@@ -17,7 +17,7 @@ fn test_store() -> (Store, TempDir) {
         data_dir: dir.path().to_path_buf(),
         segment_max_bytes: 4096,
         sync_every_n_events: 1,
-        ..StoreConfig::default()
+        ..StoreConfig::new("")
     };
     let store = Store::open(config).expect("open store");
     (store, dir)
@@ -142,7 +142,7 @@ fn snapshot_copies_segments() {
     // Verify: can open a store from the snapshot
     let snap_config = StoreConfig {
         data_dir: snap_dir.path().to_path_buf(),
-        ..StoreConfig::default()
+        ..StoreConfig::new("")
     };
     let snap_store = Store::open(snap_config).expect("open snapshot");
     let stats = snap_store.stats();
@@ -516,7 +516,7 @@ fn cursor_poll_batch_respects_max() {
     store.close().expect("close");
 }
 
-// --- compact (currently no-op sync) ---
+// --- compact ---
 
 #[test]
 fn compact_does_not_lose_data() {
@@ -530,7 +530,9 @@ fn compact_does_not_lose_data() {
             .expect("append");
     }
 
-    store.compact().expect("compact");
+    store
+        .compact(&CompactionConfig::default())
+        .expect("compact");
 
     let stats = store.stats();
     assert_eq!(
@@ -544,32 +546,28 @@ fn compact_does_not_lose_data() {
     store.close().expect("close");
 }
 
-// --- open_default ---
+// --- StoreConfig::new() defaults ---
 
 #[test]
-fn open_default_uses_default_config() {
-    // open_default creates ./free-batteries-data — use a temp dir to avoid side effects
+fn store_config_new_uses_sensible_defaults() {
     let dir = TempDir::new().expect("temp dir");
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        ..StoreConfig::default()
-    };
+    let config = StoreConfig::new(dir.path());
     let store = Store::open(config).expect("open");
     let diag = store.diagnostics();
     assert_eq!(
         diag.segment_max_bytes,
         256 * 1024 * 1024,
-        "PROPERTY: default StoreConfig must set segment_max_bytes to 256 MiB.\n\
-         Investigate: src/store/mod.rs StoreConfig::default.\n\
+        "PROPERTY: StoreConfig::new() must set segment_max_bytes to 256 MiB.\n\
+         Investigate: src/store/mod.rs StoreConfig::new.\n\
          Common causes: default constant changed, field wired to wrong config value.\n\
-         Run: cargo test --test store_advanced open_default_uses_default_config"
-    ); // 256MB default
+         Run: cargo test --test store_advanced store_config_new_uses_sensible_defaults"
+    );
     assert_eq!(
         diag.fd_budget, 64,
-        "PROPERTY: default StoreConfig must set fd_budget to 64.\n\
-         Investigate: src/store/mod.rs StoreConfig::default.\n\
+        "PROPERTY: StoreConfig::new() must set fd_budget to 64.\n\
+         Investigate: src/store/mod.rs StoreConfig::new.\n\
          Common causes: default constant changed, fd_budget not propagated into diagnostics.\n\
-         Run: cargo test --test store_advanced open_default_uses_default_config"
+         Run: cargo test --test store_advanced store_config_new_uses_sensible_defaults"
     );
     store.close().expect("close");
 }
@@ -753,7 +751,7 @@ fn fd_budget_evicts_oldest_segments() {
         segment_max_bytes: 512, // tiny segments → many segment files
         sync_every_n_events: 1,
         fd_budget: 2, // only 2 FDs allowed → forces eviction
-        ..StoreConfig::default()
+        ..StoreConfig::new("")
     };
     let store = Store::open(config).expect("open store");
     let coord = Coordinate::new("entity:fd", "scope:test").expect("valid coord");
@@ -847,7 +845,7 @@ fn cold_start_skips_corrupt_segment_gracefully() {
             data_dir: dir.path().to_path_buf(),
             segment_max_bytes: 512,
             sync_every_n_events: 1,
-            ..StoreConfig::default()
+            ..StoreConfig::new("")
         };
         let store = Store::open(config).expect("open");
         let coord = Coordinate::new("entity:corrupt", "scope:test").expect("valid coord");
@@ -870,7 +868,7 @@ fn cold_start_skips_corrupt_segment_gracefully() {
     let config = StoreConfig {
         data_dir: dir.path().to_path_buf(),
         segment_max_bytes: 512,
-        ..StoreConfig::default()
+        ..StoreConfig::new("")
     };
     let result = Store::open(config);
     // The store should fail on a corrupt segment (bad magic = hard error)
@@ -895,7 +893,7 @@ fn corrupt_frame_in_segment_is_detected() {
         let config = StoreConfig {
             data_dir: dir.path().to_path_buf(),
             sync_every_n_events: 1,
-            ..StoreConfig::default()
+            ..StoreConfig::new("")
         };
         let store = Store::open(config).expect("open");
         let coord = Coordinate::new("entity:crc", "scope:test").expect("valid");
@@ -941,7 +939,7 @@ fn corrupt_frame_in_segment_is_detected() {
     // but should have fewer events than originally written
     let config = StoreConfig {
         data_dir: dir.path().to_path_buf(),
-        ..StoreConfig::default()
+        ..StoreConfig::new("")
     };
     // The store may open successfully (skipping corrupt frames) or may error
     // depending on where the corruption landed. Either behavior is acceptable

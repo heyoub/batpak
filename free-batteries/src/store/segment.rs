@@ -63,30 +63,44 @@ pub fn frame_encode<T: serde::Serialize>(data: &T) -> Result<Vec<u8>, StoreError
     Ok(frame)
 }
 
+/// Error from frame_decode. Does not include segment_id — the caller
+/// wraps this with the correct segment context.
+#[derive(Debug)]
+pub enum FrameDecodeError {
+    TooShort,
+    Truncated { expected_len: usize, available: usize },
+    CrcMismatch { expected: u32, actual: u32 },
+}
+
+impl std::fmt::Display for FrameDecodeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::TooShort => write!(f, "frame too short for header"),
+            Self::Truncated { expected_len, available } => {
+                write!(f, "frame truncated: expected {expected_len} bytes, got {available}")
+            }
+            Self::CrcMismatch { expected, actual } => {
+                write!(f, "CRC mismatch: expected {expected:#010x}, got {actual:#010x}")
+            }
+        }
+    }
+}
+
 /// frame_decode: read [len][crc][msgpack], verify CRC, return msgpack bytes.
 /// Returns (msgpack_bytes, total_frame_size_consumed).
-pub fn frame_decode(buf: &[u8]) -> Result<(&[u8], usize), StoreError> {
+pub fn frame_decode(buf: &[u8]) -> Result<(&[u8], usize), FrameDecodeError> {
     if buf.len() < 8 {
-        return Err(StoreError::CorruptSegment {
-            segment_id: 0,
-            detail: "frame too short for header".into(),
-        });
+        return Err(FrameDecodeError::TooShort);
     }
     let len = u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]) as usize;
     let expected_crc = u32::from_be_bytes([buf[4], buf[5], buf[6], buf[7]]);
     if buf.len() < 8 + len {
-        return Err(StoreError::CorruptSegment {
-            segment_id: 0,
-            detail: "frame truncated".into(),
-        });
+        return Err(FrameDecodeError::Truncated { expected_len: 8 + len, available: buf.len() });
     }
     let msgpack = &buf[8..8 + len];
     let actual_crc = crc32fast::hash(msgpack);
     if actual_crc != expected_crc {
-        return Err(StoreError::CrcMismatch {
-            segment_id: 0,
-            offset: 0,
-        });
+        return Err(FrameDecodeError::CrcMismatch { expected: expected_crc, actual: actual_crc });
     }
     Ok((msgpack, 8 + len))
 }

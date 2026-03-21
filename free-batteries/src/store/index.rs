@@ -261,4 +261,45 @@ impl StoreIndex {
     pub(crate) fn len(&self) -> usize {
         self.len.load(Ordering::Relaxed)
     }
+
+    /// Update disk_pos for an event after compaction moves it to a new segment.
+    /// Updates all indexes that store DiskPos.
+    pub(crate) fn update_disk_pos(&self, event_id: u128, new_pos: DiskPos) {
+        // Update by_id
+        if let Some(mut entry) = self.by_id.get_mut(&event_id) {
+            let entity = entry.coord.entity_arc();
+            let clock = entry.clock;
+            let kind = entry.kind;
+            entry.disk_pos = new_pos.clone();
+            drop(entry);
+
+            // Update streams
+            if let Some(mut stream) = self.streams.get_mut(entity.as_ref()) {
+                for (_, idx_entry) in stream.iter_mut() {
+                    if idx_entry.event_id == event_id {
+                        idx_entry.disk_pos = new_pos.clone();
+                        break;
+                    }
+                }
+            }
+
+            // Update by_fact
+            if let Some(mut fact_map) = self.by_fact.get_mut(&kind) {
+                let key = ClockKey {
+                    clock,
+                    uuid: event_id,
+                };
+                if let Some(entry) = fact_map.get_mut(&key) {
+                    entry.disk_pos = new_pos.clone();
+                }
+            }
+
+            // Update latest if this event is the latest for its entity
+            if let Some(mut latest) = self.latest.get_mut(entity.as_ref()) {
+                if latest.event_id == event_id {
+                    latest.disk_pos = new_pos;
+                }
+            }
+        }
+    }
 }

@@ -84,7 +84,16 @@ impl Reader {
             file.read_exact(&mut buf).map_err(StoreError::Io)?;
         }
 
-        let (msgpack, _) = segment::frame_decode(&buf)?;
+        let (msgpack, _) = segment::frame_decode(&buf).map_err(|e| match e {
+            segment::FrameDecodeError::CrcMismatch { .. } => StoreError::CrcMismatch {
+                segment_id: pos.segment_id,
+                offset: pos.offset,
+            },
+            _ => StoreError::CorruptSegment {
+                segment_id: pos.segment_id,
+                detail: e.to_string(),
+            },
+        })?;
         let payload: FramePayload<serde_json::Value> =
             rmp_serde::from_slice(msgpack).map_err(|e| StoreError::Serialization(e.to_string()))?;
 
@@ -111,11 +120,17 @@ impl Reader {
         }
 
         // Extract segment_id from filename: "000042.fbat" → 42
-        let segment_id = path
+        let segment_id = match path
             .file_stem()
             .and_then(|s| s.to_str())
             .and_then(|s| s.parse::<u64>().ok())
-            .unwrap_or(0);
+        {
+            Some(id) => id,
+            None => {
+                tracing::warn!(?path, "skipping segment with unparseable filename");
+                return Ok(Vec::new());
+            }
+        };
 
         // Skip magic (4 bytes). Parse segment header from msgpack.
         // [DEP:rmp_serde::from_slice] — deserialize SegmentHeader
@@ -162,7 +177,7 @@ impl Reader {
                     }
                     cursor += frame_size;
                 }
-                Err(StoreError::CrcMismatch { .. }) => {
+                Err(segment::FrameDecodeError::CrcMismatch { .. }) => {
                     tracing::warn!(
                         segment_id,
                         offset = frame_offset,
@@ -201,5 +216,12 @@ impl Reader {
             .insert(segment_id, file.try_clone().map_err(StoreError::Io)?);
         cache.order.push(segment_id);
         Ok(file)
+    }
+
+    /// Evict a segment from the FD cache. Called during compaction before deleting segment files.
+    pub(crate) fn evict_segment(&self, segment_id: u64) {
+        let mut cache = self.fd_cache.lock();
+        cache.fds.remove(&segment_id);
+        cache.order.retain(|&id| id != segment_id);
     }
 }

@@ -12,7 +12,7 @@ use tempfile::TempDir;
 fn populate_store(dir: &std::path::Path, count: u64) {
     let config = StoreConfig {
         data_dir: dir.to_path_buf(),
-        ..StoreConfig::default()
+        ..StoreConfig::new("")
     };
     let store = Store::open(config).expect("open store for populate");
     let coord = Coordinate::new("bench:entity", "bench:scope").expect("valid coord");
@@ -45,7 +45,7 @@ fn bench_cold_start(c: &mut Criterion) {
                 // Cold start: open the store (triggers index rebuild from segments)
                 let config = StoreConfig {
                     data_dir: dir.path().to_path_buf(),
-                    ..StoreConfig::default()
+                    ..StoreConfig::new("")
                 };
                 let store = Store::open(config).expect("cold start open");
                 store.close().expect("close");

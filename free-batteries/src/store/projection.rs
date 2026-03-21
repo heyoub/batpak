@@ -83,12 +83,12 @@ impl ProjectionCache for RedbCache {
                 let watermark = u64::from_le_bytes(
                     meta_bytes[..8]
                         .try_into()
-                        .expect("split guarantees 16 bytes"),
+                        .map_err(|_| StoreError::CacheFailed("corrupt cache metadata".into()))?,
                 );
                 let cached_at_us = i64::from_le_bytes(
                     meta_bytes[8..16]
                         .try_into()
-                        .expect("split guarantees 16 bytes"),
+                        .map_err(|_| StoreError::CacheFailed("corrupt cache metadata".into()))?,
                 );
                 Ok(Some((
                     value.to_vec(),
@@ -220,12 +220,12 @@ impl ProjectionCache for LmdbCache {
                 let watermark = u64::from_le_bytes(
                     meta_bytes[..8]
                         .try_into()
-                        .expect("split guarantees 16 bytes"),
+                        .map_err(|_| StoreError::CacheFailed("corrupt cache metadata".into()))?,
                 );
                 let cached_at_us = i64::from_le_bytes(
                     meta_bytes[8..16]
                         .try_into()
-                        .expect("split guarantees 16 bytes"),
+                        .map_err(|_| StoreError::CacheFailed("corrupt cache metadata".into()))?,
                 );
                 Ok(Some((
                     value.to_vec(),

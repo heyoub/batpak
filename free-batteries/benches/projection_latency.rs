@@ -15,7 +15,7 @@ use free_batteries::store::{Freshness, Store, StoreConfig};
 use tempfile::TempDir;
 
 /// A minimal EventSourced implementation for benchmarking.
-#[derive(Default, Debug)]
+#[derive(Default, Debug, serde::Serialize, serde::Deserialize)]
 struct Counter {
     count: u64,
 }
@@ -49,7 +49,7 @@ fn bench_projection_replay(c: &mut Criterion) {
     let dir = TempDir::new().expect("create temp dir");
     let config = StoreConfig {
         data_dir: dir.path().to_path_buf(),
-        ..StoreConfig::default()
+        ..StoreConfig::new("")
     };
     let store = Store::open(config).expect("open store");
     let coord = Coordinate::new("bench:entity", "bench:scope").expect("valid coord");
@@ -65,7 +65,7 @@ fn bench_projection_replay(c: &mut Criterion) {
     group.bench_function("replay_cold", |b| {
         b.iter(|| {
             let _: Option<Counter> = store
-                .project("bench:entity", Freshness::Consistent)
+                .project("bench:entity", &Freshness::Consistent)
                 .expect("project");
         });
     });
@@ -74,13 +74,13 @@ fn bench_projection_replay(c: &mut Criterion) {
     // Both runs do full segment replay (NoCache), but warm benefits from
     // OS-level page caching of the segment files.
     let _: Option<Counter> = store
-        .project("bench:entity", Freshness::Consistent)
+        .project("bench:entity", &Freshness::Consistent)
         .expect("warm OS page cache");
 
     group.bench_function("replay_warm", |b| {
         b.iter(|| {
             let _: Option<Counter> = store
-                .project("bench:entity", Freshness::Consistent)
+                .project("bench:entity", &Freshness::Consistent)
                 .expect("project");
         });
     });

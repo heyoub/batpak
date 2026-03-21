@@ -11,7 +11,7 @@ fn setup_store() -> (Store, TempDir) {
     let dir = TempDir::new().expect("create temp dir");
     let config = StoreConfig {
         data_dir: dir.path().to_path_buf(),
-        ..StoreConfig::default()
+        ..StoreConfig::new("")
     };
     let store = Store::open(config).expect("open store");
     (store, dir)

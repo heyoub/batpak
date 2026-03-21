@@ -59,7 +59,7 @@ fn cold_start_1k_events_under_threshold() {
     {
         let config = StoreConfig {
             data_dir: dir.path().to_path_buf(),
-            ..StoreConfig::default()
+            ..StoreConfig::new("")
         };
         let store = Store::open(config).expect("open store");
         let coord = Coordinate::new("bench:entity", "bench:scope").expect("valid coord");
@@ -74,7 +74,7 @@ fn cold_start_1k_events_under_threshold() {
     let start = Instant::now();
     let config = StoreConfig {
         data_dir: dir.path().to_path_buf(),
-        ..StoreConfig::default()
+        ..StoreConfig::new("")
     };
     let store = Store::open(config).expect("cold start");
     let cold_start_ms = start.elapsed().as_millis();
@@ -251,7 +251,7 @@ struct PerfContext {
 
 /// The multi-gate self-benchmark. Uses evaluate_all() to collect ALL denials,
 /// not fail-fast — so it reports EVERYTHING that needs improvement in one pass.
-#[derive(Default, Debug)]
+#[derive(Default, Debug, serde::Serialize, serde::Deserialize)]
 struct BenchCounter {
     count: u64,
 }
@@ -281,7 +281,7 @@ fn multi_gate_performance_feedback() {
     let dir = TempDir::new().expect("temp dir");
     let config = StoreConfig {
         data_dir: dir.path().to_path_buf(),
-        ..StoreConfig::default()
+        ..StoreConfig::new("")
     };
     let store = Store::open(config).expect("open");
     let coord = Coordinate::new("perf:entity", "perf:scope").expect("valid coord");
@@ -311,7 +311,7 @@ fn multi_gate_performance_feedback() {
     // Measure projection replay
     let proj_start = Instant::now();
     let _: Option<BenchCounter> = store
-        .project("perf:entity", free_batteries::store::Freshness::Consistent)
+        .project("perf:entity", &free_batteries::store::Freshness::Consistent)
         .expect("project");
     let projection_ms = proj_start.elapsed().as_secs_f64() * 1000.0;
 
@@ -589,7 +589,7 @@ fn correctness_gates_self_validate() {
         segment_max_bytes: 512, // tiny → many segments
         sync_every_n_events: 1,
         fd_budget: 2, // tiny → forces LRU eviction
-        ..StoreConfig::default()
+        ..StoreConfig::new("")
     };
     let store = Store::open(config).expect("open");
     let coord = Coordinate::new("correctness:entity", "correctness:scope").expect("valid coord");
@@ -677,7 +677,7 @@ fn correctness_gates_self_validate() {
     store.snapshot(snap_dir.path()).expect("snapshot");
     let snap_config = StoreConfig {
         data_dir: snap_dir.path().to_path_buf(),
-        ..StoreConfig::default()
+        ..StoreConfig::new("")
     };
     let snap_boot = Store::open(snap_config);
     let snapshot_boots = snap_boot.is_ok();

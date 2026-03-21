@@ -13,7 +13,7 @@
 //! [SPEC:tests/chaos_testing.rs]
 
 use free_batteries::prelude::*;
-use free_batteries::store::segment::{frame_decode, frame_encode};
+use free_batteries::store::segment::frame_decode;
 use free_batteries::store::{AppendOptions, Store, StoreConfig};
 use rand::prelude::*;
 use rand::Rng;
@@ -40,7 +40,7 @@ fn chaos_corrupted_segment_bytes() {
     let config = StoreConfig {
         data_dir: dir.path().to_path_buf(),
         segment_max_bytes: 4096,
-        ..StoreConfig::default()
+        ..StoreConfig::new("")
     };
     let store = Store::open(config).expect("open");
     let coord = Coordinate::new("chaos:corrupt", "chaos:scope").expect("valid");
@@ -93,7 +93,7 @@ fn chaos_corrupted_segment_bytes() {
     // or fail with StoreError::CrcMismatch / CorruptSegment (NOT panic)
     let config2 = StoreConfig {
         data_dir: dir.path().to_path_buf(),
-        ..StoreConfig::default()
+        ..StoreConfig::new("")
     };
     let result = Store::open(config2);
     // The key invariant: no panic. Either Ok or a structured error.
@@ -133,7 +133,7 @@ fn chaos_concurrent_writer_stress() {
         data_dir: dir.path().to_path_buf(),
         segment_max_bytes: 8192, // small segments → lots of rotation
         sync_every_n_events: 10,
-        ..StoreConfig::default()
+        ..StoreConfig::new("")
     };
     let store = Arc::new(Store::open(config).expect("open"));
     let iterations = chaos_iterations();
@@ -217,7 +217,7 @@ fn chaos_cas_contention() {
     let dir = TempDir::new().expect("temp dir");
     let config = StoreConfig {
         data_dir: dir.path().to_path_buf(),
-        ..StoreConfig::default()
+        ..StoreConfig::new("")
     };
     let store = Arc::new(Store::open(config).expect("open"));
     let coord = Coordinate::new("chaos:cas", "chaos:scope").expect("valid");
@@ -285,7 +285,7 @@ fn chaos_idempotency_concurrent() {
     let dir = TempDir::new().expect("temp dir");
     let config = StoreConfig {
         data_dir: dir.path().to_path_buf(),
-        ..StoreConfig::default()
+        ..StoreConfig::new("")
     };
     let store = Arc::new(Store::open(config).expect("open"));
     let coord = Coordinate::new("chaos:idem", "chaos:scope").expect("valid");
@@ -317,7 +317,7 @@ fn chaos_idempotency_concurrent() {
 
     // All should return the same event_id
     let first = event_ids[0];
-    for (i, id) in event_ids.iter().enumerate() {
+    for (_i, id) in event_ids.iter().enumerate() {
         assert_eq!(
             *id, first,
             "CHAOS PROPERTY: all concurrent idempotent appends with the same key must return the same event_id.\n\
@@ -358,7 +358,7 @@ fn chaos_rapid_segment_rotation() {
         segment_max_bytes: 256, // extremely tiny
         fd_budget: 3,           // very constrained
         sync_every_n_events: 1,
-        ..StoreConfig::default()
+        ..StoreConfig::new("")
     };
     let store = Store::open(config).expect("open");
     let coord = Coordinate::new("chaos:rotation", "chaos:scope").expect("valid");
@@ -479,7 +479,7 @@ fn chaos_subscription_write_storm() {
     let config = StoreConfig {
         data_dir: dir.path().to_path_buf(),
         broadcast_capacity: 64, // small buffer → forces drops
-        ..StoreConfig::default()
+        ..StoreConfig::new("")
     };
     let store = Arc::new(Store::open(config).expect("open"));
     let coord = Coordinate::new("chaos:sub", "chaos:scope").expect("valid");
@@ -539,7 +539,7 @@ fn chaos_cursor_completeness_concurrent() {
     let dir = TempDir::new().expect("temp dir");
     let config = StoreConfig {
         data_dir: dir.path().to_path_buf(),
-        ..StoreConfig::default()
+        ..StoreConfig::new("")
     };
     let store = Arc::new(Store::open(config).expect("open"));
     let coord = Coordinate::new("chaos:cursor", "chaos:scope").expect("valid");
@@ -605,7 +605,7 @@ fn chaos_truncated_segment_recovers() {
     let config = StoreConfig {
         data_dir: dir.path().to_path_buf(),
         segment_max_bytes: 65536,
-        ..StoreConfig::default()
+        ..StoreConfig::new("")
     };
     let store = Store::open(config).expect("open");
     let coord = Coordinate::new("chaos:truncate", "chaos:scope").expect("valid");
@@ -683,7 +683,7 @@ fn chaos_truncated_segment_recovers() {
     let config2 = StoreConfig {
         data_dir: dir.path().to_path_buf(),
         segment_max_bytes: 65536,
-        ..StoreConfig::default()
+        ..StoreConfig::new("")
     };
     let store2 = Store::open(config2).expect("store must reopen after tail truncation");
 

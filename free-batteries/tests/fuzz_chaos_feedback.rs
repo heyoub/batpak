@@ -272,7 +272,7 @@ fn run_chaos_probes() -> (f64, u64, bool, bool, u64, f64, bool) {
         sync_every_n_events: 10,
         fd_budget: 4,
         broadcast_capacity: 128,
-        ..StoreConfig::default()
+        ..StoreConfig::new("")
     };
     let store = Arc::new(Store::open(config).expect("open"));
     let kind = EventKind::custom(0xF, 1);
@@ -532,7 +532,7 @@ fn run_extended_fuzz_chaos() {
         data_dir: dir.path().to_path_buf(),
         segment_max_bytes: 1024,
         fd_budget: 4,
-        ..StoreConfig::default()
+        ..StoreConfig::new("")
     };
     let store = Arc::new(Store::open(config).expect("open"));
     let kind = EventKind::custom(0xF, 1);

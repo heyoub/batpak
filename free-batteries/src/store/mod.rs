@@ -9,6 +9,10 @@ pub mod writer;
 pub use cursor::Cursor;
 pub use index::{ClockKey, DiskPos, IndexEntry};
 pub use projection::{CacheMeta, Freshness, NoCache, ProjectionCache};
+#[cfg(feature = "redb")]
+pub use projection::RedbCache;
+#[cfg(feature = "lmdb")]
+pub use projection::LmdbCache;
 pub use subscription::Subscription;
 pub use writer::{Notification, RestartPolicy};
 
@@ -32,12 +36,13 @@ compile_error!("INVARIANT 2: Store API is sync. Use spawn_blocking or flume recv
 pub struct Store {
     index: Arc<StoreIndex>,
     reader: Arc<Reader>,
-    _cache: Box<dyn ProjectionCache>,
+    cache: Box<dyn ProjectionCache>,
     writer: WriterHandle,
     config: Arc<StoreConfig>,
 }
 
-/// StoreConfig: all settings with sane defaults.
+/// StoreConfig: all settings for a Store instance.
+/// No Default — callers must provide data_dir via `StoreConfig::new(path)`.
 #[derive(Clone, Debug)]
 pub struct StoreConfig {
     pub data_dir: PathBuf,
@@ -51,18 +56,21 @@ pub struct StoreConfig {
     pub shutdown_drain_limit: usize,
 }
 
-impl Default for StoreConfig {
-    fn default() -> Self {
+impl StoreConfig {
+    /// Create a StoreConfig with required data_dir and sensible defaults.
+    /// All numeric defaults are documented. Override fields after construction
+    /// to tune for your deployment (embedded, server, CLI).
+    pub fn new(data_dir: impl Into<PathBuf>) -> Self {
         Self {
-            data_dir: PathBuf::from("./free-batteries-data"),
-            segment_max_bytes: 256 * 1024 * 1024, // 256MB
-            sync_every_n_events: 1000,
-            fd_budget: 64,
-            writer_channel_capacity: 4096,
-            broadcast_capacity: 8192,
-            cache_map_size_bytes: 64 * 1024 * 1024, // 64MB
+            data_dir: data_dir.into(),
+            segment_max_bytes: 256 * 1024 * 1024,    // 256MB — tune down for embedded
+            sync_every_n_events: 1000,                // durability vs throughput tradeoff
+            fd_budget: 64,                            // LRU FD cache slots
+            writer_channel_capacity: 4096,            // back-pressure threshold
+            broadcast_capacity: 8192,                 // per-subscriber lossy buffer
+            cache_map_size_bytes: 64 * 1024 * 1024,   // 64MB — used by LmdbCache
             restart_policy: RestartPolicy::default(),
-            shutdown_drain_limit: 1024,
+            shutdown_drain_limit: 1024,               // max queued commands drained on shutdown
         }
     }
 }
@@ -152,8 +160,48 @@ pub struct AppendOptions {
     pub causation_id: Option<u128>,
 }
 
+/// Predicate for filtering events during compaction. Returns true to keep, false to drop.
+pub type RetentionPredicate = Box<dyn Fn(&StoredEvent<serde_json::Value>) -> bool + Send>;
+
+/// CompactionStrategy: how compact() handles events during segment merging.
+pub enum CompactionStrategy {
+    /// Merge sealed segments into one. No events removed.
+    Merge,
+    /// Merge + drop events failing the retention predicate.
+    /// Dropped events are permanently lost.
+    Retention(RetentionPredicate),
+    /// Merge + write tombstone markers for dropped events.
+    /// Downstream consumers can detect deletions.
+    Tombstone(RetentionPredicate),
+}
+
+/// CompactionConfig: controls compact() behavior.
+pub struct CompactionConfig {
+    /// Strategy for handling events during compaction.
+    pub strategy: CompactionStrategy,
+    /// Minimum number of sealed segments before compaction runs.
+    /// Below this threshold, compact() returns early.
+    pub min_segments: usize,
+}
+
+impl Default for CompactionConfig {
+    fn default() -> Self {
+        Self {
+            strategy: CompactionStrategy::Merge,
+            min_segments: 2,
+        }
+    }
+}
+
 impl Store {
     pub fn open(config: StoreConfig) -> Result<Self, StoreError> {
+        Self::open_with_cache(config, Box::new(NoCache))
+    }
+
+    pub fn open_with_cache(
+        config: StoreConfig,
+        cache: Box<dyn ProjectionCache>,
+    ) -> Result<Self, StoreError> {
         std::fs::create_dir_all(&config.data_dir)?;
         let config = Arc::new(config);
         let index = Arc::new(StoreIndex::new());
@@ -202,14 +250,10 @@ impl Store {
         Ok(Self {
             index,
             reader,
-            _cache: Box::new(NoCache),
+            cache,
             writer,
             config,
         })
-    }
-
-    pub fn open_default() -> Result<Self, StoreError> {
-        Self::open(StoreConfig::default())
     }
 
     /// WRITE: append a new root-cause event.
@@ -314,7 +358,7 @@ impl Store {
     }
 
     /// READ: walk hash chain ancestors. [SPEC:IMPLEMENTATION NOTES item 3]
-    /// When blake3 is enabled, follows the hash chain (event_hash → prev_hash).
+    /// When blake3 is enabled, follows the hash chain (event_hash -> prev_hash).
     /// When blake3 is disabled, all hashes are [0u8;32] so hash-based walking
     /// is impossible. Falls back to clock-ordered traversal (descending clock).
     pub fn walk_ancestors(
@@ -377,23 +421,63 @@ impl Store {
         results
     }
 
-    /// PROJECT: reconstruct typed state from events.
-    pub fn project<T: EventSourced<serde_json::Value>>(
+    /// PROJECT: reconstruct typed state from events, with cache support.
+    /// [SPEC:src/store/mod.rs — Projection Flow]
+    pub fn project<T>(
         &self,
         entity: &str,
-        _freshness: Freshness,
-    ) -> Result<Option<T>, StoreError> {
+        freshness: &Freshness,
+    ) -> Result<Option<T>, StoreError>
+    where
+        T: EventSourced<serde_json::Value> + serde::Serialize + serde::de::DeserializeOwned,
+    {
         let entries = self.index.stream(entity);
         if entries.is_empty() {
             return Ok(None);
         }
 
+        let watermark = entries.last().map(|e| e.global_sequence).unwrap_or(0);
+        let cache_key = entity.as_bytes();
+
+        // Step 1: Check cache
+        if let Ok(Some((bytes, meta))) = self.cache.get(cache_key) {
+            let is_fresh = match freshness {
+                Freshness::Consistent => meta.watermark == watermark,
+                Freshness::BestEffort { max_stale_ms } => {
+                    let age_us = now_us().saturating_sub(meta.cached_at_us);
+                    age_us < (*max_stale_ms as i64) * 1000
+                }
+            };
+            if is_fresh {
+                if let Ok(t) = serde_json::from_slice::<T>(&bytes) {
+                    return Ok(Some(t));
+                }
+                // Deserialization failed — fall through to replay
+            }
+        }
+
+        // Step 2: Cache miss or stale — replay from segments
         let mut events = Vec::with_capacity(entries.len());
         for entry in &entries {
             let stored = self.reader.read_entry(&entry.disk_pos)?;
             events.push(stored.event);
         }
-        Ok(T::from_events(&events))
+        let result = T::from_events(&events);
+
+        // Step 3: Populate cache (non-fatal on error)
+        if let Some(ref t) = result {
+            if let Ok(bytes) = serde_json::to_vec(t) {
+                let meta = projection::CacheMeta {
+                    watermark,
+                    cached_at_us: now_us(),
+                };
+                if let Err(e) = self.cache.put(cache_key, &bytes, meta) {
+                    tracing::warn!("cache put failed (non-fatal): {e}");
+                }
+            }
+        }
+
+        Ok(result)
     }
 
     /// SUBSCRIBE: push-based, lossy.
@@ -507,11 +591,143 @@ impl Store {
         Ok(())
     }
 
-    /// Compact: placeholder for segment compaction. Currently a no-op sync.
-    pub fn compact(&self) -> Result<(), StoreError> {
-        // Future: merge segments, remove superseded events.
-        // For now, just sync to ensure durability.
-        self.sync()
+    /// Compact: merge sealed segments, optionally filtering events.
+    /// Returns the number of segments removed and bytes reclaimed.
+    /// The active (currently-written) segment is never touched.
+    pub fn compact(&self, config: &CompactionConfig) -> Result<segment::CompactionResult, StoreError> {
+        self.sync()?;
+
+        // 1. Enumerate sealed segment files (not the active one the writer owns).
+        // The active segment is always the max-numbered one.
+        let active_segment_id = std::fs::read_dir(&self.config.data_dir)
+            .map_err(StoreError::Io)?
+            .filter_map(|e| e.ok())
+            .filter_map(|e| {
+                let path = e.path();
+                if path.extension().map(|ext| ext == "fbat").unwrap_or(false) {
+                    path.file_stem()?.to_str()?.parse::<u64>().ok()
+                } else {
+                    None
+                }
+            })
+            .max()
+            .unwrap_or(0);
+
+        let mut sealed: Vec<(u64, std::path::PathBuf)> = std::fs::read_dir(&self.config.data_dir)
+            .map_err(StoreError::Io)?
+            .filter_map(|e| e.ok())
+            .filter_map(|e| {
+                let path = e.path();
+                let ext_ok = path.extension().map(|ext| ext == "fbat").unwrap_or(false);
+                if !ext_ok { return None; }
+                let seg_id = path.file_stem()
+                    .and_then(|s| s.to_str())
+                    .and_then(|s| s.parse::<u64>().ok())?;
+                if seg_id >= active_segment_id { return None; } // skip active
+                Some((seg_id, path))
+            })
+            .collect();
+        sealed.sort_by_key(|(id, _)| *id);
+
+        if sealed.len() < config.min_segments {
+            return Ok(segment::CompactionResult { segments_removed: 0, bytes_reclaimed: 0 });
+        }
+
+        // 2. Read all events from sealed segments
+        let mut all_events: Vec<reader::ScannedEntry> = Vec::new();
+        for (_, path) in &sealed {
+            let scanned = self.reader.scan_segment(path)?;
+            all_events.extend(scanned);
+        }
+
+        // 3. Apply strategy filter
+        let tombstone_kind = EventKind::custom(0x0, 0xFFE); // system tombstone
+        let mut kept_events: Vec<reader::ScannedEntry> = Vec::new();
+        match &config.strategy {
+            CompactionStrategy::Merge => {
+                kept_events = all_events;
+            }
+            CompactionStrategy::Retention(predicate) => {
+                for entry in all_events {
+                    let coord = Coordinate::new(&entry.entity, &entry.scope)?;
+                    let stored = StoredEvent {
+                        coordinate: coord,
+                        event: entry.event.clone(),
+                    };
+                    if predicate(&stored) {
+                        kept_events.push(entry);
+                    }
+                }
+            }
+            CompactionStrategy::Tombstone(predicate) => {
+                for entry in all_events {
+                    let coord = Coordinate::new(&entry.entity, &entry.scope)?;
+                    let stored = StoredEvent {
+                        coordinate: coord,
+                        event: entry.event.clone(),
+                    };
+                    if predicate(&stored) {
+                        kept_events.push(entry);
+                    } else {
+                        let mut tombstone = entry;
+                        tombstone.event.header.event_kind = tombstone_kind;
+                        kept_events.push(tombstone);
+                    }
+                }
+            }
+        }
+
+        // 4. Create merged segment.
+        // Use the lowest sealed ID for the merged segment (reuse it).
+        let merged_id = sealed[0].0;
+        let merged_path = self.config.data_dir.join(segment::segment_filename(merged_id));
+
+        // Evict FDs for ALL sealed segments before removing files
+        for (seg_id, _) in &sealed {
+            self.reader.evict_segment(*seg_id);
+        }
+
+        let _ = std::fs::remove_file(&merged_path); // remove the existing file at merged_id
+        let mut merged_segment = segment::Segment::<segment::Active>::create(
+            &self.config.data_dir,
+            merged_id,
+        )?;
+
+        // 5. Write kept events to merged segment, updating index
+        for entry in &kept_events {
+            let frame_payload = segment::FramePayload {
+                event: entry.event.clone(),
+                entity: entry.entity.clone(),
+                scope: entry.scope.clone(),
+            };
+            let frame = segment::frame_encode(&frame_payload)?;
+            let offset = merged_segment.write_frame(&frame)?;
+
+            // Update index disk_pos
+            let new_pos = DiskPos {
+                segment_id: merged_id,
+                offset,
+                length: frame.len() as u32,
+            };
+            self.index.update_disk_pos(entry.event.header.event_id, new_pos);
+        }
+
+        merged_segment.sync()?;
+        let _sealed_seg = merged_segment.seal();
+
+        // 6. Delete old segment files (except the merged one which was replaced)
+        let mut bytes_reclaimed: u64 = 0;
+        let mut segments_removed: usize = 0;
+        for (seg_id, path) in &sealed {
+            if *seg_id == merged_id { continue; } // already replaced
+            if let Ok(meta) = std::fs::metadata(path) {
+                bytes_reclaimed += meta.len();
+            }
+            std::fs::remove_file(path).map_err(StoreError::Io)?;
+            segments_removed += 1;
+        }
+
+        Ok(segment::CompactionResult { segments_removed, bytes_reclaimed })
     }
 
     pub fn close(self) -> Result<(), StoreError> {
@@ -543,7 +759,7 @@ impl Store {
     }
 }
 
-fn now_us() -> i64 {
+pub(crate) fn now_us() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()

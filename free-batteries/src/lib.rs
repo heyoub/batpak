@@ -14,7 +14,7 @@
 //! ```ignore
 //! use free_batteries::prelude::*;
 //!
-//! let store = Store::open_default()?;
+//! let store = Store::open(StoreConfig::new("./my-data"))?;
 //! let gates = GateSet::new();
 //! let pipeline = Pipeline::new(gates);
 //!

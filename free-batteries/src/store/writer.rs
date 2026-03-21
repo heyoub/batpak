@@ -111,15 +111,32 @@ impl WriterHandle {
         index: &Arc<StoreIndex>,
         subscribers: &Arc<SubscriberList>,
     ) -> Result<Self, StoreError> {
+        // Fallible init — propagate errors to Store::open() caller
+        std::fs::create_dir_all(&config.data_dir).map_err(StoreError::Io)?;
+        let initial_segment_id = find_latest_segment_id(&config.data_dir).unwrap_or(0) + 1;
+        let initial_segment = Segment::<Active>::create(&config.data_dir, initial_segment_id)?;
+
         let (tx, rx) = flume::bounded::<WriterCommand>(config.writer_channel_capacity);
         let subs = Arc::clone(subscribers);
         let cfg = Arc::clone(config);
         let idx = Arc::clone(index);
 
+        let thread_name = format!(
+            "free-batteries-writer-{:08x}",
+            {
+                let mut h: u64 = 0xcbf29ce484222325; // FNV-1a basis
+                for b in config.data_dir.to_string_lossy().bytes() {
+                    h ^= b as u64;
+                    h = h.wrapping_mul(0x100000001b3); // FNV-1a prime
+                }
+                h
+            }
+        );
+
         let thread = std::thread::Builder::new()
-            .name("free-batteries-writer".into())
+            .name(thread_name)
             .spawn(move || {
-                writer_loop(&rx, &cfg, &idx, &subs);
+                writer_loop(&rx, &cfg, &idx, &subs, initial_segment, initial_segment_id);
             })
             .map_err(StoreError::Io)?;
 
@@ -152,13 +169,9 @@ fn writer_loop(
     config: &StoreConfig,
     index: &StoreIndex,
     subscribers: &SubscriberList,
+    mut active_segment: Segment<Active>,
+    mut segment_id: u64,
 ) {
-    let data_dir = &config.data_dir;
-    // Initialize: create data_dir if not exists, find latest segment or create first.
-    std::fs::create_dir_all(data_dir).expect("create data dir");
-    let mut segment_id: u64 = find_latest_segment_id(data_dir).unwrap_or(0) + 1;
-    let mut active_segment =
-        Segment::<Active>::create(data_dir, segment_id).expect("create initial segment");
     let mut events_since_sync: u32 = 0;
 
     let mut state = WriterState {
@@ -265,7 +278,7 @@ impl WriterState<'_> {
             .or_insert_with(|| Arc::new(parking_lot::Mutex::new(())))
             .clone();
         let _entity_guard = lock.lock();
-        debug!(entity = %entity, "entity lock acquired");
+        trace!(entity = %entity, "entity lock acquired");
 
         // STEP 1a: CAS check (under entity lock — no TOCTOU).
         if let Some(expected) = guards.expected_sequence {

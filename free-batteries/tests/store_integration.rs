@@ -16,7 +16,7 @@ fn test_store() -> (Store, TempDir) {
         data_dir: dir.path().to_path_buf(),
         segment_max_bytes: 4096, // small segments to force rotation
         sync_every_n_events: 1,
-        ..StoreConfig::default()
+        ..StoreConfig::new("")
     };
     let store = Store::open(config).expect("open store");
     (store, dir)
@@ -305,7 +305,7 @@ fn cold_start_rebuilds_index() {
     {
         let config = StoreConfig {
             data_dir: dir.path().to_path_buf(),
-            ..StoreConfig::default()
+            ..StoreConfig::new("")
         };
         let store = Store::open(config).expect("open store");
         let coord = Coordinate::new("entity:1", "scope:test").expect("valid coord");
@@ -320,7 +320,7 @@ fn cold_start_rebuilds_index() {
     {
         let config = StoreConfig {
             data_dir: dir.path().to_path_buf(),
-            ..StoreConfig::default()
+            ..StoreConfig::new("")
         };
         let store = Store::open(config).expect("cold start open");
         let stats = store.stats();
@@ -393,7 +393,7 @@ fn segment_rotation_on_size() {
         data_dir: dir.path().to_path_buf(),
         segment_max_bytes: 512, // tiny segments
         sync_every_n_events: 1,
-        ..StoreConfig::default()
+        ..StoreConfig::new("")
     };
     let store = Store::open(config).expect("open store");
     let coord = Coordinate::new("entity:1", "scope:test").expect("valid coord");
@@ -436,7 +436,7 @@ fn concurrent_append_and_query() {
     let dir = TempDir::new().expect("create temp dir");
     let config = StoreConfig {
         data_dir: dir.path().to_path_buf(),
-        ..StoreConfig::default()
+        ..StoreConfig::new("")
     };
     let store = std::sync::Arc::new(Store::open(config).expect("open store"));
     let coord = Coordinate::new("entity:1", "scope:test").expect("valid coord");
@@ -543,7 +543,7 @@ fn append_with_cas_success() {
 
 // --- EventSourced projection ---
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, serde::Serialize, serde::Deserialize)]
 struct Counter {
     count: u64,
 }
@@ -582,7 +582,7 @@ fn projection_replays_events() {
     }
 
     let counter: Option<Counter> = store
-        .project("entity:proj", Freshness::Consistent)
+        .project("entity:proj", &Freshness::Consistent)
         .expect("project");
 
     assert!(

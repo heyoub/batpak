@@ -850,6 +850,46 @@ fn dag_position_display() {
 }
 
 // ================================================================
+// DagPosition::fork() — scaffolding for multi-lane fan-out
+// ================================================================
+
+#[test]
+fn dag_position_fork_creates_new_lane() {
+    let forked = DagPosition::fork(0, 1);
+    assert_eq!(
+        forked,
+        DagPosition::new(1, 1, 0),
+        "PROPERTY: fork(parent_depth=0, new_lane=1) must produce depth=1, lane=1, sequence=0.\n\
+         Investigate: src/coordinate/position.rs DagPosition::fork().\n\
+         Run: cargo test --test quiet_stragglers dag_position_fork_creates_new_lane"
+    );
+}
+
+#[test]
+fn dag_position_forked_incomparable_with_lane_zero() {
+    let main = DagPosition::child(5);
+    let forked = DagPosition::fork(0, 1);
+    assert!(
+        main.partial_cmp(&forked).is_none(),
+        "PROPERTY: Forked position (lane=1) must be incomparable with main lane (lane=0).\n\
+         Investigate: src/coordinate/position.rs DagPosition PartialOrd impl.\n\
+         Run: cargo test --test quiet_stragglers dag_position_forked_incomparable_with_lane_zero"
+    );
+}
+
+#[test]
+fn dag_position_fork_is_not_ancestor_across_lanes() {
+    let main = DagPosition::child(0);
+    let forked = DagPosition::fork(0, 1);
+    assert!(
+        !main.is_ancestor_of(&forked),
+        "PROPERTY: is_ancestor_of must return false across different lanes.\n\
+         Investigate: src/coordinate/position.rs DagPosition::is_ancestor_of().\n\
+         Run: cargo test --test quiet_stragglers dag_position_fork_is_not_ancestor_across_lanes"
+    );
+}
+
+// ================================================================
 // src/outcome/error.rs — ErrorKind classification
 // ================================================================
 
@@ -1304,7 +1344,7 @@ fn reactive_subscribe_react_append_pattern() {
     let config = StoreConfig {
         data_dir: dir.path().to_path_buf(),
         sync_every_n_events: 1,
-        ..StoreConfig::default()
+        ..StoreConfig::new("")
     };
     let store = Arc::new(Store::open(config).expect("open"));
     let coord = Coordinate::new("order:1", "scope:test").expect("valid");
