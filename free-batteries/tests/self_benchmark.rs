@@ -1,11 +1,12 @@
 //! Self-benchmark test: the library dogfoods its own Gate system.
-//! A Gate validates that cold-start time for N events stays under a threshold.
+//! Performance gates + correctness gates + resilience gates.
 //! [SPEC:tests/self_benchmark.rs]
 //!
 //! This IS the "free battery factory" philosophy: the same Gate/Pipeline system
 //! that products use to enforce business rules, the library uses to enforce
-//! its own performance characteristics. If gates work, this test passes.
-//! If this test passes, gates work. Quadratic feedback.
+//! its own performance AND correctness characteristics.
+//! If gates work, this test passes. If this test passes, gates work.
+//! Quadratic feedback — the deepest kind of dogfood.
 
 use free_batteries::prelude::*;
 use free_batteries::store::{Store, StoreConfig};
@@ -350,4 +351,281 @@ fn multi_gate_collects_all_denials() {
         "Denial should point to file to investigate");
     assert!(denials[2].message.contains("reader.rs"),
         "Denial should point to file to investigate");
+}
+
+// ================================================================
+// CORRECTNESS GATES: the library uses its own Gate system to verify
+// its own resilience properties. Not just "does it work?" but
+// "does it KEEP working when things go wrong?"
+// ================================================================
+
+/// Context for correctness gates — collected by exercising the store
+/// under adversarial conditions.
+struct CorrectnessContext {
+    /// After fd eviction + re-read, does the data round-trip?
+    fd_eviction_round_trips: bool,
+    /// After segment rotation, can we still read old events?
+    cross_segment_reads_ok: bool,
+    /// Does CAS actually reject stale sequences?
+    cas_rejects_stale: bool,
+    /// Does idempotency return the same event_id?
+    idempotency_deduplicates: bool,
+    /// Can cursors see every event (including global_sequence 0)?
+    cursor_sees_all_events: bool,
+    /// Does snapshot produce a bootable store?
+    snapshot_boots: bool,
+}
+
+struct FdEvictionGate;
+impl Gate<CorrectnessContext> for FdEvictionGate {
+    fn name(&self) -> &'static str { "fd_eviction_integrity" }
+    fn evaluate(&self, ctx: &CorrectnessContext) -> Result<(), Denial> {
+        if ctx.fd_eviction_round_trips {
+            Ok(())
+        } else {
+            Err(Denial::new("fd_eviction_integrity",
+                "Data corrupted after FD cache eviction. \
+                 Investigate: src/store/reader.rs get_fd() LRU eviction, \
+                 try_clone() correctness."))
+        }
+    }
+}
+
+struct CrossSegmentGate;
+impl Gate<CorrectnessContext> for CrossSegmentGate {
+    fn name(&self) -> &'static str { "cross_segment_reads" }
+    fn evaluate(&self, ctx: &CorrectnessContext) -> Result<(), Denial> {
+        if ctx.cross_segment_reads_ok {
+            Ok(())
+        } else {
+            Err(Denial::new("cross_segment_reads",
+                "Cannot read events across segment boundaries. \
+                 Investigate: src/store/writer.rs STEP 7 rotation, \
+                 src/store/reader.rs read_entry offset calculation."))
+        }
+    }
+}
+
+struct CasGate;
+impl Gate<CorrectnessContext> for CasGate {
+    fn name(&self) -> &'static str { "cas_correctness" }
+    fn evaluate(&self, ctx: &CorrectnessContext) -> Result<(), Denial> {
+        if ctx.cas_rejects_stale {
+            Ok(())
+        } else {
+            Err(Denial::new("cas_correctness",
+                "CAS did NOT reject a stale expected_sequence. \
+                 Investigate: src/store/mod.rs append_with_options CAS check."))
+        }
+    }
+}
+
+struct IdempotencyGate;
+impl Gate<CorrectnessContext> for IdempotencyGate {
+    fn name(&self) -> &'static str { "idempotency" }
+    fn evaluate(&self, ctx: &CorrectnessContext) -> Result<(), Denial> {
+        if ctx.idempotency_deduplicates {
+            Ok(())
+        } else {
+            Err(Denial::new("idempotency",
+                "Idempotency key did NOT deduplicate. \
+                 Investigate: src/store/mod.rs append_with_options idempotency check."))
+        }
+    }
+}
+
+struct CursorCompletenessGate;
+impl Gate<CorrectnessContext> for CursorCompletenessGate {
+    fn name(&self) -> &'static str { "cursor_completeness" }
+    fn evaluate(&self, ctx: &CorrectnessContext) -> Result<(), Denial> {
+        if ctx.cursor_sees_all_events {
+            Ok(())
+        } else {
+            Err(Denial::new("cursor_completeness",
+                "Cursor missed events (possibly global_sequence=0). \
+                 Investigate: src/store/cursor.rs poll() started flag."))
+        }
+    }
+}
+
+struct SnapshotBootGate;
+impl Gate<CorrectnessContext> for SnapshotBootGate {
+    fn name(&self) -> &'static str { "snapshot_bootable" }
+    fn evaluate(&self, ctx: &CorrectnessContext) -> Result<(), Denial> {
+        if ctx.snapshot_boots {
+            Ok(())
+        } else {
+            Err(Denial::new("snapshot_bootable",
+                "Snapshot did not produce a bootable store. \
+                 Investigate: src/store/mod.rs snapshot(), Store::open cold start."))
+        }
+    }
+}
+
+/// THE CORRECTNESS SELF-TEST.
+/// The library exercises itself under adversarial conditions, collects
+/// the results, then feeds them through its own Gate system.
+/// Every denial tells you EXACTLY where the bug is.
+#[test]
+fn correctness_gates_self_validate() {
+    let dir = TempDir::new().expect("temp dir");
+    let config = StoreConfig {
+        data_dir: dir.path().to_path_buf(),
+        segment_max_bytes: 512,  // tiny → many segments
+        sync_every_n_events: 1,
+        fd_budget: 2,            // tiny → forces LRU eviction
+        ..StoreConfig::default()
+    };
+    let store = Store::open(config).expect("open");
+    let coord = Coordinate::new("correctness:entity", "correctness:scope")
+        .expect("valid coord");
+    let kind = EventKind::custom(0xF, 1);
+    let n = 50u64;
+
+    // Populate with enough events to trigger segment rotation + fd eviction
+    for i in 0..n {
+        store.append(&coord, kind, &serde_json::json!({"i": i})).expect("append");
+    }
+    store.sync().expect("sync");
+
+    // --- Probe 1: FD eviction round-trip ---
+    let entries = store.stream("correctness:entity");
+    let first = store.get(entries[0].event_id);
+    let last = store.get(entries[entries.len() - 1].event_id);
+    let first_again = store.get(entries[0].event_id); // re-read after eviction
+    let fd_eviction_round_trips = first.is_ok() && last.is_ok() && first_again.is_ok()
+        && first.as_ref().expect("ok").event.event_id()
+            == first_again.as_ref().expect("ok").event.event_id();
+
+    // --- Probe 2: Cross-segment reads ---
+    let segment_count = std::fs::read_dir(dir.path())
+        .expect("read dir")
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().map(|ext| ext == "fbat").unwrap_or(false))
+        .count();
+    let cross_segment_reads_ok = segment_count > 1 && entries.len() == n as usize;
+
+    // --- Probe 3: CAS rejection ---
+    store.append(&coord, kind, &serde_json::json!({"extra": true})).expect("one more");
+    let cas_result = store.append_with_options(
+        &coord, kind, &serde_json::json!({"cas": "stale"}),
+        free_batteries::store::AppendOptions {
+            expected_sequence: Some(0), // stale
+            ..Default::default()
+        },
+    );
+    let cas_rejects_stale = cas_result.is_err();
+
+    // --- Probe 4: Idempotency ---
+    let idem_key: u128 = 0xCAFE_BABE_DEAD_BEEF_1234_5678_9ABC_DEF0;
+    let idem_opts = free_batteries::store::AppendOptions {
+        idempotency_key: Some(idem_key),
+        ..Default::default()
+    };
+    let r1 = store.append_with_options(&coord, kind, &serde_json::json!({"x": 1}), idem_opts)
+        .expect("first idem");
+    let r2 = store.append_with_options(&coord, kind, &serde_json::json!({"x": 2}), idem_opts)
+        .expect("second idem");
+    let idempotency_deduplicates = r1.event_id == r2.event_id;
+
+    // --- Probe 5: Cursor completeness ---
+    let coord2 = Coordinate::new("cursor:test", "correctness:scope").expect("valid");
+    for i in 0..5 {
+        store.append(&coord2, kind, &serde_json::json!({"c": i})).expect("append");
+    }
+    let region = Region::entity("cursor:test");
+    let mut cursor = store.cursor(&region);
+    let mut cursor_count = 0;
+    while cursor.poll().is_some() { cursor_count += 1; }
+    let cursor_sees_all_events = cursor_count == 5;
+
+    // --- Probe 6: Snapshot bootability ---
+    let snap_dir = TempDir::new().expect("snap dir");
+    store.snapshot(snap_dir.path()).expect("snapshot");
+    let snap_config = StoreConfig {
+        data_dir: snap_dir.path().to_path_buf(),
+        ..StoreConfig::default()
+    };
+    let snap_boot = Store::open(snap_config);
+    let snapshot_boots = snap_boot.is_ok();
+    if let Ok(s) = snap_boot { let _ = s.close(); }
+
+    // --- Feed through our own Gate system ---
+    let ctx = CorrectnessContext {
+        fd_eviction_round_trips,
+        cross_segment_reads_ok,
+        cas_rejects_stale,
+        idempotency_deduplicates,
+        cursor_sees_all_events,
+        snapshot_boots,
+    };
+
+    let mut gates = GateSet::new();
+    gates.push(FdEvictionGate);
+    gates.push(CrossSegmentGate);
+    gates.push(CasGate);
+    gates.push(IdempotencyGate);
+    gates.push(CursorCompletenessGate);
+    gates.push(SnapshotBootGate);
+
+    let denials = gates.evaluate_all(&ctx);
+
+    eprintln!("\n  CORRECTNESS GATE REPORT:");
+    eprintln!("    fd_eviction_round_trips:   {fd_eviction_round_trips}");
+    eprintln!("    cross_segment_reads:        {cross_segment_reads_ok}");
+    eprintln!("    cas_rejects_stale:          {cas_rejects_stale}");
+    eprintln!("    idempotency_deduplicates:   {idempotency_deduplicates}");
+    eprintln!("    cursor_sees_all_events:     {cursor_sees_all_events}");
+    eprintln!("    snapshot_boots:             {snapshot_boots}");
+
+    if denials.is_empty() {
+        eprintln!("    Result: ALL 6 CORRECTNESS GATES PASSED");
+    } else {
+        eprintln!("    Result: {} CORRECTNESS GATES FAILED:", denials.len());
+        for d in &denials {
+            eprintln!("      [{gate}] {msg}", gate = d.gate, msg = d.message);
+        }
+        panic!(
+            "CORRECTNESS SELF-TEST FAILED: {} gate(s) denied.\n\
+             Each denial above tells you the exact file + function to investigate.\n\
+             This is the library stress-testing itself with its own Gate system.",
+            denials.len()
+        );
+    }
+
+    store.close().expect("close");
+}
+
+/// Verify the correctness gates actually FIRE when properties are violated.
+/// Without this, a broken gate that always passes would be invisible.
+#[test]
+fn correctness_gates_fire_on_violations() {
+    let broken_ctx = CorrectnessContext {
+        fd_eviction_round_trips: false,
+        cross_segment_reads_ok: false,
+        cas_rejects_stale: false,
+        idempotency_deduplicates: false,
+        cursor_sees_all_events: false,
+        snapshot_boots: false,
+    };
+
+    let mut gates = GateSet::new();
+    gates.push(FdEvictionGate);
+    gates.push(CrossSegmentGate);
+    gates.push(CasGate);
+    gates.push(IdempotencyGate);
+    gates.push(CursorCompletenessGate);
+    gates.push(SnapshotBootGate);
+
+    let denials = gates.evaluate_all(&broken_ctx);
+    assert_eq!(denials.len(), 6,
+        "All 6 correctness gates should fire when all properties are violated. Got {}.",
+        denials.len());
+
+    // Every denial should contain an investigation pointer
+    for d in &denials {
+        assert!(d.message.contains("Investigate:"),
+            "Denial [{gate}] should point to source file. Message: {msg}",
+            gate = d.gate, msg = d.message);
+    }
 }
