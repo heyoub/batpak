@@ -50,7 +50,8 @@ pub struct RedbCache {
 }
 
 #[cfg(feature = "redb")]
-const CACHE_TABLE: redb::TableDefinition<&[u8], &[u8]> = redb::TableDefinition::new("projection_cache");
+const CACHE_TABLE: redb::TableDefinition<&[u8], &[u8]> =
+    redb::TableDefinition::new("projection_cache");
 
 #[cfg(feature = "redb")]
 impl RedbCache {
@@ -80,12 +81,22 @@ impl ProjectionCache for RedbCache {
                 }
                 let (value, meta_bytes) = bytes.split_at(bytes.len() - 16);
                 let watermark = u64::from_le_bytes(
-                    meta_bytes[..8].try_into().expect("split guarantees 16 bytes"),
+                    meta_bytes[..8]
+                        .try_into()
+                        .expect("split guarantees 16 bytes"),
                 );
                 let cached_at_us = i64::from_le_bytes(
-                    meta_bytes[8..16].try_into().expect("split guarantees 16 bytes"),
+                    meta_bytes[8..16]
+                        .try_into()
+                        .expect("split guarantees 16 bytes"),
                 );
-                Ok(Some((value.to_vec(), CacheMeta { watermark, cached_at_us })))
+                Ok(Some((
+                    value.to_vec(),
+                    CacheMeta {
+                        watermark,
+                        cached_at_us,
+                    },
+                )))
             }
             Ok(None) => Ok(None),
             Err(e) => Err(StoreError::CacheFailed(e.to_string())),
@@ -207,12 +218,22 @@ impl ProjectionCache for LmdbCache {
             Some(bytes) if bytes.len() >= 16 => {
                 let (value, meta_bytes) = bytes.split_at(bytes.len() - 16);
                 let watermark = u64::from_le_bytes(
-                    meta_bytes[..8].try_into().expect("split guarantees 16 bytes"),
+                    meta_bytes[..8]
+                        .try_into()
+                        .expect("split guarantees 16 bytes"),
                 );
                 let cached_at_us = i64::from_le_bytes(
-                    meta_bytes[8..16].try_into().expect("split guarantees 16 bytes"),
+                    meta_bytes[8..16]
+                        .try_into()
+                        .expect("split guarantees 16 bytes"),
                 );
-                Ok(Some((value.to_vec(), CacheMeta { watermark, cached_at_us })))
+                Ok(Some((
+                    value.to_vec(),
+                    CacheMeta {
+                        watermark,
+                        cached_at_us,
+                    },
+                )))
             }
             _ => Ok(None),
         }

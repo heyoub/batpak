@@ -11,8 +11,8 @@ use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Coordinate {
-    entity: Arc<str>,   // WHO — stream key, hash chain anchor
-    scope: Arc<str>,    // WHERE — isolation boundary
+    entity: Arc<str>, // WHO — stream key, hash chain anchor
+    scope: Arc<str>,  // WHERE — isolation boundary
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -34,29 +34,38 @@ pub struct Region {
 #[derive(Clone, Debug)]
 pub enum KindFilter {
     Exact(EventKind),
-    Category(u8),    // matches any EventKind in this 4-bit category
+    Category(u8), // matches any EventKind in this 4-bit category
     Any,
 }
 
 impl Coordinate {
-    pub fn new(
-        entity: impl AsRef<str>,
-        scope: impl AsRef<str>,
-    ) -> Result<Self, CoordinateError> {
+    pub fn new(entity: impl AsRef<str>, scope: impl AsRef<str>) -> Result<Self, CoordinateError> {
         let entity = entity.as_ref();
         let scope = scope.as_ref();
-        if entity.is_empty() { return Err(CoordinateError::EmptyEntity); }
-        if scope.is_empty() { return Err(CoordinateError::EmptyScope); }
+        if entity.is_empty() {
+            return Err(CoordinateError::EmptyEntity);
+        }
+        if scope.is_empty() {
+            return Err(CoordinateError::EmptyScope);
+        }
         Ok(Self {
             entity: Arc::from(entity),
             scope: Arc::from(scope),
         })
     }
 
-    pub fn entity(&self) -> &str { &self.entity }
-    pub fn scope(&self) -> &str { &self.scope }
-    pub(crate) fn entity_arc(&self) -> Arc<str> { Arc::clone(&self.entity) }
-    pub(crate) fn scope_arc(&self) -> Arc<str> { Arc::clone(&self.scope) }
+    pub fn entity(&self) -> &str {
+        &self.entity
+    }
+    pub fn scope(&self) -> &str {
+        &self.scope
+    }
+    pub(crate) fn entity_arc(&self) -> Arc<str> {
+        Arc::clone(&self.entity)
+    }
+    pub(crate) fn scope_arc(&self) -> Arc<str> {
+        Arc::clone(&self.scope)
+    }
 }
 
 impl fmt::Display for Coordinate {
@@ -78,14 +87,22 @@ impl std::error::Error for CoordinateError {}
 
 /// Region builder — method chaining. [SPEC:src/coordinate/mod.rs — Region builder]
 impl Region {
-    pub fn all() -> Self { Self::default() }
+    pub fn all() -> Self {
+        Self::default()
+    }
 
     pub fn entity(prefix: impl AsRef<str>) -> Self {
-        Self { entity_prefix: Some(Arc::from(prefix.as_ref())), ..Self::default() }
+        Self {
+            entity_prefix: Some(Arc::from(prefix.as_ref())),
+            ..Self::default()
+        }
     }
 
     pub fn scope(scope: impl AsRef<str>) -> Self {
-        Self { scope: Some(Arc::from(scope.as_ref())), ..Self::default() }
+        Self {
+            scope: Some(Arc::from(scope.as_ref())),
+            ..Self::default()
+        }
     }
 
     pub fn coordinate(coord: &Coordinate) -> Self {
@@ -132,9 +149,17 @@ impl Region {
         }
         if let Some(ref fact) = self.fact {
             match fact {
-                KindFilter::Exact(k) => if kind != *k { return false; },
-                KindFilter::Category(c) => if kind.category() != *c { return false; },
-                KindFilter::Any => {},
+                KindFilter::Exact(k) => {
+                    if kind != *k {
+                        return false;
+                    }
+                }
+                KindFilter::Category(c) => {
+                    if kind.category() != *c {
+                        return false;
+                    }
+                }
+                KindFilter::Any => {}
             }
         }
         // clock_range is not checked here — it's for index queries, not live filtering.

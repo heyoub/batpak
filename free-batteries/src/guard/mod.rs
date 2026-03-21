@@ -11,7 +11,9 @@ pub use receipt::Receipt;
 pub trait Gate<Ctx>: Send + Sync {
     fn name(&self) -> &'static str;
     fn evaluate(&self, ctx: &Ctx) -> Result<(), Denial>;
-    fn description(&self) -> &'static str { "" }
+    fn description(&self) -> &'static str {
+        ""
+    }
 }
 
 /// GateSet<Ctx>: ordered collection of gates. Fail-fast by default.
@@ -20,7 +22,9 @@ pub struct GateSet<Ctx> {
 }
 
 impl<Ctx> GateSet<Ctx> {
-    pub fn new() -> Self { Self { gates: vec![] } }
+    pub fn new() -> Self {
+        Self { gates: vec![] }
+    }
 
     pub fn push(&mut self, gate: impl Gate<Ctx> + 'static) {
         self.gates.push(Box::new(gate));
@@ -28,9 +32,11 @@ impl<Ctx> GateSet<Ctx> {
 
     /// Fail-fast evaluation. First denial stops.
     /// Returns Receipt<T> wrapping the proposal payload on success.
-    pub fn evaluate<T>(&self, ctx: &Ctx, proposal: crate::pipeline::Proposal<T>)
-        -> Result<Receipt<T>, Denial>
-    {
+    pub fn evaluate<T>(
+        &self,
+        ctx: &Ctx,
+        proposal: crate::pipeline::Proposal<T>,
+    ) -> Result<Receipt<T>, Denial> {
         for gate in &self.gates {
             gate.evaluate(ctx)?;
         }
@@ -40,18 +46,25 @@ impl<Ctx> GateSet<Ctx> {
 
     /// Evaluate ALL gates (no fail-fast). For observability — collect all denials.
     pub fn evaluate_all(&self, ctx: &Ctx) -> Vec<Denial> {
-        self.gates.iter()
+        self.gates
+            .iter()
             .filter_map(|g| g.evaluate(ctx).err())
             .collect()
     }
 
-    pub fn len(&self) -> usize { self.gates.len() }
-    pub fn is_empty(&self) -> bool { self.gates.is_empty() }
+    pub fn len(&self) -> usize {
+        self.gates.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.gates.is_empty()
+    }
     pub fn names(&self) -> Vec<&'static str> {
         self.gates.iter().map(|g| g.name()).collect()
     }
 }
 
 impl<Ctx> Default for GateSet<Ctx> {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }

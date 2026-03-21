@@ -3,7 +3,7 @@
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use free_batteries::prelude::*;
-use free_batteries::store::{Store, StoreConfig, Freshness};
+use free_batteries::store::{Freshness, Store, StoreConfig};
 use tempfile::TempDir;
 
 /// A minimal EventSourced implementation for benchmarking.

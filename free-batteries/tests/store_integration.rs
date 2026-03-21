@@ -7,7 +7,7 @@
 //! Arc<str> serialization path (Phase 1.1 fix) through round-trip persistence.
 
 use free_batteries::prelude::*;
-use free_batteries::store::{Store, StoreConfig, Freshness};
+use free_batteries::store::{Freshness, Store, StoreConfig};
 use tempfile::TempDir;
 
 fn test_store() -> (Store, TempDir) {
@@ -34,9 +34,11 @@ fn append_and_get_single_event() {
     let receipt = store.append(&coord, kind, &payload).expect("append");
     let stored = store.get(receipt.event_id).expect("get");
 
-    assert_eq!(stored.coordinate, coord,
+    assert_eq!(
+        stored.coordinate, coord,
         "ROUND-TRIP FAILED: coordinate mismatch after append+get. \
-         Investigate: src/store/mod.rs append/get and Arc<str> serialization.");
+         Investigate: src/store/mod.rs append/get and Arc<str> serialization."
+    );
     assert_eq!(stored.event.event_kind(), kind);
 
     store.close().expect("close");
@@ -54,9 +56,12 @@ fn append_multiple_events_same_entity() {
     }
 
     let stats = store.stats();
-    assert_eq!(stats.event_count, 10,
+    assert_eq!(
+        stats.event_count, 10,
         "EVENT COUNT MISMATCH: expected 10 events, got {}. \
-         Investigate: src/store/index.rs insert.", stats.event_count);
+         Investigate: src/store/index.rs insert.",
+        stats.event_count
+    );
 
     store.close().expect("close");
 }
@@ -71,9 +76,7 @@ fn query_by_entity_prefix() {
 
     // Create events across different entities
     for i in 0..5 {
-        let coord = Coordinate::new(
-            &format!("user:{i}"), "scope:test"
-        ).expect("valid coord");
+        let coord = Coordinate::new(&format!("user:{i}"), "scope:test").expect("valid coord");
         store.append(&coord, kind, &payload).expect("append");
     }
     // And some non-matching entities
@@ -82,9 +85,13 @@ fn query_by_entity_prefix() {
 
     let region = Region::entity("user:");
     let results = store.query(&region);
-    assert_eq!(results.len(), 5,
+    assert_eq!(
+        results.len(),
+        5,
         "ENTITY PREFIX QUERY FAILED: expected 5 'user:*' events, got {}. \
-         Investigate: src/store/index.rs query() entity_prefix path.", results.len());
+         Investigate: src/store/index.rs query() entity_prefix path.",
+        results.len()
+    );
 
     store.close().expect("close");
 }
@@ -104,10 +111,14 @@ fn query_by_scope() {
 
     let region = Region::scope("scope:a");
     let results = store.query(&region);
-    assert_eq!(results.len(), 2,
+    assert_eq!(
+        results.len(),
+        2,
         "SCOPE QUERY FAILED: expected 2 scope:a events, got {}. \
          Investigate: src/store/index.rs query() scope path. \
-         This exercises the DashMap Ref lifetime fix (Phase 1.5).", results.len());
+         This exercises the DashMap Ref lifetime fix (Phase 1.5).",
+        results.len()
+    );
 
     store.close().expect("close");
 }
@@ -125,9 +136,13 @@ fn query_by_fact() {
     store.append(&coord, kind_b, &payload).expect("append");
 
     let results = store.by_fact(kind_a);
-    assert_eq!(results.len(), 2,
+    assert_eq!(
+        results.len(),
+        2,
         "FACT QUERY FAILED: expected 2 events of kind_a, got {}. \
-         Investigate: src/store/index.rs by_fact path.", results.len());
+         Investigate: src/store/index.rs by_fact path.",
+        results.len()
+    );
 
     store.close().expect("close");
 }
@@ -163,9 +178,12 @@ fn cold_start_rebuilds_index() {
         };
         let store = Store::open(config).expect("cold start open");
         let stats = store.stats();
-        assert_eq!(stats.event_count, 20,
+        assert_eq!(
+            stats.event_count, 20,
             "COLD START FAILED: index should have 20 events after rebuild, got {}. \
-             Investigate: src/store/mod.rs Store::open cold start scan.", stats.event_count);
+             Investigate: src/store/mod.rs Store::open cold start scan.",
+            stats.event_count
+        );
 
         // Verify query still works
         let results = store.stream("entity:1");
@@ -201,13 +219,19 @@ fn segment_rotation_on_size() {
         .expect("read dir")
         .filter_map(|e| e.ok())
         .filter(|e| {
-            e.path().extension().map(|ext| ext == "fbat").unwrap_or(false)
+            e.path()
+                .extension()
+                .map(|ext| ext == "fbat")
+                .unwrap_or(false)
         })
         .count();
 
-    assert!(segment_count > 1,
+    assert!(
+        segment_count > 1,
         "SEGMENT ROTATION FAILED: expected multiple segments with 512-byte max, got {}. \
-         Investigate: src/store/writer.rs STEP 7 rotation check.", segment_count);
+         Investigate: src/store/writer.rs STEP 7 rotation check.",
+        segment_count
+    );
 
     store.close().expect("close");
 }
@@ -244,11 +268,15 @@ fn concurrent_append_and_query() {
         for _ in 0..200 {
             let results = store_r.stream("entity:1");
             let count = results.len();
-            assert!(count >= max_seen,
+            assert!(
+                count >= max_seen,
                 "CONCURRENT READ REGRESSION: event count went from {max_seen} to {count}. \
-                 Events should never disappear during concurrent writes.");
+                 Events should never disappear during concurrent writes."
+            );
             max_seen = count;
-            if max_seen >= 100 { break; }
+            if max_seen >= 100 {
+                break;
+            }
             std::thread::yield_now();
         }
         max_seen
@@ -257,14 +285,18 @@ fn concurrent_append_and_query() {
     writer.join().expect("writer thread");
     let max_seen = reader.join().expect("reader thread");
     // Reader should have seen SOME events (not always 0)
-    assert!(max_seen > 0,
+    assert!(
+        max_seen > 0,
         "CONCURRENT READ: reader never saw any events during writing. \
-         This suggests reader queries aren't seeing writer commits.");
+         This suggests reader queries aren't seeing writer commits."
+    );
 
     let stats = store.stats();
-    assert_eq!(stats.event_count, 100,
+    assert_eq!(
+        stats.event_count, 100,
         "CONCURRENT R/W FAILED: expected 100 events after concurrent writes, got {}.",
-        stats.event_count);
+        stats.event_count
+    );
 
     // store is in Arc, close via sync
     store.sync().expect("sync");
@@ -337,10 +369,16 @@ fn projection_replays_events() {
         .project("entity:proj", Freshness::Consistent)
         .expect("project");
 
-    assert!(counter.is_some(), "Projection should return Some after events");
-    assert_eq!(counter.expect("checked").count, 5,
+    assert!(
+        counter.is_some(),
+        "Projection should return Some after events"
+    );
+    assert_eq!(
+        counter.expect("checked").count,
+        5,
         "PROJECTION REPLAY FAILED: Counter should have counted 5 events. \
-         Investigate: src/store/mod.rs project().");
+         Investigate: src/store/mod.rs project()."
+    );
 
     store.close().expect("close");
 }

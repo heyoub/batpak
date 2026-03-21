@@ -13,10 +13,21 @@ pub struct Transition<From, To, P> {
 
 impl<From, To, P> Transition<From, To, P> {
     pub fn new(kind: EventKind, payload: P) -> Self {
-        Self { kind, payload, _from: PhantomData, _to: PhantomData }
+        Self {
+            kind,
+            payload,
+            _from: PhantomData,
+            _to: PhantomData,
+        }
     }
 
-    pub fn kind(&self) -> EventKind { self.kind }
-    pub fn payload(&self) -> &P { &self.payload }
-    pub fn into_payload(self) -> P { self.payload }
+    pub fn kind(&self) -> EventKind {
+        self.kind
+    }
+    pub fn payload(&self) -> &P {
+        &self.payload
+    }
+    pub fn into_payload(self) -> P {
+        self.payload
+    }
 }

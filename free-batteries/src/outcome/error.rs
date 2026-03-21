@@ -37,10 +37,7 @@ impl ErrorKind {
     pub fn is_domain(&self) -> bool {
         matches!(
             self,
-            Self::NotFound
-                | Self::Conflict
-                | Self::Validation
-                | Self::PolicyRejection
+            Self::NotFound | Self::Conflict | Self::Validation | Self::PolicyRejection
         )
     }
 

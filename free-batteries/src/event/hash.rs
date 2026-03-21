@@ -21,10 +21,6 @@ pub fn compute_hash(content_bytes: &[u8]) -> [u8; 32] {
 /// verify_chain: check that event_hash matches content AND prev_hash matches expected.
 /// [SPEC:src/event/hash.rs — verify_chain]
 #[cfg(feature = "blake3")]
-pub fn verify_chain(
-    content_bytes: &[u8],
-    chain: &HashChain,
-    expected_prev: &[u8; 32],
-) -> bool {
+pub fn verify_chain(content_bytes: &[u8], chain: &HashChain, expected_prev: &[u8; 32]) -> bool {
     chain.prev_hash == *expected_prev && chain.event_hash == compute_hash(content_bytes)
 }

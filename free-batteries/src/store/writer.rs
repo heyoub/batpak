@@ -8,10 +8,10 @@ compile_error!(
 
 use crate::coordinate::{Coordinate, DagPosition};
 use crate::event::{Event, EventKind, HashChain};
-use crate::store::index::{StoreIndex, IndexEntry, DiskPos};
-use crate::store::segment::{self, Segment, Active, FramePayload};
-use crate::store::{StoreConfig, StoreError, AppendReceipt};
-use flume::{Sender, Receiver, TrySendError};
+use crate::store::index::{DiskPos, IndexEntry, StoreIndex};
+use crate::store::segment::{self, Active, FramePayload, Segment};
+use crate::store::{AppendReceipt, StoreConfig, StoreError};
+use flume::{Receiver, Sender, TrySendError};
 use parking_lot::Mutex;
 use std::sync::Arc;
 use tracing::{debug, info, trace};
@@ -23,7 +23,7 @@ pub(crate) enum WriterCommand {
     Append {
         entity: Arc<str>,
         scope: Arc<str>,
-        event: Box<Event<Vec<u8>>>,  // pre-serialized payload as msgpack bytes
+        event: Box<Event<Vec<u8>>>, // pre-serialized payload as msgpack bytes
         kind: EventKind,
         guards: AppendGuards,
         respond: Sender<Result<AppendReceipt, StoreError>>,
@@ -69,12 +69,17 @@ pub struct Notification {
 pub enum RestartPolicy {
     #[default]
     Once,
-    Bounded { max_restarts: u32, within_ms: u64 },
+    Bounded {
+        max_restarts: u32,
+        within_ms: u64,
+    },
 }
 
 impl SubscriberList {
     pub(crate) fn new() -> Self {
-        Self { senders: Mutex::new(Vec::new()) }
+        Self {
+            senders: Mutex::new(Vec::new()),
+        }
     }
 
     /// Subscribe: create a new bounded channel, store the sender, return the receiver.
@@ -118,7 +123,11 @@ impl WriterHandle {
             })
             .map_err(StoreError::Io)?;
 
-        Ok(Self { tx, subscribers: Arc::clone(subscribers), _thread: Some(thread) })
+        Ok(Self {
+            tx,
+            subscribers: Arc::clone(subscribers),
+            _thread: Some(thread),
+        })
     }
 
     // NOTE: No send_append() method here. Store::append() and Store::append_reaction()
@@ -148,23 +157,30 @@ fn writer_loop(
     // Initialize: create data_dir if not exists, find latest segment or create first.
     std::fs::create_dir_all(data_dir).expect("create data dir");
     let mut segment_id: u64 = find_latest_segment_id(data_dir).unwrap_or(0) + 1;
-    let mut active_segment = Segment::<Active>::create(data_dir, segment_id)
-        .expect("create initial segment");
+    let mut active_segment =
+        Segment::<Active>::create(data_dir, segment_id).expect("create initial segment");
     let mut events_since_sync: u32 = 0;
 
     let mut state = WriterState {
-        index, active_segment: &mut active_segment,
-        segment_id: &mut segment_id, config, subscribers,
+        index,
+        active_segment: &mut active_segment,
+        segment_id: &mut segment_id,
+        config,
+        subscribers,
     };
 
     // Main loop: recv commands, dispatch.
     for cmd in rx.iter() {
         match cmd {
-            WriterCommand::Append { entity, scope, event, kind,
-                                    guards, respond } => {
-                let result = state.handle_append(
-                    &entity, &scope, *event, kind, &guards,
-                );
+            WriterCommand::Append {
+                entity,
+                scope,
+                event,
+                kind,
+                guards,
+                respond,
+            } => {
+                let result = state.handle_append(&entity, &scope, *event, kind, &guards);
                 // Respond to caller. Ignore send error (caller may have dropped).
                 let _ = respond.send(result);
 
@@ -185,11 +201,16 @@ fn writer_loop(
                 let mut drained = 0;
                 while drained < config.shutdown_drain_limit {
                     match rx.try_recv() {
-                        Ok(WriterCommand::Append { entity, scope, event, kind,
-                                                   guards, respond: r }) => {
-                            let result = state.handle_append(
-                                &entity, &scope, *event, kind, &guards,
-                            );
+                        Ok(WriterCommand::Append {
+                            entity,
+                            scope,
+                            event,
+                            kind,
+                            guards,
+                            respond: r,
+                        }) => {
+                            let result =
+                                state.handle_append(&entity, &scope, *event, kind, &guards);
                             let _ = r.send(result);
                             drained += 1;
                         }
@@ -237,7 +258,10 @@ impl WriterState<'_> {
         // [SPEC:IMPLEMENTATION NOTES item 5 — DashMap guard lifetimes]
         // Clone the Arc<Mutex> OUT of DashMap, drop the DashMap entry guard,
         // THEN lock the Mutex. Never hold DashMap Ref across the commit.
-        let lock = self.index.entity_locks.entry(Arc::clone(entity))
+        let lock = self
+            .index
+            .entity_locks
+            .entry(Arc::clone(entity))
             .or_insert_with(|| Arc::new(parking_lot::Mutex::new(())))
             .clone();
         let _entity_guard = lock.lock();
@@ -245,9 +269,7 @@ impl WriterState<'_> {
 
         // STEP 1a: CAS check (under entity lock — no TOCTOU).
         if let Some(expected) = guards.expected_sequence {
-            let actual = self.index.get_latest(entity)
-                .map(|e| e.clock)
-                .unwrap_or(0);
+            let actual = self.index.get_latest(entity).map(|e| e.clock).unwrap_or(0);
             if actual != expected {
                 return Err(StoreError::SequenceMismatch {
                     entity: entity.to_string(),
@@ -270,12 +292,16 @@ impl WriterState<'_> {
 
         // STEP 2: Get prev_hash from index (or [0u8;32] for genesis).
         // Clone the value out of the DashMap Ref immediately.
-        let prev_hash = self.index.get_latest(entity)
+        let prev_hash = self
+            .index
+            .get_latest(entity)
             .map(|e| e.hash_chain.event_hash)
             .unwrap_or([0u8; 32]);
 
         // STEP 3: Compute sequence (latest.clock + 1, or 0).
-        let clock = self.index.get_latest(entity)
+        let clock = self
+            .index
+            .get_latest(entity)
             .map(|e| e.clock + 1)
             .unwrap_or(0);
 
@@ -293,7 +319,10 @@ impl WriterState<'_> {
         #[cfg(not(feature = "blake3"))]
         let event_hash = [0u8; 32];
 
-        event.hash_chain = Some(HashChain { prev_hash, event_hash });
+        event.hash_chain = Some(HashChain {
+            prev_hash,
+            event_hash,
+        });
 
         // STEP 6: Serialize to MessagePack + CRC32 frame.
         // [SPEC:WIRE FORMAT DECISIONS — rmp_serde::to_vec_named() ALWAYS]
@@ -305,7 +334,10 @@ impl WriterState<'_> {
         let frame = segment::frame_encode(&frame_payload)?;
 
         // STEP 7: Check segment rotation.
-        if self.active_segment.needs_rotation(self.config.segment_max_bytes) {
+        if self
+            .active_segment
+            .needs_rotation(self.config.segment_max_bytes)
+        {
             self.active_segment.sync()?;
             let old = std::mem::replace(
                 self.active_segment,
@@ -363,14 +395,17 @@ impl WriterState<'_> {
 
 /// Find the latest segment ID by scanning data_dir for .fbat files.
 fn find_latest_segment_id(dir: &std::path::Path) -> Option<u64> {
-    std::fs::read_dir(dir).ok()?
+    std::fs::read_dir(dir)
+        .ok()?
         .filter_map(|e| e.ok())
         .filter_map(|e| {
             let name = e.file_name();
             let name = name.to_str()?;
             if name.ends_with(".fbat") {
                 name.trim_end_matches(".fbat").parse::<u64>().ok()
-            } else { None }
+            } else {
+                None
+            }
         })
         .max()
 }

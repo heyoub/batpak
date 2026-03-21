@@ -68,9 +68,7 @@ fn check_no_banned_patterns() {
         //Invariant 3: no product concepts in library code.
         //Check struct/enum/fn/type declarations for banned nouns.
         //Skip string literals and comments. [SPEC:INVARIANTS item 3]
-        let banned_nouns = [
-            "trajectory", "artifact", "tenant",
-        ];
+        let banned_nouns = ["trajectory", "artifact", "tenant"];
         //NOTE: "scope" and "agent" are common English words.
         //"turn" and "note" are substrings of "return" and "annotation" —
         //substring matching would false-positive on legitimate Rust code.
@@ -92,13 +90,15 @@ fn check_no_banned_patterns() {
                 for noun in &banned_nouns {
                     //Word boundary check: noun must be preceded by start/underscore/space
                     //and followed by end/underscore/space/(/>. Prevents "return" matching "turn".
-                    let has_match = lower.split(|c: char| !c.is_alphanumeric() && c != '_')
-                        .any(|word| {
-                            word == *noun
-                            || word.starts_with(&format!("{noun}_"))
-                            || word.ends_with(&format!("_{noun}"))
-                            || word.contains(&format!("_{noun}_"))
-                        });
+                    let has_match =
+                        lower
+                            .split(|c: char| !c.is_alphanumeric() && c != '_')
+                            .any(|word| {
+                                word == *noun
+                                    || word.starts_with(&format!("{noun}_"))
+                                    || word.ends_with(&format!("_{noun}"))
+                                    || word.contains(&format!("_{noun}_"))
+                            });
                     if has_match {
                         panic!(
                             "INVARIANT 3 VIOLATED in {path_str}: \

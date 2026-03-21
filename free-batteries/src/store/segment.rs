@@ -51,8 +51,8 @@ pub struct CompactionResult {
 /// [DEP:rmp_serde::to_vec_named] → Result<Vec<u8>, encode::Error>
 /// [DEP:crc32fast::hash] → u32
 pub fn frame_encode<T: serde::Serialize>(data: &T) -> Result<Vec<u8>, StoreError> {
-    let msgpack = rmp_serde::to_vec_named(data)
-        .map_err(|e| StoreError::Serialization(e.to_string()))?;
+    let msgpack =
+        rmp_serde::to_vec_named(data).map_err(|e| StoreError::Serialization(e.to_string()))?;
     let crc = crc32fast::hash(&msgpack);
     let len = msgpack.len() as u32;
 

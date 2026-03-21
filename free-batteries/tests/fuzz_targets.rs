@@ -7,10 +7,10 @@
 //! Deep fuzz: PROPTEST_CASES=100000 cargo test --test fuzz_targets --all-features --release
 //! [SPEC:tests/fuzz_targets.rs]
 
-use free_batteries::prelude::*;
-use free_batteries::store::segment::{frame_encode, frame_decode, SegmentHeader};
 use free_batteries::event::hash::HashChain;
-use free_batteries::outcome::wait::{WaitCondition, CompensationAction};
+use free_batteries::outcome::wait::{CompensationAction, WaitCondition};
+use free_batteries::prelude::*;
+use free_batteries::store::segment::{frame_decode, frame_encode, SegmentHeader};
 use proptest::prelude::*;
 use proptest::strategy::BoxedStrategy;
 
@@ -342,14 +342,16 @@ fn arb_outcome_deep() -> impl Strategy<Value = Outcome<i32>> {
         })),
         (any::<u64>(), any::<u32>(), any::<u32>(), any::<String>()).prop_map(
             |(after, attempt, max, reason)| Outcome::Retry {
-                after_ms: after, attempt, max_attempts: max, reason,
+                after_ms: after,
+                attempt,
+                max_attempts: max,
+                reason,
             }
         ),
         any::<String>().prop_map(|reason| Outcome::Cancelled { reason }),
     ];
     leaf.prop_recursive(3, 32, 8, |inner| {
-        proptest::collection::vec(inner, 0..6)
-            .prop_map(Outcome::Batch)
+        proptest::collection::vec(inner, 0..6).prop_map(Outcome::Batch)
     })
 }
 

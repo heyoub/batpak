@@ -1,11 +1,11 @@
-pub mod kind;
-pub mod header;
 pub mod hash;
+pub mod header;
+pub mod kind;
 pub mod sourcing;
 
-pub use kind::EventKind;
-pub use header::EventHeader;
 pub use hash::HashChain;
+pub use header::EventHeader;
+pub use kind::EventKind;
 pub use sourcing::{EventSourced, Reactive};
 
 use crate::coordinate::Coordinate;

@@ -1,25 +1,25 @@
-pub mod index;
-pub mod segment;
-pub mod writer;
-pub mod reader;
-pub mod projection;
 pub mod cursor;
+pub mod index;
+pub mod projection;
+pub mod reader;
+pub mod segment;
 pub mod subscription;
+pub mod writer;
 
-pub use index::{IndexEntry, ClockKey, DiskPos};
-pub use projection::{ProjectionCache, NoCache, CacheMeta, Freshness};
 pub use cursor::Cursor;
+pub use index::{ClockKey, DiskPos, IndexEntry};
+pub use projection::{CacheMeta, Freshness, NoCache, ProjectionCache};
 pub use subscription::Subscription;
 pub use writer::{Notification, RestartPolicy};
 
-use crate::coordinate::{Coordinate, CoordinateError, Region, KindFilter};
-use crate::event::{Event, EventHeader, EventKind, StoredEvent, EventSourced};
+use crate::coordinate::{Coordinate, CoordinateError, KindFilter, Region};
+use crate::event::{Event, EventHeader, EventKind, EventSourced, StoredEvent};
 use index::StoreIndex;
 use reader::Reader;
-use writer::{WriterHandle, WriterCommand, AppendGuards, SubscriberList};
 use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::Arc;
+use writer::{AppendGuards, SubscriberList, WriterCommand, WriterHandle};
 // ProjectionCache re-exported above via pub use, no separate use needed.
 
 /// Store: the runtime. Sync API. Send + Sync.
@@ -55,7 +55,7 @@ impl Default for StoreConfig {
     fn default() -> Self {
         Self {
             data_dir: PathBuf::from("./free-batteries-data"),
-            segment_max_bytes: 256 * 1024 * 1024,  // 256MB
+            segment_max_bytes: 256 * 1024 * 1024, // 256MB
             sync_every_n_events: 1000,
             fd_budget: 64,
             writer_channel_capacity: 4096,
@@ -74,10 +74,20 @@ pub enum StoreError {
     Io(std::io::Error),
     Coordinate(CoordinateError),
     Serialization(String),
-    CrcMismatch { segment_id: u64, offset: u64 },
-    CorruptSegment { segment_id: u64, detail: String },
+    CrcMismatch {
+        segment_id: u64,
+        offset: u64,
+    },
+    CorruptSegment {
+        segment_id: u64,
+        detail: String,
+    },
     NotFound(u128),
-    SequenceMismatch { entity: String, expected: u32, actual: u32 },
+    SequenceMismatch {
+        entity: String,
+        expected: u32,
+        actual: u32,
+    },
     DuplicateEvent(u128),
     WriterCrashed,
     ShuttingDown,
@@ -90,13 +100,21 @@ impl std::fmt::Display for StoreError {
             Self::Io(e) => write!(f, "IO error: {e}"),
             Self::Coordinate(e) => write!(f, "coordinate error: {e}"),
             Self::Serialization(s) => write!(f, "serialization error: {s}"),
-            Self::CrcMismatch { segment_id, offset } =>
-                write!(f, "CRC mismatch in segment {segment_id} at offset {offset}"),
-            Self::CorruptSegment { segment_id, detail } =>
-                write!(f, "corrupt segment {segment_id}: {detail}"),
+            Self::CrcMismatch { segment_id, offset } => {
+                write!(f, "CRC mismatch in segment {segment_id} at offset {offset}")
+            }
+            Self::CorruptSegment { segment_id, detail } => {
+                write!(f, "corrupt segment {segment_id}: {detail}")
+            }
             Self::NotFound(id) => write!(f, "event {id:032x} not found"),
-            Self::SequenceMismatch { entity, expected, actual } =>
-                write!(f, "CAS failed for {entity}: expected seq {expected}, got {actual}"),
+            Self::SequenceMismatch {
+                entity,
+                expected,
+                actual,
+            } => write!(
+                f,
+                "CAS failed for {entity}: expected seq {expected}, got {actual}"
+            ),
             Self::DuplicateEvent(key) => write!(f, "duplicate idempotency key {key:032x}"),
             Self::WriterCrashed => write!(f, "writer thread crashed"),
             Self::ShuttingDown => write!(f, "store is shutting down"),
@@ -106,10 +124,14 @@ impl std::fmt::Display for StoreError {
 }
 impl std::error::Error for StoreError {}
 impl From<CoordinateError> for StoreError {
-    fn from(e: CoordinateError) -> Self { Self::Coordinate(e) }
+    fn from(e: CoordinateError) -> Self {
+        Self::Coordinate(e)
+    }
 }
 impl From<std::io::Error> for StoreError {
-    fn from(e: std::io::Error) -> Self { Self::Io(e) }
+    fn from(e: std::io::Error) -> Self {
+        Self::Io(e)
+    }
 }
 
 /// AppendReceipt: proof an event was persisted.
@@ -141,7 +163,12 @@ impl Store {
         // [SPEC:IMPLEMENTATION NOTES item 2 — segment naming, alphabetical scan]
         let mut entries: Vec<std::fs::DirEntry> = std::fs::read_dir(&config.data_dir)?
             .filter_map(|e| e.ok())
-            .filter(|e| e.path().extension().map(|ext| ext == "fbat").unwrap_or(false))
+            .filter(|e| {
+                e.path()
+                    .extension()
+                    .map(|ext| ext == "fbat")
+                    .unwrap_or(false)
+            })
             .collect();
         entries.sort_by_key(|e| e.file_name());
 
@@ -173,7 +200,11 @@ impl Store {
         let writer = WriterHandle::spawn(&config, &index, &subscribers)?;
 
         Ok(Self {
-            index, reader, _cache: Box::new(NoCache), writer, config,
+            index,
+            reader,
+            _cache: Box::new(NoCache),
+            writer,
+            config,
         })
     }
 
@@ -184,65 +215,95 @@ impl Store {
     /// WRITE: append a new root-cause event.
     /// correlation_id defaults to event_id (self-correlated). causation_id = None.
     pub fn append(
-        &self, coord: &Coordinate, kind: EventKind, payload: &impl Serialize,
+        &self,
+        coord: &Coordinate,
+        kind: EventKind,
+        payload: &impl Serialize,
     ) -> Result<AppendReceipt, StoreError> {
         let payload_bytes = rmp_serde::to_vec_named(payload)
             .map_err(|e| StoreError::Serialization(e.to_string()))?;
         let event_id = crate::id::generate_v7_id();
         let header = EventHeader::new(
-            event_id, event_id, None, // correlation = self, causation = root
-            now_us(), crate::coordinate::DagPosition::root(),
-            payload_bytes.len() as u32, kind,
+            event_id,
+            event_id,
+            None, // correlation = self, causation = root
+            now_us(),
+            crate::coordinate::DagPosition::root(),
+            payload_bytes.len() as u32,
+            kind,
         );
         let event = Event::new(header, payload_bytes);
 
         let (tx, rx) = flume::bounded(1);
-        self.writer.tx.send(WriterCommand::Append {
-            entity: coord.entity_arc(),
-            scope: coord.scope_arc(),
-            event: Box::new(event), kind,
-            guards: AppendGuards {
-                correlation_id: event_id, causation_id: None,
-                expected_sequence: None, idempotency_key: None,
-            },
-            respond: tx,
-        }).map_err(|_| StoreError::WriterCrashed)?;
+        self.writer
+            .tx
+            .send(WriterCommand::Append {
+                entity: coord.entity_arc(),
+                scope: coord.scope_arc(),
+                event: Box::new(event),
+                kind,
+                guards: AppendGuards {
+                    correlation_id: event_id,
+                    causation_id: None,
+                    expected_sequence: None,
+                    idempotency_key: None,
+                },
+                respond: tx,
+            })
+            .map_err(|_| StoreError::WriterCrashed)?;
 
         rx.recv().map_err(|_| StoreError::WriterCrashed)?
     }
 
     /// WRITE: append a reaction (caused by another event).
     pub fn append_reaction(
-        &self, coord: &Coordinate, kind: EventKind, payload: &impl Serialize,
-        correlation_id: u128, causation_id: u128,
+        &self,
+        coord: &Coordinate,
+        kind: EventKind,
+        payload: &impl Serialize,
+        correlation_id: u128,
+        causation_id: u128,
     ) -> Result<AppendReceipt, StoreError> {
         let payload_bytes = rmp_serde::to_vec_named(payload)
             .map_err(|e| StoreError::Serialization(e.to_string()))?;
         let event_id = crate::id::generate_v7_id();
         let header = EventHeader::new(
-            event_id, correlation_id, Some(causation_id),
-            now_us(), crate::coordinate::DagPosition::root(),
-            payload_bytes.len() as u32, kind,
+            event_id,
+            correlation_id,
+            Some(causation_id),
+            now_us(),
+            crate::coordinate::DagPosition::root(),
+            payload_bytes.len() as u32,
+            kind,
         );
         let event = Event::new(header, payload_bytes);
 
         let (tx, rx) = flume::bounded(1);
-        self.writer.tx.send(WriterCommand::Append {
-            entity: coord.entity_arc(), scope: coord.scope_arc(),
-            event: Box::new(event), kind,
-            guards: AppendGuards {
-                correlation_id, causation_id: Some(causation_id),
-                expected_sequence: None, idempotency_key: None,
-            },
-            respond: tx,
-        }).map_err(|_| StoreError::WriterCrashed)?;
+        self.writer
+            .tx
+            .send(WriterCommand::Append {
+                entity: coord.entity_arc(),
+                scope: coord.scope_arc(),
+                event: Box::new(event),
+                kind,
+                guards: AppendGuards {
+                    correlation_id,
+                    causation_id: Some(causation_id),
+                    expected_sequence: None,
+                    idempotency_key: None,
+                },
+                respond: tx,
+            })
+            .map_err(|_| StoreError::WriterCrashed)?;
 
         rx.recv().map_err(|_| StoreError::WriterCrashed)?
     }
 
     /// READ: get a single event by ID.
     pub fn get(&self, event_id: u128) -> Result<StoredEvent<serde_json::Value>, StoreError> {
-        let entry = self.index.get_by_id(event_id)
+        let entry = self
+            .index
+            .get_by_id(event_id)
             .ok_or(StoreError::NotFound(event_id))?;
         self.reader.read_entry(&entry.disk_pos)
     }
@@ -256,24 +317,32 @@ impl Store {
     /// When blake3 is enabled, follows the hash chain (event_hash → prev_hash).
     /// When blake3 is disabled, all hashes are [0u8;32] so hash-based walking
     /// is impossible. Falls back to clock-ordered traversal (descending clock).
-    pub fn walk_ancestors(&self, event_id: u128, limit: usize)
-        -> Vec<StoredEvent<serde_json::Value>>
-    {
+    pub fn walk_ancestors(
+        &self,
+        event_id: u128,
+        limit: usize,
+    ) -> Vec<StoredEvent<serde_json::Value>> {
         let mut results = Vec::new();
         #[cfg(feature = "blake3")]
         {
             let mut current_id = Some(event_id);
             while let Some(id) = current_id {
-                if results.len() >= limit { break; }
+                if results.len() >= limit {
+                    break;
+                }
                 if let Some(entry) = self.index.get_by_id(id) {
                     if let Ok(stored) = self.reader.read_entry(&entry.disk_pos) {
                         results.push(stored);
                     }
                     // Follow prev_hash: find the entry whose event_hash matches prev_hash
                     let prev = entry.hash_chain.prev_hash;
-                    if prev == [0u8; 32] { break; } // genesis
-                    // Linear scan is acceptable for ancestor walks (bounded by limit).
-                    current_id = self.index.stream(entry.coord.entity())
+                    if prev == [0u8; 32] {
+                        break;
+                    } // genesis
+                      // Linear scan is acceptable for ancestor walks (bounded by limit).
+                    current_id = self
+                        .index
+                        .stream(entry.coord.entity())
                         .iter()
                         .find(|e| e.hash_chain.event_hash == prev)
                         .map(|e| e.event_id);
@@ -293,8 +362,12 @@ impl Store {
             let stream = self.index.stream(entity);
             // stream is sorted by (clock, uuid). Walk backwards from start_entry's clock.
             for entry in stream.iter().rev() {
-                if results.len() >= limit { break; }
-                if entry.clock > start_entry.clock { continue; }
+                if results.len() >= limit {
+                    break;
+                }
+                if entry.clock > start_entry.clock {
+                    continue;
+                }
                 if let Ok(stored) = self.reader.read_entry(&entry.disk_pos) {
                     results.push(stored);
                 }
@@ -306,10 +379,14 @@ impl Store {
 
     /// PROJECT: reconstruct typed state from events.
     pub fn project<T: EventSourced<serde_json::Value>>(
-        &self, entity: &str, _freshness: Freshness,
+        &self,
+        entity: &str,
+        _freshness: Freshness,
     ) -> Result<Option<T>, StoreError> {
         let entries = self.index.stream(entity);
-        if entries.is_empty() { return Ok(None); }
+        if entries.is_empty() {
+            return Ok(None);
+        }
 
         let mut events = Vec::with_capacity(entries.len());
         for entry in &entries {
@@ -321,7 +398,10 @@ impl Store {
 
     /// SUBSCRIBE: push-based, lossy.
     pub fn subscribe(&self, region: &Region) -> Subscription {
-        let rx = self.writer.subscribers.subscribe(self.config.broadcast_capacity);
+        let rx = self
+            .writer
+            .subscribers
+            .subscribe(self.config.broadcast_capacity);
         Subscription::new(rx, region.clone())
     }
 
@@ -353,28 +433,39 @@ impl Store {
     ) -> Result<AppendReceipt, StoreError> {
         let payload_bytes = rmp_serde::to_vec_named(payload)
             .map_err(|e| StoreError::Serialization(e.to_string()))?;
-        let event_id = opts.idempotency_key.unwrap_or_else(crate::id::generate_v7_id);
+        let event_id = opts
+            .idempotency_key
+            .unwrap_or_else(crate::id::generate_v7_id);
         let correlation_id = opts.correlation_id.unwrap_or(event_id);
         let causation_id = opts.causation_id;
         let header = EventHeader::new(
-            event_id, correlation_id, causation_id,
-            now_us(), crate::coordinate::DagPosition::root(),
-            payload_bytes.len() as u32, kind,
+            event_id,
+            correlation_id,
+            causation_id,
+            now_us(),
+            crate::coordinate::DagPosition::root(),
+            payload_bytes.len() as u32,
+            kind,
         );
         let event = Event::new(header, payload_bytes);
 
         let (tx, rx) = flume::bounded(1);
-        self.writer.tx.send(WriterCommand::Append {
-            entity: coord.entity_arc(),
-            scope: coord.scope_arc(),
-            event: Box::new(event), kind,
-            guards: AppendGuards {
-                correlation_id, causation_id,
-                expected_sequence: opts.expected_sequence,
-                idempotency_key: opts.idempotency_key,
-            },
-            respond: tx,
-        }).map_err(|_| StoreError::WriterCrashed)?;
+        self.writer
+            .tx
+            .send(WriterCommand::Append {
+                entity: coord.entity_arc(),
+                scope: coord.scope_arc(),
+                event: Box::new(event),
+                kind,
+                guards: AppendGuards {
+                    correlation_id,
+                    causation_id,
+                    expected_sequence: opts.expected_sequence,
+                    idempotency_key: opts.idempotency_key,
+                },
+                respond: tx,
+            })
+            .map_err(|_| StoreError::WriterCrashed)?;
 
         rx.recv().map_err(|_| StoreError::WriterCrashed)?
     }
@@ -393,7 +484,9 @@ impl Store {
     /// LIFECYCLE
     pub fn sync(&self) -> Result<(), StoreError> {
         let (tx, rx) = flume::bounded(1);
-        self.writer.tx.send(WriterCommand::Sync { respond: tx })
+        self.writer
+            .tx
+            .send(WriterCommand::Sync { respond: tx })
             .map_err(|_| StoreError::WriterCrashed)?;
         rx.recv().map_err(|_| StoreError::WriterCrashed)?
     }
@@ -423,7 +516,9 @@ impl Store {
 
     pub fn close(self) -> Result<(), StoreError> {
         let (tx, rx) = flume::bounded(1);
-        self.writer.tx.send(WriterCommand::Shutdown { respond: tx })
+        self.writer
+            .tx
+            .send(WriterCommand::Shutdown { respond: tx })
             .map_err(|_| StoreError::WriterCrashed)?;
         rx.recv().map_err(|_| StoreError::WriterCrashed)?
     }

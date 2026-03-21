@@ -36,16 +36,17 @@ pub mod u128_bytes {
             }
             fn visit_bytes<E: de::Error>(self, v: &[u8]) -> Result<u128, E> {
                 // v must be exactly 16 bytes. Convert via from_be_bytes.
-                let arr: [u8; 16] = v.try_into().map_err(|_| {
-                    E::invalid_length(v.len(), &"16 bytes")
-                })?;
+                let arr: [u8; 16] = v
+                    .try_into()
+                    .map_err(|_| E::invalid_length(v.len(), &"16 bytes"))?;
                 Ok(u128::from_be_bytes(arr))
             }
             // Also handle seq format (some deserializers emit sequences not bytes)
             fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<u128, A::Error> {
                 let mut bytes = [0u8; 16];
                 for (i, byte) in bytes.iter_mut().enumerate() {
-                    *byte = seq.next_element()?
+                    *byte = seq
+                        .next_element()?
                         .ok_or_else(|| de::Error::invalid_length(i, &"16 bytes"))?;
                 }
                 Ok(u128::from_be_bytes(bytes))
@@ -82,9 +83,9 @@ pub mod option_u128_bytes {
                 super::u128_bytes::deserialize(de).map(Some)
             }
             fn visit_bytes<E: de::Error>(self, v: &[u8]) -> Result<Option<u128>, E> {
-                let arr: [u8; 16] = v.try_into().map_err(|_| {
-                    E::invalid_length(v.len(), &"16 bytes")
-                })?;
+                let arr: [u8; 16] = v
+                    .try_into()
+                    .map_err(|_| E::invalid_length(v.len(), &"16 bytes"))?;
                 Ok(Some(u128::from_be_bytes(arr)))
             }
         }

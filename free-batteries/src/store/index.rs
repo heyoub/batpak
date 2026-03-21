@@ -60,7 +60,9 @@ pub struct DiskPos {
 
 impl Ord for ClockKey {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.clock.cmp(&other.clock).then(self.uuid.cmp(&other.uuid))
+        self.clock
+            .cmp(&other.clock)
+            .then(self.uuid.cmp(&other.uuid))
     }
 }
 
@@ -188,12 +190,11 @@ impl StoreIndex {
         } else if let Some(ref fact) = region.fact {
             // Fact filter without entity/scope → scan by_fact index
             match fact {
-                KindFilter::Exact(k) => {
-                    self.by_fact
-                        .get(k)
-                        .map(|r| r.value().values().cloned().collect())
-                        .unwrap_or_default()
-                }
+                KindFilter::Exact(k) => self
+                    .by_fact
+                    .get(k)
+                    .map(|r| r.value().values().cloned().collect())
+                    .unwrap_or_default(),
                 KindFilter::Category(c) => {
                     let cat = *c;
                     self.by_fact

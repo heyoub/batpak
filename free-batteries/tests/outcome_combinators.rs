@@ -28,8 +28,16 @@ fn inspect_calls_closure_on_ok() {
         assert_eq!(*v, 42);
         c.fetch_add(1, Ordering::SeqCst);
     });
-    assert_eq!(counter.load(Ordering::SeqCst), 1, "inspect should call closure for Ok");
-    assert_eq!(result, Outcome::Ok(42), "inspect should not modify the value");
+    assert_eq!(
+        counter.load(Ordering::SeqCst),
+        1,
+        "inspect should call closure for Ok"
+    );
+    assert_eq!(
+        result,
+        Outcome::Ok(42),
+        "inspect should not modify the value"
+    );
 }
 
 #[test]
@@ -51,9 +59,19 @@ fn inspect_skips_non_ok() {
 fn inspect_distributes_over_batch() {
     let counter = Arc::new(AtomicU32::new(0));
     let c = Arc::clone(&counter);
-    let batch = Outcome::Batch(vec![Outcome::Ok(1), Outcome::Err(test_err()), Outcome::Ok(3)]);
-    let _ = batch.inspect(move |_| { c.fetch_add(1, Ordering::SeqCst); });
-    assert_eq!(counter.load(Ordering::SeqCst), 2, "inspect should be called for each Ok in Batch");
+    let batch = Outcome::Batch(vec![
+        Outcome::Ok(1),
+        Outcome::Err(test_err()),
+        Outcome::Ok(3),
+    ]);
+    let _ = batch.inspect(move |_| {
+        c.fetch_add(1, Ordering::SeqCst);
+    });
+    assert_eq!(
+        counter.load(Ordering::SeqCst),
+        2,
+        "inspect should be called for each Ok in Batch"
+    );
 }
 
 // --- inspect_err ---
@@ -66,7 +84,11 @@ fn inspect_err_calls_closure_on_err() {
         assert_eq!(e.kind, ErrorKind::Internal);
         c.fetch_add(1, Ordering::SeqCst);
     });
-    assert_eq!(counter.load(Ordering::SeqCst), 1, "inspect_err should call closure for Err");
+    assert_eq!(
+        counter.load(Ordering::SeqCst),
+        1,
+        "inspect_err should call closure for Err"
+    );
     assert!(result.is_err());
 }
 
@@ -80,9 +102,19 @@ fn inspect_err_skips_ok() {
 fn inspect_err_distributes_over_batch() {
     let counter = Arc::new(AtomicU32::new(0));
     let c = Arc::clone(&counter);
-    let batch = Outcome::Batch(vec![Outcome::Ok(1), Outcome::Err(test_err()), Outcome::Ok(3)]);
-    let _ = batch.inspect_err(move |_| { c.fetch_add(1, Ordering::SeqCst); });
-    assert_eq!(counter.load(Ordering::SeqCst), 1, "inspect_err should be called for each Err in Batch");
+    let batch = Outcome::Batch(vec![
+        Outcome::Ok(1),
+        Outcome::Err(test_err()),
+        Outcome::Ok(3),
+    ]);
+    let _ = batch.inspect_err(move |_| {
+        c.fetch_add(1, Ordering::SeqCst);
+    });
+    assert_eq!(
+        counter.load(Ordering::SeqCst),
+        1,
+        "inspect_err should be called for each Err in Batch"
+    );
 }
 
 // --- map_err ---
@@ -107,10 +139,7 @@ fn map_err_skips_ok() {
 
 #[test]
 fn map_err_distributes_over_batch() {
-    let batch: Outcome<i32> = Outcome::Batch(vec![
-        Outcome::Ok(1),
-        Outcome::Err(test_err()),
-    ]);
+    let batch: Outcome<i32> = Outcome::Batch(vec![Outcome::Ok(1), Outcome::Err(test_err())]);
     let result = batch.map_err(|mut e| {
         e.message = "mapped".into();
         e
@@ -150,10 +179,7 @@ fn or_else_skips_non_err_variants() {
 
 #[test]
 fn or_else_distributes_over_batch() {
-    let batch: Outcome<i32> = Outcome::Batch(vec![
-        Outcome::Err(test_err()),
-        Outcome::Ok(1),
-    ]);
+    let batch: Outcome<i32> = Outcome::Batch(vec![Outcome::Err(test_err()), Outcome::Ok(1)]);
     let result = batch.or_else(|_| Outcome::Ok(0));
     match result {
         Outcome::Batch(items) => {
@@ -168,10 +194,7 @@ fn or_else_distributes_over_batch() {
 
 #[test]
 fn and_then_if_applies_when_predicate_true() {
-    let result = Outcome::Ok(42).and_then_if(
-        |v| *v > 10,
-        |v| Outcome::Ok(v * 2),
-    );
+    let result = Outcome::Ok(42).and_then_if(|v| *v > 10, |v| Outcome::Ok(v * 2));
     assert_eq!(result, Outcome::Ok(84));
 }
 
@@ -333,26 +356,23 @@ fn join_any_retry_propagates() {
         Outcome::retry(100, 1, 3, "try later"),
     ];
     let result = free_batteries::outcome::join_any(outcomes);
-    assert!(result.is_retry(), "join_any should propagate Retry immediately");
+    assert!(
+        result.is_retry(),
+        "join_any should propagate Retry immediately"
+    );
 }
 
 // --- zip edge cases ---
 
 #[test]
 fn zip_err_plus_ok() {
-    let result = free_batteries::outcome::zip(
-        Outcome::<i32>::Err(test_err()),
-        Outcome::Ok(42),
-    );
+    let result = free_batteries::outcome::zip(Outcome::<i32>::Err(test_err()), Outcome::Ok(42));
     assert!(result.is_err());
 }
 
 #[test]
 fn zip_ok_plus_cancelled() {
-    let result = free_batteries::outcome::zip(
-        Outcome::Ok(1),
-        Outcome::<i32>::cancelled("no"),
-    );
+    let result = free_batteries::outcome::zip(Outcome::Ok(1), Outcome::<i32>::cancelled("no"));
     assert!(result.is_cancelled());
 }
 
@@ -388,7 +408,11 @@ fn zip_ok_plus_batch() {
 
 #[test]
 fn map_distributes_over_batch() {
-    let batch = Outcome::Batch(vec![Outcome::Ok(1), Outcome::Ok(2), Outcome::Err(test_err())]);
+    let batch = Outcome::Batch(vec![
+        Outcome::Ok(1),
+        Outcome::Ok(2),
+        Outcome::Err(test_err()),
+    ]);
     let result = batch.map(|x| x * 10);
     match result {
         Outcome::Batch(items) => {
@@ -406,11 +430,15 @@ fn map_distributes_over_batch() {
 fn and_then_distributes_over_batch() {
     let batch = Outcome::Batch(vec![Outcome::Ok(1), Outcome::Ok(2)]);
     let result = batch.and_then(|x| {
-        if x > 1 { Outcome::Ok(x * 10) } else { Outcome::Err(test_err()) }
+        if x > 1 {
+            Outcome::Ok(x * 10)
+        } else {
+            Outcome::Err(test_err())
+        }
     });
     match result {
         Outcome::Batch(items) => {
-            assert!(items[0].is_err());         // 1 <= 1 → Err
+            assert!(items[0].is_err()); // 1 <= 1 → Err
             assert_eq!(items[1], Outcome::Ok(20)); // 2 > 1 → Ok(20)
         }
         _ => panic!("Expected Batch"),
@@ -447,7 +475,10 @@ fn wait_condition_variants() {
     let event = WaitCondition::Event { event_id: 123 };
     let all = WaitCondition::All(vec![timeout.clone(), event.clone()]);
     let any = WaitCondition::Any(vec![timeout, event]);
-    let custom = WaitCondition::Custom { tag: 42, data: vec![1, 2, 3] };
+    let custom = WaitCondition::Custom {
+        tag: 42,
+        data: vec![1, 2, 3],
+    };
 
     // Verify serde round-trip
     for condition in [all, any, custom] {
@@ -460,10 +491,20 @@ fn wait_condition_variants() {
 fn compensation_action_variants() {
     use free_batteries::outcome::CompensationAction;
 
-    let rollback = CompensationAction::Rollback { event_ids: vec![1, 2, 3] };
-    let notify = CompensationAction::Notify { target_id: 42, message: "oops".into() };
-    let release = CompensationAction::Release { resource_ids: vec![100] };
-    let custom = CompensationAction::Custom { action_type: "refund".into(), data: vec![0xFF] };
+    let rollback = CompensationAction::Rollback {
+        event_ids: vec![1, 2, 3],
+    };
+    let notify = CompensationAction::Notify {
+        target_id: 42,
+        message: "oops".into(),
+    };
+    let release = CompensationAction::Release {
+        resource_ids: vec![100],
+    };
+    let custom = CompensationAction::Custom {
+        action_type: "refund".into(),
+        data: vec![0xFF],
+    };
 
     // Verify serde round-trip
     for action in [rollback, notify, release, custom] {

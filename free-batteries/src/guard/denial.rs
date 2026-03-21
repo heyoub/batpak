@@ -20,7 +20,12 @@ pub struct Denial {
 
 impl Denial {
     pub fn new(gate: &'static str, message: impl Into<String>) -> Self {
-        Self { gate, code: String::new(), message: message.into(), context: vec![] }
+        Self {
+            gate,
+            code: String::new(),
+            message: message.into(),
+            context: vec![],
+        }
     }
 
     pub fn with_code(mut self, code: impl Into<String>) -> Self {

@@ -3,7 +3,7 @@
 //! against every backend (NoCache, RedbCache, LmdbCache)."
 //! [SPEC:tests/projection_cache.rs]
 
-use free_batteries::store::projection::{ProjectionCache, NoCache, CacheMeta};
+use free_batteries::store::projection::{CacheMeta, NoCache, ProjectionCache};
 
 fn test_meta() -> CacheMeta {
     CacheMeta {
@@ -20,14 +20,18 @@ fn test_meta() -> CacheMeta {
 fn nocache_get_always_returns_none() {
     let cache = NoCache;
     let result = cache.get(b"any_key").expect("get should not error");
-    assert!(result.is_none(),
-        "NoCache::get should always return None. Investigate: src/store/projection.rs NoCache.");
+    assert!(
+        result.is_none(),
+        "NoCache::get should always return None. Investigate: src/store/projection.rs NoCache."
+    );
 }
 
 #[test]
 fn nocache_put_is_noop() {
     let cache = NoCache;
-    cache.put(b"key", b"value", test_meta()).expect("put should not error");
+    cache
+        .put(b"key", b"value", test_meta())
+        .expect("put should not error");
     // Verify: still returns None after put
     let result = cache.get(b"key").expect("get");
     assert!(result.is_none(), "NoCache should not store anything.");
@@ -71,8 +75,10 @@ mod redb_tests {
         // Put creates the table, then get retrieves
         cache.put(b"key1", b"hello", meta.clone()).expect("put");
         let (value, returned_meta) = cache.get(b"key1").expect("get").expect("should be Some");
-        assert_eq!(value, b"hello",
-            "RedbCache round-trip failed. Investigate: src/store/projection.rs RedbCache.");
+        assert_eq!(
+            value, b"hello",
+            "RedbCache round-trip failed. Investigate: src/store/projection.rs RedbCache."
+        );
         assert_eq!(returned_meta.watermark, 42);
         assert_eq!(returned_meta.cached_at_us, 1_000_000);
 

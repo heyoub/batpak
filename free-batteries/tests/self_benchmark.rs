@@ -10,8 +10,8 @@
 
 use free_batteries::prelude::*;
 use free_batteries::store::{Store, StoreConfig};
-use tempfile::TempDir;
 use std::time::Instant;
+use tempfile::TempDir;
 
 /// A Gate that checks cold-start performance.
 /// This is not a unit test — it's the library testing itself with its own tools.
@@ -20,7 +20,9 @@ struct ColdStartGate {
 }
 
 impl Gate<ColdStartContext> for ColdStartGate {
-    fn name(&self) -> &'static str { "cold_start_performance" }
+    fn name(&self) -> &'static str {
+        "cold_start_performance"
+    }
 
     fn evaluate(&self, ctx: &ColdStartContext) -> Result<(), Denial> {
         if ctx.cold_start_ms <= self.max_ms {
@@ -34,9 +36,10 @@ impl Gate<ColdStartContext> for ColdStartGate {
                      src/store/reader.rs scan_segment.",
                     ctx.cold_start_ms, ctx.event_count, self.max_ms
                 ),
-            ).with_context("event_count", ctx.event_count.to_string())
-             .with_context("cold_start_ms", ctx.cold_start_ms.to_string())
-             .with_context("max_ms", self.max_ms.to_string()))
+            )
+            .with_context("event_count", ctx.event_count.to_string())
+            .with_context("cold_start_ms", ctx.cold_start_ms.to_string())
+            .with_context("max_ms", self.max_ms.to_string()))
         }
     }
 }
@@ -91,16 +94,24 @@ fn cold_start_1k_events_under_threshold() {
     match result {
         Ok(receipt) => {
             let (ms, gate_names) = receipt.into_parts();
-            assert_eq!(gate_names, vec!["cold_start_performance"],
-                "Gate should report its name in the receipt.");
-            eprintln!("SELF-BENCHMARK: cold start for 1K events: {}ms (passed {})",
-                ms, gate_names.join(", "));
+            assert_eq!(
+                gate_names,
+                vec!["cold_start_performance"],
+                "Gate should report its name in the receipt."
+            );
+            eprintln!(
+                "SELF-BENCHMARK: cold start for 1K events: {}ms (passed {})",
+                ms,
+                gate_names.join(", ")
+            );
         }
         Err(denial) => {
-            panic!("SELF-BENCHMARK FAILED: {}\n\
+            panic!(
+                "SELF-BENCHMARK FAILED: {}\n\
                     The library's own Gate system detected a performance regression.\n\
                     Context: {:?}",
-                denial, denial.context);
+                denial, denial.context
+            );
         }
     }
 
@@ -122,9 +133,11 @@ fn cold_start_gate_rejects_slow() {
 
     let proposal = Proposal::new(100u128);
     let result = gates.evaluate(&ctx, proposal);
-    assert!(result.is_err(),
+    assert!(
+        result.is_err(),
         "Gate should reject cold start that exceeds threshold. \
-         If this test passes incorrectly, the self-benchmark dogfood is broken.");
+         If this test passes incorrectly, the self-benchmark dogfood is broken."
+    );
 }
 
 // ---- Multi-dimension performance gates ----
@@ -136,7 +149,9 @@ struct WriteThroughputGate {
 }
 
 impl Gate<PerfContext> for WriteThroughputGate {
-    fn name(&self) -> &'static str { "write_throughput" }
+    fn name(&self) -> &'static str {
+        "write_throughput"
+    }
 
     fn evaluate(&self, ctx: &PerfContext) -> Result<(), Denial> {
         if ctx.events_per_sec >= self.min_events_per_sec {
@@ -150,8 +165,9 @@ impl Gate<PerfContext> for WriteThroughputGate {
                      src/store/segment.rs write_frame, CRC overhead.",
                     ctx.events_per_sec, self.min_events_per_sec
                 ),
-            ).with_context("events_per_sec", format!("{:.0}", ctx.events_per_sec))
-             .with_context("min_required", format!("{:.0}", self.min_events_per_sec)))
+            )
+            .with_context("events_per_sec", format!("{:.0}", ctx.events_per_sec))
+            .with_context("min_required", format!("{:.0}", self.min_events_per_sec)))
         }
     }
 }
@@ -162,7 +178,9 @@ struct QueryLatencyGate {
 }
 
 impl Gate<PerfContext> for QueryLatencyGate {
-    fn name(&self) -> &'static str { "query_latency" }
+    fn name(&self) -> &'static str {
+        "query_latency"
+    }
 
     fn evaluate(&self, ctx: &PerfContext) -> Result<(), Denial> {
         if ctx.query_us <= self.max_us_per_query {
@@ -176,8 +194,9 @@ impl Gate<PerfContext> for QueryLatencyGate {
                      Region::matches_event hot path.",
                     ctx.query_us, self.max_us_per_query
                 ),
-            ).with_context("query_us", format!("{:.1}", ctx.query_us))
-             .with_context("max_us", format!("{:.1}", self.max_us_per_query)))
+            )
+            .with_context("query_us", format!("{:.1}", ctx.query_us))
+            .with_context("max_us", format!("{:.1}", self.max_us_per_query)))
         }
     }
 }
@@ -188,7 +207,9 @@ struct ProjectionGate {
 }
 
 impl Gate<PerfContext> for ProjectionGate {
-    fn name(&self) -> &'static str { "projection_replay" }
+    fn name(&self) -> &'static str {
+        "projection_replay"
+    }
 
     fn evaluate(&self, ctx: &PerfContext) -> Result<(), Denial> {
         if ctx.projection_ms <= self.max_ms {
@@ -202,9 +223,10 @@ impl Gate<PerfContext> for ProjectionGate {
                      src/store/reader.rs read_entry deserialization.",
                     ctx.projection_ms, self.max_ms, ctx.event_count
                 ),
-            ).with_context("projection_ms", format!("{:.1}", ctx.projection_ms))
-             .with_context("max_ms", format!("{:.1}", self.max_ms))
-             .with_context("event_count", ctx.event_count.to_string()))
+            )
+            .with_context("projection_ms", format!("{:.1}", ctx.projection_ms))
+            .with_context("max_ms", format!("{:.1}", self.max_ms))
+            .with_context("event_count", ctx.event_count.to_string()))
         }
     }
 }
@@ -225,9 +247,13 @@ struct BenchCounter {
 
 impl EventSourced<serde_json::Value> for BenchCounter {
     fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
-        if events.is_empty() { return None; }
+        if events.is_empty() {
+            return None;
+        }
         let mut s = Self::default();
-        for e in events { s.apply_event(e); }
+        for e in events {
+            s.apply_event(e);
+        }
         Some(s)
     }
     fn apply_event(&mut self, _event: &Event<serde_json::Value>) {
@@ -254,7 +280,9 @@ fn multi_gate_performance_feedback() {
     // Measure write throughput
     let write_start = Instant::now();
     for i in 0..n {
-        store.append(&coord, kind, &serde_json::json!({"i": i})).expect("append");
+        store
+            .append(&coord, kind, &serde_json::json!({"i": i}))
+            .expect("append");
     }
     let write_elapsed = write_start.elapsed();
     let events_per_sec = n as f64 / write_elapsed.as_secs_f64();
@@ -285,9 +313,13 @@ fn multi_gate_performance_feedback() {
 
     // Build gate set with thresholds (generous for CI, tighten for prod)
     let mut gates = GateSet::new();
-    gates.push(WriteThroughputGate { min_events_per_sec: 1_000.0 });  // 1K/sec minimum
-    gates.push(QueryLatencyGate { max_us_per_query: 50_000.0 });       // 50ms max
-    gates.push(ProjectionGate { max_ms: 5_000.0 });                    // 5s max for 1K events
+    gates.push(WriteThroughputGate {
+        min_events_per_sec: 1_000.0,
+    }); // 1K/sec minimum
+    gates.push(QueryLatencyGate {
+        max_us_per_query: 50_000.0,
+    }); // 50ms max
+    gates.push(ProjectionGate { max_ms: 5_000.0 }); // 5s max for 1K events
 
     // evaluate_all: collect ALL denials, don't stop at first
     let denials = gates.evaluate_all(&ctx);
@@ -324,20 +356,27 @@ fn multi_gate_performance_feedback() {
 fn multi_gate_collects_all_denials() {
     let ctx = PerfContext {
         event_count: 1000,
-        events_per_sec: 1.0,       // way too slow
-        query_us: 999_999.0,       // way too slow
-        projection_ms: 999_999.0,  // way too slow
+        events_per_sec: 1.0,      // way too slow
+        query_us: 999_999.0,      // way too slow
+        projection_ms: 999_999.0, // way too slow
     };
 
     let mut gates = GateSet::new();
-    gates.push(WriteThroughputGate { min_events_per_sec: 1_000.0 });
-    gates.push(QueryLatencyGate { max_us_per_query: 50_000.0 });
+    gates.push(WriteThroughputGate {
+        min_events_per_sec: 1_000.0,
+    });
+    gates.push(QueryLatencyGate {
+        max_us_per_query: 50_000.0,
+    });
     gates.push(ProjectionGate { max_ms: 5_000.0 });
 
     let denials = gates.evaluate_all(&ctx);
-    assert_eq!(denials.len(), 3,
+    assert_eq!(
+        denials.len(),
+        3,
         "evaluate_all should report ALL 3 failures, not fail-fast. Got {}.",
-        denials.len());
+        denials.len()
+    );
 
     // Verify each denial points to the right gate and has actionable context
     assert_eq!(denials[0].gate, "write_throughput");
@@ -345,12 +384,18 @@ fn multi_gate_collects_all_denials() {
     assert_eq!(denials[2].gate, "projection_replay");
 
     // Verify context has the "investigate" pointers
-    assert!(denials[0].message.contains("writer.rs"),
-        "Denial should point to file to investigate");
-    assert!(denials[1].message.contains("index.rs"),
-        "Denial should point to file to investigate");
-    assert!(denials[2].message.contains("reader.rs"),
-        "Denial should point to file to investigate");
+    assert!(
+        denials[0].message.contains("writer.rs"),
+        "Denial should point to file to investigate"
+    );
+    assert!(
+        denials[1].message.contains("index.rs"),
+        "Denial should point to file to investigate"
+    );
+    assert!(
+        denials[2].message.contains("reader.rs"),
+        "Denial should point to file to investigate"
+    );
 }
 
 // ================================================================
@@ -378,86 +423,110 @@ struct CorrectnessContext {
 
 struct FdEvictionGate;
 impl Gate<CorrectnessContext> for FdEvictionGate {
-    fn name(&self) -> &'static str { "fd_eviction_integrity" }
+    fn name(&self) -> &'static str {
+        "fd_eviction_integrity"
+    }
     fn evaluate(&self, ctx: &CorrectnessContext) -> Result<(), Denial> {
         if ctx.fd_eviction_round_trips {
             Ok(())
         } else {
-            Err(Denial::new("fd_eviction_integrity",
+            Err(Denial::new(
+                "fd_eviction_integrity",
                 "Data corrupted after FD cache eviction. \
                  Investigate: src/store/reader.rs get_fd() LRU eviction, \
-                 try_clone() correctness."))
+                 try_clone() correctness.",
+            ))
         }
     }
 }
 
 struct CrossSegmentGate;
 impl Gate<CorrectnessContext> for CrossSegmentGate {
-    fn name(&self) -> &'static str { "cross_segment_reads" }
+    fn name(&self) -> &'static str {
+        "cross_segment_reads"
+    }
     fn evaluate(&self, ctx: &CorrectnessContext) -> Result<(), Denial> {
         if ctx.cross_segment_reads_ok {
             Ok(())
         } else {
-            Err(Denial::new("cross_segment_reads",
+            Err(Denial::new(
+                "cross_segment_reads",
                 "Cannot read events across segment boundaries. \
                  Investigate: src/store/writer.rs STEP 7 rotation, \
-                 src/store/reader.rs read_entry offset calculation."))
+                 src/store/reader.rs read_entry offset calculation.",
+            ))
         }
     }
 }
 
 struct CasGate;
 impl Gate<CorrectnessContext> for CasGate {
-    fn name(&self) -> &'static str { "cas_correctness" }
+    fn name(&self) -> &'static str {
+        "cas_correctness"
+    }
     fn evaluate(&self, ctx: &CorrectnessContext) -> Result<(), Denial> {
         if ctx.cas_rejects_stale {
             Ok(())
         } else {
-            Err(Denial::new("cas_correctness",
+            Err(Denial::new(
+                "cas_correctness",
                 "CAS did NOT reject a stale expected_sequence. \
-                 Investigate: src/store/mod.rs append_with_options CAS check."))
+                 Investigate: src/store/mod.rs append_with_options CAS check.",
+            ))
         }
     }
 }
 
 struct IdempotencyGate;
 impl Gate<CorrectnessContext> for IdempotencyGate {
-    fn name(&self) -> &'static str { "idempotency" }
+    fn name(&self) -> &'static str {
+        "idempotency"
+    }
     fn evaluate(&self, ctx: &CorrectnessContext) -> Result<(), Denial> {
         if ctx.idempotency_deduplicates {
             Ok(())
         } else {
-            Err(Denial::new("idempotency",
+            Err(Denial::new(
+                "idempotency",
                 "Idempotency key did NOT deduplicate. \
-                 Investigate: src/store/mod.rs append_with_options idempotency check."))
+                 Investigate: src/store/mod.rs append_with_options idempotency check.",
+            ))
         }
     }
 }
 
 struct CursorCompletenessGate;
 impl Gate<CorrectnessContext> for CursorCompletenessGate {
-    fn name(&self) -> &'static str { "cursor_completeness" }
+    fn name(&self) -> &'static str {
+        "cursor_completeness"
+    }
     fn evaluate(&self, ctx: &CorrectnessContext) -> Result<(), Denial> {
         if ctx.cursor_sees_all_events {
             Ok(())
         } else {
-            Err(Denial::new("cursor_completeness",
+            Err(Denial::new(
+                "cursor_completeness",
                 "Cursor missed events (possibly global_sequence=0). \
-                 Investigate: src/store/cursor.rs poll() started flag."))
+                 Investigate: src/store/cursor.rs poll() started flag.",
+            ))
         }
     }
 }
 
 struct SnapshotBootGate;
 impl Gate<CorrectnessContext> for SnapshotBootGate {
-    fn name(&self) -> &'static str { "snapshot_bootable" }
+    fn name(&self) -> &'static str {
+        "snapshot_bootable"
+    }
     fn evaluate(&self, ctx: &CorrectnessContext) -> Result<(), Denial> {
         if ctx.snapshot_boots {
             Ok(())
         } else {
-            Err(Denial::new("snapshot_bootable",
+            Err(Denial::new(
+                "snapshot_bootable",
                 "Snapshot did not produce a bootable store. \
-                 Investigate: src/store/mod.rs snapshot(), Store::open cold start."))
+                 Investigate: src/store/mod.rs snapshot(), Store::open cold start.",
+            ))
         }
     }
 }
@@ -471,20 +540,21 @@ fn correctness_gates_self_validate() {
     let dir = TempDir::new().expect("temp dir");
     let config = StoreConfig {
         data_dir: dir.path().to_path_buf(),
-        segment_max_bytes: 512,  // tiny → many segments
+        segment_max_bytes: 512, // tiny → many segments
         sync_every_n_events: 1,
-        fd_budget: 2,            // tiny → forces LRU eviction
+        fd_budget: 2, // tiny → forces LRU eviction
         ..StoreConfig::default()
     };
     let store = Store::open(config).expect("open");
-    let coord = Coordinate::new("correctness:entity", "correctness:scope")
-        .expect("valid coord");
+    let coord = Coordinate::new("correctness:entity", "correctness:scope").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
     let n = 50u64;
 
     // Populate with enough events to trigger segment rotation + fd eviction
     for i in 0..n {
-        store.append(&coord, kind, &serde_json::json!({"i": i})).expect("append");
+        store
+            .append(&coord, kind, &serde_json::json!({"i": i}))
+            .expect("append");
     }
     store.sync().expect("sync");
 
@@ -493,7 +563,9 @@ fn correctness_gates_self_validate() {
     let first = store.get(entries[0].event_id);
     let last = store.get(entries[entries.len() - 1].event_id);
     let first_again = store.get(entries[0].event_id); // re-read after eviction
-    let fd_eviction_round_trips = first.is_ok() && last.is_ok() && first_again.is_ok()
+    let fd_eviction_round_trips = first.is_ok()
+        && last.is_ok()
+        && first_again.is_ok()
         && first.as_ref().expect("ok").event.event_id()
             == first_again.as_ref().expect("ok").event.event_id();
 
@@ -501,14 +573,23 @@ fn correctness_gates_self_validate() {
     let segment_count = std::fs::read_dir(dir.path())
         .expect("read dir")
         .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().map(|ext| ext == "fbat").unwrap_or(false))
+        .filter(|e| {
+            e.path()
+                .extension()
+                .map(|ext| ext == "fbat")
+                .unwrap_or(false)
+        })
         .count();
     let cross_segment_reads_ok = segment_count > 1 && entries.len() == n as usize;
 
     // --- Probe 3: CAS rejection ---
-    store.append(&coord, kind, &serde_json::json!({"extra": true})).expect("one more");
+    store
+        .append(&coord, kind, &serde_json::json!({"extra": true}))
+        .expect("one more");
     let cas_result = store.append_with_options(
-        &coord, kind, &serde_json::json!({"cas": "stale"}),
+        &coord,
+        kind,
+        &serde_json::json!({"cas": "stale"}),
         free_batteries::store::AppendOptions {
             expected_sequence: Some(0), // stale
             ..Default::default()
@@ -522,21 +603,27 @@ fn correctness_gates_self_validate() {
         idempotency_key: Some(idem_key),
         ..Default::default()
     };
-    let r1 = store.append_with_options(&coord, kind, &serde_json::json!({"x": 1}), idem_opts)
+    let r1 = store
+        .append_with_options(&coord, kind, &serde_json::json!({"x": 1}), idem_opts)
         .expect("first idem");
-    let r2 = store.append_with_options(&coord, kind, &serde_json::json!({"x": 2}), idem_opts)
+    let r2 = store
+        .append_with_options(&coord, kind, &serde_json::json!({"x": 2}), idem_opts)
         .expect("second idem");
     let idempotency_deduplicates = r1.event_id == r2.event_id;
 
     // --- Probe 5: Cursor completeness ---
     let coord2 = Coordinate::new("cursor:test", "correctness:scope").expect("valid");
     for i in 0..5 {
-        store.append(&coord2, kind, &serde_json::json!({"c": i})).expect("append");
+        store
+            .append(&coord2, kind, &serde_json::json!({"c": i}))
+            .expect("append");
     }
     let region = Region::entity("cursor:test");
     let mut cursor = store.cursor(&region);
     let mut cursor_count = 0;
-    while cursor.poll().is_some() { cursor_count += 1; }
+    while cursor.poll().is_some() {
+        cursor_count += 1;
+    }
     let cursor_sees_all_events = cursor_count == 5;
 
     // --- Probe 6: Snapshot bootability ---
@@ -548,7 +635,9 @@ fn correctness_gates_self_validate() {
     };
     let snap_boot = Store::open(snap_config);
     let snapshot_boots = snap_boot.is_ok();
-    if let Ok(s) = snap_boot { let _ = s.close(); }
+    if let Ok(s) = snap_boot {
+        let _ = s.close();
+    }
 
     // --- Feed through our own Gate system ---
     let ctx = CorrectnessContext {
@@ -618,14 +707,20 @@ fn correctness_gates_fire_on_violations() {
     gates.push(SnapshotBootGate);
 
     let denials = gates.evaluate_all(&broken_ctx);
-    assert_eq!(denials.len(), 6,
+    assert_eq!(
+        denials.len(),
+        6,
         "All 6 correctness gates should fire when all properties are violated. Got {}.",
-        denials.len());
+        denials.len()
+    );
 
     // Every denial should contain an investigation pointer
     for d in &denials {
-        assert!(d.message.contains("Investigate:"),
+        assert!(
+            d.message.contains("Investigate:"),
             "Denial [{gate}] should point to source file. Message: {msg}",
-            gate = d.gate, msg = d.message);
+            gate = d.gate,
+            msg = d.message
+        );
     }
 }

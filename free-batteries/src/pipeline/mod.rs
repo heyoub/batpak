@@ -62,10 +62,7 @@ impl<Ctx> Pipeline<Ctx> {
 
     /// bypass: skip gates with an auditable reason.
     /// [FILE:src/pipeline/bypass.rs]
-    pub fn bypass<T>(
-        proposal: Proposal<T>,
-        reason: &'static dyn BypassReason,
-    ) -> BypassReceipt<T> {
+    pub fn bypass<T>(proposal: Proposal<T>, reason: &'static dyn BypassReason) -> BypassReceipt<T> {
         BypassReceipt {
             payload: proposal.0,
             reason: reason.name(),

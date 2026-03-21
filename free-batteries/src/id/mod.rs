@@ -34,15 +34,21 @@ macro_rules! define_entity_id {
         impl $crate::id::EntityIdType for $name {
             const ENTITY_NAME: &'static str = $entity;
 
-            fn new(id: u128) -> Self { Self(id) }
+            fn new(id: u128) -> Self {
+                Self(id)
+            }
 
-            fn as_u128(&self) -> u128 { self.0 }
+            fn as_u128(&self) -> u128 {
+                self.0
+            }
 
             fn now_v7() -> Self {
                 Self($crate::id::generate_v7_id())
             }
 
-            fn nil() -> Self { Self(0) }
+            fn nil() -> Self {
+                Self(0)
+            }
         }
 
         impl ::std::fmt::Display for $name {

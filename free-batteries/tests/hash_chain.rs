@@ -39,9 +39,11 @@ mod no_blake3_tests {
         // This test verifies the fallback path compiles AND produces zero hashes.
         // Run with: cargo test --no-default-features
         let chain = HashChain::default();
-        assert_eq!(chain.event_hash, [0u8; 32],
+        assert_eq!(
+            chain.event_hash, [0u8; 32],
             "Without blake3 feature, hash chains should use zero hashes. \
-             Investigate: src/store/writer.rs STEP 5 #[cfg(not(feature = \"blake3\"))].");
+             Investigate: src/store/writer.rs STEP 5 #[cfg(not(feature = \"blake3\"))]."
+        );
         assert_eq!(chain.prev_hash, [0u8; 32]);
     }
 }
@@ -58,21 +60,30 @@ mod blake3_tests {
         let data = b"hello world";
         let h1 = compute_hash(data);
         let h2 = compute_hash(data);
-        assert_eq!(h1, h2, "HASH DETERMINISM VIOLATED: same input must produce same hash.");
+        assert_eq!(
+            h1, h2,
+            "HASH DETERMINISM VIOLATED: same input must produce same hash."
+        );
     }
 
     #[test]
     fn compute_hash_different_inputs() {
         let h1 = compute_hash(b"hello");
         let h2 = compute_hash(b"world");
-        assert_ne!(h1, h2, "HASH COLLISION: different inputs must produce different hashes \
-            (with overwhelming probability).");
+        assert_ne!(
+            h1, h2,
+            "HASH COLLISION: different inputs must produce different hashes \
+            (with overwhelming probability)."
+        );
     }
 
     #[test]
     fn compute_hash_empty_input() {
         let h = compute_hash(b"");
-        assert_ne!(h, [0u8; 32], "Empty input should still produce a non-zero hash.");
+        assert_ne!(
+            h, [0u8; 32],
+            "Empty input should still produce a non-zero hash."
+        );
     }
 
     proptest! {

@@ -1,7 +1,7 @@
 //! Benchmark: index rebuild latency for 1K/10K/100K/1M events.
 //! [SPEC:benches/cold_start.rs]
 
-use criterion::{criterion_group, criterion_main, Criterion, BenchmarkId};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use free_batteries::prelude::*;
 use free_batteries::store::{Store, StoreConfig};
 use tempfile::TempDir;
@@ -30,21 +30,17 @@ fn bench_cold_start(c: &mut Criterion) {
         let dir = TempDir::new().expect("create temp dir");
         populate_store(dir.path(), count);
 
-        group.bench_with_input(
-            BenchmarkId::from_parameter(count),
-            &count,
-            |b, &_count| {
-                b.iter(|| {
-                    // Cold start: open the store (triggers index rebuild from segments)
-                    let config = StoreConfig {
-                        data_dir: dir.path().to_path_buf(),
-                        ..StoreConfig::default()
-                    };
-                    let store = Store::open(config).expect("cold start open");
-                    store.close().expect("close");
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::from_parameter(count), &count, |b, &_count| {
+            b.iter(|| {
+                // Cold start: open the store (triggers index rebuild from segments)
+                let config = StoreConfig {
+                    data_dir: dir.path().to_path_buf(),
+                    ..StoreConfig::default()
+                };
+                let store = Store::open(config).expect("cold start open");
+                store.close().expect("close");
+            });
+        });
     }
 
     group.finish();

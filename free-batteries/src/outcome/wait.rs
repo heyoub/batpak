@@ -8,14 +8,19 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum WaitCondition {
-    Timeout { resume_at_ms: u64 },
+    Timeout {
+        resume_at_ms: u64,
+    },
     Event {
         #[serde(with = "crate::wire::u128_bytes")]
         event_id: u128,
     },
     All(Vec<WaitCondition>),
     Any(Vec<WaitCondition>),
-    Custom { tag: u16, data: Vec<u8> },
+    Custom {
+        tag: u16,
+        data: Vec<u8>,
+    },
 }
 
 /// CompensationAction: what to do when an error needs compensation.
@@ -37,5 +42,8 @@ pub enum CompensationAction {
         #[serde(with = "crate::wire::vec_u128_bytes")]
         resource_ids: Vec<u128>,
     },
-    Custom { action_type: String, data: Vec<u8> },
+    Custom {
+        action_type: String,
+        data: Vec<u8>,
+    },
 }

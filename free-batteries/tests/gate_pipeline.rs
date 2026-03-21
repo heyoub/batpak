@@ -8,15 +8,21 @@ use free_batteries::prelude::*;
 
 struct AlwaysAllow;
 impl Gate<()> for AlwaysAllow {
-    fn name(&self) -> &'static str { "always_allow" }
-    fn evaluate(&self, _ctx: &()) -> Result<(), Denial> { Ok(()) }
+    fn name(&self) -> &'static str {
+        "always_allow"
+    }
+    fn evaluate(&self, _ctx: &()) -> Result<(), Denial> {
+        Ok(())
+    }
 }
 
 struct AlwaysDeny {
     reason: &'static str,
 }
 impl Gate<()> for AlwaysDeny {
-    fn name(&self) -> &'static str { "always_deny" }
+    fn name(&self) -> &'static str {
+        "always_deny"
+    }
     fn evaluate(&self, _ctx: &()) -> Result<(), Denial> {
         Err(Denial::new("always_deny", self.reason))
     }
@@ -24,7 +30,9 @@ impl Gate<()> for AlwaysDeny {
 
 struct ContextGate;
 impl Gate<i32> for ContextGate {
-    fn name(&self) -> &'static str { "context_gate" }
+    fn name(&self) -> &'static str {
+        "context_gate"
+    }
     fn evaluate(&self, ctx: &i32) -> Result<(), Denial> {
         if *ctx > 0 {
             Ok(())
@@ -82,9 +90,11 @@ fn fail_fast_stops_at_first_denial() {
         Err(d) => d,
         Ok(_) => panic!("Expected Err(Denial)"),
     };
-    assert_eq!(denial.message, "first",
+    assert_eq!(
+        denial.message, "first",
         "FAIL-FAST VIOLATED: first denial should stop evaluation. \
-         Investigate: src/guard/mod.rs GateSet::evaluate.");
+         Investigate: src/guard/mod.rs GateSet::evaluate."
+    );
 }
 
 // --- evaluate_all collects all denials ---
@@ -97,9 +107,12 @@ fn evaluate_all_collects_all_denials() {
     gates.push(AlwaysDeny { reason: "third" });
 
     let denials = gates.evaluate_all(&());
-    assert_eq!(denials.len(), 2,
+    assert_eq!(
+        denials.len(),
+        2,
         "evaluate_all should collect all denials, not fail-fast. \
-         Investigate: src/guard/mod.rs GateSet::evaluate_all.");
+         Investigate: src/guard/mod.rs GateSet::evaluate_all."
+    );
 }
 
 // --- Registration order matters ---
@@ -111,8 +124,11 @@ fn gate_registration_order_preserved() {
     gates.push(AlwaysDeny { reason: "deny" });
 
     let names = gates.names();
-    assert_eq!(names, vec!["always_allow", "always_deny"],
-        "Gate registration order must be preserved.");
+    assert_eq!(
+        names,
+        vec!["always_allow", "always_deny"],
+        "Gate registration order must be preserved."
+    );
 }
 
 // --- Receipt TOCTOU guarantee ---
@@ -125,8 +141,11 @@ fn receipt_wraps_payload_immutably() {
     let proposal = Proposal::new(42);
     let receipt = gates.evaluate(&(), proposal).expect("should pass");
 
-    assert_eq!(*receipt.payload(), 42,
-        "Receipt should wrap the original proposal payload.");
+    assert_eq!(
+        *receipt.payload(),
+        42,
+        "Receipt should wrap the original proposal payload."
+    );
     assert_eq!(receipt.gates_passed(), &["always_allow"]);
 }
 
@@ -155,14 +174,16 @@ fn pipeline_commit_with_receipt() {
     let proposal = Proposal::new("data".to_string());
     let receipt = pipeline.evaluate(&(), proposal).expect("should pass");
 
-    let committed = pipeline.commit(receipt, |payload| {
-        Ok::<_, String>(Committed {
-            payload,
-            event_id: 12345,
-            sequence: 0,
-            hash: [0u8; 32],
+    let committed = pipeline
+        .commit(receipt, |payload| {
+            Ok::<_, String>(Committed {
+                payload,
+                event_id: 12345,
+                sequence: 0,
+                hash: [0u8; 32],
+            })
         })
-    }).expect("commit should succeed");
+        .expect("commit should succeed");
 
     assert_eq!(committed.payload, "data");
     assert_eq!(committed.event_id, 12345);

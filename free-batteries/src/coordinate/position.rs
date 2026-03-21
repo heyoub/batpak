@@ -15,21 +15,37 @@ pub struct DagPosition {
 
 impl DagPosition {
     pub const fn new(depth: u32, lane: u32, sequence: u32) -> Self {
-        Self { depth, lane, sequence }
+        Self {
+            depth,
+            lane,
+            sequence,
+        }
     }
 
     pub const fn root() -> Self {
-        Self { depth: 0, lane: 0, sequence: 0 }
+        Self {
+            depth: 0,
+            lane: 0,
+            sequence: 0,
+        }
     }
 
     /// v1: always depth=0, lane=0, sequence=N
     pub const fn child(sequence: u32) -> Self {
-        Self { depth: 0, lane: 0, sequence }
+        Self {
+            depth: 0,
+            lane: 0,
+            sequence,
+        }
     }
 
     /// Future: fork creates a new lane at depth+1
     pub const fn fork(parent_depth: u32, new_lane: u32) -> Self {
-        Self { depth: parent_depth + 1, lane: new_lane, sequence: 0 }
+        Self {
+            depth: parent_depth + 1,
+            lane: new_lane,
+            sequence: 0,
+        }
     }
 
     pub const fn is_root(&self) -> bool {
@@ -39,9 +55,7 @@ impl DagPosition {
     /// Causal ordering: ancestor if same lane and lower depth+sequence.
     /// v1: same lane always (lane=0), so just compare sequence.
     pub const fn is_ancestor_of(&self, other: &DagPosition) -> bool {
-        self.lane == other.lane
-            && self.depth <= other.depth
-            && self.sequence < other.sequence
+        self.lane == other.lane && self.depth <= other.depth && self.sequence < other.sequence
     }
 }
 

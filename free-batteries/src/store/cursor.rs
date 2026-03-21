@@ -1,5 +1,5 @@
 use crate::coordinate::Region;
-use crate::store::index::{StoreIndex, IndexEntry};
+use crate::store::index::{IndexEntry, StoreIndex};
 use std::sync::Arc;
 
 /// Cursor: pull-based event consumption with guaranteed delivery.
@@ -7,14 +7,19 @@ use std::sync::Arc;
 /// [SPEC:src/store/cursor.rs]
 pub struct Cursor {
     region: Region,
-    position: u64,      // tracks global_sequence — next poll starts after this
-    started: bool,      // false until first event consumed (global_sequence 0 is valid)
+    position: u64, // tracks global_sequence — next poll starts after this
+    started: bool, // false until first event consumed (global_sequence 0 is valid)
     index: Arc<StoreIndex>,
 }
 
 impl Cursor {
     pub(crate) fn new(region: Region, index: Arc<StoreIndex>) -> Self {
-        Self { region, position: 0, started: false, index }
+        Self {
+            region,
+            position: 0,
+            started: false,
+            index,
+        }
     }
 
     /// Poll for the next matching event at or after our current position.
@@ -39,7 +44,9 @@ impl Cursor {
                 self.position = entry.global_sequence;
                 self.started = true;
                 batch.push(entry);
-                if batch.len() >= max { break; }
+                if batch.len() >= max {
+                    break;
+                }
             }
         }
         batch

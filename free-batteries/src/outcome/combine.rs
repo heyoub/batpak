@@ -21,18 +21,24 @@ pub fn zip<A: Clone, B: Clone>(a: Outcome<A>, b: Outcome<B>) -> Outcome<(A, B)> 
         }
 
         // Either Retry → first Retry wins
-        (Outcome::Retry {
-            after_ms,
-            attempt,
-            max_attempts,
-            reason,
-        }, _)
-        | (_, Outcome::Retry {
-            after_ms,
-            attempt,
-            max_attempts,
-            reason,
-        }) => Outcome::Retry {
+        (
+            Outcome::Retry {
+                after_ms,
+                attempt,
+                max_attempts,
+                reason,
+            },
+            _,
+        )
+        | (
+            _,
+            Outcome::Retry {
+                after_ms,
+                attempt,
+                max_attempts,
+                reason,
+            },
+        ) => Outcome::Retry {
             after_ms,
             attempt,
             max_attempts,
@@ -40,14 +46,20 @@ pub fn zip<A: Clone, B: Clone>(a: Outcome<A>, b: Outcome<B>) -> Outcome<(A, B)> 
         },
 
         // Either Pending → first Pending wins
-        (Outcome::Pending {
-            condition,
-            resume_token,
-        }, _)
-        | (_, Outcome::Pending {
-            condition,
-            resume_token,
-        }) => Outcome::Pending {
+        (
+            Outcome::Pending {
+                condition,
+                resume_token,
+            },
+            _,
+        )
+        | (
+            _,
+            Outcome::Pending {
+                condition,
+                resume_token,
+            },
+        ) => Outcome::Pending {
             condition,
             resume_token,
         },

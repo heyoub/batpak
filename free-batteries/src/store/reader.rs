@@ -62,7 +62,8 @@ impl Reader {
             use std::os::unix::fs::FileExt;
             let mut total_read = 0;
             while total_read < buf.len() {
-                let n = file.read_at(&mut buf[total_read..], pos.offset + total_read as u64)
+                let n = file
+                    .read_at(&mut buf[total_read..], pos.offset + total_read as u64)
                     .map_err(StoreError::Io)?;
                 if n == 0 {
                     return Err(StoreError::CorruptSegment {
@@ -84,11 +85,11 @@ impl Reader {
         }
 
         let (msgpack, _) = segment::frame_decode(&buf)?;
-        let payload: FramePayload<serde_json::Value> = rmp_serde::from_slice(msgpack)
-            .map_err(|e| StoreError::Serialization(e.to_string()))?;
+        let payload: FramePayload<serde_json::Value> =
+            rmp_serde::from_slice(msgpack).map_err(|e| StoreError::Serialization(e.to_string()))?;
 
-        let coord = Coordinate::new(&payload.entity, &payload.scope)
-            .map_err(StoreError::Coordinate)?;
+        let coord =
+            Coordinate::new(&payload.entity, &payload.scope).map_err(StoreError::Coordinate)?;
         Ok(StoredEvent {
             coordinate: coord,
             event: payload.event,
@@ -99,8 +100,7 @@ impl Reader {
     pub(crate) fn scan_segment(&self, path: &Path) -> Result<Vec<ScannedEntry>, StoreError> {
         let mut file = File::open(path).map_err(StoreError::Io)?;
         let mut all_bytes = Vec::new();
-        file.read_to_end(&mut all_bytes)
-            .map_err(StoreError::Io)?;
+        file.read_to_end(&mut all_bytes).map_err(StoreError::Io)?;
 
         // Verify magic
         if all_bytes.len() < 4 || &all_bytes[..4] != SEGMENT_MAGIC {
@@ -183,9 +183,7 @@ impl Reader {
         if let Some(pos) = cache.order.iter().position(|&id| id == segment_id) {
             cache.order.remove(pos);
             cache.order.push(segment_id);
-            return cache.fds[&segment_id]
-                .try_clone()
-                .map_err(StoreError::Io);
+            return cache.fds[&segment_id].try_clone().map_err(StoreError::Io);
         }
 
         let path = self.data_dir.join(segment::segment_filename(segment_id));
@@ -198,7 +196,9 @@ impl Reader {
             }
         }
 
-        cache.fds.insert(segment_id, file.try_clone().map_err(StoreError::Io)?);
+        cache
+            .fds
+            .insert(segment_id, file.try_clone().map_err(StoreError::Io)?);
         cache.order.push(segment_id);
         Ok(file)
     }

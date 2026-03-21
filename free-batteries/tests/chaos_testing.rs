@@ -1,4 +1,9 @@
-#![allow(clippy::panic, clippy::print_stderr, clippy::unwrap_used, clippy::inconsistent_digit_grouping)]
+#![allow(
+    clippy::panic,
+    clippy::print_stderr,
+    clippy::unwrap_used,
+    clippy::inconsistent_digit_grouping
+)]
 //! Chaos testing: fault injection, data corruption, concurrent stress.
 //! The library tests itself under adversarial conditions and feeds
 //! results through its own Gate system for actionable diagnostics.
@@ -8,8 +13,8 @@
 //! [SPEC:tests/chaos_testing.rs]
 
 use free_batteries::prelude::*;
-use free_batteries::store::{Store, StoreConfig, AppendOptions};
 use free_batteries::store::segment::{frame_decode, frame_encode};
+use free_batteries::store::{AppendOptions, Store, StoreConfig};
 use rand::prelude::*;
 use rand::Rng;
 use std::sync::Arc;
@@ -43,7 +48,9 @@ fn chaos_corrupted_segment_bytes() {
 
     // Write some events
     for i in 0..20 {
-        store.append(&coord, kind, &serde_json::json!({"i": i})).expect("append");
+        store
+            .append(&coord, kind, &serde_json::json!({"i": i}))
+            .expect("append");
     }
     store.sync().expect("sync");
     store.close().expect("close");
@@ -53,7 +60,12 @@ fn chaos_corrupted_segment_bytes() {
     let segments: Vec<_> = std::fs::read_dir(dir.path())
         .expect("read dir")
         .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().map(|ext| ext == "fbat").unwrap_or(false))
+        .filter(|e| {
+            e.path()
+                .extension()
+                .map(|ext| ext == "fbat")
+                .unwrap_or(false)
+        })
         .collect();
 
     assert!(!segments.is_empty(), "Should have segment files");
@@ -89,9 +101,11 @@ fn chaos_corrupted_segment_bytes() {
             // Verify it's an expected error variant
             let msg = format!("{e}");
             assert!(
-                msg.contains("CRC") || msg.contains("corrupt") ||
-                msg.contains("serialization") || msg.contains("IO") ||
-                msg.contains("coordinate"),
+                msg.contains("CRC")
+                    || msg.contains("corrupt")
+                    || msg.contains("serialization")
+                    || msg.contains("IO")
+                    || msg.contains("coordinate"),
                 "CHAOS: unexpected error type: {msg}. \
                  Expected CRC/corrupt/serialization/IO error. \
                  Investigate: src/store/mod.rs Store::open error handling."
@@ -118,27 +132,27 @@ fn chaos_concurrent_writer_stress() {
     let iterations = chaos_iterations();
     let n_threads = 4;
 
-    let handles: Vec<_> = (0..n_threads).map(|t| {
-        let store = Arc::clone(&store);
-        std::thread::spawn(move || {
-            let coord = Coordinate::new(
-                &format!("chaos:thread{t}"),
-                "chaos:stress",
-            ).expect("valid");
-            let kind = EventKind::custom(0xF, 1);
-            let mut successes = 0u64;
-            let mut errors = 0u64;
+    let handles: Vec<_> = (0..n_threads)
+        .map(|t| {
+            let store = Arc::clone(&store);
+            std::thread::spawn(move || {
+                let coord =
+                    Coordinate::new(&format!("chaos:thread{t}"), "chaos:stress").expect("valid");
+                let kind = EventKind::custom(0xF, 1);
+                let mut successes = 0u64;
+                let mut errors = 0u64;
 
-            for i in 0..(iterations / n_threads) {
-                let payload = serde_json::json!({"t": t, "i": i});
-                match store.append(&coord, kind, &payload) {
-                    Ok(_) => successes += 1,
-                    Err(_) => errors += 1,
+                for i in 0..(iterations / n_threads) {
+                    let payload = serde_json::json!({"t": t, "i": i});
+                    match store.append(&coord, kind, &payload) {
+                        Ok(_) => successes += 1,
+                        Err(_) => errors += 1,
+                    }
                 }
-            }
-            (successes, errors)
+                (successes, errors)
+            })
         })
-    }).collect();
+        .collect();
 
     let mut total_ok = 0u64;
     let mut total_err = 0u64;
@@ -148,18 +162,28 @@ fn chaos_concurrent_writer_stress() {
         total_err += err;
     }
 
-    eprintln!("  CHAOS CONCURRENT STRESS: {total_ok} ok, {total_err} errors across {n_threads} threads");
-    assert!(total_ok > 0, "CHAOS: no successful writes under concurrent stress");
-    assert_eq!(total_err, 0, "CHAOS: {total_err} errors under concurrent stress. \
-        Investigate: src/store/writer.rs lock ordering.");
+    eprintln!(
+        "  CHAOS CONCURRENT STRESS: {total_ok} ok, {total_err} errors across {n_threads} threads"
+    );
+    assert!(
+        total_ok > 0,
+        "CHAOS: no successful writes under concurrent stress"
+    );
+    assert_eq!(
+        total_err, 0,
+        "CHAOS: {total_err} errors under concurrent stress. \
+        Investigate: src/store/writer.rs lock ordering."
+    );
 
     // Verify data integrity: each thread's events should be readable
     let store_ref = &*store;
     for t in 0..n_threads {
         let entries = store_ref.stream(&format!("chaos:thread{t}"));
-        assert!(!entries.is_empty(),
+        assert!(
+            !entries.is_empty(),
             "CHAOS: thread {t} wrote events but none found in index. \
-             Investigate: src/store/index.rs insert.");
+             Investigate: src/store/index.rs insert."
+        );
     }
 
     match Arc::try_unwrap(store) {
@@ -186,24 +210,24 @@ fn chaos_cas_contention() {
     let kind = EventKind::custom(0xF, 1);
 
     // First, seed with one event so sequence > 0
-    store.append(&coord, kind, &serde_json::json!({"seed": true})).expect("seed");
+    store
+        .append(&coord, kind, &serde_json::json!({"seed": true}))
+        .expect("seed");
 
     let n_threads = 8;
-    let handles: Vec<_> = (0..n_threads).map(|t| {
-        let store = Arc::clone(&store);
-        let coord = coord.clone();
-        std::thread::spawn(move || {
-            let opts = AppendOptions {
-                expected_sequence: Some(0), // all compete: expect latest clock=0 after seed
-                ..Default::default()
-            };
-            store.append_with_options(
-                &coord, kind,
-                &serde_json::json!({"thread": t}),
-                opts,
-            )
+    let handles: Vec<_> = (0..n_threads)
+        .map(|t| {
+            let store = Arc::clone(&store);
+            let coord = coord.clone();
+            std::thread::spawn(move || {
+                let opts = AppendOptions {
+                    expected_sequence: Some(0), // all compete: expect latest clock=0 after seed
+                    ..Default::default()
+                };
+                store.append_with_options(&coord, kind, &serde_json::json!({"thread": t}), opts)
+            })
         })
-    }).collect();
+        .collect();
 
     let mut winners = 0;
     let mut losers = 0;
@@ -215,12 +239,17 @@ fn chaos_cas_contention() {
     }
 
     eprintln!("  CHAOS CAS CONTENTION: {winners} winners, {losers} losers");
-    assert_eq!(winners, 1,
+    assert_eq!(
+        winners, 1,
         "CHAOS: CAS should allow exactly 1 winner. Got {winners}. \
-         Investigate: src/store/writer.rs CAS check under entity lock.");
+         Investigate: src/store/writer.rs CAS check under entity lock."
+    );
     assert_eq!(losers, n_threads - 1);
 
-    match Arc::try_unwrap(store) { Ok(s) => s.close().expect("close"), Err(_) => panic!("Arc still has multiple owners"), }
+    match Arc::try_unwrap(store) {
+        Ok(s) => s.close().expect("close"),
+        Err(_) => panic!("Arc still has multiple owners"),
+    }
 }
 
 // ============================================================
@@ -240,21 +269,19 @@ fn chaos_idempotency_concurrent() {
     let idem_key: u128 = 0xDEAD_BEEF_CAFE_BABE_1111_2222_3333_4444;
 
     let n_threads = 8;
-    let handles: Vec<_> = (0..n_threads).map(|t| {
-        let store = Arc::clone(&store);
-        let coord = coord.clone();
-        std::thread::spawn(move || {
-            let opts = AppendOptions {
-                idempotency_key: Some(idem_key),
-                ..Default::default()
-            };
-            store.append_with_options(
-                &coord, kind,
-                &serde_json::json!({"thread": t}),
-                opts,
-            )
+    let handles: Vec<_> = (0..n_threads)
+        .map(|t| {
+            let store = Arc::clone(&store);
+            let coord = coord.clone();
+            std::thread::spawn(move || {
+                let opts = AppendOptions {
+                    idempotency_key: Some(idem_key),
+                    ..Default::default()
+                };
+                store.append_with_options(&coord, kind, &serde_json::json!({"thread": t}), opts)
+            })
         })
-    }).collect();
+        .collect();
 
     let mut event_ids = Vec::new();
     for h in handles {
@@ -267,20 +294,28 @@ fn chaos_idempotency_concurrent() {
     // All should return the same event_id
     let first = event_ids[0];
     for (i, id) in event_ids.iter().enumerate() {
-        assert_eq!(*id, first,
+        assert_eq!(
+            *id, first,
             "CHAOS: idempotency returned different event_id at index {i}. \
              Expected {first:032x}, got {id:032x}. \
-             Investigate: src/store/writer.rs idempotency check.");
+             Investigate: src/store/writer.rs idempotency check."
+        );
     }
 
     // Only one event should exist in the store
     let entries = store.stream("chaos:idem");
-    assert_eq!(entries.len(), 1,
+    assert_eq!(
+        entries.len(),
+        1,
         "CHAOS: idempotency should produce exactly 1 event, got {}. \
          Investigate: src/store/writer.rs idempotency dedup.",
-        entries.len());
+        entries.len()
+    );
 
-    match Arc::try_unwrap(store) { Ok(s) => s.close().expect("close"), Err(_) => panic!("Arc still has multiple owners"), }
+    match Arc::try_unwrap(store) {
+        Ok(s) => s.close().expect("close"),
+        Err(_) => panic!("Arc still has multiple owners"),
+    }
 }
 
 // ============================================================
@@ -304,7 +339,9 @@ fn chaos_rapid_segment_rotation() {
     let iterations = chaos_iterations().min(200);
 
     for i in 0..iterations {
-        store.append(&coord, kind, &serde_json::json!({"i": i})).expect("append");
+        store
+            .append(&coord, kind, &serde_json::json!({"i": i}))
+            .expect("append");
     }
     store.sync().expect("sync");
 
@@ -312,23 +349,35 @@ fn chaos_rapid_segment_rotation() {
     let segment_count = std::fs::read_dir(dir.path())
         .expect("read dir")
         .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().map(|ext| ext == "fbat").unwrap_or(false))
+        .filter(|e| {
+            e.path()
+                .extension()
+                .map(|ext| ext == "fbat")
+                .unwrap_or(false)
+        })
         .count();
 
     eprintln!("  CHAOS ROTATION: {iterations} events across {segment_count} segments");
-    assert!(segment_count > 1,
-        "CHAOS: expected multiple segments with 256-byte limit, got {segment_count}");
+    assert!(
+        segment_count > 1,
+        "CHAOS: expected multiple segments with 256-byte limit, got {segment_count}"
+    );
 
     // Verify ALL events are still readable after all the rotation
     let entries = store.stream("chaos:rotation");
-    assert_eq!(entries.len(), iterations,
+    assert_eq!(
+        entries.len(),
+        iterations,
         "CHAOS: lost events during rapid rotation. Expected {iterations}, got {}. \
          Investigate: src/store/writer.rs STEP 7 rotation + src/store/reader.rs.",
-        entries.len());
+        entries.len()
+    );
 
     // Spot-check first and last events
     let first = store.get(entries[0].event_id).expect("first event");
-    let last = store.get(entries[entries.len() - 1].event_id).expect("last event");
+    let last = store
+        .get(entries[entries.len() - 1].event_id)
+        .expect("last event");
     assert_eq!(first.event.event_id(), entries[0].event_id);
     assert_eq!(last.event.event_id(), entries[entries.len() - 1].event_id);
 
@@ -357,12 +406,16 @@ fn chaos_frame_decode_random_bombardment() {
         // Key: no panics
     }
 
-    eprintln!("  CHAOS FRAME DECODE: {ok_count} accepted, {err_count} rejected out of {iterations}");
+    eprintln!(
+        "  CHAOS FRAME DECODE: {ok_count} accepted, {err_count} rejected out of {iterations}"
+    );
     // With random data, almost nothing should decode as valid
     // (valid CRC match on random data is ~1 in 4 billion)
-    assert!(err_count > ok_count,
+    assert!(
+        err_count > ok_count,
         "CHAOS: more random frames accepted than rejected. \
-         Investigate: src/store/segment.rs frame_decode CRC check.");
+         Investigate: src/store/segment.rs frame_decode CRC check."
+    );
 }
 
 // ============================================================
@@ -392,7 +445,8 @@ fn chaos_subscription_write_storm() {
     let store2 = Arc::clone(&store);
     let writer = std::thread::spawn(move || {
         for i in 0..iterations {
-            store2.append(&coord, kind, &serde_json::json!({"i": i}))
+            store2
+                .append(&coord, kind, &serde_json::json!({"i": i}))
                 .expect("append");
         }
     });
@@ -412,11 +466,16 @@ fn chaos_subscription_write_storm() {
 
     eprintln!("  CHAOS SUBSCRIPTION: received {received}/{iterations} events (lossy channel)");
     // With a small buffer some loss is expected, but we should get *something*
-    assert!(received > 0,
+    assert!(
+        received > 0,
         "CHAOS: subscriber received 0 events. \
-         Investigate: src/store/writer.rs broadcast, src/store/subscription.rs.");
+         Investigate: src/store/writer.rs broadcast, src/store/subscription.rs."
+    );
 
-    match Arc::try_unwrap(store) { Ok(s) => s.close().expect("close"), Err(_) => panic!("Arc still has multiple owners"), }
+    match Arc::try_unwrap(store) {
+        Ok(s) => s.close().expect("close"),
+        Err(_) => panic!("Arc still has multiple owners"),
+    }
 }
 
 // ============================================================
@@ -438,7 +497,9 @@ fn chaos_cursor_completeness_concurrent() {
 
     // Write events
     for i in 0..n {
-        store.append(&coord, kind, &serde_json::json!({"i": i})).expect("append");
+        store
+            .append(&coord, kind, &serde_json::json!({"i": i}))
+            .expect("append");
     }
 
     // Create cursor and drain
@@ -449,18 +510,27 @@ fn chaos_cursor_completeness_concurrent() {
         seen.push(entry.event_id);
     }
 
-    assert_eq!(seen.len(), n,
+    assert_eq!(
+        seen.len(),
+        n,
         "CHAOS: cursor missed events. Expected {n}, got {}. \
          Investigate: src/store/cursor.rs poll().",
-        seen.len());
+        seen.len()
+    );
 
     // Verify no duplicates
     let mut unique = seen.clone();
     unique.sort();
     unique.dedup();
-    assert_eq!(unique.len(), seen.len(),
+    assert_eq!(
+        unique.len(),
+        seen.len(),
         "CHAOS: cursor delivered duplicate events. \
-         Investigate: src/store/cursor.rs position tracking.");
+         Investigate: src/store/cursor.rs position tracking."
+    );
 
-    match Arc::try_unwrap(store) { Ok(s) => s.close().expect("close"), Err(_) => panic!("Arc still has multiple owners"), }
+    match Arc::try_unwrap(store) {
+        Ok(s) => s.close().expect("close"),
+        Err(_) => panic!("Arc still has multiple owners"),
+    }
 }

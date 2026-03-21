@@ -8,8 +8,8 @@
 use free_batteries::prelude::*;
 use free_batteries::store::{Store, StoreConfig};
 use free_batteries::typestate::Transition;
-use tempfile::TempDir;
 use std::sync::Arc;
+use tempfile::TempDir;
 
 fn test_store() -> (Store, TempDir) {
     let dir = TempDir::new().expect("create temp dir");
@@ -42,18 +42,24 @@ fn walk_ancestors_follows_chain() {
     let ancestors = store.walk_ancestors(last_id, 10);
 
     // Must return more than just the starting event — the chain has 5 events
-    assert!(ancestors.len() >= 2,
+    assert!(
+        ancestors.len() >= 2,
         "walk_ancestors should traverse the chain, not just return the start. \
          Got {} ancestors for a 5-event chain. \
-         Investigate: src/store/mod.rs walk_ancestors.", ancestors.len());
+         Investigate: src/store/mod.rs walk_ancestors.",
+        ancestors.len()
+    );
 
     // First ancestor should be the event we started from
     assert_eq!(ancestors[0].event.event_id(), last_id);
 
     // Second ancestor must be DIFFERENT from the first (chain was traversed)
-    assert_ne!(ancestors[0].event.event_id(), ancestors[1].event.event_id(),
+    assert_ne!(
+        ancestors[0].event.event_id(),
+        ancestors[1].event.event_id(),
         "walk_ancestors should return different events along the chain, \
-         not the same event repeated.");
+         not the same event repeated."
+    );
 
     store.close().expect("close");
 }
@@ -74,10 +80,13 @@ fn walk_ancestors_respects_limit() {
     let ancestors = store.walk_ancestors(last_id, 2);
 
     // With a 10-event chain and limit=2, we should get EXACTLY 2 ancestors
-    assert_eq!(ancestors.len(), 2,
+    assert_eq!(
+        ancestors.len(),
+        2,
         "walk_ancestors(limit=2) on a 10-event chain should return exactly 2. \
          Got {}. Investigate: src/store/mod.rs walk_ancestors limit logic.",
-        ancestors.len());
+        ancestors.len()
+    );
 
     store.close().expect("close");
 }
@@ -91,7 +100,9 @@ fn snapshot_copies_segments() {
     let kind = EventKind::custom(0xF, 1);
 
     for i in 0..10 {
-        store.append(&coord, kind, &serde_json::json!({"i": i})).expect("append");
+        store
+            .append(&coord, kind, &serde_json::json!({"i": i}))
+            .expect("append");
     }
     store.sync().expect("sync");
 
@@ -102,12 +113,19 @@ fn snapshot_copies_segments() {
     let fbat_count = std::fs::read_dir(snap_dir.path())
         .expect("read snap dir")
         .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().map(|ext| ext == "fbat").unwrap_or(false))
+        .filter(|e| {
+            e.path()
+                .extension()
+                .map(|ext| ext == "fbat")
+                .unwrap_or(false)
+        })
         .count();
 
-    assert!(fbat_count > 0,
+    assert!(
+        fbat_count > 0,
         "SNAPSHOT FAILED: destination should contain .fbat segment files. \
-         Investigate: src/store/mod.rs snapshot().");
+         Investigate: src/store/mod.rs snapshot()."
+    );
 
     // Verify: can open a store from the snapshot
     let snap_config = StoreConfig {
@@ -116,8 +134,11 @@ fn snapshot_copies_segments() {
     };
     let snap_store = Store::open(snap_config).expect("open snapshot");
     let stats = snap_store.stats();
-    assert_eq!(stats.event_count, 10,
-        "Snapshot store should have same event count. Got {}.", stats.event_count);
+    assert_eq!(
+        stats.event_count, 10,
+        "Snapshot store should have same event count. Got {}.",
+        stats.event_count
+    );
 
     snap_store.close().expect("close snap");
     store.close().expect("close");
@@ -147,14 +168,20 @@ fn append_reaction_links_causation() {
     let kind_evt = EventKind::custom(0xF, 2);
 
     // Root cause event
-    let root = store.append(&coord, kind_cmd, &serde_json::json!({"cmd": "create"}))
+    let root = store
+        .append(&coord, kind_cmd, &serde_json::json!({"cmd": "create"}))
         .expect("root append");
 
     // Reaction event linked to root
-    let reaction = store.append_reaction(
-        &coord, kind_evt, &serde_json::json!({"evt": "created"}),
-        root.event_id, root.event_id,
-    ).expect("reaction append");
+    let reaction = store
+        .append_reaction(
+            &coord,
+            kind_evt,
+            &serde_json::json!({"evt": "created"}),
+            root.event_id,
+            root.event_id,
+        )
+        .expect("reaction append");
 
     // Verify: reaction has different event_id
     assert_ne!(root.event_id, reaction.event_id);
@@ -176,8 +203,12 @@ fn cas_fails_on_wrong_sequence() {
     let coord = Coordinate::new("entity:cas-fail", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
 
-    store.append(&coord, kind, &serde_json::json!({"x": 1})).expect("first");
-    store.append(&coord, kind, &serde_json::json!({"x": 2})).expect("second");
+    store
+        .append(&coord, kind, &serde_json::json!({"x": 1}))
+        .expect("first");
+    store
+        .append(&coord, kind, &serde_json::json!({"x": 2}))
+        .expect("second");
 
     // CAS with stale expected_sequence (clock 0, but actual is now 1)
     let opts = free_batteries::store::AppendOptions {
@@ -185,9 +216,11 @@ fn cas_fails_on_wrong_sequence() {
         ..Default::default()
     };
     let result = store.append_with_options(&coord, kind, &serde_json::json!({"x": 3}), opts);
-    assert!(result.is_err(),
+    assert!(
+        result.is_err(),
         "CAS should fail when expected_sequence is stale. \
-         Investigate: src/store/mod.rs append_with_options CAS check.");
+         Investigate: src/store/mod.rs append_with_options CAS check."
+    );
 
     store.close().expect("close");
 }
@@ -206,16 +239,20 @@ fn idempotency_returns_same_receipt() {
         ..Default::default()
     };
 
-    let r1 = store.append_with_options(&coord, kind, &serde_json::json!({"x": 1}), opts)
+    let r1 = store
+        .append_with_options(&coord, kind, &serde_json::json!({"x": 1}), opts)
         .expect("first append");
 
     // Second append with same key should return same receipt
-    let r2 = store.append_with_options(&coord, kind, &serde_json::json!({"x": 2}), opts)
+    let r2 = store
+        .append_with_options(&coord, kind, &serde_json::json!({"x": 2}), opts)
         .expect("idempotent append");
 
-    assert_eq!(r1.event_id, r2.event_id,
+    assert_eq!(
+        r1.event_id, r2.event_id,
         "IDEMPOTENCY BROKEN: same key should return same event_id. \
-         Investigate: src/store/mod.rs append_with_options idempotency check.");
+         Investigate: src/store/mod.rs append_with_options idempotency check."
+    );
 
     // Only 1 event should exist
     let stats = store.stats();
@@ -241,7 +278,9 @@ fn subscription_receives_matching_events() {
     let coord_w = coord.clone();
     let writer = std::thread::spawn(move || {
         for i in 0..3 {
-            store_w.append(&coord_w, kind, &serde_json::json!({"i": i})).expect("append");
+            store_w
+                .append(&coord_w, kind, &serde_json::json!({"i": i}))
+                .expect("append");
         }
     });
     writer.join().expect("writer");
@@ -255,9 +294,12 @@ fn subscription_receives_matching_events() {
             count += 1;
         }
     }
-    assert_eq!(count, 3,
+    assert_eq!(
+        count, 3,
         "SUBSCRIPTION FAILED: expected 3 notifications, got {}. \
-         Investigate: src/store/subscription.rs and writer broadcast.", count);
+         Investigate: src/store/subscription.rs and writer broadcast.",
+        count
+    );
 
     store.sync().expect("sync");
 }
@@ -276,9 +318,15 @@ fn subscription_filters_by_region() {
     let writer = std::thread::spawn(move || {
         let coord_a = Coordinate::new("entity:a", "scope:test").expect("valid coord");
         let coord_b = Coordinate::new("entity:b", "scope:test").expect("valid coord");
-        store_w.append(&coord_a, kind, &serde_json::json!({"target": "a"})).expect("append a");
-        store_w.append(&coord_b, kind, &serde_json::json!({"target": "b"})).expect("append b");
-        store_w.append(&coord_a, kind, &serde_json::json!({"target": "a2"})).expect("append a2");
+        store_w
+            .append(&coord_a, kind, &serde_json::json!({"target": "a"}))
+            .expect("append a");
+        store_w
+            .append(&coord_b, kind, &serde_json::json!({"target": "b"}))
+            .expect("append b");
+        store_w
+            .append(&coord_a, kind, &serde_json::json!({"target": "a2"}))
+            .expect("append a2");
     });
     writer.join().expect("writer");
 
@@ -290,8 +338,11 @@ fn subscription_filters_by_region() {
             matching += 1;
         }
     }
-    assert_eq!(matching, 2,
-        "SUBSCRIPTION FILTER FAILED: expected 2 entity:a notifications, got {}.", matching);
+    assert_eq!(
+        matching, 2,
+        "SUBSCRIPTION FILTER FAILED: expected 2 entity:a notifications, got {}.",
+        matching
+    );
 
     store.sync().expect("sync");
 }
@@ -305,7 +356,9 @@ fn cursor_polls_events_in_order() {
     let kind = EventKind::custom(0xF, 1);
 
     for i in 0..5 {
-        store.append(&coord, kind, &serde_json::json!({"i": i})).expect("append");
+        store
+            .append(&coord, kind, &serde_json::json!({"i": i}))
+            .expect("append");
     }
 
     let region = Region::entity("entity:cur");
@@ -316,14 +369,20 @@ fn cursor_polls_events_in_order() {
         polled.push(entry);
     }
 
-    assert_eq!(polled.len(), 5,
+    assert_eq!(
+        polled.len(),
+        5,
         "CURSOR POLL FAILED: expected 5 events, got {}. \
-         Investigate: src/store/cursor.rs poll().", polled.len());
+         Investigate: src/store/cursor.rs poll().",
+        polled.len()
+    );
 
     // Verify global_sequence is monotonically increasing
     for window in polled.windows(2) {
-        assert!(window[0].global_sequence < window[1].global_sequence,
-            "Cursor events should be ordered by global_sequence.");
+        assert!(
+            window[0].global_sequence < window[1].global_sequence,
+            "Cursor events should be ordered by global_sequence."
+        );
     }
 
     store.close().expect("close");
@@ -336,15 +395,21 @@ fn cursor_poll_batch_respects_max() {
     let kind = EventKind::custom(0xF, 1);
 
     for i in 0..10 {
-        store.append(&coord, kind, &serde_json::json!({"i": i})).expect("append");
+        store
+            .append(&coord, kind, &serde_json::json!({"i": i}))
+            .expect("append");
     }
 
     let region = Region::entity("entity:batch");
     let mut cursor = store.cursor(&region);
 
     let batch1 = cursor.poll_batch(3);
-    assert_eq!(batch1.len(), 3,
-        "poll_batch(3) should return exactly 3 events. Got {}.", batch1.len());
+    assert_eq!(
+        batch1.len(),
+        3,
+        "poll_batch(3) should return exactly 3 events. Got {}.",
+        batch1.len()
+    );
 
     let batch2 = cursor.poll_batch(3);
     assert_eq!(batch2.len(), 3, "Second batch should have 3 more.");
@@ -353,7 +418,11 @@ fn cursor_poll_batch_respects_max() {
     assert_eq!(batch3.len(), 4, "Third batch should have remaining 4.");
 
     let batch4 = cursor.poll_batch(100);
-    assert_eq!(batch4.len(), 0, "Fourth batch should be empty (all consumed).");
+    assert_eq!(
+        batch4.len(),
+        0,
+        "Fourth batch should be empty (all consumed)."
+    );
 
     store.close().expect("close");
 }
@@ -367,14 +436,19 @@ fn compact_does_not_lose_data() {
     let kind = EventKind::custom(0xF, 1);
 
     for i in 0..5 {
-        store.append(&coord, kind, &serde_json::json!({"i": i})).expect("append");
+        store
+            .append(&coord, kind, &serde_json::json!({"i": i}))
+            .expect("append");
     }
 
     store.compact().expect("compact");
 
     let stats = store.stats();
-    assert_eq!(stats.event_count, 5,
-        "compact() should not lose data. Got {} events.", stats.event_count);
+    assert_eq!(
+        stats.event_count, 5,
+        "compact() should not lose data. Got {} events.",
+        stats.event_count
+    );
 
     store.close().expect("close");
 }
@@ -402,7 +476,10 @@ fn open_default_uses_default_config() {
 fn get_nonexistent_returns_not_found() {
     let (store, _dir) = test_store();
     let result = store.get(0xDEAD);
-    assert!(result.is_err(), "get() of nonexistent event should return Err");
+    assert!(
+        result.is_err(),
+        "get() of nonexistent event should return Err"
+    );
     store.close().expect("close");
 }
 
@@ -420,7 +497,9 @@ fn apply_transition_persists_event() {
         serde_json::json!({"title": "hello", "from": "draft", "to": "published"}),
     );
 
-    let receipt = store.apply_transition(&coord, transition).expect("apply_transition");
+    let receipt = store
+        .apply_transition(&coord, transition)
+        .expect("apply_transition");
 
     // Verify: event persisted and retrievable
     let stored = store.get(receipt.event_id).expect("get transition event");
@@ -440,21 +519,30 @@ fn query_with_clock_range_filters_events() {
 
     // Append 10 events (clock 0..9)
     for i in 0..10 {
-        store.append(&coord, kind, &serde_json::json!({"i": i})).expect("append");
+        store
+            .append(&coord, kind, &serde_json::json!({"i": i}))
+            .expect("append");
     }
 
     // Query with clock_range [3, 7] — should get events with clock 3,4,5,6,7
     let region = Region::entity("entity:clock").with_clock_range((3, 7));
     let results = store.query(&region);
 
-    assert_eq!(results.len(), 5,
+    assert_eq!(
+        results.len(),
+        5,
         "CLOCK RANGE FAILED: expected 5 events in clock range [3,7], got {}. \
-         Investigate: src/store/index.rs query() clock_range filter.", results.len());
+         Investigate: src/store/index.rs query() clock_range filter.",
+        results.len()
+    );
 
     // Verify all results have clock in [3, 7]
     for entry in &results {
-        assert!(entry.clock >= 3 && entry.clock <= 7,
-            "Event clock {} outside range [3,7]", entry.clock);
+        assert!(
+            entry.clock >= 3 && entry.clock <= 7,
+            "Event clock {} outside range [3,7]",
+            entry.clock
+        );
     }
 
     store.close().expect("close");
@@ -470,15 +558,23 @@ fn query_clock_range_with_scope_filter() {
     let coord_b = Coordinate::new("entity:b", "scope:shared").expect("valid coord");
 
     for i in 0..5 {
-        store.append(&coord_a, kind, &serde_json::json!({"i": i})).expect("append a");
-        store.append(&coord_b, kind, &serde_json::json!({"i": i})).expect("append b");
+        store
+            .append(&coord_a, kind, &serde_json::json!({"i": i}))
+            .expect("append a");
+        store
+            .append(&coord_b, kind, &serde_json::json!({"i": i}))
+            .expect("append b");
     }
 
     // entity:a with clock range [1,3]
     let region = Region::entity("entity:a").with_clock_range((1, 3));
     let results = store.query(&region);
-    assert_eq!(results.len(), 3,
-        "Expected 3 events for entity:a clock [1,3], got {}", results.len());
+    assert_eq!(
+        results.len(),
+        3,
+        "Expected 3 events for entity:a clock [1,3], got {}",
+        results.len()
+    );
 
     store.close().expect("close");
 }
@@ -496,16 +592,26 @@ fn query_by_fact_category() {
     // Category 0xB: type 1
     let kind_b1 = EventKind::custom(0xB, 1);
 
-    store.append(&coord, kind_a1, &serde_json::json!({"cat": "a"})).expect("append");
-    store.append(&coord, kind_a2, &serde_json::json!({"cat": "a"})).expect("append");
-    store.append(&coord, kind_b1, &serde_json::json!({"cat": "b"})).expect("append");
+    store
+        .append(&coord, kind_a1, &serde_json::json!({"cat": "a"}))
+        .expect("append");
+    store
+        .append(&coord, kind_a2, &serde_json::json!({"cat": "a"}))
+        .expect("append");
+    store
+        .append(&coord, kind_b1, &serde_json::json!({"cat": "b"}))
+        .expect("append");
 
     // Query by category 0xA — should get both kind_a1 and kind_a2
     let region = Region::all().with_fact_category(0xA);
     let results = store.query(&region);
-    assert_eq!(results.len(), 2,
+    assert_eq!(
+        results.len(),
+        2,
         "CATEGORY QUERY FAILED: expected 2 events in category 0xA, got {}. \
-         Investigate: src/store/index.rs KindFilter::Category path.", results.len());
+         Investigate: src/store/index.rs KindFilter::Category path.",
+        results.len()
+    );
 
     store.close().expect("close");
 }
@@ -517,9 +623,9 @@ fn fd_budget_evicts_oldest_segments() {
     let dir = TempDir::new().expect("temp dir");
     let config = StoreConfig {
         data_dir: dir.path().to_path_buf(),
-        segment_max_bytes: 512,   // tiny segments → many segment files
+        segment_max_bytes: 512, // tiny segments → many segment files
         sync_every_n_events: 1,
-        fd_budget: 2,             // only 2 FDs allowed → forces eviction
+        fd_budget: 2, // only 2 FDs allowed → forces eviction
         ..StoreConfig::default()
     };
     let store = Store::open(config).expect("open store");
@@ -528,7 +634,12 @@ fn fd_budget_evicts_oldest_segments() {
 
     // Write enough events to create many segments (>2, exceeding fd_budget)
     for i in 0..100 {
-        store.append(&coord, kind, &serde_json::json!({"data": format!("payload_{i}")}))
+        store
+            .append(
+                &coord,
+                kind,
+                &serde_json::json!({"data": format!("payload_{i}")}),
+            )
             .expect("append");
     }
     store.sync().expect("sync");
@@ -537,10 +648,18 @@ fn fd_budget_evicts_oldest_segments() {
     let segment_count = std::fs::read_dir(dir.path())
         .expect("read dir")
         .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().map(|ext| ext == "fbat").unwrap_or(false))
+        .filter(|e| {
+            e.path()
+                .extension()
+                .map(|ext| ext == "fbat")
+                .unwrap_or(false)
+        })
         .count();
-    assert!(segment_count > 2,
-        "Expected >2 segments to stress fd_budget, got {}", segment_count);
+    assert!(
+        segment_count > 2,
+        "Expected >2 segments to stress fd_budget, got {}",
+        segment_count
+    );
 
     // Read events from different segments — this exercises LRU eviction
     // because fd_budget=2 but we have >2 segments
@@ -552,15 +671,23 @@ fn fd_budget_evicts_oldest_segments() {
     // then re-open seg1 (evicts seg_last)
     let first = store.get(entries[0].event_id).expect("get first");
     let last = store.get(entries[99].event_id).expect("get last");
-    let first_again = store.get(entries[0].event_id).expect("get first again after eviction");
+    let first_again = store
+        .get(entries[0].event_id)
+        .expect("get first again after eviction");
 
-    assert_eq!(first.event.event_id(), first_again.event.event_id(),
+    assert_eq!(
+        first.event.event_id(),
+        first_again.event.event_id(),
         "FD EVICTION CORRUPTION: re-reading after eviction should return same event. \
-         Investigate: src/store/reader.rs get_fd() LRU cache.");
+         Investigate: src/store/reader.rs get_fd() LRU cache."
+    );
 
     // Verify event identity integrity through eviction cycles
-    assert_eq!(first.event.event_kind(), last.event.event_kind(),
-        "Events across segments should preserve kind through LRU eviction");
+    assert_eq!(
+        first.event.event_kind(),
+        last.event.event_kind(),
+        "Events across segments should preserve kind through LRU eviction"
+    );
 
     store.close().expect("close");
 }
@@ -583,7 +710,9 @@ fn cold_start_skips_corrupt_segment_gracefully() {
         let store = Store::open(config).expect("open");
         let coord = Coordinate::new("entity:corrupt", "scope:test").expect("valid coord");
         for i in 0..20 {
-            store.append(&coord, kind, &serde_json::json!({"i": i})).expect("append");
+            store
+                .append(&coord, kind, &serde_json::json!({"i": i}))
+                .expect("append");
         }
         store.sync().expect("sync");
         store.close().expect("close");
@@ -603,9 +732,11 @@ fn cold_start_skips_corrupt_segment_gracefully() {
     };
     let result = Store::open(config);
     // The store should fail on a corrupt segment (bad magic = hard error)
-    assert!(result.is_err(),
+    assert!(
+        result.is_err(),
         "Store::open should reject segments with bad magic. \
-         Investigate: src/store/reader.rs scan_segment magic check.");
+         Investigate: src/store/reader.rs scan_segment magic check."
+    );
 }
 
 #[test]
@@ -625,7 +756,9 @@ fn corrupt_frame_in_segment_is_detected() {
         let store = Store::open(config).expect("open");
         let coord = Coordinate::new("entity:crc", "scope:test").expect("valid");
         for i in 0..3 {
-            store.append(&coord, kind, &serde_json::json!({"i": i})).expect("append");
+            store
+                .append(&coord, kind, &serde_json::json!({"i": i}))
+                .expect("append");
         }
         store.sync().expect("sync");
         store.close().expect("close");
@@ -635,7 +768,12 @@ fn corrupt_frame_in_segment_is_detected() {
     let segments: Vec<_> = std::fs::read_dir(dir.path())
         .expect("read dir")
         .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().map(|ext| ext == "fbat").unwrap_or(false))
+        .filter(|e| {
+            e.path()
+                .extension()
+                .map(|ext| ext == "fbat")
+                .unwrap_or(false)
+        })
         .collect();
     assert!(!segments.is_empty(), "Should have segment files");
 
@@ -663,9 +801,11 @@ fn corrupt_frame_in_segment_is_detected() {
             let stats = store.stats();
             // Corrupted segment may have fewer events (some frames skipped)
             // The key assertion: we don't get MORE events than we wrote
-            assert!(stats.event_count <= 3,
+            assert!(
+                stats.event_count <= 3,
                 "Corrupt segment should not produce phantom events. Got {}.",
-                stats.event_count);
+                stats.event_count
+            );
             let _ = store.close();
         }
         Err(_) => {
@@ -682,39 +822,77 @@ fn store_error_display_variants() {
 
     // Each variant should display its key information, not just a generic string
     let not_found = format!("{}", StoreError::NotFound(0xDEAD));
-    assert!(not_found.contains("dead"), "NotFound should contain the event ID hex. Got: {not_found}");
+    assert!(
+        not_found.contains("dead"),
+        "NotFound should contain the event ID hex. Got: {not_found}"
+    );
 
     let writer = format!("{}", StoreError::WriterCrashed);
-    assert!(writer.contains("writer") || writer.contains("crash"),
-        "WriterCrashed should mention writer/crash. Got: {writer}");
+    assert!(
+        writer.contains("writer") || writer.contains("crash"),
+        "WriterCrashed should mention writer/crash. Got: {writer}"
+    );
 
     let shutting = format!("{}", StoreError::ShuttingDown);
-    assert!(shutting.contains("shut"), "ShuttingDown should mention shutdown. Got: {shutting}");
+    assert!(
+        shutting.contains("shut"),
+        "ShuttingDown should mention shutdown. Got: {shutting}"
+    );
 
     let cache = format!("{}", StoreError::CacheFailed("redis timeout".into()));
-    assert!(cache.contains("redis timeout"),
-        "CacheFailed should contain the inner message. Got: {cache}");
+    assert!(
+        cache.contains("redis timeout"),
+        "CacheFailed should contain the inner message. Got: {cache}"
+    );
 
     let dup = format!("{}", StoreError::DuplicateEvent(0xBEEF));
-    assert!(dup.contains("beef"), "DuplicateEvent should contain the key hex. Got: {dup}");
+    assert!(
+        dup.contains("beef"),
+        "DuplicateEvent should contain the key hex. Got: {dup}"
+    );
 
-    let seq = format!("{}", StoreError::SequenceMismatch {
-        entity: "user:1".into(), expected: 5, actual: 3
-    });
-    assert!(seq.contains("user:1") && seq.contains("5") && seq.contains("3"),
-        "SequenceMismatch should contain entity, expected, actual. Got: {seq}");
+    let seq = format!(
+        "{}",
+        StoreError::SequenceMismatch {
+            entity: "user:1".into(),
+            expected: 5,
+            actual: 3
+        }
+    );
+    assert!(
+        seq.contains("user:1") && seq.contains("5") && seq.contains("3"),
+        "SequenceMismatch should contain entity, expected, actual. Got: {seq}"
+    );
 
-    let crc = format!("{}", StoreError::CrcMismatch { segment_id: 7, offset: 42 });
-    assert!(crc.contains("7") && crc.contains("42"),
-        "CrcMismatch should contain segment_id and offset. Got: {crc}");
+    let crc = format!(
+        "{}",
+        StoreError::CrcMismatch {
+            segment_id: 7,
+            offset: 42
+        }
+    );
+    assert!(
+        crc.contains("7") && crc.contains("42"),
+        "CrcMismatch should contain segment_id and offset. Got: {crc}"
+    );
 
-    let corrupt = format!("{}", StoreError::CorruptSegment { segment_id: 3, detail: "bad magic".into() });
-    assert!(corrupt.contains("bad magic"),
-        "CorruptSegment should contain the detail. Got: {corrupt}");
+    let corrupt = format!(
+        "{}",
+        StoreError::CorruptSegment {
+            segment_id: 3,
+            detail: "bad magic".into()
+        }
+    );
+    assert!(
+        corrupt.contains("bad magic"),
+        "CorruptSegment should contain the detail. Got: {corrupt}"
+    );
 
     let ser = format!("{}", StoreError::Serialization("unexpected EOF".into()));
-    assert!(ser.contains("unexpected EOF"),
-        "Serialization should contain the inner message. Got: {ser}");
+    assert!(
+        ser.contains("unexpected EOF"),
+        "Serialization should contain the inner message. Got: {ser}"
+    );
 }
 
 // --- CoordinateError Display ---
@@ -723,11 +901,17 @@ fn store_error_display_variants() {
 fn coordinate_error_display() {
     let err = Coordinate::new("", "scope").unwrap_err();
     let msg = format!("{err}");
-    assert!(msg.contains("entity"), "EmptyEntity error should mention 'entity': {msg}");
+    assert!(
+        msg.contains("entity"),
+        "EmptyEntity error should mention 'entity': {msg}"
+    );
 
     let err = Coordinate::new("entity", "").unwrap_err();
     let msg = format!("{err}");
-    assert!(msg.contains("scope"), "EmptyScope error should mention 'scope': {msg}");
+    assert!(
+        msg.contains("scope"),
+        "EmptyScope error should mention 'scope': {msg}"
+    );
 }
 
 // --- Coordinate Display ---
@@ -736,8 +920,10 @@ fn coordinate_error_display() {
 fn coordinate_display_format() {
     let coord = Coordinate::new("user:42", "tenant:acme").expect("valid");
     let display = format!("{coord}");
-    assert_eq!(display, "user:42@tenant:acme",
-        "Coordinate Display should be 'entity@scope'");
+    assert_eq!(
+        display, "user:42@tenant:acme",
+        "Coordinate Display should be 'entity@scope'"
+    );
 }
 
 // --- IndexEntry causation helpers ---
@@ -749,28 +935,52 @@ fn index_entry_causation_helpers() {
     let kind = EventKind::custom(0xF, 1);
 
     // Root event (self-correlated, no causation)
-    let root = store.append(&coord, kind, &serde_json::json!({"cmd": "create"}))
+    let root = store
+        .append(&coord, kind, &serde_json::json!({"cmd": "create"}))
         .expect("root");
 
     // Reaction event
-    let reaction = store.append_reaction(
-        &coord, kind, &serde_json::json!({"evt": "created"}),
-        root.event_id, root.event_id,
-    ).expect("reaction");
+    let reaction = store
+        .append_reaction(
+            &coord,
+            kind,
+            &serde_json::json!({"evt": "created"}),
+            root.event_id,
+            root.event_id,
+        )
+        .expect("reaction");
 
     let entries = store.stream("entity:helpers");
     assert_eq!(entries.len(), 2);
 
     // Root: is_root_cause=true, is_correlated=false (correlation==event_id)
-    let root_entry = entries.iter().find(|e| e.event_id == root.event_id).expect("find root");
-    assert!(root_entry.is_root_cause(), "Root event should be root cause");
-    assert!(!root_entry.is_correlated(), "Self-correlated event is NOT 'correlated'");
+    let root_entry = entries
+        .iter()
+        .find(|e| e.event_id == root.event_id)
+        .expect("find root");
+    assert!(
+        root_entry.is_root_cause(),
+        "Root event should be root cause"
+    );
+    assert!(
+        !root_entry.is_correlated(),
+        "Self-correlated event is NOT 'correlated'"
+    );
 
     // Reaction: is_root_cause=false, is_correlated=true, is_caused_by(root)=true
-    let react_entry = entries.iter().find(|e| e.event_id == reaction.event_id).expect("find reaction");
-    assert!(!react_entry.is_root_cause(), "Reaction should not be root cause");
+    let react_entry = entries
+        .iter()
+        .find(|e| e.event_id == reaction.event_id)
+        .expect("find reaction");
+    assert!(
+        !react_entry.is_root_cause(),
+        "Reaction should not be root cause"
+    );
     assert!(react_entry.is_correlated(), "Reaction should be correlated");
-    assert!(react_entry.is_caused_by(root.event_id), "Reaction should be caused by root");
+    assert!(
+        react_entry.is_caused_by(root.event_id),
+        "Reaction should be caused by root"
+    );
 
     store.close().expect("close");
 }

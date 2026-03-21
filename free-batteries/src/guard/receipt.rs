@@ -19,11 +19,19 @@ impl<T> Receipt<T> {
     /// Only callable from within the crate (seal::Token is pub(crate)).
     /// [FILE:src/guard/mod.rs — GateSet::evaluate() is the only caller]
     pub(crate) fn new(payload: T, gates_passed: Vec<&'static str>) -> Self {
-        Self { _seal: seal::Token, gates_passed, payload }
+        Self {
+            _seal: seal::Token,
+            gates_passed,
+            payload,
+        }
     }
 
-    pub fn payload(&self) -> &T { &self.payload }
-    pub fn gates_passed(&self) -> &[&'static str] { &self.gates_passed }
+    pub fn payload(&self) -> &T {
+        &self.payload
+    }
+    pub fn gates_passed(&self) -> &[&'static str] {
+        &self.gates_passed
+    }
 
     /// Consuming extraction. After this, the receipt is gone.
     pub fn into_parts(self) -> (T, Vec<&'static str>) {

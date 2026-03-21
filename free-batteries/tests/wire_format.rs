@@ -30,11 +30,13 @@ fn check_or_update_golden(name: &str, actual_bytes: &[u8]) {
         ));
 
     assert_eq!(
-        actual_hex.trim(), expected_hex.trim(),
+        actual_hex.trim(),
+        expected_hex.trim(),
         "WIRE FORMAT DRIFT: {} bytes differ from golden file {}. \
          If this is intentional, run GOLDEN_UPDATE=1 cargo test wire_format. \
          If not, investigate: src/wire.rs and serde derives.",
-        name, path.display()
+        name,
+        path.display()
     );
 }
 
@@ -51,9 +53,11 @@ fn coordinate_msgpack_round_trip() {
 
     // Round-trip
     let decoded: Coordinate = rmp_serde::from_slice(&bytes).expect("deserialize Coordinate");
-    assert_eq!(coord, decoded,
+    assert_eq!(
+        coord, decoded,
         "ROUND-TRIP FAILED: Coordinate serialization/deserialization mismatch. \
-         This exercises the Arc<str> serde 'rc' feature (Phase 1.1).");
+         This exercises the Arc<str> serde 'rc' feature (Phase 1.1)."
+    );
 
     check_or_update_golden("coordinate_v1.hex", &bytes);
 }
@@ -63,12 +67,12 @@ fn coordinate_msgpack_round_trip() {
 #[test]
 fn event_header_msgpack_golden() {
     let header = EventHeader::new(
-        0x0123456789ABCDEF_0123456789ABCDEF_u128,  // event_id
-        0x0123456789ABCDEF_0123456789ABCDEF_u128,  // correlation_id
-        None,                                        // causation_id
-        1700000000_000000_i64,                      // timestamp_us
+        0x0123456789ABCDEF_0123456789ABCDEF_u128, // event_id
+        0x0123456789ABCDEF_0123456789ABCDEF_u128, // correlation_id
+        None,                                     // causation_id
+        1700000000_000000_i64,                    // timestamp_us
         DagPosition::root(),
-        42,                                          // payload_size
+        42, // payload_size
         EventKind::custom(0xF, 1),
     );
 

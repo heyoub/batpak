@@ -1,13 +1,13 @@
 use serde::{Deserialize, Serialize};
 // NOTE: No `use crate::wire::*` needed. serde(with = "crate::wire::...") resolves via string path.
 
-pub mod error;
 pub mod combine;
+pub mod error;
 pub mod wait;
 
-pub use error::{OutcomeError, ErrorKind};
-pub use wait::{WaitCondition, CompensationAction};
-pub use combine::{zip, join_all, join_any};
+pub use combine::{join_all, join_any, zip};
+pub use error::{ErrorKind, OutcomeError};
+pub use wait::{CompensationAction, WaitCondition};
 
 /// Outcome<T>: the core algebraic type. 6 variants.
 /// Named "Outcome" not "Effect" to eliminate Effect/Event confusion.
@@ -29,7 +29,9 @@ pub enum Outcome<T> {
         #[serde(with = "crate::wire::u128_bytes")]
         resume_token: u128,
     },
-    Cancelled { reason: String },
+    Cancelled {
+        reason: String,
+    },
     Batch(Vec<Outcome<T>>),
 }
 
@@ -159,12 +161,9 @@ impl<T> Outcome<T> {
     pub fn map_err<F: FnOnce(OutcomeError) -> OutcomeError + Clone>(self, f: F) -> Self {
         match self {
             Self::Err(e) => Self::Err(f(e)),
-            Self::Batch(items) => Self::Batch(
-                items
-                    .into_iter()
-                    .map(|o| o.map_err(f.clone()))
-                    .collect(),
-            ),
+            Self::Batch(items) => {
+                Self::Batch(items.into_iter().map(|o| o.map_err(f.clone())).collect())
+            }
             other => other,
         }
     }
@@ -172,31 +171,37 @@ impl<T> Outcome<T> {
     pub fn or_else<F: FnOnce(OutcomeError) -> Outcome<T> + Clone>(self, f: F) -> Outcome<T> {
         match self {
             Self::Err(e) => f(e),
-            Self::Batch(items) => Self::Batch(
-                items
-                    .into_iter()
-                    .map(|o| o.or_else(f.clone()))
-                    .collect(),
-            ),
+            Self::Batch(items) => {
+                Self::Batch(items.into_iter().map(|o| o.or_else(f.clone())).collect())
+            }
             other => other,
         }
     }
 
     pub fn inspect<F: FnOnce(&T) + Clone>(self, f: F) -> Self {
         match self {
-            Self::Ok(v) => { f(&v); Self::Ok(v) }
-            Self::Batch(items) => Self::Batch(
-                items.into_iter().map(|o| o.inspect(f.clone())).collect()
-            ),
+            Self::Ok(v) => {
+                f(&v);
+                Self::Ok(v)
+            }
+            Self::Batch(items) => {
+                Self::Batch(items.into_iter().map(|o| o.inspect(f.clone())).collect())
+            }
             other => other,
         }
     }
 
     pub fn inspect_err<F: FnOnce(&OutcomeError) + Clone>(self, f: F) -> Self {
         match self {
-            Self::Err(e) => { f(&e); Self::Err(e) }
+            Self::Err(e) => {
+                f(&e);
+                Self::Err(e)
+            }
             Self::Batch(items) => Self::Batch(
-                items.into_iter().map(|o| o.inspect_err(f.clone())).collect()
+                items
+                    .into_iter()
+                    .map(|o| o.inspect_err(f.clone()))
+                    .collect(),
             ),
             other => other,
         }
