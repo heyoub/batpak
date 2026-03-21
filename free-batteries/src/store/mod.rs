@@ -262,6 +262,7 @@ impl Store {
                     causation_id: se.event.header.causation_id,
                     coord,
                     kind: se.event.header.event_kind,
+                    wall_ms: se.event.header.position.wall_ms,
                     clock,
                     hash_chain: se.event.hash_chain.clone().unwrap_or_default(),
                     disk_pos: DiskPos {
@@ -777,6 +778,7 @@ impl Store {
                     causation_id: se.event.header.causation_id,
                     coord,
                     kind: se.event.header.event_kind,
+                    wall_ms: se.event.header.position.wall_ms,
                     clock,
                     hash_chain: se.event.hash_chain.clone().unwrap_or_default(),
                     disk_pos: DiskPos {

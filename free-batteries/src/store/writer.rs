@@ -319,8 +319,10 @@ impl WriterState<'_> {
             .map(|e| e.clock + 1)
             .unwrap_or(0);
 
-        // STEP 4: Set event header position.
-        let position = DagPosition::child(clock);
+        // STEP 4: Set event header position with HLC wall clock.
+        // [CROSS-POLLINATION:czap/hlc.ts — HLC for global causal ordering]
+        let now_ms = (event.header.timestamp_us / 1000) as u64;
+        let position = DagPosition::child_at(clock, now_ms, 0);
         event.header.position = position;
         event.header.event_kind = kind;
         event.header.correlation_id = correlation_id;
@@ -337,6 +339,9 @@ impl WriterState<'_> {
             prev_hash,
             event_hash,
         });
+        // Set content_hash on header for projection cache auto-invalidation.
+        // [CROSS-POLLINATION:czap/typed-ref.ts — content addressing]
+        event.header.content_hash = event_hash;
 
         // STEP 6: Serialize to MessagePack + CRC32 frame.
         // [SPEC:WIRE FORMAT DECISIONS — rmp_serde::to_vec_named() ALWAYS]
@@ -380,6 +385,7 @@ impl WriterState<'_> {
             coord: Coordinate::new(entity.as_ref(), scope.as_ref())
                 .map_err(StoreError::Coordinate)?,
             kind,
+            wall_ms: now_ms,
             clock,
             hash_chain: event.hash_chain.clone().unwrap_or_default(),
             disk_pos: disk_pos.clone(),

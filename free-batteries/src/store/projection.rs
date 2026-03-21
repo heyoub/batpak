@@ -8,6 +8,13 @@ pub trait ProjectionCache: Send + Sync + 'static {
     fn put(&self, key: &[u8], value: &[u8], meta: CacheMeta) -> Result<(), StoreError>;
     fn delete_prefix(&self, prefix: &[u8]) -> Result<u64, StoreError>;
     fn sync(&self) -> Result<(), StoreError>;
+
+    /// Hint that this key is likely to be requested soon. Implementations may
+    /// pre-warm internal caches or pre-compute values. Default: no-op.
+    /// [CROSS-POLLINATION:czap/speculative.ts — pre-compute before threshold crossing]
+    fn prefetch(&self, _key: &[u8], _predicted_meta: CacheMeta) -> Result<(), StoreError> {
+        Ok(()) // default: no-op (NoCache, lazy impls)
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

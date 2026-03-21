@@ -8,7 +8,7 @@ use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-/// Reader: reads events from segment files. LRU file descriptor cache.
+/// Reader: reads events from segment files. LRU file descriptor cache + buffer pool.
 /// Behind parking_lot::Mutex for Send + Sync. [SPEC:src/store/reader.rs]
 /// [SPEC:IMPLEMENTATION NOTES item 6 — Store is Send + Sync]
 pub(crate) struct Reader {
@@ -16,6 +16,9 @@ pub(crate) struct Reader {
     /// LRU FD cache: segment_id -> open File handle. Evicts oldest when full.
     /// [DEP:parking_lot::Mutex] — lock() returns guard directly, no poisoning
     fd_cache: Mutex<FdCache>,
+    /// Recycled frame buffers to avoid per-read allocations during batch reads.
+    /// [CROSS-POLLINATION:czap/compositor-pool.ts — zero-alloc hot path via ring buffer]
+    buffer_pool: Mutex<Vec<Vec<u8>>>,
 }
 
 struct FdCache {
@@ -43,7 +46,29 @@ impl Reader {
                 order: Vec::new(),
                 budget: fd_budget,
             }),
+            buffer_pool: Mutex::new(Vec::new()),
         }
+    }
+
+    /// Acquire a buffer from the pool, or allocate a new one if pool is empty.
+    /// [CROSS-POLLINATION:czap/compositor-pool.ts — acquire/release pattern]
+    pub(crate) fn acquire_buffer(&self, min_size: usize) -> Vec<u8> {
+        let mut pool = self.buffer_pool.lock();
+        if let Some(mut buf) = pool.pop() {
+            buf.resize(min_size, 0);
+            buf
+        } else {
+            vec![0u8; min_size]
+        }
+    }
+
+    /// Return a buffer to the pool for reuse. Caps pool at 16 buffers.
+    pub(crate) fn release_buffer(&self, buf: Vec<u8>) {
+        let mut pool = self.buffer_pool.lock();
+        if pool.len() < 16 {
+            pool.push(buf);
+        }
+        // else: drop it — pool is full
     }
 
     /// Read a single event by disk position. CRC32 verified.
@@ -53,7 +78,7 @@ impl Reader {
         pos: &DiskPos,
     ) -> Result<StoredEvent<serde_json::Value>, StoreError> {
         let file = self.get_fd(pos.segment_id)?;
-        let mut buf = vec![0u8; pos.length as usize];
+        let mut buf = self.acquire_buffer(pos.length as usize);
 
         // Use pread (read_at) — doesn't modify file cursor. [SPEC:IMPLEMENTATION NOTES item 7]
         // Loop to handle short reads (read_at may return fewer bytes than requested).
@@ -84,7 +109,7 @@ impl Reader {
             file.read_exact(&mut buf).map_err(StoreError::Io)?;
         }
 
-        let (msgpack, _) = segment::frame_decode(&buf).map_err(|e| match e {
+        let result = segment::frame_decode(&buf).map_err(|e| match e {
             segment::FrameDecodeError::CrcMismatch { .. } => StoreError::CrcMismatch {
                 segment_id: pos.segment_id,
                 offset: pos.offset,
@@ -93,9 +118,19 @@ impl Reader {
                 segment_id: pos.segment_id,
                 detail: e.to_string(),
             },
-        })?;
+        });
+        let (msgpack, _) = match result {
+            Ok(v) => v,
+            Err(e) => {
+                self.release_buffer(buf);
+                return Err(e);
+            }
+        };
         let payload: FramePayload<serde_json::Value> =
             rmp_serde::from_slice(msgpack).map_err(|e| StoreError::Serialization(e.to_string()))?;
+
+        // Release buffer back to pool after deserialization
+        self.release_buffer(buf);
 
         let coord =
             Coordinate::new(&payload.entity, &payload.scope).map_err(StoreError::Coordinate)?;

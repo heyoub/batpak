@@ -19,6 +19,12 @@ pub struct EventHeader {
     pub payload_size: u32,
     pub event_kind: EventKind,
     pub flags: u8,
+    /// Content hash of the serialized payload. Enables automatic projection cache
+    /// invalidation when event schemas evolve. Computed from payload bytes during
+    /// writer step 5 (reuses the blake3 computation). [0u8; 32] when blake3 is off.
+    /// [CROSS-POLLINATION:czap/typed-ref.ts — content addressing for auto-invalidation]
+    #[serde(default)]
+    pub content_hash: [u8; 32],
 }
 
 /// Flag bit constants for EventHeader.flags
@@ -45,6 +51,7 @@ impl EventHeader {
             payload_size,
             event_kind,
             flags: 0,
+            content_hash: [0u8; 32],
         }
     }
 
