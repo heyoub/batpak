@@ -37,6 +37,7 @@ jobs:
           - ""                    # no features (no blake3, no redb, no lmdb)
           - "--features blake3"   # blake3 only
           - "--features redb"     # redb cache only
+          - "--features lmdb"     # lmdb cache only
       fail-fast: false
     steps:
       - uses: actions/checkout@v4

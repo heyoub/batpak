@@ -182,14 +182,6 @@ impl<T> Outcome<T> {
         }
     }
 
-    pub fn flatten(self) -> Outcome<T>
-    where
-        T: Into<Outcome<T>>,
-    {
-        // Unwrap one layer: Outcome<Outcome<T>> → Outcome<T>
-        self.and_then(|v| v.into())
-    }
-
     pub fn inspect<F: FnOnce(&T) + Clone>(self, f: F) -> Self {
         match self {
             Self::Ok(v) => { f(&v); Self::Ok(v) }
@@ -258,5 +250,15 @@ impl<T> Outcome<T> {
             Self::Ok(v) => v,
             _ => f(),
         }
+    }
+}
+
+/// flatten: unwrap one layer of nesting. Outcome<Outcome<T>> → Outcome<T>.
+/// Implemented on the nested type (like Option::flatten), not as a bounded
+/// method on Outcome<T>. This is join in category theory: join = bind(id).
+/// Composes with and_then (the monad bind, proptest-proven).
+impl<T: Clone> Outcome<Outcome<T>> {
+    pub fn flatten(self) -> Outcome<T> {
+        self.and_then(|inner| inner)
     }
 }

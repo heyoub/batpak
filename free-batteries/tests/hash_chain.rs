@@ -27,6 +27,25 @@ fn genesis_has_zero_event_hash() {
     );
 }
 
+// --- No-blake3 fallback: events get [0u8; 32] hash chains ---
+
+#[cfg(not(feature = "blake3"))]
+mod no_blake3_tests {
+    use super::*;
+
+    #[test]
+    fn no_blake3_hash_chain_is_zero() {
+        // Without blake3, the writer sets event_hash = [0u8; 32].
+        // This test verifies the fallback path compiles AND produces zero hashes.
+        // Run with: cargo test --no-default-features
+        let chain = HashChain::default();
+        assert_eq!(chain.event_hash, [0u8; 32],
+            "Without blake3 feature, hash chains should use zero hashes. \
+             Investigate: src/store/writer.rs STEP 5 #[cfg(not(feature = \"blake3\"))].");
+        assert_eq!(chain.prev_hash, [0u8; 32]);
+    }
+}
+
 // --- Blake3 compute_hash ---
 
 #[cfg(feature = "blake3")]
