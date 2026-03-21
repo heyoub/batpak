@@ -41,12 +41,19 @@ fn walk_ancestors_follows_chain() {
     let last_id = receipts.last().expect("has receipts").event_id;
     let ancestors = store.walk_ancestors(last_id, 10);
 
-    assert!(!ancestors.is_empty(),
-        "walk_ancestors should return at least the event itself. \
-         Investigate: src/store/mod.rs walk_ancestors.");
+    // Must return more than just the starting event — the chain has 5 events
+    assert!(ancestors.len() >= 2,
+        "walk_ancestors should traverse the chain, not just return the start. \
+         Got {} ancestors for a 5-event chain. \
+         Investigate: src/store/mod.rs walk_ancestors.", ancestors.len());
 
     // First ancestor should be the event we started from
     assert_eq!(ancestors[0].event.event_id(), last_id);
+
+    // Second ancestor must be DIFFERENT from the first (chain was traversed)
+    assert_ne!(ancestors[0].event.event_id(), ancestors[1].event.event_id(),
+        "walk_ancestors should return different events along the chain, \
+         not the same event repeated.");
 
     store.close().expect("close");
 }
@@ -66,8 +73,10 @@ fn walk_ancestors_respects_limit() {
     let last_id = entries.last().expect("has entries").event_id;
     let ancestors = store.walk_ancestors(last_id, 2);
 
-    assert!(ancestors.len() <= 2,
-        "walk_ancestors should respect limit. Got {} results for limit=2.",
+    // With a 10-event chain and limit=2, we should get EXACTLY 2 ancestors
+    assert_eq!(ancestors.len(), 2,
+        "walk_ancestors(limit=2) on a 10-event chain should return exactly 2. \
+         Got {}. Investigate: src/store/mod.rs walk_ancestors limit logic.",
         ancestors.len());
 
     store.close().expect("close");
@@ -600,62 +609,112 @@ fn cold_start_skips_corrupt_segment_gracefully() {
 }
 
 #[test]
-fn frame_decode_rejects_bad_crc() {
-    // Direct test of frame_decode with corrupted CRC
+fn corrupt_frame_in_segment_is_detected() {
+    // Write good events, then inject a corrupt frame into the segment file.
+    // Verify cold start detects the corruption (CRC mismatch stops scanning).
+    let dir = TempDir::new().expect("temp dir");
+    let kind = EventKind::custom(0xF, 1);
 
-    // Encode a valid frame
-    let payload = serde_json::json!({"test": "data"});
-    let msgpack = rmp_serde::to_vec_named(&payload).expect("encode");
-    let crc = crc32fast::hash(&msgpack);
-    let len = msgpack.len() as u32;
+    // Phase 1: populate with good data and sync
+    {
+        let config = StoreConfig {
+            data_dir: dir.path().to_path_buf(),
+            sync_every_n_events: 1,
+            ..StoreConfig::default()
+        };
+        let store = Store::open(config).expect("open");
+        let coord = Coordinate::new("entity:crc", "scope:test").expect("valid");
+        for i in 0..3 {
+            store.append(&coord, kind, &serde_json::json!({"i": i})).expect("append");
+        }
+        store.sync().expect("sync");
+        store.close().expect("close");
+    }
 
-    let mut frame = Vec::new();
-    frame.extend_from_slice(&len.to_be_bytes());
-    frame.extend_from_slice(&(crc ^ 0xFFFFFFFF).to_be_bytes()); // corrupt CRC
-    frame.extend_from_slice(&msgpack);
+    // Phase 2: corrupt a segment file by flipping bytes in the middle
+    let segments: Vec<_> = std::fs::read_dir(dir.path())
+        .expect("read dir")
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().map(|ext| ext == "fbat").unwrap_or(false))
+        .collect();
+    assert!(!segments.is_empty(), "Should have segment files");
 
-    // frame_decode is pub in segment module — test via store re-export
-    // Actually, frame_decode is pub(crate), so we can't call it directly.
-    // Instead, verify that a store with a corrupt frame handles it.
-    // This is already covered by the cold_start test above + the CRC check
-    // in segment::frame_decode which is called by reader::scan_segment.
+    let seg_path = segments[0].path();
+    let mut data = std::fs::read(&seg_path).expect("read segment");
+    // Flip bytes near the end of the file (inside a frame's msgpack region)
+    if data.len() > 20 {
+        let mid = data.len() - 10;
+        data[mid] ^= 0xFF;
+        data[mid + 1] ^= 0xFF;
+    }
+    std::fs::write(&seg_path, &data).expect("write corrupted segment");
 
-    // We CAN verify frame_encode + tamper + round-trip via the store.
-    // The corrupt segment test above covers this path.
-    // This test verifies the CRC computation itself.
-    let good_crc = crc32fast::hash(&msgpack);
-    let bad_crc = good_crc ^ 0xFFFFFFFF;
-    assert_ne!(good_crc, bad_crc, "CRC flip should produce different value");
+    // Phase 3: cold start should still open (corrupt frames are skipped/truncated)
+    // but should have fewer events than originally written
+    let config = StoreConfig {
+        data_dir: dir.path().to_path_buf(),
+        ..StoreConfig::default()
+    };
+    // The store may open successfully (skipping corrupt frames) or may error
+    // depending on where the corruption landed. Either behavior is acceptable
+    // — what matters is it doesn't silently return wrong data.
+    match Store::open(config) {
+        Ok(store) => {
+            let stats = store.stats();
+            // Corrupted segment may have fewer events (some frames skipped)
+            // The key assertion: we don't get MORE events than we wrote
+            assert!(stats.event_count <= 3,
+                "Corrupt segment should not produce phantom events. Got {}.",
+                stats.event_count);
+            let _ = store.close();
+        }
+        Err(_) => {
+            // Store rejected the corrupt segment entirely — also acceptable
+        }
+    }
 }
 
 // --- StoreError Display coverage ---
 
 #[test]
 fn store_error_display_variants() {
-    // Exercise Display impl for all StoreError variants
-    let errors: Vec<String> = vec![
-        format!("{}", free_batteries::store::StoreError::NotFound(0xDEAD)),
-        format!("{}", free_batteries::store::StoreError::WriterCrashed),
-        format!("{}", free_batteries::store::StoreError::ShuttingDown),
-        format!("{}", free_batteries::store::StoreError::CacheFailed("test".into())),
-        format!("{}", free_batteries::store::StoreError::DuplicateEvent(123)),
-        format!("{}", free_batteries::store::StoreError::SequenceMismatch {
-            entity: "e".into(), expected: 1, actual: 2
-        }),
-        format!("{}", free_batteries::store::StoreError::CrcMismatch {
-            segment_id: 1, offset: 42
-        }),
-        format!("{}", free_batteries::store::StoreError::CorruptSegment {
-            segment_id: 1, detail: "bad".into()
-        }),
-        format!("{}", free_batteries::store::StoreError::Serialization("oops".into())),
-    ];
+    use free_batteries::store::StoreError;
 
-    // All should produce non-empty, meaningful strings
-    for (i, msg) in errors.iter().enumerate() {
-        assert!(!msg.is_empty(), "StoreError variant {} has empty Display", i);
-        assert!(msg.len() > 5, "StoreError variant {} has suspiciously short Display: '{}'", i, msg);
-    }
+    // Each variant should display its key information, not just a generic string
+    let not_found = format!("{}", StoreError::NotFound(0xDEAD));
+    assert!(not_found.contains("dead"), "NotFound should contain the event ID hex. Got: {not_found}");
+
+    let writer = format!("{}", StoreError::WriterCrashed);
+    assert!(writer.contains("writer") || writer.contains("crash"),
+        "WriterCrashed should mention writer/crash. Got: {writer}");
+
+    let shutting = format!("{}", StoreError::ShuttingDown);
+    assert!(shutting.contains("shut"), "ShuttingDown should mention shutdown. Got: {shutting}");
+
+    let cache = format!("{}", StoreError::CacheFailed("redis timeout".into()));
+    assert!(cache.contains("redis timeout"),
+        "CacheFailed should contain the inner message. Got: {cache}");
+
+    let dup = format!("{}", StoreError::DuplicateEvent(0xBEEF));
+    assert!(dup.contains("beef"), "DuplicateEvent should contain the key hex. Got: {dup}");
+
+    let seq = format!("{}", StoreError::SequenceMismatch {
+        entity: "user:1".into(), expected: 5, actual: 3
+    });
+    assert!(seq.contains("user:1") && seq.contains("5") && seq.contains("3"),
+        "SequenceMismatch should contain entity, expected, actual. Got: {seq}");
+
+    let crc = format!("{}", StoreError::CrcMismatch { segment_id: 7, offset: 42 });
+    assert!(crc.contains("7") && crc.contains("42"),
+        "CrcMismatch should contain segment_id and offset. Got: {crc}");
+
+    let corrupt = format!("{}", StoreError::CorruptSegment { segment_id: 3, detail: "bad magic".into() });
+    assert!(corrupt.contains("bad magic"),
+        "CorruptSegment should contain the detail. Got: {corrupt}");
+
+    let ser = format!("{}", StoreError::Serialization("unexpected EOF".into()));
+    assert!(ser.contains("unexpected EOF"),
+        "Serialization should contain the inner message. Got: {ser}");
 }
 
 // --- CoordinateError Display ---

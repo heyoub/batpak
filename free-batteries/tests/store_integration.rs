@@ -236,17 +236,27 @@ fn concurrent_append_and_query() {
     });
 
     // Reader thread (queries while writes happen)
+    // Verifies: concurrent reads don't crash, and event counts never decrease
     let store_r = std::sync::Arc::clone(&store);
     let reader = std::thread::spawn(move || {
+        let mut max_seen = 0usize;
         for _ in 0..50 {
             let results = store_r.stream("entity:1");
-            // Results should be non-decreasing in count
-            let _ = results.len();
+            let count = results.len();
+            assert!(count >= max_seen,
+                "CONCURRENT READ REGRESSION: event count went from {max_seen} to {count}. \
+                 Events should never disappear during concurrent writes.");
+            max_seen = count;
         }
+        max_seen
     });
 
     writer.join().expect("writer thread");
-    reader.join().expect("reader thread");
+    let max_seen = reader.join().expect("reader thread");
+    // Reader should have seen SOME events (not always 0)
+    assert!(max_seen > 0,
+        "CONCURRENT READ: reader never saw any events during writing. \
+         This suggests reader queries aren't seeing writer commits.");
 
     let stats = store.stats();
     assert_eq!(stats.event_count, 100,
