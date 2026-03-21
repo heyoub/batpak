@@ -8,11 +8,11 @@ pub mod writer;
 
 pub use cursor::Cursor;
 pub use index::{ClockKey, DiskPos, IndexEntry};
-pub use projection::{CacheMeta, Freshness, NoCache, ProjectionCache};
-#[cfg(feature = "redb")]
-pub use projection::RedbCache;
 #[cfg(feature = "lmdb")]
 pub use projection::LmdbCache;
+#[cfg(feature = "redb")]
+pub use projection::RedbCache;
+pub use projection::{CacheMeta, Freshness, NoCache, ProjectionCache};
 pub use subscription::Subscription;
 pub use writer::{Notification, RestartPolicy};
 
@@ -81,17 +81,17 @@ impl StoreConfig {
     pub fn new(data_dir: impl Into<PathBuf>) -> Self {
         Self {
             data_dir: data_dir.into(),
-            segment_max_bytes: 256 * 1024 * 1024,    // 256MB — tune down for embedded
-            sync_every_n_events: 1000,                // durability vs throughput tradeoff
-            fd_budget: 64,                            // LRU FD cache slots
-            writer_channel_capacity: 4096,            // back-pressure threshold
-            broadcast_capacity: 8192,                 // per-subscriber lossy buffer
-            cache_map_size_bytes: 64 * 1024 * 1024,   // 64MB — used by LmdbCache
+            segment_max_bytes: 256 * 1024 * 1024, // 256MB — tune down for embedded
+            sync_every_n_events: 1000,            // durability vs throughput tradeoff
+            fd_budget: 64,                        // LRU FD cache slots
+            writer_channel_capacity: 4096,        // back-pressure threshold
+            broadcast_capacity: 8192,             // per-subscriber lossy buffer
+            cache_map_size_bytes: 64 * 1024 * 1024, // 64MB — used by LmdbCache
             restart_policy: RestartPolicy::default(),
-            shutdown_drain_limit: 1024,               // max queued commands drained on shutdown
-            writer_stack_size: None,                   // OS default (~8MB on Linux)
-            clock: None,                               // SystemTime::now() default
-            sync_mode: SyncMode::default(),            // SyncAll (safest)
+            shutdown_drain_limit: 1024, // max queued commands drained on shutdown
+            writer_stack_size: None,    // OS default (~8MB on Linux)
+            clock: None,                // SystemTime::now() default
+            sync_mode: SyncMode::default(), // SyncAll (safest)
         }
     }
 
@@ -262,6 +262,7 @@ impl Store {
                     causation_id: se.event.header.causation_id,
                     coord,
                     kind: se.event.header.event_kind,
+                    wall_ms: se.event.header.position.wall_ms,
                     clock,
                     hash_chain: se.event.hash_chain.clone().unwrap_or_default(),
                     disk_pos: DiskPos {
@@ -454,11 +455,7 @@ impl Store {
 
     /// PROJECT: reconstruct typed state from events, with cache support.
     /// [SPEC:src/store/mod.rs — Projection Flow]
-    pub fn project<T>(
-        &self,
-        entity: &str,
-        freshness: &Freshness,
-    ) -> Result<Option<T>, StoreError>
+    pub fn project<T>(&self, entity: &str, freshness: &Freshness) -> Result<Option<T>, StoreError>
     where
         T: EventSourced<serde_json::Value> + serde::Serialize + serde::de::DeserializeOwned,
     {
@@ -475,7 +472,11 @@ impl Store {
             let is_fresh = match freshness {
                 Freshness::Consistent => meta.watermark == watermark,
                 Freshness::BestEffort { max_stale_ms } => {
-                    let age_us = self.config.now_us().saturating_sub(meta.cached_at_us).max(0);
+                    let age_us = self
+                        .config
+                        .now_us()
+                        .saturating_sub(meta.cached_at_us)
+                        .max(0);
                     age_us < (*max_stale_ms as i64) * 1000
                 }
             };
@@ -614,7 +615,11 @@ impl Store {
         let entries = std::fs::read_dir(&self.config.data_dir).map_err(StoreError::Io)?;
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().map(|e| e == segment::SEGMENT_EXTENSION).unwrap_or(false) {
+            if path
+                .extension()
+                .map(|e| e == segment::SEGMENT_EXTENSION)
+                .unwrap_or(false)
+            {
                 let dest_path = dest.join(entry.file_name());
                 std::fs::copy(&path, &dest_path).map_err(StoreError::Io)?;
             }
@@ -625,7 +630,10 @@ impl Store {
     /// Compact: merge sealed segments, optionally filtering events.
     /// Returns the number of segments removed and bytes reclaimed.
     /// The active (currently-written) segment is never touched.
-    pub fn compact(&self, config: &CompactionConfig) -> Result<segment::CompactionResult, StoreError> {
+    pub fn compact(
+        &self,
+        config: &CompactionConfig,
+    ) -> Result<segment::CompactionResult, StoreError> {
         self.sync()?;
 
         // 1. Enumerate sealed segment files (not the active one the writer owns).
@@ -635,7 +643,11 @@ impl Store {
             .filter_map(|e| e.ok())
             .filter_map(|e| {
                 let path = e.path();
-                if path.extension().map(|ext| ext == segment::SEGMENT_EXTENSION).unwrap_or(false) {
+                if path
+                    .extension()
+                    .map(|ext| ext == segment::SEGMENT_EXTENSION)
+                    .unwrap_or(false)
+                {
                     path.file_stem()?.to_str()?.parse::<u64>().ok()
                 } else {
                     None
@@ -649,19 +661,30 @@ impl Store {
             .filter_map(|e| e.ok())
             .filter_map(|e| {
                 let path = e.path();
-                let ext_ok = path.extension().map(|ext| ext == segment::SEGMENT_EXTENSION).unwrap_or(false);
-                if !ext_ok { return None; }
-                let seg_id = path.file_stem()
+                let ext_ok = path
+                    .extension()
+                    .map(|ext| ext == segment::SEGMENT_EXTENSION)
+                    .unwrap_or(false);
+                if !ext_ok {
+                    return None;
+                }
+                let seg_id = path
+                    .file_stem()
                     .and_then(|s| s.to_str())
                     .and_then(|s| s.parse::<u64>().ok())?;
-                if seg_id >= active_segment_id { return None; } // skip active
+                if seg_id >= active_segment_id {
+                    return None;
+                } // skip active
                 Some((seg_id, path))
             })
             .collect();
         sealed.sort_by_key(|(id, _)| *id);
 
         if sealed.len() < config.min_segments {
-            return Ok(segment::CompactionResult { segments_removed: 0, bytes_reclaimed: 0 });
+            return Ok(segment::CompactionResult {
+                segments_removed: 0,
+                bytes_reclaimed: 0,
+            });
         }
 
         // 2. Read all events from sealed segments
@@ -711,7 +734,10 @@ impl Store {
         // 4. Create merged segment.
         // Use the lowest sealed ID for the merged segment (reuse it).
         let merged_id = sealed[0].0;
-        let merged_path = self.config.data_dir.join(segment::segment_filename(merged_id));
+        let merged_path = self
+            .config
+            .data_dir
+            .join(segment::segment_filename(merged_id));
 
         // Evict FDs for ALL sealed segments before removing files
         for (seg_id, _) in &sealed {
@@ -719,10 +745,8 @@ impl Store {
         }
 
         let _ = std::fs::remove_file(&merged_path); // remove the existing file at merged_id
-        let mut merged_segment = segment::Segment::<segment::Active>::create(
-            &self.config.data_dir,
-            merged_id,
-        )?;
+        let mut merged_segment =
+            segment::Segment::<segment::Active>::create(&self.config.data_dir, merged_id)?;
 
         // 5. Write kept events to merged segment
         for entry in &kept_events {
@@ -742,7 +766,9 @@ impl Store {
         let mut bytes_reclaimed: u64 = 0;
         let mut segments_removed: usize = 0;
         for (seg_id, path) in &sealed {
-            if *seg_id == merged_id { continue; } // already replaced
+            if *seg_id == merged_id {
+                continue;
+            } // already replaced
             if let Ok(meta) = std::fs::metadata(path) {
                 bytes_reclaimed += meta.len();
             }
@@ -777,6 +803,7 @@ impl Store {
                     causation_id: se.event.header.causation_id,
                     coord,
                     kind: se.event.header.event_kind,
+                    wall_ms: se.event.header.position.wall_ms,
                     clock,
                     hash_chain: se.event.hash_chain.clone().unwrap_or_default(),
                     disk_pos: DiskPos {
@@ -790,7 +817,10 @@ impl Store {
             }
         }
 
-        Ok(segment::CompactionResult { segments_removed, bytes_reclaimed })
+        Ok(segment::CompactionResult {
+            segments_removed,
+            bytes_reclaimed,
+        })
     }
 
     pub fn close(self) -> Result<(), StoreError> {

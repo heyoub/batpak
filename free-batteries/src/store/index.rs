@@ -28,10 +28,14 @@ pub(crate) struct StoreIndex {
     pub(crate) entity_locks: DashMap<Arc<str>, Arc<parking_lot::Mutex<()>>>,
 }
 
-/// ClockKey: BTreeMap key. Ord: clock-first, uuid tiebreak.
+/// ClockKey: BTreeMap key. Ord: wall_ms-first, then clock, then uuid tiebreak.
+/// wall_ms enables global causal ordering across entities (HLC layer 1).
 /// [SPEC:IMPLEMENTATION NOTES item 1]
+/// [CROSS-POLLINATION:czap/hlc.ts — HLC 3-tier comparison]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ClockKey {
+    /// HLC wall clock milliseconds — global ordering across entities.
+    pub wall_ms: u64,
     pub clock: u32,
     pub uuid: u128,
 }
@@ -44,6 +48,8 @@ pub struct IndexEntry {
     pub causation_id: Option<u128>,
     pub coord: Coordinate,
     pub kind: EventKind,
+    /// HLC wall clock milliseconds — for global causal ordering.
+    pub wall_ms: u64,
     pub clock: u32,
     pub hash_chain: HashChain,
     pub disk_pos: DiskPos,
@@ -60,8 +66,9 @@ pub struct DiskPos {
 
 impl Ord for ClockKey {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.clock
-            .cmp(&other.clock)
+        self.wall_ms
+            .cmp(&other.wall_ms)
+            .then(self.clock.cmp(&other.clock))
             .then(self.uuid.cmp(&other.uuid))
     }
 }
@@ -107,6 +114,7 @@ impl StoreIndex {
         let entity = entry.coord.entity_arc();
         let scope = entry.coord.scope_arc();
         let key = ClockKey {
+            wall_ms: entry.wall_ms,
             clock: entry.clock,
             uuid: entry.event_id,
         };
@@ -273,5 +281,4 @@ impl StoreIndex {
         self.len.store(0, Ordering::Relaxed);
         // entity_locks intentionally NOT cleared — writer may hold references
     }
-
 }

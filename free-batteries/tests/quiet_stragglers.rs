@@ -840,8 +840,8 @@ fn dag_position_display() {
     let pos = DagPosition::new(1, 2, 3);
     assert_eq!(
         format!("{pos}"),
-        "1:2:3",
-        "PROPERTY: DagPosition Display must format as 'depth:lane:sequence'.\n\
+        "1:2:3@0.0",
+        "PROPERTY: DagPosition Display must format as 'depth:lane:sequence@wall_ms.counter'.\n\
          Investigate: src/coordinate/position.rs DagPosition Display impl.\n\
          Common causes: Display outputting fields in wrong order (e.g. sequence:lane:depth), \
          using a different separator than ':', or printing only some fields.\n\
