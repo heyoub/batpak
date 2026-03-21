@@ -29,10 +29,12 @@ heed = { version = "0.20", optional = true }
 
 [dev-dependencies]
 proptest = "1"
+arbitrary = { version = "1", features = ["derive"] }
 criterion = { version = "0.5", features = ["html_reports"] }
 tempfile = "3"
 trybuild = "1"
 tokio = { version = "1", features = ["rt", "macros"] }
+rand = "0.8"
 
 [lints.clippy]
 dbg_macro = "deny"

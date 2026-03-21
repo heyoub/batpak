@@ -45,6 +45,29 @@ bench-save:
 bench-compare:
     ./scripts/bench-report --compare
 
+# Fuzz testing (proptest-based, high iteration count)
+fuzz:
+    PROPTEST_CASES=10000 cargo test --test fuzz_targets --all-features --release -- --nocapture
+
+# Deep fuzz (100K iterations per target)
+fuzz-deep:
+    PROPTEST_CASES=100000 cargo test --test fuzz_targets --all-features --release -- --nocapture
+
+# Chaos testing
+chaos:
+    CHAOS_ITERATIONS=2000 cargo test --test chaos_testing --all-features --release -- --nocapture
+
+# Extended chaos (5K iterations per chaos scenario)
+chaos-deep:
+    CHAOS_ITERATIONS=5000 cargo test --test chaos_testing --all-features --release -- --nocapture
+
+# Full fuzz+chaos feedback loop (gates → extended load)
+fuzz-chaos:
+    cargo test --test fuzz_chaos_feedback --all-features --release -- --nocapture
+
+# Everything: fuzz + chaos + feedback loop + benchmarks
+stress: fuzz chaos fuzz-chaos bench
+
 doc:
     cargo doc --all-features --no-deps --open
 
