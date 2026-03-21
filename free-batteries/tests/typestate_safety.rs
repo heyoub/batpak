@@ -6,4 +6,5 @@
 fn compile_fail_tests() {
     let t = trybuild::TestCases::new();
     t.compile_fail("tests/ui/forge_receipt.rs");
+    t.compile_fail("tests/ui/invalid_transition.rs");
 }

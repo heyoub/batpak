@@ -1,5 +1,13 @@
-//! Benchmark: cache hit vs miss for EventSourced projection.
+//! Benchmark: projection replay latency for EventSourced.
 //! [SPEC:benches/projection_latency.rs]
+//!
+//! NOTE: Store::project() currently always replays from segments (the _cache
+//! field is not yet wired into the projection path). Both benchmarks measure
+//! segment replay; "replay_cold" is the first read (OS page cache cold),
+//! "replay_warm" is after the data is in the OS page cache.
+//!
+//! When the ProjectionCache is wired into project(), add a "redb_cache_hit"
+//! / "redb_cache_miss" benchmark group gated behind #[cfg(feature = "redb")].
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use free_batteries::prelude::*;
@@ -34,8 +42,8 @@ impl EventSourced<serde_json::Value> for Counter {
     }
 }
 
-fn bench_projection_latency(c: &mut Criterion) {
-    let mut group = c.benchmark_group("projection_latency");
+fn bench_projection_replay(c: &mut Criterion) {
+    let mut group = c.benchmark_group("projection_replay");
 
     // Setup: populate a store with events for one entity
     let dir = TempDir::new().expect("create temp dir");
@@ -52,7 +60,9 @@ fn bench_projection_latency(c: &mut Criterion) {
     }
     store.sync().expect("sync");
 
-    group.bench_function("cache_miss", |b| {
+    // replay_cold: first projection after store open.
+    // OS page cache may or may not have the segment data.
+    group.bench_function("replay_cold", |b| {
         b.iter(|| {
             let _: Option<Counter> = store
                 .project("bench:entity", Freshness::Consistent)
@@ -60,12 +70,14 @@ fn bench_projection_latency(c: &mut Criterion) {
         });
     });
 
-    // Cache hit: project once to warm cache, then measure subsequent calls.
+    // replay_warm: project once to populate OS page cache, then measure.
+    // Both runs do full segment replay (NoCache), but warm benefits from
+    // OS-level page caching of the segment files.
     let _: Option<Counter> = store
         .project("bench:entity", Freshness::Consistent)
-        .expect("warm cache");
+        .expect("warm OS page cache");
 
-    group.bench_function("cache_hit", |b| {
+    group.bench_function("replay_warm", |b| {
         b.iter(|| {
             let _: Option<Counter> = store
                 .project("bench:entity", Freshness::Consistent)
@@ -77,5 +89,5 @@ fn bench_projection_latency(c: &mut Criterion) {
     store.close().expect("close");
 }
 
-criterion_group!(benches, bench_projection_latency);
+criterion_group!(benches, bench_projection_replay);
 criterion_main!(benches);

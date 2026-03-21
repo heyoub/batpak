@@ -81,7 +81,11 @@ fn cold_start_1k_events_under_threshold() {
 
     // Dogfood: use our own Gate system to validate performance
     let mut gates = GateSet::new();
-    gates.push(ColdStartGate { max_ms: 2000 }); // 2s threshold for 1K events (generous for CI)
+    // SPEC target: cold start < 200ms for 1K events on production hardware.
+    // CI threshold: 2000ms (10x) because CI runners are slow, virtualized, and
+    // share resources. The criterion bench (benches/cold_start.rs) tracks the
+    // actual distribution — this gate catches gross regressions.
+    gates.push(ColdStartGate { max_ms: 2000 });
 
     let ctx = ColdStartContext {
         cold_start_ms,
@@ -97,7 +101,11 @@ fn cold_start_1k_events_under_threshold() {
             assert_eq!(
                 gate_names,
                 vec!["cold_start_performance"],
-                "Gate should report its name in the receipt."
+                "PROPERTY: GateSet receipt must record the gate name 'cold_start_performance'.\n\
+                 Investigate: src/guard/mod.rs GateSet::evaluate() receipt gate_names collection.\n\
+                 Common causes: Gate::name() not being called or stored in the receipt, \
+                 or receipt.into_parts() returning an empty name list.\n\
+                 Run: cargo test --test self_benchmark cold_start_1k_events_under_threshold"
             );
             eprintln!(
                 "SELF-BENCHMARK: cold start for 1K events: {}ms (passed {})",
@@ -135,8 +143,11 @@ fn cold_start_gate_rejects_slow() {
     let result = gates.evaluate(&ctx, proposal);
     assert!(
         result.is_err(),
-        "Gate should reject cold start that exceeds threshold. \
-         If this test passes incorrectly, the self-benchmark dogfood is broken."
+        "PROPERTY: ColdStartGate must reject a cold start that exceeds the configured max_ms.\n\
+         Investigate: src/guard/mod.rs GateSet::evaluate() ColdStartGate::evaluate().\n\
+         Common causes: Gate::evaluate() ignoring the threshold and always returning Ok, \
+         or GateSet::evaluate() not propagating Denial from a gate.\n\
+         Run: cargo test --test self_benchmark cold_start_gate_rejects_slow"
     );
 }
 
@@ -374,27 +385,62 @@ fn multi_gate_collects_all_denials() {
     assert_eq!(
         denials.len(),
         3,
-        "evaluate_all should report ALL 3 failures, not fail-fast. Got {}.",
-        denials.len()
+        "PROPERTY: evaluate_all must collect ALL 3 gate failures, not stop at the first denial.\n\
+         Investigate: src/guard/mod.rs GateSet::evaluate_all().\n\
+         Common causes: evaluate_all() short-circuiting on first Err like evaluate() does, \
+         or not iterating all gates before returning.\n\
+         Run: cargo test --test self_benchmark multi_gate_collects_all_denials"
     );
 
     // Verify each denial points to the right gate and has actionable context
-    assert_eq!(denials[0].gate, "write_throughput");
-    assert_eq!(denials[1].gate, "query_latency");
-    assert_eq!(denials[2].gate, "projection_replay");
+    assert_eq!(
+        denials[0].gate, "write_throughput",
+        "PROPERTY: First denial gate name must be 'write_throughput' (gates evaluated in order).\n\
+         Investigate: src/guard/mod.rs GateSet::evaluate_all() gate ordering.\n\
+         Common causes: evaluate_all() not preserving insertion order, or \
+         gate names being overwritten with a generic label.\n\
+         Run: cargo test --test self_benchmark multi_gate_collects_all_denials"
+    );
+    assert_eq!(
+        denials[1].gate, "query_latency",
+        "PROPERTY: Second denial gate name must be 'query_latency' (gates evaluated in order).\n\
+         Investigate: src/guard/mod.rs GateSet::evaluate_all() gate ordering.\n\
+         Common causes: evaluate_all() not preserving insertion order of gates.\n\
+         Run: cargo test --test self_benchmark multi_gate_collects_all_denials"
+    );
+    assert_eq!(
+        denials[2].gate,
+        "projection_replay",
+        "PROPERTY: Third denial gate name must be 'projection_replay' (gates evaluated in order).\n\
+         Investigate: src/guard/mod.rs GateSet::evaluate_all() gate ordering.\n\
+         Common causes: evaluate_all() not preserving insertion order of gates.\n\
+         Run: cargo test --test self_benchmark multi_gate_collects_all_denials"
+    );
 
     // Verify context has the "investigate" pointers
     assert!(
         denials[0].message.contains("writer.rs"),
-        "Denial should point to file to investigate"
+        "PROPERTY: WriteThroughputGate denial must point to src/store/writer.rs for investigation.\n\
+         Investigate: WriteThroughputGate::evaluate() denial message in tests/self_benchmark.rs.\n\
+         Common causes: Gate message missing 'writer.rs' investigation pointer, or \
+         message format changed without updating this assertion.\n\
+         Run: cargo test --test self_benchmark multi_gate_collects_all_denials"
     );
     assert!(
         denials[1].message.contains("index.rs"),
-        "Denial should point to file to investigate"
+        "PROPERTY: QueryLatencyGate denial must point to src/store/index.rs for investigation.\n\
+         Investigate: QueryLatencyGate::evaluate() denial message in tests/self_benchmark.rs.\n\
+         Common causes: Gate message missing 'index.rs' investigation pointer, or \
+         message format changed without updating this assertion.\n\
+         Run: cargo test --test self_benchmark multi_gate_collects_all_denials"
     );
     assert!(
         denials[2].message.contains("reader.rs"),
-        "Denial should point to file to investigate"
+        "PROPERTY: ProjectionGate denial must point to src/store/reader.rs for investigation.\n\
+         Investigate: ProjectionGate::evaluate() denial message in tests/self_benchmark.rs.\n\
+         Common causes: Gate message missing 'reader.rs' investigation pointer, or \
+         message format changed without updating this assertion.\n\
+         Run: cargo test --test self_benchmark multi_gate_collects_all_denials"
     );
 }
 
@@ -710,15 +756,22 @@ fn correctness_gates_fire_on_violations() {
     assert_eq!(
         denials.len(),
         6,
-        "All 6 correctness gates should fire when all properties are violated. Got {}.",
-        denials.len()
+        "PROPERTY: All 6 correctness gates must fire when all properties are violated.\n\
+         Investigate: src/guard/mod.rs GateSet::evaluate_all() tests/self_benchmark.rs correctness gates.\n\
+         Common causes: evaluate_all() stopping early after fewer than 6 denials, or \
+         one of the correctness gates returning Ok even when the property is false.\n\
+         Run: cargo test --test self_benchmark correctness_gates_fire_on_violations"
     );
 
     // Every denial should contain an investigation pointer
     for d in &denials {
         assert!(
             d.message.contains("Investigate:"),
-            "Denial [{gate}] should point to source file. Message: {msg}",
+            "PROPERTY: Every correctness gate denial must include an 'Investigate:' pointer to a source file.\n\
+             Investigate: tests/self_benchmark.rs [{gate}] Gate::evaluate() denial message: {msg}.\n\
+             Common causes: Gate denial message not including the 'Investigate:' keyword, or \
+             denial constructed with an empty message string.\n\
+             Run: cargo test --test self_benchmark correctness_gates_fire_on_violations",
             gate = d.gate,
             msg = d.message
         );

@@ -100,7 +100,12 @@ proptest! {
     #[test]
     fn zip_both_ok(a in any::<i32>(), b in any::<i32>()) {
         let result = free_batteries::outcome::zip(Outcome::Ok(a), Outcome::Ok(b));
-        prop_assert_eq!(result, Outcome::Ok((a, b)));
+        prop_assert_eq!(result, Outcome::Ok((a, b)),
+            "ZIP COMMUTATIVITY: zip(Ok({}), Ok({})) should produce Ok(({}, {})).\n\
+             Investigate: src/outcome/combine.rs zip.\n\
+             Common causes: zip not pairing Ok values, returning wrong variant.\n\
+             Run: cargo test --test monad_laws zip_both_ok",
+            a, b, a, b);
     }
 
     // --- JOIN_ALL: all Ok gives Ok(Vec) ---
@@ -127,7 +132,11 @@ proptest! {
         outcomes.push(Outcome::Ok(42)); // should never be reached
         let result = free_batteries::outcome::join_all(outcomes);
         match result {
-            Outcome::Err(e) => prop_assert_eq!(e.message, "test error"),
+            Outcome::Err(e) => prop_assert_eq!(e.message, "test error",
+                "JOIN_ALL SHORT-CIRCUIT: join_all should propagate the Err message unchanged.\n\
+                 Investigate: src/outcome/combine.rs join_all.\n\
+                 Common causes: error message overwritten or not forwarded from Err variant.\n\
+                 Run: cargo test --test monad_laws join_all_first_err_wins"),
             other => prop_assert!(false, "Expected Err, got {:?}", other),
         }
     }

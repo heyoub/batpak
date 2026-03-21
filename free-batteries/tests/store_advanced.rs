@@ -44,21 +44,30 @@ fn walk_ancestors_follows_chain() {
     // Must return more than just the starting event — the chain has 5 events
     assert!(
         ancestors.len() >= 2,
-        "walk_ancestors should traverse the chain, not just return the start. \
-         Got {} ancestors for a 5-event chain. \
-         Investigate: src/store/mod.rs walk_ancestors.",
-        ancestors.len()
+        "PROPERTY: walk_ancestors must traverse the hash chain and return at least 2 entries for a 5-event chain.\n\
+         Investigate: src/store/mod.rs walk_ancestors.\n\
+         Common causes: walk stops after the anchor event, parent pointer not followed past first entry.\n\
+         Run: cargo test --test store_advanced walk_ancestors_follows_chain"
     );
 
     // First ancestor should be the event we started from
-    assert_eq!(ancestors[0].event.event_id(), last_id);
+    assert_eq!(
+        ancestors[0].event.event_id(),
+        last_id,
+        "PROPERTY: walk_ancestors first result must be the starting event.\n\
+         Investigate: src/store/mod.rs walk_ancestors.\n\
+         Common causes: off-by-one in initial anchor insertion, wrong field returned.\n\
+         Run: cargo test --test store_advanced walk_ancestors_follows_chain"
+    );
 
     // Second ancestor must be DIFFERENT from the first (chain was traversed)
     assert_ne!(
         ancestors[0].event.event_id(),
         ancestors[1].event.event_id(),
-        "walk_ancestors should return different events along the chain, \
-         not the same event repeated."
+        "PROPERTY: walk_ancestors must return distinct events along the hash chain.\n\
+         Investigate: src/store/mod.rs walk_ancestors.\n\
+         Common causes: parent-pointer not followed, same entry re-inserted in loop.\n\
+         Run: cargo test --test store_advanced walk_ancestors_follows_chain"
     );
 
     store.close().expect("close");
@@ -83,9 +92,10 @@ fn walk_ancestors_respects_limit() {
     assert_eq!(
         ancestors.len(),
         2,
-        "walk_ancestors(limit=2) on a 10-event chain should return exactly 2. \
-         Got {}. Investigate: src/store/mod.rs walk_ancestors limit logic.",
-        ancestors.len()
+        "PROPERTY: walk_ancestors(limit=2) on a 10-event chain must return exactly 2 entries.\n\
+         Investigate: src/store/mod.rs walk_ancestors limit logic.\n\
+         Common causes: limit parameter ignored, off-by-one in loop termination condition.\n\
+         Run: cargo test --test store_advanced walk_ancestors_respects_limit"
     );
 
     store.close().expect("close");
@@ -123,8 +133,10 @@ fn snapshot_copies_segments() {
 
     assert!(
         fbat_count > 0,
-        "SNAPSHOT FAILED: destination should contain .fbat segment files. \
-         Investigate: src/store/mod.rs snapshot()."
+        "PROPERTY: snapshot destination must contain at least one .fbat segment file.\n\
+         Investigate: src/store/mod.rs snapshot.\n\
+         Common causes: snapshot copies to wrong directory, segment files flushed after snapshot call.\n\
+         Run: cargo test --test store_advanced snapshot_copies_segments"
     );
 
     // Verify: can open a store from the snapshot
@@ -136,8 +148,10 @@ fn snapshot_copies_segments() {
     let stats = snap_store.stats();
     assert_eq!(
         stats.event_count, 10,
-        "Snapshot store should have same event count. Got {}.",
-        stats.event_count
+        "PROPERTY: snapshot must preserve full event count — no events lost during copy.\n\
+         Investigate: src/store/mod.rs snapshot.\n\
+         Common causes: segment file not flushed before copy, partial write, index not rebuilt.\n\
+         Run: cargo test --test store_advanced snapshot_copies_segments"
     );
 
     snap_store.close().expect("close snap");
@@ -151,9 +165,28 @@ fn diagnostics_reports_config() {
     let (store, dir) = test_store();
     let diag = store.diagnostics();
 
-    assert_eq!(diag.data_dir, dir.path().to_path_buf());
-    assert_eq!(diag.segment_max_bytes, 4096);
-    assert_eq!(diag.event_count, 0);
+    assert_eq!(
+        diag.data_dir,
+        dir.path().to_path_buf(),
+        "PROPERTY: diagnostics must report the configured data_dir unchanged.\n\
+         Investigate: src/store/mod.rs diagnostics.\n\
+         Common causes: diagnostics returns a different field, path normalisation mismatch.\n\
+         Run: cargo test --test store_advanced diagnostics_reports_config"
+    );
+    assert_eq!(
+        diag.segment_max_bytes, 4096,
+        "PROPERTY: diagnostics must report the configured segment_max_bytes.\n\
+         Investigate: src/store/mod.rs diagnostics.\n\
+         Common causes: StoreConfig not propagated into inner state, field name mismatch.\n\
+         Run: cargo test --test store_advanced diagnostics_reports_config"
+    );
+    assert_eq!(
+        diag.event_count, 0,
+        "PROPERTY: diagnostics on an empty store must report event_count == 0.\n\
+         Investigate: src/store/mod.rs diagnostics.\n\
+         Common causes: counter not reset on open, leftover state from previous run.\n\
+         Run: cargo test --test store_advanced diagnostics_reports_config"
+    );
 
     store.close().expect("close");
 }
@@ -184,13 +217,33 @@ fn append_reaction_links_causation() {
         .expect("reaction append");
 
     // Verify: reaction has different event_id
-    assert_ne!(root.event_id, reaction.event_id);
+    assert_ne!(
+        root.event_id, reaction.event_id,
+        "PROPERTY: append_reaction must produce a new unique event_id distinct from its cause.\n\
+         Investigate: src/store/mod.rs append_reaction.\n\
+         Common causes: event_id generation reuses the cause ID, hash collision in tiny test set.\n\
+         Run: cargo test --test store_advanced append_reaction_links_causation"
+    );
 
     // Verify: can retrieve both
     let root_stored = store.get(root.event_id).expect("get root");
     let react_stored = store.get(reaction.event_id).expect("get reaction");
-    assert_eq!(root_stored.event.event_kind(), kind_cmd);
-    assert_eq!(react_stored.event.event_kind(), kind_evt);
+    assert_eq!(
+        root_stored.event.event_kind(),
+        kind_cmd,
+        "PROPERTY: root event must retain its original EventKind after being stored.\n\
+         Investigate: src/store/mod.rs append, src/store/segment.rs write_frame.\n\
+         Common causes: event_kind field not serialised, wrong frame read back.\n\
+         Run: cargo test --test store_advanced append_reaction_links_causation"
+    );
+    assert_eq!(
+        react_stored.event.event_kind(),
+        kind_evt,
+        "PROPERTY: reaction event must retain its EventKind (kind_evt) after storage.\n\
+         Investigate: src/store/mod.rs append_reaction, src/store/segment.rs write_frame.\n\
+         Common causes: reaction inherits cause kind instead of its own, serialisation bug.\n\
+         Run: cargo test --test store_advanced append_reaction_links_causation"
+    );
 
     store.close().expect("close");
 }
@@ -218,8 +271,10 @@ fn cas_fails_on_wrong_sequence() {
     let result = store.append_with_options(&coord, kind, &serde_json::json!({"x": 3}), opts);
     assert!(
         result.is_err(),
-        "CAS should fail when expected_sequence is stale. \
-         Investigate: src/store/mod.rs append_with_options CAS check."
+        "PROPERTY: append_with_options must return Err when expected_sequence is stale (CAS failure).\n\
+         Investigate: src/store/mod.rs append_with_options CAS check.\n\
+         Common causes: sequence comparison uses wrong field, CAS check skipped under lock.\n\
+         Run: cargo test --test store_advanced cas_fails_on_wrong_sequence"
     );
 
     store.close().expect("close");
@@ -250,13 +305,21 @@ fn idempotency_returns_same_receipt() {
 
     assert_eq!(
         r1.event_id, r2.event_id,
-        "IDEMPOTENCY BROKEN: same key should return same event_id. \
-         Investigate: src/store/mod.rs append_with_options idempotency check."
+        "PROPERTY: append_with_options with the same idempotency_key must return the same event_id.\n\
+         Investigate: src/store/mod.rs append_with_options idempotency check.\n\
+         Common causes: idempotency key not stored after first write, key lookup hash collision.\n\
+         Run: cargo test --test store_advanced idempotency_returns_same_receipt"
     );
 
     // Only 1 event should exist
     let stats = store.stats();
-    assert_eq!(stats.event_count, 1);
+    assert_eq!(
+        stats.event_count, 1,
+        "PROPERTY: idempotent appends must not increase event_count — only one event must be stored.\n\
+         Investigate: src/store/mod.rs append_with_options idempotency check.\n\
+         Common causes: idempotency key lookup misses in-memory cache, duplicate written to segment.\n\
+         Run: cargo test --test store_advanced idempotency_returns_same_receipt"
+    );
 
     store.close().expect("close");
 }
@@ -296,9 +359,10 @@ fn subscription_receives_matching_events() {
     }
     assert_eq!(
         count, 3,
-        "SUBSCRIPTION FAILED: expected 3 notifications, got {}. \
-         Investigate: src/store/subscription.rs and writer broadcast.",
-        count
+        "PROPERTY: subscription must deliver exactly 3 notifications for 3 matching appends.\n\
+         Investigate: src/store/subscription.rs, src/store/mod.rs writer broadcast.\n\
+         Common causes: broadcast channel dropped before all events sent, region filter too narrow.\n\
+         Run: cargo test --test store_advanced subscription_receives_matching_events"
     );
 
     store.sync().expect("sync");
@@ -340,8 +404,10 @@ fn subscription_filters_by_region() {
     }
     assert_eq!(
         matching, 2,
-        "SUBSCRIPTION FILTER FAILED: expected 2 entity:a notifications, got {}.",
-        matching
+        "PROPERTY: subscription filtered to entity:a must match exactly 2 of 3 appended events.\n\
+         Investigate: src/store/subscription.rs region filter, src/store/mod.rs broadcast.\n\
+         Common causes: region predicate not applied, entity prefix match too broad or too narrow.\n\
+         Run: cargo test --test store_advanced subscription_filters_by_region"
     );
 
     store.sync().expect("sync");
@@ -372,16 +438,20 @@ fn cursor_polls_events_in_order() {
     assert_eq!(
         polled.len(),
         5,
-        "CURSOR POLL FAILED: expected 5 events, got {}. \
-         Investigate: src/store/cursor.rs poll().",
-        polled.len()
+        "PROPERTY: cursor must yield all 5 appended events when polled to exhaustion.\n\
+         Investigate: src/store/cursor.rs poll.\n\
+         Common causes: cursor stops at segment boundary, region filter drops valid events.\n\
+         Run: cargo test --test store_advanced cursor_polls_events_in_order"
     );
 
     // Verify global_sequence is monotonically increasing
     for window in polled.windows(2) {
         assert!(
             window[0].global_sequence < window[1].global_sequence,
-            "Cursor events should be ordered by global_sequence."
+            "PROPERTY: cursor must yield events in strictly ascending global_sequence order.\n\
+             Investigate: src/store/cursor.rs poll.\n\
+             Common causes: cursor index not sorted on open, iterator yields unordered segments.\n\
+             Run: cargo test --test store_advanced cursor_polls_events_in_order"
         );
     }
 
@@ -407,21 +477,40 @@ fn cursor_poll_batch_respects_max() {
     assert_eq!(
         batch1.len(),
         3,
-        "poll_batch(3) should return exactly 3 events. Got {}.",
-        batch1.len()
+        "PROPERTY: first poll_batch(3) on a 10-event stream must return exactly 3 events.\n\
+         Investigate: src/store/cursor.rs poll_batch.\n\
+         Common causes: max parameter ignored, cursor yields all remaining instead of bounded slice.\n\
+         Run: cargo test --test store_advanced cursor_poll_batch_respects_max"
     );
 
     let batch2 = cursor.poll_batch(3);
-    assert_eq!(batch2.len(), 3, "Second batch should have 3 more.");
+    assert_eq!(
+        batch2.len(),
+        3,
+        "PROPERTY: second poll_batch(3) must return exactly 3 more events.\n\
+         Investigate: src/store/cursor.rs poll_batch.\n\
+         Common causes: cursor position not advanced after first batch, events re-yielded.\n\
+         Run: cargo test --test store_advanced cursor_poll_batch_respects_max"
+    );
 
     let batch3 = cursor.poll_batch(100);
-    assert_eq!(batch3.len(), 4, "Third batch should have remaining 4.");
+    assert_eq!(
+        batch3.len(),
+        4,
+        "PROPERTY: third poll_batch must return the remaining 4 events.\n\
+         Investigate: src/store/cursor.rs poll_batch.\n\
+         Common causes: cursor position drifts, batch limit applied incorrectly to remainder.\n\
+         Run: cargo test --test store_advanced cursor_poll_batch_respects_max"
+    );
 
     let batch4 = cursor.poll_batch(100);
     assert_eq!(
         batch4.len(),
         0,
-        "Fourth batch should be empty (all consumed)."
+        "PROPERTY: poll_batch on an exhausted cursor must return an empty batch.\n\
+         Investigate: src/store/cursor.rs poll_batch.\n\
+         Common causes: cursor resets on empty, returns stale events after stream end.\n\
+         Run: cargo test --test store_advanced cursor_poll_batch_respects_max"
     );
 
     store.close().expect("close");
@@ -446,8 +535,10 @@ fn compact_does_not_lose_data() {
     let stats = store.stats();
     assert_eq!(
         stats.event_count, 5,
-        "compact() should not lose data. Got {} events.",
-        stats.event_count
+        "PROPERTY: compact() must not lose any events — all 5 appended events must remain.\n\
+         Investigate: src/store/mod.rs compact, src/store/segment.rs compaction path.\n\
+         Common causes: compaction drops events below tombstone horizon, segment replaced before flush.\n\
+         Run: cargo test --test store_advanced compact_does_not_lose_data"
     );
 
     store.close().expect("close");
@@ -465,8 +556,21 @@ fn open_default_uses_default_config() {
     };
     let store = Store::open(config).expect("open");
     let diag = store.diagnostics();
-    assert_eq!(diag.segment_max_bytes, 256 * 1024 * 1024); // 256MB default
-    assert_eq!(diag.fd_budget, 64);
+    assert_eq!(
+        diag.segment_max_bytes,
+        256 * 1024 * 1024,
+        "PROPERTY: default StoreConfig must set segment_max_bytes to 256 MiB.\n\
+         Investigate: src/store/mod.rs StoreConfig::default.\n\
+         Common causes: default constant changed, field wired to wrong config value.\n\
+         Run: cargo test --test store_advanced open_default_uses_default_config"
+    ); // 256MB default
+    assert_eq!(
+        diag.fd_budget, 64,
+        "PROPERTY: default StoreConfig must set fd_budget to 64.\n\
+         Investigate: src/store/mod.rs StoreConfig::default.\n\
+         Common causes: default constant changed, fd_budget not propagated into diagnostics.\n\
+         Run: cargo test --test store_advanced open_default_uses_default_config"
+    );
     store.close().expect("close");
 }
 
@@ -478,7 +582,10 @@ fn get_nonexistent_returns_not_found() {
     let result = store.get(0xDEAD);
     assert!(
         result.is_err(),
-        "get() of nonexistent event should return Err"
+        "PROPERTY: get() of a nonexistent event_id must return Err(StoreError::NotFound).\n\
+         Investigate: src/store/mod.rs get, src/store/reader.rs lookup.\n\
+         Common causes: index returns a default entry instead of None, error type suppressed.\n\
+         Run: cargo test --test store_advanced get_nonexistent_returns_not_found"
     );
     store.close().expect("close");
 }
@@ -503,8 +610,21 @@ fn apply_transition_persists_event() {
 
     // Verify: event persisted and retrievable
     let stored = store.get(receipt.event_id).expect("get transition event");
-    assert_eq!(stored.event.event_kind(), kind);
-    assert_eq!(stored.coordinate, coord);
+    assert_eq!(
+        stored.event.event_kind(),
+        kind,
+        "PROPERTY: apply_transition must persist the EventKind carried by the Transition.\n\
+         Investigate: src/store/mod.rs apply_transition, src/typestate/mod.rs Transition.\n\
+         Common causes: transition payload serialised without kind, wrong kind written to frame.\n\
+         Run: cargo test --test store_advanced apply_transition_persists_event"
+    );
+    assert_eq!(
+        stored.coordinate, coord,
+        "PROPERTY: apply_transition must persist the event under the supplied Coordinate.\n\
+         Investigate: src/store/mod.rs apply_transition.\n\
+         Common causes: coordinate not forwarded to inner append call, coordinate field swapped.\n\
+         Run: cargo test --test store_advanced apply_transition_persists_event"
+    );
 
     store.close().expect("close");
 }
@@ -531,16 +651,20 @@ fn query_with_clock_range_filters_events() {
     assert_eq!(
         results.len(),
         5,
-        "CLOCK RANGE FAILED: expected 5 events in clock range [3,7], got {}. \
-         Investigate: src/store/index.rs query() clock_range filter.",
-        results.len()
+        "PROPERTY: clock_range [3,7] query must return exactly 5 events (clocks 3,4,5,6,7).\n\
+         Investigate: src/store/index.rs query clock_range filter.\n\
+         Common causes: range bounds exclusive instead of inclusive, clock field misread from frame.\n\
+         Run: cargo test --test store_advanced query_with_clock_range_filters_events"
     );
 
     // Verify all results have clock in [3, 7]
     for entry in &results {
         assert!(
             entry.clock >= 3 && entry.clock <= 7,
-            "Event clock {} outside range [3,7]",
+            "PROPERTY: every result from a clock_range [3,7] query must have clock in [3,7], got {}.\n\
+             Investigate: src/store/index.rs query clock_range filter.\n\
+             Common causes: range bounds off-by-one, filter applied before or after wrong index.\n\
+             Run: cargo test --test store_advanced query_with_clock_range_filters_events",
             entry.clock
         );
     }
@@ -572,8 +696,10 @@ fn query_clock_range_with_scope_filter() {
     assert_eq!(
         results.len(),
         3,
-        "Expected 3 events for entity:a clock [1,3], got {}",
-        results.len()
+        "PROPERTY: entity:a with clock_range [1,3] must return exactly 3 events.\n\
+         Investigate: src/store/index.rs query clock_range + entity filter.\n\
+         Common causes: entity filter applied after range filter loses scope, range inclusive bounds wrong.\n\
+         Run: cargo test --test store_advanced query_clock_range_with_scope_filter"
     );
 
     store.close().expect("close");
@@ -608,9 +734,10 @@ fn query_by_fact_category() {
     assert_eq!(
         results.len(),
         2,
-        "CATEGORY QUERY FAILED: expected 2 events in category 0xA, got {}. \
-         Investigate: src/store/index.rs KindFilter::Category path.",
-        results.len()
+        "PROPERTY: fact_category filter 0xA must match exactly 2 events (kind_a1 and kind_a2).\n\
+         Investigate: src/store/index.rs KindFilter::Category path.\n\
+         Common causes: category nibble extracted from wrong byte, filter matches all kinds.\n\
+         Run: cargo test --test store_advanced query_by_fact_category"
     );
 
     store.close().expect("close");
@@ -657,14 +784,23 @@ fn fd_budget_evicts_oldest_segments() {
         .count();
     assert!(
         segment_count > 2,
-        "Expected >2 segments to stress fd_budget, got {}",
-        segment_count
+        "PROPERTY: writing 100 events with segment_max_bytes=512 must create more than 2 segment files.\n\
+         Investigate: src/store/writer.rs segment rotation logic.\n\
+         Common causes: rotation threshold not honoured, all events written to one segment.\n\
+         Run: cargo test --test store_advanced fd_budget_evicts_oldest_segments"
     );
 
     // Read events from different segments — this exercises LRU eviction
     // because fd_budget=2 but we have >2 segments
     let entries = store.stream("entity:fd");
-    assert_eq!(entries.len(), 100);
+    assert_eq!(
+        entries.len(),
+        100,
+        "PROPERTY: stream must return all 100 appended events even when fd_budget forces LRU eviction.\n\
+         Investigate: src/store/reader.rs get_fd LRU cache, src/store/mod.rs stream.\n\
+         Common causes: evicted segment FD not re-opened on next access, stream skips closed segments.\n\
+         Run: cargo test --test store_advanced fd_budget_evicts_oldest_segments"
+    );
 
     // Read first event (oldest segment), last event (newest), then first again
     // This forces eviction: open seg1, open seg_last (evicts seg1 if budget=2),
@@ -678,15 +814,21 @@ fn fd_budget_evicts_oldest_segments() {
     assert_eq!(
         first.event.event_id(),
         first_again.event.event_id(),
-        "FD EVICTION CORRUPTION: re-reading after eviction should return same event. \
-         Investigate: src/store/reader.rs get_fd() LRU cache."
+        "PROPERTY: re-reading the same event after LRU fd eviction must return the identical event_id.\n\
+         Investigate: src/store/reader.rs get_fd LRU cache.\n\
+         Common causes: evicted segment FD reopened to wrong offset, cache key collision after eviction.\n\
+         Run: cargo test --test store_advanced fd_budget_evicts_oldest_segments"
     );
 
     // Verify event identity integrity through eviction cycles
     assert_eq!(
         first.event.event_kind(),
         last.event.event_kind(),
-        "Events across segments should preserve kind through LRU eviction"
+        "PROPERTY: EventKind must be identical for events written with the same kind, \
+         even when read from different segments after LRU eviction.\n\
+         Investigate: src/store/reader.rs get_fd LRU cache, src/store/segment.rs read_frame.\n\
+         Common causes: frame data corrupted during eviction cycle, wrong frame decoded after re-open.\n\
+         Run: cargo test --test store_advanced fd_budget_evicts_oldest_segments"
     );
 
     store.close().expect("close");
@@ -734,8 +876,10 @@ fn cold_start_skips_corrupt_segment_gracefully() {
     // The store should fail on a corrupt segment (bad magic = hard error)
     assert!(
         result.is_err(),
-        "Store::open should reject segments with bad magic. \
-         Investigate: src/store/reader.rs scan_segment magic check."
+        "PROPERTY: Store::open must return Err when a segment file has an invalid magic header.\n\
+         Investigate: src/store/reader.rs scan_segment magic check.\n\
+         Common causes: magic bytes check skipped or returns Ok(empty), corrupt file silently ignored.\n\
+         Run: cargo test --test store_advanced cold_start_skips_corrupt_segment_gracefully"
     );
 }
 
@@ -775,7 +919,13 @@ fn corrupt_frame_in_segment_is_detected() {
                 .unwrap_or(false)
         })
         .collect();
-    assert!(!segments.is_empty(), "Should have segment files");
+    assert!(
+        !segments.is_empty(),
+        "PROPERTY: after appending events and syncing, at least one .fbat segment file must exist.\n\
+         Investigate: src/store/writer.rs sync, src/store/segment.rs write path.\n\
+         Common causes: sync no-op, segment file never flushed to disk, wrong extension used.\n\
+         Run: cargo test --test store_advanced corrupt_frame_in_segment_is_detected"
+    );
 
     let seg_path = segments[0].path();
     let mut data = std::fs::read(&seg_path).expect("read segment");
@@ -803,7 +953,10 @@ fn corrupt_frame_in_segment_is_detected() {
             // The key assertion: we don't get MORE events than we wrote
             assert!(
                 stats.event_count <= 3,
-                "Corrupt segment should not produce phantom events. Got {}.",
+                "PROPERTY: a store opened with a corrupted segment must not report more events than were written — no phantom events allowed. Got {}.\n\
+                 Investigate: src/store/reader.rs scan_segment CRC check, src/store/mod.rs open.\n\
+                 Common causes: CRC check skipped, corrupt bytes decoded as valid frames.\n\
+                 Run: cargo test --test store_advanced corrupt_frame_in_segment_is_detected",
                 stats.event_count
             );
             let _ = store.close();
@@ -824,31 +977,46 @@ fn store_error_display_variants() {
     let not_found = format!("{}", StoreError::NotFound(0xDEAD));
     assert!(
         not_found.contains("dead"),
-        "NotFound should contain the event ID hex. Got: {not_found}"
+        "PROPERTY: StoreError::NotFound Display must include the event ID in hex (e.g. 'dead').\n\
+         Investigate: src/store/mod.rs StoreError Display impl.\n\
+         Common causes: Display arm for NotFound omits the id, uses decimal instead of hex.\n\
+         Run: cargo test --test store_advanced store_error_display_variants"
     );
 
     let writer = format!("{}", StoreError::WriterCrashed);
     assert!(
         writer.contains("writer") || writer.contains("crash"),
-        "WriterCrashed should mention writer/crash. Got: {writer}"
+        "PROPERTY: StoreError::WriterCrashed Display must mention 'writer' or 'crash'.\n\
+         Investigate: src/store/mod.rs StoreError Display impl.\n\
+         Common causes: Display arm returns generic message without variant-specific text.\n\
+         Run: cargo test --test store_advanced store_error_display_variants"
     );
 
     let shutting = format!("{}", StoreError::ShuttingDown);
     assert!(
         shutting.contains("shut"),
-        "ShuttingDown should mention shutdown. Got: {shutting}"
+        "PROPERTY: StoreError::ShuttingDown Display must contain 'shut' (e.g. 'shutting down').\n\
+         Investigate: src/store/mod.rs StoreError Display impl.\n\
+         Common causes: Display arm returns generic or empty string for ShuttingDown variant.\n\
+         Run: cargo test --test store_advanced store_error_display_variants"
     );
 
     let cache = format!("{}", StoreError::CacheFailed("redis timeout".into()));
     assert!(
         cache.contains("redis timeout"),
-        "CacheFailed should contain the inner message. Got: {cache}"
+        "PROPERTY: StoreError::CacheFailed Display must include the inner error message.\n\
+         Investigate: src/store/mod.rs StoreError Display impl.\n\
+         Common causes: inner string not interpolated, Display arm discards the inner field.\n\
+         Run: cargo test --test store_advanced store_error_display_variants"
     );
 
     let dup = format!("{}", StoreError::DuplicateEvent(0xBEEF));
     assert!(
         dup.contains("beef"),
-        "DuplicateEvent should contain the key hex. Got: {dup}"
+        "PROPERTY: StoreError::DuplicateEvent Display must include the event key in hex (e.g. 'beef').\n\
+         Investigate: src/store/mod.rs StoreError Display impl.\n\
+         Common causes: Display arm for DuplicateEvent omits the key, uses decimal instead of hex.\n\
+         Run: cargo test --test store_advanced store_error_display_variants"
     );
 
     let seq = format!(
@@ -861,7 +1029,10 @@ fn store_error_display_variants() {
     );
     assert!(
         seq.contains("user:1") && seq.contains("5") && seq.contains("3"),
-        "SequenceMismatch should contain entity, expected, actual. Got: {seq}"
+        "PROPERTY: StoreError::SequenceMismatch Display must include entity, expected, and actual values.\n\
+         Investigate: src/store/mod.rs StoreError Display impl.\n\
+         Common causes: Display arm omits one or more struct fields, entity string not interpolated.\n\
+         Run: cargo test --test store_advanced store_error_display_variants"
     );
 
     let crc = format!(
@@ -873,7 +1044,10 @@ fn store_error_display_variants() {
     );
     assert!(
         crc.contains("7") && crc.contains("42"),
-        "CrcMismatch should contain segment_id and offset. Got: {crc}"
+        "PROPERTY: StoreError::CrcMismatch Display must include segment_id (7) and offset (42).\n\
+         Investigate: src/store/mod.rs StoreError Display impl.\n\
+         Common causes: Display arm for CrcMismatch omits numeric fields, formats only one field.\n\
+         Run: cargo test --test store_advanced store_error_display_variants"
     );
 
     let corrupt = format!(
@@ -885,13 +1059,19 @@ fn store_error_display_variants() {
     );
     assert!(
         corrupt.contains("bad magic"),
-        "CorruptSegment should contain the detail. Got: {corrupt}"
+        "PROPERTY: StoreError::CorruptSegment Display must include the detail string.\n\
+         Investigate: src/store/mod.rs StoreError Display impl.\n\
+         Common causes: detail field not interpolated into Display output, generic message used.\n\
+         Run: cargo test --test store_advanced store_error_display_variants"
     );
 
     let ser = format!("{}", StoreError::Serialization("unexpected EOF".into()));
     assert!(
         ser.contains("unexpected EOF"),
-        "Serialization should contain the inner message. Got: {ser}"
+        "PROPERTY: StoreError::Serialization Display must include the inner error message.\n\
+         Investigate: src/store/mod.rs StoreError Display impl.\n\
+         Common causes: inner string not forwarded to Display output, variant uses static text only.\n\
+         Run: cargo test --test store_advanced store_error_display_variants"
     );
 }
 
@@ -903,14 +1083,20 @@ fn coordinate_error_display() {
     let msg = format!("{err}");
     assert!(
         msg.contains("entity"),
-        "EmptyEntity error should mention 'entity': {msg}"
+        "PROPERTY: CoordinateError for an empty entity string must mention 'entity' in its Display.\n\
+         Investigate: src/store/mod.rs CoordinateError Display impl.\n\
+         Common causes: EmptyEntity variant Display returns generic string without the word 'entity'.\n\
+         Run: cargo test --test store_advanced coordinate_error_display"
     );
 
     let err = Coordinate::new("entity", "").unwrap_err();
     let msg = format!("{err}");
     assert!(
         msg.contains("scope"),
-        "EmptyScope error should mention 'scope': {msg}"
+        "PROPERTY: CoordinateError for an empty scope string must mention 'scope' in its Display.\n\
+         Investigate: src/store/mod.rs CoordinateError Display impl.\n\
+         Common causes: EmptyScope variant Display returns generic string without the word 'scope'.\n\
+         Run: cargo test --test store_advanced coordinate_error_display"
     );
 }
 
@@ -922,7 +1108,10 @@ fn coordinate_display_format() {
     let display = format!("{coord}");
     assert_eq!(
         display, "user:42@tenant:acme",
-        "Coordinate Display should be 'entity@scope'"
+        "PROPERTY: Coordinate Display must format as 'entity@scope' (e.g. 'user:42@tenant:acme').\n\
+         Investigate: src/store/mod.rs Coordinate Display impl.\n\
+         Common causes: separator wrong (e.g. '/' or ':' instead of '@'), fields swapped.\n\
+         Run: cargo test --test store_advanced coordinate_display_format"
     );
 }
 
@@ -951,7 +1140,14 @@ fn index_entry_causation_helpers() {
         .expect("reaction");
 
     let entries = store.stream("entity:helpers");
-    assert_eq!(entries.len(), 2);
+    assert_eq!(
+        entries.len(),
+        2,
+        "PROPERTY: stream must return exactly 2 events (root + reaction) for entity:helpers.\n\
+         Investigate: src/store/mod.rs stream, src/store/index.rs entity lookup.\n\
+         Common causes: reaction event stored under wrong entity key, stream skips reaction frames.\n\
+         Run: cargo test --test store_advanced index_entry_causation_helpers"
+    );
 
     // Root: is_root_cause=true, is_correlated=false (correlation==event_id)
     let root_entry = entries
@@ -960,11 +1156,17 @@ fn index_entry_causation_helpers() {
         .expect("find root");
     assert!(
         root_entry.is_root_cause(),
-        "Root event should be root cause"
+        "PROPERTY: an event with no explicit causation must be identified as a root cause.\n\
+         Investigate: src/store/mod.rs IndexEntry::is_root_cause.\n\
+         Common causes: is_root_cause checks wrong field, causation_id default value incorrect.\n\
+         Run: cargo test --test store_advanced index_entry_causation_helpers"
     );
     assert!(
         !root_entry.is_correlated(),
-        "Self-correlated event is NOT 'correlated'"
+        "PROPERTY: a self-correlated event (correlation_id == event_id) must not be 'correlated'.\n\
+         Investigate: src/store/mod.rs IndexEntry::is_correlated.\n\
+         Common causes: is_correlated returns true for self-correlation, field comparison inverted.\n\
+         Run: cargo test --test store_advanced index_entry_causation_helpers"
     );
 
     // Reaction: is_root_cause=false, is_correlated=true, is_caused_by(root)=true
@@ -974,12 +1176,24 @@ fn index_entry_causation_helpers() {
         .expect("find reaction");
     assert!(
         !react_entry.is_root_cause(),
-        "Reaction should not be root cause"
+        "PROPERTY: a reaction event with an explicit cause must not be identified as a root cause.\n\
+         Investigate: src/store/mod.rs IndexEntry::is_root_cause.\n\
+         Common causes: is_root_cause ignores causation_id field, always returns true.\n\
+         Run: cargo test --test store_advanced index_entry_causation_helpers"
     );
-    assert!(react_entry.is_correlated(), "Reaction should be correlated");
+    assert!(
+        react_entry.is_correlated(),
+        "PROPERTY: a reaction event with a correlation_id different from its own event_id must be 'correlated'.\n\
+         Investigate: src/store/mod.rs IndexEntry::is_correlated.\n\
+         Common causes: correlation_id not set on reaction frame, is_correlated comparison wrong.\n\
+         Run: cargo test --test store_advanced index_entry_causation_helpers"
+    );
     assert!(
         react_entry.is_caused_by(root.event_id),
-        "Reaction should be caused by root"
+        "PROPERTY: a reaction event must report is_caused_by(root.event_id) == true.\n\
+         Investigate: src/store/mod.rs IndexEntry::is_caused_by.\n\
+         Common causes: causation_id not stored in reaction frame, is_caused_by checks wrong field.\n\
+         Run: cargo test --test store_advanced index_entry_causation_helpers"
     );
 
     store.close().expect("close");

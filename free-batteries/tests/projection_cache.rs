@@ -79,11 +79,29 @@ mod redb_tests {
             value, b"hello",
             "RedbCache round-trip failed. Investigate: src/store/projection.rs RedbCache."
         );
-        assert_eq!(returned_meta.watermark, 42);
-        assert_eq!(returned_meta.cached_at_us, 1_000_000);
+        assert_eq!(
+            returned_meta.watermark, 42,
+            "REDB ROUND-TRIP META WATERMARK: watermark should be preserved across put/get.\n\
+             Investigate: src/store/projection.rs RedbCache::put and RedbCache::get.\n\
+             Common causes: CacheMeta serialization losing watermark field.\n\
+             Run: cargo test --test projection_cache redb_get_put_round_trip"
+        );
+        assert_eq!(
+            returned_meta.cached_at_us, 1_000_000,
+            "REDB ROUND-TRIP META CACHED_AT: cached_at_us should be preserved across put/get.\n\
+             Investigate: src/store/projection.rs RedbCache::put and RedbCache::get.\n\
+             Common causes: CacheMeta serialization losing cached_at_us field.\n\
+             Run: cargo test --test projection_cache redb_get_put_round_trip"
+        );
 
         // Non-existent key returns None
-        assert!(cache.get(b"nonexistent").expect("get").is_none());
+        assert!(
+            cache.get(b"nonexistent").expect("get").is_none(),
+            "REDB ROUND-TRIP: get for a key that was never inserted should return None.\n\
+             Investigate: src/store/projection.rs RedbCache::get.\n\
+             Common causes: get returning stale data, missing key check logic.\n\
+             Run: cargo test --test projection_cache redb_get_put_round_trip"
+        );
     }
 
     #[test]
@@ -99,10 +117,28 @@ mod redb_tests {
         assert_eq!(deleted, 2, "Should delete 2 keys with prefix 'user:'.");
 
         // user keys gone
-        assert!(cache.get(b"user:1").expect("get").is_none());
-        assert!(cache.get(b"user:2").expect("get").is_none());
+        assert!(
+            cache.get(b"user:1").expect("get").is_none(),
+            "REDB DELETE PREFIX: key 'user:1' should be gone after delete_prefix('user:').\n\
+             Investigate: src/store/projection.rs RedbCache::delete_prefix.\n\
+             Common causes: prefix scan not matching key, deletion not committed.\n\
+             Run: cargo test --test projection_cache redb_delete_prefix"
+        );
+        assert!(
+            cache.get(b"user:2").expect("get").is_none(),
+            "REDB DELETE PREFIX: key 'user:2' should be gone after delete_prefix('user:').\n\
+             Investigate: src/store/projection.rs RedbCache::delete_prefix.\n\
+             Common causes: prefix scan stopping early, deletion not committed.\n\
+             Run: cargo test --test projection_cache redb_delete_prefix"
+        );
         // order key remains
-        assert!(cache.get(b"order:1").expect("get").is_some());
+        assert!(
+            cache.get(b"order:1").expect("get").is_some(),
+            "REDB DELETE PREFIX: key 'order:1' should survive delete_prefix('user:').\n\
+             Investigate: src/store/projection.rs RedbCache::delete_prefix.\n\
+             Common causes: prefix matching too broad, deleting keys that don't share the prefix.\n\
+             Run: cargo test --test projection_cache redb_delete_prefix"
+        );
     }
 
     #[test]
@@ -138,8 +174,20 @@ mod lmdb_tests {
 
         cache.put(b"key1", b"hello", meta.clone()).expect("put");
         let (value, returned_meta) = cache.get(b"key1").expect("get").expect("should be Some");
-        assert_eq!(value, b"hello");
-        assert_eq!(returned_meta.watermark, 42);
+        assert_eq!(
+            value, b"hello",
+            "LMDB ROUND-TRIP VALUE: value should be preserved across put/get.\n\
+             Investigate: src/store/projection.rs LmdbCache::put and LmdbCache::get.\n\
+             Common causes: value bytes not written or read correctly from LMDB.\n\
+             Run: cargo test --test projection_cache lmdb_get_put_round_trip"
+        );
+        assert_eq!(
+            returned_meta.watermark, 42,
+            "LMDB ROUND-TRIP META WATERMARK: watermark should be preserved across put/get.\n\
+             Investigate: src/store/projection.rs LmdbCache::put and LmdbCache::get.\n\
+             Common causes: CacheMeta serialization losing watermark field.\n\
+             Run: cargo test --test projection_cache lmdb_get_put_round_trip"
+        );
     }
 
     #[test]
@@ -152,10 +200,28 @@ mod lmdb_tests {
         cache.put(b"order:1", b"widget", meta.clone()).expect("put");
 
         let deleted = cache.delete_prefix(b"user:").expect("delete_prefix");
-        assert_eq!(deleted, 2);
+        assert_eq!(
+            deleted, 2,
+            "LMDB DELETE PREFIX: should delete exactly 2 keys with prefix 'user:'.\n\
+             Investigate: src/store/projection.rs LmdbCache::delete_prefix.\n\
+             Common causes: prefix scan not matching both keys, count not incremented correctly.\n\
+             Run: cargo test --test projection_cache lmdb_delete_prefix"
+        );
 
-        assert!(cache.get(b"user:1").expect("get").is_none());
-        assert!(cache.get(b"order:1").expect("get").is_some());
+        assert!(
+            cache.get(b"user:1").expect("get").is_none(),
+            "LMDB DELETE PREFIX: key 'user:1' should be gone after delete_prefix('user:').\n\
+             Investigate: src/store/projection.rs LmdbCache::delete_prefix.\n\
+             Common causes: prefix scan not matching key, deletion not committed.\n\
+             Run: cargo test --test projection_cache lmdb_delete_prefix"
+        );
+        assert!(
+            cache.get(b"order:1").expect("get").is_some(),
+            "LMDB DELETE PREFIX: key 'order:1' should survive delete_prefix('user:').\n\
+             Investigate: src/store/projection.rs LmdbCache::delete_prefix.\n\
+             Common causes: prefix matching too broad, deleting keys outside the prefix.\n\
+             Run: cargo test --test projection_cache lmdb_delete_prefix"
+        );
     }
 
     #[test]

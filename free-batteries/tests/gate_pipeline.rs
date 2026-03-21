@@ -58,7 +58,13 @@ fn single_allow_gate_passes() {
     gates.push(AlwaysAllow);
     let proposal = Proposal::new(42);
     let result = gates.evaluate(&(), proposal);
-    assert!(result.is_ok());
+    assert!(
+        result.is_ok(),
+        "GATE EVALUATION: single AlwaysAllow gate should pass.\n\
+         Investigate: src/guard/mod.rs GateSet::evaluate.\n\
+         Common causes: Gate::evaluate returning Err unexpectedly, gate not registered.\n\
+         Run: cargo test --test gate_pipeline single_allow_gate_passes"
+    );
 }
 
 #[test]
@@ -69,8 +75,20 @@ fn single_deny_gate_fails() {
     let result = gates.evaluate(&(), proposal);
     match result {
         Err(denial) => {
-            assert_eq!(denial.gate, "always_deny");
-            assert_eq!(denial.message, "nope");
+            assert_eq!(
+                denial.gate, "always_deny",
+                "DENIAL GATE NAME: denial.gate should be 'always_deny'.\n\
+                 Investigate: src/guard/mod.rs Denial::new gate field.\n\
+                 Common causes: gate name not propagated into Denial struct.\n\
+                 Run: cargo test --test gate_pipeline single_deny_gate_fails"
+            );
+            assert_eq!(
+                denial.message, "nope",
+                "DENIAL MESSAGE: denial.message should be 'nope'.\n\
+                 Investigate: src/guard/mod.rs Denial::new message field.\n\
+                 Common causes: message not propagated into Denial struct.\n\
+                 Run: cargo test --test gate_pipeline single_deny_gate_fails"
+            );
         }
         Ok(_) => panic!("Expected Err(Denial), gate should have denied"),
     }
@@ -146,7 +164,14 @@ fn receipt_wraps_payload_immutably() {
         42,
         "Receipt should wrap the original proposal payload."
     );
-    assert_eq!(receipt.gates_passed(), &["always_allow"]);
+    assert_eq!(
+        receipt.gates_passed(),
+        &["always_allow"],
+        "RECEIPT GATES PASSED: receipt should record the gates it passed through.\n\
+         Investigate: src/guard/mod.rs Receipt::gates_passed.\n\
+         Common causes: gate names not accumulated during evaluation, wrong order.\n\
+         Run: cargo test --test gate_pipeline receipt_wraps_payload_immutably"
+    );
 }
 
 #[test]
@@ -158,8 +183,21 @@ fn receipt_consumed_once_via_into_parts() {
     let receipt = gates.evaluate(&(), proposal).expect("should pass");
 
     let (payload, gate_names) = receipt.into_parts();
-    assert_eq!(payload, 42);
-    assert_eq!(gate_names, vec!["always_allow"]);
+    assert_eq!(
+        payload, 42,
+        "RECEIPT CONSUMED ONCE: into_parts should yield the original payload.\n\
+         Investigate: src/guard/mod.rs Receipt::into_parts.\n\
+         Common causes: payload not moved correctly out of Receipt.\n\
+         Run: cargo test --test gate_pipeline receipt_consumed_once_via_into_parts"
+    );
+    assert_eq!(
+        gate_names,
+        vec!["always_allow"],
+        "RECEIPT CONSUMED ONCE: into_parts should yield the list of passed gate names.\n\
+         Investigate: src/guard/mod.rs Receipt::into_parts.\n\
+         Common causes: gate names not moved correctly out of Receipt.\n\
+         Run: cargo test --test gate_pipeline receipt_consumed_once_via_into_parts"
+    );
     // receipt is now consumed — can't be used again (enforced by type system)
 }
 
@@ -185,8 +223,20 @@ fn pipeline_commit_with_receipt() {
         })
         .expect("commit should succeed");
 
-    assert_eq!(committed.payload, "data");
-    assert_eq!(committed.event_id, 12345);
+    assert_eq!(
+        committed.payload, "data",
+        "PIPELINE COMMIT PAYLOAD: committed payload should match the proposal value.\n\
+         Investigate: src/pipeline/mod.rs Pipeline::commit.\n\
+         Common causes: payload not forwarded from Receipt into commit closure.\n\
+         Run: cargo test --test gate_pipeline pipeline_commit_with_receipt"
+    );
+    assert_eq!(
+        committed.event_id, 12345,
+        "PIPELINE COMMIT EVENT_ID: committed event_id should match what the closure returns.\n\
+         Investigate: src/pipeline/mod.rs Pipeline::commit.\n\
+         Common causes: commit closure result not propagated into Committed struct.\n\
+         Run: cargo test --test gate_pipeline pipeline_commit_with_receipt"
+    );
 }
 
 // --- Context-dependent gate ---
@@ -197,10 +247,22 @@ fn context_gate_uses_context() {
     gates.push(ContextGate);
 
     let proposal_pass = Proposal::new("ok");
-    assert!(gates.evaluate(&1, proposal_pass).is_ok());
+    assert!(
+        gates.evaluate(&1, proposal_pass).is_ok(),
+        "CONTEXT GATE: positive context should pass ContextGate.\n\
+         Investigate: src/guard/mod.rs Gate::evaluate context usage.\n\
+         Common causes: context value not passed through to gate, comparison logic inverted.\n\
+         Run: cargo test --test gate_pipeline context_gate_uses_context"
+    );
 
     let proposal_fail = Proposal::new("fail");
-    assert!(gates.evaluate(&(-1), proposal_fail).is_err());
+    assert!(
+        gates.evaluate(&(-1), proposal_fail).is_err(),
+        "CONTEXT GATE: non-positive context should be denied by ContextGate.\n\
+         Investigate: src/guard/mod.rs Gate::evaluate context usage.\n\
+         Common causes: context value not passed through to gate, comparison logic inverted.\n\
+         Run: cargo test --test gate_pipeline context_gate_uses_context"
+    );
 }
 
 // --- Denial builder ---
@@ -212,9 +274,38 @@ fn denial_builder_pattern() {
         .with_context("user_id", "123")
         .with_context("resource", "secret");
 
-    assert_eq!(denial.gate, "test_gate");
-    assert_eq!(denial.code, "403");
-    assert_eq!(denial.message, "access denied");
-    assert_eq!(denial.context.len(), 2);
-    assert_eq!(denial.to_string(), "[test_gate] access denied");
+    assert_eq!(
+        denial.gate, "test_gate",
+        "DENIAL BUILDER: gate field should match the name passed to Denial::new.\n\
+         Investigate: src/guard/mod.rs Denial::new.\n\
+         Common causes: gate name not stored in Denial struct field.\n\
+         Run: cargo test --test gate_pipeline denial_builder_pattern"
+    );
+    assert_eq!(
+        denial.code, "403",
+        "DENIAL BUILDER: code field should match the value passed to with_code.\n\
+         Investigate: src/guard/mod.rs Denial::with_code.\n\
+         Common causes: with_code not storing value, returning default instead.\n\
+         Run: cargo test --test gate_pipeline denial_builder_pattern"
+    );
+    assert_eq!(
+        denial.message, "access denied",
+        "DENIAL BUILDER: message field should match the reason passed to Denial::new.\n\
+         Investigate: src/guard/mod.rs Denial::new.\n\
+         Common causes: message not stored in Denial struct field.\n\
+         Run: cargo test --test gate_pipeline denial_builder_pattern"
+    );
+    assert_eq!(denial.context.len(), 2,
+        "DENIAL BUILDER: context map should contain exactly 2 entries after two with_context calls.\n\
+         Investigate: src/guard/mod.rs Denial::with_context.\n\
+         Common causes: with_context not inserting into map, entries being overwritten.\n\
+         Run: cargo test --test gate_pipeline denial_builder_pattern");
+    assert_eq!(
+        denial.to_string(),
+        "[test_gate] access denied",
+        "DENIAL BUILDER: Display format should be '[gate] message'.\n\
+         Investigate: src/guard/mod.rs impl Display for Denial.\n\
+         Common causes: Display format string incorrect, gate or message field wrong.\n\
+         Run: cargo test --test gate_pipeline denial_builder_pattern"
+    );
 }

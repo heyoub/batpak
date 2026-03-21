@@ -233,16 +233,34 @@ proptest! {
     fn fuzz_coordinate_validation(entity in "\\PC{0,50}", scope in "\\PC{0,50}") {
         let result = Coordinate::new(&entity, &scope);
         if entity.is_empty() {
-            prop_assert!(result.is_err());
+            prop_assert!(result.is_err(),
+                "COORDINATE EMPTY ENTITY ACCEPTED: Coordinate::new must reject empty entity string.\n\
+                 Investigate: src/coordinate/mod.rs Coordinate::new validation.\n\
+                 Common causes: missing empty-string guard, off-by-one in length check.\n\
+                 Run: cargo test --test fuzz_targets");
         } else if scope.is_empty() {
-            prop_assert!(result.is_err());
+            prop_assert!(result.is_err(),
+                "COORDINATE EMPTY SCOPE ACCEPTED: Coordinate::new must reject empty scope string.\n\
+                 Investigate: src/coordinate/mod.rs Coordinate::new validation.\n\
+                 Common causes: missing empty-string guard on scope field.\n\
+                 Run: cargo test --test fuzz_targets");
         } else {
             prop_assert!(result.is_ok(),
                 "COORDINATE REJECTED VALID INPUT: entity={entity:?}, scope={scope:?}. \
                  Investigate: src/coordinate/mod.rs Coordinate::new.");
             let coord = result.expect("valid");
-            prop_assert_eq!(coord.entity(), entity.as_str());
-            prop_assert_eq!(coord.scope(), scope.as_str());
+            prop_assert_eq!(coord.entity(), entity.as_str(),
+                "COORDINATE ENTITY MISMATCH: stored entity {:?} != input {:?}.\n\
+                 Investigate: src/coordinate/mod.rs Coordinate::new entity storage.\n\
+                 Common causes: normalization or trimming applied unexpectedly.\n\
+                 Run: cargo test --test fuzz_targets",
+                coord.entity(), entity.as_str());
+            prop_assert_eq!(coord.scope(), scope.as_str(),
+                "COORDINATE SCOPE MISMATCH: stored scope {:?} != input {:?}.\n\
+                 Investigate: src/coordinate/mod.rs Coordinate::new scope storage.\n\
+                 Common causes: normalization or trimming applied unexpectedly.\n\
+                 Run: cargo test --test fuzz_targets",
+                coord.scope(), scope.as_str());
         }
     }
 
@@ -322,7 +340,11 @@ proptest! {
         let pos = DagPosition::new(d, l, s);
         let bytes = rmp_serde::to_vec_named(&pos).expect("serialize");
         let decoded: DagPosition = rmp_serde::from_slice(&bytes).expect("deserialize");
-        prop_assert_eq!(pos, decoded);
+        prop_assert_eq!(pos, decoded,
+            "DAGPOSITION SERDE ROUNDTRIP FAILED: decoded position does not match original.\n\
+             Investigate: src/coordinate/position.rs DagPosition Serialize/Deserialize.\n\
+             Common causes: field ordering mismatch, missing u32 wire encoding, serde rename.\n\
+             Run: cargo test --test fuzz_targets");
     }
 }
 
@@ -476,10 +498,30 @@ proptest! {
         let header = SegmentHeader { version, flags, created_ns, segment_id };
         let bytes = rmp_serde::to_vec_named(&header).expect("serialize");
         let decoded: SegmentHeader = rmp_serde::from_slice(&bytes).expect("deserialize");
-        prop_assert_eq!(header.version, decoded.version);
-        prop_assert_eq!(header.flags, decoded.flags);
-        prop_assert_eq!(header.created_ns, decoded.created_ns);
-        prop_assert_eq!(header.segment_id, decoded.segment_id);
+        prop_assert_eq!(header.version, decoded.version,
+            "SEGMENTHEADER VERSION MISMATCH: {} != {} after serde roundtrip.\n\
+             Investigate: src/store/segment.rs SegmentHeader Serialize/Deserialize.\n\
+             Common causes: field renamed/skipped in serde attrs, version field type mismatch.\n\
+             Run: cargo test --test fuzz_targets",
+            header.version, decoded.version);
+        prop_assert_eq!(header.flags, decoded.flags,
+            "SEGMENTHEADER FLAGS MISMATCH: {} != {} after serde roundtrip.\n\
+             Investigate: src/store/segment.rs SegmentHeader Serialize/Deserialize.\n\
+             Common causes: flags field skipped or default-overridden during deserialization.\n\
+             Run: cargo test --test fuzz_targets",
+            header.flags, decoded.flags);
+        prop_assert_eq!(header.created_ns, decoded.created_ns,
+            "SEGMENTHEADER CREATED_NS MISMATCH: {} != {} after serde roundtrip.\n\
+             Investigate: src/store/segment.rs SegmentHeader Serialize/Deserialize.\n\
+             Common causes: i64 sign-extension bug, timestamp field lost in wire encoding.\n\
+             Run: cargo test --test fuzz_targets",
+            header.created_ns, decoded.created_ns);
+        prop_assert_eq!(header.segment_id, decoded.segment_id,
+            "SEGMENTHEADER SEGMENT_ID MISMATCH: {} != {} after serde roundtrip.\n\
+             Investigate: src/store/segment.rs SegmentHeader Serialize/Deserialize.\n\
+             Common causes: u64 truncated to u32 in wire format, field ordering error.\n\
+             Run: cargo test --test fuzz_targets",
+            header.segment_id, decoded.segment_id);
     }
 }
 
@@ -539,7 +581,11 @@ proptest! {
         let chain = HashChain { prev_hash: prev_arr, event_hash: event_arr };
         let bytes = rmp_serde::to_vec_named(&chain).expect("serialize");
         let decoded: HashChain = rmp_serde::from_slice(&bytes).expect("deserialize");
-        prop_assert_eq!(chain, decoded);
+        prop_assert_eq!(chain, decoded,
+            "HASHCHAIN SERDE ROUNDTRIP FAILED: decoded HashChain does not match original.\n\
+             Investigate: src/event/hash.rs HashChain Serialize/Deserialize.\n\
+             Common causes: fixed-size [u8;32] arrays not preserved by serde, byte slice length mismatch.\n\
+             Run: cargo test --test fuzz_targets");
     }
 }
 

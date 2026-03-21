@@ -68,7 +68,13 @@ fn chaos_corrupted_segment_bytes() {
         })
         .collect();
 
-    assert!(!segments.is_empty(), "Should have segment files");
+    assert!(
+        !segments.is_empty(),
+        "CHAOS PROPERTY: writing 20 events must produce at least one .fbat segment file.\n\
+         Investigate: src/store/segment.rs open_writer, src/store/writer.rs STEP 7 rotation.\n\
+         Common causes: segment file extension mismatch, data_dir not flushed before read_dir.\n\
+         Run: cargo test --test chaos_testing chaos_corrupted_segment_bytes"
+    );
 
     for seg in &segments {
         let mut data = std::fs::read(seg.path()).expect("read segment");
@@ -106,9 +112,10 @@ fn chaos_corrupted_segment_bytes() {
                     || msg.contains("serialization")
                     || msg.contains("IO")
                     || msg.contains("coordinate"),
-                "CHAOS: unexpected error type: {msg}. \
-                 Expected CRC/corrupt/serialization/IO error. \
-                 Investigate: src/store/mod.rs Store::open error handling."
+                "CHAOS PROPERTY: corrupted segment must produce a structured CRC/corrupt/serialization/IO error, not an unknown variant.\n\
+                 Investigate: src/store/mod.rs Store::open, src/store/segment.rs frame_decode error mapping.\n\
+                 Common causes: new error variant added without updating open() match arm, raw unwrap() escaping as opaque error.\n\
+                 Run: cargo test --test chaos_testing chaos_corrupted_segment_bytes"
             );
         }
     }
@@ -167,12 +174,17 @@ fn chaos_concurrent_writer_stress() {
     );
     assert!(
         total_ok > 0,
-        "CHAOS: no successful writes under concurrent stress"
+        "CHAOS PROPERTY: at least one write must succeed under concurrent stress across {n_threads} threads.\n\
+         Investigate: src/store/writer.rs lock acquisition, src/store/segment.rs open_writer.\n\
+         Common causes: mutex poisoning on first write error, segment open failure blocking all writers.\n\
+         Run: cargo test --test chaos_testing chaos_concurrent_writer_stress"
     );
     assert_eq!(
         total_err, 0,
-        "CHAOS: {total_err} errors under concurrent stress. \
-        Investigate: src/store/writer.rs lock ordering."
+        "CHAOS PROPERTY: zero write errors expected under concurrent stress, got {total_err}.\n\
+         Investigate: src/store/writer.rs lock ordering, src/store/segment.rs rotate.\n\
+         Common causes: race on segment rotation, fd_budget exhaustion under concurrent open, poisoned Mutex from a prior panic.\n\
+         Run: cargo test --test chaos_testing chaos_concurrent_writer_stress"
     );
 
     // Verify data integrity: each thread's events should be readable
@@ -181,8 +193,10 @@ fn chaos_concurrent_writer_stress() {
         let entries = store_ref.stream(&format!("chaos:thread{t}"));
         assert!(
             !entries.is_empty(),
-            "CHAOS: thread {t} wrote events but none found in index. \
-             Investigate: src/store/index.rs insert."
+            "CHAOS PROPERTY: every writer thread must have its events present in the index after store close.\n\
+             Investigate: src/store/index.rs insert, src/store/writer.rs STEP 5 index update.\n\
+             Common causes: index update skipped on rotation, thread-local writes not flushed before stream() call.\n\
+             Run: cargo test --test chaos_testing chaos_concurrent_writer_stress"
         );
     }
 
@@ -241,10 +255,20 @@ fn chaos_cas_contention() {
     eprintln!("  CHAOS CAS CONTENTION: {winners} winners, {losers} losers");
     assert_eq!(
         winners, 1,
-        "CHAOS: CAS should allow exactly 1 winner. Got {winners}. \
-         Investigate: src/store/writer.rs CAS check under entity lock."
+        "CHAOS PROPERTY: CAS must allow exactly one winner when all threads compete on the same expected_sequence.\n\
+         Investigate: src/store/writer.rs CAS check under entity lock, src/store/mod.rs AppendOptions handling.\n\
+         Common causes: entity lock not held across sequence read + write, CAS condition checked outside the lock.\n\
+         Run: cargo test --test chaos_testing chaos_cas_contention"
     );
-    assert_eq!(losers, n_threads - 1);
+    assert_eq!(
+        losers,
+        n_threads - 1,
+        "CHAOS PROPERTY: all threads except the CAS winner must receive a conflict error (expected {}, got {losers}).\n\
+         Investigate: src/store/writer.rs CAS rejection path, StoreError::SequenceMismatch variant.\n\
+         Common causes: CAS error swallowed/mapped to Ok, winner count > 1 masking losers.\n\
+         Run: cargo test --test chaos_testing chaos_cas_contention",
+        n_threads - 1
+    );
 
     match Arc::try_unwrap(store) {
         Ok(s) => s.close().expect("close"),
@@ -296,9 +320,10 @@ fn chaos_idempotency_concurrent() {
     for (i, id) in event_ids.iter().enumerate() {
         assert_eq!(
             *id, first,
-            "CHAOS: idempotency returned different event_id at index {i}. \
-             Expected {first:032x}, got {id:032x}. \
-             Investigate: src/store/writer.rs idempotency check."
+            "CHAOS PROPERTY: all concurrent idempotent appends with the same key must return the same event_id.\n\
+             Investigate: src/store/writer.rs idempotency check, src/store/index.rs idempotency_key lookup.\n\
+             Common causes: idempotency map not protected by the same lock as the append, two threads both pass the key-absent check.\n\
+             Run: cargo test --test chaos_testing chaos_idempotency_concurrent"
         );
     }
 
@@ -307,8 +332,10 @@ fn chaos_idempotency_concurrent() {
     assert_eq!(
         entries.len(),
         1,
-        "CHAOS: idempotency should produce exactly 1 event, got {}. \
-         Investigate: src/store/writer.rs idempotency dedup.",
+        "CHAOS PROPERTY: idempotent append with the same key from {n_threads} concurrent threads must store exactly 1 event, got {}.\n\
+         Investigate: src/store/writer.rs idempotency dedup, src/store/index.rs stream().\n\
+         Common causes: dedup check races with concurrent insert, idempotency_key stored per-segment losing cross-segment dedup.\n\
+         Run: cargo test --test chaos_testing chaos_idempotency_concurrent",
         entries.len()
     );
 
@@ -360,7 +387,10 @@ fn chaos_rapid_segment_rotation() {
     eprintln!("  CHAOS ROTATION: {iterations} events across {segment_count} segments");
     assert!(
         segment_count > 1,
-        "CHAOS: expected multiple segments with 256-byte limit, got {segment_count}"
+        "CHAOS PROPERTY: with a 256-byte segment limit, {iterations} events must span more than one segment file (got {segment_count}).\n\
+         Investigate: src/store/writer.rs STEP 7 rotation trigger, src/store/segment.rs segment_max_bytes enforcement.\n\
+         Common causes: byte budget checked after write instead of before, segment size accumulated incorrectly.\n\
+         Run: cargo test --test chaos_testing chaos_rapid_segment_rotation"
     );
 
     // Verify ALL events are still readable after all the rotation
@@ -368,8 +398,10 @@ fn chaos_rapid_segment_rotation() {
     assert_eq!(
         entries.len(),
         iterations,
-        "CHAOS: lost events during rapid rotation. Expected {iterations}, got {}. \
-         Investigate: src/store/writer.rs STEP 7 rotation + src/store/reader.rs.",
+        "CHAOS PROPERTY: no events must be lost across {segment_count} segment rotations (expected {iterations}, got {}).\n\
+         Investigate: src/store/writer.rs STEP 7 rotation, src/store/reader.rs multi-segment scan, src/store/index.rs insert.\n\
+         Common causes: index entry for last event in a segment dropped on rotation, reader skips sealed segments.\n\
+         Run: cargo test --test chaos_testing chaos_rapid_segment_rotation",
         entries.len()
     );
 
@@ -378,8 +410,22 @@ fn chaos_rapid_segment_rotation() {
     let last = store
         .get(entries[entries.len() - 1].event_id)
         .expect("last event");
-    assert_eq!(first.event.event_id(), entries[0].event_id);
-    assert_eq!(last.event.event_id(), entries[entries.len() - 1].event_id);
+    assert_eq!(
+        first.event.event_id(),
+        entries[0].event_id,
+        "CHAOS PROPERTY: store.get() for the first indexed event_id must return the matching event.\n\
+         Investigate: src/store/reader.rs get(), src/store/index.rs lookup offset.\n\
+         Common causes: index stores wrong file offset after rotation, event_id collision from monotonic-clock reset.\n\
+         Run: cargo test --test chaos_testing chaos_rapid_segment_rotation"
+    );
+    assert_eq!(
+        last.event.event_id(),
+        entries[entries.len() - 1].event_id,
+        "CHAOS PROPERTY: store.get() for the last indexed event_id must return the matching event.\n\
+         Investigate: src/store/reader.rs get(), src/store/segment.rs seek by offset.\n\
+         Common causes: final segment not flushed before get(), write buffer not committed on sync().\n\
+         Run: cargo test --test chaos_testing chaos_rapid_segment_rotation"
+    );
 
     store.close().expect("close");
 }
@@ -413,8 +459,11 @@ fn chaos_frame_decode_random_bombardment() {
     // (valid CRC match on random data is ~1 in 4 billion)
     assert!(
         err_count > ok_count,
-        "CHAOS: more random frames accepted than rejected. \
-         Investigate: src/store/segment.rs frame_decode CRC check."
+        "CHAOS PROPERTY: the vast majority of random-byte frames must be rejected by frame_decode (CRC collision probability ~1/2^32), \
+         but accepted={ok_count} >= rejected={err_count} across {iterations} iterations.\n\
+         Investigate: src/store/segment.rs frame_decode CRC check, crc32 polynomial selection.\n\
+         Common causes: CRC validation accidentally skipped, CRC field not checked against payload, wrong byte range fed to CRC.\n\
+         Run: cargo test --test chaos_testing chaos_frame_decode_random_bombardment"
     );
 }
 
@@ -468,8 +517,10 @@ fn chaos_subscription_write_storm() {
     // With a small buffer some loss is expected, but we should get *something*
     assert!(
         received > 0,
-        "CHAOS: subscriber received 0 events. \
-         Investigate: src/store/writer.rs broadcast, src/store/subscription.rs."
+        "CHAOS PROPERTY: a live subscriber must receive at least one broadcast event during a {iterations}-write storm, even with a small buffer.\n\
+         Investigate: src/store/writer.rs broadcast send, src/store/subscription.rs Receiver::try_recv.\n\
+         Common causes: broadcast channel created after writes complete, subscription region filter excludes entity, sender dropped before subscriber polls.\n\
+         Run: cargo test --test chaos_testing chaos_subscription_write_storm"
     );
 
     match Arc::try_unwrap(store) {
@@ -513,8 +564,10 @@ fn chaos_cursor_completeness_concurrent() {
     assert_eq!(
         seen.len(),
         n,
-        "CHAOS: cursor missed events. Expected {n}, got {}. \
-         Investigate: src/store/cursor.rs poll().",
+        "CHAOS PROPERTY: cursor must deliver every event exactly once — expected {n} events, got {}.\n\
+         Investigate: src/store/cursor.rs poll(), src/store/index.rs stream() ordering.\n\
+         Common causes: cursor position not advanced after yielding last entry in a segment, stream() returns fewer entries than appended.\n\
+         Run: cargo test --test chaos_testing chaos_cursor_completeness_concurrent",
         seen.len()
     );
 
@@ -525,12 +578,158 @@ fn chaos_cursor_completeness_concurrent() {
     assert_eq!(
         unique.len(),
         seen.len(),
-        "CHAOS: cursor delivered duplicate events. \
-         Investigate: src/store/cursor.rs position tracking."
+        "CHAOS PROPERTY: cursor must not deliver any event more than once ({} unique out of {} delivered).\n\
+         Investigate: src/store/cursor.rs position tracking, src/store/index.rs stream() dedup.\n\
+         Common causes: cursor resets position to segment start on re-poll, index entries duplicated across segment rotation.\n\
+         Run: cargo test --test chaos_testing chaos_cursor_completeness_concurrent",
+        unique.len(),
+        seen.len()
     );
 
     match Arc::try_unwrap(store) {
         Ok(s) => s.close().expect("close"),
         Err(_) => panic!("Arc still has multiple owners"),
     }
+}
+
+// ============================================================
+// CHAOS 9: Truncated segment mid-write recovery
+// Simulates a crash that leaves a segment file with a partial
+// (torn) write at the tail. Cold start must skip the corrupted
+// tail and recover all events written before the truncation.
+// ============================================================
+
+#[test]
+fn chaos_truncated_segment_recovers() {
+    let dir = TempDir::new().expect("temp dir");
+    let config = StoreConfig {
+        data_dir: dir.path().to_path_buf(),
+        segment_max_bytes: 65536,
+        ..StoreConfig::default()
+    };
+    let store = Store::open(config).expect("open");
+    let coord = Coordinate::new("chaos:truncate", "chaos:scope").expect("valid");
+    let kind = EventKind::custom(0xF, 1);
+    let n_events = 20usize;
+
+    for i in 0..n_events {
+        store
+            .append(&coord, kind, &serde_json::json!({"i": i}))
+            .expect("append");
+    }
+    store.sync().expect("sync");
+
+    // Capture the event_ids written so we can verify them after recovery
+    let written_entries = store.stream("chaos:truncate");
+    assert_eq!(
+        written_entries.len(),
+        n_events,
+        "CHAOS PROPERTY: all {n_events} appended events must appear in the index before close, got {}.\n\
+         Investigate: src/store/writer.rs STEP 5 index update, src/store/index.rs insert.\n\
+         Common causes: index update deferred past sync(), events buffered but not flushed.\n\
+         Run: cargo test --test chaos_testing chaos_truncated_segment_recovers",
+        written_entries.len()
+    );
+    let written_ids: Vec<_> = written_entries.iter().map(|e| e.event_id).collect();
+
+    store.close().expect("close");
+
+    // Find the segment file(s) and truncate the last one to simulate a torn write
+    let mut segments: Vec<_> = std::fs::read_dir(dir.path())
+        .expect("read dir")
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            e.path()
+                .extension()
+                .map(|ext| ext == "fbat")
+                .unwrap_or(false)
+        })
+        .collect();
+
+    assert!(
+        !segments.is_empty(),
+        "CHAOS PROPERTY: writing {n_events} events must produce at least one .fbat segment file.\n\
+         Investigate: src/store/segment.rs open_writer, src/store/writer.rs STEP 7 rotation.\n\
+         Common causes: segment file extension mismatch, data_dir not flushed before read_dir.\n\
+         Run: cargo test --test chaos_testing chaos_truncated_segment_recovers"
+    );
+
+    // Sort by name so we operate on the last (most recently written) segment
+    segments.sort_by_key(|e| e.file_name());
+    let last_seg_path = segments.last().unwrap().path();
+
+    let original_data = std::fs::read(&last_seg_path).expect("read segment");
+    assert!(
+        original_data.len() > 64,
+        "CHAOS PROPERTY: the last segment must contain more than 64 bytes to allow meaningful truncation (got {} bytes).\n\
+         Investigate: src/store/segment.rs header write, src/store/writer.rs event serialization.\n\
+         Common causes: segment header larger than expected, events too small to exceed header.\n\
+         Run: cargo test --test chaos_testing chaos_truncated_segment_recovers",
+        original_data.len()
+    );
+
+    // Remove the last 32 bytes — this tears the final frame, simulating a crash mid-write
+    let truncated_len = original_data.len() - 32;
+    std::fs::write(&last_seg_path, &original_data[..truncated_len])
+        .expect("write truncated segment");
+
+    eprintln!(
+        "  CHAOS TRUNCATE: truncated {} → {} bytes (removed 32 bytes from tail)",
+        original_data.len(),
+        truncated_len
+    );
+
+    // Reopen: cold start must tolerate the truncated tail and not panic
+    let config2 = StoreConfig {
+        data_dir: dir.path().to_path_buf(),
+        segment_max_bytes: 65536,
+        ..StoreConfig::default()
+    };
+    let store2 = Store::open(config2).expect("store must reopen after tail truncation");
+
+    let recovered_entries = store2.stream("chaos:truncate");
+
+    // We must recover at least some events — truncating only the last 32 bytes
+    // should leave the bulk of the segment intact
+    assert!(
+        !recovered_entries.is_empty(),
+        "CHAOS PROPERTY: after tail truncation, cold-start recovery must restore at least some events; got zero.\n\
+         Investigate: src/store/mod.rs Store::open cold-start scan, src/store/segment.rs frame_decode error handling.\n\
+         Common causes: open() bails out on first decode error instead of stopping at corrupt tail, segment skipped entirely on any error.\n\
+         Run: cargo test --test chaos_testing chaos_truncated_segment_recovers"
+    );
+
+    eprintln!(
+        "  CHAOS TRUNCATE: recovered {}/{} events after tail truncation",
+        recovered_entries.len(),
+        n_events
+    );
+
+    // Every recovered event_id must have been one we originally wrote
+    for entry in &recovered_entries {
+        assert!(
+            written_ids.contains(&entry.event_id),
+            "CHAOS PROPERTY: every event recovered after truncation must match an originally written event_id; \
+             found unknown id {:?}.\n\
+             Investigate: src/store/mod.rs cold-start replay, src/store/segment.rs frame_decode.\n\
+             Common causes: partial frame incorrectly accepted as valid, event_id reconstructed from corrupt bytes.\n\
+             Run: cargo test --test chaos_testing chaos_truncated_segment_recovers",
+            entry.event_id
+        );
+    }
+
+    // All recovered events must be readable via get()
+    for entry in &recovered_entries {
+        let fetched = store2.get(entry.event_id).expect("get recovered event");
+        assert_eq!(
+            fetched.event.event_id(),
+            entry.event_id,
+            "CHAOS PROPERTY: store.get() for a recovered event_id must return the matching event.\n\
+             Investigate: src/store/reader.rs get(), src/store/index.rs offset lookup.\n\
+             Common causes: index rebuilt with wrong file offsets during cold-start, truncated segment re-indexed past truncation point.\n\
+             Run: cargo test --test chaos_testing chaos_truncated_segment_recovers"
+        );
+    }
+
+    store2.close().expect("close after recovery");
 }
