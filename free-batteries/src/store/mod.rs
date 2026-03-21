@@ -16,7 +16,7 @@ use crate::coordinate::{Coordinate, CoordinateError, Region, KindFilter};
 use crate::event::{Event, EventHeader, EventKind, StoredEvent, EventSourced};
 use index::StoreIndex;
 use reader::Reader;
-use writer::{WriterHandle, WriterCommand, SubscriberList};
+use writer::{WriterHandle, WriterCommand, AppendGuards, SubscriberList};
 use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -201,8 +201,10 @@ impl Store {
             entity: coord.entity_arc(),
             scope: coord.scope_arc(),
             event: Box::new(event), kind,
-            correlation_id: event_id,
-            causation_id: None,
+            guards: AppendGuards {
+                correlation_id: event_id, causation_id: None,
+                expected_sequence: None, idempotency_key: None,
+            },
             respond: tx,
         }).map_err(|_| StoreError::WriterCrashed)?;
 
@@ -227,7 +229,11 @@ impl Store {
         let (tx, rx) = flume::bounded(1);
         self.writer.tx.send(WriterCommand::Append {
             entity: coord.entity_arc(), scope: coord.scope_arc(),
-            event: Box::new(event), kind, correlation_id, causation_id: Some(causation_id),
+            event: Box::new(event), kind,
+            guards: AppendGuards {
+                correlation_id, causation_id: Some(causation_id),
+                expected_sequence: None, idempotency_key: None,
+            },
             respond: tx,
         }).map_err(|_| StoreError::WriterCrashed)?;
 
@@ -247,29 +253,54 @@ impl Store {
     }
 
     /// READ: walk hash chain ancestors. [SPEC:IMPLEMENTATION NOTES item 3]
+    /// When blake3 is enabled, follows the hash chain (event_hash → prev_hash).
+    /// When blake3 is disabled, all hashes are [0u8;32] so hash-based walking
+    /// is impossible. Falls back to clock-ordered traversal (descending clock).
     pub fn walk_ancestors(&self, event_id: u128, limit: usize)
         -> Vec<StoredEvent<serde_json::Value>>
     {
         let mut results = Vec::new();
-        let mut current_id = Some(event_id);
-        while let Some(id) = current_id {
-            if results.len() >= limit { break; }
-            if let Some(entry) = self.index.get_by_id(id) {
+        #[cfg(feature = "blake3")]
+        {
+            let mut current_id = Some(event_id);
+            while let Some(id) = current_id {
+                if results.len() >= limit { break; }
+                if let Some(entry) = self.index.get_by_id(id) {
+                    if let Ok(stored) = self.reader.read_entry(&entry.disk_pos) {
+                        results.push(stored);
+                    }
+                    // Follow prev_hash: find the entry whose event_hash matches prev_hash
+                    let prev = entry.hash_chain.prev_hash;
+                    if prev == [0u8; 32] { break; } // genesis
+                    // Linear scan is acceptable for ancestor walks (bounded by limit).
+                    current_id = self.index.stream(entry.coord.entity())
+                        .iter()
+                        .find(|e| e.hash_chain.event_hash == prev)
+                        .map(|e| e.event_id);
+                } else {
+                    break;
+                }
+            }
+        }
+
+        #[cfg(not(feature = "blake3"))]
+        {
+            // Without blake3, hashes are all zeros. Walk by descending clock order.
+            let Some(start_entry) = self.index.get_by_id(event_id) else {
+                return results;
+            };
+            let entity = start_entry.coord.entity();
+            let stream = self.index.stream(entity);
+            // stream is sorted by (clock, uuid). Walk backwards from start_entry's clock.
+            for entry in stream.iter().rev() {
+                if results.len() >= limit { break; }
+                if entry.clock > start_entry.clock { continue; }
                 if let Ok(stored) = self.reader.read_entry(&entry.disk_pos) {
                     results.push(stored);
                 }
-                // Follow prev_hash: find the entry whose event_hash matches prev_hash
-                let prev = entry.hash_chain.prev_hash;
-                if prev == [0u8; 32] { break; } // genesis
-                // Linear scan is acceptable for ancestor walks (bounded by limit).
-                current_id = self.index.stream(entry.coord.entity())
-                    .iter()
-                    .find(|e| e.hash_chain.event_hash == prev)
-                    .map(|e| e.event_id);
-            } else {
-                break;
             }
         }
+
         results
     }
 
@@ -311,6 +342,8 @@ impl Store {
     }
 
     /// WRITE: append with CAS, idempotency, custom correlation/causation.
+    /// CAS and idempotency checks execute inside the writer thread under
+    /// the entity lock — no TOCTOU race between check and commit.
     pub fn append_with_options(
         &self,
         coord: &Coordinate,
@@ -318,31 +351,6 @@ impl Store {
         payload: &impl Serialize,
         opts: AppendOptions,
     ) -> Result<AppendReceipt, StoreError> {
-        // CAS: check expected sequence
-        if let Some(expected) = opts.expected_sequence {
-            let actual = self.index.get_latest(coord.entity())
-                .map(|e| e.clock)
-                .unwrap_or(0);
-            if actual != expected {
-                return Err(StoreError::SequenceMismatch {
-                    entity: coord.entity().to_string(),
-                    expected,
-                    actual,
-                });
-            }
-        }
-
-        // Idempotency: check if key already seen
-        if let Some(key) = opts.idempotency_key {
-            if let Some(entry) = self.index.get_by_id(key) {
-                return Ok(AppendReceipt {
-                    event_id: entry.event_id,
-                    sequence: entry.global_sequence,
-                    disk_pos: entry.disk_pos,
-                });
-            }
-        }
-
         let payload_bytes = rmp_serde::to_vec_named(payload)
             .map_err(|e| StoreError::Serialization(e.to_string()))?;
         let event_id = opts.idempotency_key.unwrap_or_else(crate::id::generate_v7_id);
@@ -359,7 +367,12 @@ impl Store {
         self.writer.tx.send(WriterCommand::Append {
             entity: coord.entity_arc(),
             scope: coord.scope_arc(),
-            event: Box::new(event), kind, correlation_id, causation_id,
+            event: Box::new(event), kind,
+            guards: AppendGuards {
+                correlation_id, causation_id,
+                expected_sequence: opts.expected_sequence,
+                idempotency_key: opts.idempotency_key,
+            },
             respond: tx,
         }).map_err(|_| StoreError::WriterCrashed)?;
 

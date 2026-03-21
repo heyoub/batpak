@@ -134,7 +134,13 @@ impl ProjectionCache for RedbCache {
             let keys: Vec<Vec<u8>> = table
                 .range(prefix..end.as_slice())
                 .map_err(|e| StoreError::CacheFailed(e.to_string()))?
-                .filter_map(|r| r.ok())
+                .filter_map(|r| match r {
+                    Ok(v) => Some(v),
+                    Err(e) => {
+                        tracing::warn!("cache iteration error (skipping row): {e}");
+                        None
+                    }
+                })
                 .map(|(k, _)| k.value().to_vec())
                 .collect();
             for key in &keys {

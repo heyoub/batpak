@@ -236,17 +236,20 @@ fn concurrent_append_and_query() {
     });
 
     // Reader thread (queries while writes happen)
-    // Verifies: concurrent reads don't crash, and event counts never decrease
+    // Verifies: concurrent reads don't crash, and event counts never decrease.
+    // Yields between iterations so the writer thread has time to make progress.
     let store_r = std::sync::Arc::clone(&store);
     let reader = std::thread::spawn(move || {
         let mut max_seen = 0usize;
-        for _ in 0..50 {
+        for _ in 0..200 {
             let results = store_r.stream("entity:1");
             let count = results.len();
             assert!(count >= max_seen,
                 "CONCURRENT READ REGRESSION: event count went from {max_seen} to {count}. \
                  Events should never disappear during concurrent writes.");
             max_seen = count;
+            if max_seen >= 100 { break; }
+            std::thread::yield_now();
         }
         max_seen
     });

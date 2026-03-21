@@ -25,8 +25,7 @@ pub(crate) enum WriterCommand {
         scope: Arc<str>,
         event: Box<Event<Vec<u8>>>,  // pre-serialized payload as msgpack bytes
         kind: EventKind,
-        correlation_id: u128,
-        causation_id: Option<u128>,
+        guards: AppendGuards,
         respond: Sender<Result<AppendReceipt, StoreError>>,
     },
     Sync {
@@ -162,9 +161,9 @@ fn writer_loop(
     for cmd in rx.iter() {
         match cmd {
             WriterCommand::Append { entity, scope, event, kind,
-                                    correlation_id, causation_id, respond } => {
+                                    guards, respond } => {
                 let result = state.handle_append(
-                    &entity, &scope, *event, kind, correlation_id, causation_id,
+                    &entity, &scope, *event, kind, &guards,
                 );
                 // Respond to caller. Ignore send error (caller may have dropped).
                 let _ = respond.send(result);
@@ -187,9 +186,9 @@ fn writer_loop(
                 while drained < config.shutdown_drain_limit {
                     match rx.try_recv() {
                         Ok(WriterCommand::Append { entity, scope, event, kind,
-                                                   correlation_id, causation_id, respond: r }) => {
+                                                   guards, respond: r }) => {
                             let result = state.handle_append(
-                                &entity, &scope, *event, kind, correlation_id, causation_id,
+                                &entity, &scope, *event, kind, &guards,
                             );
                             let _ = r.send(result);
                             drained += 1;
@@ -211,8 +210,17 @@ fn writer_loop(
     }
 }
 
+/// Options and guards for an append operation, passed through the channel.
+/// CAS + idempotency checks execute under the entity lock — no TOCTOU.
+pub(crate) struct AppendGuards {
+    pub correlation_id: u128,
+    pub causation_id: Option<u128>,
+    pub expected_sequence: Option<u32>,
+    pub idempotency_key: Option<u128>,
+}
+
 impl WriterState<'_> {
-    /// The 10-step commit protocol. 6 params + &mut self = 7.
+    /// The 10-step commit protocol.
     /// [SPEC:src/store/writer.rs — handle_append]
     fn handle_append(
         &mut self,
@@ -220,9 +228,10 @@ impl WriterState<'_> {
         scope: &Arc<str>,
         mut event: Event<Vec<u8>>,
         kind: EventKind,
-        correlation_id: u128,
-        causation_id: Option<u128>,
+        guards: &AppendGuards,
     ) -> Result<AppendReceipt, StoreError> {
+        let correlation_id = guards.correlation_id;
+        let causation_id = guards.causation_id;
 
         // STEP 1: Acquire per-entity lock.
         // [SPEC:IMPLEMENTATION NOTES item 5 — DashMap guard lifetimes]
@@ -233,6 +242,31 @@ impl WriterState<'_> {
             .clone();
         let _entity_guard = lock.lock();
         debug!(entity = %entity, "entity lock acquired");
+
+        // STEP 1a: CAS check (under entity lock — no TOCTOU).
+        if let Some(expected) = guards.expected_sequence {
+            let actual = self.index.get_latest(entity)
+                .map(|e| e.clock)
+                .unwrap_or(0);
+            if actual != expected {
+                return Err(StoreError::SequenceMismatch {
+                    entity: entity.to_string(),
+                    expected,
+                    actual,
+                });
+            }
+        }
+
+        // STEP 1b: Idempotency check (under entity lock — no TOCTOU).
+        if let Some(key) = guards.idempotency_key {
+            if let Some(entry) = self.index.get_by_id(key) {
+                return Ok(AppendReceipt {
+                    event_id: entry.event_id,
+                    sequence: entry.global_sequence,
+                    disk_pos: entry.disk_pos,
+                });
+            }
+        }
 
         // STEP 2: Get prev_hash from index (or [0u8;32] for genesis).
         // Clone the value out of the DashMap Ref immediately.
@@ -254,9 +288,8 @@ impl WriterState<'_> {
 
         // STEP 5: Compute blake3 hash, set hash chain (or skip if feature off).
         // [SPEC:INVARIANTS item 5 — blake3 only]
-        let payload_for_hash = &event.payload; // pre-serialized bytes
         #[cfg(feature = "blake3")]
-        let event_hash = crate::event::hash::compute_hash(payload_for_hash);
+        let event_hash = crate::event::hash::compute_hash(&event.payload);
         #[cfg(not(feature = "blake3"))]
         let event_hash = [0u8; 32];
 
