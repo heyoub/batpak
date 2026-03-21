@@ -281,5 +281,4 @@ impl StoreIndex {
         self.len.store(0, Ordering::Relaxed);
         // entity_locks intentionally NOT cleared — writer may hold references
     }
-
 }

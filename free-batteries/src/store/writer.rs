@@ -122,17 +122,14 @@ impl WriterHandle {
         let cfg = Arc::clone(config);
         let idx = Arc::clone(index);
 
-        let thread_name = format!(
-            "free-batteries-writer-{:08x}",
-            {
-                let mut h: u64 = 0xcbf29ce484222325; // FNV-1a basis
-                for b in config.data_dir.to_string_lossy().bytes() {
-                    h ^= b as u64;
-                    h = h.wrapping_mul(0x100000001b3); // FNV-1a prime
-                }
-                h
+        let thread_name = format!("free-batteries-writer-{:08x}", {
+            let mut h: u64 = 0xcbf29ce484222325; // FNV-1a basis
+            for b in config.data_dir.to_string_lossy().bytes() {
+                h ^= b as u64;
+                h = h.wrapping_mul(0x100000001b3); // FNV-1a prime
             }
-        );
+            h
+        });
 
         let thread = std::thread::Builder::new()
             .name(thread_name)

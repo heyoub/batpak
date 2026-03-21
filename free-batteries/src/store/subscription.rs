@@ -63,10 +63,13 @@ impl Subscription {
 /// SubscriptionOps: composable stream wrapper over Subscription.
 /// Chains filter/take operations. No tokio, no async — just closures in recv loop.
 /// [CROSS-POLLINATION:czap/wire.ts — Wire<T,E> fluent operators]
+type NotifFilter = Box<dyn Fn(&Notification) -> bool + Send>;
+type NotifMapper = Box<dyn Fn(&Notification) -> Option<Notification> + Send>;
+
 pub struct SubscriptionOps {
     sub: Subscription,
-    filters: Vec<Box<dyn Fn(&Notification) -> bool + Send>>,
-    map_fn: Option<Box<dyn Fn(&Notification) -> Option<Notification> + Send>>,
+    filters: Vec<NotifFilter>,
+    map_fn: Option<NotifMapper>,
     limit: Option<usize>,
     count: usize,
 }

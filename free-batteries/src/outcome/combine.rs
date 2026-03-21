@@ -128,11 +128,27 @@ pub fn join_all<T>(outcomes: Vec<Outcome<T>>) -> Outcome<Vec<T>> {
                     Outcome::Ok(vs) => results.extend(vs),
                     Outcome::Err(e) => return Outcome::Err(e),
                     Outcome::Cancelled { reason } => return Outcome::Cancelled { reason },
-                    Outcome::Retry { after_ms, attempt, max_attempts, reason } => {
-                        return Outcome::Retry { after_ms, attempt, max_attempts, reason };
+                    Outcome::Retry {
+                        after_ms,
+                        attempt,
+                        max_attempts,
+                        reason,
+                    } => {
+                        return Outcome::Retry {
+                            after_ms,
+                            attempt,
+                            max_attempts,
+                            reason,
+                        };
                     }
-                    Outcome::Pending { condition, resume_token } => {
-                        return Outcome::Pending { condition, resume_token };
+                    Outcome::Pending {
+                        condition,
+                        resume_token,
+                    } => {
+                        return Outcome::Pending {
+                            condition,
+                            resume_token,
+                        };
                     }
                     Outcome::Batch(vs) => {
                         // Nested batch from recursive join_all — extend results

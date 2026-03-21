@@ -567,7 +567,9 @@ fn compact_retention_removes_dropped_events_from_index() {
 
         for i in 0..10 {
             let kind = if i % 2 == 0 { keep_kind } else { drop_kind };
-            let receipt = store.append(&coord, kind, &serde_json::json!({"i": i})).expect("append");
+            let receipt = store
+                .append(&coord, kind, &serde_json::json!({"i": i}))
+                .expect("append");
             if i % 2 != 0 {
                 drop_ids.push(receipt.event_id);
             }
@@ -606,7 +608,8 @@ fn compact_retention_removes_dropped_events_from_index() {
 
     // Remaining events should still be accessible (5 kept + events in new active segment = 5)
     assert_eq!(
-        store.stats().event_count, 5,
+        store.stats().event_count,
+        5,
         "COMPACT RETENTION COUNT: expected 5 kept events after dropping 5.\n\
          Investigate: src/store/mod.rs compact() index rebuild."
     );
@@ -635,7 +638,9 @@ fn compact_tombstone_updates_event_kind_in_index() {
 
         for i in 0..10 {
             let kind = if i % 2 == 0 { live_kind } else { doomed_kind };
-            store.append(&coord, kind, &serde_json::json!({"i": i})).expect("append");
+            store
+                .append(&coord, kind, &serde_json::json!({"i": i}))
+                .expect("append");
         }
         store.close().expect("close");
     }
@@ -659,7 +664,8 @@ fn compact_tombstone_updates_event_kind_in_index() {
 
     // All 10 events should still exist (tombstones replace, not remove)
     assert_eq!(
-        store.stats().event_count, 10,
+        store.stats().event_count,
+        10,
         "COMPACT TOMBSTONE COUNT: expected all 10 events to remain (5 live + 5 tombstoned).\n\
          Investigate: src/store/mod.rs compact() tombstone path."
     );

@@ -33,7 +33,13 @@ impl DagPosition {
     }
 
     /// Full constructor with HLC fields.
-    pub const fn with_hlc(wall_ms: u64, counter: u16, depth: u32, lane: u32, sequence: u32) -> Self {
+    pub const fn with_hlc(
+        wall_ms: u64,
+        counter: u16,
+        depth: u32,
+        lane: u32,
+        sequence: u32,
+    ) -> Self {
         Self {
             wall_ms,
             counter,
@@ -100,7 +106,11 @@ impl DagPosition {
 impl fmt::Display for DagPosition {
     /// "depth:lane:sequence@wall_ms.counter"
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}:{}:{}@{}.{}", self.depth, self.lane, self.sequence, self.wall_ms, self.counter)
+        write!(
+            f,
+            "{}:{}:{}@{}.{}",
+            self.depth, self.lane, self.sequence, self.wall_ms, self.counter
+        )
     }
 }
 
