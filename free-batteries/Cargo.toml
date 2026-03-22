@@ -5,6 +5,9 @@ edition = "2021"
 rust-version = "1.75"
 license = "MIT OR Apache-2.0"
 description = "Event-sourced state machines over coordinate spaces"
+repository = "https://github.com/heyoub/free-b"
+keywords = ["event-sourcing", "state-machine", "coordinate", "cqrs"]
+categories = ["data-structures", "database"]
 
 [features]
 default = ["blake3"]
