@@ -70,7 +70,9 @@ fn ops_filter_passes_matching() {
 
     let region = Region::entity("entity:");
     let sub = store.subscribe(&region);
-    let mut ops = sub.ops().filter(move |n: &Notification| n.kind == target_kind);
+    let mut ops = sub
+        .ops()
+        .filter(move |n: &Notification| n.kind == target_kind);
 
     let store_w = Arc::clone(&store);
     let coord_w = coord.clone();
@@ -162,9 +164,7 @@ fn ops_take_limits_count() {
         thread::sleep(Duration::from_millis(20));
         let payload = serde_json::json!({"x": 1});
         for _ in 0..5 {
-            store_w
-                .append(&coord_w, kind, &payload)
-                .expect("append");
+            store_w.append(&coord_w, kind, &payload).expect("append");
         }
     });
 
