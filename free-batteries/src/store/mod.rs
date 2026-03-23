@@ -475,7 +475,7 @@ impl Store {
 
     /// READ: walk hash chain ancestors. [SPEC:IMPLEMENTATION NOTES item 3]
     /// When blake3 is enabled, follows the hash chain (event_hash -> prev_hash).
-    /// When blake3 is disabled, all hashes are [0u8;32] so hash-based walking
+    /// When blake3 is disabled, all hashes are `[0u8;32]` so hash-based walking
     /// is impossible. Falls back to clock-ordered traversal (descending clock).
     pub fn walk_ancestors(
         &self,

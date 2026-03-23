@@ -4,7 +4,7 @@ pub mod receipt;
 pub use denial::Denial;
 pub use receipt::Receipt;
 
-/// Gate<Ctx>: a predicate that evaluates a context and either permits or denies.
+/// `Gate<Ctx>`: a predicate that evaluates a context and either permits or denies.
 /// Gates are PREDICATES, not transformers. No I/O, no mutation, pure.
 /// Ctx is product-defined. Library is generic over it.
 /// [SPEC:src/guard/mod.rs]
@@ -16,7 +16,7 @@ pub trait Gate<Ctx>: Send + Sync {
     }
 }
 
-/// GateSet<Ctx>: ordered collection of gates. Fail-fast by default.
+/// `GateSet<Ctx>`: ordered collection of gates. Fail-fast by default.
 pub struct GateSet<Ctx> {
     gates: Vec<Box<dyn Gate<Ctx>>>,
 }
@@ -31,7 +31,7 @@ impl<Ctx> GateSet<Ctx> {
     }
 
     /// Fail-fast evaluation. First denial stops.
-    /// Returns Receipt<T> wrapping the proposal payload on success.
+    /// Returns `Receipt<T>` wrapping the proposal payload on success.
     pub fn evaluate<T>(
         &self,
         ctx: &Ctx,
@@ -45,10 +45,27 @@ impl<Ctx> GateSet<Ctx> {
     }
 
     /// Evaluate ALL gates (no fail-fast). For observability — collect all denials.
+    /// Gates that panic are caught and surfaced as `Denial` with code `GATE_DEFECT`.
+    /// [CROSS-POLLINATION:czap/packages/core/src/gate.ts — evaluateAll defect handling]
     pub fn evaluate_all(&self, ctx: &Ctx) -> Vec<Denial> {
         self.gates
             .iter()
-            .filter_map(|g| g.evaluate(ctx).err())
+            .filter_map(|g| {
+                match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| g.evaluate(ctx))) {
+                    Ok(Ok(())) => None,
+                    Ok(Err(denial)) => Some(denial),
+                    Err(panic_payload) => {
+                        let msg = if let Some(s) = panic_payload.downcast_ref::<&str>() {
+                            (*s).to_string()
+                        } else if let Some(s) = panic_payload.downcast_ref::<String>() {
+                            s.clone()
+                        } else {
+                            "unknown panic".to_string()
+                        };
+                        Some(Denial::new(g.name(), msg).with_code("GATE_DEFECT"))
+                    }
+                }
+            })
             .collect()
     }
 

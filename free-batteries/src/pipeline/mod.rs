@@ -4,11 +4,11 @@ use serde::{Deserialize, Serialize};
 pub mod bypass;
 pub use bypass::{BypassReason, BypassReceipt};
 
-/// Proposal<T>: wraps a value for gate evaluation.
+/// `Proposal<T>`: wraps a value for gate evaluation.
 /// [SPEC:src/pipeline/mod.rs]
 pub struct Proposal<T>(pub T);
 
-/// Committed<T>: proof that an event was persisted.
+/// `Committed<T>`: proof that an event was persisted.
 /// [SPEC:src/pipeline/mod.rs]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Committed<T> {
@@ -19,7 +19,7 @@ pub struct Committed<T> {
     pub hash: [u8; 32], // blake3, or [0u8;32] if feature off
 }
 
-/// Pipeline<Ctx>: evaluate gates then commit.
+/// `Pipeline<Ctx>`: evaluate gates then commit.
 /// [SPEC:src/pipeline/mod.rs]
 pub struct Pipeline<Ctx> {
     gates: GateSet<Ctx>,

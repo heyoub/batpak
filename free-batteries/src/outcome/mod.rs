@@ -9,7 +9,7 @@ pub use combine::{join_all, join_any, zip};
 pub use error::{ErrorKind, OutcomeError};
 pub use wait::{CompensationAction, WaitCondition};
 
-/// Outcome<T>: the core algebraic type. 6 variants.
+/// `Outcome<T>`: the core algebraic type. 6 variants.
 /// Named "Outcome" not "Effect" to eliminate Effect/Event confusion.
 /// [SPEC:src/outcome/mod.rs]
 
@@ -259,9 +259,9 @@ impl<T> Outcome<T> {
     }
 }
 
-/// flatten: unwrap one layer of nesting. Outcome<Outcome<T>> → Outcome<T>.
+/// flatten: unwrap one layer of nesting. `Outcome<Outcome<T>>` → `Outcome<T>`.
 /// Implemented on the nested type (like Option::flatten), not as a bounded
-/// method on Outcome<T>. This is join in category theory: join = bind(id).
+/// method on `Outcome<T>`. This is join in category theory: join = bind(id).
 /// Composes with and_then (the monad bind, proptest-proven).
 impl<T> Outcome<Outcome<T>> {
     pub fn flatten(self) -> Outcome<T> {

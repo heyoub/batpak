@@ -1,4 +1,4 @@
-/// Receipt<T>: proof that all gates passed. Consumed exactly once.
+/// `Receipt<T>`: proof that all gates passed. Consumed exactly once.
 /// The seal module prevents external construction. Only GateSet::evaluate() creates these.
 /// [SPEC:src/guard/receipt.rs — TOCTOU fix]
 pub struct Receipt<T> {

@@ -5,7 +5,7 @@ pub trait BypassReason: Send + Sync {
     fn justification(&self) -> &'static str;
 }
 
-/// BypassReceipt<T>: audit trail shows "bypassed: {reason}".
+/// `BypassReceipt<T>`: audit trail shows "bypassed: {reason}".
 pub struct BypassReceipt<T> {
     pub payload: T,
     pub reason: &'static str,

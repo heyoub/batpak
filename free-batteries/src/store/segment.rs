@@ -5,7 +5,7 @@ use std::io::Write;
 // NOTE: No `use crate::wire::*` needed. serde(with) resolves via string path.
 
 /// Segment file format: magic(4) + header_len(4 BE) + header(msgpack) + frames
-/// Frame: [len:u32 BE][crc32:u32 BE][msgpack]
+/// Frame: \[len:u32 BE\]\[crc32:u32 BE\]\[msgpack\]
 /// Files named: {segment_id:06}.fbat. Sequential u64.
 /// [SPEC:src/store/segment.rs]
 pub const SEGMENT_MAGIC: &[u8; 4] = b"FBAT";
@@ -46,10 +46,10 @@ pub struct CompactionResult {
     pub bytes_reclaimed: u64,
 }
 
-/// frame_encode: serialize data to msgpack, wrap in [len:u32 BE][crc32:u32 BE][msgpack]
-/// [SPEC:WIRE FORMAT DECISIONS — ALWAYS rmp_serde::to_vec_named()]
-/// [DEP:rmp_serde::to_vec_named] → Result<Vec<u8>, encode::Error>
-/// [DEP:crc32fast::hash] → u32
+/// frame_encode: serialize data to msgpack, wrap in \[len:u32 BE\]\[crc32:u32 BE\]\[msgpack\]
+/// \[SPEC:WIRE FORMAT DECISIONS — ALWAYS rmp_serde::to_vec_named()\]
+/// \[DEP:rmp_serde::to_vec_named\] → `Result<Vec<u8>, encode::Error>`
+/// \[DEP:crc32fast::hash\] → u32
 pub fn frame_encode<T: serde::Serialize>(data: &T) -> Result<Vec<u8>, StoreError> {
     let msgpack =
         rmp_serde::to_vec_named(data).map_err(|e| StoreError::Serialization(e.to_string()))?;
@@ -102,7 +102,7 @@ impl std::fmt::Display for FrameDecodeError {
     }
 }
 
-/// frame_decode: read [len][crc][msgpack], verify CRC, return msgpack bytes.
+/// frame_decode: read \[len\]\[crc\]\[msgpack\], verify CRC, return msgpack bytes.
 /// Returns (msgpack_bytes, total_frame_size_consumed).
 pub fn frame_decode(buf: &[u8]) -> Result<(&[u8], usize), FrameDecodeError> {
     if buf.len() < 8 {

@@ -7,6 +7,7 @@
 //! Deep fuzz: PROPTEST_CASES=100000 cargo test --test fuzz_targets --all-features --release
 //! [SPEC:tests/fuzz_targets.rs]
 
+#[cfg(feature = "blake3")]
 use free_batteries::event::hash::HashChain;
 use free_batteries::outcome::wait::{CompensationAction, WaitCondition};
 use free_batteries::prelude::*;
