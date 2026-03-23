@@ -53,8 +53,7 @@ pub enum SyncMode {
 
 /// StoreConfig: all settings for a Store instance.
 /// No Default — callers must provide data_dir via `StoreConfig::new(path)`.
-/// Note: Manual Clone impl because `clock` field is `Arc<dyn Fn>`.
-/// No Debug derive because closures don't implement Debug.
+/// Manual Clone and Debug impls because `clock` field is `Arc<dyn Fn>`.
 pub struct StoreConfig {
     pub data_dir: PathBuf,
     pub segment_max_bytes: u64,
@@ -101,6 +100,44 @@ impl StoreConfig {
             Some(f) => f(),
             None => now_us(), // module-level fallback using SystemTime
         }
+    }
+}
+
+impl Clone for StoreConfig {
+    fn clone(&self) -> Self {
+        Self {
+            data_dir: self.data_dir.clone(),
+            segment_max_bytes: self.segment_max_bytes,
+            sync_every_n_events: self.sync_every_n_events,
+            fd_budget: self.fd_budget,
+            writer_channel_capacity: self.writer_channel_capacity,
+            broadcast_capacity: self.broadcast_capacity,
+            cache_map_size_bytes: self.cache_map_size_bytes,
+            restart_policy: self.restart_policy.clone(),
+            shutdown_drain_limit: self.shutdown_drain_limit,
+            writer_stack_size: self.writer_stack_size,
+            clock: self.clock.clone(),
+            sync_mode: self.sync_mode.clone(),
+        }
+    }
+}
+
+impl std::fmt::Debug for StoreConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StoreConfig")
+            .field("data_dir", &self.data_dir)
+            .field("segment_max_bytes", &self.segment_max_bytes)
+            .field("sync_every_n_events", &self.sync_every_n_events)
+            .field("fd_budget", &self.fd_budget)
+            .field("writer_channel_capacity", &self.writer_channel_capacity)
+            .field("broadcast_capacity", &self.broadcast_capacity)
+            .field("cache_map_size_bytes", &self.cache_map_size_bytes)
+            .field("restart_policy", &self.restart_policy)
+            .field("shutdown_drain_limit", &self.shutdown_drain_limit)
+            .field("writer_stack_size", &self.writer_stack_size)
+            .field("clock", &self.clock.as_ref().map(|_| "<fn>"))
+            .field("sync_mode", &self.sync_mode)
+            .finish()
     }
 }
 
@@ -188,6 +225,46 @@ pub struct AppendOptions {
     pub idempotency_key: Option<u128>,
     pub correlation_id: Option<u128>,
     pub causation_id: Option<u128>,
+    /// EventHeader flags (FLAG_REQUIRES_ACK, FLAG_TRANSACTIONAL, FLAG_REPLAY).
+    /// Default: 0 (no flags). [SPEC:src/event/header.rs — Flag bit constants]
+    pub flags: u8,
+}
+
+impl AppendOptions {
+    /// Create new AppendOptions with all defaults.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set expected sequence for compare-and-swap (CAS) check.
+    pub fn with_cas(mut self, seq: u32) -> Self {
+        self.expected_sequence = Some(seq);
+        self
+    }
+
+    /// Set idempotency key. Duplicate appends with the same key return the original receipt.
+    pub fn with_idempotency(mut self, key: u128) -> Self {
+        self.idempotency_key = Some(key);
+        self
+    }
+
+    /// Set EventHeader flags (bitwise OR of FLAG_REQUIRES_ACK, FLAG_TRANSACTIONAL, FLAG_REPLAY).
+    pub fn with_flags(mut self, flags: u8) -> Self {
+        self.flags = flags;
+        self
+    }
+
+    /// Set custom correlation ID.
+    pub fn with_correlation(mut self, id: u128) -> Self {
+        self.correlation_id = Some(id);
+        self
+    }
+
+    /// Set custom causation ID.
+    pub fn with_causation(mut self, id: u128) -> Self {
+        self.causation_id = Some(id);
+        self
+    }
 }
 
 /// Predicate for filtering events during compaction. Returns true to keep, false to drop.
@@ -225,6 +302,13 @@ impl Default for CompactionConfig {
 }
 
 impl Store {
+    /// Open a store with default config at `./free-batteries-data`.
+    /// Sugar over `Store::open(StoreConfig::new("./free-batteries-data"))`.
+    /// [SPEC:src/store/mod.rs — Store::open_default]
+    pub fn open_default() -> Result<Self, StoreError> {
+        Self::open(StoreConfig::new("./free-batteries-data"))
+    }
+
     pub fn open(config: StoreConfig) -> Result<Self, StoreError> {
         Self::open_with_cache(config, Box::new(NoCache))
     }
@@ -467,6 +551,16 @@ impl Store {
         let watermark = entries.last().map(|e| e.global_sequence).unwrap_or(0);
         let cache_key = entity.as_bytes();
 
+        // Step 0: Prefetch hint — let cache pre-warm if it supports it.
+        // [SPEC:src/store/projection.rs — ProjectionCache::prefetch]
+        let predicted_meta = projection::CacheMeta {
+            watermark,
+            cached_at_us: self.config.now_us(),
+        };
+        if let Err(e) = self.cache.prefetch(cache_key, predicted_meta) {
+            tracing::warn!("cache prefetch failed (non-fatal): {e}");
+        }
+
         // Step 1: Check cache
         if let Ok(Some((bytes, meta))) = self.cache.get(cache_key) {
             let is_fresh = match freshness {
@@ -537,6 +631,46 @@ impl Store {
         self.query(&Region::all().with_fact(KindFilter::Exact(kind)))
     }
 
+    /// REACT: spawn a background thread running the subscribe→react→append loop.
+    /// Returns a JoinHandle. The thread runs until the store is dropped (subscription closes).
+    /// [SPEC:src/event/sourcing.rs — Reactive<P> glue pattern]
+    pub fn react_loop<R>(
+        self: &Arc<Self>,
+        region: &Region,
+        reactor: R,
+    ) -> std::thread::JoinHandle<()>
+    where
+        R: crate::event::sourcing::Reactive<serde_json::Value> + Send + 'static,
+    {
+        let store = Arc::clone(self);
+        let sub = self.subscribe(region);
+        std::thread::Builder::new()
+            .name("free-batteries-reactor".into())
+            .spawn(move || {
+                while let Some(notif) = sub.recv() {
+                    let stored = match store.get(notif.event_id) {
+                        Ok(s) => s,
+                        Err(e) => {
+                            tracing::warn!("react_loop: failed to get event {}: {e}", notif.event_id);
+                            continue;
+                        }
+                    };
+                    for (coord, kind, payload) in reactor.react(&stored.event) {
+                        if let Err(e) = store.append_reaction(
+                            &coord,
+                            kind,
+                            &payload,
+                            notif.correlation_id,
+                            notif.event_id,
+                        ) {
+                            tracing::warn!("react_loop: failed to append reaction: {e}");
+                        }
+                    }
+                }
+            })
+            .expect("failed to spawn reactor thread")
+    }
+
     /// WRITE: append with CAS, idempotency, custom correlation/causation.
     /// CAS and idempotency checks execute inside the writer thread under
     /// the entity lock — no TOCTOU race between check and commit.
@@ -562,7 +696,8 @@ impl Store {
             crate::coordinate::DagPosition::root(),
             payload_bytes.len() as u32,
             kind,
-        );
+        )
+        .with_flags(opts.flags);
         let event = Event::new(header, payload_bytes);
 
         let (tx, rx) = flume::bounded(1);

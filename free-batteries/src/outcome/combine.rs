@@ -150,13 +150,10 @@ pub fn join_all<T>(outcomes: Vec<Outcome<T>>) -> Outcome<Vec<T>> {
                             resume_token,
                         };
                     }
-                    Outcome::Batch(vs) => {
-                        // Nested batch from recursive join_all — extend results
-                        for item in vs {
-                            if let Outcome::Ok(v) = item {
-                                results.extend(v);
-                            }
-                        }
+                    Outcome::Batch(_) => {
+                        // join_all always returns Ok, Err, Cancelled, Retry, or Pending —
+                        // never Batch. This arm is unreachable by construction.
+                        unreachable!("join_all never returns Batch — it always returns Ok or an early-exit variant");
                     }
                 }
             }

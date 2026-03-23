@@ -69,4 +69,14 @@ impl<Ctx> Pipeline<Ctx> {
             justification: reason.justification(),
         }
     }
+
+    /// commit_bypass: persist a bypassed proposal through the same commit path.
+    /// Mirrors commit() but takes a BypassReceipt instead of a Receipt.
+    /// [SPEC:src/pipeline/mod.rs — Pipeline::commit_bypass]
+    pub fn commit_bypass<T, E>(
+        receipt: BypassReceipt<T>,
+        commit_fn: impl FnOnce(T) -> Result<Committed<T>, E>,
+    ) -> Result<Committed<T>, E> {
+        commit_fn(receipt.payload)
+    }
 }

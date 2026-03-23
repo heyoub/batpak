@@ -81,6 +81,17 @@ impl SubscriptionOps {
         self
     }
 
+    /// Transform notifications. The mapper returns Some(notification) to pass through,
+    /// or None to skip. Chainable with filter/take.
+    /// [SPEC:src/store/subscription.rs — SubscriptionOps::map]
+    pub fn map<F: Fn(&Notification) -> Option<Notification> + Send + 'static>(
+        mut self,
+        f: F,
+    ) -> Self {
+        self.map_fn = Some(Box::new(f));
+        self
+    }
+
     /// Limit the number of notifications returned before stopping.
     pub fn take(mut self, n: usize) -> Self {
         self.limit = Some(n);

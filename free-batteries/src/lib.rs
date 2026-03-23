@@ -11,18 +11,26 @@
 //! [`Gate`](crate::guard::Gate) instances, then [`commit`](crate::pipeline::Pipeline::commit) to
 //! the [`Store`](crate::store::Store).
 //!
-//! ```ignore
+//! ```no_run
 //! use free_batteries::prelude::*;
 //!
-//! let store = Store::open(StoreConfig::new("./my-data"))?;
-//! let gates = GateSet::new();
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let store = Store::open_default()?;
+//! let gates: GateSet<()> = GateSet::new();
 //! let pipeline = Pipeline::new(gates);
 //!
-//! let proposal = Proposal::new(payload);
-//! let receipt = pipeline.evaluate(&context, proposal)?;
-//! let committed = pipeline.commit(receipt, |p| {
-//!     store.append(&coord, kind, &p)
+//! let coord = Coordinate::new("entity:1", "scope:test")?;
+//! let kind = EventKind::custom(0xF, 1);
+//! let payload = serde_json::json!({"hello": "world"});
+//!
+//! let proposal = Proposal::new(payload.clone());
+//! let receipt = pipeline.evaluate(&(), proposal)?;
+//! let committed = pipeline.commit(receipt, |p| -> Result<_, StoreError> {
+//!     let r = store.append(&coord, kind, &p)?;
+//!     Ok(Committed { payload: p, event_id: r.event_id, sequence: r.sequence, hash: [0u8; 32] })
 //! })?;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! **Reading order:**

@@ -731,6 +731,109 @@ fn correctness_gates_self_validate() {
     store.close().expect("close");
 }
 
+/// Append throughput gate: dedicated test using the library's own Gate system.
+/// [SPEC:tests/self_benchmark.rs — BN5 append throughput gate]
+#[test]
+fn append_throughput_gate() {
+    let dir = TempDir::new().expect("temp dir");
+    let config = StoreConfig {
+        data_dir: dir.path().to_path_buf(),
+        ..StoreConfig::new("")
+    };
+    let store = Store::open(config).expect("open");
+    let coord = Coordinate::new("gate:append", "gate:scope").expect("valid coord");
+    let kind = EventKind::custom(0xF, 1);
+    let n = 5_000u64;
+
+    let start = Instant::now();
+    for i in 0..n {
+        store.append(&coord, kind, &serde_json::json!({"i": i})).expect("append");
+    }
+    let elapsed = start.elapsed();
+    let events_per_sec = n as f64 / elapsed.as_secs_f64();
+
+    let mut gates = GateSet::new();
+    // CI threshold: 5K events/sec minimum (generous for slow runners)
+    gates.push(WriteThroughputGate { min_events_per_sec: 5_000.0 });
+
+    let ctx = PerfContext {
+        event_count: n,
+        events_per_sec,
+        query_us: 0.0,
+        projection_ms: 0.0,
+    };
+    let denials = gates.evaluate_all(&ctx);
+
+    eprintln!("\n  APPEND THROUGHPUT GATE ({n} events):");
+    eprintln!("    Throughput: {events_per_sec:.0} events/sec");
+
+    if !denials.is_empty() {
+        for d in &denials {
+            eprintln!("    DENIED: [{gate}] {msg}", gate = d.gate, msg = d.message);
+        }
+        panic!(
+            "APPEND THROUGHPUT GATE FAILED: {:.0} events/sec < 5000 minimum.\n\
+             Investigate: src/store/writer.rs handle_append.",
+            events_per_sec
+        );
+    }
+
+    store.close().expect("close");
+}
+
+/// Projection latency gate: dedicated test using the library's own Gate system.
+/// [SPEC:tests/self_benchmark.rs — BN5 projection latency gate]
+#[test]
+fn projection_latency_gate() {
+    let dir = TempDir::new().expect("temp dir");
+    let config = StoreConfig {
+        data_dir: dir.path().to_path_buf(),
+        ..StoreConfig::new("")
+    };
+    let store = Store::open(config).expect("open");
+    let coord = Coordinate::new("gate:proj", "gate:scope").expect("valid coord");
+    let kind = EventKind::custom(0xF, 1);
+    let n = 1_000u64;
+
+    for i in 0..n {
+        store.append(&coord, kind, &serde_json::json!({"i": i})).expect("append");
+    }
+
+    let start = Instant::now();
+    let _: Option<BenchCounter> = store
+        .project("gate:proj", &free_batteries::store::Freshness::Consistent)
+        .expect("project");
+    let projection_ms = start.elapsed().as_secs_f64() * 1000.0;
+
+    let mut gates = GateSet::new();
+    // CI threshold: 5s max for 1K event projection (generous)
+    gates.push(ProjectionGate { max_ms: 5_000.0 });
+
+    let ctx = PerfContext {
+        event_count: n,
+        events_per_sec: 0.0,
+        query_us: 0.0,
+        projection_ms,
+    };
+    let denials = gates.evaluate_all(&ctx);
+
+    eprintln!("\n  PROJECTION LATENCY GATE ({n} events):");
+    eprintln!("    Replay: {projection_ms:.1} ms");
+
+    if !denials.is_empty() {
+        for d in &denials {
+            eprintln!("    DENIED: [{gate}] {msg}", gate = d.gate, msg = d.message);
+        }
+        panic!(
+            "PROJECTION LATENCY GATE FAILED: {:.1}ms > 5000ms max.\n\
+             Investigate: src/store/mod.rs project(), src/store/reader.rs.",
+            projection_ms
+        );
+    }
+
+    store.close().expect("close");
+}
+
 /// Verify the correctness gates actually FIRE when properties are violated.
 /// Without this, a broken gate that always passes would be invisible.
 #[test]

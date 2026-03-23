@@ -96,10 +96,11 @@ impl DagPosition {
         self.depth == 0 && self.lane == 0 && self.sequence == 0
     }
 
-    /// Causal ordering: ancestor if same lane and lower depth+sequence.
-    /// v1: same lane always (lane=0), so just compare sequence.
+    /// Causal ordering: ancestor if same lane, same depth, and lower sequence.
+    /// v1: depth is always 0, lane always 0, so just compare sequence.
+    /// DAG-ready: different depths means different branches — not ancestor.
     pub const fn is_ancestor_of(&self, other: &DagPosition) -> bool {
-        self.lane == other.lane && self.depth <= other.depth && self.sequence < other.sequence
+        self.lane == other.lane && self.depth == other.depth && self.sequence < other.sequence
     }
 }
 

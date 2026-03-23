@@ -77,13 +77,13 @@ impl Reader {
         &self,
         pos: &DiskPos,
     ) -> Result<StoredEvent<serde_json::Value>, StoreError> {
-        let file = self.get_fd(pos.segment_id)?;
         let mut buf = self.acquire_buffer(pos.length as usize);
 
         // Use pread (read_at) — doesn't modify file cursor. [SPEC:IMPLEMENTATION NOTES item 7]
         // Loop to handle short reads (read_at may return fewer bytes than requested).
         #[cfg(unix)]
         {
+            let file = self.get_fd(pos.segment_id)?;
             use std::os::unix::fs::FileExt;
             let mut total_read = 0;
             while total_read < buf.len() {
@@ -101,12 +101,32 @@ impl Reader {
         }
         #[cfg(not(unix))]
         {
-            // Fallback: seek + read (holds the mutex so this is safe)
+            // Non-unix fallback: seek + read under the FD cache lock to prevent
+            // concurrent seeks on cloned File handles (which share the file cursor
+            // on Windows). The lock ensures sequential access per reader instance.
+            // [SPEC:IMPLEMENTATION NOTES item 7 — concurrent read safety]
             use std::io::{Seek, SeekFrom};
-            let mut file = file; // need mut for seek
-            file.seek(SeekFrom::Start(pos.offset))
-                .map_err(StoreError::Io)?;
-            file.read_exact(&mut buf).map_err(StoreError::Io)?;
+            let mut cache = self.fd_cache.lock();
+            if let Some(f) = cache.fds.get_mut(&pos.segment_id) {
+                f.seek(SeekFrom::Start(pos.offset))
+                    .map_err(StoreError::Io)?;
+                f.read_exact(&mut buf).map_err(StoreError::Io)?;
+            } else {
+                // File not in cache — open, seek, read, and cache it
+                let path = self.data_dir.join(segment::segment_filename(pos.segment_id));
+                let mut f = File::open(&path).map_err(StoreError::Io)?;
+                f.seek(SeekFrom::Start(pos.offset))
+                    .map_err(StoreError::Io)?;
+                f.read_exact(&mut buf).map_err(StoreError::Io)?;
+                if cache.fds.len() >= cache.budget {
+                    if let Some(oldest) = cache.order.first().copied() {
+                        cache.fds.remove(&oldest);
+                        cache.order.remove(0);
+                    }
+                }
+                cache.fds.insert(pos.segment_id, f);
+                cache.order.push(pos.segment_id);
+            }
         }
 
         let result = segment::frame_decode(&buf).map_err(|e| match e {

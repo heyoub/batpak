@@ -1333,3 +1333,525 @@ fn index_entry_causation_helpers() {
 
     store.close().expect("close");
 }
+
+// ================================================================
+// Phase 3 — NEW TESTS: Flags, Subscription ops, Cursor edge cases,
+// walk_ancestors genesis, DagPosition is_ancestor_of, commit_bypass,
+// react_loop, prefetch wiring.
+// ================================================================
+
+// --- Flags round-trip ---
+
+#[test]
+fn append_with_flags_round_trips() {
+    use free_batteries::event::header::{FLAG_REQUIRES_ACK, FLAG_TRANSACTIONAL};
+
+    let (store, _dir) = test_store();
+    let coord = Coordinate::new("entity:flags", "scope:test").expect("valid coord");
+    let kind = EventKind::custom(0xF, 1);
+    let flags = FLAG_REQUIRES_ACK | FLAG_TRANSACTIONAL;
+
+    let opts = AppendOptions {
+        flags,
+        ..Default::default()
+    };
+    let receipt = store
+        .append_with_options(&coord, kind, &serde_json::json!({"flagged": true}), opts)
+        .expect("append with flags");
+
+    let stored = store.get(receipt.event_id).expect("get");
+    assert_eq!(
+        stored.event.header.flags, flags,
+        "PROPERTY: flags set via AppendOptions must round-trip through append→get.\n\
+         Investigate: src/store/mod.rs append_with_options, src/store/writer.rs handle_append.\n\
+         Common causes: flags not propagated from AppendOptions to EventHeader, writer overwrites flags.\n\
+         Run: cargo test --test store_advanced append_with_flags_round_trips"
+    );
+    assert!(
+        stored.event.header.requires_ack(),
+        "PROPERTY: FLAG_REQUIRES_ACK must be readable via requires_ack() accessor.\n\
+         Investigate: src/event/header.rs requires_ack.\n\
+         Run: cargo test --test store_advanced append_with_flags_round_trips"
+    );
+    assert!(
+        stored.event.header.is_transactional(),
+        "PROPERTY: FLAG_TRANSACTIONAL must be readable via is_transactional() accessor.\n\
+         Investigate: src/event/header.rs is_transactional.\n\
+         Run: cargo test --test store_advanced append_with_flags_round_trips"
+    );
+
+    store.close().expect("close");
+}
+
+// --- SubscriptionOps::map ---
+
+#[test]
+fn subscription_ops_map_transforms_notifications() {
+    let (store, _dir) = test_store();
+    let store = Arc::new(store);
+    let coord = Coordinate::new("entity:map", "scope:test").expect("valid coord");
+    let kind = EventKind::custom(0xF, 1);
+    let region = Region::entity("entity:map");
+
+    let sub = store.subscribe(&region);
+
+    let store_w = Arc::clone(&store);
+    let coord_w = coord.clone();
+    std::thread::spawn(move || {
+        store_w
+            .append(&coord_w, kind, &serde_json::json!({"v": 1}))
+            .expect("append");
+    })
+    .join()
+    .expect("writer");
+
+    // Use map to transform: change the kind to a custom marker
+    let marker_kind = EventKind::custom(0xA, 0xBB);
+    let mut ops = sub.ops().map(move |n| {
+        let mut transformed = n.clone();
+        transformed.kind = marker_kind;
+        Some(transformed)
+    });
+
+    // Use try-based approach: events are already sent
+    let rx_result = std::thread::spawn(move || {
+        ops.recv()
+    }).join().expect("recv thread");
+
+    assert!(
+        rx_result.is_some(),
+        "PROPERTY: SubscriptionOps::map must pass through transformed notifications.\n\
+         Investigate: src/store/subscription.rs SubscriptionOps::map and recv.\n\
+         Common causes: map_fn not applied in recv loop, map returns None.\n\
+         Run: cargo test --test store_advanced subscription_ops_map_transforms_notifications"
+    );
+    let notif = rx_result.unwrap();
+    assert_eq!(
+        notif.kind, marker_kind,
+        "PROPERTY: SubscriptionOps::map must apply the transformation function to notifications.\n\
+         Investigate: src/store/subscription.rs recv map_fn application.\n\
+         Common causes: map_fn ignored, original notification returned instead.\n\
+         Run: cargo test --test store_advanced subscription_ops_map_transforms_notifications"
+    );
+
+    store.sync().expect("sync");
+}
+
+// --- SubscriptionOps::filter chains ---
+
+#[test]
+fn subscription_ops_filter_chains_correctly() {
+    let (store, _dir) = test_store();
+    let store = Arc::new(store);
+    let kind1 = EventKind::custom(0xF, 1);
+    let kind2 = EventKind::custom(0xF, 2);
+    let coord = Coordinate::new("entity:filt", "scope:test").expect("valid coord");
+    let region = Region::entity("entity:filt");
+
+    let sub = store.subscribe(&region);
+
+    // Chain two filters and take(2) to prevent blocking forever:
+    // first accepts kind1 only, second is always-true (AND semantics)
+    let mut ops = sub.ops()
+        .filter(move |n| n.kind == kind1)
+        .filter(|_n| true)
+        .take(2);
+
+    let store_w = Arc::clone(&store);
+    let coord_w = coord.clone();
+    let writer = std::thread::spawn(move || {
+        store_w.append(&coord_w, kind1, &serde_json::json!({"k": 1})).expect("append");
+        store_w.append(&coord_w, kind2, &serde_json::json!({"k": 2})).expect("append");
+        store_w.append(&coord_w, kind1, &serde_json::json!({"k": 3})).expect("append");
+    });
+
+    let result = std::thread::spawn(move || {
+        let mut results = Vec::new();
+        while let Some(n) = ops.recv() {
+            results.push(n);
+        }
+        results
+    }).join().expect("recv thread");
+
+    writer.join().expect("writer");
+
+    assert_eq!(
+        result.len(), 2,
+        "PROPERTY: chained filter with AND semantics must pass only kind1 events (2 of 3).\n\
+         Investigate: src/store/subscription.rs SubscriptionOps::filter, recv.\n\
+         Common causes: filters not chained, last filter replaces previous.\n\
+         Run: cargo test --test store_advanced subscription_ops_filter_chains_correctly"
+    );
+
+    store.sync().expect("sync");
+}
+
+// --- SubscriptionOps::take ---
+
+#[test]
+fn subscription_ops_take_limits_count() {
+    let (store, _dir) = test_store();
+    let store = Arc::new(store);
+    let coord = Coordinate::new("entity:take", "scope:test").expect("valid coord");
+    let kind = EventKind::custom(0xF, 1);
+    let region = Region::entity("entity:take");
+
+    let sub = store.subscribe(&region);
+
+    let store_w = Arc::clone(&store);
+    let coord_w = coord.clone();
+    std::thread::spawn(move || {
+        for i in 0..5 {
+            store_w.append(&coord_w, kind, &serde_json::json!({"i": i})).expect("append");
+        }
+        drop(store_w);
+    }).join().expect("writer");
+
+    let mut ops = sub.ops().take(3);
+    let result = std::thread::spawn(move || {
+        let mut results = Vec::new();
+        while let Some(n) = ops.recv() {
+            results.push(n);
+        }
+        results
+    }).join().expect("recv thread");
+
+    assert_eq!(
+        result.len(), 3,
+        "PROPERTY: SubscriptionOps::take(3) must return at most 3 notifications from 5 events.\n\
+         Investigate: src/store/subscription.rs SubscriptionOps::take, recv count check.\n\
+         Common causes: count not incremented in recv, limit check after return.\n\
+         Run: cargo test --test store_advanced subscription_ops_take_limits_count"
+    );
+
+    store.sync().expect("sync");
+}
+
+// --- Cursor edge cases ---
+
+#[test]
+fn cursor_on_empty_store_returns_empty() {
+    let (store, _dir) = test_store();
+    let region = Region::entity("entity:nothing");
+    let mut cursor = store.cursor(&region);
+
+    assert!(
+        cursor.poll().is_none(),
+        "PROPERTY: cursor.poll() on an empty store must return None.\n\
+         Investigate: src/store/cursor.rs poll.\n\
+         Common causes: cursor starts with a non-zero position, index returns phantom entries.\n\
+         Run: cargo test --test store_advanced cursor_on_empty_store_returns_empty"
+    );
+
+    let batch = cursor.poll_batch(10);
+    assert!(
+        batch.is_empty(),
+        "PROPERTY: cursor.poll_batch() on an empty store must return an empty Vec.\n\
+         Investigate: src/store/cursor.rs poll_batch.\n\
+         Run: cargo test --test store_advanced cursor_on_empty_store_returns_empty"
+    );
+
+    store.close().expect("close");
+}
+
+#[test]
+fn cursor_sees_events_appended_after_creation() {
+    let (store, _dir) = test_store();
+    let coord = Coordinate::new("entity:late", "scope:test").expect("valid coord");
+    let kind = EventKind::custom(0xF, 1);
+    let region = Region::entity("entity:late");
+
+    // Create cursor BEFORE any events
+    let mut cursor = store.cursor(&region);
+    assert!(cursor.poll().is_none(), "cursor should be empty initially");
+
+    // Append events AFTER cursor creation
+    for i in 0..3 {
+        store.append(&coord, kind, &serde_json::json!({"i": i})).expect("append");
+    }
+
+    // Cursor should now see the new events
+    let batch = cursor.poll_batch(10);
+    assert_eq!(
+        batch.len(), 3,
+        "PROPERTY: cursor must see events appended after cursor creation (guaranteed delivery).\n\
+         Investigate: src/store/cursor.rs poll_batch, position tracking.\n\
+         Common causes: cursor snapshots index at creation time and never refreshes.\n\
+         Run: cargo test --test store_advanced cursor_sees_events_appended_after_creation"
+    );
+
+    store.close().expect("close");
+}
+
+#[test]
+fn cursor_guaranteed_delivery_under_load() {
+    let (store, _dir) = test_store();
+    let store = Arc::new(store);
+    let coord = Coordinate::new("entity:load", "scope:test").expect("valid coord");
+    let kind = EventKind::custom(0xF, 1);
+    let region = Region::entity("entity:load");
+
+    let event_count = 100;
+
+    // Append from multiple threads
+    let mut handles = Vec::new();
+    for t in 0..4 {
+        let s = Arc::clone(&store);
+        let c = coord.clone();
+        handles.push(std::thread::spawn(move || {
+            for i in 0..25 {
+                s.append(&c, kind, &serde_json::json!({"t": t, "i": i})).expect("append");
+            }
+        }));
+    }
+    for h in handles {
+        h.join().expect("writer");
+    }
+
+    // Cursor should see ALL events (guaranteed delivery)
+    let mut cursor = store.cursor(&region);
+    let mut total = 0;
+    loop {
+        let batch = cursor.poll_batch(50);
+        if batch.is_empty() {
+            break;
+        }
+        total += batch.len();
+    }
+
+    assert_eq!(
+        total, event_count,
+        "PROPERTY: cursor must deliver exactly {event_count} events under concurrent load (guaranteed delivery).\n\
+         Investigate: src/store/cursor.rs poll_batch, src/store/index.rs.\n\
+         Common causes: index race conditions, cursor skips entries during concurrent writes.\n\
+         Run: cargo test --test store_advanced cursor_guaranteed_delivery_under_load"
+    );
+
+    store.sync().expect("sync");
+}
+
+// --- walk_ancestors genesis edge case ---
+
+#[test]
+fn walk_ancestors_genesis_returns_single_event() {
+    let (store, _dir) = test_store();
+    let coord = Coordinate::new("entity:gen", "scope:test").expect("valid coord");
+    let kind = EventKind::custom(0xF, 1);
+
+    let receipt = store.append(&coord, kind, &serde_json::json!({"genesis": true})).expect("append");
+    let ancestors = store.walk_ancestors(receipt.event_id, 10);
+
+    assert_eq!(
+        ancestors.len(), 1,
+        "PROPERTY: walk_ancestors on a genesis event (first in chain) must return exactly 1 event.\n\
+         Investigate: src/store/mod.rs walk_ancestors.\n\
+         Common causes: walk doesn't stop at genesis (prev_hash == [0;32]), off-by-one.\n\
+         Run: cargo test --test store_advanced walk_ancestors_genesis_returns_single_event"
+    );
+    assert_eq!(
+        ancestors[0].event.event_id(), receipt.event_id,
+        "PROPERTY: the single ancestor returned must be the genesis event itself.\n\
+         Investigate: src/store/mod.rs walk_ancestors.\n\
+         Run: cargo test --test store_advanced walk_ancestors_genesis_returns_single_event"
+    );
+
+    store.close().expect("close");
+}
+
+// --- DagPosition::is_ancestor_of fix verification ---
+
+#[test]
+fn dag_position_different_depth_not_ancestor() {
+    let pos_a = DagPosition::child_at(5, 1000, 0);  // depth=0, seq=5
+    let pos_b = DagPosition::child_at(10, 2000, 0); // depth=0, seq=10
+
+    // Same depth, same lane — pos_a IS ancestor of pos_b
+    assert!(
+        pos_a.is_ancestor_of(&pos_b),
+        "PROPERTY: same-depth, same-lane, lower-sequence must be ancestor.\n\
+         Investigate: src/coordinate/position.rs is_ancestor_of.\n\
+         Run: cargo test --test store_advanced dag_position_different_depth_not_ancestor"
+    );
+
+    // Self is NOT ancestor of self (strict less-than on sequence)
+    assert!(
+        !pos_a.is_ancestor_of(&pos_a),
+        "PROPERTY: a position must NOT be its own ancestor (strict ordering).\n\
+         Investigate: src/coordinate/position.rs is_ancestor_of.\n\
+         Run: cargo test --test store_advanced dag_position_different_depth_not_ancestor"
+    );
+}
+
+// --- Pipeline::commit_bypass ---
+
+#[test]
+fn pipeline_commit_bypass_persists() {
+    use free_batteries::pipeline::bypass::BypassReason;
+
+    struct TestBypass;
+    impl BypassReason for TestBypass {
+        fn name(&self) -> &'static str { "test-bypass" }
+        fn justification(&self) -> &'static str { "testing commit_bypass" }
+    }
+
+    let (store, _dir) = test_store();
+    let coord = Coordinate::new("entity:bypass", "scope:test").expect("valid coord");
+    let kind = EventKind::custom(0xF, 1);
+
+    let proposal = Proposal::new(serde_json::json!({"bypassed": true}));
+    let bypass_receipt = Pipeline::<()>::bypass(proposal, &TestBypass);
+
+    let committed = Pipeline::<()>::commit_bypass(bypass_receipt, |p| -> Result<_, StoreError> {
+        let r = store.append(&coord, kind, &p)?;
+        Ok(Committed { payload: p, event_id: r.event_id, sequence: r.sequence, hash: [0u8; 32] })
+    }).expect("commit_bypass");
+
+    // Verify persisted
+    let stored = store.get(committed.event_id).expect("get");
+    assert_eq!(
+        stored.event.event_kind(), kind,
+        "PROPERTY: commit_bypass must persist the event through the store.\n\
+         Investigate: src/pipeline/mod.rs commit_bypass.\n\
+         Common causes: commit_fn not called, payload not forwarded.\n\
+         Run: cargo test --test store_advanced pipeline_commit_bypass_persists"
+    );
+
+    store.close().expect("close");
+}
+
+// --- Store::react_loop ---
+
+#[test]
+fn react_loop_spawns_and_processes() {
+    use free_batteries::event::sourcing::Reactive;
+
+    struct TestReactor;
+    impl Reactive<serde_json::Value> for TestReactor {
+        fn react(&self, event: &free_batteries::prelude::Event<serde_json::Value>) -> Vec<(Coordinate, EventKind, serde_json::Value)> {
+            if event.event_kind() == EventKind::custom(0xA, 1) {
+                vec![(
+                    Coordinate::new("entity:reactions", "scope:test").expect("valid"),
+                    EventKind::custom(0xA, 2),
+                    serde_json::json!({"reacted_to": event.event_id().to_string()}),
+                )]
+            } else {
+                vec![]
+            }
+        }
+    }
+
+    let dir = TempDir::new().expect("create temp dir");
+    let config = StoreConfig {
+        data_dir: dir.path().to_path_buf(),
+        segment_max_bytes: 4096,
+        sync_every_n_events: 1,
+        ..StoreConfig::new("")
+    };
+    let store = Arc::new(Store::open(config).expect("open store"));
+
+    let region = Region::entity("entity:trigger");
+    let _handle = store.react_loop(&region, TestReactor);
+
+    // Append a trigger event
+    let coord = Coordinate::new("entity:trigger", "scope:test").expect("valid coord");
+    store.append(&coord, EventKind::custom(0xA, 1), &serde_json::json!({"trigger": true})).expect("append");
+
+    // Give the reactor thread time to process
+    std::thread::sleep(std::time::Duration::from_millis(200));
+
+    // Check that a reaction was appended
+    let reactions = store.query(&Region::entity("entity:reactions"));
+    assert!(
+        !reactions.is_empty(),
+        "PROPERTY: react_loop must produce reaction events when the reactor emits them.\n\
+         Investigate: src/store/mod.rs react_loop, src/event/sourcing.rs Reactive.\n\
+         Common causes: reactor thread not started, subscribe/recv not wired, append_reaction fails.\n\
+         Run: cargo test --test store_advanced react_loop_spawns_and_processes"
+    );
+    assert_eq!(
+        reactions[0].kind,
+        EventKind::custom(0xA, 2),
+        "PROPERTY: reaction event must have the kind returned by the reactor.\n\
+         Investigate: src/store/mod.rs react_loop.\n\
+         Run: cargo test --test store_advanced react_loop_spawns_and_processes"
+    );
+
+    store.sync().expect("sync");
+}
+
+// --- ProjectionCache::prefetch wiring ---
+
+#[test]
+fn project_calls_prefetch() {
+    use free_batteries::store::projection::{ProjectionCache, CacheMeta};
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    // Custom cache that tracks prefetch calls
+    struct TrackingCache {
+        prefetch_called: Arc<AtomicBool>,
+    }
+
+    impl ProjectionCache for TrackingCache {
+        fn get(&self, _key: &[u8]) -> Result<Option<(Vec<u8>, CacheMeta)>, StoreError> {
+            Ok(None) // always miss
+        }
+        fn put(&self, _key: &[u8], _value: &[u8], _meta: CacheMeta) -> Result<(), StoreError> {
+            Ok(())
+        }
+        fn delete_prefix(&self, _prefix: &[u8]) -> Result<u64, StoreError> {
+            Ok(0)
+        }
+        fn sync(&self) -> Result<(), StoreError> {
+            Ok(())
+        }
+        fn prefetch(&self, _key: &[u8], _predicted_meta: CacheMeta) -> Result<(), StoreError> {
+            self.prefetch_called.store(true, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    let prefetch_called = Arc::new(AtomicBool::new(false));
+    let cache = TrackingCache { prefetch_called: Arc::clone(&prefetch_called) };
+
+    let dir = TempDir::new().expect("create temp dir");
+    let config = StoreConfig {
+        data_dir: dir.path().to_path_buf(),
+        segment_max_bytes: 4096,
+        sync_every_n_events: 1,
+        ..StoreConfig::new("")
+    };
+    let store = free_batteries::store::Store::open_with_cache(config, Box::new(cache))
+        .expect("open store with tracking cache");
+
+    // Append an event so project has something to work with
+    let coord = Coordinate::new("entity:pf", "scope:test").expect("valid coord");
+    let kind = EventKind::custom(0xF, 1);
+    store.append(&coord, kind, &serde_json::json!({"data": 1})).expect("append");
+
+    // Define a minimal EventSourced type
+    #[derive(serde::Serialize, serde::Deserialize)]
+    struct Counter { count: u32 }
+    impl EventSourced<serde_json::Value> for Counter {
+        fn from_events(events: &[free_batteries::prelude::Event<serde_json::Value>]) -> Option<Self> {
+            Some(Counter { count: events.len() as u32 })
+        }
+        fn apply_event(&mut self, _event: &free_batteries::prelude::Event<serde_json::Value>) {
+            self.count += 1;
+        }
+        fn relevant_event_kinds() -> &'static [EventKind] {
+            &[]
+        }
+    }
+
+    let _result: Option<Counter> = store.project("entity:pf", &Freshness::Consistent).expect("project");
+
+    assert!(
+        prefetch_called.load(Ordering::SeqCst),
+        "PROPERTY: Store::project must call cache.prefetch() before checking the cache.\n\
+         Investigate: src/store/mod.rs project, src/store/projection.rs prefetch.\n\
+         Common causes: prefetch call not added to project(), called after cache.get().\n\
+         Run: cargo test --test store_advanced project_calls_prefetch"
+    );
+
+    store.close().expect("close");
+}
