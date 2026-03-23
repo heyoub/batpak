@@ -39,7 +39,7 @@ impl Subscription {
 
     /// Expose the raw receiver for async usage.
     /// Caller uses: sub.receiver().recv_async().await
-    /// [DEP:flume::Receiver::recv_async] → RecvFut<'_, T>: Future
+    /// \[DEP:flume::Receiver::recv_async\] → `RecvFut<'_, T>`: Future
     /// ASYNC NOTE: This is for async event consumption. For Store methods
     /// (append, get, query), use spawn_blocking instead. Two different patterns.
     /// [SPEC:src/store/subscription.rs — ASYNC NOTE]

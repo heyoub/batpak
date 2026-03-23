@@ -40,7 +40,7 @@ impl Denial {
 }
 
 impl fmt::Display for Denial {
-    /// "[gate] message"
+    /// "\[gate\] message"
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "[{}] {}", self.gate, self.message)
     }

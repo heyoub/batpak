@@ -18,7 +18,7 @@ pub trait EntityIdType:
 /// Helper function: generates a UUIDv7 as u128. Used by the macro below.
 /// This keeps `uuid` as a private dependency — downstream crates calling
 /// define_entity_id! don't need uuid in their own Cargo.toml.
-/// [DEP:uuid::Uuid::now_v7] → generates UUIDv7, .as_u128() → u128
+/// \[DEP:uuid::Uuid::now_v7\] → generates UUIDv7, .as_u128() → u128
 pub fn generate_v7_id() -> u128 {
     uuid::Uuid::now_v7().as_u128()
 }

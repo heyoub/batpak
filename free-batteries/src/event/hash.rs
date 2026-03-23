@@ -12,7 +12,7 @@ pub struct HashChain {
 /// compute_hash: blake3 hash of content bytes.
 /// Behind feature = "blake3". When off, Committed.hash is [0u8; 32].
 /// [SPEC:INVARIANTS item 5 — blake3 is the only hash]
-/// [DEP:blake3::hash] → returns blake3::Hash, .into() gives [u8; 32]
+/// \[DEP:blake3::hash\] → returns blake3::Hash, .into() gives \[u8; 32\]
 #[cfg(feature = "blake3")]
 pub fn compute_hash(content_bytes: &[u8]) -> [u8; 32] {
     blake3::hash(content_bytes).into()

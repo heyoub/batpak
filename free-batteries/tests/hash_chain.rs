@@ -3,6 +3,7 @@
 //! [SPEC:tests/hash_chain.rs]
 
 use free_batteries::prelude::*;
+#[cfg(feature = "blake3")]
 use proptest::prelude::*;
 
 // --- Genesis ---

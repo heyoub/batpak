@@ -18,6 +18,10 @@ ci: fmt clip test
     cargo bench --no-run --all-features
     cargo check --no-default-features
 
+pre-commit: fmt
+    cargo clippy --all-features -- -D warnings
+    cargo check --all-features
+
 bench:
     cargo bench --all-features
 

@@ -21,6 +21,9 @@ fn bench_write_throughput(c: &mut Criterion) {
     let mut group = c.benchmark_group("write_throughput");
 
     for count in [1_000u64, 10_000, 100_000] {
+        if count >= 100_000 {
+            group.sample_size(10);
+        }
         group.bench_with_input(BenchmarkId::from_parameter(count), &count, |b, &count| {
             b.iter_with_setup(
                 || setup_store(),

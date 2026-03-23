@@ -11,7 +11,7 @@ pub use sourcing::{EventSourced, Reactive};
 use crate::coordinate::Coordinate;
 use serde::{Deserialize, Serialize};
 
-/// Event<P>: header + payload + optional hash chain.
+/// `Event<P>`: header + payload + optional hash chain.
 /// [SPEC:src/event/mod.rs]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Event<P> {
@@ -20,7 +20,7 @@ pub struct Event<P> {
     pub hash_chain: Option<HashChain>,
 }
 
-/// StoredEvent<P>: what store.get() returns. Coordinate + Event.
+/// `StoredEvent<P>`: what store.get() returns. Coordinate + Event.
 /// store.get() returns StoredEvent<serde_json::Value> because segments are
 /// schema-free MessagePack. [SPEC:src/event/mod.rs]
 #[derive(Clone, Debug, Serialize, Deserialize)]

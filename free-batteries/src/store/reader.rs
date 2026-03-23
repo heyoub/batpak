@@ -277,3 +277,106 @@ impl Reader {
         cache.order.retain(|&id| id != segment_id);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn test_reader() -> (Reader, TempDir) {
+        let dir = TempDir::new().unwrap();
+        let reader = Reader::new(dir.path().to_path_buf(), 4);
+        (reader, dir)
+    }
+
+    #[test]
+    fn acquire_buffer_returns_requested_size() {
+        let (reader, _dir) = test_reader();
+        let buf = reader.acquire_buffer(256);
+        assert_eq!(
+            buf.len(),
+            256,
+            "ACQUIRE BUFFER: expected buffer of size 256, got {}.\n\
+             Check: src/store/reader.rs acquire_buffer() vec allocation.",
+            buf.len()
+        );
+        // All bytes should be zero-initialized.
+        assert!(
+            buf.iter().all(|&b| b == 0),
+            "ACQUIRE BUFFER: newly allocated buffer should be zero-initialized."
+        );
+    }
+
+    #[test]
+    fn released_buffer_is_recycled() {
+        let (reader, _dir) = test_reader();
+
+        // Acquire and release a buffer.
+        let buf = reader.acquire_buffer(128);
+        assert_eq!(buf.len(), 128);
+        reader.release_buffer(buf);
+
+        // Pool should now have 1 buffer. Next acquire should recycle it.
+        let buf2 = reader.acquire_buffer(64);
+        assert_eq!(
+            buf2.len(),
+            64,
+            "RECYCLED BUFFER: buffer should be resized to requested size.\n\
+             Check: src/store/reader.rs acquire_buffer() resize path."
+        );
+
+        // Verify pool is now empty (we took the recycled buffer).
+        let pool = reader.buffer_pool.lock();
+        assert_eq!(
+            pool.len(),
+            0,
+            "RECYCLED BUFFER: pool should be empty after acquiring the recycled buffer."
+        );
+    }
+
+    #[test]
+    fn pool_caps_at_16_buffers() {
+        let (reader, _dir) = test_reader();
+
+        // Release 20 buffers into the pool. Only 16 should be retained.
+        for _ in 0..20 {
+            let buf = vec![0u8; 64];
+            reader.release_buffer(buf);
+        }
+
+        let pool = reader.buffer_pool.lock();
+        assert_eq!(
+            pool.len(),
+            16,
+            "POOL CAP: buffer pool should cap at 16 buffers, got {}.\n\
+             Check: src/store/reader.rs release_buffer() cap check.",
+            pool.len()
+        );
+    }
+
+    #[test]
+    fn acquire_from_empty_pool_allocates_new() {
+        let (reader, _dir) = test_reader();
+
+        // Pool starts empty. Acquire should allocate a fresh buffer.
+        {
+            let pool = reader.buffer_pool.lock();
+            assert_eq!(pool.len(), 0, "Pool should start empty.");
+        }
+
+        let buf = reader.acquire_buffer(512);
+        assert_eq!(
+            buf.len(),
+            512,
+            "EMPTY POOL ALLOC: should allocate a new buffer of requested size when pool is empty."
+        );
+
+        // Pool should still be empty since we allocated, not recycled.
+        let pool = reader.buffer_pool.lock();
+        assert_eq!(
+            pool.len(),
+            0,
+            "EMPTY POOL ALLOC: pool should remain empty after allocation (buffer not returned yet)."
+        );
+    }
+}
