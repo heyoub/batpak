@@ -1,4 +1,11 @@
 #![allow(unexpected_cfgs)]
+// Catch swallowed errors: `let _ = <must_use>` is a bug pattern that
+// caused sync failures to be silently ignored (Bug 6 post-mortem).
+// Enable via: cargo clippy --features strict-lints
+#![cfg_attr(
+    feature = "strict-lints",
+    deny(clippy::let_underscore_must_use, clippy::cast_possible_truncation)
+)]
 //! batpak: Event Sourcing Runtime with DAG Causation Tracking.
 //!
 //! Batpak provides a complete event sourcing platform with:

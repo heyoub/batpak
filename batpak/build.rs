@@ -66,6 +66,44 @@ fn check_no_banned_patterns() {
             );
         }
 
+        // Post-mortem Bug 7: std::thread::spawn() panics on failure.
+        // All thread creation must use Builder::new().spawn() for fallible error handling.
+        if contents.contains("std::thread::spawn(") {
+            panic!(
+                "BANNED PATTERN in {path_str}: `std::thread::spawn()` found.\n\
+                 Use `std::thread::Builder::new().name(...).spawn()` instead.\n\
+                 `thread::spawn` panics on failure; `Builder::spawn` returns Result.\n\
+                 See: Bug 7 post-mortem (react_loop panic)."
+            );
+        }
+
+        // Post-mortem Bug 9: bare .sync() bypasses sync_mode config.
+        // In store/ files, require .sync_with_mode() — never bare .sync().
+        // The only exception is segment.rs which defines the .sync() method itself.
+        if path_str.contains("store") && !path_str.ends_with("segment.rs") {
+            for (line_no, line) in contents.lines().enumerate() {
+                let trimmed = line.trim();
+                if trimmed.starts_with("//") || trimmed.starts_with("///") {
+                    continue;
+                }
+                // Match .sync() but not .sync_with_mode() and not self.sync() (Store::sync)
+                if trimmed.contains(".sync()")
+                    && !trimmed.contains("sync_with_mode")
+                    && !trimmed.contains("self.sync()")
+                    && !trimmed.contains("force_sync()")
+                {
+                    panic!(
+                        "BANNED PATTERN in {path_str}:{}: bare `.sync()` call.\n\
+                         Use `.sync_with_mode(&config.sync_mode)` instead.\n\
+                         Bare .sync() hardcodes SyncAll, ignoring the user's config.\n\
+                         See: Bug 9 post-mortem (segment rotation bypassed sync_mode).\n\
+                         Line: {trimmed}",
+                        line_no + 1
+                    );
+                }
+            }
+        }
+
         //Invariant 3: no product concepts in library code.
         //Check struct/enum/fn/type declarations for banned nouns.
         //Skip string literals and comments. [SPEC:INVARIANTS item 3]

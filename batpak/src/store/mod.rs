@@ -908,7 +908,7 @@ impl Store {
             merged_segment.write_frame(&frame)?;
         }
 
-        merged_segment.sync()?;
+        merged_segment.sync_with_mode(&self.config.sync_mode)?;
         let _sealed_seg = merged_segment.seal();
 
         // 6. Delete old segment files (except the merged one which was replaced)
