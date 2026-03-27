@@ -113,7 +113,9 @@ impl Reader {
                 f.read_exact(&mut buf).map_err(StoreError::Io)?;
             } else {
                 // File not in cache — open, seek, read, and cache it
-                let path = self.data_dir.join(segment::segment_filename(pos.segment_id));
+                let path = self
+                    .data_dir
+                    .join(segment::segment_filename(pos.segment_id));
                 let mut f = File::open(&path).map_err(StoreError::Io)?;
                 f.seek(SeekFrom::Start(pos.offset))
                     .map_err(StoreError::Io)?;

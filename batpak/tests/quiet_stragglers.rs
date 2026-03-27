@@ -97,8 +97,8 @@ fn event_id_from_str_with_prefix() {
 #[test]
 fn event_id_from_str_bare_hex() {
     use std::str::FromStr;
-    let id = batpak::id::EventId::from_str("00000000000000000000000000000042")
-        .expect("parse bare hex");
+    let id =
+        batpak::id::EventId::from_str("00000000000000000000000000000042").expect("parse bare hex");
     assert_eq!(
         id.as_u128(),
         0x42,

@@ -10,7 +10,7 @@ help: the following other types implement trait `LockState`
   --> tests/ui/invalid_transition.rs:11:1
    |
 11 | batpak::define_state_machine!(LockState { Acquired, Released });
-   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
    | |
    | `Acquired`
    | `Released`

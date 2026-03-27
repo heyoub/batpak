@@ -1,8 +1,8 @@
 error[E0624]: associated function `new` is private
- --> tests/ui/forge_receipt.rs:7:59
+ --> tests/ui/forge_receipt.rs:7:51
   |
 7 |     let _receipt = batpak::guard::Receipt::<i32>::new(42, vec!["fake_gate"]);
-  |                                                           ^^^ private associated function
+  |                                                   ^^^ private associated function
   |
  ::: src/guard/receipt.rs
   |

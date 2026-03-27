@@ -2,9 +2,9 @@
 //! Measures delivery latency for 1/10/100 subscribers receiving 10K events.
 //! [SPEC:benches/subscription_fanout.rs]
 
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use batpak::prelude::*;
 use batpak::store::{Store, StoreConfig};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use std::sync::Arc;
 use tempfile::TempDir;
 
@@ -34,9 +34,7 @@ fn bench_fanout(c: &mut Criterion) {
                     || {
                         let (store, dir) = setup_store();
                         let region = Region::entity("bench:fan");
-                        let subs: Vec<_> = (0..n_subs)
-                            .map(|_| store.subscribe(&region))
-                            .collect();
+                        let subs: Vec<_> = (0..n_subs).map(|_| store.subscribe(&region)).collect();
                         (store, dir, subs)
                     },
                     |(store, _dir, subs)| {

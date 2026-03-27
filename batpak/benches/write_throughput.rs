@@ -1,9 +1,9 @@
 //! Benchmark: events/sec for 1K/10K/100K appends (single + concurrent).
 //! [SPEC:benches/write_throughput.rs]
 
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use batpak::prelude::*;
 use batpak::store::{Store, StoreConfig};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use std::sync::Arc;
 use tempfile::TempDir;
 

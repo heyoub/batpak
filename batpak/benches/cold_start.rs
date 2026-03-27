@@ -4,9 +4,9 @@
 //! SPEC line 259: "criterion: index rebuild for 1K/10K/100K/1M events"
 //! The 1M case uses a reduced sample_size to keep bench runtime manageable.
 
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use batpak::prelude::*;
 use batpak::store::{Store, StoreConfig};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use tempfile::TempDir;
 
 fn populate_store(dir: &std::path::Path, count: u64) {

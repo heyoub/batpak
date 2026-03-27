@@ -548,10 +548,8 @@ fn predicates_cover_all_variants() {
          Run: cargo test --test outcome_combinators"
     );
 
-    let pending: Outcome<i32> = Outcome::pending(
-        batpak::outcome::WaitCondition::Event { event_id: 123 },
-        456,
-    );
+    let pending: Outcome<i32> =
+        Outcome::pending(batpak::outcome::WaitCondition::Event { event_id: 123 }, 456);
     assert!(
         pending.is_pending(),
         "PREDICATE is_pending FAILED: Pending(...).is_pending() must be true.\n\

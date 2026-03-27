@@ -1414,9 +1414,9 @@ fn subscription_ops_map_transforms_notifications() {
     });
 
     // Use try-based approach: events are already sent
-    let rx_result = std::thread::spawn(move || {
-        ops.recv()
-    }).join().expect("recv thread");
+    let rx_result = std::thread::spawn(move || ops.recv())
+        .join()
+        .expect("recv thread");
 
     assert!(
         rx_result.is_some(),
@@ -1452,7 +1452,8 @@ fn subscription_ops_filter_chains_correctly() {
 
     // Chain two filters and take(2) to prevent blocking forever:
     // first accepts kind1 only, second is always-true (AND semantics)
-    let mut ops = sub.ops()
+    let mut ops = sub
+        .ops()
         .filter(move |n| n.kind == kind1)
         .filter(|_n| true)
         .take(2);
@@ -1460,9 +1461,15 @@ fn subscription_ops_filter_chains_correctly() {
     let store_w = Arc::clone(&store);
     let coord_w = coord.clone();
     let writer = std::thread::spawn(move || {
-        store_w.append(&coord_w, kind1, &serde_json::json!({"k": 1})).expect("append");
-        store_w.append(&coord_w, kind2, &serde_json::json!({"k": 2})).expect("append");
-        store_w.append(&coord_w, kind1, &serde_json::json!({"k": 3})).expect("append");
+        store_w
+            .append(&coord_w, kind1, &serde_json::json!({"k": 1}))
+            .expect("append");
+        store_w
+            .append(&coord_w, kind2, &serde_json::json!({"k": 2}))
+            .expect("append");
+        store_w
+            .append(&coord_w, kind1, &serde_json::json!({"k": 3}))
+            .expect("append");
     });
 
     let result = std::thread::spawn(move || {
@@ -1471,12 +1478,15 @@ fn subscription_ops_filter_chains_correctly() {
             results.push(n);
         }
         results
-    }).join().expect("recv thread");
+    })
+    .join()
+    .expect("recv thread");
 
     writer.join().expect("writer");
 
     assert_eq!(
-        result.len(), 2,
+        result.len(),
+        2,
         "PROPERTY: chained filter with AND semantics must pass only kind1 events (2 of 3).\n\
          Investigate: src/store/subscription.rs SubscriptionOps::filter, recv.\n\
          Common causes: filters not chained, last filter replaces previous.\n\
@@ -1502,10 +1512,14 @@ fn subscription_ops_take_limits_count() {
     let coord_w = coord.clone();
     std::thread::spawn(move || {
         for i in 0..5 {
-            store_w.append(&coord_w, kind, &serde_json::json!({"i": i})).expect("append");
+            store_w
+                .append(&coord_w, kind, &serde_json::json!({"i": i}))
+                .expect("append");
         }
         drop(store_w);
-    }).join().expect("writer");
+    })
+    .join()
+    .expect("writer");
 
     let mut ops = sub.ops().take(3);
     let result = std::thread::spawn(move || {
@@ -1514,10 +1528,13 @@ fn subscription_ops_take_limits_count() {
             results.push(n);
         }
         results
-    }).join().expect("recv thread");
+    })
+    .join()
+    .expect("recv thread");
 
     assert_eq!(
-        result.len(), 3,
+        result.len(),
+        3,
         "PROPERTY: SubscriptionOps::take(3) must return at most 3 notifications from 5 events.\n\
          Investigate: src/store/subscription.rs SubscriptionOps::take, recv count check.\n\
          Common causes: count not incremented in recv, limit check after return.\n\
@@ -1567,13 +1584,16 @@ fn cursor_sees_events_appended_after_creation() {
 
     // Append events AFTER cursor creation
     for i in 0..3 {
-        store.append(&coord, kind, &serde_json::json!({"i": i})).expect("append");
+        store
+            .append(&coord, kind, &serde_json::json!({"i": i}))
+            .expect("append");
     }
 
     // Cursor should now see the new events
     let batch = cursor.poll_batch(10);
     assert_eq!(
-        batch.len(), 3,
+        batch.len(),
+        3,
         "PROPERTY: cursor must see events appended after cursor creation (guaranteed delivery).\n\
          Investigate: src/store/cursor.rs poll_batch, position tracking.\n\
          Common causes: cursor snapshots index at creation time and never refreshes.\n\
@@ -1600,7 +1620,8 @@ fn cursor_guaranteed_delivery_under_load() {
         let c = coord.clone();
         handles.push(std::thread::spawn(move || {
             for i in 0..25 {
-                s.append(&c, kind, &serde_json::json!({"t": t, "i": i})).expect("append");
+                s.append(&c, kind, &serde_json::json!({"t": t, "i": i}))
+                    .expect("append");
             }
         }));
     }
@@ -1638,7 +1659,9 @@ fn walk_ancestors_genesis_returns_single_event() {
     let coord = Coordinate::new("entity:gen", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
 
-    let receipt = store.append(&coord, kind, &serde_json::json!({"genesis": true})).expect("append");
+    let receipt = store
+        .append(&coord, kind, &serde_json::json!({"genesis": true}))
+        .expect("append");
     let ancestors = store.walk_ancestors(receipt.event_id, 10);
 
     assert_eq!(
@@ -1649,7 +1672,8 @@ fn walk_ancestors_genesis_returns_single_event() {
          Run: cargo test --test store_advanced walk_ancestors_genesis_returns_single_event"
     );
     assert_eq!(
-        ancestors[0].event.event_id(), receipt.event_id,
+        ancestors[0].event.event_id(),
+        receipt.event_id,
         "PROPERTY: the single ancestor returned must be the genesis event itself.\n\
          Investigate: src/store/mod.rs walk_ancestors.\n\
          Run: cargo test --test store_advanced walk_ancestors_genesis_returns_single_event"
@@ -1662,7 +1686,7 @@ fn walk_ancestors_genesis_returns_single_event() {
 
 #[test]
 fn dag_position_different_depth_not_ancestor() {
-    let pos_a = DagPosition::child_at(5, 1000, 0);  // depth=0, seq=5
+    let pos_a = DagPosition::child_at(5, 1000, 0); // depth=0, seq=5
     let pos_b = DagPosition::child_at(10, 2000, 0); // depth=0, seq=10
 
     // Same depth, same lane — pos_a IS ancestor of pos_b
@@ -1690,8 +1714,12 @@ fn pipeline_commit_bypass_persists() {
 
     struct TestBypass;
     impl BypassReason for TestBypass {
-        fn name(&self) -> &'static str { "test-bypass" }
-        fn justification(&self) -> &'static str { "testing commit_bypass" }
+        fn name(&self) -> &'static str {
+            "test-bypass"
+        }
+        fn justification(&self) -> &'static str {
+            "testing commit_bypass"
+        }
     }
 
     let (store, _dir) = test_store();
@@ -1703,13 +1731,20 @@ fn pipeline_commit_bypass_persists() {
 
     let committed = Pipeline::<()>::commit_bypass(bypass_receipt, |p| -> Result<_, StoreError> {
         let r = store.append(&coord, kind, &p)?;
-        Ok(Committed { payload: p, event_id: r.event_id, sequence: r.sequence, hash: [0u8; 32] })
-    }).expect("commit_bypass");
+        Ok(Committed {
+            payload: p,
+            event_id: r.event_id,
+            sequence: r.sequence,
+            hash: [0u8; 32],
+        })
+    })
+    .expect("commit_bypass");
 
     // Verify persisted
     let stored = store.get(committed.event_id).expect("get");
     assert_eq!(
-        stored.event.event_kind(), kind,
+        stored.event.event_kind(),
+        kind,
         "PROPERTY: commit_bypass must persist the event through the store.\n\
          Investigate: src/pipeline/mod.rs commit_bypass.\n\
          Common causes: commit_fn not called, payload not forwarded.\n\
@@ -1727,7 +1762,10 @@ fn react_loop_spawns_and_processes() {
 
     struct TestReactor;
     impl Reactive<serde_json::Value> for TestReactor {
-        fn react(&self, event: &batpak::prelude::Event<serde_json::Value>) -> Vec<(Coordinate, EventKind, serde_json::Value)> {
+        fn react(
+            &self,
+            event: &batpak::prelude::Event<serde_json::Value>,
+        ) -> Vec<(Coordinate, EventKind, serde_json::Value)> {
             if event.event_kind() == EventKind::custom(0xA, 1) {
                 vec![(
                     Coordinate::new("entity:reactions", "scope:test").expect("valid"),
@@ -1754,7 +1792,13 @@ fn react_loop_spawns_and_processes() {
 
     // Append a trigger event
     let coord = Coordinate::new("entity:trigger", "scope:test").expect("valid coord");
-    store.append(&coord, EventKind::custom(0xA, 1), &serde_json::json!({"trigger": true})).expect("append");
+    store
+        .append(
+            &coord,
+            EventKind::custom(0xA, 1),
+            &serde_json::json!({"trigger": true}),
+        )
+        .expect("append");
 
     // Give the reactor thread time to process
     std::thread::sleep(std::time::Duration::from_millis(200));
@@ -1783,7 +1827,7 @@ fn react_loop_spawns_and_processes() {
 
 #[test]
 fn project_calls_prefetch() {
-    use batpak::store::projection::{ProjectionCache, CacheMeta};
+    use batpak::store::projection::{CacheMeta, ProjectionCache};
     use std::sync::atomic::{AtomicBool, Ordering};
 
     // Custom cache that tracks prefetch calls
@@ -1811,7 +1855,9 @@ fn project_calls_prefetch() {
     }
 
     let prefetch_called = Arc::new(AtomicBool::new(false));
-    let cache = TrackingCache { prefetch_called: Arc::clone(&prefetch_called) };
+    let cache = TrackingCache {
+        prefetch_called: Arc::clone(&prefetch_called),
+    };
 
     let dir = TempDir::new().expect("create temp dir");
     let config = StoreConfig {
@@ -1826,14 +1872,20 @@ fn project_calls_prefetch() {
     // Append an event so project has something to work with
     let coord = Coordinate::new("entity:pf", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
-    store.append(&coord, kind, &serde_json::json!({"data": 1})).expect("append");
+    store
+        .append(&coord, kind, &serde_json::json!({"data": 1}))
+        .expect("append");
 
     // Define a minimal EventSourced type
     #[derive(serde::Serialize, serde::Deserialize)]
-    struct Counter { count: u32 }
+    struct Counter {
+        count: u32,
+    }
     impl EventSourced<serde_json::Value> for Counter {
         fn from_events(events: &[batpak::prelude::Event<serde_json::Value>]) -> Option<Self> {
-            Some(Counter { count: events.len() as u32 })
+            Some(Counter {
+                count: events.len() as u32,
+            })
         }
         fn apply_event(&mut self, _event: &batpak::prelude::Event<serde_json::Value>) {
             self.count += 1;
@@ -1843,7 +1895,9 @@ fn project_calls_prefetch() {
         }
     }
 
-    let _result: Option<Counter> = store.project("entity:pf", &Freshness::Consistent).expect("project");
+    let _result: Option<Counter> = store
+        .project("entity:pf", &Freshness::Consistent)
+        .expect("project");
 
     assert!(
         prefetch_called.load(Ordering::SeqCst),

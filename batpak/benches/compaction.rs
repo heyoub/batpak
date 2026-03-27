@@ -1,9 +1,9 @@
 //! Benchmark: compaction time and bytes reclaimed for sealed segments.
 //! [SPEC:benches/compaction.rs]
 
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use batpak::prelude::*;
 use batpak::store::{Store, StoreConfig};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use tempfile::TempDir;
 
 fn populate_segments(dir: &std::path::Path, events_per_segment: u64, segment_count: u64) -> Store {

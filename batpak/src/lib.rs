@@ -40,18 +40,18 @@
 //! 4. [`pipeline`]: Propose and commit
 //! 5. [`store`]: Persist and query
 
+pub mod coordinate;
+pub mod event;
+pub mod guard;
+pub mod id;
+pub mod outcome;
+pub mod pipeline;
+pub mod prelude;
+pub mod store;
+pub mod typestate;
 /// Module declarations in DEPENDENCY ORDER: wire, coordinate, outcome, event, guard, pipeline, store, typestate, id, prelude.
 /// [SPEC:src/lib.rs — Module declarations in DEPENDENCY ORDER]
 pub mod wire;
-pub mod coordinate;
-pub mod outcome;
-pub mod event;
-pub mod guard;
-pub mod pipeline;
-pub mod store;
-pub mod typestate;
-pub mod id;
-pub mod prelude;
 
 /// compile_error guards for impossible configurations:
 #[allow(unexpected_cfgs)]

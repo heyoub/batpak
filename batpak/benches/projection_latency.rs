@@ -9,9 +9,9 @@
 //! When the ProjectionCache is wired into project(), add a "redb_cache_hit"
 //! / "redb_cache_miss" benchmark group gated behind #[cfg(feature = "redb")].
 
-use criterion::{criterion_group, criterion_main, Criterion};
 use batpak::prelude::*;
 use batpak::store::{Freshness, Store, StoreConfig};
+use criterion::{criterion_group, criterion_main, Criterion};
 use tempfile::TempDir;
 
 /// A minimal EventSourced implementation for benchmarking.

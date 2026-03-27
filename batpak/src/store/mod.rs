@@ -651,7 +651,10 @@ impl Store {
                     let stored = match store.get(notif.event_id) {
                         Ok(s) => s,
                         Err(e) => {
-                            tracing::warn!("react_loop: failed to get event {}: {e}", notif.event_id);
+                            tracing::warn!(
+                                "react_loop: failed to get event {}: {e}",
+                                notif.event_id
+                            );
                             continue;
                         }
                     };

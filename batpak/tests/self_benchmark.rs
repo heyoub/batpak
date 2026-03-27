@@ -747,14 +747,18 @@ fn append_throughput_gate() {
 
     let start = Instant::now();
     for i in 0..n {
-        store.append(&coord, kind, &serde_json::json!({"i": i})).expect("append");
+        store
+            .append(&coord, kind, &serde_json::json!({"i": i}))
+            .expect("append");
     }
     let elapsed = start.elapsed();
     let events_per_sec = n as f64 / elapsed.as_secs_f64();
 
     let mut gates = GateSet::new();
     // CI threshold: 5K events/sec minimum (generous for slow runners)
-    gates.push(WriteThroughputGate { min_events_per_sec: 5_000.0 });
+    gates.push(WriteThroughputGate {
+        min_events_per_sec: 5_000.0,
+    });
 
     let ctx = PerfContext {
         event_count: n,
@@ -796,7 +800,9 @@ fn projection_latency_gate() {
     let n = 1_000u64;
 
     for i in 0..n {
-        store.append(&coord, kind, &serde_json::json!({"i": i})).expect("append");
+        store
+            .append(&coord, kind, &serde_json::json!({"i": i}))
+            .expect("append");
     }
 
     let start = Instant::now();
