@@ -116,11 +116,12 @@ impl fmt::Display for DagPosition {
 }
 
 /// PartialOrd for causal ordering — not total because different lanes
-/// are incomparable. [SPEC:src/coordinate/position.rs — PartialOrd]
+/// are incomparable, and different depths are incomparable.
+/// [SPEC:src/coordinate/position.rs — PartialOrd]
 impl PartialOrd for DagPosition {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        if self.lane != other.lane {
-            return None; // different lanes are incomparable
+        if self.lane != other.lane || self.depth != other.depth {
+            return None; // different lanes or depths are incomparable
         }
         Some(self.sequence.cmp(&other.sequence))
     }

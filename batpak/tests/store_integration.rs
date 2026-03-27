@@ -2,6 +2,10 @@
 //! Append/get/query, segment rotation, cold start index rebuild, concurrent r/w.
 //! [SPEC:tests/store_integration.rs]
 //!
+//! PROVES: LAW-002 (No Local State — uses real Store), LAW-003 (No Orphan Infrastructure)
+//! DEFENDS: FM-007 (Island Syndrome — full production path), FM-008 (Shadow Test — imports real types)
+//! INVARIANTS: INV-TEMP (cold start rebuild), INV-CONC (concurrent r/w)
+//!
 //! Anti-almost-correctness: These tests exercise the real DashMap index query()
 //! method (Phase 1.5 fix), the dead logic branch (Phase 1.6 fix), and the
 //! Arc<str> serialization path (Phase 1.1 fix) through round-trip persistence.

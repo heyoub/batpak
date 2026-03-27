@@ -1,6 +1,10 @@
 //! Tests for critical coverage gaps identified by deterministic audit.
 //! Targets: frame_decode edge cases, subscription lifecycle, concurrent ops,
 //! config edge cases, Store drop behavior.
+//!
+//! PROVES: LAW-006 (Bidirectional Traceability — audit findings drove these tests)
+//! DEFENDS: FM-011 (Error Path Hollowing), FM-013 (Coverage Mirage)
+//! INVARIANTS: INV-TYPE (frame decode totality), INV-CONC (concurrent appends)
 
 use batpak::prelude::*;
 use std::io::Write;

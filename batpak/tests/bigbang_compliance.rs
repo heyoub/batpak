@@ -1,6 +1,11 @@
 //! Big Bang Protocol compliance tests.
 //! Verifies constitutional laws, algebraic properties, and flow connectivity
 //! that the compiler and unit tests cannot catch.
+//!
+//! PROVES: LAW-003 (No Orphan Infrastructure), LAW-007 (Codebase Accuses Itself)
+//! DEFENDS: FM-007 (Island Syndrome), FM-022 (Receipt Hollowing), FM-023 (Fallback Laundering)
+//! INVARIANTS: INV-TEMP (replay determinism), INV-CONC (idempotency), INV-TYPE (round-trip),
+//!             INV-SEC (EventKind category enforcement)
 
 use batpak::prelude::*;
 use tempfile::TempDir;
@@ -414,4 +419,240 @@ fn eventkind_allows_product_categories() {
             "PROPERTY: EventKind::custom({cat}, 1) must preserve category."
         );
     }
+}
+
+// ===== Phase 3A: Commutativity — independent entity appends are order-independent =====
+
+#[test]
+fn commutativity_independent_entity_appends() {
+    // Append to entity A then B, and B then A — final index state should be equivalent
+    let dir1 = tempfile::TempDir::new().expect("temp dir");
+    let dir2 = tempfile::TempDir::new().expect("temp dir");
+    let kind = EventKind::custom(1, 1);
+
+    let coord_a = Coordinate::new("comm:alpha", "comm:scope").expect("valid");
+    let coord_b = Coordinate::new("comm:beta", "comm:scope").expect("valid");
+
+    // Order 1: A then B
+    {
+        let store = Store::open(StoreConfig::new(dir1.path())).expect("open");
+        store.append(&coord_a, kind, &"a1").expect("a1");
+        store.append(&coord_b, kind, &"b1").expect("b1");
+        store.close().expect("close");
+    }
+    // Order 2: B then A
+    {
+        let store = Store::open(StoreConfig::new(dir2.path())).expect("open");
+        store.append(&coord_b, kind, &"b1").expect("b1");
+        store.append(&coord_a, kind, &"a1").expect("a1");
+        store.close().expect("close");
+    }
+
+    // Both stores should have the same entity streams (same events per entity)
+    let s1 = Store::open(StoreConfig::new(dir1.path())).expect("reopen1");
+    let s2 = Store::open(StoreConfig::new(dir2.path())).expect("reopen2");
+
+    assert_eq!(
+        s1.stream("comm:alpha").len(),
+        s2.stream("comm:alpha").len(),
+        "PROPERTY: Independent entity appends must be commutative — \
+         same number of events per entity regardless of append order.\n\
+         Investigate: src/store/index.rs entity stream storage."
+    );
+    assert_eq!(
+        s1.stream("comm:beta").len(),
+        s2.stream("comm:beta").len(),
+        "PROPERTY: Independent entity appends must be commutative."
+    );
+}
+
+// ===== Phase 3B: Closure — Outcome combinators stay within Outcome type =====
+
+#[test]
+fn closure_outcome_combinators_preserve_type() {
+    // map on Ok stays Ok
+    let ok: Outcome<i32> = Outcome::Ok(42);
+    let mapped = ok.map(|x| x * 2);
+    assert!(
+        matches!(mapped, Outcome::Ok(84)),
+        "PROPERTY: Outcome::map must produce a valid Outcome::Ok, not escape the type.\n\
+         Investigate: src/outcome/mod.rs Outcome::map()."
+    );
+
+    // map on Err stays Err
+    let err: Outcome<i32> = Outcome::Err(OutcomeError {
+        kind: batpak::prelude::ErrorKind::Internal,
+        message: "test".into(),
+        compensation: None,
+        retryable: false,
+    });
+    let mapped_err = err.map(|x| x * 2);
+    assert!(
+        matches!(mapped_err, Outcome::Err(_)),
+        "PROPERTY: Outcome::map on Err must preserve the Err variant.\n\
+         Investigate: src/outcome/mod.rs Outcome::map() non-Ok pass-through."
+    );
+
+    // and_then on Ok produces valid Outcome
+    let ok2: Outcome<i32> = Outcome::Ok(10);
+    let chained = ok2.and_then(|x| Outcome::Ok(x + 1));
+    assert!(
+        matches!(chained, Outcome::Ok(11)),
+        "PROPERTY: Outcome::and_then must produce a valid Outcome.\n\
+         Investigate: src/outcome/mod.rs Outcome::and_then()."
+    );
+
+    // zip of two Ok values produces Ok tuple
+    let a: Outcome<i32> = Outcome::Ok(1);
+    let b: Outcome<i32> = Outcome::Ok(2);
+    let zipped = batpak::outcome::zip(a, b);
+    assert!(
+        matches!(zipped, Outcome::Ok((1, 2))),
+        "PROPERTY: zip(Ok(a), Ok(b)) must produce Ok((a, b)).\n\
+         Investigate: src/outcome/combine.rs zip()."
+    );
+}
+
+// ===== Phase 3C: Totality — unknown EventKind through projection doesn't panic =====
+
+#[derive(Default, Debug, serde::Serialize, serde::Deserialize)]
+struct StrictCounter {
+    count: u64,
+}
+
+impl EventSourced<serde_json::Value> for StrictCounter {
+    fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
+        if events.is_empty() {
+            return None;
+        }
+        let mut s = Self::default();
+        for e in events {
+            s.apply_event(e);
+        }
+        Some(s)
+    }
+    fn apply_event(&mut self, _event: &Event<serde_json::Value>) {
+        // Intentionally handles ALL event kinds without panic
+        self.count += 1;
+    }
+    fn relevant_event_kinds() -> &'static [EventKind] {
+        // Only cares about one kind, but receives all
+        static KINDS: [EventKind; 1] = [EventKind::custom(1, 1)];
+        &KINDS
+    }
+}
+
+#[test]
+fn totality_projection_handles_unknown_event_kinds() {
+    let dir = tempfile::TempDir::new().expect("temp dir");
+    let store = Store::open(StoreConfig::new(dir.path())).expect("open");
+    let coord = Coordinate::new("total:entity", "total:scope").expect("valid");
+
+    // Append events with different kinds — projection should handle all gracefully
+    let known_kind = EventKind::custom(1, 1);
+    let unknown_kind = EventKind::custom(2, 99); // not in relevant_event_kinds
+
+    store.append(&coord, known_kind, &"known").expect("known");
+    store.append(&coord, unknown_kind, &"unknown").expect("unknown");
+    store.append(&coord, known_kind, &"known2").expect("known2");
+
+    // This must not panic even though unknown_kind isn't in relevant_event_kinds
+    let result: Option<StrictCounter> = store
+        .project("total:entity", &batpak::store::Freshness::Consistent)
+        .expect("project must not panic on unknown kinds");
+
+    assert!(
+        result.is_some(),
+        "PROPERTY: Projection must complete successfully even with unknown EventKinds.\n\
+         Investigate: src/store/mod.rs project() event filtering.\n\
+         INVARIANT: INV-TYPE totality — functions handle all inputs in their domain."
+    );
+}
+
+// ===== Phase 4C: Error Variant Coverage — every StoreError has non-empty Display =====
+
+#[test]
+fn error_variant_coverage_all_store_errors_display() {
+    use batpak::store::StoreError;
+
+    // Construct every StoreError variant and verify Display is non-empty.
+    // FM-011: No hollow error paths.
+    let variants: Vec<(&str, StoreError)> = vec![
+        ("Io", StoreError::Io(std::io::Error::new(std::io::ErrorKind::Other, "test"))),
+        ("Serialization", StoreError::Serialization("test ser".into())),
+        ("CrcMismatch", StoreError::CrcMismatch { segment_id: 1, offset: 42 }),
+        ("CorruptSegment", StoreError::CorruptSegment { segment_id: 2, detail: "bad".into() }),
+        ("NotFound", StoreError::NotFound(123)),
+        ("SequenceMismatch", StoreError::SequenceMismatch {
+            entity: "test".into(), expected: 1, actual: 2,
+        }),
+        ("DuplicateEvent", StoreError::DuplicateEvent(456)),
+        ("WriterCrashed", StoreError::WriterCrashed),
+        ("ShuttingDown", StoreError::ShuttingDown),
+        ("CacheFailed", StoreError::CacheFailed("cache err".into())),
+    ];
+
+    for (name, err) in &variants {
+        let display = format!("{err}");
+        assert!(
+            !display.is_empty(),
+            "PROPERTY: StoreError::{name} must have a non-empty Display message.\n\
+             FM-011: Error Path Hollowing — every error variant must carry actionable context.\n\
+             Investigate: src/store/mod.rs Display impl for StoreError."
+        );
+    }
+
+    // Also verify CoordinateError variant
+    let coord_err = StoreError::Coordinate(
+        Coordinate::new("", "scope").expect_err("empty entity must fail")
+    );
+    let display = format!("{coord_err}");
+    assert!(
+        !display.is_empty(),
+        "PROPERTY: StoreError::Coordinate must have non-empty Display."
+    );
+}
+
+// ===== DagPosition PartialOrd depth test (Phase 1B verification) =====
+
+#[test]
+fn dag_position_different_depths_are_incomparable() {
+    use batpak::prelude::DagPosition;
+    let shallow = DagPosition::new(0, 0, 5);
+    let deep = DagPosition::new(1, 0, 5);
+
+    assert!(
+        shallow.partial_cmp(&deep).is_none(),
+        "PROPERTY: DagPosition with different depths must be incomparable.\n\
+         Investigate: src/coordinate/position.rs PartialOrd impl.\n\
+         This prevents treating positions on different DAG branches as ordered."
+    );
+}
+
+// ===== Store Drop drains pending events (Phase 1C verification) =====
+
+#[test]
+fn store_drop_drains_pending_events() {
+    let dir = tempfile::TempDir::new().expect("temp dir");
+    let kind = EventKind::custom(1, 1);
+    let coord = Coordinate::new("drop:entity", "drop:scope").expect("valid");
+
+    // Append events and drop (not close) — data should still be recoverable
+    {
+        let store = Store::open(StoreConfig::new(dir.path())).expect("open");
+        for i in 0..10 {
+            store.append(&coord, kind, &serde_json::json!({"i": i})).expect("append");
+        }
+        // Drop without close() — Drop should wait briefly for writer drain
+    }
+
+    // Reopen and verify events persisted
+    let store = Store::open(StoreConfig::new(dir.path())).expect("reopen");
+    let events = store.stream("drop:entity");
+    assert!(
+        events.len() >= 10,
+        "PROPERTY: Store Drop must drain pending events. Got {} events, expected 10.\n\
+         Investigate: src/store/mod.rs Drop impl — bounded wait for writer drain.",
+        events.len()
+    );
 }

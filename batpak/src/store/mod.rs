@@ -1014,11 +1014,16 @@ impl Store {
 }
 
 /// Safety net: if Store is dropped without calling close(), send a best-effort
-/// Shutdown to the writer thread. close(self) is still the preferred explicit path.
+/// Shutdown to the writer thread and wait briefly for it to drain pending events.
+/// close(self) is still the preferred explicit path for guaranteed clean shutdown.
 impl Drop for Store {
     fn drop(&mut self) {
-        let (tx, _rx) = flume::bounded(1);
-        let _ = self.writer.tx.send(WriterCommand::Shutdown { respond: tx });
+        let (tx, rx) = flume::bounded(1);
+        if self.writer.tx.send(WriterCommand::Shutdown { respond: tx }).is_ok() {
+            // Wait up to 100ms for the writer to drain pending events.
+            // This prevents data loss when Store is dropped without close().
+            let _ = rx.recv_timeout(std::time::Duration::from_millis(100));
+        }
     }
 }
 

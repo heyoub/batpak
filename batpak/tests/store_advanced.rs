@@ -3,6 +3,10 @@
 //! subscription, cursor, compact, CAS failure, idempotency,
 //! apply_transition, clock_range queries, fd_budget eviction,
 //! corrupt segment recovery.
+//!
+//! PROVES: LAW-003 (No Orphan Infrastructure — exercises full public API)
+//! DEFENDS: FM-009 (Polite Downgrade), FM-011 (Error Path Hollowing), FM-013 (Coverage Mirage)
+//! INVARIANTS: INV-CONC (CAS, idempotency), INV-TEMP (walk_ancestors, compaction), INV-PERF (fd_budget)
 //! [SPEC:tests/store_advanced.rs]
 
 use batpak::prelude::*;

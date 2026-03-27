@@ -14,6 +14,36 @@ fn main() {
     check_no_banned_patterns();
     check_store_config_field_usage();
     check_allow_justifications();
+    check_no_stubs_in_src();
+}
+
+/// Audit Loop Layer 2 enforcement: no stub markers in production src/.
+/// todo!() and unimplemented!() are already denied by clippy, but this
+/// catches patterns clippy misses: hardcoded placeholder strings, empty
+/// function bodies returning defaults, etc.
+fn check_no_stubs_in_src() {
+    let stub_patterns = [
+        ("\"placeholder\"", "Placeholder string literal — replace with real implementation"),
+        ("\"not implemented\"", "Stub string — implement the real behavior or return a typed error"),
+        ("\"not yet implemented\"", "Stub string — implement the real behavior"),
+    ];
+
+    walk_rs_files(Path::new("src"), &|path, contents| {
+        let path_str = path.display().to_string();
+        for (line_no, line) in contents.lines().enumerate() {
+            let lower = line.to_lowercase();
+            for (pattern, msg) in &stub_patterns {
+                if lower.contains(pattern) {
+                    panic!(
+                        "STUB DETECTED in {path_str}:{}: {msg}\n\
+                         Line: {line}\n\
+                         LAW-001: No fake success responses. FM-009: No polite downgrades.",
+                        line_no + 1
+                    );
+                }
+            }
+        }
+    });
 }
 
 /// FM-002 Rogue Silence defense: every #[allow(...)] in src/ must have a

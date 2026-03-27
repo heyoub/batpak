@@ -2,6 +2,10 @@
 //! Verifies MessagePack serialization matches known-good byte sequences.
 //! [SPEC:tests/wire_format.rs]
 //!
+//! PROVES: LAW-005 (Architecture Freeze — wire format stability)
+//! DEFENDS: FM-010 (Semantic Drift — byte-level determinism prevents silent serde changes)
+//! INVARIANTS: INV-TYPE (round-trip fidelity), INV-MIG (backward compatibility)
+//!
 //! Anti-almost-correctness: This test would have caught the Arc<str> serialization
 //! failure (Phase 1.1) — golden tests serialize a Coordinate containing Arc<str>.
 //!

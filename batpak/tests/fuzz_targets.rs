@@ -3,6 +3,10 @@
 //! Uses proptest as a structured fuzzer with high iteration counts.
 //! Every target exercises a boundary where untrusted/arbitrary data enters.
 //!
+//! PROVES: LAW-007 (Codebase Accuses Itself — fuzz as specification)
+//! DEFENDS: FM-004 (Phantom Dependency), FM-006 (Version Chimera)
+//! INVARIANTS: INV-TYPE (round-trip fidelity for all types), INV-SEC (EventKind packing)
+//!
 //! Run with: cargo test --test fuzz_targets --all-features
 //! Deep fuzz: PROPTEST_CASES=100000 cargo test --test fuzz_targets --all-features --release
 //! [SPEC:tests/fuzz_targets.rs]

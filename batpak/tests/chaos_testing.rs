@@ -1,3 +1,6 @@
+// PROVES: LAW-007 (Codebase Accuses Itself — adversarial self-testing)
+// DEFENDS: FM-011 (Error Path Hollowing), FM-019 (Non-Replayable Truth)
+// INVARIANTS: INV-CONC (linearizability, CAS, idempotency), INV-TEMP (corruption recovery)
 #![allow(
     clippy::panic,
     clippy::print_stderr,
