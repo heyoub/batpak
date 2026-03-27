@@ -1,0 +1,22 @@
+error[E0277]: the trait bound `String: LockState` is not satisfied
+  --> tests/ui/invalid_transition.rs:27:22
+   |
+27 |     apply_transition(Transition::<String, Released, String>::new(kind, "bad".into()));
+   |     ---------------- ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the trait `LockState` is not implemented for `String`
+   |     |
+   |     required by a bound introduced by this call
+   |
+help: the following other types implement trait `LockState`
+  --> tests/ui/invalid_transition.rs:11:1
+   |
+11 | batpak::define_state_machine!(LockState { Acquired, Released });
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   | |
+   | `Acquired`
+   | `Released`
+note: required by a bound in `apply_transition`
+  --> tests/ui/invalid_transition.rs:14:27
+   |
+14 | fn apply_transition<From: LockState, To: LockState>(
+   |                           ^^^^^^^^^ required by this bound in `apply_transition`
+   = note: this error originates in the macro `batpak::define_state_machine` (in Nightly builds, run with -Z macro-backtrace for more info)

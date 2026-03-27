@@ -1,11 +1,11 @@
-# Contributing to free-batteries
+# Contributing to batpak
 
 ## Setup
 
 1. Clone the repo:
    ```bash
    git clone <repo-url>
-   cd free-b/free-batteries
+   cd free-b/batpak
    ```
 
 2. Build:
@@ -29,7 +29,7 @@
 
 Reading order: coordinate → event → guard → pipeline → store
 
-See [TUNING.md](free-batteries/TUNING.md) for configuration guidance.
+See [TUNING.md](batpak/TUNING.md) for configuration guidance.
 
 ## Before Submitting
 

@@ -1,0 +1,140 @@
+name: CI
+on: [push, pull_request]
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+  PROPTEST_CASES: 256
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --all-features
+      - run: cargo check --no-default-features
+      - run: cargo check --features blake3
+      - run: cargo check --features redb
+
+  test:
+    runs-on: ubuntu-latest
+    needs: check
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@nextest
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo nextest run --profile ci --all-features
+      - run: cargo test --doc --all-features
+
+  test-feature-isolation:
+    runs-on: ubuntu-latest
+    needs: check
+    strategy:
+      matrix:
+        features:
+          - ""                    # no features (no blake3, no redb, no lmdb)
+          - "--features blake3"   # blake3 only
+          - "--features redb"     # redb cache only
+          - "--features lmdb"     # lmdb cache only
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Test with features [${{ matrix.features || 'none' }}]
+        run: cargo test ${{ matrix.features }}
+
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with: { components: clippy }
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --all-features -- -D warnings
+
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with: { components: rustfmt }
+      - run: cargo fmt --check
+
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.75.0
+      - run: cargo check --all-features
+
+  semver:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: obi1kenobi/cargo-semver-checks-action@v2
+
+  coverage:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with: { components: llvm-tools-preview }
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - uses: Swatinem/rust-cache@v2
+      - name: Run coverage
+        run: cargo llvm-cov test --all-features --text
+      - name: Coverage threshold check (70% line coverage)
+        run: |
+          SUMMARY=$(cargo llvm-cov test --all-features --json 2>/dev/null | python3 -c "
+          import json, sys
+          data = json.load(sys.stdin)
+          totals = data['data'][0]['totals']
+          lines = totals['lines']
+          pct = lines['covered'] * 100 // lines['count'] if lines['count'] > 0 else 0
+          print(f'{pct}')
+          ")
+          echo "Line coverage: ${SUMMARY}%"
+          if [ "${SUMMARY}" -lt 70 ]; then
+            echo "FAIL: coverage ${SUMMARY}% < 70%"
+            exit 1
+          fi
+
+  bench-compile:
+    runs-on: ubuntu-latest
+    needs: check
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo bench --no-run --all-features
+
+  docs:
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build rustdoc
+        run: cargo doc --all-features --no-deps
+        env:
+          RUSTDOCFLAGS: "--cfg docsrs -D warnings"
+      - name: Add redirect index
+        run: echo '<meta http-equiv="refresh" content="0;url=batpak/index.html">' > target/doc/index.html
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: target/doc
+      - id: deploy
+        uses: actions/deploy-pages@v4

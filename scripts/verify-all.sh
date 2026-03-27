@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # ============================================================================
-# free-batteries verification harness
+# batpak verification harness
 #
 # Runs all quality gates in dependency order. Exit code 0 = all green.
 # Optimized for Rust: fmt → clippy → test (all features) → test (no features)
@@ -12,14 +12,14 @@ set -euo pipefail
 #   ./scripts/verify-all.sh --quick  # fmt + clippy only (pre-commit)
 # ============================================================================
 
-cd "$(dirname "$0")/../free-batteries"
+cd "$(dirname "$0")/../batpak"
 
 QUICK=false
 if [ "${1:-}" = "--quick" ]; then
   QUICK=true
 fi
 
-echo "=== free-batteries verification ==="
+echo "=== batpak verification ==="
 echo ""
 
 # ── Gate 1: formatting ───────────────────────────────────────────────

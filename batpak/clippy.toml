@@ -1,0 +1,17 @@
+msrv = "1.75"
+cognitive-complexity-threshold = 25
+too-many-arguments-threshold = 7
+
+# Banned methods: enforce API discipline at the clippy level.
+# These complement build.rs checks with clippy's full semantic understanding.
+[[disallowed-methods]]
+path = "std::thread::spawn"
+reason = "Use std::thread::Builder::new().name(...).spawn() for fallible thread creation (Bug 7 post-mortem)"
+
+[[disallowed-methods]]
+path = "std::process::exit"
+reason = "Use proper error propagation. process::exit skips Drop impls and loses data (LAW-001)"
+
+[[disallowed-methods]]
+path = "std::mem::forget"
+reason = "Leaking resources is a bug, not a feature. Use ManuallyDrop if truly needed (BANNED-002)"
