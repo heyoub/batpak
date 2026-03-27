@@ -186,8 +186,15 @@ impl Segment<Active> {
     }
 
     pub fn sync(&mut self) -> Result<(), StoreError> {
+        self.sync_with_mode(&crate::store::SyncMode::SyncAll)
+    }
+
+    pub fn sync_with_mode(&mut self, mode: &crate::store::SyncMode) -> Result<(), StoreError> {
         if let Some(ref f) = self.file {
-            f.sync_all().map_err(StoreError::Io)?;
+            match mode {
+                crate::store::SyncMode::SyncAll => f.sync_all().map_err(StoreError::Io)?,
+                crate::store::SyncMode::SyncData => f.sync_data().map_err(StoreError::Io)?,
+            }
         }
         Ok(())
     }

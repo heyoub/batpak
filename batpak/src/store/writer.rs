@@ -131,8 +131,11 @@ impl WriterHandle {
             h
         });
 
-        let thread = std::thread::Builder::new()
-            .name(thread_name)
+        let mut builder = std::thread::Builder::new().name(thread_name);
+        if let Some(stack_size) = config.writer_stack_size {
+            builder = builder.stack_size(stack_size);
+        }
+        let thread = builder
             .spawn(move || {
                 writer_loop(&rx, &cfg, &idx, &subs, initial_segment, initial_segment_id);
             })
@@ -197,12 +200,12 @@ fn writer_loop(
 
                 events_since_sync += 1;
                 if events_since_sync >= config.sync_every_n_events {
-                    let _ = state.active_segment.sync();
+                    let _ = state.active_segment.sync_with_mode(&config.sync_mode);
                     events_since_sync = 0;
                 }
             }
             WriterCommand::Sync { respond } => {
-                let result = state.active_segment.sync();
+                let result = state.active_segment.sync_with_mode(&config.sync_mode);
                 let _ = respond.send(result);
                 events_since_sync = 0;
             }
@@ -229,12 +232,12 @@ fn writer_loop(
                             let _ = r.send(Ok(()));
                         }
                         Ok(WriterCommand::Sync { respond: r }) => {
-                            let _ = r.send(state.active_segment.sync());
+                            let _ = r.send(state.active_segment.sync_with_mode(&config.sync_mode));
                         }
                         Err(_) => break, // channel empty
                     }
                 }
-                let _ = state.active_segment.sync();
+                let _ = state.active_segment.sync_with_mode(&config.sync_mode);
                 let _ = respond.send(Ok(()));
                 return; // exit writer loop
             }
@@ -317,8 +320,16 @@ impl WriterState<'_> {
             .unwrap_or(0);
 
         // STEP 4: Set event header position with HLC wall clock.
+        // Ensure wall_ms is monotonically non-decreasing per entity to prevent
+        // BTreeMap reordering on clock regression.
         // [CROSS-POLLINATION:czap/hlc.ts — HLC for global causal ordering]
-        let now_ms = (event.header.timestamp_us / 1000) as u64;
+        let raw_ms = (event.header.timestamp_us / 1000) as u64;
+        let last_ms = self
+            .index
+            .get_latest(entity)
+            .map(|e| e.wall_ms)
+            .unwrap_or(0);
+        let now_ms = raw_ms.max(last_ms);
         let position = DagPosition::child_at(clock, now_ms, 0);
         event.header.position = position;
         event.header.event_kind = kind;
