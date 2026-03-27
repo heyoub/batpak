@@ -63,6 +63,10 @@ pub struct StoreConfig {
     pub writer_channel_capacity: usize,
     pub broadcast_capacity: usize,
     pub cache_map_size_bytes: usize,
+    /// NOTE: restart_policy is defined for API completeness but not yet wired
+    /// into the writer loop. The writer thread currently exits on panic without
+    /// automatic restart. This field is read by diagnostics() for reporting only.
+    /// TODO: Implement restart logic in WriterHandle::spawn() when needed.
     pub restart_policy: RestartPolicy,
     pub shutdown_drain_limit: usize,
     /// Optional writer thread stack size. None = OS default (~8MB on Linux).
