@@ -57,6 +57,7 @@ pub mod typestate;
 pub mod wire; // serde helpers — no deps, must come first
 
 /// compile_error guards for impossible configurations:
+// async-store is not a declared feature — suppress cfg warning for this guard
 #[allow(unexpected_cfgs)]
 #[cfg(feature = "async-store")]
 compile_error!(
@@ -65,6 +66,7 @@ compile_error!(
      See: src/store/subscription.rs for the async pattern."
 );
 
+// sha256 is not a declared feature — suppress cfg warning for this guard
 #[allow(unexpected_cfgs)]
 #[cfg(feature = "sha256")]
 compile_error!(

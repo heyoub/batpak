@@ -36,6 +36,9 @@ pub enum Outcome<T> {
     Batch(Vec<Outcome<T>>),
 }
 
+// Monadic combinators intentionally use wildcard matches for pass-through patterns.
+// Each combinator handles 1-2 specific variants and passes the rest unchanged.
+#[allow(clippy::wildcard_enum_match_arm)]
 impl<T> Outcome<T> {
     // --- Construction ---
     pub fn ok(val: T) -> Self {
@@ -278,6 +281,7 @@ impl<T> Outcome<T> {
 /// Implemented on the nested type (like Option::flatten), not as a bounded
 /// method on `Outcome<T>`. This is join in category theory: join = bind(id).
 /// Composes with and_then (the monad bind, proptest-proven).
+#[allow(clippy::wildcard_enum_match_arm)]
 impl<T> Outcome<Outcome<T>> {
     pub fn flatten(self) -> Outcome<T> {
         self.and_then(|inner| inner)

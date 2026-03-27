@@ -29,6 +29,7 @@ use writer::{AppendGuards, SubscriberList, WriterCommand, WriterHandle};
 /// Store: the runtime. Sync API. Send + Sync.
 /// [SPEC:src/store/mod.rs]
 /// Invariant 2: ALL METHODS ARE SYNC. No .await anywhere.
+// async-store is not a declared feature — suppress cfg warning for this guard
 #[allow(unexpected_cfgs)]
 #[cfg(feature = "async-store")]
 compile_error!("INVARIANT 2: Store API is sync. Use spawn_blocking or flume recv_async.");

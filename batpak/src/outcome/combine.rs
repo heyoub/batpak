@@ -164,6 +164,7 @@ pub fn join_all<T>(outcomes: Vec<Outcome<T>>) -> Outcome<Vec<T>> {
 
 /// join_any: first Ok wins. If all fail, last Err wins.
 /// [SPEC:src/outcome/combine.rs]
+#[allow(clippy::wildcard_enum_match_arm)] // Retry/Pending/Cancelled are intentional pass-through
 pub fn join_any<T>(outcomes: Vec<Outcome<T>>) -> Outcome<T> {
     let mut last_err = None;
     for outcome in outcomes {

@@ -13,6 +13,43 @@ fn main() {
     check_no_tokio_in_deps();
     check_no_banned_patterns();
     check_store_config_field_usage();
+    check_allow_justifications();
+}
+
+/// FM-002 Rogue Silence defense: every #[allow(...)] in src/ must have a
+/// justification comment on the same or previous line explaining why.
+/// Unjustified allows are how agents silence the compiler instead of fixing bugs.
+fn check_allow_justifications() {
+    walk_rs_files(Path::new("src"), &|path, contents| {
+        let path_str = path.display().to_string();
+        for (line_no, line) in contents.lines().enumerate() {
+            let trimmed = line.trim();
+            // Skip the crate-level allow at the top of lib.rs
+            if trimmed.starts_with("#![allow") {
+                continue;
+            }
+            if trimmed.starts_with("#[allow(") {
+                // Check this line and previous line for a justification comment
+                let has_justification = trimmed.contains("//")
+                    || (line_no > 0
+                        && contents
+                            .lines()
+                            .nth(line_no - 1)
+                            .map(|prev| prev.trim().starts_with("//"))
+                            .unwrap_or(false));
+                if !has_justification {
+                    panic!(
+                        "ROGUE SILENCE in {path_str}:{}: `{trimmed}`\n\
+                         Every #[allow(...)] must have a justification comment on the same\n\
+                         or previous line explaining WHY the lint is suppressed.\n\
+                         Example: #[allow(clippy::cast_possible_truncation)] // frame_size < u32::MAX\n\
+                         See: Big Bang FM-002 (Rogue Silence).",
+                        line_no + 1
+                    );
+                }
+            }
+        }
+    });
 }
 
 fn check_no_tokio_in_deps() {

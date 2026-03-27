@@ -136,7 +136,8 @@ impl Reader {
                 segment_id: pos.segment_id,
                 offset: pos.offset,
             },
-            _ => StoreError::CorruptSegment {
+            segment::FrameDecodeError::TooShort
+            | segment::FrameDecodeError::Truncated { .. } => StoreError::CorruptSegment {
                 segment_id: pos.segment_id,
                 detail: e.to_string(),
             },

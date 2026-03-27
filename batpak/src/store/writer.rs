@@ -1,3 +1,4 @@
+// exponential-backoff is not a declared feature — suppress cfg warning for this guard
 #[allow(unexpected_cfgs)]
 #[cfg(feature = "exponential-backoff")]
 compile_error!(
