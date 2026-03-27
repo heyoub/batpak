@@ -147,9 +147,10 @@ impl ProjectionCache for RedbCache {
             let mut table = txn
                 .open_table(CACHE_TABLE)
                 .map_err(|e| StoreError::CacheFailed(e.to_string()))?;
-            // Range: prefix..prefix_end (increment last non-0xFF byte)
-            let mut end = prefix.to_vec();
-            end.push(0xFF);
+            // Range: prefix..prefix_end. Compute the exclusive upper bound
+            // by incrementing the last byte (with carry). Appending 0xFF was
+            // wrong — it missed keys where the byte after the prefix is 0xFF.
+            let end = prefix_successor(prefix);
             let keys: Vec<Vec<u8>> = table
                 .range(prefix..end.as_slice())
                 .map_err(|e| StoreError::CacheFailed(e.to_string()))?
@@ -301,4 +302,23 @@ impl ProjectionCache for LmdbCache {
             .force_sync()
             .map_err(|e| StoreError::CacheFailed(e.to_string()))
     }
+}
+
+#[cfg(feature = "redb")]
+/// Compute the exclusive upper bound for a prefix range scan.
+/// Increments the last byte, carrying if 0xFF. Returns prefix + 0x00
+/// if all bytes are 0xFF (which correctly captures everything).
+fn prefix_successor(prefix: &[u8]) -> Vec<u8> {
+    let mut end = prefix.to_vec();
+    // Walk backwards, incrementing the last non-0xFF byte
+    for i in (0..end.len()).rev() {
+        if end[i] < 0xFF {
+            end[i] += 1;
+            end.truncate(i + 1);
+            return end;
+        }
+    }
+    // All bytes are 0xFF — extend with 0x00 to cover everything after prefix
+    end.push(0x00);
+    end
 }

@@ -208,7 +208,7 @@ impl<T> Outcome<T> {
         }
     }
 
-    pub fn and_then_if<F: FnOnce(&T) -> bool, G: FnOnce(T) -> Outcome<T>>(
+    pub fn and_then_if<F: Fn(&T) -> bool, G: FnOnce(T) -> Outcome<T> + Clone>(
         self,
         pred: F,
         f: G,
@@ -221,6 +221,21 @@ impl<T> Outcome<T> {
                     Self::Ok(v)
                 }
             }
+            Self::Batch(items) => Self::Batch(
+                items
+                    .into_iter()
+                    .map(|o| match o {
+                        Self::Ok(v) => {
+                            if pred(&v) {
+                                f.clone()(v)
+                            } else {
+                                Self::Ok(v)
+                            }
+                        }
+                        other => other,
+                    })
+                    .collect(),
+            ),
             other => other,
         }
     }

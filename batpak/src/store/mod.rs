@@ -622,9 +622,11 @@ impl Store {
         Cursor::new(region.clone(), Arc::clone(&self.index))
     }
 
-    /// CONVENIENCE: sugar over Region.
+    /// CONVENIENCE: sugar over index.stream() for exact entity match.
+    /// Unlike Region::entity() (prefix match), this returns events for
+    /// exactly the named entity — "entity:1" does NOT match "entity:10".
     pub fn stream(&self, entity: &str) -> Vec<IndexEntry> {
-        self.query(&Region::entity(entity))
+        self.index.stream(entity)
     }
     pub fn by_scope(&self, scope: &str) -> Vec<IndexEntry> {
         self.query(&Region::scope(scope))
@@ -771,6 +773,12 @@ impl Store {
     /// Compact: merge sealed segments, optionally filtering events.
     /// Returns the number of segments removed and bytes reclaimed.
     /// The active (currently-written) segment is never touched.
+    ///
+    /// **IMPORTANT**: compact() rebuilds the in-memory index from disk.
+    /// Appends that arrive during compaction are safe (they go to the active
+    /// segment which is not compacted), but the index rebuild syncs the writer
+    /// before and after to minimize the window for stale index state.
+    /// For maximum safety, avoid high-throughput appends during compaction.
     pub fn compact(
         &self,
         config: &CompactionConfig,
@@ -920,6 +928,8 @@ impl Store {
         // 7. Rebuild index from all remaining segments on disk.
         // This guarantees consistency for Retention (dropped events removed)
         // and Tombstone (event_kind updated in index).
+        // Sync writer first to flush any in-flight appends before clearing.
+        self.sync()?;
         self.index.clear();
         let mut remaining: Vec<std::fs::DirEntry> = std::fs::read_dir(&self.config.data_dir)
             .map_err(StoreError::Io)?
@@ -957,6 +967,11 @@ impl Store {
                 self.index.insert(entry);
             }
         }
+
+        // Sync again to ensure any events the writer committed during
+        // the rebuild window are flushed (they're in the active segment
+        // which was scanned above, but the writer may have appended more).
+        self.sync()?;
 
         Ok(segment::CompactionResult {
             segments_removed,
