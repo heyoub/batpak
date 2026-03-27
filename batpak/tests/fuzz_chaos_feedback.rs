@@ -577,10 +577,29 @@ fn run_extended_fuzz_chaos() {
          Data loss detected. Investigate: src/store/writer.rs + src/store/index.rs."
     );
 
+    // Close and reopen to verify durability (cold-start verification).
+    // Without this, we only verified in-memory state — events could be lost on disk.
     match Arc::try_unwrap(store) {
         Ok(s) => s.close().expect("close"),
         Err(_) => panic!("Arc still has multiple owners"),
     }
+    let config2 = StoreConfig {
+        data_dir: dir.path().to_path_buf(),
+        ..StoreConfig::new("")
+    };
+    let store2 = Store::open(config2).expect("cold start reopen");
+    let mut cold_entries = 0;
+    for t in 0..n_threads {
+        cold_entries += store2.stream(&format!("ext:t{t}")).len();
+    }
+    assert_eq!(
+        cold_entries, total_ok as usize,
+        "COLD START DATA LOSS: wrote {total_ok} events, but only {cold_entries} survived cold start.\n\
+         This means events were in-memory but not durable on disk.\n\
+         Investigate: src/store/writer.rs sync paths, segment rotation durability.\n\
+         Run: cargo test --test fuzz_chaos_feedback"
+    );
+    store2.close().expect("close cold start store");
 
     // --- Extended gates (stricter thresholds) ---
     struct ExtendedContext {

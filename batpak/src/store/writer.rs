@@ -200,7 +200,9 @@ fn writer_loop(
 
                 events_since_sync += 1;
                 if events_since_sync >= config.sync_every_n_events {
-                    let _ = state.active_segment.sync_with_mode(&config.sync_mode);
+                    if let Err(e) = state.active_segment.sync_with_mode(&config.sync_mode) {
+                        tracing::error!("periodic sync failed: {e}");
+                    }
                     events_since_sync = 0;
                 }
             }
@@ -237,7 +239,9 @@ fn writer_loop(
                         Err(_) => break, // channel empty
                     }
                 }
-                let _ = state.active_segment.sync_with_mode(&config.sync_mode);
+                if let Err(e) = state.active_segment.sync_with_mode(&config.sync_mode) {
+                    tracing::error!("shutdown sync failed: {e}");
+                }
                 let _ = respond.send(Ok(()));
                 return; // exit writer loop
             }
@@ -365,7 +369,7 @@ impl WriterState<'_> {
             .active_segment
             .needs_rotation(self.config.segment_max_bytes)
         {
-            self.active_segment.sync()?;
+            self.active_segment.sync_with_mode(&self.config.sync_mode)?;
             let old = std::mem::replace(
                 self.active_segment,
                 Segment::<Active>::create(&self.config.data_dir, *self.segment_id + 1)?,

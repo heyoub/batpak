@@ -1788,7 +1788,9 @@ fn react_loop_spawns_and_processes() {
     let store = Arc::new(Store::open(config).expect("open store"));
 
     let region = Region::entity("entity:trigger");
-    let _handle = store.react_loop(&region, TestReactor);
+    let _handle = store
+        .react_loop(&region, TestReactor)
+        .expect("spawn reactor");
 
     // Append a trigger event
     let coord = Coordinate::new("entity:trigger", "scope:test").expect("valid coord");

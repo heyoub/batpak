@@ -243,21 +243,31 @@ fn chaos_cas_contention() {
         })
         .collect();
 
-    let mut winners = 0;
+    let mut winning_receipt = None;
     let mut losers = 0;
+    let mut loser_errors = Vec::new();
     for h in handles {
         match h.join().expect("join") {
-            Ok(_) => winners += 1,
-            Err(_) => losers += 1,
+            Ok(receipt) => {
+                assert!(
+                    winning_receipt.is_none(),
+                    "CHAOS PROPERTY: CAS must allow exactly ONE winner, but got a second.\n\
+                     Investigate: src/store/writer.rs CAS check under entity lock.\n\
+                     Common causes: entity lock not held across sequence read + write."
+                );
+                winning_receipt = Some(receipt);
+            }
+            Err(e) => {
+                losers += 1;
+                loser_errors.push(format!("{e}"));
+            }
         }
     }
 
-    eprintln!("  CHAOS CAS CONTENTION: {winners} winners, {losers} losers");
-    assert_eq!(
-        winners, 1,
-        "CHAOS PROPERTY: CAS must allow exactly one winner when all threads compete on the same expected_sequence.\n\
-         Investigate: src/store/writer.rs CAS check under entity lock, src/store/mod.rs AppendOptions handling.\n\
-         Common causes: entity lock not held across sequence read + write, CAS condition checked outside the lock.\n\
+    eprintln!("  CHAOS CAS CONTENTION: 1 winner, {losers} losers");
+    assert!(
+        winning_receipt.is_some(),
+        "CHAOS PROPERTY: exactly one thread must win CAS, but none did.\n\
          Run: cargo test --test chaos_testing chaos_cas_contention"
     );
     assert_eq!(
@@ -265,9 +275,27 @@ fn chaos_cas_contention() {
         n_threads - 1,
         "CHAOS PROPERTY: all threads except the CAS winner must receive a conflict error (expected {}, got {losers}).\n\
          Investigate: src/store/writer.rs CAS rejection path, StoreError::SequenceMismatch variant.\n\
-         Common causes: CAS error swallowed/mapped to Ok, winner count > 1 masking losers.\n\
          Run: cargo test --test chaos_testing chaos_cas_contention",
         n_threads - 1
+    );
+    // Verify losers got SequenceMismatch, not some other error
+    for err_msg in &loser_errors {
+        assert!(
+            err_msg.contains("CAS failed"),
+            "CHAOS PROPERTY: CAS losers must get SequenceMismatch, got: {err_msg}\n\
+             Investigate: src/store/writer.rs CAS rejection, StoreError::SequenceMismatch.\n\
+             Run: cargo test --test chaos_testing chaos_cas_contention"
+        );
+    }
+
+    // Verify the winner's event is actually in the stream
+    let entries = store.stream("chaos:cas");
+    assert_eq!(
+        entries.len(),
+        2, // seed + 1 winner
+        "CHAOS PROPERTY: stream should have exactly 2 events (seed + CAS winner), got {}.\n\
+         Investigate: src/store/writer.rs handle_append commit path.",
+        entries.len()
     );
 
     match Arc::try_unwrap(store) {

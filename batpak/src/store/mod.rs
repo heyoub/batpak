@@ -382,6 +382,7 @@ impl Store {
     ) -> Result<AppendReceipt, StoreError> {
         let payload_bytes = rmp_serde::to_vec_named(payload)
             .map_err(|e| StoreError::Serialization(e.to_string()))?;
+        let payload_len = checked_payload_len(&payload_bytes)?;
         let event_id = crate::id::generate_v7_id();
         let header = EventHeader::new(
             event_id,
@@ -389,7 +390,7 @@ impl Store {
             None, // correlation = self, causation = root
             self.config.now_us(),
             crate::coordinate::DagPosition::root(),
-            payload_bytes.len() as u32,
+            payload_len,
             kind,
         );
         let event = Event::new(header, payload_bytes);
@@ -426,6 +427,7 @@ impl Store {
     ) -> Result<AppendReceipt, StoreError> {
         let payload_bytes = rmp_serde::to_vec_named(payload)
             .map_err(|e| StoreError::Serialization(e.to_string()))?;
+        let payload_len = checked_payload_len(&payload_bytes)?;
         let event_id = crate::id::generate_v7_id();
         let header = EventHeader::new(
             event_id,
@@ -433,7 +435,7 @@ impl Store {
             Some(causation_id),
             self.config.now_us(),
             crate::coordinate::DagPosition::root(),
-            payload_bytes.len() as u32,
+            payload_len,
             kind,
         );
         let event = Event::new(header, payload_bytes);
@@ -638,7 +640,7 @@ impl Store {
         self: &Arc<Self>,
         region: &Region,
         reactor: R,
-    ) -> std::thread::JoinHandle<()>
+    ) -> Result<std::thread::JoinHandle<()>, StoreError>
     where
         R: crate::event::sourcing::Reactive<serde_json::Value> + Send + 'static,
     {
@@ -671,7 +673,7 @@ impl Store {
                     }
                 }
             })
-            .expect("failed to spawn reactor thread")
+            .map_err(StoreError::Io)
     }
 
     /// WRITE: append with CAS, idempotency, custom correlation/causation.
@@ -686,6 +688,7 @@ impl Store {
     ) -> Result<AppendReceipt, StoreError> {
         let payload_bytes = rmp_serde::to_vec_named(payload)
             .map_err(|e| StoreError::Serialization(e.to_string()))?;
+        let payload_len = checked_payload_len(&payload_bytes)?;
         let event_id = opts
             .idempotency_key
             .unwrap_or_else(crate::id::generate_v7_id);
@@ -697,7 +700,7 @@ impl Store {
             causation_id,
             self.config.now_us(),
             crate::coordinate::DagPosition::root(),
-            payload_bytes.len() as u32,
+            payload_len,
             kind,
         )
         .with_flags(opts.flags);
@@ -997,6 +1000,18 @@ impl Drop for Store {
         let (tx, _rx) = flume::bounded(1);
         let _ = self.writer.tx.send(WriterCommand::Shutdown { respond: tx });
     }
+}
+
+/// Validate payload length fits in u32. Prevents silent truncation
+/// when serialized payloads exceed 4GB (unlikely but possible with
+/// pathological inputs or corrupted serialization).
+fn checked_payload_len(payload_bytes: &[u8]) -> Result<u32, StoreError> {
+    u32::try_from(payload_bytes.len()).map_err(|_| {
+        StoreError::Serialization(format!(
+            "payload size {} exceeds u32::MAX (4GB limit)",
+            payload_bytes.len()
+        ))
+    })
 }
 
 pub(crate) fn now_us() -> i64 {

@@ -35,6 +35,36 @@ fn bench_write_throughput(c: &mut Criterion) {
                     for _ in 0..count {
                         store.append(&coord, kind, &payload).expect("append");
                     }
+                    // NOTE: Do NOT call store.close() inside measurement.
+                    // close() forces a final sync which conflates fsync cost with
+                    // append throughput. Store is dropped after iter_with_setup returns.
+                },
+            );
+        });
+    }
+
+    group.finish();
+}
+
+/// Durable write throughput: includes explicit sync + close.
+/// Measures the full durability cost (append + periodic sync + final sync).
+/// Compare with write_throughput to isolate sync overhead.
+fn bench_durable_write_throughput(c: &mut Criterion) {
+    let mut group = c.benchmark_group("durable_write_throughput");
+
+    for count in [1_000u64, 10_000] {
+        group.bench_with_input(BenchmarkId::from_parameter(count), &count, |b, &count| {
+            b.iter_with_setup(
+                || setup_store(),
+                |(store, _dir)| {
+                    let coord =
+                        Coordinate::new("bench:entity", "bench:scope").expect("valid coord");
+                    let kind = EventKind::custom(0xF, 1);
+                    let payload = serde_json::json!({"x": 1, "y": 2});
+                    for _ in 0..count {
+                        store.append(&coord, kind, &payload).expect("append");
+                    }
+                    store.sync().expect("sync");
                     store.close().expect("close");
                 },
             );
@@ -77,10 +107,9 @@ fn bench_concurrent_write_throughput(c: &mut Criterion) {
                 for h in handles {
                     h.join().expect("thread join");
                 }
-                // Use Arc::try_unwrap to get ownership for close()
-                if let Ok(store) = Arc::try_unwrap(store) {
-                    store.close().expect("close");
-                }
+                // Do NOT close inside measurement — see write_throughput note.
+                // Store drops naturally when Arc refcount hits zero.
+                drop(store);
             },
         );
     });
@@ -133,6 +162,7 @@ fn bench_sync_mode_comparison(c: &mut Criterion) {
 criterion_group!(
     benches,
     bench_write_throughput,
+    bench_durable_write_throughput,
     bench_concurrent_write_throughput,
     bench_sync_mode_comparison
 );
