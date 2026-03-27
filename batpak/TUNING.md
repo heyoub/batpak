@@ -36,26 +36,22 @@ applies sane defaults, then override fields before passing to `Store::open()`.
 ## Example: Embedded Device
 
 ```rust
-let config = StoreConfig::new("/data/events")
-    .with(|c| {
-        c.segment_max_bytes = 16 * 1024 * 1024;  // 16 MB segments
-        c.fd_budget = 8;                           // minimal FDs
-        c.sync_every_n_events = 10;                // near-durable
-        c.writer_channel_capacity = 256;           // tight memory
-        c.cache_map_size_bytes = 4 * 1024 * 1024;  // 4 MB cache
-    });
+let mut config = StoreConfig::new("/data/events");
+config.segment_max_bytes = 16 * 1024 * 1024;  // 16 MB segments
+config.fd_budget = 8;                           // minimal FDs
+config.sync_every_n_events = 10;                // near-durable
+config.writer_channel_capacity = 256;           // tight memory
+config.cache_map_size_bytes = 4 * 1024 * 1024;  // 4 MB cache
 ```
 
 ## Example: High-Throughput Server
 
 ```rust
-let config = StoreConfig::new("/var/lib/events")
-    .with(|c| {
-        c.segment_max_bytes = 1024 * 1024 * 1024;  // 1 GB segments
-        c.sync_every_n_events = 5000;               // batch syncs
-        c.sync_mode = SyncMode::SyncData;           // skip metadata
-        c.fd_budget = 256;                          // many open segments
-        c.writer_channel_capacity = 16384;          // high burst tolerance
-        c.broadcast_capacity = 32768;               // slow consumer tolerance
-    });
+let mut config = StoreConfig::new("/var/lib/events");
+config.segment_max_bytes = 1024 * 1024 * 1024;  // 1 GB segments
+config.sync_every_n_events = 5000;               // batch syncs
+config.sync_mode = SyncMode::SyncData;           // skip metadata
+config.fd_budget = 256;                          // many open segments
+config.writer_channel_capacity = 16384;          // high burst tolerance
+config.broadcast_capacity = 32768;               // slow consumer tolerance
 ```
