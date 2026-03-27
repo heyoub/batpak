@@ -12,6 +12,7 @@ fn main() {
 
     check_no_tokio_in_deps();
     check_no_banned_patterns();
+    check_store_config_field_usage();
 }
 
 fn check_no_tokio_in_deps() {
@@ -112,6 +113,153 @@ fn check_no_banned_patterns() {
             }
         }
     });
+}
+
+fn check_store_config_field_usage() {
+    // Invariant: every pub field in StoreConfig must be read somewhere in src/.
+    // This catches "config field defined but never wired up" bugs like
+    // writer_stack_size and sync_mode being ignored.
+    // [SPEC:INVARIANTS — config completeness]
+    let config_src =
+        fs::read_to_string("src/store/mod.rs").expect("read src/store/mod.rs for config check");
+
+    // Extract field names from `pub struct StoreConfig { ... }`
+    let struct_start = match config_src.find("pub struct StoreConfig {") {
+        Some(pos) => pos,
+        None => return, // struct not found — skip check
+    };
+    let after_brace = &config_src[struct_start..];
+    let struct_body = match after_brace.find('}') {
+        Some(end) => &after_brace[..end],
+        None => return,
+    };
+
+    let fields: Vec<&str> = struct_body
+        .lines()
+        .filter_map(|line| {
+            let trimmed = line.trim();
+            if trimmed.starts_with("pub ") && trimmed.contains(':') {
+                // Extract field name: "pub field_name: Type," -> "field_name"
+                let after_pub = trimmed.strip_prefix("pub ")?;
+                let field_name = after_pub.split(':').next()?.trim();
+                Some(field_name)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    // For each field, search all src/**/*.rs files for usage patterns like
+    // config.field_name or self.field_name. We search ALL files including mod.rs
+    // because the wiring often happens in the same module (e.g., Store::open
+    // reads config.fd_budget to construct the Reader).
+    //
+    // To avoid false positives from the struct definition and StoreConfig::new(),
+    // we strip those blocks before searching.
+    let mut all_src = String::new();
+    collect_rs_contents(Path::new("src"), &mut all_src, None);
+
+    // Remove the StoreConfig struct body and ::new() body from the search text
+    // so that field definitions and default initializations don't count as "usage".
+    let search_text = strip_struct_and_new(&all_src, "StoreConfig");
+
+    // Fields that are defined for external consumers (e.g., cache backends
+    // constructed outside the store). These are intentionally not read in src/.
+    let allowed_external = ["cache_map_size_bytes"];
+
+    for field in &fields {
+        if allowed_external.contains(field) {
+            continue;
+        }
+        // Look for config.field or .field access patterns (not just the field name
+        // as a substring, which would match comments and variable names).
+        let dot_field = format!(".{field}");
+        if !search_text.contains(&dot_field) {
+            panic!(
+                "STORE CONFIG FIELD UNUSED: `{field}` is defined in StoreConfig but never \
+                 accessed via `.{field}` in any src/ file (outside struct def and ::new()).\n\
+                 Every config field must be wired to actual behavior.\n\
+                 Either use the field or remove it from StoreConfig.\n\
+                 See: the writer_stack_size / sync_mode bugs that slipped through review."
+            );
+        }
+    }
+}
+
+/// Strip the struct definition body and ::new() body so field definitions
+/// and default initializations don't count as "usage".
+fn strip_struct_and_new(src: &str, struct_name: &str) -> String {
+    let mut result = src.to_string();
+
+    // Strip `pub struct StructName { ... }`
+    let struct_marker = format!("pub struct {struct_name} {{");
+    if let Some(start) = result.find(&struct_marker) {
+        if let Some(end) = find_matching_brace(&result[start..]) {
+            result.replace_range(start..start + end + 1, "/* stripped */");
+        }
+    }
+
+    // Strip the Clone impl body (contains self.field_name copies)
+    let clone_marker = format!("impl Clone for {struct_name}");
+    if let Some(start) = result.find(&clone_marker) {
+        if let Some(brace_offset) = result[start..].find('{') {
+            let body_start = start + brace_offset;
+            if let Some(end) = find_matching_brace(&result[body_start..]) {
+                result.replace_range(body_start..body_start + end + 1, "/* stripped */");
+            }
+        }
+    }
+
+    // Strip the Debug impl body (contains .field("name", &self.field))
+    let debug_marker = format!("impl std::fmt::Debug for {struct_name}");
+    if let Some(start) = result.find(&debug_marker) {
+        if let Some(brace_offset) = result[start..].find('{') {
+            let body_start = start + brace_offset;
+            if let Some(end) = find_matching_brace(&result[body_start..]) {
+                result.replace_range(body_start..body_start + end + 1, "/* stripped */");
+            }
+        }
+    }
+
+    result
+}
+
+/// Find the position of the matching closing brace for text starting with '{'.
+fn find_matching_brace(s: &str) -> Option<usize> {
+    let mut depth = 0i32;
+    for (i, ch) in s.char_indices() {
+        match ch {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn collect_rs_contents(dir: &Path, buf: &mut String, exclude: Option<&str>) {
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                collect_rs_contents(&path, buf, exclude);
+            } else if path.extension().map(|e| e == "rs").unwrap_or(false) {
+                if let Some(excl) = exclude {
+                    if path.to_string_lossy().replace('\\', "/").ends_with(excl) {
+                        continue;
+                    }
+                }
+                if let Ok(contents) = fs::read_to_string(&path) {
+                    buf.push_str(&contents);
+                }
+            }
+        }
+    }
 }
 
 fn walk_rs_files(dir: &Path, check: &dyn Fn(&Path, &str)) {

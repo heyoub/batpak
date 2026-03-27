@@ -2,7 +2,7 @@
 //! [SPEC:benches/write_throughput.rs]
 
 use batpak::prelude::*;
-use batpak::store::{Store, StoreConfig};
+use batpak::store::{Store, StoreConfig, SyncMode};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use std::sync::Arc;
 use tempfile::TempDir;
@@ -88,9 +88,52 @@ fn bench_concurrent_write_throughput(c: &mut Criterion) {
     group.finish();
 }
 
+/// SyncMode comparison: SyncAll vs SyncData throughput.
+/// Detects if sync_mode stops being wired through (regression guard).
+/// If both modes produce identical throughput, the config may be ignored.
+fn bench_sync_mode_comparison(c: &mut Criterion) {
+    let mut group = c.benchmark_group("sync_mode_comparison");
+    group.sample_size(20);
+
+    let count = 1_000u64;
+
+    for (label, mode) in [
+        ("sync_all", SyncMode::SyncAll),
+        ("sync_data", SyncMode::SyncData),
+    ] {
+        group.bench_function(label, |b| {
+            b.iter_with_setup(
+                || {
+                    let dir = TempDir::new().expect("create temp dir");
+                    let config = StoreConfig {
+                        data_dir: dir.path().to_path_buf(),
+                        sync_every_n_events: 100,
+                        sync_mode: mode.clone(),
+                        ..StoreConfig::new("")
+                    };
+                    let store = Store::open(config).expect("open store");
+                    (store, dir)
+                },
+                |(store, _dir)| {
+                    let coord = Coordinate::new("bench:sync", "bench:scope").expect("valid coord");
+                    let kind = EventKind::custom(0xF, 1);
+                    let payload = serde_json::json!({"x": 1});
+                    for _ in 0..count {
+                        store.append(&coord, kind, &payload).expect("append");
+                    }
+                    store.close().expect("close");
+                },
+            );
+        });
+    }
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_write_throughput,
-    bench_concurrent_write_throughput
+    bench_concurrent_write_throughput,
+    bench_sync_mode_comparison
 );
 criterion_main!(benches);
