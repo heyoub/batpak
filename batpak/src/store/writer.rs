@@ -327,6 +327,7 @@ impl WriterState<'_> {
         // Ensure wall_ms is monotonically non-decreasing per entity to prevent
         // BTreeMap reordering on clock regression.
         // [CROSS-POLLINATION:czap/hlc.ts — HLC for global causal ordering]
+        #[allow(clippy::cast_sign_loss)] // timestamp_us is always positive (from SystemTime)
         let raw_ms = (event.header.timestamp_us / 1000) as u64;
         let last_ms = self
             .index
@@ -388,6 +389,7 @@ impl WriterState<'_> {
         let disk_pos = DiskPos {
             segment_id: *self.segment_id,
             offset,
+            #[allow(clippy::cast_possible_truncation)] // checked_payload_len already verified < u32::MAX
             length: frame.len() as u32,
         };
         let entry = IndexEntry {

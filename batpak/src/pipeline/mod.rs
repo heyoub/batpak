@@ -6,7 +6,7 @@ pub use bypass::{BypassReason, BypassReceipt};
 
 /// `Proposal<T>`: wraps a value for gate evaluation.
 /// [SPEC:src/pipeline/mod.rs]
-pub struct Proposal<T>(pub T);
+pub struct Proposal<T>(pub(crate) T);
 
 /// `Committed<T>`: proof that an event was persisted.
 /// [SPEC:src/pipeline/mod.rs]
@@ -77,6 +77,6 @@ impl<Ctx> Pipeline<Ctx> {
         receipt: BypassReceipt<T>,
         commit_fn: impl FnOnce(T) -> Result<Committed<T>, E>,
     ) -> Result<Committed<T>, E> {
-        commit_fn(receipt.payload)
+        commit_fn(receipt.into_payload())
     }
 }

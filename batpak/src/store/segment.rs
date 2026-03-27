@@ -148,6 +148,7 @@ impl Segment<Active> {
         let header = SegmentHeader {
             version: 1,
             flags: 0,
+            #[allow(clippy::cast_possible_truncation)] // won't overflow i64 until year 2262
             created_ns: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
@@ -159,6 +160,7 @@ impl Segment<Active> {
         file.write_all(SEGMENT_MAGIC).map_err(StoreError::Io)?;
         let header_bytes = rmp_serde::to_vec_named(&header)
             .map_err(|e| StoreError::Serialization(e.to_string()))?;
+        #[allow(clippy::cast_possible_truncation)] // msgpack header is always small
         let header_len = (header_bytes.len() as u32).to_be_bytes();
         file.write_all(&header_len).map_err(StoreError::Io)?;
         file.write_all(&header_bytes).map_err(StoreError::Io)?;

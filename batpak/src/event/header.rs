@@ -73,6 +73,9 @@ impl EventHeader {
     }
 
     pub fn age_us(&self, now_us: i64) -> u64 {
-        now_us.saturating_sub(self.timestamp_us).max(0) as u64
+        #[allow(clippy::cast_sign_loss)] // .max(0) guarantees non-negative
+        {
+            now_us.saturating_sub(self.timestamp_us).max(0) as u64
+        }
     }
 }

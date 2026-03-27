@@ -238,6 +238,7 @@ impl Reader {
                                 scope: payload.scope,
                                 segment_id,
                                 offset: frame_offset,
+                                #[allow(clippy::cast_possible_truncation)] // frame_size < segment_max_bytes < u32::MAX
                                 length: frame_size as u32,
                             });
                         }

@@ -1,11 +1,6 @@
 #![allow(unexpected_cfgs)]
-// Catch swallowed errors: `let _ = <must_use>` is a bug pattern that
-// caused sync failures to be silently ignored (Bug 6 post-mortem).
-// Enable via: cargo clippy --features strict-lints
-#![cfg_attr(
-    feature = "strict-lints",
-    deny(clippy::let_underscore_must_use, clippy::cast_possible_truncation)
-)]
+// cast_possible_truncation and cast_sign_loss are enforced via [lints.clippy] in Cargo.toml.
+// Each intentional cast has an inline #[allow] with a justification comment.
 //! batpak: Event Sourcing Runtime with DAG Causation Tracking.
 //!
 //! Batpak provides a complete event sourcing platform with:
@@ -56,9 +51,10 @@ pub mod pipeline;
 pub mod prelude;
 pub mod store;
 pub mod typestate;
-/// Module declarations in DEPENDENCY ORDER: wire, coordinate, outcome, event, guard, pipeline, store, typestate, id, prelude.
+/// Module declarations in DEPENDENCY ORDER:
+/// wire → coordinate → outcome → event → guard → pipeline → store → typestate → id → prelude
 /// [SPEC:src/lib.rs — Module declarations in DEPENDENCY ORDER]
-pub mod wire;
+pub mod wire; // serde helpers — no deps, must come first
 
 /// compile_error guards for impossible configurations:
 #[allow(unexpected_cfgs)]

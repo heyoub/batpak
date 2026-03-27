@@ -182,7 +182,8 @@ fn pipeline_bypass_returns_bypass_receipt() {
     let receipt = batpak::pipeline::Pipeline::<()>::bypass(proposal, &TEST_BYPASS);
 
     assert_eq!(
-        receipt.payload, 42,
+        *receipt.payload(),
+        42,
         "PROPERTY: BypassReceipt must carry the original proposal payload unchanged.\n\
          Investigate: src/pipeline/mod.rs Pipeline::bypass().\n\
          Common causes: bypass() discarding the proposal value, or BypassReceipt \
@@ -190,7 +191,8 @@ fn pipeline_bypass_returns_bypass_receipt() {
          Run: cargo test --test quiet_stragglers pipeline_bypass_returns_bypass_receipt"
     );
     assert_eq!(
-        receipt.reason, "test_bypass",
+        receipt.reason(),
+        "test_bypass",
         "PROPERTY: BypassReceipt must record the BypassReason::name() as reason.\n\
          Investigate: src/pipeline/mod.rs Pipeline::bypass() BypassReason::name().\n\
          Common causes: bypass() storing justification() in reason field, or \
@@ -198,7 +200,8 @@ fn pipeline_bypass_returns_bypass_receipt() {
          Run: cargo test --test quiet_stragglers pipeline_bypass_returns_bypass_receipt"
     );
     assert_eq!(
-        receipt.justification, "testing bypass audit trail",
+        receipt.justification(),
+        "testing bypass audit trail",
         "PROPERTY: BypassReceipt must record BypassReason::justification() verbatim.\n\
          Investigate: src/pipeline/mod.rs Pipeline::bypass() BypassReason::justification().\n\
          Common causes: bypass() storing name() in justification field, or \

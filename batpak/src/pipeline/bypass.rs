@@ -6,8 +6,31 @@ pub trait BypassReason: Send + Sync {
 }
 
 /// `BypassReceipt<T>`: audit trail shows "bypassed: {reason}".
+/// Fields are `pub(crate)` to prevent external forgery — use getters for read access.
 pub struct BypassReceipt<T> {
-    pub payload: T,
-    pub reason: &'static str,
-    pub justification: &'static str,
+    pub(crate) payload: T,
+    pub(crate) reason: &'static str,
+    pub(crate) justification: &'static str,
+}
+
+impl<T> BypassReceipt<T> {
+    /// The original proposal payload.
+    pub fn payload(&self) -> &T {
+        &self.payload
+    }
+
+    /// The bypass reason name.
+    pub fn reason(&self) -> &'static str {
+        self.reason
+    }
+
+    /// The bypass justification text.
+    pub fn justification(&self) -> &'static str {
+        self.justification
+    }
+
+    /// Consume the receipt and return the payload.
+    pub fn into_payload(self) -> T {
+        self.payload
+    }
 }

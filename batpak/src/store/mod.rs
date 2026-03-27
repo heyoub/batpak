@@ -1030,10 +1030,13 @@ fn checked_payload_len(payload_bytes: &[u8]) -> Result<u32, StoreError> {
 }
 
 pub(crate) fn now_us() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_micros() as i64
+    #[allow(clippy::cast_possible_truncation)] // won't overflow i64 until year 292277
+    {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_micros() as i64
+    }
 }
 
 #[derive(Clone, Debug)]

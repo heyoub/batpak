@@ -47,12 +47,17 @@ unwrap_used = "deny"
 panic = "deny"
 print_stdout = "deny"
 print_stderr = "deny"
+cast_possible_truncation = "deny"
+cast_sign_loss = "deny"
 large_enum_variant = "warn"
 clone_on_ref_ptr = "warn"
 needless_pass_by_value = "warn"
 module_name_repetitions = "allow"
 must_use_candidate = "allow"
 missing_errors_doc = "allow"
+
+[lints.rust]
+deprecated = "deny"
 
 [[bench]]
 name = "write_throughput"
