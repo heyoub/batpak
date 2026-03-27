@@ -213,13 +213,16 @@ Coordinate { entity: Arc<str>, scope: Arc<str> }   — fields PRIVATE
 
 CoordinateError: EmptyEntity | EmptyScope          — impl Display, Error
 
-DagPosition { pub depth: u32, pub lane: u32, pub sequence: u32 }  — repr(C)
-  ::new(depth, lane, sequence) -> Self
-  ::root() -> Self                    // (0, 0, 0)
-  ::child(sequence: u32) -> Self      // (0, 0, seq)
+DagPosition { pub wall_ms: u64, pub counter: u16, pub depth: u32, pub lane: u32, pub sequence: u32 }  — repr(C)
+  ::new(depth, lane, sequence) -> Self              // wall_ms=0, counter=0
+  ::with_hlc(wall_ms, counter, depth, lane, sequence) -> Self
+  ::root() -> Self                    // all zeros
+  ::child(sequence: u32) -> Self      // depth=0, lane=0, wall_ms=0
+  ::child_at(sequence, wall_ms, counter) -> Self    // v1 with HLC
+  ::fork(parent_depth, new_lane) -> Self
   .is_root() -> bool
   .is_ancestor_of(&DagPosition) -> bool
-  Display: "depth:lane:sequence"
+  Display: "depth:lane:sequence@wall_ms.counter"
 
 Region { entity_prefix, scope, fact, clock_range } — all Option, all pub
   ::all() -> Self (Default)
@@ -237,10 +240,11 @@ KindFilter: Exact(EventKind) | Category(u8) | Any
 HashChain { pub prev_hash: [u8; 32], pub event_hash: [u8; 32] }
   Default: all zeros (genesis convention)
 
-EventHeader { event_id, correlation_id, causation_id, timestamp_us,
-              position, payload_size, event_kind, flags }
-  All fields pub. Serde annotations on u128 fields.
+EventHeader { event_id, correlation_id, causation_id, timestamp_us: i64,
+              position, payload_size, event_kind, flags: u8, content_hash: [u8; 32] }
+  All fields pub. Serde annotations on u128 fields. content_hash has #[serde(default)].
   ::new(event_id, correlation_id, causation_id, timestamp_us, position, payload_size, event_kind) -> Self
+    // flags defaults to 0, content_hash defaults to [0u8; 32]
   .with_flags(u8) -> Self
   .requires_ack() -> bool    // flag bit 0
   .is_transactional() -> bool // flag bit 1
@@ -322,8 +326,12 @@ Store { index: Arc<StoreIndex>, reader: Arc<Reader>, cache: Box<dyn ProjectionCa
 
 StoreConfig { data_dir: PathBuf, segment_max_bytes: u64, sync_every_n_events: u32,
               fd_budget: usize, writer_channel_capacity: usize, broadcast_capacity: usize,
-              cache_map_size_bytes: usize, restart_policy: RestartPolicy, shutdown_drain_limit: usize }
-  All pub. impl Default with sane values.
+              cache_map_size_bytes: usize, restart_policy: RestartPolicy, shutdown_drain_limit: usize,
+              writer_stack_size: Option<usize>, clock: Option<Arc<dyn Fn() -> i64 + Send + Sync>>,
+              sync_mode: SyncMode }
+  All pub. No Default — use StoreConfig::new(data_dir) with sane defaults, then override fields.
+  Manual Clone and Debug impls because `clock` is `Arc<dyn Fn>`.
+  SyncMode: SyncAll (default) | SyncData.
 
 StoreError: Io(io::Error) | Coordinate(CoordinateError) | Serialization(String)
   | CrcMismatch{segment_id,offset} | CorruptSegment{segment_id,detail}
@@ -346,14 +354,14 @@ StoreIndex — pub(crate). Fields: streams, scope_entities, by_fact, by_id, late
   .global_sequence() -> u64 .len() -> usize
 
 IndexEntry { pub event_id: u128, pub correlation_id: u128, pub causation_id: Option<u128>,
-             pub coord: Coordinate, pub kind: EventKind, pub clock: u32,
+             pub coord: Coordinate, pub kind: EventKind, pub wall_ms: u64, pub clock: u32,
              pub hash_chain: HashChain, pub disk_pos: DiskPos, pub global_sequence: u64 }
   .is_correlated() -> bool    (event_id != correlation_id)
   .is_caused_by(u128) -> bool (causation_id == Some(id))
   .is_root_cause() -> bool    (causation_id.is_none())
 
-ClockKey { pub clock: u32, pub uuid: u128 }
-  impl Ord: clock first, uuid tiebreak. [SPEC:IMPLEMENTATION NOTES item 1]
+ClockKey { pub wall_ms: u64, pub clock: u32, pub uuid: u128 }
+  impl Ord: wall_ms first, then clock, then uuid tiebreak. [SPEC:IMPLEMENTATION NOTES item 1]
 
 DiskPos { pub segment_id: u64, pub offset: u64, pub length: u32 }
 
@@ -937,14 +945,21 @@ use std::fmt;
 
 TYPES:
 ```rust
-/// DagPosition: graph position with depth + lane + sequence.
+/// DagPosition: graph position with hybrid logical clock + depth + lane + sequence.
+/// wall_ms + counter provide global causal ordering (HLC-style) across entities.
+/// depth/lane/sequence provide per-entity chain ordering.
 /// v1: depth=0, lane=0 always. Sequence is per-entity monotonic counter.
 /// Lane/depth vocabulary is scaffolding for future distributed fan-out.
 /// [SPEC:src/coordinate/position.rs]
+/// [CROSS-POLLINATION:czap/hlc.ts — HLC adds wall-clock causality to event ordering]
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct DagPosition {
+    /// Wall-clock milliseconds at event creation. HLC layer 1.
+    pub wall_ms: u64,
+    /// HLC counter for same-millisecond tiebreaking.
+    pub counter: u16,
     pub depth: u32,
     pub lane: u32,
     pub sequence: u32,
@@ -955,40 +970,51 @@ IMPL:
 ```rust
 impl DagPosition {
     pub const fn new(depth: u32, lane: u32, sequence: u32) -> Self {
-        Self { depth, lane, sequence }
+        Self { wall_ms: 0, counter: 0, depth, lane, sequence }
+    }
+
+    /// Full constructor with HLC fields.
+    pub const fn with_hlc(wall_ms: u64, counter: u16, depth: u32, lane: u32, sequence: u32) -> Self {
+        Self { wall_ms, counter, depth, lane, sequence }
     }
 
     pub const fn root() -> Self {
-        Self { depth: 0, lane: 0, sequence: 0 }
+        Self { wall_ms: 0, counter: 0, depth: 0, lane: 0, sequence: 0 }
     }
 
-    /// v1: always depth=0, lane=0, sequence=N
+    /// v1: always depth=0, lane=0, sequence=N. wall_ms set by writer.
     pub const fn child(sequence: u32) -> Self {
-        Self { depth: 0, lane: 0, sequence }
+        Self { wall_ms: 0, counter: 0, depth: 0, lane: 0, sequence }
+    }
+
+    /// v1 with HLC: same as child but with wall clock context.
+    pub const fn child_at(sequence: u32, wall_ms: u64, counter: u16) -> Self {
+        Self { wall_ms, counter, depth: 0, lane: 0, sequence }
     }
 
     /// Future: fork creates a new lane at depth+1
     pub const fn fork(parent_depth: u32, new_lane: u32) -> Self {
-        Self { depth: parent_depth + 1, lane: new_lane, sequence: 0 }
+        Self { wall_ms: 0, counter: 0, depth: parent_depth + 1, lane: new_lane, sequence: 0 }
     }
 
     pub const fn is_root(&self) -> bool {
         self.depth == 0 && self.lane == 0 && self.sequence == 0
     }
 
-    /// Causal ordering: ancestor if same lane and lower depth+sequence.
-    /// v1: same lane always (lane=0), so just compare sequence.
+    /// Causal ordering: ancestor if same lane, same depth, and lower sequence.
+    /// v1: depth is always 0, lane always 0, so just compare sequence.
+    /// DAG-ready: different depths means different branches — not ancestor.
     pub const fn is_ancestor_of(&self, other: &DagPosition) -> bool {
         self.lane == other.lane
-            && self.depth <= other.depth
+            && self.depth == other.depth
             && self.sequence < other.sequence
     }
 }
 
 impl fmt::Display for DagPosition {
-    /// "depth:lane:sequence"
+    /// "depth:lane:sequence@wall_ms.counter"
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}:{}:{}", self.depth, self.lane, self.sequence)
+        write!(f, "{}:{}:{}@{}.{}", self.depth, self.lane, self.sequence, self.wall_ms, self.counter)
     }
 }
 
@@ -1962,7 +1988,18 @@ pub struct EventHeader {
     pub payload_size: u32,
     pub event_kind: EventKind,
     pub flags: u8,
+    /// Content hash of the serialized payload. Enables automatic projection cache
+    /// invalidation when event schemas evolve. [0u8; 32] when blake3 is off.
+    #[serde(default)]
+    pub content_hash: [u8; 32],
 }
+```
+
+Flag bit constants:
+```rust
+pub const FLAG_REQUIRES_ACK: u8 = 0x01;
+pub const FLAG_TRANSACTIONAL: u8 = 0x02;
+pub const FLAG_REPLAY: u8 = 0x08;
 ```
 
 IMPL:
@@ -1980,6 +2017,7 @@ impl EventHeader {
         Self {
             event_id, correlation_id, causation_id, timestamp_us,
             position, payload_size, event_kind, flags: 0,
+            content_hash: [0u8; 32],
         }
     }
 
@@ -1988,10 +2026,10 @@ impl EventHeader {
         self
     }
 
-    pub fn requires_ack(&self) -> bool { self.flags & 0x01 != 0 }
-    pub fn is_transactional(&self) -> bool { self.flags & 0x02 != 0 }
-    pub fn is_replay(&self) -> bool { self.flags & 0x08 != 0 }
-    pub fn age_us(&self, now_us: i64) -> u64 { (now_us - self.timestamp_us) as u64 }
+    pub fn requires_ack(&self) -> bool { self.flags & FLAG_REQUIRES_ACK != 0 }
+    pub fn is_transactional(&self) -> bool { self.flags & FLAG_TRANSACTIONAL != 0 }
+    pub fn is_replay(&self) -> bool { self.flags & FLAG_REPLAY != 0 }
+    pub fn age_us(&self, now_us: i64) -> u64 { now_us.saturating_sub(self.timestamp_us).max(0) as u64 }
 }
 ```
 
@@ -2340,6 +2378,8 @@ pub(crate) struct StoreIndex {
 /// [SPEC:IMPLEMENTATION NOTES item 1]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ClockKey {
+    /// HLC wall clock milliseconds — global ordering across entities.
+    pub wall_ms: u64,
     pub clock: u32,
     pub uuid: u128,
 }
@@ -2352,6 +2392,8 @@ pub struct IndexEntry {
     pub causation_id: Option<u128>,
     pub coord: Coordinate,
     pub kind: EventKind,
+    /// HLC wall clock milliseconds — for global causal ordering.
+    pub wall_ms: u64,
     pub clock: u32,
     pub hash_chain: HashChain,
     pub disk_pos: DiskPos,
@@ -2371,7 +2413,9 @@ IMPL:
 ```rust
 impl Ord for ClockKey {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.clock.cmp(&other.clock).then(self.uuid.cmp(&other.uuid))
+        self.wall_ms.cmp(&other.wall_ms)
+            .then(self.clock.cmp(&other.clock))
+            .then(self.uuid.cmp(&other.uuid))
     }
 }
 impl PartialOrd for ClockKey {
@@ -2406,7 +2450,7 @@ impl StoreIndex {
     pub(crate) fn insert(&self, entry: IndexEntry) {
         let entity = entry.coord.entity_arc();
         let scope = entry.coord.scope_arc();
-        let key = ClockKey { clock: entry.clock, uuid: entry.event_id };
+        let key = ClockKey { wall_ms: entry.wall_ms, clock: entry.clock, uuid: entry.event_id };
 
         /// Primary index: entity -> BTreeMap
         /// [DEP:dashmap::DashMap::entry] — holds write lock, release fast
@@ -3032,25 +3076,38 @@ impl SubscriberList {
 
 impl WriterHandle {
     /// Spawn the background writer thread.
-    /// [SPEC:src/store/writer.rs — "batpak-writer" thread]
+    /// [SPEC:src/store/writer.rs — "batpak-writer-{hash}" thread]
     pub(crate) fn spawn(
-        config: Arc<StoreConfig>,
-        index: Arc<StoreIndex>,
-        subscribers: Arc<SubscriberList>,
+        config: &Arc<StoreConfig>,
+        index: &Arc<StoreIndex>,
+        subscribers: &Arc<SubscriberList>,
     ) -> Result<Self, StoreError> {
+        std::fs::create_dir_all(&config.data_dir).map_err(StoreError::Io)?;
+        let initial_segment_id = find_latest_segment_id(&config.data_dir).unwrap_or(0) + 1;
+        let initial_segment = Segment::<Active>::create(&config.data_dir, initial_segment_id)?;
+
         let (tx, rx) = flume::bounded::<WriterCommand>(config.writer_channel_capacity);
-        let subs = Arc::clone(&subscribers);
-        let cfg = Arc::clone(&config);
-        let idx = Arc::clone(&index);
+        let subs = Arc::clone(subscribers);
+        let cfg = Arc::clone(config);
+        let idx = Arc::clone(index);
+
+        let thread_name = format!("batpak-writer-{:08x}", {
+            let mut h: u64 = 0xcbf29ce484222325; // FNV-1a basis
+            for b in config.data_dir.to_string_lossy().bytes() {
+                h ^= b as u64;
+                h = h.wrapping_mul(0x100000001b3); // FNV-1a prime
+            }
+            h
+        });
 
         let thread = std::thread::Builder::new()
-            .name("batpak-writer".into())
+            .name(thread_name)
             .spawn(move || {
-                writer_loop(rx, cfg, idx, subs);
+                writer_loop(&rx, &cfg, &idx, &subs, initial_segment, initial_segment_id);
             })
-            .map_err(|e| StoreError::Io(e))?;
+            .map_err(StoreError::Io)?;
 
-        Ok(Self { tx, subscribers, thread: Some(thread) })
+        Ok(Self { tx, subscribers: Arc::clone(subscribers), _thread: Some(thread) })
     }
 
     /// NOTE: No send_append() method here. Store::append() and Store::append_reaction()
@@ -3224,6 +3281,7 @@ fn handle_append(
         coord: Coordinate::new(entity.as_ref(), scope.as_ref())
             .map_err(StoreError::Coordinate)?,
         kind,
+        wall_ms: now_ms,
         clock,
         hash_chain: event.hash_chain.clone().unwrap_or_default(),
         disk_pos: disk_pos.clone(),
@@ -3659,8 +3717,9 @@ pub struct Store {
     config: Arc<StoreConfig>,
 }
 
-/// StoreConfig: all settings with sane defaults.
-#[derive(Clone, Debug)]
+/// StoreConfig: all settings for a Store instance.
+/// No Default — callers must provide data_dir via `StoreConfig::new(path)`.
+/// Manual Clone and Debug impls because `clock` field is `Arc<dyn Fn>`.
 pub struct StoreConfig {
     pub data_dir: PathBuf,
     pub segment_max_bytes: u64,
@@ -3671,12 +3730,28 @@ pub struct StoreConfig {
     pub cache_map_size_bytes: usize,
     pub restart_policy: RestartPolicy,
     pub shutdown_drain_limit: usize,
+    /// Optional writer thread stack size. None = OS default (~8MB on Linux).
+    pub writer_stack_size: Option<usize>,
+    /// Injectable clock for deterministic testing. Returns microseconds since epoch.
+    /// None = std::time::SystemTime::now() (production default).
+    pub clock: Option<Arc<dyn Fn() -> i64 + Send + Sync>>,
+    /// Sync mode: SyncAll (data+metadata, default) or SyncData (data only, faster).
+    pub sync_mode: SyncMode,
 }
 
-impl Default for StoreConfig {
-    fn default() -> Self {
+/// Sync strategy for segment fsync.
+#[derive(Clone, Debug, Default)]
+pub enum SyncMode {
+    #[default]
+    SyncAll,
+    SyncData,
+}
+
+impl StoreConfig {
+    /// Create a StoreConfig with required data_dir and sensible defaults.
+    pub fn new(data_dir: impl Into<PathBuf>) -> Self {
         Self {
-            data_dir: PathBuf::from("./batpak-data"),
+            data_dir: data_dir.into(),
             segment_max_bytes: 256 * 1024 * 1024,  // 256MB
             sync_every_n_events: 1000,
             fd_budget: 64,
@@ -3685,6 +3760,9 @@ impl Default for StoreConfig {
             cache_map_size_bytes: 64 * 1024 * 1024, // 64MB
             restart_policy: RestartPolicy::default(),
             shutdown_drain_limit: 1024,
+            writer_stack_size: None,
+            clock: None,
+            sync_mode: SyncMode::default(),
         }
     }
 }
@@ -3781,6 +3859,7 @@ impl Store {
                     causation_id: se.event.header.causation_id,
                     coord,
                     kind: se.event.header.event_kind,
+                    wall_ms: se.event.header.position.wall_ms,
                     clock,
                     hash_chain: se.event.hash_chain.clone().unwrap_or_default(),
                     disk_pos: DiskPos {
@@ -3805,7 +3884,7 @@ impl Store {
     }
 
     pub fn open_default() -> Result<Self, StoreError> {
-        Self::open(StoreConfig::default())
+        Self::open(StoreConfig::new("./batpak-data"))
     }
 
     /// WRITE: append a new root-cause event.

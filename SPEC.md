@@ -199,7 +199,7 @@ batpak/
 │   │
 │   ├── coordinate/
 │   │   ├── mod.rs            # Coordinate (Arc<str>), Region, CoordinateError, KindFilter
-│   │   └── position.rs       # DagPosition (depth, lane, sequence)
+│   │   └── position.rs       # DagPosition (wall_ms, counter, depth, lane, sequence)
 │   │
 │   ├── outcome/
 │   │   ├── mod.rs            # Outcome<T> — 6 variants + all combinators
@@ -281,7 +281,7 @@ lmdb = ["dep:heed"]
 
 [dependencies]
 uuid = { version = "1", features = ["v7"] }
-serde = { version = "1", features = ["derive"] }
+serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
 blake3 = { version = "1", optional = true }
 flume = "0.11"
@@ -583,17 +583,26 @@ Region::matches_event(&self, entity: &str, scope: &str, kind: EventKind) -> bool
 ### `src/coordinate/position.rs`
 
 ```
-DagPosition. Graph position: depth + lane + sequence.
+DagPosition. Graph position with hybrid logical clock + depth + lane + sequence.
+wall_ms + counter provide global causal ordering (HLC-style) across entities.
+depth/lane/sequence provide per-entity chain ordering.
 
 #[repr(C)]
-pub struct DagPosition { pub depth: u32, pub lane: u32, pub sequence: u32 }
+pub struct DagPosition {
+    pub wall_ms: u64,    // Wall-clock milliseconds at event creation (HLC layer 1)
+    pub counter: u16,    // HLC counter for same-millisecond tiebreaking
+    pub depth: u32,
+    pub lane: u32,
+    pub sequence: u32,
+}
 
-const fn: new, root, child, fork, is_root, is_ancestor_of
-Display: "depth:lane:sequence"
-PartialOrd for causal ordering.
+const fn: new (depth/lane/seq, wall_ms=0), with_hlc (all fields),
+          root, child (seq only), child_at (seq + HLC), fork, is_root, is_ancestor_of
+Display: "depth:lane:sequence@wall_ms.counter"
+PartialOrd for causal ordering (different lanes are incomparable).
 
 v1: depth=0, lane=0 always. Sequence is per-entity monotonic counter.
-Batched events get sequential positions (N, N+1, N+2...) on lane 0.
+wall_ms set by writer. Batched events get sequential positions (N, N+1, N+2...) on lane 0.
 Lane/depth vocabulary is for future distributed fan-out/fan-in.
 ```
 
@@ -768,6 +777,10 @@ pub struct EventHeader {
     pub payload_size: u32,
     pub event_kind: EventKind,
     pub flags: u8,
+    /// Content hash of the serialized payload. Enables automatic projection cache
+    /// invalidation when event schemas evolve. [0u8; 32] when blake3 is off.
+    #[serde(default)]
+    pub content_hash: [u8; 32],
 }
 // No align(64) — causation_id pushes the struct past one cache line.
 // Cache-line alignment isn't load-bearing for an append-only log
@@ -1074,6 +1087,11 @@ StoreConfig includes:
   cache_map_size_bytes: usize    (default: 64MB, for LMDB)
   restart_policy: RestartPolicy  (default: Once)
   shutdown_drain_limit: usize    (default: 1024)
+  writer_stack_size: Option<usize>  (default: None = OS default ~8MB on Linux)
+  clock: Option<Arc<dyn Fn() -> i64 + Send + Sync>>  (default: None = SystemTime::now())
+    Injectable clock for deterministic testing. Returns microseconds since epoch.
+  sync_mode: SyncMode            (default: SyncAll)
+    SyncAll = data+metadata (safest). SyncData = data only (faster).
 
 In production, run under a process supervisor (systemd, k8s restart policy).
 The library's RestartPolicy handles transient writer panics. Process-level
@@ -1106,7 +1124,7 @@ Types: SegmentHeader, FramePayload<P>, CompactionResult
 ### `src/store/writer.rs`
 
 ```
-Background OS thread ("batpak-writer"). Sync-first. flume channels.
+Background OS thread ("batpak-writer-{hash}" where hash is FNV-1a of data_dir). Sync-first. flume channels.
 
 WriterCommand { Append{entity,scope,event,respond}, Sync{respond}, Shutdown{respond} }
   All respond channels: flume::Sender (sync send from writer, async recv from caller)
@@ -1223,6 +1241,7 @@ pub struct IndexEntry {
     pub causation_id: Option<u128>,    // direct causal parent (None = root cause)
     pub coord: Coordinate,
     pub kind: EventKind,
+    pub wall_ms: u64,                  // HLC wall clock milliseconds — for global causal ordering
     pub clock: u32,
     pub hash_chain: HashChain,
     pub disk_pos: DiskPos,
@@ -1249,7 +1268,8 @@ impl IndexEntry {
 // Total per entry: ~230-330 bytes. Worth it for O(1) causal queries without disk reads.
 
 pub struct DiskPos { pub segment_id: u64, pub offset: u64, pub length: u32 }
-pub struct ClockKey { pub clock: u32, pub uuid: u128 }
+pub struct ClockKey { pub wall_ms: u64, pub clock: u32, pub uuid: u128 }
+// Ord: wall_ms-first, then clock, then uuid tiebreak.
 
 Memory: ~200-300 bytes per IndexEntry. 10M events ≈ 2-3GB RAM. No eviction.
 ```
@@ -1926,9 +1946,9 @@ decisions the PRDs specify the WHAT.
 
 ```
 1. ClockKey Ord implementation:
-   impl Ord for ClockKey: compare clock first, then uuid for deterministic
-   tiebreaking of same-clock events. This is the sort order for BTreeMap
-   entries in streams and by_fact indexes.
+   impl Ord for ClockKey: compare wall_ms first (HLC global ordering),
+   then clock, then uuid for deterministic tiebreaking. This is the sort
+   order for BTreeMap entries in streams and by_fact indexes.
 
 2. Segment file naming:
    {segment_id:06}.fbat (e.g., 000001.fbat). segment_id is a sequential u64.
