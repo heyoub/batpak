@@ -640,7 +640,7 @@ impl Store {
 
     /// REACT: spawn a background thread running the subscribe→react→append loop.
     /// Returns a JoinHandle. The thread runs until the store is dropped (subscription closes).
-    /// [SPEC:src/event/sourcing.rs — Reactive<P> glue pattern]
+    /// \[SPEC:src/event/sourcing.rs — Reactive\<P\> glue pattern\]
     pub fn react_loop<R>(
         self: &Arc<Self>,
         region: &Region,
