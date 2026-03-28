@@ -52,7 +52,7 @@ println!("Stored event {} at seq {}", receipt.event_id, receipt.sequence);
 1. **No async** — the Store API is synchronous. Async belongs in the product layer.
 2. **No tokio** — zero async runtime dependency.
 3. **No product concepts** — no User, no Account, no domain-specific types.
-4. **No transmute** — safe Rust only.
+4. **No transmute** — safe Rust only, except LMDB FFI behind `#[cfg(feature = "lmdb")]`.
 5. **Blake3 only** — single hash algorithm, feature-gated.
 
 ## Tuning

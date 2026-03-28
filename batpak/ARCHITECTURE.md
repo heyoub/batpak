@@ -24,7 +24,7 @@ Coordinates use `Arc<str>` internally — cheap to clone, zero-copy in the hot p
 Region::entity("order:507")                     // exact entity
 Region::scope("workspace:acme")                 // all entities in a scope
 Region::all().with_fact(KindFilter::Exact(k))   // all events of a specific kind
-Region::entity("sensor:*").clock_range(10, 50)  // entity with clock window
+Region::entity("sensor:*").with_clock_range((10, 50))  // entity with clock window
 ```
 
 One predicate type. Four access patterns (query, subscribe, cursor, walk).

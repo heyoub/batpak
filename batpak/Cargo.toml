@@ -4,10 +4,13 @@ version = "0.1.0"
 edition = "2021"
 rust-version = "1.75"
 license = "MIT OR Apache-2.0"
-description = "Event-sourced state machines over coordinate spaces"
-repository = "https://github.com/heyoub/free-b"
-keywords = ["event-sourcing", "state-machine", "coordinate", "cqrs"]
-categories = ["data-structures", "database"]
+description = "Event sourcing with causal graphs and policy gates. Sync API, zero async."
+repository = "https://github.com/TheFreeBatteryFactory/batpak"
+homepage = "https://github.com/TheFreeBatteryFactory/batpak"
+documentation = "https://docs.rs/batpak"
+readme = "README.md"
+keywords = ["event-sourcing", "audit-trail", "causal-graph", "hash-chain", "policy-engine"]
+categories = ["database", "concurrency"]
 
 [features]
 default = ["blake3"]

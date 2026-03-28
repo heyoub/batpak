@@ -1,4 +1,4 @@
-# Free-B (batteries) — Airgapped Build Spec
+# batpak — Airgapped Build Spec
 
 One document. No overrides. No layers. Every decision is final. A cloud agent with zero prior context builds the entire library from this file.
 
