@@ -5,7 +5,7 @@
 1. Clone the repo:
    ```bash
    git clone <repo-url>
-   cd free-b/batpak
+   cd batpak/batpak
    ```
 
 2. Build:

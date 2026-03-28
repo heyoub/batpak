@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.1.0] - 2026-03-28
 
 ### Added
 - Initial implementation of batpak v0.1.0
