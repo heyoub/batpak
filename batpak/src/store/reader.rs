@@ -136,11 +136,12 @@ impl Reader {
                 segment_id: pos.segment_id,
                 offset: pos.offset,
             },
-            segment::FrameDecodeError::TooShort
-            | segment::FrameDecodeError::Truncated { .. } => StoreError::CorruptSegment {
-                segment_id: pos.segment_id,
-                detail: e.to_string(),
-            },
+            segment::FrameDecodeError::TooShort | segment::FrameDecodeError::Truncated { .. } => {
+                StoreError::CorruptSegment {
+                    segment_id: pos.segment_id,
+                    detail: e.to_string(),
+                }
+            }
         });
         let (msgpack, _) = match result {
             Ok(v) => v,

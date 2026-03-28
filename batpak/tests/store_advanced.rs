@@ -1942,7 +1942,9 @@ fn writer_restart_once_recovers_from_panic() {
     let kind = EventKind::custom(0xF, 1);
 
     // Append before panic — should succeed
-    store.append(&coord, kind, &"before_panic").expect("append before panic");
+    store
+        .append(&coord, kind, &"before_panic")
+        .expect("append before panic");
 
     // Trigger writer panic
     store.panic_writer_for_test().expect("send panic command");
@@ -1951,13 +1953,14 @@ fn writer_restart_once_recovers_from_panic() {
     store.append(&coord, kind, &"after_panic").expect(
         "RESTART FAILED: append after writer panic should succeed with RestartPolicy::Once.\n\
          Investigate: src/store/writer.rs writer_thread_main() catch_unwind logic.\n\
-         Common causes: restart not re-creating segment, rx channel dead."
+         Common causes: restart not re-creating segment, rx channel dead.",
     );
 
     // Verify both events persisted
     let entries = store.stream("restart:test");
     assert_eq!(
-        entries.len(), 2,
+        entries.len(),
+        2,
         "RESTART DATA LOSS: both events (before and after panic) should be persisted.\n\
          Investigate: src/store/writer.rs writer_thread_main() segment re-creation.\n\
          Run: cargo test --test store_advanced writer_restart_once_recovers_from_panic"
@@ -2016,15 +2019,15 @@ fn writer_restart_bounded_respects_limit() {
 
     // First panic — restarts (1/2)
     store.panic_writer_for_test().expect("first panic");
-    store.append(&coord, kind, &"after_panic_1").expect(
-        "append after 1st restart should succeed (budget 1/2)"
-    );
+    store
+        .append(&coord, kind, &"after_panic_1")
+        .expect("append after 1st restart should succeed (budget 1/2)");
 
     // Second panic — restarts (2/2)
     store.panic_writer_for_test().expect("second panic");
-    store.append(&coord, kind, &"after_panic_2").expect(
-        "append after 2nd restart should succeed (budget 2/2)"
-    );
+    store
+        .append(&coord, kind, &"after_panic_2")
+        .expect("append after 2nd restart should succeed (budget 2/2)");
 
     // Third panic — budget exhausted
     let _ = store.panic_writer_for_test();

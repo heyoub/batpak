@@ -158,7 +158,8 @@ fn round_trip_fidelity_append_get_preserves_payload() {
 
     // Verify EventKind round-trips (category + type_id encoded in u16)
     assert_eq!(
-        stored.event.event_kind(), kind,
+        stored.event.event_kind(),
+        kind,
         "PROPERTY: EventKind must survive storage round-trip.\n\
          Investigate: src/event/kind.rs u16 encoding, msgpack serialization."
     );
@@ -284,7 +285,8 @@ fn flow_connectivity_full_production_path() {
          Common causes: Island Syndrome (FM-007) — pipeline not wired to store, or store not persisting."
     );
     assert_eq!(
-        stored.coordinate.entity(), "user:alice",
+        stored.coordinate.entity(),
+        "user:alice",
         "PROPERTY: Entity must survive cold start round-trip."
     );
 
@@ -409,14 +411,16 @@ fn eventkind_allows_product_categories() {
     for cat in 1..=0xCu8 {
         let kind = EventKind::custom(cat, 1);
         assert_eq!(
-            kind.category(), cat,
+            kind.category(),
+            cat,
             "PROPERTY: EventKind::custom({cat}, 1) must preserve category."
         );
     }
     for cat in [0xEu8, 0xF] {
         let kind = EventKind::custom(cat, 1);
         assert_eq!(
-            kind.category(), cat,
+            kind.category(),
+            cat,
             "PROPERTY: EventKind::custom({cat}, 1) must preserve category."
         );
     }
@@ -554,7 +558,9 @@ fn totality_projection_handles_unknown_event_kinds() {
     let unknown_kind = EventKind::custom(2, 99); // not in relevant_event_kinds
 
     store.append(&coord, known_kind, &"known").expect("known");
-    store.append(&coord, unknown_kind, &"unknown").expect("unknown");
+    store
+        .append(&coord, unknown_kind, &"unknown")
+        .expect("unknown");
     store.append(&coord, known_kind, &"known2").expect("known2");
 
     // This must not panic even though unknown_kind isn't in relevant_event_kinds
@@ -580,13 +586,33 @@ fn error_variant_coverage_all_store_errors_display() {
     // FM-011: No hollow error paths.
     let variants: Vec<(&str, StoreError)> = vec![
         ("Io", StoreError::Io(std::io::Error::other("test"))),
-        ("Serialization", StoreError::Serialization("test ser".into())),
-        ("CrcMismatch", StoreError::CrcMismatch { segment_id: 1, offset: 42 }),
-        ("CorruptSegment", StoreError::CorruptSegment { segment_id: 2, detail: "bad".into() }),
+        (
+            "Serialization",
+            StoreError::Serialization("test ser".into()),
+        ),
+        (
+            "CrcMismatch",
+            StoreError::CrcMismatch {
+                segment_id: 1,
+                offset: 42,
+            },
+        ),
+        (
+            "CorruptSegment",
+            StoreError::CorruptSegment {
+                segment_id: 2,
+                detail: "bad".into(),
+            },
+        ),
         ("NotFound", StoreError::NotFound(123)),
-        ("SequenceMismatch", StoreError::SequenceMismatch {
-            entity: "test".into(), expected: 1, actual: 2,
-        }),
+        (
+            "SequenceMismatch",
+            StoreError::SequenceMismatch {
+                entity: "test".into(),
+                expected: 1,
+                actual: 2,
+            },
+        ),
         ("DuplicateEvent", StoreError::DuplicateEvent(456)),
         ("WriterCrashed", StoreError::WriterCrashed),
         ("ShuttingDown", StoreError::ShuttingDown),
@@ -604,9 +630,8 @@ fn error_variant_coverage_all_store_errors_display() {
     }
 
     // Also verify CoordinateError variant
-    let coord_err = StoreError::Coordinate(
-        Coordinate::new("", "scope").expect_err("empty entity must fail")
-    );
+    let coord_err =
+        StoreError::Coordinate(Coordinate::new("", "scope").expect_err("empty entity must fail"));
     let display = format!("{coord_err}");
     assert!(
         !display.is_empty(),
@@ -642,7 +667,9 @@ fn store_drop_drains_pending_events() {
     {
         let store = Store::open(StoreConfig::new(dir.path())).expect("open");
         for i in 0..10 {
-            store.append(&coord, kind, &serde_json::json!({"i": i})).expect("append");
+            store
+                .append(&coord, kind, &serde_json::json!({"i": i}))
+                .expect("append");
         }
         // Drop without close() — Drop should wait briefly for writer drain
     }

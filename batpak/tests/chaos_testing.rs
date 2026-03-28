@@ -148,22 +148,26 @@ fn chaos_concurrent_writer_stress() {
     let handles: Vec<_> = (0..n_threads)
         .map(|t| {
             let store = Arc::clone(&store);
-            std::thread::Builder::new().name(format!("chaos-writer-{t}")).spawn(move || {
-                let coord =
-                    Coordinate::new(format!("chaos:thread{t}").as_str(), "chaos:stress").expect("valid");
-                let kind = EventKind::custom(0xF, 1);
-                let mut successes = 0u64;
-                let mut errors = 0u64;
+            std::thread::Builder::new()
+                .name(format!("chaos-writer-{t}"))
+                .spawn(move || {
+                    let coord =
+                        Coordinate::new(format!("chaos:thread{t}").as_str(), "chaos:stress")
+                            .expect("valid");
+                    let kind = EventKind::custom(0xF, 1);
+                    let mut successes = 0u64;
+                    let mut errors = 0u64;
 
-                for i in 0..(iterations / n_threads) {
-                    let payload = serde_json::json!({"t": t, "i": i});
-                    match store.append(&coord, kind, &payload) {
-                        Ok(_) => successes += 1,
-                        Err(_) => errors += 1,
+                    for i in 0..(iterations / n_threads) {
+                        let payload = serde_json::json!({"t": t, "i": i});
+                        match store.append(&coord, kind, &payload) {
+                            Ok(_) => successes += 1,
+                            Err(_) => errors += 1,
+                        }
                     }
-                }
-                (successes, errors)
-            }).expect("spawn thread")
+                    (successes, errors)
+                })
+                .expect("spawn thread")
         })
         .collect();
 
@@ -239,13 +243,16 @@ fn chaos_cas_contention() {
         .map(|t| {
             let store = Arc::clone(&store);
             let coord = coord.clone();
-            std::thread::Builder::new().name(format!("chaos-cas-{t}")).spawn(move || {
-                let opts = AppendOptions {
-                    expected_sequence: Some(0), // all compete: expect latest clock=0 after seed
-                    ..Default::default()
-                };
-                store.append_with_options(&coord, kind, &serde_json::json!({"thread": t}), opts)
-            }).expect("spawn thread")
+            std::thread::Builder::new()
+                .name(format!("chaos-cas-{t}"))
+                .spawn(move || {
+                    let opts = AppendOptions {
+                        expected_sequence: Some(0), // all compete: expect latest clock=0 after seed
+                        ..Default::default()
+                    };
+                    store.append_with_options(&coord, kind, &serde_json::json!({"thread": t}), opts)
+                })
+                .expect("spawn thread")
         })
         .collect();
 
@@ -331,13 +338,16 @@ fn chaos_idempotency_concurrent() {
         .map(|t| {
             let store = Arc::clone(&store);
             let coord = coord.clone();
-            std::thread::Builder::new().name(format!("chaos-idem-{t}")).spawn(move || {
-                let opts = AppendOptions {
-                    idempotency_key: Some(idem_key),
-                    ..Default::default()
-                };
-                store.append_with_options(&coord, kind, &serde_json::json!({"thread": t}), opts)
-            }).expect("spawn thread")
+            std::thread::Builder::new()
+                .name(format!("chaos-idem-{t}"))
+                .spawn(move || {
+                    let opts = AppendOptions {
+                        idempotency_key: Some(idem_key),
+                        ..Default::default()
+                    };
+                    store.append_with_options(&coord, kind, &serde_json::json!({"thread": t}), opts)
+                })
+                .expect("spawn thread")
         })
         .collect();
 
@@ -526,13 +536,16 @@ fn chaos_subscription_write_storm() {
 
     // Writer thread hammers events
     let store2 = Arc::clone(&store);
-    let writer = std::thread::Builder::new().name("chaos-sub-writer".to_string()).spawn(move || {
-        for i in 0..iterations {
-            store2
-                .append(&coord, kind, &serde_json::json!({"i": i}))
-                .expect("append");
-        }
-    }).expect("spawn thread");
+    let writer = std::thread::Builder::new()
+        .name("chaos-sub-writer".to_string())
+        .spawn(move || {
+            for i in 0..iterations {
+                store2
+                    .append(&coord, kind, &serde_json::json!({"i": i}))
+                    .expect("append");
+            }
+        })
+        .expect("spawn thread");
 
     writer.join().expect("writer join");
 

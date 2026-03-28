@@ -26,21 +26,17 @@ fn bench_write_throughput(c: &mut Criterion) {
             group.sample_size(10);
         }
         group.bench_with_input(BenchmarkId::from_parameter(count), &count, |b, &count| {
-            b.iter_with_setup(
-                setup_store,
-                |(store, _dir)| {
-                    let coord =
-                        Coordinate::new("bench:entity", "bench:scope").expect("valid coord");
-                    let kind = EventKind::custom(0xF, 1);
-                    let payload = serde_json::json!({"x": 1, "y": 2});
-                    for _ in 0..count {
-                        store.append(&coord, kind, &payload).expect("append");
-                    }
-                    // NOTE: Do NOT call store.close() inside measurement.
-                    // close() forces a final sync which conflates fsync cost with
-                    // append throughput. Store is dropped after iter_with_setup returns.
-                },
-            );
+            b.iter_with_setup(setup_store, |(store, _dir)| {
+                let coord = Coordinate::new("bench:entity", "bench:scope").expect("valid coord");
+                let kind = EventKind::custom(0xF, 1);
+                let payload = serde_json::json!({"x": 1, "y": 2});
+                for _ in 0..count {
+                    store.append(&coord, kind, &payload).expect("append");
+                }
+                // NOTE: Do NOT call store.close() inside measurement.
+                // close() forces a final sync which conflates fsync cost with
+                // append throughput. Store is dropped after iter_with_setup returns.
+            });
         });
     }
 
@@ -55,20 +51,16 @@ fn bench_durable_write_throughput(c: &mut Criterion) {
 
     for count in [1_000u64, 10_000] {
         group.bench_with_input(BenchmarkId::from_parameter(count), &count, |b, &count| {
-            b.iter_with_setup(
-                setup_store,
-                |(store, _dir)| {
-                    let coord =
-                        Coordinate::new("bench:entity", "bench:scope").expect("valid coord");
-                    let kind = EventKind::custom(0xF, 1);
-                    let payload = serde_json::json!({"x": 1, "y": 2});
-                    for _ in 0..count {
-                        store.append(&coord, kind, &payload).expect("append");
-                    }
-                    store.sync().expect("sync");
-                    store.close().expect("close");
-                },
-            );
+            b.iter_with_setup(setup_store, |(store, _dir)| {
+                let coord = Coordinate::new("bench:entity", "bench:scope").expect("valid coord");
+                let kind = EventKind::custom(0xF, 1);
+                let payload = serde_json::json!({"x": 1, "y": 2});
+                for _ in 0..count {
+                    store.append(&coord, kind, &payload).expect("append");
+                }
+                store.sync().expect("sync");
+                store.close().expect("close");
+            });
         });
     }
 
@@ -95,15 +87,21 @@ fn bench_concurrent_write_throughput(c: &mut Criterion) {
                 let mut handles = Vec::with_capacity(thread_count);
                 for t in 0..thread_count {
                     let store = Arc::clone(&store);
-                    handles.push(std::thread::Builder::new().name(format!("bench-writer-{t}")).spawn(move || {
-                        let entity = format!("bench:thread{t}");
-                        let coord = Coordinate::new(&entity, "bench:scope").expect("valid coord");
-                        let kind = EventKind::custom(0xF, 1);
-                        let payload = serde_json::json!({"t": t});
-                        for _ in 0..events_per_thread {
-                            store.append(&coord, kind, &payload).expect("append");
-                        }
-                    }).expect("spawn thread"));
+                    handles.push(
+                        std::thread::Builder::new()
+                            .name(format!("bench-writer-{t}"))
+                            .spawn(move || {
+                                let entity = format!("bench:thread{t}");
+                                let coord =
+                                    Coordinate::new(&entity, "bench:scope").expect("valid coord");
+                                let kind = EventKind::custom(0xF, 1);
+                                let payload = serde_json::json!({"t": t});
+                                for _ in 0..events_per_thread {
+                                    store.append(&coord, kind, &payload).expect("append");
+                                }
+                            })
+                            .expect("spawn thread"),
+                    );
                 }
                 for h in handles {
                     h.join().expect("thread join");

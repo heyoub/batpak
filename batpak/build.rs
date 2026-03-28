@@ -23,9 +23,18 @@ fn main() {
 /// function bodies returning defaults, etc.
 fn check_no_stubs_in_src() {
     let stub_patterns = [
-        ("\"placeholder\"", "Placeholder string literal — replace with real implementation"),
-        ("\"not implemented\"", "Stub string — implement the real behavior or return a typed error"),
-        ("\"not yet implemented\"", "Stub string — implement the real behavior"),
+        (
+            "\"placeholder\"",
+            "Placeholder string literal — replace with real implementation",
+        ),
+        (
+            "\"not implemented\"",
+            "Stub string — implement the real behavior or return a typed error",
+        ),
+        (
+            "\"not yet implemented\"",
+            "Stub string — implement the real behavior",
+        ),
     ];
 
     walk_rs_files(Path::new("src"), &|path, contents| {

@@ -28,8 +28,19 @@ done
 
 # Auto-install cargo-llvm-cov if missing
 if ! command -v cargo-llvm-cov &>/dev/null; then
-    echo "Installing cargo-llvm-cov..."
-    cargo install cargo-llvm-cov --locked
+    echo "cargo-llvm-cov not found. Attempting install..."
+    if ! cargo install cargo-llvm-cov --locked 2>&1; then
+        echo ""
+        echo "ERROR: Failed to install cargo-llvm-cov."
+        echo ""
+        echo "Install manually with one of:"
+        echo "  cargo install cargo-llvm-cov --locked"
+        echo "  cargo binstall cargo-llvm-cov"
+        echo "  brew install cargo-llvm-cov    (macOS)"
+        echo ""
+        echo "Or in CI, use: taiki-e/install-action@cargo-llvm-cov"
+        exit 2
+    fi
 fi
 
 EXPORT_DIR="$(mktemp -d)"

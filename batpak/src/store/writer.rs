@@ -356,7 +356,8 @@ fn writer_loop(
                 return; // exit writer loop
             }
             // test-only: intentional panic to exercise restart_policy
-            #[allow(clippy::panic)] // intentional: this panic IS the test — it exercises catch_unwind in writer_thread_main
+            #[allow(clippy::panic)]
+            // intentional: this panic IS the test — it exercises catch_unwind in writer_thread_main
             WriterCommand::PanicForTest { respond } => {
                 // Acknowledge receipt before panicking so the test knows the command was processed.
                 let _ = respond.send(Ok(()));

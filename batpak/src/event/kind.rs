@@ -16,8 +16,14 @@ impl EventKind {
         assert!(category < 16, "EventKind category must be 0-15 (4 bits)");
         // Categories 0x0 (system) and 0xD (effect) are reserved for library constants.
         // Products must use 0x1-0xC or 0xE-0xF.
-        assert!(category != 0, "EventKind category 0x0 is reserved for system kinds (SYSTEM_INIT, etc.)");
-        assert!(category != 0xD, "EventKind category 0xD is reserved for effect kinds (EFFECT_ERROR, etc.)");
+        assert!(
+            category != 0,
+            "EventKind category 0x0 is reserved for system kinds (SYSTEM_INIT, etc.)"
+        );
+        assert!(
+            category != 0xD,
+            "EventKind category 0xD is reserved for effect kinds (EFFECT_ERROR, etc.)"
+        );
         Self(((category as u16) << 12) | (type_id & 0x0FFF))
     }
 
