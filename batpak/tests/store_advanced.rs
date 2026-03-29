@@ -1928,11 +1928,14 @@ fn project_calls_prefetch() {
 
 // ================================================================
 // Writer restart_policy tests — PROVES LAW-001, DEFENDS FM-009
+// These tests use panic_writer_for_test() which interacts badly under high
+// parallelism (INV-CONC). Serialized to prevent hangs.
 // ================================================================
 
 /// RestartPolicy::Once allows one restart after panic.
 /// After restart, the store should still accept appends normally.
 #[test]
+#[serial_test::serial(writer_restart)]
 fn writer_restart_once_recovers_from_panic() {
     let dir = TempDir::new().expect("create temp dir");
     let config = StoreConfig {
@@ -1974,6 +1977,7 @@ fn writer_restart_once_recovers_from_panic() {
 /// RestartPolicy::Once gives up after the 2nd panic.
 /// The writer thread should be dead, and further appends should fail with WriterCrashed.
 #[test]
+#[serial_test::serial(writer_restart)]
 fn writer_restart_once_gives_up_after_second_panic() {
     let dir = TempDir::new().expect("create temp dir");
     let config = StoreConfig {
@@ -2006,6 +2010,7 @@ fn writer_restart_once_gives_up_after_second_panic() {
 
 /// RestartPolicy::Bounded respects max_restarts within the time window.
 #[test]
+#[serial_test::serial(writer_restart)]
 fn writer_restart_bounded_respects_limit() {
     let dir = TempDir::new().expect("create temp dir");
     let config = StoreConfig {
@@ -2191,5 +2196,118 @@ fn cursor_poll_batch_respects_max_boundary() {
     assert!(
         batch.is_empty(),
         "PROPERTY: poll_batch after exhaustion must return empty vec."
+    );
+}
+
+// ===== AppendOptions builder tests: with_correlation + with_causation =====
+// These pub methods were orphans — defined but never called anywhere in the
+// codebase. build.rs allowlisted them with TODOs. These tests close the gap.
+// PROVES: LAW-003 (No Orphan Infrastructure)
+// DEFENDS: FM-007 (Island Syndrome — pub items must connect to tests)
+
+#[test]
+fn with_correlation_sets_header_correlation_id() {
+    let dir = TempDir::new().expect("create temp dir");
+    let config = StoreConfig {
+        data_dir: dir.path().to_path_buf(),
+        segment_max_bytes: 4096,
+        sync_every_n_events: 1,
+        ..StoreConfig::new("")
+    };
+    let store = Store::open(config).expect("open store");
+    let coord = Coordinate::new("entity:corr", "scope:test").expect("valid coord");
+    let kind = EventKind::custom(0xF, 1);
+
+    let custom_corr: u128 = 0xDEAD_BEEF_CAFE_BABE_1234_5678_9ABC_DEF0;
+    let opts = AppendOptions::new().with_correlation(custom_corr);
+    let receipt = store
+        .append_with_options(&coord, kind, &"corr_test", opts)
+        .expect("append with correlation");
+
+    let event = store.get(receipt.event_id).expect("get event");
+    assert_eq!(
+        event.event.header.correlation_id, custom_corr,
+        "WITH_CORRELATION: correlation_id on stored event should match the value \
+         set via AppendOptions::with_correlation().\n\
+         Investigate: src/store/mod.rs append_with_options → writer.rs AppendGuards.\n\
+         Common causes: correlation_id not propagated from AppendOptions to EventHeader."
+    );
+}
+
+#[test]
+fn with_causation_sets_header_causation_id() {
+    let dir = TempDir::new().expect("create temp dir");
+    let config = StoreConfig {
+        data_dir: dir.path().to_path_buf(),
+        segment_max_bytes: 4096,
+        sync_every_n_events: 1,
+        ..StoreConfig::new("")
+    };
+    let store = Store::open(config).expect("open store");
+    let coord = Coordinate::new("entity:caus", "scope:test").expect("valid coord");
+    let kind = EventKind::custom(0xF, 1);
+
+    let custom_cause: u128 = 0x1111_2222_3333_4444_5555_6666_7777_8888;
+    let opts = AppendOptions::new().with_causation(custom_cause);
+    let receipt = store
+        .append_with_options(&coord, kind, &"cause_test", opts)
+        .expect("append with causation");
+
+    let event = store.get(receipt.event_id).expect("get event");
+    assert_eq!(
+        event.event.header.causation_id,
+        Some(custom_cause),
+        "WITH_CAUSATION: causation_id on stored event should match the value \
+         set via AppendOptions::with_causation().\n\
+         Investigate: src/store/mod.rs append_with_options → writer.rs AppendGuards.\n\
+         Common causes: causation_id not propagated from AppendOptions to EventHeader."
+    );
+}
+
+#[test]
+fn with_correlation_and_causation_combined() {
+    let dir = TempDir::new().expect("create temp dir");
+    let config = StoreConfig {
+        data_dir: dir.path().to_path_buf(),
+        segment_max_bytes: 4096,
+        sync_every_n_events: 1,
+        ..StoreConfig::new("")
+    };
+    let store = Store::open(config).expect("open store");
+    let coord = Coordinate::new("entity:both", "scope:test").expect("valid coord");
+    let kind = EventKind::custom(0xF, 1);
+
+    let corr: u128 = 0xAAAA_BBBB_CCCC_DDDD_EEEE_FFFF_0000_1111;
+    let cause: u128 = 0x2222_3333_4444_5555_6666_7777_8888_9999;
+    let opts = AppendOptions::new()
+        .with_correlation(corr)
+        .with_causation(cause);
+    let receipt = store
+        .append_with_options(&coord, kind, &"both_test", opts)
+        .expect("append with both");
+
+    let event = store.get(receipt.event_id).expect("get event");
+    assert_eq!(
+        event.event.header.correlation_id, corr,
+        "COMBINED: correlation_id should be set when both with_correlation and with_causation used."
+    );
+    assert_eq!(
+        event.event.header.causation_id,
+        Some(cause),
+        "COMBINED: causation_id should be set when both with_correlation and with_causation used."
+    );
+
+    // Variance: default append should NOT have our custom IDs
+    let default_receipt = store
+        .append(&coord, kind, &"default_test")
+        .expect("default append");
+    let default_event = store.get(default_receipt.event_id).expect("get default");
+    assert_ne!(
+        default_event.event.header.correlation_id, corr,
+        "VARIANCE: default append should auto-generate a different correlation_id."
+    );
+    assert_eq!(
+        default_event.event.header.causation_id, None,
+        "VARIANCE: default append should have None causation_id."
     );
 }

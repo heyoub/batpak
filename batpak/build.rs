@@ -413,8 +413,6 @@ fn check_pub_items_have_tests() {
         // TODO: Wave 2 should add direct builder method tests
         ("with_idempotency", "AppendOptions builder, tested indirectly via idempotency tests"),
         ("with_expected_sequence", "AppendOptions builder, tested indirectly via CAS tests"),
-        ("with_correlation", "AppendOptions builder, needs dedicated test in Wave 2"),
-        ("with_causation", "AppendOptions builder, needs dedicated test in Wave 2"),
         // Serde wire helpers — referenced via #[serde(with = "...")] not by name
         ("u128_bytes", "serde helper module used via attribute, not by name"),
         ("option_u128_bytes", "serde helper module used via attribute, not by name"),
