@@ -13,6 +13,10 @@
 //! to evaluate fuzz and chaos testing results. Performance scores gate
 //! whether extended load fuzz/chaos runs are launched.
 //!
+//! PROVES: LAW-001 (No Fake Success), LAW-005 (Resilience Under Chaos)
+//! DEFENDS: FM-013 (Coverage Mirage), FM-019 (Chaos Gap)
+//! INVARIANTS: INV-STATE (state machine), INV-CONC (concurrent), INV-TEMP (temporal)
+//!
 //! This is the quadratic feedback loop:
 //!   1. Run fuzz + chaos probes
 //!   2. Feed results through Gate system

@@ -5,6 +5,10 @@
 //!
 //! Integration tests: `cargo test --features redb,lmdb --test projection_cache`
 //! [SPEC:tests/projection_cache.rs]
+//!
+//! PROVES: LAW-001 (No Fake Success — cached projections must be correct)
+//! DEFENDS: FM-009 (Polite Downgrade — BestEffort must eventually refresh)
+//! INVARIANTS: INV-TYPE (cache round-trip fidelity), INV-TEMP (freshness semantics)
 
 use batpak::store::projection::{CacheMeta, NoCache, ProjectionCache};
 
@@ -396,4 +400,195 @@ mod lmdb_tests {
 
         store.close().expect("close");
     }
+}
+
+// ================================================================
+// Wave 3C: Freshness::BestEffort + cache metadata edge cases
+// PROVES: LAW-001 (No Fake Success — stale cache must not serve wrong data)
+// DEFENDS: FM-009 (Polite Downgrade — BestEffort must eventually refresh)
+// ================================================================
+
+// Shared Counter type for projection tests
+#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq)]
+struct BestEffortCounter {
+    count: u32,
+}
+impl batpak::prelude::EventSourced<serde_json::Value> for BestEffortCounter {
+    fn from_events(events: &[batpak::prelude::Event<serde_json::Value>]) -> Option<Self> {
+        Some(BestEffortCounter {
+            count: u32::try_from(events.len()).expect("test uses < 2^32 events"),
+        })
+    }
+    fn apply_event(&mut self, _event: &batpak::prelude::Event<serde_json::Value>) {
+        self.count += 1;
+    }
+    fn relevant_event_kinds() -> &'static [batpak::prelude::EventKind] {
+        &[]
+    }
+}
+
+#[cfg(feature = "redb")]
+#[test]
+fn freshness_best_effort_serves_stale_cache_within_window() {
+    use batpak::prelude::*;
+    use batpak::store::{Freshness, RedbCache, Store, StoreConfig};
+    use tempfile::TempDir;
+
+    let dir = TempDir::new().expect("temp dir");
+    let cache_path = dir.path().join("cache.redb");
+    let cache = RedbCache::open(&cache_path).expect("open redb cache");
+
+    let config = StoreConfig {
+        data_dir: dir.path().join("data"),
+        segment_max_bytes: 4096,
+        sync_every_n_events: 1,
+        ..StoreConfig::new("")
+    };
+    let store = Store::open_with_cache(config, Box::new(cache)).expect("open store");
+
+    let coord = Coordinate::new("entity:besteff1", "scope:test").expect("coord");
+    let kind = EventKind::custom(0xF, 1);
+    store
+        .append(&coord, kind, &serde_json::json!({"x": 1}))
+        .expect("append 1");
+    store
+        .append(&coord, kind, &serde_json::json!({"x": 2}))
+        .expect("append 2");
+
+    // Project with Consistent to populate cache
+    let result: Option<BestEffortCounter> = store
+        .project("entity:besteff1", &Freshness::Consistent)
+        .expect("project consistent");
+    assert_eq!(result, Some(BestEffortCounter { count: 2 }));
+
+    // Append a third event — cache is now stale
+    store
+        .append(&coord, kind, &serde_json::json!({"x": 3}))
+        .expect("append 3");
+
+    // BestEffort with large window should serve the stale cached value
+    let result_best: Option<BestEffortCounter> = store
+        .project(
+            "entity:besteff1",
+            &Freshness::BestEffort {
+                max_stale_ms: 60_000,
+            },
+        )
+        .expect("project best effort");
+    assert_eq!(
+        result_best,
+        Some(BestEffortCounter { count: 2 }),
+        "FRESHNESS BEST EFFORT: with large stale window, should serve cached value (count=2) \
+         even though a 3rd event was appended.\n\
+         Investigate: src/store/mod.rs project() BestEffort branch.\n\
+         Common causes: BestEffort not checking age, always replaying from segments."
+    );
+
+    // BestEffort with zero window should force re-replay
+    let result_strict: Option<BestEffortCounter> = store
+        .project(
+            "entity:besteff1",
+            &Freshness::BestEffort { max_stale_ms: 0 },
+        )
+        .expect("project best effort strict");
+    assert_eq!(
+        result_strict,
+        Some(BestEffortCounter { count: 3 }),
+        "FRESHNESS BEST EFFORT ZERO: with max_stale_ms=0, cache should always be considered \
+         stale, forcing a full replay (count=3).\n\
+         Investigate: src/store/mod.rs project() BestEffort age calculation.\n\
+         Common causes: age comparison off-by-one, zero treated as infinity."
+    );
+
+    store.close().expect("close");
+}
+
+#[test]
+fn cache_metadata_short_bytes_returns_none() {
+    // When cache bytes are < 16, the CacheMeta can't be decoded.
+    // Both RedbCache and LmdbCache handle this by returning None.
+    // Test the contract at the NoCache level — it always returns None regardless.
+    let cache = NoCache;
+    cache.put(b"short", b"x", test_meta()).expect("put");
+    // NoCache always returns None, so this is really testing the interface contract.
+    let result = cache.get(b"short").expect("get");
+    assert!(
+        result.is_none(),
+        "CACHE METADATA: NoCache should return None regardless of what was put.\n\
+         This test verifies the interface contract for short/missing data."
+    );
+}
+
+#[cfg(feature = "redb")]
+#[test]
+fn redb_delete_prefix_with_0xff_keys() {
+    // Tests prefix_successor edge case: keys with 0xFF bytes.
+    // prefix_successor must handle all-0xFF prefixes correctly.
+    use batpak::store::projection::RedbCache;
+    use tempfile::TempDir;
+
+    let dir = TempDir::new().expect("temp dir");
+    let path = dir.path().join("test.redb");
+    let cache = RedbCache::open(&path).expect("open redb");
+    let meta = test_meta();
+
+    // Insert keys with high-byte prefixes
+    cache
+        .put(&[0xFF, 0x01], b"val1", meta.clone())
+        .expect("put");
+    cache
+        .put(&[0xFF, 0x02], b"val2", meta.clone())
+        .expect("put");
+    cache
+        .put(&[0xFF, 0xFF], b"val3", meta.clone())
+        .expect("put");
+    cache.put(&[0xFE, 0x01], b"other", meta.clone()).expect("put");
+
+    let deleted = cache.delete_prefix(&[0xFF]).expect("delete_prefix");
+    assert_eq!(
+        deleted, 3,
+        "DELETE PREFIX 0xFF: should delete all 3 keys starting with 0xFF.\n\
+         Investigate: src/store/projection.rs prefix_successor().\n\
+         Common causes: prefix_successor wrapping incorrectly on 0xFF, missing carry logic."
+    );
+
+    // The 0xFE key should survive
+    assert!(
+        cache.get(&[0xFE, 0x01]).expect("get").is_some(),
+        "DELETE PREFIX 0xFF: key [0xFE, 0x01] should survive prefix delete of [0xFF]."
+    );
+}
+
+#[cfg(feature = "redb")]
+#[test]
+fn redb_delete_prefix_empty_prefix_deletes_all() {
+    // Empty prefix matches everything — should delete all keys.
+    use batpak::store::projection::RedbCache;
+    use tempfile::TempDir;
+
+    let dir = TempDir::new().expect("temp dir");
+    let path = dir.path().join("test.redb");
+    let cache = RedbCache::open(&path).expect("open redb");
+    let meta = test_meta();
+
+    cache.put(b"a", b"1", meta.clone()).expect("put");
+    cache.put(b"b", b"2", meta.clone()).expect("put");
+    cache.put(b"z", b"3", meta.clone()).expect("put");
+
+    let deleted = cache.delete_prefix(b"").expect("delete_prefix");
+    assert_eq!(
+        deleted, 3,
+        "DELETE PREFIX EMPTY: empty prefix should match all keys.\n\
+         Investigate: src/store/projection.rs prefix_successor() with empty input.\n\
+         Common causes: empty prefix edge case not handled, range scan returning nothing."
+    );
+}
+
+#[test]
+fn nocache_prefetch_is_noop() {
+    let cache = NoCache;
+    let meta = test_meta();
+    cache
+        .prefetch(b"any_key", meta)
+        .expect("NoCache::prefetch should not error — it's a no-op by default.");
 }

@@ -148,21 +148,37 @@ impl ProjectionCache for RedbCache {
                 .open_table(CACHE_TABLE)
                 .map_err(|e| StoreError::CacheFailed(e.to_string()))?;
             // Range: prefix..prefix_end. Compute the exclusive upper bound
-            // by incrementing the last byte (with carry). Appending 0xFF was
-            // wrong — it missed keys where the byte after the prefix is 0xFF.
+            // by incrementing the last byte (with carry).
+            // When no successor exists (all 0xFF or empty prefix), scan to end.
             let end = prefix_successor(prefix);
-            let keys: Vec<Vec<u8>> = table
-                .range(prefix..end.as_slice())
-                .map_err(|e| StoreError::CacheFailed(e.to_string()))?
-                .filter_map(|r| match r {
-                    Ok(v) => Some(v),
-                    Err(e) => {
-                        tracing::warn!("cache iteration error (skipping row): {e}");
-                        None
-                    }
-                })
-                .map(|(k, _)| k.value().to_vec())
-                .collect();
+            let keys: Vec<Vec<u8>> = if let Some(end) = end {
+                table
+                    .range(prefix..end.as_slice())
+                    .map_err(|e| StoreError::CacheFailed(e.to_string()))?
+                    .filter_map(|r| match r {
+                        Ok(v) => Some(v),
+                        Err(e) => {
+                            tracing::warn!("cache iteration error (skipping row): {e}");
+                            None
+                        }
+                    })
+                    .map(|(k, _)| k.value().to_vec())
+                    .collect()
+            } else {
+                // No upper bound — scan from prefix to end of table
+                table
+                    .range(prefix..)
+                    .map_err(|e| StoreError::CacheFailed(e.to_string()))?
+                    .filter_map(|r| match r {
+                        Ok(v) => Some(v),
+                        Err(e) => {
+                            tracing::warn!("cache iteration error (skipping row): {e}");
+                            None
+                        }
+                    })
+                    .map(|(k, _)| k.value().to_vec())
+                    .collect()
+            };
             for key in &keys {
                 table
                     .remove(key.as_slice())
@@ -306,19 +322,22 @@ impl ProjectionCache for LmdbCache {
 
 #[cfg(feature = "redb")]
 /// Compute the exclusive upper bound for a prefix range scan.
-/// Increments the last byte, carrying if 0xFF. Returns prefix + 0x00
-/// if all bytes are 0xFF (which correctly captures everything).
-fn prefix_successor(prefix: &[u8]) -> Vec<u8> {
+/// Increments the last byte, carrying if 0xFF. Returns None if no finite
+/// upper bound exists (all bytes 0xFF, or empty prefix) — caller must
+/// use an unbounded range scan.
+fn prefix_successor(prefix: &[u8]) -> Option<Vec<u8>> {
+    if prefix.is_empty() {
+        return None; // empty prefix matches everything — no upper bound
+    }
     let mut end = prefix.to_vec();
     // Walk backwards, incrementing the last non-0xFF byte
     for i in (0..end.len()).rev() {
         if end[i] < 0xFF {
             end[i] += 1;
             end.truncate(i + 1);
-            return end;
+            return Some(end);
         }
     }
-    // All bytes are 0xFF — extend with 0x00 to cover everything after prefix
-    end.push(0x00);
-    end
+    // All bytes are 0xFF — no finite successor exists
+    None
 }

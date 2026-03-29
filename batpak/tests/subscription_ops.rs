@@ -1,6 +1,10 @@
 #![allow(clippy::disallowed_methods, clippy::unwrap_used)] // tests use thread::spawn for producers
 //! Integration tests for SubscriptionOps: filter, take, and combined chains.
 //! [SPEC:tests/subscription_ops.rs]
+//!
+//! PROVES: LAW-004 (Composition Over Construction — ops chain correctly)
+//! DEFENDS: FM-009 (Polite Downgrade — map must not silently drop events)
+//! INVARIANTS: INV-STATE (subscription: open → recv → closed)
 
 use batpak::prelude::*;
 use batpak::store::{Notification, Store, StoreConfig};
@@ -257,4 +261,177 @@ fn ops_filter_and_take_combined() {
     );
 
     producer.join().expect("producer thread");
+}
+
+// ===== Wave 3D: Subscription composition depth tests =====
+// PROVES: LAW-004 (Composition Over Construction — ops chain correctly)
+// DEFENDS: FM-009 (Polite Downgrade — map must not silently drop events)
+// INVARIANTS: INV-STATE (subscription state machine: open → recv → closed)
+
+#[test]
+fn ops_map_transforms_notification() {
+    let (store, _dir) = test_store();
+    let store = Arc::new(store);
+    let coord = Coordinate::new("entity:1", "scope:test").expect("valid coord");
+    let kind = EventKind::custom(0xF, 1);
+    let mapped_kind = EventKind::custom(0xF, 5);
+
+    let region = Region::entity("entity:");
+    let sub = store.subscribe(&region);
+    // Map: change the kind field of every notification
+    let mut ops = sub
+        .ops()
+        .map(move |n: &Notification| {
+            Some(Notification {
+                event_id: n.event_id,
+                correlation_id: n.correlation_id,
+                causation_id: n.causation_id,
+                coord: n.coord.clone(),
+                kind: mapped_kind,
+                sequence: n.sequence,
+            })
+        })
+        .take(1);
+
+    let store_w = Arc::clone(&store);
+    let coord_w = coord.clone();
+    let producer = thread::spawn(move || {
+        thread::sleep(Duration::from_millis(20));
+        store_w
+            .append(&coord_w, kind, &serde_json::json!({"x": 1}))
+            .expect("append");
+    });
+
+    let notif = ops.recv();
+    assert!(notif.is_some(), "OPS MAP: should receive a mapped notification.");
+    assert_eq!(
+        notif.unwrap().kind,
+        mapped_kind,
+        "OPS MAP: map should transform the notification kind.\n\
+         Investigate: src/store/subscription.rs SubscriptionOps::map().\n\
+         Common causes: map_fn not applied, original notification returned instead."
+    );
+
+    producer.join().expect("producer thread");
+}
+
+#[test]
+fn ops_map_returning_none_skips_event() {
+    let (store, _dir) = test_store();
+    let store = Arc::new(store);
+    let coord = Coordinate::new("entity:1", "scope:test").expect("valid coord");
+    let skip_kind = EventKind::custom(0xF, 1);
+    let pass_kind = EventKind::custom(0xF, 2);
+
+    let region = Region::entity("entity:");
+    let sub = store.subscribe(&region);
+    // Map: return None for skip_kind (acts as filter), Some for pass_kind
+    let mut ops = sub
+        .ops()
+        .map(move |n: &Notification| {
+            if n.kind == skip_kind {
+                None
+            } else {
+                Some(n.clone())
+            }
+        })
+        .take(1);
+
+    let store_w = Arc::clone(&store);
+    let coord_w = coord.clone();
+    let producer = thread::spawn(move || {
+        thread::sleep(Duration::from_millis(20));
+        // First event: skip_kind — map returns None, should be skipped
+        store_w
+            .append(&coord_w, skip_kind, &serde_json::json!({"skip": true}))
+            .expect("append skip");
+        // Second event: pass_kind — map returns Some, should pass through
+        store_w
+            .append(&coord_w, pass_kind, &serde_json::json!({"pass": true}))
+            .expect("append pass");
+    });
+
+    let notif = ops.recv();
+    assert!(notif.is_some(), "OPS MAP SKIP: should receive the pass_kind event.");
+    assert_eq!(
+        notif.unwrap().kind,
+        pass_kind,
+        "OPS MAP SKIP: map returning None should skip that event.\n\
+         Investigate: src/store/subscription.rs SubscriptionOps::recv() map branch.\n\
+         Common causes: None from map not triggering continue in recv loop."
+    );
+
+    producer.join().expect("producer thread");
+}
+
+#[test]
+fn ops_multiple_filters_all_must_pass() {
+    let (store, _dir) = test_store();
+    let store = Arc::new(store);
+    let coord = Coordinate::new("entity:multi", "scope:test").expect("valid coord");
+    let kind_a = EventKind::custom(0xF, 1);
+    let kind_b = EventKind::custom(0xF, 2);
+    let kind_c = EventKind::custom(0xF, 3);
+
+    let region = Region::entity("entity:");
+    let sub = store.subscribe(&region);
+    // Two independent filters: must be kind_a OR kind_b, AND must have sequence > 0
+    // Only events passing BOTH filters are received.
+    let mut ops = sub
+        .ops()
+        .filter(move |n: &Notification| n.kind == kind_a || n.kind == kind_b)
+        .filter(move |n: &Notification| n.sequence > 0)
+        .take(1);
+
+    let store_w = Arc::clone(&store);
+    let coord_w = coord.clone();
+    let producer = thread::spawn(move || {
+        thread::sleep(Duration::from_millis(20));
+        // Event 1: kind_c — fails first filter
+        store_w
+            .append(&coord_w, kind_c, &serde_json::json!({"x": 1}))
+            .expect("append kind_c");
+        // Event 2: kind_a, sequence=1 — passes both filters
+        store_w
+            .append(&coord_w, kind_a, &serde_json::json!({"x": 2}))
+            .expect("append kind_a");
+    });
+
+    let notif = ops.recv();
+    assert!(notif.is_some(), "OPS MULTI FILTER: should receive kind_a event.");
+    let notif = notif.unwrap();
+    assert_eq!(
+        notif.kind, kind_a,
+        "OPS MULTI FILTER: only kind_a/kind_b with sequence>0 should pass both filters.\n\
+         Investigate: src/store/subscription.rs SubscriptionOps::recv() filter chain.\n\
+         Common causes: filters short-circuiting, only first filter applied."
+    );
+
+    producer.join().expect("producer thread");
+}
+
+#[test]
+fn ops_channel_closed_returns_none() {
+    let (store, _dir) = test_store();
+    let store = Arc::new(store);
+
+    let region = Region::entity("entity:");
+    let sub = store.subscribe(&region);
+    let mut ops = sub.ops();
+
+    // Close the store — this shuts down the writer, which closes broadcast channels
+    let store_clone = match Arc::try_unwrap(store) {
+        Ok(s) => s,
+        Err(_) => panic!("Arc should have single owner"),
+    };
+    store_clone.close().expect("close");
+
+    // After channel closes, recv should return None
+    let notif = ops.recv();
+    assert!(
+        notif.is_none(),
+        "OPS CHANNEL CLOSED: recv should return None after store is closed.\n\
+         Investigate: src/store/subscription.rs Subscription::recv() channel close path.\n\
+         Common causes: recv blocking forever instead of returning None on closed channel."
+    );
 }

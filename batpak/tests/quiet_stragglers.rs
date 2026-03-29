@@ -3,6 +3,11 @@
 //! but have zero test coverage. Organized by module.
 //! [SPEC:tests/quiet_stragglers.rs]
 //!
+//!
+//! PROVES: LAW-003 (No Orphan Infrastructure — every pub item exercised)
+//! DEFENDS: FM-007 (Island Syndrome — pub items must connect to tests)
+//! INVARIANTS: INV-OBS (observability — every pub API has a test witness)
+//!
 //! These are the functions that "won't make noise but won't say when they're
 //! hurt either." Each test asserts real behavior with investigation pointers.
 
