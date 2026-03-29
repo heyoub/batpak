@@ -10,6 +10,10 @@
 //! apply_transition, clock_range queries, fd_budget eviction,
 //! corrupt segment recovery.
 //!
+//! PROVES: LAW-001 (No Fake Success), LAW-003 (No Orphan Infrastructure)
+//! DEFENDS: FM-007 (Island Syndrome), FM-013 (Coverage Mirage)
+//! INVARIANTS: INV-STATE (cursor state machine), INV-TEMP (temporal ordering)
+//!
 //! PROVES: LAW-001 (No Fake Success), LAW-003 (No Orphan Infrastructure — exercises full public API)
 //! DEFENDS: FM-009 (Polite Downgrade — restart_policy wired), FM-011 (Error Path Hollowing), FM-013 (Coverage Mirage)
 //! INVARIANTS: INV-CONC (CAS, idempotency), INV-TEMP (walk_ancestors, compaction), INV-PERF (fd_budget)
@@ -1924,11 +1928,14 @@ fn project_calls_prefetch() {
 
 // ================================================================
 // Writer restart_policy tests — PROVES LAW-001, DEFENDS FM-009
+// These tests use panic_writer_for_test() which interacts badly under high
+// parallelism (INV-CONC). Serialized to prevent hangs.
 // ================================================================
 
 /// RestartPolicy::Once allows one restart after panic.
 /// After restart, the store should still accept appends normally.
 #[test]
+#[serial_test::serial(writer_restart)]
 fn writer_restart_once_recovers_from_panic() {
     let dir = TempDir::new().expect("create temp dir");
     let config = StoreConfig {
@@ -1970,6 +1977,7 @@ fn writer_restart_once_recovers_from_panic() {
 /// RestartPolicy::Once gives up after the 2nd panic.
 /// The writer thread should be dead, and further appends should fail with WriterCrashed.
 #[test]
+#[serial_test::serial(writer_restart)]
 fn writer_restart_once_gives_up_after_second_panic() {
     let dir = TempDir::new().expect("create temp dir");
     let config = StoreConfig {
@@ -2002,6 +2010,7 @@ fn writer_restart_once_gives_up_after_second_panic() {
 
 /// RestartPolicy::Bounded respects max_restarts within the time window.
 #[test]
+#[serial_test::serial(writer_restart)]
 fn writer_restart_bounded_respects_limit() {
     let dir = TempDir::new().expect("create temp dir");
     let config = StoreConfig {
@@ -2039,5 +2048,266 @@ fn writer_restart_bounded_respects_limit() {
         "BOUNDED RESTART BUDGET NOT ENFORCED: append should fail after 3 panics with max_restarts=2.\n\
          Investigate: src/store/writer.rs writer_thread_main() Bounded branch.\n\
          Run: cargo test --test store_advanced writer_restart_bounded_respects_limit"
+    );
+}
+
+// ===== Wave 2C: Cursor edge case tests =====
+// Cursor had only happy-path tests. These exercise empty streams, re-poll after EOF,
+// batch edge cases, and position persistence.
+// DEFENDS: FM-009 (Polite Downgrade — cursor must not fake events), FM-013 (Coverage Mirage)
+
+#[test]
+fn cursor_empty_stream_returns_none() {
+    let (store, _dir) = test_store();
+    let region = Region::entity("nonexistent:entity");
+    let mut cursor = store.cursor(&region);
+    assert!(
+        cursor.poll().is_none(),
+        "PROPERTY: Cursor on empty stream must return None, not fake data.\n\
+         Investigate: src/store/cursor.rs poll() when index query returns empty.\n\
+         Common causes: returning default IndexEntry instead of None.\n\
+         DEFENDS: FM-009 (Polite Downgrade)."
+    );
+}
+
+#[test]
+fn cursor_poll_batch_empty_stream_returns_empty_vec() {
+    let (store, _dir) = test_store();
+    let region = Region::entity("nonexistent:entity");
+    let mut cursor = store.cursor(&region);
+    let batch = cursor.poll_batch(10);
+    assert!(
+        batch.is_empty(),
+        "PROPERTY: Cursor::poll_batch on empty stream must return empty vec.\n\
+         Investigate: src/store/cursor.rs poll_batch()."
+    );
+}
+
+#[test]
+fn cursor_repoll_after_eof_sees_new_events() {
+    let (store, _dir) = test_store();
+    let coord = Coordinate::new("cursor:repoll", "cursor:scope").expect("valid");
+    let kind = EventKind::custom(1, 1);
+    let region = Region::entity("cursor:repoll");
+
+    // Append 2 events, consume them
+    store.append(&coord, kind, &"e1").expect("append");
+    store.append(&coord, kind, &"e2").expect("append");
+
+    let mut cursor = store.cursor(&region);
+    assert!(cursor.poll().is_some(), "first poll");
+    assert!(cursor.poll().is_some(), "second poll");
+    assert!(cursor.poll().is_none(), "should be exhausted");
+
+    // Append a new event AFTER cursor reached EOF
+    store.append(&coord, kind, &"e3").expect("append new");
+
+    // Re-poll should see the new event
+    let entry = cursor.poll();
+    assert!(
+        entry.is_some(),
+        "PROPERTY: Cursor must see new events appended after reaching EOF.\n\
+         Investigate: src/store/cursor.rs poll() position tracking.\n\
+         Common causes: position set to max, preventing future polls.\n\
+         Run: cargo test --test store_advanced cursor_repoll_after_eof_sees_new_events"
+    );
+}
+
+#[test]
+fn cursor_position_persists_no_duplicates() {
+    let (store, _dir) = test_store();
+    let coord = Coordinate::new("cursor:nodup", "cursor:scope").expect("valid");
+    let kind = EventKind::custom(1, 1);
+    let region = Region::entity("cursor:nodup");
+
+    // Append 5 events
+    for i in 0..5 {
+        store
+            .append(&coord, kind, &format!("event_{i}"))
+            .expect("append");
+    }
+
+    let mut cursor = store.cursor(&region);
+
+    // Poll 3
+    let first_three: Vec<_> = (0..3).filter_map(|_| cursor.poll()).collect();
+    assert_eq!(first_three.len(), 3, "should get 3 events");
+
+    // Poll remaining — must NOT repeat first 3
+    let mut remaining = Vec::new();
+    while let Some(entry) = cursor.poll() {
+        remaining.push(entry);
+    }
+    assert_eq!(
+        remaining.len(),
+        2,
+        "PROPERTY: Cursor must not repeat events across poll calls.\n\
+         Investigate: src/store/cursor.rs position tracking.\n\
+         Common causes: position reset between polls, global_sequence comparison wrong."
+    );
+
+    // Verify no overlap
+    let first_seqs: Vec<u64> = first_three.iter().map(|e| e.global_sequence).collect();
+    for entry in &remaining {
+        assert!(
+            !first_seqs.contains(&entry.global_sequence),
+            "PROPERTY: Cursor must not return duplicate events. Sequence {} appeared twice.\n\
+             Investigate: src/store/cursor.rs started flag and position comparison.",
+            entry.global_sequence
+        );
+    }
+}
+
+#[test]
+fn cursor_poll_batch_respects_max_boundary() {
+    let (store, _dir) = test_store();
+    let coord = Coordinate::new("cursor:batch", "cursor:scope").expect("valid");
+    let kind = EventKind::custom(1, 1);
+    let region = Region::entity("cursor:batch");
+
+    for i in 0..10 {
+        store
+            .append(&coord, kind, &format!("event_{i}"))
+            .expect("append");
+    }
+
+    let mut cursor = store.cursor(&region);
+
+    // Request batch of 3 — should return exactly 3
+    let batch = cursor.poll_batch(3);
+    assert_eq!(
+        batch.len(),
+        3,
+        "PROPERTY: poll_batch(3) with 10 available must return exactly 3.\n\
+         Investigate: src/store/cursor.rs poll_batch() max check."
+    );
+
+    // Request batch of 100 — should return remaining 7
+    let batch = cursor.poll_batch(100);
+    assert_eq!(
+        batch.len(),
+        7,
+        "PROPERTY: poll_batch(100) with 7 remaining must return exactly 7.\n\
+         Investigate: src/store/cursor.rs poll_batch() exhaustion."
+    );
+
+    // Request again — should be empty
+    let batch = cursor.poll_batch(10);
+    assert!(
+        batch.is_empty(),
+        "PROPERTY: poll_batch after exhaustion must return empty vec."
+    );
+}
+
+// ===== AppendOptions builder tests: with_correlation + with_causation =====
+// These pub methods were orphans — defined but never called anywhere in the
+// codebase. build.rs allowlisted them with TODOs. These tests close the gap.
+// PROVES: LAW-003 (No Orphan Infrastructure)
+// DEFENDS: FM-007 (Island Syndrome — pub items must connect to tests)
+
+#[test]
+fn with_correlation_sets_header_correlation_id() {
+    let dir = TempDir::new().expect("create temp dir");
+    let config = StoreConfig {
+        data_dir: dir.path().to_path_buf(),
+        segment_max_bytes: 4096,
+        sync_every_n_events: 1,
+        ..StoreConfig::new("")
+    };
+    let store = Store::open(config).expect("open store");
+    let coord = Coordinate::new("entity:corr", "scope:test").expect("valid coord");
+    let kind = EventKind::custom(0xF, 1);
+
+    let custom_corr: u128 = 0xDEAD_BEEF_CAFE_BABE_1234_5678_9ABC_DEF0;
+    let opts = AppendOptions::new().with_correlation(custom_corr);
+    let receipt = store
+        .append_with_options(&coord, kind, &"corr_test", opts)
+        .expect("append with correlation");
+
+    let event = store.get(receipt.event_id).expect("get event");
+    assert_eq!(
+        event.event.header.correlation_id, custom_corr,
+        "WITH_CORRELATION: correlation_id on stored event should match the value \
+         set via AppendOptions::with_correlation().\n\
+         Investigate: src/store/mod.rs append_with_options → writer.rs AppendGuards.\n\
+         Common causes: correlation_id not propagated from AppendOptions to EventHeader."
+    );
+}
+
+#[test]
+fn with_causation_sets_header_causation_id() {
+    let dir = TempDir::new().expect("create temp dir");
+    let config = StoreConfig {
+        data_dir: dir.path().to_path_buf(),
+        segment_max_bytes: 4096,
+        sync_every_n_events: 1,
+        ..StoreConfig::new("")
+    };
+    let store = Store::open(config).expect("open store");
+    let coord = Coordinate::new("entity:caus", "scope:test").expect("valid coord");
+    let kind = EventKind::custom(0xF, 1);
+
+    let custom_cause: u128 = 0x1111_2222_3333_4444_5555_6666_7777_8888;
+    let opts = AppendOptions::new().with_causation(custom_cause);
+    let receipt = store
+        .append_with_options(&coord, kind, &"cause_test", opts)
+        .expect("append with causation");
+
+    let event = store.get(receipt.event_id).expect("get event");
+    assert_eq!(
+        event.event.header.causation_id,
+        Some(custom_cause),
+        "WITH_CAUSATION: causation_id on stored event should match the value \
+         set via AppendOptions::with_causation().\n\
+         Investigate: src/store/mod.rs append_with_options → writer.rs AppendGuards.\n\
+         Common causes: causation_id not propagated from AppendOptions to EventHeader."
+    );
+}
+
+#[test]
+fn with_correlation_and_causation_combined() {
+    let dir = TempDir::new().expect("create temp dir");
+    let config = StoreConfig {
+        data_dir: dir.path().to_path_buf(),
+        segment_max_bytes: 4096,
+        sync_every_n_events: 1,
+        ..StoreConfig::new("")
+    };
+    let store = Store::open(config).expect("open store");
+    let coord = Coordinate::new("entity:both", "scope:test").expect("valid coord");
+    let kind = EventKind::custom(0xF, 1);
+
+    let corr: u128 = 0xAAAA_BBBB_CCCC_DDDD_EEEE_FFFF_0000_1111;
+    let cause: u128 = 0x2222_3333_4444_5555_6666_7777_8888_9999;
+    let opts = AppendOptions::new()
+        .with_correlation(corr)
+        .with_causation(cause);
+    let receipt = store
+        .append_with_options(&coord, kind, &"both_test", opts)
+        .expect("append with both");
+
+    let event = store.get(receipt.event_id).expect("get event");
+    assert_eq!(
+        event.event.header.correlation_id, corr,
+        "COMBINED: correlation_id should be set when both with_correlation and with_causation used."
+    );
+    assert_eq!(
+        event.event.header.causation_id,
+        Some(cause),
+        "COMBINED: causation_id should be set when both with_correlation and with_causation used."
+    );
+
+    // Variance: default append should NOT have our custom IDs
+    let default_receipt = store
+        .append(&coord, kind, &"default_test")
+        .expect("default append");
+    let default_event = store.get(default_receipt.event_id).expect("get default");
+    assert_ne!(
+        default_event.event.header.correlation_id, corr,
+        "VARIANCE: default append should auto-generate a different correlation_id."
+    );
+    assert_eq!(
+        default_event.event.header.causation_id, None,
+        "VARIANCE: default append should have None causation_id."
     );
 }

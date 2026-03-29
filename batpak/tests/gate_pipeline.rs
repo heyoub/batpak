@@ -314,3 +314,98 @@ fn denial_builder_pattern() {
          Run: cargo test --test gate_pipeline denial_builder_pattern"
     );
 }
+
+// ===== Wave 2B: BypassReason + BypassReceipt deep tests =====
+// These had only quiet_straggler existence checks. Now we test the trait contract,
+// audit trail format, and payload consumption semantics.
+// DEFENDS: FM-022 (Receipt Hollowing), LAW-001 (No Fake Success via bypass)
+
+struct TestBypassReason;
+
+impl batpak::pipeline::bypass::BypassReason for TestBypassReason {
+    fn name(&self) -> &'static str {
+        "emergency_override"
+    }
+    fn justification(&self) -> &'static str {
+        "Production incident #1234 — rate limiter disabled"
+    }
+}
+
+#[test]
+fn bypass_reason_trait_returns_correct_values() {
+    use batpak::pipeline::bypass::BypassReason;
+    let reason = TestBypassReason;
+    assert_eq!(
+        reason.name(),
+        "emergency_override",
+        "PROPERTY: BypassReason::name() must return the declared name.\n\
+         Investigate: src/pipeline/bypass.rs BypassReason trait.\n\
+         Common causes: trait method returning wrong field."
+    );
+    assert_eq!(
+        reason.justification(),
+        "Production incident #1234 — rate limiter disabled",
+        "PROPERTY: BypassReason::justification() must return the declared justification."
+    );
+}
+
+#[test]
+fn bypass_receipt_getters_match_construction() {
+    let receipt = Pipeline::<()>::bypass(Proposal::new("important_payload"), &TestBypassReason);
+    assert_eq!(
+        receipt.reason(),
+        "emergency_override",
+        "PROPERTY: BypassReceipt::reason() must match the BypassReason::name().\n\
+         Investigate: src/pipeline/mod.rs Pipeline::bypass construction."
+    );
+    assert_eq!(
+        receipt.justification(),
+        "Production incident #1234 — rate limiter disabled",
+        "PROPERTY: BypassReceipt::justification() must match BypassReason::justification()."
+    );
+    assert_eq!(
+        receipt.payload(),
+        &"important_payload",
+        "PROPERTY: BypassReceipt::payload() must return the original proposal payload."
+    );
+}
+
+#[test]
+fn bypass_receipt_into_payload_consumes_and_returns() {
+    let receipt = Pipeline::<()>::bypass(Proposal::new(vec![1, 2, 3]), &TestBypassReason);
+    let payload = receipt.into_payload();
+    assert_eq!(
+        payload,
+        vec![1, 2, 3],
+        "PROPERTY: BypassReceipt::into_payload() must return the original payload by move.\n\
+         Investigate: src/pipeline/bypass.rs into_payload()."
+    );
+}
+
+#[test]
+fn bypass_through_full_pipeline_commits_to_store() {
+    use batpak::store::{Store, StoreConfig};
+    let dir = tempfile::TempDir::new().expect("temp dir");
+    let store = Store::open(StoreConfig::new(dir.path())).expect("open");
+    let coord = Coordinate::new("bypass:entity", "bypass:scope").expect("valid");
+    let kind = EventKind::custom(1, 1);
+
+    // Bypass gates entirely
+    let bypass_receipt = Pipeline::<()>::bypass(
+        Proposal::new(serde_json::json!({"bypassed": true})),
+        &TestBypassReason,
+    );
+
+    // Commit the bypassed payload to the store
+    let payload = bypass_receipt.into_payload();
+    let append_receipt = store.append(&coord, kind, &payload).expect("append");
+
+    // Verify the event actually persisted
+    let stored = store.get(append_receipt.event_id).expect("get");
+    assert_eq!(
+        stored.coordinate, coord,
+        "PROPERTY: Bypassed payload must persist to store with correct coordinate.\n\
+         Investigate: Pipeline::bypass → into_payload → store.append flow.\n\
+         DEFENDS: FM-007 (Island Syndrome — bypass path must connect to real store)."
+    );
+}

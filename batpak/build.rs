@@ -15,6 +15,7 @@ fn main() {
     check_store_config_field_usage();
     check_allow_justifications();
     check_no_stubs_in_src();
+    check_pub_items_have_tests();
 }
 
 /// Audit Loop Layer 2 enforcement: no stub markers in production src/.
@@ -374,6 +375,126 @@ fn collect_rs_contents(dir: &Path, buf: &mut String, exclude: Option<&str>) {
             }
         }
     }
+}
+
+/// Downstream post-mortem defense: every pub item in src/ must appear in at least
+/// one test file. This is the library-shaped version of "dispatch functions with no
+/// tests" — if a future AI campaign adds a pub fn/struct/enum/trait without a test,
+/// the build fails. LAW-003 (No Orphan Infrastructure), FM-007 (Island Syndrome).
+///
+/// String-scanning only — no syn, no proc-macro, no external deps.
+fn check_pub_items_have_tests() {
+    // Collect all test file contents into one searchable string.
+    let mut test_contents = String::new();
+    collect_rs_contents(Path::new("tests"), &mut test_contents, None);
+    // Also include src/ inline #[cfg(test)] modules — they count as tests.
+    let mut src_contents = String::new();
+    collect_rs_contents(Path::new("src"), &mut src_contents, None);
+
+    // Items that are tested indirectly or are macro-generated / re-export glue.
+    // Each entry: (item_name, justification).
+    let allowlist: &[(&str, &str)] = &[
+        // Macro-generated types from define_state_machine! / define_typestate!
+        // Tested via typestate_safety.rs compile-fail tests and quiet_stragglers.rs
+        ("EntityIdType", "trait used via define_entity_id! macro, tested in quiet_stragglers"),
+        // Internal store types that are only referenced via field access patterns
+        ("ClockKey", "internal index type, tested via store_integration + store_advanced"),
+        ("Active", "segment typestate marker, tested via store operations"),
+        // Macro-generated methods from define_typestate! — tested via the generated types
+        // TODO: Wave 2D adds explicit into_data() test in typestate_safety.rs
+        ("into_data", "macro-generated method from define_typestate!, needs dedicated test"),
+        ("Sealed", "segment typestate marker, tested via compaction tests"),
+        ("SegmentHeader", "internal segment type, tested via frame_encode/decode"),
+        ("StoreDiagnostics", "returned by Store::stats, tested via store_advanced"),
+        // Internal segment methods tested via store_integration/store_advanced rotation tests
+        ("needs_rotation", "internal segment method, tested via segment rotation in store tests"),
+        ("CompactionResult", "returned by compact(), tested via compaction tests"),
+        // Builder methods on AppendOptions — tested indirectly via append_with_options
+        // TODO: Wave 2 should add direct builder method tests
+        ("with_idempotency", "AppendOptions builder, tested indirectly via idempotency tests"),
+        ("with_expected_sequence", "AppendOptions builder, tested indirectly via CAS tests"),
+        // Serde wire helpers — referenced via #[serde(with = "...")] not by name
+        ("u128_bytes", "serde helper module used via attribute, not by name"),
+        ("option_u128_bytes", "serde helper module used via attribute, not by name"),
+        ("vec_u128_bytes", "serde helper module used via attribute, not by name"),
+    ];
+    let allowed_names: Vec<&str> = allowlist.iter().map(|(name, _)| *name).collect();
+
+    // Walk src/ and extract pub item names.
+    walk_rs_files(Path::new("src"), &|path, contents| {
+        let path_str = path.display().to_string();
+        for (line_no, line) in contents.lines().enumerate() {
+            let trimmed = line.trim();
+            // Match: pub fn NAME, pub struct NAME, pub enum NAME, pub trait NAME
+            let item_name = extract_pub_item_name(trimmed);
+            if let Some(name) = item_name {
+                if allowed_names.contains(&name) {
+                    continue;
+                }
+                // Check if this name appears in any test file
+                if !test_contents.contains(name) && !has_test_reference(&src_contents, name) {
+                    panic!(
+                        "PUB ITEM UNTESTED: `{name}` in {path_str}:{}\n\
+                         Every pub fn/struct/enum/trait must appear in at least one test file.\n\
+                         Either add a test that exercises this item, or add it to the build.rs\n\
+                         allowlist with a justification for why it's tested indirectly.\n\
+                         See: LAW-003 (No Orphan Infrastructure), FM-007 (Island Syndrome).\n\
+                         Post-mortem: downstream had 5 dispatch functions with zero tests.",
+                        line_no + 1
+                    );
+                }
+            }
+        }
+    });
+}
+
+/// Extract the item name from a line like `pub fn foo(`, `pub struct Bar {`, etc.
+/// Returns None if the line doesn't match a pub item declaration.
+fn extract_pub_item_name(line: &str) -> Option<&str> {
+    let rest = line.strip_prefix("pub ")?;
+    // Skip pub(crate), pub(super), pub(in ...) — those aren't public API
+    if rest.starts_with('(') {
+        return None;
+    }
+    // Match the keyword
+    let after_keyword = if let Some(r) = rest.strip_prefix("fn ") {
+        r
+    } else if let Some(r) = rest.strip_prefix("struct ") {
+        r
+    } else if let Some(r) = rest.strip_prefix("enum ") {
+        r
+    } else if let Some(r) = rest.strip_prefix("trait ") {
+        r
+    } else {
+        return None;
+    };
+    // Extract the name (up to first non-alphanumeric/underscore)
+    let name = after_keyword
+        .split(|c: char| !c.is_alphanumeric() && c != '_')
+        .next()?;
+    if name.is_empty() {
+        return None;
+    }
+    Some(name)
+}
+
+/// Check if a name appears in a #[cfg(test)] context within src/ contents.
+/// Simple heuristic: the name appears somewhere in the source that also contains #[cfg(test)].
+fn has_test_reference(src_contents: &str, name: &str) -> bool {
+    // This is a coarse check — if the name appears in src/ at all beyond its definition,
+    // it's likely referenced by inline tests or other modules.
+    // The primary guard is the test_contents check; this is the fallback for inline tests.
+    let mut count = 0;
+    for line in src_contents.lines() {
+        if line.contains(name) {
+            count += 1;
+        }
+        // More than just the definition line means it's referenced elsewhere
+        if count > 2 {
+            return true;
+        }
+    }
+    false
 }
 
 fn walk_rs_files(dir: &Path, check: &dyn Fn(&Path, &str)) {

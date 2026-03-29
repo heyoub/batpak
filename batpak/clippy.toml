@@ -15,3 +15,11 @@ reason = "Use proper error propagation. process::exit skips Drop impls and loses
 [[disallowed-methods]]
 path = "std::mem::forget"
 reason = "Leaking resources is a bug, not a feature. Use ManuallyDrop if truly needed (BANNED-002)"
+
+[[disallowed-methods]]
+path = "std::env::set_var"
+reason = "Not thread-safe — UB in multi-threaded context. Use constructor injection or config structs (BANNED-003)"
+
+[[disallowed-methods]]
+path = "std::env::remove_var"
+reason = "Not thread-safe — UB in multi-threaded context. Use constructor injection or config structs (BANNED-003)"

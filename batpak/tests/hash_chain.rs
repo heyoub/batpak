@@ -1,6 +1,10 @@
 //! Proptest verification of hash chain integrity.
 //! Chain verification, tamper detection, genesis event semantics.
 //! [SPEC:tests/hash_chain.rs]
+//!
+//! PROVES: LAW-001 (No Fake Success — tampered chains must fail verification)
+//! DEFENDS: FM-022 (Receipt Hollowing — hash integrity prevents forgery)
+//! INVARIANTS: INV-SEC (cryptographic chain integrity)
 
 use batpak::prelude::*;
 #[cfg(feature = "blake3")]

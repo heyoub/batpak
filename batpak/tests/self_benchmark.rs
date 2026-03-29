@@ -3,6 +3,10 @@
 //! Performance gates + correctness gates + resilience gates.
 //! [SPEC:tests/self_benchmark.rs]
 //!
+//! PROVES: LAW-004 (Composition Over Construction — quadratic dogfooding)
+//! DEFENDS: FM-013 (Coverage Mirage — gates test themselves), FM-007 (Island Syndrome)
+//! INVARIANTS: INV-PERF (performance thresholds), INV-STATE (gate evaluation)
+//!
 //! This IS the "free battery factory" philosophy: the same Gate/Pipeline system
 //! that products use to enforce business rules, the library uses to enforce
 //! its own performance AND correctness characteristics.

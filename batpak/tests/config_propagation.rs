@@ -1,4 +1,9 @@
 //! Regression tests for StoreConfig field propagation.
+//! [SPEC:tests/config_propagation.rs]
+//!
+//! PROVES: LAW-001 (No Fake Success — config must actually apply)
+//! DEFENDS: FM-003 (Silent Config Drift — fields ignored after construction)
+//! INVARIANTS: INV-STATE (config→runtime field propagation)
 //!
 //! These tests exist because three bugs slipped through code review:
 //! 1. wall_ms clock regression — backward clock could reorder events in BTreeMap

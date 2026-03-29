@@ -70,6 +70,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.75.0
       - run: cargo check --all-features
 
+  deny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+
   semver:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
@@ -88,7 +94,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Run coverage
         run: cargo llvm-cov test --all-features --text
-      - name: Coverage threshold check (70% line coverage)
+      - name: Coverage threshold check (80% line coverage)
         run: |
           SUMMARY=$(cargo llvm-cov test --all-features --json 2>/dev/null | python3 -c "
           import json, sys
@@ -99,12 +105,25 @@ jobs:
           print(f'{pct}')
           ")
           echo "Line coverage: ${SUMMARY}%"
-          if [ "${SUMMARY}" -lt 70 ]; then
-            echo "FAIL: coverage ${SUMMARY}% < 70%"
+          if [ "${SUMMARY}" -lt 80 ]; then
+            echo "FAIL: coverage ${SUMMARY}% < 80%"
             exit 1
           fi
 
-  bench-compile:
+  fuzz-chaos:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run fuzz-chaos feedback loop (ignored tests)
+        run: cargo test --test fuzz_chaos_feedback -- --ignored --test-threads=1
+        env:
+          PROPTEST_CASES: 256
+          CHAOS_ITERATIONS: 100
+
+  bench:
     runs-on: ubuntu-latest
     needs: check
     steps:
@@ -112,6 +131,15 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo bench --no-run --all-features
+      - name: Run benchmarks and save baseline
+        if: github.ref == 'refs/heads/main'
+        run: cargo bench --all-features -- --save-baseline main
+      - name: Run benchmarks against main baseline
+        if: github.ref != 'refs/heads/main'
+        continue-on-error: true
+        run: |
+          cargo bench --all-features -- --load-baseline main --baseline main 2>&1 | tee bench-results.txt || true
+          echo "::notice::Benchmark comparison complete — check output for regressions"
 
   docs:
     runs-on: ubuntu-latest

@@ -3,6 +3,10 @@
 //! Covers: inspect, inspect_err, map_err, or_else, and_then_if,
 //! into_result, unwrap_or, unwrap_or_else, join_any, zip edge cases.
 //! [SPEC:tests/outcome_combinators.rs]
+//!
+//! PROVES: LAW-006 (Algebraic Integrity — combinator contracts)
+//! DEFENDS: FM-009 (Polite Downgrade — combinators preserve error semantics)
+//! INVARIANTS: INV-TYPE (combinator type safety), INV-STATE (WaitCondition semantics)
 
 use batpak::prelude::*;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -1180,4 +1184,178 @@ fn join_any_pending_propagates() {
          Investigate: src/outcome/combine.rs join_any 'other' arm.\n\
          Run: cargo test --test outcome_combinators join_any_pending_propagates"
     );
+}
+
+// ===== Wave 2A: WaitCondition + CompensationAction behavioral tests =====
+// These types had only wire-format serde tests. Now we verify semantic construction
+// and variant differentiation. DEFENDS: FM-009 (Polite Downgrade — types must carry
+// real data, not just pass serde round-trips).
+
+#[test]
+fn wait_condition_timeout_carries_resume_time() {
+    use batpak::outcome::WaitCondition;
+    let wc = WaitCondition::Timeout {
+        resume_at_ms: 1_700_000_000_000,
+    };
+    match &wc {
+        WaitCondition::Timeout { resume_at_ms } => {
+            assert_eq!(
+                *resume_at_ms, 1_700_000_000_000,
+                "PROPERTY: WaitCondition::Timeout must carry exact resume_at_ms.\n\
+                 Investigate: src/outcome/wait.rs WaitCondition::Timeout variant.\n\
+                 Common causes: field silently defaulted or truncated."
+            );
+        }
+        _ => panic!("Expected Timeout variant"),
+    }
+}
+
+#[test]
+fn wait_condition_event_carries_id() {
+    use batpak::outcome::WaitCondition;
+    let id: u128 = 0xDEAD_BEEF_CAFE_BABE_1234_5678_9ABC_DEF0;
+    let wc = WaitCondition::Event { event_id: id };
+    match &wc {
+        WaitCondition::Event { event_id } => {
+            assert_eq!(
+                *event_id, id,
+                "PROPERTY: WaitCondition::Event must preserve full u128 event_id.\n\
+                 Investigate: src/outcome/wait.rs WaitCondition::Event, wire::u128_bytes.\n\
+                 Common causes: byte-order swap in serde, truncation to u64."
+            );
+        }
+        _ => panic!("Expected Event variant"),
+    }
+}
+
+#[test]
+fn wait_condition_all_composes_multiple() {
+    use batpak::outcome::WaitCondition;
+    let wc = WaitCondition::All(vec![
+        WaitCondition::Timeout { resume_at_ms: 100 },
+        WaitCondition::Timeout { resume_at_ms: 200 },
+    ]);
+    match &wc {
+        WaitCondition::All(conditions) => {
+            assert_eq!(
+                conditions.len(),
+                2,
+                "PROPERTY: WaitCondition::All must preserve all inner conditions.\n\
+                 Investigate: src/outcome/wait.rs WaitCondition::All variant."
+            );
+        }
+        _ => panic!("Expected All variant"),
+    }
+}
+
+#[test]
+fn wait_condition_custom_carries_tag_and_data() {
+    use batpak::outcome::WaitCondition;
+    let wc = WaitCondition::Custom {
+        tag: 42,
+        data: vec![1, 2, 3, 4],
+    };
+    match &wc {
+        WaitCondition::Custom { tag, data } => {
+            assert_eq!(*tag, 42);
+            assert_eq!(data, &[1, 2, 3, 4]);
+        }
+        _ => panic!("Expected Custom variant"),
+    }
+}
+
+#[test]
+fn wait_condition_variants_are_distinguishable() {
+    use batpak::outcome::WaitCondition;
+    // Variance assertion: different variants produce different Debug output
+    let variants: Vec<WaitCondition> = vec![
+        WaitCondition::Timeout { resume_at_ms: 100 },
+        WaitCondition::Event { event_id: 1 },
+        WaitCondition::All(vec![]),
+        WaitCondition::Any(vec![]),
+        WaitCondition::Custom {
+            tag: 0,
+            data: vec![],
+        },
+    ];
+    let debug_strings: Vec<String> = variants.iter().map(|v| format!("{v:?}")).collect();
+    for i in 0..debug_strings.len() {
+        for j in (i + 1)..debug_strings.len() {
+            assert_ne!(
+                debug_strings[i], debug_strings[j],
+                "VARIANCE: WaitCondition variants must produce distinct Debug output.\n\
+                 Variant {i} and {j} both produce: {}\n\
+                 Investigate: src/outcome/wait.rs derive(Debug).",
+                debug_strings[i]
+            );
+        }
+    }
+}
+
+#[test]
+fn compensation_action_rollback_carries_event_ids() {
+    use batpak::outcome::CompensationAction;
+    let ids = vec![111u128, 222, 333];
+    let action = CompensationAction::Rollback {
+        event_ids: ids.clone(),
+    };
+    match &action {
+        CompensationAction::Rollback { event_ids } => {
+            assert_eq!(
+                event_ids, &ids,
+                "PROPERTY: CompensationAction::Rollback must preserve all event_ids.\n\
+                 Investigate: src/outcome/wait.rs CompensationAction::Rollback, wire::vec_u128_bytes."
+            );
+        }
+        _ => panic!("Expected Rollback variant"),
+    }
+}
+
+#[test]
+fn compensation_action_notify_carries_message() {
+    use batpak::outcome::CompensationAction;
+    let action = CompensationAction::Notify {
+        target_id: 42,
+        message: "something went wrong".into(),
+    };
+    match &action {
+        CompensationAction::Notify {
+            target_id,
+            message,
+        } => {
+            assert_eq!(*target_id, 42);
+            assert_eq!(message, "something went wrong");
+        }
+        _ => panic!("Expected Notify variant"),
+    }
+}
+
+#[test]
+fn compensation_action_variants_are_distinguishable() {
+    use batpak::outcome::CompensationAction;
+    let variants: Vec<CompensationAction> = vec![
+        CompensationAction::Rollback {
+            event_ids: vec![1],
+        },
+        CompensationAction::Notify {
+            target_id: 1,
+            message: "x".into(),
+        },
+        CompensationAction::Release {
+            resource_ids: vec![1],
+        },
+        CompensationAction::Custom {
+            action_type: "x".into(),
+            data: vec![],
+        },
+    ];
+    let debug_strings: Vec<String> = variants.iter().map(|v| format!("{v:?}")).collect();
+    for i in 0..debug_strings.len() {
+        for j in (i + 1)..debug_strings.len() {
+            assert_ne!(
+                debug_strings[i], debug_strings[j],
+                "VARIANCE: CompensationAction variants must produce distinct Debug output."
+            );
+        }
+    }
 }
