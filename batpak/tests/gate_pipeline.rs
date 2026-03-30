@@ -438,7 +438,7 @@ fn pipeline_bypass_returns_bypass_receipt() {
          Investigate: src/pipeline/mod.rs Pipeline::bypass().\n\
          Common causes: bypass() discarding the proposal value, or BypassReceipt \
          storing the wrong field.\n\
-         Run: cargo test --test quiet_stragglers pipeline_bypass_returns_bypass_receipt"
+         Run: cargo test --test gate_pipeline pipeline_bypass_returns_bypass_receipt"
     );
     assert_eq!(
         receipt.reason(),
@@ -447,7 +447,7 @@ fn pipeline_bypass_returns_bypass_receipt() {
          Investigate: src/pipeline/mod.rs Pipeline::bypass() BypassReason::name().\n\
          Common causes: bypass() storing justification() in reason field, or \
          name() not being called at all.\n\
-         Run: cargo test --test quiet_stragglers pipeline_bypass_returns_bypass_receipt"
+         Run: cargo test --test gate_pipeline pipeline_bypass_returns_bypass_receipt"
     );
     assert_eq!(
         receipt.justification(),
@@ -456,7 +456,7 @@ fn pipeline_bypass_returns_bypass_receipt() {
          Investigate: src/pipeline/mod.rs Pipeline::bypass() BypassReason::justification().\n\
          Common causes: bypass() storing name() in justification field, or \
          justification() returning a hardcoded string instead of the impl's value.\n\
-         Run: cargo test --test quiet_stragglers pipeline_bypass_returns_bypass_receipt"
+         Run: cargo test --test gate_pipeline pipeline_bypass_returns_bypass_receipt"
     );
 }
 
@@ -471,7 +471,7 @@ fn proposal_map_transforms_payload() {
          Investigate: src/pipeline/mod.rs Proposal::map().\n\
          Common causes: map() cloning the old payload instead of applying the closure, \
          or the closure not being called at all.\n\
-         Run: cargo test --test quiet_stragglers proposal_map_transforms_payload"
+         Run: cargo test --test gate_pipeline proposal_map_transforms_payload"
     );
 }
 
@@ -495,7 +495,7 @@ fn committed_serde_round_trip() {
          Investigate: src/pipeline/mod.rs Committed Serialize/Deserialize impls.\n\
          Common causes: payload field not tagged with serde attribute, or msgpack \
          encoding changing string encoding between versions.\n\
-         Run: cargo test --test quiet_stragglers committed_serde_round_trip"
+         Run: cargo test --test gate_pipeline committed_serde_round_trip"
     );
     assert_eq!(
         decoded.event_id, 0xDEAD_BEEF_CAFE_BABE_1234_5678_9ABC_DEF0,
@@ -503,7 +503,7 @@ fn committed_serde_round_trip() {
          Investigate: src/pipeline/mod.rs src/wire.rs u128_bytes serde helper.\n\
          Common causes: u128_bytes encoding as little-endian but decoding as big-endian, \
          or serde_as attribute missing on the event_id field.\n\
-         Run: cargo test --test quiet_stragglers committed_serde_round_trip"
+         Run: cargo test --test gate_pipeline committed_serde_round_trip"
     );
     assert_eq!(
         decoded.sequence, 42,
@@ -511,7 +511,7 @@ fn committed_serde_round_trip() {
          Investigate: src/pipeline/mod.rs Committed Serialize/Deserialize impls.\n\
          Common causes: sequence field not included in serialization, or deserialized \
          into wrong numeric type causing truncation.\n\
-         Run: cargo test --test quiet_stragglers committed_serde_round_trip"
+         Run: cargo test --test gate_pipeline committed_serde_round_trip"
     );
     assert_eq!(
         decoded.hash, [0xAA; 32],
@@ -519,7 +519,7 @@ fn committed_serde_round_trip() {
          Investigate: src/pipeline/mod.rs Committed Serialize/Deserialize impls.\n\
          Common causes: hash field serialized as a sequence vs bytes causing length mismatch, \
          or serde_bytes attribute missing from the hash field.\n\
-         Run: cargo test --test quiet_stragglers committed_serde_round_trip"
+         Run: cargo test --test gate_pipeline committed_serde_round_trip"
     );
 }
 
@@ -535,7 +535,7 @@ fn denial_is_error_trait() {
          Investigate: src/guard/denial.rs Denial Display impl.\n\
          Common causes: Display not wrapping the gate name in brackets, or printing \
          only the message without the gate name prefix.\n\
-         Run: cargo test --test quiet_stragglers denial_is_error_trait"
+         Run: cargo test --test gate_pipeline denial_is_error_trait"
     );
 }
 
@@ -552,7 +552,7 @@ fn denial_serialize() {
          Investigate: src/guard/denial.rs Denial Serialize impl.\n\
          Common causes: gate field omitted from serde derive, or field renamed \
          to something other than 'gate' in the serialized output.\n\
-         Run: cargo test --test quiet_stragglers denial_serialize"
+         Run: cargo test --test gate_pipeline denial_serialize"
     );
     assert!(
         json.contains("403"),
@@ -560,7 +560,7 @@ fn denial_serialize() {
          Investigate: src/guard/denial.rs Denial Serialize impl with_code().\n\
          Common causes: code field serialized as null instead of the set value, \
          or with_code() not storing the value in the struct.\n\
-         Run: cargo test --test quiet_stragglers denial_serialize"
+         Run: cargo test --test gate_pipeline denial_serialize"
     );
     assert!(
         json.contains("alice"),
@@ -568,7 +568,7 @@ fn denial_serialize() {
          Investigate: src/guard/denial.rs Denial Serialize impl with_context().\n\
          Common causes: context map not included in serialization, or with_context() \
          not inserting into the context HashMap.\n\
-         Run: cargo test --test quiet_stragglers denial_serialize"
+         Run: cargo test --test gate_pipeline denial_serialize"
     );
 }
 
@@ -581,7 +581,7 @@ fn gateset_default() {
          Investigate: src/guard/mod.rs GateSet Default impl.\n\
          Common causes: Default not delegating to new(), or Default adding a \
          built-in gate that should not be present.\n\
-         Run: cargo test --test quiet_stragglers gateset_default"
+         Run: cargo test --test gate_pipeline gateset_default"
     );
 }
 
@@ -594,7 +594,7 @@ fn gateset_len_and_is_empty() {
          Investigate: src/guard/mod.rs GateSet::new() is_empty().\n\
          Common causes: GateSet::new() not initializing an empty inner collection, \
          or is_empty() always returning false.\n\
-         Run: cargo test --test quiet_stragglers gateset_len_and_is_empty"
+         Run: cargo test --test gate_pipeline gateset_len_and_is_empty"
     );
     assert_eq!(
         gates.len(),
@@ -603,7 +603,7 @@ fn gateset_len_and_is_empty() {
          Investigate: src/guard/mod.rs GateSet::new() len().\n\
          Common causes: len() returning 1 from a sentinel element, or GateSet \
          pre-populated with a default gate.\n\
-         Run: cargo test --test quiet_stragglers gateset_len_and_is_empty"
+         Run: cargo test --test gate_pipeline gateset_len_and_is_empty"
     );
 
     struct DummyGate;
@@ -623,7 +623,7 @@ fn gateset_len_and_is_empty() {
          Investigate: src/guard/mod.rs GateSet::push() is_empty().\n\
          Common causes: push() not actually inserting into the inner collection, \
          or is_empty() not reflecting the current state.\n\
-         Run: cargo test --test quiet_stragglers gateset_len_and_is_empty"
+         Run: cargo test --test gate_pipeline gateset_len_and_is_empty"
     );
     assert_eq!(
         gates.len(),
@@ -632,7 +632,7 @@ fn gateset_len_and_is_empty() {
          Investigate: src/guard/mod.rs GateSet::push() len().\n\
          Common causes: push() pushing a boxed copy without increasing the count, \
          or len() reading a cached stale value.\n\
-         Run: cargo test --test quiet_stragglers gateset_len_and_is_empty"
+         Run: cargo test --test gate_pipeline gateset_len_and_is_empty"
     );
 }
 
@@ -656,6 +656,6 @@ fn gate_description_default() {
          Investigate: src/guard/mod.rs Gate trait default description() impl.\n\
          Common causes: default impl returning the gate name instead of \"\", or \
          trait not providing a default impl and requiring every implementor to define it.\n\
-         Run: cargo test --test quiet_stragglers gate_description_default"
+         Run: cargo test --test gate_pipeline gate_description_default"
     );
 }

@@ -19,6 +19,7 @@
 //! INVARIANTS: INV-CONC (CAS, idempotency), INV-TEMP (walk_ancestors, compaction), INV-PERF (fd_budget)
 //! [SPEC:tests/store_advanced.rs]
 
+use batpak::event::Reactive;
 use batpak::prelude::*;
 use batpak::store::{RestartPolicy, Store, StoreConfig};
 use batpak::typestate::Transition;
@@ -2316,8 +2317,6 @@ fn with_correlation_and_causation_combined() {
 // Reactive pattern
 // ================================================================
 
-use batpak::event::Reactive;
-
 struct OrderReactor;
 impl batpak::event::Reactive<serde_json::Value> for OrderReactor {
     fn react(
@@ -2394,7 +2393,7 @@ fn reactive_subscribe_react_append_pattern() {
          Investigate: src/event/sourcing.rs Reactive trait react() method.\n\
          Common causes: react() returning an empty vec because event_kind comparison \
          fails, or EventKind::custom encoding mismatch between writer and reactor.\n\
-         Run: cargo test --test quiet_stragglers reactive_subscribe_react_append_pattern"
+         Run: cargo test --test store_advanced reactive_subscribe_react_append_pattern"
     );
 
     // Append reactions via append_reaction (the causal link)
@@ -2418,7 +2417,7 @@ fn reactive_subscribe_react_append_pattern() {
          Investigate: src/store/mod.rs Store::append_reaction() src/event/sourcing.rs.\n\
          Common causes: append_reaction() not writing to the store, or stats.event_count \
          not counting reaction events that go to a different coordinate.\n\
-         Run: cargo test --test quiet_stragglers reactive_subscribe_react_append_pattern"
+         Run: cargo test --test store_advanced reactive_subscribe_react_append_pattern"
     );
 
     store.sync().expect("sync");

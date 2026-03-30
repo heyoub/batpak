@@ -1370,7 +1370,7 @@ fn flatten_unwraps_nested_ok() {
          Investigate: src/outcome/mod.rs impl Outcome<Outcome<T>> flatten().\n\
          Common causes: flatten() returning the outer Ok without unwrapping the inner, \
          or not handling the doubly-nested case.\n\
-         Run: cargo test --test quiet_stragglers flatten_unwraps_nested_ok"
+         Run: cargo test --test outcome_combinators flatten_unwraps_nested_ok"
     );
 }
 
@@ -1390,7 +1390,7 @@ fn flatten_propagates_inner_err() {
          Investigate: src/outcome/mod.rs impl Outcome<Outcome<T>> flatten().\n\
          Common causes: flatten() treating Ok(Err) as Ok(default) by ignoring the \
          inner variant, or only handling the outer layer.\n\
-         Run: cargo test --test quiet_stragglers flatten_propagates_inner_err"
+         Run: cargo test --test outcome_combinators flatten_propagates_inner_err"
     );
 }
 
@@ -1410,7 +1410,7 @@ fn flatten_propagates_outer_err() {
          Investigate: src/outcome/mod.rs impl Outcome<Outcome<T>> flatten().\n\
          Common causes: flatten() converting outer Err to Ok(default), or returning \
          Outcome::Pending instead of the error.\n\
-         Run: cargo test --test quiet_stragglers flatten_propagates_outer_err"
+         Run: cargo test --test outcome_combinators flatten_propagates_outer_err"
     );
 }
 
@@ -1428,7 +1428,7 @@ fn flatten_distributes_over_batch() {
          Investigate: src/outcome/mod.rs impl Outcome<Outcome<T>> flatten() Batch arm.\n\
          Common causes: flatten() not recursing into Batch items, or collecting the \
          batch as Outcome<Vec<Outcome<T>>> instead of Outcome::Batch(Vec<Outcome<T>>).\n\
-         Run: cargo test --test quiet_stragglers flatten_distributes_over_batch"
+         Run: cargo test --test outcome_combinators flatten_distributes_over_batch"
     );
 }
 
@@ -1447,7 +1447,7 @@ fn outcome_error_display() {
          Investigate: src/outcome/error.rs OutcomeError Display impl.\n\
          Common causes: Display formatting only the message field without including \
          the kind, or kind printed as a raw discriminant number instead of its name.\n\
-         Run: cargo test --test quiet_stragglers outcome_error_display"
+         Run: cargo test --test outcome_combinators outcome_error_display"
     );
     assert!(
         s.contains("double booking"),
@@ -1455,6 +1455,6 @@ fn outcome_error_display() {
          Investigate: src/outcome/error.rs OutcomeError Display impl.\n\
          Common causes: Display printing only the kind and omitting the message, \
          or message field not being formatted into the output string.\n\
-         Run: cargo test --test quiet_stragglers outcome_error_display"
+         Run: cargo test --test outcome_combinators outcome_error_display"
     );
 }

@@ -1,4 +1,3 @@
-#![allow(clippy::disallowed_methods)] // uses thread::spawn in subscription test
 //! Unit tests for the event domain: EventId, EventKind, EventHeader, Event methods,
 //! DagPosition, and the define_entity_id! macro.
 //! [SPEC:tests/event_api.rs]
@@ -24,7 +23,7 @@ fn event_id_now_v7_is_nonzero() {
          Investigate: src/id/mod.rs generate_v7_id().\n\
          Common causes: UUID library returning nil on clock skew, feature flag disabled, \
          or SystemTime before Unix epoch on the test host.\n\
-         Run: cargo test --test quiet_stragglers event_id_now_v7_is_nonzero"
+         Run: cargo test --test event_api event_id_now_v7_is_nonzero"
     );
 }
 
@@ -38,7 +37,7 @@ fn event_id_nil_is_zero() {
          Investigate: src/id/mod.rs nil().\n\
          Common causes: nil() forwarding to now_v7() by mistake, or inner type default \
          not being zero-initialized.\n\
-         Run: cargo test --test quiet_stragglers event_id_nil_is_zero"
+         Run: cargo test --test event_api event_id_nil_is_zero"
     );
 }
 
@@ -53,7 +52,7 @@ fn event_id_round_trip() {
          Investigate: src/id/mod.rs new() as_u128().\n\
          Common causes: byte-order swap in new() or as_u128(), truncation of high bits, \
          or wrapping newtype that strips the value.\n\
-         Run: cargo test --test quiet_stragglers event_id_round_trip"
+         Run: cargo test --test event_api event_id_round_trip"
     );
 }
 
@@ -67,7 +66,7 @@ fn event_id_display_format() {
          Investigate: src/id/mod.rs define_entity_id! Display impl.\n\
          Common causes: macro emitting the wrong prefix string literal, or Display \
          delegating to as_u128() without prepending the prefix.\n\
-         Run: cargo test --test quiet_stragglers event_id_display_format"
+         Run: cargo test --test event_api event_id_display_format"
     );
     assert!(
         s.contains("ff"),
@@ -75,7 +74,7 @@ fn event_id_display_format() {
          Investigate: src/id/mod.rs define_entity_id! Display impl.\n\
          Common causes: Display printing decimal instead of hex, or padding zeroing \
          out the only non-zero byte before formatting.\n\
-         Run: cargo test --test quiet_stragglers event_id_display_format"
+         Run: cargo test --test event_api event_id_display_format"
     );
 }
 
@@ -91,7 +90,7 @@ fn event_id_from_str_with_prefix() {
          Investigate: src/id/mod.rs define_entity_id! FromStr impl.\n\
          Common causes: prefix stripping off-by-one consuming a hex digit, or \
          from_str not recognising the 'entity:' prefix at all.\n\
-         Run: cargo test --test quiet_stragglers event_id_from_str_with_prefix"
+         Run: cargo test --test event_api event_id_from_str_with_prefix"
     );
 }
 
@@ -107,7 +106,7 @@ fn event_id_from_str_bare_hex() {
          Investigate: src/id/mod.rs define_entity_id! FromStr impl.\n\
          Common causes: parser requiring the 'entity:' prefix and returning Err on bare \
          hex, or u128::from_str_radix receiving the wrong slice.\n\
-         Run: cargo test --test quiet_stragglers event_id_from_str_bare_hex"
+         Run: cargo test --test event_api event_id_from_str_bare_hex"
     );
 }
 
@@ -121,7 +120,7 @@ fn event_id_from_str_rejects_garbage() {
          Investigate: src/id/mod.rs define_entity_id! FromStr impl.\n\
          Common causes: parser returning Ok(0) on parse failure instead of Err, \
          or unwrap_or silently swallowing the error.\n\
-         Run: cargo test --test quiet_stragglers event_id_from_str_rejects_garbage"
+         Run: cargo test --test event_api event_id_from_str_rejects_garbage"
     );
 }
 
@@ -138,7 +137,7 @@ fn define_entity_id_custom_type() {
          Investigate: src/id/mod.rs define_entity_id! macro expansion.\n\
          Common causes: macro forwarding to a stub that returns nil, or UUID clock \
          returning zero on test host.\n\
-         Run: cargo test --test quiet_stragglers define_entity_id_custom_type"
+         Run: cargo test --test event_api define_entity_id_custom_type"
     );
     assert_eq!(
         OrderId::ENTITY_NAME,
@@ -147,7 +146,7 @@ fn define_entity_id_custom_type() {
          Investigate: src/id/mod.rs define_entity_id! macro ENTITY_NAME const.\n\
          Common causes: macro hardcoding a different literal, or const not being \
          set from the macro argument.\n\
-         Run: cargo test --test quiet_stragglers define_entity_id_custom_type"
+         Run: cargo test --test event_api define_entity_id_custom_type"
     );
 
     let display = format!("{id}");
@@ -157,7 +156,7 @@ fn define_entity_id_custom_type() {
          Investigate: src/id/mod.rs define_entity_id! Display impl.\n\
          Common causes: Display impl using a hardcoded prefix instead of ENTITY_NAME, \
          or macro not emitting a Display impl at all.\n\
-         Run: cargo test --test quiet_stragglers define_entity_id_custom_type"
+         Run: cargo test --test event_api define_entity_id_custom_type"
     );
 }
 
@@ -175,21 +174,21 @@ fn event_header_flags_requires_ack() {
          Investigate: src/event/header.rs requires_ack() flag mask.\n\
          Common causes: requires_ack() testing bit 0x02 instead of 0x01, or \
          with_flags() not storing the value in the flags field.\n\
-         Run: cargo test --test quiet_stragglers event_header_flags_requires_ack"
+         Run: cargo test --test event_api event_header_flags_requires_ack"
     );
     assert!(
         !header.is_transactional(),
         "PROPERTY: Flag bit 0x01 must NOT set is_transactional().\n\
          Investigate: src/event/header.rs is_transactional() flag mask.\n\
          Common causes: is_transactional() using the same bit mask as requires_ack().\n\
-         Run: cargo test --test quiet_stragglers event_header_flags_requires_ack"
+         Run: cargo test --test event_api event_header_flags_requires_ack"
     );
     assert!(
         !header.is_replay(),
         "PROPERTY: Flag bit 0x01 must NOT set is_replay().\n\
          Investigate: src/event/header.rs is_replay() flag mask.\n\
          Common causes: is_replay() using bit 0x01 instead of 0x08.\n\
-         Run: cargo test --test quiet_stragglers event_header_flags_requires_ack"
+         Run: cargo test --test event_api event_header_flags_requires_ack"
     );
 }
 
@@ -203,14 +202,14 @@ fn event_header_flags_transactional() {
          Investigate: src/event/header.rs is_transactional() flag mask.\n\
          Common causes: is_transactional() testing bit 0x01 instead of 0x02, or \
          flag bits defined in the wrong order.\n\
-         Run: cargo test --test quiet_stragglers event_header_flags_transactional"
+         Run: cargo test --test event_api event_header_flags_transactional"
     );
     assert!(
         !header.requires_ack(),
         "PROPERTY: Flag bit 0x02 must NOT set requires_ack().\n\
          Investigate: src/event/header.rs requires_ack() flag mask.\n\
          Common causes: requires_ack() testing bit 0x02 instead of 0x01.\n\
-         Run: cargo test --test quiet_stragglers event_header_flags_transactional"
+         Run: cargo test --test event_api event_header_flags_transactional"
     );
 }
 
@@ -224,21 +223,21 @@ fn event_header_flags_replay() {
          Investigate: src/event/header.rs is_replay() flag mask.\n\
          Common causes: is_replay() testing bit 0x04 instead of 0x08, or \
          flag constant defined incorrectly.\n\
-         Run: cargo test --test quiet_stragglers event_header_flags_replay"
+         Run: cargo test --test event_api event_header_flags_replay"
     );
     assert!(
         !header.requires_ack(),
         "PROPERTY: Flag bit 0x08 must NOT set requires_ack().\n\
          Investigate: src/event/header.rs requires_ack() flag mask.\n\
          Common causes: requires_ack() mask accidentally overlapping with replay bit.\n\
-         Run: cargo test --test quiet_stragglers event_header_flags_replay"
+         Run: cargo test --test event_api event_header_flags_replay"
     );
     assert!(
         !header.is_transactional(),
         "PROPERTY: Flag bit 0x08 must NOT set is_transactional().\n\
          Investigate: src/event/header.rs is_transactional() flag mask.\n\
          Common causes: is_transactional() mask accidentally overlapping with replay bit.\n\
-         Run: cargo test --test quiet_stragglers event_header_flags_replay"
+         Run: cargo test --test event_api event_header_flags_replay"
     );
 }
 
@@ -251,7 +250,7 @@ fn event_header_flags_zero_all_false() {
          Investigate: src/event/header.rs requires_ack() flags field initialization.\n\
          Common causes: EventHeader::new() defaulting flags to a non-zero value, or \
          requires_ack() not masking correctly against 0x01.\n\
-         Run: cargo test --test quiet_stragglers event_header_flags_zero_all_false"
+         Run: cargo test --test event_api event_header_flags_zero_all_false"
     );
     assert!(
         !header.is_transactional(),
@@ -259,7 +258,7 @@ fn event_header_flags_zero_all_false() {
          Investigate: src/event/header.rs is_transactional() flags field initialization.\n\
          Common causes: EventHeader::new() defaulting flags to a non-zero value, or \
          is_transactional() not masking correctly against 0x02.\n\
-         Run: cargo test --test quiet_stragglers event_header_flags_zero_all_false"
+         Run: cargo test --test event_api event_header_flags_zero_all_false"
     );
     assert!(
         !header.is_replay(),
@@ -267,7 +266,7 @@ fn event_header_flags_zero_all_false() {
          Investigate: src/event/header.rs is_replay() flags field initialization.\n\
          Common causes: EventHeader::new() defaulting flags to a non-zero value, or \
          is_replay() not masking correctly against 0x08.\n\
-         Run: cargo test --test quiet_stragglers event_header_flags_zero_all_false"
+         Run: cargo test --test event_api event_header_flags_zero_all_false"
     );
 }
 
@@ -289,7 +288,7 @@ fn event_header_age_us() {
          Investigate: src/event/header.rs EventHeader::age_us().\n\
          Common causes: age_us() returning absolute timestamp instead of delta, \
          or subtraction performed in wrong order (timestamp - now).\n\
-         Run: cargo test --test quiet_stragglers event_header_age_us"
+         Run: cargo test --test event_api event_header_age_us"
     );
 }
 
@@ -314,7 +313,7 @@ fn event_kind_system_constants_are_system() {
              Investigate: src/event/kind.rs EventKind::is_system() category check.\n\
              Common causes: system category constant changed, or is_system() checking \
              the wrong nibble in the packed u16 value.\n\
-             Run: cargo test --test quiet_stragglers event_kind_system_constants_are_system",
+             Run: cargo test --test event_api event_kind_system_constants_are_system",
             kind
         );
         assert!(
@@ -322,7 +321,7 @@ fn event_kind_system_constants_are_system() {
             "PROPERTY: System EventKind {:?} must NOT return true for is_effect().\n\
              Investigate: src/event/kind.rs EventKind::is_effect() category check.\n\
              Common causes: is_effect() using the same category mask as is_system().\n\
-             Run: cargo test --test quiet_stragglers event_kind_system_constants_are_system",
+             Run: cargo test --test event_api event_kind_system_constants_are_system",
             kind
         );
     }
@@ -345,7 +344,7 @@ fn event_kind_effect_constants_are_effect() {
              Investigate: src/event/kind.rs EventKind::is_effect() category check.\n\
              Common causes: effect category constant changed, or is_effect() checking \
              the wrong nibble in the packed u16 value.\n\
-             Run: cargo test --test quiet_stragglers event_kind_effect_constants_are_effect",
+             Run: cargo test --test event_api event_kind_effect_constants_are_effect",
             kind
         );
         assert!(
@@ -353,7 +352,7 @@ fn event_kind_effect_constants_are_effect() {
             "PROPERTY: Effect EventKind {:?} must NOT return true for is_system().\n\
              Investigate: src/event/kind.rs EventKind::is_system() category check.\n\
              Common causes: is_system() using the same category mask as is_effect().\n\
-             Run: cargo test --test quiet_stragglers event_kind_effect_constants_are_effect",
+             Run: cargo test --test event_api event_kind_effect_constants_are_effect",
             kind
         );
     }
@@ -368,7 +367,7 @@ fn event_kind_custom_is_neither_system_nor_effect() {
          Investigate: src/event/kind.rs EventKind::is_system() category range check.\n\
          Common causes: is_system() treating category 0x5 as reserved system space, \
          or category boundaries defined incorrectly.\n\
-         Run: cargo test --test quiet_stragglers event_kind_custom_is_neither_system_nor_effect"
+         Run: cargo test --test event_api event_kind_custom_is_neither_system_nor_effect"
     );
     assert!(
         !custom.is_effect(),
@@ -376,7 +375,7 @@ fn event_kind_custom_is_neither_system_nor_effect() {
          Investigate: src/event/kind.rs EventKind::is_effect() category range check.\n\
          Common causes: is_effect() treating category 0x5 as reserved effect space, \
          or category boundaries defined incorrectly.\n\
-         Run: cargo test --test quiet_stragglers event_kind_custom_is_neither_system_nor_effect"
+         Run: cargo test --test event_api event_kind_custom_is_neither_system_nor_effect"
     );
     assert_eq!(
         custom.category(),
@@ -385,7 +384,7 @@ fn event_kind_custom_is_neither_system_nor_effect() {
          Investigate: src/event/kind.rs EventKind::custom() category() packing.\n\
          Common causes: category packed into wrong nibble position, or category() \
          extracting the wrong bits from the u16.\n\
-         Run: cargo test --test quiet_stragglers event_kind_custom_is_neither_system_nor_effect"
+         Run: cargo test --test event_api event_kind_custom_is_neither_system_nor_effect"
     );
     assert_eq!(
         custom.type_id(),
@@ -394,7 +393,7 @@ fn event_kind_custom_is_neither_system_nor_effect() {
          Investigate: src/event/kind.rs EventKind::custom() type_id() packing.\n\
          Common causes: type_id packed into wrong byte position, or type_id() \
          extracting bits that include the category nibble.\n\
-         Run: cargo test --test quiet_stragglers event_kind_custom_is_neither_system_nor_effect"
+         Run: cargo test --test event_api event_kind_custom_is_neither_system_nor_effect"
     );
 }
 
@@ -408,7 +407,7 @@ fn event_kind_display_hex() {
          Investigate: src/event/kind.rs EventKind Display impl.\n\
          Common causes: Display using lowercase instead of uppercase hex, missing '0x' prefix, \
          or printing the raw u16 without the structured nibble/byte layout.\n\
-         Run: cargo test --test quiet_stragglers event_kind_display_hex"
+         Run: cargo test --test event_api event_kind_display_hex"
     );
 }
 
@@ -432,7 +431,7 @@ fn event_with_hash_chain_sets_field() {
          Investigate: src/event/mod.rs Event::with_hash_chain().\n\
          Common causes: with_hash_chain() returning a clone of the original event without \
          updating the field, or hash_chain field shadowed by a local variable.\n\
-         Run: cargo test --test quiet_stragglers event_with_hash_chain_sets_field"
+         Run: cargo test --test event_api event_with_hash_chain_sets_field"
     );
 }
 
@@ -449,7 +448,7 @@ fn event_is_genesis_true_when_prev_hash_zero() {
          Investigate: src/event/mod.rs Event::is_genesis().\n\
          Common causes: is_genesis() checking event_hash instead of prev_hash, or \
          comparing against [0xFF; 32] instead of [0u8; 32].\n\
-         Run: cargo test --test quiet_stragglers event_is_genesis_true_when_prev_hash_zero"
+         Run: cargo test --test event_api event_is_genesis_true_when_prev_hash_zero"
     );
 }
 
@@ -466,7 +465,7 @@ fn event_is_genesis_false_when_prev_hash_nonzero() {
          Investigate: src/event/mod.rs Event::is_genesis().\n\
          Common causes: is_genesis() always returning true, or using wrong zero-comparison \
          that ignores non-zero bytes in prev_hash.\n\
-         Run: cargo test --test quiet_stragglers event_is_genesis_false_when_prev_hash_nonzero"
+         Run: cargo test --test event_api event_is_genesis_false_when_prev_hash_nonzero"
     );
 }
 
@@ -480,7 +479,7 @@ fn event_is_genesis_true_when_no_hash_chain() {
          Investigate: src/event/mod.rs Event::is_genesis().\n\
          Common causes: is_genesis() panicking or returning false on None hash_chain, \
          or not handling the Option::None case.\n\
-         Run: cargo test --test quiet_stragglers event_is_genesis_true_when_no_hash_chain"
+         Run: cargo test --test event_api event_is_genesis_true_when_no_hash_chain"
     );
 }
 
@@ -495,7 +494,7 @@ fn event_map_payload_transforms_preserving_header() {
          Investigate: src/event/mod.rs Event::map_payload().\n\
          Common causes: map_payload() ignoring the closure and cloning the original \
          payload, or building a new Event with the old payload.\n\
-         Run: cargo test --test quiet_stragglers event_map_payload_transforms_preserving_header"
+         Run: cargo test --test event_api event_map_payload_transforms_preserving_header"
     );
     assert_eq!(
         mapped.header.event_id, 42,
@@ -503,7 +502,7 @@ fn event_map_payload_transforms_preserving_header() {
          Investigate: src/event/mod.rs Event::map_payload().\n\
          Common causes: map_payload() creating a new header instead of moving the original, \
          or resetting header fields like event_id to defaults.\n\
-         Run: cargo test --test quiet_stragglers event_map_payload_transforms_preserving_header"
+         Run: cargo test --test event_api event_map_payload_transforms_preserving_header"
     );
     assert_eq!(
         mapped.header.timestamp_us, 100,
@@ -511,7 +510,7 @@ fn event_map_payload_transforms_preserving_header() {
          Investigate: src/event/mod.rs Event::map_payload().\n\
          Common causes: map_payload() rebuilding a fresh header that zero-initializes \
          timestamp_us instead of carrying over the original header.\n\
-         Run: cargo test --test quiet_stragglers event_map_payload_transforms_preserving_header"
+         Run: cargo test --test event_api event_map_payload_transforms_preserving_header"
     );
 }
 
@@ -527,7 +526,7 @@ fn event_position_returns_header_position() {
          Investigate: src/event/mod.rs Event::position().\n\
          Common causes: position() returning a default DagPosition instead of \
          delegating to header.position, or dereferencing the wrong field.\n\
-         Run: cargo test --test quiet_stragglers event_position_returns_header_position"
+         Run: cargo test --test event_api event_position_returns_header_position"
     );
 }
 
@@ -544,7 +543,7 @@ fn dag_position_root() {
          Investigate: src/coordinate/position.rs DagPosition::root().\n\
          Common causes: root() copying a non-zero depth from a template, or \
          the struct initializer using wrong field ordering.\n\
-         Run: cargo test --test quiet_stragglers dag_position_root"
+         Run: cargo test --test event_api dag_position_root"
     );
     assert_eq!(
         pos.lane, 0,
@@ -552,7 +551,7 @@ fn dag_position_root() {
          Investigate: src/coordinate/position.rs DagPosition::root().\n\
          Common causes: root() initializing lane to 1 instead of 0, or \
          field ordering swap between lane and depth.\n\
-         Run: cargo test --test quiet_stragglers dag_position_root"
+         Run: cargo test --test event_api dag_position_root"
     );
     assert_eq!(
         pos.sequence, 0,
@@ -560,7 +559,7 @@ fn dag_position_root() {
          Investigate: src/coordinate/position.rs DagPosition::root().\n\
          Common causes: root() not zero-initializing sequence, or sequence \
          defaulting to 1 for 'first event' semantics.\n\
-         Run: cargo test --test quiet_stragglers dag_position_root"
+         Run: cargo test --test event_api dag_position_root"
     );
     assert!(
         pos.is_root(),
@@ -568,7 +567,7 @@ fn dag_position_root() {
          Investigate: src/coordinate/position.rs DagPosition::is_root().\n\
          Common causes: is_root() checking only depth but not lane or sequence, \
          or root() not producing coordinates that satisfy is_root().\n\
-         Run: cargo test --test quiet_stragglers dag_position_root"
+         Run: cargo test --test event_api dag_position_root"
     );
 }
 
@@ -581,7 +580,7 @@ fn dag_position_child() {
          Investigate: src/coordinate/position.rs DagPosition::child().\n\
          Common causes: child() ignoring the sequence argument and hardcoding 0, \
          or storing sequence in the depth field by mistake.\n\
-         Run: cargo test --test quiet_stragglers dag_position_child"
+         Run: cargo test --test event_api dag_position_child"
     );
     assert_eq!(
         pos.depth, 0,
@@ -589,14 +588,14 @@ fn dag_position_child() {
          Investigate: src/coordinate/position.rs DagPosition::child().\n\
          Common causes: child() incrementing depth like fork(), or copying depth \
          from an earlier position.\n\
-         Run: cargo test --test quiet_stragglers dag_position_child"
+         Run: cargo test --test event_api dag_position_child"
     );
     assert_eq!(
         pos.lane, 0,
         "PROPERTY: DagPosition::child() must set lane to 0 (main lane).\n\
          Investigate: src/coordinate/position.rs DagPosition::child().\n\
          Common causes: child() calling fork() internally, which would assign a new lane.\n\
-         Run: cargo test --test quiet_stragglers dag_position_child"
+         Run: cargo test --test event_api dag_position_child"
     );
     assert!(
         !pos.is_root(),
@@ -604,7 +603,7 @@ fn dag_position_child() {
          Investigate: src/coordinate/position.rs DagPosition::is_root().\n\
          Common causes: is_root() only checking depth==0 and lane==0 without checking \
          sequence==0.\n\
-         Run: cargo test --test quiet_stragglers dag_position_child"
+         Run: cargo test --test event_api dag_position_child"
     );
 }
 
@@ -617,7 +616,7 @@ fn dag_position_fork() {
          Investigate: src/coordinate/position.rs DagPosition::fork().\n\
          Common causes: fork() storing parent_depth unchanged instead of incrementing, \
          or depth and lane arguments swapped in the constructor.\n\
-         Run: cargo test --test quiet_stragglers dag_position_fork"
+         Run: cargo test --test event_api dag_position_fork"
     );
     assert_eq!(
         pos.lane, 3,
@@ -625,7 +624,7 @@ fn dag_position_fork() {
          Investigate: src/coordinate/position.rs DagPosition::fork().\n\
          Common causes: fork() using an auto-incrementing lane counter instead of \
          the provided lane argument.\n\
-         Run: cargo test --test quiet_stragglers dag_position_fork"
+         Run: cargo test --test event_api dag_position_fork"
     );
     assert_eq!(
         pos.sequence, 0,
@@ -633,14 +632,14 @@ fn dag_position_fork() {
          Investigate: src/coordinate/position.rs DagPosition::fork().\n\
          Common causes: fork() copying sequence from the parent position instead of \
          resetting it to 0.\n\
-         Run: cargo test --test quiet_stragglers dag_position_fork"
+         Run: cargo test --test event_api dag_position_fork"
     );
     assert!(
         !pos.is_root(),
         "PROPERTY: DagPosition::fork() must NOT be is_root() (non-zero depth and lane).\n\
          Investigate: src/coordinate/position.rs DagPosition::is_root().\n\
          Common causes: is_root() returning true when sequence==0 regardless of depth/lane.\n\
-         Run: cargo test --test quiet_stragglers dag_position_fork"
+         Run: cargo test --test event_api dag_position_fork"
     );
 }
 
@@ -654,7 +653,7 @@ fn dag_position_is_ancestor_of_same_lane() {
          Investigate: src/coordinate/position.rs DagPosition::is_ancestor_of().\n\
          Common causes: is_ancestor_of() using >= instead of < on sequence, or not \
          checking lane equality before comparing sequence.\n\
-         Run: cargo test --test quiet_stragglers dag_position_is_ancestor_of_same_lane"
+         Run: cargo test --test event_api dag_position_is_ancestor_of_same_lane"
     );
     assert!(
         !b.is_ancestor_of(&a),
@@ -662,7 +661,7 @@ fn dag_position_is_ancestor_of_same_lane() {
          Investigate: src/coordinate/position.rs DagPosition::is_ancestor_of().\n\
          Common causes: is_ancestor_of() not checking direction, returning true for \
          any two positions on the same lane.\n\
-         Run: cargo test --test quiet_stragglers dag_position_is_ancestor_of_same_lane"
+         Run: cargo test --test event_api dag_position_is_ancestor_of_same_lane"
     );
 }
 
@@ -676,7 +675,7 @@ fn dag_position_is_ancestor_of_different_lanes() {
          Investigate: src/coordinate/position.rs DagPosition::is_ancestor_of().\n\
          Common causes: is_ancestor_of() only comparing sequence without checking \
          that lanes match, treating all lower-sequence positions as ancestors.\n\
-         Run: cargo test --test quiet_stragglers dag_position_is_ancestor_of_different_lanes"
+         Run: cargo test --test event_api dag_position_is_ancestor_of_different_lanes"
     );
 }
 
@@ -690,7 +689,7 @@ fn dag_position_partial_ord_same_lane() {
          Investigate: src/coordinate/position.rs DagPosition PartialOrd impl.\n\
          Common causes: PartialOrd returning None for same-lane comparisons, or comparing \
          depth/lane first without falling through to sequence.\n\
-         Run: cargo test --test quiet_stragglers dag_position_partial_ord_same_lane"
+         Run: cargo test --test event_api dag_position_partial_ord_same_lane"
     );
     assert!(
         b > a,
@@ -698,7 +697,7 @@ fn dag_position_partial_ord_same_lane() {
          Investigate: src/coordinate/position.rs DagPosition PartialOrd impl.\n\
          Common causes: PartialOrd impl not providing symmetry, or gt() delegating \
          to an incorrect comparison.\n\
-         Run: cargo test --test quiet_stragglers dag_position_partial_ord_same_lane"
+         Run: cargo test --test event_api dag_position_partial_ord_same_lane"
     );
     let c = DagPosition::child(2);
     assert!(
@@ -707,7 +706,7 @@ fn dag_position_partial_ord_same_lane() {
          Investigate: src/coordinate/position.rs DagPosition PartialOrd impl.\n\
          Common causes: PartialOrd returning None for equal positions, or failing to \
          short-circuit when all fields are equal.\n\
-         Run: cargo test --test quiet_stragglers dag_position_partial_ord_same_lane"
+         Run: cargo test --test event_api dag_position_partial_ord_same_lane"
     );
 }
 
@@ -722,7 +721,7 @@ fn dag_position_partial_ord_different_lanes_incomparable() {
          Investigate: src/coordinate/position.rs DagPosition PartialOrd impl.\n\
          Common causes: PartialOrd ignoring lane differences and comparing only by sequence, \
          or returning Some(Less) when lane of a < lane of b.\n\
-         Run: cargo test --test quiet_stragglers dag_position_partial_ord_different_lanes_incomparable"
+         Run: cargo test --test event_api dag_position_partial_ord_different_lanes_incomparable"
     );
 }
 
@@ -736,7 +735,7 @@ fn dag_position_display() {
          Investigate: src/coordinate/position.rs DagPosition Display impl.\n\
          Common causes: Display outputting fields in wrong order (e.g. sequence:lane:depth), \
          using a different separator than ':', or printing only some fields.\n\
-         Run: cargo test --test quiet_stragglers dag_position_display"
+         Run: cargo test --test event_api dag_position_display"
     );
 }
 
@@ -752,7 +751,7 @@ fn dag_position_fork_creates_new_lane() {
         DagPosition::new(1, 1, 0),
         "PROPERTY: fork(parent_depth=0, new_lane=1) must produce depth=1, lane=1, sequence=0.\n\
          Investigate: src/coordinate/position.rs DagPosition::fork().\n\
-         Run: cargo test --test quiet_stragglers dag_position_fork_creates_new_lane"
+         Run: cargo test --test event_api dag_position_fork_creates_new_lane"
     );
 }
 
@@ -764,7 +763,7 @@ fn dag_position_forked_incomparable_with_lane_zero() {
         main.partial_cmp(&forked).is_none(),
         "PROPERTY: Forked position (lane=1) must be incomparable with main lane (lane=0).\n\
          Investigate: src/coordinate/position.rs DagPosition PartialOrd impl.\n\
-         Run: cargo test --test quiet_stragglers dag_position_forked_incomparable_with_lane_zero"
+         Run: cargo test --test event_api dag_position_forked_incomparable_with_lane_zero"
     );
 }
 
@@ -776,6 +775,6 @@ fn dag_position_fork_is_not_ancestor_across_lanes() {
         !main.is_ancestor_of(&forked),
         "PROPERTY: is_ancestor_of must return false across different lanes.\n\
          Investigate: src/coordinate/position.rs DagPosition::is_ancestor_of().\n\
-         Run: cargo test --test quiet_stragglers dag_position_fork_is_not_ancestor_across_lanes"
+         Run: cargo test --test event_api dag_position_fork_is_not_ancestor_across_lanes"
     );
 }

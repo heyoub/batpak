@@ -696,7 +696,7 @@ fn error_kind_is_domain() {
          Investigate: src/outcome/error.rs ErrorKind::is_domain().\n\
          Common causes: NotFound missing from the domain match arm, or mis-categorized \
          as an operational error.\n\
-         Run: cargo test --test quiet_stragglers error_kind_is_domain"
+         Run: cargo test --test store_properties error_kind_is_domain"
     );
     assert!(
         ErrorKind::Conflict.is_domain(),
@@ -704,14 +704,14 @@ fn error_kind_is_domain() {
          Investigate: src/outcome/error.rs ErrorKind::is_domain().\n\
          Common causes: Conflict missing from the domain match arm, or grouped \
          with operational errors.\n\
-         Run: cargo test --test quiet_stragglers error_kind_is_domain"
+         Run: cargo test --test store_properties error_kind_is_domain"
     );
     assert!(
         ErrorKind::Validation.is_domain(),
         "PROPERTY: ErrorKind::Validation must be classified as a domain error.\n\
          Investigate: src/outcome/error.rs ErrorKind::is_domain().\n\
          Common causes: Validation missing from the domain match arm.\n\
-         Run: cargo test --test quiet_stragglers error_kind_is_domain"
+         Run: cargo test --test store_properties error_kind_is_domain"
     );
     assert!(
         ErrorKind::PolicyRejection.is_domain(),
@@ -719,7 +719,7 @@ fn error_kind_is_domain() {
          Investigate: src/outcome/error.rs ErrorKind::is_domain().\n\
          Common causes: PolicyRejection missing from the domain match arm, or \
          grouped with operational errors.\n\
-         Run: cargo test --test quiet_stragglers error_kind_is_domain"
+         Run: cargo test --test store_properties error_kind_is_domain"
     );
     assert!(
         !ErrorKind::StorageError.is_domain(),
@@ -727,14 +727,14 @@ fn error_kind_is_domain() {
          Investigate: src/outcome/error.rs ErrorKind::is_domain().\n\
          Common causes: StorageError incorrectly placed in the domain match arm, or \
          wildcard arm returning true.\n\
-         Run: cargo test --test quiet_stragglers error_kind_is_domain"
+         Run: cargo test --test store_properties error_kind_is_domain"
     );
     assert!(
         !ErrorKind::Timeout.is_domain(),
         "PROPERTY: ErrorKind::Timeout must NOT be classified as a domain error.\n\
          Investigate: src/outcome/error.rs ErrorKind::is_domain().\n\
          Common causes: Timeout incorrectly placed in the domain match arm.\n\
-         Run: cargo test --test quiet_stragglers error_kind_is_domain"
+         Run: cargo test --test store_properties error_kind_is_domain"
     );
     assert!(
         !ErrorKind::Internal.is_domain(),
@@ -742,14 +742,14 @@ fn error_kind_is_domain() {
          Investigate: src/outcome/error.rs ErrorKind::is_domain().\n\
          Common causes: Internal incorrectly placed in the domain match arm, or \
          wildcard arm returning true.\n\
-         Run: cargo test --test quiet_stragglers error_kind_is_domain"
+         Run: cargo test --test store_properties error_kind_is_domain"
     );
     assert!(
         !ErrorKind::Custom(99).is_domain(),
         "PROPERTY: ErrorKind::Custom must NOT be classified as a domain error by default.\n\
          Investigate: src/outcome/error.rs ErrorKind::is_domain().\n\
          Common causes: Custom variant handled by a wildcard arm that returns true.\n\
-         Run: cargo test --test quiet_stragglers error_kind_is_domain"
+         Run: cargo test --test store_properties error_kind_is_domain"
     );
 }
 
@@ -761,14 +761,14 @@ fn error_kind_is_operational() {
          Investigate: src/outcome/error.rs ErrorKind::is_operational().\n\
          Common causes: StorageError missing from the operational match arm, or \
          is_operational() not including infrastructure errors.\n\
-         Run: cargo test --test quiet_stragglers error_kind_is_operational"
+         Run: cargo test --test store_properties error_kind_is_operational"
     );
     assert!(
         ErrorKind::Timeout.is_operational(),
         "PROPERTY: ErrorKind::Timeout must be classified as operational.\n\
          Investigate: src/outcome/error.rs ErrorKind::is_operational().\n\
          Common causes: Timeout missing from the operational match arm.\n\
-         Run: cargo test --test quiet_stragglers error_kind_is_operational"
+         Run: cargo test --test store_properties error_kind_is_operational"
     );
     assert!(
         ErrorKind::Serialization.is_operational(),
@@ -776,35 +776,35 @@ fn error_kind_is_operational() {
          Investigate: src/outcome/error.rs ErrorKind::is_operational().\n\
          Common causes: Serialization missing from the operational match arm, or \
          grouped with domain errors.\n\
-         Run: cargo test --test quiet_stragglers error_kind_is_operational"
+         Run: cargo test --test store_properties error_kind_is_operational"
     );
     assert!(
         ErrorKind::Internal.is_operational(),
         "PROPERTY: ErrorKind::Internal must be classified as operational.\n\
          Investigate: src/outcome/error.rs ErrorKind::is_operational().\n\
          Common causes: Internal missing from the operational match arm.\n\
-         Run: cargo test --test quiet_stragglers error_kind_is_operational"
+         Run: cargo test --test store_properties error_kind_is_operational"
     );
     assert!(
         !ErrorKind::NotFound.is_operational(),
         "PROPERTY: ErrorKind::NotFound must NOT be classified as operational (it is a domain error).\n\
          Investigate: src/outcome/error.rs ErrorKind::is_operational().\n\
          Common causes: is_operational() wildcard arm returning true for domain errors.\n\
-         Run: cargo test --test quiet_stragglers error_kind_is_operational"
+         Run: cargo test --test store_properties error_kind_is_operational"
     );
     assert!(
         !ErrorKind::Conflict.is_operational(),
         "PROPERTY: ErrorKind::Conflict must NOT be classified as operational (it is a domain error).\n\
          Investigate: src/outcome/error.rs ErrorKind::is_operational().\n\
          Common causes: Conflict incorrectly placed in the operational match arm.\n\
-         Run: cargo test --test quiet_stragglers error_kind_is_operational"
+         Run: cargo test --test store_properties error_kind_is_operational"
     );
     assert!(
         !ErrorKind::Custom(99).is_operational(),
         "PROPERTY: ErrorKind::Custom must NOT be classified as operational by default.\n\
          Investigate: src/outcome/error.rs ErrorKind::is_operational().\n\
          Common causes: Custom variant matched by wildcard arm that returns true.\n\
-         Run: cargo test --test quiet_stragglers error_kind_is_operational"
+         Run: cargo test --test store_properties error_kind_is_operational"
     );
 }
 
@@ -816,7 +816,7 @@ fn error_kind_is_retryable() {
          Investigate: src/outcome/error.rs ErrorKind::is_retryable().\n\
          Common causes: StorageError missing from the retryable match arm, or \
          is_retryable() returning false by default.\n\
-         Run: cargo test --test quiet_stragglers error_kind_is_retryable"
+         Run: cargo test --test store_properties error_kind_is_retryable"
     );
     assert!(
         ErrorKind::Timeout.is_retryable(),
@@ -824,14 +824,14 @@ fn error_kind_is_retryable() {
          Investigate: src/outcome/error.rs ErrorKind::is_retryable().\n\
          Common causes: Timeout missing from the retryable match arm, or \
          Timeout placed in the non-retryable group by mistake.\n\
-         Run: cargo test --test quiet_stragglers error_kind_is_retryable"
+         Run: cargo test --test store_properties error_kind_is_retryable"
     );
     assert!(
         !ErrorKind::NotFound.is_retryable(),
         "PROPERTY: ErrorKind::NotFound must NOT be retryable (domain error, not transient).\n\
          Investigate: src/outcome/error.rs ErrorKind::is_retryable().\n\
          Common causes: NotFound grouped with operational errors in the retryable arm.\n\
-         Run: cargo test --test quiet_stragglers error_kind_is_retryable"
+         Run: cargo test --test store_properties error_kind_is_retryable"
     );
     assert!(
         !ErrorKind::Conflict.is_retryable(),
@@ -839,14 +839,14 @@ fn error_kind_is_retryable() {
          Investigate: src/outcome/error.rs ErrorKind::is_retryable().\n\
          Common causes: Conflict grouped with transient errors, or is_retryable() \
          treating all non-domain errors as retryable.\n\
-         Run: cargo test --test quiet_stragglers error_kind_is_retryable"
+         Run: cargo test --test store_properties error_kind_is_retryable"
     );
     assert!(
         !ErrorKind::Internal.is_retryable(),
         "PROPERTY: ErrorKind::Internal must NOT be retryable (programming error, not transient).\n\
          Investigate: src/outcome/error.rs ErrorKind::is_retryable().\n\
          Common causes: Internal grouped with operational transients by mistake.\n\
-         Run: cargo test --test quiet_stragglers error_kind_is_retryable"
+         Run: cargo test --test store_properties error_kind_is_retryable"
     );
     assert!(
         !ErrorKind::Custom(99).is_retryable(),
@@ -854,6 +854,6 @@ fn error_kind_is_retryable() {
          Investigate: src/outcome/error.rs ErrorKind::is_retryable().\n\
          Common causes: Custom variant handled by a wildcard arm that returns true, or \
          Custom not having an explicit non-retryable arm.\n\
-         Run: cargo test --test quiet_stragglers error_kind_is_retryable"
+         Run: cargo test --test store_properties error_kind_is_retryable"
     );
 }
