@@ -8,8 +8,8 @@ pub use crate::outcome::{ErrorKind, Outcome, OutcomeError};
 pub use crate::pipeline::{Committed, Pipeline, Proposal};
 pub use crate::store::subscription::{Subscription, SubscriptionOps};
 pub use crate::store::writer::Notification;
+pub use crate::store::writer::RestartPolicy;
 pub use crate::store::{
     AppendOptions, AppendReceipt, CompactionConfig, CompactionStrategy, Cursor, DiskPos, Freshness,
     IndexEntry, NoCache, Store, StoreConfig, StoreError, SyncMode,
 };
-pub use crate::store::writer::RestartPolicy;

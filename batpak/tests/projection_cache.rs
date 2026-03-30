@@ -542,7 +542,9 @@ fn redb_delete_prefix_with_0xff_keys() {
     cache
         .put(&[0xFF, 0xFF], b"val3", meta.clone())
         .expect("put");
-    cache.put(&[0xFE, 0x01], b"other", meta.clone()).expect("put");
+    cache
+        .put(&[0xFE, 0x01], b"other", meta.clone())
+        .expect("put");
 
     let deleted = cache.delete_prefix(&[0xFF]).expect("delete_prefix");
     assert_eq!(

@@ -44,7 +44,8 @@ mod typestate_runtime {
         let lock = TestLock::<Locked>::new("alice".into(), 5);
         let (holder, count) = lock.data();
         assert_eq!(
-            holder, &"alice".to_string(),
+            holder,
+            &"alice".to_string(),
             "PROPERTY: define_typestate! data() must return correct field reference.\n\
              Investigate: src/typestate/mod.rs define_typestate! data() method."
         );

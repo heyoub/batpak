@@ -83,52 +83,37 @@ impl Reader {
         // Loop to handle short reads (read_at may return fewer bytes than requested).
         #[cfg(unix)]
         {
-            let file = self.get_fd(pos.segment_id)?;
             use std::os::unix::fs::FileExt;
-            let mut total_read = 0;
-            while total_read < buf.len() {
-                let n = file
-                    .read_at(&mut buf[total_read..], pos.offset + total_read as u64)
-                    .map_err(StoreError::Io)?;
-                if n == 0 {
-                    return Err(StoreError::CorruptSegment {
-                        segment_id: pos.segment_id,
-                        detail: "unexpected EOF during read".into(),
-                    });
+            let segment_id = pos.segment_id;
+            let offset = pos.offset;
+            self.with_fd(segment_id, |f| {
+                let mut total_read = 0;
+                while total_read < buf.len() {
+                    let n = f
+                        .read_at(&mut buf[total_read..], offset + total_read as u64)
+                        .map_err(StoreError::Io)?;
+                    if n == 0 {
+                        return Err(StoreError::CorruptSegment {
+                            segment_id,
+                            detail: "unexpected EOF during read".into(),
+                        });
+                    }
+                    total_read += n;
                 }
-                total_read += n;
-            }
+                Ok(())
+            })?;
         }
         #[cfg(not(unix))]
         {
-            // Non-unix fallback: seek + read under the FD cache lock to prevent
-            // concurrent seeks on cloned File handles (which share the file cursor
-            // on Windows). The lock ensures sequential access per reader instance.
-            // [SPEC:IMPLEMENTATION NOTES item 7 — concurrent read safety]
+            // Non-unix: seek + read under the FD cache lock to prevent concurrent seeks.
+            // Cloned File handles share the file cursor on Windows, so the lock must be
+            // held for the entire seek+read. [SPEC:IMPLEMENTATION NOTES item 7]
             use std::io::{Seek, SeekFrom};
-            let mut cache = self.fd_cache.lock();
-            if let Some(f) = cache.fds.get_mut(&pos.segment_id) {
-                f.seek(SeekFrom::Start(pos.offset))
-                    .map_err(StoreError::Io)?;
-                f.read_exact(&mut buf).map_err(StoreError::Io)?;
-            } else {
-                // File not in cache — open, seek, read, and cache it
-                let path = self
-                    .data_dir
-                    .join(segment::segment_filename(pos.segment_id));
-                let mut f = File::open(&path).map_err(StoreError::Io)?;
-                f.seek(SeekFrom::Start(pos.offset))
-                    .map_err(StoreError::Io)?;
-                f.read_exact(&mut buf).map_err(StoreError::Io)?;
-                if cache.fds.len() >= cache.budget {
-                    if let Some(oldest) = cache.order.first().copied() {
-                        cache.fds.remove(&oldest);
-                        cache.order.remove(0);
-                    }
-                }
-                cache.fds.insert(pos.segment_id, f);
-                cache.order.push(pos.segment_id);
-            }
+            let offset = pos.offset;
+            self.with_fd(pos.segment_id, |f| {
+                f.seek(SeekFrom::Start(offset)).map_err(StoreError::Io)?;
+                f.read_exact(&mut buf).map_err(StoreError::Io)
+            })?;
         }
 
         let result = segment::frame_decode(&buf).map_err(|e| match e {
@@ -268,31 +253,38 @@ impl Reader {
         Ok(entries)
     }
 
-    fn get_fd(&self, segment_id: u64) -> Result<File, StoreError> {
+    /// Run `op` against the cached (or freshly opened) file descriptor for `segment_id`,
+    /// holding the FD cache lock for the duration. LRU order is maintained on each call.
+    /// On Windows this is required: cloned File handles share the OS file cursor, so
+    /// seek+read must happen under the lock. On Unix, read_at(pread) is cursor-safe but
+    /// still benefits from the single-lock path for cache consistency.
+    fn with_fd<F, T>(&self, segment_id: u64, op: F) -> Result<T, StoreError>
+    where
+        F: FnOnce(&mut File) -> Result<T, StoreError>,
+    {
         let mut cache = self.fd_cache.lock();
-        // LRU logic: if in cache, move to end of order vec. If not, open file,
-        // evict oldest if over budget, insert.
         if let Some(pos) = cache.order.iter().position(|&id| id == segment_id) {
             cache.order.remove(pos);
             cache.order.push(segment_id);
-            return cache.fds[&segment_id].try_clone().map_err(StoreError::Io);
-        }
-
-        let path = self.data_dir.join(segment::segment_filename(segment_id));
-        let file = File::open(&path).map_err(StoreError::Io)?;
-
-        if cache.fds.len() >= cache.budget {
-            if let Some(oldest) = cache.order.first().copied() {
-                cache.fds.remove(&oldest);
-                cache.order.remove(0);
+        } else {
+            let path = self.data_dir.join(segment::segment_filename(segment_id));
+            let file = File::open(&path).map_err(StoreError::Io)?;
+            if cache.fds.len() >= cache.budget {
+                if let Some(oldest) = cache.order.first().copied() {
+                    cache.fds.remove(&oldest);
+                    cache.order.remove(0);
+                }
             }
+            cache.fds.insert(segment_id, file);
+            cache.order.push(segment_id);
         }
-
-        cache
-            .fds
-            .insert(segment_id, file.try_clone().map_err(StoreError::Io)?);
-        cache.order.push(segment_id);
-        Ok(file)
+        let file = cache.fds.get_mut(&segment_id).ok_or_else(|| {
+            StoreError::Io(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "segment fd missing after cache insert",
+            ))
+        })?;
+        op(file)
     }
 
     /// Evict a segment from the FD cache. Called during compaction before deleting segment files.

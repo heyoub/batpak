@@ -303,7 +303,10 @@ fn ops_map_transforms_notification() {
     });
 
     let notif = ops.recv();
-    assert!(notif.is_some(), "OPS MAP: should receive a mapped notification.");
+    assert!(
+        notif.is_some(),
+        "OPS MAP: should receive a mapped notification."
+    );
     assert_eq!(
         notif.unwrap().kind,
         mapped_kind,
@@ -352,7 +355,10 @@ fn ops_map_returning_none_skips_event() {
     });
 
     let notif = ops.recv();
-    assert!(notif.is_some(), "OPS MAP SKIP: should receive the pass_kind event.");
+    assert!(
+        notif.is_some(),
+        "OPS MAP SKIP: should receive the pass_kind event."
+    );
     assert_eq!(
         notif.unwrap().kind,
         pass_kind,
@@ -398,7 +404,10 @@ fn ops_multiple_filters_all_must_pass() {
     });
 
     let notif = ops.recv();
-    assert!(notif.is_some(), "OPS MULTI FILTER: should receive kind_a event.");
+    assert!(
+        notif.is_some(),
+        "OPS MULTI FILTER: should receive kind_a event."
+    );
     let notif = notif.unwrap();
     assert_eq!(
         notif.kind, kind_a,
