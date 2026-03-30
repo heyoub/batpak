@@ -110,7 +110,7 @@ fn cold_start_1k_events_under_threshold() {
                  Investigate: src/guard/mod.rs GateSet::evaluate() receipt gate_names collection.\n\
                  Common causes: Gate::name() not being called or stored in the receipt, \
                  or receipt.into_parts() returning an empty name list.\n\
-                 Run: cargo test --test self_benchmark cold_start_1k_events_under_threshold"
+                 Run: cargo test --test perf_gates cold_start_1k_events_under_threshold"
             );
             eprintln!(
                 "SELF-BENCHMARK: cold start for 1K events: {}ms (passed {})",
@@ -152,7 +152,7 @@ fn cold_start_gate_rejects_slow() {
          Investigate: src/guard/mod.rs GateSet::evaluate() ColdStartGate::evaluate().\n\
          Common causes: Gate::evaluate() ignoring the threshold and always returning Ok, \
          or GateSet::evaluate() not propagating Denial from a gate.\n\
-         Run: cargo test --test self_benchmark cold_start_gate_rejects_slow"
+         Run: cargo test --test perf_gates cold_start_gate_rejects_slow"
     );
 }
 
@@ -394,7 +394,7 @@ fn multi_gate_collects_all_denials() {
          Investigate: src/guard/mod.rs GateSet::evaluate_all().\n\
          Common causes: evaluate_all() short-circuiting on first Err like evaluate() does, \
          or not iterating all gates before returning.\n\
-         Run: cargo test --test self_benchmark multi_gate_collects_all_denials"
+         Run: cargo test --test perf_gates multi_gate_collects_all_denials"
     );
 
     // Verify each denial points to the right gate and has actionable context
@@ -404,14 +404,14 @@ fn multi_gate_collects_all_denials() {
          Investigate: src/guard/mod.rs GateSet::evaluate_all() gate ordering.\n\
          Common causes: evaluate_all() not preserving insertion order, or \
          gate names being overwritten with a generic label.\n\
-         Run: cargo test --test self_benchmark multi_gate_collects_all_denials"
+         Run: cargo test --test perf_gates multi_gate_collects_all_denials"
     );
     assert_eq!(
         denials[1].gate, "query_latency",
         "PROPERTY: Second denial gate name must be 'query_latency' (gates evaluated in order).\n\
          Investigate: src/guard/mod.rs GateSet::evaluate_all() gate ordering.\n\
          Common causes: evaluate_all() not preserving insertion order of gates.\n\
-         Run: cargo test --test self_benchmark multi_gate_collects_all_denials"
+         Run: cargo test --test perf_gates multi_gate_collects_all_denials"
     );
     assert_eq!(
         denials[2].gate,
@@ -419,7 +419,7 @@ fn multi_gate_collects_all_denials() {
         "PROPERTY: Third denial gate name must be 'projection_replay' (gates evaluated in order).\n\
          Investigate: src/guard/mod.rs GateSet::evaluate_all() gate ordering.\n\
          Common causes: evaluate_all() not preserving insertion order of gates.\n\
-         Run: cargo test --test self_benchmark multi_gate_collects_all_denials"
+         Run: cargo test --test perf_gates multi_gate_collects_all_denials"
     );
 
     // Verify context has the "investigate" pointers
@@ -429,7 +429,7 @@ fn multi_gate_collects_all_denials() {
          Investigate: WriteThroughputGate::evaluate() denial message in tests/self_benchmark.rs.\n\
          Common causes: Gate message missing 'writer.rs' investigation pointer, or \
          message format changed without updating this assertion.\n\
-         Run: cargo test --test self_benchmark multi_gate_collects_all_denials"
+         Run: cargo test --test perf_gates multi_gate_collects_all_denials"
     );
     assert!(
         denials[1].message.contains("index.rs"),
@@ -437,7 +437,7 @@ fn multi_gate_collects_all_denials() {
          Investigate: QueryLatencyGate::evaluate() denial message in tests/self_benchmark.rs.\n\
          Common causes: Gate message missing 'index.rs' investigation pointer, or \
          message format changed without updating this assertion.\n\
-         Run: cargo test --test self_benchmark multi_gate_collects_all_denials"
+         Run: cargo test --test perf_gates multi_gate_collects_all_denials"
     );
     assert!(
         denials[2].message.contains("reader.rs"),
@@ -445,7 +445,7 @@ fn multi_gate_collects_all_denials() {
          Investigate: ProjectionGate::evaluate() denial message in tests/self_benchmark.rs.\n\
          Common causes: Gate message missing 'reader.rs' investigation pointer, or \
          message format changed without updating this assertion.\n\
-         Run: cargo test --test self_benchmark multi_gate_collects_all_denials"
+         Run: cargo test --test perf_gates multi_gate_collects_all_denials"
     );
 }
 
@@ -874,7 +874,7 @@ fn correctness_gates_fire_on_violations() {
          Investigate: src/guard/mod.rs GateSet::evaluate_all() tests/self_benchmark.rs correctness gates.\n\
          Common causes: evaluate_all() stopping early after fewer than 6 denials, or \
          one of the correctness gates returning Ok even when the property is false.\n\
-         Run: cargo test --test self_benchmark correctness_gates_fire_on_violations"
+         Run: cargo test --test perf_gates correctness_gates_fire_on_violations"
     );
 
     // Every denial should contain an investigation pointer
@@ -885,7 +885,7 @@ fn correctness_gates_fire_on_violations() {
              Investigate: tests/self_benchmark.rs [{gate}] Gate::evaluate() denial message: {msg}.\n\
              Common causes: Gate denial message not including the 'Investigate:' keyword, or \
              denial constructed with an empty message string.\n\
-             Run: cargo test --test self_benchmark correctness_gates_fire_on_violations",
+             Run: cargo test --test perf_gates correctness_gates_fire_on_violations",
             gate = d.gate,
             msg = d.message
         );
