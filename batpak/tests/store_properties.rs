@@ -219,7 +219,7 @@ fn law_007_gates_reject_bad_performance() {
     // A ColdStartGate with impossible threshold should fire
     let gate = batpak::guard::GateSet::<(f64,)>::new();
     // GateSet with no gates always passes — that's correct behavior.
-    // The real test is in self_benchmark.rs which uses actual Store metrics.
+    // The real test is in perf_gates.rs which uses actual Store metrics.
     assert!(gate.is_empty());
     let proposal = batpak::pipeline::Proposal::new(42);
     let receipt = gate.evaluate(&(0.0,), proposal);

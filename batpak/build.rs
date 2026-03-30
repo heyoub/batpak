@@ -395,10 +395,10 @@ fn check_pub_items_have_tests() {
     // Each entry: (item_name, justification).
     let allowlist: &[(&str, &str)] = &[
         // Macro-generated types from define_state_machine! / define_typestate!
-        // Tested via typestate_safety.rs compile-fail tests and quiet_stragglers.rs
+        // Tested via typestate_safety.rs compile-fail tests and event_api.rs
         (
             "EntityIdType",
-            "trait used via define_entity_id! macro, tested in quiet_stragglers",
+            "trait used via define_entity_id! macro, tested in event_api",
         ),
         // Internal store types that are only referenced via field access patterns
         (

@@ -426,7 +426,7 @@ fn multi_gate_collects_all_denials() {
     assert!(
         denials[0].message.contains("writer.rs"),
         "PROPERTY: WriteThroughputGate denial must point to src/store/writer.rs for investigation.\n\
-         Investigate: WriteThroughputGate::evaluate() denial message in tests/self_benchmark.rs.\n\
+         Investigate: WriteThroughputGate::evaluate() denial message in tests/perf_gates.rs.\n\
          Common causes: Gate message missing 'writer.rs' investigation pointer, or \
          message format changed without updating this assertion.\n\
          Run: cargo test --test perf_gates multi_gate_collects_all_denials"
@@ -434,7 +434,7 @@ fn multi_gate_collects_all_denials() {
     assert!(
         denials[1].message.contains("index.rs"),
         "PROPERTY: QueryLatencyGate denial must point to src/store/index.rs for investigation.\n\
-         Investigate: QueryLatencyGate::evaluate() denial message in tests/self_benchmark.rs.\n\
+         Investigate: QueryLatencyGate::evaluate() denial message in tests/perf_gates.rs.\n\
          Common causes: Gate message missing 'index.rs' investigation pointer, or \
          message format changed without updating this assertion.\n\
          Run: cargo test --test perf_gates multi_gate_collects_all_denials"
@@ -442,7 +442,7 @@ fn multi_gate_collects_all_denials() {
     assert!(
         denials[2].message.contains("reader.rs"),
         "PROPERTY: ProjectionGate denial must point to src/store/reader.rs for investigation.\n\
-         Investigate: ProjectionGate::evaluate() denial message in tests/self_benchmark.rs.\n\
+         Investigate: ProjectionGate::evaluate() denial message in tests/perf_gates.rs.\n\
          Common causes: Gate message missing 'reader.rs' investigation pointer, or \
          message format changed without updating this assertion.\n\
          Run: cargo test --test perf_gates multi_gate_collects_all_denials"
@@ -737,7 +737,7 @@ fn correctness_gates_self_validate() {
 }
 
 /// Append throughput gate: dedicated test using the library's own Gate system.
-/// [SPEC:tests/self_benchmark.rs — BN5 append throughput gate]
+/// [SPEC:tests/perf_gates.rs — BN5 append throughput gate]
 #[test]
 fn append_throughput_gate() {
     let dir = TempDir::new().expect("temp dir");
@@ -791,7 +791,7 @@ fn append_throughput_gate() {
 }
 
 /// Projection latency gate: dedicated test using the library's own Gate system.
-/// [SPEC:tests/self_benchmark.rs — BN5 projection latency gate]
+/// [SPEC:tests/perf_gates.rs — BN5 projection latency gate]
 #[test]
 fn projection_latency_gate() {
     let dir = TempDir::new().expect("temp dir");
@@ -871,7 +871,7 @@ fn correctness_gates_fire_on_violations() {
         denials.len(),
         6,
         "PROPERTY: All 6 correctness gates must fire when all properties are violated.\n\
-         Investigate: src/guard/mod.rs GateSet::evaluate_all() tests/self_benchmark.rs correctness gates.\n\
+         Investigate: src/guard/mod.rs GateSet::evaluate_all() tests/perf_gates.rs correctness gates.\n\
          Common causes: evaluate_all() stopping early after fewer than 6 denials, or \
          one of the correctness gates returning Ok even when the property is false.\n\
          Run: cargo test --test perf_gates correctness_gates_fire_on_violations"
@@ -882,7 +882,7 @@ fn correctness_gates_fire_on_violations() {
         assert!(
             d.message.contains("Investigate:"),
             "PROPERTY: Every correctness gate denial must include an 'Investigate:' pointer to a source file.\n\
-             Investigate: tests/self_benchmark.rs [{gate}] Gate::evaluate() denial message: {msg}.\n\
+             Investigate: tests/perf_gates.rs [{gate}] Gate::evaluate() denial message: {msg}.\n\
              Common causes: Gate denial message not including the 'Investigate:' keyword, or \
              denial constructed with an empty message string.\n\
              Run: cargo test --test perf_gates correctness_gates_fire_on_violations",
