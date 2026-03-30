@@ -857,3 +857,90 @@ fn error_kind_is_retryable() {
          Run: cargo test --test store_properties error_kind_is_retryable"
     );
 }
+
+// ================================================================
+// AppendOptions builder API
+// ================================================================
+
+#[test]
+fn append_options_with_idempotency_builder() {
+    let opts = AppendOptions::new().with_idempotency(0xDEAD_BEEF_CAFE_BABE);
+    assert_eq!(
+        opts.idempotency_key,
+        Some(0xDEAD_BEEF_CAFE_BABE),
+        "PROPERTY: with_idempotency(key) must set idempotency_key to Some(key).\n\
+         Investigate: src/store/mod.rs AppendOptions::with_idempotency.\n\
+         Common causes: builder returning Self without setting idempotency_key."
+    );
+    assert!(opts.expected_sequence.is_none(), "unset fields must remain None");
+    assert_eq!(opts.flags, 0, "unset flags must remain 0");
+}
+
+#[test]
+fn append_options_with_cas_builder() {
+    let opts = AppendOptions::new().with_cas(7);
+    assert_eq!(
+        opts.expected_sequence,
+        Some(7),
+        "PROPERTY: with_cas(seq) must set expected_sequence to Some(seq).\n\
+         Investigate: src/store/mod.rs AppendOptions::with_cas.\n\
+         Common causes: method setting wrong field, or returning Self unchanged."
+    );
+    assert!(opts.idempotency_key.is_none(), "unset fields must remain None");
+}
+
+#[test]
+fn append_options_with_flags_builder() {
+    let opts = AppendOptions::new().with_flags(0x03);
+    assert_eq!(
+        opts.flags,
+        0x03,
+        "PROPERTY: with_flags(f) must set flags to f.\n\
+         Investigate: src/store/mod.rs AppendOptions::with_flags.\n\
+         Common causes: flags field not updated, or OR'd with previous value."
+    );
+    assert!(opts.expected_sequence.is_none(), "unset fields must remain None");
+    assert!(opts.idempotency_key.is_none(), "unset fields must remain None");
+}
+
+#[test]
+fn append_options_with_correlation_builder() {
+    let opts = AppendOptions::new().with_correlation(0xCAFE_BABE_1234_5678);
+    assert_eq!(
+        opts.correlation_id,
+        Some(0xCAFE_BABE_1234_5678),
+        "PROPERTY: with_correlation(id) must set correlation_id to Some(id).\n\
+         Investigate: src/store/mod.rs AppendOptions::with_correlation.\n\
+         Common causes: method writing to causation_id by mistake."
+    );
+    assert!(opts.causation_id.is_none(), "causation_id must not be set");
+}
+
+#[test]
+fn append_options_with_causation_builder() {
+    let opts = AppendOptions::new().with_causation(0xABCD_EF01_2345_6789);
+    assert_eq!(
+        opts.causation_id,
+        Some(0xABCD_EF01_2345_6789),
+        "PROPERTY: with_causation(id) must set causation_id to Some(id).\n\
+         Investigate: src/store/mod.rs AppendOptions::with_causation.\n\
+         Common causes: method writing to correlation_id by mistake."
+    );
+    assert!(opts.correlation_id.is_none(), "correlation_id must not be set");
+}
+
+#[test]
+fn append_options_builder_chain() {
+    // All builders must be chainable and independent
+    let opts = AppendOptions::new()
+        .with_idempotency(1)
+        .with_cas(5)
+        .with_flags(0x01)
+        .with_correlation(2)
+        .with_causation(3);
+    assert_eq!(opts.idempotency_key, Some(1));
+    assert_eq!(opts.expected_sequence, Some(5));
+    assert_eq!(opts.flags, 0x01);
+    assert_eq!(opts.correlation_id, Some(2));
+    assert_eq!(opts.causation_id, Some(3));
+}
