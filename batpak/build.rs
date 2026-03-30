@@ -396,27 +396,54 @@ fn check_pub_items_have_tests() {
     let allowlist: &[(&str, &str)] = &[
         // Macro-generated types from define_state_machine! / define_typestate!
         // Tested via typestate_safety.rs compile-fail tests and quiet_stragglers.rs
-        ("EntityIdType", "trait used via define_entity_id! macro, tested in quiet_stragglers"),
+        (
+            "EntityIdType",
+            "trait used via define_entity_id! macro, tested in quiet_stragglers",
+        ),
         // Internal store types that are only referenced via field access patterns
-        ("ClockKey", "internal index type, tested via store_integration + store_advanced"),
-        ("Active", "segment typestate marker, tested via store operations"),
-        // Macro-generated methods from define_typestate! — tested via the generated types
-        // TODO: Wave 2D adds explicit into_data() test in typestate_safety.rs
-        ("into_data", "macro-generated method from define_typestate!, needs dedicated test"),
-        ("Sealed", "segment typestate marker, tested via compaction tests"),
-        ("SegmentHeader", "internal segment type, tested via frame_encode/decode"),
-        ("StoreDiagnostics", "returned by Store::stats, tested via store_advanced"),
+        (
+            "ClockKey",
+            "internal index type, tested via store_integration + store_advanced",
+        ),
+        (
+            "Active",
+            "segment typestate marker, tested via store operations",
+        ),
+        // Macro-generated methods from define_typestate! — tested directly in typestate_safety.rs
+        (
+            "Sealed",
+            "segment typestate marker, tested via compaction tests",
+        ),
+        (
+            "SegmentHeader",
+            "internal segment type, tested via frame_encode/decode",
+        ),
+        (
+            "StoreDiagnostics",
+            "returned by Store::stats, tested via store_advanced",
+        ),
         // Internal segment methods tested via store_integration/store_advanced rotation tests
-        ("needs_rotation", "internal segment method, tested via segment rotation in store tests"),
-        ("CompactionResult", "returned by compact(), tested via compaction tests"),
-        // Builder methods on AppendOptions — tested indirectly via append_with_options
-        // TODO: Wave 2 should add direct builder method tests
-        ("with_idempotency", "AppendOptions builder, tested indirectly via idempotency tests"),
-        ("with_expected_sequence", "AppendOptions builder, tested indirectly via CAS tests"),
+        (
+            "needs_rotation",
+            "internal segment method, tested via segment rotation in store tests",
+        ),
+        (
+            "CompactionResult",
+            "returned by compact(), tested via compaction tests",
+        ),
         // Serde wire helpers — referenced via #[serde(with = "...")] not by name
-        ("u128_bytes", "serde helper module used via attribute, not by name"),
-        ("option_u128_bytes", "serde helper module used via attribute, not by name"),
-        ("vec_u128_bytes", "serde helper module used via attribute, not by name"),
+        (
+            "u128_bytes",
+            "serde helper module used via attribute, not by name",
+        ),
+        (
+            "option_u128_bytes",
+            "serde helper module used via attribute, not by name",
+        ),
+        (
+            "vec_u128_bytes",
+            "serde helper module used via attribute, not by name",
+        ),
     ];
     let allowed_names: Vec<&str> = allowlist.iter().map(|(name, _)| *name).collect();
 
