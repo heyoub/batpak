@@ -1,42 +1,66 @@
-# Contributing to batpak
+# Contributing to `batpak`
 
-## Setup
+## Canonical Environment
 
-1. Clone the repo:
-   ```bash
-   git clone <repo-url>
-   cd batpak/batpak
-   ```
+The canonical development environment is the checked-in Dev Container in [`.devcontainer/devcontainer.json`](.devcontainer/devcontainer.json). Native Windows and Linux development are still supported, but they must pass the same integrity gates.
 
-2. Build:
-   ```bash
-   cargo build --all-features
-   ```
+From the repo root:
 
-3. Test:
-   ```bash
-   cargo test --all-features
-   ```
+```bash
+cd batpak
+cargo run --manifest-path tools/integrity/Cargo.toml -- doctor --strict
+```
+
+`doctor --strict` verifies the expected toolchain, integrity tooling, and line-ending contract before you start.
+
+## Daily Commands
+
+From [`batpak/`](batpak/):
+
+```bash
+just doctor
+just traceability
+just structural
+just ci
+```
+
+The canonical full gate set is also available through [`scripts/verify-all.sh`](scripts/verify-all.sh).
 
 ## Code Style
 
-- `cargo fmt` for formatting
-- `cargo clippy --all-features -- -D warnings` for linting
-- No `unwrap()`, `panic!()`, `todo!()`, `dbg!()` in production code (enforced via clippy lints)
-- Synchronous API only — no async runtime dependency
+- `cargo fmt --check`
+- `cargo clippy --all-features --all-targets -- -D warnings`
+- `cargo deny check`
+- No `unwrap()`, `panic!()`, `todo!()`, or `dbg!()` in production code
+- Synchronous API only; no async runtime dependency in production
+- Host-specific linker or environment overrides must stay out of the repo
 
-## Architecture
+## Traceability And Decisions
 
-Reading order: coordinate → event → guard → pipeline → store
-
-See [TUNING.md](batpak/TUNING.md) for configuration guidance.
+- Requirement, invariant, flow, and proving-artifact links live under [`traceability/`](traceability/).
+- Architecture decisions live under [`batpak/docs/adr/`](batpak/docs/adr/).
+- If you add a new public surface, named flow, or invariant, update those registries in the same change.
 
 ## Before Submitting
 
+Run this from [`batpak/`](batpak/):
+
 ```bash
+just ci
+```
+
+That expands to:
+
+```bash
+cargo run --manifest-path tools/integrity/Cargo.toml -- doctor --strict
+cargo run --manifest-path tools/integrity/Cargo.toml -- traceability-check
+cargo run --manifest-path tools/integrity/Cargo.toml -- structural-check
 cargo fmt --check
-cargo clippy --all-features -- -D warnings
-cargo test --all-features
-cargo test --no-default-features
-cargo doc --all-features --no-deps
+cargo clippy --all-features --all-targets -- -D warnings
+cargo deny check
+cargo nextest run --profile ci --all-features
+cargo test --doc --all-features
+cargo check --all-features
+cargo check --no-default-features
+cargo bench --no-run --all-features
 ```

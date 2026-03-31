@@ -102,6 +102,12 @@ Events are stored in **segment files** — append-only files with MessagePack-en
 
 **Cold start** scans all segment files alphabetically, rebuilds the in-memory index, and opens the latest segment for writing. No WAL, no compaction log — the segment files ARE the log.
 
+### Public API Witness Index
+
+The advanced store surface intentionally includes `SyncMode`, `AppendReceipt`, `AppendOptions`, `RetentionPredicate`, `CompactionStrategy`, `CompactionConfig`, `StoreStats`, and `StoreDiagnostics`.
+
+The low-level storage surface intentionally includes `SEGMENT_MAGIC`, `SEGMENT_EXTENSION`, `SegmentHeader`, `FramePayload`, `FrameDecodeError`, `frame_encode`, `frame_decode`, `segment_filename`, and `CompactionResult`.
+
 ## Cross-Cutting Patterns
 
 ### EventSourced — backward fold

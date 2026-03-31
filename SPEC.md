@@ -2,6 +2,13 @@
 
 One document. No overrides. No layers. Every decision is final. A cloud agent with zero prior context builds the entire library from this file.
 
+Status note (2026-03-30): this spec tracks the post-integrity-hardening repo.
+The canonical Linux environment lives in `.devcontainer/`, CI runs the Linux
+integrity path inside that container, Windows remains a first-class native
+matrix, mutation testing has both smoke and scheduled full-shard lanes, and the
+store surface is now split across focused modules instead of concentrating all
+store types and helpers in `src/store/mod.rs`.
+
 ---
 
 ## INVARIANTS (check every decision against these — they override everything)
@@ -98,7 +105,7 @@ review — it's **making the toolchain the reviewer**.
    so it's probably fine" — compilation is necessary but not sufficient.
 
 3. THE LIBRARY DOGFOODS ITS OWN GATE SYSTEM.
-   tests/self_benchmark.rs uses a Gate<ColdStartContext> to validate
+   tests/perf_gates.rs uses a Gate<ColdStartContext> to validate
    cold-start performance. If gates work, the test passes. If the test
    passes, gates work. This is the quadratic feedback loop.
 
@@ -127,7 +134,7 @@ review — it's **making the toolchain the reviewer**.
      │               │                                    │
      │               └─── benchmarks ──────────────────→  │
      │                                                    │
-     └──── self_benchmark.rs (dogfood Gate) ──────────────┘
+     └──── perf_gates.rs (dogfood Gate) ──────────────────┘
                          ↑
                     quadratic: the test uses the system
                     being tested to validate the test
@@ -247,7 +254,7 @@ batpak/
 │   ├── gate_pipeline.rs      # registration order, fail-fast, receipt TOCTOU, consumed once
 │   ├── typestate_safety.rs   # trybuild: compile-fail for invalid transitions + forged receipts
 │   ├── wire_format.rs        # golden file comparison for MessagePack serialization
-│   ├── self_benchmark.rs     # gate that validates cold start < 200ms (library tests itself)
+│   ├── perf_gates.rs         # gate that validates cold start < 200ms (library tests itself)
 │   ├── ui/                   # trybuild compile-fail test cases
 │   │   ├── forge_receipt.rs
 │   │   └── invalid_transition.rs
@@ -409,7 +416,7 @@ compile_error!() — placed at top of modules agents try to "improve":
         Exponential backoff belongs in the product's supervisor, not here.");
 
 clippy denials — per-module guardrails beyond Cargo.toml lints:
-    src/store/mod.rs:     #![deny(clippy::future_not_send)]
+    cargo clippy --all-features --all-targets -- -D warnings
     src/guard/receipt.rs:  // Receipt must NOT derive Clone (enforced by not deriving it;
                            // trybuild test verifies cloning fails to compile)
 
@@ -418,7 +425,7 @@ Test diagnostic messages — every test failure includes:
     2. Which files to investigate
     3. Common causes
     4. Next command to run
-  Example (self_benchmark.rs cold start test):
+  Example (perf_gates.rs cold start test):
     assert!(elapsed < Duration::from_millis(200),
       "COLD START REGRESSION: {elapsed:?} > 200ms.\n\
        Check: store/index.rs scan_segment(), store/reader.rs.\n\
@@ -430,16 +437,36 @@ Golden test data — tests/golden/*.hex:
     wire_format.rs serializes known values, compares to golden files.
     To update: GOLDEN_UPDATE=1 cargo test wire_format
 
-justfile dep-doc targets:
-    deps-doc:
-        cargo doc --document-private-items --no-deps --open
-    lib-doc:
-        cargo doc --all-features --open  # includes all dependency docs
+Canonical environment + wrappers:
+    .devcontainer/devcontainer.json      # canonical Linux toolchain + cargo subtools
+    scripts/run-in-devcontainer.sh       # CI/local wrapper for canonical container runs
+    batpak/justfile                      # doctor / structural / traceability / ci / mutants-*
+    batpak/.github/workflows/ci.yml      # Linux-in-container + Windows-native integrity
 ```
 
 ---
 
 ## PER-FILE PRDs
+
+Current-state note: some legacy PRD blocks below remain useful as design
+history, but the live repo now follows the post-hardening topology. Treat the
+following as the current source of truth when reading those blocks:
+
+- `src/store/mod.rs` is now a public facade plus wiring, not the owner of every
+  store type.
+- Store support code is split across `src/store/config.rs`,
+  `src/store/contracts.rs`, `src/store/error.rs`,
+  `src/store/runtime_contracts.rs`, `src/store/ancestors.rs`,
+  `src/store/ancestors_hash.rs`, `src/store/ancestors_clock.rs`,
+  `src/store/maintenance.rs`, `src/store/projection_flow.rs`,
+  `src/store/stats.rs`, and `src/store/test_support.rs`.
+- Canonical integrity execution is `.devcontainer/` plus
+  `scripts/run-in-devcontainer.sh`.
+- CI is dual-surface: Linux in the canonical container and Windows native.
+- Mutation testing has both `mutants-smoke` and scheduled `mutants-full`
+  workflows.
+- The dependency surface has moved to `flume = "0.12"`, `rand = "0.9"`, and
+  deterministic concurrency checks use `loom = "0.7"` rather than `shuttle`.
 
 Every PRD below is the FINAL version. No overrides exist. Implement exactly what's described.
 
@@ -994,6 +1021,17 @@ Audit trails show "bypassed: {reason}" with empty gate list.
 ---
 
 ### `src/store/mod.rs`
+
+Current-state note (2026-03-30): the live repo split the old monolith from
+this section. `StoreConfig` lives in `src/store/config.rs`, `StoreError` lives
+in `src/store/error.rs`, append/compaction contracts live in
+`src/store/contracts.rs`, test-only runtime assertions live in
+`src/store/runtime_contracts.rs`, ancestor traversal is split into
+`src/store/ancestors.rs` plus cfg-specific helper files, lifecycle helpers live
+in `src/store/maintenance.rs`, projection wiring lives in
+`src/store/projection_flow.rs`, and test-only hooks live behind the
+`test-support` feature in `src/store/test_support.rs`. Read this block as API
+intent, not as the literal final file layout.
 
 ```
 pub struct Store { index, reader, cache, writer, config }
@@ -1566,7 +1604,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with: { components: clippy }
       - uses: Swatinem/rust-cache@v2
-      - run: cargo clippy --all-features -- -D warnings
+      - run: cargo clippy --all-features --all-targets -- -D warnings
 
   fmt:
     runs-on: ubuntu-latest
@@ -1613,7 +1651,7 @@ test:
     cargo test --doc --all-features
 
 clip:
-    cargo clippy --all-features -- -D warnings
+    cargo clippy --all-features --all-targets -- -D warnings
 
 fmt:
     cargo fmt
@@ -1696,6 +1734,20 @@ STEP 6 — Pipeline
   → cargo check --features blake3 MUST PASS
 
 STEP 7 — Store (all files, biggest step)
+  Current-state note (2026-03-30):
+    The live repo split the old store monolith. In addition to the files
+    listed below, the current store surface also includes:
+      src/store/config.rs
+      src/store/contracts.rs
+      src/store/error.rs
+      src/store/ancestors.rs
+      src/store/ancestors_hash.rs
+      src/store/ancestors_clock.rs
+      src/store/maintenance.rs
+      src/store/projection_flow.rs
+      src/store/stats.rs
+      src/store/test_support.rs
+    `src/store/mod.rs` is now the Store facade plus public wiring.
   FILES:
     src/store/index.rs             ← StoreIndex, IndexEntry, ClockKey, DiskPos
     src/store/segment.rs           ← SegmentHeader, frame_encode/decode, FramePayload
@@ -1711,7 +1763,7 @@ STEP 7 — Store (all files, biggest step)
 
 STEP 8 — Tests
   FILES: tests/monad_laws.rs, hash_chain.rs, store_integration.rs,
-    gate_pipeline.rs, typestate_safety.rs, wire_format.rs, self_benchmark.rs
+    gate_pipeline.rs, typestate_safety.rs, wire_format.rs, perf_gates.rs
   → cargo nextest run MUST PASS
 
 STEP 9 — Benches
@@ -1721,9 +1773,11 @@ STEP 9 — Benches
 STEP 10 — Hello world, verify it runs (fn main, no tokio)
 
 STEP 11 — Final checks
-  → cargo clippy --all-features -- -D warnings → ZERO WARNINGS
+  → cargo clippy --all-features --all-targets -- -D warnings → ZERO WARNINGS
   → cargo fmt --check → PASSES
   → cargo doc --all-features --no-deps → CLEAN
+  → just mutants-smoke → PASSES
+  → scheduled CI runs full-shard mutation matrix in the canonical container
 ```
 
 ---

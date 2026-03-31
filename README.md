@@ -11,7 +11,7 @@ batpak gives you an append-only event log with hash chain integrity, a DAG-based
 ```rust
 use batpak::prelude::*;
 
-let store = Store::open(StoreConfig::new("/tmp/my-store"))?;
+let store = Store::open(StoreConfig::new("./batpak-data"))?;
 let coord = Coordinate::new("player:alice", "room:dungeon")?;
 let kind = EventKind::custom(0xF, 1);
 
@@ -40,6 +40,20 @@ CONTRIBUTING.md  How to build, test, and contribute
 | [batpak/TUNING.md](batpak/TUNING.md) | StoreConfig reference, tradeoff matrix, deployment examples |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Build, test, lint, pre-submit checklist |
 | [SPEC.md](SPEC.md) | Full technical specification |
+
+## Integrity Contract
+
+- Canonical environment: `.devcontainer/`
+- Machine-readable traceability: `traceability/`
+- Decision records: `batpak/docs/adr/`
+- Executable integrity tooling: `batpak/tools/integrity/`
+
+From `batpak/`, the canonical verification path is:
+
+```bash
+cargo run --manifest-path tools/integrity/Cargo.toml -- doctor --strict
+just ci
+```
 
 ## License
 

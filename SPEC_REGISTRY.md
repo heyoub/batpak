@@ -1,5 +1,13 @@
 # SPEC_REGISTRY — Portable Context for Parallel Agent Execution
 
+Status note (2026-03-30): this registry now sits beside the live code and the
+machine-readable traceability registry. The store implementation has been split
+across focused modules, the canonical Linux environment is the checked-in
+devcontainer, CI runs Linux in-container plus Windows native, and mutation
+testing now has smoke and scheduled full-shard lanes. Where older file-local
+sections still describe the pre-split store monolith, treat them as API intent
+only and prefer the current file graph in `batpak/src/store/`.
+
 ```
 WHAT THIS IS:
   Self-contained file-level build contexts. Each H2 section is ONE file.
@@ -46,7 +54,7 @@ This section is GROUND TRUTH. If it contradicts your training data, this wins.
 Verified against cargo doc output for the pinned versions in Cargo.toml.
 
 ```
-=== flume 0.11 ===
+=== flume 0.12 ===
 
 flume::bounded<T>(cap: usize) -> (Sender<T>, Receiver<T>)
 flume::unbounded<T>() -> (Sender<T>, Receiver<T>)
@@ -3674,6 +3682,17 @@ impl Subscription {
 
 ## src/store/mod.rs
 
+Current-state note (2026-03-30): the live repo no longer keeps every store
+type in this file. `StoreConfig` lives in `src/store/config.rs`, `StoreError`
+lives in `src/store/error.rs`, append/compaction contracts live in
+`src/store/contracts.rs`, test-only runtime checks live in
+`src/store/runtime_contracts.rs`, ancestor traversal is split into
+`src/store/ancestors.rs` plus cfg-specific helper files, lifecycle helpers live
+in `src/store/maintenance.rs`, projection orchestration lives in
+`src/store/projection_flow.rs`, and test-only hooks live behind the
+`test-support` feature in `src/store/test_support.rs`. Read the section below
+as public API intent, not as the literal final file layout.
+
 IMPORTS:
 ```rust
 pub mod index;
@@ -4067,7 +4086,7 @@ STORE MODULE REGISTRATION COMPLETE — 7 files registered.
 
 Tests and benches pending registration:
   tests/monad_laws.rs, hash_chain.rs, store_integration.rs, gate_pipeline.rs,
-  typestate_safety.rs, wire_format.rs, self_benchmark.rs
+  typestate_safety.rs, wire_format.rs, perf_gates.rs
   benches/write_throughput.rs, cold_start.rs, projection_latency.rs
 
 Test/bench registration will follow the same pattern:

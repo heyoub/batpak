@@ -37,7 +37,7 @@ coordinate  →  event  →  guard  →  pipeline  →  store
 ```rust
 use batpak::prelude::*;
 
-let config = StoreConfig::new("/tmp/my-store");
+let config = StoreConfig::new("./batpak-data");
 let store = Store::open(config)?;
 
 let coord = Coordinate::new("player:alice", "room:dungeon")?;
@@ -46,6 +46,17 @@ let kind = EventKind::custom(0xF, 1);
 let receipt = store.append(&coord, kind, &serde_json::json!({"x": 10, "y": 20}))?;
 println!("Stored event {} at seq {}", receipt.event_id, receipt.sequence);
 ```
+
+## Integrity Workflow
+
+Use the checked-in Dev Container for the canonical environment, or run the same gates natively after a strict doctor check:
+
+```bash
+cargo run --manifest-path tools/integrity/Cargo.toml -- doctor --strict
+just ci
+```
+
+Traceability and architectural proof live in `../traceability/` and `docs/adr/`.
 
 ## Design Invariants
 
