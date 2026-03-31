@@ -1,0 +1,8 @@
+test_tool = "cargo"
+sharding = "slice"
+output = "mutants.out"
+minimum_test_timeout = 120.0
+timeout_multiplier = 2.5
+build_timeout_multiplier = 2.0
+copy_target = true
+gitignore = true

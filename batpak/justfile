@@ -1,82 +1,89 @@
+set windows-shell := ["powershell.exe", "-NoLogo", "-Command"]
+
 default:
     just --list
 
+doctor:
+    cargo run --manifest-path tools/integrity/Cargo.toml -- doctor --strict
+
+traceability:
+    cargo run --manifest-path tools/integrity/Cargo.toml -- traceability-check
+
+structural:
+    cargo run --manifest-path tools/integrity/Cargo.toml -- structural-check
+
 check:
     cargo check --all-features
-
-test:
-    cargo nextest run --all-features
-    cargo test --doc --all-features
-
-clip:
-    cargo clippy --all-features -- -D warnings
-
-fmt:
-    cargo fmt
-
-ci: fmt clip test
-    cargo bench --no-run --all-features
     cargo check --no-default-features
 
-pre-commit: fmt
-    cargo clippy --all-features -- -D warnings
-    cargo check --all-features
+test:
+    cargo nextest run --profile ci --all-features
+    cargo test --doc --all-features
+
+clippy:
+    cargo clippy --all-features --all-targets -- -D warnings
+
+fmt:
+    cargo fmt --check
+
+deny:
+    cargo deny check
+
+bench-compile:
+    cargo bench --no-run --all-features
+
+# Keep mutation surfaces aligned with the compiled feature set:
+# the blake3 hash helper is excluded from no-default runs, and the
+# clock-only fallback helper is excluded from all-features runs.
+mutants-smoke:
+    cargo mutants --file "src/store/*.rs" --file src/wire.rs --file "src/guard/*.rs" --file "src/pipeline/*.rs" --exclude src/store/ancestors_clock.rs --shard 1/12 --all-features --test-tool cargo
+    cargo mutants --file "src/store/*.rs" --exclude src/store/ancestors_hash.rs --shard 1/12 --no-default-features --test-tool cargo
+
+mutants-full:
+    cargo mutants --file "src/store/*.rs" --file src/wire.rs --file "src/guard/*.rs" --file "src/pipeline/*.rs" --exclude src/store/ancestors_clock.rs --all-features --test-tool cargo
+    cargo mutants --file "src/store/*.rs" --exclude src/store/ancestors_hash.rs --no-default-features --test-tool cargo
+
+ci: doctor traceability structural fmt clippy deny test bench-compile check
+
+pre-commit: fmt clippy traceability structural
+
+cover:
+    ./scripts/coverage-feedback
+
+cover-check:
+    ./scripts/coverage-feedback --ci --threshold 80
+
+cover-json:
+    ./scripts/coverage-feedback --json
 
 bench:
     cargo bench --all-features
 
-# Coverage: like `mix test --cover` — pings back what's NOT covered.
-cover:
-    ./scripts/coverage-feedback
-
-# Coverage with CI threshold gate (fails if below 70%)
-cover-check:
-    ./scripts/coverage-feedback --ci --threshold 70
-
-# Raw coverage JSON for tooling
-cover-json:
-    ./scripts/coverage-feedback --json
-
-# Benchmark with improvement report
 bench-report:
     ./scripts/bench-report
 
-# Save benchmark baseline for future comparison
 bench-save:
     ./scripts/bench-report --save
 
-# Compare benchmarks against saved baseline
 bench-compare:
     ./scripts/bench-report --compare
 
-# Fuzz testing (proptest-based, high iteration count)
 fuzz:
     PROPTEST_CASES=10000 cargo test --test fuzz_targets --all-features --release -- --nocapture
 
-# Deep fuzz (100K iterations per target)
 fuzz-deep:
     PROPTEST_CASES=100000 cargo test --test fuzz_targets --all-features --release -- --nocapture
 
-# Chaos testing
 chaos:
     CHAOS_ITERATIONS=2000 cargo test --test chaos_testing --all-features --release -- --nocapture
 
-# Extended chaos (5K iterations per chaos scenario)
 chaos-deep:
     CHAOS_ITERATIONS=5000 cargo test --test chaos_testing --all-features --release -- --nocapture
 
-# Full fuzz+chaos feedback loop (gates → extended load)
 fuzz-chaos:
     cargo test --test fuzz_chaos_feedback --all-features --release -- --nocapture
 
-# Everything: fuzz + chaos + feedback loop + benchmarks
 stress: fuzz chaos fuzz-chaos bench
 
 doc:
     cargo doc --all-features --no-deps --open
-
-deps-doc:
-    cargo doc --document-private-items --no-deps --open
-
-lib-doc:
-    cargo doc --all-features --open

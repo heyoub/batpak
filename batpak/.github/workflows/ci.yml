@@ -1,149 +1,162 @@
-name: CI
-on: [push, pull_request]
+name: Integrity CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 7 * * 1"
+
 env:
   CARGO_TERM_COLOR: always
-  RUSTFLAGS: "-D warnings"
   PROPTEST_CASES: 256
 
 jobs:
-  check:
+  integrity-linux-container:
+    name: Integrity (ubuntu-devcontainer)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo check --all-features
-      - run: cargo check --no-default-features
-      - run: cargo check --features blake3
-      - run: cargo check --features redb
+      - name: Canonical container integrity gates
+        run: |
+          bash ./scripts/run-in-devcontainer.sh '
+            cargo run --manifest-path tools/integrity/Cargo.toml -- doctor --strict &&
+            cargo run --manifest-path tools/integrity/Cargo.toml -- traceability-check &&
+            cargo run --manifest-path tools/integrity/Cargo.toml -- structural-check &&
+            cargo fmt --check &&
+            cargo clippy --all-features --all-targets -- -D warnings &&
+            cargo deny check &&
+            cargo check --all-features &&
+            cargo check --no-default-features &&
+            cargo nextest run --profile ci --all-features &&
+            cargo test --doc --all-features &&
+            cargo bench --no-run --all-features
+          '
 
-  test:
-    runs-on: ubuntu-latest
-    needs: check
+  integrity-windows-native:
+    name: Integrity (windows-native)
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: batpak
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy,rustfmt,llvm-tools-preview
       - uses: taiki-e/install-action@nextest
+      - uses: taiki-e/install-action@cargo-deny
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - uses: taiki-e/install-action@cargo-mutants
       - uses: Swatinem/rust-cache@v2
-      - run: cargo nextest run --profile ci --all-features
-      - run: cargo test --doc --all-features
+      - name: Doctor
+        run: cargo run --manifest-path tools/integrity/Cargo.toml -- doctor --strict
+      - name: Traceability
+        run: cargo run --manifest-path tools/integrity/Cargo.toml -- traceability-check
+      - name: Structural
+        run: cargo run --manifest-path tools/integrity/Cargo.toml -- structural-check
+      - name: Format
+        run: cargo fmt --check
+      - name: Clippy
+        run: cargo clippy --all-features --all-targets -- -D warnings
+      - name: Deny
+        run: cargo deny check
+      - name: Check all features
+        run: cargo check --all-features
+      - name: Check no default features
+        run: cargo check --no-default-features
+      - name: Tests
+        run: cargo nextest run --profile ci --all-features
+      - name: Doc tests
+        run: cargo test --doc --all-features
+      - name: Bench compile
+        run: cargo bench --no-run --all-features
 
-  test-feature-isolation:
+  feature-isolation:
     runs-on: ubuntu-latest
-    needs: check
+    needs: [integrity-linux-container, integrity-windows-native]
     strategy:
+      fail-fast: false
       matrix:
         features:
-          - ""                    # no features (no blake3, no redb, no lmdb)
-          - "--features blake3"   # blake3 only
-          - "--features redb"     # redb cache only
-          - "--features lmdb"     # lmdb cache only
-      fail-fast: false
+          - ""
+          - "--features blake3"
+          - "--features redb"
+          - "--features lmdb"
+          - "--features test-support"
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Test with features [${{ matrix.features || 'none' }}]
-        run: cargo test ${{ matrix.features }}
-
-  clippy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with: { components: clippy }
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo clippy --all-features -- -D warnings
-
-  fmt:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with: { components: rustfmt }
-      - run: cargo fmt --check
-
-  msrv:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.75.0
-      - run: cargo check --all-features
-
-  deny:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: EmbarkStudios/cargo-deny-action@v2
-
-  semver:
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-    steps:
-      - uses: actions/checkout@v4
-      - uses: obi1kenobi/cargo-semver-checks-action@v2
+      - name: Feature-isolation test matrix
+        run: bash ./scripts/run-in-devcontainer.sh "cargo test ${{ matrix.features }}"
 
   coverage:
     runs-on: ubuntu-latest
-    needs: test
+    needs: [integrity-linux-container, integrity-windows-native]
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with: { components: llvm-tools-preview }
-      - uses: taiki-e/install-action@cargo-llvm-cov
-      - uses: Swatinem/rust-cache@v2
-      - name: Run coverage
-        run: cargo llvm-cov test --all-features --text
-      - name: Coverage threshold check (80% line coverage)
+      - name: Coverage threshold check
         run: |
-          SUMMARY=$(cargo llvm-cov test --all-features --json 2>/dev/null | python3 -c "
-          import json, sys
-          data = json.load(sys.stdin)
-          totals = data['data'][0]['totals']
-          lines = totals['lines']
-          pct = lines['covered'] * 100 // lines['count'] if lines['count'] > 0 else 0
-          print(f'{pct}')
-          ")
-          echo "Line coverage: ${SUMMARY}%"
-          if [ "${SUMMARY}" -lt 80 ]; then
-            echo "FAIL: coverage ${SUMMARY}% < 80%"
-            exit 1
-          fi
+          bash ./scripts/run-in-devcontainer.sh '
+            SUMMARY=$(cargo llvm-cov test --all-features --json 2>/dev/null | python3 -c "
+            import json, sys
+            data = json.load(sys.stdin)
+            totals = data[\"data\"][0][\"totals\"]
+            lines = totals[\"lines\"]
+            pct = lines[\"covered\"] * 100 // lines[\"count\"] if lines[\"count\"] > 0 else 0
+            print(f\"{pct}\")
+            ")
+            echo "Line coverage: ${SUMMARY}%"
+            if [ "${SUMMARY}" -lt 80 ]; then
+              echo "FAIL: coverage ${SUMMARY}% < 80%"
+              exit 1
+            fi
+          '
 
-  fuzz-chaos:
+  mutants:
     runs-on: ubuntu-latest
-    needs: test
+    if: github.event_name == 'workflow_dispatch'
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Run fuzz-chaos feedback loop (ignored tests)
-        run: cargo test --test fuzz_chaos_feedback -- --ignored --test-threads=1
-        env:
-          PROPTEST_CASES: 256
-          CHAOS_ITERATIONS: 100
+      - name: Mutation smoke (all features)
+        run: bash ./scripts/run-in-devcontainer.sh 'cargo mutants --file "src/store/*.rs" --file src/wire.rs --file "src/guard/*.rs" --file "src/pipeline/*.rs" --exclude src/store/ancestors_clock.rs --shard 1/12 --all-features --test-tool cargo'
+      - name: Mutation smoke (no default features)
+        run: bash ./scripts/run-in-devcontainer.sh 'cargo mutants --file "src/store/*.rs" --exclude src/store/ancestors_hash.rs --shard 1/12 --no-default-features --test-tool cargo'
 
-  bench:
+  mutants-full:
     runs-on: ubuntu-latest
-    needs: check
+    if: github.event_name == 'schedule'
+    strategy:
+      fail-fast: false
+      matrix:
+        surface:
+          - name: all-features
+            command: >-
+              cargo mutants --file "src/store/*.rs" --file src/wire.rs --file "src/guard/*.rs" --file "src/pipeline/*.rs" --exclude src/store/ancestors_clock.rs --all-features --test-tool cargo
+          - name: no-default-features
+            command: >-
+              cargo mutants --file "src/store/*.rs" --exclude src/store/ancestors_hash.rs --no-default-features --test-tool cargo
+        shard:
+          - 1/12
+          - 2/12
+          - 3/12
+          - 4/12
+          - 5/12
+          - 6/12
+          - 7/12
+          - 8/12
+          - 9/12
+          - 10/12
+          - 11/12
+          - 12/12
+    name: Mutation full (${{ matrix.surface.name }} shard ${{ matrix.shard }})
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo bench --no-run --all-features
-      - name: Run benchmarks and save baseline
-        if: github.ref == 'refs/heads/main'
-        run: cargo bench --all-features -- --save-baseline main
-      - name: Run benchmarks against main baseline
-        if: github.ref != 'refs/heads/main'
-        continue-on-error: true
-        run: |
-          cargo bench --all-features -- --load-baseline main --baseline main 2>&1 | tee bench-results.txt || true
-          echo "::notice::Benchmark comparison complete — check output for regressions"
+      - name: Full mutation shard
+        run: bash ./scripts/run-in-devcontainer.sh '${{ matrix.surface.command }} --shard ${{ matrix.shard }}'
 
   docs:
     runs-on: ubuntu-latest
-    needs: test
+    needs: [integrity-linux-container, integrity-windows-native]
     if: github.ref == 'refs/heads/main'
     permissions:
       pages: write
@@ -153,16 +166,12 @@ jobs:
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Build rustdoc
-        run: cargo doc --all-features --no-deps
-        env:
-          RUSTDOCFLAGS: "--cfg docsrs -D warnings"
+      - name: Build rustdoc in canonical container
+        run: bash ./scripts/run-in-devcontainer.sh 'RUSTDOCFLAGS="--cfg docsrs -D warnings" cargo doc --all-features --no-deps'
       - name: Add redirect index
-        run: echo '<meta http-equiv="refresh" content="0;url=batpak/index.html">' > target/doc/index.html
+        run: echo '<meta http-equiv="refresh" content="0;url=batpak/index.html">' > batpak/target/doc/index.html
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: target/doc
+          path: batpak/target/doc
       - id: deploy
         uses: actions/deploy-pages@v4

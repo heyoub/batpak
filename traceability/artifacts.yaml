@@ -1,0 +1,149 @@
+- id: ART-DEVCONTAINER
+  kind: environment
+  paths:
+    - .devcontainer/devcontainer.json
+    - .devcontainer/Dockerfile
+- id: ART-DEVCONTAINER-RUNNER
+  kind: workflow
+  paths:
+    - scripts/run-in-devcontainer.sh
+- id: ART-GITATTRIBUTES
+  kind: environment
+  paths:
+    - .gitattributes
+- id: ART-DOCTOR
+  kind: tool
+  paths:
+    - batpak/tools/integrity/src/main.rs
+- id: ART-TRACEABILITY
+  kind: registry
+  paths:
+    - traceability/requirements.yaml
+    - traceability/invariants.yaml
+    - traceability/flows.yaml
+    - traceability/artifacts.yaml
+- id: ART-TRACEABILITY-CHECK
+  kind: tool
+  paths:
+    - batpak/tools/integrity/src/main.rs
+- id: ART-STRUCTURAL-CHECK
+  kind: tool
+  paths:
+    - batpak/tools/integrity/src/main.rs
+- id: ART-PUB-ALLOWLIST
+  kind: registry
+  paths:
+    - traceability/pub_item_allowlist.yaml
+- id: ART-CI
+  kind: ci
+  paths:
+    - batpak/.github/workflows/ci.yml
+- id: ART-JUST
+  kind: workflow
+  paths:
+    - batpak/justfile
+- id: ART-VERIFY
+  kind: workflow
+  paths:
+    - scripts/verify-all.sh
+- id: ART-DENY-CONFIG
+  kind: dependency-policy
+  paths:
+    - batpak/deny.toml
+- id: ART-CARGO
+  kind: manifest
+  paths:
+    - batpak/Cargo.toml
+- id: ART-BUILD-RS
+  kind: detector
+  paths:
+    - batpak/build.rs
+- id: ART-STORE-MOD
+  kind: source
+  paths:
+    - batpak/src/store/mod.rs
+- id: ART-STORE-CONFIG
+  kind: source
+  paths:
+    - batpak/src/store/config.rs
+- id: ART-STORE-ERROR
+  kind: source
+  paths:
+    - batpak/src/store/error.rs
+- id: ART-STORE-CONTRACTS
+  kind: source
+  paths:
+    - batpak/src/store/contracts.rs
+- id: ART-STORE-ANCESTORS
+  kind: source
+  paths:
+    - batpak/src/store/ancestors.rs
+    - batpak/src/store/ancestors_hash.rs
+    - batpak/src/store/ancestors_clock.rs
+- id: ART-STORE-PROJECTION-FLOW
+  kind: source
+  paths:
+    - batpak/src/store/projection_flow.rs
+- id: ART-STORE-MAINTENANCE
+  kind: source
+  paths:
+    - batpak/src/store/maintenance.rs
+- id: ART-STORE-TEST-SUPPORT
+  kind: source
+  paths:
+    - batpak/src/store/test_support.rs
+- id: ART-STORE-RUNTIME-CONTRACTS
+  kind: tests
+  paths:
+    - batpak/src/store/runtime_contracts.rs
+- id: ART-PROJECTION
+  kind: source
+  paths:
+    - batpak/src/store/projection.rs
+- id: ART-GUARD-RECEIPT
+  kind: source
+  paths:
+    - batpak/src/guard/receipt.rs
+- id: ART-TYPESTATE-TESTS
+  kind: tests
+  paths:
+    - batpak/tests/typestate_safety.rs
+    - batpak/tests/ui/forge_receipt.rs
+- id: ART-PROJECTION-TESTS
+  kind: tests
+  paths:
+    - batpak/tests/projection_cache.rs
+    - batpak/tests/store_projection_wiring.rs
+- id: ART-STORE-ADVANCED
+  kind: tests
+  paths:
+    - batpak/tests/store_advanced.rs
+    - batpak/tests/store_restart_policy.rs
+- id: ART-STORE-INTEGRATION
+  kind: tests
+  paths:
+    - batpak/tests/store_integration.rs
+- id: ART-STORE-PROPERTIES
+  kind: tests
+  paths:
+    - batpak/tests/store_properties.rs
+- id: ART-OBSERVABILITY-TESTS
+  kind: tests
+  paths:
+    - batpak/tests/observability_flows.rs
+- id: ART-REPLAY-TESTS
+  kind: tests
+  paths:
+    - batpak/tests/replay_consistency.rs
+- id: ART-DETERMINISTIC-CONCURRENCY-TESTS
+  kind: tests
+  paths:
+    - batpak/tests/deterministic_concurrency.rs
+- id: ART-ADR-SYNC
+  kind: adr
+  paths:
+    - batpak/docs/adr/ADR-0001-sync-only-store.md
+- id: ART-ADR-COMPACTION
+  kind: adr
+  paths:
+    - batpak/docs/adr/ADR-0004-compaction-concurrency.md

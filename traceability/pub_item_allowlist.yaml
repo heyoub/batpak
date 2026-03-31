@@ -1,0 +1,24 @@
+- name: EntityIdType
+  justification: macro entrypoint tested through define_entity_id! consumers
+- name: ClockKey
+  justification: internal index helper exercised indirectly through store queries and cursor tests
+- name: DiskPos
+  justification: append receipts and reader/index internals exercise it indirectly without naming the type directly
+- name: RetentionPredicate
+  justification: compaction closures are exercised through CompactionStrategy without test code naming the boxed type alias directly
+- name: Active
+  justification: typestate marker exercised by segment lifecycle tests
+- name: Sealed
+  justification: typestate marker exercised by compaction and segment lifecycle tests
+- name: SegmentHeader
+  justification: serialization shape tested indirectly through wire and fuzz coverage
+- name: StoreDiagnostics
+  justification: surfaced through diagnostics tests instead of direct type-name references
+- name: CompactionResult
+  justification: returned by compact and asserted through compaction behavior tests
+- name: u128_bytes
+  justification: serde helper module referenced through serde attributes rather than direct imports
+- name: option_u128_bytes
+  justification: serde helper module referenced through serde attributes rather than direct imports
+- name: vec_u128_bytes
+  justification: serde helper module referenced through serde attributes rather than direct imports

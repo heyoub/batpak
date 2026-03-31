@@ -1,0 +1,45 @@
+- id: REQ-ENV-HERMETIC
+  summary: The repository must define a portable, reproducible development and CI environment contract.
+  artifacts:
+    - ART-DEVCONTAINER
+    - ART-GITATTRIBUTES
+    - ART-DOCTOR
+- id: REQ-GATES-EXECUTABLE
+  summary: All declared integrity gates must be runnable and required in local and CI workflows.
+  artifacts:
+    - ART-CI
+    - ART-JUST
+    - ART-VERIFY
+    - ART-DENY-CONFIG
+- id: REQ-TRACE-BIDIR
+  summary: Important requirements, invariants, flows, and proving artifacts must link bidirectionally.
+  artifacts:
+    - ART-TRACEABILITY
+    - ART-ADR-SYNC
+    - ART-ADR-COMPACTION
+- id: REQ-STORE-HONESTY
+  summary: The store runtime must expose only production-valid APIs by default and make privileged paths explicit.
+  artifacts:
+    - ART-STORE-MOD
+    - ART-STORE-TEST-SUPPORT
+    - ART-STORE-ADVANCED
+- id: REQ-CACHE-CAPABILITY
+  summary: Cache behavior must express capabilities explicitly rather than hiding behind silent default no-ops.
+  artifacts:
+    - ART-PROJECTION
+    - ART-PROJECTION-TESTS
+- id: REQ-OBSERVABILITY
+  summary: Named flows must emit enough telemetry and proofs for post-facto reconstruction.
+  artifacts:
+    - ART-OBSERVABILITY-TESTS
+    - ART-STORE-MOD
+- id: REQ-REPLAY-DETERMINISM
+  summary: Snapshot and cold-start rebuilds must preserve observable state and projection outputs.
+  artifacts:
+    - ART-REPLAY-TESTS
+    - ART-STORE-INTEGRATION
+- id: REQ-STRUCTURAL-DETECTORS
+  summary: The codebase must run parser-backed detectors for structural drift, stale references, and public-surface honesty.
+  artifacts:
+    - ART-STRUCTURAL-CHECK
+    - ART-PUB-ALLOWLIST

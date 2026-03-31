@@ -1,0 +1,77 @@
+- id: INV-NO-TOKIO-PROD
+  statement: Production dependencies remain runtime-agnostic; Tokio stays out of non-dev dependencies.
+  artifacts:
+    - ART-CARGO
+    - ART-BUILD-RS
+- id: INV-STORE-SYNC-ONLY
+  statement: The Store public API remains synchronous.
+  artifacts:
+    - ART-STORE-MOD
+    - ART-STORE-CONFIG
+    - ART-ADR-SYNC
+- id: INV-STORE-LIFECYCLE-HONESTY
+  statement: Store sync and drop paths must surface writer failures honestly and send best-effort shutdown rather than silently succeeding.
+  artifacts:
+    - ART-STORE-MOD
+    - ART-STORE-ERROR
+    - ART-STORE-MAINTENANCE
+    - ART-STORE-RUNTIME-CONTRACTS
+- id: INV-STORE-ERROR-TAXONOMY
+  statement: Store failure paths must preserve structured error variants instead of laundering failures into defaults or strings.
+  artifacts:
+    - ART-STORE-ERROR
+    - ART-STORE-PROPERTIES
+- id: INV-PAYLOAD-LENGTH-EXACT
+  statement: Serialized payload lengths must be computed exactly and rejected when they exceed the wire contract.
+  artifacts:
+    - ART-STORE-CONTRACTS
+    - ART-STORE-RUNTIME-CONTRACTS
+- id: INV-CLOCK-NOW-US-LIVE
+  statement: The store wall-clock helper must produce positive microsecond timestamps that advance with real time.
+  artifacts:
+    - ART-STORE-CONFIG
+    - ART-STORE-RUNTIME-CONTRACTS
+- id: INV-RECEIPT-SEALED
+  statement: Receipts are only constructible by gate evaluation, not by external callers.
+  artifacts:
+    - ART-GUARD-RECEIPT
+    - ART-TYPESTATE-TESTS
+- id: INV-TEST-SUPPORT-NONDEFAULT
+  statement: Test-only writer panic control is not exposed in default production builds.
+  artifacts:
+    - ART-STORE-TEST-SUPPORT
+    - ART-STORE-ADVANCED
+- id: INV-CACHE-CAPABILITIES-EXPLICIT
+  statement: Cache prefetch behavior must be discoverable through an explicit capability surface.
+  artifacts:
+    - ART-PROJECTION
+    - ART-STORE-PROJECTION-FLOW
+    - ART-PROJECTION-TESTS
+- id: INV-LMDB-DELETE-IDEMPOTENT
+  statement: LMDB prefix deletion remains safe and idempotent even when rows are removed through iterator-driven deletion.
+  artifacts:
+    - ART-PROJECTION
+    - ART-PROJECTION-TESTS
+- id: INV-TRACEABILITY-COMPLETE
+  statement: Each important requirement, invariant, and flow links to concrete proving artifacts, and every artifact participates in that graph.
+  artifacts:
+    - ART-TRACEABILITY
+    - ART-TRACEABILITY-CHECK
+- id: INV-CONCURRENCY-SCHEDULE-PROOF
+  statement: Idempotency, compare-and-set, restart-budget, and compaction-exclusivity semantics remain valid under deterministic schedule exploration.
+  artifacts:
+    - ART-DETERMINISTIC-CONCURRENCY-TESTS
+    - ART-STORE-MOD
+    - ART-STORE-MAINTENANCE
+- id: INV-OBSERVABILITY-FAILURE-PATHS
+  statement: Named flows emit enough telemetry to distinguish successful execution from cache-degraded or causal-reaction execution paths.
+  artifacts:
+    - ART-OBSERVABILITY-TESTS
+    - ART-STORE-PROJECTION-FLOW
+    - ART-STORE-MOD
+- id: INV-CANONICAL-CONTAINER-CI
+  statement: The canonical Linux CI path executes inside the checked-in devcontainer image rather than a separately hand-installed host environment.
+  artifacts:
+    - ART-DEVCONTAINER
+    - ART-DEVCONTAINER-RUNNER
+    - ART-CI

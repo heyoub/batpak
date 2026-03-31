@@ -1,60 +1,63 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ============================================================================
-# batpak verification harness
-#
-# Runs all quality gates in dependency order. Exit code 0 = all green.
-# Optimized for Rust: fmt → clippy → test (all features) → test (no features)
-#
-# Usage:
-#   ./scripts/verify-all.sh          # full suite
-#   ./scripts/verify-all.sh --quick  # fmt + clippy only (pre-commit)
-# ============================================================================
-
 cd "$(dirname "$0")/../batpak"
 
-QUICK=false
+quick=false
 if [ "${1:-}" = "--quick" ]; then
-  QUICK=true
+  quick=true
 fi
 
-echo "=== batpak verification ==="
-echo ""
+echo "=== batpak integrity verification ==="
+echo
 
-# ── Gate 1: formatting ───────────────────────────────────────────────
-echo "--- Gate 1: cargo fmt --check ---"
+echo "--- Gate 1: doctor ---"
+cargo run --manifest-path tools/integrity/Cargo.toml -- doctor --strict
+echo
+
+echo "--- Gate 2: traceability ---"
+cargo run --manifest-path tools/integrity/Cargo.toml -- traceability-check
+echo
+
+echo "--- Gate 3: structural ---"
+cargo run --manifest-path tools/integrity/Cargo.toml -- structural-check
+echo
+
+echo "--- Gate 4: cargo fmt --check ---"
 cargo fmt --check
-echo "    PASS"
-echo ""
+echo
 
-# ── Gate 2: clippy ───────────────────────────────────────────────────
-echo "--- Gate 2: cargo clippy --all-features -- -D warnings ---"
-cargo clippy --all-features -- -D warnings 2>&1
-echo "    PASS"
-echo ""
+echo "--- Gate 5: cargo clippy --all-features --all-targets -- -D warnings ---"
+cargo clippy --all-features --all-targets -- -D warnings
+echo
 
-if [ "$QUICK" = true ]; then
-  echo "=== QUICK GATES PASSED (fmt + clippy) ==="
+if [ "$quick" = true ]; then
+  echo "=== QUICK GATES PASSED ==="
   exit 0
 fi
 
-# ── Gate 3: tests with all features ──────────────────────────────────
-echo "--- Gate 3: cargo test --all-features ---"
-cargo test --all-features 2>&1
-echo "    PASS"
-echo ""
+echo "--- Gate 6: cargo deny check ---"
+cargo deny check
+echo
 
-# ── Gate 4: tests with no features ───────────────────────────────────
-echo "--- Gate 4: cargo test --no-default-features ---"
-cargo test --no-default-features 2>&1
-echo "    PASS"
-echo ""
+echo "--- Gate 7: cargo nextest run --profile ci --all-features ---"
+cargo nextest run --profile ci --all-features
+echo
 
-# ── Gate 5: doc warnings (informational) ─────────────────────────────
-echo "--- Gate 5: cargo doc --all-features --no-deps (informational) ---"
-DOC_WARNINGS=$(cargo doc --all-features --no-deps 2>&1 | grep -c "warning" || true)
-echo "    Doc warnings: $DOC_WARNINGS (pre-existing, not gated)"
-echo ""
+echo "--- Gate 8: cargo test --doc --all-features ---"
+cargo test --doc --all-features
+echo
+
+echo "--- Gate 9: cargo check --all-features ---"
+cargo check --all-features
+echo
+
+echo "--- Gate 10: cargo check --no-default-features ---"
+cargo check --no-default-features
+echo
+
+echo "--- Gate 11: cargo bench --no-run --all-features ---"
+cargo bench --no-run --all-features
+echo
 
 echo "=== ALL GATES PASSED ==="

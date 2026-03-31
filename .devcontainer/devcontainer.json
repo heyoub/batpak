@@ -1,0 +1,23 @@
+{
+  "name": "batpak-integrity",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+  "workspaceFolder": "/workspace/batpak",
+  "overrideCommand": false,
+  "remoteEnv": {
+    "DEVCONTAINER": "1"
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "rust-lang.rust-analyzer",
+        "tamasfe.even-better-toml",
+        "ms-python.python",
+        "editorconfig.editorconfig"
+      ]
+    }
+  },
+  "postCreateCommand": "cargo run --manifest-path batpak/tools/integrity/Cargo.toml -- doctor --strict"
+}

@@ -1,0 +1,55 @@
+- id: FLOW-APPEND
+  summary: Root-cause append goes through store append path, writer commit protocol, and persistence.
+  artifacts:
+    - ART-STORE-MOD
+    - ART-STORE-INTEGRATION
+    - ART-OBSERVABILITY-TESTS
+- id: FLOW-APPEND-OPTIONS
+  summary: Append with CAS/idempotency/correlation options enforces guards before commit.
+  artifacts:
+    - ART-STORE-MOD
+    - ART-STORE-PROPERTIES
+- id: FLOW-APPEND-REACTION
+  summary: Causal follow-up appends preserve correlation and causation IDs while emitting distinct telemetry.
+  artifacts:
+    - ART-STORE-MOD
+    - ART-OBSERVABILITY-TESTS
+- id: FLOW-WALK-ANCESTORS
+  summary: Ancestor traversal follows hash links when available and falls back to deterministic clock order otherwise.
+  artifacts:
+    - ART-STORE-ANCESTORS
+    - ART-STORE-ADVANCED
+- id: FLOW-PROJECT
+  summary: Project checks cache capability, optionally prefetches, validates freshness, and replays on miss.
+  artifacts:
+    - ART-PROJECTION
+    - ART-STORE-PROJECTION-FLOW
+    - ART-PROJECTION-TESTS
+    - ART-OBSERVABILITY-TESTS
+- id: FLOW-REACT
+  summary: Reactive loop subscribes, loads source events, emits derived reactions, and appends them causally.
+  artifacts:
+    - ART-STORE-MOD
+    - ART-STORE-ADVANCED
+- id: FLOW-SYNC
+  summary: Explicit sync hands control to the writer and returns only after the writer acknowledges durability work.
+  artifacts:
+    - ART-STORE-MAINTENANCE
+    - ART-OBSERVABILITY-TESTS
+- id: FLOW-SNAPSHOT
+  summary: Snapshot syncs first, then copies the sealed on-disk segment set into a destination directory.
+  artifacts:
+    - ART-STORE-MAINTENANCE
+    - ART-OBSERVABILITY-TESTS
+    - ART-REPLAY-TESTS
+- id: FLOW-COMPACT
+  summary: Compaction syncs, merges sealed segments, rebuilds the index, and preserves observable store truth.
+  artifacts:
+    - ART-STORE-MAINTENANCE
+    - ART-REPLAY-TESTS
+    - ART-ADR-COMPACTION
+- id: FLOW-CLOSE
+  summary: Close routes shutdown through the writer so outstanding work drains before the store exits.
+  artifacts:
+    - ART-STORE-MAINTENANCE
+    - ART-OBSERVABILITY-TESTS

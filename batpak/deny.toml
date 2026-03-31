@@ -1,34 +1,51 @@
-# cargo-deny configuration — supply chain defense.
-# Run: cargo deny check
-# CI: runs on every push (see .github/workflows/ci.yml)
+# cargo-deny configuration for batpak.
+# Run locally with: cargo deny check
+
+[graph]
+targets = [
+    "x86_64-pc-windows-msvc",
+    "x86_64-unknown-linux-gnu",
+]
+all-features = true
 
 [advisories]
-vulnerability = "deny"
-unmaintained = "warn"
-yanked = "warn"
-notice = "warn"
+ignore = [
+    { id = "RUSTSEC-2025-0141", reason = "heed currently depends on heed-types -> bincode 1.x for the optional lmdb backend; track until the lmdb stack moves off bincode 1.x." },
+]
 
 [licenses]
-unlicensed = "deny"
 allow = [
     "MIT",
     "Apache-2.0",
     "BSD-2-Clause",
     "BSD-3-Clause",
-    "ISC",
     "Unicode-3.0",
-    "Unicode-DFS-2016",
-    "Zlib",
-    "BlueOak-1.0.0",
 ]
-copyleft = "deny"
+confidence-threshold = 0.8
+
+[licenses.private]
+ignore = false
+registries = []
 
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
+highlight = "all"
+workspace-default-features = "allow"
+external-default-features = "allow"
+allow = []
+deny = []
+skip = [
+]
+skip-tree = []
 
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 allow-git = []
+
+[sources.allow-org]
+github = []
+gitlab = []
+bitbucket = []

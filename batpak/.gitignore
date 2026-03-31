@@ -1,5 +1,8 @@
 /target
 Cargo.lock
+.cargo/config.local.toml
+.env.local
+.integrity-cache/
 *.swp
 *.swo
 *~
@@ -7,3 +10,4 @@ Cargo.lock
 *.profraw
 .env
 .idea/
+mutants*/
