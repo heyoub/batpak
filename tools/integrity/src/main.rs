@@ -298,8 +298,27 @@ fn check_for_absolute_paths(repo_root: &Path, tracked_files: &[PathBuf]) -> Resu
 }
 
 fn check_for_stale_references(repo_root: &Path, tracked_files: &[PathBuf]) -> Result<()> {
-    let stale_terms: [&str; 0] = [];
-    let allow: [PathBuf; 0] = [];
+    let stale_terms = [
+        // Old test file names (renamed in repo flatten)
+        "self_benchmark.rs",
+        "quiet_stragglers.rs",
+        "bigbang_compliance.rs",
+        "coverage_gaps.rs",
+        // Old API name (replaced by AppendOptions::with_cas)
+        "with_expected_sequence",
+        // Deleted plan file
+        "plans-test-bench-reorganization",
+        // Old MSRV (updated to 1.92)
+        "MSRV is 1.75",
+        "MSRV: 1.75",
+        "MSRV 1.75",
+    ];
+    let allow = [
+        // Audit report legitimately documents historical state
+        repo_root.join("docs/audits/HICP_AUDIT_REPORT.md"),
+        // This file contains the terms as string literals
+        repo_root.join("tools/integrity/src/main.rs"),
+    ];
     for path in tracked_files {
         if allow.iter().any(|allowed| allowed == path) {
             continue;
