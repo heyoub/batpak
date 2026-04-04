@@ -415,6 +415,39 @@ fn versioned_cache_key_isolates_versions() {
     store.close().expect("close");
 }
 
+#[cfg(feature = "redb")]
+#[test]
+fn versioned_cache_key_isolates_with_redb() {
+    use batpak::store::RedbCache;
+    let dir = TempDir::new().expect("temp dir");
+    let cache_path = dir.path().join("cache.redb");
+    let cache = RedbCache::open(&cache_path).expect("open redb");
+    let config = StoreConfig::new(dir.path().join("data"));
+    let store = Store::open_with_cache(config, Box::new(cache)).expect("open with redb");
+    let coord = Coordinate::new("svr:entity", "svr:scope").expect("coord");
+    for i in 0u32..5 {
+        store.append(&coord, kind_a(), &payload(i)).expect("append");
+    }
+    // Project with AllCounter (v0) — populates redb cache under key "svr:entity"
+    let r1: Option<AllCounter> = store
+        .project("svr:entity", &Freshness::Consistent)
+        .expect("project v0");
+    assert_eq!(r1.expect("some").count, 5);
+    // Project with VersionedCounterV2 (v2) — must get a SEPARATE cache entry
+    // under key "svr:entity\0v2", not the v0 bytes
+    let r2: Option<VersionedCounterV2> = store
+        .project("svr:entity", &Freshness::Consistent)
+        .expect("project v2");
+    assert_eq!(
+        r2.expect("some").count,
+        5,
+        "PROPERTY: redb-backed schema-versioned cache keys must isolate types.\n\
+         v0 and v2 projections must not share a cache slot.\n\
+         Investigate: src/store/projection_flow.rs cache key with schema_version."
+    );
+    store.close().expect("close");
+}
+
 // ===========================================================================
 // 2a: Arc<IndexEntry> + PackedCausation
 // ===========================================================================
@@ -510,6 +543,44 @@ fn index_layout_aosoa8_by_fact_correct() {
         results.len(),
         20,
         "PROPERTY: AoSoA8 by_fact must return correct count.\n\
+         Investigate: src/store/columnar.rs Tile<8> query."
+    );
+    store.close().expect("close");
+}
+
+#[test]
+fn index_layout_aosoa16_by_fact_correct() {
+    let dir = TempDir::new().expect("temp dir");
+    let config = StoreConfig::new(dir.path()).with_index_layout(IndexLayout::AoSoA16);
+    let store = Store::open(config).expect("open");
+    let coord = Coordinate::new("tile16:entity", "tile16:scope").expect("coord");
+    for i in 0u32..40 {
+        store.append(&coord, kind_a(), &payload(i)).expect("append");
+    }
+    let results = store.by_fact(kind_a());
+    assert_eq!(
+        results.len(),
+        40,
+        "PROPERTY: AoSoA16 by_fact must return correct count.\n\
+         Investigate: src/store/columnar.rs Tile<16> query."
+    );
+    store.close().expect("close");
+}
+
+#[test]
+fn index_layout_aosoa64_by_fact_correct() {
+    let dir = TempDir::new().expect("temp dir");
+    let config = StoreConfig::new(dir.path()).with_index_layout(IndexLayout::AoSoA64);
+    let store = Store::open(config).expect("open");
+    let coord = Coordinate::new("tile64:entity", "tile64:scope").expect("coord");
+    for i in 0u32..150 {
+        store.append(&coord, kind_a(), &payload(i)).expect("append");
+    }
+    let results = store.by_fact(kind_a());
+    assert_eq!(
+        results.len(),
+        150,
+        "PROPERTY: AoSoA64 by_fact must return correct count.\n\
          Investigate: src/store/columnar.rs Tile<8> query."
     );
     store.close().expect("close");

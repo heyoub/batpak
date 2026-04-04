@@ -33,16 +33,6 @@ pub trait EventSourced<P>: Sized {
         false
     }
 
-    /// Attempt to migrate a cached projection from an older schema version.
-    /// Called when the projection cache contains bytes from `old_version` but
-    /// the current type uses a different `schema_version()`. Return `Some(Self)`
-    /// if migration succeeds, `None` to force a full replay from the event log.
-    ///
-    /// Default: no migration — always replays. Override to provide a migration
-    /// path between schema versions (e.g., adding a new field with a default).
-    fn upcast(_bytes: &[u8], _old_version: u64) -> Option<Self> {
-        None
-    }
 }
 
 /// `Reactive<P>`: forward-looking counterpart. See event → maybe emit derived events.
