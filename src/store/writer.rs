@@ -568,10 +568,11 @@ impl WriterState<'_> {
             .active_segment
             .needs_rotation(self.config.segment_max_bytes)
         {
-            // NOTE: SIDX footer writing is deferred — the footer would be included
-            // in compaction's append_frames_from_segment raw byte copy, corrupting
-            // the merged segment. SIDX will be written in a future revision that
-            // teaches compaction to strip footers before merging.
+            // Write SIDX footer before sealing. append_frames_from_segment now
+            // strips SIDX data via detect_sidx_boundary, so this is safe.
+            if let Err(e) = self.active_segment.write_sidx_footer(&self.sidx_collector) {
+                tracing::warn!("SIDX footer write failed (non-fatal): {e}");
+            }
             self.sidx_collector = crate::store::sidx::SidxEntryCollector::new();
 
             self.active_segment.sync_with_mode(&self.config.sync_mode)?;

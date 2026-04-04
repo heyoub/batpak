@@ -243,13 +243,27 @@ impl Segment<Active> {
             .read_exact(&mut header_len_buf)
             .map_err(StoreError::Io)?;
         let header_len = u32::from_be_bytes(header_len_buf) as u64;
+        let frames_start = 8 + header_len;
+
+        // Determine where frames end: if the segment has a SIDX footer,
+        // the frames stop at string_table_offset. Otherwise, frames extend
+        // to the end of the file.
+        let file_len = source.seek(SeekFrom::End(0)).map_err(StoreError::Io)?;
+        let frames_end = detect_sidx_boundary(&mut source, file_len)?
+            .unwrap_or(file_len);
+
         source
-            .seek(SeekFrom::Start(8 + header_len))
+            .seek(SeekFrom::Start(frames_start))
             .map_err(StoreError::Io)?;
 
         let offset = self.written_bytes;
         if let Some(ref mut destination) = self.file {
-            let copied = std::io::copy(&mut source, destination).map_err(StoreError::Io)?;
+            let bytes_to_copy = frames_end.saturating_sub(frames_start);
+            let copied = std::io::copy(
+                &mut source.take(bytes_to_copy),
+                destination,
+            )
+            .map_err(StoreError::Io)?;
             self.written_bytes += copied;
         }
         Ok(offset)
@@ -311,4 +325,34 @@ impl Segment<Active> {
             _state: std::marker::PhantomData,
         }
     }
+}
+
+/// Check whether a segment file ends with a SIDX footer.
+/// If so, return the byte offset where the string table starts (= end of frames).
+/// If not, return `None` (frames extend to EOF).
+fn detect_sidx_boundary<R: Read + Seek>(
+    source: &mut R,
+    file_len: u64,
+) -> Result<Option<u64>, StoreError> {
+    // SIDX trailer is the last 16 bytes: [string_table_offset:u64 LE][entry_count:u32 LE][magic:4]
+    const TRAILER_LEN: u64 = 16;
+    if file_len < TRAILER_LEN {
+        return Ok(None);
+    }
+    source
+        .seek(SeekFrom::End(-(TRAILER_LEN as i64)))
+        .map_err(StoreError::Io)?;
+    let mut trailer = [0u8; 16];
+    source.read_exact(&mut trailer).map_err(StoreError::Io)?;
+
+    // Check magic at bytes 12..16
+    if &trailer[12..16] != crate::store::sidx::SIDX_MAGIC {
+        return Ok(None);
+    }
+    // string_table_offset at bytes 0..8
+    let string_table_offset = u64::from_le_bytes([
+        trailer[0], trailer[1], trailer[2], trailer[3],
+        trailer[4], trailer[5], trailer[6], trailer[7],
+    ]);
+    Ok(Some(string_table_offset))
 }
