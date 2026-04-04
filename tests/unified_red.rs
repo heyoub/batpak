@@ -553,6 +553,68 @@ fn layout_parity_aos_vs_soa() {
 }
 
 // ===========================================================================
+// 2c continued: SoAoS LAYOUT
+// ===========================================================================
+
+#[test]
+fn index_layout_soaos_by_fact_correct() {
+    let dir = TempDir::new().expect("temp dir");
+    let config = StoreConfig::new(dir.path()).with_index_layout(IndexLayout::SoAoS);
+    let store = Store::open(config).expect("open");
+    let coord = Coordinate::new("soaos:entity", "soaos:scope").expect("coord");
+    for i in 0u32..15 {
+        store.append(&coord, kind_a(), &payload(i)).expect("a");
+    }
+    for i in 0u32..5 {
+        store.append(&coord, kind_b(), &payload(i)).expect("b");
+    }
+    let results = store.by_fact(kind_a());
+    assert_eq!(
+        results.len(),
+        15,
+        "PROPERTY: SoAoS by_fact must return correct count.\n\
+         Investigate: src/store/columnar.rs SoAoSInner::query_by_kind."
+    );
+    store.close().expect("close");
+}
+
+#[test]
+fn layout_parity_aos_vs_soaos() {
+    let dir_aos = TempDir::new().expect("dir aos");
+    let dir_soaos = TempDir::new().expect("dir soaos");
+    let kind = kind_a();
+
+    let populate = |store: &Store| {
+        let coord = Coordinate::new("parity:entity", "parity:scope").expect("coord");
+        for i in 0u32..20 {
+            store.append(&coord, kind, &payload(i)).expect("append");
+        }
+    };
+
+    let store_aos = Store::open(StoreConfig::new(dir_aos.path())).expect("open aos");
+    populate(&store_aos);
+
+    let store_soaos = Store::open(
+        StoreConfig::new(dir_soaos.path()).with_index_layout(IndexLayout::SoAoS),
+    )
+    .expect("open soaos");
+    populate(&store_soaos);
+
+    let events_aos = store_aos.by_fact(kind);
+    let events_soaos = store_soaos.by_fact(kind);
+    assert_eq!(
+        events_aos.len(),
+        events_soaos.len(),
+        "PROPERTY: AoS and SoAoS must return identical by_fact results.\n\
+         aos={}, soaos={}.",
+        events_aos.len(),
+        events_soaos.len()
+    );
+    store_aos.close().expect("close");
+    store_soaos.close().expect("close");
+}
+
+// ===========================================================================
 // SIDX FOOTER
 // ===========================================================================
 

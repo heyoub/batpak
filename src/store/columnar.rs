@@ -277,6 +277,79 @@ impl<const N: usize> AoSoAInner<N> {
 
 // ---------------------------------------------------------------------------
 // ColumnarVariant — erases the const-generic parameter at the enum level
+// ── SoAoS: hybrid AoS-outer, SoA-inner ──────────────────────────────────────
+
+/// One entity's events stored as parallel arrays (SoA within an entity group).
+struct EntityGroup {
+    kinds: Vec<EventKind>,
+    sequences: Vec<u64>,
+    entries: Vec<Arc<IndexEntry>>,
+}
+
+/// Hybrid layout: entities looked up by HashMap (AoS outer), events within each
+/// entity stored as parallel arrays (SoA inner). Matches the ECS archetype pattern.
+struct SoAoSInner {
+    groups: std::collections::HashMap<Arc<str>, EntityGroup>,
+    scope_entities: std::collections::HashMap<Arc<str>, std::collections::HashSet<Arc<str>>>,
+}
+
+impl SoAoSInner {
+    fn new() -> Self {
+        Self {
+            groups: std::collections::HashMap::new(),
+            scope_entities: std::collections::HashMap::new(),
+        }
+    }
+
+    fn push(&mut self, entry: &Arc<IndexEntry>) {
+        let entity = entry.coord.entity_arc();
+        let scope = entry.coord.scope_arc();
+        let group = self.groups.entry(Arc::clone(&entity)).or_insert_with(|| {
+            EntityGroup {
+                kinds: Vec::new(),
+                sequences: Vec::new(),
+                entries: Vec::new(),
+            }
+        });
+        group.kinds.push(entry.kind);
+        group.sequences.push(entry.global_sequence);
+        group.entries.push(Arc::clone(entry));
+        self.scope_entities
+            .entry(scope)
+            .or_default()
+            .insert(entity);
+    }
+
+    fn query_by_kind(&self, target: EventKind) -> Vec<Arc<IndexEntry>> {
+        let mut out = Vec::new();
+        for group in self.groups.values() {
+            for (i, &kind) in group.kinds.iter().enumerate() {
+                if kind == target {
+                    out.push(Arc::clone(&group.entries[i]));
+                }
+            }
+        }
+        out
+    }
+
+    fn query_by_scope(&self, scope: &str) -> Vec<Arc<IndexEntry>> {
+        let mut out = Vec::new();
+        if let Some(entities) = self.scope_entities.get(scope) {
+            for entity in entities {
+                if let Some(group) = self.groups.get(entity.as_ref()) {
+                    out.extend(group.entries.iter().map(Arc::clone));
+                }
+            }
+        }
+        out
+    }
+
+    fn clear(&mut self) {
+        self.groups.clear();
+        self.scope_entities.clear();
+    }
+}
+
 // ---------------------------------------------------------------------------
 
 /// Concrete storage variant held inside a [`ColumnarIndex`].
@@ -292,6 +365,8 @@ enum ColumnarVariant {
     AoSoA16(RwLock<AoSoAInner<16>>),
     /// 64-element tiles; fills a full x86 cache line of `u64`s.
     AoSoA64(RwLock<AoSoAInner<64>>),
+    /// Hybrid AoS-outer (entity groups), SoA-inner (parallel arrays per entity).
+    SoAoS(RwLock<SoAoSInner>),
 }
 
 // ---------------------------------------------------------------------------
@@ -342,6 +417,13 @@ impl ColumnarIndex {
         }
     }
 
+    /// Create a new SoAoS (hybrid AoS-outer, SoA-inner) index.
+    pub(crate) fn new_soaos() -> Self {
+        Self {
+            inner: ColumnarVariant::SoAoS(RwLock::new(SoAoSInner::new())),
+        }
+    }
+
     /// Append `entry` to the index.
     ///
     /// Events must be inserted in ascending `global_sequence` order (which is
@@ -353,6 +435,7 @@ impl ColumnarIndex {
             ColumnarVariant::AoSoA8(lock) => lock.write().push(entry),
             ColumnarVariant::AoSoA16(lock) => lock.write().push(entry),
             ColumnarVariant::AoSoA64(lock) => lock.write().push(entry),
+            ColumnarVariant::SoAoS(lock) => lock.write().push(entry),
         }
     }
 
@@ -369,6 +452,7 @@ impl ColumnarIndex {
             ColumnarVariant::AoSoA8(lock) => lock.read().query_by_kind(target),
             ColumnarVariant::AoSoA16(lock) => lock.read().query_by_kind(target),
             ColumnarVariant::AoSoA64(lock) => lock.read().query_by_kind(target),
+            ColumnarVariant::SoAoS(lock) => lock.read().query_by_kind(target),
         };
         results.sort_by_key(|e| e.global_sequence);
         results
@@ -382,6 +466,7 @@ impl ColumnarIndex {
             ColumnarVariant::AoSoA8(lock) => lock.read().query_by_scope(scope),
             ColumnarVariant::AoSoA16(lock) => lock.read().query_by_scope(scope),
             ColumnarVariant::AoSoA64(lock) => lock.read().query_by_scope(scope),
+            ColumnarVariant::SoAoS(lock) => lock.read().query_by_scope(scope),
         };
         results.sort_by_key(|e| e.global_sequence);
         results
@@ -403,7 +488,8 @@ impl ColumnarIndex {
             ColumnarVariant::AoSoA8(lock) => Some(lock.read().with_tile(idx, f)),
             ColumnarVariant::SoA(_)
             | ColumnarVariant::AoSoA16(_)
-            | ColumnarVariant::AoSoA64(_) => None,
+            | ColumnarVariant::AoSoA64(_)
+            | ColumnarVariant::SoAoS(_) => None,
         }
     }
 
@@ -414,7 +500,8 @@ impl ColumnarIndex {
             ColumnarVariant::AoSoA16(lock) => Some(lock.read().with_tile(idx, f)),
             ColumnarVariant::SoA(_)
             | ColumnarVariant::AoSoA8(_)
-            | ColumnarVariant::AoSoA64(_) => None,
+            | ColumnarVariant::AoSoA64(_)
+            | ColumnarVariant::SoAoS(_) => None,
         }
     }
 
@@ -425,7 +512,8 @@ impl ColumnarIndex {
             ColumnarVariant::AoSoA64(lock) => Some(lock.read().with_tile(idx, f)),
             ColumnarVariant::SoA(_)
             | ColumnarVariant::AoSoA8(_)
-            | ColumnarVariant::AoSoA16(_) => None,
+            | ColumnarVariant::AoSoA16(_)
+            | ColumnarVariant::SoAoS(_) => None,
         }
     }
 
@@ -436,6 +524,7 @@ impl ColumnarIndex {
             ColumnarVariant::AoSoA8(lock) => lock.write().clear(),
             ColumnarVariant::AoSoA16(lock) => lock.write().clear(),
             ColumnarVariant::AoSoA64(lock) => lock.write().clear(),
+            ColumnarVariant::SoAoS(lock) => lock.write().clear(),
         }
     }
 }
@@ -481,6 +570,7 @@ impl ScanIndex {
             IndexLayout::AoSoA8 => Self::Columnar(ColumnarIndex::new_aosoa8()),
             IndexLayout::AoSoA16 => Self::Columnar(ColumnarIndex::new_aosoa16()),
             IndexLayout::AoSoA64 => Self::Columnar(ColumnarIndex::new_aosoa64()),
+            IndexLayout::SoAoS => Self::Columnar(ColumnarIndex::new_soaos()),
         }
     }
 

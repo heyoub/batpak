@@ -36,6 +36,12 @@ pub enum IndexLayout {
     AoSoA16,
     /// 64-element tiles. Fits full x86 cache line of u64s.
     AoSoA64,
+    /// Hybrid: AoS outer (entity groups via HashMap), SoA inner (events within
+    /// each entity stored as parallel arrays). Best for entity-local queries
+    /// (stream, project) where per-entity iteration should be cache-friendly.
+    /// Matches the ECS archetype pattern: entity lookup is O(1) hash,
+    /// event scan within entity is columnar.
+    SoAoS,
 }
 
 /// StoreConfig: all settings for a Store instance.
