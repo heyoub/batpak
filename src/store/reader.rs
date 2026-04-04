@@ -117,7 +117,7 @@ impl Reader {
     }
 
     /// Acquire a buffer from the pool, or allocate a new one if pool is empty.
-    pub(crate) fn acquire_buffer(&self, min_size: usize) -> Vec<u8> {
+    fn acquire_buffer(&self, min_size: usize) -> Vec<u8> {
         let mut pool = self.buffer_pool.lock();
         if let Some(mut buf) = pool.pop() {
             buf.resize(min_size, 0);
@@ -128,7 +128,7 @@ impl Reader {
     }
 
     /// Return a buffer to the pool for reuse. Caps pool at 16 buffers.
-    pub(crate) fn release_buffer(&self, buf: Vec<u8>) {
+    fn release_buffer(&self, buf: Vec<u8>) {
         let mut pool = self.buffer_pool.lock();
         if pool.len() < 16 {
             pool.push(buf);

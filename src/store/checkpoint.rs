@@ -590,4 +590,29 @@ mod tests {
             "wrong version should return None"
         );
     }
+
+    #[test]
+    fn restore_advances_global_sequence() {
+        let tmp = TempDir::new().expect("tempdir");
+        let dir = tmp.path();
+        touch_segment(dir, 0);
+
+        let src = make_index(16);
+        write_checkpoint(&src, dir, 0, 0).expect("write");
+
+        let (entries, interner_strings, _wm) =
+            try_load_checkpoint(dir).expect("should load");
+        assert_eq!(entries.len(), 16);
+
+        let dst = StoreIndex::new();
+        restore_from_checkpoint(&dst, entries, &interner_strings).expect("restore");
+
+        // After restoring 16 entries, global_sequence should be 16
+        // (each insert() call increments the counter by 1).
+        assert_eq!(
+            dst.global_sequence(),
+            16,
+            "PROPERTY: global_sequence after restore must equal the number of restored entries."
+        );
+    }
 }

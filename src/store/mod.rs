@@ -596,6 +596,7 @@ where
 
     /// Expose the underlying subscription's receiver for async integration.
     /// After receiving a notification, call `project()` on the store manually.
+    #[doc(hidden)]
     pub fn subscription(&self) -> &Subscription {
         &self.sub
     }

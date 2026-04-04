@@ -482,7 +482,7 @@ impl ColumnarIndex {
     /// Caller contract violation — not recoverable.
     /// Invoke `f` with an immutable reference to the `Tile<8>` at `idx`.
     /// Returns `None` if `self` is not an `AoSoA8` variant.
-    pub(crate) fn with_tile8<R>(&self, idx: usize, f: impl FnOnce(&Tile<8>) -> R) -> Option<R> {
+    fn with_tile8<R>(&self, idx: usize, f: impl FnOnce(&Tile<8>) -> R) -> Option<R> {
         match &self.inner {
             ColumnarVariant::AoSoA8(lock) => lock.read().with_tile(idx, f),
             ColumnarVariant::SoA(_)
@@ -494,7 +494,7 @@ impl ColumnarIndex {
 
     /// Invoke `f` with an immutable reference to the `Tile<16>` at `idx`.
     /// Returns `None` if `self` is not an `AoSoA16` variant or idx is out of range.
-    pub(crate) fn with_tile16<R>(&self, idx: usize, f: impl FnOnce(&Tile<16>) -> R) -> Option<R> {
+    fn with_tile16<R>(&self, idx: usize, f: impl FnOnce(&Tile<16>) -> R) -> Option<R> {
         match &self.inner {
             ColumnarVariant::AoSoA16(lock) => lock.read().with_tile(idx, f),
             ColumnarVariant::SoA(_)
@@ -506,7 +506,7 @@ impl ColumnarIndex {
 
     /// Invoke `f` with an immutable reference to the `Tile<64>` at `idx`.
     /// Returns `None` if `self` is not an `AoSoA64` variant or idx is out of range.
-    pub(crate) fn with_tile64<R>(&self, idx: usize, f: impl FnOnce(&Tile<64>) -> R) -> Option<R> {
+    fn with_tile64<R>(&self, idx: usize, f: impl FnOnce(&Tile<64>) -> R) -> Option<R> {
         match &self.inner {
             ColumnarVariant::AoSoA64(lock) => lock.read().with_tile(idx, f),
             ColumnarVariant::SoA(_)
@@ -897,6 +897,47 @@ mod tests {
         assert_eq!(len, 64);
     }
 
+    // --- SoAoS ---
+
+    #[test]
+    fn soaos_insert_and_query_by_kind() {
+        let idx = ColumnarIndex::new_soaos();
+        for i in 0u64..10 {
+            idx.insert(&make_entry(KIND_A, i, "e1", "s1"));
+        }
+        for i in 10u64..15 {
+            idx.insert(&make_entry(KIND_B, i, "e2", "s1"));
+        }
+        assert_eq!(idx.query_by_kind(KIND_A).len(), 10);
+        assert_eq!(idx.query_by_kind(KIND_B).len(), 5);
+    }
+
+    #[test]
+    fn soaos_query_by_scope() {
+        let idx = ColumnarIndex::new_soaos();
+        for i in 0u64..8 {
+            idx.insert(&make_entry(KIND_A, i, "e1", "scope-x"));
+        }
+        for i in 8u64..12 {
+            idx.insert(&make_entry(KIND_A, i, "e2", "scope-y"));
+        }
+        let x = idx.query_by_scope("scope-x");
+        assert_eq!(x.len(), 8);
+        let y = idx.query_by_scope("scope-y");
+        assert_eq!(y.len(), 4);
+    }
+
+    #[test]
+    fn soaos_clear() {
+        let idx = ColumnarIndex::new_soaos();
+        for i in 0u64..5 {
+            idx.insert(&make_entry(KIND_A, i, "e1", "s1"));
+        }
+        assert_eq!(idx.query_by_kind(KIND_A).len(), 5);
+        idx.clear();
+        assert_eq!(idx.query_by_kind(KIND_A).len(), 0);
+    }
+
     // --- ScanIndex ---
 
     #[test]
@@ -958,6 +999,19 @@ mod tests {
         for i in 0u64..5 {
             si.insert(&make_entry(KIND_A, i, "e1", "s1"));
         }
+        si.clear();
+        assert!(si.query_by_kind(KIND_A).is_empty());
+    }
+
+    #[test]
+    fn scan_index_soaos_variant() {
+        use crate::store::IndexLayout;
+        let si = ScanIndex::for_layout(&IndexLayout::SoAoS);
+        for i in 0u64..10 {
+            si.insert(&make_entry(KIND_A, i, "e1", "s1"));
+        }
+        assert_eq!(si.query_by_kind(KIND_A).len(), 10);
+        assert_eq!(si.query_by_scope("s1").len(), 10);
         si.clear();
         assert!(si.query_by_kind(KIND_A).is_empty());
     }
