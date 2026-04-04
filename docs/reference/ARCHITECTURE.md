@@ -100,7 +100,11 @@ When the channel is full, producers block — this is intentional back-pressure.
 
 Events are stored in **segment files** — append-only files with MessagePack-encoded frames and CRC32 checksums. When a segment exceeds `segment_max_bytes`, the writer seals it and creates a new one. Sealed segments are immutable and safe for concurrent reads.
 
-**Cold start** scans all segment files alphabetically, rebuilds the in-memory index, and opens the latest segment for writing. No WAL, no compaction log — the segment files ARE the log.
+**Cold start** uses a three-tier strategy: (1) if an `index.ckpt` checkpoint file exists and is valid, restore the index from it and replay only segments written after the checkpoint watermark; (2) if sealed segments carry SIDX footers (compact binary index), use those for fast per-segment index rebuild without full msgpack deserialization; (3) fall back to frame-by-frame segment scanning. Sealed segments are memory-mapped via `memmap2` for zero-copy reads; the active segment uses pread (Unix) or seek+read (Windows).
+
+**Secondary scan index**: When `IndexLayout` is set to `SoA`, `AoSoA8/16/64`, or `SoAoS`, a columnar secondary index replaces the `by_fact` and `scope_entities` DashMaps for cache-friendly scan queries. AoSoA variants use const-generic `Tile<N>` structs with `#[repr(C, align(64))]` for cache-line alignment.
+
+**Group commit**: The writer can batch multiple appends before a single fsync, controlled by `group_commit_max_batch`. When batch > 1, all appends must include idempotency keys for crash safety.
 
 ### Public API Witness Index
 

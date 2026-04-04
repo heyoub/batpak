@@ -19,6 +19,10 @@ use the fluent `with_*` helpers for the knobs you care about, then pass it to
 | `writer_stack_size` | `None` (OS default) | bytes | Set explicitly if writer thread needs deep stacks (recursive projections). |
 | `clock` | `None` (SystemTime) | - | Inject deterministic clock for testing. Returns microseconds since epoch. |
 | `sync_mode` | `SyncAll` | - | `SyncData` skips metadata fsync (faster, slightly less crash-safe). |
+| `group_commit_max_batch` | 1 | count | 0 = unbounded drain (batch all pending). >1 = batch N appends per fsync. **Requires idempotency keys** on every append when >1. |
+| `index_layout` | `AoS` | enum | `SoA` for scan-heavy, `AoSoA8/16/64` for SIMD, `SoAoS` for entity-local. Replaces DashMap scan indexes. |
+| `incremental_projection` | `false` | bool | Enable for types with `supports_incremental_apply()=true`. Applies only delta events to cached state. |
+| `enable_checkpoint` | `true` | bool | Writes `index.ckpt` on close for fast cold start. Disable for ephemeral test stores. |
 
 ## Tradeoff Matrix
 
@@ -52,9 +56,19 @@ let config = StoreConfig::new("/var/lib/events")
     .with_segment_max_bytes(1024 * 1024 * 1024)
     .with_sync_every_n_events(5000)
     .with_sync_mode(SyncMode::SyncData)
+    .with_group_commit_max_batch(64)
     .with_fd_budget(256)
     .with_writer_channel_capacity(16384)
     .with_broadcast_capacity(32768);
+// NOTE: group_commit_max_batch > 1 requires idempotency keys on every append.
+```
+
+## Example: ECS / Analytical Workload
+
+```rust
+let config = StoreConfig::new("/data/events")
+    .with_index_layout(IndexLayout::AoSoA16)
+    .with_incremental_projection(true);
 ```
 
 ## Projection Cache Backends
