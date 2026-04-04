@@ -2,6 +2,7 @@ use crate::coordinate::Coordinate;
 use crate::event::{EventKind, HashChain};
 use crate::store::columnar::ScanIndex;
 use crate::store::config::IndexLayout;
+use crate::store::interner::StringInterner;
 use dashmap::DashMap;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -28,6 +29,10 @@ pub(crate) struct StoreIndex {
     /// Per-entity write locks. Writer step 1 acquires these.
     /// [SPEC:IMPLEMENTATION NOTES item 5 — DashMap guard lifetimes]
     pub(crate) entity_locks: DashMap<Arc<str>, Arc<parking_lot::Mutex<()>>>,
+    /// String interner for compact index keys and checkpoint serialization.
+    /// Entity and scope strings are interned on insert; IDs are used by
+    /// checkpoint and (future) InternId-based IndexEntry fields.
+    pub(crate) interner: Arc<StringInterner>,
 }
 
 /// ClockKey: BTreeMap key. Ord: wall_ms-first, then clock, then uuid tiebreak.
@@ -114,6 +119,7 @@ impl IndexEntry {
 }
 
 impl StoreIndex {
+    #[cfg(test)]
     pub(crate) fn new() -> Self {
         Self::with_layout(&IndexLayout::default())
     }
@@ -128,6 +134,7 @@ impl StoreIndex {
             global_sequence: AtomicU64::new(0),
             len: AtomicUsize::new(0),
             entity_locks: DashMap::new(),
+            interner: Arc::new(StringInterner::new()),
         }
     }
 
@@ -136,6 +143,13 @@ impl StoreIndex {
     /// [SPEC:IMPLEMENTATION NOTES item 5]
     pub(crate) fn insert(&self, entry: IndexEntry) {
         let entity = entry.coord.entity_arc();
+
+        // Intern entity and scope strings for compact checkpoint serialization.
+        // The InternIds aren't stored in IndexEntry yet (phase 2), but the
+        // interner is populated so checkpoint can use it.
+        let _entity_id = self.interner.intern(entry.coord.entity());
+        let _scope_id = self.interner.intern(entry.coord.scope());
+
         let key = ClockKey {
             wall_ms: entry.wall_ms,
             clock: entry.clock,
