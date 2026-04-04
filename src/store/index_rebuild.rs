@@ -15,17 +15,17 @@ pub(crate) fn open_index(
     enable_checkpoint: bool,
 ) -> Result<(), StoreError> {
     if enable_checkpoint {
-        if let Some((entries, watermark)) =
+        if let Some((entries, interner_strings, watermark)) =
             crate::store::checkpoint::try_load_checkpoint(data_dir)
         {
             tracing::info!(
-                "checkpoint loaded: {} entries, global_seq {}, watermark segment {} offset {}",
+                "checkpoint v2 loaded: {} entries, {} interner strings, watermark segment {} offset {}",
                 entries.len(),
-                watermark.global_sequence,
+                interner_strings.len(),
                 watermark.watermark_segment_id,
                 watermark.watermark_offset
             );
-            crate::store::checkpoint::restore_from_checkpoint(index, entries)?;
+            crate::store::checkpoint::restore_from_checkpoint(index, entries, &interner_strings)?;
             // Replay segments newer than the watermark.
             replay_tail_segments(index, reader, data_dir, &watermark)?;
             return Ok(());

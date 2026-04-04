@@ -33,7 +33,9 @@ use std::path::Path;
 pub(crate) const CHECKPOINT_MAGIC: &[u8; 6] = b"FBATCK";
 
 /// Format version stored in the checkpoint header.
-pub(crate) const CHECKPOINT_VERSION: u16 = 1;
+/// v2: interner snapshot + InternId entries (smaller, faster restore).
+/// v1 checkpoints are rejected — graceful fallback to full rebuild.
+pub(crate) const CHECKPOINT_VERSION: u16 = 2;
 
 /// Final checkpoint filename inside the data directory.
 pub(crate) const CHECKPOINT_FILENAME: &str = "index.ckpt";
@@ -43,58 +45,40 @@ pub(crate) const CHECKPOINT_TMP: &str = "index.ckpt.tmp";
 
 // ── Wire types ───────────────────────────────────────────────────────────────
 
-/// Serialised representation of the full index at checkpoint time.
-///
-/// Stored as the msgpack body inside the checkpoint file.
+/// Checkpoint format v2: includes interner snapshot + InternId-based entries.
 #[derive(Serialize, Deserialize)]
 struct CheckpointData {
-    /// Value of `StoreIndex::global_sequence()` at the time the checkpoint was taken.
     global_sequence: u64,
-    /// Segment ID of the highest durably-written event (the watermark).
     watermark_segment_id: u64,
-    /// Byte offset within the watermark segment.
     watermark_offset: u64,
-    /// All index entries, sorted ascending by `global_sequence`.
+    /// Interner snapshot: ordered list of interned strings (index = InternId).
+    /// The sentinel (empty string at index 0) is included.
+    interner_strings: Vec<String>,
     entries: Vec<CheckpointEntry>,
 }
 
-/// Serialised form of a single [`IndexEntry`].
-///
-/// Mirrors every field needed to reconstruct an [`IndexEntry`] without reading
-/// segment files.  128-bit IDs are encoded as 16-byte big-endian arrays via the
-/// `crate::wire` helpers so that rmp_serde can round-trip them correctly.
+/// Checkpoint entry v2: uses InternId u32s instead of raw entity/scope strings.
+/// ~22 bytes smaller per entry than v1.
 #[derive(Serialize, Deserialize)]
 pub(crate) struct CheckpointEntry {
-    /// Unique event identifier.
     #[serde(with = "crate::wire::u128_bytes")]
     pub event_id: u128,
-    /// Correlation ID linking related events.
     #[serde(with = "crate::wire::u128_bytes")]
     pub correlation_id: u128,
-    /// ID of the event that caused this one; `None` for root-cause events.
     #[serde(with = "crate::wire::option_u128_bytes")]
     pub causation_id: Option<u128>,
-    /// Entity name string (e.g. `"user:42"`).
-    pub entity: String,
-    /// Scope name string (e.g. `"profile"`).
-    pub scope: String,
-    /// Event kind, already derives `Serialize + Deserialize`.
+    /// InternId for entity string — index into interner_strings.
+    pub entity_id: u32,
+    /// InternId for scope string — index into interner_strings.
+    pub scope_id: u32,
     pub kind: EventKind,
-    /// HLC wall-clock milliseconds.
     pub wall_ms: u64,
-    /// Per-entity monotonic sequence (HLC logical counter).
     pub clock: u32,
-    /// Blake3 hash of the preceding event; all-zeros signals genesis.
     pub prev_hash: [u8; 32],
-    /// Blake3 hash of this event's serialised content bytes.
     pub event_hash: [u8; 32],
-    /// Segment file that stores this event's frame.
     pub segment_id: u64,
-    /// Byte offset of the frame within the segment file.
     pub offset: u64,
-    /// Total byte length of the encoded frame.
     pub length: u32,
-    /// Monotonic sequence number assigned at commit time.
     pub global_sequence: u64,
 }
 
@@ -144,8 +128,8 @@ pub(crate) fn write_checkpoint(
             event_id: e.event_id,
             correlation_id: e.correlation_id,
             causation_id: e.causation_id,
-            entity: e.coord.entity().to_owned(),
-            scope: e.coord.scope().to_owned(),
+            entity_id: e.entity_id.as_u32(),
+            scope_id: e.scope_id.as_u32(),
             kind: e.kind,
             wall_ms: e.wall_ms,
             clock: e.clock,
@@ -161,10 +145,20 @@ pub(crate) fn write_checkpoint(
     // ── 2. Sort ascending by global_sequence for deterministic restore order ──
     entries.sort_by_key(|e| e.global_sequence);
 
+    // Snapshot the interner: sentinel ("") at index 0, then all interned strings in order.
+    let mut interner_strings = vec![String::new()]; // sentinel at index 0
+    interner_strings.extend(index.interner.to_snapshot());
+    tracing::debug!(
+        "checkpoint: {} entries, {} interned strings",
+        entries.len(),
+        index.interner.len()
+    );
+
     let data = CheckpointData {
         global_sequence: index.global_sequence(),
         watermark_segment_id,
         watermark_offset,
+        interner_strings,
         entries,
     };
 
@@ -226,12 +220,12 @@ pub(crate) fn write_checkpoint(
 ///   disk (indicates the data directory was modified externally after the
 ///   checkpoint was written).
 ///
-/// On success returns `(entries, WatermarkInfo)` where `entries` are sorted
-/// ascending by `global_sequence` and ready to be passed to
-/// [`restore_from_checkpoint`].
+/// On success returns `(entries, interner_strings, WatermarkInfo)` where entries
+/// are sorted ascending by `global_sequence` and ready to be passed to
+/// [`restore_from_checkpoint`] along with the interner strings table.
 pub(crate) fn try_load_checkpoint(
     data_dir: &Path,
-) -> Option<(Vec<CheckpointEntry>, WatermarkInfo)> {
+) -> Option<(Vec<CheckpointEntry>, Vec<String>, WatermarkInfo)> {
     let path = data_dir.join(CHECKPOINT_FILENAME);
 
     // ── 1. Read raw bytes ─────────────────────────────────────────────────────
@@ -349,30 +343,37 @@ pub(crate) fn try_load_checkpoint(
         "checkpoint loaded successfully"
     );
 
-    Some((data.entries, watermark))
+    Some((data.entries, data.interner_strings, watermark))
 }
 
 // ── restore_from_checkpoint ───────────────────────────────────────────────────
 
-/// Replay a slice of [`CheckpointEntry`] values into `index`.
+/// Replay checkpoint entries into `index`, using the interner strings table
+/// to resolve `entity_id` and `scope_id` back to string values.
 ///
 /// Entries must be sorted ascending by `global_sequence` (which
-/// [`write_checkpoint`] guarantees).  Each entry is converted back into a full
-/// [`IndexEntry`] + [`Coordinate`] and inserted via `index.insert()`.
+/// [`write_checkpoint`] guarantees).
 ///
 /// # Errors
 ///
-/// Returns [`StoreError::Coordinate`] if any `entity` or `scope` string stored
-/// in the checkpoint is empty (which would indicate a corrupt checkpoint that
-/// slipped past the CRC check).
+/// Returns [`StoreError::Coordinate`] if resolved strings are empty.
+/// Returns [`StoreError::Serialization`] if an InternId is out of range.
 pub(crate) fn restore_from_checkpoint(
     index: &StoreIndex,
     entries: Vec<CheckpointEntry>,
+    interner_strings: &[String],
 ) -> Result<(), StoreError> {
     for ce in entries {
-        let coord = Coordinate::new(&ce.entity, &ce.scope)?;
-        let entity_id = index.interner.intern(&ce.entity);
-        let scope_id = index.interner.intern(&ce.scope);
+        let entity_str = interner_strings
+            .get(ce.entity_id as usize)
+            .ok_or_else(|| StoreError::ser_msg("checkpoint entity_id out of interner range"))?;
+        let scope_str = interner_strings
+            .get(ce.scope_id as usize)
+            .ok_or_else(|| StoreError::ser_msg("checkpoint scope_id out of interner range"))?;
+
+        let coord = Coordinate::new(entity_str, scope_str)?;
+        let entity_id = index.interner.intern(entity_str);
+        let scope_id = index.interner.intern(scope_str);
 
         let entry = IndexEntry {
             event_id: ce.event_id,
@@ -462,7 +463,7 @@ mod tests {
         let result = try_load_checkpoint(dir);
         assert!(result.is_some(), "checkpoint should load");
 
-        let (entries, wm) = result.expect("some");
+        let (entries, _strings, wm) = result.expect("some");
         assert_eq!(entries.len(), 0);
         assert_eq!(wm.watermark_segment_id, 0);
         assert_eq!(wm.watermark_offset, 0);
@@ -478,7 +479,7 @@ mod tests {
         let idx = make_index(16);
         write_checkpoint(&idx, dir, 0, 4096).expect("write");
 
-        let (entries, wm) = try_load_checkpoint(dir).expect("should load");
+        let (entries, _strings, wm) = try_load_checkpoint(dir).expect("should load");
         assert_eq!(entries.len(), 16);
         assert_eq!(wm.watermark_offset, 4096);
 
@@ -498,10 +499,10 @@ mod tests {
         let src = make_index(8);
         write_checkpoint(&src, dir, 0, 0).expect("write");
 
-        let (entries, _wm) = try_load_checkpoint(dir).expect("should load");
+        let (entries, interner_strings, _wm) = try_load_checkpoint(dir).expect("should load");
 
         let dst = StoreIndex::new();
-        restore_from_checkpoint(&dst, entries).expect("restore");
+        restore_from_checkpoint(&dst, entries, &interner_strings).expect("restore");
 
         assert_eq!(dst.len(), 8);
     }
@@ -573,11 +574,11 @@ mod tests {
         let idx = StoreIndex::new();
         write_checkpoint(&idx, dir, 0, 0).expect("write");
 
-        // Overwrite the two version bytes with version 2
+        // Overwrite the two version bytes with an unsupported future version
         let path = dir.join(CHECKPOINT_FILENAME);
         let mut raw = std::fs::read(&path).expect("read");
-        // bytes [6..8] are the version
-        raw[6] = 2;
+        // bytes [6..8] are the version — set to 99
+        raw[6] = 99;
         raw[7] = 0;
         // Also fix the CRC so it doesn't fail there first
         let body_crc = crc32fast::hash(&raw[12..]);
