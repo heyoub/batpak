@@ -284,6 +284,22 @@ impl Segment<Active> {
         Ok(())
     }
 
+    /// Write a SIDX footer to the end of this segment before sealing.
+    /// The footer enables fast cold-start index rebuild by storing compact
+    /// binary entries instead of requiring full msgpack frame deserialization.
+    ///
+    /// # Errors
+    /// Returns `StoreError::Io` or `StoreError::Serialization` if writing fails.
+    pub(crate) fn write_sidx_footer(
+        &mut self,
+        collector: &crate::store::sidx::SidxEntryCollector,
+    ) -> Result<(), StoreError> {
+        if let Some(ref mut f) = self.file {
+            collector.write_footer(f)?;
+        }
+        Ok(())
+    }
+
     /// Seal: close file handle, transition to Sealed.
     pub fn seal(mut self) -> Segment<Sealed> {
         drop(self.file.take());

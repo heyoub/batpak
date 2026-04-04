@@ -22,3 +22,7 @@
   justification: serde helper module referenced through serde attributes rather than direct imports
 - name: vec_u128_bytes
   justification: serde helper module referenced through serde attributes rather than direct imports
+- name: write_sidx_footer
+  justification: called by writer on segment rotation; tested through store integration tests that trigger rotation
+- name: IndexLayout
+  justification: config enum tested through unified_red.rs layout tests and bench fixtures

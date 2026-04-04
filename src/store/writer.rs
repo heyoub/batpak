@@ -193,6 +193,9 @@ struct WriterState<'a> {
     segment_id: &'a mut u64,
     config: &'a StoreConfig,
     subscribers: &'a SubscriberList,
+    /// Accumulates SIDX entries for the current active segment.
+    /// Flushed as a footer on segment rotation and shutdown.
+    sidx_collector: crate::store::sidx::SidxEntryCollector,
 }
 
 /// Writer thread entry point with panic recovery and restart logic.
@@ -311,6 +314,7 @@ fn writer_loop(
         segment_id: &mut segment_id,
         config,
         subscribers,
+        sidx_collector: crate::store::sidx::SidxEntryCollector::new(),
     };
 
     // Main loop: recv commands, dispatch.
@@ -564,6 +568,12 @@ impl WriterState<'_> {
             .active_segment
             .needs_rotation(self.config.segment_max_bytes)
         {
+            // NOTE: SIDX footer writing is deferred — the footer would be included
+            // in compaction's append_frames_from_segment raw byte copy, corrupting
+            // the merged segment. SIDX will be written in a future revision that
+            // teaches compaction to strip footers before merging.
+            self.sidx_collector = crate::store::sidx::SidxEntryCollector::new();
+
             self.active_segment.sync_with_mode(&self.config.sync_mode)?;
             let old = std::mem::replace(
                 self.active_segment,
@@ -601,6 +611,27 @@ impl WriterState<'_> {
             global_sequence: global_seq,
         };
         self.index.insert(entry);
+
+        // Record SIDX entry for the segment footer (written on rotation/shutdown).
+        let hash_chain_ref = event.hash_chain.as_ref();
+        let sidx_entry = crate::store::sidx::SidxEntry {
+            event_id: event.header.event_id,
+            entity_idx: 0, // filled by collector.record()
+            scope_idx: 0,  // filled by collector.record()
+            kind: crate::store::sidx::kind_to_raw(kind),
+            wall_ms: now_ms,
+            clock,
+            prev_hash: hash_chain_ref.map(|h| h.prev_hash).unwrap_or([0u8; 32]),
+            event_hash: hash_chain_ref.map(|h| h.event_hash).unwrap_or([0u8; 32]),
+            frame_offset: offset,
+            #[allow(clippy::cast_possible_truncation)] // frame.len() checked by checked_payload_len
+            frame_length: frame.len() as u32,
+            global_sequence: global_seq,
+            correlation_id,
+            causation_id: causation_id.unwrap_or(0),
+        };
+        self.sidx_collector.record(&sidx_entry, entity.as_ref(), scope.as_ref());
+
         debug!(event_id = %event.header.event_id, clock = clock, "append committed");
 
         // STEP 10: Broadcast notification to subscribers.

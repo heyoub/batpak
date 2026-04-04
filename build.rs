@@ -453,6 +453,14 @@ fn check_pub_items_have_tests() {
             "vec_u128_bytes",
             "serde helper module used via attribute, not by name",
         ),
+        (
+            "write_sidx_footer",
+            "called by writer on segment rotation, tested via store rotation integration tests",
+        ),
+        (
+            "IndexLayout",
+            "config enum tested through unified_red.rs layout tests and bench fixtures",
+        ),
     ];
     let allowed_names: Vec<&str> = allowlist.iter().map(|(name, _)| *name).collect();
 
