@@ -310,10 +310,53 @@ impl Reader {
     }
 
     /// Scan only the metadata required to rebuild the in-memory index.
+    /// Tries the SIDX footer first (O(1) seek + bulk read); falls back to
+    /// frame-by-frame msgpack deserialization if no SIDX footer is present.
     pub(crate) fn scan_segment_index(
         &self,
         path: &Path,
     ) -> Result<Vec<ScannedIndexEntry>, StoreError> {
+        // Fast path: try SIDX footer.
+        if let Ok(Some((sidx_entries, strings))) = crate::store::sidx::read_footer(path) {
+            let segment_id = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .and_then(|s| s.parse::<u64>().ok())
+                .unwrap_or(0);
+            let mut result = Vec::with_capacity(sidx_entries.len());
+            for se in sidx_entries {
+                let entity = strings
+                    .get(se.entity_idx as usize)
+                    .cloned()
+                    .unwrap_or_default();
+                let scope = strings
+                    .get(se.scope_idx as usize)
+                    .cloned()
+                    .unwrap_or_default();
+                result.push(ScannedIndexEntry {
+                    header: crate::event::EventHeader::from_sidx(
+                        se.event_id,
+                        se.correlation_id,
+                        if se.causation_id == 0 { None } else { Some(se.causation_id) },
+                        se.wall_ms,
+                        se.clock,
+                        crate::store::sidx::raw_to_kind(se.kind),
+                    ),
+                    entity,
+                    scope,
+                    hash_chain: crate::event::HashChain {
+                        prev_hash: se.prev_hash,
+                        event_hash: se.event_hash,
+                    },
+                    segment_id,
+                    offset: se.frame_offset,
+                    length: se.frame_length,
+                });
+            }
+            return Ok(result);
+        }
+
+        // Slow path: frame-by-frame scan.
         let mut file = File::open(path).map_err(StoreError::Io)?;
         let mut magic = [0u8; 4];
         file.read_exact(&mut magic).map_err(StoreError::Io)?;
@@ -458,7 +501,7 @@ impl Reader {
     ) -> Result<StoredEvent<serde_json::Value>, StoreError> {
         let mmap_ref = self.get_or_map_sealed(pos.segment_id)?;
         let mmap: &memmap2::Mmap = mmap_ref.value();
-        let start = pos.offset as usize;
+        let start = usize::try_from(pos.offset).map_err(|_| StoreError::corrupt_eof(pos.segment_id))?;
         let end = start + pos.length as usize;
         if end > mmap.len() {
             return Err(StoreError::corrupt_eof(pos.segment_id));
@@ -469,7 +512,10 @@ impl Reader {
                 segment_id: pos.segment_id,
                 offset: pos.offset,
             },
-            _ => StoreError::corrupt_frame(pos.segment_id, e.to_string()),
+            segment::FrameDecodeError::TooShort
+            | segment::FrameDecodeError::Truncated { .. } => {
+                StoreError::corrupt_frame(pos.segment_id, e.to_string())
+            }
         })?;
         let payload: FramePayload<serde_json::Value> =
             rmp_serde::from_slice(msgpack).map_err(|e| StoreError::Serialization(Box::new(e)))?;

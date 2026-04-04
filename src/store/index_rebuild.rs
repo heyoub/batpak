@@ -19,8 +19,9 @@ pub(crate) fn open_index(
             crate::store::checkpoint::try_load_checkpoint(data_dir)
         {
             tracing::info!(
-                "checkpoint loaded: {} entries, watermark segment {} offset {}",
+                "checkpoint loaded: {} entries, global_seq {}, watermark segment {} offset {}",
                 entries.len(),
+                watermark.global_sequence,
                 watermark.watermark_segment_id,
                 watermark.watermark_offset
             );

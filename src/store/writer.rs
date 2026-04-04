@@ -382,9 +382,13 @@ fn writer_loop(
                         }
                         #[cfg(feature = "test-support")]
                         Ok(WriterCommand::PanicForTest { respond: r }) => {
+                            // Don't panic mid-drain — acknowledge and stop draining.
+                            // The test should send PanicForTest as a standalone command
+                            // (through the main loop) not mid-batch. Panicking mid-drain
+                            // would leave the batch partially synced with some callers
+                            // never receiving their receipt.
                             let _ = r.send(Ok(()));
-                            #[allow(clippy::panic)] // intentional: exercises catch_unwind
-                            panic!("PanicForTest mid-batch");
+                            break;
                         }
                         Err(_) => break, // channel empty — batch complete
                     }

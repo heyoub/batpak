@@ -125,12 +125,10 @@ where
         }
     }
 
-    // Full replay: read all filtered entries from disk.
-    let mut events = Vec::with_capacity(entries.len());
-    for entry in &entries {
-        let stored = store.reader.read_entry(&entry.disk_pos)?;
-        events.push(stored.event);
-    }
+    // Full replay: batch-read all filtered entries from disk.
+    let positions: Vec<&crate::store::DiskPos> = entries.iter().map(|e| &e.disk_pos).collect();
+    let stored_events = store.reader.read_entries_batch(&positions)?;
+    let events: Vec<_> = stored_events.into_iter().map(|s| s.event).collect();
     let result = T::from_events(&events);
 
     if let Some(ref value) = result {

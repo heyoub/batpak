@@ -66,6 +66,31 @@ impl EventHeader {
         }
     }
 
+    /// Reconstruct an `EventHeader` from SIDX footer fields.
+    /// Used during SIDX-accelerated cold start — only the fields stored in
+    /// the SIDX entry are available; `timestamp_us`, `payload_size`, `flags`,
+    /// and `content_hash` are set to defaults (0/empty).
+    pub(crate) fn from_sidx(
+        event_id: u128,
+        correlation_id: u128,
+        causation_id: Option<u128>,
+        wall_ms: u64,
+        clock: u32,
+        event_kind: EventKind,
+    ) -> Self {
+        Self {
+            event_id,
+            correlation_id,
+            causation_id,
+            timestamp_us: (wall_ms * 1000) as i64, // approximate: ms → µs
+            position: DagPosition::child_at(clock, wall_ms, 0),
+            payload_size: 0,
+            event_kind,
+            flags: 0,
+            content_hash: [0u8; 32],
+        }
+    }
+
     /// Sets the flags byte on this header.
     pub fn with_flags(mut self, flags: u8) -> Self {
         self.flags = flags;

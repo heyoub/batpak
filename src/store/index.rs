@@ -170,7 +170,7 @@ impl StoreIndex {
             .insert(key, Arc::clone(&arc_entry));
 
         // Scan index: by_fact + scope (DashMap or columnar depending on layout)
-        self.scan.insert(Arc::clone(&arc_entry));
+        self.scan.insert(&arc_entry);
 
         // Point lookup
         self.by_id

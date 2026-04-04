@@ -266,6 +266,7 @@ impl SidxEntry {
     }
 
     /// Reconstruct the [`EventKind`] from the raw `kind` field stored in this entry.
+    #[cfg(test)]
     pub(crate) fn event_kind(&self) -> EventKind {
         raw_to_kind(self.kind)
     }
@@ -314,11 +315,13 @@ impl SidxEntryCollector {
     }
 
     /// Return a shared reference to all entries collected so far.
+    #[cfg(test)]
     pub(crate) fn entries(&self) -> &[SidxEntry] {
         &self.entries
     }
 
     /// Return a shared reference to the interned string table.
+    #[cfg(test)]
     pub(crate) fn strings(&self) -> &[String] {
         &self.strings
     }
@@ -414,9 +417,12 @@ impl SidxEntryCollector {
 /// Returns [`StoreError::Serialization`] if the msgpack string table cannot be decoded.
 /// Returns [`StoreError::CorruptSegment`] if structural invariants are violated (e.g.
 /// out-of-range offsets or string-table indices).
+/// Parsed SIDX footer: entries + string table.
+pub(crate) type SidxFooterData = (Vec<SidxEntry>, Vec<String>);
+
 pub(crate) fn read_footer(
     path: &Path,
-) -> Result<Option<(Vec<SidxEntry>, Vec<String>)>, StoreError> {
+) -> Result<Option<SidxFooterData>, StoreError> {
     // Derive a segment_id for error messages from the filename ("000042.fbat" → 42).
     let segment_id = path
         .file_stem()

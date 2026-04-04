@@ -129,12 +129,12 @@ impl SoAInner {
     }
 
     /// Append one event.  O(1) amortised.
-    fn push(&mut self, entry: Arc<IndexEntry>) {
+    fn push(&mut self, entry: &Arc<IndexEntry>) {
         let scope: Arc<str> = entry.coord.scope_arc();
         let entity: Arc<str> = entry.coord.entity_arc();
         self.kinds.push(entry.kind);
         self.sequences.push(entry.global_sequence);
-        self.entries.push(entry);
+        self.entries.push(Arc::clone(entry));
         self.scope_entities
             .entry(scope)
             .or_default()
@@ -200,7 +200,7 @@ impl<const N: usize> AoSoAInner<N> {
     }
 
     /// Append one event into the appropriate tile.
-    fn push(&mut self, entry: Arc<IndexEntry>) {
+    fn push(&mut self, entry: &Arc<IndexEntry>) {
         let scope: Arc<str> = entry.coord.scope_arc();
         let entity: Arc<str> = entry.coord.entity_arc();
         let kind = entry.kind;
@@ -217,10 +217,10 @@ impl<const N: usize> AoSoAInner<N> {
                 .tiles
                 .last_mut()
                 .expect("checked above that last() is Some"); // safe: is_some_and confirmed
-            t.push(kind, seq, Arc::clone(&entry));
+            t.push(kind, seq, Arc::clone(entry));
         } else {
             let mut tile = Tile::new();
-            tile.push(kind, seq, Arc::clone(&entry));
+            tile.push(kind, seq, Arc::clone(entry));
             self.tiles.push(tile);
         }
 
@@ -347,7 +347,7 @@ impl ColumnarIndex {
     /// Events must be inserted in ascending `global_sequence` order (which is
     /// guaranteed by the single-writer architecture).  The operation is O(1)
     /// amortised for SoA and O(1) amortised for AoSoA (tile append or new tile).
-    pub(crate) fn insert(&self, entry: Arc<IndexEntry>) {
+    pub(crate) fn insert(&self, entry: &Arc<IndexEntry>) {
         match &self.inner {
             ColumnarVariant::SoA(lock) => lock.write().push(entry),
             ColumnarVariant::AoSoA8(lock) => lock.write().push(entry),
@@ -396,37 +396,36 @@ impl ColumnarIndex {
     /// # Panics
     /// Panics if `self` is not an `AoSoA8` variant, or if `idx` is out of range.
     /// Caller contract violation — not recoverable.
-    #[allow(clippy::panic)] // intentional: caller violated the variant contract; not recoverable
-    pub(crate) fn with_tile8<R>(&self, idx: usize, f: impl FnOnce(&Tile<8>) -> R) -> R {
+    /// Invoke `f` with an immutable reference to the `Tile<8>` at `idx`.
+    /// Returns `None` if `self` is not an `AoSoA8` variant.
+    pub(crate) fn with_tile8<R>(&self, idx: usize, f: impl FnOnce(&Tile<8>) -> R) -> Option<R> {
         match &self.inner {
-            ColumnarVariant::AoSoA8(lock) => lock.read().with_tile(idx, f),
-            _ => panic!("with_tile8 called on a non-AoSoA8 ColumnarIndex"),
+            ColumnarVariant::AoSoA8(lock) => Some(lock.read().with_tile(idx, f)),
+            ColumnarVariant::SoA(_)
+            | ColumnarVariant::AoSoA16(_)
+            | ColumnarVariant::AoSoA64(_) => None,
         }
     }
 
     /// Invoke `f` with an immutable reference to the `Tile<16>` at `idx`.
-    ///
-    /// # Panics
-    /// Panics if `self` is not an `AoSoA16` variant, or if `idx` is out of range.
-    /// Caller contract violation — not recoverable.
-    #[allow(clippy::panic)] // intentional: caller violated the variant contract; not recoverable
-    pub(crate) fn with_tile16<R>(&self, idx: usize, f: impl FnOnce(&Tile<16>) -> R) -> R {
+    /// Returns `None` if `self` is not an `AoSoA16` variant.
+    pub(crate) fn with_tile16<R>(&self, idx: usize, f: impl FnOnce(&Tile<16>) -> R) -> Option<R> {
         match &self.inner {
-            ColumnarVariant::AoSoA16(lock) => lock.read().with_tile(idx, f),
-            _ => panic!("with_tile16 called on a non-AoSoA16 ColumnarIndex"),
+            ColumnarVariant::AoSoA16(lock) => Some(lock.read().with_tile(idx, f)),
+            ColumnarVariant::SoA(_)
+            | ColumnarVariant::AoSoA8(_)
+            | ColumnarVariant::AoSoA64(_) => None,
         }
     }
 
     /// Invoke `f` with an immutable reference to the `Tile<64>` at `idx`.
-    ///
-    /// # Panics
-    /// Panics if `self` is not an `AoSoA64` variant, or if `idx` is out of range.
-    /// Caller contract violation — not recoverable.
-    #[allow(clippy::panic)] // intentional: caller violated the variant contract; not recoverable
-    pub(crate) fn with_tile64<R>(&self, idx: usize, f: impl FnOnce(&Tile<64>) -> R) -> R {
+    /// Returns `None` if `self` is not an `AoSoA64` variant.
+    pub(crate) fn with_tile64<R>(&self, idx: usize, f: impl FnOnce(&Tile<64>) -> R) -> Option<R> {
         match &self.inner {
-            ColumnarVariant::AoSoA64(lock) => lock.read().with_tile(idx, f),
-            _ => panic!("with_tile64 called on a non-AoSoA64 ColumnarIndex"),
+            ColumnarVariant::AoSoA64(lock) => Some(lock.read().with_tile(idx, f)),
+            ColumnarVariant::SoA(_)
+            | ColumnarVariant::AoSoA8(_)
+            | ColumnarVariant::AoSoA16(_) => None,
         }
     }
 
@@ -491,7 +490,7 @@ impl ScanIndex {
     /// same `ClockKey` ordering used by `StoreIndex::insert`.
     ///
     /// For `Columnar`, this delegates to [`ColumnarIndex::insert`].
-    pub(crate) fn insert(&self, entry: Arc<IndexEntry>) {
+    pub(crate) fn insert(&self, entry: &Arc<IndexEntry>) {
         match self {
             Self::Maps {
                 by_fact,
@@ -505,7 +504,7 @@ impl ScanIndex {
                 by_fact
                     .entry(entry.kind)
                     .or_default()
-                    .insert(key, Arc::clone(&entry));
+                    .insert(key, Arc::clone(entry));
                 scope_entities
                     .entry(entry.coord.scope_arc())
                     .or_default()
@@ -635,10 +634,10 @@ mod tests {
     fn soa_insert_and_query_by_kind() {
         let idx = ColumnarIndex::new_soa();
         for i in 0u64..10 {
-            idx.insert(make_entry(KIND_A, i, "e1", "s1"));
+            idx.insert(&make_entry(KIND_A, i, "e1", "s1"));
         }
         for i in 10u64..15 {
-            idx.insert(make_entry(KIND_B, i, "e2", "s1"));
+            idx.insert(&make_entry(KIND_B, i, "e2", "s1"));
         }
         let a = idx.query_by_kind(KIND_A);
         assert_eq!(a.len(), 10);
@@ -654,10 +653,10 @@ mod tests {
     fn soa_query_by_scope() {
         let idx = ColumnarIndex::new_soa();
         for i in 0u64..6 {
-            idx.insert(make_entry(KIND_A, i, "e1", "scope-x"));
+            idx.insert(&make_entry(KIND_A, i, "e1", "scope-x"));
         }
         for i in 6u64..10 {
-            idx.insert(make_entry(KIND_A, i, "e2", "scope-y"));
+            idx.insert(&make_entry(KIND_A, i, "e2", "scope-y"));
         }
         let x = idx.query_by_scope("scope-x");
         assert_eq!(x.len(), 6);
@@ -671,7 +670,7 @@ mod tests {
     fn soa_clear() {
         let idx = ColumnarIndex::new_soa();
         for i in 0u64..5 {
-            idx.insert(make_entry(KIND_A, i, "e1", "s1"));
+            idx.insert(&make_entry(KIND_A, i, "e1", "s1"));
         }
         idx.clear();
         assert!(idx.query_by_kind(KIND_A).is_empty());
@@ -685,7 +684,7 @@ mod tests {
         let idx = ColumnarIndex::new_aosoa8();
         // 20 events of KIND_A → should fill 2 complete tiles + 1 partial (3 total)
         for i in 0u64..20 {
-            idx.insert(make_entry(KIND_A, i, "e1", "s1"));
+            idx.insert(&make_entry(KIND_A, i, "e1", "s1"));
         }
         let results = idx.query_by_kind(KIND_A);
         assert_eq!(results.len(), 20);
@@ -699,8 +698,8 @@ mod tests {
         let idx = ColumnarIndex::new_aosoa8();
         // Interleaved: push both kinds so tiles can't be pre-filled
         for i in 0u64..12 {
-            idx.insert(make_entry(KIND_A, i * 2, "ea", "s1"));
-            idx.insert(make_entry(KIND_B, i * 2 + 1, "eb", "s1"));
+            idx.insert(&make_entry(KIND_A, i * 2, "ea", "s1"));
+            idx.insert(&make_entry(KIND_B, i * 2 + 1, "eb", "s1"));
         }
         let a = idx.query_by_kind(KIND_A);
         let b = idx.query_by_kind(KIND_B);
@@ -712,10 +711,10 @@ mod tests {
     fn aosoa8_query_by_scope() {
         let idx = ColumnarIndex::new_aosoa8();
         for i in 0u64..9 {
-            idx.insert(make_entry(KIND_A, i, "ent-a", "scope-alpha"));
+            idx.insert(&make_entry(KIND_A, i, "ent-a", "scope-alpha"));
         }
         for i in 9u64..14 {
-            idx.insert(make_entry(KIND_A, i, "ent-b", "scope-beta"));
+            idx.insert(&make_entry(KIND_A, i, "ent-b", "scope-beta"));
         }
         let alpha = idx.query_by_scope("scope-alpha");
         assert_eq!(alpha.len(), 9);
@@ -727,10 +726,10 @@ mod tests {
     fn aosoa8_with_tile_callback() {
         let idx = ColumnarIndex::new_aosoa8();
         for i in 0u64..8 {
-            idx.insert(make_entry(KIND_A, i, "e1", "s1"));
+            idx.insert(&make_entry(KIND_A, i, "e1", "s1"));
         }
         // First tile should be full with KIND_A
-        let len = idx.with_tile8(0, |t| t.len);
+        let len = idx.with_tile8(0, |t| t.len).expect("should be AoSoA8");
         assert_eq!(len, 8);
     }
 
@@ -740,7 +739,7 @@ mod tests {
     fn aosoa16_basic() {
         let idx = ColumnarIndex::new_aosoa16();
         for i in 0u64..33 {
-            idx.insert(make_entry(KIND_A, i, "e1", "s1"));
+            idx.insert(&make_entry(KIND_A, i, "e1", "s1"));
         }
         assert_eq!(idx.query_by_kind(KIND_A).len(), 33);
     }
@@ -751,7 +750,7 @@ mod tests {
     fn aosoa64_basic() {
         let idx = ColumnarIndex::new_aosoa64();
         for i in 0u64..130 {
-            idx.insert(make_entry(KIND_A, i, "e1", "s1"));
+            idx.insert(&make_entry(KIND_A, i, "e1", "s1"));
         }
         assert_eq!(idx.query_by_kind(KIND_A).len(), 130);
     }
@@ -763,7 +762,7 @@ mod tests {
         use crate::store::IndexLayout;
         let si = ScanIndex::for_layout(&IndexLayout::AoS);
         for i in 0u64..7 {
-            si.insert(make_entry(KIND_A, i, "e1", "s1"));
+            si.insert(&make_entry(KIND_A, i, "e1", "s1"));
         }
         let results = si.query_by_kind(KIND_A);
         assert_eq!(results.len(), 7);
@@ -774,7 +773,7 @@ mod tests {
         use crate::store::IndexLayout;
         let si = ScanIndex::for_layout(&IndexLayout::SoA);
         for i in 0u64..12 {
-            si.insert(make_entry(KIND_A, i, "e1", "s2"));
+            si.insert(&make_entry(KIND_A, i, "e1", "s2"));
         }
         let results = si.query_by_kind(KIND_A);
         assert_eq!(results.len(), 12);
@@ -785,7 +784,7 @@ mod tests {
         use crate::store::IndexLayout;
         let si = ScanIndex::for_layout(&IndexLayout::AoSoA8);
         for i in 0u64..20 {
-            si.insert(make_entry(KIND_A, i, "e1", "s1"));
+            si.insert(&make_entry(KIND_A, i, "e1", "s1"));
         }
         let results = si.query_by_kind(KIND_A);
         assert_eq!(results.len(), 20);
@@ -795,8 +794,8 @@ mod tests {
     fn scan_index_maps_scope_entity_set() {
         use crate::store::IndexLayout;
         let si = ScanIndex::for_layout(&IndexLayout::AoS);
-        si.insert(make_entry(KIND_A, 0, "ent-1", "my-scope"));
-        si.insert(make_entry(KIND_A, 1, "ent-2", "my-scope"));
+        si.insert(&make_entry(KIND_A, 0, "ent-1", "my-scope"));
+        si.insert(&make_entry(KIND_A, 1, "ent-2", "my-scope"));
         let set = si.scope_entity_set("my-scope").expect("should be Some for Maps");
         assert!(set.contains("ent-1" as &str));
         assert!(set.contains("ent-2" as &str));
@@ -806,7 +805,7 @@ mod tests {
     fn scan_index_columnar_scope_entity_set_returns_none() {
         use crate::store::IndexLayout;
         let si = ScanIndex::for_layout(&IndexLayout::SoA);
-        si.insert(make_entry(KIND_A, 0, "ent-1", "my-scope"));
+        si.insert(&make_entry(KIND_A, 0, "ent-1", "my-scope"));
         assert!(si.scope_entity_set("my-scope").is_none());
     }
 
@@ -815,7 +814,7 @@ mod tests {
         use crate::store::IndexLayout;
         let si = ScanIndex::for_layout(&IndexLayout::SoA);
         for i in 0u64..5 {
-            si.insert(make_entry(KIND_A, i, "e1", "s1"));
+            si.insert(&make_entry(KIND_A, i, "e1", "s1"));
         }
         si.clear();
         assert!(si.query_by_kind(KIND_A).is_empty());

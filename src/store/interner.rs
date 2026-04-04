@@ -161,7 +161,7 @@ impl StringInterner {
             // because IDs are issued monotonically and we hold the forward write
             // lock the entire time.
             debug_assert_eq!(
-                rev.len() as u32,
+                u32::try_from(rev.len()).unwrap_or(u32::MAX),
                 raw,
                 "reverse table length mismatch: expected {raw}, got {}",
                 rev.len()
