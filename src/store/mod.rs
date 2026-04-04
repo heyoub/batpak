@@ -152,7 +152,7 @@ impl Store {
         reader.set_active_segment(active_seg_id);
 
         let subscribers = Arc::new(SubscriberList::new());
-        let writer = WriterHandle::spawn(&config, &index, &subscribers)?;
+        let writer = WriterHandle::spawn(&config, &index, &subscribers, &reader)?;
 
         Ok(Self {
             index,

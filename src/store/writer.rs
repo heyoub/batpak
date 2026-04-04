@@ -131,6 +131,7 @@ impl WriterHandle {
         config: &Arc<StoreConfig>,
         index: &Arc<StoreIndex>,
         subscribers: &Arc<SubscriberList>,
+        reader: &Arc<crate::store::reader::Reader>,
     ) -> Result<Self, StoreError> {
         // Fallible init — propagate errors to Store::open() caller
         std::fs::create_dir_all(&config.data_dir).map_err(StoreError::Io)?;
@@ -141,6 +142,7 @@ impl WriterHandle {
         let subs = Arc::clone(subscribers);
         let cfg = Arc::clone(config);
         let idx = Arc::clone(index);
+        let rdr = Arc::clone(reader);
 
         let thread_name = format!("batpak-writer-{:08x}", {
             let mut h: u64 = 0xcbf29ce484222325; // FNV-1a basis
@@ -157,7 +159,7 @@ impl WriterHandle {
         }
         let thread = builder
             .spawn(move || {
-                writer_thread_main(&rx, &cfg, &idx, &subs, initial_segment, initial_segment_id);
+                writer_thread_main(&rx, &cfg, &idx, &subs, &rdr, initial_segment, initial_segment_id);
             })
             .map_err(StoreError::Io)?;
 
@@ -193,6 +195,8 @@ struct WriterState<'a> {
     segment_id: &'a mut u64,
     config: &'a StoreConfig,
     subscribers: &'a SubscriberList,
+    /// Reader handle — updated on segment rotation so mmap dispatch is correct.
+    reader: Arc<crate::store::reader::Reader>,
     /// Accumulates SIDX entries for the current active segment.
     /// Flushed as a footer on segment rotation and shutdown.
     sidx_collector: crate::store::sidx::SidxEntryCollector,
@@ -209,6 +213,7 @@ fn writer_thread_main(
     config: &StoreConfig,
     index: &StoreIndex,
     subscribers: &SubscriberList,
+    reader: &Arc<crate::store::reader::Reader>,
     initial_segment: Segment<Active>,
     initial_segment_id: u64,
 ) {
@@ -218,11 +223,9 @@ fn writer_thread_main(
     let mut window_start = Instant::now();
 
     loop {
-        // catch_unwind needs AssertUnwindSafe because writer_loop borrows
-        // mutable state. This is safe: on panic, the segment is dropped
-        // (cleaned up by unwind) and we re-create it below.
+        let rdr = Arc::clone(reader);
         let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
-            writer_loop(rx, config, index, subscribers, segment, seg_id);
+            writer_loop(rx, config, index, subscribers, rdr, segment, seg_id);
         }));
 
         match result {
@@ -303,6 +306,7 @@ fn writer_loop(
     config: &StoreConfig,
     index: &StoreIndex,
     subscribers: &SubscriberList,
+    reader: Arc<crate::store::reader::Reader>,
     mut active_segment: Segment<Active>,
     mut segment_id: u64,
 ) {
@@ -314,6 +318,7 @@ fn writer_loop(
         segment_id: &mut segment_id,
         config,
         subscribers,
+        reader,
         sidx_collector: crate::store::sidx::SidxEntryCollector::new(),
     };
 
@@ -591,6 +596,8 @@ impl WriterState<'_> {
             );
             let _sealed = old.seal();
             *self.segment_id += 1;
+            // Notify the reader of the new active segment so mmap dispatch is correct.
+            self.reader.set_active_segment(*self.segment_id);
             info!(segment_id = *self.segment_id, "segment rotated");
         }
 
