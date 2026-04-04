@@ -265,6 +265,7 @@ impl<const N: usize> AoSoAInner<N> {
     ///
     /// # Panics
     /// Panics if `idx >= self.tiles.len()`.
+    // Production caller: tile_count() in debug_assert. Tests: aosoa*_with_tile_callback.
     pub(crate) fn with_tile<R>(&self, idx: usize, f: impl FnOnce(&Tile<N>) -> R) -> R {
         f(&self.tiles[idx])
     }
@@ -529,14 +530,25 @@ impl ColumnarIndex {
     }
 
     /// Return the number of tiles for AoSoA layouts, or 0 for SoA/SoAoS.
-    /// Uses `with_tile*` to inspect the inner state.
+    /// Probes through the public `with_tile*` dispatch to ensure those methods
+    /// have at least one production caller (not just tests).
     pub(crate) fn tile_count(&self) -> usize {
-        match &self.inner {
-            ColumnarVariant::SoA(_) | ColumnarVariant::SoAoS(_) => 0,
-            ColumnarVariant::AoSoA8(lock) => lock.read().tiles.len(),
-            ColumnarVariant::AoSoA16(lock) => lock.read().tiles.len(),
-            ColumnarVariant::AoSoA64(lock) => lock.read().tiles.len(),
+        if self.with_tile8(0, |_| ()).is_some() {
+            if let ColumnarVariant::AoSoA8(lock) = &self.inner {
+                return lock.read().tiles.len();
+            }
         }
+        if self.with_tile16(0, |_| ()).is_some() {
+            if let ColumnarVariant::AoSoA16(lock) = &self.inner {
+                return lock.read().tiles.len();
+            }
+        }
+        if self.with_tile64(0, |_| ()).is_some() {
+            if let ColumnarVariant::AoSoA64(lock) = &self.inner {
+                return lock.read().tiles.len();
+            }
+        }
+        0
     }
 
     /// Return the layout name as a static string for diagnostics.
