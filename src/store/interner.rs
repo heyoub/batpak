@@ -58,12 +58,14 @@ impl InternId {
 
     /// Returns the sentinel ID (slot 0, empty string). Used as a placeholder
     /// when the interner is not available (e.g., in test constructors).
+    #[cfg(test)]
     #[inline]
     pub(crate) fn sentinel() -> Self {
         Self(SENTINEL_ID)
     }
 
     /// Returns `true` if this is the sentinel ID (slot 0, empty string).
+    #[cfg(test)]
     #[inline]
     pub(crate) fn is_sentinel(self) -> bool {
         self.0 == SENTINEL_ID
@@ -179,6 +181,7 @@ impl StringInterner {
     ///
     /// The reverse table is accessed under a brief shared read lock; the returned
     /// [`Arc<str>`] extends the string's lifetime beyond the lock.
+    #[cfg(test)]
     pub(crate) fn resolve(&self, id: InternId) -> Option<Arc<str>> {
         let rev = self.reverse.read();
         rev.get(id.0 as usize).map(Arc::clone)
@@ -216,6 +219,7 @@ impl StringInterner {
     /// The sentinel is automatically re-installed at slot 0.  Each element of
     /// `strings` is assigned the next available ID starting at 1, preserving
     /// the original ID assignments.
+    #[cfg(test)]
     pub(crate) fn from_snapshot(strings: Vec<String>) -> Self {
         let interner = Self::new();
 

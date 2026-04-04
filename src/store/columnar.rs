@@ -265,6 +265,7 @@ impl<const N: usize> AoSoAInner<N> {
     ///
     /// # Panics
     /// Panics if `idx >= self.tiles.len()`.
+    #[cfg(test)]
     pub(crate) fn with_tile<R>(&self, idx: usize, f: impl FnOnce(&Tile<N>) -> R) -> R {
         f(&self.tiles[idx])
     }
@@ -483,6 +484,7 @@ impl ColumnarIndex {
     /// Caller contract violation — not recoverable.
     /// Invoke `f` with an immutable reference to the `Tile<8>` at `idx`.
     /// Returns `None` if `self` is not an `AoSoA8` variant.
+    #[cfg(test)]
     pub(crate) fn with_tile8<R>(&self, idx: usize, f: impl FnOnce(&Tile<8>) -> R) -> Option<R> {
         match &self.inner {
             ColumnarVariant::AoSoA8(lock) => Some(lock.read().with_tile(idx, f)),
@@ -495,6 +497,7 @@ impl ColumnarIndex {
 
     /// Invoke `f` with an immutable reference to the `Tile<16>` at `idx`.
     /// Returns `None` if `self` is not an `AoSoA16` variant.
+    #[cfg(test)]
     pub(crate) fn with_tile16<R>(&self, idx: usize, f: impl FnOnce(&Tile<16>) -> R) -> Option<R> {
         match &self.inner {
             ColumnarVariant::AoSoA16(lock) => Some(lock.read().with_tile(idx, f)),
@@ -507,6 +510,7 @@ impl ColumnarIndex {
 
     /// Invoke `f` with an immutable reference to the `Tile<64>` at `idx`.
     /// Returns `None` if `self` is not an `AoSoA64` variant.
+    #[cfg(test)]
     pub(crate) fn with_tile64<R>(&self, idx: usize, f: impl FnOnce(&Tile<64>) -> R) -> Option<R> {
         match &self.inner {
             ColumnarVariant::AoSoA64(lock) => Some(lock.read().with_tile(idx, f)),

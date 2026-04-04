@@ -93,8 +93,6 @@ pub(crate) struct WatermarkInfo {
     pub watermark_segment_id: u64,
     /// Byte offset within the watermark segment.
     pub watermark_offset: u64,
-    /// Global sequence counter at checkpoint time.
-    pub global_sequence: u64,
 }
 
 // ── write_checkpoint ─────────────────────────────────────────────────────────
@@ -331,7 +329,6 @@ pub(crate) fn try_load_checkpoint(
     let watermark = WatermarkInfo {
         watermark_segment_id: data.watermark_segment_id,
         watermark_offset: data.watermark_offset,
-        global_sequence: data.global_sequence,
     };
 
     tracing::debug!(
@@ -467,7 +464,6 @@ mod tests {
         assert_eq!(entries.len(), 0);
         assert_eq!(wm.watermark_segment_id, 0);
         assert_eq!(wm.watermark_offset, 0);
-        assert_eq!(wm.global_sequence, 0);
     }
 
     #[test]
