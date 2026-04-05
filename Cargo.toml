@@ -99,6 +99,10 @@ harness = false
 name = "subscription_fanout"
 harness = false
 
+[[bench]]
+name = "unified_bench"
+harness = false
+
 # Profile settings (NOT in .cargo/config.toml — they're ignored there)
 [profile.dev]
 opt-level = 0
