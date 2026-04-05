@@ -69,9 +69,7 @@ fn replay_tail_segments(
         let scanned = reader.scan_segment_index(&dir_entry.path())?;
         for se in scanned {
             // Skip frames already in the checkpoint
-            if seg_id == watermark.watermark_segment_id
-                && se.offset < watermark.watermark_offset
-            {
+            if seg_id == watermark.watermark_segment_id && se.offset < watermark.watermark_offset {
                 continue;
             }
             let coord = Coordinate::new(&se.entity, &se.scope)?;

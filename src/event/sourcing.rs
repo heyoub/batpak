@@ -32,7 +32,6 @@ pub trait EventSourced<P>: Sized {
     fn supports_incremental_apply() -> bool {
         false
     }
-
 }
 
 /// `Reactive<P>`: forward-looking counterpart. See event → maybe emit derived events.

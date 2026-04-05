@@ -83,10 +83,7 @@ where
 
             // Incremental apply path: if the cache is stale but we have a baseline,
             // and the projection type opts in, apply only delta events.
-            if !is_fresh
-                && T::supports_incremental_apply()
-                && store.config.incremental_projection
-            {
+            if !is_fresh && T::supports_incremental_apply() && store.config.incremental_projection {
                 let cached_watermark = meta.watermark;
                 // Delta: entries with global_sequence > cached watermark
                 let delta_entries: Vec<_> = entries

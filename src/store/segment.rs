@@ -249,8 +249,7 @@ impl Segment<Active> {
         // the frames stop at string_table_offset. Otherwise, frames extend
         // to the end of the file.
         let file_len = source.seek(SeekFrom::End(0)).map_err(StoreError::Io)?;
-        let frames_end = detect_sidx_boundary(&mut source, file_len)?
-            .unwrap_or(file_len);
+        let frames_end = detect_sidx_boundary(&mut source, file_len)?.unwrap_or(file_len);
 
         source
             .seek(SeekFrom::Start(frames_start))
@@ -259,11 +258,8 @@ impl Segment<Active> {
         let offset = self.written_bytes;
         if let Some(ref mut destination) = self.file {
             let bytes_to_copy = frames_end.saturating_sub(frames_start);
-            let copied = std::io::copy(
-                &mut source.take(bytes_to_copy),
-                destination,
-            )
-            .map_err(StoreError::Io)?;
+            let copied = std::io::copy(&mut source.take(bytes_to_copy), destination)
+                .map_err(StoreError::Io)?;
             self.written_bytes += copied;
         }
         Ok(offset)
@@ -341,8 +337,8 @@ fn detect_sidx_boundary<R: Read + Seek>(
     }
     // string_table_offset at bytes 0..8
     let string_table_offset = u64::from_le_bytes([
-        trailer[0], trailer[1], trailer[2], trailer[3],
-        trailer[4], trailer[5], trailer[6], trailer[7],
+        trailer[0], trailer[1], trailer[2], trailer[3], trailer[4], trailer[5], trailer[6],
+        trailer[7],
     ]);
     Ok(Some(string_table_offset))
 }

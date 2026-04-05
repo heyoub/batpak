@@ -135,10 +135,7 @@ impl SoAInner {
         self.kinds.push(entry.kind);
         self.sequences.push(entry.global_sequence);
         self.entries.push(Arc::clone(entry));
-        self.scope_entities
-            .entry(scope)
-            .or_default()
-            .insert(entity);
+        self.scope_entities.entry(scope).or_default().insert(entity);
     }
 
     /// Return all entries whose `kind == target`.  Linear scan; cache-friendly
@@ -224,10 +221,7 @@ impl<const N: usize> AoSoAInner<N> {
             self.tiles.push(tile);
         }
 
-        self.scope_entities
-            .entry(scope)
-            .or_default()
-            .insert(entity);
+        self.scope_entities.entry(scope).or_default().insert(entity);
     }
 
     /// Iterate every tile and collect entries whose kind matches `target`.
@@ -303,20 +297,18 @@ impl SoAoSInner {
     fn push(&mut self, entry: &Arc<IndexEntry>) {
         let entity = entry.coord.entity_arc();
         let scope = entry.coord.scope_arc();
-        let group = self.groups.entry(Arc::clone(&entity)).or_insert_with(|| {
-            EntityGroup {
+        let group = self
+            .groups
+            .entry(Arc::clone(&entity))
+            .or_insert_with(|| EntityGroup {
                 kinds: Vec::new(),
                 sequences: Vec::new(),
                 entries: Vec::new(),
-            }
-        });
+            });
         group.kinds.push(entry.kind);
         group.sequences.push(entry.global_sequence);
         group.entries.push(Arc::clone(entry));
-        self.scope_entities
-            .entry(scope)
-            .or_default()
-            .insert(entity);
+        self.scope_entities.entry(scope).or_default().insert(entity);
     }
 
     fn query_by_kind(&self, target: EventKind) -> Vec<Arc<IndexEntry>> {
@@ -691,9 +683,9 @@ impl ScanIndex {
     /// [`query_by_scope`]: ScanIndex::query_by_scope
     pub(crate) fn scope_entity_set(&self, scope: &str) -> Option<HashSet<Arc<str>>> {
         match self {
-            Self::Maps { scope_entities, .. } => scope_entities
-                .get(scope)
-                .map(|r| r.value().clone()),
+            Self::Maps { scope_entities, .. } => {
+                scope_entities.get(scope).map(|r| r.value().clone())
+            }
             Self::Columnar(_) => None,
         }
     }
@@ -979,7 +971,9 @@ mod tests {
         let si = ScanIndex::for_layout(&IndexLayout::AoS);
         si.insert(&make_entry(KIND_A, 0, "ent-1", "my-scope"));
         si.insert(&make_entry(KIND_A, 1, "ent-2", "my-scope"));
-        let set = si.scope_entity_set("my-scope").expect("should be Some for Maps");
+        let set = si
+            .scope_entity_set("my-scope")
+            .expect("should be Some for Maps");
         assert!(set.contains("ent-1" as &str));
         assert!(set.contains("ent-2" as &str));
     }

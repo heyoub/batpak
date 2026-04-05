@@ -185,7 +185,9 @@ impl StoreIndex {
     }
 
     pub(crate) fn get_by_id(&self, event_id: u128) -> Option<IndexEntry> {
-        self.by_id.get(&event_id).map(|r| r.value().as_ref().clone())
+        self.by_id
+            .get(&event_id)
+            .map(|r| r.value().as_ref().clone())
     }
 
     pub(crate) fn get_latest(&self, entity: &str) -> Option<IndexEntry> {
@@ -211,13 +213,21 @@ impl StoreIndex {
             self.streams
                 .iter()
                 .filter(|r| r.key().as_ref().starts_with(prefix.as_ref()))
-                .flat_map(|r| r.value().values().map(|arc| arc.as_ref().clone()).collect::<Vec<_>>())
+                .flat_map(|r| {
+                    r.value()
+                        .values()
+                        .map(|arc| arc.as_ref().clone())
+                        .collect::<Vec<_>>()
+                })
                 .collect()
         } else if let Some(ref scope) = region.scope {
             // Scope → delegate to scan index
             let scope_entries = self.scan.query_by_scope(scope.as_ref());
             if !scope_entries.is_empty() {
-                scope_entries.into_iter().map(|arc| arc.as_ref().clone()).collect()
+                scope_entries
+                    .into_iter()
+                    .map(|arc| arc.as_ref().clone())
+                    .collect()
             } else {
                 // Fallback for Maps mode: look up entities in scope, collect their streams
                 if let Some(entities) = self.scan.scope_entity_set(scope.as_ref()) {
@@ -226,7 +236,12 @@ impl StoreIndex {
                         .flat_map(|entity| {
                             self.streams
                                 .get(entity.as_ref())
-                                .map(|r| r.value().values().map(|arc| arc.as_ref().clone()).collect::<Vec<_>>())
+                                .map(|r| {
+                                    r.value()
+                                        .values()
+                                        .map(|arc| arc.as_ref().clone())
+                                        .collect::<Vec<_>>()
+                                })
                                 .unwrap_or_default()
                         })
                         .collect()
@@ -240,7 +255,10 @@ impl StoreIndex {
                 KindFilter::Exact(k) => {
                     let results = self.scan.query_by_kind(*k);
                     if !results.is_empty() {
-                        results.into_iter().map(|arc| arc.as_ref().clone()).collect()
+                        results
+                            .into_iter()
+                            .map(|arc| arc.as_ref().clone())
+                            .collect()
                     } else {
                         // Empty could mean AoS mode with no events of this kind — that's correct
                         Vec::new()
@@ -253,22 +271,36 @@ impl StoreIndex {
                     // TODO: add category_scan to ScanIndex for better columnar support
                     self.streams
                         .iter()
-                        .flat_map(|r| r.value().values().map(|arc| arc.as_ref().clone()).collect::<Vec<_>>())
+                        .flat_map(|r| {
+                            r.value()
+                                .values()
+                                .map(|arc| arc.as_ref().clone())
+                                .collect::<Vec<_>>()
+                        })
                         .filter(|e| e.kind.category() == cat)
                         .collect()
                 }
-                KindFilter::Any => {
-                    self.streams
-                        .iter()
-                        .flat_map(|r| r.value().values().map(|arc| arc.as_ref().clone()).collect::<Vec<_>>())
-                        .collect()
-                }
+                KindFilter::Any => self
+                    .streams
+                    .iter()
+                    .flat_map(|r| {
+                        r.value()
+                            .values()
+                            .map(|arc| arc.as_ref().clone())
+                            .collect::<Vec<_>>()
+                    })
+                    .collect(),
             }
         } else {
             // Region::all() with no filters — return everything
             self.streams
                 .iter()
-                .flat_map(|r| r.value().values().map(|arc| arc.as_ref().clone()).collect::<Vec<_>>())
+                .flat_map(|r| {
+                    r.value()
+                        .values()
+                        .map(|arc| arc.as_ref().clone())
+                        .collect::<Vec<_>>()
+                })
                 .collect()
         };
 
@@ -308,7 +340,10 @@ impl StoreIndex {
     /// DashMap iteration is not a linearisable snapshot, but that is acceptable
     /// because checkpoints are always written from a quiesced write path.
     pub(crate) fn all_entries(&self) -> Vec<IndexEntry> {
-        self.by_id.iter().map(|r| r.value().as_ref().clone()).collect()
+        self.by_id
+            .iter()
+            .map(|r| r.value().as_ref().clone())
+            .collect()
     }
 
     pub(crate) fn global_sequence(&self) -> u64 {

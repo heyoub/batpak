@@ -65,7 +65,10 @@ pub(crate) const ENTRY_SIZE: usize = 154;
 
 const _ASSERT_ENTRY_SIZE: () = {
     // Compile-time sanity: update this constant whenever SidxEntry fields change.
-    assert!(ENTRY_SIZE == 154, "ENTRY_SIZE must equal 154 — update when SidxEntry layout changes");
+    assert!(
+        ENTRY_SIZE == 154,
+        "ENTRY_SIZE must equal 154 — update when SidxEntry layout changes"
+    );
 };
 
 // ── EventKind helpers ─────────────────────────────────────────────────────────
@@ -160,7 +163,11 @@ impl SidxEntry {
     /// All multi-byte integers are written in little-endian byte order.
     /// Hash fields are copied as-is (byte arrays have no endianness).
     pub(crate) fn encode_into(&self, buf: &mut [u8]) {
-        debug_assert_eq!(buf.len(), ENTRY_SIZE, "encode_into: buf must be ENTRY_SIZE bytes");
+        debug_assert_eq!(
+            buf.len(),
+            ENTRY_SIZE,
+            "encode_into: buf must be ENTRY_SIZE bytes"
+        );
 
         let mut pos = 0usize;
 
@@ -342,10 +349,7 @@ impl SidxEntryCollector {
     ///
     /// Returns [`StoreError::Serialization`] if the string table cannot be encoded to msgpack.
     /// Returns [`StoreError::Io`] if any write or seek operation fails.
-    pub(crate) fn write_footer<W: Write + Seek>(
-        &self,
-        writer: &mut W,
-    ) -> Result<(), StoreError> {
+    pub(crate) fn write_footer<W: Write + Seek>(&self, writer: &mut W) -> Result<(), StoreError> {
         // 1. Encode string table to msgpack.
         let string_table_bytes = rmp_serde::to_vec_named(&self.strings)
             .map_err(|e| StoreError::Serialization(Box::new(e)))?;
@@ -354,7 +358,9 @@ impl SidxEntryCollector {
         let string_table_offset = writer.stream_position().map_err(StoreError::Io)?;
 
         // 3. Write string table bytes.
-        writer.write_all(&string_table_bytes).map_err(StoreError::Io)?;
+        writer
+            .write_all(&string_table_bytes)
+            .map_err(StoreError::Io)?;
 
         // 4. Write all entries as packed little-endian binary.
         let mut buf = [0u8; ENTRY_SIZE];
@@ -388,7 +394,8 @@ impl SidxEntryCollector {
             return idx;
         }
         // Saturating truncation: segments can never accumulate 4B unique strings.
-        #[allow(clippy::cast_possible_truncation)] // string table bounded by segment size, always < u32::MAX
+        #[allow(clippy::cast_possible_truncation)]
+        // string table bounded by segment size, always < u32::MAX
         let idx = self.strings.len() as u32;
         self.strings.push(s.to_owned());
         self.string_map.insert(s.to_owned(), idx);
@@ -417,9 +424,7 @@ impl SidxEntryCollector {
 /// Parsed SIDX footer: entries + string table.
 pub(crate) type SidxFooterData = (Vec<SidxEntry>, Vec<String>);
 
-pub(crate) fn read_footer(
-    path: &Path,
-) -> Result<Option<SidxFooterData>, StoreError> {
+pub(crate) fn read_footer(path: &Path) -> Result<Option<SidxFooterData>, StoreError> {
     // Derive a segment_id for error messages from the filename ("000042.fbat" → 42).
     let segment_id = path
         .file_stem()
@@ -491,19 +496,17 @@ pub(crate) fn read_footer(
     file.seek(SeekFrom::Start(string_table_offset))
         .map_err(StoreError::Io)?;
 
-    let table_len_usize = usize::try_from(string_table_len).map_err(|_| {
-        StoreError::CorruptSegment {
+    let table_len_usize =
+        usize::try_from(string_table_len).map_err(|_| StoreError::CorruptSegment {
             segment_id,
             detail: format!("SIDX string table length {string_table_len} exceeds usize::MAX"),
-        }
-    })?;
+        })?;
     let mut string_table_buf = vec![0u8; table_len_usize];
     file.read_exact(&mut string_table_buf)
         .map_err(StoreError::Io)?;
 
-    let strings: Vec<String> =
-        rmp_serde::from_slice(&string_table_buf)
-            .map_err(|e| StoreError::Serialization(Box::new(e)))?;
+    let strings: Vec<String> = rmp_serde::from_slice(&string_table_buf)
+        .map_err(|e| StoreError::Serialization(Box::new(e)))?;
 
     // ── 5. Read and decode entries ─────────────────────────────────────────────
     // After reading the string table we are positioned at entries_start.
@@ -690,7 +693,11 @@ mod tests {
         let i2 = collector.intern("entity:1");
         assert_eq!(i0, i2, "same string must return the same index");
         assert_ne!(i0, i1, "different strings must get different indices");
-        assert_eq!(collector.strings().len(), 2, "only 2 unique strings expected");
+        assert_eq!(
+            collector.strings().len(),
+            2,
+            "only 2 unique strings expected"
+        );
     }
 
     // ── write_footer / read_footer round-trip ─────────────────────────────────
@@ -709,17 +716,18 @@ mod tests {
         collector.record(sample_entry(1), "user:1", "profile");
         collector.record(sample_entry(2), "user:2", "profile");
 
-        collector.write_footer(&mut cursor).expect("write_footer must succeed");
+        collector
+            .write_footer(&mut cursor)
+            .expect("write_footer must succeed");
 
         // Persist to a temporary file and read back.
         let mut tmp = NamedTempFile::new().expect("create temp file");
         tmp.write_all(&buf).expect("write buf to temp file");
         tmp.flush().expect("flush temp file");
 
-        let (entries, strings) =
-            read_footer(tmp.path())
-                .expect("read_footer must not error")
-                .expect("SIDX footer must be found");
+        let (entries, strings) = read_footer(tmp.path())
+            .expect("read_footer must not error")
+            .expect("SIDX footer must be found");
 
         assert_eq!(entries.len(), 2, "expected 2 entries");
         assert!(strings.contains(&"user:1".to_owned()));
@@ -826,18 +834,22 @@ mod tests {
         cursor.seek(SeekFrom::End(0)).expect("seek to end");
 
         let collector = SidxEntryCollector::new();
-        collector.write_footer(&mut cursor).expect("write_footer must succeed");
+        collector
+            .write_footer(&mut cursor)
+            .expect("write_footer must succeed");
 
         let mut tmp = NamedTempFile::new().expect("create temp file");
         tmp.write_all(&buf).expect("write");
         tmp.flush().expect("flush");
 
-        let (entries, strings) =
-            read_footer(tmp.path())
-                .expect("read_footer must not error")
-                .expect("footer must be found");
+        let (entries, strings) = read_footer(tmp.path())
+            .expect("read_footer must not error")
+            .expect("footer must be found");
 
         assert!(entries.is_empty(), "zero entries expected");
-        assert!(strings.is_empty(), "zero strings expected for empty collector");
+        assert!(
+            strings.is_empty(),
+            "zero strings expected for empty collector"
+        );
     }
 }

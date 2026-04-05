@@ -354,8 +354,10 @@ mod tests {
             })
             .collect();
 
-        let all_results: Vec<Vec<InternId>> =
-            handles.into_iter().map(|h| h.join().expect("thread must not panic")).collect();
+        let all_results: Vec<Vec<InternId>> = handles
+            .into_iter()
+            .map(|h| h.join().expect("thread must not panic"))
+            .collect();
 
         // All threads must agree on the same ID for the same string.
         for i in 0..n_strings {

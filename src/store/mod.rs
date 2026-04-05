@@ -4,8 +4,6 @@ pub(crate) mod checkpoint;
 /// Columnar (SoA / AoSoA) secondary query index.
 pub(crate) mod columnar;
 mod config;
-/// String interning for compact index keys.
-pub(crate) mod interner;
 mod contracts;
 /// Pull-based cursor for guaranteed, ordered event delivery.
 pub mod cursor;
@@ -13,6 +11,8 @@ mod error;
 /// In-memory 2D event index, rebuilt from segments on startup.
 pub mod index;
 mod index_rebuild;
+/// String interning for compact index keys.
+pub(crate) mod interner;
 mod maintenance;
 /// Projection cache traits and built-in backends (NoCache, redb, LMDB).
 pub mod projection;
@@ -252,7 +252,10 @@ impl Store {
     /// Returns `StoreError::CacheFailed` if the projection cache backend encounters an error.
     pub fn project<T>(&self, entity: &str, freshness: &Freshness) -> Result<Option<T>, StoreError>
     where
-        T: EventSourced<serde_json::Value> + serde::Serialize + serde::de::DeserializeOwned + 'static,
+        T: EventSourced<serde_json::Value>
+            + serde::Serialize
+            + serde::de::DeserializeOwned
+            + 'static,
     {
         projection_flow::project(self, entity, freshness)
     }

@@ -161,8 +161,8 @@ pub(crate) fn write_checkpoint(
     };
 
     // ── 3. Serialise to msgpack ───────────────────────────────────────────────
-    let body = rmp_serde::to_vec_named(&data)
-        .map_err(|e| StoreError::Serialization(Box::new(e)))?;
+    let body =
+        rmp_serde::to_vec_named(&data).map_err(|e| StoreError::Serialization(Box::new(e)))?;
 
     // ── 4. Compute CRC of the body ────────────────────────────────────────────
     let crc: u32 = crc32fast::hash(&body);
@@ -412,11 +412,8 @@ mod tests {
     fn make_index(n: u64) -> StoreIndex {
         let idx = StoreIndex::new();
         for i in 0..n {
-            let coord = Coordinate::new(
-                format!("entity:{i}"),
-                "test-scope",
-            )
-            .expect("valid coordinate");
+            let coord =
+                Coordinate::new(format!("entity:{i}"), "test-scope").expect("valid coordinate");
             let entity_id = idx.interner.intern(coord.entity());
             let scope_id = idx.interner.intern(coord.scope());
             let entry = IndexEntry {
@@ -600,8 +597,7 @@ mod tests {
         let src = make_index(16);
         write_checkpoint(&src, dir, 0, 0).expect("write");
 
-        let (entries, interner_strings, _wm) =
-            try_load_checkpoint(dir).expect("should load");
+        let (entries, interner_strings, _wm) = try_load_checkpoint(dir).expect("should load");
         assert_eq!(entries.len(), 16);
 
         let dst = StoreIndex::new();

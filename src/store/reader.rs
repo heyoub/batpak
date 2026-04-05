@@ -95,7 +95,10 @@ impl Reader {
     }
 
     /// Get or create a memory mapping for a sealed segment.
-    fn get_or_map_sealed(&self, segment_id: u64) -> Result<dashmap::mapref::one::Ref<'_, u64, memmap2::Mmap>, StoreError> {
+    fn get_or_map_sealed(
+        &self,
+        segment_id: u64,
+    ) -> Result<dashmap::mapref::one::Ref<'_, u64, memmap2::Mmap>, StoreError> {
         if let Some(entry) = self.sealed_maps.get(&segment_id) {
             return Ok(entry);
         }
@@ -337,7 +340,11 @@ impl Reader {
                     header: crate::event::EventHeader::from_sidx(
                         se.event_id,
                         se.correlation_id,
-                        if se.causation_id == 0 { None } else { Some(se.causation_id) },
+                        if se.causation_id == 0 {
+                            None
+                        } else {
+                            Some(se.causation_id)
+                        },
                         se.wall_ms,
                         se.clock,
                         crate::store::sidx::raw_to_kind(se.kind),
@@ -495,13 +502,11 @@ impl Reader {
     }
 
     /// Zero-copy read from a sealed segment's memory map.
-    fn read_entry_mmap(
-        &self,
-        pos: &DiskPos,
-    ) -> Result<StoredEvent<serde_json::Value>, StoreError> {
+    fn read_entry_mmap(&self, pos: &DiskPos) -> Result<StoredEvent<serde_json::Value>, StoreError> {
         let mmap_ref = self.get_or_map_sealed(pos.segment_id)?;
         let mmap: &memmap2::Mmap = mmap_ref.value();
-        let start = usize::try_from(pos.offset).map_err(|_| StoreError::corrupt_eof(pos.segment_id))?;
+        let start =
+            usize::try_from(pos.offset).map_err(|_| StoreError::corrupt_eof(pos.segment_id))?;
         let end = start + pos.length as usize;
         if end > mmap.len() {
             return Err(StoreError::corrupt_eof(pos.segment_id));
@@ -512,8 +517,7 @@ impl Reader {
                 segment_id: pos.segment_id,
                 offset: pos.offset,
             },
-            segment::FrameDecodeError::TooShort
-            | segment::FrameDecodeError::Truncated { .. } => {
+            segment::FrameDecodeError::TooShort | segment::FrameDecodeError::Truncated { .. } => {
                 StoreError::corrupt_frame(pos.segment_id, e.to_string())
             }
         })?;

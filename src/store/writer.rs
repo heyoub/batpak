@@ -159,7 +159,15 @@ impl WriterHandle {
         }
         let thread = builder
             .spawn(move || {
-                writer_thread_main(&rx, &cfg, &idx, &subs, &rdr, initial_segment, initial_segment_id);
+                writer_thread_main(
+                    &rx,
+                    &cfg,
+                    &idx,
+                    &subs,
+                    &rdr,
+                    initial_segment,
+                    initial_segment_id,
+                );
             })
             .map_err(StoreError::Io)?;
 
@@ -360,16 +368,14 @@ fn writer_loop(
                             guards: g2,
                             respond: r2,
                         }) => {
-                            let res2 =
-                                state.handle_append(&e2, &s2, *ev2, k2, &g2);
+                            let res2 = state.handle_append(&e2, &s2, *ev2, k2, &g2);
                             let _ = r2.send(res2);
                             events_since_sync += 1;
                             drained += 1;
                         }
                         Ok(WriterCommand::Sync { respond: r }) => {
                             // Sync mid-batch: honor immediately, stop draining.
-                            let sr =
-                                state.active_segment.sync_with_mode(&config.sync_mode);
+                            let sr = state.active_segment.sync_with_mode(&config.sync_mode);
                             let _ = r.send(sr);
                             events_since_sync = 0;
                             break;
@@ -450,7 +456,10 @@ fn writer_loop(
                     }
                 }
                 // Write SIDX footer on active segment before shutdown sync.
-                if let Err(e) = state.active_segment.write_sidx_footer(&state.sidx_collector) {
+                if let Err(e) = state
+                    .active_segment
+                    .write_sidx_footer(&state.sidx_collector)
+                {
                     tracing::warn!("shutdown SIDX footer write failed (non-fatal): {e}");
                 }
                 let sync_result = state.active_segment.sync_with_mode(&config.sync_mode);
@@ -655,7 +664,8 @@ impl WriterState<'_> {
             correlation_id,
             causation_id: causation_id.unwrap_or(0),
         };
-        self.sidx_collector.record(sidx_entry, entity.as_ref(), scope.as_ref());
+        self.sidx_collector
+            .record(sidx_entry, entity.as_ref(), scope.as_ref());
 
         debug!(event_id = %event.header.event_id, clock = clock, "append committed");
 

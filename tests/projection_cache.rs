@@ -296,7 +296,9 @@ mod redb_tests {
         // (the cache key includes a TypeId hash, so raw cache.get with just the
         // entity name won't match).
         let cache = RedbCache::open(&cache_path).expect("final reopen cache");
-        let repopulated = cache.delete_prefix(b"entity:redb-miss").expect("check repopulated");
+        let repopulated = cache
+            .delete_prefix(b"entity:redb-miss")
+            .expect("check repopulated");
         assert!(
             repopulated >= 1,
             "REDB CACHE MISS PROOF: projecting after delete_prefix must repopulate the cache key."
@@ -547,7 +549,9 @@ mod lmdb_tests {
         }
 
         let cache = LmdbCache::open(&cache_path, 10 * 1024 * 1024).expect("final reopen cache");
-        let repopulated = cache.delete_prefix(b"entity:lmdb-miss").expect("check repopulated");
+        let repopulated = cache
+            .delete_prefix(b"entity:lmdb-miss")
+            .expect("check repopulated");
         assert!(
             repopulated >= 1,
             "LMDB CACHE MISS PROOF: projecting after delete_prefix must repopulate the cache key."

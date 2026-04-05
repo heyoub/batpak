@@ -599,14 +599,12 @@ fn layout_parity_aos_vs_soa() {
         }
     };
 
-    let store_aos =
-        Store::open(StoreConfig::new(dir_aos.path())).expect("open aos");
+    let store_aos = Store::open(StoreConfig::new(dir_aos.path())).expect("open aos");
     populate(&store_aos);
 
-    let store_soa = Store::open(
-        StoreConfig::new(dir_soa.path()).with_index_layout(IndexLayout::SoA),
-    )
-    .expect("open soa");
+    let store_soa =
+        Store::open(StoreConfig::new(dir_soa.path()).with_index_layout(IndexLayout::SoA))
+            .expect("open soa");
     populate(&store_soa);
 
     let events_aos = store_aos.by_fact(kind);
@@ -665,10 +663,9 @@ fn layout_parity_aos_vs_soaos() {
     let store_aos = Store::open(StoreConfig::new(dir_aos.path())).expect("open aos");
     populate(&store_aos);
 
-    let store_soaos = Store::open(
-        StoreConfig::new(dir_soaos.path()).with_index_layout(IndexLayout::SoAoS),
-    )
-    .expect("open soaos");
+    let store_soaos =
+        Store::open(StoreConfig::new(dir_soaos.path()).with_index_layout(IndexLayout::SoAoS))
+            .expect("open soaos");
     populate(&store_soaos);
 
     let events_aos = store_aos.by_fact(kind);
@@ -701,10 +698,8 @@ fn sidx_cold_start_uses_footer() {
     store.sync().expect("sync");
     store.close().expect("close");
     // Reopen — cold start should use SIDX footers for sealed segments
-    let store2 = Store::open(
-        StoreConfig::new(dir.path()).with_segment_max_bytes(512),
-    )
-    .expect("reopen");
+    let store2 =
+        Store::open(StoreConfig::new(dir.path()).with_segment_max_bytes(512)).expect("reopen");
     assert_eq!(
         store2.stream("entity:test").len(),
         50,
@@ -730,10 +725,8 @@ fn checkpoint_write_load_roundtrip() {
     store.sync().expect("sync");
     store.close().expect("close writes checkpoint");
     // Reopen — should load checkpoint, not full scan
-    let store2 = Store::open(
-        StoreConfig::new(dir.path()).with_enable_checkpoint(true),
-    )
-    .expect("reopen from checkpoint");
+    let store2 = Store::open(StoreConfig::new(dir.path()).with_enable_checkpoint(true))
+        .expect("reopen from checkpoint");
     assert_eq!(
         store2.stream("entity:test").len(),
         100,
@@ -760,10 +753,8 @@ fn stale_checkpoint_falls_back_to_full_rebuild() {
         std::fs::write(&ckpt_path, b"CORRUPT").expect("corrupt checkpoint");
     }
     // Reopen — must fall back to full scan without error
-    let store2 = Store::open(
-        StoreConfig::new(dir.path()).with_enable_checkpoint(true),
-    )
-    .expect("reopen with corrupt checkpoint");
+    let store2 = Store::open(StoreConfig::new(dir.path()).with_enable_checkpoint(true))
+        .expect("reopen with corrupt checkpoint");
     assert_eq!(
         store2.stream("entity:test").len(),
         20,
@@ -785,7 +776,9 @@ fn post_compact_checkpoint_valid() {
         store.append(&coord, kind_a(), &payload(i)).expect("append");
     }
     store.sync().expect("sync");
-    store.compact(&CompactionConfig::default()).expect("compact");
+    store
+        .compact(&CompactionConfig::default())
+        .expect("compact");
     store.close().expect("close writes post-compact checkpoint");
     // Reopen — checkpoint should be valid for post-compact state
     let store2 = Store::open(
@@ -956,7 +949,9 @@ fn watch_projection_emits_on_new_events() {
             std::thread::sleep(std::time::Duration::from_millis(50));
             let coord = Coordinate::new("watch:entity", "watch:scope").expect("coord");
             for i in 5u32..8 {
-                store2.append(&coord, kind_a(), &payload(i)).expect("append");
+                store2
+                    .append(&coord, kind_a(), &payload(i))
+                    .expect("append");
             }
         })
         .expect("spawn");
@@ -997,8 +992,12 @@ fn watch_projection_returns_none_on_store_close() {
             // Try to unwrap the Arc. If watcher holds a clone, this fails
             // and we just drop it (which triggers the Drop impl shutdown).
             match Arc::try_unwrap(store) {
-                Ok(s) => { let _ = s.close(); }
-                Err(arc) => { drop(arc); }
+                Ok(s) => {
+                    let _ = s.close();
+                }
+                Err(arc) => {
+                    drop(arc);
+                }
             }
         })
         .expect("spawn");

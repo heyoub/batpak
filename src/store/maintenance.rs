@@ -224,18 +224,11 @@ pub(crate) fn close(store: Store) -> Result<(), StoreError> {
 /// Determine watermark from the latest segment file and write checkpoint.
 fn write_checkpoint_on_close(store: &Store) -> Result<(), StoreError> {
     let (seg_id, offset) = find_latest_segment_watermark(&store.config.data_dir)?;
-    crate::store::checkpoint::write_checkpoint(
-        &store.index,
-        &store.config.data_dir,
-        seg_id,
-        offset,
-    )
+    crate::store::checkpoint::write_checkpoint(&store.index, &store.config.data_dir, seg_id, offset)
 }
 
 /// Scan data_dir for the highest-numbered .fbat file and return (segment_id, file_size).
-fn find_latest_segment_watermark(
-    data_dir: &std::path::Path,
-) -> Result<(u64, u64), StoreError> {
+fn find_latest_segment_watermark(data_dir: &std::path::Path) -> Result<(u64, u64), StoreError> {
     let mut max: Option<(u64, std::path::PathBuf)> = None;
     for entry in std::fs::read_dir(data_dir).map_err(StoreError::Io)? {
         let entry = entry.map_err(StoreError::Io)?;
@@ -277,9 +270,7 @@ pub(crate) fn diagnostics(store: &Store) -> StoreDiagnostics {
     // Extract tile stats from columnar index (0 for non-columnar layouts).
     let (index_layout, tile_count) = match &store.index.scan {
         crate::store::columnar::ScanIndex::Maps { .. } => ("AoS", 0),
-        crate::store::columnar::ScanIndex::Columnar(ci) => {
-            (ci.layout_name(), ci.tile_count())
-        }
+        crate::store::columnar::ScanIndex::Columnar(ci) => (ci.layout_name(), ci.tile_count()),
     };
     StoreDiagnostics {
         event_count: store.index.len(),
