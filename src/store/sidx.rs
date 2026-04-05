@@ -305,13 +305,10 @@ impl SidxEntryCollector {
     /// The `entity_idx` and `scope_idx` fields of `entry` are overwritten with
     /// the interned indices for `entity` and `scope`. All other fields are
     /// copied verbatim from `entry`.
-    pub(crate) fn record(&mut self, entry: &SidxEntry, entity: &str, scope: &str) {
-        let entity_idx = self.intern(entity);
-        let scope_idx = self.intern(scope);
-        let mut e = entry.clone();
-        e.entity_idx = entity_idx;
-        e.scope_idx = scope_idx;
-        self.entries.push(e);
+    pub(crate) fn record(&mut self, mut entry: SidxEntry, entity: &str, scope: &str) {
+        entry.entity_idx = self.intern(entity);
+        entry.scope_idx = self.intern(scope);
+        self.entries.push(entry);
     }
 
     /// Return a shared reference to all entries collected so far.
@@ -709,8 +706,8 @@ mod tests {
         cursor.seek(SeekFrom::End(0)).expect("seek to end");
 
         let mut collector = SidxEntryCollector::new();
-        collector.record(&sample_entry(1), "user:1", "profile");
-        collector.record(&sample_entry(2), "user:2", "profile");
+        collector.record(sample_entry(1), "user:1", "profile");
+        collector.record(sample_entry(2), "user:2", "profile");
 
         collector.write_footer(&mut cursor).expect("write_footer must succeed");
 
@@ -781,7 +778,7 @@ mod tests {
         let mut collector = SidxEntryCollector::new();
         // Three events in the same entity + scope → string table should have exactly 2 entries.
         for n in 0u8..3 {
-            collector.record(&sample_entry(n), "order:999", "payments");
+            collector.record(sample_entry(n), "order:999", "payments");
         }
         assert_eq!(
             collector.strings().len(),

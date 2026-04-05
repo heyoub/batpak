@@ -40,21 +40,21 @@ where
 
     let watermark = entries.last().map(|e| e.global_sequence).unwrap_or(0);
 
-    // Cache key: entity + \0 + type_hash + \0 + schema_version
-    // TypeId ensures two different EventSourced types on the same entity
-    // never collide, even if both use schema_version = 0 (the default).
+    // Cache key: entity + \0 + type_id_hash(u64 LE) + schema_version(u64 LE)
+    // TypeId ensures different EventSourced types never collide on the same entity.
+    // Vec pre-allocated to exact size: entity.len() + 1 + 8 + 8 = entity.len() + 17.
     let schema_v = T::schema_version();
-    let type_hash = {
+    let type_disc = {
         use std::any::TypeId;
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
         TypeId::of::<T>().hash(&mut h);
         h.finish()
     };
-    let mut cache_key: Vec<u8> = entity.as_bytes().to_vec();
+    let mut cache_key = Vec::with_capacity(entity.len() + 17);
+    cache_key.extend_from_slice(entity.as_bytes());
     cache_key.push(0);
-    cache_key.extend_from_slice(&type_hash.to_le_bytes());
-    cache_key.push(0);
+    cache_key.extend_from_slice(&type_disc.to_le_bytes());
     cache_key.extend_from_slice(&schema_v.to_le_bytes());
 
     let predicted_meta = projection::CacheMeta {

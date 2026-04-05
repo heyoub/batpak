@@ -651,7 +651,7 @@ impl WriterState<'_> {
             correlation_id,
             causation_id: causation_id.unwrap_or(0),
         };
-        self.sidx_collector.record(&sidx_entry, entity.as_ref(), scope.as_ref());
+        self.sidx_collector.record(sidx_entry, entity.as_ref(), scope.as_ref());
 
         debug!(event_id = %event.header.event_id, clock = clock, "append committed");
 
