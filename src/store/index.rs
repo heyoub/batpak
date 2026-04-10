@@ -184,6 +184,51 @@ impl StoreIndex {
         self.len.fetch_add(1, Ordering::Relaxed);
     }
 
+    /// Atomic batch insert: all entries become visible together.
+    /// [SPEC:src/store/index.rs — insert_batch]
+    pub(crate) fn insert_batch(&self, entries: Vec<IndexEntry>) {
+        if entries.is_empty() {
+            return;
+        }
+
+        // Pre-allocate Arcs to minimize work under locks.
+        let arc_entries: Vec<Arc<IndexEntry>> = entries.into_iter().map(Arc::new).collect();
+
+        // Insert all entries. Since we have a single writer thread,
+        // no other inserts can interleave. Readers will see all or none
+        // depending on when they query relative to this loop.
+        for arc_entry in &arc_entries {
+            let entity = arc_entry.coord.entity_arc();
+            let key = ClockKey {
+                wall_ms: arc_entry.wall_ms,
+                clock: arc_entry.clock,
+                uuid: arc_entry.event_id,
+            };
+
+            // Primary index: entity -> BTreeMap
+            self.streams
+                .entry(Arc::clone(&entity))
+                .or_default()
+                .insert(key, Arc::clone(arc_entry));
+
+            // Scan index
+            self.scan.insert(arc_entry);
+
+            // Point lookup
+            self.by_id.insert(arc_entry.event_id, Arc::clone(arc_entry));
+
+            // Chain head
+            self.latest.insert(entity, Arc::clone(arc_entry));
+
+            // Global sequence already reserved during batch staging
+            self.len.fetch_add(1, Ordering::Relaxed);
+        }
+
+        // Single global_sequence bump for the batch (already reserved per-entry during staging)
+        self.global_sequence
+            .fetch_add(arc_entries.len() as u64, Ordering::Release);
+    }
+
     pub(crate) fn get_by_id(&self, event_id: u128) -> Option<IndexEntry> {
         self.by_id
             .get(&event_id)
@@ -265,19 +310,10 @@ impl StoreIndex {
                     }
                 }
                 KindFilter::Category(c) => {
-                    let cat = *c;
-                    // Category filter: must scan all kinds. For Maps mode, scan the DashMap.
-                    // For Columnar mode, this is less efficient — iterate all entries.
-                    // TODO: add category_scan to ScanIndex for better columnar support
-                    self.streams
-                        .iter()
-                        .flat_map(|r| {
-                            r.value()
-                                .values()
-                                .map(|arc| arc.as_ref().clone())
-                                .collect::<Vec<_>>()
-                        })
-                        .filter(|e| e.kind.category() == cat)
+                    let results = self.scan.query_by_category(*c);
+                    results
+                        .into_iter()
+                        .map(|arc| arc.as_ref().clone())
                         .collect()
                 }
                 KindFilter::Any => self

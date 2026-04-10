@@ -52,7 +52,7 @@ fn ops_recv_without_filters() {
         "OPS RECV WITHOUT FILTERS: expected a notification, got None.\n\
          Check: src/store/subscription.rs SubscriptionOps::recv(), writer broadcast."
     );
-    let notif = notif.unwrap();
+    let notif = notif.expect("notification should be Some per preceding assert");
     assert_eq!(
         notif.coord.entity(),
         "entity:1",
@@ -96,7 +96,7 @@ fn ops_filter_passes_matching() {
         "OPS FILTER PASSES MATCHING: filter should pass events with matching kind.\n\
          Check: src/store/subscription.rs SubscriptionOps::filter()."
     );
-    let notif = notif.unwrap();
+    let notif = notif.expect("notification should be Some per preceding assert");
     assert_eq!(
         notif.kind, target_kind,
         "OPS FILTER PASSES MATCHING: received event has wrong kind."
@@ -141,7 +141,7 @@ fn ops_filter_rejects_non_matching() {
         notif.is_some(),
         "OPS FILTER REJECTS: should have received the matching event after the non-matching one."
     );
-    let notif = notif.unwrap();
+    let notif = notif.expect("notification should be Some per preceding assert");
     assert_eq!(
         notif.kind, wanted_kind,
         "OPS FILTER REJECTS: the non-matching event should have been filtered out,\n\
@@ -236,9 +236,9 @@ fn ops_filter_and_take_combined() {
         first.is_some(),
         "OPS COMBINED: first recv should return Some."
     );
+    let first = first.expect("first notification should be Some");
     assert_eq!(
-        first.unwrap().kind,
-        wanted_kind,
+        first.kind, wanted_kind,
         "OPS COMBINED: first event should be wanted_kind."
     );
 
@@ -248,7 +248,7 @@ fn ops_filter_and_take_combined() {
         "OPS COMBINED: second recv should return Some."
     );
     assert_eq!(
-        second.unwrap().kind,
+        second.expect("second notification should be Some").kind,
         wanted_kind,
         "OPS COMBINED: second event should be wanted_kind."
     );
@@ -308,7 +308,9 @@ fn ops_map_transforms_notification() {
         "OPS MAP: should receive a mapped notification."
     );
     assert_eq!(
-        notif.unwrap().kind,
+        notif
+            .expect("notification should be Some per preceding assert")
+            .kind,
         mapped_kind,
         "OPS MAP: map should transform the notification kind.\n\
          Investigate: src/store/subscription.rs SubscriptionOps::map().\n\
@@ -360,7 +362,9 @@ fn ops_map_returning_none_skips_event() {
         "OPS MAP SKIP: should receive the pass_kind event."
     );
     assert_eq!(
-        notif.unwrap().kind,
+        notif
+            .expect("notification should be Some per preceding assert")
+            .kind,
         pass_kind,
         "OPS MAP SKIP: map returning None should skip that event.\n\
          Investigate: src/store/subscription.rs SubscriptionOps::recv() map branch.\n\
@@ -408,7 +412,7 @@ fn ops_multiple_filters_all_must_pass() {
         notif.is_some(),
         "OPS MULTI FILTER: should receive kind_a event."
     );
-    let notif = notif.unwrap();
+    let notif = notif.expect("notification should be Some per preceding assert");
     assert_eq!(
         notif.kind, kind_a,
         "OPS MULTI FILTER: only kind_a/kind_b with sequence>0 should pass both filters.\n\
@@ -429,7 +433,7 @@ fn ops_channel_closed_returns_none() {
     let mut ops = sub.ops();
 
     // Close the store — this shuts down the writer, which closes broadcast channels
-    let store_clone = Arc::into_inner(store).unwrap();
+    let store_clone = Arc::into_inner(store).expect("Arc should have single owner at test end");
     store_clone.close().expect("close");
 
     // After channel closes, recv should return None

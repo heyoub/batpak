@@ -1,5 +1,58 @@
-use crate::event::StoredEvent;
+use crate::coordinate::Coordinate;
+use crate::event::{EventKind, StoredEvent};
 use crate::store::{DiskPos, StoreError};
+use serde::Serialize;
+
+/// Reference to causation for batch items.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CausationRef {
+    /// No causation.
+    #[default]
+    None,
+    /// Absolute event ID.
+    Absolute(u128),
+    /// Reference to previous item in same batch by index.
+    PriorItem(usize),
+}
+
+/// Single item in a batch append operation.
+#[derive(Clone, Debug)]
+pub struct BatchAppendItem {
+    /// Target coordinate (entity/scope) for this event.
+    pub coord: Coordinate,
+    /// Event kind classification.
+    pub kind: EventKind,
+    /// Pre-serialized payload bytes (MessagePack).
+    pub payload_bytes: Vec<u8>,
+    /// Append options (idempotency, correlation, etc.).
+    pub options: AppendOptions,
+    /// Causation reference for intra-batch linking.
+    pub causation: CausationRef,
+}
+
+impl BatchAppendItem {
+    /// Create a new batch item with serialized payload.
+    ///
+    /// # Errors
+    /// Returns `StoreError::Serialization` if payload serialization fails.
+    pub fn new(
+        coord: Coordinate,
+        kind: EventKind,
+        payload: &impl Serialize,
+        options: AppendOptions,
+        causation: CausationRef,
+    ) -> Result<Self, StoreError> {
+        let payload_bytes =
+            rmp_serde::to_vec(payload).map_err(|e| StoreError::Serialization(Box::new(e)))?;
+        Ok(Self {
+            coord,
+            kind,
+            payload_bytes,
+            options,
+            causation,
+        })
+    }
+}
 
 /// AppendReceipt: proof an event was persisted.
 #[derive(Clone, Debug)]

@@ -293,19 +293,23 @@ fn run_chaos_probes() -> (f64, u64, bool, bool, u64, f64, bool) {
     let handles: Vec<_> = (0..n_threads)
         .map(|t| {
             let store = Arc::clone(&store);
-            std::thread::spawn(move || {
-                let coord = Coordinate::new(&format!("probe:t{t}"), "probe:scope").expect("valid");
-                let mut errors = 0u64;
-                for i in 0..writes_per_thread {
-                    if store
-                        .append(&coord, kind, &serde_json::json!({"i": i}))
-                        .is_err()
-                    {
-                        errors += 1;
+            std::thread::Builder::new()
+                .name(format!("fuzz-chaos-probe-write-{t}"))
+                .spawn(move || {
+                    let coord =
+                        Coordinate::new(&format!("probe:t{t}"), "probe:scope").expect("valid");
+                    let mut errors = 0u64;
+                    for i in 0..writes_per_thread {
+                        if store
+                            .append(&coord, kind, &serde_json::json!({"i": i}))
+                            .is_err()
+                        {
+                            errors += 1;
+                        }
                     }
-                }
-                errors
-            })
+                    errors
+                })
+                .expect("spawn probe write thread")
         })
         .collect();
 
@@ -327,15 +331,18 @@ fn run_chaos_probes() -> (f64, u64, bool, bool, u64, f64, bool) {
         .map(|t| {
             let store = Arc::clone(&store);
             let coord = cas_coord.clone();
-            std::thread::spawn(move || {
-                let opts = AppendOptions {
-                    expected_sequence: Some(0), // expect latest clock=0 after seed
-                    ..Default::default()
-                };
-                store
-                    .append_with_options(&coord, kind, &serde_json::json!({"t": t}), opts)
-                    .is_ok()
-            })
+            std::thread::Builder::new()
+                .name(format!("fuzz-chaos-cas-{t}"))
+                .spawn(move || {
+                    let opts = AppendOptions {
+                        expected_sequence: Some(0), // expect latest clock=0 after seed
+                        ..Default::default()
+                    };
+                    store
+                        .append_with_options(&coord, kind, &serde_json::json!({"t": t}), opts)
+                        .is_ok()
+                })
+                .expect("spawn CAS contention thread")
         })
         .collect();
 
@@ -553,19 +560,22 @@ fn run_extended_fuzz_chaos() {
     let handles: Vec<_> = (0..n_threads)
         .map(|t| {
             let store = Arc::clone(&store);
-            std::thread::spawn(move || {
-                let coord = Coordinate::new(&format!("ext:t{t}"), "ext:scope").expect("valid");
-                let mut ok = 0u64;
-                for i in 0..writes_per {
-                    if store
-                        .append(&coord, kind, &serde_json::json!({"i": i}))
-                        .is_ok()
-                    {
-                        ok += 1;
+            std::thread::Builder::new()
+                .name(format!("fuzz-chaos-ext-write-{t}"))
+                .spawn(move || {
+                    let coord = Coordinate::new(&format!("ext:t{t}"), "ext:scope").expect("valid");
+                    let mut ok = 0u64;
+                    for i in 0..writes_per {
+                        if store
+                            .append(&coord, kind, &serde_json::json!({"i": i}))
+                            .is_ok()
+                        {
+                            ok += 1;
+                        }
                     }
-                }
-                ok
-            })
+                    ok
+                })
+                .expect("spawn extended chaos write thread")
         })
         .collect();
 

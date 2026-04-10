@@ -102,3 +102,18 @@
   artifacts:
     - ART-STORE-PROJECTION-FLOW
     - ART-UNIFIED-TESTS
+- id: INV-BATCH-ATOMIC-VISIBILITY
+  statement: Batch append events are invisible to queries, cursors, and subscriptions until the entire batch is committed, fsynced, and atomically published to the in-memory index. No partial batch is ever observable.
+  artifacts:
+    - ART-STORE-MOD
+    - ART-BATCH-TESTS
+- id: INV-BATCH-CRASH-RECOVERY
+  statement: Incomplete batches (BEGIN without matching COMMIT) are discarded during cold-start segment scan. Cross-segment batch state persists across segment boundaries to handle batches spanning rotation points.
+  artifacts:
+    - ART-STORE-READER
+    - ART-BATCH-TESTS
+- id: INV-FAULT-INJECT-GATED
+  statement: Fault injection infrastructure (InjectionPoint, FaultInjector trait, maybe_inject hooks) is compiled only under the test-support feature gate and has zero cost in production builds.
+  artifacts:
+    - ART-STORE-FAULT
+    - ART-STORE-CONFIG

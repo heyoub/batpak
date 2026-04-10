@@ -2,6 +2,9 @@ use crate::store::RestartPolicy;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+#[cfg(feature = "test-support")]
+use crate::store::fault::FaultInjector;
+
 /// Sync strategy for segment fsync.
 #[derive(Clone, Debug, Default)]
 pub enum SyncMode {
@@ -91,6 +94,16 @@ pub struct StoreConfig {
     /// Write an index checkpoint on close (and after compact) for fast cold start.
     /// Default: true. Set to false for ephemeral test stores.
     pub enable_checkpoint: bool,
+    /// Maximum number of items in a single batch append. Default: 256.
+    /// Bounded to prevent unbounded memory use and writer stalls.
+    pub batch_max_size: u32,
+    /// Maximum total payload bytes in a single batch append. Default: 1MB.
+    /// Bounded to prevent pathological batch sizes.
+    pub batch_max_bytes: u32,
+    /// Fault injector for testing failure scenarios.
+    /// Only available with the `test-support` feature.
+    #[cfg(feature = "test-support")]
+    pub fault_injector: Option<Arc<dyn FaultInjector>>,
 }
 
 impl StoreConfig {
@@ -109,12 +122,16 @@ impl StoreConfig {
             restart_policy: RestartPolicy::default(),
             shutdown_drain_limit: 1024,
             writer_stack_size: None,
+            batch_max_size: 256,
+            batch_max_bytes: 1024 * 1024, // 1MB
             clock: None,
             sync_mode: SyncMode::default(),
             group_commit_max_batch: 1,
             index_layout: IndexLayout::default(),
             incremental_projection: false,
             enable_checkpoint: true,
+            #[cfg(feature = "test-support")]
+            fault_injector: None,
         }
     }
 
@@ -142,6 +159,16 @@ impl StoreConfig {
         if self.broadcast_capacity == 0 {
             return Err(crate::store::StoreError::Configuration(
                 "broadcast_capacity must be > 0 (0 creates rendezvous channels that starve subscribers)".into(),
+            ));
+        }
+        if self.batch_max_size == 0 || self.batch_max_size > 4096 {
+            return Err(crate::store::StoreError::Configuration(
+                "batch_max_size must be 1..=4096".into(),
+            ));
+        }
+        if self.batch_max_bytes == 0 || self.batch_max_bytes > 16 * 1024 * 1024 {
+            return Err(crate::store::StoreError::Configuration(
+                "batch_max_bytes must be 1..=16MB".into(),
             ));
         }
         Ok(())
@@ -239,6 +266,18 @@ impl StoreConfig {
         self
     }
 
+    /// Set maximum items per batch append. Default: 256.
+    pub fn with_batch_max_size(mut self, batch_max_size: u32) -> Self {
+        self.batch_max_size = batch_max_size;
+        self
+    }
+
+    /// Set maximum total payload bytes per batch append. Default: 1MB.
+    pub fn with_batch_max_bytes(mut self, batch_max_bytes: u32) -> Self {
+        self.batch_max_bytes = batch_max_bytes;
+        self
+    }
+
     /// Get current timestamp in microseconds, using the injectable clock if set.
     pub(crate) fn now_us(&self) -> i64 {
         match &self.clock {
@@ -267,6 +306,10 @@ impl Clone for StoreConfig {
             index_layout: self.index_layout.clone(),
             incremental_projection: self.incremental_projection,
             enable_checkpoint: self.enable_checkpoint,
+            batch_max_size: self.batch_max_size,
+            batch_max_bytes: self.batch_max_bytes,
+            #[cfg(feature = "test-support")]
+            fault_injector: self.fault_injector.clone(),
         }
     }
 }
@@ -290,6 +333,8 @@ impl std::fmt::Debug for StoreConfig {
             .field("index_layout", &self.index_layout)
             .field("incremental_projection", &self.incremental_projection)
             .field("enable_checkpoint", &self.enable_checkpoint)
+            .field("batch_max_size", &self.batch_max_size)
+            .field("batch_max_bytes", &self.batch_max_bytes)
             .finish()
     }
 }

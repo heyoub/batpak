@@ -106,6 +106,15 @@ Events are stored in **segment files** — append-only files with MessagePack-en
 
 **Group commit**: The writer can batch multiple appends before a single fsync, controlled by `group_commit_max_batch`. When batch > 1, all appends must include idempotency keys for crash safety.
 
+**Batch append**: `Store::append_batch()` provides atomic bulk insertion with a two-phase commit envelope:
+- `SYSTEM_BATCH_BEGIN` marker written before batch items
+- All batch items written sequentially
+- `SYSTEM_BATCH_COMMIT` marker written after all items
+- Single fsync for the entire batch
+- Atomic index publish: all items visible together or not at all
+
+Batch envelope markers are invisible to queries, cursors, and subscriptions. Cold-start recovery requires both BEGIN and COMMIT markers to commit a batch; incomplete batches are discarded. Cross-segment batches are supported via `BatchRecoveryState` carried across segment scans.
+
 ### Public API Witness Index
 
 The advanced store surface intentionally includes `SyncMode`, `AppendReceipt`, `AppendOptions`, `RetentionPredicate`, `CompactionStrategy`, `CompactionConfig`, `StoreStats`, and `StoreDiagnostics`.

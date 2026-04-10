@@ -475,6 +475,186 @@ fn chaos_rapid_segment_rotation() {
 }
 
 // ============================================================
+// CHAOS 5b: Batch atomicity under concurrent stress
+// Multiple threads appending batches, verifying atomicity.
+// ============================================================
+
+#[test]
+fn chaos_batch_atomicity_concurrent() {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    let dir = TempDir::new().expect("temp dir");
+    let config = StoreConfig {
+        data_dir: dir.path().to_path_buf(),
+        segment_max_bytes: 4096,
+        sync_every_n_events: 1,
+        ..StoreConfig::new("")
+    };
+    let store = Arc::new(Store::open(config).expect("open"));
+    let kind = EventKind::custom(0xF, 1);
+    let n_threads = 4;
+    let batches_per_thread = 10;
+    let items_per_batch = 10;
+
+    let total_batches = Arc::new(AtomicU64::new(0));
+
+    let handles: Vec<_> = (0..n_threads)
+        .map(|t| {
+            let store = Arc::clone(&store);
+            let batch_counter = Arc::clone(&total_batches);
+            std::thread::Builder::new()
+                .name(format!("chaos-batch-{t}"))
+                .spawn(move || {
+                    let coord = Coordinate::new(
+                        format!("chaos:batch_thread{t}").as_str(),
+                        "chaos:batch_scope",
+                    )
+                    .expect("valid");
+
+                    for b in 0..batches_per_thread {
+                        let items: Vec<_> = (0..items_per_batch)
+                            .map(|i| {
+                                BatchAppendItem::new(
+                                    coord.clone(),
+                                    kind,
+                                    &serde_json::json!({"batch": b, "item": i, "thread": t}),
+                                    AppendOptions::default(),
+                                    CausationRef::None,
+                                )
+                                .expect("valid item")
+                            })
+                            .collect();
+
+                        match store.append_batch(items) {
+                            Ok(_) => {
+                                batch_counter.fetch_add(1, Ordering::SeqCst);
+                            }
+                            Err(e) => {
+                                eprintln!("Thread {t} batch {b} failed: {e}");
+                            }
+                        }
+                    }
+                })
+                .expect("spawn")
+        })
+        .collect();
+
+    for h in handles {
+        h.join().expect("thread join");
+    }
+
+    // Verify atomicity: each entity should have 0 or N*items_per_batch events
+    // never a partial batch
+    for t in 0..n_threads {
+        let coord = Coordinate::new(
+            format!("chaos:batch_thread{t}").as_str(),
+            "chaos:batch_scope",
+        )
+        .expect("valid");
+        let entries = store.stream(coord.entity());
+
+        let expected_count = batches_per_thread * items_per_batch;
+        assert!(
+            entries.len() == expected_count || entries.is_empty(),
+            "CHAOS PROPERTY: batch atomicity - entity {} must have {} or 0 events, got {}.\n\
+             Partial batches indicate atomicity violation.\n\
+             Investigate: src/store/writer.rs handle_append_batch atomic publish, \
+             src/store/index.rs insert_batch all-or-nothing.",
+            coord.entity(),
+            expected_count,
+            entries.len()
+        );
+
+        // Verify sequence continuity within each entity
+        if !entries.is_empty() {
+            for (i, entry) in entries.iter().enumerate() {
+                assert_eq!(
+                    entry.clock as usize, i,
+                    "CHAOS PROPERTY: entity clocks must be contiguous after concurrent batches.\n\
+                     Entry {} has clock {} (expected {}).",
+                    i, entry.clock, i
+                );
+            }
+        }
+    }
+
+    let total_committed = total_batches.load(Ordering::SeqCst);
+    eprintln!("  CHAOS BATCH: {total_committed} batches committed across {n_threads} threads");
+
+    drop(store);
+}
+
+// ============================================================
+// CHAOS 5c: Batch with rapid segment rotation
+// Large batches that force mid-batch segment rotation.
+// ============================================================
+
+#[test]
+fn chaos_batch_cross_segment_rotation() {
+    let dir = TempDir::new().expect("temp dir");
+    let config = StoreConfig {
+        data_dir: dir.path().to_path_buf(),
+        segment_max_bytes: 512, // Tiny - will force rotation mid-batch
+        sync_every_n_events: 1,
+        ..StoreConfig::new("")
+    };
+    let store = Store::open(config).expect("open");
+    let coord = Coordinate::new("chaos:batch_rot", "chaos:scope").expect("valid");
+    let kind = EventKind::custom(0xF, 1);
+
+    // Create a batch that will span multiple segments
+    let items: Vec<_> = (0..20)
+        .map(|i| {
+            // Large payload to force rotation
+            BatchAppendItem::new(
+                coord.clone(),
+                kind,
+                &serde_json::json!({"i": i, "pad": "x".repeat(100)}),
+                AppendOptions::default(),
+                CausationRef::None,
+            )
+            .expect("valid item")
+        })
+        .collect();
+
+    store.append_batch(items).expect("batch across segments");
+    store.sync().expect("sync");
+
+    // Verify all items committed despite segment rotation
+    let entries = store.stream(coord.entity());
+    assert_eq!(
+        entries.len(),
+        20,
+        "CHAOS PROPERTY: batch spanning segment rotation must commit all items.\n\
+         Expected 20 events, got {}.\n\
+         Investigate: src/store/reader.rs cross-segment batch recovery, \
+         src/store/writer.rs mid-batch rotation handling.",
+        entries.len()
+    );
+
+    // Count segments to verify rotation occurred
+    let segment_count = std::fs::read_dir(dir.path())
+        .expect("read dir")
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            e.path()
+                .extension()
+                .map(|ext| ext == "fbat")
+                .unwrap_or(false)
+        })
+        .count();
+
+    assert!(
+        segment_count >= 2,
+        "CHAOS PROPERTY: with 512-byte segments, 20 large items must span multiple segments (got {}).",
+        segment_count
+    );
+
+    eprintln!("  CHAOS BATCH ROTATION: 20 items across {segment_count} segments");
+    store.close().expect("close");
+}
+
+// ============================================================
 // CHAOS 6: Random msgpack garbage to frame_decode
 // High-volume fuzzing with truly random data.
 // ============================================================
@@ -703,7 +883,10 @@ fn chaos_truncated_segment_recovers() {
 
     // Sort by name so we operate on the last (most recently written) segment
     segments.sort_by_key(|e| e.file_name());
-    let last_seg_path = segments.last().unwrap().path();
+    let last_seg_path = segments
+        .last()
+        .expect("segments should not be empty per preceding assertion")
+        .path();
 
     let original_data = std::fs::read(&last_seg_path).expect("read segment");
     assert!(

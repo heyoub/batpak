@@ -26,3 +26,21 @@
   justification: called by writer on segment rotation; tested through store integration tests that trigger rotation
 - name: IndexLayout
   justification: config enum tested through unified_red.rs layout tests and bench fixtures
+- name: BatchAppendItem
+  justification: public batch API type tested through tests/atomic_batch.rs
+- name: CausationRef
+  justification: batch causation enum tested through tests/atomic_batch.rs intra-batch linking tests
+- name: BatchStage
+  justification: batch error reporting enum tested through tests/atomic_batch.rs validation failure tests
+- name: InjectionPoint
+  justification: fault injection enum tested through tests/atomic_batch.rs chaos injection tests (test-support feature)
+- name: FaultInjector
+  justification: fault injection trait tested through tests/atomic_batch.rs custom injector implementations
+- name: CountdownInjector
+  justification: countdown fault injector tested through tests/atomic_batch.rs crash-at-N scenarios
+- name: CountdownAction
+  justification: fault action enum tested through tests/atomic_batch.rs injector configuration
+- name: ProbabilisticInjector
+  justification: probabilistic fault injector tested through tests/atomic_batch.rs chaos testing
+- name: maybe_inject
+  justification: fault injection helper called by writer internals, tested indirectly through batch fault tests

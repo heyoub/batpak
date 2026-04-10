@@ -382,6 +382,10 @@ fn store_config_all_fields_overridable() {
         index_layout: IndexLayout::default(),     // default
         incremental_projection: false,            // default
         enable_checkpoint: false,                 // disabled for this test
+        batch_max_size: 512,                      // non-default
+        batch_max_bytes: 2 * 1024 * 1024,         // 2MB (non-default)
+        #[cfg(feature = "test-support")]
+        fault_injector: None,
     };
 
     let store = Store::open(config).expect(
@@ -434,6 +438,10 @@ fn store_config_debug_lists_all_integrity_relevant_fields() {
         index_layout: IndexLayout::default(),
         incremental_projection: false,
         enable_checkpoint: true,
+        batch_max_size: 333,
+        batch_max_bytes: 44_444,
+        #[cfg(feature = "test-support")]
+        fault_injector: None,
     };
 
     let debug = format!("{config:?}");
@@ -454,6 +462,8 @@ fn store_config_debug_lists_all_integrity_relevant_fields() {
         "writer_stack_size: Some(31744)",
         "clock: Some(\"<fn>\")",
         "sync_mode: SyncData",
+        "batch_max_size: 333",
+        "batch_max_bytes: 44444",
     ] {
         assert!(
             debug.contains(needle),

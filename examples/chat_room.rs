@@ -39,32 +39,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // -- Spawn a listener thread that collects messages via subscription --
     let store_clone = Arc::clone(&store);
-    let listener = std::thread::spawn(move || {
-        let mut received = vec![];
-        // Use SubscriptionOps for composable filtering: only MSG_SENT, take 3
-        let mut ops = sub.ops().filter(|n| n.kind == MSG_SENT).take(3);
-        while let Some(notif) = ops.recv() {
-            received.push(format!(
-                "{}@{} (kind={})",
-                notif.coord.entity(),
-                notif.coord.scope(),
-                notif.kind
-            ));
-        }
-        // Also demonstrate reading full events from notifications
-        println!(
-            "  Subscriber received {} messages (via push)",
-            received.len()
-        );
-        for r in &received {
-            println!("    {}", r);
-        }
-        // Try to read one of the events
-        if let Some(first_notif_desc) = received.first() {
-            println!("    (first: {})", first_notif_desc);
-        }
-        drop(store_clone);
-    });
+    let listener = std::thread::Builder::new()
+        .name("chat-room-listener".into())
+        .spawn(move || {
+            let mut received = vec![];
+            // Use SubscriptionOps for composable filtering: only MSG_SENT, take 3
+            let mut ops = sub.ops().filter(|n| n.kind == MSG_SENT).take(3);
+            while let Some(notif) = ops.recv() {
+                received.push(format!(
+                    "{}@{} (kind={})",
+                    notif.coord.entity(),
+                    notif.coord.scope(),
+                    notif.kind
+                ));
+            }
+            // Also demonstrate reading full events from notifications
+            println!(
+                "  Subscriber received {} messages (via push)",
+                received.len()
+            );
+            for r in &received {
+                println!("    {}", r);
+            }
+            // Try to read one of the events
+            if let Some(first_notif_desc) = received.first() {
+                println!("    (first: {})", first_notif_desc);
+            }
+            drop(store_clone);
+        })
+        .expect("spawn chat room listener thread");
 
     // -- Send messages from different users --
     let alice = Coordinate::new("user:alice", "chat:general")?;
@@ -155,6 +158,57 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n--- Query: All edits across all users ---");
     let edits = store.by_fact(MSG_EDITED);
     println!("  {} edit event(s) found", edits.len());
+
+    // -- Batch append: efficient bulk messaging --
+    println!("\n--- Batch: Bulk message import ---");
+    use batpak::store::{BatchAppendItem, CausationRef};
+
+    // Simulate importing a batch of historical messages
+    let historical = vec![
+        BatchAppendItem::new(
+            Coordinate::new("user:alice", "chat:general")?,
+            MSG_SENT,
+            &ChatMessage {
+                from: "alice".into(),
+                text: "[Batch] Historical message 1".into(),
+            },
+            AppendOptions::default(),
+            CausationRef::None,
+        )?,
+        BatchAppendItem::new(
+            Coordinate::new("user:bob", "chat:general")?,
+            MSG_SENT,
+            &ChatMessage {
+                from: "bob".into(),
+                text: "[Batch] Historical message 2".into(),
+            },
+            AppendOptions::default(),
+            CausationRef::None,
+        )?,
+        BatchAppendItem::new(
+            Coordinate::new("user:charlie", "chat:general")?,
+            MSG_SENT,
+            &ChatMessage {
+                from: "charlie".into(),
+                text: "[Batch] Historical message 3".into(),
+            },
+            AppendOptions::default(),
+            CausationRef::None,
+        )?,
+    ];
+
+    let batch_receipts = store.append_batch(historical)?;
+    println!("  Imported {} messages atomically", batch_receipts.len());
+    for (i, receipt) in batch_receipts.iter().enumerate() {
+        println!(
+            "    Message {}: seq={}, event_id={}",
+            i, receipt.sequence, receipt.event_id
+        );
+    }
+
+    // Verify all batch messages are visible
+    let all_general = store.cursor(&general_region).poll_batch(100).len();
+    println!("  Total messages in #general: {}", all_general);
 
     drop(store);
     println!("\nSubscriptions are push (lossy, filtered, composable).");

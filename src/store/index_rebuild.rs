@@ -54,6 +54,9 @@ fn replay_tail_segments(
         .collect();
     entries.sort_by_key(|e| e.file_name());
 
+    // Cross-segment batch recovery state persists across segment scans.
+    let mut batch_state = crate::store::reader::BatchRecoveryState::default();
+
     for dir_entry in &entries {
         let seg_id = dir_entry
             .path()
@@ -66,7 +69,7 @@ fn replay_tail_segments(
             continue; // Already in checkpoint
         }
 
-        let scanned = reader.scan_segment_index(&dir_entry.path())?;
+        let scanned = reader.scan_segment_index(&dir_entry.path(), Some(&mut batch_state))?;
         for se in scanned {
             // Skip frames already in the checkpoint
             if seg_id == watermark.watermark_segment_id && se.offset < watermark.watermark_offset {
@@ -102,6 +105,7 @@ fn replay_tail_segments(
 
 /// Scan all segment files in `data_dir`, rebuild the in-memory index from their contents.
 /// Used by both cold-start (`Store::open_with_cache`) and post-compaction index rebuild.
+/// Handles cross-segment batch recovery using BatchRecoveryState.
 pub(crate) fn rebuild_from_segments(
     index: &StoreIndex,
     reader: &Reader,
@@ -118,8 +122,11 @@ pub(crate) fn rebuild_from_segments(
         .collect();
     entries.sort_by_key(|e| e.file_name());
 
+    // Cross-segment batch recovery state persists across segment scans.
+    let mut batch_state = crate::store::reader::BatchRecoveryState::default();
+
     for dir_entry in &entries {
-        let scanned = reader.scan_segment_index(&dir_entry.path())?;
+        let scanned = reader.scan_segment_index(&dir_entry.path(), Some(&mut batch_state))?;
         for se in scanned {
             let coord = Coordinate::new(&se.entity, &se.scope)?;
             let entity_id = index.interner.intern(&se.entity);

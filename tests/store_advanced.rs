@@ -431,13 +431,16 @@ fn subscription_receives_matching_events() {
     // Write from another thread so recv doesn't deadlock
     let store_w = Arc::clone(&store);
     let coord_w = coord.clone();
-    let writer = std::thread::spawn(move || {
-        for i in 0..3 {
-            store_w
-                .append(&coord_w, kind, &serde_json::json!({"i": i}))
-                .expect("append");
-        }
-    });
+    let writer = std::thread::Builder::new()
+        .name("store-advanced-sub-recv-writer".into())
+        .spawn(move || {
+            for i in 0..3 {
+                store_w
+                    .append(&coord_w, kind, &serde_json::json!({"i": i}))
+                    .expect("append");
+            }
+        })
+        .expect("spawn subscription recv writer thread");
     writer.join().expect("writer");
 
     // Should receive 3 matching notifications
@@ -471,19 +474,22 @@ fn subscription_filters_by_region() {
     let sub = store.subscribe(&region);
 
     let store_w = Arc::clone(&store);
-    let writer = std::thread::spawn(move || {
-        let coord_a = Coordinate::new("entity:a", "scope:test").expect("valid coord");
-        let coord_b = Coordinate::new("entity:b", "scope:test").expect("valid coord");
-        store_w
-            .append(&coord_a, kind, &serde_json::json!({"target": "a"}))
-            .expect("append a");
-        store_w
-            .append(&coord_b, kind, &serde_json::json!({"target": "b"}))
-            .expect("append b");
-        store_w
-            .append(&coord_a, kind, &serde_json::json!({"target": "a2"}))
-            .expect("append a2");
-    });
+    let writer = std::thread::Builder::new()
+        .name("store-advanced-sub-filter-writer".into())
+        .spawn(move || {
+            let coord_a = Coordinate::new("entity:a", "scope:test").expect("valid coord");
+            let coord_b = Coordinate::new("entity:b", "scope:test").expect("valid coord");
+            store_w
+                .append(&coord_a, kind, &serde_json::json!({"target": "a"}))
+                .expect("append a");
+            store_w
+                .append(&coord_b, kind, &serde_json::json!({"target": "b"}))
+                .expect("append b");
+            store_w
+                .append(&coord_a, kind, &serde_json::json!({"target": "a2"}))
+                .expect("append a2");
+        })
+        .expect("spawn subscription filter writer thread");
     writer.join().expect("writer");
 
     // Raw receiver gets all events, but region filter should match only entity:a
@@ -1288,7 +1294,8 @@ fn store_error_display_variants() {
 
 #[test]
 fn coordinate_error_display() {
-    let err = Coordinate::new("", "scope").unwrap_err();
+    let err =
+        Coordinate::new("", "scope").expect_err("empty entity should produce CoordinateError");
     let msg = format!("{err}");
     assert!(
         msg.contains("entity"),
@@ -1298,7 +1305,8 @@ fn coordinate_error_display() {
          Run: cargo test --test store_advanced coordinate_error_display"
     );
 
-    let err = Coordinate::new("entity", "").unwrap_err();
+    let err =
+        Coordinate::new("entity", "").expect_err("empty scope should produce CoordinateError");
     let msg = format!("{err}");
     assert!(
         msg.contains("scope"),
@@ -1477,13 +1485,16 @@ fn subscription_ops_map_transforms_notifications() {
 
     let store_w = Arc::clone(&store);
     let coord_w = coord.clone();
-    std::thread::spawn(move || {
-        store_w
-            .append(&coord_w, kind, &serde_json::json!({"v": 1}))
-            .expect("append");
-    })
-    .join()
-    .expect("writer");
+    std::thread::Builder::new()
+        .name("store-advanced-sub-ops-map-writer".into())
+        .spawn(move || {
+            store_w
+                .append(&coord_w, kind, &serde_json::json!({"v": 1}))
+                .expect("append");
+        })
+        .expect("spawn subscription ops map writer thread")
+        .join()
+        .expect("writer");
 
     // Use map to transform: change the kind to a custom marker
     let marker_kind = EventKind::custom(0xA, 0xBB);
@@ -1494,9 +1505,12 @@ fn subscription_ops_map_transforms_notifications() {
     });
 
     // Use try-based approach: events are already sent
-    let rx_result = std::thread::spawn(move || ops.recv())
+    let rx_result = std::thread::Builder::new()
+        .name("store-advanced-sub-ops-map-recv".into())
+        .spawn(move || ops.recv())
+        .expect("spawn subscription ops map recv thread")
         .join()
-        .expect("recv thread");
+        .expect("join subscription ops map recv thread");
 
     assert!(
         rx_result.is_some(),
@@ -1505,7 +1519,7 @@ fn subscription_ops_map_transforms_notifications() {
          Common causes: map_fn not applied in recv loop, map returns None.\n\
          Run: cargo test --test store_advanced subscription_ops_map_transforms_notifications"
     );
-    let notif = rx_result.unwrap();
+    let notif = rx_result.expect("mapped notification should be Some per preceding assert");
     assert_eq!(
         notif.kind, marker_kind,
         "PROPERTY: SubscriptionOps::map must apply the transformation function to notifications.\n\
@@ -1540,27 +1554,33 @@ fn subscription_ops_filter_chains_correctly() {
 
     let store_w = Arc::clone(&store);
     let coord_w = coord.clone();
-    let writer = std::thread::spawn(move || {
-        store_w
-            .append(&coord_w, kind1, &serde_json::json!({"k": 1}))
-            .expect("append");
-        store_w
-            .append(&coord_w, kind2, &serde_json::json!({"k": 2}))
-            .expect("append");
-        store_w
-            .append(&coord_w, kind1, &serde_json::json!({"k": 3}))
-            .expect("append");
-    });
+    let writer = std::thread::Builder::new()
+        .name("store-advanced-sub-ops-filter-writer".into())
+        .spawn(move || {
+            store_w
+                .append(&coord_w, kind1, &serde_json::json!({"k": 1}))
+                .expect("append");
+            store_w
+                .append(&coord_w, kind2, &serde_json::json!({"k": 2}))
+                .expect("append");
+            store_w
+                .append(&coord_w, kind1, &serde_json::json!({"k": 3}))
+                .expect("append");
+        })
+        .expect("spawn subscription ops filter writer thread");
 
-    let result = std::thread::spawn(move || {
-        let mut results = Vec::new();
-        while let Some(n) = ops.recv() {
-            results.push(n);
-        }
-        results
-    })
-    .join()
-    .expect("recv thread");
+    let result = std::thread::Builder::new()
+        .name("store-advanced-sub-ops-filter-recv".into())
+        .spawn(move || {
+            let mut results = Vec::new();
+            while let Some(n) = ops.recv() {
+                results.push(n);
+            }
+            results
+        })
+        .expect("spawn subscription ops filter recv thread")
+        .join()
+        .expect("join subscription ops filter recv thread");
 
     writer.join().expect("writer");
 
@@ -1590,27 +1610,33 @@ fn subscription_ops_take_limits_count() {
 
     let store_w = Arc::clone(&store);
     let coord_w = coord.clone();
-    std::thread::spawn(move || {
-        for i in 0..5 {
-            store_w
-                .append(&coord_w, kind, &serde_json::json!({"i": i}))
-                .expect("append");
-        }
-        drop(store_w);
-    })
-    .join()
-    .expect("writer");
+    std::thread::Builder::new()
+        .name("store-advanced-sub-ops-take-writer".into())
+        .spawn(move || {
+            for i in 0..5 {
+                store_w
+                    .append(&coord_w, kind, &serde_json::json!({"i": i}))
+                    .expect("append");
+            }
+            drop(store_w);
+        })
+        .expect("spawn subscription ops take writer thread")
+        .join()
+        .expect("writer");
 
     let mut ops = sub.ops().take(3);
-    let result = std::thread::spawn(move || {
-        let mut results = Vec::new();
-        while let Some(n) = ops.recv() {
-            results.push(n);
-        }
-        results
-    })
-    .join()
-    .expect("recv thread");
+    let result = std::thread::Builder::new()
+        .name("store-advanced-sub-ops-take-recv".into())
+        .spawn(move || {
+            let mut results = Vec::new();
+            while let Some(n) = ops.recv() {
+                results.push(n);
+            }
+            results
+        })
+        .expect("spawn subscription ops take recv thread")
+        .join()
+        .expect("join subscription ops take recv thread");
 
     assert_eq!(
         result.len(),
@@ -1698,12 +1724,17 @@ fn cursor_guaranteed_delivery_under_load() {
     for t in 0..4 {
         let s = Arc::clone(&store);
         let c = coord.clone();
-        handles.push(std::thread::spawn(move || {
-            for i in 0..25 {
-                s.append(&c, kind, &serde_json::json!({"t": t, "i": i}))
-                    .expect("append");
-            }
-        }));
+        handles.push(
+            std::thread::Builder::new()
+                .name(format!("store-advanced-cursor-load-{t}"))
+                .spawn(move || {
+                    for i in 0..25 {
+                        s.append(&c, kind, &serde_json::json!({"t": t, "i": i}))
+                            .expect("append");
+                    }
+                })
+                .expect("spawn cursor load thread"),
+        );
     }
     for h in handles {
         h.join().expect("writer");
@@ -2211,11 +2242,14 @@ fn reactive_subscribe_react_append_pattern() {
     // Write the root event from another thread
     let store_w = Arc::clone(&store);
     let coord_w = coord.clone();
-    let writer = std::thread::spawn(move || {
-        store_w
-            .append(&coord_w, kind, &serde_json::json!({"item": "widget"}))
-            .expect("append root")
-    });
+    let writer = std::thread::Builder::new()
+        .name("store-advanced-reactive-writer".into())
+        .spawn(move || {
+            store_w
+                .append(&coord_w, kind, &serde_json::json!({"item": "widget"}))
+                .expect("append root")
+        })
+        .expect("spawn reactive writer thread");
     let root_receipt = writer.join().expect("writer thread");
 
     // Receive the notification

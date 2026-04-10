@@ -8,6 +8,9 @@ mod contracts;
 /// Pull-based cursor for guaranteed, ordered event delivery.
 pub mod cursor;
 mod error;
+/// Fault injection framework for testing failure scenarios.
+#[cfg(feature = "test-support")]
+pub mod fault;
 /// In-memory 2D event index, rebuilt from segments on startup.
 pub mod index;
 mod index_rebuild;
@@ -36,10 +39,16 @@ pub mod writer;
 
 pub use config::{IndexLayout, StoreConfig, SyncMode};
 pub use contracts::{
-    AppendOptions, AppendReceipt, CompactionConfig, CompactionStrategy, RetentionPredicate,
+    AppendOptions, AppendReceipt, BatchAppendItem, CausationRef, CompactionConfig,
+    CompactionStrategy, RetentionPredicate,
 };
 pub use cursor::Cursor;
+pub use error::BatchStage;
 pub use error::StoreError;
+#[cfg(feature = "test-support")]
+pub use fault::{
+    CountdownAction, CountdownInjector, FaultInjector, InjectionPoint, ProbabilisticInjector,
+};
 pub use index::{ClockKey, DiskPos, IndexEntry};
 #[cfg(feature = "lmdb")]
 pub use projection::LmdbCache;
@@ -211,6 +220,52 @@ impl Store {
             None,
             0,
         )
+    }
+
+    /// WRITE: atomic batch append of multiple events.
+    /// All events are committed together or none are visible.
+    /// [SPEC:src/store/mod.rs — append_batch]
+    ///
+    /// # Errors
+    /// Returns `StoreError::BatchFailed` if any item fails validation, encoding, or write.
+    /// The `item_index` field indicates which item failed.
+    pub fn append_batch(
+        &self,
+        items: Vec<crate::store::contracts::BatchAppendItem>,
+    ) -> Result<Vec<AppendReceipt>, StoreError> {
+        let (tx, rx) = flume::bounded(1);
+        self.writer
+            .tx
+            .send(WriterCommand::AppendBatch { items, respond: tx })
+            .map_err(|_| StoreError::WriterCrashed)?;
+        rx.recv().map_err(|_| StoreError::WriterCrashed)?
+    }
+
+    /// WRITE: atomic batch append of reaction events.
+    /// All events share the same correlation_id from the triggering event.
+    /// [SPEC:src/store/mod.rs — append_reaction_batch]
+    ///
+    /// # Errors
+    /// Returns `StoreError::BatchFailed` if any item fails validation, encoding, or write.
+    pub fn append_reaction_batch(
+        &self,
+        correlation_id: u128,
+        causation_id: u128,
+        items: Vec<crate::store::contracts::BatchAppendItem>,
+    ) -> Result<Vec<AppendReceipt>, StoreError> {
+        // Set correlation_id and causation_id on all items.
+        let items: Vec<_> = items
+            .into_iter()
+            .map(|mut item| {
+                item.options.correlation_id = Some(correlation_id);
+                // Only set causation_id if not already explicitly set.
+                if matches!(item.causation, crate::store::contracts::CausationRef::None) {
+                    item.options.causation_id = Some(causation_id);
+                }
+                item
+            })
+            .collect();
+        self.append_batch(items)
     }
 
     /// READ: get a single event by ID.

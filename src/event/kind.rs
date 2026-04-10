@@ -68,6 +68,11 @@ impl EventKind {
     pub const SYSTEM_CONFIG_CHANGE: Self = Self(0x0004);
     /// System checkpoint event.
     pub const SYSTEM_CHECKPOINT: Self = Self(0x0005);
+    /// Batch envelope marker. Internal only—never visible to queries.
+    pub const SYSTEM_BATCH_BEGIN: Self = Self(0x0006);
+    /// Batch commit marker. Internal only—never visible to queries.
+    /// Paired with SYSTEM_BATCH_BEGIN for two-phase commit semantics.
+    pub const SYSTEM_BATCH_COMMIT: Self = Self(0x0007);
     /// Effect: an error was observed during processing.
     pub const EFFECT_ERROR: Self = Self(0xD001);
     /// Effect: a retry is being attempted.

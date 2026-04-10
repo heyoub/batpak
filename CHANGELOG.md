@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.0] - 2026-04-09
+
+### Added
+- Atomic batch append: `Store::append_batch()` and `append_reaction_batch()` APIs
+- `SYSTEM_BATCH_BEGIN` envelope marker for durable batch commit semantics
+- `BatchAppendItem` with explicit `CausationRef` for intra-batch causation linking
+- `BatchStage` and `StoreError::BatchFailed` for detailed batch failure reporting
+- Cold-start batch recovery: global streaming scan with committedness enforcement
+- Batch size limits (`batch_max_size`) and byte limits (`batch_max_bytes`) in config
+- Marker invisibility: batch envelope frames never appear in queries/cursors/subscriptions
+- Fault injection framework (`test-support` feature): `InjectionPoint`, `FaultInjector` trait, `CountdownInjector`, `ProbabilisticInjector` for chaos testing write paths
+- `batch_append.rs` example demonstrating atomic multi-event commit with intra-batch causation
+
+### Changed
+- Segment scan logic now stages batch frames until commit marker confirmed
+- SIDX remains advisory; frame stream is source of truth for committedness
+
 ## [0.1.0] - 2026-04-04
 
 ### Added
@@ -29,5 +46,5 @@ All notable changes to this project will be documented in this file.
 - Arc<IndexEntry> shared across all index maps (single allocation per event)
 - Release/Acquire ordering on global_sequence (was SeqCst)
 - StoreDiagnostics with index_layout and tile_count fields
-- 7 traceability artifacts + 5 new invariants
-- 473 tests, 0 clippy errors, full integrity checks
+- 7 traceability artifacts + 5 new invariants (at time of release)
+- 473 tests, 0 clippy errors, full integrity checks (at time of release)

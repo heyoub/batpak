@@ -179,6 +179,14 @@
   kind: tests
   paths:
     - tests/group_commit_crash.rs
+- id: ART-STORE-FAULT
+  kind: source
+  paths:
+    - src/store/fault.rs
+- id: ART-BATCH-TESTS
+  kind: tests
+  paths:
+    - tests/atomic_batch.rs
 - id: ART-DX-DOCS
   kind: docs
   paths:

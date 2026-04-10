@@ -41,6 +41,8 @@ println!("stored {} at {}", receipt.event_id, receipt.sequence);
 - Append-only segment store with CRC32 integrity
 - Optional Blake3 hash chains
 - Causal metadata and region queries
+- **Atomic batch append**: multi-event commit with two-phase markers, crash recovery, and intra-batch causation
+- Fault injection framework (`test-support` feature) for chaos testing batch and write paths
 - Gate / receipt workflow for policy enforcement
 - Event-sourced projections with optional `redb` or `lmdb` caches
 - Push subscriptions, pull cursors, typestate helpers

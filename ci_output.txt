@@ -1,0 +1,30 @@
+   Compiling unicode-ident v1.0.24
+   Compiling serde_core v1.0.228
+   Compiling serde v1.0.228
+   Compiling aho-corasick v1.1.4
+   Compiling equivalent v1.0.2
+   Compiling hashbrown v0.16.1
+   Compiling unsafe-libyaml v0.2.11
+   Compiling ryu v1.0.23
+   Compiling proc-macro2 v1.0.106
+   Compiling quote v1.0.45
+   Compiling syn v2.0.117
+   Compiling indexmap v2.13.1
+   Compiling regex-automata v0.4.14
+   Compiling semver v1.0.27
+   Compiling serde_json v1.0.149
+   Compiling camino v1.2.2
+   Compiling regex v1.12.3
+   Compiling serde_derive v1.0.228
+   Compiling thiserror-impl v1.0.69
+   Compiling clap_derive v4.6.0
+   Compiling thiserror v1.0.69
+   Compiling cargo-platform v0.1.9
+   Compiling serde_yaml v0.9.34+deprecated
+   Compiling cargo_metadata v0.18.1
+   Compiling clap v4.6.0
+   Compiling batpak-integrity v0.1.0 (/home/heyoub/Documents/code/new_ver_sot/batpak/batpak/tools/integrity)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1m 12s
+     Running `target/debug/batpak-integrity doctor --strict`
+Error: required command missing or failing: cargo deny --version
+Error: command failed with status exit status: 1

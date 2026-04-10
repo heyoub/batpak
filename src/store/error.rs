@@ -1,5 +1,20 @@
 use crate::coordinate::CoordinateError;
 
+/// Stage of batch processing when failure occurred.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BatchStage {
+    /// Pre-write checks (CAS, idempotency, entity locks).
+    Validation,
+    /// Payload serialization.
+    Encoding,
+    /// Segment file write.
+    Writing,
+    /// fsync to disk.
+    Syncing,
+    /// In-memory index update.
+    Indexing,
+}
+
 /// StoreError: every error the store can produce.
 /// [SPEC:src/store/error.rs — StoreError variants]
 #[derive(Debug)]
@@ -44,6 +59,18 @@ pub enum StoreError {
     Configuration(String),
     /// Group commit (batch > 1) requires an idempotency key on every append.
     IdempotencyRequired,
+    /// Batch append failed at a specific item.
+    BatchFailed {
+        /// Index of the item that failed (0-based).
+        item_index: usize,
+        /// Stage of processing when the failure occurred.
+        stage: BatchStage,
+        /// The underlying error.
+        source: Box<StoreError>,
+    },
+    /// A fault was injected by the test-support fault injection framework.
+    #[cfg(feature = "test-support")]
+    FaultInjected(String),
 }
 
 impl std::fmt::Display for StoreError {
@@ -74,6 +101,17 @@ impl std::fmt::Display for StoreError {
                 f,
                 "group commit (batch > 1) requires an idempotency key on every append"
             ),
+            Self::BatchFailed {
+                item_index,
+                stage,
+                source,
+            } => write!(
+                f,
+                "batch failed at item {} during {:?}: {}",
+                item_index, stage, source
+            ),
+            #[cfg(feature = "test-support")]
+            Self::FaultInjected(msg) => write!(f, "fault injected: {msg}"),
         }
     }
 }
@@ -91,7 +129,10 @@ impl std::error::Error for StoreError {
             | Self::SequenceMismatch { .. }
             | Self::WriterCrashed
             | Self::Configuration(_)
-            | Self::IdempotencyRequired => None,
+            | Self::IdempotencyRequired
+            | Self::BatchFailed { .. } => None,
+            #[cfg(feature = "test-support")]
+            Self::FaultInjected(_) => None,
         }
     }
 }

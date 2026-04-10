@@ -402,7 +402,7 @@ fn into_result_err() {
 #[test]
 fn into_result_cancelled() {
     let r: Result<i32, OutcomeError> = Outcome::cancelled("nope").into_result();
-    let err = r.unwrap_err();
+    let err = r.expect_err("cancelled outcome should convert to error");
     assert!(err.message.contains("cancelled"),
         "INTO_RESULT CANCELLED MESSAGE WRONG: error message should contain \"cancelled\", got {:?}.\n\
          Investigate: src/outcome/mod.rs into_result Cancelled arm.\n\
@@ -414,7 +414,7 @@ fn into_result_cancelled() {
 #[test]
 fn into_result_non_terminal() {
     let r: Result<i32, OutcomeError> = Outcome::retry(100, 1, 3, "wait").into_result();
-    let err = r.unwrap_err();
+    let err = r.expect_err("non-terminal outcome should convert to error");
     assert!(err.message.contains("not terminal"),
         "INTO_RESULT NON_TERMINAL MESSAGE WRONG: error message should contain \"not terminal\", got {:?}.\n\
          Investigate: src/outcome/mod.rs into_result Retry/Pending arm.\n\

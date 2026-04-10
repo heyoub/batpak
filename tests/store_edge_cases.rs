@@ -144,7 +144,10 @@ fn subscription_recv_returns_none_on_store_drop() {
     let sub = store.subscribe(&region);
 
     // Spawn a thread that will block on recv
-    let handle = std::thread::spawn(move || sub.recv());
+    let handle = std::thread::Builder::new()
+        .name("store-edge-sub-recv-block".into())
+        .spawn(move || sub.recv())
+        .expect("spawn subscription recv thread");
 
     // Small delay then drop the store to close channels
     std::thread::sleep(std::time::Duration::from_millis(50));
@@ -241,13 +244,16 @@ fn concurrent_appends_same_entity_all_persisted() {
 
     let handles: Vec<_> = (0..n_threads)
         .map(|t| {
-            let s = store.clone();
+            let s = std::sync::Arc::<Store>::clone(&store);
             let c = coord.clone();
-            std::thread::spawn(move || {
-                for i in 0..n_per_thread {
-                    s.append(&c, kind, &format!("t{t}_e{i}")).expect("append");
-                }
-            })
+            std::thread::Builder::new()
+                .name(format!("store-edge-concurrent-append-{t}"))
+                .spawn(move || {
+                    for i in 0..n_per_thread {
+                        s.append(&c, kind, &format!("t{t}_e{i}")).expect("append");
+                    }
+                })
+                .expect("spawn concurrent append thread")
         })
         .collect();
 

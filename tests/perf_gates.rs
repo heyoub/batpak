@@ -367,6 +367,127 @@ fn multi_gate_performance_feedback() {
     store.close().expect("close");
 }
 
+/// Batch throughput gate: batch events/sec must meet minimum.
+struct BatchThroughputGate {
+    min_events_per_sec: f64,
+}
+
+impl Gate<BatchPerfContext> for BatchThroughputGate {
+    fn name(&self) -> &'static str {
+        "batch_throughput"
+    }
+
+    fn evaluate(&self, ctx: &BatchPerfContext) -> Result<(), Denial> {
+        if ctx.batch_events_per_sec >= self.min_events_per_sec {
+            Ok(())
+        } else {
+            Err(Denial::new(
+                "batch_throughput",
+                format!(
+                    "Batch throughput {:.0} events/sec < minimum {:.0}. \
+                     Batch size: {}, batches: {}. \
+                     Investigate: src/store/writer.rs handle_append_batch, \
+                     two-phase commit overhead.",
+                    ctx.batch_events_per_sec,
+                    self.min_events_per_sec,
+                    ctx.batch_size,
+                    ctx.batch_count
+                ),
+            )
+            .with_context("events_per_sec", format!("{:.0}", ctx.batch_events_per_sec))
+            .with_context("min_required", format!("{:.0}", self.min_events_per_sec))
+            .with_context("batch_size", ctx.batch_size.to_string())
+            .with_context("batch_count", ctx.batch_count.to_string()))
+        }
+    }
+}
+
+struct BatchPerfContext {
+    batch_size: usize,
+    batch_count: usize,
+    batch_events_per_sec: f64,
+}
+
+/// Self-benchmark for batch append throughput.
+#[test]
+fn batch_throughput_performance_gate() {
+    let dir = TempDir::new().expect("temp dir");
+    let config = StoreConfig {
+        data_dir: dir.path().to_path_buf(),
+        sync_every_n_events: 1, // Each batch is a sync
+        ..StoreConfig::new("")
+    };
+    let store = Store::open(config).expect("open");
+    let coord = Coordinate::new("perf:batch", "batch_scope").expect("valid");
+    let kind = EventKind::custom(0xF, 1);
+
+    let batch_size = 100usize;
+    let batch_count = 100usize;
+    let total_events = (batch_size * batch_count) as u64;
+
+    // Build batch items once
+    let batch_template: Vec<_> = (0..batch_size)
+        .map(|i| {
+            BatchAppendItem::new(
+                coord.clone(),
+                kind,
+                &serde_json::json!({"i": i, "payload": "x".repeat(50)}),
+                AppendOptions::default(),
+                CausationRef::None,
+            )
+            .expect("valid item")
+        })
+        .collect();
+
+    // Measure batch append throughput
+    let write_start = Instant::now();
+    for _ in 0..batch_count {
+        store
+            .append_batch(batch_template.clone())
+            .expect("batch append");
+    }
+    let write_elapsed = write_start.elapsed();
+    let batch_events_per_sec = total_events as f64 / write_elapsed.as_secs_f64();
+
+    let ctx = BatchPerfContext {
+        batch_size,
+        batch_count,
+        batch_events_per_sec,
+    };
+
+    // Batch should be significantly faster than single append
+    // Threshold: 5K events/sec (generous for CI)
+    let mut gates = GateSet::new();
+    gates.push(BatchThroughputGate {
+        min_events_per_sec: 5_000.0,
+    });
+
+    let proposal = Proposal::new(batch_events_per_sec);
+    match gates.evaluate(&ctx, proposal) {
+        Ok(receipt) => {
+            eprintln!(
+                "  BATCH SELF-BENCHMARK: {} batches of {} = {} events in {:?} ({:.0} events/sec) - passed {}",
+                batch_count,
+                batch_size,
+                total_events,
+                write_elapsed,
+                batch_events_per_sec,
+                receipt.gates_passed().join(", ")
+            );
+        }
+        Err(denial) => {
+            panic!(
+                "BATCH SELF-BENCHMARK FAILED: {}\n\
+                 Batch append throughput regression detected.\n\
+                 Context: {:?}",
+                denial, denial.context
+            );
+        }
+    }
+
+    store.close().expect("close");
+}
+
 /// Verify multi-gate reports ALL failures, not just the first.
 #[test]
 fn multi_gate_collects_all_denials() {

@@ -1,5 +1,5 @@
 use crate::coordinate::Coordinate;
-use crate::event::{Event, EventHeader, HashChain, StoredEvent};
+use crate::event::{Event, EventHeader, EventKind, HashChain, StoredEvent};
 use crate::store::segment::{self, FramePayload, SEGMENT_MAGIC};
 use crate::store::{DiskPos, StoreError};
 use dashmap::DashMap;
@@ -51,6 +51,17 @@ pub(crate) struct ScannedIndexEntry {
     pub segment_id: u64,
     pub offset: u64,
     pub length: u32,
+}
+
+/// Cross-segment batch recovery state.
+/// Passed between segment scans to handle batches spanning segment boundaries.
+/// [SPEC:src/store/reader.rs — cross-segment batch recovery]
+#[derive(Default)]
+pub(crate) struct BatchRecoveryState {
+    pub staged: Vec<ScannedIndexEntry>,
+    pub remaining: u32,
+    pub started_count: u32,
+    pub in_batch: bool,
 }
 
 #[derive(Deserialize)]
@@ -315,52 +326,66 @@ impl Reader {
     /// Scan only the metadata required to rebuild the in-memory index.
     /// Tries the SIDX footer first (O(1) seek + bulk read); falls back to
     /// frame-by-frame msgpack deserialization if no SIDX footer is present.
+    /// Accepts optional `batch_state` for cross-segment batch recovery.
     pub(crate) fn scan_segment_index(
         &self,
         path: &Path,
+        mut batch_state: Option<&mut BatchRecoveryState>,
     ) -> Result<Vec<ScannedIndexEntry>, StoreError> {
         // Fast path: try SIDX footer.
-        if let Ok(Some((sidx_entries, strings))) = crate::store::sidx::read_footer(path) {
-            let segment_id = path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .and_then(|s| s.parse::<u64>().ok())
-                .unwrap_or(0);
-            let mut result = Vec::with_capacity(sidx_entries.len());
-            for se in sidx_entries {
-                let entity = strings
-                    .get(se.entity_idx as usize)
-                    .cloned()
-                    .unwrap_or_default();
-                let scope = strings
-                    .get(se.scope_idx as usize)
-                    .cloned()
-                    .unwrap_or_default();
-                result.push(ScannedIndexEntry {
-                    header: crate::event::EventHeader::from_sidx(
-                        se.event_id,
-                        se.correlation_id,
-                        if se.causation_id == 0 {
-                            None
-                        } else {
-                            Some(se.causation_id)
+        // Note: SIDX fast path cannot handle cross-segment batches correctly
+        // because it doesn't have BEGIN/COMMIT markers to guide staging.
+        // Fall back to slow path if we have pending batch state.
+        if batch_state.as_ref().is_none_or(|s| !s.in_batch) {
+            if let Ok(Some((sidx_entries, strings))) = crate::store::sidx::read_footer(path) {
+                let segment_id = path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .unwrap_or(0);
+                let mut result = Vec::with_capacity(sidx_entries.len());
+                for se in sidx_entries {
+                    let kind = crate::store::sidx::raw_to_kind(se.kind);
+                    // Skip batch markers in SIDX fast path.
+                    if kind == EventKind::SYSTEM_BATCH_BEGIN
+                        || kind == EventKind::SYSTEM_BATCH_COMMIT
+                    {
+                        continue;
+                    }
+                    let entity = strings
+                        .get(se.entity_idx as usize)
+                        .cloned()
+                        .unwrap_or_default();
+                    let scope = strings
+                        .get(se.scope_idx as usize)
+                        .cloned()
+                        .unwrap_or_default();
+                    result.push(ScannedIndexEntry {
+                        header: crate::event::EventHeader::from_sidx(
+                            se.event_id,
+                            se.correlation_id,
+                            if se.causation_id == 0 {
+                                None
+                            } else {
+                                Some(se.causation_id)
+                            },
+                            se.wall_ms,
+                            se.clock,
+                            kind,
+                        ),
+                        entity,
+                        scope,
+                        hash_chain: crate::event::HashChain {
+                            prev_hash: se.prev_hash,
+                            event_hash: se.event_hash,
                         },
-                        se.wall_ms,
-                        se.clock,
-                        crate::store::sidx::raw_to_kind(se.kind),
-                    ),
-                    entity,
-                    scope,
-                    hash_chain: crate::event::HashChain {
-                        prev_hash: se.prev_hash,
-                        event_hash: se.event_hash,
-                    },
-                    segment_id,
-                    offset: se.frame_offset,
-                    length: se.frame_length,
-                });
+                        segment_id,
+                        offset: se.frame_offset,
+                        length: se.frame_length,
+                    });
+                }
+                return Ok(result);
             }
-            return Ok(result);
         }
 
         // Slow path: frame-by-frame scan.
@@ -397,12 +422,31 @@ impl Reader {
 
         let mut cursor = (8 + header_len) as u64;
         let mut entries = Vec::new();
+
+        // Use cross-segment batch state if provided, otherwise create local state.
+        // This enables batches that span segment boundaries to be recovered correctly.
+        let mut local_state = BatchRecoveryState::default();
+        let state_ref: &mut BatchRecoveryState = match batch_state {
+            Some(ref mut s) => s,
+            None => &mut local_state,
+        };
+
         loop {
             let frame_offset = cursor;
             let mut frame_header = [0u8; 8];
             match file.read_exact(&mut frame_header) {
                 Ok(()) => {}
-                Err(error) if error.kind() == ErrorKind::UnexpectedEof => break,
+                Err(error) if error.kind() == ErrorKind::UnexpectedEof => {
+                    // EOF: discard any incomplete batch (persists in state_ref for cross-segment handling).
+                    if state_ref.in_batch {
+                        tracing::warn!(
+                            segment_id,
+                            staged_count = state_ref.staged.len(),
+                            "incomplete batch at EOF, will discard or continue in next segment"
+                        );
+                    }
+                    break;
+                }
                 Err(error) => return Err(StoreError::Io(error)),
             }
 
@@ -417,6 +461,7 @@ impl Reader {
             if let Err(error) = file.read_exact(&mut frame_buf[8..]) {
                 self.release_buffer(frame_buf);
                 if error.kind() == ErrorKind::UnexpectedEof {
+                    // EOF: incomplete batch persists in state_ref for cross-segment handling.
                     break;
                 }
                 return Err(StoreError::Io(error));
@@ -427,16 +472,95 @@ impl Reader {
                 Ok((msgpack, frame_size)) => {
                     match rmp_serde::from_slice::<IndexScanFramePayload>(msgpack) {
                         Ok(payload) => {
-                            entries.push(ScannedIndexEntry {
-                                header: payload.event.header,
-                                entity: payload.entity,
-                                scope: payload.scope,
-                                hash_chain: payload.event.hash_chain.unwrap_or_default(),
-                                segment_id,
-                                offset: frame_offset,
-                                #[allow(clippy::cast_possible_truncation)] // frame_size < segment_max_bytes < u32::MAX
-                                length: frame_size as u32,
-                            });
+                            let kind = payload.event.header.event_kind;
+
+                            if !state_ref.in_batch {
+                                if kind == EventKind::SYSTEM_BATCH_BEGIN {
+                                    // Start staging batch. The marker itself is not indexed.
+                                    // Extract batch count from payload_size field.
+                                    let batch_count = payload.event.header.payload_size;
+                                    state_ref.in_batch = true;
+                                    state_ref.remaining = batch_count;
+                                    state_ref.started_count = batch_count;
+                                    state_ref.staged.reserve(batch_count as usize);
+                                } else if kind == EventKind::SYSTEM_BATCH_COMMIT {
+                                    // COMMIT without BEGIN: orphaned commit, skip.
+                                    tracing::warn!(
+                                        segment_id,
+                                        offset = frame_offset,
+                                        "orphaned COMMIT marker, skipping"
+                                    );
+                                } else {
+                                    // Normal event: commit immediately.
+                                    entries.push(ScannedIndexEntry {
+                                        header: payload.event.header,
+                                        entity: payload.entity,
+                                        scope: payload.scope,
+                                        hash_chain: payload.event.hash_chain.unwrap_or_default(),
+                                        segment_id,
+                                        offset: frame_offset,
+                                        // Frame sizes are bounded by segment_max_bytes (default 64MB), well within u32 range
+                                        #[allow(clippy::cast_possible_truncation)]
+                                        length: frame_size as u32,
+                                    });
+                                }
+                            } else if kind == EventKind::SYSTEM_BATCH_COMMIT {
+                                // COMMIT marker: verify count matches and commit.
+                                if state_ref.remaining == 0 {
+                                    // Complete batch: commit all staged.
+                                    let completed_batch = std::mem::take(&mut state_ref.staged);
+                                    entries.extend(completed_batch);
+                                    state_ref.in_batch = false;
+                                    tracing::debug!(
+                                        segment_id,
+                                        batch_count = state_ref.started_count,
+                                        "batch committed via COMMIT marker"
+                                    );
+                                } else {
+                                    // Mismatch: expected more or fewer items.
+                                    tracing::warn!(
+                                        segment_id,
+                                        expected = state_ref.started_count,
+                                        remaining = state_ref.remaining,
+                                        staged_count = state_ref.staged.len(),
+                                        "batch COMMIT mismatch, discarding"
+                                    );
+                                }
+                                // Reset batch state (committed or mismatched, we're done).
+                                state_ref.in_batch = false;
+                                state_ref.staged.clear();
+                            } else if kind == EventKind::SYSTEM_BATCH_BEGIN {
+                                // Nested BEGIN without COMMIT: discard previous batch.
+                                tracing::warn!(
+                                    segment_id,
+                                    staged_count = state_ref.staged.len(),
+                                    "nested BEGIN without COMMIT, discarding incomplete batch"
+                                );
+                                // Start new batch.
+                                let batch_count = payload.event.header.payload_size;
+                                state_ref.remaining = batch_count;
+                                state_ref.started_count = batch_count;
+                                state_ref.staged.clear();
+                                state_ref.staged.reserve(batch_count as usize);
+                            } else {
+                                // Stage this event (not a marker).
+                                state_ref.staged.push(ScannedIndexEntry {
+                                    header: payload.event.header,
+                                    entity: payload.entity,
+                                    scope: payload.scope,
+                                    hash_chain: payload.event.hash_chain.unwrap_or_default(),
+                                    segment_id,
+                                    offset: frame_offset,
+                                    // Frame sizes are bounded by segment_max_bytes (default 64MB), well within u32 range
+                                    #[allow(clippy::cast_possible_truncation)]
+                                    length: frame_size as u32,
+                                });
+                                if state_ref.remaining > 0 {
+                                    state_ref.remaining -= 1;
+                                }
+                                // Note: We don't auto-commit on remaining==0.
+                                // We wait for the COMMIT marker to confirm.
+                            }
                         }
                         Err(error) => {
                             tracing::warn!(
@@ -444,6 +568,16 @@ impl Reader {
                                 offset = frame_offset,
                                 "skipping unreadable frame metadata: {error}"
                             );
+                            // Corruption during batch: discard staged entries.
+                            if state_ref.in_batch {
+                                tracing::warn!(
+                                    segment_id,
+                                    staged_count = state_ref.staged.len(),
+                                    "discarding incomplete batch due to corruption"
+                                );
+                                state_ref.staged.clear();
+                                state_ref.in_batch = false;
+                            }
                         }
                     }
                     cursor += frame_size as u64;
@@ -454,9 +588,31 @@ impl Reader {
                         offset = frame_offset,
                         "CRC mismatch, skipping frame"
                     );
+                    // CRC failure during batch: discard staged entries.
+                    if state_ref.in_batch {
+                        tracing::warn!(
+                            segment_id,
+                            staged_count = state_ref.staged.len(),
+                            "discarding incomplete batch due to CRC mismatch"
+                        );
+                        state_ref.staged.clear();
+                        state_ref.in_batch = false;
+                    }
                     stop_scan = true;
                 }
-                Err(_) => stop_scan = true,
+                Err(_) => {
+                    // Other decode errors: discard staged entries.
+                    if state_ref.in_batch {
+                        tracing::warn!(
+                            segment_id,
+                            staged_count = state_ref.staged.len(),
+                            "discarding incomplete batch due to decode error"
+                        );
+                        state_ref.staged.clear();
+                        state_ref.in_batch = false;
+                    }
+                    stop_scan = true;
+                }
             }
             self.release_buffer(frame_buf);
             if stop_scan {

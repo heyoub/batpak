@@ -149,6 +149,16 @@ impl SoAInner {
             .collect()
     }
 
+    /// Return all entries whose kind falls in `category` (upper 4 bits).
+    fn query_by_category(&self, category: u8) -> Vec<Arc<IndexEntry>> {
+        self.kinds
+            .iter()
+            .zip(self.entries.iter())
+            .filter(|(k, _)| k.category() == category)
+            .map(|(_, e)| Arc::clone(e))
+            .collect()
+    }
+
     /// Return all entries belonging to entities registered under `scope`.
     fn query_by_scope(&self, scope: &str) -> Vec<Arc<IndexEntry>> {
         let Some(entities) = self.scope_entities.get(scope) else {
@@ -239,6 +249,21 @@ impl<const N: usize> AoSoAInner<N> {
         out
     }
 
+    /// Return all entries whose kind falls in `category` (upper 4 bits).
+    /// Skips entire tiles whose kind doesn't match the category.
+    fn query_by_category(&self, category: u8) -> Vec<Arc<IndexEntry>> {
+        let mut out = Vec::new();
+        for tile in &self.tiles {
+            if tile.kinds.first().is_none_or(|k| k.category() != category) {
+                continue;
+            }
+            for e in tile.entries.iter().take(tile.len) {
+                out.push(Arc::clone(e));
+            }
+        }
+        out
+    }
+
     /// Collect entries belonging to entities in `scope`.
     fn query_by_scope(&self, scope: &str) -> Vec<Arc<IndexEntry>> {
         let Some(entities) = self.scope_entities.get(scope) else {
@@ -316,6 +341,18 @@ impl SoAoSInner {
         for group in self.groups.values() {
             for (i, &kind) in group.kinds.iter().enumerate() {
                 if kind == target {
+                    out.push(Arc::clone(&group.entries[i]));
+                }
+            }
+        }
+        out
+    }
+
+    fn query_by_category(&self, category: u8) -> Vec<Arc<IndexEntry>> {
+        let mut out = Vec::new();
+        for group in self.groups.values() {
+            for (i, &kind) in group.kinds.iter().enumerate() {
+                if kind.category() == category {
                     out.push(Arc::clone(&group.entries[i]));
                 }
             }
@@ -449,7 +486,21 @@ impl ColumnarIndex {
         results
     }
 
-    /// Return all entries whose event coordinate belongs to `scope`, sorted by
+    /// Return all entries whose kind falls in `category` (upper 4 bits),
+    /// sorted by `global_sequence` (ascending).
+    pub(crate) fn query_by_category(&self, category: u8) -> Vec<Arc<IndexEntry>> {
+        let mut results = match &self.inner {
+            ColumnarVariant::SoA(lock) => lock.read().query_by_category(category),
+            ColumnarVariant::AoSoA8(lock) => lock.read().query_by_category(category),
+            ColumnarVariant::AoSoA16(lock) => lock.read().query_by_category(category),
+            ColumnarVariant::AoSoA64(lock) => lock.read().query_by_category(category),
+            ColumnarVariant::SoAoS(lock) => lock.read().query_by_category(category),
+        };
+        results.sort_by_key(|e| e.global_sequence);
+        results
+    }
+
+    /// Return all entries whose coordinate scope matches `scope`, sorted by
     /// `global_sequence` (ascending).
     pub(crate) fn query_by_scope(&self, scope: &str) -> Vec<Arc<IndexEntry>> {
         let mut results = match &self.inner {
@@ -672,6 +723,27 @@ impl ScanIndex {
                 Vec::new()
             }
             Self::Columnar(idx) => idx.query_by_scope(scope),
+        }
+    }
+
+    /// Return all entries whose kind falls in `category` (upper 4 bits),
+    /// sorted by `global_sequence`.
+    ///
+    /// For `Maps`, iterates all kinds in `by_fact` and collects those matching
+    /// the category. For `Columnar`, delegates to
+    /// [`ColumnarIndex::query_by_category`].
+    pub(crate) fn query_by_category(&self, category: u8) -> Vec<Arc<IndexEntry>> {
+        match self {
+            Self::Maps { by_fact, .. } => {
+                let mut results: Vec<Arc<IndexEntry>> = by_fact
+                    .iter()
+                    .filter(|r| r.key().category() == category)
+                    .flat_map(|r| r.value().values().map(Arc::clone).collect::<Vec<_>>())
+                    .collect();
+                results.sort_by_key(|e| e.global_sequence);
+                results
+            }
+            Self::Columnar(idx) => idx.query_by_category(category),
         }
     }
 

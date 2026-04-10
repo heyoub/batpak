@@ -10,6 +10,7 @@ pub use crate::store::subscription::{Subscription, SubscriptionOps};
 pub use crate::store::writer::Notification;
 pub use crate::store::writer::RestartPolicy;
 pub use crate::store::{
-    AppendOptions, AppendReceipt, CompactionConfig, CompactionStrategy, Cursor, DiskPos, Freshness,
-    IndexEntry, IndexLayout, NoCache, Store, StoreConfig, StoreError, SyncMode,
+    AppendOptions, AppendReceipt, BatchAppendItem, BatchStage, CausationRef, CompactionConfig,
+    CompactionStrategy, Cursor, DiskPos, Freshness, IndexEntry, IndexLayout, NoCache, Store,
+    StoreConfig, StoreError, SyncMode,
 };

@@ -740,3 +740,119 @@ proptest! {
             "COMPENSATIONACTION SERDE ROUNDTRIP FAILED. Investigate: src/outcome/wait.rs.");
     }
 }
+
+// ============================================================
+// FUZZ TARGET 9: BatchAppendItem payload bounds
+// ============================================================
+
+use batpak::store::{BatchAppendItem, CausationRef};
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(
+        std::env::var("PROPTEST_CASES")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(256)
+    ))]
+
+    #[test]
+    fn fuzz_batch_item_new_preserves_fields(
+        entity in "[a-zA-Z0-9_:]{1,50}",
+        scope in "[a-zA-Z0-9_:]{1,50}",
+        payload in proptest::collection::vec(any::<u8>(), 0..1024),
+        correlation_id in proptest::option::of(any::<u128>()),
+        causation_id in proptest::option::of(any::<u128>()),
+        flags in any::<u8>(),
+        variant in 0u8..3,
+        absolute_id in any::<u128>(),
+        prior_index in 0usize..64,
+    ) {
+        let coord = Coordinate::new(&entity, &scope).expect("valid coordinate");
+        let value = serde_json::Value::Array(
+            payload.iter().copied().map(serde_json::Value::from).collect()
+        );
+        let options = AppendOptions {
+            correlation_id,
+            causation_id,
+            flags,
+            ..AppendOptions::default()
+        };
+        let causation = match variant {
+            0 => CausationRef::None,
+            1 => CausationRef::PriorItem(prior_index),
+            _ => CausationRef::Absolute(absolute_id),
+        };
+        let item = BatchAppendItem::new(
+            coord.clone(),
+            EventKind::DATA,
+            &value,
+            options,
+            causation,
+        )
+        .expect("construct BatchAppendItem");
+
+        let decoded: serde_json::Value =
+            rmp_serde::from_slice(&item.payload_bytes).expect("decode payload bytes");
+
+        prop_assert_eq!(item.coord, coord,
+            "BATCH ITEM COORD MISMATCH. Investigate: src/store/contracts.rs BatchAppendItem::new.");
+        prop_assert_eq!(item.kind, EventKind::DATA,
+            "BATCH ITEM KIND MISMATCH. Investigate: src/store/contracts.rs BatchAppendItem::new.");
+        prop_assert_eq!(item.options.correlation_id, correlation_id,
+            "BATCH ITEM CORRELATION MISMATCH. Investigate: src/store/contracts.rs AppendOptions preservation.");
+        prop_assert_eq!(item.options.causation_id, causation_id,
+            "BATCH ITEM CAUSATION OPTION MISMATCH. Investigate: src/store/contracts.rs AppendOptions preservation.");
+        prop_assert_eq!(item.options.flags, flags,
+            "BATCH ITEM FLAGS MISMATCH. Investigate: src/store/contracts.rs AppendOptions preservation.");
+        prop_assert_eq!(item.causation, causation,
+            "BATCH ITEM CAUSATION REF MISMATCH. Investigate: src/store/contracts.rs CausationRef preservation.");
+        prop_assert_eq!(decoded, value,
+            "BATCH ITEM PAYLOAD ROUNDTRIP FAILED. Investigate: src/store/contracts.rs BatchAppendItem::new payload encoding.");
+    }
+
+    #[test]
+    fn fuzz_batch_varying_item_count(
+        item_count in 1usize..50,
+        payload_size in 10usize..500,
+    ) {
+        let coord = Coordinate::new("fuzz", "batch").expect("valid");
+        let items: Vec<_> = (0..item_count)
+            .map(|i| {
+                let value = serde_json::Value::Array(
+                    std::iter::repeat_n(serde_json::Value::from(i as u64), payload_size)
+                        .collect()
+                );
+                BatchAppendItem::new(
+                    coord.clone(),
+                    EventKind::DATA,
+                    &value,
+                    AppendOptions::default(),
+                    CausationRef::None,
+                )
+                .expect("construct batch item")
+            })
+            .collect();
+
+        prop_assert_eq!(items.len(), item_count,
+            "BATCH ITEM COUNT MISMATCH. Investigate: src/store/contracts.rs batch item construction.");
+        prop_assert!(items.iter().all(|item| item.coord == coord),
+            "BATCH ITEM COORD DRIFT. Investigate: src/store/contracts.rs BatchAppendItem construction.");
+        prop_assert!(items.iter().all(|item| item.kind == EventKind::DATA),
+            "BATCH ITEM KIND DRIFT. Investigate: src/store/contracts.rs BatchAppendItem construction.");
+        prop_assert!(items.iter().all(|item| !item.payload_bytes.is_empty()),
+            "BATCH ITEM PAYLOAD BYTES SHOULD NOT BE EMPTY FOR NON-EMPTY JSON ARRAYS.");
+    }
+
+    #[test]
+    fn fuzz_causation_ref_current_variants(variant in 0u8..3, index in 0usize..100, event_id in any::<u128>()) {
+        let causation = match variant {
+            0 => CausationRef::None,
+            1 => CausationRef::PriorItem(index),
+            _ => CausationRef::Absolute(event_id),
+        };
+
+        let copied = causation;
+        prop_assert_eq!(copied, causation,
+            "CAUSATION REF COPY/EQ FAILED. Investigate: src/store/contracts.rs CausationRef.");
+    }
+}

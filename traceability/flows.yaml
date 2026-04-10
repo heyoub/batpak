@@ -54,6 +54,23 @@
     - ART-STORE-MOD
     - ART-STORE-PROJECTION-FLOW
     - ART-UNIFIED-TESTS
+- id: FLOW-BATCH-APPEND
+  summary: Atomic batch append validates limits, acquires entity locks in sorted order, writes BEGIN marker, event frames, COMMIT marker, fsyncs, then atomically publishes to in-memory index.
+  artifacts:
+    - ART-STORE-MOD
+    - ART-STORE-CONTRACTS
+    - ART-BATCH-TESTS
+    - ART-STORE-READER
+- id: FLOW-BATCH-RECOVERY
+  summary: Cold-start segment scan stages batch frames until COMMIT marker confirmed; incomplete batches (missing COMMIT) are discarded. State persists across segment boundaries.
+  artifacts:
+    - ART-STORE-READER
+    - ART-BATCH-TESTS
+- id: FLOW-FAULT-INJECT
+  summary: Fault injection hooks at writer critical points allow chaos testing of crash/error scenarios under the test-support feature gate.
+  artifacts:
+    - ART-STORE-FAULT
+    - ART-BATCH-TESTS
 - id: FLOW-CLOSE
   summary: Close routes shutdown through the writer so outstanding work drains before the store exits.
   artifacts:
