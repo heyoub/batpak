@@ -29,6 +29,45 @@ All notable changes to this project will be documented in this file.
   (`config.sync_every_n_events`) to nested (`config.sync.every_n_events`).
   All `with_*` builder methods kept their existing names and signatures —
   callers using the fluent API are unaffected.
+- **`cargo xtask preflight`**: runs the full CI pipeline (`xtask ci` + coverage
+  + docs + rustdoc-bang-redirect strip + `.lock` cleanup + chmod) inside the
+  canonical devcontainer. Bit-equivalent to the GH `Integrity
+  (ubuntu-devcontainer)` job. If `preflight` passes locally, that GH job will
+  pass — the single highest-leverage local gate for AI-agent-driven development.
+- **`cargo xtask perf-gates`**: runs the 5 hardware-dependent perf gate tests
+  on demand via `cargo nextest run --run-ignored only`. The tests are now
+  `#[ignore]`'d in the normal suite so timing variance on shared CI runners
+  cannot cause spurious failures; this command is the designated path to
+  exercise them intentionally.
+- **`check_ci_parity` structural check** (`tools/integrity/src/main.rs`): fails
+  the build when `.github/workflows/ci.yml` drifts from
+  `tools/xtask/src/main.rs` or `.devcontainer/Dockerfile`. Three invariants
+  enforced: (1) every `cargo xtask <subcommand>` referenced in the workflow
+  must exist in xtask; (2) every tool installed via `taiki-e/install-action`
+  must also appear in `cargo xtask setup`; (3) version pins for
+  `cargo-deny`, `cargo-llvm-cov`, `cargo-mutants`, `cargo-nextest`, and
+  `mdbook` must agree between the Dockerfile and the xtask setup step.
+- **Mutation testing on every PR** (`.github/workflows/ci.yml`): the `mutants`
+  smoke job (1/12 shard, ~5 min) was previously `workflow_dispatch`-only and
+  never ran in practice. It now runs on every `push` and `pull_request`.
+  Results are report-only for this cycle; threshold gating is a follow-up.
+- **`loom_model_bounded` helper** (`tests/deterministic_concurrency.rs`,
+  `tests/group_commit_crash.rs`): wraps `loom::model(...)` in
+  `loom::model::Builder` with `preemption_bound = Some(3)` so loom exploration
+  is bounded and cannot OOM-kill a slow CI runner. Models that genuinely need
+  a deeper bound will fail loud rather than spin.
+- **`CHAOS_ITERATIONS=500`** in the `.github/workflows/ci.yml` env block. The
+  previous in-source fallback was 10 — too few for meaningful concurrency-stress
+  coverage. 500 is the CI compromise between wall-clock time and coverage depth.
+- **Proptest seed persistence** (`tests/fuzz_targets.rs`, `tests/monad_laws.rs`,
+  `tests/hash_chain.rs`, `tests/store_properties.rs`): all `ProptestConfig`
+  instances now set
+  `failure_persistence: Some(Box::new(FileFailurePersistence::SourceParallel("proptest-regressions")))`.
+  Failing seeds are written next to the test source and re-exercised on every
+  subsequent run. Without this, every proptest flake was effectively one-shot.
+- **`round_trip_fidelity_property`** (`tests/store_properties.rs`): property
+  test asserting that append + `get` returns the original payload for ANY
+  shrinkable JSON value, not just a single fixed example. 64 cases per run.
 
 ### Changed
 - **`NativeCache::put` no longer fsyncs.** The projection cache is rebuildable
@@ -61,6 +100,34 @@ All notable changes to this project will be documented in this file.
 - `NativeCache::get()` now propagates real IO errors as
   `StoreError::CacheFailed` instead of silently degrading to a cache miss.
   `NotFound` still returns `Ok(None)` (the only legitimate cache miss).
+- **Perf gates moved out of the unit suite.** The 5 timing-sensitive tests in
+  `tests/perf_gates.rs` are now `#[ignore]`'d with comments pointing at
+  `cargo xtask perf-gates`. Logic-only tests (synthetic contexts, no
+  `Instant::now()`) continue to run on every CI cycle unaffected.
+- **`subscription_ops.rs` sleeps removed.** All 8 `thread::sleep(20 ms)`
+  "subscriber readiness" delays deleted. `store.subscribe()` registers
+  synchronously and notifications buffer in the flume channel, so the sleeps
+  were always dead weight. Net savings: ~160 ms per test run.
+- **`atomic_batch.rs::batch_subscription_atomicity_no_partial_visibility`
+  rewritten.** The old version spawned a thread that polled `try_recv` in a
+  sleep loop bounded by `Instant::now()`. The new version drains the receiver
+  immediately after each synchronous append. Runtime: ~700 ms → ~24 ms.
+- **`store_restart_policy.rs` writer-death waits replaced with
+  poll-with-deadline.** The two `thread::sleep(100 ms)` calls after
+  `panic_writer_for_test` are replaced with retry-append loops bounded by a 5 s
+  deadline. The post-exhaustion error is now asserted to be specifically
+  `StoreError::WriterCrashed` rather than a generic failure.
+- **`read_dir` results sorted before indexing** (`tests/store_edge_cases.rs`,
+  `tests/store_advanced.rs`). POSIX `readdir` makes no ordering guarantee; the
+  previous `remove(0)` / `[0]` indexing picked a non-deterministic file on
+  exotic filesystems. Both call-sites now sort the `DirEntry` vec before use.
+- **Bench fix — `bench_layout_by_fact`** (`benches/unified_bench.rs`): the
+  `assert_eq!(results.len(), 1_000)` assertion was inside `b.iter`, which
+  (a) crashes the bench on regression instead of failing a test cleanly and
+  (b) adds measurement noise. Moved outside the loop; `criterion::black_box`
+  added around the result inside.
+- **Bench fix — `compaction.rs`**: deprecated `b.iter_with_setup` replaced with
+  `b.iter_batched` + `BatchSize::SmallInput`.
 
 ### Removed
 - `StoreIndex::entity_locks` (the per-entity `DashMap<Arc<str>, Mutex<()>>`)
@@ -73,6 +140,21 @@ All notable changes to this project will be documented in this file.
   batch.
 - The `fsync_dir` helper from `NativeCache` (no longer needed after the
   cache write path stopped fsyncing).
+- **`law_003_store_public_api_exercised`** (`tests/store_properties.rs`):
+  pure tautology — asserted `!"name".is_empty()` over a hardcoded slice of
+  method name strings. Would have passed with zero `Store` methods. The
+  comment in the source even acknowledged it was "documentation, not a runtime
+  test."
+- **`entry_size_constant_matches_layout`** (`src/store/sidx.rs`): asserted
+  that a `Vec<u8>` constructed with length N still has length N after
+  `encode_into` writes in-place. The compile-time `_ASSERT_ENTRY_SIZE` already
+  enforces this statically; the runtime test added nothing.
+- **3 reader internal-state tests** (`src/store/reader.rs`): the old tests
+  directly locked the private `buffer_pool` and asserted on the `Vec`'s
+  internal length. Replaced with behavior-based versions that assert the
+  observable contract — recycled buffers must be exactly the requested size
+  and zero-filled on re-acquire — without coupling to private implementation
+  details.
 
 ### Removed (continued — earlier in this Unreleased cycle)
 - `RedbCache`, `LmdbCache`, the `redb` and `lmdb` Cargo features, and the
@@ -85,6 +167,31 @@ All notable changes to this project will be documented in this file.
   image.
 - The `RUSTSEC-2025-0141` advisory exception in `deny.toml` (no longer
   needed without `heed` in the dependency tree).
+
+### Fixed
+- **`ReplayCursor::commit` empty-replay off-by-one** (`src/store/index.rs`).
+  Every fresh-store cold start goes through `rebuild_from_segments` →
+  `cursor.commit(0)`. The old logic unconditionally set the allocator to
+  `max_seen.saturating_add(1)`, which is `1` for an empty cursor — so the very
+  first append on a brand-new store received sequence `1` instead of `0`. Fix:
+  gate the `+1` on a new `inserted_any` flag; empty replays leave the allocator
+  at the supplied `hint` unchanged.
+- **`ReplayCursor::synthesize_next` first-call off-by-one** (`src/store/index.rs`).
+  The slow-path rebuild (active segment with no SIDX footer) calls
+  `synthesize_next()` for every entry. The old implementation returned
+  `1, 2, 3, …` instead of `0, 1, 2, …` — same root cause as above, same
+  `inserted_any` guard fix. Caught by
+  `tests/replay_consistency.rs::snapshot_checkpoint_matches_source_projection`
+  after the empty-replay fix landed and the test began diverging at
+  `live=6, snap=7`.
+- **Reader info-disclosure via recycled buffers** (`src/store/reader.rs`,
+  `acquire_buffer`). `Vec::resize(min_size, 0)` only zeroes newly appended
+  elements — existing bytes are untouched when the buffer is shrunk or
+  returned at the same size. A recycled buffer therefore leaked the previous
+  caller's bytes to the next acquirer. Fix: `buf.clear(); buf.resize(min_size, 0);`
+  so the entire range is unconditionally zeroed. Caught by a new
+  behavior-based test that fills a buffer with `0xAB`, releases it back to the
+  pool, re-acquires it, and asserts every byte is `0x00`.
 
 ### Migration
 Callers using the fluent builder API (`StoreConfig::new(dir).with_*()`) need

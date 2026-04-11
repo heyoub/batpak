@@ -33,7 +33,7 @@ println!("stored {} at {}", receipt.event_id, receipt.sequence);
 ## Pick Your Lane
 
 - User lane: `cargo build`, `cargo test`, `cargo run --example quickstart`
-- Maintainer lane: `cargo xtask doctor`, `cargo xtask ci`
+- Maintainer lane: `cargo xtask doctor`, `cargo xtask ci`, `cargo xtask preflight` (gold standard before pushing)
 - Perf lane: `cargo xtask bench --surface neutral|native [--save|--compare]`
 
 ## What You Get
@@ -68,6 +68,8 @@ println!("stored {} at {}", receipt.event_id, receipt.sequence);
 cargo xtask doctor
 cargo xtask ci
 cargo xtask docs
+cargo xtask preflight    # full CI inside the devcontainer (gold standard for "ready to push")
+cargo xtask perf-gates   # hardware-dependent perf tests (run on demand only)
 ```
 
 `just` remains available as shorthand, but `cargo xtask` is the canonical command surface.
