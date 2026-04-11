@@ -646,12 +646,31 @@ fn check_for_stale_references(repo_root: &Path, tracked_files: &[PathBuf]) -> Re
         "MSRV is 1.75",
         "MSRV: 1.75",
         "MSRV 1.75",
+        // Removed in 0.3.0 — the integrity tool now flags any reappearance in
+        // non-allowlisted files. The allowlist below covers files that legitimately
+        // contain historical references (CHANGELOG, audit reports, SPEC snapshots,
+        // ADR archeology).
+        "RedbCache",
+        "LmdbCache",
+        "entity_locks",
+        "cache_map_size_bytes",
+        "with_cache_map_size_bytes",
+        "open_with_redb_cache",
+        "open_with_lmdb_cache",
     ];
     let allow = [
         // Audit report legitimately documents historical state
         repo_root.join("docs/audits/HICP_AUDIT_REPORT.md"),
         // This file contains the terms as string literals
         repo_root.join("tools/integrity/src/main.rs"),
+        // CHANGELOG documents the 0.3.0 removal of the cache backends
+        repo_root.join("CHANGELOG.md"),
+        // SPEC snapshots and ADR archeology contain historical API references
+        repo_root.join("docs/spec/SPEC.md"),
+        repo_root.join("docs/spec/SPEC_REGISTRY.md"),
+        repo_root.join("docs/adr/ADR-0003-cache-safety-assumptions.md"),
+        // AGENTS.md may legitimately mention removed concepts in historical context
+        repo_root.join("AGENTS.md"),
     ];
     for path in tracked_files {
         if allow.iter().any(|allowed| allowed == path) {

@@ -66,12 +66,14 @@ fn store_error_source_chain_serialization() {
 #[test]
 fn store_error_source_chain_cache_failed() {
     use std::error::Error;
-    let inner: Box<dyn std::error::Error + Send + Sync> = "redb broke".into();
+    // (formerly mentioned 'redb' explicitly — neutralized after 0.3.0 removed redb
+    // backend support; the stale_terms check would otherwise flag this file)
+    let inner: Box<dyn std::error::Error + Send + Sync> = "storage backend error".into();
     let store_err = batpak::store::StoreError::CacheFailed(inner);
     let source = store_err
         .source()
         .expect("CacheFailed variant should have a source");
-    assert!(source.to_string().contains("redb broke"));
+    assert!(source.to_string().contains("storage backend error"));
 }
 
 #[test]
