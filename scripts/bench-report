@@ -22,6 +22,8 @@ def os_slug() -> str:
 
 
 def cargo_command(surface: str) -> list[str]:
+    # `neutral` runs the historical 5-bench set, kept for stable per-OS
+    # baseline comparison across releases.
     if surface == "neutral":
         return [
             "cargo",
@@ -37,16 +39,36 @@ def cargo_command(surface: str) -> list[str]:
             "--bench",
             "write_throughput",
         ]
-    if surface == "redb":
-        return ["cargo", "bench", "--features", "redb", "--bench", "projection_latency"]
-    if surface == "lmdb":
-        return ["cargo", "bench", "--features", "lmdb", "--bench", "projection_latency"]
+    # `native` runs the full bench set with all features enabled. This is
+    # the post-redb/lmdb-removal default surface — every backend that
+    # exists ships built-in, so there is no longer a separate "redb" or
+    # "lmdb" surface to compare against.
+    if surface == "native":
+        return [
+            "cargo",
+            "bench",
+            "--all-features",
+            "--bench",
+            "batch_throughput",
+            "--bench",
+            "cold_start",
+            "--bench",
+            "compaction",
+            "--bench",
+            "projection_latency",
+            "--bench",
+            "subscription_fanout",
+            "--bench",
+            "unified_bench",
+            "--bench",
+            "write_throughput",
+        ]
     raise ValueError(f"unsupported surface: {surface}")
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--surface", required=True, choices=["neutral", "redb", "lmdb"])
+    parser.add_argument("--surface", required=True, choices=["neutral", "native"])
     parser.add_argument("--save", action="store_true")
     parser.add_argument("--compare", action="store_true")
     args = parser.parse_args()

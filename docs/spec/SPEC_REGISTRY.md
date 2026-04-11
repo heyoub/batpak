@@ -1,12 +1,26 @@
 # SPEC_REGISTRY — Portable Context for Parallel Agent Execution
 
-Status note (2026-04-04): **This registry is historical.** 24 commits since
-2026-04-03 added extensive new features (group commit, checkpoint v2, mmap
-reader, 6 index layouts, SIDX footers, incremental projection, schema
-versioning, watch_projection, etc.). The StoreConfig, StoreError, IndexEntry,
-Store method list, and WriterCommand shapes below are from the pre-Keller-Cut
-era. Consult `src/store/mod.rs` for the current API surface and
-`docs/reference/ARCHITECTURE.md` + `docs/reference/TUNING.md` for current docs.
+Status note (last updated 2026-04-11): **This registry is historical.**
+Multiple rounds of refactors have superseded the code listings below:
+
+- 2026-04-03+: group commit, checkpoint v2, mmap reader, 6 index layouts,
+  SIDX footers, incremental projection, schema versioning, watch_projection.
+- 2026-04-09+ (0.3.0 prep): atomic batch append + visibility watermark
+  (`SequenceGate`), `NativeCache` replacing `RedbCache`/`LmdbCache`, the
+  `redb`/`lmdb` Cargo features and `heed`/`redb` deps removed, `StoreConfig`
+  refactored from 17 flat fields into 4 sub-structs (`SyncConfig`,
+  `WriterConfig`, `BatchConfig`, `IndexConfig`), `StoreIndex::entity_locks`
+  deleted as dead code, projection-cache fsync removed.
+
+The `StoreConfig`, `StoreError`, `IndexEntry`, `Store` method list, and
+`WriterCommand` shapes below are from the pre-Keller-Cut era and **do not
+match the current source**. References to `RedbCache`, `LmdbCache`, the
+`redb`/`lmdb` features, `cache_map_size_bytes`, `entity_locks`,
+`sync_every_n_events`, and `sync_mode` are all stale.
+
+Consult `src/store/mod.rs` for the current API surface,
+`docs/reference/ARCHITECTURE.md` + `docs/reference/TUNING.md` for the
+current docs, and `CHANGELOG.md` for the migration story between versions.
 
 ```
 WHAT THIS IS:

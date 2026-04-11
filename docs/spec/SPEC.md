@@ -67,7 +67,7 @@ for current documentation.
 
 ✗ DO NOT add a trait for what has one implementation.
   Store is a struct. ProjectionCache is a trait because it has NoCache +
-  RedbCache + LmdbCache. If your new thing has one impl, it's a struct.
+  NativeCache. If your new thing has one impl, it's a struct.
 
 ✗ DO NOT bypass the Receipt to commit.
   If you can call store.append() without a Receipt<T> from the pipeline,
@@ -115,8 +115,8 @@ review — it's **making the toolchain the reviewer**.
 
 4. HALLUCINATED APIs ARE CAUGHT BY INTEGRATION TESTS.
    Every trait method on ProjectionCache is exercised against every backend
-   (NoCache, RedbCache, LmdbCache). If an API doesn't exist, the test
-   fails before it reaches CI. See: LmdbCache::delete_prefix (never existed).
+   (NoCache, NativeCache). If an API doesn't exist, the test fails before
+   it reaches CI.
 
 5. AI-GENERATED CODE FOLLOWS THE SAME SPEC AS HUMAN CODE.
    The spec IS the compiler after first build. If an AI produces code
@@ -149,8 +149,6 @@ review — it's **making the toolchain the reviewer**.
 | Fix | Root Cause | Test That Catches It |
 |-----|-----------|---------------------|
 | serde `"rc"` feature | Arc<str> not Serialize | wire_format::coordinate_msgpack_round_trip |
-| `use redb::ReadableTable` | trait method not in scope | store_integration (any RedbCache test) |
-| LmdbCache::delete_prefix | hallucinated API | store_integration (any LmdbCache test) |
 | `T: Clone` on join_all | Outcome::map needs Clone | monad_laws::join_all_all_ok (Batch cases) |
 | DashMap Ref lifetime | flat_map escapes guard | store_integration::query_by_scope |
 | Dead logic in query() | unreachable branch | store_integration::query_by_entity_prefix |
@@ -240,7 +238,7 @@ batpak/
 │   │   ├── writer.rs         # WriterHandle, WriterCommand, SubscriberList, 10-step commit
 │   │   ├── reader.rs         # Reader (LRU FD cache, pread, CRC32 verify)
 │   │   ├── index.rs          # StoreIndex, IndexEntry, ClockKey, DiskPos
-│   │   ├── projection.rs     # ProjectionCache trait, NoCache, RedbCache, Freshness
+│   │   ├── projection.rs     # ProjectionCache trait, NoCache, NativeCache, Freshness
 │   │   ├── cursor.rs         # Cursor (pull-based, guaranteed delivery)
 │   │   └── subscription.rs   # Subscription (push-based, per-subscriber flume channels)
 │   │
@@ -287,8 +285,7 @@ description = "Event-sourced state machines over coordinate spaces"
 [features]
 default = ["blake3"]
 blake3 = ["dep:blake3"]
-redb = ["dep:redb"]
-lmdb = ["dep:heed"]
+test-support = []
 
 [dependencies]
 uuid = { version = "1", features = ["v7"] }
@@ -301,9 +298,8 @@ rmp-serde = "1"
 dashmap = "5"
 parking_lot = "0.12"
 tracing = "0.1"
-redb = { version = "2", optional = true }
-heed = { version = "0.20", optional = true }
 # NO TOKIO. Invariant 1.
+# NO redb / heed. NativeCache is the only built-in projection cache as of 0.3.0.
 
 [dev-dependencies]
 proptest = "1"
@@ -1119,21 +1115,46 @@ pub enum StoreError {
 }
 impl Display, Error, From<CoordinateError>, From<std::io::Error>.
 
-StoreConfig includes:
+StoreConfig is composed from sub-structs (refactored in 0.3.0):
+
   data_dir: PathBuf              (default: "./batpak-data")
   segment_max_bytes: u64         (default: 256MB)
-  sync_every_n_events: u32       (default: 1000)
   fd_budget: usize               (default: 64)
-  writer_channel_capacity: usize (default: 4096)
   broadcast_capacity: usize      (default: 8192)
-  cache_map_size_bytes: usize    (default: 64MB, for LMDB)
-  restart_policy: RestartPolicy  (default: Once)
-  shutdown_drain_limit: usize    (default: 1024)
-  writer_stack_size: Option<usize>  (default: None = OS default ~8MB on Linux)
+
+  sync: SyncConfig {
+    every_n_events: u32          (default: 1000)
+    mode: SyncMode               (default: SyncAll)
+      SyncAll = data+metadata (safest). SyncData = data only (faster).
+  }
+
+  writer: WriterConfig {
+    channel_capacity: usize      (default: 4096)
+    stack_size: Option<usize>    (default: None = OS default ~8MB)
+    restart_policy: RestartPolicy (default: Once)
+    shutdown_drain_limit: usize  (default: 1024)
+  }
+
+  batch: BatchConfig {
+    max_size: u32                (default: 4000)
+    max_bytes: u64               (default: 64MB)
+    group_commit_max_batch: u32  (default: 0 = unbounded drain)
+  }
+
+  index: IndexConfig {
+    layout: IndexLayout          (default: AoS)
+    incremental_projection: bool (default: false)
+    enable_checkpoint: bool      (default: true)
+  }
+
   clock: Option<Arc<dyn Fn() -> i64 + Send + Sync>>  (default: None = SystemTime::now())
     Injectable clock for deterministic testing. Returns microseconds since epoch.
-  sync_mode: SyncMode            (default: SyncAll)
-    SyncAll = data+metadata (safest). SyncData = data only (faster).
+
+  fault_injector: Option<Arc<dyn FaultInjector>>     (default: None; test-support only)
+
+All `with_*` builder methods on StoreConfig (e.g. `with_sync_every_n_events`,
+`with_sync_mode`, `with_writer_channel_capacity`) preserve their old names so
+fluent-API callers see no break.
 
 In production, run under a process supervisor (systemd, k8s restart policy).
 The library's RestartPolicy handles transient writer panics. Process-level
@@ -1330,10 +1351,11 @@ pub trait ProjectionCache: Send + Sync + 'static {
 
 pub struct CacheMeta { pub watermark: u64, pub cached_at_us: i64 }
 pub enum Freshness { Consistent, BestEffort { max_stale_ms: u64 } }
-pub struct NoCache;   // default: every read replays from segments
-
-#[cfg(feature = "redb")] pub struct RedbCache { ... }
-#[cfg(feature = "lmdb")] pub struct LmdbCache { ... }
+pub struct NoCache;     // default: every read replays from segments
+pub struct NativeCache; // file-backed cache rooted at a directory.
+                        // Atomic via tempfile + rename. No fsync on put
+                        // (cache is rebuildable from segments). Always
+                        // available — no Cargo feature required.
 ```
 
 ---
@@ -1588,7 +1610,7 @@ jobs:
       - run: cargo check --all-features
       - run: cargo check --no-default-features
       - run: cargo check --features blake3
-      - run: cargo check --features redb
+      - run: cargo check --features test-support
 
   test:
     runs-on: ubuntu-latest
@@ -1757,7 +1779,7 @@ STEP 7 — Store (all files, biggest step)
     src/store/segment.rs           ← SegmentHeader, frame_encode/decode, FramePayload
     src/store/reader.rs            ← Reader (LRU FD cache, pread, CRC32)
     src/store/writer.rs            ← WriterHandle, WriterCommand, SubscriberList, Notification
-    src/store/projection.rs        ← ProjectionCache trait, NoCache, RedbCache, LmdbCache
+    src/store/projection.rs        ← ProjectionCache trait, NoCache, NativeCache
     src/store/cursor.rs            ← Cursor
     src/store/subscription.rs      ← Subscription
     src/store/mod.rs               ← Store, StoreConfig, StoreError, AppendReceipt, AppendOptions
@@ -2030,15 +2052,13 @@ decisions the PRDs specify the WHAT.
    flume error. The in-flight append is lost — the caller must retry.
 
 5. DashMap guard lifetimes in the writer:
-   Extract and clone values from DashMap BEFORE acquiring the entity Mutex.
-   Do NOT hold a DashMap Ref across the 10-step commit. Pattern:
-     let lock = index.entity_locks.entry(entity.clone())
-         .or_insert_with(|| Arc::new(Mutex::new(()))).clone();
-     // DashMap entry guard dropped here (clone gives us the Arc)
-     let _guard = lock.lock();
-     // ... 10-step commit with _guard held ...
-   Similarly for step 2 (prev_hash from latest): clone the IndexEntry out
-   of the DashMap Ref immediately, drop the Ref, then use the cloned value.
+   Never hold a DashMap Ref across the 10-step commit — clone the value
+   out of the Ref immediately, drop the Ref, then use the cloned value.
+   This applies to `latest`, `by_id`, and any other DashMap accessed
+   during the commit. There is no per-entity Mutex: the writer is the
+   only thread that mutates the index, so a producer/producer race is
+   impossible. (The previous `entity_locks: DashMap<_, Mutex<()>>` was
+   a leftover from a multi-writer design and was removed in 0.3.0.)
 
 6. Store is Send + Sync:
    - Reader: LRU FD cache behind parking_lot::Mutex → Send + Sync
@@ -2058,7 +2078,7 @@ decisions the PRDs specify the WHAT.
    The store's primary API (append with &impl Serialize, get returning
    serde_json::Value, project) fundamentally requires serialization.
    Layer 0 types derive(Serialize, Deserialize) unconditionally.
-   blake3, redb, lmdb remain optional features.
+   blake3 (default) and test-support are the only optional features.
    --no-default-features builds everything except blake3 hashing (which
    falls back to [0u8; 32] genesis convention).
 

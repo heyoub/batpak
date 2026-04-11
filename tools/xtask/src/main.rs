@@ -132,7 +132,7 @@ fn main() -> Result<()> {
             "warnings",
         ]),
         XtaskCommand::Fmt => cargo(["fmt", "--check"]),
-        XtaskCommand::Deny => cargo(["deny", "check"]),
+        XtaskCommand::Deny => deny_split(),
         XtaskCommand::BenchCompile => cargo(["bench", "--no-run", "--all-features"]),
         XtaskCommand::Bench(args) => bench(args),
         XtaskCommand::Cover(args) => cover(args),
@@ -190,7 +190,9 @@ fn setup(args: SetupArgs) -> Result<()> {
     let required = [
         (
             "cargo-nextest",
-            &["install", "--locked", "cargo-nextest"][..],
+            // Pinned to match `.devcontainer/Dockerfile` so local installs
+            // and the canonical container stay in lock-step.
+            &["install", "--locked", "cargo-nextest@0.9.132"][..],
         ),
         (
             "cargo-deny",
@@ -243,6 +245,32 @@ fn integrity<const N: usize>(subcommand: &str, extra: [&str; N]) -> Result<()> {
     let mut args = vec!["run", "--package", "batpak-integrity", "--", subcommand];
     args.extend(extra);
     cargo(args)
+}
+
+/// Run `cargo deny check` split into hard gates + warn-only advisories.
+///
+/// Bans, licenses, and sources are run as hard gates — they protect
+/// against banned dependencies, license violations, and unauthorized
+/// registries.
+///
+/// Advisories are run separately and treated as warn-only because the
+/// upstream RustSec/advisory-db currently ships a malformed
+/// `crates/abi_stable/RUSTSEC-2020-0105.md` that crashes cargo-deny's
+/// parser ("failed to find toml block") before any filter can be applied.
+/// cargo-deny stderr is still printed, so legitimate advisories remain
+/// visible — they just do not fail the command until upstream is fixed.
+///
+/// TODO: collapse back to a single `cargo deny check` once cargo-deny
+/// or RustSec/advisory-db fixes the parse failure.
+fn deny_split() -> Result<()> {
+    cargo(["deny", "check", "bans", "licenses", "sources"])?;
+    if cargo(["deny", "check", "advisories"]).is_err() {
+        eprintln!(
+            "warning: cargo-deny advisories check failed (upstream advisory-db parse issue) — \
+             continuing without enforcement. See `deny_split` in tools/xtask/src/main.rs."
+        );
+    }
+    Ok(())
 }
 
 fn bench(args: BenchArgs) -> Result<()> {
@@ -380,22 +408,7 @@ fn ci() -> Result<()> {
         "-D",
         "warnings",
     ])?;
-    // Bans, licenses, and sources are hard gates — they protect against
-    // license violations, banned dependencies, and unauthorized registries.
-    cargo(["deny", "check", "bans", "licenses", "sources"])?;
-    // Advisories are run separately and treated as warn-only because the
-    // upstream RustSec/advisory-db currently ships a malformed
-    // RUSTSEC-2020-0105.md (abi_stable) that crashes cargo-deny's parser
-    // before any filtering can occur. cargo-deny stderr is still printed,
-    // so legitimate advisories remain visible — they just don't fail CI
-    // until the upstream parse bug or the malformed file is fixed.
-    // TODO: revert to a single `cargo deny check` once upstream is fixed.
-    if cargo(["deny", "check", "advisories"]).is_err() {
-        eprintln!(
-            "warning: cargo-deny advisories check failed (upstream advisory-db parse issue) — \
-             continuing without enforcement. See xtask main.rs for context."
-        );
-    }
+    deny_split()?;
     cargo(["nextest", "run", "--profile", "ci", "--all-features"])?;
     cargo(["test", "--doc", "--all-features"])?;
     cargo(["check", "--all-features"])?;
