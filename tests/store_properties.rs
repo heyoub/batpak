@@ -9,27 +9,11 @@
 
 use batpak::prelude::*;
 use proptest::prelude::*;
-use proptest::test_runner::FileFailurePersistence;
 use tempfile::TempDir;
 
 mod common;
 use common::medium_segment_store as test_store;
 use common::test_coord;
-
-/// Project-wide proptest config: env-driven cases + persistent failure seeds.
-fn proptest_cfg() -> ProptestConfig {
-    let cases = std::env::var("PROPTEST_CASES")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(64);
-    ProptestConfig {
-        cases,
-        failure_persistence: Some(Box::new(FileFailurePersistence::SourceParallel(
-            "proptest-regressions",
-        ))),
-        ..ProptestConfig::default()
-    }
-}
 
 /// Generate an arbitrary JSON value with bounded depth and breadth.
 /// proptest's recursive strategy keeps generated payloads finite and shrinkable.
@@ -230,7 +214,7 @@ fn round_trip_fidelity_append_get_preserves_payload() {
 // the failing case to a minimal counterexample. Sample on every CI run.
 
 proptest! {
-    #![proptest_config(proptest_cfg())]
+    #![proptest_config(common::proptest::cfg(64))]
 
     #[test]
     fn round_trip_fidelity_property(payload in arb_json()) {
@@ -265,17 +249,16 @@ proptest! {
 //
 // The previous `law_003_store_public_api_exercised` test asserted that the
 // strings in a hardcoded `&[&str]` were non-empty. That's a tautology — it
-// would have passed if every method on `Store` were deleted. It was deleted
-// in the test-quality drill sweep (Tier 1, task #45).
+// would have passed if every method on `Store` were deleted.
 //
-// The replacement is a real structural check in `tools/integrity/src/main.rs`
-// that parses `src/store/mod.rs` with `syn`, extracts every `pub fn` on the
-// `impl Store` block, and asserts that each one is referenced by at least
-// one `#[test]` function under `tests/` or `src/`. That check belongs in
-// `cargo xtask structural`, not in this file, because it needs access to
-// the syn AST and shouldn't compile-time-cost the unit test build.
-//
-// TODO(tier-1-followup): wire the syn-based check into integrity tool.
+// The replacement is `check_store_pub_fn_coverage` in
+// `tools/integrity/src/main.rs`, wired into `cargo xtask structural`. It
+// parses `src/store/mod.rs` with `syn`, extracts every `pub fn` on the
+// `impl Store` block, and asserts that each one is referenced (via method
+// call, fully-qualified call, or turbofish call) by at least one file under
+// `tests/` or `src/`. The check belongs in the integrity tool — not here —
+// because it needs access to the syn AST and shouldn't bloat the unit test
+// build.
 
 // ===== LAW-007: Codebase Accuses Itself =====
 // Verify that self-benchmark gates actually fire on bad data.
