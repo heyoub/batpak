@@ -324,7 +324,134 @@ fn structural_check() -> Result<()> {
     check_for_stale_references(&repo_root, &tracked_files)?;
     check_allow_justifications(&repo_root)?;
     check_pub_items_have_references(&repo_root)?;
+    check_ci_parity(&repo_root)?;
     println!("structural-check: ok");
+    Ok(())
+}
+
+/// Assert that the GitHub Actions workflow does not drift from the local
+/// `cargo xtask` command surface and the canonical devcontainer Dockerfile.
+///
+/// This is the safety harness that catches the kind of drift we hit
+/// repeatedly during the v0.3 prep work: someone updates `.github/workflows/ci.yml`
+/// without updating `tools/xtask/src/main.rs` (or vice versa), and CI passes
+/// locally but fails on GitHub because the two pipelines run different
+/// commands. The check is purely mechanical:
+///
+/// 1. Every `cargo xtask <subcommand>` referenced in `ci.yml` must exist
+///    as an `XtaskCommand` variant in `tools/xtask/src/main.rs`.
+/// 2. Every tool installed via `taiki-e/install-action` in the workflow
+///    must also be installed by `cargo xtask setup` in `tools/xtask/src/main.rs`.
+/// 3. The Dockerfile and the workflow must agree on tool versions for
+///    `cargo-deny`, `cargo-llvm-cov`, `cargo-mutants`, `cargo-nextest`, and
+///    `mdbook` (the tools we care about pinning).
+///
+/// The implementation uses string-grep instead of YAML parsing to keep the
+/// dependency surface minimal and the failure messages legible. If the
+/// workflow YAML reorganizes substantially, this check will need updates,
+/// which is the right behavior — drift detection requires the check to
+/// itself be regularly maintained.
+fn check_ci_parity(repo_root: &Path) -> Result<()> {
+    let ci_yml = fs::read_to_string(repo_root.join(".github/workflows/ci.yml"))
+        .context("read .github/workflows/ci.yml")?;
+    let xtask_main = fs::read_to_string(repo_root.join("tools/xtask/src/main.rs"))
+        .context("read tools/xtask/src/main.rs")?;
+    let dockerfile = fs::read_to_string(repo_root.join(".devcontainer/Dockerfile"))
+        .context("read .devcontainer/Dockerfile")?;
+
+    // 1. Every `cargo xtask <subcommand>` in ci.yml must exist in xtask main.rs.
+    //    Match `cargo xtask <word>` patterns and look the word up in the
+    //    XtaskCommand enum.
+    let xtask_cmd_re = Regex::new(r"cargo\s+xtask\s+([a-z][a-z0-9-]*)").unwrap();
+    let mut found_subcommands: BTreeSet<String> = BTreeSet::new();
+    for cap in xtask_cmd_re.captures_iter(&ci_yml) {
+        if let Some(sub) = cap.get(1) {
+            found_subcommands.insert(sub.as_str().to_string());
+        }
+    }
+    for sub in &found_subcommands {
+        // Map kebab-case to PascalCase: "perf-gates" → "PerfGates".
+        let pascal: String = sub
+            .split('-')
+            .map(|word| {
+                let mut chars = word.chars();
+                match chars.next() {
+                    Some(c) => c.to_uppercase().chain(chars).collect::<String>(),
+                    None => String::new(),
+                }
+            })
+            .collect();
+        // The variant must appear in the XtaskCommand enum (with optional args).
+        let needle_a = format!("    {pascal},");
+        let needle_b = format!("    {pascal}(");
+        if !xtask_main.contains(&needle_a) && !xtask_main.contains(&needle_b) {
+            bail!(
+                "ci-parity: workflow references `cargo xtask {sub}` but no \
+                 matching `XtaskCommand::{pascal}` variant in \
+                 tools/xtask/src/main.rs. Either add the command to xtask \
+                 or fix the workflow."
+            );
+        }
+    }
+
+    // 2. Every tool installed via taiki-e/install-action in ci.yml must also
+    //    be installed by `cargo xtask setup` in tools/xtask/src/main.rs.
+    let tool_install_re = Regex::new(r#"tool:\s*([a-z][a-z0-9-]*)"#).unwrap();
+    let mut workflow_tools: BTreeSet<String> = BTreeSet::new();
+    for cap in tool_install_re.captures_iter(&ci_yml) {
+        if let Some(tool) = cap.get(1) {
+            workflow_tools.insert(tool.as_str().to_string());
+        }
+    }
+    for tool in &workflow_tools {
+        if !xtask_main.contains(&format!("\"{tool}\"")) {
+            bail!(
+                "ci-parity: workflow installs `{tool}` via taiki-e/install-action \
+                 but `cargo xtask setup` in tools/xtask/src/main.rs does not list \
+                 it. Either add it to setup or remove from the workflow."
+            );
+        }
+    }
+
+    // 3. Tool version pin parity between Dockerfile and xtask setup.
+    let pinned_tools = [
+        "cargo-nextest",
+        "cargo-deny",
+        "cargo-llvm-cov",
+        "cargo-mutants",
+        "mdbook",
+    ];
+    for tool in pinned_tools {
+        let dock_pin_re = Regex::new(&format!(r"{tool}@(\d+(?:\.\d+)+)")).unwrap();
+        let xtask_pin_re = Regex::new(&format!(r"{tool}@(\d+(?:\.\d+)+)")).unwrap();
+        let dock_v = dock_pin_re
+            .captures(&dockerfile)
+            .and_then(|c| c.get(1))
+            .map(|m| m.as_str().to_string());
+        let xtask_v = xtask_pin_re
+            .captures(&xtask_main)
+            .and_then(|c| c.get(1))
+            .map(|m| m.as_str().to_string());
+        match (dock_v, xtask_v) {
+            (Some(d), Some(x)) if d != x => {
+                bail!(
+                    "ci-parity: tool `{tool}` is pinned to `{d}` in \
+                     `.devcontainer/Dockerfile` but `{x}` in `cargo xtask setup` \
+                     (tools/xtask/src/main.rs). Pick one version and update both."
+                );
+            }
+            (Some(_), None) => {
+                bail!(
+                    "ci-parity: tool `{tool}` is pinned in \
+                     `.devcontainer/Dockerfile` but unpinned (or missing) in \
+                     `cargo xtask setup`. Add the same pin to xtask setup so \
+                     local installs match the container."
+                );
+            }
+            _ => {}
+        }
+    }
+
     Ok(())
 }
 

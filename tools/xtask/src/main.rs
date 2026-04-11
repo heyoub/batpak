@@ -31,7 +31,16 @@ enum XtaskCommand {
     Chaos(ChaosArgs),
     FuzzChaos,
     Stress,
+    /// Run hardware-dependent perf gates (excluded from `cargo xtask ci`).
+    /// These tests use Instant::now() and assert on wall-clock time, so they
+    /// are unfit for shared CI runners. Run them on a dedicated perf machine
+    /// or locally on stable hardware.
+    PerfGates,
     Ci,
+    /// Reproduce CI verbatim by running `cargo xtask ci` inside the
+    /// canonical devcontainer. If `cargo xtask preflight` passes, the
+    /// `Integrity (ubuntu-devcontainer)` GitHub job will pass.
+    Preflight,
     PreCommit,
     Docs(DocsArgs),
     Release(ReleaseArgs),
@@ -167,7 +176,9 @@ fn main() -> Result<()> {
                 compile: false,
             })
         }
+        XtaskCommand::PerfGates => perf_gates(),
         XtaskCommand::Ci => ci(),
+        XtaskCommand::Preflight => preflight(),
         XtaskCommand::PreCommit => {
             cargo(["fmt", "--check"])?;
             cargo([
@@ -414,6 +425,92 @@ fn ci() -> Result<()> {
     cargo(["check", "--all-features"])?;
     cargo(["check", "--no-default-features"])?;
     cargo(["bench", "--no-run", "--all-features"])
+}
+
+/// Run the hardware-dependent perf-gate tests that are excluded from
+/// `cargo xtask ci`. These are marked `#[ignore]` in the test source so
+/// they don't fire on every CI run; this command runs them on demand.
+///
+/// **Where to run this:** locally on stable hardware, or on a dedicated
+/// perf-tracking CI runner. Do NOT run on shared GitHub Actions runners
+/// — the timing variance will produce false failures.
+fn perf_gates() -> Result<()> {
+    cargo([
+        "nextest",
+        "run",
+        "--test",
+        "perf_gates",
+        "--all-features",
+        "--run-ignored",
+        "only",
+    ])
+}
+
+/// Reproduce the GitHub Linux integrity-and-friends jobs verbatim by
+/// running the full CI pipeline inside the canonical devcontainer.
+///
+/// This eliminates the entire class of "passes locally but fails CI"
+/// drift caused by tool-version differences, advisory-db caching, file
+/// permissions, fsync rates, etc. If `cargo xtask preflight` passes,
+/// every job in `.github/workflows/ci.yml` that runs through the
+/// devcontainer will pass too — bit-for-bit equivalent environment.
+///
+/// **Pipeline executed (inside the container):**
+/// 1. `cargo xtask ci`   — clippy, fmt, deny-split, all tests, doctests,
+///                          all-features check, no-default check, bench compile
+/// 2. `cargo xtask cover --ci --threshold 80` — line-coverage gate
+/// 3. `cargo xtask docs` — rustdoc + mdbook build
+/// 4. Strip `*!*.html`  — the rustdoc-emits-bang-redirect workaround
+///                          that the upload-pages-artifact action chokes on
+///
+/// Use this as the gold standard for "is this commit ready to push"
+/// instead of bare `cargo xtask ci` (which runs on the host and skips
+/// coverage and docs).
+///
+/// Cost: ~15-20 minutes on a developer machine (matches the
+/// `Integrity (ubuntu-devcontainer)` job cost). Run BEFORE pushing to
+/// save GitHub Actions minutes.
+fn preflight() -> Result<()> {
+    let script = repo_root()?.join("scripts").join("run-in-devcontainer.sh");
+    if !script.exists() {
+        bail!(
+            "preflight requires scripts/run-in-devcontainer.sh — not found at {}",
+            script.display()
+        );
+    }
+    let mut command = Command::new("bash");
+    command.arg(&script);
+    // The full devcontainer pipeline. `&&` short-circuits — first failure
+    // stops the chain and returns non-zero. The find/chmod steps mirror
+    // the docs job in `.github/workflows/ci.yml` so preflight catches
+    // the same gotchas the GH job would.
+    command.arg(
+        "cargo xtask ci && \
+         cargo xtask cover --ci --threshold 80 && \
+         cargo xtask docs && \
+         find target/site -name '*!*.html' -type f -delete && \
+         find target/site -name '.lock' -type f -delete && \
+         chmod -R u+rX target/site",
+    );
+    run(command)
+}
+
+/// Locate the workspace root by walking up from the current directory
+/// until we find a `Cargo.toml` containing `[workspace]`.
+fn repo_root() -> Result<PathBuf> {
+    let mut current = std::env::current_dir().context("get cwd")?;
+    loop {
+        let manifest = current.join("Cargo.toml");
+        if manifest.exists() {
+            let contents = std::fs::read_to_string(&manifest).context("read manifest")?;
+            if contents.contains("[workspace]") {
+                return Ok(current);
+            }
+        }
+        if !current.pop() {
+            bail!("could not locate workspace root from cwd");
+        }
+    }
 }
 
 fn docs(args: DocsArgs) -> Result<()> {
