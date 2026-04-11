@@ -36,7 +36,10 @@ fn bench_compaction(c: &mut Criterion) {
             BenchmarkId::new("merge_segments", segments),
             &segments,
             |b, &segments| {
-                b.iter_with_setup(
+                // `iter_batched` (BatchSize::SmallInput) replaces the
+                // deprecated `iter_with_setup` and avoids accumulating
+                // setup cost in the measurement.
+                b.iter_batched(
                     || {
                         let dir = TempDir::new().expect("create temp dir");
                         let config = StoreConfig {
@@ -56,6 +59,7 @@ fn bench_compaction(c: &mut Criterion) {
                             .compact(&CompactionConfig::default())
                             .expect("compact");
                     },
+                    criterion::BatchSize::SmallInput,
                 );
             },
         );

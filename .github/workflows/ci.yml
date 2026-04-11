@@ -10,6 +10,12 @@ on:
 env:
   CARGO_TERM_COLOR: always
   PROPTEST_CASES: 256
+  # tests/chaos_testing.rs reads this; default fallback in the test source
+  # is 10, which is too few to expose real concurrency races. The inline
+  # comment in the test file recommends 5000 for meaningful coverage; 500
+  # is the CI compromise (~50x the default, enough to find races but
+  # bounded enough to keep CI under the 20-minute Linux job budget).
+  CHAOS_ITERATIONS: 500
 
 jobs:
   integrity-linux-container:
@@ -89,11 +95,21 @@ jobs:
         run: bash ./scripts/run-in-devcontainer.sh 'cargo run --manifest-path templates/minimal-app/Cargo.toml'
 
   mutants:
+    # Mutation testing smoke run — fast subset (1/12 shard) that completes
+    # in under ~5 minutes. Triggered on every push and pull_request to
+    # surface tests that pass-by-accident (mutations that survive without
+    # being caught by any test). Also runs on manual workflow_dispatch.
+    #
+    # NOTE: this is currently report-only, not a hard gate. cargo-mutants
+    # exits 0 even when mutations survive. The gating story (require
+    # mutation score >= 80%) is a follow-up — see TODO in
+    # tools/xtask/src/main.rs::mutants.
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'pull_request' || github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    needs: [integrity-linux-container, integrity-windows-native]
     steps:
       - uses: actions/checkout@v4
-      - name: Mutation smoke (all features)
+      - name: Mutation smoke (all features, shard 1/12)
         run: bash ./scripts/run-in-devcontainer.sh 'cargo xtask mutants smoke'
 
   mutants-full:
@@ -140,17 +156,24 @@ jobs:
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
-      - name: Build rustdoc in canonical container
-        # Recent rustdoc emits macro.NAME!.html redirects alongside the
-        # canonical macro.NAME.html. The `!` is rejected by
-        # actions/upload-pages-artifact (the underlying tar packing fails
-        # on it), and the redirect file is redundant. We strip them inside
-        # the devcontainer because the rustdoc output is owned by the
-        # in-container user (root), so an outside-container `find -delete`
-        # hits permission-denied.
+      - name: Build rustdoc + scrub upload-pages-artifact gotchas
+        # Two things in the rustdoc output break `actions/upload-pages-artifact@v3`:
+        #   1. `macro.NAME!.html` redirect files — the `!` in the filename
+        #      is rejected by the tar packing the action uses.
+        #   2. `./api/.lock` — a rustdoc-internal lock file with restricted
+        #      permissions; the GH runner user can't read it.
+        # Both files are owned by the in-container user (root) because
+        # rustdoc runs inside the canonical devcontainer. Delete them
+        # INSIDE the container so the host runner doesn't hit
+        # permission-denied. Both deletes are best-effort (`|| true`)
+        # so a missing file doesn't fail the step.
         run: |
-          bash ./scripts/run-in-devcontainer.sh \
-            'cargo xtask docs && find target/site -name "*!*.html" -type f -delete'
+          bash ./scripts/run-in-devcontainer.sh '
+            cargo xtask docs &&
+            find target/site -name "*!*.html" -type f -delete &&
+            find target/site -name ".lock" -type f -delete &&
+            chmod -R u+rX target/site
+          '
       - uses: actions/upload-pages-artifact@v3
         with:
           path: target/site

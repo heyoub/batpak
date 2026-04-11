@@ -134,10 +134,23 @@ fn bench_layout_by_fact(c: &mut Criterion) {
                 .expect("append");
         }
 
+        // Sanity-check ONCE outside the bench loop, not inside `b.iter`.
+        // A correctness assertion inside `iter` (a) crashes the bench
+        // run on regression instead of a clean test failure, (b) adds
+        // a comparison + branch to every measured iteration polluting
+        // the measurement.
+        let warmup = store.by_fact(kind);
+        assert_eq!(
+            warmup.len(),
+            1_000,
+            "BENCH SETUP: expected 1000 events from by_fact before \
+             measurement, got {}. Layout: {name}.",
+            warmup.len()
+        );
+
         group.bench_function(*name, |b| {
             b.iter(|| {
-                let results = store.by_fact(kind);
-                assert_eq!(results.len(), 1_000);
+                criterion::black_box(store.by_fact(kind));
             });
         });
 

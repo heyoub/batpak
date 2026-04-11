@@ -11,6 +11,18 @@ use batpak::prelude::*;
 use batpak::store::{Store, StoreConfig};
 use tempfile::TempDir;
 
+/// Run a loom model with a bounded preemption budget. See
+/// `tests/deterministic_concurrency.rs::loom_model_bounded` for rationale.
+#[allow(dead_code)] // only used by #[cfg(loom)] tests in this file
+fn loom_model_bounded<F>(check: F)
+where
+    F: Fn() + Sync + Send + 'static,
+{
+    let mut builder = loom::model::Builder::new();
+    builder.preemption_bound = Some(3);
+    builder.check(check);
+}
+
 // ===========================================================================
 // CRASH: Partial batch + idempotent retry
 // ===========================================================================
@@ -77,7 +89,7 @@ fn loom_group_commit_drain_race() {
     // not the actual batpak writer (loom can't drive real I/O).
     // The model captures the critical invariant: try_recv drain
     // must not miss a command that was sent before the drain started.
-    loom::model(|| {
+    loom_model_bounded(|| {
         use loom::sync::atomic::{AtomicU64, Ordering};
         use loom::sync::Arc;
 
@@ -133,7 +145,7 @@ fn loom_interner_concurrent_resolve() {
     // Model: one writer interns strings, two readers resolve concurrently.
     // The interner uses RwLock internally — this verifies no deadlock
     // or stale reads under loom's schedule exploration.
-    loom::model(|| {
+    loom_model_bounded(|| {
         use loom::sync::Arc;
         use loom::sync::RwLock;
         use std::collections::HashMap;

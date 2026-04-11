@@ -18,6 +18,27 @@ use batpak::prelude::*;
 use batpak::store::segment::{frame_decode, frame_encode, SegmentHeader};
 use proptest::prelude::*;
 use proptest::strategy::BoxedStrategy;
+use proptest::test_runner::FileFailurePersistence;
+
+/// Build a `ProptestConfig` with the project-wide settings:
+///   - `cases`: from `PROPTEST_CASES` env var (CI sets 256), default 32 locally.
+///   - `failure_persistence`: write failing seeds to a `proptest-regressions/`
+///     directory next to the test source so a flake can be reproduced
+///     deterministically. Without this, every failure is one-shot and the
+///     seed is lost the moment the process exits.
+fn proptest_cfg() -> ProptestConfig {
+    let cases = std::env::var("PROPTEST_CASES")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(32);
+    ProptestConfig {
+        cases,
+        failure_persistence: Some(Box::new(FileFailurePersistence::SourceParallel(
+            "proptest-regressions",
+        ))),
+        ..ProptestConfig::default()
+    }
+}
 
 // ============================================================
 // FUZZ TARGET 1: frame_decode — CRITICAL
@@ -26,12 +47,7 @@ use proptest::strategy::BoxedStrategy;
 // ============================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(
-        std::env::var("PROPTEST_CASES")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(32)
-    ))]
+    #![proptest_config(proptest_cfg())]
 
     /// Fuzz frame_decode with completely random bytes.
     /// Must never panic, only return Ok or Err.
@@ -106,12 +122,7 @@ proptest! {
 // ============================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(
-        std::env::var("PROPTEST_CASES")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(32)
-    ))]
+    #![proptest_config(proptest_cfg())]
 
     /// u128 round-trip through MessagePack.
     #[test]
@@ -232,12 +243,7 @@ proptest! {
 // ============================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(
-        std::env::var("PROPTEST_CASES")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(32)
-    ))]
+    #![proptest_config(proptest_cfg())]
 
     /// Coordinate::new rejects empty strings, accepts non-empty.
     #[test]
@@ -391,12 +397,7 @@ fn arb_outcome_deep() -> impl Strategy<Value = Outcome<i32>> {
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(
-        std::env::var("PROPTEST_CASES")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(32)
-    ))]
+    #![proptest_config(proptest_cfg())]
 
     /// Deep nested Batch: map(id) == id (functor identity, recursive).
     #[test]
@@ -546,12 +547,7 @@ proptest! {
 
 #[cfg(feature = "blake3")]
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(
-        std::env::var("PROPTEST_CASES")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(32)
-    ))]
+    #![proptest_config(proptest_cfg())]
 
     /// Multi-event hash chain: build N events, verify entire chain.
     #[test]

@@ -63,6 +63,22 @@ mod no_blake3_tests {
 mod blake3_tests {
     use super::*;
     use batpak::event::hash::{compute_hash, verify_chain};
+    use proptest::test_runner::FileFailurePersistence;
+
+    /// Project-wide proptest config: env-driven cases + persistent failure seeds.
+    fn proptest_cfg() -> ProptestConfig {
+        let cases = std::env::var("PROPTEST_CASES")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(256);
+        ProptestConfig {
+            cases,
+            failure_persistence: Some(Box::new(FileFailurePersistence::SourceParallel(
+                "proptest-regressions",
+            ))),
+            ..ProptestConfig::default()
+        }
+    }
 
     #[test]
     fn compute_hash_deterministic() {
@@ -96,12 +112,7 @@ mod blake3_tests {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig::with_cases(
-            std::env::var("PROPTEST_CASES")
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(256)
-        ))]
+        #![proptest_config(proptest_cfg())]
 
         #[test]
         fn verify_chain_accepts_valid(content in proptest::collection::vec(any::<u8>(), 0..100)) {

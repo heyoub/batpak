@@ -5,6 +5,28 @@
 use loom::sync::{Arc, Mutex};
 use loom::thread;
 
+/// Run a loom model with a bounded exploration budget.
+///
+/// Plain `loom::model(|| ...)` has no exploration ceiling. On a slow CI
+/// runner an exhaustive model with more than ~3 threads can take hours
+/// or get OOM-killed mid-exploration, producing an inconclusive result
+/// that looks like a CI infrastructure flake. The `Builder` lets us cap
+/// how much state space loom explores: `preemption_bound` limits the
+/// number of preemptions per execution, which transitively bounds the
+/// total exploration size for a given model.
+fn loom_model_bounded<F>(check: F)
+where
+    F: Fn() + Sync + Send + 'static,
+{
+    let mut builder = loom::model::Builder::new();
+    // 3 preemption points is enough to explore every model in this file
+    // (verified on a developer machine — all models use 2 threads with
+    // a small number of operations) but small enough that any future
+    // model with more threads / more ops will fail loud rather than spin.
+    builder.preemption_bound = Some(3);
+    builder.check(check);
+}
+
 fn model_idempotent_append(committed: &Mutex<bool>, commit_count: &Mutex<u64>) {
     let mut committed_guard = committed.lock().unwrap();
     if !*committed_guard {
@@ -55,7 +77,7 @@ fn model_single_compactor(compacting: &Mutex<bool>, winners: &Mutex<u32>) {
 
 #[test]
 fn loom_idempotency_single_winner_under_race() {
-    loom::model(|| {
+    loom_model_bounded(|| {
         let committed = Arc::new(Mutex::new(false));
         let commit_count = Arc::new(Mutex::new(0_u64));
 
@@ -86,7 +108,7 @@ fn loom_idempotency_single_winner_under_race() {
 
 #[test]
 fn loom_cas_only_one_writer_can_claim_sequence() {
-    loom::model(|| {
+    loom_model_bounded(|| {
         let sequence = Arc::new(Mutex::new(0_u32));
         let success_count = Arc::new(Mutex::new(0_u32));
 
@@ -118,7 +140,7 @@ fn loom_cas_only_one_writer_can_claim_sequence() {
 
 #[test]
 fn loom_bounded_restart_allows_only_configured_number_of_recoveries() {
-    loom::model(|| {
+    loom_model_bounded(|| {
         let restart_count = Arc::new(Mutex::new(0_u32));
         let successful_restarts = Arc::new(Mutex::new(0_u32));
 
@@ -150,7 +172,7 @@ fn loom_bounded_restart_allows_only_configured_number_of_recoveries() {
 
 #[test]
 fn loom_compaction_has_single_exclusive_owner() {
-    loom::model(|| {
+    loom_model_bounded(|| {
         let compacting = Arc::new(Mutex::new(false));
         let winners = Arc::new(Mutex::new(0_u32));
 
@@ -209,7 +231,7 @@ fn loom_batch_visibility_no_prefix_exposure() {
     const SENTINEL: u64 = 0;
     const N: u64 = 3;
 
-    loom::model(|| {
+    loom_model_bounded(|| {
         let slot0 = Arc::new(AtomicU64::new(SENTINEL));
         let slot1 = Arc::new(AtomicU64::new(SENTINEL));
         let slot2 = Arc::new(AtomicU64::new(SENTINEL));

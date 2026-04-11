@@ -13,6 +13,22 @@
 
 use batpak::prelude::*;
 use proptest::prelude::*;
+use proptest::test_runner::FileFailurePersistence;
+
+/// Project-wide proptest config: env-driven cases + persistent failure seeds.
+fn proptest_cfg() -> ProptestConfig {
+    let cases = std::env::var("PROPTEST_CASES")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(256);
+    ProptestConfig {
+        cases,
+        failure_persistence: Some(Box::new(FileFailurePersistence::SourceParallel(
+            "proptest-regressions",
+        ))),
+        ..ProptestConfig::default()
+    }
+}
 
 // --- Arbitrary Outcome generator ---
 
@@ -53,12 +69,7 @@ fn f_add_one(x: i32) -> Outcome<i32> {
 
 // --- LEFT IDENTITY: return a >>= f  ≡  f a ---
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(
-        std::env::var("PROPTEST_CASES")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(256)
-    ))]
+    #![proptest_config(proptest_cfg())]
 
     #[test]
     fn left_identity(a in any::<i32>()) {
