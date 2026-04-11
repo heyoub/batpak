@@ -9,7 +9,6 @@ use std::path::Path;
 fn main() {
     println!("cargo:rerun-if-changed=Cargo.toml");
     println!("cargo:rerun-if-changed=src/");
-    link_windows_lmdb_security_support();
 
     check_no_tokio_in_deps();
     check_no_banned_patterns();
@@ -17,14 +16,6 @@ fn main() {
     check_allow_justifications();
     check_no_stubs_in_src();
     check_pub_items_have_tests();
-}
-
-fn link_windows_lmdb_security_support() {
-    let is_windows = std::env::var_os("CARGO_CFG_WINDOWS").is_some();
-    let has_lmdb = std::env::var_os("CARGO_FEATURE_LMDB").is_some();
-    if is_windows && has_lmdb {
-        println!("cargo:rustc-link-lib=Advapi32");
-    }
 }
 
 /// Audit Loop Layer 2 enforcement: no stub markers in production src/.
@@ -180,9 +171,9 @@ fn check_no_banned_patterns() {
                 {
                     panic!(
                         "BANNED PATTERN in {path_str}:{}: bare `.sync()` call.\n\
-                         Use `.sync_with_mode(&config.sync_mode)` instead.\n\
+                         Use `.sync_with_mode(&config.sync.mode)` instead.\n\
                          Bare .sync() hardcodes SyncAll, ignoring the user's config.\n\
-                         See: Bug 9 post-mortem (segment rotation bypassed sync_mode).\n\
+                         See: Bug 9 post-mortem (segment rotation bypassed sync.mode).\n\
                          Line: {trimmed}",
                         line_no + 1
                     );
@@ -241,8 +232,8 @@ fn check_no_banned_patterns() {
 
 fn check_store_config_field_usage() {
     // Invariant: every pub field in StoreConfig must be read somewhere in src/.
-    // This catches "config field defined but never wired up" bugs like
-    // writer_stack_size and sync_mode being ignored.
+    // This catches "config field defined but never wired up" bugs like the
+    // historical writer.stack_size and sync.mode regressions.
     // [SPEC:INVARIANTS — config completeness]
     let config_src = fs::read_to_string("src/store/config.rs")
         .expect("read src/store/config.rs for config check");
@@ -287,14 +278,7 @@ fn check_store_config_field_usage() {
     // so that field definitions and default initializations don't count as "usage".
     let search_text = strip_struct_and_new(&all_src, "StoreConfig");
 
-    // Fields that are defined for external consumers (e.g., cache backends
-    // constructed outside the store). These are intentionally not read in src/.
-    let allowed_external = ["cache_map_size_bytes"];
-
     for field in &fields {
-        if allowed_external.contains(field) {
-            continue;
-        }
         // Look for config.field or .field access patterns (not just the field name
         // as a substring, which would match comments and variable names).
         let dot_field = format!(".{field}");
@@ -304,7 +288,7 @@ fn check_store_config_field_usage() {
                  accessed via `.{field}` in any src/ file (outside struct def and ::new()).\n\
                  Every config field must be wired to actual behavior.\n\
                  Either use the field or remove it from StoreConfig.\n\
-                 See: the writer_stack_size / sync_mode bugs that slipped through review."
+                 See: the historical writer.stack_size / sync.mode bugs that slipped through review."
             );
         }
     }

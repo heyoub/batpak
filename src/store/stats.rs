@@ -18,8 +18,11 @@ pub struct StoreStats {
 pub struct StoreDiagnostics {
     /// Total number of events currently held in the in-memory index.
     pub event_count: usize,
-    /// Current value of the global monotonic sequence counter.
+    /// Current value of the global monotonic sequence counter (allocator).
     pub global_sequence: u64,
+    /// Current visibility watermark (exclusive upper bound).
+    /// Entries with `global_sequence < visible_sequence` are returned by read methods.
+    pub visible_sequence: u64,
     /// Filesystem path to the directory containing segment files.
     pub data_dir: PathBuf,
     /// Maximum segment file size in bytes before rotation.

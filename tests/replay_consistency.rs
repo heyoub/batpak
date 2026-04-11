@@ -2,7 +2,7 @@
 //! [SPEC:tests/replay_consistency.rs]
 
 use batpak::prelude::*;
-use batpak::store::{Store, StoreConfig};
+use batpak::store::{Store, StoreConfig, SyncConfig};
 use tempfile::TempDir;
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -31,7 +31,10 @@ fn seeded_store() -> (Store, TempDir) {
     let config = StoreConfig {
         data_dir: dir.path().to_path_buf(),
         segment_max_bytes: 4096,
-        sync_every_n_events: 1,
+        sync: SyncConfig {
+            every_n_events: 1,
+            ..SyncConfig::default()
+        },
         ..StoreConfig::new("")
     };
     let store = Store::open(config).expect("open");

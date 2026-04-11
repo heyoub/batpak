@@ -167,6 +167,11 @@ impl StoreError {
         Self::CacheFailed(msg.into())
     }
 
+    /// Cache operation failed with a typed error (IO, serialization, etc.).
+    pub(crate) fn cache_error(err: impl std::error::Error + Send + Sync + 'static) -> Self {
+        Self::CacheFailed(Box::new(err))
+    }
+
     /// Serialization failed with a message (no underlying typed error).
     pub(crate) fn ser_msg(msg: &str) -> Self {
         Self::Serialization(msg.into())

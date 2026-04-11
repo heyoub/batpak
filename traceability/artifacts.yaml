@@ -100,6 +100,18 @@
   kind: tests
   paths:
     - src/store/runtime_contracts.rs
+- id: ART-STORE-INDEX
+  kind: source
+  paths:
+    - src/store/index.rs
+- id: ART-STORE-WRITER
+  kind: source
+  paths:
+    - src/store/writer.rs
+- id: ART-STORE-SEGMENT
+  kind: source
+  paths:
+    - src/store/segment.rs
 - id: ART-PROJECTION
   kind: source
   paths:

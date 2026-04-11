@@ -5,7 +5,7 @@
 mod common;
 
 use batpak::prelude::*;
-use batpak::store::{Store, StoreConfig, SyncMode};
+use batpak::store::{Store, StoreConfig, SyncConfig, SyncMode};
 use common::{apply_profile, profile_for_event_count, throughput_elements, BenchProfile};
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use std::sync::Arc;
@@ -22,8 +22,10 @@ fn open_bench_store(
     let dir = TempDir::new().expect("create temp dir");
     let config = StoreConfig {
         data_dir: dir.path().to_path_buf(),
-        sync_every_n_events,
-        sync_mode,
+        sync: SyncConfig {
+            every_n_events: sync_every_n_events,
+            mode: sync_mode,
+        },
         ..StoreConfig::new("")
     };
     let store = Store::open(config).expect("open store");

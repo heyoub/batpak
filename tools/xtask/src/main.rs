@@ -46,8 +46,7 @@ struct SetupArgs {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
 enum BenchSurface {
     Neutral,
-    Redb,
-    Lmdb,
+    Native,
 }
 
 #[derive(Args)]
@@ -255,8 +254,7 @@ fn bench(args: BenchArgs) -> Result<()> {
     command.arg("--surface");
     command.arg(match args.surface {
         BenchSurface::Neutral => "neutral",
-        BenchSurface::Redb => "redb",
-        BenchSurface::Lmdb => "lmdb",
+        BenchSurface::Native => "native",
     });
     if args.save {
         command.arg("--save");

@@ -218,12 +218,14 @@ pub(crate) fn write_checkpoint(
 ///   disk (indicates the data directory was modified externally after the
 ///   checkpoint was written).
 ///
-/// On success returns `(entries, interner_strings, WatermarkInfo)` where entries
+/// On success returns `(entries, interner_strings, watermark, stored_allocator)` where entries
 /// are sorted ascending by `global_sequence` and ready to be passed to
 /// [`restore_from_checkpoint`] along with the interner strings table.
+/// `stored_allocator` is the `global_sequence` allocator position at checkpoint time,
+/// which may be higher than `entries.len()` due to burned batch slots.
 pub(crate) fn try_load_checkpoint(
     data_dir: &Path,
-) -> Option<(Vec<CheckpointEntry>, Vec<String>, WatermarkInfo)> {
+) -> Option<(Vec<CheckpointEntry>, Vec<String>, WatermarkInfo, u64)> {
     let path = data_dir.join(CHECKPOINT_FILENAME);
 
     // ── 1. Read raw bytes ─────────────────────────────────────────────────────
@@ -340,13 +342,22 @@ pub(crate) fn try_load_checkpoint(
         "checkpoint loaded successfully"
     );
 
-    Some((data.entries, data.interner_strings, watermark))
+    Some((
+        data.entries,
+        data.interner_strings,
+        watermark,
+        data.global_sequence,
+    ))
 }
 
 // ── restore_from_checkpoint ───────────────────────────────────────────────────
 
 /// Replay checkpoint entries into `index`, using the interner strings table
 /// to resolve `entity_id` and `scope_id` back to string values.
+///
+/// `stored_allocator` is the `global_sequence` allocator value at checkpoint time.
+/// It may be higher than `entries.len()` due to burned batch slots. After inserting
+/// all entries, the allocator is restored to this value (not the count-derived value).
 ///
 /// Entries must be sorted ascending by `global_sequence` (which
 /// [`write_checkpoint`] guarantees).
@@ -359,7 +370,14 @@ pub(crate) fn restore_from_checkpoint(
     index: &StoreIndex,
     entries: Vec<CheckpointEntry>,
     interner_strings: &[String],
+    stored_allocator: u64,
 ) -> Result<(), StoreError> {
+    // Use the type-safe replay cursor: it preserves each entry's stored
+    // global_sequence verbatim and we pass `stored_allocator` as the commit
+    // hint so the allocator ends up at the original position even when the
+    // highest visible sequence is lower than the allocator (burned slots).
+    let mut cursor = index.begin_replay();
+
     for ce in entries {
         let entity_str = interner_strings
             .get(ce.entity_id as usize)
@@ -394,8 +412,13 @@ pub(crate) fn restore_from_checkpoint(
             global_sequence: ce.global_sequence,
         };
 
-        index.insert(entry);
+        cursor.insert(entry);
     }
+
+    // Commit the cursor with the stored allocator as a hint. The cursor
+    // restores the allocator to max(max_seen + 1, stored_allocator) and
+    // publishes that value as the visibility watermark in one shot.
+    cursor.commit(stored_allocator);
 
     Ok(())
 }
@@ -436,6 +459,8 @@ mod tests {
             };
             idx.insert(entry);
         }
+        // Publish all entries so read methods see them.
+        idx.publish(idx.global_sequence());
         idx
     }
 
@@ -457,7 +482,7 @@ mod tests {
         let result = try_load_checkpoint(dir);
         assert!(result.is_some(), "checkpoint should load");
 
-        let (entries, _strings, wm) = result.expect("some");
+        let (entries, _strings, wm, _alloc) = result.expect("some");
         assert_eq!(entries.len(), 0);
         assert_eq!(wm.watermark_segment_id, 0);
         assert_eq!(wm.watermark_offset, 0);
@@ -472,7 +497,7 @@ mod tests {
         let idx = make_index(16);
         write_checkpoint(&idx, dir, 0, 4096).expect("write");
 
-        let (entries, _strings, wm) = try_load_checkpoint(dir).expect("should load");
+        let (entries, _strings, wm, _alloc) = try_load_checkpoint(dir).expect("should load");
         assert_eq!(entries.len(), 16);
         assert_eq!(wm.watermark_offset, 4096);
 
@@ -492,10 +517,11 @@ mod tests {
         let src = make_index(8);
         write_checkpoint(&src, dir, 0, 0).expect("write");
 
-        let (entries, interner_strings, _wm) = try_load_checkpoint(dir).expect("should load");
+        let (entries, interner_strings, _wm, stored_alloc) =
+            try_load_checkpoint(dir).expect("should load");
 
         let dst = StoreIndex::new();
-        restore_from_checkpoint(&dst, entries, &interner_strings).expect("restore");
+        restore_from_checkpoint(&dst, entries, &interner_strings, stored_alloc).expect("restore");
 
         assert_eq!(dst.len(), 8);
     }
@@ -597,11 +623,12 @@ mod tests {
         let src = make_index(16);
         write_checkpoint(&src, dir, 0, 0).expect("write");
 
-        let (entries, interner_strings, _wm) = try_load_checkpoint(dir).expect("should load");
+        let (entries, interner_strings, _wm, stored_alloc) =
+            try_load_checkpoint(dir).expect("should load");
         assert_eq!(entries.len(), 16);
 
         let dst = StoreIndex::new();
-        restore_from_checkpoint(&dst, entries, &interner_strings).expect("restore");
+        restore_from_checkpoint(&dst, entries, &interner_strings, stored_alloc).expect("restore");
 
         // After restoring 16 entries, global_sequence should be 16
         // (each insert() call increments the counter by 1).
@@ -609,6 +636,13 @@ mod tests {
             dst.global_sequence(),
             16,
             "PROPERTY: global_sequence after restore must equal the number of restored entries."
+        );
+        // Visibility watermark must also advance to 16 (restore_from_checkpoint
+        // calls publish(global_sequence()) at the end).
+        assert_eq!(
+            dst.visible_sequence(),
+            16,
+            "PROPERTY: visible_sequence after restore must equal global_sequence."
         );
     }
 }

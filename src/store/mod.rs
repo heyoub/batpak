@@ -17,7 +17,7 @@ mod index_rebuild;
 /// String interning for compact index keys.
 pub(crate) mod interner;
 mod maintenance;
-/// Projection cache traits and built-in backends (NoCache, redb, LMDB).
+/// Projection cache traits and built-in backends (NoCache, NativeCache).
 pub mod projection;
 mod projection_flow;
 /// Low-level segment file reader for replaying events from disk.
@@ -37,7 +37,9 @@ mod test_support;
 /// Background writer thread, restart policy, and subscriber fanout.
 pub mod writer;
 
-pub use config::{IndexLayout, StoreConfig, SyncMode};
+pub use config::{
+    BatchConfig, IndexConfig, IndexLayout, StoreConfig, SyncConfig, SyncMode, WriterConfig,
+};
 pub use contracts::{
     AppendOptions, AppendReceipt, BatchAppendItem, CausationRef, CompactionConfig,
     CompactionStrategy, RetentionPredicate,
@@ -50,11 +52,9 @@ pub use fault::{
     CountdownAction, CountdownInjector, FaultInjector, InjectionPoint, ProbabilisticInjector,
 };
 pub use index::{ClockKey, DiskPos, IndexEntry};
-#[cfg(feature = "lmdb")]
-pub use projection::LmdbCache;
-#[cfg(feature = "redb")]
-pub use projection::RedbCache;
-pub use projection::{CacheCapabilities, CacheMeta, Freshness, NoCache, ProjectionCache};
+pub use projection::{
+    CacheCapabilities, CacheMeta, Freshness, NativeCache, NoCache, ProjectionCache,
+};
 pub use stats::{StoreDiagnostics, StoreStats};
 pub use subscription::Subscription;
 pub use writer::{Notification, RestartPolicy};
@@ -99,35 +99,20 @@ impl Store {
         Self::open_with_cache(config, Box::new(NoCache))
     }
 
-    /// Open a store with the built-in redb projection cache.
+    /// Open a store with the built-in file-backed projection cache.
     ///
     /// # Errors
-    /// Returns [`StoreError::CacheFailed`] if the redb database cannot be opened,
+    /// Returns [`StoreError::CacheFailed`] if the cache directory cannot be created,
     /// or any error from [`Store::open_with_cache`].
-    #[cfg(feature = "redb")]
-    pub fn open_with_redb_cache(
+    pub fn open_with_native_cache(
         config: StoreConfig,
         cache_path: impl AsRef<std::path::Path>,
     ) -> Result<Self, StoreError> {
-        Self::open_with_cache(config, Box::new(RedbCache::open(cache_path)?))
-    }
-
-    /// Open a store with the built-in LMDB projection cache.
-    ///
-    /// # Errors
-    /// Returns [`StoreError::CacheFailed`] if the LMDB environment cannot be opened,
-    /// or any error from [`Store::open_with_cache`].
-    #[cfg(feature = "lmdb")]
-    pub fn open_with_lmdb_cache(
-        config: StoreConfig,
-        cache_path: impl AsRef<std::path::Path>,
-    ) -> Result<Self, StoreError> {
-        let map_size = config.cache_map_size_bytes;
-        Self::open_with_cache(config, Box::new(LmdbCache::open(cache_path, map_size)?))
+        Self::open_with_cache(config, Box::new(NativeCache::open(cache_path)?))
     }
 
     /// Open a store with a custom projection cache backend.
-    /// Use `RedbCache` or `LmdbCache` (feature-gated) for cache-accelerated `project()` calls.
+    /// Use [`NativeCache`] for file-backed cache-accelerated `project()` calls.
     ///
     /// # Errors
     /// Returns `StoreError::Io` if the data directory cannot be created or segments cannot be read.
@@ -138,12 +123,17 @@ impl Store {
         config.validate()?;
         std::fs::create_dir_all(&config.data_dir)?;
         let config = Arc::new(config);
-        let index = Arc::new(StoreIndex::with_layout(&config.index_layout));
+        let index = Arc::new(StoreIndex::with_layout(&config.index.layout));
         let reader = Arc::new(Reader::new(config.data_dir.clone(), config.fd_budget));
 
         // Cold start: checkpoint fast path or full segment scan.
         // [SPEC:IMPLEMENTATION NOTES item 2 — segment naming, alphabetical scan]
-        index_rebuild::open_index(&index, &reader, &config.data_dir, config.enable_checkpoint)?;
+        index_rebuild::open_index(
+            &index,
+            &reader,
+            &config.data_dir,
+            config.index.enable_checkpoint,
+        )?;
 
         // Tell the reader which segment is active (for mmap dispatch).
         // The writer's initial segment ID is the highest existing + 1.
@@ -480,7 +470,7 @@ impl Store {
         flags: u8,
     ) -> Result<AppendReceipt, StoreError> {
         // Group commit safety: batch > 1 requires idempotency keys for crash recovery.
-        if self.config.group_commit_max_batch > 1 && idempotency_key.is_none() {
+        if self.config.batch.group_commit_max_batch > 1 && idempotency_key.is_none() {
             return Err(StoreError::IdempotencyRequired);
         }
         let payload_bytes =
@@ -504,8 +494,7 @@ impl Store {
         self.writer
             .tx
             .send(WriterCommand::Append {
-                entity: coord.entity_arc(),
-                scope: coord.scope_arc(),
+                coord: coord.clone(),
                 event: Box::new(event),
                 kind,
                 guards: AppendGuards {

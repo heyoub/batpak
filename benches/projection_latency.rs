@@ -2,8 +2,7 @@
 //!
 //! Groups:
 //!   projection_replay        - NoCache: first pass after open vs warm replay
-//!   projection_cache_redb    - RedbCache: cache hit vs cache miss [feature = "redb"]
-//!   projection_cache_lmdb    - LmdbCache: cache hit vs cache miss [feature = "lmdb"]
+//!   projection_cache_native  - NativeCache: cache hit vs cache miss
 
 mod common;
 
@@ -101,7 +100,6 @@ fn bench_projection_replay(c: &mut Criterion) {
     store.close().expect("close");
 }
 
-#[cfg(any(feature = "redb", feature = "lmdb"))]
 fn populate_projection_fixture(store: &Store, entity: &str, events: u64) {
     let coord = Coordinate::new(entity, "bench:scope").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
@@ -112,108 +110,48 @@ fn populate_projection_fixture(store: &Store, entity: &str, events: u64) {
 }
 
 fn bench_projection_caches(c: &mut Criterion) {
-    #[cfg(feature = "redb")]
-    {
-        use batpak::store::projection::RedbCache;
+    let mut group = c.benchmark_group("projection_cache_native");
+    apply_profile(&mut group, BenchProfile::Quick);
+    throughput_elements(&mut group, 1_000);
 
-        let mut group = c.benchmark_group("projection_cache_redb");
-        apply_profile(&mut group, BenchProfile::Quick);
-        throughput_elements(&mut group, 1_000);
-
-        let dir = TempDir::new().expect("create temp dir");
-        let config = StoreConfig {
-            data_dir: dir.path().join("data"),
-            ..StoreConfig::new("")
-        };
-        let cache = RedbCache::open(dir.path().join("cache.redb")).expect("open redb cache");
-        let store =
-            Store::open_with_cache(config, Box::new(cache)).expect("open store with redb cache");
-        populate_projection_fixture(&store, "bench:entity", 1_000);
-        let miss_entities: Vec<String> = (0..64).map(|i| format!("bench:miss:{i}")).collect();
-        for entity in &miss_entities {
-            populate_projection_fixture(&store, entity, 1_000);
-        }
-        store.sync().expect("sync");
-        let _: Option<Counter> = store
-            .project("bench:entity", &Freshness::Consistent)
-            .expect("warm redb cache");
-
-        group.bench_function("cache_hit", |b| {
-            b.iter(|| {
-                let _: Option<Counter> = store
-                    .project("bench:entity", &Freshness::Consistent)
-                    .expect("project");
-            });
-        });
-
-        let mut miss_index = 0usize;
-        group.bench_function("cache_miss", |b| {
-            b.iter(|| {
-                let entity = &miss_entities[miss_index % miss_entities.len()];
-                miss_index += 1;
-                let _: Option<Counter> = store
-                    .project(entity, &Freshness::Consistent)
-                    .expect("project miss");
-            });
-        });
-
-        group.finish();
-        store.close().expect("close");
+    let dir = TempDir::new().expect("create temp dir");
+    let config = StoreConfig {
+        data_dir: dir.path().join("data"),
+        ..StoreConfig::new("")
+    };
+    let store = Store::open_with_native_cache(config, dir.path().join("cache"))
+        .expect("open store with native cache");
+    populate_projection_fixture(&store, "bench:entity", 1_000);
+    let miss_entities: Vec<String> = (0..64).map(|i| format!("bench:miss:{i}")).collect();
+    for entity in &miss_entities {
+        populate_projection_fixture(&store, entity, 1_000);
     }
+    store.sync().expect("sync");
+    let _: Option<Counter> = store
+        .project("bench:entity", &Freshness::Consistent)
+        .expect("warm native cache");
 
-    #[cfg(feature = "lmdb")]
-    {
-        use batpak::store::projection::LmdbCache;
-        const LMDB_MAP_SIZE: usize = 10 * 1024 * 1024;
-
-        let mut group = c.benchmark_group("projection_cache_lmdb");
-        apply_profile(&mut group, BenchProfile::Quick);
-        throughput_elements(&mut group, 1_000);
-
-        let dir = TempDir::new().expect("create temp dir");
-        let config = StoreConfig {
-            data_dir: dir.path().join("data"),
-            ..StoreConfig::new("")
-        };
-        let cache =
-            LmdbCache::open(dir.path().join("lmdb_cache"), LMDB_MAP_SIZE).expect("open cache");
-        let store =
-            Store::open_with_cache(config, Box::new(cache)).expect("open store with lmdb cache");
-        populate_projection_fixture(&store, "bench:entity", 1_000);
-        let miss_entities: Vec<String> = (0..64).map(|i| format!("bench:miss:{i}")).collect();
-        for entity in &miss_entities {
-            populate_projection_fixture(&store, entity, 1_000);
-        }
-        store.sync().expect("sync");
-        let _: Option<Counter> = store
-            .project("bench:entity", &Freshness::Consistent)
-            .expect("warm lmdb cache");
-
-        group.bench_function("cache_hit", |b| {
-            b.iter(|| {
-                let _: Option<Counter> = store
-                    .project("bench:entity", &Freshness::Consistent)
-                    .expect("project");
-            });
+    group.bench_function("cache_hit", |b| {
+        b.iter(|| {
+            let _: Option<Counter> = store
+                .project("bench:entity", &Freshness::Consistent)
+                .expect("project");
         });
+    });
 
-        let mut miss_index = 0usize;
-        group.bench_function("cache_miss", |b| {
-            b.iter(|| {
-                let entity = &miss_entities[miss_index % miss_entities.len()];
-                miss_index += 1;
-                let _: Option<Counter> = store
-                    .project(entity, &Freshness::Consistent)
-                    .expect("project miss");
-            });
+    let mut miss_index = 0usize;
+    group.bench_function("cache_miss", |b| {
+        b.iter(|| {
+            let entity = &miss_entities[miss_index % miss_entities.len()];
+            miss_index += 1;
+            let _: Option<Counter> = store
+                .project(entity, &Freshness::Consistent)
+                .expect("project miss");
         });
+    });
 
-        group.finish();
-        store.close().expect("close");
-    }
-
-    #[cfg(not(any(feature = "redb", feature = "lmdb")))]
-    let _ = c;
+    group.finish();
+    store.close().expect("close");
 }
 
 criterion_group!(benches, bench_projection_replay, bench_projection_caches);

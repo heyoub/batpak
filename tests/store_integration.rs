@@ -15,20 +15,11 @@
 //! Arc<str> serialization path (Phase 1.1 fix) through round-trip persistence.
 
 use batpak::prelude::*;
-use batpak::store::{Freshness, Store, StoreConfig};
+use batpak::store::{Freshness, Store, StoreConfig, SyncConfig};
 use tempfile::TempDir;
 
-fn test_store() -> (Store, TempDir) {
-    let dir = TempDir::new().expect("create temp dir");
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        segment_max_bytes: 4096, // small segments to force rotation
-        sync_every_n_events: 1,
-        ..StoreConfig::new("")
-    };
-    let store = Store::open(config).expect("open store");
-    (store, dir)
-}
+mod common;
+use common::small_segment_store as test_store;
 
 // --- Basic append/get round-trip ---
 
@@ -449,7 +440,10 @@ fn segment_rotation_on_size() {
     let config = StoreConfig {
         data_dir: dir.path().to_path_buf(),
         segment_max_bytes: 512, // tiny segments
-        sync_every_n_events: 1,
+        sync: SyncConfig {
+            every_n_events: 1,
+            ..SyncConfig::default()
+        },
         ..StoreConfig::new("")
     };
     let store = Store::open(config).expect("open store");

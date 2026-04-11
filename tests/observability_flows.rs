@@ -4,7 +4,7 @@
 use batpak::prelude::*;
 use batpak::store::{
     CacheCapabilities, CacheMeta, CompactionConfig, Freshness, ProjectionCache, Store, StoreConfig,
-    StoreError,
+    StoreError, SyncConfig,
 };
 use std::io;
 use std::sync::{Arc, Mutex};
@@ -115,7 +115,10 @@ fn named_store_flows_emit_traceable_events() {
         let config = StoreConfig {
             data_dir: dir.path().to_path_buf(),
             segment_max_bytes: 4096,
-            sync_every_n_events: 1,
+            sync: SyncConfig {
+                every_n_events: 1,
+                ..SyncConfig::default()
+            },
             ..StoreConfig::new("")
         };
         let store = Store::open(config).expect("open store");
@@ -177,7 +180,10 @@ fn project_failure_paths_emit_cache_warnings_without_hiding_flow() {
         let config = StoreConfig {
             data_dir: dir.path().to_path_buf(),
             segment_max_bytes: 4096,
-            sync_every_n_events: 1,
+            sync: SyncConfig {
+                every_n_events: 1,
+                ..SyncConfig::default()
+            },
             ..StoreConfig::new("")
         };
         let store = Store::open_with_cache(config, Box::new(FailingPrefetchCache))
@@ -221,7 +227,10 @@ fn append_reaction_emits_distinct_flow_telemetry() {
         let config = StoreConfig {
             data_dir: dir.path().to_path_buf(),
             segment_max_bytes: 4096,
-            sync_every_n_events: 1,
+            sync: SyncConfig {
+                every_n_events: 1,
+                ..SyncConfig::default()
+            },
             ..StoreConfig::new("")
         };
         let store = Store::open(config).expect("open store");

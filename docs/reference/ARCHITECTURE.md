@@ -79,7 +79,7 @@ The **Store** is the runtime. It manages:
 
 - **Write path**: `append()` serializes to MessagePack, sends to the background writer thread via flume channel, writer appends to the active segment file, computes CRC32 + optional Blake3 hash, indexes the event, broadcasts to subscribers.
 - **Read path**: `get()`, `query()`, `stream()`, `by_scope()`, `by_fact()` — all sync, all go through the in-memory index.
-- **Projection path**: `project::<T>(entity, freshness)` replays events through `EventSourced::from_events()` with optional caching (NoCache, RedbCache, LmdbCache).
+- **Projection path**: `project::<T>(entity, freshness)` replays events through `EventSourced::from_events()` with optional caching (NoCache, NativeCache).
 - **Subscription path**: `subscribe(region)` returns a push-based `Subscription` (lossy, bounded flume channel). `cursor(region)` returns a pull-based `Cursor` (guaranteed delivery). `watch_projection::<T>(entity, freshness)` returns a `ProjectionWatcher` that auto-re-projects on new events.
 - **Lifecycle**: `sync()`, `snapshot()`, `compact()`, `close()`.
 
@@ -94,7 +94,7 @@ caller → [flume bounded channel] → writer thread → segment file
          [flume oneshot]        ← AppendReceipt
 ```
 
-When the channel is full, producers block — this is intentional back-pressure. Tune `writer_channel_capacity` to control the threshold.
+When the channel is full, producers block — this is intentional back-pressure. Tune `writer.channel_capacity` to control the threshold.
 
 ### Storage Format
 
@@ -104,7 +104,7 @@ Events are stored in **segment files** — append-only files with MessagePack-en
 
 **Secondary scan index**: When `IndexLayout` is set to `SoA`, `AoSoA8/16/64`, or `SoAoS`, a columnar secondary index replaces the `by_fact` and `scope_entities` DashMaps for cache-friendly scan queries. AoSoA variants use const-generic `Tile<N>` structs with `#[repr(C, align(64))]` for cache-line alignment.
 
-**Group commit**: The writer can batch multiple appends before a single fsync, controlled by `group_commit_max_batch`. When batch > 1, all appends must include idempotency keys for crash safety.
+**Group commit**: The writer can batch multiple appends before a single fsync, controlled by `batch.group_commit_max_batch`. When batch > 1, all appends must include idempotency keys for crash safety.
 
 **Batch append**: `Store::append_batch()` provides atomic bulk insertion with a two-phase commit envelope:
 - `SYSTEM_BATCH_BEGIN` marker written before batch items

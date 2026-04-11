@@ -136,9 +136,8 @@ impl EventSourced<serde_json::Value> for IncrementalCounter {
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn test_coord() -> Coordinate {
-    Coordinate::new("entity:test", "scope:test").expect("valid coord")
-}
+mod common;
+use common::test_coord;
 
 fn kind_a() -> EventKind {
     EventKind::custom(0xF, 1)
@@ -415,20 +414,17 @@ fn versioned_cache_key_isolates_versions() {
     store.close().expect("close");
 }
 
-#[cfg(feature = "redb")]
 #[test]
-fn versioned_cache_key_isolates_with_redb() {
-    use batpak::store::RedbCache;
+fn versioned_cache_key_isolates_with_native_cache() {
     let dir = TempDir::new().expect("temp dir");
-    let cache_path = dir.path().join("cache.redb");
-    let cache = RedbCache::open(&cache_path).expect("open redb");
+    let cache_path = dir.path().join("cache");
     let config = StoreConfig::new(dir.path().join("data"));
-    let store = Store::open_with_cache(config, Box::new(cache)).expect("open with redb");
+    let store = Store::open_with_native_cache(config, &cache_path).expect("open with native cache");
     let coord = Coordinate::new("svr:entity", "svr:scope").expect("coord");
     for i in 0u32..5 {
         store.append(&coord, kind_a(), &payload(i)).expect("append");
     }
-    // Project with AllCounter (v0) — populates redb cache under key "svr:entity"
+    // Project with AllCounter (v0) — populates native cache under key "svr:entity"
     let r1: Option<AllCounter> = store
         .project("svr:entity", &Freshness::Consistent)
         .expect("project v0");
@@ -441,7 +437,7 @@ fn versioned_cache_key_isolates_with_redb() {
     assert_eq!(
         r2.expect("some").count,
         5,
-        "PROPERTY: redb-backed schema-versioned cache keys must isolate types.\n\
+        "PROPERTY: native-cache-backed schema-versioned cache keys must isolate types.\n\
          v0 and v2 projections must not share a cache slot.\n\
          Investigate: src/store/projection_flow.rs cache key with schema_version."
     );
@@ -840,7 +836,7 @@ fn config_validation_rejects_zero_writer_channel_capacity() {
     let result = Store::open(config);
     assert!(
         result.is_err(),
-        "PROPERTY: writer_channel_capacity=0 must be rejected (deadlocks on first append).\n\
+        "PROPERTY: writer.channel_capacity=0 must be rejected (deadlocks on first append).\n\
          Investigate: src/store/config.rs validate()."
     );
 }

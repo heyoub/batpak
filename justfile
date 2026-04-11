@@ -59,11 +59,8 @@ bench: bench-neutral
 bench-neutral:
     cargo xtask bench --surface neutral
 
-bench-redb:
-    cargo xtask bench --surface redb
-
-bench-lmdb:
-    cargo xtask bench --surface lmdb
+bench-native:
+    cargo xtask bench --surface native
 
 bench-report surface="neutral":
     cargo xtask bench --surface {{surface}}

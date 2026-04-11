@@ -12,6 +12,6 @@ For performance work:
 
 ```bash
 cargo xtask bench --surface neutral
-cargo xtask bench --surface redb --save
-cargo xtask bench --surface lmdb --compare
+cargo xtask bench --surface native --save
+cargo xtask bench --surface neutral --compare
 ```

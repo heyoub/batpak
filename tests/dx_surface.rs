@@ -9,7 +9,6 @@ fn store_config_builder_methods_are_chainable() {
         .with_fd_budget(9)
         .with_writer_channel_capacity(10)
         .with_broadcast_capacity(11)
-        .with_cache_map_size_bytes(12)
         .with_restart_policy(RestartPolicy::Bounded {
             max_restarts: 2,
             within_ms: 30_000,
@@ -20,54 +19,36 @@ fn store_config_builder_methods_are_chainable() {
         .with_sync_mode(SyncMode::SyncData);
 
     assert_eq!(config.segment_max_bytes, 1024);
-    assert_eq!(config.sync_every_n_events, 7);
+    assert_eq!(config.sync.every_n_events, 7);
     assert_eq!(config.fd_budget, 9);
-    assert_eq!(config.writer_channel_capacity, 10);
+    assert_eq!(config.writer.channel_capacity, 10);
     assert_eq!(config.broadcast_capacity, 11);
-    assert_eq!(config.cache_map_size_bytes, 12);
     assert!(matches!(
-        config.restart_policy,
+        config.writer.restart_policy,
         RestartPolicy::Bounded {
             max_restarts: 2,
             within_ms: 30_000
         }
     ));
-    assert_eq!(config.shutdown_drain_limit, 13);
-    assert_eq!(config.writer_stack_size, Some(14));
+    assert_eq!(config.writer.shutdown_drain_limit, 13);
+    assert_eq!(config.writer.stack_size, Some(14));
     assert!(config.clock.is_some());
-    assert!(matches!(config.sync_mode, SyncMode::SyncData));
+    assert!(matches!(config.sync.mode, SyncMode::SyncData));
 }
 
-#[cfg(feature = "redb")]
 #[test]
-fn open_with_redb_cache_is_available_for_common_setup() {
+fn open_with_native_cache_is_available_for_common_setup() {
     let data_dir = tempfile::tempdir().expect("data dir");
     let cache_dir = tempfile::tempdir().expect("cache dir");
-    let store = Store::open_with_redb_cache(
+    let store = Store::open_with_native_cache(
         StoreConfig::new(data_dir.path()),
-        cache_dir.path().join("projection.redb"),
+        cache_dir.path().join("projection_cache"),
     )
-    .expect("open store with redb cache");
-    let coord = Coordinate::new("entity:redb", "scope:test").expect("coord");
+    .expect("open store with native cache");
+    let coord = Coordinate::new("entity:native", "scope:test").expect("coord");
     let kind = EventKind::custom(0xF, 1);
     let receipt = store
-        .append(&coord, kind, &serde_json::json!({"hello": "redb"}))
-        .expect("append");
-    assert!(receipt.event_id != 0);
-}
-
-#[cfg(feature = "lmdb")]
-#[test]
-fn open_with_lmdb_cache_is_available_for_common_setup() {
-    let data_dir = tempfile::tempdir().expect("data dir");
-    let cache_dir = tempfile::tempdir().expect("cache dir");
-    let config = StoreConfig::new(data_dir.path()).with_cache_map_size_bytes(4 * 1024 * 1024);
-    let store =
-        Store::open_with_lmdb_cache(config, cache_dir.path()).expect("open store with lmdb");
-    let coord = Coordinate::new("entity:lmdb", "scope:test").expect("coord");
-    let kind = EventKind::custom(0xF, 1);
-    let receipt = store
-        .append(&coord, kind, &serde_json::json!({"hello": "lmdb"}))
+        .append(&coord, kind, &serde_json::json!({"hello": "native"}))
         .expect("append");
     assert!(receipt.event_id != 0);
 }

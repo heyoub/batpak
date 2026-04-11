@@ -1,4 +1,8 @@
 #![warn(missing_docs)]
+// Intentional impossible-feature guards (async-store, sha256, exponential-backoff) use
+// cfg attributes for features that are NOT declared in Cargo.toml. Suppress the
+// unexpected_cfgs warning at crate level because item-level #[allow] is unreliable
+// for cfg checks on some toolchain versions.
 #![allow(unexpected_cfgs)]
 // cast_possible_truncation and cast_sign_loss are enforced via [lints.clippy] in Cargo.toml.
 // Each intentional cast has an inline #[allow] with a justification comment.

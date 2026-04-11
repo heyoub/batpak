@@ -2,7 +2,6 @@
 
 Use:
 
-- `Store::open_with_redb_cache(...)` with the `redb` feature
-- `Store::open_with_lmdb_cache(...)` with the `lmdb` feature
+- `Store::open_with_native_cache(config, cache_path)` for the built-in file-backed projection cache (no feature flag required)
 
-These wrap the lower-level `open_with_cache` API for common setups.
+This wraps the lower-level `open_with_cache` API for common setups.

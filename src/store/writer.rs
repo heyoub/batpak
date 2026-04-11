@@ -10,7 +10,7 @@ compile_error!(
 
 use crate::coordinate::{Coordinate, DagPosition};
 use crate::event::{Event, EventHeader, EventKind, HashChain};
-use crate::store::contracts::BatchAppendItem;
+use crate::store::contracts::{BatchAppendItem, CausationRef};
 use crate::store::index::{DiskPos, IndexEntry, StoreIndex};
 use crate::store::segment::{self, Active, FramePayloadRef, Segment};
 use crate::store::{AppendReceipt, BatchStage, StoreConfig, StoreError};
@@ -31,8 +31,7 @@ const BATCH_MARKER_SCOPE: &str = "_system";
 /// [SPEC:src/store/writer.rs]
 pub(crate) enum WriterCommand {
     Append {
-        entity: Arc<str>,
-        scope: Arc<str>,
+        coord: Coordinate,
         event: Box<Event<Vec<u8>>>, // pre-serialized payload as msgpack bytes
         kind: EventKind,
         guards: AppendGuards,
@@ -148,7 +147,7 @@ impl WriterHandle {
         let initial_segment_id = find_latest_segment_id(&config.data_dir).unwrap_or(0) + 1;
         let initial_segment = Segment::<Active>::create(&config.data_dir, initial_segment_id)?;
 
-        let (tx, rx) = flume::bounded::<WriterCommand>(config.writer_channel_capacity);
+        let (tx, rx) = flume::bounded::<WriterCommand>(config.writer.channel_capacity);
         let subs = Arc::clone(subscribers);
         let cfg = Arc::clone(config);
         let idx = Arc::clone(index);
@@ -164,7 +163,7 @@ impl WriterHandle {
         });
 
         let mut builder = std::thread::Builder::new().name(thread_name);
-        if let Some(stack_size) = config.writer_stack_size {
+        if let Some(stack_size) = config.writer.stack_size {
             builder = builder.stack_size(stack_size);
         }
         let thread = builder
@@ -257,7 +256,7 @@ fn writer_thread_main(
                     "unknown panic".to_string()
                 };
 
-                let budget_ok = match &config.restart_policy {
+                let budget_ok = match &config.writer.restart_policy {
                     RestartPolicy::Once => {
                         if restarts >= 1 {
                             false
@@ -288,14 +287,14 @@ fn writer_thread_main(
                     tracing::error!(
                         "writer restart budget exhausted — thread exiting. \
                          Last panic: {panic_msg}. Policy: {:?}",
-                        config.restart_policy
+                        config.writer.restart_policy
                     );
                     return;
                 }
 
                 tracing::warn!(
                     "writer panic — restarting ({restarts}/{max}). Panic: {panic_msg}",
-                    max = match &config.restart_policy {
+                    max = match &config.writer.restart_policy {
                         RestartPolicy::Once => 1,
                         RestartPolicy::Bounded { max_restarts, .. } => *max_restarts,
                     }
@@ -344,15 +343,14 @@ fn writer_loop(
     for cmd in rx.iter() {
         match cmd {
             WriterCommand::Append {
-                entity,
-                scope,
+                coord,
                 event,
                 kind,
                 guards,
                 respond,
             } => {
                 // Process first command in batch.
-                let result = state.handle_append(&entity, &scope, *event, kind, &guards);
+                let result = state.handle_append(&coord, *event, kind, &guards);
                 let _ = respond.send(result);
                 events_since_sync += 1;
 
@@ -360,25 +358,24 @@ fn writer_loop(
                 // group_commit_max_batch == 0 means unbounded drain (drain all pending).
                 // group_commit_max_batch == 1 means no draining (backward compat, per-event).
                 // group_commit_max_batch > 1 means drain up to (batch - 1) more.
-                let extra_budget = if config.group_commit_max_batch == 0 {
+                let extra_budget = if config.batch.group_commit_max_batch == 0 {
                     u32::MAX
-                } else if config.group_commit_max_batch == 1 {
+                } else if config.batch.group_commit_max_batch == 1 {
                     0u32
                 } else {
-                    config.group_commit_max_batch.saturating_sub(1)
+                    config.batch.group_commit_max_batch.saturating_sub(1)
                 };
                 let mut drained = 0u32;
                 while drained < extra_budget {
                     match rx.try_recv() {
                         Ok(WriterCommand::Append {
-                            entity: e2,
-                            scope: s2,
+                            coord: c2,
                             event: ev2,
                             kind: k2,
                             guards: g2,
                             respond: r2,
                         }) => {
-                            let res2 = state.handle_append(&e2, &s2, *ev2, k2, &g2);
+                            let res2 = state.handle_append(&c2, *ev2, k2, &g2);
                             let _ = r2.send(res2);
                             events_since_sync += 1;
                             drained += 1;
@@ -392,7 +389,7 @@ fn writer_loop(
                         }
                         Ok(WriterCommand::Sync { respond: r }) => {
                             // Sync mid-batch: honor immediately, stop draining.
-                            let sr = state.active_segment.sync_with_mode(&config.sync_mode);
+                            let sr = state.active_segment.sync_with_mode(&config.sync.mode);
                             let _ = r.send(sr);
                             events_since_sync = 0;
                             break;
@@ -401,7 +398,7 @@ fn writer_loop(
                             // Shutdown mid-batch: sync current batch, then exit.
                             // Propagate sync errors honestly — lifecycle honesty invariant.
                             let shutdown_result = if events_since_sync > 0 {
-                                let sr = state.active_segment.sync_with_mode(&config.sync_mode);
+                                let sr = state.active_segment.sync_with_mode(&config.sync.mode);
                                 if let Err(ref e) = sr {
                                     tracing::error!("group commit pre-shutdown sync: {e}");
                                 }
@@ -427,8 +424,8 @@ fn writer_loop(
                 }
 
                 // Single fsync for the entire batch.
-                if events_since_sync >= config.sync_every_n_events {
-                    if let Err(e) = state.active_segment.sync_with_mode(&config.sync_mode) {
+                if events_since_sync >= config.sync.every_n_events {
+                    if let Err(e) = state.active_segment.sync_with_mode(&config.sync.mode) {
                         tracing::error!("periodic sync failed: {e}");
                     }
                     events_since_sync = 0;
@@ -440,15 +437,15 @@ fn writer_loop(
                 events_since_sync += 1; // Batch counts as one sync event
 
                 // Sync after batch if needed.
-                if events_since_sync >= config.sync_every_n_events {
-                    if let Err(e) = state.active_segment.sync_with_mode(&config.sync_mode) {
+                if events_since_sync >= config.sync.every_n_events {
+                    if let Err(e) = state.active_segment.sync_with_mode(&config.sync.mode) {
                         tracing::error!("post-batch sync failed: {e}");
                     }
                     events_since_sync = 0;
                 }
             }
             WriterCommand::Sync { respond } => {
-                let result = state.active_segment.sync_with_mode(&config.sync_mode);
+                let result = state.active_segment.sync_with_mode(&config.sync.mode);
                 let _ = respond.send(result);
                 events_since_sync = 0;
             }
@@ -456,18 +453,16 @@ fn writer_loop(
                 // Drain up to shutdown_drain_limit queued commands.
                 // [SPEC:src/store/writer.rs — Shutdown drain semantics]
                 let mut drained = 0;
-                while drained < config.shutdown_drain_limit {
+                while drained < config.writer.shutdown_drain_limit {
                     match rx.try_recv() {
                         Ok(WriterCommand::Append {
-                            entity,
-                            scope,
+                            coord,
                             event,
                             kind,
                             guards,
                             respond: r,
                         }) => {
-                            let result =
-                                state.handle_append(&entity, &scope, *event, kind, &guards);
+                            let result = state.handle_append(&coord, *event, kind, &guards);
                             let _ = r.send(result);
                             drained += 1;
                         }
@@ -475,7 +470,7 @@ fn writer_loop(
                             let _ = r.send(Ok(()));
                         }
                         Ok(WriterCommand::Sync { respond: r }) => {
-                            let _ = r.send(state.active_segment.sync_with_mode(&config.sync_mode));
+                            let _ = r.send(state.active_segment.sync_with_mode(&config.sync.mode));
                         }
                         Ok(WriterCommand::AppendBatch { items, respond: r }) => {
                             // Drain batches during shutdown.
@@ -498,7 +493,7 @@ fn writer_loop(
                 {
                     tracing::warn!("shutdown SIDX footer write failed (non-fatal): {e}");
                 }
-                let sync_result = state.active_segment.sync_with_mode(&config.sync_mode);
+                let sync_result = state.active_segment.sync_with_mode(&config.sync.mode);
                 if let Err(ref e) = sync_result {
                     tracing::error!("shutdown sync failed: {e}");
                 }
@@ -520,7 +515,8 @@ fn writer_loop(
 }
 
 /// Options and guards for an append operation, passed through the channel.
-/// CAS + idempotency checks execute under the entity lock — no TOCTOU.
+/// CAS + idempotency checks execute on the single writer thread, so there
+/// is no producer/producer race to guard against.
 pub(crate) struct AppendGuards {
     pub correlation_id: u128,
     pub causation_id: Option<u128>,
@@ -528,36 +524,272 @@ pub(crate) struct AppendGuards {
     pub idempotency_key: Option<u128>,
 }
 
+/// Pre-computed per-item batch state shared between the precompute, write,
+/// stage, and broadcast phases of `handle_append_batch`.
+struct BatchItemComputed {
+    global_seq: u64,
+    clock: u32,
+    prev_hash: [u8; 32],
+    event_id: u128,
+    causation_id: Option<u128>,
+}
+
 impl WriterState<'_> {
+    /// Check whether the active segment needs rotation, and if so, seal it,
+    /// write its SIDX footer, sync, and create a new active segment.
+    ///
+    /// Returns `Ok(true)` if a rotation occurred, `Ok(false)` if no rotation
+    /// was needed. On rotation, the SIDX collector is reset, the old segment
+    /// is sealed, segment_id is advanced, and the reader is notified.
+    ///
+    /// Callers needing batch-specific error context should wrap with
+    /// `.map_err(|e| StoreError::BatchFailed { ... })`.
+    fn maybe_rotate_segment(&mut self) -> Result<bool, StoreError> {
+        if !self
+            .active_segment
+            .needs_rotation(self.config.segment_max_bytes)
+        {
+            return Ok(false);
+        }
+        // Write SIDX footer before sealing. append_frames_from_segment now
+        // strips SIDX data via detect_sidx_boundary, so this is safe.
+        if let Err(e) = self.active_segment.write_sidx_footer(&self.sidx_collector) {
+            tracing::warn!("SIDX footer write failed (non-fatal): {e}");
+        }
+        self.sidx_collector = crate::store::sidx::SidxEntryCollector::new();
+        self.active_segment.sync_with_mode(&self.config.sync.mode)?;
+        let old = std::mem::replace(
+            self.active_segment,
+            Segment::<Active>::create(&self.config.data_dir, *self.segment_id + 1)?,
+        );
+        let _sealed = old.seal();
+        *self.segment_id += 1;
+        // Notify the reader of the new active segment so mmap dispatch is correct.
+        self.reader.set_active_segment(*self.segment_id);
+        Ok(true)
+    }
+
+    /// STEPs 1-2: Validate batch size, total bytes, and reject CAS in batches.
+    fn validate_batch(&self, items: &[BatchAppendItem]) -> Result<(), StoreError> {
+        if items.len() > self.config.batch.max_size as usize {
+            return Err(StoreError::BatchFailed {
+                item_index: 0,
+                stage: BatchStage::Validation,
+                source: Box::new(StoreError::Configuration(format!(
+                    "batch size {} exceeds max {}",
+                    items.len(),
+                    self.config.batch.max_size
+                ))),
+            });
+        }
+        let total_bytes: usize = items.iter().map(|i| i.payload_bytes.len()).sum();
+        if total_bytes > self.config.batch.max_bytes as usize {
+            return Err(StoreError::BatchFailed {
+                item_index: 0,
+                stage: BatchStage::Validation,
+                source: Box::new(StoreError::Configuration(format!(
+                    "batch bytes {} exceeds max {}",
+                    total_bytes, self.config.batch.max_bytes
+                ))),
+            });
+        }
+        for (idx, item) in items.iter().enumerate() {
+            if item.options.expected_sequence.is_some() {
+                return Err(StoreError::BatchFailed {
+                    item_index: idx,
+                    stage: BatchStage::Validation,
+                    source: Box::new(StoreError::Configuration(
+                        "CAS not supported in batch append (v1)".into(),
+                    )),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    /// STEP 3: Preflight idempotency check.
+    /// Returns `Ok(Some(receipts))` if every item is already committed (full replay),
+    /// `Ok(None)` to proceed with the batch write, or `Err` for partial-replay ambiguity.
+    fn preflight_batch_idempotency(
+        &self,
+        items: &[BatchAppendItem],
+    ) -> Result<Option<Vec<AppendReceipt>>, StoreError> {
+        let mut cached_receipts: Vec<Option<AppendReceipt>> = vec![None; items.len()];
+        let mut cached_count = 0usize;
+        for (idx, item) in items.iter().enumerate() {
+            if let Some(key) = item.options.idempotency_key {
+                if let Some(entry) = self.index.get_by_id(key) {
+                    cached_receipts[idx] = Some(AppendReceipt {
+                        event_id: entry.event_id,
+                        sequence: entry.global_sequence,
+                        disk_pos: entry.disk_pos,
+                    });
+                    cached_count += 1;
+                }
+            }
+        }
+        if cached_count == items.len() {
+            return Ok(Some(
+                cached_receipts
+                    .into_iter()
+                    .map(|r| r.expect("full replay: all cached_receipts verified as Some"))
+                    .collect(),
+            ));
+        }
+        if cached_count > 0 {
+            return Err(StoreError::BatchFailed {
+                item_index: cached_receipts
+                    .iter()
+                    .position(|r| r.is_none())
+                    .unwrap_or(0),
+                stage: BatchStage::Validation,
+                source: Box::new(StoreError::Configuration(
+                    "partial batch replay: some items already committed, some not".into(),
+                )),
+            });
+        }
+        Ok(None)
+    }
+
+    /// Pre-compute per-item global sequences, clocks, prev_hashes, event_ids,
+    /// and causation. Builds intra-batch entity clock + hash chains so multiple
+    /// items per entity get incrementing clocks before the index is updated.
+    fn precompute_batch_items(
+        &self,
+        items: &[BatchAppendItem],
+        first_seq: u64,
+    ) -> Result<Vec<BatchItemComputed>, StoreError> {
+        let mut computed: Vec<BatchItemComputed> = Vec::with_capacity(items.len());
+        let mut entity_prev_hashes: std::collections::HashMap<Arc<str>, [u8; 32]> =
+            std::collections::HashMap::new();
+        let mut entity_batch_clocks: std::collections::HashMap<Arc<str>, u32> =
+            std::collections::HashMap::new();
+
+        for (idx, item) in items.iter().enumerate() {
+            let entity: Arc<str> = Arc::from(item.coord.entity());
+
+            let prev_hash = if let Some(&hash) = entity_prev_hashes.get(&entity) {
+                hash
+            } else {
+                self.index
+                    .get_latest(&entity)
+                    .map(|e| e.hash_chain.event_hash)
+                    .unwrap_or([0u8; 32])
+            };
+
+            let clock = if let Some(&last_clock) = entity_batch_clocks.get(&entity) {
+                last_clock + 1
+            } else {
+                self.index
+                    .get_latest(&entity)
+                    .map(|e| e.clock + 1)
+                    .unwrap_or(0)
+            };
+            entity_batch_clocks.insert(Arc::clone(&entity), clock);
+
+            let event_id = uuid::Uuid::now_v7().as_u128();
+
+            let causation_id = match item.causation {
+                CausationRef::None => item.options.causation_id,
+                CausationRef::Absolute(id) => Some(id),
+                CausationRef::PriorItem(prior_idx) => {
+                    if prior_idx >= idx {
+                        return Err(StoreError::BatchFailed {
+                            item_index: idx,
+                            stage: BatchStage::Validation,
+                            source: Box::new(StoreError::Configuration(
+                                "PriorItem causation must reference earlier batch item".into(),
+                            )),
+                        });
+                    }
+                    Some(computed[prior_idx].event_id)
+                }
+            };
+
+            entity_prev_hashes.insert(entity, [0u8; 32]);
+
+            let global_seq = first_seq + idx as u64;
+            computed.push(BatchItemComputed {
+                global_seq,
+                clock,
+                prev_hash,
+                event_id,
+                causation_id,
+            });
+        }
+        Ok(computed)
+    }
+
+    /// Encode and write a batch marker frame (BEGIN or COMMIT).
+    /// Handles segment rotation before the write. Returns the frame offset.
+    fn write_batch_marker_frame(
+        &mut self,
+        batch_id: u64,
+        kind: EventKind,
+        payload_size: u32,
+        item_index_for_error: usize,
+    ) -> Result<u64, StoreError> {
+        let now_us = self.config.now_us();
+        let header = EventHeader::new(
+            batch_id as u128,
+            batch_id as u128,
+            None,
+            now_us,
+            #[allow(clippy::cast_sign_loss)] // timestamp_us is always positive (from SystemTime)
+            DagPosition::child_at(0, (now_us / 1000) as u64, 0),
+            payload_size,
+            kind,
+        );
+        let event = Event::new(header, Vec::<u8>::new());
+        let payload = crate::store::segment::FramePayloadRef {
+            event: &event,
+            entity: BATCH_MARKER_ENTITY,
+            scope: BATCH_MARKER_SCOPE,
+        };
+        let frame = segment::frame_encode(&payload).map_err(|e| StoreError::BatchFailed {
+            item_index: item_index_for_error,
+            stage: BatchStage::Encoding,
+            source: Box::new(e),
+        })?;
+
+        self.maybe_rotate_segment()
+            .map_err(|e| StoreError::BatchFailed {
+                item_index: item_index_for_error,
+                stage: BatchStage::Syncing,
+                source: Box::new(e),
+            })?;
+
+        let offset =
+            self.active_segment
+                .write_frame(&frame)
+                .map_err(|e| StoreError::BatchFailed {
+                    item_index: item_index_for_error,
+                    stage: BatchStage::Writing,
+                    source: Box::new(e),
+                })?;
+        Ok(offset)
+    }
+
     /// The 10-step commit protocol.
     /// [SPEC:src/store/writer.rs — handle_append]
     fn handle_append(
         &mut self,
-        entity: &Arc<str>,
-        scope: &Arc<str>,
+        coord: &Coordinate,
         mut event: Event<Vec<u8>>,
         kind: EventKind,
         guards: &AppendGuards,
     ) -> Result<AppendReceipt, StoreError> {
         let correlation_id = guards.correlation_id;
         let causation_id = guards.causation_id;
+        let entity = coord.entity();
+        let scope = coord.scope();
 
-        // STEP 1: Acquire per-entity lock.
-        // [SPEC:IMPLEMENTATION NOTES item 5 — DashMap guard lifetimes]
-        // Clone the Arc<Mutex> OUT of DashMap, drop the DashMap entry guard,
-        // THEN lock the Mutex. Never hold DashMap Ref across the commit.
-        let lock = self
-            .index
-            .entity_locks
-            .entry(Arc::clone(entity))
-            .or_insert_with(|| Arc::new(parking_lot::Mutex::new(())))
-            .clone();
-        let _entity_guard = lock.lock();
-        trace!(entity = %entity, "entity lock acquired");
-
+        // STEP 1: Read latest entry. No lock needed: this function runs on the
+        // single writer thread, which is the only writer of the index. There
+        // is no producer/producer race to guard against.
         let latest = self.index.get_latest(entity);
 
-        // STEP 1a: CAS check (under entity lock — no TOCTOU).
+        // STEP 1a: CAS check.
         if let Some(expected) = guards.expected_sequence {
             let actual = latest.as_ref().map(|entry| entry.clock).unwrap_or(0);
             if actual != expected {
@@ -569,7 +801,7 @@ impl WriterState<'_> {
             }
         }
 
-        // STEP 1b: Idempotency check (under entity lock — no TOCTOU).
+        // STEP 1b: Idempotency check.
         if let Some(key) = guards.idempotency_key {
             if let Some(entry) = self.index.get_by_id(key) {
                 return Ok(AppendReceipt {
@@ -621,32 +853,13 @@ impl WriterState<'_> {
         // [SPEC:WIRE FORMAT DECISIONS — rmp_serde::to_vec_named() ALWAYS]
         let frame_payload = FramePayloadRef {
             event: &event,
-            entity: entity.as_ref(),
-            scope: scope.as_ref(),
+            entity,
+            scope,
         };
         let frame = segment::frame_encode(&frame_payload)?;
 
         // STEP 7: Check segment rotation.
-        if self
-            .active_segment
-            .needs_rotation(self.config.segment_max_bytes)
-        {
-            // Write SIDX footer before sealing. append_frames_from_segment now
-            // strips SIDX data via detect_sidx_boundary, so this is safe.
-            if let Err(e) = self.active_segment.write_sidx_footer(&self.sidx_collector) {
-                tracing::warn!("SIDX footer write failed (non-fatal): {e}");
-            }
-            self.sidx_collector = crate::store::sidx::SidxEntryCollector::new();
-
-            self.active_segment.sync_with_mode(&self.config.sync_mode)?;
-            let old = std::mem::replace(
-                self.active_segment,
-                Segment::<Active>::create(&self.config.data_dir, *self.segment_id + 1)?,
-            );
-            let _sealed = old.seal();
-            *self.segment_id += 1;
-            // Notify the reader of the new active segment so mmap dispatch is correct.
-            self.reader.set_active_segment(*self.segment_id);
+        if self.maybe_rotate_segment()? {
             info!(segment_id = *self.segment_id, "segment rotated");
         }
 
@@ -662,10 +875,8 @@ impl WriterState<'_> {
             #[allow(clippy::cast_possible_truncation)] // checked_payload_len already verified < u32::MAX
             length: frame.len() as u32,
         };
-        let coord =
-            Coordinate::new(entity.as_ref(), scope.as_ref()).map_err(StoreError::Coordinate)?;
-        let entity_id = self.index.interner.intern(entity.as_ref());
-        let scope_id = self.index.interner.intern(scope.as_ref());
+        let entity_id = self.index.interner.intern(entity);
+        let scope_id = self.index.interner.intern(scope);
         let entry = IndexEntry {
             event_id: event.header.event_id,
             correlation_id,
@@ -681,6 +892,11 @@ impl WriterState<'_> {
             global_sequence: global_seq,
         };
         self.index.insert(entry);
+
+        // Publish: make this entry visible to concurrent readers.
+        // Explicit boundary: the entry has global_sequence == global_seq,
+        // so visible_sequence must advance to global_seq + 1.
+        self.index.publish(global_seq + 1);
 
         // Record SIDX entry for the segment footer (written on rotation/shutdown).
         let hash_chain_ref = event.hash_chain.as_ref();
@@ -700,8 +916,7 @@ impl WriterState<'_> {
             correlation_id,
             causation_id: causation_id.unwrap_or(0),
         };
-        self.sidx_collector
-            .record(sidx_entry, entity.as_ref(), scope.as_ref());
+        self.sidx_collector.record(sidx_entry, entity, scope);
 
         debug!(event_id = %event.header.event_id, clock = clock, "append committed");
 
@@ -710,7 +925,7 @@ impl WriterState<'_> {
             event_id: event.header.event_id,
             correlation_id,
             causation_id,
-            coord,
+            coord: coord.clone(),
             kind,
             sequence: global_seq,
         });
@@ -728,106 +943,22 @@ impl WriterState<'_> {
         &mut self,
         items: &[BatchAppendItem],
     ) -> Result<Vec<AppendReceipt>, StoreError> {
-        use crate::store::contracts::CausationRef;
+        // STEPs 1-2: Validate size, bytes, and reject CAS.
+        self.validate_batch(items)?;
 
-        // STEP 1: Validate batch limits upfront.
-        if items.len() > self.config.batch_max_size as usize {
-            return Err(StoreError::BatchFailed {
-                item_index: 0,
-                stage: BatchStage::Validation,
-                source: Box::new(StoreError::Configuration(format!(
-                    "batch size {} exceeds max {}",
-                    items.len(),
-                    self.config.batch_max_size
-                ))),
-            });
-        }
-        let total_bytes: usize = items.iter().map(|i| i.payload_bytes.len()).sum();
-        if total_bytes > self.config.batch_max_bytes as usize {
-            return Err(StoreError::BatchFailed {
-                item_index: 0,
-                stage: BatchStage::Validation,
-                source: Box::new(StoreError::Configuration(format!(
-                    "batch bytes {} exceeds max {}",
-                    total_bytes, self.config.batch_max_bytes
-                ))),
-            });
+        // STEP 3: Preflight idempotency. Full replay returns cached receipts;
+        // partial replay errors out; clean batch proceeds.
+        if let Some(cached) = self.preflight_batch_idempotency(items)? {
+            return Ok(cached);
         }
 
-        // STEP 2: Reject CAS in batch (v1: CAS not supported for batches).
-        for (idx, item) in items.iter().enumerate() {
-            if item.options.expected_sequence.is_some() {
-                return Err(StoreError::BatchFailed {
-                    item_index: idx,
-                    stage: BatchStage::Validation,
-                    source: Box::new(StoreError::Configuration(
-                        "CAS not supported in batch append (v1)".into(),
-                    )),
-                });
-            }
-        }
+        // STEPs 4-5: (no locks needed) — single writer thread owns all
+        // index mutation. The previous per-entity Mutex was a leftover from
+        // a multi-writer design and added overhead with no concurrency benefit.
 
-        // STEP 3: Preflight idempotency checks (fail fast before any writes).
-        // Collect cached receipts for items whose idempotency key already exists.
-        let mut cached_receipts: Vec<Option<AppendReceipt>> = vec![None; items.len()];
-        let mut cached_count = 0usize;
-        for (idx, item) in items.iter().enumerate() {
-            if let Some(key) = item.options.idempotency_key {
-                if let Some(entry) = self.index.get_by_id(key) {
-                    cached_receipts[idx] = Some(AppendReceipt {
-                        event_id: entry.event_id,
-                        sequence: entry.global_sequence,
-                        disk_pos: entry.disk_pos,
-                    });
-                    cached_count += 1;
-                }
-            }
-        }
-        // Full replay: every item already committed — return cached receipts.
-        if cached_count == items.len() {
-            return Ok(cached_receipts
-                .into_iter()
-                .map(|r| r.expect("full replay: all cached_receipts verified as Some"))
-                .collect());
-        }
-        // Partial replay: some items exist, some don't — ambiguous, reject.
-        if cached_count > 0 {
-            return Err(StoreError::BatchFailed {
-                item_index: cached_receipts
-                    .iter()
-                    .position(|r| r.is_none())
-                    .unwrap_or(0),
-                stage: BatchStage::Validation,
-                source: Box::new(StoreError::Configuration(
-                    "partial batch replay: some items already committed, some not".into(),
-                )),
-            });
-        }
-
-        // STEP 4: Build entity set and sort for deterministic lock ordering.
-        // Use string comparison (not pointer) — fresh Arc allocations have distinct
-        // addresses even for identical strings, so pointer dedup would fail and
-        // cause double-lock deadlock on repeated entities.
-        let mut entity_names: Vec<Arc<str>> =
-            items.iter().map(|i| Arc::from(i.coord.entity())).collect();
-        entity_names.sort_by(|a, b| a.as_ref().cmp(b.as_ref()));
-        entity_names.dedup_by(|a, b| a.as_ref() == b.as_ref());
-
-        // STEP 5: Acquire all entity locks in order (prevents deadlock).
-        let mut locks: Vec<Arc<parking_lot::Mutex<()>>> = Vec::with_capacity(entity_names.len());
-        for entity in &entity_names {
-            let lock = self
-                .index
-                .entity_locks
-                .entry(Arc::clone(entity))
-                .or_insert_with(|| Arc::new(parking_lot::Mutex::new(())))
-                .clone();
-            locks.push(lock);
-        }
-        let _guards: Vec<_> = locks.iter().map(|l| l.lock()).collect();
-
-        // STEP 6: Generate batch_id and pre-compute all event metadata.
-        let batch_id = self.index.global_sequence(); // Use global_seq as batch_id (monotonic)
+        // STEP 6: Generate batch_id and reserve global sequences.
+        let batch_id = self.index.global_sequence();
+        let first_seq = self.index.reserve_sequences(items.len() as u64);
 
         // FAULT INJECTION: Batch start
         #[cfg(feature = "test-support")]
@@ -839,136 +970,16 @@ impl WriterState<'_> {
             &self.config.fault_injector,
         )?;
 
-        // Pre-compute all sequences and prev_hashes.
-        struct BatchItemComputed {
-            global_seq: u64,
-            clock: u32,
-            prev_hash: [u8; 32],
-            event_id: u128,
-            causation_id: Option<u128>,
-        }
-        let mut computed: Vec<BatchItemComputed> = Vec::with_capacity(items.len());
+        // STEP 7: Pre-compute per-item global sequences, clocks, prev_hashes,
+        // event_ids, and intra-batch causation chains.
+        let computed = self.precompute_batch_items(items, first_seq)?;
 
-        // Track per-entity last hash for intra-batch chaining.
-        let mut entity_prev_hashes: std::collections::HashMap<Arc<str>, [u8; 32]> =
-            std::collections::HashMap::new();
-        // Track per-entity clock within the batch so multiple items for the same
-        // entity get incrementing clocks (index isn't updated until publish).
-        let mut entity_batch_clocks: std::collections::HashMap<Arc<str>, u32> =
-            std::collections::HashMap::new();
-
-        for (idx, item) in items.iter().enumerate() {
-            let entity: Arc<str> = Arc::from(item.coord.entity());
-
-            // Get prev_hash: either from within-batch chain or from index.
-            let prev_hash = if let Some(&hash) = entity_prev_hashes.get(&entity) {
-                hash
-            } else {
-                self.index
-                    .get_latest(&entity)
-                    .map(|e| e.hash_chain.event_hash)
-                    .unwrap_or([0u8; 32])
-            };
-
-            // Compute clock (entity sequence). For the first item per entity,
-            // read from the index. For subsequent intra-batch items, advance
-            // from the last batch-local clock.
-            let clock = if let Some(&last_clock) = entity_batch_clocks.get(&entity) {
-                last_clock + 1
-            } else {
-                self.index
-                    .get_latest(&entity)
-                    .map(|e| e.clock + 1)
-                    .unwrap_or(0)
-            };
-            entity_batch_clocks.insert(Arc::clone(&entity), clock);
-
-            // Generate event_id.
-            let event_id = uuid::Uuid::now_v7().as_u128(); // Same as single append
-
-            // Resolve causation.
-            let causation_id = match item.causation {
-                CausationRef::None => item.options.causation_id,
-                CausationRef::Absolute(id) => Some(id),
-                CausationRef::PriorItem(prior_idx) => {
-                    if prior_idx >= idx {
-                        return Err(StoreError::BatchFailed {
-                            item_index: idx,
-                            stage: BatchStage::Validation,
-                            source: Box::new(StoreError::Configuration(
-                                "PriorItem causation must reference earlier batch item".into(),
-                            )),
-                        });
-                    }
-                    Some(computed[prior_idx].event_id)
-                }
-            };
-
-            // Store for intra-batch lookups.
-            entity_prev_hashes.insert(entity, [0u8; 32]); // Will update after hash computation
-
-            let global_seq = self.index.global_sequence();
-            computed.push(BatchItemComputed {
-                global_seq,
-                clock,
-                prev_hash,
-                event_id,
-                causation_id,
-            });
-        }
-
-        // STEP 7: Re-compute hashes now that we have all prev_hashes set.
-        // (Hash computation requires the full event, which we build during writing)
-
-        // STEP 8: Encode and write SYSTEM_BATCH_BEGIN marker frame.
-        // Store batch count in payload_size so recovery can decode it.
-        // batch_max_size validation (STEP 1) guarantees items.len() <= u32::MAX
+        // STEP 8: Write SYSTEM_BATCH_BEGIN marker. Stores batch count in payload_size.
+        // batch_max_size validation guarantees items.len() <= u32::MAX.
         #[allow(clippy::cast_possible_truncation)]
         let batch_count = items.len() as u32;
-        let begin_now_us = self.config.now_us();
-        let marker_header = EventHeader::new(
-            batch_id as u128, // Use batch_id as marker event_id
-            batch_id as u128, // correlation_id = batch_id
-            None,             // causation_id
-            begin_now_us,
-            #[allow(clippy::cast_sign_loss)] // timestamp_us is always positive (from SystemTime)
-            DagPosition::child_at(0, (begin_now_us / 1000) as u64, 0),
-            batch_count, // payload_size encodes batch count for recovery
-            EventKind::SYSTEM_BATCH_BEGIN,
-        );
-        let marker_event = Event::new(marker_header, Vec::<u8>::new()); // Empty payload for marker
-        let marker_payload = crate::store::segment::FramePayloadRef {
-            event: &marker_event,
-            entity: BATCH_MARKER_ENTITY,
-            scope: BATCH_MARKER_SCOPE,
-        };
-        let marker_frame =
-            segment::frame_encode(&marker_payload).map_err(|e| StoreError::BatchFailed {
-                item_index: 0,
-                stage: BatchStage::Encoding,
-                source: Box::new(e),
-            })?;
-
-        // Check segment rotation before writing marker.
-        if self
-            .active_segment
-            .needs_rotation(self.config.segment_max_bytes)
-        {
-            if let Err(e) = self.active_segment.write_sidx_footer(&self.sidx_collector) {
-                tracing::warn!("SIDX footer write failed (non-fatal): {e}");
-            }
-            self.sidx_collector = crate::store::sidx::SidxEntryCollector::new();
-            self.active_segment.sync_with_mode(&self.config.sync_mode)?;
-            let old = std::mem::replace(
-                self.active_segment,
-                Segment::<Active>::create(&self.config.data_dir, *self.segment_id + 1)?,
-            );
-            let _sealed = old.seal();
-            *self.segment_id += 1;
-            self.reader.set_active_segment(*self.segment_id);
-        }
-
-        let marker_offset = self.active_segment.write_frame(&marker_frame)?;
+        let marker_offset =
+            self.write_batch_marker_frame(batch_id, EventKind::SYSTEM_BATCH_BEGIN, batch_count, 0)?;
         trace!(batch_id, offset = marker_offset, "batch marker written");
 
         // FAULT INJECTION: After BEGIN marker written
@@ -981,9 +992,110 @@ impl WriterState<'_> {
             &self.config.fault_injector,
         )?;
 
-        // STEP 9: Write all batch event frames.
+        // STEP 9: Write all event frames. Returns offsets, receipts, and the
+        // populated entity_prev_hashes map (used by stage step for IndexEntry).
+        let (frame_offsets, receipts, entity_prev_hashes) =
+            self.write_batch_event_frames(items, &computed, batch_id)?;
+
+        // FAULT INJECTION: All batch items complete
+        #[cfg(feature = "test-support")]
+        crate::store::fault::maybe_inject(
+            crate::store::fault::InjectionPoint::BatchItemsComplete {
+                batch_id,
+                item_count: items.len(),
+            },
+            &self.config.fault_injector,
+        )?;
+
+        // STEP 10: Write SYSTEM_BATCH_COMMIT marker (two-phase commit).
+        let _commit_offset = self.write_batch_marker_frame(
+            batch_id,
+            EventKind::SYSTEM_BATCH_COMMIT,
+            0,
+            items.len() - 1,
+        )?;
+        trace!(batch_id, "batch commit marker written");
+
+        // FAULT INJECTION: After COMMIT written, before fsync
+        #[cfg(feature = "test-support")]
+        crate::store::fault::maybe_inject(
+            crate::store::fault::InjectionPoint::BatchCommitWritten { batch_id },
+            &self.config.fault_injector,
+        )?;
+
+        // STEP 11: Sync to disk (atomic durability point).
+        // If this fails, the batch may be partially on disk but without the
+        // commit marker. Recovery will discard incomplete batches.
+
+        // FAULT INJECTION: During fsync
+        #[cfg(feature = "test-support")]
+        crate::store::fault::maybe_inject(
+            crate::store::fault::InjectionPoint::BatchFsync { batch_id },
+            &self.config.fault_injector,
+        )?;
+
+        self.active_segment
+            .sync_with_mode(&self.config.sync.mode)
+            .map_err(|e| StoreError::BatchFailed {
+                item_index: items.len() - 1,
+                stage: BatchStage::Syncing,
+                source: Box::new(e),
+            })?;
+
+        // STEP 12: Build index entries from the precomputed data + frame offsets.
+        let staged_entries = self.stage_batch_index_entries(
+            items,
+            &computed,
+            &frame_offsets,
+            &receipts,
+            &entity_prev_hashes,
+        )?;
+
+        // FAULT INJECTION: Before atomic publish to index
+        #[cfg(feature = "test-support")]
+        crate::store::fault::maybe_inject(
+            crate::store::fault::InjectionPoint::BatchPrePublish {
+                batch_id,
+                item_count: items.len(),
+            },
+            &self.config.fault_injector,
+        )?;
+
+        // STEP 13: Insert all entries into the in-memory index, then publish
+        // atomically. Entries occupy [first_seq, first_seq + items.len()).
+        self.index.insert_batch(staged_entries);
+        #[allow(clippy::cast_possible_truncation)] // items.len() bounded by batch_max_size (u32)
+        self.index.publish(first_seq + items.len() as u64);
+
+        // STEP 14: Broadcast notifications. A subscriber that reacts by calling
+        // query/get will now see the full batch (publish happened first).
+        self.broadcast_batch_notifications(items, &computed)?;
+
+        debug!(batch_id, count = items.len(), "batch committed");
+        Ok(receipts)
+    }
+
+    /// STEP 9: Write all event frames for the batch. Returns frame offsets,
+    /// per-item receipts, and the populated entity_prev_hashes map (which the
+    /// stage step needs to fill in `IndexEntry::hash_chain.event_hash`).
+    #[allow(clippy::type_complexity)] // tuple is the natural shape; refactoring would obscure flow
+    fn write_batch_event_frames(
+        &mut self,
+        items: &[BatchAppendItem],
+        computed: &[BatchItemComputed],
+        batch_id: u64,
+    ) -> Result<
+        (
+            Vec<u64>,
+            Vec<AppendReceipt>,
+            std::collections::HashMap<Arc<str>, [u8; 32]>,
+        ),
+        StoreError,
+    > {
         let mut frame_offsets: Vec<u64> = Vec::with_capacity(items.len());
         let mut receipts: Vec<AppendReceipt> = Vec::with_capacity(items.len());
+        let mut entity_prev_hashes: std::collections::HashMap<Arc<str>, [u8; 32]> =
+            std::collections::HashMap::new();
 
         for (idx, item) in items.iter().enumerate() {
             let c = &computed[idx];
@@ -1006,7 +1118,7 @@ impl WriterState<'_> {
                 causation_id,
                 now_us,
                 position,
-                // Payload sizes bounded by batch_max_bytes validation (STEP 1)
+                // Payload sizes bounded by batch_max_bytes validation
                 #[allow(clippy::cast_possible_truncation)]
                 {
                     item.payload_bytes.len() as u32
@@ -1028,7 +1140,7 @@ impl WriterState<'_> {
             });
             event.header.content_hash = event_hash;
 
-            // Update entity_prev_hashes for intra-batch chain.
+            // Update entity_prev_hashes for intra-batch chain (and stage step).
             let entity: Arc<str> = Arc::from(item.coord.entity());
             entity_prev_hashes.insert(entity, event_hash);
 
@@ -1046,29 +1158,12 @@ impl WriterState<'_> {
                 })?;
 
             // Check segment rotation.
-            if self
-                .active_segment
-                .needs_rotation(self.config.segment_max_bytes)
-            {
-                if let Err(e) = self.active_segment.write_sidx_footer(&self.sidx_collector) {
-                    tracing::warn!("SIDX footer write failed (non-fatal): {e}");
-                }
-                self.sidx_collector = crate::store::sidx::SidxEntryCollector::new();
-                self.active_segment
-                    .sync_with_mode(&self.config.sync_mode)
-                    .map_err(|e| StoreError::BatchFailed {
-                        item_index: idx,
-                        stage: BatchStage::Syncing,
-                        source: Box::new(e),
-                    })?;
-                let old = std::mem::replace(
-                    self.active_segment,
-                    Segment::<Active>::create(&self.config.data_dir, *self.segment_id + 1)?,
-                );
-                let _sealed = old.seal();
-                *self.segment_id += 1;
-                self.reader.set_active_segment(*self.segment_id);
-            }
+            self.maybe_rotate_segment()
+                .map_err(|e| StoreError::BatchFailed {
+                    item_index: idx,
+                    stage: BatchStage::Syncing,
+                    source: Box::new(e),
+                })?;
 
             // Write frame.
             let offset =
@@ -1105,107 +1200,22 @@ impl WriterState<'_> {
                 &self.config.fault_injector,
             )?;
         }
+        // Suppress unused warning when test-support is disabled.
+        let _ = batch_id;
 
-        // FAULT INJECTION: All batch items complete
-        #[cfg(feature = "test-support")]
-        crate::store::fault::maybe_inject(
-            crate::store::fault::InjectionPoint::BatchItemsComplete {
-                batch_id,
-                item_count: items.len(),
-            },
-            &self.config.fault_injector,
-        )?;
+        Ok((frame_offsets, receipts, entity_prev_hashes))
+    }
 
-        // STEP 10: Write SYSTEM_BATCH_COMMIT marker (two-phase commit).
-        // This marks the batch as committed on disk. Only after this marker
-        // is written and synced will we publish to the in-memory index.
-        let commit_now_us = self.config.now_us();
-        let commit_header = EventHeader::new(
-            batch_id as u128,
-            batch_id as u128,
-            None,
-            commit_now_us,
-            #[allow(clippy::cast_sign_loss)] // timestamp_us is always positive (from SystemTime)
-            DagPosition::child_at(0, (commit_now_us / 1000) as u64, 0),
-            0,
-            EventKind::SYSTEM_BATCH_COMMIT,
-        );
-        let commit_event = Event::new(commit_header, Vec::<u8>::new());
-        let commit_payload = crate::store::segment::FramePayloadRef {
-            event: &commit_event,
-            entity: BATCH_MARKER_ENTITY,
-            scope: BATCH_MARKER_SCOPE,
-        };
-        let commit_frame =
-            segment::frame_encode(&commit_payload).map_err(|e| StoreError::BatchFailed {
-                item_index: items.len() - 1,
-                stage: BatchStage::Encoding,
-                source: Box::new(e),
-            })?;
-
-        // Check segment rotation before writing commit marker.
-        if self
-            .active_segment
-            .needs_rotation(self.config.segment_max_bytes)
-        {
-            if let Err(e) = self.active_segment.write_sidx_footer(&self.sidx_collector) {
-                tracing::warn!("SIDX footer write failed (non-fatal): {e}");
-            }
-            self.sidx_collector = crate::store::sidx::SidxEntryCollector::new();
-            self.active_segment
-                .sync_with_mode(&self.config.sync_mode)
-                .map_err(|e| StoreError::BatchFailed {
-                    item_index: items.len() - 1,
-                    stage: BatchStage::Syncing,
-                    source: Box::new(e),
-                })?;
-            let old = std::mem::replace(
-                self.active_segment,
-                Segment::<Active>::create(&self.config.data_dir, *self.segment_id + 1)?,
-            );
-            let _sealed = old.seal();
-            *self.segment_id += 1;
-            self.reader.set_active_segment(*self.segment_id);
-        }
-
-        let _commit_offset = self
-            .active_segment
-            .write_frame(&commit_frame)
-            .map_err(|e| StoreError::BatchFailed {
-                item_index: items.len() - 1,
-                stage: BatchStage::Writing,
-                source: Box::new(e),
-            })?;
-        trace!(batch_id, "batch commit marker written");
-
-        // FAULT INJECTION: After COMMIT written, before fsync
-        #[cfg(feature = "test-support")]
-        crate::store::fault::maybe_inject(
-            crate::store::fault::InjectionPoint::BatchCommitWritten { batch_id },
-            &self.config.fault_injector,
-        )?;
-
-        // STEP 11: Sync to disk (atomic durability point).
-        // If this fails, the batch may be partially on disk but without the
-        // commit marker. Recovery will discard incomplete batches.
-
-        // FAULT INJECTION: During fsync
-        #[cfg(feature = "test-support")]
-        crate::store::fault::maybe_inject(
-            crate::store::fault::InjectionPoint::BatchFsync { batch_id },
-            &self.config.fault_injector,
-        )?;
-
-        self.active_segment
-            .sync_with_mode(&self.config.sync_mode)
-            .map_err(|e| StoreError::BatchFailed {
-                item_index: items.len() - 1,
-                stage: BatchStage::Syncing,
-                source: Box::new(e),
-            })?;
-
-        // STEP 12: Build and stage index entries.
-        // We collect all entries first, then publish atomically.
+    /// STEP 12: Build IndexEntry vec from precomputed data + write outputs.
+    /// Also records SIDX entries for the segment footer.
+    fn stage_batch_index_entries(
+        &mut self,
+        items: &[BatchAppendItem],
+        computed: &[BatchItemComputed],
+        frame_offsets: &[u64],
+        receipts: &[AppendReceipt],
+        entity_prev_hashes: &std::collections::HashMap<Arc<str>, [u8; 32]>,
+    ) -> Result<Vec<IndexEntry>, StoreError> {
         let mut staged_entries: Vec<IndexEntry> = Vec::with_capacity(items.len());
         for (idx, item) in items.iter().enumerate() {
             let c = &computed[idx];
@@ -1219,15 +1229,14 @@ impl WriterState<'_> {
             let entity: Arc<str> = Arc::from(item.coord.entity());
             let scope: Arc<str> = Arc::from(item.coord.scope());
 
-            // Use the segment_id captured at write time, not the current one —
-            // if rotation happened mid-batch, earlier items live on a prior segment.
+            // Use disk_pos captured at write time — if rotation happened mid-batch,
+            // earlier items live on a prior segment.
             let disk_pos = receipts[idx].disk_pos;
             let coord =
                 Coordinate::new(entity.as_ref(), scope.as_ref()).map_err(StoreError::Coordinate)?;
             let entity_id = self.index.interner.intern(entity.as_ref());
             let scope_id = self.index.interner.intern(scope.as_ref());
 
-            // Re-compute event_hash for index entry.
             let event_hash = entity_prev_hashes
                 .get(&entity)
                 .copied()
@@ -1276,22 +1285,15 @@ impl WriterState<'_> {
             self.sidx_collector
                 .record(sidx_entry, entity.as_ref(), scope.as_ref());
         }
+        Ok(staged_entries)
+    }
 
-        // FAULT INJECTION: Before atomic publish to index
-        #[cfg(feature = "test-support")]
-        crate::store::fault::maybe_inject(
-            crate::store::fault::InjectionPoint::BatchPrePublish {
-                batch_id,
-                item_count: items.len(),
-            },
-            &self.config.fault_injector,
-        )?;
-
-        // STEP 13: Atomic publish to in-memory index.
-        // All entries become visible together. No partial batch visibility.
-        self.index.insert_batch(staged_entries);
-
-        // STEP 14: Broadcast notifications (after index publish).
+    /// STEP 14: Broadcast a Notification for each item in the committed batch.
+    fn broadcast_batch_notifications(
+        &self,
+        items: &[BatchAppendItem],
+        computed: &[BatchItemComputed],
+    ) -> Result<(), StoreError> {
         for (idx, item) in items.iter().enumerate() {
             let c = &computed[idx];
             let global_seq = c.global_seq;
@@ -1311,10 +1313,7 @@ impl WriterState<'_> {
                 sequence: global_seq,
             });
         }
-
-        debug!(batch_id, count = items.len(), "batch committed");
-
-        Ok(receipts)
+        Ok(())
     }
 }
 

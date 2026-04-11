@@ -56,8 +56,8 @@ impl EventKind {
     }
 
     /// Library constants. Products NEVER define these — they use custom().
-    /// User-defined data event.
-    pub const DATA: Self = Self(0x0000);
+    /// User-defined data event. Uses product category 0x1, not system category 0x0.
+    pub const DATA: Self = Self(0x1000);
     /// System initialisation event.
     pub const SYSTEM_INIT: Self = Self(0x0001);
     /// System shutdown event.

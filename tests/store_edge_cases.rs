@@ -15,15 +15,9 @@ use batpak::prelude::*;
 use std::io::Write;
 use tempfile::TempDir;
 
-fn test_store(dir: &TempDir) -> Store {
-    let mut config = StoreConfig::new(dir.path());
-    config.segment_max_bytes = 64 * 1024;
-    Store::open(config).expect("open store")
-}
-
-fn test_coord() -> Coordinate {
-    Coordinate::new("entity:test", "scope:test").expect("coord")
-}
+mod common;
+use common::medium_segment_store as test_store;
+use common::test_coord;
 
 // ===== frame_decode edge cases =====
 

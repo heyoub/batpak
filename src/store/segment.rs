@@ -12,6 +12,11 @@ pub const SEGMENT_MAGIC: &[u8; 4] = b"FBAT";
 /// File extension used for all segment files (without the leading dot).
 pub const SEGMENT_EXTENSION: &str = "fbat";
 
+/// Maximum allowed frame payload size in bytes. Frames claiming a payload
+/// larger than this are rejected as corrupt before allocation, preventing
+/// a malicious or corrupt segment file from causing unbounded memory use.
+pub(crate) const MAX_FRAME_PAYLOAD: usize = 256 * 1024 * 1024;
+
 /// Segment file header, serialized as MessagePack after the magic bytes.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SegmentHeader {

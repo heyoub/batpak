@@ -47,8 +47,8 @@
     - ART-PROJECTION
     - ART-STORE-PROJECTION-FLOW
     - ART-PROJECTION-TESTS
-- id: INV-LMDB-DELETE-IDEMPOTENT
-  statement: LMDB prefix deletion remains safe and idempotent even when rows are removed through iterator-driven deletion.
+- id: INV-NATIVE-DELETE-IDEMPOTENT
+  statement: NativeCache prefix deletion remains safe and idempotent — repeating a delete_prefix call after entries are already removed must return 0 with no errors.
   artifacts:
     - ART-PROJECTION
     - ART-PROJECTION-TESTS
@@ -103,10 +103,13 @@
     - ART-STORE-PROJECTION-FLOW
     - ART-UNIFIED-TESTS
 - id: INV-BATCH-ATOMIC-VISIBILITY
-  statement: Batch append events are invisible to queries, cursors, and subscriptions until the entire batch is committed, fsynced, and atomically published to the in-memory index. No partial batch is ever observable.
+  statement: Batch append events are invisible to queries, cursors, and subscriptions until the entire batch is committed, fsynced, and atomically published via SequenceGate::publish(). All read methods filter by visible_sequence. No partial batch is ever observable. Proved by loom model and concurrent-read integration test.
   artifacts:
     - ART-STORE-MOD
+    - ART-STORE-INDEX
+    - ART-STORE-WRITER
     - ART-BATCH-TESTS
+    - ART-DETERMINISTIC-CONCURRENCY-TESTS
 - id: INV-BATCH-CRASH-RECOVERY
   statement: Incomplete batches (BEGIN without matching COMMIT) are discarded during cold-start segment scan. Cross-segment batch state persists across segment boundaries to handle batches spanning rotation points.
   artifacts:

@@ -30,7 +30,7 @@ mod tests {
     use super::*;
     use crate::coordinate::Coordinate;
     use crate::event::EventKind;
-    use crate::store::{Store, StoreConfig};
+    use crate::store::{Store, StoreConfig, SyncConfig};
     use tempfile::TempDir;
 
     fn test_store() -> (Store, TempDir) {
@@ -38,7 +38,10 @@ mod tests {
         let config = StoreConfig {
             data_dir: dir.path().to_path_buf(),
             segment_max_bytes: 4096,
-            sync_every_n_events: 1,
+            sync: SyncConfig {
+                every_n_events: 1,
+                ..SyncConfig::default()
+            },
             ..StoreConfig::new("")
         };
         let store = Store::open(config).expect("open store");

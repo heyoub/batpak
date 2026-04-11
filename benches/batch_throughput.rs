@@ -7,7 +7,7 @@
 mod common;
 
 use batpak::prelude::*;
-use batpak::store::{BatchAppendItem, CausationRef, Store, StoreConfig, SyncMode};
+use batpak::store::{BatchAppendItem, CausationRef, Store, StoreConfig, SyncConfig, SyncMode};
 use common::{apply_profile, throughput_elements, BenchProfile};
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use tempfile::TempDir;
@@ -16,8 +16,10 @@ fn open_bench_store(sync_mode: SyncMode) -> (Store, TempDir, Coordinate, EventKi
     let dir = TempDir::new().expect("create temp dir");
     let config = StoreConfig {
         data_dir: dir.path().to_path_buf(),
-        sync_every_n_events: 1, // Every batch is a sync
-        sync_mode,
+        sync: SyncConfig {
+            every_n_events: 1, // Every batch is a sync
+            mode: sync_mode,
+        },
         ..StoreConfig::new("")
     };
     let store = Store::open(config).expect("open store");

@@ -161,7 +161,7 @@ pub(crate) fn compact(
         }
     }
 
-    merged_segment.sync_with_mode(&store.config.sync_mode)?;
+    merged_segment.sync_with_mode(&store.config.sync.mode)?;
     let _sealed_segment = merged_segment.seal();
 
     let mut bytes_reclaimed = 0_u64;
@@ -187,7 +187,7 @@ pub(crate) fn compact(
     )?;
 
     // Write checkpoint after post-compact rebuild so next open is fast.
-    if store.config.enable_checkpoint {
+    if store.config.index.enable_checkpoint {
         if let Err(e) = write_checkpoint_on_close(store) {
             tracing::warn!("post-compaction checkpoint write failed: {e}");
         }
@@ -210,7 +210,7 @@ pub(crate) fn close(store: Store) -> Result<(), StoreError> {
     let result = rx.recv().map_err(|_| StoreError::WriterCrashed)?;
 
     // Write index checkpoint after writer shutdown (all data fsynced).
-    if store.config.enable_checkpoint {
+    if store.config.index.enable_checkpoint {
         if let Err(e) = write_checkpoint_on_close(&store) {
             tracing::warn!("failed to write checkpoint on close: {e}");
             // Non-fatal: next open will fall back to full segment scan.
@@ -275,10 +275,11 @@ pub(crate) fn diagnostics(store: &Store) -> StoreDiagnostics {
     StoreDiagnostics {
         event_count: store.index.len(),
         global_sequence: store.index.global_sequence(),
+        visible_sequence: store.index.visible_sequence(),
         data_dir: store.config.data_dir.clone(),
         segment_max_bytes: store.config.segment_max_bytes,
         fd_budget: store.config.fd_budget,
-        restart_policy: store.config.restart_policy.clone(),
+        restart_policy: store.config.writer.restart_policy.clone(),
         index_layout,
         tile_count,
     }

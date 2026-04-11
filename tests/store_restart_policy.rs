@@ -3,7 +3,7 @@
 //! [SPEC:tests/store_restart_policy.rs]
 
 use batpak::prelude::*;
-use batpak::store::{RestartPolicy, Store, StoreConfig};
+use batpak::store::{RestartPolicy, Store, StoreConfig, WriterConfig};
 use tempfile::TempDir;
 
 #[test]
@@ -13,7 +13,10 @@ fn writer_restart_once_recovers_from_panic() {
     let config = StoreConfig {
         data_dir: dir.path().to_path_buf(),
         segment_max_bytes: 64 * 1024,
-        restart_policy: RestartPolicy::Once,
+        writer: WriterConfig {
+            restart_policy: RestartPolicy::Once,
+            ..WriterConfig::default()
+        },
         ..StoreConfig::new("")
     };
     let store = Store::open(config).expect("open store");
@@ -40,7 +43,10 @@ fn writer_restart_once_gives_up_after_second_panic() {
     let config = StoreConfig {
         data_dir: dir.path().to_path_buf(),
         segment_max_bytes: 64 * 1024,
-        restart_policy: RestartPolicy::Once,
+        writer: WriterConfig {
+            restart_policy: RestartPolicy::Once,
+            ..WriterConfig::default()
+        },
         ..StoreConfig::new("")
     };
     let store = Store::open(config).expect("open store");
@@ -62,9 +68,12 @@ fn writer_restart_bounded_respects_limit() {
     let config = StoreConfig {
         data_dir: dir.path().to_path_buf(),
         segment_max_bytes: 64 * 1024,
-        restart_policy: RestartPolicy::Bounded {
-            max_restarts: 2,
-            within_ms: 60_000,
+        writer: WriterConfig {
+            restart_policy: RestartPolicy::Bounded {
+                max_restarts: 2,
+                within_ms: 60_000,
+            },
+            ..WriterConfig::default()
         },
         ..StoreConfig::new("")
     };

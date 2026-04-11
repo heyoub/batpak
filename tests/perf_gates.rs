@@ -14,7 +14,7 @@
 //! Quadratic feedback — the deepest kind of dogfood.
 
 use batpak::prelude::*;
-use batpak::store::{Store, StoreConfig};
+use batpak::store::{Store, StoreConfig, SyncConfig};
 use std::time::Instant;
 use tempfile::TempDir;
 
@@ -414,7 +414,10 @@ fn batch_throughput_performance_gate() {
     let dir = TempDir::new().expect("temp dir");
     let config = StoreConfig {
         data_dir: dir.path().to_path_buf(),
-        sync_every_n_events: 1, // Each batch is a sync
+        sync: SyncConfig {
+            every_n_events: 1,
+            ..SyncConfig::default()
+        }, // Each batch is a sync
         ..StoreConfig::new("")
     };
     let store = Store::open(config).expect("open");
@@ -713,7 +716,10 @@ fn correctness_gates_self_validate() {
     let config = StoreConfig {
         data_dir: dir.path().to_path_buf(),
         segment_max_bytes: 512, // tiny → many segments
-        sync_every_n_events: 1,
+        sync: SyncConfig {
+            every_n_events: 1,
+            ..SyncConfig::default()
+        },
         fd_budget: 2, // tiny → forces LRU eviction
         ..StoreConfig::new("")
     };

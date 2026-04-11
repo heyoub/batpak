@@ -8,6 +8,87 @@ use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 
+/// Gated publish boundary for reader visibility.
+///
+/// `allocated` advances when sequences are reserved (writer-only).
+/// `visible` is the exclusive upper bound readers filter against:
+/// an entry is visible iff `entry.global_sequence < visible`.
+///
+/// Invariant: `visible <= allocated` (enforced by `debug_assert` in `publish`).
+pub(crate) struct SequenceGate {
+    /// Next sequence to be assigned. Only the writer thread advances this.
+    allocated: AtomicU64,
+    /// Exclusive upper bound for reader visibility. Entries with
+    /// `global_sequence < visible` are returned by read methods.
+    visible: AtomicU64,
+}
+
+impl SequenceGate {
+    pub(crate) fn new() -> Self {
+        Self {
+            allocated: AtomicU64::new(0),
+            visible: AtomicU64::new(0),
+        }
+    }
+
+    /// Reserve `n` sequences. Returns first in `[first, first + n)`.
+    pub(crate) fn reserve(&self, n: u64) -> u64 {
+        self.allocated.fetch_add(n, Ordering::AcqRel)
+    }
+
+    /// Advance visibility so readers see entries with `global_sequence < up_to`.
+    ///
+    /// # Panics (debug)
+    ///
+    /// Panics if `up_to` exceeds the allocated counter or regresses below
+    /// the current visible watermark.
+    #[allow(clippy::panic)] // correctness invariant, not a recoverable error
+    pub(crate) fn publish(&self, up_to: u64) {
+        assert!(
+            up_to <= self.allocated.load(Ordering::Acquire),
+            "publish({up_to}) exceeds allocated({})",
+            self.allocated.load(Ordering::Acquire),
+        );
+        assert!(
+            up_to >= self.visible.load(Ordering::Acquire),
+            "publish({up_to}) regresses below visible({})",
+            self.visible.load(Ordering::Acquire),
+        );
+        self.visible.store(up_to, Ordering::Release);
+    }
+
+    /// Current visibility watermark (exclusive upper bound).
+    pub(crate) fn visible(&self) -> u64 {
+        self.visible.load(Ordering::Acquire)
+    }
+
+    /// Current allocator position (next sequence to be assigned).
+    pub(crate) fn allocated(&self) -> u64 {
+        self.allocated.load(Ordering::Acquire)
+    }
+
+    /// Advance allocator by 1. Used by `insert()` for the single-event path.
+    pub(crate) fn advance(&self) {
+        self.allocated.fetch_add(1, Ordering::Release);
+    }
+
+    /// Set the allocator to a specific value during checkpoint restore.
+    ///
+    /// Checkpoint stores the allocator position at write time (which may
+    /// be higher than `entry_count` due to burned batch slots). On restore,
+    /// `insert()` calls `advance()` per entry, but the allocator must end
+    /// at the checkpointed value — not at the entry count.
+    pub(crate) fn restore_allocator(&self, value: u64) {
+        self.allocated.store(value, Ordering::Release);
+    }
+
+    /// Reset both counters to 0 (used by `clear()` during rebuild/compaction).
+    pub(crate) fn clear(&self) {
+        self.allocated.store(0, Ordering::Release);
+        self.visible.store(0, Ordering::Release);
+    }
+}
+
 /// StoreIndex: in-memory 2D index + auxiliaries. NOT persisted — rebuilt from segments on cold start.
 /// [SPEC:src/store/index.rs]
 /// [DEP:dashmap::DashMap] — see DEPENDENCY SURFACE for deadlock warnings
@@ -22,13 +103,11 @@ pub(crate) struct StoreIndex {
     by_id: DashMap<u128, Arc<IndexEntry>>,
     /// Chain head: entity -> latest IndexEntry. For prev_hash in writer step 2.
     latest: DashMap<Arc<str>, Arc<IndexEntry>>,
-    /// Monotonic counter. Foundation for cursors, checkpoints, exactly-once.
-    global_sequence: AtomicU64,
+    /// Gated sequence counter: allocator + visibility watermark.
+    /// Replaces the former bare `global_sequence: AtomicU64`.
+    pub(crate) sequence: SequenceGate,
     /// Total event count.
     len: AtomicUsize,
-    /// Per-entity write locks. Writer step 1 acquires these.
-    /// [SPEC:IMPLEMENTATION NOTES item 5 — DashMap guard lifetimes]
-    pub(crate) entity_locks: DashMap<Arc<str>, Arc<parking_lot::Mutex<()>>>,
     /// String interner for compact index keys and checkpoint serialization.
     /// Entity and scope strings are interned on insert; IDs are used by
     /// checkpoint and (future) InternId-based IndexEntry fields.
@@ -135,17 +214,40 @@ impl StoreIndex {
             scan: ScanIndex::for_layout(layout),
             by_id: DashMap::new(),
             latest: DashMap::new(),
-            global_sequence: AtomicU64::new(0),
+            sequence: SequenceGate::new(),
             len: AtomicUsize::new(0),
-            entity_locks: DashMap::new(),
             interner: Arc::new(StringInterner::new()),
         }
     }
 
+    /// Reserve N global sequences for batch staging.
+    /// Returns the first sequence number; caller allocates `[first, first + n)`.
+    /// Used by writer to pre-assign sequences before writing to disk.
+    pub(crate) fn reserve_sequences(&self, n: u64) -> u64 {
+        self.sequence.reserve(n)
+    }
+
     /// Called by writer step 9. Inserts into ALL indexes atomically.
-    /// CONSTRAINT: caller MUST hold the entity lock before calling this.
-    /// [SPEC:IMPLEMENTATION NOTES item 5]
+    /// Caller must be the single writer thread; this is the only writer of
+    /// the index, so no per-entity lock is needed.
+    /// Advances the allocator by one — used by the live single-event append path.
     pub(crate) fn insert(&self, entry: IndexEntry) {
+        self.insert_inner(entry);
+        // Advance allocator (visibility is advanced separately by publish()).
+        self.sequence.advance();
+    }
+
+    /// Replay-only insert. Identical to `insert()` except the allocator is
+    /// **not** advanced. The caller (a [`ReplayCursor`]) is responsible for
+    /// restoring the allocator to the correct value once all replay entries
+    /// have been inserted, so sparse `global_sequence` values from disk are
+    /// preserved verbatim.
+    pub(crate) fn insert_replay(&self, entry: IndexEntry) {
+        self.insert_inner(entry);
+        // Allocator advance intentionally omitted — see ReplayCursor::commit.
+    }
+
+    fn insert_inner(&self, entry: IndexEntry) {
         let entity = entry.coord.entity_arc();
 
         // Intern entity and scope strings. IDs stored in IndexEntry for
@@ -179,8 +281,6 @@ impl StoreIndex {
         // Chain head
         self.latest.insert(entity, arc_entry);
 
-        // Counters — Release ordering sufficient for single-writer
-        self.global_sequence.fetch_add(1, Ordering::Release);
         self.len.fetch_add(1, Ordering::Relaxed);
     }
 
@@ -220,29 +320,50 @@ impl StoreIndex {
             // Chain head
             self.latest.insert(entity, Arc::clone(arc_entry));
 
-            // Global sequence already reserved during batch staging
+            // Global sequence already reserved during batch staging via reserve_sequences()
             self.len.fetch_add(1, Ordering::Relaxed);
         }
 
-        // Single global_sequence bump for the batch (already reserved per-entry during staging)
-        self.global_sequence
-            .fetch_add(arc_entries.len() as u64, Ordering::Release);
+        // Global sequence already reserved during batch staging via reserve_sequences()
+        // No additional fetch_add needed.
     }
 
     pub(crate) fn get_by_id(&self, event_id: u128) -> Option<IndexEntry> {
+        let vis = self.sequence.visible();
         self.by_id
             .get(&event_id)
             .map(|r| r.value().as_ref().clone())
+            .filter(|e| e.global_sequence < vis)
     }
 
+    /// Returns the latest entry for `entity`, filtered by visibility.
+    ///
+    /// **Transient behavior during batch insert:** Between `insert_batch()`
+    /// and `publish()`, the `latest` map may contain an entry whose sequence
+    /// exceeds the visibility watermark. This method filters it out, which
+    /// can transiently return `None` even when visible entries exist in
+    /// `streams`. The window is sub-microsecond (single writer, publish is
+    /// the next instruction). The writer calls this only BEFORE `insert_batch()`,
+    /// so it always sees previously-published state.
     pub(crate) fn get_latest(&self, entity: &str) -> Option<IndexEntry> {
-        self.latest.get(entity).map(|r| r.value().as_ref().clone())
+        let vis = self.sequence.visible();
+        self.latest
+            .get(entity)
+            .map(|r| r.value().as_ref().clone())
+            .filter(|e| e.global_sequence < vis)
     }
 
     pub(crate) fn stream(&self, entity: &str) -> Vec<IndexEntry> {
+        let vis = self.sequence.visible();
         self.streams
             .get(entity)
-            .map(|r| r.value().values().map(|arc| arc.as_ref().clone()).collect())
+            .map(|r| {
+                r.value()
+                    .values()
+                    .filter(|arc| arc.global_sequence < vis)
+                    .map(|arc| arc.as_ref().clone())
+                    .collect()
+            })
             .unwrap_or_default()
     }
 
@@ -250,8 +371,10 @@ impl StoreIndex {
         // Region query strategy:
         // 1. Determine candidate set based on most selective filter
         // 2. Apply remaining filters to narrow results
-        // 3. Apply clock_range last (it's per-entity, cheap)
+        // 3. Filter by visibility watermark
+        // 4. Apply clock_range last (it's per-entity, cheap)
         use crate::coordinate::KindFilter;
+        let vis = self.sequence.visible();
 
         let mut candidates: Vec<IndexEntry> = if let Some(ref prefix) = region.entity_prefix {
             // Entity prefix → scan streams map for matching keys
@@ -360,6 +483,9 @@ impl StoreIndex {
             }
         }
 
+        // Visibility watermark: exclude entries not yet published.
+        candidates.retain(|e| e.global_sequence < vis);
+
         // Clock range filter (always per-entity clock, not global_sequence)
         if let Some((min, max)) = region.clock_range {
             candidates.retain(|e| e.clock >= min && e.clock <= max);
@@ -382,8 +508,25 @@ impl StoreIndex {
             .collect()
     }
 
+    /// Current allocator position (next sequence to be assigned).
+    /// Used by checkpoint, rebuild, writer, and stats/diagnostics.
     pub(crate) fn global_sequence(&self) -> u64 {
-        self.global_sequence.load(Ordering::Acquire)
+        self.sequence.allocated()
+    }
+
+    /// Current visibility watermark (exclusive upper bound).
+    /// Entries with `global_sequence < visible_sequence()` are returned by read methods.
+    pub(crate) fn visible_sequence(&self) -> u64 {
+        self.sequence.visible()
+    }
+
+    /// Advance the visibility watermark so readers can observe entries
+    /// with `global_sequence < up_to`.
+    ///
+    /// Called by the writer after `insert()` or `insert_batch()`, and by
+    /// checkpoint restore / index rebuild after all entries are loaded.
+    pub(crate) fn publish(&self, up_to: u64) {
+        self.sequence.publish(up_to);
     }
 
     pub(crate) fn len(&self) -> usize {
@@ -396,8 +539,124 @@ impl StoreIndex {
         self.scan.clear();
         self.by_id.clear();
         self.latest.clear();
-        self.global_sequence.store(0, Ordering::Release);
+        self.sequence.clear();
         self.len.store(0, Ordering::Relaxed);
-        // entity_locks intentionally NOT cleared — writer may hold references
+    }
+
+    /// Begin a replay session against this index. Use this for checkpoint
+    /// restore and segment rebuild paths to preserve sparse `global_sequence`
+    /// values from durable sources (SIDX footers / checkpoint payload) while
+    /// synthesizing sequences for entries with no durable source.
+    ///
+    /// The returned [`ReplayCursor`] holds an exclusive borrow of the index
+    /// and **must** be `commit()`-ed to publish entries and restore the
+    /// allocator. Forgetting to commit leaves the index unpublished — the
+    /// `Drop` impl emits a debug-mode panic to catch this in tests.
+    pub(crate) fn begin_replay(&self) -> ReplayCursor<'_> {
+        ReplayCursor {
+            index: self,
+            max_seen: 0,
+            committed: false,
+        }
+    }
+}
+
+/// Type-safe replay session over a [`StoreIndex`].
+///
+/// `ReplayCursor` exists so the borrow checker enforces three things at the
+/// type level:
+///
+/// 1. Replay entries cannot escape the lifetime of the index they target
+///    (the cursor borrows `&'a StoreIndex`).
+/// 2. Sequence assignment, allocator restoration, and visibility publish
+///    are coupled — `commit()` consumes the cursor and performs all three
+///    in one shot, so callers cannot publish without restoring the allocator
+///    or vice versa.
+/// 3. Forgetting to call `commit()` is detected at debug time via `Drop`,
+///    which prevents silently leaving the index in an unpublished state.
+///
+/// **Sequence preservation policy:**
+/// - If `entry.global_sequence` is provided by the caller (e.g. from a SIDX
+///   footer or a checkpoint blob), it is preserved verbatim. The cursor
+///   tracks the maximum seen value.
+/// - The caller of [`Self::insert`] is responsible for setting
+///   `entry.global_sequence` before calling. For sources without a durable
+///   sequence, [`Self::synthesize_next`] returns the next free slot above
+///   the running max.
+pub(crate) struct ReplayCursor<'a> {
+    index: &'a StoreIndex,
+    /// Highest `global_sequence` observed so far across all inserted entries.
+    /// After `commit`, the allocator is set to `max_seen + 1` (or higher if
+    /// the caller passes a hint via [`Self::commit_with_allocator_hint`]).
+    max_seen: u64,
+    committed: bool,
+}
+
+impl<'a> ReplayCursor<'a> {
+    /// Insert a fully-built entry whose `global_sequence` has already been
+    /// chosen by the caller (e.g. read from a SIDX footer or checkpoint blob).
+    ///
+    /// The cursor records the sequence in its running maximum so the
+    /// allocator can be restored correctly at commit time.
+    pub(crate) fn insert(&mut self, entry: IndexEntry) {
+        self.max_seen = self.max_seen.max(entry.global_sequence);
+        self.index.insert_replay(entry);
+    }
+
+    /// Allocate the next sequence above the cursor's running maximum.
+    /// Used for replay sources that have no durable `global_sequence`
+    /// (e.g. slow-path scans of an active or footerless segment).
+    ///
+    /// Calling this method does not insert anything; the caller is expected
+    /// to use the returned value to populate `IndexEntry::global_sequence`
+    /// and then call [`Self::insert`] with the populated entry.
+    pub(crate) fn synthesize_next(&mut self) -> u64 {
+        // Don't update max_seen here — insert() will, once the entry is built.
+        self.max_seen.saturating_add(1)
+    }
+
+    /// Finish the replay session.
+    ///
+    /// Restores the allocator to `max_seen + 1` (or `hint` if higher), then
+    /// publishes that value as the visibility watermark so all replayed
+    /// entries become visible to readers atomically.
+    ///
+    /// `hint` is used by checkpoint restore to preserve burned-slot
+    /// allocator positions: the checkpoint stores the original allocator
+    /// value, which may be greater than `max(entry.global_sequence)` because
+    /// some sequence slots were reserved for batches that later failed.
+    /// Pass `0` if there is no hint (i.e. segment rebuild).
+    pub(crate) fn commit(mut self, hint: u64) {
+        let next = self.max_seen.saturating_add(1).max(hint);
+        self.index.sequence.restore_allocator(next);
+        self.index.publish(next);
+        self.committed = true;
+    }
+
+    /// Abandon the replay session without publishing.
+    ///
+    /// Use this on error paths where partial replay state should not become
+    /// visible to readers. The allocator and visibility watermark are left
+    /// untouched. Any entries already inserted via [`Self::insert`] remain
+    /// in the underlying index maps but are unreachable until a later
+    /// successful replay publishes a watermark covering them.
+    ///
+    /// This is the explicit "I'm bailing out" signal that suppresses the
+    /// `Drop` debug-assertion designed to catch forgotten `commit()` calls.
+    pub(crate) fn abort(mut self) {
+        self.committed = true;
+    }
+}
+
+impl<'a> Drop for ReplayCursor<'a> {
+    fn drop(&mut self) {
+        // In debug builds, catch programmer errors where the cursor is
+        // dropped without commit() being called. In release builds the
+        // index is left unpublished, which is the safest possible state
+        // (readers see nothing).
+        debug_assert!(
+            self.committed,
+            "ReplayCursor dropped without calling commit() — index is unpublished",
+        );
     }
 }

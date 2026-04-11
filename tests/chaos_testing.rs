@@ -20,7 +20,7 @@
 
 use batpak::prelude::*;
 use batpak::store::segment::frame_decode;
-use batpak::store::{AppendOptions, Store, StoreConfig};
+use batpak::store::{AppendOptions, Store, StoreConfig, SyncConfig};
 use rand::prelude::*;
 use rand::Rng;
 use std::sync::Arc;
@@ -138,7 +138,10 @@ fn chaos_concurrent_writer_stress() {
     let config = StoreConfig {
         data_dir: dir.path().to_path_buf(),
         segment_max_bytes: 8192, // small segments → lots of rotation
-        sync_every_n_events: 10,
+        sync: SyncConfig {
+            every_n_events: 10,
+            ..SyncConfig::default()
+        },
         ..StoreConfig::new("")
     };
     let store = Arc::new(Store::open(config).expect("open"));
@@ -401,7 +404,10 @@ fn chaos_rapid_segment_rotation() {
         data_dir: dir.path().to_path_buf(),
         segment_max_bytes: 256, // extremely tiny
         fd_budget: 3,           // very constrained
-        sync_every_n_events: 1,
+        sync: SyncConfig {
+            every_n_events: 1,
+            ..SyncConfig::default()
+        },
         ..StoreConfig::new("")
     };
     let store = Store::open(config).expect("open");
@@ -487,7 +493,10 @@ fn chaos_batch_atomicity_concurrent() {
     let config = StoreConfig {
         data_dir: dir.path().to_path_buf(),
         segment_max_bytes: 4096,
-        sync_every_n_events: 1,
+        sync: SyncConfig {
+            every_n_events: 1,
+            ..SyncConfig::default()
+        },
         ..StoreConfig::new("")
     };
     let store = Arc::new(Store::open(config).expect("open"));
@@ -595,7 +604,10 @@ fn chaos_batch_cross_segment_rotation() {
     let config = StoreConfig {
         data_dir: dir.path().to_path_buf(),
         segment_max_bytes: 512, // Tiny - will force rotation mid-batch
-        sync_every_n_events: 1,
+        sync: SyncConfig {
+            every_n_events: 1,
+            ..SyncConfig::default()
+        },
         ..StoreConfig::new("")
     };
     let store = Store::open(config).expect("open");

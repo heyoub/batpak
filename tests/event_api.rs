@@ -299,7 +299,6 @@ fn event_header_age_us() {
 #[test]
 fn event_kind_system_constants_are_system() {
     let system_kinds = [
-        EventKind::DATA,
         EventKind::SYSTEM_INIT,
         EventKind::SYSTEM_SHUTDOWN,
         EventKind::SYSTEM_HEARTBEAT,

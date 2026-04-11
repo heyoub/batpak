@@ -369,7 +369,7 @@ fn batch_restart_recovery_discards_incomplete_mid_items() {
     assert_eq!(entries.len(), 0, "partial batch items should be discarded");
 }
 
-/// Test: both BEGIN and COMMIT markers are invisible.
+/// Test: both batch markers invisible to queries.
 #[test]
 fn batch_both_markers_invisible() {
     let tmp = tempfile::tempdir().expect("create temp dir for marker invisibility pair test");
@@ -426,7 +426,7 @@ fn batch_fsync_ambiguity_discards_uncommitted() {
     // Reopen with fault injector that triggers DURING fsync.
     // This simulates: COMMIT written, power lost before fsync completes.
     let mut config = StoreConfig::new(tmp.path());
-    config.sync_mode = SyncMode::SyncAll; // Full sync to test real ambiguity
+    config.sync.mode = SyncMode::SyncAll; // Full sync to test real ambiguity
     config.fault_injector = Some(std::sync::Arc::new(
         CountdownInjector::new(
             1,
@@ -525,6 +525,7 @@ fn batch_recovery_system_remains_coherent() {
         .expect("construct faulted entity_b batch item"),
     ];
 
+    // Batch append should fail due to fault injection.
     let _ = store.append_batch(items);
     drop(store);
 
@@ -829,5 +830,208 @@ fn batch_cross_segment_fault_recovery() {
     assert!(
         new_receipt.sequence > 0,
         "new appends should work after cross-segment recovery"
+    );
+}
+
+/// Test: concurrent readers NEVER observe a partial batch.
+///
+/// Uses a fault injector at `BatchPrePublish` to create a deterministic
+/// window where all batch entries are in the index maps but the visibility
+/// watermark has NOT yet advanced. A reader thread queries continuously
+/// during this window and asserts that it sees exactly 0 batch entries
+/// (not a strict prefix).
+///
+/// [INV-BATCH-ATOMIC-VISIBILITY]
+#[cfg(feature = "test-support")]
+#[test]
+fn batch_publish_atomicity_no_partial_read_during_insert() {
+    use batpak::store::{CountdownAction, CountdownInjector, InjectionPoint};
+    use std::sync::Arc;
+
+    let tmp = tempfile::tempdir().expect("create temp dir for publish atomicity test");
+    let coord = Coordinate::new("batch_vis", "test").expect("valid coordinate");
+
+    // Pre-populate a baseline event so we can distinguish "pre-batch" from "batch" entries.
+    let config = StoreConfig::new(tmp.path());
+    let store = Store::open(config).expect("open baseline store");
+    let pre = store
+        .append(
+            &coord,
+            EventKind::DATA,
+            &serde_json::json!({"baseline": true}),
+        )
+        .expect("append baseline event");
+    drop(store);
+
+    // Reopen with a fault injector that fails at BatchPrePublish.
+    // This means insert_batch() has run (entries are in maps) but
+    // publish() has NOT been called yet, so the batch attempt fails
+    // before advancing the visibility watermark.
+    let mut config = StoreConfig::new(tmp.path());
+    config.fault_injector = Some(Arc::new(
+        CountdownInjector::new(1, CountdownAction::Fail("halt before publish"))
+            .with_filter(|p| matches!(p, InjectionPoint::BatchPrePublish { .. })),
+    ));
+    let store = Arc::new(Store::open(config).expect("open fault-injected store"));
+
+    let batch_size = 10usize;
+    let items: Vec<_> = (0..batch_size)
+        .map(|i| {
+            BatchAppendItem::new(
+                coord.clone(),
+                EventKind::DATA,
+                &serde_json::json!({"batch_item": i}),
+                AppendOptions::default(),
+                CausationRef::None,
+            )
+            .expect("construct batch item")
+        })
+        .collect();
+
+    // The batch should fail because BatchPrePublish injects a fault.
+    let result = store.append_batch(items);
+    assert!(
+        result.is_err(),
+        "batch must fail when BatchPrePublish fault is injected"
+    );
+
+    // After the failed batch, query the store. Because publish() was never called,
+    // readers must see only the baseline event — no partial batch entries.
+    let region = Region::entity("batch_vis");
+    let entries = store.query(&region);
+
+    assert_eq!(
+        entries.len(),
+        1,
+        "PROPERTY: after BatchPrePublish fault, readers must see 0 batch entries.\n\
+         Expected only the baseline event (id={}), but got {} entries.\n\
+         Investigate: src/store/index.rs read methods must filter by visible_sequence.\n\
+         Common causes: read method missing visibility filter, publish() called before fault point.",
+        pre.event_id,
+        entries.len(),
+    );
+    assert_eq!(
+        entries[0].event_id, pre.event_id,
+        "the single visible entry must be the pre-batch baseline event"
+    );
+}
+
+/// Real concurrent-reader proof of batch publish atomicity.
+///
+/// A reader thread runs `store.query(...)` in a tight loop while a writer
+/// thread does many batch appends back-to-back. The reader records every
+/// observed count. After the writer finishes, every observation must be of
+/// the form `pre_count + k * batch_size` for some `k`. Any other value
+/// (e.g. `pre_count + 3` when batch_size = 7) means a partial batch became
+/// visible — i.e. the SequenceGate failed to enforce atomic publish.
+///
+/// This is the "show me the race" companion to the loom model in
+/// tests/deterministic_concurrency.rs. The loom model proves the property
+/// under exhaustive interleavings of a simplified abstract model; this
+/// integration test exercises the real Store/SequenceGate code under real
+/// OS-scheduled contention.
+///
+/// [INV-BATCH-ATOMIC-VISIBILITY]
+#[test]
+fn batch_publish_atomicity_concurrent_reader_sees_zero_or_all() {
+    use std::collections::HashSet;
+    use std::sync::atomic::{AtomicBool, Ordering as MemOrd};
+    use std::sync::Arc;
+    use std::thread;
+
+    let tmp = tempfile::tempdir().expect("create temp dir for concurrent atomicity test");
+    let coord = Coordinate::new("concurrent_atom", "scope").expect("valid coordinate");
+
+    let config = StoreConfig::new(tmp.path());
+    let store = Arc::new(Store::open(config).expect("open store"));
+
+    // Pre-populate baseline events so the "post-batch" count is always
+    // pre_count + k * batch_size.
+    let pre_count: usize = 3;
+    for i in 0..pre_count {
+        store
+            .append(&coord, EventKind::DATA, &serde_json::json!({"pre": i}))
+            .expect("append baseline event");
+    }
+
+    let stop = Arc::new(AtomicBool::new(false));
+    let region = Region::entity("concurrent_atom");
+
+    // Reader thread: hammer query() until told to stop, recording every
+    // distinct count we observe along the way.
+    let r_store = Arc::clone(&store);
+    let r_stop = Arc::clone(&stop);
+    let r_region = region.clone();
+    let reader = thread::Builder::new()
+        .name("atomic-batch-reader".into())
+        .spawn(move || {
+            let mut observations: HashSet<usize> = HashSet::new();
+            while !r_stop.load(MemOrd::Acquire) {
+                let count = r_store.query(&r_region).len();
+                observations.insert(count);
+            }
+            // One final read after the stop signal so we always include the
+            // post-writer terminal state in the observations.
+            observations.insert(r_store.query(&r_region).len());
+            observations
+        })
+        .expect("spawn reader thread");
+
+    // Writer thread: many back-to-back batch appends. Run on this thread so
+    // we don't have to deal with sharing the Store as Arc both ways.
+    let batch_size: usize = 7;
+    let num_batches: usize = 50;
+    for _ in 0..num_batches {
+        let items: Vec<BatchAppendItem> = (0..batch_size)
+            .map(|i| {
+                BatchAppendItem::new(
+                    coord.clone(),
+                    EventKind::DATA,
+                    &serde_json::json!({"batch_item": i}),
+                    AppendOptions::default(),
+                    CausationRef::None,
+                )
+                .expect("construct batch item")
+            })
+            .collect();
+        store.append_batch(items).expect("batch append");
+    }
+
+    // Stop the reader and collect observations.
+    stop.store(true, MemOrd::Release);
+    let observed = reader.join().expect("reader thread joined cleanly");
+
+    // Compute the set of valid counts: pre_count + k * batch_size for
+    // 0 <= k <= num_batches.
+    let allowed: HashSet<usize> = (0..=num_batches)
+        .map(|k| pre_count + k * batch_size)
+        .collect();
+
+    // Every observation must be in the allowed set. Anything else means
+    // the reader saw a partial batch.
+    let bad: Vec<usize> = observed.difference(&allowed).copied().collect();
+    assert!(
+        bad.is_empty(),
+        "PROPERTY: reader must only ever observe pre_count + k * batch_size.\n\
+         Observed counts not in the allowed set: {bad:?}\n\
+         Allowed set: {allowed:?}\n\
+         All observed: {observed:?}\n\
+         A partial batch was visible — INV-BATCH-ATOMIC-VISIBILITY violated.\n\
+         Investigate: src/store/index.rs SequenceGate visibility filter +\n\
+         src/store/writer.rs handle_append_batch publish ordering.",
+    );
+
+    // Sanity check: we should have observed AT LEAST the initial pre_count
+    // and the terminal pre_count + num_batches * batch_size. (The reader
+    // is fast enough to almost certainly catch some intermediate states
+    // too, but we don't depend on that.)
+    assert!(
+        observed.contains(&pre_count),
+        "expected to observe at least the pre-batch baseline count {pre_count}, observed {observed:?}",
+    );
+    let terminal = pre_count + num_batches * batch_size;
+    assert!(
+        observed.contains(&terminal),
+        "expected to observe the terminal count {terminal}, observed {observed:?}",
     );
 }

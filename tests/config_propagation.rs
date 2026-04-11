@@ -8,13 +8,15 @@
 //! These tests exist because three bugs slipped through code review:
 //! 1. wall_ms clock regression — backward clock could reorder events in BTreeMap
 //! 2. SyncMode ignored — segment always used sync_all regardless of config
-//! 3. writer_stack_size unused — config field never applied to thread builder
+//! 3. writer.stack_size unused — config field never applied to thread builder
 //!
 //! Each test targets the specific bug class to prevent regression.
 //! [SPEC:tests/config_propagation.rs]
 
 use batpak::prelude::*;
-use batpak::store::{Store, StoreConfig, SyncMode};
+use batpak::store::{
+    BatchConfig, IndexConfig, Store, StoreConfig, SyncConfig, SyncMode, WriterConfig,
+};
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 use tempfile::TempDir;
@@ -34,7 +36,10 @@ fn wall_ms_monotonic_under_clock_regression() {
     let clock_ref = Arc::clone(&clock_us);
     let config = StoreConfig {
         data_dir: dir.path().to_path_buf(),
-        sync_every_n_events: 1,
+        sync: SyncConfig {
+            every_n_events: 1,
+            ..SyncConfig::default()
+        },
         clock: Some(Arc::new(move || clock_ref.load(Ordering::SeqCst))),
         ..StoreConfig::new("")
     };
@@ -106,7 +111,10 @@ fn wall_ms_monotonic_per_entity_isolation() {
     let clock_ref = Arc::clone(&clock_us);
     let config = StoreConfig {
         data_dir: dir.path().to_path_buf(),
-        sync_every_n_events: 1,
+        sync: SyncConfig {
+            every_n_events: 1,
+            ..SyncConfig::default()
+        },
         clock: Some(Arc::new(move || clock_ref.load(Ordering::SeqCst))),
         ..StoreConfig::new("")
     };
@@ -157,8 +165,10 @@ fn sync_mode_sync_data_does_not_panic() {
     let dir = TempDir::new().expect("create temp dir");
     let config = StoreConfig {
         data_dir: dir.path().to_path_buf(),
-        sync_every_n_events: 1,
-        sync_mode: SyncMode::SyncData,
+        sync: SyncConfig {
+            every_n_events: 1,
+            mode: SyncMode::SyncData,
+        },
         ..StoreConfig::new("")
     };
     let store = Store::open(config).expect("open store with SyncData");
@@ -195,8 +205,10 @@ fn sync_mode_sync_data_survives_segment_rotation() {
     let config = StoreConfig {
         data_dir: dir.path().to_path_buf(),
         segment_max_bytes: 512, // tiny segments to force rotation
-        sync_every_n_events: 1,
-        sync_mode: SyncMode::SyncData,
+        sync: SyncConfig {
+            every_n_events: 1,
+            mode: SyncMode::SyncData,
+        },
         ..StoreConfig::new("")
     };
     let store = Store::open(config).expect("open store");
@@ -245,8 +257,10 @@ fn sync_mode_sync_data_survives_cold_start() {
     {
         let config = StoreConfig {
             data_dir: dir.path().to_path_buf(),
-            sync_every_n_events: 1,
-            sync_mode: SyncMode::SyncData,
+            sync: SyncConfig {
+                every_n_events: 1,
+                mode: SyncMode::SyncData,
+            },
             ..StoreConfig::new("")
         };
         let store = Store::open(config).expect("open store");
@@ -282,9 +296,9 @@ fn sync_mode_sync_data_survives_cold_start() {
 }
 
 // ============================================================================
-// BUG 3: writer_stack_size propagation
+// BUG 3: writer.stack_size propagation
 // ============================================================================
-// The writer_stack_size config field must be applied to the spawned thread.
+// The writer.stack_size config field must be applied to the spawned thread.
 // We can't directly inspect thread stack size, but we can verify:
 // 1. Setting it doesn't crash
 // 2. A very small stack size causes a stack overflow (proving it's applied)
@@ -296,8 +310,14 @@ fn writer_stack_size_custom_value_works() {
     let dir = TempDir::new().expect("create temp dir");
     let config = StoreConfig {
         data_dir: dir.path().to_path_buf(),
-        sync_every_n_events: 1,
-        writer_stack_size: Some(2 * 1024 * 1024), // 2MB
+        sync: SyncConfig {
+            every_n_events: 1,
+            ..SyncConfig::default()
+        },
+        writer: WriterConfig {
+            stack_size: Some(2 * 1024 * 1024), // 2MB
+            ..WriterConfig::default()
+        },
         ..StoreConfig::new("")
     };
     let store = Store::open(config).expect("open store with custom stack size");
@@ -327,8 +347,14 @@ fn writer_stack_size_none_uses_default() {
     let dir = TempDir::new().expect("create temp dir");
     let config = StoreConfig {
         data_dir: dir.path().to_path_buf(),
-        sync_every_n_events: 1,
-        writer_stack_size: None,
+        sync: SyncConfig {
+            every_n_events: 1,
+            ..SyncConfig::default()
+        },
+        writer: WriterConfig {
+            stack_size: None,
+            ..WriterConfig::default()
+        },
         ..StoreConfig::new("")
     };
     let store = Store::open(config).expect("open store with default stack");
@@ -364,26 +390,33 @@ fn store_config_all_fields_overridable() {
 
     let config = StoreConfig {
         data_dir: dir.path().to_path_buf(),
-        segment_max_bytes: 1024 * 1024,    // 1MB (non-default)
-        sync_every_n_events: 5,            // non-default
-        fd_budget: 8,                      // non-default
-        writer_channel_capacity: 128,      // non-default
-        broadcast_capacity: 256,           // non-default
-        cache_map_size_bytes: 1024 * 1024, // 1MB (non-default)
-        restart_policy: batpak::store::RestartPolicy::Bounded {
-            max_restarts: 3,
-            within_ms: 5000,
+        segment_max_bytes: 1024 * 1024, // 1MB (non-default)
+        fd_budget: 8,                   // non-default
+        broadcast_capacity: 256,        // non-default
+        sync: SyncConfig {
+            mode: SyncMode::SyncData, // non-default
+            every_n_events: 5,        // non-default
         },
-        shutdown_drain_limit: 64,                 // non-default
-        writer_stack_size: Some(4 * 1024 * 1024), // 4MB (non-default)
-        clock: Some(clock_fn),                    // custom clock
-        sync_mode: SyncMode::SyncData,            // non-default
-        group_commit_max_batch: 1,                // default (not testing group commit here)
-        index_layout: IndexLayout::default(),     // default
-        incremental_projection: false,            // default
-        enable_checkpoint: false,                 // disabled for this test
-        batch_max_size: 512,                      // non-default
-        batch_max_bytes: 2 * 1024 * 1024,         // 2MB (non-default)
+        writer: WriterConfig {
+            channel_capacity: 128,             // non-default
+            stack_size: Some(4 * 1024 * 1024), // 4MB (non-default)
+            restart_policy: batpak::store::RestartPolicy::Bounded {
+                max_restarts: 3,
+                within_ms: 5000,
+            },
+            shutdown_drain_limit: 64, // non-default
+        },
+        batch: BatchConfig {
+            max_size: 512,              // non-default
+            max_bytes: 2 * 1024 * 1024, // 2MB (non-default)
+            group_commit_max_batch: 1,  // default (not testing group commit here)
+        },
+        index: IndexConfig {
+            layout: IndexLayout::default(), // default
+            incremental_projection: false,  // default
+            enable_checkpoint: false,       // disabled for this test
+        },
+        clock: Some(clock_fn), // custom clock
         #[cfg(feature = "test-support")]
         fault_injector: None,
     };
@@ -396,7 +429,7 @@ fn store_config_all_fields_overridable() {
     let coord = Coordinate::new("entity:config-test", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
 
-    // Write enough to trigger periodic sync (sync_every_n_events = 5)
+    // Write enough to trigger periodic sync (sync.every_n_events = 5)
     for i in 0..10 {
         store
             .append(&coord, kind, &serde_json::json!({"i": i}))
@@ -421,25 +454,32 @@ fn store_config_debug_lists_all_integrity_relevant_fields() {
     let config = StoreConfig {
         data_dir: dir.path().to_path_buf(),
         segment_max_bytes: 11_111,
-        sync_every_n_events: 7,
         fd_budget: 13,
-        writer_channel_capacity: 17,
         broadcast_capacity: 19,
-        cache_map_size_bytes: 23,
-        restart_policy: batpak::store::RestartPolicy::Bounded {
-            max_restarts: 2,
-            within_ms: 3000,
+        sync: SyncConfig {
+            mode: SyncMode::SyncData,
+            every_n_events: 7,
         },
-        shutdown_drain_limit: 29,
-        writer_stack_size: Some(31 * 1024),
+        writer: WriterConfig {
+            channel_capacity: 17,
+            stack_size: Some(31 * 1024),
+            restart_policy: batpak::store::RestartPolicy::Bounded {
+                max_restarts: 2,
+                within_ms: 3000,
+            },
+            shutdown_drain_limit: 29,
+        },
+        batch: BatchConfig {
+            max_size: 333,
+            max_bytes: 44_444,
+            group_commit_max_batch: 1,
+        },
+        index: IndexConfig {
+            layout: IndexLayout::default(),
+            incremental_projection: false,
+            enable_checkpoint: true,
+        },
         clock: Some(clock_fn),
-        sync_mode: SyncMode::SyncData,
-        group_commit_max_batch: 1,
-        index_layout: IndexLayout::default(),
-        incremental_projection: false,
-        enable_checkpoint: true,
-        batch_max_size: 333,
-        batch_max_bytes: 44_444,
         #[cfg(feature = "test-support")]
         fault_injector: None,
     };
@@ -450,20 +490,23 @@ fn store_config_debug_lists_all_integrity_relevant_fields() {
         "StoreConfig",
         "data_dir",
         "segment_max_bytes: 11111",
-        "sync_every_n_events: 7",
         "fd_budget: 13",
-        "writer_channel_capacity: 17",
         "broadcast_capacity: 19",
-        "cache_map_size_bytes: 23",
+        "SyncConfig",
+        "mode: SyncData",
+        "every_n_events: 7",
+        "WriterConfig",
+        "channel_capacity: 17",
+        "stack_size: Some(31744)",
         "restart_policy: Bounded",
         "max_restarts: 2",
         "within_ms: 3000",
         "shutdown_drain_limit: 29",
-        "writer_stack_size: Some(31744)",
+        "BatchConfig",
+        "max_size: 333",
+        "max_bytes: 44444",
+        "IndexConfig",
         "clock: Some(\"<fn>\")",
-        "sync_mode: SyncData",
-        "batch_max_size: 333",
-        "batch_max_bytes: 44444",
     ] {
         assert!(
             debug.contains(needle),

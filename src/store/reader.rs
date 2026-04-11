@@ -51,6 +51,10 @@ pub(crate) struct ScannedIndexEntry {
     pub segment_id: u64,
     pub offset: u64,
     pub length: u32,
+    /// Original `global_sequence` if a durable source (SIDX footer) was available.
+    /// `None` for slow-path scans (active segment, missing/corrupt SIDX) — the
+    /// rebuild caller must synthesize a sequence in that case.
+    pub global_sequence: Option<u64>,
 }
 
 /// Cross-segment batch recovery state.
@@ -80,6 +84,30 @@ struct IndexScanEvent {
 }
 
 impl Reader {
+    fn decode_frame_payload_value(
+        msgpack: &[u8],
+    ) -> Result<FramePayload<serde_json::Value>, StoreError> {
+        let payload: FramePayload<Vec<u8>> =
+            rmp_serde::from_slice(msgpack).map_err(|e| StoreError::Serialization(Box::new(e)))?;
+        let event = payload.event;
+        let decoded_payload = match event.header.event_kind {
+            EventKind::SYSTEM_BATCH_BEGIN | EventKind::SYSTEM_BATCH_COMMIT => {
+                serde_json::Value::Null
+            }
+            _ => rmp_serde::from_slice(&event.payload)
+                .map_err(|e| StoreError::Serialization(Box::new(e)))?,
+        };
+        Ok(FramePayload {
+            event: Event {
+                header: event.header,
+                payload: decoded_payload,
+                hash_chain: event.hash_chain,
+            },
+            entity: payload.entity,
+            scope: payload.scope,
+        })
+    }
+
     pub(crate) fn new(data_dir: PathBuf, fd_budget: usize) -> Self {
         Self {
             data_dir,
@@ -211,8 +239,7 @@ impl Reader {
                 return Err(e);
             }
         };
-        let payload: FramePayload<serde_json::Value> =
-            rmp_serde::from_slice(msgpack).map_err(|e| StoreError::Serialization(Box::new(e)))?;
+        let payload = Self::decode_frame_payload_value(msgpack)?;
 
         // Release buffer back to pool after deserialization
         self.release_buffer(buf);
@@ -274,6 +301,17 @@ impl Reader {
                 frame_header[2],
                 frame_header[3],
             ]) as usize;
+            if payload_len > segment::MAX_FRAME_PAYLOAD {
+                // Corrupt or truncated frame header — stop scanning this segment
+                // rather than allocating unbounded memory. Events before this point
+                // are still valid and will be returned.
+                tracing::warn!(
+                    segment_id,
+                    payload_len,
+                    "frame payload exceeds MAX_FRAME_PAYLOAD, stopping segment scan"
+                );
+                break;
+            }
             let mut frame_buf = self.acquire_buffer(8 + payload_len);
             frame_buf[..8].copy_from_slice(&frame_header);
             if let Err(error) = file.read_exact(&mut frame_buf[8..]) {
@@ -287,8 +325,15 @@ impl Reader {
             let mut stop_scan = false;
             match segment::frame_decode(&frame_buf) {
                 Ok((msgpack, frame_size)) => {
-                    match rmp_serde::from_slice::<FramePayload<serde_json::Value>>(msgpack) {
+                    match Self::decode_frame_payload_value(msgpack) {
                         Ok(payload) => {
+                            if matches!(
+                                payload.event.header.event_kind,
+                                EventKind::SYSTEM_BATCH_BEGIN | EventKind::SYSTEM_BATCH_COMMIT
+                            ) {
+                                cursor += frame_size as u64;
+                                continue;
+                            }
                             entries.push(ScannedEntry {
                                 event: payload.event,
                                 entity: payload.entity,
@@ -332,17 +377,18 @@ impl Reader {
         path: &Path,
         mut batch_state: Option<&mut BatchRecoveryState>,
     ) -> Result<Vec<ScannedIndexEntry>, StoreError> {
-        // Fast path: try SIDX footer.
-        // Note: SIDX fast path cannot handle cross-segment batches correctly
-        // because it doesn't have BEGIN/COMMIT markers to guide staging.
-        // Fall back to slow path if we have pending batch state.
-        if batch_state.as_ref().is_none_or(|s| !s.in_batch) {
+        // Fast path: try SIDX footer for sealed segments only.
+        // Sealed segments cannot have incomplete batches, so SIDX is safe.
+        // Active segment might have incomplete batches, so use slow path.
+        let segment_id = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(0);
+        let is_active = self.active_segment_id.load(Ordering::Acquire) == segment_id;
+
+        if !is_active && batch_state.as_ref().is_none_or(|s| !s.in_batch) {
             if let Ok(Some((sidx_entries, strings))) = crate::store::sidx::read_footer(path) {
-                let segment_id = path
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .and_then(|s| s.parse::<u64>().ok())
-                    .unwrap_or(0);
                 let mut result = Vec::with_capacity(sidx_entries.len());
                 for se in sidx_entries {
                     let kind = crate::store::sidx::raw_to_kind(se.kind);
@@ -382,13 +428,19 @@ impl Reader {
                         segment_id,
                         offset: se.frame_offset,
                         length: se.frame_length,
+                        // SIDX footer carries the original sequence — preserve it
+                        // so sparse `global_sequence` values survive cold-start rebuild.
+                        global_sequence: Some(se.global_sequence),
                     });
                 }
                 return Ok(result);
             }
         }
 
-        // Slow path: frame-by-frame scan.
+        // Slow path: frame-by-frame scan for active segment or when batch state is pending.
+        // Track batch-committed entries for fsync ambiguity handling.
+        let has_sidx_footer = crate::store::sidx::read_footer(path).is_ok_and(|r| r.is_some());
+        let mut batch_committed_indices = Vec::new();
         let mut file = File::open(path).map_err(StoreError::Io)?;
         let mut magic = [0u8; 4];
         file.read_exact(&mut magic).map_err(StoreError::Io)?;
@@ -456,6 +508,17 @@ impl Reader {
                 frame_header[2],
                 frame_header[3],
             ]) as usize;
+            if payload_len > segment::MAX_FRAME_PAYLOAD {
+                // Corrupt or truncated frame header — stop scanning this segment
+                // rather than allocating unbounded memory. Events before this point
+                // are still valid and will be returned.
+                tracing::warn!(
+                    segment_id,
+                    payload_len,
+                    "frame payload exceeds MAX_FRAME_PAYLOAD, stopping segment scan"
+                );
+                break;
+            }
             let mut frame_buf = self.acquire_buffer(8 + payload_len);
             frame_buf[..8].copy_from_slice(&frame_header);
             if let Err(error) = file.read_exact(&mut frame_buf[8..]) {
@@ -502,6 +565,9 @@ impl Reader {
                                         // Frame sizes are bounded by segment_max_bytes (default 64MB), well within u32 range
                                         #[allow(clippy::cast_possible_truncation)]
                                         length: frame_size as u32,
+                                        // Slow path: no SIDX footer, so no durable sequence source.
+                                        // Caller (rebuild) will synthesize via the ReplayCursor allocator.
+                                        global_sequence: None,
                                     });
                                 }
                             } else if kind == EventKind::SYSTEM_BATCH_COMMIT {
@@ -509,7 +575,12 @@ impl Reader {
                                 if state_ref.remaining == 0 {
                                     // Complete batch: commit all staged.
                                     let completed_batch = std::mem::take(&mut state_ref.staged);
+                                    let start_idx = entries.len();
                                     entries.extend(completed_batch);
+                                    // Track batch-committed entry indices for fsync ambiguity.
+                                    for i in start_idx..entries.len() {
+                                        batch_committed_indices.push(i);
+                                    }
                                     state_ref.in_batch = false;
                                     tracing::debug!(
                                         segment_id,
@@ -554,6 +625,8 @@ impl Reader {
                                     // Frame sizes are bounded by segment_max_bytes (default 64MB), well within u32 range
                                     #[allow(clippy::cast_possible_truncation)]
                                     length: frame_size as u32,
+                                    // Slow path: no SIDX, no durable sequence source.
+                                    global_sequence: None,
                                 });
                                 if state_ref.remaining > 0 {
                                     state_ref.remaining -= 1;
@@ -620,6 +693,21 @@ impl Reader {
             }
         }
 
+        // Fsync ambiguity handling: if segment lacks SIDX footer (incomplete sync),
+        // discard batch-committed entries. SIDX is written after sync, so its absence
+        // indicates sync didn't complete.
+        if !has_sidx_footer && !batch_committed_indices.is_empty() {
+            tracing::warn!(
+                segment_id,
+                batch_count = batch_committed_indices.len(),
+                "segment lacks SIDX footer (incomplete sync), discarding batch entries"
+            );
+            // Remove in reverse order to preserve indices.
+            for idx in batch_committed_indices.into_iter().rev() {
+                entries.remove(idx);
+            }
+        }
+
         Ok(entries)
     }
 
@@ -677,8 +765,7 @@ impl Reader {
                 StoreError::corrupt_frame(pos.segment_id, e.to_string())
             }
         })?;
-        let payload: FramePayload<serde_json::Value> =
-            rmp_serde::from_slice(msgpack).map_err(|e| StoreError::Serialization(Box::new(e)))?;
+        let payload = Self::decode_frame_payload_value(msgpack)?;
         let coord =
             Coordinate::new(&payload.entity, &payload.scope).map_err(StoreError::Coordinate)?;
         Ok(StoredEvent {

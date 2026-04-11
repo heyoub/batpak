@@ -2,6 +2,8 @@
   summary: Root-cause append goes through store append path, writer commit protocol, and persistence.
   artifacts:
     - ART-STORE-MOD
+    - ART-STORE-WRITER
+    - ART-STORE-SEGMENT
     - ART-STORE-INTEGRATION
     - ART-OBSERVABILITY-TESTS
 - id: FLOW-APPEND-OPTIONS

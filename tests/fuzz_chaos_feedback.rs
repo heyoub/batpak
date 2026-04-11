@@ -28,7 +28,7 @@
 
 use batpak::prelude::*;
 use batpak::store::segment::{frame_decode, frame_encode};
-use batpak::store::{AppendOptions, Store, StoreConfig};
+use batpak::store::{AppendOptions, Store, StoreConfig, SyncConfig};
 use rand::Rng;
 use std::sync::Arc;
 use std::time::Instant;
@@ -278,7 +278,10 @@ fn run_chaos_probes() -> (f64, u64, bool, bool, u64, f64, bool) {
     let config = StoreConfig {
         data_dir: dir.path().to_path_buf(),
         segment_max_bytes: 2048,
-        sync_every_n_events: 10,
+        sync: SyncConfig {
+            every_n_events: 10,
+            ..SyncConfig::default()
+        },
         fd_budget: 4,
         broadcast_capacity: 128,
         ..StoreConfig::new("")

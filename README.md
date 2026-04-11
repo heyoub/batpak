@@ -34,7 +34,7 @@ println!("stored {} at {}", receipt.event_id, receipt.sequence);
 
 - User lane: `cargo build`, `cargo test`, `cargo run --example quickstart`
 - Maintainer lane: `cargo xtask doctor`, `cargo xtask ci`
-- Perf lane: `cargo xtask bench --surface neutral|redb|lmdb [--save|--compare]`
+- Perf lane: `cargo xtask bench --surface neutral|native [--save|--compare]`
 
 ## What You Get
 
@@ -44,7 +44,7 @@ println!("stored {} at {}", receipt.event_id, receipt.sequence);
 - **Atomic batch append**: multi-event commit with two-phase markers, crash recovery, and intra-batch causation
 - Fault injection framework (`test-support` feature) for chaos testing batch and write paths
 - Gate / receipt workflow for policy enforcement
-- Event-sourced projections with optional `redb` or `lmdb` caches
+- Event-sourced projections with optional native file-backed cache
 - Push subscriptions, pull cursors, typestate helpers
 - Query/read operations yield `StoredEvent<serde_json::Value>` at the storage boundary
 
@@ -60,8 +60,6 @@ println!("stored {} at {}", receipt.event_id, receipt.sequence);
 ## Features
 
 - `blake3` (default): hash-chain verification
-- `redb`: redb-backed projection cache
-- `lmdb`: LMDB-backed projection cache
 - `test-support`: explicit test-only runtime hooks
 
 ## Canonical Commands

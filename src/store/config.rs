@@ -47,6 +47,93 @@ pub enum IndexLayout {
     SoAoS,
 }
 
+/// Batch append limits and group-commit behavior.
+#[derive(Clone, Debug)]
+pub struct BatchConfig {
+    /// Maximum number of items in a single batch append.
+    pub max_size: u32,
+    /// Maximum total payload bytes in a single batch append.
+    pub max_bytes: u32,
+    /// Maximum Append commands drained per writer loop iteration before issuing
+    /// a single fsync (group commit). Default: 1 (per-event sync). When > 1,
+    /// all appends MUST include an idempotency key or `StoreError::IdempotencyRequired`
+    /// is raised.
+    pub group_commit_max_batch: u32,
+}
+
+impl Default for BatchConfig {
+    fn default() -> Self {
+        Self {
+            max_size: 256,
+            max_bytes: 1024 * 1024,
+            group_commit_max_batch: 1,
+        }
+    }
+}
+
+/// Writer thread channel, stack, restart, and shutdown-drain configuration.
+#[derive(Clone, Debug)]
+pub struct WriterConfig {
+    /// Capacity of the flume channel between callers and the writer thread.
+    pub channel_capacity: usize,
+    /// Optional writer thread stack size. None = OS default.
+    pub stack_size: Option<usize>,
+    /// Writer auto-restart policy on panic.
+    pub restart_policy: RestartPolicy,
+    /// Maximum number of queued append commands drained during shutdown.
+    pub shutdown_drain_limit: usize,
+}
+
+impl Default for WriterConfig {
+    fn default() -> Self {
+        Self {
+            channel_capacity: 4096,
+            stack_size: None,
+            restart_policy: RestartPolicy::default(),
+            shutdown_drain_limit: 1024,
+        }
+    }
+}
+
+/// fsync strategy and cadence.
+#[derive(Clone, Debug)]
+pub struct SyncConfig {
+    /// Sync mode: SyncAll (data+metadata, default) or SyncData (data only, faster).
+    pub mode: SyncMode,
+    /// Number of events between periodic fsyncs.
+    pub every_n_events: u32,
+}
+
+impl Default for SyncConfig {
+    fn default() -> Self {
+        Self {
+            mode: SyncMode::default(),
+            every_n_events: 1000,
+        }
+    }
+}
+
+/// Secondary query index layout, projection, and checkpoint configuration.
+#[derive(Clone, Debug)]
+pub struct IndexConfig {
+    /// Memory layout for the secondary query index.
+    pub layout: IndexLayout,
+    /// Enable incremental projection apply (delta replay from cached watermark).
+    pub incremental_projection: bool,
+    /// Write an index checkpoint on close (and after compact) for fast cold start.
+    pub enable_checkpoint: bool,
+}
+
+impl Default for IndexConfig {
+    fn default() -> Self {
+        Self {
+            layout: IndexLayout::default(),
+            incremental_projection: false,
+            enable_checkpoint: true,
+        }
+    }
+}
+
 /// StoreConfig: all settings for a Store instance.
 /// No Default — callers must provide data_dir via `StoreConfig::new(path)`.
 /// Manual Clone and Debug impls because `clock` field is `Arc<dyn Fn>`.
@@ -55,51 +142,21 @@ pub struct StoreConfig {
     pub data_dir: PathBuf,
     /// Maximum bytes per segment file before rotation.
     pub segment_max_bytes: u64,
-    /// Number of events between periodic fsyncs.
-    pub sync_every_n_events: u32,
     /// Maximum number of open segment file descriptors.
     pub fd_budget: usize,
-    /// Capacity of the flume channel between callers and the writer thread.
-    pub writer_channel_capacity: usize,
     /// Capacity of each subscriber's broadcast channel.
     pub broadcast_capacity: usize,
-    /// Maximum size in bytes of the LMDB cache map.
-    pub cache_map_size_bytes: usize,
-    /// Writer auto-restart policy on panic. `Once` allows 1 restart, `Bounded`
-    /// allows N restarts within a time window. See: writer.rs writer_thread_main().
-    pub restart_policy: RestartPolicy,
-    /// Maximum number of queued append commands drained during shutdown.
-    pub shutdown_drain_limit: usize,
-    /// Optional writer thread stack size. None = OS default (~8MB on Linux).
-    pub writer_stack_size: Option<usize>,
+    /// Batch append limits and group-commit behavior.
+    pub batch: BatchConfig,
+    /// Writer thread channel, stack, restart, and shutdown-drain configuration.
+    pub writer: WriterConfig,
+    /// fsync strategy and cadence.
+    pub sync: SyncConfig,
+    /// Secondary query index layout, projection, and checkpoint configuration.
+    pub index: IndexConfig,
     /// Injectable clock for deterministic testing. Returns microseconds since epoch.
     /// None = std::time::SystemTime::now() (production default).
     pub clock: Option<Arc<dyn Fn() -> i64 + Send + Sync>>,
-    /// Sync mode: SyncAll (data+metadata, default) or SyncData (data only, faster).
-    pub sync_mode: SyncMode,
-    /// Maximum Append commands drained per writer loop iteration before issuing
-    /// a single fsync (group commit). Default: 1 (per-event sync, backward-compatible).
-    /// Set higher for throughput. When > 1, all appends MUST include an idempotency
-    /// key — the store returns `StoreError::IdempotencyRequired` otherwise.
-    /// Set to 0 for unbounded drain (drain all pending before syncing).
-    pub group_commit_max_batch: u32,
-    /// Memory layout for the secondary query index. Default: AoS (DashMap only).
-    /// SoA and AoSoA variants replace by_fact + scope_entities DashMaps with
-    /// cache-friendly columnar storage.
-    pub index_layout: IndexLayout,
-    /// Enable incremental projection: when the `EventSourced` impl opts in via
-    /// `supports_incremental_apply() -> true`, load cached state and apply only
-    /// events newer than the cached watermark instead of full replay.
-    pub incremental_projection: bool,
-    /// Write an index checkpoint on close (and after compact) for fast cold start.
-    /// Default: true. Set to false for ephemeral test stores.
-    pub enable_checkpoint: bool,
-    /// Maximum number of items in a single batch append. Default: 256.
-    /// Bounded to prevent unbounded memory use and writer stalls.
-    pub batch_max_size: u32,
-    /// Maximum total payload bytes in a single batch append. Default: 1MB.
-    /// Bounded to prevent pathological batch sizes.
-    pub batch_max_bytes: u32,
     /// Fault injector for testing failure scenarios.
     /// Only available with the `test-support` feature.
     #[cfg(feature = "test-support")]
@@ -114,22 +171,13 @@ impl StoreConfig {
         Self {
             data_dir: data_dir.into(),
             segment_max_bytes: 256 * 1024 * 1024,
-            sync_every_n_events: 1000,
             fd_budget: 64,
-            writer_channel_capacity: 4096,
             broadcast_capacity: 8192,
-            cache_map_size_bytes: 64 * 1024 * 1024,
-            restart_policy: RestartPolicy::default(),
-            shutdown_drain_limit: 1024,
-            writer_stack_size: None,
-            batch_max_size: 256,
-            batch_max_bytes: 1024 * 1024, // 1MB
+            batch: BatchConfig::default(),
+            writer: WriterConfig::default(),
+            sync: SyncConfig::default(),
+            index: IndexConfig::default(),
             clock: None,
-            sync_mode: SyncMode::default(),
-            group_commit_max_batch: 1,
-            index_layout: IndexLayout::default(),
-            incremental_projection: false,
-            enable_checkpoint: true,
             #[cfg(feature = "test-support")]
             fault_injector: None,
         }
@@ -146,9 +194,9 @@ impl StoreConfig {
                 "segment_max_bytes must be > 0".into(),
             ));
         }
-        if self.writer_channel_capacity == 0 {
+        if self.writer.channel_capacity == 0 {
             return Err(crate::store::StoreError::Configuration(
-                "writer_channel_capacity must be > 0 (0 creates a rendezvous channel that deadlocks)".into(),
+                "writer.channel_capacity must be > 0 (0 creates a rendezvous channel that deadlocks)".into(),
             ));
         }
         if self.fd_budget == 0 {
@@ -161,14 +209,14 @@ impl StoreConfig {
                 "broadcast_capacity must be > 0 (0 creates rendezvous channels that starve subscribers)".into(),
             ));
         }
-        if self.batch_max_size == 0 || self.batch_max_size > 4096 {
+        if self.batch.max_size == 0 || self.batch.max_size > 4096 {
             return Err(crate::store::StoreError::Configuration(
-                "batch_max_size must be 1..=4096".into(),
+                "batch.max_size must be 1..=4096".into(),
             ));
         }
-        if self.batch_max_bytes == 0 || self.batch_max_bytes > 16 * 1024 * 1024 {
+        if self.batch.max_bytes == 0 || self.batch.max_bytes > 16 * 1024 * 1024 {
             return Err(crate::store::StoreError::Configuration(
-                "batch_max_bytes must be 1..=16MB".into(),
+                "batch.max_bytes must be 1..=16MB".into(),
             ));
         }
         Ok(())
@@ -182,7 +230,7 @@ impl StoreConfig {
 
     /// Set how many events are written between periodic fsyncs.
     pub fn with_sync_every_n_events(mut self, sync_every_n_events: u32) -> Self {
-        self.sync_every_n_events = sync_every_n_events;
+        self.sync.every_n_events = sync_every_n_events;
         self
     }
 
@@ -194,7 +242,7 @@ impl StoreConfig {
 
     /// Set the capacity of the writer command channel.
     pub fn with_writer_channel_capacity(mut self, writer_channel_capacity: usize) -> Self {
-        self.writer_channel_capacity = writer_channel_capacity;
+        self.writer.channel_capacity = writer_channel_capacity;
         self
     }
 
@@ -204,27 +252,21 @@ impl StoreConfig {
         self
     }
 
-    /// Set the LMDB cache map size in bytes.
-    pub fn with_cache_map_size_bytes(mut self, cache_map_size_bytes: usize) -> Self {
-        self.cache_map_size_bytes = cache_map_size_bytes;
-        self
-    }
-
     /// Set the writer thread restart policy on panic.
     pub fn with_restart_policy(mut self, restart_policy: RestartPolicy) -> Self {
-        self.restart_policy = restart_policy;
+        self.writer.restart_policy = restart_policy;
         self
     }
 
     /// Set how many pending appends the writer drains before shutting down.
     pub fn with_shutdown_drain_limit(mut self, shutdown_drain_limit: usize) -> Self {
-        self.shutdown_drain_limit = shutdown_drain_limit;
+        self.writer.shutdown_drain_limit = shutdown_drain_limit;
         self
     }
 
     /// Set an explicit stack size for the writer thread; `None` uses the OS default.
     pub fn with_writer_stack_size(mut self, writer_stack_size: Option<usize>) -> Self {
-        self.writer_stack_size = writer_stack_size;
+        self.writer.stack_size = writer_stack_size;
         self
     }
 
@@ -236,7 +278,7 @@ impl StoreConfig {
 
     /// Set the fsync strategy used after writes.
     pub fn with_sync_mode(mut self, sync_mode: SyncMode) -> Self {
-        self.sync_mode = sync_mode;
+        self.sync.mode = sync_mode;
         self
     }
 
@@ -244,37 +286,37 @@ impl StoreConfig {
     /// Default: 1 (per-event, backward-compatible). When > 1, all appends
     /// must include an idempotency key for crash safety.
     pub fn with_group_commit_max_batch(mut self, group_commit_max_batch: u32) -> Self {
-        self.group_commit_max_batch = group_commit_max_batch;
+        self.batch.group_commit_max_batch = group_commit_max_batch;
         self
     }
 
     /// Set the memory layout for the secondary query index.
     pub fn with_index_layout(mut self, index_layout: IndexLayout) -> Self {
-        self.index_layout = index_layout;
+        self.index.layout = index_layout;
         self
     }
 
     /// Enable or disable incremental projection for types that support it.
     pub fn with_incremental_projection(mut self, incremental_projection: bool) -> Self {
-        self.incremental_projection = incremental_projection;
+        self.index.incremental_projection = incremental_projection;
         self
     }
 
     /// Enable or disable index checkpoint on close.
     pub fn with_enable_checkpoint(mut self, enable_checkpoint: bool) -> Self {
-        self.enable_checkpoint = enable_checkpoint;
+        self.index.enable_checkpoint = enable_checkpoint;
         self
     }
 
     /// Set maximum items per batch append. Default: 256.
     pub fn with_batch_max_size(mut self, batch_max_size: u32) -> Self {
-        self.batch_max_size = batch_max_size;
+        self.batch.max_size = batch_max_size;
         self
     }
 
     /// Set maximum total payload bytes per batch append. Default: 1MB.
     pub fn with_batch_max_bytes(mut self, batch_max_bytes: u32) -> Self {
-        self.batch_max_bytes = batch_max_bytes;
+        self.batch.max_bytes = batch_max_bytes;
         self
     }
 
@@ -292,22 +334,13 @@ impl Clone for StoreConfig {
         Self {
             data_dir: self.data_dir.clone(),
             segment_max_bytes: self.segment_max_bytes,
-            sync_every_n_events: self.sync_every_n_events,
             fd_budget: self.fd_budget,
-            writer_channel_capacity: self.writer_channel_capacity,
             broadcast_capacity: self.broadcast_capacity,
-            cache_map_size_bytes: self.cache_map_size_bytes,
-            restart_policy: self.restart_policy.clone(),
-            shutdown_drain_limit: self.shutdown_drain_limit,
-            writer_stack_size: self.writer_stack_size,
+            batch: self.batch.clone(),
+            writer: self.writer.clone(),
+            sync: self.sync.clone(),
+            index: self.index.clone(),
             clock: self.clock.clone(),
-            sync_mode: self.sync_mode.clone(),
-            group_commit_max_batch: self.group_commit_max_batch,
-            index_layout: self.index_layout.clone(),
-            incremental_projection: self.incremental_projection,
-            enable_checkpoint: self.enable_checkpoint,
-            batch_max_size: self.batch_max_size,
-            batch_max_bytes: self.batch_max_bytes,
             #[cfg(feature = "test-support")]
             fault_injector: self.fault_injector.clone(),
         }
@@ -319,22 +352,13 @@ impl std::fmt::Debug for StoreConfig {
         f.debug_struct("StoreConfig")
             .field("data_dir", &self.data_dir)
             .field("segment_max_bytes", &self.segment_max_bytes)
-            .field("sync_every_n_events", &self.sync_every_n_events)
             .field("fd_budget", &self.fd_budget)
-            .field("writer_channel_capacity", &self.writer_channel_capacity)
             .field("broadcast_capacity", &self.broadcast_capacity)
-            .field("cache_map_size_bytes", &self.cache_map_size_bytes)
-            .field("restart_policy", &self.restart_policy)
-            .field("shutdown_drain_limit", &self.shutdown_drain_limit)
-            .field("writer_stack_size", &self.writer_stack_size)
+            .field("batch", &self.batch)
+            .field("writer", &self.writer)
+            .field("sync", &self.sync)
+            .field("index", &self.index)
             .field("clock", &self.clock.as_ref().map(|_| "<fn>"))
-            .field("sync_mode", &self.sync_mode)
-            .field("group_commit_max_batch", &self.group_commit_max_batch)
-            .field("index_layout", &self.index_layout)
-            .field("incremental_projection", &self.incremental_projection)
-            .field("enable_checkpoint", &self.enable_checkpoint)
-            .field("batch_max_size", &self.batch_max_size)
-            .field("batch_max_bytes", &self.batch_max_bytes)
             .finish()
     }
 }

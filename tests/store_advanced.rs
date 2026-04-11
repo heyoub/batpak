@@ -21,22 +21,13 @@
 
 use batpak::event::Reactive;
 use batpak::prelude::*;
-use batpak::store::{Store, StoreConfig};
+use batpak::store::{Store, StoreConfig, SyncConfig};
 use batpak::typestate::Transition;
 use std::sync::Arc;
 use tempfile::TempDir;
 
-fn test_store() -> (Store, TempDir) {
-    let dir = TempDir::new().expect("create temp dir");
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        segment_max_bytes: 4096,
-        sync_every_n_events: 1,
-        ..StoreConfig::new("")
-    };
-    let store = Store::open(config).expect("open store");
-    (store, dir)
-}
+mod common;
+use common::small_segment_store as test_store;
 
 // --- walk_ancestors: hash chain traversal ---
 
@@ -657,7 +648,10 @@ fn compact_retention_removes_dropped_events_from_index() {
         let config = StoreConfig {
             data_dir: dir.path().to_path_buf(),
             segment_max_bytes: 512, // force many segment rotations
-            sync_every_n_events: 1,
+            sync: SyncConfig {
+                every_n_events: 1,
+                ..SyncConfig::default()
+            },
             ..StoreConfig::new("")
         };
         let store = Store::open(config).expect("open store");
@@ -679,7 +673,10 @@ fn compact_retention_removes_dropped_events_from_index() {
     let config = StoreConfig {
         data_dir: dir.path().to_path_buf(),
         segment_max_bytes: 512,
-        sync_every_n_events: 1,
+        sync: SyncConfig {
+            every_n_events: 1,
+            ..SyncConfig::default()
+        },
         ..StoreConfig::new("")
     };
     let store = Store::open(config).expect("reopen");
@@ -728,7 +725,10 @@ fn compact_tombstone_updates_event_kind_in_index() {
         let config = StoreConfig {
             data_dir: dir.path().to_path_buf(),
             segment_max_bytes: 512,
-            sync_every_n_events: 1,
+            sync: SyncConfig {
+                every_n_events: 1,
+                ..SyncConfig::default()
+            },
             ..StoreConfig::new("")
         };
         let store = Store::open(config).expect("open store");
@@ -747,7 +747,10 @@ fn compact_tombstone_updates_event_kind_in_index() {
     let config = StoreConfig {
         data_dir: dir.path().to_path_buf(),
         segment_max_bytes: 512,
-        sync_every_n_events: 1,
+        sync: SyncConfig {
+            every_n_events: 1,
+            ..SyncConfig::default()
+        },
         ..StoreConfig::new("")
     };
     let store = Store::open(config).expect("reopen");
@@ -984,7 +987,10 @@ fn fd_budget_evicts_oldest_segments() {
     let config = StoreConfig {
         data_dir: dir.path().to_path_buf(),
         segment_max_bytes: 512, // tiny segments → many segment files
-        sync_every_n_events: 1,
+        sync: SyncConfig {
+            every_n_events: 1,
+            ..SyncConfig::default()
+        },
         fd_budget: 2, // only 2 FDs allowed → forces eviction
         ..StoreConfig::new("")
     };
@@ -1079,7 +1085,10 @@ fn cold_start_skips_corrupt_segment_gracefully() {
         let config = StoreConfig {
             data_dir: dir.path().to_path_buf(),
             segment_max_bytes: 512,
-            sync_every_n_events: 1,
+            sync: SyncConfig {
+                every_n_events: 1,
+                ..SyncConfig::default()
+            },
             ..StoreConfig::new("")
         };
         let store = Store::open(config).expect("open");
@@ -1127,7 +1136,10 @@ fn corrupt_frame_in_segment_is_detected() {
     {
         let config = StoreConfig {
             data_dir: dir.path().to_path_buf(),
-            sync_every_n_events: 1,
+            sync: SyncConfig {
+                every_n_events: 1,
+                ..SyncConfig::default()
+            },
             ..StoreConfig::new("")
         };
         let store = Store::open(config).expect("open");
@@ -1893,7 +1905,10 @@ fn react_loop_spawns_and_processes() {
     let config = StoreConfig {
         data_dir: dir.path().to_path_buf(),
         segment_max_bytes: 4096,
-        sync_every_n_events: 1,
+        sync: SyncConfig {
+            every_n_events: 1,
+            ..SyncConfig::default()
+        },
         ..StoreConfig::new("")
     };
     let store = Arc::new(Store::open(config).expect("open store"));
@@ -2096,7 +2111,10 @@ fn with_correlation_sets_header_correlation_id() {
     let config = StoreConfig {
         data_dir: dir.path().to_path_buf(),
         segment_max_bytes: 4096,
-        sync_every_n_events: 1,
+        sync: SyncConfig {
+            every_n_events: 1,
+            ..SyncConfig::default()
+        },
         ..StoreConfig::new("")
     };
     let store = Store::open(config).expect("open store");
@@ -2125,7 +2143,10 @@ fn with_causation_sets_header_causation_id() {
     let config = StoreConfig {
         data_dir: dir.path().to_path_buf(),
         segment_max_bytes: 4096,
-        sync_every_n_events: 1,
+        sync: SyncConfig {
+            every_n_events: 1,
+            ..SyncConfig::default()
+        },
         ..StoreConfig::new("")
     };
     let store = Store::open(config).expect("open store");
@@ -2155,7 +2176,10 @@ fn with_correlation_and_causation_combined() {
     let config = StoreConfig {
         data_dir: dir.path().to_path_buf(),
         segment_max_bytes: 4096,
-        sync_every_n_events: 1,
+        sync: SyncConfig {
+            every_n_events: 1,
+            ..SyncConfig::default()
+        },
         ..StoreConfig::new("")
     };
     let store = Store::open(config).expect("open store");
@@ -2228,7 +2252,10 @@ fn reactive_subscribe_react_append_pattern() {
     let dir = TempDir::new().expect("temp dir");
     let config = StoreConfig {
         data_dir: dir.path().to_path_buf(),
-        sync_every_n_events: 1,
+        sync: SyncConfig {
+            every_n_events: 1,
+            ..SyncConfig::default()
+        },
         ..StoreConfig::new("")
     };
     let store = Arc::new(Store::open(config).expect("open"));

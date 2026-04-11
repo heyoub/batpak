@@ -7,23 +7,13 @@
 //! INVARIANTS: INV-STATE (subscription: open → recv → closed)
 
 use batpak::prelude::*;
-use batpak::store::{Notification, Store, StoreConfig};
+use batpak::store::Notification;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
-use tempfile::TempDir;
 
-fn test_store() -> (Store, TempDir) {
-    let dir = TempDir::new().expect("create temp dir");
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        segment_max_bytes: 4096,
-        sync_every_n_events: 1,
-        ..StoreConfig::new("")
-    };
-    let store = Store::open(config).expect("open store");
-    (store, dir)
-}
+mod common;
+use common::small_segment_store as test_store;
 
 #[test]
 fn ops_recv_without_filters() {
