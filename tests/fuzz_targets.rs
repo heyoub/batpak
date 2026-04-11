@@ -18,27 +18,7 @@ use batpak::prelude::*;
 use batpak::store::segment::{frame_decode, frame_encode, SegmentHeader};
 use proptest::prelude::*;
 use proptest::strategy::BoxedStrategy;
-use proptest::test_runner::FileFailurePersistence;
-
-/// Build a `ProptestConfig` with the project-wide settings:
-///   - `cases`: from `PROPTEST_CASES` env var (CI sets 256), default 32 locally.
-///   - `failure_persistence`: write failing seeds to a `proptest-regressions/`
-///     directory next to the test source so a flake can be reproduced
-///     deterministically. Without this, every failure is one-shot and the
-///     seed is lost the moment the process exits.
-fn proptest_cfg() -> ProptestConfig {
-    let cases = std::env::var("PROPTEST_CASES")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(32);
-    ProptestConfig {
-        cases,
-        failure_persistence: Some(Box::new(FileFailurePersistence::SourceParallel(
-            "proptest-regressions",
-        ))),
-        ..ProptestConfig::default()
-    }
-}
+mod common;
 
 // ============================================================
 // FUZZ TARGET 1: frame_decode — CRITICAL
@@ -47,7 +27,7 @@ fn proptest_cfg() -> ProptestConfig {
 // ============================================================
 
 proptest! {
-    #![proptest_config(proptest_cfg())]
+    #![proptest_config(common::proptest::cfg(32))]
 
     /// Fuzz frame_decode with completely random bytes.
     /// Must never panic, only return Ok or Err.
@@ -122,7 +102,7 @@ proptest! {
 // ============================================================
 
 proptest! {
-    #![proptest_config(proptest_cfg())]
+    #![proptest_config(common::proptest::cfg(32))]
 
     /// u128 round-trip through MessagePack.
     #[test]
@@ -189,12 +169,7 @@ proptest! {
 // ============================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(
-        std::env::var("PROPTEST_CASES")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(2048)
-    ))]
+    #![proptest_config(common::proptest::cfg(2048))]
 
     /// EventKind custom() round-trips through category()/type_id().
     /// Categories 0x0 (system) and 0xD (effect) are reserved — filter them out.
@@ -243,7 +218,7 @@ proptest! {
 // ============================================================
 
 proptest! {
-    #![proptest_config(proptest_cfg())]
+    #![proptest_config(common::proptest::cfg(32))]
 
     /// Coordinate::new rejects empty strings, accepts non-empty.
     #[test]
@@ -319,12 +294,7 @@ proptest! {
 // ============================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(
-        std::env::var("PROPTEST_CASES")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(2048)
-    ))]
+    #![proptest_config(common::proptest::cfg(2048))]
 
     /// DagPosition::is_ancestor_of is anti-reflexive.
     #[test]
@@ -397,7 +367,7 @@ fn arb_outcome_deep() -> impl Strategy<Value = Outcome<i32>> {
 }
 
 proptest! {
-    #![proptest_config(proptest_cfg())]
+    #![proptest_config(common::proptest::cfg(32))]
 
     /// Deep nested Batch: map(id) == id (functor identity, recursive).
     #[test]
@@ -454,12 +424,7 @@ proptest! {
 // ============================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(
-        std::env::var("PROPTEST_CASES")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(512)
-    ))]
+    #![proptest_config(common::proptest::cfg(512))]
 
     #[test]
     fn fuzz_event_header_serde(
@@ -497,12 +462,7 @@ proptest! {
 // ============================================================
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(
-        std::env::var("PROPTEST_CASES")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(512)
-    ))]
+    #![proptest_config(common::proptest::cfg(512))]
 
     #[test]
     fn fuzz_segment_header_serde(
@@ -547,7 +507,7 @@ proptest! {
 
 #[cfg(feature = "blake3")]
 proptest! {
-    #![proptest_config(proptest_cfg())]
+    #![proptest_config(common::proptest::cfg(32))]
 
     /// Multi-event hash chain: build N events, verify entire chain.
     #[test]
@@ -648,12 +608,7 @@ fn fuzz_u128_json_roundtrip() {
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(
-        std::env::var("PROPTEST_CASES")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(256)
-    ))]
+    #![proptest_config(common::proptest::cfg(256))]
 
     /// Feed JSON arrays of wrong lengths to u128_bytes deserializer (visit_seq) — must error, not panic.
     #[test]
@@ -696,12 +651,7 @@ fn arb_wait_condition() -> impl Strategy<Value = WaitCondition> {
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(
-        std::env::var("PROPTEST_CASES")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(512)
-    ))]
+    #![proptest_config(common::proptest::cfg(512))]
 
     #[test]
     fn fuzz_wait_condition_serde(wc in arb_wait_condition()) {
@@ -744,12 +694,7 @@ proptest! {
 use batpak::store::{BatchAppendItem, CausationRef};
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(
-        std::env::var("PROPTEST_CASES")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(256)
-    ))]
+    #![proptest_config(common::proptest::cfg(256))]
 
     #[test]
     fn fuzz_batch_item_new_preserves_fields(

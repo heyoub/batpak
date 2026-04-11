@@ -11,6 +11,8 @@
 
 #![allow(dead_code)] // helpers are used by some test files but not all
 
+pub mod proptest;
+
 use batpak::prelude::*;
 use tempfile::TempDir;
 
