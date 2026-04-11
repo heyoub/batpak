@@ -2,7 +2,8 @@
     clippy::unwrap_used,           // test assertions
     clippy::disallowed_methods,    // chaos tests use thread::spawn for concurrency probes
     clippy::cast_possible_truncation, // test data fits in target types
-    clippy::needless_borrows_for_generic_args
+    clippy::needless_borrows_for_generic_args,
+    clippy::panic,                 // tests panic to surface specific contract violations
 )]
 //! Advanced Store tests: code paths missed by store_integration.rs.
 //! Covers: walk_ancestors, snapshot, diagnostics, append_reaction,
@@ -21,7 +22,7 @@
 
 use batpak::event::Reactive;
 use batpak::prelude::*;
-use batpak::store::{Store, StoreConfig, SyncConfig};
+use batpak::store::{Store, StoreConfig, StoreError, SyncConfig};
 use batpak::typestate::Transition;
 use std::sync::Arc;
 use tempfile::TempDir;
@@ -352,12 +353,14 @@ fn cas_fails_on_wrong_sequence() {
         ..Default::default()
     };
     let result = store.append_with_options(&coord, kind, &serde_json::json!({"x": 3}), opts);
+    let err = result.expect_err(
+        "PROPERTY: append_with_options must return Err when expected_sequence is stale (CAS failure).\
+         Investigate: src/store/mod.rs append_with_options CAS check.\
+         Common causes: sequence comparison uses wrong field, CAS check skipped under lock."
+    );
     assert!(
-        result.is_err(),
-        "PROPERTY: append_with_options must return Err when expected_sequence is stale (CAS failure).\n\
-         Investigate: src/store/mod.rs append_with_options CAS check.\n\
-         Common causes: sequence comparison uses wrong field, CAS check skipped under lock.\n\
-         Run: cargo test --test store_advanced cas_fails_on_wrong_sequence"
+        matches!(err, StoreError::SequenceMismatch { .. }),
+        "PROPERTY: CAS failure must surface as StoreError::SequenceMismatch, got {err:?}"
     );
 
     store.close().expect("close");
@@ -692,12 +695,13 @@ fn compact_retention_removes_dropped_events_from_index() {
     // Dropped event IDs must return NotFound
     for dropped_id in &drop_ids {
         let get_result = store.get(*dropped_id);
+        let err = get_result.expect_err(
+            "COMPACT RETENTION INDEX LEAK: get() should return NotFound after retention compaction dropped the event.\
+             Investigate: src/store/mod.rs compact(), src/store/index.rs clear()."
+        );
         assert!(
-            get_result.is_err(),
-            "COMPACT RETENTION INDEX LEAK: get({dropped_id}) should return NotFound after retention \
-             compaction dropped the event.\n\
-             Investigate: src/store/mod.rs compact(), src/store/index.rs clear().\n\
-             Common causes: index not rebuilt after compaction, stale entries pointing to deleted segments."
+            matches!(err, StoreError::NotFound(_)),
+            "PROPERTY: get() on a compaction-dropped event must surface as StoreError::NotFound, got {err:?}"
         );
     }
 
@@ -816,12 +820,13 @@ fn store_config_new_uses_sensible_defaults() {
 fn get_nonexistent_returns_not_found() {
     let (store, _dir) = test_store();
     let result = store.get(0xDEAD);
+    let err = result.expect_err(
+        "PROPERTY: get() of a nonexistent event_id must return Err(StoreError::NotFound).\
+         Investigate: src/store/mod.rs get, src/store/reader.rs lookup.",
+    );
     assert!(
-        result.is_err(),
-        "PROPERTY: get() of a nonexistent event_id must return Err(StoreError::NotFound).\n\
-         Investigate: src/store/mod.rs get, src/store/reader.rs lookup.\n\
-         Common causes: index returns a default entry instead of None, error type suppressed.\n\
-         Run: cargo test --test store_advanced get_nonexistent_returns_not_found"
+        matches!(err, StoreError::NotFound(_)),
+        "PROPERTY: get() on a nonexistent event_id must surface as StoreError::NotFound, got {err:?}"
     );
     store.close().expect("close");
 }
@@ -1114,14 +1119,20 @@ fn cold_start_skips_corrupt_segment_gracefully() {
         segment_max_bytes: 512,
         ..StoreConfig::new("")
     };
-    let result = Store::open(config);
-    // The store should fail on a corrupt segment (bad magic = hard error)
+    // Note: `Store` doesn't implement Debug (it owns Arc'd internal state),
+    // so `Result::expect_err` doesn't compile here. Match instead.
+    let err = match Store::open(config) {
+        Ok(_) => panic!(
+            "PROPERTY: Store::open must return Err when a segment file has an \
+             invalid magic header. Investigate: src/store/reader.rs scan_segment \
+             magic check. Common causes: magic bytes check skipped or returns \
+             Ok(empty), corrupt file silently ignored."
+        ),
+        Err(e) => e,
+    };
     assert!(
-        result.is_err(),
-        "PROPERTY: Store::open must return Err when a segment file has an invalid magic header.\n\
-         Investigate: src/store/reader.rs scan_segment magic check.\n\
-         Common causes: magic bytes check skipped or returns Ok(empty), corrupt file silently ignored.\n\
-         Run: cargo test --test store_advanced cold_start_skips_corrupt_segment_gracefully"
+        matches!(err, StoreError::CorruptSegment { .. }),
+        "PROPERTY: invalid magic header must surface as StoreError::CorruptSegment, got {err:?}"
     );
 }
 
@@ -1931,18 +1942,22 @@ fn react_loop_spawns_and_processes() {
         )
         .expect("append");
 
-    // Give the reactor thread time to process
-    std::thread::sleep(std::time::Duration::from_millis(200));
-
-    // Check that a reaction was appended
-    let reactions = store.query(&Region::entity("entity:reactions"));
-    assert!(
-        !reactions.is_empty(),
-        "PROPERTY: react_loop must produce reaction events when the reactor emits them.\n\
-         Investigate: src/store/mod.rs react_loop, src/event/sourcing.rs Reactive.\n\
-         Common causes: reactor thread not started, subscribe/recv not wired, append_reaction fails.\n\
-         Run: cargo test --test store_advanced react_loop_spawns_and_processes"
-    );
+    // Poll for the reactor to produce a reaction instead of sleeping a fixed duration.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let reactions = loop {
+        let r = store.query(&Region::entity("entity:reactions"));
+        if !r.is_empty() {
+            break r;
+        }
+        if std::time::Instant::now() >= deadline {
+            panic!(
+                "PROPERTY: react_loop must produce reaction events when the reactor emits them. \
+                 Got nothing after 5s deadline. \
+                 Investigate: src/store/mod.rs react_loop, src/event/sourcing.rs Reactive."
+            );
+        }
+        std::thread::yield_now();
+    };
     assert_eq!(
         reactions[0].kind,
         EventKind::custom(0xA, 2),

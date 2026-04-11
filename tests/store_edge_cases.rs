@@ -143,8 +143,10 @@ fn subscription_recv_returns_none_on_store_drop() {
         .spawn(move || sub.recv())
         .expect("spawn subscription recv thread");
 
-    // Small delay then drop the store to close channels
-    std::thread::sleep(std::time::Duration::from_millis(50));
+    // Drop the store immediately — no sleep needed. subscribe() registers synchronously,
+    // so the subscriber thread's recv() is already blocked (or will be before recv()
+    // ever returns a value). Dropping the store closes the broadcaster; recv() returns
+    // None and the thread exits cleanly.
     drop(store);
 
     let result = handle.join().expect("thread join");

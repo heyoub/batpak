@@ -114,13 +114,13 @@ fn event_id_from_str_bare_hex() {
 fn event_id_from_str_rejects_garbage() {
     use std::str::FromStr;
     let result = batpak::id::EventId::from_str("not_hex_at_all");
+    let err = result.expect_err(
+        "PROPERTY: EventId::FromStr must reject non-hex input with Err. \
+         Investigate: src/id/mod.rs define_entity_id! FromStr impl.",
+    );
     assert!(
-        result.is_err(),
-        "PROPERTY: EventId::FromStr must reject non-hex input with Err.\n\
-         Investigate: src/id/mod.rs define_entity_id! FromStr impl.\n\
-         Common causes: parser returning Ok(0) on parse failure instead of Err, \
-         or unwrap_or silently swallowing the error.\n\
-         Run: cargo test --test event_api event_id_from_str_rejects_garbage"
+        err.contains("invalid event"),
+        "PROPERTY: rejection message must identify 'invalid event', got {err:?}"
     );
 }
 

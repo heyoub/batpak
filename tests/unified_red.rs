@@ -1,6 +1,7 @@
 #![allow(
     clippy::unwrap_used,              // test assertions use unwrap for clarity
     clippy::cast_possible_truncation, // test data fits in target types
+    clippy::panic,                    // tests panic to surface specific contract violations
 )]
 //! BANG 1 (RED): Unified enhancement spec.
 //! Every test in this file defines a behavioral contract.
@@ -821,11 +822,18 @@ fn interner_roundtrip() {
 fn config_validation_rejects_zero_segment_max_bytes() {
     let dir = TempDir::new().expect("temp dir");
     let config = StoreConfig::new(dir.path()).with_segment_max_bytes(0);
-    let result = Store::open(config);
+    // Note: `Store` doesn't implement Debug (it owns Arc'd internal state),
+    // so `Result::expect_err` doesn't compile here. Match instead.
+    let err = match Store::open(config) {
+        Ok(_) => panic!(
+            "PROPERTY: segment_max_bytes=0 must be rejected at open time. \
+             Investigate: src/store/config.rs StoreConfig::validate."
+        ),
+        Err(e) => e,
+    };
     assert!(
-        result.is_err(),
-        "PROPERTY: segment_max_bytes=0 must be rejected at open time.\n\
-         Investigate: src/store/config.rs validate()."
+        matches!(err, StoreError::Configuration { .. }),
+        "PROPERTY: must surface as StoreError::Configuration, got {err:?}"
     );
 }
 
@@ -833,11 +841,17 @@ fn config_validation_rejects_zero_segment_max_bytes() {
 fn config_validation_rejects_zero_writer_channel_capacity() {
     let dir = TempDir::new().expect("temp dir");
     let config = StoreConfig::new(dir.path()).with_writer_channel_capacity(0);
-    let result = Store::open(config);
+    let err = match Store::open(config) {
+        Ok(_) => panic!(
+            "PROPERTY: writer.channel_capacity=0 must be rejected at open time \
+             (a zero-capacity channel deadlocks on the first append). \
+             Investigate: src/store/config.rs StoreConfig::validate."
+        ),
+        Err(e) => e,
+    };
     assert!(
-        result.is_err(),
-        "PROPERTY: writer.channel_capacity=0 must be rejected (deadlocks on first append).\n\
-         Investigate: src/store/config.rs validate()."
+        matches!(err, StoreError::Configuration { .. }),
+        "PROPERTY: must surface as StoreError::Configuration, got {err:?}"
     );
 }
 
@@ -942,7 +956,6 @@ fn watch_projection_emits_on_new_events() {
     let handle = std::thread::Builder::new()
         .name("watch-writer".into())
         .spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(50));
             let coord = Coordinate::new("watch:entity", "watch:scope").expect("coord");
             for i in 5u32..8 {
                 store2
@@ -984,7 +997,6 @@ fn watch_projection_returns_none_on_store_close() {
     let handle = std::thread::Builder::new()
         .name("store-closer".into())
         .spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(50));
             // Try to unwrap the Arc. If watcher holds a clone, this fails
             // and we just drop it (which triggers the Drop impl shutdown).
             match Arc::try_unwrap(store) {

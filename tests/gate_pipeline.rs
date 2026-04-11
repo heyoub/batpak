@@ -261,12 +261,19 @@ fn context_gate_uses_context() {
     );
 
     let proposal_fail = Proposal::new("fail");
-    assert!(
-        gates.evaluate(&(-1), proposal_fail).is_err(),
-        "CONTEXT GATE: non-positive context should be denied by ContextGate.\n\
-         Investigate: src/guard/mod.rs Gate::evaluate context usage.\n\
-         Common causes: context value not passed through to gate, comparison logic inverted.\n\
-         Run: cargo test --test gate_pipeline context_gate_uses_context"
+    // Note: `Receipt<&str>` doesn't implement Debug (it carries an opaque
+    // sealed token), so `Result::expect_err` doesn't compile here.
+    // Match instead.
+    let denial = match gates.evaluate(&(-1), proposal_fail) {
+        Ok(_) => panic!(
+            "PROPERTY: non-positive context must be denied by ContextGate. \
+             Investigate: src/guard/mod.rs Gate::evaluate context usage."
+        ),
+        Err(d) => d,
+    };
+    assert_eq!(
+        denial.gate, "context_gate",
+        "PROPERTY: first failed gate must be 'context_gate', got {denial:?}"
     );
 }
 

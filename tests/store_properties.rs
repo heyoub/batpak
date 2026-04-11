@@ -431,11 +431,13 @@ fn errors_propagate_not_launder_to_defaults() {
 
     // get() on nonexistent event must return NotFound, not a default
     let result = store.get(999999);
+    let err = result.expect_err(
+        "PROPERTY: get() for nonexistent event must return Err(NotFound), not a default. \
+         Investigate: src/store/mod.rs get(), src/store/reader.rs read_entry.",
+    );
     assert!(
-        result.is_err(),
-        "PROPERTY: get() for nonexistent event must return Err, not a default.\n\
-         Investigate: src/store/mod.rs get(), src/store/reader.rs read_entry.\n\
-         Common causes: Fallback Laundering (FM-023) — returning Ok(default) on failure."
+        matches!(err, StoreError::NotFound(_)),
+        "PROPERTY: violation must surface as StoreError::NotFound, got {err:?}"
     );
 
     // CAS failure must return SequenceMismatch, not silently succeed
@@ -448,11 +450,13 @@ fn errors_propagate_not_launder_to_defaults() {
         ..AppendOptions::default()
     };
     let result = store.append_with_options(&coord, kind, &"should_fail", opts);
+    let err = result.expect_err(
+        "PROPERTY: CAS with wrong expected_sequence must return Err(SequenceMismatch). \
+         Investigate: src/store/writer.rs CAS check (Step 1a).",
+    );
     assert!(
-        result.is_err(),
-        "PROPERTY: CAS with wrong expected_sequence must return Err(SequenceMismatch).\n\
-         Investigate: src/store/writer.rs CAS check (Step 1a).\n\
-         Common causes: CAS check missing or returning Ok on mismatch."
+        matches!(err, StoreError::SequenceMismatch { .. }),
+        "PROPERTY: violation must surface as StoreError::SequenceMismatch, got {err:?}"
     );
 }
 

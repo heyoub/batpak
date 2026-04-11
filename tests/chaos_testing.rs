@@ -24,7 +24,6 @@ use batpak::store::{AppendOptions, Store, StoreConfig, SyncConfig};
 use rand::prelude::*;
 use rand::Rng;
 use std::sync::Arc;
-use std::time::Instant;
 use tempfile::TempDir;
 
 fn chaos_iterations() -> usize {
@@ -741,24 +740,20 @@ fn chaos_subscription_write_storm() {
 
     writer.join().expect("writer join");
 
-    // Drain subscriber — it's lossy, so we just count what we got
+    // Drain subscriber — writer.join() guarantees all appends (and their broadcasts) are
+    // complete before we drain, so every notification is already sitting in the channel
+    // buffer. No sleep needed; tight try_recv until empty is deterministic.
     let mut received = 0;
-    let deadline = Instant::now() + std::time::Duration::from_millis(500);
-    while Instant::now() < deadline {
-        if sub.receiver().try_recv().is_ok() {
-            received += 1;
-        } else {
-            std::thread::sleep(std::time::Duration::from_millis(1));
-        }
+    while sub.receiver().try_recv().is_ok() {
+        received += 1;
     }
 
-    eprintln!("  CHAOS SUBSCRIPTION: received {received}/{iterations} events (lossy channel)");
-    // With a small buffer some loss is expected, but we should get *something*
+    eprintln!("  CHAOS SUBSCRIPTION: received {received}/{iterations} events");
     assert!(
-        received > 0,
-        "CHAOS PROPERTY: a live subscriber must receive at least one broadcast event during a {iterations}-write storm, even with a small buffer.\n\
-         Investigate: src/store/writer.rs broadcast send, src/store/subscription.rs Receiver::try_recv.\n\
-         Common causes: broadcast channel created after writes complete, subscription region filter excludes entity, sender dropped before subscriber polls.\n\
+        received == iterations,
+        "PROPERTY: every append() broadcasts before returning, so a subscriber joined after all \
+         writes must see exactly {iterations} notifications, got {received}.\n\
+         Investigate: src/store/writer.rs (broadcast send path), src/store/index.rs (region filter).\n\
          Run: cargo test --test chaos_testing chaos_subscription_write_storm"
     );
 
