@@ -274,6 +274,10 @@ batpak/
 ## Cargo.toml
 
 ```toml
+# ⚠ HISTORICAL SNAPSHOT — pre-Keller-Cut era. Live version is 0.3.0.
+# See `Cargo.toml` at the repo root for the current dependency surface.
+# The `[features]` block below predates the redb/lmdb removal: only
+# `blake3` and `test-support` exist as of 0.3.0.
 [package]
 name = "batpak"
 version = "0.1.0"
@@ -464,7 +468,10 @@ following as the current source of truth when reading those blocks:
   `scripts/run-in-devcontainer.sh`.
 - CI is dual-surface: Linux in the canonical container and Windows native.
 - Mutation testing has both `mutants-smoke` and scheduled `mutants-full`
-  workflows.
+  workflows. Both are HARD GATES: `cargo-mutants 27.0` exits non-zero on any
+  missed mutant, and `tools/xtask/src/main.rs::assert_mutation_score` enforces
+  a >= 20% catch-rate threshold as a backup. Mutation testing is NOT
+  report-only — it blocks every PR.
 - The dependency surface has moved to `flume = "0.12"`, `rand = "0.9"`, and
   deterministic concurrency checks use `loom = "0.7"` rather than `shuttle`.
 

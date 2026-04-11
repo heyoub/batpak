@@ -12,7 +12,9 @@
 //! INVARIANTS: INV-TYPE (round-trip fidelity), INV-MIG (backward compatibility)
 //!
 //! Anti-almost-correctness: This test would have caught the Arc<str> serialization
-//! failure (Phase 1.1) — golden tests serialize a Coordinate containing Arc<str>.
+//! failure (the missing `serde 'rc'` feature flag that broke `Coordinate`
+//! deserialization through msgpack — see CHANGELOG for v0.1.x→0.2.x) — golden
+//! tests serialize a Coordinate containing Arc<str>.
 //!
 //! To regenerate golden files, set the sentinel env var EXACTLY as shown — any other
 //! value (including "1" or "true") is treated as absent and goldens will NOT be updated:

@@ -11,8 +11,11 @@
 //! INVARIANTS: INV-TEMP (cold start rebuild), INV-CONC (concurrent r/w)
 //!
 //! Anti-almost-correctness: These tests exercise the real DashMap index query()
-//! method (Phase 1.5 fix), the dead logic branch (Phase 1.6 fix), and the
-//! Arc<str> serialization path (Phase 1.1 fix) through round-trip persistence.
+//! method (regression coverage for the iterator-vs-Vec dead-logic branch that
+//! previously short-circuited on the first match), the dead-logic branch in the
+//! scope query path, and the Arc<str> serialization round-trip via msgpack
+//! (regression coverage for the missing `serde 'rc'` feature flag that broke
+//! `Coordinate` deserialization) through round-trip persistence.
 
 use batpak::prelude::*;
 use batpak::store::{Freshness, Store, StoreConfig, SyncConfig};

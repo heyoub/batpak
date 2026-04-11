@@ -1,5 +1,10 @@
 # Audit Report: batpak
 
+> **Note (2026-04-11):** This audit was conducted against the pre-0.3.0
+> codebase. Sections referencing `RedbCache`, `LmdbCache`, the `redb`/`lmdb`
+> Cargo features, `entity_locks`, or flat `StoreConfig` fields are
+> historical — see CHANGELOG.md for the 0.3.0 changes.
+
 Evidence run on 2026-03-30:
 - `cargo test --all-features`: pass
 - `cargo check --no-default-features`: pass
@@ -255,7 +260,7 @@ Named Offenses / Forbidden Remedies: Structural policy finding: visibility creep
 ### batpak/src/store/projection.rs
 Applicable Parameters: Core-Source
 Score: 76/100
-Notes: Real cache backends are implemented and thoroughly tested, but this module contains two `unsafe` LMDB blocks and a default `prefetch()` no-op that weakens the “codebase must accuse itself” posture for predictive-cache behavior.
+Notes: Real cache backends are implemented and thoroughly tested. This module contains the `NativeCache` implementation (safe filesystem I/O via tempfile + atomic rename — the previous `LmdbCache` and its two unsafe blocks were removed in 0.3.0). There are NO unsafe blocks in projection.rs. A default `prefetch()` no-op remains and weakens the “codebase must accuse itself” posture for predictive-cache behavior.
 Named Offenses / Forbidden Remedies: None confirmed; monitor for Polite Downgrade on default no-op paths.
 
 ### batpak/src/store/reader.rs
@@ -357,7 +362,7 @@ Named Offenses / Forbidden Remedies: None confirmed.
 ### batpak/tests/projection_cache.rs
 Applicable Parameters: Test-Infrastructure
 Score: 91/100
-Notes: STRONG. Real backend coverage for NoCache, Redb, LMDB, freshness, and metadata behavior closes several phantom/chimera risks.
+Notes: STRONG. Real backend coverage for NoCache, NativeCache, freshness, and metadata behavior closes several phantom/chimera risks.
 Named Offenses / Forbidden Remedies: None confirmed.
 
 ### batpak/tests/store_advanced.rs

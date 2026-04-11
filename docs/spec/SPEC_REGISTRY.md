@@ -346,6 +346,9 @@ Store { index: Arc<StoreIndex>, reader: Arc<Reader>, cache: Box<dyn ProjectionCa
   .stream(entity) .by_scope(scope) .by_fact(kind)  // convenience sugar
   .sync() .close(self) .stats() -> StoreStats
 
+<!-- ⚠ HISTORICAL SNAPSHOT — pre-0.3.0 layout. Live struct uses sub-structs:
+     SyncConfig, WriterConfig, BatchConfig, IndexConfig.
+     See src/store/config.rs for the current shape. -->
 StoreConfig { data_dir: PathBuf, segment_max_bytes: u64, sync_every_n_events: u32,
               fd_budget: usize, writer_channel_capacity: usize, broadcast_capacity: usize,
               cache_map_size_bytes: usize, restart_policy: RestartPolicy, shutdown_drain_limit: usize,
@@ -2393,6 +2396,8 @@ pub(crate) struct StoreIndex {
     len: AtomicUsize,
     /// Per-entity write locks. Writer step 1 acquires these.
     /// [SPEC:IMPLEMENTATION NOTES item 5 — DashMap guard lifetimes]
+    <!-- ⚠ HISTORICAL — entity_locks was removed in 0.3.0. It was dead code in
+         the single-writer architecture. See src/store/index.rs. -->
     pub(crate) entity_locks: DashMap<Arc<str>, Arc<parking_lot::Mutex<()>>>,
 }
 
@@ -2462,6 +2467,7 @@ impl StoreIndex {
             latest: DashMap::new(),
             global_sequence: AtomicU64::new(0),
             len: AtomicUsize::new(0),
+            // ⚠ HISTORICAL — entity_locks removed in 0.3.0 (dead code in single-writer arch).
             entity_locks: DashMap::new(),
         }
     }
@@ -3363,6 +3369,8 @@ use serde::{Deserialize, Serialize};
 
 TYPES:
 ```rust
+<!-- ⚠ HISTORICAL — current: Two impls (NoCache, NativeCache). RedbCache and
+     LmdbCache were removed in 0.3.0. See src/store/projection.rs. -->
 /// ProjectionCache: trait for caching projected state.
 /// Three impls: NoCache (default), RedbCache (optional), LmdbCache (optional).
 /// [SPEC:src/store/projection.rs]
@@ -3407,6 +3415,9 @@ impl ProjectionCache for NoCache {
     }
 }
 
+<!-- ⚠ HISTORICAL — RedbCache and LmdbCache were removed in 0.3.0 in favor
+     of NativeCache. The implementations below are kept for diff/historical
+     purposes. See src/store/projection.rs for the current cache surface. -->
 /// RedbCache: backed by redb embedded database.
 /// [DEP:redb::Database::create] [DEP:redb::TableDefinition]
 #[cfg(feature = "redb")]
@@ -4098,6 +4109,8 @@ pub struct StoreStats {
 ```
 STORE MODULE REGISTRATION COMPLETE — 7 files registered.
 
+<!-- ⚠ HISTORICAL — these are no longer pending; perf_gates.rs and the benches
+     are registered and run. See benches/ and tests/perf_gates.rs. -->
 Tests and benches pending registration:
   tests/monad_laws.rs, hash_chain.rs, store_integration.rs, gate_pipeline.rs,
   typestate_safety.rs, wire_format.rs, perf_gates.rs

@@ -690,7 +690,7 @@ fn error_variant_coverage_all_store_errors_display() {
     );
 }
 
-// ===== DagPosition PartialOrd depth test (Phase 1B verification) =====
+// ===== DagPosition: nodes at different depths are incomparable =====
 
 #[test]
 fn dag_position_different_depths_are_incomparable() {
@@ -706,7 +706,7 @@ fn dag_position_different_depths_are_incomparable() {
     );
 }
 
-// ===== Store Drop drains pending events (Phase 1C verification) =====
+// ===== Store::drop drains pending writer events before exit =====
 
 #[test]
 fn store_drop_drains_pending_events() {
