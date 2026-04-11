@@ -87,7 +87,14 @@ fn snapshot_checkpoint_matches_source_projection() {
         .expect("snapshot project");
 
     assert_eq!(snap_stats.event_count, live_stats.event_count);
-    assert_eq!(snap_stats.global_sequence, live_stats.global_sequence);
+    assert_eq!(
+        snap_stats.global_sequence, live_stats.global_sequence,
+        "PROPERTY: a snapshot reopen must produce the same global_sequence \
+         as the source store. Drift here means the rebuild path is using a \
+         different sequence-allocation scheme than the live writer. \
+         Investigate: ReplayCursor::commit / synthesize_next empty-cursor \
+         handling, src/store/index.rs."
+    );
     assert_eq!(
         snap_projection, live,
         "Snapshot reopen must preserve the same projection output as the source store."

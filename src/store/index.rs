@@ -556,6 +556,7 @@ impl StoreIndex {
         ReplayCursor {
             index: self,
             max_seen: 0,
+            inserted_any: false,
             committed: false,
         }
     }
@@ -587,8 +588,18 @@ pub(crate) struct ReplayCursor<'a> {
     index: &'a StoreIndex,
     /// Highest `global_sequence` observed so far across all inserted entries.
     /// After `commit`, the allocator is set to `max_seen + 1` (or higher if
-    /// the caller passes a hint via [`Self::commit_with_allocator_hint`]).
+    /// the caller passes a hint), but ONLY when at least one entry has been
+    /// inserted. See `inserted_any` for the empty-replay case.
     max_seen: u64,
+    /// Whether `insert()` has been called at least once. Needed to distinguish
+    /// "no entries replayed" from "one entry with sequence 0 replayed" — both
+    /// leave `max_seen == 0`. For an empty replay (cold start of an empty
+    /// store), the allocator must be left at `hint` (typically 0), NOT at
+    /// `max_seen + 1 = 1`. Forgetting this distinction was the cause of a
+    /// real off-by-one bug in the rebuild path: every fresh store started
+    /// with `allocated = 1`, so the first append got `sequence = 1` instead
+    /// of `sequence = 0`.
+    inserted_any: bool,
     committed: bool,
 }
 
@@ -600,6 +611,7 @@ impl<'a> ReplayCursor<'a> {
     /// allocator can be restored correctly at commit time.
     pub(crate) fn insert(&mut self, entry: IndexEntry) {
         self.max_seen = self.max_seen.max(entry.global_sequence);
+        self.inserted_any = true;
         self.index.insert_replay(entry);
     }
 
@@ -610,16 +622,42 @@ impl<'a> ReplayCursor<'a> {
     /// Calling this method does not insert anything; the caller is expected
     /// to use the returned value to populate `IndexEntry::global_sequence`
     /// and then call [`Self::insert`] with the populated entry.
+    ///
+    /// **Empty-cursor handling:** the first call on a cursor with no inserts
+    /// returns `0`, not `1`. Earlier versions returned `max_seen + 1 = 1` on
+    /// the first call, which gave the first replayed entry sequence `1` and
+    /// shifted the entire stream by one. The bug was caught by the
+    /// `tests/replay_consistency.rs::snapshot_checkpoint_matches_source_projection`
+    /// test, which compares a live store to a snapshot rebuild and demands
+    /// they have identical `global_sequence` values.
     pub(crate) fn synthesize_next(&mut self) -> u64 {
         // Don't update max_seen here — insert() will, once the entry is built.
-        self.max_seen.saturating_add(1)
+        if self.inserted_any {
+            self.max_seen.saturating_add(1)
+        } else {
+            // No entries yet — the first synthesized sequence is 0.
+            0
+        }
     }
 
     /// Finish the replay session.
     ///
-    /// Restores the allocator to `max_seen + 1` (or `hint` if higher), then
-    /// publishes that value as the visibility watermark so all replayed
-    /// entries become visible to readers atomically.
+    /// Restores the allocator and publishes the visibility watermark so all
+    /// replayed entries become observable atomically.
+    ///
+    /// The post-commit allocator value is:
+    /// - `hint`, if no entries were inserted (empty replay / fresh store).
+    /// - `max(max_seen + 1, hint)` otherwise.
+    ///
+    /// **The empty-replay branch is critical.** Earlier versions used
+    /// `max_seen.saturating_add(1).max(hint)` unconditionally, which set
+    /// the allocator to `1` for an empty rebuild (because `max_seen = 0`
+    /// and `0 + 1 = 1`). The result was that every fresh store started
+    /// with `allocated = 1`, so the first append got `sequence = 1` instead
+    /// of `sequence = 0`. The bug was caught by the `Tier 1` test
+    /// `tests/atomic_batch.rs::batch_oversized_item_no_partial_visibility`,
+    /// which asserts that the first append after a failed batch occupies
+    /// sequence `0` on a fresh store.
     ///
     /// `hint` is used by checkpoint restore to preserve burned-slot
     /// allocator positions: the checkpoint stores the original allocator
@@ -627,7 +665,13 @@ impl<'a> ReplayCursor<'a> {
     /// some sequence slots were reserved for batches that later failed.
     /// Pass `0` if there is no hint (i.e. segment rebuild).
     pub(crate) fn commit(mut self, hint: u64) {
-        let next = self.max_seen.saturating_add(1).max(hint);
+        let next = if self.inserted_any {
+            self.max_seen.saturating_add(1).max(hint)
+        } else {
+            // Empty replay — leave the allocator at the hint (0 for a fresh
+            // segment rebuild, or the checkpoint's stored allocator value).
+            hint
+        };
         self.index.sequence.restore_allocator(next);
         self.index.publish(next);
         self.committed = true;

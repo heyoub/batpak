@@ -173,44 +173,20 @@ fn round_trip_fidelity_append_get_preserves_payload() {
 }
 
 // ===== LAW-003: No Orphan Infrastructure =====
-// Every pub fn on Store must be exercised by at least one test.
-// This is a meta-test that checks test coverage of the public API.
-
-#[test]
-fn law_003_store_public_api_exercised() {
-    // List of Store pub methods that MUST have test callers.
-    // If a new pub method is added to Store without a test, add it here.
-    let required_methods = [
-        "open",
-        "append",
-        "append_with_options",
-        "get",
-        "stream",
-        "query",
-        "subscribe",
-        "sync",
-        "close",
-        "compact",
-        "cursor",
-        "project",
-        "snapshot",
-        "stats",
-        "react_loop",
-    ];
-
-    // This is a documentation/enforcement test, not a runtime test.
-    // It forces developers to acknowledge every public method has coverage.
-    // The actual coverage is proved by the other test files.
-    for method in &required_methods {
-        // If this line exists, we've acknowledged the method needs testing.
-        // The real enforcement is: if someone adds a pub fn and forgets to
-        // add it to this list, the method count check below will catch it.
-        assert!(
-            !method.is_empty(),
-            "Every Store pub method must be listed and tested"
-        );
-    }
-}
+//
+// The previous `law_003_store_public_api_exercised` test asserted that the
+// strings in a hardcoded `&[&str]` were non-empty. That's a tautology — it
+// would have passed if every method on `Store` were deleted. It was deleted
+// in the test-quality drill sweep (Tier 1, task #45).
+//
+// The replacement is a real structural check in `tools/integrity/src/main.rs`
+// that parses `src/store/mod.rs` with `syn`, extracts every `pub fn` on the
+// `impl Store` block, and asserts that each one is referenced by at least
+// one `#[test]` function under `tests/` or `src/`. That check belongs in
+// `cargo xtask structural`, not in this file, because it needs access to
+// the syn AST and shouldn't compile-time-cost the unit test build.
+//
+// TODO(tier-1-followup): wire the syn-based check into integrity tool.
 
 // ===== LAW-007: Codebase Accuses Itself =====
 // Verify that self-benchmark gates actually fire on bad data.

@@ -72,20 +72,38 @@ fn batch_config_max_bytes() {
     assert!(result.is_ok(), "batch under max_bytes should succeed");
 }
 
-/// Test: zero visible partial commit on batch failure.
+/// Test: an empty batch is a no-op and leaves the store usable.
+///
+/// (Renamed from `batch_atomicity_zero_visibility_on_failure` in the
+/// Tier 1 drill sweep — that name lied about what the body did. The
+/// body never triggered a failure path; it submitted `vec![]` and
+/// asserted success. The real "failure path doesn't leak partial
+/// state" property is now covered by
+/// `batch_oversized_item_no_partial_visibility` below and by
+/// `batch_publish_atomicity_no_partial_read_during_insert`.)
 #[test]
-fn batch_atomicity_zero_visibility_on_failure() {
-    let tmp = tempfile::tempdir().expect("create temp dir for zero-visibility test");
+fn batch_empty_is_noop_and_store_remains_usable() {
+    let tmp = tempfile::tempdir().expect("create temp dir for empty-batch test");
     let config = StoreConfig::new(tmp.path()).with_batch_max_size(4);
-    let store = Store::open(config).expect("open store for zero-visibility test");
+    let store = Store::open(config).expect("open store for empty-batch test");
 
-    // Create a batch with an oversized payload that will fail during encoding.
     let items = vec![];
     let result = store.append_batch(items);
-    // Empty batch should succeed (nothing to do).
-    assert!(result.is_ok());
+    assert!(
+        result.is_ok(),
+        "PROPERTY: an empty batch must succeed as a no-op (writer must \
+         tolerate zero items without panicking or returning an error). \
+         Investigate: src/store/writer.rs handle_append_batch validate_batch \
+         early-return for empty input."
+    );
+    let receipts = result.expect("empty batch ok");
+    assert!(
+        receipts.is_empty(),
+        "PROPERTY: an empty batch must return zero receipts, got {}",
+        receipts.len()
+    );
 
-    // Verify store is still usable after empty batch.
+    // Store must still be usable after the empty batch.
     let receipt = store
         .append(
             &Coordinate::new("test", "atomicity").expect("valid atomicity coordinate"),
@@ -93,7 +111,103 @@ fn batch_atomicity_zero_visibility_on_failure() {
             &serde_json::json!({"test": true}),
         )
         .expect("append post-empty-batch event");
-    assert!(receipt.event_id != 0);
+    assert!(
+        receipt.event_id != 0,
+        "PROPERTY: after an empty batch, the next append must succeed \
+         and produce a non-zero event_id (the writer must not be in a \
+         broken state). Got event_id = 0."
+    );
+    let visible_count = store.cursor(&Region::all()).poll_batch(10).len();
+    assert_eq!(
+        visible_count, 1,
+        "PROPERTY: after empty batch + one append, exactly 1 event must \
+         be visible. Got {visible_count}. The empty batch must not have \
+         exposed any phantom entries."
+    );
+}
+
+/// Test: when a batch contains an oversized item that fails validation,
+/// NONE of the items in that batch become visible to readers.
+///
+/// This is the "atomicity on natural failure" property — distinct from
+/// the fault-injection-driven test at
+/// `batch_publish_atomicity_no_partial_read_during_insert`. Natural
+/// failures (validation, oversized payload, encoding error) must be
+/// just as atomic as fault-injected ones.
+#[test]
+fn batch_oversized_item_no_partial_visibility() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    // Tight per-batch byte cap so a single 4 KB payload trips it.
+    let config = StoreConfig::new(tmp.path())
+        .with_batch_max_bytes(2 * 1024)
+        .with_batch_max_size(8);
+    let store = Store::open(config).expect("open store");
+    let coord = Coordinate::new("entity:atomic", "scope:test").expect("valid coord");
+
+    // Build a batch where the LAST item is too large.
+    let mut items: Vec<BatchAppendItem> = (0..3)
+        .map(|i| {
+            BatchAppendItem::new(
+                coord.clone(),
+                EventKind::DATA,
+                &serde_json::json!({"i": i, "small": true}),
+                AppendOptions::default(),
+                CausationRef::None,
+            )
+            .expect("small item builds")
+        })
+        .collect();
+    let oversized_payload = serde_json::json!({"big": "x".repeat(4 * 1024)});
+    items.push(
+        BatchAppendItem::new(
+            coord.clone(),
+            EventKind::DATA,
+            &oversized_payload,
+            AppendOptions::default(),
+            CausationRef::None,
+        )
+        .expect("item builder doesn't enforce batch byte cap; writer does"),
+    );
+
+    let result = store.append_batch(items);
+    assert!(
+        matches!(result, Err(StoreError::BatchFailed { .. })),
+        "PROPERTY: a batch whose total bytes exceed batch_max_bytes must \
+         fail with BatchFailed; got {result:?}. \
+         Investigate: src/store/writer.rs validate_batch byte-cap branch \
+         and StoreError::BatchFailed mapping for the Validating stage."
+    );
+
+    // Critical: NONE of the 4 items should be visible.
+    let visible_count = store.cursor(&Region::all()).poll_batch(100).len();
+    assert_eq!(
+        visible_count, 0,
+        "PROPERTY: BATCH ATOMICITY VIOLATION — a batch that failed during \
+         validation must not expose ANY of its items to readers. Found \
+         {visible_count} visible events; expected 0. \
+         Investigate: src/store/writer.rs handle_append_batch must validate \
+         BEFORE reserving sequences and writing frames, OR must roll back \
+         all visibility on failure. src/store/index.rs publish() must not \
+         have advanced the watermark."
+    );
+
+    // Store must still be usable after the failed batch.
+    let post_failure = store
+        .append(
+            &coord,
+            EventKind::DATA,
+            &serde_json::json!({"recovery": true}),
+        )
+        .expect("store usable after failed batch");
+    assert_eq!(
+        post_failure.sequence, 0,
+        "PROPERTY: the first event after a failed batch must occupy \
+         sequence 0 — the failed batch must not have burned any sequence \
+         slots that would shift the next append's sequence. Got sequence \
+         {}. Investigate: src/store/writer.rs validate_batch ordering \
+         relative to reserve_sequences.",
+        post_failure.sequence
+    );
 }
 
 /// Test: full batch visibility on success.

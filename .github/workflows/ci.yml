@@ -141,13 +141,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build rustdoc in canonical container
-        run: bash ./scripts/run-in-devcontainer.sh 'cargo xtask docs'
-      - name: Strip rustdoc files with `!` in filename
         # Recent rustdoc emits macro.NAME!.html redirects alongside the
         # canonical macro.NAME.html. The `!` is rejected by
         # actions/upload-pages-artifact (the underlying tar packing fails
-        # on it), and the redirect file is redundant.
-        run: find target/site -name '*!*.html' -type f -delete
+        # on it), and the redirect file is redundant. We strip them inside
+        # the devcontainer because the rustdoc output is owned by the
+        # in-container user (root), so an outside-container `find -delete`
+        # hits permission-denied.
+        run: |
+          bash ./scripts/run-in-devcontainer.sh \
+            'cargo xtask docs && find target/site -name "*!*.html" -type f -delete'
       - uses: actions/upload-pages-artifact@v3
         with:
           path: target/site
