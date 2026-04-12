@@ -9,6 +9,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   PROPTEST_CASES: 256
   # tests/chaos_testing.rs reads this; default fallback in the test source
   # is 10, which is too few to expose real concurrency races. The inline
@@ -22,8 +23,12 @@ jobs:
     name: Integrity (ubuntu-devcontainer)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-devcontainer
       - name: Canonical container integrity gates
+        env:
+          BATPAK_DEVCONTAINER_IMAGE: batpak-devcontainer:ci
+          BATPAK_DEVCONTAINER_SKIP_BUILD: "1"
         run: |
           bash ./scripts/run-in-devcontainer.sh 'cargo xtask ci'
 
@@ -31,7 +36,7 @@ jobs:
     name: Integrity (windows-native)
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy,rustfmt,llvm-tools-preview
@@ -71,34 +76,44 @@ jobs:
           - "--features blake3"
           - "--features dangerous-test-hooks"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-devcontainer
       - name: Feature-isolation test matrix
+        env:
+          BATPAK_DEVCONTAINER_IMAGE: batpak-devcontainer:ci
+          BATPAK_DEVCONTAINER_SKIP_BUILD: "1"
         run: bash ./scripts/run-in-devcontainer.sh "cargo test ${{ matrix.features }}"
 
   coverage:
     runs-on: ubuntu-latest
     needs: [integrity-linux-container, integrity-windows-native]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-devcontainer
       - name: Coverage threshold check
+        env:
+          BATPAK_DEVCONTAINER_IMAGE: batpak-devcontainer:ci
+          BATPAK_DEVCONTAINER_SKIP_BUILD: "1"
         run: |
           bash ./scripts/run-in-devcontainer.sh 'cargo xtask cover --ci --threshold 80'
 
-  quickstart-smoke:
+  smoke-consumers:
+    name: Smoke (quickstart, packaged consumer, template)
     runs-on: ubuntu-latest
     needs: [integrity-linux-container]
     steps:
-      - uses: actions/checkout@v4
-      - name: Run the beginner quickstart
-        run: bash ./scripts/run-in-devcontainer.sh 'cargo run --example quickstart'
-
-  template-smoke:
-    runs-on: ubuntu-latest
-    needs: [integrity-linux-container]
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build the starter template
-        run: bash ./scripts/run-in-devcontainer.sh 'cargo run --manifest-path templates/minimal-app/Cargo.toml'
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-devcontainer
+      - name: Run onboarding smoke checks
+        env:
+          BATPAK_DEVCONTAINER_IMAGE: batpak-devcontainer:ci
+          BATPAK_DEVCONTAINER_SKIP_BUILD: "1"
+        run: |
+          bash ./scripts/run-in-devcontainer.sh '
+            cargo xtask quickstart &&
+            cargo xtask consumer-smoke &&
+            cargo run --manifest-path templates/minimal-app/Cargo.toml
+          '
 
   mutants:
     # Mutation testing smoke run — fast subset (1/12 shard) that completes
@@ -114,8 +129,12 @@ jobs:
     if: github.event_name == 'pull_request' || github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     needs: [integrity-linux-container, integrity-windows-native]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-devcontainer
       - name: Mutation smoke (all features, shard 1/12)
+        env:
+          BATPAK_DEVCONTAINER_IMAGE: batpak-devcontainer:ci
+          BATPAK_DEVCONTAINER_SKIP_BUILD: "1"
         run: bash ./scripts/run-in-devcontainer.sh 'cargo xtask mutants smoke'
 
   mutants-full:
@@ -146,8 +165,12 @@ jobs:
           - 12/12
     name: Mutation full (${{ matrix.surface.name }} shard ${{ matrix.shard }})
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-devcontainer
       - name: Full mutation shard
+        env:
+          BATPAK_DEVCONTAINER_IMAGE: batpak-devcontainer:ci
+          BATPAK_DEVCONTAINER_SKIP_BUILD: "1"
         run: bash ./scripts/run-in-devcontainer.sh '${{ matrix.surface.command }} --shard ${{ matrix.shard }}'
 
   docs:
@@ -161,7 +184,8 @@ jobs:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-devcontainer
       - name: Build rustdoc + scrub upload-pages-artifact gotchas
         # Two things in the rustdoc output break `actions/upload-pages-artifact@v3`:
         #   1. `macro.NAME!.html` redirect files — the `!` in the filename

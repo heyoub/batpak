@@ -5,6 +5,9 @@ on:
   schedule:
     - cron: "0 9 * * 1"
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   criterion:
     strategy:
@@ -14,7 +17,7 @@ jobs:
         surface: [neutral, native]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@mdbook
       - uses: Swatinem/rust-cache@v2
