@@ -15,7 +15,6 @@ exclude = [
     ".devcontainer/**",
     ".github/**",
     "AGENTS.md",
-    "benches/**",
     "docs/**",
     "guide/**",
     "scripts/**",
