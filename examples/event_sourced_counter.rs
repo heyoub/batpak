@@ -57,17 +57,10 @@ impl EventSourced<serde_json::Value> for CounterState {
     fn apply_event(&mut self, event: &Event<serde_json::Value>) {
         let kind = event.header.event_kind;
         if kind == INCREMENTED || kind == DECREMENTED {
-            // The store serializes payloads to msgpack bytes, so when read back
-            // as serde_json::Value, the payload is an array of u8 values.
-            // Extract the bytes and deserialize from msgpack.
-            let bytes: Vec<u8> = match &event.payload {
-                serde_json::Value::Array(arr) => arr
-                    .iter()
-                    .filter_map(|v| v.as_u64().map(|n| n as u8))
-                    .collect(),
-                _ => return,
-            };
-            if let Ok(payload) = rmp_serde::from_slice::<IncrementedBy>(&bytes) {
+            // Reader delivers payloads as typed serde_json::Value (already
+            // decoded from the on-disk msgpack frame), so we can deserialize
+            // directly from the Value without re-parsing bytes.
+            if let Ok(payload) = serde_json::from_value::<IncrementedBy>(event.payload.clone()) {
                 self.value += payload.amount;
                 if payload.amount > 0 {
                     self.total_increments += 1;

@@ -236,8 +236,12 @@ impl ProjectionCache for NativeCache {
         //
         // Skipping the per-write `sync_all()` and directory fsync removes
         // ~600 µs of latency per cache write, which previously dwarfed the
-        // savings from incremental projection apply. Callers who want
-        // crash-resilient cache state can call `cache.sync()` explicitly.
+        // savings from incremental projection apply. There is no public path
+        // to force per-cache durability for `NativeCache` (`sync()` on this
+        // backend is a no-op by design); a power-loss-recoverable cache is
+        // an explicit non-goal of this backend, since the segment log is the
+        // source of truth and a missing cache entry simply triggers a
+        // replay-and-rewrite on the next `project()` call.
         let write_result = (|| -> Result<(), StoreError> {
             {
                 use std::io::Write;
@@ -308,10 +312,15 @@ impl ProjectionCache for NativeCache {
     }
 
     fn sync(&self) -> Result<(), StoreError> {
-        // The cache is rebuildable from segments, so put()/delete_prefix()
-        // don't fsync. This method is a no-op: callers who care about cache
-        // durability across crashes should sync the underlying filesystem
-        // separately, or rely on segment replay to rebuild missing entries.
+        // Intentional no-op. The `ProjectionCache::sync` trait method is the
+        // contract surface for backends whose `put` is buffered or
+        // non-durable; `NativeCache::put` is already a `tempfile + rename`
+        // sequence (atomic but not fsynced) and the cache is treated as a
+        // rebuildable derivative of the segment log. There is no in-process
+        // buffer to flush. A future custom backend (e.g. one that buffers
+        // writes in memory or talks to a remote KV) MUST implement `sync`
+        // properly; `NativeCache` exists in the no-op camp by design, and
+        // there is no public `Store` API path to invoke it.
         Ok(())
     }
 }

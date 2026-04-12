@@ -526,10 +526,36 @@ pub(crate) struct AppendGuards {
 
 /// Pre-computed per-item batch state shared between the precompute, write,
 /// stage, and broadcast phases of `handle_append_batch`.
+///
+/// Every field is derived in `precompute_batch_items` BEFORE any frame is
+/// written. The downstream phases (`write_batch_event_frames`,
+/// `stage_batch_index_entries`) consume these values verbatim. This is
+/// load-bearing: an earlier version computed `event_hash` only inside the
+/// frame-write phase and reconstructed it from a shared scratch map in the
+/// stage phase, which silently corrupted hash chains for batches with two or
+/// more items on the same entity (the second item's `prev_hash` came from a
+/// post-precompute `[0u8; 32]` placeholder, and every staged `event_hash`
+/// collapsed to the entity's LAST item's hash because the map insert
+/// overwrote per item). Capturing all per-item material here makes those
+/// invariants impossible to break — there is no scratch map.
 struct BatchItemComputed {
     global_seq: u64,
     clock: u32,
+    /// Per-item monotonic wall_ms used by BOTH the on-disk header position AND
+    /// the in-memory `IndexEntry.wall_ms`. Computed once with `max(last_ms)`
+    /// clamping per entity (matches the single-append path) so a regressing
+    /// injected/system clock cannot reorder `stream()` results.
+    wall_ms: u64,
+    /// Microsecond timestamp captured once at the top of
+    /// `precompute_batch_items` and reused as the header `timestamp_us` for
+    /// every item in the batch. Single-batch / single-`now_us()` semantics
+    /// keep the on-disk and in-memory views byte-equivalent.
+    wall_us: i64,
     prev_hash: [u8; 32],
+    /// Blake3 of the payload, computed in `precompute_batch_items` so the
+    /// next same-entity item can read it as its `prev_hash`. Without this,
+    /// hash chains for multi-item same-entity batches break.
+    event_hash: [u8; 32],
     event_id: u128,
     causation_id: Option<u128>,
 }
@@ -651,9 +677,23 @@ impl WriterState<'_> {
         Ok(None)
     }
 
-    /// Pre-compute per-item global sequences, clocks, prev_hashes, event_ids,
-    /// and causation. Builds intra-batch entity clock + hash chains so multiple
-    /// items per entity get incrementing clocks before the index is updated.
+    /// Pre-compute per-item global sequences, clocks, wall_ms, prev_hashes,
+    /// event_hashes, event_ids, and causation. Builds intra-batch per-entity
+    /// chains for clock, wall_ms, and hash so multi-item same-entity batches
+    /// produce a continuous sequence and a continuous hash chain on disk.
+    ///
+    /// **Single timestamp invariant.** A single `now_us()` is captured at the
+    /// top and reused for every item's `wall_us`. The corresponding `wall_ms`
+    /// is `max(now_ms, entity_last_ms)` per entity to mirror the single-append
+    /// monotonicity guard at `handle_append::STEP 4` — without this clamp, a
+    /// regressing clock (mocked test clock, NTP slew) could reorder
+    /// `stream()` results within a batch.
+    ///
+    /// **Eager hash invariant.** `event_hash` is computed here (not deferred
+    /// to the frame-write phase) so the next same-entity item can read it as
+    /// its `prev_hash`. Without this, the on-disk frame chain and the
+    /// in-memory IndexEntry chain diverge — see `BatchItemComputed` for the
+    /// historical incident this guards against.
     fn precompute_batch_items(
         &self,
         items: &[BatchAppendItem],
@@ -664,10 +704,21 @@ impl WriterState<'_> {
             std::collections::HashMap::new();
         let mut entity_batch_clocks: std::collections::HashMap<Arc<str>, u32> =
             std::collections::HashMap::new();
+        let mut entity_batch_wall_ms: std::collections::HashMap<Arc<str>, u64> =
+            std::collections::HashMap::new();
+
+        // Single timestamp for the entire batch (see Single timestamp invariant
+        // above). Header `timestamp_us` and the IndexEntry `wall_ms` are both
+        // derived from this one capture.
+        let now_us = self.config.now_us();
+        #[allow(clippy::cast_sign_loss)] // timestamp_us is always positive (from SystemTime)
+        let now_ms = (now_us / 1000) as u64;
 
         for (idx, item) in items.iter().enumerate() {
             let entity: Arc<str> = Arc::from(item.coord.entity());
 
+            // prev_hash: previous batch item if same entity, else the index's
+            // latest entry for the entity, else genesis [0; 32].
             let prev_hash = if let Some(&hash) = entity_prev_hashes.get(&entity) {
                 hash
             } else {
@@ -677,6 +728,7 @@ impl WriterState<'_> {
                     .unwrap_or([0u8; 32])
             };
 
+            // clock: monotonic per entity, +1 from prior batch item or index.
             let clock = if let Some(&last_clock) = entity_batch_clocks.get(&entity) {
                 last_clock + 1
             } else {
@@ -686,6 +738,22 @@ impl WriterState<'_> {
                     .unwrap_or(0)
             };
             entity_batch_clocks.insert(Arc::clone(&entity), clock);
+
+            // wall_ms: monotonic per entity. The clamp source must consider
+            // BOTH the index AND prior batch items on the same entity — a
+            // batch-internal clock regression would otherwise reorder
+            // BTreeMap entries in `StoreIndex::streams`.
+            let last_ms = entity_batch_wall_ms
+                .get(&entity)
+                .copied()
+                .unwrap_or_else(|| {
+                    self.index
+                        .get_latest(&entity)
+                        .map(|e| e.wall_ms)
+                        .unwrap_or(0)
+                });
+            let wall_ms = now_ms.max(last_ms);
+            entity_batch_wall_ms.insert(Arc::clone(&entity), wall_ms);
 
             let event_id = uuid::Uuid::now_v7().as_u128();
 
@@ -706,13 +774,25 @@ impl WriterState<'_> {
                 }
             };
 
-            entity_prev_hashes.insert(entity, [0u8; 32]);
+            // Compute event_hash NOW (eager hash invariant — see fn doc).
+            #[cfg(feature = "blake3")]
+            let event_hash = crate::event::hash::compute_hash(&item.payload_bytes);
+            #[cfg(not(feature = "blake3"))]
+            let event_hash = [0u8; 32];
+
+            // Populate the prev_hash source for the next same-entity item
+            // with the ACTUAL hash (was a `[0u8; 32]` placeholder before,
+            // which broke the chain).
+            entity_prev_hashes.insert(entity, event_hash);
 
             let global_seq = first_seq + idx as u64;
             computed.push(BatchItemComputed {
                 global_seq,
                 clock,
+                wall_ms,
+                wall_us: now_us,
                 prev_hash,
+                event_hash,
                 event_id,
                 causation_id,
             });
@@ -992,9 +1072,11 @@ impl WriterState<'_> {
             &self.config.fault_injector,
         )?;
 
-        // STEP 9: Write all event frames. Returns offsets, receipts, and the
-        // populated entity_prev_hashes map (used by stage step for IndexEntry).
-        let (frame_offsets, receipts, entity_prev_hashes) =
+        // STEP 9: Write all event frames. Returns offsets and receipts;
+        // every per-item value the stage step needs (`prev_hash`,
+        // `event_hash`, `wall_ms`, `clock`) was already locked in by
+        // `precompute_batch_items`.
+        let (frame_offsets, receipts) =
             self.write_batch_event_frames(items, &computed, batch_id)?;
 
         // FAULT INJECTION: All batch items complete
@@ -1043,13 +1125,8 @@ impl WriterState<'_> {
             })?;
 
         // STEP 12: Build index entries from the precomputed data + frame offsets.
-        let staged_entries = self.stage_batch_index_entries(
-            items,
-            &computed,
-            &frame_offsets,
-            &receipts,
-            &entity_prev_hashes,
-        )?;
+        let staged_entries =
+            self.stage_batch_index_entries(items, &computed, &frame_offsets, &receipts)?;
 
         // FAULT INJECTION: Before atomic publish to index
         #[cfg(feature = "test-support")]
@@ -1075,48 +1152,43 @@ impl WriterState<'_> {
         Ok(receipts)
     }
 
-    /// STEP 9: Write all event frames for the batch. Returns frame offsets,
-    /// per-item receipts, and the populated entity_prev_hashes map (which the
-    /// stage step needs to fill in `IndexEntry::hash_chain.event_hash`).
-    #[allow(clippy::type_complexity)] // tuple is the natural shape; refactoring would obscure flow
+    /// STEP 9: Write all event frames for the batch. Returns frame offsets and
+    /// per-item receipts. All per-item state (`prev_hash`, `event_hash`,
+    /// `wall_us`, etc.) is taken verbatim from the precomputed
+    /// `BatchItemComputed` slice — this function does NOT recompute hashes,
+    /// timestamps, or chain links. See the `BatchItemComputed` doc for the
+    /// historical incident behind this discipline.
     fn write_batch_event_frames(
         &mut self,
         items: &[BatchAppendItem],
         computed: &[BatchItemComputed],
         batch_id: u64,
-    ) -> Result<
-        (
-            Vec<u64>,
-            Vec<AppendReceipt>,
-            std::collections::HashMap<Arc<str>, [u8; 32]>,
-        ),
-        StoreError,
-    > {
+    ) -> Result<(Vec<u64>, Vec<AppendReceipt>), StoreError> {
         let mut frame_offsets: Vec<u64> = Vec::with_capacity(items.len());
         let mut receipts: Vec<AppendReceipt> = Vec::with_capacity(items.len());
-        let mut entity_prev_hashes: std::collections::HashMap<Arc<str>, [u8; 32]> =
-            std::collections::HashMap::new();
 
         for (idx, item) in items.iter().enumerate() {
             let c = &computed[idx];
             let global_seq = c.global_seq;
             let clock = c.clock;
             let prev_hash = c.prev_hash;
+            let event_hash = c.event_hash;
             let event_id = c.event_id;
             let causation_id = c.causation_id;
+            let wall_us = c.wall_us;
+            let wall_ms = c.wall_ms;
 
-            // Build event header.
-            let now_us = self.config.now_us();
-            #[allow(clippy::cast_sign_loss)] // timestamp_us is always positive (from SystemTime)
-            let now_ms = (now_us / 1000) as u64;
-            let position = DagPosition::child_at(clock, now_ms, 0);
+            // Build event header. wall_us / wall_ms come from the single
+            // batch-level capture in precompute, with per-entity monotonicity
+            // already applied to wall_ms.
+            let position = DagPosition::child_at(clock, wall_ms, 0);
             let correlation_id = item.options.correlation_id.unwrap_or(event_id);
 
             let header = EventHeader::new(
                 event_id,
                 correlation_id,
                 causation_id,
-                now_us,
+                wall_us,
                 position,
                 // Payload sizes bounded by batch_max_bytes validation
                 #[allow(clippy::cast_possible_truncation)]
@@ -1126,23 +1198,15 @@ impl WriterState<'_> {
                 item.kind,
             );
 
-            // Build event.
+            // Build event using the precomputed event_hash. The frame's
+            // prev_hash MUST be the precomputed value so multi-item
+            // same-entity batches produce a continuous on-disk hash chain.
             let mut event = Event::new(header, item.payload_bytes.clone());
-
-            // Compute hash.
-            #[cfg(feature = "blake3")]
-            let event_hash = crate::event::hash::compute_hash(&event.payload);
-            #[cfg(not(feature = "blake3"))]
-            let event_hash = [0u8; 32];
             event.hash_chain = Some(HashChain {
                 prev_hash,
                 event_hash,
             });
             event.header.content_hash = event_hash;
-
-            // Update entity_prev_hashes for intra-batch chain (and stage step).
-            let entity: Arc<str> = Arc::from(item.coord.entity());
-            entity_prev_hashes.insert(entity, event_hash);
 
             // Encode frame.
             let frame_payload = FramePayloadRef {
@@ -1203,18 +1267,22 @@ impl WriterState<'_> {
         // Suppress unused warning when test-support is disabled.
         let _ = batch_id;
 
-        Ok((frame_offsets, receipts, entity_prev_hashes))
+        Ok((frame_offsets, receipts))
     }
 
     /// STEP 12: Build IndexEntry vec from precomputed data + write outputs.
-    /// Also records SIDX entries for the segment footer.
+    /// Also records SIDX entries for the segment footer. Per-item state
+    /// (`prev_hash`, `event_hash`, `wall_ms`, `clock`) is taken verbatim from
+    /// `BatchItemComputed`. The map-based hash lookup that lived here
+    /// previously was wrong: it returned the entity's LAST item's hash for
+    /// every staged entry on that entity, silently corrupting in-memory and
+    /// SIDX hash chains for multi-item same-entity batches.
     fn stage_batch_index_entries(
         &mut self,
         items: &[BatchAppendItem],
         computed: &[BatchItemComputed],
         frame_offsets: &[u64],
         receipts: &[AppendReceipt],
-        entity_prev_hashes: &std::collections::HashMap<Arc<str>, [u8; 32]>,
     ) -> Result<Vec<IndexEntry>, StoreError> {
         let mut staged_entries: Vec<IndexEntry> = Vec::with_capacity(items.len());
         for (idx, item) in items.iter().enumerate() {
@@ -1222,6 +1290,8 @@ impl WriterState<'_> {
             let global_seq = c.global_seq;
             let clock = c.clock;
             let prev_hash = c.prev_hash;
+            let event_hash = c.event_hash;
+            let wall_ms = c.wall_ms;
             let event_id = c.event_id;
             let causation_id = c.causation_id;
             let offset = frame_offsets[idx];
@@ -1236,15 +1306,6 @@ impl WriterState<'_> {
                 Coordinate::new(entity.as_ref(), scope.as_ref()).map_err(StoreError::Coordinate)?;
             let entity_id = self.index.interner.intern(entity.as_ref());
             let scope_id = self.index.interner.intern(scope.as_ref());
-
-            let event_hash = entity_prev_hashes
-                .get(&entity)
-                .copied()
-                .unwrap_or([0u8; 32]);
-
-            // Use the injectable clock for wall_ms (matches single-append path).
-            #[allow(clippy::cast_sign_loss)] // timestamp_us is always positive
-            let wall_ms = (self.config.now_us() / 1000) as u64;
 
             let entry = IndexEntry {
                 event_id,

@@ -449,9 +449,21 @@ impl Reader {
         }
 
         // Slow path: frame-by-frame scan for active segment or when batch state is pending.
-        // Track batch-committed entries for fsync ambiguity handling.
-        let has_sidx_footer = crate::store::sidx::read_footer(path).is_ok_and(|r| r.is_some());
-        let mut batch_committed_indices = Vec::new();
+        //
+        // Note: an earlier version tracked `batch_committed_indices` and discarded
+        // them on cold start when the segment lacked a SIDX footer, on the
+        // premise that "SIDX is written after sync, so its absence implies the
+        // sync didn't complete". That premise was wrong: SIDX is only ever
+        // written on segment rotation or clean shutdown, NEVER per batch.
+        // `handle_append_batch` issues its own `sync_with_mode` after the
+        // COMMIT marker, so a batch whose `append_batch` returned `Ok(receipts)`
+        // is durably on disk regardless of whether SIDX has been written yet.
+        // The discard logic was therefore silently dropping confirmed-committed
+        // batches on any unclean shutdown that happened between batch commit and
+        // segment rotation/clean close — exactly the scenario that
+        // crash-resilience claims must survive. The COMMIT marker plus the
+        // existing CRC / decode-error mid-loop discards are the actual oracles
+        // for batch durability.
         let mut file = File::open(path).map_err(StoreError::Io)?;
         let mut magic = [0u8; 4];
         file.read_exact(&mut magic).map_err(StoreError::Io)?;
@@ -583,15 +595,15 @@ impl Reader {
                                 }
                             } else if kind == EventKind::SYSTEM_BATCH_COMMIT {
                                 // COMMIT marker: verify count matches and commit.
+                                // The COMMIT frame is the durability oracle —
+                                // its presence in the segment means the writer
+                                // got at least as far as `write_frame(COMMIT)`,
+                                // and the subsequent `sync_with_mode` is what
+                                // makes the receipt callable in the first place.
                                 if state_ref.remaining == 0 {
                                     // Complete batch: commit all staged.
                                     let completed_batch = std::mem::take(&mut state_ref.staged);
-                                    let start_idx = entries.len();
                                     entries.extend(completed_batch);
-                                    // Track batch-committed entry indices for fsync ambiguity.
-                                    for i in start_idx..entries.len() {
-                                        batch_committed_indices.push(i);
-                                    }
                                     state_ref.in_batch = false;
                                     tracing::debug!(
                                         segment_id,
@@ -701,21 +713,6 @@ impl Reader {
             self.release_buffer(frame_buf);
             if stop_scan {
                 break;
-            }
-        }
-
-        // Fsync ambiguity handling: if segment lacks SIDX footer (incomplete sync),
-        // discard batch-committed entries. SIDX is written after sync, so its absence
-        // indicates sync didn't complete.
-        if !has_sidx_footer && !batch_committed_indices.is_empty() {
-            tracing::warn!(
-                segment_id,
-                batch_count = batch_committed_indices.len(),
-                "segment lacks SIDX footer (incomplete sync), discarding batch entries"
-            );
-            // Remove in reverse order to preserve indices.
-            for idx in batch_committed_indices.into_iter().rev() {
-                entries.remove(idx);
             }
         }
 

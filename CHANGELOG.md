@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+_Nothing yet — next entries go here._
+
+## [0.3.0] - 2026-04-11
+
 ### Added
 - `SequenceGate`: in-memory visibility watermark separating sequence allocation
   from reader-visible publication. Batch entries are now invisible to
@@ -41,12 +45,38 @@ All notable changes to this project will be documented in this file.
   exercise them intentionally.
 - **`check_ci_parity` structural check** (`tools/integrity/src/main.rs`): fails
   the build when `.github/workflows/ci.yml` drifts from
-  `tools/xtask/src/main.rs` or `.devcontainer/Dockerfile`. Three invariants
+  `tools/xtask/src/main.rs` or `.devcontainer/Dockerfile`. Four invariants
   enforced: (1) every `cargo xtask <subcommand>` referenced in the workflow
-  must exist in xtask; (2) every tool installed via `taiki-e/install-action`
-  must also appear in `cargo xtask setup`; (3) version pins for
-  `cargo-deny`, `cargo-llvm-cov`, `cargo-mutants`, `cargo-nextest`, and
-  `mdbook` must agree between the Dockerfile and the xtask setup step.
+  must exist in xtask; (2) every `taiki-e/install-action` tool entry in the
+  workflow must use the canonical `name@version` form (a bare `tool: nextest`
+  is rejected so Windows CI cannot silently drift from Linux pins); (3) every
+  workflow tool pin must match the `cargo xtask setup` pin for the same
+  binary; (4) version pins for `cargo-deny`, `cargo-llvm-cov`, `cargo-mutants`,
+  `cargo-nextest`, and `mdbook` must agree between the Dockerfile and the
+  xtask setup step. Together, these close the drift vector identified by the
+  infrastructure-QA pass where unpinned Windows installs could resolve to a
+  newer release than the canonical container.
+- **`stale_terms` tripwire** (`tools/integrity/src/main.rs::check_for_stale_references`):
+  seven removed-API identifiers (`RedbCache`, `LmdbCache`, `entity_locks`,
+  `cache_map_size_bytes`, `with_cache_map_size_bytes`, `open_with_redb_cache`,
+  `open_with_lmdb_cache`) are now structurally denied anywhere outside the
+  allowlist (`CHANGELOG.md`, `docs/spec/SPEC.md`, `docs/spec/SPEC_REGISTRY.md`,
+  `docs/adr/ADR-0003-cache-safety-assumptions.md`, `docs/audits/HICP_AUDIT_REPORT.md`,
+  `AGENTS.md`, the tool source itself). Any reintroduction via lazy copy-paste
+  from old docs fails `cargo xtask structural` (called by `cargo xtask ci`).
+- **Test hardening — variant matching, seeded fuzz, `GOLDEN_UPDATE` sentinel**
+  (`tests/chaos_testing.rs`, `tests/fuzz_chaos_feedback.rs`, `tests/wire_format.rs`).
+  `chaos_corrupted_segment_bytes` replaced string-matching error checks
+  (`msg.contains("CRC") || msg.contains("corrupt") || ...`) with a typed
+  `matches!(e, StoreError::CrcMismatch{..} | StoreError::CorruptSegment{..} | ...)`
+  guard so adding a new `StoreError` variant cannot silently widen the
+  acceptable set. `run_extended_fuzz_chaos` replaced OS-seeded `rand::rng()`
+  with `StdRng::seed_from_u64(seed)` where `seed` is read from the
+  `FUZZ_CHAOS_SEED` env var and printed to stderr, making any failure in the
+  50k-iteration fuzz loop exactly reproducible. Golden-file tests in
+  `wire_format.rs` now refuse to rewrite fixtures unless the explicit
+  `GOLDEN_UPDATE=I_KNOW_WHAT_IM_DOING` sentinel is set (a stray `=1` no
+  longer trips the regenerator).
 - **Mutation testing on every PR** (`.github/workflows/ci.yml`): the `mutants`
   smoke job (1/12 shard, ~5 min) was previously `workflow_dispatch`-only and
   never ran in practice. It now runs on every `push` and `pull_request`.
@@ -80,13 +110,28 @@ All notable changes to this project will be documented in this file.
   test asserting that append + `get` returns the original payload for ANY
   shrinkable JSON value, not just a single fixed example. 64 cases per run.
 
+#### Atomic batch append (originally in `[0.3.0] - 2026-04-09`, merged here)
+- Atomic batch append: `Store::append_batch()` and `append_reaction_batch()` APIs
+- `SYSTEM_BATCH_BEGIN` envelope marker for durable batch commit semantics
+- `BatchAppendItem` with explicit `CausationRef` for intra-batch causation linking
+- `BatchStage` and `StoreError::BatchFailed` for detailed batch failure reporting
+- Cold-start batch recovery: global streaming scan with committedness enforcement
+- Batch size limits (`batch_max_size`) and byte limits (`batch_max_bytes`) in config
+- Marker invisibility: batch envelope frames never appear in queries/cursors/subscriptions
+- Fault injection framework (`test-support` feature): `InjectionPoint`, `FaultInjector` trait, `CountdownInjector`, `ProbabilisticInjector` for chaos testing write paths
+- `batch_append.rs` example demonstrating atomic multi-event commit with intra-batch causation
+
 ### Changed
 - **`NativeCache::put` no longer fsyncs.** The projection cache is rebuildable
   from segments, so per-write durability is unnecessary. Atomicity (no torn
   reads) still comes from `std::fs::rename`. This drops cache-write latency
   from ~13 ms to ~140 µs on the `projection_cache_native/cache_miss`
-  benchmark — a **94x speedup**. Users who explicitly want crash-resilient
-  cache state can call `cache.sync()`.
+  benchmark — a **94x speedup**. `NativeCache::sync()` is a documented no-op
+  on this backend and there is no public `Store` API path to invoke it; a
+  power-loss-recoverable cache is an explicit non-goal because the segment
+  log is the source of truth and a missing cache entry triggers replay on
+  the next `project()` call. Custom `ProjectionCache` backends that buffer
+  writes are still expected to implement `sync()` properly.
 - `StoreError::cache_error()` helper added; replaces 8 occurrences of the
   verbose `.map_err(|e| StoreError::CacheFailed(Box::new(e)))` pattern.
 - Segment rotation logic in `writer.rs` extracted to a single
@@ -140,6 +185,70 @@ All notable changes to this project will be documented in this file.
 - **Bench fix — `compaction.rs`**: deprecated `b.iter_with_setup` replaced with
   `b.iter_batched` + `BatchSize::SmallInput`.
 
+#### Atomic batch append (originally in `[0.3.0] - 2026-04-09`, merged here)
+- Segment scan logic now stages batch frames until commit marker confirmed
+- SIDX remains advisory; frame stream is source of truth for committedness
+
+### Fixed
+- **Atomic batch hash chain corrupted for multi-item same-entity batches**
+  (`src/store/writer.rs::precompute_batch_items` /
+  `write_batch_event_frames` / `stage_batch_index_entries`). Two
+  independent bugs that produced the same symptom on disk and in memory:
+  (a) `precompute_batch_items` populated `entity_prev_hashes.insert(entity, [0u8; 32])`
+  *before* `event_hash` was known, so any second-or-later same-entity item
+  in a batch wrote `prev_hash = [0; 32]` into its on-disk frame instead of
+  the previous item's actual `event_hash`; (b) `stage_batch_index_entries`
+  read `event_hash` for every staged `IndexEntry` and SIDX entry from the
+  shared `entity_prev_hashes` map, which the write phase populated by
+  `insert(entity, event_hash)` per item — so the map only ever held the
+  entity's LAST item's hash, and every staged entry on that entity got the
+  same wrong value. Net effect: `walk_ancestors` from any non-first
+  same-entity batch item would terminate at `[0; 32]` instead of traversing
+  predecessors; in-memory `IndexEntry`/SIDX hash chains diverged from the
+  on-disk frame chain; cold-start rebuilds via the SIDX fast path and the
+  slow-path frame scan reconstructed different state. Fix: compute blake3
+  eagerly inside `precompute_batch_items`, store `event_hash` per item in
+  `BatchItemComputed`, and have both the write and stage phases consume
+  the per-item value verbatim. The `entity_prev_hashes` scratch map is
+  gone. **No previously-shipped release contained this code path** — it
+  was introduced in the v0.3.0 prep cycle and is fixed before publish.
+- **Durably-committed batches discarded on cold start when the segment had
+  no SIDX footer** (`src/store/reader.rs::scan_segment_index`). The slow
+  path tracked `batch_committed_indices` and removed every batch entry
+  from `entries` if `has_sidx_footer == false`, on the documented premise
+  that "SIDX is written after sync, so its absence indicates sync didn't
+  complete." That premise was wrong: `SidxEntryCollector::write_sidx_footer`
+  is only ever invoked from `maybe_rotate_segment` and the writer-thread
+  shutdown drain — *never* per batch. `handle_append_batch` issues its
+  own `sync_with_mode` after writing the COMMIT marker, so a batch whose
+  `append_batch` returned `Ok(receipts)` is durably on disk regardless of
+  whether SIDX has been written yet. The discard logic was therefore
+  silently dropping confirmed-committed batches whenever the process died
+  between the batch sync and the next segment rotation / clean shutdown
+  (OOM kill, kernel panic, host reboot, writer-thread panic with no clean
+  drain) — an asymmetric "single events survive but batches vanish"
+  failure mode that violated `[INV-BATCH-ATOMIC-VISIBILITY]`. Fix: delete
+  the discard branch and the `batch_committed_indices` tracking. The
+  COMMIT marker plus the existing CRC / decode-error mid-loop discards
+  are the actual oracles for batch durability. **No previously-shipped
+  release contained this code path** — same provenance as the hash-chain
+  fix above.
+- **Batch wall_ms could regress under a non-monotonic clock**
+  (`src/store/writer.rs`). The single-append path applied
+  `raw_ms.max(last_ms)` per entity to keep `ClockKey` ordering monotonic
+  in `StoreIndex::streams`, but the batch path called `self.config.now_us()`
+  twice per item (once for the frame header, once for the `IndexEntry`
+  in the stage step) and never clamped against the entity's prior
+  `wall_ms`. A regressing injected/test clock could (a) reorder
+  `stream()` results within a batch and (b) write divergent header /
+  IndexEntry / SIDX wall_ms values for the same item depending on which
+  recovery path read it. Fix: capture a single `now_us` at the top of
+  `precompute_batch_items`, clamp `wall_ms = now_ms.max(entity_last_ms)`
+  per entity (consulting both the index and prior batch items), and
+  store both `wall_us` and the clamped `wall_ms` in `BatchItemComputed`
+  so the frame header, `IndexEntry`, and SIDX entry all consume the same
+  per-item value. Same provenance — never shipped.
+
 ### Removed
 - `StoreIndex::entity_locks` (the per-entity `DashMap<Arc<str>, Mutex<()>>`)
   and the corresponding `lock.lock()` acquisitions in `handle_append` and
@@ -167,7 +276,6 @@ All notable changes to this project will be documented in this file.
   and zero-filled on re-acquire — without coupling to private implementation
   details.
 
-### Removed (continued — earlier in this Unreleased cycle)
 - `RedbCache`, `LmdbCache`, the `redb` and `lmdb` Cargo features, and the
   `redb`/`heed` dependencies. Replaced by `NativeCache`.
 - `cache_map_size_bytes` field on `StoreConfig` and the
@@ -243,23 +351,6 @@ For LMDB/redb users: replace `Store::open_with_lmdb_cache(config, path)` or
 `Store::open_with_redb_cache(config, path)` with
 `Store::open_with_native_cache(config, path)`. Old `.redb` files and LMDB
 `data.mdb` files in your cache directory can be safely deleted.
-
-## [0.3.0] - 2026-04-09
-
-### Added
-- Atomic batch append: `Store::append_batch()` and `append_reaction_batch()` APIs
-- `SYSTEM_BATCH_BEGIN` envelope marker for durable batch commit semantics
-- `BatchAppendItem` with explicit `CausationRef` for intra-batch causation linking
-- `BatchStage` and `StoreError::BatchFailed` for detailed batch failure reporting
-- Cold-start batch recovery: global streaming scan with committedness enforcement
-- Batch size limits (`batch_max_size`) and byte limits (`batch_max_bytes`) in config
-- Marker invisibility: batch envelope frames never appear in queries/cursors/subscriptions
-- Fault injection framework (`test-support` feature): `InjectionPoint`, `FaultInjector` trait, `CountdownInjector`, `ProbabilisticInjector` for chaos testing write paths
-- `batch_append.rs` example demonstrating atomic multi-event commit with intra-batch causation
-
-### Changed
-- Segment scan logic now stages batch frames until commit marker confirmed
-- SIDX remains advisory; frame stream is source of truth for committedness
 
 ## [0.1.0] - 2026-04-04
 

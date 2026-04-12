@@ -395,22 +395,77 @@ fn check_ci_parity(repo_root: &Path) -> Result<()> {
         }
     }
 
-    // 2. Every tool installed via taiki-e/install-action in ci.yml must also
-    //    be installed by `cargo xtask setup` in tools/xtask/src/main.rs.
-    let tool_install_re = Regex::new(r#"tool:\s*([a-z][a-z0-9-]*)"#).unwrap();
-    let mut workflow_tools: BTreeSet<String> = BTreeSet::new();
-    for cap in tool_install_re.captures_iter(&ci_yml) {
-        if let Some(tool) = cap.get(1) {
-            workflow_tools.insert(tool.as_str().to_string());
+    // 2. Every tool installed via taiki-e/install-action in ci.yml must
+    //    be pinned to the same version that `.devcontainer/Dockerfile`
+    //    and `cargo xtask setup` use.
+    //
+    //    This guards three drift vectors at once:
+    //    (a) workflow installs an unpinned tool (Windows CI silently picks
+    //        up a new release that breaks against pinned Linux);
+    //    (b) workflow pins to a different version than the container;
+    //    (c) tool added to workflow but missing from xtask setup.
+    //
+    //    The regex requires the canonical `name@x.y[.z]` form. A bare
+    //    `tool: nextest` is intentionally rejected — see ci.yml for the
+    //    drift comment that explains the lock-step requirement.
+    let tool_install_re = Regex::new(r#"tool:\s*([a-z][a-z0-9-]*)@(\d+(?:\.\d+)+)"#).unwrap();
+    let bare_tool_re = Regex::new(r#"tool:\s*([a-z][a-z0-9-]*)\s*$"#).unwrap();
+    // Reject any unpinned `tool:` entry up front so we never have to wonder
+    // why a Windows install drifted from the canonical Linux pin.
+    for line in ci_yml.lines() {
+        if let Some(cap) = bare_tool_re.captures(line.trim_end()) {
+            let tool = cap.get(1).map(|m| m.as_str()).unwrap_or("?");
+            bail!(
+                "ci-parity: `.github/workflows/ci.yml` installs `{tool}` via \
+                 taiki-e/install-action without a version pin. Use \
+                 `tool: {tool}@<version>` so Linux and Windows CI install the \
+                 same version. Match the pin in `.devcontainer/Dockerfile` \
+                 and `cargo xtask setup`."
+            );
         }
     }
-    for tool in &workflow_tools {
-        if !xtask_main.contains(&format!("\"{tool}\"")) {
+    let mut workflow_tools: BTreeSet<(String, String)> = BTreeSet::new();
+    for cap in tool_install_re.captures_iter(&ci_yml) {
+        if let (Some(tool), Some(ver)) = (cap.get(1), cap.get(2)) {
+            workflow_tools.insert((tool.as_str().to_string(), ver.as_str().to_string()));
+        }
+    }
+    for (tool, wf_ver) in &workflow_tools {
+        // The xtask setup list must contain `"{tool}"` as a tuple key
+        // followed (within ~80 bytes on the next install line) by
+        // `{tool}@{version}`. Both checks together kill the
+        // accidental-substring-match failure mode.
+        let setup_key = format!("\"{tool}\"");
+        if !xtask_main.contains(&setup_key) {
             bail!(
-                "ci-parity: workflow installs `{tool}` via taiki-e/install-action \
-                 but `cargo xtask setup` in tools/xtask/src/main.rs does not list \
-                 it. Either add it to setup or remove from the workflow."
+                "ci-parity: workflow installs `{tool}@{wf_ver}` via \
+                 taiki-e/install-action but `cargo xtask setup` in \
+                 tools/xtask/src/main.rs does not list a `{setup_key}` entry. \
+                 Either add it to setup or remove from the workflow."
             );
+        }
+        let xtask_pin_re = Regex::new(&format!(r"{tool}@(\d+(?:\.\d+)+)")).unwrap();
+        let xtask_ver = xtask_pin_re
+            .captures(&xtask_main)
+            .and_then(|c| c.get(1))
+            .map(|m| m.as_str().to_string());
+        match xtask_ver {
+            Some(x) if &x != wf_ver => {
+                bail!(
+                    "ci-parity: tool `{tool}` is pinned to `{wf_ver}` in \
+                     `.github/workflows/ci.yml` but `{x}` in `cargo xtask setup` \
+                     (tools/xtask/src/main.rs). Pick one version and update both."
+                );
+            }
+            None => {
+                bail!(
+                    "ci-parity: tool `{tool}` is pinned in \
+                     `.github/workflows/ci.yml` but unpinned (or missing) in \
+                     `cargo xtask setup`. Add the same pin so local installs \
+                     match the workflow."
+                );
+            }
+            _ => {}
         }
     }
 

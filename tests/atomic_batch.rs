@@ -1177,3 +1177,325 @@ fn batch_publish_atomicity_concurrent_reader_sees_zero_or_all() {
         "expected to observe the terminal count {terminal}, observed {observed:?}",
     );
 }
+
+// ── Regression tests for the v0.3.0-prep batch hash-chain / cold-start /
+//    wall_ms bugs found in the final 1M-context audit. Each test names the
+//    specific bug it pins down so a future regression has a loud signal.
+// ─────────────────────────────────────────────────────────────────────────
+
+/// REGRESSION: multi-item same-entity batches must produce a continuous
+/// on-disk + in-memory hash chain.
+///
+/// Before the fix in `precompute_batch_items`, the second-or-later item of
+/// any same-entity batch wrote `prev_hash = [0u8; 32]` into its on-disk
+/// frame because `entity_prev_hashes.insert(entity, [0u8; 32])` ran *before*
+/// the real `event_hash` was known, AND every staged `IndexEntry` /
+/// `SidxEntry` collapsed to the entity's LAST item's `event_hash` because
+/// `stage_batch_index_entries` looked the value up in a shared scratch map
+/// instead of using a per-item field. This test would have caught both
+/// halves: hash uniqueness, prev/event linking, and `walk_ancestors`
+/// traversal all fail loud against the buggy code.
+#[cfg(feature = "blake3")]
+#[test]
+fn batch_multi_item_same_entity_hash_chain_is_continuous() {
+    let tmp = tempfile::tempdir().expect("create temp dir for hash chain regression");
+    let store = Store::open(StoreConfig::new(tmp.path())).expect("open store");
+    let coord = Coordinate::new("regress", "hashchain").expect("valid coord");
+
+    // Three distinct payloads on the SAME entity. Distinct payloads matter:
+    // identical payloads would produce identical event_hash values and the
+    // bug would be invisible against deduped hashes.
+    let items: Vec<BatchAppendItem> = (0..3)
+        .map(|i| {
+            BatchAppendItem::new(
+                coord.clone(),
+                EventKind::DATA,
+                &serde_json::json!({"step": i, "nonce": format!("regress-{i}")}),
+                AppendOptions::default(),
+                CausationRef::None,
+            )
+            .expect("construct batch item")
+        })
+        .collect();
+
+    let receipts = store.append_batch(items).expect("batch append");
+    assert_eq!(receipts.len(), 3, "all three items must be committed");
+
+    // Pull the in-memory IndexEntries via query.
+    let entries = store.query(&Region::entity("regress"));
+    assert_eq!(entries.len(), 3, "query must surface all three batch items");
+
+    // Sort by clock so the order is deterministic regardless of map ordering.
+    let mut entries = entries;
+    entries.sort_by_key(|e| e.clock);
+
+    // (a) every event_hash distinct (would fail under the
+    //     "stage step collapses to LAST item's hash" bug)
+    let h0 = entries[0].hash_chain.event_hash;
+    let h1 = entries[1].hash_chain.event_hash;
+    let h2 = entries[2].hash_chain.event_hash;
+    assert_ne!(
+        h0, h1,
+        "PROPERTY: distinct payloads must produce distinct event_hash values \
+         in the in-memory IndexEntry. Buggy stage_batch_index_entries collapsed \
+         every same-entity entry's event_hash to the LAST item's hash via the \
+         shared entity_prev_hashes map."
+    );
+    assert_ne!(h1, h2, "second pair of event_hash values must be distinct");
+    assert_ne!(h0, h2, "first/third event_hash values must be distinct");
+    assert_ne!(
+        h0, [0u8; 32],
+        "blake3 of a non-empty payload must be non-zero"
+    );
+
+    // (b) prev/event chain links: items[i].prev_hash == items[i-1].event_hash
+    //     This is the on-disk-and-in-memory chain that the bug broke. The
+    //     buggy precompute populated entity_prev_hashes with [0; 32], so
+    //     items[1].prev_hash and items[2].prev_hash were both [0; 32].
+    assert_eq!(
+        entries[1].hash_chain.prev_hash, h0,
+        "PROPERTY: items[1].prev_hash MUST equal items[0].event_hash. \
+         Buggy precompute_batch_items inserted [0; 32] into entity_prev_hashes \
+         before the real hash was computed, so this assertion would fail with \
+         actual = [0; 32]."
+    );
+    assert_eq!(
+        entries[2].hash_chain.prev_hash, h1,
+        "PROPERTY: items[2].prev_hash MUST equal items[1].event_hash. Same bug."
+    );
+    assert_eq!(
+        entries[0].hash_chain.prev_hash, [0u8; 32],
+        "items[0] is the genesis for the entity, so prev_hash is the all-zero \
+         sentinel. (Entity has no prior history in this test.)"
+    );
+
+    // (c) walk_ancestors must traverse the full chain in reverse order.
+    //     Buggy code would terminate at items[2] because items[2].prev_hash
+    //     was [0; 32] and walk_ancestors_by_hash bails on prev == [0; 32].
+    let walked = store.walk_ancestors(receipts[2].event_id, 8);
+    let walked_ids: Vec<u128> = walked.iter().map(|s| s.event.event_id()).collect();
+    let expected: Vec<u128> = vec![
+        receipts[2].event_id,
+        receipts[1].event_id,
+        receipts[0].event_id,
+    ];
+    assert_eq!(
+        walked_ids, expected,
+        "PROPERTY: walk_ancestors from the last batch item must yield all \
+         three items in reverse insertion order. Buggy hash chain breaks the \
+         traversal at the [0; 32] terminator after step 1."
+    );
+}
+
+/// REGRESSION: a durably-committed batch must survive an unclean shutdown
+/// that left the segment without a SIDX footer.
+///
+/// Before the fix in `reader.rs::scan_segment_index`, the slow path tracked
+/// `batch_committed_indices` and discarded every batch entry from the result
+/// when `has_sidx_footer == false`, on the (false) premise that "SIDX is
+/// written after sync, so its absence implies sync didn't complete." But
+/// SIDX is only ever written on segment rotation or clean shutdown — never
+/// per batch — so a successful `append_batch` followed by a crash before
+/// the next rotation/clean close caused silent data loss for the entire
+/// batch even though `append_batch` returned `Ok(receipts)`.
+///
+/// This test simulates that exact scenario by writing a batch, closing
+/// cleanly (which writes SIDX), then surgically truncating the SIDX footer
+/// off the segment file. Reopening the store must recover the batch via
+/// the slow path's COMMIT-marker oracle.
+#[test]
+fn batch_survives_unclean_shutdown_without_sidx_footer() {
+    let tmp = tempfile::tempdir().expect("create temp dir for unclean-shutdown regression");
+    let data_dir = tmp.path().to_path_buf();
+    let coord = Coordinate::new("regress", "no-sidx").expect("valid coord");
+
+    // Phase 1: open, write a 3-item batch, close cleanly. Clean close
+    // writes SIDX, which we strip in Phase 2 to simulate the unclean case.
+    {
+        let store = Store::open(StoreConfig::new(&data_dir)).expect("open store");
+        let items: Vec<BatchAppendItem> = (0..3)
+            .map(|i| {
+                BatchAppendItem::new(
+                    coord.clone(),
+                    EventKind::DATA,
+                    &serde_json::json!({"step": i}),
+                    AppendOptions::default(),
+                    CausationRef::None,
+                )
+                .expect("construct item")
+            })
+            .collect();
+        let receipts = store
+            .append_batch(items)
+            .expect("batch append must succeed");
+        assert_eq!(receipts.len(), 3, "baseline: all 3 items committed");
+        store.close().expect("clean close");
+    }
+
+    // Phase 2a: delete the index checkpoint that clean close just wrote.
+    // Without this, the next open uses the checkpoint fast path and skips
+    // the segment scan entirely — which means the slow-path discard branch
+    // (the H2 bug) never runs and we'd be testing the wrong code path.
+    let _ = std::fs::remove_file(data_dir.join("index.ckpt"));
+
+    // Phase 2b: locate the segment file and strip its SIDX footer in place.
+    // The SIDX trailer is the last 16 bytes: [string_table_offset:u64 LE]
+    // [entry_count:u32 LE][magic:4 b"SIDX"]. Truncating to string_table_offset
+    // restores the file to its pre-SIDX state — exactly what an unclean
+    // shutdown between batch sync and segment rotation/close would produce.
+    let entries: Vec<_> = std::fs::read_dir(&data_dir)
+        .expect("read data_dir")
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().map(|x| x == "fbat").unwrap_or(false))
+        .collect();
+    assert_eq!(
+        entries.len(),
+        1,
+        "exactly one segment file expected before truncation"
+    );
+    let seg_path = entries[0].path();
+    let bytes = std::fs::read(&seg_path).expect("read segment file");
+    assert!(
+        bytes.len() >= 16,
+        "segment file must be at least 16 bytes (SIDX trailer length)"
+    );
+    let trailer = &bytes[bytes.len() - 16..];
+    assert_eq!(
+        &trailer[12..16],
+        b"SIDX",
+        "clean close must have written the SIDX footer (sanity check before truncation)"
+    );
+    let string_table_offset = u64::from_le_bytes(trailer[0..8].try_into().unwrap());
+    std::fs::write(
+        &seg_path,
+        &bytes[..usize::try_from(string_table_offset).expect("offset fits in usize")],
+    )
+    .expect("truncate SIDX footer off segment");
+
+    // Phase 3: reopen. The reader's slow path must recover the batch via
+    // the COMMIT marker, NOT discard it for lacking a SIDX footer.
+    let store = Store::open(StoreConfig::new(&data_dir)).expect("reopen after truncation");
+    let recovered = store.query(&Region::entity("regress"));
+    assert_eq!(
+        recovered.len(),
+        3,
+        "PROPERTY: a durably-committed batch (BEGIN+frames+COMMIT all on disk) \
+         must survive an unclean shutdown that stripped the SIDX footer. The \
+         old reader.rs:707 discard branch silently dropped all 3 entries when \
+         has_sidx_footer == false, violating [INV-BATCH-ATOMIC-VISIBILITY]."
+    );
+
+    // Sanity: the recovered entries are the same payloads we wrote.
+    let mut steps: Vec<i64> = recovered
+        .iter()
+        .filter_map(|e| {
+            store
+                .get(e.event_id)
+                .ok()
+                .and_then(|stored| stored.event.payload["step"].as_i64())
+        })
+        .collect();
+    steps.sort();
+    assert_eq!(
+        steps,
+        vec![0, 1, 2],
+        "recovered batch payloads must round-trip exactly"
+    );
+}
+
+/// REGRESSION: batch wall_ms must remain monotonic per entity even when the
+/// injected clock regresses between batch items.
+///
+/// Before the fix in `precompute_batch_items` + `BatchItemComputed.wall_ms`,
+/// the batch path called `self.config.now_us()` independently for the
+/// header and for the IndexEntry, and never applied the `raw_ms.max(last_ms)`
+/// clamp the single-append path uses. A regressing test/system clock could
+/// reorder `stream()` results within a batch and produce divergent wall_ms
+/// between the on-disk frame header, the in-memory IndexEntry, and the SIDX
+/// entry recovered through the cold-start fast path. The fix captures a
+/// single `now_us` per batch and clamps `wall_ms = now_ms.max(entity_last_ms)`
+/// per entity, mirroring the single-append guard.
+#[test]
+fn batch_wall_ms_monotonic_under_regressing_clock() {
+    use std::sync::atomic::{AtomicI64, Ordering};
+    use std::sync::Arc;
+
+    // First call returns a "high" timestamp; every subsequent call returns
+    // a strictly lower value. This is the kind of regression a mocked clock,
+    // a coarse Windows timer, or NTP slew could produce.
+    let tick = Arc::new(AtomicI64::new(2_000_000_000_000)); // 2e12 µs
+    let clock_tick = Arc::clone(&tick);
+    let clock: Arc<dyn Fn() -> i64 + Send + Sync> =
+        Arc::new(move || clock_tick.fetch_sub(10_000, Ordering::SeqCst));
+
+    let tmp = tempfile::tempdir().expect("create temp dir for wall_ms regression");
+    let store = Store::open(StoreConfig::new(tmp.path()).with_clock(Some(clock)))
+        .expect("open store with regressing clock");
+    let coord = Coordinate::new("regress", "wallms").expect("valid coord");
+
+    // Pre-establish a single event so the entity has a baseline `last_ms`
+    // the batch path must clamp against.
+    let pre = store
+        .append(&coord, EventKind::DATA, &serde_json::json!({"pre": true}))
+        .expect("pre-establish single event");
+    let pre_entry = store
+        .get(pre.event_id)
+        .expect("load pre-established event")
+        .event;
+    let pre_wall_ms = pre_entry.header.position.wall_ms;
+
+    // Now write a 3-item batch on the same entity. With the regressing clock,
+    // the raw `now_ms` for the batch will be smaller than `pre_wall_ms`. The
+    // monotonicity clamp must lift each batch item's wall_ms back up.
+    let items: Vec<BatchAppendItem> = (0..3)
+        .map(|i| {
+            BatchAppendItem::new(
+                coord.clone(),
+                EventKind::DATA,
+                &serde_json::json!({"batch_step": i}),
+                AppendOptions::default(),
+                CausationRef::None,
+            )
+            .expect("construct batch item")
+        })
+        .collect();
+    store
+        .append_batch(items)
+        .expect("batch append must succeed");
+
+    // Pull the entries in stream order (BTreeMap-sorted by ClockKey).
+    let mut entries = store.query(&Region::entity("regress"));
+    entries.sort_by_key(|e| e.clock);
+    assert_eq!(entries.len(), 4, "1 single + 3 batch items expected");
+
+    // PROPERTY: every IndexEntry.wall_ms must be >= the entity's prior
+    // wall_ms. The batch items must NOT regress below pre_wall_ms.
+    for (idx, entry) in entries.iter().enumerate() {
+        assert!(
+            entry.wall_ms >= pre_wall_ms,
+            "PROPERTY: batch item {idx} wall_ms ({}) must NOT regress below \
+             the entity's prior wall_ms ({pre_wall_ms}). Buggy precompute \
+             never applied raw_ms.max(last_ms) for batches, so a regressing \
+             clock would write wall_ms < pre_wall_ms and reorder stream() \
+             results.",
+            entry.wall_ms
+        );
+    }
+
+    // PROPERTY: stream order must follow append order across the boundary.
+    // If the regression had broken BTreeMap ordering, the batch items would
+    // sort BEFORE the pre-established event.
+    let mut sequences: Vec<u64> = entries.iter().map(|e| e.global_sequence).collect();
+    let sorted_sequences = {
+        let mut s = sequences.clone();
+        s.sort();
+        s
+    };
+    sequences.sort_by_key(|_| 0); // no-op, keep clock-sorted order
+    assert_eq!(
+        sequences, sorted_sequences,
+        "PROPERTY: stream-order (clock) and append-order (global_sequence) \
+         must agree per entity. A wall_ms regression in a batch breaks this \
+         invariant by inserting batch items at a lower BTreeMap key."
+    );
+}
