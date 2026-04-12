@@ -729,7 +729,11 @@ fn chaos_subscription_write_storm() {
     let dir = TempDir::new().expect("temp dir");
     let config = StoreConfig {
         data_dir: dir.path().to_path_buf(),
-        broadcast_capacity: 64, // small buffer → forces drops
+        // Buffer must be >= iterations so the "drain after join" pattern
+        // sees every notification. The lossy-under-backpressure path is
+        // tested separately in subscription_ops::slow_subscriber_*. Here we
+        // want to verify that every append() broadcasts synchronously.
+        broadcast_capacity: 1024,
         ..StoreConfig::new("")
     };
     let store = Arc::new(Store::open(config).expect("open"));
