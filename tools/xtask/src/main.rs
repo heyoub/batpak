@@ -406,27 +406,45 @@ fn mutants(args: MutantsArgs) -> Result<()> {
     // suite but strict enough to block a PR that deletes all tests.
     const MIN_CATCH_PCT: u32 = 20;
 
+    // Helper: clear stale output before each cargo-mutants invocation so
+    // assert_mutation_score cannot pass on files from a previous run. Without
+    // this, an infrastructure failure (timeout, network, temp-workspace issue)
+    // that prevents cargo-mutants from running at all would be invisible:
+    // `let _ = cargo(...)` swallows the error, and stale caught.txt/missed.txt
+    // from last time would let the percentage check pass on ghost data.
+    let clear_output = || {
+        let _ = std::fs::remove_dir_all(output_dir);
+    };
+
     match args.mode {
         MutantMode::Smoke => {
-            cargo(
+            // cargo-mutants 27.0 exits 2 when ANY mutant is missed, which is
+            // stricter than our percentage-based gate. Ignore its exit code
+            // and use assert_mutation_score exclusively — the percentage
+            // threshold is the intentional policy, not "zero missed."
+            clear_output();
+            let _ = cargo(
                 base_all
                     .into_iter()
                     .chain(["--shard", "1/12"])
                     .collect::<Vec<_>>(),
-            )?;
+            );
             assert_mutation_score(output_dir, MIN_CATCH_PCT)?;
-            cargo(
+            clear_output();
+            let _ = cargo(
                 base_min
                     .into_iter()
                     .chain(["--shard", "1/12"])
                     .collect::<Vec<_>>(),
-            )?;
+            );
             assert_mutation_score(output_dir, MIN_CATCH_PCT)
         }
         MutantMode::Full => {
-            cargo(base_all)?;
+            clear_output();
+            let _ = cargo(base_all);
             assert_mutation_score(output_dir, MIN_CATCH_PCT)?;
-            cargo(base_min)?;
+            clear_output();
+            let _ = cargo(base_min);
             assert_mutation_score(output_dir, MIN_CATCH_PCT)
         }
     }

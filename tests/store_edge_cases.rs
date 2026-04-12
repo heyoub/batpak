@@ -246,6 +246,50 @@ fn single_append_payload_over_limit_is_rejected_cleanly() {
     );
 }
 
+/// MUTATION GATE: the boundary check uses `>` (strictly greater), so a
+/// payload that serializes to exactly max bytes MUST succeed. The mutant
+/// `> → >=` would reject this exact-boundary payload and fail this test.
+#[test]
+fn single_append_payload_at_exact_limit_succeeds() {
+    let dir = TempDir::new().expect("tmpdir");
+    // Pick a limit large enough to hold a small msgpack-serialized string
+    // but small enough that one extra byte would fail.
+    let limit: u32 = 64;
+    let config = StoreConfig::new(dir.path()).with_single_append_max_bytes(limit);
+    let store = Store::open(config).expect("open");
+    let coord = test_coord();
+    let kind = EventKind::custom(1, 1);
+
+    // Build a payload whose msgpack serialization is exactly `limit` bytes.
+    // Strategy: start with a string, measure, and adjust.
+    let mut s = String::new();
+    loop {
+        let bytes = rmp_serde::to_vec_named(&s).expect("serialize");
+        if bytes.len() == limit as usize {
+            break;
+        }
+        if bytes.len() > limit as usize {
+            panic!(
+                "overshot: could not construct a payload of exactly {limit} msgpack bytes"
+            );
+        }
+        s.push('A');
+    }
+
+    // This append MUST succeed: payload is exactly max, check is `> max` not `>= max`.
+    store
+        .append(&coord, kind, &s)
+        .expect("PROPERTY: payload of exactly single_append_max_bytes must be accepted");
+
+    // One more byte MUST fail.
+    s.push('B');
+    let result = store.append(&coord, kind, &s);
+    assert!(
+        result.is_err(),
+        "PROPERTY: payload exceeding single_append_max_bytes must be rejected"
+    );
+}
+
 #[test]
 fn coordinate_component_length_limit_is_enforced() {
     let long = "x".repeat(batpak::coordinate::MAX_COORDINATE_COMPONENT_LEN + 1);
