@@ -3,6 +3,21 @@ use crate::store::{projection, Freshness, Store, StoreError};
 use std::any::TypeId;
 use std::hash::{Hash, Hasher};
 
+/// Per-phase timing breakdown for the projection pipeline.
+/// Only populated when the caller opts in via `project_timed()`.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ProjectionTimings {
+    pub plan_build_us: u64,
+    pub group_local_lookup_us: u64,
+    pub cache_key_build_us: u64,
+    pub prefetch_us: u64,
+    pub external_cache_probe_us: u64,
+    pub disk_read_us: u64,
+    pub replay_fold_us: u64,
+    pub cache_store_us: u64,
+    pub total_us: u64,
+}
+
 pub(crate) fn projection_cache_key<T>(entity: &str) -> Vec<u8>
 where
     T: EventSourced<serde_json::Value> + 'static,
@@ -32,6 +47,36 @@ pub(crate) fn project<T, State>(
 where
     T: EventSourced<serde_json::Value> + serde::Serialize + serde::de::DeserializeOwned + 'static,
 {
+    project_inner(store, entity, freshness, None)
+}
+
+/// Same as `project()` but captures per-phase timings into `out`.
+/// The measured path IS the real path — same code, same branches.
+#[cfg(test)]
+pub(crate) fn project_timed<T, State>(
+    store: &Store<State>,
+    entity: &str,
+    freshness: &Freshness,
+    out: &mut ProjectionTimings,
+) -> Result<Option<T>, StoreError>
+where
+    T: EventSourced<serde_json::Value> + serde::Serialize + serde::de::DeserializeOwned + 'static,
+{
+    project_inner(store, entity, freshness, Some(out))
+}
+
+/// Shared projection executor. Optional timing sink gated behind `timings.is_some()`.
+fn project_inner<T, State>(
+    store: &Store<State>,
+    entity: &str,
+    freshness: &Freshness,
+    mut timings: Option<&mut ProjectionTimings>,
+) -> Result<Option<T>, StoreError>
+where
+    T: EventSourced<serde_json::Value> + serde::Serialize + serde::de::DeserializeOwned + 'static,
+{
+    let t_start = std::time::Instant::now();
+
     tracing::debug!(
         target: "batpak::flow",
         flow = "project",
@@ -41,33 +86,37 @@ where
             Freshness::MaybeStale { .. } => "maybe_stale",
         }
     );
-    let entries = store.index.stream(entity);
-    if entries.is_empty() {
-        return Ok(None);
-    }
 
-    // Filter by relevant_event_kinds() — hard filter at the index level.
-    // Empty slice = no filter = replay all events.
+    // Phase 1: Build replay plan
     let relevant_kinds = T::relevant_event_kinds();
-    let entries: Vec<_> = if relevant_kinds.is_empty() {
-        entries
-    } else {
-        entries
-            .into_iter()
-            .filter(|e| relevant_kinds.contains(&e.kind))
-            .collect()
-    };
-    if entries.is_empty() {
+    let Some(replay_plan) = store.index.projection_replay_plan(entity, relevant_kinds) else {
+        if let Some(t) = timings.as_deref_mut() {
+            t.total_us = t_start.elapsed().as_micros() as u64;
+        }
         return Ok(None);
+    };
+    if let Some(t) = timings.as_deref_mut() {
+        t.plan_build_us = t_start.elapsed().as_micros() as u64;
     }
 
-    let watermark = entries.last().map(|e| e.global_sequence).unwrap_or(0);
-    let entity_generation = store.index.entity_generation(entity).unwrap_or(0);
+    let watermark = replay_plan.watermark;
+    let entity_generation = replay_plan.generation;
     let cached_at_us = store.config.now_us();
     let type_id = TypeId::of::<T>();
-    let cache_key = projection_cache_key::<T>(entity);
 
+    // Phase 2: Cache key construction
+    let t_cache_key = std::time::Instant::now();
+    let cache_key = projection_cache_key::<T>(entity);
+    if let Some(t) = timings.as_deref_mut() {
+        t.cache_key_build_us = t_cache_key.elapsed().as_micros() as u64;
+    }
+
+    // Phase 3: Group-local cache check
+    let t_group = std::time::Instant::now();
     if let Some(slot) = store.index.cached_projection(entity, type_id) {
+        if let Some(t) = timings.as_deref_mut() {
+            t.group_local_lookup_us = t_group.elapsed().as_micros() as u64;
+        }
         let is_fresh = match freshness {
             Freshness::Consistent => {
                 slot.watermark == watermark && slot.generation == entity_generation
@@ -81,7 +130,12 @@ where
         };
         if is_fresh {
             match serde_json::from_slice::<T>(&slot.bytes) {
-                Ok(value) => return Ok(Some(value)),
+                Ok(value) => {
+                    if let Some(t) = timings.as_deref_mut() {
+                        t.total_us = t_start.elapsed().as_micros() as u64;
+                    }
+                    return Ok(Some(value));
+                }
                 Err(e) => {
                     tracing::warn!(
                         entity,
@@ -90,8 +144,12 @@ where
                 }
             }
         }
+    } else if let Some(t) = timings.as_deref_mut() {
+        t.group_local_lookup_us = t_group.elapsed().as_micros() as u64;
     }
 
+    // Phase 4: External cache prefetch
+    let t_prefetch = std::time::Instant::now();
     let predicted_meta = projection::CacheMeta {
         watermark,
         cached_at_us,
@@ -101,9 +159,17 @@ where
             tracing::warn!("cache prefetch failed (non-fatal): {error}");
         }
     }
+    if let Some(t) = timings.as_deref_mut() {
+        t.prefetch_us = t_prefetch.elapsed().as_micros() as u64;
+    }
 
+    // Phase 5: External cache probe
+    let t_ext = std::time::Instant::now();
     match store.cache.get(&cache_key) {
         Ok(Some((bytes, meta))) => {
+            if let Some(t) = timings.as_deref_mut() {
+                t.external_cache_probe_us = t_ext.elapsed().as_micros() as u64;
+            }
             let is_fresh = match freshness {
                 Freshness::Consistent => meta.watermark == watermark,
                 Freshness::MaybeStale { max_stale_ms } => {
@@ -116,25 +182,21 @@ where
                 }
             };
 
-            // Incremental apply path: if the cache is stale but we have a baseline,
-            // and the projection type opts in, apply only delta events.
             if !is_fresh
                 && T::supports_incremental_apply()
                 && store.config.index.incremental_projection
             {
                 let cached_watermark = meta.watermark;
-                // Delta: entries with global_sequence > cached watermark
-                let delta_entries: Vec<_> = entries
+                let delta_entries: Vec<_> = replay_plan
+                    .items
                     .iter()
-                    .filter(|e| e.global_sequence > cached_watermark)
+                    .filter(|item| item.global_sequence > cached_watermark)
                     .collect();
                 if let Ok(mut cached_state) = serde_json::from_slice::<T>(&bytes) {
-                    // Read only delta events from disk
                     for de in &delta_entries {
                         let stored = store.reader.read_entry(&de.disk_pos)?;
                         cached_state.apply_event(&stored.event);
                     }
-                    // Write back updated state
                     if let Ok(new_bytes) = serde_json::to_vec(&cached_state) {
                         let new_meta = projection::CacheMeta {
                             watermark,
@@ -151,9 +213,11 @@ where
                             cached_at_us,
                         );
                     }
+                    if let Some(t) = timings.as_deref_mut() {
+                        t.total_us = t_start.elapsed().as_micros() as u64;
+                    }
                     return Ok(Some(cached_state));
                 }
-                // If deser fails, fall through to full replay
                 tracing::warn!(
                     entity,
                     "incremental projection deser failed, falling back to full replay"
@@ -170,6 +234,9 @@ where
                             meta.watermark,
                             meta.cached_at_us,
                         );
+                        if let Some(t) = timings.as_deref_mut() {
+                            t.total_us = t_start.elapsed().as_micros() as u64;
+                        }
                         return Ok(Some(value));
                     }
                     Err(e) => {
@@ -178,17 +245,37 @@ where
                 }
             }
         }
-        Ok(None) => { /* cache miss — expected, fall through to replay */ }
+        Ok(None) => {
+            if let Some(t) = timings.as_deref_mut() {
+                t.external_cache_probe_us = t_ext.elapsed().as_micros() as u64;
+            }
+        }
         Err(e) => {
+            if let Some(t) = timings.as_deref_mut() {
+                t.external_cache_probe_us = t_ext.elapsed().as_micros() as u64;
+            }
             tracing::warn!("cache get failed (falling back to replay): {e}");
         }
     }
 
-    // Full replay: batch-read all filtered entries from disk.
-    let positions: Vec<&crate::store::DiskPos> = entries.iter().map(|e| &e.disk_pos).collect();
+    // Phase 6: Full replay — batch-read filtered entries from disk
+    let t_disk = std::time::Instant::now();
+    let positions: Vec<&crate::store::DiskPos> = replay_plan
+        .items
+        .iter()
+        .map(|item| &item.disk_pos)
+        .collect();
     let stored_events = store.reader.read_entries_batch(&positions)?;
     let events: Vec<_> = stored_events.into_iter().map(|s| s.event).collect();
+    if let Some(t) = timings.as_deref_mut() {
+        t.disk_read_us = t_disk.elapsed().as_micros() as u64;
+    }
+
+    let t_fold = std::time::Instant::now();
     let result = T::from_events(&events);
+    if let Some(t) = timings.as_deref_mut() {
+        t.replay_fold_us = t_fold.elapsed().as_micros() as u64;
+    }
 
     if result.is_none() && !events.is_empty() {
         tracing::debug!(
@@ -198,6 +285,8 @@ where
         );
     }
 
+    // Phase 7: Cache store-back
+    let t_store = std::time::Instant::now();
     if let Some(ref value) = result {
         if let Ok(bytes) = serde_json::to_vec(value) {
             let meta = projection::CacheMeta {
@@ -216,6 +305,142 @@ where
             );
         }
     }
+    if let Some(t) = timings.as_deref_mut() {
+        t.cache_store_us = t_store.elapsed().as_micros() as u64;
+        t.total_us = t_start.elapsed().as_micros() as u64;
+    }
 
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::event::{Event, EventKind};
+    use crate::store::StoreConfig;
+    use tempfile::TempDir;
+
+    #[derive(Default, Debug, serde::Serialize, serde::Deserialize)]
+    struct Counter;
+
+    impl EventSourced<serde_json::Value> for Counter {
+        fn apply_event(&mut self, _event: &Event<serde_json::Value>) {}
+
+        fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
+            (!events.is_empty()).then_some(Self)
+        }
+
+        fn relevant_event_kinds() -> &'static [EventKind] {
+            static KINDS: [EventKind; 1] = [EventKind::custom(0xF, 1)];
+            &KINDS
+        }
+    }
+
+    #[test]
+    fn projection_replay_plan_matches_legacy_stream_filtering() {
+        let dir = TempDir::new().expect("temp dir");
+        let store = Store::open(StoreConfig::new(dir.path())).expect("open store");
+        let coord = crate::coordinate::Coordinate::new("entity:proj", "scope:test").expect("coord");
+        let kept = EventKind::custom(0xF, 1);
+        let skipped = EventKind::custom(0xF, 2);
+
+        for (kind, payload) in [
+            (kept, serde_json::json!({"n": 1})),
+            (skipped, serde_json::json!({"n": 2})),
+            (kept, serde_json::json!({"n": 3})),
+        ] {
+            store.append(&coord, kind, &payload).expect("append");
+        }
+
+        let plan = store
+            .index
+            .projection_replay_plan("entity:proj", Counter::relevant_event_kinds())
+            .expect("projection plan");
+
+        let legacy_entries = store.index.stream("entity:proj");
+        let legacy_entries: Vec<_> = legacy_entries
+            .into_iter()
+            .filter(|entry| Counter::relevant_event_kinds().contains(&entry.kind))
+            .collect();
+        let legacy_items: Vec<_> = legacy_entries
+            .iter()
+            .map(|entry| crate::store::index::ProjectionReplayItem {
+                global_sequence: entry.global_sequence,
+                disk_pos: entry.disk_pos,
+            })
+            .collect();
+        let legacy_watermark = legacy_entries
+            .last()
+            .map(|entry| entry.global_sequence)
+            .expect("legacy filtered entries");
+
+        assert_eq!(plan.watermark, legacy_watermark);
+        assert_eq!(
+            plan.generation,
+            store.index.entity_generation("entity:proj").unwrap_or(0)
+        );
+        assert_eq!(plan.items, legacy_items);
+
+        store.close().expect("close");
+    }
+
+    #[test]
+    fn projection_timings_cold_path_breakdown() {
+        let dir = TempDir::new().expect("temp dir");
+        let store = Store::open(StoreConfig::new(dir.path())).expect("open store");
+        let coord =
+            crate::coordinate::Coordinate::new("entity:timed", "scope:test").expect("coord");
+        let kind = EventKind::custom(0xF, 1);
+        for i in 0..1_000u32 {
+            store
+                .append(&coord, kind, &serde_json::json!({"i": i}))
+                .expect("append");
+        }
+
+        // Close and reopen to get a true cold path
+        store.close().expect("close");
+        let store = Store::open(StoreConfig::new(dir.path())).expect("reopen");
+
+        let mut timings = ProjectionTimings::default();
+        let result: Option<Counter> =
+            project_timed(&store, "entity:timed", &Freshness::Consistent, &mut timings)
+                .expect("project_timed");
+        assert!(result.is_some(), "projection must produce a value");
+
+        // Print breakdown for diagnostic purposes (visible with --nocapture)
+        eprintln!("=== Projection Cold Path Breakdown (1k events) ===");
+        eprintln!("  plan_build:           {:>8} us", timings.plan_build_us);
+        eprintln!(
+            "  cache_key_build:      {:>8} us",
+            timings.cache_key_build_us
+        );
+        eprintln!(
+            "  group_local_lookup:   {:>8} us",
+            timings.group_local_lookup_us
+        );
+        eprintln!("  prefetch:             {:>8} us", timings.prefetch_us);
+        eprintln!(
+            "  external_cache_probe: {:>8} us",
+            timings.external_cache_probe_us
+        );
+        eprintln!("  disk_read:            {:>8} us", timings.disk_read_us);
+        eprintln!("  replay_fold:          {:>8} us", timings.replay_fold_us);
+        eprintln!("  cache_store:          {:>8} us", timings.cache_store_us);
+        eprintln!("  total:                {:>8} us", timings.total_us);
+        let accounted = timings.plan_build_us
+            + timings.cache_key_build_us
+            + timings.group_local_lookup_us
+            + timings.prefetch_us
+            + timings.external_cache_probe_us
+            + timings.disk_read_us
+            + timings.replay_fold_us
+            + timings.cache_store_us;
+        eprintln!(
+            "  unaccounted:          {:>8} us",
+            timings.total_us.saturating_sub(accounted)
+        );
+
+        assert!(timings.total_us > 0, "total must be positive");
+        store.close().expect("close");
+    }
 }
