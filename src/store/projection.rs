@@ -8,6 +8,9 @@ use tempfile::NamedTempFile;
 pub struct CacheCapabilities {
     /// Whether this backend supports `prefetch()` hints for pre-warming.
     pub supports_prefetch: bool,
+    /// Whether this backend is a no-op (e.g. `NoCache`). When true, the
+    /// projection flow skips the external-cache probe entirely.
+    pub is_noop: bool,
 }
 
 impl CacheCapabilities {
@@ -15,6 +18,7 @@ impl CacheCapabilities {
     pub const fn none() -> Self {
         Self {
             supports_prefetch: false,
+            is_noop: false,
         }
     }
 
@@ -22,6 +26,7 @@ impl CacheCapabilities {
     pub const fn prefetch_hints() -> Self {
         Self {
             supports_prefetch: true,
+            is_noop: false,
         }
     }
 }
@@ -127,7 +132,10 @@ pub struct NoCache;
 
 impl ProjectionCache for NoCache {
     fn capabilities(&self) -> CacheCapabilities {
-        CacheCapabilities::none()
+        CacheCapabilities {
+            is_noop: true,
+            ..CacheCapabilities::none()
+        }
     }
 
     fn get(&self, _key: &[u8]) -> Result<Option<(Vec<u8>, CacheMeta)>, StoreError> {

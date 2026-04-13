@@ -1,4 +1,6 @@
 use crate::event::EventSourced;
+use crate::store::columnar::CachedProjectionSlot;
+use crate::store::index::ProjectionReplayPlan;
 use crate::store::{projection, Freshness, Store, StoreError};
 use std::any::TypeId;
 use std::hash::{Hash, Hasher};
@@ -12,13 +14,57 @@ pub(crate) struct ProjectionTimings {
     pub cache_key_build_us: u64,
     pub prefetch_us: u64,
     pub external_cache_probe_us: u64,
-    /// Batch read from disk (frame decode + msgpack deser + coordinate build).
+    /// Batch read from disk (frame decode + msgpack deser, no coordinate build).
     pub disk_read_us: u64,
-    /// Extracting Event<Value> from StoredEvent (discarding coordinate).
+    /// Legacy: was StoredEvent -> Event extraction. Now always 0 since
+    /// `read_events_batch` returns `Event` directly, skipping coordinates.
     pub event_extract_us: u64,
     pub replay_fold_us: u64,
     pub cache_store_us: u64,
     pub total_us: u64,
+}
+
+/// Internal dispatch strategy for a single project() call.
+/// Computed once from known metadata; makes the decision tree explicit and testable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ProjectionStrategy {
+    /// No replay plan exists — the entity has no matching events.
+    Empty,
+    /// Group-local cache hit is fresh; deserialize and return.
+    GroupLocalHit,
+    /// Group-local slot exists but is stale; apply delta events incrementally.
+    GroupLocalIncremental,
+    /// Probe the external cache first, then fall back to full replay.
+    ExternalCacheThenReplay,
+    /// Skip external cache entirely and go straight to disk replay.
+    DirectReplay,
+}
+
+/// Pure function: decide which projection strategy to use from known metadata.
+/// No I/O, no side effects — makes the decision tree unit-testable.
+fn compute_strategy(
+    has_replay_plan: bool,
+    group_local_slot: Option<&CachedProjectionSlot>,
+    is_group_local_fresh: bool,
+    supports_incremental: bool,
+    incremental_enabled: bool,
+    cache_is_noop: bool,
+) -> ProjectionStrategy {
+    if !has_replay_plan {
+        return ProjectionStrategy::Empty;
+    }
+    if group_local_slot.is_some() {
+        if is_group_local_fresh {
+            return ProjectionStrategy::GroupLocalHit;
+        }
+        if supports_incremental && incremental_enabled {
+            return ProjectionStrategy::GroupLocalIncremental;
+        }
+    }
+    if cache_is_noop {
+        return ProjectionStrategy::DirectReplay;
+    }
+    ProjectionStrategy::ExternalCacheThenReplay
 }
 
 pub(crate) fn projection_cache_key<T>(entity: &str) -> Vec<u8>
@@ -90,37 +136,46 @@ where
         }
     );
 
-    // Phase 1: Build replay plan
+    // ── Phase 1: Gather metadata ──────────────────────────────────────
+
+    // 1a: Build replay plan
     let relevant_kinds = T::relevant_event_kinds();
-    let Some(replay_plan) = store.index.projection_replay_plan(entity, relevant_kinds) else {
-        if let Some(t) = timings.as_deref_mut() {
-            t.total_us = t_start.elapsed().as_micros() as u64;
-        }
-        return Ok(None);
-    };
+    let replay_plan = store.index.projection_replay_plan(entity, relevant_kinds);
+    let has_replay_plan = replay_plan.is_some();
     if let Some(t) = timings.as_deref_mut() {
         t.plan_build_us = t_start.elapsed().as_micros() as u64;
     }
 
-    let watermark = replay_plan.watermark;
-    let entity_generation = replay_plan.generation;
-    let cached_at_us = store.config.now_us();
-    let type_id = TypeId::of::<T>();
+    // Early-out metadata (only meaningful when replay plan exists).
+    let (watermark, entity_generation, cached_at_us, type_id, cache_key) =
+        if let Some(ref plan) = replay_plan {
+            let wm = plan.watermark;
+            let gen = plan.generation;
+            let ts = store.config.now_us();
+            let tid = TypeId::of::<T>();
 
-    // Phase 2: Cache key construction
-    let t_cache_key = std::time::Instant::now();
-    let cache_key = projection_cache_key::<T>(entity);
-    if let Some(t) = timings.as_deref_mut() {
-        t.cache_key_build_us = t_cache_key.elapsed().as_micros() as u64;
-    }
+            // 1b: Cache key construction
+            let t_cache_key = std::time::Instant::now();
+            let ck = projection_cache_key::<T>(entity);
+            if let Some(t) = timings.as_deref_mut() {
+                t.cache_key_build_us = t_cache_key.elapsed().as_micros() as u64;
+            }
+            (wm, gen, ts, tid, ck)
+        } else {
+            // Values unused when strategy is Empty; provide defaults to avoid Option overhead.
+            (0, 0, 0, TypeId::of::<T>(), Vec::new())
+        };
 
-    // Phase 3: Group-local cache check
+    // 1c: Group-local cache slot + freshness
     let t_group = std::time::Instant::now();
-    if let Some(slot) = store.index.cached_projection(entity, type_id) {
-        if let Some(t) = timings.as_deref_mut() {
-            t.group_local_lookup_us = t_group.elapsed().as_micros() as u64;
-        }
-        let is_fresh = match freshness {
+    let group_local_slot = if has_replay_plan {
+        store.index.cached_projection(entity, type_id)
+    } else {
+        None
+    };
+    let is_group_local_fresh = group_local_slot
+        .as_ref()
+        .map(|slot| match freshness {
             Freshness::Consistent => {
                 slot.watermark == watermark && slot.generation == entity_generation
             }
@@ -130,35 +185,187 @@ where
                     && slot.generation == entity_generation
                     && slot.watermark <= watermark
             }
-        };
-        if is_fresh {
+        })
+        .unwrap_or(false);
+    if let Some(t) = timings.as_deref_mut() {
+        t.group_local_lookup_us = t_group.elapsed().as_micros() as u64;
+    }
+
+    // ── Phase 2: Compute strategy ─────────────────────────────────────
+
+    let strategy = compute_strategy(
+        has_replay_plan,
+        group_local_slot.as_ref(),
+        is_group_local_fresh,
+        T::supports_incremental_apply(),
+        store.config.index.incremental_projection,
+        store.cache.capabilities().is_noop,
+    );
+
+    tracing::debug!(
+        target: "batpak::flow",
+        flow = "project",
+        entity,
+        ?strategy,
+    );
+
+    // ── Phase 3: Dispatch ─────────────────────────────────────────────
+
+    match strategy {
+        ProjectionStrategy::Empty => {
+            if let Some(t) = timings.as_deref_mut() {
+                t.total_us = t_start.elapsed().as_micros() as u64;
+            }
+            Ok(None)
+        }
+
+        ProjectionStrategy::GroupLocalHit => {
+            // compute_strategy only returns GroupLocalHit when slot is Some + fresh.
+            let slot = group_local_slot.expect("GroupLocalHit requires a slot");
             match serde_json::from_slice::<T>(&slot.bytes) {
                 Ok(value) => {
                     if let Some(t) = timings.as_deref_mut() {
                         t.total_us = t_start.elapsed().as_micros() as u64;
                     }
-                    return Ok(Some(value));
+                    Ok(Some(value))
                 }
                 Err(e) => {
                     tracing::warn!(
                         entity,
                         "group-local projection cache deserialize failed (falling back): {e}"
                     );
+                    // Fallback: full replay (skip external cache since we already had a slot).
+                    let plan = replay_plan.expect("GroupLocalHit requires a plan");
+                    execute_full_replay::<T, State>(
+                        store,
+                        entity,
+                        &plan,
+                        &cache_key,
+                        watermark,
+                        cached_at_us,
+                        type_id,
+                        t_start,
+                        &mut timings,
+                    )
                 }
             }
         }
-    } else if let Some(t) = timings.as_deref_mut() {
-        t.group_local_lookup_us = t_group.elapsed().as_micros() as u64;
-    }
 
-    // Phase 4: External cache prefetch
+        ProjectionStrategy::GroupLocalIncremental => {
+            let slot = group_local_slot.expect("GroupLocalIncremental requires a slot");
+            let plan = replay_plan.expect("GroupLocalIncremental requires a plan");
+            match serde_json::from_slice::<T>(&slot.bytes) {
+                Ok(mut cached_state) => {
+                    let cached_watermark = slot.watermark;
+                    for item in plan
+                        .items
+                        .iter()
+                        .filter(|i| i.global_sequence > cached_watermark)
+                    {
+                        let event = store.reader.read_event_only(&item.disk_pos)?;
+                        cached_state.apply_event(&event);
+                    }
+                    // Store back to both caches.
+                    if let Ok(new_bytes) = serde_json::to_vec(&cached_state) {
+                        let new_meta = projection::CacheMeta {
+                            watermark,
+                            cached_at_us,
+                        };
+                        if let Err(e) = store.cache.put(&cache_key, &new_bytes, new_meta) {
+                            tracing::warn!("incremental cache put failed: {e}");
+                        }
+                        let _ = store.index.store_cached_projection(
+                            entity,
+                            type_id,
+                            new_bytes,
+                            watermark,
+                            cached_at_us,
+                        );
+                    }
+                    if let Some(t) = timings.as_deref_mut() {
+                        t.total_us = t_start.elapsed().as_micros() as u64;
+                    }
+                    Ok(Some(cached_state))
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        entity,
+                        "group-local incremental deser failed, falling back to full replay: {e}"
+                    );
+                    execute_full_replay::<T, State>(
+                        store,
+                        entity,
+                        &plan,
+                        &cache_key,
+                        watermark,
+                        cached_at_us,
+                        type_id,
+                        t_start,
+                        &mut timings,
+                    )
+                }
+            }
+        }
+
+        ProjectionStrategy::ExternalCacheThenReplay => {
+            let plan = replay_plan.expect("ExternalCacheThenReplay requires a plan");
+            execute_external_cache_path::<T, State>(
+                store,
+                entity,
+                &plan,
+                &cache_key,
+                freshness,
+                watermark,
+                cached_at_us,
+                type_id,
+                t_start,
+                &mut timings,
+            )
+        }
+
+        ProjectionStrategy::DirectReplay => {
+            let plan = replay_plan.expect("DirectReplay requires a plan");
+            execute_full_replay::<T, State>(
+                store,
+                entity,
+                &plan,
+                &cache_key,
+                watermark,
+                cached_at_us,
+                type_id,
+                t_start,
+                &mut timings,
+            )
+        }
+    }
+}
+
+/// External cache probe with incremental apply and fresh-hit paths, then fallback to full replay.
+// cold path -- keep out of the hot dispatch to reduce instruction cache pressure
+#[inline(never)]
+fn execute_external_cache_path<T, State>(
+    store: &Store<State>,
+    entity: &str,
+    replay_plan: &ProjectionReplayPlan,
+    cache_key: &[u8],
+    freshness: &Freshness,
+    watermark: u64,
+    cached_at_us: i64,
+    type_id: TypeId,
+    t_start: std::time::Instant,
+    timings: &mut Option<&mut ProjectionTimings>,
+) -> Result<Option<T>, StoreError>
+where
+    T: EventSourced<serde_json::Value> + serde::Serialize + serde::de::DeserializeOwned + 'static,
+{
+    // Prefetch
     let t_prefetch = std::time::Instant::now();
     let predicted_meta = projection::CacheMeta {
         watermark,
         cached_at_us,
     };
     if store.cache.capabilities().supports_prefetch {
-        if let Err(error) = store.cache.prefetch(&cache_key, predicted_meta) {
+        if let Err(error) = store.cache.prefetch(cache_key, predicted_meta) {
             tracing::warn!("cache prefetch failed (non-fatal): {error}");
         }
     }
@@ -166,9 +373,9 @@ where
         t.prefetch_us = t_prefetch.elapsed().as_micros() as u64;
     }
 
-    // Phase 5: External cache probe
+    // External cache probe
     let t_ext = std::time::Instant::now();
-    match store.cache.get(&cache_key) {
+    match store.cache.get(cache_key) {
         Ok(Some((bytes, meta))) => {
             if let Some(t) = timings.as_deref_mut() {
                 t.external_cache_probe_us = t_ext.elapsed().as_micros() as u64;
@@ -197,15 +404,15 @@ where
                     .collect();
                 if let Ok(mut cached_state) = serde_json::from_slice::<T>(&bytes) {
                     for de in &delta_entries {
-                        let stored = store.reader.read_entry(&de.disk_pos)?;
-                        cached_state.apply_event(&stored.event);
+                        let event = store.reader.read_event_only(&de.disk_pos)?;
+                        cached_state.apply_event(&event);
                     }
                     if let Ok(new_bytes) = serde_json::to_vec(&cached_state) {
                         let new_meta = projection::CacheMeta {
                             watermark,
                             cached_at_us,
                         };
-                        if let Err(e) = store.cache.put(&cache_key, &new_bytes, new_meta) {
+                        if let Err(e) = store.cache.put(cache_key, &new_bytes, new_meta) {
                             tracing::warn!("incremental cache put failed: {e}");
                         }
                         let _ = store.index.store_cached_projection(
@@ -261,23 +468,51 @@ where
         }
     }
 
-    // Phase 6: Full replay — batch-read filtered entries from disk
+    // Fallback: full replay
+    execute_full_replay::<T, State>(
+        store,
+        entity,
+        replay_plan,
+        cache_key,
+        watermark,
+        cached_at_us,
+        type_id,
+        t_start,
+        timings,
+    )
+}
+
+/// Full replay from disk: batch-read events, fold, and store back to cache.
+// cold path -- keep out of the hot dispatch to reduce instruction cache pressure
+#[inline(never)]
+fn execute_full_replay<T, State>(
+    store: &Store<State>,
+    entity: &str,
+    replay_plan: &ProjectionReplayPlan,
+    cache_key: &[u8],
+    watermark: u64,
+    cached_at_us: i64,
+    type_id: TypeId,
+    t_start: std::time::Instant,
+    timings: &mut Option<&mut ProjectionTimings>,
+) -> Result<Option<T>, StoreError>
+where
+    T: EventSourced<serde_json::Value> + serde::Serialize + serde::de::DeserializeOwned + 'static,
+{
+    // Full replay -- batch-read filtered events from disk.
+    // Uses read_events_batch which skips Coordinate construction (pure waste
+    // for projection replay that only needs the event payload).
     let t_disk = std::time::Instant::now();
     let positions: Vec<&crate::store::DiskPos> = replay_plan
         .items
         .iter()
         .map(|item| &item.disk_pos)
         .collect();
-    let stored_events = store.reader.read_entries_batch(&positions)?;
+    let events = store.reader.read_events_batch(&positions)?;
     if let Some(t) = timings.as_deref_mut() {
         t.disk_read_us = t_disk.elapsed().as_micros() as u64;
-    }
-
-    // Phase 6b: Extract Event<Value> from StoredEvent (discards coordinate)
-    let t_extract = std::time::Instant::now();
-    let events: Vec<_> = stored_events.into_iter().map(|s| s.event).collect();
-    if let Some(t) = timings.as_deref_mut() {
-        t.event_extract_us = t_extract.elapsed().as_micros() as u64;
+        // No separate extraction step -- read_events_batch returns Event directly.
+        t.event_extract_us = 0;
     }
 
     let t_fold = std::time::Instant::now();
@@ -294,7 +529,7 @@ where
         );
     }
 
-    // Phase 7: Cache store-back
+    // Cache store-back
     let t_store = std::time::Instant::now();
     if let Some(ref value) = result {
         if let Ok(bytes) = serde_json::to_vec(value) {
@@ -302,7 +537,7 @@ where
                 watermark,
                 cached_at_us,
             };
-            if let Err(error) = store.cache.put(&cache_key, &bytes, meta) {
+            if let Err(error) = store.cache.put(cache_key, &bytes, meta) {
                 tracing::warn!("cache put failed (non-fatal): {error}");
             }
             let _ = store.index.store_cached_projection(
@@ -433,11 +668,11 @@ mod tests {
             timings.external_cache_probe_us
         );
         eprintln!(
-            "  disk_read:            {:>8} us  (frame decode + deser + coord build)",
+            "  disk_read:            {:>8} us  (frame decode + deser, no coord build)",
             timings.disk_read_us
         );
         eprintln!(
-            "  event_extract:        {:>8} us  (StoredEvent -> Event, discard coord)",
+            "  event_extract:        {:>8} us  (now 0 -- events returned directly)",
             timings.event_extract_us
         );
         eprintln!("  replay_fold:          {:>8} us", timings.replay_fold_us);
@@ -459,5 +694,81 @@ mod tests {
 
         assert!(timings.total_us > 0, "total must be positive");
         store.close().expect("close");
+    }
+
+    #[test]
+    fn compute_strategy_exhaustive() {
+        // No replay plan -> Empty regardless of other inputs
+        assert_eq!(
+            compute_strategy(false, None, false, false, false, false),
+            ProjectionStrategy::Empty,
+        );
+        assert_eq!(
+            compute_strategy(false, None, true, true, true, true),
+            ProjectionStrategy::Empty,
+        );
+
+        let slot = CachedProjectionSlot {
+            bytes: vec![],
+            watermark: 42,
+            generation: 1,
+            cached_at_us: 100,
+        };
+
+        // Slot present + fresh -> GroupLocalHit
+        assert_eq!(
+            compute_strategy(true, Some(&slot), true, false, false, false),
+            ProjectionStrategy::GroupLocalHit,
+        );
+        assert_eq!(
+            compute_strategy(true, Some(&slot), true, true, true, true),
+            ProjectionStrategy::GroupLocalHit,
+        );
+
+        // Slot present + stale + incremental supported + enabled -> GroupLocalIncremental
+        assert_eq!(
+            compute_strategy(true, Some(&slot), false, true, true, false),
+            ProjectionStrategy::GroupLocalIncremental,
+        );
+        assert_eq!(
+            compute_strategy(true, Some(&slot), false, true, true, true),
+            ProjectionStrategy::GroupLocalIncremental,
+        );
+
+        // Slot present + stale + incremental NOT supported -> falls through to cache check
+        assert_eq!(
+            compute_strategy(true, Some(&slot), false, false, true, false),
+            ProjectionStrategy::ExternalCacheThenReplay,
+        );
+        assert_eq!(
+            compute_strategy(true, Some(&slot), false, true, false, false),
+            ProjectionStrategy::ExternalCacheThenReplay,
+        );
+        assert_eq!(
+            compute_strategy(true, Some(&slot), false, false, false, false),
+            ProjectionStrategy::ExternalCacheThenReplay,
+        );
+
+        // Slot present + stale + incremental NOT supported + noop cache -> DirectReplay
+        assert_eq!(
+            compute_strategy(true, Some(&slot), false, false, false, true),
+            ProjectionStrategy::DirectReplay,
+        );
+
+        // No slot + noop cache -> DirectReplay
+        assert_eq!(
+            compute_strategy(true, None, false, false, false, true),
+            ProjectionStrategy::DirectReplay,
+        );
+
+        // No slot + real cache -> ExternalCacheThenReplay
+        assert_eq!(
+            compute_strategy(true, None, false, false, false, false),
+            ProjectionStrategy::ExternalCacheThenReplay,
+        );
+        assert_eq!(
+            compute_strategy(true, None, false, true, true, false),
+            ProjectionStrategy::ExternalCacheThenReplay,
+        );
     }
 }

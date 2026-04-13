@@ -257,4 +257,34 @@ proptest! {
             assert_snapshot_matches(label, baseline_label, baseline, snapshot);
         }
     }
+
+    #[test]
+    fn reopened_view_topologies_return_identical_query_results(specs in arb_append_specs()) {
+        let configs = vec![
+            ("aos", store_config(&TempDir::new().expect("temp dir"), ViewConfig::none())),
+            ("soa-only", store_config(&TempDir::new().expect("temp dir"), ViewConfig::none().with_soa(true))),
+            ("entity-groups-only", store_config(&TempDir::new().expect("temp dir"), ViewConfig::none().with_entity_groups(true))),
+            ("tiles-only", store_config(&TempDir::new().expect("temp dir"), ViewConfig::none().with_tiles64(true))),
+            ("all-views", store_config(&TempDir::new().expect("temp dir"), ViewConfig::all())),
+        ];
+
+        let mut snapshots = Vec::new();
+        for (label, config) in configs {
+            let store = Store::open(config.clone()).expect("open store");
+            populate(&store, &specs).expect("populate store");
+            store.close().expect("close store");
+
+            let reopened = Store::open(config).expect("reopen store");
+            let snapshot = capture_snapshot(&reopened, &specs);
+            snapshots.push((label, snapshot));
+            reopened.close().expect("close reopened store");
+        }
+
+        let (baseline_label, baseline) = snapshots
+            .first()
+            .expect("at least one topology must be tested");
+        for (label, snapshot) in snapshots.iter().skip(1) {
+            assert_snapshot_matches(label, baseline_label, baseline, snapshot);
+        }
+    }
 }

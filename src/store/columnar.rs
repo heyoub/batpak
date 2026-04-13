@@ -32,12 +32,14 @@
 //! layout and fully vectorisable for AoSoA once LLVM sees the uniform stride.
 
 use crate::event::EventKind;
-use crate::store::index::{ClockKey, IndexEntry};
+use crate::store::index::{ClockKey, DiskPos, IndexEntry};
 use dashmap::DashMap;
 use parking_lot::RwLock;
 use std::any::TypeId;
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
+
+type ProjectionCandidates = (u64, u64, Vec<(u64, DiskPos)>);
 
 // ---------------------------------------------------------------------------
 // Tile — AoSoA building block
@@ -125,6 +127,29 @@ impl SoAInner {
         }
     }
 
+    fn from_entries(entries: &[Arc<IndexEntry>]) -> Self {
+        let mut kinds = Vec::with_capacity(entries.len());
+        let mut sequences = Vec::with_capacity(entries.len());
+        let mut built_entries = Vec::with_capacity(entries.len());
+        let mut scope_entities = std::collections::HashMap::<Arc<str>, HashSet<Arc<str>>>::new();
+
+        for entry in entries {
+            let scope = entry.coord.scope_arc();
+            let entity = entry.coord.entity_arc();
+            kinds.push(entry.kind);
+            sequences.push(entry.global_sequence);
+            built_entries.push(Arc::clone(entry));
+            scope_entities.entry(scope).or_default().insert(entity);
+        }
+
+        Self {
+            kinds,
+            sequences,
+            entries: built_entries,
+            scope_entities,
+        }
+    }
+
     /// Append one event.  O(1) amortised.
     fn push(&mut self, entry: &Arc<IndexEntry>) {
         let scope: Arc<str> = entry.coord.scope_arc();
@@ -201,6 +226,14 @@ impl<const N: usize> AoSoAInner<N> {
             tiles: Vec::new(),
             scope_entities: std::collections::HashMap::new(),
         }
+    }
+
+    fn from_entries(entries: &[Arc<IndexEntry>]) -> Self {
+        let mut built = Self::new();
+        for entry in entries {
+            built.push(entry);
+        }
+        built
     }
 
     /// Append one event into the appropriate tile.
@@ -326,6 +359,14 @@ impl SoAoSInner {
         }
     }
 
+    fn from_entries(entries: &[Arc<IndexEntry>]) -> Self {
+        let mut built = Self::new();
+        for entry in entries {
+            built.push(entry);
+        }
+        built
+    }
+
     fn push(&mut self, entry: &Arc<IndexEntry>) {
         let entity = entry.coord.entity_arc();
         let scope = entry.coord.scope_arc();
@@ -384,6 +425,32 @@ impl SoAoSInner {
 
     fn entity_generation(&self, entity: &str) -> Option<u64> {
         self.groups.get(entity).map(|group| group.generation)
+    }
+
+    fn projection_candidates(
+        &self,
+        entity: &str,
+        relevant_kinds: &[EventKind],
+    ) -> Option<ProjectionCandidates> {
+        let group = self.groups.get(entity)?;
+        let match_all = relevant_kinds.is_empty();
+        let mut candidates = Vec::new();
+        let mut watermark = None;
+
+        for ((&kind, &sequence), entry) in group
+            .kinds
+            .iter()
+            .zip(group.sequences.iter())
+            .zip(group.entries.iter())
+        {
+            if !match_all && !relevant_kinds.contains(&kind) {
+                continue;
+            }
+            watermark = Some(sequence);
+            candidates.push((sequence, entry.disk_pos));
+        }
+
+        Some((watermark?, group.generation, candidates))
     }
 
     fn cached_projection(&self, entity: &str, type_id: TypeId) -> Option<CachedProjectionSlot> {
@@ -513,6 +580,22 @@ impl ColumnarIndex {
             ColumnarVariant::AoSoA16(lock) => lock.write().push(entry),
             ColumnarVariant::AoSoA64(lock) => lock.write().push(entry),
             ColumnarVariant::SoAoS(lock) => lock.write().push(entry),
+        }
+    }
+
+    pub(crate) fn rebuild_from_entries(&self, entries: &[Arc<IndexEntry>]) {
+        match &self.inner {
+            ColumnarVariant::SoA(lock) => *lock.write() = SoAInner::from_entries(entries),
+            #[cfg(test)]
+            ColumnarVariant::AoSoA8(lock) => *lock.write() = AoSoAInner::<8>::from_entries(entries),
+            #[cfg(test)]
+            ColumnarVariant::AoSoA16(lock) => {
+                *lock.write() = AoSoAInner::<16>::from_entries(entries)
+            }
+            ColumnarVariant::AoSoA64(lock) => {
+                *lock.write() = AoSoAInner::<64>::from_entries(entries)
+            }
+            ColumnarVariant::SoAoS(lock) => *lock.write() = SoAoSInner::from_entries(entries),
         }
     }
 
@@ -684,6 +767,21 @@ impl ColumnarIndex {
             ColumnarVariant::AoSoA8(_) | ColumnarVariant::AoSoA16(_) => false,
         }
     }
+
+    pub(crate) fn projection_candidates(
+        &self,
+        entity: &str,
+        relevant_kinds: &[EventKind],
+    ) -> Option<ProjectionCandidates> {
+        match &self.inner {
+            ColumnarVariant::SoAoS(lock) => {
+                lock.read().projection_candidates(entity, relevant_kinds)
+            }
+            ColumnarVariant::SoA(_) | ColumnarVariant::AoSoA64(_) => None,
+            #[cfg(test)]
+            ColumnarVariant::AoSoA8(_) | ColumnarVariant::AoSoA16(_) => None,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -793,6 +891,48 @@ impl ScanIndex {
         }
         if let Some(idx) = &self.tiles64 {
             idx.insert(entry);
+        }
+    }
+
+    pub(crate) fn rebuild_from_entries(&self, entries: &[Arc<IndexEntry>]) {
+        self.by_fact.clear();
+        self.scope_entities.clear();
+
+        let mut by_fact =
+            std::collections::HashMap::<EventKind, BTreeMap<ClockKey, Arc<IndexEntry>>>::new();
+        let mut scope_entities = std::collections::HashMap::<Arc<str>, HashSet<Arc<str>>>::new();
+
+        for entry in entries {
+            let key = ClockKey {
+                wall_ms: entry.wall_ms,
+                clock: entry.clock,
+                uuid: entry.event_id,
+            };
+            by_fact
+                .entry(entry.kind)
+                .or_default()
+                .insert(key, Arc::clone(entry));
+            scope_entities
+                .entry(entry.coord.scope_arc())
+                .or_default()
+                .insert(entry.coord.entity_arc());
+        }
+
+        for (kind, map) in by_fact {
+            self.by_fact.insert(kind, map);
+        }
+        for (scope, entities) in scope_entities {
+            self.scope_entities.insert(scope, entities);
+        }
+
+        if let Some(idx) = &self.soa {
+            idx.rebuild_from_entries(entries);
+        }
+        if let Some(idx) = &self.entity_groups {
+            idx.rebuild_from_entries(entries);
+        }
+        if let Some(idx) = &self.tiles64 {
+            idx.rebuild_from_entries(entries);
         }
     }
 
@@ -910,6 +1050,16 @@ impl ScanIndex {
         self.entity_groups.as_ref().is_some_and(|idx| {
             idx.store_cached_projection(entity, type_id, bytes, watermark, cached_at_us)
         })
+    }
+
+    pub(crate) fn projection_candidates(
+        &self,
+        entity: &str,
+        relevant_kinds: &[EventKind],
+    ) -> Option<ProjectionCandidates> {
+        self.entity_groups
+            .as_ref()
+            .and_then(|idx| idx.projection_candidates(entity, relevant_kinds))
     }
 }
 

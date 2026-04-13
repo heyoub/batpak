@@ -820,6 +820,113 @@ impl Reader {
         Ok(results)
     }
 
+    /// Read a single event by disk position, skipping Coordinate construction.
+    /// Returns `Event<serde_json::Value>` directly — suitable for projection
+    /// replay where only the event payload matters.
+    pub(crate) fn read_event_only(
+        &self,
+        pos: &DiskPos,
+    ) -> Result<Event<serde_json::Value>, StoreError> {
+        // Fast path: mmap for sealed segments — zero-copy, no lock, no buffer.
+        if self.is_sealed(pos.segment_id) {
+            return self.read_event_only_mmap(pos);
+        }
+
+        // Slow path: active segment via FD cache + buffer pool.
+        let mut buf = self.acquire_buffer(pos.length as usize);
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::FileExt;
+            let segment_id = pos.segment_id;
+            let offset = pos.offset;
+            self.with_fd(segment_id, |f| {
+                let mut total_read = 0;
+                while total_read < buf.len() {
+                    let n = f
+                        .read_at(&mut buf[total_read..], offset + total_read as u64)
+                        .map_err(StoreError::Io)?;
+                    if n == 0 {
+                        return Err(StoreError::corrupt_eof(segment_id));
+                    }
+                    total_read += n;
+                }
+                Ok(())
+            })?;
+        }
+        #[cfg(not(unix))]
+        {
+            use std::io::{Seek, SeekFrom};
+            let offset = pos.offset;
+            self.with_fd(pos.segment_id, |f| {
+                f.seek(SeekFrom::Start(offset)).map_err(StoreError::Io)?;
+                f.read_exact(&mut buf).map_err(StoreError::Io)
+            })?;
+        }
+
+        let result = segment::frame_decode(&buf).map_err(|e| match e {
+            segment::FrameDecodeError::CrcMismatch { .. } => StoreError::CrcMismatch {
+                segment_id: pos.segment_id,
+                offset: pos.offset,
+            },
+            segment::FrameDecodeError::TooShort | segment::FrameDecodeError::Truncated { .. } => {
+                StoreError::corrupt_frame(pos.segment_id, e.to_string())
+            }
+        });
+        let (msgpack, _) = match result {
+            Ok(v) => v,
+            Err(e) => {
+                self.release_buffer(buf);
+                return Err(e);
+            }
+        };
+        let payload = Self::decode_frame_payload_value(msgpack)?;
+
+        // Release buffer back to pool after deserialization
+        self.release_buffer(buf);
+
+        Ok(payload.event)
+    }
+
+    /// Zero-copy read from a sealed segment's memory map, returning only the
+    /// event and skipping Coordinate construction.
+    fn read_event_only_mmap(&self, pos: &DiskPos) -> Result<Event<serde_json::Value>, StoreError> {
+        let mmap_ref = self.get_or_map_sealed(pos.segment_id)?;
+        let mmap: &memmap2::Mmap = mmap_ref.value();
+        let start =
+            usize::try_from(pos.offset).map_err(|_| StoreError::corrupt_eof(pos.segment_id))?;
+        let end = start + pos.length as usize;
+        if end > mmap.len() {
+            return Err(StoreError::corrupt_eof(pos.segment_id));
+        }
+        let frame_buf = &mmap[start..end];
+        let (msgpack, _) = segment::frame_decode(frame_buf).map_err(|e| match e {
+            segment::FrameDecodeError::CrcMismatch { .. } => StoreError::CrcMismatch {
+                segment_id: pos.segment_id,
+                offset: pos.offset,
+            },
+            segment::FrameDecodeError::TooShort | segment::FrameDecodeError::Truncated { .. } => {
+                StoreError::corrupt_frame(pos.segment_id, e.to_string())
+            }
+        })?;
+        let payload = Self::decode_frame_payload_value(msgpack)?;
+        Ok(payload.event)
+    }
+
+    /// Read events by disk position without constructing Coordinates.
+    /// Returns `Event<serde_json::Value>` directly — suitable for projection
+    /// replay where only the event payload matters.
+    pub(crate) fn read_events_batch(
+        &self,
+        positions: &[&DiskPos],
+    ) -> Result<Vec<Event<serde_json::Value>>, StoreError> {
+        let mut results = Vec::with_capacity(positions.len());
+        for pos in positions {
+            results.push(self.read_event_only(pos)?);
+        }
+        Ok(results)
+    }
+
     /// Evict a segment from FD cache and mmap cache.
     /// Called during compaction before deleting segment files.
     /// On Windows, the mmap MUST be dropped before the file can be deleted.

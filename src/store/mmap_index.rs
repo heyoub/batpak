@@ -535,13 +535,16 @@ pub(crate) fn try_restore_mmap_index(
     };
     let entries_end = loaded.entries_offset + (entry_count * MMAP_ENTRY_SIZE);
     let entries_slice = &loaded.mmap[loaded.entries_offset..entries_end];
-    let mut cursor = index.begin_replay();
+    index.clear();
+    index
+        .interner
+        .replace_from_full_snapshot(&loaded.interner_strings);
+    let mut rebuilt_entries = Vec::with_capacity(entry_count);
 
     for chunk in entries_slice.chunks_exact(MMAP_ENTRY_SIZE) {
         let entry = match MmapIndexEntry::decode_from(chunk) {
             Ok(entry) => entry,
             Err(error) => {
-                cursor.abort();
                 tracing::warn!(
                     target: "batpak::mmap_index",
                     error = %error,
@@ -553,7 +556,6 @@ pub(crate) fn try_restore_mmap_index(
         let entity = match loaded.interner_strings.get(entry.entity_idx as usize) {
             Some(entity) => entity,
             None => {
-                cursor.abort();
                 tracing::warn!(
                     target: "batpak::mmap_index",
                     entity_idx = entry.entity_idx,
@@ -565,7 +567,6 @@ pub(crate) fn try_restore_mmap_index(
         let scope = match loaded.interner_strings.get(entry.scope_idx as usize) {
             Some(scope) => scope,
             None => {
-                cursor.abort();
                 tracing::warn!(
                     target: "batpak::mmap_index",
                     scope_idx = entry.scope_idx,
@@ -578,7 +579,6 @@ pub(crate) fn try_restore_mmap_index(
         let coord = match Coordinate::new(entity, scope) {
             Ok(coord) => coord,
             Err(error) => {
-                cursor.abort();
                 tracing::warn!(
                     target: "batpak::mmap_index",
                     error = %error,
@@ -587,16 +587,13 @@ pub(crate) fn try_restore_mmap_index(
                 return None;
             }
         };
-        let entity_id = index.interner.intern(entity);
-        let scope_id = index.interner.intern(scope);
-
-        cursor.insert(IndexEntry {
+        rebuilt_entries.push(IndexEntry {
             event_id: entry.event_id,
             correlation_id: entry.correlation_id,
             causation_id: (entry.causation_id != 0).then_some(entry.causation_id),
             coord,
-            entity_id,
-            scope_id,
+            entity_id: crate::store::interner::InternId(entry.entity_idx),
+            scope_id: crate::store::interner::InternId(entry.scope_idx),
             kind: raw_to_kind(entry.kind),
             wall_ms: entry.wall_ms,
             clock: entry.clock,
@@ -613,7 +610,7 @@ pub(crate) fn try_restore_mmap_index(
         });
     }
 
-    cursor.commit(loaded.stored_allocator);
+    index.restore_sorted_entries(rebuilt_entries, loaded.stored_allocator);
     Some((loaded.watermark, loaded.stored_allocator))
 }
 

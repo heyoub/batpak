@@ -115,6 +115,29 @@ impl StringInterner {
         }
     }
 
+    fn install_snapshot_iter<I>(&self, strings: I)
+    where
+        I: IntoIterator<Item = Arc<str>>,
+    {
+        let sentinel: Arc<str> = Arc::from(SENTINEL_STR);
+        let mut forward_map = HashMap::new();
+        let mut reverse = vec![Arc::clone(&sentinel)];
+        forward_map.insert(sentinel, InternId(SENTINEL_ID));
+
+        for (idx, string) in strings.into_iter().enumerate() {
+            let raw = u32::try_from(idx + 1).expect("interner snapshot exceeds u32 slots");
+            forward_map.insert(Arc::clone(&string), InternId(raw));
+            reverse.push(string);
+        }
+
+        *self.forward.write() = forward_map;
+        *self.reverse.write() = reverse;
+        self.next_id.store(
+            u32::try_from(self.reverse.read().len()).expect("interner size exceeds u32 slots"),
+            Ordering::Release,
+        );
+    }
+
     /// Return the [`InternId`] for `s`, creating a new one if `s` has not been
     /// seen before.
     ///
@@ -230,6 +253,18 @@ impl StringInterner {
         }
 
         interner
+    }
+
+    /// Reset the interner to its empty state while preserving the sentinel slot.
+    pub(crate) fn reset(&self) {
+        self.install_snapshot_iter(std::iter::empty());
+    }
+
+    /// Replace the current contents with a snapshot that includes the sentinel
+    /// at slot 0, matching the cold-start artifact formats.
+    pub(crate) fn replace_from_full_snapshot(&self, strings: &[String]) {
+        let iter = strings.iter().skip(1).map(|s| Arc::<str>::from(s.as_str()));
+        self.install_snapshot_iter(iter);
     }
 }
 

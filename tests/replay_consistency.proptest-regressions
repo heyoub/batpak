@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 3477a67e5301ef78086e1cd10ef966f287a88e930884cbd482102292f498e821 # shrinks to specs = [AppendSpec { entity_idx: 0, scope_idx: 0, category: 1, type_id: 1, payload: 0 }]

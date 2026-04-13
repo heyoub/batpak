@@ -382,11 +382,9 @@ pub(crate) fn restore_from_checkpoint(
     interner_strings: &[String],
     stored_allocator: u64,
 ) -> Result<(), StoreError> {
-    // Use the type-safe replay cursor: it preserves each entry's stored
-    // global_sequence verbatim and we pass `stored_allocator` as the commit
-    // hint so the allocator ends up at the original position even when the
-    // highest visible sequence is lower than the allocator (burned slots).
-    let mut cursor = index.begin_replay();
+    index.clear();
+    index.interner.replace_from_full_snapshot(interner_strings);
+    let mut rebuilt_entries = Vec::with_capacity(entries.len());
 
     for ce in entries {
         let entity_str = interner_strings
@@ -397,16 +395,13 @@ pub(crate) fn restore_from_checkpoint(
             .ok_or_else(|| StoreError::ser_msg("checkpoint scope_id out of interner range"))?;
 
         let coord = Coordinate::new(entity_str, scope_str)?;
-        let entity_id = index.interner.intern(entity_str);
-        let scope_id = index.interner.intern(scope_str);
-
-        let entry = IndexEntry {
+        rebuilt_entries.push(IndexEntry {
             event_id: ce.event_id,
             correlation_id: ce.correlation_id,
             causation_id: ce.causation_id,
             coord,
-            entity_id,
-            scope_id,
+            entity_id: crate::store::interner::InternId(ce.entity_id),
+            scope_id: crate::store::interner::InternId(ce.scope_id),
             kind: ce.kind,
             wall_ms: ce.wall_ms,
             clock: ce.clock,
@@ -420,16 +415,10 @@ pub(crate) fn restore_from_checkpoint(
                 length: ce.length,
             },
             global_sequence: ce.global_sequence,
-        };
-
-        cursor.insert(entry);
+        });
     }
 
-    // Commit the cursor with the stored allocator as a hint. The cursor
-    // restores the allocator to max(max_seen + 1, stored_allocator) and
-    // publishes that value as the visibility watermark in one shot.
-    cursor.commit(stored_allocator);
-
+    index.restore_sorted_entries(rebuilt_entries, stored_allocator);
     Ok(())
 }
 

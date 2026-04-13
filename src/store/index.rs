@@ -6,7 +6,7 @@ use crate::store::interner::StringInterner;
 use dashmap::DashMap;
 use parking_lot::RwLock;
 use std::any::TypeId;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -318,7 +318,7 @@ pub struct IndexEntry {
 }
 
 /// DiskPos: where to find this event on disk.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DiskPos {
     /// Numeric identifier of the segment file containing this event.
     pub segment_id: u64,
@@ -326,6 +326,19 @@ pub struct DiskPos {
     pub offset: u64,
     /// Total byte length of the encoded frame.
     pub length: u32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ProjectionReplayItem {
+    pub(crate) global_sequence: u64,
+    pub(crate) disk_pos: DiskPos,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ProjectionReplayPlan {
+    pub(crate) watermark: u64,
+    pub(crate) generation: u64,
+    pub(crate) items: Vec<ProjectionReplayItem>,
 }
 
 impl Ord for ClockKey {
@@ -485,6 +498,80 @@ impl StoreIndex {
 
         // Global sequence already reserved during batch staging via reserve_sequences()
         // No additional fetch_add needed.
+    }
+
+    /// Replace the in-memory index contents from a sorted durable snapshot.
+    ///
+    /// `entries` must be sorted ascending by `global_sequence`. The allocator is
+    /// restored to `max(last_sequence + 1, allocator_hint)` and published only
+    /// after every base map and overlay view has been rebuilt.
+    fn restore_sorted_entries_impl(
+        &self,
+        entries: Vec<IndexEntry>,
+        allocator_hint: u64,
+        before_publish: impl FnOnce(&Self),
+    ) {
+        self.streams.clear();
+        self.scan.clear();
+        self.by_id.clear();
+        self.latest.clear();
+        self.sequence.clear();
+
+        let arc_entries: Vec<Arc<IndexEntry>> = entries.into_iter().map(Arc::new).collect();
+        let mut streams = HashMap::<Arc<str>, BTreeMap<ClockKey, Arc<IndexEntry>>>::new();
+        let mut by_id = HashMap::<u128, Arc<IndexEntry>>::with_capacity(arc_entries.len());
+        let mut latest = HashMap::<Arc<str>, Arc<IndexEntry>>::new();
+
+        for entry in &arc_entries {
+            let entity = entry.coord.entity_arc();
+            let key = ClockKey {
+                wall_ms: entry.wall_ms,
+                clock: entry.clock,
+                uuid: entry.event_id,
+            };
+            streams
+                .entry(Arc::clone(&entity))
+                .or_default()
+                .insert(key, Arc::clone(entry));
+            by_id.insert(entry.event_id, Arc::clone(entry));
+            latest.insert(entity, Arc::clone(entry));
+        }
+
+        for (entity, stream) in streams {
+            self.streams.insert(entity, stream);
+        }
+        self.scan.rebuild_from_entries(&arc_entries);
+        for (event_id, entry) in by_id {
+            self.by_id.insert(event_id, entry);
+        }
+        for (entity, entry) in latest {
+            self.latest.insert(entity, entry);
+        }
+
+        self.len.store(arc_entries.len(), Ordering::Relaxed);
+        before_publish(self);
+
+        let next_sequence = arc_entries
+            .last()
+            .map(|entry| entry.global_sequence.saturating_add(1))
+            .unwrap_or(allocator_hint)
+            .max(allocator_hint);
+        self.sequence.restore_allocator(next_sequence);
+        self.publish(next_sequence);
+    }
+
+    pub(crate) fn restore_sorted_entries(&self, entries: Vec<IndexEntry>, allocator_hint: u64) {
+        self.restore_sorted_entries_impl(entries, allocator_hint, |_| {});
+    }
+
+    #[cfg(test)]
+    pub(crate) fn restore_sorted_entries_with_before_publish(
+        &self,
+        entries: Vec<IndexEntry>,
+        allocator_hint: u64,
+        before_publish: impl FnOnce(&Self),
+    ) {
+        self.restore_sorted_entries_impl(entries, allocator_hint, before_publish);
     }
 
     pub(crate) fn get_by_id(&self, event_id: u128) -> Option<IndexEntry> {
@@ -770,6 +857,49 @@ impl StoreIndex {
             .store_cached_projection(entity, type_id, bytes, watermark, cached_at_us)
     }
 
+    pub(crate) fn projection_replay_plan(
+        &self,
+        entity: &str,
+        relevant_kinds: &[EventKind],
+    ) -> Option<ProjectionReplayPlan> {
+        if let Some((watermark, generation, items)) =
+            self.scan.projection_candidates(entity, relevant_kinds)
+        {
+            return Some(ProjectionReplayPlan {
+                watermark,
+                generation,
+                items: items
+                    .into_iter()
+                    .map(|(global_sequence, disk_pos)| ProjectionReplayItem {
+                        global_sequence,
+                        disk_pos,
+                    })
+                    .collect(),
+            });
+        }
+
+        let stream = self.streams.get(entity)?;
+        let match_all = relevant_kinds.is_empty();
+        let mut items = Vec::new();
+        let mut watermark = None;
+        for entry in stream.value().values() {
+            if !match_all && !relevant_kinds.contains(&entry.kind) {
+                continue;
+            }
+            watermark = Some(entry.global_sequence);
+            items.push(ProjectionReplayItem {
+                global_sequence: entry.global_sequence,
+                disk_pos: entry.disk_pos,
+            });
+        }
+
+        Some(ProjectionReplayPlan {
+            watermark: watermark?,
+            generation: stream.value().len() as u64,
+            items,
+        })
+    }
+
     pub(crate) fn begin_visibility_fence(&self) -> Result<u64, crate::store::StoreError> {
         self.sequence.begin_fence()
     }
@@ -951,5 +1081,64 @@ impl<'a> Drop for ReplayCursor<'a> {
             self.committed,
             "ReplayCursor dropped without calling commit() — index is unpublished",
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::coordinate::Region;
+    use crate::event::EventKind;
+
+    fn make_entry(seq: u64, entity: &str, scope: &str) -> IndexEntry {
+        let coord = Coordinate::new(entity, scope).expect("coord");
+        IndexEntry {
+            event_id: seq as u128 + 1,
+            correlation_id: seq as u128 + 1,
+            causation_id: None,
+            entity_id: crate::store::interner::InternId::sentinel(),
+            scope_id: crate::store::interner::InternId::sentinel(),
+            coord,
+            kind: EventKind::custom(0xF, 1),
+            wall_ms: seq,
+            clock: u32::try_from(seq).expect("small seq"),
+            hash_chain: HashChain::default(),
+            disk_pos: DiskPos {
+                segment_id: 0,
+                offset: seq * 16,
+                length: 16,
+            },
+            global_sequence: seq,
+        }
+    }
+
+    #[test]
+    fn bulk_restore_keeps_entries_invisible_until_publish() {
+        let index = StoreIndex::new();
+        let entity_id = index.interner.intern("entity:bulk");
+        let scope_id = index.interner.intern("scope:bulk");
+        let entries = (0..3)
+            .map(|seq| {
+                let mut entry = make_entry(seq, "entity:bulk", "scope:bulk");
+                entry.entity_id = entity_id;
+                entry.scope_id = scope_id;
+                entry
+            })
+            .collect();
+
+        index.restore_sorted_entries_with_before_publish(entries, 3, |index| {
+            assert_eq!(
+                index.visible_sequence(),
+                0,
+                "visibility watermark must not advance until every view is rebuilt"
+            );
+            assert!(
+                index.query(&Region::all()).is_empty(),
+                "PROPERTY: reads must observe neither base maps nor overlays before publish"
+            );
+        });
+
+        assert_eq!(index.query(&Region::all()).len(), 3);
+        assert_eq!(index.visible_sequence(), 3);
     }
 }

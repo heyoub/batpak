@@ -10,7 +10,7 @@
 //! DEFENDS: FM-009 (Polite Downgrade — MaybeStale must eventually refresh)
 //! INVARIANTS: INV-TYPE (cache round-trip fidelity), INV-TEMP (freshness semantics)
 
-use batpak::store::projection::{CacheCapabilities, CacheMeta, NoCache, ProjectionCache};
+use batpak::store::projection::{CacheMeta, NoCache, ProjectionCache};
 
 fn test_meta() -> CacheMeta {
     CacheMeta {
@@ -525,10 +525,14 @@ fn cache_metadata_short_bytes_returns_none() {
 fn nocache_prefetch_is_noop() {
     let cache = NoCache;
     let meta = test_meta();
-    assert_eq!(
-        cache.capabilities(),
-        CacheCapabilities::none(),
+    let caps = cache.capabilities();
+    assert!(
+        !caps.supports_prefetch,
         "NoCache must explicitly report that it does not support prefetch hints."
+    );
+    assert!(
+        caps.is_noop,
+        "NoCache must report itself as a no-op cache backend."
     );
     cache
         .prefetch(b"any_key", meta)
