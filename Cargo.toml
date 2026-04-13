@@ -60,7 +60,6 @@ arbitrary = { version = "1", features = ["derive"] }
 criterion = { version = "0.5", features = ["html_reports"] }
 tempfile = "3"
 trybuild = "1"
-tokio = { version = "1", features = ["rt", "macros"] }
 fastrand = "2"
 serial_test = "3.4.0"
 loom = "0.7"
