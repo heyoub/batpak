@@ -1,5 +1,4 @@
 //! Observability proofs for named store flows.
-//! [SPEC:tests/observability_flows.rs]
 
 use batpak::prelude::*;
 use batpak::store::{

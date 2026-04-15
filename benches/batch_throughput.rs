@@ -1,6 +1,5 @@
 //! Benchmark: batch append throughput vs single append.
 //!
-//! [SPEC:benches/batch_throughput.rs]
 //! Measures the overhead reduction from batching multiple events
 //! into a single fsync operation.
 

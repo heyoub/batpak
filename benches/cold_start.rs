@@ -1,6 +1,5 @@
 //! Benchmark: reopening a populated store through explicit cold-start lanes.
 //!
-//! [SPEC:benches/cold_start.rs]
 //!
 //! This benchmark measures `Store::open()` against a copied on-disk fixture,
 //! which is more honest than repeatedly reopening the same temp directory and

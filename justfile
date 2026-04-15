@@ -6,6 +6,9 @@ default:
 doctor:
     cargo xtask doctor
 
+install-hooks:
+    cargo xtask install-hooks
+
 traceability:
     cargo xtask traceability
 

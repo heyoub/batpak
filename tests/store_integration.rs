@@ -4,7 +4,6 @@
 )]
 //! Integration tests for Store lifecycle.
 //! Append/get/query, segment rotation, cold start index rebuild, concurrent r/w.
-//! [SPEC:tests/store_integration.rs]
 //!
 //! PROVES: LAW-002 (No Local State — uses real Store), LAW-003 (No Orphan Infrastructure)
 //! DEFENDS: FM-007 (Island Syndrome — full production path), FM-008 (Shadow Test — imports real types)

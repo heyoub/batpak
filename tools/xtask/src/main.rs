@@ -19,6 +19,7 @@ struct Cli {
 #[derive(Subcommand)]
 enum XtaskCommand {
     Setup(SetupArgs),
+    InstallHooks,
     Quickstart,
     ConsumerSmoke,
     Doctor,
@@ -37,10 +38,12 @@ enum XtaskCommand {
     FuzzChaos,
     Stress,
     /// Run hardware-dependent perf gates (excluded from `cargo xtask ci`).
-    /// These tests use Instant::now() and assert on wall-clock time, so they
-    /// are unfit for shared CI runners. Run them on a dedicated perf machine
-    /// or locally on stable hardware.
+    /// These tests are loose catastrophic-regression guards, not precision
+    /// performance gates: no current environment is both canonical and
+    /// timing-stable. Run them on a dedicated perf machine or locally on
+    /// stable hardware when you need real interpretation.
     PerfGates,
+    DevcontainerExec(DevcontainerExecArgs),
     Ci,
     /// Reproduce the full proof chain inside the canonical devcontainer.
     /// The host enters the container once, then CI, coverage, and docs run
@@ -91,10 +94,20 @@ pub(crate) enum MutantMode {
     Full,
 }
 
-#[derive(Args, Clone, Copy)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub(crate) enum MutantSurface {
+    AllFeatures,
+    NoDefaultFeatures,
+}
+
+#[derive(Args, Clone)]
 pub(crate) struct MutantsArgs {
     #[arg(value_enum)]
     mode: MutantMode,
+    #[arg(long, value_enum)]
+    surface: Option<MutantSurface>,
+    #[arg(long)]
+    shard: Option<String>,
 }
 
 #[derive(Args, Clone, Copy)]
@@ -121,13 +134,20 @@ pub(crate) struct ReleaseArgs {
     dry_run: bool,
 }
 
+#[derive(Args, Clone, Debug)]
+pub(crate) struct DevcontainerExecArgs {
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    command: Vec<String>,
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
         XtaskCommand::Setup(args) => commands::setup(args),
+        XtaskCommand::InstallHooks => commands::install_hooks(),
         XtaskCommand::Quickstart => commands::quickstart(),
         XtaskCommand::ConsumerSmoke => commands::consumer_smoke(),
-        XtaskCommand::Doctor => commands::integrity("doctor", ["--strict"]),
+        XtaskCommand::Doctor => commands::doctor(),
         XtaskCommand::Traceability => commands::integrity("traceability-check", []),
         XtaskCommand::Structural => commands::integrity("structural-check", []),
         XtaskCommand::Check => {
@@ -182,6 +202,7 @@ fn main() -> Result<()> {
             })
         }
         XtaskCommand::PerfGates => commands::perf_gates(),
+        XtaskCommand::DevcontainerExec(args) => devcontainer::devcontainer_exec(args),
         XtaskCommand::Ci => commands::ci(),
         XtaskCommand::Preflight => preflight::preflight(),
         XtaskCommand::PreCommit => {

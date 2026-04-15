@@ -1,5 +1,4 @@
 //! Projection wiring tests split out of store_advanced.rs.
-//! [SPEC:tests/store_projection_wiring.rs]
 
 use batpak::prelude::*;
 use batpak::store::projection::{CacheCapabilities, CacheMeta, ProjectionCache};

@@ -1,6 +1,5 @@
 //! Benchmark: segment compaction (merge small segments into one).
 //!
-//! [SPEC:benches/compaction.rs]
 
 mod common;
 

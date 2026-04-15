@@ -1,7 +1,6 @@
 #![allow(clippy::panic)] // test assertions use panic for expected-failure paths
 //! Gate and Pipeline integration tests.
 //! Registration order, fail-fast evaluation, Receipt TOCTOU guarantee, consumed-once.
-//! [SPEC:tests/gate_pipeline.rs]
 //!
 //! PROVES: LAW-001 (No Fake Success), LAW-004 (Composition Over Construction)
 //! DEFENDS: FM-022 (Receipt Hollowing — Receipt is sealed, single-use)

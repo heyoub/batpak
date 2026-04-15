@@ -1,7 +1,6 @@
 #![allow(clippy::wildcard_enum_match_arm)] // proptest assertions use wildcard match
 //! Proptest verification of Outcome<T> monad laws.
 //! Left identity, right identity, associativity, and Batch distribution.
-//! [SPEC:tests/monad_laws.rs]
 //!
 //! PROVES: LAW-006 (Algebraic Integrity — monad laws hold for Outcome)
 //! DEFENDS: FM-009 (Polite Downgrade — combinators must not silently drop errors)

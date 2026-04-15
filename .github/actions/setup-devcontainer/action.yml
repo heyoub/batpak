@@ -4,6 +4,9 @@ description: Build and load the canonical batpak devcontainer image with GitHub 
 runs:
   using: composite
   steps:
+    - name: Install host Rust toolchain for xtask-driven wrapper calls
+      uses: dtolnay/rust-toolchain@stable
+
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v4
 

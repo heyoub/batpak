@@ -4,7 +4,6 @@
 //! against every backend (NoCache, NativeCache)."
 //!
 //! Integration tests: `cargo test --test projection_cache`
-//! [SPEC:tests/projection_cache.rs]
 //!
 //! PROVES: LAW-001 (No Fake Success — cached projections must be correct)
 //! DEFENDS: FM-009 (Polite Downgrade — MaybeStale must eventually refresh)

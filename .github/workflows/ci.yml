@@ -10,12 +10,13 @@ on:
 env:
   CARGO_TERM_COLOR: always
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  # tests/common/proptest.rs treats this as a floor, not an exact override:
+  # small fast tests can be lifted upward in CI without silently capping
+  # deeper fuzz/property surfaces that already ask for more.
   PROPTEST_CASES: 256
-  # tests/chaos_testing.rs reads this; default fallback in the test source
-  # is 10, which is too few to expose real concurrency races. The inline
-  # comment in the test file recommends 5000 for meaningful coverage; 500
-  # is the CI compromise (~50x the default, enough to find races but
-  # bounded enough to keep CI under the 20-minute Linux job budget).
+  # tests/chaos_testing.rs now defaults to 500 in source. CI sets the same
+  # value explicitly so the canonical container lane, local preflight, and
+  # manual deep overrides all agree on the intended baseline.
   CHAOS_ITERATIONS: 500
 
 jobs:
@@ -141,12 +142,8 @@ jobs:
       fail-fast: false
       matrix:
         surface:
-          - name: all-features
-            command: >-
-              cargo mutants --file "src/store/*.rs" --file src/wire.rs --file "src/guard/*.rs" --file "src/pipeline/*.rs" --exclude src/store/ancestors_clock.rs --all-features --test-tool cargo
-          - name: no-default-features
-            command: >-
-              cargo mutants --file "src/store/*.rs" --exclude src/store/ancestors_hash.rs --no-default-features --test-tool cargo
+          - all-features
+          - no-default-features
         shard:
           - 1/12
           - 2/12
@@ -160,7 +157,7 @@ jobs:
           - 10/12
           - 11/12
           - 12/12
-    name: Mutation full (${{ matrix.surface.name }} shard ${{ matrix.shard }})
+    name: Mutation full (${{ matrix.surface }} shard ${{ matrix.shard }})
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-devcontainer
@@ -168,7 +165,7 @@ jobs:
         env:
           BATPAK_DEVCONTAINER_IMAGE: batpak-devcontainer:ci
           BATPAK_DEVCONTAINER_SKIP_BUILD: "1"
-        run: bash ./scripts/run-in-devcontainer.sh '${{ matrix.surface.command }} --shard ${{ matrix.shard }}'
+        run: bash ./scripts/run-in-devcontainer.sh 'cargo xtask mutants full --surface ${{ matrix.surface }} --shard ${{ matrix.shard }}'
 
   docs:
     runs-on: ubuntu-latest

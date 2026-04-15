@@ -1,5 +1,4 @@
 //! Regression tests for StoreConfig field propagation.
-//! [SPEC:tests/config_propagation.rs]
 //!
 //! PROVES: LAW-001 (No Fake Success — config must actually apply)
 //! DEFENDS: FM-003 (Silent Config Drift — fields ignored after construction)
@@ -11,7 +10,6 @@
 //! 3. writer.stack_size unused — config field never applied to thread builder
 //!
 //! Each test targets the specific bug class to prevent regression.
-//! [SPEC:tests/config_propagation.rs]
 
 use batpak::prelude::*;
 use batpak::store::{

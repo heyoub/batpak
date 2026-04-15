@@ -2,7 +2,6 @@
 //! Compile-fail tests for typestate safety + runtime tests for generated state machines.
 //! Verifies that Receipt forgery and invalid state construction fail to compile,
 //! AND that generated types work correctly at runtime.
-//! [SPEC:tests/typestate_safety.rs]
 //!
 //! PROVES: LAW-004 (Composition Over Construction — typestate enforces phase)
 //! DEFENDS: FM-009 (Polite Downgrade — generated methods must carry real data)

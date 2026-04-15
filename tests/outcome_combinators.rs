@@ -2,7 +2,6 @@
 //! Tests for Outcome combinators not covered by monad_laws.rs.
 //! Covers: inspect, inspect_err, map_err, or_else, and_then_if,
 //! into_result, unwrap_or, unwrap_or_else, join_any, zip edge cases.
-//! [SPEC:tests/outcome_combinators.rs]
 //!
 //! PROVES: LAW-006 (Algebraic Integrity — combinator contracts)
 //! DEFENDS: FM-009 (Polite Downgrade — combinators preserve error semantics)

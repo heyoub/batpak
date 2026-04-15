@@ -39,7 +39,7 @@ store.close()?;
 ## Pick Your Lane
 
 - User lane: `cargo build`, `cargo test`, `cargo run --example quickstart`
-- Maintainer lane: `cargo xtask doctor`, `cargo xtask ci`, `cargo xtask preflight` (gold standard before pushing; one canonical devcontainer proof session)
+- Maintainer lane: `cargo xtask doctor`, `cargo xtask install-hooks`, `cargo xtask ci`, `cargo xtask preflight` (gold standard before pushing; one canonical devcontainer proof session)
 - Perf lane: `cargo xtask bench --surface neutral|native [--save|--compare|--compile]`
 - Coverage lane: `cargo xtask cover [--ci|--json|--threshold N]`
 
@@ -110,7 +110,7 @@ cargo xtask doctor
 cargo xtask ci
 cargo xtask docs
 cargo xtask preflight    # CI + coverage + docs in one canonical devcontainer session
-cargo xtask perf-gates   # hardware-dependent perf tests (run on demand only)
+cargo xtask perf-gates   # catastrophic-regression perf guards; interpret on stable hardware
 cargo xtask cover        # coverage feedback with retained artifacts under target/xtask-cover/last-run
 ```
 

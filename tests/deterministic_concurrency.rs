@@ -1,6 +1,5 @@
 #![allow(clippy::unwrap_used)]
 //! Deterministic concurrency proofs using loom.
-//! [SPEC:tests/deterministic_concurrency.rs]
 
 use loom::sync::{Arc, Mutex};
 use loom::thread;

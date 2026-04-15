@@ -5,7 +5,6 @@
 )]
 //! Wire format golden tests.
 //! Verifies MessagePack serialization matches known-good byte sequences.
-//! [SPEC:tests/wire_format.rs]
 //!
 //! PROVES: LAW-005 (Architecture Freeze — wire format stability)
 //! DEFENDS: FM-010 (Semantic Drift — byte-level determinism prevents silent serde changes)
@@ -238,7 +237,6 @@ fn outcome_batch_round_trip() {
 }
 
 // --- Committed<T> golden test ---
-// [SPEC:WIRE FORMAT DECISIONS] Committed.event_id uses #[serde(with = "crate::wire::u128_bytes")]
 
 #[test]
 fn committed_msgpack_golden() {
@@ -280,7 +278,6 @@ fn committed_msgpack_golden() {
 }
 
 // --- WaitCondition golden test ---
-// [SPEC:WIRE FORMAT DECISIONS] WaitCondition::Event.event_id uses u128_bytes
 
 #[test]
 fn wait_condition_msgpack_golden() {
@@ -304,7 +301,6 @@ fn wait_condition_msgpack_golden() {
 }
 
 // --- CompensationAction golden test ---
-// [SPEC:WIRE FORMAT DECISIONS] CompensationAction::Rollback.event_ids uses vec_u128_bytes
 
 #[test]
 fn compensation_action_msgpack_golden() {

@@ -1,6 +1,5 @@
 //! Benchmark: append throughput (single-threaded, durable, concurrent, sync modes).
 //!
-//! [SPEC:benches/write_throughput.rs]
 
 mod common;
 

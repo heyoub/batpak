@@ -44,10 +44,24 @@ fn check_no_tracked_archive_or_audit_docs(
 
 fn check_no_live_spec_markers(repo_root: &Path, tracked_files: &[PathBuf]) -> Result<()> {
     let marker = Regex::new(r"\\?\[SPEC:").unwrap();
+    let allow = [repo_root.join("tools/integrity/src/architecture_lints.rs")];
     for path in tracked_files {
+        if allow.iter().any(|allowed| allowed == path) {
+            continue;
+        }
         let rel = relative(repo_root, path);
-        let is_live_rust = rel.starts_with("src/") || rel.starts_with("tools/");
-        if !is_live_rust || path.extension().and_then(|ext| ext.to_str()) != Some("rs") {
+        let ext = path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .unwrap_or_default();
+        let is_root_markdown = !rel.contains('/') && ext == "md";
+        let is_live_surface = is_root_markdown
+            || rel.starts_with("src/")
+            || rel.starts_with("tools/")
+            || rel.starts_with("tests/")
+            || rel.starts_with("benches/")
+            || rel.starts_with("examples/");
+        if !is_live_surface || !matches!(ext, "rs" | "md") {
             continue;
         }
         let content =
@@ -55,7 +69,7 @@ fn check_no_live_spec_markers(repo_root: &Path, tracked_files: &[PathBuf]) -> Re
         ensure(
             !marker.is_match(&content),
             format!(
-                "live Rust source still contains embedded [SPEC:...] markers: {}",
+                "live surface still contains embedded [SPEC:...] markers: {}",
                 relative(repo_root, path)
             ),
         )?;
@@ -410,19 +424,27 @@ fn check_packaging_surface(repo_root: &Path) -> Result<()> {
 fn check_xtask_surface_contract(repo_root: &Path) -> Result<()> {
     let xtask_main = repo_root.join("tools/xtask/src/main.rs");
     let coverage_rs = repo_root.join("tools/xtask/src/coverage.rs");
+    let commands_rs = repo_root.join("tools/xtask/src/commands.rs");
+    let devcontainer_rs = repo_root.join("tools/xtask/src/devcontainer.rs");
     let preflight_rs = repo_root.join("tools/xtask/src/preflight.rs");
     let util_rs = repo_root.join("tools/xtask/src/util.rs");
     let justfile = repo_root.join("justfile");
     let dockerfile = repo_root.join(".devcontainer/Dockerfile");
+    let setup_devcontainer_action = repo_root.join(".github/actions/setup-devcontainer/action.yml");
     let run_in_devcontainer = repo_root.join("scripts/run-in-devcontainer.sh");
 
     let xtask_main_content = fs::read_to_string(&xtask_main).context("read xtask main")?;
     let coverage_content = fs::read_to_string(&coverage_rs).context("read xtask coverage")?;
+    let commands_content = fs::read_to_string(&commands_rs).context("read xtask commands")?;
+    let devcontainer_content =
+        fs::read_to_string(&devcontainer_rs).context("read xtask devcontainer")?;
     let preflight_content = fs::read_to_string(&preflight_rs).context("read xtask preflight")?;
     let util_content = fs::read_to_string(&util_rs).context("read xtask util")?;
     let justfile_content = fs::read_to_string(&justfile).context("read justfile")?;
     let dockerfile_content =
         fs::read_to_string(&dockerfile).context("read devcontainer dockerfile")?;
+    let setup_devcontainer_action_content = fs::read_to_string(&setup_devcontainer_action)
+        .context("read setup-devcontainer composite action")?;
     let run_in_devcontainer_content =
         fs::read_to_string(&run_in_devcontainer).context("read run-in-devcontainer wrapper")?;
 
@@ -431,8 +453,17 @@ fn check_xtask_surface_contract(repo_root: &Path) -> Result<()> {
         "xtask must not reintroduce a separate BenchCompile CLI variant",
     )?;
     ensure(
+        xtask_main_content.contains("InstallHooks")
+            && xtask_main_content.contains("DevcontainerExec("),
+        "xtask main must expose install-hooks and devcontainer-exec as first-class command surfaces",
+    )?;
+    ensure(
         justfile_content.contains("bench-compile:\n    cargo xtask bench --compile"),
         "justfile bench-compile recipe must remain a thin alias over `cargo xtask bench --compile`",
+    )?;
+    ensure(
+        justfile_content.contains("install-hooks:\n    cargo xtask install-hooks"),
+        "justfile install-hooks recipe must remain a thin alias over `cargo xtask install-hooks`",
     )?;
     ensure(
         coverage_content.contains("target/xtask-cover/last-run"),
@@ -485,6 +516,24 @@ fn check_xtask_surface_contract(repo_root: &Path) -> Result<()> {
         "xtask preflight must re-enter the canonical devcontainer only once",
     )?;
     ensure(
+        commands_content.contains("cargo xtask install-hooks")
+            && commands_content.contains(".githooks/pre-commit"),
+        "xtask commands must own the tracked git-hook surface and surface install guidance",
+    )?;
+    ensure(
+        devcontainer_content.contains("io.batpak.devcontainer-hash")
+            && devcontainer_content.contains("Reusing local devcontainer image")
+            && devcontainer_content.contains("\"PROPTEST_CASES\"")
+            && devcontainer_content.contains("\"CHAOS_ITERATIONS\"")
+            && devcontainer_content.contains("bash")
+            && devcontainer_content.contains("-lc"),
+        "xtask devcontainer logic must own image reuse, env forwarding, and single-string shell compatibility",
+    )?;
+    ensure(
+        setup_devcontainer_action_content.contains("dtolnay/rust-toolchain@stable"),
+        "setup-devcontainer action must install a host Rust toolchain so the thin wrapper can delegate to cargo xtask",
+    )?;
+    ensure(
         dockerfile_content.contains("ENV PATH=\"/usr/local/cargo/bin:${PATH}\"")
             && dockerfile_content.contains("install-from-binstall-release.sh")
             && dockerfile_content.contains("cargo binstall --no-confirm cargo-deny@0.19.0")
@@ -496,11 +545,10 @@ fn check_xtask_surface_contract(repo_root: &Path) -> Result<()> {
         "devcontainer bootstrap must source-install cargo-mutants on bookworm because the published GNU binary is not glibc-compatible there",
     )?;
     ensure(
-        run_in_devcontainer_content.contains("io.batpak.devcontainer-hash")
-            && run_in_devcontainer_content.contains("Reusing local devcontainer image")
-            && run_in_devcontainer_content.contains("\"$@\"")
-            && !run_in_devcontainer_content.contains("bash -c \"$*\""),
-        "run-in-devcontainer must reuse a matching local image instead of rebuilding blindly every time",
+        run_in_devcontainer_content.contains("cargo xtask devcontainer-exec -- \"$@\"")
+            && !run_in_devcontainer_content.contains("docker build")
+            && !run_in_devcontainer_content.contains("image_hash_label"),
+        "run-in-devcontainer.sh must stay a thin compatibility wrapper over xtask-owned devcontainer logic",
     )?;
     Ok(())
 }

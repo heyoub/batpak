@@ -1,6 +1,5 @@
 //! Unit tests for the event domain: EventId, EventKind, EventHeader, Event methods,
 //! DagPosition, and the define_entity_id! macro.
-//! [SPEC:tests/event_api.rs]
 //!
 //! PROVES: LAW-003 (No Orphan Infrastructure — every pub item exercised)
 //! DEFENDS: FM-007 (Island Syndrome — pub items must connect to tests)

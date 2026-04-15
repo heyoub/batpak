@@ -1,4 +1,4 @@
-name: Performance Reports
+name: Criterion Trends
 
 on:
   workflow_dispatch:
@@ -10,6 +10,7 @@ env:
 
 jobs:
   criterion:
+    name: Criterion trend collection
     strategy:
       fail-fast: false
       matrix:
@@ -20,9 +21,13 @@ jobs:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Run Criterion surface
+      # No current environment is both canonical and timing-stable, so this
+      # workflow is visibility-only trend collection. Hard perf enforcement
+      # remains the loose catastrophic-regression guard surface in
+      # `tests/perf_gates.rs`, which should be interpreted on stable hardware.
+      - name: Run Criterion trend surface
         run: cargo xtask bench --surface ${{ matrix.surface }}
-      - name: Upload Criterion artifacts
+      - name: Upload Criterion trend artifacts
         uses: actions/upload-artifact@v4
         with:
           name: criterion-${{ matrix.os }}-${{ matrix.surface }}

@@ -1,7 +1,9 @@
 #![allow(clippy::panic, clippy::print_stderr, clippy::cast_possible_truncation)] // benchmark reporting uses eprintln; gate failures use panic
 //! Performance gate tests: the library dogfoods its own Gate/Pipeline system
 //! to enforce its own throughput, latency, and correctness thresholds.
-//! [SPEC:tests/perf_gates.rs]
+//! These are catastrophic-regression guards with intentionally generous
+//! thresholds, not precision benchmark gates: no current environment is both
+//! canonical and timing-stable.
 //!
 //! PROVES: LAW-004 (Composition Over Construction — quadratic dogfooding)
 //! DEFENDS: FM-013 (Coverage Mirage — gates test themselves), FM-007 (Island Syndrome)
@@ -875,7 +877,6 @@ fn correctness_gates_self_validate() {
 }
 
 /// Append throughput gate: dedicated test using the library's own Gate system.
-/// [SPEC:tests/perf_gates.rs — BN5 append throughput gate]
 #[test]
 #[ignore = "hardware-dependent perf gate — run via `cargo xtask perf-gates`. Asserts events/sec on shared hardware."]
 fn append_throughput_gate() {
@@ -930,7 +931,6 @@ fn append_throughput_gate() {
 }
 
 /// Projection latency gate: dedicated test using the library's own Gate system.
-/// [SPEC:tests/perf_gates.rs — BN5 projection latency gate]
 #[test]
 #[ignore = "hardware-dependent perf gate — run via `cargo xtask perf-gates`. Asserts projection latency in ms on shared hardware."]
 fn projection_latency_gate() {
@@ -987,7 +987,6 @@ fn projection_latency_gate() {
 
 /// Projection cold-path gate: measures first-pass projection on a freshly
 /// reopened store. This isolates the cold projection cost from warm caches.
-/// [SPEC:tests/perf_gates.rs — BN6 projection cold-path gate]
 #[test]
 #[ignore = "hardware-dependent perf gate — run via `cargo xtask perf-gates`. Asserts cold-path projection latency."]
 fn projection_cold_path_gate() {

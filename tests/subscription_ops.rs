@@ -1,6 +1,5 @@
 #![allow(clippy::disallowed_methods, clippy::unwrap_used)] // tests use thread::spawn for producers
 //! Integration tests for SubscriptionOps: filter, take, and combined chains.
-//! [SPEC:tests/subscription_ops.rs]
 //!
 //! PROVES: LAW-004 (Composition Over Construction — ops chain correctly)
 //! DEFENDS: FM-009 (Polite Downgrade — map must not silently drop events)

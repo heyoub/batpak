@@ -1,5 +1,4 @@
 //! Compile-time assertions that key public types implement Send + Sync.
-//! [SPEC:tests/type_assertions.rs]
 
 #[test]
 fn store_is_send_and_sync() {

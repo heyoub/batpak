@@ -15,10 +15,16 @@ If your local toolchain is missing standard cargo helpers, run:
 cargo xtask setup --install-tools
 ```
 
+That setup command also installs the tracked `.githooks/` surface when no
+custom `core.hooksPath` is active. If you keep a custom hooks path, batpak
+will leave it alone; run `cargo xtask install-hooks` after clearing or changing
+that config if you want the repo-managed pre-commit hook.
+
 ## Daily Commands
 
 ```bash
 cargo xtask doctor
+cargo xtask install-hooks
 cargo xtask traceability
 cargo xtask structural
 cargo xtask pre-commit
@@ -28,12 +34,22 @@ cargo xtask cover
 
 `just` recipes are wrappers around the same commands.
 
+`cargo xtask doctor` warns when the repo-managed hooks are not installed.
+
 ## Contributor Workflow
 
 1. Make the change.
 2. Update docs, examples, traceability, and ADRs if the public surface or behavior changed.
 3. Run `cargo xtask pre-commit`.
 4. Run `cargo xtask preflight` before pushing. This enters the canonical devcontainer once, then runs CI, coverage, and docs from that single in-container proof session. It remains the closest local match to the GH `Integrity (ubuntu-devcontainer)` job, so it eliminates "passes locally, fails CI" surprises that `cargo xtask ci` on a native host cannot catch (different toolchain, missing system deps, wrong env vars). Use `cargo xtask ci` as a faster inner-loop check during iterative development, but always finish with `preflight` before the push that matters.
+
+## Performance Surfaces
+
+No current environment is both canonical and timing-stable.
+
+- `cargo xtask perf-gates` is a catastrophic-regression guard with generous thresholds. Run it on stable hardware when you want a "something is badly wrong" signal.
+- `.github/workflows/perf.yml` is Criterion trend collection, not a hard gate.
+- `cargo xtask bench --surface ...` is the measurement lane for comparing surfaces and baselines intentionally.
 
 ## Public Surface Rules
 

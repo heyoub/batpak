@@ -1,5 +1,4 @@
 //! Replay and checkpoint consistency proofs.
-//! [SPEC:tests/replay_consistency.rs]
 #![allow(clippy::panic)]
 
 use batpak::prelude::*;

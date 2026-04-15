@@ -1,5 +1,4 @@
 //! Atomic batch append tests.
-//! [SPEC:tests/atomic_batch.rs]
 
 use batpak::prelude::*;
 use std::collections::HashSet;

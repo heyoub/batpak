@@ -15,8 +15,8 @@
 //! results through its own Gate system for actionable diagnostics.
 //!
 //! Run with: cargo test --test chaos_testing --all-features
+//! Default depth: 500 iterations (override with `CHAOS_ITERATIONS=<n>`)
 //! Extended: CHAOS_ITERATIONS=5000 cargo test --test chaos_testing --all-features --release
-//! [SPEC:tests/chaos_testing.rs]
 
 use batpak::prelude::*;
 use batpak::store::segment::frame_decode;
@@ -24,11 +24,26 @@ use batpak::store::{AppendOptions, Store, StoreConfig, StoreError, SyncConfig};
 use std::sync::Arc;
 use tempfile::TempDir;
 
+const DEFAULT_CHAOS_ITERATIONS: usize = 500;
+
+fn effective_chaos_iterations(env_value: Option<&str>) -> usize {
+    env_value
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(DEFAULT_CHAOS_ITERATIONS)
+}
+
 fn chaos_iterations() -> usize {
-    std::env::var("CHAOS_ITERATIONS")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(10)
+    effective_chaos_iterations(std::env::var("CHAOS_ITERATIONS").ok().as_deref())
+}
+
+#[test]
+fn chaos_iterations_default_to_repo_truth() {
+    assert_eq!(effective_chaos_iterations(None), DEFAULT_CHAOS_ITERATIONS);
+    assert_eq!(effective_chaos_iterations(Some("5000")), 5000);
+    assert_eq!(
+        effective_chaos_iterations(Some("not-a-number")),
+        DEFAULT_CHAOS_ITERATIONS
+    );
 }
 
 // ============================================================

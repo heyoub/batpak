@@ -9,7 +9,6 @@
 //!
 //! Run with: cargo test --test fuzz_targets --all-features
 //! Deep fuzz: PROPTEST_CASES=100000 cargo test --test fuzz_targets --all-features --release
-//! [SPEC:tests/fuzz_targets.rs]
 
 #[cfg(feature = "blake3")]
 use batpak::event::hash::HashChain;

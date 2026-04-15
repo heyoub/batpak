@@ -2,7 +2,8 @@ use crate::bench;
 use crate::docs;
 use crate::util::{cargo, command_succeeds, repo_root, run};
 use crate::{
-    BenchSurface, ChaosArgs, DocsArgs, FuzzArgs, MutantMode, MutantsArgs, ReleaseArgs, SetupArgs,
+    BenchSurface, ChaosArgs, DocsArgs, FuzzArgs, MutantMode, MutantSurface, MutantsArgs,
+    ReleaseArgs, SetupArgs,
 };
 use anyhow::{bail, Context, Result};
 use std::fs;
@@ -13,6 +14,16 @@ use std::process::Command;
 enum InstallStrategy {
     PreferBinstall,
     SourceOnly,
+}
+
+const REPO_HOOKS_PATH: &str = ".githooks";
+const PRE_COMMIT_HOOK: &str = ".githooks/pre-commit";
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum HookStatus {
+    Installed,
+    Default,
+    Custom(String),
 }
 
 pub(crate) fn setup(args: SetupArgs) -> Result<()> {
@@ -74,7 +85,126 @@ pub(crate) fn setup(args: SetupArgs) -> Result<()> {
     } else {
         println!("Use the checked-in devcontainer for the canonical environment.");
     }
+    let hook_status = if args.install_tools {
+        maybe_install_repo_hooks().map(|status| (status, true))
+    } else {
+        repo_hook_status().map(|status| (status, false))
+    };
+    match hook_status {
+        Ok((status, attempted_install)) => report_hook_install_result(status, attempted_install),
+        Err(err) => eprintln!("setup: warning: could not inspect/install repo hooks: {err:#}"),
+    }
     Ok(())
+}
+
+pub(crate) fn install_hooks() -> Result<()> {
+    report_hook_install_result(maybe_install_repo_hooks()?, true);
+    Ok(())
+}
+
+pub(crate) fn doctor() -> Result<()> {
+    integrity("doctor", ["--strict"])?;
+    match repo_hook_status() {
+        Ok(HookStatus::Installed) => {}
+        Ok(HookStatus::Default) => {
+            eprintln!(
+                "doctor: warning: repo-managed hooks are not installed. Run `cargo xtask install-hooks` to wire `.githooks/pre-commit`."
+            );
+        }
+        Ok(HookStatus::Custom(path)) => {
+            eprintln!(
+                "doctor: warning: custom git hooks path `{path}` is active, so `.githooks/pre-commit` is not managing pre-commit checks. Clear or change `core.hooksPath`, then run `cargo xtask install-hooks` if you want the repo hook surface."
+            );
+        }
+        Err(err) => {
+            eprintln!("doctor: warning: could not inspect git hooks path: {err:#}");
+        }
+    }
+    Ok(())
+}
+
+fn maybe_install_repo_hooks() -> Result<HookStatus> {
+    let root = repo_root()?;
+    let hook = root.join(PRE_COMMIT_HOOK);
+    if !hook.exists() {
+        bail!(
+            "repo hook surface is missing `{}`; restore the tracked hook before installing",
+            hook.display()
+        );
+    }
+
+    match repo_hook_status()? {
+        HookStatus::Installed => Ok(HookStatus::Installed),
+        HookStatus::Custom(path) => Ok(HookStatus::Custom(path)),
+        HookStatus::Default => {
+            let mut command = Command::new("git");
+            command
+                .current_dir(&root)
+                .args(["config", "core.hooksPath", REPO_HOOKS_PATH]);
+            run(command)?;
+            Ok(HookStatus::Installed)
+        }
+    }
+}
+
+fn repo_hook_status() -> Result<HookStatus> {
+    let root = repo_root()?;
+    let output = Command::new("git")
+        .current_dir(&root)
+        .args(["config", "--get", "core.hooksPath"])
+        .output()
+        .context("inspect git core.hooksPath")?;
+
+    if output.status.success() {
+        let path = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+        let default_hooks_dir = root.join(".git").join("hooks");
+        if path.is_empty()
+            || path == ".git/hooks"
+            || Path::new(&path) == default_hooks_dir.as_path()
+        {
+            return Ok(HookStatus::Default);
+        }
+        if path == REPO_HOOKS_PATH {
+            let hook = root.join(PRE_COMMIT_HOOK);
+            if hook.exists() {
+                return Ok(HookStatus::Installed);
+            }
+            return Ok(HookStatus::Custom(path));
+        }
+        return Ok(HookStatus::Custom(path));
+    }
+
+    if output.status.code() == Some(1) {
+        return Ok(HookStatus::Default);
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    bail!(
+        "git config --get core.hooksPath failed with status {}: {}",
+        output.status,
+        stderr.trim()
+    )
+}
+
+fn report_hook_install_result(status: HookStatus, attempted_install: bool) {
+    match status {
+        HookStatus::Installed if attempted_install => {
+            println!("Repo hooks are installed at `{REPO_HOOKS_PATH}`.");
+        }
+        HookStatus::Installed => {
+            println!("Repo hooks are already installed at `{REPO_HOOKS_PATH}`.");
+        }
+        HookStatus::Default => {
+            println!(
+                "Repo hooks are not installed. Run `cargo xtask install-hooks` to wire `.githooks/pre-commit`."
+            );
+        }
+        HookStatus::Custom(path) => {
+            println!(
+                "Custom git hooks path `{path}` is active; leaving it unchanged. To opt into the repo-managed hook surface, set `git config core.hooksPath {REPO_HOOKS_PATH}` or clear the custom path first, then run `cargo xtask install-hooks`."
+            );
+        }
+    }
 }
 
 fn ensure_binstall_helper() -> Result<()> {
@@ -232,67 +362,92 @@ fn assert_mutation_score(output_dir: &Path, min_catch_pct: u32) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn mutants(args: MutantsArgs) -> Result<()> {
-    let base_all = [
-        "mutants",
-        "--file",
-        "src/store/*.rs",
-        "--file",
-        "src/wire.rs",
-        "--file",
-        "src/guard/*.rs",
-        "--file",
-        "src/pipeline/*.rs",
-        "--exclude",
-        "src/store/ancestors_clock.rs",
-        "--all-features",
-        "--test-tool",
-        "cargo",
-    ];
-    let base_min = [
-        "mutants",
-        "--file",
-        "src/store/*.rs",
-        "--exclude",
-        "src/store/ancestors_hash.rs",
-        "--no-default-features",
-        "--test-tool",
-        "cargo",
-    ];
+fn mutants_command(surface: MutantSurface, shard: Option<&str>) -> Vec<String> {
+    let mut args: Vec<String> = match surface {
+        MutantSurface::AllFeatures => [
+            "mutants",
+            "--file",
+            "src/store/*.rs",
+            "--file",
+            "src/wire.rs",
+            "--file",
+            "src/guard/*.rs",
+            "--file",
+            "src/pipeline/*.rs",
+            "--exclude",
+            "src/store/ancestors_clock.rs",
+            "--all-features",
+            "--test-tool",
+            "cargo",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect(),
+        MutantSurface::NoDefaultFeatures => [
+            "mutants",
+            "--file",
+            "src/store/*.rs",
+            "--exclude",
+            "src/store/ancestors_hash.rs",
+            "--no-default-features",
+            "--test-tool",
+            "cargo",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect(),
+    };
 
+    if let Some(shard) = shard {
+        args.push("--shard".to_owned());
+        args.push(shard.to_owned());
+    }
+
+    args
+}
+
+fn run_mutants_surface(
+    surface: MutantSurface,
+    shard: Option<&str>,
+    output_dir: &Path,
+    min_catch_pct: u32,
+) -> Result<()> {
+    let _ = std::fs::remove_dir_all(output_dir);
+    let _ = cargo(mutants_command(surface, shard));
+    assert_mutation_score(output_dir, min_catch_pct)
+}
+
+pub(crate) fn mutants(args: MutantsArgs) -> Result<()> {
     let output_dir = Path::new("target/mutants.out");
     const MIN_CATCH_PCT: u32 = 20;
 
-    let clear_output = || {
-        let _ = std::fs::remove_dir_all(output_dir);
-    };
-
     match args.mode {
         MutantMode::Smoke => {
-            clear_output();
-            let _ = cargo(
-                base_all
-                    .into_iter()
-                    .chain(["--shard", "1/12"])
-                    .collect::<Vec<_>>(),
-            );
-            assert_mutation_score(output_dir, MIN_CATCH_PCT)?;
-            clear_output();
-            let _ = cargo(
-                base_min
-                    .into_iter()
-                    .chain(["--shard", "1/12"])
-                    .collect::<Vec<_>>(),
-            );
-            assert_mutation_score(output_dir, MIN_CATCH_PCT)
+            if args.surface.is_some() || args.shard.is_some() {
+                bail!("`cargo xtask mutants smoke` owns its fixed shard policy; do not pass --surface or --shard");
+            }
+            run_mutants_surface(
+                MutantSurface::AllFeatures,
+                Some("1/12"),
+                output_dir,
+                MIN_CATCH_PCT,
+            )?;
+            run_mutants_surface(
+                MutantSurface::NoDefaultFeatures,
+                Some("1/12"),
+                output_dir,
+                MIN_CATCH_PCT,
+            )
         }
         MutantMode::Full => {
-            clear_output();
-            let _ = cargo(base_all);
-            assert_mutation_score(output_dir, MIN_CATCH_PCT)?;
-            clear_output();
-            let _ = cargo(base_min);
-            assert_mutation_score(output_dir, MIN_CATCH_PCT)
+            let surfaces = args.surface.map_or_else(
+                || vec![MutantSurface::AllFeatures, MutantSurface::NoDefaultFeatures],
+                |surface| vec![surface],
+            );
+            for surface in surfaces {
+                run_mutants_surface(surface, args.shard.as_deref(), output_dir, MIN_CATCH_PCT)?;
+            }
+            Ok(())
         }
     }
 }
@@ -418,4 +573,58 @@ fn unpacked_package_dir(packaged_root: &Path) -> Result<String> {
     }
 
     unpacked.context("could not locate unpacked batpak package directory")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::mutants_command;
+    use crate::MutantSurface;
+
+    #[test]
+    fn mutants_full_all_features_surface_stays_xtask_owned() {
+        assert_eq!(
+            mutants_command(MutantSurface::AllFeatures, Some("3/12")),
+            vec![
+                "mutants",
+                "--file",
+                "src/store/*.rs",
+                "--file",
+                "src/wire.rs",
+                "--file",
+                "src/guard/*.rs",
+                "--file",
+                "src/pipeline/*.rs",
+                "--exclude",
+                "src/store/ancestors_clock.rs",
+                "--all-features",
+                "--test-tool",
+                "cargo",
+                "--shard",
+                "3/12",
+            ]
+            .into_iter()
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn mutants_full_no_default_surface_stays_xtask_owned() {
+        assert_eq!(
+            mutants_command(MutantSurface::NoDefaultFeatures, None),
+            vec![
+                "mutants",
+                "--file",
+                "src/store/*.rs",
+                "--exclude",
+                "src/store/ancestors_hash.rs",
+                "--no-default-features",
+                "--test-tool",
+                "cargo",
+            ]
+            .into_iter()
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+        );
+    }
 }

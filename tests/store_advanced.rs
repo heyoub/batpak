@@ -18,7 +18,6 @@
 //! PROVES: LAW-001 (No Fake Success), LAW-003 (No Orphan Infrastructure — exercises full public API)
 //! DEFENDS: FM-009 (Polite Downgrade — restart_policy wired), FM-011 (Error Path Hollowing), FM-013 (Coverage Mirage)
 //! INVARIANTS: INV-CONC (CAS, idempotency), INV-TEMP (walk_ancestors, compaction), INV-PERF (fd_budget)
-//! [SPEC:tests/store_advanced.rs]
 
 use batpak::event::Reactive;
 use batpak::prelude::*;

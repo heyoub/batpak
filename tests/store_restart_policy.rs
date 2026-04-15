@@ -1,7 +1,6 @@
 #![cfg(feature = "dangerous-test-hooks")]
 #![allow(clippy::panic)] // tests use panic! to escape the retry-poll loops
 //! Restart policy tests split out of store_advanced.rs.
-//! [SPEC:tests/store_restart_policy.rs]
 
 use batpak::prelude::*;
 use batpak::store::{RestartPolicy, Store, StoreConfig, StoreError, WriterConfig};

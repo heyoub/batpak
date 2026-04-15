@@ -1,6 +1,5 @@
 //! Benchmark: subscriber fanout under workload and micro-cost shapes.
 //!
-//! [SPEC:benches/subscription_fanout.rs]
 
 mod common;
 

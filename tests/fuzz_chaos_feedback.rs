@@ -24,7 +24,6 @@
 //!   4. Extended results feed back through stricter gates
 //!
 //! Run with: cargo test --test fuzz_chaos_feedback --all-features --release
-//! [SPEC:tests/fuzz_chaos_feedback.rs]
 
 use batpak::prelude::*;
 use batpak::store::segment::{frame_decode, frame_encode};
