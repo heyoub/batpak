@@ -19,14 +19,14 @@ pub enum SyncMode {
 ///
 /// Base AoS maps are always present. This type controls which additional
 /// overlays are materialized alongside them.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct IndexTopology {
     /// Enable the SoA overlay for broad kind/scope scans.
-    pub soa: bool,
+    soa: bool,
     /// Enable the SoAoS entity-group overlay for entity-local queries.
-    pub entity_groups: bool,
+    entity_groups: bool,
     /// Enable the AoSoA64 tiled overlay for replay/scanning hot loops.
-    pub tiles64: bool,
+    tiles64: bool,
 }
 
 impl IndexTopology {
@@ -91,6 +91,18 @@ impl IndexTopology {
     pub fn with_tiles64(mut self, enabled: bool) -> Self {
         self.tiles64 = enabled;
         self
+    }
+
+    pub(crate) fn soa_enabled(&self) -> bool {
+        self.soa
+    }
+
+    pub(crate) fn entity_groups_enabled(&self) -> bool {
+        self.entity_groups
+    }
+
+    pub(crate) fn tiles64_enabled(&self) -> bool {
+        self.tiles64
     }
 }
 
@@ -296,7 +308,7 @@ impl StoreConfig {
             ));
         }
         // group_commit_max_batch: 0 = unbounded drain (writer drains all pending
-        // appends before syncing); 1 = per-event sync (default, backward compatible);
+        // appends before syncing); 1 = per-event sync (default single-event behavior);
         // N > 1 = drain up to N-1 additional appends before syncing.
         // All values are valid; no range check needed.
         Ok(())
@@ -377,8 +389,8 @@ impl StoreConfig {
         self
     }
 
-    /// Set maximum appends batched before a single fsync (group commit).
-    /// Default: 1 (per-event, backward-compatible). When > 1, all appends
+    /// Set maximum appends batched before a single fsync.
+    /// Default: 1 (per-event sync). When > 1, all appends
     /// must include an idempotency key for crash safety.
     pub fn with_group_commit_max_batch(mut self, group_commit_max_batch: u32) -> Self {
         self.batch.group_commit_max_batch = group_commit_max_batch;

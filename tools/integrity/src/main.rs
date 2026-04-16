@@ -332,22 +332,25 @@ fn structural_check() -> Result<()> {
     Ok(())
 }
 
-/// Assert that the GitHub Actions workflow does not drift from the local
+/// Assert that the live GitHub Actions workflows do not drift from the local
 /// `cargo xtask` command surface and the canonical devcontainer Dockerfile.
 ///
 /// This is the safety harness that catches the kind of drift we hit
-/// repeatedly during the v0.3 prep work: someone updates `.github/workflows/ci.yml`
-/// without updating the xtask source tree (or vice versa), and CI passes
-/// locally but fails on GitHub because the two pipelines run different
-/// commands. The check is purely mechanical:
+/// repeatedly during the v0.3 prep work: someone updates a workflow without
+/// updating the xtask source tree (or vice versa), and CI passes locally but
+/// fails on GitHub because the two pipelines run different commands. The check
+/// is purely mechanical:
 ///
-/// 1. Every `cargo xtask <subcommand>` referenced in `ci.yml` must exist
+/// 1. Every `cargo xtask <subcommand>` referenced in `ci.yml`, `perf.yml`,
+///    or `release.yml` must exist
 ///    as an `XtaskCommand` variant in `tools/xtask/src/main.rs`.
 /// 2. Every tool installed via `taiki-e/install-action` in the workflow
-///    must also be installed by `cargo xtask setup` in the xtask source tree.
+///    must also be installed by `cargo xtask setup --install-tools` in the xtask source tree.
 /// 3. The Dockerfile and the workflow must agree on tool versions for
 ///    `cargo-deny`, `cargo-llvm-cov`, `cargo-mutants`, `cargo-nextest`, and
 ///    `cargo-audit` (the tools we care about pinning).
+/// 4. Workflow-owned matrix values for perf surfaces and scheduled mutation
+///    shards must stay inside the exact xtask-owned truth set.
 ///
 /// The implementation uses string-grep instead of YAML parsing to keep the
 /// dependency surface minimal and the failure messages legible. If the
@@ -357,20 +360,32 @@ fn structural_check() -> Result<()> {
 fn check_ci_parity(repo_root: &Path) -> Result<()> {
     let ci_yml = fs::read_to_string(repo_root.join(".github/workflows/ci.yml"))
         .context("read .github/workflows/ci.yml")?;
+    let perf_yml = fs::read_to_string(repo_root.join(".github/workflows/perf.yml"))
+        .context("read .github/workflows/perf.yml")?;
+    let release_yml = fs::read_to_string(repo_root.join(".github/workflows/release.yml"))
+        .context("read .github/workflows/release.yml")?;
     let xtask_main = fs::read_to_string(repo_root.join("tools/xtask/src/main.rs"))
         .context("read tools/xtask/src/main.rs")?;
     let xtask_sources = xtask_source_text(repo_root)?;
     let dockerfile = fs::read_to_string(repo_root.join(".devcontainer/Dockerfile"))
         .context("read .devcontainer/Dockerfile")?;
+    let workflows = [
+        (".github/workflows/ci.yml", ci_yml.as_str()),
+        (".github/workflows/perf.yml", perf_yml.as_str()),
+        (".github/workflows/release.yml", release_yml.as_str()),
+    ];
 
-    // 1. Every `cargo xtask <subcommand>` in ci.yml must exist in xtask main.rs.
+    // 1. Every `cargo xtask <subcommand>` in the live workflows must exist in
+    //    xtask main.rs.
     //    Match `cargo xtask <word>` patterns and look the word up in the
     //    XtaskCommand enum.
     let xtask_cmd_re = Regex::new(r"cargo\s+xtask\s+([a-z][a-z0-9-]*)").unwrap();
     let mut found_subcommands: BTreeSet<String> = BTreeSet::new();
-    for cap in xtask_cmd_re.captures_iter(&ci_yml) {
-        if let Some(sub) = cap.get(1) {
-            found_subcommands.insert(sub.as_str().to_string());
+    for (_, workflow) in workflows {
+        for cap in xtask_cmd_re.captures_iter(workflow) {
+            if let Some(sub) = cap.get(1) {
+                found_subcommands.insert(sub.as_str().to_string());
+            }
         }
     }
     for sub in &found_subcommands {
@@ -398,9 +413,35 @@ fn check_ci_parity(repo_root: &Path) -> Result<()> {
         }
     }
 
+    assert_workflow_list_values(
+        ".github/workflows/perf.yml",
+        &perf_yml,
+        "surface",
+        &["neutral", "native"],
+    )?;
+    assert_workflow_list_values(
+        ".github/workflows/ci.yml",
+        &ci_yml,
+        "surface",
+        &["all-features", "no-default-features"],
+    )?;
+    assert_workflow_list_values(
+        ".github/workflows/ci.yml",
+        &ci_yml,
+        "shard",
+        &[
+            "1/12", "2/12", "3/12", "4/12", "5/12", "6/12", "7/12", "8/12", "9/12", "10/12",
+            "11/12", "12/12",
+        ],
+    )?;
+    ensure(
+        release_yml.contains("bash ./scripts/run-in-devcontainer.sh 'cargo xtask release --dry-run'"),
+        "ci-parity: `.github/workflows/release.yml` must run `cargo xtask release --dry-run` through `scripts/run-in-devcontainer.sh`.",
+    )?;
+
     // 2. Every tool installed via taiki-e/install-action in ci.yml must
     //    be pinned to the same version that `.devcontainer/Dockerfile`
-    //    and `cargo xtask setup` use.
+    //    and `cargo xtask setup --install-tools` use.
     //
     //    This guards three drift vectors at once:
     //    (a) workflow installs an unpinned tool (Windows CI silently picks
@@ -423,7 +464,7 @@ fn check_ci_parity(repo_root: &Path) -> Result<()> {
                  taiki-e/install-action without a version pin. Use \
                  `tool: {tool}@<version>` so Linux and Windows CI install the \
                  same version. Match the pin in `.devcontainer/Dockerfile` \
-                 and `cargo xtask setup`."
+                 and `cargo xtask setup --install-tools`."
             );
         }
     }
@@ -442,7 +483,7 @@ fn check_ci_parity(repo_root: &Path) -> Result<()> {
         if !xtask_sources.contains(&setup_key) {
             bail!(
                 "ci-parity: workflow installs `{tool}@{wf_ver}` via \
-                 taiki-e/install-action but `cargo xtask setup` in \
+                 taiki-e/install-action but `cargo xtask setup --install-tools` in \
                  tools/xtask/src/ does not list a `{setup_key}` entry. \
                  Either add it to setup or remove from the workflow."
             );
@@ -456,7 +497,7 @@ fn check_ci_parity(repo_root: &Path) -> Result<()> {
             Some(x) if &x != wf_ver => {
                 bail!(
                     "ci-parity: tool `{tool}` is pinned to `{wf_ver}` in \
-                     `.github/workflows/ci.yml` but `{x}` in `cargo xtask setup` \
+                     `.github/workflows/ci.yml` but `{x}` in `cargo xtask setup --install-tools` \
                      (tools/xtask/src/). Pick one version and update both."
                 );
             }
@@ -464,7 +505,7 @@ fn check_ci_parity(repo_root: &Path) -> Result<()> {
                 bail!(
                     "ci-parity: tool `{tool}` is pinned in \
                      `.github/workflows/ci.yml` but unpinned (or missing) in \
-                     `cargo xtask setup`. Add the same pin so local installs \
+                     `cargo xtask setup --install-tools`. Add the same pin so local installs \
                      match the workflow."
                 );
             }
@@ -495,7 +536,7 @@ fn check_ci_parity(repo_root: &Path) -> Result<()> {
             (Some(d), Some(x)) if d != x => {
                 bail!(
                     "ci-parity: tool `{tool}` is pinned to `{d}` in \
-                     `.devcontainer/Dockerfile` but `{x}` in `cargo xtask setup` \
+                     `.devcontainer/Dockerfile` but `{x}` in `cargo xtask setup --install-tools` \
                      (tools/xtask/src/). Pick one version and update both."
                 );
             }
@@ -503,7 +544,7 @@ fn check_ci_parity(repo_root: &Path) -> Result<()> {
                 bail!(
                     "ci-parity: tool `{tool}` is pinned in \
                      `.devcontainer/Dockerfile` but unpinned (or missing) in \
-                     `cargo xtask setup`. Add the same pin to xtask setup so \
+                     `cargo xtask setup --install-tools`. Add the same pin to xtask setup so \
                      local installs match the container."
                 );
             }
@@ -512,6 +553,79 @@ fn check_ci_parity(repo_root: &Path) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn assert_workflow_list_values(
+    workflow_name: &str,
+    workflow: &str,
+    key: &str,
+    expected: &[&str],
+) -> Result<()> {
+    let expected_set: BTreeSet<String> = expected.iter().map(|value| (*value).to_owned()).collect();
+    let actual_set: BTreeSet<String> = workflow_list_values(workflow, key)?.into_iter().collect();
+    ensure(
+        actual_set == expected_set,
+        format!(
+            "ci-parity: `{workflow_name}` must declare `{key}` values {:?}, found {:?}",
+            expected, actual_set
+        ),
+    )?;
+    Ok(())
+}
+
+fn workflow_list_values(workflow: &str, key: &str) -> Result<Vec<String>> {
+    let inline_re = Regex::new(&format!(r"^\s*{}\s*:\s*\[(?P<values>[^\]]+)\]\s*$", key)).unwrap();
+    let mut lines = workflow.lines().enumerate().peekable();
+    while let Some((index, line)) = lines.next() {
+        if let Some(caps) = inline_re.captures(line) {
+            let values = caps["values"]
+                .split(',')
+                .map(|value| value.trim().trim_matches('"').trim_matches('\'').to_owned())
+                .filter(|value| !value.is_empty())
+                .collect::<Vec<_>>();
+            return Ok(values);
+        }
+
+        let trimmed = line.trim();
+        let Some(rest) = trimmed.strip_prefix(key) else {
+            continue;
+        };
+        if !rest.trim_start().starts_with(':') {
+            continue;
+        }
+        let base_indent = indentation(line);
+        let mut values = Vec::new();
+        while let Some((_, next_line)) = lines.peek() {
+            let next_trimmed = next_line.trim();
+            if next_trimmed.is_empty() {
+                lines.next();
+                continue;
+            }
+            let next_indent = indentation(next_line);
+            if next_indent <= base_indent {
+                break;
+            }
+            if let Some(value) = next_trimmed.strip_prefix("- ") {
+                values.push(value.trim().trim_matches('"').trim_matches('\'').to_owned());
+                lines.next();
+                continue;
+            }
+            break;
+        }
+        if !values.is_empty() {
+            return Ok(values);
+        }
+        bail!(
+            "ci-parity: found `{key}:` in workflow but could not read any values near line {}",
+            index + 1
+        );
+    }
+
+    bail!("ci-parity: could not find `{key}` list in workflow")
+}
+
+fn indentation(line: &str) -> usize {
+    line.len() - line.trim_start().len()
 }
 
 fn xtask_source_text(repo_root: &Path) -> Result<String> {
@@ -826,7 +940,7 @@ fn relative(root: &Path, path: &Path) -> String {
 
 fn load_yaml<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T> {
     let content = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
-    serde_yaml::from_str(&content).with_context(|| format!("parse {}", path.display()))
+    yaml_serde::from_str(&content).with_context(|| format!("parse {}", path.display()))
 }
 
 fn ensure_unique_ids<'a>(ids: impl IntoIterator<Item = &'a str>, context: &str) -> Result<()> {

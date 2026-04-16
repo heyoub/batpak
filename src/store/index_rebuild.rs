@@ -274,6 +274,8 @@ fn scanned_entries_from_sidx_footer(
                         (entry.causation_id != 0).then_some(entry.causation_id),
                         entry.wall_ms,
                         entry.clock,
+                        entry.dag_lane,
+                        entry.dag_depth,
                         kind,
                     ),
                     entity,
@@ -357,6 +359,8 @@ fn entry_from_scan(
         kind: se.header.event_kind,
         wall_ms: se.header.position.wall_ms,
         clock,
+        dag_lane: se.header.position.lane,
+        dag_depth: se.header.position.depth,
         hash_chain: se.hash_chain,
         disk_pos: DiskPos {
             segment_id: se.segment_id,

@@ -8,14 +8,18 @@ All notable changes to this project will be documented in this file.
 - Root docs now treat `README.md` as the primary entrypoint and keep historical material out of the tracked repo
 - The public scan-configuration model now centers on `IndexTopology` instead of older layout/view compatibility naming
 - Projection replay naming now centers on `ReplayLane`, `JsonValueInput`, and `RawMsgpackInput`
+- Append options now carry an explicit `AppendPositionHint` for DAG `lane`/`depth` hints while writer-owned HLC wall/counter and sequence remain authoritative
+- Cold-start persistence artifacts now advance together: SIDX uses `SDX2`, checkpoints are v4, and mmap index snapshots are v3 so non-root lane/depth survives reopen across every restore path
 
 ### Added
 - Root-doc truth surface centered on `README.md`, `GUIDE.md`, and `REFERENCE.md`
 - Parser-backed architecture linting in `tools/integrity/src/architecture_lints.rs`
 - Topology/replay/writer measurement surfaces in `benches/topology_matrix.rs`, `benches/replay_lanes.rs`, and `benches/writer_staging.rs`
+- End-to-end lane/depth position-hint coverage across live append, mmap reopen, checkpoint reopen, full rebuild, and SIDX header reconstruction
 
 ### Notes
 - Released sections below preserve the public names that shipped in those releases, even when newer unreleased work has renamed the live surface since then.
+- Upgrade note: pre-existing artifacts remain readable. Old SIDX footers are ignored and fall back to scan; checkpoint v3 and mmap v1/v2 load with `dag_lane=0` and `dag_depth=0`, which is the correct root default for pre-feature events.
 
 ## [0.5.0] - 2026-04-13
 
@@ -26,7 +30,6 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 - `ProjectionInput` trait with `ValueInput` (serde_json::Value replay) and `RawMsgpackInput` (raw bytes replay) — projections choose their decode mode via one associated type
-- `ProjectionMode` enum for compile-time replay lane selection
 - `RoutingSummary` / `EntityRunTable` internal substrate consumed by restore, projection replay, and view materialization — one traversal, many products
 - Entity-partitioned bulk restore: mixed-entity workloads build per-entity streams from pre-grouped runs; single-entity corpora hit a dedicated fast path
 - Raw projection example (`examples/raw_projection_counter.rs`) and correctness tests (`tests/raw_projection_mode.rs`)

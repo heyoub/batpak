@@ -308,6 +308,10 @@ pub struct IndexEntry {
     pub wall_ms: u64,
     /// Per-entity monotonic sequence number.
     pub clock: u32,
+    /// Branch lane within the logical event DAG.
+    pub dag_lane: u32,
+    /// Branch depth within the logical event DAG.
+    pub dag_depth: u32,
     /// Blake3 hash chain linking this event to its predecessor.
     pub hash_chain: HashChain,
     /// Location of the event frame on disk.
@@ -1189,6 +1193,8 @@ mod tests {
             kind: EventKind::custom(0xF, 1),
             wall_ms: seq,
             clock: u32::try_from(seq).expect("small seq"),
+            dag_lane: 0,
+            dag_depth: 0,
             hash_chain: HashChain::default(),
             disk_pos: DiskPos {
                 segment_id: 0,

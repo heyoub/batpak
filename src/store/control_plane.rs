@@ -426,11 +426,14 @@ impl AppendSubmission {
     }
 
     fn guards(self) -> AppendGuards {
+        let position_hint = self.options.position_hint.unwrap_or_default();
         AppendGuards {
             correlation_id: self.correlation_id,
             causation_id: self.options.causation_id,
             expected_sequence: self.options.expected_sequence,
             idempotency_key: self.options.idempotency_key,
+            dag_lane: position_hint.lane,
+            dag_depth: position_hint.depth,
         }
     }
 

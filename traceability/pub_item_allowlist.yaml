@@ -12,6 +12,8 @@
   justification: typestate marker exercised by compaction and segment lifecycle tests
 - name: SegmentHeader
   justification: serialization shape tested indirectly through wire and fuzz coverage
+- name: needs_rotation
+  justification: internal segment rotation helper exercised through store integration and rotation tests without direct name references
 - name: StoreDiagnostics
   justification: surfaced through diagnostics tests instead of direct type-name references
 - name: CompactionResult
@@ -26,6 +28,10 @@
   justification: called by writer on segment rotation; tested through store integration tests that trigger rotation
 - name: IndexTopology
   justification: config topology type tested through index_topology.rs, unified_red.rs, and bench fixtures
+- name: watch_projection
+  justification: reactive projection API exercised through unified_red watch_projection tests without direct type-name references
+- name: ProjectionWatcher
+  justification: returned by watch_projection and exercised through unified_red projection watch tests without direct naming in every witness
 - name: BatchAppendItem
   justification: public batch API type tested through tests/atomic_batch.rs
 - name: CausationRef

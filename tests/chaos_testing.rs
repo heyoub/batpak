@@ -11,8 +11,8 @@
     clippy::unused_enumerate_index
 )]
 //! Chaos testing: fault injection, data corruption, concurrent stress.
-//! The library tests itself under adversarial conditions and feeds
-//! results through its own Gate system for actionable diagnostics.
+//! The library tests itself under adversarial conditions with direct
+//! assertions and panic messages that point back to the runtime seam.
 //!
 //! Run with: cargo test --test chaos_testing --all-features
 //! Default depth: 500 iterations (override with `CHAOS_ITERATIONS=<n>`)
@@ -28,7 +28,8 @@ const DEFAULT_CHAOS_ITERATIONS: usize = 500;
 
 fn effective_chaos_iterations(env_value: Option<&str>) -> usize {
     env_value
-        .and_then(|value| value.parse().ok())
+        .and_then(|value| value.parse::<usize>().ok())
+        .map(|iterations| iterations.max(1))
         .unwrap_or(DEFAULT_CHAOS_ITERATIONS)
 }
 
@@ -40,6 +41,7 @@ fn chaos_iterations() -> usize {
 fn chaos_iterations_default_to_repo_truth() {
     assert_eq!(effective_chaos_iterations(None), DEFAULT_CHAOS_ITERATIONS);
     assert_eq!(effective_chaos_iterations(Some("5000")), 5000);
+    assert_eq!(effective_chaos_iterations(Some("0")), 1);
     assert_eq!(
         effective_chaos_iterations(Some("not-a-number")),
         DEFAULT_CHAOS_ITERATIONS

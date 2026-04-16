@@ -89,7 +89,7 @@ fn cold_start_1k_events_under_threshold() {
 
     // Dogfood: use our own Gate system to validate performance
     let mut gates = GateSet::new();
-    // SPEC target: cold start < 200ms for 1K events on production hardware.
+    // Reference target: cold start < 200ms for 1K events on production hardware.
     // CI threshold: 2000ms (10x) because CI runners are slow, virtualized, and
     // share resources. The criterion bench (benches/cold_start.rs) tracks the
     // actual distribution — this gate catches gross regressions.

@@ -2263,7 +2263,7 @@ impl batpak::event::Reactive<serde_json::Value> for OrderReactor {
 
 #[test]
 fn reactive_subscribe_react_append_pattern() {
-    // This test proves the SPEC's "7 lines of glue" pattern works:
+    // This test proves the minimal reactive wiring pattern works:
     // subscribe → receive → react() → append_reaction()
 
     let dir = TempDir::new().expect("temp dir");

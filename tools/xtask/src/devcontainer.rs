@@ -9,7 +9,12 @@ use std::process::{Command, Stdio};
 
 const IMAGE_HASH_LABEL: &str = "io.batpak.devcontainer-hash";
 const WORKSPACE_DIR: &str = "/workspace/batpak";
-const FORWARDED_ENV_VARS: &[&str] = &["CARGO_TERM_COLOR", "PROPTEST_CASES", "CHAOS_ITERATIONS"];
+const FORWARDED_ENV_VARS: &[&str] = &[
+    "CARGO_TERM_COLOR",
+    "PROPTEST_CASES",
+    "CHAOS_ITERATIONS",
+    "CARGO_INCREMENTAL",
+];
 
 pub(crate) fn devcontainer_exec(args: DevcontainerExecArgs) -> Result<()> {
     if args.command.is_empty() {
@@ -174,7 +179,7 @@ mod tests {
     use std::ffi::OsString;
 
     #[test]
-    fn single_string_command_preserves_legacy_shell_mode() {
+    fn single_string_command_uses_shell_entry_path() {
         let args = vec!["cargo xtask ci".to_owned()];
         assert_eq!(
             inner_command(&args),

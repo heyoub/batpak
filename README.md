@@ -9,7 +9,7 @@ front door.
 ## Start In 5 Minutes
 
 ```bash
-cargo xtask setup
+cargo xtask setup --install-tools
 cargo run --example quickstart
 ```
 
@@ -65,6 +65,7 @@ inside it.
 - Fault injection framework (`dangerous-test-hooks` feature) for chaos testing batch and write paths
 - Gate / receipt workflow for policy enforcement
 - Event-sourced projections with optional native file-backed cache
+- Optional append-time DAG `lane`/`depth` hints without giving up writer-owned HLC wall time, counter, or sequence
 - `subscribe_lossy` / `cursor_guaranteed` delivery names that say what they do
 - `close(self) -> Closed` for explicit durable shutdown; `Drop` is best-effort only
 - Query/read operations yield `StoredEvent<serde_json::Value>` at the storage boundary
@@ -80,10 +81,28 @@ you want to deserialize directly from MessagePack bytes inside the projection.
 - `cargo run --example event_sourced_counter` shows the default JSON lane
 - `cargo run --example raw_projection_counter` shows the raw replay lane
 
-The current `benches/replay_lanes.rs` quick surface consistently shows raw
-replay ahead of `JsonValueInput` on the 1k-event counter-shaped workload, so
+The current `benches/replay_lanes.rs` witness surface shows raw replay ahead of
+`JsonValueInput` on the 1k-event counter-shaped workload in the current tree, so
 raw replay should be treated as real engineering value, not as an obscure
-trick.
+trick. Treat that as a benchmark witness, not a timeless guarantee.
+
+## Storage Upgrade Notes
+
+Recent unreleased work changed the cold-start artifact formats together so
+append-time DAG `lane`/`depth` hints survive every restore path:
+
+- SIDX footers now use `SDX2`
+- checkpoints are now v4
+- mmap index snapshots are now v3
+
+Compatibility stays additive:
+
+- old SIDX footers are ignored and reopen falls back to scan
+- checkpoint v3 loads with root `lane=0` / `depth=0`
+- mmap v1/v2 loads with root `lane=0` / `depth=0`
+
+Caller control stays intentionally narrow: `AppendPositionHint` only supplies
+`lane` and `depth`. The writer still owns `wall_ms`, `counter`, and `sequence`.
 
 ## Docs
 
@@ -115,6 +134,47 @@ cargo xtask cover        # coverage feedback with retained artifacts under targe
 ```
 
 `just` remains available as shorthand, but `cargo xtask` is the canonical command surface.
+
+## Dev Speed Setup
+
+batpak keeps repository-tracked Cargo config portable. Put machine-specific
+speedups in `~/.cargo/config.toml`, not in this repo. Cargo does not
+automatically load a repo-local `.cargo/config.local.toml`.
+
+Recommended tools:
+
+```bash
+cargo install cargo-nextest cargo-llvm-cov sccache
+rustup component add llvm-tools-preview
+```
+
+Recommended `~/.cargo/config.toml` shape:
+
+```toml
+[build]
+rustc-wrapper = "sccache"
+
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "target-cpu=native"]
+```
+
+If you want to try `mold`, benchmark it against the current linker on this
+machine before adopting it:
+
+```toml
+[target.x86_64-unknown-linux-gnu]
+linker = "clang"
+rustflags = ["-C", "link-arg=-fuse-ld=mold", "-C", "target-cpu=native"]
+```
+
+Daily-loop commands:
+
+```bash
+cargo nextest run
+cargo nextest run --all-features
+cargo llvm-cov nextest
+cargo build --timings
+```
 
 ## Docs Policy
 

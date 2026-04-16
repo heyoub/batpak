@@ -75,6 +75,8 @@ impl EventHeader {
         causation_id: Option<u128>,
         wall_ms: u64,
         clock: u32,
+        lane: u32,
+        depth: u32,
         event_kind: EventKind,
     ) -> Self {
         Self {
@@ -82,7 +84,7 @@ impl EventHeader {
             correlation_id,
             causation_id,
             timestamp_us: (wall_ms * 1000) as i64, // approximate: ms → µs
-            position: DagPosition::child_at(clock, wall_ms, 0),
+            position: DagPosition::with_hlc(wall_ms, 0, depth, lane, clock),
             payload_size: 0,
             event_kind,
             flags: 0,
@@ -117,5 +119,30 @@ impl EventHeader {
         {
             now_us.saturating_sub(self.timestamp_us).max(0) as u64
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::EventHeader;
+    use crate::event::EventKind;
+
+    #[test]
+    fn from_sidx_preserves_non_root_lane_depth() {
+        let header = EventHeader::from_sidx(
+            1,
+            2,
+            Some(3),
+            1_700_000_000_000,
+            9,
+            4,
+            2,
+            EventKind::DATA,
+        );
+
+        assert_eq!(header.position.wall_ms, 1_700_000_000_000);
+        assert_eq!(header.position.sequence, 9);
+        assert_eq!(header.position.lane, 4);
+        assert_eq!(header.position.depth, 2);
     }
 }

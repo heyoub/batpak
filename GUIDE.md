@@ -8,7 +8,7 @@ invariants.
 ## Quickstart
 
 ```bash
-cargo xtask setup
+cargo xtask setup --install-tools
 cargo run --example quickstart
 ```
 
@@ -103,6 +103,20 @@ store.append_with_options(&coord, kind, &payload, opts)?;
 
 Idempotency keys are required when `group_commit_max_batch > 1`.
 
+Position hints:
+
+```rust
+let opts = AppendOptions::new().with_position_hint(AppendPositionHint::new(3, 1));
+store.append_with_options(&coord, kind, &payload, opts)?;
+```
+
+Position-hint contract:
+
+- callers control only `lane` and `depth`
+- the writer still assigns `wall_ms`, `counter`, and `sequence`
+- old checkpoints and mmap artifacts load missing lane/depth as root defaults
+- old SIDX footers fall back cleanly to scan when the new footer format is absent
+
 ## Projections
 
 A projection replays events for an entity and folds them into typed state.
@@ -161,8 +175,8 @@ shows the JSON decode lane is costing real time.
 Current bench signal:
 
 - `benches/replay_lanes.rs` is the current witness surface for the replay-lane
-  tradeoff and consistently shows `RawMsgpackInput` ahead on the 1k-event
-  counter-shaped workload
+  tradeoff and currently shows `RawMsgpackInput` ahead on the 1k-event
+  counter-shaped workload in this tree
 - `examples/event_sourced_counter.rs` is the ergonomic default template
 - `examples/raw_projection_counter.rs` is the performance-lane template
 

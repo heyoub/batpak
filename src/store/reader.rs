@@ -443,6 +443,8 @@ impl Reader {
                             },
                             se.wall_ms,
                             se.clock,
+                            se.dag_lane,
+                            se.dag_depth,
                             kind,
                         ),
                         entity,

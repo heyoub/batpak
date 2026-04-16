@@ -1361,7 +1361,7 @@ fn batch_survives_unclean_shutdown_without_sidx_footer() {
 
     // Phase 2b: locate the segment file and strip its SIDX footer in place.
     // The SIDX trailer is the last 16 bytes: [string_table_offset:u64 LE]
-    // [entry_count:u32 LE][magic:4 b"SIDX"]. Truncating to string_table_offset
+    // [entry_count:u32 LE][magic:4 b"SDX2"]. Truncating to string_table_offset
     // restores the file to its pre-SIDX state — exactly what an unclean
     // shutdown between batch sync and segment rotation/close would produce.
     let entries: Vec<_> = std::fs::read_dir(&data_dir)
@@ -1383,7 +1383,7 @@ fn batch_survives_unclean_shutdown_without_sidx_footer() {
     let trailer = &bytes[bytes.len() - 16..];
     assert_eq!(
         &trailer[12..16],
-        b"SIDX",
+        b"SDX2",
         "clean close must have written the SIDX footer (sanity check before truncation)"
     );
     let string_table_offset = u64::from_le_bytes(

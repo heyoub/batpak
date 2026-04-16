@@ -234,6 +234,10 @@
   kind: tests
   paths:
     - tests/atomic_batch.rs
+- id: ART-DAG-POSITION-HINT-TESTS
+  kind: tests
+  paths:
+    - tests/dag_position_hint.rs
 - id: ART-DX-DOCS
   kind: docs
   paths:

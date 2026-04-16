@@ -36,9 +36,9 @@ use tempfile::NamedTempFile;
 pub(crate) const CHECKPOINT_MAGIC: &[u8; 6] = b"FBATCK";
 
 /// Format version stored in the checkpoint header.
-/// v3: interner snapshot + InternId entries + persisted routing summary.
+/// v4: v3 plus persisted DAG lane/depth on each entry.
 /// v2 checkpoints remain readable as a fallback; v1 is rejected.
-pub(crate) const CHECKPOINT_VERSION: u16 = 3;
+pub(crate) const CHECKPOINT_VERSION: u16 = 4;
 
 /// Final checkpoint filename inside the data directory.
 pub(crate) const CHECKPOINT_FILENAME: &str = "index.ckpt";
@@ -68,6 +68,17 @@ struct CheckpointDataV3 {
     entries: Vec<CheckpointEntry>,
 }
 
+/// Checkpoint format v4: v3 plus DAG lane/depth inside each entry.
+#[derive(Serialize, Deserialize)]
+struct CheckpointDataV4 {
+    global_sequence: u64,
+    watermark_segment_id: u64,
+    watermark_offset: u64,
+    interner_strings: Vec<String>,
+    routing: RoutingSummary,
+    entries: Vec<CheckpointEntry>,
+}
+
 /// Checkpoint entry v2: uses InternId u32s instead of raw entity/scope strings.
 /// ~22 bytes smaller per entry than v1.
 #[derive(Serialize, Deserialize)]
@@ -85,6 +96,10 @@ pub(crate) struct CheckpointEntry {
     pub kind: EventKind,
     pub wall_ms: u64,
     pub clock: u32,
+    #[serde(default)]
+    pub dag_lane: u32,
+    #[serde(default)]
+    pub dag_depth: u32,
     pub prev_hash: [u8; 32],
     pub event_hash: [u8; 32],
     pub segment_id: u64,
@@ -146,6 +161,8 @@ fn checkpoint_entries_to_index_entries(
                 kind: ce.kind,
                 wall_ms: ce.wall_ms,
                 clock: ce.clock,
+                dag_lane: ce.dag_lane,
+                dag_depth: ce.dag_depth,
                 hash_chain: HashChain {
                     prev_hash: ce.prev_hash,
                     event_hash: ce.event_hash,
@@ -197,6 +214,8 @@ pub(crate) fn write_checkpoint(
             kind: e.kind,
             wall_ms: e.wall_ms,
             clock: e.clock,
+            dag_lane: e.dag_lane,
+            dag_depth: e.dag_depth,
             prev_hash: e.hash_chain.prev_hash,
             event_hash: e.hash_chain.event_hash,
             segment_id: e.disk_pos.segment_id,
@@ -223,7 +242,7 @@ pub(crate) fn write_checkpoint(
         recommended_restore_chunk_count(entries.len()),
     );
 
-    let data = CheckpointDataV3 {
+    let data = CheckpointDataV4 {
         global_sequence: index.global_sequence(),
         watermark_segment_id,
         watermark_offset,
@@ -423,6 +442,28 @@ pub(crate) fn try_load_checkpoint(data_dir: &Path) -> Option<LoadedCheckpointDat
                 data.routing,
             )
         }
+        4 => {
+            let data: CheckpointDataV4 = match rmp_serde::from_slice(body) {
+                Ok(d) => d,
+                Err(e) => {
+                    tracing::warn!(
+                        target: "batpak::checkpoint",
+                        path = %path.display(),
+                        error = %e,
+                        "checkpoint deserialisation failed — ignoring"
+                    );
+                    return None;
+                }
+            };
+            (
+                data.entries,
+                data.interner_strings,
+                data.watermark_segment_id,
+                data.watermark_offset,
+                data.global_sequence,
+                data.routing,
+            )
+        }
         _ => {
             tracing::warn!(
                 target: "batpak::checkpoint",
@@ -522,6 +563,8 @@ pub(crate) fn restore_from_checkpoint(
             kind: ce.kind,
             wall_ms: ce.wall_ms,
             clock: ce.clock,
+            dag_lane: ce.dag_lane,
+            dag_depth: ce.dag_depth,
             hash_chain: HashChain {
                 prev_hash: ce.prev_hash,
                 event_hash: ce.event_hash,
@@ -610,6 +653,8 @@ mod tests {
                 kind: EventKind::custom(0x1, (i & 0x0FFF) as u16),
                 wall_ms: 1_700_000_000_000 + i * 1000,
                 clock: u32::try_from(i).expect("i fits u32"),
+                dag_lane: 0,
+                dag_depth: 0,
                 hash_chain: HashChain::default(),
                 disk_pos: DiskPos {
                     segment_id: 0,
@@ -810,6 +855,8 @@ mod tests {
                 kind: e.kind,
                 wall_ms: e.wall_ms,
                 clock: e.clock,
+                dag_lane: e.dag_lane,
+                dag_depth: e.dag_depth,
                 prev_hash: e.hash_chain.prev_hash,
                 event_hash: e.hash_chain.event_hash,
                 segment_id: e.disk_pos.segment_id,
@@ -845,6 +892,96 @@ mod tests {
             !loaded.routing.chunks.is_empty(),
             "v2 fallback should synthesize chunk summaries on load"
         );
+    }
+
+    #[test]
+    fn v3_checkpoint_defaults_lane_depth_to_zero() {
+        #[derive(Serialize)]
+        struct LegacyCheckpointEntryV3 {
+            #[serde(with = "crate::wire::u128_bytes")]
+            event_id: u128,
+            #[serde(with = "crate::wire::u128_bytes")]
+            correlation_id: u128,
+            #[serde(with = "crate::wire::option_u128_bytes")]
+            causation_id: Option<u128>,
+            entity_id: u32,
+            scope_id: u32,
+            kind: EventKind,
+            wall_ms: u64,
+            clock: u32,
+            prev_hash: [u8; 32],
+            event_hash: [u8; 32],
+            segment_id: u64,
+            offset: u64,
+            length: u32,
+            global_sequence: u64,
+        }
+
+        #[derive(Serialize)]
+        struct LegacyCheckpointDataV3 {
+            global_sequence: u64,
+            watermark_segment_id: u64,
+            watermark_offset: u64,
+            interner_strings: Vec<String>,
+            routing: RoutingSummary,
+            entries: Vec<LegacyCheckpointEntryV3>,
+        }
+
+        let tmp = TempDir::new().expect("tempdir");
+        let dir = tmp.path();
+        touch_segment(dir, 0);
+
+        let idx = make_index(4);
+        let mut legacy_entries: Vec<LegacyCheckpointEntryV3> = idx
+            .all_entries()
+            .into_iter()
+            .map(|e| LegacyCheckpointEntryV3 {
+                event_id: e.event_id,
+                correlation_id: e.correlation_id,
+                causation_id: e.causation_id,
+                entity_id: e.entity_id.as_u32(),
+                scope_id: e.scope_id.as_u32(),
+                kind: e.kind,
+                wall_ms: e.wall_ms,
+                clock: e.clock,
+                prev_hash: e.hash_chain.prev_hash,
+                event_hash: e.hash_chain.event_hash,
+                segment_id: e.disk_pos.segment_id,
+                offset: e.disk_pos.offset,
+                length: e.disk_pos.length,
+                global_sequence: e.global_sequence,
+            })
+            .collect();
+        legacy_entries.sort_by_key(|entry| entry.global_sequence);
+        let mut interner_strings = vec![String::new()];
+        interner_strings.extend(idx.interner.to_snapshot());
+        let mut sorted_entries = idx.all_entries();
+        sorted_entries.sort_by_key(|entry| entry.global_sequence);
+        let routing = RoutingSummary::from_sorted_entries(
+            &sorted_entries,
+            recommended_restore_chunk_count(sorted_entries.len()),
+        );
+        let body = rmp_serde::to_vec_named(&LegacyCheckpointDataV3 {
+            global_sequence: idx.global_sequence(),
+            watermark_segment_id: 0,
+            watermark_offset: 0,
+            interner_strings,
+            routing,
+            entries: legacy_entries,
+        })
+        .expect("serialize v3 checkpoint");
+        let crc = crc32fast::hash(&body);
+        let path = dir.join(CHECKPOINT_FILENAME);
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(CHECKPOINT_MAGIC);
+        bytes.extend_from_slice(&3u16.to_le_bytes());
+        bytes.extend_from_slice(&crc.to_le_bytes());
+        bytes.extend_from_slice(&body);
+        std::fs::write(&path, bytes).expect("write v3 checkpoint");
+
+        let loaded = try_load_checkpoint_snapshot(dir).expect("load v3 checkpoint snapshot");
+        assert!(loaded.entries.iter().all(|entry| entry.dag_lane == 0));
+        assert!(loaded.entries.iter().all(|entry| entry.dag_depth == 0));
     }
 
     #[test]

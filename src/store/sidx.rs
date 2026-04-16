@@ -2,7 +2,7 @@
 //!
 //! A SIDX footer is appended to a **sealed** segment file immediately after all event
 //! frames have been written. On the next cold start, the store can seek to the last 16
-//! bytes of each segment, detect the `b"SIDX"` magic, and reconstruct the in-memory
+//! bytes of each segment, detect the `b"SDX2"` magic, and reconstruct the in-memory
 //! index without re-deserialising every MessagePack frame.
 //!
 //! # On-disk layout (end of segment file)
@@ -13,13 +13,13 @@
 //! [entries: N × ENTRY_SIZE]      — raw little-endian binary, no framing, no CRC
 //! [string_table_offset: u64 LE]  — byte offset from segment start where the table begins
 //! [entry_count: u32 LE]          — number of SidxEntry records
-//! [magic: b"SIDX"]               — 4 bytes; last bytes of the file
+//! [magic: b"SDX2"]               — 4 bytes; last bytes of the file
 //! ```
 //!
 //! To read: seek to `EOF - 16`, read `magic(4) + entry_count(4) + string_table_offset(8)`.
 //! Then seek to `string_table_offset` and read the string table, then the entry block.
 //!
-//! # Entry binary layout (154 bytes per entry, little-endian)
+//! # Entry binary layout (162 bytes per entry, little-endian)
 //!
 //! | Field           | Bytes | Notes                               |
 //! |-----------------|-------|-------------------------------------|
@@ -29,6 +29,8 @@
 //! | kind            | 2     | u16 LE — EventKind raw value        |
 //! | wall_ms         | 8     | u64 LE                              |
 //! | clock           | 4     | u32 LE                              |
+//! | dag_lane        | 4     | u32 LE                              |
+//! | dag_depth       | 4     | u32 LE                              |
 //! | prev_hash       | 32    | as-is bytes                         |
 //! | event_hash      | 32    | as-is bytes                         |
 //! | frame_offset    | 8     | u64 LE                              |
@@ -36,7 +38,7 @@
 //! | global_sequence | 8     | u64 LE                              |
 //! | correlation_id  | 16    | u128 LE                             |
 //! | causation_id    | 16    | u128 LE; 0 = no causation           |
-//! | **Total**       | **154** |                                   |
+//! | **Total**       | **162** |                                   |
 
 use crate::event::EventKind;
 use crate::store::StoreError;
@@ -47,7 +49,7 @@ use std::path::Path;
 // ── constants ─────────────────────────────────────────────────────────────────
 
 /// Four-byte magic that identifies a SIDX footer at the tail of a segment file.
-pub(crate) const SIDX_MAGIC: &[u8; 4] = b"SIDX";
+pub(crate) const SIDX_MAGIC: &[u8; 4] = b"SDX2";
 
 /// Size of the fixed-layout trailer that terminates the SIDX footer:
 /// `string_table_offset(8) + entry_count(4) + magic(4)` = 16 bytes.
@@ -57,17 +59,17 @@ const TRAILER_SIZE: u64 = 16;
 ///
 /// Breakdown:
 /// - event_id(16) + entity_idx(4) + scope_idx(4) + kind(2) = 26
-/// - wall_ms(8) + clock(4) = 12 → 38
-/// - prev_hash(32) + event_hash(32) = 64 → 102
-/// - frame_offset(8) + frame_length(4) + global_sequence(8) = 20 → 122
-/// - correlation_id(16) + causation_id(16) = 32 → **154**
-pub(crate) const ENTRY_SIZE: usize = 154;
+/// - wall_ms(8) + clock(4) + dag_lane(4) + dag_depth(4) = 20 → 46
+/// - prev_hash(32) + event_hash(32) = 64 → 110
+/// - frame_offset(8) + frame_length(4) + global_sequence(8) = 20 → 130
+/// - correlation_id(16) + causation_id(16) = 32 → **162**
+pub(crate) const ENTRY_SIZE: usize = 162;
 
 const _ASSERT_ENTRY_SIZE: () = {
     // Compile-time sanity: update this constant whenever SidxEntry fields change.
     assert!(
-        ENTRY_SIZE == 154,
-        "ENTRY_SIZE must equal 154 — update when SidxEntry layout changes"
+        ENTRY_SIZE == 162,
+        "ENTRY_SIZE must equal 162 — update when SidxEntry layout changes"
     );
 };
 
@@ -140,6 +142,10 @@ pub(crate) struct SidxEntry {
     pub wall_ms: u64,
     /// Per-entity monotonic sequence number at commit time.
     pub clock: u32,
+    /// Branch lane within the logical event DAG.
+    pub dag_lane: u32,
+    /// Branch depth within the logical event DAG.
+    pub dag_depth: u32,
     /// Blake3 hash of the immediately preceding event in this entity's chain.
     /// All-zeros signals genesis (no predecessor).
     pub prev_hash: [u8; 32],
@@ -192,6 +198,8 @@ impl SidxEntry {
         put_le!(self.kind, 2);
         put_le!(self.wall_ms, 8);
         put_le!(self.clock, 4);
+        put_le!(self.dag_lane, 4);
+        put_le!(self.dag_depth, 4);
         put_bytes!(self.prev_hash);
         put_bytes!(self.event_hash);
         put_le!(self.frame_offset, 8);
@@ -245,6 +253,8 @@ impl SidxEntry {
         let kind = get_le!(u16, 2);
         let wall_ms = get_le!(u64, 8);
         let clock = get_le!(u32, 4);
+        let dag_lane = get_le!(u32, 4);
+        let dag_depth = get_le!(u32, 4);
         let prev_hash = get_hash!();
         let event_hash = get_hash!();
         let frame_offset = get_le!(u64, 8);
@@ -262,6 +272,8 @@ impl SidxEntry {
             kind,
             wall_ms,
             clock,
+            dag_lane,
+            dag_depth,
             prev_hash,
             event_hash,
             frame_offset,
@@ -342,7 +354,7 @@ impl SidxEntryCollector {
     /// [entries: N × ENTRY_SIZE]     — raw little-endian binary
     /// [string_table_offset: u64 LE] — byte offset where string_table_bytes starts
     /// [entry_count: u32 LE]
-    /// [magic: b"SIDX"]
+    /// [magic: b"SDX2"]
     /// ```
     ///
     /// # Errors
@@ -573,6 +585,8 @@ mod tests {
             kind: kind_to_raw(EventKind::custom(0x1, u16::from(n))),
             wall_ms: 1_000_000 + u64::from(n),
             clock: u32::from(n),
+            dag_lane: u32::from(n % 3),
+            dag_depth: u32::from(n % 5),
             prev_hash: [n; 32],
             event_hash: [n.wrapping_add(1); 32],
             frame_offset: u64::from(n) * 512,
@@ -601,6 +615,8 @@ mod tests {
             kind: 0xF042,
             wall_ms: 1_700_000_000_000,
             clock: 99,
+            dag_lane: 4,
+            dag_depth: 2,
             prev_hash: [0xAB; 32],
             event_hash: [0xCD; 32],
             frame_offset: 0x0000_1234_5678_9ABC,
@@ -753,6 +769,17 @@ mod tests {
         tmp.flush().expect("flush");
         let result = read_footer(tmp.path()).expect("must not IO-error");
         assert!(result.is_none(), "non-SIDX file must return None");
+    }
+
+    #[test]
+    fn read_footer_returns_none_for_old_sidx_magic() {
+        let mut tmp = NamedTempFile::new().expect("create temp file");
+        tmp.write_all(&[0u8; 12]).expect("write prefix");
+        tmp.write_all(b"SIDX").expect("write old magic");
+        tmp.flush().expect("flush");
+
+        let result = read_footer(tmp.path()).expect("must not IO-error");
+        assert!(result.is_none(), "old SIDX magic must fall back cleanly");
     }
 
     // ── read_footer returns None for files smaller than TRAILER_SIZE ──────────

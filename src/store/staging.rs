@@ -309,14 +309,24 @@ pub(crate) struct StagedCommitTiming {
     pub(crate) timestamp_us: i64,
     pub(crate) wall_ms: u64,
     pub(crate) clock: u32,
+    pub(crate) dag_lane: u32,
+    pub(crate) dag_depth: u32,
 }
 
 impl StagedCommitTiming {
-    pub(crate) fn new(timestamp_us: i64, wall_ms: u64, clock: u32) -> Self {
+    pub(crate) fn new(
+        timestamp_us: i64,
+        wall_ms: u64,
+        clock: u32,
+        dag_lane: u32,
+        dag_depth: u32,
+    ) -> Self {
         Self {
             timestamp_us,
             wall_ms,
             clock,
+            dag_lane,
+            dag_depth,
         }
     }
 }
@@ -380,7 +390,13 @@ impl StagedCommittedEvent {
     }
 
     pub(crate) fn position(&self) -> DagPosition {
-        DagPosition::child_at(self.timing.clock, self.timing.wall_ms, 0)
+        DagPosition::with_hlc(
+            self.timing.wall_ms,
+            0,
+            self.timing.dag_depth,
+            self.timing.dag_lane,
+            self.timing.clock,
+        )
     }
 
     pub(crate) fn notification(&self) -> Notification {
@@ -416,6 +432,8 @@ impl StagedCommittedEvent {
             kind: self.meta.kind,
             wall_ms: self.timing.wall_ms,
             clock: self.timing.clock,
+            dag_lane: self.timing.dag_lane,
+            dag_depth: self.timing.dag_depth,
             hash_chain: self.hash_chain.clone(),
             disk_pos,
             global_sequence: self.meta.global_sequence,
@@ -430,6 +448,8 @@ impl StagedCommittedEvent {
             kind: kind_to_raw(self.meta.kind),
             wall_ms: self.timing.wall_ms,
             clock: self.timing.clock,
+            dag_lane: self.timing.dag_lane,
+            dag_depth: self.timing.dag_depth,
             prev_hash: self.hash_chain.prev_hash,
             event_hash: self.hash_chain.event_hash,
             frame_offset: disk_pos.offset,

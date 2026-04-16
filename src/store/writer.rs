@@ -720,6 +720,8 @@ pub(crate) struct AppendGuards {
     pub causation_id: Option<u128>,
     pub expected_sequence: Option<u32>,
     pub idempotency_key: Option<u128>,
+    pub dag_lane: u32,
+    pub dag_depth: u32,
 }
 
 impl WriterState<'_> {
@@ -1199,7 +1201,14 @@ impl WriterState<'_> {
                 item.kind(),
                 global_seq,
             );
-            let timing = StagedCommitTiming::new(now_us, wall_ms, clock);
+            let position_hint = item.options().position_hint.unwrap_or_default();
+            let timing = StagedCommitTiming::new(
+                now_us,
+                wall_ms,
+                clock,
+                position_hint.lane,
+                position_hint.depth,
+            );
             computed.push(StagedCommittedEvent::new(
                 item.coord(),
                 meta,
@@ -1322,7 +1331,8 @@ impl WriterState<'_> {
         let raw_ms = (event.header.timestamp_us / 1000) as u64;
         let last_ms = latest.as_ref().map(|entry| entry.wall_ms).unwrap_or(0);
         let now_ms = raw_ms.max(last_ms);
-        let position = DagPosition::child_at(clock, now_ms, 0);
+        let position =
+            DagPosition::with_hlc(now_ms, 0, guards.dag_depth, guards.dag_lane, clock);
         event.header.position = position;
         event.header.event_kind = kind;
         event.header.correlation_id = correlation_id;
@@ -1374,7 +1384,13 @@ impl WriterState<'_> {
             kind,
             global_seq,
         );
-        let timing = StagedCommitTiming::new(event.header.timestamp_us, now_ms, clock);
+        let timing = StagedCommitTiming::new(
+            event.header.timestamp_us,
+            now_ms,
+            clock,
+            guards.dag_lane,
+            guards.dag_depth,
+        );
         let staged = StagedCommittedEvent::new(
             coord,
             meta,

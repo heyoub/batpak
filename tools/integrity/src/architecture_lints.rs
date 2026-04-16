@@ -60,8 +60,10 @@ fn check_no_live_spec_markers(repo_root: &Path, tracked_files: &[PathBuf]) -> Re
             || rel.starts_with("tools/")
             || rel.starts_with("tests/")
             || rel.starts_with("benches/")
-            || rel.starts_with("examples/");
-        if !is_live_surface || !matches!(ext, "rs" | "md") {
+            || rel.starts_with("examples/")
+            || rel.starts_with("traceability/")
+            || rel.starts_with("docs/reference/");
+        if !is_live_surface || !matches!(ext, "rs" | "md" | "yml" | "yaml") {
             continue;
         }
         let content =
@@ -726,19 +728,29 @@ fn check_public_surface_truth(repo_root: &Path) -> Result<()> {
     }
 
     let topology_constructors = public_impl_method_names(&config, "IndexTopology");
-    for required in ["aos", "scan", "entity_local", "tiled", "all"] {
+    for required in [
+        "aos",
+        "scan",
+        "entity_local",
+        "tiled",
+        "all",
+        "with_soa",
+        "with_entity_groups",
+        "with_tiles64",
+    ] {
         ensure(
             topology_constructors.contains(required),
-            format!("IndexTopology must expose constructor `{required}`"),
+            format!("IndexTopology must expose builder/constructor `{required}`"),
         )?;
     }
-    let topology_variants = public_struct_field_names(&config, "IndexTopology");
-    for required in ["soa", "entity_groups", "tiles64"] {
-        ensure(
-            topology_variants.contains(required),
-            format!("IndexTopology must expose field `{required}`"),
-        )?;
-    }
+    let topology_public_fields = public_struct_field_names(&config, "IndexTopology");
+    ensure(
+        topology_public_fields.is_empty(),
+        format!(
+            "IndexTopology fields must stay private; found public fields {:?}",
+            topology_public_fields
+        ),
+    )?;
     let topology_default = default_impl_return_target(&config, "IndexTopology");
     ensure(
         matches!(

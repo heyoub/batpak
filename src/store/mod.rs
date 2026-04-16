@@ -50,7 +50,7 @@ pub use config::{
     BatchConfig, IndexConfig, IndexTopology, StoreConfig, SyncConfig, SyncMode, WriterConfig,
 };
 pub use contracts::{
-    AppendOptions, AppendReceipt, BatchAppendItem, CausationRef, CompactionConfig,
+    AppendOptions, AppendPositionHint, AppendReceipt, BatchAppendItem, CausationRef, CompactionConfig,
     CompactionStrategy, RetentionPredicate,
 };
 pub use control_plane::{AppendTicket, BatchAppendTicket, Outbox, VisibilityFence};

@@ -43,6 +43,13 @@ An `Event<P>` is typed payload plus metadata:
 
 `EventKind` is a sealed packed `u16` with category/type semantics.
 
+`position` is not fully caller-controlled. Public append surfaces may hint only
+the DAG branch coordinates:
+
+- `AppendPositionHint { lane, depth }`
+- writer still owns `wall_ms`, `counter`, and `sequence`
+- default append behavior remains root position: `lane=0`, `depth=0`
+
 ### Guard and Pipeline
 
 - `Gate<Ctx>` is a pure policy check
@@ -67,6 +74,7 @@ The store is sync by design. Async integration belongs around it, not inside it.
 - `src/coordinate/mod.rs`: `Coordinate`, `Region`, `KindFilter`
 - `src/event/`: event model and replay-lane types
 - `src/store/config.rs`: `StoreConfig`, `IndexTopology`
+- `src/store/contracts.rs`: `AppendOptions`, `AppendPositionHint`, batch contracts
 - `src/store/control_plane.rs`: tickets, outbox, visibility fence
 - `src/store/fanout.rs`: notification fanout and internal committed-event envelopes
 - `src/store/writer.rs`: writer thread and commit flow
@@ -76,8 +84,13 @@ The store is sync by design. Async integration belongs around it, not inside it.
 - `src/store/projection_flow.rs`: replay, incremental apply, cache path
 - `src/store/watch.rs`: projection watcher
 - `tools/integrity/src/architecture_lints.rs`: parser-backed truth-surface checks
-- `tools/xtask/src/main.rs`: CLI entrypoint and command dispatch
-- `tools/xtask/src/commands.rs`: canonical workflow command surface
+- `tools/xtask/src/main.rs`: CLI entrypoint and dispatch only
+- `tools/xtask/src/bench.rs`: benchmark surface and compile orchestration
+- `tools/xtask/src/coverage.rs`: coverage execution, retained artifacts, and reporting
+- `tools/xtask/src/docs.rs`: root-doc site and rustdoc generation
+- `tools/xtask/src/devcontainer.rs`: canonical container execution and image reuse
+- `tools/xtask/src/preflight.rs`: single-session canonical proof chain
+- `tools/xtask/src/commands.rs`: repo workflow commands, hooks, smoke checks, release plumbing
 
 ## Topology Model
 
@@ -112,9 +125,9 @@ measurement before becoming the default mental model.
 
 Current measurement witness:
 
-- `benches/replay_lanes.rs` is the current witness surface and consistently
-  shows `RawMsgpackInput` ahead of `JsonValueInput` on the 1k-event
-  counter-shaped replay workload
+- `benches/replay_lanes.rs` is the current witness surface and currently shows
+  `RawMsgpackInput` ahead of `JsonValueInput` on the 1k-event counter-shaped
+  replay workload in this tree
 - `examples/event_sourced_counter.rs` is the canonical ergonomic lane example
 - `examples/raw_projection_counter.rs` is the canonical performance-lane example
 
@@ -147,6 +160,23 @@ Cold-start priority:
 4. full frame-by-frame rebuild
 
 Batch append uses BEGIN/COMMIT markers and atomic visibility publication.
+
+Current artifact versions:
+
+- SIDX footer magic: `SDX2`
+- checkpoint format: v4
+- mmap index snapshot: v3
+
+Compatibility rules:
+
+- old SIDX footers are ignored and reopen falls back to scan
+- checkpoint v3 restores missing `dag_lane` / `dag_depth` as `0`
+- mmap v1/v2 restores missing `dag_lane` / `dag_depth` as `0`
+- full frame scan remains the source of truth when an optimization artifact is missing, stale, or structurally incompatible
+
+Position hints are persistence-affecting, not just API sugar: non-root
+`lane`/`depth` must survive live append, mmap reopen, checkpoint reopen, SIDX
+header reconstruction, and full rebuild.
 
 ## Public Surface Witnesses
 

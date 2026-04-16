@@ -7,10 +7,11 @@
     - ART-STORE-INTEGRATION
     - ART-OBSERVABILITY-TESTS
 - id: FLOW-APPEND-OPTIONS
-  summary: Append with CAS/idempotency/correlation options enforces guards before commit.
+  summary: Append with CAS/idempotency/correlation options and optional lane/depth position hints enforces guards before commit while leaving HLC wall/counter and sequence under writer control.
   artifacts:
     - ART-STORE-MOD
     - ART-STORE-PROPERTIES
+    - ART-DAG-POSITION-HINT-TESTS
 - id: FLOW-APPEND-REACTION
   summary: Causal follow-up appends preserve correlation and causation IDs while emitting distinct telemetry.
   artifacts:

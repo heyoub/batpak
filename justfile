@@ -65,9 +65,6 @@ bench-neutral:
 bench-native:
     cargo xtask bench --surface native
 
-bench-report surface="neutral":
-    cargo xtask bench --surface {{surface}}
-
 bench-save surface="neutral":
     cargo xtask bench --surface {{surface}} --save
 

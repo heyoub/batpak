@@ -1,9 +1,16 @@
 #![allow(clippy::panic)]
 
+use serde::Deserialize;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
 use syn::visit::Visit;
+
+#[derive(Debug, Deserialize)]
+struct PubItemAllowlistEntry {
+    name: String,
+    justification: String,
+}
 
 // build.rs runs before every cargo build/check/test. Cannot be skipped.
 // It enforces live runtime invariants at build time so agents get English
@@ -12,6 +19,7 @@ use syn::visit::Visit;
 fn main() {
     println!("cargo:rerun-if-changed=Cargo.toml");
     println!("cargo:rerun-if-changed=src/");
+    println!("cargo:rerun-if-changed=traceability/pub_item_allowlist.yaml");
 
     check_no_tokio_in_deps();
     check_no_banned_patterns();
@@ -405,7 +413,9 @@ fn collect_rs_contents(dir: &Path, buf: &mut String, exclude: Option<&str>) {
 /// tests" — if a future AI campaign adds a pub fn/struct/enum/trait without a test,
 /// the build fails. LAW-003 (No Orphan Infrastructure), FM-007 (Island Syndrome).
 ///
-/// String-scanning only — no syn, no proc-macro, no external deps.
+/// Fast text scan plus the canonical YAML allowlist. Keep this build-time gate
+/// cheap and local, even though the richer structural mirror lives in the
+/// integrity tool.
 fn check_pub_items_have_tests() {
     // Collect all test file contents into one searchable string.
     let mut test_contents = String::new();
@@ -414,77 +424,8 @@ fn check_pub_items_have_tests() {
     let mut src_contents = String::new();
     collect_rs_contents(Path::new("src"), &mut src_contents, None);
 
-    // Items that are tested indirectly or are macro-generated / re-export glue.
-    // Each entry: (item_name, justification).
-    let allowlist: &[(&str, &str)] = &[
-        // Macro-generated types from define_state_machine! / define_typestate!
-        // Tested via typestate_safety.rs compile-fail tests and event_api.rs
-        (
-            "EntityIdType",
-            "trait used via define_entity_id! macro, tested in event_api",
-        ),
-        // Internal store types that are only referenced via field access patterns
-        (
-            "ClockKey",
-            "internal index type, tested via store_integration + store_advanced",
-        ),
-        (
-            "Active",
-            "segment typestate marker, tested via store operations",
-        ),
-        // Macro-generated methods from define_typestate! — tested directly in typestate_safety.rs
-        (
-            "Sealed",
-            "segment typestate marker, tested via compaction tests",
-        ),
-        (
-            "SegmentHeader",
-            "internal segment type, tested via frame_encode/decode",
-        ),
-        (
-            "StoreDiagnostics",
-            "returned by Store::stats, tested via store_advanced",
-        ),
-        // Internal segment methods tested via store_integration/store_advanced rotation tests
-        (
-            "needs_rotation",
-            "internal segment method, tested via segment rotation in store tests",
-        ),
-        (
-            "CompactionResult",
-            "returned by compact(), tested via compaction tests",
-        ),
-        // Serde wire helpers — referenced via #[serde(with = "...")] not by name
-        (
-            "u128_bytes",
-            "serde helper module used via attribute, not by name",
-        ),
-        (
-            "option_u128_bytes",
-            "serde helper module used via attribute, not by name",
-        ),
-        (
-            "vec_u128_bytes",
-            "serde helper module used via attribute, not by name",
-        ),
-        (
-            "write_sidx_footer",
-            "called by writer on segment rotation, tested via store rotation integration tests",
-        ),
-        (
-            "IndexTopology",
-            "config topology type tested through index_topology.rs, unified_red.rs, and bench fixtures",
-        ),
-        (
-            "watch_projection",
-            "reactive projection API tested through unified_red watch_projection tests",
-        ),
-        (
-            "ProjectionWatcher",
-            "returned by watch_projection, tested through unified_red watch_projection tests",
-        ),
-    ];
-    let allowed_names: Vec<&str> = allowlist.iter().map(|(name, _)| *name).collect();
+    let allowlist = load_pub_item_allowlist();
+    let allowed_names: BTreeSet<&str> = allowlist.iter().map(|entry| entry.name.as_str()).collect();
 
     // Walk src/ and extract pub item names.
     walk_rs_files(Path::new("src"), &mut |path, contents| {
@@ -494,7 +435,7 @@ fn check_pub_items_have_tests() {
             // Match: pub fn NAME, pub struct NAME, pub enum NAME, pub trait NAME
             let item_name = extract_pub_item_name(trimmed);
             if let Some(name) = item_name {
-                if allowed_names.contains(&name) {
+                if allowed_names.contains(name) {
                     continue;
                 }
                 // Check if this name appears in any test file
@@ -502,8 +443,8 @@ fn check_pub_items_have_tests() {
                     panic!(
                         "PUB ITEM UNTESTED: `{name}` in {path_str}:{}\n\
                          Every pub fn/struct/enum/trait must appear in at least one test file.\n\
-                         Either add a test that exercises this item, or add it to the build.rs\n\
-                         allowlist with a justification for why it's tested indirectly.\n\
+                         Either add a test that exercises this item, or add it to\n\
+                         traceability/pub_item_allowlist.yaml with a justification for why it's tested indirectly.\n\
                          See: LAW-003 (No Orphan Infrastructure), FM-007 (Island Syndrome).\n\
                          Post-mortem: downstream had 5 dispatch functions with zero tests.",
                         line_no + 1
@@ -514,8 +455,36 @@ fn check_pub_items_have_tests() {
     });
 }
 
+fn load_pub_item_allowlist() -> Vec<PubItemAllowlistEntry> {
+    let path = Path::new("traceability/pub_item_allowlist.yaml");
+    let contents = fs::read_to_string(path)
+        .unwrap_or_else(|err| panic!("failed to read {}: {err}", path.display()));
+    let entries: Vec<PubItemAllowlistEntry> = yaml_serde::from_str(&contents)
+        .unwrap_or_else(|err| panic!("failed to parse {}: {err}", path.display()));
+    for entry in &entries {
+        if entry.name.trim().is_empty() {
+            panic!(
+                "invalid {} entry: `name` must not be empty (justification: {})",
+                path.display(),
+                entry.justification
+            );
+        }
+        if entry.justification.trim().is_empty() {
+            panic!(
+                "invalid {} entry for `{}`: `justification` must not be empty",
+                path.display(),
+                entry.name
+            );
+        }
+    }
+    entries
+}
+
 /// Extract the item name from a line like `pub fn foo(`, `pub struct Bar {`, etc.
 /// Returns None if the line doesn't match a pub item declaration.
+/// TODO(integrity-hardening): this heuristic does not handle `pub async fn`.
+/// Upgrade public-item discovery to a syn visitor before trusting it as a
+/// language-aware detector rather than a repo-shaped text scan.
 fn extract_pub_item_name(line: &str) -> Option<&str> {
     let rest = line.strip_prefix("pub ")?;
     // Skip pub(crate), pub(super), pub(in ...) — those aren't public API

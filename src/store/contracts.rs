@@ -65,6 +65,22 @@ pub struct AppendReceipt {
     pub disk_pos: DiskPos,
 }
 
+/// Optional caller-supplied branch hint for the committed event position.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AppendPositionHint {
+    /// Parallel branch index within the DAG.
+    pub lane: u32,
+    /// Branch depth within the DAG.
+    pub depth: u32,
+}
+
+impl AppendPositionHint {
+    /// Create a new DAG lane/depth hint for append operations.
+    pub const fn new(lane: u32, depth: u32) -> Self {
+        Self { lane, depth }
+    }
+}
+
 /// AppendOptions: CAS, idempotency, custom correlation/causation.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct AppendOptions {
@@ -76,6 +92,8 @@ pub struct AppendOptions {
     pub correlation_id: Option<u128>,
     /// ID of the event that caused this append; `None` for root-cause events.
     pub causation_id: Option<u128>,
+    /// Optional caller-supplied branch hint; writer still owns HLC wall/counter and sequence.
+    pub position_hint: Option<AppendPositionHint>,
     /// EventHeader flags (FLAG_REQUIRES_ACK, FLAG_TRANSACTIONAL, FLAG_REPLAY).
     /// Default: 0 (no flags); uses the same bit layout as `EventHeader::flags`.
     pub flags: u8,
@@ -114,6 +132,12 @@ impl AppendOptions {
     /// Set custom causation ID.
     pub fn with_causation(mut self, id: u128) -> Self {
         self.causation_id = Some(id);
+        self
+    }
+
+    /// Set the DAG lane/depth hint while leaving HLC and sequence to the writer.
+    pub fn with_position_hint(mut self, hint: AppendPositionHint) -> Self {
+        self.position_hint = Some(hint);
         self
     }
 }

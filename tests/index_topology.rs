@@ -6,21 +6,35 @@ use tempfile::TempDir;
 #[test]
 fn topology_constructors_enable_expected_overlays() {
     let cases = [
-        ("aos", IndexTopology::aos(), (false, false, false)),
-        ("scan", IndexTopology::scan(), (true, false, false)),
+        ("aos", IndexTopology::aos(), IndexTopology::aos()),
+        (
+            "scan",
+            IndexTopology::scan(),
+            IndexTopology::aos().with_soa(true),
+        ),
         (
             "entity_local",
             IndexTopology::entity_local(),
-            (false, true, false),
+            IndexTopology::aos().with_entity_groups(true),
         ),
-        ("tiled", IndexTopology::tiled(), (false, false, true)),
-        ("all", IndexTopology::all(), (true, true, true)),
+        (
+            "tiled",
+            IndexTopology::tiled(),
+            IndexTopology::aos().with_tiles64(true),
+        ),
+        (
+            "all",
+            IndexTopology::all(),
+            IndexTopology::aos()
+                .with_soa(true)
+                .with_entity_groups(true)
+                .with_tiles64(true),
+        ),
     ];
 
     for (label, topology, expected) in cases {
         assert_eq!(
-            (topology.soa, topology.entity_groups, topology.tiles64),
-            expected,
+            topology, expected,
             "constructor `{label}` must enable the intended overlay set"
         );
     }
@@ -30,8 +44,8 @@ fn topology_constructors_enable_expected_overlays() {
 fn default_topology_is_aos() {
     let topology = IndexTopology::default();
     assert_eq!(
-        (topology.soa, topology.entity_groups, topology.tiles64),
-        (false, false, false),
+        topology,
+        IndexTopology::aos(),
         "default topology must be explicit base AoS only"
     );
 }

@@ -1,7 +1,7 @@
 //! Direct tests of ProjectionCache trait methods per backend.
 //! Plus: integration tests with real Store operations (append → project → cache hit).
-//! Fulfills SPEC promise: "Every trait method on ProjectionCache is exercised
-//! against every backend (NoCache, NativeCache)."
+//! Every trait method on ProjectionCache is exercised against every live backend
+//! surface (NoCache, NativeCache).
 //!
 //! Integration tests: `cargo test --test projection_cache`
 //!

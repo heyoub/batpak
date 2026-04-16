@@ -75,6 +75,11 @@ cargo xtask docs
 cargo xtask release --dry-run
 ```
 
+If a change touches persistence artifacts or cold-start behavior, update the
+release notes and reference docs explicitly. Operators need to know when reopen
+falls back to scan and which older artifact versions load with additive root
+defaults.
+
 Coverage artifacts are retained under `target/xtask-cover/last-run/` so failed
 or partial coverage runs can be inspected instead of disappearing into a temp
 directory.

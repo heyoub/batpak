@@ -21,7 +21,7 @@ use std::path::Path;
 use tempfile::NamedTempFile;
 
 pub(crate) const MMAP_INDEX_MAGIC: &[u8; 6] = b"FBATIX";
-pub(crate) const MMAP_INDEX_VERSION: u16 = 2;
+pub(crate) const MMAP_INDEX_VERSION: u16 = 3;
 pub(crate) const MMAP_INDEX_FILENAME: &str = "index.fbati";
 
 const PREFIX_LEN: usize = 6 + 2 + 4;
@@ -29,7 +29,8 @@ const HEADER_TAIL_LEN_V1: usize = 8 + 8 + 8 + 4 + 8 + 8;
 const HEADER_TAIL_LEN_V2: usize = HEADER_TAIL_LEN_V1 + 8;
 const HEADER_LEN_V1: usize = PREFIX_LEN + HEADER_TAIL_LEN_V1;
 const HEADER_LEN_V2: usize = PREFIX_LEN + HEADER_TAIL_LEN_V2;
-const MMAP_ENTRY_SIZE: usize = 162;
+const MMAP_ENTRY_SIZE_V2: usize = 162;
+const MMAP_ENTRY_SIZE_V3: usize = 170;
 
 struct LoadedMmapIndex {
     mmap: Mmap,
@@ -37,6 +38,7 @@ struct LoadedMmapIndex {
     routing: RoutingSummary,
     entries_offset: usize,
     entry_count: u64,
+    entry_size: usize,
     watermark: WatermarkInfo,
     stored_allocator: u64,
 }
@@ -74,6 +76,8 @@ struct MmapIndexEntry {
     kind: u16,
     wall_ms: u64,
     clock: u32,
+    dag_lane: u32,
+    dag_depth: u32,
     prev_hash: [u8; 32],
     event_hash: [u8; 32],
     segment_id: u64,
@@ -85,8 +89,9 @@ struct MmapIndexEntry {
 }
 
 impl MmapIndexEntry {
-    fn encode_into(&self, buf: &mut [u8]) {
-        debug_assert_eq!(buf.len(), MMAP_ENTRY_SIZE);
+    #[cfg(test)]
+    fn encode_into_v2(&self, buf: &mut [u8]) {
+        debug_assert_eq!(buf.len(), MMAP_ENTRY_SIZE_V2);
         let mut pos = 0usize;
 
         macro_rules! put_le {
@@ -117,11 +122,53 @@ impl MmapIndexEntry {
         put_le!(self.global_sequence, 8);
         put_le!(self.correlation_id, 16);
         put_le!(self.causation_id, 16);
-        debug_assert_eq!(pos, MMAP_ENTRY_SIZE);
+        debug_assert_eq!(pos, MMAP_ENTRY_SIZE_V2);
     }
 
-    fn decode_from(buf: &[u8]) -> Result<Self, StoreError> {
-        if buf.len() != MMAP_ENTRY_SIZE {
+    fn encode_into(&self, buf: &mut [u8]) {
+        debug_assert_eq!(buf.len(), MMAP_ENTRY_SIZE_V3);
+        let mut pos = 0usize;
+
+        macro_rules! put_le {
+            ($val:expr, $n:expr) => {{
+                buf[pos..pos + $n].copy_from_slice(&($val).to_le_bytes());
+                pos += $n;
+            }};
+        }
+        macro_rules! put_bytes {
+            ($arr:expr) => {{
+                let slice: &[u8] = &$arr;
+                buf[pos..pos + slice.len()].copy_from_slice(slice);
+                pos += slice.len();
+            }};
+        }
+
+        put_le!(self.event_id, 16);
+        put_le!(self.entity_idx, 4);
+        put_le!(self.scope_idx, 4);
+        put_le!(self.kind, 2);
+        put_le!(self.wall_ms, 8);
+        put_le!(self.clock, 4);
+        put_le!(self.dag_lane, 4);
+        put_le!(self.dag_depth, 4);
+        put_bytes!(self.prev_hash);
+        put_bytes!(self.event_hash);
+        put_le!(self.segment_id, 8);
+        put_le!(self.frame_offset, 8);
+        put_le!(self.frame_length, 4);
+        put_le!(self.global_sequence, 8);
+        put_le!(self.correlation_id, 16);
+        put_le!(self.causation_id, 16);
+        debug_assert_eq!(pos, MMAP_ENTRY_SIZE_V3);
+    }
+
+    fn decode_from(buf: &[u8], version: u16) -> Result<Self, StoreError> {
+        let expected_size = if version >= 3 {
+            MMAP_ENTRY_SIZE_V3
+        } else {
+            MMAP_ENTRY_SIZE_V2
+        };
+        if buf.len() != expected_size {
             return Err(StoreError::ser_msg("mmap entry buffer has wrong size"));
         }
         let mut pos = 0usize;
@@ -145,13 +192,26 @@ impl MmapIndexEntry {
             }};
         }
 
+        let event_id = get_le!(u128, 16);
+        let entity_idx = get_le!(u32, 4);
+        let scope_idx = get_le!(u32, 4);
+        let kind = get_le!(u16, 2);
+        let wall_ms = get_le!(u64, 8);
+        let clock = get_le!(u32, 4);
+        let (dag_lane, dag_depth) = if version >= 3 {
+            (get_le!(u32, 4), get_le!(u32, 4))
+        } else {
+            (0, 0)
+        };
         let decoded = Self {
-            event_id: get_le!(u128, 16),
-            entity_idx: get_le!(u32, 4),
-            scope_idx: get_le!(u32, 4),
-            kind: get_le!(u16, 2),
-            wall_ms: get_le!(u64, 8),
-            clock: get_le!(u32, 4),
+            event_id,
+            entity_idx,
+            scope_idx,
+            kind,
+            wall_ms,
+            clock,
+            dag_lane,
+            dag_depth,
             prev_hash: get_hash!(),
             event_hash: get_hash!(),
             segment_id: get_le!(u64, 8),
@@ -161,7 +221,7 @@ impl MmapIndexEntry {
             correlation_id: get_le!(u128, 16),
             causation_id: get_le!(u128, 16),
         };
-        debug_assert_eq!(pos, MMAP_ENTRY_SIZE);
+        debug_assert_eq!(pos, expected_size);
         Ok(decoded)
     }
 }
@@ -174,6 +234,8 @@ fn entry_to_mmap(entry: &IndexEntry) -> MmapIndexEntry {
         kind: kind_to_raw(entry.kind),
         wall_ms: entry.wall_ms,
         clock: entry.clock,
+        dag_lane: entry.dag_lane,
+        dag_depth: entry.dag_depth,
         prev_hash: entry.hash_chain.prev_hash,
         event_hash: entry.hash_chain.event_hash,
         segment_id: entry.disk_pos.segment_id,
@@ -247,7 +309,7 @@ pub(crate) fn write_mmap_index(
         writer.write_all(&interner_bytes).map_err(StoreError::Io)?;
         writer.write_all(&summary_bytes).map_err(StoreError::Io)?;
 
-        let mut buf = [0u8; MMAP_ENTRY_SIZE];
+        let mut buf = [0u8; MMAP_ENTRY_SIZE_V3];
         for entry in &entries {
             entry_to_mmap(entry).encode_into(&mut buf);
             hasher.update(&buf);
@@ -315,7 +377,7 @@ fn try_load_mmap_index(data_dir: &Path) -> Option<LoadedMmapIndex> {
     }
 
     let version = u16::from_le_bytes(prefix[6..8].try_into().expect("prefix slice length"));
-    if version != 1 && version != MMAP_INDEX_VERSION {
+    if version != 1 && version != 2 && version != MMAP_INDEX_VERSION {
         tracing::warn!(
             target: "batpak::mmap_index",
             path = %path.display(),
@@ -442,7 +504,12 @@ fn try_load_mmap_index(data_dir: &Path) -> Option<LoadedMmapIndex> {
             return None;
         }
     };
-    let entry_bytes_len = match entry_count_usize.checked_mul(MMAP_ENTRY_SIZE) {
+    let entry_size = if version >= 3 {
+        MMAP_ENTRY_SIZE_V3
+    } else {
+        MMAP_ENTRY_SIZE_V2
+    };
+    let entry_bytes_len = match entry_count_usize.checked_mul(entry_size) {
         Some(len) => len,
         None => {
             tracing::warn!(
@@ -599,6 +666,7 @@ fn try_load_mmap_index(data_dir: &Path) -> Option<LoadedMmapIndex> {
         routing,
         entries_offset,
         entry_count,
+        entry_size,
         watermark: WatermarkInfo {
             watermark_segment_id,
             watermark_offset,
@@ -636,7 +704,7 @@ pub(crate) fn try_load_mmap_snapshot(data_dir: &Path) -> Option<LoadedMmapSnapsh
             return None;
         }
     };
-    let entries_end = loaded.entries_offset + (entry_count * MMAP_ENTRY_SIZE);
+    let entries_end = loaded.entries_offset + (entry_count * loaded.entry_size);
     let entries_slice = &loaded.mmap[loaded.entries_offset..entries_end];
     let chunk_ranges = if loaded.routing.chunks.is_empty() {
         let chunk_count = recommended_restore_chunk_count(entry_count);
@@ -670,11 +738,16 @@ pub(crate) fn try_load_mmap_snapshot(data_dir: &Path) -> Option<LoadedMmapSnapsh
         .into_par_iter()
         .enumerate()
         .map(|(chunk_idx, (start, len))| {
-            let start_byte = start * MMAP_ENTRY_SIZE;
-            let end_byte = start_byte + (len * MMAP_ENTRY_SIZE);
+            let start_byte = start * loaded.entry_size;
+            let end_byte = start_byte + (len * loaded.entry_size);
             let mut rebuilt = Vec::with_capacity(len);
-            for chunk in entries_slice[start_byte..end_byte].chunks_exact(MMAP_ENTRY_SIZE) {
-                let entry = MmapIndexEntry::decode_from(chunk)?;
+            let version = if loaded.entry_size == MMAP_ENTRY_SIZE_V3 {
+                3
+            } else {
+                2
+            };
+            for chunk in entries_slice[start_byte..end_byte].chunks_exact(loaded.entry_size) {
+                let entry = MmapIndexEntry::decode_from(chunk, version)?;
                 let entity = loaded
                     .interner_strings
                     .get(entry.entity_idx as usize)
@@ -694,6 +767,8 @@ pub(crate) fn try_load_mmap_snapshot(data_dir: &Path) -> Option<LoadedMmapSnapsh
                     kind: raw_to_kind(entry.kind),
                     wall_ms: entry.wall_ms,
                     clock: entry.clock,
+                    dag_lane: entry.dag_lane,
+                    dag_depth: entry.dag_depth,
                     hash_chain: HashChain {
                         prev_hash: entry.prev_hash,
                         event_hash: entry.event_hash,
@@ -757,6 +832,8 @@ mod tests {
                 kind: EventKind::custom(0x1, (i & 0x0FFF) as u16),
                 wall_ms: 10_000 + i,
                 clock: u32::try_from(i).expect("fits u32"),
+                dag_lane: 0,
+                dag_depth: 0,
                 hash_chain: HashChain::default(),
                 disk_pos: DiskPos {
                     segment_id: 7,
@@ -855,9 +932,9 @@ mod tests {
         let mut hasher = crc32fast::Hasher::new();
         hasher.update(&header_tail);
         hasher.update(&interner_bytes);
-        let mut buf = [0u8; MMAP_ENTRY_SIZE];
+        let mut buf = [0u8; MMAP_ENTRY_SIZE_V2];
         for entry in &entries {
-            entry_to_mmap(entry).encode_into(&mut buf);
+            entry_to_mmap(entry).encode_into_v2(&mut buf);
             hasher.update(&buf);
             bytes.extend_from_slice(&buf);
         }
@@ -872,5 +949,61 @@ mod tests {
             !snapshot.routing.chunks.is_empty(),
             "v1 fallback should synthesize chunk summaries on load"
         );
+    }
+
+    #[test]
+    fn v2_mmap_fallback_defaults_lane_depth_to_zero() {
+        let tmp = TempDir::new().expect("temp dir");
+        let segment_path = tmp.path().join(crate::store::segment::segment_filename(7));
+        std::fs::write(&segment_path, vec![0u8; 4096]).expect("segment file");
+
+        let idx = make_index(4);
+        let mut entries = idx.all_entries();
+        entries.sort_by_key(|entry| entry.global_sequence);
+        let mut interner_strings = vec![String::new()];
+        interner_strings.extend(idx.interner.to_snapshot());
+        let interner_bytes = rmp_serde::to_vec_named(&interner_strings).expect("interner bytes");
+        let routing = RoutingSummary::from_sorted_entries(
+            &entries,
+            recommended_restore_chunk_count(entries.len()),
+        );
+        let summary_bytes =
+            rmp_serde::to_vec_named(&MmapSummaryDataV2 { routing }).expect("summary bytes");
+
+        let mut header_tail = Vec::with_capacity(HEADER_TAIL_LEN_V2);
+        header_tail.extend_from_slice(&7u64.to_le_bytes());
+        header_tail.extend_from_slice(&128u64.to_le_bytes());
+        header_tail.extend_from_slice(&idx.global_sequence().to_le_bytes());
+        header_tail.extend_from_slice(&(interner_strings.len() as u32).to_le_bytes());
+        header_tail.extend_from_slice(&(entries.len() as u64).to_le_bytes());
+        header_tail.extend_from_slice(&(interner_bytes.len() as u64).to_le_bytes());
+        header_tail.extend_from_slice(&(summary_bytes.len() as u64).to_le_bytes());
+
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(MMAP_INDEX_MAGIC);
+        bytes.extend_from_slice(&2u16.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes.extend_from_slice(&header_tail);
+        bytes.extend_from_slice(&interner_bytes);
+        bytes.extend_from_slice(&summary_bytes);
+
+        let mut hasher = crc32fast::Hasher::new();
+        hasher.update(&header_tail);
+        hasher.update(&interner_bytes);
+        hasher.update(&summary_bytes);
+        let mut buf = [0u8; MMAP_ENTRY_SIZE_V2];
+        for entry in &entries {
+            entry_to_mmap(entry).encode_into_v2(&mut buf);
+            hasher.update(&buf);
+            bytes.extend_from_slice(&buf);
+        }
+        let crc = hasher.finalize();
+        bytes[8..12].copy_from_slice(&crc.to_le_bytes());
+        std::fs::write(tmp.path().join(MMAP_INDEX_FILENAME), bytes).expect("write v2 mmap index");
+
+        let snapshot = try_load_mmap_snapshot(tmp.path()).expect("load v2 snapshot");
+        assert_eq!(snapshot.entries.len(), 4);
+        assert!(snapshot.entries.iter().all(|entry| entry.dag_lane == 0));
+        assert!(snapshot.entries.iter().all(|entry| entry.dag_depth == 0));
     }
 }

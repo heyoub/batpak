@@ -7,7 +7,7 @@ use crate::{
 };
 use anyhow::{bail, Context, Result};
 use std::fs;
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -157,14 +157,10 @@ fn repo_hook_status() -> Result<HookStatus> {
 
     if output.status.success() {
         let path = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-        let default_hooks_dir = root.join(".git").join("hooks");
-        if path.is_empty()
-            || path == ".git/hooks"
-            || Path::new(&path) == default_hooks_dir.as_path()
-        {
+        if path.is_empty() || is_default_hooks_path(&root, &path) {
             return Ok(HookStatus::Default);
         }
-        if path == REPO_HOOKS_PATH {
+        if matches_repo_hooks_path(&root, &path) {
             let hook = root.join(PRE_COMMIT_HOOK);
             if hook.exists() {
                 return Ok(HookStatus::Installed);
@@ -184,6 +180,42 @@ fn repo_hook_status() -> Result<HookStatus> {
         output.status,
         stderr.trim()
     )
+}
+
+fn is_default_hooks_path(root: &Path, configured_path: &str) -> bool {
+    configured_path == ".git/hooks"
+        || resolved_git_path(root, configured_path)
+            == normalize_path(&root.join(".git").join("hooks"))
+}
+
+fn matches_repo_hooks_path(root: &Path, configured_path: &str) -> bool {
+    resolved_git_path(root, configured_path) == normalize_path(&root.join(REPO_HOOKS_PATH))
+}
+
+fn resolved_git_path(root: &Path, configured_path: &str) -> PathBuf {
+    let path = Path::new(configured_path);
+    let resolved = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        root.join(path)
+    };
+    normalize_path(&resolved)
+}
+
+fn normalize_path(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            Component::RootDir | Component::Prefix(_) | Component::Normal(_) => {
+                normalized.push(component.as_os_str());
+            }
+        }
+    }
+    normalized
 }
 
 fn report_hook_install_result(status: HookStatus, attempted_install: bool) {
@@ -218,7 +250,7 @@ fn ensure_binstall_helper() -> Result<()> {
 }
 
 fn install_tool(spec: &str, strategy: InstallStrategy) -> Result<()> {
-    // Prefer prebuilt binaries when available so `cargo xtask setup` and the
+    // Prefer prebuilt binaries when available so `cargo xtask setup --install-tools` and the
     // devcontainer bootstrap do not spend unnecessary time compiling the
     // helper toolchain from source.
     if strategy == InstallStrategy::PreferBinstall
@@ -577,8 +609,24 @@ fn unpacked_package_dir(packaged_root: &Path) -> Result<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::mutants_command;
+    use super::{is_default_hooks_path, matches_repo_hooks_path, mutants_command};
     use crate::MutantSurface;
+    use std::path::Path;
+
+    #[test]
+    fn repo_hooks_path_matches_relative_and_absolute_spellings() {
+        let root = Path::new("/workspace/batpak");
+        assert!(matches_repo_hooks_path(root, ".githooks"));
+        assert!(matches_repo_hooks_path(root, "./.githooks"));
+        assert!(matches_repo_hooks_path(root, "/workspace/batpak/.githooks"));
+    }
+
+    #[test]
+    fn default_git_hooks_path_matches_relative_and_absolute_spellings() {
+        let root = Path::new("/workspace/batpak");
+        assert!(is_default_hooks_path(root, ".git/hooks"));
+        assert!(is_default_hooks_path(root, "/workspace/batpak/.git/hooks"));
+    }
 
     #[test]
     fn mutants_full_all_features_surface_stays_xtask_owned() {

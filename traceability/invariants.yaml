@@ -132,6 +132,16 @@
   artifacts:
     - ART-STORE-READER
     - ART-BATCH-TESTS
+- id: INV-POSITION-HINT-PERSISTENCE
+  statement: Append position hints may supply only DAG lane/depth; writer-owned HLC wall/counter and sequence remain authoritative, and non-root lane/depth must survive live commit, mmap reopen, checkpoint reopen, SIDX-backed reconstruction, and full rebuild.
+  artifacts:
+    - ART-STORE-CONTRACTS
+    - ART-STORE-WRITER
+    - ART-STORE-REBUILD
+    - ART-STORE-SIDX
+    - ART-STORE-CHECKPOINT
+    - ART-STORE-MMAP-INDEX
+    - ART-DAG-POSITION-HINT-TESTS
 - id: INV-FAULT-INJECT-GATED
   statement: Fault injection infrastructure (InjectionPoint, FaultInjector trait, maybe_inject hooks) is compiled only under the dangerous-test-hooks feature gate and has zero cost in production builds.
   artifacts:

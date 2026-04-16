@@ -873,9 +873,9 @@ pub(crate) struct ScanIndex {
 impl ScanIndex {
     /// Construct base AoS maps plus the configured optional overlays.
     pub(crate) fn for_config(config: &crate::store::IndexConfig) -> Self {
-        let soa = config.topology.soa;
-        let entity_groups = config.topology.entity_groups;
-        let tiles64 = config.topology.tiles64;
+        let soa = config.topology.soa_enabled();
+        let entity_groups = config.topology.entity_groups_enabled();
+        let tiles64 = config.topology.tiles64_enabled();
 
         Self {
             by_fact: DashMap::new(),
@@ -1255,6 +1255,8 @@ mod tests {
             kind,
             wall_ms: seq * 1000,
             clock: u32::try_from(seq).expect("test seq fits u32"),
+            dag_lane: 0,
+            dag_depth: 0,
             hash_chain: HashChain::default(),
             disk_pos: DiskPos {
                 segment_id: 0,
