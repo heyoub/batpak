@@ -25,9 +25,11 @@ writer thread, projections, subscriptions.
 
 ## One Event Through The System
 
-`store.append(&coord, kind, &payload)` serializes the payload to MessagePack, wraps it in
-an `Event<Vec<u8>>`, and sends it as a `WriterCommand::Append` through a one-shot flume
-channel. The calling thread parks waiting for the writer's response.
+`store.append_typed(&coord, &payload)` — where `payload` is any `#[derive(EventPayload)]`
+struct — serializes the payload to MessagePack, wraps it in an `Event<Vec<u8>>`, and sends
+it as a `WriterCommand::Append` through a one-shot flume channel. The calling thread parks
+waiting for the writer's response. (The underlying raw surface, `append(&coord, kind, &payload)`,
+still exists for callers that compute `EventKind` dynamically.)
 
 The writer thread receives the command and calls `WriterState::handle_append()`, which
 executes a ten-step commit protocol: reads the entity's latest `IndexEntry` from the
@@ -66,13 +68,20 @@ store/
 
 ## Public Surface
 
-**Append** — `append`, `append_reaction`, `append_batch`, `append_with_options`,
-`apply_transition`. Each returns an `AppendReceipt`. Non-blocking variants via `submit`
-return an `AppendTicket` you `.wait()` later.
+**Typed payload binding** — `#[derive(EventPayload)]` on a named-field struct binds the Rust
+type to its `EventKind` at compile time. Every typed write/read sibling below infers the
+kind from `T::KIND`, so callsites never write `EventKind::custom(...)` directly.
 
-**Query** — `stream(entity)`, `by_scope(scope)`, `by_fact(kind)`, `query(&region)`,
+**Append** — `append_typed`, `append_typed_with_options`, `append_reaction_typed`,
+`append_batch` (with `BatchAppendItem::typed`), `apply_transition` (with
+`Transition::from_payload`). Each returns an `AppendReceipt`. Non-blocking variants via
+`submit_typed` / `try_submit_typed` return an `AppendTicket` you `.wait()` later. The raw
+`append`, `append_reaction`, `submit`, `try_submit`, `append_with_options` still exist for
+callers computing `EventKind` at runtime.
+
+**Query** — `stream(entity)`, `by_scope(scope)`, `by_fact_typed::<T>()`, `query(&region)`,
 `get(event_id)`, `walk_ancestors(id, limit)`. All return from the in-memory index; only
-`get` and `walk_ancestors` read from disk.
+`get` and `walk_ancestors` read from disk. `by_fact(kind)` remains for dynamic-kind lookups.
 
 **Projection** — `project::<T>(entity, &freshness)` folds events into any type
 implementing `EventSourced`. `project_if_changed` skips work when nothing changed.

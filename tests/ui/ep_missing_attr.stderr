@@ -1,0 +1,5 @@
+error: #[derive(EventPayload)] requires a `#[batpak(category = N, type_id = N)]` attribute
+ --> tests/ui/ep_missing_attr.rs:6:8
+  |
+6 | struct NoAttr {
+  |        ^^^^^^

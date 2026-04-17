@@ -41,7 +41,13 @@ An `Event<P>` is typed payload plus metadata:
 - `flags`
 - `content_hash`
 
-`EventKind` is a sealed packed `u16` with category/type semantics.
+`EventKind` is a sealed packed `u16` with category/type semantics. The
+`#[derive(EventPayload)]` macro binds a Rust struct to its `EventKind` at compile
+time via `#[batpak(category = N, type_id = N)]`. Category 0x0 and 0xD are
+reserved; valid product categories are 0x1–0xC and 0xE–0xF. `type_id` is 12 bits
+(0x000–0xFFF). The derive emits a test-time collision check per type so
+duplicate `(category, type_id)` pairs surface as test failures, not as silent
+shape drift on the wire.
 
 `position` is not fully caller-controlled. Public append surfaces may hint only
 the DAG branch coordinates:
@@ -68,6 +74,24 @@ The store owns:
 - lifecycle operations like `sync`, `snapshot`, `compact`, `close`
 
 The store is sync by design. Async integration belongs around it, not inside it.
+
+**Typed siblings.** For every raw surface that currently takes an `EventKind`
+argument, the store exposes a typed sibling that infers the kind from
+`T::KIND` where `T: EventPayload`:
+
+- write: `append_typed`, `append_typed_with_options`, `submit_typed`,
+  `try_submit_typed`, `append_reaction_typed`, `submit_reaction_typed`,
+  `try_submit_reaction_typed`
+- batch construction: `BatchAppendItem::typed`
+- read: `by_fact_typed::<T>()`
+- typestate: `Transition::from_payload::<P: EventPayload>`
+
+Outbox staging, `append_batch` itself, and `VisibilityFence::submit` remain
+on the raw `EventKind` surface in the current lock. The raw surfaces stay
+available for callers that compute `EventKind` at runtime. See
+`docs/adr/ADR-0010-eventpayload-macro-surface.md` for scope, schema-evolution
+rules, and the explicitly deferred locks (projection synthesis, typed
+reactor ergonomics).
 
 ## Runtime Map
 

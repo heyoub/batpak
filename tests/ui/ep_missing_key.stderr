@@ -1,0 +1,5 @@
+error: `#[batpak(...)]` requires `type_id = N`
+ --> tests/ui/ep_missing_key.rs:6:1
+  |
+6 | #[batpak(category = 1)]
+  | ^

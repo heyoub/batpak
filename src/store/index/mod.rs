@@ -369,6 +369,44 @@ impl DiskPos {
     }
 }
 
+/// Minimal result for columnar scan hot paths.
+///
+/// Scan methods return `Vec<QueryHit>` to avoid two per-result costs that
+/// existed in the `Vec<Arc<IndexEntry>>` path:
+///  1. `Arc::clone` (atomic ref-count increment) inside the scan loop.
+///  2. Immediate `as_ref().clone()` (full `IndexEntry` memcpy) at the
+///     `StoreIndex` boundary.
+///
+/// Callers that need the full entry call `StoreIndex::upgrade_hit`, which does
+/// a single `by_id` DashMap lookup and one `IndexEntry` clone.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct QueryHit {
+    /// Event identity — used by `upgrade_hit` for the `by_id` lookup.
+    pub(crate) event_id: u128,
+    /// Globally monotonic commit order. Used for cursor position, visibility
+    /// filtering, sort, and clock-range comparisons.
+    pub(crate) global_sequence: u64,
+    /// On-disk frame location. Sufficient for projection replay without a full
+    /// `IndexEntry` clone.
+    pub(crate) disk_pos: DiskPos,
+    /// Event kind. Needed for secondary fact filter and projection kind match.
+    pub(crate) kind: EventKind,
+    /// Per-entity HLC clock. Needed for `Region::clock_range` filtering.
+    pub(crate) clock: u32,
+}
+
+impl QueryHit {
+    pub(crate) fn from_entry(entry: &IndexEntry) -> Self {
+        Self {
+            event_id: entry.event_id,
+            global_sequence: entry.global_sequence,
+            disk_pos: entry.disk_pos,
+            kind: entry.kind,
+            clock: entry.clock,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ProjectionReplayItem {
     pub(crate) global_sequence: u64,
@@ -879,6 +917,286 @@ impl StoreIndex {
             .filter(|e| visibility.is_visible(e.global_sequence))
     }
 
+    /// Upgrade a `QueryHit` to a full `IndexEntry` via the `by_id` DashMap.
+    ///
+    /// # Panics
+    /// Panics if `hit.event_id` is absent from `by_id`. A hit is produced by
+    /// the scan path only after the entry was inserted into all index maps
+    /// atomically, so absence means the index is corrupt.
+    pub(crate) fn upgrade_hit(&self, hit: QueryHit) -> IndexEntry {
+        self.by_id
+            .get(&hit.event_id)
+            .expect(
+                "invariant: QueryHit.event_id not found in by_id — \
+                 scan produced a hit with no backing entry; the index is corrupt",
+            )
+            .value()
+            .as_ref()
+            .clone()
+    }
+
+    /// Return all entries matching `region` as lightweight `QueryHit` values.
+    ///
+    /// Same candidate-selection strategy and secondary filters as `query()`,
+    /// but eliminates the `Arc::clone` per entry in the scan loop.
+    /// Visibility, clock_range, and global_sequence sort are applied here so
+    /// callers can use hits directly or selectively upgrade via `upgrade_hit`.
+    pub(crate) fn query_hits(&self, region: &crate::coordinate::Region) -> Vec<QueryHit> {
+        use crate::coordinate::KindFilter;
+        let visibility = self.sequence.snapshot();
+
+        let mut hits: Vec<QueryHit> = if let Some(ref prefix) = region.entity_prefix {
+            // Inline all secondary filters so we avoid a second pass.
+            let scope_filter = region.scope.as_deref();
+            let fact_filter = region.fact.as_ref();
+            let mut candidates = Vec::new();
+            for stream in self
+                .streams
+                .iter()
+                .filter(|r| r.key().as_ref().starts_with(prefix.as_ref()))
+            {
+                for entry in stream.value().values() {
+                    if !visibility.is_visible(entry.global_sequence) {
+                        continue;
+                    }
+                    if let Some(scope) = scope_filter {
+                        if entry.coord.scope() != scope {
+                            continue;
+                        }
+                    }
+                    if let Some(fact) = fact_filter {
+                        let kind_ok = match fact {
+                            KindFilter::Exact(k) => entry.kind == *k,
+                            KindFilter::Category(c) => entry.kind.category() == *c,
+                            KindFilter::Any => true,
+                        };
+                        if !kind_ok {
+                            continue;
+                        }
+                    }
+                    candidates.push(QueryHit::from_entry(entry));
+                }
+            }
+            candidates
+        } else if let Some(ref scope) = region.scope {
+            let scan_hits = self.scan.query_hits_by_scope(scope.as_ref());
+            if !scan_hits.is_empty() {
+                scan_hits
+            } else if let Some(entities) = self.scan.scope_entity_set(scope.as_ref()) {
+                let mut candidates = Vec::new();
+                for entity in &entities {
+                    if let Some(stream) = self.streams.get(entity.as_ref()) {
+                        for entry in stream.value().values() {
+                            if visibility.is_visible(entry.global_sequence) {
+                                candidates.push(QueryHit::from_entry(entry));
+                            }
+                        }
+                    }
+                }
+                candidates
+            } else {
+                Vec::new()
+            }
+        } else if let Some(ref fact) = region.fact {
+            match fact {
+                KindFilter::Exact(k) => self.scan.query_hits_by_kind(*k),
+                KindFilter::Category(c) => self.scan.query_hits_by_category(*c),
+                KindFilter::Any => {
+                    let mut candidates = Vec::new();
+                    for stream in self.streams.iter() {
+                        for entry in stream.value().values() {
+                            if visibility.is_visible(entry.global_sequence) {
+                                candidates.push(QueryHit::from_entry(entry));
+                            }
+                        }
+                    }
+                    candidates
+                }
+            }
+        } else {
+            let mut candidates = Vec::new();
+            for stream in self.streams.iter() {
+                for entry in stream.value().values() {
+                    if visibility.is_visible(entry.global_sequence) {
+                        candidates.push(QueryHit::from_entry(entry));
+                    }
+                }
+            }
+            candidates
+        };
+
+        // Fact filter — only needed when scope was the primary selector.
+        if region.entity_prefix.is_none() && region.scope.is_some() {
+            if let Some(ref fact) = region.fact {
+                hits.retain(|h| match fact {
+                    KindFilter::Exact(k) => h.kind == *k,
+                    KindFilter::Category(c) => h.kind.category() == *c,
+                    KindFilter::Any => true,
+                });
+            }
+        }
+
+        // Visibility watermark (scan paths don't pre-filter; stream paths do
+        // but a second pass is a cheap no-op on an already-filtered vec).
+        hits.retain(|h| visibility.is_visible(h.global_sequence));
+
+        // Clock range.
+        if let Some((min, max)) = region.clock_range {
+            hits.retain(|h| h.clock >= min && h.clock <= max);
+        }
+
+        hits.sort_by_key(|h| h.global_sequence);
+        hits
+    }
+
+    /// Bounded variant of [`query_hits`].
+    ///
+    /// Returns at most `limit` hits with `global_sequence > after_seq` (when
+    /// `started = true`).  When `started = false` (fresh cursor), the position
+    /// filter is open and up to `limit` hits are returned from the beginning.
+    ///
+    /// For the default SoA topology the scan is O(log N + limit/selectivity):
+    /// a binary search skips already-consumed entries, then a forward scan
+    /// stops once `limit` hits are collected.  Other layouts apply the position
+    /// filter after collecting all matching candidates, then sort and truncate.
+    pub(crate) fn query_hits_after(
+        &self,
+        region: &crate::coordinate::Region,
+        after_seq: u64,
+        started: bool,
+        limit: usize,
+    ) -> Vec<QueryHit> {
+        use crate::coordinate::KindFilter;
+        let visibility = self.sequence.snapshot();
+        let seq_ok = |seq: u64| !started || seq > after_seq;
+
+        let mut hits: Vec<QueryHit> = if let Some(ref prefix) = region.entity_prefix {
+            let scope_filter = region.scope.as_deref();
+            let fact_filter = region.fact.as_ref();
+            let mut candidates = Vec::new();
+            for stream in self
+                .streams
+                .iter()
+                .filter(|r| r.key().as_ref().starts_with(prefix.as_ref()))
+            {
+                for entry in stream.value().values() {
+                    if !seq_ok(entry.global_sequence) {
+                        continue;
+                    }
+                    if !visibility.is_visible(entry.global_sequence) {
+                        continue;
+                    }
+                    if let Some(scope) = scope_filter {
+                        if entry.coord.scope() != scope {
+                            continue;
+                        }
+                    }
+                    if let Some(fact) = fact_filter {
+                        let kind_ok = match fact {
+                            KindFilter::Exact(k) => entry.kind == *k,
+                            KindFilter::Category(c) => entry.kind.category() == *c,
+                            KindFilter::Any => true,
+                        };
+                        if !kind_ok {
+                            continue;
+                        }
+                    }
+                    candidates.push(QueryHit::from_entry(entry));
+                }
+            }
+            candidates.sort_by_key(|h| h.global_sequence);
+            candidates.truncate(limit);
+            return candidates;
+        } else if let Some(ref scope) = region.scope {
+            let mut scan_hits =
+                self.scan
+                    .query_hits_by_scope_after(scope.as_ref(), after_seq, started, limit);
+            if !scan_hits.is_empty() {
+                return scan_hits;
+            }
+            if let Some(entities) = self.scan.scope_entity_set(scope.as_ref()) {
+                let mut candidates = Vec::new();
+                for entity in &entities {
+                    if let Some(stream) = self.streams.get(entity.as_ref()) {
+                        for entry in stream.value().values() {
+                            if seq_ok(entry.global_sequence)
+                                && visibility.is_visible(entry.global_sequence)
+                            {
+                                candidates.push(QueryHit::from_entry(entry));
+                            }
+                        }
+                    }
+                }
+                // scope_hits was empty; check if we still need the scan fallback
+                scan_hits = candidates;
+                scan_hits
+            } else {
+                Vec::new()
+            }
+        } else if let Some(ref fact) = region.fact {
+            let mut hits = match fact {
+                KindFilter::Exact(k) => self
+                    .scan
+                    .query_hits_by_kind_after(*k, after_seq, started, limit),
+                KindFilter::Category(c) => self
+                    .scan
+                    .query_hits_by_category_after(*c, after_seq, started, limit),
+                KindFilter::Any => {
+                    let mut candidates = Vec::new();
+                    for stream in self.streams.iter() {
+                        for entry in stream.value().values() {
+                            if seq_ok(entry.global_sequence)
+                                && visibility.is_visible(entry.global_sequence)
+                            {
+                                candidates.push(QueryHit::from_entry(entry));
+                            }
+                        }
+                    }
+                    candidates
+                }
+            };
+            // Fact-primary: scan paths don't pre-filter visibility; apply now.
+            hits.retain(|h| visibility.is_visible(h.global_sequence));
+            if let Some((min, max)) = region.clock_range {
+                hits.retain(|h| h.clock >= min && h.clock <= max);
+            }
+            hits.truncate(limit);
+            return hits;
+        } else {
+            let mut candidates = Vec::new();
+            for stream in self.streams.iter() {
+                for entry in stream.value().values() {
+                    if seq_ok(entry.global_sequence) && visibility.is_visible(entry.global_sequence)
+                    {
+                        candidates.push(QueryHit::from_entry(entry));
+                    }
+                }
+            }
+            candidates
+        };
+
+        // Secondary fact filter for scope-primary path.
+        if region.entity_prefix.is_none() && region.scope.is_some() {
+            if let Some(ref fact) = region.fact {
+                hits.retain(|h| match fact {
+                    KindFilter::Exact(k) => h.kind == *k,
+                    KindFilter::Category(c) => h.kind.category() == *c,
+                    KindFilter::Any => true,
+                });
+            }
+        }
+
+        hits.retain(|h| visibility.is_visible(h.global_sequence));
+
+        if let Some((min, max)) = region.clock_range {
+            hits.retain(|h| h.clock >= min && h.clock <= max);
+        }
+
+        hits.sort_by_key(|h| h.global_sequence);
+        hits.truncate(limit);
+        hits
+    }
+
     /// Returns the latest entry for `entity`, filtered by visibility.
     ///
     /// **Transient behavior during batch insert:** Between `insert_batch()`
@@ -909,124 +1227,10 @@ impl StoreIndex {
     }
 
     pub(crate) fn query(&self, region: &crate::coordinate::Region) -> Vec<IndexEntry> {
-        let visibility = self.sequence.snapshot();
-        // Region query strategy:
-        // 1. Determine candidate set based on most selective filter
-        // 2. Apply remaining filters to narrow results
-        // 3. Filter by visibility watermark
-        // 4. Apply clock_range last (it's per-entity, cheap)
-        use crate::coordinate::KindFilter;
-        let mut candidates: Vec<IndexEntry> = if let Some(ref prefix) = region.entity_prefix {
-            // Entity prefix → scan streams map for matching keys
-            let mut candidates = Vec::new();
-            for stream in self
-                .streams
-                .iter()
-                .filter(|r| r.key().as_ref().starts_with(prefix.as_ref()))
-            {
-                extend_visible_entries(&mut candidates, stream.value().values(), &visibility);
-            }
-            candidates
-        } else if let Some(ref scope) = region.scope {
-            // Scope → delegate to scan index
-            let scope_entries = self.scan.query_by_scope(scope.as_ref());
-            if !scope_entries.is_empty() {
-                scope_entries
-                    .into_iter()
-                    .map(|arc| arc.as_ref().clone())
-                    .collect()
-            } else {
-                // Fallback for Maps mode: look up entities in scope, collect their streams
-                if let Some(entities) = self.scan.scope_entity_set(scope.as_ref()) {
-                    let mut candidates = Vec::new();
-                    for entity in &entities {
-                        if let Some(stream) = self.streams.get(entity.as_ref()) {
-                            extend_visible_entries(
-                                &mut candidates,
-                                stream.value().values(),
-                                &visibility,
-                            );
-                        }
-                    }
-                    candidates
-                } else {
-                    Vec::new()
-                }
-            }
-        } else if let Some(ref fact) = region.fact {
-            // Fact filter → delegate to scan index for Exact kind
-            match fact {
-                KindFilter::Exact(k) => {
-                    let results = self.scan.query_by_kind(*k);
-                    if !results.is_empty() {
-                        results
-                            .into_iter()
-                            .map(|arc| arc.as_ref().clone())
-                            .collect()
-                    } else {
-                        // Empty could mean AoS mode with no events of this kind — that's correct
-                        Vec::new()
-                    }
-                }
-                KindFilter::Category(c) => {
-                    let results = self.scan.query_by_category(*c);
-                    results
-                        .into_iter()
-                        .map(|arc| arc.as_ref().clone())
-                        .collect()
-                }
-                KindFilter::Any => {
-                    let mut candidates = Vec::new();
-                    for stream in self.streams.iter() {
-                        extend_visible_entries(
-                            &mut candidates,
-                            stream.value().values(),
-                            &visibility,
-                        );
-                    }
-                    candidates
-                }
-            }
-        } else {
-            // Region::all() with no filters — return everything
-            let mut candidates = Vec::new();
-            for stream in self.streams.iter() {
-                extend_visible_entries(&mut candidates, stream.value().values(), &visibility);
-            }
-            candidates
-        };
-
-        // Apply remaining filters that weren't used for the initial candidate set.
-
-        // Scope filter (if entity_prefix was the primary selector)
-        if region.entity_prefix.is_some() {
-            if let Some(ref scope) = region.scope {
-                candidates.retain(|e| e.coord.scope() == scope.as_ref());
-            }
-        }
-
-        // Fact filter (if not already applied)
-        if region.entity_prefix.is_some() || region.scope.is_some() {
-            if let Some(ref fact) = region.fact {
-                candidates.retain(|e| match fact {
-                    KindFilter::Exact(k) => e.kind == *k,
-                    KindFilter::Category(c) => e.kind.category() == *c,
-                    KindFilter::Any => true,
-                });
-            }
-        }
-
-        // Visibility watermark: exclude entries not yet published.
-        candidates.retain(|e| visibility.is_visible(e.global_sequence));
-
-        // Clock range filter (always per-entity clock, not global_sequence)
-        if let Some((min, max)) = region.clock_range {
-            candidates.retain(|e| e.clock >= min && e.clock <= max);
-        }
-
-        // Sort by global_sequence for consistent ordering
-        candidates.sort_by_key(|e| e.global_sequence);
-        candidates
+        self.query_hits(region)
+            .into_iter()
+            .map(|hit| self.upgrade_hit(hit))
+            .collect()
     }
 
     /// Return a snapshot of all entries in the index, collected from `by_id`.

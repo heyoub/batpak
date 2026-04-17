@@ -18,6 +18,33 @@ If you just want the crate:
 cargo add batpak
 ```
 
+## Define Your Payload
+
+Every event is a typed payload. Use `#[derive(EventPayload)]` to bind a
+Rust struct to its `EventKind` at compile time. The derive is the only
+place a category/type_id pair should appear in your code; callsites
+never touch `EventKind::custom(...)` again.
+
+```rust
+use batpak::prelude::*;
+
+#[derive(serde::Serialize, serde::Deserialize, EventPayload)]
+#[batpak(category = 0xF, type_id = 1)]
+struct PlayerMoved {
+    x: i32,
+    y: i32,
+}
+```
+
+- `#[batpak(category = N, type_id = N)]` is required exactly once.
+- `serde::Serialize + serde::Deserialize` are required; the derive does
+  not generate them for you.
+- The derive works on named-field structs only. Enums, unions, tuple
+  structs, and unit structs are rejected with a compile-time error.
+- Adding fields is wire-safe only if they are `Option<T>` or carry
+  `#[serde(default)]`. Renaming, removing, or retyping a field requires
+  bumping `type_id`.
+
 ## Append And Query
 
 ### Single event
@@ -27,33 +54,35 @@ use batpak::prelude::*;
 
 let store = Store::open(StoreConfig::new("./data"))?;
 let coord = Coordinate::new("user:alice", "chat:general")?;
-let kind = EventKind::custom(0xF, 1);
 
-let receipt = store.append(&coord, kind, &serde_json::json!({"text": "hello"}))?;
+let receipt = store.append_typed(&coord, &PlayerMoved { x: 10, y: 20 })?;
 let event = store.get(receipt.event_id)?;
 println!("entity={}, payload={}", event.coordinate.entity(), event.event.payload);
 ```
 
 ### Batch append
 
-For atomic bulk insertion, use `Store::append_batch`:
+For atomic bulk insertion, use `Store::append_batch` with
+`BatchAppendItem::typed`:
 
 ```rust
 use batpak::prelude::*;
 use batpak::store::{BatchAppendItem, CausationRef};
 
+#[derive(serde::Serialize, serde::Deserialize, EventPayload)]
+#[batpak(category = 1, type_id = 1)]
+struct MessagePosted { text: String }
+
 let items = vec![
-    BatchAppendItem::new(
+    BatchAppendItem::typed(
         Coordinate::new("user:alice", "chat:general")?,
-        EventKind::custom(1, 1),
-        &serde_json::json!({"text": "Hello"}),
+        &MessagePosted { text: "Hello".into() },
         AppendOptions::default(),
         CausationRef::None,
     )?,
-    BatchAppendItem::new(
+    BatchAppendItem::typed(
         Coordinate::new("user:bob", "chat:general")?,
-        EventKind::custom(1, 1),
-        &serde_json::json!({"text": "Hi!"}),
+        &MessagePosted { text: "Hi!".into() },
         AppendOptions::default(),
         CausationRef::PriorItem(0),
     )?,
@@ -75,10 +104,10 @@ Batch properties:
 ```rust
 let stream = store.stream("user:alice");
 let scope = store.by_scope("chat:general");
-let by_kind = store.by_fact(EventKind::custom(0xF, 1));
+let by_kind = store.by_fact_typed::<PlayerMoved>();
 let region = store.query(
     &Region::scope("chat:general")
-        .with_fact(KindFilter::Exact(EventKind::custom(0xF, 1))),
+        .with_fact(KindFilter::Exact(PlayerMoved::KIND)),
 );
 ```
 
@@ -91,14 +120,14 @@ Compare-and-swap:
 
 ```rust
 let opts = AppendOptions::new().with_cas(expected_sequence);
-store.append_with_options(&coord, kind, &payload, opts)?;
+store.append_typed_with_options(&coord, &payload, opts)?;
 ```
 
 Idempotency:
 
 ```rust
 let opts = AppendOptions::new().with_idempotency(0xDEADBEEF_u128);
-store.append_with_options(&coord, kind, &payload, opts)?;
+store.append_typed_with_options(&coord, &payload, opts)?;
 ```
 
 Idempotency keys are required when `group_commit_max_batch > 1`.
@@ -107,7 +136,7 @@ Position hints:
 
 ```rust
 let opts = AppendOptions::new().with_position_hint(AppendPositionHint::new(3, 1));
-store.append_with_options(&coord, kind, &payload, opts)?;
+store.append_typed_with_options(&coord, &payload, opts)?;
 ```
 
 Position-hint contract:
@@ -148,7 +177,7 @@ impl EventSourced for HitCounter {
     }
 
     fn relevant_event_kinds() -> &'static [EventKind] {
-        static KINDS: [EventKind; 1] = [EventKind::custom(0xF, 1)];
+        static KINDS: [EventKind; 1] = [PlayerMoved::KIND];
         &KINDS
     }
 }
@@ -236,7 +265,7 @@ Use `cursor_worker(...)` for restartable background consumers with
 The simple path stays simple:
 
 ```rust
-let receipt = store.append(&coord, kind, &payload)?;
+let receipt = store.append_typed(&coord, &payload)?;
 ```
 
 But the control plane gives you more explicit execution shapes when needed.
@@ -244,8 +273,12 @@ But the control plane gives you more explicit execution shapes when needed.
 ### Submit and tickets
 
 ```rust
-let t1 = store.submit(&coord, kind, &serde_json::json!({"n": 1}))?;
-let t2 = store.submit(&coord, kind, &serde_json::json!({"n": 2}))?;
+#[derive(serde::Serialize, serde::Deserialize, EventPayload)]
+#[batpak(category = 1, type_id = 3)]
+struct Tick { n: u64 }
+
+let t1 = store.submit_typed(&coord, &Tick { n: 1 })?;
+let t2 = store.submit_typed(&coord, &Tick { n: 2 })?;
 
 let r1 = t1.wait()?;
 let r2 = t2.wait()?;
@@ -260,7 +293,7 @@ Ticket surfaces:
 ### Soft pressure with `Outcome`
 
 ```rust
-match store.try_submit(&coord, kind, &payload)? {
+match store.try_submit_typed(&coord, &payload)? {
     batpak::outcome::Outcome::Ok(ticket) => {
         let receipt = ticket.wait()?;
         println!("{}", receipt.sequence);
@@ -276,20 +309,26 @@ Use `store.writer_pressure()` for direct mailbox telemetry.
 
 ### Outbox batching
 
+Outbox staging is not yet typed in v1 — pass the raw kind + payload
+bytes here. Typed outbox staging lands in the next lock.
+
 ```rust
 let mut outbox = store.outbox();
-outbox.stage(coord.clone(), kind, &serde_json::json!({"n": 1}))?;
+outbox.stage(coord.clone(), Tick::KIND, &Tick { n: 1 })?;
 let receipts = outbox.flush()?;
 assert_eq!(receipts.len(), 1);
 ```
 
 ### Visibility fences
 
-`VisibilityFence` gives you durable-now, visible-later semantics:
+`VisibilityFence` gives you durable-now, visible-later semantics.
+Fence submit is also still on the raw surface in v1 — use the payload
+type's `KIND` constant so callsites stay free of literal category/type_id
+pairs:
 
 ```rust
 let fence = store.begin_visibility_fence()?;
-let ticket = fence.submit(&coord, kind, &serde_json::json!({"n": 1}))?;
+let ticket = fence.submit(&coord, Tick::KIND, &Tick { n: 1 })?;
 fence.commit()?;
 let receipt = ticket.wait()?;
 ```
@@ -298,7 +337,7 @@ let receipt = ticket.wait()?;
 
 ```rust
 let ro = batpak::store::Store::<batpak::store::ReadOnly>::open_read_only(config)?;
-let events = ro.by_fact(kind);
+let events = ro.by_fact_typed::<Tick>();
 ```
 
 ## Policy Gates

@@ -1,0 +1,5 @@
+error: #[derive(EventPayload)] requires a named-field struct; tuple structs are not supported
+ --> tests/ui/ep_on_tuple_struct.rs:7:13
+  |
+7 | struct Tuple(u64);
+  |             ^^^^^

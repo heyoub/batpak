@@ -1,0 +1,5 @@
+error: #[derive(EventPayload)] requires a named-field struct; unit structs are not supported
+ --> tests/ui/ep_on_unit_struct.rs:7:8
+  |
+7 | struct Unit;
+  |        ^^^^

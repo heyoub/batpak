@@ -518,7 +518,7 @@ fn store_config_debug_lists_all_integrity_relevant_fields() {
         "max_size: 333",
         "max_bytes: 44444",
         "IndexConfig",
-        "topology: IndexTopology { soa: true, entity_groups: false, tiles64: true }",
+        "topology: IndexTopology { soa: true, entity_groups: false, tiles64: true, tiles64_simd: false }",
         "enable_checkpoint: true",
         "enable_mmap_index: false",
         "clock: Some(\"<fn>\")",

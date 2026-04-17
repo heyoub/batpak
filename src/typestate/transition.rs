@@ -1,4 +1,4 @@
-use crate::event::EventKind;
+use crate::event::{EventKind, EventPayload};
 use std::marker::PhantomData;
 
 #[doc(hidden)]
@@ -44,5 +44,12 @@ impl<From: StateMarker, To: StateMarker, P> Transition<From, To, P> {
     /// Consumes the transition and returns the payload.
     pub fn into_payload(self) -> P {
         self.payload
+    }
+}
+
+impl<From: StateMarker, To: StateMarker, P: EventPayload> Transition<From, To, P> {
+    /// Create a transition from a typed payload — kind derived from `P::KIND`.
+    pub fn from_payload(payload: P) -> Self {
+        Self::new(P::KIND, payload)
     }
 }

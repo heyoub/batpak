@@ -4,12 +4,15 @@ pub mod hash;
 pub mod header;
 /// Discriminant enum identifying the category of an event.
 pub mod kind;
+/// Binding between a Rust payload type and its wire EventKind.
+pub mod payload;
 /// Traits for event-sourced and reactive state reconstruction.
 pub mod sourcing;
 
 pub use hash::HashChain;
 pub use header::EventHeader;
 pub use kind::EventKind;
+pub use payload::EventPayload;
 pub use sourcing::{
     EventSourced, JsonValueInput, ProjectionEvent, ProjectionInput, ProjectionPayload,
     RawMsgpackInput, Reactive, ReplayLane,

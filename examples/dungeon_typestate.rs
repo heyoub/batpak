@@ -17,7 +17,7 @@
 
 use batpak::prelude::*;
 use batpak::typestate::Transition;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 // -- Step 1: Define the state machine --
 // This macro generates: a sealed trait `DoorState`, and zero-sized structs
@@ -36,75 +36,68 @@ batpak::define_state_machine!(
 // Door<Open> and Door<Closed> are *different types* — you can't confuse them.
 batpak::define_typestate!(Door<S: DoorState> { name: String });
 
-// -- Step 3: Define legal transitions as methods on specific states --
+// -- Step 3: Define one event payload per legal transition. #[derive(EventPayload)]
+// binds each struct to its EventKind at compile time — the Transition type then
+// pulls the kind out of T::KIND via `Transition::from_payload`, so callsites
+// never touch EventKind::custom(...) again.
+#[derive(Serialize, Deserialize, EventPayload)]
+#[batpak(category = 2, type_id = 1)]
+struct DoorClosed {
+    door_name: String,
+}
+
+#[derive(Serialize, Deserialize, EventPayload)]
+#[batpak(category = 2, type_id = 2)]
+struct DoorOpened {
+    door_name: String,
+}
+
+#[derive(Serialize, Deserialize, EventPayload)]
+#[batpak(category = 2, type_id = 3)]
+struct DoorLocked {
+    door_name: String,
+}
+
+#[derive(Serialize, Deserialize, EventPayload)]
+#[batpak(category = 2, type_id = 4)]
+struct DoorUnlocked {
+    door_name: String,
+}
+
+// -- Step 4: Define legal transitions as methods on specific states --
 // Only Door<Open> has a `close()` method. Door<Locked> doesn't.
 // The type system enforces the state diagram.
 
-const DOOR_CLOSED: EventKind = EventKind::custom(2, 1);
-const DOOR_OPENED: EventKind = EventKind::custom(2, 2);
-const DOOR_LOCKED: EventKind = EventKind::custom(2, 3);
-const DOOR_UNLOCKED: EventKind = EventKind::custom(2, 4);
-
-#[derive(Serialize)]
-struct DoorEvent {
-    door_name: String,
-    action: String,
-}
-
 impl Door<Open> {
-    fn close(self) -> (Door<Closed>, Transition<Open, Closed, DoorEvent>) {
+    fn close(self) -> (Door<Closed>, Transition<Open, Closed, DoorClosed>) {
         let (name,) = self.into_data();
         let door = Door::<Closed>::new(name.clone());
-        let transition = Transition::new(
-            DOOR_CLOSED,
-            DoorEvent {
-                door_name: name,
-                action: "closed".into(),
-            },
-        );
+        let transition = Transition::from_payload(DoorClosed { door_name: name });
         (door, transition)
     }
 }
 
 impl Door<Closed> {
-    fn open(self) -> (Door<Open>, Transition<Closed, Open, DoorEvent>) {
+    fn open(self) -> (Door<Open>, Transition<Closed, Open, DoorOpened>) {
         let (name,) = self.into_data();
         let door = Door::<Open>::new(name.clone());
-        let transition = Transition::new(
-            DOOR_OPENED,
-            DoorEvent {
-                door_name: name,
-                action: "opened".into(),
-            },
-        );
+        let transition = Transition::from_payload(DoorOpened { door_name: name });
         (door, transition)
     }
 
-    fn lock(self, _key: &str) -> (Door<Locked>, Transition<Closed, Locked, DoorEvent>) {
+    fn lock(self, _key: &str) -> (Door<Locked>, Transition<Closed, Locked, DoorLocked>) {
         let (name,) = self.into_data();
         let door = Door::<Locked>::new(name.clone());
-        let transition = Transition::new(
-            DOOR_LOCKED,
-            DoorEvent {
-                door_name: name,
-                action: "locked".into(),
-            },
-        );
+        let transition = Transition::from_payload(DoorLocked { door_name: name });
         (door, transition)
     }
 }
 
 impl Door<Locked> {
-    fn unlock(self, _key: &str) -> (Door<Closed>, Transition<Locked, Closed, DoorEvent>) {
+    fn unlock(self, _key: &str) -> (Door<Closed>, Transition<Locked, Closed, DoorUnlocked>) {
         let (name,) = self.into_data();
         let door = Door::<Closed>::new(name.clone());
-        let transition = Transition::new(
-            DOOR_UNLOCKED,
-            DoorEvent {
-                door_name: name,
-                action: "unlocked".into(),
-            },
-        );
+        let transition = Transition::from_payload(DoorUnlocked { door_name: name });
         (door, transition)
     }
 }

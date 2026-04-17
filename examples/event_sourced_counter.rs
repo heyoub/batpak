@@ -24,19 +24,24 @@
 use batpak::prelude::*;
 use serde::{Deserialize, Serialize};
 
-// -- Step 1: Define your event kinds --
-// EventKind uses category:type encoding. Category 1, types 1-2.
-const INCREMENTED: EventKind = EventKind::custom(1, 1);
-const DECREMENTED: EventKind = EventKind::custom(1, 2);
-
-// -- Step 2: Define event payloads --
-#[derive(Serialize, Deserialize)]
-struct IncrementedBy {
+// -- Step 1: Define event payload types. #[derive(EventPayload)] binds
+//    each Rust struct to its EventKind at compile time, so callsites
+//    never write EventKind::custom(...) again.
+#[derive(Serialize, Deserialize, EventPayload)]
+#[batpak(category = 1, type_id = 1)]
+struct Incremented {
     amount: i64,
     reason: String,
 }
 
-// -- Step 3: Define your projection (the "read model") --
+#[derive(Serialize, Deserialize, EventPayload)]
+#[batpak(category = 1, type_id = 2)]
+struct Decremented {
+    amount: i64,
+    reason: String,
+}
+
+// -- Step 2: Define your projection (the "read model") --
 // This is what you reconstruct by replaying events.
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct CounterState {
@@ -45,7 +50,13 @@ struct CounterState {
     total_decrements: u32,
 }
 
-// -- Step 4: Implement EventSourced to teach batpak how to fold events --
+// -- Step 3: Implement EventSourced to teach batpak how to fold events --
+//
+// The dispatch table here is hand-written: compare `kind` against each
+// payload type's `KIND` constant, then deserialize into the right type.
+// A future `#[derive(EventSourced)]` will generate this dispatch from
+// per-handler attributes, but that's the next lock. For now the KIND
+// constants keep the comparisons honest.
 impl EventSourced for CounterState {
     type Input = batpak::prelude::JsonValueInput;
 
@@ -62,24 +73,22 @@ impl EventSourced for CounterState {
 
     fn apply_event(&mut self, event: &Event<serde_json::Value>) {
         let kind = event.header.event_kind;
-        if kind == INCREMENTED || kind == DECREMENTED {
-            // Reader delivers payloads as typed serde_json::Value (already
-            // decoded from the on-disk msgpack frame), so we can deserialize
-            // directly from the Value without re-parsing bytes.
-            let payload = serde_json::from_value::<IncrementedBy>(event.payload.clone()).expect(
-                "CounterState::apply_event expects replay payloads that match IncrementedBy",
-            );
-            self.value += payload.amount;
-            if payload.amount > 0 {
-                self.total_increments += 1;
-            } else {
-                self.total_decrements += 1;
-            }
+        if kind == Incremented::KIND {
+            let p = serde_json::from_value::<Incremented>(event.payload.clone())
+                .expect("CounterState::apply_event: Incremented payload decode");
+            self.value += p.amount;
+            self.total_increments += 1;
+        } else if kind == Decremented::KIND {
+            let p = serde_json::from_value::<Decremented>(event.payload.clone())
+                .expect("CounterState::apply_event: Decremented payload decode");
+            self.value += p.amount;
+            self.total_decrements += 1;
         }
     }
 
     fn relevant_event_kinds() -> &'static [EventKind] {
-        &[INCREMENTED, DECREMENTED]
+        static KINDS: [EventKind; 2] = [Incremented::KIND, Decremented::KIND];
+        &KINDS
     }
 }
 
@@ -94,26 +103,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // -- Write some events --
     println!("Writing events...\n");
 
-    store.append(
+    store.append_typed(
         &coord,
-        INCREMENTED,
-        &IncrementedBy {
+        &Incremented {
             amount: 1,
             reason: "page view".into(),
         },
     )?;
-    store.append(
+    store.append_typed(
         &coord,
-        INCREMENTED,
-        &IncrementedBy {
+        &Incremented {
             amount: 5,
             reason: "bulk import".into(),
         },
     )?;
-    store.append(
+    store.append_typed(
         &coord,
-        DECREMENTED,
-        &IncrementedBy {
+        &Decremented {
             amount: -2,
             reason: "cleanup".into(),
         },

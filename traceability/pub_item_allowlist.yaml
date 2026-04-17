@@ -48,3 +48,11 @@
   justification: probabilistic fault injector tested through tests/atomic_batch.rs chaos testing
 - name: maybe_inject
   justification: fault injection helper called by writer internals, tested indirectly through batch fault tests
+- name: __private
+  justification: doc-hidden module; all contents exist solely for #[derive(EventPayload)] generated code and cannot be named in user-facing tests
+- name: EventPayloadRegistration
+  justification: __private struct consumed by inventory::submit! in derive-generated test code; not a user-facing API
+- name: scan_for_kind_collisions
+  justification: __private function called by derive-generated collision scan tests; not a user-facing API
+- name: inventory
+  justification: __private re-export used by derive-generated code; not a user-facing API

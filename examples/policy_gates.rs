@@ -21,11 +21,10 @@
 //! Run: `cargo run --example policy_gates`
 
 use batpak::prelude::*;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-const TRANSFER: EventKind = EventKind::custom(4, 1);
-
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Deserialize, EventPayload)]
+#[batpak(category = 4, type_id = 1)]
 struct TransferRequest {
     from: String,
     to: String,
@@ -133,9 +132,11 @@ fn try_transfer(store: &Store, pipeline: &Pipeline<TransferRequest>, transfer: T
                 Coordinate::new(&format!("transfer:{}", transfer.from), "banking:transfers")
                     .expect("valid coordinate");
 
-            // Commit consumes the receipt (can't reuse it)
+            // Commit consumes the receipt (can't reuse it). `payload` here is
+            // `&TransferRequest` (`pipeline.commit` passes by reference), so we
+            // forward it directly — `append_typed` expects `&T: EventPayload`.
             let result: Result<_, StoreError> = pipeline.commit(receipt, |payload| {
-                let r = store.append(&coord, TRANSFER, &payload)?;
+                let r = store.append_typed(&coord, payload)?;
                 Ok(CommitMetadata::from_append_receipt(r))
             });
 

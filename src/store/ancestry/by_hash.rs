@@ -6,15 +6,27 @@ pub(crate) fn walk_ancestors_by_hash<State>(
     event_id: u128,
     limit: usize,
 ) -> Vec<StoredEvent<serde_json::Value>> {
+    // All events in a hash chain belong to the same entity, so we load the
+    // entity stream once and reuse it across every hop instead of re-querying
+    // the DashMap (and re-cloning all IndexEntries) on each step.
+    //
+    // A by_event_hash DashMap was considered to turn the per-hop linear scan
+    // into O(1). Benchmarks showed the per-hop cost (~6 µs) is dominated by
+    // the segment disk read, not the stream scan. The ~15-30% scan saving does
+    // not justify a permanent DashMap entry per event across the whole index.
+    let start = match store.index.get_by_id(event_id) {
+        Some(e) => e,
+        None => return Vec::new(),
+    };
+    let entity_stream = store.index.stream(start.coord.entity());
+
     super::collect_ancestors(store, Some(event_id), limit, |store, current_id| {
         let (entry, stored) = super::read_entry_and_event(store, current_id)?;
         let prev = entry.hash_chain.prev_hash;
         let next = if prev == [0_u8; 32] {
             None
         } else {
-            store
-                .index
-                .stream(entry.coord.entity())
+            entity_stream
                 .iter()
                 .find(|candidate| candidate.hash_chain.event_hash == prev)
                 .map(|candidate| candidate.event_id)

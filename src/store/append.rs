@@ -1,5 +1,5 @@
 use crate::coordinate::Coordinate;
-use crate::event::{EventKind, StoredEvent};
+use crate::event::{EventKind, EventPayload, StoredEvent};
 use crate::store::{DiskPos, StoreError};
 use serde::Serialize;
 
@@ -81,6 +81,19 @@ impl BatchAppendItem {
             options,
             causation,
         })
+    }
+
+    /// Create a new batch item with a typed payload — kind derived from `T::KIND`.
+    ///
+    /// # Errors
+    /// Returns `StoreError::Serialization` if payload serialization fails.
+    pub fn typed<T: EventPayload>(
+        coord: Coordinate,
+        payload: &T,
+        options: AppendOptions,
+        causation: CausationRef,
+    ) -> Result<Self, StoreError> {
+        Self::new(coord, T::KIND, payload, options, causation)
     }
 
     /// Low-level escape hatch for callers that already own canonical MessagePack bytes.

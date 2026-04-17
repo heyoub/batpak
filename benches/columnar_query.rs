@@ -57,8 +57,7 @@ fn build_sorted_store(topology: IndexTopology) -> (Store, TempDir) {
     .expect("open");
     // Same-kind runs: all EVENTS_PER_KIND events of kind[0], then kind[1], etc.
     for (i, &kind) in KINDS.iter().enumerate() {
-        let coord =
-            Coordinate::new(format!("bench:entity:{i}"), "bench:scope").expect("coord");
+        let coord = Coordinate::new(format!("bench:entity:{i}"), "bench:scope").expect("coord");
         for seq in 0..EVENTS_PER_KIND {
             store
                 .append(&coord, kind, &serde_json::json!({"seq": seq}))
@@ -80,9 +79,7 @@ fn build_interleaved_store(topology: IndexTopology) -> (Store, TempDir) {
     let coords: Vec<Coordinate> = KINDS
         .iter()
         .enumerate()
-        .map(|(i, _)| {
-            Coordinate::new(format!("bench:entity:{i}"), "bench:scope").expect("coord")
-        })
+        .map(|(i, _)| Coordinate::new(format!("bench:entity:{i}"), "bench:scope").expect("coord"))
         .collect();
     for seq in 0..EVENTS_PER_KIND {
         for (i, &kind) in KINDS.iter().enumerate() {
@@ -98,6 +95,7 @@ fn bench_by_kind(c: &mut Criterion) {
     let cases = [
         ("soa", IndexTopology::scan()),
         ("aosoa64", IndexTopology::tiled()),
+        ("aosoa64simd", IndexTopology::tiled_simd()),
     ];
 
     let mut group = c.benchmark_group("by_kind/sorted");
@@ -131,6 +129,7 @@ fn bench_by_category(c: &mut Criterion) {
     let cases = [
         ("soa", IndexTopology::scan()),
         ("aosoa64", IndexTopology::tiled()),
+        ("aosoa64simd", IndexTopology::tiled_simd()),
     ];
 
     let mut group = c.benchmark_group("by_category/sorted");
@@ -142,9 +141,7 @@ fn bench_by_category(c: &mut Criterion) {
         let (store, _dir) = build_sorted_store(topology.clone());
         group.bench_function(BenchmarkId::new(*name, EVENTS_PER_KIND), |b| {
             b.iter(|| {
-                criterion::black_box(
-                    store.query(&Region::all().with_fact_category(QUERY_CATEGORY)),
-                )
+                criterion::black_box(store.query(&Region::all().with_fact_category(QUERY_CATEGORY)))
             });
         });
         store.close().expect("close");
@@ -159,9 +156,7 @@ fn bench_by_category(c: &mut Criterion) {
         let (store, _dir) = build_interleaved_store(topology.clone());
         group.bench_function(BenchmarkId::new(*name, EVENTS_PER_KIND), |b| {
             b.iter(|| {
-                criterion::black_box(
-                    store.query(&Region::all().with_fact_category(QUERY_CATEGORY)),
-                )
+                criterion::black_box(store.query(&Region::all().with_fact_category(QUERY_CATEGORY)))
             });
         });
         store.close().expect("close");

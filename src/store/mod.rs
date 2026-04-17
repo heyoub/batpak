@@ -49,7 +49,7 @@ pub use write::control::{AppendTicket, BatchAppendTicket, Outbox, VisibilityFenc
 pub use write::writer::{Notification, RestartPolicy};
 
 use crate::coordinate::{Coordinate, KindFilter, Region};
-use crate::event::{EventKind, EventSourced, StoredEvent};
+use crate::event::{EventKind, EventPayload, EventSourced, StoredEvent};
 #[cfg(test)]
 pub(crate) use config::now_us;
 use index::StoreIndex;
@@ -559,6 +559,103 @@ impl Store<Open> {
         self.append(coord, kind, &payload)
     }
 
+    /// WRITE (typed): append a root-cause event — kind derived from `T::KIND`.
+    ///
+    /// # Errors
+    /// Returns `StoreError::Serialization` if the payload cannot be serialized.
+    /// Returns `StoreError::WriterCrashed` if the writer thread has exited unexpectedly.
+    pub fn append_typed<T: EventPayload>(
+        &self,
+        coord: &Coordinate,
+        payload: &T,
+    ) -> Result<AppendReceipt, StoreError> {
+        self.append(coord, T::KIND, payload)
+    }
+
+    /// WRITE (typed): append with options — kind derived from `T::KIND`.
+    ///
+    /// # Errors
+    /// Returns `StoreError::Serialization` if the payload cannot be serialized.
+    /// Returns `StoreError::WriterCrashed` if the writer thread has exited unexpectedly.
+    pub fn append_typed_with_options<T: EventPayload>(
+        &self,
+        coord: &Coordinate,
+        payload: &T,
+        opts: AppendOptions,
+    ) -> Result<AppendReceipt, StoreError> {
+        self.append_with_options(coord, T::KIND, payload, opts)
+    }
+
+    /// WRITE (typed): nonblocking submit — kind derived from `T::KIND`.
+    ///
+    /// # Errors
+    /// Returns any serialization, enqueue, or writer error.
+    pub fn submit_typed<T: EventPayload>(
+        &self,
+        coord: &Coordinate,
+        payload: &T,
+    ) -> Result<AppendTicket, StoreError> {
+        self.submit(coord, T::KIND, payload)
+    }
+
+    /// WRITE (typed): attempt submit without blocking under pressure — kind derived from `T::KIND`.
+    ///
+    /// # Errors
+    /// Returns any serialization, enqueue, or writer error.
+    pub fn try_submit_typed<T: EventPayload>(
+        &self,
+        coord: &Coordinate,
+        payload: &T,
+    ) -> Result<crate::outcome::Outcome<AppendTicket>, StoreError> {
+        self.try_submit(coord, T::KIND, payload)
+    }
+
+    /// WRITE (typed): append a reaction — kind derived from `T::KIND`.
+    ///
+    /// `correlation_id` and `causation_id` are still supplied explicitly;
+    /// only the `kind` becomes implicit.
+    ///
+    /// # Errors
+    /// Returns `StoreError::Serialization` if the payload cannot be serialized.
+    /// Returns `StoreError::WriterCrashed` if the writer thread has exited unexpectedly.
+    pub fn append_reaction_typed<T: EventPayload>(
+        &self,
+        coord: &Coordinate,
+        payload: &T,
+        correlation_id: u128,
+        causation_id: u128,
+    ) -> Result<AppendReceipt, StoreError> {
+        self.append_reaction(coord, T::KIND, payload, correlation_id, causation_id)
+    }
+
+    /// WRITE (typed): nonblocking reaction submit — kind derived from `T::KIND`.
+    ///
+    /// # Errors
+    /// Returns any serialization, enqueue, or writer error.
+    pub fn submit_reaction_typed<T: EventPayload>(
+        &self,
+        coord: &Coordinate,
+        payload: &T,
+        correlation_id: u128,
+        causation_id: u128,
+    ) -> Result<AppendTicket, StoreError> {
+        self.submit_reaction(coord, T::KIND, payload, correlation_id, causation_id)
+    }
+
+    /// WRITE (typed): attempt reaction submit without blocking under pressure — kind derived from `T::KIND`.
+    ///
+    /// # Errors
+    /// Returns any serialization, enqueue, or writer error.
+    pub fn try_submit_reaction_typed<T: EventPayload>(
+        &self,
+        coord: &Coordinate,
+        payload: &T,
+        correlation_id: u128,
+        causation_id: u128,
+    ) -> Result<crate::outcome::Outcome<AppendTicket>, StoreError> {
+        self.try_submit_reaction(coord, T::KIND, payload, correlation_id, causation_id)
+    }
+
     /// LIFECYCLE
     ///
     /// # Errors
@@ -746,6 +843,14 @@ impl<State> Store<State> {
     #[must_use]
     pub fn by_fact(&self, kind: EventKind) -> Vec<IndexEntry> {
         self.query(&Region::all().with_fact(KindFilter::Exact(kind)))
+    }
+
+    /// READ (typed): query all events whose kind matches `T::KIND`.
+    ///
+    /// Available on both `Store<Open>` and `Store<ReadOnly>`.
+    #[must_use]
+    pub fn by_fact_typed<T: EventPayload>(&self) -> Vec<IndexEntry> {
+        self.by_fact(T::KIND)
     }
 
     /// CURSOR: pull-based, guaranteed delivery.

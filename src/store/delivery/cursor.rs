@@ -26,32 +26,34 @@ impl Cursor {
 
     /// Poll for the next matching event at or after our current position.
     pub fn poll(&mut self) -> Option<IndexEntry> {
-        let results = self.index.query(&self.region);
-        for entry in results {
-            if !self.started || entry.global_sequence > self.position {
-                self.position = entry.global_sequence;
-                self.started = true;
-                return Some(entry);
-            }
+        let hits = self
+            .index
+            .query_hits_after(&self.region, self.position, self.started, 1);
+        if let Some(hit) = hits.into_iter().next() {
+            self.position = hit.global_sequence;
+            self.started = true;
+            Some(self.index.upgrade_hit(hit))
+        } else {
+            None
         }
-        None
     }
 
     /// Poll for up to max matching events.
     pub fn poll_batch(&mut self, max: usize) -> Vec<IndexEntry> {
-        let mut batch = Vec::with_capacity(max);
-        let results = self.index.query(&self.region);
-        for entry in results {
-            if !self.started || entry.global_sequence > self.position {
-                self.position = entry.global_sequence;
-                self.started = true;
-                batch.push(entry);
-                if batch.len() >= max {
-                    break;
-                }
-            }
+        let hits = self
+            .index
+            .query_hits_after(&self.region, self.position, self.started, max);
+        if hits.is_empty() {
+            return Vec::new();
         }
-        batch
+        self.started = true;
+        self.position = hits
+            .last()
+            .expect("non-empty vec has a last element")
+            .global_sequence;
+        hits.into_iter()
+            .map(|hit| self.index.upgrade_hit(hit))
+            .collect()
     }
 
     pub(crate) fn checkpoint(&self) -> (u64, bool) {

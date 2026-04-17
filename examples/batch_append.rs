@@ -9,6 +9,19 @@
 use batpak::prelude::*;
 use batpak::store::{BatchAppendItem, CausationRef};
 
+#[derive(serde::Serialize, serde::Deserialize, EventPayload)]
+#[batpak(category = 1, type_id = 1)]
+struct ChatSent {
+    text: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, EventPayload)]
+#[batpak(category = 2, type_id = 1)]
+struct AuditLogged {
+    action: String,
+    participants: u32,
+}
+
 #[allow(clippy::print_stdout)] // example should show observable success path to users.
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let dir = tempfile::tempdir()?;
@@ -21,26 +34,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Build a batch of related events across two entities.
     let items = vec![
         // First event: Alice sends a message.
-        BatchAppendItem::new(
+        BatchAppendItem::typed(
             Coordinate::new("user:alice", "chat:general")?,
-            EventKind::custom(1, 1),
-            &serde_json::json!({"text": "Hello everyone!"}),
+            &ChatSent {
+                text: "Hello everyone!".into(),
+            },
             AppendOptions::default(),
             CausationRef::None,
         )?,
         // Second event: Bob replies, caused by Alice's message (item 0).
-        BatchAppendItem::new(
+        BatchAppendItem::typed(
             Coordinate::new("user:bob", "chat:general")?,
-            EventKind::custom(1, 1),
-            &serde_json::json!({"text": "Hi Alice!"}),
+            &ChatSent {
+                text: "Hi Alice!".into(),
+            },
             AppendOptions::default(),
             CausationRef::PriorItem(0),
         )?,
         // Third event: System audit log, caused by Bob's reply (item 1).
-        BatchAppendItem::new(
+        BatchAppendItem::typed(
             Coordinate::new("system:audit", "chat:general")?,
-            EventKind::custom(2, 1),
-            &serde_json::json!({"action": "message_exchange", "participants": 2}),
+            &AuditLogged {
+                action: "message_exchange".into(),
+                participants: 2,
+            },
             AppendOptions::default(),
             CausationRef::PriorItem(1),
         )?,

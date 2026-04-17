@@ -1,0 +1,5 @@
+error: expected exactly one `#[batpak(...)]` attribute
+ --> tests/ui/ep_multiple_attrs.rs:7:1
+  |
+7 | #[batpak(category = 2, type_id = 2)]
+  | ^

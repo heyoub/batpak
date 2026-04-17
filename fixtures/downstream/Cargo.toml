@@ -1,0 +1,15 @@
+[package]
+name = "batpak-derive-downstream-fixture"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Standalone workspace so this fixture is NOT pulled into batpak's workspace.
+# Phase 3 of ADR-0010 uses it as a downstream path-hygiene check: the derive
+# expands `::batpak::...` paths and they must resolve for an external
+# consumer that depends on `batpak` as a normal library dependency.
+[workspace]
+
+[dependencies]
+batpak = { path = "../.." }
+serde = { version = "1", features = ["derive"] }

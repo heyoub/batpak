@@ -4,12 +4,17 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+#[derive(serde::Serialize, serde::Deserialize, EventPayload)]
+#[batpak(category = 0xF, type_id = 6)]
+struct Tick {
+    n: u32,
+}
+
 #[allow(clippy::print_stdout)]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let dir = tempfile::tempdir()?;
     let store = Arc::new(Store::open(StoreConfig::new(dir.path()))?);
     let coord = Coordinate::new("player:cursor", "room:worker")?;
-    let kind = EventKind::custom(0xF, 6);
     let processed = Arc::new(AtomicUsize::new(0));
 
     let worker = store.cursor_worker(
@@ -33,7 +38,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
 
     for n in 0..3u32 {
-        store.append(&coord, kind, &serde_json::json!({"n": n}))?;
+        store.append_typed(&coord, &Tick { n })?;
     }
 
     let deadline = Instant::now() + Duration::from_secs(5);

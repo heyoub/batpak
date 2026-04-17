@@ -1565,8 +1565,13 @@ impl WriterState<'_> {
 
         // STEP 12/14: Materialize all post-write projections in one pass.
         let artifacts = self.materialize_batch_commit_artifacts(prepared, &computed, &receipts);
-        for (sidx_entry, index_entry) in artifacts.sidx_entries.iter().zip(artifacts.entries.iter()) {
-            self.sidx_collector.record(sidx_entry.clone(), index_entry.coord.entity(), index_entry.coord.scope());
+        for (sidx_entry, index_entry) in artifacts.sidx_entries.iter().zip(artifacts.entries.iter())
+        {
+            self.sidx_collector.record(
+                sidx_entry.clone(),
+                index_entry.coord.entity(),
+                index_entry.coord.scope(),
+            );
         }
 
         // FAULT INJECTION: Before atomic publish to index

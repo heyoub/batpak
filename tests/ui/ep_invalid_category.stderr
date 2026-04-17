@@ -1,0 +1,5 @@
+error: category 0x0 is reserved for system events
+ --> tests/ui/ep_invalid_category.rs:6:21
+  |
+6 | #[batpak(category = 0, type_id = 1)]
+  |                     ^

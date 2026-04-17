@@ -1,0 +1,5 @@
+error: unknown key `extra`, expected `category` or `type_id`
+ --> tests/ui/ep_unknown_key.rs:6:37
+  |
+6 | #[batpak(category = 1, type_id = 1, extra = 2)]
+  |                                     ^^^^^

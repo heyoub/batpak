@@ -2,8 +2,8 @@ pub use crate::coordinate::DagPosition;
 pub use crate::coordinate::{Coordinate, CoordinateError, KindFilter, Region};
 pub use crate::event::sourcing::Reactive;
 pub use crate::event::{
-    Event, EventHeader, EventKind, EventSourced, HashChain, JsonValueInput, ProjectionEvent,
-    ProjectionInput, ProjectionPayload, RawMsgpackInput, ReplayLane, StoredEvent,
+    Event, EventHeader, EventKind, EventPayload, EventSourced, HashChain, JsonValueInput,
+    ProjectionEvent, ProjectionInput, ProjectionPayload, RawMsgpackInput, ReplayLane, StoredEvent,
 };
 pub use crate::guard::{Denial, Gate, GateSet, Receipt};
 pub use crate::id::EventId;
@@ -20,3 +20,4 @@ pub use crate::store::{
     Open, ReadOnly, RestartPolicy, Store, StoreConfig, StoreError, SyncConfig, SyncMode,
     WriterConfig, WriterPressure,
 };
+pub use batpak_macros::EventPayload;

@@ -1,0 +1,5 @@
+error: type_id must fit in 12 bits (0x000–0xFFF)
+ --> tests/ui/ep_invalid_type_id.rs:6:34
+  |
+6 | #[batpak(category = 1, type_id = 4096)]
+  |                                  ^^^^

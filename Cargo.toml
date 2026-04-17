@@ -23,7 +23,7 @@ exclude = [
 ]
 
 [workspace]
-members = ["tools/integrity", "tools/xtask"]
+members = ["tools/integrity", "tools/xtask", "batpak-macros-support", "batpak-macros"]
 default-members = ["."]
 resolver = "2"
 
@@ -40,6 +40,8 @@ dangerous-test-hooks = ["dep:fastrand"]
 uuid = { version = "1", features = ["v7"] }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
+batpak-macros-support = { path = "./batpak-macros-support", version = "0.6.0" }
+batpak-macros = { path = "./batpak-macros", version = "0.6.0" }
 blake3 = { version = "1", optional = true }
 flume = "0.12"
 crc32fast = "1"
@@ -142,6 +144,14 @@ harness = false
 
 [[bench]]
 name = "columnar_query"
+harness = false
+
+[[bench]]
+name = "query_materialization"
+harness = false
+
+[[bench]]
+name = "ancestry_walk"
 harness = false
 
 # Profile settings (NOT in .cargo/config.toml — they're ignored there)

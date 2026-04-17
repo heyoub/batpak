@@ -1,0 +1,5 @@
+error: duplicate `category` key
+ --> tests/ui/ep_duplicate_key.rs:6:24
+  |
+6 | #[batpak(category = 1, category = 2, type_id = 1)]
+  |                        ^^^^^^^^

@@ -15,14 +15,26 @@ use batpak::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-const MSG_SENT: EventKind = EventKind::custom(3, 1);
-const MSG_EDITED: EventKind = EventKind::custom(3, 2);
-const MSG_DELETED: EventKind = EventKind::custom(3, 3);
-
-#[derive(Serialize, Deserialize, Debug)]
-struct ChatMessage {
+// Three event kinds, three payload types. Category 3 = chat;
+// type_id = 1/2/3 for sent/edited/deleted.
+#[derive(Serialize, Deserialize, Debug, EventPayload)]
+#[batpak(category = 3, type_id = 1)]
+struct MessageSent {
     from: String,
     text: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, EventPayload)]
+#[batpak(category = 3, type_id = 2)]
+struct MessageEdited {
+    from: String,
+    text: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, EventPayload)]
+#[batpak(category = 3, type_id = 3)]
+struct MessageDeleted {
+    from: String,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -42,8 +54,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .name("chat-room-listener".into())
         .spawn(move || {
             let mut received = vec![];
-            // Use SubscriptionOps for composable filtering: only MSG_SENT, take 3
-            let mut ops = sub.ops().filter(|n| n.kind == MSG_SENT).take(3);
+            // Use SubscriptionOps for composable filtering: only MessageSent, take 3
+            let mut ops = sub.ops().filter(|n| n.kind == MessageSent::KIND).take(3);
             while let Some(notif) = ops.recv() {
                 received.push(format!(
                     "{}@{} (kind={})",
@@ -74,20 +86,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let charlie = Coordinate::new("user:charlie", "chat:general")?;
 
     // A few small delays so the subscriber thread can keep up
-    store.append(
+    store.append_typed(
         &alice,
-        MSG_SENT,
-        &ChatMessage {
+        &MessageSent {
             from: "alice".into(),
             text: "Hey everyone!".into(),
         },
     )?;
     println!("Alice: Hey everyone!");
 
-    store.append(
+    store.append_typed(
         &bob,
-        MSG_SENT,
-        &ChatMessage {
+        &MessageSent {
             from: "bob".into(),
             text: "What's up?".into(),
         },
@@ -95,20 +105,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Bob: What's up?");
 
     // Bob edits his message (different event kind — subscriber filter will skip this)
-    store.append(
+    store.append_typed(
         &bob,
-        MSG_EDITED,
-        &ChatMessage {
+        &MessageEdited {
             from: "bob".into(),
             text: "What's up? (edited)".into(),
         },
     )?;
     println!("Bob: [edited his message]");
 
-    store.append(
+    store.append_typed(
         &charlie,
-        MSG_SENT,
-        &ChatMessage {
+        &MessageSent {
             from: "charlie".into(),
             text: "Hey! Just joined.".into(),
         },
@@ -133,9 +141,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("  Cursor found {} events total:", cursor_events.len());
     for entry in &cursor_events {
         let kind_label = match entry.kind {
-            k if k == MSG_SENT => "SENT",
-            k if k == MSG_EDITED => "EDITED",
-            k if k == MSG_DELETED => "DELETED",
+            k if k == MessageSent::KIND => "SENT",
+            k if k == MessageEdited::KIND => "EDITED",
+            k if k == MessageDeleted::KIND => "DELETED",
             _ => "OTHER",
         };
         println!(
@@ -154,7 +162,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // -- Query: filter by event kind --
     println!("\n--- Query: All edits across all users ---");
-    let edits = store.by_fact(MSG_EDITED);
+    let edits = store.by_fact_typed::<MessageEdited>();
     println!("  {} edit event(s) found", edits.len());
 
     // -- Batch append: efficient bulk messaging --
@@ -163,30 +171,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Simulate importing a batch of historical messages
     let historical = vec![
-        BatchAppendItem::new(
+        BatchAppendItem::typed(
             Coordinate::new("user:alice", "chat:general")?,
-            MSG_SENT,
-            &ChatMessage {
+            &MessageSent {
                 from: "alice".into(),
                 text: "[Batch] Historical message 1".into(),
             },
             AppendOptions::default(),
             CausationRef::None,
         )?,
-        BatchAppendItem::new(
+        BatchAppendItem::typed(
             Coordinate::new("user:bob", "chat:general")?,
-            MSG_SENT,
-            &ChatMessage {
+            &MessageSent {
                 from: "bob".into(),
                 text: "[Batch] Historical message 2".into(),
             },
             AppendOptions::default(),
             CausationRef::None,
         )?,
-        BatchAppendItem::new(
+        BatchAppendItem::typed(
             Coordinate::new("user:charlie", "chat:general")?,
-            MSG_SENT,
-            &ChatMessage {
+            &MessageSent {
                 from: "charlie".into(),
                 text: "[Batch] Historical message 3".into(),
             },

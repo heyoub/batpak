@@ -1,0 +1,5 @@
+error: #[derive(EventPayload)] requires a named-field struct; enums are not supported
+ --> tests/ui/ep_on_enum.rs:7:1
+  |
+7 | enum NotAStruct {
+  | ^^^^

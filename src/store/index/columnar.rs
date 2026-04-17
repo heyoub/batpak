@@ -33,7 +33,9 @@
 //! SIMD intrinsics; that specialization is not yet implemented.
 
 use crate::event::EventKind;
-use crate::store::index::{projection_kind_matches, ClockKey, DiskPos, IndexEntry, RoutingSummary};
+use crate::store::index::{
+    projection_kind_matches, ClockKey, DiskPos, IndexEntry, QueryHit, RoutingSummary,
+};
 use dashmap::DashMap;
 use parking_lot::RwLock;
 use std::any::TypeId;
@@ -41,6 +43,28 @@ use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 
 type ProjectionCandidates = (u64, u64, Vec<(u64, DiskPos)>);
+
+/// Reconstruct the raw `u16` wire value from an `EventKind`.
+///
+/// `EventKind` stores `(category << 12) | type_id` but the inner field is
+/// private. Reconstructing from the public accessors gives the same bits.
+#[inline]
+fn event_kind_raw(kind: EventKind) -> u16 {
+    ((kind.category() as u16) << 12) | kind.type_id()
+}
+
+/// Post-filter, sort, and truncate for non-SoA bounded-scan fallback.
+///
+/// Retains hits with `global_sequence > after_seq` (when `started`), sorts
+/// ascending, and truncates to `limit`.
+#[inline]
+fn apply_after_bounds(v: &mut Vec<QueryHit>, after_seq: u64, started: bool, limit: usize) {
+    if started {
+        v.retain(|h| h.global_sequence > after_seq);
+    }
+    v.sort_by_key(|h| h.global_sequence);
+    v.truncate(limit);
+}
 
 #[derive(Clone, Copy, Debug)]
 enum EntryQuery<'a> {
@@ -162,44 +186,100 @@ impl SoAInner {
         self.scope_entities.entry(scope).or_default().insert(entity);
     }
 
-    fn query_entries(&self, mut matches: impl FnMut(EventKind) -> bool) -> Vec<Arc<IndexEntry>> {
+    fn query_hits_entries(&self, mut matches: impl FnMut(EventKind) -> bool) -> Vec<QueryHit> {
         self.kinds
             .iter()
             .zip(self.entries.iter())
             .filter(|(kind, _)| matches(**kind))
-            .map(|(_, e)| Arc::clone(e))
+            .map(|(_, e)| QueryHit::from_entry(e))
             .collect()
     }
 
-    /// Return all entries whose `kind == target`.  Linear scan; cache-friendly
-    /// because `kinds` is a packed `Vec<EventKind>` (2 bytes per element).
-    fn query_by_kind(&self, target: EventKind) -> Vec<Arc<IndexEntry>> {
-        self.query_entries(|kind| kind == target)
+    fn query_hits_by_kind(&self, target: EventKind) -> Vec<QueryHit> {
+        self.query_hits_entries(|kind| kind == target)
     }
 
-    /// Return all entries whose kind falls in `category` (upper 4 bits).
-    fn query_by_category(&self, category: u8) -> Vec<Arc<IndexEntry>> {
-        self.query_entries(|kind| kind.category() == category)
+    fn query_hits_by_category(&self, category: u8) -> Vec<QueryHit> {
+        self.query_hits_entries(|kind| kind.category() == category)
     }
 
-    /// Return all entries belonging to entities registered under `scope`.
-    fn query_by_scope(&self, scope: &str) -> Vec<Arc<IndexEntry>> {
+    fn query_hits_by_scope(&self, scope: &str) -> Vec<QueryHit> {
         let Some(entities) = self.scope_entities.get(scope) else {
             return Vec::new();
         };
         self.entries
             .iter()
             .filter(|e| entities.contains(e.coord.entity_arc().as_ref()))
-            .map(Arc::clone)
+            .map(|e| QueryHit::from_entry(e))
             .collect()
     }
 
-    fn candidates(&self, spec: &EntryQuery<'_>) -> Vec<Arc<IndexEntry>> {
+    fn hits_candidates(&self, spec: &EntryQuery<'_>) -> Vec<QueryHit> {
         match spec {
-            EntryQuery::Kind(k) => self.query_by_kind(*k),
-            EntryQuery::Category(c) => self.query_by_category(*c),
-            EntryQuery::Scope(s) => self.query_by_scope(s),
+            EntryQuery::Kind(k) => self.query_hits_by_kind(*k),
+            EntryQuery::Category(c) => self.query_hits_by_category(*c),
+            EntryQuery::Scope(s) => self.query_hits_by_scope(s),
         }
+    }
+
+    /// Bounded scan: binary-search past already-consumed entries, then scan
+    /// forward collecting up to `limit` hits.  Output is in ascending
+    /// `global_sequence` order (no sort needed — `entries` are in insertion
+    /// order which equals ascending global_sequence).
+    fn hits_candidates_after(
+        &self,
+        spec: &EntryQuery<'_>,
+        after_seq: u64,
+        started: bool,
+        limit: usize,
+    ) -> Vec<QueryHit> {
+        let start = if started {
+            self.entries
+                .partition_point(|e| e.global_sequence <= after_seq)
+        } else {
+            0
+        };
+        let remaining_kinds = &self.kinds[start..];
+        let remaining_entries = &self.entries[start..];
+        let mut out = Vec::new();
+
+        match spec {
+            EntryQuery::Kind(target) => {
+                for (kind, entry) in remaining_kinds.iter().zip(remaining_entries.iter()) {
+                    if kind == target {
+                        out.push(QueryHit::from_entry(entry));
+                        if out.len() >= limit {
+                            break;
+                        }
+                    }
+                }
+            }
+            EntryQuery::Category(cat) => {
+                for (kind, entry) in remaining_kinds.iter().zip(remaining_entries.iter()) {
+                    if kind.category() == *cat {
+                        out.push(QueryHit::from_entry(entry));
+                        if out.len() >= limit {
+                            break;
+                        }
+                    }
+                }
+            }
+            EntryQuery::Scope(scope) => {
+                let Some(entities) = self.scope_entities.get(*scope) else {
+                    return Vec::new();
+                };
+                for entry in remaining_entries.iter() {
+                    if entities.contains(entry.coord.entity_arc().as_ref()) {
+                        out.push(QueryHit::from_entry(entry));
+                        if out.len() >= limit {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        out
     }
 
     fn clear(&mut self) {
@@ -284,38 +364,31 @@ impl<const N: usize> AoSoAInner<N> {
         self.scope_entities.entry(scope).or_default().insert(entity);
     }
 
-    fn query_entries(&self, mut matches: impl FnMut(EventKind) -> bool) -> Vec<Arc<IndexEntry>> {
+    fn query_hits_entries(&self, mut matches: impl FnMut(EventKind) -> bool) -> Vec<QueryHit> {
         let mut out = Vec::new();
         for tile in &self.tiles {
-            // All elements in a tile share the same kind; skip non-matching tiles fast.
-            if tile
-                .kinds
-                .first()
-                .copied()
-                .is_none_or(|kind| !matches(kind))
-            {
+            if tile.len == 0 {
                 continue;
             }
-            for e in tile.entries.iter().take(tile.len) {
-                out.push(Arc::clone(e));
+            if !matches(tile.kinds[0]) {
+                continue;
+            }
+            for entry in tile.entries.iter().take(tile.len) {
+                out.push(QueryHit::from_entry(entry));
             }
         }
         out
     }
 
-    /// Iterate every tile and collect entries whose kind matches `target`.
-    fn query_by_kind(&self, target: EventKind) -> Vec<Arc<IndexEntry>> {
-        self.query_entries(|kind| kind == target)
+    fn query_hits_by_kind(&self, target: EventKind) -> Vec<QueryHit> {
+        self.query_hits_entries(|kind| kind == target)
     }
 
-    /// Return all entries whose kind falls in `category` (upper 4 bits).
-    /// Skips entire tiles whose kind doesn't match the category.
-    fn query_by_category(&self, category: u8) -> Vec<Arc<IndexEntry>> {
-        self.query_entries(|kind| kind.category() == category)
+    fn query_hits_by_category(&self, category: u8) -> Vec<QueryHit> {
+        self.query_hits_entries(|kind| kind.category() == category)
     }
 
-    /// Collect entries belonging to entities in `scope`.
-    fn query_by_scope(&self, scope: &str) -> Vec<Arc<IndexEntry>> {
+    fn query_hits_by_scope(&self, scope: &str) -> Vec<QueryHit> {
         let Some(entities) = self.scope_entities.get(scope) else {
             return Vec::new();
         };
@@ -323,24 +396,25 @@ impl<const N: usize> AoSoAInner<N> {
         for tile in &self.tiles {
             for e in tile.entries.iter().take(tile.len) {
                 if entities.contains(e.coord.entity_arc().as_ref()) {
-                    out.push(Arc::clone(e));
+                    out.push(QueryHit::from_entry(e));
                 }
             }
         }
         out
     }
 
-    fn candidates(&self, spec: &EntryQuery<'_>) -> Vec<Arc<IndexEntry>> {
+    fn hits_candidates(&self, spec: &EntryQuery<'_>) -> Vec<QueryHit> {
         match spec {
-            EntryQuery::Kind(k) => self.query_by_kind(*k),
-            EntryQuery::Category(c) => self.query_by_category(*c),
-            EntryQuery::Scope(s) => self.query_by_scope(s),
+            EntryQuery::Kind(k) => self.query_hits_by_kind(*k),
+            EntryQuery::Category(c) => self.query_hits_by_category(*c),
+            EntryQuery::Scope(s) => self.query_hits_by_scope(s),
         }
     }
 
     /// Execute `f` on the tile at position `idx`.
     ///
     /// Returns `None` if `idx` is out of range.
+    #[cfg(test)]
     pub(crate) fn with_tile<R>(&self, idx: usize, f: impl FnOnce(&Tile<N>) -> R) -> Option<R> {
         self.tiles.get(idx).map(f)
     }
@@ -348,6 +422,194 @@ impl<const N: usize> AoSoAInner<N> {
     fn clear(&mut self) {
         self.tiles.clear();
         self.open_tiles.clear();
+        self.scope_entities.clear();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tile64Simd — mixed-kind tile with inline kinds array for auto-vectorizable scan
+// ---------------------------------------------------------------------------
+
+/// A fixed-width 64-slot tile that holds events of **any** kind.
+///
+/// Unlike [`Tile<N>`], `Tile64Simd` stores kind values in an inline `[u16; 64]`
+/// array rather than a heap-allocated `Vec`. This lets the compiler see a
+/// contiguous, fixed-size comparison array and auto-vectorize the scan loop —
+/// no heap pointer dereference, no dynamic dispatch, just 64 `u16` values
+/// sitting in a cache line.
+///
+/// The trade-off versus `Tile<N>` (kind-homogeneous):
+/// - **No tile-skip**: tiles contain mixed kinds, so every tile must be scanned.
+/// - **Vectorizable comparison**: the `kinds_raw` comparison loop has a fixed
+///   bound and may be auto-vectorized by the compiler with SIMD instructions.
+/// - **Better interleaved fill**: one open tile accepts any kind, so interleaved
+///   multi-kind workloads produce fully-packed tiles.
+#[repr(C, align(64))]
+pub(crate) struct Tile64Simd {
+    /// Raw `u16` kind values, inline. Slots beyond `len` are zero-padded.
+    kinds_raw: [u16; 64],
+    /// Full index entries parallel to `kinds_raw`.
+    entries: Vec<Arc<IndexEntry>>,
+    /// Number of valid elements currently stored (≤ 64).
+    len: usize,
+}
+
+impl Tile64Simd {
+    pub(crate) fn new() -> Self {
+        Self {
+            kinds_raw: [0u16; 64],
+            entries: Vec::with_capacity(64),
+            len: 0,
+        }
+    }
+
+    #[inline]
+    pub(crate) fn is_full(&self) -> bool {
+        self.len >= 64
+    }
+
+    pub(crate) fn push(&mut self, kind: EventKind, entry: Arc<IndexEntry>) {
+        debug_assert!(!self.is_full(), "Tile64Simd::push called on a full tile");
+        self.kinds_raw[self.len] = event_kind_raw(kind);
+        self.entries.push(entry);
+        self.len += 1;
+    }
+
+    fn collect_hits_by_kind(&self, target_raw: u16, out: &mut Vec<QueryHit>) {
+        let n = self.len;
+        let mut hits = [0u8; 64];
+        for (hit, &k) in hits[..n].iter_mut().zip(&self.kinds_raw[..n]) {
+            *hit = (k == target_raw) as u8;
+        }
+        for (hit, entry) in hits[..n].iter().zip(&self.entries[..n]) {
+            if *hit != 0 {
+                out.push(QueryHit::from_entry(entry));
+            }
+        }
+    }
+
+    fn collect_hits_by_category(&self, category: u8, out: &mut Vec<QueryHit>) {
+        let n = self.len;
+        let mut hits = [0u8; 64];
+        for (hit, &k) in hits[..n].iter_mut().zip(&self.kinds_raw[..n]) {
+            *hit = ((k >> 12) as u8 == category) as u8;
+        }
+        for (hit, entry) in hits[..n].iter().zip(&self.entries[..n]) {
+            if *hit != 0 {
+                out.push(QueryHit::from_entry(entry));
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// AoSoA64SimdInner — mixed-kind tiled state for auto-vectorizable scan
+// ---------------------------------------------------------------------------
+
+/// Internal state for the experimental mixed-kind AoSoA64Simd layout.
+///
+/// Fill strategy: one open tile at a time, any kind accepted. When the open
+/// tile fills (64 entries), a new tile is allocated. This produces fully-packed
+/// tiles regardless of insertion order, at the cost of no tile-skip.
+///
+/// Query path: every tile is scanned via the two-pass `collect_by_kind` /
+/// `collect_by_category` methods on [`Tile64Simd`], which are designed to be
+/// auto-vectorized by the compiler.
+struct AoSoA64SimdInner {
+    tiles: Vec<Tile64Simd>,
+    /// Index of the current open (not yet full) tile, or `None` if all tiles
+    /// are full or no tiles have been allocated yet.
+    open_tile: Option<usize>,
+    scope_entities: std::collections::HashMap<Arc<str>, HashSet<Arc<str>>>,
+}
+
+impl AoSoA64SimdInner {
+    fn new() -> Self {
+        Self {
+            tiles: Vec::new(),
+            open_tile: None,
+            scope_entities: std::collections::HashMap::new(),
+        }
+    }
+
+    fn from_entries(entries: &[Arc<IndexEntry>]) -> Self {
+        let mut built = Self::new();
+        for entry in entries {
+            built.push(entry);
+        }
+        built
+    }
+
+    fn push(&mut self, entry: &Arc<IndexEntry>) {
+        let scope: Arc<str> = entry.coord.scope_arc();
+        let entity: Arc<str> = entry.coord.entity_arc();
+        let kind = entry.kind;
+
+        match self.open_tile {
+            Some(idx) => {
+                self.tiles[idx].push(kind, Arc::clone(entry));
+                if self.tiles[idx].is_full() {
+                    self.open_tile = None;
+                }
+            }
+            None => {
+                let new_idx = self.tiles.len();
+                let mut tile = Tile64Simd::new();
+                tile.push(kind, Arc::clone(entry));
+                let is_full = tile.is_full();
+                self.tiles.push(tile);
+                if !is_full {
+                    self.open_tile = Some(new_idx);
+                }
+            }
+        }
+
+        self.scope_entities.entry(scope).or_default().insert(entity);
+    }
+
+    fn query_hits_by_kind(&self, target: EventKind) -> Vec<QueryHit> {
+        let target_raw = event_kind_raw(target);
+        let mut out = Vec::new();
+        for tile in &self.tiles {
+            tile.collect_hits_by_kind(target_raw, &mut out);
+        }
+        out
+    }
+
+    fn query_hits_by_category(&self, category: u8) -> Vec<QueryHit> {
+        let mut out = Vec::new();
+        for tile in &self.tiles {
+            tile.collect_hits_by_category(category, &mut out);
+        }
+        out
+    }
+
+    fn query_hits_by_scope(&self, scope: &str) -> Vec<QueryHit> {
+        let Some(entities) = self.scope_entities.get(scope) else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        for tile in &self.tiles {
+            for e in tile.entries.iter().take(tile.len) {
+                if entities.contains(e.coord.entity_arc().as_ref()) {
+                    out.push(QueryHit::from_entry(e));
+                }
+            }
+        }
+        out
+    }
+
+    fn hits_candidates(&self, spec: &EntryQuery<'_>) -> Vec<QueryHit> {
+        match spec {
+            EntryQuery::Kind(k) => self.query_hits_by_kind(*k),
+            EntryQuery::Category(c) => self.query_hits_by_category(*c),
+            EntryQuery::Scope(s) => self.query_hits_by_scope(s),
+        }
+    }
+
+    fn clear(&mut self) {
+        self.tiles.clear();
+        self.open_tile = None;
         self.scope_entities.clear();
     }
 }
@@ -444,43 +706,45 @@ impl SoAoSInner {
         self.scope_entities.entry(scope).or_default().insert(entity);
     }
 
-    fn query_entries(&self, mut matches: impl FnMut(EventKind) -> bool) -> Vec<Arc<IndexEntry>> {
+    fn query_hits_entries(&self, mut matches: impl FnMut(EventKind) -> bool) -> Vec<QueryHit> {
         let mut out = Vec::new();
         for group in self.groups.values() {
             for (i, &kind) in group.kinds.iter().enumerate() {
                 if matches(kind) {
-                    out.push(Arc::clone(&group.entries[i]));
+                    out.push(QueryHit::from_entry(&group.entries[i]));
                 }
             }
         }
         out
     }
 
-    fn query_by_kind(&self, target: EventKind) -> Vec<Arc<IndexEntry>> {
-        self.query_entries(|kind| kind == target)
+    fn query_hits_by_kind(&self, target: EventKind) -> Vec<QueryHit> {
+        self.query_hits_entries(|kind| kind == target)
     }
 
-    fn query_by_category(&self, category: u8) -> Vec<Arc<IndexEntry>> {
-        self.query_entries(|kind| kind.category() == category)
+    fn query_hits_by_category(&self, category: u8) -> Vec<QueryHit> {
+        self.query_hits_entries(|kind| kind.category() == category)
     }
 
-    fn query_by_scope(&self, scope: &str) -> Vec<Arc<IndexEntry>> {
+    fn query_hits_by_scope(&self, scope: &str) -> Vec<QueryHit> {
         let mut out = Vec::new();
         if let Some(entities) = self.scope_entities.get(scope) {
             for entity in entities {
                 if let Some(group) = self.groups.get(entity.as_ref()) {
-                    out.extend(group.entries.iter().map(Arc::clone));
+                    for entry in &group.entries {
+                        out.push(QueryHit::from_entry(entry));
+                    }
                 }
             }
         }
         out
     }
 
-    fn candidates(&self, spec: &EntryQuery<'_>) -> Vec<Arc<IndexEntry>> {
+    fn hits_candidates(&self, spec: &EntryQuery<'_>) -> Vec<QueryHit> {
         match spec {
-            EntryQuery::Kind(k) => self.query_by_kind(*k),
-            EntryQuery::Category(c) => self.query_by_category(*c),
-            EntryQuery::Scope(s) => self.query_by_scope(s),
+            EntryQuery::Kind(k) => self.query_hits_by_kind(*k),
+            EntryQuery::Category(c) => self.query_hits_by_category(*c),
+            EntryQuery::Scope(s) => self.query_hits_by_scope(s),
         }
     }
 
@@ -568,6 +832,13 @@ enum ColumnarVariant {
     /// the next lever — implement only after benchmarking confirms the tile
     /// structure earns the route on target hardware.
     AoSoA64(RwLock<AoSoAInner<64>>),
+    /// Experimental mixed-kind 64-element tiles with inline `[u16; 64]` kinds array.
+    ///
+    /// Unlike `AoSoA64` (kind-homogeneous tiles + tile-skip), this variant packs
+    /// any kind into a tile and scans with a two-pass auto-vectorizable loop.
+    /// Benchmarked head-to-head against `AoSoA64` and `SoA` on sorted and
+    /// interleaved corpora. Not default-routed until it clears the 15% threshold.
+    AoSoA64Simd(RwLock<AoSoA64SimdInner>),
     /// Hybrid AoS-outer (entity groups), SoA-inner (parallel arrays per entity).
     SoAoS(RwLock<SoAoSInner>),
 }
@@ -622,6 +893,13 @@ impl ColumnarIndex {
         }
     }
 
+    /// Create a new experimental AoSoA64Simd index (mixed-kind, inline kinds array).
+    pub(crate) fn new_aosoa64_simd() -> Self {
+        Self {
+            inner: ColumnarVariant::AoSoA64Simd(RwLock::new(AoSoA64SimdInner::new())),
+        }
+    }
+
     /// Create a new SoAoS (hybrid AoS-outer, SoA-inner) index.
     pub(crate) fn new_soaos() -> Self {
         Self {
@@ -642,6 +920,7 @@ impl ColumnarIndex {
             #[cfg(test)]
             ColumnarVariant::AoSoA16(lock) => lock.write().push(entry),
             ColumnarVariant::AoSoA64(lock) => lock.write().push(entry),
+            ColumnarVariant::AoSoA64Simd(lock) => lock.write().push(entry),
             ColumnarVariant::SoAoS(lock) => lock.write().push(entry),
         }
     }
@@ -667,48 +946,121 @@ impl ColumnarIndex {
             ColumnarVariant::AoSoA64(lock) => {
                 *lock.write() = AoSoAInner::<64>::from_entries(entries_by_sequence)
             }
+            ColumnarVariant::AoSoA64Simd(lock) => {
+                *lock.write() = AoSoA64SimdInner::from_entries(entries_by_sequence)
+            }
             ColumnarVariant::SoAoS(lock) => {
                 *lock.write() = SoAoSInner::from_restore_base(entries_by_entity, routing)
             }
         }
     }
 
-    /// Return all entries matching `query`, sorted by `global_sequence`
-    /// (ascending).
-    ///
-    /// Dispatch chooses the layout; each layout's `candidates()` applies its own
-    /// native optimization (tile-skip for AoSoA, group lookup for SoAoS). The
-    /// sort is the only shared semantic: result order is stable across layouts.
-    fn query_sorted(&self, query: EntryQuery<'_>) -> Vec<Arc<IndexEntry>> {
+    fn query_hits_sorted(&self, query: EntryQuery<'_>) -> Vec<QueryHit> {
         let mut results = match &self.inner {
-            ColumnarVariant::SoA(lock) => lock.read().candidates(&query),
-            ColumnarVariant::AoSoA64(lock) => lock.read().candidates(&query),
-            ColumnarVariant::SoAoS(lock) => lock.read().candidates(&query),
+            ColumnarVariant::SoA(lock) => lock.read().hits_candidates(&query),
+            ColumnarVariant::AoSoA64(lock) => lock.read().hits_candidates(&query),
+            ColumnarVariant::AoSoA64Simd(lock) => lock.read().hits_candidates(&query),
+            ColumnarVariant::SoAoS(lock) => lock.read().hits_candidates(&query),
             #[cfg(test)]
-            ColumnarVariant::AoSoA8(lock) => lock.read().candidates(&query),
+            ColumnarVariant::AoSoA8(lock) => lock.read().hits_candidates(&query),
             #[cfg(test)]
-            ColumnarVariant::AoSoA16(lock) => lock.read().candidates(&query),
+            ColumnarVariant::AoSoA16(lock) => lock.read().hits_candidates(&query),
         };
-        results.sort_by_key(|e| e.global_sequence);
+        results.sort_by_key(|h| h.global_sequence);
         results
     }
 
-    /// Return all entries whose `kind` exactly matches `target`, sorted by
-    /// `global_sequence` (ascending).
-    pub(crate) fn query_by_kind(&self, target: EventKind) -> Vec<Arc<IndexEntry>> {
-        self.query_sorted(EntryQuery::Kind(target))
+    /// Bounded variant of `query_hits_sorted`.
+    ///
+    /// For the SoA layout, uses a binary search to jump past already-consumed
+    /// entries and stops the forward scan once `limit` hits are collected.
+    /// Output is pre-sorted (entries are in global_sequence order).
+    ///
+    /// For all other layouts, collects all candidates, applies the position
+    /// filter, sorts, and truncates to `limit`.
+    fn query_hits_sorted_after(
+        &self,
+        query: EntryQuery<'_>,
+        after_seq: u64,
+        started: bool,
+        limit: usize,
+    ) -> Vec<QueryHit> {
+        match &self.inner {
+            ColumnarVariant::SoA(lock) => {
+                // Fast path: pre-sorted, pre-limited.
+                lock.read()
+                    .hits_candidates_after(&query, after_seq, started, limit)
+            }
+            ColumnarVariant::AoSoA64(lock) => {
+                let mut v = lock.read().hits_candidates(&query);
+                apply_after_bounds(&mut v, after_seq, started, limit);
+                v
+            }
+            ColumnarVariant::AoSoA64Simd(lock) => {
+                let mut v = lock.read().hits_candidates(&query);
+                apply_after_bounds(&mut v, after_seq, started, limit);
+                v
+            }
+            ColumnarVariant::SoAoS(lock) => {
+                let mut v = lock.read().hits_candidates(&query);
+                apply_after_bounds(&mut v, after_seq, started, limit);
+                v
+            }
+            #[cfg(test)]
+            ColumnarVariant::AoSoA8(lock) => {
+                let mut v = lock.read().hits_candidates(&query);
+                apply_after_bounds(&mut v, after_seq, started, limit);
+                v
+            }
+            #[cfg(test)]
+            ColumnarVariant::AoSoA16(lock) => {
+                let mut v = lock.read().hits_candidates(&query);
+                apply_after_bounds(&mut v, after_seq, started, limit);
+                v
+            }
+        }
     }
 
-    /// Return all entries whose kind falls in `category` (upper 4 bits),
-    /// sorted by `global_sequence` (ascending).
-    pub(crate) fn query_by_category(&self, category: u8) -> Vec<Arc<IndexEntry>> {
-        self.query_sorted(EntryQuery::Category(category))
+    pub(crate) fn query_hits_by_kind(&self, target: EventKind) -> Vec<QueryHit> {
+        self.query_hits_sorted(EntryQuery::Kind(target))
     }
 
-    /// Return all entries whose coordinate scope matches `scope`, sorted by
-    /// `global_sequence` (ascending).
-    pub(crate) fn query_by_scope(&self, scope: &str) -> Vec<Arc<IndexEntry>> {
-        self.query_sorted(EntryQuery::Scope(scope))
+    pub(crate) fn query_hits_by_category(&self, category: u8) -> Vec<QueryHit> {
+        self.query_hits_sorted(EntryQuery::Category(category))
+    }
+
+    pub(crate) fn query_hits_by_scope(&self, scope: &str) -> Vec<QueryHit> {
+        self.query_hits_sorted(EntryQuery::Scope(scope))
+    }
+
+    pub(crate) fn query_hits_by_kind_after(
+        &self,
+        target: EventKind,
+        after_seq: u64,
+        started: bool,
+        limit: usize,
+    ) -> Vec<QueryHit> {
+        self.query_hits_sorted_after(EntryQuery::Kind(target), after_seq, started, limit)
+    }
+
+    pub(crate) fn query_hits_by_category_after(
+        &self,
+        category: u8,
+        after_seq: u64,
+        started: bool,
+        limit: usize,
+    ) -> Vec<QueryHit> {
+        self.query_hits_sorted_after(EntryQuery::Category(category), after_seq, started, limit)
+    }
+
+    pub(crate) fn query_hits_by_scope_after(
+        &self,
+        scope: &str,
+        after_seq: u64,
+        started: bool,
+        limit: usize,
+    ) -> Vec<QueryHit> {
+        self.query_hits_sorted_after(EntryQuery::Scope(scope), after_seq, started, limit)
     }
 
     /// Invoke `f` with an immutable reference to the `Tile<8>` at `idx`.
@@ -726,9 +1078,10 @@ impl ColumnarIndex {
     fn with_tile8<R>(&self, idx: usize, f: impl FnOnce(&Tile<8>) -> R) -> Option<R> {
         match &self.inner {
             ColumnarVariant::AoSoA8(lock) => lock.read().with_tile(idx, f),
-            ColumnarVariant::SoA(_) | ColumnarVariant::AoSoA64(_) | ColumnarVariant::SoAoS(_) => {
-                None
-            }
+            ColumnarVariant::SoA(_)
+            | ColumnarVariant::AoSoA64(_)
+            | ColumnarVariant::AoSoA64Simd(_)
+            | ColumnarVariant::SoAoS(_) => None,
             #[cfg(test)]
             ColumnarVariant::AoSoA16(_) => None,
         }
@@ -740,9 +1093,10 @@ impl ColumnarIndex {
     fn with_tile16<R>(&self, idx: usize, f: impl FnOnce(&Tile<16>) -> R) -> Option<R> {
         match &self.inner {
             ColumnarVariant::AoSoA16(lock) => lock.read().with_tile(idx, f),
-            ColumnarVariant::SoA(_) | ColumnarVariant::AoSoA64(_) | ColumnarVariant::SoAoS(_) => {
-                None
-            }
+            ColumnarVariant::SoA(_)
+            | ColumnarVariant::AoSoA64(_)
+            | ColumnarVariant::AoSoA64Simd(_)
+            | ColumnarVariant::SoAoS(_) => None,
             #[cfg(test)]
             ColumnarVariant::AoSoA8(_) => None,
         }
@@ -750,10 +1104,13 @@ impl ColumnarIndex {
 
     /// Invoke `f` with an immutable reference to the `Tile<64>` at `idx`.
     /// Returns `None` if `self` is not an `AoSoA64` variant or idx is out of range.
+    #[cfg(test)]
     fn with_tile64<R>(&self, idx: usize, f: impl FnOnce(&Tile<64>) -> R) -> Option<R> {
         match &self.inner {
             ColumnarVariant::AoSoA64(lock) => lock.read().with_tile(idx, f),
-            ColumnarVariant::SoA(_) | ColumnarVariant::SoAoS(_) => None,
+            ColumnarVariant::SoA(_)
+            | ColumnarVariant::AoSoA64Simd(_)
+            | ColumnarVariant::SoAoS(_) => None,
             #[cfg(test)]
             ColumnarVariant::AoSoA8(_) | ColumnarVariant::AoSoA16(_) => None,
         }
@@ -768,25 +1125,28 @@ impl ColumnarIndex {
             #[cfg(test)]
             ColumnarVariant::AoSoA16(lock) => lock.write().clear(),
             ColumnarVariant::AoSoA64(lock) => lock.write().clear(),
+            ColumnarVariant::AoSoA64Simd(lock) => lock.write().clear(),
             ColumnarVariant::SoAoS(lock) => lock.write().clear(),
         }
     }
 
-    /// Return the number of tiles for the production tiled overlay, or 0 for
-    /// non-tiled layouts.
+    /// Return the number of tiles for any active tiled overlay, or 0 for non-tiled layouts.
     pub(crate) fn tile_count(&self) -> usize {
-        if self.with_tile64(0, |_| ()).is_some() {
-            if let ColumnarVariant::AoSoA64(lock) = &self.inner {
-                return lock.read().tiles.len();
-            }
+        match &self.inner {
+            ColumnarVariant::AoSoA64(lock) => lock.read().tiles.len(),
+            ColumnarVariant::AoSoA64Simd(lock) => lock.read().tiles.len(),
+            ColumnarVariant::SoA(_) | ColumnarVariant::SoAoS(_) => 0,
+            #[cfg(test)]
+            ColumnarVariant::AoSoA8(_) | ColumnarVariant::AoSoA16(_) => 0,
         }
-        0
     }
 
     pub(crate) fn entity_generation(&self, entity: &str) -> Option<u64> {
         match &self.inner {
             ColumnarVariant::SoAoS(lock) => lock.read().entity_generation(entity),
-            ColumnarVariant::SoA(_) | ColumnarVariant::AoSoA64(_) => None,
+            ColumnarVariant::SoA(_)
+            | ColumnarVariant::AoSoA64(_)
+            | ColumnarVariant::AoSoA64Simd(_) => None,
             #[cfg(test)]
             ColumnarVariant::AoSoA8(_) | ColumnarVariant::AoSoA16(_) => None,
         }
@@ -799,7 +1159,9 @@ impl ColumnarIndex {
     ) -> Option<CachedProjectionSlot> {
         match &self.inner {
             ColumnarVariant::SoAoS(lock) => lock.read().cached_projection(entity, type_id),
-            ColumnarVariant::SoA(_) | ColumnarVariant::AoSoA64(_) => None,
+            ColumnarVariant::SoA(_)
+            | ColumnarVariant::AoSoA64(_)
+            | ColumnarVariant::AoSoA64Simd(_) => None,
             #[cfg(test)]
             ColumnarVariant::AoSoA8(_) | ColumnarVariant::AoSoA16(_) => None,
         }
@@ -821,7 +1183,9 @@ impl ColumnarIndex {
                 watermark,
                 cached_at_us,
             ),
-            ColumnarVariant::SoA(_) | ColumnarVariant::AoSoA64(_) => false,
+            ColumnarVariant::SoA(_)
+            | ColumnarVariant::AoSoA64(_)
+            | ColumnarVariant::AoSoA64Simd(_) => false,
             #[cfg(test)]
             ColumnarVariant::AoSoA8(_) | ColumnarVariant::AoSoA16(_) => false,
         }
@@ -836,7 +1200,9 @@ impl ColumnarIndex {
             ColumnarVariant::SoAoS(lock) => {
                 lock.read().projection_candidates(entity, relevant_kinds)
             }
-            ColumnarVariant::SoA(_) | ColumnarVariant::AoSoA64(_) => None,
+            ColumnarVariant::SoA(_)
+            | ColumnarVariant::AoSoA64(_)
+            | ColumnarVariant::AoSoA64Simd(_) => None,
             #[cfg(test)]
             ColumnarVariant::AoSoA8(_) | ColumnarVariant::AoSoA16(_) => None,
         }
@@ -853,6 +1219,7 @@ enum ScanRoute {
     SoA,
     SoAoS,
     AoSoA64,
+    AoSoA64Simd,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -882,8 +1249,10 @@ pub(crate) struct ScanIndex {
     soa: Option<ColumnarIndex>,
     /// Entity-group overlay.
     entity_groups: Option<ColumnarIndex>,
-    /// Tiled replay/scanning overlay.
+    /// Tiled replay/scanning overlay (kind-homogeneous, tile-skip).
     tiles64: Option<ColumnarIndex>,
+    /// Experimental tiled overlay (mixed-kind, inline kinds array, auto-vectorizable).
+    tiles64_simd: Option<ColumnarIndex>,
 }
 
 impl ScanIndex {
@@ -892,6 +1261,7 @@ impl ScanIndex {
         let soa = config.topology.soa_enabled();
         let entity_groups = config.topology.entity_groups_enabled();
         let tiles64 = config.topology.tiles64_enabled();
+        let tiles64_simd = config.topology.tiles64_simd_enabled();
 
         Self {
             by_fact: DashMap::new(),
@@ -899,6 +1269,7 @@ impl ScanIndex {
             soa: soa.then(ColumnarIndex::new_soa),
             entity_groups: entity_groups.then(ColumnarIndex::new_soaos),
             tiles64: tiles64.then(ColumnarIndex::new_aosoa64),
+            tiles64_simd: tiles64_simd.then(ColumnarIndex::new_aosoa64_simd),
         }
     }
 
@@ -918,42 +1289,21 @@ impl ScanIndex {
             .insert(entry.coord.entity_arc());
     }
 
-    fn query_base_by_kind(&self, kind: EventKind) -> Vec<Arc<IndexEntry>> {
-        let mut results: Vec<Arc<IndexEntry>> = self
-            .by_fact
-            .get(&kind)
-            .map(|r| r.value().values().map(Arc::clone).collect())
-            .unwrap_or_default();
-        results.sort_by_key(|e| e.global_sequence);
-        results
-    }
-
-    fn query_base_by_category(&self, category: u8) -> Vec<Arc<IndexEntry>> {
-        let mut results = Vec::new();
-        for entries in self
-            .by_fact
-            .iter()
-            .filter(|r| r.key().category() == category)
-        {
-            results.extend(entries.value().values().map(Arc::clone));
-        }
-        results.sort_by_key(|e| e.global_sequence);
-        results
-    }
-
     fn capabilities(&self) -> ScanCapabilities {
-        let (has_soa, has_entity_groups, has_tiles64) = (
+        let (has_soa, has_entity_groups, has_tiles64, has_tiles64_simd) = (
             self.soa.is_some(),
             self.entity_groups.is_some(),
             self.tiles64.is_some(),
+            self.tiles64_simd.is_some(),
         );
 
-        let topology_name = match (has_soa, has_entity_groups, has_tiles64) {
-            (false, false, false) => "aos",
-            (true, false, false) => "scan",
-            (false, true, false) => "entity-local",
-            (false, false, true) => "tiled",
-            (true, true, true) => "all",
+        let topology_name = match (has_soa, has_entity_groups, has_tiles64, has_tiles64_simd) {
+            (false, false, false, false) => "aos",
+            (true, false, false, false) => "scan",
+            (false, true, false, false) => "entity-local",
+            (false, false, true, false) => "tiled",
+            (false, false, false, true) => "tiled-simd",
+            (true, true, true, false) => "all",
             _ => "hybrid",
         };
 
@@ -962,6 +1312,8 @@ impl ScanIndex {
                 ScanRoute::SoA
             } else if has_tiles64 {
                 ScanRoute::AoSoA64
+            } else if has_tiles64_simd {
+                ScanRoute::AoSoA64Simd
             } else if has_entity_groups {
                 ScanRoute::SoAoS
             } else {
@@ -973,6 +1325,8 @@ impl ScanIndex {
                 ScanRoute::SoA
             } else if has_tiles64 {
                 ScanRoute::AoSoA64
+            } else if has_tiles64_simd {
+                ScanRoute::AoSoA64Simd
             } else {
                 ScanRoute::BaseAoS
             },
@@ -980,6 +1334,8 @@ impl ScanIndex {
                 ScanRoute::SoA
             } else if has_tiles64 {
                 ScanRoute::AoSoA64
+            } else if has_tiles64_simd {
+                ScanRoute::AoSoA64Simd
             } else if has_entity_groups {
                 ScanRoute::SoAoS
             } else {
@@ -991,66 +1347,292 @@ impl ScanIndex {
                 projection_candidates: has_entity_groups,
             },
             topology_name,
-            tile_count: self.tiles64.as_ref().map_or(0, ColumnarIndex::tile_count),
+            tile_count: self
+                .tiles64
+                .as_ref()
+                .or(self.tiles64_simd.as_ref())
+                .map_or(0, ColumnarIndex::tile_count),
         }
     }
 
-    fn query_route(&self, route: ScanRoute, query: EntryQuery<'_>) -> Vec<Arc<IndexEntry>> {
+    fn query_base_hits_by_kind(&self, kind: EventKind) -> Vec<QueryHit> {
+        let mut results: Vec<QueryHit> = self
+            .by_fact
+            .get(&kind)
+            .map(|r| {
+                r.value()
+                    .values()
+                    .map(|e| QueryHit::from_entry(e))
+                    .collect()
+            })
+            .unwrap_or_default();
+        results.sort_by_key(|h| h.global_sequence);
+        results
+    }
+
+    fn query_base_hits_by_category(&self, category: u8) -> Vec<QueryHit> {
+        let mut results = Vec::new();
+        for entries in self
+            .by_fact
+            .iter()
+            .filter(|r| r.key().category() == category)
+        {
+            results.extend(entries.value().values().map(|e| QueryHit::from_entry(e)));
+        }
+        results.sort_by_key(|h| h.global_sequence);
+        results
+    }
+
+    fn query_hits_route(&self, route: ScanRoute, query: EntryQuery<'_>) -> Vec<QueryHit> {
         match (route, query) {
-            (ScanRoute::BaseAoS, EntryQuery::Kind(kind)) => self.query_base_by_kind(kind),
+            (ScanRoute::BaseAoS, EntryQuery::Kind(kind)) => self.query_base_hits_by_kind(kind),
             (ScanRoute::BaseAoS, EntryQuery::Category(category)) => {
-                self.query_base_by_category(category)
+                self.query_base_hits_by_category(category)
             }
-            // Base AoS keeps the authoritative scope -> entity set, but not a
-            // direct scope -> entries index. Callers pair this route with
-            // `scope_entity_set` when they need the full entry list.
             (ScanRoute::BaseAoS, EntryQuery::Scope(_)) => Vec::new(),
             (ScanRoute::SoA, EntryQuery::Kind(kind)) => self
                 .soa
                 .as_ref()
                 .expect("ScanCapabilities routed queries through missing SoA overlay")
-                .query_by_kind(kind),
+                .query_hits_by_kind(kind),
             (ScanRoute::SoA, EntryQuery::Category(category)) => self
                 .soa
                 .as_ref()
                 .expect("ScanCapabilities routed queries through missing SoA overlay")
-                .query_by_category(category),
+                .query_hits_by_category(category),
             (ScanRoute::SoA, EntryQuery::Scope(scope)) => self
                 .soa
                 .as_ref()
                 .expect("ScanCapabilities routed queries through missing SoA overlay")
-                .query_by_scope(scope),
+                .query_hits_by_scope(scope),
             (ScanRoute::SoAoS, EntryQuery::Kind(kind)) => self
                 .entity_groups
                 .as_ref()
                 .expect("ScanCapabilities routed queries through missing SoAoS overlay")
-                .query_by_kind(kind),
+                .query_hits_by_kind(kind),
             (ScanRoute::SoAoS, EntryQuery::Category(category)) => self
                 .entity_groups
                 .as_ref()
                 .expect("ScanCapabilities routed queries through missing SoAoS overlay")
-                .query_by_category(category),
+                .query_hits_by_category(category),
             (ScanRoute::SoAoS, EntryQuery::Scope(scope)) => self
                 .entity_groups
                 .as_ref()
                 .expect("ScanCapabilities routed queries through missing SoAoS overlay")
-                .query_by_scope(scope),
+                .query_hits_by_scope(scope),
             (ScanRoute::AoSoA64, EntryQuery::Kind(kind)) => self
                 .tiles64
                 .as_ref()
                 .expect("ScanCapabilities routed queries through missing AoSoA64 overlay")
-                .query_by_kind(kind),
+                .query_hits_by_kind(kind),
             (ScanRoute::AoSoA64, EntryQuery::Category(category)) => self
                 .tiles64
                 .as_ref()
                 .expect("ScanCapabilities routed queries through missing AoSoA64 overlay")
-                .query_by_category(category),
+                .query_hits_by_category(category),
             (ScanRoute::AoSoA64, EntryQuery::Scope(scope)) => self
                 .tiles64
                 .as_ref()
                 .expect("ScanCapabilities routed queries through missing AoSoA64 overlay")
-                .query_by_scope(scope),
+                .query_hits_by_scope(scope),
+            (ScanRoute::AoSoA64Simd, EntryQuery::Kind(kind)) => self
+                .tiles64_simd
+                .as_ref()
+                .expect("ScanCapabilities routed queries through missing AoSoA64Simd overlay")
+                .query_hits_by_kind(kind),
+            (ScanRoute::AoSoA64Simd, EntryQuery::Category(category)) => self
+                .tiles64_simd
+                .as_ref()
+                .expect("ScanCapabilities routed queries through missing AoSoA64Simd overlay")
+                .query_hits_by_category(category),
+            (ScanRoute::AoSoA64Simd, EntryQuery::Scope(scope)) => self
+                .tiles64_simd
+                .as_ref()
+                .expect("ScanCapabilities routed queries through missing AoSoA64Simd overlay")
+                .query_hits_by_scope(scope),
         }
+    }
+
+    pub(crate) fn query_hits_by_kind(&self, kind: EventKind) -> Vec<QueryHit> {
+        self.query_hits_route(self.capabilities().by_kind, EntryQuery::Kind(kind))
+    }
+
+    pub(crate) fn query_hits_by_category(&self, category: u8) -> Vec<QueryHit> {
+        self.query_hits_route(
+            self.capabilities().by_category,
+            EntryQuery::Category(category),
+        )
+    }
+
+    pub(crate) fn query_hits_by_scope(&self, scope: &str) -> Vec<QueryHit> {
+        self.query_hits_route(self.capabilities().by_scope, EntryQuery::Scope(scope))
+    }
+
+    fn query_hits_route_after(
+        &self,
+        route: ScanRoute,
+        query: EntryQuery<'_>,
+        after_seq: u64,
+        started: bool,
+        limit: usize,
+    ) -> Vec<QueryHit> {
+        match (route, query) {
+            (ScanRoute::BaseAoS, EntryQuery::Kind(kind)) => {
+                let mut v = self.query_base_hits_by_kind(kind);
+                apply_after_bounds(&mut v, after_seq, started, limit);
+                v
+            }
+            (ScanRoute::BaseAoS, EntryQuery::Category(cat)) => {
+                let mut v = self.query_base_hits_by_category(cat);
+                apply_after_bounds(&mut v, after_seq, started, limit);
+                v
+            }
+            (ScanRoute::BaseAoS, EntryQuery::Scope(_)) => Vec::new(),
+            (ScanRoute::SoA, EntryQuery::Kind(kind)) => self
+                .soa
+                .as_ref()
+                .expect("ScanCapabilities routed queries through missing SoA overlay")
+                .query_hits_by_kind_after(kind, after_seq, started, limit),
+            (ScanRoute::SoA, EntryQuery::Category(cat)) => self
+                .soa
+                .as_ref()
+                .expect("ScanCapabilities routed queries through missing SoA overlay")
+                .query_hits_by_category_after(cat, after_seq, started, limit),
+            (ScanRoute::SoA, EntryQuery::Scope(scope)) => self
+                .soa
+                .as_ref()
+                .expect("ScanCapabilities routed queries through missing SoA overlay")
+                .query_hits_by_scope_after(scope, after_seq, started, limit),
+            (ScanRoute::SoAoS, EntryQuery::Kind(kind)) => {
+                let mut v = self
+                    .entity_groups
+                    .as_ref()
+                    .expect("ScanCapabilities routed queries through missing SoAoS overlay")
+                    .query_hits_by_kind(kind);
+                apply_after_bounds(&mut v, after_seq, started, limit);
+                v
+            }
+            (ScanRoute::SoAoS, EntryQuery::Category(cat)) => {
+                let mut v = self
+                    .entity_groups
+                    .as_ref()
+                    .expect("ScanCapabilities routed queries through missing SoAoS overlay")
+                    .query_hits_by_category(cat);
+                apply_after_bounds(&mut v, after_seq, started, limit);
+                v
+            }
+            (ScanRoute::SoAoS, EntryQuery::Scope(scope)) => {
+                let mut v = self
+                    .entity_groups
+                    .as_ref()
+                    .expect("ScanCapabilities routed queries through missing SoAoS overlay")
+                    .query_hits_by_scope(scope);
+                apply_after_bounds(&mut v, after_seq, started, limit);
+                v
+            }
+            (ScanRoute::AoSoA64, EntryQuery::Kind(kind)) => {
+                let mut v = self
+                    .tiles64
+                    .as_ref()
+                    .expect("ScanCapabilities routed queries through missing AoSoA64 overlay")
+                    .query_hits_by_kind(kind);
+                apply_after_bounds(&mut v, after_seq, started, limit);
+                v
+            }
+            (ScanRoute::AoSoA64, EntryQuery::Category(cat)) => {
+                let mut v = self
+                    .tiles64
+                    .as_ref()
+                    .expect("ScanCapabilities routed queries through missing AoSoA64 overlay")
+                    .query_hits_by_category(cat);
+                apply_after_bounds(&mut v, after_seq, started, limit);
+                v
+            }
+            (ScanRoute::AoSoA64, EntryQuery::Scope(scope)) => {
+                let mut v = self
+                    .tiles64
+                    .as_ref()
+                    .expect("ScanCapabilities routed queries through missing AoSoA64 overlay")
+                    .query_hits_by_scope(scope);
+                apply_after_bounds(&mut v, after_seq, started, limit);
+                v
+            }
+            (ScanRoute::AoSoA64Simd, EntryQuery::Kind(kind)) => {
+                let mut v = self
+                    .tiles64_simd
+                    .as_ref()
+                    .expect("ScanCapabilities routed queries through missing AoSoA64Simd overlay")
+                    .query_hits_by_kind(kind);
+                apply_after_bounds(&mut v, after_seq, started, limit);
+                v
+            }
+            (ScanRoute::AoSoA64Simd, EntryQuery::Category(cat)) => {
+                let mut v = self
+                    .tiles64_simd
+                    .as_ref()
+                    .expect("ScanCapabilities routed queries through missing AoSoA64Simd overlay")
+                    .query_hits_by_category(cat);
+                apply_after_bounds(&mut v, after_seq, started, limit);
+                v
+            }
+            (ScanRoute::AoSoA64Simd, EntryQuery::Scope(scope)) => {
+                let mut v = self
+                    .tiles64_simd
+                    .as_ref()
+                    .expect("ScanCapabilities routed queries through missing AoSoA64Simd overlay")
+                    .query_hits_by_scope(scope);
+                apply_after_bounds(&mut v, after_seq, started, limit);
+                v
+            }
+        }
+    }
+
+    pub(crate) fn query_hits_by_kind_after(
+        &self,
+        kind: EventKind,
+        after_seq: u64,
+        started: bool,
+        limit: usize,
+    ) -> Vec<QueryHit> {
+        self.query_hits_route_after(
+            self.capabilities().by_kind,
+            EntryQuery::Kind(kind),
+            after_seq,
+            started,
+            limit,
+        )
+    }
+
+    pub(crate) fn query_hits_by_category_after(
+        &self,
+        category: u8,
+        after_seq: u64,
+        started: bool,
+        limit: usize,
+    ) -> Vec<QueryHit> {
+        self.query_hits_route_after(
+            self.capabilities().by_category,
+            EntryQuery::Category(category),
+            after_seq,
+            started,
+            limit,
+        )
+    }
+
+    pub(crate) fn query_hits_by_scope_after(
+        &self,
+        scope: &str,
+        after_seq: u64,
+        started: bool,
+        limit: usize,
+    ) -> Vec<QueryHit> {
+        self.query_hits_route_after(
+            self.capabilities().by_scope,
+            EntryQuery::Scope(scope),
+            after_seq,
+            started,
+            limit,
+        )
     }
 
     pub(crate) fn topology_name(&self) -> &'static str {
@@ -1076,6 +1658,9 @@ impl ScanIndex {
             idx.insert(entry);
         }
         if let Some(idx) = &self.tiles64 {
+            idx.insert(entry);
+        }
+        if let Some(idx) = &self.tiles64_simd {
             idx.insert(entry);
         }
     }
@@ -1125,52 +1710,17 @@ impl ScanIndex {
         if let Some(idx) = &self.tiles64 {
             idx.rebuild_from_restore_base(entries_by_sequence, entries_by_entity, routing);
         }
-    }
-
-    /// Return all entries matching `kind`, sorted by `global_sequence`.
-    ///
-    /// For `Maps`, this clones values out of the `BTreeMap` (ordered by
-    /// `ClockKey`, which is equivalent to `global_sequence` order for events
-    /// that belong to the same entity stream; a final sort ensures correctness
-    /// across entities).
-    ///
-    /// For `Columnar`, delegates to [`ColumnarIndex::query_by_kind`].
-    pub(crate) fn query_by_kind(&self, kind: EventKind) -> Vec<Arc<IndexEntry>> {
-        self.query_route(self.capabilities().by_kind, EntryQuery::Kind(kind))
-    }
-
-    /// Return all entries whose coordinate scope matches `scope`, sorted by
-    /// `global_sequence`.
-    ///
-    /// For `Maps`, resolves entity names through `scope_entities` and then
-    /// falls back to callers re-filtering the stream index (this variant is
-    /// intended for use by `StoreIndex::query` which performs that join).
-    /// When called standalone it returns the entity set so the caller can join.
-    ///
-    /// For `Columnar`, delegates to [`ColumnarIndex::query_by_scope`].
-    pub(crate) fn query_by_scope(&self, scope: &str) -> Vec<Arc<IndexEntry>> {
-        self.query_route(self.capabilities().by_scope, EntryQuery::Scope(scope))
-    }
-
-    /// Return all entries whose kind falls in `category` (upper 4 bits),
-    /// sorted by `global_sequence`.
-    ///
-    /// For `Maps`, iterates all kinds in `by_fact` and collects those matching
-    /// the category. For `Columnar`, delegates to
-    /// [`ColumnarIndex::query_by_category`].
-    pub(crate) fn query_by_category(&self, category: u8) -> Vec<Arc<IndexEntry>> {
-        self.query_route(
-            self.capabilities().by_category,
-            EntryQuery::Category(category),
-        )
+        if let Some(idx) = &self.tiles64_simd {
+            idx.rebuild_from_restore_base(entries_by_sequence, entries_by_entity, routing);
+        }
     }
 
     /// Return the set of entity strings registered under `scope` (Maps variant only).
     ///
     /// Returns `None` for the Columnar variant — callers should use
-    /// [`query_by_scope`] instead.
+    /// [`query_hits_by_scope`] instead.
     ///
-    /// [`query_by_scope`]: ScanIndex::query_by_scope
+    /// [`query_hits_by_scope`]: ScanIndex::query_hits_by_scope
     pub(crate) fn scope_entity_set(&self, scope: &str) -> Option<HashSet<Arc<str>>> {
         self.scope_entities.get(scope).map(|r| r.value().clone())
     }
@@ -1186,6 +1736,9 @@ impl ScanIndex {
             idx.clear();
         }
         if let Some(idx) = &self.tiles64 {
+            idx.clear();
+        }
+        if let Some(idx) = &self.tiles64_simd {
             idx.clear();
         }
     }
@@ -1294,13 +1847,12 @@ mod tests {
         for i in 10u64..15 {
             idx.insert(&make_entry(KIND_B, i, "e2", "s1"));
         }
-        let a = idx.query_by_kind(KIND_A);
+        let a = idx.query_hits_by_kind(KIND_A);
         assert_eq!(a.len(), 10);
-        // sorted by global_sequence
-        for (i, e) in a.iter().enumerate() {
-            assert_eq!(e.global_sequence, i as u64);
+        for (i, h) in a.iter().enumerate() {
+            assert_eq!(h.global_sequence, i as u64);
         }
-        let b = idx.query_by_kind(KIND_B);
+        let b = idx.query_hits_by_kind(KIND_B);
         assert_eq!(b.len(), 5);
     }
 
@@ -1313,12 +1865,9 @@ mod tests {
         for i in 6u64..10 {
             idx.insert(&make_entry(KIND_A, i, "e2", "scope-y"));
         }
-        let x = idx.query_by_scope("scope-x");
-        assert_eq!(x.len(), 6);
-        let y = idx.query_by_scope("scope-y");
-        assert_eq!(y.len(), 4);
-        let z = idx.query_by_scope("scope-z");
-        assert!(z.is_empty());
+        assert_eq!(idx.query_hits_by_scope("scope-x").len(), 6);
+        assert_eq!(idx.query_hits_by_scope("scope-y").len(), 4);
+        assert!(idx.query_hits_by_scope("scope-z").is_empty());
     }
 
     #[test]
@@ -1328,8 +1877,8 @@ mod tests {
             idx.insert(&make_entry(KIND_A, i, "e1", "s1"));
         }
         idx.clear();
-        assert!(idx.query_by_kind(KIND_A).is_empty());
-        assert!(idx.query_by_scope("s1").is_empty());
+        assert!(idx.query_hits_by_kind(KIND_A).is_empty());
+        assert!(idx.query_hits_by_scope("s1").is_empty());
     }
 
     // --- AoSoA8 ---
@@ -1337,29 +1886,25 @@ mod tests {
     #[test]
     fn aosoa8_insert_spans_multiple_tiles() {
         let idx = ColumnarIndex::new_aosoa8();
-        // 20 events of KIND_A → should fill 2 complete tiles + 1 partial (3 total)
         for i in 0u64..20 {
             idx.insert(&make_entry(KIND_A, i, "e1", "s1"));
         }
-        let results = idx.query_by_kind(KIND_A);
+        let results = idx.query_hits_by_kind(KIND_A);
         assert_eq!(results.len(), 20);
-        for (i, e) in results.iter().enumerate() {
-            assert_eq!(e.global_sequence, i as u64, "order must be preserved");
+        for (i, h) in results.iter().enumerate() {
+            assert_eq!(h.global_sequence, i as u64, "order must be preserved");
         }
     }
 
     #[test]
     fn aosoa8_interleaved_kinds() {
         let idx = ColumnarIndex::new_aosoa8();
-        // Interleaved: push both kinds so tiles can't be pre-filled
         for i in 0u64..12 {
             idx.insert(&make_entry(KIND_A, i * 2, "ea", "s1"));
             idx.insert(&make_entry(KIND_B, i * 2 + 1, "eb", "s1"));
         }
-        let a = idx.query_by_kind(KIND_A);
-        let b = idx.query_by_kind(KIND_B);
-        assert_eq!(a.len(), 12);
-        assert_eq!(b.len(), 12);
+        assert_eq!(idx.query_hits_by_kind(KIND_A).len(), 12);
+        assert_eq!(idx.query_hits_by_kind(KIND_B).len(), 12);
     }
 
     #[test]
@@ -1371,10 +1916,8 @@ mod tests {
         for i in 9u64..14 {
             idx.insert(&make_entry(KIND_A, i, "ent-b", "scope-beta"));
         }
-        let alpha = idx.query_by_scope("scope-alpha");
-        assert_eq!(alpha.len(), 9);
-        let beta = idx.query_by_scope("scope-beta");
-        assert_eq!(beta.len(), 5);
+        assert_eq!(idx.query_hits_by_scope("scope-alpha").len(), 9);
+        assert_eq!(idx.query_hits_by_scope("scope-beta").len(), 5);
     }
 
     #[test]
@@ -1396,7 +1939,7 @@ mod tests {
         for i in 0u64..33 {
             idx.insert(&make_entry(KIND_A, i, "e1", "s1"));
         }
-        assert_eq!(idx.query_by_kind(KIND_A).len(), 33);
+        assert_eq!(idx.query_hits_by_kind(KIND_A).len(), 33);
     }
 
     #[test]
@@ -1417,7 +1960,7 @@ mod tests {
         for i in 0u64..130 {
             idx.insert(&make_entry(KIND_A, i, "e1", "s1"));
         }
-        assert_eq!(idx.query_by_kind(KIND_A).len(), 130);
+        assert_eq!(idx.query_hits_by_kind(KIND_A).len(), 130);
     }
 
     #[test]
@@ -1441,8 +1984,8 @@ mod tests {
         for i in 10u64..15 {
             idx.insert(&make_entry(KIND_B, i, "e2", "s1"));
         }
-        assert_eq!(idx.query_by_kind(KIND_A).len(), 10);
-        assert_eq!(idx.query_by_kind(KIND_B).len(), 5);
+        assert_eq!(idx.query_hits_by_kind(KIND_A).len(), 10);
+        assert_eq!(idx.query_hits_by_kind(KIND_B).len(), 5);
     }
 
     #[test]
@@ -1454,10 +1997,8 @@ mod tests {
         for i in 8u64..12 {
             idx.insert(&make_entry(KIND_A, i, "e2", "scope-y"));
         }
-        let x = idx.query_by_scope("scope-x");
-        assert_eq!(x.len(), 8);
-        let y = idx.query_by_scope("scope-y");
-        assert_eq!(y.len(), 4);
+        assert_eq!(idx.query_hits_by_scope("scope-x").len(), 8);
+        assert_eq!(idx.query_hits_by_scope("scope-y").len(), 4);
     }
 
     #[test]
@@ -1466,9 +2007,9 @@ mod tests {
         for i in 0u64..5 {
             idx.insert(&make_entry(KIND_A, i, "e1", "s1"));
         }
-        assert_eq!(idx.query_by_kind(KIND_A).len(), 5);
+        assert_eq!(idx.query_hits_by_kind(KIND_A).len(), 5);
         idx.clear();
-        assert_eq!(idx.query_by_kind(KIND_A).len(), 0);
+        assert_eq!(idx.query_hits_by_kind(KIND_A).len(), 0);
     }
 
     // --- ScanIndex ---
@@ -1484,8 +2025,7 @@ mod tests {
         for i in 0u64..7 {
             si.insert(&make_entry(KIND_A, i, "e1", "s1"));
         }
-        let results = si.query_by_kind(KIND_A);
-        assert_eq!(results.len(), 7);
+        assert_eq!(si.query_hits_by_kind(KIND_A).len(), 7);
     }
 
     #[test]
@@ -1499,8 +2039,7 @@ mod tests {
         for i in 0u64..12 {
             si.insert(&make_entry(KIND_A, i, "e1", "s2"));
         }
-        let results = si.query_by_kind(KIND_A);
-        assert_eq!(results.len(), 12);
+        assert_eq!(si.query_hits_by_kind(KIND_A).len(), 12);
     }
 
     #[test]
@@ -1567,6 +2106,21 @@ mod tests {
                 },
             ),
             (
+                crate::store::IndexTopology::tiled_simd(),
+                ScanCapabilities {
+                    by_kind: ScanRoute::AoSoA64Simd,
+                    by_scope: ScanRoute::AoSoA64Simd,
+                    by_category: ScanRoute::AoSoA64Simd,
+                    projection: ProjectionSupport {
+                        entity_generation_fast_path: false,
+                        cached_projection: false,
+                        projection_candidates: false,
+                    },
+                    topology_name: "tiled-simd",
+                    tile_count: 0,
+                },
+            ),
+            (
                 crate::store::IndexTopology::all(),
                 ScanCapabilities {
                     by_kind: ScanRoute::SoA,
@@ -1610,8 +2164,7 @@ mod tests {
         for i in 0u64..20 {
             si.insert(&make_entry(KIND_A, i, "e1", "s1"));
         }
-        let results = si.query_by_kind(KIND_A);
-        assert_eq!(results.len(), 20);
+        assert_eq!(si.query_hits_by_kind(KIND_A).len(), 20);
     }
 
     #[test]
@@ -1658,7 +2211,7 @@ mod tests {
             si.insert(&make_entry(KIND_A, i, "e1", "s1"));
         }
         si.clear();
-        assert!(si.query_by_kind(KIND_A).is_empty());
+        assert!(si.query_hits_by_kind(KIND_A).is_empty());
     }
 
     #[test]
@@ -1672,10 +2225,10 @@ mod tests {
         for i in 0u64..10 {
             si.insert(&make_entry(KIND_A, i, "e1", "s1"));
         }
-        assert_eq!(si.query_by_kind(KIND_A).len(), 10);
-        assert_eq!(si.query_by_scope("s1").len(), 10);
+        assert_eq!(si.query_hits_by_kind(KIND_A).len(), 10);
+        assert_eq!(si.query_hits_by_scope("s1").len(), 10);
         si.clear();
-        assert!(si.query_by_kind(KIND_A).is_empty());
+        assert!(si.query_hits_by_kind(KIND_A).is_empty());
     }
 
     #[test]
@@ -1727,8 +2280,8 @@ mod tests {
         entries
     }
 
-    fn ids(v: &[Arc<IndexEntry>]) -> Vec<u64> {
-        v.iter().map(|e| e.global_sequence).collect()
+    fn seq_ids(v: &[QueryHit]) -> Vec<u64> {
+        v.iter().map(|h| h.global_sequence).collect()
     }
 
     #[test]
@@ -1736,21 +2289,28 @@ mod tests {
         let corpus = build_oracle_corpus();
         let soa = ColumnarIndex::new_soa();
         let aosoa64 = ColumnarIndex::new_aosoa64();
+        let aosoa64_simd = ColumnarIndex::new_aosoa64_simd();
         let soaos = ColumnarIndex::new_soaos();
         for entry in &corpus {
             soa.insert(entry);
             aosoa64.insert(entry);
+            aosoa64_simd.insert(entry);
             soaos.insert(entry);
         }
         for kind in [KIND_A, KIND_B, KIND_C] {
-            let reference = ids(&soa.query_by_kind(kind));
+            let reference = seq_ids(&soa.query_hits_by_kind(kind));
             assert_eq!(
-                ids(&aosoa64.query_by_kind(kind)),
+                seq_ids(&aosoa64.query_hits_by_kind(kind)),
                 reference,
                 "AoSoA64 by_kind({kind:?}) must match SoA"
             );
             assert_eq!(
-                ids(&soaos.query_by_kind(kind)),
+                seq_ids(&aosoa64_simd.query_hits_by_kind(kind)),
+                reference,
+                "AoSoA64Simd by_kind({kind:?}) must match SoA"
+            );
+            assert_eq!(
+                seq_ids(&soaos.query_hits_by_kind(kind)),
                 reference,
                 "SoAoS by_kind({kind:?}) must match SoA"
             );
@@ -1762,22 +2322,28 @@ mod tests {
         let corpus = build_oracle_corpus();
         let soa = ColumnarIndex::new_soa();
         let aosoa64 = ColumnarIndex::new_aosoa64();
+        let aosoa64_simd = ColumnarIndex::new_aosoa64_simd();
         let soaos = ColumnarIndex::new_soaos();
         for entry in &corpus {
             soa.insert(entry);
             aosoa64.insert(entry);
+            aosoa64_simd.insert(entry);
             soaos.insert(entry);
         }
-        // KIND_A and KIND_B share category 0x1; KIND_C has category 0x2.
         for category in [0x1u8, 0x2u8] {
-            let reference = ids(&soa.query_by_category(category));
+            let reference = seq_ids(&soa.query_hits_by_category(category));
             assert_eq!(
-                ids(&aosoa64.query_by_category(category)),
+                seq_ids(&aosoa64.query_hits_by_category(category)),
                 reference,
                 "AoSoA64 by_category(0x{category:x}) must match SoA"
             );
             assert_eq!(
-                ids(&soaos.query_by_category(category)),
+                seq_ids(&aosoa64_simd.query_hits_by_category(category)),
+                reference,
+                "AoSoA64Simd by_category(0x{category:x}) must match SoA"
+            );
+            assert_eq!(
+                seq_ids(&soaos.query_hits_by_category(category)),
                 reference,
                 "SoAoS by_category(0x{category:x}) must match SoA"
             );
@@ -1789,21 +2355,28 @@ mod tests {
         let corpus = build_oracle_corpus();
         let soa = ColumnarIndex::new_soa();
         let aosoa64 = ColumnarIndex::new_aosoa64();
+        let aosoa64_simd = ColumnarIndex::new_aosoa64_simd();
         let soaos = ColumnarIndex::new_soaos();
         for entry in &corpus {
             soa.insert(entry);
             aosoa64.insert(entry);
+            aosoa64_simd.insert(entry);
             soaos.insert(entry);
         }
         for scope in ["scope-one", "scope-two", "scope-missing"] {
-            let reference = ids(&soa.query_by_scope(scope));
+            let reference = seq_ids(&soa.query_hits_by_scope(scope));
             assert_eq!(
-                ids(&aosoa64.query_by_scope(scope)),
+                seq_ids(&aosoa64.query_hits_by_scope(scope)),
                 reference,
                 "AoSoA64 by_scope({scope:?}) must match SoA"
             );
             assert_eq!(
-                ids(&soaos.query_by_scope(scope)),
+                seq_ids(&aosoa64_simd.query_hits_by_scope(scope)),
+                reference,
+                "AoSoA64Simd by_scope({scope:?}) must match SoA"
+            );
+            assert_eq!(
+                seq_ids(&soaos.query_hits_by_scope(scope)),
                 reference,
                 "SoAoS by_scope({scope:?}) must match SoA"
             );
