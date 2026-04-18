@@ -1,4 +1,5 @@
 //! Replay and checkpoint consistency proofs.
+// justifies: test bodies treat invariant violations as test failures; panic! is the assertion style throughout this file.
 #![allow(clippy::panic)]
 
 use batpak::prelude::*;

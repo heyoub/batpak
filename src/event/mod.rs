@@ -1,3 +1,5 @@
+/// Typed decode/route seam — shared dispatch primitive for both replay lanes.
+pub mod decode;
 /// Blake3 hash chain for per-entity integrity verification.
 pub mod hash;
 /// Metadata header attached to every event.
@@ -9,13 +11,14 @@ pub mod payload;
 /// Traits for event-sourced and reactive state reconstruction.
 pub mod sourcing;
 
+pub use decode::{DecodeSource, DecodeTyped, TypedDecodeError};
 pub use hash::HashChain;
 pub use header::EventHeader;
 pub use kind::EventKind;
 pub use payload::EventPayload;
 pub use sourcing::{
-    EventSourced, JsonValueInput, ProjectionEvent, ProjectionInput, ProjectionPayload,
-    RawMsgpackInput, Reactive, ReplayLane,
+    EventSourced, JsonValueInput, MultiDispatchError, MultiReactive, ProjectionEvent,
+    ProjectionInput, ProjectionPayload, RawMsgpackInput, Reactive, ReplayLane, TypedReactive,
 };
 
 use crate::coordinate::Coordinate;

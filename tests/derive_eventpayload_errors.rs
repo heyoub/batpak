@@ -1,4 +1,5 @@
-#![allow(clippy::panic)] // trybuild fixtures assert via panic internally
+// justifies: trybuild fixtures surface fixture-mismatch failures via panic; the compile-fail harness relies on that assertion shape.
+#![allow(clippy::panic)]
 //! Compile-fail coverage for the `#[derive(EventPayload)]` parser contract.
 //!
 //! Every fixture in `tests/ui/ep_*.rs` is a stand-alone crate that should

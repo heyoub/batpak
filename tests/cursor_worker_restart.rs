@@ -1,3 +1,4 @@
+// justifies: cursor worker restart tests use panic! to escape retry-poll loops when the expected event fails to arrive within the bound.
 #![allow(clippy::panic)]
 
 use batpak::prelude::*;
@@ -35,39 +36,35 @@ fn cursor_worker_restarts_from_last_committed_checkpoint_after_panic() {
 
     let seen = Arc::new(Mutex::new(BTreeMap::<u64, usize>::new()));
     let panic_once = Arc::new(AtomicBool::new(true));
+    let mut worker_config = CursorWorkerConfig::default();
+    worker_config.batch_size = 1;
+    worker_config.idle_sleep = Duration::from_millis(1);
+    worker_config.restart = RestartPolicy::Bounded {
+        max_restarts: 2,
+        within_ms: 5_000,
+    };
 
     let worker = store
-        .cursor_worker(
-            &Region::entity("entity:cursor-worker"),
-            CursorWorkerConfig {
-                batch_size: 1,
-                idle_sleep: Duration::from_millis(1),
-                restart: RestartPolicy::Bounded {
-                    max_restarts: 2,
-                    within_ms: 5_000,
-                },
-            },
-            {
-                let seen = Arc::clone(&seen);
-                let panic_once = Arc::clone(&panic_once);
-                move |batch, _store| {
-                    let seq = batch[0].global_sequence;
-                    let mut counts = seen.lock().expect("counts mutex");
-                    *counts.entry(seq).or_insert(0) += 1;
-                    drop(counts);
+        .cursor_worker(&Region::entity("entity:cursor-worker"), worker_config, {
+            let seen = Arc::clone(&seen);
+            let panic_once = Arc::clone(&panic_once);
+            move |batch, _store| {
+                let seq = batch[0].global_sequence;
+                let mut counts = seen.lock().expect("counts mutex");
+                *counts.entry(seq).or_insert(0) += 1;
+                drop(counts);
 
-                    if seq == 1 && panic_once.swap(false, Ordering::SeqCst) {
-                        panic!("intentional cursor worker panic after first checkpoint");
-                    }
-
-                    if seq == 2 {
-                        CursorWorkerAction::Stop
-                    } else {
-                        CursorWorkerAction::Continue
-                    }
+                if seq == 1 && panic_once.swap(false, Ordering::SeqCst) {
+                    panic!("intentional cursor worker panic after first checkpoint");
                 }
-            },
-        )
+
+                if seq == 2 {
+                    CursorWorkerAction::Stop
+                } else {
+                    CursorWorkerAction::Continue
+                }
+            }
+        })
         .expect("spawn worker");
 
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -87,7 +84,7 @@ fn cursor_worker_restarts_from_last_committed_checkpoint_after_panic() {
         std::thread::sleep(Duration::from_millis(10));
     }
 
-    worker.join().expect("join worker");
+    worker.stop_and_join().expect("stop and join worker");
 
     let snapshot = seen.lock().expect("counts mutex").clone();
     assert_eq!(
@@ -143,17 +140,17 @@ fn cursor_worker_exits_cleanly_when_restart_budget_exhausted() {
     // With max_restarts=1 the worker should:
     //   attempt 0 → process batch → panic → restart (1 restart used)
     //   attempt 1 → process batch → panic → budget exhausted → exit
+    let mut worker_config = CursorWorkerConfig::default();
+    worker_config.batch_size = 1;
+    worker_config.idle_sleep = Duration::from_millis(1);
+    worker_config.restart = RestartPolicy::Bounded {
+        max_restarts: 1,
+        within_ms: 5_000,
+    };
     let worker = store
         .cursor_worker(
             &Region::entity("entity:budget-exhausted"),
-            CursorWorkerConfig {
-                batch_size: 1,
-                idle_sleep: Duration::from_millis(1),
-                restart: RestartPolicy::Bounded {
-                    max_restarts: 1,
-                    within_ms: 5_000,
-                },
-            },
+            worker_config,
             |_batch, _store| {
                 panic!("intentional panic to exhaust restart budget");
             },
@@ -162,7 +159,9 @@ fn cursor_worker_exits_cleanly_when_restart_budget_exhausted() {
 
     // Worker must exit once the restart budget is exhausted.
     // join() must complete (not hang).
-    worker.join().expect("join worker after budget exhaustion");
+    worker
+        .stop_and_join()
+        .expect("stop and join worker after budget exhaustion");
 
     // The store must remain usable after the worker exits.
     let receipt = store

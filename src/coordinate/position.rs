@@ -8,19 +8,65 @@ use std::fmt;
 /// may supply non-root depth/lane, while the writer still owns HLC fields and
 /// the per-entity sequence counter.
 #[repr(C)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
+#[serde(into = "DagPositionWire")]
 pub struct DagPosition {
     /// Wall-clock milliseconds at event creation. HLC layer 1.
     /// Enables global causal ordering across entities (not just per-entity sequence).
-    pub wall_ms: u64,
+    pub(crate) wall_ms: u64,
     /// HLC counter for same-millisecond tiebreaking. Incremented when wall_ms hasn't advanced.
-    pub counter: u16,
+    pub(crate) counter: u16,
     /// DAG depth level. Root appends default to 0; append-position hints may set non-root depth.
-    pub depth: u32,
+    pub(crate) depth: u32,
     /// Parallel branch index. Root appends default to 0; append-position hints may set non-root lane.
-    pub lane: u32,
+    pub(crate) lane: u32,
     /// Per-entity monotonic event counter within this lane and depth.
-    pub sequence: u32,
+    pub(crate) sequence: u32,
+}
+
+/// Serde intermediate that mirrors the on-wire layout of [`DagPosition`].
+/// All construction routes through [`DagPosition::with_hlc`] so any future
+/// invariants land in one place.
+#[derive(Serialize, Deserialize)]
+struct DagPositionWire {
+    wall_ms: u64,
+    counter: u16,
+    depth: u32,
+    lane: u32,
+    sequence: u32,
+}
+
+impl From<DagPosition> for DagPositionWire {
+    fn from(pos: DagPosition) -> Self {
+        Self {
+            wall_ms: pos.wall_ms,
+            counter: pos.counter,
+            depth: pos.depth,
+            lane: pos.lane,
+            sequence: pos.sequence,
+        }
+    }
+}
+
+impl From<DagPositionWire> for DagPosition {
+    fn from(wire: DagPositionWire) -> Self {
+        Self::with_hlc(
+            wire.wall_ms,
+            wire.counter,
+            wire.depth,
+            wire.lane,
+            wire.sequence,
+        )
+    }
+}
+
+impl<'de> Deserialize<'de> for DagPosition {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        DagPositionWire::deserialize(deserializer).map(DagPosition::from)
+    }
 }
 
 impl DagPosition {
@@ -94,6 +140,31 @@ impl DagPosition {
             lane: new_lane,
             sequence: 0,
         }
+    }
+
+    /// Returns the wall-clock milliseconds timestamp (HLC layer 1).
+    pub const fn wall_ms(&self) -> u64 {
+        self.wall_ms
+    }
+
+    /// Returns the HLC counter (same-millisecond tiebreak).
+    pub const fn counter(&self) -> u16 {
+        self.counter
+    }
+
+    /// Returns the DAG depth.
+    pub const fn depth(&self) -> u32 {
+        self.depth
+    }
+
+    /// Returns the DAG lane index.
+    pub const fn lane(&self) -> u32 {
+        self.lane
+    }
+
+    /// Returns the per-entity sequence number.
+    pub const fn sequence(&self) -> u32 {
+        self.sequence
     }
 
     /// Returns `true` if this is the root position (depth 0, lane 0, sequence 0).

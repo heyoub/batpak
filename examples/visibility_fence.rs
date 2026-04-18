@@ -1,3 +1,9 @@
+//! # visibility_fence
+//!
+//! **Teaches:** durable visibility fence with delayed publish.
+//!
+//! Run: `cargo run --example visibility_fence`
+
 use batpak::prelude::*;
 
 #[derive(serde::Serialize, serde::Deserialize, EventPayload)]
@@ -6,6 +12,7 @@ struct Hidden {
     hidden: bool,
 }
 
+// justifies: example binary demonstrates the visibility-fence observable via println, which is the user-visible success signal here.
 #[allow(clippy::print_stdout)]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let dir = tempfile::tempdir()?;
@@ -13,10 +20,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let coord = Coordinate::new("player:fence", "room:hidden")?;
 
-    // Fence submit is not yet typed in v1; pass the kind explicitly from the
-    // payload type's KIND constant so the callsite still avoids literal
-    // (category, type_id) pairs.
-    //
     // Ordering: fenced tickets only resolve once `fence.commit()` runs.
     // Call `ticket.wait()` AFTER `fence.commit()`, not before.
     let fence = store.begin_visibility_fence()?;

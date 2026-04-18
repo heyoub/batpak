@@ -1,4 +1,5 @@
-#![allow(clippy::panic, clippy::print_stderr, clippy::cast_possible_truncation)] // benchmark reporting uses eprintln; gate failures use panic
+// justifies: perf-gate tests stream benchmark timings to stderr, panic! on regressions, and narrow timing counters into smaller integer types.
+#![allow(clippy::panic, clippy::print_stderr, clippy::cast_possible_truncation)]
 //! Performance gate tests use the library's Gate/Pipeline primitives as a
 //! reusable harness for catastrophic-regression checks.
 //! These thresholds are intentionally generous and exist to catch obvious

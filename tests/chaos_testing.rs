@@ -1,12 +1,13 @@
 // PROVES: LAW-007 (Codebase Accuses Itself — adversarial self-testing)
 // DEFENDS: FM-011 (Error Path Hollowing), FM-019 (Non-Replayable Truth)
 // INVARIANTS: INV-CONC (linearizability, CAS, idempotency), INV-TEMP (corruption recovery)
+// justifies: chaos fixtures spawn threads for stress probes, emit stderr diagnostics during fault injection, and use unwrap/panic as assertion style when invariants are violated.
 #![allow(
     clippy::panic,
     clippy::print_stderr,
     clippy::unwrap_used,
     clippy::inconsistent_digit_grouping,
-    clippy::disallowed_methods,    // chaos tests use thread::spawn for stress probes
+    clippy::disallowed_methods,
     clippy::needless_borrows_for_generic_args,
     clippy::unused_enumerate_index
 )]

@@ -1,6 +1,16 @@
 use crate::event::StoredEvent;
 use crate::store::Store;
 
+/// Walk clock-ordered ancestors of `event_id`, up to `limit` entries.
+///
+/// Used when the `blake3` hash-chain feature is not compiled in: we
+/// iterate over the entity's stream in reverse clock order starting at
+/// the anchor's clock value. The per-hop step is O(1) amortised (the
+/// IDs were precomputed in `clock_cursor`) so the whole walk is
+/// O(limit) plus the per-hop disk read. Cycle detection still runs at
+/// the caller (`ancestry::mod`) via [`super::collect_ancestors`] —
+/// clock walks should never cycle (strictly decreasing clocks), but
+/// the caller's `HashSet` is the defensive oracle.
 pub(crate) fn walk_ancestors_by_clock<State>(
     store: &Store<State>,
     event_id: u128,

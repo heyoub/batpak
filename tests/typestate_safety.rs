@@ -1,4 +1,5 @@
-#![allow(clippy::panic)] // test assertions use panic
+// justifies: runtime typestate tests use panic! as the assertion style when a state machine should have rejected an input.
+#![allow(clippy::panic)]
 //! Compile-fail tests for typestate safety + runtime tests for generated state machines.
 //! Verifies that Receipt forgery and invalid state construction fail to compile,
 //! AND that generated types work correctly at runtime.

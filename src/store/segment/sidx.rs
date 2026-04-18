@@ -374,7 +374,8 @@ impl SidxEntryCollector {
     /// Write the SIDX footer immediately after the current write position of `writer`.
     ///
     /// The caller must ensure all event frames have been written before calling this.
-    /// `writer` must implement both [`Write`] and [`Seek`].
+    /// `writer` must implement both [`Write`] and [`Seek`]. `segment_id` is
+    /// used only to stamp structural errors (e.g. too many entries).
     ///
     /// # Footer layout written
     ///
@@ -386,11 +387,23 @@ impl SidxEntryCollector {
     /// [magic: b"SDX2"]
     /// ```
     ///
+    /// The body is assembled in a single `Vec<u8>` and written in one
+    /// `write_all` call so a partial-write torn state cannot leave the
+    /// footer half-formed: either the entire footer is on disk or none of
+    /// it is. This matters for crash recovery — a partially-written
+    /// footer would cause `read_footer` to either mis-parse or (worse)
+    /// silently fall back to the slow frame-scan path.
+    ///
     /// # Errors
     ///
     /// Returns [`StoreError::Serialization`] if the string table cannot be encoded to msgpack.
-    /// Returns [`StoreError::Io`] if any write or seek operation fails.
-    pub(crate) fn write_footer<W: Write + Seek>(&self, writer: &mut W) -> Result<(), StoreError> {
+    /// Returns [`StoreError::SegmentTooManyEntries`] if the entry count exceeds `u32::MAX`.
+    /// Returns [`StoreError::Io`] if the write fails.
+    pub(crate) fn write_footer<W: Write + Seek>(
+        &self,
+        writer: &mut W,
+        segment_id: u64,
+    ) -> Result<(), StoreError> {
         // 1. Encode string table to msgpack.
         let string_table_bytes = rmp_serde::to_vec_named(&self.strings)
             .map_err(|e| StoreError::Serialization(Box::new(e)))?;
@@ -398,30 +411,37 @@ impl SidxEntryCollector {
         // 2. Record the file position where the string table will start.
         let string_table_offset = writer.stream_position().map_err(StoreError::Io)?;
 
-        // 3. Write string table bytes.
-        writer
-            .write_all(&string_table_bytes)
-            .map_err(StoreError::Io)?;
+        // 3. Validate entry count fits in u32 before building the footer.
+        // A segment with > u32::MAX entries is structurally invalid — the
+        // SIDX trailer cannot represent it, and saturating silently would
+        // ship a lie on disk. Surface this as a real error.
+        let entry_count =
+            u32::try_from(self.entries.len()).map_err(|_| StoreError::SegmentTooManyEntries {
+                segment_id,
+                count: self.entries.len() as u64,
+            })?;
 
-        // 4. Write all entries as packed little-endian binary.
+        // 4. Build the full footer in one contiguous buffer so the write
+        // is atomic (single write_all) — no partial-write torn state.
+        let trailer_size = usize::try_from(TRAILER_SIZE)
+            .expect("invariant: SIDX trailer size fits usize on every supported target");
+        let mut footer = Vec::with_capacity(
+            string_table_bytes.len() + self.entries.len() * ENTRY_SIZE + trailer_size,
+        );
+
+        footer.extend_from_slice(&string_table_bytes);
+
         let mut buf = [0u8; ENTRY_SIZE];
         for entry in &self.entries {
             entry.encode_into(&mut buf);
-            writer.write_all(&buf).map_err(StoreError::Io)?;
+            footer.extend_from_slice(&buf);
         }
 
-        // 5. Write the 16-byte trailer: string_table_offset(8) + entry_count(4) + magic(4).
-        writer
-            .write_all(&string_table_offset.to_le_bytes())
-            .map_err(StoreError::Io)?;
+        footer.extend_from_slice(&string_table_offset.to_le_bytes());
+        footer.extend_from_slice(&entry_count.to_le_bytes());
+        footer.extend_from_slice(SIDX_MAGIC);
 
-        // Saturate at u32::MAX — a single segment can never hold 4 billion events.
-        let entry_count = u32::try_from(self.entries.len()).unwrap_or(u32::MAX);
-        writer
-            .write_all(&entry_count.to_le_bytes())
-            .map_err(StoreError::Io)?;
-
-        writer.write_all(SIDX_MAGIC).map_err(StoreError::Io)?;
+        writer.write_all(&footer).map_err(StoreError::Io)?;
 
         Ok(())
     }
@@ -491,10 +511,27 @@ pub(crate) fn read_footer(path: &Path) -> Result<Option<SidxFooterData>, StoreEr
         return Ok(None);
     }
 
-    let string_table_offset =
-        u64::from_le_bytes(trailer[0..8].try_into().expect("slice is 8 bytes"));
-    let entry_count =
-        u32::from_le_bytes(trailer[8..12].try_into().expect("slice is 4 bytes")) as usize;
+    // A5: explicit length guards. The slices are 8 and 4 bytes by
+    // construction (trailer is `[u8; 16]`), but surfacing a proper
+    // `CorruptFrame` error — rather than an `.expect` panic — keeps the
+    // cold-start read path honest if TRAILER_SIZE is ever refactored.
+    let offset_bytes: [u8; 8] = trailer[0..8]
+        .try_into()
+        .map_err(|_| StoreError::CorruptFrame {
+            segment_id,
+            offset: 0,
+            reason: "trailer truncated: string_table_offset bytes not readable".into(),
+        })?;
+    let string_table_offset = u64::from_le_bytes(offset_bytes);
+
+    let count_bytes: [u8; 4] = trailer[8..12]
+        .try_into()
+        .map_err(|_| StoreError::CorruptFrame {
+            segment_id,
+            offset: 0,
+            reason: "trailer truncated: entry_count bytes not readable".into(),
+        })?;
+    let entry_count = u32::from_le_bytes(count_bytes) as usize;
 
     // ── 3. Validate offsets before any further I/O ────────────────────────────
     // entries block occupies the ENTRY_SIZE × N bytes immediately before the trailer.
@@ -826,7 +863,7 @@ mod tests {
         collector.record(sample_entry(2), "user:2", "profile");
 
         collector
-            .write_footer(&mut cursor)
+            .write_footer(&mut cursor, /* segment_id = */ 0)
             .expect("write_footer must succeed");
 
         // Persist to a temporary file and read back.
@@ -955,7 +992,7 @@ mod tests {
 
         let collector = SidxEntryCollector::new();
         collector
-            .write_footer(&mut cursor)
+            .write_footer(&mut cursor, /* segment_id = */ 0)
             .expect("write_footer must succeed");
 
         let mut tmp = NamedTempFile::new().expect("create temp file");

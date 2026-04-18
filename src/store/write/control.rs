@@ -1,6 +1,6 @@
 use super::writer::{AppendGuards, WriterCommand, WriterHandle};
 use crate::coordinate::Coordinate;
-use crate::event::EventKind;
+use crate::event::{EventKind, EventPayload};
 use crate::store::append::checked_payload_len;
 use crate::store::{
     AppendOptions, AppendReceipt, BatchAppendItem, CausationRef, Open, Store, StoreError,
@@ -191,6 +191,74 @@ impl<'a> Outbox<'a> {
         Ok(self)
     }
 
+    /// Stage a new batch item with a typed payload — kind derived from `T::KIND`.
+    ///
+    /// # Errors
+    /// Returns any serialization or validation error raised while converting
+    /// the payload into a staged [`BatchAppendItem`].
+    pub fn stage_typed<T: EventPayload>(
+        &mut self,
+        coord: Coordinate,
+        payload: &T,
+    ) -> Result<&mut Self, StoreError> {
+        self.stage_with_options_and_causation(
+            coord,
+            T::KIND,
+            payload,
+            AppendOptions::default(),
+            CausationRef::None,
+        )
+    }
+
+    /// Stage a typed batch item with explicit append options — kind derived from `T::KIND`.
+    ///
+    /// # Errors
+    /// Returns any serialization or validation error raised while converting
+    /// the payload into a staged [`BatchAppendItem`].
+    pub fn stage_typed_with_options<T: EventPayload>(
+        &mut self,
+        coord: Coordinate,
+        payload: &T,
+        options: AppendOptions,
+    ) -> Result<&mut Self, StoreError> {
+        self.stage_with_options_and_causation(coord, T::KIND, payload, options, CausationRef::None)
+    }
+
+    /// Stage a typed batch item with explicit causation — kind derived from `T::KIND`.
+    ///
+    /// # Errors
+    /// Returns any serialization or validation error raised while converting
+    /// the payload into a staged [`BatchAppendItem`].
+    pub fn stage_typed_with_causation<T: EventPayload>(
+        &mut self,
+        coord: Coordinate,
+        payload: &T,
+        causation: CausationRef,
+    ) -> Result<&mut Self, StoreError> {
+        self.stage_with_options_and_causation(
+            coord,
+            T::KIND,
+            payload,
+            AppendOptions::default(),
+            causation,
+        )
+    }
+
+    /// Stage a typed batch item with explicit append options and causation — kind derived from `T::KIND`.
+    ///
+    /// # Errors
+    /// Returns any serialization or validation error raised while converting
+    /// the payload into a staged [`BatchAppendItem`].
+    pub fn stage_typed_with_options_and_causation<T: EventPayload>(
+        &mut self,
+        coord: Coordinate,
+        payload: &T,
+        options: AppendOptions,
+        causation: CausationRef,
+    ) -> Result<&mut Self, StoreError> {
+        self.stage_with_options_and_causation(coord, T::KIND, payload, options, causation)
+    }
+
     /// Stage a fully-formed batch item.
     pub fn push_item(&mut self, item: BatchAppendItem) -> &mut Self {
         self.items.push(item);
@@ -244,6 +312,12 @@ impl<'a> Outbox<'a> {
 
 /// Public visibility fence: writes become durable immediately but remain hidden
 /// until the fence commits.
+///
+/// `Drop` is best-effort cancellation: it sends a `CancelVisibilityFence`
+/// command to the writer without waiting for acknowledgement and logs at
+/// `error` level if the send fails. For deterministic cleanup — especially
+/// when the writer may have crashed — call [`VisibilityFence::cancel`]
+/// explicitly instead of relying on drop.
 pub struct VisibilityFence<'a> {
     store: &'a Store<Open>,
     token: u64,
@@ -295,6 +369,34 @@ impl<'a> VisibilityFence<'a> {
             causation_id,
             self.token,
         )
+    }
+
+    /// Submit a typed root-cause append under this fence — kind derived from `T::KIND`.
+    ///
+    /// # Errors
+    /// Returns any serialization, enqueue, or writer error surfaced while
+    /// staging the fenced append.
+    pub fn submit_typed<T: EventPayload>(
+        &self,
+        coord: &Coordinate,
+        payload: &T,
+    ) -> Result<AppendTicket, StoreError> {
+        self.submit(coord, T::KIND, payload)
+    }
+
+    /// Submit a typed reaction append under this fence — kind derived from `T::KIND`.
+    ///
+    /// # Errors
+    /// Returns any serialization, enqueue, or writer error surfaced while
+    /// staging the fenced reaction append.
+    pub fn submit_reaction_typed<T: EventPayload>(
+        &self,
+        coord: &Coordinate,
+        payload: &T,
+        correlation_id: u128,
+        causation_id: u128,
+    ) -> Result<AppendTicket, StoreError> {
+        self.submit_reaction(coord, T::KIND, payload, correlation_id, causation_id)
     }
 
     /// Submit a batch append under this fence.
@@ -365,10 +467,27 @@ impl Drop for VisibilityFence<'_> {
             return;
         };
         let (tx, _rx) = flume::bounded(1);
-        let _ = writer.tx.send(WriterCommand::CancelVisibilityFence {
+        // D4: best-effort cancel on drop. We do not wait for the writer's
+        // ack here — doing so would turn every fence drop into a
+        // synchronization point, and a dropped `VisibilityFence` is by
+        // definition not on the hot correctness path (callers who need
+        // correctness call `commit()` or `cancel()` explicitly). A send
+        // failure here means the writer channel is already down, so the
+        // writer has crashed or shut down — log that condition so
+        // operators see it.
+        match writer.tx.send(WriterCommand::CancelVisibilityFence {
             token: self.token,
             respond: tx,
-        });
+        }) {
+            Ok(()) => {}
+            Err(_) => {
+                tracing::error!(
+                    fence_token = ?self.token,
+                    "visibility-fence cancel send failed on drop; writer likely crashed — \
+                     explicit cancel() recommended for deterministic cleanup"
+                );
+            }
+        }
     }
 }
 

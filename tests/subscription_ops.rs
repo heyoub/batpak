@@ -1,4 +1,5 @@
-#![allow(clippy::disallowed_methods, clippy::unwrap_used)] // tests use thread::spawn for producers
+// justifies: subscription tests spawn producer threads via std::thread::spawn and use unwrap as the assertion style throughout the file.
+#![allow(clippy::disallowed_methods, clippy::unwrap_used)]
 //! Integration tests for SubscriptionOps: filter, take, and combined chains.
 //!
 //! PROVES: LAW-004 (Composition Over Construction — ops chain correctly)
@@ -77,10 +78,10 @@ fn subscription_notifications_preserve_committed_position() {
     });
 
     let notif = ops.recv().expect("position notification");
-    assert_eq!(notif.position.lane, 6);
-    assert_eq!(notif.position.depth, 2);
-    assert!(notif.position.wall_ms > 0);
-    assert_eq!(notif.position.sequence, 0);
+    assert_eq!(notif.position.lane(), 6);
+    assert_eq!(notif.position.depth(), 2);
+    assert!(notif.position.wall_ms() > 0);
+    assert_eq!(notif.position.sequence(), 0);
 
     producer.join().expect("producer thread");
 }

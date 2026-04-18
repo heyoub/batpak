@@ -1,5 +1,6 @@
 #![cfg(feature = "dangerous-test-hooks")]
-#![allow(clippy::panic)] // tests use panic! to escape the retry-poll loops
+// justifies: retry-poll loops in these tests use panic! as the escape hatch when the expected transition never arrives within the bound.
+#![allow(clippy::panic)]
 //! Restart policy tests split out of store_advanced.rs.
 
 use batpak::prelude::*;

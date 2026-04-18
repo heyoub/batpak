@@ -1,3 +1,4 @@
+// justifies: mmap cold-start tests use panic! as the assertion style when invariants around checkpoint/mmap dispatch fail.
 #![allow(clippy::panic)]
 
 use batpak::coordinate::{Coordinate, Region};

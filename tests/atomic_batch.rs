@@ -859,7 +859,7 @@ fn batch_subscription_atomicity_no_partial_visibility() {
 #[cfg(feature = "dangerous-test-hooks")]
 #[test]
 fn fault_injector_after_commit_before_fsync() {
-    use batpak::store::{CountdownInjector, FaultInjector, InjectionPoint};
+    use batpak::store::fault::{CountdownInjector, FaultInjector, InjectionPoint};
 
     let injector = CountdownInjector::after_commit_before_fsync();
 
@@ -887,7 +887,7 @@ fn fault_injector_after_commit_before_fsync() {
 #[cfg(feature = "dangerous-test-hooks")]
 #[test]
 fn batch_cross_segment_fault_recovery() {
-    use batpak::store::{CountdownAction, CountdownInjector, InjectionPoint};
+    use batpak::store::fault::{CountdownAction, CountdownInjector, InjectionPoint};
 
     let tmp = tempfile::tempdir().expect("create temp dir for cross-segment recovery test");
     let coord = Coordinate::new("cross", "seg").expect("valid cross-segment coordinate");
@@ -1456,7 +1456,7 @@ fn batch_wall_ms_monotonic_under_regressing_clock() {
         .get(pre.event_id)
         .expect("load pre-established event")
         .event;
-    let pre_wall_ms = pre_entry.header.position.wall_ms;
+    let pre_wall_ms = pre_entry.header.position.wall_ms();
 
     // Now write a 3-item batch on the same entity. With the regressing clock,
     // the raw `now_ms` for the batch will be smaller than `pre_wall_ms`. The

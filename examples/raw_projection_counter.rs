@@ -1,9 +1,15 @@
+// justifies: example binary demonstrates hand-written raw projection via println output, matches only the demo variants with a wildcard fallback, and narrows bounded counters into smaller integer types.
 #![allow(
     clippy::print_stdout,
     clippy::wildcard_enum_match_arm,
     clippy::cast_possible_truncation
-)] // example binary
-//! # Raw MessagePack Projection Counter
+)]
+//! # raw_projection_counter
+//!
+//! This example is the intentional hand-written counterpart to
+//! `raw_projection_counter_derived.rs`; production code should use
+//! `#[derive(EventSourced)]` with `input = RawMsgpackInput`. It is kept as a
+//! reference for what the derive replaces.
 //!
 //! Same event-sourced counter idea as `event_sourced_counter`, but the
 //! projection chooses batpak's raw replay lane instead of eagerly decoding

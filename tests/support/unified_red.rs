@@ -1,3 +1,4 @@
+// justifies: shared support module is included via #[path] by multiple unified_red test binaries; each binary only exercises a subset of the helpers and imports so dead_code and unused_imports are expected per-binary.
 #![allow(dead_code, unused_imports)]
 
 pub(crate) use batpak::prelude::*;

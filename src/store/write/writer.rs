@@ -1,5 +1,6 @@
 // Intentional impossible-feature guard: exponential backoff belongs in the product supervisor, not the library.
 // exponential-backoff is not a declared feature — suppress cfg warning for this guard
+// justifies: the `exponential-backoff` feature is deliberately undeclared — this block is a compile_error tripwire for anyone who adds the feature to Cargo.toml.
 #[allow(unexpected_cfgs)]
 #[cfg(feature = "exponential-backoff")]
 compile_error!(
@@ -566,6 +567,34 @@ fn writer_thread_main(
                          Last panic: {panic_msg}. Policy: {:?}",
                         runtime.config.writer.restart_policy
                     );
+                    // A2: auto-cancel any active visibility fence on
+                    // terminal exit so cancellation is visible to callers
+                    // holding a VisibilityFence handle and so the
+                    // persisted hidden-ranges on disk stay honest.
+                    //
+                    // Pending fence response Senders inside the previous
+                    // WriterState.fence_ledger were dropped during panic
+                    // unwind; their receivers will observe
+                    // `RecvError::Disconnected` and map it to
+                    // `StoreError::WriterCrashed`, so no caller blocks
+                    // forever. The index-side cancellation below is the
+                    // durable counterpart — equivalent to
+                    // `WriterState::auto_cancel_fence_on_shutdown` but
+                    // operating without a live WriterState.
+                    if let Some(token) = runtime.index.active_visibility_fence() {
+                        if runtime.index.cancel_visibility_fence(token).is_ok() {
+                            let ranges = runtime.index.cancelled_visibility_ranges();
+                            if let Err(error) = crate::store::hidden_ranges::write_cancelled_ranges(
+                                &runtime.config.data_dir,
+                                &ranges,
+                            ) {
+                                tracing::error!(
+                                    error = %error,
+                                    "failed to persist cancelled visibility ranges on terminal writer exit"
+                                );
+                            }
+                        }
+                    }
                     return;
                 }
 
@@ -965,6 +994,12 @@ impl WriterState<'_> {
             return Err(StoreError::VisibilityFenceNotActive);
         }
 
+        // Publish index boundary first; subscribers woken by complete_ok must
+        // already see the events as visible. If `complete_ok` delivered
+        // receipts before `finish_visibility_fence` advanced the visible
+        // watermark, a subscriber could observe the receipt yet see the
+        // entry still hidden — a real ordering bug, not just a style
+        // question.
         self.index
             .finish_visibility_fence(token, fence.publish_up_to)?;
         fence.complete_ok(self.subscribers, self.reactor_subscribers);
@@ -1064,16 +1099,29 @@ impl WriterState<'_> {
     }
 
     /// STEP 3: Preflight idempotency check.
-    /// Returns `Ok(Some(receipts))` if every item is already committed (full replay),
-    /// `Ok(None)` to proceed with the batch write, or `Err` for partial-replay ambiguity.
+    ///
+    /// Callers (`handle_append_batch`) guarantee that either every item has
+    /// an `idempotency_key` or none does — the all-or-none shape check is
+    /// performed before this function runs. Given that precondition:
+    ///
+    /// * All-keyed, every key found in the index: return cached receipts.
+    /// * All-keyed, no keys found: return `Ok(None)` — caller proceeds and
+    ///   mints fresh UUIDs.
+    /// * All-keyed, some keys found and others missing: partial replay —
+    ///   reject with `StoreError::IdempotencyPartialBatch`. Fabricating
+    ///   UUIDs for the missing items and mixing them with cached receipts
+    ///   would be a silent-corruption path.
+    /// * All-unkeyed: return `Ok(None)` — fresh write, no dedupe possible.
     fn preflight_batch_idempotency(
         &self,
         items: &[BatchAppendItem],
     ) -> Result<Option<Vec<AppendReceipt>>, StoreError> {
         let mut cached_receipts: Vec<Option<AppendReceipt>> = vec![None; items.len()];
         let mut cached_count = 0usize;
+        let mut keyed_count = 0usize;
         for (idx, item) in items.iter().enumerate() {
             if let Some(key) = item.options().idempotency_key {
+                keyed_count += 1;
                 if let Some(entry) = self.index.get_by_id(key) {
                     cached_receipts[idx] = Some(AppendReceipt {
                         event_id: entry.event_id,
@@ -1084,6 +1132,13 @@ impl WriterState<'_> {
                 }
             }
         }
+
+        // Unkeyed (or fully-unkeyed via caller contract) → fresh write.
+        if keyed_count == 0 {
+            return Ok(None);
+        }
+
+        // Every keyed item was found → full replay.
         if cached_count == items.len() {
             return Ok(Some(
                 cached_receipts
@@ -1092,18 +1147,15 @@ impl WriterState<'_> {
                     .collect(),
             ));
         }
+
+        // Some found, some not → partial replay, reject.
         if cached_count > 0 {
-            return Err(batch_failed(
-                cached_receipts
-                    .iter()
-                    .position(|r| r.is_none())
-                    .unwrap_or(0),
-                BatchFailureStage::Validation,
-                StoreError::Configuration(
-                    "partial batch replay: some items already committed, some not".into(),
-                ),
-            ));
+            return Err(StoreError::IdempotencyPartialBatch {
+                reason: "partial idempotency-key replay".into(),
+            });
         }
+
+        // All keyed, none found → fresh write.
         Ok(None)
     }
 
@@ -1177,7 +1229,14 @@ impl WriterState<'_> {
             // BTreeMap entries in `StoreIndex::streams`.
             let wall_ms = now_ms.max(state.last_wall_ms);
 
-            let event_id = uuid::Uuid::now_v7().as_u128();
+            // A1: mirror single-append idempotency semantics. On the first
+            // write, an item with `idempotency_key = K` uses `event_id = K`
+            // so a replay can short-circuit via `index.get_by_id(K)`.
+            // Unkeyed items still mint a fresh UUID.
+            let event_id = item
+                .options()
+                .idempotency_key
+                .unwrap_or_else(|| uuid::Uuid::now_v7().as_u128());
 
             let causation_id = item
                 .causation()
@@ -1420,6 +1479,15 @@ impl WriterState<'_> {
 
         // STEP 10: Broadcast notification to subscribers.
         if let Some(fence) = fence {
+            // Record the in-memory ledger progress FIRST, then mark the
+            // on-disk fence-progress range. Ordering rationale: if this
+            // sequence is interrupted between the two calls (panic, crash),
+            // the on-disk ledger must never claim progress beyond what the
+            // in-memory fence knows about — the opposite ordering would
+            // leave the disk ledger ahead of the fence's publish_up_to, and
+            // a subsequent restart-time recovery could publish events that
+            // the fence intended to cancel.
+            fence.record_publish_up_to(global_seq.saturating_add(1));
             self.index
                 .note_visibility_fence_progress(
                     fence.token,
@@ -1427,7 +1495,6 @@ impl WriterState<'_> {
                     global_seq.saturating_add(1),
                 )
                 .expect("active fence token verified before fenced append");
-            fence.record_publish_up_to(global_seq.saturating_add(1));
             fence.extend_artifacts([committed.notification], committed.envelope);
         } else {
             // Publish: make this entry visible to concurrent readers.
@@ -1453,8 +1520,36 @@ impl WriterState<'_> {
         // STEPs 1-2: Validate size, bytes, and reject CAS.
         self.validate_batch(&items)?;
 
-        // STEP 3: Preflight idempotency. Full replay returns cached receipts;
-        // partial replay errors out; clean batch proceeds.
+        // Empty batch is an explicit no-op. Routing it through the two-phase
+        // batch marker flow would underflow on `len() - 1` and would be
+        // conceptually dishonest anyway: there is nothing to reserve, encode,
+        // fsync, or publish.
+        if items.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // STEP 2b (A1): enforce all-or-none idempotency-key shape before
+        // computing anything. A partial-keyed batch is a caller bug — it
+        // would force us to fabricate UUIDs for some items and replay
+        // cached receipts for others, which would mix fresh events in
+        // with "already-committed" receipts under a single batch id.
+        // Reject synchronously so the caller sees the shape error instead
+        // of a silently-broken batch.
+        let keyed_count = items
+            .iter()
+            .filter(|item| item.options().idempotency_key.is_some())
+            .count();
+        if keyed_count != 0 && keyed_count != items.len() {
+            return Err(StoreError::IdempotencyPartialBatch {
+                reason: "batch must have all items keyed or all unkeyed".into(),
+            });
+        }
+
+        // STEP 3: Preflight idempotency.
+        // - All-keyed + every item found → return cached receipts.
+        // - All-keyed + none found → proceed (fresh UUIDs, no dedupe hit).
+        // - All-keyed + some found + some missing → partial replay, reject.
+        // - All-unkeyed → proceed (dedupe not possible).
         if let Some(cached) = self.preflight_batch_idempotency(&items)? {
             return Ok(cached);
         }
@@ -1594,10 +1689,15 @@ impl WriterState<'_> {
                 ));
 
         if let Some(fence) = fence {
+            // Mirror the single-append ordering (see A12 comment in
+            // handle_append): record the in-memory ledger progress FIRST,
+            // then stamp the on-disk fence-progress range. The in-memory
+            // ledger must never lag the disk ledger, otherwise a
+            // post-crash replay could publish more than the fence knew.
+            fence.record_publish_up_to(publish_up_to);
             self.index
                 .note_visibility_fence_progress(fence.token, first_seq, publish_up_to)
                 .expect("active fence token verified before fenced batch append");
-            fence.record_publish_up_to(publish_up_to);
             fence.extend_artifacts(artifacts.notifications, artifacts.envelopes);
         } else {
             self.index.publish(publish_up_to);

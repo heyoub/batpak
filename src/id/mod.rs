@@ -66,8 +66,16 @@ macro_rules! define_entity_id {
         impl ::std::str::FromStr for $name {
             type Err = String;
             fn from_str(s: &str) -> Result<Self, Self::Err> {
-                // Parse "entity_name:hex" or bare hex
-                let hex = s.strip_prefix(concat!($entity, ":")).unwrap_or(s);
+                // Parse "entity_name:hex" — bare hex without the explicit
+                // entity prefix is rejected so ambiguous inputs (e.g. two
+                // entity types that share the same hex) cannot silently
+                // alias.
+                let hex = s.strip_prefix(concat!($entity, ":")).ok_or_else(|| {
+                    format!(
+                        "invalid {}: missing entity prefix '{}:' in {s:?}",
+                        $entity, $entity
+                    )
+                })?;
                 u128::from_str_radix(hex, 16)
                     .map(Self)
                     .map_err(|e| format!("invalid {}: {e}", $entity))

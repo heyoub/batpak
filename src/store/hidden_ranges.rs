@@ -19,12 +19,14 @@ struct VisibilityRangeEntry {
     end: u64,
 }
 
-fn normalize_ranges(ranges: &[(u64, u64)]) -> Vec<(u64, u64)> {
-    let mut normalized: Vec<(u64, u64)> = ranges
-        .iter()
-        .copied()
-        .filter(|(start, end)| start < end)
-        .collect();
+fn normalize_ranges(ranges: &[(u64, u64)]) -> Result<Vec<(u64, u64)>, StoreError> {
+    let mut normalized: Vec<(u64, u64)> = Vec::with_capacity(ranges.len());
+    for &(start, end) in ranges {
+        if start >= end {
+            return Err(StoreError::RangeMalformed { start, end });
+        }
+        normalized.push((start, end));
+    }
     normalized.sort_by_key(|(start, _)| *start);
 
     let mut merged: Vec<(u64, u64)> = Vec::with_capacity(normalized.len());
@@ -37,7 +39,7 @@ fn normalize_ranges(ranges: &[(u64, u64)]) -> Vec<(u64, u64)> {
         }
         merged.push((start, end));
     }
-    merged
+    Ok(merged)
 }
 
 pub(crate) fn write_cancelled_ranges(
@@ -47,7 +49,7 @@ pub(crate) fn write_cancelled_ranges(
     let final_path = data_dir.join(VISIBILITY_RANGES_FILENAME);
     reject_symlink_leaf(&final_path)?;
 
-    let normalized = normalize_ranges(ranges);
+    let normalized = normalize_ranges(ranges)?;
     if normalized.is_empty() {
         match std::fs::remove_file(&final_path) {
             Ok(()) => {}
@@ -153,13 +155,23 @@ pub(crate) fn try_load_cancelled_ranges(data_dir: &Path) -> Option<Vec<(u64, u64
         }
     };
 
-    Some(normalize_ranges(
-        &data
-            .ranges
-            .into_iter()
-            .map(|entry| (entry.start, entry.end))
-            .collect::<Vec<_>>(),
-    ))
+    let raw_ranges: Vec<(u64, u64)> = data
+        .ranges
+        .into_iter()
+        .map(|entry| (entry.start, entry.end))
+        .collect();
+    match normalize_ranges(&raw_ranges) {
+        Ok(normalized) => Some(normalized),
+        Err(err) => {
+            tracing::warn!(
+                target: "batpak::visibility",
+                path = %path.display(),
+                error = %err,
+                "visibility-ranges file contained malformed entries; ignoring"
+            );
+            None
+        }
+    }
 }
 
 fn reject_symlink_leaf(path: &Path) -> Result<(), StoreError> {

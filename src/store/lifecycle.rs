@@ -14,9 +14,7 @@ pub(crate) fn sync(store: &Store<Open>) -> Result<(), StoreError> {
     tracing::debug!(target: "batpak::flow", flow = "sync");
     let (tx, rx) = flume::bounded(1);
     store
-        .writer
-        .as_ref()
-        .expect("open store has writer")
+        .writer_ref()
         .tx
         .send(crate::store::write::writer::WriterCommand::Sync { respond: tx })
         .map_err(|_| StoreError::WriterCrashed)?;
@@ -89,12 +87,20 @@ pub(crate) fn compact(
         .collect();
 
     if sealed.len() < config.min_segments {
+        // Skip signal: zero segments removed, zero bytes reclaimed. No
+        // merged_id is fabricated from a zero fallback — the early return
+        // happens before any merged-file path is derived, so there is no
+        // way for compaction to overwrite segment 0.
         return Ok(segment::CompactionResult {
+            outcome: segment::CompactionOutcome::Skipped,
             segments_removed: 0,
             bytes_reclaimed: 0,
         });
     }
 
+    // sealed.len() >= config.min_segments >= 1 here, so sealed[0] is safe
+    // without any unwrap_or fallback. The merged_id is always a real sealed
+    // segment id that we are about to replace.
     let merged_id = sealed[0].0;
     let merged_path = store
         .config
@@ -209,6 +215,7 @@ pub(crate) fn compact(
     }
 
     Ok(segment::CompactionResult {
+        outcome: segment::CompactionOutcome::Performed,
         segments_removed,
         bytes_reclaimed,
     })
@@ -218,9 +225,7 @@ pub(crate) fn close(mut store: Store<Open>) -> Result<Closed, StoreError> {
     tracing::debug!(target: "batpak::flow", flow = "close");
     let (tx, rx) = flume::bounded(1);
     store
-        .writer
-        .as_ref()
-        .expect("open store has writer")
+        .writer_ref()
         .tx
         .send(crate::store::write::writer::WriterCommand::Shutdown { respond: tx })
         .map_err(|_| StoreError::WriterCrashed)?;

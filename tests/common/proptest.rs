@@ -31,7 +31,8 @@ pub(crate) fn effective_cases(default_cases: u32, env_value: Option<&str>) -> u3
     }
 }
 
-#[allow(clippy::panic)] // invalid shared proof-depth knobs must fail loudly in test harness code
+// justifies: invalid PROPTEST_CASES environment knob must fail the test harness loudly rather than silently falling back to a default.
+#[allow(clippy::panic)]
 fn invalid_proptest_cases(value: &str) -> u32 {
     panic!(
         "PROPTEST_CASES must be an unsigned integer, got `{value}`. \

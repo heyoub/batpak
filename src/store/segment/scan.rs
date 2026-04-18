@@ -20,7 +20,14 @@ const MAX_BATCH_RECOVERY_ITEMS: u32 = 4096;
 /// Active segment: LRU FD cache + pread (Unix) / seek+read (Windows).
 /// Reader: low-level segment access used by replay and point reads.
 /// Internally synchronized so `Store` stays `Send + Sync`.
-pub(crate) struct Reader {
+///
+/// Technically public (with `#[doc(hidden)]`) so that `ReplayInput`'s
+/// methods — which take `&Reader` — can be part of a public trait without
+/// triggering the `private_bounds` lint on `Store::project` and friends.
+/// External callers must not rely on this type being reachable; it is
+/// not part of the public API contract.
+#[doc(hidden)]
+pub struct Reader {
     data_dir: PathBuf,
     /// FD cache for the active segment only. Sealed segments use mmap.
     /// [DEP:parking_lot::Mutex] — lock() returns guard directly, no poisoning
@@ -374,7 +381,73 @@ impl Reader {
         })
     }
 
+    /// Check whether the SIDX entries cover every frame in the segment up to
+    /// the SIDX footer.
+    ///
+    /// Returns `Some(true)` when the max (frame_offset + frame_length)
+    /// across SIDX entries equals the SIDX footer start — meaning every
+    /// frame in the segment is represented. Returns `Some(false)` when
+    /// there are trailing frames that SIDX doesn't know about (the
+    /// cross-segment batch case — see `scan_segment_index_into`'s
+    /// contract). Returns `None` on I/O trouble; callers interpret as
+    /// "can't prove coverage, frame-scan to be safe".
+    fn sidx_covers_segment_tail(
+        path: &Path,
+        sidx_entries: &[super::sidx::SidxEntry],
+    ) -> Option<bool> {
+        // file_len - TRAILER_SIZE - entries_block - string_table = SIDX start,
+        // which is also the `string_table_offset` written in the trailer.
+        // We want to compare the tail of the last SIDX entry to that start.
+        let file_len = std::fs::metadata(path).ok()?.len();
+        // Trailer is 16 bytes: string_table_offset(8) + entry_count(4) + magic(4).
+        // Read only the trailer to get string_table_offset without reparsing
+        // the entire footer.
+        use std::io::{Read, Seek, SeekFrom};
+        let mut file = std::fs::File::open(path).ok()?;
+        if file_len < 16 {
+            return Some(false);
+        }
+        file.seek(SeekFrom::End(-16)).ok()?;
+        let mut trailer = [0u8; 16];
+        file.read_exact(&mut trailer).ok()?;
+        // If this isn't a SIDX footer the caller shouldn't have reached
+        // this path — but guard anyway.
+        if &trailer[12..16] != super::sidx::SIDX_MAGIC {
+            return None;
+        }
+        let offset_bytes: [u8; 8] = trailer[0..8].try_into().ok()?;
+        let sidx_start = u64::from_le_bytes(offset_bytes);
+
+        // Max tail across entries. Batch markers are written as frames but
+        // are NOT recorded into the SIDX collector, so a segment with a
+        // BEGIN at its tail will have sidx_max_tail < sidx_start. Items
+        // written between BEGIN and rotation are also not in SIDX (they
+        // land in the collector only at COMMIT time, and the segment
+        // rotated before COMMIT), so they push sidx_max_tail further
+        // below sidx_start. Either case fails this check and forces the
+        // frame-scan path.
+        let max_tail = sidx_entries
+            .iter()
+            .map(|e| e.frame_offset.saturating_add(u64::from(e.frame_length)))
+            .max()
+            .unwrap_or(0);
+
+        // Segments with an empty SIDX but frames present are an unusual
+        // case; force frame-scan there too by reporting "not covered".
+        if sidx_entries.is_empty() && sidx_start > (4 + 4/* magic + header_len */) {
+            return Some(false);
+        }
+
+        Some(max_tail >= sidx_start)
+    }
+
     /// Scan an entire segment for cold start. Returns all events in order.
+    ///
+    /// **SIDX fast-path contract.** This function does not use the SIDX
+    /// fast-path at all — it always frame-scans. The mirror contract in
+    /// `scan_segment_index_into` is the one that must be careful about
+    /// cross-segment batches; here we return every frame so callers that
+    /// need the full event stream always get it.
     pub(crate) fn scan_segment(&self, path: &Path) -> Result<Vec<ScannedEntry>, StoreError> {
         let mut file = File::open(path).map_err(StoreError::Io)?;
         let mut magic = [0u8; 4];
@@ -494,7 +567,19 @@ impl Reader {
     /// Tries the SIDX footer first (O(1) seek + bulk read); falls back to
     /// frame-by-frame msgpack deserialization if no SIDX footer is present.
     /// Accepts optional `batch_state` for cross-segment batch recovery.
-    /// Scan segment index metadata and push entries directly into `sink`.
+    ///
+    /// **SIDX fast-path contract.** The SIDX fast-path may be used only
+    /// when the caller has no pending batch (`batch_state.in_batch ==
+    /// false`) AND this segment does not itself carry a cross-segment
+    /// batch — i.e., its SIDX entries cover every frame in the segment.
+    /// If a BEGIN marker in this segment rotates before its COMMIT, the
+    /// SIDX written at rotation is empty of that batch's items (items
+    /// are recorded to the collector only after COMMIT succeeds), and
+    /// the next segment's frame-scan needs the batch-in-progress state
+    /// to match its COMMIT against. In that case we must frame-scan this
+    /// segment so the BEGIN and staged items propagate via
+    /// `BatchRecoveryState`. Otherwise a cross-segment batch is silently
+    /// dropped on recovery.
     ///
     /// This lets cold-start rebuild stream scanned entries straight into the
     /// replay cursor instead of allocating a per-segment `Vec` only to fold it
@@ -520,18 +605,36 @@ impl Reader {
 
         if !is_active && batch_state.as_ref().is_none_or(|s| !s.in_batch) {
             if let Ok(Some((sidx_entries, strings))) = super::sidx::read_footer(path) {
-                for se in sidx_entries {
-                    let row = se.to_cold_start_row(segment_id);
-                    let kind = row.kind;
-                    // Skip batch markers in SIDX fast path.
-                    if kind == EventKind::SYSTEM_BATCH_BEGIN
-                        || kind == EventKind::SYSTEM_BATCH_COMMIT
-                    {
-                        continue;
+                // SIDX coverage check (A7): if any frame exists past the
+                // last SIDX entry's tail (before the SIDX footer itself),
+                // this segment rotated with an in-flight batch — the
+                // BEGIN marker and staged items occupy frames that SIDX
+                // does not know about, because SIDX records items only
+                // after COMMIT succeeds. In that case we must frame-scan
+                // so `BatchRecoveryState` picks up the BEGIN and staged
+                // entries and carries them into the next segment.
+                let sidx_covers_tail =
+                    Self::sidx_covers_segment_tail(path, &sidx_entries).unwrap_or(false);
+                if sidx_covers_tail {
+                    for se in sidx_entries {
+                        let row = se.to_cold_start_row(segment_id);
+                        let kind = row.kind;
+                        // Skip batch markers in SIDX fast path (markers
+                        // themselves are not indexed; their role is
+                        // purely durability-oracle on the frame stream).
+                        if kind == EventKind::SYSTEM_BATCH_BEGIN
+                            || kind == EventKind::SYSTEM_BATCH_COMMIT
+                        {
+                            continue;
+                        }
+                        sink(ScannedIndexEntry::from_cold_start_row(&row, &strings)?)?;
                     }
-                    sink(ScannedIndexEntry::from_cold_start_row(&row, &strings)?)?;
+                    return Ok(());
                 }
-                return Ok(());
+                // Fall through to frame-scan: SIDX exists but does not
+                // cover the segment tail, which means a cross-segment
+                // batch is in flight. Frame-scan picks up the BEGIN and
+                // staged items into `state_ref`.
             }
         }
 
@@ -675,6 +778,15 @@ impl Reader {
                                         segment_id,
                                         frame_offset,
                                     )?;
+                                    let length = u32::try_from(frame_size).map_err(|_| {
+                                        StoreError::CorruptFrame {
+                                            segment_id,
+                                            offset: frame_offset,
+                                            reason: format!(
+                                                "frame size {frame_size} overflows u32"
+                                            ),
+                                        }
+                                    })?;
                                     sink(ScannedIndexEntry {
                                         header: payload.event.header,
                                         entity: payload.entity,
@@ -682,8 +794,7 @@ impl Reader {
                                         hash_chain,
                                         segment_id,
                                         offset: frame_offset,
-                                        length: u32::try_from(frame_size)
-                                            .expect("invariant: frame_size bounded by segment_max_bytes (64 MB), well within u32"),
+                                        length,
                                         // Slow path: no SIDX footer, so no durable sequence source.
                                         // Caller (rebuild) will synthesize via the ReplayCursor allocator.
                                         global_sequence: None,
@@ -748,6 +859,13 @@ impl Reader {
                                     segment_id,
                                     frame_offset,
                                 )?;
+                                let length = u32::try_from(frame_size).map_err(|_| {
+                                    StoreError::CorruptFrame {
+                                        segment_id,
+                                        offset: frame_offset,
+                                        reason: format!("frame size {frame_size} overflows u32"),
+                                    }
+                                })?;
                                 state_ref.staged.push(ScannedIndexEntry {
                                     header: payload.event.header,
                                     entity: payload.entity,
@@ -755,8 +873,7 @@ impl Reader {
                                     hash_chain,
                                     segment_id,
                                     offset: frame_offset,
-                                    length: u32::try_from(frame_size)
-                                        .expect("invariant: frame_size bounded by segment_max_bytes (64 MB), well within u32"),
+                                    length,
                                     // Slow path: no SIDX, no durable sequence source.
                                     global_sequence: None,
                                 });
@@ -879,6 +996,69 @@ impl Reader {
             }
         })?;
         let payload = Self::decode_frame_payload_value(msgpack)?;
+        let coord =
+            Coordinate::new(&payload.entity, &payload.scope).map_err(StoreError::Coordinate)?;
+        Ok(StoredEvent {
+            coordinate: coord,
+            event: payload.event,
+        })
+    }
+
+    /// Read an entry by disk position but leave the payload as raw MessagePack
+    /// bytes. Mirrors `read_entry` but returns `StoredEvent<Vec<u8>>`, used by
+    /// the raw-lane reactor loop.
+    pub(crate) fn read_entry_raw(&self, pos: &DiskPos) -> Result<StoredEvent<Vec<u8>>, StoreError> {
+        if self.is_sealed(pos.segment_id) {
+            return self.read_entry_raw_mmap(pos);
+        }
+
+        let frame_len = Self::checked_frame_len(pos.segment_id, pos.length)?;
+        let mut buf = self.acquire_buffer(frame_len);
+        self.read_active_frame_into(pos, &mut buf)?;
+
+        let result = segment::frame_decode(&buf).map_err(|e| match e {
+            segment::FrameDecodeError::CrcMismatch { .. } => StoreError::CrcMismatch {
+                segment_id: pos.segment_id,
+                offset: pos.offset,
+            },
+            segment::FrameDecodeError::TooShort | segment::FrameDecodeError::Truncated { .. } => {
+                StoreError::corrupt_frame(pos.segment_id, e.to_string())
+            }
+        });
+        let (msgpack, _) = match result {
+            Ok(v) => v,
+            Err(e) => {
+                self.release_buffer(buf);
+                return Err(e);
+            }
+        };
+        let payload = Self::decode_frame_payload_raw(msgpack)?;
+        self.release_buffer(buf);
+
+        let coord =
+            Coordinate::new(&payload.entity, &payload.scope).map_err(StoreError::Coordinate)?;
+        Ok(StoredEvent {
+            coordinate: coord,
+            event: payload.event,
+        })
+    }
+
+    fn read_entry_raw_mmap(&self, pos: &DiskPos) -> Result<StoredEvent<Vec<u8>>, StoreError> {
+        let mmap_ref = self.get_or_map_sealed(pos.segment_id)?;
+        let mmap: &memmap2::Mmap = mmap_ref.value();
+        let frame_range =
+            Self::checked_frame_range(pos.segment_id, pos.offset, pos.length, mmap.len())?;
+        let frame_buf = &mmap[frame_range];
+        let (msgpack, _) = segment::frame_decode(frame_buf).map_err(|e| match e {
+            segment::FrameDecodeError::CrcMismatch { .. } => StoreError::CrcMismatch {
+                segment_id: pos.segment_id,
+                offset: pos.offset,
+            },
+            segment::FrameDecodeError::TooShort | segment::FrameDecodeError::Truncated { .. } => {
+                StoreError::corrupt_frame(pos.segment_id, e.to_string())
+            }
+        })?;
+        let payload = Self::decode_frame_payload_raw(msgpack)?;
         let coord =
             Coordinate::new(&payload.entity, &payload.scope).map_err(StoreError::Coordinate)?;
         Ok(StoredEvent {

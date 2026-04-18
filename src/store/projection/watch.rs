@@ -20,7 +20,6 @@ pub struct ProjectionWatcher<T> {
     _phantom: std::marker::PhantomData<T>,
 }
 
-#[allow(private_bounds)] // watcher delta replay uses the same internal replay lanes as Store::project
 impl<T> ProjectionWatcher<T> {
     pub(crate) fn new(
         sub: Subscription,
@@ -40,7 +39,6 @@ impl<T> ProjectionWatcher<T> {
     }
 }
 
-#[allow(private_bounds)] // watcher delta replay uses the same internal replay lanes as Store::project
 impl<T> ProjectionWatcher<T>
 where
     T: EventSourced + serde::Serialize + serde::de::DeserializeOwned + 'static,

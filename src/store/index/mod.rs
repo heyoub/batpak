@@ -128,7 +128,8 @@ impl SequenceGate {
     ///
     /// Panics if `up_to` exceeds the allocated counter or regresses below
     /// the current visible watermark.
-    #[allow(clippy::panic)] // correctness invariant, not a recoverable error
+    // justifies: publish asserts a non-recoverable invariant (visibility watermark regression); panic is the correctness signal, not a bubbled error.
+    #[allow(clippy::panic)]
     pub(crate) fn publish(&self, up_to: u64) {
         assert!(
             up_to <= self.allocated.load(Ordering::Acquire),
@@ -937,18 +938,15 @@ impl StoreIndex {
 
     /// Return all entries matching `region` as lightweight `QueryHit` values.
     ///
-    /// Same candidate-selection strategy and secondary filters as `query()`,
-    /// but eliminates the `Arc::clone` per entry in the scan loop.
-    /// Visibility, clock_range, and global_sequence sort are applied here so
-    /// callers can use hits directly or selectively upgrade via `upgrade_hit`.
+    /// Candidate selection picks the cheapest overlay for the primary axis,
+    /// then every candidate passes through the shared
+    /// [`filter_region_hits`] pipeline: visibility → scope revalidation →
+    /// kind/fact → clock range. Output is sorted by `global_sequence`.
     pub(crate) fn query_hits(&self, region: &crate::coordinate::Region) -> Vec<QueryHit> {
         use crate::coordinate::KindFilter;
         let visibility = self.sequence.snapshot();
 
         let mut hits: Vec<QueryHit> = if let Some(ref prefix) = region.entity_prefix {
-            // Inline all secondary filters so we avoid a second pass.
-            let scope_filter = region.scope.as_deref();
-            let fact_filter = region.fact.as_ref();
             let mut candidates = Vec::new();
             for stream in self
                 .streams
@@ -956,24 +954,6 @@ impl StoreIndex {
                 .filter(|r| r.key().as_ref().starts_with(prefix.as_ref()))
             {
                 for entry in stream.value().values() {
-                    if !visibility.is_visible(entry.global_sequence) {
-                        continue;
-                    }
-                    if let Some(scope) = scope_filter {
-                        if entry.coord.scope() != scope {
-                            continue;
-                        }
-                    }
-                    if let Some(fact) = fact_filter {
-                        let kind_ok = match fact {
-                            KindFilter::Exact(k) => entry.kind == *k,
-                            KindFilter::Category(c) => entry.kind.category() == *c,
-                            KindFilter::Any => true,
-                        };
-                        if !kind_ok {
-                            continue;
-                        }
-                    }
                     candidates.push(QueryHit::from_entry(entry));
                 }
             }
@@ -987,9 +967,7 @@ impl StoreIndex {
                 for entity in &entities {
                     if let Some(stream) = self.streams.get(entity.as_ref()) {
                         for entry in stream.value().values() {
-                            if visibility.is_visible(entry.global_sequence) {
-                                candidates.push(QueryHit::from_entry(entry));
-                            }
+                            candidates.push(QueryHit::from_entry(entry));
                         }
                     }
                 }
@@ -1005,9 +983,7 @@ impl StoreIndex {
                     let mut candidates = Vec::new();
                     for stream in self.streams.iter() {
                         for entry in stream.value().values() {
-                            if visibility.is_visible(entry.global_sequence) {
-                                candidates.push(QueryHit::from_entry(entry));
-                            }
+                            candidates.push(QueryHit::from_entry(entry));
                         }
                     }
                     candidates
@@ -1017,36 +993,73 @@ impl StoreIndex {
             let mut candidates = Vec::new();
             for stream in self.streams.iter() {
                 for entry in stream.value().values() {
-                    if visibility.is_visible(entry.global_sequence) {
-                        candidates.push(QueryHit::from_entry(entry));
-                    }
+                    candidates.push(QueryHit::from_entry(entry));
                 }
             }
             candidates
         };
 
-        // Fact filter — only needed when scope was the primary selector.
-        if region.entity_prefix.is_none() && region.scope.is_some() {
-            if let Some(ref fact) = region.fact {
-                hits.retain(|h| match fact {
+        self.filter_region_hits(&mut hits, region, &visibility);
+        hits.sort_by_key(|h| h.global_sequence);
+        hits
+    }
+
+    /// Apply every non-candidate Region filter in a single pass:
+    /// visibility, scope revalidation (when scope is the requested axis),
+    /// kind/fact, and clock range. Does not sort, does not truncate.
+    ///
+    /// Scope revalidation is the B2 correctness check: overlays return
+    /// candidates on a best-effort basis (BaseAoS returns `Vec::new` for
+    /// scope queries and the stream fallback does not re-check the entry's
+    /// own scope). The re-check here defends the scope-request contract
+    /// regardless of which overlay produced the candidate.
+    fn filter_region_hits(
+        &self,
+        hits: &mut Vec<QueryHit>,
+        region: &crate::coordinate::Region,
+        visibility: &VisibilitySnapshot,
+    ) {
+        use crate::coordinate::KindFilter;
+
+        let requested_scope = region.scope.as_deref();
+        let fact_filter = region.fact.as_ref();
+        let clock_range = region.clock_range;
+        // Entity-prefix candidates are already filtered by prefix during
+        // candidate selection, so no re-validation is needed here for that
+        // axis. Scope is re-validated against the entry's actual coord
+        // when the Region asked for a scope.
+
+        hits.retain(|h| {
+            if !visibility.is_visible(h.global_sequence) {
+                return false;
+            }
+            if let Some(scope) = requested_scope {
+                match self.by_id.get(&h.event_id) {
+                    Some(entry) => {
+                        if entry.value().coord.scope() != scope {
+                            return false;
+                        }
+                    }
+                    None => return false,
+                }
+            }
+            if let Some(fact) = fact_filter {
+                let kind_ok = match fact {
                     KindFilter::Exact(k) => h.kind == *k,
                     KindFilter::Category(c) => h.kind.category() == *c,
                     KindFilter::Any => true,
-                });
+                };
+                if !kind_ok {
+                    return false;
+                }
             }
-        }
-
-        // Visibility watermark (scan paths don't pre-filter; stream paths do
-        // but a second pass is a cheap no-op on an already-filtered vec).
-        hits.retain(|h| visibility.is_visible(h.global_sequence));
-
-        // Clock range.
-        if let Some((min, max)) = region.clock_range {
-            hits.retain(|h| h.clock >= min && h.clock <= max);
-        }
-
-        hits.sort_by_key(|h| h.global_sequence);
-        hits
+            if let Some((min, max)) = clock_range {
+                if h.clock < min || h.clock > max {
+                    return false;
+                }
+            }
+            true
+        });
     }
 
     /// Bounded variant of [`query_hits`].
@@ -1055,10 +1068,10 @@ impl StoreIndex {
     /// `started = true`).  When `started = false` (fresh cursor), the position
     /// filter is open and up to `limit` hits are returned from the beginning.
     ///
-    /// For the default SoA topology the scan is O(log N + limit/selectivity):
-    /// a binary search skips already-consumed entries, then a forward scan
-    /// stops once `limit` hits are collected.  Other layouts apply the position
-    /// filter after collecting all matching candidates, then sort and truncate.
+    /// The same shared filter pipeline as [`query_hits`] runs here
+    /// (visibility → scope revalidation → kind/fact → clock range) before
+    /// the final sort and truncate, so the `limit` always bounds
+    /// post-filter results — never a larger pre-filter candidate set.
     pub(crate) fn query_hits_after(
         &self,
         region: &crate::coordinate::Region,
@@ -1071,8 +1084,6 @@ impl StoreIndex {
         let seq_ok = |seq: u64| !started || seq > after_seq;
 
         let mut hits: Vec<QueryHit> = if let Some(ref prefix) = region.entity_prefix {
-            let scope_filter = region.scope.as_deref();
-            let fact_filter = region.fact.as_ref();
             let mut candidates = Vec::new();
             for stream in self
                 .streams
@@ -1083,113 +1094,120 @@ impl StoreIndex {
                     if !seq_ok(entry.global_sequence) {
                         continue;
                     }
-                    if !visibility.is_visible(entry.global_sequence) {
-                        continue;
-                    }
-                    if let Some(scope) = scope_filter {
-                        if entry.coord.scope() != scope {
-                            continue;
-                        }
-                    }
-                    if let Some(fact) = fact_filter {
-                        let kind_ok = match fact {
-                            KindFilter::Exact(k) => entry.kind == *k,
-                            KindFilter::Category(c) => entry.kind.category() == *c,
-                            KindFilter::Any => true,
-                        };
-                        if !kind_ok {
-                            continue;
-                        }
-                    }
                     candidates.push(QueryHit::from_entry(entry));
                 }
             }
-            candidates.sort_by_key(|h| h.global_sequence);
-            candidates.truncate(limit);
-            return candidates;
+            candidates
         } else if let Some(ref scope) = region.scope {
-            let mut scan_hits =
-                self.scan
-                    .query_hits_by_scope_after(scope.as_ref(), after_seq, started, limit);
-            if !scan_hits.is_empty() {
-                return scan_hits;
-            }
-            if let Some(entities) = self.scan.scope_entity_set(scope.as_ref()) {
+            // Correctness over premature truncation: bounded overlay helpers
+            // can only see kind/category/scope, not visibility or clock-range.
+            // If they stop at `limit` raw candidates and the earliest hits are
+            // later filtered out (hidden range, clock mismatch), the cursor
+            // can under-fill or get stuck behind a hidden hole. Collect the
+            // full scope candidate set, then let the shared filter pipeline
+            // below own the final post-filter bound.
+            let overlay_hits = self.scan.query_hits_by_scope(scope.as_ref());
+            if !overlay_hits.is_empty() {
+                overlay_hits
+            } else if let Some(entities) = self.scan.scope_entity_set(scope.as_ref()) {
                 let mut candidates = Vec::new();
                 for entity in &entities {
                     if let Some(stream) = self.streams.get(entity.as_ref()) {
                         for entry in stream.value().values() {
-                            if seq_ok(entry.global_sequence)
-                                && visibility.is_visible(entry.global_sequence)
-                            {
+                            if seq_ok(entry.global_sequence) {
                                 candidates.push(QueryHit::from_entry(entry));
                             }
                         }
                     }
                 }
-                // scope_hits was empty; check if we still need the scan fallback
-                scan_hits = candidates;
-                scan_hits
+                candidates
             } else {
                 Vec::new()
             }
         } else if let Some(ref fact) = region.fact {
-            let mut hits = match fact {
-                KindFilter::Exact(k) => self
-                    .scan
-                    .query_hits_by_kind_after(*k, after_seq, started, limit),
-                KindFilter::Category(c) => self
-                    .scan
-                    .query_hits_by_category_after(*c, after_seq, started, limit),
+            match fact {
+                // Same rule as the scope branch above: the overlay can filter
+                // by kind/category, but only the shared pipeline can apply
+                // visibility + region clock bounds honestly. Returning a
+                // pre-truncated overlay vec and filtering later is a silent
+                // starvation bug for cursors and bounded polls.
+                KindFilter::Exact(k) => self.scan.query_hits_by_kind(*k),
+                KindFilter::Category(c) => self.scan.query_hits_by_category(*c),
                 KindFilter::Any => {
-                    let mut candidates = Vec::new();
+                    // Bounded collection: keep only the `limit` smallest
+                    // visible global_sequence values as the scan proceeds.
+                    // Whenever the working buffer grows past 2·limit we
+                    // sort and truncate back to `limit`, so memory stays
+                    // O(limit) regardless of corpus size and the overall
+                    // sort cost is O(visible log limit) instead of
+                    // O(visible log visible).
+                    let clock_range = region.clock_range;
+                    // Guard against a caller passing `limit == usize::MAX`
+                    // which would make the trim threshold saturate and the
+                    // Vec allocation explode. 1 << 20 is an arbitrary but
+                    // generous ceiling for the working buffer; every hit
+                    // past it still gets considered because the trim keeps
+                    // the `limit` smallest seen so far.
+                    let trim_threshold = limit
+                        .saturating_mul(2)
+                        .max(limit.saturating_add(1))
+                        .min(1 << 20);
+                    let initial_cap = limit.min(1 << 20);
+                    let mut buf: Vec<QueryHit> = Vec::with_capacity(initial_cap);
+                    let trim = |buf: &mut Vec<QueryHit>, limit: usize| {
+                        buf.sort_by_key(|h| h.global_sequence);
+                        buf.truncate(limit);
+                    };
                     for stream in self.streams.iter() {
                         for entry in stream.value().values() {
-                            if seq_ok(entry.global_sequence)
-                                && visibility.is_visible(entry.global_sequence)
-                            {
-                                candidates.push(QueryHit::from_entry(entry));
+                            if !seq_ok(entry.global_sequence) {
+                                continue;
+                            }
+                            if !visibility.is_visible(entry.global_sequence) {
+                                continue;
+                            }
+                            if let Some((min, max)) = clock_range {
+                                if entry.clock < min || entry.clock > max {
+                                    continue;
+                                }
+                            }
+                            buf.push(QueryHit::from_entry(entry));
+                            if buf.len() >= trim_threshold {
+                                trim(&mut buf, limit);
                             }
                         }
                     }
-                    candidates
+                    trim(&mut buf, limit);
+                    // Already visibility + clock-range filtered; no further
+                    // pipeline pass needed. Return early to preserve the
+                    // bounded allocation guarantee.
+                    return buf;
                 }
-            };
-            // Fact-primary: scan paths don't pre-filter visibility; apply now.
-            hits.retain(|h| visibility.is_visible(h.global_sequence));
-            if let Some((min, max)) = region.clock_range {
-                hits.retain(|h| h.clock >= min && h.clock <= max);
             }
-            hits.truncate(limit);
-            return hits;
         } else {
             let mut candidates = Vec::new();
             for stream in self.streams.iter() {
                 for entry in stream.value().values() {
-                    if seq_ok(entry.global_sequence) && visibility.is_visible(entry.global_sequence)
-                    {
-                        candidates.push(QueryHit::from_entry(entry));
+                    if !seq_ok(entry.global_sequence) {
+                        continue;
                     }
+                    candidates.push(QueryHit::from_entry(entry));
                 }
             }
             candidates
         };
 
-        // Secondary fact filter for scope-primary path.
-        if region.entity_prefix.is_none() && region.scope.is_some() {
-            if let Some(ref fact) = region.fact {
-                hits.retain(|h| match fact {
-                    KindFilter::Exact(k) => h.kind == *k,
-                    KindFilter::Category(c) => h.kind.category() == *c,
-                    KindFilter::Any => true,
-                });
-            }
-        }
+        // Single shared filter pipeline: visibility, scope revalidation,
+        // kind/fact, clock range. Applied before the final sort+truncate
+        // so that `limit` bounds filtered results, not candidates.
+        self.filter_region_hits(&mut hits, region, &visibility);
 
-        hits.retain(|h| visibility.is_visible(h.global_sequence));
-
-        if let Some((min, max)) = region.clock_range {
-            hits.retain(|h| h.clock >= min && h.clock <= max);
+        // Enforce the seq_ok condition after the filter pass for overlay
+        // paths that do not honour `started` at the candidate stage (the
+        // scope overlay fallback collects without post-filter). This is
+        // cheap — the vec is already shrunk by filter_region_hits.
+        if started {
+            hits.retain(|h| h.global_sequence > after_seq);
         }
 
         hits.sort_by_key(|h| h.global_sequence);
@@ -1319,10 +1337,9 @@ impl StoreIndex {
         type_id: TypeId,
         bytes: Vec<u8>,
         watermark: u64,
-        cached_at_us: i64,
     ) -> bool {
         self.scan
-            .store_cached_projection(entity, type_id, bytes, watermark, cached_at_us)
+            .store_cached_projection(entity, type_id, bytes, watermark)
     }
 
     pub(crate) fn projection_replay_plan(

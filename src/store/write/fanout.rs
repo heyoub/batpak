@@ -1,3 +1,11 @@
+//! Push-based subscriber fanout.
+//!
+//! Lossy push — slow subscribers are dropped, not retained. A subscriber
+//! whose channel fills is treated as disconnected and removed from the
+//! sender list; the writer thread must never be paced by a single slow
+//! consumer. Callers who need every event must use `Cursor` (pull) or
+//! `Subscription`-on-top-of-Cursor, not this fanout.
+
 use crate::coordinate::{Coordinate, DagPosition};
 use crate::event::{EventKind, StoredEvent};
 use flume::{Receiver, Sender, TrySendError};
@@ -57,15 +65,22 @@ impl<T: Clone> FanoutList<T> {
         !self.senders.lock().is_empty()
     }
 
-    /// Broadcast: try_send to all, retain on Ok or Full, prune on Disconnected.
+    /// Broadcast: try_send to all, prune on Full OR Disconnected.
     /// NEVER use blocking send() — one slow subscriber must not block the writer.
+    ///
+    /// A `Full` subscriber is a slow subscriber. Retaining it would let the
+    /// sender list grow without bound and keep a dead channel alive across
+    /// every broadcast; we drop it immediately and treat the channel as
+    /// disconnected for our purposes. Subscribers that need guaranteed
+    /// delivery must use `Cursor` (pull), not this push fanout.
+    ///
     /// [DEP:flume::Sender::try_send] → Result<(), TrySendError<T>>
     /// [DEP:flume::TrySendError::Full] / [DEP:flume::TrySendError::Disconnected]
     pub(crate) fn broadcast(&self, value: &T) {
         let mut guard = self.senders.lock();
         guard.retain(|tx| match tx.try_send(value.clone()) {
             Ok(()) => true,
-            Err(TrySendError::Full(_)) => true,
+            Err(TrySendError::Full(_)) => false,
             Err(TrySendError::Disconnected(_)) => false,
         });
     }

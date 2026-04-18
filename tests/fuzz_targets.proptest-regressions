@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc ba5e8ab9d5b504c5dffcf3ab9aacd1dfa8a63bf1f4cf0bebdf26b69154c080d5 # shrinks to prefix = "", scope = "", entity = "0", event_scope = "𑊰", cat = 0, type_id = 0
+cc f20e21d1300d6f68a12a858eb1800ca251a70d31791d7fd13a98e85ce89cb749 # shrinks to entity = "A", scope = "/"

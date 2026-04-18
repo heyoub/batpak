@@ -1,9 +1,10 @@
+// justifies: raw projection mode tests use panic! as the assertion style when the raw-dispatch contract breaks.
 #![allow(clippy::panic)]
 
 use std::sync::Arc;
 
 use batpak::prelude::*;
-use batpak::store::{Freshness, Store, StoreConfig};
+use batpak::store::{Freshness, ProjectionWatcher, Store, StoreConfig};
 use serde::{Deserialize, Serialize};
 use tempfile::TempDir;
 
@@ -80,11 +81,15 @@ impl EventSourced for RawCounter {
     }
 }
 
-// Compile-time assertions: replay mode selection and payload type aliases work correctly.
-const _: () = assert!(matches!(
-    <RawMsgpackInput as ProjectionInput>::MODE,
-    ReplayLane::RawMsgpack
-));
+#[test]
+fn projection_input_modes_select_expected_replay_lanes() {
+    let raw_mode = <RawMsgpackInput as ProjectionInput>::MODE;
+    let json_mode = <JsonValueInput as ProjectionInput>::MODE;
+    let expected_raw = ReplayLane::RawMsgpack;
+    let expected_json = ReplayLane::Value;
+    assert_eq!(raw_mode, expected_raw);
+    assert_eq!(json_mode, expected_json);
+}
 
 // ProjectionPayload and ProjectionEvent resolve to the correct concrete types.
 fn _assert_projection_type_aliases() {
@@ -155,8 +160,14 @@ fn raw_projection_matches_value_projection_live_and_reopen() {
 #[test]
 fn raw_watch_projection_emits_updated_state() {
     let (store, _dir) = seeded_store();
-    let mut watcher =
+    let mut watcher: ProjectionWatcher<RawCounter> =
         Arc::clone(&store).watch_projection::<RawCounter>("entity:raw-proj", Freshness::Consistent);
+    let subscription = watcher.subscription();
+    let subscription_rx = subscription.receiver();
+    assert!(
+        subscription_rx.is_empty(),
+        "fresh projection watcher subscription should not have buffered notifications before a write"
+    );
     let coord = Coordinate::new("entity:raw-proj", "scope:test").expect("coord");
 
     store
@@ -191,7 +202,7 @@ fn raw_watch_projection_matches_project_if_changed_after_relevant_append() {
     let baseline_generation = store
         .entity_generation("entity:raw-proj")
         .expect("seeded entity generation");
-    let mut watcher =
+    let mut watcher: ProjectionWatcher<RawCounter> =
         Arc::clone(&store).watch_projection::<RawCounter>("entity:raw-proj", Freshness::Consistent);
     let coord = Coordinate::new("entity:raw-proj", "scope:test").expect("coord");
 
@@ -248,7 +259,7 @@ fn raw_watch_projection_matches_project_if_changed_after_irrelevant_append() {
         .project::<RawCounter>("entity:raw-proj", &Freshness::Consistent)
         .expect("baseline project")
         .expect("baseline state");
-    let mut watcher =
+    let mut watcher: ProjectionWatcher<RawCounter> =
         Arc::clone(&store).watch_projection::<RawCounter>("entity:raw-proj", Freshness::Consistent);
     let coord = Coordinate::new("entity:raw-proj", "scope:test").expect("coord");
 

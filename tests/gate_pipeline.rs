@@ -1,4 +1,5 @@
-#![allow(clippy::panic)] // test assertions use panic for expected-failure paths
+// justifies: gate+pipeline tests use panic! to surface expected-failure paths when a gate fires or a Receipt is reused.
+#![allow(clippy::panic)]
 //! Gate and Pipeline integration tests.
 //! Registration order, fail-fast evaluation, Receipt TOCTOU guarantee, consumed-once.
 //!
@@ -6,6 +7,7 @@
 //! DEFENDS: FM-022 (Receipt Hollowing — Receipt is sealed, single-use)
 //! INVARIANTS: INV-STATE (gate evaluation state machine), INV-SEC (Receipt seal)
 
+use batpak::pipeline::BypassReceipt;
 use batpak::prelude::*;
 
 // --- Test gate implementations ---
@@ -162,14 +164,15 @@ fn receipt_wraps_payload_immutably() {
 
     let proposal = Proposal::new(42);
     let receipt = gates.evaluate(&(), proposal).expect("should pass");
+    let payload = *receipt.payload();
+    let passed_gates = receipt.gates_passed();
 
     assert_eq!(
-        *receipt.payload(),
-        42,
+        payload, 42,
         "Receipt should wrap the original proposal payload."
     );
     assert_eq!(
-        receipt.gates_passed(),
+        passed_gates,
         &["always_allow"],
         "RECEIPT GATES PASSED: receipt should record the gates it passed through.\n\
          Investigate: src/guard/mod.rs Receipt::gates_passed.\n\
@@ -216,10 +219,14 @@ fn pipeline_commit_with_receipt() {
     let proposal = Proposal::new("data".to_string());
     let receipt = pipeline.evaluate(&(), proposal).expect("should pass");
 
-    let committed = pipeline
+    let committed: Committed<String> = pipeline
         .commit(receipt, |payload| {
             assert_eq!(payload, "data");
-            Ok::<_, String>(CommitMetadata::new(12345, 0, [0u8; 32]))
+            let metadata = match CommitMetadata::new(12345, 0, [0u8; 32]) {
+                Ok(metadata) => metadata,
+                Err(err) => panic!("test constructs known-valid commit metadata: {err:?}"),
+            };
+            Ok::<_, StoreError>(metadata)
         })
         .expect("commit should succeed");
 
@@ -355,21 +362,22 @@ fn bypass_reason_trait_returns_correct_values() {
 
 #[test]
 fn bypass_receipt_getters_match_construction() {
-    let receipt = Pipeline::<()>::bypass(Proposal::new("important_payload"), &TestBypassReason);
+    let receipt: BypassReceipt<&'static str> =
+        Pipeline::<()>::bypass(Proposal::new("important_payload"), &TestBypassReason);
+    let reason = receipt.reason();
+    let justification = receipt.justification();
+    let payload = receipt.payload();
     assert_eq!(
-        receipt.reason(),
-        "emergency_override",
+        reason, "emergency_override",
         "PROPERTY: BypassReceipt::reason() must match the BypassReason::name().\n\
          Investigate: src/pipeline/mod.rs Pipeline::bypass construction."
     );
     assert_eq!(
-        receipt.justification(),
-        "Production incident #1234 — rate limiter disabled",
+        justification, "Production incident #1234 — rate limiter disabled",
         "PROPERTY: BypassReceipt::justification() must match BypassReason::justification()."
     );
     assert_eq!(
-        receipt.payload(),
-        &"important_payload",
+        payload, &"important_payload",
         "PROPERTY: BypassReceipt::payload() must return the original proposal payload."
     );
 }
@@ -433,11 +441,14 @@ static STRAGGLERS_TEST_BYPASS: StragglersTestBypassReason = StragglersTestBypass
 #[test]
 fn pipeline_bypass_returns_bypass_receipt() {
     let proposal = Proposal::new(42);
-    let receipt = batpak::pipeline::Pipeline::<()>::bypass(proposal, &STRAGGLERS_TEST_BYPASS);
+    let receipt: BypassReceipt<i32> =
+        batpak::pipeline::Pipeline::<()>::bypass(proposal, &STRAGGLERS_TEST_BYPASS);
+    let payload = *receipt.payload();
+    let reason = receipt.reason();
+    let justification = receipt.justification();
 
     assert_eq!(
-        *receipt.payload(),
-        42,
+        payload, 42,
         "PROPERTY: BypassReceipt must carry the original proposal payload unchanged.\n\
          Investigate: src/pipeline/mod.rs Pipeline::bypass().\n\
          Common causes: bypass() discarding the proposal value, or BypassReceipt \
@@ -445,8 +456,7 @@ fn pipeline_bypass_returns_bypass_receipt() {
          Run: cargo test --test gate_pipeline pipeline_bypass_returns_bypass_receipt"
     );
     assert_eq!(
-        receipt.reason(),
-        "test_bypass",
+        reason, "test_bypass",
         "PROPERTY: BypassReceipt must record the BypassReason::name() as reason.\n\
          Investigate: src/pipeline/mod.rs Pipeline::bypass() BypassReason::name().\n\
          Common causes: bypass() storing justification() in reason field, or \
@@ -454,8 +464,7 @@ fn pipeline_bypass_returns_bypass_receipt() {
          Run: cargo test --test gate_pipeline pipeline_bypass_returns_bypass_receipt"
     );
     assert_eq!(
-        receipt.justification(),
-        "testing bypass audit trail",
+        justification, "testing bypass audit trail",
         "PROPERTY: BypassReceipt must record BypassReason::justification() verbatim.\n\
          Investigate: src/pipeline/mod.rs Pipeline::bypass() BypassReason::justification().\n\
          Common causes: bypass() storing name() in justification field, or \
@@ -468,9 +477,9 @@ fn pipeline_bypass_returns_bypass_receipt() {
 fn proposal_map_transforms_payload() {
     let proposal = Proposal::new(21);
     let doubled = proposal.map(|x| x * 2);
+    let payload = *doubled.payload();
     assert_eq!(
-        *doubled.payload(),
-        42,
+        payload, 42,
         "PROPERTY: Proposal::map must transform the payload using the provided closure.\n\
          Investigate: src/pipeline/mod.rs Proposal::map().\n\
          Common causes: map() cloning the old payload instead of applying the closure, \
@@ -481,34 +490,41 @@ fn proposal_map_transforms_payload() {
 
 #[test]
 fn committed_accessors_expose_only_read_only_metadata() {
-    let committed = batpak::pipeline::Pipeline::<()>::commit_bypass(
+    let committed: Committed<String> = batpak::pipeline::Pipeline::<()>::commit_bypass(
         batpak::pipeline::Pipeline::<()>::bypass(
             Proposal::new("test".to_string()),
             &STRAGGLERS_TEST_BYPASS,
         ),
         |_| {
-            Ok::<_, String>(CommitMetadata::new(
+            let metadata = match CommitMetadata::new(
                 0xDEAD_BEEF_CAFE_BABE_1234_5678_9ABC_DEF0,
                 42,
                 [0xAA; 32],
-            ))
+            ) {
+                Ok(metadata) => metadata,
+                Err(err) => panic!("test constructs known-valid commit metadata: {err:?}"),
+            };
+            Ok::<_, StoreError>(metadata)
         },
     )
     .expect("commit");
+    let payload = committed.payload();
+    let event_id = committed.event_id();
+    let sequence = committed.sequence();
+    let hash = committed.hash();
 
     assert_eq!(
-        committed.payload(),
+        payload,
         &"test".to_string(),
         "PROPERTY: Committed payload accessor must expose the original payload without making the proof forgeable.\n\
          Investigate: src/pipeline/mod.rs Committed::payload()."
     );
     assert_eq!(
-        committed.event_id(),
-        0xDEAD_BEEF_CAFE_BABE_1234_5678_9ABC_DEF0,
+        event_id, 0xDEAD_BEEF_CAFE_BABE_1234_5678_9ABC_DEF0,
         "PROPERTY: Committed event_id accessor must surface persisted metadata."
     );
-    assert_eq!(committed.sequence(), 42);
-    assert_eq!(committed.hash(), &[0xAA; 32]);
+    assert_eq!(sequence, 42);
+    assert_eq!(hash, &[0xAA; 32]);
 }
 
 #[test]

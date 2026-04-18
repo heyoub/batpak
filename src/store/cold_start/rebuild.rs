@@ -99,7 +99,8 @@ impl<'a> RestorePlanner<'a> {
         })
     }
 
-    #[allow(clippy::needless_pass_by_value)] // planner takes ownership of snapshot data
+    // justifies: planner takes ownership of snapshot data — clippy's suggestion would force a re-clone on the caller side.
+    #[allow(clippy::needless_pass_by_value)]
     fn build_snapshot_plan(
         &self,
         source: RestoreSource,

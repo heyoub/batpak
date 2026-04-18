@@ -35,9 +35,11 @@ impl CausationRef {
             Self::Absolute(id) => Ok(Some(id)),
             Self::PriorItem(prior_idx) => {
                 if prior_idx >= item_index {
-                    return Err(StoreError::Configuration(
-                        "PriorItem causation must reference earlier batch item".into(),
-                    ));
+                    return Err(StoreError::InvalidCausation {
+                        prior_idx,
+                        item_index,
+                        reason: "PriorItem causation must reference earlier batch item".into(),
+                    });
                 }
                 Ok(Some(prior_event_id(prior_idx)))
             }

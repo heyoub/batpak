@@ -1,7 +1,8 @@
+// justifies: wire-format golden tests assert via panic, intentionally group timestamp digits for readability, and emit a stderr warning when GOLDEN_UPDATE rewrites fixtures.
 #![allow(
-    clippy::panic,                       // test assertions use panic
-    clippy::inconsistent_digit_grouping, // timestamp grouping is intentional
-    clippy::print_stderr,                // GOLDEN_UPDATE sentinel prints a loud warning
+    clippy::panic,
+    clippy::inconsistent_digit_grouping,
+    clippy::print_stderr
 )]
 //! Wire format golden tests.
 //! Verifies MessagePack serialization matches known-good byte sequences.
@@ -24,6 +25,7 @@
 
 use batpak::outcome::wait::{CompensationAction, WaitCondition};
 use batpak::prelude::*;
+use batpak::wire::{option_u128_bytes, u128_bytes, vec_u128_bytes};
 use serde::Serialize;
 
 fn golden_dir() -> std::path::PathBuf {
@@ -96,24 +98,36 @@ fn coordinate_msgpack_round_trip() {
 fn batch_append_item_uses_named_msgpack_payloads() {
     let coord = Coordinate::new("entity:test", "scope:test").expect("valid coord");
     let payload = BatchPayloadShape { alpha: 7, beta: 42 };
+    let options = AppendOptions::default();
+    let causation = CausationRef::None;
     let item = BatchAppendItem::new(
         coord,
         EventKind::custom(0xF, 9),
         &payload,
-        AppendOptions::default(),
-        CausationRef::None,
+        options,
+        causation,
     )
     .expect("serialize batch payload");
     let expected = rmp_serde::to_vec_named(&payload).expect("serialize expected named payload");
+    let item_payload_bytes = item.payload_bytes();
+    let item_options = item.options();
+    let item_causation = item.causation();
 
     assert_eq!(
-        item.payload_bytes(),
+        item_payload_bytes,
         expected.as_slice(),
         "WIRE FORMAT: BatchAppendItem payload encoding drifted from named MessagePack.\n\
          Investigate: src/store/append.rs BatchAppendItem::new.\n\
          Common causes: rmp_serde::to_vec used instead of to_vec_named.\n\
          Run: cargo test --test wire_format batch_append_item_uses_named_msgpack_payloads"
     );
+    assert_eq!(item_options.expected_sequence, options.expected_sequence);
+    assert_eq!(item_options.idempotency_key, options.idempotency_key);
+    assert_eq!(item_options.correlation_id, options.correlation_id);
+    assert_eq!(item_options.causation_id, options.causation_id);
+    assert_eq!(item_options.position_hint, options.position_hint);
+    assert_eq!(item_options.flags, options.flags);
+    assert_eq!(item_causation, causation);
 }
 
 #[test]
@@ -121,17 +135,31 @@ fn batch_append_item_from_msgpack_bytes_preserves_raw_payload() {
     let coord = Coordinate::new("entity:test", "scope:test").expect("valid coord");
     let payload = BatchPayloadShape { alpha: 1, beta: 2 };
     let encoded = rmp_serde::to_vec_named(&payload).expect("encode named payload");
+    let options = AppendOptions::default();
+    let causation = CausationRef::None;
     let item = BatchAppendItem::from_msgpack_bytes(
         coord.clone(),
         EventKind::custom(0xF, 7),
         encoded.clone(),
-        AppendOptions::default(),
-        CausationRef::None,
+        options,
+        causation,
     );
+    let item_coord = item.coord();
+    let item_kind = item.kind();
+    let item_payload_bytes = item.payload_bytes();
+    let item_options = item.options();
+    let item_causation = item.causation();
 
-    assert_eq!(item.coord(), &coord);
-    assert_eq!(item.kind(), EventKind::custom(0xF, 7));
-    assert_eq!(item.payload_bytes(), encoded.as_slice());
+    assert_eq!(item_coord, &coord);
+    assert_eq!(item_kind, EventKind::custom(0xF, 7));
+    assert_eq!(item_payload_bytes, encoded.as_slice());
+    assert_eq!(item_options.expected_sequence, options.expected_sequence);
+    assert_eq!(item_options.idempotency_key, options.idempotency_key);
+    assert_eq!(item_options.correlation_id, options.correlation_id);
+    assert_eq!(item_options.causation_id, options.causation_id);
+    assert_eq!(item_options.position_hint, options.position_hint);
+    assert_eq!(item_options.flags, options.flags);
+    assert_eq!(item_causation, causation);
 }
 
 // --- EventHeader ---
@@ -275,26 +303,36 @@ fn committed_api_contract() {
     hash[0] = 0xAB;
     hash[31] = 0xCD;
 
-    let meta = CommitMetadata::new(event_id, sequence, hash);
+    let meta = match CommitMetadata::new(event_id, sequence, hash) {
+        Ok(meta) => meta,
+        Err(err) => panic!("test constructs known-valid commit metadata: {err:?}"),
+    };
     assert_eq!(meta.event_id(), event_id);
     assert_eq!(meta.sequence(), sequence);
     assert_eq!(meta.hash(), hash);
 
-    let committed = Pipeline::<()>::commit_bypass(
+    let committed: Committed<&'static str> = Pipeline::<()>::commit_bypass(
         Pipeline::<()>::bypass(Proposal::new("payload"), &TestBypassReason),
-        |_| Ok::<_, String>(meta),
+        |_| Ok::<_, StoreError>(meta),
     )
     .expect("public commit path should construct Committed");
-    assert_eq!(committed.payload(), &"payload");
-    assert_eq!(committed.event_id(), event_id);
-    assert_eq!(committed.sequence(), sequence);
-    assert_eq!(committed.hash(), &hash);
+    let payload = committed.payload();
+    let committed_event_id = committed.event_id();
+    let committed_sequence = committed.sequence();
+    let committed_hash = committed.hash();
+    assert_eq!(payload, &"payload");
+    assert_eq!(committed_event_id, event_id);
+    assert_eq!(committed_sequence, sequence);
+    assert_eq!(committed_hash, &hash);
 
     let (payload, meta2) = committed.into_parts();
     assert_eq!(payload, "payload");
-    assert_eq!(meta2.event_id(), event_id);
-    assert_eq!(meta2.sequence(), sequence);
-    assert_eq!(meta2.hash(), hash);
+    let meta2_event_id = meta2.event_id();
+    let meta2_sequence = meta2.sequence();
+    let meta2_hash = meta2.hash();
+    assert_eq!(meta2_event_id, event_id);
+    assert_eq!(meta2_sequence, sequence);
+    assert_eq!(meta2_hash, hash);
 }
 
 #[test]
@@ -305,7 +343,10 @@ fn commit_metadata_from_append_receipt_zeroes_hash() {
         disk_pos: batpak::store::DiskPos::new(3, 128, 64),
     };
 
-    let meta = CommitMetadata::from_append_receipt(receipt);
+    let meta = match CommitMetadata::from_append_receipt(receipt) {
+        Ok(meta) => meta,
+        Err(err) => panic!("test constructs known-valid receipt metadata: {err:?}"),
+    };
     assert_eq!(meta.event_id(), 0xDEAD);
     assert_eq!(meta.sequence(), 7);
     assert_eq!(
@@ -313,6 +354,74 @@ fn commit_metadata_from_append_receipt_zeroes_hash() {
         [0u8; 32],
         "CommitMetadata::from_append_receipt must not fabricate a content hash",
     );
+}
+
+#[test]
+fn commit_metadata_genesis_reserves_zero_sequence_legally() {
+    let hash = [0x11; 32];
+    let meta = CommitMetadata::genesis(0xBEEF, hash);
+    let event_id = meta.event_id();
+    let sequence = meta.sequence();
+    let returned_hash = meta.hash();
+    let is_genesis = meta.is_genesis();
+
+    assert_eq!(event_id, 0xBEEF);
+    assert_eq!(sequence, 0);
+    assert_eq!(returned_hash, hash);
+    assert!(is_genesis, "genesis metadata must mark itself as genesis");
+    meta.validate().expect("genesis metadata should validate");
+}
+
+#[test]
+fn u128_bytes_round_trips_through_direct_helper_calls() {
+    let value = 0xDEADBEEFCAFEBABE_1234567890ABCDEF_u128;
+    let mut encoded = Vec::new();
+    let mut serializer = rmp_serde::encode::Serializer::new(&mut encoded);
+    u128_bytes::serialize(&value, &mut serializer).expect("serialize u128 helper");
+
+    let mut deserializer = rmp_serde::decode::Deserializer::new(&encoded[..]);
+    let decoded = u128_bytes::deserialize(&mut deserializer).expect("deserialize u128 helper");
+    assert_eq!(decoded, value);
+}
+
+#[test]
+fn option_u128_bytes_round_trips_some_and_none_through_direct_helper_calls() {
+    let some = Some(0xAABBCCDDEEFF0011_2233445566778899_u128);
+    let mut encoded_some = Vec::new();
+    let mut serializer_some = rmp_serde::encode::Serializer::new(&mut encoded_some);
+    option_u128_bytes::serialize(&some, &mut serializer_some)
+        .expect("serialize option<u128> helper");
+    let mut deserializer_some = rmp_serde::decode::Deserializer::new(&encoded_some[..]);
+    let decoded_some = option_u128_bytes::deserialize(&mut deserializer_some)
+        .expect("deserialize option<u128> helper");
+    assert_eq!(decoded_some, some);
+
+    let none: Option<u128> = None;
+    let mut encoded_none = Vec::new();
+    let mut serializer_none = rmp_serde::encode::Serializer::new(&mut encoded_none);
+    option_u128_bytes::serialize(&none, &mut serializer_none)
+        .expect("serialize none option<u128> helper");
+    let mut deserializer_none = rmp_serde::decode::Deserializer::new(&encoded_none[..]);
+    let decoded_none = option_u128_bytes::deserialize(&mut deserializer_none)
+        .expect("deserialize none option<u128> helper");
+    assert_eq!(decoded_none, none);
+}
+
+#[test]
+fn vec_u128_bytes_round_trips_through_direct_helper_calls() {
+    let values = vec![
+        0x1111111111111111_2222222222222222_u128,
+        0x3333333333333333_4444444444444444_u128,
+        0x5555555555555555_6666666666666666_u128,
+    ];
+    let mut encoded = Vec::new();
+    let mut serializer = rmp_serde::encode::Serializer::new(&mut encoded);
+    vec_u128_bytes::serialize(&values, &mut serializer).expect("serialize vec<u128> helper");
+
+    let mut deserializer = rmp_serde::decode::Deserializer::new(&encoded[..]);
+    let decoded =
+        vec_u128_bytes::deserialize(&mut deserializer).expect("deserialize vec<u128> helper");
+    assert_eq!(decoded, values);
 }
 
 // --- WaitCondition golden test ---

@@ -1,3 +1,4 @@
+// justifies: fuzz+chaos feedback harness spawns threads, reports shrink traces to stderr, and uses unwrap/panic as assertion style while narrowing proptest-bounded counters.
 #![allow(
     clippy::panic,
     clippy::print_stderr,
@@ -7,7 +8,7 @@
     clippy::cast_possible_truncation,
     clippy::unnecessary_cast,
     clippy::needless_borrows_for_generic_args,
-    clippy::disallowed_methods // test harness uses thread::spawn for chaos probes
+    clippy::disallowed_methods
 )]
 //! Fuzz + Chaos Feedback Loop: the library uses its guard primitives as a
 //! reusable harness to evaluate fuzz and chaos testing results.

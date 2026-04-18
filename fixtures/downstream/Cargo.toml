@@ -13,3 +13,6 @@ publish = false
 [dependencies]
 batpak = { path = "../.." }
 serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+tempfile = "3"

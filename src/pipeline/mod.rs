@@ -1,4 +1,5 @@
 use crate::guard::{Denial, GateSet, Receipt};
+use crate::store::StoreError;
 
 /// Bypass types for skipping gate evaluation with an auditable reason.
 pub mod bypass;
@@ -28,6 +29,10 @@ pub struct CommitMetadata {
     sequence: u64,
     /// Content hash of the committed payload (blake3, or all-zeros if feature is off).
     hash: [u8; 32],
+    /// True when this metadata describes the genesis marker. Genesis metadata
+    /// is an explicit marker; sequence `0` is also a legitimate store-assigned
+    /// global sequence for the first real event.
+    is_genesis: bool,
 }
 
 /// `Pipeline<Ctx>`: evaluate gates then commit.
@@ -91,17 +96,57 @@ impl<T> Committed<T> {
 
 impl CommitMetadata {
     /// Creates explicit commit proof metadata for a persisted payload.
-    pub const fn new(event_id: u128, sequence: u64, hash: [u8; 32]) -> Self {
-        Self {
+    ///
+    /// # Errors
+    /// Returns [`StoreError::InvalidCommitMetadata`] if the supplied
+    /// metadata fails [`CommitMetadata::validate`].
+    pub fn new(event_id: u128, sequence: u64, hash: [u8; 32]) -> Result<Self, StoreError> {
+        let built = Self {
             event_id,
             sequence,
             hash,
+            is_genesis: false,
+        };
+        built.validate()?;
+        Ok(built)
+    }
+
+    /// Constructs explicit genesis metadata. Genesis is a semantic marker, not
+    /// shorthand for "sequence zero"; ordinary store appends can also carry
+    /// sequence `0` for the first committed event.
+    pub const fn genesis(event_id: u128, hash: [u8; 32]) -> Self {
+        Self {
+            event_id,
+            sequence: 0,
+            hash,
+            is_genesis: true,
         }
     }
 
     /// Creates metadata from a store append receipt when no content hash is available.
-    pub const fn from_append_receipt(receipt: crate::store::AppendReceipt) -> Self {
+    ///
+    /// Append receipts always describe a non-genesis commit, so this
+    /// constructor runs the same validation as [`CommitMetadata::new`].
+    ///
+    /// # Errors
+    /// Returns [`StoreError::InvalidCommitMetadata`] if the append receipt
+    /// would produce invalid commit metadata.
+    pub fn from_append_receipt(receipt: crate::store::AppendReceipt) -> Result<Self, StoreError> {
         Self::new(receipt.event_id, receipt.sequence, [0u8; 32])
+    }
+
+    /// Validate that this metadata represents a legal commit.
+    ///
+    /// # Errors
+    /// Returns [`StoreError::InvalidCommitMetadata`] if the metadata claims to
+    /// be genesis while carrying a non-zero sequence.
+    pub fn validate(&self) -> Result<(), StoreError> {
+        if self.is_genesis && self.sequence != 0 {
+            return Err(StoreError::InvalidCommitMetadata {
+                reason: "genesis metadata must carry sequence=0".into(),
+            });
+        }
+        Ok(())
     }
 
     /// Returns the committed event identifier.
@@ -117,6 +162,11 @@ impl CommitMetadata {
     /// Returns the committed payload hash.
     pub const fn hash(self) -> [u8; 32] {
         self.hash
+    }
+
+    /// Returns `true` when this metadata represents the genesis marker.
+    pub const fn is_genesis(self) -> bool {
+        self.is_genesis
     }
 }
 
@@ -137,15 +187,24 @@ impl<Ctx> Pipeline<Ctx> {
     /// commit: generic over error type E. Pipeline doesn't know about StoreError.
     /// Products pass a closure that inspects the payload and returns commit metadata.
     ///
+    /// The metadata returned by the closure is revalidated before the
+    /// `Committed<T>` is assembled; a failed revalidation is surfaced as
+    /// `StoreError::InvalidCommitMetadata` (converted into `E`).
+    ///
     /// # Errors
-    /// Returns `Err(E)` if the caller-supplied `commit_fn` closure fails.
+    /// Returns `Err(E)` if the caller-supplied `commit_fn` closure fails,
+    /// or if the metadata it returns fails revalidation.
     pub fn commit<T, E>(
         &self,
         receipt: Receipt<T>,
         commit_fn: impl FnOnce(&T) -> Result<CommitMetadata, E>,
-    ) -> Result<Committed<T>, E> {
+    ) -> Result<Committed<T>, E>
+    where
+        E: From<StoreError>,
+    {
         let (payload, _gate_names) = receipt.into_parts();
         let metadata = commit_fn(&payload)?;
+        metadata.validate().map_err(E::from)?;
         Ok(Committed::new(payload, metadata))
     }
 
@@ -162,14 +221,23 @@ impl<Ctx> Pipeline<Ctx> {
     /// commit_bypass: persist a bypassed proposal through the same commit path.
     /// Mirrors commit() but takes a BypassReceipt instead of a Receipt.
     ///
+    /// The metadata returned by the closure is revalidated before the
+    /// `Committed<T>` is assembled; a failed revalidation is surfaced as
+    /// `StoreError::InvalidCommitMetadata` (converted into `E`).
+    ///
     /// # Errors
-    /// Returns `Err(E)` if the caller-supplied `commit_fn` closure fails.
+    /// Returns `Err(E)` if the caller-supplied `commit_fn` closure fails,
+    /// or if the metadata it returns fails revalidation.
     pub fn commit_bypass<T, E>(
         receipt: BypassReceipt<T>,
         commit_fn: impl FnOnce(&T) -> Result<CommitMetadata, E>,
-    ) -> Result<Committed<T>, E> {
+    ) -> Result<Committed<T>, E>
+    where
+        E: From<StoreError>,
+    {
         let payload = receipt.into_payload();
         let metadata = commit_fn(&payload)?;
+        metadata.validate().map_err(E::from)?;
         Ok(Committed::new(payload, metadata))
     }
 }

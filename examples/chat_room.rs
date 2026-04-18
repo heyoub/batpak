@@ -1,8 +1,12 @@
-#![allow(clippy::print_stdout, clippy::disallowed_methods)] // example binary — println and thread::spawn are fine
-//! # Chat Room — subscriptions, cursors, and real-time event streams
+// justifies: example binary demonstrates the chat-room scenario with println and std::thread::spawn as the user-observable output and concurrency shape.
+#![allow(clippy::print_stdout, clippy::disallowed_methods)]
+//! # chat_room
+//!
+//! **Teaches:** push subscriptions (lossy) vs pull cursors (guaranteed).
+//! Slow subscribers are dropped, not retained.
 //!
 //! A chat system demonstrating batpak's two consumption patterns:
-//! 1. **Subscriptions** — push-based, lossy (like a live stream you might miss)
+//! 1. **Subscriptions** — push-based, lossy (slow subscribers dropped on Full)
 //! 2. **Cursors** — pull-based, guaranteed delivery (like reading a transcript)
 //!
 //! Plus: filtering, composable SubscriptionOps, and cross-thread event delivery.

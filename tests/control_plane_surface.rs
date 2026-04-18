@@ -1,12 +1,13 @@
+// justifies: test bodies treat invariant violations as test failures; panic! is the assertion style throughout this file.
 #![allow(clippy::panic)]
 
 use batpak::coordinate::{Coordinate, Region};
 use batpak::event::{Event, EventKind, EventSourced};
 use batpak::store::delivery::cursor::{CursorWorkerAction, CursorWorkerConfig, CursorWorkerHandle};
-use batpak::store::delivery::subscription::ScanSubscriptionOps;
+use batpak::store::delivery::subscription::{ScanSubscriptionOps, SubscriptionOps};
 use batpak::store::Freshness;
 use batpak::store::{
-    AppendOptions, AppendTicket, BatchAppendItem, BatchAppendTicket, IndexTopology, Notification,
+    AppendOptions, AppendTicket, BatchAppendItem, BatchAppendTicket, IndexTopology, Outbox,
     ReadOnly, Store, StoreConfig, StoreError, SyncConfig, VisibilityFence, WriterPressure,
 };
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -48,11 +49,6 @@ impl EventSourced for CounterProjection {
     }
 }
 
-fn fold_notification_count(count: &mut u32, _notif: &Notification) -> Option<u32> {
-    *count += 1;
-    Some(*count)
-}
-
 fn test_config(dir: &TempDir) -> StoreConfig {
     StoreConfig {
         data_dir: dir.path().to_path_buf(),
@@ -77,26 +73,16 @@ fn control_plane_surface_smoke() {
     let kind = KIND_COUNTER;
 
     let pressure = store.writer_pressure();
+    let pressure_headroom = pressure.headroom();
+    let pressure_utilization = pressure.utilization();
+    let pressure_is_idle = pressure.is_idle();
     assert!(
         pressure.capacity > 0,
         "writer pressure capacity should be populated"
     );
-    assert!(pressure.headroom() <= pressure.capacity);
-    assert!(pressure.utilization() >= 0.0);
-    assert!(pressure.is_idle());
-
-    let _wait_append: fn(AppendTicket) -> Result<_, StoreError> = AppendTicket::wait;
-    let _try_append: fn(&AppendTicket) -> Option<Result<_, StoreError>> = AppendTicket::try_check;
-    let _recv_append = AppendTicket::receiver;
-
-    let _wait_batch: fn(BatchAppendTicket) -> Result<_, StoreError> = BatchAppendTicket::wait;
-    let _try_batch: fn(&BatchAppendTicket) -> Option<Result<_, StoreError>> =
-        BatchAppendTicket::try_check;
-    let _recv_batch = BatchAppendTicket::receiver;
-    let _scan_ops_type = std::any::type_name::<
-        ScanSubscriptionOps<u32, fn(&mut u32, &Notification) -> Option<u32>>,
-    >();
-    let _fold_fn: fn(&mut u32, &Notification) -> Option<u32> = fold_notification_count;
+    assert!(pressure_headroom <= pressure.capacity);
+    assert!(pressure_utilization >= 0.0);
+    assert!(pressure_is_idle);
 
     let receipt = store
         .submit(&coord, kind, &serde_json::json!({"n": 1}))
@@ -121,7 +107,7 @@ fn control_plane_surface_smoke() {
     let outcome = store
         .try_submit(&coord, kind, &serde_json::json!({"n": 3}))
         .expect("try_submit");
-    let ticket = outcome.into_result().expect("ok outcome");
+    let ticket: AppendTicket = outcome.into_result().expect("ok outcome");
     let receipt = ticket.wait().expect("wait try_submit");
     assert_eq!(receipt.sequence, 2);
 
@@ -176,12 +162,19 @@ fn control_plane_surface_smoke() {
         .expect("try submit batch")
         .into_result()
         .expect("batch outcome");
+    let try_batch: BatchAppendTicket = try_batch;
     let _ = try_batch.wait().expect("batch wait");
 
-    let mut outbox = store.outbox();
-    assert!(outbox.is_empty());
+    let mut outbox: Outbox<'_> = store.outbox();
+    let outbox_empty = outbox.is_empty();
+    assert!(outbox_empty);
     outbox
-        .stage(coord.clone(), kind, &serde_json::json!({"n": 7}))
+        .stage_with_options(
+            coord.clone(),
+            kind,
+            &serde_json::json!({"n": 7}),
+            AppendOptions::new().with_idempotency(0xDC),
+        )
         .expect("stage");
     outbox
         .stage_with_options(
@@ -210,15 +203,17 @@ fn control_plane_surface_smoke() {
         )
         .expect("push item"),
     );
-    assert_eq!(outbox.len(), 4);
+    let outbox_len = outbox.len();
+    assert_eq!(outbox_len, 4);
     let _ = outbox
         .submit_flush()
         .expect("submit flush")
         .wait()
         .expect("wait flush");
-    assert!(outbox.is_empty());
+    let outbox_empty_after_flush = outbox.is_empty();
+    assert!(outbox_empty_after_flush);
 
-    let mut outbox2 = store.outbox();
+    let mut outbox2: Outbox<'_> = store.outbox();
     outbox2
         .stage_with_options(
             coord.clone(),
@@ -230,13 +225,13 @@ fn control_plane_surface_smoke() {
     let flushed = outbox2.flush().expect("flush");
     assert_eq!(flushed.len(), 1);
 
-    let mut folded = store
+    let ops: SubscriptionOps = store
         .subscribe_lossy(&Region::entity("entity:control"))
-        .ops()
-        .scan(0u32, |count, _| {
-            *count += 1;
-            Some(*count)
-        });
+        .ops();
+    let mut folded: ScanSubscriptionOps<u32, _> = ops.scan(0u32, |count, _| {
+        *count += 1;
+        Some(*count)
+    });
     store
         .append(&coord, kind, &serde_json::json!({"n": 11}))
         .expect("append for scan");
@@ -294,8 +289,10 @@ fn control_plane_surface_smoke() {
     let fenced_ticket = fence
         .submit(&coord, kind, &serde_json::json!({"n": 13}))
         .expect("fence submit");
+    let fenced_receiver = fenced_ticket.receiver();
+    let fenced_ready = fenced_ticket.try_check();
     assert!(
-        fenced_ticket.try_check().is_none(),
+        fenced_receiver.is_empty() && fenced_ready.is_none(),
         "fenced write should not resolve before commit"
     );
 
@@ -308,7 +305,7 @@ fn control_plane_surface_smoke() {
             AppendOptions::new().with_idempotency(0x1234),
         )
         .expect("fence outbox stage");
-    let fenced_batch = fence_outbox.submit_flush().expect("fence submit flush");
+    let fenced_batch: BatchAppendTicket = fence_outbox.submit_flush().expect("fence submit flush");
 
     let visible_before_commit = store.by_fact(kind).len();
     fence.commit().expect("commit fence");
@@ -347,25 +344,21 @@ fn control_plane_surface_smoke() {
         "entity stream must also keep cancelled fence writes hidden"
     );
 
-    let _stop_worker: fn(&CursorWorkerHandle) = CursorWorkerHandle::stop;
-    let _join_worker: fn(CursorWorkerHandle) -> Result<(), StoreError> = CursorWorkerHandle::join;
-
     let store = Arc::new(store);
-    let worker = store
+    let mut cursor_config = CursorWorkerConfig::default();
+    cursor_config.batch_size = 1;
+    cursor_config.idle_sleep = Duration::from_millis(1);
+    let worker: CursorWorkerHandle = store
         .cursor_worker(
             &Region::entity("entity:control"),
-            CursorWorkerConfig {
-                batch_size: 1,
-                idle_sleep: Duration::from_millis(1),
-                ..CursorWorkerConfig::default()
-            },
+            cursor_config,
             |_batch, _store| CursorWorkerAction::Stop,
         )
         .expect("spawn cursor worker");
     store
         .append(&coord, kind, &serde_json::json!({"n": 13}))
         .expect("append for cursor worker");
-    worker.join().expect("join cursor worker");
+    worker.stop_and_join().expect("stop and join cursor worker");
 
     let _ = WriterPressure {
         queue_len: 0,
@@ -378,7 +371,6 @@ fn control_plane_surface_smoke() {
     };
     let visible_before_close = store.by_fact(kind).len();
     store.close().expect("close");
-    let _all_topology = IndexTopology::all();
     let native_cache_dir = dir.path().join("native-cache");
     let _native_ro: Store<ReadOnly> =
         Store::open_read_only_with_native_cache(test_config(&dir), &native_cache_dir)
@@ -387,12 +379,13 @@ fn control_plane_surface_smoke() {
         Store::open_read_only_with_cache(test_config(&dir), Box::new(batpak::store::NoCache))
             .expect("open read-only with custom cache");
     let ro: Store<ReadOnly> = Store::open_read_only(test_config(&dir)).expect("open read-only");
+    let ro_entries: Vec<batpak::store::index::IndexEntry> = ro.by_fact(kind);
     assert!(
-        !ro.by_fact(kind).is_empty(),
+        !ro_entries.is_empty(),
         "read-only handle should support querying existing events"
     );
     assert_eq!(
-        ro.by_fact(kind).len(),
+        ro_entries.len(),
         visible_before_close,
         "reopen must preserve hidden cancelled-fence ranges"
     );

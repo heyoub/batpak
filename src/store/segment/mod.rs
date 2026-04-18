@@ -36,7 +36,7 @@ pub struct SegmentHeader {
 /// entity and scope are stored as strings (not Coordinate) because segments
 /// are the persistence layer — they don't depend on the Coordinate type.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct FramePayload<P> {
+pub(crate) struct FramePayload<P> {
     /// The event data stored in this frame.
     pub event: Event<P>,
     /// Entity name string (e.g. `"user:42"`).
@@ -67,9 +67,21 @@ pub struct Segment<State> {
     _state: std::marker::PhantomData<State>,
 }
 
+/// Outcome of a compaction run: whether work happened or the run was skipped
+/// because the sealed-segment count was below the configured threshold.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompactionOutcome {
+    /// Compaction merged and replaced sealed segments.
+    Performed,
+    /// Compaction was a no-op: sealed-segment count was below `min_segments`.
+    Skipped,
+}
+
 /// Result returned by a compaction run.
 #[derive(Debug)]
 pub struct CompactionResult {
+    /// Whether the compaction actually ran or was skipped as a no-op.
+    pub outcome: CompactionOutcome,
     /// Number of sealed segment files that were merged and removed.
     pub segments_removed: usize,
     /// Total bytes freed by removing the merged segment files.
@@ -155,13 +167,22 @@ pub fn frame_decode(buf: &[u8]) -> Result<(&[u8], usize), FrameDecodeError> {
     }
     let len = u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]) as usize;
     let expected_crc = u32::from_be_bytes([buf[4], buf[5], buf[6], buf[7]]);
-    if buf.len() < 8 + len {
+
+    // A6: explicit bounds check before slicing. `8 + len` can overflow
+    // `usize` on 32-bit targets (where usize is 32-bit and a u32 payload
+    // length can approach usize::MAX); the checked_add guards against
+    // that case so we never index past the end of the buffer.
+    let expected_len = 8usize.checked_add(len).ok_or(FrameDecodeError::Truncated {
+        expected_len: usize::MAX,
+        available: buf.len(),
+    })?;
+    if buf.len() < expected_len {
         return Err(FrameDecodeError::Truncated {
-            expected_len: 8 + len,
+            expected_len,
             available: buf.len(),
         });
     }
-    let msgpack = &buf[8..8 + len];
+    let msgpack = &buf[8..expected_len];
     let actual_crc = crc32fast::hash(msgpack);
     if actual_crc != expected_crc {
         return Err(FrameDecodeError::CrcMismatch {
@@ -169,7 +190,7 @@ pub fn frame_decode(buf: &[u8]) -> Result<(&[u8], usize), FrameDecodeError> {
             actual: actual_crc,
         });
     }
-    Ok((msgpack, 8 + len))
+    Ok((msgpack, expected_len))
 }
 
 /// Segment naming helper.
@@ -299,13 +320,14 @@ impl Segment<Active> {
     /// binary entries instead of requiring full msgpack frame deserialization.
     ///
     /// # Errors
-    /// Returns `StoreError::Io` or `StoreError::Serialization` if writing fails.
+    /// Returns `StoreError::Io`, `StoreError::Serialization`, or
+    /// `StoreError::SegmentTooManyEntries` if writing fails.
     pub(crate) fn write_sidx_footer(
         &mut self,
         collector: &crate::store::segment::sidx::SidxEntryCollector,
     ) -> Result<(), StoreError> {
         if let Some(ref mut f) = self.file {
-            collector.write_footer(f)?;
+            collector.write_footer(f, self.header.segment_id)?;
         }
         Ok(())
     }

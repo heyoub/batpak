@@ -27,6 +27,18 @@ fn event_id_now_v7_is_nonzero() {
 }
 
 #[test]
+fn generate_v7_id_is_nonzero() {
+    let raw = batpak::id::generate_v7_id();
+    assert_ne!(
+        raw, 0,
+        "PROPERTY: generate_v7_id() must never return the nil UUID.\n\
+         Investigate: src/id/mod.rs generate_v7_id().\n\
+         Common causes: UUID generator returning nil, wrong helper wired, or helper stubbed.\n\
+         Run: cargo test --test event_api generate_v7_id_is_nonzero"
+    );
+}
+
+#[test]
 fn event_id_nil_is_zero() {
     let id = batpak::id::EventId::nil();
     assert_eq!(
@@ -94,18 +106,15 @@ fn event_id_from_str_with_prefix() {
 }
 
 #[test]
-fn event_id_from_str_bare_hex() {
+fn event_id_from_str_rejects_bare_hex() {
     use std::str::FromStr;
-    let id =
-        batpak::id::EventId::from_str("00000000000000000000000000000042").expect("parse bare hex");
-    assert_eq!(
-        id.as_u128(),
-        0x42,
-        "PROPERTY: EventId::from_str must parse bare hex (no prefix) correctly.\n\
+    let result = batpak::id::EventId::from_str("00000000000000000000000000000042");
+    assert!(
+        result.is_err(),
+        "PROPERTY: EventId::from_str must reject bare hex (no 'event:' prefix).\n\
          Investigate: src/id/mod.rs define_entity_id! FromStr impl.\n\
-         Common causes: parser requiring the 'entity:' prefix and returning Err on bare \
-         hex, or u128::from_str_radix receiving the wrong slice.\n\
-         Run: cargo test --test event_api event_id_from_str_bare_hex"
+         Common causes: parser accepting bare hex when the prefix is mandatory.\n\
+         Run: cargo test --test event_api event_id_from_str_rejects_bare_hex"
     );
 }
 
@@ -167,8 +176,11 @@ fn define_entity_id_custom_type() {
 fn event_header_flags_requires_ack() {
     let header =
         EventHeader::new(1, 1, None, 0, DagPosition::root(), 0, EventKind::DATA).with_flags(0x01);
+    let requires_ack = header.requires_ack();
+    let is_transactional = header.is_transactional();
+    let is_replay = header.is_replay();
     assert!(
-        header.requires_ack(),
+        requires_ack,
         "PROPERTY: Flag bit 0x01 must set requires_ack() to true.\n\
          Investigate: src/event/header.rs requires_ack() flag mask.\n\
          Common causes: requires_ack() testing bit 0x02 instead of 0x01, or \
@@ -176,14 +188,14 @@ fn event_header_flags_requires_ack() {
          Run: cargo test --test event_api event_header_flags_requires_ack"
     );
     assert!(
-        !header.is_transactional(),
+        !is_transactional,
         "PROPERTY: Flag bit 0x01 must NOT set is_transactional().\n\
          Investigate: src/event/header.rs is_transactional() flag mask.\n\
          Common causes: is_transactional() using the same bit mask as requires_ack().\n\
          Run: cargo test --test event_api event_header_flags_requires_ack"
     );
     assert!(
-        !header.is_replay(),
+        !is_replay,
         "PROPERTY: Flag bit 0x01 must NOT set is_replay().\n\
          Investigate: src/event/header.rs is_replay() flag mask.\n\
          Common causes: is_replay() using bit 0x01 instead of 0x08.\n\
@@ -195,8 +207,10 @@ fn event_header_flags_requires_ack() {
 fn event_header_flags_transactional() {
     let header =
         EventHeader::new(1, 1, None, 0, DagPosition::root(), 0, EventKind::DATA).with_flags(0x02);
+    let is_transactional = header.is_transactional();
+    let requires_ack = header.requires_ack();
     assert!(
-        header.is_transactional(),
+        is_transactional,
         "PROPERTY: Flag bit 0x02 must set is_transactional() to true.\n\
          Investigate: src/event/header.rs is_transactional() flag mask.\n\
          Common causes: is_transactional() testing bit 0x01 instead of 0x02, or \
@@ -204,7 +218,7 @@ fn event_header_flags_transactional() {
          Run: cargo test --test event_api event_header_flags_transactional"
     );
     assert!(
-        !header.requires_ack(),
+        !requires_ack,
         "PROPERTY: Flag bit 0x02 must NOT set requires_ack().\n\
          Investigate: src/event/header.rs requires_ack() flag mask.\n\
          Common causes: requires_ack() testing bit 0x02 instead of 0x01.\n\
@@ -216,8 +230,11 @@ fn event_header_flags_transactional() {
 fn event_header_flags_replay() {
     let header =
         EventHeader::new(1, 1, None, 0, DagPosition::root(), 0, EventKind::DATA).with_flags(0x08);
+    let is_replay = header.is_replay();
+    let requires_ack = header.requires_ack();
+    let is_transactional = header.is_transactional();
     assert!(
-        header.is_replay(),
+        is_replay,
         "PROPERTY: Flag bit 0x08 must set is_replay() to true.\n\
          Investigate: src/event/header.rs is_replay() flag mask.\n\
          Common causes: is_replay() testing bit 0x04 instead of 0x08, or \
@@ -225,14 +242,14 @@ fn event_header_flags_replay() {
          Run: cargo test --test event_api event_header_flags_replay"
     );
     assert!(
-        !header.requires_ack(),
+        !requires_ack,
         "PROPERTY: Flag bit 0x08 must NOT set requires_ack().\n\
          Investigate: src/event/header.rs requires_ack() flag mask.\n\
          Common causes: requires_ack() mask accidentally overlapping with replay bit.\n\
          Run: cargo test --test event_api event_header_flags_replay"
     );
     assert!(
-        !header.is_transactional(),
+        !is_transactional,
         "PROPERTY: Flag bit 0x08 must NOT set is_transactional().\n\
          Investigate: src/event/header.rs is_transactional() flag mask.\n\
          Common causes: is_transactional() mask accidentally overlapping with replay bit.\n\
@@ -243,8 +260,11 @@ fn event_header_flags_replay() {
 #[test]
 fn event_header_flags_zero_all_false() {
     let header = EventHeader::new(1, 1, None, 0, DagPosition::root(), 0, EventKind::DATA);
+    let requires_ack = header.requires_ack();
+    let is_transactional = header.is_transactional();
+    let is_replay = header.is_replay();
     assert!(
-        !header.requires_ack(),
+        !requires_ack,
         "PROPERTY: Zero flags must not set requires_ack().\n\
          Investigate: src/event/header.rs requires_ack() flags field initialization.\n\
          Common causes: EventHeader::new() defaulting flags to a non-zero value, or \
@@ -252,7 +272,7 @@ fn event_header_flags_zero_all_false() {
          Run: cargo test --test event_api event_header_flags_zero_all_false"
     );
     assert!(
-        !header.is_transactional(),
+        !is_transactional,
         "PROPERTY: Zero flags must not set is_transactional().\n\
          Investigate: src/event/header.rs is_transactional() flags field initialization.\n\
          Common causes: EventHeader::new() defaulting flags to a non-zero value, or \
@@ -260,7 +280,7 @@ fn event_header_flags_zero_all_false() {
          Run: cargo test --test event_api event_header_flags_zero_all_false"
     );
     assert!(
-        !header.is_replay(),
+        !is_replay,
         "PROPERTY: Zero flags must not set is_replay().\n\
          Investigate: src/event/header.rs is_replay() flags field initialization.\n\
          Common causes: EventHeader::new() defaulting flags to a non-zero value, or \
@@ -305,8 +325,10 @@ fn event_kind_system_constants_are_system() {
         EventKind::SYSTEM_CHECKPOINT,
     ];
     for kind in system_kinds {
+        let is_system = kind.is_system();
+        let is_effect = kind.is_effect();
         assert!(
-            kind.is_system(),
+            is_system,
             "PROPERTY: EventKind {:?} must return true for is_system().\n\
              Investigate: src/event/kind.rs EventKind::is_system() category check.\n\
              Common causes: system category constant changed, or is_system() checking \
@@ -315,7 +337,7 @@ fn event_kind_system_constants_are_system() {
             kind
         );
         assert!(
-            !kind.is_effect(),
+            !is_effect,
             "PROPERTY: System EventKind {:?} must NOT return true for is_effect().\n\
              Investigate: src/event/kind.rs EventKind::is_effect() category check.\n\
              Common causes: is_effect() using the same category mask as is_system().\n\
@@ -336,8 +358,10 @@ fn event_kind_effect_constants_are_effect() {
         EventKind::EFFECT_CONFLICT,
     ];
     for kind in effect_kinds {
+        let is_effect = kind.is_effect();
+        let is_system = kind.is_system();
         assert!(
-            kind.is_effect(),
+            is_effect,
             "PROPERTY: EventKind {:?} must return true for is_effect().\n\
              Investigate: src/event/kind.rs EventKind::is_effect() category check.\n\
              Common causes: effect category constant changed, or is_effect() checking \
@@ -346,7 +370,7 @@ fn event_kind_effect_constants_are_effect() {
             kind
         );
         assert!(
-            !kind.is_system(),
+            !is_system,
             "PROPERTY: Effect EventKind {:?} must NOT return true for is_system().\n\
              Investigate: src/event/kind.rs EventKind::is_system() category check.\n\
              Common causes: is_system() using the same category mask as is_effect().\n\
@@ -359,8 +383,12 @@ fn event_kind_effect_constants_are_effect() {
 #[test]
 fn event_kind_custom_is_neither_system_nor_effect() {
     let custom = EventKind::custom(0x5, 42);
+    let is_system = custom.is_system();
+    let is_effect = custom.is_effect();
+    let category = custom.category();
+    let type_id = custom.type_id();
     assert!(
-        !custom.is_system(),
+        !is_system,
         "PROPERTY: Custom EventKind must NOT be classified as a system event.\n\
          Investigate: src/event/kind.rs EventKind::is_system() category range check.\n\
          Common causes: is_system() treating category 0x5 as reserved system space, \
@@ -368,7 +396,7 @@ fn event_kind_custom_is_neither_system_nor_effect() {
          Run: cargo test --test event_api event_kind_custom_is_neither_system_nor_effect"
     );
     assert!(
-        !custom.is_effect(),
+        !is_effect,
         "PROPERTY: Custom EventKind must NOT be classified as an effect event.\n\
          Investigate: src/event/kind.rs EventKind::is_effect() category range check.\n\
          Common causes: is_effect() treating category 0x5 as reserved effect space, \
@@ -376,8 +404,7 @@ fn event_kind_custom_is_neither_system_nor_effect() {
          Run: cargo test --test event_api event_kind_custom_is_neither_system_nor_effect"
     );
     assert_eq!(
-        custom.category(),
-        0x5,
+        category, 0x5,
         "PROPERTY: EventKind::custom(0x5, 42) must store and return category 0x5.\n\
          Investigate: src/event/kind.rs EventKind::custom() category() packing.\n\
          Common causes: category packed into wrong nibble position, or category() \
@@ -385,8 +412,7 @@ fn event_kind_custom_is_neither_system_nor_effect() {
          Run: cargo test --test event_api event_kind_custom_is_neither_system_nor_effect"
     );
     assert_eq!(
-        custom.type_id(),
-        42,
+        type_id, 42,
         "PROPERTY: EventKind::custom(0x5, 42) must store and return type_id 42.\n\
          Investigate: src/event/kind.rs EventKind::custom() type_id() packing.\n\
          Common causes: type_id packed into wrong byte position, or type_id() \
@@ -536,7 +562,8 @@ fn event_position_returns_header_position() {
 fn dag_position_root() {
     let pos = DagPosition::root();
     assert_eq!(
-        pos.depth, 0,
+        pos.depth(),
+        0,
         "PROPERTY: DagPosition::root() must set depth to 0.\n\
          Investigate: src/coordinate/position.rs DagPosition::root().\n\
          Common causes: root() copying a non-zero depth from a template, or \
@@ -544,7 +571,8 @@ fn dag_position_root() {
          Run: cargo test --test event_api dag_position_root"
     );
     assert_eq!(
-        pos.lane, 0,
+        pos.lane(),
+        0,
         "PROPERTY: DagPosition::root() must set lane to 0.\n\
          Investigate: src/coordinate/position.rs DagPosition::root().\n\
          Common causes: root() initializing lane to 1 instead of 0, or \
@@ -552,7 +580,8 @@ fn dag_position_root() {
          Run: cargo test --test event_api dag_position_root"
     );
     assert_eq!(
-        pos.sequence, 0,
+        pos.sequence(),
+        0,
         "PROPERTY: DagPosition::root() must set sequence to 0.\n\
          Investigate: src/coordinate/position.rs DagPosition::root().\n\
          Common causes: root() not zero-initializing sequence, or sequence \
@@ -573,7 +602,8 @@ fn dag_position_root() {
 fn dag_position_child() {
     let pos = DagPosition::child(42);
     assert_eq!(
-        pos.sequence, 42,
+        pos.sequence(),
+        42,
         "PROPERTY: DagPosition::child(42) must set sequence to 42.\n\
          Investigate: src/coordinate/position.rs DagPosition::child().\n\
          Common causes: child() ignoring the sequence argument and hardcoding 0, \
@@ -581,7 +611,8 @@ fn dag_position_child() {
          Run: cargo test --test event_api dag_position_child"
     );
     assert_eq!(
-        pos.depth, 0,
+        pos.depth(),
+        0,
         "PROPERTY: DagPosition::child() must set depth to 0 (same lane as root).\n\
          Investigate: src/coordinate/position.rs DagPosition::child().\n\
          Common causes: child() incrementing depth like fork(), or copying depth \
@@ -589,7 +620,8 @@ fn dag_position_child() {
          Run: cargo test --test event_api dag_position_child"
     );
     assert_eq!(
-        pos.lane, 0,
+        pos.lane(),
+        0,
         "PROPERTY: DagPosition::child() must set lane to 0 (main lane).\n\
          Investigate: src/coordinate/position.rs DagPosition::child().\n\
          Common causes: child() calling fork() internally, which would assign a new lane.\n\
@@ -609,31 +641,36 @@ fn dag_position_child() {
 fn dag_position_with_hlc_preserves_all_fields() {
     let pos = DagPosition::with_hlc(1234, 7, 2, 9, 42);
     assert_eq!(
-        pos.wall_ms, 1234,
+        pos.wall_ms(),
+        1234,
         "PROPERTY: DagPosition::with_hlc must preserve the supplied wall_ms.\n\
          Investigate: src/coordinate/position.rs DagPosition::with_hlc().\n\
          Run: cargo test --test event_api dag_position_with_hlc_preserves_all_fields"
     );
     assert_eq!(
-        pos.counter, 7,
+        pos.counter(),
+        7,
         "PROPERTY: DagPosition::with_hlc must preserve the supplied HLC counter.\n\
          Investigate: src/coordinate/position.rs DagPosition::with_hlc().\n\
          Run: cargo test --test event_api dag_position_with_hlc_preserves_all_fields"
     );
     assert_eq!(
-        pos.depth, 2,
+        pos.depth(),
+        2,
         "PROPERTY: DagPosition::with_hlc must preserve the supplied depth.\n\
          Investigate: src/coordinate/position.rs DagPosition::with_hlc().\n\
          Run: cargo test --test event_api dag_position_with_hlc_preserves_all_fields"
     );
     assert_eq!(
-        pos.lane, 9,
+        pos.lane(),
+        9,
         "PROPERTY: DagPosition::with_hlc must preserve the supplied lane.\n\
          Investigate: src/coordinate/position.rs DagPosition::with_hlc().\n\
          Run: cargo test --test event_api dag_position_with_hlc_preserves_all_fields"
     );
     assert_eq!(
-        pos.sequence, 42,
+        pos.sequence(),
+        42,
         "PROPERTY: DagPosition::with_hlc must preserve the supplied sequence.\n\
          Investigate: src/coordinate/position.rs DagPosition::with_hlc().\n\
          Run: cargo test --test event_api dag_position_with_hlc_preserves_all_fields"
@@ -644,7 +681,8 @@ fn dag_position_with_hlc_preserves_all_fields() {
 fn dag_position_fork() {
     let pos = DagPosition::fork(2, 3);
     assert_eq!(
-        pos.depth, 3,
+        pos.depth(),
+        3,
         "PROPERTY: DagPosition::fork(parent_depth=2, lane=3) must set depth to parent_depth+1=3.\n\
          Investigate: src/coordinate/position.rs DagPosition::fork().\n\
          Common causes: fork() storing parent_depth unchanged instead of incrementing, \
@@ -652,7 +690,8 @@ fn dag_position_fork() {
          Run: cargo test --test event_api dag_position_fork"
     );
     assert_eq!(
-        pos.lane, 3,
+        pos.lane(),
+        3,
         "PROPERTY: DagPosition::fork(2, 3) must set lane to 3.\n\
          Investigate: src/coordinate/position.rs DagPosition::fork().\n\
          Common causes: fork() using an auto-incrementing lane counter instead of \
@@ -660,7 +699,8 @@ fn dag_position_fork() {
          Run: cargo test --test event_api dag_position_fork"
     );
     assert_eq!(
-        pos.sequence, 0,
+        pos.sequence(),
+        0,
         "PROPERTY: DagPosition::fork() must start at sequence 0 (beginning of the new branch).\n\
          Investigate: src/coordinate/position.rs DagPosition::fork().\n\
          Common causes: fork() copying sequence from the parent position instead of \

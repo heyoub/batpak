@@ -1,10 +1,12 @@
-//! Atomic batch append example.
+//! # batch_append
+//!
+//! **Teaches:** atomic batch commit with causation refs.
 //!
 //! Demonstrates `Store::append_batch()` — multiple events committed atomically
 //! with intra-batch causation linking. All events become visible together or
-//! none are visible (crash-safe two-phase commit).
+//! none are visible (crash-safe two-part commit protocol).
 //!
-//! Run with: `cargo run --example batch_append`
+//! Run: `cargo run --example batch_append`
 
 use batpak::prelude::*;
 use batpak::store::{BatchAppendItem, CausationRef};
@@ -22,7 +24,8 @@ struct AuditLogged {
     participants: u32,
 }
 
-#[allow(clippy::print_stdout)] // example should show observable success path to users.
+// justifies: example demonstrates batch append; println output is the observable success path shown to readers of this example.
+#[allow(clippy::print_stdout)]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let dir = tempfile::tempdir()?;
     let config = StoreConfig::new(dir.path())

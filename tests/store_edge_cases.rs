@@ -1,7 +1,8 @@
+// justifies: edge-case tests spawn threads for concurrent stress probes, rely on panic as the assertion style, and intentionally build config via field-by-field mutation; these allows are the file-wide idioms.
 #![allow(
-    clippy::disallowed_methods,     // concurrent tests use thread::spawn for stress probes
-    clippy::panic,                  // test assertions
-    clippy::clone_on_ref_ptr,       // Arc::clone style preference
+    clippy::disallowed_methods,
+    clippy::panic,
+    clippy::clone_on_ref_ptr,
     clippy::field_reassign_with_default
 )]
 //! Store edge case tests: frame_decode error paths, subscription lifecycle,
@@ -54,6 +55,7 @@ fn frame_decode_truncated() {
 fn frame_decode_crc_mismatch() {
     use batpak::store::segment::{frame_decode, FrameDecodeError};
     let payload = b"hello";
+    // justifies: b"hello" has len 5, far below u32::MAX, so usize-to-u32 narrowing cannot truncate in this fixed-size test payload.
     #[allow(clippy::cast_possible_truncation)]
     let len = payload.len() as u32;
     let bad_crc = 0xDEADBEEFu32;
@@ -80,7 +82,9 @@ fn frame_decode_valid_round_trip() {
 
 #[test]
 fn append_frames_from_segment_copies_frame_bytes_exactly() {
-    use batpak::store::segment::{frame_encode, Segment, SEGMENT_MAGIC};
+    use batpak::store::segment::{
+        frame_encode, segment_filename, Active, Sealed, Segment, SEGMENT_MAGIC,
+    };
 
     fn frame_bytes(path: &std::path::Path) -> Vec<u8> {
         let bytes = std::fs::read(path).expect("read segment");
@@ -96,7 +100,8 @@ fn append_frames_from_segment_copies_frame_bytes_exactly() {
     let dir = TempDir::new().expect("tmpdir");
     let source_path;
     {
-        let mut source = Segment::create(dir.path(), 1).expect("create source segment");
+        let mut source: Segment<Active> =
+            Segment::create(dir.path(), 1).expect("create source segment");
         let frame_a = frame_encode(&serde_json::json!({"a": 1})).expect("encode frame a");
         let frame_b = frame_encode(&serde_json::json!({"b": 2})).expect("encode frame b");
         source.write_frame(&frame_a).expect("write frame a");
@@ -105,12 +110,13 @@ fn append_frames_from_segment_copies_frame_bytes_exactly() {
             .sync_with_mode(&SyncMode::SyncData)
             .expect("sync source");
         source_path = source.path.clone();
-        let _sealed = source.seal();
+        let _sealed: Segment<Sealed> = source.seal();
     }
 
     let destination_path;
     {
-        let mut destination = Segment::create(dir.path(), 2).expect("create destination segment");
+        let mut destination: Segment<Active> =
+            Segment::create(dir.path(), 2).expect("create destination segment");
         destination
             .append_frames_from_segment(&source_path)
             .expect("append frames");
@@ -118,13 +124,53 @@ fn append_frames_from_segment_copies_frame_bytes_exactly() {
             .sync_with_mode(&SyncMode::SyncData)
             .expect("sync destination");
         destination_path = destination.path.clone();
-        let _sealed = destination.seal();
+        let _sealed: Segment<Sealed> = destination.seal();
     }
+
+    let expected_source_name = segment_filename(1);
+    let expected_destination_name = segment_filename(2);
+    assert!(
+        source_path.ends_with(&expected_source_name),
+        "source segment path should end with the canonical segment filename"
+    );
+    assert!(
+        destination_path.ends_with(&expected_destination_name),
+        "destination segment path should end with the canonical segment filename"
+    );
 
     assert_eq!(
         frame_bytes(&destination_path),
         frame_bytes(&source_path),
         "APPEND FRAMES: destination segment should contain exactly the source frame bytes after both headers are stripped."
+    );
+}
+
+#[test]
+fn segment_needs_rotation_tracks_written_bytes_threshold() {
+    use batpak::store::segment::{frame_encode, Active, Segment};
+
+    let dir = TempDir::new().expect("tmpdir");
+    let mut segment: Segment<Active> = Segment::create(dir.path(), 1).expect("create segment");
+    let frame =
+        frame_encode(&serde_json::json!({"payload": "rotation-threshold"})).expect("encode frame");
+    let initially_needs_rotation = segment.needs_rotation(1024);
+
+    assert!(
+        !initially_needs_rotation,
+        "PROPERTY: a fresh segment must not report rotation before any frames are written"
+    );
+
+    segment.write_frame(&frame).expect("write frame");
+    let needs_rotation_at_one_byte = segment.needs_rotation(1);
+    let still_below_large_threshold = segment.needs_rotation(1024);
+
+    assert!(
+        needs_rotation_at_one_byte,
+        "PROPERTY: needs_rotation(max_bytes=1) must flip true after any real frame write"
+    );
+    assert!(
+        !still_below_large_threshold,
+        "PROPERTY: needs_rotation must stay false when written_bytes remains below the threshold"
     );
 }
 

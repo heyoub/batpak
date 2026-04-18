@@ -15,6 +15,8 @@ fn test_meta() -> CacheMeta {
     CacheMeta {
         watermark: 42,
         cached_at_us: 1_000_000,
+        cached_at_mono_ns: None,
+        process_boot_ns: None,
     }
 }
 

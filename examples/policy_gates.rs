@@ -1,9 +1,13 @@
+// justifies: policy-gates example shows the propose-evaluate-commit flow via println, and passes gate-shaped arguments by value/borrow as the gate API expects from a teaching fixture.
 #![allow(
     clippy::print_stdout,
     clippy::needless_pass_by_value,
     clippy::needless_borrows_for_generic_args
-)] // example binary
-//! # Policy Gates — enforcing rules before events are committed
+)]
+//! # policy_gates
+//!
+//! **Teaches:** gate-based propose→evaluate→commit pipeline with
+//! `CommitMetadata::validate`.
 //!
 //! A bank transfer system where every transfer must pass through policy gates
 //! before it can be committed to the event log. Gates enforce:
@@ -137,7 +141,7 @@ fn try_transfer(store: &Store, pipeline: &Pipeline<TransferRequest>, transfer: T
             // forward it directly — `append_typed` expects `&T: EventPayload`.
             let result: Result<_, StoreError> = pipeline.commit(receipt, |payload| {
                 let r = store.append_typed(&coord, payload)?;
-                Ok(CommitMetadata::from_append_receipt(r))
+                CommitMetadata::from_append_receipt(r)
             });
 
             match result {

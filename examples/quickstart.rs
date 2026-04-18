@@ -1,3 +1,9 @@
+//! # quickstart
+//!
+//! **Teaches:** basic typed append + retrieval.
+//!
+//! Run: `cargo run --example quickstart`
+
 use batpak::prelude::*;
 
 // One struct binds a Rust type to its EventKind at compile time.
@@ -9,7 +15,8 @@ struct PlayerMoved {
     y: i32,
 }
 
-#[allow(clippy::print_stdout)] // quickstart should show an observable success path to new users.
+// justifies: quickstart example prints observable success output so new users can see the end-to-end append and query flow.
+#[allow(clippy::print_stdout)]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let dir = tempfile::tempdir()?;
     let config = StoreConfig::new(dir.path())

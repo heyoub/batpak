@@ -1,5 +1,8 @@
-#![allow(clippy::print_stdout)] // example binary — println! is the whole point
-//! # Dungeon Doors — compile-time state machines
+// justifies: example binary demonstrates typestate transitions by printing the state trace to stdout; println is the user-observable success path.
+#![allow(clippy::print_stdout)]
+//! # dungeon_typestate
+//!
+//! **Teaches:** compile-time state machine enforcement via typestate transitions.
 //!
 //! A door in a dungeon can be Open, Closed, or Locked. Not every transition
 //! makes sense: you can't lock an open door, and you can't open a locked door

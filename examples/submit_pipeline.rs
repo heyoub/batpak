@@ -1,3 +1,9 @@
+//! # submit_pipeline
+//!
+//! **Teaches:** async submit ticket with blocking wait.
+//!
+//! Run: `cargo run --example submit_pipeline`
+
 use batpak::prelude::*;
 
 #[derive(serde::Serialize, serde::Deserialize, EventPayload)]
@@ -6,6 +12,7 @@ struct Tick {
     n: u32,
 }
 
+// justifies: example demonstrates submit-pipeline ticket completion via stdout; println is the observable success path for this demo.
 #[allow(clippy::print_stdout)]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let dir = tempfile::tempdir()?;

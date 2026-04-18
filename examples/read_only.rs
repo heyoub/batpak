@@ -1,3 +1,9 @@
+//! # read_only
+//!
+//! **Teaches:** read-only store reopening after graceful close.
+//!
+//! Run: `cargo run --example read_only`
+
 use batpak::prelude::*;
 
 #[derive(serde::Serialize, serde::Deserialize, EventPayload)]
@@ -6,6 +12,7 @@ struct Archived {
     n: u32,
 }
 
+// justifies: example main prints read-only reopening observable output via stdout; println is the success signal for this demo.
 #[allow(clippy::print_stdout)]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let dir = tempfile::tempdir()?;

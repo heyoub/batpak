@@ -1,7 +1,5 @@
-#![allow(
-    clippy::disallowed_methods,    // concurrent tests use thread::spawn
-    clippy::needless_borrows_for_generic_args
-)]
+// justifies: integration tests spawn concurrent writer threads via std::thread::spawn and pass borrows shaped by the fixture's generic helpers.
+#![allow(clippy::disallowed_methods, clippy::needless_borrows_for_generic_args)]
 //! Integration tests for Store lifecycle.
 //! Append/get/query, segment rotation, cold start index rebuild, concurrent r/w.
 //!

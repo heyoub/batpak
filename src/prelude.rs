@@ -1,9 +1,10 @@
 pub use crate::coordinate::DagPosition;
 pub use crate::coordinate::{Coordinate, CoordinateError, KindFilter, Region};
-pub use crate::event::sourcing::Reactive;
+pub use crate::event::sourcing::{MultiDispatchError, MultiReactive, Reactive, TypedReactive};
 pub use crate::event::{
-    Event, EventHeader, EventKind, EventPayload, EventSourced, HashChain, JsonValueInput,
-    ProjectionEvent, ProjectionInput, ProjectionPayload, RawMsgpackInput, ReplayLane, StoredEvent,
+    DecodeSource, DecodeTyped, Event, EventHeader, EventKind, EventPayload, EventSourced,
+    HashChain, JsonValueInput, ProjectionEvent, ProjectionInput, ProjectionPayload,
+    RawMsgpackInput, ReplayLane, StoredEvent, TypedDecodeError,
 };
 pub use crate::guard::{Denial, Gate, GateSet, Receipt};
 pub use crate::id::EventId;
@@ -17,7 +18,7 @@ pub use crate::store::{
     AppendOptions, AppendPositionHint, AppendReceipt, AppendTicket, BatchAppendItem,
     BatchAppendTicket, BatchConfig, CausationRef, Closed, CompactionConfig, CompactionStrategy,
     Cursor, DiskPos, Freshness, IndexConfig, IndexEntry, IndexTopology, NoCache, Notification,
-    Open, ReadOnly, RestartPolicy, Store, StoreConfig, StoreError, SyncConfig, SyncMode,
-    WriterConfig, WriterPressure,
+    Open, ReactionBatch, ReactorConfig, ReactorError, ReadOnly, RestartPolicy, Store, StoreConfig,
+    StoreError, SyncConfig, SyncMode, TypedReactorHandle, WriterConfig, WriterPressure,
 };
-pub use batpak_macros::EventPayload;
+pub use batpak_macros::{EventPayload, EventSourced, MultiEventReactor};

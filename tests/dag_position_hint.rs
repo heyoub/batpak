@@ -12,8 +12,10 @@ fn data_kind() -> EventKind {
 }
 
 fn assert_position(stored: &StoredEvent<serde_json::Value>, lane: u32, depth: u32) {
-    assert_eq!(stored.event.header.position.lane, lane);
-    assert_eq!(stored.event.header.position.depth, depth);
+    let actual_lane = stored.event.header.position.lane();
+    let actual_depth = stored.event.header.position.depth();
+    assert_eq!(actual_lane, lane);
+    assert_eq!(actual_depth, depth);
 }
 
 #[test]
@@ -30,8 +32,8 @@ fn explicit_lane_depth_survives_into_committed_header() {
     let stored = store.get(receipt.event_id).expect("fetch stored event");
 
     assert_position(&stored, hint.lane, hint.depth);
-    assert!(stored.event.header.position.wall_ms > 0);
-    assert_eq!(stored.event.header.position.sequence, 0);
+    assert!(stored.event.header.position.wall_ms() > 0);
+    assert_eq!(stored.event.header.position.sequence(), 0);
 }
 
 #[test]
@@ -39,6 +41,46 @@ fn append_position_hint_default_is_root() {
     let hint = AppendPositionHint::default();
     assert_eq!(hint.lane, 0);
     assert_eq!(hint.depth, 0);
+}
+
+#[test]
+fn dag_position_public_surface_reports_expected_values() {
+    let module_root = batpak::coordinate::position::DagPosition::root();
+    let root = DagPosition::root();
+    let child = DagPosition::child_at(5, 1_234, 7);
+    let forked = DagPosition::fork(2, 9);
+
+    let module_root_is_root = module_root.is_root();
+    let root_is_root = root.is_root();
+    let child_wall_ms = child.wall_ms();
+    let child_counter = child.counter();
+    let child_depth = child.depth();
+    let child_lane = child.lane();
+    let child_sequence = child.sequence();
+    let root_is_ancestor = root.is_ancestor_of(&child);
+    let child_is_ancestor = child.is_ancestor_of(&forked);
+
+    assert!(
+        module_root_is_root,
+        "PROPERTY: the public coordinate::position module export must expose DagPosition::root()"
+    );
+    assert!(
+        root_is_root,
+        "PROPERTY: DagPosition::root() must report is_root()"
+    );
+    assert_eq!(child_wall_ms, 1_234);
+    assert_eq!(child_counter, 7);
+    assert_eq!(child_depth, 0);
+    assert_eq!(child_lane, 0);
+    assert_eq!(child_sequence, 5);
+    assert!(
+        root_is_ancestor,
+        "PROPERTY: root position must be an ancestor of a same-lane child"
+    );
+    assert!(
+        !child_is_ancestor,
+        "PROPERTY: positions on different depth/lane branches must not report ancestorhood"
+    );
 }
 
 #[test]

@@ -1,3 +1,4 @@
+// justifies: unified red-path projection tests use unwrap/panic as the assertion style and narrow bounded test counters that fit in u32.
 #![allow(clippy::unwrap_used, clippy::cast_possible_truncation, clippy::panic)]
 
 #[path = "support/unified_red.rs"]

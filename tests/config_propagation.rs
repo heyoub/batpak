@@ -13,7 +13,8 @@
 
 use batpak::prelude::*;
 use batpak::store::{
-    BatchConfig, IndexConfig, IndexTopology, Store, StoreConfig, SyncConfig, SyncMode, WriterConfig,
+    BatchConfig, ClockKey, IndexConfig, IndexTopology, Store, StoreConfig, SyncConfig, SyncMode,
+    WriterConfig,
 };
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
@@ -98,6 +99,61 @@ fn wall_ms_monotonic_under_clock_regression() {
     );
 
     store.close().expect("close");
+}
+
+#[test]
+fn clock_key_orders_by_wall_then_clock_then_uuid() {
+    let mut keys = vec![
+        ClockKey {
+            wall_ms: 10,
+            clock: 3,
+            uuid: 9,
+        },
+        ClockKey {
+            wall_ms: 9,
+            clock: 99,
+            uuid: 1,
+        },
+        ClockKey {
+            wall_ms: 10,
+            clock: 2,
+            uuid: 99,
+        },
+        ClockKey {
+            wall_ms: 10,
+            clock: 3,
+            uuid: 4,
+        },
+    ];
+
+    keys.sort();
+
+    assert_eq!(
+        keys,
+        vec![
+            ClockKey {
+                wall_ms: 9,
+                clock: 99,
+                uuid: 1,
+            },
+            ClockKey {
+                wall_ms: 10,
+                clock: 2,
+                uuid: 99,
+            },
+            ClockKey {
+                wall_ms: 10,
+                clock: 3,
+                uuid: 4,
+            },
+            ClockKey {
+                wall_ms: 10,
+                clock: 3,
+                uuid: 9,
+            },
+        ],
+        "PROPERTY: ClockKey ordering must be wall_ms first, then clock, then uuid as the deterministic tiebreaker"
+    );
 }
 
 #[test]
@@ -377,7 +433,8 @@ fn store_config_all_fields_overridable() {
     // but never wired up, this test documents the expected behavior.
     let dir = TempDir::new().expect("create temp dir");
     let clock_fn: Arc<dyn Fn() -> i64 + Send + Sync> = Arc::new(|| {
-        #[allow(clippy::cast_possible_truncation)] // timestamp_us fits i64 until year 292,277
+        // justifies: u128 microseconds-since-epoch narrowed to i64 cannot overflow before year 292,277, far beyond any test run.
+        #[allow(clippy::cast_possible_truncation)]
         {
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

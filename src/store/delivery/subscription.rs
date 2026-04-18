@@ -16,6 +16,15 @@ impl Subscription {
     }
 
     /// Blocking receive. Filters by region. Returns None if channel closed.
+    ///
+    /// The filter loop is unbounded: if the region filter matches only a
+    /// rare event kind but the underlying stream is high-throughput,
+    /// `recv()` may loop internally for many notifications before
+    /// returning a match. Callers who need timeout semantics should
+    /// drive the underlying receiver directly — a `crossbeam_channel::
+    /// select!` pattern or a polling loop with `receiver().recv_deadline`
+    /// around [`Subscription::receiver`] gives per-call deadlines while
+    /// keeping the region filter on the caller side.
     pub fn recv(&self) -> Option<Notification> {
         loop {
             match self.rx.recv() {

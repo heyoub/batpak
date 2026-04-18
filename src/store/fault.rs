@@ -368,4 +368,37 @@ mod tests {
             "expected FaultInjected variant"
         );
     }
+
+    #[test]
+    fn probabilistic_injector_is_deterministic_at_probability_extremes() {
+        let point = InjectionPoint::BatchCommitWritten { batch_id: 7 };
+
+        let never = ProbabilisticInjector::new(0.0, CountdownAction::Fail("boom"));
+        assert!(
+            never.check(point).is_none(),
+            "probability=0.0 must never inject a fault"
+        );
+
+        let always = ProbabilisticInjector::new(1.0, CountdownAction::Fail("boom"));
+        assert!(
+            matches!(always.check(point), Some(StoreError::FaultInjected(_))),
+            "probability=1.0 must always inject the configured fault"
+        );
+    }
+
+    #[test]
+    fn maybe_inject_propagates_injector_decision() {
+        let injector: Arc<dyn FaultInjector> =
+            Arc::new(CountdownInjector::new(1, CountdownAction::Fail("boom")));
+        let point = InjectionPoint::BatchStart {
+            batch_id: 9,
+            item_count: 2,
+        };
+
+        let err = maybe_inject(point, &Some(injector)).expect_err("fault should propagate");
+        assert!(
+            matches!(err, StoreError::FaultInjected(_)),
+            "maybe_inject must return the injector-produced StoreError variant"
+        );
+    }
 }

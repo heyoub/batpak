@@ -1,7 +1,5 @@
-#![allow(
-    clippy::unwrap_used,              // test assertions use unwrap for clarity
-    clippy::cast_possible_truncation, // test data fits in target types
-)]
+// justifies: crash-safety tests use unwrap as assertion style and narrow bounded counters that the fixture guarantees fit in target types.
+#![allow(clippy::unwrap_used, clippy::cast_possible_truncation)]
 //! Crash safety and deterministic concurrency tests for group commit.
 //!
 //! PROVES: partial batch writes survive crash + idempotent retry,
@@ -13,7 +11,8 @@ use tempfile::TempDir;
 
 /// Run a loom model with a bounded preemption budget. See
 /// `tests/deterministic_concurrency.rs::loom_model_bounded` for rationale.
-#[allow(dead_code)] // only used by #[cfg(loom)] tests in this file
+// justifies: helper is only reached from #[cfg(loom)] tests in this file; dead_code fires under the non-loom compile path.
+#[allow(dead_code)]
 fn loom_model_bounded<F>(check: F)
 where
     F: Fn() + Sync + Send + 'static,

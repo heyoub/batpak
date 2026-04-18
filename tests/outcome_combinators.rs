@@ -1,4 +1,5 @@
-#![allow(clippy::panic, clippy::wildcard_enum_match_arm, clippy::unwrap_used)] // test assertions use panic; exhaustive match not needed in tests
+// justifies: Outcome combinator tests use panic/unwrap as assertion style and match the success arm with a wildcard fallback rather than enumerating every error variant.
+#![allow(clippy::panic, clippy::wildcard_enum_match_arm, clippy::unwrap_used)]
 //! Tests for Outcome combinators not covered by monad_laws.rs.
 //! Covers: inspect, inspect_err, map_err, or_else, and_then_if,
 //! into_result, unwrap_or, unwrap_or_else, join_any, zip edge cases.
@@ -467,50 +468,57 @@ fn unwrap_or_else_calls_closure_for_non_ok() {
 #[test]
 fn predicates_cover_all_variants() {
     let ok: Outcome<i32> = Outcome::Ok(1);
+    let ok_is_ok = ok.is_ok();
+    let ok_is_terminal = ok.is_terminal();
+    let ok_is_err = ok.is_err();
+    let ok_is_retry = ok.is_retry();
+    let ok_is_pending = ok.is_pending();
+    let ok_is_cancelled = ok.is_cancelled();
+    let ok_is_batch = ok.is_batch();
     assert!(
-        ok.is_ok(),
+        ok_is_ok,
         "PREDICATE is_ok FAILED: Ok(1).is_ok() must be true.\n\
          Investigate: src/outcome/mod.rs is_ok predicate.\n\
          Common causes: is_ok returns false for Ok variant or has wrong match arm.\n\
          Run: cargo test --test outcome_combinators"
     );
     assert!(
-        ok.is_terminal(),
+        ok_is_terminal,
         "PREDICATE is_terminal FAILED: Ok(1).is_terminal() must be true.\n\
          Investigate: src/outcome/mod.rs is_terminal predicate.\n\
          Common causes: Ok not listed as terminal in is_terminal match.\n\
          Run: cargo test --test outcome_combinators"
     );
     assert!(
-        !ok.is_err(),
+        !ok_is_err,
         "PREDICATE is_err FALSE POSITIVE: Ok(1).is_err() must be false.\n\
          Investigate: src/outcome/mod.rs is_err predicate.\n\
          Common causes: is_err matches Ok variant by mistake.\n\
          Run: cargo test --test outcome_combinators"
     );
     assert!(
-        !ok.is_retry(),
+        !ok_is_retry,
         "PREDICATE is_retry FALSE POSITIVE: Ok(1).is_retry() must be false.\n\
          Investigate: src/outcome/mod.rs is_retry predicate.\n\
          Common causes: is_retry matches Ok variant by mistake.\n\
          Run: cargo test --test outcome_combinators"
     );
     assert!(
-        !ok.is_pending(),
+        !ok_is_pending,
         "PREDICATE is_pending FALSE POSITIVE: Ok(1).is_pending() must be false.\n\
          Investigate: src/outcome/mod.rs is_pending predicate.\n\
          Common causes: is_pending matches Ok variant by mistake.\n\
          Run: cargo test --test outcome_combinators"
     );
     assert!(
-        !ok.is_cancelled(),
+        !ok_is_cancelled,
         "PREDICATE is_cancelled FALSE POSITIVE: Ok(1).is_cancelled() must be false.\n\
          Investigate: src/outcome/mod.rs is_cancelled predicate.\n\
          Common causes: is_cancelled matches Ok variant by mistake.\n\
          Run: cargo test --test outcome_combinators"
     );
     assert!(
-        !ok.is_batch(),
+        !ok_is_batch,
         "PREDICATE is_batch FALSE POSITIVE: Ok(1).is_batch() must be false.\n\
          Investigate: src/outcome/mod.rs is_batch predicate.\n\
          Common causes: is_batch matches Ok variant by mistake.\n\
@@ -518,15 +526,17 @@ fn predicates_cover_all_variants() {
     );
 
     let err: Outcome<i32> = Outcome::Err(test_err());
+    let err_is_err = err.is_err();
+    let err_is_terminal = err.is_terminal();
     assert!(
-        err.is_err(),
+        err_is_err,
         "PREDICATE is_err FAILED: Err(...).is_err() must be true.\n\
          Investigate: src/outcome/mod.rs is_err predicate.\n\
          Common causes: is_err does not match Err variant.\n\
          Run: cargo test --test outcome_combinators"
     );
     assert!(
-        err.is_terminal(),
+        err_is_terminal,
         "PREDICATE is_terminal FAILED: Err(...).is_terminal() must be true.\n\
          Investigate: src/outcome/mod.rs is_terminal predicate.\n\
          Common causes: Err not listed as terminal in is_terminal match.\n\
@@ -534,15 +544,17 @@ fn predicates_cover_all_variants() {
     );
 
     let retry: Outcome<i32> = Outcome::retry(100, 1, 3, "r");
+    let retry_is_retry = retry.is_retry();
+    let retry_is_terminal = retry.is_terminal();
     assert!(
-        retry.is_retry(),
+        retry_is_retry,
         "PREDICATE is_retry FAILED: Retry(...).is_retry() must be true.\n\
          Investigate: src/outcome/mod.rs is_retry predicate.\n\
          Common causes: is_retry does not match Retry variant.\n\
          Run: cargo test --test outcome_combinators"
     );
     assert!(
-        !retry.is_terminal(),
+        !retry_is_terminal,
         "PREDICATE is_terminal FALSE POSITIVE: Retry(...).is_terminal() must be false.\n\
          Investigate: src/outcome/mod.rs is_terminal predicate.\n\
          Common causes: Retry incorrectly listed as terminal in is_terminal match.\n\
@@ -551,15 +563,17 @@ fn predicates_cover_all_variants() {
 
     let pending: Outcome<i32> =
         Outcome::pending(batpak::outcome::WaitCondition::Event { event_id: 123 }, 456);
+    let pending_is_pending = pending.is_pending();
+    let pending_is_terminal = pending.is_terminal();
     assert!(
-        pending.is_pending(),
+        pending_is_pending,
         "PREDICATE is_pending FAILED: Pending(...).is_pending() must be true.\n\
          Investigate: src/outcome/mod.rs is_pending predicate.\n\
          Common causes: is_pending does not match Pending variant.\n\
          Run: cargo test --test outcome_combinators"
     );
     assert!(
-        !pending.is_terminal(),
+        !pending_is_terminal,
         "PREDICATE is_terminal FALSE POSITIVE: Pending(...).is_terminal() must be false.\n\
          Investigate: src/outcome/mod.rs is_terminal predicate.\n\
          Common causes: Pending incorrectly listed as terminal in is_terminal match.\n\
@@ -567,15 +581,17 @@ fn predicates_cover_all_variants() {
     );
 
     let cancelled: Outcome<i32> = Outcome::cancelled("c");
+    let cancelled_is_cancelled = cancelled.is_cancelled();
+    let cancelled_is_terminal = cancelled.is_terminal();
     assert!(
-        cancelled.is_cancelled(),
+        cancelled_is_cancelled,
         "PREDICATE is_cancelled FAILED: Cancelled(...).is_cancelled() must be true.\n\
          Investigate: src/outcome/mod.rs is_cancelled predicate.\n\
          Common causes: is_cancelled does not match Cancelled variant.\n\
          Run: cargo test --test outcome_combinators"
     );
     assert!(
-        cancelled.is_terminal(),
+        cancelled_is_terminal,
         "PREDICATE is_terminal FAILED: Cancelled(...).is_terminal() must be true.\n\
          Investigate: src/outcome/mod.rs is_terminal predicate.\n\
          Common causes: Cancelled not listed as terminal in is_terminal match.\n\
@@ -583,15 +599,17 @@ fn predicates_cover_all_variants() {
     );
 
     let batch: Outcome<i32> = Outcome::Batch(vec![Outcome::Ok(1)]);
+    let batch_is_batch = batch.is_batch();
+    let batch_is_terminal = batch.is_terminal();
     assert!(
-        batch.is_batch(),
+        batch_is_batch,
         "PREDICATE is_batch FAILED: Batch(...).is_batch() must be true.\n\
          Investigate: src/outcome/mod.rs is_batch predicate.\n\
          Common causes: is_batch does not match Batch variant.\n\
          Run: cargo test --test outcome_combinators"
     );
     assert!(
-        !batch.is_terminal(),
+        !batch_is_terminal,
         "PREDICATE is_terminal FALSE POSITIVE: Batch(...).is_terminal() must be false.\n\
          Investigate: src/outcome/mod.rs is_terminal predicate.\n\
          Common causes: Batch incorrectly listed as terminal in is_terminal match.\n\

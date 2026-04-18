@@ -1,9 +1,10 @@
+// justifies: advanced store tests rely on unwrap/panic as assertion style, spawn threads for chaos concurrency probes, and narrow bounded test data into target types that the fixture guarantees fit.
 #![allow(
-    clippy::unwrap_used,           // test assertions
-    clippy::disallowed_methods,    // chaos tests use thread::spawn for concurrency probes
-    clippy::cast_possible_truncation, // test data fits in target types
+    clippy::unwrap_used,
+    clippy::disallowed_methods,
+    clippy::cast_possible_truncation,
     clippy::needless_borrows_for_generic_args,
-    clippy::panic,                 // tests panic to surface specific contract violations
+    clippy::panic
 )]
 //! Advanced Store tests: code paths missed by store_integration.rs.
 //! Covers: walk_ancestors, snapshot, diagnostics, append_reaction,
@@ -21,7 +22,10 @@
 
 use batpak::event::Reactive;
 use batpak::prelude::*;
-use batpak::store::{Store, StoreConfig, StoreError, SyncConfig};
+use batpak::store::{
+    segment::{CompactionOutcome, CompactionResult},
+    Store, StoreConfig, StoreDiagnostics, StoreError, StoreStats, SyncConfig,
+};
 use batpak::typestate::Transition;
 use std::sync::Arc;
 use tempfile::TempDir;
@@ -246,7 +250,7 @@ fn snapshot_copies_segments() {
 #[test]
 fn diagnostics_reports_config() {
     let (store, dir) = test_store();
-    let diag = store.diagnostics();
+    let diag: StoreDiagnostics = store.diagnostics();
 
     assert_eq!(
         diag.data_dir,
@@ -397,7 +401,7 @@ fn idempotency_returns_same_receipt() {
     );
 
     // Only 1 event should exist
-    let stats = store.stats();
+    let stats: StoreStats = store.stats();
     assert_eq!(
         stats.event_count, 1,
         "PROPERTY: idempotent appends must not increase event_count — only one event must be stored.\n\
@@ -512,9 +516,14 @@ fn cursor_polls_events_in_order() {
     let coord = Coordinate::new("entity:cur", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
 
+    let large_payload = "x".repeat(2_048);
     for i in 0..5 {
         store
-            .append(&coord, kind, &serde_json::json!({"i": i}))
+            .append(
+                &coord,
+                kind,
+                &serde_json::json!({"i": i, "blob": large_payload}),
+            )
             .expect("append");
     }
 
@@ -621,9 +630,20 @@ fn compact_does_not_lose_data() {
             .expect("append");
     }
 
-    store
-        .compact(&CompactionConfig::default())
+    let compaction: CompactionResult = store
+        .compact(&CompactionConfig {
+            min_segments: 1,
+            ..CompactionConfig::default()
+        })
         .expect("compact");
+    let compaction_outcome = compaction.outcome;
+    assert!(
+        matches!(
+            compaction_outcome,
+            CompactionOutcome::Performed | CompactionOutcome::Skipped
+        ),
+        "PROPERTY: compact() over a populated store must either perform a merge or honestly report that nothing was compactable"
+    );
 
     let stats = store.stats();
     assert_eq!(
@@ -683,10 +703,10 @@ fn compact_retention_removes_dropped_events_from_index() {
     };
     let store = Store::open(config).expect("reopen");
 
+    let retention: batpak::store::RetentionPredicate =
+        Box::new(move |stored| stored.event.header.event_kind == keep_kind);
     let retention_config = CompactionConfig {
-        strategy: CompactionStrategy::Retention(Box::new(move |stored| {
-            stored.event.header.event_kind == keep_kind
-        })),
+        strategy: CompactionStrategy::Retention(retention),
         min_segments: 1,
     };
     store.compact(&retention_config).expect("compact");
@@ -794,7 +814,7 @@ fn store_config_new_uses_sensible_defaults() {
     let dir = TempDir::new().expect("temp dir");
     let config = StoreConfig::new(dir.path());
     let store = Store::open(config).expect("open");
-    let diag = store.diagnostics();
+    let diag: StoreDiagnostics = store.diagnostics();
     assert_eq!(
         diag.segment_max_bytes,
         256 * 1024 * 1024,
@@ -1398,15 +1418,17 @@ fn index_entry_causation_helpers() {
         .iter()
         .find(|e| e.event_id == root.event_id)
         .expect("find root");
+    let root_is_root_cause = root_entry.is_root_cause();
+    let root_is_correlated = root_entry.is_correlated();
     assert!(
-        root_entry.is_root_cause(),
+        root_is_root_cause,
         "PROPERTY: an event with no explicit causation must be identified as a root cause.\n\
          Investigate: src/store/mod.rs IndexEntry::is_root_cause.\n\
          Common causes: is_root_cause checks wrong field, causation_id default value incorrect.\n\
          Run: cargo test --test store_advanced index_entry_causation_helpers"
     );
     assert!(
-        !root_entry.is_correlated(),
+        !root_is_correlated,
         "PROPERTY: a self-correlated event (correlation_id == event_id) must not be 'correlated'.\n\
          Investigate: src/store/mod.rs IndexEntry::is_correlated.\n\
          Common causes: is_correlated returns true for self-correlation, field comparison inverted.\n\
@@ -1418,22 +1440,25 @@ fn index_entry_causation_helpers() {
         .iter()
         .find(|e| e.event_id == reaction.event_id)
         .expect("find reaction");
+    let reaction_is_root_cause = react_entry.is_root_cause();
+    let reaction_is_correlated = react_entry.is_correlated();
+    let reaction_is_caused_by_root = react_entry.is_caused_by(root.event_id);
     assert!(
-        !react_entry.is_root_cause(),
+        !reaction_is_root_cause,
         "PROPERTY: a reaction event with an explicit cause must not be identified as a root cause.\n\
          Investigate: src/store/mod.rs IndexEntry::is_root_cause.\n\
          Common causes: is_root_cause ignores causation_id field, always returns true.\n\
          Run: cargo test --test store_advanced index_entry_causation_helpers"
     );
     assert!(
-        react_entry.is_correlated(),
+        reaction_is_correlated,
         "PROPERTY: a reaction event with a correlation_id different from its own event_id must be 'correlated'.\n\
          Investigate: src/store/mod.rs IndexEntry::is_correlated.\n\
          Common causes: correlation_id not set on reaction frame, is_correlated comparison wrong.\n\
          Run: cargo test --test store_advanced index_entry_causation_helpers"
     );
     assert!(
-        react_entry.is_caused_by(root.event_id),
+        reaction_is_caused_by_root,
         "PROPERTY: a reaction event must report is_caused_by(root.event_id) == true.\n\
          Investigate: src/store/mod.rs IndexEntry::is_caused_by.\n\
          Common causes: causation_id not stored in reaction frame, is_caused_by checks wrong field.\n\
@@ -1867,14 +1892,16 @@ fn pipeline_commit_bypass_persists() {
     let proposal = Proposal::new(serde_json::json!({"bypassed": true}));
     let bypass_receipt = Pipeline::<()>::bypass(proposal, &TestBypass);
 
-    let committed = Pipeline::<()>::commit_bypass(bypass_receipt, |p| -> Result<_, StoreError> {
-        let r = store.append(&coord, kind, &p)?;
-        Ok(CommitMetadata::from_append_receipt(r))
-    })
-    .expect("commit_bypass");
+    let committed: Committed<serde_json::Value> =
+        Pipeline::<()>::commit_bypass(bypass_receipt, |p| -> Result<_, StoreError> {
+            let r = store.append(&coord, kind, &p)?;
+            CommitMetadata::from_append_receipt(r)
+        })
+        .expect("commit_bypass");
+    let committed_event_id = committed.event_id();
 
     // Verify persisted
-    let stored = store.get(committed.event_id()).expect("get");
+    let stored = store.get(committed_event_id).expect("get");
     assert_eq!(
         stored.event.event_kind(),
         kind,

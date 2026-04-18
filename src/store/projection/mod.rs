@@ -53,7 +53,12 @@ pub trait ProjectionCache: Send + Sync + 'static {
     /// # Errors
     /// Returns `StoreError::CacheFailed` if the underlying cache backend fails.
     fn delete_prefix(&self, prefix: &[u8]) -> Result<u64, StoreError>;
-    /// Flush any pending writes to durable storage.
+    /// Flush any backend-local pending writes.
+    ///
+    /// This trait does not, by itself, promise power-loss durability.
+    /// Durability is backend-defined: some caches may fsync, some may flush
+    /// only in-process buffers, and some rebuildable caches may intentionally
+    /// treat `sync()` as a no-op.
     ///
     /// # Errors
     /// Returns `StoreError::CacheFailed` if flushing the cache backend fails.
@@ -70,33 +75,113 @@ pub trait ProjectionCache: Send + Sync + 'static {
 }
 
 /// Metadata stored alongside each cached projection value.
+///
+/// `watermark` and `cached_at_us` are always populated. `cached_at_mono_ns` and
+/// `process_boot_ns` are populated for values cached in the current format; when
+/// `None`, the value was encoded by an older writer and its monotonic age cannot
+/// be computed (age-based freshness checks must conservatively treat such
+/// entries as stale — see `flow.rs` B6).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CacheMeta {
     /// Global sequence watermark at the time the value was cached.
     pub watermark: u64,
     /// Wall-clock timestamp (microseconds since epoch) when the value was cached.
     pub cached_at_us: i64,
+    /// Monotonic nanoseconds since this process's anchor, captured at cache
+    /// write. `None` for values encoded by older writers that pre-date this
+    /// field. Only comparable within a single process — readers must check
+    /// `process_boot_ns` equality before trusting this value.
+    #[serde(default)]
+    pub cached_at_mono_ns: Option<i64>,
+    /// Monotonic-epoch marker of the process that produced this value. Readers
+    /// compare this against their own `now_process_boot_ns`; on mismatch, the
+    /// `cached_at_mono_ns` value belongs to a different process and must be
+    /// treated as unavailable.
+    #[serde(default)]
+    pub process_boot_ns: Option<u64>,
 }
 
-/// Byte layout: value bytes followed by 16 bytes of metadata (watermark u64 LE + cached_at_us i64 LE).
-const CACHE_META_SIZE: usize = 16;
+/// Legacy byte layout: value bytes followed by 16 bytes of metadata
+/// (watermark u64 LE + cached_at_us i64 LE).
+const CACHE_META_LEGACY_SIZE: usize = 16;
+
+/// Current byte layout: value bytes followed by 40 bytes of metadata
+/// (watermark u64 LE + cached_at_us i64 LE + cached_at_mono_ns i64 LE +
+/// process_boot_ns u64 LE + magic u64 LE).
+/// The magic tag distinguishes current-format entries from legacy ones
+/// (whose trailing bytes do not contain the magic).
+const CACHE_META_CURRENT_SIZE: usize = 40;
+
+/// Magic bytes at the end of a current-format trailer. Chosen to be unlikely
+/// to appear as the last 8 bytes of either a JSON value or a legacy trailer
+/// (legacy trailer's last 8 bytes are an i64 µs-since-epoch, which is always
+/// much smaller than this constant).
+const CACHE_META_MAGIC: u64 = 0xCA_CB_CC_CD_CE_CF_D0_D1;
 
 impl CacheMeta {
     /// Encode value + metadata into a single byte buffer for cache storage.
+    /// Always writes the current format (40-byte trailer including magic).
     pub(crate) fn encode_with_value(&self, value: &[u8]) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(value.len() + CACHE_META_SIZE);
+        let mut buf = Vec::with_capacity(value.len() + CACHE_META_CURRENT_SIZE);
         buf.extend_from_slice(value);
         buf.extend_from_slice(&self.watermark.to_le_bytes());
         buf.extend_from_slice(&self.cached_at_us.to_le_bytes());
+        // Emit `0` for None so the layout is always fixed-width. Readers
+        // distinguish populated-vs-legacy via the trailing magic, not via
+        // these bytes.
+        buf.extend_from_slice(&self.cached_at_mono_ns.unwrap_or(0).to_le_bytes());
+        buf.extend_from_slice(&self.process_boot_ns.unwrap_or(0).to_le_bytes());
+        buf.extend_from_slice(&CACHE_META_MAGIC.to_le_bytes());
         buf
     }
 
-    /// Decode value + metadata from a cache-stored byte buffer.
+    /// Decode value + metadata from a cache-stored byte buffer. Handles both
+    /// current (40-byte trailer + magic) and legacy (16-byte trailer) formats.
+    /// Legacy entries return `None` for the monotonic fields.
     pub(crate) fn decode_from_bytes(bytes: &[u8]) -> Result<(Vec<u8>, Self), StoreError> {
-        if bytes.len() < CACHE_META_SIZE {
+        // Try current format first: last 8 bytes == magic.
+        if bytes.len() >= CACHE_META_CURRENT_SIZE {
+            let magic_bytes: [u8; 8] = bytes[bytes.len() - 8..]
+                .try_into()
+                .map_err(|_| StoreError::cache_msg("corrupt cache metadata"))?;
+            if u64::from_le_bytes(magic_bytes) == CACHE_META_MAGIC {
+                let (value, meta_bytes) = bytes.split_at(bytes.len() - CACHE_META_CURRENT_SIZE);
+                let watermark = u64::from_le_bytes(
+                    meta_bytes[0..8]
+                        .try_into()
+                        .map_err(|_| StoreError::cache_msg("corrupt cache metadata"))?,
+                );
+                let cached_at_us = i64::from_le_bytes(
+                    meta_bytes[8..16]
+                        .try_into()
+                        .map_err(|_| StoreError::cache_msg("corrupt cache metadata"))?,
+                );
+                let cached_at_mono_ns = i64::from_le_bytes(
+                    meta_bytes[16..24]
+                        .try_into()
+                        .map_err(|_| StoreError::cache_msg("corrupt cache metadata"))?,
+                );
+                let process_boot_ns = u64::from_le_bytes(
+                    meta_bytes[24..32]
+                        .try_into()
+                        .map_err(|_| StoreError::cache_msg("corrupt cache metadata"))?,
+                );
+                return Ok((
+                    value.to_vec(),
+                    Self {
+                        watermark,
+                        cached_at_us,
+                        cached_at_mono_ns: Some(cached_at_mono_ns),
+                        process_boot_ns: Some(process_boot_ns),
+                    },
+                ));
+            }
+        }
+        // Fall back to legacy: 16-byte trailer, no magic.
+        if bytes.len() < CACHE_META_LEGACY_SIZE {
             return Err(StoreError::cache_msg("corrupt cache metadata: too short"));
         }
-        let (value, meta_bytes) = bytes.split_at(bytes.len() - CACHE_META_SIZE);
+        let (value, meta_bytes) = bytes.split_at(bytes.len() - CACHE_META_LEGACY_SIZE);
         let watermark = u64::from_le_bytes(
             meta_bytes[..8]
                 .try_into()
@@ -112,6 +197,8 @@ impl CacheMeta {
             Self {
                 watermark,
                 cached_at_us,
+                cached_at_mono_ns: None,
+                process_boot_ns: None,
             },
         ))
     }
@@ -351,6 +438,8 @@ mod tests {
         let meta = CacheMeta {
             watermark: 42,
             cached_at_us: 1_700_000_000_000,
+            cached_at_mono_ns: Some(123_456_789),
+            process_boot_ns: Some(987_654_321),
         };
         let value = b"hello world";
         let encoded = meta.encode_with_value(value);
@@ -359,6 +448,8 @@ mod tests {
         assert_eq!(decoded_value, value);
         assert_eq!(decoded_meta.watermark, 42);
         assert_eq!(decoded_meta.cached_at_us, 1_700_000_000_000);
+        assert_eq!(decoded_meta.cached_at_mono_ns, Some(123_456_789));
+        assert_eq!(decoded_meta.process_boot_ns, Some(987_654_321));
     }
 
     #[test]
@@ -373,6 +464,8 @@ mod tests {
         let meta = CacheMeta {
             watermark: 0,
             cached_at_us: 0,
+            cached_at_mono_ns: Some(0),
+            process_boot_ns: Some(0),
         };
         let encoded = meta.encode_with_value(b"");
         let (decoded_value, decoded_meta) =
@@ -380,5 +473,24 @@ mod tests {
         assert!(decoded_value.is_empty());
         assert_eq!(decoded_meta.watermark, 0);
         assert_eq!(decoded_meta.cached_at_us, 0);
+        assert_eq!(decoded_meta.cached_at_mono_ns, Some(0));
+        assert_eq!(decoded_meta.process_boot_ns, Some(0));
+    }
+
+    #[test]
+    fn cache_meta_legacy_trailer_decodes_as_none_mono() {
+        // Legacy layout: 16-byte trailer (watermark u64 LE + cached_at_us i64 LE),
+        // no magic. Produced by older writers before monotonic fields existed.
+        let mut buf = Vec::new();
+        buf.extend_from_slice(b"legacy payload");
+        buf.extend_from_slice(&99u64.to_le_bytes());
+        buf.extend_from_slice(&1_234_567i64.to_le_bytes());
+        let (value, meta) =
+            CacheMeta::decode_from_bytes(&buf).expect("legacy decode should succeed");
+        assert_eq!(value, b"legacy payload");
+        assert_eq!(meta.watermark, 99);
+        assert_eq!(meta.cached_at_us, 1_234_567);
+        assert!(meta.cached_at_mono_ns.is_none());
+        assert!(meta.process_boot_ns.is_none());
     }
 }

@@ -57,6 +57,7 @@ fn event_kind_raw(kind: EventKind) -> u16 {
 ///
 /// Retains hits with `global_sequence > after_seq` (when `started`), sorts
 /// ascending, and truncates to `limit`.
+#[cfg(test)]
 #[inline]
 fn apply_after_bounds(v: &mut Vec<QueryHit>, after_seq: u64, started: bool, limit: usize) {
     if started {
@@ -87,7 +88,9 @@ enum EntryQuery<'a> {
 ///
 /// For a real SIMD specialization, `kinds` would need to be an inline array
 /// (e.g. `[u16; N]`) so the kind values sit contiguously without a heap hop.
-/// That restructuring is deferred until the specialization is actually implemented.
+/// The current `Vec<u16>` layout is the shape chosen for the scalar scan;
+/// any SIMD specialization is a distinct chapter that would redesign this
+/// type's internal storage.
 ///
 /// ### Why `Vec` instead of `[T; N]`?
 ///
@@ -143,6 +146,9 @@ impl<const N: usize> Tile<N> {
 struct SoAInner {
     kinds: Vec<EventKind>,
     entries: Vec<Arc<IndexEntry>>,
+    // scope membership is correct-by-construction because `coord.scope` is
+    // immutable post-construction; debug_assertions verifies invariant at
+    // insert time.
     /// scope → set of entity strings that have emitted at least one event in
     /// that scope.  Mirrors the role of `StoreIndex::scope_entities`.
     scope_entities: std::collections::HashMap<Arc<str>, HashSet<Arc<str>>>,
@@ -181,6 +187,11 @@ impl SoAInner {
     fn push(&mut self, entry: &Arc<IndexEntry>) {
         let scope: Arc<str> = entry.coord.scope_arc();
         let entity: Arc<str> = entry.coord.entity_arc();
+        debug_assert_eq!(
+            scope.as_ref(),
+            entry.coord.scope(),
+            "scope_entities bucket must match entry.coord.scope()"
+        );
         self.kinds.push(entry.kind);
         self.entries.push(Arc::clone(entry));
         self.scope_entities.entry(scope).or_default().insert(entity);
@@ -226,6 +237,7 @@ impl SoAInner {
     /// forward collecting up to `limit` hits.  Output is in ascending
     /// `global_sequence` order (no sort needed — `entries` are in insertion
     /// order which equals ascending global_sequence).
+    #[cfg(test)]
     fn hits_candidates_after(
         &self,
         spec: &EntryQuery<'_>,
@@ -312,6 +324,9 @@ struct AoSoAInner<const N: usize> {
     tiles: Vec<Tile<N>>,
     /// kind → index of the currently open (not yet full) tile for that kind.
     open_tiles: std::collections::HashMap<EventKind, usize>,
+    // scope membership is correct-by-construction because `coord.scope` is
+    // immutable post-construction; debug_assertions verifies invariant at
+    // insert time.
     /// scope → entity set, same role as in SoAInner.
     scope_entities: std::collections::HashMap<Arc<str>, HashSet<Arc<str>>>,
 }
@@ -341,6 +356,11 @@ impl<const N: usize> AoSoAInner<N> {
         let scope: Arc<str> = entry.coord.scope_arc();
         let entity: Arc<str> = entry.coord.entity_arc();
         let kind = entry.kind;
+        debug_assert_eq!(
+            scope.as_ref(),
+            entry.coord.scope(),
+            "scope_entities bucket must match entry.coord.scope()"
+        );
 
         match self.open_tiles.get(&kind).copied() {
             Some(idx) => {
@@ -520,6 +540,9 @@ struct AoSoA64SimdInner {
     /// Index of the current open (not yet full) tile, or `None` if all tiles
     /// are full or no tiles have been allocated yet.
     open_tile: Option<usize>,
+    // scope membership is correct-by-construction because `coord.scope` is
+    // immutable post-construction; debug_assertions verifies invariant at
+    // insert time.
     scope_entities: std::collections::HashMap<Arc<str>, HashSet<Arc<str>>>,
 }
 
@@ -544,6 +567,11 @@ impl AoSoA64SimdInner {
         let scope: Arc<str> = entry.coord.scope_arc();
         let entity: Arc<str> = entry.coord.entity_arc();
         let kind = entry.kind;
+        debug_assert_eq!(
+            scope.as_ref(),
+            entry.coord.scope(),
+            "scope_entities bucket must match entry.coord.scope()"
+        );
 
         match self.open_tile {
             Some(idx) => {
@@ -624,7 +652,6 @@ pub(crate) struct CachedProjectionSlot {
     pub(crate) bytes: Vec<u8>,
     pub(crate) watermark: u64,
     pub(crate) generation: u64,
-    pub(crate) cached_at_us: i64,
 }
 
 struct EntityGroup {
@@ -638,6 +665,9 @@ struct EntityGroup {
 /// entity stored as parallel arrays (SoA inner). Matches the ECS archetype pattern.
 struct SoAoSInner {
     groups: std::collections::HashMap<Arc<str>, EntityGroup>,
+    // scope membership is correct-by-construction because `coord.scope` is
+    // immutable post-construction; debug_assertions verifies invariant at
+    // insert time.
     scope_entities: std::collections::HashMap<Arc<str>, std::collections::HashSet<Arc<str>>>,
 }
 
@@ -691,6 +721,11 @@ impl SoAoSInner {
     fn push(&mut self, entry: &Arc<IndexEntry>) {
         let entity = entry.coord.entity_arc();
         let scope = entry.coord.scope_arc();
+        debug_assert_eq!(
+            scope.as_ref(),
+            entry.coord.scope(),
+            "scope_entities bucket must match entry.coord.scope()"
+        );
         let group = self
             .groups
             .entry(Arc::clone(&entity))
@@ -785,7 +820,6 @@ impl SoAoSInner {
         type_id: TypeId,
         bytes: Vec<u8>,
         watermark: u64,
-        cached_at_us: i64,
     ) -> bool {
         let Some(group) = self.groups.get_mut(entity) else {
             return false;
@@ -796,7 +830,6 @@ impl SoAoSInner {
                 bytes,
                 watermark,
                 generation: group.generation,
-                cached_at_us,
             },
         );
         true
@@ -978,6 +1011,7 @@ impl ColumnarIndex {
     ///
     /// For all other layouts, collects all candidates, applies the position
     /// filter, sorts, and truncates to `limit`.
+    #[cfg(test)]
     fn query_hits_sorted_after(
         &self,
         query: EntryQuery<'_>,
@@ -1033,6 +1067,7 @@ impl ColumnarIndex {
         self.query_hits_sorted(EntryQuery::Scope(scope))
     }
 
+    #[cfg(test)]
     pub(crate) fn query_hits_by_kind_after(
         &self,
         target: EventKind,
@@ -1043,6 +1078,7 @@ impl ColumnarIndex {
         self.query_hits_sorted_after(EntryQuery::Kind(target), after_seq, started, limit)
     }
 
+    #[cfg(test)]
     pub(crate) fn query_hits_by_category_after(
         &self,
         category: u8,
@@ -1053,6 +1089,7 @@ impl ColumnarIndex {
         self.query_hits_sorted_after(EntryQuery::Category(category), after_seq, started, limit)
     }
 
+    #[cfg(test)]
     pub(crate) fn query_hits_by_scope_after(
         &self,
         scope: &str,
@@ -1173,16 +1210,11 @@ impl ColumnarIndex {
         type_id: TypeId,
         bytes: Vec<u8>,
         watermark: u64,
-        cached_at_us: i64,
     ) -> bool {
         match &self.inner {
-            ColumnarVariant::SoAoS(lock) => lock.write().store_cached_projection(
-                entity,
-                type_id,
-                bytes,
-                watermark,
-                cached_at_us,
-            ),
+            ColumnarVariant::SoAoS(lock) => lock
+                .write()
+                .store_cached_projection(entity, type_id, bytes, watermark),
             ColumnarVariant::SoA(_)
             | ColumnarVariant::AoSoA64(_)
             | ColumnarVariant::AoSoA64Simd(_) => false,
@@ -1468,6 +1500,7 @@ impl ScanIndex {
         self.query_hits_route(self.capabilities().by_scope, EntryQuery::Scope(scope))
     }
 
+    #[cfg(test)]
     fn query_hits_route_after(
         &self,
         route: ScanRoute,
@@ -1587,6 +1620,7 @@ impl ScanIndex {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn query_hits_by_kind_after(
         &self,
         kind: EventKind,
@@ -1603,6 +1637,7 @@ impl ScanIndex {
         )
     }
 
+    #[cfg(test)]
     pub(crate) fn query_hits_by_category_after(
         &self,
         category: u8,
@@ -1619,6 +1654,7 @@ impl ScanIndex {
         )
     }
 
+    #[cfg(test)]
     pub(crate) fn query_hits_by_scope_after(
         &self,
         scope: &str,
@@ -1773,13 +1809,13 @@ impl ScanIndex {
         type_id: TypeId,
         bytes: Vec<u8>,
         watermark: u64,
-        cached_at_us: i64,
     ) -> bool {
         let projection = self.capabilities().projection;
         projection.cached_projection
-            && self.entity_groups.as_ref().is_some_and(|idx| {
-                idx.store_cached_projection(entity, type_id, bytes, watermark, cached_at_us)
-            })
+            && self
+                .entity_groups
+                .as_ref()
+                .is_some_and(|idx| idx.store_cached_projection(entity, type_id, bytes, watermark))
     }
 
     pub(crate) fn projection_candidates(
@@ -2348,6 +2384,211 @@ mod tests {
                 "SoAoS by_category(0x{category:x}) must match SoA"
             );
         }
+    }
+
+    #[test]
+    fn all_layouts_agree_on_by_kind_after() {
+        let corpus = build_oracle_corpus();
+        let soa = ColumnarIndex::new_soa();
+        let aosoa64 = ColumnarIndex::new_aosoa64();
+        let aosoa64_simd = ColumnarIndex::new_aosoa64_simd();
+        let soaos = ColumnarIndex::new_soaos();
+        for entry in &corpus {
+            soa.insert(entry);
+            aosoa64.insert(entry);
+            aosoa64_simd.insert(entry);
+            soaos.insert(entry);
+        }
+        for kind in [KIND_A, KIND_B, KIND_C] {
+            let reference = seq_ids(&soa.query_hits_by_kind_after(kind, 7, true, 5));
+            assert_eq!(
+                seq_ids(&aosoa64.query_hits_by_kind_after(kind, 7, true, 5)),
+                reference,
+                "AoSoA64 by_kind_after({kind:?}) must match SoA"
+            );
+            assert_eq!(
+                seq_ids(&aosoa64_simd.query_hits_by_kind_after(kind, 7, true, 5)),
+                reference,
+                "AoSoA64Simd by_kind_after({kind:?}) must match SoA"
+            );
+            assert_eq!(
+                seq_ids(&soaos.query_hits_by_kind_after(kind, 7, true, 5)),
+                reference,
+                "SoAoS by_kind_after({kind:?}) must match SoA"
+            );
+        }
+    }
+
+    #[test]
+    fn all_layouts_agree_on_by_category_after() {
+        let corpus = build_oracle_corpus();
+        let soa = ColumnarIndex::new_soa();
+        let aosoa64 = ColumnarIndex::new_aosoa64();
+        let aosoa64_simd = ColumnarIndex::new_aosoa64_simd();
+        let soaos = ColumnarIndex::new_soaos();
+        for entry in &corpus {
+            soa.insert(entry);
+            aosoa64.insert(entry);
+            aosoa64_simd.insert(entry);
+            soaos.insert(entry);
+        }
+        for category in [0x1u8, 0x2u8] {
+            let reference = seq_ids(&soa.query_hits_by_category_after(category, 7, true, 5));
+            assert_eq!(
+                seq_ids(&aosoa64.query_hits_by_category_after(category, 7, true, 5)),
+                reference,
+                "AoSoA64 by_category_after(0x{category:x}) must match SoA"
+            );
+            assert_eq!(
+                seq_ids(&aosoa64_simd.query_hits_by_category_after(category, 7, true, 5)),
+                reference,
+                "AoSoA64Simd by_category_after(0x{category:x}) must match SoA"
+            );
+            assert_eq!(
+                seq_ids(&soaos.query_hits_by_category_after(category, 7, true, 5)),
+                reference,
+                "SoAoS by_category_after(0x{category:x}) must match SoA"
+            );
+        }
+    }
+
+    // --- B2 contract: overlay scope queries are a subset of ground truth ---
+    //
+    // Every overlay's `query_hits_by_scope` output must be a subset of the
+    // ground-truth "entries whose coord.scope == scope" set computed from the
+    // raw corpus. Overlays may return fewer results (the shared filter
+    // pipeline in StoreIndex::query_hits re-validates) but must never leak
+    // events from other scopes.
+    fn ground_truth_by_scope(corpus: &[Arc<IndexEntry>], scope: &str) -> Vec<u64> {
+        let mut v: Vec<u64> = corpus
+            .iter()
+            .filter(|e| e.coord.scope() == scope)
+            .map(|e| e.global_sequence)
+            .collect();
+        v.sort_unstable();
+        v
+    }
+
+    fn is_subset_of_truth(overlay: &[QueryHit], truth: &[u64]) -> bool {
+        let truth_set: std::collections::HashSet<u64> = truth.iter().copied().collect();
+        overlay
+            .iter()
+            .all(|h| truth_set.contains(&h.global_sequence))
+    }
+
+    #[test]
+    fn overlay_scope_queries_are_subset_of_ground_truth() {
+        let corpus = build_oracle_corpus();
+        let soa = ColumnarIndex::new_soa();
+        let aosoa64 = ColumnarIndex::new_aosoa64();
+        let aosoa64_simd = ColumnarIndex::new_aosoa64_simd();
+        let soaos = ColumnarIndex::new_soaos();
+        for entry in &corpus {
+            soa.insert(entry);
+            aosoa64.insert(entry);
+            aosoa64_simd.insert(entry);
+            soaos.insert(entry);
+        }
+        for scope in ["scope-one", "scope-two", "scope-missing"] {
+            let truth = ground_truth_by_scope(&corpus, scope);
+            for (name, overlay_hits) in [
+                ("SoA", soa.query_hits_by_scope(scope)),
+                ("AoSoA64", aosoa64.query_hits_by_scope(scope)),
+                ("AoSoA64Simd", aosoa64_simd.query_hits_by_scope(scope)),
+                ("SoAoS", soaos.query_hits_by_scope(scope)),
+            ] {
+                assert!(
+                    is_subset_of_truth(&overlay_hits, &truth),
+                    "{name} overlay leaked events outside scope {scope:?}: hits={:?} truth={:?}",
+                    overlay_hits
+                        .iter()
+                        .map(|h| h.global_sequence)
+                        .collect::<Vec<_>>(),
+                    truth,
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn overlay_scope_queries_after_respect_limit_and_subset() {
+        let corpus = build_oracle_corpus();
+        let soa = ColumnarIndex::new_soa();
+        let aosoa64 = ColumnarIndex::new_aosoa64();
+        let aosoa64_simd = ColumnarIndex::new_aosoa64_simd();
+        let soaos = ColumnarIndex::new_soaos();
+        for entry in &corpus {
+            soa.insert(entry);
+            aosoa64.insert(entry);
+            aosoa64_simd.insert(entry);
+            soaos.insert(entry);
+        }
+        for scope in ["scope-one", "scope-two"] {
+            let truth = ground_truth_by_scope(&corpus, scope);
+            for limit in [1usize, 3, 10, usize::MAX] {
+                for (name, overlay_hits) in [
+                    ("SoA", soa.query_hits_by_scope_after(scope, 0, false, limit)),
+                    (
+                        "AoSoA64",
+                        aosoa64.query_hits_by_scope_after(scope, 0, false, limit),
+                    ),
+                    (
+                        "AoSoA64Simd",
+                        aosoa64_simd.query_hits_by_scope_after(scope, 0, false, limit),
+                    ),
+                    (
+                        "SoAoS",
+                        soaos.query_hits_by_scope_after(scope, 0, false, limit),
+                    ),
+                ] {
+                    assert!(
+                        overlay_hits.len() <= limit,
+                        "{name} scope-after limit honoured: got {} > {}",
+                        overlay_hits.len(),
+                        limit
+                    );
+                    assert!(
+                        is_subset_of_truth(&overlay_hits, &truth),
+                        "{name} scope-after overlay leaked events outside scope {scope:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn scan_index_after_queries_honor_kind_category_and_scope() {
+        let corpus = build_oracle_corpus();
+        let scan = ScanIndex::for_config(&crate::store::IndexConfig {
+            topology: crate::store::IndexTopology::all(),
+            ..crate::store::IndexConfig::default()
+        });
+        let soa = ColumnarIndex::new_soa();
+        for entry in &corpus {
+            scan.insert(entry);
+            soa.insert(entry);
+        }
+
+        let by_kind = seq_ids(&scan.query_hits_by_kind_after(KIND_A, 7, true, 5));
+        assert_eq!(
+            by_kind,
+            seq_ids(&soa.query_hits_by_kind_after(KIND_A, 7, true, 5)),
+            "scan by_kind_after should stay wired through the overlay route"
+        );
+
+        let by_category = seq_ids(&scan.query_hits_by_category_after(0x1, 7, true, 5));
+        assert_eq!(
+            by_category,
+            seq_ids(&soa.query_hits_by_category_after(0x1, 7, true, 5)),
+            "scan by_category_after should stay wired through the overlay route"
+        );
+
+        let by_scope = seq_ids(&scan.query_hits_by_scope_after("scope-two", 7, true, 5));
+        assert_eq!(
+            by_scope,
+            seq_ids(&soa.query_hits_by_scope_after("scope-two", 7, true, 5)),
+            "scan by_scope_after should stay wired through the overlay route"
+        );
     }
 
     #[test]

@@ -47,7 +47,17 @@ struct ReplayContext {
     plan: ProjectionReplayPlan,
     cache_key: Vec<u8>,
     watermark: u64,
+    /// Wall-clock µs-since-epoch captured at plan build. Survives across
+    /// process restarts via the cache format; not monotonic on its own.
     cached_at_us: i64,
+    /// Monotonic ns-since-process-anchor captured at plan build. Only
+    /// meaningful within the producing process; readers compare
+    /// `process_boot_ns` before trusting age deltas.
+    cached_at_mono_ns: i64,
+    /// This process's monotonic-epoch marker. Stamped on every cached value
+    /// produced by this replay so subsequent reads can detect cross-process
+    /// monotonic-clock comparisons.
+    process_boot_ns: u64,
     type_id: TypeId,
 }
 
@@ -168,7 +178,14 @@ fn compute_strategy(
     ProjectionStrategy::ExternalCacheThenReplay
 }
 
-pub(crate) trait ReplayInput: ProjectionInput {
+/// Internal projection-replay machinery. Exposed as `pub` (behind
+/// `#[doc(hidden)]`) only to satisfy the public bound on
+/// `Store::project` / `project_if_changed` / `watch_projection` without
+/// tripping the `private_bounds` lint. External callers cannot implement
+/// this trait (its `Reader` parameter is a `#[doc(hidden)]` internal
+/// type) and must not rely on it being stable.
+#[doc(hidden)]
+pub trait ReplayInput: ProjectionInput {
     fn read_batch(
         reader: &crate::store::segment::scan::Reader,
         positions: &[&DiskPos],
@@ -212,25 +229,63 @@ impl ReplayInput for RawMsgpackInput {
     }
 }
 
+/// Build the projection cache key for a given entity and projection type.
+///
+/// Key layout: `entity + \0 + type_id_hash(u64 LE) + schema_version(u64 LE) +
+/// relevant_kinds_hash(u64 LE)`.
+///
+/// - `type_id_hash` ensures different [`EventSourced`] types never collide on
+///   the same entity.
+/// - `schema_version` invalidates the cache when replay semantics change.
+/// - `relevant_kinds_hash` is a stable hash of `T::relevant_event_kinds()`.
+///   Changing which event kinds a projection consumes invalidates the cache
+///   automatically — no `schema_version` bump required for that reason.
+///   (Changing replay semantics per-kind still requires a `schema_version` bump.)
 pub(crate) fn projection_cache_key<T>(entity: &str) -> Vec<u8>
 where
     T: EventSourced + 'static,
 {
-    // Cache key: entity + \0 + type_id_hash(u64 LE) + schema_version(u64 LE)
-    // TypeId ensures different EventSourced types never collide on the same entity.
-    // Vec pre-allocated to exact size: entity.len() + 1 + 8 + 8 = entity.len() + 17.
     let schema_v = T::schema_version();
     let type_disc = {
         let mut h = std::collections::hash_map::DefaultHasher::new();
         TypeId::of::<T>().hash(&mut h);
         h.finish()
     };
-    let mut cache_key = Vec::with_capacity(entity.len() + 17);
+    let kinds_disc = relevant_kinds_hash::<T>();
+    let mut cache_key = Vec::with_capacity(entity.len() + 1 + 8 + 8 + 8);
     cache_key.extend_from_slice(entity.as_bytes());
     cache_key.push(0);
     cache_key.extend_from_slice(&type_disc.to_le_bytes());
     cache_key.extend_from_slice(&schema_v.to_le_bytes());
+    cache_key.extend_from_slice(&kinds_disc.to_le_bytes());
     cache_key
+}
+
+/// Stable hash of `T::relevant_event_kinds()` for use as a cache-key component.
+///
+/// Event kinds are first serialised into their canonical u16 wire representation
+/// (`(category << 12) | type_id`), sorted, then fed into a `DefaultHasher`. The
+/// sort makes the hash order-insensitive: a projection that declares
+/// `[EFFECT_ERROR, DATA]` and one that declares `[DATA, EFFECT_ERROR]` produce
+/// the same key. Uses the same hasher family as the `TypeId` discriminant
+/// above to keep the key derivation stylistically consistent.
+fn relevant_kinds_hash<T>() -> u64
+where
+    T: EventSourced + 'static,
+{
+    let mut kinds: Vec<u16> = T::relevant_event_kinds()
+        .iter()
+        .map(|k| (u16::from(k.category()) << 12) | k.type_id())
+        .collect();
+    kinds.sort_unstable();
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    for k in &kinds {
+        k.hash(&mut h);
+    }
+    // Also fold the count so `[]` and `[0]` cannot collide via the same
+    // hash-finish value on an empty feed.
+    kinds.len().hash(&mut h);
+    h.finish()
 }
 
 pub(crate) fn project<T, State>(
@@ -327,6 +382,8 @@ where
             let replay = ReplayContext {
                 watermark: plan.watermark,
                 cached_at_us: store.config.now_us(),
+                cached_at_mono_ns: crate::store::config::now_mono_ns(),
+                process_boot_ns: crate::store::config::process_boot_ns(),
                 type_id: TypeId::of::<T>(),
                 cache_key: projection_cache_key::<T>(entity),
                 plan,
@@ -341,6 +398,8 @@ where
                 let predicted_meta = super::CacheMeta {
                     watermark: replay.watermark,
                     cached_at_us: replay.cached_at_us,
+                    cached_at_mono_ns: Some(replay.cached_at_mono_ns),
+                    process_boot_ns: Some(replay.process_boot_ns),
                 };
                 if let Err(error) = store.cache.prefetch(&replay.cache_key, predicted_meta) {
                     tracing::warn!("cache prefetch failed (non-fatal): {error}");
@@ -359,11 +418,25 @@ where
                         slot.watermark == replay.watermark
                             && slot.generation == replay.plan.generation
                     }
-                    Freshness::MaybeStale { max_stale_ms } => {
-                        let age_us = replay.cached_at_us.saturating_sub(slot.cached_at_us).max(0);
-                        age_us < (*max_stale_ms as i64) * 1000
+                    Freshness::MaybeStale { max_stale_ms: _ } => {
+                        // `slot.watermark == replay.watermark` — a slot with a
+                        // lower watermark can legitimately happen if the replay
+                        // plan advanced, but treating it as fresh would return
+                        // a state that omits the newer events. Equality here
+                        // is the honest invariant.
+                        //
+                        // The age-based branch (`age_us < max_stale_ms * 1000`)
+                        // is omitted because the group-local slot stores only
+                        // wall-clock `cached_at_us` — a regression-prone basis
+                        // for age comparison. Until the slot carries a
+                        // monotonic counterpart, MaybeStale collapses to the
+                        // same invariant as `Consistent` for group-local: hit
+                        // only when state is unchanged.
+                        //
+                        // justifies: legacy-cache rows lack monotonic time;
+                        // conservatively treat as stale for MaybeStale.
+                        slot.watermark == replay.watermark
                             && slot.generation == replay.plan.generation
-                            && slot.watermark <= replay.watermark
                     }
                 })
                 .unwrap_or(false);
@@ -534,12 +607,28 @@ where
             let is_fresh = match execution.freshness {
                 Freshness::Consistent => meta.watermark == execution.replay.watermark,
                 Freshness::MaybeStale { max_stale_ms } => {
-                    let age_us = store
-                        .config
-                        .now_us()
-                        .saturating_sub(meta.cached_at_us)
-                        .max(0);
-                    age_us < (*max_stale_ms as i64) * 1000
+                    // Monotonic-clock age: compare `now_mono_ns` against the
+                    // cached `cached_at_mono_ns`, but only when the cached
+                    // entry was produced by this process (matching
+                    // `process_boot_ns`). Legacy entries (`None`) and
+                    // cross-process entries are treated as stale — there is
+                    // no safe way to age them without a shared monotonic
+                    // reference.
+                    match (meta.cached_at_mono_ns, meta.process_boot_ns) {
+                        (Some(cached_mono), Some(boot))
+                            if boot == execution.replay.process_boot_ns =>
+                        {
+                            let age_ns = execution
+                                .replay
+                                .cached_at_mono_ns
+                                .saturating_sub(cached_mono)
+                                .max(0);
+                            // Convert ns -> µs for comparison with max_stale_ms.
+                            let age_us = age_ns / 1_000;
+                            age_us < (*max_stale_ms as i64) * 1000
+                        }
+                        _ => false,
+                    }
                 }
             };
 
@@ -572,7 +661,6 @@ where
                             execution.replay.type_id,
                             bytes,
                             meta.watermark,
-                            meta.cached_at_us,
                         );
                         if let Some(t) = timings.as_deref_mut() {
                             t.total_us = duration_micros(execution.started_at.elapsed());
@@ -693,6 +781,8 @@ fn store_projection_value<T, State>(
         let meta = super::CacheMeta {
             watermark: execution.replay.watermark,
             cached_at_us: execution.replay.cached_at_us,
+            cached_at_mono_ns: Some(execution.replay.cached_at_mono_ns),
+            process_boot_ns: Some(execution.replay.process_boot_ns),
         };
         if let Err(error) = store.cache.put(&execution.replay.cache_key, &bytes, meta) {
             tracing::warn!("cache put failed (non-fatal): {error}");
@@ -702,7 +792,6 @@ fn store_projection_value<T, State>(
             execution.replay.type_id,
             bytes,
             execution.replay.watermark,
-            execution.replay.cached_at_us,
         );
     }
 }
@@ -781,7 +870,8 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::print_stderr)] // diagnostic test — eprintln output is the point
+    // justifies: diagnostic test reports cold-path breakdown on stderr; the eprintln is the observable artefact of the test.
+    #[allow(clippy::print_stderr)]
     fn projection_timings_cold_path_breakdown() {
         let dir = TempDir::new().expect("temp dir");
         let store = Store::open(StoreConfig::new(dir.path())).expect("open store");
@@ -855,7 +945,6 @@ mod tests {
             bytes: vec![],
             watermark: 42,
             generation: 1,
-            cached_at_us: 100,
         };
 
         // Slot present + fresh -> GroupLocalHit

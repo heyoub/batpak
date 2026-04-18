@@ -1,3 +1,4 @@
+// justifies: writer command-flow tests use panic! to surface unexpected writer states when the WriterCommand handshake breaks.
 #![allow(clippy::panic)]
 
 use batpak::prelude::*;

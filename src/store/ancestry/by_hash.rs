@@ -1,6 +1,20 @@
 use crate::event::StoredEvent;
 use crate::store::Store;
 
+/// Walk hash-chain ancestors of `event_id`, up to `limit` entries.
+///
+/// The per-hop parent lookup is a linear scan over the entity's stream
+/// (`entity_stream.iter().find(…)`). That is O(N) per hop where N is
+/// the entity's total event count, giving O(limit · N) worst case.
+/// Entity streams in batpak typically contain tens to thousands of
+/// events — the linear-scan cost is negligible compared to the segment
+/// disk read that `read_entry_and_event` performs per hop. Benchmarks
+/// showed the per-hop cost (~6 µs) is dominated by disk I/O, not the
+/// scan, and a dedicated `by_event_hash` DashMap was rejected because
+/// its ~15-30% scan saving did not justify a permanent per-event entry
+/// across the whole index. This linear-scan shape is deliberate and
+/// bounded; cycle detection lives in the caller (`ancestry::mod`) via
+/// [`super::collect_ancestors`].
 pub(crate) fn walk_ancestors_by_hash<State>(
     store: &Store<State>,
     event_id: u128,
@@ -9,11 +23,6 @@ pub(crate) fn walk_ancestors_by_hash<State>(
     // All events in a hash chain belong to the same entity, so we load the
     // entity stream once and reuse it across every hop instead of re-querying
     // the DashMap (and re-cloning all IndexEntries) on each step.
-    //
-    // A by_event_hash DashMap was considered to turn the per-hop linear scan
-    // into O(1). Benchmarks showed the per-hop cost (~6 µs) is dominated by
-    // the segment disk read, not the stream scan. The ~15-30% scan saving does
-    // not justify a permanent DashMap entry per event across the whole index.
     let start = match store.index.get_by_id(event_id) {
         Some(e) => e,
         None => return Vec::new(),

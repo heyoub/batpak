@@ -14,6 +14,10 @@ pub mod index;
 mod lifecycle;
 /// Projection cache traits and built-in backends (NoCache, NativeCache).
 pub mod projection;
+/// Typed reactor output batch — accumulator handed to typed reactor handlers.
+pub mod reaction;
+/// Typed reactor public surface + shared internal canal runner.
+pub mod reactor_typed;
 #[cfg(test)]
 mod runtime_contracts;
 /// On-disk segment format, frame encoding/decoding, and compaction helpers.
@@ -44,6 +48,8 @@ pub use projection::watch::ProjectionWatcher;
 pub use projection::{
     CacheCapabilities, CacheMeta, Freshness, NativeCache, NoCache, ProjectionCache,
 };
+pub use reaction::ReactionBatch;
+pub use reactor_typed::{ReactorConfig, ReactorError, TypedReactorHandle};
 pub use stats::{StoreDiagnostics, StoreStats, WriterPressure};
 pub use write::control::{AppendTicket, BatchAppendTicket, Outbox, VisibilityFence};
 pub use write::writer::{Notification, RestartPolicy};
@@ -63,8 +69,7 @@ use write::writer::{WriterCommand, WriterHandle};
 
 /// Store: the runtime. Sync API. Send + Sync.
 /// Invariant 2: all methods are sync; async integration lives in channels.
-// Intentional impossible-feature guard: Store API is sync by design (Invariant 2).
-// async-store is not a declared feature — suppress cfg warning for this guard
+// justifies: async-store is not a declared feature; this compile_error guard must survive cargo check by silencing the unexpected cfg name
 #[allow(unexpected_cfgs)]
 #[cfg(feature = "async-store")]
 compile_error!("INVARIANT 2: Store API is sync. Use spawn_blocking or flume recv_async.");
@@ -215,10 +220,7 @@ impl Store<Open> {
 
     /// Snapshot the current writer mailbox pressure.
     pub fn writer_pressure(&self) -> WriterPressure {
-        let writer = self
-            .writer
-            .as_ref()
-            .expect("open store always has a writer handle");
+        let writer = self.writer_ref();
         WriterPressure {
             queue_len: writer.tx.len(),
             capacity: self.config.writer.channel_capacity,
@@ -262,14 +264,27 @@ impl Store<Open> {
 
     /// Nonblocking batch append submission.
     ///
+    /// Every item's coordinate is revalidated synchronously at this entry so
+    /// that invalid coordinates surface to the caller rather than being
+    /// deferred to the writer thread.
+    ///
     /// # Errors
-    /// Returns any enqueue or writer error surfaced while staging the batch for
-    /// background execution.
+    /// Returns [`StoreError::InvalidCoordinate`] if any item's coordinate
+    /// fails validation, or any enqueue or writer error surfaced while
+    /// staging the batch for background execution.
     pub fn submit_batch(
         &self,
         items: Vec<crate::store::append::BatchAppendItem>,
     ) -> Result<BatchAppendTicket, StoreError> {
         self.ensure_no_active_public_fence()?;
+        for (i, item) in items.iter().enumerate() {
+            if let Err(err) = item.coord().validate() {
+                return Err(StoreError::InvalidCoordinate {
+                    index: Some(i),
+                    reason: format!("{err}"),
+                });
+            }
+        }
         self.submit_batch_with_fence_impl(items, None)
     }
 
@@ -431,13 +446,31 @@ impl Store<Open> {
 
     /// SUBSCRIBE: push-based, lossy.
     pub fn subscribe_lossy(&self, region: &Region) -> Subscription {
+        // justifies: Store<Open> typestate guarantees writer presence at
+        // construction (see Store::open_with_cache — it fails the open
+        // instead of yielding Store<Open> if the writer cannot be spawned).
+        // The expect here documents an invariant, it does not recover from
+        // one: observing None means the store is mid-drop and every public
+        // path through Store<Open> is already invalid.
         let rx = self
-            .writer
-            .as_ref()
-            .expect("open store has writer")
+            .writer_ref()
             .subscribers
             .subscribe(self.config.broadcast_capacity);
         Subscription::new(rx, region.clone())
+    }
+
+    /// Crate-private accessor that encodes the `Store<Open>` typestate
+    /// invariant: an `Open` store always holds a writer handle.
+    ///
+    /// Panics if the invariant is violated — which only happens when a
+    /// `Store<Open>` has been partially moved out of during drop, a context
+    /// in which every public method is already unreachable.
+    pub(crate) fn writer_ref(&self) -> &WriterHandle {
+        // justifies: typestate invariant of Store<Open> — see open_components
+        // and Store::open_with_cache for the construction guarantee.
+        self.writer
+            .as_ref()
+            .expect("invariant: Store<Open> is constructed with a writer handle")
     }
 
     /// REACT: spawn a background thread running the subscribe→react→append loop.
@@ -456,9 +489,7 @@ impl Store<Open> {
         let store = Arc::clone(self);
         let region = region.clone();
         let sub = self
-            .writer
-            .as_ref()
-            .expect("open store has writer")
+            .writer_ref()
             .reactor_subscribers
             .subscribe(self.config.broadcast_capacity);
         std::thread::Builder::new()
@@ -767,6 +798,23 @@ impl<State> Store<State> {
         self.reader.read_entry(&entry.disk_pos)
     }
 
+    /// READ: fetch a single event by ID with the payload left as raw
+    /// MessagePack bytes. Mirrors [`get`](Self::get) but skips the
+    /// JSON-decode step, suitable for the `RawMsgpackInput` lane of a
+    /// multi-event reactor.
+    ///
+    /// # Errors
+    /// Returns `StoreError::NotFound` if no event with that ID exists.
+    /// Returns `StoreError::Io` or `StoreError::Serialization` if reading
+    /// from disk fails.
+    pub fn get_raw(&self, event_id: u128) -> Result<StoredEvent<Vec<u8>>, StoreError> {
+        let entry = self
+            .index
+            .get_by_id(event_id)
+            .ok_or(StoreError::NotFound(event_id))?;
+        self.reader.read_entry_raw(&entry.disk_pos)
+    }
+
     /// READ: query by Region.
     #[must_use]
     pub fn query(&self, region: &Region) -> Vec<IndexEntry> {
@@ -787,7 +835,6 @@ impl<State> Store<State> {
     /// # Errors
     /// Returns any replay, deserialization, cache, or disk-read error surfaced
     /// while reconstructing the projection state.
-    #[allow(private_bounds)] // replay lanes are store-internal; public projections select them via Input marker types
     pub fn project<T>(&self, entity: &str, freshness: &Freshness) -> Result<Option<T>, StoreError>
     where
         T: EventSourced + serde::Serialize + serde::de::DeserializeOwned + 'static,
@@ -813,7 +860,6 @@ impl<State> Store<State> {
     /// # Errors
     /// Returns any error surfaced by [`Store::project`] when the entity has
     /// changed and the projection must be rebuilt.
-    #[allow(private_bounds)] // replay lanes are store-internal; public projections select them via Input marker types
     pub fn project_if_changed<T>(
         &self,
         entity: &str,

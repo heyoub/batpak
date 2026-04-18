@@ -1,3 +1,4 @@
+// justifies: fuzz targets report shrink cases on stderr and use panic/unwrap as the assertion style when a proptest invariant is falsified.
 #![allow(clippy::panic, clippy::print_stderr, clippy::unwrap_used)]
 //! Fuzz targets for all critical paths in batpak.
 //! Uses proptest as a structured fuzzer with high iteration counts.
@@ -222,6 +223,19 @@ proptest! {
     #[test]
     fn fuzz_coordinate_validation(entity in "\\PC{0,50}", scope in "\\PC{0,50}") {
         let result = Coordinate::new(&entity, &scope);
+        let entity_has_control = entity.bytes().any(|byte| byte < 0x20 || byte == 0x7F);
+        let scope_has_control = scope.bytes().any(|byte| byte < 0x20 || byte == 0x7F);
+        let entity_invalid = entity.is_empty()
+            || entity.contains('/')
+            || entity.contains("..")
+            || entity.bytes().any(|byte| byte == 0)
+            || entity_has_control;
+        let scope_invalid = scope.is_empty()
+            || scope.contains('/')
+            || scope.contains("..")
+            || scope.bytes().any(|byte| byte == 0)
+            || scope_has_control;
+
         if entity.is_empty() {
             prop_assert!(result.is_err(),
                 "COORDINATE EMPTY ENTITY ACCEPTED: Coordinate::new must reject empty entity string.\n\
@@ -234,6 +248,10 @@ proptest! {
                  Investigate: src/coordinate/mod.rs Coordinate::new validation.\n\
                  Common causes: missing empty-string guard on scope field.\n\
                  Run: cargo test --test fuzz_targets");
+        } else if entity_invalid || scope_invalid {
+            prop_assert!(result.is_err(),
+                "COORDINATE ACCEPTED INVALID INPUT: entity={entity:?}, scope={scope:?}. \
+                 Investigate: src/coordinate/mod.rs Coordinate::new invalid-component validation.");
         } else {
             prop_assert!(result.is_ok(),
                 "COORDINATE REJECTED VALID INPUT: entity={entity:?}, scope={scope:?}. \

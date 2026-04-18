@@ -1,9 +1,14 @@
+// justifies: example binary demonstrates counter output via println, matches only the variants used in the demo with a wildcard fallback, and narrows bounded demo counters to smaller integer types.
 #![allow(
     clippy::print_stdout,
     clippy::wildcard_enum_match_arm,
     clippy::cast_possible_truncation
-)] // example binary
-//! # Event-Sourced Counter — from first principles
+)]
+//! # event_sourced_counter
+//!
+//! **Teaches:** `#[derive(EventSourced)]` with `JsonValueInput` replay lane.
+//!
+//! ## From first principles
 //!
 //! The simplest possible event-sourced system: a counter that only goes up.
 //! Instead of storing "count = 7", we store the *history* of increments.
@@ -15,9 +20,10 @@
 //! - Two systems can independently derive the same count from the same events
 //! - You never lose information — a decrement is a new event, not an overwrite
 //!
-//! This example intentionally uses `JsonValueInput`, the ergonomic default
-//! replay lane. When replay throughput matters more than projection simplicity,
-//! compare it with `raw_projection_counter`.
+//! This example uses `JsonValueInput`, the ergonomic default replay lane.
+//! When replay throughput matters more than projection simplicity, compare it
+//! with `raw_projection_counter`, which uses the same derive on the
+//! raw-msgpack lane via `input = RawMsgpackInput`.
 //!
 //! Run: `cargo run --example event_sourced_counter`
 
@@ -41,54 +47,40 @@ struct Decremented {
     reason: String,
 }
 
-// -- Step 2: Define your projection (the "read model") --
-// This is what you reconstruct by replaying events.
-#[derive(Debug, Default, Serialize, Deserialize)]
+// -- Step 2: Define your projection (the "read model") + bind events to
+//    handler methods via #[derive(EventSourced)].
+//
+// The derive generates:
+//   - `type Input = JsonValueInput`
+//   - `from_events` (default fold over Default::default())
+//   - `apply_event` — dispatches by kind via DecodeTyped::route_typed
+//   - `relevant_event_kinds` — one source of truth, generated from the
+//     `event =` list; the sync-drift bug against `apply_event` is
+//     structurally impossible.
+//   - `schema_version` — from `cache_version` (projection cache invalidation
+//     only; unrelated to payload wire `type_id`).
+#[derive(Debug, Default, Serialize, Deserialize, EventSourced)]
+#[batpak(input = JsonValueInput, cache_version = 0)]
+#[batpak(event = Incremented, handler = on_incremented)]
+#[batpak(event = Decremented, handler = on_decremented)]
 struct CounterState {
     value: i64,
     total_increments: u32,
     total_decrements: u32,
 }
 
-// -- Step 3: Implement EventSourced to teach batpak how to fold events --
-//
-// The dispatch table here is hand-written: compare `kind` against each
-// payload type's `KIND` constant, then deserialize into the right type.
-// A future `#[derive(EventSourced)]` will generate this dispatch from
-// per-handler attributes, but that's the next lock. For now the KIND
-// constants keep the comparisons honest.
-impl EventSourced for CounterState {
-    type Input = batpak::prelude::JsonValueInput;
-
-    fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
-        if events.is_empty() {
-            return None;
-        }
-        let mut state = Self::default();
-        for event in events {
-            state.apply_event(event);
-        }
-        Some(state)
+impl CounterState {
+    fn on_incremented(&mut self, p: &Incremented) {
+        self.value += p.amount;
+        self.total_increments += 1;
+        let _ = &p.reason; // keep the field for audit log; example doesn't use it here.
     }
 
-    fn apply_event(&mut self, event: &Event<serde_json::Value>) {
-        let kind = event.header.event_kind;
-        if kind == Incremented::KIND {
-            let p = serde_json::from_value::<Incremented>(event.payload.clone())
-                .expect("CounterState::apply_event: Incremented payload decode");
-            self.value += p.amount;
-            self.total_increments += 1;
-        } else if kind == Decremented::KIND {
-            let p = serde_json::from_value::<Decremented>(event.payload.clone())
-                .expect("CounterState::apply_event: Decremented payload decode");
-            self.value += p.amount;
-            self.total_decrements += 1;
-        }
-    }
-
-    fn relevant_event_kinds() -> &'static [EventKind] {
-        static KINDS: [EventKind; 2] = [Incremented::KIND, Decremented::KIND];
-        &KINDS
+    fn on_decremented(&mut self, p: &Decremented) {
+        // Decremented payloads carry a negative amount by convention.
+        self.value += p.amount;
+        self.total_decrements += 1;
+        let _ = &p.reason;
     }
 }
 

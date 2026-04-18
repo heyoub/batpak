@@ -11,7 +11,10 @@ pub fn zip<A: Clone, B: Clone>(a: Outcome<A>, b: Outcome<B>) -> Outcome<(A, B)> 
         // Both Ok → combine
         (Outcome::Ok(a), Outcome::Ok(b)) => Outcome::Ok((a, b)),
 
-        // Either Err → first Err wins
+        // Both Err → first (a) Err wins. Matched explicitly before the
+        // single-side Err arms so the or-pattern can never misbind to `b`.
+        (Outcome::Err(e), Outcome::Err(_)) => Outcome::Err(e),
+        // Single-side Err — the other side is non-Err, so `e` is unambiguous.
         (Outcome::Err(e), _) | (_, Outcome::Err(e)) => Outcome::Err(e),
 
         // Either Cancelled → first Cancelled wins
@@ -63,14 +66,30 @@ pub fn zip<A: Clone, B: Clone>(a: Outcome<A>, b: Outcome<B>) -> Outcome<(A, B)> 
             resume_token,
         },
 
-        // Both Batch → zip elements pairwise (truncate to shorter)
-        (Outcome::Batch(a_items), Outcome::Batch(b_items)) => Outcome::Batch(
-            a_items
-                .into_iter()
-                .zip(b_items)
-                .map(|(a, b)| zip(a, b))
-                .collect(),
-        ),
+        // Both Batch → zip elements pairwise. Lengths must match; silent
+        // truncation would hide a caller bug and drop data, so length
+        // mismatch is surfaced as an Internal error.
+        (Outcome::Batch(a_items), Outcome::Batch(b_items)) => {
+            if a_items.len() != b_items.len() {
+                return Outcome::Err(OutcomeError {
+                    kind: ErrorKind::Internal,
+                    message: format!(
+                        "Batch length mismatch: lhs={} rhs={}",
+                        a_items.len(),
+                        b_items.len()
+                    ),
+                    compensation: None,
+                    retryable: false,
+                });
+            }
+            Outcome::Batch(
+                a_items
+                    .into_iter()
+                    .zip(b_items)
+                    .map(|(a, b)| zip(a, b))
+                    .collect(),
+            )
+        }
 
         // One Batch, one Ok → map the Ok into each Batch element
         (Outcome::Batch(items), Outcome::Ok(b)) => Outcome::Batch(

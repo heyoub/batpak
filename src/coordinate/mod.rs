@@ -13,10 +13,39 @@ pub const MAX_COORDINATE_COMPONENT_LEN: usize = 1024;
 
 /// Coordinate: WHO (entity) + WHERE (scope). The address of an event stream.
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize)]
+#[serde(into = "CoordinateWire")]
 pub struct Coordinate {
     entity: Arc<str>, // WHO — stream key, hash chain anchor
     scope: Arc<str>,  // WHERE — isolation boundary
+}
+
+/// Wire form of [`Coordinate`] used by serde so that every deserialised
+/// value routes back through [`Coordinate::new`] and picks up the same
+/// validation as in-process construction.
+#[derive(Serialize, Deserialize)]
+struct CoordinateWire {
+    entity: String,
+    scope: String,
+}
+
+impl From<Coordinate> for CoordinateWire {
+    fn from(coord: Coordinate) -> Self {
+        Self {
+            entity: coord.entity.as_ref().to_owned(),
+            scope: coord.scope.as_ref().to_owned(),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for Coordinate {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let wire = CoordinateWire::deserialize(deserializer)?;
+        Coordinate::new(&wire.entity, &wire.scope).map_err(serde::de::Error::custom)
+    }
 }
 
 /// Errors returned when constructing a [`Coordinate`].
@@ -41,19 +70,25 @@ pub enum CoordinateError {
         /// Maximum permitted length.
         max: usize,
     },
+    /// A coordinate component contained a NUL byte (`'\0'`).
+    NulByte,
+    /// A coordinate component contained a forbidden ASCII control character.
+    ControlChar,
+    /// A coordinate component contained a path-traversal substring (`..` or `/`).
+    PathTraversal,
 }
 
 /// Region: the ONE predicate type for query, subscription, cursor, traversal.
 #[derive(Clone, Debug, Default)]
 pub struct Region {
     /// Optional entity name prefix; matches any entity whose name starts with this string.
-    pub entity_prefix: Option<Arc<str>>,
+    pub(crate) entity_prefix: Option<Arc<str>>,
     /// Optional exact scope to match.
-    pub scope: Option<Arc<str>>,
+    pub(crate) scope: Option<Arc<str>>,
     /// Optional event-kind filter applied to matched events.
-    pub fact: Option<KindFilter>,
+    pub(crate) fact: Option<KindFilter>,
     /// Optional inclusive per-entity clock range; does not apply to live filtering.
-    pub clock_range: Option<(u32, u32)>, // per-entity clock, not global_sequence
+    pub(crate) clock_range: Option<(u32, u32)>, // per-entity clock, not global_sequence
 }
 
 /// Filter on [`EventKind`] used within a [`Region`] query.
@@ -107,6 +142,19 @@ impl Coordinate {
         Ok(Self { entity, scope })
     }
 
+    /// Revalidate an existing coordinate against the current validation rules.
+    ///
+    /// Used at API boundaries (e.g. `submit_batch`) to defend against
+    /// coordinates constructed through internal routes that bypass `new`,
+    /// or produced by older on-disk data under tightened rules.
+    ///
+    /// # Errors
+    /// Returns any [`CoordinateError`] that [`Coordinate::new`] would produce
+    /// if called with the same entity/scope strings.
+    pub fn validate(&self) -> Result<(), CoordinateError> {
+        Self::validate_parts(self.entity.as_ref(), self.scope.as_ref())
+    }
+
     fn validate_parts(entity: &str, scope: &str) -> Result<(), CoordinateError> {
         if entity.is_empty() {
             return Err(CoordinateError::EmptyEntity);
@@ -125,6 +173,25 @@ impl Coordinate {
                 len: scope.len(),
                 max: MAX_COORDINATE_COMPONENT_LEN,
             });
+        }
+        Self::validate_component_bytes(entity)?;
+        Self::validate_component_bytes(scope)?;
+        Ok(())
+    }
+
+    fn validate_component_bytes(value: &str) -> Result<(), CoordinateError> {
+        for byte in value.bytes() {
+            if byte == 0 {
+                return Err(CoordinateError::NulByte);
+            }
+            // ASCII control range 0x00..=0x1F and DEL 0x7F. NUL is handled
+            // above for a more specific error; the rest fall through here.
+            if byte < 0x20 || byte == 0x7F {
+                return Err(CoordinateError::ControlChar);
+            }
+        }
+        if value.contains('/') || value.contains("..") {
+            return Err(CoordinateError::PathTraversal);
         }
         Ok(())
     }
@@ -148,6 +215,15 @@ impl fmt::Display for CoordinateError {
             Self::ScopeTooLong { len, max } => {
                 write!(f, "scope length {len} exceeds maximum {max}")
             }
+            Self::NulByte => write!(f, "coordinate component contains a NUL byte"),
+            Self::ControlChar => write!(
+                f,
+                "coordinate component contains a forbidden ASCII control character"
+            ),
+            Self::PathTraversal => write!(
+                f,
+                "coordinate component contains a forbidden path-traversal substring"
+            ),
         }
     }
 }
@@ -198,6 +274,26 @@ impl Region {
     pub fn with_clock_range(mut self, range: (u32, u32)) -> Self {
         self.clock_range = Some(range);
         self
+    }
+
+    /// Returns the configured entity prefix, if any.
+    pub fn entity_prefix(&self) -> Option<&str> {
+        self.entity_prefix.as_deref()
+    }
+
+    /// Returns the configured exact scope, if any.
+    pub fn scope_value(&self) -> Option<&str> {
+        self.scope.as_deref()
+    }
+
+    /// Returns the configured kind filter, if any.
+    pub fn fact(&self) -> Option<&KindFilter> {
+        self.fact.as_ref()
+    }
+
+    /// Returns the configured inclusive per-entity clock range, if any.
+    pub fn clock_range(&self) -> Option<(u32, u32)> {
+        self.clock_range
     }
 
     /// Match against individual fields — avoids circular dep on store::Notification.

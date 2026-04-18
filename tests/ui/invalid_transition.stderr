@@ -4,20 +4,14 @@ error[E0277]: the trait bound `String: StateMarker` is not satisfied
 27 |     apply_transition(Transition::<String, Released, String>::new(kind, "bad".into()));
    |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the trait `StateMarker` is not implemented for `String`
    |
-help: the following other types implement trait `StateMarker`
-  --> tests/ui/invalid_transition.rs:11:1
-   |
-11 | batpak::define_state_machine!(lock_state_seal, LockState { Acquired, Released });
-   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-   | |
-   | `Acquired`
-   | `Released`
+   = help: the following other types implement trait `StateMarker`:
+             Acquired
+             Released
 note: required by a bound in `Transition`
   --> src/typestate/transition.rs
    |
    | pub struct Transition<From: StateMarker, To: StateMarker, P> {
    |                             ^^^^^^^^^^^ required by this bound in `Transition`
-   = note: this error originates in the macro `batpak::define_state_machine` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error[E0599]: the function or associated item `new` exists for struct `Transition<String, Released, String>`, but its trait bounds were not satisfied
   --> tests/ui/invalid_transition.rs:27:62

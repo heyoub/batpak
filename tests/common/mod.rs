@@ -9,7 +9,8 @@
 //! rotation, or `common::default_store()` for tests that just need a working
 //! Store.
 
-#![allow(dead_code)] // helpers are used by some test files but not all
+// justifies: shared test helpers are pulled in by multiple integration binaries; each binary only invokes a subset so dead_code is expected per-binary.
+#![allow(dead_code)]
 
 pub mod proptest;
 

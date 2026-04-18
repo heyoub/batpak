@@ -1,3 +1,9 @@
+//! # outbox
+//!
+//! **Teaches:** typed outbox staging for pre-commit item collection.
+//!
+//! Run: `cargo run --example outbox`
+
 use batpak::prelude::*;
 
 #[derive(serde::Serialize, serde::Deserialize, EventPayload)]
@@ -6,9 +12,7 @@ struct Tick {
     n: u32,
 }
 
-// Outbox staging is not yet typed in v1; feed the payload type's KIND
-// constant so the callsite still never writes a literal (category, type_id)
-// pair. Typed outbox staging lands in the next lock.
+// justifies: example main prints outbox events to stdout so the reader can see the staging-then-flush observable result.
 #[allow(clippy::print_stdout)]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let dir = tempfile::tempdir()?;

@@ -1,3 +1,4 @@
+// justifies: unified red-path config tests use unwrap/panic as assertion style and narrow bounded test counters that fit within u32.
 #![allow(clippy::unwrap_used, clippy::cast_possible_truncation, clippy::panic)]
 
 #[path = "support/unified_red.rs"]
