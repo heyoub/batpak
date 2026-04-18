@@ -698,7 +698,6 @@ pub(crate) fn try_restore_mmap_index(
     data_dir: &Path,
 ) -> Option<(WatermarkInfo, u64)> {
     let loaded = try_load_mmap_snapshot(data_dir)?;
-    index.clear();
     index
         .interner
         .replace_from_full_snapshot(&loaded.interner_strings);

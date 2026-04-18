@@ -21,6 +21,14 @@ impl CausationRef {
         matches!(self, Self::None)
     }
 
+    /// Construct an `Absolute` variant from a typed
+    /// [`crate::id::CausationId`]. Prefer this at public call-sites over
+    /// the raw-u128 variant so the ID class cannot be mixed up.
+    pub fn absolute_typed(id: crate::id::CausationId) -> Self {
+        use crate::id::EntityIdType;
+        Self::Absolute(id.as_u128())
+    }
+
     /// Resolve the effective causation ID for a batch item.
     pub(crate) fn resolve(
         self,
@@ -238,18 +246,44 @@ impl AppendOptions {
     }
 
     /// Set custom correlation ID.
+    ///
+    /// This accepts a raw `u128` to keep wire-decode code paths unchanged.
+    /// Public callers that already hold a typed [`crate::id::CorrelationId`]
+    /// should prefer [`AppendOptions::with_correlation_typed`].
     pub fn with_correlation(mut self, id: u128) -> Self {
         self.correlation_id = Some(id);
         self
     }
 
+    /// Typed-id variant of [`AppendOptions::with_correlation`]. See
+    /// [`crate::id::CorrelationId`]. The typed newtype makes it structurally
+    /// impossible to pass (e.g.) an [`crate::id::EventId`] where a
+    /// correlation id was intended.
+    pub fn with_correlation_typed(self, id: crate::id::CorrelationId) -> Self {
+        use crate::id::EntityIdType;
+        self.with_correlation(id.as_u128())
+    }
+
     /// Set custom causation ID. Passing `0` is a no-op — 0 is the wire sentinel
     /// for "no causation" and is treated identically to not calling this method.
+    ///
+    /// This accepts a raw `u128` to keep wire-decode code paths unchanged.
+    /// Public callers that already hold a typed [`crate::id::CausationId`]
+    /// should prefer [`AppendOptions::with_causation_typed`].
     pub fn with_causation(mut self, id: u128) -> Self {
         if id != 0 {
             self.causation_id = Some(id);
         }
         self
+    }
+
+    /// Typed-id variant of [`AppendOptions::with_causation`]. See
+    /// [`crate::id::CausationId`]. The sentinel-zero behavior carries over:
+    /// a [`crate::id::CausationId`] wrapping `0` is still treated as
+    /// "no causation".
+    pub fn with_causation_typed(self, id: crate::id::CausationId) -> Self {
+        use crate::id::EntityIdType;
+        self.with_causation(id.as_u128())
     }
 
     /// Set the DAG lane/depth hint while leaving HLC and sequence to the writer.

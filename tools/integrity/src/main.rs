@@ -22,8 +22,15 @@
 //! justification below is load-bearing and is checked by
 //! `check_allow_justifications` on every run.
 mod architecture_lints;
+// justifies: INV-ALLOW-IS-DESIGN; importing build.rs shares helper logic here, and the build-only entrypoints remain intentionally unused in this binary
+#[allow(dead_code)]
+#[path = "../../../build.rs"]
+mod build_script_checks;
 
 use anyhow::{anyhow, bail, Context, Result};
+use build_script_checks::shared::{
+    ast_references_name, line_carries_justification, load_known_invariants, public_item_names,
+};
 use clap::{Parser, Subcommand};
 use regex::Regex;
 use serde::Deserialize;
@@ -31,9 +38,11 @@ use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use syn::visit::Visit;
 use syn::Item;
 use walkdir::WalkDir;
+
+#[cfg(test)]
+use build_script_checks::shared::{extract_anchors, justification_body, JustifiesAnchor};
 
 #[derive(Parser)]
 #[command(author, version, about = "Executable integrity checks for batpak")]
@@ -863,170 +872,8 @@ fn check_store_pub_fn_coverage(repo_root: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Extract the justification body (the prose after `justifies:`) from a line
-/// that carries a structured justification comment. Returns `None` if the
-/// line is not a justification.
-fn justification_body(line: &str) -> Option<String> {
-    let trimmed = line.trim();
-    if let Some(idx) = trimmed.find("// justifies:") {
-        let comment = &trimmed[idx + "// ".len()..];
-        // justifies: INV-LITERAL-REGEX-UNWRAP-SAFE; literal pattern in tools/integrity/src/main.rs is compile-time constant
-        let re = Regex::new(r"^\s*(?://\s*)?justifies:\s*(\S.*)$")
-            // justifies: INV-LITERAL-REGEX-UNWRAP-SAFE; pattern is a string literal in tools/integrity/src/main.rs
-            .expect("internal regex is a compile-time constant and will compile");
-        return re
-            .captures(comment)
-            .and_then(|c| c.get(1).map(|m| m.as_str().to_string()));
-    }
-    if trimmed.starts_with("//") {
-        let stripped = trimmed.trim_start_matches('/').trim();
-        if stripped.starts_with("justifies:") {
-            // justifies: INV-LITERAL-REGEX-UNWRAP-SAFE; literal pattern cannot fail to compile, see tools/integrity/src/main.rs
-            let re = Regex::new(r"^\s*justifies:\s*(\S.*)$")
-                // justifies: INV-LITERAL-REGEX-UNWRAP-SAFE; compile-time regex in tools/integrity/src/main.rs
-                .expect("internal regex is a compile-time constant and will compile");
-            return re
-                .captures(stripped)
-                .and_then(|c| c.get(1).map(|m| m.as_str().to_string()));
-        }
-    }
-    None
-}
-
-/// An anchor extracted from a `// justifies:` body.
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum JustifiesAnchor {
-    /// `INV-<NAME>` — must resolve to an id in `traceability/invariants.yaml`.
-    Invariant(String),
-    /// `ADR-NNNN` — must resolve to a file matching `docs/adr/ADR-NNNN-*.md`.
-    Adr(u32),
-    /// An in-repo path like `src/foo.rs`, `tests/bar.rs:42`, `examples/baz.rs`.
-    /// The optional `:line` suffix is informational; resolution checks file existence only.
-    Path(PathBuf),
-}
-
-fn extract_anchors(body: &str) -> Vec<JustifiesAnchor> {
-    // justifies: INV-LITERAL-REGEX-UNWRAP-SAFE; literal patterns in tools/integrity/src/main.rs are compile-time constants
-    let inv_re = Regex::new(r"\bINV-[A-Z][A-Z0-9_-]*\b")
-        .expect("inv anchor regex is a compile-time constant and will compile");
-    // justifies: INV-LITERAL-REGEX-UNWRAP-SAFE; literal pattern in tools/integrity/src/main.rs cannot fail to compile
-    let adr_re = Regex::new(r"\bADR-(\d{4})\b")
-        .expect("adr anchor regex is a compile-time constant and will compile");
-    // Paths: src/..., tests/..., examples/..., batpak-macros/..., batpak-macros-support/..., build.rs, benches/..., tools/...
-    // justifies: INV-LITERAL-REGEX-UNWRAP-SAFE; compile-time literal pattern in tools/integrity/src/main.rs
-    let path_re = Regex::new(
-        r"\b(?:src|tests|examples|batpak-macros|batpak-macros-support|benches|tools|fixtures|docs|traceability)/[A-Za-z0-9_./-]+\.(?:rs|md|yaml|toml)(?::\d+)?\b|\bbuild\.rs(?::\d+)?\b",
-    )
-    .expect("path anchor regex is a compile-time constant and will compile");
-
-    let mut out = Vec::new();
-    for m in inv_re.find_iter(body) {
-        out.push(JustifiesAnchor::Invariant(m.as_str().to_string()));
-    }
-    for caps in adr_re.captures_iter(body) {
-        if let Some(digits) = caps.get(1) {
-            if let Ok(n) = digits.as_str().parse::<u32>() {
-                out.push(JustifiesAnchor::Adr(n));
-            }
-        }
-    }
-    for m in path_re.find_iter(body) {
-        let s = m.as_str();
-        // Strip trailing :<line> if present.
-        let file = s
-            .rsplit_once(':')
-            .and_then(|(before, after)| {
-                if after.chars().all(|c| c.is_ascii_digit()) {
-                    Some(before)
-                } else {
-                    None
-                }
-            })
-            .unwrap_or(s);
-        out.push(JustifiesAnchor::Path(PathBuf::from(file)));
-    }
-    out
-}
-
-fn resolve_anchor(
-    anchor: &JustifiesAnchor,
-    repo_root: &Path,
-    known_invariants: &BTreeSet<String>,
-) -> Result<(), String> {
-    match anchor {
-        JustifiesAnchor::Invariant(id) => {
-            if known_invariants.contains(id) {
-                Ok(())
-            } else {
-                Err(format!(
-                    "invariant id `{}` is not present in traceability/invariants.yaml",
-                    id
-                ))
-            }
-        }
-        JustifiesAnchor::Adr(n) => {
-            let prefix = format!("ADR-{:04}", n);
-            let adr_dir = repo_root.join("docs/adr");
-            if !adr_dir.is_dir() {
-                return Err(format!(
-                    "docs/adr/ directory not found while resolving ADR-{:04}",
-                    n
-                ));
-            }
-            let found = fs::read_dir(&adr_dir)
-                .map_err(|e| format!("read docs/adr/: {}", e))?
-                .any(|entry| {
-                    entry
-                        .ok()
-                        .and_then(|e| e.file_name().into_string().ok())
-                        .map_or(false, |name| name.starts_with(&prefix))
-                });
-            if found {
-                Ok(())
-            } else {
-                Err(format!(
-                    "ADR-{:04} does not match any file under docs/adr/",
-                    n
-                ))
-            }
-        }
-        JustifiesAnchor::Path(rel) => {
-            let abs = repo_root.join(rel);
-            if abs.exists() {
-                Ok(())
-            } else {
-                Err(format!("path anchor `{}` does not exist", rel.display()))
-            }
-        }
-    }
-}
-
-fn load_known_invariants(repo_root: &Path) -> Result<BTreeSet<String>> {
-    let records: Vec<InvariantRecord> = load_yaml(&repo_root.join("traceability/invariants.yaml"))?;
-    Ok(records.into_iter().map(|r| r.id).collect())
-}
-
-/// Return `true` if the given line carries a structured justification comment
-/// with at least 5 words **and** at least one resolvable anchor.
-fn line_carries_justification(
-    line: &str,
-    repo_root: &Path,
-    known_invariants: &BTreeSet<String>,
-) -> bool {
-    let Some(body) = justification_body(line) else {
-        return false;
-    };
-    if body.split_whitespace().count() < 5 {
-        return false;
-    }
-    let anchors = extract_anchors(&body);
-    anchors
-        .iter()
-        .any(|a| resolve_anchor(a, repo_root, known_invariants).is_ok())
-}
-
 fn check_allow_justifications(repo_root: &Path) -> Result<()> {
-    let known_invariants = load_known_invariants(repo_root)?;
+    let known_invariants = load_known_invariants(repo_root).map_err(|err| anyhow!(err))?;
     let mut paths = rust_files(&repo_root.join("src"));
     paths.extend(rust_files(&repo_root.join("tools/xtask/src")));
     paths.extend(rust_files(&repo_root.join("tools/integrity/src")));
@@ -1094,6 +941,20 @@ fn check_pub_items_have_references(repo_root: &Path) -> Result<()> {
             ),
         )?;
         for witness in &entry.witness {
+            ensure(
+                witness.path.starts_with("tests/"),
+                format!(
+                    "pub_item_allowlist entry `{}` witness `{}` must point at a file under tests/, not production code",
+                    entry.name, witness.path
+                ),
+            )?;
+            ensure(
+                !witness.line_hints().is_empty(),
+                format!(
+                    "pub_item_allowlist entry `{}` witness `{}` must include at least one concrete line hint",
+                    entry.name, witness.path
+                ),
+            )?;
             let abs = repo_root.join(&witness.path);
             ensure(
                 abs.exists(),
@@ -1120,14 +981,14 @@ fn check_pub_items_have_references(repo_root: &Path) -> Result<()> {
     }
 
     let test_files: Vec<PathBuf> = rust_files(&repo_root.join("tests"));
-    let parsed_tests: Vec<(PathBuf, syn::File)> = test_files
-        .into_iter()
-        .filter_map(|path| {
-            let content = fs::read_to_string(&path).ok()?;
-            let file = syn::parse_file(&content).ok()?;
-            Some((path, file))
-        })
-        .collect();
+    let mut parsed_tests: Vec<(PathBuf, syn::File)> = Vec::with_capacity(test_files.len());
+    for path in test_files {
+        let content = fs::read_to_string(&path)
+            .with_context(|| format!("read {}", relative(repo_root, &path)))?;
+        let file = syn::parse_file(&content)
+            .with_context(|| format!("parse {}", relative(repo_root, &path)))?;
+        parsed_tests.push((path, file));
+    }
 
     for path in rust_files(&repo_root.join("src")) {
         if path.ends_with("prelude.rs") {
@@ -1155,199 +1016,6 @@ fn check_pub_items_have_references(repo_root: &Path) -> Result<()> {
         }
     }
     Ok(())
-}
-
-/// Walk a parsed Rust file and return true if any real path-position expression
-/// or type references `name`. This is an AST walk, not a substring match —
-/// references inside comments, string literals, and doc-comments are ignored.
-///
-/// Positions considered "real":
-/// - `syn::ExprPath` (e.g. `FooBar`, `module::FooBar`, `Store::method`)
-/// - `syn::TypePath` (e.g. `Vec<FooBar>`, `FooBar`)
-/// - `syn::UseTree::Name` / `syn::UseTree::Rename` (e.g. `use crate::FooBar`,
-///   `use crate::FooBar as _`)
-/// - A path whose last segment's identifier equals `name`
-/// - An identifier in a method-call position (`something.name(...)`)
-pub(crate) fn ast_references_name(file: &syn::File, name: &str) -> bool {
-    struct Walker<'a> {
-        needle: &'a str,
-        found: bool,
-    }
-    impl<'a, 'ast> Visit<'ast> for Walker<'a> {
-        fn visit_path(&mut self, path: &'ast syn::Path) {
-            if self.found {
-                return;
-            }
-            for segment in &path.segments {
-                if segment.ident == self.needle {
-                    self.found = true;
-                    return;
-                }
-            }
-            syn::visit::visit_path(self, path);
-        }
-
-        fn visit_use_tree(&mut self, tree: &'ast syn::UseTree) {
-            if self.found {
-                return;
-            }
-            match tree {
-                syn::UseTree::Name(n) => {
-                    if n.ident == self.needle {
-                        self.found = true;
-                    }
-                }
-                syn::UseTree::Rename(r) => {
-                    if r.ident == self.needle || r.rename == self.needle {
-                        self.found = true;
-                    }
-                }
-                syn::UseTree::Path(p) => {
-                    if p.ident == self.needle {
-                        self.found = true;
-                        return;
-                    }
-                    self.visit_use_tree(&p.tree);
-                }
-                syn::UseTree::Group(group) => {
-                    for item in &group.items {
-                        self.visit_use_tree(item);
-                        if self.found {
-                            return;
-                        }
-                    }
-                }
-                syn::UseTree::Glob(_) => {}
-            }
-        }
-
-        fn visit_expr_method_call(&mut self, call: &'ast syn::ExprMethodCall) {
-            if self.found {
-                return;
-            }
-            if call.method == self.needle {
-                self.found = true;
-                return;
-            }
-            syn::visit::visit_expr_method_call(self, call);
-        }
-
-        fn visit_macro(&mut self, mac: &'ast syn::Macro) {
-            if self.found {
-                return;
-            }
-            for segment in &mac.path.segments {
-                if segment.ident == self.needle {
-                    self.found = true;
-                    return;
-                }
-            }
-            syn::visit::visit_macro(self, mac);
-        }
-
-        fn visit_field(&mut self, field: &'ast syn::Field) {
-            if self.found {
-                return;
-            }
-            // Skip the field ident itself — we are only interested in the type
-            // path. `visit_field` on a struct definition would otherwise make
-            // every struct's field name match bogusly.
-            syn::visit::visit_type(self, &field.ty);
-        }
-    }
-
-    let mut walker = Walker {
-        needle: name,
-        found: false,
-    };
-    walker.visit_file(file);
-    walker.found
-}
-
-fn public_item_names(file: &syn::File) -> Vec<String> {
-    let mut collector = PublicItemCollector::default();
-    collector.visit_file(file);
-    collector.names.into_iter().collect()
-}
-
-#[derive(Default)]
-struct PublicItemCollector {
-    names: BTreeSet<String>,
-}
-
-impl PublicItemCollector {
-    fn record_visibility(&mut self, vis: &syn::Visibility, name: impl Into<String>) {
-        if matches!(vis, syn::Visibility::Public(_)) {
-            self.names.insert(name.into());
-        }
-    }
-
-    fn record_use_tree(&mut self, tree: &syn::UseTree) {
-        match tree {
-            syn::UseTree::Name(name) => {
-                self.names.insert(name.ident.to_string());
-            }
-            syn::UseTree::Rename(rename) => {
-                self.names.insert(rename.rename.to_string());
-            }
-            syn::UseTree::Group(group) => {
-                for item in &group.items {
-                    self.record_use_tree(item);
-                }
-            }
-            syn::UseTree::Path(path) => self.record_use_tree(&path.tree),
-            syn::UseTree::Glob(_) => {}
-        }
-    }
-}
-
-impl Visit<'_> for PublicItemCollector {
-    fn visit_item_fn(&mut self, node: &syn::ItemFn) {
-        self.record_visibility(&node.vis, node.sig.ident.to_string());
-        syn::visit::visit_item_fn(self, node);
-    }
-
-    fn visit_item_struct(&mut self, node: &syn::ItemStruct) {
-        self.record_visibility(&node.vis, node.ident.to_string());
-        syn::visit::visit_item_struct(self, node);
-    }
-
-    fn visit_item_enum(&mut self, node: &syn::ItemEnum) {
-        self.record_visibility(&node.vis, node.ident.to_string());
-        syn::visit::visit_item_enum(self, node);
-    }
-
-    fn visit_item_trait(&mut self, node: &syn::ItemTrait) {
-        self.record_visibility(&node.vis, node.ident.to_string());
-        syn::visit::visit_item_trait(self, node);
-    }
-
-    fn visit_item_type(&mut self, node: &syn::ItemType) {
-        self.record_visibility(&node.vis, node.ident.to_string());
-        syn::visit::visit_item_type(self, node);
-    }
-
-    fn visit_item_const(&mut self, node: &syn::ItemConst) {
-        self.record_visibility(&node.vis, node.ident.to_string());
-        syn::visit::visit_item_const(self, node);
-    }
-
-    fn visit_item_mod(&mut self, node: &syn::ItemMod) {
-        self.record_visibility(&node.vis, node.ident.to_string());
-        syn::visit::visit_item_mod(self, node);
-    }
-
-    fn visit_item_use(&mut self, node: &syn::ItemUse) {
-        if matches!(node.vis, syn::Visibility::Public(_)) {
-            self.record_use_tree(&node.tree);
-        }
-        syn::visit::visit_item_use(self, node);
-    }
-
-    fn visit_impl_item_fn(&mut self, node: &syn::ImplItemFn) {
-        self.record_visibility(&node.vis, node.sig.ident.to_string());
-        syn::visit::visit_impl_item_fn(self, node);
-    }
 }
 
 fn tracked_repo_files(repo_root: &Path) -> Result<Vec<PathBuf>> {

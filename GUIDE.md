@@ -254,9 +254,9 @@ while let Some(entry) = cursor.poll() {
 }
 ```
 
-Use cursor paths when you need at-least-once replay from the index.
-Guarantee scope: at-least-once within process lifetime, or across process
-restart if `CursorWorkerConfig.checkpoint_id` is set.
+Use cursor paths when you need ordered pull replay from the index.
+Guarantee scope: process-local without a checkpoint, or durable
+at-least-once across restart if `CursorWorkerConfig.checkpoint_id` is set.
 
 ### `cursor_worker`
 
@@ -264,7 +264,9 @@ Use `cursor_worker(...)` for restartable background consumers with
 `RestartPolicy` and explicit batch processing. Set
 `CursorWorkerConfig.checkpoint_id: Option<String>` to persist resume
 position under `{data_dir}/cursors/{id}.ckpt` (written with parent-dir
-fsync). Without a `checkpoint_id`, resume is in-memory only.
+fsync). Without a `checkpoint_id`, resume is in-memory only. Startup
+checkpoint load and validation failures are reported asynchronously from
+`join()` / `stop_and_join()`, not from `cursor_worker(...)` itself.
 
 ## Control Plane
 

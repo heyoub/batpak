@@ -67,24 +67,42 @@ pub struct Segment<State> {
     _state: std::marker::PhantomData<State>,
 }
 
-/// Outcome of a compaction run: whether work happened or the run was skipped
-/// because the sealed-segment count was below the configured threshold.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Outcome of a compaction run: whether work happened, was skipped because
+/// the sealed-segment count was below the configured threshold, or failed
+/// inside the swap-point protocol. A `Failed` result guarantees the live
+/// index was NOT mutated — the F6 / FREEZE-4 contract routes rebuild
+/// failures here so callers can distinguish "did nothing" from "tried and
+/// failed" from "did compact" without clobbering the reader-visible state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum CompactionOutcome {
     /// Compaction merged and replaced sealed segments.
     Performed,
     /// Compaction was a no-op: sealed-segment count was below `min_segments`.
     Skipped,
+    /// The compact-swap protocol aborted before the swap point; the live
+    /// index is unchanged. `reason` describes which step failed (off-side
+    /// rebuild error, disk-side scan error, etc.). See
+    /// `src/store/lifecycle.rs::compact` and
+    /// `StoreIndex::replace_contents_from_fresh` for the swap invariants.
+    Failed {
+        /// Human-readable description of which swap-point step aborted.
+        reason: String,
+    },
 }
 
 /// Result returned by a compaction run.
 #[derive(Debug)]
 pub struct CompactionResult {
-    /// Whether the compaction actually ran or was skipped as a no-op.
+    /// Whether the compaction actually ran, was skipped, or failed.
     pub outcome: CompactionOutcome,
-    /// Number of sealed segment files that were merged and removed.
+    /// Number of sealed segment files that were merged and removed. Always
+    /// `0` for [`CompactionOutcome::Skipped`] and
+    /// [`CompactionOutcome::Failed`].
     pub segments_removed: usize,
-    /// Total bytes freed by removing the merged segment files.
+    /// Total bytes freed by removing the merged segment files. Always `0`
+    /// for [`CompactionOutcome::Skipped`] and
+    /// [`CompactionOutcome::Failed`].
     pub bytes_reclaimed: u64,
 }
 

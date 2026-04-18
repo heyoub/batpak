@@ -104,12 +104,14 @@ pub trait EventSourced: Sized {
 /// `TypedReactive<T>`: forward-looking counterpart to `EventSourced`, keyed by
 /// a single typed payload. A reactor of this shape reacts to events of one
 /// `T: EventPayload` and emits derived events into a `ReactionBatch`, which
-/// the typed-reactor loop flushes atomically on `Ok(())` from `react`.
+/// the typed-reactor loop gathers and later flushes after `Ok(())` from
+/// `react`.
 ///
 /// This is the typed sibling of [`Reactive<P>`]. The raw `Reactive<P>`
 /// trait and [`Store::react_loop`](crate::store::Store::react_loop) stay
 /// intact as the lossy push variant; `TypedReactive<T>` rides the
-/// guaranteed-delivery canal (see ADR-0011).
+/// cursor canal (see ADR-0011) with the same at-least-once / checkpoint
+/// semantics described on the typed reactor surface.
 ///
 /// Decode-failure semantics are rigorously split between two modes:
 ///
@@ -126,7 +128,8 @@ pub trait TypedReactive<T: EventPayload>: Send + 'static {
     type Error: std::error::Error + Send + Sync + 'static;
 
     /// Inspect an incoming event and stage zero or more derived events into
-    /// `out`. On `Ok(())` the batch is flushed atomically by the loop. On
+    /// `out`. On `Ok(())` the batch is flushed by the loop as one
+    /// `append_reaction_batch` call for that source event. On
     /// `Err(Self::Error)` the batch is dropped and the loop stops.
     ///
     /// # Errors

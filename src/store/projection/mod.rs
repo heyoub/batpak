@@ -1,6 +1,8 @@
 pub(crate) mod flow;
 pub(crate) mod watch;
 
+pub use watch::{ProjectionWatcher, WatcherError};
+
 use crate::store::StoreError;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -210,7 +212,14 @@ impl CacheMeta {
 pub enum Freshness {
     /// Always replay from the current head; never return a stale cached value.
     Consistent,
-    /// Return a cached value if it is no older than `max_stale_ms` milliseconds.
+    /// Return a cached value if it is no older than `max_stale_ms`
+    /// milliseconds.
+    ///
+    /// Today the age-based check is fully honored only on the external-cache
+    /// path. The group-local in-memory slot does not yet carry monotonic age
+    /// metadata, so `MaybeStale` conservatively degrades to `Consistent`
+    /// there — a caller gets a group-local hit only when the slot watermark
+    /// and generation exactly match the current replay plan.
     MaybeStale {
         /// Maximum age in milliseconds a cached value may have before forcing a replay.
         max_stale_ms: u64,

@@ -84,5 +84,47 @@ macro_rules! define_entity_id {
     };
 }
 
-// Library defines ONE id type.
+// Library defines the canonical public id types. Each is a typed newtype
+// around `u128` so the API cannot silently confuse (say) an event id with a
+// causation id. Raw `u128` traffic is an internal-only escape hatch —
+// external crates should prefer the typed constructors, and the `From<u128>`
+// / `as_u128()` helpers are documented as the wire-serde boundary seam.
 define_entity_id!(EventId, "event");
+define_entity_id!(CorrelationId, "correlation");
+define_entity_id!(CausationId, "causation");
+
+impl From<u128> for EventId {
+    fn from(id: u128) -> Self {
+        <Self as EntityIdType>::new(id)
+    }
+}
+
+impl From<EventId> for u128 {
+    fn from(id: EventId) -> Self {
+        id.as_u128()
+    }
+}
+
+impl From<u128> for CorrelationId {
+    fn from(id: u128) -> Self {
+        <Self as EntityIdType>::new(id)
+    }
+}
+
+impl From<CorrelationId> for u128 {
+    fn from(id: CorrelationId) -> Self {
+        id.as_u128()
+    }
+}
+
+impl From<u128> for CausationId {
+    fn from(id: u128) -> Self {
+        <Self as EntityIdType>::new(id)
+    }
+}
+
+impl From<CausationId> for u128 {
+    fn from(id: CausationId) -> Self {
+        id.as_u128()
+    }
+}

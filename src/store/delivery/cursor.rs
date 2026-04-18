@@ -5,7 +5,7 @@ use crate::store::{RestartPolicy, Store, StoreError};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tempfile::NamedTempFile;
 
@@ -19,8 +19,10 @@ use tempfile::NamedTempFile;
 /// `None` when that wiring is not required.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CursorCheckpoint {
-    /// Global sequence one-past-last-delivered. A subsequent poll returns
-    /// events strictly after this position when `started` is true.
+    /// Global sequence of the last delivered event.
+    ///
+    /// When `started` is true, a subsequent poll returns events strictly
+    /// after this position.
     pub position: u64,
     /// Whether the cursor has delivered at least one event. A fresh
     /// cursor starts at position 0 with `started = false` so that
@@ -29,14 +31,22 @@ pub struct CursorCheckpoint {
     /// Process-boot monotonic clock value at the time of the last save.
     /// Reserved for monotonic-clock integration; `None` when not wired.
     pub process_boot_ns: Option<u64>,
+    /// Stable identity of the region this checkpoint belongs to.
+    ///
+    /// Old checkpoints may deserialize with `None`; startup treats that as
+    /// a mismatch and fails closed instead of silently resuming an
+    /// unscoped checkpoint against an arbitrary region.
+    #[serde(default)]
+    pub region_identity: Option<String>,
 }
 
 impl CursorCheckpoint {
-    fn from_checkpoint(position: u64, started: bool) -> Self {
+    fn from_checkpoint(position: u64, started: bool, region_identity: String) -> Self {
         Self {
             position,
             started,
             process_boot_ns: None,
+            region_identity: Some(region_identity),
         }
     }
 }
@@ -49,13 +59,14 @@ fn cursor_checkpoint_path(data_dir: &Path, id: &str) -> PathBuf {
     cursor_checkpoint_dir(data_dir).join(format!("{id}.ckpt"))
 }
 
-/// Cursor: pull-based event consumption with guaranteed delivery.
+/// Cursor: pull-based event consumption with ordered replay.
 ///
-/// Cursor durability — a cursor with a `checkpoint_id` persists its
-/// position durably via tempfile + parent-directory fsync after every
-/// successful batch. On process restart, constructing a cursor with the
-/// same `id` resumes from the persisted position. Cursors without an id
-/// (the default) are process-local only.
+/// [`Store::cursor_guaranteed`] exposes the process-local surface of this
+/// type: ordered, at-least-once pull replay from the in-memory index.
+/// Checkpoint-backed cursors are the internal mechanism used by
+/// `cursor_worker` and typed reactors when `checkpoint_id` is set.
+/// Resume succeeds only if the saved checkpoint loads and its region
+/// identity matches the cursor's exact [`Region`].
 ///
 /// Delivery semantics:
 ///
@@ -65,6 +76,8 @@ fn cursor_checkpoint_path(data_dir: &Path, id: &str) -> PathBuf {
 /// * **With `checkpoint_id`:** at-least-once across restarts. A crash
 ///   between delivery and checkpoint save causes the latest batch to be
 ///   re-delivered — callers must treat their handler as idempotent.
+///   The checkpoint is also bound to the cursor's exact [`Region`];
+///   reusing the same id for a different logical consumer fails closed.
 ///
 /// Neither mode is exactly-once: that guarantee requires coordinating
 /// the cursor checkpoint with the downstream side-effect in a single
@@ -97,18 +110,13 @@ impl Cursor {
         }
     }
 
-    /// Construct a cursor bound to a durable checkpoint id. On
-    /// construction the persisted position (if any) is loaded and the
-    /// cursor resumes from it. Missing or malformed checkpoint files
-    /// yield a fresh cursor at position 0 — a corrupt checkpoint never
-    /// blocks delivery, it only loses progress.
-    pub(crate) fn new_with_checkpoint(
+    fn new_bound_checkpoint(
         region: Region,
         index: Arc<StoreIndex>,
         data_dir: &Path,
         id: &str,
     ) -> Self {
-        let mut cursor = Self {
+        Self {
             region,
             position: 0,
             started: false,
@@ -117,22 +125,46 @@ impl Cursor {
                 data_dir: data_dir.to_path_buf(),
                 id: id.to_owned(),
             }),
-        };
+        }
+    }
+
+    /// Construct a cursor bound to a durable checkpoint id. On
+    /// construction the persisted position (if any) is loaded and the
+    /// cursor resumes from it. Missing checkpoints yield a fresh cursor
+    /// at position 0; a corrupt checkpoint fails closed with
+    /// [`StoreError::CursorCheckpointCorrupt`].
+    pub(crate) fn new_with_checkpoint(
+        region: Region,
+        index: Arc<StoreIndex>,
+        data_dir: &Path,
+        id: &str,
+    ) -> Result<Self, StoreError> {
+        let mut cursor = Self::new_bound_checkpoint(region, index, data_dir, id);
         match Self::load_checkpoint(data_dir, id) {
             Ok(Some(ckpt)) => {
+                let expected_region = cursor.region.checkpoint_identity();
+                if ckpt.region_identity.as_deref() != Some(expected_region.as_str()) {
+                    return Err(StoreError::CursorCheckpointRegionMismatch {
+                        path: cursor_checkpoint_path(data_dir, id),
+                        stored: ckpt.region_identity,
+                        expected: expected_region,
+                    });
+                }
                 cursor.position = ckpt.position;
                 cursor.started = ckpt.started;
             }
             Ok(None) => {}
             Err(error) => {
-                tracing::warn!(
-                    cursor_id = %id,
-                    error = %error,
-                    "failed to load cursor checkpoint — starting fresh"
-                );
+                if error.kind() == std::io::ErrorKind::InvalidData {
+                    return Err(StoreError::CursorCheckpointCorrupt {
+                        path: cursor_checkpoint_path(data_dir, id),
+                        reason: error.to_string(),
+                    });
+                }
+                return Err(StoreError::Io(error));
             }
         }
-        cursor
+        Ok(cursor)
     }
 
     /// Poll for the next matching event at or after our current position.
@@ -182,7 +214,11 @@ impl Cursor {
         let Some(binding) = &self.durable else {
             return Ok(());
         };
-        let ckpt = CursorCheckpoint::from_checkpoint(self.position, self.started);
+        let ckpt = CursorCheckpoint::from_checkpoint(
+            self.position,
+            self.started,
+            self.region.checkpoint_identity(),
+        );
         Self::save_checkpoint(&binding.data_dir, &binding.id, &ckpt)
     }
 
@@ -190,9 +226,9 @@ impl Cursor {
     ///
     /// # Errors
     /// Returns an I/O error if the checkpoint file exists but cannot be
-    /// read. A decoding error yields `Ok(None)` — a corrupt checkpoint
-    /// is treated as a missing one because it never makes progress to
-    /// force a user-visible failure out of it.
+    /// read. A decoding error yields `io::ErrorKind::InvalidData` so
+    /// durable-resume callers can fail closed instead of silently
+    /// rewinding to position 0.
     pub fn load_checkpoint(data_dir: &Path, id: &str) -> std::io::Result<Option<CursorCheckpoint>> {
         let path = cursor_checkpoint_path(data_dir, id);
         let bytes = match std::fs::read(&path) {
@@ -202,14 +238,10 @@ impl Cursor {
         };
         match rmp_serde::from_slice::<CursorCheckpoint>(&bytes) {
             Ok(ckpt) => Ok(Some(ckpt)),
-            Err(error) => {
-                tracing::warn!(
-                    cursor_id = %id,
-                    error = %error,
-                    "cursor checkpoint decode failed — treating as missing"
-                );
-                Ok(None)
-            }
+            Err(error) => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("cursor checkpoint decode failed: {error}"),
+            )),
         }
     }
 
@@ -275,6 +307,44 @@ pub enum CursorWorkerAction {
 /// worker exits.
 pub(crate) type RestartBudgetExhaustedCallback = Box<dyn FnOnce() + Send + 'static>;
 
+/// G5: callback invoked when a **durable** cursor checkpoint write fails.
+/// Only fires for cursors constructed with `checkpoint_id: Some(_)`;
+/// in-memory cursors never call this because they perform no file
+/// write. The callback receives the checkpoint `id` and the underlying
+/// `io::Error` so the reactor runner can stash a
+/// `ReactorError::Store(StoreError::CheckpointWriteFailed { .. })` in
+/// its error slot before the worker exits. No silent downgrade of
+/// durable-resume — a persist failure escalates to a hard error.
+pub(crate) type CheckpointFailureCallback = Box<dyn FnMut(&str, std::io::Error) + Send + 'static>;
+
+fn checkpoint_write_failed(id: &str, error: &std::io::Error) -> StoreError {
+    StoreError::CheckpointWriteFailed {
+        id: id.to_string(),
+        source: std::io::Error::new(error.kind(), error.to_string()),
+    }
+}
+
+fn build_worker_cursor(
+    region: &Region,
+    index: &Arc<StoreIndex>,
+    data_dir: &Path,
+    checkpoint_id: Option<&str>,
+    load_saved_checkpoint: bool,
+) -> Result<Cursor, StoreError> {
+    match checkpoint_id {
+        Some(id) if load_saved_checkpoint => {
+            Cursor::new_with_checkpoint(region.clone(), Arc::clone(index), data_dir, id)
+        }
+        Some(id) => Ok(Cursor::new_bound_checkpoint(
+            region.clone(),
+            Arc::clone(index),
+            data_dir,
+            id,
+        )),
+        None => Ok(Cursor::new(region.clone(), Arc::clone(index))),
+    }
+}
+
 /// Configuration for a supervised cursor worker thread.
 ///
 /// This struct is `#[non_exhaustive]` — external callers should
@@ -296,19 +366,36 @@ pub struct CursorWorkerConfig {
     /// Optional durable-checkpoint id. When `Some`, the worker's cursor
     /// is constructed with `new_with_checkpoint`, resumes from the
     /// persisted position on startup, and writes a fresh checkpoint
-    /// after every successful poll batch.
+    /// after every successful poll batch. The checkpoint is bound to the
+    /// exact `Region` this worker is consuming; reusing the same id for a
+    /// different region fails closed at startup. If checkpoint persist
+    /// fails, the worker stops and the failure surfaces through
+    /// [`CursorWorkerHandle::join`] / [`CursorWorkerHandle::stop_and_join`]
+    /// as [`StoreError::CheckpointWriteFailed`]. Startup checkpoint load
+    /// and validation failures (`CursorCheckpointCorrupt`,
+    /// `CursorCheckpointRegionMismatch`, or checkpoint read I/O errors)
+    /// also stop the worker before the first batch and are observed from
+    /// `join()` / `stop_and_join()`.
     pub checkpoint_id: Option<String>,
     /// Optional callback fired once when the restart budget is
     /// exhausted, before the worker exits. Used by the reactor runner
     /// to populate its error slot with `RestartBudgetExhausted`.
     pub(crate) on_restart_budget_exhausted: Option<RestartBudgetExhaustedCallback>,
+    /// G5: optional callback fired when a durable checkpoint write
+    /// fails. Used by the reactor runner to populate its error slot
+    /// with `StoreError::CheckpointWriteFailed`. In-memory cursors
+    /// never invoke this (no file write); it is strictly a durable-
+    /// resume safeguard.
+    pub(crate) on_checkpoint_failure: Option<CheckpointFailureCallback>,
 }
 
 impl Clone for CursorWorkerConfig {
-    // The callback is not cloneable — it is a one-shot `FnOnce`. Cloning
-    // a `CursorWorkerConfig` drops the callback rather than duplicating
-    // it, which matches every existing caller's expectation: the clone
-    // is for configuration reuse, not for spawning a second worker.
+    // The callbacks are not cloneable — they hold `FnOnce` / `FnMut`
+    // closures that capture writer-side state. Cloning a
+    // `CursorWorkerConfig` drops the callbacks rather than duplicating
+    // them, which matches every existing caller's expectation: the
+    // clone is for configuration reuse, not for spawning a second
+    // worker.
     fn clone(&self) -> Self {
         Self {
             batch_size: self.batch_size,
@@ -316,6 +403,7 @@ impl Clone for CursorWorkerConfig {
             restart: self.restart.clone(),
             checkpoint_id: self.checkpoint_id.clone(),
             on_restart_budget_exhausted: None,
+            on_checkpoint_failure: None,
         }
     }
 }
@@ -331,6 +419,10 @@ impl std::fmt::Debug for CursorWorkerConfig {
                 "on_restart_budget_exhausted",
                 &self.on_restart_budget_exhausted.is_some(),
             )
+            .field(
+                "on_checkpoint_failure",
+                &self.on_checkpoint_failure.is_some(),
+            )
             .finish()
     }
 }
@@ -343,6 +435,7 @@ impl Default for CursorWorkerConfig {
             restart: RestartPolicy::Once,
             checkpoint_id: None,
             on_restart_budget_exhausted: None,
+            on_checkpoint_failure: None,
         }
     }
 }
@@ -351,9 +444,21 @@ impl Default for CursorWorkerConfig {
 pub struct CursorWorkerHandle {
     stop: Arc<AtomicBool>,
     join: Option<std::thread::JoinHandle<()>>,
+    error_slot: Arc<Mutex<Option<StoreError>>>,
 }
 
 impl CursorWorkerHandle {
+    fn finish_join(&mut self) -> Result<(), StoreError> {
+        if let Some(join) = self.join.take() {
+            join.join().map_err(|_| StoreError::WriterCrashed)?;
+        }
+        let mut guard = self
+            .error_slot
+            .lock()
+            .map_err(|_| StoreError::WriterCrashed)?;
+        guard.take().map_or(Ok(()), Err)
+    }
+
     /// Request a clean stop. The worker exits after the current iteration.
     pub fn stop(&self) {
         self.stop.store(true, Ordering::Release);
@@ -370,12 +475,15 @@ impl CursorWorkerHandle {
     ///
     /// # Errors
     /// Returns [`StoreError::WriterCrashed`] if the worker thread
-    /// panicked before it could exit cleanly.
+    /// panicked before it could exit cleanly, or
+    /// [`StoreError::CheckpointWriteFailed`] if a durable worker
+    /// (`checkpoint_id: Some(_)`) failed to persist its checkpoint
+    /// before exit. Startup checkpoint load and validation failures
+    /// (`CursorCheckpointCorrupt`, `CursorCheckpointRegionMismatch`, or
+    /// checkpoint read I/O errors) also surface here because worker
+    /// startup is asynchronous.
     pub fn join(mut self) -> Result<(), StoreError> {
-        if let Some(join) = self.join.take() {
-            join.join().map_err(|_| StoreError::WriterCrashed)?;
-        }
-        Ok(())
+        self.finish_join()
     }
 
     /// Signal stop, then wait for the worker thread to exit.
@@ -387,13 +495,16 @@ impl CursorWorkerHandle {
     ///
     /// # Errors
     /// Returns [`StoreError::WriterCrashed`] if the worker thread
-    /// panicked before it could exit cleanly.
+    /// panicked before it could exit cleanly, or
+    /// [`StoreError::CheckpointWriteFailed`] if a durable worker
+    /// (`checkpoint_id: Some(_)`) failed to persist its checkpoint
+    /// before exit. Startup checkpoint load and validation failures
+    /// (`CursorCheckpointCorrupt`, `CursorCheckpointRegionMismatch`, or
+    /// checkpoint read I/O errors) also surface here because worker
+    /// startup is asynchronous.
     pub fn stop_and_join(mut self) -> Result<(), StoreError> {
         self.stop();
-        if let Some(join) = self.join.take() {
-            join.join().map_err(|_| StoreError::WriterCrashed)?;
-        }
-        Ok(())
+        self.finish_join()
     }
 }
 
@@ -404,7 +515,15 @@ impl Drop for CursorWorkerHandle {
 }
 
 impl Store<crate::store::Open> {
-    /// Spawn a supervised cursor worker that processes guaranteed-delivery batches.
+    /// Spawn a supervised cursor worker that processes ordered pull batches,
+    /// with durable at-least-once semantics when `checkpoint_id` is set.
+    /// A durable worker either persists its cursor position after each
+    /// successful batch or stops and reports
+    /// [`StoreError::CheckpointWriteFailed`] through the returned handle's
+    /// `join` path; it does not silently degrade to process-local resume.
+    /// Startup checkpoint load and validation failures are also reported
+    /// through the returned handle because the worker initializes
+    /// asynchronously on its own thread.
     ///
     /// # Errors
     /// Returns [`StoreError::Io`] if the background worker thread cannot be
@@ -422,30 +541,49 @@ impl Store<crate::store::Open> {
         let region = region.clone();
         let stop = Arc::new(AtomicBool::new(false));
         let stop_thread = Arc::clone(&stop);
+        let error_slot = Arc::new(Mutex::new(None));
+        let error_slot_thread = Arc::clone(&error_slot);
         let CursorWorkerConfig {
             batch_size,
             idle_sleep,
             restart,
             checkpoint_id,
             on_restart_budget_exhausted,
+            on_checkpoint_failure,
         } = config;
 
         let join = std::thread::Builder::new()
             .name("batpak-cursor-worker".into())
             .spawn(move || {
-                let mut cursor = match checkpoint_id.clone() {
-                    Some(id) => Cursor::new_with_checkpoint(
-                        region.clone(),
-                        Arc::clone(&store.index),
-                        &store.config.data_dir,
-                        &id,
-                    ),
-                    None => store.cursor_guaranteed(&region),
+                let mut cursor = match build_worker_cursor(
+                    &region,
+                    &store.index,
+                    &store.config.data_dir,
+                    checkpoint_id.as_deref(),
+                    true,
+                ) {
+                    Ok(cursor) => cursor,
+                    Err(error) => {
+                        if let Ok(mut guard) = error_slot_thread.lock() {
+                            if guard.is_none() {
+                                *guard = Some(error);
+                            }
+                        }
+                        stop_thread.store(true, Ordering::Release);
+                        return;
+                    }
                 };
                 let mut committed = cursor.checkpoint();
                 let mut restarts = 0u32;
                 let mut window_start = Instant::now();
                 let mut budget_callback = on_restart_budget_exhausted;
+                let checkpoint_error_slot = Arc::clone(&error_slot_thread);
+                // G5: the durable-persist failure callback. For in-memory
+                // cursors this slot stays `None` and the persist path is a
+                // no-op; for durable cursors this callback stashes a
+                // `ReactorError::Store(StoreError::CheckpointWriteFailed)`
+                // in the reactor runner's error slot before we stop.
+                let mut checkpoint_failure_callback = on_checkpoint_failure;
 
                 while !stop_thread.load(Ordering::Acquire) {
                     let batch = cursor.poll_batch(batch_size);
@@ -460,24 +598,79 @@ impl Store<crate::store::Open> {
 
                     match result {
                         Ok(CursorWorkerAction::Continue) => {
-                            committed = cursor.checkpoint();
+                            let next_checkpoint = cursor.checkpoint();
                             if let Err(error) = cursor.persist_current() {
-                                tracing::error!(
-                                    error = %error,
-                                    "cursor checkpoint persist failed — \
-                                     continuing in-memory; a crash before \
-                                     the next successful persist will \
-                                     re-deliver this batch"
-                                );
+                                // G5: durable-cursor persist failure is a
+                                // hard error. For in-memory cursors
+                                // `persist_current` is a no-op so this
+                                // branch is only reached when
+                                // `checkpoint_id: Some(_)` was supplied.
+                                // Stash via callback (so the reactor
+                                // runner surfaces CheckpointWriteFailed
+                                // through its join handle) AND roll the
+                                // cursor back to the last committed
+                                // position so the batch is re-delivered
+                                // on restart. No silent downgrade.
+                                let Some(id) = checkpoint_id.as_deref() else {
+                                    debug_assert!(
+                                        false,
+                                        "in-memory cursor checkpoint persist failure is unreachable"
+                                    );
+                                    stop_thread.store(true, Ordering::Release);
+                                    continue;
+                                };
+                                if let Ok(mut guard) = checkpoint_error_slot.lock() {
+                                    if guard.is_none() {
+                                        *guard = Some(checkpoint_write_failed(id, &error));
+                                    }
+                                }
+                                if let Some(cb) = checkpoint_failure_callback.as_mut() {
+                                    cb(id, error);
+                                } else {
+                                    tracing::error!(
+                                        cursor_id = %id,
+                                        "durable cursor checkpoint persist failed; no \
+                                         failure callback wired — stopping worker to \
+                                         avoid silent durable-resume regression"
+                                    );
+                                }
+                                cursor.restore_checkpoint(committed.0, committed.1);
+                                stop_thread.store(true, Ordering::Release);
+                                continue;
                             }
+                            committed = next_checkpoint;
                         }
                         Ok(CursorWorkerAction::Stop) => {
-                            committed = cursor.checkpoint();
+                            let final_checkpoint = cursor.checkpoint();
                             if let Err(error) = cursor.persist_current() {
-                                tracing::error!(
-                                    error = %error,
-                                    "cursor checkpoint persist failed on clean stop"
-                                );
+                                // G5: same hard-error contract on clean
+                                // stop — a durable cursor that cannot
+                                // persist must surface the error rather
+                                // than silently lose progress.
+                                let Some(id) = checkpoint_id.as_deref() else {
+                                    debug_assert!(
+                                        false,
+                                        "in-memory cursor checkpoint persist failure is unreachable"
+                                    );
+                                    stop_thread.store(true, Ordering::Release);
+                                    continue;
+                                };
+                                if let Ok(mut guard) = checkpoint_error_slot.lock() {
+                                    if guard.is_none() {
+                                        *guard = Some(checkpoint_write_failed(id, &error));
+                                    }
+                                }
+                                if let Some(cb) = checkpoint_failure_callback.as_mut() {
+                                    cb(id, error);
+                                } else {
+                                    tracing::error!(
+                                        cursor_id = %id,
+                                        "durable cursor checkpoint persist failed on \
+                                         clean stop; no failure callback wired"
+                                    );
+                                }
+                            } else {
+                                committed = final_checkpoint;
                             }
                             stop_thread.store(true, Ordering::Release);
                         }
@@ -540,14 +733,23 @@ impl Store<crate::store::Open> {
                             tracing::warn!(
                                 "cursor worker panicked; restarting from last checkpoint"
                             );
-                            cursor = match checkpoint_id.clone() {
-                                Some(id) => Cursor::new_with_checkpoint(
-                                    region.clone(),
-                                    Arc::clone(&store.index),
-                                    &store.config.data_dir,
-                                    &id,
-                                ),
-                                None => store.cursor_guaranteed(&region),
+                            cursor = match build_worker_cursor(
+                                &region,
+                                &store.index,
+                                &store.config.data_dir,
+                                checkpoint_id.as_deref(),
+                                false,
+                            ) {
+                                Ok(cursor) => cursor,
+                                Err(error) => {
+                                    if let Ok(mut guard) = error_slot_thread.lock() {
+                                        if guard.is_none() {
+                                            *guard = Some(error);
+                                        }
+                                    }
+                                    stop_thread.store(true, Ordering::Release);
+                                    continue;
+                                }
                             };
                             cursor.restore_checkpoint(committed.0, committed.1);
                         }
@@ -559,6 +761,7 @@ impl Store<crate::store::Open> {
         Ok(CursorWorkerHandle {
             stop,
             join: Some(join),
+            error_slot,
         })
     }
 }

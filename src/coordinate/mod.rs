@@ -327,4 +327,23 @@ impl Region {
         // clock_range is not checked here — it's for index queries, not live filtering.
         true
     }
+
+    /// Stable identity string for persisted cursor checkpoints.
+    pub(crate) fn checkpoint_identity(&self) -> String {
+        let entity = self.entity_prefix.as_deref().unwrap_or("*");
+        let scope = self.scope.as_deref().unwrap_or("*");
+        let fact = match self.fact.as_ref() {
+            Some(KindFilter::Exact(kind)) => {
+                format!("exact:{:x}:{:x}", kind.category(), kind.type_id())
+            }
+            Some(KindFilter::Category(cat)) => format!("category:{cat:x}"),
+            Some(KindFilter::Any) => "any".to_owned(),
+            None => "none".to_owned(),
+        };
+        let clock = match self.clock_range {
+            Some((start, end)) => format!("{start}-{end}"),
+            None => "*".to_owned(),
+        };
+        format!("entity={entity}|scope={scope}|fact={fact}|clock={clock}")
+    }
 }

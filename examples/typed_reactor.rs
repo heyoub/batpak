@@ -6,13 +6,15 @@
 //! surfacing as `ReactorError::Decode` and the observable-state wait pattern.
 //!
 //! Demonstrates a typed reactor that watches for `PayloadA` events and emits
-//! one `PayloadB` reaction per source event, atomically flushed via
-//! `ReactionBatch`. The main thread waits on observable state
+//! one `PayloadB` reaction per source event, flushed via `ReactionBatch`.
+//! Each source-event batch append is atomic on its own; the overall reactor
+//! remains at-least-once. The main thread waits on observable state
 //! (`by_fact_typed::<PayloadB>().len() >= 4`) before stopping the reactor —
 //! no pre-stop sleeps.
 //!
 //! Semantics (see ADR-0011):
-//!   * At-least-once delivery via `cursor_guaranteed` — never drops events.
+//!   * At-least-once delivery via the cursor canal (process-lifetime in this
+//!     example; durable across restarts only when `checkpoint_id` is set).
 //!   * Wrong-kind events are filtered silently (no handler call, no error).
 //!   * Matched-kind decode failures stop the loop with
 //!     `ReactorError::Decode` (hard correctness signal).

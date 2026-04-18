@@ -527,7 +527,6 @@ pub(crate) fn restore_from_checkpoint(
     interner_strings: &[String],
     stored_allocator: u64,
 ) -> Result<(), StoreError> {
-    index.clear();
     index.interner.replace_from_full_snapshot(interner_strings);
     let mut rebuilt_entries = Vec::with_capacity(entries.len());
 

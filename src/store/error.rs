@@ -1,4 +1,5 @@
 use crate::coordinate::CoordinateError;
+use std::path::PathBuf;
 
 /// StoreError: every error the store can produce.
 #[derive(Debug)]
@@ -128,6 +129,76 @@ pub enum StoreError {
     CoordinatePathTraversal,
     /// A coordinate component contained a forbidden ASCII control character.
     CoordinateControlChar,
+    /// The on-disk hidden-ranges metadata file is present but unreadable.
+    ///
+    /// Cold start must fail closed: a corrupt visibility-ranges file cannot be
+    /// silently treated as empty, because doing so would resurrect cancelled
+    /// events. The caller must remediate (repair or manually clear the file)
+    /// before proceeding.
+    HiddenRangesCorrupt {
+        /// Path of the unreadable metadata file.
+        path: PathBuf,
+        /// Human-readable description of why the file could not be parsed.
+        reason: String,
+    },
+    /// A batch item's serialized payload exceeded `single_append_max_bytes`.
+    ///
+    /// The per-item ceiling is independent of the batch-total cap: a single
+    /// oversized item is rejected synchronously at `submit_batch` entry even
+    /// when the sum of all item payloads stays under the batch cap.
+    BatchItemTooLarge {
+        /// Index of the offending item within the batch (0-based).
+        index: usize,
+        /// Serialized payload size of the offending item, in bytes.
+        size: usize,
+        /// Configured per-item ceiling (`single_append_max_bytes`).
+        limit: usize,
+    },
+    /// An entity's per-entity clock reached `u32::MAX`; further appends to
+    /// that entity are rejected rather than silently saturating. See F1 /
+    /// the INVARIANT doc at the mutation site in
+    /// `store/write/writer.rs::precompute_batch_items`.
+    EntityClockOverflow {
+        /// Entity whose clock would have overflowed.
+        entity: String,
+    },
+    /// A durable cursor checkpoint write failed. Only raised for cursors
+    /// constructed with `checkpoint_id: Some(_)`; in-memory cursors have
+    /// no file write and cannot produce this error. See G5.
+    CheckpointWriteFailed {
+        /// The cursor checkpoint identifier (i.e. the file stem under
+        /// `{data_dir}/cursors/{id}.ckpt`).
+        id: String,
+        /// The underlying I/O error from temp-file creation, write,
+        /// fsync, or rename.
+        source: std::io::Error,
+    },
+    /// A durable cursor checkpoint file exists but cannot be decoded.
+    ///
+    /// Durable resume must fail closed: silently treating a corrupt
+    /// checkpoint as missing would rewind the worker to position 0 and
+    /// re-deliver an unbounded prefix while claiming the durable surface
+    /// was still intact.
+    CursorCheckpointCorrupt {
+        /// Path of the corrupt checkpoint file.
+        path: PathBuf,
+        /// Human-readable decode failure.
+        reason: String,
+    },
+    /// A durable cursor checkpoint belongs to a different logical consumer.
+    ///
+    /// Checkpoints are bound to the exact region identity of the cursor
+    /// that created them. Reusing a `checkpoint_id` across different
+    /// regions must fail closed rather than silently resuming from an
+    /// unrelated global position.
+    CursorCheckpointRegionMismatch {
+        /// Path of the mismatched checkpoint file.
+        path: PathBuf,
+        /// Region identity encoded in the checkpoint on disk.
+        stored: Option<String>,
+        /// Region identity expected by the caller.
+        expected: String,
+    },
 }
 
 impl std::fmt::Display for StoreError {
@@ -227,6 +298,38 @@ impl std::fmt::Display for StoreError {
                 f,
                 "coordinate component contains forbidden ASCII control character"
             ),
+            Self::HiddenRangesCorrupt { path, reason } => write!(
+                f,
+                "hidden-ranges metadata at {} is corrupt: {reason}",
+                path.display()
+            ),
+            Self::BatchItemTooLarge { index, size, limit } => write!(
+                f,
+                "batch item {index} payload size {size} exceeds per-item ceiling {limit}"
+            ),
+            Self::EntityClockOverflow { entity } => write!(
+                f,
+                "entity {entity} per-entity clock reached u32::MAX; further appends rejected"
+            ),
+            Self::CheckpointWriteFailed { id, source } => {
+                write!(f, "cursor checkpoint {id} write failed: {source}")
+            }
+            Self::CursorCheckpointCorrupt { path, reason } => write!(
+                f,
+                "durable cursor checkpoint at {} is corrupt: {reason}",
+                path.display()
+            ),
+            Self::CursorCheckpointRegionMismatch {
+                path,
+                stored,
+                expected,
+            } => write!(
+                f,
+                "durable cursor checkpoint at {} belongs to region {:?}, expected {}",
+                path.display(),
+                stored,
+                expected
+            ),
         }
     }
 }
@@ -259,8 +362,14 @@ impl std::error::Error for StoreError {
             | Self::InvalidCommitMetadata { .. }
             | Self::CoordinateNulByte
             | Self::CoordinatePathTraversal
-            | Self::CoordinateControlChar => None,
+            | Self::CoordinateControlChar
+            | Self::HiddenRangesCorrupt { .. }
+            | Self::BatchItemTooLarge { .. }
+            | Self::EntityClockOverflow { .. }
+            | Self::CursorCheckpointCorrupt { .. }
+            | Self::CursorCheckpointRegionMismatch { .. } => None,
             Self::BatchFailed { source, .. } => Some(source.as_ref()),
+            Self::CheckpointWriteFailed { source, .. } => Some(source),
             #[cfg(feature = "dangerous-test-hooks")]
             Self::FaultInjected(_) => None,
         }

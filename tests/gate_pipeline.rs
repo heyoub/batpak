@@ -3,7 +3,7 @@
 //! Gate and Pipeline integration tests.
 //! Registration order, fail-fast evaluation, Receipt TOCTOU guarantee, consumed-once.
 //!
-//! PROVES: LAW-001 (No Fake Success), LAW-004 (Composition Over Construction)
+//! PROVES: LAW-004 (Composition Over Construction)
 //! DEFENDS: FM-022 (Receipt Hollowing — Receipt is sealed, single-use)
 //! INVARIANTS: INV-STATE (gate evaluation state machine), INV-SEC (Receipt seal)
 
@@ -395,14 +395,14 @@ fn bypass_receipt_into_payload_consumes_and_returns() {
 }
 
 #[test]
-fn bypass_through_full_pipeline_commits_to_store() {
+fn bypass_receipt_payload_commits_to_store() {
     use batpak::store::{Store, StoreConfig};
     let dir = tempfile::TempDir::new().expect("temp dir");
     let store = Store::open(StoreConfig::new(dir.path())).expect("open");
     let coord = Coordinate::new("bypass:entity", "bypass:scope").expect("valid");
     let kind = EventKind::custom(1, 1);
 
-    // Bypass gates entirely
+    // Build a bypass receipt, then commit its payload manually through the store.
     let bypass_receipt = Pipeline::<()>::bypass(
         Proposal::new(serde_json::json!({"bypassed": true})),
         &TestBypassReason,
@@ -474,6 +474,32 @@ fn pipeline_bypass_returns_bypass_receipt() {
 }
 
 #[test]
+fn commit_bypass_preserves_approved_by() {
+    let receipt = batpak::pipeline::Pipeline::<()>::bypass(
+        Proposal::new("test".to_string()),
+        &STRAGGLERS_TEST_BYPASS,
+    )
+    .with_approved_by("ops-42");
+    let committed: Committed<String> =
+        batpak::pipeline::Pipeline::<()>::commit_bypass(receipt, |_| {
+            let metadata = match CommitMetadata::new(7, 9, [0x11; 32]) {
+                Ok(metadata) => metadata,
+                Err(err) => panic!("test constructs known-valid commit metadata: {err:?}"),
+            };
+            Ok::<_, StoreError>(metadata)
+        })
+        .expect("commit");
+
+    assert_eq!(
+        committed
+            .bypass_audit()
+            .and_then(|audit| audit.approved_by.as_deref()),
+        Some("ops-42"),
+        "PROPERTY: commit_bypass must preserve the bypass approver identity."
+    );
+}
+
+#[test]
 fn proposal_map_transforms_payload() {
     let proposal = Proposal::new(21);
     let doubled = proposal.map(|x| x * 2);
@@ -512,6 +538,11 @@ fn committed_accessors_expose_only_read_only_metadata() {
     let event_id = committed.event_id();
     let sequence = committed.sequence();
     let hash = committed.hash();
+    let audit: &batpak::pipeline::BypassAudit = committed
+        .bypass_audit()
+        .expect("commit_bypass should preserve bypass audit");
+    let approved_by = audit.approved_by.as_deref();
+    let approved_by_is_none = approved_by.is_none();
 
     assert_eq!(
         payload,
@@ -525,6 +556,18 @@ fn committed_accessors_expose_only_read_only_metadata() {
     );
     assert_eq!(sequence, 42);
     assert_eq!(hash, &[0xAA; 32]);
+    assert_eq!(
+        audit.reason, "test_bypass",
+        "PROPERTY: Committed::bypass_audit must preserve the bypass reason."
+    );
+    assert_eq!(
+        audit.justification, "testing bypass audit trail",
+        "PROPERTY: Committed::bypass_audit must preserve the bypass justification."
+    );
+    assert!(
+        approved_by_is_none,
+        "PROPERTY: Committed::bypass_audit must preserve the approver field."
+    );
 }
 
 #[test]

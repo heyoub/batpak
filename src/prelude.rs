@@ -7,7 +7,7 @@ pub use crate::event::{
     RawMsgpackInput, ReplayLane, StoredEvent, TypedDecodeError,
 };
 pub use crate::guard::{Denial, Gate, GateSet, Receipt};
-pub use crate::id::EventId;
+pub use crate::id::{CausationId, CorrelationId, EventId};
 pub use crate::outcome::{ErrorKind, Outcome, OutcomeError};
 pub use crate::pipeline::{CommitMetadata, Committed, Pipeline, Proposal};
 pub use crate::store::delivery::cursor::{

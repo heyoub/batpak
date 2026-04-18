@@ -243,12 +243,7 @@ fn outcome_ok_round_trip() {
 
 #[test]
 fn outcome_err_round_trip() {
-    let outcome: Outcome<i32> = Outcome::Err(OutcomeError {
-        kind: ErrorKind::NotFound,
-        message: "not found".into(),
-        compensation: None,
-        retryable: false,
-    });
+    let outcome: Outcome<i32> = Outcome::Err(OutcomeError::new(ErrorKind::NotFound, "not found"));
     let json = serde_json::to_string(&outcome).expect("serialize");
     let decoded: Outcome<i32> = serde_json::from_str(&json).expect("deserialize");
     assert_eq!(
@@ -265,12 +260,7 @@ fn outcome_batch_round_trip() {
     let outcome: Outcome<i32> = Outcome::Batch(vec![
         Outcome::Ok(1),
         Outcome::Ok(2),
-        Outcome::Err(OutcomeError {
-            kind: ErrorKind::Internal,
-            message: "fail".into(),
-            compensation: None,
-            retryable: true,
-        }),
+        Outcome::Err(OutcomeError::new(ErrorKind::Internal, "fail")),
     ]);
     let json = serde_json::to_string(&outcome).expect("serialize");
     let decoded: Outcome<i32> = serde_json::from_str(&json).expect("deserialize");
@@ -325,8 +315,9 @@ fn committed_api_contract() {
     assert_eq!(committed_sequence, sequence);
     assert_eq!(committed_hash, &hash);
 
-    let (payload, meta2) = committed.into_parts();
+    let (payload, meta2, audit2) = committed.into_parts();
     assert_eq!(payload, "payload");
+    assert!(audit2.is_some(), "bypass audit must survive into_parts()");
     let meta2_event_id = meta2.event_id();
     let meta2_sequence = meta2.sequence();
     let meta2_hash = meta2.hash();

@@ -46,6 +46,7 @@ fn cursor_checkpoint_round_trips_through_save_and_load() {
         position: 42,
         started: true,
         process_boot_ns: None,
+        region_identity: Some("entity=entity:roundtrip|scope=*|fact=none|clock=*".to_owned()),
     };
 
     Cursor::save_checkpoint(dir.path(), CHECKPOINT_ID, &checkpoint).expect("save checkpoint");
@@ -54,6 +55,45 @@ fn cursor_checkpoint_round_trips_through_save_and_load() {
         .expect("checkpoint should exist");
 
     assert_eq!(loaded, checkpoint);
+}
+
+#[test]
+fn cursor_worker_fails_closed_on_corrupt_checkpoint() {
+    let dir = TempDir::new().expect("temp dir");
+    let checkpoint_dir = dir.path().join("cursors");
+    std::fs::create_dir_all(&checkpoint_dir).expect("create cursor dir");
+    let checkpoint_path = checkpoint_dir.join("corrupt-start.ckpt");
+    std::fs::write(&checkpoint_path, b"not-msgpack").expect("write corrupt checkpoint");
+
+    let store = Arc::new(Store::open(config(&dir)).expect("open store"));
+    let mut worker_config = CursorWorkerConfig::default();
+    worker_config.batch_size = 1;
+    worker_config.idle_sleep = Duration::from_millis(1);
+    worker_config.restart = RestartPolicy::Once;
+    worker_config.checkpoint_id = Some("corrupt-start".into());
+
+    let worker = store
+        .cursor_worker(
+            &Region::entity("entity:cursor-corrupt"),
+            worker_config,
+            |_batch, _store| CursorWorkerAction::Stop,
+        )
+        .expect("spawn cursor worker");
+
+    let err = match worker.join() {
+        Ok(()) => panic!("PROPERTY: corrupt durable checkpoint must fail closed on startup"),
+        Err(err) => err,
+    };
+    let batpak::store::StoreError::CursorCheckpointCorrupt { path, .. } = err else {
+        panic!("expected CursorCheckpointCorrupt");
+    };
+    assert_eq!(path, checkpoint_path);
+
+    let store = match Arc::try_unwrap(store) {
+        Ok(store) => store,
+        Err(_) => panic!("cursor worker must release its Arc before close"),
+    };
+    store.close().expect("close store after corrupt checkpoint");
 }
 
 #[test]
@@ -212,4 +252,123 @@ fn cursor_resumes_from_checkpoint_across_reopen() {
         };
         store.close().expect("close store after second pass");
     }
+}
+
+#[test]
+fn cursor_worker_rejects_checkpoint_id_reused_for_different_region() {
+    let dir = TempDir::new().expect("temp dir");
+    let coord_a = Coordinate::new("entity:cursor-a", "scope:test").expect("coord a");
+    let coord_b = Coordinate::new("entity:cursor-b", "scope:test").expect("coord b");
+    let store = Arc::new(Store::open(config(&dir)).expect("open store"));
+
+    store
+        .append(&coord_a, KIND, &serde_json::json!({"i": 0}))
+        .expect("append a");
+    store
+        .append(&coord_b, KIND, &serde_json::json!({"i": 1}))
+        .expect("append b");
+
+    let mut worker_config = CursorWorkerConfig::default();
+    worker_config.batch_size = 1;
+    worker_config.idle_sleep = Duration::from_millis(1);
+    worker_config.restart = RestartPolicy::Once;
+    worker_config.checkpoint_id = Some("region-bound".into());
+    let first_worker = store
+        .cursor_worker(
+            &Region::entity("entity:cursor-a"),
+            worker_config.clone(),
+            |_batch, _store| CursorWorkerAction::Stop,
+        )
+        .expect("spawn first worker");
+    first_worker.join().expect("first worker join");
+
+    let second_worker = store
+        .cursor_worker(
+            &Region::entity("entity:cursor-b"),
+            worker_config,
+            |_batch, _store| CursorWorkerAction::Stop,
+        )
+        .expect("spawn second worker");
+    let err = match second_worker.join() {
+        Ok(()) => panic!("PROPERTY: checkpoint_id reused for a different region must fail closed"),
+        Err(err) => err,
+    };
+    let batpak::store::StoreError::CursorCheckpointRegionMismatch { expected, .. } = err else {
+        panic!("expected CursorCheckpointRegionMismatch");
+    };
+    assert!(
+        expected.contains("entity:cursor-b"),
+        "expected region identity should mention the second worker's entity filter"
+    );
+
+    let store = match Arc::try_unwrap(store) {
+        Ok(store) => store,
+        Err(_) => panic!("cursor workers must release their Arc before close"),
+    };
+    store.close().expect("close store");
+}
+
+#[test]
+fn cursor_worker_surfaces_checkpoint_write_failure_through_join() {
+    let dir = TempDir::new().expect("temp dir");
+    let coord = Coordinate::new("entity:cursor-ckpt-fail", "scope:test").expect("valid coord");
+    let store = Arc::new(Store::open(config(&dir)).expect("open store"));
+
+    // Allow startup to bind the durable cursor. The handler will create a
+    // blocking directory at the final checkpoint path immediately before the
+    // worker tries to persist, so startup stays clean and the write path
+    // fails deterministically.
+    let cursor_dir = dir.path().join("cursors");
+    std::fs::create_dir_all(&cursor_dir).expect("create cursor dir");
+
+    let processed = Arc::new(AtomicU64::new(0));
+    let worker = {
+        let processed = Arc::clone(&processed);
+        let checkpoint_blocker_root = dir.path().to_path_buf();
+        let mut worker_config = CursorWorkerConfig::default();
+        worker_config.batch_size = 1;
+        worker_config.idle_sleep = Duration::from_millis(1);
+        worker_config.restart = RestartPolicy::Once;
+        worker_config.checkpoint_id = Some("checkpoint-write-fails".into());
+        store
+            .cursor_worker(
+                &Region::entity("entity:cursor-ckpt-fail"),
+                worker_config,
+                move |batch, _store| {
+                    processed.fetch_add(batch.len() as u64, Ordering::SeqCst);
+                    std::fs::create_dir_all(
+                        checkpoint_blocker_root
+                            .join("cursors")
+                            .join("checkpoint-write-fails.ckpt"),
+                    )
+                    .expect("create blocking checkpoint path");
+                    CursorWorkerAction::Stop
+                },
+            )
+            .expect("spawn cursor worker")
+    };
+
+    store
+        .append(&coord, KIND, &serde_json::json!({"i": 0}))
+        .expect("append");
+
+    let err = match worker.join() {
+        Ok(()) => panic!("PROPERTY: durable cursor worker must surface checkpoint write failure"),
+        Err(err) => err,
+    };
+    let batpak::store::StoreError::CheckpointWriteFailed { id, .. } = err else {
+        panic!("expected CheckpointWriteFailed");
+    };
+    assert_eq!(id, "checkpoint-write-fails");
+    assert_eq!(
+        processed.load(Ordering::SeqCst),
+        1,
+        "worker should process exactly one batch before surfacing the checkpoint failure"
+    );
+
+    let store = match Arc::try_unwrap(store) {
+        Ok(store) => store,
+        Err(_) => panic!("cursor worker must release its Arc before close"),
+    };
+    store.close().expect("close store after checkpoint failure");
 }

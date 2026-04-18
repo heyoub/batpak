@@ -21,14 +21,18 @@
 //!
 //! **Decode-failure contract (unified across T4b and T6).**
 //!
+//! Anchors: `INV-REPLAY-LANE-SELECTION`.
+//!
 //!   * Wrong kind (`route_typed` returns `Ok(None)`) → dispatcher returns
 //!     `Ok(())` with an empty batch; runner advances the checkpoint without
-//!     invoking user code. Normal filter, not an error.
+//!     invoking user code. Normal filter, not an error. **The reactor is
+//!     not invoked; the cursor advances silently.**
 //!   * Matched kind + decode failure (`route_typed` returns
 //!     `Err(TypedDecodeError)`) → dispatcher returns
 //!     `Err(ReactorStepError::Decode(_))`. Runner surfaces
 //!     `ReactorError::Decode` through the join handle. **Hard correctness
-//!     signal, never a silent skip.**
+//!     signal, never a silent skip; stops the loop immediately regardless
+//!     of restart policy.**
 //!   * User handler returns `Err(E)` → dispatcher returns
 //!     `Err(ReactorStepError::User(_))`. Runner surfaces
 //!     `ReactorError::User` through the join handle.
@@ -67,16 +71,24 @@ use crate::store::{Open, RestartPolicy, Store, StoreError};
 /// matched-kind events are delivered at-least-once within process
 /// lifetime. There is no exactly-once delivery: the canal does not
 /// coordinate delivery with the user handler's side effects, and
-/// handler-side idempotency is the caller's responsibility. A future
-/// durable-checkpoint option (see `CursorWorkerConfig::checkpoint_id`)
-/// extends at-least-once across restarts; the reactor surface does not
-/// expose that option today.
+/// handler-side idempotency is the caller's responsibility.
+///
+/// When `checkpoint_id` is `Some(id)` the cursor's position is persisted
+/// durably under `{data_dir}/cursors/{id}.ckpt` after each successfully
+/// flushed batch — the reactor then resumes from the last-committed
+/// position across process restarts (still at-least-once; callers still
+/// owe idempotency on the handler side). When `None` (the default) the
+/// cursor is in-memory only; at-least-once holds only within the process
+/// lifetime.
 #[derive(Clone, Debug)]
 pub struct ReactorConfig {
-    /// Max events per cursor poll. Each event is dispatched individually
-    /// and its `ReactionBatch` is flushed atomically before the next
-    /// event is processed; batching here only affects cursor-poll size,
-    /// not the reaction-flush granularity.
+    /// Max events per cursor poll. Each event is dispatched individually;
+    /// the resulting `ReactionBatch`es are gathered per cursor-batch, then
+    /// flushed sequentially after dispatch succeeds for the whole poll.
+    /// The cursor checkpoint advances only after that flush sequence
+    /// completes; if a later flush fails, earlier flushes remain durable and
+    /// the whole cursor-batch replays on restart. Batching here therefore
+    /// governs both cursor-poll size and the replay/idempotency window.
     pub batch_size: usize,
     /// Sleep when no matching events are available.
     pub idle_sleep: Duration,
@@ -100,12 +112,52 @@ pub struct ReactorConfig {
     ///   reaction-batch flush are also immediate-stop: they surface as
     ///   `ReactorError::Store` through the join handle.
     ///
+    /// # Decode-failure contract (restart-policy interaction)
+    ///
+    /// Anchor: `INV-REPLAY-LANE-SELECTION`.
+    ///
+    /// `restart_policy` governs **only** caught panics. The two route-typed
+    /// outcomes are observably distinct and neither is governed by
+    /// `restart_policy`:
+    ///
+    /// * `Ok(None)` from `route_typed` — kind mismatch. The reactor is
+    ///   NOT invoked; the cursor advances silently. This is a filter, not
+    ///   a retry.
+    /// * `Err(DecodeFailure)` from `route_typed` — matched kind, decode
+    ///   failed. Correctness signal: stops the loop immediately regardless
+    ///   of `restart_policy`; surfaces as
+    ///   [`ReactorError::Decode`](ReactorError::Decode). Restarts would
+    ///   loop forever on a deterministic decode failure, which is why the
+    ///   policy is bypassed.
+    ///
     /// On each caught panic the worker rolls the cursor back to the
     /// last committed checkpoint (so the failing batch is re-delivered)
     /// and consumes one restart slot. If the budget is exhausted the
     /// runner surfaces `ReactorError::RestartBudgetExhausted` via the
     /// join handle.
     pub restart_policy: RestartPolicy,
+    /// Durable checkpoint identifier, per FREEZE-5.
+    ///
+    /// * `None` (default) — in-memory cursor only; the reactor is
+    ///   at-least-once within the process lifetime. Cursor position is
+    ///   lost on restart.
+    /// * `Some(id)` — the reactor's underlying cursor is constructed via
+    ///   `Cursor::new_with_checkpoint` and its position is persisted to
+    ///   `{data_dir}/cursors/{id}.ckpt` after every successfully flushed
+    ///   cursor-batch. On process restart a reactor spawned with the same
+    ///   `id` resumes from the durable position, so at-least-once holds
+    ///   across restarts as well. The checkpoint is bound to the exact
+    ///   reactor `Region`; reusing the same id for a different region
+    ///   fails closed at startup. A crash between a partial flush sequence
+    ///   and checkpoint save re-delivers the most recent cursor-batch;
+    ///   handlers must therefore remain idempotent. A checkpoint write
+    ///   failure is surfaced as
+    ///   [`ReactorError::Store`] via `ReactorError::Store(
+    ///   StoreError::CheckpointWriteFailed)` (G5). Checkpoint load and
+    ///   validation failures are also asynchronous: they stop the worker
+    ///   before the first batch and surface from `handle.join()` /
+    ///   `stop_and_join()` as `ReactorError::Store(...)`.
+    pub checkpoint_id: Option<String>,
 }
 
 impl Default for ReactorConfig {
@@ -114,6 +166,7 @@ impl Default for ReactorConfig {
             batch_size: 64,
             idle_sleep: Duration::from_millis(10),
             restart_policy: RestartPolicy::Once,
+            checkpoint_id: None,
         }
     }
 }
@@ -164,6 +217,8 @@ pub struct TypedReactorHandle<E: std::error::Error + Send + Sync + 'static> {
     inner: CursorWorkerHandle,
     error_slot: Arc<Mutex<Option<ReactorError<E>>>>,
 }
+
+type CheckpointFailureCallback = dyn FnMut(&str, std::io::Error) + Send + 'static;
 
 impl<E: std::error::Error + Send + Sync + 'static> TypedReactorHandle<E> {
     /// Request a clean stop. The loop exits after the current dispatch.
@@ -251,6 +306,106 @@ pub(crate) trait ReactorDispatcher<P>: Send + 'static {
     ) -> Result<(), ReactorStepError<Self::Error>>;
 }
 
+/// Outcome of processing one cursor-batch's worth of events through the
+/// reactor. See [`dispatch_and_gather_batch`] for the replay/checkpoint
+/// protocol.
+enum BatchOutcome {
+    /// Flush succeeded and the cursor should advance / persist its
+    /// checkpoint for the batch.
+    Continue,
+    /// A step or flush step failed; the error was already stashed in the
+    /// shared slot. Caller should return `StopWithRollback` so the cursor
+    /// rolls back to the last-committed checkpoint.
+    Rollback,
+}
+
+/// G4: process one cursor-batch as one replay unit.
+///
+/// Protocol:
+///
+/// 1. For every polled entry in `entries`: fetch the stored event via
+///    `fetch`; dispatch it through the user's reactor; **gather** the
+///    resulting `ReactionBatch` into a per-batch `Vec<(ReactionBatch,
+///    correlation_id, causation_id)>`. **No reaction is flushed
+///    mid-dispatch.**
+/// 2. After every event in the polled batch has dispatched successfully,
+///    flush all gathered `ReactionBatch`es in order. If any flush fails
+///    mid-batch, the cursor rolls back via `Rollback`; reactions flushed
+///    before the failure are observably committed in the store (the batch
+///    append itself is atomic-per-item-batch, but the sequence of
+///    per-source-event flushes is not kernel-atomic).
+/// 3. Only after the flush sequence completes does the caller advance
+///    the cursor checkpoint. A crash between a partial flush sequence
+///    and the checkpoint advance re-delivers the whole cursor-batch on
+///    restart — callers must treat reactors as idempotent
+///    (**at-least-once**, per FREEZE-5).
+///
+/// A dispatch error (user / decode / fetch) stashes the appropriate
+/// `ReactorError` and returns `Rollback` without attempting a flush.
+fn dispatch_and_gather_batch<P, D>(
+    entries: &[crate::store::index::IndexEntry],
+    inner_store: &Store<Open>,
+    store_for_handler: &Arc<Store<Open>>,
+    dispatcher: &mut D,
+    fetch: fn(&Store<Open>, u128) -> Result<StoredEvent<P>, StoreError>,
+    slot_for_handler: &Arc<Mutex<Option<ReactorError<D::Error>>>>,
+) -> BatchOutcome
+where
+    P: Send + 'static,
+    D: ReactorDispatcher<P>,
+{
+    // Per-batch gathered reactions. Each entry carries the correlation /
+    // causation IDs inherited from its source event so the flush uses the
+    // right IDs even when reactions are flushed after all dispatches.
+    let mut gathered: Vec<(ReactionBatch, u128, u128)> = Vec::with_capacity(entries.len());
+
+    for entry in entries {
+        // Fetch the full event using the lane's specific reader.
+        let stored = match fetch(inner_store, entry.event_id) {
+            Ok(s) => s,
+            Err(e) => {
+                *slot_for_handler.lock() = Some(ReactorError::Store(e));
+                return BatchOutcome::Rollback;
+            }
+        };
+
+        let mut batch = ReactionBatch::new();
+        let step = dispatcher.dispatch(&stored, &mut batch);
+        match step {
+            Ok(()) => {
+                if !batch.is_empty() {
+                    gathered.push((
+                        batch,
+                        stored.event.header.correlation_id,
+                        stored.event.header.event_id,
+                    ));
+                }
+            }
+            Err(ReactorStepError::User(e)) => {
+                *slot_for_handler.lock() = Some(ReactorError::User(e));
+                return BatchOutcome::Rollback;
+            }
+            Err(ReactorStepError::Decode(e)) => {
+                *slot_for_handler.lock() = Some(ReactorError::Decode(e));
+                return BatchOutcome::Rollback;
+            }
+        }
+    }
+
+    // Flush every gathered ReactionBatch in order. A failure mid-flush
+    // leaves earlier-flushed reactions durable; the cursor checkpoint is
+    // not advanced (the caller returns Rollback), so the whole
+    // cursor-batch replays on restart — reactors must be idempotent.
+    for (batch, correlation_id, causation_id) in gathered {
+        if let Err(e) = batch.flush(store_for_handler, correlation_id, causation_id) {
+            *slot_for_handler.lock() = Some(ReactorError::Store(e));
+            return BatchOutcome::Rollback;
+        }
+    }
+
+    BatchOutcome::Continue
+}
+
 /// Shared canal runner: spawns a `cursor_worker` and drives it with the
 /// given dispatcher. Parameterised over the replay-lane payload type so
 /// both `react_loop_typed` / `react_loop_multi` (JSON) and
@@ -264,6 +419,11 @@ pub(crate) trait ReactorDispatcher<P>: Send + 'static {
 /// back to the last committed checkpoint and stops. No panics — the
 /// worker exits cleanly and [`TypedReactorHandle::join`] reads the
 /// stashed typed error.
+///
+/// G4 note: per-event reactions are gathered and flushed per cursor-batch,
+/// then the cursor checkpoint advances. See
+/// [`dispatch_and_gather_batch`] for the batch-atomicity contract and the
+/// at-least-once replay semantics.
 pub(crate) fn run_reactor<P, D>(
     store: &Arc<Store<Open>>,
     region: &Region,
@@ -291,52 +451,51 @@ where
         }
     });
 
+    // G5: supply the cursor-worker with a callback that writes
+    // `ReactorError::Store(StoreError::CheckpointWriteFailed)` into the
+    // shared slot when a durable-cursor persist fails. In-memory cursors
+    // never invoke this — the callback is harmless for them because the
+    // worker only fires it when `checkpoint_id: Some(_)`.
+    let slot_for_checkpoint = Arc::clone(&error_slot);
+    let on_checkpoint_failure: Box<CheckpointFailureCallback> =
+        Box::new(move |id: &str, source: std::io::Error| {
+            let mut guard = slot_for_checkpoint.lock();
+            if guard.is_none() {
+                *guard = Some(ReactorError::Store(StoreError::CheckpointWriteFailed {
+                    id: id.to_string(),
+                    source,
+                }));
+            }
+        });
+
+    // G3: plumb `checkpoint_id` from ReactorConfig → CursorWorkerConfig per
+    // FREEZE-5. `None` keeps the cursor in-memory; `Some(id)` makes the
+    // cursor durable under `{data_dir}/cursors/{id}.ckpt`.
     let worker_config = CursorWorkerConfig {
         batch_size: config.batch_size,
         idle_sleep: config.idle_sleep,
         restart: config.restart_policy,
-        checkpoint_id: None,
+        checkpoint_id: config.checkpoint_id,
         on_restart_budget_exhausted: Some(on_budget_exhausted),
+        on_checkpoint_failure: Some(on_checkpoint_failure),
     };
 
     let inner = store.cursor_worker(region, worker_config, move |entries, inner_store| {
-        for entry in entries {
-            // Fetch the full event using the lane's specific reader.
-            let stored = match fetch(inner_store, entry.event_id) {
-                Ok(s) => s,
-                Err(e) => {
-                    *slot_for_handler.lock() = Some(ReactorError::Store(e));
-                    return CursorWorkerAction::StopWithRollback;
-                }
-            };
-
-            let mut batch = ReactionBatch::new();
-            let step = dispatcher.dispatch(&stored, &mut batch);
-
-            match step {
-                Ok(()) => {
-                    if !batch.is_empty() {
-                        if let Err(e) = batch.flush(
-                            &store_for_handler,
-                            stored.event.header.correlation_id,
-                            stored.event.header.event_id,
-                        ) {
-                            *slot_for_handler.lock() = Some(ReactorError::Store(e));
-                            return CursorWorkerAction::StopWithRollback;
-                        }
-                    }
-                }
-                Err(ReactorStepError::User(e)) => {
-                    *slot_for_handler.lock() = Some(ReactorError::User(e));
-                    return CursorWorkerAction::StopWithRollback;
-                }
-                Err(ReactorStepError::Decode(e)) => {
-                    *slot_for_handler.lock() = Some(ReactorError::Decode(e));
-                    return CursorWorkerAction::StopWithRollback;
-                }
-            }
+        // G4: gather per-event reactions for the whole cursor-batch; flush
+        // them + advance the checkpoint atomically per batch. See
+        // `dispatch_and_gather_batch` for the atomicity protocol and the
+        // at-least-once semantics it defines.
+        match dispatch_and_gather_batch(
+            entries,
+            inner_store,
+            &store_for_handler,
+            &mut dispatcher,
+            fetch,
+            &slot_for_handler,
+        ) {
+            BatchOutcome::Continue => CursorWorkerAction::Continue,
+            BatchOutcome::Rollback => CursorWorkerAction::StopWithRollback,
         }
-        CursorWorkerAction::Continue
     })?;
 
     Ok(TypedReactorHandle { inner, error_slot })
@@ -411,18 +570,22 @@ impl Store<Open> {
     /// The reactor handler is called once per event whose kind matches
     /// `T::KIND`; wrong-kind events in the region are filtered silently.
     /// On `Ok(())` from the handler, any reactions staged in the
-    /// [`ReactionBatch`] are flushed in a single batch append with the
-    /// source event's correlation and causation IDs (atomic w.r.t. the
-    /// append: either every staged item lands or none does). On `Err(E)`
-    /// the batch is dropped (no partial commits) and the loop stops —
-    /// surfacing [`ReactorError::User`] through the returned handle.
+    /// [`ReactionBatch`] are gathered for one cursor poll, then flushed
+    /// sequentially with the source event's correlation and causation IDs.
+    /// Each individual batch flush is atomic w.r.t. its own append, but the
+    /// whole cursor poll is not one giant atomic append: if a later flush
+    /// fails, earlier flushes remain committed and the cursor rolls back.
+    /// On `Err(E)` the current event's staged batch is dropped and the loop
+    /// stops — surfacing [`ReactorError::User`] through the returned handle.
     /// Matched-kind decode failures stop the loop with
     /// [`ReactorError::Decode`]; wrong-kind filtering is never treated
     /// as an error.
     ///
-    /// Delivery is at-least-once within process lifetime — a crash
-    /// between handler success and the next successful batch means the
-    /// current batch is re-delivered on restart. The handler must be
+    /// Delivery is at-least-once within process lifetime by default. If
+    /// `config.checkpoint_id` is set, resume becomes durable
+    /// at-least-once across restarts. In either mode, a crash between
+    /// handler success and the next successful checkpoint means the
+    /// current batch is re-delivered later. The handler must be
     /// idempotent relative to the side effects it performs.
     ///
     /// # Errors
@@ -512,8 +675,8 @@ impl Store<Open> {
     /// filtered by the derive-generated dispatch body.
     ///
     /// See [`react_loop_typed`](Self::react_loop_typed) for semantics — the
-    /// two surfaces share the same underlying canal runner (ADR-0011) and
-    /// the same decode-failure contract.
+    /// two surfaces share the same underlying canal runner (ADR-0011), the
+    /// same checkpoint contract, and the same decode-failure contract.
     ///
     /// # Errors
     /// Returns [`StoreError::Io`] if the background cursor-worker thread
@@ -535,7 +698,9 @@ impl Store<Open> {
     /// lane. Events are delivered with payloads left as [`Vec<u8>`] so the
     /// reactor's `dispatch` (generated by `#[derive(MultiEventReactor)]`
     /// with `#[batpak(input = RawMsgpackInput)]`) can decode each kind via
-    /// the raw-msgpack `DecodeTyped` impl.
+    /// the raw-msgpack `DecodeTyped` impl. Delivery, checkpoint, restart,
+    /// and error semantics are identical to [`react_loop_typed`](Self::react_loop_typed);
+    /// only the replay lane differs.
     ///
     /// # Errors
     /// Returns [`StoreError::Io`] if the background cursor-worker thread

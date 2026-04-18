@@ -10,7 +10,9 @@
 //!   * reactor handler owns mutable state across events (`&mut self`)
 //!   * raw `react_loop` + `Reactive<P>` remain unchanged (invariant 6)
 //!
-//! The canal is `cursor_guaranteed` per ADR-0011.
+//! The canal is `cursor_guaranteed` per ADR-0011, with the same
+//! at-least-once / checkpoint semantics documented on the typed reactor
+//! surface.
 
 mod common;
 
@@ -147,6 +149,7 @@ fn happy_path_reactor_filters_wrong_kind_and_reacts_to_matched() {
                 batch_size: 8,
                 idle_sleep: Duration::from_millis(5),
                 restart_policy: RestartPolicy::Once,
+                checkpoint_id: None,
             },
             CountingReactor {
                 seen: Arc::clone(&seen),
@@ -210,6 +213,7 @@ fn user_error_stops_loop_and_surfaces_through_join() {
                 // Choose a policy that does not retry forever: Once gives the
                 // worker a single restart attempt before it gives up.
                 restart_policy: RestartPolicy::Once,
+                checkpoint_id: None,
             },
             FailOnThird {
                 seen: Arc::clone(&seen),
@@ -271,6 +275,7 @@ fn matched_kind_decode_failure_surfaces_reactor_error_decode() {
                 batch_size: 1,
                 idle_sleep: Duration::from_millis(5),
                 restart_policy: RestartPolicy::Once,
+                checkpoint_id: None,
             },
             ShapeXReactor,
         )

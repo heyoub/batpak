@@ -160,10 +160,13 @@ fn raw_projection_matches_value_projection_live_and_reopen() {
 #[test]
 fn raw_watch_projection_emits_updated_state() {
     let (store, _dir) = seeded_store();
+    let baseline_generation = store
+        .entity_generation("entity:raw-proj")
+        .expect("seeded entity generation");
     let mut watcher: ProjectionWatcher<RawCounter> =
         Arc::clone(&store).watch_projection::<RawCounter>("entity:raw-proj", Freshness::Consistent);
     let subscription = watcher.subscription();
-    let subscription_rx = subscription.receiver();
+    let subscription_rx = subscription.filtered_receiver();
     assert!(
         subscription_rx.is_empty(),
         "fresh projection watcher subscription should not have buffered notifications before a write"
@@ -181,12 +184,14 @@ fn raw_watch_projection_emits_updated_state() {
         )
         .expect("append watch event");
 
-    let update = watcher
-        .recv()
-        .expect("watch projection recv")
-        .expect("watch projection state");
+    let (gen, update) = watcher.recv().expect("watch projection recv");
+    let update = update.expect("watch projection state");
     assert_eq!(update.value, 16);
     assert_eq!(update.seen, 5);
+    assert!(
+        gen > baseline_generation,
+        "watch projection generation should advance after a relevant append"
+    );
 
     drop(watcher);
     let store = match Arc::try_unwrap(store) {
@@ -217,26 +222,28 @@ fn raw_watch_projection_matches_project_if_changed_after_relevant_append() {
         )
         .expect("append parity event");
 
-    let watched = watcher
-        .recv()
-        .expect("watch projection recv")
-        .expect("watch projection state");
-    let projected = store
+    let (gen, watched) = watcher.recv().expect("watch projection recv");
+    let watched = watched.expect("watch projection state");
+    let changed = store
         .project_if_changed::<RawCounter>(
             "entity:raw-proj",
             baseline_generation,
             &Freshness::Consistent,
         )
         .expect("project if changed")
-        .expect("changed projection")
-        .1
-        .expect("projection state");
+        .expect("changed projection");
+    let projected = changed.1.expect("projection state");
 
     assert_eq!(
         watched, projected,
         "PROPERTY: watch_projection and project_if_changed must share the same projection semantics \
          after a relevant event.\n\
          Investigate: src/store/mod.rs ProjectionWatcher::recv + src/store/projection/flow.rs."
+    );
+    assert_eq!(
+        gen, changed.0,
+        "PROPERTY: watch_projection and project_if_changed must report the same honest generation \
+         after a relevant append."
     );
 
     drop(watcher);
@@ -274,10 +281,8 @@ fn raw_watch_projection_matches_project_if_changed_after_irrelevant_append() {
         )
         .expect("append irrelevant event");
 
-    let watched = watcher
-        .recv()
-        .expect("watch projection recv")
-        .expect("watch projection state");
+    let (gen, watched) = watcher.recv().expect("watch projection recv");
+    let watched = watched.expect("watch projection state");
     let changed = store
         .project_if_changed::<RawCounter>(
             "entity:raw-proj",
@@ -299,6 +304,11 @@ fn raw_watch_projection_matches_project_if_changed_after_irrelevant_append() {
         "PROPERTY: watch_projection and project_if_changed must agree even when the entity changes \
          but the projection filter rejects the new event.\n\
          Investigate: src/store/mod.rs ProjectionWatcher::recv + src/store/projection/flow.rs."
+    );
+    assert_eq!(
+        gen, changed.0,
+        "PROPERTY: watch_projection and project_if_changed must report the same generation even \
+         when the folded state is unchanged."
     );
     assert!(
         changed.0 > baseline_generation,

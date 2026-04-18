@@ -63,7 +63,7 @@ store/
 ├── cold_start/   open/restore: mmap → checkpoint → SIDX rebuild → frame scan
 ├── projection/   state reconstruction: replay, cache, watcher
 ├── ancestry/     causal graph walking: by hash chain or by HLC clock
-└── delivery/     push subscriptions (lossy) and pull cursors (guaranteed)
+└── delivery/     push subscriptions (lossy) and pull cursors (ordered)
 ```
 
 ## Public Surface
@@ -89,8 +89,10 @@ implementing `EventSourced`. `project_if_changed` skips work when nothing change
 Two replay lanes: `JsonValueInput` (default, ergonomic) and `RawMsgpackInput` (perf).
 
 **Delivery** — `subscribe_lossy(&region)` for push-based broadcast (may drop under load).
-`cursor_guaranteed(&region)` for pull-based ordered delivery (never drops). `react_loop`
-spawns a background thread that subscribes, calls user logic, and appends derived events.
+`cursor_guaranteed(&region)` for process-local pull-based ordered delivery from the in-memory
+index. Durable at-least-once across restarts is exposed by
+`cursor_worker(..., CursorWorkerConfig { checkpoint_id: Some(..), .. })` and typed reactors via
+`ReactorConfig::checkpoint_id`. `react_loop` is the legacy subscribe-based loop.
 
 **Control plane** — `submit`/`try_submit` for non-blocking fire-and-ticket. `outbox()` for
 staged batch assembly. `begin_visibility_fence()` for atomic write groups. `open`, `close`,

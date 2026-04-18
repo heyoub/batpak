@@ -6,11 +6,15 @@
 //! * Items are pushed via [`ReactionBatch::push_typed`] — kind is inferred
 //!   from the payload's `T::KIND`, so handler code never writes
 //!   `EventKind::custom(...)`.
-//! * The batch is flushed atomically by the typed-reactor loop (via
+//! * The batch is flushed by the typed-reactor loop (via
 //!   [`Store::append_reaction_batch`]), and only when the handler returned
-//!   `Ok(())`. If the handler returns `Err`, the `ReactionBatch` is dropped
-//!   and no items land in the store — drop-on-error is structural, not
-//!   runtime.
+//!   `Ok(())`. Each `ReactionBatch` flush is atomic with respect to its own
+//!   batch append, but a whole cursor poll may flush several of these
+//!   batches sequentially; the typed reactor is therefore at-least-once, not
+//!   one giant atomic multi-event append.
+//! * If the handler returns `Err`, the `ReactionBatch` is dropped and no
+//!   items from that event land in the store — drop-on-error is structural,
+//!   not runtime.
 //! * Construction (`new`) and `flush` are `pub(crate)`. Users never build
 //!   or flush a batch directly; the reactor loop owns both ends.
 //!
@@ -25,8 +29,8 @@ use crate::event::EventPayload;
 use crate::store::append::{AppendOptions, BatchAppendItem, CausationRef};
 use crate::store::{AppendReceipt, Open, Store, StoreError};
 
-/// Typed output batch accumulated by a reactor handler and flushed atomically
-/// by the typed-reactor loop when the handler returns `Ok(())`.
+/// Typed output batch accumulated by a reactor handler and flushed by the
+/// typed-reactor loop when the handler returns `Ok(())`.
 ///
 /// See the module docs for the drop-on-error guarantee and the flush model.
 pub struct ReactionBatch {
@@ -82,8 +86,9 @@ impl ReactionBatch {
         self.items.is_empty()
     }
 
-    /// Flush all staged reactions atomically with the supplied correlation
-    /// and causation IDs inherited from the triggering source event.
+    /// Flush all staged reactions as one batch append with the supplied
+    /// correlation and causation IDs inherited from the triggering source
+    /// event.
     ///
     /// Per-item causation overrides passed via [`CausationRef::Absolute`] are
     /// preserved by [`Store::append_reaction_batch`] (it only fills the

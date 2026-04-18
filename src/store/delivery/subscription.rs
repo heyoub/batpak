@@ -4,7 +4,8 @@ use flume::Receiver;
 
 /// Subscription: push-based per-subscriber flume channel. Lossy.
 /// If subscriber is slow, bounded channel fills. Writer's retain() prunes.
-/// For guaranteed delivery, use Cursor instead.
+/// For ordered pull delivery with optional durable checkpoints, use Cursor
+/// instead.
 pub struct Subscription {
     rx: Receiver<Notification>,
     region: Region,
@@ -21,10 +22,10 @@ impl Subscription {
     /// rare event kind but the underlying stream is high-throughput,
     /// `recv()` may loop internally for many notifications before
     /// returning a match. Callers who need timeout semantics should
-    /// drive the underlying receiver directly — a `crossbeam_channel::
-    /// select!` pattern or a polling loop with `receiver().recv_deadline`
-    /// around [`Subscription::receiver`] gives per-call deadlines while
-    /// keeping the region filter on the caller side.
+    /// use [`Subscription::filtered_receiver`] and drive the returned
+    /// channel with `recv_deadline`; the filter is applied at the
+    /// writer push point so no filter loop is required on the consumer
+    /// side.
     pub fn recv(&self) -> Option<Notification> {
         loop {
             match self.rx.recv() {
@@ -45,11 +46,34 @@ impl Subscription {
         }
     }
 
-    /// Expose the raw receiver for async usage.
-    /// Caller uses: sub.receiver().recv_async().await
-    /// \[DEP:flume::Receiver::recv_async\] → `RecvFut<'_, T>`: Future
-    /// ASYNC NOTE: This is for async event consumption. For Store methods
-    /// (append, get, query), use spawn_blocking instead. Two different patterns.
+    /// F8: region-preserving receiver for async / deadline-driven
+    /// consumers. Returns a `flume::Receiver<Notification>` whose
+    /// contents are pre-filtered at the writer push point — no
+    /// out-of-region notification is ever placed into the channel. Use
+    /// this in preference to the raw [`Subscription::receiver`] shim:
+    /// `sub.filtered_receiver().recv_async().await`.
+    ///
+    /// The returned receiver is borrowed (`&Receiver<_>`); the
+    /// subscription owns the channel lifetime. The underlying channel
+    /// was registered with this subscription's region when the
+    /// subscription was created, so the filter contract is established
+    /// at the writer side — this accessor simply re-exposes that
+    /// already-filtered channel.
+    ///
+    /// ASYNC NOTE: use this for async event consumption. For Store
+    /// methods (append, get, query), use spawn_blocking instead — two
+    /// different patterns.
+    pub fn filtered_receiver(&self) -> &Receiver<Notification> {
+        &self.rx
+    }
+
+    /// F8: legacy raw-receiver accessor. Retained under
+    /// `#[doc(hidden)]` so existing async consumers keep compiling, but
+    /// new callers should use [`Subscription::filtered_receiver`] — the
+    /// semantics are identical (both receivers are pre-filtered at the
+    /// writer push point since F8), and the name advertises the
+    /// contract.
+    #[doc(hidden)]
     pub fn receiver(&self) -> &Receiver<Notification> {
         &self.rx
     }

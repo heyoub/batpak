@@ -453,6 +453,14 @@ impl StoreConfig {
     /// `tracing::error!` event but do not panic. Callers pass an unwrapped
     /// `Arc<dyn Fn() -> i64>`; the wrapping happens here so the invariant
     /// cannot be bypassed.
+    ///
+    /// **Observable scope.** The injected clock controls both the wall-clock
+    /// reads used by internal timestamping AND the `Freshness::MaybeStale`
+    /// age comparison in the projection pipeline. Tests may fast-forward the
+    /// injected clock to observe age-based cache invalidation: a cached
+    /// projection returned from an earlier `project()` becomes stale once
+    /// the clock advances past `max_stale_ms`, forcing a re-project on the
+    /// next call. See G6.
     pub fn with_clock(mut self, clock: Option<Arc<dyn Fn() -> i64 + Send + Sync>>) -> Self {
         self.clock = clock.map(|raw| {
             let wrapped = MonotonicClock::wrap(raw);

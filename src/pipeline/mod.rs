@@ -3,7 +3,7 @@ use crate::store::StoreError;
 
 /// Bypass types for skipping gate evaluation with an auditable reason.
 pub mod bypass;
-pub use bypass::{BypassReason, BypassReceipt};
+pub use bypass::{BypassAudit, BypassReason, BypassReceipt};
 
 /// `Proposal<T>`: wraps a value for gate evaluation.
 pub struct Proposal<T>(
@@ -11,13 +11,28 @@ pub struct Proposal<T>(
     pub(crate) T,
 );
 
-/// `Committed<T>`: proof that an event was persisted.
+/// `Committed<T>`: wrapper for a payload plus validated commit metadata.
+///
+/// `Pipeline` itself does not perform persistence; the caller-supplied
+/// commit closure does. This type therefore proves only that the commit
+/// path produced metadata that passed [`CommitMetadata::validate`]. When the
+/// closure actually persists through the store, `Committed<T>` is the
+/// caller's persistence proof wrapper; when the closure fabricates metadata,
+/// the wrapper is only as strong as that closure.
+///
+/// When the commit came via [`Pipeline::commit_bypass`], a [`BypassAudit`] is
+/// attached so the reason/justification (and optional approver) survive the
+/// commit boundary. Gate-evaluated commits via [`Pipeline::commit`] leave
+/// `bypass_audit` as `None`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Committed<T> {
     /// The committed event payload.
     payload: T,
     /// Proof metadata attached to the committed payload.
     metadata: CommitMetadata,
+    /// Bypass audit trail when this commit came from `commit_bypass`; `None`
+    /// for ordinary gate-evaluated commits. See G8.
+    bypass_audit: Option<BypassAudit>,
 }
 
 /// Narrow commit proof metadata returned by persistence closures.
@@ -60,7 +75,19 @@ impl<T> Proposal<T> {
 
 impl<T> Committed<T> {
     pub(crate) fn new(payload: T, metadata: CommitMetadata) -> Self {
-        Self { payload, metadata }
+        Self {
+            payload,
+            metadata,
+            bypass_audit: None,
+        }
+    }
+
+    pub(crate) fn new_with_audit(payload: T, metadata: CommitMetadata, audit: BypassAudit) -> Self {
+        Self {
+            payload,
+            metadata,
+            bypass_audit: Some(audit),
+        }
     }
 
     /// Returns the committed payload.
@@ -83,14 +110,21 @@ impl<T> Committed<T> {
         &self.metadata.hash
     }
 
+    /// Returns the bypass audit trail if this commit came from
+    /// [`Pipeline::commit_bypass`]; `None` for gate-evaluated commits.
+    pub fn bypass_audit(&self) -> Option<&BypassAudit> {
+        self.bypass_audit.as_ref()
+    }
+
     /// Consumes the proof and returns the payload.
     pub fn into_payload(self) -> T {
         self.payload
     }
 
-    /// Consumes the proof and returns the payload plus narrow metadata.
-    pub fn into_parts(self) -> (T, CommitMetadata) {
-        (self.payload, self.metadata)
+    /// Consumes the proof and returns the payload, narrow metadata, and any
+    /// bypass audit that travelled with the commit.
+    pub fn into_parts(self) -> (T, CommitMetadata, Option<BypassAudit>) {
+        (self.payload, self.metadata, self.bypass_audit)
     }
 }
 
@@ -184,8 +218,12 @@ impl<Ctx> Pipeline<Ctx> {
         self.gates.evaluate(ctx, proposal)
     }
 
-    /// commit: generic over error type E. Pipeline doesn't know about StoreError.
-    /// Products pass a closure that inspects the payload and returns commit metadata.
+    /// Commit a gate-approved payload via a caller-supplied closure.
+    ///
+    /// `Pipeline` is transport-agnostic: it does not append to the store on
+    /// its own. Products pass a closure that performs whatever commit action
+    /// they want (store append, external write, synthetic metadata for tests)
+    /// and returns the resulting metadata.
     ///
     /// The metadata returned by the closure is revalidated before the
     /// `Committed<T>` is assembled; a failed revalidation is surfaced as
@@ -209,20 +247,32 @@ impl<Ctx> Pipeline<Ctx> {
     }
 
     /// bypass: skip gates with an auditable reason.
+    ///
+    /// The returned receipt retains `reason`, `justification`, and (when
+    /// attached via [`BypassReceipt::with_approved_by`]) an approver
+    /// identity. These survive commit via [`Pipeline::commit_bypass`],
+    /// which attaches a [`BypassAudit`] to the resulting [`Committed`].
+    ///
     /// [FILE:src/pipeline/bypass.rs]
     pub fn bypass<T>(proposal: Proposal<T>, reason: &'static dyn BypassReason) -> BypassReceipt<T> {
         BypassReceipt {
             payload: proposal.0,
             reason: reason.name(),
             justification: reason.justification(),
+            approved_by: None,
         }
     }
 
-    /// commit_bypass: persist a bypassed proposal through the same commit path.
-    /// Mirrors commit() but takes a BypassReceipt instead of a Receipt.
+    /// Commit a bypassed proposal through the same caller-supplied commit path.
     ///
-    /// The metadata returned by the closure is revalidated before the
-    /// `Committed<T>` is assembled; a failed revalidation is surfaced as
+    /// Mirrors [`commit`](Self::commit) but takes a [`BypassReceipt`] instead
+    /// of a normal [`Receipt`].
+    ///
+    /// The resulting [`Committed`] carries a [`BypassAudit`] (reason,
+    /// justification, optional approver) so post-commit consumers can
+    /// distinguish a bypass-committed event from a gate-evaluated one and
+    /// preserve the audit trail (G8). The metadata returned by the closure
+    /// is revalidated before assembly; a failed revalidation is surfaced as
     /// `StoreError::InvalidCommitMetadata` (converted into `E`).
     ///
     /// # Errors
@@ -235,9 +285,10 @@ impl<Ctx> Pipeline<Ctx> {
     where
         E: From<StoreError>,
     {
+        let audit = receipt.to_audit();
         let payload = receipt.into_payload();
         let metadata = commit_fn(&payload)?;
         metadata.validate().map_err(E::from)?;
-        Ok(Committed::new(payload, metadata))
+        Ok(Committed::new_with_audit(payload, metadata, audit))
     }
 }

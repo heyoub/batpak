@@ -1,7 +1,7 @@
 //! # cursor_worker
 //!
-//! **Teaches:** cursor-based worker with durable checkpoint (survives process
-//! restart when `checkpoint_id` is set).
+//! **Teaches:** cursor-based worker with ordered pull replay and observable
+//! stop/join lifecycle.
 //!
 //! The worker drives its own lifecycle through `CursorWorkerAction::Stop`
 //! returned from the handler once the observable-state condition is met;
@@ -59,7 +59,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     worker.stop_and_join()?;
     println!(
-        "cursor worker processed {} event(s) through the guaranteed-delivery path",
+        "cursor worker processed {} event(s) through the ordered pull path",
         processed.load(Ordering::SeqCst)
     );
 
