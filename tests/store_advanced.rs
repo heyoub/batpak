@@ -27,11 +27,45 @@ use batpak::store::{
     Store, StoreConfig, StoreDiagnostics, StoreError, StoreStats, SyncConfig,
 };
 use batpak::typestate::Transition;
+use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tempfile::TempDir;
 
+// Test-local EventPayload used by the apply_transition test. FREEZE-7 removed
+// `Transition::new(kind, payload)`, so transitions can no longer be built from
+// a raw `serde_json::Value`; the payload type must impl `EventPayload`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, batpak::EventPayload)]
+#[batpak(category = 0x0A, type_id = 1)]
+struct PublishedDoc {
+    title: String,
+    from: String,
+    to: String,
+}
+
 mod common;
 use common::small_segment_store as test_store;
+
+fn append_cursor_json_events(store: &Store, coord: &Coordinate, kind: EventKind, count: usize) {
+    for i in 0..count {
+        store
+            .append(coord, kind, &serde_json::json!({ "i": i }))
+            .expect("append");
+    }
+}
+
+fn cursor_batch_sequences(cursor: &mut batpak::store::Cursor, requests: &[usize]) -> Vec<Vec<u64>> {
+    requests
+        .iter()
+        .map(|max| {
+            cursor
+                .poll_batch(*max)
+                .into_iter()
+                .map(|entry| entry.global_sequence)
+                .collect()
+        })
+        .collect()
+}
 
 // --- walk_ancestors: hash chain traversal ---
 
@@ -242,6 +276,200 @@ fn snapshot_copies_segments() {
     );
 
     snap_store.close().expect("close snap");
+    store.close().expect("close");
+}
+
+#[test]
+fn snapshot_rejects_when_visibility_fence_is_active() {
+    let (store, _dir) = test_store();
+    let fence = store
+        .begin_visibility_fence()
+        .expect("begin visibility fence");
+    let snap_dir = TempDir::new().expect("snap dir");
+
+    let err = match store.snapshot(snap_dir.path()) {
+        Ok(_) => panic!("PROPERTY: snapshot must not proceed while a visibility fence is active"),
+        Err(err) => err,
+    };
+    assert!(
+        matches!(err, StoreError::VisibilityFenceActive),
+        "PROPERTY: snapshot with an active visibility fence must surface VisibilityFenceActive, got {err:?}"
+    );
+
+    fence.cancel().expect("cancel visibility fence");
+    store.close().expect("close");
+}
+
+#[test]
+fn snapshot_reused_destination_replaces_stale_store_artifacts() {
+    let (store, _dir) = test_store();
+    let coord = Coordinate::new("entity:snap:source", "scope:test").expect("valid coord");
+    let kind = EventKind::custom(0xF, 7);
+    for i in 0..6 {
+        store
+            .append(&coord, kind, &serde_json::json!({"i": i}))
+            .expect("append source");
+    }
+    let live_stats = store.stats();
+
+    let snapshot_dir = TempDir::new().expect("snapshot dir");
+    {
+        let stale_store =
+            Store::open(StoreConfig::new(snapshot_dir.path())).expect("open stale store");
+        let stale_coord = Coordinate::new("entity:snap:stale", "scope:test").expect("stale coord");
+        stale_store
+            .append(&stale_coord, kind, &serde_json::json!({"stale": true}))
+            .expect("append stale");
+        stale_store.close().expect("close stale");
+    }
+
+    store
+        .snapshot(snapshot_dir.path())
+        .expect("snapshot into reused dir");
+
+    let reopened = Store::open(StoreConfig::new(snapshot_dir.path())).expect("open snapshot");
+    let snap_stats = reopened.stats();
+    assert_eq!(
+        snap_stats.event_count, live_stats.event_count,
+        "PROPERTY: snapshot into a reused destination must clear stale store artifacts before copying."
+    );
+    assert_eq!(
+        snap_stats.global_sequence, live_stats.global_sequence,
+        "PROPERTY: snapshot into a reused destination must not keep stale cold-start artifacts or superseded segments."
+    );
+
+    reopened.close().expect("close reopened");
+    store.close().expect("close source");
+}
+
+#[test]
+fn snapshot_waits_for_in_flight_compaction() {
+    let dir = TempDir::new().expect("temp dir");
+    let config = StoreConfig {
+        data_dir: dir.path().to_path_buf(),
+        segment_max_bytes: 512,
+        sync: SyncConfig {
+            every_n_events: 1,
+            ..SyncConfig::default()
+        },
+        ..StoreConfig::new("")
+    };
+    let store = Arc::new(Store::open(config).expect("open store"));
+    let coord = Coordinate::new("entity:snapshot-vs-compact", "scope:test").expect("coord");
+    let kind = EventKind::custom(0xF, 0x44);
+    let payload = "x".repeat(300);
+    for i in 0..12 {
+        store
+            .append(&coord, kind, &serde_json::json!({"i": i, "blob": payload}))
+            .expect("append");
+    }
+
+    let compaction_entered = Arc::new(AtomicBool::new(false));
+    let allow_compaction_finish = Arc::new(AtomicBool::new(false));
+    let compaction_store = Arc::clone(&store);
+    let compaction_entered_thread = Arc::clone(&compaction_entered);
+    let allow_compaction_finish_thread = Arc::clone(&allow_compaction_finish);
+    let compaction = std::thread::Builder::new()
+        .name("store-advanced-snapshot-vs-compact".into())
+        .spawn(move || {
+            compaction_store.compact(&CompactionConfig {
+                min_segments: 1,
+                strategy: CompactionStrategy::Retention(Box::new(move |_event| {
+                    compaction_entered_thread.store(true, Ordering::SeqCst);
+                    while !allow_compaction_finish_thread.load(Ordering::SeqCst) {
+                        std::thread::yield_now();
+                    }
+                    true
+                })),
+            })
+        })
+        .expect("spawn compaction thread");
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !compaction_entered.load(Ordering::SeqCst) {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "PROPERTY: compaction predicate should be entered before snapshot probe starts"
+        );
+        std::thread::yield_now();
+    }
+
+    let snapshot_dir = TempDir::new().expect("snapshot dir");
+    let snapshot_dest = snapshot_dir.path().to_path_buf();
+    let snapshot_store = Arc::clone(&store);
+    let (snapshot_done_tx, snapshot_done_rx) = std::sync::mpsc::channel();
+    let snapshot = std::thread::Builder::new()
+        .name("store-advanced-snapshot-blocked-by-compact".into())
+        .spawn(move || {
+            let result = snapshot_store.snapshot(&snapshot_dest);
+            let _ = snapshot_done_tx.send(result);
+        })
+        .expect("spawn snapshot thread");
+
+    std::thread::sleep(std::time::Duration::from_millis(150));
+    assert!(
+        snapshot_done_rx.try_recv().is_err(),
+        "PROPERTY: snapshot must not complete while compaction is mutating the on-disk segment set"
+    );
+
+    allow_compaction_finish.store(true, Ordering::SeqCst);
+    let compaction_result = compaction.join().expect("join compaction thread");
+    assert!(
+        matches!(
+            compaction_result.expect("compact result").outcome,
+            CompactionOutcome::Performed | CompactionOutcome::Skipped
+        ),
+        "compaction should finish honestly once the test releases the predicate gate"
+    );
+
+    snapshot_done_rx
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .expect("snapshot completion after compaction")
+        .expect("snapshot result");
+    snapshot.join().expect("join snapshot thread");
+
+    let reopened = Store::open(StoreConfig::new(snapshot_dir.path())).expect("open snapshot");
+    let live_stats = store.stats();
+    let snap_stats = reopened.stats();
+    assert_eq!(
+        snap_stats.event_count, live_stats.event_count,
+        "PROPERTY: snapshot that starts during compaction must serialize behind compaction and reopen to the same event count as the live store"
+    );
+    assert_eq!(
+        snap_stats.global_sequence, live_stats.global_sequence,
+        "PROPERTY: snapshot that starts during compaction must preserve the live store watermark after compaction finishes"
+    );
+
+    reopened.close().expect("close reopened snapshot");
+    let store = match Arc::try_unwrap(store) {
+        Ok(store) => store,
+        Err(_) => panic!("snapshot/compaction threads must release the store Arc"),
+    };
+    store.close().expect("close");
+}
+
+#[test]
+fn snapshot_preserves_pending_compaction_marker() {
+    let (store, dir) = test_store();
+    let coord = Coordinate::new("entity:snapshot:marker", "scope:test").expect("coord");
+    let kind = EventKind::custom(0xF, 0x66);
+    store
+        .append(&coord, kind, &serde_json::json!({"i": 0}))
+        .expect("append");
+    std::fs::write(
+        dir.path().join("compaction.pending.json"),
+        br#"{"merged_id":1,"source_segment_ids":[1]}"#,
+    )
+    .expect("write pending compaction marker");
+
+    let snapshot_dir = TempDir::new().expect("snapshot dir");
+    store.snapshot(snapshot_dir.path()).expect("snapshot");
+
+    assert!(
+        snapshot_dir.path().join("compaction.pending.json").exists(),
+        "PROPERTY: snapshot must preserve pending-compaction markers so reopen semantics match the source store"
+    );
+
     store.close().expect("close");
 }
 
@@ -559,59 +787,71 @@ fn cursor_polls_events_in_order() {
 }
 
 #[test]
-fn cursor_poll_batch_respects_max() {
+fn cursor_poll_batch_respects_boundaries_without_duplicates() {
     let (store, _dir) = test_store();
-    let coord = Coordinate::new("entity:batch", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
+    let plans: &[(&str, &[usize], &[usize])] = &[
+        ("entity:batch:stepped", &[3, 3, 100, 100], &[3, 3, 4, 0]),
+        ("entity:batch:boundary", &[3, 100, 10], &[3, 7, 0]),
+    ];
 
-    for i in 0..10 {
-        store
-            .append(&coord, kind, &serde_json::json!({"i": i}))
-            .expect("append");
+    for (entity, requests, expected_counts) in plans {
+        let coord = Coordinate::new(entity, "scope:test").expect("valid coord");
+        append_cursor_json_events(&store, &coord, kind, 10);
+
+        let mut cursor = store.cursor_guaranteed(&Region::entity(entity));
+        let batch_sequences = cursor_batch_sequences(&mut cursor, requests);
+        let actual_counts: Vec<usize> = batch_sequences.iter().map(Vec::len).collect();
+
+        assert_eq!(
+            actual_counts,
+            *expected_counts,
+            "PROPERTY: poll_batch must honor exact batch boundaries across stepped and oversized requests.\n\
+             Entity: {entity}\n\
+             Requests: {requests:?}\n\
+             Got counts: {actual_counts:?}\n\
+             Expected counts: {expected_counts:?}\n\
+             Investigate: src/store/delivery/cursor.rs poll_batch.\n\
+             Common causes: max parameter ignored, exhaustion not sticky, or cursor position drifts between batch calls.\n\
+             Run: cargo test --test store_advanced cursor_poll_batch_respects_boundaries_without_duplicates"
+        );
+
+        let flattened: Vec<u64> = batch_sequences.into_iter().flatten().collect();
+        assert_eq!(
+            flattened.len(),
+            10,
+            "PROPERTY: poll_batch plans must drain each 10-event stream exactly once.\n\
+             Entity: {entity}\n\
+             Requests: {requests:?}\n\
+             Drained sequences: {flattened:?}\n\
+             Investigate: src/store/delivery/cursor.rs poll_batch advancement.\n\
+             Run: cargo test --test store_advanced cursor_poll_batch_respects_boundaries_without_duplicates"
+        );
+
+        let unique: std::collections::HashSet<u64> = flattened.iter().copied().collect();
+        assert_eq!(
+            unique.len(),
+            flattened.len(),
+            "PROPERTY: poll_batch must never duplicate events while satisfying mixed batch plans.\n\
+             Entity: {entity}\n\
+             Requests: {requests:?}\n\
+             Drained sequences: {flattened:?}\n\
+             Investigate: src/store/delivery/cursor.rs position tracking.\n\
+             Run: cargo test --test store_advanced cursor_poll_batch_respects_boundaries_without_duplicates"
+        );
+
+        for pair in flattened.windows(2) {
+            assert!(
+                pair[0] < pair[1],
+                "PROPERTY: poll_batch must preserve strictly increasing global_sequence across batch boundaries.\n\
+                 Entity: {entity}\n\
+                 Requests: {requests:?}\n\
+                 Drained sequences: {flattened:?}\n\
+                 Investigate: src/store/delivery/cursor.rs and src/store/index/mod.rs ordering.\n\
+                 Run: cargo test --test store_advanced cursor_poll_batch_respects_boundaries_without_duplicates"
+            );
+        }
     }
-
-    let region = Region::entity("entity:batch");
-    let mut cursor = store.cursor_guaranteed(&region);
-
-    let batch1 = cursor.poll_batch(3);
-    assert_eq!(
-        batch1.len(),
-        3,
-        "PROPERTY: first poll_batch(3) on a 10-event stream must return exactly 3 events.\n\
-         Investigate: src/store/delivery/cursor.rs poll_batch.\n\
-         Common causes: max parameter ignored, cursor yields all remaining instead of bounded slice.\n\
-         Run: cargo test --test store_advanced cursor_poll_batch_respects_max"
-    );
-
-    let batch2 = cursor.poll_batch(3);
-    assert_eq!(
-        batch2.len(),
-        3,
-        "PROPERTY: second poll_batch(3) must return exactly 3 more events.\n\
-         Investigate: src/store/delivery/cursor.rs poll_batch.\n\
-         Common causes: cursor position not advanced after first batch, events re-yielded.\n\
-         Run: cargo test --test store_advanced cursor_poll_batch_respects_max"
-    );
-
-    let batch3 = cursor.poll_batch(100);
-    assert_eq!(
-        batch3.len(),
-        4,
-        "PROPERTY: third poll_batch must return the remaining 4 events.\n\
-         Investigate: src/store/delivery/cursor.rs poll_batch.\n\
-         Common causes: cursor position drifts, batch limit applied incorrectly to remainder.\n\
-         Run: cargo test --test store_advanced cursor_poll_batch_respects_max"
-    );
-
-    let batch4 = cursor.poll_batch(100);
-    assert_eq!(
-        batch4.len(),
-        0,
-        "PROPERTY: poll_batch on an exhausted cursor must return an empty batch.\n\
-         Investigate: src/store/delivery/cursor.rs poll_batch.\n\
-         Common causes: cursor resets on empty, returns stale events after stream end.\n\
-         Run: cargo test --test store_advanced cursor_poll_batch_respects_max"
-    );
 
     store.close().expect("close");
 }
@@ -652,6 +892,201 @@ fn compact_does_not_lose_data() {
          Investigate: src/store/mod.rs compact, src/store/segment/mod.rs compaction path.\n\
          Common causes: compaction drops events below tombstone horizon, segment replaced before flush.\n\
          Run: cargo test --test store_advanced compact_does_not_lose_data"
+    );
+
+    store.close().expect("close");
+}
+
+#[test]
+fn compact_merge_rebuild_does_not_duplicate_superseded_sealed_segments() {
+    let dir = TempDir::new().expect("create temp dir");
+    let config = StoreConfig {
+        data_dir: dir.path().to_path_buf(),
+        segment_max_bytes: 512,
+        sync: SyncConfig {
+            every_n_events: 1,
+            ..SyncConfig::default()
+        },
+        ..StoreConfig::new("")
+    };
+    let store = Store::open(config).expect("open store");
+    let coord = Coordinate::new("entity:compact:dedupe", "scope:test").expect("valid coord");
+    let kind = EventKind::custom(0xF, 3);
+
+    for i in 0..12 {
+        store
+            .append(&coord, kind, &serde_json::json!({"i": i}))
+            .expect("append");
+    }
+    store.close().expect("close");
+
+    let config = StoreConfig {
+        data_dir: dir.path().to_path_buf(),
+        segment_max_bytes: 512,
+        sync: SyncConfig {
+            every_n_events: 1,
+            ..SyncConfig::default()
+        },
+        ..StoreConfig::new("")
+    };
+    let store = Store::open(config).expect("reopen");
+    let compaction = store
+        .compact(&CompactionConfig {
+            min_segments: 1,
+            ..CompactionConfig::default()
+        })
+        .expect("compact");
+    assert!(
+        matches!(compaction.outcome, CompactionOutcome::Performed),
+        "PROPERTY: forced merge compaction should perform once multiple sealed segments exist."
+    );
+
+    let all = store.query(&Region::all());
+    let mut ids: Vec<_> = all.iter().map(|entry| entry.event_id).collect();
+    ids.sort_unstable();
+    ids.dedup();
+
+    assert_eq!(
+        all.len(),
+        12,
+        "PROPERTY: post-compaction rebuild must not re-index superseded sealed segments alongside the merged segment."
+    );
+    assert_eq!(
+        ids.len(),
+        12,
+        "PROPERTY: compact() must leave exactly one indexed copy of each event after merging sealed segments."
+    );
+
+    let segment_count = std::fs::read_dir(dir.path())
+        .expect("read data dir")
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry
+                .path()
+                .extension()
+                .map(|ext| ext == "fbat")
+                .unwrap_or(false)
+        })
+        .count();
+    assert_eq!(
+        segment_count,
+        2,
+        "PROPERTY: after merge compaction, the data dir should contain only the merged sealed segment plus the active segment."
+    );
+
+    store.close().expect("close");
+}
+
+#[test]
+fn compact_fails_closed_on_corrupt_hidden_ranges_metadata() {
+    let dir = TempDir::new().expect("temp dir");
+    let config = StoreConfig {
+        data_dir: dir.path().to_path_buf(),
+        segment_max_bytes: 512,
+        sync: SyncConfig {
+            every_n_events: 1,
+            ..SyncConfig::default()
+        },
+        ..StoreConfig::new("")
+    };
+    let store = Store::open(config).expect("open store");
+    let coord = Coordinate::new("entity:compact:hidden-ranges", "scope:test").expect("coord");
+    let kind = EventKind::custom(0xF, 0x55);
+
+    for i in 0..12 {
+        store
+            .append(&coord, kind, &serde_json::json!({"i": i}))
+            .expect("append");
+    }
+    std::fs::write(dir.path().join("visibility_ranges.fbv"), b"corrupt")
+        .expect("write corrupt hidden ranges metadata");
+
+    let result = store
+        .compact(&CompactionConfig {
+            min_segments: 1,
+            ..CompactionConfig::default()
+        })
+        .expect("compact result");
+    let CompactionOutcome::Failed { reason } = result.outcome else {
+        panic!("expected compaction failure on corrupt hidden ranges");
+    };
+    assert!(
+        reason.contains("visibility-ranges"),
+        "PROPERTY: corrupt hidden-ranges metadata must abort compaction before swap with an explicit reason, got {reason}"
+    );
+
+    assert_eq!(
+        store.stats().event_count,
+        12,
+        "PROPERTY: failed compaction on corrupt hidden-ranges metadata must leave the live event count unchanged"
+    );
+
+    store.close().expect("close");
+}
+
+#[test]
+fn compact_rolls_back_marker_on_pre_swap_rename_failure() {
+    let dir = TempDir::new().expect("temp dir");
+    let config = StoreConfig {
+        data_dir: dir.path().to_path_buf(),
+        segment_max_bytes: 512,
+        sync: SyncConfig {
+            every_n_events: 1,
+            ..SyncConfig::default()
+        },
+        ..StoreConfig::new("")
+    };
+    let store = Store::open(config).expect("open store");
+    let coord = Coordinate::new("entity:compact:rollback", "scope:test").expect("coord");
+    let kind = EventKind::custom(0xF, 0x56);
+    let payload = "x".repeat(300);
+    for i in 0..12 {
+        store
+            .append(&coord, kind, &serde_json::json!({"i": i, "blob": payload}))
+            .expect("append");
+    }
+
+    let mut segment_ids: Vec<u64> = std::fs::read_dir(dir.path())
+        .expect("read data dir")
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let path = entry.path();
+            let is_segment = path.extension().map(|ext| ext == "fbat").unwrap_or(false);
+            if !is_segment {
+                return None;
+            }
+            path.file_stem()
+                .and_then(|stem| stem.to_str())
+                .and_then(|stem| stem.parse::<u64>().ok())
+        })
+        .collect();
+    segment_ids.sort_unstable();
+    let merged_id = *segment_ids.first().expect("sealed segment id");
+    let blocker = dir.path().join(format!("{merged_id:06}.fbat.compact-src"));
+    std::fs::create_dir_all(&blocker).expect("create rename blocker");
+
+    let result = store
+        .compact(&CompactionConfig {
+            min_segments: 1,
+            ..CompactionConfig::default()
+        })
+        .expect("compact result");
+    let CompactionOutcome::Failed { reason } = result.outcome else {
+        panic!("expected compaction failure on pre-swap rename blocker");
+    };
+    assert!(
+        reason.contains("pre-swap phase failed"),
+        "PROPERTY: pre-swap rename failure must surface as a rolled-back compaction failure, got {reason}"
+    );
+
+    assert!(
+        !dir.path().join("compaction.pending.json").exists(),
+        "PROPERTY: failed pre-swap compaction must clear the pending marker during rollback"
+    );
+    assert_eq!(
+        store.stats().event_count,
+        12,
+        "PROPERTY: failed pre-swap compaction must leave the live event count unchanged"
     );
 
     store.close().expect("close");
@@ -859,12 +1294,16 @@ fn apply_transition_persists_event() {
     let (store, _dir) = test_store();
     let coord = Coordinate::new("entity:transition", "scope:test").expect("valid coord");
 
-    // Simulate: Draft -> Published transition with a payload
-    let kind = EventKind::custom(0xA, 1); // category 0xA, type 1
-    let transition = Transition::<Draft, Published, serde_json::Value>::new(
-        kind,
-        serde_json::json!({"title": "hello", "from": "draft", "to": "published"}),
-    );
+    // Simulate: Draft -> Published transition with a payload. FREEZE-7:
+    // `Transition::from_payload` derives the event kind from `P::KIND`, so
+    // the kind tested here comes from `PublishedDoc` rather than a separate
+    // argument.
+    let kind = <PublishedDoc as batpak::EventPayload>::KIND;
+    let transition = Transition::<Draft, Published, PublishedDoc>::from_payload(PublishedDoc {
+        title: "hello".into(),
+        from: "draft".into(),
+        to: "published".into(),
+    });
 
     let receipt = store
         .apply_transition(&coord, transition)
@@ -1705,7 +2144,7 @@ fn subscription_ops_take_limits_count() {
 // --- Cursor edge cases ---
 
 #[test]
-fn cursor_on_empty_store_returns_empty() {
+fn cursor_empty_stream_stays_empty_across_poll_and_batch_calls() {
     let (store, _dir) = test_store();
     let region = Region::entity("entity:nothing");
     let mut cursor = store.cursor_guaranteed(&region);
@@ -1715,15 +2154,32 @@ fn cursor_on_empty_store_returns_empty() {
         "PROPERTY: cursor.poll() on an empty store must return None.\n\
          Investigate: src/store/delivery/cursor.rs poll.\n\
          Common causes: cursor starts with a non-zero position, index returns phantom entries.\n\
-         Run: cargo test --test store_advanced cursor_on_empty_store_returns_empty"
+         Run: cargo test --test store_advanced cursor_empty_stream_stays_empty_across_poll_and_batch_calls"
     );
 
     let batch = cursor.poll_batch(10);
     assert!(
         batch.is_empty(),
-        "PROPERTY: cursor.poll_batch() on an empty store must return an empty Vec.\n\
+        "PROPERTY: cursor.poll_batch() on an empty stream must return an empty Vec even after a prior empty poll().\n\
          Investigate: src/store/delivery/cursor.rs poll_batch.\n\
-         Run: cargo test --test store_advanced cursor_on_empty_store_returns_empty"
+         Common causes: empty poll mutates cursor state, or poll_batch fabricates a stale entry.\n\
+         Run: cargo test --test store_advanced cursor_empty_stream_stays_empty_across_poll_and_batch_calls"
+    );
+
+    assert!(
+        cursor.poll().is_none(),
+        "PROPERTY: an empty cursor must stay empty across repeated poll() calls.\n\
+         Investigate: src/store/delivery/cursor.rs poll.\n\
+         Common causes: empty-path state machine mutates `started`/position and fabricates later entries.\n\
+         Run: cargo test --test store_advanced cursor_empty_stream_stays_empty_across_poll_and_batch_calls"
+    );
+
+    assert!(
+        cursor.poll_batch(1).is_empty(),
+        "PROPERTY: an empty cursor must stay empty across repeated poll_batch() calls after prior empty reads.\n\
+         Investigate: src/store/delivery/cursor.rs poll_batch.\n\
+         Common causes: exhaustion is not sticky, or repeated empty reads reset internal state.\n\
+         Run: cargo test --test store_advanced cursor_empty_stream_stays_empty_across_poll_and_batch_calls"
     );
 
     store.close().expect("close");
@@ -1752,7 +2208,7 @@ fn cursor_sees_events_appended_after_creation() {
     assert_eq!(
         batch.len(),
         3,
-        "PROPERTY: cursor must see events appended after cursor creation (guaranteed delivery).\n\
+        "PROPERTY: cursor must see events appended after cursor creation.\n\
          Investigate: src/store/delivery/cursor.rs poll_batch, position tracking.\n\
          Common causes: cursor snapshots index at creation time and never refreshes.\n\
          Run: cargo test --test store_advanced cursor_sees_events_appended_after_creation"
@@ -1762,7 +2218,7 @@ fn cursor_sees_events_appended_after_creation() {
 }
 
 #[test]
-fn cursor_guaranteed_delivery_under_load() {
+fn cursor_ordered_delivery_under_load() {
     let (store, _dir) = test_store();
     let store = Arc::new(store);
     let coord = Coordinate::new("entity:load", "scope:test").expect("valid coord");
@@ -1792,7 +2248,7 @@ fn cursor_guaranteed_delivery_under_load() {
         h.join().expect("writer");
     }
 
-    // Cursor should see ALL events (guaranteed delivery)
+    // Cursor should see all committed events in order from the index.
     let mut cursor = store.cursor_guaranteed(&region);
     let mut total = 0;
     loop {
@@ -1805,10 +2261,10 @@ fn cursor_guaranteed_delivery_under_load() {
 
     assert_eq!(
         total, event_count,
-        "PROPERTY: cursor must deliver exactly {event_count} events under concurrent load (guaranteed delivery).\n\
+        "PROPERTY: cursor must deliver exactly {event_count} indexed events under concurrent load.\n\
          Investigate: src/store/delivery/cursor.rs poll_batch, src/store/index/mod.rs.\n\
          Common causes: index race conditions, cursor skips entries during concurrent writes.\n\
-         Run: cargo test --test store_advanced cursor_guaranteed_delivery_under_load"
+         Run: cargo test --test store_advanced cursor_ordered_delivery_under_load"
     );
 
     store.sync().expect("sync");
@@ -1899,6 +2355,9 @@ fn pipeline_commit_bypass_persists() {
         })
         .expect("commit_bypass");
     let committed_event_id = committed.event_id();
+    let committed_audit = committed
+        .bypass_audit()
+        .expect("commit_bypass should retain bypass audit");
 
     // Verify persisted
     let stored = store.get(committed_event_id).expect("get");
@@ -1909,6 +2368,11 @@ fn pipeline_commit_bypass_persists() {
          Investigate: src/pipeline/mod.rs commit_bypass.\n\
          Common causes: commit_fn not called, payload not forwarded.\n\
          Run: cargo test --test store_advanced pipeline_commit_bypass_persists"
+    );
+    assert_eq!(
+        committed_audit.reason,
+        "test-bypass",
+        "PROPERTY: commit_bypass must retain the bypass audit reason alongside the persisted event."
     );
 
     store.close().expect("close");
@@ -1998,33 +2462,6 @@ fn react_loop_spawns_and_processes() {
 // DEFENDS: FM-009 (Polite Downgrade — cursor must not fake events), FM-013 (Coverage Mirage)
 
 #[test]
-fn cursor_empty_stream_returns_none() {
-    let (store, _dir) = test_store();
-    let region = Region::entity("nonexistent:entity");
-    let mut cursor = store.cursor_guaranteed(&region);
-    assert!(
-        cursor.poll().is_none(),
-        "PROPERTY: Cursor on empty stream must return None, not fake data.\n\
-         Investigate: src/store/delivery/cursor.rs poll() when index query returns empty.\n\
-         Common causes: returning default IndexEntry instead of None.\n\
-         DEFENDS: FM-009 (Polite Downgrade)."
-    );
-}
-
-#[test]
-fn cursor_poll_batch_empty_stream_returns_empty_vec() {
-    let (store, _dir) = test_store();
-    let region = Region::entity("nonexistent:entity");
-    let mut cursor = store.cursor_guaranteed(&region);
-    let batch = cursor.poll_batch(10);
-    assert!(
-        batch.is_empty(),
-        "PROPERTY: Cursor::poll_batch on empty stream must return empty vec.\n\
-         Investigate: src/store/delivery/cursor.rs poll_batch()."
-    );
-}
-
-#[test]
 fn cursor_repoll_after_eof_sees_new_events() {
     let (store, _dir) = test_store();
     let coord = Coordinate::new("cursor:repoll", "cursor:scope").expect("valid");
@@ -2097,47 +2534,6 @@ fn cursor_position_persists_no_duplicates() {
             entry.global_sequence
         );
     }
-}
-
-#[test]
-fn cursor_poll_batch_respects_max_boundary() {
-    let (store, _dir) = test_store();
-    let coord = Coordinate::new("cursor:batch", "cursor:scope").expect("valid");
-    let kind = EventKind::custom(1, 1);
-    let region = Region::entity("cursor:batch");
-
-    for i in 0..10 {
-        store
-            .append(&coord, kind, &format!("event_{i}"))
-            .expect("append");
-    }
-
-    let mut cursor = store.cursor_guaranteed(&region);
-
-    // Request batch of 3 — should return exactly 3
-    let batch = cursor.poll_batch(3);
-    assert_eq!(
-        batch.len(),
-        3,
-        "PROPERTY: poll_batch(3) with 10 available must return exactly 3.\n\
-         Investigate: src/store/delivery/cursor.rs poll_batch() max check."
-    );
-
-    // Request batch of 100 — should return remaining 7
-    let batch = cursor.poll_batch(100);
-    assert_eq!(
-        batch.len(),
-        7,
-        "PROPERTY: poll_batch(100) with 7 remaining must return exactly 7.\n\
-         Investigate: src/store/delivery/cursor.rs poll_batch() exhaustion."
-    );
-
-    // Request again — should be empty
-    let batch = cursor.poll_batch(10);
-    assert!(
-        batch.is_empty(),
-        "PROPERTY: poll_batch after exhaustion must return empty vec."
-    );
 }
 
 // ===== AppendOptions builder tests: with_correlation + with_causation =====

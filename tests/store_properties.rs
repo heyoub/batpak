@@ -534,12 +534,10 @@ fn closure_outcome_combinators_preserve_type() {
     );
 
     // map on Err stays Err
-    let err: Outcome<i32> = Outcome::Err(OutcomeError {
-        kind: batpak::prelude::ErrorKind::Internal,
-        message: "test".into(),
-        compensation: None,
-        retryable: false,
-    });
+    let err: Outcome<i32> = Outcome::Err(OutcomeError::new(
+        batpak::prelude::ErrorKind::Internal,
+        "test",
+    ));
     let mapped_err = err.map(|x| x * 2);
     assert!(
         matches!(mapped_err, Outcome::Err(_)),
@@ -744,6 +742,7 @@ fn error_kind_is_domain() {
     let conflict_is_domain = ErrorKind::Conflict.is_domain();
     let validation_is_domain = ErrorKind::Validation.is_domain();
     let policy_rejection_is_domain = ErrorKind::PolicyRejection.is_domain();
+    let cancelled_is_domain = ErrorKind::Cancelled.is_domain();
     let storage_is_domain = ErrorKind::StorageError.is_domain();
     let timeout_is_domain = ErrorKind::Timeout.is_domain();
     let internal_is_domain = ErrorKind::Internal.is_domain();
@@ -778,6 +777,12 @@ fn error_kind_is_domain() {
          Investigate: src/outcome/error.rs ErrorKind::is_domain().\n\
          Common causes: PolicyRejection missing from the domain match arm, or \
          grouped with operational errors.\n\
+         Run: cargo test --test store_properties error_kind_is_domain"
+    );
+    assert!(
+        cancelled_is_domain,
+        "PROPERTY: ErrorKind::Cancelled must be classified as a domain error.\n\
+         Investigate: src/outcome/error.rs ErrorKind::is_domain().\n\
          Run: cargo test --test store_properties error_kind_is_domain"
     );
     assert!(
@@ -816,8 +821,10 @@ fn error_kind_is_domain() {
 fn error_kind_is_operational() {
     let storage_is_operational = ErrorKind::StorageError.is_operational();
     let timeout_is_operational = ErrorKind::Timeout.is_operational();
+    let pending_is_operational = ErrorKind::Pending.is_operational();
     let serialization_is_operational = ErrorKind::Serialization.is_operational();
     let internal_is_operational = ErrorKind::Internal.is_operational();
+    let batch_collapse_is_operational = ErrorKind::BatchCollapse.is_operational();
     let not_found_is_operational = ErrorKind::NotFound.is_operational();
     let conflict_is_operational = ErrorKind::Conflict.is_operational();
     let custom_is_operational = ErrorKind::Custom(99).is_operational();
@@ -838,6 +845,12 @@ fn error_kind_is_operational() {
          Run: cargo test --test store_properties error_kind_is_operational"
     );
     assert!(
+        pending_is_operational,
+        "PROPERTY: ErrorKind::Pending must be classified as operational.\n\
+         Investigate: src/outcome/error.rs ErrorKind::is_operational().\n\
+         Run: cargo test --test store_properties error_kind_is_operational"
+    );
+    assert!(
         serialization_is_operational,
         "PROPERTY: ErrorKind::Serialization must be classified as operational.\n\
          Investigate: src/outcome/error.rs ErrorKind::is_operational().\n\
@@ -850,6 +863,12 @@ fn error_kind_is_operational() {
         "PROPERTY: ErrorKind::Internal must be classified as operational.\n\
          Investigate: src/outcome/error.rs ErrorKind::is_operational().\n\
          Common causes: Internal missing from the operational match arm.\n\
+         Run: cargo test --test store_properties error_kind_is_operational"
+    );
+    assert!(
+        batch_collapse_is_operational,
+        "PROPERTY: ErrorKind::BatchCollapse must be classified as operational.\n\
+         Investigate: src/outcome/error.rs ErrorKind::is_operational().\n\
          Run: cargo test --test store_properties error_kind_is_operational"
     );
     assert!(
@@ -879,9 +898,12 @@ fn error_kind_is_operational() {
 fn error_kind_is_retryable() {
     let storage_is_retryable = ErrorKind::StorageError.is_retryable();
     let timeout_is_retryable = ErrorKind::Timeout.is_retryable();
+    let pending_is_retryable = ErrorKind::Pending.is_retryable();
     let not_found_is_retryable = ErrorKind::NotFound.is_retryable();
     let conflict_is_retryable = ErrorKind::Conflict.is_retryable();
     let internal_is_retryable = ErrorKind::Internal.is_retryable();
+    let cancelled_is_retryable = ErrorKind::Cancelled.is_retryable();
+    let batch_collapse_is_retryable = ErrorKind::BatchCollapse.is_retryable();
 
     assert!(
         storage_is_retryable,
@@ -897,6 +919,12 @@ fn error_kind_is_retryable() {
          Investigate: src/outcome/error.rs ErrorKind::is_retryable().\n\
          Common causes: Timeout missing from the retryable match arm, or \
          Timeout placed in the non-retryable group by mistake.\n\
+         Run: cargo test --test store_properties error_kind_is_retryable"
+    );
+    assert!(
+        !pending_is_retryable,
+        "PROPERTY: ErrorKind::Pending must NOT be retryable by default.\n\
+         Investigate: src/outcome/error.rs ErrorKind::is_retryable().\n\
          Run: cargo test --test store_properties error_kind_is_retryable"
     );
     assert!(
@@ -919,6 +947,18 @@ fn error_kind_is_retryable() {
         "PROPERTY: ErrorKind::Internal must NOT be retryable (programming error, not transient).\n\
          Investigate: src/outcome/error.rs ErrorKind::is_retryable().\n\
          Common causes: Internal grouped with operational transients by mistake.\n\
+         Run: cargo test --test store_properties error_kind_is_retryable"
+    );
+    assert!(
+        !cancelled_is_retryable,
+        "PROPERTY: ErrorKind::Cancelled must NOT be retryable by default.\n\
+         Investigate: src/outcome/error.rs ErrorKind::is_retryable().\n\
+         Run: cargo test --test store_properties error_kind_is_retryable"
+    );
+    assert!(
+        !batch_collapse_is_retryable,
+        "PROPERTY: ErrorKind::BatchCollapse must NOT be retryable by default.\n\
+         Investigate: src/outcome/error.rs ErrorKind::is_retryable().\n\
          Run: cargo test --test store_properties error_kind_is_retryable"
     );
     assert!(

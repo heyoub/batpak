@@ -168,6 +168,63 @@ fn define_entity_id_custom_type() {
     );
 }
 
+#[test]
+fn event_header_new_typed_preserves_typed_ids() {
+    let event_id = batpak::id::EventId::new(0x11);
+    let correlation_id = batpak::id::CorrelationId::new(0x22);
+    let causation_id = batpak::id::CausationId::new(0x33);
+    let header = EventHeader::new_typed(
+        event_id,
+        correlation_id,
+        Some(causation_id),
+        123,
+        DagPosition::root(),
+        9,
+        EventKind::DATA,
+    );
+
+    assert_eq!(
+        header.event_id, 0x11,
+        "PROPERTY: EventHeader::new_typed must write the typed event id into the raw header field."
+    );
+    assert_eq!(
+        header.correlation_id,
+        0x22,
+        "PROPERTY: EventHeader::new_typed must write the typed correlation id into the raw header field."
+    );
+    assert_eq!(
+        header.causation_id,
+        Some(0x33),
+        "PROPERTY: EventHeader::new_typed must write the typed causation id into the raw header field."
+    );
+}
+
+#[test]
+fn typed_append_surfaces_preserve_underlying_ids() {
+    let correlation = batpak::id::CorrelationId::new(0xAA);
+    let causation = batpak::id::CausationId::new(0xBB);
+    let options = AppendOptions::new()
+        .with_correlation_typed(correlation)
+        .with_causation_typed(causation);
+    let absolute_typed = CausationRef::absolute_typed(causation);
+
+    assert_eq!(
+        options.correlation_id,
+        Some(0xAA),
+        "PROPERTY: AppendOptions::with_correlation_typed must preserve the underlying correlation id."
+    );
+    assert_eq!(
+        options.causation_id,
+        Some(0xBB),
+        "PROPERTY: AppendOptions::with_causation_typed must preserve the underlying causation id."
+    );
+    assert_eq!(
+        absolute_typed,
+        CausationRef::Absolute(0xBB),
+        "PROPERTY: CausationRef::absolute_typed must preserve the underlying causation id."
+    );
+}
+
 // ================================================================
 // src/event/header.rs — Flag system
 // ================================================================

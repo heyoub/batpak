@@ -27,34 +27,282 @@ pub(crate) fn snapshot(store: &Store<Open>, dest: &std::path::Path) -> Result<()
         flow = "snapshot",
         destination = %dest.display()
     );
+    let _lifecycle = store.lifecycle_gate.lock();
+    // Hold a private visibility fence for the duration of the snapshot so
+    // concurrent unfenced appends are rejected and a user-held fence cannot
+    // race hidden writes into the copied segment set.
+    let snapshot_fence = store.begin_visibility_fence()?;
     sync(store)?;
     reject_symlink_leaf(dest, "snapshot destination")?;
     std::fs::create_dir_all(dest).map_err(StoreError::Io)?;
+    clear_snapshot_store_artifacts(dest)?;
     let entries = std::fs::read_dir(&store.config.data_dir).map_err(StoreError::Io)?;
     for entry in entries.flatten() {
         let path = entry.path();
-        let is_segment = path
-            .extension()
-            .map(|ext| ext == segment::SEGMENT_EXTENSION)
-            .unwrap_or(false);
-        let is_visibility_metadata = path
-            .file_name()
-            .map(|name| name == crate::store::hidden_ranges::VISIBILITY_RANGES_FILENAME)
-            .unwrap_or(false);
-        if is_segment || is_visibility_metadata {
+        if snapshot_source_should_copy(&path) {
             let dest_path = dest.join(entry.file_name());
             reject_symlink_leaf(&dest_path, "snapshot entry")?;
             std::fs::copy(&path, &dest_path).map_err(StoreError::Io)?;
         }
     }
+    snapshot_fence.cancel()?;
     Ok(())
 }
 
+fn snapshot_source_should_copy(path: &std::path::Path) -> bool {
+    path.extension()
+        .map(|ext| ext == segment::SEGMENT_EXTENSION)
+        .unwrap_or(false)
+        || path
+            .file_name()
+            .map(|name| name == crate::store::hidden_ranges::VISIBILITY_RANGES_FILENAME)
+            .unwrap_or(false)
+        || path
+            .file_name()
+            .map(|name| name == crate::store::cold_start::rebuild::COMPACTION_MARKER_FILENAME)
+            .unwrap_or(false)
+}
+
+fn snapshot_destination_should_clear(path: &std::path::Path) -> bool {
+    path.extension()
+        .map(|ext| ext == segment::SEGMENT_EXTENSION || ext == "compact-src")
+        .unwrap_or(false)
+        || path
+            .file_name()
+            .map(|name| {
+                name == crate::store::hidden_ranges::VISIBILITY_RANGES_FILENAME
+                    || name == crate::store::cold_start::checkpoint::CHECKPOINT_FILENAME
+                    || name == crate::store::cold_start::mmap::MMAP_INDEX_FILENAME
+                    || name == crate::store::cold_start::rebuild::COMPACTION_MARKER_FILENAME
+            })
+            .unwrap_or(false)
+}
+
+fn remove_file_if_present(path: &std::path::Path) -> Result<(), StoreError> {
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(StoreError::Io(error)),
+    }
+}
+
+fn remove_dir_all_if_present(path: &std::path::Path) -> Result<(), StoreError> {
+    match std::fs::remove_dir_all(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(StoreError::Io(error)),
+    }
+}
+
+fn clear_snapshot_store_artifacts(dest: &std::path::Path) -> Result<(), StoreError> {
+    let entries = std::fs::read_dir(dest).map_err(StoreError::Io)?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if snapshot_destination_should_clear(&path) {
+            remove_file_if_present(&path)?;
+            continue;
+        }
+
+        if path.is_dir()
+            && path
+                .file_name()
+                .map(|name| name == "cursors")
+                .unwrap_or(false)
+        {
+            remove_dir_all_if_present(&path)?;
+        }
+    }
+    Ok(())
+}
+
+fn rollback_compaction_disk_state(
+    data_dir: &std::path::Path,
+    merged_path: &std::path::Path,
+    compact_source_path: Option<&std::path::Path>,
+) -> Result<(), StoreError> {
+    if let Err(remove_err) = std::fs::remove_file(merged_path) {
+        if remove_err.kind() != std::io::ErrorKind::NotFound {
+            return Err(StoreError::Io(remove_err));
+        }
+    }
+    if let Some(temp_source_path) = compact_source_path {
+        std::fs::rename(temp_source_path, merged_path).map_err(StoreError::Io)?;
+    }
+    crate::store::cold_start::rebuild::clear_pending_compaction(data_dir)?;
+    Ok(())
+}
+
+fn failed_compaction_with_rollback(
+    data_dir: &std::path::Path,
+    merged_path: &std::path::Path,
+    compact_source_path: Option<&std::path::Path>,
+    error: &StoreError,
+    context: &str,
+) -> Result<segment::CompactionResult, StoreError> {
+    rollback_compaction_disk_state(data_dir, merged_path, compact_source_path)?;
+    let reason = format!("{context}; disk layout rolled back: {error}");
+    tracing::error!(target: "batpak::flow", flow = "compact", error = %error, "{reason}");
+    Ok(segment::CompactionResult {
+        outcome: segment::CompactionOutcome::Failed { reason },
+        segments_removed: 0,
+        bytes_reclaimed: 0,
+    })
+}
+
+fn scan_sealed_entries(
+    store: &Store<Open>,
+    sealed: &[(u64, std::path::PathBuf)],
+) -> Result<Vec<reader::ScannedEntry>, StoreError> {
+    let mut all_events = Vec::new();
+    for (_, path) in sealed {
+        all_events.extend(store.reader.scan_segment(path)?);
+    }
+    Ok(all_events)
+}
+
+fn scanned_entry_as_stored_event(
+    entry: &reader::ScannedEntry,
+) -> Result<StoredEvent<serde_json::Value>, StoreError> {
+    Ok(StoredEvent {
+        coordinate: Coordinate::new(&entry.entity, &entry.scope)?,
+        event: entry.event.clone(),
+    })
+}
+
+fn write_scanned_entry(
+    merged_segment: &mut segment::Segment<Active>,
+    entry: reader::ScannedEntry,
+) -> Result<(), StoreError> {
+    let frame_payload = FramePayload {
+        event: entry.event,
+        entity: entry.entity,
+        scope: entry.scope,
+    };
+    let frame = segment::frame_encode(&frame_payload)?;
+    merged_segment.write_frame(&frame)?;
+    Ok(())
+}
+
+fn materialize_compacted_segment(
+    store: &Store<Open>,
+    strategy: &CompactionStrategy,
+    sealed: &mut [(u64, std::path::PathBuf)],
+    merged_id: u64,
+    merged_path: &std::path::Path,
+    compact_source_path: &mut Option<std::path::PathBuf>,
+) -> Result<(), StoreError> {
+    for (seg_id, _) in sealed.iter() {
+        store.reader.evict_segment(*seg_id);
+    }
+
+    if let Some((_, source_path)) = sealed.iter_mut().find(|(seg_id, _)| *seg_id == merged_id) {
+        let temp_source_path = store.config.data_dir.join(format!(
+            "{merged_id:06}.{}.compact-src",
+            segment::SEGMENT_EXTENSION
+        ));
+        let _ = std::fs::remove_file(&temp_source_path);
+        std::fs::rename(&*source_path, &temp_source_path).map_err(StoreError::Io)?;
+        *source_path = temp_source_path.clone();
+        *compact_source_path = Some(temp_source_path);
+    }
+
+    let _ = std::fs::remove_file(merged_path);
+    let mut merged_segment = segment::Segment::<Active>::create(&store.config.data_dir, merged_id)?;
+    match strategy {
+        CompactionStrategy::Merge => {
+            for (_, path) in sealed.iter() {
+                merged_segment.append_frames_from_segment(path)?;
+            }
+        }
+        CompactionStrategy::Retention(predicate) => {
+            for entry in scan_sealed_entries(store, sealed)? {
+                if predicate(&scanned_entry_as_stored_event(&entry)?) {
+                    write_scanned_entry(&mut merged_segment, entry)?;
+                }
+            }
+        }
+        CompactionStrategy::Tombstone(predicate) => {
+            let tombstone_kind = EventKind::TOMBSTONE;
+            for mut entry in scan_sealed_entries(store, sealed)? {
+                if !predicate(&scanned_entry_as_stored_event(&entry)?) {
+                    entry.event.header.event_kind = tombstone_kind;
+                }
+                write_scanned_entry(&mut merged_segment, entry)?;
+            }
+        }
+    }
+
+    merged_segment.sync_with_mode(&store.config.sync.mode)?;
+    let _sealed_segment = merged_segment.seal();
+    Ok(())
+}
+
+fn rebuild_fresh_compaction_index(
+    store: &Store<Open>,
+) -> Result<crate::store::index::StoreIndex, StoreError> {
+    // Second drain. We are about to read the on-disk state to build a fresh
+    // index off-side — no writer traffic must race past this point.
+    sync(store)?;
+
+    // ── OFF-SIDE INDEX BUILD (FREEZE-4 step 1) ────────────────────────
+    //
+    // Build the replacement index in a sibling allocation. The live index is
+    // untouched — readers keep serving pre-compact state; a concurrent
+    // cursor/query observes no mid-rebuild cleared view.
+    let fresh_index = crate::store::index::StoreIndex::with_config(&store.config.index);
+    crate::store::cold_start::rebuild::rebuild_from_segments(
+        &fresh_index,
+        &store.reader,
+        &store.config.data_dir,
+    )?;
+    if let Some(ranges) =
+        crate::store::hidden_ranges::load_cancelled_ranges(&store.config.data_dir)?
+    {
+        fresh_index.restore_cancelled_visibility_ranges(ranges);
+    }
+
+    Ok(fresh_index)
+}
+
+/// Compact sealed segments.
+///
+/// # F6 / FREEZE-4 swap sketch
+///
+/// ```text
+///   sync()                              (1) drain writer
+///   scan on-disk segments
+///   if sealed.len() < min_segments { return Skipped }
+///   merge/retain/tombstone into merged_segment       (disk-side work)
+///   sync()                              (2) second drain after disk ops
+///
+///   // OFF-SIDE INDEX BUILD (no mutation of live index)
+///   fresh = StoreIndex::with_config(index_cfg)
+///   rebuild_from_segments(&fresh, reader, data_dir)
+///   if let Some(ranges) = load_cancelled_ranges(data_dir)? {
+///       fresh.restore_cancelled_visibility_ranges(ranges)
+///   }
+///   // If rebuild or hidden-range reload fails here, the live index is still valid.
+///   // Callers observe CompactionOutcome::Failed { reason }.
+///
+///   // SINGLE PUBLISH POINT
+///   live.replace_contents_from_fresh(fresh)   (3) swap under write lock
+///
+///   // CLEANUP (only after the live swap has committed)
+///   delete_old_sealed_segments()
+///   delete_compact_source_tempfile()
+///   delete_pending_compaction_marker()
+///   write_cold_start_artifacts_on_close()     (4) refresh fastpaths
+/// ```
+///
+/// The old index is valid and readable at every point before step (3). The
+/// new index is live from step (3) onward. A reader either observes one or
+/// the other — never a partially cleared or half-rebuilt view.
 pub(crate) fn compact(
     store: &Store<Open>,
     config: &CompactionConfig,
 ) -> Result<segment::CompactionResult, StoreError> {
     tracing::debug!(target: "batpak::flow", flow = "compact");
+    let _lifecycle = store.lifecycle_gate.lock();
     sync(store)?;
 
     // Single read_dir: collect all segment IDs and paths, then partition.
@@ -106,82 +354,52 @@ pub(crate) fn compact(
         .config
         .data_dir
         .join(segment::segment_filename(merged_id));
+    let source_segment_ids: Vec<u64> = sealed.iter().map(|(seg_id, _)| *seg_id).collect();
     let mut compact_source_path = None;
 
-    for (seg_id, _) in &sealed {
-        store.reader.evict_segment(*seg_id);
-    }
+    crate::store::cold_start::rebuild::write_pending_compaction(
+        &store.config.data_dir,
+        merged_id,
+        &source_segment_ids,
+    )?;
 
-    if let Some((_, source_path)) = sealed.iter_mut().find(|(seg_id, _)| *seg_id == merged_id) {
-        let temp_source_path = store.config.data_dir.join(format!(
-            "{merged_id:06}.{}.compact-src",
-            segment::SEGMENT_EXTENSION
-        ));
-        let _ = std::fs::remove_file(&temp_source_path);
-        std::fs::rename(&*source_path, &temp_source_path).map_err(StoreError::Io)?;
-        *source_path = temp_source_path.clone();
-        compact_source_path = Some(temp_source_path);
-    }
-
-    let _ = std::fs::remove_file(&merged_path);
-    let mut merged_segment = segment::Segment::<Active>::create(&store.config.data_dir, merged_id)?;
-    match &config.strategy {
-        CompactionStrategy::Merge => {
-            for (_, path) in &sealed {
-                merged_segment.append_frames_from_segment(path)?;
-            }
+    // Pre-swap preparation: materialize the merged segment on disk, then do
+    // the second drain + off-side rebuild into a sibling index.
+    let fresh_index = match materialize_compacted_segment(
+        store,
+        &config.strategy,
+        &mut sealed,
+        merged_id,
+        &merged_path,
+        &mut compact_source_path,
+    )
+    .and_then(|_| rebuild_fresh_compaction_index(store))
+    {
+        Ok(fresh_index) => fresh_index,
+        Err(error) => {
+            return failed_compaction_with_rollback(
+                &store.config.data_dir,
+                &merged_path,
+                compact_source_path.as_deref(),
+                &error,
+                "compaction pre-swap phase failed",
+            );
         }
-        CompactionStrategy::Retention(predicate) => {
-            let mut all_events: Vec<reader::ScannedEntry> = Vec::new();
-            for (_, path) in &sealed {
-                all_events.extend(store.reader.scan_segment(path)?);
-            }
-            for entry in all_events {
-                let coord = Coordinate::new(&entry.entity, &entry.scope)?;
-                let stored = StoredEvent {
-                    coordinate: coord,
-                    event: entry.event.clone(),
-                };
-                if predicate(&stored) {
-                    let frame_payload = FramePayload {
-                        event: entry.event,
-                        entity: entry.entity,
-                        scope: entry.scope,
-                    };
-                    let frame = segment::frame_encode(&frame_payload)?;
-                    merged_segment.write_frame(&frame)?;
-                }
-            }
-        }
-        CompactionStrategy::Tombstone(predicate) => {
-            let mut all_events: Vec<reader::ScannedEntry> = Vec::new();
-            for (_, path) in &sealed {
-                all_events.extend(store.reader.scan_segment(path)?);
-            }
-            let tombstone_kind = EventKind::TOMBSTONE;
-            for mut entry in all_events {
-                let coord = Coordinate::new(&entry.entity, &entry.scope)?;
-                let stored = StoredEvent {
-                    coordinate: coord,
-                    event: entry.event.clone(),
-                };
-                if !predicate(&stored) {
-                    entry.event.header.event_kind = tombstone_kind;
-                }
-                let frame_payload = FramePayload {
-                    event: entry.event,
-                    entity: entry.entity,
-                    scope: entry.scope,
-                };
-                let frame = segment::frame_encode(&frame_payload)?;
-                merged_segment.write_frame(&frame)?;
-            }
-        }
-    }
+    };
 
-    merged_segment.sync_with_mode(&store.config.sync.mode)?;
-    let _sealed_segment = merged_segment.seal();
+    // ── SINGLE SWAP POINT (FREEZE-4 step 2) ───────────────────────────
+    //
+    // Atomically adopt the fresh index as the live one. Under the
+    // `swap_gate` write guard: readers either hold the old index (already
+    // in progress on the read guard) or the new one.
+    store.index.replace_contents_from_fresh(fresh_index);
 
+    // ── SEGMENT CLEANUP AFTER SWAP (FREEZE-4 step 5) ──────────────────
+    //
+    // Now that the live index reflects the merged segment, it is safe to
+    // delete the compacted sealed files. If the process crashes between
+    // swap and cleanup, the pending-compaction marker keeps cold-start
+    // from re-indexing the superseded sealed sources on next open.
     let mut bytes_reclaimed = 0_u64;
     let mut segments_removed = 0_usize;
     for (_, path) in &sealed {
@@ -195,18 +413,7 @@ pub(crate) fn compact(
     if let Some(temp_source_path) = compact_source_path {
         let _ = std::fs::remove_file(temp_source_path);
     }
-
-    sync(store)?;
-    store.index.clear();
-    crate::store::cold_start::rebuild::rebuild_from_segments(
-        &store.index,
-        &store.reader,
-        &store.config.data_dir,
-    )?;
-    crate::store::cold_start::rebuild::restore_cancelled_visibility_ranges(
-        &store.index,
-        &store.config.data_dir,
-    );
+    crate::store::cold_start::rebuild::clear_pending_compaction(&store.config.data_dir)?;
 
     // Refresh cold-start artifacts after post-compact rebuild so the next open
     // can take the fast path.
@@ -223,6 +430,7 @@ pub(crate) fn compact(
 
 pub(crate) fn close(mut store: Store<Open>) -> Result<Closed, StoreError> {
     tracing::debug!(target: "batpak::flow", flow = "close");
+    let _lifecycle = store.lifecycle_gate.lock();
     let (tx, rx) = flume::bounded(1);
     store
         .writer_ref()

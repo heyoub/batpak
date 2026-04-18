@@ -5,20 +5,16 @@
 //! into_result, unwrap_or, unwrap_or_else, join_any, zip edge cases.
 //!
 //! PROVES: LAW-006 (Algebraic Integrity — combinator contracts)
-//! DEFENDS: FM-009 (Polite Downgrade — combinators preserve error semantics)
+//! DEFENDS: FM-009 (Polite Downgrade — combinators preserve collapse semantics)
 //! INVARIANTS: INV-TYPE (combinator type safety), INV-STATE (WaitCondition semantics)
 
+use batpak::outcome::WaitCondition;
 use batpak::prelude::*;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
 fn test_err() -> OutcomeError {
-    OutcomeError {
-        kind: ErrorKind::Internal,
-        message: "test error".into(),
-        compensation: None,
-        retryable: false,
-    }
+    OutcomeError::new(ErrorKind::Internal, "test error")
 }
 
 // --- inspect ---
@@ -375,6 +371,26 @@ fn and_then_if_skips_non_ok() {
     );
 }
 
+#[test]
+fn and_then_if_distributes_through_nested_batch() {
+    let nested = Outcome::Batch(vec![
+        Outcome::Ok(1),
+        Outcome::Batch(vec![Outcome::Ok(2), Outcome::Err(test_err())]),
+    ]);
+    let result = nested.and_then_if(|v| *v > 0, |v| Outcome::Ok(v * 10));
+
+    assert_eq!(
+        result,
+        Outcome::Batch(vec![
+            Outcome::Ok(10),
+            Outcome::Batch(vec![Outcome::Ok(20), Outcome::Err(test_err())]),
+        ]),
+        "AND_THEN_IF NESTED BATCH DRIFT: nested Batch items must recurse through and_then_if the \
+         same way map/and_then/or_else already do.\n\
+         Investigate: src/outcome/mod.rs and_then_if Batch arm."
+    );
+}
+
 // --- into_result ---
 
 #[test]
@@ -400,7 +416,7 @@ fn into_result_err() {
 fn into_result_cancelled() {
     let r: Result<i32, OutcomeError> = Outcome::cancelled("nope").into_result();
     let err = r.expect_err("cancelled outcome should convert to error");
-    assert!(err.message.contains("cancelled: nope") && !err.retryable,
+    assert!(err.kind == ErrorKind::Cancelled && err.message.contains("cancelled: nope") && !err.is_retryable(),
         "INTO_RESULT CANCELLED WRONG: expected a non-retryable structured error carrying the cancellation reason, got {:?}.\n\
          Investigate: src/outcome/mod.rs into_result Cancelled arm.\n\
          Common causes: into_result dropping the cancellation reason or marking cancellation retryable.\n\
@@ -412,12 +428,36 @@ fn into_result_cancelled() {
 fn into_result_non_terminal() {
     let r: Result<i32, OutcomeError> = Outcome::retry(100, 1, 3, "wait").into_result();
     let err = r.expect_err("non-terminal outcome should convert to terminal error");
-    assert!(err.retryable && err.message.contains("retry after 100ms") && err.message.contains("wait"),
+    assert!(err.is_retryable() && err.message.contains("retry after 100ms") && err.message.contains("wait"),
         "INTO_RESULT NON_TERMINAL WRONG: expected a retryable structured error carrying retry details, got {:?}.\n\
          Investigate: src/outcome/mod.rs into_result Retry arm.\n\
          Common causes: into_result dropping retry metadata or clearing the retryable bit.\n\
          Run: cargo test --test outcome_combinators",
         err);
+}
+
+#[test]
+fn into_result_pending_uses_pending_kind() {
+    let r: Result<i32, OutcomeError> =
+        Outcome::pending(WaitCondition::Event { event_id: 7 }, 0xAB).into_result();
+    let err = r.expect_err("pending outcome should convert to error");
+    assert_eq!(
+        err.kind,
+        ErrorKind::Pending,
+        "INTO_RESULT PENDING KIND WRONG: pending collapse must surface ErrorKind::Pending."
+    );
+}
+
+#[test]
+fn into_result_batch_uses_batch_collapse_kind() {
+    let r: Result<i32, OutcomeError> =
+        Outcome::Batch(vec![Outcome::Ok(1), Outcome::Err(test_err())]).into_result();
+    let err = r.expect_err("batch outcome should convert to error");
+    assert_eq!(
+        err.kind,
+        ErrorKind::BatchCollapse,
+        "INTO_RESULT BATCH KIND WRONG: batch collapse must surface ErrorKind::BatchCollapse."
+    );
 }
 
 // --- unwrap_or / unwrap_or_else ---
@@ -641,18 +681,8 @@ fn join_any_first_ok_wins() {
 #[test]
 fn join_any_all_err_returns_last() {
     let outcomes: Vec<Outcome<i32>> = vec![
-        Outcome::Err(OutcomeError {
-            kind: ErrorKind::Internal,
-            message: "first".into(),
-            compensation: None,
-            retryable: false,
-        }),
-        Outcome::Err(OutcomeError {
-            kind: ErrorKind::NotFound,
-            message: "last".into(),
-            compensation: None,
-            retryable: false,
-        }),
+        Outcome::Err(OutcomeError::new(ErrorKind::Internal, "first")),
+        Outcome::Err(OutcomeError::new(ErrorKind::NotFound, "last")),
     ];
     let result = batpak::outcome::join_any(outcomes);
     match result {
@@ -698,6 +728,50 @@ fn join_any_retry_propagates() {
          Common causes: join_any ignores Retry and continues past it, returning Err instead.\n\
          Run: cargo test --test outcome_combinators"
     );
+}
+
+#[test]
+fn join_any_batch_yields_first_ok() {
+    let outcomes = vec![Outcome::Batch(vec![
+        Outcome::Err(test_err()),
+        Outcome::Ok(42),
+    ])];
+    let result = batpak::outcome::join_any(outcomes);
+    assert_eq!(
+        result,
+        Outcome::Ok(42),
+        "JOIN_ANY BATCH OK NOT SELECTED: join_any must recurse into Batch and surface the first Ok."
+    );
+}
+
+#[test]
+fn join_any_nested_batch_recurses() {
+    let outcomes = vec![Outcome::Batch(vec![Outcome::Batch(vec![
+        Outcome::Err(OutcomeError::new(ErrorKind::Internal, "inner err")),
+        Outcome::Ok(7),
+    ])])];
+    let result = batpak::outcome::join_any(outcomes);
+    assert_eq!(
+        result,
+        Outcome::Ok(7),
+        "JOIN_ANY NESTED BATCH DRIFT: nested Batch values must recurse until the first Ok is found."
+    );
+}
+
+#[test]
+fn join_any_batch_all_err_contributes_last_err() {
+    let outcomes: Vec<Outcome<i32>> = vec![Outcome::Batch(vec![
+        Outcome::Err(OutcomeError::new(ErrorKind::Internal, "first")),
+        Outcome::Err(OutcomeError::new(ErrorKind::NotFound, "last")),
+    ])];
+    let result = batpak::outcome::join_any(outcomes);
+    match result {
+        Outcome::Err(err) => assert_eq!(
+            err.message, "last",
+            "JOIN_ANY BATCH ALL_ERR WRONG ERROR: recursive Batch traversal must still return the last Err."
+        ),
+        _ => panic!("JOIN_ANY BATCH ALL_ERR WRONG VARIANT: expected Err"),
+    }
 }
 
 // --- zip edge cases ---
@@ -980,18 +1054,17 @@ fn compensation_action_variants() {
 fn outcome_error_with_compensation() {
     use batpak::outcome::CompensationAction;
 
-    let err = OutcomeError {
-        kind: ErrorKind::Conflict,
-        message: "double booking".into(),
-        compensation: Some(CompensationAction::Rollback { event_ids: vec![1] }),
-        retryable: true,
-    };
+    // NOTE (G9): retryability is now derived from kind. Conflict is non-retryable,
+    // so the retryable assertion is replaced with a kind-based check that the
+    // error preserves its classification and compensation.
+    let err = OutcomeError::new(ErrorKind::Conflict, "double booking")
+        .with_compensation(CompensationAction::Rollback { event_ids: vec![1] });
 
     assert!(
-        err.retryable,
-        "OUTCOME_ERROR RETRYABLE WRONG: expected retryable=true for this error.\n\
-         Investigate: src/outcome/mod.rs OutcomeError retryable field.\n\
-         Common causes: retryable field not set correctly during construction.\n\
+        !err.is_retryable(),
+        "OUTCOME_ERROR RETRYABLE DERIVATION WRONG: expected Conflict to be non-retryable (derived from ErrorKind).\n\
+         Investigate: src/outcome/error.rs ErrorKind::is_retryable.\n\
+         Common causes: Conflict classifier drifted from Kind arm.\n\
          Run: cargo test --test outcome_combinators"
     );
     assert!(
@@ -1012,15 +1085,12 @@ fn outcome_error_with_compensation() {
     );
 
     // Direct construction with compensation
-    let err2 = OutcomeError {
-        kind: ErrorKind::Internal,
-        message: "fail".into(),
-        compensation: Some(CompensationAction::Notify {
+    let err2 = OutcomeError::new(ErrorKind::Internal, "fail").with_compensation(
+        CompensationAction::Notify {
             target_id: 99,
             message: "cleanup".into(),
-        }),
-        retryable: false,
-    };
+        },
+    );
     assert!(err2.compensation.is_some(),
         "OUTCOME_ERROR COMPENSATION MISSING: expected err2.compensation to be Some after direct construction.\n\
          Investigate: src/outcome/mod.rs OutcomeError compensation field.\n\
@@ -1184,12 +1254,7 @@ fn join_all_cancelled_short_circuits() {
 
 #[test]
 fn join_any_pending_propagates() {
-    let err = OutcomeError {
-        kind: ErrorKind::Internal,
-        message: "fail".into(),
-        compensation: None,
-        retryable: false,
-    };
+    let err = OutcomeError::new(ErrorKind::Internal, "fail");
     let outcomes: Vec<Outcome<i32>> = vec![Outcome::Err(err), test_pending()];
     let result = batpak::outcome::join_any(outcomes);
     assert!(
@@ -1390,12 +1455,7 @@ fn flatten_unwraps_nested_ok() {
 
 #[test]
 fn flatten_propagates_inner_err() {
-    let err = OutcomeError {
-        kind: ErrorKind::Internal,
-        message: "inner".into(),
-        compensation: None,
-        retryable: false,
-    };
+    let err = OutcomeError::new(ErrorKind::Internal, "inner");
     let nested: Outcome<Outcome<i32>> = Outcome::Ok(Outcome::Err(err));
     let flat = nested.flatten();
     assert!(
@@ -1410,12 +1470,7 @@ fn flatten_propagates_inner_err() {
 
 #[test]
 fn flatten_propagates_outer_err() {
-    let err = OutcomeError {
-        kind: ErrorKind::Internal,
-        message: "outer".into(),
-        compensation: None,
-        retryable: false,
-    };
+    let err = OutcomeError::new(ErrorKind::Internal, "outer");
     let nested: Outcome<Outcome<i32>> = Outcome::Err(err);
     let flat = nested.flatten();
     assert!(
@@ -1448,12 +1503,7 @@ fn flatten_distributes_over_batch() {
 
 #[test]
 fn outcome_error_display() {
-    let err = OutcomeError {
-        kind: ErrorKind::Conflict,
-        message: "double booking".into(),
-        compensation: None,
-        retryable: false,
-    };
+    let err = OutcomeError::new(ErrorKind::Conflict, "double booking");
     let s = format!("{err}");
     assert!(
         s.contains("Conflict"),

@@ -5,6 +5,7 @@ use crate::store::append::checked_payload_len;
 use crate::store::{
     AppendOptions, AppendReceipt, BatchAppendItem, CausationRef, Open, Store, StoreError,
 };
+use flume::TrySendError;
 
 type AppendReply = Result<AppendReceipt, StoreError>;
 type BatchAppendReply = Result<Vec<AppendReceipt>, StoreError>;
@@ -313,11 +314,12 @@ impl<'a> Outbox<'a> {
 /// Public visibility fence: writes become durable immediately but remain hidden
 /// until the fence commits.
 ///
-/// `Drop` is best-effort cancellation: it sends a `CancelVisibilityFence`
-/// command to the writer without waiting for acknowledgement and logs at
-/// `error` level if the send fails. For deterministic cleanup — especially
-/// when the writer may have crashed — call [`VisibilityFence::cancel`]
-/// explicitly instead of relying on drop.
+/// `Drop` is best-effort cancellation: it tries to enqueue a
+/// `CancelVisibilityFence` command without waiting for acknowledgement. If the
+/// writer channel is full, drop offloads the blocking send to a detached
+/// helper thread so the caller thread does not stall. For deterministic
+/// cleanup — especially when the writer may have crashed — call
+/// [`VisibilityFence::cancel`] explicitly instead of relying on drop.
 pub struct VisibilityFence<'a> {
     store: &'a Store<Open>,
     token: u64,
@@ -458,35 +460,69 @@ impl<'a> VisibilityFence<'a> {
     }
 }
 
-impl Drop for VisibilityFence<'_> {
-    fn drop(&mut self) {
+impl<'a> VisibilityFence<'a> {
+    /// F13: surface the `Drop`-time cancel enqueue as a `Result` so the
+    /// `Drop` impl can distinguish "already closed / writer gone" (both
+    /// silent) from a genuine enqueue/spawn failure (logged).
+    ///
+    /// Returns:
+    /// * `Ok(())` when the cancel command was enqueued directly, offloaded
+    ///   to a helper thread, or when there is no action to take
+    ///   (`self.closed` is true, or the store is no longer holding a
+    ///   writer handle).
+    /// * `Err(String)` when the writer channel is disconnected or the helper
+    ///   thread could not be spawned. We never panic in `Drop` under any
+    ///   circumstance.
+    fn try_cancel_on_drop(&mut self) -> Result<(), String> {
         if self.closed {
-            return;
+            return Ok(());
         }
         let Some(writer) = self.store.writer.as_ref() else {
-            return;
+            return Ok(());
         };
+        let writer_tx = writer.tx.clone();
         let (tx, _rx) = flume::bounded(1);
         // D4: best-effort cancel on drop. We do not wait for the writer's
         // ack here — doing so would turn every fence drop into a
         // synchronization point, and a dropped `VisibilityFence` is by
         // definition not on the hot correctness path (callers who need
-        // correctness call `commit()` or `cancel()` explicitly). A send
-        // failure here means the writer channel is already down, so the
-        // writer has crashed or shut down — log that condition so
-        // operators see it.
-        match writer.tx.send(WriterCommand::CancelVisibilityFence {
+        // correctness call `commit()` or `cancel()` explicitly). Use
+        // `try_send` first so drop never blocks the caller thread under
+        // writer backpressure; if the channel is full, hand the blocking
+        // send off to a detached helper thread.
+        let command = WriterCommand::CancelVisibilityFence {
             token: self.token,
             respond: tx,
-        }) {
-            Ok(()) => {}
-            Err(_) => {
-                tracing::error!(
-                    fence_token = ?self.token,
-                    "visibility-fence cancel send failed on drop; writer likely crashed — \
-                     explicit cancel() recommended for deterministic cleanup"
-                );
+        };
+        match writer_tx.try_send(command) {
+            Ok(()) => Ok(()),
+            Err(TrySendError::Disconnected(_)) => {
+                Err("writer channel disconnected during fence drop".to_string())
             }
+            Err(TrySendError::Full(command)) => std::thread::Builder::new()
+                .name("batpak-fence-drop-cancel".to_string())
+                .spawn(move || {
+                    let _ = writer_tx.send(command);
+                })
+                .map(|_| ())
+                .map_err(|error| format!("failed to spawn drop-cancel helper: {error}")),
+        }
+    }
+}
+
+impl Drop for VisibilityFence<'_> {
+    fn drop(&mut self) {
+        // F13: no panic in Drop under any circumstance. A send error is
+        // surfaced via tracing at `error` level so operators see the
+        // writer-gone condition; callers that require deterministic
+        // cleanup must call `cancel()` explicitly.
+        if let Err(e) = self.try_cancel_on_drop() {
+            tracing::error!(
+                fence_token = ?self.token,
+                err = %e,
+                "visibility-fence cancel enqueue failed on drop; explicit cancel() \
+                 recommended for deterministic cleanup"
+            );
         }
     }
 }

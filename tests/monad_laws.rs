@@ -20,12 +20,7 @@ mod common;
 fn arb_outcome() -> impl Strategy<Value = Outcome<i32>> {
     prop_oneof![
         any::<i32>().prop_map(Outcome::Ok),
-        any::<String>().prop_map(|msg| Outcome::Err(OutcomeError {
-            kind: ErrorKind::Internal,
-            message: msg,
-            compensation: None,
-            retryable: false,
-        })),
+        any::<String>().prop_map(|msg| Outcome::Err(OutcomeError::new(ErrorKind::Internal, msg))),
         (any::<u64>(), any::<u32>(), any::<u32>(), any::<String>()).prop_map(
             |(after, attempt, max, reason)| Outcome::Retry {
                 after_ms: after,
@@ -122,12 +117,7 @@ proptest! {
     // --- JOIN_ALL: first Err short-circuits ---
     #[test]
     fn join_all_first_err_wins(values in proptest::collection::vec(any::<i32>(), 1..5)) {
-        let err = OutcomeError {
-            kind: ErrorKind::Internal,
-            message: "test error".into(),
-            compensation: None,
-            retryable: false,
-        };
+        let err = OutcomeError::new(ErrorKind::Internal, "test error");
         let mut outcomes: Vec<Outcome<i32>> = values.iter().map(|&v| Outcome::Ok(v)).collect();
         outcomes.push(Outcome::Err(err.clone()));
         outcomes.push(Outcome::Ok(42)); // should never be reached

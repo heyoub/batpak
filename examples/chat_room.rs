@@ -2,12 +2,12 @@
 #![allow(clippy::print_stdout, clippy::disallowed_methods)]
 //! # chat_room
 //!
-//! **Teaches:** push subscriptions (lossy) vs pull cursors (guaranteed).
+//! **Teaches:** push subscriptions (lossy) vs pull cursors (ordered replay).
 //! Slow subscribers are dropped, not retained.
 //!
 //! A chat system demonstrating batpak's two consumption patterns:
 //! 1. **Subscriptions** — push-based, lossy (slow subscribers dropped on Full)
-//! 2. **Cursors** — pull-based, guaranteed delivery (like reading a transcript)
+//! 2. **Cursors** — pull-based, ordered replay (like reading a transcript)
 //!
 //! Plus: filtering, composable SubscriptionOps, and cross-thread event delivery.
 //!
@@ -133,7 +133,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .join()
         .map_err(|_| std::io::Error::other("chat room listener thread panicked"))?;
 
-    // -- Now demonstrate cursors: guaranteed delivery, pull-based --
+    // -- Now demonstrate cursors: ordered replay, pull-based --
     println!("\n--- Cursor: Pull-based replay ---");
     println!("  (Cursors see ALL events, even ones before the cursor was created)\n");
 
@@ -222,7 +222,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     drop(store);
     println!("\nSubscriptions are push (lossy, filtered, composable).");
-    println!("Cursors are pull (guaranteed, complete, sequential).");
+    println!("Cursors are pull (ordered, complete, sequential).");
     println!("Queries are instant (in-memory index).");
 
     Ok(())

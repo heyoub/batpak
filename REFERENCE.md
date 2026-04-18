@@ -91,7 +91,8 @@ The raw `EventKind` surfaces stay available for callers that compute
 `docs/adr/ADR-0010-eventpayload-macro-surface.md` for scope and
 schema-evolution rules. Typed reactor ergonomics
 (`#[derive(EventSourced)]`, `#[derive(MultiEventReactor)]`,
-`react_loop_typed`, `react_loop_multi`) are covered by ADR-0011.
+`react_loop_typed`, `react_loop_multi`, `react_loop_multi_raw`) are
+covered by ADR-0011.
 
 ## Runtime Map
 

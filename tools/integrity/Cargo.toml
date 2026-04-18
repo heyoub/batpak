@@ -8,7 +8,7 @@ publish = false
 anyhow = "1"
 cargo_metadata = "0.18"
 clap = { version = "4.5", features = ["derive"] }
-pulldown-cmark = "0.11"
+pulldown-cmark = "0.13"
 regex = "1"
 serde = { version = "1", features = ["derive"] }
 yaml_serde = "0.10.4"

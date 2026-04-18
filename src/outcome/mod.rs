@@ -270,7 +270,7 @@ impl<T> Outcome<T> {
     }
 
     /// Applies `f` only when this is `Ok` and `pred` returns true; otherwise returns self unchanged.
-    pub fn and_then_if<F: Fn(&T) -> bool, G: FnOnce(T) -> Outcome<T> + Clone>(
+    pub fn and_then_if<F: Fn(&T) -> bool + Clone, G: FnOnce(T) -> Outcome<T> + Clone>(
         self,
         pred: F,
         f: G,
@@ -286,36 +286,7 @@ impl<T> Outcome<T> {
             Self::Batch(items) => Self::Batch(
                 items
                     .into_iter()
-                    .map(|o| match o {
-                        Self::Ok(v) => {
-                            if pred(&v) {
-                                f.clone()(v)
-                            } else {
-                                Self::Ok(v)
-                            }
-                        }
-                        Self::Err(error) => Self::Err(error),
-                        Self::Retry {
-                            after_ms,
-                            attempt,
-                            max_attempts,
-                            reason,
-                        } => Self::Retry {
-                            after_ms,
-                            attempt,
-                            max_attempts,
-                            reason,
-                        },
-                        Self::Pending {
-                            condition,
-                            resume_token,
-                        } => Self::Pending {
-                            condition,
-                            resume_token,
-                        },
-                        Self::Cancelled { reason } => Self::Cancelled { reason },
-                        Self::Batch(nested) => Self::Batch(nested),
-                    })
+                    .map(|o| o.and_then_if(pred.clone(), f.clone()))
                     .collect(),
             ),
             Self::Err(error) => Self::Err(error),
@@ -350,47 +321,42 @@ impl<T> Outcome<T> {
         match self {
             Self::Ok(v) => Ok(v),
             Self::Err(error) => Err(error),
-            Self::Cancelled { reason } => Err(OutcomeError {
-                kind: ErrorKind::PolicyRejection,
-                message: format!("cancelled: {reason}"),
-                compensation: None,
-                retryable: false,
-            }),
+            Self::Cancelled { reason } => Err(OutcomeError::new(
+                ErrorKind::Cancelled,
+                format!("cancelled: {reason}"),
+            )),
             Self::Retry {
                 after_ms,
                 attempt,
                 max_attempts,
                 reason,
-            } => Err(OutcomeError {
-                kind: ErrorKind::Timeout,
-                message: format!(
+            } => Err(OutcomeError::new(
+                // Timeout is inherently retryable per `ErrorKind::is_retryable`,
+                // which is the sole source of truth (G9) — no separate
+                // boolean on the error.
+                ErrorKind::Timeout,
+                format!(
                     "retry after {}ms (attempt {}/{}) - {}",
                     after_ms, attempt, max_attempts, reason
                 ),
-                compensation: None,
-                retryable: true,
-            }),
+            )),
             Self::Pending {
                 condition,
                 resume_token,
-            } => Err(OutcomeError {
-                kind: ErrorKind::Internal,
-                message: format!(
+            } => Err(OutcomeError::new(
+                ErrorKind::Pending,
+                format!(
                     "pending outcome cannot collapse into Result: {:?} (resume {:032x})",
                     condition, resume_token
                 ),
-                compensation: None,
-                retryable: false,
-            }),
-            Self::Batch(items) => Err(OutcomeError {
-                kind: ErrorKind::Internal,
-                message: format!(
+            )),
+            Self::Batch(items) => Err(OutcomeError::new(
+                ErrorKind::BatchCollapse,
+                format!(
                     "batch outcome cannot collapse into Result without dropping {} item(s)",
                     items.len()
                 ),
-                compensation: None,
-                retryable: false,
-            }),
+            )),
         }
     }
 

@@ -6,7 +6,7 @@
 //! consumer. Callers who need every event must use `Cursor` (pull) or
 //! `Subscription`-on-top-of-Cursor, not this fanout.
 
-use crate::coordinate::{Coordinate, DagPosition};
+use crate::coordinate::{Coordinate, DagPosition, Region};
 use crate::event::{EventKind, StoredEvent};
 use flume::{Receiver, Sender, TrySendError};
 use parking_lot::Mutex;
@@ -14,6 +14,24 @@ use parking_lot::Mutex;
 /// Generic push-based notification fanout via bounded flume channels.
 pub(crate) struct FanoutList<T: Clone> {
     senders: Mutex<Vec<Sender<T>>>,
+}
+
+/// F8: region-filtered fanout for [`Notification`] subscribers.
+///
+/// Each subscriber is stored alongside the [`Region`] that defined it at
+/// `subscribe` time. The broadcast path tests the predicate BEFORE pushing
+/// onto the subscriber's channel, so a raw receiver handed out here only
+/// ever sees in-region notifications. That closes the drift where
+/// `Subscription::recv()` filtered on the consume side while
+/// `Subscription::receiver()` exposed the unfiltered channel — async
+/// consumers could observe unrelated events.
+pub(crate) struct FilteredSubscriberList {
+    senders: Mutex<Vec<FilteredSender>>,
+}
+
+struct FilteredSender {
+    tx: Sender<Notification>,
+    region: Region,
 }
 
 /// Private richer event envelope used by internal reactor consumers so they do
@@ -24,7 +42,10 @@ pub(crate) struct CommittedEventEnvelope {
     pub stored: StoredEvent<serde_json::Value>,
 }
 
-pub(crate) type SubscriberList = FanoutList<Notification>;
+/// Subscriber-facing list for push-based notifications. F8 replaces the
+/// raw `FanoutList<Notification>` so per-subscriber region filtering is
+/// applied at the writer push point rather than the consumer side.
+pub(crate) type SubscriberList = FilteredSubscriberList;
 pub(crate) type ReactorSubscriberList = FanoutList<CommittedEventEnvelope>;
 
 /// Notification: lightweight event summary pushed to subscribers.
@@ -82,6 +103,54 @@ impl<T: Clone> FanoutList<T> {
             Ok(()) => true,
             Err(TrySendError::Full(_)) => false,
             Err(TrySendError::Disconnected(_)) => false,
+        });
+    }
+}
+
+impl FilteredSubscriberList {
+    pub(crate) fn new() -> Self {
+        Self {
+            senders: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// Subscribe with a [`Region`] filter applied at the writer push point.
+    /// Returns the receiver half of a bounded channel that only ever sees
+    /// notifications whose `(entity, scope, kind)` match the region.
+    ///
+    /// F8: this is the preferred subscribe path. Region filtering runs at
+    /// the broadcast-push site so the raw receiver only ever contains
+    /// in-region notifications; async consumers that poll the receiver
+    /// directly cannot observe unrelated events.
+    pub(crate) fn subscribe_with_region(
+        &self,
+        capacity: usize,
+        region: Region,
+    ) -> Receiver<Notification> {
+        let (tx, rx) = flume::bounded(capacity);
+        self.senders.lock().push(FilteredSender { tx, region });
+        rx
+    }
+
+    /// F8: apply the per-subscriber region filter before `try_send`. A
+    /// non-matching notification is not pushed at all; the subscriber
+    /// stays in the list (it is NOT considered "Full"). Matching
+    /// notifications follow the same `Full`/`Disconnected`-prune rule as
+    /// the raw `FanoutList::broadcast`.
+    pub(crate) fn broadcast(&self, value: &Notification) {
+        let mut guard = self.senders.lock();
+        guard.retain(|sub| {
+            match sub
+                .region
+                .matches_event(value.coord.entity(), value.coord.scope(), value.kind)
+            {
+                false => true, // out of region; subscriber remains but gets no push
+                true => match sub.tx.try_send(value.clone()) {
+                    Ok(()) => true,
+                    Err(TrySendError::Full(_)) => false,
+                    Err(TrySendError::Disconnected(_)) => false,
+                },
+            }
         });
     }
 }

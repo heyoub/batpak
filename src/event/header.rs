@@ -43,6 +43,13 @@ pub const FLAG_REPLAY: u8 = 0x08;
 
 impl EventHeader {
     /// Constructs an `EventHeader` with all fields; flags and content hash default to zero.
+    ///
+    /// The parameters accept raw `u128` values to preserve the existing
+    /// zero-ceremony call shape used by wire-decode paths. Public call-sites
+    /// that already hold typed ids ([`crate::id::EventId`],
+    /// [`crate::id::CorrelationId`], [`crate::id::CausationId`]) should use
+    /// [`EventHeader::new_typed`] instead — the typed variant cannot
+    /// accidentally swap an event id for a correlation id at the call site.
     pub fn new(
         event_id: u128,
         correlation_id: u128,
@@ -63,6 +70,33 @@ impl EventHeader {
             flags: 0,
             content_hash: [0u8; 32],
         }
+    }
+
+    /// Typed-id constructor. See [`EventHeader::new`] for the raw-id
+    /// escape hatch used by wire-decode paths.
+    ///
+    /// `From<u128>` / `as_u128()` on each newtype form the internal-only
+    /// wire-serde boundary (G10) — downstream crates should reach for this
+    /// method, not the raw-id form.
+    pub fn new_typed(
+        event_id: crate::id::EventId,
+        correlation_id: crate::id::CorrelationId,
+        causation_id: Option<crate::id::CausationId>,
+        timestamp_us: i64,
+        position: DagPosition,
+        payload_size: u32,
+        event_kind: EventKind,
+    ) -> Self {
+        use crate::id::EntityIdType;
+        Self::new(
+            event_id.as_u128(),
+            correlation_id.as_u128(),
+            causation_id.map(|id| id.as_u128()),
+            timestamp_us,
+            position,
+            payload_size,
+            event_kind,
+        )
     }
 
     /// Sets the flags byte on this header.

@@ -14,6 +14,7 @@ fn test_store_with_writer(tx: flume::Sender<writer::WriterCommand>) -> (Store, T
         reader: Arc::new(reader::Reader::new(dir.path().to_path_buf(), 4)),
         cache: Box::new(NoCache),
         writer: Some(writer::WriterHandle::from_parts_for_test(tx, subscribers)),
+        lifecycle_gate: parking_lot::Mutex::new(()),
         config,
         runtime,
         should_shutdown_on_drop: true,

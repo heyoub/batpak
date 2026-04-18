@@ -71,16 +71,14 @@ pub fn zip<A: Clone, B: Clone>(a: Outcome<A>, b: Outcome<B>) -> Outcome<(A, B)> 
         // mismatch is surfaced as an Internal error.
         (Outcome::Batch(a_items), Outcome::Batch(b_items)) => {
             if a_items.len() != b_items.len() {
-                return Outcome::Err(OutcomeError {
-                    kind: ErrorKind::Internal,
-                    message: format!(
+                return Outcome::Err(OutcomeError::new(
+                    ErrorKind::Internal,
+                    format!(
                         "Batch length mismatch: lhs={} rhs={}",
                         a_items.len(),
                         b_items.len()
                     ),
-                    compensation: None,
-                    retryable: false,
-                });
+                ));
             }
             Outcome::Batch(
                 a_items
@@ -109,7 +107,8 @@ pub fn zip<A: Clone, B: Clone>(a: Outcome<A>, b: Outcome<B>) -> Outcome<(A, B)> 
 // A: Clone and B: Clone required for the Batch+Ok distribution cases above.
 
 /// join_all: collect a Vec of outcomes into an outcome of Vec.
-/// All must be Ok for the result to be Ok. First Err short-circuits.
+/// Every leaf must be `Ok` for the result to be `Ok`; nested `Batch`
+/// values are flattened recursively.
 pub fn join_all<T>(outcomes: Vec<Outcome<T>>) -> Outcome<Vec<T>> {
     let mut results = Vec::with_capacity(outcomes.len());
     for outcome in outcomes {
@@ -168,14 +167,11 @@ pub fn join_all<T>(outcomes: Vec<Outcome<T>>) -> Outcome<Vec<T>> {
                         };
                     }
                     Outcome::Batch(_) => {
-                        return Outcome::Err(OutcomeError {
-                            kind: ErrorKind::Internal,
-                            message: "join_all: recursive join produced a nested Batch — \
-                                      batch outcomes must not appear inside join_all input"
-                                .into(),
-                            compensation: None,
-                            retryable: false,
-                        });
+                        return Outcome::Err(OutcomeError::new(
+                            ErrorKind::Internal,
+                            "join_all: recursive join produced a nested Batch — \
+                             batch outcomes must not appear inside join_all input",
+                        ));
                     }
                 }
             }
@@ -184,28 +180,34 @@ pub fn join_all<T>(outcomes: Vec<Outcome<T>>) -> Outcome<Vec<T>> {
     Outcome::Ok(results)
 }
 
-/// join_any: first Ok wins. If all fail, last Err wins.
-/// Retry, Pending, and Cancelled propagate immediately — they signal
-/// structural conditions that make further iteration meaningless.
+/// join_any: first `Ok` wins. If all fail, last `Err` wins.
+/// Retry, Pending, Cancelled, and Batch propagate immediately — they signal
+/// structural conditions that make further iteration meaningless for this
+/// combinator.
 pub fn join_any<T>(outcomes: Vec<Outcome<T>>) -> Outcome<T> {
     let mut last_err = None;
     for outcome in outcomes {
         match outcome {
             Outcome::Ok(v) => return Outcome::Ok(v),
             Outcome::Err(e) => last_err = Some(e),
-            ret @ (Outcome::Retry { .. }
-            | Outcome::Pending { .. }
-            | Outcome::Cancelled { .. }
-            | Outcome::Batch(_)) => return ret,
+            Outcome::Batch(inner) => match join_any(inner) {
+                Outcome::Ok(v) => return Outcome::Ok(v),
+                Outcome::Err(e) => last_err = Some(e),
+                other @ (Outcome::Retry { .. }
+                | Outcome::Pending { .. }
+                | Outcome::Cancelled { .. }
+                | Outcome::Batch(_)) => return other,
+            },
+            ret @ (Outcome::Retry { .. } | Outcome::Pending { .. } | Outcome::Cancelled { .. }) => {
+                return ret
+            }
         }
     }
     match last_err {
         Some(e) => Outcome::Err(e),
-        None => Outcome::Err(OutcomeError {
-            kind: ErrorKind::Internal,
-            message: "join_any called with empty vec".into(),
-            compensation: None,
-            retryable: false,
-        }),
+        None => Outcome::Err(OutcomeError::new(
+            ErrorKind::Internal,
+            "join_any called with empty vec",
+        )),
     }
 }

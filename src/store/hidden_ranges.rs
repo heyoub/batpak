@@ -1,3 +1,4 @@
+use crate::store::cold_start::persist_with_parent_fsync;
 use crate::store::StoreError;
 use serde::{Deserialize, Serialize};
 use std::io::{BufWriter, Write};
@@ -52,7 +53,7 @@ pub(crate) fn write_cancelled_ranges(
     let normalized = normalize_ranges(ranges)?;
     if normalized.is_empty() {
         match std::fs::remove_file(&final_path) {
-            Ok(()) => {}
+            Ok(()) => sync_parent_dir(&final_path)?,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => return Err(StoreError::Io(error)),
         }
@@ -79,79 +80,80 @@ pub(crate) fn write_cancelled_ranges(
         writer.flush()?;
     }
     tmp.as_file().sync_all()?;
-    tmp.persist(&final_path)
-        .map_err(|error| StoreError::Io(error.error))?;
+    persist_with_parent_fsync(tmp, &final_path).map_err(StoreError::Io)?;
     Ok(())
 }
 
-pub(crate) fn try_load_cancelled_ranges(data_dir: &Path) -> Option<Vec<(u64, u64)>> {
+/// Load the hidden-ranges metadata, failing closed on corruption.
+///
+/// The outcome ladder distinguishes "file absent" from "file present but
+/// invalid" — a first-open store has no file and returns `Ok(None)`, but a
+/// store whose metadata was corrupted mid-write must not silently forget
+/// its cancelled ranges (doing so resurrects previously-hidden events):
+///
+/// - No file at the expected path → `Ok(None)` (first open).
+/// - Valid file → `Ok(Some(ranges))`.
+/// - File present but unreadable / wrong magic / unsupported version /
+///   CRC mismatch / malformed →
+///   `Err(StoreError::HiddenRangesCorrupt { .. })`.
+///
+/// The caller must remediate (repair or manually clear the file) before
+/// re-opening.
+pub(crate) fn load_cancelled_ranges(
+    data_dir: &Path,
+) -> Result<Option<Vec<(u64, u64)>>, StoreError> {
     let path = data_dir.join(VISIBILITY_RANGES_FILENAME);
     let raw = match std::fs::read(&path) {
         Ok(raw) => raw,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => {
-            tracing::warn!(
-                target: "batpak::visibility",
-                path = %path.display(),
-                error = %error,
-                "failed to read visibility-ranges metadata"
-            );
-            return None;
+            return Err(corrupt_ranges(
+                &path,
+                format!("failed to read visibility-ranges metadata: {error}"),
+            ));
         }
     };
 
     const HEADER_LEN: usize = 6 + 2 + 4;
     if raw.len() < HEADER_LEN {
-        tracing::warn!(
-            target: "batpak::visibility",
-            path = %path.display(),
-            "visibility-ranges file too short; ignoring"
-        );
-        return None;
+        return Err(corrupt_ranges(
+            &path,
+            "visibility-ranges file too short".to_string(),
+        ));
     }
 
     if &raw[..6] != VISIBILITY_RANGES_MAGIC {
-        tracing::warn!(
-            target: "batpak::visibility",
-            path = %path.display(),
-            "visibility-ranges file has wrong magic; ignoring"
-        );
-        return None;
+        return Err(corrupt_ranges(
+            &path,
+            "visibility-ranges file has wrong magic".to_string(),
+        ));
     }
 
     let version = u16::from_le_bytes([raw[6], raw[7]]);
     if version != VISIBILITY_RANGES_VERSION {
-        tracing::warn!(
-            target: "batpak::visibility",
-            path = %path.display(),
-            version,
-            "unsupported visibility-ranges version; ignoring"
-        );
-        return None;
+        return Err(corrupt_ranges(
+            &path,
+            format!("unsupported visibility-ranges version: {version}"),
+        ));
     }
 
     let stored_crc = u32::from_le_bytes([raw[8], raw[9], raw[10], raw[11]]);
     let body = &raw[HEADER_LEN..];
     let actual_crc = crc32fast::hash(body);
     if stored_crc != actual_crc {
-        tracing::warn!(
-            target: "batpak::visibility",
-            path = %path.display(),
-            "visibility-ranges CRC mismatch; ignoring"
-        );
-        return None;
+        return Err(corrupt_ranges(
+            &path,
+            "visibility-ranges CRC mismatch".to_string(),
+        ));
     }
 
     let data: VisibilityRangesData = match rmp_serde::from_slice(body) {
         Ok(data) => data,
         Err(error) => {
-            tracing::warn!(
-                target: "batpak::visibility",
-                path = %path.display(),
-                error = %error,
-                "visibility-ranges deserialisation failed; ignoring"
-            );
-            return None;
+            return Err(corrupt_ranges(
+                &path,
+                format!("visibility-ranges deserialisation failed: {error}"),
+            ));
         }
     };
 
@@ -161,16 +163,24 @@ pub(crate) fn try_load_cancelled_ranges(data_dir: &Path) -> Option<Vec<(u64, u64
         .map(|entry| (entry.start, entry.end))
         .collect();
     match normalize_ranges(&raw_ranges) {
-        Ok(normalized) => Some(normalized),
-        Err(err) => {
-            tracing::warn!(
-                target: "batpak::visibility",
-                path = %path.display(),
-                error = %err,
-                "visibility-ranges file contained malformed entries; ignoring"
-            );
-            None
-        }
+        Ok(normalized) => Ok(Some(normalized)),
+        Err(err) => Err(corrupt_ranges(
+            &path,
+            format!("visibility-ranges file contained malformed entries: {err}"),
+        )),
+    }
+}
+
+fn corrupt_ranges(path: &Path, reason: String) -> StoreError {
+    tracing::warn!(
+        target: "batpak::visibility",
+        path = %path.display(),
+        reason = %reason,
+        "visibility-ranges metadata unreadable; failing closed"
+    );
+    StoreError::HiddenRangesCorrupt {
+        path: path.to_path_buf(),
+        reason,
     }
 }
 
@@ -185,4 +195,20 @@ fn reject_symlink_leaf(path: &Path) -> Result<(), StoreError> {
         ))),
         Ok(_) | Err(_) => Ok(()),
     }
+}
+
+fn sync_parent_dir(path: &Path) -> Result<(), StoreError> {
+    #[cfg(unix)]
+    {
+        if let Some(parent) = path.parent() {
+            std::fs::File::open(parent)
+                .and_then(|dir| dir.sync_all())
+                .map_err(StoreError::Io)?;
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+    }
+    Ok(())
 }

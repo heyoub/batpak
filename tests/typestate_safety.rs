@@ -8,6 +8,19 @@
 //! DEFENDS: FM-009 (Polite Downgrade — generated methods must carry real data)
 //! INVARIANTS: INV-TYPE (typestate round-trip fidelity)
 
+use batpak::EventPayload;
+use serde::{Deserialize, Serialize};
+
+// Test-local payload: `Transition::from_payload` requires `P: EventPayload`,
+// so we can no longer parameterise transitions on bare `String`. This minimal
+// payload carries a single string label and is only used by the runtime
+// typestate tests below.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, EventPayload)]
+#[batpak(category = 0x0F, type_id = 0xA1)]
+struct UnlockLabel {
+    label: String,
+}
+
 #[test]
 fn compile_fail_tests() {
     let t = trybuild::TestCases::new();
@@ -85,19 +98,24 @@ mod typestate_runtime {
              Investigate: src/typestate/mod.rs — into_data + new round-trip."
         );
 
-        // Verify Transition type is constructible
-        let kind = batpak::prelude::EventKind::custom(1, 1);
-        let _t: Transition<Locked, Unlocked, String> =
-            Transition::new(kind, "carol_unlocked".into());
+        // Verify Transition type is constructible via the from_payload
+        // constructor (FREEZE-7): `kind` is derived from `P::KIND`, not
+        // supplied separately, so the transition cannot hold a payload that
+        // disagrees with its event kind.
+        let payload = super::UnlockLabel {
+            label: "carol_unlocked".into(),
+        };
+        let _t: Transition<Locked, Unlocked, super::UnlockLabel> =
+            Transition::from_payload(payload.clone());
         assert_eq!(
             _t.payload(),
-            &"carol_unlocked".to_string(),
+            &payload,
             "PROPERTY: Transition::payload() must return the payload."
         );
         assert_eq!(
             _t.kind(),
-            kind,
-            "PROPERTY: Transition::kind() must return the EventKind."
+            <super::UnlockLabel as batpak::EventPayload>::KIND,
+            "PROPERTY: Transition::kind() must return the EventKind derived from P::KIND."
         );
     }
 }

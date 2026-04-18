@@ -297,22 +297,6 @@ impl FenceLedger {
         self.responses.push(response);
     }
 
-    fn complete_ok(
-        self,
-        subscribers: &SubscriberList,
-        reactor_subscribers: &ReactorSubscriberList,
-    ) {
-        for notification in &self.notifications {
-            subscribers.broadcast(notification);
-        }
-        for envelope in &self.envelopes {
-            reactor_subscribers.broadcast(envelope);
-        }
-        for response in self.responses {
-            response.complete_ok();
-        }
-    }
-
     fn complete_cancelled(self) {
         for response in self.responses {
             response.complete_cancelled();
@@ -994,15 +978,26 @@ impl WriterState<'_> {
             return Err(StoreError::VisibilityFenceNotActive);
         }
 
-        // Publish index boundary first; subscribers woken by complete_ok must
-        // already see the events as visible. If `complete_ok` delivered
-        // receipts before `finish_visibility_fence` advanced the visible
-        // watermark, a subscriber could observe the receipt yet see the
-        // entry still hidden — a real ordering bug, not just a style
-        // question.
-        self.index
-            .finish_visibility_fence(token, fence.publish_up_to)?;
-        fence.complete_ok(self.subscribers, self.reactor_subscribers);
+        // F2: publish index boundary first, then broadcast — lifted into
+        // `fence_finish_then_broadcast`. Subscribers woken by the
+        // broadcast must already see the events as visible: if the
+        // broadcast ran before `finish_visibility_fence`, a subscriber
+        // could observe a notification yet see the entry still hidden.
+        //
+        // Receipt-completion happens after the broadcast; the receipt
+        // reply is a private caller ack, not a visibility event, so it
+        // is sent after the ordered finish-then-broadcast sequence.
+        let FenceLedger {
+            publish_up_to,
+            notifications,
+            envelopes,
+            responses,
+            ..
+        } = fence;
+        self.fence_finish_then_broadcast(token, publish_up_to, notifications, envelopes)?;
+        for response in responses {
+            response.complete_ok();
+        }
         Ok(())
     }
 
@@ -1182,8 +1177,15 @@ impl WriterState<'_> {
         prepared: &PreparedBatch,
         first_seq: u64,
     ) -> Result<Vec<StagedCommittedEvent>, StoreError> {
-        #[derive(Clone, Copy)]
+        #[derive(Clone)]
         struct BatchEntityState {
+            /// INVARIANT: `entity_arc` is the canonical `Arc<str>` that keyed
+            /// this state into the batch HashMap. Every later batch item that
+            /// lands on the same HashMap slot must share Arc identity with
+            /// this field (debug_assert below), otherwise we would be silently
+            /// keying by string equality while the per-entity clock/hash
+            /// chain assumed key-level identity.
+            entity_arc: Arc<str>,
             prev_hash: [u8; 32],
             next_clock: u32,
             last_wall_ms: u64,
@@ -1207,6 +1209,7 @@ impl WriterState<'_> {
             let state = entity_states.entry(Arc::clone(&entity)).or_insert_with(|| {
                 let latest = self.index.get_latest(&entity);
                 BatchEntityState {
+                    entity_arc: Arc::clone(&entity),
                     prev_hash: latest
                         .as_ref()
                         .map(|entry| entry.hash_chain.event_hash)
@@ -1215,6 +1218,14 @@ impl WriterState<'_> {
                     last_wall_ms: latest.as_ref().map(|entry| entry.wall_ms).unwrap_or(0),
                 }
             });
+
+            // INVARIANT: entity_arc is immutable per-item; HashMap key identity is stable.
+            debug_assert!(
+                Arc::ptr_eq(&state.entity_arc, item.entity_arc()),
+                "batch entity Arc identity must be stable; state={:p} item={:p}",
+                Arc::as_ptr(&state.entity_arc),
+                Arc::as_ptr(item.entity_arc()),
+            );
 
             // prev_hash: previous batch item if same entity, else the index's
             // latest entry for the entity, else genesis [0; 32].
@@ -1255,7 +1266,14 @@ impl WriterState<'_> {
             // with the ACTUAL hash (was a `[0u8; 32]` placeholder before,
             // which broke the chain).
             state.prev_hash = event_hash;
-            state.next_clock = clock.saturating_add(1);
+            // INVARIANT: next_clock strictly monotonic per entity; u32::MAX is
+            // the hard ceiling and an error, not a saturating behaviour.
+            state.next_clock =
+                clock
+                    .checked_add(1)
+                    .ok_or_else(|| StoreError::EntityClockOverflow {
+                        entity: entity.to_string(),
+                    })?;
             state.last_wall_ms = wall_ms;
 
             let global_seq = first_seq + idx as u64;
@@ -1497,11 +1515,15 @@ impl WriterState<'_> {
                 .expect("active fence token verified before fenced append");
             fence.extend_artifacts([committed.notification], committed.envelope);
         } else {
-            // Publish: make this entry visible to concurrent readers.
-            // Explicit boundary: the entry has global_sequence == global_seq,
-            // so visible_sequence must advance to global_seq + 1.
-            self.index.publish(global_seq + 1);
-            self.broadcast_commit_artifacts([committed.notification], committed.envelope);
+            // F2: publish-then-broadcast ordering is load-bearing; lifted
+            // into a named helper so the ordering cannot be silently
+            // swapped at the call-site. See
+            // `publish_then_broadcast_unfenced` for the contract.
+            self.publish_then_broadcast_unfenced(
+                global_seq + 1,
+                [committed.notification],
+                committed.envelope,
+            );
         }
 
         Ok(AppendReceipt {
@@ -1511,7 +1533,36 @@ impl WriterState<'_> {
         })
     }
 
-    /// Batch append protocol: atomic multi-event commit with SYSTEM_BATCH_BEGIN envelope.
+    /// Batch append protocol: durable multi-event commit via 2-phase
+    /// BEGIN/COMMIT markers and cold-start recovery.
+    ///
+    /// This is NOT kernel-atomic. It is a two-phase protocol:
+    ///
+    /// 1. Reserve sequences and write a `SYSTEM_BATCH_BEGIN` marker frame
+    ///    whose payload_size encodes the expected item count.
+    /// 2. Write each item's frame in order.
+    /// 3. Write a `SYSTEM_BATCH_COMMIT` marker frame.
+    /// 4. `fsync` the segment — the durability boundary.
+    /// 5. Publish the new entries into the in-memory index and broadcast
+    ///    notifications.
+    ///
+    /// Crash-recovery contract (enforced by cold-start replay):
+    ///
+    /// * Crash between BEGIN and COMMIT: the batch is discarded on
+    ///   cold-start replay. No item in the batch becomes visible — the
+    ///   missing COMMIT marker is the signal.
+    /// * Crash after the COMMIT marker has been written and the segment
+    ///   has been synced: the batch is durable. Cold-start replay
+    ///   observes the COMMIT marker and the full run of item frames, and
+    ///   publishes them atomically with respect to readers.
+    ///
+    /// See `INV-BATCH-ATOMIC-VISIBILITY` (no partial batch is ever
+    /// observable by a reader after publish) and
+    /// `INV-BATCH-CRASH-RECOVERY` (cold-start discards BEGIN-without-
+    /// COMMIT). Callers that want kernel-atomic multi-event semantics
+    /// should read this as "atomic visibility" — the protocol guarantees
+    /// readers never see a partial batch, but the underlying
+    /// multi-segment fsync is not itself atomic.
     fn handle_append_batch(
         &mut self,
         items: Vec<BatchAppendItem>,
@@ -1700,10 +1751,14 @@ impl WriterState<'_> {
                 .expect("active fence token verified before fenced batch append");
             fence.extend_artifacts(artifacts.notifications, artifacts.envelopes);
         } else {
-            self.index.publish(publish_up_to);
-            // STEP 14: Broadcast notifications. A subscriber that reacts by calling
-            // query/get will now see the full batch (publish happened first).
-            self.broadcast_commit_artifacts(artifacts.notifications, artifacts.envelopes);
+            // F2: STEP 14 — publish-then-broadcast ordering is load-bearing;
+            // lifted into a named helper. A subscriber that reacts by calling
+            // query/get will see the full batch (publish happens first).
+            self.publish_then_broadcast_unfenced(
+                publish_up_to,
+                artifacts.notifications,
+                artifacts.envelopes,
+            );
         }
 
         debug!(batch_id, count = prepared.len(), "batch committed");
@@ -1901,6 +1956,60 @@ impl WriterState<'_> {
         for envelope in envelopes {
             self.reactor_subscribers.broadcast(&envelope);
         }
+    }
+
+    /// Publishes the index boundary for an unfenced commit, then notifies
+    /// subscribers. ORDER IS LOAD-BEARING: subscribers woken by the broadcast
+    /// must already be able to observe the events as visible — if the
+    /// broadcast ran before the publish, a subscriber could read the
+    /// notification, query the store, and see the entry still hidden.
+    ///
+    /// Call-sites for unfenced commits use only this helper; the raw
+    /// `publish` + `broadcast_commit_artifacts` calls are intentionally kept
+    /// private to this module so this ordering contract cannot be swapped by
+    /// mistake.
+    #[inline]
+    fn publish_then_broadcast_unfenced(
+        &mut self,
+        publish_up_to: u64,
+        notifications: impl IntoIterator<Item = Notification>,
+        envelopes: impl IntoIterator<Item = CommittedEventEnvelope>,
+    ) {
+        // STEP 1: publish — make the new entries visible to concurrent
+        // readers. Explicit boundary: an entry at global_sequence == s is
+        // visible once visible_sequence advances to s + 1.
+        self.index.publish(publish_up_to);
+        // STEP 2: broadcast — wake subscribers. A subscriber that reacts by
+        // calling query/get will now see the full set (publish happened
+        // first).
+        self.broadcast_commit_artifacts(notifications, envelopes);
+    }
+
+    /// Finishes a visibility fence (publishes the hidden range), then notifies
+    /// subscribers. Same ordering contract as
+    /// [`publish_then_broadcast_unfenced`]: visibility must be established
+    /// before the broadcast, or a subscriber could observe a notification for
+    /// an entry that is still hidden.
+    ///
+    /// `publish_up_to` is an `Option<u64>` because a fence with no recorded
+    /// progress (no fenced appends committed) finishes without advancing
+    /// the visible watermark; the index's `finish_visibility_fence` accepts
+    /// that shape directly.
+    #[inline]
+    fn fence_finish_then_broadcast(
+        &mut self,
+        token: u64,
+        publish_up_to: Option<u64>,
+        notifications: impl IntoIterator<Item = Notification>,
+        envelopes: impl IntoIterator<Item = CommittedEventEnvelope>,
+    ) -> Result<(), StoreError> {
+        // STEP 1: finish fence — publish the hidden range so the fenced
+        // entries are visible to concurrent readers.
+        self.index.finish_visibility_fence(token, publish_up_to)?;
+        // STEP 2: broadcast — wake subscribers; see ordering rationale
+        // above.
+        self.broadcast_commit_artifacts(notifications, envelopes);
+        Ok(())
     }
 }
 

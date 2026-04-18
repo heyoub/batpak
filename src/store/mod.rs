@@ -2,7 +2,8 @@ mod ancestry;
 mod append;
 pub(crate) mod cold_start;
 mod config;
-/// Push subscriptions (lossy) and pull cursors (guaranteed) for event delivery.
+/// Push subscriptions (lossy) and pull cursors (ordered, with optional durable
+/// checkpoints) for event delivery.
 pub mod delivery;
 mod error;
 /// Fault injection framework for testing failure scenarios.
@@ -44,7 +45,7 @@ pub use fault::{
     CountdownAction, CountdownInjector, FaultInjector, InjectionPoint, ProbabilisticInjector,
 };
 pub use index::{ClockKey, DiskPos, IndexEntry};
-pub use projection::watch::ProjectionWatcher;
+pub use projection::watch::{ProjectionWatcher, WatcherError};
 pub use projection::{
     CacheCapabilities, CacheMeta, Freshness, NativeCache, NoCache, ProjectionCache,
 };
@@ -59,6 +60,7 @@ use crate::event::{EventKind, EventPayload, EventSourced, StoredEvent};
 #[cfg(test)]
 pub(crate) use config::now_us;
 use index::StoreIndex;
+use parking_lot::Mutex;
 use segment::scan::Reader;
 use serde::Serialize;
 use std::sync::Arc;
@@ -89,6 +91,7 @@ pub struct Store<State = Open> {
     pub(crate) reader: Arc<Reader>,
     pub(crate) cache: Box<dyn ProjectionCache>,
     pub(crate) writer: Option<WriterHandle>,
+    pub(crate) lifecycle_gate: Mutex<()>,
     pub(crate) config: Arc<StoreConfig>,
     pub(crate) runtime: Arc<config::ValidatedStoreConfig>,
     pub(crate) should_shutdown_on_drop: bool,
@@ -185,6 +188,7 @@ impl Store<Open> {
             reader,
             cache,
             writer: Some(writer),
+            lifecycle_gate: Mutex::new(()),
             config,
             runtime,
             should_shutdown_on_drop: true,
@@ -266,22 +270,35 @@ impl Store<Open> {
     ///
     /// Every item's coordinate is revalidated synchronously at this entry so
     /// that invalid coordinates surface to the caller rather than being
-    /// deferred to the writer thread.
+    /// deferred to the writer thread. Each item's serialized payload is also
+    /// checked against `single_append_max_bytes` (G1): a single oversized
+    /// item is rejected even when the batch-total cap would have allowed it.
     ///
     /// # Errors
     /// Returns [`StoreError::InvalidCoordinate`] if any item's coordinate
-    /// fails validation, or any enqueue or writer error surfaced while
-    /// staging the batch for background execution.
+    /// fails validation, [`StoreError::BatchItemTooLarge`] if any item's
+    /// serialized payload exceeds `single_append_max_bytes`, or any enqueue
+    /// or writer error surfaced while staging the batch for background
+    /// execution.
     pub fn submit_batch(
         &self,
         items: Vec<crate::store::append::BatchAppendItem>,
     ) -> Result<BatchAppendTicket, StoreError> {
         self.ensure_no_active_public_fence()?;
+        let per_item_cap = self.config.single_append_max_bytes as usize;
         for (i, item) in items.iter().enumerate() {
             if let Err(err) = item.coord().validate() {
                 return Err(StoreError::InvalidCoordinate {
                     index: Some(i),
                     reason: format!("{err}"),
+                });
+            }
+            let size = item.payload_bytes().len();
+            if size > per_item_cap {
+                return Err(StoreError::BatchItemTooLarge {
+                    index: i,
+                    size,
+                    limit: per_item_cap,
                 });
             }
         }
@@ -455,7 +472,7 @@ impl Store<Open> {
         let rx = self
             .writer_ref()
             .subscribers
-            .subscribe(self.config.broadcast_capacity);
+            .subscribe_with_region(self.config.broadcast_capacity, region.clone());
         Subscription::new(rx, region.clone())
     }
 
@@ -521,7 +538,14 @@ impl Store<Open> {
     /// that emits an updated projection `T` whenever new events arrive for `entity`.
     ///
     /// Internally subscribes to entity events, then re-projects on each notification.
-    /// The watcher is pull-based: the caller drives the loop via `watcher.recv()`.
+    /// The watcher is pull-based: the caller drives the loop via
+    /// [`ProjectionWatcher::recv`], which returns
+    /// `Result<(u64, Option<T>), WatcherError>` — see the method docs for the
+    /// full three-way return taxonomy (materialized state, empty fold, store
+    /// closed). The returned generation is persisted honestly: redundant
+    /// wakeups for an already-delivered generation are suppressed, but an
+    /// append that advances the entity generation can still yield the same
+    /// folded state if `T::relevant_event_kinds()` filters it out.
     ///
     /// Requires `Arc<Store>` because the watcher outlives the borrow.
     pub fn watch_projection<T>(
@@ -532,7 +556,9 @@ impl Store<Open> {
     where
         T: EventSourced + serde::Serialize + serde::de::DeserializeOwned + Send + 'static,
     {
+        let baseline_generation = self.entity_generation(entity).unwrap_or(0);
         let sub = self.subscribe_lossy(&Region::entity(entity));
+        let post_subscribe_generation = self.entity_generation(entity).unwrap_or(0);
         let store = Arc::clone(self);
         let entity_owned = entity.to_owned();
         ProjectionWatcher::new(
@@ -540,7 +566,8 @@ impl Store<Open> {
             store,
             entity_owned,
             freshness,
-            self.entity_generation(entity).unwrap_or(0),
+            baseline_generation,
+            post_subscribe_generation > baseline_generation,
         )
     }
 
@@ -571,7 +598,11 @@ impl Store<Open> {
             .wait()
     }
 
-    /// WRITE: apply a typestate transition — extracts kind+payload, delegates to append.
+    /// WRITE: apply a typestate transition — kind is read from `P::KIND`.
+    ///
+    /// Per FREEZE-7 the transition's event kind is structurally derived from
+    /// the payload type parameter, so this API cannot be called with a
+    /// mismatched payload/kind pair.
     ///
     /// # Errors
     /// Returns `StoreError::Serialization` if the payload cannot be serialized.
@@ -579,15 +610,14 @@ impl Store<Open> {
     pub fn apply_transition<
         From: crate::typestate::transition::StateMarker,
         To: crate::typestate::transition::StateMarker,
-        P: Serialize,
+        P: EventPayload,
     >(
         &self,
         coord: &Coordinate,
         transition: crate::typestate::transition::Transition<From, To, P>,
     ) -> Result<AppendReceipt, StoreError> {
-        let kind = transition.kind();
         let payload = transition.into_payload();
-        self.append(coord, kind, &payload)
+        self.append(coord, P::KIND, &payload)
     }
 
     /// WRITE (typed): append a root-cause event — kind derived from `T::KIND`.
@@ -704,17 +734,40 @@ impl Store<Open> {
     }
 
     /// Compact: merge sealed segments, optionally filtering events.
-    /// Returns the number of segments removed and bytes reclaimed.
     /// The active (currently-written) segment is never touched.
     ///
-    /// **IMPORTANT**: compact() rebuilds the in-memory index from disk.
+    /// # F6 / FREEZE-4 swap contract
+    ///
+    /// The in-memory index is rebuilt off-side from the post-merge segment
+    /// layout and then published as a single atomic swap under an exclusive
+    /// lock (see `StoreIndex::replace_contents_from_fresh`). Reader-facing
+    /// methods (`query`, `stream`, `cursor_guaranteed` polls, etc.) take a
+    /// read guard on the same lock, so a concurrent reader observes either
+    /// the pre-compact index or the post-compact index — never a cleared or
+    /// partially rebuilt view.
+    ///
+    /// Failure modes are surfaced through the returned
+    /// [`segment::CompactionResult`]:
+    ///
+    /// * [`segment::CompactionOutcome::Performed`] — the segment merge
+    ///   happened and the live index has been swapped for the fresh one.
+    /// * [`segment::CompactionOutcome::Skipped`] — the sealed-segment count
+    ///   was below `min_segments`; no disk or index work was done.
+    /// * [`segment::CompactionOutcome::Failed`] — the off-side rebuild
+    ///   aborted before the swap point; the live index has not been
+    ///   mutated, and the pending-compaction marker preserves a coherent
+    ///   reopen path until cleanup completes.
+    ///
     /// Appends that arrive during compaction are safe (they go to the active
-    /// segment which is not compacted), but the index rebuild syncs the writer
-    /// before and after to minimize the window for stale index state.
-    /// For maximum safety, avoid high-throughput appends during compaction.
+    /// segment which is not compacted). `sync()` is called before and after
+    /// the segment merge so the off-side rebuild sees a quiescent on-disk
+    /// state; for maximum safety, avoid high-throughput appends during
+    /// compaction.
     ///
     /// # Errors
-    /// Returns `StoreError::Io` if reading, writing, or removing segment files fails.
+    /// Returns `StoreError::Io` if reading, writing, or removing segment
+    /// files fails. A rebuild failure is NOT an error — it is reported via
+    /// `CompactionOutcome::Failed`.
     pub fn compact(
         &self,
         config: &CompactionConfig,
@@ -775,6 +828,7 @@ impl Store<ReadOnly> {
             reader,
             cache,
             writer: None,
+            lifecycle_gate: Mutex::new(()),
             config,
             runtime,
             should_shutdown_on_drop: false,
@@ -854,8 +908,15 @@ impl<State> Store<State> {
 
     /// Project only when the entity changed since `last_seen_generation`.
     ///
-    /// Returns `Ok(None)` when no change is observed. Otherwise returns the new
-    /// generation together with the freshly projected state.
+    /// Returns `Ok(None)` when no change is observed. Otherwise returns the
+    /// generation at which the returned state was materialized together with
+    /// the freshly projected state. The returned generation is honest: a
+    /// cache-hit path returns the generation at which the cache was
+    /// stamped, a replay path returns the generation sampled before replay
+    /// started. Callers who persist this generation as a watermark (e.g.
+    /// [`ProjectionWatcher`]) will not silently consume a relevant append
+    /// against stale state (F5). To preserve that property, this API treats
+    /// [`Freshness::MaybeStale`] the same as [`Freshness::Consistent`].
     ///
     /// # Errors
     /// Returns any error surfaced by [`Store::project`] when the entity has
@@ -899,10 +960,12 @@ impl<State> Store<State> {
         self.by_fact(T::KIND)
     }
 
-    /// CURSOR: pull-based, guaranteed delivery.
+    /// CURSOR: pull-based, ordered delivery from the in-memory index.
     ///
-    /// Available on both `Store<Open>` and `Store<ReadOnly>`. The cursor reads
-    /// from the in-memory index and cannot lose events.
+    /// Available on both `Store<Open>` and `Store<ReadOnly>`. This cursor is
+    /// process-local only: it does not persist its position, so restart-time
+    /// at-least-once semantics require the checkpoint-bound cursor worker
+    /// surface rather than this constructor.
     pub fn cursor_guaranteed(&self, region: &Region) -> Cursor {
         Cursor::new(region.clone(), Arc::clone(&self.index))
     }

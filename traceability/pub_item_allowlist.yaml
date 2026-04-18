@@ -2,7 +2,7 @@
   justification: macro entrypoint tested through define_entity_id! consumers
   witness:
     - path: tests/event_api.rs
-      lines: [8, 126]
+      lines: [8, 17, 43, 95, 137]
 - name: ClockKey
   justification: internal index helper exercised indirectly through store queries and cursor tests
   witness:
@@ -17,7 +17,7 @@
   justification: compaction closures are exercised through CompactionStrategy without test code naming the boxed type alias directly
   witness:
     - path: tests/store_advanced.rs
-      lines: []
+      lines: [718]
 - name: Active
   justification: typestate marker exercised by segment lifecycle tests
   witness:
@@ -76,14 +76,14 @@
   justification: reactive projection API exercised through raw_projection_mode and derive parity tests
   witness:
     - path: tests/raw_projection_mode.rs
-      lines: [159, 195, 252]
+      lines: [166, 210, 269]
     - path: tests/derive_event_sourced_parity.rs
       lines: [340, 342]
 - name: ProjectionWatcher
-  justification: returned by watch_projection and exercised through projection watch tests whose assert text names the type in panic messages
+  justification: returned by watch_projection and exercised directly in raw projection watch tests
   witness:
     - path: tests/raw_projection_mode.rs
-      lines: [7, 159, 195, 252]
+      lines: [7, 166, 210, 269]
 - name: BatchAppendItem
   justification: public batch API type tested through tests/atomic_batch.rs and writer_command_flow.rs
   witness:
@@ -122,16 +122,6 @@
   witness:
     - path: tests/atomic_batch.rs
       lines: [541, 561, 890, 912, 975, 999]
-- name: ProbabilisticInjector
-  justification: probabilistic fault injector tested through tests/chaos_testing.rs chaos runs
-  witness:
-    - path: src/store/fault.rs
-      lines: [370]
-- name: maybe_inject
-  justification: fault injection helper called by writer internals, tested indirectly through batch fault tests
-  witness:
-    - path: src/store/fault.rs
-      lines: [384]
 - name: __private
   justification: doc-hidden module; all contents exist solely for #[derive(EventPayload)] generated code and cannot be named in user-facing tests
   witness:
@@ -152,13 +142,3 @@
   witness:
     - path: tests/event_payload_surface.rs
       lines: [20, 62]
-- name: Reader
-  justification: pub(hidden) internal segment reader; technically public only so that the ReplayInput trait (also hidden) can appear as a bound on public projection APIs without tripping `private_bounds`. Not reachable via any documented path.
-  witness:
-    - path: src/store/projection/flow.rs
-      lines: [190, 202, 218]
-- name: ReplayInput
-  justification: pub(hidden) sealed trait that structures the projection replay lanes; public only to avoid `private_bounds` on Store::project / project_if_changed / watch_projection. Exercised indirectly every time any projection test runs, but cannot be named by users (its `Reader` parameter type is also doc(hidden)).
-  witness:
-    - path: src/store/projection/flow.rs
-      lines: [188, 200, 216]

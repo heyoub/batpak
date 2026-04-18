@@ -7,6 +7,49 @@ use crate::store::{Freshness, Store, StoreError};
 use std::any::TypeId;
 use std::hash::{Hash, Hasher};
 
+/// Outcome returned by the internal `project_inner` pipeline.
+///
+/// Bundles the projected state with the generation at which the state was
+/// materialized. The generation is honest — it is:
+///   * `slot.generation` on a group-local cache hit,
+///   * `plan.generation` (sampled before replay started) on a replay path, or
+///   * the probed entity generation on the empty/no-replay-plan path.
+///
+/// `ProjectionWatcher` persists the returned generation after each successful
+/// `recv()`, so a subsequent relevant append cannot be “consumed” while the
+/// caller still holds stale state.
+#[derive(Debug)]
+pub(crate) struct ProjectionOutcome<T> {
+    state: Option<T>,
+    returned_generation: u64,
+}
+
+impl<T> ProjectionOutcome<T> {
+    fn empty(returned_generation: u64) -> Self {
+        Self {
+            state: None,
+            returned_generation,
+        }
+    }
+
+    fn new(state: Option<T>, returned_generation: u64) -> Self {
+        Self {
+            state,
+            returned_generation,
+        }
+    }
+
+    /// Consume the outcome and return `(generation, state)`.
+    pub(crate) fn into_parts(self) -> (u64, Option<T>) {
+        (self.returned_generation, self.state)
+    }
+
+    /// Consume just the state, discarding the generation bookkeeping.
+    pub(crate) fn into_state(self) -> Option<T> {
+        self.state
+    }
+}
+
 /// Per-phase timing breakdown for the projection pipeline.
 /// Only populated when the caller opts in via `project_timed()`.
 #[derive(Debug, Clone, Default)]
@@ -47,12 +90,19 @@ struct ReplayContext {
     plan: ProjectionReplayPlan,
     cache_key: Vec<u8>,
     watermark: u64,
-    /// Wall-clock µs-since-epoch captured at plan build. Survives across
-    /// process restarts via the cache format; not monotonic on its own.
+    /// Wall-clock µs-since-epoch captured at plan build. Used as the
+    /// prefetch-hint predicted timestamp so backends can warm the right
+    /// row; NOT used as the `cached_at_us` stamp written into the real
+    /// cache row. The honest put-time stamp is taken inside
+    /// `store_projection_value` right before `ProjectionCache::put`
+    /// (see G6). Survives across process restarts via the cache format;
+    /// not monotonic on its own.
     cached_at_us: i64,
     /// Monotonic ns-since-process-anchor captured at plan build. Only
     /// meaningful within the producing process; readers compare
-    /// `process_boot_ns` before trusting age deltas.
+    /// `process_boot_ns` before trusting age deltas. Same rationale as
+    /// `cached_at_us`: used for prefetch prediction, NOT as the stamp
+    /// written at put time.
     cached_at_mono_ns: i64,
     /// This process's monotonic-epoch marker. Stamped on every cached value
     /// produced by this replay so subsequent reads can detect cross-process
@@ -111,6 +161,86 @@ impl ProjectionDispatch {
             Self::DirectReplay { .. } => ProjectionStrategy::DirectReplay,
         }
     }
+}
+
+fn record_total_time(timings: &mut Option<&mut ProjectionTimings>, started_at: std::time::Instant) {
+    if let Some(t) = timings.as_deref_mut() {
+        t.total_us = duration_micros(started_at.elapsed());
+    }
+}
+
+fn record_external_cache_probe_time(
+    timings: &mut Option<&mut ProjectionTimings>,
+    started_at: std::time::Instant,
+) {
+    if let Some(t) = timings.as_deref_mut() {
+        t.external_cache_probe_us = duration_micros(started_at.elapsed());
+    }
+}
+
+fn finish_projection<T>(
+    timings: &mut Option<&mut ProjectionTimings>,
+    started_at: std::time::Instant,
+    state: Option<T>,
+    returned_generation: u64,
+) -> ProjectionOutcome<T> {
+    record_total_time(timings, started_at);
+    ProjectionOutcome::new(state, returned_generation)
+}
+
+fn finish_empty_projection<T>(
+    timings: &mut Option<&mut ProjectionTimings>,
+    started_at: std::time::Instant,
+    returned_generation: u64,
+) -> ProjectionOutcome<T> {
+    record_total_time(timings, started_at);
+    ProjectionOutcome::empty(returned_generation)
+}
+
+fn replay_execution<'a>(
+    entity: &'a str,
+    freshness: &'a Freshness,
+    replay: &'a ReplayContext,
+    started_at: std::time::Instant,
+) -> ReplayExecution<'a> {
+    ReplayExecution {
+        entity,
+        freshness,
+        replay,
+        started_at,
+    }
+}
+
+fn decode_cached_state<T>(entity: &str, bytes: &[u8], warning: &str) -> Option<T>
+where
+    T: serde::de::DeserializeOwned,
+{
+    match serde_json::from_slice::<T>(bytes) {
+        Ok(value) => Some(value),
+        Err(error) => {
+            tracing::warn!(entity, error = %error, "{}", warning);
+            None
+        }
+    }
+}
+
+fn fallback_to_full_replay<T, I, State>(
+    store: &Store<State>,
+    entity: &str,
+    freshness: &Freshness,
+    replay: &ReplayContext,
+    started_at: std::time::Instant,
+    timings: &mut Option<&mut ProjectionTimings>,
+) -> Result<ProjectionOutcome<T>, StoreError>
+where
+    T: EventSourced + serde::Serialize + serde::de::DeserializeOwned + 'static,
+    I: ReplayInput<Payload = <T::Input as ProjectionInput>::Payload>,
+{
+    execute_full_replay::<T, I, State>(
+        store,
+        replay_execution(entity, freshness, replay, started_at),
+        timings,
+    )
 }
 
 impl PreparedProjection {
@@ -297,21 +427,7 @@ where
     T: EventSourced + serde::Serialize + serde::de::DeserializeOwned + 'static,
     T::Input: ReplayInput,
 {
-    project_inner::<T, T::Input, State>(store, entity, freshness, None)
-}
-
-pub(crate) fn project_with_generation<T, State>(
-    store: &Store<State>,
-    entity: &str,
-    freshness: &Freshness,
-) -> Result<(u64, Option<T>), StoreError>
-where
-    T: EventSourced + serde::Serialize + serde::de::DeserializeOwned + 'static,
-    T::Input: ReplayInput,
-{
-    let generation = store.entity_generation(entity).unwrap_or(0);
-    let projected = project::<T, State>(store, entity, freshness)?;
-    Ok((generation, projected))
+    Ok(project_inner::<T, T::Input, State>(store, entity, freshness, None)?.into_state())
 }
 
 pub(crate) fn project_if_changed<T, State>(
@@ -324,12 +440,29 @@ where
     T: EventSourced + serde::Serialize + serde::de::DeserializeOwned + 'static,
     T::Input: ReplayInput,
 {
+    let consistent_freshness = Freshness::Consistent;
+    let effective_freshness = match freshness {
+        Freshness::Consistent => freshness,
+        // `project_if_changed` returns a generation token that callers often
+        // persist as a watermark. Serving a MaybeStale cache row here would
+        // let stale state travel with a newer generation and silently consume
+        // a later relevant append. Keep this path generation-honest by
+        // normalising to `Consistent`.
+        Freshness::MaybeStale { .. } => &consistent_freshness,
+    };
     let current_generation = store.entity_generation(entity).unwrap_or(0);
     if current_generation == last_seen_generation {
         return Ok(None);
     }
-    let projected = project::<T, State>(store, entity, freshness)?;
-    Ok(Some((current_generation, projected)))
+    // Do NOT return `current_generation` — that is the generation as of the
+    // change-detection probe, not the generation at which the returned state
+    // was materialized. A cache-hit path may return state stamped at an
+    // earlier generation; a replay path stamps at `plan.generation` sampled
+    // before replay started. Returning the honest value here prevents
+    // `ProjectionWatcher` from "consuming" a relevant append while the caller
+    // is still holding stale state. See F5.
+    let outcome = project_inner::<T, T::Input, State>(store, entity, effective_freshness, None)?;
+    Ok(Some(outcome.into_parts()))
 }
 
 /// Same as `project()` but captures per-phase timings into `out`.
@@ -345,7 +478,7 @@ where
     T: EventSourced + serde::Serialize + serde::de::DeserializeOwned + 'static,
     T::Input: ReplayInput,
 {
-    project_inner::<T, T::Input, State>(store, entity, freshness, Some(out))
+    Ok(project_inner::<T, T::Input, State>(store, entity, freshness, Some(out))?.into_state())
 }
 
 /// Shared projection executor. Optional timing sink gated behind `timings.is_some()`.
@@ -354,12 +487,13 @@ fn project_inner<T, I, State>(
     entity: &str,
     freshness: &Freshness,
     mut timings: Option<&mut ProjectionTimings>,
-) -> Result<Option<T>, StoreError>
+) -> Result<ProjectionOutcome<T>, StoreError>
 where
     T: EventSourced + serde::Serialize + serde::de::DeserializeOwned + 'static,
     I: ReplayInput<Payload = <T::Input as ProjectionInput>::Payload>,
 {
     let t_start = std::time::Instant::now();
+    let observed_generation = store.entity_generation(entity).unwrap_or(0);
 
     tracing::debug!(
         target: "batpak::flow",
@@ -473,111 +607,91 @@ where
     );
 
     // ── Phase 3: Dispatch ─────────────────────────────────────────────
+    //
+    // Each branch returns a `ProjectionOutcome<T>` whose `returned_generation`
+    // is the generation at which the returned state was actually materialized:
+    //   * Cache hit  → slot.generation (the generation stamped on that cache row)
+    //   * Any replay path → plan.generation (sampled at plan-build, BEFORE the
+    //     replay stream executed — this is the honest upper bound of what the
+    //     returned state saw)
+    //
+    // See F5: `ProjectionWatcher` persists the returned value as its
+    // `last_delivered_generation`; if we returned a fresher token than the
+    // state actually reflects, a subsequent relevant append would be silently
+    // "consumed" against stale data.
 
     match dispatch {
-        ProjectionDispatch::Empty => {
-            if let Some(t) = timings.as_deref_mut() {
-                t.total_us = duration_micros(t_start.elapsed());
-            }
-            Ok(None)
-        }
+        ProjectionDispatch::Empty => Ok(finish_empty_projection(
+            &mut timings,
+            t_start,
+            observed_generation,
+        )),
 
         ProjectionDispatch::GroupLocalHit { slot, replay } => {
-            match serde_json::from_slice::<T>(&slot.bytes) {
-                Ok(value) => {
-                    if let Some(t) = timings.as_deref_mut() {
-                        t.total_us = duration_micros(t_start.elapsed());
-                    }
-                    Ok(Some(value))
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        entity,
-                        "group-local projection cache deserialize failed (falling back): {e}"
-                    );
-                    execute_full_replay::<T, I, State>(
-                        store,
-                        ReplayExecution {
-                            entity,
-                            freshness,
-                            replay: &replay,
-                            started_at: t_start,
-                        },
-                        &mut timings,
-                    )
-                }
+            if let Some(value) = decode_cached_state::<T>(
+                entity,
+                &slot.bytes,
+                "group-local projection cache deserialize failed (falling back)",
+            ) {
+                return Ok(finish_projection(
+                    &mut timings,
+                    t_start,
+                    Some(value),
+                    slot.generation,
+                ));
             }
+            fallback_to_full_replay::<T, I, State>(
+                store,
+                entity,
+                freshness,
+                &replay,
+                t_start,
+                &mut timings,
+            )
         }
 
         ProjectionDispatch::GroupLocalIncremental { slot, replay } => {
-            match serde_json::from_slice::<T>(&slot.bytes) {
-                Ok(mut cached_state) => {
-                    apply_incremental_events::<T, I, State>(
-                        store,
-                        &ReplayExecution {
-                            entity,
-                            freshness,
-                            replay: &replay,
-                            started_at: t_start,
-                        },
-                        &mut cached_state,
-                        slot.watermark,
-                    )?;
-                    store_projection_value(
-                        store,
-                        &ReplayExecution {
-                            entity,
-                            freshness,
-                            replay: &replay,
-                            started_at: t_start,
-                        },
-                        &cached_state,
-                    );
-                    if let Some(t) = timings.as_deref_mut() {
-                        t.total_us = duration_micros(t_start.elapsed());
-                    }
-                    Ok(Some(cached_state))
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        entity,
-                        "group-local incremental deser failed, falling back to full replay: {e}"
-                    );
-                    execute_full_replay::<T, I, State>(
-                        store,
-                        ReplayExecution {
-                            entity,
-                            freshness,
-                            replay: &replay,
-                            started_at: t_start,
-                        },
-                        &mut timings,
-                    )
-                }
+            if let Some(mut cached_state) = decode_cached_state::<T>(
+                entity,
+                &slot.bytes,
+                "group-local incremental deser failed, falling back to full replay",
+            ) {
+                let execution = replay_execution(entity, freshness, &replay, t_start);
+                apply_incremental_events::<T, I, State>(
+                    store,
+                    &execution,
+                    &mut cached_state,
+                    slot.watermark,
+                )?;
+                store_projection_value(store, &execution, &cached_state);
+                return Ok(finish_projection(
+                    &mut timings,
+                    t_start,
+                    Some(cached_state),
+                    replay.plan.generation,
+                ));
             }
+            fallback_to_full_replay::<T, I, State>(
+                store,
+                entity,
+                freshness,
+                &replay,
+                t_start,
+                &mut timings,
+            )
         }
 
         ProjectionDispatch::ExternalCacheThenReplay { replay } => {
             execute_external_cache_path::<T, I, State>(
                 store,
-                ReplayExecution {
-                    entity,
-                    freshness,
-                    replay: &replay,
-                    started_at: t_start,
-                },
+                replay_execution(entity, freshness, &replay, t_start),
                 &mut timings,
             )
         }
 
         ProjectionDispatch::DirectReplay { replay } => execute_full_replay::<T, I, State>(
             store,
-            ReplayExecution {
-                entity,
-                freshness,
-                replay: &replay,
-                started_at: t_start,
-            },
+            replay_execution(entity, freshness, &replay, t_start),
             &mut timings,
         ),
     }
@@ -590,7 +704,7 @@ fn execute_external_cache_path<T, I, State>(
     store: &Store<State>,
     execution: ReplayExecution<'_>,
     timings: &mut Option<&mut ProjectionTimings>,
-) -> Result<Option<T>, StoreError>
+) -> Result<ProjectionOutcome<T>, StoreError>
 where
     T: EventSourced + serde::Serialize + serde::de::DeserializeOwned + 'static,
     I: ReplayInput<Payload = <T::Input as ProjectionInput>::Payload>,
@@ -598,43 +712,42 @@ where
     // Prefetch already fired in Phase 1c (before group-local check).
     // External cache probe
 
+    // `plan.generation` was sampled BEFORE the replay stream executed and is
+    // the honest generation for any state served from this path — see F5.
+    let plan_generation = execution.replay.plan.generation;
+
     let t_ext = std::time::Instant::now();
     match store.cache.get(&execution.replay.cache_key) {
         Ok(Some((bytes, meta))) => {
-            if let Some(t) = timings.as_deref_mut() {
-                t.external_cache_probe_us = duration_micros(t_ext.elapsed());
-            }
+            record_external_cache_probe_time(timings, t_ext);
             let is_fresh = match execution.freshness {
                 Freshness::Consistent => meta.watermark == execution.replay.watermark,
                 Freshness::MaybeStale { max_stale_ms } => {
-                    // Monotonic-clock age: compare `now_mono_ns` against the
-                    // cached `cached_at_mono_ns`, but only when the cached
-                    // entry was produced by this process (matching
-                    // `process_boot_ns`). Legacy entries (`None`) and
-                    // cross-process entries are treated as stale — there is
-                    // no safe way to age them without a shared monotonic
-                    // reference.
-                    match (meta.cached_at_mono_ns, meta.process_boot_ns) {
-                        (Some(cached_mono), Some(boot))
-                            if boot == execution.replay.process_boot_ns =>
-                        {
-                            let age_ns = execution
-                                .replay
-                                .cached_at_mono_ns
-                                .saturating_sub(cached_mono)
-                                .max(0);
-                            // Convert ns -> µs for comparison with max_stale_ms.
-                            let age_us = age_ns / 1_000;
-                            age_us < (*max_stale_ms as i64) * 1000
-                        }
-                        _ => false,
-                    }
+                    // Age-based freshness runs through the Store's monotonic
+                    // clock — which is derived from the injected wall clock
+                    // via `MonotonicClock` (see `StoreConfig::with_clock`).
+                    // This makes fast-forwarded test clocks observable in the
+                    // MaybeStale path: a test that advances the injected
+                    // clock past `max_stale_ms` forces a re-project on the
+                    // next call. See G6.
+                    //
+                    // The comparison is against `cached_at_us` on the cache
+                    // meta, which is stamped at `ProjectionCache::put` time
+                    // (not plan-build time) so "age" means actual time since
+                    // the bytes were written, not since the plan was drawn.
+                    let now_us = store.config.now_us();
+                    let age_us = now_us.saturating_sub(meta.cached_at_us).max(0);
+                    age_us < (*max_stale_ms as i64) * 1000
                 }
             };
 
             if !is_fresh && T::supports_incremental_apply() && store.runtime.incremental_projection
             {
-                if let Ok(mut cached_state) = serde_json::from_slice::<T>(&bytes) {
+                if let Some(mut cached_state) = decode_cached_state::<T>(
+                    execution.entity,
+                    &bytes,
+                    "incremental projection deser failed, falling back to full replay",
+                ) {
                     apply_incremental_events::<T, I, State>(
                         store,
                         &execution,
@@ -642,46 +755,39 @@ where
                         meta.watermark,
                     )?;
                     store_projection_value(store, &execution, &cached_state);
-                    if let Some(t) = timings.as_deref_mut() {
-                        t.total_us = duration_micros(execution.started_at.elapsed());
-                    }
-                    return Ok(Some(cached_state));
+                    return Ok(finish_projection(
+                        timings,
+                        execution.started_at,
+                        Some(cached_state),
+                        plan_generation,
+                    ));
                 }
-                tracing::warn!(
-                    execution.entity,
-                    "incremental projection deser failed, falling back to full replay"
-                );
             }
 
             if is_fresh {
-                match serde_json::from_slice::<T>(&bytes) {
-                    Ok(value) => {
-                        let _ = store.index.store_cached_projection(
-                            execution.entity,
-                            execution.replay.type_id,
-                            bytes,
-                            meta.watermark,
-                        );
-                        if let Some(t) = timings.as_deref_mut() {
-                            t.total_us = duration_micros(execution.started_at.elapsed());
-                        }
-                        return Ok(Some(value));
-                    }
-                    Err(e) => {
-                        tracing::warn!("cache deserialize failed (falling back to replay): {e}");
-                    }
+                if let Some(value) = decode_cached_state::<T>(
+                    execution.entity,
+                    &bytes,
+                    "cache deserialize failed (falling back to replay)",
+                ) {
+                    let _ = store.index.store_cached_projection(
+                        execution.entity,
+                        execution.replay.type_id,
+                        bytes,
+                        meta.watermark,
+                    );
+                    return Ok(finish_projection(
+                        timings,
+                        execution.started_at,
+                        Some(value),
+                        plan_generation,
+                    ));
                 }
             }
         }
-        Ok(None) => {
-            if let Some(t) = timings.as_deref_mut() {
-                t.external_cache_probe_us = duration_micros(t_ext.elapsed());
-            }
-        }
+        Ok(None) => record_external_cache_probe_time(timings, t_ext),
         Err(e) => {
-            if let Some(t) = timings.as_deref_mut() {
-                t.external_cache_probe_us = duration_micros(t_ext.elapsed());
-            }
+            record_external_cache_probe_time(timings, t_ext);
             tracing::warn!("cache get failed (falling back to replay): {e}");
         }
     }
@@ -697,11 +803,17 @@ fn execute_full_replay<T, I, State>(
     store: &Store<State>,
     execution: ReplayExecution<'_>,
     timings: &mut Option<&mut ProjectionTimings>,
-) -> Result<Option<T>, StoreError>
+) -> Result<ProjectionOutcome<T>, StoreError>
 where
     T: EventSourced + serde::Serialize + serde::de::DeserializeOwned + 'static,
     I: ReplayInput<Payload = <T::Input as ProjectionInput>::Payload>,
 {
+    // `plan.generation` was sampled at plan-build, BEFORE the replay stream
+    // executed. That is the honest upper bound for what the returned state
+    // reflects — returning a fresher `entity_generation` here would risk
+    // silently "consuming" a later append in the watcher bump path (F5).
+    let plan_generation = execution.replay.plan.generation;
+
     // Full replay -- batch-read filtered events from disk.
     // Uses the projection's replay-input lane, which always skips Coordinate
     // construction and may leave payloads as raw MessagePack bytes.
@@ -741,10 +853,14 @@ where
     }
     if let Some(t) = timings.as_deref_mut() {
         t.cache_store_us = duration_micros(t_store.elapsed());
-        t.total_us = duration_micros(execution.started_at.elapsed());
     }
 
-    Ok(result)
+    Ok(finish_projection(
+        timings,
+        execution.started_at,
+        result,
+        plan_generation,
+    ))
 }
 
 fn apply_incremental_events<T, I, State>(
@@ -778,11 +894,23 @@ fn store_projection_value<T, State>(
     T: serde::Serialize,
 {
     if let Ok(bytes) = serde_json::to_vec(value) {
+        // G6: stamp `cached_at_*` at the moment the bytes are actually
+        // handed to `ProjectionCache::put`, not at the moment the plan was
+        // built. Plan-build time can be microseconds to milliseconds earlier
+        // — anything that depends on "how old is this cache row" must see
+        // the real put timestamp, not the plan-build timestamp.
+        //
+        // Wall-clock (`now_us`) flows through the injected `MonotonicClock`
+        // wrapper, so the age observable in the `MaybeStale` path above is
+        // the same clock a test controls via `StoreConfig::with_clock`.
+        // `cached_at_mono_ns` + `process_boot_ns` stay pinned to the
+        // hardware monotonic anchor for the lifetime of this process —
+        // they are the cross-process-mismatch detector, not the age basis.
         let meta = super::CacheMeta {
             watermark: execution.replay.watermark,
-            cached_at_us: execution.replay.cached_at_us,
-            cached_at_mono_ns: Some(execution.replay.cached_at_mono_ns),
-            process_boot_ns: Some(execution.replay.process_boot_ns),
+            cached_at_us: store.config.now_us(),
+            cached_at_mono_ns: Some(crate::store::config::now_mono_ns()),
+            process_boot_ns: Some(crate::store::config::process_boot_ns()),
         };
         if let Err(error) = store.cache.put(&execution.replay.cache_key, &bytes, meta) {
             tracing::warn!("cache put failed (non-fatal): {error}");

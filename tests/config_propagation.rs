@@ -432,14 +432,14 @@ fn store_config_all_fields_overridable() {
     // and the store still opens and operates correctly. If a new field is added
     // but never wired up, this test documents the expected behavior.
     let dir = TempDir::new().expect("create temp dir");
-    let clock_fn: Arc<dyn Fn() -> i64 + Send + Sync> = Arc::new(|| {
-        // justifies: INV-CLOCK-NOW-US-LIVE, INV-MACRO-BOUNDED-CAST; u128 microseconds-since-epoch narrowed to i64 in tests/config_propagation.rs cannot overflow before year 292,277, far beyond any test run.
+    // Deterministic monotonic clock: relative to a fixed test-start Instant.
+    // Avoids wall-clock dependency so the test never flakes on clock skew.
+    let clock_start = std::time::Instant::now();
+    let clock_fn: Arc<dyn Fn() -> i64 + Send + Sync> = Arc::new(move || {
+        // justifies: INV-CLOCK-NOW-US-LIVE, INV-MACRO-BOUNDED-CAST; u128 microseconds-since-start narrowed to i64 in tests/config_propagation.rs cannot overflow during any plausible test run (requires >292,000 years of elapsed time).
         #[allow(clippy::cast_possible_truncation)]
         {
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_micros() as i64
+            clock_start.elapsed().as_micros() as i64
         }
     });
 

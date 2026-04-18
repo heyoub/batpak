@@ -279,6 +279,34 @@ impl SequenceGate {
 
 /// StoreIndex: in-memory 2D index + auxiliaries. Not persisted; rebuilt from segments on cold start.
 /// [DEP:dashmap::DashMap] — see DEPENDENCY SURFACE for deadlock warnings
+///
+/// # F6 / FREEZE-4 compact swap-point
+///
+/// Compaction must never expose a cleared or partially rebuilt index to
+/// readers. The protocol enforced here is:
+///
+/// 1. **Off-side build.** `compact()` allocates a *fresh* [`StoreIndex`],
+///    populates it from segments via `rebuild_from_segments`, and
+///    only then hands it to [`StoreIndex::replace_contents_from_fresh`].
+///    While the fresh index is being built the live index is not touched,
+///    so readers keep serving the pre-compact state unchanged.
+/// 2. **Single swap point.** The critical section inside
+///    `replace_contents_from_fresh` takes the write guard on `swap_gate`
+///    and publishes the new contents. That guard is the commit point.
+/// 3. **Failure safety.** If the off-side rebuild errors before the swap,
+///    the live index is still valid and readable; the caller observes
+///    [`crate::store::segment::CompactionOutcome::Failed`] rather than a
+///    silently clobbered store.
+/// 4. **Reader observation.** Reader-facing methods take the read guard on
+///    `swap_gate` at entry. Concurrent readers complete on their snapshot;
+///    a concurrent compact-swap waits for them to release before taking
+///    the write guard. Either the old index or the new one is fully
+///    observable — never a partially rebuilt view.
+/// 5. **Segment cleanup AFTER swap.** Callers (see
+///    `src/store/lifecycle.rs::compact`) delete the old segment files
+///    only after `replace_contents_from_fresh` returns. If the process
+///    crashes between swap and cleanup, cold-start reconciliation removes
+///    the orphaned files.
 pub(crate) struct StoreIndex {
     /// Primary: entity -> ordered events. [DEP:dashmap::DashMap::get_mut] for insert.
     streams: DashMap<Arc<str>, BTreeMap<ClockKey, Arc<IndexEntry>>>,
@@ -299,6 +327,13 @@ pub(crate) struct StoreIndex {
     /// Entity and scope strings are interned on insert; IDs are used by
     /// checkpoint and (future) InternId-based IndexEntry fields.
     pub(crate) interner: Arc<StringInterner>,
+    /// F6 / FREEZE-4 compact swap-point lock. Writers (compact) take the
+    /// write guard for the single critical section that swaps fresh
+    /// contents in; readers (queries) take the read guard at entry so they
+    /// see either the old index or the new one, never a partial rebuild.
+    /// The lock's inner unit value is intentionally trivial — it exists
+    /// purely as a rendezvous barrier around the swap.
+    swap_gate: RwLock<()>,
 }
 
 /// ClockKey: BTreeMap key. Ord: wall_ms-first, then clock, then uuid tiebreak.
@@ -697,6 +732,7 @@ impl StoreIndex {
             sequence: SequenceGate::new(),
             len: AtomicUsize::new(0),
             interner: Arc::new(StringInterner::new()),
+            swap_gate: RwLock::new(()),
         }
     }
 
@@ -711,7 +747,14 @@ impl StoreIndex {
     /// Caller must be the single writer thread; this is the only writer of
     /// the index, so no per-entity lock is needed.
     /// Advances the allocator by one — used by the live single-event append path.
+    ///
+    /// F6 / FREEZE-4: the insert path takes the `swap_gate` read guard so
+    /// that a concurrent compact-swap (which holds the write guard) cannot
+    /// race mid-clear with an in-flight writer insert. The guard is
+    /// released before the method returns — writer throughput is unaffected
+    /// when no compact is in flight.
     pub(crate) fn insert(&self, entry: IndexEntry) {
+        let _read = self.swap_gate.read();
         self.insert_inner(entry);
         // Advance allocator (visibility is advanced separately by publish()).
         self.sequence.advance();
@@ -755,7 +798,12 @@ impl StoreIndex {
     }
 
     /// Atomic batch insert: all entries become visible together.
+    ///
+    /// F6 / FREEZE-4: takes the `swap_gate` read guard for the duration of
+    /// the batch so that a concurrent compact-swap cannot race mid-clear
+    /// with an in-flight writer batch insert.
     pub(crate) fn insert_batch(&self, entries: Vec<IndexEntry>) {
+        let _read = self.swap_gate.read();
         if entries.is_empty() {
             return;
         }
@@ -911,6 +959,9 @@ impl StoreIndex {
     }
 
     pub(crate) fn get_by_id(&self, event_id: u128) -> Option<IndexEntry> {
+        // F6 swap-point read guard — ensure no compact mid-swap tears this
+        // observation; released immediately after the snapshot is taken.
+        let _read = self.swap_gate.read();
         let visibility = self.sequence.snapshot();
         self.by_id
             .get(&event_id)
@@ -944,6 +995,9 @@ impl StoreIndex {
     /// kind/fact → clock range. Output is sorted by `global_sequence`.
     pub(crate) fn query_hits(&self, region: &crate::coordinate::Region) -> Vec<QueryHit> {
         use crate::coordinate::KindFilter;
+        // F6 swap-point read guard — reader sees the pre-compact index OR
+        // the post-compact index, never a partially rebuilt one.
+        let _read = self.swap_gate.read();
         let visibility = self.sequence.snapshot();
 
         let mut hits: Vec<QueryHit> = if let Some(ref prefix) = region.entity_prefix {
@@ -1080,6 +1134,9 @@ impl StoreIndex {
         limit: usize,
     ) -> Vec<QueryHit> {
         use crate::coordinate::KindFilter;
+        // F6 swap-point read guard — cursor-bounded poll sees a consistent
+        // pre- or post-compact view; neither partial nor cleared.
+        let _read = self.swap_gate.read();
         let visibility = self.sequence.snapshot();
         let seq_ok = |seq: u64| !started || seq > after_seq;
 
@@ -1225,6 +1282,8 @@ impl StoreIndex {
     /// the next instruction). The writer calls this only BEFORE `insert_batch()`,
     /// so it always sees previously-published state.
     pub(crate) fn get_latest(&self, entity: &str) -> Option<IndexEntry> {
+        // F6 swap-point read guard.
+        let _read = self.swap_gate.read();
         let visibility = self.sequence.snapshot();
         self.latest
             .get(entity)
@@ -1233,6 +1292,8 @@ impl StoreIndex {
     }
 
     pub(crate) fn stream(&self, entity: &str) -> Vec<IndexEntry> {
+        // F6 swap-point read guard.
+        let _read = self.swap_gate.read();
         let visibility = self.sequence.snapshot();
         self.streams
             .get(entity)
@@ -1288,14 +1349,85 @@ impl StoreIndex {
         self.len.load(Ordering::Relaxed)
     }
 
-    /// Clear all indexes for a full rebuild (e.g. after compaction).
-    pub(crate) fn clear(&self) {
+    /// F6 / FREEZE-4 compact swap-point.
+    ///
+    /// Adopt the contents of a freshly-built sibling [`StoreIndex`] as the
+    /// live contents of `self`. Called exclusively by
+    /// `src/store/lifecycle.rs::compact` after the segment merge has
+    /// produced the new on-disk layout and `rebuild_from_segments` has
+    /// populated the fresh index off-side.
+    ///
+    /// Protocol:
+    ///
+    /// * The **exclusive** write guard on `swap_gate` is held for the
+    ///   duration of the transfer. Reader-facing methods on [`StoreIndex`]
+    ///   acquire the read guard at entry, so no reader observes the
+    ///   intermediate cleared state.
+    /// * The interner on `self` is mutated in-place via
+    ///   [`StringInterner::replace_from_full_snapshot`] so that external
+    ///   references to `index.interner` (cold-start, writer staging) remain
+    ///   valid across the swap.
+    /// * `fresh` is consumed; its per-field contents are transferred into
+    ///   `self` by draining `fresh` and re-inserting. This is an `O(n)`
+    ///   operation but it is performed on already-populated in-memory data
+    ///   (no disk I/O), which is significantly faster than the previous
+    ///   protocol of clearing the live index and replaying segments under
+    ///   reader visibility.
+    pub(crate) fn replace_contents_from_fresh(&self, fresh: StoreIndex) {
+        let _write = self.swap_gate.write();
+
+        // Reset live fields. `scan.clear()` also drops any overlay slots.
         self.streams.clear();
         self.scan.clear();
         self.by_id.clear();
         self.latest.clear();
         self.sequence.clear();
         self.len.store(0, Ordering::Relaxed);
+
+        // Transfer the fresh interner strings in-place so that external
+        // handles to `self.interner` (cold-start checkpoint writer, writer
+        // staging) continue to see a populated interner after the swap.
+        // `replace_from_full_snapshot` expects `[sentinel, ...strings]`;
+        // `to_snapshot` returns only the non-sentinel strings, so we
+        // re-prepend the sentinel here (same shape cold-start uses).
+        let mut interner_full = vec![String::new()];
+        interner_full.extend(fresh.interner.to_snapshot());
+        self.interner.replace_from_full_snapshot(&interner_full);
+
+        // Streams: drain fresh, insert into self.
+        for (entity, stream) in fresh.streams.into_iter() {
+            self.streams.insert(entity, stream);
+        }
+        for (id, entry) in fresh.by_id.into_iter() {
+            self.by_id.insert(id, entry);
+        }
+        for (entity, latest) in fresh.latest.into_iter() {
+            self.latest.insert(entity, latest);
+        }
+
+        // Scan overlays: rebuild from the entries we just populated so the
+        // overlay topology matches the live configuration. We walk `by_id`
+        // once because it is the only map that already contains every
+        // entry exactly once.
+        for entry in self.by_id.iter() {
+            self.scan.insert(entry.value());
+        }
+
+        // Sequence gate: restore allocator + visibility + cancelled ranges
+        // from the fresh gate. The fresh gate was driven by
+        // `rebuild_from_segments` which publishes to the correct watermark.
+        let fresh_allocated = fresh.sequence.allocated();
+        let fresh_visible = fresh.sequence.visible();
+        let fresh_cancelled = fresh.sequence.cancelled_ranges_snapshot();
+        self.sequence.restore_allocator(fresh_allocated);
+        self.sequence.publish(fresh_visible);
+        self.sequence.restore_cancelled_ranges(fresh_cancelled);
+
+        // Restore len. `fresh.len` is a snapshot of how many entries were
+        // populated off-side — reading it after draining `fresh.by_id`
+        // would be inconsistent, so we use `self.by_id.len()` which is the
+        // live truth at this point.
+        self.len.store(self.by_id.len(), Ordering::Relaxed);
     }
 
     /// Begin a replay session against this index. Use this for checkpoint
@@ -1316,6 +1448,8 @@ impl StoreIndex {
     }
 
     pub(crate) fn entity_generation(&self, entity: &str) -> Option<u64> {
+        // F6 swap-point read guard.
+        let _read = self.swap_gate.read();
         self.scan.entity_generation(entity).or_else(|| {
             self.streams
                 .get(entity)
@@ -1328,6 +1462,8 @@ impl StoreIndex {
         entity: &str,
         type_id: TypeId,
     ) -> Option<CachedProjectionSlot> {
+        // F6 swap-point read guard.
+        let _read = self.swap_gate.read();
         self.scan.cached_projection(entity, type_id)
     }
 
@@ -1347,6 +1483,8 @@ impl StoreIndex {
         entity: &str,
         relevant_kinds: &[EventKind],
     ) -> Option<ProjectionReplayPlan> {
+        // F6 swap-point read guard.
+        let _read = self.swap_gate.read();
         if let Some((watermark, generation, items)) =
             self.scan.projection_candidates(entity, relevant_kinds)
         {

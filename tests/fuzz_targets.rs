@@ -363,12 +363,7 @@ proptest! {
 fn arb_outcome_deep() -> impl Strategy<Value = Outcome<i32>> {
     let leaf = prop_oneof![
         any::<i32>().prop_map(Outcome::Ok),
-        any::<String>().prop_map(|msg| Outcome::Err(OutcomeError {
-            kind: ErrorKind::Internal,
-            message: msg,
-            compensation: None,
-            retryable: false,
-        })),
+        any::<String>().prop_map(|msg| Outcome::Err(OutcomeError::new(ErrorKind::Internal, msg))),
         (any::<u64>(), any::<u32>(), any::<u32>(), any::<String>()).prop_map(
             |(after, attempt, max, reason)| Outcome::Retry {
                 after_ms: after,

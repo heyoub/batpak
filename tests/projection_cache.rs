@@ -1,12 +1,11 @@
-//! Direct tests of ProjectionCache trait methods per backend.
-//! Plus: integration tests with real Store operations (append → project → cache hit).
-//! Every trait method on ProjectionCache is exercised against every live backend
-//! surface (NoCache, NativeCache).
+//! Direct tests of ProjectionCache trait methods on the built-in backends.
+//! Plus: integration tests with real Store operations around cache population,
+//! stale reads, and refresh behavior.
 //!
 //! Integration tests: `cargo test --test projection_cache`
 //!
 //! PROVES: LAW-001 (No Fake Success — cached projections must be correct)
-//! DEFENDS: FM-009 (Polite Downgrade — MaybeStale must eventually refresh)
+//! DEFENDS: FM-009 (Polite Downgrade — MaybeStale stale-window semantics stay honest)
 //! INVARIANTS: INV-TYPE (cache round-trip fidelity), INV-TEMP (freshness semantics)
 
 use batpak::store::projection::{CacheMeta, NoCache, ProjectionCache};
@@ -417,7 +416,7 @@ mod native_tests {
 // ================================================================
 // Freshness::MaybeStale + cache metadata edge cases
 // PROVES: LAW-001 (No Fake Success — stale cache must not serve wrong data)
-// DEFENDS: FM-009 (Polite Downgrade — MaybeStale must eventually refresh)
+// DEFENDS: FM-009 (Polite Downgrade — MaybeStale stale-window semantics stay honest)
 // ================================================================
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq)]
@@ -437,6 +436,32 @@ impl batpak::prelude::EventSourced for MaybeStaleCounter {
     }
     fn relevant_event_kinds() -> &'static [batpak::prelude::EventKind] {
         &[]
+    }
+}
+
+const MAYBE_STALE_GENERATION_KIND: batpak::prelude::EventKind =
+    batpak::prelude::EventKind::custom(0xF, 0x51);
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq)]
+struct MaybeStaleGenerationCounter {
+    count: u32,
+}
+
+impl batpak::prelude::EventSourced for MaybeStaleGenerationCounter {
+    type Input = batpak::prelude::JsonValueInput;
+
+    fn from_events(events: &[batpak::prelude::Event<serde_json::Value>]) -> Option<Self> {
+        Some(Self {
+            count: u32::try_from(events.len()).expect("test uses < 2^32 events"),
+        })
+    }
+
+    fn apply_event(&mut self, _event: &batpak::prelude::Event<serde_json::Value>) {
+        self.count += 1;
+    }
+
+    fn relevant_event_kinds() -> &'static [batpak::prelude::EventKind] {
+        &[MAYBE_STALE_GENERATION_KIND]
     }
 }
 
@@ -516,7 +541,86 @@ fn freshness_maybe_stale_serves_stale_cache_within_window() {
 }
 
 #[test]
-fn cache_metadata_short_bytes_returns_none() {
+fn project_if_changed_never_pairs_maybe_stale_cache_with_new_generation() {
+    use batpak::prelude::*;
+    use batpak::store::{Freshness, NativeCache, Store, StoreConfig, SyncConfig};
+    use tempfile::TempDir;
+
+    let dir = TempDir::new().expect("temp dir");
+    let cache_path = dir.path().join("cache");
+    let cache = NativeCache::open(&cache_path).expect("open native cache");
+
+    let config = StoreConfig {
+        data_dir: dir.path().join("data"),
+        segment_max_bytes: 4096,
+        sync: SyncConfig {
+            every_n_events: 1,
+            ..SyncConfig::default()
+        },
+        ..StoreConfig::new("")
+    };
+    let store = Store::open_with_cache(config, Box::new(cache)).expect("open store");
+
+    let coord = Coordinate::new("entity:generation-honesty", "scope:test").expect("coord");
+    store
+        .append(
+            &coord,
+            MAYBE_STALE_GENERATION_KIND,
+            &serde_json::json!({"x": 1}),
+        )
+        .expect("append 1");
+    store
+        .append(
+            &coord,
+            MAYBE_STALE_GENERATION_KIND,
+            &serde_json::json!({"x": 2}),
+        )
+        .expect("append 2");
+
+    let seeded: Option<MaybeStaleGenerationCounter> = store
+        .project("entity:generation-honesty", &Freshness::Consistent)
+        .expect("seed cache");
+    assert_eq!(seeded, Some(MaybeStaleGenerationCounter { count: 2 }));
+
+    let baseline_generation = store
+        .entity_generation("entity:generation-honesty")
+        .expect("baseline generation");
+
+    store
+        .append(
+            &coord,
+            MAYBE_STALE_GENERATION_KIND,
+            &serde_json::json!({"x": 3}),
+        )
+        .expect("append 3");
+
+    let changed = store
+        .project_if_changed::<MaybeStaleGenerationCounter>(
+            "entity:generation-honesty",
+            baseline_generation,
+            &Freshness::MaybeStale {
+                max_stale_ms: 60_000,
+            },
+        )
+        .expect("project_if_changed")
+        .expect("changed projection");
+
+    assert!(
+        changed.0 > baseline_generation,
+        "generation should advance after the third relevant append"
+    );
+    assert_eq!(
+        changed.1,
+        Some(MaybeStaleGenerationCounter { count: 3 }),
+        "PROPERTY: project_if_changed must not return stale cache bytes together with a newer generation token.\n\
+         Investigate: src/store/projection/flow.rs project_if_changed() MaybeStale path."
+    );
+
+    store.close().expect("close");
+}
+
+#[test]
+fn nocache_ignores_put_and_always_returns_none() {
     let cache = NoCache;
     cache.put(b"short", b"x", test_meta()).expect("put");
     let result = cache.get(b"short").expect("get");

@@ -223,6 +223,7 @@ fn matched_kind_decode_failure_surfaces_reactor_error_decode() {
                 batch_size: 1,
                 idle_sleep: Duration::from_millis(5),
                 restart_policy: RestartPolicy::Once,
+                checkpoint_id: None,
             },
             ShapeYReactor { _marker: () },
         )

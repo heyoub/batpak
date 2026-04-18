@@ -8,7 +8,9 @@
 //! `#[derive(MultiEventReactor)]` + `store.react_loop_multi`: a single
 //! reactor bound to multiple payload types, dispatched through the shared
 //! canal runner (same plumbing as `react_loop_typed`). One source event in
-//! the relevant-kinds set produces one atomic `ReactionBatch` commit.
+//! the relevant-kinds set produces one `ReactionBatch` flush for that source
+//! event; each such flush is atomic on its own, while the overall reactor
+//! still runs with at-least-once replay semantics.
 //!
 //! The main thread waits on observable state
 //! (`by_fact_typed::<Reaction>().len() >= 4`) before stopping the reactor —

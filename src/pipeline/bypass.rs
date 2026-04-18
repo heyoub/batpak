@@ -6,6 +6,44 @@ pub trait BypassReason: Send + Sync {
     fn justification(&self) -> &'static str;
 }
 
+/// Audit trail carried by a [`crate::pipeline::Committed`] when the commit
+/// came from a gate bypass rather than a gate-evaluated [`crate::guard::Receipt`].
+///
+/// Per G8, reason + justification (+ approver, when products choose to track
+/// one) must survive past `commit_bypass` so downstream observers can tell a
+/// bypass-committed event from one that passed gate evaluation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BypassAudit {
+    /// Short reason name (`BypassReason::name()`) — stable identifier for
+    /// the bypass class.
+    pub reason: String,
+    /// Full justification (`BypassReason::justification()`) — human-readable
+    /// explanation for the audit log.
+    pub justification: String,
+    /// Optional approver identity. `None` when the bypass is
+    /// caller-asserted without an explicit approver; products can populate
+    /// this with an operator id, ticket reference, or similar.
+    pub approved_by: Option<String>,
+}
+
+impl BypassAudit {
+    /// Build a `BypassAudit` from a reason/justification pair with no
+    /// explicit approver recorded.
+    pub fn new(reason: impl Into<String>, justification: impl Into<String>) -> Self {
+        Self {
+            reason: reason.into(),
+            justification: justification.into(),
+            approved_by: None,
+        }
+    }
+
+    /// Attach an approver identity to this audit entry.
+    pub fn with_approved_by(mut self, approver: impl Into<String>) -> Self {
+        self.approved_by = Some(approver.into());
+        self
+    }
+}
+
 /// `BypassReceipt<T>`: audit trail shows "bypassed: {reason}".
 /// Fields are `pub(crate)` to prevent external forgery — use getters for read access.
 pub struct BypassReceipt<T> {
@@ -15,6 +53,8 @@ pub struct BypassReceipt<T> {
     pub(crate) reason: &'static str,
     /// Full justification text explaining why gates were skipped.
     pub(crate) justification: &'static str,
+    /// Optional approver identity recorded alongside the bypass reason.
+    pub(crate) approved_by: Option<String>,
 }
 
 impl<T> BypassReceipt<T> {
@@ -33,8 +73,30 @@ impl<T> BypassReceipt<T> {
         self.justification
     }
 
+    /// The recorded approver identity, if any.
+    pub fn approved_by(&self) -> Option<&str> {
+        self.approved_by.as_deref()
+    }
+
+    /// Attach an approver identity to this receipt. Defaults to `None`
+    /// when `Pipeline::bypass` created the receipt without an approver.
+    pub fn with_approved_by(mut self, approver: impl Into<String>) -> Self {
+        self.approved_by = Some(approver.into());
+        self
+    }
+
     /// Consume the receipt and return the payload.
     pub fn into_payload(self) -> T {
         self.payload
+    }
+
+    /// Build a structured [`BypassAudit`] snapshot of this receipt for
+    /// attachment to the resulting [`crate::pipeline::Committed`] value.
+    pub(crate) fn to_audit(&self) -> BypassAudit {
+        BypassAudit {
+            reason: self.reason.to_string(),
+            justification: self.justification.to_string(),
+            approved_by: self.approved_by.clone(),
+        }
     }
 }

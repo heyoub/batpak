@@ -31,17 +31,16 @@ fn watch_projection_emits_on_new_events() {
         })
         .expect("spawn");
 
-    let result = watcher.recv().expect("recv should not error");
-    let counter = result.expect("should have projection");
-    assert!(
-        counter.count >= 6,
-        "PROPERTY: watch_projection must re-project with new events.\n\
-         Got count={}, expected >= 6.\n\
-         Investigate: src/store/mod.rs watch_projection + ProjectionWatcher::recv.",
-        counter.count
-    );
-
     handle.join().expect("writer thread");
+
+    let (_gen, state) = watcher.recv().expect("recv should not error");
+    let counter = state.expect("should have projection");
+    assert_eq!(
+        counter.count, 8,
+        "PROPERTY: watch_projection must catch up to the fully visible state after new writes.\n\
+         Investigate: src/store/mod.rs watch_projection + ProjectionWatcher::recv.\n\
+         Common causes: watcher returns before replay catches up, generation/state mismatch."
+    );
 }
 
 #[test]
@@ -65,8 +64,8 @@ fn watch_projection_catches_up_after_lossy_notifications() {
             .expect("append burst");
     }
 
-    let result = watcher.recv().expect("recv should not error");
-    let counter = result.expect("projection should exist");
+    let (_gen, state) = watcher.recv().expect("recv should not error");
+    let counter = state.expect("projection should exist");
     assert_eq!(
         counter.count, 10,
         "PROPERTY: watch_projection must catch up by watermark even when the lossy subscription \
@@ -76,7 +75,7 @@ fn watch_projection_catches_up_after_lossy_notifications() {
 }
 
 #[test]
-fn watch_projection_returns_none_on_store_close() {
+fn subscription_returns_none_on_store_close() {
     let dir = TempDir::new().expect("temp dir");
     let store = Arc::new(Store::open(StoreConfig::new(dir.path())).expect("open"));
     let coord = Coordinate::new("drop:entity", "drop:scope").expect("coord");
@@ -103,4 +102,77 @@ fn watch_projection_returns_none_on_store_close() {
     );
 
     handle.join().expect("closer thread");
+}
+
+#[test]
+fn watch_projection_returns_store_closed_when_slow_watcher_is_pruned() {
+    let dir = TempDir::new().expect("temp dir");
+    let config = StoreConfig::new(dir.path()).with_broadcast_capacity(1);
+    let store = Arc::new(Store::open(config).expect("open"));
+    let coord = Coordinate::new("watch:pruned", "watch:scope").expect("coord");
+
+    store
+        .append(&coord, kind_a(), &payload(0))
+        .expect("seed append");
+
+    let mut watcher = store.watch_projection::<AllCounter>("watch:pruned", Freshness::Consistent);
+
+    for i in 1u32..6 {
+        store
+            .append(&coord, kind_a(), &payload(i))
+            .expect("burst append");
+    }
+
+    let (_gen, state) = watcher
+        .recv()
+        .expect("first recv should drain buffered notification");
+    let state = state.expect("projection should exist");
+    assert_eq!(
+        state.count, 6,
+        "PROPERTY: even a pruned watcher must catch up to the latest visible state before the \
+         channel closes.\n\
+         Investigate: src/store/projection/watch.rs recv + src/store/projection/flow.rs."
+    );
+
+    let err: batpak::store::WatcherError = match watcher.recv() {
+        Ok(_) => panic!("PROPERTY: pruned watcher should terminate with WatcherError::StoreClosed"),
+        Err(err) => err,
+    };
+    assert!(
+        matches!(err, batpak::store::WatcherError::StoreClosed),
+        "PROPERTY: a pruned watcher must surface WatcherError::StoreClosed, got {err:?}"
+    );
+}
+
+#[test]
+fn project_if_changed_reports_honest_generation_for_empty_filtered_state() {
+    let dir = TempDir::new().expect("temp dir");
+    let store = Arc::new(Store::open(StoreConfig::new(dir.path())).expect("open"));
+    let coord = Coordinate::new("watch:filtered-empty", "watch:scope").expect("coord");
+
+    store
+        .append(&coord, kind_b(), &payload(99))
+        .expect("append irrelevant event");
+
+    let changed = store
+        .project_if_changed::<KindFilteredCounter>(
+            "watch:filtered-empty",
+            0,
+            &Freshness::Consistent,
+        )
+        .expect("project_if_changed")
+        .expect("changed projection");
+
+    let current_generation = store
+        .entity_generation("watch:filtered-empty")
+        .expect("entity generation");
+
+    assert_eq!(
+        changed.1, None,
+        "PROPERTY: a filtered projection with no relevant events must still report an empty fold."
+    );
+    assert_eq!(
+        changed.0, current_generation,
+        "PROPERTY: project_if_changed must return the honest advanced generation even when the projection fold is empty."
+    );
 }

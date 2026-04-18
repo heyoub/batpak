@@ -9,6 +9,14 @@ use crate::store::StoreError;
 use rayon::prelude::*;
 use std::path::Path;
 
+pub(crate) const COMPACTION_MARKER_FILENAME: &str = "compaction.pending.json";
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub(crate) struct PendingCompaction {
+    pub merged_id: u64,
+    pub source_segment_ids: Vec<u64>,
+}
+
 /// Which cold-start restore strategy was actually used.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OpenIndexPath {
@@ -59,7 +67,14 @@ struct RestorePlanner<'a> {
 
 impl<'a> RestorePlanner<'a> {
     fn build(&self) -> Result<RestorePlan, StoreError> {
-        if self.policy.try_mmap_index() {
+        // A pending compaction marker means the on-disk segment set still
+        // needs marker-aware reconciliation. Skip stale mmap/checkpoint
+        // fast paths until that reconciliation has run; otherwise reopen can
+        // resurrect pre-compaction truth from an artifact written before the
+        // marker.
+        let has_pending_compaction = load_pending_compaction(self.data_dir)?.is_some();
+
+        if !has_pending_compaction && self.policy.try_mmap_index() {
             if let Some(snapshot) = super::mmap::try_load_mmap_snapshot(self.data_dir) {
                 return self.build_snapshot_plan(
                     RestoreSource::Mmap,
@@ -72,7 +87,7 @@ impl<'a> RestorePlanner<'a> {
             }
         }
 
-        if self.policy.try_checkpoint() {
+        if !has_pending_compaction && self.policy.try_checkpoint() {
             if let Some(snapshot) = super::checkpoint::try_load_checkpoint_snapshot(self.data_dir) {
                 return self.build_snapshot_plan(
                     RestoreSource::Checkpoint,
@@ -168,7 +183,12 @@ pub(crate) fn open_index(
         .interner
         .replace_from_full_snapshot(&plan.interner_strings);
     index.restore_sorted_entries_with_routing(plan.entries, plan.allocator_hint, &plan.routing);
-    restore_cancelled_visibility_ranges(index, data_dir);
+    // G2: cold-start fails closed on corrupt hidden-ranges metadata.
+    // A missing file is OK (first open); any other read/parse failure is
+    // surfaced so callers cannot silently resurrect cancelled events.
+    if let Some(ranges) = crate::store::hidden_ranges::load_cancelled_ranges(data_dir)? {
+        index.restore_cancelled_visibility_ranges(ranges);
+    }
 
     Ok(OpenIndexReport {
         path: match plan.source {
@@ -184,9 +204,59 @@ pub(crate) fn open_index(
     })
 }
 
-pub(crate) fn restore_cancelled_visibility_ranges(index: &StoreIndex, data_dir: &Path) {
-    if let Some(ranges) = crate::store::hidden_ranges::try_load_cancelled_ranges(data_dir) {
-        index.restore_cancelled_visibility_ranges(ranges);
+fn pending_compaction_path(data_dir: &Path) -> std::path::PathBuf {
+    data_dir.join(COMPACTION_MARKER_FILENAME)
+}
+
+fn compaction_source_temp_path(data_dir: &Path, merged_id: u64) -> std::path::PathBuf {
+    data_dir.join(format!(
+        "{merged_id:06}.{}.compact-src",
+        segment::SEGMENT_EXTENSION
+    ))
+}
+
+fn load_pending_compaction(data_dir: &Path) -> Result<Option<PendingCompaction>, StoreError> {
+    let path = pending_compaction_path(data_dir);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let bytes = std::fs::read(&path).map_err(StoreError::Io)?;
+    let marker = serde_json::from_slice::<PendingCompaction>(&bytes)
+        .map_err(|_| StoreError::DataDirMalformed { path: path.clone() })?;
+    Ok(Some(marker))
+}
+
+pub(crate) fn write_pending_compaction(
+    data_dir: &Path,
+    merged_id: u64,
+    source_segment_ids: &[u64],
+) -> Result<(), StoreError> {
+    let marker = PendingCompaction {
+        merged_id,
+        source_segment_ids: source_segment_ids.to_vec(),
+    };
+    let final_path = pending_compaction_path(data_dir);
+    super::write_artifact_atomically(data_dir, &final_path, "compaction marker", |file| {
+        serde_json::to_writer(file, &marker).map_err(|e| StoreError::Serialization(Box::new(e)))
+    })
+}
+
+pub(crate) fn clear_pending_compaction(data_dir: &Path) -> Result<(), StoreError> {
+    let path = pending_compaction_path(data_dir);
+    match std::fs::remove_file(&path) {
+        Ok(()) => {
+            #[cfg(unix)]
+            {
+                if let Some(parent) = path.parent() {
+                    std::fs::File::open(parent)
+                        .and_then(|dir| dir.sync_all())
+                        .map_err(StoreError::Io)?;
+                }
+            }
+            Ok(())
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(StoreError::Io(err)),
     }
 }
 
@@ -209,6 +279,52 @@ fn segment_paths(data_dir: &Path) -> Result<Vec<(u64, std::path::PathBuf)>, Stor
             Some((segment_id, path))
         })
         .collect();
+    if let Some(marker) = load_pending_compaction(data_dir)? {
+        let merged_present = entries
+            .iter()
+            .any(|(segment_id, _)| *segment_id == marker.merged_id);
+        let temp_source_path = compaction_source_temp_path(data_dir, marker.merged_id);
+        let temp_source_exists = temp_source_path.exists();
+        let stale_finalized_marker = merged_present
+            && !temp_source_exists
+            && marker
+                .source_segment_ids
+                .iter()
+                .filter(|&&segment_id| segment_id != marker.merged_id)
+                .all(|segment_id| !entries.iter().any(|(id, _)| id == segment_id));
+
+        if !stale_finalized_marker {
+            if merged_present {
+                entries.retain(|(segment_id, _)| {
+                    *segment_id == marker.merged_id
+                        || !marker
+                            .source_segment_ids
+                            .iter()
+                            .any(|source_id| source_id == segment_id)
+                });
+            } else {
+                if temp_source_exists {
+                    entries.retain(|(segment_id, _)| *segment_id != marker.merged_id);
+                    entries.push((marker.merged_id, temp_source_path));
+                }
+                for source_id in marker
+                    .source_segment_ids
+                    .iter()
+                    .copied()
+                    .filter(|source_id| *source_id != marker.merged_id)
+                {
+                    if !entries
+                        .iter()
+                        .any(|(segment_id, _)| *segment_id == source_id)
+                    {
+                        return Err(StoreError::DataDirMalformed {
+                            path: pending_compaction_path(data_dir),
+                        });
+                    }
+                }
+            }
+        }
+    }
     entries.sort_by_key(|(segment_id, _)| *segment_id);
     Ok(entries)
 }
@@ -625,5 +741,101 @@ mod tests {
         };
         let entry = entry_from_scan(&interner, se, 1).expect("entry_from_scan");
         assert_eq!(entry.causation_id, Some(99));
+    }
+
+    #[test]
+    fn segment_paths_ignore_superseded_sources_when_merge_is_present() {
+        let dir = TempDir::new().expect("temp dir");
+        let merged_path = dir.path().join(segment::segment_filename(1));
+        let superseded_path = dir.path().join(segment::segment_filename(2));
+        let untouched_path = dir.path().join(segment::segment_filename(3));
+        let temp_source_path = compaction_source_temp_path(dir.path(), 1);
+
+        std::fs::write(&merged_path, []).expect("write merged");
+        std::fs::write(&superseded_path, []).expect("write superseded");
+        std::fs::write(&untouched_path, []).expect("write untouched");
+        std::fs::write(&temp_source_path, []).expect("write temp source");
+        write_pending_compaction(dir.path(), 1, &[1, 2]).expect("write marker");
+
+        let paths = segment_paths(dir.path()).expect("segment paths");
+        let ids: Vec<_> = paths.iter().map(|(segment_id, _)| *segment_id).collect();
+
+        assert_eq!(
+            ids,
+            vec![1, 3],
+            "PROPERTY: when the merged segment is published, cold-start must ignore superseded compacted sources."
+        );
+        assert_eq!(
+            paths[0].1,
+            merged_path,
+            "PROPERTY: cold-start must prefer the published merged segment, not the compact-src temp."
+        );
+    }
+
+    #[test]
+    fn segment_paths_restore_temp_source_when_merge_not_published() {
+        let dir = TempDir::new().expect("temp dir");
+        let temp_source_path = compaction_source_temp_path(dir.path(), 1);
+        let source_path = dir.path().join(segment::segment_filename(2));
+        let untouched_path = dir.path().join(segment::segment_filename(3));
+
+        std::fs::write(&temp_source_path, []).expect("write temp source");
+        std::fs::write(&source_path, []).expect("write source");
+        std::fs::write(&untouched_path, []).expect("write untouched");
+        write_pending_compaction(dir.path(), 1, &[1, 2]).expect("write marker");
+
+        let paths = segment_paths(dir.path()).expect("segment paths");
+        let ids: Vec<_> = paths.iter().map(|(segment_id, _)| *segment_id).collect();
+
+        assert_eq!(
+            ids,
+            vec![1, 2, 3],
+            "PROPERTY: if compaction crashes before publishing the merged segment, cold-start must reconstruct the pre-compact segment set."
+        );
+        assert_eq!(
+            paths[0].1,
+            temp_source_path,
+            "PROPERTY: cold-start must substitute the compact-src temp for the renamed merged-id source."
+        );
+    }
+
+    #[test]
+    fn open_index_skips_fast_paths_when_pending_compaction_marker_exists() {
+        let dir = TempDir::new().expect("temp dir");
+        let config = crate::store::StoreConfig::new(dir.path())
+            .with_enable_checkpoint(true)
+            .with_enable_mmap_index(false)
+            .with_segment_max_bytes(512)
+            .with_sync_every_n_events(1);
+        let store = crate::store::Store::open(config).expect("open");
+        let coord = crate::coordinate::Coordinate::new("entity:pending-fast-path", "scope:test")
+            .expect("coord");
+        let kind = crate::event::EventKind::custom(0xE, 1);
+        for i in 0..20u32 {
+            store
+                .append(&coord, kind, &serde_json::json!({ "i": i }))
+                .expect("append");
+        }
+        store.close().expect("close");
+
+        let existing = segment_paths(dir.path()).expect("segment paths");
+        let merged_id = existing.first().expect("segment id").0;
+        write_pending_compaction(dir.path(), merged_id, &[merged_id]).expect("write marker");
+
+        let reader = Reader::new(dir.path().to_path_buf(), 4);
+        let index = StoreIndex::new();
+        let report = open_index(
+            &index,
+            &reader,
+            dir.path(),
+            ColdStartPolicy::new(true, false),
+        )
+        .expect("open index with pending compaction");
+
+        assert_eq!(
+            report.path,
+            OpenIndexPath::Rebuild,
+            "PROPERTY: pending compaction must force a marker-aware rebuild instead of trusting checkpoint fast paths."
+        );
     }
 }
