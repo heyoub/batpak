@@ -526,6 +526,11 @@ fn check_xtask_surface_contract(repo_root: &Path) -> Result<()> {
         "xtask coverage must stage exports outside target so cargo-llvm-cov cleanup cannot delete them mid-run",
     )?;
     ensure(
+        coverage_content.contains("\"LLVM_PROFILE_FILE\"")
+            && coverage_content.contains("coverage_profraw_dir"),
+        "xtask coverage must route raw LLVM profiles into a dedicated staging directory instead of spraying .profraw files into the repo root",
+    )?;
+    ensure(
         coverage_content.contains("\"nextest\",\n        \"--profile\",\n        \"ci\",")
             || coverage_content.contains("\"nextest\", \"--profile\", \"ci\","),
         "xtask coverage must use the ci nextest profile so slow compile-fail tests remain truthful under coverage",

@@ -1,4 +1,5 @@
 #![cfg(feature = "dangerous-test-hooks")]
+// justifies: INV-TEST-PANIC-AS-ASSERTION; dangerous-test-hooks regression in tests/fault_hooks.rs uses panic as the direct assertion surface for injected failure paths.
 #![allow(clippy::panic)]
 
 use std::sync::Arc;

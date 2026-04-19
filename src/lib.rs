@@ -78,7 +78,7 @@ pub mod __private {
 
 // Self-alias for path hygiene in derive-generated code.
 // `batpak-macros` emits absolute `::batpak::...` paths (see ADR-0010 and
-// `batpak-macros/src/lib.rs:151-166`). `pub extern crate self as batpak;`
+// `crates/macros/src/lib.rs:151-166`). `pub extern crate self as batpak;`
 // makes `::batpak::...` resolve to `self::...` from inside the library
 // crate itself, so `#[derive(EventPayload)]` / `#[derive(EventSourced)]` /
 // `#[derive(MultiEventReactor)]` all work identically in downstream crates

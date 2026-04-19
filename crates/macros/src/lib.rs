@@ -205,7 +205,7 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
             "category must fit in 4 bits (0x1–0xF, excluding 0x0 and 0xD)",
         ));
     }
-    // justifies: INV-MACRO-BOUNDED-CAST; narrowing u64 to u8 is bounds-checked by the u8::MAX comparison on the preceding lines in batpak-macros/src/lib.rs so truncation cannot occur here.
+    // justifies: INV-MACRO-BOUNDED-CAST; narrowing u64 to u8 is bounds-checked by the u8::MAX comparison on the preceding lines in crates/macros/src/lib.rs so truncation cannot occur here.
     #[allow(clippy::cast_possible_truncation)]
     let category: u8 = category_u64 as u8;
     if let Err(msg) = batpak_macros_support::validate_category(category) {
@@ -219,7 +219,7 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
             "type_id must fit in 12 bits (0x000–0xFFF)",
         ));
     }
-    // justifies: INV-MACRO-BOUNDED-CAST; narrowing u64 to u16 is bounds-checked by the u16::MAX comparison on the preceding lines in batpak-macros/src/lib.rs so truncation cannot occur here.
+    // justifies: INV-MACRO-BOUNDED-CAST; narrowing u64 to u16 is bounds-checked by the u16::MAX comparison on the preceding lines in crates/macros/src/lib.rs so truncation cannot occur here.
     #[allow(clippy::cast_possible_truncation)]
     let type_id: u16 = type_id_u64 as u16;
     if let Err(msg) = batpak_macros_support::validate_type_id(type_id) {
@@ -256,7 +256,7 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
 
         #[cfg(test)]
         #[test]
-        // justifies: INV-GENERATED-WITNESS-PIN; generated test fn in batpak-macros/src/lib.rs embeds the user's CamelCase ident so non_snake_case must be suppressed on this specific item.
+        // justifies: INV-GENERATED-WITNESS-PIN; generated test fn in crates/macros/src/lib.rs embeds the user's CamelCase ident so non_snake_case must be suppressed on this specific item.
         #[allow(non_snake_case)]
         fn #test_fn_name() {
             ::batpak::__private::scan_for_kind_collisions();
@@ -559,7 +559,7 @@ fn expand_event_sourced(input: &DeriveInput) -> syn::Result<proc_macro2::TokenSt
             let handler_fn = &b.handler;
             let pin_ident = format_ident!("_HANDLER_PIN_{}", i);
             quote! {
-                // justifies: INV-GENERATED-WITNESS-PIN; generated handler-signature pin in batpak-macros/src/lib.rs is a type-check witness only; its snake-case name and zero runtime use trigger non_upper_case_globals and dead_code on the user's crate.
+                // justifies: INV-GENERATED-WITNESS-PIN; generated handler-signature pin in crates/macros/src/lib.rs is a type-check witness only; its snake-case name and zero runtime use trigger non_upper_case_globals and dead_code on the user's crate.
                 #[allow(non_upper_case_globals, dead_code)]
                 // generated associated const used solely as a type-check witness:
                 // the `fn(&mut Self, &T)` coercion pins the handler's shape
@@ -849,7 +849,7 @@ fn expand_multi_event_reactor(input: &DeriveInput) -> syn::Result<proc_macro2::T
             let handler_fn = &b.handler;
             let pin_ident = format_ident!("_HANDLER_PIN_{}", i);
             quote! {
-                // justifies: INV-GENERATED-WITNESS-PIN; generated reactor handler-pin const in batpak-macros/src/lib.rs has no runtime role and uses a snake-case ident, so non_upper_case_globals and dead_code must be silenced on the user's crate.
+                // justifies: INV-GENERATED-WITNESS-PIN; generated reactor handler-pin const in crates/macros/src/lib.rs has no runtime role and uses a snake-case ident, so non_upper_case_globals and dead_code must be silenced on the user's crate.
                 #[allow(non_upper_case_globals, dead_code)]
                 // generated associated const used solely as a type-check witness:
                 // the `fn(&mut Self, &StoredEvent<T>, &mut ReactionBatch) ->

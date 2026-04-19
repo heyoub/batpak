@@ -2,7 +2,7 @@
 //!
 //! This crate depends on `batpak` the way an external user would: as a
 //! normal path dependency, without any direct reference to
-//! `batpak-macros` or `batpak-macros-support`. Every derive's generated
+//! the `batpak-macros` workspace crates under `crates/macros*`. Every derive's generated
 //! `::batpak::...` paths must resolve cleanly from here. This fixture
 //! covers all three derives — `EventPayload`, `EventSourced`, and
 //! `MultiEventReactor` — using neutral payload names so the fixture

@@ -10,7 +10,7 @@ publish = false
 proc-macro = true
 
 [dependencies]
-batpak-macros-support = { path = "../batpak-macros-support", version = "0.6.0" }
+batpak-macros-support = { path = "../macros-support", version = "0.6.0" }
 syn = { version = "2", features = ["full"] }
 quote = "1"
 proc-macro2 = "1"

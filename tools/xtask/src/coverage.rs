@@ -138,6 +138,7 @@ fn ensure_llvm_cov_available() -> Result<()> {
 }
 
 fn run_llvm_cov_nextest(export_dir: &Path, json_mode: bool) -> Result<()> {
+    let profraw_dir = coverage_profraw_dir(export_dir)?;
     let mut command = Command::new("cargo");
     command.args([
         "llvm-cov",
@@ -147,6 +148,10 @@ fn run_llvm_cov_nextest(export_dir: &Path, json_mode: bool) -> Result<()> {
         "--all-features",
         "--no-report",
     ]);
+    command.env(
+        "LLVM_PROFILE_FILE",
+        profraw_dir.join("batpak-%p-%m.profraw"),
+    );
     if json_mode {
         command.stdout(Stdio::null());
         command.stderr(Stdio::inherit());
@@ -193,6 +198,15 @@ fn coverage_export_dir() -> Result<PathBuf> {
 
 fn coverage_staging_dir() -> Result<PathBuf> {
     let path = std::env::temp_dir().join("batpak-xtask-cover-staging");
+    if path.exists() {
+        fs::remove_dir_all(&path).with_context(|| format!("clear {}", path.display()))?;
+    }
+    fs::create_dir_all(&path).with_context(|| format!("create {}", path.display()))?;
+    Ok(path)
+}
+
+fn coverage_profraw_dir(staging_dir: &Path) -> Result<PathBuf> {
+    let path = staging_dir.join("profraw");
     if path.exists() {
         fs::remove_dir_all(&path).with_context(|| format!("clear {}", path.display()))?;
     }

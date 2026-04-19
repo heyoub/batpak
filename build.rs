@@ -77,8 +77,8 @@ pub(crate) mod shared {
                 "src/",
                 "tests/",
                 "examples/",
-                "batpak-macros/",
-                "batpak-macros-support/",
+                "crates/macros/",
+                "crates/macros-support/",
                 "benches/",
                 "tools/",
                 "fixtures/",
@@ -486,7 +486,7 @@ fn check_allow_justifications() {
                          Every #[allow(...)] must carry a `// justifies: <>=5 words + >=1 resolvable anchor>`\n\
                          comment on the same or preceding line. Anchors: INV-<NAME> from\n\
                          traceability/invariants.yaml, ADR-NNNN from docs/adr/, or a concrete repo path\n\
-                         (src/..., tests/..., examples/..., batpak-macros/..., batpak-macros-support/...,\n\
+                         (src/..., tests/..., examples/..., crates/macros/..., crates/macros-support/...,\n\
                          benches/..., tools/..., build.rs). See INV-ALLOW-IS-DESIGN.",
                         line_no + 1
                     ));

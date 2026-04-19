@@ -172,7 +172,7 @@
     - ART-STORE-FAULT
     - ART-STORE-CONFIG
 - id: INV-ALLOW-IS-DESIGN
-  statement: "Every `#[allow(...)]` in the repo is a deliberate design decision, not a silencer. The allow carries a `// justifies <prose>` comment on the same or preceding line that cites at least one resolvable anchor — an INV-id from this catalog, an `ADR-NNNN` under `docs/adr/`, or a concrete repo path (`src/...`, `tests/...`, `examples/...`, `batpak-macros/...`, `batpak-macros-support/...`) — so the rationale is traceable, not narrative-only."
+  statement: "Every `#[allow(...)]` in the repo is a deliberate design decision, not a silencer. The allow carries a `// justifies <prose>` comment on the same or preceding line that cites at least one resolvable anchor — an INV-id from this catalog, an `ADR-NNNN` under `docs/adr/`, or a concrete repo path (`src/...`, `tests/...`, `examples/...`, `crates/macros/...`, `crates/macros-support/...`) — so the rationale is traceable, not narrative-only."
   artifacts:
     - ART-DOCTOR
     - ART-STRUCTURAL-CHECK
@@ -182,7 +182,7 @@
   artifacts:
     - ART-EXAMPLES
 - id: INV-MACRO-BOUNDED-CAST
-  statement: "Narrowing integer casts inside batpak-macros (for example u64 to u8 or u64 to u16) are preceded by an explicit u8::MAX / u16::MAX comparison that returns an error before the cast, so clippy::cast_possible_truncation at the cast site cannot fire."
+  statement: "Narrowing integer casts inside batpak-macros (under crates/macros) are preceded by an explicit u8::MAX / u16::MAX comparison that returns an error before the cast, so clippy::cast_possible_truncation at the cast site cannot fire."
   artifacts:
     - ART-MACROS
 - id: INV-GENERATED-WITNESS-PIN

@@ -302,8 +302,8 @@
 - id: ART-MACROS
   kind: source
   paths:
-    - batpak-macros/src/lib.rs
-    - batpak-macros-support/src/lib.rs
+    - crates/macros/src/lib.rs
+    - crates/macros-support/src/lib.rs
 - id: ART-TESTS
   kind: tests
   paths:

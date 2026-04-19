@@ -13,7 +13,7 @@
 //! 3. Cite at least one resolvable anchor — an `INV-<NAME>` from
 //!    `traceability/invariants.yaml`, an `ADR-NNNN` whose file exists under
 //!    `docs/adr/`, or a concrete in-repo path (`src/...`, `tests/...`,
-//!    `examples/...`, `batpak-macros/...`, `batpak-macros-support/...`,
+//!    `examples/...`, `crates/macros/...`, `crates/macros-support/...`,
 //!    `build.rs`) whose file exists. Multiple anchors are fine; at least one
 //!    must resolve.
 //!
@@ -877,8 +877,8 @@ fn check_allow_justifications(repo_root: &Path) -> Result<()> {
     let mut paths = rust_files(&repo_root.join("src"));
     paths.extend(rust_files(&repo_root.join("tools/xtask/src")));
     paths.extend(rust_files(&repo_root.join("tools/integrity/src")));
-    paths.extend(rust_files(&repo_root.join("batpak-macros/src")));
-    paths.extend(rust_files(&repo_root.join("batpak-macros-support/src")));
+    paths.extend(rust_files(&repo_root.join("crates/macros/src")));
+    paths.extend(rust_files(&repo_root.join("crates/macros-support/src")));
     paths.extend(rust_files(&repo_root.join("tests")));
     paths.extend(rust_files(&repo_root.join("examples")));
     paths.extend(rust_files(&repo_root.join("benches")));
@@ -900,7 +900,7 @@ fn check_allow_justifications(repo_root: &Path) -> Result<()> {
                     format!(
                         "unjustified allow in {}:{} — every #[allow(...)] must carry a `// justifies: <>=5 words + >=1 resolvable anchor>` comment. \
                          An anchor is an INV-id from traceability/invariants.yaml, an ADR-NNNN whose file exists under docs/adr/, \
-                         or a concrete repo path (src/..., tests/..., examples/..., batpak-macros/..., batpak-macros-support/..., benches/..., tools/..., build.rs). \
+                         or a concrete repo path (src/..., tests/..., examples/..., crates/macros/..., crates/macros-support/..., benches/..., tools/..., build.rs). \
                          See INV-ALLOW-IS-DESIGN.",
                         relative(repo_root, &path),
                         index + 1
@@ -1212,7 +1212,7 @@ matrix:
 
         // good — real invariant anchor, prose is long enough
         assert!(line_carries_justification(
-            "// justifies: INV-MACRO-BOUNDED-CAST; narrowing cast bounds checked in batpak-macros/src/lib.rs",
+            "// justifies: INV-MACRO-BOUNDED-CAST; narrowing cast bounds checked in crates/macros/src/lib.rs",
             &repo_root,
             &known,
         ));

@@ -1,9 +1,27 @@
-// regenerate with TRYBUILD=overwrite cargo test --test typestate_safety compile_fail_tests
-// Post-FREEZE-7 this fixture now fails on two distinct bounds (sealed
-// StateMarker on the first type parameter AND EventPayload on the payload
-// argument to from_payload). The exact rustc output below is a best-effort
-// reconstruction; re-run trybuild with TRYBUILD=overwrite to re-bless if
-// rustc tightens its diagnostics or path formatting.
+error[E0277]: the trait bound `String: EventPayload` is not satisfied
+  --> tests/ui/invalid_transition.rs:28:18
+   |
+28 |     _transition: Transition<From, To, String>,
+   |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the trait `EventPayload` is not implemented for `String`
+   |
+note: required by a bound in `Transition`
+  --> src/typestate/transition.rs
+   |
+   | pub struct Transition<From: StateMarker, To: StateMarker, P: EventPayload> {
+   |                                                              ^^^^^^^^^^^^ required by this bound in `Transition`
+
+error[E0277]: the trait bound `String: EventPayload` is not satisfied
+  --> tests/ui/invalid_transition.rs:42:22
+   |
+42 |     apply_transition(Transition::<String, Released, String>::from_payload("bad".to_string()));
+   |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the trait `EventPayload` is not implemented for `String`
+   |
+note: required by a bound in `Transition`
+  --> src/typestate/transition.rs
+   |
+   | pub struct Transition<From: StateMarker, To: StateMarker, P: EventPayload> {
+   |                                                              ^^^^^^^^^^^^ required by this bound in `Transition`
+
 error[E0277]: the trait bound `String: StateMarker` is not satisfied
   --> tests/ui/invalid_transition.rs:42:22
    |
@@ -19,23 +37,16 @@ note: required by a bound in `Transition`
    | pub struct Transition<From: StateMarker, To: StateMarker, P: EventPayload> {
    |                             ^^^^^^^^^^^ required by this bound in `Transition`
 
-error[E0277]: the trait bound `String: EventPayload` is not satisfied
-  --> tests/ui/invalid_transition.rs:42:22
-   |
-42 |     apply_transition(Transition::<String, Released, String>::from_payload("bad".to_string()));
-   |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the trait `EventPayload` is not implemented for `String`
-   |
-note: required by a bound in `Transition`
-  --> src/typestate/transition.rs
-   |
-   | pub struct Transition<From: StateMarker, To: StateMarker, P: EventPayload> {
-   |                                                             ^^^^^^^^^^^^ required by this bound in `Transition`
-
 error[E0599]: the function or associated item `from_payload` exists for struct `Transition<String, Released, String>`, but its trait bounds were not satisfied
   --> tests/ui/invalid_transition.rs:42:62
    |
 42 |     apply_transition(Transition::<String, Released, String>::from_payload("bad".to_string()));
    |                                                              ^^^^^^^^^^^^ function or associated item cannot be called on `Transition<String, Released, String>` due to unsatisfied trait bounds
+   |
+  ::: $RUST/alloc/src/string.rs
+   |
+   | pub struct String {
+   | ----------------- doesn't satisfy `String: EventPayload` or `String: StateMarker`
    |
    = note: the following trait bounds were not satisfied:
            `String: StateMarker`
