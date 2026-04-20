@@ -1,6 +1,7 @@
 // justifies: INV-TEST-PANIC-AS-ASSERTION; tests in tests/cold_start_recovery.rs rely on expect/panic on unreachable failures; clippy::unwrap_used and clippy::panic are the standard harness allowances for integration tests.
 #![allow(clippy::unwrap_used, clippy::panic)]
 //! Cold-start recovery artifacts.
+//! Harness pattern: Fault-Injection Harness (artifact recovery lane).
 //!
 //! [INV-COLDSTART-ARTIFACTS] A clean close writes the expected on-disk
 //! artifacts (segment + SIDX footer + the preferred fast-start artifact),

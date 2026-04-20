@@ -1,5 +1,7 @@
 // justifies: INV-TEST-PANIC-AS-ASSERTION, INV-MMAP-SEALED-READS; mmap cold-start tests in tests/mmap_cold_start.rs use panic! as the assertion style when invariants around checkpoint/mmap dispatch fail.
 #![allow(clippy::panic)]
+//! Mmap cold-start path proofs.
+//! Harness pattern: Equivalence Harness (artifact-path parity lane).
 
 use batpak::coordinate::{Coordinate, Region};
 use batpak::event::EventKind;

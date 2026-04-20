@@ -30,6 +30,8 @@
 - `cargo xtask install-hooks`
 - `cargo xtask preflight`     — full proof chain inside the canonical devcontainer, entered once per run (gold standard before pushing); the closest local match to the GH `Integrity (ubuntu-devcontainer)` lane because it runs CI, coverage, and docs from one in-container session. Prefer this over bare `cargo xtask ci` for any push that touches store internals, xtask itself, or CI config.
 - `cargo xtask ci`
+- `cargo xtask mutants policy`
+- `cargo xtask mutants smoke`
 - `cargo xtask perf-gates`    — hardware-dependent catastrophic-regression guards, not precision perf gates. Run only on stable hardware; no current environment is both canonical and timing-stable, so these thresholds stay intentionally generous and are excluded from `cargo xtask ci`.
 - `cargo xtask bench --surface neutral|native [--save|--compare|--compile]`
 - `cargo xtask cover [--ci|--json|--threshold N]`
@@ -70,9 +72,9 @@
 
 ## Mutation Testing Gate
 
-The `mutants` job in `ci.yml` runs on every `push` and `pull_request` — it is **not** report-only. `cargo-mutants 27.0` exits non-zero on any missed mutation. Additionally, `tools/xtask/src/commands.rs::assert_mutation_score` enforces a >= 20% catch rate as a percentage-threshold backup. Removing tests without replacement will fail the PR.
+The `mutants` job in `ci.yml` runs on every `push` and `pull_request` — it is **not** report-only. `cargo xtask mutants smoke` is the repo-owned CI surface now: it runs the named critical seams first at an `85%` catch-rate threshold (`writer commit protocol`, `cursor delivery/checkpoint logic`, `projection replay/freshness logic`, `segment scan / corruption handling`, and `hash-chain / replay consistency` across the feature lanes), then runs repo-wide `1/12` shards on both feature surfaces under the current ratchet phase. Today the repo-wide phase is `Phase0` record-only, so xtask records the score and prints the next available ratchet floor without enforcing it yet. Run `cargo xtask mutants policy` to see the current thresholds and staged repo-wide floors from xtask itself.
 
-**Rule:** if you delete a test, expect the mutation score to drop; either replace it with an equivalent test or write a stronger one that subsumes its coverage.
+**Rule:** if you delete a test, expect either a critical-seam threshold failure or a repo-wide score drop; replace it with an equivalent test or write a stronger one that subsumes its coverage.
 
 ## Test-Authoring Caveats
 

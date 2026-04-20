@@ -1,4 +1,5 @@
 //! Replay and checkpoint consistency proofs.
+//! Harness pattern: Equivalence Harness (live vs reopen lane).
 // justifies: INV-TEST-PANIC-AS-ASSERTION; test bodies in tests/replay_consistency.rs treat invariant violations as test failures; panic! is the assertion style throughout this file.
 #![allow(clippy::panic)]
 

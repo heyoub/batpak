@@ -1,5 +1,13 @@
 // justifies: INV-TEST-PANIC-AS-ASSERTION; raw projection mode tests in tests/raw_projection_mode.rs use panic! as the assertion style when the raw-dispatch contract breaks.
 #![allow(clippy::panic)]
+//! Raw projection mode parity and flow-matrix tests.
+//! Harness pattern: Equivalence Harness.
+//!
+//! PROVES: `project`, `project_if_changed`, and `watch_projection` converge on
+//! the same honest `(generation, folded state)` pair across both replay lanes.
+//! CATCHES: replay-lane drift, watcher/project divergence, and generation-only
+//! updates that masquerade as semantic state changes.
+//! SEEDED: deterministic / no randomness.
 
 use std::sync::Arc;
 
@@ -53,6 +61,37 @@ impl EventSourced for ValueCounter {
 struct RawCounter {
     value: i64,
     seen: u32,
+}
+
+trait MatrixCounterState {
+    fn summary(&self) -> (i64, u32);
+}
+
+impl MatrixCounterState for ValueCounter {
+    fn summary(&self) -> (i64, u32) {
+        (self.value, self.seen)
+    }
+}
+
+impl MatrixCounterState for RawCounter {
+    fn summary(&self) -> (i64, u32) {
+        (self.value, self.seen)
+    }
+}
+
+#[derive(Clone, Copy)]
+struct ProjectionFlowMatrixCase {
+    label: &'static str,
+    append_kind: EventKind,
+    append_amount: i64,
+    expected_after: (i64, u32),
+    expect_state_change: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ProjectionFlowObservation {
+    generation: u64,
+    state: (i64, u32),
 }
 
 impl EventSourced for RawCounter {
@@ -116,6 +155,109 @@ fn seeded_store() -> (Arc<Store>, TempDir) {
             .expect("append");
     }
     (store, dir)
+}
+
+macro_rules! observe_projection_flow_matrix_case {
+    ($ty:ty, $case:expr) => {{
+        let case = $case;
+        let (store, _dir) = seeded_store();
+        let baseline_generation = store
+            .entity_generation("entity:raw-proj")
+            .expect("seeded entity generation");
+        let baseline = store
+            .project::<$ty>("entity:raw-proj", &Freshness::Consistent)
+            .expect("baseline project")
+            .expect("baseline projection state");
+        let mut watcher: ProjectionWatcher<$ty> =
+            Arc::clone(&store).watch_projection::<$ty>("entity:raw-proj", Freshness::Consistent);
+        let coord = Coordinate::new("entity:raw-proj", "scope:test").expect("coord");
+
+        store
+            .append(
+                &coord,
+                case.append_kind,
+                &CounterDelta {
+                    amount: case.append_amount,
+                    label: case.label.to_owned(),
+                },
+            )
+            .expect("append matrix event");
+
+        let (watched_generation, watched_state) = watcher.recv().expect("watch projection recv");
+        let watched_state = watched_state.expect("watch projection state");
+        let changed = store
+            .project_if_changed::<$ty>(
+                "entity:raw-proj",
+                baseline_generation,
+                &Freshness::Consistent,
+            )
+            .expect("project if changed")
+            .expect("changed projection");
+        let projected = store
+            .project::<$ty>("entity:raw-proj", &Freshness::Consistent)
+            .expect("full project after append")
+            .expect("full projection state");
+        let current_generation = store
+            .entity_generation("entity:raw-proj")
+            .expect("entity generation after append");
+
+        let watched_summary = watched_state.summary();
+        let changed_summary = changed.1.expect("changed state").summary();
+        let projected_summary = projected.summary();
+        let baseline_summary = baseline.summary();
+
+        assert_eq!(
+            watched_summary, changed_summary,
+            "PROPERTY: watch_projection and project_if_changed must converge on the same folded \
+             state for matrix cell '{}'.\n\
+             Investigate: src/store/projection/watch.rs recv + src/store/projection/flow.rs.",
+            case.label
+        );
+        assert_eq!(
+            watched_summary, projected_summary,
+            "PROPERTY: watch_projection and project must converge on the same folded state for \
+             matrix cell '{}'.",
+            case.label
+        );
+        assert_eq!(
+            watched_generation, changed.0,
+            "PROPERTY: watch_projection and project_if_changed must return the same honest \
+             generation for matrix cell '{}'.",
+            case.label
+        );
+        assert_eq!(
+            watched_generation, current_generation,
+            "PROPERTY: matrix cell '{}' must report the entity's latest visible generation.",
+            case.label
+        );
+        assert_eq!(
+            watched_summary, case.expected_after,
+            "PROPERTY: projection flow matrix cell '{}' must reach the expected folded state.",
+            case.label
+        );
+        assert_eq!(
+            watched_summary != baseline_summary,
+            case.expect_state_change,
+            "PROPERTY: projection flow matrix cell '{}' must truthfully distinguish semantic \
+             state changes from generation-only changes.",
+            case.label
+        );
+
+        drop(watcher);
+        let store = match Arc::try_unwrap(store) {
+            Ok(store) => store,
+            Err(_) => panic!(
+                "PROPERTY: projection flow matrix cell '{}' should release all Arc clones before close",
+                case.label
+            ),
+        };
+        store.close().expect("close matrix store");
+
+        ProjectionFlowObservation {
+            generation: watched_generation,
+            state: watched_summary,
+        }
+    }};
 }
 
 #[test]
@@ -325,4 +467,41 @@ fn raw_watch_projection_matches_project_if_changed_after_irrelevant_append() {
         }
     };
     store.close().expect("close");
+}
+
+#[test]
+fn projection_flow_matrix_keeps_project_watch_and_project_if_changed_equivalent() {
+    // PROVES: the projection flow surfaces (`project`, `project_if_changed`,
+    // and `watch_projection`) stay observationally equivalent across both
+    // replay lanes, even when entity generation advances without a semantic
+    // state change.
+    let cases = [
+        ProjectionFlowMatrixCase {
+            label: "relevant-append",
+            append_kind: KIND,
+            append_amount: 4,
+            expected_after: (15, 5),
+            expect_state_change: true,
+        },
+        ProjectionFlowMatrixCase {
+            label: "irrelevant-append",
+            append_kind: NOISE_KIND,
+            append_amount: 999,
+            expected_after: (11, 4),
+            expect_state_change: false,
+        },
+    ];
+
+    for case in cases {
+        let value = observe_projection_flow_matrix_case!(ValueCounter, case);
+        let raw = observe_projection_flow_matrix_case!(RawCounter, case);
+
+        assert_eq!(
+            raw, value,
+            "PROPERTY: raw-msgpack and json-value replay lanes must agree on the same honest \
+             (generation, folded state) pair for matrix cell '{}'.\n\
+             Investigate: src/store/projection/flow.rs ReplayInput dispatch.",
+            case.label
+        );
+    }
 }

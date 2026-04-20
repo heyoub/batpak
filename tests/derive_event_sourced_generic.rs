@@ -1,6 +1,7 @@
 // justifies: INV-TEST-PANIC-AS-ASSERTION; test body in tests/derive_event_sourced_generic.rs exercises precondition-holds invariants; .unwrap is acceptable in test code where a panic is a test failure.
 #![allow(clippy::unwrap_used, clippy::panic)]
 //! Generic-projection coverage for `#[derive(EventSourced)]`.
+//! Harness pattern: Equivalence Harness (parity lane).
 //!
 //! The derive's handler-signature pins live inside a generic `impl` so they can
 //! reference `Self` with the struct's type parameters. A module-scope

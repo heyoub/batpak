@@ -12,6 +12,7 @@
     clippy::unused_enumerate_index
 )]
 //! Chaos testing: fault injection, data corruption, concurrent stress.
+//! Harness pattern: Fault-Injection Harness (direct chaos lane).
 //! The library tests itself under adversarial conditions with direct
 //! assertions and panic messages that point back to the runtime seam.
 //!

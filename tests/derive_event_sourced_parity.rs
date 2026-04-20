@@ -1,6 +1,7 @@
 // justifies: INV-TEST-PANIC-AS-ASSERTION; test body in tests/derive_event_sourced_parity.rs exercises precondition-holds invariants; .unwrap is acceptable in test code where a panic is a test failure.
 #![allow(clippy::unwrap_used, clippy::panic)]
 //! Parity tests for `#[derive(EventSourced)]` (Dispatch Chapter T3).
+//! Harness pattern: Equivalence Harness (behavioural parity lane).
 //!
 //! The derive must produce a projection that is behaviourally identical to
 //! a careful hand-written impl. This file pins that equivalence:

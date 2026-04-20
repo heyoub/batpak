@@ -104,13 +104,27 @@ observability.
 | Command | What it does |
 |---|---|
 | `cargo xtask doctor` | Check tools and env |
-| `cargo xtask ci` | Full test + lint + structural checks |
+| `cargo xtask ci` | Full test + lint + structural + bench-compile checks |
 | `cargo xtask cover` | Coverage with retained artifacts |
+| `cargo xtask mutants policy` | Print the repo-owned mutation policy |
+| `cargo xtask mutants smoke` | Critical seam hard gates + repo-wide ratchet smoke |
 | `cargo xtask bench --surface neutral` | Criterion benchmark suite |
 | `cargo xtask perf-gates` | Catastrophic-regression guards (stable hardware only) |
 | `cargo xtask preflight` | CI + coverage + docs in one session (gold standard before push) |
 | `cargo xtask docs` | Build and check documentation |
 | `cargo xtask release --dry-run` | Release preflight |
+
+## Testing Doctrine
+
+[HARNESS_DIRECTIVE.md](HARNESS_DIRECTIVE.md) defines the five harness
+patterns used to classify doctrine-bearing test suites and the module-header
+rule for new harnesses.
+[HARNESS_LEDGER.md](HARNESS_LEDGER.md) records the current canonical witnesses,
+including derive compile-fail/parity,
+deterministic concurrency, chaos, fuzz-chaos feedback, perf gates, and
+cold-start/replay consistency.
+`cargo xtask mutants policy` prints the repo-owned mutation thresholds and
+critical seams without running cargo-mutants.
 
 ## What This Is Not
 

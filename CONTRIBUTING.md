@@ -30,6 +30,8 @@ cargo xtask structural
 cargo xtask pre-commit
 cargo xtask ci
 cargo xtask cover
+cargo xtask mutants policy
+cargo xtask mutants smoke
 ```
 
 `just` recipes are wrappers around the same commands.
@@ -47,9 +49,18 @@ cargo xtask cover
 
 No current environment is both canonical and timing-stable.
 
+- `cargo xtask ci` compiles the benchmark surfaces (`cargo xtask bench --compile`) as a build-integrity check only; it does not interpret timings.
 - `cargo xtask perf-gates` is a catastrophic-regression guard with generous thresholds. Run it on stable hardware when you want a "something is badly wrong" signal.
 - `.github/workflows/perf.yml` is Criterion trend collection, not a hard gate.
 - `cargo xtask bench --surface ...` is the measurement lane for comparing surfaces and baselines intentionally.
+
+## Mutation Policy
+
+- `cargo xtask mutants policy` prints the repo-owned mutation policy from xtask itself.
+- `cargo xtask mutants smoke` is the CI smoke lane: it runs the named critical seams first (`writer commit protocol`, `cursor delivery/checkpoint logic`, `projection replay/freshness logic`, `segment scan / corruption handling`, and `hash-chain / replay consistency`) and then repo-wide 1/12 ratchet shards on both feature surfaces.
+- `cargo xtask mutants full` with no overrides runs the full policy locally. `cargo xtask mutants full --surface ... --shard ...` stays the targeted repo-wide lane for matrix jobs and focused investigation.
+- Critical seams enforce an `85%` mutation-score threshold immediately. Repo-wide lanes use the staged ratchet phases owned by xtask; the current phase is `Phase0` record-only, which means xtask records the score and reports the next available floor without enforcing it yet.
+- Mutation artifacts live under `tools/xtask/target/mutants/` so xtask owns the scratch surface.
 
 ## Public Surface Rules
 

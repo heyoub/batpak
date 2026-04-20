@@ -12,6 +12,7 @@
 )]
 //! Fuzz + Chaos Feedback Loop: the library uses its guard primitives as a
 //! reusable harness to evaluate fuzz and chaos testing results.
+//! Harness pattern: Property Harness (feedback gate lane).
 //! Performance scores here are screening signals for extended load probes,
 //! not standalone production authority.
 //!

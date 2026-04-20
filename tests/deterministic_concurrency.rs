@@ -1,6 +1,7 @@
 // justifies: INV-CONCURRENCY-SCHEDULE-PROOF, INV-TEST-PANIC-AS-ASSERTION; loom proofs in tests/deterministic_concurrency.rs treat any unwrap failure as a falsified invariant; unwrap is the idiomatic assertion style for loom tests.
 #![allow(clippy::unwrap_used)]
 //! Deterministic concurrency proofs using loom.
+//! Harness pattern: State-Machine Harness (bounded schedule lane).
 
 use loom::sync::{Arc, Mutex};
 use loom::thread;

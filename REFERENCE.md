@@ -300,6 +300,21 @@ cargo xtask cover
 cargo xtask cover --json
 ```
 
+## Testing Doctrine
+
+The doctrine surfaces live in:
+
+- [HARNESS_DIRECTIVE.md](HARNESS_DIRECTIVE.md) for the five harness patterns
+  and invariant/failure-mode/seed header rule
+- [HARNESS_LEDGER.md](HARNESS_LEDGER.md) for the current doctrine-bearing
+  suites and their primary pattern
+- `cargo xtask mutants policy` for the repo-owned mutation thresholds,
+  critical seams, and repo-wide ratchet phase
+
+Use these to classify strong suites by evidence shape. Do not treat perf gates,
+chaos probes, loom proofs, and compile-fail parity tests as interchangeable
+"more testing"; they answer different questions.
+
 ## Invariants
 
 Build-time/runtime policy highlights:

@@ -90,7 +90,11 @@ pub(crate) struct CoverArgs {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
 pub(crate) enum MutantMode {
+    /// Print the repo-owned mutation policy without running cargo-mutants.
+    Policy,
+    /// Run the CI smoke lane: hard critical seams plus repo-wide ratchet shards.
     Smoke,
+    /// Run repo-wide lanes, or the full policy when no overrides are passed.
     Full,
 }
 

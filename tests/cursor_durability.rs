@@ -8,11 +8,19 @@
 //! resumes exactly from the persisted position: it sees only the events
 //! that arrived after the checkpoint, never the ones it has already
 //! consumed.
+//! Harness pattern: State-Machine Harness.
+//!
+//! PROVES: durable cursor checkpoints only commit honest progress and restart
+//! from the last committed checkpoint.
+//! CATCHES: checkpoint write/startup corruption, region mismatch, rollback
+//! leaks, and panic restarts that resume from an uncommitted batch.
+//! SEEDED: deterministic / no randomness.
 
 use batpak::coordinate::{Coordinate, Region};
 use batpak::event::EventKind;
 use batpak::store::delivery::cursor::{CursorCheckpoint, CursorWorkerAction, CursorWorkerConfig};
 use batpak::store::{Cursor, RestartPolicy, Store, StoreConfig};
+use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -37,6 +45,26 @@ fn wait_until(cond: impl Fn() -> bool, timeout: Duration, description: &str) {
         std::thread::yield_now();
     }
     panic!("timed out waiting for: {description}");
+}
+
+fn assert_checkpoint_position(
+    dir: &TempDir,
+    checkpoint_id: &str,
+    expected_position: u64,
+    description: &str,
+) {
+    let checkpoint = Cursor::load_checkpoint(dir.path(), checkpoint_id)
+        .expect("load checkpoint")
+        .expect("checkpoint should exist");
+    assert_eq!(
+        checkpoint.position, expected_position,
+        "PROPERTY: {description} must persist position {expected_position}, got {}",
+        checkpoint.position
+    );
+    assert!(
+        checkpoint.started,
+        "PROPERTY: {description} must persist started=true once at least one event was delivered"
+    );
 }
 
 #[test]
@@ -371,4 +399,119 @@ fn cursor_worker_surfaces_checkpoint_write_failure_through_join() {
         Err(_) => panic!("cursor worker must release its Arc before close"),
     };
     store.close().expect("close store after checkpoint failure");
+}
+
+#[test]
+fn durable_cursor_worker_state_machine_preserves_last_committed_checkpoint() {
+    // PROVES: a durable cursor worker commits `Continue`, rewinds
+    // `StopWithRollback`, and restarts from the last committed checkpoint
+    // after a panic instead of from the most recently polled batch.
+    let dir = TempDir::new().expect("temp dir");
+    let checkpoint_id = "cursor-state-machine";
+    let coord = Coordinate::new("entity:cursor-state-machine", "scope:test").expect("coord");
+    let store = Arc::new(Store::open(config(&dir)).expect("open store"));
+
+    for i in 0..5u32 {
+        store
+            .append(&coord, KIND, &serde_json::json!({"i": i}))
+            .expect("seed append");
+    }
+
+    let seen = Arc::new(Mutex::new(BTreeMap::<u64, usize>::new()));
+    let mut worker_config = CursorWorkerConfig::default();
+    worker_config.batch_size = 1;
+    worker_config.idle_sleep = Duration::from_millis(1);
+    worker_config.restart = RestartPolicy::Once;
+    worker_config.checkpoint_id = Some(checkpoint_id.into());
+
+    let phase_one = store
+        .cursor_worker(
+            &Region::entity("entity:cursor-state-machine"),
+            worker_config.clone(),
+            {
+                let seen = Arc::clone(&seen);
+                move |batch, _store| {
+                    let seq = batch[0].global_sequence;
+                    let mut counts = seen.lock().expect("counts mutex");
+                    *counts.entry(seq).or_insert(0) += 1;
+                    drop(counts);
+
+                    match seq {
+                        0 => CursorWorkerAction::Continue,
+                        1 => CursorWorkerAction::StopWithRollback,
+                        _ => panic!("PROPERTY: phase one should only reach sequences 0 and 1"),
+                    }
+                }
+            },
+        )
+        .expect("spawn phase one worker");
+    phase_one.join().expect("phase one join");
+
+    assert_checkpoint_position(
+        &dir,
+        checkpoint_id,
+        0,
+        "phase one durable worker after StopWithRollback",
+    );
+
+    let phase_two = store
+        .cursor_worker(
+            &Region::entity("entity:cursor-state-machine"),
+            worker_config,
+            {
+                let seen = Arc::clone(&seen);
+                let panic_once = Arc::new(std::sync::atomic::AtomicBool::new(true));
+                move |batch, _store| {
+                    let seq = batch[0].global_sequence;
+                    let mut counts = seen.lock().expect("counts mutex");
+                    *counts.entry(seq).or_insert(0) += 1;
+                    drop(counts);
+
+                    match seq {
+                        1 | 2 => CursorWorkerAction::Continue,
+                        3 if panic_once.swap(false, std::sync::atomic::Ordering::SeqCst) => {
+                            panic!("intentional durable cursor panic after checkpointed progress");
+                        }
+                        3 => CursorWorkerAction::Continue,
+                        4 => CursorWorkerAction::Stop,
+                        _ => panic!(
+                            "PROPERTY: phase two should only reach rolled-back tail sequences 1..=4"
+                        ),
+                    }
+                }
+            },
+        )
+        .expect("spawn phase two worker");
+    phase_two.join().expect("phase two join");
+
+    assert_checkpoint_position(
+        &dir,
+        checkpoint_id,
+        4,
+        "phase two durable worker after panic restart and clean stop",
+    );
+
+    let observed = seen.lock().expect("counts mutex").clone();
+    let expected = BTreeMap::from([
+        (0, 1usize),
+        (1, 2usize),
+        (2, 1usize),
+        (3, 2usize),
+        (4, 1usize),
+    ]);
+    assert_eq!(
+        observed, expected,
+        "PROPERTY: durable cursor state machine must re-deliver only the rolled-back or panicked \
+         batches, never the last committed one.\n\
+         Expected counts {:?}, got {:?}.",
+        expected, observed
+    );
+
+    let store = match Arc::try_unwrap(store) {
+        Ok(store) => store,
+        Err(_) => panic!("cursor worker must release its Arc before close"),
+    };
+    store
+        .close()
+        .expect("close store after state-machine harness");
 }

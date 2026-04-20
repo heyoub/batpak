@@ -18,12 +18,103 @@ enum InstallStrategy {
 
 const REPO_HOOKS_PATH: &str = ".githooks";
 const PRE_COMMIT_HOOK: &str = ".githooks/pre-commit";
+const MUTANTS_OUTPUT_ROOT: &str = "tools/xtask/target/mutants";
+const CRITICAL_SEAM_MIN_CATCH_PCT: u32 = 85;
+const REPO_MUTATION_PHASE: RepoMutationPhase = RepoMutationPhase::Phase0;
+const REPO_MUTATION_THRESHOLDS: &[(RepoMutationPhase, u32)] = &[
+    (RepoMutationPhase::Phase1, 35),
+    (RepoMutationPhase::Phase2, 50),
+    (RepoMutationPhase::Phase3, 65),
+    (RepoMutationPhase::Phase4, 75),
+    (RepoMutationPhase::Phase5, 85),
+];
+const REPO_WIDE_ALL_FEATURES_MUTANT_FILES: &[&str] = &[
+    "src/store/**/*.rs",
+    "src/wire.rs",
+    "src/guard/*.rs",
+    "src/pipeline/*.rs",
+];
+const REPO_WIDE_NO_DEFAULT_MUTANT_FILES: &[&str] = &["src/store/**/*.rs"];
+const WRITER_COMMIT_MUTANT_FILES: &[&str] = &["src/store/write/*.rs"];
+const CURSOR_MUTANT_FILES: &[&str] = &["src/store/delivery/cursor.rs"];
+const PROJECTION_MUTANT_FILES: &[&str] = &["src/store/projection/flow.rs"];
+const SEGMENT_SCAN_MUTANT_FILES: &[&str] = &["src/store/segment/scan.rs"];
+const HASH_CHAIN_REPLAY_ALL_FEATURES_MUTANT_FILES: &[&str] = &[
+    "src/store/ancestry/by_hash.rs",
+    "src/store/cold_start/rebuild.rs",
+];
+const HASH_CHAIN_REPLAY_NO_DEFAULT_MUTANT_FILES: &[&str] = &[
+    "src/store/ancestry/by_clock.rs",
+    "src/store/cold_start/rebuild.rs",
+];
+const ALL_FEATURES_MUTANT_EXCLUDES: &[&str] = &["src/store/ancestry/by_clock.rs"];
+const NO_DEFAULT_FEATURES_MUTANT_EXCLUDES: &[&str] = &["src/store/ancestry/by_hash.rs"];
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum HookStatus {
     Installed,
     Default,
     Custom(String),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum MutationScope {
+    CriticalSeam,
+    RepoWide,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum MutationEnforcement {
+    Threshold { min_catch_pct: u32 },
+    RecordOnly,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RepoMutationPhase {
+    Phase0,
+    Phase1,
+    Phase2,
+    Phase3,
+    Phase4,
+    Phase5,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct CriticalMutationSeam {
+    slug: &'static str,
+    label: &'static str,
+    description: &'static str,
+    surface: MutantSurface,
+    paths: &'static [&'static str],
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct MutationLane {
+    label: String,
+    slug: String,
+    description: &'static str,
+    scope: MutationScope,
+    surface: MutantSurface,
+    shard: Option<String>,
+    enforcement: MutationEnforcement,
+    paths: &'static [&'static str],
+    excludes: &'static [&'static str],
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct MutationScore {
+    caught: usize,
+    missed: usize,
+    timed_out: usize,
+    unviable: usize,
+    tested: usize,
+    score_pct: usize,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum MutantExecutionPlan {
+    DescribePolicy,
+    Run(Vec<MutationLane>),
 }
 
 pub(crate) fn setup(args: SetupArgs) -> Result<()> {
@@ -365,74 +456,326 @@ fn count_mutants_file(output_dir: &Path, filename: &str) -> Result<usize> {
     Ok(contents.lines().filter(|l| !l.trim().is_empty()).count())
 }
 
-fn assert_mutation_score(output_dir: &Path, min_catch_pct: u32) -> Result<()> {
+fn mutation_score(output_dir: &Path) -> Result<MutationScore> {
     let caught = count_mutants_file(output_dir, "caught.txt")?;
     let missed = count_mutants_file(output_dir, "missed.txt")?;
+    let timed_out = count_mutants_file(output_dir, "timeout.txt")?;
+    let unviable = count_mutants_file(output_dir, "unviable.txt")?;
     let tested = caught + missed;
+    let score_pct = if tested == 0 {
+        0
+    } else {
+        (caught * 100) / tested
+    };
+    Ok(MutationScore {
+        caught,
+        missed,
+        timed_out,
+        unviable,
+        tested,
+        score_pct,
+    })
+}
 
-    if tested == 0 {
+impl MutationScope {
+    fn name(self) -> &'static str {
+        match self {
+            MutationScope::CriticalSeam => "critical seam",
+            MutationScope::RepoWide => "repo-wide",
+        }
+    }
+}
+
+impl MutationLane {
+    fn critical(seam: CriticalMutationSeam) -> Self {
+        Self {
+            label: format!("{} ({})", seam.label, surface_name(seam.surface)),
+            slug: seam.slug.to_owned(),
+            description: seam.description,
+            scope: MutationScope::CriticalSeam,
+            surface: seam.surface,
+            shard: None,
+            enforcement: MutationEnforcement::Threshold {
+                min_catch_pct: CRITICAL_SEAM_MIN_CATCH_PCT,
+            },
+            paths: seam.paths,
+            excludes: surface_excludes(seam.surface),
+        }
+    }
+
+    fn repo_wide(surface: MutantSurface, shard: Option<&str>) -> Self {
+        Self {
+            label: match shard {
+                Some(shard) => format!("repo-wide ({}, shard {shard})", surface_name(surface)),
+                None => format!("repo-wide ({})", surface_name(surface)),
+            },
+            slug: "repo-wide".to_owned(),
+            description: "repo-wide mutation ratchet lane",
+            scope: MutationScope::RepoWide,
+            surface,
+            shard: shard.map(str::to_owned),
+            enforcement: current_repo_mutation_enforcement(),
+            paths: repo_wide_paths(surface),
+            excludes: surface_excludes(surface),
+        }
+    }
+
+    fn output_dir(&self) -> PathBuf {
+        Path::new(MUTANTS_OUTPUT_ROOT).join(self.slug())
+    }
+
+    fn slug(&self) -> String {
+        let surface = surface_slug(self.surface);
+        match self.shard.as_deref() {
+            Some(shard) => format!("{}-{surface}-{}", self.slug, shard.replace('/', "-of-")),
+            None => format!("{}-{surface}", self.slug),
+        }
+    }
+
+    fn allows_nonzero_exit(&self, score: MutationScore) -> bool {
+        matches!(
+            self.enforcement,
+            MutationEnforcement::Threshold { .. } | MutationEnforcement::RecordOnly
+        ) && score.missed > 0
+            && score.timed_out == 0
+            && score.unviable == 0
+    }
+
+    fn policy_line(&self) -> String {
+        match self.enforcement {
+            MutationEnforcement::Threshold { min_catch_pct } => match self.shard.as_deref() {
+                Some(shard) => format!(
+                    "{} `{}` on {} shard {shard}: threshold {}%",
+                    self.scope.name(),
+                    self.label,
+                    surface_name(self.surface),
+                    min_catch_pct,
+                ),
+                None => format!(
+                    "{} `{}` on {}: threshold {}%",
+                    self.scope.name(),
+                    self.label,
+                    surface_name(self.surface),
+                    min_catch_pct,
+                ),
+            },
+            MutationEnforcement::RecordOnly => format!(
+                "{} `{}` on {}: record-only for current ratchet phase",
+                self.scope.name(),
+                self.label,
+                surface_name(self.surface)
+            ),
+        }
+    }
+}
+
+fn surface_name(surface: MutantSurface) -> &'static str {
+    match surface {
+        MutantSurface::AllFeatures => "all-features",
+        MutantSurface::NoDefaultFeatures => "no-default-features",
+    }
+}
+
+fn surface_slug(surface: MutantSurface) -> &'static str {
+    surface_name(surface)
+}
+
+fn repo_wide_paths(surface: MutantSurface) -> &'static [&'static str] {
+    match surface {
+        MutantSurface::AllFeatures => REPO_WIDE_ALL_FEATURES_MUTANT_FILES,
+        MutantSurface::NoDefaultFeatures => REPO_WIDE_NO_DEFAULT_MUTANT_FILES,
+    }
+}
+
+fn surface_excludes(surface: MutantSurface) -> &'static [&'static str] {
+    match surface {
+        MutantSurface::AllFeatures => ALL_FEATURES_MUTANT_EXCLUDES,
+        MutantSurface::NoDefaultFeatures => NO_DEFAULT_FEATURES_MUTANT_EXCLUDES,
+    }
+}
+
+fn critical_mutation_seams() -> &'static [CriticalMutationSeam] {
+    &[
+        CriticalMutationSeam {
+            slug: "writer-commit",
+            label: "writer commit protocol",
+            description: "writer commit protocol and staging/publish ordering",
+            surface: MutantSurface::AllFeatures,
+            paths: WRITER_COMMIT_MUTANT_FILES,
+        },
+        CriticalMutationSeam {
+            slug: "cursor-delivery",
+            label: "cursor delivery and checkpoints",
+            description: "cursor delivery/checkpoint logic",
+            surface: MutantSurface::AllFeatures,
+            paths: CURSOR_MUTANT_FILES,
+        },
+        CriticalMutationSeam {
+            slug: "projection-flow",
+            label: "projection replay and freshness",
+            description: "projection replay/freshness logic",
+            surface: MutantSurface::AllFeatures,
+            paths: PROJECTION_MUTANT_FILES,
+        },
+        CriticalMutationSeam {
+            slug: "segment-scan",
+            label: "segment scan corruption handling",
+            description: "segment scan and corruption handling",
+            surface: MutantSurface::AllFeatures,
+            paths: SEGMENT_SCAN_MUTANT_FILES,
+        },
+        CriticalMutationSeam {
+            slug: "hash-chain-replay-all-features",
+            label: "hash-chain and replay consistency",
+            description: "hash-chain / replay consistency logic (blake3 lane)",
+            surface: MutantSurface::AllFeatures,
+            paths: HASH_CHAIN_REPLAY_ALL_FEATURES_MUTANT_FILES,
+        },
+        CriticalMutationSeam {
+            slug: "hash-chain-replay-no-default",
+            label: "hash-chain and replay consistency",
+            description: "hash-chain / replay consistency logic (no-default lane)",
+            surface: MutantSurface::NoDefaultFeatures,
+            paths: HASH_CHAIN_REPLAY_NO_DEFAULT_MUTANT_FILES,
+        },
+    ]
+}
+
+fn current_repo_mutation_floor() -> Option<u32> {
+    match REPO_MUTATION_PHASE {
+        RepoMutationPhase::Phase0 => None,
+        RepoMutationPhase::Phase1 => Some(35),
+        RepoMutationPhase::Phase2 => Some(50),
+        RepoMutationPhase::Phase3 => Some(65),
+        RepoMutationPhase::Phase4 => Some(75),
+        RepoMutationPhase::Phase5 => Some(85),
+    }
+}
+
+fn current_repo_mutation_enforcement() -> MutationEnforcement {
+    match current_repo_mutation_floor() {
+        Some(min_catch_pct) => MutationEnforcement::Threshold { min_catch_pct },
+        None => MutationEnforcement::RecordOnly,
+    }
+}
+
+fn assert_mutation_policy(
+    lane: &MutationLane,
+    output_dir: &Path,
+    score: MutationScore,
+) -> Result<()> {
+    if score.tested == 0 {
         bail!(
-            "mutants: no tested mutants found in {}. Treating this as a failure because the \
-             mutation surface produced no evidence.",
+            "mutants: `{}` produced no tested mutants in {}. Treating this as a failure because \
+             the mutation surface produced no evidence.",
+            lane.label,
             output_dir.display()
         );
     }
 
-    let score_pct = (caught * 100) / tested;
     println!(
-        "mutants: {caught} caught / {tested} tested = {score_pct}% (threshold: {min_catch_pct}%)"
+        "mutants: `{}` => {} caught / {} tested = {}% (missed: {}, timed out: {}, unviable: {})",
+        lane.label,
+        score.caught,
+        score.tested,
+        score.score_pct,
+        score.missed,
+        score.timed_out,
+        score.unviable,
     );
 
-    if score_pct < min_catch_pct as usize {
+    if score.timed_out > 0 {
         bail!(
-            "mutation score {score_pct}% is below the required {min_catch_pct}% \
-             ({caught} caught, {missed} missed out of {tested} tested mutants). \
-             Add tests that catch the mutations listed in {}.",
-            output_dir.join("missed.txt").display()
+            "mutation lane `{}` timed out on {} mutants. Investigate {}.",
+            lane.label,
+            score.timed_out,
+            output_dir.join("timeout.txt").display()
         );
     }
+
+    if score.unviable > 0 {
+        bail!(
+            "mutation lane `{}` produced {} unviable mutants. Investigate {}.",
+            lane.label,
+            score.unviable,
+            output_dir.join("unviable.txt").display()
+        );
+    }
+
+    match lane.enforcement {
+        MutationEnforcement::Threshold { min_catch_pct } => {
+            if score.score_pct < min_catch_pct as usize {
+                bail!(
+                    "mutation score for `{}` is {}%, below the required {}% \
+                     ({} caught, {} missed out of {} tested mutants). Add tests that catch the \
+                     mutations listed in {}.",
+                    lane.label,
+                    score.score_pct,
+                    min_catch_pct,
+                    score.caught,
+                    score.missed,
+                    score.tested,
+                    output_dir.join("missed.txt").display()
+                );
+            }
+            if lane.scope == MutationScope::RepoWide {
+                if let Some(next_floor) = next_ratchet_floor(score.score_pct, Some(min_catch_pct)) {
+                    println!(
+                        "mutants: `{}` is above the current repo-wide ratchet floor; a future raise to {}% is available.",
+                        lane.label, next_floor
+                    );
+                }
+            }
+        }
+        MutationEnforcement::RecordOnly => {
+            if let Some(next_floor) = next_ratchet_floor(score.score_pct, None) {
+                println!(
+                    "mutants: `{}` is in repo-wide record-only mode for this phase. Current score {}% supports a future ratchet to {}%.",
+                    lane.label, score.score_pct, next_floor
+                );
+            }
+        }
+    }
+
     Ok(())
 }
 
-fn mutants_command(surface: MutantSurface, shard: Option<&str>) -> Vec<String> {
-    let mut args: Vec<String> = match surface {
-        MutantSurface::AllFeatures => [
-            "mutants",
-            "--file",
-            "src/store/**/*.rs",
-            "--file",
-            "src/wire.rs",
-            "--file",
-            "src/guard/*.rs",
-            "--file",
-            "src/pipeline/*.rs",
-            // by_clock is not compiled when blake3 is enabled (--all-features).
-            "--exclude",
-            "src/store/ancestry/by_clock.rs",
-            "--all-features",
-            "--test-tool",
-            "cargo",
-        ]
-        .into_iter()
-        .map(str::to_owned)
-        .collect(),
-        MutantSurface::NoDefaultFeatures => [
-            "mutants",
-            "--file",
-            "src/store/**/*.rs",
-            // by_hash is not compiled when blake3 is disabled (--no-default-features).
-            "--exclude",
-            "src/store/ancestry/by_hash.rs",
-            "--no-default-features",
-            "--test-tool",
-            "cargo",
-        ]
-        .into_iter()
-        .map(str::to_owned)
-        .collect(),
-    };
+fn next_ratchet_floor(score_pct: usize, current_floor: Option<u32>) -> Option<u32> {
+    REPO_MUTATION_THRESHOLDS
+        .iter()
+        .map(|(_, floor)| *floor)
+        .filter(|floor| Some(*floor) > current_floor && score_pct >= *floor as usize)
+        .max()
+}
 
-    if let Some(shard) = shard {
+fn mutants_command(lane: &MutationLane, output_dir: &Path) -> Vec<String> {
+    let mut args = vec![
+        "mutants".to_owned(),
+        "--output".to_owned(),
+        output_dir.display().to_string(),
+        "--in-place".to_owned(),
+    ];
+
+    for pattern in lane.paths {
+        args.push("--file".to_owned());
+        args.push((*pattern).to_owned());
+    }
+
+    for exclude in lane.excludes {
+        args.push("--exclude".to_owned());
+        args.push((*exclude).to_owned());
+    }
+
+    match lane.surface {
+        MutantSurface::AllFeatures => args.push("--all-features".to_owned()),
+        MutantSurface::NoDefaultFeatures => args.push("--no-default-features".to_owned()),
+    }
+    args.push("--cargo-arg".to_owned());
+    args.push("--locked".to_owned());
+    args.push("--test-tool".to_owned());
+    args.push("cargo".to_owned());
+
+    if let Some(shard) = lane.shard.as_deref() {
         args.push("--shard".to_owned());
         args.push(shard.to_owned());
     }
@@ -440,46 +783,188 @@ fn mutants_command(surface: MutantSurface, shard: Option<&str>) -> Vec<String> {
     args
 }
 
-fn run_mutants_surface(
-    surface: MutantSurface,
-    shard: Option<&str>,
-    output_dir: &Path,
-    min_catch_pct: u32,
-) -> Result<()> {
-    let _ = std::fs::remove_dir_all(output_dir);
-    cargo(mutants_command(surface, shard))?;
-    assert_mutation_score(output_dir, min_catch_pct)
+fn critical_mutation_lanes() -> Vec<MutationLane> {
+    critical_mutation_seams()
+        .iter()
+        .copied()
+        .map(MutationLane::critical)
+        .collect()
 }
 
-pub(crate) fn mutants(args: MutantsArgs) -> Result<()> {
-    let output_dir = Path::new("target/mutants.out");
-    const MIN_CATCH_PCT: u32 = 20;
+fn repo_wide_mutation_lanes(
+    surfaces: Vec<MutantSurface>,
+    shard: Option<&str>,
+) -> Vec<MutationLane> {
+    surfaces
+        .into_iter()
+        .map(|surface| MutationLane::repo_wide(surface, shard))
+        .collect()
+}
 
+fn build_mutant_execution_plan(args: &MutantsArgs) -> Result<MutantExecutionPlan> {
     match args.mode {
+        MutantMode::Policy => {
+            if args.surface.is_some() || args.shard.is_some() {
+                bail!(
+                    "`cargo xtask mutants policy` only describes repo-owned policy; do not pass \
+                     --surface or --shard"
+                );
+            }
+            Ok(MutantExecutionPlan::DescribePolicy)
+        }
         MutantMode::Smoke => {
             if args.surface.is_some() || args.shard.is_some() {
-                bail!("`cargo xtask mutants smoke` owns its fixed shard policy; do not pass --surface or --shard");
+                bail!(
+                    "`cargo xtask mutants smoke` owns its fixed policy lanes; do not pass \
+                     --surface or --shard"
+                );
             }
-            run_mutants_surface(
-                MutantSurface::AllFeatures,
+
+            let mut lanes = critical_mutation_lanes();
+            lanes.extend(repo_wide_mutation_lanes(
+                vec![MutantSurface::AllFeatures, MutantSurface::NoDefaultFeatures],
                 Some("1/12"),
-                output_dir,
-                MIN_CATCH_PCT,
-            )?;
-            run_mutants_surface(
-                MutantSurface::NoDefaultFeatures,
-                Some("1/12"),
-                output_dir,
-                MIN_CATCH_PCT,
-            )
+            ));
+            Ok(MutantExecutionPlan::Run(lanes))
         }
         MutantMode::Full => {
             let surfaces = args.surface.map_or_else(
                 || vec![MutantSurface::AllFeatures, MutantSurface::NoDefaultFeatures],
                 |surface| vec![surface],
             );
-            for surface in surfaces {
-                run_mutants_surface(surface, args.shard.as_deref(), output_dir, MIN_CATCH_PCT)?;
+
+            if args.surface.is_some() || args.shard.is_some() {
+                return Ok(MutantExecutionPlan::Run(repo_wide_mutation_lanes(
+                    surfaces,
+                    args.shard.as_deref(),
+                )));
+            }
+
+            let mut lanes = critical_mutation_lanes();
+            lanes.extend(repo_wide_mutation_lanes(surfaces, None));
+            Ok(MutantExecutionPlan::Run(lanes))
+        }
+    }
+}
+
+fn print_mutation_policy() {
+    println!("Mutation policy:");
+    println!(
+        "- `cargo xtask mutants smoke`: run the critical seams at {}%, then repo-wide 1/12 lanes using the current ratchet phase.",
+        CRITICAL_SEAM_MIN_CATCH_PCT
+    );
+    println!(
+        "- `cargo xtask mutants full`: with no overrides, run the full policy; with `--surface` and/or `--shard`, run only the requested repo-wide ratchet lane."
+    );
+    match current_repo_mutation_floor() {
+        Some(floor) => println!(
+            "- Repo-wide ratchet phase: {:?} (current floor: {floor}%).",
+            REPO_MUTATION_PHASE
+        ),
+        None => println!(
+            "- Repo-wide ratchet phase: {:?} (record-only; no floor enforced yet).",
+            REPO_MUTATION_PHASE
+        ),
+    }
+    println!("- Repo-wide ratchet phases staged in code:");
+    for (phase, floor) in REPO_MUTATION_THRESHOLDS {
+        println!("  {:?} => {floor}%", phase);
+    }
+    for lane in critical_mutation_lanes() {
+        println!("- {}", lane.policy_line());
+    }
+    for lane in repo_wide_mutation_lanes(
+        vec![MutantSurface::AllFeatures, MutantSurface::NoDefaultFeatures],
+        Some("1/12"),
+    ) {
+        println!("- {}", lane.policy_line());
+    }
+    println!("- Critical seam surfaces:");
+    for seam in critical_mutation_seams() {
+        println!(
+            "  {} [{} on {}]: {}",
+            seam.label,
+            seam.slug,
+            surface_name(seam.surface),
+            seam.description
+        );
+        for pattern in seam.paths {
+            println!("    {pattern}");
+        }
+    }
+    println!("- Repo-wide patterns:");
+    for pattern in REPO_WIDE_ALL_FEATURES_MUTANT_FILES {
+        println!("  all-features: {pattern}");
+    }
+    for pattern in REPO_WIDE_NO_DEFAULT_MUTANT_FILES {
+        println!("  no-default-features: {pattern}");
+    }
+    println!(
+        "- Surface-specific excludes: all-features => {}, no-default-features => {}.",
+        ALL_FEATURES_MUTANT_EXCLUDES.join(", "),
+        NO_DEFAULT_FEATURES_MUTANT_EXCLUDES.join(", ")
+    );
+    println!(
+        "- Mutation artifacts live under `{MUTANTS_OUTPUT_ROOT}` so xtask owns the scratch surface."
+    );
+}
+
+fn run_mutation_lane(lane: &MutationLane) -> Result<()> {
+    let output_dir = lane.output_dir();
+    let _ = std::fs::remove_dir_all(&output_dir);
+    if let Some(parent) = output_dir.parent() {
+        std::fs::create_dir_all(parent).with_context(|| {
+            format!(
+                "create cargo-mutants output parent directory {} for `{}`",
+                parent.display(),
+                lane.label
+            )
+        })?;
+    }
+
+    let mut command = Command::new("cargo");
+    command.args(mutants_command(lane, &output_dir));
+    let status = command
+        .status()
+        .with_context(|| format!("run cargo-mutants lane `{}`", lane.label))?;
+
+    let score = mutation_score(&output_dir).with_context(|| {
+        format!(
+            "read cargo-mutants results for `{}` from {}",
+            lane.label,
+            output_dir.display()
+        )
+    })?;
+
+    let policy_result = assert_mutation_policy(lane, &output_dir, score);
+    if status.success() || lane.allows_nonzero_exit(score) {
+        return policy_result;
+    }
+
+    match policy_result {
+        Ok(()) => bail!(
+            "cargo-mutants exited with status {status} for `{}` even though the xtask policy \
+             checks passed. Inspect {}.",
+            lane.label,
+            output_dir.display()
+        ),
+        Err(err) => Err(err).context(format!(
+            "cargo-mutants exited with status {status} for `{}`; inspect {}",
+            lane.label,
+            output_dir.display()
+        )),
+    }
+}
+
+pub(crate) fn mutants(args: MutantsArgs) -> Result<()> {
+    match build_mutant_execution_plan(&args)? {
+        MutantExecutionPlan::DescribePolicy => {
+            print_mutation_policy();
+            Ok(())
+        }
+        MutantExecutionPlan::Run(lanes) => {
+            for lane in lanes {
+                run_mutation_lane(&lane)?;
             }
             Ok(())
         }
@@ -611,8 +1096,14 @@ fn unpacked_package_dir(packaged_root: &Path) -> Result<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_default_hooks_path, matches_repo_hooks_path, mutants_command};
-    use crate::MutantSurface;
+    use super::{
+        build_mutant_execution_plan, critical_mutation_lanes, is_default_hooks_path,
+        matches_repo_hooks_path, mutants_command, next_ratchet_floor, surface_excludes,
+        MutantExecutionPlan, MutationLane, MutationScope, RepoMutationPhase, CURSOR_MUTANT_FILES,
+        PROJECTION_MUTANT_FILES, REPO_MUTATION_PHASE, REPO_WIDE_ALL_FEATURES_MUTANT_FILES,
+        REPO_WIDE_NO_DEFAULT_MUTANT_FILES, WRITER_COMMIT_MUTANT_FILES,
+    };
+    use crate::{MutantMode, MutantSurface, MutantsArgs};
     use std::path::Path;
 
     #[test]
@@ -631,26 +1122,71 @@ mod tests {
     }
 
     #[test]
-    fn mutants_full_all_features_surface_stays_xtask_owned() {
+    fn mutants_smoke_plan_runs_critical_then_repo_wide_ratchet_lanes() {
+        let plan = build_mutant_execution_plan(&MutantsArgs {
+            mode: MutantMode::Smoke,
+            surface: None,
+            shard: None,
+        })
+        .expect("smoke plan");
+
         assert_eq!(
-            mutants_command(MutantSurface::AllFeatures, Some("3/12")),
+            plan,
+            MutantExecutionPlan::Run(
+                critical_mutation_lanes()
+                    .into_iter()
+                    .chain([
+                        MutationLane::repo_wide(MutantSurface::AllFeatures, Some("1/12")),
+                        MutationLane::repo_wide(MutantSurface::NoDefaultFeatures, Some("1/12")),
+                    ])
+                    .collect()
+            )
+        );
+    }
+
+    #[test]
+    fn mutants_full_with_overrides_stays_repo_wide_only() {
+        let plan = build_mutant_execution_plan(&MutantsArgs {
+            mode: MutantMode::Full,
+            surface: Some(MutantSurface::AllFeatures),
+            shard: Some("3/12".to_owned()),
+        })
+        .expect("full plan");
+
+        assert_eq!(
+            plan,
+            MutantExecutionPlan::Run(vec![MutationLane::repo_wide(
+                MutantSurface::AllFeatures,
+                Some("3/12"),
+            )])
+        );
+    }
+
+    #[test]
+    fn mutants_writer_commit_surface_stays_xtask_owned() {
+        let lane = critical_mutation_lanes()
+            .into_iter()
+            .find(|lane| lane.slug == "writer-commit")
+            .expect("writer commit seam");
+        assert_eq!(
+            mutants_command(
+                &lane,
+                Path::new("tools/xtask/target/mutants/writer-commit-all-features")
+            ),
             vec![
                 "mutants",
+                "--output",
+                "tools/xtask/target/mutants/writer-commit-all-features",
+                "--in-place",
                 "--file",
-                "src/store/**/*.rs",
-                "--file",
-                "src/wire.rs",
-                "--file",
-                "src/guard/*.rs",
-                "--file",
-                "src/pipeline/*.rs",
+                "src/store/write/*.rs",
                 "--exclude",
                 "src/store/ancestry/by_clock.rs",
                 "--all-features",
+                "--cargo-arg",
+                "--locked",
                 "--test-tool",
                 "cargo",
-                "--shard",
-                "3/12",
             ]
             .into_iter()
             .map(str::to_owned)
@@ -660,15 +1196,24 @@ mod tests {
 
     #[test]
     fn mutants_full_no_default_surface_stays_xtask_owned() {
+        let lane = MutationLane::repo_wide(MutantSurface::NoDefaultFeatures, None);
         assert_eq!(
-            mutants_command(MutantSurface::NoDefaultFeatures, None),
+            mutants_command(
+                &lane,
+                Path::new("tools/xtask/target/mutants/repo-wide-no-default-features")
+            ),
             vec![
                 "mutants",
+                "--output",
+                "tools/xtask/target/mutants/repo-wide-no-default-features",
+                "--in-place",
                 "--file",
                 "src/store/**/*.rs",
                 "--exclude",
                 "src/store/ancestry/by_hash.rs",
                 "--no-default-features",
+                "--cargo-arg",
+                "--locked",
                 "--test-tool",
                 "cargo",
             ]
@@ -676,5 +1221,48 @@ mod tests {
             .map(str::to_owned)
             .collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn ratchet_floor_only_advances_to_staged_thresholds() {
+        assert_eq!(next_ratchet_floor(34, None), None);
+        assert_eq!(next_ratchet_floor(35, None), Some(35));
+        assert_eq!(next_ratchet_floor(74, Some(50)), Some(65));
+        assert_eq!(next_ratchet_floor(86, Some(75)), Some(85));
+    }
+
+    #[test]
+    fn current_phase_starts_repo_wide_in_record_only_mode() {
+        assert_eq!(REPO_MUTATION_PHASE, RepoMutationPhase::Phase0);
+    }
+
+    #[test]
+    fn critical_seam_lane_keeps_owned_paths() {
+        let lanes = critical_mutation_lanes();
+        let cursor_lane = lanes
+            .iter()
+            .find(|lane| lane.slug == "cursor-delivery")
+            .expect("cursor lane");
+        let projection_lane = lanes
+            .iter()
+            .find(|lane| lane.slug == "projection-flow")
+            .expect("projection lane");
+
+        assert_eq!(cursor_lane.scope, MutationScope::CriticalSeam);
+        assert_eq!(cursor_lane.paths, CURSOR_MUTANT_FILES);
+        assert_eq!(projection_lane.paths, PROJECTION_MUTANT_FILES);
+        assert_eq!(
+            MutationLane::repo_wide(MutantSurface::AllFeatures, None).paths,
+            REPO_WIDE_ALL_FEATURES_MUTANT_FILES
+        );
+        assert_eq!(
+            MutationLane::repo_wide(MutantSurface::NoDefaultFeatures, None).paths,
+            REPO_WIDE_NO_DEFAULT_MUTANT_FILES
+        );
+        assert_eq!(
+            MutationLane::repo_wide(MutantSurface::AllFeatures, None).excludes,
+            surface_excludes(MutantSurface::AllFeatures)
+        );
+        assert_eq!(lanes[0].paths, WRITER_COMMIT_MUTANT_FILES);
     }
 }

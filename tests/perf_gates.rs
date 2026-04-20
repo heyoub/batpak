@@ -2,6 +2,7 @@
 #![allow(clippy::panic, clippy::print_stderr, clippy::cast_possible_truncation)]
 //! Performance gate tests use the library's Gate/Pipeline primitives as a
 //! reusable harness for catastrophic-regression checks.
+//! Harness pattern: Property Harness (catastrophic threshold lane).
 //! These thresholds are intentionally generous and exist to catch obvious
 //! regressions, not to act as precision benchmark authority: no current
 //! environment is both canonical and timing-stable.
