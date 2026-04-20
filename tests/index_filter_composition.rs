@@ -43,6 +43,11 @@ fn open_store(dir: &TempDir, topology: IndexTopology) -> Store {
     Store::open(config).expect("open store")
 }
 
+fn entity_scoped_region(prefix: &str, scope: &str) -> Region {
+    let with_scope = |region: Region, scope: &str| Region::with_scope(region, scope);
+    with_scope(Region::entity(prefix), scope)
+}
+
 /// Deterministic PRNG — a tiny xorshift so every run produces the same
 /// corpus. Using a hand-rolled generator keeps the test free of any extra
 /// test-dependency and pins the corpus shape exactly.
@@ -281,118 +286,42 @@ fn assert_cursor_matches(
     );
 }
 
-#[test]
-fn overlays_return_ground_truth_for_every_filter_shape() {
-    let corpus = build_corpus();
-
-    for (label, topology) in topologies() {
-        let dir = TempDir::new().expect("temp dir");
-        let store = open_store(&dir, topology);
-        seed_store_with_corpus(&store, &corpus);
-
-        // entity prefix only
-        assert_matches(
-            label,
-            "entity(alpha)",
-            &Region::entity("entity:alpha"),
-            &store,
-            &corpus,
-        );
-
-        // scope only
-        assert_matches(
-            label,
-            "scope(X)",
-            &Region::scope("scope:X"),
-            &store,
-            &corpus,
-        );
-        assert_matches(
-            label,
-            "scope(Y)",
-            &Region::scope("scope:Y"),
-            &store,
-            &corpus,
-        );
-
-        // scope + kind
-        assert_matches(
-            label,
+fn standard_queries() -> Vec<(&'static str, Region)> {
+    vec![
+        ("entity(alpha)", Region::entity("entity:alpha")),
+        ("scope(X)", Region::scope("scope:X")),
+        ("scope(Y)", Region::scope("scope:Y")),
+        (
             "scope(X) + kind(5,1)",
-            &Region::scope("scope:X").with_fact(KindFilter::Exact(EventKind::custom(0x5, 1))),
-            &store,
-            &corpus,
-        );
-
-        // scope + kind + clock_range
-        assert_matches(
-            label,
+            Region::scope("scope:X").with_fact(KindFilter::Exact(EventKind::custom(0x5, 1))),
+        ),
+        (
             "scope(Z) + kind(6,1) + clock(0..=3)",
-            &Region::scope("scope:Z")
+            Region::scope("scope:Z")
                 .with_fact(KindFilter::Exact(EventKind::custom(0x6, 1)))
                 .with_clock_range((0, 3)),
-            &store,
-            &corpus,
-        );
-
-        // kind only
-        assert_matches(
-            label,
+        ),
+        (
             "kind(5,2)",
-            &Region::all().with_fact(KindFilter::Exact(EventKind::custom(0x5, 2))),
-            &store,
-            &corpus,
-        );
-
-        // category-only kind filter
-        assert_matches(
-            label,
+            Region::all().with_fact(KindFilter::Exact(EventKind::custom(0x5, 2))),
+        ),
+        (
             "category(5)",
-            &Region::all().with_fact(KindFilter::Category(0x5)),
-            &store,
-            &corpus,
-        );
-
-        // KindFilter::Any — the B4 fix: limit applied during collection so
-        // all entries round-trip when no limit is set.
-        assert_matches(
-            label,
-            "kind(Any)",
-            &Region::all().with_fact(KindFilter::Any),
-            &store,
-            &corpus,
-        );
-
-        // clock_range only (entity/scope unconstrained)
-        assert_matches(
-            label,
-            "clock(2..=5)",
-            &Region::all().with_clock_range((2, 5)),
-            &store,
-            &corpus,
-        );
-
-        // combined: entity + scope + category + clock_range
-        assert_matches(
-            label,
+            Region::all().with_fact(KindFilter::Category(0x5)),
+        ),
+        ("kind(Any)", Region::all().with_fact(KindFilter::Any)),
+        ("clock(2..=5)", Region::all().with_clock_range((2, 5))),
+        (
             "entity(bravo) + scope(Y) + category(5) + clock(0..=2)",
-            &Region::entity("entity:bravo")
-                .with_scope("scope:Y")
+            entity_scoped_region("entity:bravo", "scope:Y")
                 .with_fact(KindFilter::Category(0x5))
                 .with_clock_range((0, 2)),
-            &store,
-            &corpus,
-        );
-
-        store.close().expect("close");
-    }
+        ),
+    ]
 }
 
-#[test]
-fn cursor_batches_match_ground_truth_order_across_topologies() {
-    let corpus = build_corpus();
-    let batch_sizes = [1usize, 3, 11];
-    let queries = vec![
+fn cursor_queries() -> Vec<(&'static str, Region)> {
+    vec![
         ("all + any", Region::all().with_fact(KindFilter::Any)),
         (
             "scope(X) + kind(5,1)",
@@ -404,23 +333,78 @@ fn cursor_batches_match_ground_truth_order_across_topologies() {
         ),
         (
             "entity(alpha) + scope(Z) + category(5)",
-            Region::entity("entity:alpha")
-                .with_scope("scope:Z")
-                .with_fact(KindFilter::Category(0x5)),
+            entity_scoped_region("entity:alpha", "scope:Z").with_fact(KindFilter::Category(0x5)),
         ),
-    ];
+    ]
+}
+
+fn assert_query_matrix(label: &str, store: &Store, corpus: &[GroundTruthEvent]) {
+    for (query_name, region) in standard_queries() {
+        assert_matches(label, query_name, &region, store, corpus);
+    }
+}
+
+fn assert_cursor_query_matrix(label: &str, store: &Store, corpus: &[GroundTruthEvent]) {
+    for (query_name, region) in cursor_queries() {
+        for batch_size in [1usize, 3, 11] {
+            assert_cursor_matches(label, query_name, &region, batch_size, store, corpus);
+        }
+    }
+}
+
+#[test]
+fn overlays_return_ground_truth_for_every_filter_shape() {
+    let corpus = build_corpus();
 
     for (label, topology) in topologies() {
         let dir = TempDir::new().expect("temp dir");
         let store = open_store(&dir, topology);
         seed_store_with_corpus(&store, &corpus);
-
-        for (query_name, region) in &queries {
-            for batch_size in batch_sizes {
-                assert_cursor_matches(label, query_name, region, batch_size, &store, &corpus);
-            }
-        }
-
+        assert_query_matrix(label, &store, &corpus);
         store.close().expect("close");
+    }
+}
+
+#[test]
+fn cursor_batches_match_ground_truth_order_across_topologies() {
+    let corpus = build_corpus();
+
+    for (label, topology) in topologies() {
+        let dir = TempDir::new().expect("temp dir");
+        let store = open_store(&dir, topology);
+        seed_store_with_corpus(&store, &corpus);
+        assert_cursor_query_matrix(label, &store, &corpus);
+        store.close().expect("close");
+    }
+}
+
+#[test]
+fn reopen_matches_live_oracle_across_topologies() {
+    let corpus = build_corpus();
+
+    for (label, topology) in topologies() {
+        let dir = TempDir::new().expect("temp dir");
+        let live = open_store(&dir, topology.clone());
+        seed_store_with_corpus(&live, &corpus);
+        let live_all = live.query(&Region::all());
+        assert_query_matrix(label, &live, &corpus);
+        assert_cursor_query_matrix(label, &live, &corpus);
+        live.close().expect("close live store");
+
+        let reopened = open_store(&dir, topology);
+        let reopened_all = reopened.query(&Region::all());
+        assert_query_matrix(label, &reopened, &corpus);
+        assert_cursor_query_matrix(label, &reopened, &corpus);
+        assert_eq!(
+            actual(&reopened_all),
+            actual(&live_all),
+            "topology `{label}` reopen must preserve the same all-region visible set as the live build"
+        );
+        assert_eq!(
+            actual_ordered(&reopened_all),
+            actual_ordered(&live_all),
+            "topology `{label}` reopen must preserve the same all-region order as the live build"
+        );
+        reopened.close().expect("close reopened store");
     }
 }
