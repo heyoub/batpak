@@ -8,6 +8,7 @@
 //! surface as trybuild diffs.
 
 #[test]
+#[serial_test::serial]
 fn compile_fail_multi_event_reactor_derive_errors() {
     let t = trybuild::TestCases::new();
     t.compile_fail("tests/ui/mer_on_unit_struct.rs");
