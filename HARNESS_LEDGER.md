@@ -109,10 +109,11 @@ instead of pretending.
   - `tests/projection_cache.rs`
 - Command used:
   - `cargo test --test projection_cache freshness_maybe_stale_replays_when_stale_cache_bytes_are_corrupt`
+  - `cargo test --test projection_cache freshness_maybe_stale_replays_when_fresh_cache_bytes_are_corrupt`
 - Line/function coverage delta: targeted rise in `src/store/projection/flow.rs`; exact JSON delta not recorded in this wave
 - Mutation delta: unmeasured in this wave
 - Remaining known blind spots:
-  - this seam now proves that stale-but-young corrupt cache bytes fall back to replay under `Freshness::MaybeStale`
+  - this seam now proves that both stale-but-young and fresh-but-corrupt cache bytes fall back to replay under `Freshness::MaybeStale`
   - remaining cache-edge blind spots are mostly around alternate corruption shapes and process-monotonic timing discontinuities rather than stale-byte honesty itself
 
 ## Property Harness
@@ -192,6 +193,7 @@ instead of pretending.
   - `cargo test --test control_plane_surface try_check_surfaces_ready_append_and_batch_tickets`
   - `cargo test --test control_plane_surface fenced_root_submit_stays_hidden_until_commit_and_cancel_discards_it`
   - `cargo test --test control_plane_surface fenced_batch_submit_stays_hidden_until_commit_and_cancel_discards_it`
+  - `cargo test --test control_plane_surface fenced_reaction_submit_stays_hidden_until_commit_and_cancel_discards_it`
   - `CARGO_INCREMENTAL=0 cargo mutants --output tools/xtask/target/mutants/writer-commit-ticket-try-check-none --in-place --baseline run --file 'src/store/write/*.rs' --exclude src/store/ancestry/by_clock.rs --all-features --cargo-arg --locked --test-tool cargo --shard 1/8 --sharding round-robin --build-timeout 300 --timeout 300 --minimum-test-timeout 120 -F 'Ticket<T>::try_check.*with None'`
   - `CARGO_INCREMENTAL=0 cargo mutants --output tools/xtask/target/mutants/fence-token-root-under-fence-4 --in-place --baseline run --file 'src/store/write/control.rs' --all-features --cargo-arg --locked --test-tool cargo --build-timeout 300 --timeout 300 --minimum-test-timeout 120 -F 'delete field fence_token from struct Self expression in AppendSubmission::root_under_fence'`
 - Line/function coverage delta: targeted rise in `src/store/write/control.rs`; exact JSON delta not recorded in this wave
@@ -205,7 +207,7 @@ instead of pretending.
     - `src/store/write/control.rs:562:17 delete field causation_id from struct AppendOptions expression in AppendSubmission::reaction`
     - `src/store/write/control.rs:575:13 delete field fence_token from struct Self expression in AppendSubmission::reaction_under_fence`
 - Remaining known blind spots:
-  - this closes the positive-ready edge for append and batch tickets and adds direct root-under-fence plus batch-under-fence visibility/cancel proofs
+  - this closes the positive-ready edge for append and batch tickets and adds direct root-under-fence, batch-under-fence, and reaction-under-fence visibility/cancel proofs
   - the wider writer commit protocol still needs broader mutation pressure across `writer.rs`, `staging.rs`, and `fanout.rs`
 
 ## Oracle Harness
