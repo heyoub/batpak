@@ -102,6 +102,19 @@ instead of pretending.
     lanes plus the cache-enabled `Freshness::MaybeStale` stale-hit vs forced-replay branch
   - remaining blind spots are deeper external-cache corruption and monotonic-age edge cases, which stay owned by `tests/projection_cache.rs`
 
+### Invariant: MaybeStale never serves corrupt cache bytes as a “fresh enough” success
+
+- Harness pattern: `Fault-Injection Harness`
+- Location:
+  - `tests/projection_cache.rs`
+- Command used:
+  - `cargo test --test projection_cache freshness_maybe_stale_replays_when_stale_cache_bytes_are_corrupt`
+- Line/function coverage delta: targeted rise in `src/store/projection/flow.rs`; exact JSON delta not recorded in this wave
+- Mutation delta: unmeasured in this wave
+- Remaining known blind spots:
+  - this seam now proves that stale-but-young corrupt cache bytes fall back to replay under `Freshness::MaybeStale`
+  - remaining cache-edge blind spots are mostly around alternate corruption shapes and process-monotonic timing discontinuities rather than stale-byte honesty itself
+
 ## Property Harness
 
 ### Invariant: Fuzz and chaos probe outputs stay within explicit policy gates
