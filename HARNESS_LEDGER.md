@@ -115,6 +115,18 @@ instead of pretending.
   - feedback policy is explicit, but it does not replace direct seam-level
     fault-injection or state-machine proofs
 
+### Invariant: Representative store errors keep stable handling, display, and source contracts
+
+- Harness pattern: `Property Harness`
+- Location:
+  - `tests/store_error_contract.rs`
+- Command used:
+  - `cargo test --test store_error_contract`
+- Line/function coverage delta: targeted rise in `src/store/error.rs`; exact JSON delta not recorded in this wave
+- Mutation delta: unmeasured in this wave
+- Remaining known blind spots:
+  - this table owns representative variant handling, `Display`, `source()`, and conversion routing, but it does not yet exercise the internal helper constructors that only unit tests inside `src/store/error.rs` can reach
+
 ### Invariant: Catastrophic performance regressions trip explicit thresholds
 
 - Harness pattern: `Property Harness`
@@ -167,6 +179,9 @@ instead of pretending.
 - Line/function coverage delta: targeted rise in `src/store/write/control.rs`; exact JSON delta not recorded in this wave
 - Mutation delta:
   - exact mutant `src/store/write/control.rs:29:9 replace Ticket<T>::try_check -> Option<Result<T, StoreError>> with None` is now caught by the ready-path proof lane
+  - the exact default-receipt mutants for `AppendTicket::try_check` and `BatchAppendTicket::try_check` are now characterized as unviable at build time:
+    - `src/store/write/control.rs:64:9 replace AppendTicket::try_check -> Option<AppendReply> with Some(Default::default())`
+    - `src/store/write/control.rs:96:9 replace BatchAppendTicket::try_check -> Option<BatchAppendReply> with Some(Default::default())`
 - Remaining known blind spots:
   - this closes the positive-ready edge for append and batch tickets, but the wider writer commit protocol still needs broader mutation pressure across `writer.rs`, `staging.rs`, and `fanout.rs`
 
