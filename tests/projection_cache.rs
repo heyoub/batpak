@@ -465,6 +465,31 @@ impl batpak::prelude::EventSourced for MaybeStaleGenerationCounter {
     }
 }
 
+fn find_only_native_cache_entry(cache_path: &std::path::Path) -> std::path::PathBuf {
+    let mut stack = vec![cache_path.to_path_buf()];
+    let mut entries = Vec::new();
+
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir).expect("read_dir") {
+            let entry = entry.expect("dir entry");
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.extension().and_then(std::ffi::OsStr::to_str) == Some("bin") {
+                entries.push(path);
+            }
+        }
+    }
+
+    assert_eq!(
+        entries.len(),
+        1,
+        "PROJECTION CACHE TEST SETUP: expected exactly one native cache entry, found {}",
+        entries.len()
+    );
+    entries.pop().expect("single cache entry")
+}
+
 #[test]
 fn freshness_maybe_stale_serves_stale_cache_within_window() {
     use batpak::prelude::*;
@@ -537,6 +562,77 @@ fn freshness_maybe_stale_serves_stale_cache_within_window() {
          stale, forcing a full replay (count=3)."
     );
 
+    store.close().expect("close");
+}
+
+#[test]
+fn freshness_maybe_stale_replays_when_stale_cache_bytes_are_corrupt() {
+    use batpak::prelude::*;
+    use batpak::store::{Freshness, Store, StoreConfig, SyncConfig};
+    use tempfile::TempDir;
+
+    let dir = TempDir::new().expect("temp dir");
+    let cache_path = dir.path().join("cache");
+
+    let config = StoreConfig {
+        data_dir: dir.path().join("data"),
+        segment_max_bytes: 4096,
+        sync: SyncConfig {
+            every_n_events: 1,
+            ..SyncConfig::default()
+        },
+        ..StoreConfig::new("")
+    };
+    let coord = Coordinate::new("entity:maybe-stale-corrupt", "scope:test").expect("coord");
+    let kind = EventKind::custom(0xF, 1);
+
+    {
+        let store = Store::open_with_native_cache(config.clone(), &cache_path).expect("open store");
+        store
+            .append(&coord, kind, &serde_json::json!({"x": 1}))
+            .expect("append 1");
+        store
+            .append(&coord, kind, &serde_json::json!({"x": 2}))
+            .expect("append 2");
+
+        let seeded: Option<MaybeStaleCounter> = store
+            .project("entity:maybe-stale-corrupt", &Freshness::Consistent)
+            .expect("seed cache");
+        assert_eq!(seeded, Some(MaybeStaleCounter { count: 2 }));
+
+        // Advance the entity so the warmed cache row is stale by watermark,
+        // but keep the row young enough that MaybeStale would otherwise try
+        // to serve it from the external cache.
+        store
+            .append(&coord, kind, &serde_json::json!({"x": 3}))
+            .expect("append 3");
+        store.close().expect("close seeded store");
+    }
+
+    let cache_entry = find_only_native_cache_entry(&cache_path);
+    let mut corrupted = std::fs::read(&cache_entry).expect("read cache entry");
+    let last = corrupted
+        .len()
+        .checked_sub(1)
+        .expect("non-empty cache entry");
+    corrupted[last] ^= 0x5A;
+    std::fs::write(&cache_entry, corrupted).expect("corrupt cache entry");
+
+    let store = Store::open_with_native_cache(config, &cache_path).expect("reopen store");
+    let result: Option<MaybeStaleCounter> = store
+        .project(
+            "entity:maybe-stale-corrupt",
+            &Freshness::MaybeStale {
+                max_stale_ms: 60_000,
+            },
+        )
+        .expect("project maybe stale after corruption");
+    assert_eq!(
+        result,
+        Some(MaybeStaleCounter { count: 3 }),
+        "MAYBE STALE CORRUPTION HONESTY: a stale-but-young corrupt cache row must fall back to replay and return the current folded state.\n\
+         It must not serve garbage and must not preserve the stale count=2 row just because the age window still says 'fresh enough'."
+    );
     store.close().expect("close");
 }
 
