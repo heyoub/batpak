@@ -93,12 +93,14 @@ instead of pretending.
   - `tests/raw_projection_mode.rs`
 - Command used:
   - `cargo test --test raw_projection_mode`
+-  - `cargo test --test raw_projection_mode projection_flow_maybe_stale_keeps_replay_lanes_equivalent`
 - Line/function coverage delta: targeted rise in `src/store/projection/flow.rs`
     and watcher-adjacent paths; exact JSON delta not recorded in this wave
 - Mutation delta: unmeasured in this wave
 - Remaining known blind spots:
-  - current matrix covers relevant and irrelevant appends across the two replay
-    lanes; cache-state and `Freshness::MaybeStale` matrix expansion still remains
+  - current matrix now covers relevant and irrelevant appends across the two replay
+    lanes plus the cache-enabled `Freshness::MaybeStale` stale-hit vs forced-replay branch
+  - remaining blind spots are deeper external-cache corruption and monotonic-age edge cases, which stay owned by `tests/projection_cache.rs`
 
 ## Property Harness
 
@@ -175,6 +177,7 @@ instead of pretending.
   - `tests/control_plane_surface.rs`
 - Command used:
   - `cargo test --test control_plane_surface try_check_surfaces_ready_append_and_batch_tickets`
+  - `cargo test --test control_plane_surface fenced_root_submit_stays_hidden_until_commit_and_cancel_discards_it`
   - `CARGO_INCREMENTAL=0 cargo mutants --output tools/xtask/target/mutants/writer-commit-ticket-try-check-none --in-place --baseline run --file 'src/store/write/*.rs' --exclude src/store/ancestry/by_clock.rs --all-features --cargo-arg --locked --test-tool cargo --shard 1/8 --sharding round-robin --build-timeout 300 --timeout 300 --minimum-test-timeout 120 -F 'Ticket<T>::try_check.*with None'`
 - Line/function coverage delta: targeted rise in `src/store/write/control.rs`; exact JSON delta not recorded in this wave
 - Mutation delta:
@@ -183,7 +186,8 @@ instead of pretending.
     - `src/store/write/control.rs:64:9 replace AppendTicket::try_check -> Option<AppendReply> with Some(Default::default())`
     - `src/store/write/control.rs:96:9 replace BatchAppendTicket::try_check -> Option<BatchAppendReply> with Some(Default::default())`
 - Remaining known blind spots:
-  - this closes the positive-ready edge for append and batch tickets, but the wider writer commit protocol still needs broader mutation pressure across `writer.rs`, `staging.rs`, and `fanout.rs`
+  - this closes the positive-ready edge for append and batch tickets and adds a direct root-under-fence visibility proof
+  - the wider writer commit protocol still needs broader mutation pressure across `writer.rs`, `staging.rs`, `fanout.rs`, and the remaining fence-token-specific mutants
 
 ## Oracle Harness
 

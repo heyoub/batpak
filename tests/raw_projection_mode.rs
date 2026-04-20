@@ -12,7 +12,7 @@
 use std::sync::Arc;
 
 use batpak::prelude::*;
-use batpak::store::{Freshness, ProjectionWatcher, Store, StoreConfig};
+use batpak::store::{Freshness, ProjectionWatcher, Store, StoreConfig, SyncConfig};
 use serde::{Deserialize, Serialize};
 use tempfile::TempDir;
 
@@ -141,6 +141,37 @@ fn _assert_projection_type_aliases() {
 fn seeded_store() -> (Arc<Store>, TempDir) {
     let dir = TempDir::new().expect("temp dir");
     let store = Arc::new(Store::open(StoreConfig::new(dir.path())).expect("open"));
+    let coord = Coordinate::new("entity:raw-proj", "scope:test").expect("coord");
+    for (amount, label) in [(3, "a"), (-1, "b"), (7, "c"), (2, "d")] {
+        store
+            .append(
+                &coord,
+                KIND,
+                &CounterDelta {
+                    amount,
+                    label: label.to_owned(),
+                },
+            )
+            .expect("append");
+    }
+    (store, dir)
+}
+
+fn cached_seeded_store() -> (Arc<Store>, TempDir) {
+    let dir = TempDir::new().expect("temp dir");
+    let cache_path = dir.path().join("cache");
+    let config = StoreConfig {
+        data_dir: dir.path().join("data"),
+        segment_max_bytes: 4096,
+        sync: SyncConfig {
+            every_n_events: 1,
+            ..SyncConfig::default()
+        },
+        ..StoreConfig::new("")
+    };
+    let store = Arc::new(
+        Store::open_with_native_cache(config, &cache_path).expect("open with native cache"),
+    );
     let coord = Coordinate::new("entity:raw-proj", "scope:test").expect("coord");
     for (amount, label) in [(3, "a"), (-1, "b"), (7, "c"), (2, "d")] {
         store
@@ -504,4 +535,117 @@ fn projection_flow_matrix_keeps_project_watch_and_project_if_changed_equivalent(
             case.label
         );
     }
+}
+
+#[test]
+fn projection_flow_maybe_stale_keeps_replay_lanes_equivalent() {
+    // PROVES: cache-enabled `Freshness::MaybeStale` stays honest across both
+    // replay lanes: a generous stale window may serve cached bytes, but a
+    // zero window must force replay, and raw/value lanes must agree in both
+    // branches.
+    let (store, _dir) = cached_seeded_store();
+    let baseline_value = store
+        .project::<ValueCounter>("entity:raw-proj", &Freshness::Consistent)
+        .expect("seed value cache")
+        .expect("baseline value state");
+    let baseline_raw = store
+        .project::<RawCounter>("entity:raw-proj", &Freshness::Consistent)
+        .expect("seed raw cache")
+        .expect("baseline raw state");
+    assert_eq!(
+        baseline_value.summary(),
+        baseline_raw.summary(),
+        "baseline cache warmup must agree across replay lanes"
+    );
+
+    let coord = Coordinate::new("entity:raw-proj", "scope:test").expect("coord");
+    store
+        .append(
+            &coord,
+            KIND,
+            &CounterDelta {
+                amount: 4,
+                label: "maybe-stale".to_owned(),
+            },
+        )
+        .expect("append relevant maybe stale event");
+
+    let value_stale = store
+        .project::<ValueCounter>(
+            "entity:raw-proj",
+            &Freshness::MaybeStale {
+                max_stale_ms: 60_000,
+            },
+        )
+        .expect("value maybe stale")
+        .expect("value stale state");
+    let raw_stale = store
+        .project::<RawCounter>(
+            "entity:raw-proj",
+            &Freshness::MaybeStale {
+                max_stale_ms: 60_000,
+            },
+        )
+        .expect("raw maybe stale")
+        .expect("raw stale state");
+    assert_eq!(
+        value_stale.summary(),
+        baseline_value.summary(),
+        "PROPERTY: MaybeStale with a generous window may serve the previously cached folded state."
+    );
+    assert_eq!(
+        raw_stale.summary(),
+        baseline_raw.summary(),
+        "PROPERTY: raw replay lane must expose the same stale cached state as the value lane."
+    );
+    assert_eq!(
+        value_stale.summary(),
+        raw_stale.summary(),
+        "PROPERTY: raw and value replay lanes must agree on the stale cache-hit branch."
+    );
+
+    let value_strict = store
+        .project::<ValueCounter>(
+            "entity:raw-proj",
+            &Freshness::MaybeStale { max_stale_ms: 0 },
+        )
+        .expect("value strict maybe stale")
+        .expect("value strict state");
+    let raw_strict = store
+        .project::<RawCounter>(
+            "entity:raw-proj",
+            &Freshness::MaybeStale { max_stale_ms: 0 },
+        )
+        .expect("raw strict maybe stale")
+        .expect("raw strict state");
+    let value_consistent = store
+        .project::<ValueCounter>("entity:raw-proj", &Freshness::Consistent)
+        .expect("value consistent")
+        .expect("value consistent state");
+    let raw_consistent = store
+        .project::<RawCounter>("entity:raw-proj", &Freshness::Consistent)
+        .expect("raw consistent")
+        .expect("raw consistent state");
+
+    assert_eq!(
+        value_strict.summary(),
+        value_consistent.summary(),
+        "PROPERTY: MaybeStale with max_stale_ms=0 must force replay on the value lane."
+    );
+    assert_eq!(
+        raw_strict.summary(),
+        raw_consistent.summary(),
+        "PROPERTY: MaybeStale with max_stale_ms=0 must force replay on the raw lane."
+    );
+    assert_eq!(
+        value_strict.summary(),
+        raw_strict.summary(),
+        "PROPERTY: raw and value replay lanes must agree on the strict replay branch."
+    );
+
+    let store = match Arc::try_unwrap(store) {
+        Ok(store) => store,
+        Err(_) => panic!("PROPERTY: maybe-stale matrix must release all Arc clones before close"),
+    };
+    store.close().expect("close maybe stale matrix store");
 }
