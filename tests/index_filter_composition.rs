@@ -164,6 +164,64 @@ fn actual(entries: &[IndexEntry]) -> HashSet<(String, String, u32)> {
         .collect()
 }
 
+fn ground_truth_ordered(
+    corpus: &[GroundTruthEvent],
+    region: &Region,
+) -> Vec<(u64, String, String, u32)> {
+    corpus
+        .iter()
+        .enumerate()
+        .filter_map(|(seq, ev)| {
+            if let Some(prefix) = region.entity_prefix() {
+                if !ev.entity.starts_with(prefix) {
+                    return None;
+                }
+            }
+            if let Some(scope) = region.scope_value() {
+                if scope != ev.scope {
+                    return None;
+                }
+            }
+            if let Some(fact) = region.fact() {
+                let matches = match fact {
+                    KindFilter::Exact(k) => ev.kind == *k,
+                    KindFilter::Category(c) => ev.kind.category() == *c,
+                    KindFilter::Any => true,
+                    _ => panic!("reference model must be updated for new KindFilter variants"),
+                };
+                if !matches {
+                    return None;
+                }
+            }
+            if let Some((lo, hi)) = region.clock_range() {
+                if ev.clock_slot < lo || ev.clock_slot > hi {
+                    return None;
+                }
+            }
+            Some((
+                u64::try_from(seq).expect("seed corpus index fits u64"),
+                ev.entity.to_owned(),
+                ev.scope.to_owned(),
+                ev.clock_slot,
+            ))
+        })
+        .collect()
+}
+
+fn actual_ordered(entries: &[IndexEntry]) -> Vec<(u64, String, String, u32)> {
+    entries
+        .iter()
+        .map(|e| {
+            (
+                e.global_sequence,
+                e.coord.entity().to_owned(),
+                e.coord.scope().to_owned(),
+                e.clock,
+            )
+        })
+        .collect()
+}
+
 fn assert_matches(
     label: &str,
     query_name: &str,
@@ -185,6 +243,41 @@ fn assert_matches(
         actual_entries.len(),
         actual_set.len(),
         "topology `{label}` query `{query_name}` returned duplicate entries"
+    );
+}
+
+fn assert_cursor_matches(
+    label: &str,
+    query_name: &str,
+    region: &Region,
+    batch_size: usize,
+    store: &Store,
+    corpus: &[GroundTruthEvent],
+) {
+    let expected = ground_truth_ordered(corpus, region);
+    let mut cursor = store.cursor_guaranteed(region);
+    let mut actual_entries = Vec::new();
+
+    loop {
+        let batch = cursor.poll_batch(batch_size);
+        if batch.is_empty() {
+            break;
+        }
+        actual_entries.extend(actual_ordered(&batch));
+    }
+
+    let unique: HashSet<_> = actual_entries.iter().cloned().collect();
+    assert_eq!(
+        unique.len(),
+        actual_entries.len(),
+        "topology `{label}` cursor query `{query_name}` produced duplicates with batch_size={batch_size}"
+    );
+    assert_eq!(
+        actual_entries, expected,
+        "topology `{label}` cursor query `{query_name}` mismatch with batch_size={batch_size}.\n\
+         expected={expected:?}\n\
+         actual  ={actual_entries:?}\n\
+         region={region:?}"
     );
 }
 
@@ -290,6 +383,43 @@ fn overlays_return_ground_truth_for_every_filter_shape() {
             &store,
             &corpus,
         );
+
+        store.close().expect("close");
+    }
+}
+
+#[test]
+fn cursor_batches_match_ground_truth_order_across_topologies() {
+    let corpus = build_corpus();
+    let batch_sizes = [1usize, 3, 11];
+    let queries = vec![
+        ("all + any", Region::all().with_fact(KindFilter::Any)),
+        (
+            "scope(X) + kind(5,1)",
+            Region::scope("scope:X").with_fact(KindFilter::Exact(EventKind::custom(0x5, 1))),
+        ),
+        (
+            "entity(bravo) + clock(1..=6)",
+            Region::entity("entity:bravo").with_clock_range((1, 6)),
+        ),
+        (
+            "entity(alpha) + scope(Z) + category(5)",
+            Region::entity("entity:alpha")
+                .with_scope("scope:Z")
+                .with_fact(KindFilter::Category(0x5)),
+        ),
+    ];
+
+    for (label, topology) in topologies() {
+        let dir = TempDir::new().expect("temp dir");
+        let store = open_store(&dir, topology);
+        seed_store_with_corpus(&store, &corpus);
+
+        for (query_name, region) in &queries {
+            for batch_size in batch_sizes {
+                assert_cursor_matches(label, query_name, region, batch_size, &store, &corpus);
+            }
+        }
 
         store.close().expect("close");
     }

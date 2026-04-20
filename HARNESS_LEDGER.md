@@ -41,6 +41,18 @@ instead of pretending.
   - broad chaos coverage exists, but not every low-level segment-scan defensive
     branch is table-driven yet
 
+### Invariant: Slow-path segment recovery fails closed on corrupt batch metadata
+
+- Harness pattern: `Fault-Injection Harness`
+- Location:
+  - `tests/segment_scan_hardening.rs`
+- Command used:
+  - `cargo test --test segment_scan_hardening`
+- Line/function coverage delta: targeted rise in `src/store/segment/scan.rs`; exact JSON delta not recorded in this wave
+- Mutation delta: unmeasured in this wave
+- Remaining known blind spots:
+  - this wave now proves invalid BEGIN counts and missing `hash_chain` fail closed on reopen, but a direct black-box proof that corruption inside an in-flight staged batch discards the entire batch still remains
+
 ## Equivalence Harness
 
 ### Invariant: Derived projections stay equivalent to the hand-written target
@@ -158,15 +170,14 @@ instead of pretending.
 
 ## Oracle Harness
 
-### Status: Planned, not yet ledger-seeded
+### Invariant: Public query and cursor surfaces match a linear reference scan across topologies
 
 - Harness pattern: `Oracle Harness`
 - Location:
-  - planned first-class target: `src/store/index/columnar.rs`
+  - `tests/index_filter_composition.rs`
 - Command used:
-  - pending
-- Line/function coverage delta: pending
-- Mutation delta: pending
+  - `cargo test --test index_filter_composition`
+- Line/function coverage delta: targeted rise in `src/store/index/columnar.rs` and `src/store/index/mod.rs`; exact JSON delta not recorded in this wave
+- Mutation delta: unmeasured in this wave
 - Remaining known blind spots:
-  - the repo still needs a dedicated simple-scan oracle harness for the columnar
-    topology family rather than relying only on narrower topology-specific tests
+  - the oracle now owns filter composition and cursor batch ordering across topologies, but a direct live-build vs restore-build equivalence property for the overlay family still remains

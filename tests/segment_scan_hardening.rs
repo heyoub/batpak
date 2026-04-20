@@ -17,9 +17,10 @@
 //! and observe what `Store::open` + `query` produce.
 
 use batpak::coordinate::{Coordinate, Region};
-use batpak::event::EventKind;
-use batpak::store::segment::{SEGMENT_EXTENSION, SEGMENT_MAGIC};
-use batpak::store::{Store, StoreConfig};
+use batpak::event::{Event, EventKind};
+use batpak::store::segment::{self, SEGMENT_EXTENSION, SEGMENT_MAGIC};
+use batpak::store::{BatchAppendItem, Store, StoreConfig, StoreError};
+use serde::{Deserialize, Serialize};
 use tempfile::TempDir;
 
 const KIND: EventKind = EventKind::custom(0xE, 2);
@@ -56,6 +57,89 @@ fn seed_store(dir: &TempDir, count: u32) {
             .expect("append");
     }
     store.close().expect("clean close");
+}
+
+fn seed_batched_store(dir: &TempDir) {
+    let store = Store::open(config(dir)).expect("open store");
+    let coord = Coordinate::new("entity:scan-batch", "scope:test").expect("valid coord");
+    let items = vec![
+        BatchAppendItem::new(
+            coord.clone(),
+            KIND,
+            &serde_json::json!({"i": 0}),
+            batpak::store::AppendOptions::new().with_idempotency(0xA1),
+            batpak::store::CausationRef::None,
+        )
+        .expect("batch item 0"),
+        BatchAppendItem::new(
+            coord,
+            KIND,
+            &serde_json::json!({"i": 1}),
+            batpak::store::AppendOptions::new().with_idempotency(0xA2),
+            batpak::store::CausationRef::None,
+        )
+        .expect("batch item 1"),
+    ];
+    store.append_batch(items).expect("append batch");
+    store.close().expect("clean close");
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct RawFramePayload {
+    event: Event<serde_json::Value>,
+    entity: String,
+    scope: String,
+}
+
+fn strip_sidx(mut bytes: Vec<u8>) -> Vec<u8> {
+    if bytes.len() >= 16 && &bytes[bytes.len() - 4..] == b"SDX2" {
+        let string_table_offset = u64::from_le_bytes(
+            bytes[bytes.len() - 16..bytes.len() - 8]
+                .try_into()
+                .expect("8-byte SIDX trailer offset"),
+        );
+        bytes.truncate(
+            usize::try_from(string_table_offset).expect("SIDX string table offset fits usize"),
+        );
+    }
+    bytes
+}
+
+fn rewrite_first_matching_frame(
+    seg: &std::path::Path,
+    mut predicate: impl FnMut(&RawFramePayload) -> bool,
+    mutate: impl FnOnce(&mut RawFramePayload),
+) {
+    let bytes = strip_sidx(std::fs::read(seg).expect("read segment"));
+    let header_len = u32::from_be_bytes(bytes[4..8].try_into().expect("4-byte header len"));
+    let header_end = 8 + usize::try_from(header_len).expect("segment header len fits usize");
+
+    let mut mutated = false;
+    let mut mutate = Some(mutate);
+    let mut cursor = header_end;
+    let mut rebuilt = bytes[..header_end].to_vec();
+
+    while cursor < bytes.len() {
+        let (msgpack, frame_size) =
+            segment::frame_decode(&bytes[cursor..]).expect("seeded frame decodes");
+        if !mutated {
+            let mut payload: RawFramePayload =
+                rmp_serde::from_slice(msgpack).expect("seeded frame payload decodes");
+            if predicate(&payload) {
+                mutate.take().expect("frame mutator used once")(&mut payload);
+                rebuilt.extend(segment::frame_encode(&payload).expect("re-encode mutated frame"));
+                mutated = true;
+            } else {
+                rebuilt.extend_from_slice(&bytes[cursor..cursor + frame_size]);
+            }
+        } else {
+            rebuilt.extend_from_slice(&bytes[cursor..cursor + frame_size]);
+        }
+        cursor += frame_size;
+    }
+
+    assert!(mutated, "test must mutate one matching frame");
+    std::fs::write(seg, rebuilt).expect("write mutated segment");
 }
 
 #[test]
@@ -201,4 +285,74 @@ fn truncating_segment_mid_frame_never_panics() {
         entries.len()
     );
     store.close().expect("close");
+}
+
+#[test]
+fn invalid_batch_begin_count_fails_closed_on_reopen() {
+    // Slow-path recovery uses SYSTEM_BATCH_BEGIN.payload_size as the claimed
+    // batch item count. Corrupting it to zero must fail closed instead of
+    // staging phantom items or silently defaulting the count.
+    let dir = TempDir::new().expect("temp dir");
+    seed_batched_store(&dir);
+
+    let seg = segment_path(&dir);
+    rewrite_first_matching_frame(
+        &seg,
+        |payload| payload.event.header.event_kind == EventKind::SYSTEM_BATCH_BEGIN,
+        |payload| {
+            payload.event.header.payload_size = 0;
+        },
+    );
+
+    let err = match Store::open(config(&dir)) {
+        Ok(_) => {
+            panic!("PROPERTY: a SYSTEM_BATCH_BEGIN with count 0 must fail closed during reopen")
+        }
+        Err(err) => err,
+    };
+    assert!(
+        matches!(
+            err,
+            StoreError::CorruptSegment { ref detail, .. }
+            if detail.contains("invalid batch marker count")
+        ),
+        "PROPERTY: corrupt batch marker count must surface a clear CorruptSegment detail, got {err:?}"
+    );
+}
+
+#[test]
+fn missing_hash_chain_for_data_frame_fails_closed_on_reopen() {
+    // Slow-path recovery no longer defaults missing hash chains for ordinary
+    // data events. Removing it from a persisted frame must fail closed.
+    let dir = TempDir::new().expect("temp dir");
+    seed_store(&dir, 2);
+
+    let seg = segment_path(&dir);
+    rewrite_first_matching_frame(
+        &seg,
+        |payload| {
+            !matches!(
+                payload.event.header.event_kind,
+                EventKind::SYSTEM_BATCH_BEGIN | EventKind::SYSTEM_BATCH_COMMIT
+            )
+        },
+        |payload| {
+            payload.event.hash_chain = None;
+        },
+    );
+
+    let err = match Store::open(config(&dir)) {
+        Ok(_) => panic!(
+            "PROPERTY: a persisted data frame without hash_chain must fail closed during reopen"
+        ),
+        Err(err) => err,
+    };
+    assert!(
+        matches!(
+            err,
+            StoreError::CorruptSegment { ref detail, .. }
+            if detail.contains("missing hash_chain")
+        ),
+        "PROPERTY: missing hash_chain must surface a clear CorruptSegment detail, got {err:?}"
+    );
 }
