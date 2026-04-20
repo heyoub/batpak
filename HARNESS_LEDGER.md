@@ -48,10 +48,12 @@ instead of pretending.
   - `tests/segment_scan_hardening.rs`
 - Command used:
   - `cargo test --test segment_scan_hardening`
+  - `cargo test --test segment_scan_hardening corruption_inside_staged_batch_discards_the_whole_batch`
 - Line/function coverage delta: targeted rise in `src/store/segment/scan.rs`; exact JSON delta not recorded in this wave
 - Mutation delta: unmeasured in this wave
 - Remaining known blind spots:
-  - this wave now proves invalid BEGIN counts and missing `hash_chain` fail closed on reopen, but a direct black-box proof that corruption inside an in-flight staged batch discards the entire batch still remains
+  - this wave now proves invalid BEGIN counts, missing `hash_chain`, and CRC corruption on the second staged batch item all fail closed on reopen
+  - remaining uncovered defensive branches are mostly other corrupt-frame shapes such as footer disagreement and non-CRC decode failures deeper in the slow path
 
 ## Equivalence Harness
 
@@ -177,7 +179,9 @@ instead of pretending.
   - `tests/index_filter_composition.rs`
 - Command used:
   - `cargo test --test index_filter_composition`
+  - `cargo test --test index_filter_composition reopen_matches_live_oracle_across_topologies`
 - Line/function coverage delta: targeted rise in `src/store/index/columnar.rs` and `src/store/index/mod.rs`; exact JSON delta not recorded in this wave
 - Mutation delta: unmeasured in this wave
 - Remaining known blind spots:
-  - the oracle now owns filter composition and cursor batch ordering across topologies, but a direct live-build vs restore-build equivalence property for the overlay family still remains
+  - the oracle now owns filter composition, cursor batch ordering, and live-vs-reopen parity across topologies
+  - remaining blind spots are deeper restore-artifact mismatches outside this pure query surface, which still belong to cold-start parity suites rather than the overlay oracle itself

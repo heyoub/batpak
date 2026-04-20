@@ -142,6 +142,53 @@ fn rewrite_first_matching_frame(
     std::fs::write(seg, rebuilt).expect("write mutated segment");
 }
 
+fn corrupt_second_staged_batch_item_crc(seg: &std::path::Path) {
+    let bytes = strip_sidx(std::fs::read(seg).expect("read segment"));
+    let header_len = u32::from_be_bytes(bytes[4..8].try_into().expect("4-byte header len"));
+    let header_end = 8 + usize::try_from(header_len).expect("segment header len fits usize");
+
+    let mut corrupted = false;
+    let mut in_batch = false;
+    let mut staged_items = 0usize;
+    let mut cursor = header_end;
+    let mut rebuilt = bytes[..header_end].to_vec();
+
+    while cursor < bytes.len() {
+        let (msgpack, frame_size) =
+            segment::frame_decode(&bytes[cursor..]).expect("seeded frame decodes");
+        let payload: RawFramePayload =
+            rmp_serde::from_slice(msgpack).expect("seeded frame payload decodes");
+        let kind = payload.event.header.event_kind;
+
+        if kind == EventKind::SYSTEM_BATCH_BEGIN {
+            in_batch = true;
+            staged_items = 0;
+        } else if kind == EventKind::SYSTEM_BATCH_COMMIT {
+            in_batch = false;
+            staged_items = 0;
+        } else if in_batch {
+            staged_items += 1;
+        }
+
+        if !corrupted && in_batch && staged_items == 2 {
+            let mut frame = bytes[cursor..cursor + frame_size].to_vec();
+            let last = frame
+                .len()
+                .checked_sub(1)
+                .expect("frame must contain payload bytes");
+            frame[last] ^= 0x01;
+            rebuilt.extend(frame);
+            corrupted = true;
+        } else {
+            rebuilt.extend_from_slice(&bytes[cursor..cursor + frame_size]);
+        }
+        cursor += frame_size;
+    }
+
+    assert!(corrupted, "test must corrupt the second staged batch item");
+    std::fs::write(seg, rebuilt).expect("write corrupted segment");
+}
+
 #[test]
 fn pathological_frame_length_is_bounded_not_panicking() {
     // Seed a segment with several real frames, then overwrite a frame-header
@@ -355,4 +402,67 @@ fn missing_hash_chain_for_data_frame_fails_closed_on_reopen() {
         ),
         "PROPERTY: missing hash_chain must surface a clear CorruptSegment detail, got {err:?}"
     );
+}
+
+#[test]
+fn corruption_inside_staged_batch_discards_the_whole_batch() {
+    // Slow-path recovery stages batch items until the COMMIT marker arrives.
+    // A CRC failure inside that staged window must discard the entire batch,
+    // not leak the valid prefix that appeared before the corruption.
+    let dir = TempDir::new().expect("temp dir");
+    let store = Store::open(config(&dir)).expect("open store");
+    let pre_coord = Coordinate::new("entity:scan-corrupt-pre", "scope:test").expect("pre coord");
+    let batch_coord =
+        Coordinate::new("entity:scan-corrupt-batch", "scope:test").expect("batch coord");
+
+    store
+        .append(&pre_coord, KIND, &serde_json::json!({"pre": true}))
+        .expect("append pre-batch event");
+    store
+        .append_batch(vec![
+            BatchAppendItem::new(
+                batch_coord.clone(),
+                KIND,
+                &serde_json::json!({"batched": 0}),
+                batpak::store::AppendOptions::new().with_idempotency(0xC0),
+                batpak::store::CausationRef::None,
+            )
+            .expect("batch item 0"),
+            BatchAppendItem::new(
+                batch_coord,
+                KIND,
+                &serde_json::json!({"batched": 1}),
+                batpak::store::AppendOptions::new().with_idempotency(0xC1),
+                batpak::store::CausationRef::None,
+            )
+            .expect("batch item 1"),
+        ])
+        .expect("append committed batch");
+    store.close().expect("close");
+
+    let seg = segment_path(&dir);
+    corrupt_second_staged_batch_item_crc(&seg);
+
+    let reopened = Store::open(config(&dir)).expect("reopen with corrupted staged batch item");
+    let entries = reopened.query(&Region::all());
+    assert_eq!(
+        entries.len(),
+        1,
+        "PROPERTY: corruption inside an in-flight staged batch must discard the whole batch and preserve only the unrelated pre-batch event."
+    );
+    let visible = reopened
+        .get(entries[0].event_id)
+        .expect("load surviving pre-batch event");
+    assert_eq!(
+        visible.event.payload["pre"],
+        serde_json::json!(true),
+        "PROPERTY: the surviving event after staged-batch corruption must be the unrelated pre-batch event."
+    );
+    assert!(
+        reopened
+            .query(&Region::entity("entity:scan-corrupt-batch"))
+            .is_empty(),
+        "PROPERTY: corruption on the second staged batch item must discard the whole batch, not leak the staged prefix."
+    );
+    reopened.close().expect("close");
 }

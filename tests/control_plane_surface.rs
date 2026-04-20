@@ -426,6 +426,10 @@ fn try_check_surfaces_ready_append_and_batch_tickets() {
         ),
     };
     assert_eq!(append_receipt.sequence, 0);
+    assert_ne!(
+        append_receipt.event_id, 0,
+        "PROPERTY: ready append ticket must surface the committed event identity, not a default receipt."
+    );
 
     let batch_ticket = store
         .submit_batch(vec![
@@ -458,6 +462,14 @@ fn try_check_surfaces_ready_append_and_batch_tickets() {
         ),
     };
     assert_eq!(batch_receipts.len(), 2);
+    assert!(
+        batch_receipts.iter().all(|receipt| receipt.event_id != 0),
+        "PROPERTY: ready batch ticket must surface committed event identities, not default receipts."
+    );
+    assert_ne!(
+        batch_receipts[0].event_id, batch_receipts[1].event_id,
+        "PROPERTY: distinct committed batch items must surface distinct event identities through try_check."
+    );
     assert_eq!(
         batch_receipts
             .iter()
