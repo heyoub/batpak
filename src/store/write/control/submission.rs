@@ -9,7 +9,7 @@ use serde::Serialize;
 pub(crate) struct AppendSubmission {
     event_id: u128,
     correlation_id: u128,
-    options: AppendOptions,
+    pub(super) options: AppendOptions,
     fence_token: Option<u64>,
 }
 
