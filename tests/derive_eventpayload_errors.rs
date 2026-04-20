@@ -9,6 +9,7 @@
 //! trybuild diff instead of a silent behaviour change.
 
 #[test]
+#[serial_test::serial]
 fn compile_fail_derive_errors() {
     let t = trybuild::TestCases::new();
     t.compile_fail("tests/ui/ep_missing_attr.rs");
