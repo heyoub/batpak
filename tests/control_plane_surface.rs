@@ -713,6 +713,66 @@ fn fenced_batch_submit_stays_hidden_until_commit_and_cancel_discards_it() {
 }
 
 #[test]
+fn fenced_reaction_submit_stays_hidden_until_commit_and_cancel_discards_it() {
+    let dir = TempDir::new().expect("temp dir");
+    let store = Store::open(test_config(&dir)).expect("open store");
+    let root_coord = Coordinate::new("entity:fence-reaction-root", "scope:test").expect("coord");
+    let reaction_coord =
+        Coordinate::new("entity:fence-reaction-child", "scope:test").expect("coord");
+    let kind = KIND_COUNTER;
+
+    let root = store
+        .append(&root_coord, kind, &serde_json::json!({"root": true}))
+        .expect("append root");
+
+    let fence = store.begin_visibility_fence().expect("begin fence");
+    let ticket = fence
+        .submit_reaction(
+            &reaction_coord,
+            kind,
+            &serde_json::json!({"reaction": true}),
+            root.event_id,
+            root.event_id,
+        )
+        .expect("submit fenced reaction");
+
+    assert!(
+        ticket.receiver().is_empty(),
+        "PROPERTY: a reaction submission under a live fence must not resolve before commit."
+    );
+    assert_eq!(
+        store.stream("entity:fence-reaction-child").len(),
+        0,
+        "PROPERTY: a reaction submission under a live fence must remain invisible before commit."
+    );
+    assert_eq!(
+        store.by_fact(kind).len(),
+        1,
+        "PROPERTY: the unfenced root event must remain visible while the fenced reaction stays hidden."
+    );
+
+    fence.cancel().expect("cancel fence");
+    assert!(
+        matches!(ticket.wait(), Err(StoreError::VisibilityFenceCancelled)),
+        "PROPERTY: cancelling a fence after a reaction submission must surface VisibilityFenceCancelled."
+    );
+    assert_eq!(
+        store.stream("entity:fence-reaction-child").len(),
+        0,
+        "PROPERTY: cancelling a fence must discard the pending reaction submission."
+    );
+
+    store.close().expect("close store");
+    let reopened = Store::open(test_config(&dir)).expect("reopen store");
+    assert_eq!(
+        reopened.stream("entity:fence-reaction-child").len(),
+        0,
+        "PROPERTY: a cancelled reaction submission under a fence must stay invisible after reopen."
+    );
+    reopened.close().expect("close reopened");
+}
+
+#[test]
 fn shutdown_with_live_fence_cancels_pending_fence_work() {
     let dir = TempDir::new().expect("temp dir");
     let store = Store::open(test_config(&dir)).expect("open store");

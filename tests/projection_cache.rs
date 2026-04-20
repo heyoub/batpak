@@ -637,6 +637,67 @@ fn freshness_maybe_stale_replays_when_stale_cache_bytes_are_corrupt() {
 }
 
 #[test]
+fn freshness_maybe_stale_replays_when_fresh_cache_bytes_are_corrupt() {
+    use batpak::prelude::*;
+    use batpak::store::{Freshness, Store, StoreConfig, SyncConfig};
+    use tempfile::TempDir;
+
+    let dir = TempDir::new().expect("temp dir");
+    let cache_path = dir.path().join("cache");
+
+    let config = StoreConfig {
+        data_dir: dir.path().join("data"),
+        segment_max_bytes: 4096,
+        sync: SyncConfig {
+            every_n_events: 1,
+            ..SyncConfig::default()
+        },
+        ..StoreConfig::new("")
+    };
+    let coord = Coordinate::new("entity:maybe-stale-fresh-corrupt", "scope:test").expect("coord");
+    let kind = EventKind::custom(0xF, 1);
+
+    {
+        let store = Store::open_with_native_cache(config.clone(), &cache_path).expect("open store");
+        store
+            .append(&coord, kind, &serde_json::json!({"x": 1}))
+            .expect("append 1");
+        store
+            .append(&coord, kind, &serde_json::json!({"x": 2}))
+            .expect("append 2");
+
+        let seeded: Option<MaybeStaleCounter> = store
+            .project("entity:maybe-stale-fresh-corrupt", &Freshness::Consistent)
+            .expect("seed cache");
+        assert_eq!(seeded, Some(MaybeStaleCounter { count: 2 }));
+        store.close().expect("close seeded store");
+    }
+
+    let cache_entry = find_only_native_cache_entry(&cache_path);
+    let mut corrupted = std::fs::read(&cache_entry).expect("read cache entry");
+    let first = corrupted.first_mut().expect("non-empty cache entry");
+    *first ^= 0xA5;
+    std::fs::write(&cache_entry, corrupted).expect("corrupt cache entry");
+
+    let store = Store::open_with_native_cache(config, &cache_path).expect("reopen store");
+    let result: Option<MaybeStaleCounter> = store
+        .project(
+            "entity:maybe-stale-fresh-corrupt",
+            &Freshness::MaybeStale {
+                max_stale_ms: 60_000,
+            },
+        )
+        .expect("project maybe stale after fresh corruption");
+    assert_eq!(
+        result,
+        Some(MaybeStaleCounter { count: 2 }),
+        "MAYBE STALE FRESH CORRUPTION HONESTY: a fresh-but-corrupt cache row must fall back to replay and return the current folded state.\n\
+         It must not fail open just because the age window still says 'fresh enough'."
+    );
+    store.close().expect("close");
+}
+
+#[test]
 fn project_if_changed_never_pairs_maybe_stale_cache_with_new_generation() {
     use batpak::prelude::*;
     use batpak::store::{Freshness, NativeCache, Store, StoreConfig, SyncConfig};
