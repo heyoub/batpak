@@ -1022,6 +1022,11 @@ fn run_mutation_lane(lane: &MutationLane) -> Result<()> {
     }
 
     let mut command = Command::new("cargo");
+    // cargo-mutants in `--in-place` mode can interact badly with incremental
+    // artifacts and produce linker-only failures that disappear under a fresh
+    // rebuild. Keep mutation receipts honest by forcing clean codegen for the
+    // lane instead of inheriting ambient incremental state.
+    command.env("CARGO_INCREMENTAL", "0");
     command.args(mutants_command(lane, &output_dir));
     let status = command
         .status()
