@@ -386,12 +386,14 @@ fn control_plane_surface_smoke() {
     let visible_before_close = store.by_fact(kind).len();
     store.close().expect("close");
     let native_cache_dir = dir.path().join("native-cache");
-    let _native_ro: Store<ReadOnly> =
+    let native_ro: Store<ReadOnly> =
         Store::open_read_only_with_native_cache(test_config(&dir), &native_cache_dir)
             .expect("open read-only with native cache");
-    let _custom_ro: Store<ReadOnly> =
+    drop(native_ro);
+    let custom_ro: Store<ReadOnly> =
         Store::open_read_only_with_cache(test_config(&dir), Box::new(batpak::store::NoCache))
             .expect("open read-only with custom cache");
+    drop(custom_ro);
     let ro: Store<ReadOnly> = Store::open_read_only(test_config(&dir)).expect("open read-only");
     let ro_entries: Vec<batpak::store::index::IndexEntry> = ro.by_fact(kind);
     assert!(
