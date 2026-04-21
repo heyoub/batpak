@@ -190,7 +190,7 @@ Projection APIs:
 - `store.project(entity, &freshness)` for one-shot reconstruction
 - `store.project_if_changed(entity, last_generation, &freshness)` to skip unchanged entities
 - `store.entity_generation(entity)` for a cheap generation check
-- `store.watch_projection(entity, freshness)` for live projection updates
+- `store.watch_projection(entity, freshness)` for live projection updates over a lossy/prunable watcher canal
 
 Replay lanes:
 
@@ -255,8 +255,9 @@ while let Some(entry) = cursor.poll() {
 ```
 
 Use cursor paths when you need ordered pull replay from the index.
-Guarantee scope: process-local without a checkpoint, or durable
-at-least-once across restart if `CursorWorkerConfig.checkpoint_id` is set.
+Guarantee scope: at-least-once within the current process without a
+checkpoint, or durable at-least-once across restart if
+`CursorWorkerConfig.checkpoint_id` is set.
 
 ### `cursor_worker`
 

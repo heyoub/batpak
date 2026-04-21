@@ -2,11 +2,52 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// EventKind wraps a private u16. Products cannot construct arbitrary system kinds.
-/// Products use EventKind::custom(category, type_id) which validates the range.
+/// Use [`EventKind::try_custom`] for runtime input and [`EventKind::custom`]
+/// for const/internal call sites that should panic on invalid shape.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct EventKind(u16); // PRIVATE inner field — not pub
 
+/// Validation error returned by [`EventKind::try_custom`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum EventKindError {
+    /// The category does not fit in the supported 4-bit namespace.
+    CategoryOutOfRange {
+        /// Rejected category value.
+        category: u8,
+    },
+    /// Category `0x0` is reserved for system kinds.
+    ReservedSystemCategory,
+    /// Category `0xD` is reserved for effect kinds.
+    ReservedEffectCategory,
+    /// The type id exceeds the supported 12-bit namespace.
+    TypeIdOutOfRange {
+        /// Rejected type identifier.
+        type_id: u16,
+    },
+}
+
 impl EventKind {
+    /// Fallible custom kind constructor for public input.
+    ///
+    /// Use this when the category/type pair originates from user input,
+    /// configuration, or any other runtime boundary that must not panic.
+    pub fn try_custom(category: u8, type_id: u16) -> Result<Self, EventKindError> {
+        if category >= 16 {
+            return Err(EventKindError::CategoryOutOfRange { category });
+        }
+        if category == 0 {
+            return Err(EventKindError::ReservedSystemCategory);
+        }
+        if category == 0xD {
+            return Err(EventKindError::ReservedEffectCategory);
+        }
+        if type_id >= 0x1000 {
+            return Err(EventKindError::TypeIdOutOfRange { type_id });
+        }
+        Ok(Self(((category as u16) << 12) | type_id))
+    }
+
     /// category:type encoding. Upper 4 bits = category, lower 12 = type.
     /// Products use categories 0x1-0xC, 0xE-0xF. System reserves 0x0 and 0xD.
     ///
@@ -14,6 +55,8 @@ impl EventKind {
     /// of silently truncating into a different namespace. That keeps the
     /// `const fn` surface honest and prevents accidental cross-category
     /// collisions from being smuggled through as "best effort" encoding.
+    /// Runtime callers should prefer [`EventKind::try_custom`] so invalid user
+    /// input becomes a typed error instead of a process abort.
     ///
     /// # Example
     /// ```
@@ -22,6 +65,10 @@ impl EventKind {
     /// assert!(!kind.is_system());
     /// assert!(!kind.is_effect());
     /// ```
+    ///
+    /// # Panics
+    /// Panics when `category` or `type_id` fall outside the supported custom
+    /// namespace. This is intentional for const/static/internal use only.
     pub const fn custom(category: u8, type_id: u16) -> Self {
         // Validate: only lower 4 bits of category survive the shift.
         // category >= 16 would silently overflow into wrong namespace.
@@ -102,3 +149,24 @@ impl fmt::Display for EventKind {
         write!(f, "0x{:04X}", self.0)
     }
 }
+
+impl fmt::Display for EventKindError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::CategoryOutOfRange { category } => {
+                write!(f, "EventKind category {category:#X} must fit in 4 bits")
+            }
+            Self::ReservedSystemCategory => {
+                write!(f, "EventKind category 0x0 is reserved for system kinds")
+            }
+            Self::ReservedEffectCategory => {
+                write!(f, "EventKind category 0xD is reserved for effect kinds")
+            }
+            Self::TypeIdOutOfRange { type_id } => {
+                write!(f, "EventKind type_id {type_id:#X} must fit in 12 bits")
+            }
+        }
+    }
+}
+
+impl std::error::Error for EventKindError {}

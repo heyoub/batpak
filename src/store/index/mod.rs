@@ -124,24 +124,23 @@ impl SequenceGate {
 
     /// Advance visibility so readers see entries with `global_sequence < up_to`.
     ///
-    /// # Panics (debug)
-    ///
-    /// Panics if `up_to` exceeds the allocated counter or regresses below
-    /// the current visible watermark.
-    // justifies: INV-MULTI-VIEW-PUBLISH-AFTER-FANOUT; publish in src/store/index/mod.rs asserts a non-recoverable invariant (visibility watermark regression); panic is the correctness signal, not a bubbled error.
-    #[allow(clippy::panic)]
-    pub(crate) fn publish(&self, up_to: u64) {
-        assert!(
-            up_to <= self.allocated.load(Ordering::Acquire),
-            "publish({up_to}) exceeds allocated({})",
-            self.allocated.load(Ordering::Acquire),
-        );
-        assert!(
-            up_to >= self.visible.load(Ordering::Acquire),
-            "publish({up_to}) regresses below visible({})",
-            self.visible.load(Ordering::Acquire),
-        );
+    pub(crate) fn publish(
+        &self,
+        up_to: u64,
+        operation: &'static str,
+    ) -> Result<(), crate::store::StoreError> {
+        let allocated = self.allocated.load(Ordering::Acquire);
+        let visible = self.visible.load(Ordering::Acquire);
+        if up_to > allocated || up_to < visible {
+            return Err(crate::store::StoreError::SequenceGateViolation {
+                operation,
+                requested: up_to,
+                allocated,
+                visible,
+            });
+        }
         self.visible.store(up_to, Ordering::Release);
+        Ok(())
     }
 
     /// Current visibility watermark (exclusive upper bound).
@@ -231,7 +230,7 @@ impl SequenceGate {
             return Err(crate::store::StoreError::VisibilityFenceNotActive);
         }
         if let Some(up_to) = publish_to {
-            self.publish(up_to);
+            self.publish(up_to, "finish_visibility_fence")?;
         }
         self.active_fence.store(0, Ordering::Release);
         self.active_fence_start.store(u64::MAX, Ordering::Release);
@@ -857,7 +856,7 @@ impl StoreIndex {
         chunk_count: usize,
         routing_hint: Option<&RoutingSummary>,
         before_publish: impl FnOnce(&Self),
-    ) {
+    ) -> Result<(), crate::store::StoreError> {
         self.streams.clear();
         self.scan.clear();
         self.by_id.clear();
@@ -924,12 +923,17 @@ impl StoreIndex {
             .unwrap_or(allocator_hint)
             .max(allocator_hint);
         self.sequence.restore_allocator(next_sequence);
-        self.publish(next_sequence);
+        self.publish(next_sequence, "restore_sorted_entries")?;
+        Ok(())
     }
 
     #[cfg(test)]
-    pub(crate) fn restore_sorted_entries(&self, entries: Vec<IndexEntry>, allocator_hint: u64) {
-        self.restore_sorted_entries_impl(entries, allocator_hint, 1, None, |_| {});
+    pub(crate) fn restore_sorted_entries(
+        &self,
+        entries: Vec<IndexEntry>,
+        allocator_hint: u64,
+    ) -> Result<(), crate::store::StoreError> {
+        self.restore_sorted_entries_impl(entries, allocator_hint, 1, None, |_| {})
     }
 
     pub(crate) fn restore_sorted_entries_with_routing(
@@ -937,7 +941,7 @@ impl StoreIndex {
         entries: Vec<IndexEntry>,
         allocator_hint: u64,
         routing: &RoutingSummary,
-    ) {
+    ) -> Result<(), crate::store::StoreError> {
         let chunk_count = usize::try_from(routing.chunk_count).unwrap_or(1).max(1);
         self.restore_sorted_entries_impl(
             entries,
@@ -945,7 +949,7 @@ impl StoreIndex {
             chunk_count,
             Some(routing),
             |_| {},
-        );
+        )
     }
 
     #[cfg(test)]
@@ -954,8 +958,8 @@ impl StoreIndex {
         entries: Vec<IndexEntry>,
         allocator_hint: u64,
         before_publish: impl FnOnce(&Self),
-    ) {
-        self.restore_sorted_entries_impl(entries, allocator_hint, 1, None, before_publish);
+    ) -> Result<(), crate::store::StoreError> {
+        self.restore_sorted_entries_impl(entries, allocator_hint, 1, None, before_publish)
     }
 
     pub(crate) fn get_by_id(&self, event_id: u128) -> Option<IndexEntry> {
@@ -971,20 +975,23 @@ impl StoreIndex {
 
     /// Upgrade a `QueryHit` to a full `IndexEntry` via the `by_id` DashMap.
     ///
-    /// # Panics
-    /// Panics if `hit.event_id` is absent from `by_id`. A hit is produced by
-    /// the scan path only after the entry was inserted into all index maps
-    /// atomically, so absence means the index is corrupt.
-    pub(crate) fn upgrade_hit(&self, hit: QueryHit) -> IndexEntry {
-        self.by_id
+    /// Missing backing entries are treated as fail-closed index corruption:
+    /// the hit is dropped and the caller continues with the remaining visible
+    /// entries rather than aborting the process.
+    pub(crate) fn upgrade_hit(&self, hit: QueryHit) -> Option<IndexEntry> {
+        let upgraded = self
+            .by_id
             .get(&hit.event_id)
-            .expect(
-                "invariant: QueryHit.event_id not found in by_id — \
-                 scan produced a hit with no backing entry; the index is corrupt",
-            )
-            .value()
-            .as_ref()
-            .clone()
+            .map(|entry| entry.value().as_ref().clone());
+        if upgraded.is_none() {
+            tracing::error!(
+                target: "batpak::index",
+                event_id = hit.event_id,
+                global_sequence = hit.global_sequence,
+                "dropping query hit with no backing by_id entry"
+            );
+        }
+        upgraded
     }
 
     /// Return all entries matching `region` as lightweight `QueryHit` values.
@@ -1308,7 +1315,7 @@ impl StoreIndex {
     pub(crate) fn query(&self, region: &crate::coordinate::Region) -> Vec<IndexEntry> {
         self.query_hits(region)
             .into_iter()
-            .map(|hit| self.upgrade_hit(hit))
+            .filter_map(|hit| self.upgrade_hit(hit))
             .collect()
     }
 
@@ -1341,8 +1348,12 @@ impl StoreIndex {
     ///
     /// Called by the writer after `insert()` or `insert_batch()`, and by
     /// checkpoint restore / index rebuild after all entries are loaded.
-    pub(crate) fn publish(&self, up_to: u64) {
-        self.sequence.publish(up_to);
+    pub(crate) fn publish(
+        &self,
+        up_to: u64,
+        operation: &'static str,
+    ) -> Result<(), crate::store::StoreError> {
+        self.sequence.publish(up_to, operation)
     }
 
     pub(crate) fn len(&self) -> usize {
@@ -1373,7 +1384,10 @@ impl StoreIndex {
     ///   (no disk I/O), which is significantly faster than the previous
     ///   protocol of clearing the live index and replaying segments under
     ///   reader visibility.
-    pub(crate) fn replace_contents_from_fresh(&self, fresh: StoreIndex) {
+    pub(crate) fn replace_contents_from_fresh(
+        &self,
+        fresh: StoreIndex,
+    ) -> Result<(), crate::store::StoreError> {
         let _write = self.swap_gate.write();
 
         // Reset live fields. `scan.clear()` also drops any overlay slots.
@@ -1420,7 +1434,8 @@ impl StoreIndex {
         let fresh_visible = fresh.sequence.visible();
         let fresh_cancelled = fresh.sequence.cancelled_ranges_snapshot();
         self.sequence.restore_allocator(fresh_allocated);
-        self.sequence.publish(fresh_visible);
+        self.sequence
+            .publish(fresh_visible, "replace_contents_from_fresh")?;
         self.sequence.restore_cancelled_ranges(fresh_cancelled);
 
         // Restore len. `fresh.len` is a snapshot of how many entries were
@@ -1428,6 +1443,7 @@ impl StoreIndex {
         // would be inconsistent, so we use `self.by_id.len()` which is the
         // live truth at this point.
         self.len.store(self.by_id.len(), Ordering::Relaxed);
+        Ok(())
     }
 
     /// Begin a replay session against this index. Use this for checkpoint
@@ -1607,17 +1623,19 @@ mod tests {
             })
             .collect();
 
-        index.restore_sorted_entries_with_before_publish(entries, 3, |index| {
-            assert_eq!(
-                index.visible_sequence(),
-                0,
-                "visibility watermark must not advance until every view is rebuilt"
-            );
-            assert!(
-                index.query(&Region::all()).is_empty(),
-                "PROPERTY: reads must observe neither base maps nor overlays before publish"
-            );
-        });
+        index
+            .restore_sorted_entries_with_before_publish(entries, 3, |index| {
+                assert_eq!(
+                    index.visible_sequence(),
+                    0,
+                    "visibility watermark must not advance until every view is rebuilt"
+                );
+                assert!(
+                    index.query(&Region::all()).is_empty(),
+                    "PROPERTY: reads must observe neither base maps nor overlays before publish"
+                );
+            })
+            .expect("bulk restore publish must succeed");
 
         assert_eq!(index.query(&Region::all()).len(), 3);
         assert_eq!(index.visible_sequence(), 3);

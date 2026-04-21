@@ -65,8 +65,7 @@ impl WriterState<'_> {
 
         let clock = latest.as_ref().map(|entry| entry.clock + 1).unwrap_or(0);
 
-        let raw_ms = u64::try_from(event.header.timestamp_us / 1000)
-            .expect("invariant: timestamp_us is always positive (from SystemTime)");
+        let raw_ms = crate::store::config::wall_ms_from_timestamp_us(event.header.timestamp_us)?;
         let last_ms = latest.as_ref().map(|entry| entry.wall_ms).unwrap_or(0);
         let now_ms = raw_ms.max(last_ms);
         let position = DagPosition::with_hlc(now_ms, 0, guards.dag_depth, guards.dag_lane, clock);
@@ -155,20 +154,18 @@ impl WriterState<'_> {
 
         if let Some(fence) = fence {
             fence.record_publish_up_to(global_seq.saturating_add(1));
-            self.index
-                .note_visibility_fence_progress(
-                    fence.token,
-                    global_seq,
-                    global_seq.saturating_add(1),
-                )
-                .expect("active fence token verified before fenced append");
+            self.index.note_visibility_fence_progress(
+                fence.token,
+                global_seq,
+                global_seq.saturating_add(1),
+            )?;
             fence.extend_artifacts([committed.notification], committed.envelope);
         } else {
             self.publish_then_broadcast_unfenced(
                 global_seq + 1,
                 [committed.notification],
                 committed.envelope,
-            );
+            )?;
         }
 
         Ok(AppendReceipt {

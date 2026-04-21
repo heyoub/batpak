@@ -175,7 +175,7 @@ impl Cursor {
         if let Some(hit) = hits.into_iter().next() {
             self.position = hit.global_sequence;
             self.started = true;
-            Some(self.index.upgrade_hit(hit))
+            self.index.upgrade_hit(hit)
         } else {
             None
         }
@@ -195,7 +195,7 @@ impl Cursor {
             .expect("non-empty vec has a last element")
             .global_sequence;
         hits.into_iter()
-            .map(|hit| self.index.upgrade_hit(hit))
+            .filter_map(|hit| self.index.upgrade_hit(hit))
             .collect()
     }
 

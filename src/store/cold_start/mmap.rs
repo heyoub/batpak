@@ -701,7 +701,9 @@ pub(crate) fn try_restore_mmap_index(
     index
         .interner
         .replace_from_full_snapshot(&loaded.interner_strings);
-    index.restore_sorted_entries(loaded.entries, loaded.stored_allocator);
+    index
+        .restore_sorted_entries(loaded.entries, loaded.stored_allocator)
+        .ok()?;
     Some((loaded.watermark, loaded.stored_allocator))
 }
 

@@ -189,6 +189,7 @@ struct WriterState<'a> {
     active_segment: &'a mut Segment<Active>,
     segment_id: &'a mut u64,
     config: &'a StoreConfig,
+    runtime: &'a ValidatedStoreConfig,
     subscribers: &'a SubscriberList,
     reactor_subscribers: &'a ReactorSubscriberList,
     /// Reader handle — updated on segment rotation so mmap dispatch is correct.

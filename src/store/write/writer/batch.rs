@@ -95,12 +95,16 @@ impl WriterState<'_> {
         }
 
         if cached_count == items.len() {
-            return Ok(Some(
-                cached_receipts
-                    .into_iter()
-                    .map(|r| r.expect("full replay: all cached_receipts verified as Some"))
-                    .collect(),
-            ));
+            let mut receipts = Vec::with_capacity(cached_receipts.len());
+            for receipt in cached_receipts {
+                let Some(receipt) = receipt else {
+                    return Err(StoreError::IdempotencyPartialBatch {
+                        reason: "cached replay bookkeeping inconsistent".into(),
+                    });
+                };
+                receipts.push(receipt);
+            }
+            return Ok(Some(receipts));
         }
 
         if cached_count > 0 {
@@ -129,9 +133,9 @@ impl WriterState<'_> {
         let mut entity_states: std::collections::HashMap<Arc<str>, BatchEntityState> =
             std::collections::HashMap::new();
 
-        let now_us = self.config.now_us();
-        let now_ms = u64::try_from(now_us / 1000)
-            .expect("invariant: timestamp_us is always positive (from SystemTime)");
+        let now_us = self.runtime.now_us();
+        let now_ms = crate::store::config::wall_ms_from_timestamp_us(now_us)
+            .map_err(|e| batch_failed(0, BatchFailureStage::Validation, e))?;
 
         for (idx, item) in prepared.items().iter().enumerate() {
             let entity = Arc::clone(item.entity_arc());
@@ -221,9 +225,9 @@ impl WriterState<'_> {
         payload_size: u32,
         item_index_for_error: usize,
     ) -> Result<u64, StoreError> {
-        let now_us = self.config.now_us();
-        let now_ms = u64::try_from(now_us / 1000)
-            .expect("invariant: timestamp_us is always positive (from SystemTime)");
+        let now_us = self.runtime.now_us();
+        let now_ms = crate::store::config::wall_ms_from_timestamp_us(now_us)
+            .map_err(|e| batch_failed(item_index_for_error, BatchFailureStage::Validation, e))?;
         let header = EventHeader::new(
             batch_id as u128,
             batch_id as u128,
@@ -388,15 +392,14 @@ impl WriterState<'_> {
         if let Some(fence) = fence {
             fence.record_publish_up_to(publish_up_to);
             self.index
-                .note_visibility_fence_progress(fence.token, first_seq, publish_up_to)
-                .expect("active fence token verified before fenced batch append");
+                .note_visibility_fence_progress(fence.token, first_seq, publish_up_to)?;
             fence.extend_artifacts(artifacts.notifications, artifacts.envelopes);
         } else {
             self.publish_then_broadcast_unfenced(
                 publish_up_to,
                 artifacts.notifications,
                 artifacts.envelopes,
-            );
+            )?;
         }
 
         debug!(batch_id, count = prepared.len(), "batch committed");

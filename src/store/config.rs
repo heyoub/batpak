@@ -274,7 +274,7 @@ pub struct StoreConfig {
     pub fault_injector: Option<Arc<dyn FaultInjector>>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub(crate) struct ValidatedStoreConfig {
     pub(crate) pressure_retry_threshold: usize,
     pub(crate) require_idempotency_keys: bool,
@@ -282,6 +282,7 @@ pub(crate) struct ValidatedStoreConfig {
     pub(crate) cold_start: ColdStartPolicy,
     pub(crate) shutdown_drain_limit: usize,
     pub(crate) group_commit_drain_budget: u32,
+    clock: Option<MonotonicClock>,
 }
 
 impl StoreConfig {
@@ -380,6 +381,7 @@ impl StoreConfig {
             ),
             shutdown_drain_limit: self.writer.shutdown_drain_limit,
             group_commit_drain_budget,
+            clock: self.clock.clone().map(MonotonicClock::wrap),
         })
     }
 
@@ -448,11 +450,9 @@ impl StoreConfig {
 
     /// Install a custom clock for deterministic testing.
     ///
-    /// `with_clock` installs a [`MonotonicClock`] wrapper — a user-supplied clock
-    /// that regresses is clamped non-decreasingly; regressions log a
-    /// `tracing::error!` event but do not panic. Callers pass an unwrapped
-    /// `Arc<dyn Fn() -> i64>`; the wrapping happens here so the invariant
-    /// cannot be bypassed.
+    /// The runtime installs the monotonic wrapper during validation/open so
+    /// direct field assignment (`config.clock = ...`) and builder use follow
+    /// the same path.
     ///
     /// **Observable scope.** The injected clock controls both the wall-clock
     /// reads used by internal timestamping AND the `Freshness::MaybeStale`
@@ -461,12 +461,11 @@ impl StoreConfig {
     /// projection returned from an earlier `project()` becomes stale once
     /// the clock advances past `max_stale_ms`, forcing a re-project on the
     /// next call. See G6.
+    ///
+    /// Negative timestamps are rejected at append/batch execution time with
+    /// `StoreError::InvalidClock` rather than being truncated or panicking.
     pub fn with_clock(mut self, clock: Option<Arc<dyn Fn() -> i64 + Send + Sync>>) -> Self {
-        self.clock = clock.map(|raw| {
-            let wrapped = MonotonicClock::wrap(raw);
-            let f: Arc<dyn Fn() -> i64 + Send + Sync> = Arc::new(move || wrapped.now_us());
-            f
-        });
+        self.clock = clock;
         self
     }
 
@@ -519,14 +518,6 @@ impl StoreConfig {
         self.batch.max_bytes = batch_max_bytes;
         self
     }
-
-    /// Get current timestamp in microseconds, using the injectable clock if set.
-    pub(crate) fn now_us(&self) -> i64 {
-        match &self.clock {
-            Some(f) => f(),
-            None => now_us(),
-        }
-    }
 }
 
 impl Clone for StoreConfig {
@@ -565,6 +556,20 @@ impl std::fmt::Debug for StoreConfig {
     }
 }
 
+impl std::fmt::Debug for ValidatedStoreConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ValidatedStoreConfig")
+            .field("pressure_retry_threshold", &self.pressure_retry_threshold)
+            .field("require_idempotency_keys", &self.require_idempotency_keys)
+            .field("incremental_projection", &self.incremental_projection)
+            .field("cold_start", &self.cold_start)
+            .field("shutdown_drain_limit", &self.shutdown_drain_limit)
+            .field("group_commit_drain_budget", &self.group_commit_drain_budget)
+            .field("clock", &self.clock.as_ref().map(|_| "<monotonic>"))
+            .finish()
+    }
+}
+
 /// Returns microseconds since Unix epoch, saturating to `i64::MAX` if the system
 /// clock is beyond year ~292,277 (treat the max value as a clock-malfunction
 /// signal). No panic; cache staleness checks downstream see a saturated value
@@ -575,6 +580,55 @@ pub(crate) fn now_us() -> i64 {
         .unwrap_or_default()
         .as_micros();
     i64::try_from(micros).unwrap_or(i64::MAX)
+}
+
+impl ValidatedStoreConfig {
+    /// Runtime clock source used by open stores and projection/cache freshness.
+    ///
+    /// Any configured custom clock is wrapped in [`MonotonicClock`] during
+    /// validation so direct field assignment cannot bypass the non-decreasing
+    /// runtime invariant.
+    pub(crate) fn now_us(&self) -> i64 {
+        match &self.clock {
+            Some(clock) => clock.now_us(),
+            None => now_us(),
+        }
+    }
+
+    /// Projection/cache metadata clock source.
+    ///
+    /// Projection freshness math and cache row timestamps must never persist a
+    /// negative wall-clock value. Clamp malformed custom clocks to zero and log
+    /// the boundary violation instead of propagating invalid metadata.
+    pub(crate) fn cache_now_us(&self) -> i64 {
+        let now_us = self.now_us();
+        if now_us < 0 {
+            tracing::error!(
+                raw_us = now_us,
+                "custom clock returned a negative value; clamping projection/cache metadata timestamp to zero"
+            );
+            0
+        } else {
+            now_us
+        }
+    }
+}
+
+/// Convert a public clock reading to persisted wall-clock milliseconds.
+///
+/// Custom clocks must report microseconds since Unix epoch as a non-negative
+/// `i64`. Negative values are rejected as invalid caller input rather than
+/// panicking in append/batch hot paths.
+pub(crate) fn wall_ms_from_timestamp_us(
+    timestamp_us: i64,
+) -> Result<u64, crate::store::StoreError> {
+    if timestamp_us < 0 {
+        return Err(crate::store::StoreError::InvalidClock {
+            timestamp_us,
+            reason: "timestamp_us must be >= 0 microseconds since Unix epoch".into(),
+        });
+    }
+    Ok((timestamp_us / 1000) as u64)
 }
 
 /// Process-wide monotonic anchor. Captured on first call; subsequent calls read
@@ -694,4 +748,46 @@ impl MonotonicClock {
 #[inline]
 pub(crate) fn duration_micros(d: std::time::Duration) -> u64 {
     u64::try_from(d.as_micros()).unwrap_or(u64::MAX)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicI64, Ordering};
+
+    #[test]
+    fn validated_runtime_clock_wraps_direct_field_assignment() {
+        let raw = Arc::new(AtomicI64::new(2_000));
+        let raw_clock = {
+            let raw = Arc::clone(&raw);
+            Arc::new(move || raw.load(Ordering::SeqCst)) as Arc<dyn Fn() -> i64 + Send + Sync>
+        };
+
+        let mut config = StoreConfig::new("target/test-clock-wrap");
+        config.clock = Some(raw_clock);
+
+        let runtime = config.validated().expect("config validates");
+        assert_eq!(runtime.now_us(), 2_000);
+
+        raw.store(1_500, Ordering::SeqCst);
+        assert_eq!(
+            runtime.now_us(),
+            2_000,
+            "validated runtime clock must clamp direct-field regressions"
+        );
+    }
+
+    #[test]
+    fn cache_now_us_clamps_negative_custom_clock_values() {
+        let raw_clock = Arc::new(|| -42_i64) as Arc<dyn Fn() -> i64 + Send + Sync>;
+        let mut config = StoreConfig::new("target/test-cache-clock-clamp");
+        config.clock = Some(raw_clock);
+
+        let runtime = config.validated().expect("config validates");
+        assert_eq!(
+            runtime.cache_now_us(),
+            0,
+            "projection/cache metadata clock must not persist negative timestamps"
+        );
+    }
 }

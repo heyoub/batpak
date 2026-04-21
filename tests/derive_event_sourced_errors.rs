@@ -9,7 +9,7 @@
 //! surface as trybuild diffs.
 
 #[test]
-#[serial_test::serial]
+#[serial_test::file_serial(trybuild)]
 fn compile_fail_event_sourced_derive_errors() {
     let t = trybuild::TestCases::new();
     t.compile_fail("tests/ui/es_missing_input.rs");

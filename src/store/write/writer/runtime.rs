@@ -188,6 +188,7 @@ fn writer_loop(
         active_segment: &mut active_segment,
         segment_id: &mut segment_id,
         config: runtime.config,
+        runtime: runtime.validated_cfg,
         subscribers: runtime.subscribers,
         reactor_subscribers: runtime.reactor_subscribers,
         reader: Arc::clone(runtime.reader),

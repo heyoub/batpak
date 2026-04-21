@@ -515,7 +515,7 @@ where
             let t_cache_key = std::time::Instant::now();
             let replay = ReplayContext {
                 watermark: plan.watermark,
-                cached_at_us: store.config.now_us(),
+                cached_at_us: store.runtime.cache_now_us(),
                 cached_at_mono_ns: crate::store::config::now_mono_ns(),
                 process_boot_ns: crate::store::config::process_boot_ns(),
                 type_id: TypeId::of::<T>(),
@@ -735,7 +735,7 @@ where
                     // meta, which is stamped at `ProjectionCache::put` time
                     // (not plan-build time) so "age" means actual time since
                     // the bytes were written, not since the plan was drawn.
-                    let now_us = store.config.now_us();
+                    let now_us = store.runtime.cache_now_us();
                     let age_us = now_us.saturating_sub(meta.cached_at_us).max(0);
                     age_us < (*max_stale_ms as i64) * 1000
                 }
@@ -908,7 +908,7 @@ fn store_projection_value<T, State>(
         // they are the cross-process-mismatch detector, not the age basis.
         let meta = super::CacheMeta {
             watermark: execution.replay.watermark,
-            cached_at_us: store.config.now_us(),
+            cached_at_us: store.runtime.cache_now_us(),
             cached_at_mono_ns: Some(crate::store::config::now_mono_ns()),
             process_boot_ns: Some(crate::store::config::process_boot_ns()),
         };

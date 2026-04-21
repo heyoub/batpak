@@ -10,7 +10,7 @@
     - `cold_start/` — `mod.rs` (open/restore orchestration), `checkpoint.rs`, `mmap.rs`, `rebuild.rs`
     - `projection/` — `mod.rs` (cache traits), `flow.rs` (replay + incremental apply), `watch.rs`
     - `ancestry/` — `mod.rs`, `by_hash.rs`, `by_clock.rs`
-    - `delivery/` — `subscription.rs` (lossy push), `cursor.rs` (guaranteed pull)
+    - `delivery/` — `subscription.rs` (lossy push), `cursor.rs` (ordered pull replay with optional durable checkpoints)
     - Flat files: `append.rs` (`BatchAppendItem`, `CausationRef`, `AppendOptions`), `lifecycle.rs`, `hidden_ranges.rs`, `config.rs`, `error.rs`, `stats.rs`
     - `fault.rs` — fault injection (dangerous-test-hooks feature)
 - `tests/`: integration, property, compile-fail, and perf-gate tests (30 files)
@@ -28,7 +28,7 @@
 
 - `cargo xtask doctor`
 - `cargo xtask install-hooks`
-- `cargo xtask preflight`     — full proof chain inside the canonical devcontainer, entered once per run (gold standard before pushing); the closest local match to the GH `Integrity (ubuntu-devcontainer)` lane because it runs CI, coverage, and docs from one in-container session. Prefer this over bare `cargo xtask ci` for any push that touches store internals, xtask itself, or CI config.
+- `cargo xtask preflight`     — canonical devcontainer verification bundle for CI + coverage + docs from one in-container session. Prefer this over bare `cargo xtask ci` for pushes that touch store internals, xtask itself, or CI config, but do not describe it as the full proof chain unless you also run the extra hard gates (`mutants smoke`, perf gates, targeted fuzz/chaos).
 - `cargo xtask ci`
 - `cargo xtask mutants policy`
 - `cargo xtask mutants smoke`
@@ -72,7 +72,7 @@
 
 ## Mutation Testing Gate
 
-The `mutants` job in `ci.yml` runs on every `push` and `pull_request` — it is **not** report-only. `cargo xtask mutants smoke` is the repo-owned CI surface now: it runs the named critical seams first at an `85%` catch-rate threshold (`writer commit protocol`, `cursor delivery/checkpoint logic`, `projection replay/freshness logic`, `segment scan / corruption handling`, and `hash-chain / replay consistency` across the feature lanes), then runs repo-wide `1/12` shards on both feature surfaces under the current ratchet phase. Today the repo-wide phase is `Phase0` record-only, so xtask records the score and prints the next available ratchet floor without enforcing it yet. Run `cargo xtask mutants policy` to see the current thresholds and staged repo-wide floors from xtask itself.
+The `mutants` job in `ci.yml` runs on every `push` and `pull_request` — it is **not** report-only. `cargo xtask mutants smoke` is the repo-owned CI surface now: it runs the named critical seams first at an `85%` catch-rate threshold (`writer commit protocol`, `cursor delivery/checkpoint logic`, `projection replay/freshness logic`, `segment scan / corruption handling`, and `hash-chain / replay consistency` across the feature lanes), then runs repo-wide `1/24` shards on both feature surfaces under the current ratchet phase. Today the repo-wide phase is `Phase0` record-only, so xtask records the score and prints the next available ratchet floor without enforcing it yet. Run `cargo xtask mutants policy` to see the current thresholds and staged repo-wide floors from xtask itself.
 
 **Rule:** if you delete a test, expect either a critical-seam threshold failure or a repo-wide score drop; replace it with an equivalent test or write a stronger one that subsumes its coverage.
 

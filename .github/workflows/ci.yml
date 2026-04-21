@@ -123,13 +123,15 @@ jobs:
           '
 
   mutants:
-    # Mutation testing smoke run — fast subset (1/12 shard) that completes
-    # in under ~5 minutes. Triggered on every push and pull_request to
-    # surface tests that pass-by-accident (mutations that survive without
-    # being caught by any test). Also runs on manual workflow_dispatch.
+    # Mutation testing smoke run — repo-owned representative shards.
+    # Triggered on every push and pull_request to surface tests that
+    # pass-by-accident (mutations that survive without being caught by any
+    # test). Also runs on manual workflow_dispatch.
     #
-    # HARD GATE: mutation score must be >= 20% (caught) or the job fails.
-    # cargo-mutants 27.0.0 has no built-in threshold flag; the gate is
+    # HARD GATE: critical seams run at 85% catch-rate thresholds. Repo-wide
+    # smoke currently runs in Phase0 record-only mode and prints the next
+    # available ratchet floor without enforcing it yet.
+    # cargo-mutants 27.0.0 has no built-in staged policy surface; the gate is
     # implemented by parsing caught.txt / missed.txt in mutants() in
     # tools/xtask/src/commands.rs after each cargo-mutants invocation.
     runs-on: ubuntu-latest
@@ -139,7 +141,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: Swatinem/rust-cache@v2
       - uses: ./.github/actions/setup-devcontainer
-      - name: Mutation smoke (all features, shard 1/12)
+      - name: Mutation smoke (critical seams + repo-wide shard 1/24)
         env:
           BATPAK_DEVCONTAINER_IMAGE: batpak-devcontainer:ci
           BATPAK_DEVCONTAINER_SKIP_BUILD: "1"

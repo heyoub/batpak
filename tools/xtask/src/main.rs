@@ -45,7 +45,7 @@ enum XtaskCommand {
     PerfGates,
     DevcontainerExec(DevcontainerExecArgs),
     Ci,
-    /// Reproduce the full proof chain inside the canonical devcontainer.
+    /// Reproduce the canonical verification bundle inside the devcontainer.
     /// The host enters the container once, then CI, coverage, and docs run
     /// from that same session.
     Preflight,

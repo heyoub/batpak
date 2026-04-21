@@ -392,7 +392,7 @@ pub(crate) fn compact(
     // Atomically adopt the fresh index as the live one. Under the
     // `swap_gate` write guard: readers either hold the old index (already
     // in progress on the read guard) or the new one.
-    store.index.replace_contents_from_fresh(fresh_index);
+    store.index.replace_contents_from_fresh(fresh_index)?;
 
     // ── SEGMENT CLEANUP AFTER SWAP (FREEZE-4 step 5) ──────────────────
     //

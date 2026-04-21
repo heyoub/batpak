@@ -1,12 +1,29 @@
 use crate::coordinate::CoordinateError;
 use std::path::PathBuf;
 
+/// Store open mode for lifetime-held directory locking.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum StoreLockMode {
+    /// Mutable open: writer thread active, exclusive lock required.
+    Mutable,
+    /// Read-only open: no writer thread, but still exclusive in the first
+    /// hardening wave until shared semantics are explicitly designed.
+    ReadOnly,
+}
+
 /// StoreError: every error the store can produce.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum StoreError {
     /// A filesystem or OS-level I/O failure.
     Io(std::io::Error),
+    /// The store directory is already locked by another open handle.
+    StoreLocked {
+        /// Store root that could not be opened in the requested mode.
+        path: PathBuf,
+        /// Requested open mode that could not acquire its lifetime-held lock.
+        mode: StoreLockMode,
+    },
     /// An invalid or malformed coordinate (entity/scope).
     Coordinate(CoordinateError),
     /// MessagePack serialization or deserialization failed.
@@ -40,6 +57,17 @@ pub enum StoreError {
     WriterCrashed,
     /// A projection cache operation failed.
     CacheFailed(Box<dyn std::error::Error + Send + Sync>),
+    /// A visibility-watermark publish request violated sequence-gate bounds.
+    SequenceGateViolation {
+        /// Human-readable operation that attempted the publish.
+        operation: &'static str,
+        /// Requested exclusive upper bound for visibility.
+        requested: u64,
+        /// Allocator watermark at the time of the request.
+        allocated: u64,
+        /// Current visible watermark at the time of the request.
+        visible: u64,
+    },
     /// A StoreConfig field has an invalid value.
     Configuration(String),
     /// Group commit (batch > 1) requires an idempotency key on every append.
@@ -162,6 +190,17 @@ pub enum StoreError {
         /// Entity whose clock would have overflowed.
         entity: String,
     },
+    /// The configured custom clock produced an invalid negative timestamp.
+    ///
+    /// Production `SystemTime` is normalized by [`crate::store::config::now_us`]
+    /// and cannot produce this. This variant exists for caller-supplied test
+    /// or integration clocks installed through `StoreConfig::with_clock`.
+    InvalidClock {
+        /// Rejected timestamp in microseconds since Unix epoch.
+        timestamp_us: i64,
+        /// Human-readable rejection reason.
+        reason: String,
+    },
     /// A durable cursor checkpoint write failed. Only raised for cursors
     /// constructed with `checkpoint_id: Some(_)`; in-memory cursors have
     /// no file write and cannot produce this error. See G5.
@@ -205,6 +244,17 @@ impl std::fmt::Display for StoreError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Io(e) => write!(f, "IO error: {e}"),
+            Self::StoreLocked { path, mode } => {
+                let mode = match mode {
+                    StoreLockMode::Mutable => "mutable",
+                    StoreLockMode::ReadOnly => "read-only",
+                };
+                write!(
+                    f,
+                    "store at {} is already locked; could not acquire {mode} access",
+                    path.display()
+                )
+            }
             Self::Coordinate(e) => write!(f, "coordinate error: {e}"),
             Self::Serialization(e) => write!(f, "serialization error: {e}"),
             Self::CrcMismatch { segment_id, offset } => {
@@ -224,6 +274,15 @@ impl std::fmt::Display for StoreError {
             ),
             Self::WriterCrashed => write!(f, "writer thread crashed"),
             Self::CacheFailed(e) => write!(f, "cache error: {e}"),
+            Self::SequenceGateViolation {
+                operation,
+                requested,
+                allocated,
+                visible,
+            } => write!(
+                f,
+                "sequence gate rejected {operation} publish({requested}) with allocated={allocated} visible={visible}"
+            ),
             Self::Configuration(msg) => write!(f, "invalid config: {msg}"),
             Self::IdempotencyRequired => write!(
                 f,
@@ -311,6 +370,13 @@ impl std::fmt::Display for StoreError {
                 f,
                 "entity {entity} per-entity clock reached u32::MAX; further appends rejected"
             ),
+            Self::InvalidClock {
+                timestamp_us,
+                reason,
+            } => write!(
+                f,
+                "custom clock returned invalid timestamp_us {timestamp_us}: {reason}"
+            ),
             Self::CheckpointWriteFailed { id, source } => {
                 write!(f, "cursor checkpoint {id} write failed: {source}")
             }
@@ -341,11 +407,13 @@ impl std::error::Error for StoreError {
             Self::Coordinate(e) => Some(e),
             Self::Serialization(e) => Some(e.as_ref()),
             Self::CacheFailed(e) => Some(e.as_ref()),
-            Self::CrcMismatch { .. }
+            Self::StoreLocked { .. }
+            | Self::CrcMismatch { .. }
             | Self::CorruptSegment { .. }
             | Self::NotFound(_)
             | Self::SequenceMismatch { .. }
             | Self::WriterCrashed
+            | Self::SequenceGateViolation { .. }
             | Self::Configuration(_)
             | Self::IdempotencyRequired
             | Self::VisibilityFenceActive
@@ -366,6 +434,7 @@ impl std::error::Error for StoreError {
             | Self::HiddenRangesCorrupt { .. }
             | Self::BatchItemTooLarge { .. }
             | Self::EntityClockOverflow { .. }
+            | Self::InvalidClock { .. }
             | Self::CursorCheckpointCorrupt { .. }
             | Self::CursorCheckpointRegionMismatch { .. } => None,
             Self::BatchFailed { source, .. } => Some(source.as_ref()),

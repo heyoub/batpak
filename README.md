@@ -85,12 +85,13 @@ callers computing `EventKind` at runtime.
 
 **Projection** — `project::<T>(entity, &freshness)` folds events into any type
 implementing `EventSourced`. `project_if_changed` skips work when nothing changed.
-`watch_projection` returns a `ProjectionWatcher` that re-projects on subscription events.
+`watch_projection` returns a `ProjectionWatcher` that re-projects on subscription
+events from a lossy/prunable watcher canal.
 Two replay lanes: `JsonValueInput` (default, ergonomic) and `RawMsgpackInput` (perf).
 
 **Delivery** — `subscribe_lossy(&region)` for push-based broadcast (may drop under load).
-`cursor_guaranteed(&region)` for process-local pull-based ordered delivery from the in-memory
-index. Durable at-least-once across restarts is exposed by
+`cursor_guaranteed(&region)` for process-local pull-based ordered replay from the
+in-memory index. Durable at-least-once across restarts is exposed by
 `cursor_worker(..., CursorWorkerConfig { checkpoint_id: Some(..), .. })` and typed reactors via
 `ReactorConfig::checkpoint_id`. `react_loop` is the legacy subscribe-based loop.
 
@@ -110,7 +111,7 @@ observability.
 | `cargo xtask mutants smoke` | Critical seam hard gates + repo-wide ratchet smoke |
 | `cargo xtask bench --surface neutral` | Criterion benchmark suite |
 | `cargo xtask perf-gates` | Catastrophic-regression guards (stable hardware only) |
-| `cargo xtask preflight` | CI + coverage + docs in one session (gold standard before push) |
+| `cargo xtask preflight` | Canonical verification bundle: CI + coverage + docs in one devcontainer session |
 | `cargo xtask docs` | Build and check documentation |
 | `cargo xtask release --dry-run` | Release preflight |
 
@@ -118,7 +119,8 @@ observability.
 
 [HARNESS_DIRECTIVE.md](HARNESS_DIRECTIVE.md) defines the five harness
 patterns used to classify doctrine-bearing test suites and the module-header
-rule for new harnesses.
+rule for new harnesses. Today that header doctrine is a repo convention, not
+a hard structural gate.
 [HARNESS_LEDGER.md](HARNESS_LEDGER.md) records the current canonical witnesses,
 including derive compile-fail/parity,
 deterministic concurrency, chaos, fuzz-chaos feedback, perf gates, and

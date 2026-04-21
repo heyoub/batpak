@@ -20,6 +20,18 @@ use proptest::prelude::*;
 use proptest::strategy::BoxedStrategy;
 mod common;
 
+fn valid_custom_category() -> impl Strategy<Value = u8> {
+    prop_oneof![1u8..13, 14u8..16]
+}
+
+fn valid_event_kind_parts() -> impl Strategy<Value = (u8, u16)> {
+    (valid_custom_category(), 0u16..4096)
+}
+
+fn valid_region_component() -> BoxedStrategy<String> {
+    "[a-z][a-z0-9:_]{0,20}".prop_map(|s| s.to_string()).boxed()
+}
+
 // ============================================================
 // FUZZ TARGET 1: frame_decode — CRITICAL
 // Parses [len:u32 BE][crc32:u32 BE][msgpack] from arbitrary bytes.
@@ -172,10 +184,8 @@ proptest! {
     #![proptest_config(common::proptest::cfg(2048))]
 
     /// EventKind custom() round-trips through category()/type_id().
-    /// Categories 0x0 (system) and 0xD (effect) are reserved — filter them out.
     #[test]
-    fn fuzz_event_kind_roundtrip(cat in 0u8..16, type_id in 0u16..4096) {
-        prop_assume!(cat != 0 && cat != 0xD);
+    fn fuzz_event_kind_roundtrip((cat, type_id) in valid_event_kind_parts()) {
         let kind = EventKind::custom(cat, type_id);
         prop_assert_eq!(kind.category(), cat,
             "EVENTKIND CATEGORY MISMATCH: custom({}, {}).category() = {} != {}. \
@@ -188,10 +198,8 @@ proptest! {
     }
 
     /// EventKind serde round-trip.
-    /// Categories 0x0 (system) and 0xD (effect) are reserved — filter them out.
     #[test]
-    fn fuzz_event_kind_serde(cat in 0u8..16, type_id in 0u16..4096) {
-        prop_assume!(cat != 0 && cat != 0xD);
+    fn fuzz_event_kind_serde((cat, type_id) in valid_event_kind_parts()) {
         let kind = EventKind::custom(cat, type_id);
         let bytes = rmp_serde::to_vec_named(&kind).expect("serialize");
         let decoded: EventKind = rmp_serde::from_slice(&bytes).expect("deserialize");
@@ -200,14 +208,12 @@ proptest! {
     }
 
     /// EventKind with overflow type_id must be rejected instead of truncated.
-    /// Categories 0x0 (system) and 0xD (effect) are reserved — filter them out.
     #[test]
-    fn fuzz_event_kind_overflow(cat in 0u8..16, raw_type in 4096u16..=u16::MAX) {
-        prop_assume!(cat != 0 && cat != 0xD);
-        let result = std::panic::catch_unwind(|| EventKind::custom(cat, raw_type));
-        prop_assert!(result.is_err(),
-            "EVENTKIND OVERFLOW: oversized type_id must panic instead of truncating. \
-             Investigate: src/event/kind.rs custom().");
+    fn fuzz_event_kind_overflow(cat in valid_custom_category(), raw_type in 4096u16..=u16::MAX) {
+        let result = EventKind::try_custom(cat, raw_type);
+        prop_assert!(matches!(result, Err(batpak::event::kind::EventKindError::TypeIdOutOfRange { type_id }) if type_id == raw_type),
+            "EVENTKIND OVERFLOW: oversized type_id must return a typed error instead of truncating. \
+             Investigate: src/event/kind.rs try_custom().");
     }
 }
 
@@ -285,18 +291,15 @@ proptest! {
             "COORDINATE SERDE ROUNDTRIP FAILED. Investigate: src/coordinate/mod.rs.");
     }
 
-    /// Region::matches_event with arbitrary inputs (must never panic).
-    /// Categories 0x0 (system) and 0xD (effect) are reserved — filter them out.
+    /// Region::matches_event with valid region/entity components (must never panic).
     #[test]
     fn fuzz_region_matches_event(
-        prefix in "\\PC{0,10}",
-        scope in "\\PC{0,10}",
-        entity in "\\PC{1,20}",
-        event_scope in "\\PC{1,20}",
-        cat in 0u8..16,
-        type_id in 0u16..4096,
+        prefix in valid_region_component(),
+        scope in valid_region_component(),
+        entity in valid_region_component(),
+        event_scope in valid_region_component(),
+        (cat, type_id) in valid_event_kind_parts(),
     ) {
-        prop_assume!(cat != 0 && cat != 0xD);
         let region = Region::entity(&prefix).with_scope(&scope);
         let kind = EventKind::custom(cat, type_id);
         // Must never panic
@@ -449,12 +452,9 @@ proptest! {
         lane in any::<u32>(),
         seq in any::<u32>(),
         payload_size in any::<u32>(),
-        cat in 0u8..16,
-        type_id in 0u16..4096,
+        (cat, type_id) in valid_event_kind_parts(),
         flags in any::<u8>(),
     ) {
-        // Categories 0x0 (system) and 0xD (effect) are reserved
-        prop_assume!(cat != 0 && cat != 0xD);
         let header = EventHeader::new(
             event_id, corr_id, caus_id, ts,
             DagPosition::new(depth, lane, seq),

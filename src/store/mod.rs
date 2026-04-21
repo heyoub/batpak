@@ -5,6 +5,7 @@ mod config;
 /// Push subscriptions (lossy) and pull cursors (ordered, with optional durable
 /// checkpoints) for event delivery.
 pub mod delivery;
+mod dir_lock;
 mod error;
 /// Fault injection framework for testing failure scenarios.
 #[cfg(feature = "dangerous-test-hooks")]
@@ -39,7 +40,7 @@ pub use config::{
 };
 pub use delivery::cursor::{Cursor, CursorWorkerAction, CursorWorkerConfig, CursorWorkerHandle};
 pub use delivery::subscription::Subscription;
-pub use error::StoreError;
+pub use error::{StoreError, StoreLockMode};
 #[cfg(feature = "dangerous-test-hooks")]
 pub use fault::{
     CountdownAction, CountdownInjector, FaultInjector, InjectionPoint, ProbabilisticInjector,
@@ -97,6 +98,7 @@ pub struct Store<State = Open> {
     pub(crate) should_shutdown_on_drop: bool,
     pub(crate) open_report: Option<cold_start::rebuild::OpenIndexReport>,
     pub(crate) _state: std::marker::PhantomData<State>,
+    pub(crate) _store_lock: dir_lock::StoreDirLock,
 }
 
 struct OpenComponents {
@@ -105,11 +107,17 @@ struct OpenComponents {
     index: Arc<StoreIndex>,
     reader: Arc<Reader>,
     open_report: cold_start::rebuild::OpenIndexReport,
+    store_lock: dir_lock::StoreDirLock,
 }
 
-fn open_components(config: StoreConfig) -> Result<OpenComponents, StoreError> {
-    let runtime = Arc::new(config.validated()?);
+fn open_components(
+    mut config: StoreConfig,
+    lock_mode: StoreLockMode,
+) -> Result<OpenComponents, StoreError> {
     std::fs::create_dir_all(&config.data_dir)?;
+    config.data_dir = std::fs::canonicalize(&config.data_dir).map_err(StoreError::Io)?;
+    let runtime = Arc::new(config.validated()?);
+    let store_lock = dir_lock::StoreDirLock::acquire(&config.data_dir, lock_mode)?;
     let config = Arc::new(config);
     let index = Arc::new(StoreIndex::with_config(&config.index));
     let reader = Arc::new(Reader::new(config.data_dir.clone(), config.fd_budget));
@@ -130,6 +138,7 @@ fn open_components(config: StoreConfig) -> Result<OpenComponents, StoreError> {
         index,
         reader,
         open_report,
+        store_lock,
     })
 }
 
@@ -138,6 +147,8 @@ impl Store<Open> {
     /// Uses `NoCache` for projection (no external cache backend).
     ///
     /// # Errors
+    /// Returns [`StoreError::StoreLocked`] if another live store handle already
+    /// owns the directory lock.
     /// Returns `StoreError::Io` if the data directory cannot be created or segments cannot be read.
     pub fn open(config: StoreConfig) -> Result<Self, StoreError> {
         Self::open_with_cache(config, Box::new(NoCache))
@@ -159,6 +170,8 @@ impl Store<Open> {
     /// Use [`NativeCache`] for file-backed cache-accelerated `project()` calls.
     ///
     /// # Errors
+    /// Returns [`StoreError::StoreLocked`] if another live store handle already
+    /// owns the directory lock.
     /// Returns `StoreError::Io` if the data directory cannot be created or segments cannot be read.
     pub fn open_with_cache(
         config: StoreConfig,
@@ -170,7 +183,8 @@ impl Store<Open> {
             index,
             reader,
             open_report,
-        } = open_components(config)?;
+            store_lock,
+        } = open_components(config, StoreLockMode::Mutable)?;
 
         let subscribers = Arc::new(SubscriberList::new());
         let reactor_subscribers = Arc::new(ReactorSubscriberList::new());
@@ -194,6 +208,7 @@ impl Store<Open> {
             should_shutdown_on_drop: true,
             open_report: Some(open_report),
             _state: std::marker::PhantomData,
+            _store_lock: store_lock,
         })
     }
 
@@ -535,14 +550,15 @@ impl Store<Open> {
     }
 
     /// WATCH: reactive projection subscription. Returns a `ProjectionWatcher`
-    /// that emits an updated projection `T` whenever new events arrive for `entity`.
+    /// that re-projects `T` when new events arrive for `entity`.
     ///
     /// Internally subscribes to entity events, then re-projects on each notification.
     /// The watcher is pull-based: the caller drives the loop via
     /// [`ProjectionWatcher::recv`], which returns
     /// `Result<(u64, Option<T>), WatcherError>` — see the method docs for the
     /// full three-way return taxonomy (materialized state, empty fold, store
-    /// closed). The returned generation is persisted honestly: redundant
+    /// closed, or watcher closure after the lossy/prunable subscription is
+    /// dropped). The returned generation is persisted honestly: redundant
     /// wakeups for an already-delivered generation are suppressed, but an
     /// append that advances the entity generation can still yield the same
     /// folded state if `T::relevant_event_kinds()` filters it out.
@@ -809,6 +825,10 @@ impl Store<ReadOnly> {
     /// Open the store in read-only mode with a custom projection cache backend.
     ///
     /// # Errors
+    /// Returns [`StoreError::StoreLocked`] if another live store handle already
+    /// owns the directory lock. In the first hardening wave, read-only opens
+    /// are intentionally exclusive-only until shared semantics are explicitly
+    /// designed and tested.
     /// Returns any configuration, directory-creation, or cold-start rebuild
     /// error surfaced while opening the store in read-only mode.
     pub fn open_read_only_with_cache(
@@ -821,7 +841,8 @@ impl Store<ReadOnly> {
             index,
             reader,
             open_report,
-        } = open_components(config)?;
+            store_lock,
+        } = open_components(config, StoreLockMode::ReadOnly)?;
 
         Ok(Self {
             index,
@@ -834,6 +855,7 @@ impl Store<ReadOnly> {
             should_shutdown_on_drop: false,
             open_report: Some(open_report),
             _state: std::marker::PhantomData,
+            _store_lock: store_lock,
         })
     }
 }

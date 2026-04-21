@@ -184,9 +184,11 @@ impl WriterState<'_> {
         publish_up_to: u64,
         notifications: impl IntoIterator<Item = Notification>,
         envelopes: impl IntoIterator<Item = CommittedEventEnvelope>,
-    ) {
-        self.index.publish(publish_up_to);
+    ) -> Result<(), crate::store::StoreError> {
+        self.index
+            .publish(publish_up_to, "publish_then_broadcast_unfenced")?;
         self.broadcast_commit_artifacts(notifications, envelopes);
+        Ok(())
     }
 
     /// Finishes a visibility fence (publishes the hidden range), then notifies

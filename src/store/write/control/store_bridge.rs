@@ -43,7 +43,7 @@ impl Store<Open> {
     ) -> Result<AppendTicket, StoreError> {
         submission.validate_route(self)?;
         submission.validate_idempotency(self)?;
-        let event = submission.build_event(payload, kind, self.config.now_us())?;
+        let event = submission.build_event(payload, kind, self.runtime.now_us())?;
         if event.payload.len() > self.config.single_append_max_bytes as usize {
             return Err(StoreError::Configuration(format!(
                 "single append bytes {} exceeds max {}",

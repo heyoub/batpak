@@ -97,8 +97,8 @@
   artifacts:
     - ART-STORE-COLUMNAR
     - ART-STORE-CONFIG
-- id: INV-MULTI-VIEW-PUBLISH-AFTER-FANOUT
-  statement: Writer publish happens only after every active index view has been populated; readers must observe either all view updates for a sequence range or none of them.
+- id: INV-MULTI-VIEW-PUBLISH-AFTER-VIEW-SYNC
+  statement: Writer visibility publish happens only after every active index view has been populated; readers must observe either all view updates for a sequence range or none of them.
   artifacts:
     - ART-STORE-INDEX
     - ART-STORE-WRITER

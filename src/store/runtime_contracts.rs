@@ -20,6 +20,8 @@ fn test_store_with_writer(tx: flume::Sender<writer::WriterCommand>) -> (Store, T
         should_shutdown_on_drop: true,
         open_report: None,
         _state: std::marker::PhantomData,
+        _store_lock: dir_lock::StoreDirLock::acquire(dir.path(), StoreLockMode::Mutable)
+            .expect("test store lock"),
     };
     (store, dir)
 }
@@ -91,5 +93,48 @@ fn now_us_moves_forward_over_real_time() {
         "PROPERTY: now_us must advance as wall-clock time moves forward.\n\
          Investigate: src/store/config.rs now_us.\n\
          Common causes: helper replaced with a constant or non-monotonic sentinel."
+    );
+}
+
+#[test]
+fn sequence_gate_publish_surfaces_typed_error_instead_of_panicking() {
+    let index = index::StoreIndex::new();
+
+    let err = match index.publish(1, "runtime-contract-publish-overflow") {
+        Ok(()) => panic!("publish beyond allocated must not succeed"),
+        Err(err) => err,
+    };
+    assert!(
+        matches!(
+            err,
+            StoreError::SequenceGateViolation {
+                operation: "runtime-contract-publish-overflow",
+                requested: 1,
+                allocated: 0,
+                visible: 0,
+            }
+        ),
+        "PROPERTY: sequence gate overflow must surface StoreError::SequenceGateViolation instead of panicking, got {err:?}"
+    );
+
+    index.sequence.restore_allocator(2);
+    index
+        .publish(2, "runtime-contract-publish-prime")
+        .expect("prime publish");
+    let err = match index.publish(1, "runtime-contract-publish-regression") {
+        Ok(()) => panic!("publish regression must not succeed"),
+        Err(err) => err,
+    };
+    assert!(
+        matches!(
+            err,
+            StoreError::SequenceGateViolation {
+                operation: "runtime-contract-publish-regression",
+                requested: 1,
+                allocated: 2,
+                visible: 2,
+            }
+        ),
+        "PROPERTY: sequence gate regression must surface StoreError::SequenceGateViolation instead of panicking, got {err:?}"
     );
 }

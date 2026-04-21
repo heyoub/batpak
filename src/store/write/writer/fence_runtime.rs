@@ -219,10 +219,9 @@ impl WriterState<'_> {
         if self.fence_ledger.as_ref().map(|fence| fence.token) != Some(token) {
             return Err(StoreError::VisibilityFenceNotActive);
         }
-        let mut fence = self
-            .fence_ledger
-            .take()
-            .expect("token check guaranteed fence ledger");
+        let Some(mut fence) = self.fence_ledger.take() else {
+            return Err(StoreError::VisibilityFenceNotActive);
+        };
         let result = f(self, &mut fence);
         self.fence_ledger = Some(fence);
         result

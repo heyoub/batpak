@@ -5,8 +5,9 @@ use crate::{CoverArgs, DocsArgs};
 use anyhow::{bail, Context, Result};
 use std::fs;
 use std::process::Command;
+use toml::Value as TomlValue;
 
-/// Reproduce the full proof chain inside the canonical devcontainer.
+/// Reproduce the canonical verification bundle inside the devcontainer.
 ///
 /// The host enters the container once, then the container runs CI, coverage,
 /// and docs in-process so we do not pay repeated container-entry ceremony for
@@ -30,7 +31,7 @@ fn preflight_inner() -> Result<()> {
     crate::docs::docs(DocsArgs { open: false })
 }
 
-/// Read `rust-toolchain.toml`, extract the pinned `channel`, shell out to
+/// Read `rust-toolchain.toml`, parse the pinned `channel`, shell out to
 /// `rustc --version`, and fail the build if the two disagree. This catches
 /// devcontainer images that were rebuilt with a drifted rustc and any host
 /// environment that tries to `cargo xtask preflight` with the wrong toolchain.
@@ -41,7 +42,7 @@ pub(crate) fn assert_rustc_matches_toolchain_pin() -> Result<()> {
         .with_context(|| format!("read {}", toolchain_path.display()))?;
     let pinned_channel = parse_toolchain_channel(&toolchain_toml).with_context(|| {
         format!(
-            "could not find `channel = \"...\"` in {}",
+            "could not parse `[toolchain].channel` from {}",
             toolchain_path.display()
         )
     })?;
@@ -70,17 +71,16 @@ pub(crate) fn assert_rustc_matches_toolchain_pin() -> Result<()> {
     Ok(())
 }
 
-fn parse_toolchain_channel(toml: &str) -> Option<String> {
-    for line in toml.lines() {
-        let trimmed = line.trim();
-        let rest = trimmed.strip_prefix("channel")?.trim_start();
-        let rest = rest.strip_prefix('=')?.trim();
-        let rest = rest.trim_matches('"').trim_matches('\'');
-        if !rest.is_empty() {
-            return Some(rest.to_string());
-        }
-    }
-    None
+fn parse_toolchain_channel(toml: &str) -> Result<String> {
+    let parsed: TomlValue = toml.parse().context("parse rust-toolchain.toml as TOML")?;
+    let channel = parsed
+        .get("toolchain")
+        .and_then(TomlValue::as_table)
+        .and_then(|toolchain| toolchain.get("channel"))
+        .and_then(TomlValue::as_str)
+        .filter(|channel| !channel.is_empty())
+        .context("missing or non-string `[toolchain].channel`")?;
+    Ok(channel.to_owned())
 }
 
 fn parse_rustc_version(output: &str) -> Option<String> {
@@ -124,6 +124,27 @@ mod tests {
         // justifies: INV-TEST-PANIC-AS-ASSERTION; test-only in tools/xtask/src/preflight.rs; panic on setup failure is the test's signal of broken fixtures
         let channel = parse_toolchain_channel(toml).expect("channel present in fixture");
         assert_eq!(channel, "1.92.0");
+    }
+
+    #[test]
+    fn parse_channel_from_toolchain_toml_with_comments_and_spacing() {
+        let toml = r#"
+            [toolchain]
+            profile = "minimal"
+            channel = "1.92.0" # canonical pin
+            components = ["rustfmt", "clippy"]
+        "#;
+        let channel = parse_toolchain_channel(toml).expect("channel present in fixture");
+        assert_eq!(channel, "1.92.0");
+    }
+
+    #[test]
+    fn parse_channel_requires_toolchain_table_and_string_channel() {
+        let missing_table = "channel = \"1.92.0\"\n";
+        let wrong_type = "[toolchain]\nchannel = 192\n";
+
+        assert!(parse_toolchain_channel(missing_table).is_err());
+        assert!(parse_toolchain_channel(wrong_type).is_err());
     }
 
     #[test]

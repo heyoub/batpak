@@ -119,7 +119,7 @@ covered by ADR-0011.
 - `tools/xtask/src/coverage.rs`: coverage execution, retained artifacts, and reporting
 - `tools/xtask/src/docs.rs`: root-doc site and rustdoc generation
 - `tools/xtask/src/devcontainer.rs`: canonical container execution and image reuse
-- `tools/xtask/src/preflight.rs`: single-session canonical proof chain
+- `tools/xtask/src/preflight.rs`: single-session canonical verification bundle
 - `tools/xtask/src/commands.rs`: repo workflow commands, hooks, smoke checks, release plumbing
 
 ## Topology Model
@@ -310,7 +310,8 @@ cargo xtask cover --json
 The doctrine surfaces live in:
 
 - [HARNESS_DIRECTIVE.md](HARNESS_DIRECTIVE.md) for the five harness patterns
-  and invariant/failure-mode/seed header rule
+  and invariant/failure-mode/seed header rule (currently a repo convention,
+  not a hard integrity gate by itself)
 - [HARNESS_LEDGER.md](HARNESS_LEDGER.md) for the current doctrine-bearing
   suites and their primary pattern
 - `cargo xtask mutants policy` for the repo-owned mutation thresholds,

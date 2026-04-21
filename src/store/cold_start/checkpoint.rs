@@ -534,7 +534,7 @@ pub(crate) fn restore_from_checkpoint(
         rebuilt_entries.push(ce.to_cold_start_row().to_index_entry(interner_strings)?);
     }
 
-    index.restore_sorted_entries(rebuilt_entries, stored_allocator);
+    index.restore_sorted_entries(rebuilt_entries, stored_allocator)?;
     Ok(())
 }
 
@@ -623,7 +623,8 @@ mod tests {
             idx.insert(entry);
         }
         // Publish all entries so read methods see them.
-        idx.publish(idx.global_sequence());
+        idx.publish(idx.global_sequence(), "checkpoint-test-publish")
+            .expect("publish all entries");
         idx
     }
 

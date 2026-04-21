@@ -182,7 +182,7 @@ pub(crate) fn open_index(
     index
         .interner
         .replace_from_full_snapshot(&plan.interner_strings);
-    index.restore_sorted_entries_with_routing(plan.entries, plan.allocator_hint, &plan.routing);
+    index.restore_sorted_entries_with_routing(plan.entries, plan.allocator_hint, &plan.routing)?;
     // G2: cold-start fails closed on corrupt hidden-ranges metadata.
     // A missing file is OK (first open); any other read/parse failure is
     // surfaced so callers cannot silently resurrect cancelled events.
@@ -581,7 +581,7 @@ pub(crate) fn rebuild_from_segments(
         collect_rebuild_entries(reader, data_dir)?;
     index.interner.replace_from_full_snapshot(&interner_strings);
     let routing = RoutingSummary::from_sorted_entries(&entries, chunk_count.max(1));
-    index.restore_sorted_entries_with_routing(entries, allocator_hint, &routing);
+    index.restore_sorted_entries_with_routing(entries, allocator_hint, &routing)?;
     Ok(())
 }
 

@@ -14,7 +14,7 @@ pub mod sourcing;
 pub use decode::{DecodeSource, DecodeTyped, TypedDecodeError};
 pub use hash::HashChain;
 pub use header::EventHeader;
-pub use kind::EventKind;
+pub use kind::{EventKind, EventKindError};
 pub use payload::EventPayload;
 pub use sourcing::{
     EventSourced, JsonValueInput, MultiDispatchError, MultiReactive, ProjectionEvent,

@@ -233,9 +233,9 @@ impl Segment<Active> {
         let header = SegmentHeader {
             version: 1,
             flags: 0,
-            // Unix epoch nanoseconds fit in i64 until year 2262 — safe for this project's lifetime.
-            created_ns: i64::try_from(created_ns_u128)
-                .expect("invariant: Unix epoch ns fits i64 until year 2262"),
+            // Saturate rather than panic if the host clock is absurdly far in
+            // the future; environment failure must not abort segment creation.
+            created_ns: i64::try_from(created_ns_u128).unwrap_or(i64::MAX),
             segment_id,
         };
 

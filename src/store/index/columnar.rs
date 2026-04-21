@@ -1416,6 +1416,11 @@ impl ScanIndex {
     }
 
     fn query_hits_route(&self, route: ScanRoute, query: EntryQuery<'_>) -> Vec<QueryHit> {
+        let fallback = || match query {
+            EntryQuery::Kind(kind) => self.query_base_hits_by_kind(kind),
+            EntryQuery::Category(category) => self.query_base_hits_by_category(category),
+            EntryQuery::Scope(_) => Vec::new(),
+        };
         match (route, query) {
             (ScanRoute::BaseAoS, EntryQuery::Kind(kind)) => self.query_base_hits_by_kind(kind),
             (ScanRoute::BaseAoS, EntryQuery::Category(category)) => {
@@ -1425,63 +1430,51 @@ impl ScanIndex {
             (ScanRoute::SoA, EntryQuery::Kind(kind)) => self
                 .soa
                 .as_ref()
-                .expect("ScanCapabilities routed queries through missing SoA overlay")
-                .query_hits_by_kind(kind),
+                .map_or_else(fallback, |soa| soa.query_hits_by_kind(kind)),
             (ScanRoute::SoA, EntryQuery::Category(category)) => self
                 .soa
                 .as_ref()
-                .expect("ScanCapabilities routed queries through missing SoA overlay")
-                .query_hits_by_category(category),
+                .map_or_else(fallback, |soa| soa.query_hits_by_category(category)),
             (ScanRoute::SoA, EntryQuery::Scope(scope)) => self
                 .soa
                 .as_ref()
-                .expect("ScanCapabilities routed queries through missing SoA overlay")
-                .query_hits_by_scope(scope),
+                .map_or_else(fallback, |soa| soa.query_hits_by_scope(scope)),
             (ScanRoute::SoAoS, EntryQuery::Kind(kind)) => self
                 .entity_groups
                 .as_ref()
-                .expect("ScanCapabilities routed queries through missing SoAoS overlay")
-                .query_hits_by_kind(kind),
+                .map_or_else(fallback, |groups| groups.query_hits_by_kind(kind)),
             (ScanRoute::SoAoS, EntryQuery::Category(category)) => self
                 .entity_groups
                 .as_ref()
-                .expect("ScanCapabilities routed queries through missing SoAoS overlay")
-                .query_hits_by_category(category),
+                .map_or_else(fallback, |groups| groups.query_hits_by_category(category)),
             (ScanRoute::SoAoS, EntryQuery::Scope(scope)) => self
                 .entity_groups
                 .as_ref()
-                .expect("ScanCapabilities routed queries through missing SoAoS overlay")
-                .query_hits_by_scope(scope),
+                .map_or_else(fallback, |groups| groups.query_hits_by_scope(scope)),
             (ScanRoute::AoSoA64, EntryQuery::Kind(kind)) => self
                 .tiles64
                 .as_ref()
-                .expect("ScanCapabilities routed queries through missing AoSoA64 overlay")
-                .query_hits_by_kind(kind),
+                .map_or_else(fallback, |tiles| tiles.query_hits_by_kind(kind)),
             (ScanRoute::AoSoA64, EntryQuery::Category(category)) => self
                 .tiles64
                 .as_ref()
-                .expect("ScanCapabilities routed queries through missing AoSoA64 overlay")
-                .query_hits_by_category(category),
+                .map_or_else(fallback, |tiles| tiles.query_hits_by_category(category)),
             (ScanRoute::AoSoA64, EntryQuery::Scope(scope)) => self
                 .tiles64
                 .as_ref()
-                .expect("ScanCapabilities routed queries through missing AoSoA64 overlay")
-                .query_hits_by_scope(scope),
+                .map_or_else(fallback, |tiles| tiles.query_hits_by_scope(scope)),
             (ScanRoute::AoSoA64Simd, EntryQuery::Kind(kind)) => self
                 .tiles64_simd
                 .as_ref()
-                .expect("ScanCapabilities routed queries through missing AoSoA64Simd overlay")
-                .query_hits_by_kind(kind),
+                .map_or_else(fallback, |tiles| tiles.query_hits_by_kind(kind)),
             (ScanRoute::AoSoA64Simd, EntryQuery::Category(category)) => self
                 .tiles64_simd
                 .as_ref()
-                .expect("ScanCapabilities routed queries through missing AoSoA64Simd overlay")
-                .query_hits_by_category(category),
+                .map_or_else(fallback, |tiles| tiles.query_hits_by_category(category)),
             (ScanRoute::AoSoA64Simd, EntryQuery::Scope(scope)) => self
                 .tiles64_simd
                 .as_ref()
-                .expect("ScanCapabilities routed queries through missing AoSoA64Simd overlay")
-                .query_hits_by_scope(scope),
+                .map_or_else(fallback, |tiles| tiles.query_hits_by_scope(scope)),
         }
     }
 
@@ -1509,6 +1502,19 @@ impl ScanIndex {
         started: bool,
         limit: usize,
     ) -> Vec<QueryHit> {
+        let fallback = || match query {
+            EntryQuery::Kind(kind) => {
+                let mut v = self.query_base_hits_by_kind(kind);
+                apply_after_bounds(&mut v, after_seq, started, limit);
+                v
+            }
+            EntryQuery::Category(cat) => {
+                let mut v = self.query_base_hits_by_category(cat);
+                apply_after_bounds(&mut v, after_seq, started, limit);
+                v
+            }
+            EntryQuery::Scope(_) => Vec::new(),
+        };
         match (route, query) {
             (ScanRoute::BaseAoS, EntryQuery::Kind(kind)) => {
                 let mut v = self.query_base_hits_by_kind(kind);
@@ -1521,101 +1527,83 @@ impl ScanIndex {
                 v
             }
             (ScanRoute::BaseAoS, EntryQuery::Scope(_)) => Vec::new(),
-            (ScanRoute::SoA, EntryQuery::Kind(kind)) => self
-                .soa
-                .as_ref()
-                .expect("ScanCapabilities routed queries through missing SoA overlay")
-                .query_hits_by_kind_after(kind, after_seq, started, limit),
-            (ScanRoute::SoA, EntryQuery::Category(cat)) => self
-                .soa
-                .as_ref()
-                .expect("ScanCapabilities routed queries through missing SoA overlay")
-                .query_hits_by_category_after(cat, after_seq, started, limit),
-            (ScanRoute::SoA, EntryQuery::Scope(scope)) => self
-                .soa
-                .as_ref()
-                .expect("ScanCapabilities routed queries through missing SoA overlay")
-                .query_hits_by_scope_after(scope, after_seq, started, limit),
+            (ScanRoute::SoA, EntryQuery::Kind(kind)) => {
+                self.soa.as_ref().map_or_else(fallback, |soa| {
+                    soa.query_hits_by_kind_after(kind, after_seq, started, limit)
+                })
+            }
+            (ScanRoute::SoA, EntryQuery::Category(cat)) => {
+                self.soa.as_ref().map_or_else(fallback, |soa| {
+                    soa.query_hits_by_category_after(cat, after_seq, started, limit)
+                })
+            }
+            (ScanRoute::SoA, EntryQuery::Scope(scope)) => {
+                self.soa.as_ref().map_or_else(fallback, |soa| {
+                    soa.query_hits_by_scope_after(scope, after_seq, started, limit)
+                })
+            }
             (ScanRoute::SoAoS, EntryQuery::Kind(kind)) => {
-                let mut v = self
-                    .entity_groups
-                    .as_ref()
-                    .expect("ScanCapabilities routed queries through missing SoAoS overlay")
-                    .query_hits_by_kind(kind);
-                apply_after_bounds(&mut v, after_seq, started, limit);
-                v
+                self.entity_groups.as_ref().map_or_else(fallback, |groups| {
+                    let mut v = groups.query_hits_by_kind(kind);
+                    apply_after_bounds(&mut v, after_seq, started, limit);
+                    v
+                })
             }
             (ScanRoute::SoAoS, EntryQuery::Category(cat)) => {
-                let mut v = self
-                    .entity_groups
-                    .as_ref()
-                    .expect("ScanCapabilities routed queries through missing SoAoS overlay")
-                    .query_hits_by_category(cat);
-                apply_after_bounds(&mut v, after_seq, started, limit);
-                v
+                self.entity_groups.as_ref().map_or_else(fallback, |groups| {
+                    let mut v = groups.query_hits_by_category(cat);
+                    apply_after_bounds(&mut v, after_seq, started, limit);
+                    v
+                })
             }
             (ScanRoute::SoAoS, EntryQuery::Scope(scope)) => {
-                let mut v = self
-                    .entity_groups
-                    .as_ref()
-                    .expect("ScanCapabilities routed queries through missing SoAoS overlay")
-                    .query_hits_by_scope(scope);
-                apply_after_bounds(&mut v, after_seq, started, limit);
-                v
+                self.entity_groups.as_ref().map_or_else(fallback, |groups| {
+                    let mut v = groups.query_hits_by_scope(scope);
+                    apply_after_bounds(&mut v, after_seq, started, limit);
+                    v
+                })
             }
             (ScanRoute::AoSoA64, EntryQuery::Kind(kind)) => {
-                let mut v = self
-                    .tiles64
-                    .as_ref()
-                    .expect("ScanCapabilities routed queries through missing AoSoA64 overlay")
-                    .query_hits_by_kind(kind);
-                apply_after_bounds(&mut v, after_seq, started, limit);
-                v
+                self.tiles64.as_ref().map_or_else(fallback, |tiles| {
+                    let mut v = tiles.query_hits_by_kind(kind);
+                    apply_after_bounds(&mut v, after_seq, started, limit);
+                    v
+                })
             }
             (ScanRoute::AoSoA64, EntryQuery::Category(cat)) => {
-                let mut v = self
-                    .tiles64
-                    .as_ref()
-                    .expect("ScanCapabilities routed queries through missing AoSoA64 overlay")
-                    .query_hits_by_category(cat);
-                apply_after_bounds(&mut v, after_seq, started, limit);
-                v
+                self.tiles64.as_ref().map_or_else(fallback, |tiles| {
+                    let mut v = tiles.query_hits_by_category(cat);
+                    apply_after_bounds(&mut v, after_seq, started, limit);
+                    v
+                })
             }
             (ScanRoute::AoSoA64, EntryQuery::Scope(scope)) => {
-                let mut v = self
-                    .tiles64
-                    .as_ref()
-                    .expect("ScanCapabilities routed queries through missing AoSoA64 overlay")
-                    .query_hits_by_scope(scope);
-                apply_after_bounds(&mut v, after_seq, started, limit);
-                v
+                self.tiles64.as_ref().map_or_else(fallback, |tiles| {
+                    let mut v = tiles.query_hits_by_scope(scope);
+                    apply_after_bounds(&mut v, after_seq, started, limit);
+                    v
+                })
             }
             (ScanRoute::AoSoA64Simd, EntryQuery::Kind(kind)) => {
-                let mut v = self
-                    .tiles64_simd
-                    .as_ref()
-                    .expect("ScanCapabilities routed queries through missing AoSoA64Simd overlay")
-                    .query_hits_by_kind(kind);
-                apply_after_bounds(&mut v, after_seq, started, limit);
-                v
+                self.tiles64_simd.as_ref().map_or_else(fallback, |tiles| {
+                    let mut v = tiles.query_hits_by_kind(kind);
+                    apply_after_bounds(&mut v, after_seq, started, limit);
+                    v
+                })
             }
             (ScanRoute::AoSoA64Simd, EntryQuery::Category(cat)) => {
-                let mut v = self
-                    .tiles64_simd
-                    .as_ref()
-                    .expect("ScanCapabilities routed queries through missing AoSoA64Simd overlay")
-                    .query_hits_by_category(cat);
-                apply_after_bounds(&mut v, after_seq, started, limit);
-                v
+                self.tiles64_simd.as_ref().map_or_else(fallback, |tiles| {
+                    let mut v = tiles.query_hits_by_category(cat);
+                    apply_after_bounds(&mut v, after_seq, started, limit);
+                    v
+                })
             }
             (ScanRoute::AoSoA64Simd, EntryQuery::Scope(scope)) => {
-                let mut v = self
-                    .tiles64_simd
-                    .as_ref()
-                    .expect("ScanCapabilities routed queries through missing AoSoA64Simd overlay")
-                    .query_hits_by_scope(scope);
-                apply_after_bounds(&mut v, after_seq, started, limit);
-                v
+                self.tiles64_simd.as_ref().map_or_else(fallback, |tiles| {
+                    let mut v = tiles.query_hits_by_scope(scope);
+                    apply_after_bounds(&mut v, after_seq, started, limit);
+                    v
+                })
             }
         }
     }

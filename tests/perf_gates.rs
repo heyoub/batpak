@@ -16,7 +16,7 @@
 //! benches provide trend visibility; these gates catch gross regressions.
 
 use batpak::prelude::*;
-use batpak::store::{Store, StoreConfig, SyncConfig};
+use batpak::store::{Store, StoreConfig, SyncConfig, SyncMode};
 use std::time::Instant;
 use tempfile::TempDir;
 
@@ -422,8 +422,8 @@ fn batch_throughput_performance_gate() {
         data_dir: dir.path().to_path_buf(),
         sync: SyncConfig {
             every_n_events: 1,
-            ..SyncConfig::default()
-        }, // Each batch is a sync
+            mode: SyncMode::SyncData,
+        }, // Each batch is a sync on the benchmark-relevant data-fsync path.
         ..StoreConfig::new("")
     };
     let store = Store::open(config).expect("open");
@@ -464,10 +464,11 @@ fn batch_throughput_performance_gate() {
         batch_events_per_sec,
     };
 
-    // Threshold: 2K events/sec — set well below the typical observed
-    // throughput (35K-42K events/sec on a developer machine, ~12K on slow
-    // shared CI runners) so the gate catches CATEGORY regressions only
-    // (e.g., a refactor that introduces an O(n²) loop or removes batching
+    // Threshold: 2K events/sec on the SyncData path — set well below the
+    // typical observed throughput (35K-42K events/sec on a developer machine,
+    // ~12K on slow shared CI runners) so the gate catches CATEGORY
+    // regressions only (e.g., a refactor that introduces an O(n²) loop or
+    // removes batching on the benchmark-relevant durability mode
     // entirely), not run-to-run jitter on noisy CI hardware. Tightening
     // this threshold has historically caused flake-by-retry failures
     // (`FLAKY 3/3` on Linux, `TRY 3 FAIL` on Windows) without catching

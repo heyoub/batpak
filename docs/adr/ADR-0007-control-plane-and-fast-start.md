@@ -16,7 +16,7 @@ The crate keeps the blocking `append` / `append_batch` API as the default surfac
 - `WriterPressure`
 - `Store<ReadOnly>`
 
-The index uses a fanout multi-view architecture instead of a single chosen scan layout. Base AoS maps remain mandatory, while SoA / SoAoS / AoSoA overlays can coexist and queries route by shape.
+The index uses a multi-view overlay architecture instead of a single chosen scan layout. Base AoS maps remain mandatory, while SoA / SoAoS / AoSoA overlays can coexist and queries route by shape.
 
 Cold start prefers a verified mmap snapshot (`index.fbati`), then checkpoint restore, then full replay. Cancelled visibility-fence ranges are persisted separately so "durable but hidden" survives reopen and snapshot export.
 

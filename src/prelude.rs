@@ -2,8 +2,8 @@ pub use crate::coordinate::DagPosition;
 pub use crate::coordinate::{Coordinate, CoordinateError, KindFilter, Region};
 pub use crate::event::sourcing::{MultiDispatchError, MultiReactive, Reactive, TypedReactive};
 pub use crate::event::{
-    DecodeSource, DecodeTyped, Event, EventHeader, EventKind, EventPayload, EventSourced,
-    HashChain, JsonValueInput, ProjectionEvent, ProjectionInput, ProjectionPayload,
+    DecodeSource, DecodeTyped, Event, EventHeader, EventKind, EventKindError, EventPayload,
+    EventSourced, HashChain, JsonValueInput, ProjectionEvent, ProjectionInput, ProjectionPayload,
     RawMsgpackInput, ReplayLane, StoredEvent, TypedDecodeError,
 };
 pub use crate::guard::{Denial, Gate, GateSet, Receipt};

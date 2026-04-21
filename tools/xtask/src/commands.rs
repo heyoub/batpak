@@ -122,8 +122,9 @@ struct MutationScore {
     missed: usize,
     timed_out: usize,
     unviable: usize,
-    tested: usize,
-    score_pct: usize,
+    executed: usize,
+    scored: usize,
+    score_pct: Option<usize>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -476,18 +477,20 @@ fn mutation_score(output_dir: &Path) -> Result<MutationScore> {
     let missed = count_mutants_file(output_dir, "missed.txt")?;
     let timed_out = count_mutants_file(output_dir, "timeout.txt")?;
     let unviable = count_mutants_file(output_dir, "unviable.txt")?;
-    let tested = caught + missed;
-    let score_pct = if tested == 0 {
-        0
+    let scored = caught + missed;
+    let executed = scored + timed_out + unviable;
+    let score_pct = if scored == 0 {
+        None
     } else {
-        (caught * 100) / tested
+        Some((caught * 100) / scored)
     };
     Ok(MutationScore {
         caught,
         missed,
         timed_out,
         unviable,
-        tested,
+        executed,
+        scored,
         score_pct,
     })
 }
@@ -601,8 +604,7 @@ impl MutationLane {
         matches!(
             self.enforcement,
             MutationEnforcement::Threshold { .. } | MutationEnforcement::RecordOnly
-        ) && score.timed_out == 0
-            && (score.missed > 0 || score.unviable > 0)
+        ) && score.executed > 0
     }
 
     fn policy_line(&self) -> String {
@@ -728,25 +730,35 @@ fn assert_mutation_policy(
     output_dir: &Path,
     score: MutationScore,
 ) -> Result<()> {
-    if score.tested == 0 {
+    if score.executed == 0 {
         bail!(
-            "mutants: `{}` produced no tested mutants in {}. Treating this as a failure because \
+            "mutants: `{}` produced no executed mutants in {}. Treating this as a failure because \
              the mutation surface produced no evidence.",
             lane.label,
             output_dir.display()
         );
     }
 
-    println!(
-        "mutants: `{}` => {} caught / {} tested = {}% (missed: {}, timed out: {}, unviable: {})",
-        lane.label,
-        score.caught,
-        score.tested,
-        score.score_pct,
-        score.missed,
-        score.timed_out,
-        score.unviable,
-    );
+    match score.score_pct {
+        Some(score_pct) => println!(
+            "mutants: `{}` => {} caught / {} scored = {}% (executed: {}, missed: {}, timed out: {}, unviable: {})",
+            lane.label,
+            score.caught,
+            score.scored,
+            score_pct,
+            score.executed,
+            score.missed,
+            score.timed_out,
+            score.unviable,
+        ),
+        None => println!(
+            "mutants: `{}` => no scoreable mutants (executed: {}, timed out: {}, unviable: {})",
+            lane.label,
+            score.executed,
+            score.timed_out,
+            score.unviable,
+        ),
+    }
 
     if score.timed_out > 0 {
         bail!(
@@ -766,24 +778,33 @@ fn assert_mutation_policy(
         );
     }
 
+    let Some(score_pct) = score.score_pct else {
+        println!(
+            "mutants: `{}` produced execution evidence but no scoreable caught/missed mutants, so threshold math is not applied for this lane.",
+            lane.label
+        );
+        return Ok(());
+    };
+
     match lane.enforcement {
         MutationEnforcement::Threshold { min_catch_pct } => {
-            if score.score_pct < min_catch_pct as usize {
+            if score_pct < min_catch_pct as usize {
                 bail!(
                     "mutation score for `{}` is {}%, below the required {}% \
-                     ({} caught, {} missed out of {} tested mutants). Add tests that catch the \
+                     ({} caught, {} missed out of {} scored mutants; {} executed total). Add tests that catch the \
                      mutations listed in {}.",
                     lane.label,
-                    score.score_pct,
+                    score_pct,
                     min_catch_pct,
                     score.caught,
                     score.missed,
-                    score.tested,
+                    score.scored,
+                    score.executed,
                     output_dir.join("missed.txt").display()
                 );
             }
             if lane.scope == MutationScope::RepoWide {
-                if let Some(next_floor) = next_ratchet_floor(score.score_pct, Some(min_catch_pct)) {
+                if let Some(next_floor) = next_ratchet_floor(score_pct, Some(min_catch_pct)) {
                     println!(
                         "mutants: `{}` is above the current repo-wide ratchet floor; a future raise to {}% is available.",
                         lane.label, next_floor
@@ -792,10 +813,10 @@ fn assert_mutation_policy(
             }
         }
         MutationEnforcement::RecordOnly => {
-            if let Some(next_floor) = next_ratchet_floor(score.score_pct, None) {
+            if let Some(next_floor) = next_ratchet_floor(score_pct, None) {
                 println!(
                     "mutants: `{}` is in repo-wide record-only mode for this phase. Current score {}% supports a future ratchet to {}%.",
-                    lane.label, score.score_pct, next_floor
+                    lane.label, score_pct, next_floor
                 );
             }
         }
@@ -1201,15 +1222,16 @@ fn unpacked_package_dir(packaged_root: &Path) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_mutant_execution_plan, critical_mutation_lanes, critical_mutation_smoke_lanes,
-        is_default_hooks_path, matches_repo_hooks_path, mutants_command, next_ratchet_floor,
-        surface_excludes, MutantExecutionPlan, MutationBaseline, MutationLane, MutationScope,
-        MutationSharding, RepoMutationPhase, CURSOR_MUTANT_FILES, PROJECTION_MUTANT_FILES,
-        REPO_MUTATION_PHASE, REPO_WIDE_ALL_FEATURES_MUTANT_FILES,
-        REPO_WIDE_NO_DEFAULT_MUTANT_FILES, WRITER_COMMIT_MUTANT_FILES,
+        assert_mutation_policy, build_mutant_execution_plan, critical_mutation_lanes,
+        critical_mutation_smoke_lanes, is_default_hooks_path, matches_repo_hooks_path,
+        mutants_command, next_ratchet_floor, surface_excludes, MutantExecutionPlan,
+        MutationBaseline, MutationLane, MutationScope, MutationScore, MutationSharding,
+        RepoMutationPhase, CURSOR_MUTANT_FILES, PROJECTION_MUTANT_FILES, REPO_MUTATION_PHASE,
+        REPO_WIDE_ALL_FEATURES_MUTANT_FILES, REPO_WIDE_NO_DEFAULT_MUTANT_FILES,
+        WRITER_COMMIT_MUTANT_FILES,
     };
     use crate::{MutantMode, MutantSurface, MutantsArgs};
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
 
     #[test]
     fn repo_hooks_path_matches_relative_and_absolute_spellings() {
@@ -1415,5 +1437,68 @@ mod tests {
             surface_excludes(MutantSurface::AllFeatures)
         );
         assert_eq!(lanes[0].paths, WRITER_COMMIT_MUTANT_FILES);
+    }
+
+    fn fake_lane() -> MutationLane {
+        critical_mutation_lanes()
+            .into_iter()
+            .find(|lane| lane.slug == "writer-commit")
+            .expect("writer lane")
+    }
+
+    fn fake_output_dir() -> PathBuf {
+        PathBuf::from("tools/xtask/target/mutants/fake-lane")
+    }
+
+    #[test]
+    fn mutation_lane_allows_nonzero_exit_when_unviable_is_execution_evidence() {
+        let lane = fake_lane();
+        let score = MutationScore {
+            caught: 0,
+            missed: 0,
+            timed_out: 0,
+            unviable: 2,
+            executed: 2,
+            scored: 0,
+            score_pct: None,
+        };
+
+        assert!(lane.allows_nonzero_exit(score));
+    }
+
+    #[test]
+    fn mutation_policy_accepts_unviable_only_lane_as_execution_evidence() {
+        let lane = fake_lane();
+        let score = MutationScore {
+            caught: 0,
+            missed: 0,
+            timed_out: 0,
+            unviable: 3,
+            executed: 3,
+            scored: 0,
+            score_pct: None,
+        };
+
+        assert!(assert_mutation_policy(&lane, &fake_output_dir(), score).is_ok());
+    }
+
+    #[test]
+    fn mutation_policy_rejects_truly_empty_execution() {
+        let lane = fake_lane();
+        let score = MutationScore {
+            caught: 0,
+            missed: 0,
+            timed_out: 0,
+            unviable: 0,
+            executed: 0,
+            scored: 0,
+            score_pct: None,
+        };
+
+        let err = assert_mutation_policy(&lane, &fake_output_dir(), score).expect_err("must fail");
+        assert!(
+            err.to_string().contains("no executed mutants"),
+            "empty mutation lanes must fail as no-evidence lanes, got: {err:#}"
+        );
     }
 }

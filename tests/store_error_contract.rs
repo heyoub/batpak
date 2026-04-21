@@ -11,7 +11,7 @@
 //! SEEDED: not random; deterministic contract table.
 
 use batpak::coordinate::{Coordinate, CoordinateError};
-use batpak::store::StoreError;
+use batpak::store::{StoreError, StoreLockMode};
 use std::error::Error as _;
 use std::io;
 use std::path::PathBuf;
@@ -36,7 +36,8 @@ fn classify(error: &StoreError) -> HandlingClass {
         StoreError::Io(_)
         | StoreError::CacheFailed(_)
         | StoreError::CheckpointWriteFailed { .. } => HandlingClass::RetryableOperational,
-        StoreError::Coordinate(_)
+        StoreError::StoreLocked { .. }
+        | StoreError::Coordinate(_)
         | StoreError::NotFound(_)
         | StoreError::SequenceMismatch { .. }
         | StoreError::Configuration(_)
@@ -53,12 +54,14 @@ fn classify(error: &StoreError) -> HandlingClass {
         | StoreError::CoordinatePathTraversal
         | StoreError::CoordinateControlChar
         | StoreError::BatchItemTooLarge { .. }
-        | StoreError::EntityClockOverflow { .. } => HandlingClass::Domain,
+        | StoreError::EntityClockOverflow { .. }
+        | StoreError::InvalidClock { .. } => HandlingClass::Domain,
         StoreError::BatchFailed { source, .. } => classify(source.as_ref()),
         StoreError::Serialization(_)
         | StoreError::CrcMismatch { .. }
         | StoreError::CorruptSegment { .. }
         | StoreError::WriterCrashed
+        | StoreError::SequenceGateViolation { .. }
         | StoreError::CorruptFrame { .. }
         | StoreError::SegmentTooManyEntries { .. }
         | StoreError::DataDirMalformed { .. }
@@ -83,6 +86,33 @@ fn store_error_contract_table_stays_stable() {
             class: HandlingClass::RetryableOperational,
             source_needle: Some("disk timed out"),
             display_needles: &["IO error", "disk timed out"],
+        },
+        Case {
+            name: "store_locked",
+            error: StoreError::StoreLocked {
+                path: PathBuf::from("fixtures/locked-store"),
+                mode: StoreLockMode::ReadOnly,
+            },
+            class: HandlingClass::Domain,
+            source_needle: None,
+            display_needles: &["fixtures/locked-store", "read-only", "locked"],
+        },
+        Case {
+            name: "sequence_gate_violation",
+            error: StoreError::SequenceGateViolation {
+                operation: "publish_then_broadcast_unfenced",
+                requested: 7,
+                allocated: 5,
+                visible: 4,
+            },
+            class: HandlingClass::FailClosedOperational,
+            source_needle: None,
+            display_needles: &[
+                "publish_then_broadcast_unfenced",
+                "publish(7)",
+                "allocated=5",
+                "visible=4",
+            ],
         },
         Case {
             name: "serialization",
@@ -166,12 +196,12 @@ fn store_error_contract_table_stays_stable() {
         Case {
             name: "hidden_ranges_corrupt",
             error: StoreError::HiddenRangesCorrupt {
-                path: PathBuf::from("/tmp/hidden-ranges.json"),
+                path: PathBuf::from("fixtures/hidden-ranges.json"),
                 reason: "unexpected EOF".into(),
             },
             class: HandlingClass::FailClosedOperational,
             source_needle: None,
-            display_needles: &["/tmp/hidden-ranges.json", "unexpected EOF", "corrupt"],
+            display_needles: &["fixtures/hidden-ranges.json", "unexpected EOF", "corrupt"],
         },
         Case {
             name: "invalid_coordinate",
@@ -199,6 +229,16 @@ fn store_error_contract_table_stays_stable() {
             display_needles: &["batch item 1", "4097", "2048"],
         },
         Case {
+            name: "invalid_clock",
+            error: StoreError::InvalidClock {
+                timestamp_us: -17,
+                reason: "timestamp_us must be >= 0 microseconds since Unix epoch".into(),
+            },
+            class: HandlingClass::Domain,
+            source_needle: None,
+            display_needles: &["-17", "invalid", "timestamp_us"],
+        },
+        Case {
             name: "checkpoint_write_failed",
             error: StoreError::CheckpointWriteFailed {
                 id: "reactor-a".into(),
@@ -211,24 +251,28 @@ fn store_error_contract_table_stays_stable() {
         Case {
             name: "cursor_checkpoint_corrupt",
             error: StoreError::CursorCheckpointCorrupt {
-                path: PathBuf::from("/tmp/cursors/reactor-a.ckpt"),
+                path: PathBuf::from("fixtures/cursors/reactor-a.ckpt"),
                 reason: "invalid msgpack".into(),
             },
             class: HandlingClass::FailClosedOperational,
             source_needle: None,
-            display_needles: &["/tmp/cursors/reactor-a.ckpt", "invalid msgpack", "corrupt"],
+            display_needles: &[
+                "fixtures/cursors/reactor-a.ckpt",
+                "invalid msgpack",
+                "corrupt",
+            ],
         },
         Case {
             name: "cursor_checkpoint_region_mismatch",
             error: StoreError::CursorCheckpointRegionMismatch {
-                path: PathBuf::from("/tmp/cursors/reactor-a.ckpt"),
+                path: PathBuf::from("fixtures/cursors/reactor-a.ckpt"),
                 stored: Some("entity_prefix=user:".into()),
                 expected: "entity_prefix=order:".into(),
             },
             class: HandlingClass::FailClosedOperational,
             source_needle: None,
             display_needles: &[
-                "/tmp/cursors/reactor-a.ckpt",
+                "fixtures/cursors/reactor-a.ckpt",
                 "entity_prefix=user:",
                 "entity_prefix=order:",
                 "belongs to region",

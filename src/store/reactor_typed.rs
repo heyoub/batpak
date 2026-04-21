@@ -8,15 +8,15 @@
 //!      method. End users build `R: TypedReactive<T>` reactors and hand
 //!      them to `Store::react_loop_typed`.
 //!
-//!   2. **Shared internal runner.** [`ReactorDispatcher`] (crate-private
-//!      trait) + [`run_reactor`] (crate-private function). The runner rides
+//!   2. **Shared internal runner.** `ReactorDispatcher` (crate-private
+//!      trait) + `run_reactor` (crate-private function). The runner rides
 //!      the canal chosen by ADR-0011 — `cursor_guaranteed` via
 //!      `cursor_worker` — and funnels every reactor shape through a single
 //!      implementation. T4b's single-kind reactor and T6's multi-kind
 //!      reactor are both expressed as specific `ReactorDispatcher` impls.
 //!
-//!   3. **T4b's adapter.** [`SingleKindDispatcher<T, R>`] wraps a
-//!      `TypedReactive<T>` reactor and implements [`ReactorDispatcher`].
+//!   3. **T4b's adapter.** `SingleKindDispatcher<T, R>` wraps a
+//!      `TypedReactive<T>` reactor and implements `ReactorDispatcher`.
 //!      T6 will add a parallel `MultiKindDispatcher<R>` adapter alongside.
 //!
 //! **Decode-failure contract (unified across T4b and T6).**
@@ -126,7 +126,7 @@ pub struct ReactorConfig {
     /// * `Err(DecodeFailure)` from `route_typed` — matched kind, decode
     ///   failed. Correctness signal: stops the loop immediately regardless
     ///   of `restart_policy`; surfaces as
-    ///   [`ReactorError::Decode`](ReactorError::Decode). Restarts would
+    ///   [`ReactorError::Decode`]. Restarts would
     ///   loop forever on a deterministic decode failure, which is why the
     ///   policy is bypassed.
     ///

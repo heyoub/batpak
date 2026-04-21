@@ -1421,7 +1421,7 @@ fn batch_survives_unclean_shutdown_without_sidx_footer() {
 /// injected clock regresses between batch items.
 ///
 /// Before the fix in `precompute_batch_items` + `BatchItemComputed.wall_ms`,
-/// the batch path called `self.config.now_us()` independently for the
+/// the batch path sampled the write clock independently for the
 /// header and for the IndexEntry, and never applied the `raw_ms.max(last_ms)`
 /// clamp the single-append path uses. A regressing test/system clock could
 /// reorder `stream()` results within a batch and produce divergent wall_ms

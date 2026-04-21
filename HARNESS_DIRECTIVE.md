@@ -2,6 +2,10 @@
 
 This file defines the operational testing doctrine for `batpak`.
 
+Today this doctrine is a repo convention for doctrine-bearing harnesses, not a
+hard structural gate. Missing headers or misclassified suites should be fixed,
+but they do not currently fail `cargo xtask ci` by themselves.
+
 The goal is not to maximize test count or chase a vanity coverage number. The
 goal is to increase proof density: more decisions covered per harness, clearer
 receipts for what each harness proves, and fewer story tests that only exercise

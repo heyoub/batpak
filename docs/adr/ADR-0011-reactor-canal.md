@@ -21,8 +21,10 @@ writer retains the sender and moves on. No error channel, no restart, no
 checkpoint.
 
 `cursor_guaranteed` exists alongside it: a pull-based, index-backed
-canal that never loses events, already wrapped by `cursor_worker` which
-supplies restart policy, panic recovery, checkpoint/resume, and clean stop.
+canal that provides at-least-once ordered replay within a process, and
+durable at-least-once replay across restart when `checkpoint_id` is set.
+It is already wrapped by `cursor_worker`, which supplies restart policy,
+panic recovery, checkpoint/resume, and clean stop.
 
 This ADR compares the two canals and records the verdict consumed by the
 shipped typed-reactor implementation.
@@ -42,7 +44,7 @@ shipped typed-reactor implementation.
 
 **Files cited**: `src/store/delivery/cursor.rs:1-229`, `src/store/mod.rs:858-862`.
 
-- **Delivery guarantee.** Pull-based from the in-memory index. `Cursor::poll_batch(max)` at `cursor.rs:42-57` queries by `(region, position, started)` via `StoreIndex::query_hits_after` and returns up to `max` matching hits. Events never drop; the cursor advances only when events are consumed. "Guaranteed" here means at-least-once within process lifetime, and at-least-once across process restart when a `checkpoint_id` is set on `CursorWorkerConfig`.
+- **Delivery guarantee.** Pull-based from the in-memory index. `Cursor::poll_batch(max)` at `cursor.rs:42-57` queries by `(region, position, started)` via `StoreIndex::query_hits_after` and returns up to `max` matching hits. The cursor advances only when events are consumed. "Guaranteed" here means at-least-once within process lifetime, and at-least-once across process restart when a `checkpoint_id` is set on `CursorWorkerConfig`.
 - **Backpressure.** Natural — the reactor pulls. A slow reactor simply polls less frequently. The writer's commit-to-index visibility path is untouched.
 - **Error surface.** `cursor_worker` at `cursor.rs:131-228` supplies a supervised thread with explicit outcomes: the handler returns `CursorWorkerAction::{Continue, Stop}`, panics are caught via `std::panic::catch_unwind`, thread join surfaces `WriterCrashed` error to `CursorWorkerHandle::join()`.
 - **Restart / checkpoint.** Full: `RestartPolicy::{Once, Bounded { max_restarts, within_ms }}` at `cursor.rs:178-218`. On panic, the worker restores the last committed checkpoint via `Cursor::restore_checkpoint` and re-polls from there. When `CursorWorkerConfig.checkpoint_id: Option<String>` is set, checkpoints are persisted under `{data_dir}/cursors/{id}.ckpt` with parent-dir fsync so restart recovery spans process lifetime.
@@ -53,7 +55,7 @@ shipped typed-reactor implementation.
 
 | Axis | Lossy fanout | `cursor_guaranteed` |
 |---|---|---|
-| Delivery guarantee | Lossy under backpressure | At-least-once within process lifetime; at-least-once across restart when `checkpoint_id` is set; never drops |
+| Delivery guarantee | Lossy under backpressure | At-least-once within process lifetime; durable at-least-once across restart when `checkpoint_id` is set |
 | Backpressure model | None (drop-on-full) | Natural (pull-based) |
 | Error surface | None — `tracing::warn!` only | `JoinHandle<Result<(), StoreError>>` + supervised panic recovery |
 | Restart / checkpoint | None | `RestartPolicy` + `Cursor::{checkpoint, restore_checkpoint}` |
@@ -86,7 +88,7 @@ Derivation from the matrix:
 **Raw surface preserved.** `react_loop` + `Reactive<P>` stay intact as the
 lossy push variant (ADR-0010 / Dispatch Chapter invariant 6). Callers who
 want the lossy, decoupled, pre-decoded-envelope path keep it. Typed
-reactors are the additive guaranteed-delivery variant built on
+reactors are the additive at-least-once delivery variant built on
 `cursor_worker`.
 
 ## Consequences

@@ -5,7 +5,9 @@
 
 use batpak::coordinate::{Coordinate, Region};
 use batpak::event::EventKind;
-use batpak::store::{OpenIndexPath, OpenIndexReport, ReadOnly, Store, StoreConfig};
+use batpak::store::{
+    OpenIndexPath, OpenIndexReport, ReadOnly, Store, StoreConfig, StoreError, StoreLockMode,
+};
 use tempfile::TempDir;
 
 fn mmap_config(dir: &TempDir) -> StoreConfig {
@@ -41,22 +43,39 @@ fn mmap_index_written_and_open_read_only_matches_open() {
     );
 
     let open_store = Store::open(mmap_config(&dir)).expect("reopen open store");
-    let read_only = Store::<ReadOnly>::open_read_only(mmap_config(&dir)).expect("open read-only");
+    let lock_err = match Store::<ReadOnly>::open_read_only(mmap_config(&dir)) {
+        Ok(_) => panic!("read-only open must fail while mutable store holds the lifetime lock"),
+        Err(err) => err,
+    };
+    assert!(
+        matches!(
+            lock_err,
+            StoreError::StoreLocked {
+                mode: StoreLockMode::ReadOnly,
+                ..
+            }
+        ),
+        "read-only open while mutable owner is live must surface StoreLocked(ReadOnly), got {lock_err:?}"
+    );
 
     let open_stream = open_store.stream("entity:mmap");
-    let ro_stream = read_only.stream("entity:mmap");
     assert_eq!(
         open_stream.len(),
         24,
         "mmap-backed reopen must preserve the full entity stream"
     );
+
+    let open_query = open_store.query(&Region::scope("scope:test"));
+    open_store.close().expect("close mutable reopen");
+
+    let read_only = Store::<ReadOnly>::open_read_only(mmap_config(&dir)).expect("open read-only");
+    let ro_stream = read_only.stream("entity:mmap");
     assert_eq!(
         ro_stream.len(),
         open_stream.len(),
-        "ReadOnly and Open cold-start paths must agree on stream cardinality"
+        "ReadOnly reopen after mutable close must preserve stream cardinality"
     );
 
-    let open_query = open_store.query(&Region::scope("scope:test"));
     let ro_query = read_only.query(&Region::scope("scope:test"));
     assert_eq!(
         ro_query.len(),
