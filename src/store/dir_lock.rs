@@ -1,8 +1,8 @@
 use crate::store::{StoreError, StoreLockMode};
 use std::fs::{File, OpenOptions};
-use std::path::Path;
 #[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
+use std::path::Path;
 
 pub(crate) const STORE_LOCK_FILENAME: &str = ".batpak.lock";
 
