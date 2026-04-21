@@ -16,8 +16,8 @@
 - name: RetentionPredicate
   justification: compaction closures are exercised through CompactionStrategy without test code naming the boxed type alias directly
   witness:
-    - path: tests/store_advanced.rs
-      lines: [718]
+    - path: tests/store_snapshot_compaction.rs
+      lines: [553]
 - name: Active
   justification: typestate marker exercised by segment lifecycle tests
   witness:
@@ -46,8 +46,8 @@
 - name: CompactionResult
   justification: returned by compact and asserted through compaction behavior tests
   witness:
-    - path: tests/store_advanced.rs
-      lines: [626]
+    - path: tests/store_snapshot_compaction.rs
+      lines: [288]
 - name: u128_bytes
   justification: serde helper module referenced through serde attributes rather than direct imports
   witness:
