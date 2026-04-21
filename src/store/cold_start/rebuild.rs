@@ -5,6 +5,7 @@ use crate::store::index::interner::StringInterner;
 use crate::store::index::{DiskPos, IndexEntry, RoutingSummary, StoreIndex};
 use crate::store::segment;
 use crate::store::segment::scan::{Reader, ScannedIndexEntry};
+use crate::store::segment::sidx::ReservedKindFallbackCounts;
 use crate::store::StoreError;
 use rayon::prelude::*;
 use std::path::Path;
@@ -30,6 +31,7 @@ pub enum OpenIndexPath {
 
 /// Diagnostic output from `open_index()`. Hard truth, not logs.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct OpenIndexReport {
     /// Which restore strategy was selected and completed.
     pub path: OpenIndexPath,
@@ -39,6 +41,12 @@ pub struct OpenIndexReport {
     pub tail_entries: usize,
     /// Wall-clock microseconds for the entire open_index() call.
     pub elapsed_us: u64,
+    /// Number of unknown reserved system-kind SIDX/mmap values that fell back
+    /// to `DATA` during reopen.
+    pub unknown_reserved_system_kind_fallbacks: usize,
+    /// Number of unknown reserved effect-kind SIDX/mmap values that fell back
+    /// to `EFFECT_ERROR` during reopen.
+    pub unknown_reserved_effect_kind_fallbacks: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,6 +65,16 @@ struct RestorePlan {
     routing: RoutingSummary,
     restored_entries: usize,
     tail_entries: usize,
+    reserved_kind_fallbacks: ReservedKindFallbackCounts,
+}
+
+struct SnapshotPlanInput {
+    entries: Vec<IndexEntry>,
+    interner_strings: Vec<String>,
+    watermark: super::checkpoint::WatermarkInfo,
+    stored_allocator: u64,
+    routing: RoutingSummary,
+    reserved_kind_fallbacks: ReservedKindFallbackCounts,
 }
 
 struct RestorePlanner<'a> {
@@ -78,11 +96,14 @@ impl<'a> RestorePlanner<'a> {
             if let Some(snapshot) = super::mmap::try_load_mmap_snapshot(self.data_dir) {
                 return self.build_snapshot_plan(
                     RestoreSource::Mmap,
-                    snapshot.entries,
-                    snapshot.interner_strings,
-                    snapshot.watermark,
-                    snapshot.stored_allocator,
-                    snapshot.routing,
+                    SnapshotPlanInput {
+                        entries: snapshot.entries,
+                        interner_strings: snapshot.interner_strings,
+                        watermark: snapshot.watermark,
+                        stored_allocator: snapshot.stored_allocator,
+                        routing: snapshot.routing,
+                        reserved_kind_fallbacks: snapshot.reserved_kind_fallbacks,
+                    },
                 );
             }
         }
@@ -91,17 +112,26 @@ impl<'a> RestorePlanner<'a> {
             if let Some(snapshot) = super::checkpoint::try_load_checkpoint_snapshot(self.data_dir) {
                 return self.build_snapshot_plan(
                     RestoreSource::Checkpoint,
-                    snapshot.entries,
-                    snapshot.interner_strings,
-                    snapshot.watermark,
-                    snapshot.stored_allocator,
-                    snapshot.routing,
+                    SnapshotPlanInput {
+                        entries: snapshot.entries,
+                        interner_strings: snapshot.interner_strings,
+                        watermark: snapshot.watermark,
+                        stored_allocator: snapshot.stored_allocator,
+                        routing: snapshot.routing,
+                        reserved_kind_fallbacks: ReservedKindFallbackCounts::default(),
+                    },
                 );
             }
         }
 
-        let (source, entries, interner_strings, allocator_hint, chunk_count) =
-            collect_rebuild_entries(self.reader, self.data_dir)?;
+        let (
+            source,
+            entries,
+            interner_strings,
+            allocator_hint,
+            chunk_count,
+            reserved_kind_fallbacks,
+        ) = collect_rebuild_entries(self.reader, self.data_dir)?;
         let routing = RoutingSummary::from_sorted_entries(&entries, chunk_count.max(1));
         Ok(RestorePlan {
             source,
@@ -111,6 +141,7 @@ impl<'a> RestorePlanner<'a> {
             interner_strings,
             routing,
             entries,
+            reserved_kind_fallbacks,
         })
     }
 
@@ -119,44 +150,42 @@ impl<'a> RestorePlanner<'a> {
     fn build_snapshot_plan(
         &self,
         source: RestoreSource,
-        mut snapshot_entries: Vec<IndexEntry>,
-        interner_strings: Vec<String>,
-        watermark: super::checkpoint::WatermarkInfo,
-        stored_allocator: u64,
-        snapshot_routing: RoutingSummary,
+        mut snapshot: SnapshotPlanInput,
     ) -> Result<RestorePlan, StoreError> {
         let interner = StringInterner::new();
-        interner.replace_from_full_snapshot(&interner_strings);
+        interner.replace_from_full_snapshot(&snapshot.interner_strings);
         let tail_entries = collect_tail_entries(
             &interner,
             self.reader,
             self.data_dir,
-            &watermark,
-            stored_allocator,
+            &snapshot.watermark,
+            snapshot.stored_allocator,
         )?;
-        let restored_entries = snapshot_entries.len();
+        let restored_entries = snapshot.entries.len();
         let tail_count = tail_entries.len();
-        snapshot_entries.extend(tail_entries);
-        snapshot_entries.sort_by_key(|entry| entry.global_sequence);
-        let chunk_count = usize::try_from(snapshot_routing.chunk_count)
+        snapshot.entries.extend(tail_entries);
+        snapshot.entries.sort_by_key(|entry| entry.global_sequence);
+        let chunk_count = usize::try_from(snapshot.routing.chunk_count)
             .unwrap_or(1)
             .max(1)
             + usize::from(tail_count > 0);
-        let routing = RoutingSummary::from_sorted_entries(&snapshot_entries, chunk_count);
+        let routing = RoutingSummary::from_sorted_entries(&snapshot.entries, chunk_count);
 
         Ok(RestorePlan {
             source,
-            allocator_hint: stored_allocator.max(
-                snapshot_entries
+            allocator_hint: snapshot.stored_allocator.max(
+                snapshot
+                    .entries
                     .last()
                     .map(|entry| entry.global_sequence.saturating_add(1))
                     .unwrap_or(0),
             ),
             interner_strings: full_interner_snapshot(&interner),
             routing,
-            entries: snapshot_entries,
+            entries: snapshot.entries,
             restored_entries,
             tail_entries: tail_count,
+            reserved_kind_fallbacks: snapshot.reserved_kind_fallbacks,
         })
     }
 }
@@ -201,6 +230,8 @@ pub(crate) fn open_index(
         restored_entries: plan.restored_entries,
         tail_entries: plan.tail_entries,
         elapsed_us: duration_micros(t0.elapsed()),
+        unknown_reserved_system_kind_fallbacks: plan.reserved_kind_fallbacks.system,
+        unknown_reserved_effect_kind_fallbacks: plan.reserved_kind_fallbacks.effect,
     })
 }
 
@@ -331,7 +362,7 @@ fn segment_paths(data_dir: &Path) -> Result<Vec<(u64, std::path::PathBuf)>, Stor
 
 fn read_sealed_sidx_entries_parallel(
     sealed_segments: &[(u64, std::path::PathBuf)],
-) -> Option<Vec<ScannedIndexEntry>> {
+) -> Option<(Vec<ScannedIndexEntry>, ReservedKindFallbackCounts)> {
     let per_segment: Result<Vec<_>, StoreError> = sealed_segments
         .par_iter()
         .map(|(segment_id, path)| scanned_entries_from_sidx_footer(*segment_id, path))
@@ -340,11 +371,13 @@ fn read_sealed_sidx_entries_parallel(
     match per_segment {
         Ok(mut batches) => {
             let mut flat = Vec::new();
-            for batch in batches.drain(..) {
+            let mut reserved_kind_fallbacks = ReservedKindFallbackCounts::default();
+            for (batch, counts) in batches.drain(..) {
                 flat.extend(batch);
+                reserved_kind_fallbacks = reserved_kind_fallbacks.add(counts);
             }
             flat.sort_by_key(|entry| entry.global_sequence.unwrap_or(0));
-            Some(flat)
+            Some((flat, reserved_kind_fallbacks))
         }
         Err(error) => {
             tracing::warn!(
@@ -360,12 +393,13 @@ fn read_sealed_sidx_entries_parallel(
 fn scanned_entries_from_sidx_footer(
     segment_id: u64,
     path: &Path,
-) -> Result<Vec<ScannedIndexEntry>, StoreError> {
+) -> Result<(Vec<ScannedIndexEntry>, ReservedKindFallbackCounts), StoreError> {
     match crate::store::segment::sidx::read_footer(path) {
         Ok(Some((entries, strings))) => {
             let mut scanned = Vec::with_capacity(entries.len());
+            let mut reserved_kind_fallbacks = ReservedKindFallbackCounts::default();
             for entry in entries {
-                let row = entry.to_cold_start_row(segment_id);
+                let row = entry.to_cold_start_row_counted(segment_id, &mut reserved_kind_fallbacks);
                 let kind = row.kind;
                 if kind == crate::event::EventKind::SYSTEM_BATCH_BEGIN
                     || kind == crate::event::EventKind::SYSTEM_BATCH_COMMIT
@@ -374,7 +408,7 @@ fn scanned_entries_from_sidx_footer(
                 }
                 scanned.push(ScannedIndexEntry::from_cold_start_row(&row, &strings)?);
             }
-            Ok(scanned)
+            Ok((scanned, reserved_kind_fallbacks))
         }
         Ok(None) => Err(StoreError::ser_msg(
             "sealed segment missing SIDX footer during parallel rebuild",
@@ -395,7 +429,7 @@ fn read_sealed_sidx_entries_sequential(
 ) -> Result<Vec<ScannedIndexEntry>, StoreError> {
     let mut flat = Vec::new();
     for (segment_id, path) in sealed_segments {
-        flat.extend(scanned_entries_from_sidx_footer(*segment_id, path)?);
+        flat.extend(scanned_entries_from_sidx_footer(*segment_id, path)?.0);
     }
     flat.sort_by_key(|entry| entry.global_sequence.unwrap_or(0));
     Ok(flat)
@@ -488,7 +522,14 @@ fn collect_tail_entries(
     Ok(rebuilt_entries)
 }
 
-type RebuildResult = (RestoreSource, Vec<IndexEntry>, Vec<String>, u64, usize);
+type RebuildResult = (
+    RestoreSource,
+    Vec<IndexEntry>,
+    Vec<String>,
+    u64,
+    usize,
+    ReservedKindFallbackCounts,
+);
 
 fn collect_rebuild_entries(reader: &Reader, data_dir: &Path) -> Result<RebuildResult, StoreError> {
     let entries = segment_paths(data_dir)?;
@@ -507,8 +548,11 @@ fn collect_rebuild_entries(reader: &Reader, data_dir: &Path) -> Result<RebuildRe
     let mut source = RestoreSource::SealedSidxRebuild;
     let mut chunk_count = sealed_segments.len().max(1);
 
+    let mut reserved_kind_fallbacks = ReservedKindFallbackCounts::default();
+
     if !sealed_segments.is_empty() {
-        if let Some(scanned) = read_sealed_sidx_entries_parallel(&sealed_segments) {
+        if let Some((scanned, counts)) = read_sealed_sidx_entries_parallel(&sealed_segments) {
+            reserved_kind_fallbacks = reserved_kind_fallbacks.add(counts);
             for se in scanned {
                 let global_sequence = se
                     .global_sequence
@@ -566,6 +610,7 @@ fn collect_rebuild_entries(reader: &Reader, data_dir: &Path) -> Result<RebuildRe
         full_interner_snapshot(&interner),
         allocator_hint,
         chunk_count,
+        reserved_kind_fallbacks,
     ))
 }
 
@@ -577,7 +622,7 @@ pub(crate) fn rebuild_from_segments(
     reader: &Reader,
     data_dir: &Path,
 ) -> Result<(), StoreError> {
-    let (_, entries, interner_strings, allocator_hint, chunk_count) =
+    let (_, entries, interner_strings, allocator_hint, chunk_count, _) =
         collect_rebuild_entries(reader, data_dir)?;
     index.interner.replace_from_full_snapshot(&interner_strings);
     let routing = RoutingSummary::from_sorted_entries(&entries, chunk_count.max(1));
@@ -666,7 +711,7 @@ mod tests {
             "PROPERTY: tiny segments should produce at least one sealed segment with an SIDX footer."
         );
 
-        let parallel = read_sealed_sidx_entries_parallel(&sealed_segments)
+        let (parallel, _) = read_sealed_sidx_entries_parallel(&sealed_segments)
             .expect("parallel SIDX footer read should succeed");
         let sequential = read_sealed_sidx_entries_sequential(&sealed_segments)
             .expect("sequential SIDX footer read should succeed");

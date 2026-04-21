@@ -10,6 +10,35 @@ use batpak::store::{
 };
 use tempfile::TempDir;
 
+fn mmap_entries_offset(bytes: &[u8]) -> usize {
+    const PREFIX_LEN: usize = 6 + 2 + 4;
+    const HEADER_TAIL_LEN_V2: usize = (8 * 6) + 4;
+    let version = u16::from_le_bytes(bytes[6..8].try_into().expect("version slice"));
+    assert_eq!(
+        version, 3,
+        "test helper expects the live mmap snapshot format"
+    );
+    let header_tail = &bytes[PREFIX_LEN..PREFIX_LEN + HEADER_TAIL_LEN_V2];
+    let interner_bytes_len =
+        u64::from_le_bytes(header_tail[36..44].try_into().expect("interner size slice"));
+    let summary_bytes_len =
+        u64::from_le_bytes(header_tail[44..52].try_into().expect("summary size slice"));
+    PREFIX_LEN
+        + HEADER_TAIL_LEN_V2
+        + usize::try_from(interner_bytes_len).expect("interner bytes fit usize")
+        + usize::try_from(summary_bytes_len).expect("summary bytes fit usize")
+}
+
+fn rewrite_first_mmap_kind(artifact: &std::path::Path, raw_kind: u16) {
+    let mut bytes = std::fs::read(artifact).expect("read mmap artifact");
+    let entries_offset = mmap_entries_offset(&bytes);
+    let kind_offset = entries_offset + 24;
+    bytes[kind_offset..kind_offset + 2].copy_from_slice(&raw_kind.to_le_bytes());
+    let crc = crc32fast::hash(&bytes[12..]);
+    bytes[8..12].copy_from_slice(&crc.to_le_bytes());
+    std::fs::write(artifact, bytes).expect("rewrite mmap artifact");
+}
+
 fn mmap_config(dir: &TempDir) -> StoreConfig {
     StoreConfig::new(dir.path())
         .with_enable_checkpoint(false)
@@ -182,4 +211,31 @@ fn default_config_reopen_uses_mmap_path() {
         "all events must be present after mmap reopen"
     );
     store2.close().expect("close");
+}
+
+#[test]
+fn mmap_open_report_counts_reserved_kind_fallbacks() {
+    let dir = TempDir::new().expect("temp dir");
+    seed_store(&dir, 12);
+
+    let artifact = dir.path().join("index.fbati");
+    rewrite_first_mmap_kind(&artifact, 0x0006);
+
+    let store = Store::open(mmap_config(&dir)).expect("reopen with reserved-kind fallback");
+    let report = store
+        .diagnostics()
+        .open_report
+        .expect("open report after mmap reopen");
+    assert_eq!(report.path, OpenIndexPath::Mmap);
+    assert_eq!(
+        report.unknown_reserved_system_kind_fallbacks, 1,
+        "PROPERTY: mmap reopen must surface reserved system-kind fallback counts through open_report."
+    );
+    assert_eq!(report.unknown_reserved_effect_kind_fallbacks, 0);
+    assert_eq!(
+        store.stream("entity:mmap").len(),
+        12,
+        "reserved-kind fallback accounting must not drop live entries on reopen"
+    );
+    store.close().expect("close");
 }

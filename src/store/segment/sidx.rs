@@ -69,6 +69,21 @@ const TRAILER_SIZE: u64 = 16;
 /// - correlation_id(16) + causation_id(16) = 32 → **162**
 pub(crate) const ENTRY_SIZE: usize = 162;
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ReservedKindFallbackCounts {
+    pub(crate) system: usize,
+    pub(crate) effect: usize,
+}
+
+impl ReservedKindFallbackCounts {
+    pub(crate) fn add(self, other: Self) -> Self {
+        Self {
+            system: self.system + other.system,
+            effect: self.effect + other.effect,
+        }
+    }
+}
+
 const _ASSERT_ENTRY_SIZE: () = {
     // Compile-time sanity: update this constant whenever SidxEntry fields change.
     assert!(
@@ -94,7 +109,7 @@ pub(crate) fn kind_to_raw(kind: EventKind) -> u16 {
 /// (effect) with a panic, so those are matched directly against the known library
 /// constants. Any unrecognised value in a reserved range falls back to the closest
 /// documented constant (system or effect root) so the index can still be rebuilt.
-pub(crate) fn raw_to_kind(raw: u16) -> EventKind {
+fn raw_to_kind_impl(raw: u16, counts: Option<&mut ReservedKindFallbackCounts>) -> EventKind {
     let category = (raw >> 12) as u8;
     match category {
         // Reserved system category (0x0) — match known constants by full value.
@@ -107,6 +122,9 @@ pub(crate) fn raw_to_kind(raw: u16) -> EventKind {
             0x0FFE => EventKind::TOMBSTONE,
             0x0000 => EventKind::DATA,
             _ => {
+                if let Some(counts) = counts {
+                    counts.system += 1;
+                }
                 warn!(
                     raw,
                     "unrecognized reserved system kind in SIDX footer; falling back to DATA"
@@ -123,6 +141,9 @@ pub(crate) fn raw_to_kind(raw: u16) -> EventKind {
             0xD006 => EventKind::EFFECT_CANCEL,
             0xD007 => EventKind::EFFECT_CONFLICT,
             _ => {
+                if let Some(counts) = counts {
+                    counts.effect += 1;
+                }
                 warn!(
                     raw,
                     "unrecognized reserved effect kind in SIDX footer; falling back to EFFECT_ERROR"
@@ -133,6 +154,15 @@ pub(crate) fn raw_to_kind(raw: u16) -> EventKind {
         // All other categories (0x1–0xC, 0xE–0xF) are open for product use.
         other => EventKind::custom(other, raw & 0x0FFF),
     }
+}
+
+#[cfg(test)]
+pub(crate) fn raw_to_kind(raw: u16) -> EventKind {
+    raw_to_kind_impl(raw, None)
+}
+
+pub(crate) fn raw_to_kind_counted(raw: u16, counts: &mut ReservedKindFallbackCounts) -> EventKind {
+    raw_to_kind_impl(raw, Some(counts))
 }
 
 // ── SidxEntry ─────────────────────────────────────────────────────────────────
@@ -184,6 +214,14 @@ impl SidxEntry {
     }
 
     pub(crate) fn to_cold_start_row(&self, segment_id: u64) -> ColdStartIndexRow {
+        self.to_cold_start_row_counted(segment_id, &mut ReservedKindFallbackCounts::default())
+    }
+
+    pub(crate) fn to_cold_start_row_counted(
+        &self,
+        segment_id: u64,
+        counts: &mut ReservedKindFallbackCounts,
+    ) -> ColdStartIndexRow {
         ColdStartIndexRow {
             source: ColdStartSource::Sidx,
             event_id: self.event_id,
@@ -191,7 +229,7 @@ impl SidxEntry {
             causation_id: (self.causation_id != 0).then_some(self.causation_id),
             entity_id: InternId(self.entity_idx),
             scope_id: InternId(self.scope_idx),
-            kind: raw_to_kind(self.kind),
+            kind: raw_to_kind_counted(self.kind, counts),
             wall_ms: self.wall_ms,
             clock: self.clock,
             dag_lane: self.dag_lane,
@@ -843,6 +881,18 @@ mod tests {
         let via_helper = entry.event_kind();
         let via_fn = raw_to_kind(entry.kind);
         assert_eq!(kind_to_raw(via_helper), kind_to_raw(via_fn));
+    }
+
+    #[test]
+    fn raw_to_kind_counted_tracks_reserved_fallbacks() {
+        let mut counts = ReservedKindFallbackCounts::default();
+        assert_eq!(raw_to_kind_counted(0x0006, &mut counts), EventKind::DATA);
+        assert_eq!(
+            raw_to_kind_counted(0xD0FF, &mut counts),
+            EventKind::EFFECT_ERROR
+        );
+        assert_eq!(counts.system, 1);
+        assert_eq!(counts.effect, 1);
     }
 
     // ── intern deduplicates strings ───────────────────────────────────────────

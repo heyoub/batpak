@@ -50,9 +50,11 @@ impl SoAoSInner {
         for run in &routing.entity_runs {
             let start = usize::try_from(run.start)
                 .expect("invariant: entity run index fits usize on any supported target");
+            let len = usize::try_from(run.len)
+                .expect("invariant: entity run length fits usize on any supported target");
             let end = start
-                + usize::try_from(run.len)
-                    .expect("invariant: entity run length fits usize on any supported target");
+                .checked_add(len)
+                .expect("invariant: entity run start+len fits usize on supported targets");
             let slice = &entries_by_entity[start..end];
             if slice.is_empty() {
                 continue;
