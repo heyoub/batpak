@@ -15,7 +15,9 @@ use crate::store::index::interner::InternId;
 use crate::store::index::{
     recommended_restore_chunk_count, DiskPos, IndexEntry, RoutingSummary, StoreIndex,
 };
-use crate::store::segment::sidx::{kind_to_raw, raw_to_kind};
+#[cfg(test)]
+use crate::store::segment::sidx::raw_to_kind;
+use crate::store::segment::sidx::{kind_to_raw, raw_to_kind_counted, ReservedKindFallbackCounts};
 use crate::store::StoreError;
 use memmap2::Mmap;
 use rayon::prelude::*;
@@ -64,6 +66,7 @@ pub(crate) struct LoadedMmapSnapshot {
     pub(crate) watermark: WatermarkInfo,
     pub(crate) stored_allocator: u64,
     pub(crate) routing: RoutingSummary,
+    pub(crate) reserved_kind_fallbacks: ReservedKindFallbackCounts,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -95,7 +98,15 @@ impl MmapIndexEntry {
         DiskPos::new(self.segment_id, self.frame_offset, self.frame_length)
     }
 
+    #[cfg(test)]
     fn to_cold_start_row(&self) -> ColdStartIndexRow {
+        self.to_cold_start_row_counted(&mut ReservedKindFallbackCounts::default())
+    }
+
+    fn to_cold_start_row_counted(
+        &self,
+        counts: &mut ReservedKindFallbackCounts,
+    ) -> ColdStartIndexRow {
         ColdStartIndexRow {
             source: ColdStartSource::MmapIndex,
             event_id: self.event_id,
@@ -103,7 +114,7 @@ impl MmapIndexEntry {
             causation_id: (self.causation_id != 0).then_some(self.causation_id),
             entity_id: InternId(self.entity_idx),
             scope_id: InternId(self.scope_idx),
-            kind: raw_to_kind(self.kind),
+            kind: raw_to_kind_counted(self.kind, counts),
             wall_ms: self.wall_ms,
             clock: self.clock,
             dag_lane: self.dag_lane,
@@ -740,6 +751,7 @@ pub(crate) fn try_load_mmap_snapshot(data_dir: &Path) -> Option<LoadedMmapSnapsh
             let start_byte = start * loaded.entry_size;
             let end_byte = start_byte + (len * loaded.entry_size);
             let mut rebuilt = Vec::with_capacity(len);
+            let mut reserved_kind_fallbacks = ReservedKindFallbackCounts::default();
             let version = if loaded.entry_size == MMAP_ENTRY_SIZE_V3 {
                 3
             } else {
@@ -749,18 +761,20 @@ pub(crate) fn try_load_mmap_snapshot(data_dir: &Path) -> Option<LoadedMmapSnapsh
                 let entry = MmapIndexEntry::decode_from(chunk, version)?;
                 rebuilt.push(
                     entry
-                        .to_cold_start_row()
+                        .to_cold_start_row_counted(&mut reserved_kind_fallbacks)
                         .to_index_entry(&loaded.interner_strings)?,
                 );
             }
-            Ok::<_, StoreError>((chunk_idx, rebuilt))
+            Ok::<_, StoreError>((chunk_idx, rebuilt, reserved_kind_fallbacks))
         })
         .collect::<Result<Vec<_>, _>>()
         .ok()?;
-    per_chunk.sort_by_key(|(chunk_idx, _)| *chunk_idx);
+    per_chunk.sort_by_key(|(chunk_idx, _, _)| *chunk_idx);
     let mut rebuilt_entries = Vec::with_capacity(entry_count);
-    for (_, chunk_entries) in per_chunk {
+    let mut reserved_kind_fallbacks = ReservedKindFallbackCounts::default();
+    for (_, chunk_entries, chunk_counts) in per_chunk {
         rebuilt_entries.extend(chunk_entries);
+        reserved_kind_fallbacks = reserved_kind_fallbacks.add(chunk_counts);
     }
     let routing = if loaded.routing.chunks.is_empty() {
         RoutingSummary::from_sorted_entries(
@@ -777,6 +791,7 @@ pub(crate) fn try_load_mmap_snapshot(data_dir: &Path) -> Option<LoadedMmapSnapsh
         watermark: loaded.watermark,
         stored_allocator: loaded.stored_allocator,
         routing,
+        reserved_kind_fallbacks,
     })
 }
 
