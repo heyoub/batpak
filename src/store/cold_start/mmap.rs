@@ -35,6 +35,18 @@ const HEADER_LEN_V2: usize = PREFIX_LEN + HEADER_TAIL_LEN_V2;
 const MMAP_ENTRY_SIZE_V2: usize = 162;
 const MMAP_ENTRY_SIZE_V3: usize = 170;
 
+fn read_le_u16(bytes: &[u8]) -> Option<u16> {
+    Some(u16::from_le_bytes(bytes.try_into().ok()?))
+}
+
+fn read_le_u32(bytes: &[u8]) -> Option<u32> {
+    Some(u32::from_le_bytes(bytes.try_into().ok()?))
+}
+
+fn read_le_u64(bytes: &[u8]) -> Option<u64> {
+    Some(u64::from_le_bytes(bytes.try_into().ok()?))
+}
+
 struct LoadedMmapIndex {
     mmap: Mmap,
     interner_strings: Vec<String>,
@@ -385,7 +397,7 @@ fn try_load_mmap_index(data_dir: &Path) -> Option<LoadedMmapIndex> {
         return None;
     }
 
-    let version = u16::from_le_bytes(prefix[6..8].try_into().expect("prefix slice length"));
+    let version = read_le_u16(&prefix[6..8])?;
     if version != 1 && version != 2 && version != MMAP_INDEX_VERSION {
         tracing::warn!(
             target: "batpak::mmap_index",
@@ -418,53 +430,24 @@ fn try_load_mmap_index(data_dir: &Path) -> Option<LoadedMmapIndex> {
         return None;
     }
 
-    let expected_crc = u32::from_le_bytes(prefix[8..12].try_into().expect("prefix slice length"));
+    let expected_crc = read_le_u32(&prefix[8..12])?;
     let mut cursor = 0usize;
-    let watermark_segment_id = u64::from_le_bytes(
-        header_tail[cursor..cursor + 8]
-            .try_into()
-            .expect("tail slice length"),
-    );
+    let watermark_segment_id = read_le_u64(header_tail.get(cursor..cursor + 8)?)?;
     cursor += 8;
-    let watermark_offset = u64::from_le_bytes(
-        header_tail[cursor..cursor + 8]
-            .try_into()
-            .expect("tail slice length"),
-    );
+    let watermark_offset = read_le_u64(header_tail.get(cursor..cursor + 8)?)?;
     cursor += 8;
-    let stored_allocator = u64::from_le_bytes(
-        header_tail[cursor..cursor + 8]
-            .try_into()
-            .expect("tail slice length"),
-    );
+    let stored_allocator = read_le_u64(header_tail.get(cursor..cursor + 8)?)?;
     cursor += 8;
-    let interner_count = u32::from_le_bytes(
-        header_tail[cursor..cursor + 4]
-            .try_into()
-            .expect("tail slice length"),
-    );
+    let interner_count = read_le_u32(header_tail.get(cursor..cursor + 4)?)?;
     cursor += 4;
-    let entry_count = u64::from_le_bytes(
-        header_tail[cursor..cursor + 8]
-            .try_into()
-            .expect("tail slice length"),
-    );
+    let entry_count = read_le_u64(header_tail.get(cursor..cursor + 8)?)?;
     cursor += 8;
-    let interner_bytes_len = u64::from_le_bytes(
-        header_tail[cursor..cursor + 8]
-            .try_into()
-            .expect("tail slice length"),
-    );
+    let interner_bytes_len = read_le_u64(header_tail.get(cursor..cursor + 8)?)?;
     cursor += 8;
     let summary_bytes_len = if version == 1 {
         0usize
     } else {
-        usize::try_from(u64::from_le_bytes(
-            header_tail[cursor..cursor + 8]
-                .try_into()
-                .expect("tail slice length"),
-        ))
-        .ok()?
+        usize::try_from(read_le_u64(header_tail.get(cursor..cursor + 8)?)?).ok()?
     };
 
     let metadata = match file.metadata() {

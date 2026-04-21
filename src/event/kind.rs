@@ -32,6 +32,10 @@ impl EventKind {
     ///
     /// Use this when the category/type pair originates from user input,
     /// configuration, or any other runtime boundary that must not panic.
+    ///
+    /// # Errors
+    /// Returns [`EventKindError`] when the caller supplies a reserved category
+    /// or a value that does not fit the supported 4-bit/12-bit custom namespace.
     pub fn try_custom(category: u8, type_id: u16) -> Result<Self, EventKindError> {
         if category >= 16 {
             return Err(EventKindError::CategoryOutOfRange { category });

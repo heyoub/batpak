@@ -190,10 +190,7 @@ impl Cursor {
             return Vec::new();
         }
         self.started = true;
-        self.position = hits
-            .last()
-            .expect("non-empty vec has a last element")
-            .global_sequence;
+        self.position = hits[hits.len() - 1].global_sequence;
         hits.into_iter()
             .filter_map(|hit| self.index.upgrade_hit(hit))
             .collect()

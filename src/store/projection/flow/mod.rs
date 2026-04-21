@@ -15,12 +15,12 @@ use outcome::{
 };
 #[doc(hidden)]
 pub use replay_input::ReplayInput;
+#[cfg(test)]
+use strategy::{compute_strategy, ProjectionStrategy};
 use strategy::{
     replay_execution, PreparedProjection, ProjectionDispatch, ProjectionPreparation, ReplayContext,
     ReplayExecution,
 };
-#[cfg(test)]
-use strategy::{compute_strategy, ProjectionStrategy};
 
 fn decode_cached_state<T>(entity: &str, bytes: &[u8], warning: &str) -> Option<T>
 where

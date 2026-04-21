@@ -323,7 +323,7 @@ impl WriterState<'_> {
         let computed = self.precompute_batch_items(prepared, first_seq)?;
 
         let batch_count = u32::try_from(prepared.len())
-            .expect("invariant: batch_max_size validated at submit time, always < u32::MAX");
+            .map_err(|_| StoreError::ser_msg("prepared batch item count exceeds u32::MAX"))?;
         let marker_offset =
             self.write_batch_marker_frame(batch_id, EventKind::SYSTEM_BATCH_BEGIN, batch_count, 0)?;
         trace!(batch_id, offset = marker_offset, "batch marker written");
@@ -392,11 +392,9 @@ impl WriterState<'_> {
         )?;
 
         self.index.insert_batch(artifacts.entries);
-        let publish_up_to =
-            first_seq
-                + u64::from(u32::try_from(prepared.len()).expect(
-                    "invariant: batch_max_size validated at submit time, always < u32::MAX",
-                ));
+        let publish_span = u32::try_from(prepared.len())
+            .map_err(|_| StoreError::ser_msg("prepared batch item count exceeds u32::MAX"))?;
+        let publish_up_to = first_seq + u64::from(publish_span);
 
         if let Some(fence) = fence {
             fence.record_publish_up_to(publish_up_to);
@@ -448,9 +446,13 @@ impl WriterState<'_> {
             let disk_pos = DiskPos {
                 segment_id: *self.segment_id,
                 offset,
-                length: u32::try_from(frame.len()).expect(
-                    "invariant: frame size bounded by segment_max_bytes (64 MB), within u32",
-                ),
+                length: u32::try_from(frame.len()).map_err(|_| {
+                    batch_failed(
+                        idx,
+                        BatchFailureStage::Encoding,
+                        StoreError::ser_msg("encoded batch frame length exceeds u32::MAX"),
+                    )
+                })?,
             };
             receipts.push(AppendReceipt {
                 event_id: staged.event_id(),

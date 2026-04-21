@@ -411,6 +411,8 @@ impl SidxEntryCollector {
     /// Returns [`StoreError::Serialization`] if the string table cannot be encoded to msgpack.
     /// Returns [`StoreError::SegmentTooManyEntries`] if the entry count exceeds `u32::MAX`.
     /// Returns [`StoreError::Io`] if the write fails.
+    // justifies: src/store/segment/sidx.rs and src/store/segment/mod.rs bound trailer sizing and string-table indexing by format ceilings, not caller input.
+    #[allow(clippy::expect_used)]
     pub(crate) fn write_footer<W: Write + Seek>(
         &self,
         writer: &mut W,
@@ -462,6 +464,8 @@ impl SidxEntryCollector {
     ///
     /// If `s` already exists in the table, returns the existing index.
     /// Otherwise appends it and returns the new index.
+    // justifies: src/store/segment/sidx.rs bounds the string table by the segment size ceiling, so this u32 slot assignment is a format invariant.
+    #[allow(clippy::expect_used)]
     fn intern(&mut self, s: &str) -> u32 {
         if let Some(&idx) = self.string_map.get(s) {
             return idx;

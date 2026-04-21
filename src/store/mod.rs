@@ -501,9 +501,9 @@ impl Store<Open> {
     /// Panics if the invariant is violated — which only happens when a
     /// `Store<Open>` has been partially moved out of during drop, a context
     /// in which every public method is already unreachable.
+    // justifies: INV-TYPESTATE-OPEN-HAS-WRITER and src/store/lifecycle.rs make this a typestate construction guarantee, not contingent runtime input.
+    #[allow(clippy::expect_used)]
     pub(crate) fn writer_ref(&self) -> &WriterHandle {
-        // justifies: INV-TYPESTATE-OPEN-HAS-WRITER; typestate invariant of Store<Open> — see open_components
-        // and Store::open_with_cache in src/store/lifecycle.rs for the construction guarantee.
         self.writer
             .as_ref()
             .expect("invariant: Store<Open> is constructed with a writer handle")

@@ -61,6 +61,8 @@ impl InternId {
     /// The inner `u32` is a 1-based index; this cast is always lossless because
     /// `u32::MAX` (≈4 B) is well within `usize` range on all supported targets.
     #[inline]
+    // justifies: src/store/index/interner.rs supports only targets where the u32 interner domain fits usize; this is a supported-target invariant.
+    #[allow(clippy::expect_used)]
     pub(crate) fn to_usize(self) -> usize {
         usize::try_from(self.0).expect("u32 intern IDs fit in usize on supported targets")
     }
@@ -124,6 +126,8 @@ impl StringInterner {
         }
     }
 
+    // justifies: src/store/index/interner.rs builds snapshots from its own u32-backed state, so restore preserves the same bounded id domain.
+    #[allow(clippy::expect_used)]
     fn install_snapshot_iter<I>(&self, strings: I)
     where
         I: IntoIterator<Item = Arc<str>>,

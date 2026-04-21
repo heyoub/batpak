@@ -139,8 +139,10 @@ Only coordinates, events, gates, pipelines, and the store.
 **No external database substrate.** Segments are native coordinate-addressed append logs.
 No LMDB, no redb, no SQLite.
 
-**No concurrent writers.** One writer thread owns commit order. Multiple readers are fine.
-Two processes sharing a store directory will corrupt it.
+**No concurrent owners.** One live `Store` handle owns the directory lock at a time.
+In the current hardening wave that lock is intentionally exclusive-only, so a
+second mutable open or a concurrent read-only open fails with `StoreLocked`
+instead of racing the same store directory.
 
 **No per-entry integrity.** Each frame carries a CRC32. Cold-start artifacts carry a
 full-file CRC. There is no per-byte or per-field checksum beyond that.

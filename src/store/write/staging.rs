@@ -217,6 +217,8 @@ pub(crate) struct PreparedBatchInternedIds {
 }
 
 impl PreparedBatchInternedIds {
+    // justifies: src/store/write/staging.rs builds PreparedBatchInternedIds from the exact batch items, so absence here indicates an internal bug.
+    #[allow(clippy::expect_used)]
     pub(crate) fn entity_id(&self, item: &PreparedBatchItem) -> InternId {
         *self
             .entity_ids
@@ -224,6 +226,8 @@ impl PreparedBatchInternedIds {
             .expect("prepared batch entity dedupe must include every item entity")
     }
 
+    // justifies: src/store/write/staging.rs builds PreparedBatchInternedIds from the exact batch items, so absence here indicates an internal bug.
+    #[allow(clippy::expect_used)]
     pub(crate) fn scope_id(&self, item: &PreparedBatchItem) -> InternId {
         *self
             .scope_ids

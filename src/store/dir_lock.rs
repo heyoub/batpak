@@ -39,14 +39,14 @@ impl StoreDirLock {
 fn open_lock_file(path: &Path) -> Result<File, StoreError> {
     #[cfg(unix)]
     {
-        return OpenOptions::new()
+        OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
             .truncate(false)
             .custom_flags(libc::O_NOFOLLOW)
             .open(path)
-            .map_err(StoreError::Io);
+            .map_err(StoreError::Io)
     }
 
     #[cfg(not(unix))]

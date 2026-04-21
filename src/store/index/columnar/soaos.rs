@@ -38,6 +38,8 @@ impl SoAoSInner {
         }
     }
 
+    // justifies: src/store/index/restore.rs and src/store/index/columnar/soaos.rs keep routing runs u32-backed; supported targets index them losslessly as usize.
+    #[allow(clippy::expect_used)]
     pub(super) fn from_restore_base(
         entries_by_entity: &[Arc<IndexEntry>],
         routing: &RoutingSummary,

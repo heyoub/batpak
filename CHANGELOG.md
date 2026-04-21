@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- Production `expect(...)` use is now denied for non-test builds unless a site
+  carries an explicit local escape hatch for a documented invariant.
+- Runtime append, batch, cursor, and scan paths now fail closed instead of
+  relying on convenience `expect(...)` calls for frame length, batch count, or
+  empty-hit assumptions.
+
+### Clarified
+- Store ownership is now documented as a lifetime-held directory lock:
+  second mutable opens and concurrent read-only opens fail with `StoreLocked`
+  in the current exclusive-only hardening wave instead of racing the same
+  store directory.
+- Lock-file symlink handling is now described honestly across platforms:
+  Unix uses `O_NOFOLLOW`, while non-Unix targets currently do a best-effort
+  symlink-leaf rejection before open.
+
 ## [0.6.0] - 2026-04-16
 
 ### Changed

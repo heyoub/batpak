@@ -1,6 +1,8 @@
 #![warn(missing_docs)]
 // justifies: INV-STORE-SYNC-ONLY, ADR-0001; impossible-feature guards in src/lib.rs (async-store, sha256) use cfg attributes for features intentionally not declared in Cargo.toml; item-level allow is unreliable for cfg checks on some toolchain versions so we silence at crate root.
 #![allow(unexpected_cfgs)]
+// justifies: src/lib.rs makes production expect() sites deliberate invariant escape hatches instead of ambient convenience panics.
+#![cfg_attr(not(test), deny(clippy::expect_used))]
 // cast_possible_truncation and cast_sign_loss are enforced via [lints.clippy] in Cargo.toml.
 // Each intentional cast has an inline #[allow] with a justification comment.
 //! batpak: Event Sourcing Runtime with DAG Causation Tracking.

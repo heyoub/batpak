@@ -215,6 +215,15 @@ Cold-start timing contract:
 - exact `timestamp_us` still lives in the event frame and is available on full frame reads
 - `EventHeader::age_us()` remains safe on SIDX-reconstructed headers, but callers must not compare live-path and cold-start `timestamp_us` values for sub-millisecond precision
 
+Store ownership contract:
+
+- opens acquire a lifetime-held lock file rooted at `{data_dir}/.batpak.lock`
+- the current hardening wave is intentionally exclusive-only, so mutable and
+  read-only opens both fail with `StoreLocked` while another live owner exists
+- Unix lock-file opens use `O_NOFOLLOW`; non-Unix targets currently do a
+  best-effort symlink-leaf rejection before opening because `std` exposes no
+  equivalent atomic no-follow flag there
+
 ### Upgrade and Rollback Procedure
 
 Operator posture for artifact-format changes is explicit:

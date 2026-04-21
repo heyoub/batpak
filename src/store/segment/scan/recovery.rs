@@ -228,10 +228,16 @@ impl Reader {
                                     state_ref.in_batch = true;
                                     state_ref.remaining = batch_count;
                                     state_ref.started_count = batch_count;
-                                    state_ref.staged.reserve(
-                                        usize::try_from(batch_count)
-                                            .expect("validated batch count fits in usize"),
-                                    );
+                                    let batch_capacity = usize::try_from(batch_count).map_err(
+                                        |_| StoreError::CorruptFrame {
+                                            segment_id,
+                                            offset: frame_offset,
+                                            reason: format!(
+                                                "validated batch count {batch_count} does not fit usize"
+                                            ),
+                                        },
+                                    )?;
+                                    state_ref.staged.reserve(batch_capacity);
                                 } else if kind == EventKind::SYSTEM_BATCH_COMMIT {
                                     tracing::warn!(
                                         segment_id,
@@ -301,10 +307,17 @@ impl Reader {
                                 state_ref.remaining = batch_count;
                                 state_ref.started_count = batch_count;
                                 state_ref.staged.clear();
-                                state_ref.staged.reserve(
-                                    usize::try_from(batch_count)
-                                        .expect("validated batch count fits in usize"),
-                                );
+                                let batch_capacity =
+                                    usize::try_from(batch_count).map_err(|_| {
+                                        StoreError::CorruptFrame {
+                                            segment_id,
+                                            offset: frame_offset,
+                                            reason: format!(
+                                            "validated batch count {batch_count} does not fit usize"
+                                        ),
+                                        }
+                                    })?;
+                                state_ref.staged.reserve(batch_capacity);
                             } else {
                                 let hash_chain = Self::required_index_hash_chain(
                                     &payload.event,

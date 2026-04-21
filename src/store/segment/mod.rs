@@ -244,7 +244,7 @@ impl Segment<Active> {
         let header_bytes =
             rmp_serde::to_vec_named(&header).map_err(|e| StoreError::Serialization(Box::new(e)))?;
         let header_len = u32::try_from(header_bytes.len())
-            .expect("invariant: msgpack segment header is always small, well under u32::MAX")
+            .map_err(|_| StoreError::ser_msg("segment header length exceeds u32::MAX"))?
             .to_be_bytes();
         file.write_all(&header_len).map_err(StoreError::Io)?;
         file.write_all(&header_bytes).map_err(StoreError::Io)?;

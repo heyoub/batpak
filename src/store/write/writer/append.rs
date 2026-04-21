@@ -104,7 +104,7 @@ impl WriterState<'_> {
             segment_id: *self.segment_id,
             offset,
             length: u32::try_from(frame.len())
-                .expect("invariant: frame length bounded by segment_max_bytes, well within u32"),
+                .map_err(|_| StoreError::ser_msg("encoded frame length exceeds u32::MAX"))?,
         };
         let meta = StagedCommitMeta::new(
             event.header.event_id,

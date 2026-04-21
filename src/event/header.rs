@@ -122,8 +122,9 @@ impl EventHeader {
 
     /// Returns the age of this event in microseconds relative to `now_us`.
     pub fn age_us(&self, now_us: i64) -> u64 {
-        // saturating_sub + max(0) guarantees a non-negative i64; try_from is always Ok here.
-        u64::try_from(now_us.saturating_sub(self.timestamp_us).max(0))
-            .expect("invariant: .max(0) ensures value is non-negative")
+        now_us
+            .saturating_sub(self.timestamp_us)
+            .max(0)
+            .cast_unsigned()
     }
 }

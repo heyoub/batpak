@@ -628,7 +628,7 @@ pub(crate) fn wall_ms_from_timestamp_us(
             reason: "timestamp_us must be >= 0 microseconds since Unix epoch".into(),
         });
     }
-    Ok((timestamp_us / 1000) as u64)
+    Ok((timestamp_us / 1000).cast_unsigned())
 }
 
 /// Process-wide monotonic anchor. Captured on first call; subsequent calls read

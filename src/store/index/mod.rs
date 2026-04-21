@@ -352,6 +352,8 @@ impl StoreIndex {
     /// `entries` must be sorted ascending by `global_sequence`. The allocator is
     /// restored to `max(last_sequence + 1, allocator_hint)` and published only
     /// after every base map and overlay view has been rebuilt.
+    // justifies: src/store/index/restore.rs builds restore runs from u32-backed artifact coordinates, so these width checks are supported-target invariants.
+    #[allow(clippy::expect_used)]
     fn restore_sorted_entries_impl(
         &self,
         entries: Vec<IndexEntry>,
@@ -379,6 +381,9 @@ impl StoreIndex {
                 + usize::try_from(run.len)
                     .expect("invariant: entity run length fits usize on any supported target");
             let slice = &restored.entries_by_entity[start..end];
+            if slice.is_empty() {
+                continue;
+            }
             let entity = slice[0].coord.entity_arc();
             let stream: BTreeMap<ClockKey, Arc<IndexEntry>> = slice
                 .iter()
@@ -393,10 +398,7 @@ impl StoreIndex {
                     )
                 })
                 .collect();
-            latest.insert(
-                Arc::clone(&entity),
-                Arc::clone(slice.last().expect("run is non-empty")),
-            );
+            latest.insert(Arc::clone(&entity), Arc::clone(&slice[slice.len() - 1]));
             self.streams.insert(entity, stream);
         }
 
@@ -530,6 +532,8 @@ impl StoreIndex {
     ///   (no disk I/O), which is significantly faster than the previous
     ///   protocol of clearing the live index and replaying segments under
     ///   reader visibility.
+    // justifies: src/store/index/restore.rs builds the fresh index from u32-backed routing runs, so these width checks are supported-target invariants.
+    #[allow(clippy::expect_used)]
     pub(crate) fn replace_contents_from_fresh(
         &self,
         fresh: StoreIndex,
