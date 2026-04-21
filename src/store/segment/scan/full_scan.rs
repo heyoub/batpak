@@ -1,6 +1,6 @@
-use super::{Reader, ScannedEntry, SEGMENT_MAGIC};
+use super::{Reader, ScannedEntry};
 use crate::event::EventKind;
-use crate::store::segment;
+use crate::store::segment::{self, SEGMENT_MAGIC};
 use crate::store::StoreError;
 use std::fs::File;
 use std::io::{ErrorKind, Read};
