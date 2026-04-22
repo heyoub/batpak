@@ -19,7 +19,7 @@
 use batpak::coordinate::{Coordinate, Region};
 use batpak::event::EventKind;
 use batpak::store::delivery::cursor::{CursorCheckpoint, CursorWorkerAction, CursorWorkerConfig};
-use batpak::store::{Cursor, RestartPolicy, Store, StoreConfig};
+use batpak::store::{CheckpointId, Cursor, RestartPolicy, Store, StoreConfig};
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -98,7 +98,7 @@ fn cursor_worker_fails_closed_on_corrupt_checkpoint() {
     worker_config.batch_size = 1;
     worker_config.idle_sleep = Duration::from_millis(1);
     worker_config.restart = RestartPolicy::Once;
-    worker_config.checkpoint_id = Some("corrupt-start".into());
+    worker_config.checkpoint_id = Some(CheckpointId::new("corrupt-start"));
 
     let worker = store
         .cursor_worker(
@@ -148,7 +148,7 @@ fn cursor_resumes_from_checkpoint_across_reopen() {
             worker_config.batch_size = 1;
             worker_config.idle_sleep = Duration::from_millis(1);
             worker_config.restart = RestartPolicy::Once;
-            worker_config.checkpoint_id = Some(CHECKPOINT_ID.into());
+            worker_config.checkpoint_id = Some(CheckpointId::new(CHECKPOINT_ID));
             store
                 .cursor_worker(
                     &Region::entity("entity:cursor-durable"),
@@ -217,7 +217,7 @@ fn cursor_resumes_from_checkpoint_across_reopen() {
             worker_config.batch_size = 8;
             worker_config.idle_sleep = Duration::from_millis(1);
             worker_config.restart = RestartPolicy::Once;
-            worker_config.checkpoint_id = Some(CHECKPOINT_ID.into());
+            worker_config.checkpoint_id = Some(CheckpointId::new(CHECKPOINT_ID));
             store
                 .cursor_worker(
                     &Region::entity("entity:cursor-durable"),
@@ -300,7 +300,7 @@ fn cursor_worker_rejects_checkpoint_id_reused_for_different_region() {
     worker_config.batch_size = 1;
     worker_config.idle_sleep = Duration::from_millis(1);
     worker_config.restart = RestartPolicy::Once;
-    worker_config.checkpoint_id = Some("region-bound".into());
+    worker_config.checkpoint_id = Some(CheckpointId::new("region-bound"));
     let first_worker = store
         .cursor_worker(
             &Region::entity("entity:cursor-a"),
@@ -357,7 +357,7 @@ fn cursor_worker_surfaces_checkpoint_write_failure_through_join() {
         worker_config.batch_size = 1;
         worker_config.idle_sleep = Duration::from_millis(1);
         worker_config.restart = RestartPolicy::Once;
-        worker_config.checkpoint_id = Some("checkpoint-write-fails".into());
+        worker_config.checkpoint_id = Some(CheckpointId::new("checkpoint-write-fails"));
         store
             .cursor_worker(
                 &Region::entity("entity:cursor-ckpt-fail"),
@@ -422,7 +422,7 @@ fn durable_cursor_worker_state_machine_preserves_last_committed_checkpoint() {
     worker_config.batch_size = 1;
     worker_config.idle_sleep = Duration::from_millis(1);
     worker_config.restart = RestartPolicy::Once;
-    worker_config.checkpoint_id = Some(checkpoint_id.into());
+    worker_config.checkpoint_id = Some(CheckpointId::new(checkpoint_id));
 
     let phase_one = store
         .cursor_worker(
@@ -437,8 +437,8 @@ fn durable_cursor_worker_state_machine_preserves_last_committed_checkpoint() {
                     drop(counts);
 
                     match seq {
-                        0 => CursorWorkerAction::Continue,
-                        1 => CursorWorkerAction::StopWithRollback,
+                        1 => CursorWorkerAction::Continue,
+                        2 => CursorWorkerAction::StopWithRollback,
                         _ => panic!("PROPERTY: phase one should only reach sequences 0 and 1"),
                     }
                 }
@@ -450,7 +450,7 @@ fn durable_cursor_worker_state_machine_preserves_last_committed_checkpoint() {
     assert_checkpoint_position(
         &dir,
         checkpoint_id,
-        0,
+        1,
         "phase one durable worker after StopWithRollback",
     );
 
@@ -468,12 +468,12 @@ fn durable_cursor_worker_state_machine_preserves_last_committed_checkpoint() {
                     drop(counts);
 
                     match seq {
-                        1 | 2 => CursorWorkerAction::Continue,
-                        3 if panic_once.swap(false, std::sync::atomic::Ordering::SeqCst) => {
+                        2 | 3 => CursorWorkerAction::Continue,
+                        4 if panic_once.swap(false, std::sync::atomic::Ordering::SeqCst) => {
                             panic!("intentional durable cursor panic after checkpointed progress");
                         }
-                        3 => CursorWorkerAction::Continue,
-                        4 => CursorWorkerAction::Stop,
+                        4 => CursorWorkerAction::Continue,
+                        5 => CursorWorkerAction::Stop,
                         _ => panic!(
                             "PROPERTY: phase two should only reach rolled-back tail sequences 1..=4"
                         ),
@@ -487,17 +487,17 @@ fn durable_cursor_worker_state_machine_preserves_last_committed_checkpoint() {
     assert_checkpoint_position(
         &dir,
         checkpoint_id,
-        4,
+        5,
         "phase two durable worker after panic restart and clean stop",
     );
 
     let observed = seen.lock().expect("counts mutex").clone();
     let expected = BTreeMap::from([
-        (0, 1usize),
-        (1, 2usize),
-        (2, 1usize),
-        (3, 2usize),
-        (4, 1usize),
+        (1, 1usize),
+        (2, 2usize),
+        (3, 1usize),
+        (4, 2usize),
+        (5, 1usize),
     ]);
     assert_eq!(
         observed, expected,

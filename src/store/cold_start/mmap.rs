@@ -17,7 +17,7 @@ use crate::store::index::{
 };
 #[cfg(test)]
 use crate::store::segment::sidx::raw_to_kind;
-use crate::store::segment::sidx::{kind_to_raw, raw_to_kind_counted, ReservedKindFallbackCounts};
+use crate::store::segment::sidx::{kind_to_raw, raw_to_kind_counted, ReservedKindFallbackStats};
 use crate::store::StoreError;
 use memmap2::Mmap;
 use rayon::prelude::*;
@@ -26,7 +26,7 @@ use std::io::{BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
 pub(crate) const MMAP_INDEX_MAGIC: &[u8; 6] = b"FBATIX";
-pub(crate) const MMAP_INDEX_VERSION: u16 = 3;
+pub(crate) const MMAP_INDEX_VERSION: u16 = 4;
 pub(crate) const MMAP_INDEX_FILENAME: &str = "index.fbati";
 
 const PREFIX_LEN: usize = 6 + 2 + 4;
@@ -58,6 +58,7 @@ struct LoadedMmapIndex {
     entry_size: usize,
     watermark: WatermarkInfo,
     stored_allocator: u64,
+    cumulative_reserved_kind_fallbacks: ReservedKindFallbackStats,
 }
 
 pub(crate) struct LoadedMmapSnapshot {
@@ -66,12 +67,20 @@ pub(crate) struct LoadedMmapSnapshot {
     pub(crate) watermark: WatermarkInfo,
     pub(crate) stored_allocator: u64,
     pub(crate) routing: RoutingSummary,
-    pub(crate) reserved_kind_fallbacks: ReservedKindFallbackCounts,
+    pub(crate) reopen_reserved_kind_fallbacks: ReservedKindFallbackStats,
+    pub(crate) cumulative_reserved_kind_fallbacks: ReservedKindFallbackStats,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct MmapSummaryDataV2 {
     routing: RoutingSummary,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct MmapSummaryDataV4 {
+    routing: RoutingSummary,
+    #[serde(default)]
+    reserved_kind_fallbacks: ReservedKindFallbackStats,
 }
 
 struct MmapIndexEntry {
@@ -100,12 +109,12 @@ impl MmapIndexEntry {
 
     #[cfg(test)]
     fn to_cold_start_row(&self) -> ColdStartIndexRow {
-        self.to_cold_start_row_counted(&mut ReservedKindFallbackCounts::default())
+        self.to_cold_start_row_counted(&mut ReservedKindFallbackStats::default())
     }
 
     fn to_cold_start_row_counted(
         &self,
-        counts: &mut ReservedKindFallbackCounts,
+        counts: &mut ReservedKindFallbackStats,
     ) -> ColdStartIndexRow {
         ColdStartIndexRow {
             source: ColdStartSource::MmapIndex,
@@ -287,11 +296,29 @@ fn entry_to_mmap(entry: &IndexEntry) -> MmapIndexEntry {
 }
 
 /// Atomically write the mmap-first index artifact.
+// justifies: src/store/lifecycle.rs routes production artifact writes through the cumulative-stats variant; this compatibility wrapper remains for targeted tests and focused artifact fixtures.
+#[allow(dead_code)]
 pub(crate) fn write_mmap_index(
     index: &StoreIndex,
     data_dir: &Path,
     watermark_segment_id: u64,
     watermark_offset: u64,
+) -> Result<(), StoreError> {
+    write_mmap_index_with_reserved_kind_fallbacks(
+        index,
+        data_dir,
+        watermark_segment_id,
+        watermark_offset,
+        &ReservedKindFallbackStats::default(),
+    )
+}
+
+pub(crate) fn write_mmap_index_with_reserved_kind_fallbacks(
+    index: &StoreIndex,
+    data_dir: &Path,
+    watermark_segment_id: u64,
+    watermark_offset: u64,
+    reserved_kind_fallbacks: &ReservedKindFallbackStats,
 ) -> Result<(), StoreError> {
     let mut entries = index.all_entries();
     entries.sort_by_key(|entry| entry.global_sequence);
@@ -304,8 +331,11 @@ pub(crate) fn write_mmap_index(
     interner_strings.extend(index.interner.to_snapshot());
     let interner_bytes = rmp_serde::to_vec_named(&interner_strings)
         .map_err(|e| StoreError::Serialization(Box::new(e)))?;
-    let summary_bytes = rmp_serde::to_vec_named(&MmapSummaryDataV2 { routing })
-        .map_err(|e| StoreError::Serialization(Box::new(e)))?;
+    let summary_bytes = rmp_serde::to_vec_named(&MmapSummaryDataV4 {
+        routing,
+        reserved_kind_fallbacks: reserved_kind_fallbacks.clone(),
+    })
+    .map_err(|e| StoreError::Serialization(Box::new(e)))?;
 
     let interner_count = u32::try_from(interner_strings.len())
         .map_err(|_| StoreError::ser_msg("interner snapshot too large for mmap index"))?;
@@ -409,7 +439,7 @@ fn try_load_mmap_index(data_dir: &Path) -> Option<LoadedMmapIndex> {
     }
 
     let version = read_le_u16(&prefix[6..8])?;
-    if version != 1 && version != 2 && version != MMAP_INDEX_VERSION {
+    if version != 1 && version != 2 && version != 3 && version != MMAP_INDEX_VERSION {
         tracing::warn!(
             target: "batpak::mmap_index",
             path = %path.display(),
@@ -651,20 +681,38 @@ fn try_load_mmap_index(data_dir: &Path) -> Option<LoadedMmapIndex> {
         return None;
     }
 
-    let routing = if version == 1 {
-        RoutingSummary::default()
+    let (routing, cumulative_reserved_kind_fallbacks) = if version == 1 {
+        (
+            RoutingSummary::default(),
+            ReservedKindFallbackStats::default(),
+        )
     } else {
         let summary_slice = &mmap[summary_offset..entries_offset];
-        match rmp_serde::from_slice::<MmapSummaryDataV2>(summary_slice) {
-            Ok(summary) => summary.routing,
-            Err(error) => {
-                tracing::warn!(
-                    target: "batpak::mmap_index",
-                    path = %path.display(),
-                    error = %error,
-                    "failed to decode mmap index summary section"
-                );
-                return None;
+        if version >= 4 {
+            match rmp_serde::from_slice::<MmapSummaryDataV4>(summary_slice) {
+                Ok(summary) => (summary.routing, summary.reserved_kind_fallbacks),
+                Err(error) => {
+                    tracing::warn!(
+                        target: "batpak::mmap_index",
+                        path = %path.display(),
+                        error = %error,
+                        "failed to decode mmap index summary section"
+                    );
+                    return None;
+                }
+            }
+        } else {
+            match rmp_serde::from_slice::<MmapSummaryDataV2>(summary_slice) {
+                Ok(summary) => (summary.routing, ReservedKindFallbackStats::default()),
+                Err(error) => {
+                    tracing::warn!(
+                        target: "batpak::mmap_index",
+                        path = %path.display(),
+                        error = %error,
+                        "failed to decode mmap index summary section"
+                    );
+                    return None;
+                }
             }
         }
     };
@@ -681,6 +729,7 @@ fn try_load_mmap_index(data_dir: &Path) -> Option<LoadedMmapIndex> {
             watermark_offset,
         },
         stored_allocator,
+        cumulative_reserved_kind_fallbacks,
     })
 }
 
@@ -751,7 +800,7 @@ pub(crate) fn try_load_mmap_snapshot(data_dir: &Path) -> Option<LoadedMmapSnapsh
             let start_byte = start * loaded.entry_size;
             let end_byte = start_byte + (len * loaded.entry_size);
             let mut rebuilt = Vec::with_capacity(len);
-            let mut reserved_kind_fallbacks = ReservedKindFallbackCounts::default();
+            let mut reserved_kind_fallbacks = ReservedKindFallbackStats::default();
             let version = if loaded.entry_size == MMAP_ENTRY_SIZE_V3 {
                 3
             } else {
@@ -771,10 +820,10 @@ pub(crate) fn try_load_mmap_snapshot(data_dir: &Path) -> Option<LoadedMmapSnapsh
         .ok()?;
     per_chunk.sort_by_key(|(chunk_idx, _, _)| *chunk_idx);
     let mut rebuilt_entries = Vec::with_capacity(entry_count);
-    let mut reserved_kind_fallbacks = ReservedKindFallbackCounts::default();
+    let mut reserved_kind_fallbacks = ReservedKindFallbackStats::default();
     for (_, chunk_entries, chunk_counts) in per_chunk {
         rebuilt_entries.extend(chunk_entries);
-        reserved_kind_fallbacks = reserved_kind_fallbacks.add(chunk_counts);
+        reserved_kind_fallbacks = reserved_kind_fallbacks.add(&chunk_counts);
     }
     let routing = if loaded.routing.chunks.is_empty() {
         RoutingSummary::from_sorted_entries(
@@ -791,7 +840,8 @@ pub(crate) fn try_load_mmap_snapshot(data_dir: &Path) -> Option<LoadedMmapSnapsh
         watermark: loaded.watermark,
         stored_allocator: loaded.stored_allocator,
         routing,
-        reserved_kind_fallbacks,
+        reopen_reserved_kind_fallbacks: reserved_kind_fallbacks,
+        cumulative_reserved_kind_fallbacks: loaded.cumulative_reserved_kind_fallbacks,
     })
 }
 

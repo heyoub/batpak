@@ -4,7 +4,7 @@
 #![allow(clippy::panic)]
 
 use batpak::prelude::*;
-use batpak::store::{Store, StoreConfig, SyncConfig};
+use batpak::store::{ReadOnly, Store, StoreConfig, SyncConfig};
 use proptest::prelude::*;
 use tempfile::TempDir;
 
@@ -98,6 +98,7 @@ fn capture_snapshot<State>(store: &Store<State>) -> StoreSnapshot {
     let visible = store
         .query(&Region::all())
         .into_iter()
+        .filter(|entry| entry.kind != EventKind::SYSTEM_OPEN_COMPLETED)
         .map(|entry| {
             let payload = store
                 .get(entry.event_id)
@@ -200,7 +201,7 @@ fn cold_start_replay_matches_live_projection() {
     assert_eq!(live, Some(Counter { count: 6 }));
     store.close().expect("close");
 
-    let reopened = Store::open(StoreConfig::new(dir.path())).expect("reopen");
+    let reopened = Store::<ReadOnly>::open_read_only(StoreConfig::new(dir.path())).expect("reopen");
     let replayed: Option<Counter> = reopened
         .project("entity:replay", &batpak::store::Freshness::Consistent)
         .expect("replay project");
@@ -208,7 +209,6 @@ fn cold_start_replay_matches_live_projection() {
         replayed, live,
         "Cold-start replay must match the live store projection exactly."
     );
-    reopened.close().expect("close reopened");
 }
 
 #[test]
@@ -222,7 +222,8 @@ fn snapshot_checkpoint_matches_source_projection() {
     let snapshot_dir = TempDir::new().expect("snapshot");
     store.snapshot(snapshot_dir.path()).expect("snapshot");
 
-    let reopened = Store::open(StoreConfig::new(snapshot_dir.path())).expect("open snapshot");
+    let reopened = Store::<ReadOnly>::open_read_only(StoreConfig::new(snapshot_dir.path()))
+        .expect("open snapshot");
     let snap_stats = reopened.stats();
     let snap_projection: Option<Counter> = reopened
         .project("entity:replay", &batpak::store::Freshness::Consistent)
@@ -242,7 +243,6 @@ fn snapshot_checkpoint_matches_source_projection() {
         "Snapshot reopen must preserve the same projection output as the source store."
     );
 
-    reopened.close().expect("close");
     store.close().expect("close source");
 }
 
@@ -268,15 +268,18 @@ proptest! {
             let live_snapshot = capture_snapshot(&store);
             store.close().expect("close seeded store");
 
-            let reopened = Store::open(seeded_config(&dir, enable_checkpoint, enable_mmap_index))
-                .expect("reopen store");
+            let reopened = Store::<ReadOnly>::open_read_only(seeded_config(
+                &dir,
+                enable_checkpoint,
+                enable_mmap_index,
+            ))
+            .expect("reopen store");
             let reopened_snapshot = capture_snapshot(&reopened);
             assert_eq!(
                 reopened_snapshot, live_snapshot,
                 "PROPERTY: reopening through {label} must preserve the same visible truth as the live store, including cancelled-fence invisibility."
             );
             reopened_snapshots.push((label, reopened_snapshot));
-            reopened.close().expect("close reopened store");
         }
 
         let (baseline_label, baseline) = reopened_snapshots

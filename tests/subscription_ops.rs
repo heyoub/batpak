@@ -21,7 +21,7 @@ fn ops_recv_without_filters() {
     let coord = Coordinate::new("entity:1", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
 
-    let region = Region::entity("entity:");
+    let region = Region::entity("entity");
     let sub = store.subscribe_lossy(&region);
     let mut ops = sub.ops();
 
@@ -93,7 +93,7 @@ fn ops_filter_passes_matching() {
     let coord = Coordinate::new("entity:1", "scope:test").expect("valid coord");
     let target_kind = EventKind::custom(0xF, 1);
 
-    let region = Region::entity("entity:");
+    let region = Region::entity("entity");
     let sub = store.subscribe_lossy(&region);
     let mut ops = sub
         .ops()
@@ -132,7 +132,7 @@ fn ops_filter_rejects_non_matching() {
     let wanted_kind = EventKind::custom(0xF, 1);
     let unwanted_kind = EventKind::custom(0xF, 2);
 
-    let region = Region::entity("entity:");
+    let region = Region::entity("entity");
     let sub = store.subscribe_lossy(&region);
     // Filter only passes wanted_kind. Take 1 so the test terminates.
     let mut ops = sub
@@ -177,7 +177,7 @@ fn ops_take_limits_count() {
     let coord = Coordinate::new("entity:1", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
 
-    let region = Region::entity("entity:");
+    let region = Region::entity("entity");
     let sub = store.subscribe_lossy(&region);
     let mut ops = sub.ops().take(2);
 
@@ -216,7 +216,7 @@ fn ops_filter_and_take_combined() {
     let wanted_kind = EventKind::custom(0xF, 1);
     let other_kind = EventKind::custom(0xF, 2);
 
-    let region = Region::entity("entity:");
+    let region = Region::entity("entity");
     let sub = store.subscribe_lossy(&region);
     // Filter for wanted_kind only, take 2.
     let mut ops = sub
@@ -292,7 +292,7 @@ fn ops_map_transforms_notification() {
     let kind = EventKind::custom(0xF, 1);
     let mapped_kind = EventKind::custom(0xF, 5);
 
-    let region = Region::entity("entity:");
+    let region = Region::entity("entity");
     let sub = store.subscribe_lossy(&region);
     // Map: change the kind field of every notification
     let mut ops = sub
@@ -344,7 +344,7 @@ fn ops_map_returning_none_skips_event() {
     let skip_kind = EventKind::custom(0xF, 1);
     let pass_kind = EventKind::custom(0xF, 2);
 
-    let region = Region::entity("entity:");
+    let region = Region::entity("entity");
     let sub = store.subscribe_lossy(&region);
     // Map: return None for skip_kind (acts as filter), Some for pass_kind
     let mut ops = sub
@@ -398,7 +398,7 @@ fn ops_multiple_filters_all_must_pass() {
     let kind_b = EventKind::custom(0xF, 2);
     let kind_c = EventKind::custom(0xF, 3);
 
-    let region = Region::entity("entity:");
+    let region = Region::entity("entity");
     let sub = store.subscribe_lossy(&region);
     // Two independent filters: must be kind_a OR kind_b, AND must have sequence > 0
     // Only events passing BOTH filters are received.
@@ -442,7 +442,7 @@ fn ops_channel_closed_returns_none() {
     let (store, _dir) = test_store();
     let store = Arc::new(store);
 
-    let region = Region::entity("entity:");
+    let region = Region::entity("entity");
     let sub = store.subscribe_lossy(&region);
     let mut ops = sub.ops();
 

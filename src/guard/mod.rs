@@ -3,7 +3,7 @@ pub mod denial;
 /// Receipt types proving a proposal passed all gates.
 pub mod receipt;
 
-pub use denial::Denial;
+pub use denial::{Denial, DenialPayload, GateEvaluation, GateId, GateIdError, Verdict};
 pub use receipt::Receipt;
 
 /// `Gate<Ctx>`: a predicate that evaluates a context and either permits or denies.
@@ -79,6 +79,54 @@ impl<Ctx> GateSet<Ctx> {
                 }
             })
             .collect()
+    }
+
+    /// Build a persistable denial trace from a fail-fast denial result.
+    pub fn trace_denial(
+        &self,
+        failing: &Denial,
+        proposed_kind: crate::event::EventKind,
+        proposed_content_hash: Option<[u8; 32]>,
+        pipeline_id: Option<String>,
+    ) -> DenialPayload {
+        let mut matched_denier = false;
+        let mut evaluations = Vec::with_capacity(self.gates.len().max(1));
+
+        for gate in &self.gates {
+            let gate_id = GateId::from_name(gate.name());
+            let verdict = if matched_denier {
+                Verdict::Skipped
+            } else if gate.name() == failing.gate {
+                matched_denier = true;
+                Verdict::Deny {
+                    code: failing.code.clone(),
+                    message: failing.message.clone(),
+                    context: failing.context.clone(),
+                }
+            } else {
+                Verdict::Permit
+            };
+            evaluations.push(GateEvaluation::new(gate_id, verdict, None));
+        }
+
+        if !matched_denier {
+            evaluations.push(GateEvaluation::new(
+                GateId::from_name(failing.gate),
+                Verdict::Deny {
+                    code: failing.code.clone(),
+                    message: failing.message.clone(),
+                    context: failing.context.clone(),
+                },
+                None,
+            ));
+        }
+
+        DenialPayload::new(
+            evaluations,
+            pipeline_id,
+            proposed_kind,
+            proposed_content_hash,
+        )
     }
 
     /// Returns the number of gates in the set.

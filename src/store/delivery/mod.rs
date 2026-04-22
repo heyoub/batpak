@@ -16,5 +16,8 @@
 
 /// Pull-based cursor for ordered delivery with optional durable checkpoints.
 pub mod cursor;
+/// Delivery observation witnesses for composing at-least-once with
+/// consumer-side idempotency.
+pub mod observation;
 /// Push-based (lossy) event subscription via broadcast channel.
 pub mod subscription;

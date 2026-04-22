@@ -88,6 +88,8 @@ fn negative_custom_clock_surfaces_store_error_in_append_and_batch_paths() {
         Err(err) => err,
     };
 
+    // justifies: INV-ALLOW-IS-DESIGN, src/store/error.rs; StoreError is #[non_exhaustive] and this negative-input harness intentionally cares about exactly one accepted variant while routing every other current or future variant through the failure message.
+    #[allow(clippy::wildcard_enum_match_arm)]
     match batch_err {
         StoreError::BatchFailed { item_index, source } => {
             assert_eq!(item_index, 0, "negative clock should fail the first batch item envelope");

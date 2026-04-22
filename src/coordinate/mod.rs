@@ -296,13 +296,21 @@ impl Region {
         self.clock_range
     }
 
+    /// Returns `true` when `entity` falls within this region's configured
+    /// namespace prefix.
+    #[must_use]
+    pub(crate) fn matches_entity(&self, entity: &str) -> bool {
+        match self.entity_prefix.as_deref() {
+            Some(prefix) => namespace_prefix_matches(prefix, entity),
+            None => true,
+        }
+    }
+
     /// Match against individual fields — avoids circular dep on store::Notification.
     /// Called by Subscription::recv() to filter events. [FILE:src/store/delivery/subscription.rs]
     pub fn matches_event(&self, entity: &str, scope: &str, kind: EventKind) -> bool {
-        if let Some(ref prefix) = self.entity_prefix {
-            if !entity.starts_with(prefix.as_ref()) {
-                return false;
-            }
+        if !self.matches_entity(entity) {
+            return false;
         }
         if let Some(ref s) = self.scope {
             if scope != s.as_ref() {
@@ -345,5 +353,43 @@ impl Region {
             None => "*".to_owned(),
         };
         format!("entity={entity}|scope={scope}|fact={fact}|clock={clock}")
+    }
+}
+
+/// Returns `true` when `candidate` is exactly `prefix` or is nested beneath it
+/// at a `:` namespace boundary.
+#[must_use]
+pub fn namespace_prefix_matches(prefix: &str, candidate: &str) -> bool {
+    candidate == prefix
+        || candidate
+            .strip_prefix(prefix)
+            .is_some_and(|suffix| suffix.starts_with(':'))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{namespace_prefix_matches, Region};
+
+    #[test]
+    fn namespace_prefix_matches_exact_and_descendants() {
+        assert!(namespace_prefix_matches("alice", "alice"));
+        assert!(namespace_prefix_matches("alice", "alice:child"));
+        assert!(namespace_prefix_matches("alice", "alice:child:grandchild"));
+    }
+
+    #[test]
+    fn namespace_prefix_rejects_adjacent_namespaces() {
+        assert!(!namespace_prefix_matches("alice", "alice2"));
+        assert!(!namespace_prefix_matches("tenant-a", "tenant-aa"));
+        assert!(!namespace_prefix_matches("alice", "alice-prod"));
+        assert!(!namespace_prefix_matches("alice", "alіce"));
+    }
+
+    #[test]
+    fn region_entity_uses_namespace_matcher() {
+        let region = Region::entity("tenant:a");
+        assert!(region.matches_entity("tenant:a"));
+        assert!(region.matches_entity("tenant:a:child"));
+        assert!(!region.matches_entity("tenant:aa"));
     }
 }

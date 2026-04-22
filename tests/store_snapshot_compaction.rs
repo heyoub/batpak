@@ -17,7 +17,7 @@
 use batpak::prelude::*;
 use batpak::store::{
     segment::{CompactionOutcome, CompactionResult},
-    Store, StoreConfig, StoreError, SyncConfig,
+    ReadOnly, Store, StoreConfig, StoreError, SyncConfig,
 };
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -65,18 +65,24 @@ fn snapshot_copies_segments() {
         data_dir: snap_dir.path().to_path_buf(),
         ..StoreConfig::new("")
     };
-    let snap_store = Store::open(snap_config).expect("open snapshot");
+    let snap_store = Store::<ReadOnly>::open_read_only(snap_config).expect("open snapshot");
     let stats = snap_store.stats();
     assert_eq!(
-        stats.event_count, 10,
+        stats.event_count, 11,
         "PROPERTY: snapshot must preserve full event count — no events lost during copy.\n\
          Investigate: src/store/mod.rs snapshot.\n\
          Common causes: segment file not flushed before copy, partial write, index not rebuilt.\n\
          Run: cargo test --test store_snapshot_compaction snapshot_copies_segments"
     );
-
-    snap_store.close().expect("close snap");
     store.close().expect("close");
+}
+
+fn user_visible_entries(store: &Store) -> Vec<batpak::store::IndexEntry> {
+    store
+        .query(&Region::all())
+        .into_iter()
+        .filter(|entry| entry.kind != EventKind::SYSTEM_OPEN_COMPLETED)
+        .collect()
 }
 
 #[test]
@@ -127,7 +133,8 @@ fn snapshot_reused_destination_replaces_stale_store_artifacts() {
         .snapshot(snapshot_dir.path())
         .expect("snapshot into reused dir");
 
-    let reopened = Store::open(StoreConfig::new(snapshot_dir.path())).expect("open snapshot");
+    let reopened = Store::<ReadOnly>::open_read_only(StoreConfig::new(snapshot_dir.path()))
+        .expect("open snapshot");
     let snap_stats = reopened.stats();
     assert_eq!(
         snap_stats.event_count, live_stats.event_count,
@@ -137,8 +144,6 @@ fn snapshot_reused_destination_replaces_stale_store_artifacts() {
         snap_stats.global_sequence, live_stats.global_sequence,
         "PROPERTY: snapshot into a reused destination must not keep stale cold-start artifacts or superseded segments."
     );
-
-    reopened.close().expect("close reopened");
     store.close().expect("close source");
 }
 
@@ -228,7 +233,8 @@ fn snapshot_waits_for_in_flight_compaction() {
         .expect("snapshot result");
     snapshot.join().expect("join snapshot thread");
 
-    let reopened = Store::open(StoreConfig::new(snapshot_dir.path())).expect("open snapshot");
+    let reopened = Store::<ReadOnly>::open_read_only(StoreConfig::new(snapshot_dir.path()))
+        .expect("open snapshot");
     let live_stats = store.stats();
     let snap_stats = reopened.stats();
     assert_eq!(
@@ -239,8 +245,6 @@ fn snapshot_waits_for_in_flight_compaction() {
         snap_stats.global_sequence, live_stats.global_sequence,
         "PROPERTY: snapshot that starts during compaction must preserve the live store watermark after compaction finishes"
     );
-
-    reopened.close().expect("close reopened snapshot");
     let store = match Arc::try_unwrap(store) {
         Ok(store) => store,
         Err(_) => panic!("snapshot/compaction threads must release the store Arc"),
@@ -302,7 +306,7 @@ fn compact_does_not_lose_data() {
 
     let stats = store.stats();
     assert_eq!(
-        stats.event_count, 5,
+        stats.event_count, 6,
         "PROPERTY: compact() must not lose any events — all 5 appended events must remain.\n\
          Investigate: src/store/mod.rs compact, src/store/segment/mod.rs compaction path.\n\
          Common causes: compaction drops events below tombstone horizon, segment replaced before flush.\n\
@@ -356,7 +360,7 @@ fn compact_merge_rebuild_does_not_duplicate_superseded_sealed_segments() {
         "PROPERTY: forced merge compaction should perform once multiple sealed segments exist."
     );
 
-    let all = store.query(&Region::all());
+    let all = user_visible_entries(&store);
     let mut ids: Vec<_> = all.iter().map(|entry| entry.event_id).collect();
     ids.sort_unstable();
     ids.dedup();
@@ -432,7 +436,7 @@ fn compact_fails_closed_on_corrupt_hidden_ranges_metadata() {
 
     assert_eq!(
         store.stats().event_count,
-        12,
+        13,
         "PROPERTY: failed compaction on corrupt hidden-ranges metadata must leave the live event count unchanged"
     );
 
@@ -500,7 +504,7 @@ fn compact_rolls_back_marker_on_pre_swap_rename_failure() {
     );
     assert_eq!(
         store.stats().event_count,
-        12,
+        13,
         "PROPERTY: failed pre-swap compaction must leave the live event count unchanged"
     );
 
@@ -571,9 +575,9 @@ fn compact_retention_removes_dropped_events_from_index() {
     }
 
     assert_eq!(
-        store.stats().event_count,
+        user_visible_entries(&store).len(),
         5,
-        "COMPACT RETENTION COUNT: expected 5 kept events after dropping 5.\n\
+        "COMPACT RETENTION COUNT: expected 5 kept user events after dropping 5.\n\
          Investigate: src/store/mod.rs compact() index rebuild."
     );
 
@@ -629,13 +633,13 @@ fn compact_tombstone_updates_event_kind_in_index() {
     store.compact(&tombstone_config).expect("compact");
 
     assert_eq!(
-        store.stats().event_count,
+        store.stream("entity:tombstone").len(),
         10,
-        "COMPACT TOMBSTONE COUNT: expected all 10 events to remain (5 live + 5 tombstoned).\n\
+        "COMPACT TOMBSTONE COUNT: expected all 10 user events to remain (5 live + 5 tombstoned).\n\
          Investigate: src/store/mod.rs compact() tombstone path."
     );
 
-    let region = Region::all().with_fact(KindFilter::Exact(tombstone_kind));
+    let region = Region::entity("entity:tombstone").with_fact(KindFilter::Exact(tombstone_kind));
     let tombstoned = store.query(&region);
     assert_eq!(
         tombstoned.len(),

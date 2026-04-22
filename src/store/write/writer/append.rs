@@ -6,6 +6,7 @@ use super::{
 };
 use super::{StagedCommitMeta, StagedCommitTiming, StagedCommittedEvent};
 use crate::store::AppendReceipt;
+use std::collections::BTreeMap;
 use tracing::{debug, info, trace};
 
 /// Options and guards for an append operation, passed through the channel.
@@ -50,11 +51,22 @@ impl WriterState<'_> {
 
         if let Some(key) = guards.idempotency_key {
             if let Some(entry) = self.index.get_by_id(key) {
-                return Ok(AppendReceipt {
+                let mut receipt = AppendReceipt {
                     event_id: entry.event_id,
                     sequence: entry.global_sequence,
                     disk_pos: entry.disk_pos,
-                });
+                    content_hash: entry.hash_chain.event_hash,
+                    key_id: [0; 32],
+                    signature: None,
+                    extensions: BTreeMap::new(),
+                };
+                self.runtime.signing_registry.sign_append_receipt(
+                    &mut receipt,
+                    &entry.coord,
+                    entry.kind,
+                    entry.hash_chain.prev_hash,
+                );
+                return Ok(receipt);
             }
         }
 
@@ -168,10 +180,18 @@ impl WriterState<'_> {
             )?;
         }
 
-        Ok(AppendReceipt {
+        let mut receipt = AppendReceipt {
             event_id: event.header.event_id,
             sequence: global_seq,
             disk_pos,
-        })
+            content_hash: event_hash,
+            key_id: [0; 32],
+            signature: None,
+            extensions: BTreeMap::new(),
+        };
+        self.runtime
+            .signing_registry
+            .sign_append_receipt(&mut receipt, coord, kind, prev_hash);
+        Ok(receipt)
     }
 }

@@ -54,11 +54,11 @@ fn cursor_worker_restarts_from_last_committed_checkpoint_after_panic() {
                 *counts.entry(seq).or_insert(0) += 1;
                 drop(counts);
 
-                if seq == 1 && panic_once.swap(false, Ordering::SeqCst) {
+                if seq == 2 && panic_once.swap(false, Ordering::SeqCst) {
                     panic!("intentional cursor worker panic after first checkpoint");
                 }
 
-                if seq == 2 {
+                if seq == 3 {
                     CursorWorkerAction::Stop
                 } else {
                     CursorWorkerAction::Continue
@@ -70,16 +70,16 @@ fn cursor_worker_restarts_from_last_committed_checkpoint_after_panic() {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         let snapshot = seen.lock().expect("counts mutex").clone();
-        if snapshot.get(&0) == Some(&1)
-            && snapshot.get(&1) == Some(&2)
-            && snapshot.get(&2) == Some(&1)
+        if snapshot.get(&1) == Some(&1)
+            && snapshot.get(&2) == Some(&2)
+            && snapshot.get(&3) == Some(&1)
         {
             break;
         }
         assert!(
             Instant::now() < deadline,
             "PROPERTY: cursor worker must restart from the last committed checkpoint after panic.\n\
-             Expected sequence counts {{0:1, 1:2, 2:1}}, got {snapshot:?}."
+             Expected sequence counts {{1:1, 2:2, 3:1}}, got {snapshot:?}."
         );
         std::thread::sleep(Duration::from_millis(10));
     }
@@ -88,17 +88,17 @@ fn cursor_worker_restarts_from_last_committed_checkpoint_after_panic() {
 
     let snapshot = seen.lock().expect("counts mutex").clone();
     assert_eq!(
-        snapshot.get(&0),
+        snapshot.get(&1),
         Some(&1),
         "first committed batch should not be replayed after restart"
     );
     assert_eq!(
-        snapshot.get(&1),
+        snapshot.get(&2),
         Some(&2),
         "failed batch must be retried exactly once after restart"
     );
     assert_eq!(
-        snapshot.get(&2),
+        snapshot.get(&3),
         Some(&1),
         "subsequent batch should run once after restart recovery"
     );

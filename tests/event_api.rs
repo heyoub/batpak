@@ -380,6 +380,9 @@ fn event_kind_system_constants_are_system() {
         EventKind::SYSTEM_HEARTBEAT,
         EventKind::SYSTEM_CONFIG_CHANGE,
         EventKind::SYSTEM_CHECKPOINT,
+        EventKind::SYSTEM_BATCH_BEGIN,
+        EventKind::SYSTEM_BATCH_COMMIT,
+        EventKind::SYSTEM_OPEN_COMPLETED,
     ];
     for kind in system_kinds {
         let is_system = kind.is_system();

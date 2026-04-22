@@ -45,7 +45,7 @@ use crate::event::HashChain;
 use crate::store::cold_start::{ColdStartIndexRow, ColdStartSource};
 use crate::store::index::interner::InternId;
 use crate::store::StoreError;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use tracing::warn;
@@ -69,18 +69,41 @@ const TRAILER_SIZE: u64 = 16;
 /// - correlation_id(16) + causation_id(16) = 32 → **162**
 pub(crate) const ENTRY_SIZE: usize = 162;
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ReservedKindFallbackCounts {
+#[derive(Debug, Default, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct ReservedKindFallbackStats {
     pub(crate) system: usize,
     pub(crate) effect: usize,
+    #[serde(default)]
+    pub(crate) system_histogram: BTreeMap<u16, usize>,
+    #[serde(default)]
+    pub(crate) effect_histogram: BTreeMap<u16, usize>,
 }
 
-impl ReservedKindFallbackCounts {
-    pub(crate) fn add(self, other: Self) -> Self {
-        Self {
-            system: self.system + other.system,
-            effect: self.effect + other.effect,
+impl ReservedKindFallbackStats {
+    pub(crate) fn record_system(&mut self, raw: u16) {
+        self.system += 1;
+        *self.system_histogram.entry(raw).or_insert(0) += 1;
+    }
+
+    pub(crate) fn record_effect(&mut self, raw: u16) {
+        self.effect += 1;
+        *self.effect_histogram.entry(raw).or_insert(0) += 1;
+    }
+
+    pub(crate) fn merge_from(&mut self, other: &Self) {
+        self.system += other.system;
+        self.effect += other.effect;
+        for (&raw, &count) in &other.system_histogram {
+            *self.system_histogram.entry(raw).or_insert(0) += count;
         }
+        for (&raw, &count) in &other.effect_histogram {
+            *self.effect_histogram.entry(raw).or_insert(0) += count;
+        }
+    }
+
+    pub(crate) fn add(mut self, other: &Self) -> Self {
+        self.merge_from(other);
+        self
     }
 }
 
@@ -109,7 +132,7 @@ pub(crate) fn kind_to_raw(kind: EventKind) -> u16 {
 /// (effect) with a panic, so those are matched directly against the known library
 /// constants. Any unrecognised value in a reserved range falls back to the closest
 /// documented constant (system or effect root) so the index can still be rebuilt.
-fn raw_to_kind_impl(raw: u16, counts: Option<&mut ReservedKindFallbackCounts>) -> EventKind {
+fn raw_to_kind_impl(raw: u16, counts: Option<&mut ReservedKindFallbackStats>) -> EventKind {
     let category = (raw >> 12) as u8;
     match category {
         // Reserved system category (0x0) — match known constants by full value.
@@ -119,11 +142,15 @@ fn raw_to_kind_impl(raw: u16, counts: Option<&mut ReservedKindFallbackCounts>) -
             0x0003 => EventKind::SYSTEM_HEARTBEAT,
             0x0004 => EventKind::SYSTEM_CONFIG_CHANGE,
             0x0005 => EventKind::SYSTEM_CHECKPOINT,
+            0x0006 => EventKind::SYSTEM_BATCH_BEGIN,
+            0x0007 => EventKind::SYSTEM_BATCH_COMMIT,
+            0x0008 => EventKind::SYSTEM_OPEN_COMPLETED,
+            0x000F => EventKind::SYSTEM_DENIAL,
             0x0FFE => EventKind::TOMBSTONE,
             0x0000 => EventKind::DATA,
             _ => {
                 if let Some(counts) = counts {
-                    counts.system += 1;
+                    counts.record_system(raw);
                 }
                 warn!(
                     raw,
@@ -142,7 +169,7 @@ fn raw_to_kind_impl(raw: u16, counts: Option<&mut ReservedKindFallbackCounts>) -
             0xD007 => EventKind::EFFECT_CONFLICT,
             _ => {
                 if let Some(counts) = counts {
-                    counts.effect += 1;
+                    counts.record_effect(raw);
                 }
                 warn!(
                     raw,
@@ -161,7 +188,7 @@ pub(crate) fn raw_to_kind(raw: u16) -> EventKind {
     raw_to_kind_impl(raw, None)
 }
 
-pub(crate) fn raw_to_kind_counted(raw: u16, counts: &mut ReservedKindFallbackCounts) -> EventKind {
+pub(crate) fn raw_to_kind_counted(raw: u16, counts: &mut ReservedKindFallbackStats) -> EventKind {
     raw_to_kind_impl(raw, Some(counts))
 }
 
@@ -214,13 +241,13 @@ impl SidxEntry {
     }
 
     pub(crate) fn to_cold_start_row(&self, segment_id: u64) -> ColdStartIndexRow {
-        self.to_cold_start_row_counted(segment_id, &mut ReservedKindFallbackCounts::default())
+        self.to_cold_start_row_counted(segment_id, &mut ReservedKindFallbackStats::default())
     }
 
     pub(crate) fn to_cold_start_row_counted(
         &self,
         segment_id: u64,
-        counts: &mut ReservedKindFallbackCounts,
+        counts: &mut ReservedKindFallbackStats,
     ) -> ColdStartIndexRow {
         ColdStartIndexRow {
             source: ColdStartSource::Sidx,
@@ -839,6 +866,9 @@ mod tests {
             EventKind::SYSTEM_HEARTBEAT,
             EventKind::SYSTEM_CONFIG_CHANGE,
             EventKind::SYSTEM_CHECKPOINT,
+            EventKind::SYSTEM_BATCH_BEGIN,
+            EventKind::SYSTEM_BATCH_COMMIT,
+            EventKind::SYSTEM_OPEN_COMPLETED,
             EventKind::TOMBSTONE,
             EventKind::DATA,
         ] {
@@ -885,14 +915,16 @@ mod tests {
 
     #[test]
     fn raw_to_kind_counted_tracks_reserved_fallbacks() {
-        let mut counts = ReservedKindFallbackCounts::default();
-        assert_eq!(raw_to_kind_counted(0x0006, &mut counts), EventKind::DATA);
+        let mut counts = ReservedKindFallbackStats::default();
+        assert_eq!(raw_to_kind_counted(0x0009, &mut counts), EventKind::DATA);
         assert_eq!(
             raw_to_kind_counted(0xD0FF, &mut counts),
             EventKind::EFFECT_ERROR
         );
         assert_eq!(counts.system, 1);
         assert_eq!(counts.effect, 1);
+        assert_eq!(counts.system_histogram.get(&0x0009), Some(&1));
+        assert_eq!(counts.effect_histogram.get(&0xD0FF), Some(&1));
     }
 
     // ── intern deduplicates strings ───────────────────────────────────────────

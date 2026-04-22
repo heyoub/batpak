@@ -1,8 +1,10 @@
 use crate::coordinate::Region;
 use crate::store::cold_start::persist_with_parent_fsync;
+use crate::store::delivery::observation::CheckpointId;
 use crate::store::index::{IndexEntry, StoreIndex};
 use crate::store::{RestartPolicy, Store, StoreError};
 use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -87,6 +89,7 @@ pub struct Cursor {
     position: u64, // tracks global_sequence — next poll starts after this
     started: bool, // false until first event consumed (global_sequence 0 is valid)
     index: Arc<StoreIndex>,
+    gap_buffer: Option<GapBuffer>,
     /// Optional durable-checkpoint id. When set, the cursor was
     /// constructed with a data directory and a checkpoint identifier so
     /// its position can be persisted via `save_checkpoint`.
@@ -96,7 +99,55 @@ pub struct Cursor {
 #[derive(Clone, Debug)]
 struct CursorDurableBinding {
     data_dir: PathBuf,
-    id: String,
+    id: CheckpointId,
+}
+
+/// Configuration for in-memory write-to-deliver gap observation.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct CursorGapConfig {
+    /// When `true`, the cursor retains write-to-deliver gaps in memory.
+    pub enabled: bool,
+    /// Maximum number of retained gap observations before the oldest
+    /// entry is dropped.
+    pub buffer_capacity: usize,
+}
+
+/// A substrate-detectable write-to-deliver gap.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GapObservation {
+    /// First sequence the cursor expected to deliver next.
+    pub expected_sequence: u64,
+    /// First visible delivered sequence after the skipped interval.
+    pub delivered_sequence: u64,
+    /// Half-open cancelled visibility ranges `[start, end)` intersecting the
+    /// skipped interval.
+    pub cancelled_ranges: Vec<(u64, u64)>,
+}
+
+#[derive(Clone, Debug)]
+struct GapBuffer {
+    capacity: usize,
+    observations: VecDeque<GapObservation>,
+}
+
+impl GapBuffer {
+    fn new(capacity: usize) -> Option<Self> {
+        (capacity > 0).then(|| Self {
+            capacity,
+            observations: VecDeque::with_capacity(capacity),
+        })
+    }
+
+    fn push(&mut self, observation: GapObservation) {
+        if self.observations.len() == self.capacity {
+            self.observations.pop_front();
+        }
+        self.observations.push_back(observation);
+    }
+
+    fn take_all(&mut self) -> Vec<GapObservation> {
+        self.observations.drain(..).collect()
+    }
 }
 
 impl Cursor {
@@ -106,6 +157,7 @@ impl Cursor {
             position: 0,
             started: false,
             index,
+            gap_buffer: None,
             durable: None,
         }
     }
@@ -121,9 +173,10 @@ impl Cursor {
             position: 0,
             started: false,
             index,
+            gap_buffer: None,
             durable: Some(CursorDurableBinding {
                 data_dir: data_dir.to_path_buf(),
-                id: id.to_owned(),
+                id: CheckpointId::new(id),
             }),
         }
     }
@@ -173,6 +226,12 @@ impl Cursor {
             .index
             .query_hits_after(&self.region, self.position, self.started, 1);
         if let Some(hit) = hits.into_iter().next() {
+            let expected_sequence = if self.started {
+                self.position.saturating_add(1)
+            } else {
+                0
+            };
+            self.record_gap(expected_sequence, hit.global_sequence);
             self.position = hit.global_sequence;
             self.started = true;
             self.index.upgrade_hit(hit)
@@ -189,11 +248,31 @@ impl Cursor {
         if hits.is_empty() {
             return Vec::new();
         }
+        self.record_gaps_for_hits(&hits);
         self.started = true;
         self.position = hits[hits.len() - 1].global_sequence;
         hits.into_iter()
             .filter_map(|hit| self.index.upgrade_hit(hit))
             .collect()
+    }
+
+    /// Configure this cursor's in-memory write-to-deliver gap observation.
+    #[must_use]
+    pub fn with_gap_config(mut self, config: CursorGapConfig) -> Self {
+        self.gap_buffer = if config.enabled {
+            GapBuffer::new(config.buffer_capacity)
+        } else {
+            None
+        };
+        self
+    }
+
+    /// Drain the currently retained write-to-deliver gaps.
+    pub fn take_gaps(&mut self) -> Vec<GapObservation> {
+        match self.gap_buffer.as_mut() {
+            Some(buffer) => buffer.take_all(),
+            None => Vec::new(),
+        }
     }
 
     pub(crate) fn checkpoint(&self) -> (u64, bool) {
@@ -216,7 +295,7 @@ impl Cursor {
             self.started,
             self.region.checkpoint_identity(),
         );
-        Self::save_checkpoint(&binding.data_dir, &binding.id, &ckpt)
+        Self::save_checkpoint(&binding.data_dir, binding.id.as_str(), &ckpt)
     }
 
     /// Load a persisted cursor checkpoint, or `Ok(None)` if none exists.
@@ -274,6 +353,45 @@ impl Cursor {
         persist_with_parent_fsync(tmp, &final_path)?;
         Ok(())
     }
+
+    fn record_gaps_for_hits(&mut self, hits: &[crate::store::index::QueryHit]) {
+        let mut expected_sequence = if self.started {
+            self.position.saturating_add(1)
+        } else {
+            0
+        };
+        for hit in hits {
+            self.record_gap(expected_sequence, hit.global_sequence);
+            expected_sequence = hit.global_sequence.saturating_add(1);
+        }
+    }
+
+    fn record_gap(&mut self, expected_sequence: u64, delivered_sequence: u64) {
+        let Some(buffer) = self.gap_buffer.as_mut() else {
+            return;
+        };
+        if delivered_sequence <= expected_sequence {
+            return;
+        }
+        let cancelled_ranges = self
+            .index
+            .cancelled_visibility_ranges()
+            .into_iter()
+            .filter_map(|(start, end)| {
+                let overlap_start = start.max(expected_sequence);
+                let overlap_end = end.min(delivered_sequence);
+                (overlap_start < overlap_end).then_some((overlap_start, overlap_end))
+            })
+            .collect::<Vec<_>>();
+        if cancelled_ranges.is_empty() {
+            return;
+        }
+        buffer.push(GapObservation {
+            expected_sequence,
+            delivered_sequence,
+            cancelled_ranges,
+        });
+    }
 }
 
 /// Outcome returned by a cursor worker batch handler.
@@ -325,18 +443,18 @@ fn build_worker_cursor(
     region: &Region,
     index: &Arc<StoreIndex>,
     data_dir: &Path,
-    checkpoint_id: Option<&str>,
+    checkpoint_id: Option<&CheckpointId>,
     load_saved_checkpoint: bool,
 ) -> Result<Cursor, StoreError> {
     match checkpoint_id {
         Some(id) if load_saved_checkpoint => {
-            Cursor::new_with_checkpoint(region.clone(), Arc::clone(index), data_dir, id)
+            Cursor::new_with_checkpoint(region.clone(), Arc::clone(index), data_dir, id.as_str())
         }
         Some(id) => Ok(Cursor::new_bound_checkpoint(
             region.clone(),
             Arc::clone(index),
             data_dir,
-            id,
+            id.as_str(),
         )),
         None => Ok(Cursor::new(region.clone(), Arc::clone(index))),
     }
@@ -373,7 +491,9 @@ pub struct CursorWorkerConfig {
     /// `CursorCheckpointRegionMismatch`, or checkpoint read I/O errors)
     /// also stop the worker before the first batch and are observed from
     /// `join()` / `stop_and_join()`.
-    pub checkpoint_id: Option<String>,
+    pub checkpoint_id: Option<CheckpointId>,
+    /// Optional cursor-owned gap observation config. Disabled by default.
+    pub gap_observation: CursorGapConfig,
     /// Optional callback fired once when the restart budget is
     /// exhausted, before the worker exits. Used by the reactor runner
     /// to populate its error slot with `RestartBudgetExhausted`.
@@ -399,6 +519,7 @@ impl Clone for CursorWorkerConfig {
             idle_sleep: self.idle_sleep,
             restart: self.restart.clone(),
             checkpoint_id: self.checkpoint_id.clone(),
+            gap_observation: self.gap_observation,
             on_restart_budget_exhausted: None,
             on_checkpoint_failure: None,
         }
@@ -412,6 +533,7 @@ impl std::fmt::Debug for CursorWorkerConfig {
             .field("idle_sleep", &self.idle_sleep)
             .field("restart", &self.restart)
             .field("checkpoint_id", &self.checkpoint_id)
+            .field("gap_observation", &self.gap_observation)
             .field(
                 "on_restart_budget_exhausted",
                 &self.on_restart_budget_exhausted.is_some(),
@@ -431,6 +553,7 @@ impl Default for CursorWorkerConfig {
             idle_sleep: Duration::from_millis(10),
             restart: RestartPolicy::Once,
             checkpoint_id: None,
+            gap_observation: CursorGapConfig::default(),
             on_restart_budget_exhausted: None,
             on_checkpoint_failure: None,
         }
@@ -545,6 +668,7 @@ impl Store<crate::store::Open> {
             idle_sleep,
             restart,
             checkpoint_id,
+            gap_observation,
             on_restart_budget_exhausted,
             on_checkpoint_failure,
         } = config;
@@ -556,7 +680,7 @@ impl Store<crate::store::Open> {
                     &region,
                     &store.index,
                     &store.config.data_dir,
-                    checkpoint_id.as_deref(),
+                    checkpoint_id.as_ref(),
                     true,
                 ) {
                     Ok(cursor) => cursor,
@@ -570,6 +694,7 @@ impl Store<crate::store::Open> {
                         return;
                     }
                 };
+                cursor = cursor.with_gap_config(gap_observation);
                 let mut committed = cursor.checkpoint();
                 let mut restarts = 0u32;
                 let mut window_start = Instant::now();
@@ -608,7 +733,7 @@ impl Store<crate::store::Open> {
                                 // cursor back to the last committed
                                 // position so the batch is re-delivered
                                 // on restart. No silent downgrade.
-                                let Some(id) = checkpoint_id.as_deref() else {
+                                let Some(id) = checkpoint_id.as_ref() else {
                                     debug_assert!(
                                         false,
                                         "in-memory cursor checkpoint persist failure is unreachable"
@@ -618,14 +743,14 @@ impl Store<crate::store::Open> {
                                 };
                                 if let Ok(mut guard) = checkpoint_error_slot.lock() {
                                     if guard.is_none() {
-                                        *guard = Some(checkpoint_write_failed(id, &error));
+                                        *guard = Some(checkpoint_write_failed(id.as_str(), &error));
                                     }
                                 }
                                 if let Some(cb) = checkpoint_failure_callback.as_mut() {
-                                    cb(id, error);
+                                    cb(id.as_str(), error);
                                 } else {
                                     tracing::error!(
-                                        cursor_id = %id,
+                                        cursor_id = %id.as_str(),
                                         "durable cursor checkpoint persist failed; no \
                                          failure callback wired — stopping worker to \
                                          avoid silent durable-resume regression"
@@ -644,7 +769,7 @@ impl Store<crate::store::Open> {
                                 // stop — a durable cursor that cannot
                                 // persist must surface the error rather
                                 // than silently lose progress.
-                                let Some(id) = checkpoint_id.as_deref() else {
+                                let Some(id) = checkpoint_id.as_ref() else {
                                     debug_assert!(
                                         false,
                                         "in-memory cursor checkpoint persist failure is unreachable"
@@ -654,14 +779,14 @@ impl Store<crate::store::Open> {
                                 };
                                 if let Ok(mut guard) = checkpoint_error_slot.lock() {
                                     if guard.is_none() {
-                                        *guard = Some(checkpoint_write_failed(id, &error));
+                                        *guard = Some(checkpoint_write_failed(id.as_str(), &error));
                                     }
                                 }
                                 if let Some(cb) = checkpoint_failure_callback.as_mut() {
-                                    cb(id, error);
+                                    cb(id.as_str(), error);
                                 } else {
                                     tracing::error!(
-                                        cursor_id = %id,
+                                        cursor_id = %id.as_str(),
                                         "durable cursor checkpoint persist failed on \
                                          clean stop; no failure callback wired"
                                     );
@@ -734,7 +859,7 @@ impl Store<crate::store::Open> {
                                 &region,
                                 &store.index,
                                 &store.config.data_dir,
-                                checkpoint_id.as_deref(),
+                                checkpoint_id.as_ref(),
                                 false,
                             ) {
                                 Ok(cursor) => cursor,
@@ -748,6 +873,7 @@ impl Store<crate::store::Open> {
                                     continue;
                                 }
                             };
+                            cursor = cursor.with_gap_config(gap_observation);
                             cursor.restore_checkpoint(committed.0, committed.1);
                         }
                     }

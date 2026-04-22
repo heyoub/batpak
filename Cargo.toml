@@ -59,6 +59,8 @@ rayon = "1.10"
 fastrand = { version = "2", optional = true }
 tempfile = "3"
 libc = "0.2"
+ed25519-compact = { version = "2.2.0", default-features = false, features = ["std"] }
+zeroize = "1"
 # NO TOKIO. Invariant 1.
 
 [dev-dependencies]

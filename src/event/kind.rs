@@ -132,6 +132,10 @@ impl EventKind {
     /// Batch commit marker. Internal only—never visible to queries.
     /// Paired with SYSTEM_BATCH_BEGIN for two-phase commit semantics.
     pub const SYSTEM_BATCH_COMMIT: Self = Self(0x0007);
+    /// Store lifecycle receipt emitted after a successful mutable open.
+    pub const SYSTEM_OPEN_COMPLETED: Self = Self(0x0008);
+    /// Persisted gate-denial audit receipt.
+    pub const SYSTEM_DENIAL: Self = Self(0x000F);
     /// Effect: an error was observed during processing.
     pub const EFFECT_ERROR: Self = Self(0xD001);
     /// Effect: a retry is being attempted.

@@ -159,6 +159,7 @@ fn ground_truth(corpus: &[GroundTruthEvent], region: &Region) -> HashSet<(String
 fn actual(entries: &[IndexEntry]) -> HashSet<(String, String, u32)> {
     entries
         .iter()
+        .filter(|e| e.kind != EventKind::SYSTEM_OPEN_COMPLETED)
         .map(|e| {
             (
                 e.coord.entity().to_owned(),
@@ -216,9 +217,12 @@ fn ground_truth_ordered(
 fn actual_ordered(entries: &[IndexEntry]) -> Vec<(u64, String, String, u32)> {
     entries
         .iter()
+        .filter(|e| e.kind != EventKind::SYSTEM_OPEN_COMPLETED)
         .map(|e| {
             (
-                e.global_sequence,
+                e.global_sequence
+                    .checked_sub(1)
+                    .expect("user events follow the mutable-open lifecycle receipt"),
                 e.coord.entity().to_owned(),
                 e.coord.scope().to_owned(),
                 e.clock,
@@ -235,7 +239,11 @@ fn assert_matches(
     corpus: &[GroundTruthEvent],
 ) {
     let actual_entries = store.query(region);
-    let actual_set = actual(&actual_entries);
+    let filtered_entries: Vec<_> = actual_entries
+        .into_iter()
+        .filter(|entry| entry.kind != EventKind::SYSTEM_OPEN_COMPLETED)
+        .collect();
+    let actual_set = actual(&filtered_entries);
     let expected = ground_truth(corpus, region);
     assert_eq!(
         actual_set, expected,
@@ -245,7 +253,7 @@ fn assert_matches(
          region={region:?}"
     );
     assert_eq!(
-        actual_entries.len(),
+        filtered_entries.len(),
         actual_set.len(),
         "topology `{label}` query `{query_name}` returned duplicate entries"
     );

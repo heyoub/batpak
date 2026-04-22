@@ -92,13 +92,26 @@ Two replay lanes: `JsonValueInput` (default, ergonomic) and `RawMsgpackInput` (p
 **Delivery** — `subscribe_lossy(&region)` for push-based broadcast (may drop under load).
 `cursor_guaranteed(&region)` for process-local pull-based ordered replay from the
 in-memory index. Durable at-least-once across restarts is exposed by
-`cursor_worker(..., CursorWorkerConfig { checkpoint_id: Some(..), .. })` and typed reactors via
-`ReactorConfig::checkpoint_id`. `react_loop` is the legacy subscribe-based loop.
+`cursor_worker(..., CursorWorkerConfig { checkpoint_id: Some(CheckpointId::new(..)), .. })`
+and typed reactors via `ReactorConfig::checkpoint_id: Option<CheckpointId>`.
+`Cursor::with_gap_config(...)` plus `Cursor::take_gaps()` expose in-memory
+write-to-deliver gap observations without introducing a persisted system event.
+`react_loop` is the legacy subscribe-based loop.
 
 **Control plane** — `submit`/`try_submit` for non-blocking fire-and-ticket. `outbox()` for
 staged batch assembly. `begin_visibility_fence()` for atomic write groups. `open`, `close`,
 `sync`, `snapshot`, `compact` for lifecycle. `stats()` and `diagnostics()` for
-observability.
+observability. `diagnostics().open_report` exposes the structured cold-start
+receipt, `StoreConfig::with_open_report_observer(...)` lets callers export it,
+and mutable opens append one durable `SYSTEM_OPEN_COMPLETED` lifecycle event at
+`batpak:store` / `batpak:lifecycle`. The `batpak:` coordinate prefix is
+reserved for library-owned lifecycle streams; application code should avoid it.
+Receipt signing is opt-in via `StoreConfig::with_signing_key(...)`; signed
+`AppendReceipt` and `DenialReceipt` values carry `key_id` and `signature`, and
+`verify_append_receipt` / `verify_denial_receipt` re-check them against the
+store's configured key registry. Gate denials can be persisted as first-class
+entity-chain events through `Store::append_denial(...)` using
+`EventKind::SYSTEM_DENIAL`.
 
 ## Commands
 

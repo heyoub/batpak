@@ -458,19 +458,21 @@ fn write_cold_start_artifacts_on_close(store: &Store<Open>) -> Result<(), StoreE
     let (seg_id, offset) = latest_segment_watermark(&store.config.data_dir)?;
     match store.runtime.cold_start.write_target() {
         Some(ColdStartArtifactKind::MmapIndex) => {
-            crate::store::cold_start::mmap::write_mmap_index(
+            crate::store::cold_start::mmap::write_mmap_index_with_reserved_kind_fallbacks(
                 &store.index,
                 &store.config.data_dir,
                 seg_id,
                 offset,
+                &store.cumulative_reserved_kind_fallbacks,
             )?;
         }
         Some(ColdStartArtifactKind::Checkpoint) => {
-            crate::store::cold_start::checkpoint::write_checkpoint(
+            crate::store::cold_start::checkpoint::write_checkpoint_with_reserved_kind_fallbacks(
                 &store.index,
                 &store.config.data_dir,
                 seg_id,
                 offset,
+                &store.cumulative_reserved_kind_fallbacks,
             )?;
         }
         None => {}

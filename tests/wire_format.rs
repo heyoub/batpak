@@ -27,6 +27,7 @@ use batpak::outcome::wait::{CompensationAction, WaitCondition};
 use batpak::prelude::*;
 use batpak::wire::{option_u128_bytes, u128_bytes, vec_u128_bytes};
 use serde::Serialize;
+use tempfile::TempDir;
 
 fn golden_dir() -> std::path::PathBuf {
     std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/golden")
@@ -327,24 +328,32 @@ fn committed_api_contract() {
 }
 
 #[test]
-fn commit_metadata_from_append_receipt_zeroes_hash() {
-    let receipt = batpak::store::AppendReceipt {
-        event_id: 0xDEAD,
-        sequence: 7,
-        disk_pos: batpak::store::DiskPos::new(3, 128, 64),
-    };
+fn commit_metadata_from_append_receipt_uses_receipt_hash() {
+    let dir = TempDir::new().expect("temp dir");
+    let _disk_pos_witness = batpak::store::DiskPos::new(3, 128, 64);
+    let store = Store::open(
+        StoreConfig::new(dir.path())
+            .with_enable_checkpoint(false)
+            .with_enable_mmap_index(false),
+    )
+    .expect("open store");
+    let coord = Coordinate::new("wire:receipt", "scope:test").expect("coord");
+    let receipt = store
+        .append(
+            &coord,
+            EventKind::custom(0xA, 7),
+            &serde_json::json!({"hello": "world"}),
+        )
+        .expect("append event");
+    let expected_hash = receipt.content_hash;
 
-    let meta = match CommitMetadata::from_append_receipt(receipt) {
+    let meta = match CommitMetadata::from_append_receipt(&receipt) {
         Ok(meta) => meta,
         Err(err) => panic!("test constructs known-valid receipt metadata: {err:?}"),
     };
-    assert_eq!(meta.event_id(), 0xDEAD);
-    assert_eq!(meta.sequence(), 7);
-    assert_eq!(
-        meta.hash(),
-        [0u8; 32],
-        "CommitMetadata::from_append_receipt must not fabricate a content hash",
-    );
+    assert_eq!(meta.hash(), expected_hash);
+
+    store.close().expect("close store");
 }
 
 #[test]

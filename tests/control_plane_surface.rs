@@ -103,7 +103,7 @@ fn control_plane_surface_smoke() {
         .expect("submit")
         .wait()
         .expect("wait");
-    assert_eq!(receipt.sequence, 0);
+    assert_eq!(receipt.sequence, 1);
 
     let reaction = store
         .submit_reaction(
@@ -116,14 +116,14 @@ fn control_plane_surface_smoke() {
         .expect("submit reaction")
         .wait()
         .expect("wait reaction");
-    assert_eq!(reaction.sequence, 1);
+    assert_eq!(reaction.sequence, 2);
 
     let outcome = store
         .try_submit(&coord, kind, &serde_json::json!({"n": 3}))
         .expect("try_submit");
     let ticket: AppendTicket = outcome.into_result().expect("ok outcome");
     let receipt = ticket.wait().expect("wait try_submit");
-    assert_eq!(receipt.sequence, 2);
+    assert_eq!(receipt.sequence, 3);
 
     let try_reaction = store
         .try_submit_reaction(
@@ -427,7 +427,7 @@ fn try_check_surfaces_ready_append_and_batch_tickets() {
             "PROPERTY: once the append ticket receiver is non-empty, try_check must return Some(Ok(_))"
         ),
     };
-    assert_eq!(append_receipt.sequence, 0);
+    assert_eq!(append_receipt.sequence, 1);
     assert_ne!(
         append_receipt.event_id, 0,
         "PROPERTY: ready append ticket must surface the committed event identity, not a default receipt."
@@ -477,7 +477,7 @@ fn try_check_surfaces_ready_append_and_batch_tickets() {
             .iter()
             .map(|receipt| receipt.sequence)
             .collect::<Vec<_>>(),
-        vec![1, 2],
+        vec![2, 3],
         "PROPERTY: batch try_check must expose the committed receipts in visible sequence order."
     );
 }

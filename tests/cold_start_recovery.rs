@@ -14,7 +14,7 @@
 
 use batpak::coordinate::{Coordinate, Region};
 use batpak::event::EventKind;
-use batpak::store::{Store, StoreConfig};
+use batpak::store::{ReadOnly, Store, StoreConfig};
 use tempfile::TempDir;
 
 const KIND: EventKind = EventKind::custom(0xE, 1);
@@ -57,6 +57,14 @@ fn find_single_segment(dir: &TempDir) -> std::path::PathBuf {
         entries
     );
     entries.into_iter().next().expect("exactly one segment")
+}
+
+fn user_visible_entries<State>(store: &Store<State>) -> Vec<batpak::store::IndexEntry> {
+    store
+        .query(&Region::all())
+        .into_iter()
+        .filter(|entry| entry.kind != EventKind::SYSTEM_OPEN_COMPLETED)
+        .collect()
 }
 
 #[test]
@@ -106,8 +114,9 @@ fn clean_close_writes_expected_artifacts_and_roundtrips() {
     );
 
     // Reopening must surface every event we wrote.
-    let store = Store::open(config_with_artifacts(&dir)).expect("reopen store");
-    let entries = store.query(&Region::all());
+    let store =
+        Store::<ReadOnly>::open_read_only(config_with_artifacts(&dir)).expect("reopen store");
+    let entries = user_visible_entries(&store);
     let entry_count =
         u32::try_from(entries.len()).expect("test fixture keeps event count within u32");
     assert_eq!(
@@ -116,7 +125,7 @@ fn clean_close_writes_expected_artifacts_and_roundtrips() {
         "PROPERTY: reopen after clean close must yield all {count} events; got {}",
         entries.len()
     );
-    store.close().expect("close after verify");
+    drop(store);
 }
 
 #[test]

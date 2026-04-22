@@ -141,7 +141,7 @@ fn try_transfer(store: &Store, pipeline: &Pipeline<TransferRequest>, transfer: T
             // forward it directly — `append_typed` expects `&T: EventPayload`.
             let result: Result<_, StoreError> = pipeline.commit(receipt, |payload| {
                 let r = store.append_typed(&coord, payload)?;
-                CommitMetadata::from_append_receipt(r)
+                CommitMetadata::from_append_receipt(&r)
             });
 
             match result {

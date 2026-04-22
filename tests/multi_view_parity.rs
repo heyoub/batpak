@@ -103,11 +103,17 @@ fn summarize_entries<State>(store: &Store<State>, entries: Vec<IndexEntry>) -> V
     entries
         .into_iter()
         .map(|entry| {
-            let payload = store
+            let mut payload = store
                 .get(entry.event_id)
                 .expect("query result must be readable from disk")
                 .event
                 .payload;
+            if entry.kind == EventKind::SYSTEM_OPEN_COMPLETED {
+                payload
+                    .as_object_mut()
+                    .expect("SYSTEM_OPEN_COMPLETED payload must be an object")
+                    .insert("elapsed_us".into(), serde_json::Value::from(0));
+            }
             EventSummary {
                 entity: entry.coord.entity().to_owned(),
                 scope: entry.coord.scope().to_owned(),

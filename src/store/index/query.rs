@@ -44,12 +44,12 @@ impl StoreIndex {
         let _read = self.swap_gate.read();
         let visibility = self.sequence.snapshot();
 
-        let mut hits: Vec<QueryHit> = if let Some(ref prefix) = region.entity_prefix {
+        let mut hits: Vec<QueryHit> = if region.entity_prefix.is_some() {
             let mut candidates = Vec::new();
             for stream in self
                 .streams
                 .iter()
-                .filter(|r| r.key().as_ref().starts_with(prefix.as_ref()))
+                .filter(|r| region.matches_entity(r.key().as_ref()))
             {
                 for entry in stream.value().values() {
                     candidates.push(QueryHit::from_entry(entry));
@@ -166,12 +166,12 @@ impl StoreIndex {
         let visibility = self.sequence.snapshot();
         let seq_ok = |seq: u64| !started || seq > after_seq;
 
-        let mut hits: Vec<QueryHit> = if let Some(ref prefix) = region.entity_prefix {
+        let mut hits: Vec<QueryHit> = if region.entity_prefix.is_some() {
             let mut candidates = Vec::new();
             for stream in self
                 .streams
                 .iter()
-                .filter(|r| r.key().as_ref().starts_with(prefix.as_ref()))
+                .filter(|r| region.matches_entity(r.key().as_ref()))
             {
                 for entry in stream.value().values() {
                     if !seq_ok(entry.global_sequence) {

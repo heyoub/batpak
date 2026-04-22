@@ -12,7 +12,7 @@
   justification: append receipts and reader/index internals exercise it indirectly without naming the type directly
   witness:
     - path: tests/wire_format.rs
-      lines: [306]
+      lines: [333]
 - name: RetentionPredicate
   justification: compaction closures are exercised through CompactionStrategy without test code naming the boxed type alias directly
   witness:
@@ -142,3 +142,43 @@
   witness:
     - path: tests/event_payload_surface.rs
       lines: [20, 62]
+- name: namespace_prefix_matches
+  justification: public namespace-boundary predicate exercised in substrate additions coverage
+  witness:
+    - path: tests/substrate_additions.rs
+      lines: [4, 86, 87]
+- name: evaluations
+  justification: denial payload accessors are exercised directly in substrate additions coverage
+  witness:
+    - path: tests/substrate_additions.rs
+      lines: [303, 304, 305, 306, 307, 309]
+- name: pipeline_id
+  justification: denial payload accessors are exercised directly in substrate additions coverage
+  witness:
+    - path: tests/substrate_additions.rs
+      lines: [300]
+- name: proposed_kind
+  justification: denial payload accessors are exercised directly in substrate additions coverage
+  witness:
+    - path: tests/substrate_additions.rs
+      lines: [301]
+- name: proposed_content_hash
+  justification: denial payload accessors are exercised directly in substrate additions coverage
+  witness:
+    - path: tests/substrate_additions.rs
+      lines: [302]
+- name: gate_id
+  justification: gate evaluation accessors are exercised directly in substrate additions coverage
+  witness:
+    - path: tests/substrate_additions.rs
+      lines: [304, 307]
+- name: verdict
+  justification: gate evaluation accessors are exercised directly in substrate additions coverage
+  witness:
+    - path: tests/substrate_additions.rs
+      lines: [305, 309]
+- name: evidence_hash
+  justification: gate evaluation accessors are exercised directly in substrate additions coverage
+  witness:
+    - path: tests/substrate_additions.rs
+      lines: [306]

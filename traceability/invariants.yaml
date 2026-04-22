@@ -92,6 +92,19 @@
   artifacts:
     - ART-STORE-SCAN
     - ART-STORE-CONFIG
+- id: INV-OPEN-REPORT-RECEIPT
+  statement: >-
+    Cold-start observability is a real receipt surface: diagnostics().open_report and
+    the open-report observer expose current reopen fallback totals/histograms plus
+    cumulative fallback totals/histograms persisted through mmap/checkpoint
+    artifacts; mutable opens also append one durable SYSTEM_OPEN_COMPLETED
+    lifecycle event while read-only opens remain side-effect free.
+  artifacts:
+    - ART-STORE-MOD
+    - ART-STORE-REBUILD
+    - ART-STORE-CHECKPOINT
+    - ART-STORE-MMAP
+    - ART-OBSERVABILITY-TESTS
 - id: INV-COLUMNAR-REPLACES-DASHMAP
   statement: The scan index always keeps the base AoS by_fact and scope_entities maps, and may additionally fan out into SoA, SoAoS, and AoSoA64 overlays. IndexTopology is the live public model for enabling those overlays.
   artifacts:

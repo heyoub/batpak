@@ -10,7 +10,7 @@
 //!
 //! ```text
 //! [MAGIC: b"FBATCK"]   — 6 bytes, identifies the file type
-//! [version: u16 LE]    — v2/v3 fallback or v4 current
+//! [version: u16 LE]    — v2/v3/v4 fallback or v5 current
 //! [crc32: u32 LE]      — CRC32 of the msgpack body that follows
 //! [msgpack body]        — versioned checkpoint body serialised via rmp_serde
 //! ```
@@ -27,6 +27,7 @@ use crate::store::index::interner::InternId;
 use crate::store::index::{
     recommended_restore_chunk_count, DiskPos, IndexEntry, RoutingSummary, StoreIndex,
 };
+use crate::store::segment::sidx::ReservedKindFallbackStats;
 use crate::store::StoreError;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -39,9 +40,9 @@ use std::path::Path;
 pub(crate) const CHECKPOINT_MAGIC: &[u8; 6] = b"FBATCK";
 
 /// Format version stored in the checkpoint header.
-/// v4: v3 plus persisted DAG lane/depth on each entry.
+/// v5: v4 plus persisted cumulative reserved-kind fallback stats.
 /// v2 checkpoints remain readable as a fallback; v1 is rejected.
-pub(crate) const CHECKPOINT_VERSION: u16 = 4;
+pub(crate) const CHECKPOINT_VERSION: u16 = 5;
 
 /// Final checkpoint filename inside the data directory.
 pub(crate) const CHECKPOINT_FILENAME: &str = "index.ckpt";
@@ -79,6 +80,19 @@ struct CheckpointDataV4 {
     watermark_offset: u64,
     interner_strings: Vec<String>,
     routing: RoutingSummary,
+    entries: Vec<CheckpointEntry>,
+}
+
+/// Checkpoint format v5: v4 plus cumulative reserved-kind fallback stats.
+#[derive(Serialize, Deserialize)]
+struct CheckpointDataV5 {
+    global_sequence: u64,
+    watermark_segment_id: u64,
+    watermark_offset: u64,
+    interner_strings: Vec<String>,
+    routing: RoutingSummary,
+    #[serde(default)]
+    reserved_kind_fallbacks: ReservedKindFallbackStats,
     entries: Vec<CheckpointEntry>,
 }
 
@@ -158,6 +172,7 @@ pub(crate) struct LoadedCheckpointData {
     pub(crate) watermark: WatermarkInfo,
     pub(crate) stored_allocator: u64,
     pub(crate) routing: RoutingSummary,
+    pub(crate) cumulative_reserved_kind_fallbacks: ReservedKindFallbackStats,
 }
 
 pub(crate) struct LoadedCheckpointSnapshot {
@@ -166,6 +181,7 @@ pub(crate) struct LoadedCheckpointSnapshot {
     pub(crate) watermark: WatermarkInfo,
     pub(crate) stored_allocator: u64,
     pub(crate) routing: RoutingSummary,
+    pub(crate) cumulative_reserved_kind_fallbacks: ReservedKindFallbackStats,
 }
 
 fn checkpoint_entries_to_index_entries(
@@ -191,11 +207,29 @@ fn checkpoint_entries_to_index_entries(
 /// Returns [`StoreError::Serialization`] if msgpack serialisation fails.
 /// Returns [`StoreError::Io`] if any filesystem operation (open, write, fsync,
 /// rename) fails.
+// justifies: src/store/lifecycle.rs routes production artifact writes through the cumulative-stats variant; this compatibility wrapper remains for targeted tests and focused artifact fixtures.
+#[allow(dead_code)]
 pub(crate) fn write_checkpoint(
     index: &StoreIndex,
     data_dir: &Path,
     watermark_segment_id: u64,
     watermark_offset: u64,
+) -> Result<(), StoreError> {
+    write_checkpoint_with_reserved_kind_fallbacks(
+        index,
+        data_dir,
+        watermark_segment_id,
+        watermark_offset,
+        &ReservedKindFallbackStats::default(),
+    )
+}
+
+pub(crate) fn write_checkpoint_with_reserved_kind_fallbacks(
+    index: &StoreIndex,
+    data_dir: &Path,
+    watermark_segment_id: u64,
+    watermark_offset: u64,
+    reserved_kind_fallbacks: &ReservedKindFallbackStats,
 ) -> Result<(), StoreError> {
     // ── 1. Collect every entry from the index ────────────────────────────────
     // all_entries() is not a linearisable snapshot (DashMap limitation), but that
@@ -242,12 +276,13 @@ pub(crate) fn write_checkpoint(
         recommended_restore_chunk_count(entries.len()),
     );
 
-    let data = CheckpointDataV4 {
+    let data = CheckpointDataV5 {
         global_sequence: index.global_sequence(),
         watermark_segment_id,
         watermark_offset,
         interner_strings,
         routing,
+        reserved_kind_fallbacks: reserved_kind_fallbacks.clone(),
         entries,
     };
 
@@ -368,6 +403,7 @@ pub(crate) fn try_load_checkpoint(data_dir: &Path) -> Option<LoadedCheckpointDat
         watermark_offset,
         global_sequence,
         routing,
+        cumulative_reserved_kind_fallbacks,
     ) = match version {
         2 => {
             let data: CheckpointDataV2 = match rmp_serde::from_slice(body) {
@@ -393,6 +429,7 @@ pub(crate) fn try_load_checkpoint(data_dir: &Path) -> Option<LoadedCheckpointDat
                 data.watermark_offset,
                 data.global_sequence,
                 routing,
+                ReservedKindFallbackStats::default(),
             )
         }
         3 => {
@@ -415,6 +452,7 @@ pub(crate) fn try_load_checkpoint(data_dir: &Path) -> Option<LoadedCheckpointDat
                 data.watermark_offset,
                 data.global_sequence,
                 data.routing,
+                ReservedKindFallbackStats::default(),
             )
         }
         4 => {
@@ -437,6 +475,30 @@ pub(crate) fn try_load_checkpoint(data_dir: &Path) -> Option<LoadedCheckpointDat
                 data.watermark_offset,
                 data.global_sequence,
                 data.routing,
+                ReservedKindFallbackStats::default(),
+            )
+        }
+        5 => {
+            let data: CheckpointDataV5 = match rmp_serde::from_slice(body) {
+                Ok(d) => d,
+                Err(e) => {
+                    tracing::warn!(
+                        target: "batpak::checkpoint",
+                        path = %path.display(),
+                        error = %e,
+                        "checkpoint deserialisation failed — ignoring"
+                    );
+                    return None;
+                }
+            };
+            (
+                data.entries,
+                data.interner_strings,
+                data.watermark_segment_id,
+                data.watermark_offset,
+                data.global_sequence,
+                data.routing,
+                data.reserved_kind_fallbacks,
             )
         }
         _ => {
@@ -501,6 +563,7 @@ pub(crate) fn try_load_checkpoint(data_dir: &Path) -> Option<LoadedCheckpointDat
         watermark,
         stored_allocator: global_sequence,
         routing,
+        cumulative_reserved_kind_fallbacks,
     })
 }
 
@@ -580,6 +643,7 @@ pub(crate) fn try_load_checkpoint_snapshot(data_dir: &Path) -> Option<LoadedChec
         watermark: loaded.watermark,
         stored_allocator: loaded.stored_allocator,
         routing: loaded.routing,
+        cumulative_reserved_kind_fallbacks: loaded.cumulative_reserved_kind_fallbacks,
     })
 }
 

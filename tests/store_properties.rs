@@ -307,7 +307,7 @@ fn flow_connectivity_full_production_path() {
         let committed = pipeline
             .commit(receipt, |payload| -> Result<_, StoreError> {
                 let r = store.append(&coord, kind, &payload)?;
-                CommitMetadata::from_append_receipt(r)
+                CommitMetadata::from_append_receipt(&r)
             })
             .expect("commit");
 

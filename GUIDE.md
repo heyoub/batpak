@@ -263,9 +263,12 @@ checkpoint, or durable at-least-once across restart if
 
 Use `cursor_worker(...)` for restartable background consumers with
 `RestartPolicy` and explicit batch processing. Set
-`CursorWorkerConfig.checkpoint_id: Option<String>` to persist resume
-position under `{data_dir}/cursors/{id}.ckpt` (written with parent-dir
-fsync). Without a `checkpoint_id`, resume is in-memory only. Startup
+`CursorWorkerConfig.checkpoint_id: Option<CheckpointId>` to persist
+resume position under `{data_dir}/cursors/{id}.ckpt` (written with
+parent-dir fsync). Without a `checkpoint_id`, resume is in-memory only.
+Use `Cursor::with_gap_config(...)` plus `take_gaps()` when you want
+cursor-local write-to-deliver gap observations without emitting durable
+system events. Startup
 checkpoint load and validation failures are reported asynchronously from
 `join()` / `stop_and_join()`, not from `cursor_worker(...)` itself.
 
@@ -315,6 +318,12 @@ match store.try_submit_typed(&coord, &payload)? {
 ```
 
 Use `store.writer_pressure()` for direct mailbox telemetry.
+Use `store.diagnostics().open_report` for the last structured cold-start
+receipt. To export that receipt during startup without polling, configure
+`StoreConfig::with_open_report_observer(...)`. Mutable opens also append a
+durable `SYSTEM_OPEN_COMPLETED` event at `batpak:store` / `batpak:lifecycle`.
+That `batpak:` coordinate prefix is reserved for library lifecycle streams and
+should not be reused by application coordinates.
 
 ### Outbox batching
 

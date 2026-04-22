@@ -33,7 +33,7 @@
 //! let receipt = pipeline.evaluate(&(), proposal)?;
 //! let committed = pipeline.commit(receipt, |p| -> Result<_, StoreError> {
 //!     let r = store.append(&coord, kind, &p)?;
-//!     CommitMetadata::from_append_receipt(r)
+//!     CommitMetadata::from_append_receipt(&r)
 //! })?;
 //! # Ok(())
 //! # }
@@ -48,6 +48,8 @@
 
 /// Entity and scope addressing for events.
 pub mod coordinate;
+/// Stable named-field MessagePack encoding helpers.
+pub mod encoding;
 /// Event types, headers, and sourcing traits.
 pub mod event;
 /// Policy gate evaluation before event commitment.
@@ -68,6 +70,10 @@ pub mod typestate;
 /// wire → coordinate → outcome → event → guard → pipeline → store → typestate → id → prelude
 /// Serde serialization helpers.
 pub mod wire; // serde helpers — no deps, must come first
+
+/// Preferred public alias for the stable encoding surface while the stronger
+/// canonical-bytes contract is phased in.
+pub use crate::encoding as canonical;
 
 /// Internal types referenced by `#[derive(EventPayload)]` generated code.
 /// Not part of the public API; may change without notice.

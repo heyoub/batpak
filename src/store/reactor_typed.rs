@@ -53,7 +53,10 @@ use parking_lot::Mutex;
 use crate::coordinate::Region;
 use crate::event::sourcing::TypedReactive;
 use crate::event::{DecodeTyped, EventPayload, StoredEvent, TypedDecodeError};
-use crate::store::delivery::cursor::{CursorWorkerAction, CursorWorkerConfig, CursorWorkerHandle};
+use crate::store::delivery::cursor::{
+    CursorGapConfig, CursorWorkerAction, CursorWorkerConfig, CursorWorkerHandle,
+};
+use crate::store::delivery::observation::CheckpointId;
 use crate::store::reaction::ReactionBatch;
 use crate::store::{Open, RestartPolicy, Store, StoreError};
 
@@ -157,7 +160,7 @@ pub struct ReactorConfig {
     ///   validation failures are also asynchronous: they stop the worker
     ///   before the first batch and surface from `handle.join()` /
     ///   `stop_and_join()` as `ReactorError::Store(...)`.
-    pub checkpoint_id: Option<String>,
+    pub checkpoint_id: Option<CheckpointId>,
 }
 
 impl Default for ReactorConfig {
@@ -476,6 +479,7 @@ where
         idle_sleep: config.idle_sleep,
         restart: config.restart_policy,
         checkpoint_id: config.checkpoint_id,
+        gap_observation: CursorGapConfig::default(),
         on_restart_budget_exhausted: Some(on_budget_exhausted),
         on_checkpoint_failure: Some(on_checkpoint_failure),
     };

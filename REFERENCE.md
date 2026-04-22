@@ -194,16 +194,26 @@ Batch append uses BEGIN/COMMIT markers and atomic visibility publication.
 Current artifact versions:
 
 - SIDX footer magic: `SDX2`
-- checkpoint format: v4
-- mmap index snapshot: v3
+- checkpoint format: v5
+- mmap index snapshot: v4
 
 Compatibility rules:
 
 - old SIDX footers are ignored and reopen falls back to scan
+- checkpoint v4 restores missing cumulative reserved-kind fallback stats as empty
 - checkpoint v3 restores missing `dag_lane` / `dag_depth` as `0`
+- mmap v3 restores missing cumulative reserved-kind fallback stats as empty
 - mmap v1/v2 restores missing `dag_lane` / `dag_depth` as `0`
 - full frame scan remains the source of truth when an optimization artifact is missing, stale, or structurally incompatible
 - SIDX-accelerated cold start reconstructs `timestamp_us` as `wall_ms * 1000`, so it is best-effort to the nearest millisecond (±999 µs), not a sub-millisecond replay guarantee
+
+Reopen observability contract:
+
+- `diagnostics().open_report` carries per-reopen reserved-kind fallback totals and histograms plus cumulative totals and histograms persisted through the current store's cold-start artifacts
+- `StoreConfig::with_open_report_observer(...)` fires once after each successful open with that same structured receipt; observer panics are warned and ignored
+- mutable opens append one durable `SYSTEM_OPEN_COMPLETED` event at `batpak:store` / `batpak:lifecycle`; read-only opens stay side-effect free
+- `SYSTEM_OPEN_COMPLETED` is an ordinary persisted event after append: it participates in the same query, snapshot, compaction, retention, and tombstone rules as any other stored event, so it does not have a special auto-prune path
+- the `batpak:` coordinate prefix is reserved for library-owned lifecycle streams; application code should avoid emitting events at that prefix
 
 Position hints are persistence-affecting, not just API sugar: non-root
 `lane`/`depth` must survive live append, mmap reopen, checkpoint reopen, SIDX
@@ -247,7 +257,12 @@ Advanced store surface names worth keeping visible in docs and audits:
 
 - `SyncMode`
 - `AppendReceipt`
+- `DenialReceipt`
 - `AppendOptions`
+- `CheckpointId`
+- `CursorGapConfig`
+- `GapObservation`
+- `SigningKey`
 - `RetentionPredicate`
 - `CompactionStrategy`
 - `CompactionConfig`
@@ -278,6 +293,20 @@ Important knobs on `StoreConfig`:
 - `writer.pressure_retry_threshold_pct`
 - `writer.shutdown_drain_limit`
 - `writer.stack_size`
+- `signing_keys` via `with_signing_key(...)`
+
+## Receipt And Denial Notes
+
+- `batpak::encoding::to_bytes` is the stable named-field MessagePack helper.
+- `batpak::canonical` currently aliases the same encoding surface while the
+  stronger canonical-bytes contract is phased in.
+- `AppendReceipt` now carries `content_hash`, `key_id`, `signature`, and
+  `extensions`.
+- `DenialReceipt` mirrors the same receipt envelope for `SYSTEM_DENIAL`.
+- `Store::append_denial(...)` persists denials on the ordinary per-entity
+  chain; denial events are not a separate chain class.
+- `verify_append_receipt(...)` and `verify_denial_receipt(...)` validate
+  receipt signatures against the store's configured signing-key registry.
 - `batch.group_commit_max_batch`
 - `batch.max_size`
 - `batch.max_bytes`

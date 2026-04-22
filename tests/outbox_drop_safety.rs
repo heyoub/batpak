@@ -18,6 +18,14 @@ fn test_coord() -> Coordinate {
     Coordinate::new("entity:outbox", "scope:drop").expect("valid coord")
 }
 
+fn user_visible_events(store: &Store) -> Vec<batpak::store::IndexEntry> {
+    store
+        .query(&Region::all())
+        .into_iter()
+        .filter(|entry| entry.kind != EventKind::SYSTEM_OPEN_COMPLETED)
+        .collect()
+}
+
 #[test]
 fn dropping_outbox_without_flush_commits_nothing() {
     let (store, _dir) = small_segment_store();
@@ -40,7 +48,7 @@ fn dropping_outbox_without_flush_commits_nothing() {
         // Drop the outbox implicitly at scope exit without calling flush.
     }
 
-    let events = store.query(&Region::all());
+    let events = user_visible_events(&store);
     assert!(
         events.is_empty(),
         "PROPERTY: dropping an Outbox without flush must leave the store untouched; \
@@ -76,7 +84,7 @@ fn flushed_outbox_lands_all_items_atomically() {
 
     assert_eq!(receipts.len(), 4, "flush must return one receipt per stage");
 
-    let events = store.query(&Region::all());
+    let events = user_visible_events(&store);
     assert_eq!(
         events.len(),
         4,
@@ -115,7 +123,7 @@ fn re_staging_after_flush_stays_coherent() {
     drop(outbox);
 
     // Only the initially flushed item is visible.
-    let events = store.query(&Region::all());
+    let events = user_visible_events(&store);
     assert_eq!(
         events.len(),
         1,

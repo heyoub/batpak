@@ -1,4 +1,6 @@
+use crate::store::cold_start::rebuild::OpenIndexReport;
 use crate::store::cold_start::ColdStartPolicy;
+use crate::store::signing::{ReceiptSigningRegistry, SigningKey};
 use crate::store::RestartPolicy;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -7,6 +9,9 @@ use std::time::Instant;
 
 #[cfg(feature = "dangerous-test-hooks")]
 use crate::store::fault::FaultInjector;
+
+/// User-supplied hook fired after a successful store open completes.
+pub type OpenReportObserver = Arc<dyn Fn(&OpenIndexReport) + Send + Sync>;
 
 /// Sync strategy for segment fsync.
 #[derive(Clone, Debug, Default)]
@@ -268,6 +273,11 @@ pub struct StoreConfig {
     /// Injectable clock for deterministic testing. Returns microseconds since epoch.
     /// None = std::time::SystemTime::now() (production default).
     pub clock: Option<Arc<dyn Fn() -> i64 + Send + Sync>>,
+    /// Optional callback fired once after a successful open completes.
+    pub open_report_observer: Option<OpenReportObserver>,
+    /// Signing keys known to this store. The last configured key signs new
+    /// receipts; earlier keys remain available for verification.
+    pub signing_keys: Vec<SigningKey>,
     /// Fault injector for testing failure scenarios.
     /// Only available with the `dangerous-test-hooks` feature.
     #[cfg(feature = "dangerous-test-hooks")]
@@ -282,6 +292,7 @@ pub(crate) struct ValidatedStoreConfig {
     pub(crate) cold_start: ColdStartPolicy,
     pub(crate) shutdown_drain_limit: usize,
     pub(crate) group_commit_drain_budget: u32,
+    pub(crate) signing_registry: ReceiptSigningRegistry,
     clock: Option<MonotonicClock>,
 }
 
@@ -301,6 +312,8 @@ impl StoreConfig {
             sync: SyncConfig::default(),
             index: IndexConfig::default(),
             clock: None,
+            open_report_observer: None,
+            signing_keys: Vec::new(),
             #[cfg(feature = "dangerous-test-hooks")]
             fault_injector: None,
         }
@@ -353,6 +366,12 @@ impl StoreConfig {
                 "batch.max_bytes must be 1..=16MB".into(),
             ));
         }
+        #[cfg(not(feature = "blake3"))]
+        if !self.signing_keys.is_empty() {
+            return Err(crate::store::StoreError::Configuration(
+                "receipt signing requires the blake3 feature".into(),
+            ));
+        }
         // group_commit_max_batch: 0 = unbounded drain (writer drains all pending
         // appends before syncing); 1 = per-event sync (default single-event behavior);
         // N > 1 = drain up to N-1 additional appends before syncing.
@@ -381,6 +400,7 @@ impl StoreConfig {
             ),
             shutdown_drain_limit: self.writer.shutdown_drain_limit,
             group_commit_drain_budget,
+            signing_registry: ReceiptSigningRegistry::from_keys(&self.signing_keys),
             clock: self.clock.clone().map(MonotonicClock::wrap),
         })
     }
@@ -469,6 +489,18 @@ impl StoreConfig {
         self
     }
 
+    /// Install a callback that observes the structured open report.
+    pub fn with_open_report_observer(mut self, observer: Option<OpenReportObserver>) -> Self {
+        self.open_report_observer = observer;
+        self
+    }
+
+    /// Add a signing key to the receipt-signature registry.
+    pub fn with_signing_key(mut self, signing_key: SigningKey) -> Self {
+        self.signing_keys.push(signing_key);
+        self
+    }
+
     /// Set the fsync strategy used after writes.
     pub fn with_sync_mode(mut self, sync_mode: SyncMode) -> Self {
         self.sync.mode = sync_mode;
@@ -533,6 +565,8 @@ impl Clone for StoreConfig {
             sync: self.sync.clone(),
             index: self.index.clone(),
             clock: self.clock.clone(),
+            open_report_observer: self.open_report_observer.clone(),
+            signing_keys: self.signing_keys.clone(),
             #[cfg(feature = "dangerous-test-hooks")]
             fault_injector: self.fault_injector.clone(),
         }
@@ -552,6 +586,11 @@ impl std::fmt::Debug for StoreConfig {
             .field("sync", &self.sync)
             .field("index", &self.index)
             .field("clock", &self.clock.as_ref().map(|_| "<fn>"))
+            .field(
+                "open_report_observer",
+                &self.open_report_observer.as_ref().map(|_| "<observer>"),
+            )
+            .field("signing_keys", &self.signing_keys.len())
             .finish()
     }
 }
@@ -565,6 +604,7 @@ impl std::fmt::Debug for ValidatedStoreConfig {
             .field("cold_start", &self.cold_start)
             .field("shutdown_drain_limit", &self.shutdown_drain_limit)
             .field("group_commit_drain_budget", &self.group_commit_drain_budget)
+            .field("signing_registry", &"<registry>")
             .field("clock", &self.clock.as_ref().map(|_| "<monotonic>"))
             .finish()
     }

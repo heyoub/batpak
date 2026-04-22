@@ -24,6 +24,7 @@ pub mod reactor_typed;
 mod runtime_contracts;
 /// On-disk segment format, frame encoding/decoding, and compaction helpers.
 pub mod segment;
+mod signing;
 /// Runtime statistics and diagnostic snapshots.
 pub mod stats;
 #[cfg(feature = "dangerous-test-hooks")]
@@ -32,13 +33,19 @@ pub(crate) mod write;
 
 pub use append::{
     AppendOptions, AppendPositionHint, AppendReceipt, BatchAppendItem, CausationRef,
-    CompactionConfig, CompactionStrategy, RetentionPredicate,
+    CompactionConfig, CompactionStrategy, DenialReceipt, EncodedBytes, ExtensionKey,
+    ExtensionKeyError, RetentionPredicate,
 };
 pub use cold_start::rebuild::{OpenIndexPath, OpenIndexReport};
 pub use config::{
-    BatchConfig, IndexConfig, IndexTopology, StoreConfig, SyncConfig, SyncMode, WriterConfig,
+    BatchConfig, IndexConfig, IndexTopology, OpenReportObserver, StoreConfig, SyncConfig, SyncMode,
+    WriterConfig,
 };
-pub use delivery::cursor::{Cursor, CursorWorkerAction, CursorWorkerConfig, CursorWorkerHandle};
+pub use delivery::cursor::{
+    Cursor, CursorGapConfig, CursorWorkerAction, CursorWorkerConfig, CursorWorkerHandle,
+    GapObservation,
+};
+pub use delivery::observation::{AtLeastOnce, CheckpointId, IdempotencyKey, ObservedOnce};
 pub use delivery::subscription::Subscription;
 pub use error::{StoreError, StoreLockMode};
 #[cfg(feature = "dangerous-test-hooks")]
@@ -52,18 +59,21 @@ pub use projection::{
 };
 pub use reaction::ReactionBatch;
 pub use reactor_typed::{ReactorConfig, ReactorError, TypedReactorHandle};
+pub use signing::SigningKey;
 pub use stats::{StoreDiagnostics, StoreStats, WriterPressure};
 pub use write::control::{AppendTicket, BatchAppendTicket, Outbox, VisibilityFence};
 pub use write::writer::{Notification, RestartPolicy};
 
 use crate::coordinate::{Coordinate, KindFilter, Region};
 use crate::event::{EventKind, EventPayload, EventSourced, StoredEvent};
+use crate::guard::{Denial, GateSet};
 #[cfg(test)]
 pub(crate) use config::now_us;
 use index::StoreIndex;
 use parking_lot::Mutex;
 use segment::scan::Reader;
 use serde::Serialize;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::Arc;
 use write::control::AppendSubmission;
 use write::fanout::{ReactorSubscriberList, SubscriberList};
@@ -97,6 +107,7 @@ pub struct Store<State = Open> {
     pub(crate) runtime: Arc<config::ValidatedStoreConfig>,
     pub(crate) should_shutdown_on_drop: bool,
     pub(crate) open_report: Option<cold_start::rebuild::OpenIndexReport>,
+    pub(crate) cumulative_reserved_kind_fallbacks: segment::sidx::ReservedKindFallbackStats,
     pub(crate) _state: std::marker::PhantomData<State>,
     pub(crate) _store_lock: dir_lock::StoreDirLock,
 }
@@ -107,6 +118,7 @@ struct OpenComponents {
     index: Arc<StoreIndex>,
     reader: Arc<Reader>,
     open_report: cold_start::rebuild::OpenIndexReport,
+    cumulative_reserved_kind_fallbacks: segment::sidx::ReservedKindFallbackStats,
     store_lock: dir_lock::StoreDirLock,
 }
 
@@ -116,6 +128,11 @@ fn open_components(
 ) -> Result<OpenComponents, StoreError> {
     std::fs::create_dir_all(&config.data_dir)?;
     config.data_dir = std::fs::canonicalize(&config.data_dir).map_err(StoreError::Io)?;
+    let configured_signing_keys = config.signing_keys.len();
+    tracing::debug!(
+        configured_signing_keys,
+        "opening store with configured signing registry"
+    );
     let runtime = Arc::new(config.validated()?);
     let store_lock = dir_lock::StoreDirLock::acquire(&config.data_dir, lock_mode)?;
     let config = Arc::new(config);
@@ -124,7 +141,7 @@ fn open_components(
 
     // Cold start: checkpoint/mmap fast paths or full segment scan.
     // Segment files are named so lexicographic order matches replay order.
-    let open_report =
+    let open_outcome =
         cold_start::rebuild::open_index(&index, &reader, &config.data_dir, runtime.cold_start)?;
 
     // Tell the reader which segment is active (for mmap dispatch).
@@ -137,9 +154,66 @@ fn open_components(
         config,
         index,
         reader,
-        open_report,
+        open_report: open_outcome.report,
+        cumulative_reserved_kind_fallbacks: open_outcome.cumulative_reserved_kind_fallbacks,
         store_lock,
     })
+}
+
+fn emit_open_report_observability(config: &StoreConfig, report: &OpenIndexReport) {
+    tracing::info!(
+        target: "batpak::open",
+        path = ?report.path,
+        restored_entries = report.restored_entries,
+        tail_entries = report.tail_entries,
+        elapsed_us = report.elapsed_us,
+        unknown_reserved_system_kind_fallbacks = report.unknown_reserved_system_kind_fallbacks,
+        unknown_reserved_effect_kind_fallbacks = report.unknown_reserved_effect_kind_fallbacks,
+        cumulative_unknown_reserved_system_kind_fallbacks = report
+            .cumulative_unknown_reserved_system_kind_fallbacks,
+        cumulative_unknown_reserved_effect_kind_fallbacks = report
+            .cumulative_unknown_reserved_effect_kind_fallbacks,
+        unknown_reserved_system_kind_histogram = ?report.unknown_reserved_system_kind_histogram,
+        unknown_reserved_effect_kind_histogram = ?report.unknown_reserved_effect_kind_histogram,
+        cumulative_unknown_reserved_system_kind_histogram =
+            ?report.cumulative_unknown_reserved_system_kind_histogram,
+        cumulative_unknown_reserved_effect_kind_histogram =
+            ?report.cumulative_unknown_reserved_effect_kind_histogram,
+        "store open completed"
+    );
+
+    let Some(observer) = config.open_report_observer.as_ref() else {
+        return;
+    };
+    let observer = Arc::clone(observer);
+    if catch_unwind(AssertUnwindSafe(|| observer(report))).is_err() {
+        tracing::warn!(
+            target: "batpak::open",
+            "open report observer panicked; continuing with successful open"
+        );
+    }
+}
+
+fn append_open_completed_event(store: &Store<Open>, report: &OpenIndexReport) {
+    let coord = match Coordinate::new("batpak:store", "batpak:lifecycle") {
+        Ok(coord) => coord,
+        Err(error) => {
+            tracing::warn!(
+                target: "batpak::open",
+                error = %error,
+                "failed to construct lifecycle coordinate for SYSTEM_OPEN_COMPLETED"
+            );
+            return;
+        }
+    };
+
+    if let Err(error) = store.append(&coord, EventKind::SYSTEM_OPEN_COMPLETED, report) {
+        tracing::warn!(
+            target: "batpak::open",
+            error = %error,
+            "failed to append SYSTEM_OPEN_COMPLETED lifecycle event after open"
+        );
+    }
 }
 
 impl Store<Open> {
@@ -183,6 +257,7 @@ impl Store<Open> {
             index,
             reader,
             open_report,
+            cumulative_reserved_kind_fallbacks,
             store_lock,
         } = open_components(config, StoreLockMode::Mutable)?;
 
@@ -197,7 +272,7 @@ impl Store<Open> {
             &reader,
         )?;
 
-        Ok(Self {
+        let store = Self {
             index,
             reader,
             cache,
@@ -206,10 +281,16 @@ impl Store<Open> {
             config,
             runtime,
             should_shutdown_on_drop: true,
-            open_report: Some(open_report),
+            open_report: Some(open_report.clone()),
+            cumulative_reserved_kind_fallbacks,
             _state: std::marker::PhantomData,
             _store_lock: store_lock,
-        })
+        };
+
+        emit_open_report_observability(&store.config, &open_report);
+        append_open_completed_event(&store, &open_report);
+
+        Ok(store)
     }
 
     /// Build a producer-side outbox for staged batch submission.
@@ -408,6 +489,38 @@ impl Store<Open> {
             event_kind = kind.type_id()
         );
         self.submit(coord, kind, payload)?.wait()
+    }
+
+    /// WRITE: persist a gate denial as a normal per-entity chain event.
+    ///
+    /// # Errors
+    /// Returns any serialization or writer error surfaced by the underlying
+    /// append path.
+    // justifies: Store::append_denial matches the substrate contract locked in this turn and mirrors the user-requested denial append surface; splitting it would add an extra request object without simplifying src/store/mod.rs.
+    #[allow(clippy::too_many_arguments)]
+    pub fn append_denial<Ctx>(
+        &self,
+        coord: &Coordinate,
+        proposed_kind: EventKind,
+        gate_set: &GateSet<Ctx>,
+        failing: &Denial,
+        proposed_content_hash: Option<[u8; 32]>,
+        pipeline_id: Option<String>,
+        options: AppendOptions,
+    ) -> Result<DenialReceipt, StoreError> {
+        let payload =
+            gate_set.trace_denial(failing, proposed_kind, proposed_content_hash, pipeline_id);
+        let receipt =
+            self.append_with_options(coord, EventKind::SYSTEM_DENIAL, &payload, options)?;
+        Ok(DenialReceipt {
+            event_id: receipt.event_id,
+            sequence: receipt.sequence,
+            disk_pos: receipt.disk_pos,
+            content_hash: receipt.content_hash,
+            key_id: receipt.key_id,
+            signature: receipt.signature,
+            extensions: receipt.extensions,
+        })
     }
 
     /// WRITE: append a reaction (caused by another event).
@@ -845,10 +958,11 @@ impl Store<ReadOnly> {
             index,
             reader,
             open_report,
+            cumulative_reserved_kind_fallbacks,
             store_lock,
         } = open_components(config, StoreLockMode::ReadOnly)?;
 
-        Ok(Self {
+        let store = Self {
             index,
             reader,
             cache,
@@ -857,10 +971,15 @@ impl Store<ReadOnly> {
             config,
             runtime,
             should_shutdown_on_drop: false,
-            open_report: Some(open_report),
+            open_report: Some(open_report.clone()),
+            cumulative_reserved_kind_fallbacks,
             _state: std::marker::PhantomData,
             _store_lock: store_lock,
-        })
+        };
+
+        emit_open_report_observability(&store.config, &open_report);
+
+        Ok(store)
     }
 }
 
@@ -893,6 +1012,36 @@ impl<State> Store<State> {
             .get_by_id(event_id)
             .ok_or(StoreError::NotFound(event_id))?;
         self.reader.read_entry_raw(&entry.disk_pos)
+    }
+
+    /// Verify an append receipt against the store's signing-key registry and
+    /// current index state.
+    #[must_use]
+    pub fn verify_append_receipt(&self, receipt: &AppendReceipt) -> bool {
+        let Some(entry) = self.index.get_by_id(receipt.event_id) else {
+            return false;
+        };
+        self.runtime.signing_registry.verify_append_receipt(
+            receipt,
+            &entry.coord,
+            entry.kind,
+            entry.hash_chain.prev_hash,
+        )
+    }
+
+    /// Verify a persisted denial receipt against the store's signing-key
+    /// registry and current index state.
+    #[must_use]
+    pub fn verify_denial_receipt(&self, receipt: &DenialReceipt) -> bool {
+        let Some(entry) = self.index.get_by_id(receipt.event_id) else {
+            return false;
+        };
+        self.runtime.signing_registry.verify_denial_receipt(
+            receipt,
+            &entry.coord,
+            entry.kind,
+            entry.hash_chain.prev_hash,
+        )
     }
 
     /// READ: query by Region.

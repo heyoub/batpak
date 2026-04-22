@@ -1,7 +1,8 @@
 use crate::coordinate::Coordinate;
 use crate::event::{EventKind, EventPayload, StoredEvent};
 use crate::store::{DiskPos, StoreError};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 /// Reference to causation for batch items.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -169,7 +170,8 @@ impl BatchAppendItem {
 }
 
 /// AppendReceipt: proof an event was persisted.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
+#[non_exhaustive]
 pub struct AppendReceipt {
     /// Unique ID of the persisted event.
     pub event_id: u128,
@@ -177,6 +179,112 @@ pub struct AppendReceipt {
     pub sequence: u64,
     /// Location of the event frame on disk.
     pub disk_pos: DiskPos,
+    /// Blake3 hash of the committed payload bytes.
+    pub content_hash: [u8; 32],
+    /// Signing-key identity. All zeros when receipt signing is disabled.
+    pub key_id: [u8; 32],
+    /// Detached Ed25519 signature over the receipt authority fields.
+    pub signature: Option<[u8; 64]>,
+    /// Typed side-data attached to the receipt envelope.
+    pub extensions: BTreeMap<ExtensionKey, EncodedBytes>,
+}
+
+/// Receipt returned when a denial trace is persisted as `SYSTEM_DENIAL`.
+#[derive(Clone, Debug)]
+#[non_exhaustive]
+pub struct DenialReceipt {
+    /// Unique ID of the persisted denial event.
+    pub event_id: u128,
+    /// Global sequence number assigned at commit time.
+    pub sequence: u64,
+    /// Location of the denial frame on disk.
+    pub disk_pos: DiskPos,
+    /// Blake3 hash of the denial payload bytes.
+    pub content_hash: [u8; 32],
+    /// Signing-key identity. All zeros when receipt signing is disabled.
+    pub key_id: [u8; 32],
+    /// Detached Ed25519 signature over the receipt authority fields.
+    pub signature: Option<[u8; 64]>,
+    /// Typed side-data attached to the denial receipt envelope.
+    pub extensions: BTreeMap<ExtensionKey, EncodedBytes>,
+}
+
+/// Encoded extension payload bytes.
+pub type EncodedBytes = Vec<u8>;
+
+/// Receipt extension key.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct ExtensionKey(String);
+
+/// Validation failures for [`ExtensionKey`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ExtensionKeyError {
+    /// The key was empty.
+    Empty,
+    /// The key must be ASCII.
+    NonAscii,
+    /// The key exceeded the maximum supported length.
+    TooLong,
+    /// The key must contain exactly one namespace separator (`.`) with
+    /// non-empty prefix and field segments.
+    InvalidNamespaceFormat,
+    /// `batpak.*` is reserved for substrate-owned keys.
+    ReservedNamespace,
+}
+
+impl ExtensionKey {
+    const MAX_LEN: usize = 256;
+
+    /// Construct a validated extension key in `<prefix>.<key>` form.
+    ///
+    /// # Errors
+    /// Returns [`ExtensionKeyError`] when the key is empty, non-ASCII, lacks a
+    /// single namespace separator, or uses the reserved `batpak.*` namespace.
+    pub fn new(key: impl Into<String>) -> Result<Self, ExtensionKeyError> {
+        let key = key.into();
+        if key.is_empty() {
+            return Err(ExtensionKeyError::Empty);
+        }
+        if !key.is_ascii() {
+            return Err(ExtensionKeyError::NonAscii);
+        }
+        if key.len() > Self::MAX_LEN {
+            return Err(ExtensionKeyError::TooLong);
+        }
+        let Some((prefix, field)) = key.split_once('.') else {
+            return Err(ExtensionKeyError::InvalidNamespaceFormat);
+        };
+        if prefix.is_empty() || field.is_empty() || field.contains('.') {
+            return Err(ExtensionKeyError::InvalidNamespaceFormat);
+        }
+        if prefix == "batpak" {
+            return Err(ExtensionKeyError::ReservedNamespace);
+        }
+        Ok(Self(key))
+    }
+
+    /// Construct a substrate-owned reserved extension key.
+    #[must_use]
+    // justifies: INV-ALLOW-IS-DESIGN [src/store/signing.rs] batpak.* stays reserved for substrate-owned receipt extensions even before the first in-crate writer lands.
+    #[allow(dead_code)]
+    pub(crate) fn reserved(key: &'static str) -> Self {
+        debug_assert!(key.starts_with("batpak."));
+        debug_assert!(key.is_ascii());
+        debug_assert!(key.len() <= Self::MAX_LEN);
+        let Some((prefix, field)) = key.split_once('.') else {
+            debug_assert!(false, "reserved extension keys require exactly one dot");
+            return Self(key.to_owned());
+        };
+        debug_assert!(!prefix.is_empty() && !field.is_empty() && !field.contains('.'));
+        Self(key.to_owned())
+    }
+
+    /// Borrow the validated extension key as a string slice.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
 /// Optional caller-supplied branch hint for the committed event position.
@@ -374,5 +482,17 @@ mod tests {
     fn causation_ref_absolute_nonzero_resolves_to_some() {
         let result = CausationRef::Absolute(99).resolve(None, 0, |_| unreachable!());
         assert_eq!(result.expect("resolve must not error"), Some(99));
+    }
+
+    #[test]
+    fn extension_key_reserved_constructor_allows_batpak_namespace() {
+        let key = ExtensionKey::reserved("batpak.signature");
+        assert_eq!(key.as_str(), "batpak.signature");
+    }
+
+    #[test]
+    fn extension_key_rejects_keys_over_max_length() {
+        let too_long = format!("acme.{}", "a".repeat(252));
+        assert_eq!(ExtensionKey::new(too_long), Err(ExtensionKeyError::TooLong));
     }
 }

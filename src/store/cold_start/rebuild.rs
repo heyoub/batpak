@@ -5,9 +5,10 @@ use crate::store::index::interner::StringInterner;
 use crate::store::index::{DiskPos, IndexEntry, RoutingSummary, StoreIndex};
 use crate::store::segment;
 use crate::store::segment::scan::{Reader, ScannedIndexEntry};
-use crate::store::segment::sidx::ReservedKindFallbackCounts;
+use crate::store::segment::sidx::ReservedKindFallbackStats;
 use crate::store::StoreError;
 use rayon::prelude::*;
+use std::collections::BTreeMap;
 use std::path::Path;
 
 pub(crate) const COMPACTION_MARKER_FILENAME: &str = "compaction.pending.json";
@@ -19,7 +20,7 @@ pub(crate) struct PendingCompaction {
 }
 
 /// Which cold-start restore strategy was actually used.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum OpenIndexPath {
     /// Restored from the mmap snapshot (`index.fbati`) plus tail replay.
     Mmap,
@@ -30,7 +31,7 @@ pub enum OpenIndexPath {
 }
 
 /// Diagnostic output from `open_index()`. Hard truth, not logs.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub struct OpenIndexReport {
     /// Which restore strategy was selected and completed.
@@ -44,9 +45,31 @@ pub struct OpenIndexReport {
     /// Number of unknown reserved system-kind SIDX/mmap values that fell back
     /// to `DATA` during reopen.
     pub unknown_reserved_system_kind_fallbacks: usize,
+    /// Histogram of raw reserved system-kind values encountered during this reopen.
+    pub unknown_reserved_system_kind_histogram: BTreeMap<u16, usize>,
     /// Number of unknown reserved effect-kind SIDX/mmap values that fell back
     /// to `EFFECT_ERROR` during reopen.
     pub unknown_reserved_effect_kind_fallbacks: usize,
+    /// Histogram of raw reserved effect-kind values encountered during this reopen.
+    pub unknown_reserved_effect_kind_histogram: BTreeMap<u16, usize>,
+    /// Cumulative number of unknown reserved system-kind fallbacks persisted
+    /// through this store's cold-start artifacts, including this reopen.
+    pub cumulative_unknown_reserved_system_kind_fallbacks: usize,
+    /// Cumulative histogram of raw reserved system-kind values persisted through
+    /// this store's cold-start artifacts, including this reopen.
+    pub cumulative_unknown_reserved_system_kind_histogram: BTreeMap<u16, usize>,
+    /// Cumulative number of unknown reserved effect-kind fallbacks persisted
+    /// through this store's cold-start artifacts, including this reopen.
+    pub cumulative_unknown_reserved_effect_kind_fallbacks: usize,
+    /// Cumulative histogram of raw reserved effect-kind values persisted
+    /// through this store's cold-start artifacts, including this reopen.
+    pub cumulative_unknown_reserved_effect_kind_histogram: BTreeMap<u16, usize>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct OpenIndexOutcome {
+    pub(crate) report: OpenIndexReport,
+    pub(crate) cumulative_reserved_kind_fallbacks: ReservedKindFallbackStats,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,7 +88,8 @@ struct RestorePlan {
     routing: RoutingSummary,
     restored_entries: usize,
     tail_entries: usize,
-    reserved_kind_fallbacks: ReservedKindFallbackCounts,
+    reopen_reserved_kind_fallbacks: ReservedKindFallbackStats,
+    persisted_cumulative_reserved_kind_fallbacks: ReservedKindFallbackStats,
 }
 
 struct SnapshotPlanInput {
@@ -74,7 +98,8 @@ struct SnapshotPlanInput {
     watermark: super::checkpoint::WatermarkInfo,
     stored_allocator: u64,
     routing: RoutingSummary,
-    reserved_kind_fallbacks: ReservedKindFallbackCounts,
+    reopen_reserved_kind_fallbacks: ReservedKindFallbackStats,
+    persisted_cumulative_reserved_kind_fallbacks: ReservedKindFallbackStats,
 }
 
 struct RestorePlanner<'a> {
@@ -102,7 +127,9 @@ impl<'a> RestorePlanner<'a> {
                         watermark: snapshot.watermark,
                         stored_allocator: snapshot.stored_allocator,
                         routing: snapshot.routing,
-                        reserved_kind_fallbacks: snapshot.reserved_kind_fallbacks,
+                        reopen_reserved_kind_fallbacks: snapshot.reopen_reserved_kind_fallbacks,
+                        persisted_cumulative_reserved_kind_fallbacks: snapshot
+                            .cumulative_reserved_kind_fallbacks,
                     },
                 );
             }
@@ -118,7 +145,9 @@ impl<'a> RestorePlanner<'a> {
                         watermark: snapshot.watermark,
                         stored_allocator: snapshot.stored_allocator,
                         routing: snapshot.routing,
-                        reserved_kind_fallbacks: ReservedKindFallbackCounts::default(),
+                        reopen_reserved_kind_fallbacks: ReservedKindFallbackStats::default(),
+                        persisted_cumulative_reserved_kind_fallbacks: snapshot
+                            .cumulative_reserved_kind_fallbacks,
                     },
                 );
             }
@@ -130,7 +159,7 @@ impl<'a> RestorePlanner<'a> {
             interner_strings,
             allocator_hint,
             chunk_count,
-            reserved_kind_fallbacks,
+            reopen_reserved_kind_fallbacks,
         ) = collect_rebuild_entries(self.reader, self.data_dir)?;
         let routing = RoutingSummary::from_sorted_entries(&entries, chunk_count.max(1));
         Ok(RestorePlan {
@@ -141,7 +170,8 @@ impl<'a> RestorePlanner<'a> {
             interner_strings,
             routing,
             entries,
-            reserved_kind_fallbacks,
+            reopen_reserved_kind_fallbacks,
+            persisted_cumulative_reserved_kind_fallbacks: ReservedKindFallbackStats::default(),
         })
     }
 
@@ -185,7 +215,9 @@ impl<'a> RestorePlanner<'a> {
             entries: snapshot.entries,
             restored_entries,
             tail_entries: tail_count,
-            reserved_kind_fallbacks: snapshot.reserved_kind_fallbacks,
+            reopen_reserved_kind_fallbacks: snapshot.reopen_reserved_kind_fallbacks,
+            persisted_cumulative_reserved_kind_fallbacks: snapshot
+                .persisted_cumulative_reserved_kind_fallbacks,
         })
     }
 }
@@ -199,7 +231,7 @@ pub(crate) fn open_index(
     reader: &Reader,
     data_dir: &Path,
     policy: ColdStartPolicy,
-) -> Result<OpenIndexReport, StoreError> {
+) -> Result<OpenIndexOutcome, StoreError> {
     let t0 = std::time::Instant::now();
     let planner = RestorePlanner {
         reader,
@@ -219,19 +251,44 @@ pub(crate) fn open_index(
         index.restore_cancelled_visibility_ranges(ranges);
     }
 
-    Ok(OpenIndexReport {
-        path: match plan.source {
-            RestoreSource::Mmap => OpenIndexPath::Mmap,
-            RestoreSource::Checkpoint => OpenIndexPath::Checkpoint,
-            RestoreSource::SealedSidxRebuild | RestoreSource::FrameScanFallback => {
-                OpenIndexPath::Rebuild
-            }
+    let cumulative_reserved_kind_fallbacks = plan
+        .persisted_cumulative_reserved_kind_fallbacks
+        .add(&plan.reopen_reserved_kind_fallbacks);
+
+    Ok(OpenIndexOutcome {
+        report: OpenIndexReport {
+            path: match plan.source {
+                RestoreSource::Mmap => OpenIndexPath::Mmap,
+                RestoreSource::Checkpoint => OpenIndexPath::Checkpoint,
+                RestoreSource::SealedSidxRebuild | RestoreSource::FrameScanFallback => {
+                    OpenIndexPath::Rebuild
+                }
+            },
+            restored_entries: plan.restored_entries,
+            tail_entries: plan.tail_entries,
+            elapsed_us: duration_micros(t0.elapsed()),
+            unknown_reserved_system_kind_fallbacks: plan.reopen_reserved_kind_fallbacks.system,
+            unknown_reserved_system_kind_histogram: plan
+                .reopen_reserved_kind_fallbacks
+                .system_histogram
+                .clone(),
+            unknown_reserved_effect_kind_fallbacks: plan.reopen_reserved_kind_fallbacks.effect,
+            unknown_reserved_effect_kind_histogram: plan
+                .reopen_reserved_kind_fallbacks
+                .effect_histogram
+                .clone(),
+            cumulative_unknown_reserved_system_kind_fallbacks: cumulative_reserved_kind_fallbacks
+                .system,
+            cumulative_unknown_reserved_system_kind_histogram: cumulative_reserved_kind_fallbacks
+                .system_histogram
+                .clone(),
+            cumulative_unknown_reserved_effect_kind_fallbacks: cumulative_reserved_kind_fallbacks
+                .effect,
+            cumulative_unknown_reserved_effect_kind_histogram: cumulative_reserved_kind_fallbacks
+                .effect_histogram
+                .clone(),
         },
-        restored_entries: plan.restored_entries,
-        tail_entries: plan.tail_entries,
-        elapsed_us: duration_micros(t0.elapsed()),
-        unknown_reserved_system_kind_fallbacks: plan.reserved_kind_fallbacks.system,
-        unknown_reserved_effect_kind_fallbacks: plan.reserved_kind_fallbacks.effect,
+        cumulative_reserved_kind_fallbacks,
     })
 }
 
@@ -362,7 +419,7 @@ fn segment_paths(data_dir: &Path) -> Result<Vec<(u64, std::path::PathBuf)>, Stor
 
 fn read_sealed_sidx_entries_parallel(
     sealed_segments: &[(u64, std::path::PathBuf)],
-) -> Option<(Vec<ScannedIndexEntry>, ReservedKindFallbackCounts)> {
+) -> Option<(Vec<ScannedIndexEntry>, ReservedKindFallbackStats)> {
     let per_segment: Result<Vec<_>, StoreError> = sealed_segments
         .par_iter()
         .map(|(segment_id, path)| scanned_entries_from_sidx_footer(*segment_id, path))
@@ -371,10 +428,10 @@ fn read_sealed_sidx_entries_parallel(
     match per_segment {
         Ok(mut batches) => {
             let mut flat = Vec::new();
-            let mut reserved_kind_fallbacks = ReservedKindFallbackCounts::default();
+            let mut reserved_kind_fallbacks = ReservedKindFallbackStats::default();
             for (batch, counts) in batches.drain(..) {
                 flat.extend(batch);
-                reserved_kind_fallbacks = reserved_kind_fallbacks.add(counts);
+                reserved_kind_fallbacks = reserved_kind_fallbacks.add(&counts);
             }
             flat.sort_by_key(|entry| entry.global_sequence.unwrap_or(0));
             Some((flat, reserved_kind_fallbacks))
@@ -393,11 +450,11 @@ fn read_sealed_sidx_entries_parallel(
 fn scanned_entries_from_sidx_footer(
     segment_id: u64,
     path: &Path,
-) -> Result<(Vec<ScannedIndexEntry>, ReservedKindFallbackCounts), StoreError> {
+) -> Result<(Vec<ScannedIndexEntry>, ReservedKindFallbackStats), StoreError> {
     match crate::store::segment::sidx::read_footer(path) {
         Ok(Some((entries, strings))) => {
             let mut scanned = Vec::with_capacity(entries.len());
-            let mut reserved_kind_fallbacks = ReservedKindFallbackCounts::default();
+            let mut reserved_kind_fallbacks = ReservedKindFallbackStats::default();
             for entry in entries {
                 let row = entry.to_cold_start_row_counted(segment_id, &mut reserved_kind_fallbacks);
                 let kind = row.kind;
@@ -528,7 +585,7 @@ type RebuildResult = (
     Vec<String>,
     u64,
     usize,
-    ReservedKindFallbackCounts,
+    ReservedKindFallbackStats,
 );
 
 fn collect_rebuild_entries(reader: &Reader, data_dir: &Path) -> Result<RebuildResult, StoreError> {
@@ -548,11 +605,11 @@ fn collect_rebuild_entries(reader: &Reader, data_dir: &Path) -> Result<RebuildRe
     let mut source = RestoreSource::SealedSidxRebuild;
     let mut chunk_count = sealed_segments.len().max(1);
 
-    let mut reserved_kind_fallbacks = ReservedKindFallbackCounts::default();
+    let mut reserved_kind_fallbacks = ReservedKindFallbackStats::default();
 
     if !sealed_segments.is_empty() {
         if let Some((scanned, counts)) = read_sealed_sidx_entries_parallel(&sealed_segments) {
-            reserved_kind_fallbacks = reserved_kind_fallbacks.add(counts);
+            reserved_kind_fallbacks = reserved_kind_fallbacks.add(&counts);
             for se in scanned {
                 let global_sequence = se
                     .global_sequence
@@ -878,7 +935,7 @@ mod tests {
         .expect("open index with pending compaction");
 
         assert_eq!(
-            report.path,
+            report.report.path,
             OpenIndexPath::Rebuild,
             "PROPERTY: pending compaction must force a marker-aware rebuild instead of trusting checkpoint fast paths."
         );

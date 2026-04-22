@@ -7,6 +7,7 @@ use super::{
 };
 use crate::store::append::BatchAppendItem;
 use crate::store::{AppendReceipt, StoreError};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use tracing::{debug, trace};
 
@@ -80,11 +81,22 @@ impl WriterState<'_> {
             if let Some(key) = item.options().idempotency_key {
                 keyed_count += 1;
                 if let Some(entry) = self.index.get_by_id(key) {
-                    cached_receipts[idx] = Some(AppendReceipt {
+                    let mut receipt = AppendReceipt {
                         event_id: entry.event_id,
                         sequence: entry.global_sequence,
                         disk_pos: entry.disk_pos,
-                    });
+                        content_hash: entry.hash_chain.event_hash,
+                        key_id: [0; 32],
+                        signature: None,
+                        extensions: BTreeMap::new(),
+                    };
+                    self.runtime.signing_registry.sign_append_receipt(
+                        &mut receipt,
+                        &entry.coord,
+                        entry.kind,
+                        entry.hash_chain.prev_hash,
+                    );
+                    cached_receipts[idx] = Some(receipt);
                     cached_count += 1;
                 }
             }
@@ -454,11 +466,22 @@ impl WriterState<'_> {
                     )
                 })?,
             };
-            receipts.push(AppendReceipt {
+            let mut receipt = AppendReceipt {
                 event_id: staged.event_id(),
                 sequence: staged.global_sequence(),
                 disk_pos,
-            });
+                content_hash: staged.hash_chain.event_hash,
+                key_id: [0; 32],
+                signature: None,
+                extensions: BTreeMap::new(),
+            };
+            self.runtime.signing_registry.sign_append_receipt(
+                &mut receipt,
+                &staged.coord,
+                staged.meta.kind,
+                staged.hash_chain.prev_hash,
+            );
+            receipts.push(receipt);
 
             #[cfg(feature = "dangerous-test-hooks")]
             crate::store::fault::maybe_inject(

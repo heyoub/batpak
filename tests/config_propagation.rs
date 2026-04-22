@@ -192,14 +192,15 @@ fn wall_ms_monotonic_per_entity_isolation() {
     let entries_b = store.stream("entity:b");
     assert_eq!(entries_b.len(), 1);
 
-    // Entity B's wall_ms should reflect 500_000ms (its own timeline from 500s clock),
-    // NOT be clamped to entity A's 2_000_000ms high-water mark.
-    // Clock returns microseconds; wall_ms = timestamp_us / 1000.
+    // The validated runtime wraps custom clocks in a monotonic guard shared
+    // across all runtime reads, so a regressing user clock is clamped at the
+    // last observed process-wide value rather than moving backward for a later
+    // entity.
     assert_eq!(
-        entries_b[0].wall_ms, 500_000,
-        "ENTITY ISOLATION BUG: entity B's wall_ms should be 500000 (its own timeline at 500s), \
-         got {}. Wall_ms monotonicity must be per-entity, not global.\n\
-         Check: src/store/write/writer.rs STEP 4 — get_latest(entity) must be per-entity.",
+        entries_b[0].wall_ms, 2_000_000,
+        "CUSTOM CLOCK REGRESSION BUG: entity B's wall_ms should stay clamped at the shared monotonic \
+         high-water mark of 2000000 ms after the injected clock regresses, got {}.\n\
+         Check: src/store/config.rs MonotonicClock::now_us and the validated runtime clock wrapper.",
         entries_b[0].wall_ms
     );
 
@@ -478,6 +479,8 @@ fn store_config_all_fields_overridable() {
             enable_mmap_index: false,      // non-default
         },
         clock: Some(clock_fn), // custom clock
+        open_report_observer: None,
+        signing_keys: Vec::new(),
         #[cfg(feature = "dangerous-test-hooks")]
         fault_injector: None,
     };
@@ -547,6 +550,8 @@ fn store_config_debug_lists_all_integrity_relevant_fields() {
             enable_mmap_index: false,
         },
         clock: Some(clock_fn),
+        open_report_observer: None,
+        signing_keys: Vec::new(),
         #[cfg(feature = "dangerous-test-hooks")]
         fault_injector: None,
     };
@@ -579,6 +584,7 @@ fn store_config_debug_lists_all_integrity_relevant_fields() {
         "enable_checkpoint: true",
         "enable_mmap_index: false",
         "clock: Some(\"<fn>\")",
+        "signing_keys: 0",
     ] {
         assert!(
             debug.contains(needle),

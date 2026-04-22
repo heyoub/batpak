@@ -226,18 +226,25 @@ fn pathological_frame_length_is_bounded_not_panicking() {
     let header_len = u32::from_be_bytes(bytes[4..8].try_into().expect("4 bytes")) as usize;
     let first_frame_offset = 8 + header_len;
 
-    // Walk past the first real frame so at least ONE legit frame remains
-    // recoverable before the pathological header.
+    // Walk past the first two real frames so at least one user-authored
+    // frame remains recoverable before the pathological header even though
+    // mutable open now writes a lifecycle event first.
     let first_len = u32::from_be_bytes(
         bytes[first_frame_offset..first_frame_offset + 4]
             .try_into()
             .expect("4 bytes"),
     ) as usize;
-    let poison_frame_offset = first_frame_offset + 8 + first_len;
+    let second_frame_offset = first_frame_offset + 8 + first_len;
+    let second_len = u32::from_be_bytes(
+        bytes[second_frame_offset..second_frame_offset + 4]
+            .try_into()
+            .expect("4 bytes"),
+    ) as usize;
+    let poison_frame_offset = second_frame_offset + 8 + second_len;
 
     assert!(
         poison_frame_offset + 4 <= bytes.len(),
-        "segment must contain a second frame to poison; size={}, target={}",
+        "segment must contain a third frame to poison; size={}, target={}",
         bytes.len(),
         poison_frame_offset + 4
     );
@@ -249,7 +256,11 @@ fn pathological_frame_length_is_bounded_not_panicking() {
 
     // Reopen must not panic or error. The scan stops at the poisoned frame.
     let store = Store::open(config(&dir)).expect("reopen with poisoned frame");
-    let entries = store.query(&Region::all());
+    let entries: Vec<_> = store
+        .query(&Region::all())
+        .into_iter()
+        .filter(|entry| entry.kind != EventKind::SYSTEM_OPEN_COMPLETED)
+        .collect();
 
     assert!(
         !entries.is_empty(),
@@ -292,7 +303,11 @@ fn sidx_footer_magic_mismatch_falls_back_to_frame_scan() {
     std::fs::write(&seg, &bytes).expect("write bad-magic segment");
 
     let store = Store::open(config(&dir)).expect("reopen with SIDX magic corruption");
-    let entries = store.query(&Region::all());
+    let entries: Vec<_> = store
+        .query(&Region::all())
+        .into_iter()
+        .filter(|entry| entry.kind != EventKind::SYSTEM_OPEN_COMPLETED)
+        .collect();
 
     // The frame scan recovers every frame despite the SIDX trailer being
     // unreadable — SIDX is an accelerator, not the durability oracle.
@@ -444,7 +459,11 @@ fn corruption_inside_staged_batch_discards_the_whole_batch() {
     corrupt_second_staged_batch_item_crc(&seg);
 
     let reopened = Store::open(config(&dir)).expect("reopen with corrupted staged batch item");
-    let entries = reopened.query(&Region::all());
+    let entries: Vec<_> = reopened
+        .query(&Region::all())
+        .into_iter()
+        .filter(|entry| entry.kind != EventKind::SYSTEM_OPEN_COMPLETED)
+        .collect();
     assert_eq!(
         entries.len(),
         1,

@@ -65,7 +65,7 @@ fn append_multiple_events_same_entity() {
 
     let stats = store.stats();
     assert_eq!(
-        stats.event_count, 10,
+        stats.event_count, 11,
         "EVENT COUNT MISMATCH: expected 10 events, got {}.\n\
          Check: src/store/index/mod.rs insert(), src/store/write/writer.rs append logic.\n\
          Common causes: double-counting, off-by-one in loop, index not updated on each write.\n\
@@ -117,7 +117,7 @@ fn query_by_entity_prefix() {
     let coord = Coordinate::new("order:1", "scope:test").expect("valid coord");
     store.append(&coord, kind, &payload).expect("append");
 
-    let region = Region::entity("user:");
+    let region = Region::entity("user");
     let results = store.query(&region);
     assert_eq!(
         results.len(),
@@ -373,7 +373,7 @@ fn cold_start_rebuilds_index() {
         let store = Store::open(config).expect("cold start open");
         let stats = store.stats();
         assert_eq!(
-            stats.event_count, 20,
+            stats.event_count, 22,
             "COLD START FAILED: index should have 20 events after rebuild, got {}. \
              Investigate: src/store/mod.rs Store::open cold start scan.",
             stats.event_count
@@ -540,7 +540,7 @@ fn concurrent_append_and_query() {
 
     let stats = store.stats();
     assert_eq!(
-        stats.event_count, 100,
+        stats.event_count, 101,
         "CONCURRENT R/W FAILED: expected 100 events after concurrent writes, got {}.\n\
          Check: src/store/index/mod.rs insert() under concurrent load, writer.rs flush ordering.\n\
          Common causes: lost write under contention, event_count stat not atomically updated.\n\

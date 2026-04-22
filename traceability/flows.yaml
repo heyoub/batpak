@@ -100,7 +100,7 @@
     - ART-CONTROL-PLANE-TESTS
     - ART-ADR-CONTROL-PLANE
 - id: FLOW-OPEN-FASTPATH
-  summary: Open prefers verified mmap index restore, then checkpoint restore, then segment replay, and reapplies persisted hidden fence ranges regardless of which cold-start path wins.
+  summary: Open prefers verified mmap index restore, then checkpoint restore, then segment replay, reapplies persisted hidden fence ranges regardless of which cold-start path wins, and emits a structured reopen receipt through diagnostics/logging plus a mutable-open lifecycle event.
   artifacts:
     - ART-STORE-MOD
     - ART-STORE-REBUILD

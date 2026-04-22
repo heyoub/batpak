@@ -25,6 +25,14 @@ fn config(dir: &TempDir) -> StoreConfig {
         .with_sync_every_n_events(1)
 }
 
+fn user_visible_events(store: &Store) -> Vec<batpak::store::IndexEntry> {
+    store
+        .query(&Region::all())
+        .into_iter()
+        .filter(|entry| entry.kind != EventKind::SYSTEM_OPEN_COMPLETED)
+        .collect()
+}
+
 #[test]
 fn partial_keys_rejected_synchronously() {
     let dir = TempDir::new().expect("temp dir");
@@ -63,7 +71,7 @@ fn partial_keys_rejected_synchronously() {
     );
 
     // Nothing must be visible to readers.
-    let visible = store.query(&Region::all());
+    let visible = user_visible_events(&store);
     assert!(
         visible.is_empty(),
         "PROPERTY: a rejected partial-key batch must leave the store empty; found {} visible events",
@@ -111,7 +119,7 @@ fn idempotent_batch_replayable_without_duplicates() {
             .append_batch(build_batch(&coord))
             .expect("first batch submission must succeed");
         assert_eq!(receipts.len(), 2);
-        let events = store.query(&Region::all());
+        let events = user_visible_events(&store);
         assert_eq!(
             events.len(),
             2,
@@ -148,7 +156,7 @@ fn idempotent_batch_replayable_without_duplicates() {
         }
 
         // Only two events must be visible — no duplicates were created.
-        let events = store.query(&Region::all());
+        let events = user_visible_events(&store);
         assert_eq!(
             events.len(),
             2,

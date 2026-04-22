@@ -23,6 +23,14 @@ fn config(dir: &TempDir) -> StoreConfig {
         .with_sync_every_n_events(1)
 }
 
+fn user_visible_entries(store: &Store) -> Vec<batpak::store::IndexEntry> {
+    store
+        .query(&Region::all())
+        .into_iter()
+        .filter(|entry| entry.kind != EventKind::SYSTEM_OPEN_COMPLETED)
+        .collect()
+}
+
 #[test]
 fn cancelled_fence_hides_batch_before_and_after_reopen() {
     let dir = TempDir::new().expect("temp dir");
@@ -61,7 +69,7 @@ fn cancelled_fence_hides_batch_before_and_after_reopen() {
         }
 
         // Query while still open: only the baseline event is visible.
-        let entries_open = store.query(&Region::all());
+        let entries_open = user_visible_entries(&store);
         assert_eq!(
             entries_open.len(),
             1,
@@ -82,7 +90,7 @@ fn cancelled_fence_hides_batch_before_and_after_reopen() {
     // durable on disk are never surfaced by a reader.
     {
         let store = Store::open(config(&dir)).expect("reopen store after fence cancellation");
-        let entries_after_reopen = store.query(&Region::all());
+        let entries_after_reopen = user_visible_entries(&store);
         assert_eq!(
             entries_after_reopen.len(),
             1,
@@ -105,7 +113,7 @@ fn cancelled_fence_hides_batch_before_and_after_reopen() {
                 &serde_json::json!({"post_reopen": true}),
             )
             .expect("append after reopen");
-        let final_entries = store.query(&Region::all());
+        let final_entries = user_visible_entries(&store);
         assert_eq!(
             final_entries.len(),
             2,

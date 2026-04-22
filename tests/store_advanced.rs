@@ -85,8 +85,8 @@ fn diagnostics_reports_config() {
          Run: cargo test --test store_advanced diagnostics_reports_config"
     );
     assert_eq!(
-        diag.event_count, 0,
-        "PROPERTY: diagnostics on an empty store must report event_count == 0.\n\
+        diag.event_count, 1,
+        "PROPERTY: diagnostics on a freshly opened mutable store must include the SYSTEM_OPEN_COMPLETED lifecycle event.\n\
          Investigate: src/store/mod.rs diagnostics.\n\
          Common causes: counter not reset on open, leftover state from previous run.\n\
          Run: cargo test --test store_advanced diagnostics_reports_config"
@@ -220,8 +220,8 @@ fn idempotency_returns_same_receipt() {
     // Only 1 event should exist
     let stats: StoreStats = store.stats();
     assert_eq!(
-        stats.event_count, 1,
-        "PROPERTY: idempotent appends must not increase event_count — only one event must be stored.\n\
+        stats.event_count, 2,
+        "PROPERTY: idempotent appends must not increase event_count beyond the lifecycle event plus one stored user event.\n\
          Investigate: src/store/mod.rs append_with_options idempotency check.\n\
          Common causes: idempotency key lookup misses in-memory cache, duplicate written to segment.\n\
          Run: cargo test --test store_advanced idempotency_returns_same_receipt"
@@ -874,7 +874,7 @@ fn corrupt_frame_in_segment_is_detected() {
             // Corrupted segment may have fewer events (some frames skipped)
             // The key assertion: we don't get MORE events than we wrote
             assert!(
-                stats.event_count <= 3,
+                stats.event_count <= 5,
                 "PROPERTY: a store opened with a corrupted segment must not report more events than were written — no phantom events allowed. Got {}.\n\
                  Investigate: src/store/segment/scan.rs scan_segment CRC check, src/store/mod.rs open.\n\
                  Common causes: CRC check skipped, corrupt bytes decoded as valid frames.\n\
@@ -1223,7 +1223,7 @@ fn pipeline_commit_bypass_persists() {
     let committed: Committed<serde_json::Value> =
         Pipeline::<()>::commit_bypass(bypass_receipt, |p| -> Result<_, StoreError> {
             let r = store.append(&coord, kind, &p)?;
-            CommitMetadata::from_append_receipt(r)
+            CommitMetadata::from_append_receipt(&r)
         })
         .expect("commit_bypass");
     let committed_event_id = committed.event_id();
@@ -1635,8 +1635,8 @@ fn reactive_subscribe_react_append_pattern() {
     // Verify: 2 events total (root + reaction)
     let stats = store.stats();
     assert_eq!(
-        stats.event_count, 2,
-        "PROPERTY: After root event + 1 reaction, store must contain exactly 2 events.\n\
+        stats.event_count, 3,
+        "PROPERTY: After root event + 1 reaction, store must contain the lifecycle event plus those 2 user-visible events.\n\
          Investigate: src/store/mod.rs Store::append_reaction() src/event/sourcing.rs.\n\
          Common causes: append_reaction() not writing to the store, or stats.event_count \
          not counting reaction events that go to a different coordinate.\n\

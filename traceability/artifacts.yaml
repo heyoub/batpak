@@ -103,7 +103,7 @@
 - id: ART-STORE-PROJECTION
   kind: source
   paths:
-    - src/store/projection/flow.rs
+    - src/store/projection/flow/mod.rs
     - src/store/projection/watch.rs
 - id: ART-STORE-LIFECYCLE
   kind: source
@@ -239,7 +239,7 @@
 - id: ART-STORE-SCAN
   kind: source
   paths:
-    - src/store/segment/scan.rs
+    - src/store/segment/scan/mod.rs
 - id: ART-UNIFIED-TESTS
   kind: tests
   paths:

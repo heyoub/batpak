@@ -6,7 +6,12 @@
 use batpak::coordinate::{Coordinate, Region};
 use batpak::event::EventKind;
 use batpak::store::{
-    OpenIndexPath, OpenIndexReport, ReadOnly, Store, StoreConfig, StoreError, StoreLockMode,
+    OpenIndexPath, OpenIndexReport, OpenReportObserver, ReadOnly, Store, StoreConfig, StoreError,
+    StoreLockMode,
+};
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc, Mutex,
 };
 use tempfile::TempDir;
 
@@ -15,7 +20,7 @@ fn mmap_entries_offset(bytes: &[u8]) -> usize {
     const HEADER_TAIL_LEN_V2: usize = (8 * 6) + 4;
     let version = u16::from_le_bytes(bytes[6..8].try_into().expect("version slice"));
     assert_eq!(
-        version, 3,
+        version, 4,
         "test helper expects the live mmap snapshot format"
     );
     let header_tail = &bytes[PREFIX_LEN..PREFIX_LEN + HEADER_TAIL_LEN_V2];
@@ -219,7 +224,7 @@ fn mmap_open_report_counts_reserved_kind_fallbacks() {
     seed_store(&dir, 12);
 
     let artifact = dir.path().join("index.fbati");
-    rewrite_first_mmap_kind(&artifact, 0x0006);
+    rewrite_first_mmap_kind(&artifact, 0x0009);
 
     let store = Store::open(mmap_config(&dir)).expect("reopen with reserved-kind fallback");
     let report = store
@@ -231,11 +236,127 @@ fn mmap_open_report_counts_reserved_kind_fallbacks() {
         report.unknown_reserved_system_kind_fallbacks, 1,
         "PROPERTY: mmap reopen must surface reserved system-kind fallback counts through open_report."
     );
+    assert_eq!(
+        report.unknown_reserved_system_kind_histogram.get(&0x0009),
+        Some(&1)
+    );
     assert_eq!(report.unknown_reserved_effect_kind_fallbacks, 0);
+    assert!(
+        report.unknown_reserved_effect_kind_histogram.is_empty(),
+        "effect histogram must stay empty when only a system fallback occurs"
+    );
+    assert_eq!(report.cumulative_unknown_reserved_system_kind_fallbacks, 1);
+    assert_eq!(
+        report
+            .cumulative_unknown_reserved_system_kind_histogram
+            .get(&0x0009),
+        Some(&1)
+    );
     assert_eq!(
         store.stream("entity:mmap").len(),
         12,
         "reserved-kind fallback accounting must not drop live entries on reopen"
     );
     store.close().expect("close");
+
+    let store = Store::open(mmap_config(&dir)).expect("second reopen after artifact refresh");
+    let report = store
+        .diagnostics()
+        .open_report
+        .expect("open report after second reopen");
+    assert_eq!(report.unknown_reserved_system_kind_fallbacks, 0);
+    assert!(
+        report.unknown_reserved_system_kind_histogram.is_empty(),
+        "refreshed artifact should not re-emit current reopen fallbacks"
+    );
+    assert_eq!(report.cumulative_unknown_reserved_system_kind_fallbacks, 1);
+    assert_eq!(
+        report
+            .cumulative_unknown_reserved_system_kind_histogram
+            .get(&0x0009),
+        Some(&1)
+    );
+    store.close().expect("close second reopen");
+}
+
+#[test]
+fn open_report_observer_runs_and_panics_do_not_abort_open() {
+    let dir = TempDir::new().expect("temp dir");
+    let observed = Arc::new(AtomicUsize::new(0));
+    let reports = Arc::new(Mutex::new(Vec::<OpenIndexReport>::new()));
+    let observer: OpenReportObserver = {
+        let observed = Arc::clone(&observed);
+        let reports = Arc::clone(&reports);
+        Arc::new(move |report: &OpenIndexReport| {
+            observed.fetch_add(1, Ordering::SeqCst);
+            reports.lock().expect("lock reports").push(report.clone());
+        })
+    };
+
+    let config = mmap_config(&dir).with_open_report_observer(Some(observer));
+    let store = Store::open(config.clone()).expect("mutable open with observer");
+    store.close().expect("close mutable");
+
+    let read_only =
+        Store::<ReadOnly>::open_read_only(config).expect("read-only open with observer");
+    drop(read_only);
+
+    assert_eq!(
+        observed.load(Ordering::SeqCst),
+        2,
+        "observer must run once for mutable open and once for read-only open"
+    );
+    assert_eq!(
+        reports.lock().expect("lock reports").len(),
+        2,
+        "observer must receive the structured open report on each successful open"
+    );
+
+    let panic_config = mmap_config(&dir).with_open_report_observer(Some(Arc::new(|_| {
+        panic!("observer panic should not abort open");
+    })));
+    let store = Store::open(panic_config).expect("observer panic must not abort open");
+    store.close().expect("close after panic observer");
+}
+
+#[test]
+fn mutable_open_appends_system_open_completed_and_read_only_does_not() {
+    let dir = TempDir::new().expect("temp dir");
+    let config = mmap_config(&dir);
+
+    let store = Store::open(config.clone()).expect("first mutable open");
+    let lifecycle_events = store.by_fact(EventKind::SYSTEM_OPEN_COMPLETED);
+    assert_eq!(
+        lifecycle_events.len(),
+        1,
+        "mutable open must append exactly one SYSTEM_OPEN_COMPLETED event"
+    );
+    let lifecycle_entry = lifecycle_events[0].clone();
+    assert_eq!(lifecycle_entry.coord.entity(), "batpak:store");
+    assert_eq!(lifecycle_entry.coord.scope(), "batpak:lifecycle");
+    let stored = store
+        .get(lifecycle_entry.event_id)
+        .expect("read lifecycle event payload");
+    assert_eq!(
+        stored.event.header.event_kind,
+        EventKind::SYSTEM_OPEN_COMPLETED,
+        "lifecycle event kind must round-trip as SYSTEM_OPEN_COMPLETED, not a fallback"
+    );
+    store.close().expect("close first mutable open");
+
+    let reopened = Store::open(config.clone()).expect("second mutable open");
+    assert_eq!(
+        reopened.by_fact(EventKind::SYSTEM_OPEN_COMPLETED).len(),
+        2,
+        "second mutable open must append one additional lifecycle event"
+    );
+    reopened.close().expect("close second mutable open");
+
+    let read_only =
+        Store::<ReadOnly>::open_read_only(config).expect("read-only reopen after mutable close");
+    assert_eq!(
+        read_only.by_fact(EventKind::SYSTEM_OPEN_COMPLETED).len(),
+        2,
+        "read-only opens must not append additional lifecycle events"
+    );
 }
