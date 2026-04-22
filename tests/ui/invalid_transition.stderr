@@ -43,11 +43,6 @@ error[E0599]: the function or associated item `from_payload` exists for struct `
 42 |     apply_transition(Transition::<String, Released, String>::from_payload("bad".to_string()));
    |                                                              ^^^^^^^^^^^^ function or associated item cannot be called on `Transition<String, Released, String>` due to unsatisfied trait bounds
    |
-  ::: $RUST/alloc/src/string.rs
-   |
-   | pub struct String {
-   | ----------------- doesn't satisfy `String: EventPayload` or `String: StateMarker`
-   |
    = note: the following trait bounds were not satisfied:
            `String: StateMarker`
            `String: EventPayload`
