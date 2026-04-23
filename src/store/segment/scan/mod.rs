@@ -126,7 +126,7 @@ impl Reader {
         }
         #[cfg(not(unix))]
         {
-            use std::io::{Seek, SeekFrom};
+            use std::io::{Read, Seek, SeekFrom};
             let offset = pos.offset;
             self.with_fd(pos.segment_id, |f| {
                 f.seek(SeekFrom::Start(offset)).map_err(StoreError::Io)?;

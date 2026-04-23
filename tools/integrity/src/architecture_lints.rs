@@ -583,7 +583,8 @@ fn check_xtask_surface_contract(repo_root: &Path) -> Result<()> {
             && devcontainer_content.contains("\"PROPTEST_CASES\"")
             && devcontainer_content.contains("\"CHAOS_ITERATIONS\"")
             && devcontainer_content.contains("bash")
-            && devcontainer_content.contains("-lc"),
+            && devcontainer_content.contains("OsString::from(\"-c\")")
+            && devcontainer_content.contains("Avoid a login shell here"),
         "xtask devcontainer logic must own image reuse, env forwarding, and single-string shell compatibility",
     )?;
     ensure(
