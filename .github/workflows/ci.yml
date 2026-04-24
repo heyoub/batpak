@@ -195,6 +195,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - uses: ./.github/actions/setup-devcontainer
       - name: Build root docs site + rustdoc
+        env:
+          BATPAK_DEVCONTAINER_IMAGE: batpak-devcontainer:ci
+          BATPAK_DEVCONTAINER_SKIP_BUILD: "1"
         run: bash ./scripts/run-in-devcontainer.sh 'cargo xtask docs'
       - uses: actions/upload-pages-artifact@v3
         with:
