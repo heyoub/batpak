@@ -4,7 +4,8 @@
 //! so flakes are reproducible across CI cycles. Without this, every flake is one-shot:
 //! the failing seed is lost the moment the process exits and can never be replayed.
 //!
-//! Call `common::proptest::cfg(N)` from any test file, where `N` is the default
+//! Include this file as `proptest_support` and call `proptest_support::cfg(N)`
+//! from any test file, where `N` is the default
 //! number of cases for that file. `PROPTEST_CASES`, when set, acts as a floor
 //! instead of silently capping deeper local defaults.
 

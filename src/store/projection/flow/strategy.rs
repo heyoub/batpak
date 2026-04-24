@@ -125,31 +125,34 @@ impl PreparedProjection {
             incremental_enabled,
             cache_is_noop,
         );
+        let Self {
+            replay,
+            group_local_slot,
+            ..
+        } = self;
 
-        match (strategy, self.group_local_slot) {
-            (ProjectionStrategy::GroupLocalHit, Some(slot)) => ProjectionDispatch::GroupLocalHit {
-                slot,
-                replay: self.replay,
-            },
+        match (strategy, group_local_slot) {
+            (ProjectionStrategy::GroupLocalHit, Some(slot)) => {
+                ProjectionDispatch::GroupLocalHit { slot, replay }
+            }
             (ProjectionStrategy::GroupLocalIncremental, Some(slot)) => {
-                ProjectionDispatch::GroupLocalIncremental {
-                    slot,
-                    replay: self.replay,
-                }
+                ProjectionDispatch::GroupLocalIncremental { slot, replay }
             }
             (ProjectionStrategy::ExternalCacheThenReplay, _) => {
-                ProjectionDispatch::ExternalCacheThenReplay {
-                    replay: self.replay,
-                }
+                ProjectionDispatch::ExternalCacheThenReplay { replay }
             }
-            (ProjectionStrategy::DirectReplay, _) => ProjectionDispatch::DirectReplay {
-                replay: self.replay,
-            },
+            (ProjectionStrategy::DirectReplay, _) => ProjectionDispatch::DirectReplay { replay },
             (ProjectionStrategy::Empty, _) => ProjectionDispatch::Empty,
-            // `compute_strategy()` only selects group-local strategies when a slot exists.
-            _ => ProjectionDispatch::DirectReplay {
-                replay: self.replay,
-            },
+            (
+                ProjectionStrategy::GroupLocalHit | ProjectionStrategy::GroupLocalIncremental,
+                None,
+            ) => {
+                debug_assert!(
+                    false,
+                    "compute_strategy selected a group-local projection strategy without a cached slot"
+                );
+                ProjectionDispatch::DirectReplay { replay }
+            }
         }
     }
 }
@@ -175,4 +178,60 @@ pub(super) fn compute_strategy(
         return ProjectionStrategy::DirectReplay;
     }
     ProjectionStrategy::ExternalCacheThenReplay
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::event::{Event, EventKind};
+    use crate::store::index::ProjectionReplayPlan;
+
+    #[derive(Default, Debug, serde::Serialize, serde::Deserialize)]
+    struct Counter;
+
+    impl EventSourced for Counter {
+        type Input = crate::event::JsonValueInput;
+
+        fn apply_event(&mut self, _event: &Event<serde_json::Value>) {}
+
+        fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
+            (!events.is_empty()).then_some(Self)
+        }
+
+        fn relevant_event_kinds() -> &'static [EventKind] {
+            static KINDS: [EventKind; 1] = [EventKind::custom(0xF, 1)];
+            &KINDS
+        }
+    }
+
+    fn replay_context() -> ReplayContext {
+        ReplayContext {
+            plan: ProjectionReplayPlan {
+                watermark: 7,
+                generation: 9,
+                items: vec![],
+            },
+            cache_key: vec![1, 2, 3],
+            watermark: 7,
+            cached_at_us: 0,
+            cached_at_mono_ns: 0,
+            process_boot_ns: 0,
+            type_id: std::any::TypeId::of::<Counter>(),
+        }
+    }
+
+    #[test]
+    fn dispatch_uses_direct_replay_for_noop_cache_without_group_local_slot() {
+        let prepared = PreparedProjection {
+            replay: replay_context(),
+            group_local_slot: None,
+            group_local_fresh: false,
+        };
+
+        assert!(matches!(
+            prepared.dispatch::<Counter>(false, true),
+            ProjectionDispatch::DirectReplay { replay }
+                if replay.plan.generation == 9
+        ));
+    }
 }

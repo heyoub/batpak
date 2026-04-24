@@ -12,5 +12,6 @@ pulldown-cmark = "0.13"
 regex = "1"
 serde = { version = "1", features = ["derive"] }
 yaml_serde = "0.10.4"
+proc-macro2 = { version = "1", features = ["span-locations"] }
 syn = { version = "2", features = ["full", "visit"] }
 walkdir = "2"

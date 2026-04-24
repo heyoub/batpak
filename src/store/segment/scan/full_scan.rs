@@ -62,7 +62,7 @@ impl Reader {
                 frame_header[2],
                 frame_header[3],
             ]) as usize;
-            if payload_len > segment::MAX_FRAME_PAYLOAD {
+            if Self::payload_len_exceeds_max(payload_len) {
                 // Corrupt or truncated frame header — stop scanning this segment
                 // rather than allocating unbounded memory. Events before this point
                 // are still valid and will be returned.

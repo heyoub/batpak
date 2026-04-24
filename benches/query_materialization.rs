@@ -22,11 +22,9 @@
 //! redundant intermediate Arc allocation that the old scan chain paid. These groups
 //! confirm no regression and show the baseline cost profile across corpus sizes.
 
-mod common;
-
 use batpak::prelude::*;
 use batpak::store::{IndexTopology, Store, StoreConfig};
-use common::{apply_profile, BenchProfile};
+use batpak_bench_support::{apply_profile, BenchProfile};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use tempfile::TempDir;
 

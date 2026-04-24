@@ -59,6 +59,16 @@ error[E0308]: mismatched types
   --> tests/ui/es_unknown_input.rs:11:57
    |
 11 | #[derive(Default, serde::Serialize, serde::Deserialize, EventSourced)]
+   |                                                         ^^^^^^^^^^^^ expected fn pointer, found fn item
+   |
+   = note: expected fn pointer `for<'a, 'b> fn(&'a mut State, &'b Ping)`
+                 found fn item `for<'a> fn(&'a mut State, Ping) {State::on_ping}`
+   = note: this error originates in the derive macro `EventSourced` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0308]: mismatched types
+  --> tests/ui/es_unknown_input.rs:11:57
+   |
+11 | #[derive(Default, serde::Serialize, serde::Deserialize, EventSourced)]
    |                                                         ^^^^^^^^^^^^ expected `Ping`, found `&Ping`
 12 | #[batpak(input = NotAMarker)]
 13 | #[batpak(event = Ping, handler = on_ping)]
@@ -69,14 +79,4 @@ note: method defined here
    |
 17 |     fn on_ping(&mut self, _p: Ping) {}
    |        ^^^^^^^            --------
-   = note: this error originates in the derive macro `EventSourced` (in Nightly builds, run with -Z macro-backtrace for more info)
-
-error[E0308]: mismatched types
-  --> tests/ui/es_unknown_input.rs:11:57
-   |
-11 | #[derive(Default, serde::Serialize, serde::Deserialize, EventSourced)]
-   |                                                         ^^^^^^^^^^^^ expected fn pointer, found fn item
-   |
-   = note: expected fn pointer `for<'a, 'b> fn(&'a mut State, &'b Ping)`
-                 found fn item `for<'a> fn(&'a mut State, Ping) {State::on_ping}`
    = note: this error originates in the derive macro `EventSourced` (in Nightly builds, run with -Z macro-backtrace for more info)

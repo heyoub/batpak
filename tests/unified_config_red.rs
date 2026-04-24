@@ -1,10 +1,8 @@
 // justifies: INV-TEST-PANIC-AS-ASSERTION, INV-MACRO-BOUNDED-CAST; unified red-path config tests in tests/unified_config_red.rs use unwrap/panic as assertion style and narrow bounded test counters that fit within u32.
 #![allow(clippy::unwrap_used, clippy::cast_possible_truncation, clippy::panic)]
 
-#[path = "support/unified_red.rs"]
-mod unified_red_support;
-
-use unified_red_support::*;
+use batpak::prelude::*;
+use tempfile::TempDir;
 
 #[test]
 fn config_validation_rejects_zero_segment_max_bytes() {

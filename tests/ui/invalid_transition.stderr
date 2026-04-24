@@ -1,32 +1,8 @@
-error[E0277]: the trait bound `String: EventPayload` is not satisfied
-  --> tests/ui/invalid_transition.rs:28:18
-   |
-28 |     _transition: Transition<From, To, String>,
-   |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the trait `EventPayload` is not implemented for `String`
-   |
-note: required by a bound in `Transition`
-  --> src/typestate/transition.rs
-   |
-   | pub struct Transition<From: StateMarker, To: StateMarker, P: EventPayload> {
-   |                                                              ^^^^^^^^^^^^ required by this bound in `Transition`
-
-error[E0277]: the trait bound `String: EventPayload` is not satisfied
-  --> tests/ui/invalid_transition.rs:42:22
-   |
-42 |     apply_transition(Transition::<String, Released, String>::from_payload("bad".to_string()));
-   |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the trait `EventPayload` is not implemented for `String`
-   |
-note: required by a bound in `Transition`
-  --> src/typestate/transition.rs
-   |
-   | pub struct Transition<From: StateMarker, To: StateMarker, P: EventPayload> {
-   |                                                              ^^^^^^^^^^^^ required by this bound in `Transition`
-
 error[E0277]: the trait bound `String: StateMarker` is not satisfied
-  --> tests/ui/invalid_transition.rs:42:22
+  --> tests/ui/invalid_transition.rs:24:15
    |
-42 |     apply_transition(Transition::<String, Released, String>::from_payload("bad".to_string()));
-   |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the trait `StateMarker` is not implemented for `String`
+24 |     let _bad: Option<Transition<String, Released, InvalidPayload>> = None;
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the trait `StateMarker` is not implemented for `String`
    |
    = help: the following other types implement trait `StateMarker`:
              Acquired
@@ -37,12 +13,51 @@ note: required by a bound in `Transition`
    | pub struct Transition<From: StateMarker, To: StateMarker, P: EventPayload> {
    |                             ^^^^^^^^^^^ required by this bound in `Transition`
 
-error[E0599]: the function or associated item `from_payload` exists for struct `Transition<String, Released, String>`, but its trait bounds were not satisfied
-  --> tests/ui/invalid_transition.rs:42:62
+error[E0277]: the trait bound `InvalidPayload: EventPayload` is not satisfied
+  --> tests/ui/invalid_transition.rs:24:15
    |
-42 |     apply_transition(Transition::<String, Released, String>::from_payload("bad".to_string()));
-   |                                                              ^^^^^^^^^^^^ function or associated item cannot be called on `Transition<String, Released, String>` due to unsatisfied trait bounds
+24 |     let _bad: Option<Transition<String, Released, InvalidPayload>> = None;
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ unsatisfied trait bound
    |
-   = note: the following trait bounds were not satisfied:
-           `String: StateMarker`
-           `String: EventPayload`
+help: the trait `EventPayload` is not implemented for `InvalidPayload`
+  --> tests/ui/invalid_transition.rs:21:1
+   |
+21 | struct InvalidPayload;
+   | ^^^^^^^^^^^^^^^^^^^^^
+note: required by a bound in `Transition`
+  --> src/typestate/transition.rs
+   |
+   | pub struct Transition<From: StateMarker, To: StateMarker, P: EventPayload> {
+   |                                                              ^^^^^^^^^^^^ required by this bound in `Transition`
+
+error[E0277]: the trait bound `String: StateMarker` is not satisfied
+  --> tests/ui/invalid_transition.rs:24:70
+   |
+24 |     let _bad: Option<Transition<String, Released, InvalidPayload>> = None;
+   |                                                                      ^^^^ the trait `StateMarker` is not implemented for `String`
+   |
+   = help: the following other types implement trait `StateMarker`:
+             Acquired
+             Released
+note: required by a bound in `Transition`
+  --> src/typestate/transition.rs
+   |
+   | pub struct Transition<From: StateMarker, To: StateMarker, P: EventPayload> {
+   |                             ^^^^^^^^^^^ required by this bound in `Transition`
+
+error[E0277]: the trait bound `InvalidPayload: EventPayload` is not satisfied
+  --> tests/ui/invalid_transition.rs:24:70
+   |
+24 |     let _bad: Option<Transition<String, Released, InvalidPayload>> = None;
+   |                                                                      ^^^^ unsatisfied trait bound
+   |
+help: the trait `EventPayload` is not implemented for `InvalidPayload`
+  --> tests/ui/invalid_transition.rs:21:1
+   |
+21 | struct InvalidPayload;
+   | ^^^^^^^^^^^^^^^^^^^^^
+note: required by a bound in `Transition`
+  --> src/typestate/transition.rs
+   |
+   | pub struct Transition<From: StateMarker, To: StateMarker, P: EventPayload> {
+   |                                                              ^^^^^^^^^^^^ required by this bound in `Transition`

@@ -12,9 +12,11 @@ use batpak::prelude::*;
 use proptest::prelude::*;
 use tempfile::TempDir;
 
-mod common;
-use common::medium_segment_store as test_store;
-use common::test_coord;
+#[path = "support/medium_store.rs"]
+mod medium_store_support;
+#[path = "common/proptest.rs"]
+mod proptest_support;
+use medium_store_support::{medium_segment_store as test_store, test_coord};
 
 /// Generate an arbitrary JSON value with bounded depth and breadth.
 /// proptest's recursive strategy keeps generated payloads finite and shrinkable.
@@ -215,7 +217,7 @@ fn round_trip_fidelity_append_get_preserves_payload() {
 // the failing case to a minimal counterexample. Sample on every CI run.
 
 proptest! {
-    #![proptest_config(common::proptest::cfg(64))]
+    #![proptest_config(proptest_support::cfg(64))]
 
     #[test]
     fn round_trip_fidelity_property(payload in arb_json()) {

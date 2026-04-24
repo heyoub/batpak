@@ -1,10 +1,16 @@
 // justifies: INV-TEST-PANIC-AS-ASSERTION, INV-MACRO-BOUNDED-CAST; unified red-path cold-start tests in tests/unified_cold_start_red.rs use unwrap/panic as assertion style and narrow bounded test counters that fit u32/u16.
 #![allow(clippy::unwrap_used, clippy::cast_possible_truncation, clippy::panic)]
 
-#[path = "support/unified_red.rs"]
-mod unified_red_support;
+#[path = "support/red_kinds.rs"]
+mod red_kinds;
+#[path = "support/red_test_coord.rs"]
+mod red_test_coord;
 
-use unified_red_support::*;
+use red_kinds::*;
+use red_test_coord::*;
+
+use batpak::prelude::*;
+use tempfile::TempDir;
 
 #[test]
 fn sidx_cold_start_uses_footer() {

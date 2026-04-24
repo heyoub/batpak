@@ -41,6 +41,34 @@ fn wait_for_path(path: &Path, label: &str) {
     panic!("{label} did not appear at {}", path.display());
 }
 
+fn wait_for_mutable_open_after_release(config: &StoreConfig, path: &Path, label: &str) -> Store {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let expected_path = std::fs::canonicalize(path).expect("canonical tempdir path");
+    let mut last_err = None;
+    while Instant::now() < deadline {
+        match Store::open(config.clone()) {
+            Ok(store) => return store,
+            Err(StoreError::StoreLocked {
+                path: actual_path,
+                mode,
+            }) => {
+                assert_eq!(actual_path, expected_path);
+                assert_eq!(mode, StoreLockMode::Mutable);
+                last_err = Some(StoreError::StoreLocked {
+                    path: actual_path,
+                    mode,
+                });
+                std::thread::sleep(Duration::from_millis(25));
+            }
+            Err(err) => panic!("{label}: unexpected error while waiting for lock release: {err:?}"),
+        }
+    }
+    panic!(
+        "{label}: lock did not clear before deadline: {:?}",
+        last_err.expect("lock retry loop should record the last StoreLocked error")
+    );
+}
+
 fn helper_command(data_dir: &Path, ready: &Path, release: &Path) -> Command {
     let mut cmd = Command::new(std::env::current_exe().expect("current test binary"));
     cmd.arg("--exact")
@@ -99,7 +127,11 @@ fn read_only_open_is_also_exclusive_in_first_hardening_wave() {
 
     drop(ro);
 
-    let store = Store::open(config).expect("mutable open after read-only release");
+    let store = wait_for_mutable_open_after_release(
+        &config,
+        dir.path(),
+        "mutable open after read-only release",
+    );
     let _ = store.diagnostics();
 }
 

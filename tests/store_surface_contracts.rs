@@ -15,8 +15,9 @@
 
 use batpak::prelude::*;
 
-mod common;
-use common::small_segment_store as test_store;
+#[path = "support/small_store.rs"]
+mod small_store_support;
+use small_store_support::small_segment_store as test_store;
 
 #[test]
 fn store_error_display_variants() {

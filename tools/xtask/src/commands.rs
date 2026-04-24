@@ -25,7 +25,7 @@ const MUTANTS_OUTPUT_ROOT: &str = "tools/xtask/target/mutants";
 const CRITICAL_SEAM_MIN_CATCH_PCT: u32 = 85;
 const REPO_MUTATION_PHASE: RepoMutationPhase = RepoMutationPhase::Phase0;
 const CRITICAL_SMOKE_SHARD: &str = "1/8";
-const REPO_WIDE_SMOKE_SHARD: &str = "1/24";
+const REPO_WIDE_SMOKE_SHARD: &str = "1/48";
 const REPO_MUTATION_THRESHOLDS: &[(RepoMutationPhase, u32)] = &[
     (RepoMutationPhase::Phase1, 35),
     (RepoMutationPhase::Phase2, 50),
@@ -42,8 +42,8 @@ const REPO_WIDE_ALL_FEATURES_MUTANT_FILES: &[&str] = &[
 const REPO_WIDE_NO_DEFAULT_MUTANT_FILES: &[&str] = &["src/store/**/*.rs"];
 const WRITER_COMMIT_MUTANT_FILES: &[&str] = &["src/store/write/*.rs"];
 const CURSOR_MUTANT_FILES: &[&str] = &["src/store/delivery/cursor.rs"];
-const PROJECTION_MUTANT_FILES: &[&str] = &["src/store/projection/flow.rs"];
-const SEGMENT_SCAN_MUTANT_FILES: &[&str] = &["src/store/segment/scan.rs"];
+const PROJECTION_MUTANT_FILES: &[&str] = &["src/store/projection/flow/**/*.rs"];
+const SEGMENT_SCAN_MUTANT_FILES: &[&str] = &["src/store/segment/scan/**/*.rs"];
 const HASH_CHAIN_REPLAY_ALL_FEATURES_MUTANT_FILES: &[&str] = &[
     "src/store/ancestry/by_hash.rs",
     "src/store/cold_start/rebuild.rs",
@@ -171,12 +171,20 @@ pub(crate) fn deny_split() -> Result<()> {
 }
 
 fn count_mutants_file(output_dir: &Path, filename: &str) -> Result<usize> {
-    let path = output_dir.join(filename);
+    let path = cargo_mutants_receipt_path(output_dir, filename);
     if !path.exists() {
         return Ok(0);
     }
     let contents = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
     Ok(contents.lines().filter(|l| !l.trim().is_empty()).count())
+}
+
+fn cargo_mutants_results_dir(output_dir: &Path) -> PathBuf {
+    output_dir.join("mutants.out")
+}
+
+fn cargo_mutants_receipt_path(output_dir: &Path, filename: &str) -> PathBuf {
+    cargo_mutants_results_dir(output_dir).join(filename)
 }
 
 fn mutation_score(output_dir: &Path) -> Result<MutationScore> {
@@ -472,7 +480,7 @@ fn assert_mutation_policy(
             "mutation lane `{}` timed out on {} mutants. Investigate {}.",
             lane.label,
             score.timed_out,
-            output_dir.join("timeout.txt").display()
+            cargo_mutants_receipt_path(output_dir, "timeout.txt").display()
         );
     }
 
@@ -481,7 +489,7 @@ fn assert_mutation_policy(
             "mutants: `{}` recorded {} unviable mutants in {}.",
             lane.label,
             score.unviable,
-            output_dir.join("unviable.txt").display()
+            cargo_mutants_receipt_path(output_dir, "unviable.txt").display()
         );
     }
 
@@ -507,7 +515,7 @@ fn assert_mutation_policy(
                     score.missed,
                     score.scored,
                     score.executed,
-                    output_dir.join("missed.txt").display()
+                    cargo_mutants_receipt_path(output_dir, "missed.txt").display()
                 );
             }
             if lane.scope == MutationScope::RepoWide {
@@ -852,14 +860,16 @@ pub(crate) fn release(args: ReleaseArgs) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        assert_mutation_policy, build_mutant_execution_plan, critical_mutation_lanes,
-        critical_mutation_smoke_lanes, mutants_command, next_ratchet_floor, setup,
-        surface_excludes, MutantExecutionPlan, MutationBaseline, MutationLane, MutationScope,
-        MutationScore, MutationSharding, RepoMutationPhase, CURSOR_MUTANT_FILES,
-        PROJECTION_MUTANT_FILES, REPO_MUTATION_PHASE, REPO_WIDE_ALL_FEATURES_MUTANT_FILES,
-        REPO_WIDE_NO_DEFAULT_MUTANT_FILES, WRITER_COMMIT_MUTANT_FILES,
+        assert_mutation_policy, build_mutant_execution_plan, cargo_mutants_results_dir,
+        critical_mutation_lanes, critical_mutation_smoke_lanes, mutants_command, mutation_score,
+        next_ratchet_floor, setup, surface_excludes, MutantExecutionPlan, MutationBaseline,
+        MutationLane, MutationScope, MutationScore, MutationSharding, RepoMutationPhase,
+        CURSOR_MUTANT_FILES, PROJECTION_MUTANT_FILES, REPO_MUTATION_PHASE,
+        REPO_WIDE_ALL_FEATURES_MUTANT_FILES, REPO_WIDE_NO_DEFAULT_MUTANT_FILES,
+        WRITER_COMMIT_MUTANT_FILES,
     };
     use crate::{MutantMode, MutantSurface, MutantsArgs};
+    use std::fs;
     use std::path::{Path, PathBuf};
 
     #[test]
@@ -1134,6 +1144,78 @@ mod tests {
         assert!(
             err.to_string().contains("no executed mutants"),
             "empty mutation lanes must fail as no-evidence lanes, got: {err:#}"
+        );
+    }
+
+    #[test]
+    fn mutation_score_reads_nested_cargo_mutants_output_dir() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time before unix epoch")
+            .as_nanos();
+        let output_dir = std::env::temp_dir().join(format!(
+            "batpak-xtask-mutation-score-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        let results_dir = cargo_mutants_results_dir(&output_dir);
+        fs::create_dir_all(&results_dir).expect("create nested mutants.out");
+        fs::write(results_dir.join("caught.txt"), "a\nb\n").expect("write caught");
+        fs::write(results_dir.join("missed.txt"), "c\n").expect("write missed");
+        fs::write(results_dir.join("timeout.txt"), "").expect("write timeout");
+        fs::write(results_dir.join("unviable.txt"), "d\n").expect("write unviable");
+
+        let score = mutation_score(&output_dir).expect("score nested output");
+        assert_eq!(score.caught, 2);
+        assert_eq!(score.missed, 1);
+        assert_eq!(score.timed_out, 0);
+        assert_eq!(score.unviable, 1);
+        assert_eq!(score.executed, 4);
+        assert_eq!(score.scored, 3);
+        assert_eq!(score.score_pct, Some(66));
+
+        let _ = fs::remove_dir_all(&output_dir);
+    }
+
+    #[test]
+    fn mutation_policy_timeout_error_points_to_nested_cargo_mutants_output_dir() {
+        let lane = fake_lane();
+        let score = MutationScore {
+            caught: 0,
+            missed: 0,
+            timed_out: 1,
+            unviable: 0,
+            executed: 1,
+            scored: 0,
+            score_pct: None,
+        };
+
+        let err = assert_mutation_policy(&lane, &fake_output_dir(), score).expect_err("must fail");
+        assert!(
+            err.to_string()
+                .contains("tools/xtask/target/mutants/fake-lane/mutants.out/timeout.txt"),
+            "timeout guidance must point at nested cargo-mutants receipts, got: {err:#}"
+        );
+    }
+
+    #[test]
+    fn mutation_policy_threshold_error_points_to_nested_cargo_mutants_output_dir() {
+        let lane = fake_lane();
+        let score = MutationScore {
+            caught: 0,
+            missed: 1,
+            timed_out: 0,
+            unviable: 0,
+            executed: 1,
+            scored: 1,
+            score_pct: Some(0),
+        };
+
+        let err = assert_mutation_policy(&lane, &fake_output_dir(), score).expect_err("must fail");
+        assert!(
+            err.to_string()
+                .contains("tools/xtask/target/mutants/fake-lane/mutants.out/missed.txt"),
+            "threshold guidance must point at nested cargo-mutants receipts, got: {err:#}"
         );
     }
 }

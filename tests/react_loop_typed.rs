@@ -14,14 +14,16 @@
 //! at-least-once / checkpoint semantics documented on the typed reactor
 //! surface.
 
-mod common;
-
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use batpak::event::StoredEvent;
 use batpak::prelude::*;
+
+#[path = "support/small_store.rs"]
+mod small_store_support;
+use small_store_support::small_segment_store;
 
 // ─── Payloads ────────────────────────────────────────────────────────────────
 
@@ -132,7 +134,7 @@ fn wait_for<F: Fn() -> bool>(cond: F, timeout: Duration) -> bool {
 }
 
 fn test_store() -> (Arc<Store>, tempfile::TempDir) {
-    let (s, d) = common::small_segment_store();
+    let (s, d) = small_segment_store();
     (Arc::new(s), d)
 }
 

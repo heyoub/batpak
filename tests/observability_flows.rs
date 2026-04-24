@@ -164,6 +164,10 @@ fn named_store_flows_emit_traceable_events() {
             "Expected tracing output for flow=\"{flow}\", got:\n{output}"
         );
     }
+    assert!(
+        !output.contains("projection returned None despite non-empty filtered event stream"),
+        "Healthy full replay should not emit the projection anomaly log, got:\n{output}"
+    );
 }
 
 #[test]

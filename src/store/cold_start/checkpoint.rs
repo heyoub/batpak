@@ -30,7 +30,9 @@ use crate::store::index::{
 use crate::store::segment::sidx::ReservedKindFallbackStats;
 use crate::store::StoreError;
 use rayon::prelude::*;
+use serde::de::{self, DeserializeSeed, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
+use std::fmt;
 use std::io::{BufWriter, Write};
 use std::path::Path;
 
@@ -184,6 +186,177 @@ pub(crate) struct LoadedCheckpointSnapshot {
     pub(crate) cumulative_reserved_kind_fallbacks: ReservedKindFallbackStats,
 }
 
+struct LoadedCheckpointFile {
+    path: std::path::PathBuf,
+    version: u16,
+    body: Vec<u8>,
+}
+
+struct CheckpointSnapshotDataV5 {
+    global_sequence: u64,
+    watermark_segment_id: u64,
+    watermark_offset: u64,
+    interner_strings: Vec<String>,
+    routing: RoutingSummary,
+    reserved_kind_fallbacks: ReservedKindFallbackStats,
+    entries: Vec<IndexEntry>,
+}
+
+#[derive(Deserialize)]
+#[serde(field_identifier, rename_all = "snake_case")]
+enum CheckpointDataV5Field {
+    GlobalSequence,
+    WatermarkSegmentId,
+    WatermarkOffset,
+    InternerStrings,
+    Routing,
+    ReservedKindFallbacks,
+    Entries,
+}
+
+struct CheckpointEntriesSeed<'a> {
+    interner_strings: &'a [String],
+}
+
+struct CheckpointEntriesVisitor<'a> {
+    interner_strings: &'a [String],
+}
+
+impl<'de, 'a> DeserializeSeed<'de> for CheckpointEntriesSeed<'a> {
+    type Value = Vec<IndexEntry>;
+
+    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_seq(CheckpointEntriesVisitor {
+            interner_strings: self.interner_strings,
+        })
+    }
+}
+
+impl<'de, 'a> Visitor<'de> for CheckpointEntriesVisitor<'a> {
+    type Value = Vec<IndexEntry>;
+
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("a sequence of checkpoint entries")
+    }
+
+    fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+    where
+        A: SeqAccess<'de>,
+    {
+        let mut entries = Vec::with_capacity(seq.size_hint().unwrap_or(0));
+        while let Some(entry) = seq.next_element::<CheckpointEntry>()? {
+            entries.push(
+                entry
+                    .to_cold_start_row()
+                    .to_index_entry(self.interner_strings)
+                    .map_err(de::Error::custom)?,
+            );
+        }
+        Ok(entries)
+    }
+}
+
+struct CheckpointSnapshotDataV5Visitor;
+
+impl<'de> Visitor<'de> for CheckpointSnapshotDataV5Visitor {
+    type Value = CheckpointSnapshotDataV5;
+
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("checkpoint v5 snapshot data")
+    }
+
+    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+    where
+        A: MapAccess<'de>,
+    {
+        let mut global_sequence = None;
+        let mut watermark_segment_id = None;
+        let mut watermark_offset = None;
+        let mut interner_strings = None;
+        let mut routing = None;
+        let mut reserved_kind_fallbacks = None;
+        let mut entries = None;
+
+        while let Some(field) = map.next_key::<CheckpointDataV5Field>()? {
+            match field {
+                CheckpointDataV5Field::GlobalSequence => {
+                    if global_sequence.is_some() {
+                        return Err(de::Error::duplicate_field("global_sequence"));
+                    }
+                    global_sequence = Some(map.next_value()?);
+                }
+                CheckpointDataV5Field::WatermarkSegmentId => {
+                    if watermark_segment_id.is_some() {
+                        return Err(de::Error::duplicate_field("watermark_segment_id"));
+                    }
+                    watermark_segment_id = Some(map.next_value()?);
+                }
+                CheckpointDataV5Field::WatermarkOffset => {
+                    if watermark_offset.is_some() {
+                        return Err(de::Error::duplicate_field("watermark_offset"));
+                    }
+                    watermark_offset = Some(map.next_value()?);
+                }
+                CheckpointDataV5Field::InternerStrings => {
+                    if interner_strings.is_some() {
+                        return Err(de::Error::duplicate_field("interner_strings"));
+                    }
+                    interner_strings = Some(map.next_value()?);
+                }
+                CheckpointDataV5Field::Routing => {
+                    if routing.is_some() {
+                        return Err(de::Error::duplicate_field("routing"));
+                    }
+                    routing = Some(map.next_value()?);
+                }
+                CheckpointDataV5Field::ReservedKindFallbacks => {
+                    if reserved_kind_fallbacks.is_some() {
+                        return Err(de::Error::duplicate_field("reserved_kind_fallbacks"));
+                    }
+                    reserved_kind_fallbacks = Some(map.next_value()?);
+                }
+                CheckpointDataV5Field::Entries => {
+                    if entries.is_some() {
+                        return Err(de::Error::duplicate_field("entries"));
+                    }
+                    let strings = interner_strings.as_deref().ok_or_else(|| {
+                        de::Error::custom("checkpoint v5 requires interner_strings before entries")
+                    })?;
+                    entries = Some(map.next_value_seed(CheckpointEntriesSeed {
+                        interner_strings: strings,
+                    })?);
+                }
+            }
+        }
+
+        Ok(CheckpointSnapshotDataV5 {
+            global_sequence: global_sequence
+                .ok_or_else(|| de::Error::missing_field("global_sequence"))?,
+            watermark_segment_id: watermark_segment_id
+                .ok_or_else(|| de::Error::missing_field("watermark_segment_id"))?,
+            watermark_offset: watermark_offset
+                .ok_or_else(|| de::Error::missing_field("watermark_offset"))?,
+            interner_strings: interner_strings
+                .ok_or_else(|| de::Error::missing_field("interner_strings"))?,
+            routing: routing.ok_or_else(|| de::Error::missing_field("routing"))?,
+            reserved_kind_fallbacks: reserved_kind_fallbacks.unwrap_or_default(),
+            entries: entries.ok_or_else(|| de::Error::missing_field("entries"))?,
+        })
+    }
+}
+
+impl<'de> Deserialize<'de> for CheckpointSnapshotDataV5 {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_map(CheckpointSnapshotDataV5Visitor)
+    }
+}
+
 fn checkpoint_entries_to_index_entries(
     entries: &[CheckpointEntry],
     interner_strings: &[String],
@@ -192,6 +365,295 @@ fn checkpoint_entries_to_index_entries(
         .iter()
         .map(|ce| ce.to_cold_start_row().to_index_entry(interner_strings))
         .collect()
+}
+
+fn read_checkpoint_file(data_dir: &Path) -> Option<LoadedCheckpointFile> {
+    let path = data_dir.join(CHECKPOINT_FILENAME);
+
+    let raw = match std::fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(error) => {
+            tracing::warn!(
+                target: "batpak::checkpoint",
+                path = %path.display(),
+                error = %error,
+                "failed to read checkpoint file"
+            );
+            return None;
+        }
+    };
+
+    const HEADER_LEN: usize = 6 + 2 + 4;
+    if raw.len() < HEADER_LEN {
+        tracing::warn!(
+            target: "batpak::checkpoint",
+            path = %path.display(),
+            len = raw.len(),
+            "checkpoint file too short to contain a valid header"
+        );
+        return None;
+    }
+
+    if &raw[..6] != CHECKPOINT_MAGIC.as_ref() {
+        tracing::warn!(
+            target: "batpak::checkpoint",
+            path = %path.display(),
+            "checkpoint file has wrong magic bytes — ignoring"
+        );
+        return None;
+    }
+
+    let version = u16::from_le_bytes([raw[6], raw[7]]);
+    let stored_crc = u32::from_le_bytes([raw[8], raw[9], raw[10], raw[11]]);
+    let body = raw[HEADER_LEN..].to_vec();
+    let computed_crc = crc32fast::hash(&body);
+    if stored_crc != computed_crc {
+        tracing::warn!(
+            target: "batpak::checkpoint",
+            path = %path.display(),
+            stored = stored_crc,
+            computed = computed_crc,
+            "checkpoint CRC mismatch — file is corrupt, ignoring"
+        );
+        return None;
+    }
+
+    Some(LoadedCheckpointFile {
+        path,
+        version,
+        body,
+    })
+}
+
+fn validate_checkpoint_watermark(
+    data_dir: &Path,
+    path: &Path,
+    watermark_segment_id: u64,
+    watermark_offset: u64,
+) -> Option<WatermarkInfo> {
+    match validate_watermark_segment(data_dir, watermark_segment_id, watermark_offset) {
+        Ok(()) => {}
+        Err(WatermarkValidationError::MissingSegment { path: seg_path }) => {
+            tracing::warn!(
+                target: "batpak::checkpoint",
+                path = %path.display(),
+                missing_segment = %seg_path.display(),
+                "watermark segment referenced by checkpoint is missing — ignoring checkpoint"
+            );
+            return None;
+        }
+        Err(WatermarkValidationError::OffsetPastTail {
+            path: seg_path,
+            file_len,
+            watermark_offset,
+        }) => {
+            tracing::warn!(
+                target: "batpak::checkpoint",
+                path = %path.display(),
+                watermark_segment = %seg_path.display(),
+                file_len,
+                watermark_offset,
+                "checkpoint watermark points past the segment tail"
+            );
+            return None;
+        }
+    }
+
+    Some(WatermarkInfo {
+        watermark_segment_id,
+        watermark_offset,
+    })
+}
+
+fn decode_checkpoint_data(
+    data_dir: &Path,
+    path: &Path,
+    version: u16,
+    body: &[u8],
+) -> Option<LoadedCheckpointData> {
+    // ── 6. Deserialise msgpack body ───────────────────────────────────────────
+    let (
+        entries,
+        interner_strings,
+        watermark_segment_id,
+        watermark_offset,
+        global_sequence,
+        routing,
+        cumulative_reserved_kind_fallbacks,
+    ) = match version {
+        2 => {
+            let data: CheckpointDataV2 = match rmp_serde::from_slice(body) {
+                Ok(d) => d,
+                Err(e) => {
+                    tracing::warn!(
+                        target: "batpak::checkpoint",
+                        path = %path.display(),
+                        error = %e,
+                        "checkpoint deserialisation failed — ignoring"
+                    );
+                    return None;
+                }
+            };
+            let routing = RoutingSummary::from_sorted_entries(
+                &checkpoint_entries_to_index_entries(&data.entries, &data.interner_strings).ok()?,
+                recommended_restore_chunk_count(data.entries.len()),
+            );
+            (
+                data.entries,
+                data.interner_strings,
+                data.watermark_segment_id,
+                data.watermark_offset,
+                data.global_sequence,
+                routing,
+                ReservedKindFallbackStats::default(),
+            )
+        }
+        3 => {
+            let data: CheckpointDataV3 = match rmp_serde::from_slice(body) {
+                Ok(d) => d,
+                Err(e) => {
+                    tracing::warn!(
+                        target: "batpak::checkpoint",
+                        path = %path.display(),
+                        error = %e,
+                        "checkpoint deserialisation failed — ignoring"
+                    );
+                    return None;
+                }
+            };
+            (
+                data.entries,
+                data.interner_strings,
+                data.watermark_segment_id,
+                data.watermark_offset,
+                data.global_sequence,
+                data.routing,
+                ReservedKindFallbackStats::default(),
+            )
+        }
+        4 => {
+            let data: CheckpointDataV4 = match rmp_serde::from_slice(body) {
+                Ok(d) => d,
+                Err(e) => {
+                    tracing::warn!(
+                        target: "batpak::checkpoint",
+                        path = %path.display(),
+                        error = %e,
+                        "checkpoint deserialisation failed — ignoring"
+                    );
+                    return None;
+                }
+            };
+            (
+                data.entries,
+                data.interner_strings,
+                data.watermark_segment_id,
+                data.watermark_offset,
+                data.global_sequence,
+                data.routing,
+                ReservedKindFallbackStats::default(),
+            )
+        }
+        5 => {
+            let data: CheckpointDataV5 = match rmp_serde::from_slice(body) {
+                Ok(d) => d,
+                Err(e) => {
+                    tracing::warn!(
+                        target: "batpak::checkpoint",
+                        path = %path.display(),
+                        error = %e,
+                        "checkpoint deserialisation failed — ignoring"
+                    );
+                    return None;
+                }
+            };
+            (
+                data.entries,
+                data.interner_strings,
+                data.watermark_segment_id,
+                data.watermark_offset,
+                data.global_sequence,
+                data.routing,
+                data.reserved_kind_fallbacks,
+            )
+        }
+        _ => {
+            tracing::warn!(
+                target: "batpak::checkpoint",
+                path = %path.display(),
+                version,
+                expected = CHECKPOINT_VERSION,
+                "unsupported checkpoint version — ignoring"
+            );
+            return None;
+        }
+    };
+
+    let watermark =
+        validate_checkpoint_watermark(data_dir, path, watermark_segment_id, watermark_offset)?;
+
+    tracing::debug!(
+        target: "batpak::checkpoint",
+        entries = entries.len(),
+        global_sequence,
+        watermark_segment_id,
+        watermark_offset,
+        "checkpoint loaded successfully"
+    );
+
+    Some(LoadedCheckpointData {
+        entries,
+        interner_strings,
+        watermark,
+        stored_allocator: global_sequence,
+        routing,
+        cumulative_reserved_kind_fallbacks,
+    })
+}
+
+fn decode_checkpoint_snapshot_v5(
+    data_dir: &Path,
+    path: &Path,
+    body: &[u8],
+) -> Option<LoadedCheckpointSnapshot> {
+    let data: CheckpointSnapshotDataV5 = match rmp_serde::from_slice(body) {
+        Ok(data) => data,
+        Err(error) => {
+            tracing::warn!(
+                target: "batpak::checkpoint",
+                path = %path.display(),
+                error = %error,
+                "checkpoint snapshot deserialisation failed — ignoring"
+            );
+            return None;
+        }
+    };
+
+    let watermark = validate_checkpoint_watermark(
+        data_dir,
+        path,
+        data.watermark_segment_id,
+        data.watermark_offset,
+    )?;
+
+    tracing::debug!(
+        target: "batpak::checkpoint",
+        entries = data.entries.len(),
+        global_sequence = data.global_sequence,
+        watermark_segment_id = data.watermark_segment_id,
+        watermark_offset = data.watermark_offset,
+        "checkpoint snapshot loaded successfully"
+    );
+
+    Some(LoadedCheckpointSnapshot {
+        entries: data.entries,
+        interner_strings: data.interner_strings,
+        watermark,
+        stored_allocator: data.global_sequence,
+        routing: data.routing,
+        cumulative_reserved_kind_fallbacks: data.reserved_kind_fallbacks,
+    })
 }
 
 // ── write_checkpoint ─────────────────────────────────────────────────────────
@@ -207,8 +669,7 @@ fn checkpoint_entries_to_index_entries(
 /// Returns [`StoreError::Serialization`] if msgpack serialisation fails.
 /// Returns [`StoreError::Io`] if any filesystem operation (open, write, fsync,
 /// rename) fails.
-// justifies: src/store/lifecycle.rs routes production artifact writes through the cumulative-stats variant; this compatibility wrapper remains for targeted tests and focused artifact fixtures.
-#[allow(dead_code)]
+#[cfg(test)]
 pub(crate) fn write_checkpoint(
     index: &StoreIndex,
     data_dir: &Path,
@@ -335,236 +796,10 @@ pub(crate) fn write_checkpoint_with_reserved_kind_fallbacks(
 /// On success returns the decoded checkpoint body plus routing summary.
 /// `stored_allocator` is the `global_sequence` allocator position at checkpoint time,
 /// which may be higher than `entries.len()` due to burned batch slots.
+#[cfg(test)]
 pub(crate) fn try_load_checkpoint(data_dir: &Path) -> Option<LoadedCheckpointData> {
-    let path = data_dir.join(CHECKPOINT_FILENAME);
-
-    // ── 1. Read raw bytes ─────────────────────────────────────────────────────
-    let raw = match std::fs::read(&path) {
-        Ok(b) => b,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            // Normal on first start — no warning needed.
-            return None;
-        }
-        Err(e) => {
-            tracing::warn!(
-                target: "batpak::checkpoint",
-                path = %path.display(),
-                error = %e,
-                "failed to read checkpoint file"
-            );
-            return None;
-        }
-    };
-
-    // ── 2. Validate header length: 6 (magic) + 2 (version) + 4 (crc) = 12 ───
-    const HEADER_LEN: usize = 6 + 2 + 4;
-    if raw.len() < HEADER_LEN {
-        tracing::warn!(
-            target: "batpak::checkpoint",
-            path = %path.display(),
-            len = raw.len(),
-            "checkpoint file too short to contain a valid header"
-        );
-        return None;
-    }
-
-    // ── 3. Verify magic ───────────────────────────────────────────────────────
-    if &raw[..6] != CHECKPOINT_MAGIC.as_ref() {
-        tracing::warn!(
-            target: "batpak::checkpoint",
-            path = %path.display(),
-            "checkpoint file has wrong magic bytes — ignoring"
-        );
-        return None;
-    }
-
-    // ── 4. Verify version ─────────────────────────────────────────────────────
-    let version = u16::from_le_bytes([raw[6], raw[7]]);
-    // ── 5. Verify CRC ─────────────────────────────────────────────────────────
-    let stored_crc = u32::from_le_bytes([raw[8], raw[9], raw[10], raw[11]]);
-    let body = &raw[HEADER_LEN..];
-    let computed_crc = crc32fast::hash(body);
-    if stored_crc != computed_crc {
-        tracing::warn!(
-            target: "batpak::checkpoint",
-            path = %path.display(),
-            stored = stored_crc,
-            computed = computed_crc,
-            "checkpoint CRC mismatch — file is corrupt, ignoring"
-        );
-        return None;
-    }
-
-    // ── 6. Deserialise msgpack body ───────────────────────────────────────────
-    let (
-        entries,
-        interner_strings,
-        watermark_segment_id,
-        watermark_offset,
-        global_sequence,
-        routing,
-        cumulative_reserved_kind_fallbacks,
-    ) = match version {
-        2 => {
-            let data: CheckpointDataV2 = match rmp_serde::from_slice(body) {
-                Ok(d) => d,
-                Err(e) => {
-                    tracing::warn!(
-                        target: "batpak::checkpoint",
-                        path = %path.display(),
-                        error = %e,
-                        "checkpoint deserialisation failed — ignoring"
-                    );
-                    return None;
-                }
-            };
-            let routing = RoutingSummary::from_sorted_entries(
-                &checkpoint_entries_to_index_entries(&data.entries, &data.interner_strings).ok()?,
-                recommended_restore_chunk_count(data.entries.len()),
-            );
-            (
-                data.entries,
-                data.interner_strings,
-                data.watermark_segment_id,
-                data.watermark_offset,
-                data.global_sequence,
-                routing,
-                ReservedKindFallbackStats::default(),
-            )
-        }
-        3 => {
-            let data: CheckpointDataV3 = match rmp_serde::from_slice(body) {
-                Ok(d) => d,
-                Err(e) => {
-                    tracing::warn!(
-                        target: "batpak::checkpoint",
-                        path = %path.display(),
-                        error = %e,
-                        "checkpoint deserialisation failed — ignoring"
-                    );
-                    return None;
-                }
-            };
-            (
-                data.entries,
-                data.interner_strings,
-                data.watermark_segment_id,
-                data.watermark_offset,
-                data.global_sequence,
-                data.routing,
-                ReservedKindFallbackStats::default(),
-            )
-        }
-        4 => {
-            let data: CheckpointDataV4 = match rmp_serde::from_slice(body) {
-                Ok(d) => d,
-                Err(e) => {
-                    tracing::warn!(
-                        target: "batpak::checkpoint",
-                        path = %path.display(),
-                        error = %e,
-                        "checkpoint deserialisation failed — ignoring"
-                    );
-                    return None;
-                }
-            };
-            (
-                data.entries,
-                data.interner_strings,
-                data.watermark_segment_id,
-                data.watermark_offset,
-                data.global_sequence,
-                data.routing,
-                ReservedKindFallbackStats::default(),
-            )
-        }
-        5 => {
-            let data: CheckpointDataV5 = match rmp_serde::from_slice(body) {
-                Ok(d) => d,
-                Err(e) => {
-                    tracing::warn!(
-                        target: "batpak::checkpoint",
-                        path = %path.display(),
-                        error = %e,
-                        "checkpoint deserialisation failed — ignoring"
-                    );
-                    return None;
-                }
-            };
-            (
-                data.entries,
-                data.interner_strings,
-                data.watermark_segment_id,
-                data.watermark_offset,
-                data.global_sequence,
-                data.routing,
-                data.reserved_kind_fallbacks,
-            )
-        }
-        _ => {
-            tracing::warn!(
-                target: "batpak::checkpoint",
-                path = %path.display(),
-                version,
-                expected = CHECKPOINT_VERSION,
-                "unsupported checkpoint version — ignoring"
-            );
-            return None;
-        }
-    };
-
-    // ── 7. Cross-check: watermark segment file must exist on disk ─────────────
-    // Format: "{segment_id:06}.fbat"  (mirrors SEGMENT_EXTENSION in segment.rs)
-    match validate_watermark_segment(data_dir, watermark_segment_id, watermark_offset) {
-        Ok(()) => {}
-        Err(WatermarkValidationError::MissingSegment { path: seg_path }) => {
-            tracing::warn!(
-                target: "batpak::checkpoint",
-                path = %path.display(),
-                missing_segment = %seg_path.display(),
-                "watermark segment referenced by checkpoint is missing — ignoring checkpoint"
-            );
-            return None;
-        }
-        Err(WatermarkValidationError::OffsetPastTail {
-            path: seg_path,
-            file_len,
-            watermark_offset,
-        }) => {
-            tracing::warn!(
-                target: "batpak::checkpoint",
-                path = %path.display(),
-                watermark_segment = %seg_path.display(),
-                file_len,
-                watermark_offset,
-                "checkpoint watermark points past the segment tail"
-            );
-            return None;
-        }
-    }
-
-    let watermark = WatermarkInfo {
-        watermark_segment_id,
-        watermark_offset,
-    };
-
-    tracing::debug!(
-        target: "batpak::checkpoint",
-        entries = entries.len(),
-        global_sequence,
-        watermark_segment_id,
-        watermark_offset,
-        "checkpoint loaded successfully"
-    );
-
-    Some(LoadedCheckpointData {
-        entries,
-        interner_strings,
-        watermark,
-        stored_allocator: global_sequence,
-        routing,
-        cumulative_reserved_kind_fallbacks,
-    })
+    let loaded = read_checkpoint_file(data_dir)?;
+    decode_checkpoint_data(data_dir, &loaded.path, loaded.version, &loaded.body)
 }
 
 // ── restore_from_checkpoint ───────────────────────────────────────────────────
@@ -602,7 +837,12 @@ pub(crate) fn restore_from_checkpoint(
 }
 
 pub(crate) fn try_load_checkpoint_snapshot(data_dir: &Path) -> Option<LoadedCheckpointSnapshot> {
-    let loaded = try_load_checkpoint(data_dir)?;
+    let raw = read_checkpoint_file(data_dir)?;
+    if raw.version == CHECKPOINT_VERSION {
+        return decode_checkpoint_snapshot_v5(data_dir, &raw.path, &raw.body);
+    }
+
+    let loaded = decode_checkpoint_data(data_dir, &raw.path, raw.version, &raw.body)?;
     let chunk_ranges = if loaded.routing.chunks.is_empty() {
         vec![(0usize, loaded.entries.len())]
     } else {
@@ -734,7 +974,7 @@ mod tests {
             "write_checkpoint must encode the current checkpoint version"
         );
         let body = &raw[12..];
-        let direct: CheckpointDataV4 =
+        let direct: CheckpointDataV5 =
             rmp_serde::from_slice(body).expect("checkpoint body should deserialize directly");
         assert_eq!(direct.entries.len(), 16);
         assert!(
@@ -761,7 +1001,44 @@ mod tests {
         );
         assert!(
             !routing.chunks.is_empty(),
-            "v4 checkpoints must persist chunk summaries"
+            "current-version checkpoints must persist chunk summaries"
+        );
+    }
+
+    #[test]
+    fn current_version_snapshot_restores_v5_checkpoint_directly() {
+        let tmp = TempDir::new().expect("tempdir");
+        let dir = tmp.path();
+        touch_segment(dir, 0);
+
+        let idx = make_index(16);
+        let reserved_kind_fallbacks = ReservedKindFallbackStats {
+            system: 2,
+            effect: 1,
+            system_histogram: std::iter::once((0x0009u16, 2usize)).collect(),
+            effect_histogram: std::iter::once((0x1001u16, 1usize)).collect(),
+        };
+        write_checkpoint_with_reserved_kind_fallbacks(&idx, dir, 0, 4096, &reserved_kind_fallbacks)
+            .expect("write v5 checkpoint");
+
+        let loaded = try_load_checkpoint_snapshot(dir).expect("load v5 checkpoint snapshot");
+
+        assert_eq!(loaded.entries.len(), 16);
+        assert_eq!(loaded.watermark.watermark_offset, 4096);
+        assert_eq!(
+            loaded.cumulative_reserved_kind_fallbacks,
+            reserved_kind_fallbacks,
+            "PROPERTY: direct v5 snapshot restore must preserve persisted cumulative reserved-kind fallback stats."
+        );
+        assert_eq!(
+            loaded.entries.first().map(|entry| entry.global_sequence),
+            Some(0),
+            "PROPERTY: direct v5 snapshot restore must preserve sorted global-sequence order."
+        );
+        assert_eq!(
+            loaded.entries.last().map(|entry| entry.global_sequence),
+            Some(15),
+            "PROPERTY: direct v5 snapshot restore must preserve the full checkpoint entry set."
         );
     }
 

@@ -15,15 +15,20 @@ exclude = [
     ".devcontainer/**",
     ".github/**",
     "AGENTS.md",
-    "docs/**",
     "scripts/**",
     "templates/**",
-    "tools/**",
-    "traceability/**",
+    "tools/integrity/**",
+    "tools/xtask/**",
 ]
 
 [workspace]
-members = ["tools/integrity", "tools/xtask", "crates/macros-support", "crates/macros"]
+members = [
+    "tools/integrity",
+    "tools/xtask",
+    "crates/macros-support",
+    "crates/macros",
+    "crates/bench-support",
+]
 default-members = ["."]
 resolver = "2"
 
@@ -64,6 +69,7 @@ zeroize = "1"
 # NO TOKIO. Invariant 1.
 
 [dev-dependencies]
+batpak-bench-support = { path = "crates/bench-support", version = "0.6.0" }
 proptest = "1"
 arbitrary = { version = "1", features = ["derive"] }
 criterion = { version = "0.5", features = ["html_reports"] }
@@ -77,6 +83,7 @@ tracing-subscriber = { version = "0.3", features = ["fmt", "std"] }
 [build-dependencies]
 serde = { version = "1", features = ["derive"] }
 yaml_serde = "0.10.4"
+proc-macro2 = { version = "1", features = ["span-locations"] }
 syn = { version = "2", features = ["full", "visit"] }
 
 [lints.clippy]

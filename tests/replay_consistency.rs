@@ -8,7 +8,8 @@ use batpak::store::{ReadOnly, Store, StoreConfig, SyncConfig};
 use proptest::prelude::*;
 use tempfile::TempDir;
 
-mod common;
+#[path = "common/proptest.rs"]
+mod proptest_support;
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 struct Counter {
@@ -247,7 +248,7 @@ fn snapshot_checkpoint_matches_source_projection() {
 }
 
 proptest! {
-    #![proptest_config(common::proptest::cfg(12))]
+    #![proptest_config(proptest_support::cfg(12))]
 
     #[test]
     fn reopen_paths_match_across_mmap_checkpoint_and_rebuild(specs in arb_append_specs()) {

@@ -1,19 +1,16 @@
-// justifies: ADR-0005; shared bench helpers in benches/common/mod.rs are imported by different bench binaries; each bench binary only uses a subset so unused helpers are expected in every compile.
-#![allow(dead_code)]
-
 use criterion::measurement::WallTime;
 use criterion::{BenchmarkGroup, SamplingMode, Throughput};
 use std::time::Duration;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum BenchProfile {
+pub enum BenchProfile {
     Quick,
     QuickWarm,
     Heavy,
     Massive,
 }
 
-pub(crate) fn apply_profile(group: &mut BenchmarkGroup<'_, WallTime>, profile: BenchProfile) {
+pub fn apply_profile(group: &mut BenchmarkGroup<'_, WallTime>, profile: BenchProfile) {
     group.noise_threshold(0.03);
     group.significance_level(0.05);
     match profile {
@@ -44,7 +41,7 @@ pub(crate) fn apply_profile(group: &mut BenchmarkGroup<'_, WallTime>, profile: B
     }
 }
 
-pub(crate) fn profile_for_event_count(count: u64) -> BenchProfile {
+pub fn profile_for_event_count(count: u64) -> BenchProfile {
     match count {
         0..=1_000 => BenchProfile::Quick,
         1_001..=10_000 => BenchProfile::Heavy,
@@ -52,6 +49,6 @@ pub(crate) fn profile_for_event_count(count: u64) -> BenchProfile {
     }
 }
 
-pub(crate) fn throughput_elements(group: &mut BenchmarkGroup<'_, WallTime>, elements: u64) {
+pub fn throughput_elements(group: &mut BenchmarkGroup<'_, WallTime>, elements: u64) {
     group.throughput(Throughput::Elements(elements));
 }

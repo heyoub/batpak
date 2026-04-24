@@ -22,11 +22,9 @@
 //! repeated reads land in the OS page cache, isolating the index scan cost.
 //! Cold-path ancestry would be dominated by I/O instead.
 
-mod common;
-
 use batpak::prelude::*;
 use batpak::store::{Store, StoreConfig};
-use common::{apply_profile, BenchProfile};
+use batpak_bench_support::{apply_profile, BenchProfile};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use tempfile::TempDir;
 

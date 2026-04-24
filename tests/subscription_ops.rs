@@ -11,8 +11,9 @@ use batpak::store::Notification;
 use std::sync::Arc;
 use std::thread;
 
-mod common;
-use common::small_segment_store as test_store;
+#[path = "support/small_store.rs"]
+mod small_store_support;
+use small_store_support::small_segment_store as test_store;
 
 #[test]
 fn ops_recv_without_filters() {

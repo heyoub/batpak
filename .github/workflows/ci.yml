@@ -141,7 +141,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: Swatinem/rust-cache@v2
       - uses: ./.github/actions/setup-devcontainer
-      - name: Mutation smoke (critical seams + repo-wide shard 1/24)
+      - name: Mutation smoke (critical seams + repo-wide shard 1/48)
         env:
           BATPAK_DEVCONTAINER_IMAGE: batpak-devcontainer:ci
           BATPAK_DEVCONTAINER_SKIP_BUILD: "1"

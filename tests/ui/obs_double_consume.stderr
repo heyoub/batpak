@@ -1,10 +1,11 @@
-error[E0624]: associated function `new` is private
+error[E0599]: no function or associated item named `new` found for struct `AtLeastOnce` in the current scope
  --> tests/ui/obs_double_consume.rs:5:22
   |
 5 |         AtLeastOnce::new(CheckpointId::new("obs-double-consume")),
-  |                      ^^^ private associated function
+  |                      ^^^ function or associated item not found in `AtLeastOnce`
   |
- ::: src/store/delivery/observation.rs
+help: there is a method `ne` with a similar name
   |
-  |     pub(crate) fn new(checkpoint_id: CheckpointId) -> Self {
-  |     ------------------------------------------------------ private associated function defined here
+5 -         AtLeastOnce::new(CheckpointId::new("obs-double-consume")),
+5 +         AtLeastOnce::ne(CheckpointId::new("obs-double-consume")),
+  |

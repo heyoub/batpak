@@ -1,11 +1,9 @@
 //! Benchmark: subscriber fanout under workload and micro-cost shapes.
 //!
 
-mod common;
-
 use batpak::prelude::*;
 use batpak::store::{Store, StoreConfig};
-use common::{apply_profile, throughput_elements, BenchProfile};
+use batpak_bench_support::{apply_profile, throughput_elements, BenchProfile};
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use tempfile::TempDir;
 

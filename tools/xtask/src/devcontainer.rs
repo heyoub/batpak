@@ -163,9 +163,12 @@ fn skip_build() -> bool {
 
 fn inner_command(args: &[String]) -> Vec<OsString> {
     if args.len() == 1 {
+        // Avoid a login shell here: `bash -lc` can clobber the Dockerfile's
+        // PATH setup on CI runners, which hides `/usr/local/cargo/bin` inside
+        // the devcontainer and breaks `cargo xtask ...` wrapper calls.
         return vec![
             OsString::from("bash"),
-            OsString::from("-lc"),
+            OsString::from("-c"),
             OsString::from(&args[0]),
         ];
     }
@@ -185,7 +188,7 @@ mod tests {
             inner_command(&args),
             vec![
                 OsString::from("bash"),
-                OsString::from("-lc"),
+                OsString::from("-c"),
                 OsString::from("cargo xtask ci"),
             ]
         );

@@ -7,12 +7,12 @@
 //! notification fires. Flushing an outbox after staging is atomic — all items
 //! land together.
 
-mod common;
-
 use batpak::prelude::*;
 use batpak::store::Outbox;
 
-use common::small_segment_store;
+#[path = "support/small_store.rs"]
+mod small_store_support;
+use small_store_support::small_segment_store;
 
 fn test_coord() -> Coordinate {
     Coordinate::new("entity:outbox", "scope:drop").expect("valid coord")

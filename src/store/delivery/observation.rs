@@ -29,14 +29,14 @@ pub struct AtLeastOnce(CheckpointId);
 impl AtLeastOnce {
     /// Create a new at-least-once witness from a typed checkpoint identifier.
     #[must_use]
+    #[cfg(test)]
     pub(crate) fn new(checkpoint_id: CheckpointId) -> Self {
         Self(checkpoint_id)
     }
 
     /// Wrap the raw cursor callback checkpoint identifier.
     #[must_use]
-    // justifies: INV-ALLOW-IS-DESIGN [src/store/delivery/cursor.rs] this helper is part of the substrate-only witness seam and lands before the first public callback producer.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn from_cursor_callback(raw: impl Into<String>) -> Self {
         Self::new(CheckpointId::new(raw))
     }
@@ -105,5 +105,13 @@ mod tests {
 
         assert_eq!(actual_at_least_once, at_least_once);
         assert_eq!(actual_idempotency, idempotency);
+    }
+
+    #[test]
+    fn at_least_once_from_cursor_callback_wraps_checkpoint_identity() {
+        let at_least_once = AtLeastOnce::from_cursor_callback("cursor-checkpoint");
+        let (checkpoint_id,) = (at_least_once.0,);
+
+        assert_eq!(checkpoint_id.as_str(), "cursor-checkpoint");
     }
 }
