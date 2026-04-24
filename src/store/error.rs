@@ -200,7 +200,7 @@ pub enum StoreError {
     },
     /// The configured custom clock produced an invalid negative timestamp.
     ///
-    /// Production `SystemTime` is normalized by [`crate::store::config::now_us`]
+    /// Production `SystemTime` is normalized by the store runtime clock path
     /// and cannot produce this. This variant exists for caller-supplied test
     /// or integration clocks installed through `StoreConfig::with_clock`.
     InvalidClock {
