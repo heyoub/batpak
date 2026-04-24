@@ -1,10 +1,22 @@
 // justifies: INV-TEST-PANIC-AS-ASSERTION, INV-MACRO-BOUNDED-CAST; unified red-path projection tests in tests/unified_projection_red.rs use unwrap/panic as the assertion style and narrow bounded test counters that fit in u32.
 #![allow(clippy::unwrap_used, clippy::cast_possible_truncation, clippy::panic)]
 
-#[path = "support/unified_red.rs"]
-mod unified_red_support;
+#[path = "support/red_counters.rs"]
+mod red_counters;
+#[path = "support/red_kind_b.rs"]
+mod red_kind_b;
+#[path = "support/red_kinds.rs"]
+mod red_kinds;
+#[path = "support/red_versioned_counters.rs"]
+mod red_versioned_counters;
 
-use unified_red_support::*;
+use red_counters::*;
+use red_kind_b::*;
+use red_kinds::*;
+use red_versioned_counters::*;
+
+use batpak::prelude::*;
+use tempfile::TempDir;
 
 #[test]
 fn relevant_kinds_filters_before_disk_read() {

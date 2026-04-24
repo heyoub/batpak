@@ -10,9 +10,11 @@
 //! exercise the public push-side contract and the drop-on-error-is-structural
 //! guarantee from a downstream consumer's point of view.
 
-mod common;
-
 use batpak::prelude::*;
+
+#[path = "support/small_store.rs"]
+mod small_store_support;
+use small_store_support::small_segment_store;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, EventPayload)]
 #[batpak(category = 5, type_id = 1)]
@@ -85,7 +87,7 @@ fn push_typed_with_options_accepts_append_options() {
 
 #[test]
 fn drop_without_flush_leaves_store_unchanged() {
-    let (store, _dir) = common::small_segment_store();
+    let (store, _dir) = small_segment_store();
 
     // Write a root event so the store has non-zero sequence state.
     let root = store

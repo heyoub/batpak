@@ -1,11 +1,9 @@
 //! Benchmark: segment compaction (merge small segments into one).
 //!
 
-mod common;
-
 use batpak::prelude::*;
 use batpak::store::{CompactionConfig, Store, StoreConfig};
-use common::{apply_profile, throughput_elements, BenchProfile};
+use batpak_bench_support::{apply_profile, throughput_elements, BenchProfile};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use tempfile::TempDir;
 

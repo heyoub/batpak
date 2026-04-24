@@ -551,22 +551,13 @@ fn expand_event_sourced(input: &DeriveInput) -> syn::Result<proc_macro2::TokenSt
     // `fn on_x(&mut self, &T)` has the wrong parameter types, rustc spans the
     // error at the generated fn-pointer coercion rather than inside an opaque
     // dispatch arm.
-    let handler_pins: Vec<proc_macro2::TokenStream> = bindings
+    let handler_checks: Vec<proc_macro2::TokenStream> = bindings
         .iter()
-        .enumerate()
-        .map(|(i, b)| {
+        .map(|b| {
             let event_ty = &b.event;
             let handler_fn = &b.handler;
-            let pin_ident = format_ident!("_HANDLER_PIN_{}", i);
             quote! {
-                // justifies: INV-GENERATED-WITNESS-PIN; generated handler-signature pin in crates/macros/src/lib.rs is a type-check witness only; its snake-case name and zero runtime use trigger non_upper_case_globals and dead_code on the user's crate.
-                #[allow(non_upper_case_globals, dead_code)]
-                // generated associated const used solely as a type-check witness:
-                // the `fn(&mut Self, &T)` coercion pins the handler's shape
-                // against its declared payload type. It has no runtime role,
-                // hence `dead_code`; the snake-case `_HANDLER_PIN_n` name is
-                // chosen for readability in compiler diagnostics.
-                const #pin_ident: fn(&mut Self, &#event_ty) = Self::#handler_fn;
+                let _: fn(&mut Self, &#event_ty) = Self::#handler_fn;
             }
         })
         .collect();
@@ -604,6 +595,7 @@ fn expand_event_sourced(input: &DeriveInput) -> syn::Result<proc_macro2::TokenSt
             }
 
             fn apply_event(&mut self, event: &::batpak::event::ProjectionEvent<Self>) {
+                #(#handler_checks)*
                 // Each arm keeps wrong-kind filtering (Ok(None)) separate from
                 // matched-kind decode failure (Err). A fall-through past all
                 // arms means "kind outside relevant_event_kinds()" — normal
@@ -626,14 +618,6 @@ fn expand_event_sourced(input: &DeriveInput) -> syn::Result<proc_macro2::TokenSt
                 // layers (ADR-0010 vs this derive).
                 #cache_version_value
             }
-        }
-
-        // Pin each handler signature so mismatched handler params produce a
-        // clear compile error at the user's handler fn rather than inside the
-        // generated dispatch. Pins live in a dedicated generic impl so they
-        // can reference `Self` with the struct's type parameters.
-        impl #impl_generics #ident #ty_generics #where_clause {
-            #(#handler_pins)*
         }
     })
 }
@@ -841,28 +825,17 @@ fn expand_multi_event_reactor(input: &DeriveInput) -> syn::Result<proc_macro2::T
     // reintroduce generics; this pattern does. Mismatched handler signatures
     // surface as span-pointed errors at the user's handler, not inside the
     // dispatch body.
-    let handler_pins: Vec<proc_macro2::TokenStream> = bindings
+    let handler_checks: Vec<proc_macro2::TokenStream> = bindings
         .iter()
-        .enumerate()
-        .map(|(i, b)| {
+        .map(|b| {
             let event_ty = &b.event;
             let handler_fn = &b.handler;
-            let pin_ident = format_ident!("_HANDLER_PIN_{}", i);
             quote! {
-                // justifies: INV-GENERATED-WITNESS-PIN; generated reactor handler-pin const in crates/macros/src/lib.rs has no runtime role and uses a snake-case ident, so non_upper_case_globals and dead_code must be silenced on the user's crate.
-                #[allow(non_upper_case_globals, dead_code)]
-                // generated associated const used solely as a type-check witness:
-                // the `fn(&mut Self, &StoredEvent<T>, &mut ReactionBatch) ->
-                // Result<(), E>` coercion pins the handler's full shape. It
-                // has no runtime role, hence `dead_code`; the snake-ish
-                // `_HANDLER_PIN_n` name is chosen for readability in compiler
-                // diagnostics.
-                const #pin_ident: fn(
+                let _: fn(
                     &mut Self,
                     &::batpak::event::StoredEvent<#event_ty>,
                     &mut ::batpak::store::ReactionBatch,
-                ) -> ::core::result::Result<(), #error_path>
-                    = Self::#handler_fn;
+                ) -> ::core::result::Result<(), #error_path> = Self::#handler_fn;
             }
         })
         .collect();
@@ -911,17 +884,11 @@ fn expand_multi_event_reactor(input: &DeriveInput) -> syn::Result<proc_macro2::T
                 >,
                 out: &mut ::batpak::store::ReactionBatch,
             ) -> ::core::result::Result<(), ::batpak::event::MultiDispatchError<Self::Error>> {
+                #(#handler_checks)*
                 #(#arms)*
                 // Wrong kind / no binding matched — silent filter.
                 ::core::result::Result::Ok(())
             }
-        }
-
-        // Handler-signature pins live in a dedicated generic impl so they can
-        // reference `Self` with the struct's type parameters (module-scope
-        // `const _: fn(...)` items can't reintroduce generics).
-        impl #impl_generics #ident #ty_generics #where_clause {
-            #(#handler_pins)*
         }
     })
 }

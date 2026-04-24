@@ -21,19 +21,20 @@
 //! INV-ALLOW-IS-DESIGN is the meta-invariant. This tool lints itself; every
 //! justification below is load-bearing and is checked by
 //! `check_allow_justifications` on every run.
+//! dead_code silencers are not tolerated in this repo; test-only code uses
+//! `cfg(test)`, unused code is deleted, and shared helpers get restructured.
 mod architecture_lints;
-// justifies: INV-ALLOW-IS-DESIGN; importing build.rs shares helper logic here, and the build-only entrypoints remain intentionally unused in this binary
-#[allow(dead_code)]
-#[path = "../../../build.rs"]
-mod build_script_checks;
+#[path = "../../shared/shared_checks.rs"]
+mod shared_checks;
 
 use anyhow::{anyhow, bail, Context, Result};
-use build_script_checks::shared::{
-    ast_references_name, line_carries_justification, load_known_invariants, public_item_names,
-};
 use clap::{Parser, Subcommand};
 use regex::Regex;
 use serde::Deserialize;
+use shared_checks::{
+    ast_references_name, collect_dead_code_silencer_sites, line_carries_justification,
+    load_dead_code_silencer_allowlist, load_known_invariants, public_item_names,
+};
 use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -42,7 +43,7 @@ use syn::Item;
 use walkdir::WalkDir;
 
 #[cfg(test)]
-use build_script_checks::shared::{extract_anchors, justification_body, JustifiesAnchor};
+use shared_checks::{extract_anchors, justification_body, JustifiesAnchor};
 
 #[derive(Parser)]
 #[command(author, version, about = "Executable integrity checks for batpak")]
@@ -372,6 +373,7 @@ fn structural_check() -> Result<()> {
     let repo_root = repo_root()?;
     let tracked_files = tracked_repo_files(&repo_root)?;
     architecture_lints::check(&repo_root, &tracked_files)?;
+    check_no_dead_code_silencers(&repo_root)?;
     check_allow_justifications(&repo_root)?;
     check_pub_items_have_references(&repo_root)?;
     check_ci_parity(&repo_root)?;
@@ -869,6 +871,43 @@ fn check_store_pub_fn_coverage(repo_root: &Path) -> Result<()> {
         );
     }
 
+    Ok(())
+}
+
+fn check_no_dead_code_silencers(repo_root: &Path) -> Result<()> {
+    let allowlisted = load_dead_code_silencer_allowlist(repo_root).map_err(|err| anyhow!(err))?;
+    let mut paths = rust_files(&repo_root.join("src"));
+    paths.extend(rust_files(&repo_root.join("tools/xtask/src")));
+    paths.extend(rust_files(&repo_root.join("tools/integrity/src")));
+    paths.extend(rust_files(&repo_root.join("crates/macros/src")));
+    paths.extend(rust_files(&repo_root.join("crates/macros-support/src")));
+    paths.extend(rust_files(&repo_root.join("tests")));
+    paths.extend(rust_files(&repo_root.join("examples")));
+    paths.extend(rust_files(&repo_root.join("benches")));
+    paths.push(repo_root.join("build.rs"));
+    for path in paths {
+        let content = fs::read_to_string(&path)?;
+        let sites = collect_dead_code_silencer_sites(&content)
+            .map_err(|err| anyhow!("parse {}: {}", relative(repo_root, &path), err))?;
+        for site in sites {
+            let allowlist_site = format!("{}:{}", relative(repo_root, &path), site.line);
+            if allowlisted.contains(&allowlist_site) {
+                continue;
+            }
+            bail!(
+                "dead_code silencers are not tolerated in {}:{}:{}.\n\
+                 Found `{}`.\n\
+                 If code is test-only, use #[cfg(test)]. If it is unused, delete it.\n\
+                 If it is shared infrastructure, restructure it so the compiler sees the real ownership surface.\n\
+                 If this is the rare legitimate exception, add `{}` to traceability/dead_code_silencer_allowlist.yaml with `reason` and `adr`.",
+                relative(repo_root, &path),
+                site.line,
+                site.column,
+                site.rendered,
+                allowlist_site,
+            );
+        }
+    }
     Ok(())
 }
 

@@ -107,14 +107,26 @@ impl Reader {
                     if n == 0 {
                         return Err(StoreError::corrupt_eof(segment_id));
                     }
-                    total_read += n;
+                    let next_total = total_read.checked_add(n).ok_or_else(|| {
+                        StoreError::corrupt_frame(
+                            segment_id,
+                            "active frame read byte count overflowed usize",
+                        )
+                    })?;
+                    if next_total <= total_read {
+                        return Err(StoreError::corrupt_frame(
+                            segment_id,
+                            "active frame read failed to advance",
+                        ));
+                    }
+                    total_read = next_total;
                 }
                 Ok(())
             })
         }
         #[cfg(not(unix))]
         {
-            use std::io::{Seek, SeekFrom};
+            use std::io::{Read, Seek, SeekFrom};
             let offset = pos.offset;
             self.with_fd(pos.segment_id, |f| {
                 f.seek(SeekFrom::Start(offset)).map_err(StoreError::Io)?;
@@ -569,12 +581,18 @@ impl Reader {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::store::DiskPos;
     use tempfile::TempDir;
 
     fn test_reader() -> (Reader, TempDir) {
         let dir = TempDir::new().expect("create temp dir for reader test");
         let reader = Reader::new(dir.path().to_path_buf(), 4);
         (reader, dir)
+    }
+
+    fn write_segment_bytes(dir: &TempDir, segment_id: u64, bytes: &[u8]) {
+        let path = dir.path().join(segment::segment_filename(segment_id));
+        std::fs::write(&path, bytes).expect("write segment bytes");
     }
 
     #[test]
@@ -692,10 +710,61 @@ mod tests {
     }
 
     #[test]
+    fn set_active_segment_advances_the_sealed_cutoff() {
+        let (reader, _dir) = test_reader();
+
+        reader.set_active_segment(7);
+
+        assert_eq!(reader.active_segment_id(), 7);
+        assert!(
+            reader.is_sealed(6),
+            "PROPERTY: segments older than the configured active segment must be treated as sealed"
+        );
+        assert!(
+            !reader.is_sealed(7),
+            "PROPERTY: the configured active segment itself must stay writable/non-sealed"
+        );
+        assert!(
+            !reader.is_sealed(8),
+            "PROPERTY: future segment ids must not be treated as sealed before rotation reaches them"
+        );
+    }
+
+    #[test]
+    fn read_active_frame_into_reads_the_full_requested_slice() {
+        let (reader, dir) = test_reader();
+        write_segment_bytes(&dir, 0, b"0123456789abcdef");
+
+        let pos = DiskPos::new(0, 3, 5);
+        let mut buf = [0u8; 5];
+        reader
+            .read_active_frame_into(&pos, &mut buf)
+            .expect("read active bytes");
+
+        assert_eq!(
+            &buf,
+            b"34567",
+            "PROPERTY: active-segment reads must advance until the caller's buffer is fully populated"
+        );
+    }
+
+    #[test]
     fn checked_frame_range_rejects_overflow_and_oversized_lengths() {
         assert!(Reader::checked_frame_range(1, u64::MAX, 16, 1024).is_err());
         assert!(Reader::checked_frame_len(1, 4).is_err());
         assert!(Reader::checked_frame_len(1, u32::MAX).is_err());
+    }
+
+    #[test]
+    fn payload_len_exceeds_max_respects_the_exact_boundary() {
+        assert!(
+            !Reader::payload_len_exceeds_max(segment::MAX_FRAME_PAYLOAD),
+            "PROPERTY: a frame exactly at MAX_FRAME_PAYLOAD remains valid"
+        );
+        assert!(
+            Reader::payload_len_exceeds_max(segment::MAX_FRAME_PAYLOAD + 1),
+            "PROPERTY: a frame one byte past MAX_FRAME_PAYLOAD must stop scan/recovery before allocation"
+        );
     }
 
     #[test]

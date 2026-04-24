@@ -9,7 +9,8 @@ use batpak::prelude::*;
 #[cfg(feature = "blake3")]
 use proptest::prelude::*;
 
-mod common;
+#[path = "common/proptest.rs"]
+mod proptest_support;
 
 // --- Genesis ---
 
@@ -97,7 +98,7 @@ mod blake3_tests {
     }
 
     proptest! {
-        #![proptest_config(super::common::proptest::cfg(256))]
+        #![proptest_config(super::proptest_support::cfg(256))]
 
         #[test]
         fn verify_chain_accepts_valid(content in proptest::collection::vec(any::<u8>(), 0..100)) {

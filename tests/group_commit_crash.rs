@@ -11,8 +11,6 @@ use tempfile::TempDir;
 
 /// Run a loom model with a bounded preemption budget. See
 /// `tests/deterministic_concurrency.rs::loom_model_bounded` for rationale.
-// justifies: INV-CONCURRENCY-SCHEDULE-PROOF; helper in tests/group_commit_crash.rs is only reached from #[cfg(loom)] tests in this file; dead_code fires under the non-loom compile path.
-#[allow(dead_code)]
 fn loom_model_bounded<F>(check: F)
 where
     F: Fn() + Sync + Send + 'static,

@@ -296,8 +296,7 @@ fn entry_to_mmap(entry: &IndexEntry) -> MmapIndexEntry {
 }
 
 /// Atomically write the mmap-first index artifact.
-// justifies: src/store/lifecycle.rs routes production artifact writes through the cumulative-stats variant; this compatibility wrapper remains for targeted tests and focused artifact fixtures.
-#[allow(dead_code)]
+#[cfg(test)]
 pub(crate) fn write_mmap_index(
     index: &StoreIndex,
     data_dir: &Path,

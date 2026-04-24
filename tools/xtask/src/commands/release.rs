@@ -23,18 +23,27 @@ pub(crate) fn consumer_smoke() -> Result<()> {
     fs::create_dir_all(&packaged_root).context("create packaged crate dir")?;
     fs::create_dir_all(consumer_root.join("src")).context("create consumer src dir")?;
 
-    let mut cargo_package = Command::new("cargo");
-    cargo_package
-        .current_dir(&root)
-        .args(["package", "--allow-dirty", "--no-verify"]);
-    run(cargo_package)?;
+    let support_archive = package_crate(&root, "batpak-macros-support", &[])?;
+    let macros_archive = package_crate(
+        &root,
+        "batpak-macros",
+        &[("batpak-macros-support", "crates/macros-support")],
+    )?;
+    let bench_support_archive = package_crate(&root, "batpak-bench-support", &[])?;
+    let batpak_archive = package_crate(
+        &root,
+        "batpak",
+        &[
+            ("batpak-macros-support", "crates/macros-support"),
+            ("batpak-macros", "crates/macros"),
+            ("batpak-bench-support", "crates/bench-support"),
+        ],
+    )?;
 
-    let archive = latest_packaged_crate(&root.join("target").join("package"))?;
-    let mut unpack = Command::new("tar");
-    unpack.current_dir(&packaged_root).arg("xf").arg(&archive);
-    run(unpack)?;
-
-    let unpacked_name = unpacked_package_dir(&packaged_root)?;
+    let support_name = unpack_crate(&packaged_root, &support_archive)?;
+    let macros_name = unpack_crate(&packaged_root, &macros_archive)?;
+    let bench_support_name = unpack_crate(&packaged_root, &bench_support_archive)?;
+    let unpacked_name = unpack_crate(&packaged_root, &batpak_archive)?;
 
     fs::write(
         consumer_root.join("Cargo.toml"),
@@ -48,7 +57,12 @@ pub(crate) fn consumer_smoke() -> Result<()> {
              [workspace]\n\
              \n\
              [dependencies]\n\
-             batpak = {{ path = \"../packaged/{unpacked_name}\", features = [\"blake3\"] }}\n"
+             batpak = {{ path = \"../packaged/{unpacked_name}\", features = [\"blake3\"] }}\n\
+             \n\
+             [patch.crates-io]\n\
+             batpak-macros-support = {{ path = \"../packaged/{support_name}\" }}\n\
+             batpak-macros = {{ path = \"../packaged/{macros_name}\" }}\n\
+             batpak-bench-support = {{ path = \"../packaged/{bench_support_name}\" }}\n"
         ),
     )
     .context("write consumer smoke manifest")?;
@@ -96,7 +110,37 @@ pub(crate) fn release(args: ReleaseArgs) -> Result<()> {
     }
 }
 
-fn latest_packaged_crate(package_dir: &Path) -> Result<PathBuf> {
+fn package_crate(root: &Path, package: &str, patches: &[(&str, &str)]) -> Result<PathBuf> {
+    let mut cargo_package = Command::new("cargo");
+    cargo_package.current_dir(root).args([
+        "package",
+        "-p",
+        package,
+        "--allow-dirty",
+        "--no-verify",
+    ]);
+    for (name, path) in patches {
+        cargo_package
+            .arg("--config")
+            .arg(format!("patch.crates-io.{name}.path=\"{path}\""));
+    }
+    run(cargo_package)?;
+    latest_packaged_crate(&root.join("target").join("package"), package)
+}
+
+fn unpack_crate(packaged_root: &Path, archive: &Path) -> Result<String> {
+    let mut unpack = Command::new("tar");
+    unpack.current_dir(packaged_root).arg("xf").arg(archive);
+    run(unpack)?;
+    archive
+        .file_name()
+        .and_then(|name| name.to_str())
+        .and_then(|name| name.strip_suffix(".crate"))
+        .map(str::to_owned)
+        .with_context(|| format!("derive unpacked crate dir from {}", archive.display()))
+}
+
+fn latest_packaged_crate(package_dir: &Path, package: &str) -> Result<PathBuf> {
     let mut latest: Option<(std::time::SystemTime, PathBuf)> = None;
     for entry in fs::read_dir(package_dir)
         .with_context(|| format!("read packaged crate directory {}", package_dir.display()))?
@@ -106,7 +150,7 @@ fn latest_packaged_crate(package_dir: &Path) -> Result<PathBuf> {
         let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
             continue;
         };
-        if !path.is_file() || !file_name.starts_with("batpak-") || !file_name.ends_with(".crate") {
+        if !path.is_file() || !is_package_archive(file_name, package) {
             continue;
         }
         let modified = entry
@@ -121,23 +165,16 @@ fn latest_packaged_crate(package_dir: &Path) -> Result<PathBuf> {
 
     latest
         .map(|(_, path)| path)
-        .context("could not locate packaged batpak .crate archive")
+        .with_context(|| format!("could not locate packaged {package} .crate archive"))
 }
 
-fn unpacked_package_dir(packaged_root: &Path) -> Result<String> {
-    let mut unpacked = None;
-    for entry in fs::read_dir(packaged_root)
-        .with_context(|| format!("read unpacked package dir {}", packaged_root.display()))?
-    {
-        let entry = entry?;
-        if !entry.file_type()?.is_dir() {
-            continue;
-        }
-        if entry.path().join("Cargo.toml").is_file() {
-            unpacked = Some(entry.file_name().to_string_lossy().into_owned());
-            break;
-        }
-    }
-
-    unpacked.context("could not locate unpacked batpak package directory")
+fn is_package_archive(file_name: &str, package: &str) -> bool {
+    let Some(rest) = file_name
+        .strip_prefix(package)
+        .and_then(|rest| rest.strip_prefix('-'))
+        .and_then(|rest| rest.strip_suffix(".crate"))
+    else {
+        return false;
+    };
+    rest.chars().next().is_some_and(|ch| ch.is_ascii_digit())
 }

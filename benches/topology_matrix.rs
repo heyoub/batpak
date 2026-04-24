@@ -1,10 +1,8 @@
 //! Benchmark query cost across the explicit topology presets.
 
-mod common;
-
 use batpak::prelude::*;
 use batpak::store::{IndexTopology, Store, StoreConfig};
-use common::{apply_profile, throughput_elements, BenchProfile};
+use batpak_bench_support::{apply_profile, throughput_elements, BenchProfile};
 use criterion::{criterion_group, criterion_main, Criterion};
 use tempfile::TempDir;
 

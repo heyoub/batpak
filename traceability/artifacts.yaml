@@ -37,6 +37,10 @@
   kind: registry
   paths:
     - traceability/pub_item_allowlist.yaml
+- id: ART-DEAD-CODE-SILENCER-ALLOWLIST
+  kind: registry
+  paths:
+    - traceability/dead_code_silencer_allowlist.yaml
 - id: ART-CI
   kind: ci
   paths:
@@ -243,7 +247,11 @@
 - id: ART-UNIFIED-TESTS
   kind: tests
   paths:
-    - tests/support/unified_red.rs
+    - tests/support/red_kinds.rs
+    - tests/support/red_kind_b.rs
+    - tests/support/red_test_coord.rs
+    - tests/support/red_counters.rs
+    - tests/support/red_versioned_counters.rs
     - tests/unified_cold_start_red.rs
     - tests/unified_config_red.rs
     - tests/unified_group_commit_red.rs

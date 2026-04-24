@@ -1,11 +1,11 @@
 //! Benchmark: append throughput (single-threaded, durable, concurrent, sync modes).
 //!
 
-mod common;
-
 use batpak::prelude::*;
 use batpak::store::{Store, StoreConfig, SyncConfig, SyncMode};
-use common::{apply_profile, profile_for_event_count, throughput_elements, BenchProfile};
+use batpak_bench_support::{
+    apply_profile, profile_for_event_count, throughput_elements, BenchProfile,
+};
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use std::sync::Arc;
 use tempfile::TempDir;

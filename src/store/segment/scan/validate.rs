@@ -37,6 +37,10 @@ impl Reader {
         Ok(start..end)
     }
 
+    pub(super) fn payload_len_exceeds_max(payload_len: usize) -> bool {
+        payload_len > segment::MAX_FRAME_PAYLOAD
+    }
+
     pub(super) fn checked_batch_count(
         segment_id: u64,
         offset: u64,

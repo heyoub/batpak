@@ -3,20 +3,21 @@
 //! Measures the overhead reduction from batching multiple events
 //! into a single fsync operation.
 
-mod common;
-
 use batpak::prelude::*;
 use batpak::store::{BatchAppendItem, CausationRef, Store, StoreConfig, SyncConfig, SyncMode};
-use common::{apply_profile, throughput_elements, BenchProfile};
+use batpak_bench_support::{apply_profile, throughput_elements, BenchProfile};
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use tempfile::TempDir;
 
-fn open_bench_store(sync_mode: SyncMode) -> (Store, TempDir, Coordinate, EventKind) {
+fn open_bench_store(
+    sync_mode: SyncMode,
+    every_n_events: u32,
+) -> (Store, TempDir, Coordinate, EventKind) {
     let dir = TempDir::new().expect("create temp dir");
     let config = StoreConfig {
         data_dir: dir.path().to_path_buf(),
         sync: SyncConfig {
-            every_n_events: 1, // Every batch is a sync
+            every_n_events,
             mode: sync_mode,
         },
         ..StoreConfig::new("")
@@ -74,7 +75,7 @@ fn bench_batch_vs_single(c: &mut Criterion) {
                     .expect("total_events fits in usize for benchmark");
                 let plan = batch_plan(total_events, batch_size);
                 b.iter_batched(
-                    || open_bench_store(SyncMode::SyncData),
+                    || open_bench_store(SyncMode::SyncData, 1),
                     |(store, _dir, coord, kind)| {
                         for item_count in &plan {
                             let items = make_batch_items(&coord, kind, *item_count);
@@ -93,7 +94,7 @@ fn bench_batch_vs_single(c: &mut Criterion) {
             &batch_size,
             |b, &_batch_size| {
                 b.iter_batched(
-                    || open_bench_store(SyncMode::SyncData),
+                    || open_bench_store(SyncMode::SyncData, 1),
                     |(store, _dir, coord, kind)| {
                         for i in 0..total_events {
                             store
@@ -135,7 +136,7 @@ fn bench_batch_durability(c: &mut Criterion) {
             &sync_mode,
             |b, sync_mode| {
                 b.iter_batched(
-                    || open_bench_store(sync_mode.clone()),
+                    || open_bench_store(sync_mode.clone(), 1),
                     |(store, _dir, coord, kind)| {
                         // 10 batches of 100 = 1000 events
                         for _ in 0..10 {
@@ -172,13 +173,45 @@ fn bench_batch_size_scaling(c: &mut Criterion) {
                     .expect("total_events fits in usize for benchmark");
                 let plan = batch_plan(total_events, batch_size);
                 b.iter_batched(
-                    || open_bench_store(SyncMode::SyncData),
+                    || open_bench_store(SyncMode::SyncData, 1),
                     |(store, _dir, coord, kind)| {
                         for item_count in &plan {
                             let items = make_batch_items(&coord, kind, *item_count);
                             store.append_batch(items).expect("batch append");
                         }
                         store.close().expect("close batch scaling benchmark store");
+                    },
+                    BatchSize::SmallInput,
+                );
+            },
+        );
+    }
+
+    group.finish();
+}
+
+/// Benchmark: explicit batch path under different periodic sync cadences.
+///
+/// `append_batch` already performs its own final sync-before-visible, so this
+/// surface shows how much the background cadence loop contributes beyond that.
+fn bench_batch_cadence_interaction(c: &mut Criterion) {
+    let mut group = c.benchmark_group("batch_cadence_interaction");
+    apply_profile(&mut group, BenchProfile::Heavy);
+    throughput_elements(&mut group, 1_000);
+
+    for every_n_events in [1u32, 1_000, 10_000] {
+        group.bench_with_input(
+            BenchmarkId::new("append_batch_100", every_n_events),
+            &every_n_events,
+            |b, &every_n_events| {
+                b.iter_batched(
+                    || open_bench_store(SyncMode::SyncData, every_n_events),
+                    |(store, _dir, coord, kind)| {
+                        for _ in 0..10 {
+                            let items = make_batch_items(&coord, kind, 100);
+                            store.append_batch(items).expect("batch append");
+                        }
+                        store.close().expect("close batch cadence benchmark store");
                     },
                     BatchSize::SmallInput,
                 );
@@ -197,7 +230,7 @@ fn bench_batch_causation(c: &mut Criterion) {
 
     group.bench_function("causation_chain", |b| {
         b.iter_batched(
-            || open_bench_store(SyncMode::SyncData),
+            || open_bench_store(SyncMode::SyncData, 1),
             |(store, _dir, coord, kind)| {
                 // Create batch with intra-batch causation
                 let items: Vec<_> = (0..50)
@@ -305,6 +338,7 @@ criterion_group!(
     bench_batch_vs_single,
     bench_batch_durability,
     bench_batch_size_scaling,
+    bench_batch_cadence_interaction,
     bench_batch_causation,
     bench_batch_recovery
 );

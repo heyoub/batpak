@@ -1,10 +1,16 @@
 // justifies: INV-TEST-PANIC-AS-ASSERTION, INV-MACRO-BOUNDED-CAST; unified red-path group-commit tests in tests/unified_group_commit_red.rs use unwrap/panic as assertion style and narrow bounded test counters that fit within u32.
 #![allow(clippy::unwrap_used, clippy::cast_possible_truncation, clippy::panic)]
 
-#[path = "support/unified_red.rs"]
-mod unified_red_support;
+#[path = "support/red_kinds.rs"]
+mod red_kinds;
+#[path = "support/red_test_coord.rs"]
+mod red_test_coord;
 
-use unified_red_support::*;
+use red_kinds::*;
+use red_test_coord::*;
+
+use batpak::prelude::*;
+use tempfile::TempDir;
 
 #[test]
 fn group_commit_batches_under_load() {

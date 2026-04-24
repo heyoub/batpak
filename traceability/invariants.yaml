@@ -219,3 +219,9 @@
   artifacts:
     - ART-STORE-MOD
     - ART-STORE-LIFECYCLE
+- id: INV-NO-DEAD-CODE-SILENCERS
+  statement: "dead_code lint suppressions are banned in tracked Rust source. The AST walker in shared_checks::collect_dead_code_silencer_sites rejects #[allow(dead_code)], #[expect(dead_code)], crate-inner forms, lint-list forms containing dead_code, #[allow(unused)] and #[expect(unused)] (the `unused` group subsumes dead_code), and cfg_attr wrappers around any of those, including multi-line wrappers. The only escape hatch is an exact-site entry in traceability/dead_code_silencer_allowlist.yaml with non-empty reason + adr fields that resolve to a real ADR. The honest responses to a dead_code warning are #[cfg(test)] for test-only code, deletion for truly unused code, or restructuring (workspace crate, narrower module, finer-grained #[path] include) so the compilation unit matches actual ownership. See ADR-0012."
+  artifacts:
+    - ART-BUILD-RS
+    - ART-STRUCTURAL-CHECK
+    - ART-DEAD-CODE-SILENCER-ALLOWLIST

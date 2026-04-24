@@ -7,9 +7,11 @@ use batpak::guard::{
     Denial, DenialPayload, Gate, GateEvaluation, GateId, GateIdError, GateSet, Verdict,
 };
 use batpak::store::{
-    CheckpointId, CursorGapConfig, DenialReceipt, EncodedBytes, ExtensionKey, ExtensionKeyError,
-    GapObservation, IdempotencyKey, SigningKey, Store, StoreConfig,
+    CheckpointId, CursorGapConfig, EncodedBytes, ExtensionKey, ExtensionKeyError, GapObservation,
+    IdempotencyKey, Store, StoreConfig,
 };
+#[cfg(feature = "blake3")]
+use batpak::store::{DenialReceipt, SigningKey};
 use std::path::PathBuf;
 use tempfile::TempDir;
 
@@ -290,7 +292,7 @@ fn denial_accessor_public_surface_is_named_in_tests() {
 }
 
 #[test]
-fn denial_trace_and_signed_receipts_round_trip() {
+fn denial_trace_round_trip() {
     let gate_id = GateId::new("manual_gate").expect("gate id");
     let evaluation = GateEvaluation::new(gate_id.clone(), Verdict::Permit, None);
     assert_eq!(gate_id.as_str(), "manual_gate");
@@ -325,12 +327,22 @@ fn denial_trace_and_signed_receipts_round_trip() {
                 && context == &vec![("reason".to_owned(), "test".to_owned())]
     ));
     let _payload_witness: DenialPayload = traced;
+}
 
+#[cfg(feature = "blake3")]
+#[test]
+fn signed_receipts_round_trip() {
     let dir = TempDir::new().expect("temp dir");
     let key1 = SigningKey::from_bytes([1; 32]);
     let key2 = SigningKey::from_bytes([2; 32]);
     let coord = Coordinate::new("signed:entity", "scope:test").expect("coord");
     let kind = EventKind::custom(0xA, 10);
+    let mut gates = GateSet::new();
+    gates.push(AllowAllGate);
+    gates.push(DenyGate);
+    let failing = Denial::new("deny_gate", "blocked")
+        .with_code("BLOCKED")
+        .with_context("reason", "test");
 
     let receipt1 = {
         let store = Store::open(

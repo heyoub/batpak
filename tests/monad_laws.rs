@@ -13,7 +13,8 @@
 
 use batpak::prelude::*;
 use proptest::prelude::*;
-mod common;
+#[path = "common/proptest.rs"]
+mod proptest_support;
 
 // --- Arbitrary Outcome generator ---
 
@@ -49,7 +50,7 @@ fn f_add_one(x: i32) -> Outcome<i32> {
 
 // --- LEFT IDENTITY: return a >>= f  ≡  f a ---
 proptest! {
-    #![proptest_config(common::proptest::cfg(256))]
+    #![proptest_config(proptest_support::cfg(256))]
 
     #[test]
     fn left_identity(a in any::<i32>()) {

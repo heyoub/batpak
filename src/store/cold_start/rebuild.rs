@@ -731,6 +731,38 @@ mod tests {
             .collect()
     }
 
+    fn sample_index_entries(count: u64, segment_id: u64) -> (Vec<IndexEntry>, Vec<String>) {
+        let interner = StringInterner::new();
+        let mut entries = Vec::new();
+        for i in 0..count {
+            let coord =
+                Coordinate::new(format!("entity:{i}"), "scope:rebuild").expect("valid coord");
+            let entity_id = interner.intern(coord.entity());
+            let scope_id = interner.intern(coord.scope());
+            entries.push(IndexEntry {
+                event_id: (i + 1) as u128,
+                correlation_id: (i + 1) as u128,
+                causation_id: None,
+                coord,
+                entity_id,
+                scope_id,
+                kind: EventKind::custom(
+                    0x1,
+                    u16::try_from(i + 1).expect("sample type id fits u16"),
+                ),
+                wall_ms: 1_700_000_000_000 + i * 1000,
+                clock: u32::try_from(i + 1).expect("clock fits u32"),
+                dag_lane: 0,
+                dag_depth: 0,
+                hash_chain: HashChain::default(),
+                disk_pos: DiskPos::new(segment_id, i * 256, 256),
+                global_sequence: i,
+            });
+        }
+        let interner_strings = full_interner_snapshot(&interner);
+        (entries, interner_strings)
+    }
+
     #[test]
     fn parallel_sidx_footer_read_matches_sequential_footer_read() {
         let dir = TempDir::new().expect("temp dir");
@@ -777,6 +809,48 @@ mod tests {
             scanned_summary(&parallel),
             scanned_summary(&sequential),
             "PROPERTY: parallel SIDX footer rebuild must match sequential footer semantics exactly."
+        );
+    }
+
+    #[test]
+    fn build_snapshot_plan_keeps_chunk_count_when_tail_is_empty() {
+        let dir = TempDir::new().expect("temp dir");
+        let reader = Reader::new(dir.path().to_path_buf(), 4);
+        let planner = RestorePlanner {
+            reader: &reader,
+            data_dir: dir.path(),
+            policy: ColdStartPolicy::new(false, false),
+        };
+        let (entries, interner_strings) = sample_index_entries(2, 0);
+        let routing = RoutingSummary::from_sorted_entries(&entries, 1);
+
+        let plan = planner
+            .build_snapshot_plan(
+                RestoreSource::Checkpoint,
+                SnapshotPlanInput {
+                    entries,
+                    interner_strings,
+                    watermark: crate::store::cold_start::checkpoint::WatermarkInfo {
+                        watermark_segment_id: 99,
+                        watermark_offset: 0,
+                    },
+                    stored_allocator: 2,
+                    routing,
+                    reopen_reserved_kind_fallbacks: ReservedKindFallbackStats::default(),
+                    persisted_cumulative_reserved_kind_fallbacks:
+                        ReservedKindFallbackStats::default(),
+                },
+            )
+            .expect("build snapshot plan");
+
+        assert_eq!(
+            plan.tail_entries, 0,
+            "SANITY: empty temp dir should produce no tail replay"
+        );
+        assert_eq!(
+            plan.routing.chunk_count,
+            1,
+            "PROPERTY: a snapshot plan with no tail entries must preserve the existing routing chunk count instead of synthesizing an extra chunk"
         );
     }
 
@@ -902,6 +976,24 @@ mod tests {
     }
 
     #[test]
+    fn segment_paths_reject_missing_sources_even_if_unrelated_segments_exist() {
+        let dir = TempDir::new().expect("temp dir");
+        let unrelated_path = dir.path().join(segment::segment_filename(99));
+
+        std::fs::write(&unrelated_path, []).expect("write unrelated segment");
+        write_pending_compaction(dir.path(), 1, &[1, 2]).expect("write marker");
+
+        let err = segment_paths(dir.path()).expect_err(
+            "PROPERTY: pending compaction must fail when a declared source segment is missing",
+        );
+
+        assert!(
+            matches!(err, StoreError::DataDirMalformed { .. }),
+            "PROPERTY: unrelated segments must not satisfy the pending-compaction source presence check"
+        );
+    }
+
+    #[test]
     fn open_index_skips_fast_paths_when_pending_compaction_marker_exists() {
         let dir = TempDir::new().expect("temp dir");
         let config = crate::store::StoreConfig::new(dir.path())
@@ -938,6 +1030,57 @@ mod tests {
             report.report.path,
             OpenIndexPath::Rebuild,
             "PROPERTY: pending compaction must force a marker-aware rebuild instead of trusting checkpoint fast paths."
+        );
+    }
+
+    #[test]
+    fn collect_tail_entries_keeps_events_from_the_watermark_segment() {
+        let dir = TempDir::new().expect("temp dir");
+        let store = Store::open(rotating_store_config(&dir)).expect("open store");
+        let coord = Coordinate::new("entity:tail", "scope:watermark").expect("coord");
+        let kind = EventKind::custom(0xE, 7);
+
+        for n in 0..64u32 {
+            store
+                .append(&coord, kind, &serde_json::json!({ "n": n }))
+                .expect("append");
+        }
+        store.close().expect("close");
+
+        let entries = segment_paths(dir.path()).expect("segment paths");
+        assert!(
+            entries.len() >= 2,
+            "SANITY: rotating config should create multiple segments for watermark-tail testing"
+        );
+        let watermark_segment_id = entries
+            .first()
+            .map(|(segment_id, _)| *segment_id)
+            .expect("watermark segment id");
+        let highest_segment_id = entries
+            .last()
+            .map(|(segment_id, _)| *segment_id)
+            .expect("highest segment id");
+
+        let interner = StringInterner::new();
+        let reader = Reader::new(dir.path().to_path_buf(), 4);
+        reader.set_active_segment(highest_segment_id + 1);
+        let tail_entries = collect_tail_entries(
+            &interner,
+            &reader,
+            dir.path(),
+            &crate::store::cold_start::checkpoint::WatermarkInfo {
+                watermark_segment_id,
+                watermark_offset: 0,
+            },
+            0,
+        )
+        .expect("collect tail entries");
+
+        assert!(
+            tail_entries
+                .iter()
+                .any(|entry| entry.disk_pos.segment_id == watermark_segment_id),
+            "PROPERTY: replay tail must include events from the watermark segment itself when the watermark offset is at the segment start"
         );
     }
 }

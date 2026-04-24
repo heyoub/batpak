@@ -16,9 +16,9 @@ use batpak::prelude::*;
 use std::io::Write;
 use tempfile::TempDir;
 
-mod common;
-use common::medium_segment_store as test_store;
-use common::test_coord;
+#[path = "support/medium_store.rs"]
+mod medium_store_support;
+use medium_store_support::{medium_segment_store as test_store, test_coord};
 
 // ===== frame_decode edge cases =====
 

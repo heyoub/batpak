@@ -18,7 +18,8 @@ use batpak::prelude::*;
 use batpak::store::segment::{frame_decode, frame_encode, SegmentHeader};
 use proptest::prelude::*;
 use proptest::strategy::BoxedStrategy;
-mod common;
+#[path = "common/proptest.rs"]
+mod proptest_support;
 
 fn valid_custom_category() -> impl Strategy<Value = u8> {
     prop_oneof![1u8..13, 14u8..16]
@@ -39,7 +40,7 @@ fn valid_region_component() -> BoxedStrategy<String> {
 // ============================================================
 
 proptest! {
-    #![proptest_config(common::proptest::cfg(32))]
+    #![proptest_config(proptest_support::cfg(32))]
 
     /// Fuzz frame_decode with completely random bytes.
     /// Must never panic, only return Ok or Err.
@@ -114,7 +115,7 @@ proptest! {
 // ============================================================
 
 proptest! {
-    #![proptest_config(common::proptest::cfg(32))]
+    #![proptest_config(proptest_support::cfg(32))]
 
     /// u128 round-trip through MessagePack.
     #[test]
@@ -181,7 +182,7 @@ proptest! {
 // ============================================================
 
 proptest! {
-    #![proptest_config(common::proptest::cfg(2048))]
+    #![proptest_config(proptest_support::cfg(2048))]
 
     /// EventKind custom() round-trips through category()/type_id().
     #[test]
@@ -223,7 +224,7 @@ proptest! {
 // ============================================================
 
 proptest! {
-    #![proptest_config(common::proptest::cfg(32))]
+    #![proptest_config(proptest_support::cfg(32))]
 
     /// Coordinate::new rejects empty strings, accepts non-empty.
     #[test]
@@ -313,7 +314,7 @@ proptest! {
 // ============================================================
 
 proptest! {
-    #![proptest_config(common::proptest::cfg(2048))]
+    #![proptest_config(proptest_support::cfg(2048))]
 
     /// DagPosition::is_ancestor_of is anti-reflexive.
     #[test]
@@ -383,7 +384,7 @@ fn arb_outcome_deep() -> impl Strategy<Value = Outcome<i32>> {
 }
 
 proptest! {
-    #![proptest_config(common::proptest::cfg(32))]
+    #![proptest_config(proptest_support::cfg(32))]
 
     /// Deep nested Batch: map(id) == id (functor identity, recursive).
     #[test]
@@ -440,7 +441,7 @@ proptest! {
 // ============================================================
 
 proptest! {
-    #![proptest_config(common::proptest::cfg(512))]
+    #![proptest_config(proptest_support::cfg(512))]
 
     #[test]
     fn fuzz_event_header_serde(
@@ -475,7 +476,7 @@ proptest! {
 // ============================================================
 
 proptest! {
-    #![proptest_config(common::proptest::cfg(512))]
+    #![proptest_config(proptest_support::cfg(512))]
 
     #[test]
     fn fuzz_segment_header_serde(
@@ -520,7 +521,7 @@ proptest! {
 
 #[cfg(feature = "blake3")]
 proptest! {
-    #![proptest_config(common::proptest::cfg(32))]
+    #![proptest_config(proptest_support::cfg(32))]
 
     /// Multi-event hash chain: build N events, verify entire chain.
     #[test]
@@ -621,7 +622,7 @@ fn fuzz_u128_json_roundtrip() {
 }
 
 proptest! {
-    #![proptest_config(common::proptest::cfg(256))]
+    #![proptest_config(proptest_support::cfg(256))]
 
     /// Feed JSON arrays of wrong lengths to u128_bytes deserializer (visit_seq) — must error, not panic.
     #[test]
@@ -664,7 +665,7 @@ fn arb_wait_condition() -> impl Strategy<Value = WaitCondition> {
 }
 
 proptest! {
-    #![proptest_config(common::proptest::cfg(512))]
+    #![proptest_config(proptest_support::cfg(512))]
 
     #[test]
     fn fuzz_wait_condition_serde(wc in arb_wait_condition()) {
@@ -707,7 +708,7 @@ proptest! {
 use batpak::store::{BatchAppendItem, CausationRef};
 
 proptest! {
-    #![proptest_config(common::proptest::cfg(256))]
+    #![proptest_config(proptest_support::cfg(256))]
 
     #[test]
     fn fuzz_batch_item_new_preserves_fields(

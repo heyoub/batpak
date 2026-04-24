@@ -11,12 +11,14 @@
 //! PROVES: LAW-003 (No Orphan Infrastructure), INV-OBS (every pub API has witness)
 //! DEFENDS: FM-007 (Island Syndrome)
 
-mod common;
-
 use batpak::__private::{inventory, scan_for_kind_collisions, EventPayloadRegistration};
 use batpak::prelude::*;
 use batpak::store::{AppendOptions, BatchAppendItem, CausationRef, Store};
 use batpak::typestate::transition::{StateMarker, Transition};
+
+#[path = "support/small_store.rs"]
+mod small_store_support;
+use small_store_support::small_segment_store;
 
 // ─── test payload type ────────────────────────────────────────────────────────
 //
@@ -52,7 +54,7 @@ impl StateMarker for Closed {}
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
 fn test_store() -> (Store, tempfile::TempDir) {
-    common::small_segment_store()
+    small_segment_store()
 }
 
 fn coord() -> Coordinate {

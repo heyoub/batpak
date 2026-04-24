@@ -266,8 +266,7 @@ impl ExtensionKey {
 
     /// Construct a substrate-owned reserved extension key.
     #[must_use]
-    // justifies: INV-ALLOW-IS-DESIGN [src/store/signing.rs] batpak.* stays reserved for substrate-owned receipt extensions even before the first in-crate writer lands.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn reserved(key: &'static str) -> Self {
         debug_assert!(key.starts_with("batpak."));
         debug_assert!(key.is_ascii());

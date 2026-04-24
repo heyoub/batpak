@@ -7,7 +7,8 @@ use proptest::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
 use tempfile::TempDir;
 
-mod common;
+#[path = "common/proptest.rs"]
+mod proptest_support;
 
 #[derive(Clone, Debug)]
 struct AppendSpec {
@@ -223,7 +224,7 @@ fn assert_snapshot_matches(
 }
 
 proptest! {
-    #![proptest_config(common::proptest::cfg(16))]
+    #![proptest_config(proptest_support::cfg(16))]
 
     #[test]
     fn all_view_topologies_return_identical_query_results(specs in arb_append_specs()) {

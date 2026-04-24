@@ -12,10 +12,12 @@
 //!   2. The concrete instantiation `Foo<u64>` runs a real projection through
 //!      the store — end-to-end behaviour matches a non-generic equivalent.
 
-mod common;
-
 use batpak::prelude::*;
 use serde::{Deserialize, Serialize};
+
+#[path = "support/small_store.rs"]
+mod small_store_support;
+use small_store_support::small_segment_store;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, EventPayload)]
 #[batpak(category = 7, type_id = 9)]
@@ -47,7 +49,7 @@ where
 
 #[test]
 fn generic_projection_compiles_and_projects() {
-    let (store, _dir) = common::small_segment_store();
+    let (store, _dir) = small_segment_store();
     let coord = Coordinate::new("entity:generic", "scope:test").unwrap();
     store.append_typed(&coord, &Bumped { amount: 2 }).unwrap();
     store.append_typed(&coord, &Bumped { amount: 5 }).unwrap();

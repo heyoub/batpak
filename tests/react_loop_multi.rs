@@ -12,8 +12,6 @@
 //!   * matched-kind decode failure surfaces `ReactorError::Decode`
 //!   * user error surfaces `ReactorError::User`
 
-mod common;
-
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -21,6 +19,10 @@ use std::time::{Duration, Instant};
 use batpak::event::StoredEvent;
 use batpak::prelude::*;
 use batpak::prelude::{EventPayload, MultiEventReactor, MultiReactive};
+
+#[path = "support/small_store.rs"]
+mod small_store_support;
+use small_store_support::small_segment_store;
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, EventPayload)]
 #[batpak(category = 0xC, type_id = 1)]
@@ -121,7 +123,7 @@ fn source_coord() -> Coordinate {
 }
 
 fn test_store() -> (Arc<Store>, tempfile::TempDir) {
-    let (s, d) = common::small_segment_store();
+    let (s, d) = small_segment_store();
     (Arc::new(s), d)
 }
 

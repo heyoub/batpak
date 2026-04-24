@@ -1,11 +1,9 @@
 //! Benchmark batch-path coordinate construction and append costs to size the
 //! payoff of deeper staging/interner work.
 
-mod common;
-
 use batpak::prelude::*;
 use batpak::store::{BatchAppendItem, CausationRef, Store, StoreConfig, SyncMode};
-use common::{apply_profile, throughput_elements, BenchProfile};
+use batpak_bench_support::{apply_profile, throughput_elements, BenchProfile};
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
 use tempfile::TempDir;
 

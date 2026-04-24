@@ -193,7 +193,7 @@ impl Reader {
                 frame_header[2],
                 frame_header[3],
             ]) as usize;
-            if payload_len > segment::MAX_FRAME_PAYLOAD {
+            if Self::payload_len_exceeds_max(payload_len) {
                 tracing::warn!(
                     segment_id,
                     payload_len,
@@ -426,4 +426,167 @@ pub(crate) struct IndexScanEvent {
     #[serde(rename = "payload")]
     pub(crate) _payload: serde::de::IgnoredAny,
     pub(crate) hash_chain: Option<HashChain>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::event::EventKind;
+    use crate::store::segment::sidx::{kind_to_raw, read_footer, SidxEntry, SidxEntryCollector};
+    use std::io::{Cursor, Seek, SeekFrom, Write};
+    use tempfile::{NamedTempFile, TempDir};
+
+    fn sample_entry(frame_offset: u64, frame_length: u32) -> SidxEntry {
+        SidxEntry {
+            event_id: 1,
+            entity_idx: 0,
+            scope_idx: 0,
+            kind: kind_to_raw(EventKind::custom(0x1, 1)),
+            wall_ms: 1,
+            clock: 1,
+            dag_lane: 0,
+            dag_depth: 0,
+            prev_hash: [0; 32],
+            event_hash: [1; 32],
+            frame_offset,
+            frame_length,
+            global_sequence: 1,
+            correlation_id: 1,
+            causation_id: 0,
+        }
+    }
+
+    fn footer_bytes(prefix_len: usize, entries: &[SidxEntry]) -> Vec<u8> {
+        let mut bytes = vec![0xA5; prefix_len];
+        let mut cursor = Cursor::new(&mut bytes);
+        cursor.seek(SeekFrom::End(0)).expect("seek to end");
+
+        let mut collector = SidxEntryCollector::new();
+        for (idx, entry) in entries.iter().cloned().enumerate() {
+            let entity = format!("entity:{idx}");
+            collector.record(entry, &entity, "scope:test");
+        }
+        collector
+            .write_footer(&mut cursor, 7)
+            .expect("write footer");
+
+        bytes
+    }
+
+    fn footer_file(prefix_len: usize, entries: &[SidxEntry]) -> NamedTempFile {
+        let bytes = footer_bytes(prefix_len, entries);
+        let mut tmp = NamedTempFile::new().expect("create temp file");
+        tmp.write_all(&bytes).expect("write temp bytes");
+        tmp.flush().expect("flush temp file");
+        tmp
+    }
+
+    fn footer_segment_path(
+        dir: &TempDir,
+        segment_id: u64,
+        prefix_len: usize,
+        entries: &[SidxEntry],
+    ) -> std::path::PathBuf {
+        let path = dir
+            .path()
+            .join(crate::store::segment::segment_filename(segment_id));
+        std::fs::write(&path, footer_bytes(prefix_len, entries))
+            .expect("write segment footer file");
+        path
+    }
+
+    #[test]
+    fn sidx_covers_segment_tail_requires_last_entry_to_reach_footer_start() {
+        let tmp = footer_file(64, &[sample_entry(0, 64)]);
+        let (entries, _) = read_footer(tmp.path())
+            .expect("read footer")
+            .expect("footer should be present");
+
+        assert_eq!(
+            Reader::sidx_covers_segment_tail(tmp.path(), &entries),
+            Some(true),
+            "PROPERTY: SIDX coverage is complete only when the last indexed frame tail reaches the footer start"
+        );
+    }
+
+    #[test]
+    fn sidx_covers_segment_tail_rejects_trailing_unindexed_bytes() {
+        let tmp = footer_file(80, &[sample_entry(0, 64)]);
+        let (entries, _) = read_footer(tmp.path())
+            .expect("read footer")
+            .expect("footer should be present");
+
+        assert_eq!(
+            Reader::sidx_covers_segment_tail(tmp.path(), &entries),
+            Some(false),
+            "PROPERTY: trailing bytes between the last indexed frame and the footer force frame-scan fallback"
+        );
+    }
+
+    #[test]
+    fn sidx_covers_segment_tail_treats_truly_empty_segment_as_covered() {
+        let tmp = footer_file(0, &[]);
+        let (entries, _) = read_footer(tmp.path())
+            .expect("read footer")
+            .expect("footer should be present");
+
+        assert!(
+            entries.is_empty(),
+            "SANITY: empty-footer fixture should not produce SIDX entries"
+        );
+        assert_eq!(
+            Reader::sidx_covers_segment_tail(tmp.path(), &entries),
+            Some(true),
+            "PROPERTY: an empty segment with an empty SIDX footer is fully covered and must not be forced onto the frame-scan fallback"
+        );
+    }
+
+    #[test]
+    fn scan_segment_index_into_uses_sidx_fast_path_for_sealed_segments() {
+        let dir = TempDir::new().expect("create temp dir");
+        let reader = Reader::new(dir.path().to_path_buf(), 4);
+        let segment_id = 7;
+        let path = footer_segment_path(&dir, segment_id, 64, &[sample_entry(0, 64)]);
+        reader.set_active_segment(segment_id + 1);
+
+        let mut rows = Vec::new();
+        reader
+            .scan_segment_index_into(&path, None, |row| {
+                rows.push(row);
+                Ok(())
+            })
+            .expect("sealed scan should succeed");
+
+        assert_eq!(
+            rows.len(),
+            1,
+            "PROPERTY: sealed segments with full SIDX tail coverage should use the footer fast path and emit indexed rows"
+        );
+    }
+
+    #[test]
+    fn scan_segment_index_into_ignores_sidx_footer_for_active_segments() {
+        let dir = TempDir::new().expect("create temp dir");
+        let reader = Reader::new(dir.path().to_path_buf(), 4);
+        let segment_id = 7;
+        let path = footer_segment_path(&dir, segment_id, 64, &[sample_entry(0, 64)]);
+        reader.set_active_segment(segment_id);
+
+        let mut rows = Vec::new();
+        let err = reader
+            .scan_segment_index_into(&path, None, |row| {
+                rows.push(row);
+                Ok(())
+            })
+            .expect_err("active segment must not trust the synthetic SIDX footer fixture");
+
+        assert!(
+            matches!(err, StoreError::CorruptSegment { .. }),
+            "PROPERTY: the active segment must refuse the SIDX fast path and fall back to frame scan even if a footer is present"
+        );
+        assert!(
+            rows.is_empty(),
+            "PROPERTY: falling back to frame scan must not synthesize rows from the active segment's footer bytes"
+        );
+    }
 }

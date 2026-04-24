@@ -5,11 +5,9 @@
 //! which is more honest than repeatedly reopening the same temp directory and
 //! calling it "cold start".
 
-mod common;
-
 use batpak::prelude::*;
 use batpak::store::{Store, StoreConfig};
-use common::{apply_profile, profile_for_event_count, throughput_elements};
+use batpak_bench_support::{apply_profile, profile_for_event_count, throughput_elements};
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use tempfile::TempDir;
 
