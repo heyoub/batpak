@@ -1,7 +1,102 @@
+use std::cmp::Ordering;
 use std::path::PathBuf;
 
 use crate::store::cold_start::rebuild::OpenIndexReport;
 use crate::store::RestartPolicy;
+
+/// Hybrid logical clock point used by frontier instrumentation.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[must_use]
+pub struct HlcPoint {
+    /// HLC wall-clock milliseconds.
+    pub wall_ms: u64,
+    /// Globally monotonic sequence assigned by the writer.
+    pub global_sequence: u64,
+}
+
+impl HlcPoint {
+    /// Origin point used before any event has been accepted.
+    pub const ORIGIN: Self = Self {
+        wall_ms: 0,
+        global_sequence: 0,
+    };
+}
+
+impl Ord for HlcPoint {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.wall_ms
+            .cmp(&other.wall_ms)
+            .then(self.global_sequence.cmp(&other.global_sequence))
+    }
+}
+
+impl PartialOrd for HlcPoint {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+/// Coherent point-in-time copy of the internal frontier watermarks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[must_use]
+pub struct WatermarkSnapshot {
+    /// Highest HLC whose ordering coordinate has been assigned.
+    pub accepted_hlc: HlcPoint,
+    /// Highest HLC whose frame write returned successfully.
+    pub written_hlc: HlcPoint,
+    /// Highest HLC covered by a successful sync.
+    pub durable_hlc: HlcPoint,
+    /// Highest HLC currently visible to query readers.
+    pub visible_hlc: HlcPoint,
+    /// Highest HLC consumed by an in-process projection fold.
+    pub applied_hlc: HlcPoint,
+    /// Highest HLC for which broadcast artifacts were attempted.
+    pub emitted_hlc: HlcPoint,
+    /// Real elapsed age of the oldest currently undurable write, if any.
+    pub oldest_pending_write_age_ms: Option<u64>,
+}
+
+impl Default for WatermarkSnapshot {
+    fn default() -> Self {
+        Self {
+            accepted_hlc: HlcPoint::ORIGIN,
+            written_hlc: HlcPoint::ORIGIN,
+            durable_hlc: HlcPoint::ORIGIN,
+            visible_hlc: HlcPoint::ORIGIN,
+            applied_hlc: HlcPoint::ORIGIN,
+            emitted_hlc: HlcPoint::ORIGIN,
+            oldest_pending_write_age_ms: None,
+        }
+    }
+}
+
+/// Narrow operator-facing frontier view with only semantics that exist today.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[must_use]
+pub struct FrontierView {
+    /// Highest HLC whose containing segment range has been synced.
+    pub durable_hlc: HlcPoint,
+    /// Highest HLC currently visible to query readers.
+    pub current_visible_hlc: HlcPoint,
+    /// Sequence-unit gap between visible and durable at snapshot time.
+    pub visible_minus_durable_seq: u64,
+    /// Real elapsed age of the oldest currently undurable write, if any.
+    pub oldest_pending_write_age_ms: Option<u64>,
+}
+
+impl From<WatermarkSnapshot> for FrontierView {
+    fn from(snapshot: WatermarkSnapshot) -> Self {
+        Self {
+            durable_hlc: snapshot.durable_hlc,
+            current_visible_hlc: snapshot.visible_hlc,
+            visible_minus_durable_seq: snapshot
+                .visible_hlc
+                .global_sequence
+                .saturating_sub(snapshot.durable_hlc.global_sequence),
+            oldest_pending_write_age_ms: snapshot.oldest_pending_write_age_ms,
+        }
+    }
+}
 
 /// Lightweight runtime statistics snapshot for the store.
 #[derive(Clone, Debug)]
@@ -64,6 +159,8 @@ pub struct StoreDiagnostics {
     pub restart_policy: RestartPolicy,
     /// Current writer mailbox pressure snapshot.
     pub writer_pressure: WriterPressure,
+    /// Narrow frontier observability view.
+    pub frontier: FrontierView,
     /// Active scan topology label (`aos`, `scan`, `entity-local`, `tiled`, `all`, or `hybrid`).
     pub index_topology: &'static str,
     /// Number of tiles in the columnar index (0 for non-tiled layouts).

@@ -60,7 +60,9 @@ pub use projection::{
 pub use reaction::ReactionBatch;
 pub use reactor_typed::{ReactorConfig, ReactorError, TypedReactorHandle};
 pub use signing::SigningKey;
-pub use stats::{StoreDiagnostics, StoreStats, WriterPressure};
+pub use stats::{
+    FrontierView, HlcPoint, StoreDiagnostics, StoreStats, WatermarkSnapshot, WriterPressure,
+};
 pub use write::control::{AppendTicket, BatchAppendTicket, Outbox, VisibilityFence};
 pub use write::writer::{Notification, RestartPolicy};
 
@@ -77,7 +79,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::Arc;
 use write::control::AppendSubmission;
 use write::fanout::{ReactorSubscriberList, SubscriberList};
-use write::writer::{WriterCommand, WriterHandle};
+use write::writer::{WatermarkAdvanceHandle, WatermarkState, WriterCommand, WriterHandle};
 // ProjectionCache re-exported above via pub use, no separate use needed.
 
 /// Store: the runtime. Sync API. Send + Sync.
@@ -102,6 +104,7 @@ pub struct Store<State = Open> {
     pub(crate) reader: Arc<Reader>,
     pub(crate) cache: Box<dyn ProjectionCache>,
     pub(crate) writer: Option<WriterHandle>,
+    pub(crate) watermark_handle: WatermarkAdvanceHandle,
     pub(crate) lifecycle_gate: Mutex<()>,
     pub(crate) config: Arc<StoreConfig>,
     pub(crate) runtime: Arc<config::ValidatedStoreConfig>,
@@ -194,7 +197,19 @@ fn emit_open_report_observability(config: &StoreConfig, report: &OpenIndexReport
     }
 }
 
-fn append_open_completed_event(store: &Store<Open>, report: &OpenIndexReport) {
+fn highest_index_hlc(index: &StoreIndex) -> HlcPoint {
+    index
+        .all_entries()
+        .into_iter()
+        .max_by_key(|entry| entry.global_sequence)
+        .map(|entry| HlcPoint {
+            wall_ms: entry.wall_ms,
+            global_sequence: entry.global_sequence,
+        })
+        .unwrap_or(HlcPoint::ORIGIN)
+}
+
+fn append_open_completed_event(store: &Store<Open>, report: &OpenIndexReport) -> Option<HlcPoint> {
     let coord = match Coordinate::new("batpak:store", "batpak:lifecycle") {
         Ok(coord) => coord,
         Err(error) => {
@@ -203,16 +218,26 @@ fn append_open_completed_event(store: &Store<Open>, report: &OpenIndexReport) {
                 error = %error,
                 "failed to construct lifecycle coordinate for SYSTEM_OPEN_COMPLETED"
             );
-            return;
+            return None;
         }
     };
 
-    if let Err(error) = store.append(&coord, EventKind::SYSTEM_OPEN_COMPLETED, report) {
-        tracing::warn!(
-            target: "batpak::open",
-            error = %error,
-            "failed to append SYSTEM_OPEN_COMPLETED lifecycle event after open"
-        );
+    match store.append(&coord, EventKind::SYSTEM_OPEN_COMPLETED, report) {
+        Ok(receipt) => store
+            .index
+            .get_by_id(receipt.event_id)
+            .map(|entry| HlcPoint {
+                wall_ms: entry.wall_ms,
+                global_sequence: entry.global_sequence,
+            }),
+        Err(error) => {
+            tracing::warn!(
+                target: "batpak::open",
+                error = %error,
+                "failed to append SYSTEM_OPEN_COMPLETED lifecycle event after open"
+            );
+            None
+        }
     }
 }
 
@@ -271,12 +296,14 @@ impl Store<Open> {
             &reactor_subscribers,
             &reader,
         )?;
+        let watermark_handle = writer.watermark_handle();
 
         let store = Self {
             index,
             reader,
             cache,
             writer: Some(writer),
+            watermark_handle,
             lifecycle_gate: Mutex::new(()),
             config,
             runtime,
@@ -288,7 +315,9 @@ impl Store<Open> {
         };
 
         emit_open_report_observability(&store.config, &open_report);
-        append_open_completed_event(&store, &open_report);
+        if let Some(open_hlc) = append_open_completed_event(&store, &open_report) {
+            store.watermark_handle.lock().reset_to_bootstrap(open_hlc);
+        }
 
         Ok(store)
     }
@@ -962,11 +991,13 @@ impl Store<ReadOnly> {
             store_lock,
         } = open_components(config, StoreLockMode::ReadOnly)?;
 
+        let watermark_handle = WatermarkState::bootstrap_handle(highest_index_hlc(&index));
         let store = Self {
             index,
             reader,
             cache,
             writer: None,
+            watermark_handle,
             lifecycle_gate: Mutex::new(()),
             config,
             runtime,
@@ -1153,6 +1184,12 @@ impl<State> Store<State> {
     /// Return detailed diagnostic information about the store's internal state.
     pub fn diagnostics(&self) -> StoreDiagnostics {
         lifecycle::diagnostics(self)
+    }
+
+    /// Return a coherent clone of the internal frontier watermarks.
+    #[cfg(any(test, feature = "dangerous-test-hooks"))]
+    pub fn dangerous_watermark_snapshot(&self) -> WatermarkSnapshot {
+        self.watermark_handle.lock().snapshot()
     }
 }
 

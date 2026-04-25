@@ -488,6 +488,7 @@ pub(crate) fn stats<State>(store: &Store<State>) -> StoreStats {
 }
 
 pub(crate) fn diagnostics<State>(store: &Store<State>) -> StoreDiagnostics {
+    let watermark_snapshot = store.watermark_handle.lock().snapshot();
     StoreDiagnostics {
         event_count: store.index.len(),
         global_sequence: store.index.global_sequence(),
@@ -507,6 +508,7 @@ pub(crate) fn diagnostics<State>(store: &Store<State>) -> StoreDiagnostics {
                 queue_len: 0,
                 capacity: 0,
             }),
+        frontier: watermark_snapshot.into(),
         index_topology: store.index.topology_name(),
         tile_count: store.index.tile_count(),
         open_report: store.open_report.clone(),
