@@ -3,6 +3,7 @@ use super::super::staging::{PreparedBatch, StagedCommittedEvent};
 use super::{kind_to_raw, Notification, WriterState};
 use crate::store::index::{DiskPos, IndexEntry};
 use crate::store::segment::sidx::SidxEntry;
+use crate::store::stats::HlcPoint;
 use crate::store::AppendReceipt;
 
 pub(super) struct CommitArtifacts {
@@ -184,12 +185,15 @@ impl WriterState<'_> {
     pub(super) fn publish_then_broadcast_unfenced(
         &mut self,
         publish_up_to: u64,
+        frontier_point: HlcPoint,
         notifications: impl IntoIterator<Item = Notification>,
         envelopes: impl IntoIterator<Item = CommittedEventEnvelope>,
     ) -> Result<(), crate::store::StoreError> {
         self.index
             .publish(publish_up_to, "publish_then_broadcast_unfenced")?;
+        self.watermark_handle.lock().advance_visible(frontier_point);
         self.broadcast_commit_artifacts(notifications, envelopes);
+        self.watermark_handle.lock().advance_emitted(frontier_point);
         Ok(())
     }
 
@@ -208,11 +212,18 @@ impl WriterState<'_> {
         &mut self,
         token: u64,
         publish_up_to: Option<u64>,
+        frontier_point: Option<HlcPoint>,
         notifications: impl IntoIterator<Item = Notification>,
         envelopes: impl IntoIterator<Item = CommittedEventEnvelope>,
     ) -> Result<(), crate::store::StoreError> {
         self.index.finish_visibility_fence(token, publish_up_to)?;
+        if let Some(point) = frontier_point {
+            self.watermark_handle.lock().advance_visible(point);
+        }
         self.broadcast_commit_artifacts(notifications, envelopes);
+        if let Some(point) = frontier_point {
+            self.watermark_handle.lock().advance_emitted(point);
+        }
         Ok(())
     }
 }

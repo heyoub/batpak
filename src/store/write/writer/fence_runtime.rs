@@ -3,6 +3,7 @@ use super::{
     AppendGuards, AppendReceipt, BatchAppendItem, Coordinate, Event, EventKind, Notification,
     StoreError, WriterState,
 };
+use crate::store::stats::HlcPoint;
 use flume::Sender;
 
 enum PendingFenceResponse {
@@ -43,6 +44,7 @@ impl PendingFenceResponse {
 pub(super) struct FenceLedger {
     pub(super) token: u64,
     pub(super) publish_up_to: Option<u64>,
+    pub(super) frontier_point: Option<HlcPoint>,
     pub(super) notifications: Vec<Notification>,
     pub(super) envelopes: Vec<CommittedEventEnvelope>,
     responses: Vec<PendingFenceResponse>,
@@ -53,14 +55,20 @@ impl FenceLedger {
         Self {
             token,
             publish_up_to: None,
+            frontier_point: None,
             notifications: Vec::new(),
             envelopes: Vec::new(),
             responses: Vec::new(),
         }
     }
 
-    pub(super) fn record_publish_up_to(&mut self, publish_up_to: u64) {
+    pub(super) fn record_publish_up_to(&mut self, publish_up_to: u64, frontier_point: HlcPoint) {
         self.publish_up_to = Some(self.publish_up_to.unwrap_or(0).max(publish_up_to));
+        self.frontier_point = Some(
+            self.frontier_point
+                .unwrap_or(HlcPoint::ORIGIN)
+                .max(frontier_point),
+        );
     }
 
     pub(super) fn extend_artifacts(
@@ -278,12 +286,19 @@ impl WriterState<'_> {
 
         let FenceLedger {
             publish_up_to,
+            frontier_point,
             notifications,
             envelopes,
             responses,
             ..
         } = fence;
-        self.fence_finish_then_broadcast(token, publish_up_to, notifications, envelopes)?;
+        self.fence_finish_then_broadcast(
+            token,
+            publish_up_to,
+            frontier_point,
+            notifications,
+            envelopes,
+        )?;
         for response in responses {
             response.complete_ok();
         }
