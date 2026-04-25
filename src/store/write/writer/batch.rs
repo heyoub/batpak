@@ -6,6 +6,7 @@ use super::{
     HashChain, WriterState,
 };
 use crate::store::append::BatchAppendItem;
+use crate::store::stats::HlcPoint;
 use crate::store::{AppendReceipt, StoreError};
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -208,6 +209,10 @@ impl WriterState<'_> {
             state.last_wall_ms = wall_ms;
 
             let global_seq = first_seq + idx as u64;
+            self.watermark_handle.lock().advance_accepted(HlcPoint {
+                wall_ms,
+                global_sequence: global_seq,
+            });
             let meta = StagedCommitMeta::new(
                 event_id,
                 item.options().correlation_id.unwrap_or(event_id),
@@ -333,6 +338,13 @@ impl WriterState<'_> {
         )?;
 
         let computed = self.precompute_batch_items(prepared, first_seq)?;
+        let batch_frontier = computed
+            .last()
+            .map(|staged| HlcPoint {
+                wall_ms: staged.timing.wall_ms,
+                global_sequence: staged.global_sequence(),
+            })
+            .unwrap_or(HlcPoint::ORIGIN);
 
         let batch_count = u32::try_from(prepared.len())
             .map_err(|_| StoreError::ser_msg("prepared batch item count exceeds u32::MAX"))?;
@@ -383,6 +395,7 @@ impl WriterState<'_> {
         self.active_segment
             .sync_with_mode(&self.config.sync.mode)
             .map_err(|e| StoreError::batch_sync_failed(prepared.len(), e))?;
+        self.watermark_handle.lock().advance_durable_to_accepted();
 
         let artifacts = self.materialize_batch_commit_artifacts(prepared, &computed, &receipts);
         for (sidx_entry, index_entry) in artifacts.sidx_entries.iter().zip(artifacts.entries.iter())
@@ -409,13 +422,14 @@ impl WriterState<'_> {
         let publish_up_to = first_seq + u64::from(publish_span);
 
         if let Some(fence) = fence {
-            fence.record_publish_up_to(publish_up_to);
+            fence.record_publish_up_to(publish_up_to, batch_frontier);
             self.index
                 .note_visibility_fence_progress(fence.token, first_seq, publish_up_to)?;
             fence.extend_artifacts(artifacts.notifications, artifacts.envelopes);
         } else {
             self.publish_then_broadcast_unfenced(
                 publish_up_to,
+                batch_frontier,
                 artifacts.notifications,
                 artifacts.envelopes,
             )?;
@@ -454,6 +468,10 @@ impl WriterState<'_> {
                 .active_segment
                 .write_frame(&frame)
                 .map_err(|e| batch_failed(idx, BatchFailureStage::Writing, e))?;
+            self.watermark_handle.lock().advance_written(HlcPoint {
+                wall_ms: staged.timing.wall_ms,
+                global_sequence: staged.global_sequence(),
+            });
 
             let disk_pos = DiskPos {
                 segment_id: *self.segment_id,

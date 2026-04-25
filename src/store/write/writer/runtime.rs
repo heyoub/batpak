@@ -18,6 +18,7 @@ pub(super) struct WriterRuntime<'a> {
     pub(super) subscribers: &'a super::SubscriberList,
     pub(super) reactor_subscribers: &'a super::ReactorSubscriberList,
     pub(super) reader: &'a Arc<crate::store::segment::scan::Reader>,
+    pub(super) watermark_handle: &'a super::WatermarkAdvanceHandle,
 }
 
 pub(super) fn writer_thread_name(data_dir: &Path) -> String {
@@ -70,6 +71,7 @@ pub(super) fn writer_thread_main(
                     subscribers: runtime.subscribers,
                     reactor_subscribers: runtime.reactor_subscribers,
                     reader: &rdr,
+                    watermark_handle: runtime.watermark_handle,
                 },
                 segment,
                 seg_id,
@@ -192,6 +194,7 @@ fn writer_loop(
         subscribers: runtime.subscribers,
         reactor_subscribers: runtime.reactor_subscribers,
         reader: Arc::clone(runtime.reader),
+        watermark_handle: Arc::clone(runtime.watermark_handle),
         sidx_collector: crate::store::segment::sidx::SidxEntryCollector::new(),
         fence_ledger: None,
     };
