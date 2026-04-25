@@ -21,7 +21,9 @@ use crate::store::segment::sidx::kind_to_raw;
 use crate::store::segment::{self, Active, FramePayloadRef, Segment};
 use crate::store::{AppendReceipt, StoreConfig, StoreError};
 use flume::{Receiver, Sender};
+use parking_lot::Mutex;
 use std::sync::Arc;
+use std::time::Instant;
 mod append;
 mod batch;
 mod fence_runtime;
@@ -32,6 +34,73 @@ pub(crate) use self::append::AppendGuards;
 use self::fence_runtime::{CommandResult, DeferredReply, FenceLedger};
 pub(crate) use self::runtime::find_latest_segment_id;
 use self::runtime::{writer_thread_main, writer_thread_name, WriterRuntime};
+
+pub(crate) type WatermarkAdvanceHandle = Arc<Mutex<WatermarkState>>;
+
+/// Internal mutable frontier state. All snapshots take this single mutex once.
+pub(crate) struct WatermarkState {
+    accepted_hlc: crate::store::stats::HlcPoint,
+    written_hlc: crate::store::stats::HlcPoint,
+    durable_hlc: crate::store::stats::HlcPoint,
+    visible_hlc: crate::store::stats::HlcPoint,
+    applied_hlc: crate::store::stats::HlcPoint,
+    emitted_hlc: crate::store::stats::HlcPoint,
+    pending_write_start: Option<Instant>,
+}
+
+impl Default for WatermarkState {
+    fn default() -> Self {
+        Self {
+            accepted_hlc: crate::store::stats::HlcPoint::ORIGIN,
+            written_hlc: crate::store::stats::HlcPoint::ORIGIN,
+            durable_hlc: crate::store::stats::HlcPoint::ORIGIN,
+            visible_hlc: crate::store::stats::HlcPoint::ORIGIN,
+            applied_hlc: crate::store::stats::HlcPoint::ORIGIN,
+            emitted_hlc: crate::store::stats::HlcPoint::ORIGIN,
+            pending_write_start: None,
+        }
+    }
+}
+
+impl WatermarkState {
+    pub(crate) fn handle() -> WatermarkAdvanceHandle {
+        Arc::new(Mutex::new(Self::default()))
+    }
+
+    pub(crate) fn bootstrap_handle(point: crate::store::stats::HlcPoint) -> WatermarkAdvanceHandle {
+        Arc::new(Mutex::new(Self::for_bootstrap(point)))
+    }
+
+    pub(crate) fn for_bootstrap(point: crate::store::stats::HlcPoint) -> Self {
+        Self {
+            accepted_hlc: point,
+            written_hlc: point,
+            durable_hlc: point,
+            visible_hlc: point,
+            applied_hlc: crate::store::stats::HlcPoint::ORIGIN,
+            emitted_hlc: point,
+            pending_write_start: None,
+        }
+    }
+
+    pub(crate) fn reset_to_bootstrap(&mut self, point: crate::store::stats::HlcPoint) {
+        *self = Self::for_bootstrap(point);
+    }
+
+    pub(crate) fn snapshot(&self) -> crate::store::stats::WatermarkSnapshot {
+        crate::store::stats::WatermarkSnapshot {
+            accepted_hlc: self.accepted_hlc,
+            written_hlc: self.written_hlc,
+            durable_hlc: self.durable_hlc,
+            visible_hlc: self.visible_hlc,
+            applied_hlc: self.applied_hlc,
+            emitted_hlc: self.emitted_hlc,
+            oldest_pending_write_age_ms: self
+                .pending_write_start
+                .map(|start| start.elapsed().as_millis().min(u128::from(u64::MAX)) as u64),
+        }
+    }
+}
 
 pub(super) fn checked_next_clock(
     latest_clock: Option<u32>,
@@ -105,6 +174,7 @@ pub(crate) struct WriterHandle {
     pub tx: Sender<WriterCommand>,
     pub subscribers: Arc<SubscriberList>,
     pub reactor_subscribers: Arc<ReactorSubscriberList>,
+    watermark_handle: WatermarkAdvanceHandle,
     _thread: Option<std::thread::JoinHandle<()>>,
 }
 
@@ -143,6 +213,7 @@ impl WriterHandle {
         let (tx, rx) = flume::bounded::<WriterCommand>(config.writer.channel_capacity);
         let subs = Arc::clone(subscribers);
         let reactor_subs = Arc::clone(reactor_subscribers);
+        let watermark_handle = WatermarkState::handle();
         let cfg = Arc::clone(config);
         let validated = Arc::clone(runtime);
         let idx = Arc::clone(index);
@@ -174,6 +245,7 @@ impl WriterHandle {
             tx,
             subscribers: Arc::clone(subscribers),
             reactor_subscribers: Arc::clone(reactor_subscribers),
+            watermark_handle,
             _thread: Some(thread),
         })
     }
@@ -187,8 +259,13 @@ impl WriterHandle {
             tx,
             subscribers,
             reactor_subscribers: Arc::new(ReactorSubscriberList::new()),
+            watermark_handle: WatermarkState::handle(),
             _thread: None,
         }
+    }
+
+    pub(crate) fn watermark_handle(&self) -> WatermarkAdvanceHandle {
+        Arc::clone(&self.watermark_handle)
     }
 
     // NOTE: No send_append() method here. Store::append() and Store::append_reaction()
