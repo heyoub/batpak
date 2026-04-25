@@ -78,8 +78,8 @@ pub struct FrontierView {
     pub durable_hlc: HlcPoint,
     /// Highest HLC currently visible to query readers.
     pub current_visible_hlc: HlcPoint,
-    /// Sequence-unit gap between visible and durable at snapshot time.
-    pub visible_minus_durable_seq: u64,
+    /// Signed sequence-unit gap between visible and durable at snapshot time.
+    pub visible_minus_durable_seq: i64,
     /// Real elapsed age of the oldest currently undurable write, if any.
     pub oldest_pending_write_age_ms: Option<u64>,
 }
@@ -89,10 +89,8 @@ impl From<WatermarkSnapshot> for FrontierView {
         Self {
             durable_hlc: snapshot.durable_hlc,
             current_visible_hlc: snapshot.visible_hlc,
-            visible_minus_durable_seq: snapshot
-                .visible_hlc
-                .global_sequence
-                .saturating_sub(snapshot.durable_hlc.global_sequence),
+            visible_minus_durable_seq: (snapshot.visible_hlc.global_sequence as i64)
+                - (snapshot.durable_hlc.global_sequence as i64),
             oldest_pending_write_age_ms: snapshot.oldest_pending_write_age_ms,
         }
     }
