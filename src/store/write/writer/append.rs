@@ -86,6 +86,15 @@ impl WriterState<'_> {
             wall_ms: now_ms,
             global_sequence: global_seq,
         };
+
+        #[cfg(feature = "dangerous-test-hooks")]
+        crate::store::fault::maybe_inject(
+            crate::store::fault::InjectionPoint::SingleAppendStart {
+                entity: entity.to_string(),
+            },
+            &self.config.fault_injector,
+        )?;
+
         self.watermark_handle
             .lock()
             .advance_accepted(frontier_point);
@@ -120,6 +129,14 @@ impl WriterState<'_> {
         let offset = self.active_segment.write_frame(&frame)?;
         self.watermark_handle.lock().advance_written(frontier_point);
         trace!(offset = offset, len = frame.len(), "frame written");
+
+        #[cfg(feature = "dangerous-test-hooks")]
+        crate::store::fault::maybe_inject(
+            crate::store::fault::InjectionPoint::SingleAppendWritten {
+                entity: entity.to_string(),
+            },
+            &self.config.fault_injector,
+        )?;
 
         let disk_pos = DiskPos {
             segment_id: *self.segment_id,
@@ -187,6 +204,14 @@ impl WriterState<'_> {
                 frontier_point,
                 [committed.notification],
                 committed.envelope,
+            )?;
+
+            #[cfg(feature = "dangerous-test-hooks")]
+            crate::store::fault::maybe_inject(
+                crate::store::fault::InjectionPoint::SingleAppendPublished {
+                    entity: entity.to_string(),
+                },
+                &self.config.fault_injector,
             )?;
         }
 

@@ -13,8 +13,43 @@
 //! SEEDED: deterministic tempdir-based open.
 
 use batpak::prelude::{Coordinate, EventKind, Region};
-use batpak::store::{FrontierView, HlcPoint, ReadOnly, Store, StoreConfig, WatermarkSnapshot};
+use batpak::store::{
+    CountdownAction, CountdownInjector, FrontierView, HlcPoint, InjectionPoint, ReadOnly, Store,
+    StoreConfig, StoreError, WatermarkSnapshot,
+};
+use std::sync::Arc;
 use tempfile::TempDir;
+
+const FRONTIER_FAULT_ENTITY: &str = "entity:frontier-fault";
+
+fn kind() -> EventKind {
+    EventKind::custom(0xF, 0x90)
+}
+
+fn coord(entity: &str) -> Coordinate {
+    Coordinate::new(entity, "scope:test").expect("coord")
+}
+
+fn config_with_fault(
+    dir: &TempDir,
+    filter: impl Fn(&InjectionPoint) -> bool + Send + Sync + 'static,
+) -> StoreConfig {
+    let mut config = StoreConfig::new(dir.path()).with_sync_every_n_events(1000);
+    config.fault_injector = Some(Arc::new(
+        CountdownInjector::new(1, CountdownAction::Fail("single append fault")).with_filter(filter),
+    ));
+    config
+}
+
+fn assert_fault_injected(result: Result<batpak::store::AppendReceipt, StoreError>) {
+    match result {
+        Ok(_) => panic!("PROPERTY: append must surface the injected error, not a receipt"),
+        Err(err) => assert!(
+            matches!(err, StoreError::FaultInjected(ref message) if message.contains("single append fault")),
+            "PROPERTY: expected injected fault, got {err:?}"
+        ),
+    }
+}
 
 #[test]
 fn bootstrap_watermark_snapshot_matches_lifecycle_open_event() {
@@ -46,11 +81,10 @@ fn single_append_cadence_gt_1_visible_exceeds_durable_frontier() {
     let config = StoreConfig::new(dir.path()).with_sync_every_n_events(1000);
     let store = Store::open(config).expect("open store");
     let bootstrap = store.dangerous_watermark_snapshot();
-    let coord = Coordinate::new("entity:frontier", "scope:test").expect("coord");
-    let kind = EventKind::custom(0xF, 0x90);
+    let coord = coord("entity:frontier");
 
     let receipt = store
-        .append(&coord, kind, &serde_json::json!({"n": 1}))
+        .append(&coord, kind(), &serde_json::json!({"n": 1}))
         .expect("append");
 
     let visible = store.query(&Region::entity("entity:frontier"));
@@ -79,11 +113,10 @@ fn explicit_sync_advances_durable_and_clears_pending_write_age() {
     let dir = TempDir::new().expect("temp dir");
     let config = StoreConfig::new(dir.path()).with_sync_every_n_events(1000);
     let store = Store::open(config).expect("open store");
-    let coord = Coordinate::new("entity:frontier-sync", "scope:test").expect("coord");
-    let kind = EventKind::custom(0xF, 0x91);
+    let coord = coord("entity:frontier-sync");
 
     store
-        .append(&coord, kind, &serde_json::json!({"n": 1}))
+        .append(&coord, kind(), &serde_json::json!({"n": 1}))
         .expect("append");
 
     let before_sync = store.dangerous_watermark_snapshot();
@@ -105,13 +138,12 @@ fn explicit_sync_advances_durable_and_clears_pending_write_age() {
 #[test]
 fn read_only_open_bootstraps_frontier_from_rebuilt_index() {
     let dir = TempDir::new().expect("temp dir");
-    let coord = Coordinate::new("entity:frontier-readonly", "scope:test").expect("coord");
-    let kind = EventKind::custom(0xF, 0x92);
+    let coord = coord("entity:frontier-readonly");
 
     let max_hlc_before_close = {
         let store = Store::open(StoreConfig::new(dir.path())).expect("open store");
         store
-            .append(&coord, kind, &serde_json::json!({"n": 1}))
+            .append(&coord, kind(), &serde_json::json!({"n": 1}))
             .expect("append");
         let entries = store.query(&Region::entity("entity:frontier-readonly"));
         assert_eq!(entries.len(), 1);
@@ -136,4 +168,87 @@ fn read_only_open_bootstraps_frontier_from_rebuilt_index() {
     assert_eq!(snapshot.emitted_hlc, max_hlc_before_close);
     assert_eq!(snapshot.applied_hlc, HlcPoint::ORIGIN);
     assert_eq!(snapshot.oldest_pending_write_age_ms, None);
+}
+
+#[test]
+fn single_append_start_fault_fires_before_watermarks_advance() {
+    let dir = TempDir::new().expect("temp dir");
+    let config = config_with_fault(&dir, |point| {
+        matches!(
+            point,
+            InjectionPoint::SingleAppendStart { entity }
+                if entity == FRONTIER_FAULT_ENTITY
+        )
+    });
+    let store = Store::open(config).expect("open store");
+    let bootstrap = store.dangerous_watermark_snapshot();
+    let coord = coord(FRONTIER_FAULT_ENTITY);
+
+    assert_fault_injected(store.append(&coord, kind(), &serde_json::json!({"n": 1})));
+
+    let snapshot = store.dangerous_watermark_snapshot();
+    assert_eq!(snapshot, bootstrap);
+    assert!(store
+        .query(&Region::entity(FRONTIER_FAULT_ENTITY))
+        .is_empty());
+}
+
+#[test]
+fn single_append_written_fault_fires_after_written_before_visible() {
+    let dir = TempDir::new().expect("temp dir");
+    let config = config_with_fault(&dir, |point| {
+        matches!(
+            point,
+            InjectionPoint::SingleAppendWritten { entity }
+                if entity == FRONTIER_FAULT_ENTITY
+        )
+    });
+    let store = Store::open(config).expect("open store");
+    let bootstrap = store.dangerous_watermark_snapshot();
+    let coord = coord(FRONTIER_FAULT_ENTITY);
+
+    assert_fault_injected(store.append(&coord, kind(), &serde_json::json!({"n": 1})));
+
+    let snapshot = store.dangerous_watermark_snapshot();
+    assert!(snapshot.accepted_hlc > bootstrap.accepted_hlc);
+    assert_eq!(snapshot.written_hlc, snapshot.accepted_hlc);
+    assert_eq!(snapshot.durable_hlc, bootstrap.durable_hlc);
+    assert_eq!(snapshot.visible_hlc, bootstrap.visible_hlc);
+    assert_eq!(snapshot.emitted_hlc, bootstrap.emitted_hlc);
+    assert!(snapshot.oldest_pending_write_age_ms.is_some());
+    assert!(store
+        .query(&Region::entity(FRONTIER_FAULT_ENTITY))
+        .is_empty());
+}
+
+#[test]
+fn single_append_published_fault_fires_after_visibility_before_receipt() {
+    let dir = TempDir::new().expect("temp dir");
+    let config = config_with_fault(&dir, |point| {
+        matches!(
+            point,
+            InjectionPoint::SingleAppendPublished { entity }
+                if entity == FRONTIER_FAULT_ENTITY
+        )
+    });
+    let store = Store::open(config).expect("open store");
+    let bootstrap = store.dangerous_watermark_snapshot();
+    let coord = coord(FRONTIER_FAULT_ENTITY);
+
+    assert_fault_injected(store.append(&coord, kind(), &serde_json::json!({"n": 1})));
+
+    let visible = store.query(&Region::entity(FRONTIER_FAULT_ENTITY));
+    assert_eq!(
+        visible.len(),
+        1,
+        "PROPERTY: published injection fires after query visibility"
+    );
+
+    let snapshot = store.dangerous_watermark_snapshot();
+    assert!(snapshot.visible_hlc > snapshot.durable_hlc);
+    assert_eq!(snapshot.durable_hlc, bootstrap.durable_hlc);
+    assert_eq!(snapshot.emitted_hlc, snapshot.visible_hlc);
+    assert_eq!(snapshot.written_hlc, snapshot.visible_hlc);
+    assert_eq!(snapshot.accepted_hlc, snapshot.visible_hlc);
+    assert!(snapshot.oldest_pending_write_age_ms.is_some());
 }

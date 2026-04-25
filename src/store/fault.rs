@@ -29,8 +29,10 @@
 use crate::store::StoreError;
 use std::sync::Arc;
 
+type InjectionPointFilter = Box<dyn Fn(&InjectionPoint) -> bool + Send + Sync>;
+
 /// Injection points in the writer where faults can be triggered.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum InjectionPoint {
     /// Before writing any batch frames.
     BatchStart {
@@ -89,13 +91,19 @@ pub enum InjectionPoint {
     /// Single event append before write.
     SingleAppendStart {
         /// Entity name for the event being appended.
-        entity: &'static str,
+        entity: String,
     },
 
     /// Single event append after write, before fsync.
     SingleAppendWritten {
         /// Entity name for the event just written.
-        entity: &'static str,
+        entity: String,
+    },
+
+    /// Single event append after publish/broadcast, before returning receipt.
+    SingleAppendPublished {
+        /// Entity name for the event just made visible.
+        entity: String,
     },
 
     /// During segment rotation.
@@ -137,7 +145,7 @@ pub struct CountdownInjector {
     /// Current count of matching points seen.
     current: std::sync::atomic::AtomicUsize,
     /// The point type to count, or None for any point.
-    filter: Option<Box<dyn Fn(InjectionPoint) -> bool + Send + Sync>>,
+    filter: Option<InjectionPointFilter>,
     /// Action to take when triggering.
     action: CountdownAction,
 }
@@ -165,7 +173,7 @@ impl CountdownInjector {
     /// Add a filter so only specific points are counted.
     pub fn with_filter<F>(mut self, filter: F) -> Self
     where
-        F: Fn(InjectionPoint) -> bool + Send + Sync + 'static,
+        F: Fn(&InjectionPoint) -> bool + Send + Sync + 'static,
     {
         self.filter = Some(Box::new(filter));
         self
@@ -201,7 +209,7 @@ impl CountdownInjector {
 
 impl FaultInjector for CountdownInjector {
     fn check(&self, point: InjectionPoint) -> Option<StoreError> {
-        let dominated = self.filter.as_ref().is_none_or(|f| f(point));
+        let dominated = self.filter.as_ref().is_none_or(|f| f(&point));
         if !dominated {
             return None;
         }
@@ -230,7 +238,7 @@ impl FaultInjector for CountdownInjector {
 /// Useful for chaos testing scenarios.
 pub struct ProbabilisticInjector {
     probability: f64,
-    filter: Option<Box<dyn Fn(InjectionPoint) -> bool + Send + Sync>>,
+    filter: Option<InjectionPointFilter>,
     action: CountdownAction,
 }
 
@@ -252,7 +260,7 @@ impl ProbabilisticInjector {
     /// Add a filter so only specific points can trigger.
     pub fn with_filter<F>(mut self, filter: F) -> Self
     where
-        F: Fn(InjectionPoint) -> bool + Send + Sync + 'static,
+        F: Fn(&InjectionPoint) -> bool + Send + Sync + 'static,
     {
         self.filter = Some(Box::new(filter));
         self
@@ -261,7 +269,7 @@ impl ProbabilisticInjector {
 
 impl FaultInjector for ProbabilisticInjector {
     fn check(&self, point: InjectionPoint) -> Option<StoreError> {
-        let dominated = self.filter.as_ref().is_none_or(|f| f(point));
+        let dominated = self.filter.as_ref().is_none_or(|f| f(&point));
         if !dominated {
             return None;
         }
@@ -316,8 +324,8 @@ mod tests {
             total_items: 5,
         };
 
-        assert!(injector.check(point).is_none());
-        assert!(injector.check(point).is_none());
+        assert!(injector.check(point.clone()).is_none());
+        assert!(injector.check(point.clone()).is_none());
         assert!(injector.check(point).is_some()); // 3rd time triggers
     }
 
@@ -332,7 +340,7 @@ mod tests {
         };
 
         // Noop counts but never returns an error.
-        assert!(injector.check(point).is_none());
+        assert!(injector.check(point.clone()).is_none());
         assert!(injector.check(point).is_none());
     }
 
@@ -375,7 +383,7 @@ mod tests {
 
         let never = ProbabilisticInjector::new(0.0, CountdownAction::Fail("boom"));
         assert!(
-            never.check(point).is_none(),
+            never.check(point.clone()).is_none(),
             "probability=0.0 must never inject a fault"
         );
 
