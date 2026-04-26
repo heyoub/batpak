@@ -70,14 +70,22 @@ impl Default for WatermarkSnapshot {
     }
 }
 
-/// Narrow operator-facing frontier view with only semantics that exist today.
+/// Operator-facing frontier view with the current internal watermark surface.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[must_use]
 pub struct FrontierView {
+    /// Highest HLC whose ordering coordinate has been assigned.
+    pub accepted_hlc: HlcPoint,
+    /// Highest HLC whose frame write returned successfully.
+    pub written_hlc: HlcPoint,
     /// Highest HLC whose containing segment range has been synced.
     pub durable_hlc: HlcPoint,
     /// Highest HLC currently visible to query readers.
     pub current_visible_hlc: HlcPoint,
+    /// Highest HLC consumed by registered in-process projections.
+    pub applied_hlc: HlcPoint,
+    /// Highest HLC for which broadcast artifacts were attempted.
+    pub emitted_hlc: HlcPoint,
     /// Signed sequence-unit gap between visible and durable at snapshot time.
     pub visible_minus_durable_seq: i64,
     /// Real elapsed age of the oldest currently undurable write, if any.
@@ -87,8 +95,12 @@ pub struct FrontierView {
 impl From<WatermarkSnapshot> for FrontierView {
     fn from(snapshot: WatermarkSnapshot) -> Self {
         Self {
+            accepted_hlc: snapshot.accepted_hlc,
+            written_hlc: snapshot.written_hlc,
             durable_hlc: snapshot.durable_hlc,
             current_visible_hlc: snapshot.visible_hlc,
+            applied_hlc: snapshot.applied_hlc,
+            emitted_hlc: snapshot.emitted_hlc,
             visible_minus_durable_seq: (snapshot.visible_hlc.global_sequence as i64)
                 - (snapshot.durable_hlc.global_sequence as i64),
             oldest_pending_write_age_ms: snapshot.oldest_pending_write_age_ms,

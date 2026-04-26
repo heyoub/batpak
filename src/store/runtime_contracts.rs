@@ -9,12 +9,16 @@ fn test_store_with_writer(tx: flume::Sender<writer::WriterCommand>) -> (Store, T
     let subscribers = Arc::new(fanout::SubscriberList::new());
     let config = Arc::new(StoreConfig::new(dir.path().to_path_buf()));
     let runtime = Arc::new(config.validated().expect("validated runtime config"));
+    let watermark_handle = writer::WatermarkState::handle();
     let store = Store {
         index: Arc::new(index::StoreIndex::new()),
         reader: Arc::new(reader::Reader::new(dir.path().to_path_buf(), 4)),
         cache: Box::new(NoCache),
         writer: Some(writer::WriterHandle::from_parts_for_test(tx, subscribers)),
-        watermark_handle: writer::WatermarkState::handle(),
+        projection_registry: projection::registry::ProjectionRegistry::new(Arc::clone(
+            &watermark_handle,
+        )),
+        watermark_handle,
         lifecycle_gate: parking_lot::Mutex::new(()),
         config,
         runtime,

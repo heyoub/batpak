@@ -15,6 +15,7 @@ use crate::store::config::duration_micros;
 pub(crate) struct ProjectionOutcome<T> {
     state: Option<T>,
     returned_generation: u64,
+    applied_sequence: Option<u64>,
 }
 
 impl<T> ProjectionOutcome<T> {
@@ -22,14 +23,24 @@ impl<T> ProjectionOutcome<T> {
         Self {
             state: None,
             returned_generation,
+            applied_sequence: None,
         }
     }
 
-    pub(super) fn new(state: Option<T>, returned_generation: u64) -> Self {
+    pub(super) fn new(
+        state: Option<T>,
+        returned_generation: u64,
+        applied_sequence: Option<u64>,
+    ) -> Self {
         Self {
             state,
             returned_generation,
+            applied_sequence,
         }
+    }
+
+    pub(super) fn applied_sequence(&self) -> Option<u64> {
+        self.applied_sequence
     }
 
     /// Consume the outcome and return `(generation, state)`.
@@ -85,9 +96,10 @@ pub(super) fn finish_projection<T>(
     started_at: std::time::Instant,
     state: Option<T>,
     returned_generation: u64,
+    applied_sequence: u64,
 ) -> ProjectionOutcome<T> {
     record_total_time(timings, started_at);
-    ProjectionOutcome::new(state, returned_generation)
+    ProjectionOutcome::new(state, returned_generation, Some(applied_sequence))
 }
 
 pub(super) fn finish_empty_projection<T>(

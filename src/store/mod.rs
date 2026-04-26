@@ -73,6 +73,7 @@ use crate::guard::{Denial, GateSet};
 pub(crate) use config::now_us;
 use index::StoreIndex;
 use parking_lot::Mutex;
+use projection::registry::ProjectionRegistry;
 use segment::scan::Reader;
 use serde::Serialize;
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -105,6 +106,7 @@ pub struct Store<State = Open> {
     pub(crate) cache: Box<dyn ProjectionCache>,
     pub(crate) writer: Option<WriterHandle>,
     pub(crate) watermark_handle: WatermarkAdvanceHandle,
+    pub(crate) projection_registry: ProjectionRegistry,
     pub(crate) lifecycle_gate: Mutex<()>,
     pub(crate) config: Arc<StoreConfig>,
     pub(crate) runtime: Arc<config::ValidatedStoreConfig>,
@@ -374,6 +376,7 @@ impl Store<Open> {
             &reader,
         )?;
         let watermark_handle = writer.watermark_handle();
+        let projection_registry = ProjectionRegistry::new(Arc::clone(&watermark_handle));
 
         let store = Self {
             index,
@@ -381,6 +384,7 @@ impl Store<Open> {
             cache,
             writer: Some(writer),
             watermark_handle,
+            projection_registry,
             lifecycle_gate: Mutex::new(()),
             config,
             runtime,
@@ -1069,12 +1073,14 @@ impl Store<ReadOnly> {
 
         let open_hlc = bootstrap_open_hlc(&runtime, &index)?;
         let watermark_handle = WatermarkState::bootstrap_handle(open_hlc);
+        let projection_registry = ProjectionRegistry::new(Arc::clone(&watermark_handle));
         let store = Self {
             index,
             reader,
             cache,
             writer: None,
             watermark_handle,
+            projection_registry,
             lifecycle_gate: Mutex::new(()),
             config,
             runtime,
@@ -1267,6 +1273,32 @@ impl<State> Store<State> {
     #[cfg(any(test, feature = "dangerous-test-hooks"))]
     pub fn dangerous_watermark_snapshot(&self) -> WatermarkSnapshot {
         self.watermark_handle.lock().snapshot()
+    }
+
+    /// Register a projection ID in the applied-frontier registry.
+    #[cfg(any(test, feature = "dangerous-test-hooks"))]
+    pub fn dangerous_register_projection(&self, projection_id: &str) {
+        self.projection_registry.register(projection_id.to_owned());
+    }
+
+    /// Register the same projection ID used by `project::<T>()` for `entity`.
+    #[cfg(any(test, feature = "dangerous-test-hooks"))]
+    pub fn dangerous_register_projection_for<T: 'static>(&self, entity: &str) {
+        self.projection_registry
+            .register(ProjectionRegistry::id_for_type::<T>(entity));
+    }
+
+    /// Report projection progress directly for focused frontier tests.
+    #[cfg(any(test, feature = "dangerous-test-hooks"))]
+    pub fn dangerous_notify_projection_applied(&self, projection_id: &str, point: HlcPoint) {
+        self.projection_registry
+            .notify_applied(projection_id.to_owned(), point);
+    }
+
+    /// Remove a projection ID from the applied-frontier registry.
+    #[cfg(any(test, feature = "dangerous-test-hooks"))]
+    pub fn dangerous_unregister_projection(&self, projection_id: &str) {
+        self.projection_registry.unregister(projection_id);
     }
 }
 

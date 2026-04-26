@@ -78,7 +78,7 @@ impl WatermarkState {
             written_hlc: point,
             durable_hlc: point,
             visible_hlc: point,
-            applied_hlc: HlcPoint::ORIGIN,
+            applied_hlc: point,
             emitted_hlc: point,
             pending_write_start: None,
         }
@@ -118,6 +118,10 @@ impl WatermarkState {
 
     pub(crate) fn advance_emitted(&mut self, point: HlcPoint) {
         self.emitted_hlc = self.emitted_hlc.max(point);
+    }
+
+    pub(crate) fn advance_applied(&mut self, point: HlcPoint) {
+        self.applied_hlc = self.applied_hlc.max(point);
     }
 
     pub(crate) fn snapshot(&self) -> WatermarkSnapshot {

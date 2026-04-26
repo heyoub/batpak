@@ -256,7 +256,7 @@ where
     // state actually reflects, a subsequent relevant append would be silently
     // "consumed" against stale data.
 
-    match dispatch {
+    let outcome = match dispatch {
         ProjectionDispatch::Empty => Ok(finish_empty_projection(
             &mut timings,
             t_start,
@@ -269,21 +269,23 @@ where
                 &slot.bytes,
                 "group-local projection cache deserialize failed (falling back)",
             ) {
-                return Ok(finish_projection(
+                Ok(finish_projection(
                     &mut timings,
                     t_start,
                     Some(value),
                     slot.generation,
-                ));
+                    slot.watermark,
+                ))
+            } else {
+                fallback_to_full_replay::<T, I, State>(
+                    store,
+                    entity,
+                    freshness,
+                    &replay,
+                    t_start,
+                    &mut timings,
+                )
             }
-            fallback_to_full_replay::<T, I, State>(
-                store,
-                entity,
-                freshness,
-                &replay,
-                t_start,
-                &mut timings,
-            )
         }
 
         ProjectionDispatch::GroupLocalIncremental { slot, replay } => {
@@ -300,21 +302,23 @@ where
                     slot.watermark,
                 )?;
                 store_projection_value(store, &execution, &cached_state);
-                return Ok(finish_projection(
+                Ok(finish_projection(
                     &mut timings,
                     t_start,
                     Some(cached_state),
                     replay.plan.generation,
-                ));
+                    replay.watermark,
+                ))
+            } else {
+                fallback_to_full_replay::<T, I, State>(
+                    store,
+                    entity,
+                    freshness,
+                    &replay,
+                    t_start,
+                    &mut timings,
+                )
             }
-            fallback_to_full_replay::<T, I, State>(
-                store,
-                entity,
-                freshness,
-                &replay,
-                t_start,
-                &mut timings,
-            )
         }
 
         ProjectionDispatch::ExternalCacheThenReplay { replay } => {
@@ -330,6 +334,26 @@ where
             replay_execution(entity, freshness, &replay, t_start),
             &mut timings,
         ),
+    }?;
+
+    notify_projection_applied::<T, State>(store, entity, &outcome);
+    Ok(outcome)
+}
+
+fn notify_projection_applied<T, State>(
+    store: &Store<State>,
+    entity: &str,
+    outcome: &ProjectionOutcome<T>,
+) where
+    T: 'static,
+{
+    if let Some(sequence) = outcome.applied_sequence() {
+        if let Some(point) = store.index.hlc_for_global_sequence(sequence) {
+            store.projection_registry.notify_applied(
+                super::registry::ProjectionRegistry::id_for_type::<T>(entity),
+                point,
+            );
+        }
     }
 }
 
@@ -396,6 +420,7 @@ where
                         execution.started_at,
                         Some(cached_state),
                         plan_generation,
+                        execution.replay.watermark,
                     ));
                 }
             }
@@ -417,6 +442,7 @@ where
                         execution.started_at,
                         Some(value),
                         plan_generation,
+                        meta.watermark,
                     ));
                 }
             }
@@ -496,6 +522,7 @@ where
         execution.started_at,
         result,
         plan_generation,
+        execution.replay.watermark,
     ))
 }
 

@@ -481,6 +481,19 @@ impl StoreIndex {
             .collect()
     }
 
+    pub(crate) fn hlc_for_global_sequence(
+        &self,
+        global_sequence: u64,
+    ) -> Option<crate::store::stats::HlcPoint> {
+        self.by_id
+            .iter()
+            .find(|entry| entry.value().global_sequence == global_sequence)
+            .map(|entry| crate::store::stats::HlcPoint {
+                wall_ms: entry.value().wall_ms,
+                global_sequence,
+            })
+    }
+
     /// Current allocator position (next sequence to be assigned).
     /// Used by checkpoint, rebuild, writer, and stats/diagnostics.
     pub(crate) fn global_sequence(&self) -> u64 {

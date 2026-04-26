@@ -13,7 +13,9 @@
 //!
 //! SEEDED: deterministic tempdir-based open.
 
-use batpak::prelude::{Coordinate, EventKind, Region};
+use batpak::prelude::{
+    Coordinate, Event, EventKind, EventSourced, Freshness, JsonValueInput, Region,
+};
 use batpak::store::{
     CountdownAction, CountdownInjector, FrontierView, HlcPoint, InjectionPoint, ReadOnly, Store,
     StoreConfig, StoreError, WatermarkSnapshot,
@@ -25,6 +27,30 @@ const FRONTIER_FAULT_ENTITY: &str = "entity:frontier-fault";
 
 fn kind() -> EventKind {
     EventKind::custom(0xF, 0x90)
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+struct FrontierProjection {
+    count: usize,
+}
+
+impl EventSourced for FrontierProjection {
+    type Input = JsonValueInput;
+
+    fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
+        (!events.is_empty()).then_some(Self {
+            count: events.len(),
+        })
+    }
+
+    fn apply_event(&mut self, _event: &Event<serde_json::Value>) {
+        self.count += 1;
+    }
+
+    fn relevant_event_kinds() -> &'static [EventKind] {
+        static KINDS: [EventKind; 1] = [EventKind::custom(0xF, 0x90)];
+        &KINDS
+    }
 }
 
 fn coord(entity: &str) -> Coordinate {
@@ -87,7 +113,7 @@ fn bootstrap_watermark_snapshot_matches_lifecycle_open_event() {
     assert_eq!(snapshot.durable_hlc, open_hlc);
     assert_eq!(snapshot.visible_hlc, open_hlc);
     assert_eq!(snapshot.emitted_hlc, open_hlc);
-    assert_eq!(snapshot.applied_hlc, HlcPoint::ORIGIN);
+    assert_eq!(snapshot.applied_hlc, open_hlc);
     assert_eq!(snapshot.oldest_pending_write_age_ms, None);
 
     assert_eq!(frontier.durable_hlc, open_hlc);
@@ -125,7 +151,7 @@ fn open_after_close_advances_open_hlc_past_max_pre_close() {
     assert_eq!(snapshot.durable_hlc, open_hlc);
     assert_eq!(snapshot.visible_hlc, open_hlc);
     assert_eq!(snapshot.emitted_hlc, open_hlc);
-    assert_eq!(snapshot.applied_hlc, HlcPoint::ORIGIN);
+    assert_eq!(snapshot.applied_hlc, open_hlc);
 }
 
 #[test]
@@ -161,7 +187,7 @@ fn read_only_reopen_does_not_emit_lifecycle_event() {
     assert_eq!(snapshot.durable_hlc, snapshot.accepted_hlc);
     assert_eq!(snapshot.visible_hlc, snapshot.accepted_hlc);
     assert_eq!(snapshot.emitted_hlc, snapshot.accepted_hlc);
-    assert_eq!(snapshot.applied_hlc, HlcPoint::ORIGIN);
+    assert_eq!(snapshot.applied_hlc, snapshot.accepted_hlc);
     assert_eq!(snapshot.oldest_pending_write_age_ms, None);
 }
 
@@ -230,7 +256,7 @@ fn single_append_cadence_gt_1_visible_exceeds_durable_frontier() {
     assert!(snapshot.accepted_hlc >= snapshot.written_hlc);
     assert!(snapshot.written_hlc >= snapshot.visible_hlc);
     assert_eq!(snapshot.durable_hlc, bootstrap.durable_hlc);
-    assert_eq!(snapshot.applied_hlc, HlcPoint::ORIGIN);
+    assert_eq!(snapshot.applied_hlc, bootstrap.applied_hlc);
     assert_eq!(snapshot.emitted_hlc, snapshot.visible_hlc);
     assert!(snapshot.oldest_pending_write_age_ms.is_some());
 
@@ -298,8 +324,128 @@ fn read_only_open_bootstraps_frontier_from_rebuilt_index() {
     assert_eq!(snapshot.durable_hlc, snapshot.accepted_hlc);
     assert_eq!(snapshot.visible_hlc, snapshot.accepted_hlc);
     assert_eq!(snapshot.emitted_hlc, snapshot.accepted_hlc);
-    assert_eq!(snapshot.applied_hlc, HlcPoint::ORIGIN);
+    assert_eq!(snapshot.applied_hlc, snapshot.accepted_hlc);
     assert_eq!(snapshot.oldest_pending_write_age_ms, None);
+}
+
+#[test]
+fn applied_starts_at_open_hlc_when_no_projections_registered() {
+    let dir = TempDir::new().expect("temp dir");
+    let store = Store::open(StoreConfig::new(dir.path())).expect("open store");
+    let open_hlc = store.dangerous_watermark_snapshot().applied_hlc;
+    let coord = coord("entity:frontier-applied-none");
+
+    for n in 0..3 {
+        store
+            .append(&coord, kind(), &serde_json::json!({"n": n}))
+            .expect("append");
+    }
+
+    let snapshot = store.dangerous_watermark_snapshot();
+    assert_eq!(
+        snapshot.applied_hlc, open_hlc,
+        "PROPERTY: without registered projections, applied remains at the bootstrap frontier"
+    );
+    assert_ne!(snapshot.applied_hlc, snapshot.emitted_hlc);
+}
+
+#[test]
+fn applied_advances_with_single_projection() {
+    let dir = TempDir::new().expect("temp dir");
+    let store = Store::open(StoreConfig::new(dir.path())).expect("open store");
+    let coord = coord("entity:frontier-applied-one");
+    store.dangerous_register_projection_for::<FrontierProjection>("entity:frontier-applied-one");
+
+    for n in 0..3 {
+        store
+            .append(&coord, kind(), &serde_json::json!({"n": n}))
+            .expect("append");
+    }
+
+    let projected = store
+        .project::<FrontierProjection>("entity:frontier-applied-one", &Freshness::Consistent)
+        .expect("project")
+        .expect("projection state");
+    assert_eq!(projected.count, 3);
+
+    let snapshot = store.dangerous_watermark_snapshot();
+    let frontier = store.diagnostics().frontier;
+    assert_eq!(snapshot.applied_hlc, snapshot.emitted_hlc);
+    assert_eq!(frontier.applied_hlc, snapshot.applied_hlc);
+}
+
+#[test]
+fn applied_is_min_across_two_projections() {
+    let dir = TempDir::new().expect("temp dir");
+    let store = Store::open(StoreConfig::new(dir.path())).expect("open store");
+    let coord = coord("entity:frontier-applied-two");
+
+    for n in 0..5 {
+        store
+            .append(&coord, kind(), &serde_json::json!({"n": n}))
+            .expect("append");
+    }
+
+    let entries = store.query(&Region::entity("entity:frontier-applied-two"));
+    assert_eq!(entries.len(), 5);
+    let second_event = point(&entries[1]);
+    let fifth_event = point(&entries[4]);
+
+    store.dangerous_register_projection("frontier:p1");
+    store.dangerous_register_projection("frontier:p2");
+    store.dangerous_notify_projection_applied("frontier:p1", fifth_event);
+    store.dangerous_notify_projection_applied("frontier:p2", second_event);
+
+    let snapshot = store.dangerous_watermark_snapshot();
+    assert_eq!(snapshot.applied_hlc, second_event);
+    assert_ne!(snapshot.applied_hlc, fifth_event);
+
+    store.dangerous_notify_projection_applied("frontier:p2", fifth_event);
+    assert_eq!(
+        store.dangerous_watermark_snapshot().applied_hlc,
+        fifth_event
+    );
+}
+
+#[test]
+fn applied_unregister_recomputes_from_remaining_projection_progress() {
+    fn run_case(unregister_fast_first: bool) {
+        let dir = TempDir::new().expect("temp dir");
+        let store = Store::open(StoreConfig::new(dir.path())).expect("open store");
+        let coord = coord(if unregister_fast_first {
+            "entity:frontier-unregister-fast"
+        } else {
+            "entity:frontier-unregister-slow"
+        });
+
+        for n in 0..5 {
+            store
+                .append(&coord, kind(), &serde_json::json!({"n": n}))
+                .expect("append");
+        }
+
+        let entries = store.query(&Region::entity(coord.entity()));
+        assert_eq!(entries.len(), 5);
+        let slow = point(&entries[1]);
+        let fast = point(&entries[4]);
+
+        store.dangerous_register_projection("frontier:fast");
+        store.dangerous_register_projection("frontier:slow");
+        store.dangerous_notify_projection_applied("frontier:fast", fast);
+        store.dangerous_notify_projection_applied("frontier:slow", slow);
+        assert_eq!(store.dangerous_watermark_snapshot().applied_hlc, slow);
+
+        if unregister_fast_first {
+            store.dangerous_unregister_projection("frontier:fast");
+            assert_eq!(store.dangerous_watermark_snapshot().applied_hlc, slow);
+        } else {
+            store.dangerous_unregister_projection("frontier:slow");
+            assert_eq!(store.dangerous_watermark_snapshot().applied_hlc, fast);
+        }
+    }
+
+    run_case(true);
+    run_case(false);
 }
 
 #[test]

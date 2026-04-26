@@ -16,6 +16,8 @@ use red_kinds::*;
 use red_versioned_counters::*;
 
 use batpak::prelude::*;
+use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::Arc;
 use tempfile::TempDir;
 
 #[test]
@@ -169,6 +171,38 @@ fn incremental_apply_delta_only() {
         8,
         "PROPERTY: incremental projection must reach correct total (5 cached + 3 new = 8).\n\
          Investigate: src/store/projection/flow.rs incremental apply path."
+    );
+    store.close().expect("close");
+}
+
+#[test]
+fn maybe_stale_uses_milliseconds_not_microseconds_for_external_cache_age() {
+    let dir = TempDir::new().expect("temp dir");
+    let cache_path = dir.path().join("cache");
+    let now_us = Arc::new(AtomicI64::new(1_000_000));
+    let clock = Arc::clone(&now_us);
+    let config = StoreConfig::new(dir.path().join("data"))
+        .with_clock(Some(Arc::new(move || clock.load(Ordering::SeqCst))));
+    let store = Store::open_with_native_cache(config, &cache_path).expect("open with cache");
+    let coord = Coordinate::new("stale:entity", "stale:scope").expect("coord");
+
+    store.append(&coord, kind_a(), &payload(1)).expect("append");
+    let first: Option<AllCounter> = store
+        .project("stale:entity", &Freshness::Consistent)
+        .expect("initial project");
+    assert_eq!(first.expect("cached").count, 1);
+
+    store.append(&coord, kind_a(), &payload(2)).expect("append");
+    now_us.store(1_002_000, Ordering::SeqCst);
+    let maybe_stale: Option<AllCounter> = store
+        .project("stale:entity", &Freshness::MaybeStale { max_stale_ms: 5 })
+        .expect("maybe stale project");
+
+    assert_eq!(
+        maybe_stale.expect("stale cache hit").count,
+        1,
+        "PROPERTY: 2ms-old external cache rows are fresh under max_stale_ms=5; \
+         the freshness comparison must convert milliseconds to microseconds."
     );
     store.close().expect("close");
 }
