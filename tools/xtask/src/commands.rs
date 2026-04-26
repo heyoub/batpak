@@ -42,7 +42,10 @@ const REPO_WIDE_ALL_FEATURES_MUTANT_FILES: &[&str] = &[
 const REPO_WIDE_NO_DEFAULT_MUTANT_FILES: &[&str] = &["src/store/**/*.rs"];
 const WRITER_COMMIT_MUTANT_FILES: &[&str] = &["src/store/write/*.rs"];
 const CURSOR_MUTANT_FILES: &[&str] = &["src/store/delivery/cursor.rs"];
-const PROJECTION_MUTANT_FILES: &[&str] = &["src/store/projection/flow/**/*.rs"];
+const PROJECTION_MUTANT_FILES: &[&str] = &[
+    "src/store/projection/flow/**/*.rs",
+    "src/store/projection/registry.rs",
+];
 const SEGMENT_SCAN_MUTANT_FILES: &[&str] = &["src/store/segment/scan/**/*.rs"];
 const HASH_CHAIN_REPLAY_ALL_FEATURES_MUTANT_FILES: &[&str] = &[
     "src/store/ancestry/by_hash.rs",

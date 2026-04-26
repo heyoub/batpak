@@ -1,4 +1,5 @@
 pub(crate) mod flow;
+pub(crate) mod registry;
 pub(crate) mod watch;
 
 pub use watch::{ProjectionWatcher, WatcherError};
