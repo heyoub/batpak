@@ -191,9 +191,10 @@ impl WriterState<'_> {
     ) -> Result<(), crate::store::StoreError> {
         self.index
             .publish(publish_up_to, "publish_then_broadcast_unfenced")?;
-        self.watermark_handle.lock().advance_visible(frontier_point);
         self.broadcast_commit_artifacts(notifications, envelopes);
-        self.watermark_handle.lock().advance_emitted(frontier_point);
+        self.watermark_handle
+            .lock()
+            .advance_visible_and_emitted(frontier_point);
         Ok(())
     }
 
@@ -217,12 +218,11 @@ impl WriterState<'_> {
         envelopes: impl IntoIterator<Item = CommittedEventEnvelope>,
     ) -> Result<(), crate::store::StoreError> {
         self.index.finish_visibility_fence(token, publish_up_to)?;
-        if let Some(point) = frontier_point {
-            self.watermark_handle.lock().advance_visible(point);
-        }
         self.broadcast_commit_artifacts(notifications, envelopes);
         if let Some(point) = frontier_point {
-            self.watermark_handle.lock().advance_emitted(point);
+            self.watermark_handle
+                .lock()
+                .advance_visible_and_emitted(point);
         }
         Ok(())
     }

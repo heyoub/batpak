@@ -20,7 +20,10 @@ use batpak::store::{
     CountdownAction, CountdownInjector, FrontierView, HlcPoint, InjectionPoint, ReadOnly, Store,
     StoreConfig, StoreError, WatermarkSnapshot,
 };
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::Barrier;
+use std::thread;
 use tempfile::TempDir;
 
 const FRONTIER_FAULT_ENTITY: &str = "entity:frontier-fault";
@@ -291,6 +294,120 @@ fn explicit_sync_advances_durable_and_clears_pending_write_age() {
         store.diagnostics().frontier.oldest_pending_write_age_ms,
         None
     );
+}
+
+#[test]
+fn frontier_api_is_public_and_returns_consistent_view() {
+    let dir = TempDir::new().expect("temp dir");
+    let config = StoreConfig::new(dir.path()).with_sync_every_n_events(1);
+    let store = Store::open(config).expect("open store");
+    let coord = coord("entity:frontier-api");
+
+    for n in 0..5 {
+        store
+            .append(&coord, kind(), &serde_json::json!({"n": n}))
+            .expect("append");
+    }
+    store.sync().expect("sync");
+
+    let frontier = store.frontier();
+    assert!(frontier.accepted_hlc > HlcPoint::ORIGIN);
+    assert_eq!(frontier.accepted_hlc, frontier.written_hlc);
+    assert_eq!(frontier.accepted_hlc, frontier.durable_hlc);
+    assert_eq!(frontier.accepted_hlc, frontier.current_visible_hlc);
+    assert_eq!(frontier.emitted_hlc, frontier.current_visible_hlc);
+    assert!(frontier.current_visible_hlc >= frontier.applied_hlc);
+    assert_eq!(frontier.visible_minus_durable_seq, 0);
+    assert_eq!(frontier.oldest_pending_write_age_ms, None);
+    assert_eq!(store.diagnostics().frontier, frontier);
+}
+
+#[test]
+fn frontier_visible_minus_durable_seq_is_positive_under_cadence_gt_1() {
+    let dir = TempDir::new().expect("temp dir");
+    let config = StoreConfig::new(dir.path()).with_sync_every_n_events(1000);
+    let store = Store::open(config).expect("open store");
+    let coord = coord("entity:frontier-api-gap");
+
+    for n in 0..10 {
+        store
+            .append(&coord, kind(), &serde_json::json!({"n": n}))
+            .expect("append");
+    }
+
+    let before_sync = store.frontier();
+    assert!(before_sync.current_visible_hlc > before_sync.durable_hlc);
+    assert!(before_sync.visible_minus_durable_seq > 0);
+    assert!(before_sync.oldest_pending_write_age_ms.is_some());
+
+    store.sync().expect("sync");
+
+    let after_sync = store.frontier();
+    assert_eq!(after_sync.current_visible_hlc, after_sync.durable_hlc);
+    assert_eq!(after_sync.visible_minus_durable_seq, 0);
+    assert_eq!(after_sync.oldest_pending_write_age_ms, None);
+}
+
+#[test]
+fn concurrent_snapshot_never_observes_torn_emitted_below_visible() {
+    let dir = TempDir::new().expect("temp dir");
+    let config = StoreConfig::new(dir.path()).with_sync_every_n_events(1000);
+    let store = Arc::new(Store::open(config).expect("open store"));
+    let coord = coord("entity:frontier-concurrent");
+    let start = Arc::new(Barrier::new(2));
+    let done = Arc::new(AtomicBool::new(false));
+
+    let observer_store = Arc::clone(&store);
+    let observer_start = Arc::clone(&start);
+    let observer_done = Arc::clone(&done);
+    let observer = thread::Builder::new()
+        .name("frontier-snapshot-observer".to_string())
+        .spawn(move || {
+            observer_start.wait();
+            let mut snapshots = Vec::new();
+            while !observer_done.load(Ordering::Acquire) {
+                let frontier = observer_store.frontier();
+                if frontier.current_visible_hlc > HlcPoint::ORIGIN {
+                    snapshots.push(frontier);
+                }
+                thread::yield_now();
+            }
+            for _ in 0..256 {
+                let frontier = observer_store.frontier();
+                if frontier.current_visible_hlc > HlcPoint::ORIGIN {
+                    snapshots.push(frontier);
+                }
+            }
+            snapshots
+        })
+        .expect("spawn frontier observer");
+
+    start.wait();
+    for n in 0..300 {
+        store
+            .append(&coord, kind(), &serde_json::json!({"n": n}))
+            .expect("append");
+        if n % 8 == 0 {
+            thread::yield_now();
+        }
+    }
+    done.store(true, Ordering::Release);
+
+    let snapshots = observer.join().expect("observer thread");
+    assert!(
+        !snapshots.is_empty(),
+        "PROPERTY: concurrent observer must collect frontier snapshots"
+    );
+    for frontier in snapshots {
+        assert!(
+            frontier.emitted_hlc >= frontier.current_visible_hlc,
+            "PROPERTY: emitted must never be observed below visible: {frontier:?}"
+        );
+        assert!(
+            frontier.current_visible_hlc >= frontier.applied_hlc,
+            "PROPERTY: applied must never be observed above visible: {frontier:?}"
+        );
+    }
 }
 
 #[test]

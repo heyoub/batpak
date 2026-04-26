@@ -19,7 +19,7 @@ use crate::store::config::ValidatedStoreConfig;
 use crate::store::index::{DiskPos, StoreIndex};
 use crate::store::segment::sidx::kind_to_raw;
 use crate::store::segment::{self, Active, FramePayloadRef, Segment};
-use crate::store::stats::{HlcPoint, WatermarkSnapshot};
+use crate::store::stats::{FrontierView, HlcPoint, WatermarkSnapshot};
 use crate::store::{AppendReceipt, StoreConfig, StoreError};
 use flume::{Receiver, Sender};
 use parking_lot::Mutex;
@@ -120,6 +120,11 @@ impl WatermarkState {
         self.emitted_hlc = self.emitted_hlc.max(point);
     }
 
+    pub(crate) fn advance_visible_and_emitted(&mut self, point: HlcPoint) {
+        self.advance_visible(point);
+        self.advance_emitted(point);
+    }
+
     pub(crate) fn advance_applied(&mut self, point: HlcPoint) {
         self.applied_hlc = self.applied_hlc.max(point);
     }
@@ -132,6 +137,53 @@ impl WatermarkState {
             visible_hlc: self.visible_hlc,
             applied_hlc: self.applied_hlc,
             emitted_hlc: self.emitted_hlc,
+            oldest_pending_write_age_ms: self
+                .pending_write_start
+                .map(|start| u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX)),
+        }
+    }
+
+    pub(crate) fn snapshot_view(&self) -> FrontierView {
+        debug_assert!(
+            self.accepted_hlc >= self.written_hlc,
+            "accepted must be >= written: {:?} vs {:?}",
+            self.accepted_hlc,
+            self.written_hlc
+        );
+        debug_assert!(
+            self.written_hlc >= self.durable_hlc,
+            "written must be >= durable: {:?} vs {:?}",
+            self.written_hlc,
+            self.durable_hlc
+        );
+        debug_assert!(
+            self.accepted_hlc >= self.visible_hlc,
+            "accepted must be >= visible: {:?} vs {:?}",
+            self.accepted_hlc,
+            self.visible_hlc
+        );
+        debug_assert!(
+            self.visible_hlc >= self.applied_hlc,
+            "visible must be >= applied: {:?} vs {:?}",
+            self.visible_hlc,
+            self.applied_hlc
+        );
+        debug_assert!(
+            self.emitted_hlc >= self.visible_hlc,
+            "emitted must be >= visible: {:?} vs {:?}",
+            self.emitted_hlc,
+            self.visible_hlc
+        );
+
+        FrontierView {
+            accepted_hlc: self.accepted_hlc,
+            written_hlc: self.written_hlc,
+            durable_hlc: self.durable_hlc,
+            current_visible_hlc: self.visible_hlc,
+            applied_hlc: self.applied_hlc,
+            emitted_hlc: self.emitted_hlc,
+            visible_minus_durable_seq: (self.visible_hlc.global_sequence as i64)
+                - (self.durable_hlc.global_sequence as i64),
             oldest_pending_write_age_ms: self
                 .pending_write_start
                 .map(|start| u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX)),

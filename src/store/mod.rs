@@ -1269,6 +1269,11 @@ impl<State> Store<State> {
         lifecycle::diagnostics(self)
     }
 
+    /// Return the current operator-facing frontier view.
+    pub fn frontier(&self) -> FrontierView {
+        self.watermark_handle.lock().snapshot_view()
+    }
+
     /// Return a coherent clone of the internal frontier watermarks.
     #[cfg(any(test, feature = "dangerous-test-hooks"))]
     pub fn dangerous_watermark_snapshot(&self) -> WatermarkSnapshot {
