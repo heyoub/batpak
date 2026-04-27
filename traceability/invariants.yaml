@@ -180,7 +180,7 @@
     - ART-STORE-REBUILD
     - ART-DX-DOCS
 - id: INV-FAULT-INJECT-GATED
-  statement: Fault injection infrastructure (InjectionPoint, FaultInjector trait, maybe_inject hooks) is compiled only under the dangerous-test-hooks feature gate and has zero cost in production builds.
+  statement: Fault injection infrastructure (InjectionPoint, FaultInjector trait, maybe_inject hooks) is compiled only under the dangerous-test-hooks feature gate; the repository enables that feature by default for its developer/test profile, and downstream lean builds can omit it with default-features = false.
   artifacts:
     - ART-STORE-FAULT
     - ART-STORE-CONFIG

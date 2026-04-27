@@ -55,6 +55,28 @@ instead of pretending.
   - this wave now proves invalid BEGIN counts, missing `hash_chain`, and CRC corruption on the second staged batch item all fail closed on reopen
   - remaining uncovered defensive branches are mostly other corrupt-frame shapes such as footer disagreement and non-CRC decode failures deeper in the slow path
 
+### Invariant: Durable frontier observations stay honest under writer faults
+
+- Harness pattern: `Fault-Injection Harness`
+- Location:
+  - `tests/durable_frontier_semantics.rs`
+  - `tests/durable_frontier_chaos.rs`
+- Command used:
+  - `cargo test --test durable_frontier_semantics --features dangerous-test-hooks`
+  - `cargo test --test durable_frontier_chaos --features dangerous-test-hooks`
+- Line/function coverage delta: added in the Phase 0 durable-frontier wave;
+  exact JSON delta not recorded in this ledger
+- Mutation delta:
+  - writer commit protocol smoke held at 5/5 caught = 100%
+  - projection replay/freshness smoke held at 7/7 caught = 100%
+- Remaining known blind spots:
+  - `writer_panic_at_single_append_written_is_not_durable_on_reopen` is
+    intentionally ignored because an in-process writer panic leaves the complete
+    unsynced frame recoverable from host page cache; proving true torn-tail
+    non-durability needs a VM/block-device harness
+  - the public frontier exposes observation truth, not durability-gated read or
+    wait semantics; those are later policy work
+
 ## Equivalence Harness
 
 ### Invariant: Derived projections stay equivalent to the hand-written target
