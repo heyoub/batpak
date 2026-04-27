@@ -215,6 +215,79 @@ Reopen observability contract:
 - `SYSTEM_OPEN_COMPLETED` is an ordinary persisted event after append: it participates in the same query, snapshot, compaction, retention, and tombstone rules as any other stored event, so it does not have a special auto-prune path
 - the `batpak:` coordinate prefix is reserved for library-owned lifecycle streams; application code should avoid emitting events at that prefix
 
+### Durable Frontier
+
+The store exposes a six-watermark frontier that tracks how far events have
+advanced through the commit, visibility, fanout, and projection pipeline:
+
+- `accepted`: highest HLC the writer has accepted into the commit pipeline
+- `written`: highest HLC whose frame has been written to the active segment
+- `durable`: highest HLC whose frame has been fsynced
+- `visible`: highest HLC visible to query readers
+- `emitted`: highest HLC for which broadcast artifacts were attempted
+- `applied`: highest HLC consumed by all registered projections
+
+At every torn-free observation, the frontier preserves these ordering
+relations:
+
+```text
+accepted >= written >= durable
+accepted >= visible >= applied
+emitted  >= visible
+```
+
+Use `Store::frontier()` to get a coherent `FrontierView` snapshot. The same
+composition path feeds `Store::diagnostics().frontier`, so
+`store.diagnostics().frontier == store.frontier()` for a single observation.
+The view is composed while holding the watermark mutex, and visible/emitted
+advance through a composite helper so external observers cannot see
+commit-time torn states such as `emitted < visible`.
+
+`FrontierView` intentionally exposes the operator-supportable fields:
+
+- `durable_hlc`
+- `current_visible_hlc`
+- `visible_minus_durable_seq`
+- `oldest_pending_write_age_ms`
+- `applied_hlc`
+- `emitted_hlc`
+
+`visible_minus_durable_seq` is signed. A positive value means visible events
+are ahead of durable sync, while a negative value can appear in internal
+commit windows where durability advances before visibility. Pending-write age
+is measured with `Instant`; it is not derived from HLC wall time.
+
+On open, the store computes:
+
+```text
+open_hlc = max(max_recovered_hlc, last_close_hlc, wall_time_floor)
+```
+
+Mutable opens emit a durable `SYSTEM_OPEN_COMPLETED` lifecycle event and then
+bootstrap the frontier to the emitted open HLC. Read-only opens do not emit a
+lifecycle event, but still bootstrap from the recovered index high-water mark
+and wall-time floor. The frontier starts with all six watermarks at `open_hlc`,
+including `applied`, so a store with zero registered projections does not
+report projection lag below the lifecycle open frontier.
+
+Projection progress is tracked through the projection registry. `applied_hlc`
+is the minimum HLC across registered projections. Registering a projection
+seeds it at the current applied frontier so late registration cannot move the
+global frontier backward. Unregistering a projection recomputes the minimum
+from the remaining projections: removing the fastest projection can freeze
+`applied_hlc`, while removing the slowest can allow it to advance.
+
+Single-append fault injection defines three ordinals for frontier tests:
+
+- `SingleAppendStart`: before any watermark advance
+- `SingleAppendWritten`: after `written` advances and before durable sync
+- `SingleAppendPublished`: after `visible` and `emitted` advance and before
+  the receipt is returned
+
+See `docs/adr/ADR-0014-durable-frontier.md` for design rationale, and
+`INV-FRONTIER-*` in `traceability/invariants.yaml` for the formal invariant
+records.
+
 Position hints are persistence-affecting, not just API sugar: non-root
 `lane`/`depth` must survive live append, mmap reopen, checkpoint reopen, SIDX
 header reconstruction, and full rebuild.
