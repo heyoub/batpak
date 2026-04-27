@@ -104,7 +104,19 @@ pub(crate) fn release(args: ReleaseArgs) -> Result<()> {
     consumer_smoke()?;
     docs::docs(DocsArgs { open: false })?;
     if args.dry_run {
-        cargo(["publish", "--dry-run", "--allow-dirty"])
+        let mut publish = Command::new("cargo");
+        publish.current_dir(repo_root()?).args([
+            "publish",
+            "--dry-run",
+            "--allow-dirty",
+            "--config",
+            "patch.crates-io.batpak-macros-support.path=\"crates/macros-support\"",
+            "--config",
+            "patch.crates-io.batpak-macros.path=\"crates/macros\"",
+            "--config",
+            "patch.crates-io.batpak-bench-support.path=\"crates/bench-support\"",
+        ]);
+        run(publish)
     } else {
         bail!("release without --dry-run is intentionally disabled in xtask")
     }
