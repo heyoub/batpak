@@ -111,7 +111,7 @@
     - ART-CONTROL-PLANE-TESTS
     - ART-ADR-CONTROL-PLANE
 - id: FLOW-FRONTIER-OBSERVE
-  summary: Store::frontier() returns a FrontierView composed under one watermark mutex acquisition; diagnostics() consumes the same path so external observers and operators see the identical six-watermark snapshot with no torn intermediate states.
+  summary: Store::frontier() returns a FrontierView composed under one watermark mutex acquisition; diagnostics() consumes the same path so external observers and operators see the identical six-watermark snapshot with no torn intermediate states. The current cadence>1 single-append visible-before-durable gap is tracked as OBS-CADENCE-GT-1-VISIBLE-EXCEEDS-DURABLE, not as an invariant.
   artifacts:
     - ART-FRONTIER-WATERMARK-STATE
     - ART-FRONTIER-TYPES
