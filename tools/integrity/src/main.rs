@@ -84,6 +84,16 @@ struct FlowRecord {
 }
 
 #[derive(Debug, Deserialize)]
+struct ObservationRecord {
+    id: String,
+    status: String,
+    statement: String,
+    evidence: Vec<String>,
+    #[serde(default)]
+    artifacts: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
 struct ArtifactRecord {
     id: String,
     kind: String,
@@ -255,6 +265,8 @@ fn traceability_check() -> Result<()> {
     let invariants: Vec<InvariantRecord> =
         load_yaml(&trace_dir.join("invariants.yaml")).context("invariants")?;
     let flows: Vec<FlowRecord> = load_yaml(&trace_dir.join("flows.yaml")).context("flows")?;
+    let observations: Vec<ObservationRecord> =
+        load_yaml(&trace_dir.join("observations.yaml")).context("observations")?;
     let artifacts: Vec<ArtifactRecord> =
         load_yaml(&trace_dir.join("artifacts.yaml")).context("artifacts")?;
 
@@ -267,6 +279,10 @@ fn traceability_check() -> Result<()> {
         "duplicate invariant id",
     )?;
     ensure_unique_ids(flows.iter().map(|f| f.id.as_str()), "duplicate flow id")?;
+    ensure_unique_ids(
+        observations.iter().map(|o| o.id.as_str()),
+        "duplicate observation id",
+    )?;
     ensure_unique_ids(
         artifacts.iter().map(|a| a.id.as_str()),
         "duplicate artifact id",
@@ -334,6 +350,37 @@ fn traceability_check() -> Result<()> {
                 format!(
                     "flow {} references missing artifact {}",
                     flow.id, artifact_id
+                ),
+            )?;
+            referenced_artifacts.insert(artifact_id.as_str());
+        }
+    }
+
+    for observation in &observations {
+        ensure(
+            !observation.status.trim().is_empty(),
+            format!("observation {} missing status", observation.id),
+        )?;
+        ensure(
+            !observation.statement.trim().is_empty(),
+            format!("observation {} missing statement", observation.id),
+        )?;
+        ensure(
+            !observation.evidence.is_empty(),
+            format!("observation {} must reference evidence", observation.id),
+        )?;
+        for evidence in &observation.evidence {
+            ensure(
+                !evidence.trim().is_empty(),
+                format!("observation {} has blank evidence", observation.id),
+            )?;
+        }
+        for artifact_id in &observation.artifacts {
+            ensure(
+                artifact_map.contains_key(artifact_id.as_str()),
+                format!(
+                    "observation {} references missing artifact {}",
+                    observation.id, artifact_id
                 ),
             )?;
             referenced_artifacts.insert(artifact_id.as_str());

@@ -99,5 +99,7 @@ visible while avoiding a production panic injection API.
   `INV-FRONTIER-FAULT-ORDINALS`, `INV-TEST-PANIC-AS-ASSERTION`
 - `traceability/flows.yaml`: `FLOW-FRONTIER-OBSERVE`,
   `FLOW-FRONTIER-BOOTSTRAP`, `FLOW-FRONTIER-CHAOS-RECOVERY`
+- `traceability/observations.yaml`:
+  `OBS-CADENCE-GT-1-VISIBLE-EXCEEDS-DURABLE`
 - `tests/durable_frontier_semantics.rs`
 - `tests/durable_frontier_chaos.rs`

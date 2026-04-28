@@ -243,14 +243,17 @@ The view is composed while holding the watermark mutex, and visible/emitted
 advance through a composite helper so external observers cannot see
 commit-time torn states such as `emitted < visible`.
 
-`FrontierView` intentionally exposes the operator-supportable fields:
+`FrontierView` exposes the current six-watermark observation surface plus two
+derived lag fields:
 
+- `accepted_hlc`
+- `written_hlc`
 - `durable_hlc`
 - `current_visible_hlc`
-- `visible_minus_durable_seq`
-- `oldest_pending_write_age_ms`
 - `applied_hlc`
 - `emitted_hlc`
+- `visible_minus_durable_seq`
+- `oldest_pending_write_age_ms`
 
 `visible_minus_durable_seq` is signed. A positive value means visible events
 are ahead of durable sync, while a negative value can appear in internal
@@ -286,7 +289,9 @@ Single-append fault injection defines three ordinals for frontier tests:
 
 See `docs/adr/ADR-0014-durable-frontier.md` for design rationale, and
 `INV-FRONTIER-*` in `traceability/invariants.yaml` for the formal invariant
-records.
+records. The current visible-before-durable cadence gap is intentionally
+registered as `OBS-CADENCE-GT-1-VISIBLE-EXCEEDS-DURABLE` in
+`traceability/observations.yaml` rather than as an invariant.
 
 Position hints are persistence-affecting, not just API sugar: non-root
 `lane`/`depth` must survive live append, mmap reopen, checkpoint reopen, SIDX

@@ -1,0 +1,17 @@
+- id: OBS-CADENCE-GT-1-VISIBLE-EXCEEDS-DURABLE
+  status: current-fact
+  statement: >
+    On single append with sync.every_n_events > 1, current_visible_hlc can
+    exceed durable_hlc until the next explicit or cadence-driven sync. Batch
+    append and cadence=1 do not exhibit this gap at the observation points
+    defended by the durable frontier semantics harness. A later durability-gated
+    read contract may tighten which frontier ordinary reads are allowed to
+    observe.
+  evidence:
+    - "tests/durable_frontier_semantics.rs :: single_append_cadence_gt_1_visible_exceeds_durable_frontier"
+    - "tests/durable_frontier_semantics.rs :: frontier_visible_minus_durable_seq_is_positive_under_cadence_gt_1"
+    - "tests/durable_frontier_semantics.rs :: single_append_published_fault_fires_after_visibility_before_receipt"
+  replaces_when: Phase 1/2 durable-read contract lands
+  artifacts:
+    - ART-FRONTIER-WATERMARK-STATE
+    - ART-FRONTIER-SEMANTICS-TESTS
