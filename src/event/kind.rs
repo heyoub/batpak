@@ -134,6 +134,8 @@ impl EventKind {
     pub const SYSTEM_BATCH_COMMIT: Self = Self(0x0007);
     /// Store lifecycle receipt emitted after a successful mutable open.
     pub const SYSTEM_OPEN_COMPLETED: Self = Self(0x0008);
+    /// Store lifecycle receipt emitted during an explicit graceful close.
+    pub const SYSTEM_CLOSE_COMPLETED: Self = Self(0x0009);
     /// Persisted gate-denial audit receipt.
     pub const SYSTEM_DENIAL: Self = Self(0x000F);
     /// Effect: an error was observed during processing.

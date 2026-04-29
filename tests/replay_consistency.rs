@@ -95,11 +95,15 @@ fn event_kind(spec: &AppendSpec) -> EventKind {
 }
 
 fn capture_snapshot<State>(store: &Store<State>) -> StoreSnapshot {
-    let stats = store.stats();
-    let visible = store
+    let visible: Vec<_> = store
         .query(&Region::all())
         .into_iter()
-        .filter(|entry| entry.kind != EventKind::SYSTEM_OPEN_COMPLETED)
+        .filter(|entry| {
+            !matches!(
+                entry.kind,
+                EventKind::SYSTEM_OPEN_COMPLETED | EventKind::SYSTEM_CLOSE_COMPLETED
+            )
+        })
         .map(|entry| {
             let payload = store
                 .get(entry.event_id)
@@ -116,9 +120,14 @@ fn capture_snapshot<State>(store: &Store<State>) -> StoreSnapshot {
             }
         })
         .collect();
+    let global_sequence = visible
+        .iter()
+        .map(|entry: &VisibleSummary| entry.global_sequence)
+        .max()
+        .unwrap_or(0);
     StoreSnapshot {
-        global_sequence: stats.global_sequence,
-        event_count: stats.event_count as u64,
+        global_sequence,
+        event_count: visible.len() as u64,
         visible,
     }
 }

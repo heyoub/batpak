@@ -159,7 +159,12 @@ fn ground_truth(corpus: &[GroundTruthEvent], region: &Region) -> HashSet<(String
 fn actual(entries: &[IndexEntry]) -> HashSet<(String, String, u32)> {
     entries
         .iter()
-        .filter(|e| e.kind != EventKind::SYSTEM_OPEN_COMPLETED)
+        .filter(|e| {
+            !matches!(
+                e.kind,
+                EventKind::SYSTEM_OPEN_COMPLETED | EventKind::SYSTEM_CLOSE_COMPLETED
+            )
+        })
         .map(|e| {
             (
                 e.coord.entity().to_owned(),
@@ -217,7 +222,12 @@ fn ground_truth_ordered(
 fn actual_ordered(entries: &[IndexEntry]) -> Vec<(u64, String, String, u32)> {
     entries
         .iter()
-        .filter(|e| e.kind != EventKind::SYSTEM_OPEN_COMPLETED)
+        .filter(|e| {
+            !matches!(
+                e.kind,
+                EventKind::SYSTEM_OPEN_COMPLETED | EventKind::SYSTEM_CLOSE_COMPLETED
+            )
+        })
         .map(|e| {
             (
                 e.global_sequence
@@ -241,7 +251,12 @@ fn assert_matches(
     let actual_entries = store.query(region);
     let filtered_entries: Vec<_> = actual_entries
         .into_iter()
-        .filter(|entry| entry.kind != EventKind::SYSTEM_OPEN_COMPLETED)
+        .filter(|entry| {
+            !matches!(
+                entry.kind,
+                EventKind::SYSTEM_OPEN_COMPLETED | EventKind::SYSTEM_CLOSE_COMPLETED
+            )
+        })
         .collect();
     let actual_set = actual(&filtered_entries);
     let expected = ground_truth(corpus, region);
@@ -270,27 +285,33 @@ fn assert_cursor_matches(
     let expected = ground_truth_ordered(corpus, region);
     let mut cursor = store.cursor_guaranteed(region);
     let mut actual_entries = Vec::new();
+    let max_batches = expected.len().saturating_add(4);
 
-    loop {
+    for _ in 0..=max_batches {
         let batch = cursor.poll_batch(batch_size);
         if batch.is_empty() {
-            break;
+            let unique: HashSet<_> = actual_entries.iter().cloned().collect();
+            assert_eq!(
+                unique.len(),
+                actual_entries.len(),
+                "topology `{label}` cursor query `{query_name}` produced duplicates with batch_size={batch_size}"
+            );
+            assert_eq!(
+                actual_entries, expected,
+                "topology `{label}` cursor query `{query_name}` mismatch with batch_size={batch_size}.\n\
+                 expected={expected:?}\n\
+                 actual  ={actual_entries:?}\n\
+                 region={region:?}"
+            );
+            return;
         }
         actual_entries.extend(actual_ordered(&batch));
     }
-
-    let unique: HashSet<_> = actual_entries.iter().cloned().collect();
-    assert_eq!(
-        unique.len(),
-        actual_entries.len(),
-        "topology `{label}` cursor query `{query_name}` produced duplicates with batch_size={batch_size}"
-    );
-    assert_eq!(
-        actual_entries, expected,
-        "topology `{label}` cursor query `{query_name}` mismatch with batch_size={batch_size}.\n\
-         expected={expected:?}\n\
-         actual  ={actual_entries:?}\n\
-         region={region:?}"
+    panic!(
+        "topology `{label}` cursor query `{query_name}` did not terminate within {max_batches} batches. \
+         expected_len={}, actual_len={}, batch_size={batch_size}, region={region:?}",
+        expected.len(),
+        actual_entries.len()
     );
 }
 

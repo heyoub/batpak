@@ -199,14 +199,50 @@ fn ops_take_limits_count() {
         second.is_some(),
         "OPS TAKE: second recv should return Some."
     );
-    let third = ops.recv();
+    let (tx, rx) = std::sync::mpsc::channel();
+    thread::spawn(move || {
+        let exhausted = ops.recv().is_none();
+        let _ = tx.send(exhausted);
+    });
     assert!(
-        third.is_none(),
+        rx.recv_timeout(std::time::Duration::from_millis(100))
+            .expect("OPS TAKE: exhausted recv should return promptly while store is open"),
         "OPS TAKE: third recv should return None after take(2), but got Some.\n\
          Check: src/store/delivery/subscription.rs SubscriptionOps::take() limit enforcement."
     );
 
     producer.join().expect("producer thread");
+}
+
+#[test]
+fn ops_take_limit_returns_none_immediately_while_store_is_open() {
+    let (store, _dir) = test_store();
+    let store = Arc::new(store);
+    let coord = Coordinate::new("entity:take-open", "scope:test").expect("valid coord");
+    let kind = EventKind::custom(0xF, 9);
+
+    let sub = store.subscribe_lossy(&Region::entity("entity:take-open"));
+    let mut ops = sub.ops().take(1);
+    store
+        .append(&coord, kind, &serde_json::json!({"x": 1}))
+        .expect("append");
+    assert!(
+        ops.recv().is_some(),
+        "OPS TAKE OPEN: first recv should consume the single allowed notification"
+    );
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    thread::spawn(move || {
+        let exhausted = ops.recv().is_none();
+        let _ = tx.send(exhausted);
+    });
+    assert!(
+        rx.recv_timeout(std::time::Duration::from_millis(100))
+            .expect(
+                "OPS TAKE OPEN: exhausted recv must return immediately while store is still open"
+            ),
+        "OPS TAKE OPEN: exhausted recv must return None"
+    );
 }
 
 #[test]
@@ -270,9 +306,14 @@ fn ops_filter_and_take_combined() {
         "OPS COMBINED: second event should be wanted_kind."
     );
 
-    let third = ops.recv();
+    let (tx, rx) = std::sync::mpsc::channel();
+    thread::spawn(move || {
+        let exhausted = ops.recv().is_none();
+        let _ = tx.send(exhausted);
+    });
     assert!(
-        third.is_none(),
+        rx.recv_timeout(std::time::Duration::from_millis(100))
+            .expect("OPS COMBINED: exhausted recv should return promptly while store is open"),
         "OPS COMBINED: third recv should return None (take(2) exhausted), but got Some.\n\
          Check: src/store/delivery/subscription.rs filter + take interaction."
     );

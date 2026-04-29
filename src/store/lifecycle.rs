@@ -5,10 +5,48 @@ use crate::store::cold_start::{
 };
 use crate::store::segment::scan as reader;
 use crate::store::segment::{self, Active, FramePayload};
+use crate::store::write::control::AppendSubmission;
 use crate::store::{
-    Closed, CompactionConfig, CompactionStrategy, Open, Store, StoreDiagnostics, StoreError,
-    StoreStats, WriterPressure,
+    AppendOptions, Closed, CompactionConfig, CompactionStrategy, Open, Store, StoreDiagnostics,
+    StoreError, StoreStats, WriterPressure,
 };
+use serde::Serialize;
+
+#[derive(Serialize)]
+struct CloseLifecyclePayload {
+    wall_ms: u64,
+    global_sequence: u64,
+}
+
+fn append_close_completed_event(store: &Store<Open>) -> Result<(), StoreError> {
+    let close_hlc = store.watermark_handle.lock().snapshot().visible_hlc;
+    let coord = Coordinate::new("batpak:store", "batpak:lifecycle")?;
+    let submission = AppendSubmission::with_options(
+        AppendOptions::default().with_idempotency(crate::id::generate_v7_id()),
+    );
+    submission.validate_route(store)?;
+    submission.validate_idempotency(store)?;
+
+    let payload = CloseLifecyclePayload {
+        wall_ms: close_hlc.wall_ms,
+        global_sequence: close_hlc.global_sequence,
+    };
+    let event = submission.build_event(
+        &payload,
+        EventKind::SYSTEM_CLOSE_COMPLETED,
+        super::timestamp_us_for_hlc(close_hlc)?,
+    )?;
+
+    let (tx, rx) = flume::bounded(1);
+    let command = submission.into_command(coord, EventKind::SYSTEM_CLOSE_COMPLETED, event, tx);
+    store
+        .writer_ref()
+        .tx
+        .send(command)
+        .map_err(|_| StoreError::WriterCrashed)?;
+    rx.recv().map_err(|_| StoreError::WriterCrashed)??;
+    Ok(())
+}
 
 pub(crate) fn sync(store: &Store<Open>) -> Result<(), StoreError> {
     tracing::debug!(target: "batpak::flow", flow = "sync");
@@ -431,6 +469,14 @@ pub(crate) fn compact(
 pub(crate) fn close(mut store: Store<Open>) -> Result<Closed, StoreError> {
     tracing::debug!(target: "batpak::flow", flow = "close");
     let _lifecycle = store.lifecycle_gate.lock();
+    if let Err(error) = append_close_completed_event(&store) {
+        tracing::warn!(
+            target: "batpak::flow",
+            flow = "close",
+            "failed to append SYSTEM_CLOSE_COMPLETED lifecycle event: {error}"
+        );
+    }
+
     let (tx, rx) = flume::bounded(1);
     store
         .writer_ref()

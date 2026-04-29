@@ -202,7 +202,7 @@
     - ART-FRONTIER-WATERMARK-STATE
     - ART-FRONTIER-SEMANTICS-TESTS
 - id: INV-FRONTIER-OPEN-MONOTONIC
-  statement: On Store::open and Store::open_read_only, the bootstrap open_hlc satisfies open_hlc >= max_recovered_hlc and open_hlc >= last_close_hlc; this monotonicity is enforced post-emit and surfaces as StoreError::InvariantViolation if violated.
+  statement: On Store::open and Store::open_read_only, the bootstrap open_hlc satisfies open_hlc >= max_recovered_hlc and open_hlc >= last_close_hlc, where last_close_hlc is the highest HLC carried by recovered SYSTEM_CLOSE_COMPLETED lifecycle events. This monotonicity is enforced post-emit and surfaces as StoreError::InvariantViolation if violated.
   artifacts:
     - ART-FRONTIER-BOOTSTRAP
     - ART-FRONTIER-SEMANTICS-TESTS

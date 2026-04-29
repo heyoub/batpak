@@ -103,6 +103,7 @@ fn populate(store: &Store, specs: &[AppendSpec]) -> Result<(), StoreError> {
 fn summarize_entries<State>(store: &Store<State>, entries: Vec<IndexEntry>) -> Vec<EventSummary> {
     entries
         .into_iter()
+        .filter(|entry| entry.kind != EventKind::SYSTEM_CLOSE_COMPLETED)
         .map(|entry| {
             let mut payload = store
                 .get(entry.event_id)
