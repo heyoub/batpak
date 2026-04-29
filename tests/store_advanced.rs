@@ -875,8 +875,8 @@ fn corrupt_frame_in_segment_is_detected() {
             // Corrupted segment may have fewer events (some frames skipped)
             // The key assertion: we don't get MORE events than we wrote
             assert!(
-                stats.event_count <= 5,
-                "PROPERTY: a store opened with a corrupted segment must not report more events than were written — no phantom events allowed. Got {}.\n\
+                stats.event_count <= 6,
+                "PROPERTY: a store opened with a corrupted segment must not report more events than the original data plus lifecycle rows — no phantom events allowed. Got {}.\n\
                  Investigate: src/store/segment/scan.rs scan_segment CRC check, src/store/mod.rs open.\n\
                  Common causes: CRC check skipped, corrupt bytes decoded as valid frames.\n\
                  Run: cargo test --test store_advanced corrupt_frame_in_segment_is_detected",
@@ -988,28 +988,33 @@ fn subscription_ops_filter_chains_correctly() {
         })
         .expect("spawn subscription ops filter writer thread");
 
-    let result = std::thread::Builder::new()
-        .name("store-advanced-sub-ops-filter-recv".into())
-        .spawn(move || {
-            let mut results = Vec::new();
-            while let Some(n) = ops.recv() {
-                results.push(n);
-            }
-            results
-        })
-        .expect("spawn subscription ops filter recv thread")
-        .join()
-        .expect("join subscription ops filter recv thread");
+    let result = [ops.recv(), ops.recv()];
 
     writer.join().expect("writer");
 
     assert_eq!(
-        result.len(),
+        result.iter().flatten().count(),
         2,
         "PROPERTY: chained filter with AND semantics must pass only kind1 events (2 of 3).\n\
          Investigate: src/store/delivery/subscription.rs SubscriptionOps::filter, recv.\n\
          Common causes: filters not chained, last filter replaces previous.\n\
          Run: cargo test --test store_advanced subscription_ops_filter_chains_correctly"
+    );
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::Builder::new()
+        .name("store-advanced-sub-ops-filter-exhausted-recv".into())
+        .spawn(move || {
+            let exhausted = ops.recv().is_none();
+            let _ = tx.send(exhausted);
+        })
+        .expect("spawn exhausted subscription ops filter recv thread");
+    assert!(
+        rx.recv_timeout(std::time::Duration::from_millis(100))
+            .expect(
+                "PROPERTY: exhausted filtered SubscriptionOps::take recv must return immediately while store is open"
+            ),
+        "PROPERTY: exhausted filtered SubscriptionOps::take recv must return None"
     );
 
     store.sync().expect("sync");
@@ -1044,26 +1049,31 @@ fn subscription_ops_take_limits_count() {
         .expect("writer");
 
     let mut ops = sub.ops().take(3);
-    let result = std::thread::Builder::new()
-        .name("store-advanced-sub-ops-take-recv".into())
-        .spawn(move || {
-            let mut results = Vec::new();
-            while let Some(n) = ops.recv() {
-                results.push(n);
-            }
-            results
-        })
-        .expect("spawn subscription ops take recv thread")
-        .join()
-        .expect("join subscription ops take recv thread");
+    let result = [ops.recv(), ops.recv(), ops.recv()];
 
     assert_eq!(
-        result.len(),
+        result.iter().flatten().count(),
         3,
         "PROPERTY: SubscriptionOps::take(3) must return at most 3 notifications from 5 events.\n\
          Investigate: src/store/delivery/subscription.rs SubscriptionOps::take, recv count check.\n\
          Common causes: count not incremented in recv, limit check after return.\n\
          Run: cargo test --test store_advanced subscription_ops_take_limits_count"
+    );
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::Builder::new()
+        .name("store-advanced-sub-ops-take-exhausted-recv".into())
+        .spawn(move || {
+            let exhausted = ops.recv().is_none();
+            let _ = tx.send(exhausted);
+        })
+        .expect("spawn exhausted subscription ops take recv thread");
+    assert!(
+        rx.recv_timeout(std::time::Duration::from_millis(100))
+            .expect(
+                "PROPERTY: exhausted SubscriptionOps::take recv must return immediately while store is open"
+            ),
+        "PROPERTY: exhausted SubscriptionOps::take recv must return None"
     );
 
     store.sync().expect("sync");
@@ -1111,6 +1121,19 @@ fn cursor_empty_stream_stays_empty_across_poll_and_batch_calls() {
     );
 
     store.close().expect("close");
+}
+
+#[test]
+fn cursor_all_region_first_poll_includes_global_sequence_zero() {
+    let (store, _dir) = test_store();
+    let mut cursor = store.cursor_guaranteed(&Region::all());
+    let first = cursor
+        .poll()
+        .expect("fresh all-region cursor must see the lifecycle open event");
+    assert_eq!(
+        first.global_sequence, 0,
+        "PROPERTY: a fresh cursor must not skip global_sequence 0 when started=false"
+    );
 }
 
 #[test]

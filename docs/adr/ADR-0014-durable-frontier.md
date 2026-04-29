@@ -88,6 +88,17 @@ Test-local panic injectors must carry a module-level `clippy::panic` opt-out
 with a traceable `justifies:` comment. This keeps panic-as-assertion discipline
 visible while avoiding a production panic injection API.
 
+## Errata
+Phase 1A closed the lifecycle stub described above by adding
+`SYSTEM_CLOSE_COMPLETED` on explicit `Store::close()`. Drop still performs only
+best-effort shutdown and does not emit a close lifecycle event. Reopen scans
+recovered close lifecycle events, verifies they advance monotonically in log
+order, and uses the highest close HLC as `last_close_hlc` for bootstrap.
+
+This is a closure of the Phase 0 durable-frontier decision, not a new
+architecture decision. The visible-vs-durable cadence observation remains
+unchanged by close-event emission.
+
 ## Related ADRs
 - [ADR-0002: Single Writer Thread Commit Path](ADR-0002-single-writer-thread.md)
 - [ADR-0006: Writer Restart Policy](ADR-0006-restart-policy.md)

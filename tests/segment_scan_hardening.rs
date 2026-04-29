@@ -259,7 +259,12 @@ fn pathological_frame_length_is_bounded_not_panicking() {
     let entries: Vec<_> = store
         .query(&Region::all())
         .into_iter()
-        .filter(|entry| entry.kind != EventKind::SYSTEM_OPEN_COMPLETED)
+        .filter(|entry| {
+            !matches!(
+                entry.kind,
+                EventKind::SYSTEM_OPEN_COMPLETED | EventKind::SYSTEM_CLOSE_COMPLETED
+            )
+        })
         .collect();
 
     assert!(
@@ -306,7 +311,12 @@ fn sidx_footer_magic_mismatch_falls_back_to_frame_scan() {
     let entries: Vec<_> = store
         .query(&Region::all())
         .into_iter()
-        .filter(|entry| entry.kind != EventKind::SYSTEM_OPEN_COMPLETED)
+        .filter(|entry| {
+            !matches!(
+                entry.kind,
+                EventKind::SYSTEM_OPEN_COMPLETED | EventKind::SYSTEM_CLOSE_COMPLETED
+            )
+        })
         .collect();
 
     // The frame scan recovers every frame despite the SIDX trailer being
@@ -462,7 +472,12 @@ fn corruption_inside_staged_batch_discards_the_whole_batch() {
     let entries: Vec<_> = reopened
         .query(&Region::all())
         .into_iter()
-        .filter(|entry| entry.kind != EventKind::SYSTEM_OPEN_COMPLETED)
+        .filter(|entry| {
+            !matches!(
+                entry.kind,
+                EventKind::SYSTEM_OPEN_COMPLETED | EventKind::SYSTEM_CLOSE_COMPLETED
+            )
+        })
         .collect();
     assert_eq!(
         entries.len(),

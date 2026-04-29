@@ -145,6 +145,7 @@ fn raw_to_kind_impl(raw: u16, counts: Option<&mut ReservedKindFallbackStats>) ->
             0x0006 => EventKind::SYSTEM_BATCH_BEGIN,
             0x0007 => EventKind::SYSTEM_BATCH_COMMIT,
             0x0008 => EventKind::SYSTEM_OPEN_COMPLETED,
+            0x0009 => EventKind::SYSTEM_CLOSE_COMPLETED,
             0x000F => EventKind::SYSTEM_DENIAL,
             0x0FFE => EventKind::TOMBSTONE,
             0x0000 => EventKind::DATA,
@@ -869,6 +870,7 @@ mod tests {
             EventKind::SYSTEM_BATCH_BEGIN,
             EventKind::SYSTEM_BATCH_COMMIT,
             EventKind::SYSTEM_OPEN_COMPLETED,
+            EventKind::SYSTEM_CLOSE_COMPLETED,
             EventKind::TOMBSTONE,
             EventKind::DATA,
         ] {
@@ -916,14 +918,14 @@ mod tests {
     #[test]
     fn raw_to_kind_counted_tracks_reserved_fallbacks() {
         let mut counts = ReservedKindFallbackStats::default();
-        assert_eq!(raw_to_kind_counted(0x0009, &mut counts), EventKind::DATA);
+        assert_eq!(raw_to_kind_counted(0x000A, &mut counts), EventKind::DATA);
         assert_eq!(
             raw_to_kind_counted(0xD0FF, &mut counts),
             EventKind::EFFECT_ERROR
         );
         assert_eq!(counts.system, 1);
         assert_eq!(counts.effect, 1);
-        assert_eq!(counts.system_histogram.get(&0x0009), Some(&1));
+        assert_eq!(counts.system_histogram.get(&0x000A), Some(&1));
         assert_eq!(counts.effect_histogram.get(&0xD0FF), Some(&1));
     }
 

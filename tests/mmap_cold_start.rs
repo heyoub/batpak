@@ -224,7 +224,7 @@ fn mmap_open_report_counts_reserved_kind_fallbacks() {
     seed_store(&dir, 12);
 
     let artifact = dir.path().join("index.fbati");
-    rewrite_first_mmap_kind(&artifact, 0x0009);
+    rewrite_first_mmap_kind(&artifact, 0x000A);
 
     let store = Store::open(mmap_config(&dir)).expect("reopen with reserved-kind fallback");
     let report = store
@@ -237,7 +237,7 @@ fn mmap_open_report_counts_reserved_kind_fallbacks() {
         "PROPERTY: mmap reopen must surface reserved system-kind fallback counts through open_report."
     );
     assert_eq!(
-        report.unknown_reserved_system_kind_histogram.get(&0x0009),
+        report.unknown_reserved_system_kind_histogram.get(&0x000A),
         Some(&1)
     );
     assert_eq!(report.unknown_reserved_effect_kind_fallbacks, 0);
@@ -249,7 +249,7 @@ fn mmap_open_report_counts_reserved_kind_fallbacks() {
     assert_eq!(
         report
             .cumulative_unknown_reserved_system_kind_histogram
-            .get(&0x0009),
+            .get(&0x000A),
         Some(&1)
     );
     assert_eq!(
@@ -273,7 +273,7 @@ fn mmap_open_report_counts_reserved_kind_fallbacks() {
     assert_eq!(
         report
             .cumulative_unknown_reserved_system_kind_histogram
-            .get(&0x0009),
+            .get(&0x000A),
         Some(&1)
     );
     store.close().expect("close second reopen");

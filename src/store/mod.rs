@@ -211,11 +211,32 @@ fn highest_index_hlc(index: &StoreIndex) -> HlcPoint {
         .unwrap_or(HlcPoint::ORIGIN)
 }
 
-fn last_close_hlc(_index: &StoreIndex) -> HlcPoint {
-    // Phase 0 consumes a close frontier if one exists, but the current segment
-    // format has no SYSTEM_CLOSE_COMPLETED lifecycle event yet. Close emission
-    // remains out of scope for this step.
-    HlcPoint::ORIGIN
+fn last_close_hlc(index: &StoreIndex) -> Result<HlcPoint, StoreError> {
+    let mut close_points: Vec<_> = index
+        .all_entries()
+        .into_iter()
+        .filter(|entry| entry.kind == EventKind::SYSTEM_CLOSE_COMPLETED)
+        .map(|entry| HlcPoint {
+            wall_ms: entry.wall_ms,
+            global_sequence: entry.global_sequence,
+        })
+        .collect();
+    close_points.sort_by_key(|point| point.global_sequence);
+
+    let mut latest = HlcPoint::ORIGIN;
+    for close_hlc in close_points {
+        if close_hlc < latest {
+            return Err(StoreError::InvariantViolation {
+                reason: format!(
+                    "SYSTEM_CLOSE_COMPLETED HLC regressed in log order: previous {:?}, later {:?}",
+                    latest, close_hlc
+                ),
+            });
+        }
+        latest = close_hlc;
+    }
+
+    Ok(latest)
 }
 
 fn lifecycle_open_candidate(
@@ -255,7 +276,7 @@ fn bootstrap_open_hlc(
     index: &StoreIndex,
 ) -> Result<HlcPoint, StoreError> {
     let max_recovered_hlc = highest_index_hlc(index);
-    let last_close_hlc = last_close_hlc(index);
+    let last_close_hlc = last_close_hlc(index)?;
     let open_hlc = lifecycle_open_candidate(runtime, max_recovered_hlc, last_close_hlc)?;
     validate_bootstrap_hlc(open_hlc, max_recovered_hlc, last_close_hlc)?;
     Ok(open_hlc)
@@ -315,7 +336,7 @@ fn append_open_completed_event(
                 receipt.event_id
             ),
         })?;
-    validate_bootstrap_hlc(open_hlc, open_candidate, last_close_hlc(&store.index))?;
+    validate_bootstrap_hlc(open_hlc, open_candidate, last_close_hlc(&store.index)?)?;
     Ok(open_hlc)
 }
 

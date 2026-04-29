@@ -110,7 +110,12 @@ impl RoutingSummary {
             while cursor < entries_by_entity.len()
                 && entries_by_entity[cursor].coord.entity() == entity.as_str()
             {
+                let previous = cursor;
                 cursor += 1;
+                debug_assert!(
+                    cursor > previous,
+                    "restore routing entity-run scan must advance cursor"
+                );
             }
             let last_sequence = entries_by_entity[cursor - 1].global_sequence;
             entity_runs.push(EntityRun {
@@ -228,4 +233,63 @@ impl RoutingSummary {
 pub(crate) fn recommended_restore_chunk_count(entry_count: usize) -> usize {
     let chunks = entry_count.div_ceil(65_536);
     chunks.clamp(1, 32)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::coordinate::Coordinate;
+    use crate::event::{EventKind, HashChain};
+    use crate::store::index::{interner::InternId, DiskPos};
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::Duration;
+
+    fn entry(seq: u64, entity: &str) -> IndexEntry {
+        IndexEntry {
+            event_id: u128::from(seq),
+            correlation_id: u128::from(seq),
+            causation_id: None,
+            coord: Coordinate::new(entity, "scope").expect("coordinate"),
+            entity_id: InternId::sentinel(),
+            scope_id: InternId::sentinel(),
+            kind: EventKind::custom(0x1, 1),
+            wall_ms: seq,
+            clock: u32::try_from(seq).expect("test sequence fits u32"),
+            dag_lane: 0,
+            dag_depth: 0,
+            hash_chain: HashChain::default(),
+            disk_pos: DiskPos::new(0, seq * 64, 64),
+            global_sequence: seq,
+        }
+    }
+
+    #[test]
+    fn routing_summary_entity_run_scan_makes_forward_progress() {
+        let entries = vec![
+            entry(0, "alpha"),
+            entry(1, "alpha"),
+            entry(2, "beta"),
+            entry(3, "beta"),
+        ];
+        let (tx, rx) = mpsc::channel();
+
+        thread::Builder::new()
+            .name("routing-summary-progress-regression".to_owned())
+            .spawn(move || {
+                let summary = RoutingSummary::from_sorted_entries(&entries, 2);
+                tx.send(summary.entity_runs)
+                    .expect("routing summary receiver is alive");
+            })
+            .expect("spawn routing summary progress regression thread");
+
+        let runs = rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("PROPERTY: routing summary entity scan must not stall");
+        assert_eq!(runs.len(), 2);
+        assert_eq!(runs[0].entity, "alpha");
+        assert_eq!(runs[0].len, 2);
+        assert_eq!(runs[1].entity, "beta");
+        assert_eq!(runs[1].len, 2);
+    }
 }

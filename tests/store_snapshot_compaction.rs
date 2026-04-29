@@ -82,7 +82,12 @@ fn user_visible_entries(store: &Store) -> Vec<batpak::store::IndexEntry> {
     store
         .query(&Region::all())
         .into_iter()
-        .filter(|entry| entry.kind != EventKind::SYSTEM_OPEN_COMPLETED)
+        .filter(|entry| {
+            !matches!(
+                entry.kind,
+                EventKind::SYSTEM_OPEN_COMPLETED | EventKind::SYSTEM_CLOSE_COMPLETED
+            )
+        })
         .collect()
 }
 

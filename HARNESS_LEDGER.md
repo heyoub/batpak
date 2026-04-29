@@ -77,6 +77,46 @@ instead of pretending.
   - the public frontier exposes observation truth, not durability-gated read or
     wait semantics; those are later policy work
 
+### Invariant: Explicit close lifecycle frontiers survive restart
+
+- Harness pattern: `Fault-Injection Harness`
+- Location:
+  - `tests/durable_frontier_semantics.rs`
+- Command used:
+  - `cargo test --test durable_frontier_semantics --features dangerous-test-hooks`
+- Line/function coverage delta: Phase 1A adds explicit-close bootstrap coverage;
+  exact JSON delta not recorded in this ledger
+- Mutation delta:
+  - writer commit protocol smoke must remain at 5/5 caught = 100%
+  - projection replay/freshness smoke must remain at 7/7 caught = 100%
+- Covered tests:
+  - `explicit_close_emits_system_close_completed_event` defends that explicit
+    `Store::close()` emits one `SYSTEM_CLOSE_COMPLETED` covering the visible
+    frontier at close time.
+  - `drop_without_explicit_close_emits_no_close_event` defends that `Drop`
+    never emits `SYSTEM_CLOSE_COMPLETED`, preserving the explicit-close-only
+    lifecycle contract.
+  - `bootstrap_open_hlc_consumes_recorded_close_hlc` defends repeated
+    graceful open/close cycles by consuming the latest recovered close
+    lifecycle HLC.
+  - `close_hlc_monotonicity_violation_surfaces_invariant_violation` records
+    the corruption shape that must fail closed once a segment-forging helper
+    exists.
+  - `ops_take_limit_returns_none_immediately_while_store_is_open` and
+    `subscription_ops_take_limits_count` are fast mutation-smoke pins for
+    exhausted `SubscriptionOps::take` behavior while the store remains open;
+    `subscription_ops_filter_chains_correctly` applies the same fail-fast
+    pattern to filtered take chains.
+  - `cursor_all_region_first_poll_includes_global_sequence_zero` and the
+    bounded cursor loop in `index_filter_composition::assert_cursor_matches`
+    are fast mutation-smoke pins added with Phase 1A so repo-wide cursor
+    progression mutants fail quickly instead of exhausting the smoke-lane
+    timeout.
+- Remaining known blind spots:
+  - `close_hlc_monotonicity_violation_surfaces_invariant_violation` is ignored
+    until the Phase 1B chaos/forging helper can construct a later-written close
+    event whose HLC regresses below a prior close event.
+
 ## Equivalence Harness
 
 ### Invariant: Derived projections stay equivalent to the hand-written target

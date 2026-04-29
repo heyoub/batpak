@@ -6,7 +6,12 @@ use std::collections::HashSet;
 fn strip_open_completed(entries: Vec<batpak::store::IndexEntry>) -> Vec<batpak::store::IndexEntry> {
     entries
         .into_iter()
-        .filter(|entry| entry.kind != EventKind::SYSTEM_OPEN_COMPLETED)
+        .filter(|entry| {
+            !matches!(
+                entry.kind,
+                EventKind::SYSTEM_OPEN_COMPLETED | EventKind::SYSTEM_CLOSE_COMPLETED
+            )
+        })
         .collect()
 }
 

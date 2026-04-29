@@ -374,8 +374,8 @@ fn cold_start_rebuilds_index() {
         let store = Store::open(config).expect("cold start open");
         let stats = store.stats();
         assert_eq!(
-            stats.event_count, 22,
-            "COLD START FAILED: index should have 20 events after rebuild, got {}. \
+            stats.event_count, 23,
+            "COLD START FAILED: index should have 20 data events plus lifecycle rows after rebuild, got {}. \
              Investigate: src/store/mod.rs Store::open cold start scan.",
             stats.event_count
         );

@@ -55,10 +55,17 @@ fn populate(store: &Store) {
     seed(store, "entity:beta", "scope:A", KIND_A, 5);
 }
 
-fn strip_open_completed(entries: Vec<batpak::store::IndexEntry>) -> Vec<batpak::store::IndexEntry> {
+fn strip_lifecycle_events(
+    entries: Vec<batpak::store::IndexEntry>,
+) -> Vec<batpak::store::IndexEntry> {
     entries
         .into_iter()
-        .filter(|entry| entry.kind != EventKind::SYSTEM_OPEN_COMPLETED)
+        .filter(|entry| {
+            !matches!(
+                entry.kind,
+                EventKind::SYSTEM_OPEN_COMPLETED | EventKind::SYSTEM_CLOSE_COMPLETED
+            )
+        })
         .collect()
 }
 
@@ -149,7 +156,7 @@ fn run_matrix(label: &str, store: &Store) {
     // KindFilter::Any is a degenerate composition that must return every event
     // when combined with an "all" region. Ensures the B4 path (limit applied
     // during collection for Any) doesn't drop entries.
-    let any_kind = strip_open_completed(store.query(&Region::all().with_fact(KindFilter::Any)));
+    let any_kind = strip_lifecycle_events(store.query(&Region::all().with_fact(KindFilter::Any)));
     assert_eq!(
         any_kind.len(),
         15,

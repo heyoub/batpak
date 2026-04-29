@@ -1015,7 +1015,7 @@ mod tests {
         let reserved_kind_fallbacks = ReservedKindFallbackStats {
             system: 2,
             effect: 1,
-            system_histogram: std::iter::once((0x0009u16, 2usize)).collect(),
+            system_histogram: std::iter::once((0x000Au16, 2usize)).collect(),
             effect_histogram: std::iter::once((0x1001u16, 1usize)).collect(),
         };
         write_checkpoint_with_reserved_kind_fallbacks(&idx, dir, 0, 4096, &reserved_kind_fallbacks)

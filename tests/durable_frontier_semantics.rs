@@ -79,6 +79,14 @@ fn lifecycle_open_count<State>(store: &Store<State>) -> usize {
         .count()
 }
 
+fn lifecycle_close_entries<State>(store: &Store<State>) -> Vec<batpak::store::IndexEntry> {
+    store
+        .query(&Region::entity("batpak:store"))
+        .into_iter()
+        .filter(|entry| entry.kind == EventKind::SYSTEM_CLOSE_COMPLETED)
+        .collect()
+}
+
 fn config_with_fault(
     dir: &TempDir,
     filter: impl Fn(&InjectionPoint) -> bool + Send + Sync + 'static,
@@ -192,6 +200,124 @@ fn read_only_reopen_does_not_emit_lifecycle_event() {
     assert_eq!(snapshot.emitted_hlc, snapshot.accepted_hlc);
     assert_eq!(snapshot.applied_hlc, snapshot.accepted_hlc);
     assert_eq!(snapshot.oldest_pending_write_age_ms, None);
+}
+
+#[test]
+fn explicit_close_emits_system_close_completed_event() {
+    let dir = TempDir::new().expect("temp dir");
+    let coord = coord("entity:frontier-close-event");
+
+    let max_hlc_before_close = {
+        let store = Store::open(StoreConfig::new(dir.path())).expect("open store");
+        store
+            .append(&coord, kind(), &serde_json::json!({"n": 1}))
+            .expect("append");
+        let entries = store.query(&Region::entity("entity:frontier-close-event"));
+        assert_eq!(entries.len(), 1);
+        let max_hlc = point(&entries[0]);
+        store.close().expect("close");
+        max_hlc
+    };
+
+    let read_only =
+        Store::<ReadOnly>::open_read_only(StoreConfig::new(dir.path())).expect("open read-only");
+    let close_entries = lifecycle_close_entries(&read_only);
+
+    assert_eq!(
+        close_entries.len(),
+        1,
+        "PROPERTY: explicit close must emit exactly one SYSTEM_CLOSE_COMPLETED event"
+    );
+    assert!(
+        point(&close_entries[0]) >= max_hlc_before_close,
+        "PROPERTY: close lifecycle HLC must cover all visible events at close; close={:?}, max={max_hlc_before_close:?}",
+        point(&close_entries[0])
+    );
+}
+
+#[test]
+fn drop_without_explicit_close_emits_no_close_event() {
+    let dir = TempDir::new().expect("temp dir");
+    let coord = coord("entity:frontier-drop-no-close");
+
+    {
+        let store = Store::open(StoreConfig::new(dir.path())).expect("open store");
+        store
+            .append(&coord, kind(), &serde_json::json!({"n": 1}))
+            .expect("append");
+    }
+
+    {
+        let read_only = Store::<ReadOnly>::open_read_only(StoreConfig::new(dir.path()))
+            .expect("open read-only");
+        assert!(
+            lifecycle_close_entries(&read_only).is_empty(),
+            "PROPERTY: Drop must not emit SYSTEM_CLOSE_COMPLETED"
+        );
+    }
+
+    let reopened = Store::open(StoreConfig::new(dir.path())).expect("reopen store");
+    assert!(
+        reopened.frontier().accepted_hlc > HlcPoint::ORIGIN,
+        "PROPERTY: reopen without a close event must still bootstrap from recovered events and wall-time floor"
+    );
+}
+
+#[test]
+fn bootstrap_open_hlc_consumes_recorded_close_hlc() {
+    let dir = TempDir::new().expect("temp dir");
+    let coord = coord("entity:frontier-close-bootstrap");
+
+    let close_hlc_1 = {
+        let store = Store::open(StoreConfig::new(dir.path())).expect("open store");
+        store
+            .append(&coord, kind(), &serde_json::json!({"n": 1}))
+            .expect("append");
+        store.close().expect("close");
+
+        let read_only = Store::<ReadOnly>::open_read_only(StoreConfig::new(dir.path()))
+            .expect("open read-only");
+        let close_entries = lifecycle_close_entries(&read_only);
+        assert_eq!(close_entries.len(), 1);
+        point(&close_entries[0])
+    };
+
+    let close_hlc_2 = {
+        let store = Store::open(StoreConfig::new(dir.path())).expect("reopen store");
+        assert!(
+            store.frontier().accepted_hlc >= close_hlc_1,
+            "PROPERTY: reopen must consume the recorded close frontier"
+        );
+        store
+            .append(&coord, kind(), &serde_json::json!({"n": 2}))
+            .expect("append");
+        store.close().expect("close");
+
+        let read_only = Store::<ReadOnly>::open_read_only(StoreConfig::new(dir.path()))
+            .expect("open read-only");
+        let close_entries = lifecycle_close_entries(&read_only);
+        assert_eq!(close_entries.len(), 2);
+        let first = point(&close_entries[0]);
+        let second = point(&close_entries[1]);
+        assert!(
+            second >= first,
+            "PROPERTY: repeated graceful closes must advance monotonically; first={first:?}, second={second:?}"
+        );
+        second
+    };
+
+    let third = Store::open(StoreConfig::new(dir.path())).expect("third open");
+    let open_hlc = third.frontier().accepted_hlc;
+    assert!(open_hlc >= close_hlc_1);
+    assert!(open_hlc >= close_hlc_2);
+}
+
+#[test]
+#[ignore = "BLOCKS: requires segment-forging helper from tests/chaos/ (Phase 1B); corruption shape is close_hlc_2 < close_hlc_1, not multiple close events"]
+fn close_hlc_monotonicity_violation_surfaces_invariant_violation() {
+    panic!(
+        "PROPERTY: a later SYSTEM_CLOSE_COMPLETED with close_hlc below the previous close_hlc must surface StoreError::InvariantViolation"
+    );
 }
 
 #[test]
