@@ -224,6 +224,14 @@
   kind: tests
   paths:
     - tests/durable_frontier_semantics.rs
+- id: ART-CHAOS-DM-FLAKEY
+  kind: tests
+  paths:
+    - tests/chaos/dm_flakey.rs
+- id: ART-CHAOS-HARNESS
+  kind: tests
+  paths:
+    - tests/chaos/
 - id: ART-REPLAY-TESTS
   kind: tests
   paths:
@@ -249,6 +257,10 @@
   kind: adr
   paths:
     - docs/adr/ADR-0014-durable-frontier.md
+- id: ART-ADR-CHAOS-HARNESS
+  kind: adr
+  paths:
+    - docs/adr/ADR-0015-chaos-harness-dm-flakey.md
 - id: ART-ADR-RESTORE-PLANNER
   kind: adr
   paths:

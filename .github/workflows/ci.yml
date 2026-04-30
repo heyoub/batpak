@@ -3,9 +3,11 @@ name: Integrity CI
 on:
   push:
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
   workflow_dispatch:
   schedule:
     - cron: "0 7 * * 1"
+    - cron: "30 7 * * *"
 
 env:
   CARGO_TERM_COLOR: always
@@ -149,7 +151,7 @@ jobs:
 
   mutants-full:
     runs-on: ubuntu-latest
-    if: github.event_name == 'schedule'
+    if: github.event_name == 'schedule' && github.event.schedule == '0 7 * * 1'
     strategy:
       fail-fast: false
       matrix:
@@ -179,6 +181,26 @@ jobs:
           BATPAK_DEVCONTAINER_IMAGE: batpak-devcontainer:ci
           BATPAK_DEVCONTAINER_SKIP_BUILD: "1"
         run: bash ./scripts/run-in-devcontainer.sh 'cargo xtask mutants full --surface ${{ matrix.surface }} --shard ${{ matrix.shard }}'
+
+  chaos-nightly:
+    name: Chaos nightly (dm-flakey smoke)
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'schedule' && github.event.schedule == '30 7 * * *') ||
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-chaos'))
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install block-device chaos tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends dmsetup e2fsprogs util-linux
+      - name: dm-flakey harness smoke
+        env:
+          BATPAK_RUN_CHAOS: "1"
+        run: cargo test --features dangerous-test-hooks --test chaos smoke -- --test-threads=1
 
   docs:
     runs-on: ubuntu-latest

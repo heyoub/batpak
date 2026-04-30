@@ -117,6 +117,30 @@ instead of pretending.
     until the Phase 1B chaos/forging helper can construct a later-written close
     event whose HLC regresses below a prior close event.
 
+### Invariant: Linux block-layer chaos harness fails writes after device flip
+
+- Harness pattern: `Fault-Injection Harness`
+- Location:
+  - `tests/chaos.rs`
+  - `tests/chaos/dm_flakey.rs`
+  - `tests/chaos/scenarios/smoke.rs`
+- Command used:
+  - `BATPAK_RUN_CHAOS=1 cargo test --features dangerous-test-hooks --test chaos smoke -- --test-threads=1`
+- Line/function coverage delta: not measured; this scaffold proves harness
+  viability rather than batpak runtime code coverage.
+- Mutation delta: not applicable yet; batpak-specific torn-tail scenarios land
+  in later Phase 1B stops.
+- Covered tests:
+  - `dm_flakey_wrapper_create_flip_teardown_round_trip` defends
+    `INV-CHAOS-LINUX-ONLY` by proving the privileged Linux device-mapper
+    wrapper can create a mapped ext4 device, write before flip, flip the mapper
+    to an error target, and observe synchronous write failure afterward.
+- Remaining known blind spots:
+  - This scaffold does not yet prove any batpak-specific durability claim.
+    `writer_panic_at_single_append_written_is_not_durable_on_reopen` remains
+    blocked until the Phase 1B.2 scenario uses the harness against a store
+    directory on the mapped device.
+
 ## Equivalence Harness
 
 ### Invariant: Derived projections stay equivalent to the hand-written target

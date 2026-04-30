@@ -11,10 +11,13 @@ ENV PATH="/usr/local/cargo/bin:${PATH}"
 RUN apt-get update && apt-get install -y --no-install-recommends \
     clang \
     curl \
+    dmsetup \
+    e2fsprogs \
     git \
     pkg-config \
     ca-certificates \
     sudo \
+    util-linux \
     && rm -rf /var/lib/apt/lists/*
 
 # Non-root user matching host UID/GID. Passwordless sudo so the container
