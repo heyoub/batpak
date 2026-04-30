@@ -218,6 +218,12 @@
   artifacts:
     - ART-FRONTIER-FAULT-INJECTION
     - ART-FRONTIER-SEMANTICS-TESTS
+- id: INV-FRONTIER-TORN-TAIL-NONDURABLE
+  statement: An event whose containing frame did not reach stable storage prior to writer crash or device failure must not be observable on reopen. Only events whose frames were fsynced through the underlying block device are durable; the durable frontier never advances past unsynced data.
+  artifacts:
+    - ART-CHAOS-HARNESS
+    - ART-FRONTIER-CHAOS-TESTS
+    - ART-FRONTIER-SEMANTICS-TESTS
 - id: INV-CHAOS-LINUX-ONLY
   statement: The chaos harness uses Linux device-mapper primitives and is unconditionally cfg'd off on non-Linux targets; durability proofs derived from this harness apply to Linux kernels only.
   artifacts:
