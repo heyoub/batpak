@@ -12,7 +12,9 @@ fn dm_flakey_wrapper_create_flip_teardown_round_trip() {
     }
 
     let device = FlakeyDevice::create(64 * 1024 * 1024).expect("create flakey device");
-    device.mount_ext4().expect("mount");
+    device
+        .format_and_mount_ext4_with_sync()
+        .expect("format and mount");
 
     let test_file = device.mount_point.join("test.bin");
     std::fs::write(&test_file, b"before flip").expect("write before flip");

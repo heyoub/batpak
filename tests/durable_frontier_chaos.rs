@@ -148,7 +148,7 @@ fn writer_panic_at_single_append_published_is_durable_on_reopen() {
 }
 
 #[test]
-#[ignore = "BLOCKS: in-process writer panic leaves the complete unsynced frame recoverable from host page cache; needs VM/block-device torn-tail harness to prove SingleAppendWritten non-durability"]
+#[ignore = "SUPERSEDED: real torn-tail proof lives at tests/chaos/scenarios/single_append_written.rs::single_append_written_is_not_durable_on_reopen_cadence_1000; this in-process FaultInjector shape leaves the unsynced frame recoverable from host page cache and cannot prove non-durability"]
 fn writer_panic_at_single_append_written_is_not_durable_on_reopen() {
     let dir = TempDir::new().expect("temp dir");
     let target_entity = "entity:chaos-written-target";

@@ -12,23 +12,70 @@ pub struct FlakeyDevice {
     pub device_name: String,
     pub mount_point: PathBuf,
     pub backing_file: PathBuf,
+    root_dir: PathBuf,
+    owns_backing: bool,
 }
 
 impl FlakeyDevice {
     pub fn create(size_bytes: u64) -> io::Result<Self> {
-        let sectors = sectors_for(size_bytes)?;
         let suffix = unique_suffix();
         let root = std::env::temp_dir().join(format!("batpak-chaos-{suffix}"));
-        let mount_point = root.join("mnt");
         let backing_file = root.join("backing.img");
-        let device_name = format!("batpak-chaos-{suffix}");
+        Self::create_inner(&backing_file, size_bytes, true)
+    }
 
-        fs::create_dir_all(&mount_point)?;
+    pub fn create_with_backing(backing: &Path, size_bytes: u64) -> io::Result<Self> {
+        Self::create_inner(backing, size_bytes, false)
+    }
+
+    pub fn open_existing_backing(backing: &Path) -> io::Result<Self> {
+        let sectors = backing_file_sectors(backing)?;
+        Self::attach_existing(backing.to_path_buf(), sectors, false)
+    }
+
+    pub fn format_and_mount_ext4_with_sync(&self) -> io::Result<()> {
+        self.format_ext4()?;
+        self.mount_ext4([OsStr::new("-o"), OsStr::new("sync")])
+    }
+
+    pub fn format_and_mount_ext4_default(&self) -> io::Result<()> {
+        self.format_ext4()?;
+        self.mount_ext4(std::iter::empty::<&OsStr>())
+    }
+
+    pub fn mount_existing_ext4(&self) -> io::Result<()> {
+        self.mount_ext4(std::iter::empty::<&OsStr>())
+    }
+
+    pub fn data_dir(&self) -> PathBuf {
+        self.mount_point.join("data")
+    }
+
+    fn create_inner(backing: &Path, size_bytes: u64, owns_backing: bool) -> io::Result<Self> {
+        let sectors = sectors_for(size_bytes)?;
+        if let Some(parent) = backing.parent() {
+            fs::create_dir_all(parent)?;
+        }
         OpenOptions::new()
             .create_new(true)
             .write(true)
-            .open(&backing_file)?
+            .open(backing)?
             .set_len(size_bytes)?;
+
+        Self::attach_existing(backing.to_path_buf(), sectors, owns_backing)
+    }
+
+    fn attach_existing(
+        backing_file: PathBuf,
+        sectors: u64,
+        owns_backing: bool,
+    ) -> io::Result<Self> {
+        let suffix = unique_suffix();
+        let root_dir = std::env::temp_dir().join(format!("batpak-chaos-{suffix}"));
+        let mount_point = root_dir.join("mnt");
+        let device_name = format!("batpak-chaos-{suffix}");
+
+        fs::create_dir_all(&mount_point)?;
 
         let loop_output = run_privileged(
             "losetup",
@@ -59,24 +106,33 @@ impl FlakeyDevice {
             device_name,
             mount_point,
             backing_file,
+            root_dir,
+            owns_backing,
         })
     }
 
-    pub fn mount_ext4(&self) -> io::Result<()> {
+    fn format_ext4(&self) -> io::Result<()> {
         let mapper = self.mapper_path();
         run_privileged(
             "mkfs.ext4",
             [OsStr::new("-F"), OsStr::new("-q"), mapper.as_os_str()],
         )?;
-        run_privileged(
-            "mount",
-            [
-                OsStr::new("-o"),
-                OsStr::new("sync"),
-                mapper.as_os_str(),
-                self.mount_point.as_os_str(),
-            ],
-        )?;
+        Ok(())
+    }
+
+    fn mount_ext4<I, S>(&self, options: I) -> io::Result<()>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        let mapper = self.mapper_path();
+        let mut args = options
+            .into_iter()
+            .map(|arg| arg.as_ref().to_os_string())
+            .collect::<Vec<_>>();
+        args.push(mapper.into_os_string());
+        args.push(self.mount_point.as_os_str().to_os_string());
+        run_privileged("mount", args)?;
         Ok(())
     }
 
@@ -116,8 +172,14 @@ impl FlakeyDevice {
 
     fn teardown(&self) -> io::Result<()> {
         let mut first_error = None;
-        for result in [
-            self.unmount(),
+        let mut record = |result: io::Result<()>| {
+            if let Err(err) = result {
+                first_error.get_or_insert(err);
+            }
+        };
+
+        record(self.unmount());
+        record(
             run_privileged(
                 "dmsetup",
                 [
@@ -127,15 +189,17 @@ impl FlakeyDevice {
                 ],
             )
             .map(drop),
-            run_privileged("losetup", [OsStr::new("-d"), self.loop_path.as_os_str()]).map(drop),
-            fs::remove_file(&self.backing_file),
-            fs::remove_dir(&self.mount_point),
-            remove_parent_dir(&self.backing_file),
-        ] {
-            if let Err(err) = result {
-                first_error.get_or_insert(err);
+        );
+        record(run_privileged("losetup", [OsStr::new("-d"), self.loop_path.as_os_str()]).map(drop));
+        if self.owns_backing {
+            record(fs::remove_file(&self.backing_file));
+            if self.backing_file.parent() != Some(self.root_dir.as_path()) {
+                record(remove_parent_dir(&self.backing_file));
             }
         }
+        record(fs::remove_dir(&self.mount_point));
+        record(fs::remove_dir(&self.root_dir));
+
         if let Some(err) = first_error {
             return Err(err);
         }
