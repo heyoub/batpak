@@ -129,3 +129,9 @@
     - ART-FRONTIER-CHAOS-TESTS
     - ART-FRONTIER-BOOTSTRAP
     - ART-FRONTIER-FAULT-INJECTION
+- id: FLOW-CHAOS-TORN-TAIL
+  summary: The dm-flakey torn-tail scenario opens a store on a mapped ext4 device, appends and fsyncs a lower-bound event, appends an unsynced tail event, flips the mapper to an error target, drops the store and device, recreates a fresh mapper on the same backing file, reopens the store, and asserts that only the fsynced lower-bound event is observable.
+  artifacts:
+    - ART-CHAOS-HARNESS
+    - ART-CHAOS-DM-FLAKEY
+    - ART-FRONTIER-CHAOS-TESTS

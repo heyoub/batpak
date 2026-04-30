@@ -72,8 +72,9 @@ instead of pretending.
 - Remaining known blind spots:
   - `writer_panic_at_single_append_written_is_not_durable_on_reopen` is
     intentionally ignored because an in-process writer panic leaves the complete
-    unsynced frame recoverable from host page cache; proving true torn-tail
-    non-durability needs a VM/block-device harness
+    unsynced frame recoverable from host page cache; it is superseded by the
+    dm-flakey block-layer proof in
+    `tests/chaos/scenarios/single_append_written.rs`
   - the public frontier exposes observation truth, not durability-gated read or
     wait semantics; those are later policy work
 
@@ -136,10 +137,39 @@ instead of pretending.
     wrapper can create a mapped ext4 device, write before flip, flip the mapper
     to an error target, and observe synchronous write failure afterward.
 - Remaining known blind spots:
-  - This scaffold does not yet prove any batpak-specific durability claim.
-    `writer_panic_at_single_append_written_is_not_durable_on_reopen` remains
-    blocked until the Phase 1B.2 scenario uses the harness against a store
-    directory on the mapped device.
+  - This scaffold entry proves wrapper viability only; batpak-specific
+    durability claims are recorded in the torn-tail scenario entry below.
+
+### Invariant: Torn-tail single appends are not durable until fsync reaches the block device
+
+- Harness pattern: `Fault-Injection Harness`
+- Location:
+  - `tests/chaos.rs`
+  - `tests/chaos/dm_flakey.rs`
+  - `tests/chaos/scenarios/single_append_written.rs`
+- Command used:
+  - `BATPAK_RUN_CHAOS=1 cargo test --features dangerous-test-hooks --test chaos -- --test-threads=1`
+- Activation gate:
+  - `BATPAK_RUN_CHAOS=1`
+- Line/function coverage delta: not measured; this is a privileged block-layer
+  proof rather than a coverage-density suite.
+- Mutation delta: not applicable; the scenario exercises real device-mapper
+  failure semantics outside cargo-mutants' in-process model.
+- Covered tests:
+  - `single_append_written_is_not_durable_on_reopen_cadence_1000` defends
+    `INV-FRONTIER-TORN-TAIL-NONDURABLE` by proving a pre-fsync
+    `SingleAppendWritten` tail is absent after mapper failure, teardown,
+    backing-file reuse, and reopen.
+  - `single_append_written_surfaces_io_error_cadence_1` defends that an append
+    after the mapper is flipped to an error target returns a caller-visible
+    storage failure instead of a false success receipt.
+  - `post_fsync_events_survive_device_failure_durability_floor` defends the
+    lower bound: events fsynced through the block device remain recoverable
+    after a later mapper failure.
+- Remaining known blind spots:
+  - the legacy in-process `FaultInjector` test remains ignored as a documented
+    contrast with host page-cache behavior; the real durability proof now lives
+    in the privileged dm-flakey scenario.
 
 ## Equivalence Harness
 
