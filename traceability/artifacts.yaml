@@ -232,6 +232,10 @@
   kind: tests
   paths:
     - tests/chaos/
+- id: ART-CHAOS-BATCH-COMMIT-WRITTEN
+  kind: tests
+  paths:
+    - tests/chaos/scenarios/batch_commit_written.rs
 - id: ART-REPLAY-TESTS
   kind: tests
   paths:

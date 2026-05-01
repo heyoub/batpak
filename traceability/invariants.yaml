@@ -222,6 +222,7 @@
   statement: On reopen after any crash or device failure, durable_hlc covers every event observable via query, and durable_hlc is monotonic across crash boundaries (recovered_durable_hlc >= pre_failure_durable_hlc). batpak makes no claim about which specific in-flight events survive a particular crash; it only guarantees that the durable frontier honestly classifies whatever was preserved.
   artifacts:
     - ART-CHAOS-HARNESS
+    - ART-CHAOS-BATCH-COMMIT-WRITTEN
     - ART-FRONTIER-CHAOS-TESTS
     - ART-FRONTIER-SEMANTICS-TESTS
 - id: INV-CHAOS-LINUX-ONLY
