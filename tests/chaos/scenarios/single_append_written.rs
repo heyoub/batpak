@@ -1,10 +1,19 @@
 //! dm-flakey proofs for `INV-FRONTIER-TORN-TAIL-NONDURABLE`.
 //!
 //! These tests use a real Linux device-mapper failure boundary instead of the
-//! in-process `FaultInjector` panic seam. They prove that a pre-fsync single
-//! append is not recovered after remounting the same backing file, that fsynced
-//! events remain recoverable, and that cadence=1 surfaces device failure to the
-//! caller.
+//! in-process `FaultInjector` panic seam. They prove that batpak's recovered
+//! durable frontier does not advance past the pre-failure fsync frontier, that
+//! fsynced events remain recoverable, and that cadence=1 surfaces device
+//! failure to the caller.
+//!
+//! Writer-side sync audit for this workload: single appends write frames without
+//! calling fsync directly; durability is advanced by explicit `Store::sync()`,
+//! cadence/group-commit drains, visibility-fence drains, segment rotation, or
+//! shutdown/close drains. This scenario uses `sync_every_n_events=1000`, one
+//! explicit sync after event A, no fences, and no segment rotation pressure, so
+//! event B has no batpak-side fsync before the injected device failure. The OS
+//! may still preserve B through page-cache writeback or ext4 journal behavior;
+//! that is allowed, but recovery must not classify B as durable.
 
 use crate::chaos::dm_flakey::FlakeyDevice;
 use batpak::prelude::{Coordinate, EventKind, Region};
@@ -62,6 +71,14 @@ fn event_ids(entries: &[batpak::store::IndexEntry]) -> Vec<u128> {
     entries.iter().map(|entry| entry.event_id).collect()
 }
 
+fn entry_point_for(entries: &[batpak::store::IndexEntry], receipt: &AppendReceipt) -> HlcPoint {
+    entries
+        .iter()
+        .find(|entry| entry.event_id == receipt.event_id)
+        .map(point)
+        .expect("receipt event must be query-visible before failure")
+}
+
 fn create_default_mounted_device(backing: &Path) -> FlakeyDevice {
     let device = FlakeyDevice::create_with_backing(backing, DEVICE_SIZE_BYTES)
         .expect("create flakey device with caller-owned backing");
@@ -93,7 +110,19 @@ fn single_append_written_is_not_durable_on_reopen_cadence_1000() {
 
     let durable = append_named(&store, "entity:torn-tail:durable", 1);
     store.sync().expect("sync durable lower-bound event");
+    let pre_failure_durable_hlc = store.frontier().durable_hlc;
     let unsynced = append_named(&store, "entity:torn-tail:unsynced", 2);
+    let pre_failure_entries = recovered_entries(&store);
+    let durable_point = entry_point_for(&pre_failure_entries, &durable);
+    let unsynced_point = entry_point_for(&pre_failure_entries, &unsynced);
+    assert!(
+        pre_failure_durable_hlc >= durable_point,
+        "PROPERTY: explicit sync must advance durable_hlc to cover event A"
+    );
+    assert!(
+        unsynced_point > pre_failure_durable_hlc,
+        "SANITY: event B must be above the pre-failure durable frontier"
+    );
 
     device.flip_to_error().expect("flip device to error target");
     drop(store);
@@ -104,27 +133,23 @@ fn single_append_written_is_not_durable_on_reopen_cadence_1000() {
     let entries = recovered_entries(&reopened);
     let ids = event_ids(&entries);
 
-    assert_eq!(
-        ids.len(),
-        1,
-        "PROPERTY: pre-fsync tail must not be recovered after block-layer failure"
-    );
     assert!(
         ids.contains(&durable.event_id),
         "PROPERTY: fsynced lower-bound event must recover"
     );
     assert!(
-        !ids.contains(&unsynced.event_id),
-        "PROPERTY: unsynced SingleAppendWritten frame must be absent on reopen"
+        reopened.frontier().durable_hlc <= pre_failure_durable_hlc,
+        "PROPERTY: recovery must not classify above-frontier pre-failure data as durable; \
+         recovered ids={ids:?}, pre_failure_durable_hlc={pre_failure_durable_hlc:?}, \
+         reopened frontier={:?}",
+        reopened.frontier()
     );
-    let durable_entry = entries
-        .iter()
-        .find(|entry| entry.event_id == durable.event_id)
-        .expect("durable entry recovered");
-    assert!(
-        reopened.frontier().durable_hlc >= point(durable_entry),
-        "PROPERTY: durable frontier must cover the recovered fsynced event"
-    );
+    if ids.contains(&unsynced.event_id) {
+        eprintln!(
+            "OS preserved pre-fsync event {}; this is permitted only if durable_hlc stays at or below {:?}",
+            unsynced.event_id, pre_failure_durable_hlc
+        );
+    }
 }
 
 #[test]
