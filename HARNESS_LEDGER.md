@@ -140,7 +140,7 @@ instead of pretending.
   - This scaffold entry proves wrapper viability only; batpak-specific
     durability claims are recorded in the torn-tail scenario entry below.
 
-### Invariant: Torn-tail single appends are not durable until fsync reaches the block device
+### Invariant: Torn-tail single appends are not classified durable until fsync returns
 
 - Harness pattern: `Fault-Injection Harness`
 - Location:
@@ -157,9 +157,14 @@ instead of pretending.
   failure semantics outside cargo-mutants' in-process model.
 - Covered tests:
   - `single_append_written_is_not_durable_on_reopen_cadence_1000` defends
-    `INV-FRONTIER-TORN-TAIL-NONDURABLE` by proving a pre-fsync
-    `SingleAppendWritten` tail is absent after mapper failure, teardown,
-    backing-file reuse, and reopen.
+    `INV-FRONTIER-TORN-TAIL-NONDURABLE` by capturing the pre-failure
+    `durable_hlc` after a successful explicit sync, appending an above-frontier
+    `SingleAppendWritten` event without another batpak fsync, failing the
+    mapper, remounting the same backing file, and asserting recovery does not
+    classify above-frontier data as durable. OS-level page-cache or ext4
+    write-back may still leave the above-frontier frame physically readable;
+    the substrate contract is durable frontier accounting, not guaranteed
+    physical disappearance.
   - `single_append_written_surfaces_io_error_cadence_1` defends that an append
     after the mapper is flipped to an error target returns a caller-visible
     storage failure instead of a false success receipt.
@@ -168,8 +173,10 @@ instead of pretending.
     after a later mapper failure.
 - Remaining known blind spots:
   - the legacy in-process `FaultInjector` test remains ignored as a documented
-    contrast with host page-cache behavior; the real durability proof now lives
-    in the privileged dm-flakey scenario.
+    contrast with host page-cache behavior; the privileged dm-flakey scenario
+    now pins the substrate accounting contract. Batpak does not currently expose
+    a per-event durability classification API, so the chaos assertion uses the
+    recovered global `durable_hlc` as the available contract surface.
 
 ## Equivalence Harness
 

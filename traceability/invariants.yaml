@@ -219,7 +219,7 @@
     - ART-FRONTIER-FAULT-INJECTION
     - ART-FRONTIER-SEMANTICS-TESTS
 - id: INV-FRONTIER-TORN-TAIL-NONDURABLE
-  statement: An event whose containing frame did not reach stable storage prior to writer crash or device failure must not be observable on reopen. Only events whose frames were fsynced through the underlying block device are durable; the durable frontier never advances past unsynced data.
+  statement: On reopen after device failure, durable_hlc reflects only events whose fsync returned successfully prior to the failure. Events with HLCs above the pre-failure durable_hlc are not classified as durable on recovery, regardless of whether they remain physically readable from the underlying segment due to OS-level write-back effects.
   artifacts:
     - ART-CHAOS-HARNESS
     - ART-FRONTIER-CHAOS-TESTS
