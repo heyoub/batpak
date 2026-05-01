@@ -133,6 +133,13 @@ impl FlakeyDevice {
         args.push(mapper.into_os_string());
         args.push(self.mount_point.as_os_str().to_os_string());
         run_privileged("mount", args)?;
+        self.chown_mount_to_current_user()?;
+        Ok(())
+    }
+
+    fn chown_mount_to_current_user(&self) -> io::Result<()> {
+        let owner = format!("{}:{}", current_id("-u")?, current_id("-g")?);
+        run_privileged("chown", [OsStr::new(&owner), self.mount_point.as_os_str()])?;
         Ok(())
     }
 
@@ -282,6 +289,14 @@ fn running_as_root() -> bool {
         return false;
     }
     String::from_utf8_lossy(&output.stdout).trim() == "0"
+}
+
+fn current_id(flag: &str) -> io::Result<String> {
+    let output = Command::new("id").arg(flag).output()?;
+    if !output.status.success() {
+        return Err(command_error(&format!("id {flag}"), &output));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
 }
 
 fn command_error(description: &str, output: &Output) -> io::Error {
