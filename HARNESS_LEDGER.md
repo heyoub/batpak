@@ -147,6 +147,7 @@ instead of pretending.
   - `tests/chaos.rs`
   - `tests/chaos/dm_flakey.rs`
   - `tests/chaos/scenarios/single_append_written.rs`
+  - `tests/chaos/scenarios/batch_commit_written.rs`
 - Command used:
   - `BATPAK_RUN_CHAOS=1 cargo test --features dangerous-test-hooks --test chaos -- --test-threads=1`
 - Activation gate:
@@ -172,6 +173,26 @@ instead of pretending.
   - `post_fsync_events_survive_device_failure_durability_floor` defends the
     lower bound: events fsynced through the block device remain recoverable
     after a later mapper failure.
+  - `durable_frontier_covers_recovered_state_after_batch_device_failure_cadence_1000`
+    defends `INV-FRONTIER-DURABLE-COVERS-RECOVERED` for unsynced batch
+    commit windows by asserting `durable_hlc` covers every recovered batch
+    entry and remains monotonic across the dm-flakey failure boundary, while
+    making no claim about the exact recovered count.
+  - `batch_append_surfaces_io_error_after_device_failure_cadence_1000`
+    defends that a batch append after the mapper is flipped to an error target
+    returns a caller-visible storage failure instead of a false success receipt.
+  - `post_fsync_batches_survive_device_failure_durability_floor` defends the
+    batch lower bound: batches fsynced through the block device remain
+    recoverable after a later mapper failure.
+  - `mixed_single_and_batch_durable_floor_survives_device_failure` defends that
+    durable frontier monotonicity and coverage hold across interleaved single
+    and batch sync boundaries.
+  - `partial_batch_writeback_durable_hlc_remains_monotonic` defends the larger
+    unsynced batch surface where OS write-back may preserve zero, some, or all
+    batch entries; batpak's guarantee remains recovered-state classification.
+  - `batch_append_surfaces_io_error_after_device_failure_cadence_1` defends
+    that cadence=1 batch appends surface device failure on the first batch
+    attempt after the mapper flips.
 - Remaining known blind spots:
   - the legacy in-process `FaultInjector` test remains ignored as a documented
     contrast with host page-cache behavior; the privileged dm-flakey scenario

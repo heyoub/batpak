@@ -130,8 +130,9 @@
     - ART-FRONTIER-BOOTSTRAP
     - ART-FRONTIER-FAULT-INJECTION
 - id: FLOW-CHAOS-TORN-TAIL
-  summary: The dm-flakey chaos scenario opens a store on a mapped ext4 device, appends and fsyncs a lower-bound event, appends a non-fsynced event, flips the mapper to an error target, drops the store and device, recreates a fresh mapper on the same backing file, reopens the store, and asserts that durable_hlc covers every recovered event and is monotonic across the crash boundary. The test does not assert which specific in-flight events survive; that depends on OS-level write-back behavior outside batpak's contract.
+  summary: The dm-flakey chaos scenarios open a store on a mapped ext4 device, append and fsync lower-bound single or batch events, append non-fsynced single or batch events, flip the mapper to an error target, drop the store and device, recreate a fresh mapper on the same backing file, reopen the store, and assert that durable_hlc covers every recovered event and is monotonic across the crash boundary. Batch torn-tail scenarios additionally stress mid-commit writeback, mixed single+batch durability floors, and caller-visible IO failure after device failure. These tests do not assert which specific in-flight events survive; that depends on OS-level write-back behavior outside batpak's contract.
   artifacts:
     - ART-CHAOS-HARNESS
     - ART-CHAOS-DM-FLAKEY
+    - ART-CHAOS-BATCH-COMMIT-WRITTEN
     - ART-FRONTIER-CHAOS-TESTS

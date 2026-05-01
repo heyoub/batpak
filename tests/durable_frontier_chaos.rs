@@ -180,6 +180,11 @@ fn writer_panic_at_single_append_written_is_not_durable_on_reopen() {
     assert!(reopened.frontier().accepted_hlc <= baseline_hlc);
 }
 
+/// In-process `BatchCommitWritten` panic recovery pins the host-page-cache
+/// observation recorded by `OBS-DURABLE-HLC-INCLUDES-OS-PRESERVED-DATA`.
+/// See `tests/chaos/scenarios/batch_commit_written.rs` for the substrate-level
+/// dm-flakey analog that exercises the same Meaning-2 durable frontier contract
+/// across a real block-device failure boundary.
 #[test]
 fn writer_panic_at_batch_commit_written_before_fsync() {
     let dir = TempDir::new().expect("temp dir");
