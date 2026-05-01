@@ -1,13 +1,16 @@
 name: Integrity CI
 
 on:
-  push:
   pull_request:
     types: [opened, synchronize, reopened, labeled]
   workflow_dispatch:
   schedule:
     - cron: "0 7 * * 1"
     - cron: "30 7 * * *"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
