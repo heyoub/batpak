@@ -81,6 +81,7 @@ pub(super) fn writer_thread_main(
         match result {
             Ok(()) => return,
             Err(panic_info) => {
+                runtime.watermark_handle.mark_writer_crashed();
                 let panic_msg = if let Some(s) = panic_info.downcast_ref::<&str>() {
                     (*s).to_string()
                 } else if let Some(s) = panic_info.downcast_ref::<String>() {
@@ -194,7 +195,7 @@ fn writer_loop(
         subscribers: runtime.subscribers,
         reactor_subscribers: runtime.reactor_subscribers,
         reader: Arc::clone(runtime.reader),
-        watermark_handle: Arc::clone(runtime.watermark_handle),
+        watermark_handle: runtime.watermark_handle.clone(),
         sidx_collector: crate::store::segment::sidx::SidxEntryCollector::new(),
         fence_ledger: None,
     };

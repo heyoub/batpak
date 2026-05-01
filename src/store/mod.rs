@@ -61,7 +61,8 @@ pub use reaction::ReactionBatch;
 pub use reactor_typed::{ReactorConfig, ReactorError, TypedReactorHandle};
 pub use signing::SigningKey;
 pub use stats::{
-    FrontierView, HlcPoint, StoreDiagnostics, StoreStats, WatermarkSnapshot, WriterPressure,
+    FrontierView, HlcPoint, StoreDiagnostics, StoreStats, WatermarkKind, WatermarkSnapshot,
+    WriterPressure,
 };
 pub use write::control::{AppendTicket, BatchAppendTicket, Outbox, VisibilityFence};
 pub use write::writer::{Notification, RestartPolicy};
@@ -397,7 +398,7 @@ impl Store<Open> {
             &reader,
         )?;
         let watermark_handle = writer.watermark_handle();
-        let projection_registry = ProjectionRegistry::new(Arc::clone(&watermark_handle));
+        let projection_registry = ProjectionRegistry::new(watermark_handle.clone());
 
         let store = Self {
             index,
@@ -988,6 +989,20 @@ impl Store<Open> {
         lifecycle::sync(self)
     }
 
+    /// Block until the durable frontier reaches `point` or `timeout` elapses.
+    ///
+    /// # Errors
+    /// Returns [`StoreError::WaitTimeout`] if `durable_hlc` does not reach
+    /// `point` before `timeout`. Returns [`StoreError::WriterCrashed`] if the
+    /// writer panicked while the caller was waiting.
+    pub fn wait_for_durable(
+        &self,
+        point: HlcPoint,
+        timeout: std::time::Duration,
+    ) -> Result<(), StoreError> {
+        self.watermark_handle.wait_for_durable(point, timeout)
+    }
+
     /// Snapshot the current index to a destination directory.
     ///
     /// # Errors
@@ -1094,7 +1109,7 @@ impl Store<ReadOnly> {
 
         let open_hlc = bootstrap_open_hlc(&runtime, &index)?;
         let watermark_handle = WatermarkState::bootstrap_handle(open_hlc);
-        let projection_registry = ProjectionRegistry::new(Arc::clone(&watermark_handle));
+        let projection_registry = ProjectionRegistry::new(watermark_handle.clone());
         let store = Self {
             index,
             reader,
@@ -1325,6 +1340,12 @@ impl<State> Store<State> {
     #[cfg(any(test, feature = "dangerous-test-hooks"))]
     pub fn dangerous_unregister_projection(&self, projection_id: &str) {
         self.projection_registry.unregister(projection_id);
+    }
+
+    /// Wake frontier waiters without advancing a watermark.
+    #[cfg(any(test, feature = "dangerous-test-hooks"))]
+    pub fn dangerous_notify_watermark_waiters(&self) {
+        self.watermark_handle.dangerous_notify_all();
     }
 }
 

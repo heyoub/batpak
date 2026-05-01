@@ -225,6 +225,12 @@
     - ART-CHAOS-BATCH-COMMIT-WRITTEN
     - ART-FRONTIER-CHAOS-TESTS
     - ART-FRONTIER-SEMANTICS-TESTS
+- id: INV-FRONTIER-WAIT-MONOTONIC
+  statement: wait_for_durable returns Ok(()) only after observing durable_hlc >= target on a state mutation under the same lock that issued the notify; spurious wakeups never satisfy the wait.
+  artifacts:
+    - ART-FRONTIER-WAIT-DURABLE
+    - ART-FRONTIER-WAIT-TESTS
+    - ART-ADR-DURABILITY-GATING
 - id: INV-CHAOS-LINUX-ONLY
   statement: The chaos harness uses Linux device-mapper primitives and is unconditionally cfg'd off on non-Linux targets; durability proofs derived from this harness apply to Linux kernels only.
   artifacts:

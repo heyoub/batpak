@@ -280,6 +280,25 @@ global frontier backward. Unregistering a projection recomputes the minimum
 from the remaining projections: removing the fastest projection can freeze
 `applied_hlc`, while removing the slowest can allow it to advance.
 
+#### Waiting for Durability
+
+`Store::wait_for_durable(point, timeout)` blocks the calling thread until the
+durable frontier crosses `point`. The timeout is mandatory:
+
+```rust
+store.wait_for_durable(target_hlc, std::time::Duration::from_secs(1))?;
+```
+
+The wait returns `Ok(())` only after observing `durable_hlc >= point` under the
+watermark mutex. If the timeout expires first it returns
+`StoreError::WaitTimeout { watermark: WatermarkKind::Durable, target, waited_ms
+}`. If the writer thread panics while callers are waiting, waiters wake and
+return `StoreError::WriterCrashed`.
+
+The implementation is sync-only and uses a `parking_lot::Condvar` with wake-all
+notification. Spurious wakeups are expected and harmless: every wake rechecks
+the writer-crash poison flag and the target watermark before returning.
+
 Single-append fault injection defines three ordinals for frontier tests:
 
 - `SingleAppendStart`: before any watermark advance

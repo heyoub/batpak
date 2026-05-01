@@ -136,3 +136,9 @@
     - ART-CHAOS-DM-FLAKEY
     - ART-CHAOS-BATCH-COMMIT-WRITTEN
     - ART-FRONTIER-CHAOS-TESTS
+- id: FLOW-FRONTIER-WAIT-DURABLE
+  summary: A caller invokes wait_for_durable with a target HLC and mandatory timeout; the store waits on the watermark condvar, watermark advances notify all waiters, each wake rechecks writer-crash poison and durable_hlc >= target under the watermark mutex, and the call returns Ok, WaitTimeout, or WriterCrashed.
+  artifacts:
+    - ART-FRONTIER-WAIT-DURABLE
+    - ART-FRONTIER-WAIT-TESTS
+    - ART-ADR-DURABILITY-GATING

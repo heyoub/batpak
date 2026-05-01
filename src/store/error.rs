@@ -1,4 +1,5 @@
 use crate::coordinate::CoordinateError;
+use crate::store::stats::{HlcPoint, WatermarkKind};
 use std::path::PathBuf;
 
 /// Store open mode for lifetime-held directory locking.
@@ -55,6 +56,16 @@ pub enum StoreError {
     },
     /// The writer thread has crashed and is no longer processing commands.
     WriterCrashed,
+    /// A synchronous frontier wait timed out before the requested watermark
+    /// crossed the target point.
+    WaitTimeout {
+        /// Watermark being observed.
+        watermark: WatermarkKind,
+        /// Target HLC point requested by the caller.
+        target: HlcPoint,
+        /// Requested wait duration in milliseconds.
+        waited_ms: u64,
+    },
     /// A projection cache operation failed.
     CacheFailed(Box<dyn std::error::Error + Send + Sync>),
     /// A visibility-watermark publish request violated sequence-gate bounds.
@@ -288,6 +299,14 @@ impl std::fmt::Display for StoreError {
                 "CAS failed for {entity}: expected seq {expected}, got {actual}"
             ),
             Self::WriterCrashed => write!(f, "writer thread crashed"),
+            Self::WaitTimeout {
+                watermark,
+                target,
+                waited_ms,
+            } => write!(
+                f,
+                "wait for {watermark:?} watermark to reach {target:?} timed out after {waited_ms}ms"
+            ),
             Self::CacheFailed(e) => write!(f, "cache error: {e}"),
             Self::SequenceGateViolation {
                 operation,
@@ -436,6 +455,7 @@ impl std::error::Error for StoreError {
             | Self::NotFound(_)
             | Self::SequenceMismatch { .. }
             | Self::WriterCrashed
+            | Self::WaitTimeout { .. }
             | Self::SequenceGateViolation { .. }
             | Self::Configuration(_)
             | Self::IdempotencyRequired

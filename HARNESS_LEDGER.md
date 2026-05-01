@@ -117,6 +117,39 @@ instead of pretending.
 - Remaining known blind spots:
   - none for the explicit-close lifecycle frontier shape currently in scope.
 
+### Invariant: Durable frontier wait API surfaces honest blocking semantics
+
+- Harness pattern: `State-Machine Harness`
+- Location:
+  - `tests/durable_frontier_waits.rs`
+- Command used:
+  - `cargo test --test durable_frontier_waits --features dangerous-test-hooks`
+- Line/function coverage delta: not measured; Phase 2.1 adds public wait API
+  coverage.
+- Mutation delta:
+  - `frontier-wait-durable` critical seam is registered at the 85% smoke
+    threshold.
+- Covered tests:
+  - `wait_for_durable_returns_immediately_when_already_past` defends the fast
+    path where the durable frontier already covers the target.
+  - `wait_for_durable_blocks_then_returns_after_advance` defends that a
+    waiter blocks until a later sync advances `durable_hlc`.
+  - `wait_for_durable_returns_timeout_when_target_unreachable` defends
+    mandatory timeout reporting through `StoreError::WaitTimeout`.
+  - `wait_for_durable_surfaces_writer_crash` defends writer-crash poison and
+    wakeup of blocked waiters.
+  - `wait_for_durable_spurious_wakeup_safe` defends that condvar wakeups alone
+    never satisfy the target predicate.
+  - `wait_for_durable_mandatory_timeout_compiles_only_with_duration` defends
+    the sync API shape by pinning a `Duration` parameter.
+  - `wait_for_durable_zero_timeout_observes_current_state` defends the
+    zero-timeout boundary for both uncovered and already-covered targets.
+  - `wait_for_durable_origin_returns_immediately` defends the origin lower
+    bound.
+- Remaining known blind spots:
+  - Phase 2.1 covers only `wait_for_durable`; `wait_for_visible`,
+    `wait_for_applied`, and append gating are deferred to later Phase 2 stops.
+
 ### Invariant: Linux block-layer chaos harness fails writes after device flip
 
 - Harness pattern: `Fault-Injection Harness`

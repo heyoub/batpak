@@ -114,6 +114,23 @@ let region = store.query(
 Queries return `Vec<IndexEntry>` from the in-memory index. Use
 `store.get(entry.event_id)` for full payload reads.
 
+### Waiting for durability
+
+When a caller needs a specific event to cross the durable frontier, wait on the
+event's HLC with a mandatory timeout:
+
+```rust
+let target = batpak::store::HlcPoint {
+    wall_ms: entry.wall_ms,
+    global_sequence: entry.global_sequence,
+};
+store.wait_for_durable(target, std::time::Duration::from_secs(1))?;
+```
+
+The wait is synchronous. It returns `StoreError::WaitTimeout` if the deadline
+expires and `StoreError::WriterCrashed` if the writer panics while the caller is
+waiting.
+
 ### Append options
 
 Compare-and-swap:

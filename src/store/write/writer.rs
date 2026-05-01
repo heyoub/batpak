@@ -19,12 +19,14 @@ use crate::store::config::ValidatedStoreConfig;
 use crate::store::index::{DiskPos, StoreIndex};
 use crate::store::segment::sidx::kind_to_raw;
 use crate::store::segment::{self, Active, FramePayloadRef, Segment};
-use crate::store::stats::{FrontierView, HlcPoint, WatermarkSnapshot};
+use crate::store::stats::{FrontierView, HlcPoint, WatermarkKind, WatermarkSnapshot};
 use crate::store::{AppendReceipt, StoreConfig, StoreError};
 use flume::{Receiver, Sender};
-use parking_lot::Mutex;
+use parking_lot::{Condvar, Mutex, MutexGuard};
+use std::ops::{Deref, DerefMut};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 mod append;
 mod batch;
 mod fence_runtime;
@@ -36,7 +38,109 @@ use self::fence_runtime::{CommandResult, DeferredReply, FenceLedger};
 pub(crate) use self::runtime::find_latest_segment_id;
 use self::runtime::{writer_thread_main, writer_thread_name, WriterRuntime};
 
-pub(crate) type WatermarkAdvanceHandle = Arc<Mutex<WatermarkState>>;
+#[derive(Clone)]
+pub(crate) struct WatermarkAdvanceHandle {
+    state: Arc<Mutex<WatermarkState>>,
+    cv: Arc<Condvar>,
+    poison: Arc<AtomicBool>,
+}
+
+pub(crate) struct WatermarkGuard<'a> {
+    guard: MutexGuard<'a, WatermarkState>,
+    cv: &'a Condvar,
+}
+
+impl WatermarkAdvanceHandle {
+    fn new(state: WatermarkState) -> Self {
+        Self {
+            state: Arc::new(Mutex::new(state)),
+            cv: Arc::new(Condvar::new()),
+            poison: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    pub(crate) fn lock(&self) -> WatermarkGuard<'_> {
+        WatermarkGuard {
+            guard: self.state.lock(),
+            cv: &self.cv,
+        }
+    }
+
+    pub(crate) fn mark_writer_crashed(&self) {
+        self.poison.store(true, Ordering::Release);
+        self.cv.notify_all();
+    }
+
+    pub(crate) fn wait_for_durable(
+        &self,
+        point: HlcPoint,
+        timeout: Duration,
+    ) -> Result<(), StoreError> {
+        self.wait_for_watermark(WatermarkKind::Durable, point, timeout)
+    }
+
+    fn wait_for_watermark(
+        &self,
+        watermark: WatermarkKind,
+        point: HlcPoint,
+        timeout: Duration,
+    ) -> Result<(), StoreError> {
+        let started = Instant::now();
+        let mut guard = self.state.lock();
+        loop {
+            if self.poison.load(Ordering::Acquire) {
+                return Err(StoreError::WriterCrashed);
+            }
+            if watermark.current(guard.snapshot()) >= point {
+                return Ok(());
+            }
+
+            let elapsed = started.elapsed();
+            if elapsed >= timeout {
+                return Err(StoreError::WaitTimeout {
+                    watermark,
+                    target: point,
+                    waited_ms: u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX),
+                });
+            }
+            let remaining = timeout.saturating_sub(elapsed);
+            if remaining.is_zero() {
+                return Err(StoreError::WaitTimeout {
+                    watermark,
+                    target: point,
+                    waited_ms: u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX),
+                });
+            }
+
+            let _ = self.cv.wait_for(&mut guard, remaining);
+        }
+    }
+
+    #[cfg(any(test, feature = "dangerous-test-hooks"))]
+    pub(crate) fn dangerous_notify_all(&self) {
+        self.cv.notify_all();
+    }
+}
+
+impl Deref for WatermarkGuard<'_> {
+    type Target = WatermarkState;
+
+    fn deref(&self) -> &Self::Target {
+        &self.guard
+    }
+}
+
+impl DerefMut for WatermarkGuard<'_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.guard
+    }
+}
+
+impl Drop for WatermarkGuard<'_> {
+    fn drop(&mut self) {
+        self.cv.notify_all();
+    }
+}
 
 /// Internal mutable frontier state. All snapshots take this single mutex once.
 pub(crate) struct WatermarkState {
@@ -65,11 +169,11 @@ impl Default for WatermarkState {
 
 impl WatermarkState {
     pub(crate) fn handle() -> WatermarkAdvanceHandle {
-        Arc::new(Mutex::new(Self::default()))
+        WatermarkAdvanceHandle::new(Self::default())
     }
 
     pub(crate) fn bootstrap_handle(point: HlcPoint) -> WatermarkAdvanceHandle {
-        Arc::new(Mutex::new(Self::for_bootstrap(point)))
+        WatermarkAdvanceHandle::new(Self::for_bootstrap(point))
     }
 
     pub(crate) fn for_bootstrap(point: HlcPoint) -> Self {
@@ -307,7 +411,7 @@ impl WriterHandle {
         let validated = Arc::clone(runtime);
         let idx = Arc::clone(index);
         let rdr = Arc::clone(reader);
-        let watermark_for_thread = Arc::clone(&watermark_handle);
+        let watermark_for_thread = watermark_handle.clone();
 
         let mut builder = std::thread::Builder::new().name(writer_thread_name(&config.data_dir));
         if let Some(stack_size) = config.writer.stack_size {
@@ -356,7 +460,7 @@ impl WriterHandle {
     }
 
     pub(crate) fn watermark_handle(&self) -> WatermarkAdvanceHandle {
-        Arc::clone(&self.watermark_handle)
+        self.watermark_handle.clone()
     }
 
     // NOTE: No send_append() method here. Store::append() and Store::append_reaction()
@@ -387,7 +491,8 @@ struct WriterState<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::checked_next_clock;
+    use super::{checked_next_clock, WatermarkState};
+    use crate::store::stats::HlcPoint;
     use crate::store::StoreError;
 
     #[test]
@@ -407,6 +512,30 @@ mod tests {
             err,
             StoreError::EntityClockOverflow { ref entity } if entity == "entity:overflow"
         ));
+    }
+
+    #[test]
+    fn duplicate_accepted_advance_does_not_restart_pending_write_age() {
+        let point = HlcPoint {
+            wall_ms: 10,
+            global_sequence: 1,
+        };
+        let mut state = WatermarkState::default();
+
+        state.advance_accepted(point);
+        state.advance_durable(point);
+        assert_eq!(
+            state.snapshot().oldest_pending_write_age_ms,
+            None,
+            "PROPERTY: durability to accepted clears pending write age"
+        );
+
+        state.advance_accepted(point);
+        assert_eq!(
+            state.snapshot().oldest_pending_write_age_ms,
+            None,
+            "PROPERTY: duplicate accepted advance must not reopen pending write age"
+        );
     }
 }
 
