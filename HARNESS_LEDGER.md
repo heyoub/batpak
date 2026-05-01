@@ -101,8 +101,9 @@ instead of pretending.
     graceful open/close cycles by consuming the latest recovered close
     lifecycle HLC.
   - `close_hlc_monotonicity_violation_surfaces_invariant_violation` records
-    the corruption shape that must fail closed once a segment-forging helper
-    exists.
+    the corruption shape that must fail closed by forging a later-written
+    `SYSTEM_CLOSE_COMPLETED` frame whose HLC regresses below a prior close
+    event while preserving frame CRC validity.
   - `ops_take_limit_returns_none_immediately_while_store_is_open` and
     `subscription_ops_take_limits_count` are fast mutation-smoke pins for
     exhausted `SubscriptionOps::take` behavior while the store remains open;
@@ -114,9 +115,7 @@ instead of pretending.
     progression mutants fail quickly instead of exhausting the smoke-lane
     timeout.
 - Remaining known blind spots:
-  - `close_hlc_monotonicity_violation_surfaces_invariant_violation` is ignored
-    until the Phase 1B chaos/forging helper can construct a later-written close
-    event whose HLC regresses below a prior close event.
+  - none for the explicit-close lifecycle frontier shape currently in scope.
 
 ### Invariant: Linux block-layer chaos harness fails writes after device flip
 
