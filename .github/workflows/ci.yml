@@ -183,7 +183,7 @@ jobs:
         run: bash ./scripts/run-in-devcontainer.sh 'cargo xtask mutants full --surface ${{ matrix.surface }} --shard ${{ matrix.shard }}'
 
   chaos-nightly:
-    name: Chaos nightly (dm-flakey smoke)
+    name: Chaos nightly (dm-flakey)
     runs-on: ubuntu-latest
     if: >-
       github.event_name == 'workflow_dispatch' ||
@@ -197,10 +197,10 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends dmsetup e2fsprogs util-linux
-      - name: dm-flakey harness smoke
+      - name: dm-flakey harness
         env:
           BATPAK_RUN_CHAOS: "1"
-        run: cargo test --features dangerous-test-hooks --test chaos smoke -- --test-threads=1
+        run: cargo test --features dangerous-test-hooks --test chaos -- --test-threads=1
 
   docs:
     runs-on: ubuntu-latest

@@ -218,8 +218,8 @@
   artifacts:
     - ART-FRONTIER-FAULT-INJECTION
     - ART-FRONTIER-SEMANTICS-TESTS
-- id: INV-FRONTIER-TORN-TAIL-NONDURABLE
-  statement: An event whose containing frame did not reach stable storage prior to writer crash or device failure must not be observable on reopen. Only events whose frames were fsynced through the underlying block device are durable; the durable frontier never advances past unsynced data.
+- id: INV-FRONTIER-DURABLE-COVERS-RECOVERED
+  statement: On reopen after any crash or device failure, durable_hlc covers every event observable via query, and durable_hlc is monotonic across crash boundaries (recovered_durable_hlc >= pre_failure_durable_hlc). batpak makes no claim about which specific in-flight events survive a particular crash; it only guarantees that the durable frontier honestly classifies whatever was preserved.
   artifacts:
     - ART-CHAOS-HARNESS
     - ART-FRONTIER-CHAOS-TESTS

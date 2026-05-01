@@ -15,3 +15,21 @@
   artifacts:
     - ART-FRONTIER-WATERMARK-STATE
     - ART-FRONTIER-SEMANTICS-TESTS
+- id: OBS-DURABLE-HLC-INCLUDES-OS-PRESERVED-DATA
+  status: current-fact
+  statement: >
+    On recovery, durable_hlc is derived from max_recovered_hlc and therefore
+    classifies any physically-on-disk event as durable, including events whose
+    fsync was never deliberately called by batpak but which the OS preserved via
+    journal commit, periodic flush, or unmount-time sync. The substrate has no
+    fsync-history marker that would distinguish 'batpak deliberately fsynced'
+    from 'OS preserved.' This is consistent with Meaning-2 durable_hlc
+    semantics; under Meaning-1 semantics it would constitute a substrate gap.
+  evidence:
+    - "tests/chaos/scenarios/single_append_written.rs :: durable_frontier_covers_recovered_state_after_device_failure_cadence_1000"
+  replaces_when: >
+    Substrate adopts a fsync-history watermark marker (no current plan;
+    Meaning-2 is the contract).
+  artifacts:
+    - ART-CHAOS-HARNESS
+    - ART-FRONTIER-WATERMARK-STATE

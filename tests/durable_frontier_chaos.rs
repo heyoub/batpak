@@ -148,7 +148,7 @@ fn writer_panic_at_single_append_published_is_durable_on_reopen() {
 }
 
 #[test]
-#[ignore = "SUPERSEDED: real torn-tail proof lives at tests/chaos/scenarios/single_append_written.rs::single_append_written_is_not_durable_on_reopen_cadence_1000; this in-process FaultInjector shape leaves the unsynced frame recoverable from host page cache and cannot prove non-durability"]
+#[ignore = "SUPERSEDED: real block-layer durable frontier proof lives at tests/chaos/scenarios/single_append_written.rs::durable_frontier_covers_recovered_state_after_device_failure_cadence_1000; this in-process FaultInjector shape leaves the unsynced frame recoverable from host page cache and cannot model device failure"]
 fn writer_panic_at_single_append_written_is_not_durable_on_reopen() {
     let dir = TempDir::new().expect("temp dir");
     let target_entity = "entity:chaos-written-target";

@@ -1,10 +1,22 @@
-//! dm-flakey proofs for `INV-FRONTIER-TORN-TAIL-NONDURABLE`.
+//! dm-flakey proofs for `INV-FRONTIER-DURABLE-COVERS-RECOVERED`.
 //!
 //! These tests use a real Linux device-mapper failure boundary instead of the
-//! in-process `FaultInjector` panic seam. They prove that a pre-fsync single
-//! append is not recovered after remounting the same backing file, that fsynced
+//! in-process `FaultInjector` panic seam. They prove that batpak's recovered
+//! durable frontier covers every event recovered from the segment log, that the
+//! durable frontier remains monotonic across a device failure, that fsynced
 //! events remain recoverable, and that cadence=1 surfaces device failure to the
 //! caller.
+//!
+//! Writer-side sync audit for this workload: single appends write frames without
+//! calling fsync directly; durability is advanced by explicit `Store::sync()`,
+//! cadence/group-commit drains, visibility-fence drains, segment rotation, or
+//! shutdown/close drains. This scenario uses `sync_every_n_events=1000`, one
+//! explicit sync after event A, no fences, and no segment rotation pressure, so
+//! event B has no batpak-side fsync before the injected device failure. The OS
+//! may still preserve B through page-cache writeback or ext4 journal behavior;
+//! that is allowed. Batpak's contract is Meaning-2 durable_hlc semantics: on
+//! recovery, whatever was physically preserved and can be queried is classified
+//! as durable going forward.
 
 use crate::chaos::dm_flakey::FlakeyDevice;
 use batpak::prelude::{Coordinate, EventKind, Region};
@@ -62,6 +74,14 @@ fn event_ids(entries: &[batpak::store::IndexEntry]) -> Vec<u128> {
     entries.iter().map(|entry| entry.event_id).collect()
 }
 
+fn entry_point_for(entries: &[batpak::store::IndexEntry], receipt: &AppendReceipt) -> HlcPoint {
+    entries
+        .iter()
+        .find(|entry| entry.event_id == receipt.event_id)
+        .map(point)
+        .expect("receipt event must be query-visible before failure")
+}
+
 fn create_default_mounted_device(backing: &Path) -> FlakeyDevice {
     let device = FlakeyDevice::create_with_backing(backing, DEVICE_SIZE_BYTES)
         .expect("create flakey device with caller-owned backing");
@@ -80,7 +100,7 @@ fn reopen_existing_device(backing: &Path) -> FlakeyDevice {
 }
 
 #[test]
-fn single_append_written_is_not_durable_on_reopen_cadence_1000() {
+fn durable_frontier_covers_recovered_state_after_device_failure_cadence_1000() {
     if !chaos_enabled() {
         eprintln!("skipping privileged torn-tail proof; set BATPAK_RUN_CHAOS=1 to run it");
         return;
@@ -93,7 +113,14 @@ fn single_append_written_is_not_durable_on_reopen_cadence_1000() {
 
     let durable = append_named(&store, "entity:torn-tail:durable", 1);
     store.sync().expect("sync durable lower-bound event");
-    let unsynced = append_named(&store, "entity:torn-tail:unsynced", 2);
+    let pre_failure_durable_hlc = store.frontier().durable_hlc;
+    let _unsynced = append_named(&store, "entity:torn-tail:unsynced", 2);
+    let pre_failure_entries = recovered_entries(&store);
+    let durable_point = entry_point_for(&pre_failure_entries, &durable);
+    assert!(
+        pre_failure_durable_hlc >= durable_point,
+        "PROPERTY: explicit sync must advance durable_hlc to cover event A"
+    );
 
     device.flip_to_error().expect("flip device to error target");
     drop(store);
@@ -104,26 +131,25 @@ fn single_append_written_is_not_durable_on_reopen_cadence_1000() {
     let entries = recovered_entries(&reopened);
     let ids = event_ids(&entries);
 
-    assert_eq!(
-        ids.len(),
-        1,
-        "PROPERTY: pre-fsync tail must not be recovered after block-layer failure"
-    );
     assert!(
         ids.contains(&durable.event_id),
         "PROPERTY: fsynced lower-bound event must recover"
     );
+    let recovered_durable_hlc = reopened.frontier().durable_hlc;
+    for entry in &entries {
+        assert!(
+            point(entry) <= recovered_durable_hlc,
+            "PROPERTY: durable_hlc must cover every recovered event; \
+             entry={entry:?}, recovered_durable_hlc={recovered_durable_hlc:?}, \
+             recovered ids={ids:?}, reopened frontier={:?}",
+            reopened.frontier()
+        );
+    }
     assert!(
-        !ids.contains(&unsynced.event_id),
-        "PROPERTY: unsynced SingleAppendWritten frame must be absent on reopen"
-    );
-    let durable_entry = entries
-        .iter()
-        .find(|entry| entry.event_id == durable.event_id)
-        .expect("durable entry recovered");
-    assert!(
-        reopened.frontier().durable_hlc >= point(durable_entry),
-        "PROPERTY: durable frontier must cover the recovered fsynced event"
+        recovered_durable_hlc >= pre_failure_durable_hlc,
+        "PROPERTY: durable frontier must be monotonic across crash; \
+         pre_failure_durable_hlc={pre_failure_durable_hlc:?}, \
+         recovered_durable_hlc={recovered_durable_hlc:?}, recovered ids={ids:?}"
     );
 }
 
