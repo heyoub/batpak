@@ -129,7 +129,7 @@ impl<'a> VisibilityFence<'a> {
             })
             .map_err(|_| StoreError::WriterCrashed)?;
         self.closed = true;
-        rx.recv().map_err(|_| StoreError::WriterCrashed)?
+        crate::store::recv_writer_reply(&rx)
     }
 
     /// Cancel publication for this fence. Durable writes remain on disk but do
@@ -150,7 +150,7 @@ impl<'a> VisibilityFence<'a> {
             })
             .map_err(|_| StoreError::WriterCrashed)?;
         self.closed = true;
-        rx.recv().map_err(|_| StoreError::WriterCrashed)?
+        crate::store::recv_writer_reply(&rx)
     }
 }
 

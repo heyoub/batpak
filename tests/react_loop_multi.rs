@@ -13,7 +13,8 @@
 //!   * user error surfaces `ReactorError::User`
 
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{mpsc, Arc};
+use std::thread;
 use std::time::{Duration, Instant};
 
 use batpak::event::StoredEvent;
@@ -125,6 +126,29 @@ fn source_coord() -> Coordinate {
 fn test_store() -> (Arc<Store>, tempfile::TempDir) {
     let (s, d) = small_segment_store();
     (Arc::new(s), d)
+}
+
+fn join_with_timeout(
+    handle: TypedReactorHandle<NeverFails>,
+    timeout: Duration,
+) -> Result<(), ReactorError<NeverFails>> {
+    let (tx, rx) = mpsc::channel();
+    thread::Builder::new()
+        .name("react-loop-multi-join".into())
+        .spawn(move || {
+            let _ = tx.send(handle.join());
+        })
+        .expect("spawn bounded join worker");
+    match rx.recv_timeout(timeout) {
+        Ok(result) => result,
+        Err(mpsc::RecvTimeoutError::Timeout) => panic!(
+            "multi-reactor dispatch contract: expected reactor to stop within {:?}",
+            timeout
+        ),
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            panic!("multi-reactor dispatch contract: join worker disconnected")
+        }
+    }
 }
 
 #[test]
@@ -243,7 +267,7 @@ fn matched_kind_decode_failure_surfaces_reactor_error_decode() {
     // Under the Once policy the worker exhausts its restart budget on its
     // own after the matched-kind decode fails. `join` is the passive wait
     // for that natural exit — no explicit stop needed.
-    match handle.join() {
+    match join_with_timeout(handle, Duration::from_secs(2)) {
         Err(ReactorError::Decode(_)) => {}
         other => panic!("expected ReactorError::Decode, got {other:?}"),
     }

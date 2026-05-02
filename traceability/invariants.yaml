@@ -232,6 +232,13 @@
     - ART-FRONTIER-WAIT-API
     - ART-FRONTIER-WAIT-TESTS
     - ART-ADR-DURABILITY-GATING
+- id: INV-FRONTIER-APPEND-GATE-HONORED
+  statement: When AppendOptions::gate is Some(DurabilityGate { kind, timeout }), Store::append_with_options and Store::append_batch_with_options return only after the corresponding watermark crosses the appended event's HLC, or return StoreError::WaitTimeout. The committed event is queryable in both cases; the timeout reflects the gate guarantee, not the commit.
+  artifacts:
+    - ART-FRONTIER-APPEND-GATE
+    - ART-FRONTIER-WAIT-API
+    - ART-FRONTIER-WAIT-TESTS
+    - ART-ADR-DURABILITY-GATING
 - id: INV-CHAOS-LINUX-ONLY
   statement: The chaos harness uses Linux device-mapper primitives and is unconditionally cfg'd off on non-Linux targets; durability proofs derived from this harness apply to Linux kernels only.
   artifacts:

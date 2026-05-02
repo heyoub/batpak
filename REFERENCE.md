@@ -283,7 +283,9 @@ from the remaining projections: removing the fastest projection can freeze
 #### Waiting for Durability
 
 `Store::wait_for_durable(point, timeout)` blocks the calling thread until the
-durable frontier crosses `point`. The timeout is mandatory:
+durable frontier crosses `point`. `Store::wait_for_applied` and
+`Store::wait_for_visible` use the same synchronous wait contract for the
+applied and visible watermarks. The timeout is mandatory:
 
 ```rust
 store.wait_for_durable(target_hlc, std::time::Duration::from_secs(1))?;
@@ -298,6 +300,26 @@ return `StoreError::WriterCrashed`.
 The implementation is sync-only and uses a `parking_lot::Condvar` with wake-all
 notification. Spurious wakeups are expected and harmless: every wake rechecks
 the writer-crash poison flag and the target watermark before returning.
+
+Append-time gating is opt-in through `AppendOptions::gate`:
+
+```rust
+pub struct DurabilityGate {
+    pub kind: WatermarkKind,
+    pub timeout: std::time::Duration,
+}
+
+pub struct AppendOptions {
+    pub gate: Option<DurabilityGate>,
+    // other append controls omitted
+}
+```
+
+When set, `Store::append_with_options` and `Store::append_batch_with_options`
+commit first, then wait for the chosen watermark to cross the committed event's
+HLC. Batch gates apply to the last event in the batch; per-item gates embedded
+in `BatchAppendItem` are ignored. `StoreError::WaitTimeout` means the commit
+succeeded but the requested gate was not observed before the timeout.
 
 Single-append fault injection defines three ordinals for frontier tests:
 

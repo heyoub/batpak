@@ -63,7 +63,9 @@ impl Store<Open> {
     }
 
     pub(crate) fn writer_handle(&self) -> Result<&WriterHandle, StoreError> {
-        self.writer.as_ref().ok_or(StoreError::WriterCrashed)
+        let writer = self.writer.as_ref().ok_or(StoreError::WriterCrashed)?;
+        writer.fail_if_exited()?;
+        Ok(writer)
     }
 
     pub(crate) fn ensure_no_active_public_fence(&self) -> Result<(), StoreError> {

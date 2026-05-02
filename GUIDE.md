@@ -131,6 +131,22 @@ The wait is synchronous. It returns `StoreError::WaitTimeout` if the deadline
 expires and `StoreError::WriterCrashed` if the writer panics while the caller is
 waiting.
 
+#### Inline gating at append time
+
+Use `AppendOptions::gate` when the append call itself should wait for a
+frontier watermark:
+
+```rust
+let opts = AppendOptions::new().with_gate(DurabilityGate {
+    kind: WatermarkKind::Durable,
+    timeout: std::time::Duration::from_secs(1),
+});
+store.append_typed_with_options(&coord, &payload, opts)?;
+```
+
+The gate is opt-in. `StoreError::WaitTimeout` means the event committed, but the
+requested watermark did not cross the event's HLC before the timeout.
+
 ### Append options
 
 Compare-and-swap:

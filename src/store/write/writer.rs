@@ -384,7 +384,7 @@ pub(crate) struct WriterHandle {
     pub subscribers: Arc<SubscriberList>,
     pub reactor_subscribers: Arc<ReactorSubscriberList>,
     watermark_handle: WatermarkAdvanceHandle,
-    _thread: Option<std::thread::JoinHandle<()>>,
+    thread: Option<std::thread::JoinHandle<()>>,
 }
 
 /// RestartPolicy: how the writer recovers from panics.
@@ -457,7 +457,7 @@ impl WriterHandle {
             subscribers: Arc::clone(subscribers),
             reactor_subscribers: Arc::clone(reactor_subscribers),
             watermark_handle,
-            _thread: Some(thread),
+            thread: Some(thread),
         })
     }
 
@@ -471,12 +471,24 @@ impl WriterHandle {
             subscribers,
             reactor_subscribers: Arc::new(ReactorSubscriberList::new()),
             watermark_handle: WatermarkState::handle(),
-            _thread: None,
+            thread: None,
         }
     }
 
     pub(crate) fn watermark_handle(&self) -> WatermarkAdvanceHandle {
         self.watermark_handle.clone()
+    }
+
+    pub(crate) fn fail_if_exited(&self) -> Result<(), StoreError> {
+        if self
+            .thread
+            .as_ref()
+            .is_some_and(std::thread::JoinHandle::is_finished)
+        {
+            self.watermark_handle.mark_writer_crashed();
+            return Err(StoreError::WriterCrashed);
+        }
+        Ok(())
     }
 
     // NOTE: No send_append() method here. Store::append() and Store::append_reaction()

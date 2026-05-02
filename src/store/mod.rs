@@ -10,6 +10,7 @@ mod error;
 /// Fault injection framework for testing failure scenarios.
 #[cfg(feature = "dangerous-test-hooks")]
 pub mod fault;
+mod gate;
 mod hidden_ranges;
 /// In-memory 2D event index, rebuilt from segments on startup.
 pub mod index;
@@ -52,6 +53,7 @@ pub use error::{StoreError, StoreLockMode};
 pub use fault::{
     CountdownAction, CountdownInjector, FaultInjector, InjectionPoint, ProbabilisticInjector,
 };
+pub use gate::DurabilityGate;
 pub use index::{ClockKey, DiskPos, IndexEntry};
 pub use projection::watch::{ProjectionWatcher, WatcherError};
 pub use projection::{
@@ -83,6 +85,21 @@ use write::control::AppendSubmission;
 use write::fanout::{ReactorSubscriberList, SubscriberList};
 use write::writer::{WatermarkAdvanceHandle, WatermarkState, WriterCommand, WriterHandle};
 // ProjectionCache re-exported above via pub use, no separate use needed.
+
+#[cfg(test)]
+const TEST_WRITER_REPLY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+pub(crate) fn recv_writer_reply<T>(
+    rx: &flume::Receiver<Result<T, StoreError>>,
+) -> Result<T, StoreError> {
+    #[cfg(test)]
+    let received = rx
+        .recv_timeout(TEST_WRITER_REPLY_TIMEOUT)
+        .map_err(|_| StoreError::WriterCrashed)?;
+    #[cfg(not(test))]
+    let received = rx.recv().map_err(|_| StoreError::WriterCrashed)?;
+    received
+}
 
 /// Store: the runtime. Sync API. Send + Sync.
 /// Invariant 2: all methods are sync; async integration lives in channels.
@@ -323,7 +340,7 @@ fn append_open_completed_event(
         .tx
         .send(command)
         .map_err(|_| StoreError::WriterCrashed)?;
-    let receipt = rx.recv().map_err(|_| StoreError::WriterCrashed)??;
+    let receipt = recv_writer_reply(&rx)?;
     let open_hlc = store
         .index
         .get_by_id(receipt.event_id)
@@ -445,7 +462,7 @@ impl Store<Open> {
             let _ = self.index.cancel_visibility_fence(token);
             return Err(StoreError::WriterCrashed);
         }
-        rx.recv().map_err(|_| StoreError::WriterCrashed)??;
+        recv_writer_reply(&rx)?;
         Ok(VisibilityFence::new(self, token))
     }
 
@@ -691,7 +708,34 @@ impl Store<Open> {
         &self,
         items: Vec<crate::store::append::BatchAppendItem>,
     ) -> Result<Vec<AppendReceipt>, StoreError> {
-        self.submit_batch(items)?.wait()
+        self.append_batch_with_options(items, AppendOptions::default())
+    }
+
+    /// WRITE: atomic batch append with a batch-level append option set.
+    ///
+    /// Only [`AppendOptions::gate`] is honored at the batch level. The gate
+    /// waits on the last event in the batch, which covers earlier events
+    /// because batch HLCs and watermarks are monotonic.
+    ///
+    /// # Errors
+    /// Returns any batch append error surfaced by [`Store::append_batch`].
+    /// Returns [`StoreError::WaitTimeout`] or [`StoreError::WriterCrashed`] if
+    /// the optional batch-level gate is not satisfied after the batch commits.
+    pub fn append_batch_with_options(
+        &self,
+        items: Vec<crate::store::append::BatchAppendItem>,
+        opts: AppendOptions,
+    ) -> Result<Vec<AppendReceipt>, StoreError> {
+        debug_assert!(
+            items.iter().all(|item| item.options().gate.is_none()),
+            "BatchAppendItem per-item DurabilityGate is ignored; pass the gate to append_batch_with_options instead"
+        );
+        let gate = opts.gate;
+        let receipts = self.submit_batch(items)?.wait()?;
+        if let (Some(gate), Some(receipt)) = (gate, receipts.last()) {
+            self.wait_for_gate(receipt, gate)?;
+        }
+        Ok(receipts)
     }
 
     /// WRITE: atomic batch append of reaction events.
@@ -850,6 +894,7 @@ impl Store<Open> {
         payload: &impl Serialize,
         opts: AppendOptions,
     ) -> Result<AppendReceipt, StoreError> {
+        let gate = opts.gate;
         tracing::debug!(
             target: "batpak::flow",
             flow = "append_with_options",
@@ -858,8 +903,13 @@ impl Store<Open> {
             has_cas = opts.expected_sequence.is_some(),
             has_idempotency = opts.idempotency_key.is_some()
         );
-        self.submit_prepared(coord, kind, payload, AppendSubmission::with_options(opts))?
-            .wait()
+        let receipt = self
+            .submit_prepared(coord, kind, payload, AppendSubmission::with_options(opts))?
+            .wait()?;
+        if let Some(gate) = gate {
+            self.wait_for_gate(&receipt, gate)?;
+        }
+        Ok(receipt)
     }
 
     /// WRITE: apply a typestate transition — kind is read from `P::KIND`.

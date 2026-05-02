@@ -56,6 +56,7 @@ const HASH_CHAIN_REPLAY_NO_DEFAULT_MUTANT_FILES: &[&str] = &[
     "src/store/cold_start/rebuild.rs",
 ];
 const FRONTIER_WAIT_MUTANT_FILES: &[&str] = &["src/store/write/writer.rs"];
+const FRONTIER_APPEND_GATE_MUTANT_FILES: &[&str] = &["src/store/gate.rs"];
 const ALL_FEATURES_MUTANT_EXCLUDES: &[&str] = &["src/store/ancestry/by_clock.rs"];
 const NO_DEFAULT_FEATURES_MUTANT_EXCLUDES: &[&str] = &["src/store/ancestry/by_hash.rs"];
 
@@ -429,6 +430,13 @@ fn critical_mutation_seams() -> &'static [CriticalMutationSeam] {
             description: "wait_for_durable poison, target, timeout, and condvar loop",
             surface: MutantSurface::AllFeatures,
             paths: FRONTIER_WAIT_MUTANT_FILES,
+        },
+        CriticalMutationSeam {
+            slug: "frontier-append-gate",
+            label: "frontier append gate",
+            description: "AppendOptions::gate kind matching, timeout propagation, receipt HLC target conversion, and batch per-item gate ignore",
+            surface: MutantSurface::AllFeatures,
+            paths: FRONTIER_APPEND_GATE_MUTANT_FILES,
         },
     ]
 }
@@ -875,9 +883,9 @@ mod tests {
         critical_mutation_lanes, critical_mutation_smoke_lanes, mutants_command, mutation_score,
         next_ratchet_floor, setup, surface_excludes, MutantExecutionPlan, MutationBaseline,
         MutationLane, MutationScope, MutationScore, MutationSharding, RepoMutationPhase,
-        CURSOR_MUTANT_FILES, PROJECTION_MUTANT_FILES, REPO_MUTATION_PHASE,
-        REPO_WIDE_ALL_FEATURES_MUTANT_FILES, REPO_WIDE_NO_DEFAULT_MUTANT_FILES,
-        WRITER_COMMIT_MUTANT_FILES,
+        CURSOR_MUTANT_FILES, FRONTIER_APPEND_GATE_MUTANT_FILES, FRONTIER_WAIT_MUTANT_FILES,
+        PROJECTION_MUTANT_FILES, REPO_MUTATION_PHASE, REPO_WIDE_ALL_FEATURES_MUTANT_FILES,
+        REPO_WIDE_NO_DEFAULT_MUTANT_FILES, WRITER_COMMIT_MUTANT_FILES,
     };
     use crate::{MutantMode, MutantSurface, MutantsArgs};
     use std::fs;
@@ -935,6 +943,9 @@ mod tests {
                     .clone()
                     .with_baseline(MutationBaseline::Skip),
                 critical_mutation_smoke_lanes()[6]
+                    .clone()
+                    .with_baseline(MutationBaseline::Skip),
+                critical_mutation_smoke_lanes()[7]
                     .clone()
                     .with_baseline(MutationBaseline::Skip),
                 MutationLane::repo_wide_smoke(MutantSurface::AllFeatures)
@@ -1083,11 +1094,16 @@ mod tests {
             .iter()
             .find(|lane| lane.slug == "frontier-wait-durable")
             .expect("frontier wait lane");
+        let gate_lane = lanes
+            .iter()
+            .find(|lane| lane.slug == "frontier-append-gate")
+            .expect("frontier append gate lane");
 
         assert_eq!(cursor_lane.scope, MutationScope::CriticalSeam);
         assert_eq!(cursor_lane.paths, CURSOR_MUTANT_FILES);
         assert_eq!(projection_lane.paths, PROJECTION_MUTANT_FILES);
         assert_eq!(wait_lane.paths, FRONTIER_WAIT_MUTANT_FILES);
+        assert_eq!(gate_lane.paths, FRONTIER_APPEND_GATE_MUTANT_FILES);
         assert_eq!(
             MutationLane::repo_wide(MutantSurface::AllFeatures, None).paths,
             REPO_WIDE_ALL_FEATURES_MUTANT_FILES

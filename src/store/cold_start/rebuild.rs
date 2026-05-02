@@ -994,6 +994,14 @@ mod tests {
     }
 
     #[test]
+    fn clear_pending_compaction_is_idempotent_when_marker_is_absent() {
+        let dir = TempDir::new().expect("temp dir");
+
+        clear_pending_compaction(dir.path())
+            .expect("PROPERTY: clearing an absent pending-compaction marker must be idempotent");
+    }
+
+    #[test]
     fn open_index_skips_fast_paths_when_pending_compaction_marker_exists() {
         let dir = TempDir::new().expect("temp dir");
         let config = crate::store::StoreConfig::new(dir.path())
