@@ -139,6 +139,19 @@
 - id: FLOW-FRONTIER-WAIT-DURABLE
   summary: A caller invokes wait_for_durable with a target HLC and mandatory timeout; the store waits on the watermark condvar, watermark advances notify all waiters, each wake rechecks writer-crash poison and durable_hlc >= target under the watermark mutex, and the call returns Ok, WaitTimeout, or WriterCrashed.
   artifacts:
-    - ART-FRONTIER-WAIT-DURABLE
+    - ART-FRONTIER-WAIT-API
+    - ART-FRONTIER-WAIT-TESTS
+    - ART-ADR-DURABILITY-GATING
+- id: FLOW-FRONTIER-WAIT-APPLIED
+  summary: A caller invokes wait_for_applied with a target HLC and mandatory timeout; the store waits on the shared watermark condvar, projection registry advances recompute applied_hlc as the minimum across registered projections and notify waiters under the watermark mutex, each wake rechecks writer-crash poison and applied_hlc >= target, and the call returns Ok, WaitTimeout, or WriterCrashed.
+  artifacts:
+    - ART-FRONTIER-WAIT-API
+    - ART-FRONTIER-PROJECTION-REGISTRY
+    - ART-FRONTIER-WAIT-TESTS
+    - ART-ADR-DURABILITY-GATING
+- id: FLOW-FRONTIER-WAIT-VISIBLE
+  summary: A caller invokes wait_for_visible with a target HLC and mandatory timeout; the store waits on the shared watermark condvar, publish advances visible_hlc and notifies waiters under the watermark mutex, each wake rechecks writer-crash poison and visible_hlc >= target, and the call returns Ok, WaitTimeout, or WriterCrashed.
+  artifacts:
+    - ART-FRONTIER-WAIT-API
     - ART-FRONTIER-WAIT-TESTS
     - ART-ADR-DURABILITY-GATING

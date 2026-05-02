@@ -124,8 +124,9 @@ instead of pretending.
   - `tests/durable_frontier_waits.rs`
 - Command used:
   - `cargo test --test durable_frontier_waits --features dangerous-test-hooks`
-- Line/function coverage delta: not measured; Phase 2.1 adds public wait API
-  coverage.
+- Line/function coverage delta: not measured; Phase 2.1 adds durable wait API
+  coverage, and Phase 2.2 extends the same surface to applied and visible
+  waits.
 - Mutation delta:
   - `frontier-wait-durable` critical seam is registered at the 85% smoke
     threshold.
@@ -146,9 +147,22 @@ instead of pretending.
     zero-timeout boundary for both uncovered and already-covered targets.
   - `wait_for_durable_origin_returns_immediately` defends the origin lower
     bound.
+  - `wait_for_applied_returns_immediately_when_already_past` defends the
+    applied fast path where the projection frontier already covers the target.
+  - `wait_for_applied_returns_min_across_projections` defends that a single
+    lagging registered projection keeps `applied_hlc` behind the target.
+  - `wait_for_applied_blocks_until_lagging_projection_advances` defends that
+    `wait_for_applied` wakes only after the lagging projection advances.
+  - `wait_for_visible_returns_immediately_when_already_past` defends the
+    visible fast path after publish.
+  - `wait_for_visible_advances_under_cadence_gt_1_without_durable` defends the
+    documented cadence>1 no-gate skew: visible can advance while durable does
+    not.
+  - `mixed_wait_for_durable_applied_visible_converge_in_order` defends that the
+    three public wait surfaces share the same condvar/poison machinery and can
+    converge on the same target.
 - Remaining known blind spots:
-  - Phase 2.1 covers only `wait_for_durable`; `wait_for_visible`,
-    `wait_for_applied`, and append gating are deferred to later Phase 2 stops.
+  - Append gating is deferred to Phase 2.3.
 
 ### Invariant: Linux block-layer chaos harness fails writes after device flip
 

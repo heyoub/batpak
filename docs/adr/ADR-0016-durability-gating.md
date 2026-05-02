@@ -14,9 +14,11 @@ thread blocking, a mandatory timeout, and a clear failure mode when the writer
 thread panics while callers are waiting.
 
 ## Decision
-`Store::wait_for_durable(point, timeout)` blocks the calling thread until the
-durable watermark observes `durable_hlc >= point`, the timeout expires, or the
-writer crash poison flag is set.
+`Store::wait_for_durable(point, timeout)`,
+`Store::wait_for_applied(point, timeout)`, and
+`Store::wait_for_visible(point, timeout)` block the calling thread until the
+chosen watermark observes its current HLC `>= point`, the timeout expires, or
+the writer crash poison flag is set.
 
 The implementation uses:
 
@@ -55,5 +57,6 @@ target watermark before returning success.
 - [ADR-0014: Durable Frontier Observability](ADR-0014-durable-frontier.md)
 - `traceability/invariants.yaml`: `INV-FRONTIER-DURABLE-COVERS-RECOVERED`,
   `INV-FRONTIER-OPEN-MONOTONIC`, `INV-FRONTIER-WAIT-MONOTONIC`
-- `traceability/flows.yaml`: `FLOW-FRONTIER-WAIT-DURABLE`
+- `traceability/flows.yaml`: `FLOW-FRONTIER-WAIT-DURABLE`,
+  `FLOW-FRONTIER-WAIT-APPLIED`, `FLOW-FRONTIER-WAIT-VISIBLE`
 - `tests/durable_frontier_waits.rs`

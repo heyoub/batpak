@@ -163,7 +163,7 @@
   kind: source
   paths:
     - src/store/write/writer.rs
-- id: ART-FRONTIER-WAIT-DURABLE
+- id: ART-FRONTIER-WAIT-API
   kind: source
   paths:
     - src/store/mod.rs

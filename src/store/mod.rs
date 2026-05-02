@@ -1003,6 +1003,37 @@ impl Store<Open> {
         self.watermark_handle.wait_for_durable(point, timeout)
     }
 
+    /// Block until the applied frontier reaches `point` or `timeout` elapses.
+    ///
+    /// `applied_hlc` is the minimum applied HLC across registered projections,
+    /// so a single lagging projection can keep this wait blocked.
+    ///
+    /// # Errors
+    /// Returns [`StoreError::WaitTimeout`] if `applied_hlc` does not reach
+    /// `point` before `timeout`. Returns [`StoreError::WriterCrashed`] if the
+    /// writer panicked while the caller was waiting.
+    pub fn wait_for_applied(
+        &self,
+        point: HlcPoint,
+        timeout: std::time::Duration,
+    ) -> Result<(), StoreError> {
+        self.watermark_handle.wait_for_applied(point, timeout)
+    }
+
+    /// Block until the visible frontier reaches `point` or `timeout` elapses.
+    ///
+    /// # Errors
+    /// Returns [`StoreError::WaitTimeout`] if `visible_hlc` does not reach
+    /// `point` before `timeout`. Returns [`StoreError::WriterCrashed`] if the
+    /// writer panicked while the caller was waiting.
+    pub fn wait_for_visible(
+        &self,
+        point: HlcPoint,
+        timeout: std::time::Duration,
+    ) -> Result<(), StoreError> {
+        self.watermark_handle.wait_for_visible(point, timeout)
+    }
+
     /// Snapshot the current index to a destination directory.
     ///
     /// # Errors

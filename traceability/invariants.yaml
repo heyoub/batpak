@@ -208,11 +208,12 @@
     - ART-FRONTIER-SEMANTICS-TESTS
     - ART-FRONTIER-CHAOS-TESTS
 - id: INV-FRONTIER-APPLIED-MIN
-  statement: applied_hlc equals the minimum HLC across all registered projections; with zero registered projections it remains at the bootstrap open_hlc, never drifting forward.
+  statement: applied_hlc equals the minimum HLC across all registered projections; with zero registered projections it remains at the bootstrap open_hlc, never drifting forward. wait_for_applied honors this min so a single lagging projection blocks the wait until it catches up.
   artifacts:
     - ART-FRONTIER-PROJECTION-REGISTRY
     - ART-FRONTIER-WATERMARK-STATE
     - ART-FRONTIER-SEMANTICS-TESTS
+    - ART-FRONTIER-WAIT-TESTS
 - id: INV-FRONTIER-FAULT-ORDINALS
   statement: SingleAppendStart fires before any watermark advance, SingleAppendWritten fires after written advance and before durable, and SingleAppendPublished fires after visible+emitted advance and before the receipt is returned.
   artifacts:
@@ -226,9 +227,9 @@
     - ART-FRONTIER-CHAOS-TESTS
     - ART-FRONTIER-SEMANTICS-TESTS
 - id: INV-FRONTIER-WAIT-MONOTONIC
-  statement: wait_for_durable returns Ok(()) only after observing durable_hlc >= target on a state mutation under the same lock that issued the notify; spurious wakeups never satisfy the wait.
+  statement: wait_for_durable, wait_for_applied, and wait_for_visible return Ok(()) only after observing the corresponding watermark >= target on a state mutation under the same lock that issued the notify; spurious wakeups never satisfy the wait.
   artifacts:
-    - ART-FRONTIER-WAIT-DURABLE
+    - ART-FRONTIER-WAIT-API
     - ART-FRONTIER-WAIT-TESTS
     - ART-ADR-DURABILITY-GATING
 - id: INV-CHAOS-LINUX-ONLY

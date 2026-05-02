@@ -79,6 +79,22 @@ impl WatermarkAdvanceHandle {
         self.wait_for_watermark(WatermarkKind::Durable, point, timeout)
     }
 
+    pub(crate) fn wait_for_applied(
+        &self,
+        point: HlcPoint,
+        timeout: Duration,
+    ) -> Result<(), StoreError> {
+        self.wait_for_watermark(WatermarkKind::Applied, point, timeout)
+    }
+
+    pub(crate) fn wait_for_visible(
+        &self,
+        point: HlcPoint,
+        timeout: Duration,
+    ) -> Result<(), StoreError> {
+        self.wait_for_watermark(WatermarkKind::Visible, point, timeout)
+    }
+
     fn wait_for_watermark(
         &self,
         watermark: WatermarkKind,
