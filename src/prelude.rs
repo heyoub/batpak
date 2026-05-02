@@ -17,8 +17,9 @@ pub use crate::store::delivery::subscription::{Subscription, SubscriptionOps};
 pub use crate::store::{
     AppendOptions, AppendPositionHint, AppendReceipt, AppendTicket, BatchAppendItem,
     BatchAppendTicket, BatchConfig, CausationRef, Closed, CompactionConfig, CompactionStrategy,
-    Cursor, DiskPos, Freshness, IndexConfig, IndexEntry, IndexTopology, NoCache, Notification,
-    Open, ReactionBatch, ReactorConfig, ReactorError, ReadOnly, RestartPolicy, Store, StoreConfig,
-    StoreError, SyncConfig, SyncMode, TypedReactorHandle, WriterConfig, WriterPressure,
+    Cursor, DiskPos, DurabilityGate, Freshness, HlcPoint, IndexConfig, IndexEntry, IndexTopology,
+    NoCache, Notification, Open, ReactionBatch, ReactorConfig, ReactorError, ReadOnly,
+    RestartPolicy, Store, StoreConfig, StoreError, SyncConfig, SyncMode, TypedReactorHandle,
+    WatermarkKind, WriterConfig, WriterPressure,
 };
 pub use batpak_macros::{EventPayload, EventSourced, MultiEventReactor};

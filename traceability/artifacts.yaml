@@ -168,6 +168,12 @@
   paths:
     - src/store/mod.rs
     - src/store/write/writer.rs
+- id: ART-FRONTIER-APPEND-GATE
+  kind: public-api
+  paths:
+    - src/store/append.rs
+    - src/store/gate.rs
+    - src/store/mod.rs
 - id: ART-STORE-REBUILD
   kind: source
   paths:

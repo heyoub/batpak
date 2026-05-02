@@ -155,3 +155,10 @@
     - ART-FRONTIER-WAIT-API
     - ART-FRONTIER-WAIT-TESTS
     - ART-ADR-DURABILITY-GATING
+- id: FLOW-FRONTIER-APPEND-GATE
+  summary: A caller invokes append_with_options or append_batch_with_options with AppendOptions::gate set; the writer commits the event or batch, the blocking append path derives the committed HLC from the receipt/index entry, calls wait_for_durable, wait_for_applied, or wait_for_visible according to DurabilityGate.kind, and returns Ok(receipt) or Ok(receipts) only after the requested watermark crosses the target, otherwise surfacing WaitTimeout or WriterCrashed while leaving the committed event queryable.
+  artifacts:
+    - ART-FRONTIER-APPEND-GATE
+    - ART-FRONTIER-WAIT-API
+    - ART-FRONTIER-WAIT-TESTS
+    - ART-ADR-DURABILITY-GATING

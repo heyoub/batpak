@@ -10,7 +10,7 @@ impl<T> Ticket<T> {
     }
 
     fn wait(self) -> Result<T, StoreError> {
-        self.rx.recv().map_err(|_| StoreError::WriterCrashed)?
+        crate::store::recv_writer_reply(&self.rx)
     }
 
     fn try_check(&self) -> Option<Result<T, StoreError>> {

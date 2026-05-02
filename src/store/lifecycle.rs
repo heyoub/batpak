@@ -40,11 +40,11 @@ fn append_close_completed_event(store: &Store<Open>) -> Result<(), StoreError> {
     let (tx, rx) = flume::bounded(1);
     let command = submission.into_command(coord, EventKind::SYSTEM_CLOSE_COMPLETED, event, tx);
     store
-        .writer_ref()
+        .writer_handle()?
         .tx
         .send(command)
         .map_err(|_| StoreError::WriterCrashed)?;
-    rx.recv().map_err(|_| StoreError::WriterCrashed)??;
+    crate::store::recv_writer_reply(&rx)?;
     Ok(())
 }
 
@@ -52,11 +52,11 @@ pub(crate) fn sync(store: &Store<Open>) -> Result<(), StoreError> {
     tracing::debug!(target: "batpak::flow", flow = "sync");
     let (tx, rx) = flume::bounded(1);
     store
-        .writer_ref()
+        .writer_handle()?
         .tx
         .send(crate::store::write::writer::WriterCommand::Sync { respond: tx })
         .map_err(|_| StoreError::WriterCrashed)?;
-    rx.recv().map_err(|_| StoreError::WriterCrashed)?
+    crate::store::recv_writer_reply(&rx)
 }
 
 pub(crate) fn snapshot(store: &Store<Open>, dest: &std::path::Path) -> Result<(), StoreError> {
@@ -479,11 +479,11 @@ pub(crate) fn close(mut store: Store<Open>) -> Result<Closed, StoreError> {
 
     let (tx, rx) = flume::bounded(1);
     store
-        .writer_ref()
+        .writer_handle()?
         .tx
         .send(crate::store::write::writer::WriterCommand::Shutdown { respond: tx })
         .map_err(|_| StoreError::WriterCrashed)?;
-    let result = rx.recv().map_err(|_| StoreError::WriterCrashed)?;
+    let result = crate::store::recv_writer_reply(&rx);
 
     result?;
 

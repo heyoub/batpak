@@ -1,5 +1,6 @@
 use crate::coordinate::Coordinate;
 use crate::event::{EventKind, EventPayload, StoredEvent};
+use crate::store::gate::DurabilityGate;
 use crate::store::{DiskPos, StoreError};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -57,6 +58,10 @@ impl CausationRef {
 }
 
 /// Single item in a batch append operation.
+///
+/// If the embedded [`AppendOptions`] includes a [`DurabilityGate`], batch
+/// append ignores that per-item gate. Use `Store::append_batch_with_options`
+/// to apply one batch-level gate to the last event in the batch.
 #[derive(Clone, Debug)]
 pub struct BatchAppendItem {
     /// Target coordinate (entity/scope) for this event.
@@ -318,6 +323,8 @@ pub struct AppendOptions {
     /// EventHeader flags (FLAG_REQUIRES_ACK, FLAG_TRANSACTIONAL, FLAG_REPLAY).
     /// Default: 0 (no flags); uses the same bit layout as `EventHeader::flags`.
     pub flags: u8,
+    /// Optional append-time wait for a frontier watermark.
+    pub gate: Option<DurabilityGate>,
 }
 
 impl AppendOptions {
@@ -331,6 +338,7 @@ impl AppendOptions {
             causation_id: None,
             position_hint: None,
             flags: 0,
+            gate: None,
         }
     }
 
@@ -396,6 +404,12 @@ impl AppendOptions {
     /// Set the DAG lane/depth hint while leaving HLC and sequence to the writer.
     pub fn with_position_hint(mut self, hint: AppendPositionHint) -> Self {
         self.position_hint = Some(hint);
+        self
+    }
+
+    /// Set an append-time durability gate.
+    pub fn with_gate(mut self, gate: DurabilityGate) -> Self {
+        self.gate = Some(gate);
         self
     }
 }
