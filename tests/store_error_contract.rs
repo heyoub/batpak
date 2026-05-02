@@ -11,7 +11,7 @@
 //! SEEDED: not random; deterministic contract table.
 
 use batpak::coordinate::{Coordinate, CoordinateError};
-use batpak::store::{StoreError, StoreLockMode};
+use batpak::store::{HlcPoint, StoreError, StoreLockMode, WatermarkKind};
 use std::error::Error as _;
 use std::io;
 use std::path::PathBuf;
@@ -35,7 +35,8 @@ fn classify(error: &StoreError) -> HandlingClass {
     match error {
         StoreError::Io(_)
         | StoreError::CacheFailed(_)
-        | StoreError::CheckpointWriteFailed { .. } => HandlingClass::RetryableOperational,
+        | StoreError::CheckpointWriteFailed { .. }
+        | StoreError::WaitTimeout { .. } => HandlingClass::RetryableOperational,
         StoreError::StoreLocked { .. }
         | StoreError::Coordinate(_)
         | StoreError::NotFound(_)
@@ -153,6 +154,20 @@ fn store_error_contract_table_stays_stable() {
             class: HandlingClass::RetryableOperational,
             source_needle: Some("cache timed out"),
             display_needles: &["cache error", "cache timed out"],
+        },
+        Case {
+            name: "wait_timeout",
+            error: StoreError::WaitTimeout {
+                watermark: WatermarkKind::Durable,
+                target: HlcPoint {
+                    wall_ms: 123,
+                    global_sequence: 4,
+                },
+                waited_ms: 250,
+            },
+            class: HandlingClass::RetryableOperational,
+            source_needle: None,
+            display_needles: &["Durable", "123", "4", "250ms", "timed out"],
         },
         Case {
             name: "configuration",

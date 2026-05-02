@@ -55,6 +55,7 @@ const HASH_CHAIN_REPLAY_NO_DEFAULT_MUTANT_FILES: &[&str] = &[
     "src/store/ancestry/by_clock.rs",
     "src/store/cold_start/rebuild.rs",
 ];
+const FRONTIER_WAIT_MUTANT_FILES: &[&str] = &["src/store/write/writer.rs"];
 const ALL_FEATURES_MUTANT_EXCLUDES: &[&str] = &["src/store/ancestry/by_clock.rs"];
 const NO_DEFAULT_FEATURES_MUTANT_EXCLUDES: &[&str] = &["src/store/ancestry/by_hash.rs"];
 
@@ -421,6 +422,13 @@ fn critical_mutation_seams() -> &'static [CriticalMutationSeam] {
             description: "hash-chain / replay consistency logic (no-default lane)",
             surface: MutantSurface::NoDefaultFeatures,
             paths: HASH_CHAIN_REPLAY_NO_DEFAULT_MUTANT_FILES,
+        },
+        CriticalMutationSeam {
+            slug: "frontier-wait-durable",
+            label: "frontier durable wait",
+            description: "wait_for_durable poison, target, timeout, and condvar loop",
+            surface: MutantSurface::AllFeatures,
+            paths: FRONTIER_WAIT_MUTANT_FILES,
         },
     ]
 }
@@ -926,6 +934,9 @@ mod tests {
                 critical_mutation_smoke_lanes()[5]
                     .clone()
                     .with_baseline(MutationBaseline::Skip),
+                critical_mutation_smoke_lanes()[6]
+                    .clone()
+                    .with_baseline(MutationBaseline::Skip),
                 MutationLane::repo_wide_smoke(MutantSurface::AllFeatures)
                     .with_baseline(MutationBaseline::Skip),
                 MutationLane::repo_wide_smoke(MutantSurface::NoDefaultFeatures)
@@ -1068,10 +1079,15 @@ mod tests {
             .iter()
             .find(|lane| lane.slug == "projection-flow")
             .expect("projection lane");
+        let wait_lane = lanes
+            .iter()
+            .find(|lane| lane.slug == "frontier-wait-durable")
+            .expect("frontier wait lane");
 
         assert_eq!(cursor_lane.scope, MutationScope::CriticalSeam);
         assert_eq!(cursor_lane.paths, CURSOR_MUTANT_FILES);
         assert_eq!(projection_lane.paths, PROJECTION_MUTANT_FILES);
+        assert_eq!(wait_lane.paths, FRONTIER_WAIT_MUTANT_FILES);
         assert_eq!(
             MutationLane::repo_wide(MutantSurface::AllFeatures, None).paths,
             REPO_WIDE_ALL_FEATURES_MUTANT_FILES

@@ -36,6 +36,28 @@ impl PartialOrd for HlcPoint {
     }
 }
 
+/// Frontier watermark identifiers accepted by synchronous wait APIs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[must_use]
+pub enum WatermarkKind {
+    /// The durable watermark.
+    Durable,
+    /// The applied watermark.
+    Applied,
+    /// The visible watermark.
+    Visible,
+}
+
+impl WatermarkKind {
+    pub(crate) fn current(self, snapshot: WatermarkSnapshot) -> HlcPoint {
+        match self {
+            Self::Durable => snapshot.durable_hlc,
+            Self::Applied => snapshot.applied_hlc,
+            Self::Visible => snapshot.visible_hlc,
+        }
+    }
+}
+
 /// Coherent point-in-time copy of the internal frontier watermarks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[must_use]

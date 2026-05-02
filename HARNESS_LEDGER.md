@@ -101,8 +101,9 @@ instead of pretending.
     graceful open/close cycles by consuming the latest recovered close
     lifecycle HLC.
   - `close_hlc_monotonicity_violation_surfaces_invariant_violation` records
-    the corruption shape that must fail closed once a segment-forging helper
-    exists.
+    the corruption shape that must fail closed by forging a later-written
+    `SYSTEM_CLOSE_COMPLETED` frame whose HLC regresses below a prior close
+    event while preserving frame CRC validity.
   - `ops_take_limit_returns_none_immediately_while_store_is_open` and
     `subscription_ops_take_limits_count` are fast mutation-smoke pins for
     exhausted `SubscriptionOps::take` behavior while the store remains open;
@@ -114,9 +115,40 @@ instead of pretending.
     progression mutants fail quickly instead of exhausting the smoke-lane
     timeout.
 - Remaining known blind spots:
-  - `close_hlc_monotonicity_violation_surfaces_invariant_violation` is ignored
-    until the Phase 1B chaos/forging helper can construct a later-written close
-    event whose HLC regresses below a prior close event.
+  - none for the explicit-close lifecycle frontier shape currently in scope.
+
+### Invariant: Durable frontier wait API surfaces honest blocking semantics
+
+- Harness pattern: `State-Machine Harness`
+- Location:
+  - `tests/durable_frontier_waits.rs`
+- Command used:
+  - `cargo test --test durable_frontier_waits --features dangerous-test-hooks`
+- Line/function coverage delta: not measured; Phase 2.1 adds public wait API
+  coverage.
+- Mutation delta:
+  - `frontier-wait-durable` critical seam is registered at the 85% smoke
+    threshold.
+- Covered tests:
+  - `wait_for_durable_returns_immediately_when_already_past` defends the fast
+    path where the durable frontier already covers the target.
+  - `wait_for_durable_blocks_then_returns_after_advance` defends that a
+    waiter blocks until a later sync advances `durable_hlc`.
+  - `wait_for_durable_returns_timeout_when_target_unreachable` defends
+    mandatory timeout reporting through `StoreError::WaitTimeout`.
+  - `wait_for_durable_surfaces_writer_crash` defends writer-crash poison and
+    wakeup of blocked waiters.
+  - `wait_for_durable_spurious_wakeup_safe` defends that condvar wakeups alone
+    never satisfy the target predicate.
+  - `wait_for_durable_mandatory_timeout_compiles_only_with_duration` defends
+    the sync API shape by pinning a `Duration` parameter.
+  - `wait_for_durable_zero_timeout_observes_current_state` defends the
+    zero-timeout boundary for both uncovered and already-covered targets.
+  - `wait_for_durable_origin_returns_immediately` defends the origin lower
+    bound.
+- Remaining known blind spots:
+  - Phase 2.1 covers only `wait_for_durable`; `wait_for_visible`,
+    `wait_for_applied`, and append gating are deferred to later Phase 2 stops.
 
 ### Invariant: Linux block-layer chaos harness fails writes after device flip
 
@@ -147,6 +179,7 @@ instead of pretending.
   - `tests/chaos.rs`
   - `tests/chaos/dm_flakey.rs`
   - `tests/chaos/scenarios/single_append_written.rs`
+  - `tests/chaos/scenarios/batch_commit_written.rs`
 - Command used:
   - `BATPAK_RUN_CHAOS=1 cargo test --features dangerous-test-hooks --test chaos -- --test-threads=1`
 - Activation gate:
@@ -172,6 +205,26 @@ instead of pretending.
   - `post_fsync_events_survive_device_failure_durability_floor` defends the
     lower bound: events fsynced through the block device remain recoverable
     after a later mapper failure.
+  - `durable_frontier_covers_recovered_state_after_batch_device_failure_cadence_1000`
+    defends `INV-FRONTIER-DURABLE-COVERS-RECOVERED` for unsynced batch
+    commit windows by asserting `durable_hlc` covers every recovered batch
+    entry and remains monotonic across the dm-flakey failure boundary, while
+    making no claim about the exact recovered count.
+  - `batch_append_surfaces_io_error_after_device_failure_cadence_1000`
+    defends that a batch append after the mapper is flipped to an error target
+    returns a caller-visible storage failure instead of a false success receipt.
+  - `post_fsync_batches_survive_device_failure_durability_floor` defends the
+    batch lower bound: batches fsynced through the block device remain
+    recoverable after a later mapper failure.
+  - `mixed_single_and_batch_durable_floor_survives_device_failure` defends that
+    durable frontier monotonicity and coverage hold across interleaved single
+    and batch sync boundaries.
+  - `partial_batch_writeback_durable_hlc_remains_monotonic` defends the larger
+    unsynced batch surface where OS write-back may preserve zero, some, or all
+    batch entries; batpak's guarantee remains recovered-state classification.
+  - `batch_append_surfaces_io_error_after_device_failure_cadence_1` defends
+    that cadence=1 batch appends surface device failure on the first batch
+    attempt after the mapper flips.
 - Remaining known blind spots:
   - the legacy in-process `FaultInjector` test remains ignored as a documented
     contrast with host page-cache behavior; the privileged dm-flakey scenario

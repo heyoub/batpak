@@ -659,11 +659,12 @@ fn fence_drop_without_commit_auto_cancels() {
 
     // The ticket should resolve with VisibilityFenceCancelled because the
     // fence was implicitly cancelled on drop.
+    let fenced_result = fenced_ticket
+        .receiver()
+        .recv_timeout(Duration::from_secs(2))
+        .expect("PROPERTY: dropped VisibilityFence must auto-cancel outstanding tickets promptly");
     assert!(
-        matches!(
-            fenced_ticket.wait(),
-            Err(StoreError::VisibilityFenceCancelled)
-        ),
+        matches!(fenced_result, Err(StoreError::VisibilityFenceCancelled)),
         "PROPERTY: dropping a VisibilityFence without commit or cancel must auto-cancel, \
          and any outstanding tickets must surface VisibilityFenceCancelled."
     );

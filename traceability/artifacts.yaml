@@ -163,6 +163,11 @@
   kind: source
   paths:
     - src/store/write/writer.rs
+- id: ART-FRONTIER-WAIT-DURABLE
+  kind: source
+  paths:
+    - src/store/mod.rs
+    - src/store/write/writer.rs
 - id: ART-STORE-REBUILD
   kind: source
   paths:
@@ -224,6 +229,10 @@
   kind: tests
   paths:
     - tests/durable_frontier_semantics.rs
+- id: ART-FRONTIER-WAIT-TESTS
+  kind: tests
+  paths:
+    - tests/durable_frontier_waits.rs
 - id: ART-CHAOS-DM-FLAKEY
   kind: tests
   paths:
@@ -232,6 +241,10 @@
   kind: tests
   paths:
     - tests/chaos/
+- id: ART-CHAOS-BATCH-COMMIT-WRITTEN
+  kind: tests
+  paths:
+    - tests/chaos/scenarios/batch_commit_written.rs
 - id: ART-REPLAY-TESTS
   kind: tests
   paths:
@@ -261,6 +274,10 @@
   kind: adr
   paths:
     - docs/adr/ADR-0015-chaos-harness-dm-flakey.md
+- id: ART-ADR-DURABILITY-GATING
+  kind: adr
+  paths:
+    - docs/adr/ADR-0016-durability-gating.md
 - id: ART-ADR-RESTORE-PLANNER
   kind: adr
   paths:

@@ -12,6 +12,7 @@
 use batpak::coordinate::{Coordinate, Region};
 use batpak::event::EventKind;
 use batpak::store::{Store, StoreConfig, StoreError};
+use std::time::Duration;
 use tempfile::TempDir;
 
 const FENCE_KIND: EventKind = EventKind::custom(0xC, 1);
@@ -132,4 +133,48 @@ fn cancelled_fence_hides_batch_before_and_after_reopen() {
 
         store.close().expect("close store");
     }
+}
+
+#[test]
+fn dropped_fence_auto_cancels_pending_work_and_releases_active_fence() {
+    let dir = TempDir::new().expect("temp dir");
+    let store = Store::open(config(&dir)).expect("open store");
+    let coord = Coordinate::new("entity:fence-drop", "scope:cancel").expect("valid coord");
+
+    let ticket = {
+        let fence = store
+            .begin_visibility_fence()
+            .expect("begin visibility fence");
+        fence
+            .submit(
+                &coord,
+                FENCE_KIND,
+                &serde_json::json!({"drop_cancel": true}),
+            )
+            .expect("submit under fence")
+    };
+
+    let dropped_result = ticket
+        .receiver()
+        .recv_timeout(Duration::from_secs(2))
+        .expect("PROPERTY: dropped visibility fence must cancel pending tickets promptly");
+    assert!(
+        matches!(dropped_result, Err(StoreError::VisibilityFenceCancelled)),
+        "PROPERTY: dropped visibility fence must resolve pending work as VisibilityFenceCancelled, got {dropped_result:?}"
+    );
+
+    let receipt = store
+        .append(
+            &coord,
+            FENCE_KIND,
+            &serde_json::json!({"after_drop_cancel": true}),
+        )
+        .expect("append after dropped fence");
+    let visible = user_visible_entries(&store);
+    assert!(
+        visible.iter().any(|entry| entry.event_id == receipt.event_id),
+        "PROPERTY: dropping a visibility fence must release the active fence so subsequent unfenced appends become visible"
+    );
+
+    store.close().expect("close store");
 }
