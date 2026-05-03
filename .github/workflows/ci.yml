@@ -224,7 +224,7 @@ jobs:
           BATPAK_DEVCONTAINER_IMAGE: batpak-devcontainer:ci
           BATPAK_DEVCONTAINER_SKIP_BUILD: "1"
         run: bash ./scripts/run-in-devcontainer.sh 'cargo xtask docs'
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: target/site
       - id: deploy
