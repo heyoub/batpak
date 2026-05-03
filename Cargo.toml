@@ -56,7 +56,7 @@ blake3 = { version = "1", optional = true }
 flume = "0.12"
 crc32fast = "1"
 rmp-serde = "1"
-dashmap = "5"
+dashmap = "6"
 parking_lot = "0.12"
 tracing = "0.1"
 memmap2 = "0.9"
