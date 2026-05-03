@@ -4,6 +4,7 @@ use batpak::prelude::*;
 use batpak::store::{Freshness, IndexTopology, Store, StoreConfig, SyncMode};
 use batpak_bench_support::{apply_profile, throughput_elements, BenchProfile};
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
+use std::hint::black_box;
 use std::sync::{Arc, Barrier};
 use tempfile::TempDir;
 
@@ -292,7 +293,7 @@ fn bench_topology_by_fact(c: &mut Criterion) {
 
         group.bench_function(*name, |b| {
             b.iter(|| {
-                criterion::black_box(store.by_fact(kind));
+                black_box(store.by_fact(kind));
             });
         });
 

@@ -26,6 +26,7 @@ use batpak::prelude::*;
 use batpak::store::{IndexTopology, Store, StoreConfig};
 use batpak_bench_support::{apply_profile, BenchProfile};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use std::hint::black_box;
 use tempfile::TempDir;
 
 const KINDS: [EventKind; 8] = [
@@ -92,7 +93,7 @@ fn bench_cursor_poll_batch(c: &mut Criterion) {
         group.bench_function(BenchmarkId::new("soa", batch_size), |b| {
             b.iter(|| {
                 let mut cursor = store.cursor_guaranteed(&region);
-                criterion::black_box(cursor.poll_batch(batch_size))
+                black_box(cursor.poll_batch(batch_size))
             });
         });
     }
@@ -117,7 +118,7 @@ fn bench_by_kind(c: &mut Criterion) {
         let (store, _dir) = build_store(events_per_kind);
         group.throughput(Throughput::Elements(events_per_kind as u64));
         group.bench_function(BenchmarkId::new("soa", events_per_kind), |b| {
-            b.iter(|| criterion::black_box(store.by_fact(QUERY_KIND)));
+            b.iter(|| black_box(store.by_fact(QUERY_KIND)));
         });
         close_store(store);
     }
@@ -137,7 +138,7 @@ fn bench_query_region(c: &mut Criterion) {
         let (store, _dir) = build_store(events_per_kind);
         group.throughput(Throughput::Elements(total));
         group.bench_function(BenchmarkId::new("soa", events_per_kind), |b| {
-            b.iter(|| criterion::black_box(store.query(&Region::all())));
+            b.iter(|| black_box(store.query(&Region::all())));
         });
         close_store(store);
     }

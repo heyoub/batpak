@@ -23,6 +23,7 @@ use batpak::prelude::*;
 use batpak::store::{IndexTopology, Store, StoreConfig};
 use batpak_bench_support::{apply_profile, BenchProfile};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use std::hint::black_box;
 use tempfile::TempDir;
 
 // 8 distinct kinds spread across 2 categories.
@@ -103,7 +104,7 @@ fn bench_by_kind(c: &mut Criterion) {
     for (name, topology) in &cases {
         let (store, _dir) = build_sorted_store(topology.clone());
         group.bench_function(BenchmarkId::new(*name, EVENTS_PER_KIND), |b| {
-            b.iter(|| criterion::black_box(store.by_fact(QUERY_KIND)));
+            b.iter(|| black_box(store.by_fact(QUERY_KIND)));
         });
         store.close().expect("close");
     }
@@ -116,7 +117,7 @@ fn bench_by_kind(c: &mut Criterion) {
     for (name, topology) in &cases {
         let (store, _dir) = build_interleaved_store(topology.clone());
         group.bench_function(BenchmarkId::new(*name, EVENTS_PER_KIND), |b| {
-            b.iter(|| criterion::black_box(store.by_fact(QUERY_KIND)));
+            b.iter(|| black_box(store.by_fact(QUERY_KIND)));
         });
         store.close().expect("close");
     }
@@ -138,9 +139,7 @@ fn bench_by_category(c: &mut Criterion) {
     for (name, topology) in &cases {
         let (store, _dir) = build_sorted_store(topology.clone());
         group.bench_function(BenchmarkId::new(*name, EVENTS_PER_KIND), |b| {
-            b.iter(|| {
-                criterion::black_box(store.query(&Region::all().with_fact_category(QUERY_CATEGORY)))
-            });
+            b.iter(|| black_box(store.query(&Region::all().with_fact_category(QUERY_CATEGORY))));
         });
         store.close().expect("close");
     }
@@ -153,9 +152,7 @@ fn bench_by_category(c: &mut Criterion) {
     for (name, topology) in &cases {
         let (store, _dir) = build_interleaved_store(topology.clone());
         group.bench_function(BenchmarkId::new(*name, EVENTS_PER_KIND), |b| {
-            b.iter(|| {
-                criterion::black_box(store.query(&Region::all().with_fact_category(QUERY_CATEGORY)))
-            });
+            b.iter(|| black_box(store.query(&Region::all().with_fact_category(QUERY_CATEGORY))));
         });
         store.close().expect("close");
     }

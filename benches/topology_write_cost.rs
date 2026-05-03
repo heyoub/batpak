@@ -5,6 +5,7 @@ use batpak::prelude::*;
 use batpak::store::{IndexTopology, Store, StoreConfig, SyncMode};
 use batpak_bench_support::{apply_profile, throughput_elements, BenchProfile};
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
+use std::hint::black_box;
 use tempfile::TempDir;
 
 const EVENT_COUNT: u32 = 1_000;
@@ -87,7 +88,7 @@ fn bench_topology_write_cost(c: &mut Criterion) {
                             "BENCH SETUP: non-tiled topology should not accumulate tile footprint"
                         );
                     }
-                    criterion::black_box(diagnostics.tile_count);
+                    black_box(diagnostics.tile_count);
                     store.close().expect("close store");
                 },
                 BatchSize::SmallInput,

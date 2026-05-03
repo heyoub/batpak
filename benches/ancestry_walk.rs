@@ -26,6 +26,7 @@ use batpak::prelude::*;
 use batpak::store::{Store, StoreConfig};
 use batpak_bench_support::{apply_profile, BenchProfile};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use std::hint::black_box;
 use tempfile::TempDir;
 
 const KIND: EventKind = EventKind::custom(0xA, 1);
@@ -62,7 +63,7 @@ fn bench_walk_ancestors(c: &mut Criterion) {
 
         group.throughput(Throughput::Elements(chain_len as u64));
         group.bench_function(BenchmarkId::new("soa", chain_len), |b| {
-            b.iter(|| criterion::black_box(store.walk_ancestors(last_id, chain_len as usize)));
+            b.iter(|| black_box(store.walk_ancestors(last_id, chain_len as usize)));
         });
 
         store.close().expect("close");
