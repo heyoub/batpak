@@ -238,4 +238,4 @@ jobs:
         # step succeeds silently and `continue-on-error` becomes a no-op.
         # See: https://github.com/TheFreeBatteryFactory/batpak/settings/pages
         continue-on-error: true
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
