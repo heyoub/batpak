@@ -28,7 +28,7 @@ jobs:
       - name: Run Criterion trend surface
         run: cargo xtask bench --surface ${{ matrix.surface }}
       - name: Upload Criterion trend artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: criterion-${{ matrix.os }}-${{ matrix.surface }}
           path: target/criterion
