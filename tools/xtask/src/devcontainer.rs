@@ -137,7 +137,8 @@ fn dockerfile_hash(path: &Path) -> Result<String> {
     let bytes = fs::read(path).with_context(|| format!("read {}", path.display()))?;
     let mut hasher = Sha256::new();
     hasher.update(bytes);
-    Ok(format!("{:x}", hasher.finalize()))
+    let digest = hasher.finalize();
+    Ok(base16ct::lower::encode_string(digest.as_ref()))
 }
 
 fn dockerfile(repo_root: &Path) -> PathBuf {
