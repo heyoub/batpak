@@ -72,7 +72,7 @@ pub(crate) fn assert_rustc_matches_toolchain_pin() -> Result<()> {
 }
 
 fn parse_toolchain_channel(toml: &str) -> Result<String> {
-    let parsed: TomlValue = toml.parse().context("parse rust-toolchain.toml as TOML")?;
+    let parsed: TomlValue = toml::from_str(toml).context("parse rust-toolchain.toml as TOML")?;
     let channel = parsed
         .get("toolchain")
         .and_then(TomlValue::as_table)

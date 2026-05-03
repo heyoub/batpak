@@ -5,6 +5,7 @@ use batpak::prelude::*;
 use batpak::store::{BatchAppendItem, CausationRef, Store, StoreConfig, SyncMode};
 use batpak_bench_support::{apply_profile, throughput_elements, BenchProfile};
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
+use std::hint::black_box;
 use tempfile::TempDir;
 
 const BATCH_SIZE: usize = 128;
@@ -83,7 +84,7 @@ fn bench_writer_batch_staging(c: &mut Criterion) {
         let mut batch_id = 0usize;
         b.iter(|| {
             let items = build_reused_items(&coord, kind, batch_id, BATCH_SIZE);
-            criterion::black_box(items);
+            black_box(items);
             batch_id += 1;
         });
     });
@@ -92,7 +93,7 @@ fn bench_writer_batch_staging(c: &mut Criterion) {
         let mut batch_id = 0usize;
         b.iter(|| {
             let items = build_fresh_items(kind, batch_id, BATCH_SIZE);
-            criterion::black_box(items);
+            black_box(items);
             batch_id += 1;
         });
     });
@@ -107,7 +108,7 @@ fn bench_writer_batch_staging(c: &mut Criterion) {
                     let items = build_reused_items(&coord, kind, batch_id, BATCH_SIZE);
                     store.append_batch(items).expect("append reused batch");
                 }
-                let _ = criterion::black_box(store.stats());
+                let _ = black_box(store.stats());
                 store.close().expect("close store");
             },
             BatchSize::SmallInput,
@@ -122,7 +123,7 @@ fn bench_writer_batch_staging(c: &mut Criterion) {
                     let items = build_fresh_items(kind, batch_id, BATCH_SIZE);
                     store.append_batch(items).expect("append fresh batch");
                 }
-                let _ = criterion::black_box(store.stats());
+                let _ = black_box(store.stats());
                 store.close().expect("close store");
             },
             BatchSize::SmallInput,

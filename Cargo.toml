@@ -72,7 +72,7 @@ zeroize = "1"
 batpak-bench-support = { path = "crates/bench-support", version = "0.6.0" }
 proptest = "1"
 arbitrary = { version = "1", features = ["derive"] }
-criterion = { version = "0.5", features = ["html_reports"] }
+criterion = { version = "0.8", features = ["html_reports"] }
 tempfile = "3"
 trybuild = "1"
 fastrand = "2"
