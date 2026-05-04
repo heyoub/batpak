@@ -69,7 +69,7 @@ zeroize = "1"
 # NO TOKIO. Invariant 1.
 
 [dev-dependencies]
-batpak-bench-support = { path = "crates/bench-support", version = "0.6.0" }
+batpak-bench-support = { path = "crates/bench-support" }
 proptest = "1"
 arbitrary = { version = "1", features = ["derive"] }
 criterion = { version = "0.8", features = ["html_reports"] }
