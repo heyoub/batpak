@@ -10,7 +10,7 @@
 
 use batpak::store::projection::{CacheMeta, NoCache, ProjectionCache};
 use batpak::store::StoreError;
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 fn test_meta() -> CacheMeta {
@@ -46,6 +46,56 @@ impl ProjectionCache for GetErrorCache {
     fn sync(&self) -> Result<(), StoreError> {
         Ok(())
     }
+}
+
+#[derive(Default)]
+struct CacheProbeCounters {
+    gets: AtomicUsize,
+    puts: AtomicUsize,
+    prefetches: AtomicUsize,
+}
+
+struct CountingCache {
+    counters: Arc<CacheProbeCounters>,
+}
+
+impl ProjectionCache for CountingCache {
+    fn capabilities(&self) -> batpak::store::projection::CacheCapabilities {
+        batpak::store::projection::CacheCapabilities {
+            is_noop: false,
+            supports_prefetch: true,
+        }
+    }
+
+    fn get(&self, _key: &[u8]) -> Result<Option<(Vec<u8>, CacheMeta)>, StoreError> {
+        self.counters.gets.fetch_add(1, Ordering::SeqCst);
+        Ok(None)
+    }
+
+    fn put(&self, _key: &[u8], _value: &[u8], _meta: CacheMeta) -> Result<(), StoreError> {
+        self.counters.puts.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+
+    fn delete_prefix(&self, _prefix: &[u8]) -> Result<u64, StoreError> {
+        Ok(0)
+    }
+
+    fn sync(&self) -> Result<(), StoreError> {
+        Ok(())
+    }
+
+    fn prefetch(&self, _key: &[u8], _predicted_meta: CacheMeta) -> Result<(), StoreError> {
+        self.counters.prefetches.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+}
+
+fn legacy_cache_bytes(value: &[u8], watermark: u64, cached_at_us: i64) -> Vec<u8> {
+    let mut bytes = value.to_vec();
+    bytes.extend_from_slice(&watermark.to_le_bytes());
+    bytes.extend_from_slice(&cached_at_us.to_le_bytes());
+    bytes
 }
 
 // ================================================================
@@ -802,6 +852,235 @@ fn project_if_changed_never_pairs_maybe_stale_cache_with_new_generation() {
          Investigate: src/store/projection/flow.rs project_if_changed() MaybeStale path."
     );
 
+    store.close().expect("close");
+}
+
+#[test]
+fn empty_projection_surface_skips_cache_for_no_replay_plan() {
+    use batpak::store::{Freshness, Store, StoreConfig, SyncConfig};
+    use tempfile::TempDir;
+
+    let dir = TempDir::new().expect("temp dir");
+    let counters = Arc::new(CacheProbeCounters::default());
+    let cache = CountingCache {
+        counters: Arc::clone(&counters),
+    };
+    let config = StoreConfig {
+        data_dir: dir.path().join("data"),
+        segment_max_bytes: 4096,
+        sync: SyncConfig {
+            every_n_events: 1,
+            ..SyncConfig::default()
+        },
+        ..StoreConfig::new("")
+    };
+    let store = Store::open_with_cache(config, Box::new(cache)).expect("open store");
+
+    let consistent: Option<MaybeStaleCounter> = store
+        .project("entity:no-events", &Freshness::Consistent)
+        .expect("project empty consistent");
+    let maybe_stale: Option<MaybeStaleCounter> = store
+        .project(
+            "entity:no-events",
+            &Freshness::MaybeStale {
+                max_stale_ms: 60_000,
+            },
+        )
+        .expect("project empty maybe stale");
+    let unchanged = store
+        .project_if_changed::<MaybeStaleCounter>("entity:no-events", 0, &Freshness::Consistent)
+        .expect("project_if_changed empty");
+
+    assert_eq!(
+        consistent, None,
+        "EMPTY PROJECTION SURFACE: project() on an entity with no replay plan should return None."
+    );
+    assert_eq!(
+        maybe_stale, None,
+        "EMPTY PROJECTION SURFACE: MaybeStale must not invent a cache-backed value for an empty entity."
+    );
+    assert_eq!(
+        unchanged, None,
+        "EMPTY PROJECTION SURFACE: project_if_changed() should report no change for a never-seen entity."
+    );
+    assert_eq!(
+        counters.gets.load(Ordering::SeqCst),
+        0,
+        "EMPTY PROJECTION SURFACE: no replay plan should skip external cache get entirely."
+    );
+    assert_eq!(
+        counters.prefetches.load(Ordering::SeqCst),
+        0,
+        "EMPTY PROJECTION SURFACE: no replay plan should skip cache prefetch entirely."
+    );
+    assert_eq!(
+        counters.puts.load(Ordering::SeqCst),
+        0,
+        "EMPTY PROJECTION SURFACE: no replay plan should not populate cache."
+    );
+
+    store.close().expect("close");
+}
+
+#[test]
+fn consistent_replays_when_reopened_native_cache_row_is_stale() {
+    use batpak::prelude::*;
+    use batpak::store::{Freshness, Store, StoreConfig, SyncConfig};
+    use tempfile::TempDir;
+
+    let dir = TempDir::new().expect("temp dir");
+    let cache_path = dir.path().join("cache");
+    let config = StoreConfig {
+        data_dir: dir.path().join("data"),
+        segment_max_bytes: 4096,
+        sync: SyncConfig {
+            every_n_events: 1,
+            ..SyncConfig::default()
+        },
+        ..StoreConfig::new("")
+    };
+    let coord = Coordinate::new("entity:consistent-stale-cache", "scope:test").expect("coord");
+    let kind = EventKind::custom(0xF, 1);
+
+    {
+        let store = Store::open_with_native_cache(config.clone(), &cache_path).expect("open store");
+        store
+            .append(&coord, kind, &serde_json::json!({"x": 1}))
+            .expect("append 1");
+        store
+            .append(&coord, kind, &serde_json::json!({"x": 2}))
+            .expect("append 2");
+        let seeded: Option<MaybeStaleCounter> = store
+            .project("entity:consistent-stale-cache", &Freshness::Consistent)
+            .expect("seed cache");
+        assert_eq!(seeded, Some(MaybeStaleCounter { count: 2 }));
+        store.close().expect("close seeded store");
+    }
+
+    {
+        let store = Store::open_with_native_cache(config, &cache_path).expect("reopen store");
+        store
+            .append(&coord, kind, &serde_json::json!({"x": 3}))
+            .expect("append 3");
+        let result: Option<MaybeStaleCounter> = store
+            .project("entity:consistent-stale-cache", &Freshness::Consistent)
+            .expect("project after stale cache");
+        assert_eq!(
+            result,
+            Some(MaybeStaleCounter { count: 3 }),
+            "CONSISTENT STALE CACHE HONESTY: after reopen, a populated external cache row with an older watermark must be bypassed and replayed."
+        );
+        store.close().expect("close");
+    }
+}
+
+#[test]
+fn maybe_stale_replays_when_cache_row_has_valid_metadata_but_empty_payload() {
+    use batpak::prelude::*;
+    use batpak::store::{Freshness, Store, StoreConfig, SyncConfig};
+    use tempfile::TempDir;
+
+    let dir = TempDir::new().expect("temp dir");
+    let cache_path = dir.path().join("cache");
+    let config = StoreConfig {
+        data_dir: dir.path().join("data"),
+        segment_max_bytes: 4096,
+        sync: SyncConfig {
+            every_n_events: 1,
+            ..SyncConfig::default()
+        },
+        ..StoreConfig::new("")
+    };
+    let coord = Coordinate::new("entity:metadata-only-stale", "scope:test").expect("coord");
+    let kind = EventKind::custom(0xF, 1);
+
+    {
+        let store = Store::open_with_native_cache(config.clone(), &cache_path).expect("open store");
+        store
+            .append(&coord, kind, &serde_json::json!({"x": 1}))
+            .expect("append 1");
+        store
+            .append(&coord, kind, &serde_json::json!({"x": 2}))
+            .expect("append 2");
+        let seeded: Option<MaybeStaleCounter> = store
+            .project("entity:metadata-only-stale", &Freshness::Consistent)
+            .expect("seed cache");
+        assert_eq!(seeded, Some(MaybeStaleCounter { count: 2 }));
+        store
+            .append(&coord, kind, &serde_json::json!({"x": 3}))
+            .expect("append 3");
+        store.close().expect("close seeded store");
+    }
+
+    let cache_entry = find_only_native_cache_entry(&cache_path);
+    std::fs::write(&cache_entry, legacy_cache_bytes(&[], 2, 1_000_000))
+        .expect("write metadata-only legacy cache entry");
+
+    let store = Store::open_with_native_cache(config, &cache_path).expect("reopen store");
+    let result: Option<MaybeStaleCounter> = store
+        .project(
+            "entity:metadata-only-stale",
+            &Freshness::MaybeStale {
+                max_stale_ms: 60_000,
+            },
+        )
+        .expect("project maybe stale after metadata-only cache row");
+    assert_eq!(
+        result,
+        Some(MaybeStaleCounter { count: 3 }),
+        "METADATA-ONLY CACHE HONESTY: a cache file with valid metadata but undecodable payload must replay rather than serve a stale MaybeStale success."
+    );
+    store.close().expect("close");
+}
+
+#[test]
+fn consistent_replays_when_cache_row_has_valid_metadata_but_truncated_payload() {
+    use batpak::prelude::*;
+    use batpak::store::{Freshness, Store, StoreConfig, SyncConfig};
+    use tempfile::TempDir;
+
+    let dir = TempDir::new().expect("temp dir");
+    let cache_path = dir.path().join("cache");
+    let config = StoreConfig {
+        data_dir: dir.path().join("data"),
+        segment_max_bytes: 4096,
+        sync: SyncConfig {
+            every_n_events: 1,
+            ..SyncConfig::default()
+        },
+        ..StoreConfig::new("")
+    };
+    let coord = Coordinate::new("entity:metadata-valid-truncated", "scope:test").expect("coord");
+    let kind = EventKind::custom(0xF, 1);
+
+    {
+        let store = Store::open_with_native_cache(config.clone(), &cache_path).expect("open store");
+        store
+            .append(&coord, kind, &serde_json::json!({"x": 1}))
+            .expect("append 1");
+        store
+            .append(&coord, kind, &serde_json::json!({"x": 2}))
+            .expect("append 2");
+        let seeded: Option<MaybeStaleCounter> = store
+            .project("entity:metadata-valid-truncated", &Freshness::Consistent)
+            .expect("seed cache");
+        assert_eq!(seeded, Some(MaybeStaleCounter { count: 2 }));
+        store.close().expect("close seeded store");
+    }
+
+    let cache_entry = find_only_native_cache_entry(&cache_path);
+    std::fs::write(&cache_entry, legacy_cache_bytes(b"\x92", 2, 1_000_000))
+        .expect("write truncated-payload legacy cache entry");
+
+    let store = Store::open_with_native_cache(config, &cache_path).expect("reopen store");
+    let result: Option<MaybeStaleCounter> = store
+        .project("entity:metadata-valid-truncated", &Freshness::Consistent)
+        .expect("project after truncated cache payload");
+    assert_eq!(
+        result,
+        Some(MaybeStaleCounter { count: 2 }),
+        "TRUNCATED PAYLOAD CACHE HONESTY: valid cache metadata with an undecodable payload must fall back to replay under Consistent freshness."
+    );
     store.close().expect("close");
 }
 

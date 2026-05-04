@@ -16,6 +16,10 @@ use batpak::store::{Freshness, ProjectionWatcher, Store, StoreConfig, SyncConfig
 use serde::{Deserialize, Serialize};
 use tempfile::TempDir;
 
+#[path = "support/bounded_blocking.rs"]
+mod bounded_blocking;
+use bounded_blocking::blocking;
+
 const KIND: EventKind = EventKind::custom(0xF, 0x31);
 const NOISE_KIND: EventKind = EventKind::custom(0xF, 0x32);
 
@@ -331,7 +335,7 @@ macro_rules! observe_projection_flow_matrix_case {
             )
             .expect("append matrix event");
 
-        let (watched_generation, watched_state) = watcher.recv().expect("watch projection recv");
+        let (watched_generation, watched_state) = blocking("raw-projection-watch-recv", move || watcher.recv()).expect("watch projection recv");
         let watched_state = watched_state.expect("watch projection state");
         let changed = store
             .project_if_changed::<$ty>(
@@ -390,8 +394,6 @@ macro_rules! observe_projection_flow_matrix_case {
              state changes from generation-only changes.",
             case.label
         );
-
-        drop(watcher);
         let store = match Arc::try_unwrap(store) {
             Ok(store) => store,
             Err(_) => panic!(
@@ -474,7 +476,8 @@ fn raw_watch_projection_emits_updated_state() {
         )
         .expect("append watch event");
 
-    let (gen, update) = watcher.recv().expect("watch projection recv");
+    let (gen, update) = blocking("raw-projection-watch-recv", move || watcher.recv())
+        .expect("watch projection recv");
     let update = update.expect("watch projection state");
     assert_eq!(update.value, 16);
     assert_eq!(update.seen, 5);
@@ -482,8 +485,6 @@ fn raw_watch_projection_emits_updated_state() {
         gen > baseline_generation,
         "watch projection generation should advance after a relevant append"
     );
-
-    drop(watcher);
     let store = match Arc::try_unwrap(store) {
         Ok(store) => store,
         Err(_) => panic!("PROPERTY: raw watch test should release all Arc clones before close"),
@@ -512,7 +513,8 @@ fn raw_watch_projection_matches_project_if_changed_after_relevant_append() {
         )
         .expect("append parity event");
 
-    let (gen, watched) = watcher.recv().expect("watch projection recv");
+    let (gen, watched) = blocking("raw-projection-watch-recv", move || watcher.recv())
+        .expect("watch projection recv");
     let watched = watched.expect("watch projection state");
     let changed = store
         .project_if_changed::<RawCounter>(
@@ -535,8 +537,6 @@ fn raw_watch_projection_matches_project_if_changed_after_relevant_append() {
         "PROPERTY: watch_projection and project_if_changed must report the same honest generation \
          after a relevant append."
     );
-
-    drop(watcher);
     let store = match Arc::try_unwrap(store) {
         Ok(store) => store,
         Err(_) => {
@@ -571,7 +571,8 @@ fn raw_watch_projection_matches_project_if_changed_after_irrelevant_append() {
         )
         .expect("append irrelevant event");
 
-    let (gen, watched) = watcher.recv().expect("watch projection recv");
+    let (gen, watched) = blocking("raw-projection-watch-recv", move || watcher.recv())
+        .expect("watch projection recv");
     let watched = watched.expect("watch projection state");
     let changed = store
         .project_if_changed::<RawCounter>(
@@ -604,8 +605,6 @@ fn raw_watch_projection_matches_project_if_changed_after_irrelevant_append() {
         changed.0 > baseline_generation,
         "entity generation should still advance on the irrelevant append"
     );
-
-    drop(watcher);
     let store = match Arc::try_unwrap(store) {
         Ok(store) => store,
         Err(_) => {

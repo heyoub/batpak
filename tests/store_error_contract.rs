@@ -71,7 +71,8 @@ fn classify(error: &StoreError) -> HandlingClass {
         | StoreError::AncestryCorrupt { .. }
         | StoreError::HiddenRangesCorrupt { .. }
         | StoreError::CursorCheckpointCorrupt { .. }
-        | StoreError::CursorCheckpointRegionMismatch { .. } => HandlingClass::FailClosedOperational,
+        | StoreError::CursorCheckpointRegionMismatch { .. }
+        | StoreError::InvariantViolation { .. } => HandlingClass::FailClosedOperational,
         #[cfg(feature = "dangerous-test-hooks")]
         StoreError::FaultInjected(_) => HandlingClass::FailClosedOperational,
         _ => panic!(
@@ -216,6 +217,16 @@ fn store_error_contract_table_stays_stable() {
             display_needles: &["CRC mismatch", "7", "42"],
         },
         Case {
+            name: "corrupt_segment",
+            error: StoreError::CorruptSegment {
+                segment_id: 8,
+                detail: "unsupported segment version: 99".into(),
+            },
+            class: HandlingClass::FailClosedOperational,
+            source_needle: None,
+            display_needles: &["corrupt segment", "8", "unsupported segment version"],
+        },
+        Case {
             name: "corrupt_frame",
             error: StoreError::CorruptFrame {
                 segment_id: 9,
@@ -260,6 +271,15 @@ fn store_error_contract_table_stays_stable() {
             class: HandlingClass::Domain,
             source_needle: None,
             display_needles: &["batch item 1", "4097", "2048"],
+        },
+        Case {
+            name: "invariant_violation",
+            error: StoreError::InvariantViolation {
+                reason: "close_hlc regressed below prior close".into(),
+            },
+            class: HandlingClass::FailClosedOperational,
+            source_needle: None,
+            display_needles: &["invariant violation", "close_hlc regressed"],
         },
         Case {
             name: "invalid_clock",

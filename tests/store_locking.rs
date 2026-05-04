@@ -194,6 +194,8 @@ fn subprocess_mutable_owner_blocks_other_processes() {
     match_locked(err, dir.path(), StoreLockMode::ReadOnly);
 
     std::fs::write(&release, b"release").expect("release helper");
+    // Intentional: child process wait follows the release signal; helper exit
+    // is the test assertion.
     let status = child.wait().expect("wait on helper");
     assert!(
         status.success(),

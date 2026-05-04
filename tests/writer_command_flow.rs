@@ -7,6 +7,10 @@ use std::sync::{Arc, Barrier};
 use std::thread;
 use tempfile::TempDir;
 
+#[path = "support/bounded_writer_reply.rs"]
+mod bounded_writer_reply;
+use bounded_writer_reply::writer_reply;
+
 const KIND: EventKind = EventKind::custom(0xF, 0x55);
 
 fn command_flow_config(dir: &TempDir) -> StoreConfig {
@@ -55,6 +59,8 @@ fn mixed_append_and_batch_commands_complete_under_group_commit_drain() {
     let coord = flow_coord();
     let barrier = Arc::new(Barrier::new(3));
 
+    // Intentional: barrier waits coordinate simultaneous writer-command entry;
+    // participant count is fixed by this test.
     let append_a = {
         let store = Arc::clone(&store);
         let coord = coord.clone();
@@ -130,6 +136,7 @@ fn sync_during_group_commit_drain_preserves_completed_work() {
     let coord = flow_coord();
     let barrier = Arc::new(Barrier::new(5));
 
+    // Intentional: barrier waits coordinate a bounded set of append threads.
     let handles: Vec<_> = (0..4u128)
         .map(|idx| {
             let store = Arc::clone(&store);
@@ -185,6 +192,7 @@ fn begin_visibility_fence_after_unfenced_drain_keeps_pre_fence_work_visible() {
     .expect("seed append before fence");
     let barrier = Arc::new(Barrier::new(4));
 
+    // Intentional: barrier waits coordinate a bounded set of append threads.
     let handles: Vec<_> = (0..3u128)
         .map(|idx| {
             let store = Arc::clone(&store);
@@ -227,7 +235,7 @@ fn begin_visibility_fence_after_unfenced_drain_keeps_pre_fence_work_visible() {
         }
     }
 
-    let err = match fenced_ticket.wait() {
+    let err = match writer_reply(fenced_ticket.receiver(), "cancelled fenced batch ticket") {
         Ok(_) => panic!("PROPERTY: cancelled fence work must not resolve as visible success"),
         Err(err) => err,
     };
@@ -285,7 +293,7 @@ fn shutdown_auto_cancels_pending_fenced_responses_after_drain_mix() {
     store.close().expect("close store");
 
     assert!(
-        matches!(ticket.wait(), Err(StoreError::VisibilityFenceCancelled)),
+        matches!(writer_reply(ticket.receiver(), "writer ticket"), Err(StoreError::VisibilityFenceCancelled)),
         "PROPERTY: shutdown with a still-live fence must cancel its pending response after mixed unfenced/fenced command flow."
     );
 

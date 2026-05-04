@@ -49,11 +49,30 @@ instead of pretending.
 - Command used:
   - `cargo test --test segment_scan_hardening`
   - `cargo test --test segment_scan_hardening corruption_inside_staged_batch_discards_the_whole_batch`
+  - `cargo test --test segment_scan_hardening sidx_footer_entry_count_disagreement_falls_back_to_frame_scan`
+  - `cargo test --test segment_scan_hardening valid_crc_unreadable_frame_metadata_skips_only_that_frame`
+  - `cargo test --test segment_scan_hardening orphan_commit_marker_is_ignored_without_stopping_scan`
 - Line/function coverage delta: targeted rise in `src/store/segment/scan.rs`; exact JSON delta not recorded in this wave
 - Mutation delta: unmeasured in this wave
+- Covered tests:
+  - `invalid_batch_begin_count_fails_closed_on_reopen` pins `BEGIN` markers
+    with invalid item counts as fail-closed corruption.
+  - `missing_hash_chain_for_data_frame_fails_closed_on_reopen` pins ordinary
+    data frames with missing hash-chain metadata as fail-closed corruption.
+  - `corruption_inside_staged_batch_discards_the_whole_batch` pins CRC
+    corruption inside a staged batch as discarding the whole in-flight batch.
+  - `sidx_footer_entry_count_disagreement_falls_back_to_frame_scan` pins SIDX
+    footer count disagreement as accelerator corruption that must fall back to
+    the authoritative frame scan.
+  - `valid_crc_unreadable_frame_metadata_skips_only_that_frame` pins
+    CRC-valid/non-CRC metadata decode failures as skipping the bad frame while
+    preserving later independent frames.
+  - `orphan_commit_marker_is_ignored_without_stopping_scan` pins COMMIT without
+    prior BEGIN as ignored batch metadata that does not stop the scan.
 - Remaining known blind spots:
-  - this wave now proves invalid BEGIN counts, missing `hash_chain`, and CRC corruption on the second staged batch item all fail closed on reopen
-  - remaining uncovered defensive branches are mostly other corrupt-frame shapes such as footer disagreement and non-CRC decode failures deeper in the slow path
+  - low-level unit coverage still owns some byte-range helper boundaries, but
+    the black-box slow-path corruption shapes currently called out in this
+    ledger are covered.
 
 ### Invariant: Durable frontier observations stay honest under writer faults
 
@@ -329,11 +348,16 @@ instead of pretending.
   - `cargo test --test projection_cache freshness_maybe_stale_replays_when_fresh_cache_bytes_are_corrupt`
   - `cargo test --test projection_cache projection_replays_when_cache_get_errors`
   - `cargo test --test projection_cache freshness_maybe_stale_replays_at_exact_age_boundary`
+  - `cargo test --test projection_cache empty_projection_surface_skips_cache_for_no_replay_plan`
+  - `cargo test --test projection_cache consistent_replays_when_reopened_native_cache_row_is_stale`
+  - `cargo test --test projection_cache maybe_stale_replays_when_cache_row_has_valid_metadata_but_empty_payload`
+  - `cargo test --test projection_cache consistent_replays_when_cache_row_has_valid_metadata_but_truncated_payload`
 - Line/function coverage delta: targeted rise in `src/store/projection/flow.rs`; exact JSON delta not recorded in this wave
 - Mutation delta: unmeasured in this wave
 - Remaining known blind spots:
   - this seam now proves that stale-but-young corrupt rows, fresh-but-corrupt rows, cache-get failures, and exact age-boundary rows all fall back to honest replay under `Freshness::MaybeStale`
-  - remaining cache-edge blind spots are mostly around alternate corruption shapes and the empty/no-replay-plan public surface rather than stale-byte honesty itself
+  - coverage-closure sweep also pins empty/no-replay-plan behavior, reopened stale external-cache replay under `Freshness::Consistent`, and valid-metadata/undecodable-payload cache rows that bypass metadata corruption but still must replay honestly
+  - remaining cache-edge blind spots are now limited to backend-specific OS error shapes that are difficult to force portably without changing production behavior
 
 ## Property Harness
 
@@ -355,12 +379,23 @@ instead of pretending.
 - Harness pattern: `Property Harness`
 - Location:
   - `tests/store_error_contract.rs`
+  - `src/store/error.rs`
 - Command used:
   - `cargo test --test store_error_contract`
+  - `cargo test store::error::tests`
 - Line/function coverage delta: targeted rise in `src/store/error.rs`; exact JSON delta not recorded in this wave
 - Mutation delta: unmeasured in this wave
+- Covered tests:
+  - `store_error_contract_table_stays_stable` now includes direct public
+    contract rows for helper-shaped `CorruptSegment` construction and
+    fail-closed `InvariantViolation` display/classification.
+  - `src/store/error.rs::tests::*_helper_*` directly exercises every
+    `pub(crate)` `StoreError` helper constructor, including source-bearing
+    batch/cache/serialization helpers and segment-corruption helpers.
 - Remaining known blind spots:
-  - this table owns representative variant handling, `Display`, `source()`, and conversion routing, but it does not yet exercise the internal helper constructors that only unit tests inside `src/store/error.rs` can reach
+  - none for the representative `StoreError` handling, `Display`, `source()`,
+    conversion routing, and internal helper-constructor surface currently in
+    scope.
 
 ### Invariant: Catastrophic performance regressions trip explicit thresholds
 

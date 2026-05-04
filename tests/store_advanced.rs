@@ -951,6 +951,8 @@ fn subscription_ops_map_transforms_notifications() {
 }
 
 // --- SubscriptionOps::filter chains ---
+// Intentional: inner `ops.recv()` exhaustion probes are bounded by the outer
+// mpsc `recv_timeout` assertions below.
 
 #[test]
 fn subscription_ops_filter_chains_correctly() {
@@ -1021,6 +1023,8 @@ fn subscription_ops_filter_chains_correctly() {
 }
 
 // --- SubscriptionOps::take ---
+// Intentional: inner `ops.recv()` exhaustion probes are bounded by the outer
+// mpsc `recv_timeout` assertions below.
 
 #[test]
 fn subscription_ops_take_limits_count() {

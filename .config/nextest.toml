@@ -9,8 +9,17 @@ fail-fast = false
 test-threads = "num-cpus"
 slow-timeout = { period = "60s", terminate-after = 3 }
 
+[test-groups]
+windows-heavy-properties = { max-threads = 1 }
+
 # Property tests that open multiple stores with different view configs
 # can exceed 60s on Windows CI due to NTFS per-file-operation latency.
+[[profile.ci.overrides]]
+filter = "test(all_view_topologies) | test(reopened_view_topologies) | test(reopen_paths_match)"
+platform = 'cfg(windows)'
+test-group = "windows-heavy-properties"
+slow-timeout = { period = "300s", terminate-after = 2 }
+
 [[profile.ci.overrides]]
 filter = "test(all_view_topologies) | test(reopened_view_topologies) | test(reopen_paths_match)"
 slow-timeout = { period = "120s", terminate-after = 2 }

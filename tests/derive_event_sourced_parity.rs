@@ -27,8 +27,11 @@ use batpak::prelude::*;
 use batpak::prelude::{EventPayload, EventSourced};
 use serde::{Deserialize, Serialize};
 
+#[path = "support/bounded_blocking.rs"]
+mod bounded_blocking;
 #[path = "support/small_store.rs"]
 mod small_store_support;
+use bounded_blocking::blocking;
 use small_store_support::small_segment_store;
 
 // ─── Payload types shared across all parity variants ─────────────────────────
@@ -349,8 +352,10 @@ fn watch_projection_parity_between_hand_and_derived() {
 
     // Drain each watcher's first delivered state after the writes; in a
     // stable test we can also fall back to `project` to compare final states.
-    let _ = hand_watcher.recv();
-    let _ = derived_watcher.recv();
+    let _ = blocking("derive-parity-hand-watch-recv", move || hand_watcher.recv());
+    let _ = blocking("derive-parity-derived-watch-recv", move || {
+        derived_watcher.recv()
+    });
 
     // Direct projection after the writes is the deterministic parity check.
     let hand_final = store

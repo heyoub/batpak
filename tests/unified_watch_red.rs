@@ -1,12 +1,15 @@
 // justifies: INV-TEST-PANIC-AS-ASSERTION, INV-MACRO-BOUNDED-CAST; unified red-path watch tests in tests/unified_watch_red.rs use unwrap/panic as assertion style and narrow bounded test counters that fit within u32.
 #![allow(clippy::unwrap_used, clippy::cast_possible_truncation, clippy::panic)]
 
+#[path = "support/bounded_blocking.rs"]
+mod bounded_blocking;
 #[path = "support/red_counters.rs"]
 mod red_counters;
 #[path = "support/red_kind_b.rs"]
 mod red_kind_b;
 #[path = "support/red_kinds.rs"]
 mod red_kinds;
+use bounded_blocking::blocking;
 
 use red_counters::*;
 use red_kind_b::*;
@@ -43,7 +46,8 @@ fn watch_projection_emits_on_new_events() {
 
     handle.join().expect("writer thread");
 
-    let (_gen, state) = watcher.recv().expect("recv should not error");
+    let (_gen, state) =
+        blocking("unified-watch-recv", move || watcher.recv()).expect("recv should not error");
     let counter = state.expect("should have projection");
     assert_eq!(
         counter.count, 8,
@@ -74,7 +78,8 @@ fn watch_projection_catches_up_after_lossy_notifications() {
             .expect("append burst");
     }
 
-    let (_gen, state) = watcher.recv().expect("recv should not error");
+    let (_gen, state) =
+        blocking("unified-watch-recv", move || watcher.recv()).expect("recv should not error");
     let counter = state.expect("projection should exist");
     assert_eq!(
         counter.count, 10,
@@ -105,7 +110,7 @@ fn subscription_returns_none_on_store_close() {
         })
         .expect("spawn");
 
-    let result = sub.recv();
+    let result = blocking("unified-watch-subscription-close-recv", move || sub.recv());
     assert!(
         result.is_none(),
         "PROPERTY: subscription must return None when store shuts down."
@@ -133,9 +138,14 @@ fn watch_projection_returns_store_closed_when_slow_watcher_is_pruned() {
             .expect("burst append");
     }
 
-    let (_gen, state) = watcher
-        .recv()
-        .expect("first recv should drain buffered notification");
+    // Intentional: the two blocking watcher receives are bounded by
+    // `bounded_blocking::blocking` around this closure.
+    let (first, second) = blocking("unified-watch-pruned-recv-sequence", move || {
+        let first = watcher.recv();
+        let second = watcher.recv();
+        (first, second)
+    });
+    let (_gen, state) = first.expect("first recv should drain buffered notification");
     let state = state.expect("projection should exist");
     assert_eq!(
         state.count, 6,
@@ -144,7 +154,7 @@ fn watch_projection_returns_store_closed_when_slow_watcher_is_pruned() {
          Investigate: src/store/projection/watch.rs recv + src/store/projection/flow.rs."
     );
 
-    let err: batpak::store::WatcherError = match watcher.recv() {
+    let err: batpak::store::WatcherError = match second {
         Ok(_) => panic!("PROPERTY: pruned watcher should terminate with WatcherError::StoreClosed"),
         Err(err) => err,
     };

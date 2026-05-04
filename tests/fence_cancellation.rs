@@ -15,6 +15,10 @@ use batpak::store::{Store, StoreConfig, StoreError};
 use std::time::Duration;
 use tempfile::TempDir;
 
+#[path = "support/bounded_writer_reply.rs"]
+mod bounded_writer_reply;
+use bounded_writer_reply::writer_reply;
+
 const FENCE_KIND: EventKind = EventKind::custom(0xC, 1);
 
 fn config(dir: &TempDir) -> StoreConfig {
@@ -67,7 +71,7 @@ fn cancelled_fence_hides_batch_before_and_after_reopen() {
         // Every ticket submitted under a cancelled fence must resolve to
         // VisibilityFenceCancelled so the caller knows it was discarded.
         for (i, ticket) in tickets.into_iter().enumerate() {
-            let outcome = ticket.wait();
+            let outcome = writer_reply(ticket.receiver(), "writer ticket");
             assert!(
                 matches!(outcome, Err(StoreError::VisibilityFenceCancelled)),
                 "PROPERTY: cancelled-fence ticket #{i} must surface VisibilityFenceCancelled, got {outcome:?}"

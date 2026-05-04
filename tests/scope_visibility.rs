@@ -14,6 +14,10 @@ use batpak::prelude::Coordinate;
 use batpak::store::{Cursor, IndexTopology, Store, StoreConfig, StoreError};
 use tempfile::TempDir;
 
+#[path = "support/bounded_writer_reply.rs"]
+mod bounded_writer_reply;
+use bounded_writer_reply::writer_reply;
+
 fn topologies() -> Vec<(&'static str, IndexTopology)> {
     vec![
         ("aos", IndexTopology::aos()),
@@ -198,7 +202,7 @@ fn bounded_scope_cursor_skips_hidden_gap_and_reaches_later_visible_event() {
         .collect();
     fence.cancel().expect("cancel visibility fence");
     for ticket in hidden_tickets {
-        let err = match ticket.wait() {
+        let err = match writer_reply(ticket.receiver(), "writer ticket") {
             Ok(_) => panic!("PROPERTY: cancelled fence ticket must not resolve as visible success"),
             Err(err) => err,
         };

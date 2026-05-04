@@ -754,6 +754,7 @@ fn concurrent_snapshot_never_observes_torn_emitted_below_visible() {
     let observer_store = Arc::clone(&store);
     let observer_start = Arc::clone(&start);
     let observer_done = Arc::clone(&done);
+    // Intentional: barrier waits coordinate exactly one observer and one writer.
     let observer = thread::Builder::new()
         .name("frontier-snapshot-observer".to_string())
         .spawn(move || {
