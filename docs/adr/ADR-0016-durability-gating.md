@@ -1,7 +1,7 @@
 # ADR-0016: Durability Gating
 
 ## Status
-Accepted
+Accepted (shipped in 0.7.0).
 
 ## Context
 ADR-0014 exposed the durable frontier as an observation surface. Phase 2 turns

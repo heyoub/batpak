@@ -20,8 +20,8 @@ instead of pretending.
   - `cargo test --test derive_eventpayload_errors`
   - `cargo test --test derive_event_sourced_errors`
   - `cargo test --test derive_multi_event_reactor_errors`
-- Line/function coverage delta: unmeasured in this wave
-- Mutation delta: unmeasured in this wave
+- Line/function coverage delta: unmeasured
+- Mutation delta: unmeasured
 - Remaining known blind spots:
   - compile-fail suites prove invalid macro shapes and error quality, but they
     do not prove successful derived runtime behaviour by themselves
@@ -35,8 +35,8 @@ instead of pretending.
 - Command used:
   - `cargo test --test chaos_testing --all-features`
   - `cargo test --test cold_start_recovery`
-- Line/function coverage delta: unmeasured in this wave
-- Mutation delta: unmeasured in this wave
+- Line/function coverage delta: unmeasured
+- Mutation delta: unmeasured
 - Remaining known blind spots:
   - broad chaos coverage exists, but not every low-level segment-scan defensive
     branch is table-driven yet
@@ -52,8 +52,8 @@ instead of pretending.
   - `cargo test --test segment_scan_hardening sidx_footer_entry_count_disagreement_falls_back_to_frame_scan`
   - `cargo test --test segment_scan_hardening valid_crc_unreadable_frame_metadata_skips_only_that_frame`
   - `cargo test --test segment_scan_hardening orphan_commit_marker_is_ignored_without_stopping_scan`
-- Line/function coverage delta: targeted rise in `src/store/segment/scan.rs`; exact JSON delta not recorded in this wave
-- Mutation delta: unmeasured in this wave
+- Line/function coverage delta: targeted rise in `src/store/segment/scan.rs`; exact JSON delta not recorded
+- Mutation delta: unmeasured
 - Covered tests:
   - `invalid_batch_begin_count_fails_closed_on_reopen` pins `BEGIN` markers
     with invalid item counts as fail-closed corruption.
@@ -298,8 +298,8 @@ instead of pretending.
 - Command used:
   - `cargo test --test derive_event_sourced_parity`
   - `cargo test --test derive_event_sourced_generic`
-- Line/function coverage delta: unmeasured in this wave
-- Mutation delta: unmeasured in this wave
+- Line/function coverage delta: unmeasured
+- Mutation delta: unmeasured
 - Remaining known blind spots:
   - these suites pin behavioural equivalence, not compile-fail diagnostics
 
@@ -312,8 +312,8 @@ instead of pretending.
 - Command used:
   - `cargo test --test replay_consistency`
   - `cargo test --test mmap_cold_start`
-- Line/function coverage delta: unmeasured in this wave
-- Mutation delta: unmeasured in this wave
+- Line/function coverage delta: unmeasured
+- Mutation delta: unmeasured
 - Remaining known blind spots:
   - parity across all artifact paths is strong, but some corruption-only
     branches still live in separate fault-injection suites
@@ -329,8 +329,8 @@ instead of pretending.
   - `cargo test --test raw_projection_mode projection_flow_incremental_group_local_keeps_lanes_equivalent`
   - `cargo test --test raw_projection_mode projection_flow_incremental_external_cache_keeps_lanes_equivalent`
 - Line/function coverage delta: targeted rise in `src/store/projection/flow.rs`
-    and watcher-adjacent paths; exact JSON delta not recorded in this wave
-- Mutation delta: unmeasured in this wave
+    and watcher-adjacent paths; exact JSON delta not recorded
+- Mutation delta: unmeasured
 - Remaining known blind spots:
   - current matrix now covers relevant and irrelevant appends across the two replay
     lanes, the cache-enabled `Freshness::MaybeStale` stale-hit vs forced-replay branch,
@@ -352,8 +352,8 @@ instead of pretending.
   - `cargo test --test projection_cache consistent_replays_when_reopened_native_cache_row_is_stale`
   - `cargo test --test projection_cache maybe_stale_replays_when_cache_row_has_valid_metadata_but_empty_payload`
   - `cargo test --test projection_cache consistent_replays_when_cache_row_has_valid_metadata_but_truncated_payload`
-- Line/function coverage delta: targeted rise in `src/store/projection/flow.rs`; exact JSON delta not recorded in this wave
-- Mutation delta: unmeasured in this wave
+- Line/function coverage delta: targeted rise in `src/store/projection/flow.rs`; exact JSON delta not recorded
+- Mutation delta: unmeasured
 - Remaining known blind spots:
   - this seam now proves that stale-but-young corrupt rows, fresh-but-corrupt rows, cache-get failures, and exact age-boundary rows all fall back to honest replay under `Freshness::MaybeStale`
   - coverage-closure sweep also pins empty/no-replay-plan behavior, reopened stale external-cache replay under `Freshness::Consistent`, and valid-metadata/undecodable-payload cache rows that bypass metadata corruption but still must replay honestly
@@ -368,8 +368,8 @@ instead of pretending.
   - `tests/fuzz_chaos_feedback.rs`
 - Command used:
   - `cargo test --test fuzz_chaos_feedback --all-features --release`
-- Line/function coverage delta: unmeasured in this wave
-- Mutation delta: unmeasured in this wave
+- Line/function coverage delta: unmeasured
+- Mutation delta: unmeasured
 - Remaining known blind spots:
   - feedback policy is explicit, but it does not replace direct seam-level
     fault-injection or state-machine proofs
@@ -383,8 +383,8 @@ instead of pretending.
 - Command used:
   - `cargo test --test store_error_contract`
   - `cargo test store::error::tests`
-- Line/function coverage delta: targeted rise in `src/store/error.rs`; exact JSON delta not recorded in this wave
-- Mutation delta: unmeasured in this wave
+- Line/function coverage delta: targeted rise in `src/store/error.rs`; exact JSON delta not recorded
+- Mutation delta: unmeasured
 - Covered tests:
   - `store_error_contract_table_stays_stable` now includes direct public
     contract rows for helper-shaped `CorruptSegment` construction and
@@ -419,8 +419,8 @@ instead of pretending.
   - `tests/deterministic_concurrency.rs`
 - Command used:
   - `cargo test --test deterministic_concurrency`
-- Line/function coverage delta: unmeasured in this wave
-- Mutation delta: unmeasured in this wave
+- Line/function coverage delta: unmeasured
+- Mutation delta: unmeasured
 - Remaining known blind spots:
   - loom proofs cover bounded interleavings, not unbounded stress or real I/O
 
@@ -432,10 +432,10 @@ instead of pretending.
 - Command used:
   - `cargo test --test cursor_durability`
 - Line/function coverage delta: targeted rise in `src/store/delivery/cursor.rs`;
-    exact JSON delta not recorded in this wave
-- Mutation delta: unmeasured in this wave
+    exact JSON delta not recorded
+- Mutation delta: unmeasured
 - Remaining known blind spots:
-  - this wave proves committed progress vs rollback/restart semantics, but does
+  - committed progress vs rollback/restart semantics are covered, but this does
     not yet replace the broader cursor lifecycle tests in `tests/store_advanced.rs`
 
 ### Invariant: Ready writer tickets surface observable completion through `try_check`
@@ -452,7 +452,7 @@ instead of pretending.
   - `cargo test --test control_plane_surface try_submit_batch_returns_retry_under_pressure`
   - `CARGO_INCREMENTAL=0 cargo mutants --output tools/xtask/target/mutants/writer-commit-ticket-try-check-none --in-place --baseline run --file 'src/store/write/*.rs' --exclude src/store/ancestry/by_clock.rs --all-features --cargo-arg --locked --test-tool cargo --shard 1/8 --sharding round-robin --build-timeout 300 --timeout 300 --minimum-test-timeout 120 -F 'Ticket<T>::try_check.*with None'`
   - `CARGO_INCREMENTAL=0 cargo mutants --output tools/xtask/target/mutants/fence-token-root-under-fence-4 --in-place --baseline run --file 'src/store/write/control.rs' --all-features --cargo-arg --locked --test-tool cargo --build-timeout 300 --timeout 300 --minimum-test-timeout 120 -F 'delete field fence_token from struct Self expression in AppendSubmission::root_under_fence'`
-- Line/function coverage delta: targeted rise in `src/store/write/control.rs`; exact JSON delta not recorded in this wave
+- Line/function coverage delta: targeted rise in `src/store/write/control.rs`; exact JSON delta not recorded
 - Mutation delta:
   - exact mutant `src/store/write/control.rs:29:9 replace Ticket<T>::try_check -> Option<Result<T, StoreError>> with None` is now caught by the ready-path proof lane
   - the exact default-receipt mutants for `AppendTicket::try_check` and `BatchAppendTicket::try_check` are now characterized as unviable at build time:
@@ -476,8 +476,8 @@ instead of pretending.
 - Command used:
   - `cargo test --test index_filter_composition`
   - `cargo test --test index_filter_composition reopen_matches_live_oracle_across_topologies`
-- Line/function coverage delta: targeted rise in `src/store/index/columnar.rs` and `src/store/index/mod.rs`; exact JSON delta not recorded in this wave
-- Mutation delta: unmeasured in this wave
+- Line/function coverage delta: targeted rise in `src/store/index/columnar.rs` and `src/store/index/mod.rs`; exact JSON delta not recorded
+- Mutation delta: unmeasured
 - Remaining known blind spots:
   - the oracle now owns filter composition, cursor batch ordering, and live-vs-reopen parity across topologies
   - remaining blind spots are deeper restore-artifact mismatches outside this pure query surface, which still belong to cold-start parity suites rather than the overlay oracle itself

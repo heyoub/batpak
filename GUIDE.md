@@ -67,7 +67,6 @@ For atomic bulk insertion, use `Store::append_batch` with
 
 ```rust
 use batpak::prelude::*;
-use batpak::store::{BatchAppendItem, CausationRef};
 
 #[derive(serde::Serialize, serde::Deserialize, EventPayload)]
 #[batpak(category = 1, type_id = 1)]
@@ -344,11 +343,11 @@ Ticket surfaces:
 
 ```rust
 match store.try_submit_typed(&coord, &payload)? {
-    batpak::outcome::Outcome::Ok(ticket) => {
+    Outcome::Ok(ticket) => {
         let receipt = ticket.wait()?;
         println!("{}", receipt.sequence);
     }
-    batpak::outcome::Outcome::Retry { after_ms, reason, .. } => {
+    Outcome::Retry { after_ms, reason, .. } => {
         println!("retry after {after_ms}ms: {reason}");
     }
     other => unreachable!("unexpected control-plane outcome: {other:?}"),

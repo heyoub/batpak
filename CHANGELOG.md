@@ -13,6 +13,9 @@ All notable changes to this project will be documented in this file.
   `react_loop_multi`, and `react_loop_multi_raw` handler bounds receive the
   same parameter. `AtLeastOnce` now exposes
   `checkpoint_id(&self) -> &CheckpointId` for read-only inspection.
+- Internal workspace crates (`batpak-macros-support`, `batpak-macros`, and
+  `batpak-bench-support`) are now publishable so the main crate can resolve
+  its crates.io dependency graph without path overrides.
 - Production `expect(...)` use is now denied for non-test builds unless a site
   carries an explicit local escape hatch for a documented invariant.
 - Runtime append, batch, cursor, and scan paths now fail closed instead of

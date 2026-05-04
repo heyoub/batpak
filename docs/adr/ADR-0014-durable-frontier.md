@@ -1,7 +1,7 @@
 # ADR-0014: Durable Frontier Observability
 
 ## Status
-Accepted
+Accepted (shipped in 0.7.0).
 
 ## Context
 Phase 0 needed an honest way to describe where the store is in the commit
@@ -102,6 +102,13 @@ unchanged by close-event emission.
 ## Related ADRs
 - [ADR-0002: Single Writer Thread Commit Path](ADR-0002-single-writer-thread.md)
 - [ADR-0006: Writer Restart Policy](ADR-0006-restart-policy.md)
+- [ADR-0015: dm-flakey Chaos Harness](ADR-0015-chaos-harness-dm-flakey.md) -
+  proves torn-tail frontier behavior below the process/page-cache boundary.
+- [ADR-0016: Durability Gating](ADR-0016-durability-gating.md) - builds the
+  wait and append-gate API on the frontier watermarks.
+- [ADR-0017: At-Least-Once Witness Surface](ADR-0017-at-least-once-witness-surface.md) -
+  carries delivery witnesses through handler paths that depend on applied
+  frontier progress.
 
 ## References
 - `traceability/invariants.yaml`: `INV-FRONTIER-MONOTONIC`,

@@ -10,10 +10,10 @@
     - `cold_start/` — `mod.rs` (open/restore orchestration), `checkpoint.rs`, `mmap.rs`, `rebuild.rs`
     - `projection/` — `mod.rs` (cache traits), `flow.rs` (replay + incremental apply), `watch.rs`
     - `ancestry/` — `mod.rs`, `by_hash.rs`, `by_clock.rs`
-    - `delivery/` — `subscription.rs` (lossy push), `cursor.rs` (ordered pull replay with optional durable checkpoints)
-    - Flat files: `append.rs` (`BatchAppendItem`, `CausationRef`, `AppendOptions`), `lifecycle.rs`, `hidden_ranges.rs`, `config.rs`, `error.rs`, `stats.rs`
+    - `delivery/` — `subscription.rs` (lossy push), `cursor.rs` (ordered pull replay with optional durable checkpoints), `observation.rs` (delivery witness types)
+    - Flat files: `append.rs` (`BatchAppendItem`, `CausationRef`, `AppendOptions`), `gate.rs` (`DurabilityGate`), `lifecycle.rs`, `hidden_ranges.rs`, `config.rs`, `error.rs`, `stats.rs`, `reactor_typed.rs`
     - `fault.rs` — fault injection (dangerous-test-hooks feature)
-- `tests/`: integration, property, compile-fail, and perf-gate tests (30 files)
+- `tests/`: integration, property, compile-fail, and perf-gate tests
 - `examples/`: runnable usage patterns
 - `benches/`: Criterion surfaces
 - `tools/integrity/`: traceability and structural detectors

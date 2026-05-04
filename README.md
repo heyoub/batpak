@@ -156,9 +156,9 @@ Only coordinates, events, gates, pipelines, and the store.
 No LMDB, no redb, no SQLite.
 
 **No concurrent owners.** One live `Store` handle owns the directory lock at a time.
-In the current hardening wave that lock is intentionally exclusive-only, so a
-second mutable open or a concurrent read-only open fails with `StoreLocked`
-instead of racing the same store directory.
+The directory lock is exclusive-only: a second mutable open or a concurrent
+read-only open fails with `StoreLocked` instead of racing the same store
+directory.
 
 **No per-entry integrity.** Each frame carries a CRC32. Cold-start artifacts carry a
 full-file CRC. There is no per-byte or per-field checksum beyond that.

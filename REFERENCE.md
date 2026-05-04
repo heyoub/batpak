@@ -12,7 +12,6 @@ When repo surfaces disagree, trust them in this order:
 1. live code in `src/`
 2. root docs: `README.md`, `GUIDE.md`, `REFERENCE.md`
 3. traceability registries in `traceability/`
-4. anything historical that is being moved out to external archive storage
 
 ## The Five Layers
 
@@ -374,8 +373,8 @@ Cold-start timing contract:
 Store ownership contract:
 
 - opens acquire a lifetime-held lock file rooted at `{data_dir}/.batpak.lock`
-- the current hardening wave is intentionally exclusive-only, so mutable and
-  read-only opens both fail with `StoreLocked` while another live owner exists
+- the directory lock is exclusive-only, so mutable and read-only opens both fail
+  with `StoreLocked` while another live owner exists
 - Unix lock-file opens use `O_NOFOLLOW`; non-Unix targets currently do a
   best-effort symlink-leaf rejection before opening because `std` exposes no
   equivalent atomic no-follow flag there
@@ -399,13 +398,14 @@ Practical procedure:
 
 ## Public Surface Witnesses
 
-Advanced store surface names worth keeping visible in docs and audits:
+Advanced public surface names worth keeping visible in docs and audits. This
+section is an audit witness list for public API shape; delivery-specific
+witness types are called out separately below.
 
 - `SyncMode`
 - `AppendReceipt`
 - `DenialReceipt`
 - `AppendOptions`
-- `CheckpointId`
 - `CursorGapConfig`
 - `GapObservation`
 - `SigningKey`
@@ -414,6 +414,13 @@ Advanced store surface names worth keeping visible in docs and audits:
 - `CompactionConfig`
 - `StoreStats`
 - `StoreDiagnostics`
+
+Delivery witness types:
+
+- `CheckpointId`
+- `AtLeastOnce`
+- `IdempotencyKey`
+- `ObservedOnce`
 
 Low-level storage surface names that remain intentionally public:
 
