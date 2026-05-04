@@ -29,16 +29,20 @@ pub struct AtLeastOnce(CheckpointId);
 impl AtLeastOnce {
     /// Create a new at-least-once witness from a typed checkpoint identifier.
     #[must_use]
-    #[cfg(test)]
     pub(crate) fn new(checkpoint_id: CheckpointId) -> Self {
         Self(checkpoint_id)
     }
 
     /// Wrap the raw cursor callback checkpoint identifier.
     #[must_use]
-    #[cfg(test)]
     pub(crate) fn from_cursor_callback(raw: impl Into<String>) -> Self {
         Self::new(CheckpointId::new(raw))
+    }
+
+    /// Borrow the checkpoint identity that minted this witness.
+    #[must_use]
+    pub fn checkpoint_id(&self) -> &CheckpointId {
+        &self.0
     }
 }
 
@@ -110,8 +114,7 @@ mod tests {
     #[test]
     fn at_least_once_from_cursor_callback_wraps_checkpoint_identity() {
         let at_least_once = AtLeastOnce::from_cursor_callback("cursor-checkpoint");
-        let (checkpoint_id,) = (at_least_once.0,);
 
-        assert_eq!(checkpoint_id.as_str(), "cursor-checkpoint");
+        assert_eq!(at_least_once.checkpoint_id().as_str(), "cursor-checkpoint");
     }
 }

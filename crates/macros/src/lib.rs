@@ -806,7 +806,7 @@ fn expand_multi_event_reactor(input: &DeriveInput) -> syn::Result<proc_macro2::T
                             },
                         };
                         return self
-                            .#handler_fn(&__typed_event, out)
+                            .#handler_fn(&__typed_event, out, at_least_once)
                             .map_err(::batpak::event::MultiDispatchError::User);
                     }
                     ::core::result::Result::Ok(::core::option::Option::None) => {}
@@ -835,6 +835,7 @@ fn expand_multi_event_reactor(input: &DeriveInput) -> syn::Result<proc_macro2::T
                     &mut Self,
                     &::batpak::event::StoredEvent<#event_ty>,
                     &mut ::batpak::store::ReactionBatch,
+                    ::core::option::Option<&::batpak::store::AtLeastOnce>,
                 ) -> ::core::result::Result<(), #error_path> = Self::#handler_fn;
             }
         })
@@ -883,6 +884,7 @@ fn expand_multi_event_reactor(input: &DeriveInput) -> syn::Result<proc_macro2::T
                     <#input_path as ::batpak::event::ProjectionInput>::Payload,
                 >,
                 out: &mut ::batpak::store::ReactionBatch,
+                at_least_once: ::core::option::Option<&::batpak::store::AtLeastOnce>,
             ) -> ::core::result::Result<(), ::batpak::event::MultiDispatchError<Self::Error>> {
                 #(#handler_checks)*
                 #(#arms)*

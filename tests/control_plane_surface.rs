@@ -366,7 +366,7 @@ fn control_plane_surface_smoke() {
         .cursor_worker(
             &Region::entity("entity:control"),
             cursor_config,
-            |_batch, _store| CursorWorkerAction::Stop,
+            |_batch, _store, _witness| CursorWorkerAction::Stop,
         )
         .expect("spawn cursor worker");
     store

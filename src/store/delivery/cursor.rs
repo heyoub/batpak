@@ -1,6 +1,6 @@
 use crate::coordinate::Region;
 use crate::store::cold_start::persist_with_parent_fsync;
-use crate::store::delivery::observation::CheckpointId;
+use crate::store::delivery::observation::{AtLeastOnce, CheckpointId};
 use crate::store::index::{IndexEntry, StoreIndex};
 use crate::store::{RestartPolicy, Store, StoreError};
 use serde::{Deserialize, Serialize};
@@ -641,6 +641,9 @@ impl Store<crate::store::Open> {
     /// successful batch or stops and reports
     /// [`StoreError::CheckpointWriteFailed`] through the returned handle's
     /// `join` path; it does not silently degrade to process-local resume.
+    /// The handler's third parameter is `Some(&AtLeastOnce)` for workers
+    /// configured with a durable `checkpoint_id`, and `None` for in-memory
+    /// workers.
     /// Startup checkpoint load and validation failures are also reported
     /// through the returned handle because the worker initializes
     /// asynchronously on its own thread.
@@ -655,7 +658,13 @@ impl Store<crate::store::Open> {
         mut handler: F,
     ) -> Result<CursorWorkerHandle, StoreError>
     where
-        F: FnMut(&[IndexEntry], &Store<crate::store::Open>) -> CursorWorkerAction + Send + 'static,
+        F: FnMut(
+                &[IndexEntry],
+                &Store<crate::store::Open>,
+                Option<&AtLeastOnce>,
+            ) -> CursorWorkerAction
+            + Send
+            + 'static,
     {
         let store = Arc::clone(self);
         let region = region.clone();
@@ -672,6 +681,9 @@ impl Store<crate::store::Open> {
             on_restart_budget_exhausted,
             on_checkpoint_failure,
         } = config;
+        let at_least_once = checkpoint_id
+            .as_ref()
+            .map(|id| AtLeastOnce::from_cursor_callback(id.as_str()));
 
         let join = std::thread::Builder::new()
             .name("batpak-cursor-worker".into())
@@ -715,7 +727,7 @@ impl Store<crate::store::Open> {
                     }
 
                     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        handler(&batch, &store)
+                        handler(&batch, &store, at_least_once.as_ref())
                     }));
 
                     match result {

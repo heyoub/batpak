@@ -41,7 +41,11 @@ const REPO_WIDE_ALL_FEATURES_MUTANT_FILES: &[&str] = &[
 ];
 const REPO_WIDE_NO_DEFAULT_MUTANT_FILES: &[&str] = &["src/store/**/*.rs"];
 const WRITER_COMMIT_MUTANT_FILES: &[&str] = &["src/store/write/*.rs"];
-const CURSOR_MUTANT_FILES: &[&str] = &["src/store/delivery/cursor.rs"];
+const CURSOR_MUTANT_FILES: &[&str] = &[
+    "src/store/delivery/cursor.rs",
+    "src/store/delivery/observation.rs",
+    "src/store/reactor_typed.rs",
+];
 const PROJECTION_MUTANT_FILES: &[&str] = &[
     "src/store/projection/flow/**/*.rs",
     "src/store/projection/registry.rs",
@@ -391,8 +395,8 @@ fn critical_mutation_seams() -> &'static [CriticalMutationSeam] {
         },
         CriticalMutationSeam {
             slug: "cursor-delivery",
-            label: "cursor delivery and checkpoints",
-            description: "cursor delivery/checkpoint logic",
+            label: "cursor delivery, checkpoints, and witnesses",
+            description: "cursor delivery/checkpoint/witness logic",
             surface: MutantSurface::AllFeatures,
             paths: CURSOR_MUTANT_FILES,
         },

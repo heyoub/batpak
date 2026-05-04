@@ -471,7 +471,7 @@ impl Visit<'_> for StoreConfigFieldAccessCollector<'_> {
     }
 }
 
-/// Moonwalker post-mortem defense: every public item in src/ must have at least
+/// Public-surface post-mortem defense: every public item in src/ must have at least
 /// one real path-position reference in a test file (verified via AST walk, not
 /// substring match). Allowlisted items must declare a `witness:` path that the
 /// AST walker confirms contains a real reference — a bogus witness fails the

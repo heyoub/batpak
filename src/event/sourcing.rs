@@ -132,6 +132,11 @@ pub trait TypedReactive<T: EventPayload>: Send + 'static {
     /// `append_reaction_batch` call for that source event. On
     /// `Err(Self::Error)` the batch is dropped and the loop stops.
     ///
+    /// `at_least_once` is `Some` when the reactor runs with a durable
+    /// checkpoint id and `None` for process-local delivery. Handlers that
+    /// compose exactly-once effects can combine the witness with their own
+    /// idempotency key.
+    ///
     /// # Errors
     /// Returns `Self::Error` to signal a user-level failure. The reactor
     /// loop will surface this as `ReactorError::User` through the join
@@ -140,6 +145,7 @@ pub trait TypedReactive<T: EventPayload>: Send + 'static {
         &mut self,
         event: &crate::event::StoredEvent<T>,
         out: &mut crate::store::ReactionBatch,
+        at_least_once: Option<&crate::store::AtLeastOnce>,
     ) -> Result<(), Self::Error>;
 }
 
@@ -197,6 +203,9 @@ pub trait MultiReactive<Input: ProjectionInput>: Send + 'static {
     /// success; [`MultiDispatchError::User`] for handler errors;
     /// [`MultiDispatchError::Decode`] for matched-kind decode failures.
     ///
+    /// `at_least_once` follows the same durable-checkpoint witness semantics
+    /// as [`TypedReactive::react`].
+    ///
     /// # Errors
     /// Returns [`MultiDispatchError::User`] if a bound handler returned an
     /// error, or [`MultiDispatchError::Decode`] if the event's kind matched
@@ -206,6 +215,7 @@ pub trait MultiReactive<Input: ProjectionInput>: Send + 'static {
         &mut self,
         event: &crate::event::StoredEvent<Input::Payload>,
         out: &mut crate::store::ReactionBatch,
+        at_least_once: Option<&crate::store::AtLeastOnce>,
     ) -> Result<(), MultiDispatchError<Self::Error>>;
 }
 

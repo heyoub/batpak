@@ -5,7 +5,7 @@ use batpak::prelude::*;
 use batpak::store::delivery::cursor::{CursorWorkerAction, CursorWorkerConfig};
 use batpak::store::{RestartPolicy, Store, StoreConfig};
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tempfile::TempDir;
@@ -48,7 +48,7 @@ fn cursor_worker_restarts_from_last_committed_checkpoint_after_panic() {
         .cursor_worker(&Region::entity("entity:cursor-worker"), worker_config, {
             let seen = Arc::clone(&seen);
             let panic_once = Arc::clone(&panic_once);
-            move |batch, _store| {
+            move |batch, _store, _witness| {
                 let seq = batch[0].global_sequence;
                 let mut counts = seen.lock().expect("counts mutex");
                 *counts.entry(seq).or_insert(0) += 1;
@@ -151,7 +151,7 @@ fn cursor_worker_exits_cleanly_when_restart_budget_exhausted() {
         .cursor_worker(
             &Region::entity("entity:budget-exhausted"),
             worker_config,
-            |_batch, _store| {
+            |_batch, _store, _witness| {
                 panic!("intentional panic to exhaust restart budget");
             },
         )
@@ -179,6 +179,57 @@ fn cursor_worker_exits_cleanly_when_restart_budget_exhausted() {
         Err(_) => {
             panic!("PROPERTY: cursor worker should release the last Arc after budget exhaustion")
         }
+    };
+    store.close().expect("close store");
+}
+
+#[test]
+fn bounded_restart_window_resets_after_elapsed_window() {
+    let dir = TempDir::new().expect("temp dir");
+    let store = Arc::new(Store::open(test_config(&dir)).expect("open store"));
+    let coord = Coordinate::new("entity:restart-window", "scope:test").expect("coord");
+    let kind = EventKind::custom(0xF, 7);
+    store
+        .append(&coord, kind, &serde_json::json!({"n": 1}))
+        .expect("append seed event");
+
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let mut worker_config = CursorWorkerConfig::default();
+    worker_config.batch_size = 1;
+    worker_config.idle_sleep = Duration::from_millis(1);
+    worker_config.restart = RestartPolicy::Bounded {
+        max_restarts: 1,
+        within_ms: 50,
+    };
+
+    let worker = store
+        .cursor_worker(&Region::entity("entity:restart-window"), worker_config, {
+            let attempts = Arc::clone(&attempts);
+            move |_batch, _store, _witness| {
+                let attempt = attempts.fetch_add(1, Ordering::SeqCst) + 1;
+                if attempt == 2 {
+                    std::thread::sleep(Duration::from_millis(75));
+                }
+                if attempt <= 2 {
+                    panic!("intentional panic to exercise bounded restart window reset");
+                }
+                CursorWorkerAction::Stop
+            }
+        })
+        .expect("spawn worker");
+
+    worker
+        .join()
+        .expect("bounded restart window should reset and allow recovery");
+    assert_eq!(
+        attempts.load(Ordering::SeqCst),
+        3,
+        "PROPERTY: Bounded restart policy must reset its counter once within_ms elapses"
+    );
+
+    let store = match Arc::try_unwrap(store) {
+        Ok(store) => store,
+        Err(_) => panic!("PROPERTY: cursor worker should release the last Arc"),
     };
     store.close().expect("close store");
 }

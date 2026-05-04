@@ -5,11 +5,39 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Changed
+- **Breaking**: `cursor_worker` handler bounds now receive a third parameter,
+  `Option<&AtLeastOnce>`. Durable workers with a `checkpoint_id` receive
+  `Some`, ephemeral workers receive `None`. `react_loop_typed`,
+  `react_loop_multi`, and `react_loop_multi_raw` handler bounds receive the
+  same parameter. `AtLeastOnce` now exposes
+  `checkpoint_id(&self) -> &CheckpointId` for read-only inspection.
 - Production `expect(...)` use is now denied for non-test builds unless a site
   carries an explicit local escape hatch for a documented invariant.
 - Runtime append, batch, cursor, and scan paths now fail closed instead of
   relying on convenience `expect(...)` calls for frame length, batch count, or
   empty-hit assumptions.
+
+### Migration
+- Update cursor and reactor handlers to accept the witness parameter:
+
+  ```rust
+  // before
+  move |batch, store| { /* ... */ }
+
+  // after
+  move |batch, store, _witness| { /* ... */ }
+  ```
+
+  Typed reactor handlers receive the same argument after `ReactionBatch`:
+
+  ```rust
+  fn react(
+      &mut self,
+      event: &StoredEvent<MyEvent>,
+      out: &mut ReactionBatch,
+      _witness: Option<&batpak::store::AtLeastOnce>,
+  ) -> Result<(), Self::Error>
+  ```
 
 ### Clarified
 - Store ownership is now documented as a lifetime-held directory lock:

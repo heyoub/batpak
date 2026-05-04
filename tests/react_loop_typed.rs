@@ -14,6 +14,7 @@
 //! at-least-once / checkpoint semantics documented on the typed reactor
 //! surface.
 
+use std::error::Error;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -70,6 +71,7 @@ impl TypedReactive<PayloadA> for CountingReactor {
         &mut self,
         event: &StoredEvent<PayloadA>,
         out: &mut ReactionBatch,
+        _witness: Option<&batpak::store::AtLeastOnce>,
     ) -> Result<(), Self::Error> {
         self.seen.fetch_add(1, Ordering::SeqCst);
         let reaction_coord = Coordinate::new("entity:reaction", "scope:test").unwrap();
@@ -107,6 +109,7 @@ impl TypedReactive<PayloadA> for FailOnThird {
         &mut self,
         _event: &StoredEvent<PayloadA>,
         _out: &mut ReactionBatch,
+        _witness: Option<&batpak::store::AtLeastOnce>,
     ) -> Result<(), Self::Error> {
         let prev = self.seen.fetch_add(1, Ordering::SeqCst);
         if prev == 2 {
@@ -235,7 +238,12 @@ fn user_error_stops_loop_and_surfaces_through_join() {
     // Worker will exhaust its restart budget and stop.
     let join_result = handle.join();
     match join_result {
-        Err(ReactorError::User(_)) => {}
+        Err(err @ ReactorError::User(_)) => {
+            assert!(
+                err.source().is_some(),
+                "ReactorError::User must expose the handler error as source()"
+            );
+        }
         other => panic!("expected ReactorError::User, got {other:?}"),
     }
 }
@@ -262,6 +270,7 @@ impl TypedReactive<ShapeX> for ShapeXReactor {
         &mut self,
         _event: &StoredEvent<ShapeX>,
         _out: &mut ReactionBatch,
+        _witness: Option<&batpak::store::AtLeastOnce>,
     ) -> Result<(), Self::Error> {
         Ok(())
     }

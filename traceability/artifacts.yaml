@@ -82,6 +82,14 @@
     - src/event/mod.rs
     - src/event/sourcing.rs
     - src/event/header.rs
+- id: ART-DELIVERY-WITNESS-SURFACE
+  kind: public-api
+  paths:
+    - src/store/delivery/observation.rs
+    - src/store/delivery/cursor.rs
+    - src/store/reactor_typed.rs
+    - src/event/sourcing.rs
+    - crates/macros/src/lib.rs
 - id: ART-STORE-MOD
   kind: source
   paths:
@@ -227,6 +235,10 @@
   kind: tests
   paths:
     - tests/observability_flows.rs
+- id: ART-DELIVERY-WITNESS-TESTS
+  kind: tests
+  paths:
+    - tests/cursor_at_least_once_witness.rs
 - id: ART-FRONTIER-CHAOS-TESTS
   kind: tests
   paths:
@@ -284,6 +296,10 @@
   kind: adr
   paths:
     - docs/adr/ADR-0016-durability-gating.md
+- id: ART-ADR-AT-LEAST-ONCE-WITNESS
+  kind: adr
+  paths:
+    - docs/adr/ADR-0017-at-least-once-witness-surface.md
 - id: ART-ADR-RESTORE-PLANNER
   kind: adr
   paths:
