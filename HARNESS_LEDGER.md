@@ -49,11 +49,30 @@ instead of pretending.
 - Command used:
   - `cargo test --test segment_scan_hardening`
   - `cargo test --test segment_scan_hardening corruption_inside_staged_batch_discards_the_whole_batch`
+  - `cargo test --test segment_scan_hardening sidx_footer_entry_count_disagreement_falls_back_to_frame_scan`
+  - `cargo test --test segment_scan_hardening valid_crc_unreadable_frame_metadata_skips_only_that_frame`
+  - `cargo test --test segment_scan_hardening orphan_commit_marker_is_ignored_without_stopping_scan`
 - Line/function coverage delta: targeted rise in `src/store/segment/scan.rs`; exact JSON delta not recorded in this wave
 - Mutation delta: unmeasured in this wave
+- Covered tests:
+  - `invalid_batch_begin_count_fails_closed_on_reopen` pins `BEGIN` markers
+    with invalid item counts as fail-closed corruption.
+  - `missing_hash_chain_for_data_frame_fails_closed_on_reopen` pins ordinary
+    data frames with missing hash-chain metadata as fail-closed corruption.
+  - `corruption_inside_staged_batch_discards_the_whole_batch` pins CRC
+    corruption inside a staged batch as discarding the whole in-flight batch.
+  - `sidx_footer_entry_count_disagreement_falls_back_to_frame_scan` pins SIDX
+    footer count disagreement as accelerator corruption that must fall back to
+    the authoritative frame scan.
+  - `valid_crc_unreadable_frame_metadata_skips_only_that_frame` pins
+    CRC-valid/non-CRC metadata decode failures as skipping the bad frame while
+    preserving later independent frames.
+  - `orphan_commit_marker_is_ignored_without_stopping_scan` pins COMMIT without
+    prior BEGIN as ignored batch metadata that does not stop the scan.
 - Remaining known blind spots:
-  - this wave now proves invalid BEGIN counts, missing `hash_chain`, and CRC corruption on the second staged batch item all fail closed on reopen
-  - remaining uncovered defensive branches are mostly other corrupt-frame shapes such as footer disagreement and non-CRC decode failures deeper in the slow path
+  - low-level unit coverage still owns some byte-range helper boundaries, but
+    the black-box slow-path corruption shapes currently called out in this
+    ledger are covered.
 
 ### Invariant: Durable frontier observations stay honest under writer faults
 

@@ -105,14 +105,40 @@ fn strip_sidx(mut bytes: Vec<u8>) -> Vec<u8> {
     bytes
 }
 
+fn frame_scan_header_end(bytes: &[u8]) -> usize {
+    let header_len = u32::from_be_bytes(bytes[4..8].try_into().expect("4-byte header len"));
+    8 + usize::try_from(header_len).expect("segment header len fits usize")
+}
+
+fn user_entries(store: &Store) -> Vec<batpak::store::IndexEntry> {
+    store
+        .query(&Region::all())
+        .into_iter()
+        .filter(|entry| {
+            !matches!(
+                entry.kind,
+                EventKind::SYSTEM_OPEN_COMPLETED | EventKind::SYSTEM_CLOSE_COMPLETED
+            )
+        })
+        .collect()
+}
+
+fn raw_msgpack_frame(msgpack: &[u8]) -> Vec<u8> {
+    let mut frame = Vec::with_capacity(8 + msgpack.len());
+    let len = u32::try_from(msgpack.len()).expect("test msgpack frame length fits u32");
+    frame.extend_from_slice(&len.to_be_bytes());
+    frame.extend_from_slice(&crc32fast::hash(msgpack).to_be_bytes());
+    frame.extend_from_slice(msgpack);
+    frame
+}
+
 fn rewrite_first_matching_frame(
     seg: &std::path::Path,
     mut predicate: impl FnMut(&RawFramePayload) -> bool,
     mutate: impl FnOnce(&mut RawFramePayload),
 ) {
     let bytes = strip_sidx(std::fs::read(seg).expect("read segment"));
-    let header_len = u32::from_be_bytes(bytes[4..8].try_into().expect("4-byte header len"));
-    let header_end = 8 + usize::try_from(header_len).expect("segment header len fits usize");
+    let header_end = frame_scan_header_end(&bytes);
 
     let mut mutated = false;
     let mut mutate = Some(mutate);
@@ -142,10 +168,44 @@ fn rewrite_first_matching_frame(
     std::fs::write(seg, rebuilt).expect("write mutated segment");
 }
 
+fn replace_first_matching_frame(
+    seg: &std::path::Path,
+    mut predicate: impl FnMut(&RawFramePayload) -> bool,
+    replacement: impl FnOnce(&RawFramePayload) -> Vec<u8>,
+) {
+    let bytes = strip_sidx(std::fs::read(seg).expect("read segment"));
+    let header_end = frame_scan_header_end(&bytes);
+
+    let mut replaced = false;
+    let mut replacement = Some(replacement);
+    let mut cursor = header_end;
+    let mut rebuilt = bytes[..header_end].to_vec();
+
+    while cursor < bytes.len() {
+        let (msgpack, frame_size) =
+            segment::frame_decode(&bytes[cursor..]).expect("seeded frame decodes");
+        let payload: RawFramePayload =
+            rmp_serde::from_slice(msgpack).expect("seeded frame payload decodes");
+        if !replaced && predicate(&payload) {
+            rebuilt.extend(replacement
+                .take()
+                .expect("replacement frame builder used once")(
+                &payload
+            ));
+            replaced = true;
+        } else {
+            rebuilt.extend_from_slice(&bytes[cursor..cursor + frame_size]);
+        }
+        cursor += frame_size;
+    }
+
+    assert!(replaced, "test must replace one matching frame");
+    std::fs::write(seg, rebuilt).expect("write replaced segment");
+}
+
 fn corrupt_second_staged_batch_item_crc(seg: &std::path::Path) {
     let bytes = strip_sidx(std::fs::read(seg).expect("read segment"));
-    let header_len = u32::from_be_bytes(bytes[4..8].try_into().expect("4-byte header len"));
-    let header_end = 8 + usize::try_from(header_len).expect("segment header len fits usize");
+    let header_end = frame_scan_header_end(&bytes);
 
     let mut corrupted = false;
     let mut in_batch = false;
@@ -332,6 +392,36 @@ fn sidx_footer_magic_mismatch_falls_back_to_frame_scan() {
 }
 
 #[test]
+fn sidx_footer_entry_count_disagreement_falls_back_to_frame_scan() {
+    // Corrupting the SIDX entry_count makes the footer structurally
+    // inconsistent with the actual footer block. Cold start must not trust
+    // the accelerator; it should fall back to the authoritative frame scan.
+    let dir = TempDir::new().expect("temp dir");
+    seed_store(&dir, 6);
+
+    let seg = segment_path(&dir);
+    let mut bytes = std::fs::read(&seg).expect("read segment");
+    assert_eq!(
+        &bytes[bytes.len() - 4..],
+        b"SDX2",
+        "seeded segment must have the SIDX magic"
+    );
+    let count_offset = bytes.len() - 8;
+    bytes[count_offset..count_offset + 4].copy_from_slice(&u32::MAX.to_le_bytes());
+    std::fs::write(&seg, &bytes).expect("write bad-count segment");
+
+    let store = Store::open(config(&dir)).expect("reopen with SIDX count disagreement");
+    let entries = user_entries(&store);
+    assert_eq!(
+        entries.len(),
+        6,
+        "PROPERTY: SIDX entry_count disagreement must fall back to the frame scan without data loss; got {} entries",
+        entries.len()
+    );
+    store.close().expect("close");
+}
+
+#[test]
 fn truncating_segment_mid_frame_never_panics() {
     // Truncate a segment inside a frame body. The scanner sees an
     // UnexpectedEof on read_exact for the payload and stops cleanly.
@@ -354,6 +444,77 @@ fn truncating_segment_mid_frame_never_panics() {
     assert!(
         entries.len() <= 4,
         "PROPERTY: truncated segment scan must not fabricate entries; got {} (max 4)",
+        entries.len()
+    );
+    store.close().expect("close");
+}
+
+#[test]
+fn valid_crc_unreadable_frame_metadata_skips_only_that_frame() {
+    // Replacing a data frame with CRC-valid bytes that are not valid
+    // MessagePack exercises the non-CRC metadata decode branch. The scanner
+    // should skip that unreadable frame and continue with later frames.
+    let dir = TempDir::new().expect("temp dir");
+    seed_store(&dir, 5);
+
+    let seg = segment_path(&dir);
+    replace_first_matching_frame(
+        &seg,
+        |payload| {
+            !matches!(
+                payload.event.header.event_kind,
+                EventKind::SYSTEM_BATCH_BEGIN
+                    | EventKind::SYSTEM_BATCH_COMMIT
+                    | EventKind::SYSTEM_OPEN_COMPLETED
+                    | EventKind::SYSTEM_CLOSE_COMPLETED
+            )
+        },
+        |_payload| raw_msgpack_frame(&[0xC1]),
+    );
+
+    let store = Store::open(config(&dir)).expect("reopen with CRC-valid unreadable frame");
+    let entries = user_entries(&store);
+    assert_eq!(
+        entries.len(),
+        4,
+        "PROPERTY: CRC-valid unreadable metadata should skip exactly the corrupt data frame and preserve later frames; got {} entries",
+        entries.len()
+    );
+    store.close().expect("close");
+}
+
+#[test]
+fn orphan_commit_marker_is_ignored_without_stopping_scan() {
+    // A COMMIT marker without a preceding BEGIN is malformed batch metadata,
+    // but it must not stop recovery of independent frames around it.
+    let dir = TempDir::new().expect("temp dir");
+    seed_store(&dir, 5);
+
+    let seg = segment_path(&dir);
+    rewrite_first_matching_frame(
+        &seg,
+        |payload| {
+            !matches!(
+                payload.event.header.event_kind,
+                EventKind::SYSTEM_BATCH_BEGIN
+                    | EventKind::SYSTEM_BATCH_COMMIT
+                    | EventKind::SYSTEM_OPEN_COMPLETED
+                    | EventKind::SYSTEM_CLOSE_COMPLETED
+            )
+        },
+        |payload| {
+            payload.event.header.event_kind = EventKind::SYSTEM_BATCH_COMMIT;
+            payload.event.header.payload_size = 0;
+            payload.event.payload = serde_json::Value::Null;
+        },
+    );
+
+    let store = Store::open(config(&dir)).expect("reopen with orphan COMMIT marker");
+    let entries = user_entries(&store);
+    assert_eq!(
+        entries.len(),
+        4,
+        "PROPERTY: orphan COMMIT marker should be ignored while later independent frames survive; got {} entries",
         entries.len()
     );
     store.close().expect("close");
