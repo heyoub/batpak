@@ -355,12 +355,23 @@ instead of pretending.
 - Harness pattern: `Property Harness`
 - Location:
   - `tests/store_error_contract.rs`
+  - `src/store/error.rs`
 - Command used:
   - `cargo test --test store_error_contract`
+  - `cargo test store::error::tests`
 - Line/function coverage delta: targeted rise in `src/store/error.rs`; exact JSON delta not recorded in this wave
 - Mutation delta: unmeasured in this wave
+- Covered tests:
+  - `store_error_contract_table_stays_stable` now includes direct public
+    contract rows for helper-shaped `CorruptSegment` construction and
+    fail-closed `InvariantViolation` display/classification.
+  - `src/store/error.rs::tests::*_helper_*` directly exercises every
+    `pub(crate)` `StoreError` helper constructor, including source-bearing
+    batch/cache/serialization helpers and segment-corruption helpers.
 - Remaining known blind spots:
-  - this table owns representative variant handling, `Display`, `source()`, and conversion routing, but it does not yet exercise the internal helper constructors that only unit tests inside `src/store/error.rs` can reach
+  - none for the representative `StoreError` handling, `Display`, `source()`,
+    conversion routing, and internal helper-constructor surface currently in
+    scope.
 
 ### Invariant: Catastrophic performance regressions trip explicit thresholds
 
