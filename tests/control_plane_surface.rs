@@ -7,8 +7,8 @@ use batpak::store::delivery::cursor::{CursorWorkerAction, CursorWorkerConfig, Cu
 use batpak::store::delivery::subscription::{ScanSubscriptionOps, SubscriptionOps};
 use batpak::store::Freshness;
 use batpak::store::{
-    AppendOptions, AppendTicket, BatchAppendItem, BatchAppendTicket, IndexTopology, Outbox,
-    ReadOnly, Store, StoreConfig, StoreError, SyncConfig, VisibilityFence, WriterPressure,
+    AppendOptions, AppendReceipt, AppendTicket, BatchAppendItem, BatchAppendTicket, IndexTopology,
+    Outbox, ReadOnly, Store, StoreConfig, StoreError, SyncConfig, VisibilityFence, WriterPressure,
 };
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -16,6 +16,13 @@ use std::time::{Duration, Instant};
 use tempfile::TempDir;
 
 const KIND_COUNTER: EventKind = EventKind::custom(0xF, 1);
+
+#[path = "support/bounded_blocking.rs"]
+mod bounded_blocking;
+#[path = "support/bounded_writer_reply.rs"]
+mod bounded_writer_reply;
+use bounded_blocking::blocking;
+use bounded_writer_reply::writer_reply;
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 struct CounterProjection {
@@ -74,6 +81,17 @@ fn wait_until_ticket_receiver_has_value<T>(
     }
 }
 
+fn wait_append_ticket(ticket: &AppendTicket, label: &str) -> Result<AppendReceipt, StoreError> {
+    writer_reply(ticket.receiver(), label)
+}
+
+fn wait_batch_ticket(
+    ticket: &BatchAppendTicket,
+    label: &str,
+) -> Result<Vec<AppendReceipt>, StoreError> {
+    writer_reply(ticket.receiver(), label)
+}
+
 #[test]
 fn control_plane_surface_smoke() {
     let dir = TempDir::new().expect("temp dir");
@@ -98,14 +116,13 @@ fn control_plane_surface_smoke() {
     assert!(pressure_utilization >= 0.0);
     assert!(pressure_is_idle);
 
-    let receipt = store
+    let ticket = store
         .submit(&coord, kind, &serde_json::json!({"n": 1}))
-        .expect("submit")
-        .wait()
-        .expect("wait");
+        .expect("submit");
+    let receipt = wait_append_ticket(&ticket, "control-plane submit").expect("wait");
     assert_eq!(receipt.sequence, 1);
 
-    let reaction = store
+    let reaction_ticket = store
         .submit_reaction(
             &coord,
             kind,
@@ -113,8 +130,8 @@ fn control_plane_surface_smoke() {
             receipt.event_id,
             receipt.event_id,
         )
-        .expect("submit reaction")
-        .wait()
+        .expect("submit reaction");
+    let reaction = wait_append_ticket(&reaction_ticket, "control-plane submit reaction")
         .expect("wait reaction");
     assert_eq!(reaction.sequence, 2);
 
@@ -122,7 +139,7 @@ fn control_plane_surface_smoke() {
         .try_submit(&coord, kind, &serde_json::json!({"n": 3}))
         .expect("try_submit");
     let ticket: AppendTicket = outcome.into_result().expect("ok outcome");
-    let receipt = ticket.wait().expect("wait try_submit");
+    let receipt = wait_append_ticket(&ticket, "control-plane try_submit").expect("wait try_submit");
     assert_eq!(receipt.sequence, 3);
 
     let try_reaction = store
@@ -136,7 +153,8 @@ fn control_plane_surface_smoke() {
         .expect("try submit reaction")
         .into_result()
         .expect("reaction outcome");
-    let _ = try_reaction.wait().expect("wait try reaction");
+    let _ = wait_append_ticket(&try_reaction, "control-plane try submit reaction")
+        .expect("wait try reaction");
 
     let batch_items = vec![
         BatchAppendItem::new(
@@ -156,11 +174,9 @@ fn control_plane_surface_smoke() {
         )
         .expect("batch item"),
     ];
-    let receipts = store
-        .submit_batch(batch_items)
-        .expect("submit batch")
-        .wait()
-        .expect("wait batch");
+    let batch_ticket = store.submit_batch(batch_items).expect("submit batch");
+    let receipts =
+        wait_batch_ticket(&batch_ticket, "control-plane submit batch").expect("wait batch");
     assert_eq!(receipts.len(), 2);
 
     let try_batch_items = vec![BatchAppendItem::new(
@@ -177,7 +193,7 @@ fn control_plane_surface_smoke() {
         .into_result()
         .expect("batch outcome");
     let try_batch: BatchAppendTicket = try_batch;
-    let _ = try_batch.wait().expect("batch wait");
+    let _ = wait_batch_ticket(&try_batch, "control-plane try submit batch").expect("batch wait");
 
     let mut outbox: Outbox<'_> = store.outbox();
     let outbox_empty = outbox.is_empty();
@@ -219,11 +235,9 @@ fn control_plane_surface_smoke() {
     );
     let outbox_len = outbox.len();
     assert_eq!(outbox_len, 4);
-    let _ = outbox
-        .submit_flush()
-        .expect("submit flush")
-        .wait()
-        .expect("wait flush");
+    let flush_ticket = outbox.submit_flush().expect("submit flush");
+    let _ =
+        wait_batch_ticket(&flush_ticket, "control-plane outbox submit flush").expect("wait flush");
     let outbox_empty_after_flush = outbox.is_empty();
     assert!(outbox_empty_after_flush);
 
@@ -249,7 +263,8 @@ fn control_plane_surface_smoke() {
     store
         .append(&coord, kind, &serde_json::json!({"n": 11}))
         .expect("append for scan");
-    let folded_count = folded.recv().expect("folded count");
+    let folded_count =
+        blocking("control-plane-scan-recv", move || folded.recv()).expect("folded count");
     assert!(folded_count >= 1);
 
     let generation_before = store
@@ -323,8 +338,10 @@ fn control_plane_surface_smoke() {
 
     let visible_before_commit = store.by_fact(kind).len();
     fence.commit().expect("commit fence");
-    let _ = fenced_ticket.wait().expect("wait fenced receipt");
-    let _ = fenced_batch.wait().expect("wait fenced batch");
+    let _ = wait_append_ticket(&fenced_ticket, "control-plane committed fenced receipt")
+        .expect("wait fenced receipt");
+    let _ = wait_batch_ticket(&fenced_batch, "control-plane committed fenced batch")
+        .expect("wait fenced batch");
     assert!(
         store.by_fact(kind).len() >= visible_before_commit + 2,
         "committed fence writes should become visible together"
@@ -337,7 +354,7 @@ fn control_plane_surface_smoke() {
     cancel_fence.cancel().expect("cancel fence");
     assert!(
         matches!(
-            cancelled_ticket.wait(),
+            wait_append_ticket(&cancelled_ticket, "control-plane cancelled fence ticket"),
             Err(StoreError::VisibilityFenceCancelled)
         ),
         "cancelled fence tickets should surface cancellation"
@@ -719,7 +736,7 @@ fn fenced_root_submit_stays_hidden_until_commit_and_cancel_discards_it() {
 
     fence.cancel().expect("cancel fence");
     assert!(
-        matches!(ticket.wait(), Err(StoreError::VisibilityFenceCancelled)),
+        matches!(wait_append_ticket(&ticket, "cancelled fence ticket"), Err(StoreError::VisibilityFenceCancelled)),
         "PROPERTY: cancelling a fence after a root submission must surface VisibilityFenceCancelled."
     );
     assert_eq!(
@@ -782,7 +799,10 @@ fn fenced_batch_submit_stays_hidden_until_commit_and_cancel_discards_it() {
 
     fence.cancel().expect("cancel fence");
     assert!(
-        matches!(ticket.wait(), Err(StoreError::VisibilityFenceCancelled)),
+        matches!(
+            wait_batch_ticket(&ticket, "cancelled fence batch ticket"),
+            Err(StoreError::VisibilityFenceCancelled)
+        ),
         "PROPERTY: cancelling a fence after batch submit_flush must surface VisibilityFenceCancelled."
     );
     assert_eq!(
@@ -842,7 +862,7 @@ fn fenced_reaction_submit_stays_hidden_until_commit_and_cancel_discards_it() {
 
     fence.cancel().expect("cancel fence");
     assert!(
-        matches!(ticket.wait(), Err(StoreError::VisibilityFenceCancelled)),
+        matches!(wait_append_ticket(&ticket, "cancelled fence ticket"), Err(StoreError::VisibilityFenceCancelled)),
         "PROPERTY: cancelling a fence after a reaction submission must surface VisibilityFenceCancelled."
     );
     assert_eq!(
@@ -892,7 +912,8 @@ fn fenced_reaction_commit_preserves_reaction_metadata() {
     );
 
     fence.commit().expect("commit fence");
-    let reaction = ticket.wait().expect("wait committed reaction");
+    let reaction =
+        wait_append_ticket(&ticket, "committed fenced reaction").expect("wait committed reaction");
     let entries = store.stream("entity:fence-reaction-commit-child");
     assert_eq!(
         entries.len(),
@@ -936,7 +957,10 @@ fn shutdown_with_live_fence_cancels_pending_fence_work() {
     store.close().expect("close store");
 
     assert!(
-        matches!(ticket.wait(), Err(StoreError::VisibilityFenceCancelled)),
+        matches!(
+            wait_append_ticket(&ticket, "cancelled fence ticket"),
+            Err(StoreError::VisibilityFenceCancelled)
+        ),
         "PROPERTY: shutting down with a still-live visibility fence must cancel its pending work \
          rather than silently committing or hanging."
     );

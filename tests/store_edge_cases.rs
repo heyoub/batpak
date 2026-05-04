@@ -14,6 +14,7 @@
 
 use batpak::prelude::*;
 use std::io::Write;
+use std::time::Duration;
 use tempfile::TempDir;
 
 #[path = "support/medium_store.rs"]
@@ -218,8 +219,10 @@ fn subscription_filters_by_region_in_recv_loop() {
     store.append(&coord_b, kind, &"ignored").expect("append b");
     store.append(&coord_a, kind, &"wanted").expect("append a");
 
-    // recv should skip entity:b and return entity:a
-    let notif = sub.recv().expect("should get notification");
+    let notif = sub
+        .filtered_receiver()
+        .recv_timeout(Duration::from_secs(2))
+        .expect("subscription notification should arrive within timeout");
     assert_eq!(notif.coord.entity(), "entity:a");
 }
 

@@ -16,8 +16,11 @@ use batpak::prelude::*;
 use batpak::store::{AppendOptions, BatchAppendItem, CausationRef, Store};
 use batpak::typestate::transition::{StateMarker, Transition};
 
+#[path = "support/bounded_writer_reply.rs"]
+mod bounded_writer_reply;
 #[path = "support/small_store.rs"]
 mod small_store_support;
+use bounded_writer_reply::writer_reply;
 use small_store_support::small_segment_store;
 
 // ─── test payload type ────────────────────────────────────────────────────────
@@ -140,7 +143,7 @@ fn submit_typed_wait_returns_receipt() {
     let ticket = store
         .submit_typed(&coord(), &payload)
         .expect("submit_typed");
-    let receipt = ticket.wait().expect("ticket.wait");
+    let receipt = writer_reply(ticket.receiver(), "typed writer ticket").expect("ticket.wait");
     assert_ne!(
         receipt.event_id, 0,
         "PROPERTY: submit_typed ticket must resolve to a non-zero event_id"
@@ -158,7 +161,7 @@ fn try_submit_typed_ok_path() {
         .try_submit_typed(&coord(), &payload)
         .expect("try_submit_typed");
     let ticket = outcome.into_result().expect("outcome is Ok");
-    ticket.wait().expect("ticket.wait");
+    writer_reply(ticket.receiver(), "typed writer ticket").expect("ticket.wait");
     store.close().unwrap();
 }
 
@@ -216,7 +219,7 @@ fn submit_reaction_typed_ticket_resolves() {
             root.event_id,
         )
         .expect("submit_reaction_typed");
-    ticket.wait().expect("ticket.wait");
+    writer_reply(ticket.receiver(), "typed writer ticket").expect("ticket.wait");
     store.close().unwrap();
 }
 
@@ -241,7 +244,7 @@ fn try_submit_reaction_typed_ok_path() {
         )
         .expect("try_submit_reaction_typed");
     let ticket = outcome.into_result().expect("outcome is Ok");
-    ticket.wait().expect("ticket.wait");
+    writer_reply(ticket.receiver(), "typed writer ticket").expect("ticket.wait");
     store.close().unwrap();
 }
 
@@ -439,7 +442,7 @@ fn fence_submit_typed_smoke() {
         .submit_typed(&coord(), &ThingHappened { value: 5 })
         .expect("submit_typed");
     fence.commit().expect("commit fence");
-    let receipt = ticket.wait().expect("ticket.wait");
+    let receipt = writer_reply(ticket.receiver(), "typed writer ticket").expect("ticket.wait");
     assert_ne!(receipt.event_id, 0);
     let hits = store.by_fact_typed::<ThingHappened>();
     assert_eq!(hits.len(), 1);
@@ -466,7 +469,7 @@ fn fence_submit_reaction_typed_smoke() {
         )
         .expect("submit_reaction_typed");
     fence.commit().expect("commit fence");
-    let receipt = ticket.wait().expect("ticket.wait");
+    let receipt = writer_reply(ticket.receiver(), "typed writer ticket").expect("ticket.wait");
     assert_ne!(receipt.event_id, 0);
     store.close().unwrap();
 }

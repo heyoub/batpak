@@ -8,8 +8,11 @@ use batpak::store::{ReadOnly, Store, StoreConfig, SyncConfig};
 use proptest::prelude::*;
 use tempfile::TempDir;
 
+#[path = "support/bounded_writer_reply.rs"]
+mod bounded_writer_reply;
 #[path = "common/proptest.rs"]
 mod proptest_support;
+use bounded_writer_reply::writer_reply;
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 struct Counter {
@@ -163,7 +166,7 @@ fn add_cancelled_fence_event(store: &Store, tag: &str) {
         )
         .expect("submit hidden event");
     drop(fence);
-    let err = match ticket.wait() {
+    let err = match writer_reply(ticket.receiver(), "writer ticket") {
         Ok(_) => panic!("PROPERTY: cancelled fence work must not resolve as visible success"),
         Err(err) => err,
     };

@@ -5,6 +5,9 @@
 //! PROVES: LAW-004 (Composition Over Construction — ops chain correctly)
 //! DEFENDS: FM-009 (Polite Downgrade — map must not silently drop events)
 //! INVARIANTS: INV-STATE (subscription: open → recv → closed)
+//! Intentional: direct `SubscriptionOps::recv()` calls exercise the blocking API
+//! after deterministic producer appends; exhaustion probes are bounded by an
+//! outer `recv_timeout` channel.
 
 use batpak::prelude::*;
 use batpak::store::Notification;
