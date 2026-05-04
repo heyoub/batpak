@@ -1,7 +1,21 @@
+[![crates.io](https://img.shields.io/crates/v/batpak.svg)](https://crates.io/crates/batpak)
+[![docs.rs](https://docs.rs/batpak/badge.svg)](https://docs.rs/batpak)
+[![CI](https://github.com/TheFreeBatteryFactory/batpak/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/TheFreeBatteryFactory/batpak/actions/workflows/ci.yml)
+[![license](https://img.shields.io/crates/l/batpak.svg)](#license)
+
 # batpak
 
 Sync-first event sourcing for Rust: append-only segments, causal metadata, policy gates,
 and typed projections — no async runtime.
+
+```bash
+cargo add batpak
+```
+
+Choose `batpak` when you want an embedded event log with typed payloads,
+causal metadata, policy gates, and projections in one Rust process. It is a
+library substrate, not a hosted database: callers own the process model, disk
+placement, and integration boundaries.
 
 ## Mental Model
 
@@ -51,8 +65,9 @@ range scan, no disk I/O).
 ## Store Internals At A Glance
 
 Seven subdirectories organize the store by concern. Flat files alongside them
-(`append.rs`, `config.rs`, `error.rs`, `lifecycle.rs`, `stats.rs`,
-`hidden_ranges.rs`) hold types that belong to the store root and don't fit
+(`append.rs`, `config.rs`, `error.rs`, `fault.rs`, `gate.rs`,
+`hidden_ranges.rs`, `lifecycle.rs`, `reactor_typed.rs`, `stats.rs`) hold
+types that belong to the store root and don't fit
 neatly into one subdirectory.
 
 ```

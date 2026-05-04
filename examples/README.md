@@ -2,6 +2,9 @@
 
 These examples are runnable entry points for the main `batpak` surfaces.
 
+Run any example with `cargo run --example <name>` where `<name>` is the file
+stem without `.rs`, for example `cargo run --example quickstart`.
+
 ## Start Here
 
 - `quickstart.rs` - minimal open, append, read flow.

@@ -1,7 +1,7 @@
 ## Summary
 
 ## Verification
-- [ ] `cargo xtask ci` passes locally, or reason documented below
+- [ ] `cargo xtask preflight`, `cargo xtask ci`, or appropriate scoped verification passes locally; reason documented below if not
 - [ ] `cargo xtask traceability` passes, or change does not touch traced surfaces
 - [ ] `cargo xtask structural` passes, or change does not touch structural surfaces
 - [ ] Tests were added, strengthened, or verified as unnecessary

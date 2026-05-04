@@ -62,6 +62,7 @@ tracing = "0.1"
 memmap2 = "0.9"
 rayon = "1.10"
 fastrand = { version = "2", optional = true }
+# tempfile is used for atomic temp-file writes in production storage paths.
 tempfile = "3"
 libc = "0.2"
 ed25519-compact = { version = "2.2.0", default-features = false, features = ["std"] }

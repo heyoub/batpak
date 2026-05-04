@@ -17,8 +17,27 @@ body:
       description: Include code, commands, and data if possible.
     validations:
       required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Linux
+        - macOS
+        - Windows
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: rust-version
+    attributes:
+      label: Rust version
+      description: Paste `rustc -V`.
+      placeholder: rustc 1.92.0 (...)
+    validations:
+      required: true
   - type: textarea
     id: environment
     attributes:
       label: Environment
-      description: OS, Rust version, feature flags, and `cargo xtask doctor` output if relevant.
+      description: Feature flags, storage/runtime details, and `cargo xtask doctor` output if relevant.

@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+_Nothing yet._
+
 ## [0.7.0] - 2026-05-04
 
 ### Changed
@@ -44,10 +46,10 @@ All notable changes to this project will be documented in this file.
   ) -> Result<(), Self::Error>
   ```
 
-### Clarified
+### Documentation
 - Store ownership is now documented as a lifetime-held directory lock:
   second mutable opens and concurrent read-only opens fail with `StoreLocked`
-  in the current exclusive-only hardening wave instead of racing the same
+  under the exclusive-only store ownership contract instead of racing the same
   store directory.
 - Lock-file symlink handling is now described honestly across platforms:
   Unix uses `O_NOFOLLOW`, while non-Unix targets currently do a best-effort

@@ -53,11 +53,11 @@ struct PlayerMoved {
 use batpak::prelude::*;
 
 let store = Store::open(StoreConfig::new("./data"))?;
-let coord = Coordinate::new("user:alice", "chat:general")?;
+let coord = Coordinate::new("player:alice", "room:dungeon")?;
 
 let receipt = store.append_typed(&coord, &PlayerMoved { x: 10, y: 20 })?;
-let event = store.get(receipt.event_id)?;
-println!("entity={}, payload={}", event.coordinate.entity(), event.event.payload);
+let stored = store.get(receipt.event_id)?;
+println!("entity={}, payload={}", stored.coordinate.entity(), stored.event.payload);
 ```
 
 ### Batch append
@@ -101,11 +101,11 @@ Batch properties:
 ### Query patterns
 
 ```rust
-let stream = store.stream("user:alice");
-let scope = store.by_scope("chat:general");
+let stream = store.stream("player:alice");
+let scope = store.by_scope("room:dungeon");
 let by_kind = store.by_fact_typed::<PlayerMoved>();
 let region = store.query(
-    &Region::scope("chat:general")
+    &Region::scope("room:dungeon")
         .with_fact(KindFilter::Exact(PlayerMoved::KIND)),
 );
 ```

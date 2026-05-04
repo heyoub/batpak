@@ -1169,9 +1169,8 @@ impl Store<ReadOnly> {
     ///
     /// # Errors
     /// Returns [`StoreError::StoreLocked`] if another live store handle already
-    /// owns the directory lock. In the first hardening wave, read-only opens
-    /// are intentionally exclusive-only until shared semantics are explicitly
-    /// designed and tested.
+    /// owns the directory lock. Read-only opens are also exclusive under the
+    /// current store-ownership contract.
     /// Returns any configuration, directory-creation, or cold-start rebuild
     /// error surfaced while opening the store in read-only mode.
     pub fn open_read_only_with_cache(

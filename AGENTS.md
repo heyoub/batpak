@@ -21,7 +21,7 @@
 - `README.md`: primary repo entrypoint
 - `GUIDE.md`: human-first workflows and usage
 - `REFERENCE.md`: technical reference and invariants
-- `docs/adr/`: decision records
+- `docs/adr/`: decision records; start with `docs/adr/README.md` for the index
 - `traceability/`: requirements, invariants, flows, artifacts
 
 ## Canonical Commands

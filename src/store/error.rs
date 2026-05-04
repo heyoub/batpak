@@ -7,8 +7,8 @@ use std::path::PathBuf;
 pub enum StoreLockMode {
     /// Mutable open: writer thread active, exclusive lock required.
     Mutable,
-    /// Read-only open: no writer thread, but still exclusive in the first
-    /// hardening wave until shared semantics are explicitly designed.
+    /// Read-only open: no writer thread, but still exclusive under the
+    /// current store-ownership contract.
     ReadOnly,
 }
 

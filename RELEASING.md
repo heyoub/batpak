@@ -8,11 +8,12 @@ manual publish/tag/release steps from a clean `main`.
 1. Start from a clean, current `main`.
 2. Bump every workspace package version for the release. For a pre-1.0
    breaking change, bump the minor version, for example `0.6.0` -> `0.7.0`.
-3. Keep internal dependency cross-references in sync. After editing, this
-   should be clean except for historical changelog entries:
+3. Keep internal dependency cross-references in sync. After editing, search
+   for the previous version across manifests; this should be clean except for
+   historical changelog entries:
 
    ```bash
-   rg '0\.6\.0' --glob Cargo.toml
+   rg '<escaped-previous-version>' --glob Cargo.toml
    ```
 
 4. Make every crate needed by the root crate publishable. The publish order is:

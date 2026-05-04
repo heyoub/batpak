@@ -1,4 +1,5 @@
-//! Unified benchmarks for group commit, topology choices, and incremental replay.
+//! Unified benchmarks compare group commit, topology, and replay surfaces in one
+//! Criterion target so release baselines share the same harness setup.
 
 use batpak::prelude::*;
 use batpak::store::{Freshness, IndexTopology, Store, StoreConfig, SyncMode};
