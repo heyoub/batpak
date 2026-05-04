@@ -1,6 +1,6 @@
 [package]
 name = "batpak"
-version = "0.6.0"
+version = "0.7.0"
 edition = "2021"
 rust-version = "1.92"
 license = "MIT OR Apache-2.0"
@@ -50,8 +50,8 @@ dangerous-test-hooks = ["dep:fastrand"]
 uuid = { version = "1", features = ["v7"] }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
-batpak-macros-support = { path = "./crates/macros-support", version = "0.6.0" }
-batpak-macros = { path = "./crates/macros", version = "0.6.0" }
+batpak-macros-support = { path = "./crates/macros-support", version = "0.7.0" }
+batpak-macros = { path = "./crates/macros", version = "0.7.0" }
 blake3 = { version = "1", optional = true }
 flume = "0.12"
 crc32fast = "1"

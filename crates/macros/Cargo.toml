@@ -1,6 +1,6 @@
 [package]
 name = "batpak-macros"
-version = "0.6.0"
+version = "0.7.0"
 edition = "2021"
 rust-version = "1.92"
 license = "MIT OR Apache-2.0"
@@ -10,7 +10,7 @@ publish = false
 proc-macro = true
 
 [dependencies]
-batpak-macros-support = { path = "../macros-support", version = "0.6.0" }
+batpak-macros-support = { path = "../macros-support", version = "0.7.0" }
 syn = { version = "2", features = ["full"] }
 quote = "1"
 proc-macro2 = "1"
