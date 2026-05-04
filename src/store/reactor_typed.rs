@@ -56,7 +56,7 @@ use crate::event::{DecodeTyped, EventPayload, StoredEvent, TypedDecodeError};
 use crate::store::delivery::cursor::{
     CursorGapConfig, CursorWorkerAction, CursorWorkerConfig, CursorWorkerHandle,
 };
-use crate::store::delivery::observation::CheckpointId;
+use crate::store::delivery::observation::{AtLeastOnce, CheckpointId};
 use crate::store::reaction::ReactionBatch;
 use crate::store::{Open, RestartPolicy, Store, StoreError};
 
@@ -306,6 +306,7 @@ pub(crate) trait ReactorDispatcher<P>: Send + 'static {
         &mut self,
         event: &StoredEvent<P>,
         out: &mut ReactionBatch,
+        at_least_once: Option<&AtLeastOnce>,
     ) -> Result<(), ReactorStepError<Self::Error>>;
 }
 
@@ -352,6 +353,7 @@ fn dispatch_and_gather_batch<P, D>(
     dispatcher: &mut D,
     fetch: fn(&Store<Open>, u128) -> Result<StoredEvent<P>, StoreError>,
     slot_for_handler: &Arc<Mutex<Option<ReactorError<D::Error>>>>,
+    at_least_once: Option<&AtLeastOnce>,
 ) -> BatchOutcome
 where
     P: Send + 'static,
@@ -373,7 +375,7 @@ where
         };
 
         let mut batch = ReactionBatch::new();
-        let step = dispatcher.dispatch(&stored, &mut batch);
+        let step = dispatcher.dispatch(&stored, &mut batch, at_least_once);
         match step {
             Ok(()) => {
                 if !batch.is_empty() {
@@ -484,23 +486,28 @@ where
         on_checkpoint_failure: Some(on_checkpoint_failure),
     };
 
-    let inner = store.cursor_worker(region, worker_config, move |entries, inner_store| {
-        // G4: gather per-event reactions for the whole cursor-batch; flush
-        // them + advance the checkpoint atomically per batch. See
-        // `dispatch_and_gather_batch` for the atomicity protocol and the
-        // at-least-once semantics it defines.
-        match dispatch_and_gather_batch(
-            entries,
-            inner_store,
-            &store_for_handler,
-            &mut dispatcher,
-            fetch,
-            &slot_for_handler,
-        ) {
-            BatchOutcome::Continue => CursorWorkerAction::Continue,
-            BatchOutcome::Rollback => CursorWorkerAction::StopWithRollback,
-        }
-    })?;
+    let inner = store.cursor_worker(
+        region,
+        worker_config,
+        move |entries, inner_store, at_least_once| {
+            // G4: gather per-event reactions for the whole cursor-batch; flush
+            // them + advance the checkpoint atomically per batch. See
+            // `dispatch_and_gather_batch` for the atomicity protocol and the
+            // at-least-once semantics it defines.
+            match dispatch_and_gather_batch(
+                entries,
+                inner_store,
+                &store_for_handler,
+                &mut dispatcher,
+                fetch,
+                &slot_for_handler,
+                at_least_once,
+            ) {
+                BatchOutcome::Continue => CursorWorkerAction::Continue,
+                BatchOutcome::Rollback => CursorWorkerAction::StopWithRollback,
+            }
+        },
+    )?;
 
     Ok(TypedReactorHandle { inner, error_slot })
 }
@@ -535,6 +542,7 @@ where
         &mut self,
         event: &StoredEvent<serde_json::Value>,
         out: &mut ReactionBatch,
+        at_least_once: Option<&AtLeastOnce>,
     ) -> Result<(), ReactorStepError<Self::Error>> {
         // Decode-failure contract:
         //   Ok(None)  → wrong kind → silent filter (no user call, no error)
@@ -557,7 +565,7 @@ where
                     },
                 };
                 self.reactor
-                    .react(&typed_stored, out)
+                    .react(&typed_stored, out, at_least_once)
                     .map_err(ReactorStepError::User)
             }
             Err(e) => Err(ReactorStepError::Decode(e)),
@@ -591,6 +599,10 @@ impl Store<Open> {
     /// handler success and the next successful checkpoint means the
     /// current batch is re-delivered later. The handler must be
     /// idempotent relative to the side effects it performs.
+    ///
+    /// Handlers receive `Option<&AtLeastOnce>` after their
+    /// [`ReactionBatch`] parameter. The value is `Some` only when
+    /// `config.checkpoint_id` is set; otherwise it is `None`.
     ///
     /// # Errors
     /// Returns [`StoreError::Io`] if the background cursor-worker thread
@@ -651,12 +663,13 @@ where
         &mut self,
         event: &StoredEvent<Input::Payload>,
         out: &mut ReactionBatch,
+        at_least_once: Option<&AtLeastOnce>,
     ) -> Result<(), ReactorStepError<Self::Error>> {
         // Forward — the derive-generated `dispatch` body returns
         // `Ok(())` for wrong-kind and matched-success, and
         // `Err(MultiDispatchError::{User, Decode})` for the two failure
         // modes (identical contract to T4b).
-        match self.reactor.dispatch(event, out) {
+        match self.reactor.dispatch(event, out, at_least_once) {
             Ok(()) => Ok(()),
             Err(crate::event::sourcing::MultiDispatchError::User(e)) => {
                 Err(ReactorStepError::User(e))

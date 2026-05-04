@@ -57,6 +57,7 @@ impl RawReactor {
         &mut self,
         _e: &StoredEvent<AlphaRaw>,
         out: &mut ReactionBatch,
+        _witness: Option<&batpak::store::AtLeastOnce>,
     ) -> Result<(), NeverFails> {
         self.alphas.fetch_add(1, Ordering::SeqCst);
         let coord = Coordinate::new("entity:raw-out", "scope:test").unwrap();
@@ -74,6 +75,7 @@ impl RawReactor {
         &mut self,
         _e: &StoredEvent<BetaRaw>,
         out: &mut ReactionBatch,
+        _witness: Option<&batpak::store::AtLeastOnce>,
     ) -> Result<(), NeverFails> {
         self.betas.fetch_add(1, Ordering::SeqCst);
         let coord = Coordinate::new("entity:raw-out", "scope:test").unwrap();

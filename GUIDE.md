@@ -299,6 +299,11 @@ Use `cursor_worker(...)` for restartable background consumers with
 `CursorWorkerConfig.checkpoint_id: Option<CheckpointId>` to persist
 resume position under `{data_dir}/cursors/{id}.ckpt` (written with
 parent-dir fsync). Without a `checkpoint_id`, resume is in-memory only.
+The handler receives a third argument, `Option<&AtLeastOnce>`: durable
+checkpoint-backed workers receive `Some`, while process-local workers receive
+`None`. Code that needs exactly-once composition can require `Some(witness)`
+and combine it with an `IdempotencyKey` through `ObservedOnce::new`; ordinary
+workers can name the parameter `_witness` and ignore it.
 Use `Cursor::with_gap_config(...)` plus `take_gaps()` when you want
 cursor-local write-to-deliver gap observations without emitting durable
 system events. Startup

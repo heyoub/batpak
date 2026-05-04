@@ -153,7 +153,7 @@ fn cursor_worker_fails_closed_on_corrupt_checkpoint() {
         .cursor_worker(
             &Region::entity("entity:cursor-corrupt"),
             worker_config,
-            |_batch, _store| CursorWorkerAction::Stop,
+            |_batch, _store, _witness| CursorWorkerAction::Stop,
         )
         .expect("spawn cursor worker");
 
@@ -206,7 +206,7 @@ fn cursor_resumes_from_checkpoint_across_reopen() {
                 .cursor_worker(
                     &Region::entity("entity:cursor-durable"),
                     worker_config,
-                    move |batch, _store| {
+                    move |batch, _store, _witness| {
                         let mut seen = seen.lock().expect("seen mutex");
                         for entry in batch {
                             seen.push(entry.global_sequence);
@@ -275,7 +275,7 @@ fn cursor_resumes_from_checkpoint_across_reopen() {
                 .cursor_worker(
                     &Region::entity("entity:cursor-durable"),
                     worker_config,
-                    move |batch, _store| {
+                    move |batch, _store, _witness| {
                         let mut seen = seen.lock().expect("seen mutex");
                         for entry in batch {
                             seen.push(entry.global_sequence);
@@ -361,7 +361,7 @@ fn cursor_worker_rejects_checkpoint_id_reused_for_different_region() {
         .cursor_worker(
             &Region::entity("entity:cursor-a"),
             worker_config.clone(),
-            |_batch, _store| CursorWorkerAction::Stop,
+            |_batch, _store, _witness| CursorWorkerAction::Stop,
         )
         .expect("spawn first worker");
     first_worker.join().expect("first worker join");
@@ -370,7 +370,7 @@ fn cursor_worker_rejects_checkpoint_id_reused_for_different_region() {
         .cursor_worker(
             &Region::entity("entity:cursor-b"),
             worker_config,
-            |_batch, _store| CursorWorkerAction::Stop,
+            |_batch, _store, _witness| CursorWorkerAction::Stop,
         )
         .expect("spawn second worker");
     let err = match second_worker.join() {
@@ -420,7 +420,7 @@ fn cursor_worker_surfaces_checkpoint_write_failure_through_join() {
             .cursor_worker(
                 &Region::entity("entity:cursor-ckpt-fail"),
                 worker_config,
-                move |batch, _store| {
+                move |batch, _store, _witness| {
                     processed.fetch_add(batch.len() as u64, Ordering::SeqCst);
                     std::fs::create_dir_all(
                         checkpoint_blocker_root
@@ -490,7 +490,7 @@ fn durable_cursor_worker_state_machine_preserves_last_committed_checkpoint() {
             worker_config.clone(),
             {
                 let seen = Arc::clone(&seen);
-                move |batch, _store| {
+                move |batch, _store, _witness| {
                     let seq = batch[0].global_sequence;
                     let mut counts = seen.lock().expect("counts mutex");
                     *counts.entry(seq).or_insert(0) += 1;
@@ -521,7 +521,7 @@ fn durable_cursor_worker_state_machine_preserves_last_committed_checkpoint() {
             {
                 let seen = Arc::clone(&seen);
                 let panic_once = Arc::new(std::sync::atomic::AtomicBool::new(true));
-                move |batch, _store| {
+                move |batch, _store, _witness| {
                     let seq = batch[0].global_sequence;
                     let mut counts = seen.lock().expect("counts mutex");
                     *counts.entry(seq).or_insert(0) += 1;

@@ -35,7 +35,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let worker = store.cursor_worker(&Region::entity("player:cursor"), worker_config, {
         let processed = Arc::clone(&processed);
-        move |_batch, _store| {
+        move |_batch, _store, _witness| {
+            // `_witness` is `Some(&AtLeastOnce)` only for checkpoint-backed workers.
             let seen = processed.fetch_add(1, Ordering::SeqCst) + 1;
             if seen >= 3 {
                 CursorWorkerAction::Stop

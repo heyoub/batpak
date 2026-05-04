@@ -139,6 +139,14 @@
     - ART-PROJECTION-TESTS
     - ART-REPLAY-TESTS
     - ART-ADR-RESTORE-PLANNER
+- id: INV-DELIVERY-AT-LEAST-ONCE-WITNESS
+  statement: cursor_worker and typed reactor handlers receive Option<&AtLeastOnce> on every delivered batch; Some is produced iff the worker config declares a checkpoint_id, and the witness CheckpointId matches that config.
+  artifacts:
+    - ART-DELIVERY-WITNESS-SURFACE
+    - ART-DELIVERY-WITNESS-TESTS
+    - ART-ADR-AT-LEAST-ONCE-WITNESS
+    - ART-DX-DOCS
+    - ART-EXAMPLES
 - id: INV-BATCH-ATOMIC-VISIBILITY
   statement: Batch append events are invisible to queries, cursors, and subscriptions until the entire batch is committed, fsynced, and atomically published via SequenceGate::publish(). All read methods filter by visible_sequence. No partial batch is ever observable. Proved by loom model and concurrent-read integration test.
   artifacts:

@@ -43,6 +43,14 @@
   artifacts:
     - ART-STORE-MOD
     - ART-STORE-ADVANCED
+- id: FLOW-DELIVERY-AT-LEAST-ONCE-WITNESS
+  summary: cursor_worker mints an AtLeastOnce witness from config.checkpoint_id at worker startup, passes Option<&AtLeastOnce> to each cursor or typed-reactor handler batch, and downstream code composes ObservedOnce only when it receives Some plus its own IdempotencyKey.
+  artifacts:
+    - ART-DELIVERY-WITNESS-SURFACE
+    - ART-DELIVERY-WITNESS-TESTS
+    - ART-ADR-AT-LEAST-ONCE-WITNESS
+    - ART-DX-DOCS
+    - ART-EXAMPLES
 - id: FLOW-SYNC
   summary: Explicit sync hands control to the writer and returns only after the writer acknowledges durability work.
   artifacts:

@@ -68,7 +68,9 @@ impl TypedReactive<PayloadA> for Doubler {
         &mut self,
         event: &StoredEvent<PayloadA>,
         out: &mut ReactionBatch,
+        _witness: Option<&batpak::store::AtLeastOnce>,
     ) -> Result<(), Self::Error> {
+        // `_witness` is `Some(&AtLeastOnce)` when ReactorConfig has a checkpoint id.
         self.seen += 1;
         out.push_typed(
             self.reaction_coord.clone(),

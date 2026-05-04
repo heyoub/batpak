@@ -215,6 +215,33 @@ Reopen observability contract:
 - `SYSTEM_OPEN_COMPLETED` is an ordinary persisted event after append: it participates in the same query, snapshot, compaction, retention, and tombstone rules as any other stored event, so it does not have a special auto-prune path
 - the `batpak:` coordinate prefix is reserved for library-owned lifecycle streams; application code should avoid emitting events at that prefix
 
+### Delivery Witnesses
+
+Checkpoint-backed cursor workers and typed reactors surface an at-least-once
+witness to their handlers:
+
+```rust
+move |batch, store, witness: Option<&AtLeastOnce>| {
+    if let Some(witness) = witness {
+        let key = IdempotencyKey::from_bytes([0; 32]);
+        let observed = ObservedOnce::new(witness.clone(), key);
+        let (_at_least_once, _idempotency_key) = observed.into_parts();
+    }
+    CursorWorkerAction::Continue
+}
+```
+
+`Some(&AtLeastOnce)` is emitted only when the worker configuration declares a
+durable `checkpoint_id`. Ephemeral workers receive `None`, which means the
+handler has process-local at-least-once delivery but no durable checkpoint
+witness. The substrate is the only constructor for `AtLeastOnce`; handlers may
+inspect its identity with `checkpoint_id()` and clone the witness when they
+need to compose an `ObservedOnce`.
+
+Typed reactor surfaces follow the same rule. `TypedReactive::react`,
+`MultiReactive::dispatch`, and derive-generated multi-reactor handlers receive
+the witness after their `ReactionBatch` parameter.
+
 ### Durable Frontier
 
 The store exposes a six-watermark frontier that tracks how far events have

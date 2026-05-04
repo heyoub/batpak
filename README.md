@@ -94,6 +94,9 @@ Two replay lanes: `JsonValueInput` (default, ergonomic) and `RawMsgpackInput` (p
 in-memory index. Durable at-least-once across restarts is exposed by
 `cursor_worker(..., CursorWorkerConfig { checkpoint_id: Some(CheckpointId::new(..)), .. })`
 and typed reactors via `ReactorConfig::checkpoint_id: Option<CheckpointId>`.
+Checkpoint-backed handlers receive `Some(&AtLeastOnce)` for exactly-once
+composition with a caller-supplied `IdempotencyKey`; process-local handlers
+receive `None`.
 `Cursor::with_gap_config(...)` plus `Cursor::take_gaps()` expose in-memory
 write-to-deliver gap observations without introducing a persisted system event.
 `react_loop` is the legacy subscribe-based loop.

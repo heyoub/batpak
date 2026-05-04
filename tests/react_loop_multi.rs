@@ -75,6 +75,7 @@ impl Counter {
         &mut self,
         _e: &StoredEvent<PayloadA>,
         out: &mut ReactionBatch,
+        _witness: Option<&batpak::store::AtLeastOnce>,
     ) -> Result<(), NeverFails> {
         self.a.fetch_add(1, Ordering::SeqCst);
         emit(out, "A")
@@ -83,6 +84,7 @@ impl Counter {
         &mut self,
         _e: &StoredEvent<PayloadB>,
         out: &mut ReactionBatch,
+        _witness: Option<&batpak::store::AtLeastOnce>,
     ) -> Result<(), NeverFails> {
         self.b.fetch_add(1, Ordering::SeqCst);
         emit(out, "B")
@@ -91,6 +93,7 @@ impl Counter {
         &mut self,
         _e: &StoredEvent<PayloadC>,
         out: &mut ReactionBatch,
+        _witness: Option<&batpak::store::AtLeastOnce>,
     ) -> Result<(), NeverFails> {
         self.c.fetch_add(1, Ordering::SeqCst);
         emit(out, "C")
@@ -234,6 +237,7 @@ impl ShapeYReactor {
         &mut self,
         _e: &StoredEvent<ShapeY>,
         _out: &mut ReactionBatch,
+        _witness: Option<&batpak::store::AtLeastOnce>,
     ) -> Result<(), NeverFails> {
         Ok(())
     }

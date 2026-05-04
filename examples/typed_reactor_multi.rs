@@ -88,7 +88,9 @@ impl MultiReactor {
         &mut self,
         _event: &StoredEvent<PayloadA>,
         out: &mut ReactionBatch,
+        _witness: Option<&batpak::store::AtLeastOnce>,
     ) -> Result<(), StoreError> {
+        // `_witness` is `Some(&AtLeastOnce)` when ReactorConfig has a checkpoint id.
         self.a_seen += 1;
         self.emit(out, "PayloadA")
     }
@@ -96,6 +98,7 @@ impl MultiReactor {
         &mut self,
         _event: &StoredEvent<PayloadB>,
         out: &mut ReactionBatch,
+        _witness: Option<&batpak::store::AtLeastOnce>,
     ) -> Result<(), StoreError> {
         self.b_seen += 1;
         self.emit(out, "PayloadB")
@@ -104,6 +107,7 @@ impl MultiReactor {
         &mut self,
         _event: &StoredEvent<PayloadC>,
         out: &mut ReactionBatch,
+        _witness: Option<&batpak::store::AtLeastOnce>,
     ) -> Result<(), StoreError> {
         self.c_seen += 1;
         self.emit(out, "PayloadC")
