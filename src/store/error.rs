@@ -82,6 +82,27 @@ pub enum StoreError {
     },
     /// A StoreConfig field has an invalid value.
     Configuration(String),
+    /// A configured platform profile file was unreadable or malformed.
+    PlatformProfileInvalid {
+        /// Path of the profile file.
+        path: PathBuf,
+        /// Human-readable rejection reason.
+        reason: String,
+    },
+    /// The configured platform profile did not match current platform evidence.
+    PlatformProfileMismatch {
+        /// Path of the profile file.
+        path: PathBuf,
+        /// Human-readable mismatch description.
+        reason: String,
+    },
+    /// Platform evidence could not be admitted for a required store capability.
+    PlatformAdmissionFailed {
+        /// Capability whose admission failed.
+        capability: &'static str,
+        /// Human-readable admission failure.
+        reason: String,
+    },
     /// Linked typed payloads claimed duplicate EventKind assignments.
     EventPayloadRegistry(EventPayloadRegistryError),
     /// Group commit (batch > 1) requires an idempotency key on every append.
@@ -326,6 +347,19 @@ impl std::fmt::Display for StoreError {
                 "sequence gate rejected {operation} publish({requested}) with allocated={allocated} visible={visible}"
             ),
             Self::Configuration(msg) => write!(f, "invalid config: {msg}"),
+            Self::PlatformProfileInvalid { path, reason } => write!(
+                f,
+                "platform profile at {} is invalid: {reason}",
+                path.display()
+            ),
+            Self::PlatformProfileMismatch { path, reason } => write!(
+                f,
+                "platform profile at {} does not match current platform evidence: {reason}",
+                path.display()
+            ),
+            Self::PlatformAdmissionFailed { capability, reason } => {
+                write!(f, "platform admission failed for {capability}: {reason}")
+            }
             Self::EventPayloadRegistry(error) => write!(f, "{error}"),
             Self::IdempotencyRequired => write!(
                 f,
@@ -467,6 +501,9 @@ impl std::error::Error for StoreError {
             | Self::WaitTimeout { .. }
             | Self::SequenceGateViolation { .. }
             | Self::Configuration(_)
+            | Self::PlatformProfileInvalid { .. }
+            | Self::PlatformProfileMismatch { .. }
+            | Self::PlatformAdmissionFailed { .. }
             | Self::IdempotencyRequired
             | Self::VisibilityFenceActive
             | Self::VisibilityFenceNotActive

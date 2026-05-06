@@ -138,6 +138,25 @@ instead of pretending.
 
 ## State-Machine Harness
 
+### Invariant: Platform profile mismatch fails open before lifecycle success
+
+- Harness pattern: `State-Machine Harness`
+- Location:
+  - `tests/platform_backend.rs`
+- Command used:
+  - `cargo test --test platform_backend platform_profile_match_allows_open_and_mismatch_fails_before_lifecycle`
+  - `cargo test platform_profile_mismatch_fails_closed`
+- Line/function coverage delta: unmeasured
+- Mutation delta:
+  - `platform-backend` critical seam is registered at the 85% smoke threshold.
+- Covered tests:
+  - profile fingerprint round-trip pins the private JSON + CRC32 shape.
+  - profile mismatch rejects store open before writer spawn or
+    `SYSTEM_OPEN_COMPLETED` lifecycle append.
+- Remaining known blind spots:
+  - profile command and build.rs env-var validation are covered by structural
+    and compile checks, but not yet by mutation-specific fixtures.
+
 ### Invariant: Durable frontier wait API surfaces honest blocking semantics
 
 - Harness pattern: `State-Machine Harness`

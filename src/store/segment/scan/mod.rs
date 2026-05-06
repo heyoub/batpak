@@ -93,46 +93,23 @@ pub(crate) use recovery::{BatchRecoveryState, IndexScanEvent};
 
 impl Reader {
     fn read_active_frame_into(&self, pos: &DiskPos, buf: &mut [u8]) -> Result<(), StoreError> {
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::FileExt;
-            let segment_id = pos.segment_id;
-            let offset = pos.offset;
-            self.with_fd(segment_id, |f| {
-                let mut total_read = 0;
-                while total_read < buf.len() {
-                    let n = f
-                        .read_at(&mut buf[total_read..], offset + total_read as u64)
-                        .map_err(StoreError::Io)?;
-                    if n == 0 {
-                        return Err(StoreError::corrupt_eof(segment_id));
-                    }
-                    let next_total = total_read.checked_add(n).ok_or_else(|| {
+        let segment_id = pos.segment_id;
+        let offset = pos.offset;
+        self.with_fd(segment_id, |f| {
+            crate::store::platform::fs::read_exact_at(f, offset, buf).map_err(|error| match error {
+                crate::store::platform::fs::PositionedReadError::Io(error) => StoreError::Io(error),
+                crate::store::platform::fs::PositionedReadError::ShortRead { bytes_read } => {
+                    if bytes_read == 0 {
+                        StoreError::corrupt_eof(segment_id)
+                    } else {
                         StoreError::corrupt_frame(
                             segment_id,
-                            "active frame read byte count overflowed usize",
+                            "active frame read ended before requested length",
                         )
-                    })?;
-                    if next_total <= total_read {
-                        return Err(StoreError::corrupt_frame(
-                            segment_id,
-                            "active frame read failed to advance",
-                        ));
                     }
-                    total_read = next_total;
                 }
-                Ok(())
             })
-        }
-        #[cfg(not(unix))]
-        {
-            use std::io::{Read, Seek, SeekFrom};
-            let offset = pos.offset;
-            self.with_fd(pos.segment_id, |f| {
-                f.seek(SeekFrom::Start(offset)).map_err(StoreError::Io)?;
-                f.read_exact(buf).map_err(StoreError::Io)
-            })
-        }
+        })
     }
 
     fn decode_frame_payload_raw(msgpack: &[u8]) -> Result<FramePayload<Vec<u8>>, StoreError> {
@@ -206,7 +183,13 @@ impl Reader {
         // SAFETY: memmap2::Mmap::map is unsafe because the file could be modified externally.
         // Sealed segments are immutable by design — only compaction deletes them, and
         // evict_segment drops the mapping before deletion.
-        let mmap = unsafe { memmap2::Mmap::map(&file) }.map_err(StoreError::Io)?;
+        let evidence = crate::store::platform::evidence::collect_for_store_path(&self.data_dir);
+        let admission = crate::store::platform::mmap::admit_sealed_segment_mmap(
+            evidence.store_path.sealed_segment_mmap,
+        )?;
+        let mmap =
+            unsafe { crate::store::platform::mmap::map_sealed_segment_file(&file, admission) }
+                .map_err(StoreError::Io)?;
         self.sealed_maps.insert(segment_id, mmap);
         // Return the just-inserted entry
         self.sealed_maps.get(&segment_id).ok_or_else(|| {

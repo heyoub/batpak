@@ -19,6 +19,7 @@ mod hidden_ranges;
 /// In-memory 2D event index, rebuilt from segments on startup.
 pub mod index;
 mod lifecycle;
+mod platform;
 /// Projection cache traits and built-in backends (NoCache, NativeCache).
 pub mod projection;
 /// Typed reactor output batch — accumulator handed to typed reactor handlers.
@@ -71,8 +72,11 @@ pub use reaction::ReactionBatch;
 pub use reactor_typed::{ReactorConfig, ReactorError, TypedReactorHandle};
 pub use signing::SigningKey;
 pub use stats::{
-    FrontierView, HlcPoint, StoreDiagnostics, StoreStats, WatermarkKind, WatermarkSnapshot,
-    WriterPressure,
+    ActiveSegmentReadEvidence, ClockEvidence, FrontierView, HlcPoint, HostEvidenceSummary,
+    LockLeafSymlinkProtection, MmapAdmissionSummary, MmapEvidence, ParentDirSyncAdmissionSummary,
+    ParentDirSyncEvidence, PlatformAdmissionSummary, PlatformEvidenceSummary, StoreDiagnostics,
+    StoreLockAdmissionSummary, StorePathEvidenceSummary, StorePathStatusEvidence, StoreStats,
+    WatermarkKind, WatermarkSnapshot, WriterPressure,
 };
 pub use write::control::{AppendTicket, BatchAppendTicket, Outbox, VisibilityFence};
 pub use write::writer::{Notification, RestartPolicy};
@@ -193,6 +197,13 @@ fn open_components(
     );
     let runtime = Arc::new(config.validated()?);
     let store_lock = dir_lock::StoreDirLock::acquire(&config.data_dir, lock_mode)?;
+    if let Some(profile_path) = config.platform_profile_path.as_ref() {
+        let _verified_platform_evidence =
+            platform::profile::PlatformProfile::verify_current_store_path(
+                profile_path,
+                &config.data_dir,
+            )?;
+    }
     let config = Arc::new(config);
     let index = Arc::new(StoreIndex::with_config(&config.index));
     let reader = Arc::new(Reader::new(config.data_dir.clone(), config.fd_budget));

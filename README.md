@@ -64,7 +64,7 @@ range scan, no disk I/O).
 
 ## Store Internals At A Glance
 
-Seven subdirectories organize the store by concern. Flat files alongside them
+Eight subdirectories organize the store by concern. Flat files alongside them
 (`append.rs`, `config.rs`, `error.rs`, `fault.rs`, `gate.rs`,
 `hidden_ranges.rs`, `lifecycle.rs`, `reactor_typed.rs`, `stats.rs`) hold
 types that belong to the store root and don't fit
@@ -76,6 +76,7 @@ store/
 ├── segment/      on-disk .fbat frame format and SIDX footer
 ├── index/        in-memory query engine: streams, by_id, columnar overlays, interner
 ├── cold_start/   open/restore: mmap → checkpoint → SIDX rebuild → frame scan
+├── platform/     target-sensitive fs/sync/lock/clock/mmap helpers
 ├── projection/   state reconstruction: replay, cache, watcher
 ├── ancestry/     causal graph walking: by hash chain or by HLC clock
 └── delivery/     push subscriptions (lossy) and pull cursors (ordered)
@@ -140,6 +141,7 @@ entity-chain events through `Store::append_denial(...)` using
 | `cargo xtask cover` | Coverage with retained artifacts |
 | `cargo xtask mutants policy` | Print the repo-owned mutation policy |
 | `cargo xtask mutants smoke` | Critical seam hard gates + repo-wide ratchet smoke |
+| `cargo xtask platform ...` | Doctor/probe/verify/bless/audit platform profile workflows |
 | `cargo xtask bench --surface neutral` | Criterion benchmark suite |
 | `cargo xtask perf-gates` | Catastrophic-regression guards (stable hardware only) |
 | `cargo xtask preflight` | Canonical verification bundle: CI + coverage + docs in one devcontainer session |

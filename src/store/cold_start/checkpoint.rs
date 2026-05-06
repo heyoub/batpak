@@ -20,13 +20,13 @@
 
 use crate::event::{EventKind, HashChain};
 use crate::store::cold_start::{
-    validate_watermark_segment, write_artifact_atomically, ColdStartIndexRow, ColdStartSource,
-    WatermarkValidationError,
+    validate_watermark_segment, ColdStartIndexRow, ColdStartSource, WatermarkValidationError,
 };
 use crate::store::index::interner::InternId;
 use crate::store::index::{
     recommended_restore_chunk_count, DiskPos, IndexEntry, RoutingSummary, StoreIndex,
 };
+use crate::store::platform::fs::write_file_atomically;
 use crate::store::segment::sidx::ReservedKindFallbackStats;
 use crate::store::StoreError;
 use rayon::prelude::*;
@@ -756,7 +756,7 @@ pub(crate) fn write_checkpoint_with_reserved_kind_fallbacks(
 
     // ── 5. Write to a same-directory tempfile with fsync ─────────────────────
     let final_path = data_dir.join(CHECKPOINT_FILENAME);
-    write_artifact_atomically(data_dir, &final_path, "checkpoint", |file| {
+    write_file_atomically(data_dir, &final_path, "checkpoint", |file| {
         let mut w = BufWriter::new(file);
 
         // Header: MAGIC (6) + version (2 LE) + crc (4 LE)

@@ -30,7 +30,19 @@
   statement: The store wall-clock helper must produce positive microsecond timestamps that advance with real time.
   artifacts:
     - ART-STORE-CONFIG
+    - ART-STORE-PLATFORM
     - ART-STORE-RUNTIME-CONTRACTS
+- id: INV-PLATFORM-EVIDENCE-NOT-MEANING
+  statement: store::platform may perform target-sensitive machine-contact operations and emit descriptive evidence/profile records, but it must not define batpak durability, replay, visibility, or admission semantics. Store, cold-start, segment, and frontier logic own those guarantees; configured profile mismatch is a hard open-time admission failure.
+  artifacts:
+    - ART-STORE-PLATFORM
+    - ART-STORE-CONFIG
+    - ART-STORE-ERROR
+    - ART-STORE-PLATFORM-FIXTURES
+    - ART-ADR-STORE-PLATFORM
+    - ART-STRUCTURAL-CHECK
+    - ART-XTASK
+    - ART-BUILD-RS
 - id: INV-RECEIPT-SEALED
   statement: Receipts are only constructible by gate evaluation, not by external callers.
   artifacts:
@@ -90,6 +102,7 @@
 - id: INV-MMAP-SEALED-READS
   statement: Sealed segment reads use zero-copy memory-mapped I/O via memmap2. Active segment uses FD cache with pread (Unix) or seek+read (Windows).
   artifacts:
+    - ART-STORE-PLATFORM
     - ART-STORE-SCAN
     - ART-STORE-CONFIG
 - id: INV-OPEN-REPORT-RECEIPT

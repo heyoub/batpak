@@ -1,4 +1,3 @@
-use crate::store::cold_start::persist_with_parent_fsync;
 use crate::store::StoreError;
 use serde::{Deserialize, Serialize};
 use std::io::{BufWriter, Write};
@@ -48,12 +47,12 @@ pub(crate) fn write_cancelled_ranges(
     ranges: &[(u64, u64)],
 ) -> Result<(), StoreError> {
     let final_path = data_dir.join(VISIBILITY_RANGES_FILENAME);
-    reject_symlink_leaf(&final_path)?;
+    crate::store::platform::fs::reject_symlink_leaf(&final_path, "visibility-ranges metadata")?;
 
     let normalized = normalize_ranges(ranges)?;
     if normalized.is_empty() {
         match std::fs::remove_file(&final_path) {
-            Ok(()) => sync_parent_dir(&final_path)?,
+            Ok(()) => crate::store::platform::sync::sync_parent_dir(&final_path)?,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => return Err(StoreError::Io(error)),
         }
@@ -79,8 +78,10 @@ pub(crate) fn write_cancelled_ranges(
         writer.write_all(&body)?;
         writer.flush()?;
     }
-    tmp.as_file().sync_all()?;
-    persist_with_parent_fsync(tmp, &final_path).map_err(StoreError::Io)?;
+    crate::store::platform::sync::sync_file_all_io(tmp.as_file()).map_err(StoreError::Io)?;
+    let admission = crate::store::platform::sync::admit_current_parent_dir_sync()?;
+    crate::store::platform::sync::persist_temp_with_parent_sync(tmp, &final_path, admission)
+        .map_err(StoreError::Io)?;
     Ok(())
 }
 
@@ -182,33 +183,4 @@ fn corrupt_ranges(path: &Path, reason: String) -> StoreError {
         path: path.to_path_buf(),
         reason,
     }
-}
-
-fn reject_symlink_leaf(path: &Path) -> Result<(), StoreError> {
-    match std::fs::symlink_metadata(path) {
-        Ok(meta) if meta.file_type().is_symlink() => Err(StoreError::Io(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            format!(
-                "refusing to write visibility-ranges metadata through symlink {}",
-                path.display()
-            ),
-        ))),
-        Ok(_) | Err(_) => Ok(()),
-    }
-}
-
-fn sync_parent_dir(path: &Path) -> Result<(), StoreError> {
-    #[cfg(unix)]
-    {
-        if let Some(parent) = path.parent() {
-            std::fs::File::open(parent)
-                .and_then(|dir| dir.sync_all())
-                .map_err(StoreError::Io)?;
-        }
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = path;
-    }
-    Ok(())
 }

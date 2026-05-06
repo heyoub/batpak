@@ -167,6 +167,7 @@ dependencies = [
  "clap",
  "proc-macro2",
  "pulldown-cmark",
+ "quote",
  "regex",
  "serde",
  "syn",
@@ -1949,9 +1950,13 @@ dependencies = [
  "anyhow",
  "base16ct",
  "clap",
+ "crc32fast",
+ "memmap2",
  "pulldown-cmark",
+ "serde",
  "serde_json",
  "sha2",
+ "tempfile",
  "toml",
 ]
 

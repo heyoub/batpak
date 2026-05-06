@@ -63,6 +63,9 @@ fn classify(error: &StoreError) -> HandlingClass {
         StoreError::Serialization(_)
         | StoreError::CrcMismatch { .. }
         | StoreError::CorruptSegment { .. }
+        | StoreError::PlatformProfileInvalid { .. }
+        | StoreError::PlatformProfileMismatch { .. }
+        | StoreError::PlatformAdmissionFailed { .. }
         | StoreError::WriterCrashed
         | StoreError::SequenceGateViolation { .. }
         | StoreError::CorruptFrame { .. }
@@ -290,6 +293,40 @@ fn store_error_contract_table_stays_stable() {
             class: HandlingClass::Domain,
             source_needle: None,
             display_needles: &["-17", "invalid", "timestamp_us"],
+        },
+        Case {
+            name: "platform_profile_invalid",
+            error: StoreError::PlatformProfileInvalid {
+                path: PathBuf::from("fixtures/platform/bad.profile"),
+                reason: "expected schema_version 1".into(),
+            },
+            class: HandlingClass::FailClosedOperational,
+            source_needle: None,
+            display_needles: &["fixtures/platform/bad.profile", "invalid", "schema_version"],
+        },
+        Case {
+            name: "platform_profile_mismatch",
+            error: StoreError::PlatformProfileMismatch {
+                path: PathBuf::from("fixtures/platform/linux_basic.profile"),
+                reason: "expected AtomicNoFollow, observed BestEffortCheckThenOpen".into(),
+            },
+            class: HandlingClass::FailClosedOperational,
+            source_needle: None,
+            display_needles: &[
+                "fixtures/platform/linux_basic.profile",
+                "does not match",
+                "AtomicNoFollow",
+            ],
+        },
+        Case {
+            name: "platform_admission_failed",
+            error: StoreError::PlatformAdmissionFailed {
+                capability: "sealed segment mmap",
+                reason: "mmap evidence Unknown is not admissible".into(),
+            },
+            class: HandlingClass::FailClosedOperational,
+            source_needle: None,
+            display_needles: &["sealed segment mmap", "admission failed", "Unknown"],
         },
         Case {
             name: "checkpoint_write_failed",

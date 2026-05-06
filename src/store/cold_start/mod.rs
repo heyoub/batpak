@@ -7,9 +7,7 @@ use crate::event::{EventHeader, HashChain};
 use crate::store::index::interner::InternId;
 use crate::store::index::{DiskPos, IndexEntry};
 use crate::store::StoreError;
-use std::fs::File;
 use std::path::{Path, PathBuf};
-use tempfile::NamedTempFile;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ColdStartSource {
@@ -135,82 +133,6 @@ pub(crate) fn validate_watermark_segment(
             path: watermark_segment_path,
         }),
     }
-}
-
-pub(crate) fn reject_symlink_leaf(path: &Path, purpose: &str) -> Result<(), StoreError> {
-    match std::fs::symlink_metadata(path) {
-        Ok(meta) if meta.file_type().is_symlink() => Err(StoreError::Io(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            format!(
-                "refusing to write {purpose} through symlink {}",
-                path.display()
-            ),
-        ))),
-        Ok(_) | Err(_) => Ok(()),
-    }
-}
-
-pub(crate) fn write_artifact_atomically(
-    data_dir: &Path,
-    final_path: &Path,
-    purpose: &str,
-    write: impl FnOnce(&mut File) -> Result<(), StoreError>,
-) -> Result<(), StoreError> {
-    reject_symlink_leaf(final_path, purpose)?;
-    let tmp = NamedTempFile::new_in(data_dir)?;
-    let mut file = tmp.reopen().map_err(StoreError::Io)?;
-    write(&mut file)?;
-    file.sync_all().map_err(StoreError::Io)?;
-    drop(file);
-    persist_with_parent_fsync(tmp, final_path).map_err(StoreError::Io)?;
-    Ok(())
-}
-
-/// Persist `named_temp` as `final_path` with parent-directory fsync.
-///
-/// The tempfile's contents must already be fsynced by the caller (this
-/// function only handles the rename + directory-entry durability). On
-/// unix the parent directory is opened and `sync_all`-ed after the
-/// rename, so a crash immediately after this returns cannot lose the
-/// directory entry that points at the new inode. On non-unix targets
-/// `File::sync_all` on a directory is not meaningful, so the parent
-/// fsync is skipped — the asymmetry is platform-level, not a shortcut:
-/// windows POSIX semantics for directory fsync simply do not exist.
-pub(crate) fn persist_with_parent_fsync(
-    named_temp: tempfile::NamedTempFile,
-    final_path: &Path,
-) -> std::io::Result<()> {
-    // Fsync the temp file one more time defensively — `write_artifact_atomically`
-    // already does this, but callers that construct their own NamedTempFile
-    // can rely on this helper being the durability boundary.
-    {
-        let handle = named_temp.as_file();
-        handle.sync_all()?;
-    }
-
-    named_temp
-        .persist(final_path)
-        .map_err(|error| error.error)?;
-
-    #[cfg(unix)]
-    {
-        if let Some(parent) = final_path.parent() {
-            // Opening the parent dir read-only and calling sync_all is the
-            // POSIX-idiomatic way to flush the directory entry for the
-            // renamed-in file. Without this, a crash after the rename
-            // returns can leave the rename itself undone on disk.
-            let dir = std::fs::File::open(parent)?;
-            dir.sync_all()?;
-        }
-    }
-    #[cfg(not(unix))]
-    {
-        // Non-unix: File::sync_all on a directory handle is not meaningful
-        // and returns an error on some platforms. The rename itself is
-        // the durability point the OS provides here.
-        let _ = final_path;
-    }
-    Ok(())
 }
 
 /// Canonical persisted-index row shared by cold-start artifact readers.

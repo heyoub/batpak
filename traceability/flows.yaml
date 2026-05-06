@@ -54,8 +54,19 @@
 - id: FLOW-SYNC
   summary: Explicit sync hands control to the writer and returns only after the writer acknowledges durability work.
   artifacts:
+    - ART-STORE-PLATFORM
     - ART-STORE-LIFECYCLE
     - ART-OBSERVABILITY-TESTS
+- id: FLOW-STORE-PLATFORM-CONTACT
+  summary: Store platform contact routes target-sensitive fs, sync, lock, clock, mmap, evidence, admission, profile, and reverify mechanics through the private store::platform room while store/cold-start/frontier code retains semantic ownership of guarantees.
+  artifacts:
+    - ART-STORE-PLATFORM
+    - ART-STORE-CONFIG
+    - ART-STORE-ERROR
+    - ART-STORE-PLATFORM-FIXTURES
+    - ART-ADR-STORE-PLATFORM
+    - ART-XTASK
+    - ART-BUILD-RS
 - id: FLOW-SNAPSHOT
   summary: Snapshot syncs first, then copies the sealed on-disk segment set plus hidden-visibility metadata into a destination directory.
   artifacts:
@@ -115,6 +126,7 @@
     - ART-STORE-SCAN
     - ART-STORE-CHECKPOINT
     - ART-STORE-MMAP
+    - ART-STORE-PLATFORM
     - ART-STORE-HIDDEN-RANGES
     - ART-CONTROL-PLANE-TESTS
     - ART-ADR-CONTROL-PLANE

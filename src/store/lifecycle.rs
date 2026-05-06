@@ -1,8 +1,6 @@
 use crate::coordinate::Coordinate;
 use crate::event::{EventKind, StoredEvent};
-use crate::store::cold_start::{
-    latest_segment_watermark, reject_symlink_leaf, ColdStartArtifactKind,
-};
+use crate::store::cold_start::{latest_segment_watermark, ColdStartArtifactKind};
 use crate::store::segment::scan as reader;
 use crate::store::segment::{self, Active, FramePayload};
 use crate::store::write::control::AppendSubmission;
@@ -71,7 +69,7 @@ pub(crate) fn snapshot(store: &Store<Open>, dest: &std::path::Path) -> Result<()
     // race hidden writes into the copied segment set.
     let snapshot_fence = store.begin_visibility_fence()?;
     sync(store)?;
-    reject_symlink_leaf(dest, "snapshot destination")?;
+    crate::store::platform::fs::reject_symlink_leaf(dest, "snapshot destination")?;
     std::fs::create_dir_all(dest).map_err(StoreError::Io)?;
     clear_snapshot_store_artifacts(dest)?;
     let entries = std::fs::read_dir(&store.config.data_dir).map_err(StoreError::Io)?;
@@ -79,7 +77,7 @@ pub(crate) fn snapshot(store: &Store<Open>, dest: &std::path::Path) -> Result<()
         let path = entry.path();
         if snapshot_source_should_copy(&path) {
             let dest_path = dest.join(entry.file_name());
-            reject_symlink_leaf(&dest_path, "snapshot entry")?;
+            crate::store::platform::fs::reject_symlink_leaf(&dest_path, "snapshot entry")?;
             std::fs::copy(&path, &dest_path).map_err(StoreError::Io)?;
         }
     }
@@ -558,5 +556,8 @@ pub(crate) fn diagnostics<State>(store: &Store<State>) -> StoreDiagnostics {
         index_topology: store.index.topology_name(),
         tile_count: store.index.tile_count(),
         open_report: store.open_report.clone(),
+        platform_evidence: crate::store::platform::evidence::collect_for_store_path(
+            &store.config.data_dir,
+        ),
     }
 }

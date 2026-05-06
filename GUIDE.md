@@ -436,6 +436,25 @@ Useful targets:
 Start with `warn` globally and enable `info` or `debug` on one `batpak::*`
 target while investigating a concrete startup, durability, or query issue.
 
+### Platform profiles
+
+For deployments that should fail closed when target-sensitive store mechanics
+change, generate and verify a platform profile:
+
+```bash
+cargo xtask platform probe --store-path ./data --profile ./platform.profile
+cargo xtask platform verify --store-path ./data --profile ./platform.profile
+```
+
+`platform probe` creates the store path before collecting evidence, so a
+first-open profile records the same directory posture that `Store::open`
+will verify.
+
+Then opt into profile-verified open with
+`StoreConfig::with_platform_profile_path("./platform.profile")`.
+The profile covers reported store platform posture for that store path; callers
+use it through `StoreConfig` reverify.
+
 ### Production Checklist
 
 Before deploying a store path that matters:

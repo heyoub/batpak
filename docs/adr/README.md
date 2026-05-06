@@ -23,3 +23,4 @@ of the public or repository contract when that release is known.
 | ADR-0015 | dm-flakey Chaos Harness | Accepted; shipped in 0.7.0 |
 | ADR-0016 | Durability Gating | Accepted; shipped in 0.7.0 |
 | ADR-0017 | At-Least-Once Witness Surface | Accepted; shipped in 0.7.0 |
+| ADR-0018 | Store Platform Backend | Accepted |

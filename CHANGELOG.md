@@ -4,7 +4,26 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-_Nothing yet._
+### Added
+- Added a private store platform backend for target-sensitive fs/sync/lock/
+  clock/mmap mechanics, descriptive platform evidence, admission summaries,
+  and opt-in profile-verified open through
+  `StoreConfig::with_platform_profile_path(...)`.
+- Added `cargo xtask platform doctor|probe|verify|bless|audit` for platform
+  profile workflows, plus build-time `BATPAK_PLATFORM_PROFILE` validation that
+  checks schema, CRC32 fingerprint, and evidence/admission consistency without
+  probing live hardware.
+- Added `StoreDiagnostics::platform_evidence` so callers can inspect reported
+  store-path platform posture.
+- Added `StoreError::PlatformProfileInvalid`,
+  `StoreError::PlatformProfileMismatch`, and
+  `StoreError::PlatformAdmissionFailed` as fail-closed operational errors.
+
+### Changed
+- Store internals now route target-sensitive machine contact through
+  `src/store/platform/`, and structural checks reject new direct store runtime
+  uses of file sync, mmap, target cfg, lock open flag, and positional-read
+  primitives outside that room.
 
 ## [0.7.0] - 2026-05-04
 

@@ -83,6 +83,8 @@ tracing-subscriber = { version = "0.3", features = ["fmt", "std"] }
 
 [build-dependencies]
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+crc32fast = "1"
 yaml_serde = "0.10.4"
 proc-macro2 = { version = "1", features = ["span-locations"] }
 syn = { version = "2", features = ["full", "visit"] }

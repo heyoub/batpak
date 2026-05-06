@@ -324,23 +324,21 @@ pub(crate) fn write_pending_compaction(
         source_segment_ids: source_segment_ids.to_vec(),
     };
     let final_path = pending_compaction_path(data_dir);
-    super::write_artifact_atomically(data_dir, &final_path, "compaction marker", |file| {
-        serde_json::to_writer(file, &marker).map_err(|e| StoreError::Serialization(Box::new(e)))
-    })
+    crate::store::platform::fs::write_file_atomically(
+        data_dir,
+        &final_path,
+        "compaction marker",
+        |file| {
+            serde_json::to_writer(file, &marker).map_err(|e| StoreError::Serialization(Box::new(e)))
+        },
+    )
 }
 
 pub(crate) fn clear_pending_compaction(data_dir: &Path) -> Result<(), StoreError> {
     let path = pending_compaction_path(data_dir);
     match std::fs::remove_file(&path) {
         Ok(()) => {
-            #[cfg(unix)]
-            {
-                if let Some(parent) = path.parent() {
-                    std::fs::File::open(parent)
-                        .and_then(|dir| dir.sync_all())
-                        .map_err(StoreError::Io)?;
-                }
-            }
+            crate::store::platform::sync::sync_parent_dir(&path)?;
             Ok(())
         }
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),

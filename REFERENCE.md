@@ -115,6 +115,8 @@ covered by ADR-0011.
 - `src/store/write/writer/publish.rs`: committed-event materialization and fanout publish
 - `src/store/write/writer/runtime.rs`: restart loop, shutdown drain, segment bootstrap probe
 - `src/store/write/staging.rs`: shared committed-event staging packets
+- `src/store/platform/`: private target-sensitive machine-contact helpers for
+  fs/sync/lock/clock/mmap operations
 - `src/store/index/mod.rs`: in-memory index and visibility gate
 - `src/store/index/columnar.rs`: base AoS plus optional overlays
 - `src/store/projection/flow.rs`: replay, incremental apply, cache path
@@ -196,6 +198,37 @@ Cold-start priority:
 4. full frame-by-frame rebuild
 
 Batch append uses BEGIN/COMMIT markers and atomic visibility publication.
+
+## Store Platform Backend
+
+`src/store/platform/` is a private store-internal room for target-sensitive
+machine contact. It owns narrow mechanics such as symlink leaf checks,
+same-directory tempfile persistence, parent-directory sync, store-lock open
+policy, segment file creation, active-segment positional reads, segment sync,
+canonical clocks, direct mmap calls, descriptive platform evidence, admission
+tokens, profile records, and opt-in reverify.
+
+The room stays private to `src/store/` and reports target mechanics without
+deciding store semantics. The rule is: platform observes; store admits; batpak
+guarantees.
+Durability, replay, visibility, and admission meaning stay with store,
+cold-start, segment, and frontier code. `StoreDiagnostics::platform_evidence`
+exposes the reported mechanics/posture, while internal admission tokens
+(store lock, parent-dir sync, mmap index, and sealed-segment mmap) keep raw
+evidence from becoming meaning. `StoreConfig::with_platform_profile_path`
+enables profile-verified open; a mismatch returns a platform profile error
+before mutable writer spawn or successful-open observability. Profile reverify
+may still create the data directory and lock file before failing.
+
+Operator profile workflows live under `cargo xtask platform ...`:
+
+- `doctor` reports whether the current store path can produce a profile.
+- `probe` writes a versioned JSON profile with a non-cryptographic CRC32
+  fingerprint for accidental drift detection. Profile signing is not
+  implemented.
+- `verify` compares a profile with current evidence.
+- `bless` intentionally refreshes a profile fixture.
+- `audit` runs the platform boundary structural check.
 
 Current artifact versions:
 
@@ -471,6 +504,7 @@ Important knobs on `StoreConfig`:
 | `index.incremental_projection` | `false` | Enable when projections support pure incremental apply and replay cost is visible. |
 | `index.enable_checkpoint` | `true` | Disable only for tiny stores or tests where cold-start artifacts are unwanted. |
 | `index.enable_mmap_index` | `true` | Disable when the platform or deployment policy rejects mmap artifacts. |
+| `platform_profile_path` via `with_platform_profile_path(...)` | `None` | Set when open must fail closed unless current platform evidence matches a recorded profile. |
 | `signing_keys` via `with_signing_key(...)` | empty | Add when append and denial receipts need tamper-evident verification. |
 
 ## Receipt And Denial Notes
@@ -549,6 +583,8 @@ the enforcement story.
 - front door: `README.md`
 - usage/workflows: `GUIDE.md`
 - technical reference: `REFERENCE.md`
+- decision index: `docs/adr/README.md`
+- harness doctrine: `HARNESS_DIRECTIVE.md` and `HARNESS_LEDGER.md`
 - traceability registry: `traceability/artifacts.yaml`
 - integrity entrypoint: `tools/integrity/src/main.rs`
 - xtask command surface: `tools/xtask/src/commands.rs`
