@@ -36,7 +36,16 @@ manual publish/tag/release steps from a clean `main`.
    overrides are a dry-run aid only; the real publish still needs dependency
    crates indexed on crates.io.
 
-8. Inspect package contents before publishing:
+8. Before publish, explicitly smoke the cross-crate payload registry fixture in
+   both debug and release modes so `inventory` registration survives optimized
+   linkage:
+
+   ```bash
+   cargo test --test event_payload_registry_downstream
+   cargo test --release --manifest-path fixtures/kind-collision-composer/Cargo.toml
+   ```
+
+9. Inspect package contents before publishing:
 
    ```bash
    cargo package --list -p batpak-macros-support
@@ -50,7 +59,8 @@ manual publish/tag/release steps from a clean `main`.
 
 ## Benchmark Baseline
 
-Capture release numbers on stable hardware, not in a devcontainer or noisy VM:
+Capture release numbers from the merged release commit on stable hardware, not
+from an unmerged PR head, devcontainer, or noisy VM:
 
 ```bash
 cargo xtask bench --surface neutral --save baseline-v0.7.0

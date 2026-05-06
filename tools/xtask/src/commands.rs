@@ -61,8 +61,27 @@ const HASH_CHAIN_REPLAY_NO_DEFAULT_MUTANT_FILES: &[&str] = &[
 ];
 const FRONTIER_WAIT_MUTANT_FILES: &[&str] = &["src/store/write/writer.rs"];
 const FRONTIER_APPEND_GATE_MUTANT_FILES: &[&str] = &["src/store/gate.rs"];
+const EVENT_PAYLOAD_REGISTRY_MUTANT_FILES: &[&str] = &[
+    "src/event/payload.rs",
+    "src/store/config.rs",
+    "src/store/mod.rs",
+];
+const HARNESS_LEDGER_LINT_MUTANT_FILES: &[&str] = &["tools/integrity/src/harness_lints.rs"];
 const ALL_FEATURES_MUTANT_EXCLUDES: &[&str] = &["src/store/ancestry/by_clock.rs"];
 const NO_DEFAULT_FEATURES_MUTANT_EXCLUDES: &[&str] = &["src/store/ancestry/by_hash.rs"];
+const INDEX_TOPOLOGY_DEFAULT_EQUIVALENT_MUTANT: &str =
+    r"src/store/config\.rs:.*replace IndexTopology::aos -> Self with Default::default\(\)";
+const SIDX_EMPTY_FOOTER_FLOOR_EQUIVALENT_MUTANT: &str =
+    r"src/store/segment/scan/recovery\.rs:.*replace \+ with . in Reader::sidx_covers_segment_tail";
+const ALL_FEATURES_MUTANT_EXCLUDE_RES: &[&str] = &[
+    INDEX_TOPOLOGY_DEFAULT_EQUIVALENT_MUTANT,
+    SIDX_EMPTY_FOOTER_FLOOR_EQUIVALENT_MUTANT,
+];
+const NO_DEFAULT_FEATURES_MUTANT_EXCLUDE_RES: &[&str] = &[
+    INDEX_TOPOLOGY_DEFAULT_EQUIVALENT_MUTANT,
+    SIDX_EMPTY_FOOTER_FLOOR_EQUIVALENT_MUTANT,
+];
+const SEGMENT_SCAN_MUTANT_EXCLUDE_RES: &[&str] = &[SIDX_EMPTY_FOOTER_FLOOR_EQUIVALENT_MUTANT];
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum HookStatus {
@@ -110,6 +129,7 @@ struct CriticalMutationSeam {
     label: &'static str,
     description: &'static str,
     surface: MutantSurface,
+    package: Option<&'static str>,
     paths: &'static [&'static str],
 }
 
@@ -124,8 +144,10 @@ struct MutationLane {
     shard: Option<String>,
     sharding: Option<MutationSharding>,
     enforcement: MutationEnforcement,
+    package: Option<&'static str>,
     paths: &'static [&'static str],
     excludes: &'static [&'static str],
+    exclude_res: &'static [&'static str],
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -242,8 +264,10 @@ impl MutationLane {
             enforcement: MutationEnforcement::Threshold {
                 min_catch_pct: CRITICAL_SEAM_MIN_CATCH_PCT,
             },
+            package: seam.package,
             paths: seam.paths,
             excludes: surface_excludes(seam.surface),
+            exclude_res: critical_seam_exclude_res(seam.slug),
         }
     }
 
@@ -264,8 +288,10 @@ impl MutationLane {
             enforcement: MutationEnforcement::Threshold {
                 min_catch_pct: CRITICAL_SEAM_MIN_CATCH_PCT,
             },
+            package: seam.package,
             paths: seam.paths,
             excludes: surface_excludes(seam.surface),
+            exclude_res: critical_seam_exclude_res(seam.slug),
         }
     }
 
@@ -283,8 +309,10 @@ impl MutationLane {
             shard: shard.map(str::to_owned),
             sharding: None,
             enforcement: current_repo_mutation_enforcement(),
+            package: None,
             paths: repo_wide_paths(surface),
             excludes: surface_excludes(surface),
+            exclude_res: surface_exclude_res(surface),
         }
     }
 
@@ -302,8 +330,10 @@ impl MutationLane {
             shard: Some(REPO_WIDE_SMOKE_SHARD.to_owned()),
             sharding: Some(MutationSharding::RoundRobin),
             enforcement: current_repo_mutation_enforcement(),
+            package: None,
             paths: repo_wide_paths(surface),
             excludes: surface_excludes(surface),
+            exclude_res: surface_exclude_res(surface),
         }
     }
 
@@ -384,6 +414,20 @@ fn surface_excludes(surface: MutantSurface) -> &'static [&'static str] {
     }
 }
 
+fn surface_exclude_res(surface: MutantSurface) -> &'static [&'static str] {
+    match surface {
+        MutantSurface::AllFeatures => ALL_FEATURES_MUTANT_EXCLUDE_RES,
+        MutantSurface::NoDefaultFeatures => NO_DEFAULT_FEATURES_MUTANT_EXCLUDE_RES,
+    }
+}
+
+fn critical_seam_exclude_res(slug: &str) -> &'static [&'static str] {
+    match slug {
+        "segment-scan" => SEGMENT_SCAN_MUTANT_EXCLUDE_RES,
+        _ => &[],
+    }
+}
+
 fn critical_mutation_seams() -> &'static [CriticalMutationSeam] {
     &[
         CriticalMutationSeam {
@@ -391,6 +435,7 @@ fn critical_mutation_seams() -> &'static [CriticalMutationSeam] {
             label: "writer commit protocol",
             description: "writer commit protocol and staging/publish ordering",
             surface: MutantSurface::AllFeatures,
+            package: None,
             paths: WRITER_COMMIT_MUTANT_FILES,
         },
         CriticalMutationSeam {
@@ -398,6 +443,7 @@ fn critical_mutation_seams() -> &'static [CriticalMutationSeam] {
             label: "cursor delivery, checkpoints, and witnesses",
             description: "cursor delivery/checkpoint/witness logic",
             surface: MutantSurface::AllFeatures,
+            package: None,
             paths: CURSOR_MUTANT_FILES,
         },
         CriticalMutationSeam {
@@ -405,6 +451,7 @@ fn critical_mutation_seams() -> &'static [CriticalMutationSeam] {
             label: "projection replay and freshness",
             description: "projection replay/freshness logic",
             surface: MutantSurface::AllFeatures,
+            package: None,
             paths: PROJECTION_MUTANT_FILES,
         },
         CriticalMutationSeam {
@@ -412,6 +459,7 @@ fn critical_mutation_seams() -> &'static [CriticalMutationSeam] {
             label: "segment scan corruption handling",
             description: "segment scan and corruption handling",
             surface: MutantSurface::AllFeatures,
+            package: None,
             paths: SEGMENT_SCAN_MUTANT_FILES,
         },
         CriticalMutationSeam {
@@ -419,6 +467,7 @@ fn critical_mutation_seams() -> &'static [CriticalMutationSeam] {
             label: "hash-chain and replay consistency",
             description: "hash-chain / replay consistency logic (blake3 lane)",
             surface: MutantSurface::AllFeatures,
+            package: None,
             paths: HASH_CHAIN_REPLAY_ALL_FEATURES_MUTANT_FILES,
         },
         CriticalMutationSeam {
@@ -426,6 +475,7 @@ fn critical_mutation_seams() -> &'static [CriticalMutationSeam] {
             label: "hash-chain and replay consistency",
             description: "hash-chain / replay consistency logic (no-default lane)",
             surface: MutantSurface::NoDefaultFeatures,
+            package: None,
             paths: HASH_CHAIN_REPLAY_NO_DEFAULT_MUTANT_FILES,
         },
         CriticalMutationSeam {
@@ -433,6 +483,7 @@ fn critical_mutation_seams() -> &'static [CriticalMutationSeam] {
             label: "frontier durable wait",
             description: "wait_for_durable poison, target, timeout, and condvar loop",
             surface: MutantSurface::AllFeatures,
+            package: None,
             paths: FRONTIER_WAIT_MUTANT_FILES,
         },
         CriticalMutationSeam {
@@ -440,7 +491,24 @@ fn critical_mutation_seams() -> &'static [CriticalMutationSeam] {
             label: "frontier append gate",
             description: "AppendOptions::gate kind matching, timeout propagation, receipt HLC target conversion, and batch per-item gate ignore",
             surface: MutantSurface::AllFeatures,
+            package: None,
             paths: FRONTIER_APPEND_GATE_MUTANT_FILES,
+        },
+        CriticalMutationSeam {
+            slug: "event-payload-registry-validator",
+            label: "event payload registry validator",
+            description: "EventPayload registry collision detection, open-time warn/fail-fast policy, and cache refresh",
+            surface: MutantSurface::AllFeatures,
+            package: None,
+            paths: EVENT_PAYLOAD_REGISTRY_MUTANT_FILES,
+        },
+        CriticalMutationSeam {
+            slug: "harness-ledger-structural-lint",
+            label: "harness ledger structural lint",
+            description: "HARNESS_LEDGER schema, location, command, header, and line-cap enforcement",
+            surface: MutantSurface::AllFeatures,
+            package: Some("batpak-integrity"),
+            paths: HARNESS_LEDGER_LINT_MUTANT_FILES,
         },
     ]
 }
@@ -608,6 +676,16 @@ fn mutants_command(lane: &MutationLane, output_dir: &Path) -> Vec<String> {
         args.push((*exclude).to_owned());
     }
 
+    for exclude_re in lane.exclude_res {
+        args.push("--exclude-re".to_owned());
+        args.push((*exclude_re).to_owned());
+    }
+
+    if let Some(package) = lane.package {
+        args.push("--package".to_owned());
+        args.push(package.to_owned());
+    }
+
     match lane.surface {
         MutantSurface::AllFeatures => args.push("--all-features".to_owned()),
         MutantSurface::NoDefaultFeatures => args.push("--no-default-features".to_owned()),
@@ -763,6 +841,11 @@ fn print_mutation_policy() {
         NO_DEFAULT_FEATURES_MUTANT_EXCLUDES.join(", ")
     );
     println!(
+        "- Surface-specific mutation regex excludes: all-features => {}, no-default-features => {}.",
+        ALL_FEATURES_MUTANT_EXCLUDE_RES.join(", "),
+        NO_DEFAULT_FEATURES_MUTANT_EXCLUDE_RES.join(", ")
+    );
+    println!(
         "- Mutation artifacts live under `{MUTANTS_OUTPUT_ROOT}` so xtask owns the scratch surface."
     );
 }
@@ -887,9 +970,12 @@ mod tests {
         critical_mutation_lanes, critical_mutation_smoke_lanes, mutants_command, mutation_score,
         next_ratchet_floor, setup, surface_excludes, MutantExecutionPlan, MutationBaseline,
         MutationLane, MutationScope, MutationScore, MutationSharding, RepoMutationPhase,
-        CURSOR_MUTANT_FILES, FRONTIER_APPEND_GATE_MUTANT_FILES, FRONTIER_WAIT_MUTANT_FILES,
+        CURSOR_MUTANT_FILES, EVENT_PAYLOAD_REGISTRY_MUTANT_FILES,
+        FRONTIER_APPEND_GATE_MUTANT_FILES, FRONTIER_WAIT_MUTANT_FILES,
+        HARNESS_LEDGER_LINT_MUTANT_FILES, INDEX_TOPOLOGY_DEFAULT_EQUIVALENT_MUTANT,
         PROJECTION_MUTANT_FILES, REPO_MUTATION_PHASE, REPO_WIDE_ALL_FEATURES_MUTANT_FILES,
-        REPO_WIDE_NO_DEFAULT_MUTANT_FILES, WRITER_COMMIT_MUTANT_FILES,
+        REPO_WIDE_NO_DEFAULT_MUTANT_FILES, SIDX_EMPTY_FOOTER_FLOOR_EQUIVALENT_MUTANT,
+        WRITER_COMMIT_MUTANT_FILES,
     };
     use crate::{MutantMode, MutantSurface, MutantsArgs};
     use std::fs;
@@ -950,6 +1036,12 @@ mod tests {
                     .clone()
                     .with_baseline(MutationBaseline::Skip),
                 critical_mutation_smoke_lanes()[7]
+                    .clone()
+                    .with_baseline(MutationBaseline::Skip),
+                critical_mutation_smoke_lanes()[8]
+                    .clone()
+                    .with_baseline(MutationBaseline::Skip),
+                critical_mutation_smoke_lanes()[9]
                     .clone()
                     .with_baseline(MutationBaseline::Skip),
                 MutationLane::repo_wide_smoke(MutantSurface::AllFeatures)
@@ -1031,6 +1123,10 @@ mod tests {
                 "src/store/**/*.rs",
                 "--exclude",
                 "src/store/ancestry/by_hash.rs",
+                "--exclude-re",
+                INDEX_TOPOLOGY_DEFAULT_EQUIVALENT_MUTANT,
+                "--exclude-re",
+                SIDX_EMPTY_FOOTER_FLOOR_EQUIVALENT_MUTANT,
                 "--no-default-features",
                 "--cargo-arg",
                 "--locked",
@@ -1102,12 +1198,23 @@ mod tests {
             .iter()
             .find(|lane| lane.slug == "frontier-append-gate")
             .expect("frontier append gate lane");
+        let registry_lane = lanes
+            .iter()
+            .find(|lane| lane.slug == "event-payload-registry-validator")
+            .expect("event payload registry lane");
+        let harness_lane = lanes
+            .iter()
+            .find(|lane| lane.slug == "harness-ledger-structural-lint")
+            .expect("harness lint lane");
 
         assert_eq!(cursor_lane.scope, MutationScope::CriticalSeam);
         assert_eq!(cursor_lane.paths, CURSOR_MUTANT_FILES);
         assert_eq!(projection_lane.paths, PROJECTION_MUTANT_FILES);
         assert_eq!(wait_lane.paths, FRONTIER_WAIT_MUTANT_FILES);
         assert_eq!(gate_lane.paths, FRONTIER_APPEND_GATE_MUTANT_FILES);
+        assert_eq!(registry_lane.paths, EVENT_PAYLOAD_REGISTRY_MUTANT_FILES);
+        assert_eq!(harness_lane.paths, HARNESS_LEDGER_LINT_MUTANT_FILES);
+        assert_eq!(harness_lane.package, Some("batpak-integrity"));
         assert_eq!(
             MutationLane::repo_wide(MutantSurface::AllFeatures, None).paths,
             REPO_WIDE_ALL_FEATURES_MUTANT_FILES
@@ -1121,6 +1228,23 @@ mod tests {
             surface_excludes(MutantSurface::AllFeatures)
         );
         assert_eq!(lanes[0].paths, WRITER_COMMIT_MUTANT_FILES);
+    }
+
+    #[test]
+    fn package_scoped_mutation_lane_emits_package_arg() {
+        let lane = critical_mutation_lanes()
+            .into_iter()
+            .find(|lane| lane.slug == "harness-ledger-structural-lint")
+            .expect("harness lint seam");
+        let command = mutants_command(
+            &lane,
+            Path::new("tools/xtask/target/mutants/harness-ledger-structural-lint-all-features"),
+        );
+        let package_index = command
+            .iter()
+            .position(|arg| arg == "--package")
+            .expect("package arg");
+        assert_eq!(command[package_index + 1], "batpak-integrity");
     }
 
     fn fake_lane() -> MutationLane {

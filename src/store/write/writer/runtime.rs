@@ -7,7 +7,7 @@ use crate::store::index::StoreIndex;
 use std::panic::AssertUnwindSafe;
 use std::path::Path;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 #[derive(Clone, Copy)]
 pub(super) struct WriterRuntime<'a> {
@@ -90,31 +90,12 @@ pub(super) fn writer_thread_main(
                     "unknown panic".to_string()
                 };
 
-                let budget_ok = match &runtime.config.writer.restart_policy {
-                    RestartPolicy::Once => {
-                        if restarts >= 1 {
-                            false
-                        } else {
-                            restarts += 1;
-                            true
-                        }
-                    }
-                    RestartPolicy::Bounded {
-                        max_restarts,
-                        within_ms,
-                    } => {
-                        if window_start.elapsed() > std::time::Duration::from_millis(*within_ms) {
-                            restarts = 0;
-                            window_start = Instant::now();
-                        }
-                        if restarts >= *max_restarts {
-                            false
-                        } else {
-                            restarts += 1;
-                            true
-                        }
-                    }
-                };
+                let budget_ok = restart_budget_allows(
+                    &runtime.config.writer.restart_policy,
+                    &mut restarts,
+                    &mut window_start,
+                    Instant::now(),
+                );
 
                 if !budget_ok {
                     tracing::error!(
@@ -172,6 +153,39 @@ pub(super) fn writer_thread_main(
                         return;
                     }
                 };
+            }
+        }
+    }
+}
+
+fn restart_budget_allows(
+    policy: &RestartPolicy,
+    restarts: &mut u32,
+    window_start: &mut Instant,
+    now: Instant,
+) -> bool {
+    match policy {
+        RestartPolicy::Once => {
+            if *restarts >= 1 {
+                false
+            } else {
+                *restarts += 1;
+                true
+            }
+        }
+        RestartPolicy::Bounded {
+            max_restarts,
+            within_ms,
+        } => {
+            if now.saturating_duration_since(*window_start) > Duration::from_millis(*within_ms) {
+                *restarts = 0;
+                *window_start = now;
+            }
+            if *restarts >= *max_restarts {
+                false
+            } else {
+                *restarts += 1;
+                true
             }
         }
     }
@@ -316,4 +330,106 @@ pub(crate) fn find_latest_segment_id(dir: &std::path::Path) -> Option<u64> {
             }
         })
         .max()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn writer_thread_name_is_stable_nonempty_and_prefixed() {
+        let path = Path::new("batpak/writer-name");
+        let name = writer_thread_name(path);
+
+        assert!(
+            name.starts_with("batpak-writer-"),
+            "PROPERTY: writer thread names carry a stable batpak prefix for diagnostics"
+        );
+        assert!(
+            name.len() > "batpak-writer-".len(),
+            "PROPERTY: writer thread names include a data-dir-derived suffix rather than the empty string"
+        );
+        assert_eq!(
+            name,
+            writer_thread_name(path),
+            "PROPERTY: writer thread names are deterministic for a store directory"
+        );
+        assert_ne!(
+            name,
+            writer_thread_name(Path::new("batpak/other-writer-name")),
+            "PROPERTY: distinct store directories should not collapse to one diagnostic thread name"
+        );
+    }
+
+    #[test]
+    fn restart_budget_once_allows_exactly_one_restart() {
+        let mut restarts = 0;
+        let mut window_start = Instant::now();
+
+        assert!(
+            restart_budget_allows(
+                &RestartPolicy::Once,
+                &mut restarts,
+                &mut window_start,
+                Instant::now()
+            ),
+            "PROPERTY: RestartPolicy::Once grants the first restart"
+        );
+        assert_eq!(
+            restarts, 1,
+            "PROPERTY: accepting a restart increments the budget counter"
+        );
+        assert!(
+            !restart_budget_allows(
+                &RestartPolicy::Once,
+                &mut restarts,
+                &mut window_start,
+                Instant::now()
+            ),
+            "PROPERTY: RestartPolicy::Once rejects a second restart"
+        );
+        assert_eq!(
+            restarts, 1,
+            "PROPERTY: rejecting a restart must not mutate the accepted restart count"
+        );
+    }
+
+    #[test]
+    fn bounded_restart_budget_resets_after_window() {
+        let policy = RestartPolicy::Bounded {
+            max_restarts: 1,
+            within_ms: 10,
+        };
+        let base = Instant::now();
+        let mut window_start = base;
+        let mut restarts = 0;
+
+        assert!(
+            restart_budget_allows(&policy, &mut restarts, &mut window_start, base),
+            "PROPERTY: bounded policy accepts the first restart in the window"
+        );
+        assert!(
+            !restart_budget_allows(
+                &policy,
+                &mut restarts,
+                &mut window_start,
+                base + Duration::from_millis(1)
+            ),
+            "PROPERTY: bounded policy rejects restarts past the per-window cap"
+        );
+        assert!(
+            restart_budget_allows(
+                &policy,
+                &mut restarts,
+                &mut window_start,
+                base + Duration::from_millis(11)
+            ),
+            "PROPERTY: bounded policy resets after its configured time window"
+        );
+        assert_eq!(
+            restarts, 1,
+            "PROPERTY: reset starts a fresh window with one accepted restart"
+        );
+    }
 }

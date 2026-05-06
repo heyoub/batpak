@@ -2,9 +2,14 @@
 
 This file defines the operational testing doctrine for `batpak`.
 
-Today this doctrine is a repo convention for doctrine-bearing harnesses, not a
-hard structural gate. Missing headers or misclassified suites should be fixed,
-but they do not currently fail `cargo xtask ci` by themselves.
+This doctrine is enforced for doctrine-bearing harnesses listed in
+`HARNESS_LEDGER.md` by `cargo xtask structural` (and therefore by
+`cargo xtask ci`). Legacy exceptions must appear in the integrity tool's
+explicit debt allowlists with a line cap, reason, and shrink target.
+Allowed `Command used:` entries are deliberately narrow: `cargo test`,
+`BATPAK_RUN_CHAOS=1 cargo test`, `CARGO_INCREMENTAL=0 cargo mutants`, or
+`cargo xtask ...`. Extending that prefix set is a structural-lint policy
+change, not a per-entry escape hatch.
 
 The goal is not to maximize test count or chase a vanity coverage number. The
 goal is to increase proof density: more decisions covered per harness, clearer

@@ -84,7 +84,7 @@ pub use crate::encoding as canonical;
 #[doc(hidden)]
 pub mod __private {
     pub use batpak_macros_support::{
-        inventory, scan_for_kind_collisions, EventPayloadRegistration,
+        assert_no_kind_collisions, inventory, scan_for_kind_collisions, EventPayloadRegistration,
     };
 }
 

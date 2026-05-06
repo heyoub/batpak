@@ -1,0 +1,14 @@
+[package]
+name = "batpak-kind-collision-composer"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dependencies]
+batpak = { path = "../.." }
+batpak-kind-collision-a = { path = "../kind-collision-a" }
+batpak-kind-collision-b = { path = "../kind-collision-b" }
+batpak-kind-feature-split = { path = "../kind-feature-split", features = ["extra-payload"] }
+tempfile = "3"

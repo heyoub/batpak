@@ -150,8 +150,9 @@ entity-chain events through `Store::append_denial(...)` using
 
 [HARNESS_DIRECTIVE.md](HARNESS_DIRECTIVE.md) defines the five harness
 patterns used to classify doctrine-bearing test suites and the module-header
-rule for new harnesses. Today that header doctrine is a repo convention, not
-a hard structural gate.
+rule for new harnesses. `cargo xtask structural` now enforces the ledger
+schema, module-header rule, and 500-line split discipline for ledger-listed
+harnesses, with explicit capped legacy debt entries.
 [HARNESS_LEDGER.md](HARNESS_LEDGER.md) records the current canonical witnesses,
 including derive compile-fail/parity,
 deterministic concurrency, chaos, fuzz-chaos feedback, perf gates, and

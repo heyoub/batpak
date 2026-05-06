@@ -58,6 +58,7 @@ pub(crate) fn consumer_smoke() -> Result<()> {
              \n\
              [dependencies]\n\
              batpak = {{ path = \"../packaged/{unpacked_name}\", features = [\"blake3\"] }}\n\
+             serde = {{ version = \"1\", features = [\"derive\"] }}\n\
              \n\
              [patch.crates-io]\n\
              batpak-macros-support = {{ path = \"../packaged/{support_name}\" }}\n\
@@ -70,6 +71,12 @@ pub(crate) fn consumer_smoke() -> Result<()> {
         consumer_root.join("src").join("main.rs"),
         "use batpak::prelude::*;\n\
          \n\
+         #[derive(serde::Serialize, serde::Deserialize, EventPayload)]\n\
+         #[batpak(category = 0xF, type_id = 1)]\n\
+         struct ConsumerSmokePayload {\n\
+         \x20   value: String,\n\
+         }\n\
+         \n\
          fn main() -> Result<(), Box<dyn std::error::Error>> {\n\
          \x20   let dir = std::env::temp_dir().join(format!(\"batpak-consumer-smoke-{}\", std::process::id()));\n\
          \x20   if dir.exists() {\n\
@@ -80,9 +87,10 @@ pub(crate) fn consumer_smoke() -> Result<()> {
          \x20   let config = StoreConfig::new(&dir)\n\
          \x20       .with_sync_every_n_events(1)\n\
          \x20       .with_sync_mode(SyncMode::SyncData);\n\
+         \x20   validate_event_payload_registry()?;\n\
          \x20   let store = Store::open(config)?;\n\
          \x20   let coord = Coordinate::new(\"consumer:smoke\", \"scope:packaged\")?;\n\
-         \x20   let receipt = store.append(&coord, EventKind::custom(0xF, 1), &\"payload\")?;\n\
+         \x20   let receipt = store.append_typed(&coord, &ConsumerSmokePayload { value: \"payload\".into() })?;\n\
          \x20   let fetched = store.get(receipt.event_id)?;\n\
          \x20   assert_eq!(fetched.coordinate.scope(), \"scope:packaged\");\n\
          \x20   store.close()?;\n\

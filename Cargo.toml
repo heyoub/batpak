@@ -171,6 +171,10 @@ harness = false
 name = "ancestry_walk"
 harness = false
 
+[[bench]]
+name = "frontier_waiters"
+harness = false
+
 # Profile settings (NOT in .cargo/config.toml — they're ignored there)
 [profile.dev]
 opt-level = 0

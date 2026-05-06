@@ -1,3 +1,4 @@
+use crate::event::EventPayloadValidation;
 use crate::store::cold_start::rebuild::OpenIndexReport;
 use crate::store::cold_start::ColdStartPolicy;
 use crate::store::signing::{ReceiptSigningRegistry, SigningKey};
@@ -278,6 +279,8 @@ pub struct StoreConfig {
     /// Signing keys known to this store. The last configured key signs new
     /// receipts; earlier keys remain available for verification.
     pub signing_keys: Vec<SigningKey>,
+    /// Payload-registry collision policy applied during `Store::open`.
+    pub event_payload_validation: EventPayloadValidation,
     /// Fault injector for testing failure scenarios.
     /// Only available with the `dangerous-test-hooks` feature.
     #[cfg(feature = "dangerous-test-hooks")]
@@ -318,6 +321,7 @@ impl StoreConfig {
             clock: None,
             open_report_observer: None,
             signing_keys: Vec::new(),
+            event_payload_validation: EventPayloadValidation::default(),
             #[cfg(feature = "dangerous-test-hooks")]
             fault_injector: None,
         }
@@ -505,6 +509,12 @@ impl StoreConfig {
         self
     }
 
+    /// Set the open-time payload-registry collision policy.
+    pub fn with_event_payload_validation(mut self, validation: EventPayloadValidation) -> Self {
+        self.event_payload_validation = validation;
+        self
+    }
+
     /// Set the fsync strategy used after writes.
     pub fn with_sync_mode(mut self, sync_mode: SyncMode) -> Self {
         self.sync.mode = sync_mode;
@@ -571,6 +581,7 @@ impl Clone for StoreConfig {
             clock: self.clock.clone(),
             open_report_observer: self.open_report_observer.clone(),
             signing_keys: self.signing_keys.clone(),
+            event_payload_validation: self.event_payload_validation,
             #[cfg(feature = "dangerous-test-hooks")]
             fault_injector: self.fault_injector.clone(),
         }
@@ -595,6 +606,7 @@ impl std::fmt::Debug for StoreConfig {
                 &self.open_report_observer.as_ref().map(|_| "<observer>"),
             )
             .field("signing_keys", &self.signing_keys.len())
+            .field("event_payload_validation", &self.event_payload_validation)
             .finish()
     }
 }
@@ -798,6 +810,7 @@ pub(crate) fn duration_micros(d: std::time::Duration) -> u64 {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicI64, Ordering};
+    use std::time::Duration;
 
     #[test]
     fn validated_runtime_clock_wraps_direct_field_assignment() {
@@ -832,6 +845,117 @@ mod tests {
             runtime.cache_now_us(),
             0,
             "projection/cache metadata clock must not persist negative timestamps"
+        );
+    }
+
+    #[test]
+    fn index_topology_tiles64_simd_builder_sets_only_simd_overlay() {
+        let topology = IndexTopology::default().with_tiles64_simd(true);
+
+        assert!(
+            topology.tiles64_simd_enabled(),
+            "PROPERTY: with_tiles64_simd(true) must enable the SIMD overlay"
+        );
+        assert!(
+            !IndexTopology::default().tiles64_simd_enabled(),
+            "PROPERTY: default topology keeps the experimental SIMD overlay disabled"
+        );
+        assert!(
+            topology.soa_enabled() == IndexTopology::default().soa_enabled()
+                && topology.entity_groups_enabled()
+                    == IndexTopology::default().entity_groups_enabled()
+                && topology.tiles64_enabled() == IndexTopology::default().tiles64_enabled(),
+            "PROPERTY: with_tiles64_simd must not silently reset the rest of the topology"
+        );
+    }
+
+    #[test]
+    fn validated_accepts_documented_inclusive_upper_bounds() {
+        let mut config = StoreConfig::new("target/test-config-upper-bounds");
+        config.writer.pressure_retry_threshold_pct = 100;
+        config.batch.max_size = 4096;
+
+        config
+            .validated()
+            .expect("documented inclusive upper bounds should validate");
+    }
+
+    #[test]
+    fn validated_rejects_values_above_documented_upper_bounds() {
+        let mut pressure = StoreConfig::new("target/test-config-pressure-too-high");
+        pressure.writer.pressure_retry_threshold_pct = 101;
+        assert!(
+            matches!(
+                pressure.validated(),
+                Err(crate::store::StoreError::Configuration(_))
+            ),
+            "PROPERTY: pressure retry threshold above 100 must be rejected"
+        );
+
+        let mut batch = StoreConfig::new("target/test-config-batch-too-large");
+        batch.batch.max_size = 4097;
+        assert!(
+            matches!(
+                batch.validated(),
+                Err(crate::store::StoreError::Configuration(_))
+            ),
+            "PROPERTY: batch.max_size above 4096 must be rejected"
+        );
+    }
+
+    #[test]
+    fn validated_config_debug_names_runtime_policy_fields() {
+        let runtime = StoreConfig::new("target/test-validated-debug")
+            .validated()
+            .expect("config validates");
+        let rendered = format!("{runtime:?}");
+
+        assert!(
+            rendered.contains("ValidatedStoreConfig")
+                && rendered.contains("pressure_retry_threshold")
+                && rendered.contains("group_commit_drain_budget")
+                && rendered.contains("signing_registry"),
+            "PROPERTY: ValidatedStoreConfig Debug must name the runtime policy fields, got: {rendered}"
+        );
+    }
+
+    #[test]
+    fn process_boot_ns_is_nonzero_and_stable_in_process() {
+        let first = process_boot_ns();
+        let second = process_boot_ns();
+
+        assert_ne!(
+            first, 0,
+            "PROPERTY: process_boot_ns must expose the captured wall-clock anchor, not zero/default"
+        );
+        assert_eq!(
+            first, second,
+            "PROPERTY: process_boot_ns must stay stable for the process lifetime"
+        );
+    }
+
+    #[test]
+    fn now_mono_ns_advances_beyond_nonzero_sentinel() {
+        std::thread::sleep(Duration::from_millis(1));
+        let elapsed = now_mono_ns();
+
+        assert!(
+            elapsed > 1,
+            "PROPERTY: now_mono_ns must report elapsed nanoseconds from the process anchor, not a fixed sentinel; got {elapsed}"
+        );
+    }
+
+    #[test]
+    fn duration_micros_preserves_zero_and_one_microsecond_boundaries() {
+        assert_eq!(
+            duration_micros(Duration::ZERO),
+            0,
+            "PROPERTY: zero duration must remain zero, not a default/nonzero sentinel"
+        );
+        assert_eq!(
+            duration_micros(Duration::from_micros(1)),
+            1,
+            "PROPERTY: one microsecond must round-trip exactly"
         );
     }
 }

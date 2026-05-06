@@ -752,6 +752,18 @@ mod tests {
     fn checked_frame_range_rejects_overflow_and_oversized_lengths() {
         assert!(Reader::checked_frame_range(1, u64::MAX, 16, 1024).is_err());
         assert!(Reader::checked_frame_len(1, 4).is_err());
+        assert!(Reader::checked_frame_len(
+            1,
+            u32::try_from(FRAME_HEADER_BYTES + segment::MAX_FRAME_PAYLOAD)
+                .expect("max frame length fits u32")
+        )
+        .is_ok());
+        assert!(Reader::checked_frame_len(
+            1,
+            u32::try_from(FRAME_HEADER_BYTES + segment::MAX_FRAME_PAYLOAD + 1)
+                .expect("one-past-max frame length fits u32")
+        )
+        .is_err());
         assert!(Reader::checked_frame_len(1, u32::MAX).is_err());
     }
 

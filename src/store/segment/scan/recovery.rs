@@ -8,6 +8,28 @@ use std::io::{ErrorKind, Read};
 use std::path::Path;
 use std::sync::atomic::Ordering;
 
+fn read_frame_header_or_eof(
+    reader: &mut impl Read,
+    segment_id: u64,
+    state: &BatchRecoveryState,
+) -> Result<Option<[u8; 8]>, StoreError> {
+    let mut frame_header = [0u8; 8];
+    match reader.read_exact(&mut frame_header) {
+        Ok(()) => Ok(Some(frame_header)),
+        Err(error) if error.kind() == ErrorKind::UnexpectedEof => {
+            if state.in_batch {
+                tracing::warn!(
+                    segment_id,
+                    staged_count = state.staged.len(),
+                    "incomplete batch at EOF, will discard or continue in next segment"
+                );
+            }
+            Ok(None)
+        }
+        Err(error) => Err(StoreError::Io(error)),
+    }
+}
+
 impl Reader {
     /// Check whether the SIDX entries cover every frame in the segment up to
     /// the SIDX footer.
@@ -171,21 +193,10 @@ impl Reader {
 
         loop {
             let frame_offset = cursor;
-            let mut frame_header = [0u8; 8];
-            match file.read_exact(&mut frame_header) {
-                Ok(()) => {}
-                Err(error) if error.kind() == ErrorKind::UnexpectedEof => {
-                    if state_ref.in_batch {
-                        tracing::warn!(
-                            segment_id,
-                            staged_count = state_ref.staged.len(),
-                            "incomplete batch at EOF, will discard or continue in next segment"
-                        );
-                    }
-                    break;
-                }
-                Err(error) => return Err(StoreError::Io(error)),
-            }
+            let Some(frame_header) = read_frame_header_or_eof(&mut file, segment_id, state_ref)?
+            else {
+                break;
+            };
 
             let payload_len = u32::from_be_bytes([
                 frame_header[0],
@@ -331,7 +342,7 @@ impl Reader {
                                         reason: format!("frame size {frame_size} overflows u32"),
                                     }
                                 })?;
-                                state_ref.staged.push(ScannedIndexEntry {
+                                let entry = ScannedIndexEntry {
                                     header: payload.event.header,
                                     entity: payload.entity,
                                     scope: payload.scope,
@@ -340,9 +351,15 @@ impl Reader {
                                     offset: frame_offset,
                                     length,
                                     global_sequence: None,
-                                });
-                                if state_ref.remaining > 0 {
-                                    state_ref.remaining -= 1;
+                                };
+                                if !state_ref.stage_entry(entry) {
+                                    tracing::warn!(
+                                        segment_id,
+                                        offset = frame_offset,
+                                        expected = state_ref.started_count,
+                                        "batch contains more items than declared, discarding"
+                                    );
+                                    state_ref.discard_incomplete();
                                 }
                             }
                         }
@@ -413,6 +430,24 @@ pub(crate) struct BatchRecoveryState {
     pub in_batch: bool,
 }
 
+impl BatchRecoveryState {
+    fn stage_entry(&mut self, entry: ScannedIndexEntry) -> bool {
+        if self.remaining == 0 {
+            return false;
+        }
+        self.staged.push(entry);
+        self.remaining -= 1;
+        true
+    }
+
+    fn discard_incomplete(&mut self) {
+        self.in_batch = false;
+        self.remaining = 0;
+        self.started_count = 0;
+        self.staged.clear();
+    }
+}
+
 #[derive(Deserialize)]
 pub(crate) struct IndexScanFramePayload {
     pub(crate) event: IndexScanEvent,
@@ -431,10 +466,21 @@ pub(crate) struct IndexScanEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::coordinate::DagPosition;
     use crate::event::EventKind;
     use crate::store::segment::sidx::{kind_to_raw, read_footer, SidxEntry, SidxEntryCollector};
-    use std::io::{Cursor, Seek, SeekFrom, Write};
+    use std::io::{self, Cursor, Seek, SeekFrom, Write};
     use tempfile::{NamedTempFile, TempDir};
+
+    struct FailingRead {
+        kind: ErrorKind,
+    }
+
+    impl Read for FailingRead {
+        fn read(&mut self, _buf: &mut [u8]) -> io::Result<usize> {
+            Err(io::Error::new(self.kind, "injected header read failure"))
+        }
+    }
 
     fn sample_entry(frame_offset: u64, frame_length: u32) -> SidxEntry {
         SidxEntry {
@@ -493,6 +539,92 @@ mod tests {
         std::fs::write(&path, footer_bytes(prefix_len, entries))
             .expect("write segment footer file");
         path
+    }
+
+    fn scanned_entry(event_id: u128) -> ScannedIndexEntry {
+        ScannedIndexEntry {
+            header: EventHeader::new(
+                event_id,
+                event_id,
+                None,
+                0,
+                DagPosition::root(),
+                0,
+                EventKind::custom(0x1, 1),
+            ),
+            entity: "entity:test".to_owned(),
+            scope: "scope:test".to_owned(),
+            hash_chain: HashChain::default(),
+            segment_id: 7,
+            offset: u64::try_from(event_id).expect("test ids fit u64"),
+            length: 16,
+            global_sequence: None,
+        }
+    }
+
+    #[test]
+    fn read_frame_header_treats_unexpected_eof_as_segment_end() {
+        let mut reader = FailingRead {
+            kind: ErrorKind::UnexpectedEof,
+        };
+        let state = BatchRecoveryState::default();
+
+        let result =
+            read_frame_header_or_eof(&mut reader, 7, &state).expect("EOF should be non-fatal");
+
+        assert!(
+            result.is_none(),
+            "PROPERTY: an EOF while reading the next frame header ends the segment scan"
+        );
+    }
+
+    #[test]
+    fn read_frame_header_surfaces_non_eof_io_errors() {
+        let mut reader = FailingRead {
+            kind: ErrorKind::PermissionDenied,
+        };
+        let state = BatchRecoveryState::default();
+
+        let result = read_frame_header_or_eof(&mut reader, 7, &state);
+
+        assert!(
+            matches!(result, Err(StoreError::Io(error)) if error.kind() == ErrorKind::PermissionDenied),
+            "PROPERTY: only UnexpectedEof is accepted as segment end; other I/O errors are reported"
+        );
+    }
+
+    #[test]
+    fn batch_recovery_state_refuses_items_past_declared_count() {
+        let mut state = BatchRecoveryState {
+            remaining: 1,
+            started_count: 1,
+            in_batch: true,
+            staged: Vec::new(),
+        };
+
+        assert!(
+            state.stage_entry(scanned_entry(1)),
+            "PROPERTY: the first item in a one-item recovered batch is accepted"
+        );
+        assert_eq!(
+            state.remaining, 0,
+            "PROPERTY: staging a recovered batch item decrements the remaining item budget"
+        );
+        assert!(
+            !state.stage_entry(scanned_entry(2)),
+            "PROPERTY: recovery must reject items beyond the BEGIN marker's declared count"
+        );
+        assert_eq!(
+            state.staged.len(),
+            1,
+            "PROPERTY: rejected over-count items must not be silently staged"
+        );
+
+        state.discard_incomplete();
+        assert!(
+            !state.in_batch && state.staged.is_empty() && state.remaining == 0,
+            "PROPERTY: corrupt over-count batches can be discarded without leaving pending state"
+        );
     }
 
     #[test]
@@ -561,6 +693,50 @@ mod tests {
             rows.len(),
             1,
             "PROPERTY: sealed segments with full SIDX tail coverage should use the footer fast path and emit indexed rows"
+        );
+    }
+
+    #[test]
+    fn scan_segment_index_into_filters_batch_markers_from_sidx_fast_path() {
+        let dir = TempDir::new().expect("create temp dir");
+        let reader = Reader::new(dir.path().to_path_buf(), 4);
+        let segment_id = 7;
+        let mut begin = sample_entry(0, 64);
+        begin.event_id = 10;
+        begin.kind = kind_to_raw(EventKind::SYSTEM_BATCH_BEGIN);
+        begin.global_sequence = 10;
+        let mut item = sample_entry(64, 64);
+        item.event_id = 11;
+        item.kind = kind_to_raw(EventKind::custom(0x1, 2));
+        item.global_sequence = 11;
+        let mut commit = sample_entry(128, 64);
+        commit.event_id = 12;
+        commit.kind = kind_to_raw(EventKind::SYSTEM_BATCH_COMMIT);
+        commit.global_sequence = 12;
+        let path = footer_segment_path(&dir, segment_id, 192, &[begin, item, commit]);
+        reader.set_active_segment(segment_id + 1);
+
+        let mut rows = Vec::new();
+        reader
+            .scan_segment_index_into(&path, None, |row| {
+                rows.push(row);
+                Ok(())
+            })
+            .expect("sealed scan should succeed");
+
+        assert_eq!(
+            rows.len(),
+            1,
+            "PROPERTY: SIDX fast-path recovery must filter BEGIN/COMMIT markers and emit only logical user rows"
+        );
+        assert_eq!(
+            rows[0].header.event_id, 11,
+            "PROPERTY: filtering batch markers must preserve the real batch item"
+        );
+        assert_eq!(
+            rows[0].header.event_kind,
+            EventKind::custom(0x1, 2),
+            "PROPERTY: filtering batch markers must not rewrite the surviving item kind"
         );
     }
 

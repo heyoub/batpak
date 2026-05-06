@@ -1,6 +1,13 @@
 use crate::event::EventKind;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
+use std::fmt;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
+
+static PAYLOAD_REGISTRY_OPEN_CACHE: Mutex<Option<Result<(), EventPayloadRegistryError>>> =
+    Mutex::new(None);
+static PAYLOAD_REGISTRY_WARNED: AtomicBool = AtomicBool::new(false);
 
 /// Binds a Rust type to a batpak [`EventKind`] at compile time.
 ///
@@ -30,4 +37,167 @@ pub trait EventPayload: Serialize + DeserializeOwned {
     /// Must be unique within a binary. The `#[derive(EventPayload)]` macro (when
     /// available) enforces this with a per-binary collision test.
     const KIND: EventKind;
+}
+
+/// How `Store::open` handles linked `EventPayload` kind collisions.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum EventPayloadValidation {
+    /// Log a single process-wide warning if duplicate payload kinds are linked.
+    #[default]
+    Warn,
+    /// Return an error from `Store::open` when duplicate payload kinds are linked.
+    FailFast,
+    /// Do not check the payload registry during `Store::open`.
+    Silent,
+}
+
+/// A duplicate `EventKind` assignment found in the linked payload registry.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EventPayloadKindCollision {
+    /// The upper 4-bit event category.
+    pub category: u8,
+    /// The lower 12-bit type identifier within the category.
+    pub type_id: u16,
+    /// First registered Rust payload type name.
+    pub first_type_name: &'static str,
+    /// Second registered Rust payload type name.
+    pub second_type_name: &'static str,
+}
+
+impl EventPayloadKindCollision {
+    fn from_support(collision: batpak_macros_support::EventKindCollision) -> Self {
+        // justifies: ADR-0010, src/event/kind.rs; kind_bits upper nibble is at most 0xF by construction so narrowing into u8 cannot truncate
+        #[allow(clippy::cast_possible_truncation)]
+        let category = (collision.kind_bits >> 12) as u8;
+        Self {
+            category,
+            type_id: collision.kind_bits & 0x0FFF,
+            first_type_name: collision.first_type_name,
+            second_type_name: collision.second_type_name,
+        }
+    }
+}
+
+/// Error returned when two linked `EventPayload` types claim the same kind.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EventPayloadRegistryError {
+    collisions: Vec<EventPayloadKindCollision>,
+}
+
+impl EventPayloadRegistryError {
+    /// Create an error from a non-empty collision list.
+    ///
+    /// # Panics
+    /// Panics if `collisions` is empty. Callers should use
+    /// [`validate_event_payload_registry`] for ordinary validation.
+    pub fn new(collisions: Vec<EventPayloadKindCollision>) -> Self {
+        assert!(
+            !collisions.is_empty(),
+            "EventPayloadRegistryError requires at least one collision"
+        );
+        Self { collisions }
+    }
+
+    /// Duplicate kind assignments found in the current binary.
+    pub fn collisions(&self) -> &[EventPayloadKindCollision] {
+        &self.collisions
+    }
+}
+
+impl fmt::Display for EventPayloadRegistryError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let first = &self.collisions[0];
+        write!(
+            f,
+            "EventPayload registry contains {} duplicate kind assignment(s); first collision is category=0x{:X} type_id=0x{:03X} between `{}` and `{}`",
+            self.collisions.len(),
+            first.category,
+            first.type_id,
+            first.first_type_name,
+            first.second_type_name,
+        )
+    }
+}
+
+impl std::error::Error for EventPayloadRegistryError {}
+
+/// Validate that linked `EventPayload` derives use unique `(category, type_id)` pairs.
+///
+/// The derive-generated registry is binary-wide. Calling this at process
+/// startup catches collisions across dependency crates before any typed
+/// dispatch path sees ambiguous wire identity.
+///
+/// # Errors
+/// Returns [`EventPayloadRegistryError`] if two or more linked payload types
+/// register the same `(category, type_id)` pair.
+pub fn validate_event_payload_registry() -> Result<(), EventPayloadRegistryError> {
+    let collisions = batpak_macros_support::find_kind_collisions()
+        .into_iter()
+        .map(EventPayloadKindCollision::from_support)
+        .collect::<Vec<_>>();
+    if collisions.is_empty() {
+        Ok(())
+    } else {
+        Err(EventPayloadRegistryError::new(collisions))
+    }
+}
+
+/// Re-scan the linked payload registry and refresh the cached open-time result.
+///
+/// Most applications never need this because registrations are static once the
+/// binary is linked. Tests and tooling that intentionally exercise registry
+/// boundaries can call it to force the next `Store::open` warning/fail-fast
+/// decision to use a fresh scan.
+///
+/// # Errors
+/// Returns [`EventPayloadRegistryError`] if duplicate payload kinds are linked.
+pub fn revalidate_event_payload_registry() -> Result<(), EventPayloadRegistryError> {
+    let result = validate_event_payload_registry();
+    PAYLOAD_REGISTRY_WARNED.store(false, Ordering::SeqCst);
+    let Ok(mut cached) = PAYLOAD_REGISTRY_OPEN_CACHE.lock() else {
+        return result;
+    };
+    *cached = Some(result.clone());
+    result
+}
+
+pub(crate) fn cached_event_payload_registry_validation() -> Result<(), EventPayloadRegistryError> {
+    let Ok(mut cached) = PAYLOAD_REGISTRY_OPEN_CACHE.lock() else {
+        return validate_event_payload_registry();
+    };
+    if let Some(result) = cached.as_ref() {
+        return result.clone();
+    }
+    let result = validate_event_payload_registry();
+    *cached = Some(result.clone());
+    result
+}
+
+pub(crate) fn mark_event_payload_registry_warning_emitted() -> bool {
+    !PAYLOAD_REGISTRY_WARNED.swap(true, Ordering::SeqCst)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn warning_marker_returns_true_once_until_revalidation_resets_it() {
+        revalidate_event_payload_registry().expect("test registry is clean");
+
+        assert!(
+            mark_event_payload_registry_warning_emitted(),
+            "PROPERTY: first open-time collision warning in a process must be emitted"
+        );
+        assert!(
+            !mark_event_payload_registry_warning_emitted(),
+            "PROPERTY: later open-time checks in the same process must not emit duplicate warnings"
+        );
+
+        revalidate_event_payload_registry().expect("test registry is clean after marker reset");
+        assert!(
+            mark_event_payload_registry_warning_emitted(),
+            "PROPERTY: explicit revalidation must reset the one-shot warning marker"
+        );
+    }
 }

@@ -24,6 +24,7 @@
 //! dead_code silencers are not tolerated in this repo; test-only code uses
 //! `cfg(test)`, unused code is deleted, and shared helpers get restructured.
 mod architecture_lints;
+mod harness_lints;
 #[path = "../../shared/shared_checks.rs"]
 mod shared_checks;
 
@@ -420,6 +421,7 @@ fn structural_check() -> Result<()> {
     let repo_root = repo_root()?;
     let tracked_files = tracked_repo_files(&repo_root)?;
     architecture_lints::check(&repo_root, &tracked_files)?;
+    harness_lints::check(&repo_root, &tracked_files)?;
     check_no_dead_code_silencers(&repo_root)?;
     check_allow_justifications(&repo_root)?;
     check_pub_items_have_references(&repo_root)?;

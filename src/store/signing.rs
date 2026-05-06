@@ -268,3 +268,55 @@ fn digest_bytes(bytes: &[u8]) -> Result<[u8; 32], CoverBuildError> {
 fn digest_bytes(_bytes: &[u8]) -> Result<[u8; 32], CoverBuildError> {
     Err(CoverBuildError::Blake3Unavailable)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(feature = "blake3")]
+    #[test]
+    fn cover_bytes_separates_event_kind_category_and_type_bits() {
+        let coord = Coordinate::new("receipt:cover", "scope:test").expect("coordinate");
+        let extensions = BTreeMap::new();
+
+        let cover_a = cover_bytes(
+            1,
+            1,
+            &coord,
+            EventKind::custom(0xF, 0x055),
+            [0x11; 32],
+            [0x22; 32],
+            &extensions,
+        )
+        .expect("cover A");
+        let cover_b = cover_bytes(
+            1,
+            1,
+            &coord,
+            EventKind::custom(0xE, 0x055),
+            [0x11; 32],
+            [0x22; 32],
+            &extensions,
+        )
+        .expect("cover B");
+        let cover_c = cover_bytes(
+            1,
+            1,
+            &coord,
+            EventKind::custom(0xF, 0x056),
+            [0x11; 32],
+            [0x22; 32],
+            &extensions,
+        )
+        .expect("cover C");
+
+        assert_ne!(
+            cover_a, cover_b,
+            "PROPERTY: receipt signature cover must include the EventKind category bits"
+        );
+        assert_ne!(
+            cover_a, cover_c,
+            "PROPERTY: receipt signature cover must include the EventKind type-id bits"
+        );
+    }
+}

@@ -18,6 +18,18 @@ _Nothing yet._
 - Internal workspace crates (`batpak-macros-support`, `batpak-macros`, and
   `batpak-bench-support`) are now publishable so the main crate can resolve
   its crates.io dependency graph without path overrides.
+- `#[derive(EventPayload)]` registrations are now linked unconditionally so
+  cross-crate duplicate `(category, type_id)` assignments are visible to a
+  composing binary. `Store::open` warns once per process by default, and
+  callers can opt into `EventPayloadValidation::FailFast` or call
+  `validate_event_payload_registry()` explicitly. This makes release-build
+  binaries carry the small static registry entries needed for validation; the
+  registry is not used for runtime dispatch.
+- `cargo xtask structural` now enforces `HARNESS_LEDGER.md` schema,
+  doctrine-bearing module headers, and capped 500-line harness debt entries.
+- Added a `frontier_waiters` benchmark surface for many concurrent
+  `wait_for_*` and append-gate waiters under the shared wake-all strategy,
+  covering both same-target and spread-target waiter distributions.
 - Production `expect(...)` use is now denied for non-test builds unless a site
   carries an explicit local escape hatch for a documented invariant.
 - Runtime append, batch, cursor, and scan paths now fail closed instead of

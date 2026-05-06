@@ -44,9 +44,16 @@ An `Event<P>` is typed payload plus metadata:
 `#[derive(EventPayload)]` macro binds a Rust struct to its `EventKind` at compile
 time via `#[batpak(category = N, type_id = N)]`. Category 0x0 and 0xD are
 reserved; valid product categories are 0x1–0xC and 0xE–0xF. `type_id` is 12 bits
-(0x000–0xFFF). The derive emits a test-time collision check per type so
-duplicate `(category, type_id)` pairs surface as test failures, not as silent
+(0x000–0xFFF). The derive registers each payload in a binary-wide registry so
+duplicate `(category, type_id)` pairs surface as generated test panics,
+one-time `Store::open` warnings, explicit `validate_event_payload_registry()`
+errors, or `EventPayloadValidation::FailFast` open errors instead of silent
 shape drift on the wire.
+
+For composed applications, treat kind allocation as a checked-in namespace:
+reserve categories or `type_id` blocks per library boundary and keep the table
+near the code that defines payloads. A minimal table is enough:
+`category`, `type_id_start`, `type_id_end`, `owner`, `purpose`.
 
 `position` is not fully caller-controlled. Public append surfaces may hint only
 the DAG branch coordinates:
@@ -326,6 +333,13 @@ return `StoreError::WriterCrashed`.
 The implementation is sync-only and uses a `parking_lot::Condvar` with wake-all
 notification. Spurious wakeups are expected and harmless: every wake rechecks
 the writer-crash poison flag and the target watermark before returning.
+The release benchmark surface includes `frontier_waiters`, which measures both
+waiter wake completion and writer-side wake cost at 1, 8, 32, 128, and 512
+concurrent waiters. Each count runs same-target waits, where every waiter waits
+for one HLC, and spread-target waits, where waiters cover distinct future HLCs.
+Precise waiter lists stay deferred unless that benchmark shows writer-side wake
+cost dominating append/sync latency or an order-of-magnitude wake-completion
+jump between adjacent waiter-count tiers on stable hardware.
 
 Append-time gating is opt-in through `AppendOptions::gate`:
 
@@ -414,6 +428,8 @@ witness types are called out separately below.
 - `CompactionConfig`
 - `StoreStats`
 - `StoreDiagnostics`
+- `EventPayloadValidation`
+- `EventPayloadRegistryError`
 
 Delivery witness types:
 
@@ -441,7 +457,7 @@ Important knobs on `StoreConfig`:
 | Knob | Default | When to change |
 | --- | --- | --- |
 | `segment_max_bytes` | 256 MiB | Lower for faster rotation and smaller repair units; raise for fewer segment files. |
-| `sync.every_n_events` | `1000` | Lower for tighter durability; raise for throughput when callers use explicit gates where needed. |
+| `sync.every_n_events` | `1000` | Lower for tighter durability; raise for throughput when callers use explicit gates where needed, after measuring on deployment hardware. |
 | `sync.mode` | `SyncAll` | Use `SyncData` only after deciding metadata sync cost is not needed for the deployment. |
 | `fd_budget` | `64` | Raise when many segments stay hot and read latency matters; lower for constrained processes. |
 | `writer.channel_capacity` | `4096` | Raise for bursty producers; lower to cap peak queued memory. |
@@ -503,8 +519,8 @@ cargo xtask cover --json
 The doctrine surfaces live in:
 
 - [HARNESS_DIRECTIVE.md](HARNESS_DIRECTIVE.md) for the five harness patterns
-  and invariant/failure-mode/seed header rule (currently a repo convention,
-  not a hard integrity gate by itself)
+  and invariant/failure-mode/seed header rule enforced by
+  `cargo xtask structural` for ledger-listed harnesses
 - [HARNESS_LEDGER.md](HARNESS_LEDGER.md) for the current doctrine-bearing
   suites and their primary pattern
 - `cargo xtask mutants policy` for the repo-owned mutation thresholds,

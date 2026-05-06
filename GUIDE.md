@@ -45,6 +45,15 @@ struct PlayerMoved {
   `#[serde(default)]`. Renaming, removing, or retyping a field requires
   bumping `type_id`.
 
+Keep kind allocation boring and explicit. Reserve a category per subsystem or
+library boundary, keep a checked-in table such as `kinds.yaml`, and allocate
+`type_id` ranges in blocks instead of ad hoc one-offs. At startup, call
+`validate_event_payload_registry()` in integration tests or set
+`StoreConfig::with_event_payload_validation(EventPayloadValidation::FailFast)`
+when a duplicate linked payload kind must reject store open instead of only
+emitting the default one-time warning. See `examples/cross_crate_payloads.rs`
+for the startup validation pattern.
+
 ## Append And Query
 
 ### Single event
@@ -416,6 +425,7 @@ Useful targets:
 | Target | What it reports |
 | --- | --- |
 | `batpak::open` | Store open path, cold-start fallback, and lifecycle bootstrap warnings. |
+| `batpak::event_registry` | Duplicate typed payload kind registrations seen during store open. |
 | `batpak::flow` | Append, sync, compact, close, projection, and waiter flow events. |
 | `batpak::checkpoint` | Checkpoint load/write validation and fallback reasons. |
 | `batpak::mmap_index` | mmap index load/write validation and fallback reasons. |
@@ -432,7 +442,10 @@ Before deploying a store path that matters:
 
 - Choose `sync.every_n_events` and `sync.mode` deliberately; use
   `AppendOptions::gate` when a caller needs the append call to wait for a
-  frontier watermark.
+  frontier watermark. Measure the cadence tradeoff on deployment hardware
+  before treating a value as a default.
+- Validate typed payload kind allocation with `validate_event_payload_registry`
+  or `EventPayloadValidation::FailFast` in startup checks.
 - Install a `tracing-subscriber` filter and route warnings somewhere durable.
 - Size `segment_max_bytes` and `fd_budget` for the expected data volume and
   file descriptor budget.

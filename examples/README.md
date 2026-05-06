@@ -10,6 +10,7 @@ stem without `.rs`, for example `cargo run --example quickstart`.
 - `quickstart.rs` - minimal open, append, read flow. Run: `cargo run --example quickstart`.
 - `batch_append.rs` - atomic multi-event append with intra-batch causation. Run: `cargo run --example batch_append`.
 - `policy_gates.rs` - guard decisions before commit. Run: `cargo run --example policy_gates`.
+- `cross_crate_payloads.rs` - startup validation for composed typed payload crates. Run: `cargo run --example cross_crate_payloads`.
 
 ## Cursor And Reactor Flows
 

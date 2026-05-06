@@ -1,4 +1,5 @@
 use crate::coordinate::CoordinateError;
+use crate::event::EventPayloadRegistryError;
 use crate::store::stats::{HlcPoint, WatermarkKind};
 use std::path::PathBuf;
 
@@ -81,6 +82,8 @@ pub enum StoreError {
     },
     /// A StoreConfig field has an invalid value.
     Configuration(String),
+    /// Linked typed payloads claimed duplicate EventKind assignments.
+    EventPayloadRegistry(EventPayloadRegistryError),
     /// Group commit (batch > 1) requires an idempotency key on every append.
     IdempotencyRequired,
     /// A visibility fence is already active on this store.
@@ -323,6 +326,7 @@ impl std::fmt::Display for StoreError {
                 "sequence gate rejected {operation} publish({requested}) with allocated={allocated} visible={visible}"
             ),
             Self::Configuration(msg) => write!(f, "invalid config: {msg}"),
+            Self::EventPayloadRegistry(error) => write!(f, "{error}"),
             Self::IdempotencyRequired => write!(
                 f,
                 "group commit (batch > 1) requires an idempotency key on every append"
@@ -486,6 +490,7 @@ impl std::error::Error for StoreError {
             | Self::CursorCheckpointCorrupt { .. }
             | Self::CursorCheckpointRegionMismatch { .. }
             | Self::InvariantViolation { .. } => None,
+            Self::EventPayloadRegistry(error) => Some(error),
             Self::BatchFailed { source, .. } | Self::BatchSyncFailed { source, .. } => {
                 Some(source.as_ref())
             }

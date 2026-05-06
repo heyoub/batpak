@@ -189,7 +189,6 @@ mod native_tests {
     fn native_delete_prefix() {
         let (cache, _dir) = native_cache();
         let meta = test_meta();
-
         cache.put(b"user:1", b"alice", meta.clone()).expect("put");
         cache.put(b"user:2", b"bob", meta.clone()).expect("put");
         cache.put(b"order:1", b"widget", meta.clone()).expect("put");

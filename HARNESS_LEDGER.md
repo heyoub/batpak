@@ -86,8 +86,8 @@ instead of pretending.
 - Line/function coverage delta: added in the Phase 0 durable-frontier wave;
   exact JSON delta not recorded in this ledger
 - Mutation delta:
-  - writer commit protocol smoke held at 5/5 caught = 100%
-  - projection replay/freshness smoke held at 7/7 caught = 100%
+  - writer commit protocol and projection replay/freshness are policy-owned
+    critical seams; current thresholds are printed by `cargo xtask mutants policy`.
 - Remaining known blind spots:
   - `writer_panic_at_single_append_written_is_not_durable_on_reopen` is
     intentionally ignored because an in-process writer panic leaves the complete
@@ -107,8 +107,8 @@ instead of pretending.
 - Line/function coverage delta: Phase 1A adds explicit-close bootstrap coverage;
   exact JSON delta not recorded in this ledger
 - Mutation delta:
-  - writer commit protocol smoke must remain at 5/5 caught = 100%
-  - projection replay/freshness smoke must remain at 7/7 caught = 100%
+  - no dedicated lifecycle seam; regressions route through the writer commit
+    protocol and projection replay/freshness critical seams.
 - Covered tests:
   - `explicit_close_emits_system_close_completed_event` defends that explicit
     `Store::close()` emits one `SYSTEM_CLOSE_COMPLETED` covering the visible
@@ -135,6 +135,8 @@ instead of pretending.
     timeout.
 - Remaining known blind spots:
   - none for the explicit-close lifecycle frontier shape currently in scope.
+
+## State-Machine Harness
 
 ### Invariant: Durable frontier wait API surfaces honest blocking semantics
 
@@ -203,6 +205,8 @@ instead of pretending.
     is the opt-in escape hatch.
 - Remaining known blind spots:
   - No precise waiter lists yet; wake-all remains the v1 wait strategy.
+
+## Fault-Injection Harness
 
 ### Invariant: Linux block-layer chaos harness fails writes after device flip
 
@@ -338,6 +342,8 @@ instead of pretending.
   - remaining blind spots are cache-get-error handling, exact age-boundary behavior,
     and the empty/no-replay-plan public surface
 
+## Fault-Injection Harness
+
 ### Invariant: MaybeStale never serves corrupt cache bytes as a “fresh enough” success
 
 - Harness pattern: `Fault-Injection Harness`
@@ -409,6 +415,59 @@ instead of pretending.
 - Remaining known blind spots:
   - these are intentionally loose catastrophic guards, not precise benchmark
     baselines; stable trend authority belongs to `cargo xtask bench`
+
+### Invariant: Typed payload kind allocation is binary-wide and collision-checked
+
+- Harness pattern: `Property Harness`
+- Location:
+  - `tests/event_payload_registry_policy.rs`
+  - `tests/event_payload_registry_downstream.rs`
+- Command used:
+  - `cargo test --test event_payload_registry_policy`
+  - `cargo test --test event_payload_registry_downstream`
+- Line/function coverage delta: targeted rise in `src/event/payload.rs`,
+  `src/store/config.rs`, and `src/store/mod.rs`; exact JSON delta not recorded
+- Mutation delta:
+  - `event-payload-registry-validator` critical seam is registered at the 85%
+    smoke threshold for collision detection, open-time warn/fail-fast policy,
+    and cache refresh.
+- Covered tests:
+  - `public_payload_registry_validator_reports_clean_registry` pins the clean
+    registry path and explicit revalidation hook.
+  - `store_open_accepts_explicit_payload_validation_policy_when_registry_is_clean`
+    pins the public config policy surface.
+  - `downstream_fixture_detects_dependency_event_kind_collision` pins
+    dependency-crate collisions in a composing debug test binary.
+  - `downstream_fixture_detects_dependency_event_kind_collision_in_release`
+    pins the same inventory-registration behavior under release linkage.
+- Remaining known blind spots:
+  - the validator reports linked registrations, not whether a particular store
+    will ever append every linked payload kind. Store open warns by default and
+    can be made fail-fast, but explicit per-application allocation discipline
+    remains the caller's responsibility.
+
+### Invariant: Harness doctrine stays structurally enforceable
+
+- Harness pattern: `Property Harness`
+- Location:
+  - `tools/integrity/src/harness_lints.rs`
+- Command used:
+  - `cargo test -p batpak-integrity harness_lints`
+  - `cargo xtask structural`
+- Line/function coverage delta: targeted rise in `tools/integrity/src/harness_lints.rs`;
+  exact JSON delta not recorded
+- Mutation delta:
+  - `harness-ledger-structural-lint` critical seam is registered at the 85%
+    smoke threshold for ledger schema, command-prefix, location, module-header,
+    and capped line-count enforcement.
+- Covered tests:
+  - `synthetic_well_formed_ledger_entry_is_accepted` pins a minimal valid
+    doctrine-bearing ledger entry, tracked Rust file, header, and line cap.
+  - `synthetic_malformed_ledger_entry_is_rejected` pins schema rejection for a
+    missing required ledger field.
+- Remaining known blind spots:
+  - allowlist entries are explicit debt with reason and shrinkage target; new
+    entries should be treated as review-visible debt, not routine bypasses.
 
 ## State-Machine Harness
 
