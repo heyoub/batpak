@@ -787,7 +787,11 @@ mod tests {
         assert!(Reader::checked_frame_range(1, u64::MAX, 16, 1024).is_err());
         assert!(Reader::checked_frame_len(1, 4).is_err());
         assert!(
-            Reader::checked_frame_len(1, FRAME_HEADER_BYTES as u32).is_ok(),
+            Reader::checked_frame_len(
+                1,
+                u32::try_from(FRAME_HEADER_BYTES).expect("frame header size fits u32")
+            )
+            .is_ok(),
             "PROPERTY: a frame length exactly equal to the frame header size is the minimum valid empty-payload frame"
         );
         assert!(Reader::checked_frame_len(
