@@ -83,13 +83,16 @@ fn append_batch(store: &Store, prefix: &str, count: usize) -> Vec<AppendReceipt>
 }
 
 fn is_device_failure_surface(err: &StoreError) -> bool {
-    match err {
-        StoreError::Io(_) | StoreError::WriterCrashed => true,
-        StoreError::BatchFailed { source, .. } | StoreError::BatchSyncFailed { source, .. } => {
-            is_device_failure_surface(source)
-        }
-        _ => false,
+    if matches!(err, StoreError::Io(_) | StoreError::WriterCrashed) {
+        return true;
     }
+    if let StoreError::BatchFailed { source, .. } = err {
+        return is_device_failure_surface(source);
+    }
+    if let StoreError::BatchSyncFailed { source, .. } = err {
+        return is_device_failure_surface(source);
+    }
+    false
 }
 
 fn recovered_entries(store: &Store) -> Vec<batpak::store::IndexEntry> {
