@@ -664,14 +664,15 @@ impl ValidatedStoreConfig {
     /// the boundary violation instead of propagating invalid metadata.
     pub(crate) fn cache_now_us(&self) -> i64 {
         let now_us = self.now_us();
-        if now_us < 0 {
-            tracing::error!(
-                raw_us = now_us,
-                "custom clock returned a negative value; clamping projection/cache metadata timestamp to zero"
-            );
-            0
-        } else {
-            now_us
+        match now_us.cmp(&0) {
+            std::cmp::Ordering::Less => {
+                tracing::error!(
+                    raw_us = now_us,
+                    "custom clock returned a negative value; clamping projection/cache metadata timestamp to zero"
+                );
+                0
+            }
+            std::cmp::Ordering::Equal | std::cmp::Ordering::Greater => now_us,
         }
     }
 }
@@ -729,6 +730,20 @@ mod tests {
     }
 
     #[test]
+    fn cache_now_us_preserves_zero_custom_clock_value() {
+        let raw_clock = Arc::new(|| 0_i64) as Arc<dyn Fn() -> i64 + Send + Sync>;
+        let mut config = StoreConfig::new("target/test-cache-clock-zero");
+        config.clock = Some(raw_clock);
+
+        let runtime = config.validated().expect("config validates");
+        assert_eq!(
+            runtime.cache_now_us(),
+            0,
+            "PROPERTY: zero is a valid cache timestamp boundary, not a negative-clock violation"
+        );
+    }
+
+    #[test]
     fn index_topology_tiles64_simd_builder_sets_only_simd_overlay() {
         let topology = IndexTopology::default().with_tiles64_simd(true);
 
@@ -780,6 +795,49 @@ mod tests {
                 Err(crate::store::StoreError::Configuration(_))
             ),
             "PROPERTY: batch.max_size above 4096 must be rejected"
+        );
+
+        let mut single_append = StoreConfig::new("target/test-config-single-append-too-large");
+        single_append.single_append_max_bytes = 64 * 1024 * 1024 + 1;
+        assert!(
+            matches!(
+                single_append.validated(),
+                Err(crate::store::StoreError::Configuration(_))
+            ),
+            "PROPERTY: single_append_max_bytes above 64MB must be rejected"
+        );
+
+        let mut batch_bytes = StoreConfig::new("target/test-config-batch-bytes-too-large");
+        batch_bytes.batch.max_bytes = 16 * 1024 * 1024 + 1;
+        assert!(
+            matches!(
+                batch_bytes.validated(),
+                Err(crate::store::StoreError::Configuration(_))
+            ),
+            "PROPERTY: batch.max_bytes above 16MB must be rejected"
+        );
+    }
+
+    #[test]
+    fn validated_rejects_zero_payload_size_boundaries() {
+        let mut single_append = StoreConfig::new("target/test-config-single-append-zero");
+        single_append.single_append_max_bytes = 0;
+        assert!(
+            matches!(
+                single_append.validated(),
+                Err(crate::store::StoreError::Configuration(_))
+            ),
+            "PROPERTY: single_append_max_bytes of zero must be rejected"
+        );
+
+        let mut batch_bytes = StoreConfig::new("target/test-config-batch-bytes-zero");
+        batch_bytes.batch.max_bytes = 0;
+        assert!(
+            matches!(
+                batch_bytes.validated(),
+                Err(crate::store::StoreError::Configuration(_))
+            ),
+            "PROPERTY: batch.max_bytes of zero must be rejected"
         );
     }
 

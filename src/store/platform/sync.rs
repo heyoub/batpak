@@ -98,3 +98,22 @@ pub(crate) fn admit_parent_dir_sync(
 pub(crate) fn admit_current_parent_dir_sync() -> Result<ParentDirSyncAdmission, StoreError> {
     admit_parent_dir_sync(crate::store::platform::evidence::parent_dir_sync_evidence())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn sync_file_with_mode_surfaces_platform_sync_errors() {
+        let file = File::open("/dev/null").expect("open /dev/null");
+
+        assert!(
+            matches!(
+                sync_file_with_mode(&file, &SyncMode::SyncAll),
+                Err(StoreError::Io(_))
+            ),
+            "PROPERTY: sync_file_with_mode must map platform sync errors to StoreError::Io, not report success"
+        );
+    }
+}

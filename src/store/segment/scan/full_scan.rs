@@ -47,7 +47,10 @@ impl Reader {
             return Err(StoreError::corrupt_version(segment_id, header.version));
         }
 
-        let mut cursor = (8 + header_len) as u64; // past magic + header_len + header
+        let mut cursor = u64::try_from(8usize.checked_add(header_len).ok_or_else(|| {
+            StoreError::corrupt_frame(segment_id, "segment header offset overflow")
+        })?)
+        .map_err(|_| StoreError::corrupt_frame(segment_id, "segment header offset overflow"))?; // past magic + header_len + header
 
         // Read frames until EOF. Each frame: [len:u32 BE][crc32:u32 BE][msgpack]
         let mut entries = Vec::new();

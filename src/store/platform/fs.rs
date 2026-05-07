@@ -70,7 +70,7 @@ pub(crate) fn read_exact_at(
                     bytes_read: total_read,
                 });
             }
-            total_read += n;
+            total_read = total_read.saturating_add(n);
         }
         Ok(())
     }
@@ -90,7 +90,7 @@ pub(crate) fn read_exact_at(
                     bytes_read: total_read,
                 });
             }
-            total_read += n;
+            total_read = total_read.saturating_add(n);
         }
         Ok(())
     }
