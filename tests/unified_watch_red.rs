@@ -1,3 +1,5 @@
+//! Red-path tests keep the `unified_*_red` names for cross-surface edge cases
+//! that should fail fast or prove defensive behavior across the unified store.
 // justifies: INV-TEST-PANIC-AS-ASSERTION, INV-MACRO-BOUNDED-CAST; unified red-path watch tests in tests/unified_watch_red.rs use unwrap/panic as assertion style and narrow bounded test counters that fit within u32.
 #![allow(clippy::unwrap_used, clippy::cast_possible_truncation, clippy::panic)]
 

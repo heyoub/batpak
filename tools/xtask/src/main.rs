@@ -8,6 +8,7 @@ mod util;
 
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use std::path::PathBuf;
 
 #[derive(Parser)]
 #[command(author, version, about = "Root developer command surface for batpak")]
@@ -33,6 +34,7 @@ enum XtaskCommand {
     Bench(BenchArgs),
     Cover(CoverArgs),
     Mutants(MutantsArgs),
+    Platform(PlatformArgs),
     Fuzz(FuzzArgs),
     Chaos(ChaosArgs),
     FuzzChaos,
@@ -114,6 +116,40 @@ pub(crate) struct MutantsArgs {
     shard: Option<String>,
 }
 
+#[derive(Args, Clone)]
+pub(crate) struct PlatformArgs {
+    #[command(subcommand)]
+    command: PlatformCommand,
+}
+
+#[derive(Subcommand, Clone)]
+pub(crate) enum PlatformCommand {
+    /// Report whether a store path can produce a platform profile.
+    Doctor(PlatformStorePathArgs),
+    /// Write a platform profile for a store path.
+    Probe(PlatformProfileIoArgs),
+    /// Compare current platform evidence with a profile.
+    Verify(PlatformProfileIoArgs),
+    /// Intentionally refresh a platform profile fixture.
+    Bless(PlatformProfileIoArgs),
+    /// Run platform boundary structural checks.
+    Audit,
+}
+
+#[derive(Args, Clone)]
+pub(crate) struct PlatformStorePathArgs {
+    #[arg(long, default_value = ".")]
+    store_path: PathBuf,
+}
+
+#[derive(Args, Clone)]
+pub(crate) struct PlatformProfileIoArgs {
+    #[arg(long)]
+    store_path: PathBuf,
+    #[arg(long)]
+    profile: PathBuf,
+}
+
 #[derive(Args, Clone, Copy)]
 pub(crate) struct FuzzArgs {
     #[arg(long)]
@@ -175,6 +211,7 @@ fn main() -> Result<()> {
         XtaskCommand::Bench(args) => bench::bench(args),
         XtaskCommand::Cover(args) => coverage::cover(args),
         XtaskCommand::Mutants(args) => commands::mutants(args),
+        XtaskCommand::Platform(args) => commands::platform(args),
         XtaskCommand::Fuzz(args) => commands::fuzz(args),
         XtaskCommand::Chaos(args) => commands::chaos(args),
         XtaskCommand::FuzzChaos => util::cargo([

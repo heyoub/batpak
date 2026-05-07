@@ -241,7 +241,7 @@ mod tests {
     use crate::coordinate::Coordinate;
     use crate::event::{EventKind, HashChain};
     use crate::store::index::{interner::InternId, DiskPos};
-    use std::sync::mpsc;
+    use std::sync::{mpsc, Arc};
     use std::thread;
     use std::time::Duration;
 
@@ -262,6 +262,18 @@ mod tests {
             disk_pos: DiskPos::new(0, seq * 64, 64),
             global_sequence: seq,
         }
+    }
+
+    fn sorted_arcs(entries: Vec<IndexEntry>) -> (Vec<Arc<IndexEntry>>, Vec<Arc<IndexEntry>>) {
+        let entries_by_sequence: Vec<_> = entries.into_iter().map(Arc::new).collect();
+        let mut entries_by_entity = entries_by_sequence.clone();
+        entries_by_entity.sort_by(|a, b| {
+            a.coord
+                .entity()
+                .cmp(b.coord.entity())
+                .then(a.global_sequence.cmp(&b.global_sequence))
+        });
+        (entries_by_sequence, entries_by_entity)
     }
 
     #[test]
@@ -291,5 +303,75 @@ mod tests {
         assert_eq!(runs[0].len, 2);
         assert_eq!(runs[1].entity, "beta");
         assert_eq!(runs[1].len, 2);
+    }
+
+    #[test]
+    fn routing_summary_validate_accepts_in_bounds_entity_runs() {
+        let entries = vec![
+            entry(0, "alpha"),
+            entry(1, "alpha"),
+            entry(2, "beta"),
+            entry(3, "beta"),
+        ];
+        let summary = RoutingSummary::from_sorted_entries(&entries, 2);
+        let (entries_by_sequence, entries_by_entity) = sorted_arcs(entries);
+
+        assert!(
+            summary.validate(&entries_by_sequence, &entries_by_entity),
+            "PROPERTY: valid in-bounds entity runs must validate; a run ending before the full entity array length is still valid when its own slice is correct"
+        );
+    }
+
+    #[test]
+    fn routing_summary_validate_rejects_chunk_boundary_mismatches_independently() {
+        let entries = vec![
+            entry(0, "alpha"),
+            entry(1, "alpha"),
+            entry(2, "beta"),
+            entry(3, "beta"),
+        ];
+        let summary = RoutingSummary::from_sorted_entries(&entries, 2);
+        let (entries_by_sequence, entries_by_entity) = sorted_arcs(entries);
+
+        let mut wrong_first = summary.clone();
+        wrong_first.chunks[0].first_sequence += 100;
+        assert!(
+            !wrong_first.validate(&entries_by_sequence, &entries_by_entity),
+            "PROPERTY: chunk validation must reject a mismatched first sequence even when the last sequence still matches"
+        );
+
+        let mut wrong_last = summary;
+        wrong_last.chunks[0].last_sequence += 100;
+        assert!(
+            !wrong_last.validate(&entries_by_sequence, &entries_by_entity),
+            "PROPERTY: chunk validation must reject a mismatched last sequence even when the first sequence still matches"
+        );
+    }
+
+    #[test]
+    fn routing_summary_validate_rejects_empty_or_out_of_bounds_entity_runs() {
+        let entries = vec![
+            entry(0, "alpha"),
+            entry(1, "alpha"),
+            entry(2, "beta"),
+            entry(3, "beta"),
+        ];
+        let summary = RoutingSummary::from_sorted_entries(&entries, 2);
+        let (entries_by_sequence, entries_by_entity) = sorted_arcs(entries);
+
+        let mut empty_run = summary.clone();
+        empty_run.entity_runs[0].len = 0;
+        assert!(
+            !empty_run.validate(&entries_by_sequence, &entries_by_entity),
+            "PROPERTY: zero-length entity runs are invalid and must not be accepted as harmless no-ops"
+        );
+
+        let mut out_of_bounds_run = summary;
+        out_of_bounds_run.entity_runs[0].start = entries_by_entity.len() as u64;
+        out_of_bounds_run.entity_runs[0].len = 1;
+        assert!(
+            !out_of_bounds_run.validate(&entries_by_sequence, &entries_by_entity),
+            "PROPERTY: entity runs whose end exceeds the entity-sorted table are invalid"
+        );
     }
 }

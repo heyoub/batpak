@@ -1,7 +1,7 @@
 # ADR-0016: Durability Gating
 
 ## Status
-Accepted
+Accepted (shipped in 0.7.0).
 
 ## Context
 ADR-0014 exposed the durable frontier as an observation surface. Phase 2 turns
@@ -39,7 +39,11 @@ benchmarks or production use show the extra bookkeeping is worth it.
   unwrap-heavy boilerplate around an observation path that already uses
   `parking_lot`.
 - Precise per-watermark waiter lists: deferred. Wake-all is simpler and correct
-  while the wait surface is small.
+  while the wait surface is small. The `frontier_waiters` benchmark records
+  waiter wake completion and writer-side wake cost at 1, 8, 32, 128, and 512
+  concurrent waiters. Precise lists promote only if stable-hardware results
+  show writer-side wake cost dominating append/sync latency or an
+  order-of-magnitude wake-completion jump between adjacent waiter-count tiers.
 
 ## Consequences
 Callers must choose a timeout. Very long waits remain possible, but the API

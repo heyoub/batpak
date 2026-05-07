@@ -28,6 +28,16 @@ const ROOT_DOCS: &[RootDoc<'_>] = &[
         title: "Reference",
     },
     RootDoc {
+        source_path: "HARNESS_DIRECTIVE.md",
+        output_name: "HARNESS_DIRECTIVE.html",
+        title: "Harness Directive",
+    },
+    RootDoc {
+        source_path: "HARNESS_LEDGER.md",
+        output_name: "HARNESS_LEDGER.html",
+        title: "Harness Ledger",
+    },
+    RootDoc {
         source_path: "CONTRIBUTING.md",
         output_name: "CONTRIBUTING.html",
         title: "Contributing",
@@ -59,7 +69,10 @@ pub(crate) fn docs(args: DocsArgs) -> Result<()> {
     fs::create_dir_all(&site_dir).with_context(|| format!("create {}", site_dir.display()))?;
 
     let mut cargo_doc = std::process::Command::new("cargo");
-    cargo_doc.env("RUSTDOCFLAGS", "--cfg docsrs -D warnings");
+    cargo_doc.env(
+        "RUSTDOCFLAGS",
+        "--cfg docsrs --cfg batpak_stable_docs -D warnings",
+    );
     cargo_doc.args(["doc", "--all-features", "--no-deps"]);
     crate::util::run(cargo_doc)?;
     copy_dir(&target_dir.join("doc"), &site_dir.join("api"))?;
@@ -170,9 +183,11 @@ fn root_doc_nav_links() -> String {
 }
 
 fn root_doc_index_links() -> String {
-    REQUIRED_DOC_NAV
+    ROOT_DOCS
         .iter()
-        .map(|(source_path, output_name)| {
+        .map(|doc| {
+            let source_path = doc.source_path;
+            let output_name = doc.output_name;
             let label = source_path.trim_end_matches(".md");
             format!("<li><a href=\"{output_name}\">{label}</a></li>")
         })
@@ -273,8 +288,8 @@ mod tests {
     #[test]
     fn index_page_links_canonical_docs_and_api() {
         let page = index_page();
-        for (_, output_name) in REQUIRED_DOC_NAV {
-            assert!(page.contains(output_name));
+        for doc in ROOT_DOCS {
+            assert!(page.contains(doc.output_name));
         }
         assert!(page.contains("api/batpak/"));
     }

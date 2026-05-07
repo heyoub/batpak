@@ -235,16 +235,15 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
 
     // The emitted test fn is named `__batpak_kind_collision_check_<Ident>`
     // (CamelCase ident embedded), so `non_snake_case` has to be suppressed on
-    // that specific item. The `#[cfg(test)]` registration block uses
-    // `inventory::submit!` which produces a runtime-registered record via
-    // `const _`; no additional allows are required at that site.
+    // that specific item. The registration block is unconditional so payloads
+    // in dependency crates remain visible to a downstream binary's explicit
+    // registry validator.
     Ok(quote! {
         impl #impl_generics ::batpak::event::EventPayload for #ident #ty_generics #where_clause {
             const KIND: ::batpak::event::EventKind =
                 ::batpak::event::EventKind::custom(#category, #type_id);
         }
 
-        #[cfg(test)]
         const _: () = {
             ::batpak::__private::inventory::submit! {
                 ::batpak::__private::EventPayloadRegistration {
@@ -259,7 +258,7 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
         // justifies: INV-GENERATED-WITNESS-PIN; generated test fn in crates/macros/src/lib.rs embeds the user's CamelCase ident so non_snake_case must be suppressed on this specific item.
         #[allow(non_snake_case)]
         fn #test_fn_name() {
-            ::batpak::__private::scan_for_kind_collisions();
+            ::batpak::__private::assert_no_kind_collisions();
         }
     })
 }

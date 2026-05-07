@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 use crate::store::cold_start::rebuild::OpenIndexReport;
 use crate::store::RestartPolicy;
+use serde::{Deserialize, Serialize};
 
 /// Hybrid logical clock point used by frontier instrumentation.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -170,6 +171,195 @@ impl WriterPressure {
     }
 }
 
+/// Diagnostic summary of target-sensitive machine-contact posture reported by
+/// the private store platform backend.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[must_use]
+#[non_exhaustive]
+pub struct PlatformEvidenceSummary {
+    /// Host/process-level clock evidence.
+    pub host: HostEvidenceSummary,
+    /// Store-path and file-operation evidence used by store admission paths.
+    pub store_path: StorePathEvidenceSummary,
+    /// Store-admitted interpretation of the descriptive evidence.
+    pub admission: PlatformAdmissionSummary,
+}
+
+/// Host/process-level platform evidence.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[must_use]
+#[non_exhaustive]
+pub struct HostEvidenceSummary {
+    /// Process-local monotonic-clock epoch marker.
+    pub process_clock_epoch_marker_ns: u64,
+    /// Source used for process-local monotonic freshness metadata.
+    pub monotonic_clock: ClockEvidence,
+}
+
+/// Store-path and file-operation platform posture.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[must_use]
+#[non_exhaustive]
+pub struct StorePathEvidenceSummary {
+    /// Cheap path inspection result for the configured store directory.
+    pub path_status: StorePathStatusEvidence,
+    /// Parent-directory sync behavior available to atomic persistence helpers.
+    pub parent_dir_sync: ParentDirSyncEvidence,
+    /// Symlink-leaf protection available for the store lock file.
+    pub lock_leaf_symlink_protection: LockLeafSymlinkProtection,
+    /// mmap posture for the cold-start index file.
+    pub mmap_index: MmapEvidence,
+    /// mmap posture for immutable sealed segments.
+    pub sealed_segment_mmap: MmapEvidence,
+    /// Active-segment positional read posture.
+    pub active_segment_read: ActiveSegmentReadEvidence,
+}
+
+/// Store-path inspection evidence.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[must_use]
+#[non_exhaustive]
+pub enum StorePathStatusEvidence {
+    /// The configured store path exists and is a directory.
+    ObservedDirectory,
+    /// The configured store path does not exist yet.
+    UnknownMissing,
+    /// The configured store path exists but is not a directory.
+    ObservedUnsupportedNotDirectory,
+    /// Metadata inspection failed before a stable conclusion was available.
+    ProbeFailed {
+        /// Human-readable metadata inspection failure.
+        reason: String,
+    },
+}
+
+/// Clock source evidence exposed by the platform backend.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[must_use]
+#[non_exhaustive]
+pub enum ClockEvidence {
+    /// A process-local `Instant` anchor is available for monotonic metadata.
+    ProcessLocalInstantAnchor,
+    /// The clock source has not been inspected.
+    Unknown,
+    /// Clock probing failed.
+    ProbeFailed,
+}
+
+/// Parent-directory sync evidence for atomic file replacement.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[must_use]
+#[non_exhaustive]
+pub enum ParentDirSyncEvidence {
+    /// Unix-style parent-directory fsync is used after rename.
+    UnixFsync,
+    /// The target has no meaningful directory-fsync surface; rename is the OS boundary.
+    RenameOnly,
+    /// Parent-directory sync support has not been inspected.
+    Unknown,
+    /// Parent-directory sync probing failed.
+    ProbeFailed,
+}
+
+/// Store-lock symlink-leaf protection evidence.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[must_use]
+#[non_exhaustive]
+pub enum LockLeafSymlinkProtection {
+    /// Unix `O_NOFOLLOW` rejects symlink leaves atomically during lock-file open.
+    AtomicNoFollow,
+    /// Non-Unix check-then-open fallback; useful evidence, not atomic protection.
+    BestEffortCheckThenOpen,
+    /// Lock symlink-leaf behavior has not been inspected.
+    Unknown,
+    /// Lock symlink-leaf behavior is unsupported.
+    ObservedUnsupported,
+    /// Lock symlink-leaf probing failed.
+    ProbeFailed,
+}
+
+/// mmap evidence for a specific store use.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[must_use]
+#[non_exhaustive]
+pub enum MmapEvidence {
+    /// File-backed mmap is the admitted mechanism for this use.
+    FileBacked,
+    /// mmap support has not been inspected.
+    Unknown,
+    /// mmap is not supported for this use.
+    ObservedUnsupported,
+    /// mmap probing failed.
+    ProbeFailed,
+}
+
+/// Active segment positional read evidence.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[must_use]
+#[non_exhaustive]
+pub enum ActiveSegmentReadEvidence {
+    /// Unix `pread`-style positional reads avoid mutating the file cursor.
+    UnixReadAt,
+    /// Non-Unix active reads use locked seek+read against the cached descriptor.
+    LockedSeekRead,
+    /// Active read posture has not been inspected.
+    Unknown,
+    /// Active read probing failed.
+    ProbeFailed,
+}
+
+/// Store admission summary derived from platform evidence.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[must_use]
+#[non_exhaustive]
+pub struct PlatformAdmissionSummary {
+    /// Store lock admission.
+    pub store_lock: StoreLockAdmissionSummary,
+    /// Parent-directory sync admission.
+    pub parent_dir_sync: ParentDirSyncAdmissionSummary,
+    /// mmap index admission.
+    pub mmap_index: MmapAdmissionSummary,
+    /// Sealed-segment mmap admission.
+    pub sealed_segment_mmap: MmapAdmissionSummary,
+}
+
+/// Admitted store-lock posture.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[must_use]
+#[non_exhaustive]
+pub enum StoreLockAdmissionSummary {
+    /// Atomic Unix no-follow lock-file open is admitted.
+    AtomicNoFollow,
+    /// Best-effort non-Unix check-then-open is admitted and reported.
+    BestEffortCheckThenOpen,
+    /// Store lock admission failed.
+    Rejected,
+}
+
+/// Admitted parent-directory sync posture.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[must_use]
+#[non_exhaustive]
+pub enum ParentDirSyncAdmissionSummary {
+    /// Unix parent-directory fsync is admitted.
+    UnixFsync,
+    /// Rename-only non-Unix posture is admitted and reported.
+    RenameOnly,
+    /// Parent-directory sync admission failed.
+    Rejected,
+}
+
+/// Admitted mmap posture.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[must_use]
+#[non_exhaustive]
+pub enum MmapAdmissionSummary {
+    /// File-backed mmap is admitted for this use.
+    FileBacked,
+    /// mmap admission failed.
+    Rejected,
+}
+
 /// Detailed diagnostic snapshot of the store's internal configuration and state.
 #[derive(Clone, Debug)]
 #[must_use]
@@ -199,4 +389,6 @@ pub struct StoreDiagnostics {
     pub tile_count: usize,
     /// Structured report from the cold-start open path, if available.
     pub open_report: Option<OpenIndexReport>,
+    /// Platform evidence summary reported by the private store platform backend.
+    pub platform_evidence: PlatformEvidenceSummary,
 }

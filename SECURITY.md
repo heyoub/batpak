@@ -1,6 +1,8 @@
 # Security Policy
 
-Please report suspected vulnerabilities privately through the repository security advisory flow or by contacting the maintainers directly before opening a public issue.
+Please report suspected vulnerabilities privately through the repository
+security advisory flow before opening a public issue:
+<https://github.com/TheFreeBatteryFactory/batpak/security/advisories/new>.
 
 Security-sensitive changes should preserve:
 

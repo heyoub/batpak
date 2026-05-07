@@ -6,6 +6,8 @@
 )]
 //! # raw_projection_counter
 //!
+//! **Teaches:** hand-written raw projection replay for performance-sensitive folds.
+//!
 //! This example is the intentional hand-written counterpart to
 //! `raw_projection_counter_derived.rs`; production code should use
 //! `#[derive(EventSourced)]` with `input = RawMsgpackInput`. It is kept as a

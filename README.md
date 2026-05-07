@@ -1,7 +1,21 @@
+[![crates.io](https://img.shields.io/crates/v/batpak.svg)](https://crates.io/crates/batpak)
+[![docs.rs](https://docs.rs/batpak/badge.svg)](https://docs.rs/batpak)
+[![CI](https://github.com/TheFreeBatteryFactory/batpak/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/TheFreeBatteryFactory/batpak/actions/workflows/ci.yml)
+[![license](https://img.shields.io/crates/l/batpak.svg)](#license)
+
 # batpak
 
 Sync-first event sourcing for Rust: append-only segments, causal metadata, policy gates,
 and typed projections — no async runtime.
+
+```bash
+cargo add batpak
+```
+
+Choose `batpak` when you want an embedded event log with typed payloads,
+causal metadata, policy gates, and projections in one Rust process. It is a
+library substrate, not a hosted database: callers own the process model, disk
+placement, and integration boundaries.
 
 ## Mental Model
 
@@ -50,9 +64,10 @@ range scan, no disk I/O).
 
 ## Store Internals At A Glance
 
-Seven subdirectories organize the store by concern. Flat files alongside them
-(`append.rs`, `config.rs`, `error.rs`, `lifecycle.rs`, `stats.rs`,
-`hidden_ranges.rs`) hold types that belong to the store root and don't fit
+Eight subdirectories organize the store by concern. Flat files alongside them
+(`append.rs`, `config.rs`, `error.rs`, `fault.rs`, `gate.rs`,
+`hidden_ranges.rs`, `lifecycle.rs`, `reactor_typed.rs`, `stats.rs`) hold
+types that belong to the store root and don't fit
 neatly into one subdirectory.
 
 ```
@@ -61,6 +76,7 @@ store/
 ├── segment/      on-disk .fbat frame format and SIDX footer
 ├── index/        in-memory query engine: streams, by_id, columnar overlays, interner
 ├── cold_start/   open/restore: mmap → checkpoint → SIDX rebuild → frame scan
+├── platform/     target-sensitive fs/sync/lock/clock/mmap helpers
 ├── projection/   state reconstruction: replay, cache, watcher
 ├── ancestry/     causal graph walking: by hash chain or by HLC clock
 └── delivery/     push subscriptions (lossy) and pull cursors (ordered)
@@ -125,6 +141,7 @@ entity-chain events through `Store::append_denial(...)` using
 | `cargo xtask cover` | Coverage with retained artifacts |
 | `cargo xtask mutants policy` | Print the repo-owned mutation policy |
 | `cargo xtask mutants smoke` | Critical seam hard gates + repo-wide ratchet smoke |
+| `cargo xtask platform ...` | Doctor/probe/verify/bless/audit platform profile workflows |
 | `cargo xtask bench --surface neutral` | Criterion benchmark suite |
 | `cargo xtask perf-gates` | Catastrophic-regression guards (stable hardware only) |
 | `cargo xtask preflight` | Canonical verification bundle: CI + coverage + docs in one devcontainer session |
@@ -135,8 +152,9 @@ entity-chain events through `Store::append_denial(...)` using
 
 [HARNESS_DIRECTIVE.md](HARNESS_DIRECTIVE.md) defines the five harness
 patterns used to classify doctrine-bearing test suites and the module-header
-rule for new harnesses. Today that header doctrine is a repo convention, not
-a hard structural gate.
+rule for new harnesses. `cargo xtask structural` now enforces the ledger
+schema, module-header rule, and 500-line split discipline for ledger-listed
+harnesses, with explicit capped legacy debt entries.
 [HARNESS_LEDGER.md](HARNESS_LEDGER.md) records the current canonical witnesses,
 including derive compile-fail/parity,
 deterministic concurrency, chaos, fuzz-chaos feedback, perf gates, and
@@ -156,9 +174,9 @@ Only coordinates, events, gates, pipelines, and the store.
 No LMDB, no redb, no SQLite.
 
 **No concurrent owners.** One live `Store` handle owns the directory lock at a time.
-In the current hardening wave that lock is intentionally exclusive-only, so a
-second mutable open or a concurrent read-only open fails with `StoreLocked`
-instead of racing the same store directory.
+The directory lock is exclusive-only: a second mutable open or a concurrent
+read-only open fails with `StoreLocked` instead of racing the same store
+directory.
 
 **No per-entry integrity.** Each frame carries a CRC32. Cold-start artifacts carry a
 full-file CRC. There is no per-byte or per-field checksum beyond that.

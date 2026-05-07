@@ -245,6 +245,31 @@ mod tests {
     }
 
     #[test]
+    fn watcher_error_display_names_terminal_and_store_errors() {
+        assert_eq!(
+            WatcherError::StoreClosed.to_string(),
+            "projection watcher stopped: underlying notification channel closed",
+            "PROPERTY: terminal watcher closure should remain visible in Display output"
+        );
+
+        let store_error = StoreError::Configuration("bad watcher config".to_owned());
+        let error = WatcherError::Store(store_error);
+        let display = error.to_string();
+        assert!(
+            display.contains("projection watcher failed"),
+            "PROPERTY: wrapped store errors should retain watcher context in Display output"
+        );
+        assert!(
+            display.contains("bad watcher config"),
+            "PROPERTY: wrapped store errors should retain their inner diagnostic message"
+        );
+        assert!(
+            std::error::Error::source(&error).is_some(),
+            "PROPERTY: wrapped store errors should remain available through source()"
+        );
+    }
+
+    #[test]
     fn recv_performs_pending_initial_check_before_blocking_on_subscription() {
         let dir = TempDir::new().expect("temp dir");
         let store = Arc::new(Store::open(StoreConfig::new(dir.path())).expect("open"));

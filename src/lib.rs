@@ -1,40 +1,44 @@
 #![warn(missing_docs)]
 // justifies: INV-STORE-SYNC-ONLY, ADR-0001; impossible-feature guards in src/lib.rs (async-store, sha256) use cfg attributes for features intentionally not declared in Cargo.toml; item-level allow is unreliable for cfg checks on some toolchain versions so we silence at crate root.
 #![allow(unexpected_cfgs)]
+// justifies: docs.rs builds with --cfg docsrs from Cargo.toml so feature-gated public API can show doc(cfg) badges; local stable docs add batpak_stable_docs to avoid nightly-only attributes.
+#![cfg_attr(all(docsrs, not(batpak_stable_docs)), feature(doc_cfg))]
 // justifies: src/lib.rs makes production expect() sites deliberate invariant escape hatches instead of ambient convenience panics.
 #![cfg_attr(not(test), deny(clippy::expect_used))]
 // cast_possible_truncation and cast_sign_loss are enforced via [lints.clippy] in Cargo.toml.
 // Each intentional cast has an inline #[allow] with a justification comment.
-//! batpak: Event Sourcing Runtime with DAG Causation Tracking.
+//! Sync-first event sourcing for Rust: append-only segments, causal metadata,
+//! policy gates, and typed projections — no async runtime.
 //!
-//! Batpak provides a complete event sourcing platform with:
-//! - **Event Sourcing**: Immutable event log with hash chain integrity
-//! - **DAG Causation**: Tracks causation relationships between events
-//! - **Gate Evaluation**: Pluggable policy enforcement before event commitment
-//! - **Persistent Storage**: Segment-based append-only store with fast querying
+//! Batpak stores immutable events in segment files, tracks causation metadata,
+//! evaluates policy gates before commit, and rebuilds typed projections through
+//! a synchronous API that does not require an async runtime.
 //!
-//! The core pattern: acquire a [`Proposal`](crate::pipeline::Proposal), evaluate it through
-//! [`Gate`](crate::guard::Gate) instances, then [`commit`](crate::pipeline::Pipeline::commit) to
-//! the [`Store`](crate::store::Store).
+//! Most callers start with typed payloads: derive [`EventPayload`], append with
+//! [`Store::append_typed`](crate::store::Store::append_typed), and read through
+//! the in-memory index. Gates and [`Pipeline`](crate::pipeline::Pipeline) can be
+//! added when a write needs policy evaluation before commit.
 //!
 //! ```no_run
 //! use batpak::prelude::*;
 //!
+//! #[derive(serde::Serialize, serde::Deserialize, EventPayload)]
+//! #[batpak(category = 0xF, type_id = 1)]
+//! struct PlayerMoved {
+//!     x: i32,
+//!     y: i32,
+//! }
+//!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! let store = Store::open(StoreConfig::new("./my-store"))?;
-//! let gates: GateSet<()> = GateSet::new();
-//! let pipeline = Pipeline::new(gates);
+//! let dir = tempfile::tempdir()?;
+//! let store = Store::open(StoreConfig::new(dir.path()))?;
+//! let coord = Coordinate::new("player:alice", "room:dungeon")?;
 //!
-//! let coord = Coordinate::new("entity:1", "scope:test")?;
-//! let kind = EventKind::custom(0xF, 1);
-//! let payload = serde_json::json!({"hello": "world"});
+//! let receipt = store.append_typed(&coord, &PlayerMoved { x: 10, y: 20 })?;
+//! let stored = store.get(receipt.event_id)?;
 //!
-//! let proposal = Proposal::new(payload.clone());
-//! let receipt = pipeline.evaluate(&(), proposal)?;
-//! let committed = pipeline.commit(receipt, |p| -> Result<_, StoreError> {
-//!     let r = store.append(&coord, kind, &p)?;
-//!     CommitMetadata::from_append_receipt(&r)
-//! })?;
+//! assert_eq!(stored.coordinate.entity(), "player:alice");
+//! assert_eq!(stored.event.header.event_id, receipt.event_id);
 //! # Ok(())
 //! # }
 //! ```
@@ -80,7 +84,7 @@ pub use crate::encoding as canonical;
 #[doc(hidden)]
 pub mod __private {
     pub use batpak_macros_support::{
-        inventory, scan_for_kind_collisions, EventPayloadRegistration,
+        assert_no_kind_collisions, inventory, scan_for_kind_collisions, EventPayloadRegistration,
     };
 }
 

@@ -9,12 +9,17 @@ mod dir_lock;
 mod error;
 /// Fault injection framework for testing failure scenarios.
 #[cfg(feature = "dangerous-test-hooks")]
+#[cfg_attr(
+    all(docsrs, not(batpak_stable_docs)),
+    doc(cfg(feature = "dangerous-test-hooks"))
+)]
 pub mod fault;
 mod gate;
 mod hidden_ranges;
 /// In-memory 2D event index, rebuilt from segments on startup.
 pub mod index;
 mod lifecycle;
+mod platform;
 /// Projection cache traits and built-in backends (NoCache, NativeCache).
 pub mod projection;
 /// Typed reactor output batch — accumulator handed to typed reactor handlers.
@@ -50,6 +55,10 @@ pub use delivery::observation::{AtLeastOnce, CheckpointId, IdempotencyKey, Obser
 pub use delivery::subscription::Subscription;
 pub use error::{StoreError, StoreLockMode};
 #[cfg(feature = "dangerous-test-hooks")]
+#[cfg_attr(
+    all(docsrs, not(batpak_stable_docs)),
+    doc(cfg(feature = "dangerous-test-hooks"))
+)]
 pub use fault::{
     CountdownAction, CountdownInjector, FaultInjector, InjectionPoint, ProbabilisticInjector,
 };
@@ -63,14 +72,19 @@ pub use reaction::ReactionBatch;
 pub use reactor_typed::{ReactorConfig, ReactorError, TypedReactorHandle};
 pub use signing::SigningKey;
 pub use stats::{
-    FrontierView, HlcPoint, StoreDiagnostics, StoreStats, WatermarkKind, WatermarkSnapshot,
-    WriterPressure,
+    ActiveSegmentReadEvidence, ClockEvidence, FrontierView, HlcPoint, HostEvidenceSummary,
+    LockLeafSymlinkProtection, MmapAdmissionSummary, MmapEvidence, ParentDirSyncAdmissionSummary,
+    ParentDirSyncEvidence, PlatformAdmissionSummary, PlatformEvidenceSummary, StoreDiagnostics,
+    StoreLockAdmissionSummary, StorePathEvidenceSummary, StorePathStatusEvidence, StoreStats,
+    WatermarkKind, WatermarkSnapshot, WriterPressure,
 };
 pub use write::control::{AppendTicket, BatchAppendTicket, Outbox, VisibilityFence};
 pub use write::writer::{Notification, RestartPolicy};
 
 use crate::coordinate::{Coordinate, KindFilter, Region};
-use crate::event::{EventKind, EventPayload, EventSourced, StoredEvent};
+use crate::event::{
+    self, EventKind, EventPayload, EventPayloadValidation, EventSourced, StoredEvent,
+};
 use crate::guard::{Denial, GateSet};
 #[cfg(test)]
 pub(crate) use config::now_us;
@@ -145,10 +159,35 @@ struct OpenComponents {
     store_lock: dir_lock::StoreDirLock,
 }
 
+fn generation_advanced_after_subscribe(baseline: u64, post_subscribe: u64) -> bool {
+    post_subscribe > baseline
+}
+
+fn validate_payload_registry_for_open(config: &StoreConfig) -> Result<(), StoreError> {
+    let Err(error) = event::payload::cached_event_payload_registry_validation() else {
+        return Ok(());
+    };
+    match config.event_payload_validation {
+        EventPayloadValidation::Warn => {
+            if event::payload::mark_event_payload_registry_warning_emitted() {
+                tracing::warn!(
+                    target: "batpak::event_registry",
+                    collisions = ?error.collisions(),
+                    "duplicate EventPayload kind registrations detected; call validate_event_payload_registry() or set EventPayloadValidation::FailFast to make this an open error"
+                );
+            }
+            Ok(())
+        }
+        EventPayloadValidation::FailFast => Err(StoreError::EventPayloadRegistry(error)),
+        EventPayloadValidation::Silent => Ok(()),
+    }
+}
+
 fn open_components(
     mut config: StoreConfig,
     lock_mode: StoreLockMode,
 ) -> Result<OpenComponents, StoreError> {
+    validate_payload_registry_for_open(&config)?;
     std::fs::create_dir_all(&config.data_dir)?;
     config.data_dir = std::fs::canonicalize(&config.data_dir).map_err(StoreError::Io)?;
     let configured_signing_keys = config.signing_keys.len();
@@ -158,6 +197,13 @@ fn open_components(
     );
     let runtime = Arc::new(config.validated()?);
     let store_lock = dir_lock::StoreDirLock::acquire(&config.data_dir, lock_mode)?;
+    if let Some(profile_path) = config.platform_profile_path.as_ref() {
+        let _verified_platform_evidence =
+            platform::profile::PlatformProfile::verify_current_store_path(
+                profile_path,
+                &config.data_dir,
+            )?;
+    }
     let config = Arc::new(config);
     let index = Arc::new(StoreIndex::with_config(&config.index));
     let reader = Arc::new(Reader::new(config.data_dir.clone(), config.fd_budget));
@@ -169,7 +215,7 @@ fn open_components(
 
     // Tell the reader which segment is active (for mmap dispatch).
     // The writer's initial segment ID is the highest existing + 1.
-    let active_seg_id = write::writer::find_latest_segment_id(&config.data_dir).unwrap_or(0) + 1;
+    let active_seg_id = next_active_segment_id(&config.data_dir);
     reader.set_active_segment(active_seg_id);
 
     Ok(OpenComponents {
@@ -181,6 +227,10 @@ fn open_components(
         cumulative_reserved_kind_fallbacks: open_outcome.cumulative_reserved_kind_fallbacks,
         store_lock,
     })
+}
+
+fn next_active_segment_id(data_dir: &std::path::Path) -> u64 {
+    write::writer::find_latest_segment_id(data_dir).unwrap_or(0) + 1
 }
 
 fn emit_open_report_observability(config: &StoreConfig, report: &OpenIndexReport) {
@@ -875,7 +925,7 @@ impl Store<Open> {
             entity_owned,
             freshness,
             baseline_generation,
-            post_subscribe_generation > baseline_generation,
+            generation_advanced_after_subscribe(baseline_generation, post_subscribe_generation),
         )
     }
 
@@ -1169,9 +1219,8 @@ impl Store<ReadOnly> {
     ///
     /// # Errors
     /// Returns [`StoreError::StoreLocked`] if another live store handle already
-    /// owns the directory lock. In the first hardening wave, read-only opens
-    /// are intentionally exclusive-only until shared semantics are explicitly
-    /// designed and tested.
+    /// owns the directory lock. Read-only opens are also exclusive under the
+    /// current store-ownership contract.
     /// Returns any configuration, directory-creation, or cold-start rebuild
     /// error surfaced while opening the store in read-only mode.
     pub fn open_read_only_with_cache(
@@ -1454,5 +1503,67 @@ impl<State> Drop for Store<State> {
             // This prevents data loss when Store is dropped without close().
             let _ = rx.recv_timeout(std::time::Duration::from_millis(100));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn next_active_segment_id_is_one_past_latest_existing_segment() {
+        let dir = TempDir::new().expect("temp dir");
+        std::fs::write(dir.path().join(segment::segment_filename(1)), b"").expect("segment 1");
+        std::fs::write(dir.path().join(segment::segment_filename(7)), b"").expect("segment 7");
+
+        assert_eq!(
+            next_active_segment_id(dir.path()),
+            8,
+            "PROPERTY: reader active segment must be one past the highest existing segment so the last sealed segment remains mmap-eligible"
+        );
+    }
+
+    #[test]
+    fn highest_index_hlc_reports_non_origin_point_for_appended_entry() {
+        let dir = TempDir::new().expect("temp dir");
+        let store = Store::open(StoreConfig::new(dir.path())).expect("open store");
+        let coord = Coordinate::new("entity:highest-hlc", "scope:test").expect("coord");
+        let receipt = store
+            .append(
+                &coord,
+                EventKind::custom(0xF, 0x77),
+                &serde_json::json!({"x": 1}),
+            )
+            .expect("append");
+
+        let point = highest_index_hlc(&store.index);
+
+        assert_eq!(
+            point.global_sequence, receipt.sequence,
+            "PROPERTY: highest_index_hlc must observe the committed entry's global sequence"
+        );
+        assert!(
+            point > HlcPoint::ORIGIN,
+            "PROPERTY: highest_index_hlc must not collapse a non-empty index to origin/default"
+        );
+
+        store.close().expect("close");
+    }
+
+    #[test]
+    fn generation_advanced_after_subscribe_is_strictly_forward() {
+        assert!(
+            !generation_advanced_after_subscribe(7, 7),
+            "PROPERTY: equal baseline/post-subscribe generations must not trigger an initial watcher catch-up"
+        );
+        assert!(
+            generation_advanced_after_subscribe(7, 8),
+            "PROPERTY: a post-subscribe generation above baseline must trigger the initial watcher catch-up"
+        );
+        assert!(
+            !generation_advanced_after_subscribe(8, 7),
+            "PROPERTY: older post-subscribe observations must never trigger an initial watcher catch-up"
+        );
     }
 }

@@ -6,7 +6,7 @@ Accepted
 ## Context
 
 This ADR records the current substrate-owner reading of the runtime and
-benchmark surfaces after the `0.6.x` hardening wave. It is not a new runtime
+benchmark surfaces after the `0.6.x` measurement pass. It is not a new runtime
 design decision by itself. It is a measured memo that:
 
 - captures what the current tree actually does,

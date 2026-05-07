@@ -98,6 +98,24 @@
   kind: source
   paths:
     - src/store/config.rs
+- id: ART-STORE-PLATFORM
+  kind: source
+  paths:
+    - src/store/platform/mod.rs
+    - src/store/platform/fs.rs
+    - src/store/platform/sync.rs
+    - src/store/platform/lock.rs
+    - src/store/platform/clock.rs
+    - src/store/platform/mmap.rs
+    - src/store/platform/evidence.rs
+    - src/store/platform/profile.rs
+- id: ART-STORE-PLATFORM-FIXTURES
+  kind: tests
+  paths:
+    - tests/fixtures/platform/linux_basic.profile
+    - tests/fixtures/platform/non_unix_best_effort_lock.profile
+    - tests/fixtures/platform/mmap_unavailable.profile
+    - tests/fixtures/platform/profile_mismatch.profile
 - id: ART-STORE-ERROR
   kind: source
   paths:
@@ -199,6 +217,7 @@
   kind: source
   paths:
     - src/store/segment/mod.rs
+    - src/store/segment/scan/mod.rs
 - id: ART-PROJECTION
   kind: source
   paths:
@@ -300,6 +319,10 @@
   kind: adr
   paths:
     - docs/adr/ADR-0017-at-least-once-witness-surface.md
+- id: ART-ADR-STORE-PLATFORM
+  kind: adr
+  paths:
+    - docs/adr/ADR-0018-store-platform-backend.md
 - id: ART-ADR-RESTORE-PLANNER
   kind: adr
   paths:

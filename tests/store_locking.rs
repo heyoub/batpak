@@ -3,9 +3,9 @@
 //! Store directory locking surface.
 //! Harness pattern: State-Machine Harness (open/hold/reject/release lane).
 //!
-//! PROVES: mutable and read-only opens both hold an exclusive lifetime lock in
-//! the first hardening wave, and open attempts fail before cold-start work
-//! when the requested mode cannot be acquired.
+//! PROVES: mutable and read-only opens both hold an exclusive lifetime lock
+//! under the exclusive-only ownership contract, and open attempts fail before
+//! cold-start work when the requested mode cannot be acquired.
 //! CATCHES: mutable/reopen races that allow two writers, read-only opens that
 //! ignore a live mutable owner, or lock guards dropped before the Store handle.
 //! SEEDED: not random; deterministic tempdir-based lock choreography.
@@ -138,7 +138,7 @@ fn mutable_open_holds_exclusive_lock_and_blocks_read_only_until_drop() {
 }
 
 #[test]
-fn read_only_open_is_also_exclusive_in_first_hardening_wave() {
+fn read_only_open_is_also_exclusive_under_ownership_contract() {
     let dir = TempDir::new().expect("temp dir");
     let config = StoreConfig::new(dir.path());
 

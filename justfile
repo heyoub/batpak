@@ -88,5 +88,7 @@ fuzz-chaos:
 
 stress: fuzz chaos fuzz-chaos bench
 
-doc:
+docs:
     cargo xtask docs --open
+
+doc: docs

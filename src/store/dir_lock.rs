@@ -1,7 +1,5 @@
 use crate::store::{StoreError, StoreLockMode};
-use std::fs::{File, OpenOptions};
-#[cfg(unix)]
-use std::os::unix::fs::OpenOptionsExt;
+use std::fs::File;
 use std::path::Path;
 
 pub(crate) const STORE_LOCK_FILENAME: &str = ".batpak.lock";
@@ -18,10 +16,10 @@ impl StoreDirLock {
     pub(crate) fn acquire(data_dir: &Path, mode: StoreLockMode) -> Result<Self, StoreError> {
         let canonical_dir = std::fs::canonicalize(data_dir).map_err(StoreError::Io)?;
         let path = canonical_dir.join(STORE_LOCK_FILENAME);
-        let file = open_lock_file(&path)?;
+        let file = crate::store::platform::lock::open_store_lock_file(&path)?;
 
-        // Wave 1 hardening is intentionally exclusive-only. Read-only handles
-        // are rejected while any live owner exists until shared semantics are
+        // Store opens are intentionally exclusive. Read-only handles are
+        // rejected while any live owner exists until shared semantics are
         // explicitly designed and tested.
         let lock_result = file.try_lock();
 
@@ -33,33 +31,5 @@ impl StoreDirLock {
             }),
             Err(std::fs::TryLockError::Error(error)) => Err(StoreError::Io(error)),
         }
-    }
-}
-
-fn open_lock_file(path: &Path) -> Result<File, StoreError> {
-    #[cfg(unix)]
-    {
-        OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .custom_flags(libc::O_NOFOLLOW)
-            .open(path)
-            .map_err(StoreError::Io)
-    }
-
-    #[cfg(not(unix))]
-    {
-        // Best-effort on non-Unix: std has no O_NOFOLLOW equivalent here, so
-        // this is check-then-open rather than the Unix branch's atomic open.
-        crate::store::cold_start::reject_symlink_leaf(path, "store lock file")?;
-        OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(path)
-            .map_err(StoreError::Io)
     }
 }

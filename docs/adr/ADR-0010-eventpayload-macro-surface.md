@@ -57,7 +57,7 @@ support items for a named-field struct.
 **What it generates:**
 
 1. `impl ::batpak::event::EventPayload for T { const KIND: ::batpak::event::EventKind = ::batpak::event::EventKind::custom(category, type_id); }`
-2. A `#[cfg(test)]`-gated static registration item for test-time collision
+2. An unconditional static registration item for binary-wide collision
    detection (see Collision Detection below).
 3. A `#[cfg(test)]`-gated `#[test]` function that scans the collision registry.
 
@@ -83,9 +83,9 @@ at macro-expansion time with a clear span-pointed error.
 **Generics.** The derive preserves the input type's generic parameters and
 where-clauses (`impl_generics` / `ty_generics` / `where_clause` from
 `syn::Generics::split_for_impl`). It adds no bounds beyond what
-`EventPayload` already requires. The test-time collision registry keys a
+`EventPayload` already requires. The collision registry keys a
 single textual `type_name` per derive site, so practical use is non-generic
-named-field structs; collision-test behavior across multiple generic
+named-field structs; collision behavior across multiple generic
 instantiations of the same derive site is undefined.
 
 **Path hygiene.** The generated `impl` block uses absolute `::batpak::...`
@@ -93,7 +93,7 @@ paths throughout (`::batpak::event::EventPayload`,
 `::batpak::event::EventKind`, `::batpak::event::EventKind::custom`,
 `::batpak::__private::inventory`,
 `::batpak::__private::EventPayloadRegistration`,
-`::batpak::__private::scan_for_kind_collisions`). The `::batpak::` prefix
+`::batpak::__private::assert_no_kind_collisions`). The `::batpak::` prefix
 resolves correctly in two contexts:
 
 - **Downstream crates** — via the root re-export
@@ -123,12 +123,14 @@ attribute touches payload wire identity.
 
 ### Collision Detection
 
-The derive emits a static registration item under `#[cfg(test)]` via the
+The derive emits a static registration item unconditionally via the
 `inventory` crate, re-exported through `batpak::__private::inventory`. A
 generated `#[cfg(test)] #[test]` function per derive site calls
-`::batpak::__private::scan_for_kind_collisions()`, which iterates the
+`::batpak::__private::assert_no_kind_collisions()`, which iterates the
 registry and panics with a clear message if two types share the same
-`(category, type_id)` pair.
+`(category, type_id)` pair. Applications and integration tests can call
+`batpak::event::validate_event_payload_registry()` directly for a structured
+error instead of a panic.
 
 **Scope.** Detection is **per binary**, not per store and not per
 organization. Two separate binaries can each register the same
@@ -136,17 +138,17 @@ organization. Two separate binaries can each register the same
 to be composed into the same test binary will produce a collision panic at
 test time if their kinds overlap.
 
-**Dependency surface.** `inventory::collect!` in `batpak-macros-support` is
-**unconditional** — a library's `#[cfg(test)]` items are not compiled into
-the `cfg(test)` build of a *dependent* crate, so if `collect!` were gated on
-`cfg(test)` inside the support crate, the inventory storage wouldn't exist
-in downstream test binaries and the collision registry would silently
-collect nothing. `inventory::submit!` and iteration, by contrast, are
-`#[cfg(test)]`-only in the derive-generated code, so no registration data
-enters non-test binaries. **The invariant we defend**: `inventory` never
-participates in runtime dispatch or production event routing. `P::KIND` is
-the sole dispatch identity. The `inventory`-backed registry exists for
-test-time collision detection only.
+**Dependency surface.** Both `inventory::collect!` in `batpak-macros-support`
+and derive-generated `inventory::submit!` registrations are unconditional.
+A library's `#[cfg(test)]` items are not compiled into the `cfg(test)` build
+of a dependent crate, so test-gating `submit!` would hide dependency-crate
+payloads from the composing binary. **The invariant we defend**:
+`inventory` never participates in runtime dispatch or production event
+routing. `P::KIND` is the sole dispatch identity. The registry is an
+observability and validation surface: `Store::open` warns once per process by
+default when collisions are linked, and callers can set
+`EventPayloadValidation::FailFast` to reject opens or call
+`validate_event_payload_registry()` explicitly at startup.
 
 ### Typed API Surface (shipped)
 
@@ -190,13 +192,15 @@ their code. Specifically:
 - use `append_typed`, `submit_typed`, and `by_fact_typed` end-to-end
 - see a compile error with a span-pointed message if `(category, type_id)` is
   missing, unknown-keyed, duplicated, or out of range
-- see a test-time panic if another type in the same binary claims the same
+- see a test-time panic, open-time warning, explicit validator error, or
+  fail-fast open error if another type in the same binary claims the same
   `(category, type_id)` pair
 
 All four have shipped. See `tests/event_payload_surface.rs` for the positive
 surface, `tests/derive_eventpayload_errors.rs` + `tests/ui/ep_*.{rs,stderr}`
-for span-pointed compile errors, and `fixtures/downstream/` for the
-downstream path-hygiene proof.
+for span-pointed compile errors, `fixtures/downstream/` for the
+path-hygiene fixture, and `fixtures/kind-collision-composer/` for cross-crate
+collision detection.
 
 ---
 

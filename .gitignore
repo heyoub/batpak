@@ -5,7 +5,8 @@
 # `/target/` line for clarity; `**/target/` is the real guarantee.
 /target/
 **/target/
-/Cargo.lock
+# Keep the root Cargo.lock tracked: this workspace includes binary developer
+# tools, and release verification should use a reproducible dependency graph.
 /.artifacts/
 /.integrity-cache/
 /.cache/
@@ -21,7 +22,6 @@
 .DS_Store
 .idea/
 .vscode/
-mutants*/
 # Nested Cargo.lock files from path-dependency fixture crates — none of the
 # fixtures ship, so their lockfiles are cache, not source of truth.
 fixtures/*/Cargo.lock

@@ -1,6 +1,6 @@
 [package]
 name = "batpak"
-version = "0.6.0"
+version = "0.7.0"
 edition = "2021"
 rust-version = "1.92"
 license = "MIT OR Apache-2.0"
@@ -9,8 +9,8 @@ repository = "https://github.com/TheFreeBatteryFactory/batpak"
 homepage = "https://github.com/TheFreeBatteryFactory/batpak"
 documentation = "https://docs.rs/batpak"
 readme = "README.md"
-keywords = ["event-sourcing", "audit-trail", "causal-graph", "hash-chain", "policy-engine"]
-categories = ["database", "concurrency"]
+keywords = ["event-sourcing", "audit-trail", "causal-graph", "hash-chain", "append-only"]
+categories = ["database-implementations", "data-structures"]
 exclude = [
     ".devcontainer/**",
     ".github/**",
@@ -50,8 +50,8 @@ dangerous-test-hooks = ["dep:fastrand"]
 uuid = { version = "1", features = ["v7"] }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
-batpak-macros-support = { path = "./crates/macros-support", version = "0.6.0" }
-batpak-macros = { path = "./crates/macros", version = "0.6.0" }
+batpak-macros-support = { path = "./crates/macros-support", version = "0.7.0" }
+batpak-macros = { path = "./crates/macros", version = "0.7.0" }
 blake3 = { version = "1", optional = true }
 flume = "0.12"
 crc32fast = "1"
@@ -62,6 +62,7 @@ tracing = "0.1"
 memmap2 = "0.9"
 rayon = "1.10"
 fastrand = { version = "2", optional = true }
+# tempfile is used for atomic temp-file writes in production storage paths.
 tempfile = "3"
 libc = "0.2"
 ed25519-compact = { version = "2.2.0", default-features = false, features = ["std"] }
@@ -69,7 +70,7 @@ zeroize = "1"
 # NO TOKIO. Invariant 1.
 
 [dev-dependencies]
-batpak-bench-support = { path = "crates/bench-support", version = "0.6.0" }
+batpak-bench-support = { path = "crates/bench-support", version = "0.7.0" }
 proptest = "1"
 arbitrary = { version = "1", features = ["derive"] }
 criterion = { version = "0.8", features = ["html_reports"] }
@@ -82,6 +83,8 @@ tracing-subscriber = { version = "0.3", features = ["fmt", "std"] }
 
 [build-dependencies]
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+crc32fast = "1"
 yaml_serde = "0.10.4"
 proc-macro2 = { version = "1", features = ["span-locations"] }
 syn = { version = "2", features = ["full", "visit"] }
@@ -168,6 +171,10 @@ harness = false
 
 [[bench]]
 name = "ancestry_walk"
+harness = false
+
+[[bench]]
+name = "frontier_waiters"
 harness = false
 
 # Profile settings (NOT in .cargo/config.toml — they're ignored there)

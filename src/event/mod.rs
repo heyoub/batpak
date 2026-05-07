@@ -15,7 +15,10 @@ pub use decode::{DecodeSource, DecodeTyped, TypedDecodeError};
 pub use hash::HashChain;
 pub use header::EventHeader;
 pub use kind::{EventKind, EventKindError};
-pub use payload::EventPayload;
+pub use payload::{
+    revalidate_event_payload_registry, validate_event_payload_registry, EventPayload,
+    EventPayloadKindCollision, EventPayloadRegistryError, EventPayloadValidation,
+};
 pub use sourcing::{
     EventSourced, JsonValueInput, MultiDispatchError, MultiReactive, ProjectionEvent,
     ProjectionInput, ProjectionPayload, RawMsgpackInput, Reactive, ReplayLane, TypedReactive,

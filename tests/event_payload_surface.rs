@@ -8,10 +8,13 @@
 //! try_submit_reaction_typed, by_fact_typed, BatchAppendItem::typed,
 //! Transition::from_payload.
 //!
-//! PROVES: LAW-003 (No Orphan Infrastructure), INV-OBS (every pub API has witness)
-//! DEFENDS: FM-007 (Island Syndrome)
+//! PROVES: LAW-003 (No Orphan Infrastructure), INV-OBS (every pub API has witness).
+//! CATCHES: typed payload public surface drift and clean-registry validator regressions.
+//! SEEDED: deterministic / no randomness.
 
-use batpak::__private::{inventory, scan_for_kind_collisions, EventPayloadRegistration};
+use batpak::__private::{
+    assert_no_kind_collisions, inventory, scan_for_kind_collisions, EventPayloadRegistration,
+};
 use batpak::prelude::*;
 use batpak::store::{AppendOptions, BatchAppendItem, CausationRef, Store};
 use batpak::typestate::transition::{StateMarker, Transition};
@@ -84,6 +87,7 @@ fn derive_private_registry_surface_is_available_to_test_binaries() {
     // With the two payloads in this file using distinct kind bits, the
     // shared collision scanner must be callable and must not panic.
     scan_for_kind_collisions();
+    assert_no_kind_collisions();
 }
 
 // ─── append_typed ─────────────────────────────────────────────────────────────

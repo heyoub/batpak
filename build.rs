@@ -1,7 +1,7 @@
 // justifies: INV-BUILD-FAIL-FAST; build.rs consolidates panic through the `fail` helper below, see build.rs and traceability/invariants.yaml
 #![allow(clippy::panic)]
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
@@ -38,6 +38,7 @@ struct PubItemAllowlistWitness {
 // errors instead of cryptic compiler failures. See README.md, GUIDE.md, and
 // REFERENCE.md for the current truth hierarchy.
 fn main() {
+    println!("cargo:rerun-if-env-changed=BATPAK_PLATFORM_PROFILE");
     println!("cargo:rerun-if-changed=Cargo.toml");
     println!("cargo:rerun-if-changed=src/");
     println!("cargo:rerun-if-changed=tests/");
@@ -62,6 +63,255 @@ fn main() {
     check_store_surface_honesty();
     check_no_fixed_temp_patterns();
     check_pub_items_have_tests();
+    check_platform_profile_env();
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct BuildPlatformProfile {
+    schema_version: u16,
+    host: BuildPlatformProfileHost,
+    store_path: BuildStorePathProfile,
+    admission: BuildPlatformAdmissionProfile,
+    fingerprint_crc32: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct BuildPlatformProfileHost {
+    monotonic_clock: BuildClockEvidence,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct BuildStorePathProfile {
+    path_status: BuildStorePathStatusEvidence,
+    parent_dir_sync: BuildParentDirSyncEvidence,
+    lock_leaf_symlink_protection: BuildLockLeafSymlinkProtection,
+    mmap_index: BuildMmapEvidence,
+    sealed_segment_mmap: BuildMmapEvidence,
+    active_segment_read: BuildActiveSegmentReadEvidence,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct BuildPlatformAdmissionProfile {
+    store_lock: BuildStoreLockAdmissionSummary,
+    parent_dir_sync: BuildParentDirSyncAdmissionSummary,
+    mmap_index: BuildMmapAdmissionSummary,
+    sealed_segment_mmap: BuildMmapAdmissionSummary,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+enum BuildClockEvidence {
+    ProcessLocalInstantAnchor,
+    Unknown,
+    ProbeFailed,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+enum BuildStorePathStatusEvidence {
+    ObservedDirectory,
+    UnknownMissing,
+    ObservedUnsupportedNotDirectory,
+    ProbeFailed { reason: String },
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+enum BuildParentDirSyncEvidence {
+    UnixFsync,
+    RenameOnly,
+    Unknown,
+    ProbeFailed,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+enum BuildLockLeafSymlinkProtection {
+    AtomicNoFollow,
+    BestEffortCheckThenOpen,
+    Unknown,
+    ObservedUnsupported,
+    ProbeFailed,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+enum BuildMmapEvidence {
+    FileBacked,
+    Unknown,
+    ObservedUnsupported,
+    ProbeFailed,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+enum BuildActiveSegmentReadEvidence {
+    UnixReadAt,
+    LockedSeekRead,
+    Unknown,
+    ProbeFailed,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+enum BuildStoreLockAdmissionSummary {
+    AtomicNoFollow,
+    BestEffortCheckThenOpen,
+    Rejected,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+enum BuildParentDirSyncAdmissionSummary {
+    UnixFsync,
+    RenameOnly,
+    Rejected,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+enum BuildMmapAdmissionSummary {
+    FileBacked,
+    Rejected,
+}
+
+#[derive(Serialize)]
+struct BuildPlatformProfileBody<'a> {
+    schema_version: u16,
+    host: &'a BuildPlatformProfileHost,
+    store_path: &'a BuildStorePathProfile,
+    admission: &'a BuildPlatformAdmissionProfile,
+}
+
+fn check_platform_profile_env() {
+    let Ok(path) = std::env::var("BATPAK_PLATFORM_PROFILE") else {
+        return;
+    };
+    println!("cargo:rerun-if-changed={path}");
+    let bytes = fs::read(&path).unwrap_or_else(|error| {
+        fail(&format!(
+            "cannot read BATPAK_PLATFORM_PROFILE={path}: {error}"
+        ))
+    });
+    let profile: BuildPlatformProfile = serde_json::from_slice(&bytes).unwrap_or_else(|error| {
+        fail(&format!(
+            "cannot decode BATPAK_PLATFORM_PROFILE={path}: {error}"
+        ))
+    });
+    if profile.schema_version != 1 {
+        fail(&format!(
+            "BATPAK_PLATFORM_PROFILE={path} has schema_version {}; expected 1",
+            profile.schema_version
+        ));
+    }
+    validate_build_platform_profile_semantics(&profile, &path);
+    let body = BuildPlatformProfileBody {
+        schema_version: profile.schema_version,
+        host: &profile.host,
+        store_path: &profile.store_path,
+        admission: &profile.admission,
+    };
+    let body_bytes = serde_json::to_vec(&body).unwrap_or_else(|error| {
+        fail(&format!(
+            "cannot canonicalize BATPAK_PLATFORM_PROFILE={path}: {error}"
+        ))
+    });
+    let computed = crc32fast::hash(&body_bytes);
+    if computed != profile.fingerprint_crc32 {
+        fail(&format!(
+            "BATPAK_PLATFORM_PROFILE={path} fingerprint_crc32 {} does not match computed {}",
+            profile.fingerprint_crc32, computed
+        ));
+    }
+    println!("cargo:rustc-env=BATPAK_PLATFORM_PROFILE_PATH={path}");
+    println!("cargo:rustc-env=BATPAK_PLATFORM_PROFILE_FINGERPRINT_CRC32={computed}");
+}
+
+fn validate_build_platform_profile_semantics(profile: &BuildPlatformProfile, path: &str) {
+    let expected_store_lock = match profile.store_path.lock_leaf_symlink_protection {
+        BuildLockLeafSymlinkProtection::AtomicNoFollow => {
+            BuildStoreLockAdmissionSummary::AtomicNoFollow
+        }
+        BuildLockLeafSymlinkProtection::BestEffortCheckThenOpen => {
+            BuildStoreLockAdmissionSummary::BestEffortCheckThenOpen
+        }
+        BuildLockLeafSymlinkProtection::Unknown
+        | BuildLockLeafSymlinkProtection::ObservedUnsupported
+        | BuildLockLeafSymlinkProtection::ProbeFailed => BuildStoreLockAdmissionSummary::Rejected,
+    };
+    if profile.admission.store_lock != expected_store_lock {
+        fail(&format!(
+            "BATPAK_PLATFORM_PROFILE={path} has inconsistent store_lock admission {:?}; expected {:?} from lock evidence {:?}",
+            profile.admission.store_lock,
+            expected_store_lock,
+            profile.store_path.lock_leaf_symlink_protection
+        ));
+    }
+
+    let expected_parent_dir_sync = match profile.store_path.parent_dir_sync {
+        BuildParentDirSyncEvidence::UnixFsync => BuildParentDirSyncAdmissionSummary::UnixFsync,
+        BuildParentDirSyncEvidence::RenameOnly => BuildParentDirSyncAdmissionSummary::RenameOnly,
+        BuildParentDirSyncEvidence::Unknown | BuildParentDirSyncEvidence::ProbeFailed => {
+            BuildParentDirSyncAdmissionSummary::Rejected
+        }
+    };
+    if profile.admission.parent_dir_sync != expected_parent_dir_sync {
+        fail(&format!(
+            "BATPAK_PLATFORM_PROFILE={path} has inconsistent parent_dir_sync admission {:?}; expected {:?} from parent-dir evidence {:?}",
+            profile.admission.parent_dir_sync,
+            expected_parent_dir_sync,
+            profile.store_path.parent_dir_sync
+        ));
+    }
+
+    validate_build_path_mmap_consistency(path, "mmap_index", profile);
+    validate_build_path_mmap_consistency(path, "sealed_segment_mmap", profile);
+    validate_build_mmap_admission(
+        path,
+        "mmap_index",
+        &profile.store_path.mmap_index,
+        &profile.admission.mmap_index,
+    );
+    validate_build_mmap_admission(
+        path,
+        "sealed_segment_mmap",
+        &profile.store_path.sealed_segment_mmap,
+        &profile.admission.sealed_segment_mmap,
+    );
+}
+
+fn validate_build_path_mmap_consistency(path: &str, field: &str, profile: &BuildPlatformProfile) {
+    let evidence = match field {
+        "mmap_index" => &profile.store_path.mmap_index,
+        "sealed_segment_mmap" => &profile.store_path.sealed_segment_mmap,
+        _ => fail(&format!(
+            "internal build profile validation bug: unknown mmap field {field}"
+        )),
+    };
+    let required = match profile.store_path.path_status {
+        BuildStorePathStatusEvidence::ObservedDirectory => return,
+        BuildStorePathStatusEvidence::ObservedUnsupportedNotDirectory => {
+            BuildMmapEvidence::ObservedUnsupported
+        }
+        BuildStorePathStatusEvidence::UnknownMissing => BuildMmapEvidence::Unknown,
+        BuildStorePathStatusEvidence::ProbeFailed { .. } => BuildMmapEvidence::ProbeFailed,
+    };
+    if evidence != &required {
+        fail(&format!(
+            "BATPAK_PLATFORM_PROFILE={path} has inconsistent {field} evidence {evidence:?}; expected {required:?} from path_status {:?}",
+            profile.store_path.path_status
+        ));
+    }
+}
+
+fn validate_build_mmap_admission(
+    path: &str,
+    field: &str,
+    evidence: &BuildMmapEvidence,
+    admission: &BuildMmapAdmissionSummary,
+) {
+    let expected = match evidence {
+        BuildMmapEvidence::FileBacked => BuildMmapAdmissionSummary::FileBacked,
+        BuildMmapEvidence::Unknown
+        | BuildMmapEvidence::ObservedUnsupported
+        | BuildMmapEvidence::ProbeFailed => BuildMmapAdmissionSummary::Rejected,
+    };
+    if admission != &expected {
+        fail(&format!(
+            "BATPAK_PLATFORM_PROFILE={path} has inconsistent {field} admission {admission:?}; expected {expected:?} from mmap evidence {evidence:?}"
+        ));
+    }
 }
 
 /// Audit Loop Layer 2 enforcement: no stub markers in production src/.

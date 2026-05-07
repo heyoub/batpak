@@ -1081,6 +1081,39 @@ mod tests {
     }
 
     #[test]
+    fn entity_local_projection_fast_paths_round_trip() {
+        let si = ScanIndex::for_config(&crate::store::IndexConfig {
+            topology: crate::store::IndexTopology::entity_local(),
+            incremental_projection: false,
+            enable_checkpoint: true,
+            enable_mmap_index: true,
+        });
+        si.insert(&make_entry(KIND_A, 0, "entity:projection", "scope:test"));
+        si.insert(&make_entry(KIND_A, 1, "entity:projection", "scope:test"));
+
+        assert_eq!(
+            si.entity_generation("entity:projection"),
+            Some(2),
+            "PROPERTY: entity-local topology must expose an entity generation fast path for projection watchers"
+        );
+
+        let type_id = std::any::TypeId::of::<u64>();
+        assert!(
+            si.store_cached_projection("entity:projection", type_id, b"cached".to_vec(), 1),
+            "PROPERTY: storing a group-local projection for an existing entity must report success"
+        );
+        let slot = si
+            .cached_projection("entity:projection", type_id)
+            .expect("cached projection slot");
+        assert_eq!(slot.bytes, b"cached");
+        assert_eq!(slot.watermark, 1);
+        assert_eq!(
+            slot.generation, 2,
+            "PROPERTY: cached projection slots must be stamped with the entity group's current generation"
+        );
+    }
+
+    #[test]
     fn scan_capabilities_track_tile_count_for_tiled_views() {
         let si = ScanIndex::for_config(&crate::store::IndexConfig {
             topology: crate::store::IndexTopology::tiled(),

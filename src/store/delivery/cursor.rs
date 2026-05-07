@@ -1,5 +1,4 @@
 use crate::coordinate::Region;
-use crate::store::cold_start::persist_with_parent_fsync;
 use crate::store::delivery::observation::{AtLeastOnce, CheckpointId};
 use crate::store::index::{IndexEntry, StoreIndex};
 use crate::store::{RestartPolicy, Store, StoreError};
@@ -346,11 +345,13 @@ impl Cursor {
             tmp.write_all(&bytes)?;
             tmp.flush()?;
         }
-        // Fsync the temp contents before rename; `persist_with_parent_fsync`
+        // Fsync the temp contents before rename; `persist_temp_with_parent_sync`
         // does a defensive fsync too, but doing it here keeps the
         // durability boundary explicit.
-        tmp.as_file().sync_all()?;
-        persist_with_parent_fsync(tmp, &final_path)?;
+        crate::store::platform::sync::sync_file_all_io(tmp.as_file())?;
+        let admission = crate::store::platform::sync::admit_current_parent_dir_sync()
+            .map_err(|error| std::io::Error::other(error.to_string()))?;
+        crate::store::platform::sync::persist_temp_with_parent_sync(tmp, &final_path, admission)?;
         Ok(())
     }
 

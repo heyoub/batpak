@@ -12,6 +12,8 @@ all-features = true
 ignore = []
 
 [licenses]
+# Deliberately narrow but practical for the Rust storage ecosystem. Additions
+# should be reviewed when a dependency needs a new license family.
 allow = [
     "MIT",
     "Apache-2.0",

@@ -1,7 +1,7 @@
 # ADR-0017: At-Least-Once Witness Surface
 
 ## Status
-Accepted
+Accepted (shipped in 0.7.0).
 
 ## Context
 `ObservedOnce` is the exactly-once composition witness: it combines a
@@ -64,6 +64,7 @@ Exactly-once composition now has a type-level path:
 ## References
 - [ADR-0001: Sync-Only Store API](ADR-0001-sync-only-store.md)
 - [ADR-0011: Reactor Canal](ADR-0011-reactor-canal.md)
+- [ADR-0014: Durable Frontier Observability](ADR-0014-durable-frontier.md)
 - `traceability/invariants.yaml`: `INV-DELIVERY-AT-LEAST-ONCE-WITNESS`
 - `traceability/flows.yaml`: `FLOW-DELIVERY-AT-LEAST-ONCE-WITNESS`
 - `tests/cursor_at_least_once_witness.rs`
