@@ -564,6 +564,7 @@ impl Reader {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::coordinate::DagPosition;
     use crate::store::DiskPos;
     use tempfile::TempDir;
 
@@ -693,6 +694,56 @@ mod tests {
     }
 
     #[test]
+    fn buffer_pool_retains_at_most_sixteen_released_buffers() {
+        let (reader, _dir) = test_reader();
+
+        for _ in 0..17 {
+            reader.release_buffer(vec![0u8; 32]);
+        }
+
+        let retained = reader.buffer_pool.lock().len();
+        assert_eq!(
+            retained, 16,
+            "PROPERTY: release_buffer must cap the internal pool at exactly 16 buffers; \
+             retaining a seventeenth buffer weakens the bounded-memory contract"
+        );
+    }
+
+    #[test]
+    fn batch_marker_payload_decode_ignores_marker_payload_bytes() {
+        let header = EventHeader::new(
+            1,
+            1,
+            None,
+            1,
+            DagPosition::root(),
+            0,
+            EventKind::SYSTEM_BATCH_BEGIN,
+        );
+        let event = Event {
+            header,
+            payload: vec![0xC1],
+            hash_chain: Some(HashChain::default()),
+        };
+        let frame = FramePayload {
+            event,
+            entity: "entity:batch-marker".to_owned(),
+            scope: "scope:test".to_owned(),
+        };
+        let encoded = rmp_serde::to_vec_named(&frame).expect("encode batch marker frame");
+
+        let decoded = Reader::decode_frame_payload_value(&encoded)
+            .expect("batch marker payload bytes are ignored by value decode");
+
+        assert_eq!(
+            decoded.event.payload,
+            serde_json::Value::Null,
+            "PROPERTY: SYSTEM_BATCH_BEGIN/COMMIT markers carry count semantics in the header; \
+             value decoding must not deserialize their raw marker payload bytes"
+        );
+    }
+
+    #[test]
     fn set_active_segment_advances_the_sealed_cutoff() {
         let (reader, _dir) = test_reader();
 
@@ -735,6 +786,10 @@ mod tests {
     fn checked_frame_range_rejects_overflow_and_oversized_lengths() {
         assert!(Reader::checked_frame_range(1, u64::MAX, 16, 1024).is_err());
         assert!(Reader::checked_frame_len(1, 4).is_err());
+        assert!(
+            Reader::checked_frame_len(1, FRAME_HEADER_BYTES as u32).is_ok(),
+            "PROPERTY: a frame length exactly equal to the frame header size is the minimum valid empty-payload frame"
+        );
         assert!(Reader::checked_frame_len(
             1,
             u32::try_from(FRAME_HEADER_BYTES + segment::MAX_FRAME_PAYLOAD)

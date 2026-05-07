@@ -3,8 +3,12 @@ use crate::event::EventKind;
 use crate::store::segment::{self, SEGMENT_MAGIC};
 use crate::store::StoreError;
 use std::fs::File;
-use std::io::{ErrorKind, Read};
+use std::io::{Error, ErrorKind, Read};
 use std::path::Path;
+
+fn frame_header_error_ends_scan(error: &Error) -> bool {
+    error.kind() == ErrorKind::UnexpectedEof
+}
 
 impl Reader {
     /// Scan an entire segment for cold start. Returns all events in order.
@@ -52,7 +56,7 @@ impl Reader {
             let mut frame_header = [0u8; 8];
             match file.read_exact(&mut frame_header) {
                 Ok(()) => {}
-                Err(error) if error.kind() == ErrorKind::UnexpectedEof => break,
+                Err(error) if frame_header_error_ends_scan(&error) => break,
                 Err(error) => return Err(StoreError::Io(error)),
             }
 
@@ -127,5 +131,22 @@ impl Reader {
             }
         }
         Ok(entries)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn frame_header_error_policy_only_treats_eof_as_clean_end() {
+        assert!(
+            frame_header_error_ends_scan(&Error::from(ErrorKind::UnexpectedEof)),
+            "PROPERTY: EOF while reading the next frame header is the clean segment terminator"
+        );
+        assert!(
+            !frame_header_error_ends_scan(&Error::from(ErrorKind::InvalidData)),
+            "PROPERTY: non-EOF frame-header read errors must surface as StoreError::Io, not end the scan"
+        );
     }
 }
