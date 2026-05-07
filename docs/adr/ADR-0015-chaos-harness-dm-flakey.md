@@ -1,7 +1,7 @@
 # ADR-0015: dm-flakey Chaos Harness
 
 ## Status
-Accepted
+Accepted (shipped in 0.7.0).
 
 ## Context
 Phase 0 durable-frontier chaos tests proved writer-thread panic behavior inside

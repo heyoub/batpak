@@ -277,7 +277,7 @@ impl NativeCache {
     /// Returns `StoreError::CacheFailed` if the root directory cannot be created.
     pub fn open(path: impl AsRef<std::path::Path>) -> Result<Self, StoreError> {
         let root = path.as_ref().to_path_buf();
-        reject_symlink_leaf(&root)?;
+        crate::store::platform::fs::reject_cache_symlink_leaf(&root)?;
         std::fs::create_dir_all(&root).map_err(StoreError::cache_error)?;
         Ok(Self { root })
     }
@@ -298,7 +298,17 @@ impl ProjectionCache for NativeCache {
     }
 
     fn get(&self, key: &[u8]) -> Result<Option<(Vec<u8>, CacheMeta)>, StoreError> {
-        let (_shard, path) = self.key_path(key);
+        let (shard, path) = self.key_path(key);
+        match std::fs::metadata(&shard) {
+            Ok(meta) if meta.is_dir() => {}
+            Ok(_) => {
+                return Err(StoreError::CacheFailed(Box::new(std::io::Error::other(
+                    format!("cache shard path is not a directory: {}", shard.display()),
+                ))));
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(StoreError::CacheFailed(Box::new(e))),
+        }
         match std::fs::read(&path) {
             Ok(bytes) => match CacheMeta::decode_from_bytes(&bytes) {
                 Ok((value, meta)) => Ok(Some((value, meta))),
@@ -320,9 +330,9 @@ impl ProjectionCache for NativeCache {
         let (shard_dir, final_path) = self.key_path(key);
 
         // Ensure shard directory exists (lazy creation).
-        reject_symlink_leaf(&shard_dir)?;
+        crate::store::platform::fs::reject_cache_symlink_leaf(&shard_dir)?;
         std::fs::create_dir_all(&shard_dir).map_err(StoreError::cache_error)?;
-        reject_symlink_leaf(&final_path)?;
+        crate::store::platform::fs::reject_cache_symlink_leaf(&final_path)?;
 
         let buf = meta.encode_with_value(value);
 
@@ -416,21 +426,6 @@ impl ProjectionCache for NativeCache {
         // properly; `NativeCache` exists in the no-op camp by design, and
         // there is no public `Store` API path to invoke it.
         Ok(())
-    }
-}
-
-fn reject_symlink_leaf(path: &std::path::Path) -> Result<(), StoreError> {
-    match std::fs::symlink_metadata(path) {
-        Ok(meta) if meta.file_type().is_symlink() => {
-            Err(StoreError::CacheFailed(Box::new(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                format!(
-                    "refusing to use cache path through symlink {}",
-                    path.display()
-                ),
-            ))))
-        }
-        Ok(_) | Err(_) => Ok(()),
     }
 }
 

@@ -779,6 +779,38 @@ mod tests {
     }
 
     #[test]
+    fn reserved_kind_fallback_stats_merge_accumulates_effect_histogram() {
+        let mut left = ReservedKindFallbackStats::default();
+        left.record_effect(0xD0AA);
+
+        let mut right = ReservedKindFallbackStats::default();
+        right.record_effect(0xD0AA);
+        right.record_effect(0xD0AA);
+        right.record_system(0x00AA);
+
+        left.merge_from(&right);
+
+        assert_eq!(
+            left.effect, 3,
+            "PROPERTY: effect fallback totals must accumulate across merged SIDX scan shards"
+        );
+        assert_eq!(
+            left.effect_histogram.get(&0xD0AA),
+            Some(&3),
+            "PROPERTY: effect fallback histograms must add counts rather than subtracting or replacing them"
+        );
+        assert_eq!(
+            left.system, 1,
+            "SANITY: merge still carries independent system fallback counts"
+        );
+        assert_eq!(
+            left.system_histogram.get(&0x00AA),
+            Some(&1),
+            "SANITY: merge still carries independent system fallback histograms"
+        );
+    }
+
+    #[test]
     fn sidx_entry_to_cold_start_row_preserves_index_and_header_fields() {
         let entry = SidxEntry {
             event_id: 0xDE,
@@ -1034,6 +1066,24 @@ mod tests {
         let tmp = NamedTempFile::new().expect("create temp file");
         let result = read_footer(tmp.path()).expect("must not IO-error");
         assert!(result.is_none(), "empty file must return None");
+    }
+
+    #[test]
+    fn read_footer_allows_empty_string_table_range_to_reach_decoder() {
+        let mut bytes = vec![0xA5; 32];
+        bytes.extend_from_slice(&32u64.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes.extend_from_slice(SIDX_MAGIC);
+
+        let mut tmp = NamedTempFile::new().expect("create temp file");
+        tmp.write_all(&bytes).expect("write malformed footer");
+        tmp.flush().expect("flush malformed footer");
+
+        let err = read_footer(tmp.path()).expect_err("empty string table bytes are malformed");
+        assert!(
+            matches!(err, StoreError::Serialization(_)),
+            "PROPERTY: string_table_offset == entries_start is a valid range boundary; malformed empty bytes must reach the MessagePack decoder instead of being rejected as an offset-overlap corruption"
+        );
     }
 
     // ── string table interning across multiple entries ────────────────────────

@@ -4,6 +4,29 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- Added a private store platform backend for target-sensitive fs/sync/lock/
+  clock/mmap mechanics, descriptive platform evidence, admission summaries,
+  and opt-in profile-verified open through
+  `StoreConfig::with_platform_profile_path(...)`.
+- Added `cargo xtask platform doctor|probe|verify|bless|audit` for platform
+  profile workflows, plus build-time `BATPAK_PLATFORM_PROFILE` validation that
+  checks schema, CRC32 fingerprint, and evidence/admission consistency without
+  probing live hardware.
+- Added `StoreDiagnostics::platform_evidence` so callers can inspect reported
+  store-path platform posture.
+- Added `StoreError::PlatformProfileInvalid`,
+  `StoreError::PlatformProfileMismatch`, and
+  `StoreError::PlatformAdmissionFailed` as fail-closed operational errors.
+
+### Changed
+- Store internals now route target-sensitive machine contact through
+  `src/store/platform/`, and structural checks reject new direct store runtime
+  uses of file sync, mmap, target cfg, lock open flag, and positional-read
+  primitives outside that room.
+
+## [0.7.0] - 2026-05-04
+
 ### Changed
 - **Breaking**: `cursor_worker` handler bounds now receive a third parameter,
   `Option<&AtLeastOnce>`. Durable workers with a `checkpoint_id` receive
@@ -11,6 +34,21 @@ All notable changes to this project will be documented in this file.
   `react_loop_multi`, and `react_loop_multi_raw` handler bounds receive the
   same parameter. `AtLeastOnce` now exposes
   `checkpoint_id(&self) -> &CheckpointId` for read-only inspection.
+- Internal workspace crates (`batpak-macros-support`, `batpak-macros`, and
+  `batpak-bench-support`) are now publishable so the main crate can resolve
+  its crates.io dependency graph without path overrides.
+- `#[derive(EventPayload)]` registrations are now linked unconditionally so
+  cross-crate duplicate `(category, type_id)` assignments are visible to a
+  composing binary. `Store::open` warns once per process by default, and
+  callers can opt into `EventPayloadValidation::FailFast` or call
+  `validate_event_payload_registry()` explicitly. This makes release-build
+  binaries carry the small static registry entries needed for validation; the
+  registry is not used for runtime dispatch.
+- `cargo xtask structural` now enforces `HARNESS_LEDGER.md` schema,
+  doctrine-bearing module headers, and capped 500-line harness debt entries.
+- Added a `frontier_waiters` benchmark surface for many concurrent
+  `wait_for_*` and append-gate waiters under the shared wake-all strategy,
+  covering both same-target and spread-target waiter distributions.
 - Production `expect(...)` use is now denied for non-test builds unless a site
   carries an explicit local escape hatch for a documented invariant.
 - Runtime append, batch, cursor, and scan paths now fail closed instead of
@@ -39,10 +77,14 @@ All notable changes to this project will be documented in this file.
   ) -> Result<(), Self::Error>
   ```
 
-### Clarified
+### Documentation
+- Added release polish for adoption paths: README badges and install line,
+  docs.rs typed-first quickstart, examples index run commands, operational
+  observability guidance, production checklist, and runnable signed-receipt
+  / lifecycle examples.
 - Store ownership is now documented as a lifetime-held directory lock:
   second mutable opens and concurrent read-only opens fail with `StoreLocked`
-  in the current exclusive-only hardening wave instead of racing the same
+  under the exclusive-only store ownership contract instead of racing the same
   store directory.
 - Lock-file symlink handling is now described honestly across platforms:
   Unix uses `O_NOFOLLOW`, while non-Unix targets currently do a best-effort

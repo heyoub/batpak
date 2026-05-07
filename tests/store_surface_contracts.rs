@@ -202,6 +202,7 @@ fn index_entry_causation_helpers() {
     let reaction_is_root_cause = react_entry.is_root_cause();
     let reaction_is_correlated = react_entry.is_correlated();
     let reaction_is_caused_by_root = react_entry.is_caused_by(root.event_id);
+    let reaction_is_caused_by_unrelated = react_entry.is_caused_by(root.event_id.wrapping_add(1));
     assert!(
         !reaction_is_root_cause,
         "PROPERTY: a reaction event with an explicit cause must not be identified as a root cause.\n\
@@ -221,6 +222,13 @@ fn index_entry_causation_helpers() {
         "PROPERTY: a reaction event must report is_caused_by(root.event_id) == true.\n\
          Investigate: src/store/mod.rs IndexEntry::is_caused_by.\n\
          Common causes: causation_id not stored in reaction frame, is_caused_by checks wrong field.\n\
+         Run: cargo test --test store_surface_contracts index_entry_causation_helpers"
+    );
+    assert!(
+        !reaction_is_caused_by_unrelated,
+        "PROPERTY: is_caused_by must be exact, not a broad 'has any cause' predicate.\n\
+         Investigate: src/store/index/mod.rs IndexEntry::is_caused_by.\n\
+         Common causes: is_caused_by always returns true for caused events.\n\
          Run: cargo test --test store_surface_contracts index_entry_causation_helpers"
     );
 

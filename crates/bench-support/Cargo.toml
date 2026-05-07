@@ -1,9 +1,16 @@
 [package]
 name = "batpak-bench-support"
-version = "0.6.0"
+version = "0.7.0"
 edition = "2021"
+rust-version = "1.92"
 license = "MIT OR Apache-2.0"
-publish = false
+description = "Criterion benchmark support helpers for batpak."
+repository = "https://github.com/TheFreeBatteryFactory/batpak"
+homepage = "https://github.com/TheFreeBatteryFactory/batpak"
+documentation = "https://docs.rs/batpak-bench-support"
+readme = "README.md"
+keywords = ["event-sourcing", "benchmark"]
+categories = ["development-tools::profiling"]
 
 [dependencies]
 criterion = { version = "0.8", features = ["html_reports"] }

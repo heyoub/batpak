@@ -222,7 +222,7 @@ impl fmt::Display for CoordinateError {
             ),
             Self::PathTraversal => write!(
                 f,
-                "coordinate component contains a forbidden path-traversal substring"
+                "coordinate component contains a forbidden path-traversal substring (`..` or `/`)"
             ),
         }
     }

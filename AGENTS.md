@@ -8,12 +8,13 @@
     - `segment/` — `mod.rs` (frame format, compaction), `scan.rs` (segment reading), `sidx.rs` (SIDX footer)
     - `index/` — `mod.rs` (in-memory query engine), `columnar.rs` (SoA/AoSoA overlays), `interner.rs` (string interning)
     - `cold_start/` — `mod.rs` (open/restore orchestration), `checkpoint.rs`, `mmap.rs`, `rebuild.rs`
+    - `platform/` — target-sensitive machine-contact helpers and evidence boundary: fs/sync/lock/clock/mmap
     - `projection/` — `mod.rs` (cache traits), `flow.rs` (replay + incremental apply), `watch.rs`
     - `ancestry/` — `mod.rs`, `by_hash.rs`, `by_clock.rs`
-    - `delivery/` — `subscription.rs` (lossy push), `cursor.rs` (ordered pull replay with optional durable checkpoints)
-    - Flat files: `append.rs` (`BatchAppendItem`, `CausationRef`, `AppendOptions`), `lifecycle.rs`, `hidden_ranges.rs`, `config.rs`, `error.rs`, `stats.rs`
+    - `delivery/` — `subscription.rs` (lossy push), `cursor.rs` (ordered pull replay with optional durable checkpoints), `observation.rs` (delivery witness types)
+    - Flat files: `append.rs` (`BatchAppendItem`, `CausationRef`, `AppendOptions`), `gate.rs` (`DurabilityGate`), `lifecycle.rs`, `hidden_ranges.rs`, `config.rs`, `error.rs`, `stats.rs`, `reactor_typed.rs`
     - `fault.rs` — fault injection (dangerous-test-hooks feature)
-- `tests/`: integration, property, compile-fail, and perf-gate tests (30 files)
+- `tests/`: integration, property, compile-fail, and perf-gate tests
 - `examples/`: runnable usage patterns
 - `benches/`: Criterion surfaces
 - `tools/integrity/`: traceability and structural detectors
@@ -21,7 +22,7 @@
 - `README.md`: primary repo entrypoint
 - `GUIDE.md`: human-first workflows and usage
 - `REFERENCE.md`: technical reference and invariants
-- `docs/adr/`: decision records
+- `docs/adr/`: decision records; start with `docs/adr/README.md` for the index
 - `traceability/`: requirements, invariants, flows, artifacts
 
 ## Canonical Commands
@@ -32,6 +33,11 @@
 - `cargo xtask ci`
 - `cargo xtask mutants policy`
 - `cargo xtask mutants smoke`
+- `cargo xtask platform doctor --store-path <dir>`
+- `cargo xtask platform probe --store-path <dir> --profile <file>`
+- `cargo xtask platform verify --store-path <dir> --profile <file>`
+- `cargo xtask platform bless --store-path <dir> --profile <file>`
+- `cargo xtask platform audit`
 - `cargo xtask perf-gates`    — hardware-dependent catastrophic-regression guards, not precision perf gates. Run only on stable hardware; no current environment is both canonical and timing-stable, so these thresholds stay intentionally generous and are excluded from `cargo xtask ci`.
 - `cargo xtask bench --surface neutral|native [--save|--compare|--compile]`
 - `cargo xtask cover [--ci|--json|--threshold N]`
@@ -72,7 +78,7 @@
 
 ## Mutation Testing Gate
 
-The `mutants` job in `ci.yml` runs on every `pull_request` and on main via `workflow_dispatch` or `schedule` — it is **not** report-only. `cargo xtask mutants smoke` is the repo-owned CI surface now: it runs the named critical seams first at an `85%` catch-rate threshold (`writer commit protocol`, `cursor delivery/checkpoint logic`, `projection replay/freshness logic`, `segment scan / corruption handling`, and `hash-chain / replay consistency` across the feature lanes), then runs repo-wide `1/48` shards on both feature surfaces under the current ratchet phase. Today the repo-wide phase is `Phase0` record-only, so xtask records the score and prints the next available ratchet floor without enforcing it yet. Run `cargo xtask mutants policy` to see the current thresholds and staged repo-wide floors from xtask itself.
+The `mutants` job in `ci.yml` runs on every `pull_request` and on main via `workflow_dispatch` or `schedule` — it is **not** report-only. `cargo xtask mutants smoke` is the repo-owned CI surface now: it runs the named critical seams first at an `85%` catch-rate threshold (`writer commit protocol`, `cursor delivery/checkpoint logic`, `projection replay/freshness logic`, `segment scan / corruption handling`, `hash-chain / replay consistency` across the feature lanes, platform backend admission/reverify, and harness-ledger linting), then runs repo-wide `1/48` shards on both feature surfaces under the current ratchet phase. Today the repo-wide phase is `Phase0` record-only, so xtask records the score and prints the next available ratchet floor without enforcing it yet. Run `cargo xtask mutants policy` to see the current thresholds and staged repo-wide floors from xtask itself.
 
 **Rule:** if you delete a test, expect either a critical-seam threshold failure or a repo-wide score drop; replace it with an equivalent test or write a stronger one that subsumes its coverage.
 

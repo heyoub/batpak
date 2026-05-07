@@ -480,7 +480,9 @@ fn store_config_all_fields_overridable() {
         },
         clock: Some(clock_fn), // custom clock
         open_report_observer: None,
+        platform_profile_path: None,
         signing_keys: Vec::new(),
+        event_payload_validation: EventPayloadValidation::Warn,
         #[cfg(feature = "dangerous-test-hooks")]
         fault_injector: None,
     };
@@ -551,7 +553,9 @@ fn store_config_debug_lists_all_integrity_relevant_fields() {
         },
         clock: Some(clock_fn),
         open_report_observer: None,
+        platform_profile_path: None,
         signing_keys: Vec::new(),
+        event_payload_validation: EventPayloadValidation::FailFast,
         #[cfg(feature = "dangerous-test-hooks")]
         fault_injector: None,
     };
@@ -584,7 +588,9 @@ fn store_config_debug_lists_all_integrity_relevant_fields() {
         "enable_checkpoint: true",
         "enable_mmap_index: false",
         "clock: Some(\"<fn>\")",
+        "platform_profile_path: None",
         "signing_keys: 0",
+        "event_payload_validation: FailFast",
     ] {
         assert!(
             debug.contains(needle),

@@ -12,7 +12,6 @@ When repo surfaces disagree, trust them in this order:
 1. live code in `src/`
 2. root docs: `README.md`, `GUIDE.md`, `REFERENCE.md`
 3. traceability registries in `traceability/`
-4. anything historical that is being moved out to external archive storage
 
 ## The Five Layers
 
@@ -45,9 +44,16 @@ An `Event<P>` is typed payload plus metadata:
 `#[derive(EventPayload)]` macro binds a Rust struct to its `EventKind` at compile
 time via `#[batpak(category = N, type_id = N)]`. Category 0x0 and 0xD are
 reserved; valid product categories are 0x1–0xC and 0xE–0xF. `type_id` is 12 bits
-(0x000–0xFFF). The derive emits a test-time collision check per type so
-duplicate `(category, type_id)` pairs surface as test failures, not as silent
+(0x000–0xFFF). The derive registers each payload in a binary-wide registry so
+duplicate `(category, type_id)` pairs surface as generated test panics,
+one-time `Store::open` warnings, explicit `validate_event_payload_registry()`
+errors, or `EventPayloadValidation::FailFast` open errors instead of silent
 shape drift on the wire.
+
+For composed applications, treat kind allocation as a checked-in namespace:
+reserve categories or `type_id` blocks per library boundary and keep the table
+near the code that defines payloads. A minimal table is enough:
+`category`, `type_id_start`, `type_id_end`, `owner`, `purpose`.
 
 `position` is not fully caller-controlled. Public append surfaces may hint only
 the DAG branch coordinates:
@@ -109,6 +115,8 @@ covered by ADR-0011.
 - `src/store/write/writer/publish.rs`: committed-event materialization and fanout publish
 - `src/store/write/writer/runtime.rs`: restart loop, shutdown drain, segment bootstrap probe
 - `src/store/write/staging.rs`: shared committed-event staging packets
+- `src/store/platform/`: private target-sensitive machine-contact helpers for
+  fs/sync/lock/clock/mmap operations
 - `src/store/index/mod.rs`: in-memory index and visibility gate
 - `src/store/index/columnar.rs`: base AoS plus optional overlays
 - `src/store/projection/flow.rs`: replay, incremental apply, cache path
@@ -190,6 +198,37 @@ Cold-start priority:
 4. full frame-by-frame rebuild
 
 Batch append uses BEGIN/COMMIT markers and atomic visibility publication.
+
+## Store Platform Backend
+
+`src/store/platform/` is a private store-internal room for target-sensitive
+machine contact. It owns narrow mechanics such as symlink leaf checks,
+same-directory tempfile persistence, parent-directory sync, store-lock open
+policy, segment file creation, active-segment positional reads, segment sync,
+canonical clocks, direct mmap calls, descriptive platform evidence, admission
+tokens, profile records, and opt-in reverify.
+
+The room stays private to `src/store/` and reports target mechanics without
+deciding store semantics. The rule is: platform observes; store admits; batpak
+guarantees.
+Durability, replay, visibility, and admission meaning stay with store,
+cold-start, segment, and frontier code. `StoreDiagnostics::platform_evidence`
+exposes the reported mechanics/posture, while internal admission tokens
+(store lock, parent-dir sync, mmap index, and sealed-segment mmap) keep raw
+evidence from becoming meaning. `StoreConfig::with_platform_profile_path`
+enables profile-verified open; a mismatch returns a platform profile error
+before mutable writer spawn or successful-open observability. Profile reverify
+may still create the data directory and lock file before failing.
+
+Operator profile workflows live under `cargo xtask platform ...`:
+
+- `doctor` reports whether the current store path can produce a profile.
+- `probe` writes a versioned JSON profile with a non-cryptographic CRC32
+  fingerprint for accidental drift detection. Profile signing is not
+  implemented.
+- `verify` compares a profile with current evidence.
+- `bless` intentionally refreshes a profile fixture.
+- `audit` runs the platform boundary structural check.
 
 Current artifact versions:
 
@@ -327,6 +366,13 @@ return `StoreError::WriterCrashed`.
 The implementation is sync-only and uses a `parking_lot::Condvar` with wake-all
 notification. Spurious wakeups are expected and harmless: every wake rechecks
 the writer-crash poison flag and the target watermark before returning.
+The release benchmark surface includes `frontier_waiters`, which measures both
+waiter wake completion and writer-side wake cost at 1, 8, 32, 128, and 512
+concurrent waiters. Each count runs same-target waits, where every waiter waits
+for one HLC, and spread-target waits, where waiters cover distinct future HLCs.
+Precise waiter lists stay deferred unless that benchmark shows writer-side wake
+cost dominating append/sync latency or an order-of-magnitude wake-completion
+jump between adjacent waiter-count tiers on stable hardware.
 
 Append-time gating is opt-in through `AppendOptions::gate`:
 
@@ -374,8 +420,8 @@ Cold-start timing contract:
 Store ownership contract:
 
 - opens acquire a lifetime-held lock file rooted at `{data_dir}/.batpak.lock`
-- the current hardening wave is intentionally exclusive-only, so mutable and
-  read-only opens both fail with `StoreLocked` while another live owner exists
+- the directory lock is exclusive-only, so mutable and read-only opens both fail
+  with `StoreLocked` while another live owner exists
 - Unix lock-file opens use `O_NOFOLLOW`; non-Unix targets currently do a
   best-effort symlink-leaf rejection before opening because `std` exposes no
   equivalent atomic no-follow flag there
@@ -399,13 +445,14 @@ Practical procedure:
 
 ## Public Surface Witnesses
 
-Advanced store surface names worth keeping visible in docs and audits:
+Advanced public surface names worth keeping visible in docs and audits. This
+section is an audit witness list for public API shape; delivery-specific
+witness types are called out separately below.
 
 - `SyncMode`
 - `AppendReceipt`
 - `DenialReceipt`
 - `AppendOptions`
-- `CheckpointId`
 - `CursorGapConfig`
 - `GapObservation`
 - `SigningKey`
@@ -414,6 +461,15 @@ Advanced store surface names worth keeping visible in docs and audits:
 - `CompactionConfig`
 - `StoreStats`
 - `StoreDiagnostics`
+- `EventPayloadValidation`
+- `EventPayloadRegistryError`
+
+Delivery witness types:
+
+- `CheckpointId`
+- `AtLeastOnce`
+- `IdempotencyKey`
+- `ObservedOnce`
 
 Low-level storage surface names that remain intentionally public:
 
@@ -431,15 +487,25 @@ Low-level storage surface names that remain intentionally public:
 
 Important knobs on `StoreConfig`:
 
-- `segment_max_bytes`
-- `sync.every_n_events`
-- `sync.mode`
-- `fd_budget`
-- `writer.channel_capacity`
-- `writer.pressure_retry_threshold_pct`
-- `writer.shutdown_drain_limit`
-- `writer.stack_size`
-- `signing_keys` via `with_signing_key(...)`
+| Knob | Default | When to change |
+| --- | --- | --- |
+| `segment_max_bytes` | 256 MiB | Lower for faster rotation and smaller repair units; raise for fewer segment files. |
+| `sync.every_n_events` | `1000` | Lower for tighter durability; raise for throughput when callers use explicit gates where needed, after measuring on deployment hardware. |
+| `sync.mode` | `SyncAll` | Use `SyncData` only after deciding metadata sync cost is not needed for the deployment. |
+| `fd_budget` | `64` | Raise when many segments stay hot and read latency matters; lower for constrained processes. |
+| `writer.channel_capacity` | `4096` | Raise for bursty producers; lower to cap peak queued memory. |
+| `writer.pressure_retry_threshold_pct` | `75` | Lower when `try_submit*` callers should back off earlier under load. |
+| `writer.shutdown_drain_limit` | `1024` | Raise when graceful shutdown should drain larger queued append bursts. |
+| `writer.stack_size` | OS default | Set only when platform thread defaults are too small for a measured workload. |
+| `batch.max_size` | `256` items | Lower to bound latency; raise for larger atomic import batches. |
+| `batch.max_bytes` | 1 MiB | Lower to bound single-batch memory; raise only within the configured 16 MiB ceiling. |
+| `batch.group_commit_max_batch` | `1` | Raise for fsync amortization; appends then require idempotency keys. |
+| `index.topology` | `IndexTopology::aos()` | Add overlays when query benchmarks show broad scans or entity-local scans dominate. |
+| `index.incremental_projection` | `false` | Enable when projections support pure incremental apply and replay cost is visible. |
+| `index.enable_checkpoint` | `true` | Disable only for tiny stores or tests where cold-start artifacts are unwanted. |
+| `index.enable_mmap_index` | `true` | Disable when the platform or deployment policy rejects mmap artifacts. |
+| `platform_profile_path` via `with_platform_profile_path(...)` | `None` | Set when open must fail closed unless current platform evidence matches a recorded profile. |
+| `signing_keys` via `with_signing_key(...)` | empty | Add when append and denial receipts need tamper-evident verification. |
 
 ## Receipt And Denial Notes
 
@@ -453,13 +519,6 @@ Important knobs on `StoreConfig`:
   chain; denial events are not a separate chain class.
 - `verify_append_receipt(...)` and `verify_denial_receipt(...)` validate
   receipt signatures against the store's configured signing-key registry.
-- `batch.group_commit_max_batch`
-- `batch.max_size`
-- `batch.max_bytes`
-- `index.topology`
-- `index.incremental_projection`
-- `index.enable_checkpoint`
-- `index.enable_mmap_index`
 
 Key tradeoffs:
 
@@ -494,8 +553,8 @@ cargo xtask cover --json
 The doctrine surfaces live in:
 
 - [HARNESS_DIRECTIVE.md](HARNESS_DIRECTIVE.md) for the five harness patterns
-  and invariant/failure-mode/seed header rule (currently a repo convention,
-  not a hard integrity gate by itself)
+  and invariant/failure-mode/seed header rule enforced by
+  `cargo xtask structural` for ledger-listed harnesses
 - [HARNESS_LEDGER.md](HARNESS_LEDGER.md) for the current doctrine-bearing
   suites and their primary pattern
 - `cargo xtask mutants policy` for the repo-owned mutation thresholds,
@@ -524,6 +583,8 @@ the enforcement story.
 - front door: `README.md`
 - usage/workflows: `GUIDE.md`
 - technical reference: `REFERENCE.md`
+- decision index: `docs/adr/README.md`
+- harness doctrine: `HARNESS_DIRECTIVE.md` and `HARNESS_LEDGER.md`
 - traceability registry: `traceability/artifacts.yaml`
 - integrity entrypoint: `tools/integrity/src/main.rs`
 - xtask command surface: `tools/xtask/src/commands.rs`

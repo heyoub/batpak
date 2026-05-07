@@ -20,8 +20,8 @@ instead of pretending.
   - `cargo test --test derive_eventpayload_errors`
   - `cargo test --test derive_event_sourced_errors`
   - `cargo test --test derive_multi_event_reactor_errors`
-- Line/function coverage delta: unmeasured in this wave
-- Mutation delta: unmeasured in this wave
+- Line/function coverage delta: unmeasured
+- Mutation delta: unmeasured
 - Remaining known blind spots:
   - compile-fail suites prove invalid macro shapes and error quality, but they
     do not prove successful derived runtime behaviour by themselves
@@ -35,8 +35,8 @@ instead of pretending.
 - Command used:
   - `cargo test --test chaos_testing --all-features`
   - `cargo test --test cold_start_recovery`
-- Line/function coverage delta: unmeasured in this wave
-- Mutation delta: unmeasured in this wave
+- Line/function coverage delta: unmeasured
+- Mutation delta: unmeasured
 - Remaining known blind spots:
   - broad chaos coverage exists, but not every low-level segment-scan defensive
     branch is table-driven yet
@@ -52,8 +52,8 @@ instead of pretending.
   - `cargo test --test segment_scan_hardening sidx_footer_entry_count_disagreement_falls_back_to_frame_scan`
   - `cargo test --test segment_scan_hardening valid_crc_unreadable_frame_metadata_skips_only_that_frame`
   - `cargo test --test segment_scan_hardening orphan_commit_marker_is_ignored_without_stopping_scan`
-- Line/function coverage delta: targeted rise in `src/store/segment/scan.rs`; exact JSON delta not recorded in this wave
-- Mutation delta: unmeasured in this wave
+- Line/function coverage delta: targeted rise in `src/store/segment/scan.rs`; exact JSON delta not recorded
+- Mutation delta: unmeasured
 - Covered tests:
   - `invalid_batch_begin_count_fails_closed_on_reopen` pins `BEGIN` markers
     with invalid item counts as fail-closed corruption.
@@ -86,8 +86,8 @@ instead of pretending.
 - Line/function coverage delta: added in the Phase 0 durable-frontier wave;
   exact JSON delta not recorded in this ledger
 - Mutation delta:
-  - writer commit protocol smoke held at 5/5 caught = 100%
-  - projection replay/freshness smoke held at 7/7 caught = 100%
+  - writer commit protocol and projection replay/freshness are policy-owned
+    critical seams; current thresholds are printed by `cargo xtask mutants policy`.
 - Remaining known blind spots:
   - `writer_panic_at_single_append_written_is_not_durable_on_reopen` is
     intentionally ignored because an in-process writer panic leaves the complete
@@ -107,8 +107,8 @@ instead of pretending.
 - Line/function coverage delta: Phase 1A adds explicit-close bootstrap coverage;
   exact JSON delta not recorded in this ledger
 - Mutation delta:
-  - writer commit protocol smoke must remain at 5/5 caught = 100%
-  - projection replay/freshness smoke must remain at 7/7 caught = 100%
+  - no dedicated lifecycle seam; regressions route through the writer commit
+    protocol and projection replay/freshness critical seams.
 - Covered tests:
   - `explicit_close_emits_system_close_completed_event` defends that explicit
     `Store::close()` emits one `SYSTEM_CLOSE_COMPLETED` covering the visible
@@ -135,6 +135,27 @@ instead of pretending.
     timeout.
 - Remaining known blind spots:
   - none for the explicit-close lifecycle frontier shape currently in scope.
+
+## State-Machine Harness
+
+### Invariant: Platform profile mismatch fails open before lifecycle success
+
+- Harness pattern: `State-Machine Harness`
+- Location:
+  - `tests/platform_backend.rs`
+- Command used:
+  - `cargo test --test platform_backend platform_profile_match_allows_open_and_mismatch_fails_before_lifecycle`
+  - `cargo test platform_profile_mismatch_fails_closed`
+- Line/function coverage delta: unmeasured
+- Mutation delta:
+  - `platform-backend` critical seam is registered at the 85% smoke threshold.
+- Covered tests:
+  - profile fingerprint round-trip pins the private JSON + CRC32 shape.
+  - profile mismatch rejects store open before writer spawn or
+    `SYSTEM_OPEN_COMPLETED` lifecycle append.
+- Remaining known blind spots:
+  - profile command and build.rs env-var validation are covered by structural
+    and compile checks, but not yet by mutation-specific fixtures.
 
 ### Invariant: Durable frontier wait API surfaces honest blocking semantics
 
@@ -203,6 +224,8 @@ instead of pretending.
     is the opt-in escape hatch.
 - Remaining known blind spots:
   - No precise waiter lists yet; wake-all remains the v1 wait strategy.
+
+## Fault-Injection Harness
 
 ### Invariant: Linux block-layer chaos harness fails writes after device flip
 
@@ -298,8 +321,8 @@ instead of pretending.
 - Command used:
   - `cargo test --test derive_event_sourced_parity`
   - `cargo test --test derive_event_sourced_generic`
-- Line/function coverage delta: unmeasured in this wave
-- Mutation delta: unmeasured in this wave
+- Line/function coverage delta: unmeasured
+- Mutation delta: unmeasured
 - Remaining known blind spots:
   - these suites pin behavioural equivalence, not compile-fail diagnostics
 
@@ -312,8 +335,8 @@ instead of pretending.
 - Command used:
   - `cargo test --test replay_consistency`
   - `cargo test --test mmap_cold_start`
-- Line/function coverage delta: unmeasured in this wave
-- Mutation delta: unmeasured in this wave
+- Line/function coverage delta: unmeasured
+- Mutation delta: unmeasured
 - Remaining known blind spots:
   - parity across all artifact paths is strong, but some corruption-only
     branches still live in separate fault-injection suites
@@ -329,14 +352,16 @@ instead of pretending.
   - `cargo test --test raw_projection_mode projection_flow_incremental_group_local_keeps_lanes_equivalent`
   - `cargo test --test raw_projection_mode projection_flow_incremental_external_cache_keeps_lanes_equivalent`
 - Line/function coverage delta: targeted rise in `src/store/projection/flow.rs`
-    and watcher-adjacent paths; exact JSON delta not recorded in this wave
-- Mutation delta: unmeasured in this wave
+    and watcher-adjacent paths; exact JSON delta not recorded
+- Mutation delta: unmeasured
 - Remaining known blind spots:
   - current matrix now covers relevant and irrelevant appends across the two replay
     lanes, the cache-enabled `Freshness::MaybeStale` stale-hit vs forced-replay branch,
     and both incremental branches (group-local and external-cache replay)
   - remaining blind spots are cache-get-error handling, exact age-boundary behavior,
     and the empty/no-replay-plan public surface
+
+## Fault-Injection Harness
 
 ### Invariant: MaybeStale never serves corrupt cache bytes as a “fresh enough” success
 
@@ -352,8 +377,8 @@ instead of pretending.
   - `cargo test --test projection_cache consistent_replays_when_reopened_native_cache_row_is_stale`
   - `cargo test --test projection_cache maybe_stale_replays_when_cache_row_has_valid_metadata_but_empty_payload`
   - `cargo test --test projection_cache consistent_replays_when_cache_row_has_valid_metadata_but_truncated_payload`
-- Line/function coverage delta: targeted rise in `src/store/projection/flow.rs`; exact JSON delta not recorded in this wave
-- Mutation delta: unmeasured in this wave
+- Line/function coverage delta: targeted rise in `src/store/projection/flow.rs`; exact JSON delta not recorded
+- Mutation delta: unmeasured
 - Remaining known blind spots:
   - this seam now proves that stale-but-young corrupt rows, fresh-but-corrupt rows, cache-get failures, and exact age-boundary rows all fall back to honest replay under `Freshness::MaybeStale`
   - coverage-closure sweep also pins empty/no-replay-plan behavior, reopened stale external-cache replay under `Freshness::Consistent`, and valid-metadata/undecodable-payload cache rows that bypass metadata corruption but still must replay honestly
@@ -368,8 +393,8 @@ instead of pretending.
   - `tests/fuzz_chaos_feedback.rs`
 - Command used:
   - `cargo test --test fuzz_chaos_feedback --all-features --release`
-- Line/function coverage delta: unmeasured in this wave
-- Mutation delta: unmeasured in this wave
+- Line/function coverage delta: unmeasured
+- Mutation delta: unmeasured
 - Remaining known blind spots:
   - feedback policy is explicit, but it does not replace direct seam-level
     fault-injection or state-machine proofs
@@ -383,8 +408,8 @@ instead of pretending.
 - Command used:
   - `cargo test --test store_error_contract`
   - `cargo test store::error::tests`
-- Line/function coverage delta: targeted rise in `src/store/error.rs`; exact JSON delta not recorded in this wave
-- Mutation delta: unmeasured in this wave
+- Line/function coverage delta: targeted rise in `src/store/error.rs`; exact JSON delta not recorded
+- Mutation delta: unmeasured
 - Covered tests:
   - `store_error_contract_table_stays_stable` now includes direct public
     contract rows for helper-shaped `CorruptSegment` construction and
@@ -410,6 +435,59 @@ instead of pretending.
   - these are intentionally loose catastrophic guards, not precise benchmark
     baselines; stable trend authority belongs to `cargo xtask bench`
 
+### Invariant: Typed payload kind allocation is binary-wide and collision-checked
+
+- Harness pattern: `Property Harness`
+- Location:
+  - `tests/event_payload_registry_policy.rs`
+  - `tests/event_payload_registry_downstream.rs`
+- Command used:
+  - `cargo test --test event_payload_registry_policy`
+  - `cargo test --test event_payload_registry_downstream`
+- Line/function coverage delta: targeted rise in `src/event/payload.rs`,
+  `src/store/config.rs`, and `src/store/mod.rs`; exact JSON delta not recorded
+- Mutation delta:
+  - `event-payload-registry-validator` critical seam is registered at the 85%
+    smoke threshold for collision detection, open-time warn/fail-fast policy,
+    and cache refresh.
+- Covered tests:
+  - `public_payload_registry_validator_reports_clean_registry` pins the clean
+    registry path and explicit revalidation hook.
+  - `store_open_accepts_explicit_payload_validation_policy_when_registry_is_clean`
+    pins the public config policy surface.
+  - `downstream_fixture_detects_dependency_event_kind_collision` pins
+    dependency-crate collisions in a composing debug test binary.
+  - `downstream_fixture_detects_dependency_event_kind_collision_in_release`
+    pins the same inventory-registration behavior under release linkage.
+- Remaining known blind spots:
+  - the validator reports linked registrations, not whether a particular store
+    will ever append every linked payload kind. Store open warns by default and
+    can be made fail-fast, but explicit per-application allocation discipline
+    remains the caller's responsibility.
+
+### Invariant: Harness doctrine stays structurally enforceable
+
+- Harness pattern: `Property Harness`
+- Location:
+  - `tools/integrity/src/harness_lints.rs`
+- Command used:
+  - `cargo test -p batpak-integrity harness_lints`
+  - `cargo xtask structural`
+- Line/function coverage delta: targeted rise in `tools/integrity/src/harness_lints.rs`;
+  exact JSON delta not recorded
+- Mutation delta:
+  - `harness-ledger-structural-lint` critical seam is registered at the 85%
+    smoke threshold for ledger schema, command-prefix, location, module-header,
+    and capped line-count enforcement.
+- Covered tests:
+  - `synthetic_well_formed_ledger_entry_is_accepted` pins a minimal valid
+    doctrine-bearing ledger entry, tracked Rust file, header, and line cap.
+  - `synthetic_malformed_ledger_entry_is_rejected` pins schema rejection for a
+    missing required ledger field.
+- Remaining known blind spots:
+  - allowlist entries are explicit debt with reason and shrinkage target; new
+    entries should be treated as review-visible debt, not routine bypasses.
+
 ## State-Machine Harness
 
 ### Invariant: Bounded schedules preserve concurrency protocol truth
@@ -419,8 +497,8 @@ instead of pretending.
   - `tests/deterministic_concurrency.rs`
 - Command used:
   - `cargo test --test deterministic_concurrency`
-- Line/function coverage delta: unmeasured in this wave
-- Mutation delta: unmeasured in this wave
+- Line/function coverage delta: unmeasured
+- Mutation delta: unmeasured
 - Remaining known blind spots:
   - loom proofs cover bounded interleavings, not unbounded stress or real I/O
 
@@ -432,10 +510,10 @@ instead of pretending.
 - Command used:
   - `cargo test --test cursor_durability`
 - Line/function coverage delta: targeted rise in `src/store/delivery/cursor.rs`;
-    exact JSON delta not recorded in this wave
-- Mutation delta: unmeasured in this wave
+    exact JSON delta not recorded
+- Mutation delta: unmeasured
 - Remaining known blind spots:
-  - this wave proves committed progress vs rollback/restart semantics, but does
+  - committed progress vs rollback/restart semantics are covered, but this does
     not yet replace the broader cursor lifecycle tests in `tests/store_advanced.rs`
 
 ### Invariant: Ready writer tickets surface observable completion through `try_check`
@@ -452,7 +530,7 @@ instead of pretending.
   - `cargo test --test control_plane_surface try_submit_batch_returns_retry_under_pressure`
   - `CARGO_INCREMENTAL=0 cargo mutants --output tools/xtask/target/mutants/writer-commit-ticket-try-check-none --in-place --baseline run --file 'src/store/write/*.rs' --exclude src/store/ancestry/by_clock.rs --all-features --cargo-arg --locked --test-tool cargo --shard 1/8 --sharding round-robin --build-timeout 300 --timeout 300 --minimum-test-timeout 120 -F 'Ticket<T>::try_check.*with None'`
   - `CARGO_INCREMENTAL=0 cargo mutants --output tools/xtask/target/mutants/fence-token-root-under-fence-4 --in-place --baseline run --file 'src/store/write/control.rs' --all-features --cargo-arg --locked --test-tool cargo --build-timeout 300 --timeout 300 --minimum-test-timeout 120 -F 'delete field fence_token from struct Self expression in AppendSubmission::root_under_fence'`
-- Line/function coverage delta: targeted rise in `src/store/write/control.rs`; exact JSON delta not recorded in this wave
+- Line/function coverage delta: targeted rise in `src/store/write/control.rs`; exact JSON delta not recorded
 - Mutation delta:
   - exact mutant `src/store/write/control.rs:29:9 replace Ticket<T>::try_check -> Option<Result<T, StoreError>> with None` is now caught by the ready-path proof lane
   - the exact default-receipt mutants for `AppendTicket::try_check` and `BatchAppendTicket::try_check` are now characterized as unviable at build time:
@@ -476,8 +554,8 @@ instead of pretending.
 - Command used:
   - `cargo test --test index_filter_composition`
   - `cargo test --test index_filter_composition reopen_matches_live_oracle_across_topologies`
-- Line/function coverage delta: targeted rise in `src/store/index/columnar.rs` and `src/store/index/mod.rs`; exact JSON delta not recorded in this wave
-- Mutation delta: unmeasured in this wave
+- Line/function coverage delta: targeted rise in `src/store/index/columnar.rs` and `src/store/index/mod.rs`; exact JSON delta not recorded
+- Mutation delta: unmeasured
 - Remaining known blind spots:
   - the oracle now owns filter composition, cursor batch ordering, and live-vs-reopen parity across topologies
   - remaining blind spots are deeper restore-artifact mismatches outside this pure query surface, which still belong to cold-start parity suites rather than the overlay oracle itself

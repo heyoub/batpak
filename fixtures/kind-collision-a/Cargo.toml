@@ -1,0 +1,11 @@
+[package]
+name = "batpak-kind-collision-a"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dependencies]
+batpak = { path = "../.." }
+serde = { version = "1", features = ["derive"] }

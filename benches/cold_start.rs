@@ -34,6 +34,17 @@ fn rebuild_only_config(dir: &std::path::Path) -> StoreConfig {
         .with_enable_mmap_index(false)
 }
 
+fn platform_profile_fixture() -> std::path::PathBuf {
+    #[cfg(unix)]
+    {
+        std::path::PathBuf::from("tests/fixtures/platform/linux_basic.profile")
+    }
+    #[cfg(not(unix))]
+    {
+        std::path::PathBuf::from("tests/fixtures/platform/non_unix_best_effort_lock.profile")
+    }
+}
+
 fn populate_store(config: StoreConfig, count: u64) {
     let store = Store::open(config).expect("open store for populate");
     let coord = Coordinate::new("bench:entity", "bench:scope").expect("valid coord");
@@ -156,6 +167,33 @@ fn bench_cold_start_paths(c: &mut Criterion) {
                         };
                         let _store = Store::open(config).expect("reopen populated store");
                         // close() excluded — drop triggers best-effort shutdown only
+                    },
+                    BatchSize::SmallInput,
+                );
+            },
+        );
+
+        // open-only with opt-in platform profile reverify: keeps the
+        // fail-closed admission path visible in the cold-start bench surface
+        // without measuring close/artifact serialization.
+        group.bench_with_input(
+            BenchmarkId::new("reopen_open_only_platform_profile", count),
+            &count,
+            |b, &_count| {
+                b.iter_batched(
+                    || {
+                        let iter_dir = TempDir::new().expect("create iteration dir");
+                        copy_dir_recursive(default_fixture.path(), iter_dir.path());
+                        iter_dir
+                    },
+                    |iter_dir| {
+                        let config = StoreConfig {
+                            data_dir: iter_dir.path().to_path_buf(),
+                            ..StoreConfig::new("")
+                        }
+                        .with_platform_profile_path(platform_profile_fixture());
+                        let _store =
+                            Store::open(config).expect("reopen populated store with profile");
                     },
                     BatchSize::SmallInput,
                 );

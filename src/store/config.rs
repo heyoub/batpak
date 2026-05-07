@@ -1,11 +1,13 @@
+use crate::event::EventPayloadValidation;
 use crate::store::cold_start::rebuild::OpenIndexReport;
 use crate::store::cold_start::ColdStartPolicy;
+pub(crate) use crate::store::platform::clock::{
+    now_mono_ns, now_us, process_boot_ns, wall_ms_from_timestamp_us, MonotonicClock,
+};
 use crate::store::signing::{ReceiptSigningRegistry, SigningKey};
 use crate::store::RestartPolicy;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
-use std::time::Instant;
 
 #[cfg(feature = "dangerous-test-hooks")]
 use crate::store::fault::FaultInjector;
@@ -275,12 +277,20 @@ pub struct StoreConfig {
     pub clock: Option<Arc<dyn Fn() -> i64 + Send + Sync>>,
     /// Optional callback fired once after a successful open completes.
     pub open_report_observer: Option<OpenReportObserver>,
+    /// Optional platform profile record that must match current platform evidence at open.
+    pub platform_profile_path: Option<PathBuf>,
     /// Signing keys known to this store. The last configured key signs new
     /// receipts; earlier keys remain available for verification.
     pub signing_keys: Vec<SigningKey>,
+    /// Payload-registry collision policy applied during `Store::open`.
+    pub event_payload_validation: EventPayloadValidation,
     /// Fault injector for testing failure scenarios.
     /// Only available with the `dangerous-test-hooks` feature.
     #[cfg(feature = "dangerous-test-hooks")]
+    #[cfg_attr(
+        all(docsrs, not(batpak_stable_docs)),
+        doc(cfg(feature = "dangerous-test-hooks"))
+    )]
     pub fault_injector: Option<Arc<dyn FaultInjector>>,
 }
 
@@ -313,7 +323,9 @@ impl StoreConfig {
             index: IndexConfig::default(),
             clock: None,
             open_report_observer: None,
+            platform_profile_path: None,
             signing_keys: Vec::new(),
+            event_payload_validation: EventPayloadValidation::default(),
             #[cfg(feature = "dangerous-test-hooks")]
             fault_injector: None,
         }
@@ -495,9 +507,27 @@ impl StoreConfig {
         self
     }
 
+    /// Set a platform profile that must verify during store open.
+    pub fn with_platform_profile_path(mut self, path: impl Into<PathBuf>) -> Self {
+        self.platform_profile_path = Some(path.into());
+        self
+    }
+
+    /// Clear any configured platform profile.
+    pub fn without_platform_profile_path(mut self) -> Self {
+        self.platform_profile_path = None;
+        self
+    }
+
     /// Add a signing key to the receipt-signature registry.
     pub fn with_signing_key(mut self, signing_key: SigningKey) -> Self {
         self.signing_keys.push(signing_key);
+        self
+    }
+
+    /// Set the open-time payload-registry collision policy.
+    pub fn with_event_payload_validation(mut self, validation: EventPayloadValidation) -> Self {
+        self.event_payload_validation = validation;
         self
     }
 
@@ -566,7 +596,9 @@ impl Clone for StoreConfig {
             index: self.index.clone(),
             clock: self.clock.clone(),
             open_report_observer: self.open_report_observer.clone(),
+            platform_profile_path: self.platform_profile_path.clone(),
             signing_keys: self.signing_keys.clone(),
+            event_payload_validation: self.event_payload_validation,
             #[cfg(feature = "dangerous-test-hooks")]
             fault_injector: self.fault_injector.clone(),
         }
@@ -590,7 +622,9 @@ impl std::fmt::Debug for StoreConfig {
                 "open_report_observer",
                 &self.open_report_observer.as_ref().map(|_| "<observer>"),
             )
+            .field("platform_profile_path", &self.platform_profile_path)
             .field("signing_keys", &self.signing_keys.len())
+            .field("event_payload_validation", &self.event_payload_validation)
             .finish()
     }
 }
@@ -608,18 +642,6 @@ impl std::fmt::Debug for ValidatedStoreConfig {
             .field("clock", &self.clock.as_ref().map(|_| "<monotonic>"))
             .finish()
     }
-}
-
-/// Returns microseconds since Unix epoch, saturating to `i64::MAX` if the system
-/// clock is beyond year ~292,277 (treat the max value as a clock-malfunction
-/// signal). No panic; cache staleness checks downstream see a saturated value
-/// and force a replay rather than poisoning the process.
-pub(crate) fn now_us() -> i64 {
-    let micros = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_micros();
-    i64::try_from(micros).unwrap_or(i64::MAX)
 }
 
 impl ValidatedStoreConfig {
@@ -642,140 +664,15 @@ impl ValidatedStoreConfig {
     /// the boundary violation instead of propagating invalid metadata.
     pub(crate) fn cache_now_us(&self) -> i64 {
         let now_us = self.now_us();
-        if now_us < 0 {
-            tracing::error!(
-                raw_us = now_us,
-                "custom clock returned a negative value; clamping projection/cache metadata timestamp to zero"
-            );
-            0
-        } else {
-            now_us
-        }
-    }
-}
-
-/// Convert a public clock reading to persisted wall-clock milliseconds.
-///
-/// Custom clocks must report microseconds since Unix epoch as a non-negative
-/// `i64`. Negative values are rejected as invalid caller input rather than
-/// panicking in append/batch hot paths.
-pub(crate) fn wall_ms_from_timestamp_us(
-    timestamp_us: i64,
-) -> Result<u64, crate::store::StoreError> {
-    if timestamp_us < 0 {
-        return Err(crate::store::StoreError::InvalidClock {
-            timestamp_us,
-            reason: "timestamp_us must be >= 0 microseconds since Unix epoch".into(),
-        });
-    }
-    Ok((timestamp_us / 1000).cast_unsigned())
-}
-
-/// Process-wide monotonic anchor. Captured on first call; subsequent calls read
-/// the elapsed nanoseconds from `Instant::now()` relative to this anchor.
-///
-/// The anchor couples two facts:
-///   1. `anchor_instant`: the `Instant` captured at first call.
-///   2. `anchor_boot_ns`: a u64 marker that identifies *this* process's
-///      monotonic epoch. Any cached monotonic value persisted to disk and then
-///      read back by a different process MUST compare its `process_boot_ns`
-///      against this value — mismatch means the monotonic value belongs to a
-///      different process's clock and cannot be trusted.
-struct MonotonicAnchor {
-    anchor_instant: Instant,
-    anchor_boot_ns: u64,
-}
-
-impl MonotonicAnchor {
-    fn get() -> &'static Self {
-        use std::sync::OnceLock;
-        static ANCHOR: OnceLock<MonotonicAnchor> = OnceLock::new();
-        ANCHOR.get_or_init(|| {
-            // The boot marker is the wall-clock time at anchor creation, encoded
-            // as nanoseconds since Unix epoch and saturated to u64. Two processes
-            // booting in the same nanosecond on the same machine would collide,
-            // which is acceptable (they would both re-project on mismatch anyway).
-            let wall_ns = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos();
-            let anchor_boot_ns = u64::try_from(wall_ns).unwrap_or(u64::MAX);
-            MonotonicAnchor {
-                anchor_instant: Instant::now(),
-                anchor_boot_ns,
+        match now_us.cmp(&0) {
+            std::cmp::Ordering::Less => {
+                tracing::error!(
+                    raw_us = now_us,
+                    "custom clock returned a negative value; clamping projection/cache metadata timestamp to zero"
+                );
+                0
             }
-        })
-    }
-}
-
-/// Returns monotonic nanoseconds since the process-wide anchor. Guaranteed
-/// non-decreasing within a single process; meaningless across processes
-/// (use [`process_boot_ns`] to detect cross-process comparisons).
-///
-/// Saturates to `i64::MAX` if the process has been alive for more than
-/// ~292 years.
-pub(crate) fn now_mono_ns() -> i64 {
-    let anchor = MonotonicAnchor::get();
-    let elapsed = anchor.anchor_instant.elapsed().as_nanos();
-    i64::try_from(elapsed).unwrap_or(i64::MAX)
-}
-
-/// Returns this process's monotonic epoch marker. Two processes never share
-/// this value (except in the vanishingly unlikely case of same-nanosecond
-/// boot); a monotonic value read from disk whose `process_boot_ns` does not
-/// match the current one belongs to a prior process and cannot be compared
-/// against [`now_mono_ns`].
-pub(crate) fn process_boot_ns() -> u64 {
-    MonotonicAnchor::get().anchor_boot_ns
-}
-
-/// Non-decreasing wrapper around a user-supplied `Fn() -> i64` clock.
-///
-/// A user clock that regresses (e.g. NTP jump, manual reset) would poison age
-/// comparisons — a slot cached at `now=1000` and read at `now=500` would look
-/// like it's `-500` µs old, and a naive check can misclassify it. This wrapper
-/// clamps each observed value to `max(last, new)`: once we see a value, we
-/// never return anything smaller. Regressions emit `tracing::error!` with the
-/// previous and new values and return the previous value — the user's clock
-/// is broken, but the store keeps running.
-#[derive(Clone)]
-pub(crate) struct MonotonicClock {
-    inner: Arc<dyn Fn() -> i64 + Send + Sync>,
-    last: Arc<AtomicI64>,
-}
-
-impl MonotonicClock {
-    /// Wrap a user-supplied clock function. The returned handle is cloneable
-    /// and stores shared state (`AtomicI64`) in an `Arc`, so clones observe the
-    /// same non-decreasing sequence.
-    pub(crate) fn wrap(inner: Arc<dyn Fn() -> i64 + Send + Sync>) -> Self {
-        Self {
-            inner,
-            last: Arc::new(AtomicI64::new(i64::MIN)),
-        }
-    }
-
-    /// Sample the wrapped clock and return a value that is never smaller than
-    /// any value previously returned by this [`MonotonicClock`] (or any clone
-    /// of it). A regression is logged at `error` level.
-    pub(crate) fn now_us(&self) -> i64 {
-        let raw = (self.inner)();
-        // Compare-and-swap loop: install `raw` if it's newer than `last`,
-        // otherwise report a regression and keep the old value.
-        loop {
-            let prev = self.last.load(Ordering::Acquire);
-            if raw >= prev {
-                match self
-                    .last
-                    .compare_exchange(prev, raw, Ordering::AcqRel, Ordering::Acquire)
-                {
-                    Ok(_) => return raw,
-                    Err(_) => continue, // another thread stored a newer value; retry
-                }
-            } else {
-                tracing::error!("user clock regressed: prev={} new={}", prev, raw);
-                return prev;
-            }
+            std::cmp::Ordering::Equal | std::cmp::Ordering::Greater => now_us,
         }
     }
 }
@@ -794,6 +691,7 @@ pub(crate) fn duration_micros(d: std::time::Duration) -> u64 {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicI64, Ordering};
+    use std::time::Duration;
 
     #[test]
     fn validated_runtime_clock_wraps_direct_field_assignment() {
@@ -828,6 +726,174 @@ mod tests {
             runtime.cache_now_us(),
             0,
             "projection/cache metadata clock must not persist negative timestamps"
+        );
+    }
+
+    #[test]
+    fn cache_now_us_preserves_zero_custom_clock_value() {
+        let raw_clock = Arc::new(|| 0_i64) as Arc<dyn Fn() -> i64 + Send + Sync>;
+        let mut config = StoreConfig::new("target/test-cache-clock-zero");
+        config.clock = Some(raw_clock);
+
+        let runtime = config.validated().expect("config validates");
+        assert_eq!(
+            runtime.cache_now_us(),
+            0,
+            "PROPERTY: zero is a valid cache timestamp boundary, not a negative-clock violation"
+        );
+    }
+
+    #[test]
+    fn index_topology_tiles64_simd_builder_sets_only_simd_overlay() {
+        let topology = IndexTopology::default().with_tiles64_simd(true);
+
+        assert!(
+            topology.tiles64_simd_enabled(),
+            "PROPERTY: with_tiles64_simd(true) must enable the SIMD overlay"
+        );
+        assert!(
+            !IndexTopology::default().tiles64_simd_enabled(),
+            "PROPERTY: default topology keeps the experimental SIMD overlay disabled"
+        );
+        assert!(
+            topology.soa_enabled() == IndexTopology::default().soa_enabled()
+                && topology.entity_groups_enabled()
+                    == IndexTopology::default().entity_groups_enabled()
+                && topology.tiles64_enabled() == IndexTopology::default().tiles64_enabled(),
+            "PROPERTY: with_tiles64_simd must not silently reset the rest of the topology"
+        );
+    }
+
+    #[test]
+    fn validated_accepts_documented_inclusive_upper_bounds() {
+        let mut config = StoreConfig::new("target/test-config-upper-bounds");
+        config.writer.pressure_retry_threshold_pct = 100;
+        config.batch.max_size = 4096;
+
+        config
+            .validated()
+            .expect("documented inclusive upper bounds should validate");
+    }
+
+    #[test]
+    fn validated_rejects_values_above_documented_upper_bounds() {
+        let mut pressure = StoreConfig::new("target/test-config-pressure-too-high");
+        pressure.writer.pressure_retry_threshold_pct = 101;
+        assert!(
+            matches!(
+                pressure.validated(),
+                Err(crate::store::StoreError::Configuration(_))
+            ),
+            "PROPERTY: pressure retry threshold above 100 must be rejected"
+        );
+
+        let mut batch = StoreConfig::new("target/test-config-batch-too-large");
+        batch.batch.max_size = 4097;
+        assert!(
+            matches!(
+                batch.validated(),
+                Err(crate::store::StoreError::Configuration(_))
+            ),
+            "PROPERTY: batch.max_size above 4096 must be rejected"
+        );
+
+        let mut single_append = StoreConfig::new("target/test-config-single-append-too-large");
+        single_append.single_append_max_bytes = 64 * 1024 * 1024 + 1;
+        assert!(
+            matches!(
+                single_append.validated(),
+                Err(crate::store::StoreError::Configuration(_))
+            ),
+            "PROPERTY: single_append_max_bytes above 64MB must be rejected"
+        );
+
+        let mut batch_bytes = StoreConfig::new("target/test-config-batch-bytes-too-large");
+        batch_bytes.batch.max_bytes = 16 * 1024 * 1024 + 1;
+        assert!(
+            matches!(
+                batch_bytes.validated(),
+                Err(crate::store::StoreError::Configuration(_))
+            ),
+            "PROPERTY: batch.max_bytes above 16MB must be rejected"
+        );
+    }
+
+    #[test]
+    fn validated_rejects_zero_payload_size_boundaries() {
+        let mut single_append = StoreConfig::new("target/test-config-single-append-zero");
+        single_append.single_append_max_bytes = 0;
+        assert!(
+            matches!(
+                single_append.validated(),
+                Err(crate::store::StoreError::Configuration(_))
+            ),
+            "PROPERTY: single_append_max_bytes of zero must be rejected"
+        );
+
+        let mut batch_bytes = StoreConfig::new("target/test-config-batch-bytes-zero");
+        batch_bytes.batch.max_bytes = 0;
+        assert!(
+            matches!(
+                batch_bytes.validated(),
+                Err(crate::store::StoreError::Configuration(_))
+            ),
+            "PROPERTY: batch.max_bytes of zero must be rejected"
+        );
+    }
+
+    #[test]
+    fn validated_config_debug_names_runtime_policy_fields() {
+        let runtime = StoreConfig::new("target/test-validated-debug")
+            .validated()
+            .expect("config validates");
+        let rendered = format!("{runtime:?}");
+
+        assert!(
+            rendered.contains("ValidatedStoreConfig")
+                && rendered.contains("pressure_retry_threshold")
+                && rendered.contains("group_commit_drain_budget")
+                && rendered.contains("signing_registry"),
+            "PROPERTY: ValidatedStoreConfig Debug must name the runtime policy fields, got: {rendered}"
+        );
+    }
+
+    #[test]
+    fn process_boot_ns_is_nonzero_and_stable_in_process() {
+        let first = process_boot_ns();
+        let second = process_boot_ns();
+
+        assert_ne!(
+            first, 0,
+            "PROPERTY: process_boot_ns must expose the captured wall-clock anchor, not zero/default"
+        );
+        assert_eq!(
+            first, second,
+            "PROPERTY: process_boot_ns must stay stable for the process lifetime"
+        );
+    }
+
+    #[test]
+    fn now_mono_ns_advances_beyond_nonzero_sentinel() {
+        std::thread::sleep(Duration::from_millis(1));
+        let elapsed = now_mono_ns();
+
+        assert!(
+            elapsed > 1,
+            "PROPERTY: now_mono_ns must report elapsed nanoseconds from the process anchor, not a fixed sentinel; got {elapsed}"
+        );
+    }
+
+    #[test]
+    fn duration_micros_preserves_zero_and_one_microsecond_boundaries() {
+        assert_eq!(
+            duration_micros(Duration::ZERO),
+            0,
+            "PROPERTY: zero duration must remain zero, not a default/nonzero sentinel"
+        );
+        assert_eq!(
+            duration_micros(Duration::from_micros(1)),
+            1,
+            "PROPERTY: one microsecond must round-trip exactly"
         );
     }
 }

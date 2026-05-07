@@ -2,9 +2,11 @@ pub use crate::coordinate::DagPosition;
 pub use crate::coordinate::{Coordinate, CoordinateError, KindFilter, Region};
 pub use crate::event::sourcing::{MultiDispatchError, MultiReactive, Reactive, TypedReactive};
 pub use crate::event::{
-    DecodeSource, DecodeTyped, Event, EventHeader, EventKind, EventKindError, EventPayload,
-    EventSourced, HashChain, JsonValueInput, ProjectionEvent, ProjectionInput, ProjectionPayload,
-    RawMsgpackInput, ReplayLane, StoredEvent, TypedDecodeError,
+    revalidate_event_payload_registry, validate_event_payload_registry, DecodeSource, DecodeTyped,
+    Event, EventHeader, EventKind, EventKindError, EventPayload, EventPayloadKindCollision,
+    EventPayloadRegistryError, EventPayloadValidation, EventSourced, HashChain, JsonValueInput,
+    ProjectionEvent, ProjectionInput, ProjectionPayload, RawMsgpackInput, ReplayLane, StoredEvent,
+    TypedDecodeError,
 };
 pub use crate::guard::{Denial, Gate, GateSet, Receipt};
 pub use crate::id::{CausationId, CorrelationId, EventId};

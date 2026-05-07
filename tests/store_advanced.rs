@@ -63,39 +63,6 @@ fn cursor_batch_sequences(cursor: &mut batpak::store::Cursor, requests: &[usize]
         .collect()
 }
 
-// --- diagnostics ---
-
-#[test]
-fn diagnostics_reports_config() {
-    let (store, dir) = test_store();
-    let diag: StoreDiagnostics = store.diagnostics();
-    let expected_data_dir = std::fs::canonicalize(dir.path()).expect("canonical temp dir");
-
-    assert_eq!(
-        diag.data_dir, expected_data_dir,
-        "PROPERTY: diagnostics must report the opened data_dir path.\n\
-         Investigate: src/store/mod.rs diagnostics.\n\
-         Common causes: diagnostics returns a different field, path canonicalisation mismatch.\n\
-         Run: cargo test --test store_advanced diagnostics_reports_config"
-    );
-    assert_eq!(
-        diag.segment_max_bytes, 4096,
-        "PROPERTY: diagnostics must report the configured segment_max_bytes.\n\
-         Investigate: src/store/mod.rs diagnostics.\n\
-         Common causes: StoreConfig not propagated into inner state, field name mismatch.\n\
-         Run: cargo test --test store_advanced diagnostics_reports_config"
-    );
-    assert_eq!(
-        diag.event_count, 1,
-        "PROPERTY: diagnostics on a freshly opened mutable store must include the SYSTEM_OPEN_COMPLETED lifecycle event.\n\
-         Investigate: src/store/mod.rs diagnostics.\n\
-         Common causes: counter not reset on open, leftover state from previous run.\n\
-         Run: cargo test --test store_advanced diagnostics_reports_config"
-    );
-
-    store.close().expect("close");
-}
-
 // --- append_reaction ---
 
 #[test]

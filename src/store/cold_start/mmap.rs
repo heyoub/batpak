@@ -8,8 +8,7 @@
 use super::checkpoint::WatermarkInfo;
 use crate::event::HashChain;
 use crate::store::cold_start::{
-    validate_watermark_segment, write_artifact_atomically, ColdStartIndexRow, ColdStartSource,
-    WatermarkValidationError,
+    validate_watermark_segment, ColdStartIndexRow, ColdStartSource, WatermarkValidationError,
 };
 use crate::store::index::interner::InternId;
 use crate::store::index::{
@@ -360,34 +359,39 @@ pub(crate) fn write_mmap_index_with_reserved_kind_fallbacks(
     hasher.update(&summary_bytes);
 
     let final_path = data_dir.join(MMAP_INDEX_FILENAME);
-    write_artifact_atomically(data_dir, &final_path, "mmap index", |file| {
-        let mut writer = BufWriter::new(&mut *file);
-        writer.write_all(MMAP_INDEX_MAGIC).map_err(StoreError::Io)?;
-        writer
-            .write_all(&MMAP_INDEX_VERSION.to_le_bytes())
-            .map_err(StoreError::Io)?;
-        writer
-            .write_all(&0u32.to_le_bytes())
-            .map_err(StoreError::Io)?;
-        writer.write_all(&header_tail).map_err(StoreError::Io)?;
-        writer.write_all(&interner_bytes).map_err(StoreError::Io)?;
-        writer.write_all(&summary_bytes).map_err(StoreError::Io)?;
+    crate::store::platform::fs::write_file_atomically(
+        data_dir,
+        &final_path,
+        "mmap index",
+        |file| {
+            let mut writer = BufWriter::new(&mut *file);
+            writer.write_all(MMAP_INDEX_MAGIC).map_err(StoreError::Io)?;
+            writer
+                .write_all(&MMAP_INDEX_VERSION.to_le_bytes())
+                .map_err(StoreError::Io)?;
+            writer
+                .write_all(&0u32.to_le_bytes())
+                .map_err(StoreError::Io)?;
+            writer.write_all(&header_tail).map_err(StoreError::Io)?;
+            writer.write_all(&interner_bytes).map_err(StoreError::Io)?;
+            writer.write_all(&summary_bytes).map_err(StoreError::Io)?;
 
-        let mut buf = [0u8; MMAP_ENTRY_SIZE_V3];
-        for entry in &entries {
-            entry_to_mmap(entry).encode_into(&mut buf);
-            hasher.update(&buf);
-            writer.write_all(&buf).map_err(StoreError::Io)?;
-        }
+            let mut buf = [0u8; MMAP_ENTRY_SIZE_V3];
+            for entry in &entries {
+                entry_to_mmap(entry).encode_into(&mut buf);
+                hasher.update(&buf);
+                writer.write_all(&buf).map_err(StoreError::Io)?;
+            }
 
-        writer.flush().map_err(StoreError::Io)?;
-        drop(writer);
+            writer.flush().map_err(StoreError::Io)?;
+            drop(writer);
 
-        let crc = hasher.finalize();
-        file.seek(SeekFrom::Start(8)).map_err(StoreError::Io)?;
-        file.write_all(&crc.to_le_bytes()).map_err(StoreError::Io)?;
-        Ok(())
-    })?;
+            let crc = hasher.finalize();
+            file.seek(SeekFrom::Start(8)).map_err(StoreError::Io)?;
+            file.write_all(&crc.to_le_bytes()).map_err(StoreError::Io)?;
+            Ok(())
+        },
+    )?;
 
     tracing::debug!(
         target: "batpak::mmap_index",
@@ -630,7 +634,22 @@ fn try_load_mmap_index(data_dir: &Path) -> Option<LoadedMmapIndex> {
     // handle remains open for the duration of the mapping. The mmap index
     // file is read-only and not written to while open — external modification
     // would be a usage error, not a correctness concern for safe Rust callers.
-    let mmap = match unsafe { Mmap::map(&file) } {
+    let evidence = crate::store::platform::evidence::collect_for_store_path(data_dir);
+    let admission =
+        match crate::store::platform::mmap::admit_mmap_index(evidence.store_path.mmap_index) {
+            Ok(admission) => admission,
+            Err(error) => {
+                tracing::warn!(
+                    target: "batpak::mmap_index",
+                    path = %path.display(),
+                    error = %error,
+                    "mmap index admission failed"
+                );
+                return None;
+            }
+        };
+    let mmap = match unsafe { crate::store::platform::mmap::map_mmap_index_file(&file, admission) }
+    {
         Ok(mmap) => mmap,
         Err(error) => {
             tracing::warn!(

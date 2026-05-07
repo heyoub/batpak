@@ -224,18 +224,12 @@ impl Segment<Active> {
     /// Returns `StoreError::Serialization` if the segment header cannot be serialized.
     pub fn create(dir: &std::path::Path, segment_id: u64) -> Result<Self, StoreError> {
         let path = dir.join(segment_filename(segment_id));
-        let mut file = std::fs::File::create_new(&path).map_err(StoreError::Io)?;
+        let mut file = crate::store::platform::fs::create_new_file(&path)?;
 
-        let created_ns_u128 = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos();
         let header = SegmentHeader {
             version: 1,
             flags: 0,
-            // Saturate rather than panic if the host clock is absurdly far in
-            // the future; environment failure must not abort segment creation.
-            created_ns: i64::try_from(created_ns_u128).unwrap_or(i64::MAX),
+            created_ns: crate::store::platform::clock::now_wall_ns_saturating(),
             segment_id,
         };
 
@@ -325,10 +319,7 @@ impl Segment<Active> {
     /// Returns `StoreError::Io` if the OS-level sync call fails.
     pub fn sync_with_mode(&mut self, mode: &crate::store::SyncMode) -> Result<(), StoreError> {
         if let Some(ref f) = self.file {
-            match mode {
-                crate::store::SyncMode::SyncAll => f.sync_all().map_err(StoreError::Io)?,
-                crate::store::SyncMode::SyncData => f.sync_data().map_err(StoreError::Io)?,
-            }
+            crate::store::platform::sync::sync_file_with_mode(f, mode)?;
         }
         Ok(())
     }

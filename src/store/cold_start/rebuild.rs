@@ -324,23 +324,21 @@ pub(crate) fn write_pending_compaction(
         source_segment_ids: source_segment_ids.to_vec(),
     };
     let final_path = pending_compaction_path(data_dir);
-    super::write_artifact_atomically(data_dir, &final_path, "compaction marker", |file| {
-        serde_json::to_writer(file, &marker).map_err(|e| StoreError::Serialization(Box::new(e)))
-    })
+    crate::store::platform::fs::write_file_atomically(
+        data_dir,
+        &final_path,
+        "compaction marker",
+        |file| {
+            serde_json::to_writer(file, &marker).map_err(|e| StoreError::Serialization(Box::new(e)))
+        },
+    )
 }
 
 pub(crate) fn clear_pending_compaction(data_dir: &Path) -> Result<(), StoreError> {
     let path = pending_compaction_path(data_dir);
     match std::fs::remove_file(&path) {
         Ok(()) => {
-            #[cfg(unix)]
-            {
-                if let Some(parent) = path.parent() {
-                    std::fs::File::open(parent)
-                        .and_then(|dir| dir.sync_all())
-                        .map_err(StoreError::Io)?;
-                }
-            }
+            crate::store::platform::sync::sync_parent_dir(&path)?;
             Ok(())
         }
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -851,6 +849,68 @@ mod tests {
             plan.routing.chunk_count,
             1,
             "PROPERTY: a snapshot plan with no tail entries must preserve the existing routing chunk count instead of synthesizing an extra chunk"
+        );
+    }
+
+    #[test]
+    fn build_snapshot_plan_adds_chunk_when_tail_is_present() {
+        let dir = TempDir::new().expect("temp dir");
+        let store = Store::open(rotating_store_config(&dir)).expect("open store");
+        let coord = Coordinate::new("entity:tail-plan", "scope:rebuild").expect("coord");
+        let kind = EventKind::custom(0xE, 8);
+        for n in 0..16u32 {
+            store
+                .append(&coord, kind, &serde_json::json!({ "n": n }))
+                .expect("append tail event");
+        }
+        store.close().expect("close store");
+
+        let entries = segment_paths(dir.path()).expect("segment paths");
+        let watermark_segment_id = entries
+            .first()
+            .map(|(segment_id, _)| *segment_id)
+            .expect("watermark segment id");
+        let active_after_tail = entries
+            .last()
+            .map(|(segment_id, _)| segment_id.saturating_add(1))
+            .expect("active segment id");
+
+        let reader = Reader::new(dir.path().to_path_buf(), 4);
+        reader.set_active_segment(active_after_tail);
+        let planner = RestorePlanner {
+            reader: &reader,
+            data_dir: dir.path(),
+            policy: ColdStartPolicy::new(false, false),
+        };
+        let routing = RoutingSummary::from_sorted_entries(&[], 1);
+
+        let plan = planner
+            .build_snapshot_plan(
+                RestoreSource::Checkpoint,
+                SnapshotPlanInput {
+                    entries: Vec::new(),
+                    interner_strings: Vec::new(),
+                    watermark: crate::store::cold_start::checkpoint::WatermarkInfo {
+                        watermark_segment_id,
+                        watermark_offset: 0,
+                    },
+                    stored_allocator: 0,
+                    routing,
+                    reopen_reserved_kind_fallbacks: ReservedKindFallbackStats::default(),
+                    persisted_cumulative_reserved_kind_fallbacks:
+                        ReservedKindFallbackStats::default(),
+                },
+            )
+            .expect("build snapshot plan with tail");
+
+        assert!(
+            plan.tail_entries > 0,
+            "SANITY: fixture should collect tail entries from the watermark segment onward"
+        );
+        assert_eq!(
+            plan.routing.chunk_count,
+            2,
+            "PROPERTY: snapshot restore must add exactly one routing chunk when tail replay contributes entries"
         );
     }
 

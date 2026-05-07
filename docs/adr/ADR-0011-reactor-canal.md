@@ -119,7 +119,7 @@ chapters:
   `{data_dir}/cursors/{id}.ckpt`. "Guaranteed" here means at-least-once
   across process restart when a `checkpoint_id` is set on
   `CursorWorkerConfig`, and at-least-once within process lifetime
-  otherwise. Checkpoint write uses `persist_with_parent_fsync`, so the
+  otherwise. Checkpoint write uses `persist_temp_with_parent_sync`, so the
   `cursors/` directory entry is durable before the worker observes the
   new checkpoint as recoverable.
 - **Chapter D1** — reactor `join()` never returns `Ok(())` after crash;
