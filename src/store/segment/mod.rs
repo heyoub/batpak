@@ -73,7 +73,7 @@ pub struct Segment<State> {
 /// index was NOT mutated — the F6 / FREEZE-4 contract routes rebuild
 /// failures here so callers can distinguish "did nothing" from "tried and
 /// failed" from "did compact" without clobbering the reader-visible state.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum CompactionOutcome {
     /// Compaction merged and replaced sealed segments.

@@ -168,21 +168,46 @@ fn rollback_compaction_disk_state(
     Ok(())
 }
 
+struct FailedCompactionCtx<'a> {
+    config: &'a CompactionConfig,
+    active_segment_id: u64,
+    sealed: &'a [(u64, std::path::PathBuf)],
+    merged_segment_id: u64,
+    data_dir: &'a std::path::Path,
+    merged_path: &'a std::path::Path,
+    compact_source_path: Option<&'a std::path::Path>,
+    error: &'a StoreError,
+    context: &'a str,
+}
+
 fn failed_compaction_with_rollback(
-    data_dir: &std::path::Path,
-    merged_path: &std::path::Path,
-    compact_source_path: Option<&std::path::Path>,
-    error: &StoreError,
-    context: &str,
-) -> Result<segment::CompactionResult, StoreError> {
-    rollback_compaction_disk_state(data_dir, merged_path, compact_source_path)?;
-    let reason = format!("{context}; disk layout rolled back: {error}");
-    tracing::error!(target: "batpak::flow", flow = "compact", error = %error, "{reason}");
-    Ok(segment::CompactionResult {
-        outcome: segment::CompactionOutcome::Failed { reason },
+    ctx: &FailedCompactionCtx<'_>,
+) -> Result<
+    (
+        segment::CompactionResult,
+        crate::store::compaction_report::CompactionReportBody,
+    ),
+    StoreError,
+> {
+    rollback_compaction_disk_state(ctx.data_dir, ctx.merged_path, ctx.compact_source_path)?;
+    let reason = format!("{}; disk layout rolled back: {}", ctx.context, ctx.error);
+    tracing::error!(target: "batpak::flow", flow = "compact", error = %ctx.error, "{reason}");
+    let result = segment::CompactionResult {
+        outcome: segment::CompactionOutcome::Failed {
+            reason: reason.clone(),
+        },
         segments_removed: 0,
         bytes_reclaimed: 0,
-    })
+    };
+    let report = crate::store::compaction_report::report_for_run(
+        ctx.config,
+        ctx.active_segment_id,
+        ctx.sealed,
+        Some(ctx.merged_segment_id),
+        &result,
+        None,
+    );
+    Ok((result, report))
 }
 
 fn scan_sealed_entries(
@@ -336,7 +361,13 @@ fn rebuild_fresh_compaction_index(
 pub(crate) fn compact(
     store: &Store<Open>,
     config: &CompactionConfig,
-) -> Result<segment::CompactionResult, StoreError> {
+) -> Result<
+    (
+        segment::CompactionResult,
+        crate::store::compaction_report::CompactionReportBody,
+    ),
+    StoreError,
+> {
     tracing::debug!(target: "batpak::flow", flow = "compact");
     let _lifecycle = store.lifecycle_gate.lock();
     sync(store)?;
@@ -375,11 +406,14 @@ pub(crate) fn compact(
         // merged_id is fabricated from a zero fallback — the early return
         // happens before any merged-file path is derived, so there is no
         // way for compaction to overwrite segment 0.
-        return Ok(segment::CompactionResult {
+        let result = segment::CompactionResult {
             outcome: segment::CompactionOutcome::Skipped,
             segments_removed: 0,
             bytes_reclaimed: 0,
-        });
+        };
+        let report =
+            crate::store::compaction_report::report_skipped(config, active_segment_id, &sealed);
+        return Ok((result, report));
     }
 
     // sealed.len() >= config.min_segments >= 1 here, so sealed[0] is safe
@@ -413,13 +447,17 @@ pub(crate) fn compact(
     {
         Ok(fresh_index) => fresh_index,
         Err(error) => {
-            return failed_compaction_with_rollback(
-                &store.config.data_dir,
-                &merged_path,
-                compact_source_path.as_deref(),
-                &error,
-                "compaction pre-swap phase failed",
-            );
+            return failed_compaction_with_rollback(&FailedCompactionCtx {
+                config,
+                active_segment_id,
+                sealed: &sealed,
+                merged_segment_id: merged_id,
+                data_dir: &store.config.data_dir,
+                merged_path: &merged_path,
+                compact_source_path: compact_source_path.as_deref(),
+                error: &error,
+                context: "compaction pre-swap phase failed",
+            });
         }
     };
 
@@ -457,11 +495,20 @@ pub(crate) fn compact(
         tracing::warn!("post-compaction cold-start artifact write failed: {e}");
     }
 
-    Ok(segment::CompactionResult {
+    let result = segment::CompactionResult {
         outcome: segment::CompactionOutcome::Performed,
         segments_removed,
         bytes_reclaimed,
-    })
+    };
+    let report = crate::store::compaction_report::report_for_run(
+        config,
+        active_segment_id,
+        &sealed,
+        Some(merged_id),
+        &result,
+        Some(&merged_path),
+    );
+    Ok((result, report))
 }
 
 pub(crate) fn close(mut store: Store<Open>) -> Result<Closed, StoreError> {

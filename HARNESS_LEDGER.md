@@ -520,6 +520,33 @@ instead of pretending.
     needs its own schema-version, canonical-body, findings-order, and
     append-boundary pins before promotion.
 
+### Invariant: Lane A generic substrate — envelope framing, compaction evidence, idempotency, and explicit read bounds
+
+- Harness pattern: `Property Harness`
+- Location:
+  - `tests/lane_a_fullsend_substrate.rs`
+  - `src/envelope.rs`
+  - `src/store/compaction_report.rs`
+- Command used:
+  - `cargo test --test lane_a_fullsend_substrate`
+- Line/function coverage delta: targeted rise in `src/envelope.rs` and
+  `src/store/compaction_report.rs`; exact JSON delta not recorded
+- Mutation delta: unmeasured
+- Covered tests:
+  - body digest stable while envelope metadata/signatures/attestations move
+    envelope digest; verification findings deterministic; free-function vs
+    inherent method envelope digest parity; compaction skipped report stability
+    and schema echo; compaction helper constructors; finding order
+    canonicalization in compaction report `body_hash`; append idempotency key
+    aliasing event id with global replay; explicit `Region` / `by_scope` /
+    `stream` / `by_fact` / cursor surfaces (no hidden public full-store
+    cursor).
+- Remaining known blind spots:
+  - deep cryptographic signature verification is intentionally out of scope;
+    tests use structural echo verifiers only. Performed compaction with output
+    segment byte hash is not forced when fixtures keep sealed counts below
+    `min_segments`.
+
 ## State-Machine Harness
 
 ### Invariant: Bounded schedules preserve concurrency protocol truth

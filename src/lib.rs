@@ -54,6 +54,8 @@
 pub mod coordinate;
 /// Stable named-field MessagePack encoding helpers.
 pub mod encoding;
+/// Generic canonical envelope (body vs envelope identity).
+pub mod envelope;
 /// Event types, headers, and sourcing traits.
 pub mod event;
 mod evidence;

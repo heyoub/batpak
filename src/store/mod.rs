@@ -2,6 +2,7 @@ mod ancestry;
 mod append;
 mod chain_walk;
 pub(crate) mod cold_start;
+mod compaction_report;
 mod config;
 /// Push subscriptions (lossy) and pull cursors (ordered, with optional durable
 /// checkpoints) for event delivery.
@@ -51,6 +52,10 @@ pub use chain_walk::{
     ChainWalkReportError, ChainWalkRequest, ChainWalkStartRef, CHAIN_WALK_REPORT_SCHEMA_VERSION,
 };
 pub use cold_start::rebuild::{OpenIndexPath, OpenIndexReport};
+pub use compaction_report::{
+    compaction_strategy_shape, report_for_run, report_skipped, CompactionReportBody,
+    CompactionReportFinding, CompactionStrategyShape, COMPACTION_REPORT_SCHEMA_VERSION,
+};
 pub use config::{
     BatchConfig, IndexConfig, IndexTopology, OpenReportObserver, StoreConfig, SyncConfig, SyncMode,
     WriterConfig,
@@ -1207,7 +1212,25 @@ impl Store<Open> {
     pub fn compact(
         &self,
         config: &CompactionConfig,
-    ) -> Result<segment::CompactionResult, StoreError> {
+    ) -> Result<crate::store::segment::CompactionResult, StoreError> {
+        lifecycle::compact(self, config).map(|(result, _report)| result)
+    }
+
+    /// Same as [`Store::compact`], plus a deterministic structural
+    /// [`CompactionReportBody`] for evidence.
+    ///
+    /// # Errors
+    /// Same error paths as [`Store::compact`].
+    pub fn compact_with_report(
+        &self,
+        config: &CompactionConfig,
+    ) -> Result<
+        (
+            crate::store::segment::CompactionResult,
+            CompactionReportBody,
+        ),
+        StoreError,
+    > {
         lifecycle::compact(self, config)
     }
 
