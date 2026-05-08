@@ -46,16 +46,17 @@
 //! **Reading order:**
 //! 1. [`coordinate`]: Identify entities and scopes
 //! 2. [`event`]: Structure your events
-//! 3. [`guard`]: Build policy gates
-//! 4. [`pipeline`]: Propose and commit
-//! 5. [`store`]: Persist and query
+//! 3. [`artifact`]: Canonical body-vs-envelope digests for signed attachments
+//! 4. [`guard`]: Build policy gates
+//! 5. [`pipeline`]: Propose and commit
+//! 6. [`store`]: Persist and query
 
+/// Crate-level substrate: canonical artifact body digest vs envelope digest.
+pub mod artifact;
 /// Entity and scope addressing for events.
 pub mod coordinate;
 /// Stable named-field MessagePack encoding helpers.
 pub mod encoding;
-/// Generic canonical envelope (body vs envelope identity).
-pub mod envelope;
 /// Event types, headers, and sourcing traits.
 pub mod event;
 mod evidence;

@@ -1,8 +1,7 @@
-//! Deterministic structural evidence for a compaction run (no retention/legal semantics).
+//! Deterministic structural evidence for a compaction attempt (no retention/legal semantics).
 //!
 //! Built from segment identity and [`crate::store::segment::CompactionResult`].
-// justifies: INV-ALLOW-IS-DESIGN; compaction report `body_hash` is encode-only like evidence reports; `tests/lane_a_fullsend_substrate.rs`
-#![allow(clippy::missing_errors_doc)]
+
 use crate::evidence::{content_hash, sort_findings};
 use crate::store::append::{CompactionConfig, CompactionStrategy};
 use crate::store::segment::{CompactionOutcome, CompactionResult};
@@ -12,58 +11,100 @@ use std::path::Path;
 /// Report body schema version for compaction evidence.
 pub const COMPACTION_REPORT_SCHEMA_VERSION: u16 = 1;
 
-/// Shape of the configured strategy (predicates are intentionally not captured).
+/// Strategy shape participating in compaction evidence (predicate bodies intentionally omitted).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum CompactionStrategyShape {
-    /// Plain merge.
+    /// Plain merge path.
     Merge,
-    /// Retention-style filter present (predicate opaque).
+    /// Retention-filter path (`RetentionPredicate` opaque).
     Retention,
-    /// Tombstone rewrite path (predicate opaque).
+    /// Tombstone-rewrite path (`RetentionPredicate` opaque).
     Tombstone,
 }
 
-/// Structural finding in a compaction report (sorted before [`CompactionReportBody::body_hash`]).
+/// Structural compaction finding (deterministically sorted for [`CompactionReportBody::body_hash`]).
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum CompactionReportFinding {
-    /// Output segment file hash unavailable on the evidence path.
+    /// Engine rolled back disk state before swap; correlates with [`CompactionOutcome::Failed`].
+    PreSwapRollback {
+        /// Mirrors the engine failure reason text.
+        reason: String,
+    },
+    /// Evidence path could not hash merged segment bytes while outcome is [`CompactionOutcome::Performed`].
     OutputSegmentHashUnavailable {
-        /// Deterministic reason.
+        /// Deterministic IO/encoding reason.
         reason: String,
     },
 }
 
-/// Evidence body for one compaction attempt: structural identities only.
+#[derive(Serialize)]
+struct CompactionStructuralFingerprint {
+    schema_version: u16,
+    strategy_shape: CompactionStrategyShape,
+    min_segments_threshold: usize,
+    active_segment_id: u64,
+    sealed_segment_count: usize,
+    source_segment_ids_sorted: Vec<u64>,
+    merged_segment_id: Option<u64>,
+    outcome: CompactionOutcome,
+    segments_removed: usize,
+    bytes_reclaimed: u64,
+}
+
+fn compaction_id_digest(
+    fp: &CompactionStructuralFingerprint,
+) -> Result<[u8; 32], rmp_serde::encode::Error> {
+    let bytes = crate::encoding::to_bytes(fp)?;
+    Ok(content_hash(&bytes))
+}
+
+fn segment_id_bounds(ids: &[u64]) -> (Option<u64>, Option<u64>) {
+    match (ids.first(), ids.last()) {
+        (Some(lo), Some(hi)) => (Some(*lo), Some(*hi)),
+        _ => (None, None),
+    }
+}
+
+/// Evidence body for a single compaction decision (structural only).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompactionReportBody {
-    /// Schema version for this report shape.
+    /// Schema version for this compaction evidence shape.
     pub schema_version: u16,
-    /// [`CompactionStrategyShape`] for this run.
+    /// Stable digest over the MessagePack-serialized structural compaction core (findings/output hash excluded).
+    pub compaction_id: [u8; 32],
+    /// Inclusive bounds over [`CompactionReportBody::source_segment_ids_sorted`] when present.
+    pub input_segment_id_low: Option<u64>,
+    /// Inclusive high bound paired with [`CompactionReportBody::input_segment_id_low`].
+    pub input_segment_id_high: Option<u64>,
+    /// Shape of [`CompactionConfig::strategy`] for evidence (predicates omitted).
     pub strategy_shape: CompactionStrategyShape,
-    /// `CompactionConfig::min_segments` threshold used for the attempt.
+    /// [`CompactionConfig::min_segments`] threshold at evidence time.
     pub min_segments_threshold: usize,
-    /// Active (append) segment id at decision time.
+    /// Active tail segment id at evidence time.
     pub active_segment_id: u64,
-    /// Count of sealed segments observed at decision time.
+    /// Count of sealed segments considered as compaction sources.
     pub sealed_segment_count: usize,
-    /// Sealed segment ids participating in the structural view (sorted).
+    /// Source segment ids sorted ascending (not directory iteration order).
     pub source_segment_ids_sorted: Vec<u64>,
-    /// Merged / output sealed id when materialization ran (`None` if skipped early).
+    /// Merged output segment id when materialization started, if any.
     pub merged_segment_id: Option<u64>,
-    /// Raw bytes hash of the merged `.fbat` after seal (`None` if not performed or unavailable).
+    /// Content hash of merged segment file bytes when outcome is performed and readable.
     pub output_segment_bytes_hash: Option<[u8; 32]>,
-    /// Outcome of the engine run.
+    /// Engine outcome for this attempt.
     pub outcome: CompactionOutcome,
-    /// Echo of [`CompactionResult::segments_removed`].
+    /// Count of sealed segment files removed after a performed compaction.
     pub segments_removed: usize,
-    /// Echo of [`CompactionResult::bytes_reclaimed`].
+    /// Sum of removed sealed file sizes (best-effort metadata), if measured.
     pub bytes_reclaimed: u64,
-    /// Structural findings (sorted before hashing).
+    /// Structural findings (canonical order for [`CompactionReportBody::body_hash`]).
     pub findings: Vec<CompactionReportFinding>,
 }
 
 impl CompactionReportBody {
-    /// Deterministic body digest (MessagePack; findings sorted for canonical order).
+    /// Full report body digest (findings sorted; includes `compaction_id` and output hash columns).
+    ///
+    /// # Errors
+    /// MessagePack encoding failure from `rmp-serde`.
     pub fn body_hash(&self) -> Result<[u8; 32], rmp_serde::encode::Error> {
         let mut body = self.clone();
         sort_findings(&mut body.findings);
@@ -72,7 +113,7 @@ impl CompactionReportBody {
     }
 }
 
-/// Map strategy to its structural shape (predicates ignored).
+/// Map live compaction strategy to its structural evidence shape.
 pub fn compaction_strategy_shape(strategy: &CompactionStrategy) -> CompactionStrategyShape {
     match strategy {
         CompactionStrategy::Merge => CompactionStrategyShape::Merge,
@@ -81,31 +122,67 @@ pub fn compaction_strategy_shape(strategy: &CompactionStrategy) -> CompactionStr
     }
 }
 
-/// Build evidence for early skip (`sealed.len() < min_segments`).
+/// Evidence for compaction skip (`sealed.len() < min_segments`).
+///
+/// # Errors
+/// MessagePack encoding failure while computing [`CompactionReportBody::compaction_id`].
 pub fn report_skipped(
     config: &CompactionConfig,
     active_segment_id: u64,
     sealed: &[(u64, std::path::PathBuf)],
-) -> CompactionReportBody {
+) -> Result<CompactionReportBody, rmp_serde::encode::Error> {
     let mut source_segment_ids_sorted: Vec<u64> = sealed.iter().map(|(id, _)| *id).collect();
     source_segment_ids_sorted.sort();
-    CompactionReportBody {
+
+    let (input_segment_id_low, input_segment_id_high) =
+        segment_id_bounds(&source_segment_ids_sorted);
+
+    let outcome = CompactionOutcome::Skipped;
+    let fp = CompactionStructuralFingerprint {
         schema_version: COMPACTION_REPORT_SCHEMA_VERSION,
         strategy_shape: compaction_strategy_shape(&config.strategy),
         min_segments_threshold: config.min_segments,
         active_segment_id,
         sealed_segment_count: sealed.len(),
+        source_segment_ids_sorted: source_segment_ids_sorted.clone(),
+        merged_segment_id: None,
+        outcome: outcome.clone(),
+        segments_removed: 0,
+        bytes_reclaimed: 0,
+    };
+    let compaction_id = compaction_id_digest(&fp)?;
+
+    Ok(CompactionReportBody {
+        schema_version: COMPACTION_REPORT_SCHEMA_VERSION,
+        compaction_id,
+        input_segment_id_low,
+        input_segment_id_high,
+        strategy_shape: fp.strategy_shape,
+        min_segments_threshold: fp.min_segments_threshold,
+        active_segment_id,
+        sealed_segment_count: sealed.len(),
         source_segment_ids_sorted,
         merged_segment_id: None,
         output_segment_bytes_hash: None,
-        outcome: CompactionOutcome::Skipped,
+        outcome,
         segments_removed: 0,
         bytes_reclaimed: 0,
         findings: Vec::new(),
+    })
+}
+
+fn push_failed_finding(findings: &mut Vec<CompactionReportFinding>, outcome: &CompactionOutcome) {
+    if let CompactionOutcome::Failed { reason } = outcome {
+        findings.push(CompactionReportFinding::PreSwapRollback {
+            reason: reason.clone(),
+        });
     }
 }
 
-/// Evidence for a completed attempt: pairs the engine [`CompactionResult`] with structural ids.
+/// Evidence tying engine [`CompactionResult`] to deterministic structural refs.
+///
+/// # Errors
+/// MessagePack encoding failure while computing [`CompactionReportBody::compaction_id`].
 pub fn report_for_run(
     config: &CompactionConfig,
     active_segment_id: u64,
@@ -113,17 +190,22 @@ pub fn report_for_run(
     merged_segment_id: Option<u64>,
     result: &CompactionResult,
     merged_segment_path_for_hash: Option<&Path>,
-) -> CompactionReportBody {
+) -> Result<CompactionReportBody, rmp_serde::encode::Error> {
     let mut source_segment_ids_sorted: Vec<u64> = sealed.iter().map(|(id, _)| *id).collect();
     source_segment_ids_sorted.sort();
 
+    let (input_segment_id_low, input_segment_id_high) =
+        segment_id_bounds(&source_segment_ids_sorted);
+
     let mut findings = Vec::new();
+    push_failed_finding(&mut findings, &result.outcome);
+
     let output_segment_bytes_hash = match (&result.outcome, merged_segment_path_for_hash) {
         (CompactionOutcome::Performed, Some(path)) => match std::fs::read(path) {
             Ok(bytes) => Some(content_hash(&bytes)),
-            Err(e) => {
+            Err(err) => {
                 findings.push(CompactionReportFinding::OutputSegmentHashUnavailable {
-                    reason: format!("read merged segment for evidence hash: {e}"),
+                    reason: format!("read merged segment for evidence hash: {err}"),
                 });
                 None
             }
@@ -131,12 +213,29 @@ pub fn report_for_run(
         _ => None,
     };
 
-    sort_findings(&mut findings);
-
-    CompactionReportBody {
+    let fp = CompactionStructuralFingerprint {
         schema_version: COMPACTION_REPORT_SCHEMA_VERSION,
         strategy_shape: compaction_strategy_shape(&config.strategy),
         min_segments_threshold: config.min_segments,
+        active_segment_id,
+        sealed_segment_count: sealed.len(),
+        source_segment_ids_sorted: source_segment_ids_sorted.clone(),
+        merged_segment_id,
+        outcome: result.outcome.clone(),
+        segments_removed: result.segments_removed,
+        bytes_reclaimed: result.bytes_reclaimed,
+    };
+    let compaction_id = compaction_id_digest(&fp)?;
+
+    sort_findings(&mut findings);
+
+    Ok(CompactionReportBody {
+        schema_version: COMPACTION_REPORT_SCHEMA_VERSION,
+        compaction_id,
+        input_segment_id_low,
+        input_segment_id_high,
+        strategy_shape: fp.strategy_shape,
+        min_segments_threshold: fp.min_segments_threshold,
         active_segment_id,
         sealed_segment_count: sealed.len(),
         source_segment_ids_sorted,
@@ -146,5 +245,5 @@ pub fn report_for_run(
         segments_removed: result.segments_removed,
         bytes_reclaimed: result.bytes_reclaimed,
         findings,
-    }
+    })
 }

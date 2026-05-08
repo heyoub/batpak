@@ -520,23 +520,24 @@ instead of pretending.
     needs its own schema-version, canonical-body, findings-order, and
     append-boundary pins before promotion.
 
-### Invariant: Lane A generic substrate — envelope framing, compaction evidence, idempotency, and explicit read bounds
+### Invariant: Lane A generic substrate — artifact envelope framing, compaction evidence, idempotency, and explicit read bounds
 
 - Harness pattern: `Property Harness`
 - Location:
   - `tests/lane_a_fullsend_substrate.rs`
-  - `src/envelope.rs`
+  - `src/artifact.rs`
   - `src/store/compaction_report.rs`
 - Command used:
   - `cargo test --test lane_a_fullsend_substrate`
-- Line/function coverage delta: targeted rise in `src/envelope.rs` and
+- Line/function coverage delta: targeted rise in `src/artifact.rs` and
   `src/store/compaction_report.rs`; exact JSON delta not recorded
 - Mutation delta: unmeasured
 - Covered tests:
-  - body digest stable while envelope metadata/signatures/attestations move
+  - body digest stable while artifact envelope metadata/signatures/attestations move
     envelope digest; verification findings deterministic; free-function vs
     inherent method envelope digest parity; compaction skipped report stability
-    and schema echo; compaction helper constructors; finding order
+    and schema echo; `compaction_id` excludes post-hoc findings; `PreSwapRollback`
+    structural finding; compaction helper constructors; finding order
     canonicalization in compaction report `body_hash`; append idempotency key
     aliasing event id with global replay; explicit `Region` / `by_scope` /
     `stream` / `by_fact` / cursor surfaces (no hidden public full-store

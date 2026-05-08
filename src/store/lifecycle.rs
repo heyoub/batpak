@@ -206,7 +206,7 @@ fn failed_compaction_with_rollback(
         Some(ctx.merged_segment_id),
         &result,
         None,
-    );
+    )?;
     Ok((result, report))
 }
 
@@ -412,7 +412,7 @@ pub(crate) fn compact(
             bytes_reclaimed: 0,
         };
         let report =
-            crate::store::compaction_report::report_skipped(config, active_segment_id, &sealed);
+            crate::store::compaction_report::report_skipped(config, active_segment_id, &sealed)?;
         return Ok((result, report));
     }
 
@@ -507,7 +507,7 @@ pub(crate) fn compact(
         Some(merged_id),
         &result,
         Some(&merged_path),
-    );
+    )?;
     Ok((result, report))
 }
 

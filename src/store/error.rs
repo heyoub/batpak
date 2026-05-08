@@ -623,6 +623,12 @@ impl From<std::io::Error> for StoreError {
     }
 }
 
+impl From<rmp_serde::encode::Error> for StoreError {
+    fn from(e: rmp_serde::encode::Error) -> Self {
+        Self::Serialization(Box::new(e))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{StoreError, StoreLockMode};
