@@ -592,6 +592,26 @@ instead of pretending.
 - Remaining known blind spots:
   - restore proof does not execute a real store open; it compares digest maps only.
 
+### Invariant: Lane B3 transition substrate — canonical event digest, allowed-edge report, finding order
+
+- Harness pattern: `Property Harness`
+- Location:
+  - `tests/lane_b3_transition_substrate.rs`
+  - `src/transition.rs`
+- Command used:
+  - `cargo test --test lane_b3_transition_substrate`
+- Line/function coverage delta: unmeasured
+- Mutation delta: unmeasured
+- Covered tests:
+  - `causes` permutation invariance for `state_transition_event_digest`; state change moves digest;
+    legal transitions yield stable empty-finding report hashes; disallowed edges emit
+    `InvalidTransition` with [`TRANSITION_INVALID_DISALLOWED_EDGE`]; unsorted causes and unsorted
+    allowed-edge inputs emit structural findings; `state_transition_report_body_hash` sorts findings;
+    sort-order helpers; normalized event digest parity; MessagePack round-trip on
+    `state_transition_event_bytes`; `StateTransitionReport` alias + schema constants.
+- Remaining known blind spots:
+  - allowed-edge membership is a flat sorted list only (no labeled edge families or weights).
+
 ## State-Machine Harness
 
 ### Invariant: Bounded schedules preserve concurrency protocol truth
