@@ -56,6 +56,7 @@ pub mod coordinate;
 pub mod encoding;
 /// Event types, headers, and sourcing traits.
 pub mod event;
+mod evidence;
 /// Policy gate evaluation before event commitment.
 pub mod guard;
 /// UUID v7 identifier generation.
@@ -66,6 +67,8 @@ pub mod outcome;
 pub mod pipeline;
 /// Common re-exports for convenient use.
 pub mod prelude;
+/// Deterministic schema/fixture snapshot drift evidence.
+pub mod schema;
 /// Persistent event storage and querying.
 pub mod store;
 /// Compile-time state machine transitions.

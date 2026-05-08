@@ -1,4 +1,4 @@
-use crate::store::stats::{LockLeafSymlinkProtection, StoreLockAdmissionSummary};
+use crate::store::stats::LockLeafSymlinkProtection;
 use crate::store::StoreError;
 use std::fs::{File, OpenOptions};
 #[cfg(unix)]
@@ -43,11 +43,9 @@ pub(crate) struct StoreLockAdmission {
 pub(crate) fn admit_store_lock(
     evidence: LockLeafSymlinkProtection,
 ) -> Result<StoreLockAdmission, StoreError> {
-    let summary = match evidence {
-        LockLeafSymlinkProtection::AtomicNoFollow => StoreLockAdmissionSummary::AtomicNoFollow,
-        LockLeafSymlinkProtection::BestEffortCheckThenOpen => {
-            StoreLockAdmissionSummary::BestEffortCheckThenOpen
-        }
+    match evidence {
+        LockLeafSymlinkProtection::AtomicNoFollow
+        | LockLeafSymlinkProtection::BestEffortCheckThenOpen => {}
         LockLeafSymlinkProtection::Unknown
         | LockLeafSymlinkProtection::ObservedUnsupported
         | LockLeafSymlinkProtection::ProbeFailed => {
@@ -57,6 +55,5 @@ pub(crate) fn admit_store_lock(
             });
         }
     };
-    let _ = summary;
     Ok(StoreLockAdmission { _private: () })
 }

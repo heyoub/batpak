@@ -1,3 +1,9 @@
+//! PROVES: public topology constructors, diagnostics labels, and tile-count
+//! reporting match the configured index topology surface.
+//! CATCHES: topology preset drift, stale diagnostics labels, and tiled overlay
+//! costs hidden from diagnostics.
+//! SEEDED: deterministic / no randomness.
+
 use batpak::coordinate::Coordinate;
 use batpak::event::EventKind;
 use batpak::store::{IndexTopology, Store, StoreConfig};
@@ -21,6 +27,11 @@ fn topology_constructors_enable_expected_overlays() {
             "tiled",
             IndexTopology::tiled(),
             IndexTopology::aos().with_tiles64(true),
+        ),
+        (
+            "tiled_simd",
+            IndexTopology::tiled_simd(),
+            IndexTopology::aos().with_tiles64_simd(true),
         ),
         (
             "all",
@@ -57,6 +68,7 @@ fn diagnostics_reports_topology_labels() {
         ("scan", IndexTopology::scan()),
         ("entity-local", IndexTopology::entity_local()),
         ("tiled", IndexTopology::tiled()),
+        ("tiled-simd", IndexTopology::tiled_simd()),
         ("all", IndexTopology::all()),
     ];
 
@@ -85,6 +97,7 @@ fn diagnostics_reports_tile_count_only_for_tiled_topologies() {
         ("scan", IndexTopology::scan(), false),
         ("entity-local", IndexTopology::entity_local(), false),
         ("tiled", IndexTopology::tiled(), true),
+        ("tiled-simd", IndexTopology::tiled_simd(), true),
         ("all", IndexTopology::all(), true),
     ];
 
@@ -114,7 +127,7 @@ fn diagnostics_reports_tile_count_only_for_tiled_topologies() {
         if expects_tiles {
             assert!(
                 diagnostics.tile_count > 0,
-                "topology `{label}` should report live AoSoA64 tile usage once populated"
+                "topology `{label}` should report live tiled overlay usage once populated"
             );
         } else {
             assert_eq!(

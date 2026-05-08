@@ -1,5 +1,6 @@
 mod ancestry;
 mod append;
+mod chain_walk;
 pub(crate) mod cold_start;
 mod config;
 /// Push subscriptions (lossy) and pull cursors (ordered, with optional durable
@@ -22,10 +23,12 @@ mod lifecycle;
 mod platform;
 /// Projection cache traits and built-in backends (NoCache, NativeCache).
 pub mod projection;
+mod projection_run;
 /// Typed reactor output batch — accumulator handed to typed reactor handlers.
 pub mod reaction;
 /// Typed reactor public surface + shared internal canal runner.
 pub mod reactor_typed;
+mod read_walk;
 #[cfg(test)]
 mod runtime_contracts;
 /// On-disk segment format, frame encoding/decoding, and compaction helpers.
@@ -33,6 +36,7 @@ pub mod segment;
 mod signing;
 /// Runtime statistics and diagnostic snapshots.
 pub mod stats;
+mod subscriber_frontier;
 #[cfg(feature = "dangerous-test-hooks")]
 mod test_support;
 pub(crate) mod write;
@@ -41,6 +45,10 @@ pub use append::{
     AppendOptions, AppendPositionHint, AppendReceipt, BatchAppendItem, CausationRef,
     CompactionConfig, CompactionStrategy, DenialReceipt, EncodedBytes, ExtensionKey,
     ExtensionKeyError, RetentionPredicate,
+};
+pub use chain_walk::{
+    ChainWalkEvidenceReport, ChainWalkFinding, ChainWalkHash, ChainWalkMode, ChainWalkReportBody,
+    ChainWalkReportError, ChainWalkRequest, ChainWalkStartRef, CHAIN_WALK_REPORT_SCHEMA_VERSION,
 };
 pub use cold_start::rebuild::{OpenIndexPath, OpenIndexReport};
 pub use config::{
@@ -68,8 +76,21 @@ pub use projection::watch::{ProjectionWatcher, WatcherError};
 pub use projection::{
     CacheCapabilities, CacheMeta, Freshness, NativeCache, NoCache, ProjectionCache,
 };
+pub use projection_run::{
+    ProjectionRunCacheStatus, ProjectionRunCheckpointRef, ProjectionRunEvidenceReport,
+    ProjectionRunFinding, ProjectionRunFreshnessStatus, ProjectionRunFrontierKind,
+    ProjectionRunHash, ProjectionRunInputFrontier, ProjectionRunOutputHash,
+    ProjectionRunReplayMode, ProjectionRunReportBody, ProjectionRunReportError,
+    ProjectionRunRequestedFreshness, ProjectionSourceRef, PROJECTION_RUN_REPORT_SCHEMA_VERSION,
+};
 pub use reaction::ReactionBatch;
 pub use reactor_typed::{ReactorConfig, ReactorError, TypedReactorHandle};
+pub use read_walk::{
+    ReadWalkDroppedCount, ReadWalkEvidenceReport, ReadWalkFinding, ReadWalkFreshnessIntent,
+    ReadWalkFrontierKind, ReadWalkHash, ReadWalkInputFrontier, ReadWalkProofRef, ReadWalkProofRefs,
+    ReadWalkReplayMode, ReadWalkReportBody, ReadWalkReportError, ReadWalkRequest,
+    ReadWalkSourceRef, READ_WALK_REPORT_SCHEMA_VERSION,
+};
 pub use signing::SigningKey;
 pub use stats::{
     ActiveSegmentReadEvidence, ClockEvidence, FrontierView, HlcPoint, HostEvidenceSummary,
@@ -77,6 +98,12 @@ pub use stats::{
     ParentDirSyncEvidence, PlatformAdmissionSummary, PlatformEvidenceSummary, StoreDiagnostics,
     StoreLockAdmissionSummary, StorePathEvidenceSummary, StorePathStatusEvidence, StoreStats,
     WatermarkKind, WatermarkSnapshot, WriterPressure,
+};
+pub use subscriber_frontier::{
+    LossPrecision, SubscriberDeliveryState, SubscriberFrontierEvidenceReport,
+    SubscriberFrontierFinding, SubscriberFrontierHash, SubscriberFrontierReportBody,
+    SubscriberFrontierReportError, SubscriberFrontierRequest, SubscriberFrontierSource,
+    SUBSCRIBER_FRONTIER_REPORT_SCHEMA_VERSION,
 };
 pub use write::control::{AppendTicket, BatchAppendTicket, Outbox, VisibilityFence};
 pub use write::writer::{Notification, RestartPolicy};

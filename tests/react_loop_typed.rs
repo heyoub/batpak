@@ -137,7 +137,7 @@ fn wait_for<F: Fn() -> bool>(cond: F, timeout: Duration) -> bool {
 }
 
 fn test_store() -> (Arc<Store>, tempfile::TempDir) {
-    let (s, d) = small_segment_store();
+    let (s, d) = small_segment_store().unwrap();
     (Arc::new(s), d)
 }
 

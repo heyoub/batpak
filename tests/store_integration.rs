@@ -20,7 +20,10 @@ use tempfile::TempDir;
 
 #[path = "support/small_store.rs"]
 mod small_store_support;
-use small_store_support::small_segment_store as test_store;
+
+fn test_store() -> (Store, TempDir) {
+    small_store_support::small_segment_store().expect("small segment store")
+}
 
 // --- Basic append/get round-trip ---
 

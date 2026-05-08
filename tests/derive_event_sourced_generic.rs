@@ -49,7 +49,7 @@ where
 
 #[test]
 fn generic_projection_compiles_and_projects() {
-    let (store, _dir) = small_segment_store();
+    let (store, _dir) = small_segment_store().unwrap();
     let coord = Coordinate::new("entity:generic", "scope:test").unwrap();
     store.append_typed(&coord, &Bumped { amount: 2 }).unwrap();
     store.append_typed(&coord, &Bumped { amount: 5 }).unwrap();

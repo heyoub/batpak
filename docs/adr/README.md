@@ -4,6 +4,9 @@ Architecture Decision Records live in this directory. All current ADRs are
 accepted; shipped notes identify the first release where a decision became part
 of the public or repository contract when that release is known.
 
+For the cross-ADR evidence-report identity pattern, see
+`docs/evidence-reports.md`.
+
 | ADR | Title | Status |
 | --- | --- | --- |
 | ADR-0001 | Sync-Only Store API | Accepted |
@@ -24,3 +27,10 @@ of the public or repository contract when that release is known.
 | ADR-0016 | Durability Gating | Accepted; shipped in 0.7.0 |
 | ADR-0017 | At-Least-Once Witness Surface | Accepted; shipped in 0.7.0 |
 | ADR-0018 | Store Platform Backend | Accepted |
+| ADR-0019 | Canonical Encoding Compatibility Contract | Accepted |
+| ADR-0020 | Schema Snapshot Drift Evidence Report | Accepted |
+| ADR-0021 | Chain Walk Evidence Report | Accepted |
+| ADR-0022 | Subscriber Frontier Observations | Accepted |
+| ADR-0023 | Projection Run Evidence Report (Design Precursor) | Accepted; superseded for v1 implementation by ADR-0024 |
+| ADR-0024 | Projection Run Evidence Report v1 | Accepted |
+| ADR-0025 | Read Walk Evidence Report v1 | Accepted |

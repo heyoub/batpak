@@ -47,6 +47,10 @@ impl VisibilitySnapshot {
             .iter()
             .any(|(start, end)| sequence >= *start && sequence < *end)
     }
+
+    pub(super) fn visible_upper_bound(&self) -> u64 {
+        self.visible
+    }
 }
 
 pub(super) fn extend_visible_entries<'a, I>(

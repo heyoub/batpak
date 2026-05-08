@@ -383,7 +383,8 @@ pub struct StoreDiagnostics {
     pub writer_pressure: WriterPressure,
     /// Narrow frontier observability view.
     pub frontier: FrontierView,
-    /// Active scan topology label (`aos`, `scan`, `entity-local`, `tiled`, `all`, or `hybrid`).
+    /// Active scan topology label (`aos`, `scan`, `entity-local`, `tiled`,
+    /// `tiled-simd`, `all`, or `hybrid`).
     pub index_topology: &'static str,
     /// Number of tiles in the columnar index (0 for non-tiled layouts).
     pub tile_count: usize,

@@ -40,7 +40,10 @@ struct PublishedDoc {
 
 #[path = "support/small_store.rs"]
 mod small_store_support;
-use small_store_support::small_segment_store as test_store;
+
+fn test_store() -> (Store, TempDir) {
+    small_store_support::small_segment_store().expect("small segment store")
+}
 
 fn append_cursor_json_events(store: &Store, coord: &Coordinate, kind: EventKind, count: usize) {
     for i in 0..count {

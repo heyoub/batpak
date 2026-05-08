@@ -1219,11 +1219,11 @@ mod tests {
         let file = syn::parse_file(source).expect("parse source");
         let names = public_item_names(&file);
 
-        assert!(names.contains(&"FLAG".to_string()));
-        assert!(names.contains(&"Alias".to_string()));
-        assert!(names.contains(&"nested".to_string()));
-        assert!(names.contains(&"PublicStoreError".to_string()));
-        assert!(names.contains(&"subscribe".to_string()));
+        assert!(names.contains("FLAG"));
+        assert!(names.contains("Alias"));
+        assert!(names.contains("nested"));
+        assert!(names.contains("PublicStoreError"));
+        assert!(names.contains("subscribe"));
     }
 
     #[test]

@@ -139,14 +139,20 @@ The topology only controls optional overlays.
 - `IndexTopology::scan()`: base AoS + SoA
 - `IndexTopology::entity_local()`: base AoS + SoAoS entity-group overlay
 - `IndexTopology::tiled()`: base AoS + AoSoA64 tiled overlay
-- `IndexTopology::all()`: base AoS + all overlays
+- `IndexTopology::tiled_simd()`: base AoS + mixed-kind tiled overlay shaped
+  for auto-vectorizable scans
+- `IndexTopology::all()`: base AoS + all stable overlays
+
+Diagnostics expose these presets as `aos`, `scan`, `entity-local`, `tiled`,
+`tiled-simd`, and `all`. Non-preset overlay combinations are reported as
+`hybrid`.
 
 `IndexTopology::default()` delegates to `aos()`, so overlay cost stays opt-in.
 
 Query routing is capability-driven:
 
-- kind/category queries prefer `SoA -> AoSoA64 -> SoAoS -> base AoS`
-- scope queries prefer `SoAoS -> SoA -> AoSoA64 -> base AoS`
+- kind/category queries prefer `SoA -> AoSoA64 -> AoSoA64Simd -> SoAoS -> base AoS`
+- scope queries prefer `SoAoS -> SoA -> AoSoA64 -> AoSoA64Simd -> base AoS`
 - only `entity_local()` and `all()` provide projection-local generation/cache acceleration
 
 ## Replay Lanes
@@ -168,6 +174,32 @@ Current measurement witness:
   replay workload in this tree
 - `examples/event_sourced_counter.rs` is the canonical ergonomic lane example
 - `examples/raw_projection_counter.rs` is the canonical performance-lane example
+
+## Diagnostics And Evidence Boundary
+
+`StoreDiagnostics` is a live operational snapshot, not a deterministic evidence
+report body. It intentionally exposes the current `StoreDiagnostics::frontier`,
+writer pressure, topology label, `tile_count`, latest `open_report`, and
+`platform_evidence` beside selected configuration values.
+
+`StoreDiagnostics::platform_evidence` is recomputed when diagnostics are
+collected. Platform evidence can therefore differ from the platform profile that
+was verified at open if a later probe observes a different target posture or a
+transient probe failure. Use platform profile verification for fail-closed
+admission; use diagnostics for current operator visibility.
+
+Not every `StoreConfig` knob appears in diagnostics. Sync cadence, batch limits,
+single-append byte limits, signing-key registry contents, registry validation
+mode, injected test clocks, open-report observers, and feature-gated test hooks
+are configuration facts rather than deterministic evidence-report body fields.
+Read-only stores also have no live writer thread, so `writer_pressure` reports
+the absence of writer pressure rather than the mutable writer mailbox capacity.
+
+The deterministic evidence-report family keeps this boundary explicit: report
+bodies prove structural facts over visible store state, chain reads, projection
+runs, read walks, schema snapshots, and subscriber observations. They do not
+attest to fsync cadence, platform profile paths, signing-key configuration, or
+which optional index layout produced equivalent answers.
 
 ## Writer Data Flow
 

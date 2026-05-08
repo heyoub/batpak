@@ -60,7 +60,7 @@ impl StateMarker for Closed {}
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
 fn test_store() -> (Store, tempfile::TempDir) {
-    small_segment_store()
+    small_segment_store().unwrap()
 }
 
 fn coord() -> Coordinate {

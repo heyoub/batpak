@@ -127,7 +127,7 @@ fn source_coord() -> Coordinate {
 }
 
 fn test_store() -> (Arc<Store>, tempfile::TempDir) {
-    let (s, d) = small_segment_store();
+    let (s, d) = small_segment_store().unwrap();
     (Arc::new(s), d)
 }
 

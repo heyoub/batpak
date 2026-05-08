@@ -33,7 +33,7 @@ fn user_visible_events(store: &Store) -> Vec<batpak::store::IndexEntry> {
 
 #[test]
 fn dropping_outbox_without_flush_commits_nothing() {
-    let (store, _dir) = small_segment_store();
+    let (store, _dir) = small_segment_store().unwrap();
     let coord = test_coord();
     let kind = EventKind::custom(0xF, 1);
 
@@ -73,7 +73,7 @@ fn dropping_outbox_without_flush_commits_nothing() {
 
 #[test]
 fn flushed_outbox_lands_all_items_atomically() {
-    let (store, _dir) = small_segment_store();
+    let (store, _dir) = small_segment_store().unwrap();
     let coord = test_coord();
     let kind = EventKind::custom(0xF, 1);
 
@@ -101,7 +101,7 @@ fn flushed_outbox_lands_all_items_atomically() {
 fn re_staging_after_flush_stays_coherent() {
     // Ensures that draining the outbox on flush leaves it clean for reuse,
     // and a subsequent drop after re-stage still commits nothing.
-    let (store, _dir) = small_segment_store();
+    let (store, _dir) = small_segment_store().unwrap();
     let coord = test_coord();
     let kind = EventKind::custom(0xF, 1);
 

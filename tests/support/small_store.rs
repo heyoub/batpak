@@ -6,23 +6,29 @@
 
 use batpak::prelude::*;
 use batpak::store::SyncConfig;
+use std::path::Path;
 use tempfile::TempDir;
 
-/// Open a store with 4 KB segments and per-event fsync, under a fresh temp
-/// directory. The returned `TempDir` must stay alive for the lifetime of the
-/// `Store`; drop either before the other only if the test deliberately
-/// exercises that shape.
-pub fn small_segment_store() -> (Store, TempDir) {
-    let dir = TempDir::new().expect("create temp dir");
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
+/// Store configuration used by [`small_segment_store`] and reopen tests.
+pub fn small_segment_store_config(data_dir: &Path) -> StoreConfig {
+    StoreConfig {
+        data_dir: data_dir.to_path_buf(),
         segment_max_bytes: 4096,
         sync: SyncConfig {
             every_n_events: 1,
             ..SyncConfig::default()
         },
         ..StoreConfig::new("")
-    };
-    let store = Store::open(config).expect("open store");
-    (store, dir)
+    }
+}
+
+/// Open a store with 4 KB segments and per-event fsync, under a fresh temp
+/// directory. The returned `TempDir` must stay alive for the lifetime of the
+/// `Store`; drop either before the other only if the test deliberately
+/// exercises that shape.
+pub fn small_segment_store() -> Result<(Store, TempDir), Box<dyn std::error::Error>> {
+    let dir = TempDir::new()?;
+    let config = small_segment_store_config(dir.path());
+    let store = Store::open(config)?;
+    Ok((store, dir))
 }

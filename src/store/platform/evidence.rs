@@ -145,10 +145,11 @@ fn mmap_admission(evidence: MmapEvidence) -> MmapAdmissionSummary {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::error::Error;
 
     #[test]
-    fn path_status_distinguishes_missing_paths_from_probe_failures() {
-        let dir = tempfile::tempdir().expect("temp dir");
+    fn path_status_distinguishes_missing_paths_from_probe_failures() -> Result<(), Box<dyn Error>> {
+        let dir = tempfile::tempdir()?;
         let missing = dir.path().join("missing-store-path");
 
         assert_eq!(
@@ -156,5 +157,6 @@ mod tests {
             StorePathStatusEvidence::UnknownMissing,
             "PROPERTY: a missing store path is unknown/missing evidence, not a probe failure"
         );
+        Ok(())
     }
 }

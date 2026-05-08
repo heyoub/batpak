@@ -4,7 +4,7 @@ use crate::coordinate::{KindFilter, Region};
 
 impl StoreIndex {
     pub(crate) fn get_by_id(&self, event_id: u128) -> Option<IndexEntry> {
-        let _read = self.swap_gate.read();
+        let _read_guard = self.swap_gate.read();
         let visibility = self.sequence.snapshot();
         self.by_id
             .get(&event_id)
@@ -18,6 +18,30 @@ impl StoreIndex {
     /// the hit is dropped and the caller continues with the remaining visible
     /// entries rather than aborting the process.
     pub(crate) fn upgrade_hit(&self, hit: QueryHit) -> Option<IndexEntry> {
+        let visibility = self.sequence.snapshot();
+        self.upgrade_hit_with_visibility(hit, &visibility)
+    }
+
+    pub(crate) fn upgrade_hit_with_visible_upper_bound(
+        &self,
+        hit: QueryHit,
+        visible_upper_bound: u64,
+    ) -> Option<IndexEntry> {
+        if hit.global_sequence >= visible_upper_bound {
+            return None;
+        }
+        let upgraded = self
+            .by_id
+            .get(&hit.event_id)
+            .map(|entry| entry.value().as_ref().clone());
+        upgraded.filter(|entry| entry.global_sequence < visible_upper_bound)
+    }
+
+    fn upgrade_hit_with_visibility(
+        &self,
+        hit: QueryHit,
+        visibility: &VisibilitySnapshot,
+    ) -> Option<IndexEntry> {
         let upgraded = self
             .by_id
             .get(&hit.event_id)
@@ -30,7 +54,7 @@ impl StoreIndex {
                 "dropping query hit with no backing by_id entry"
             );
         }
-        upgraded
+        upgraded.filter(|entry| visibility.is_visible(entry.global_sequence))
     }
 
     /// Return all entries matching `region` as lightweight `QueryHit` values.
@@ -41,9 +65,27 @@ impl StoreIndex {
     /// revalidation → kind/fact → clock range. Output is sorted by
     /// `global_sequence`.
     pub(crate) fn query_hits(&self, region: &Region) -> Vec<QueryHit> {
-        let _read = self.swap_gate.read();
+        let _read_guard = self.swap_gate.read();
         let visibility = self.sequence.snapshot();
+        self.query_hits_with_visibility(region, &visibility)
+    }
 
+    pub(crate) fn query_hits_with_visible_upper_bound(
+        &self,
+        region: &Region,
+    ) -> (Vec<QueryHit>, u64) {
+        let _read_guard = self.swap_gate.read();
+        let visibility = self.sequence.snapshot();
+        let visible_upper_bound = visibility.visible_upper_bound();
+        let hits = self.query_hits_with_visibility(region, &visibility);
+        (hits, visible_upper_bound)
+    }
+
+    fn query_hits_with_visibility(
+        &self,
+        region: &Region,
+        visibility: &VisibilitySnapshot,
+    ) -> Vec<QueryHit> {
         let mut hits: Vec<QueryHit> = if region.entity_prefix.is_some() {
             let mut candidates = Vec::new();
             for stream in self
@@ -97,7 +139,7 @@ impl StoreIndex {
             candidates
         };
 
-        self.filter_region_hits(&mut hits, region, &visibility);
+        self.filter_region_hits(&mut hits, region, visibility);
         hits.sort_by_key(|h| h.global_sequence);
         hits
     }
@@ -162,7 +204,7 @@ impl StoreIndex {
         started: bool,
         limit: usize,
     ) -> Vec<QueryHit> {
-        let _read = self.swap_gate.read();
+        let _read_guard = self.swap_gate.read();
         let visibility = self.sequence.snapshot();
         let seq_ok = |seq: u64| !started || seq > after_seq;
 
@@ -264,7 +306,7 @@ impl StoreIndex {
 
     /// Returns the latest entry for `entity`, filtered by visibility.
     pub(crate) fn get_latest(&self, entity: &str) -> Option<IndexEntry> {
-        let _read = self.swap_gate.read();
+        let _read_guard = self.swap_gate.read();
         let visibility = self.sequence.snapshot();
         self.latest
             .get(entity)
@@ -273,7 +315,7 @@ impl StoreIndex {
     }
 
     pub(crate) fn stream(&self, entity: &str) -> Vec<IndexEntry> {
-        let _read = self.swap_gate.read();
+        let _read_guard = self.swap_gate.read();
         let visibility = self.sequence.snapshot();
         self.streams
             .get(entity)

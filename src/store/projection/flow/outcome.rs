@@ -1,4 +1,5 @@
 use crate::store::config::duration_micros;
+use crate::store::HlcPoint;
 
 /// Outcome returned by the internal `project_inner` pipeline.
 ///
@@ -16,14 +17,48 @@ pub(crate) struct ProjectionOutcome<T> {
     state: Option<T>,
     returned_generation: u64,
     applied_sequence: Option<u64>,
+    cache_status: ProjectionCacheObservation,
+    observed_freshness: ProjectionObservedFreshness,
+    input_frontier: Option<HlcPoint>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ProjectionCacheObservation {
+    Hit,
+    Miss,
+    Bypassed,
+    Unavailable { reason: &'static str },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ProjectionObservedFreshness {
+    Fresh,
+    StaleAllowed,
+    NotApplicable,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(super) struct ProjectionFinishObservation {
+    pub applied_sequence: u64,
+    pub cache_status: ProjectionCacheObservation,
+    pub observed_freshness: ProjectionObservedFreshness,
+    pub input_frontier: Option<HlcPoint>,
 }
 
 impl<T> ProjectionOutcome<T> {
-    pub(super) fn empty(returned_generation: u64) -> Self {
+    pub(super) fn empty(
+        returned_generation: u64,
+        cache_status: ProjectionCacheObservation,
+        observed_freshness: ProjectionObservedFreshness,
+        input_frontier: Option<HlcPoint>,
+    ) -> Self {
         Self {
             state: None,
             returned_generation,
             applied_sequence: None,
+            cache_status,
+            observed_freshness,
+            input_frontier,
         }
     }
 
@@ -31,11 +66,17 @@ impl<T> ProjectionOutcome<T> {
         state: Option<T>,
         returned_generation: u64,
         applied_sequence: Option<u64>,
+        cache_status: ProjectionCacheObservation,
+        observed_freshness: ProjectionObservedFreshness,
+        input_frontier: Option<HlcPoint>,
     ) -> Self {
         Self {
             state,
             returned_generation,
             applied_sequence,
+            cache_status,
+            observed_freshness,
+            input_frontier,
         }
     }
 
@@ -51,6 +92,18 @@ impl<T> ProjectionOutcome<T> {
     /// Consume just the state, discarding the generation bookkeeping.
     pub(crate) fn into_state(self) -> Option<T> {
         self.state
+    }
+
+    pub(crate) fn cache_status(&self) -> ProjectionCacheObservation {
+        self.cache_status
+    }
+
+    pub(crate) fn observed_freshness(&self) -> ProjectionObservedFreshness {
+        self.observed_freshness
+    }
+
+    pub(crate) fn input_frontier(&self) -> Option<HlcPoint> {
+        self.input_frontier
     }
 }
 
@@ -96,10 +149,17 @@ pub(super) fn finish_projection<T>(
     started_at: std::time::Instant,
     state: Option<T>,
     returned_generation: u64,
-    applied_sequence: u64,
+    observation: ProjectionFinishObservation,
 ) -> ProjectionOutcome<T> {
     record_total_time(timings, started_at);
-    ProjectionOutcome::new(state, returned_generation, Some(applied_sequence))
+    ProjectionOutcome::new(
+        state,
+        returned_generation,
+        Some(observation.applied_sequence),
+        observation.cache_status,
+        observation.observed_freshness,
+        observation.input_frontier,
+    )
 }
 
 pub(super) fn finish_empty_projection<T>(
@@ -108,5 +168,10 @@ pub(super) fn finish_empty_projection<T>(
     returned_generation: u64,
 ) -> ProjectionOutcome<T> {
     record_total_time(timings, started_at);
-    ProjectionOutcome::empty(returned_generation)
+    ProjectionOutcome::empty(
+        returned_generation,
+        ProjectionCacheObservation::Bypassed,
+        ProjectionObservedFreshness::NotApplicable,
+        None,
+    )
 }

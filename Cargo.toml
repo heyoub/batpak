@@ -177,6 +177,10 @@ harness = false
 name = "frontier_waiters"
 harness = false
 
+[[bench]]
+name = "evidence_reports"
+harness = false
+
 # Profile settings (NOT in .cargo/config.toml — they're ignored there)
 [profile.dev]
 opt-level = 0

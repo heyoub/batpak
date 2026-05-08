@@ -264,36 +264,38 @@ impl PlatformProfile {
 }
 
 #[cfg(test)]
-// justifies: INV-TEST-PANIC-AS-ASSERTION; profile unit tests in src/store/platform/profile.rs use unwrap/panic assertion style to pin private fingerprint and mismatch helpers without leaking them into public APIs.
-#[allow(clippy::panic, clippy::unwrap_used)]
 mod tests {
     use super::PlatformProfile;
     use crate::store::StoreError;
+    use std::error::Error;
     use tempfile::TempDir;
 
-    #[test]
-    fn platform_profile_round_trips_with_valid_fingerprint() {
-        let dir = TempDir::new().unwrap();
-        let profile = PlatformProfile::from_store_path_for_test(dir.path()).unwrap();
-        let path = dir.path().join("platform.profile.json");
-        std::fs::write(&path, serde_json::to_vec_pretty(&profile).unwrap()).unwrap();
+    type TestResult = Result<(), Box<dyn Error>>;
 
-        let loaded = PlatformProfile::load(&path).unwrap();
+    #[test]
+    fn platform_profile_round_trips_with_valid_fingerprint() -> TestResult {
+        let dir = TempDir::new()?;
+        let profile = PlatformProfile::from_store_path_for_test(dir.path())?;
+        let path = dir.path().join("platform.profile.json");
+        std::fs::write(&path, serde_json::to_vec_pretty(&profile)?)?;
+
+        let loaded = PlatformProfile::load(&path)?;
         assert_eq!(profile, loaded);
+        Ok(())
     }
 
     #[test]
-    fn platform_profile_mismatch_fails_closed() {
-        let dir = TempDir::new().unwrap();
-        let profile = PlatformProfile::from_store_path_for_test(dir.path()).unwrap();
+    fn platform_profile_mismatch_fails_closed() -> TestResult {
+        let dir = TempDir::new()?;
+        let profile = PlatformProfile::from_store_path_for_test(dir.path())?;
         let path = dir.path().join("platform.profile.json");
-        std::fs::write(&path, serde_json::to_vec_pretty(&profile).unwrap()).unwrap();
+        std::fs::write(&path, serde_json::to_vec_pretty(&profile)?)?;
         let missing = dir.path().join("missing-store-path");
 
-        let error = match PlatformProfile::verify_current_store_path(&path, &missing) {
-            Ok(_) => panic!("expected profile mismatch"),
-            Err(error) => error,
+        let Err(error) = PlatformProfile::verify_current_store_path(&path, &missing) else {
+            return Err(std::io::Error::other("expected profile mismatch").into());
         };
         assert!(matches!(error, StoreError::PlatformProfileMismatch { .. }));
+        Ok(())
     }
 }

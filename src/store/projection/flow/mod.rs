@@ -5,13 +5,16 @@ mod strategy;
 
 use crate::event::{EventSourced, ProjectionInput};
 use crate::store::config::duration_micros;
-use crate::store::{Freshness, Store, StoreError};
+use crate::store::{Freshness, HlcPoint, Store, StoreError};
 use std::any::TypeId;
 
 pub(crate) use cache_identity::projection_cache_key;
-pub(crate) use outcome::ProjectionTimings;
 use outcome::{
-    finish_empty_projection, finish_projection, record_external_cache_probe_time, ProjectionOutcome,
+    finish_empty_projection, finish_projection, record_external_cache_probe_time,
+    ProjectionFinishObservation,
+};
+pub(crate) use outcome::{
+    ProjectionCacheObservation, ProjectionObservedFreshness, ProjectionOutcome, ProjectionTimings,
 };
 #[doc(hidden)]
 pub use replay_input::ReplayInput;
@@ -50,8 +53,28 @@ where
     execute_full_replay::<T, I, State>(
         store,
         replay_execution(entity, freshness, replay, started_at),
+        ProjectionCacheObservation::Miss,
+        ProjectionObservedFreshness::Fresh,
         timings,
     )
+}
+
+fn input_frontier_for_sequence<State>(store: &Store<State>, sequence: u64) -> Option<HlcPoint> {
+    store.index.hlc_for_global_sequence(sequence)
+}
+
+fn finish_observation<State>(
+    store: &Store<State>,
+    applied_sequence: u64,
+    cache_status: ProjectionCacheObservation,
+    observed_freshness: ProjectionObservedFreshness,
+) -> ProjectionFinishObservation {
+    ProjectionFinishObservation {
+        applied_sequence,
+        cache_status,
+        observed_freshness,
+        input_frontier: input_frontier_for_sequence(store, applied_sequence),
+    }
 }
 
 pub(crate) fn project<T, State>(
@@ -64,6 +87,18 @@ where
     T::Input: ReplayInput,
 {
     Ok(project_inner::<T, T::Input, State>(store, entity, freshness, None)?.into_state())
+}
+
+pub(crate) fn project_outcome<T, State>(
+    store: &Store<State>,
+    entity: &str,
+    freshness: &Freshness,
+) -> Result<ProjectionOutcome<T>, StoreError>
+where
+    T: EventSourced + serde::Serialize + serde::de::DeserializeOwned + 'static,
+    T::Input: ReplayInput,
+{
+    project_inner::<T, T::Input, State>(store, entity, freshness, None)
 }
 
 pub(crate) fn project_if_changed<T, State>(
@@ -274,7 +309,12 @@ where
                     t_start,
                     Some(value),
                     slot.generation,
-                    slot.watermark,
+                    finish_observation(
+                        store,
+                        slot.watermark,
+                        ProjectionCacheObservation::Hit,
+                        ProjectionObservedFreshness::Fresh,
+                    ),
                 ))
             } else {
                 fallback_to_full_replay::<T, I, State>(
@@ -307,7 +347,12 @@ where
                     t_start,
                     Some(cached_state),
                     replay.plan.generation,
-                    replay.watermark,
+                    finish_observation(
+                        store,
+                        replay.watermark,
+                        ProjectionCacheObservation::Hit,
+                        ProjectionObservedFreshness::Fresh,
+                    ),
                 ))
             } else {
                 fallback_to_full_replay::<T, I, State>(
@@ -325,6 +370,7 @@ where
             execute_external_cache_path::<T, I, State>(
                 store,
                 replay_execution(entity, freshness, &replay, t_start),
+                ProjectionCacheObservation::Miss,
                 &mut timings,
             )
         }
@@ -332,6 +378,8 @@ where
         ProjectionDispatch::DirectReplay { replay } => execute_full_replay::<T, I, State>(
             store,
             replay_execution(entity, freshness, &replay, t_start),
+            ProjectionCacheObservation::Bypassed,
+            ProjectionObservedFreshness::Fresh,
             &mut timings,
         ),
     }?;
@@ -363,6 +411,7 @@ fn notify_projection_applied<T, State>(
 fn execute_external_cache_path<T, I, State>(
     store: &Store<State>,
     execution: ReplayExecution<'_>,
+    mut fallback_cache_status: ProjectionCacheObservation,
     timings: &mut Option<&mut ProjectionTimings>,
 ) -> Result<ProjectionOutcome<T>, StoreError>
 where
@@ -420,7 +469,12 @@ where
                         execution.started_at,
                         Some(cached_state),
                         plan_generation,
-                        execution.replay.watermark,
+                        finish_observation(
+                            store,
+                            execution.replay.watermark,
+                            ProjectionCacheObservation::Hit,
+                            ProjectionObservedFreshness::Fresh,
+                        ),
                     ));
                 }
             }
@@ -442,20 +496,41 @@ where
                         execution.started_at,
                         Some(value),
                         plan_generation,
-                        meta.watermark,
+                        finish_observation(
+                            store,
+                            meta.watermark,
+                            ProjectionCacheObservation::Hit,
+                            if meta.watermark == execution.replay.watermark {
+                                ProjectionObservedFreshness::Fresh
+                            } else {
+                                ProjectionObservedFreshness::StaleAllowed
+                            },
+                        ),
                     ));
                 }
             }
         }
-        Ok(None) => record_external_cache_probe_time(timings, t_ext),
+        Ok(None) => {
+            fallback_cache_status = ProjectionCacheObservation::Miss;
+            record_external_cache_probe_time(timings, t_ext);
+        }
         Err(e) => {
+            fallback_cache_status = ProjectionCacheObservation::Unavailable {
+                reason: "cache_get_failed",
+            };
             record_external_cache_probe_time(timings, t_ext);
             tracing::warn!("cache get failed (falling back to replay): {e}");
         }
     }
 
     // Fallback: full replay
-    execute_full_replay::<T, I, State>(store, execution, timings)
+    execute_full_replay::<T, I, State>(
+        store,
+        execution,
+        fallback_cache_status,
+        ProjectionObservedFreshness::Fresh,
+        timings,
+    )
 }
 
 /// Full replay from disk: batch-read events, fold, and store back to cache.
@@ -464,6 +539,8 @@ where
 fn execute_full_replay<T, I, State>(
     store: &Store<State>,
     execution: ReplayExecution<'_>,
+    cache_status: ProjectionCacheObservation,
+    observed_freshness: ProjectionObservedFreshness,
     timings: &mut Option<&mut ProjectionTimings>,
 ) -> Result<ProjectionOutcome<T>, StoreError>
 where
@@ -522,7 +599,12 @@ where
         execution.started_at,
         result,
         plan_generation,
-        execution.replay.watermark,
+        finish_observation(
+            store,
+            execution.replay.watermark,
+            cache_status,
+            observed_freshness,
+        ),
     ))
 }
 
@@ -593,7 +675,10 @@ mod tests {
     use crate::event::{Event, EventKind};
     use crate::store::index::columnar::CachedProjectionSlot;
     use crate::store::StoreConfig;
+    use std::error::Error;
     use tempfile::TempDir;
+
+    type TestResult = Result<(), Box<dyn Error>>;
 
     #[derive(Default, Debug, serde::Serialize, serde::Deserialize)]
     struct Counter;
@@ -601,7 +686,9 @@ mod tests {
     impl EventSourced for Counter {
         type Input = crate::event::JsonValueInput;
 
-        fn apply_event(&mut self, _event: &Event<serde_json::Value>) {}
+        fn apply_event(&mut self, event: &Event<serde_json::Value>) {
+            std::hint::black_box(event.event_kind());
+        }
 
         fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
             (!events.is_empty()).then_some(Self)
@@ -614,10 +701,10 @@ mod tests {
     }
 
     #[test]
-    fn projection_replay_plan_matches_legacy_stream_filtering() {
-        let dir = TempDir::new().expect("temp dir");
-        let store = Store::open(StoreConfig::new(dir.path())).expect("open store");
-        let coord = crate::coordinate::Coordinate::new("entity:proj", "scope:test").expect("coord");
+    fn projection_replay_plan_matches_legacy_stream_filtering() -> TestResult {
+        let dir = TempDir::new()?;
+        let store = Store::open(StoreConfig::new(dir.path()))?;
+        let coord = crate::coordinate::Coordinate::new("entity:proj", "scope:test")?;
         let kept = EventKind::custom(0xF, 1);
         let skipped = EventKind::custom(0xF, 2);
 
@@ -626,13 +713,15 @@ mod tests {
             (skipped, serde_json::json!({"n": 2})),
             (kept, serde_json::json!({"n": 3})),
         ] {
-            store.append(&coord, kind, &payload).expect("append");
+            store.append(&coord, kind, &payload)?;
         }
 
-        let plan = store
+        let Some(plan) = store
             .index
             .projection_replay_plan("entity:proj", Counter::relevant_event_kinds())
-            .expect("projection plan");
+        else {
+            return Err(std::io::Error::other("expected projection replay plan").into());
+        };
 
         let legacy_entries = store.index.stream("entity:proj");
         let legacy_entries: Vec<_> = legacy_entries
@@ -648,10 +737,10 @@ mod tests {
             .iter()
             .map(|item| (item.global_sequence, item.disk_pos))
             .collect();
-        let legacy_watermark = legacy_entries
-            .last()
-            .map(|entry| entry.global_sequence)
-            .expect("legacy filtered entries");
+        let Some(legacy_watermark) = legacy_entries.last().map(|entry| entry.global_sequence)
+        else {
+            return Err(std::io::Error::other("expected legacy filtered entries").into());
+        };
 
         assert_eq!(plan.watermark, legacy_watermark);
         assert_eq!(
@@ -660,61 +749,29 @@ mod tests {
         );
         assert_eq!(planned_items, legacy_items);
 
-        store.close().expect("close");
+        store.close()?;
+        Ok(())
     }
 
     #[test]
-    // justifies: INV-OBSERVABILITY-FAILURE-PATHS; diagnostic test in src/store/projection/flow.rs reports cold-path breakdown on stderr; the eprintln is the observable artefact of the test.
-    #[allow(clippy::print_stderr)]
-    fn projection_timings_cold_path_breakdown() {
-        let dir = TempDir::new().expect("temp dir");
-        let store = Store::open(StoreConfig::new(dir.path())).expect("open store");
-        let coord =
-            crate::coordinate::Coordinate::new("entity:timed", "scope:test").expect("coord");
+    fn projection_timings_cold_path_breakdown() -> TestResult {
+        let dir = TempDir::new()?;
+        let store = Store::open(StoreConfig::new(dir.path()))?;
+        let coord = crate::coordinate::Coordinate::new("entity:timed", "scope:test")?;
         let kind = EventKind::custom(0xF, 1);
         for i in 0..1_000u32 {
-            store
-                .append(&coord, kind, &serde_json::json!({"i": i}))
-                .expect("append");
+            store.append(&coord, kind, &serde_json::json!({"i": i}))?;
         }
 
         // Close and reopen to get a true cold path
-        store.close().expect("close");
-        let store = Store::open(StoreConfig::new(dir.path())).expect("reopen");
+        store.close()?;
+        let store = Store::open(StoreConfig::new(dir.path()))?;
 
         let mut timings = ProjectionTimings::default();
         let result: Option<Counter> =
-            project_timed(&store, "entity:timed", &Freshness::Consistent, &mut timings)
-                .expect("project_timed");
+            project_timed(&store, "entity:timed", &Freshness::Consistent, &mut timings)?;
         assert!(result.is_some(), "projection must produce a value");
 
-        // Print breakdown for diagnostic purposes (visible with --nocapture)
-        eprintln!("=== Projection Cold Path Breakdown (1k events) ===");
-        eprintln!("  plan_build:           {:>8} us", timings.plan_build_us);
-        eprintln!(
-            "  cache_key_build:      {:>8} us",
-            timings.cache_key_build_us
-        );
-        eprintln!(
-            "  group_local_lookup:   {:>8} us",
-            timings.group_local_lookup_us
-        );
-        eprintln!("  prefetch:             {:>8} us", timings.prefetch_us);
-        eprintln!(
-            "  external_cache_probe: {:>8} us",
-            timings.external_cache_probe_us
-        );
-        eprintln!(
-            "  disk_read:            {:>8} us  (frame decode + deser, no coord build)",
-            timings.disk_read_us
-        );
-        eprintln!(
-            "  event_extract:        {:>8} us  (now 0 -- events returned directly)",
-            timings.event_extract_us
-        );
-        eprintln!("  replay_fold:          {:>8} us", timings.replay_fold_us);
-        eprintln!("  cache_store:          {:>8} us", timings.cache_store_us);
-        eprintln!("  total:                {:>8} us", timings.total_us);
         let accounted = timings.plan_build_us
             + timings.cache_key_build_us
             + timings.group_local_lookup_us
@@ -724,13 +781,14 @@ mod tests {
             + timings.event_extract_us
             + timings.replay_fold_us
             + timings.cache_store_us;
-        eprintln!(
-            "  unaccounted:          {:>8} us",
-            timings.total_us.saturating_sub(accounted)
-        );
 
         assert!(timings.total_us > 0, "total must be positive");
-        store.close().expect("close");
+        assert!(
+            accounted <= timings.total_us,
+            "phase timings must not exceed total"
+        );
+        store.close()?;
+        Ok(())
     }
 
     #[test]

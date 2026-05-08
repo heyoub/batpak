@@ -619,7 +619,7 @@ fn example() {}
 #[cfg_attr(not(test), allow(unused_imports))]
 #[allow(clippy::unwrap_used)]
 #[expect(clippy::panic)]
-#![cfg_attr(not(test), deny(clippy::expect_used))]
+#[cfg_attr(not(test), deny(clippy::expect_used))]
 fn example() {}
 "#;
         let sites = collect_dead_code_silencer_sites(source).expect("parse allowed forms");

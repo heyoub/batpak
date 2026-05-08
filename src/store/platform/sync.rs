@@ -1,4 +1,4 @@
-use crate::store::stats::{ParentDirSyncAdmissionSummary, ParentDirSyncEvidence};
+use crate::store::stats::ParentDirSyncEvidence;
 use crate::store::{StoreError, SyncMode};
 use std::fs::File;
 use std::path::Path;
@@ -81,9 +81,8 @@ pub(crate) struct ParentDirSyncAdmission {
 pub(crate) fn admit_parent_dir_sync(
     evidence: ParentDirSyncEvidence,
 ) -> Result<ParentDirSyncAdmission, StoreError> {
-    let summary = match evidence {
-        ParentDirSyncEvidence::UnixFsync => ParentDirSyncAdmissionSummary::UnixFsync,
-        ParentDirSyncEvidence::RenameOnly => ParentDirSyncAdmissionSummary::RenameOnly,
+    match evidence {
+        ParentDirSyncEvidence::UnixFsync | ParentDirSyncEvidence::RenameOnly => {}
         ParentDirSyncEvidence::Unknown | ParentDirSyncEvidence::ProbeFailed => {
             return Err(StoreError::PlatformAdmissionFailed {
                 capability: "parent directory sync",
@@ -91,7 +90,6 @@ pub(crate) fn admit_parent_dir_sync(
             });
         }
     };
-    let _ = summary;
     Ok(ParentDirSyncAdmission { _private: () })
 }
 
@@ -102,10 +100,11 @@ pub(crate) fn admit_current_parent_dir_sync() -> Result<ParentDirSyncAdmission, 
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+    use std::error::Error;
 
     #[test]
-    fn sync_file_with_mode_surfaces_platform_sync_errors() {
-        let file = File::open("/dev/null").expect("open /dev/null");
+    fn sync_file_with_mode_surfaces_platform_sync_errors() -> Result<(), Box<dyn Error>> {
+        let file = File::open("/dev/null")?;
 
         assert!(
             matches!(
@@ -114,5 +113,6 @@ mod tests {
             ),
             "PROPERTY: sync_file_with_mode must map platform sync errors to StoreError::Io, not report success"
         );
+        Ok(())
     }
 }

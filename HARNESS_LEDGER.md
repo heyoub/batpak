@@ -488,6 +488,38 @@ instead of pretending.
   - allowlist entries are explicit debt with reason and shrinkage target; new
     entries should be treated as review-visible debt, not routine bypasses.
 
+### Invariant: Evidence report bodies keep deterministic structural identity
+
+- Harness pattern: `Property Harness`
+- Location:
+  - `tests/evidence_report_family.rs`
+  - `tests/schema_snapshot_report.rs`
+  - `tests/chain_walk_evidence_report.rs`
+  - `tests/subscriber_frontier_observations.rs`
+  - `tests/projection_run_evidence_report.rs`
+  - `tests/read_walk_evidence_report.rs`
+- Command used:
+  - `cargo test --test evidence_report_family`
+  - `cargo test --test schema_snapshot_report`
+  - `cargo test --test chain_walk_evidence_report`
+  - `cargo test --test subscriber_frontier_observations`
+  - `cargo test --test projection_run_evidence_report`
+  - `cargo test --test read_walk_evidence_report`
+- Line/function coverage delta: unmeasured
+- Mutation delta: unmeasured
+- Covered tests:
+  - family-wide tests pin canonical `body_hash`, metadata exclusion from body
+    identity, deterministic finding order, no automatic append, domain-neutral
+    public type names, close/reopen behavior, and topology-independent
+    read/projection evidence identity.
+  - report-specific suites pin schema drift, chain continuity/corruption,
+    subscriber loss/frontier precision, projection outcome frontier/cache/
+    freshness/output truth, and read-walk visibility/proof-ref/count truth.
+- Remaining known blind spots:
+  - the v1 report family is covered as structural evidence; any new report body
+    needs its own schema-version, canonical-body, findings-order, and
+    append-boundary pins before promotion.
+
 ## State-Machine Harness
 
 ### Invariant: Bounded schedules preserve concurrency protocol truth
@@ -559,3 +591,20 @@ instead of pretending.
 - Remaining known blind spots:
   - the oracle now owns filter composition, cursor batch ordering, and live-vs-reopen parity across topologies
   - remaining blind spots are deeper restore-artifact mismatches outside this pure query surface, which still belong to cold-start parity suites rather than the overlay oracle itself
+
+### Invariant: Public topology diagnostics match configured overlay posture
+
+- Harness pattern: `Oracle Harness`
+- Location:
+  - `tests/index_topology.rs`
+- Command used:
+  - `cargo test --test index_topology`
+- Line/function coverage delta: unmeasured
+- Mutation delta: unmeasured
+- Covered tests:
+  - constructor checks pin the public presets to their intended overlay sets.
+  - diagnostics checks pin `index_topology` labels and `tile_count` reporting
+    for base, scan, entity-local, tiled, tiled-simd, and all-overlay postures.
+- Remaining known blind spots:
+  - this suite proves diagnostic truth for topology posture; query/cursor
+    semantic equivalence remains owned by the linear-reference oracle above.
