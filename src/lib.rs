@@ -48,9 +48,10 @@
 //! 2. [`event`]: Structure your events
 //! 3. [`artifact`]: Canonical body-vs-envelope digests for signed attachments
 //! 4. [`registry`]: Attested immutable rows (lifecycle, supersession, drift, verification)
-//! 5. [`guard`]: Build policy gates
-//! 6. [`pipeline`]: Propose and commit
-//! 7. [`store`]: Persist and query
+//! 5. [`transition`]: Generic state transition evidence (events and structural reports)
+//! 6. [`guard`]: Build policy gates
+//! 7. [`pipeline`]: Propose and commit
+//! 8. [`store`]: Persist and query
 
 /// Crate-level substrate: canonical artifact body digest vs envelope digest.
 pub mod artifact;
@@ -77,6 +78,8 @@ pub mod registry;
 pub mod schema;
 /// Persistent event storage and querying.
 pub mod store;
+/// Crate-level substrate: generic state transition events and reports.
+pub mod transition;
 /// Compile-time state machine transitions.
 pub mod typestate;
 /// Module declarations in DEPENDENCY ORDER:
