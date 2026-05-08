@@ -2,6 +2,11 @@
 #![allow(clippy::unwrap_used, clippy::panic)]
 //! Idempotent batch shape + replay recovery.
 //!
+//! PROVES: fully keyed batch is replayable after close+reopen without duplicate events;
+//! heterogeneous keyed/unkeyed batches fail fast with `StoreError::IdempotencyPartialBatch`.
+//! CATCHES: silent acceptance of partial idempotency-key replay in batch preflight.
+//! SEEDED: fixed `EventKind`, stable coordinates, explicit u128 idempotency keys, `tempfile` roots.
+//!
 //! [INV-BATCH-IDEMPOTENT-SHAPE] A batch that mixes keyed and unkeyed items is
 //! rejected synchronously with `StoreError::IdempotencyPartialBatch` before
 //! any frame reaches disk. A fully-keyed batch survives close+reopen and is

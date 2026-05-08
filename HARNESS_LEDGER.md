@@ -524,29 +524,33 @@ instead of pretending.
 
 - Harness pattern: `Property Harness`
 - Location:
-  - `tests/lane_a_fullsend_substrate.rs`
+  - `tests/lane_a_artifact_substrate.rs`
+  - `tests/lane_a_store_substrate.rs`
+  - `tests/idempotent_batch_crash_recovery.rs` (close+reopen batch idempotency)
   - `src/artifact.rs`
   - `src/store/compaction_report.rs`
 - Command used:
-  - `cargo test --test lane_a_fullsend_substrate`
+  - `cargo test --test lane_a_artifact_substrate`
+  - `cargo test --test lane_a_store_substrate`
 - Line/function coverage delta: targeted rise in `src/artifact.rs` and
   `src/store/compaction_report.rs`; exact JSON delta not recorded
 - Mutation delta: unmeasured
 - Covered tests:
   - body digest stable while artifact envelope metadata/signatures/attestations move
-    envelope digest; verification findings deterministic; free-function vs
+    envelope digest; canonical sort makes signature vector order and attestation vector order
+    immaterial to `envelope_hash`; verification findings deterministic; free-function vs
     inherent method envelope digest parity; compaction skipped report stability
     and schema echo; `compaction_id` excludes post-hoc findings; `PreSwapRollback`
     structural finding; compaction helper constructors; finding order
-    canonicalization in compaction report `body_hash`; append idempotency key
-    aliasing event id with global replay; explicit `Region` / `by_scope` /
-    `stream` / `by_fact` / cursor surfaces (no hidden public full-store
-    cursor).
+    canonicalization in compaction report `body_hash`; performed-merge `compact_with_report` exercise
+    in `tests/lane_a_store_substrate.rs` (sorted sources, stable `body_hash`, output digest);
+    append idempotency key aliasing event id with global replay; keyed batch replay in-process and
+    `IdempotencyPartialBatch` on mixed cached/new keys; explicit `Region` / `by_scope` /
+    `stream` / `by_fact` / cursor surfaces (no hidden public full-store cursor); close+reopen batch
+    replay in `tests/idempotent_batch_crash_recovery.rs`.
 - Remaining known blind spots:
   - deep cryptographic signature verification is intentionally out of scope;
-    tests use structural echo verifiers only. Performed compaction with output
-    segment byte hash is not forced when fixtures keep sealed counts below
-    `min_segments`.
+    tests use structural echo verifiers only.
 
 ## State-Machine Harness
 

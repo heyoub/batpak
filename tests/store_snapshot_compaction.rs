@@ -8,11 +8,13 @@
 )]
 //! Snapshot and compaction contract tests extracted from `store_advanced.rs`.
 //!
-//! PROVES: snapshot preserves honest on-disk state and compaction preserves or
+//! PROVES: snapshot preserves honest on-disk state; compaction preserves or
 //! intentionally rewrites indexed state without leaking superseded artifacts.
+//! CATCHES: superseded sealed segment leaks during snapshot/compaction interplay.
 //! DEFENDS: stale snapshot destination reuse, in-flight compaction races,
 //! pending-compaction marker loss, hidden-range corruption, and pre-swap
 //! rollback drift.
+//! SEEDED: small-segment fixtures via `support/small_store.rs` and bounded append counts.
 
 use batpak::prelude::*;
 use batpak::store::{
