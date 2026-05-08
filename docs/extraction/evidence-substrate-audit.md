@@ -194,6 +194,11 @@ is architectural closure status, not a CI pass result.
 
 ### Matrix changelog
 
+- **v3 (2026-05-08):** Lane A — `batpak::artifact` (`CanonicalArtifactEnvelope`, …) with **INV-3 carve-out**
+  in `build.rs`: `artifact` as an identifier appears on declaration lines only in `src/artifact.rs`, plus wiring
+  `pub mod artifact;` in `src/lib.rs` and `pub use crate::artifact::{{ … }}` in `src/prelude.rs`;
+  `CompactionReportBody` gains `compaction_id` + input segment id bounds + `PreSwapRollback` finding;
+  A3/A4 remain **reject / not needed** with proof in `tests/lane_a_fullsend_substrate.rs`.
 - **v2 (2026-05-08):** Lane A fullsend — `batpak::envelope` (canonical body vs
   envelope digests), `CompactionReportBody` + `Store::compact_with_report`,
   idempotency and region-bound discipline **proved redundant** as separate
@@ -210,12 +215,12 @@ is architectural closure status, not a CI pass result.
 | Typed event compile-time binding | `EventPayload` + `EventSourced` derives | derive tests + compile-fail UI tests | cite derive contracts instead of duplicating macro law | already covered | none | none |
 | Frontier/watermark runtime boundary | `FrontierView`, `WatermarkSnapshot`, wait APIs | store/frontier tests + evidence family coverage | cite frontier APIs directly for generic boundary mechanics | already covered | none | none |
 | Platform/runtime evidence | `PlatformEvidenceSummary` + `cargo xtask platform ...` | `tests/platform_backend.rs`, platform profile tests, xtask verify lanes | cite platform evidence and admission states as substrate facts | already covered | none | per-target verify still required at deploy target |
-| Canonical envelope framing (`CanonicalEnvelope` in `batpak::envelope`) | body digest vs envelope digest + verification report | `tests/lane_a_fullsend_substrate.rs`; public names avoid INV-3 banned noun in `build.rs` | cite `batpak::envelope` instead of duplicating body/envelope hashing prose | already covered | none | none — design discussions may say “artifact envelope”; shipped API is `batpak::envelope` |
-| Compaction structural evidence (`CompactionReportBody`, `Store::compact_with_report`) | deterministic report + `body_hash`; no policy semantics | `tests/lane_a_fullsend_substrate.rs`; segment outcome types serialized for evidence | cite compaction report for merge provenance | already covered | none | none |
+| Canonical artifact envelope framing (`CanonicalArtifactEnvelope` in `batpak::artifact`) | body digest vs envelope digest + verification report | `tests/lane_a_fullsend_substrate.rs`; INV-3: definitions in `src/artifact.rs`; `src/lib.rs`/`src/prelude.rs` limited wiring (`build.rs` gate) | cite `batpak::artifact` instead of duplicating body/envelope hashing prose | implement in batpak core | Lane B dependents | none — `trajectory`/`tenant` remain banned crate-wide |
+| Compaction structural evidence (`CompactionReportBody`, `Store::compact_with_report`) | deterministic report + `body_hash`; `compaction_id`; sorted source refs | `tests/lane_a_fullsend_substrate.rs`; segment outcome types serialized for evidence | cite compaction report for merge provenance | implement in batpak core | Lane B dependents | none |
 | Idempotency / duplicate replay substrate | `AppendOptions::with_idempotency` sets provisional **event id**; writer returns prior receipt via global `by_id` lookup | `tests/lane_a_fullsend_substrate.rs` | document that idempotency key **is** the event id (no separate ledger row type) | reject / not needed | none | a distinct `IdempotencyLedger` type would duplicate index facts unless new invariants appear |
 | Region-bound read discipline | public bulk reads take `Region`, entity, scope, kind, or cursor over `Region` — no hidden unbounded public iterator | `tests/lane_a_fullsend_substrate.rs` | cite `query` / `by_scope` / `stream` / `by_fact` / `cursor_guaranteed` | reject / not needed | none | a packaged `RegionBoundQuery` value type deferred until cross-cutting evidence needs outweigh tuple call sites |
-| AttestedRegistry mechanics | no core immutable-row attestation primitive yet | no dedicated tests yet | move generic row attestation mechanics down; keep mapping semantics above | implement in batpak core | lane-b-attested-registry | depends on `batpak::envelope` framing |
-| BackupEnvelope | backup/restore flows exist without envelope object | cold-start/rebuild tests exist; no backup envelope proof type | replace custom restore manifest prose with stable substrate envelope | implement in batpak core | lane-b-backup | depends on `batpak::envelope` and compaction provenance shape |
+| AttestedRegistry mechanics | no core immutable-row attestation primitive yet | no dedicated tests yet | move generic row attestation mechanics down; keep mapping semantics above | implement in batpak core | lane-b-attested-registry | depends on `batpak::artifact` framing |
+| BackupEnvelope | backup/restore flows exist without envelope object | cold-start/rebuild tests exist; no backup envelope proof type | replace custom restore manifest prose with stable substrate envelope | implement in batpak core | lane-b-backup | depends on `batpak::artifact` and compaction provenance shape |
 | StateTransition report/event | no generic state transition primitive | lifecycle and outcome tests exist; no generic transition report | collapse repeated generic transition narratives into one type | implement in batpak core or reject as domain law | lane-b-state-transition | needs strict generic boundary to avoid workflow semantics |
 | Reservation ledger | no generic reserve/commit/refund primitive | no dedicated coverage | provide generic reservation accounting substrate if truly cross-consumer | implement in batpak core or reject as domain-specific | lane-b-reservation-ledger | must prove genericity without domain nouns |
 | StoreResourceEnvelope beyond `WriterPressure` | partial via `WriterPressure`; broader counters not stabilized | diagnostics coverage exists; no stable broader envelope contract | unify generic store-resource evidence if stable counters exist | implement in batpak core or reject as premature | lane-b-resource-envelope | blocked on stable ownership and semantics of additional counters |
@@ -226,10 +231,10 @@ is architectural closure status, not a CI pass result.
 
 ## Implementation Waves
 
-### Lane A (closest to current family contract) — **v2 landed**
+### Lane A (closest to current family contract) — **v3 landed**
 
-- **A1:** `batpak::envelope` — canonical envelope framing (`CanonicalEnvelope`, …).
-- **A2:** `CompactionReportBody`, `compact_with_report`, helpers in
+- **A1:** `batpak::artifact` — canonical artifact envelope (`CanonicalArtifactEnvelope`, …).
+- **A2:** `CompactionReportBody` (`compaction_id`, input bounds, findings), `compact_with_report`, helpers in
   `src/store/compaction_report.rs`.
 - **A3:** Idempotency — **reject / not needed** (substrate = append id + index); see matrix row.
 - **A4:** Region bounds — **reject / not needed** (explicit `Region` / predicates); see matrix row.

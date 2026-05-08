@@ -1,3 +1,8 @@
+pub use crate::artifact::{
+    ArtifactEnvelopeFinding, ArtifactEnvelopeIdentity, ArtifactHash, ArtifactVerificationReport,
+    AttestationRef, CanonicalArtifactEnvelope, SignatureEnvelope, SignatureRef,
+    ARTIFACT_ENVELOPE_FRAMING_VERSION,
+};
 pub use crate::coordinate::DagPosition;
 pub use crate::coordinate::{Coordinate, CoordinateError, KindFilter, Region};
 pub use crate::event::sourcing::{MultiDispatchError, MultiReactive, Reactive, TypedReactive};

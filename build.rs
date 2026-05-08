@@ -527,49 +527,71 @@ fn check_no_banned_patterns() {
             }
         }
 
-        //Invariant 3: no product concepts in library code.
-        //Check struct/enum/fn/type declarations for banned nouns.
-        //Skip string literals and comments.
-        let banned_nouns = ["trajectory", "artifact", "tenant"];
+        // INV-3: ban product-shape nouns in public declarations everywhere except the
+        // documented Lane-A substrate carve-out (`src/artifact.rs` owns the `artifact` noun).
+        // `trajectory` and `tenant` remain banned crate-wide on declaration lines.
+        const INV3_ARTIFACT_ALLOWED_PATH: &str = "src/artifact.rs";
+
+        #[inline]
+        fn inv3_declaration_has_word(lower: &str, noun: &str) -> bool {
+            lower
+                .split(|c: char| !c.is_alphanumeric() && c != '_')
+                .any(|word| {
+                    word == noun
+                        || word.starts_with(&format!("{noun}_"))
+                        || word.ends_with(&format!("_{noun}"))
+                        || word.contains(&format!("_{noun}_"))
+                })
+        }
+
         //NOTE: "scope" and "agent" are common English words.
         //"turn" and "note" are substrings of "return" and "annotation" —
         //substring matching would false-positive on legitimate Rust code.
-        //Only check nouns that are unambiguous product concepts.
-        //Strategy: check lines starting with pub/fn/struct/enum/type
-        //for WORD-BOUNDARY matches of banned nouns.
+        //Strategy: check lines starting with pub/fn/struct/enum/type for word-boundary matches.
         for line in contents.lines() {
             let trimmed = line.trim();
             if trimmed.starts_with("//") || trimmed.starts_with("///") {
-                continue; // skip comments
+                continue;
             }
             let is_decl = trimmed.starts_with("pub ")
                 || trimmed.starts_with("fn ")
                 || trimmed.starts_with("struct ")
                 || trimmed.starts_with("enum ")
                 || trimmed.starts_with("type ");
-            if is_decl {
-                let lower = trimmed.to_lowercase();
-                for noun in &banned_nouns {
-                    //Word boundary check: noun must be preceded by start/underscore/space
-                    //and followed by end/underscore/space/(/>. Prevents "return" matching "turn".
-                    let has_match =
-                        lower
-                            .split(|c: char| !c.is_alphanumeric() && c != '_')
-                            .any(|word| {
-                                word == *noun
-                                    || word.starts_with(&format!("{noun}_"))
-                                    || word.ends_with(&format!("_{noun}"))
-                                    || word.contains(&format!("_{noun}_"))
-                            });
-                    if has_match {
-                        panic!(
-                            "INVARIANT 3 VIOLATED in {path_str}: \
-                             product concept `{noun}` in declaration:\n  {trimmed}\n\
-                             Library vocabulary: coordinate, entity, event, outcome, \
-                             gate, region, transition.\n\
-                             See: REFERENCE.md."
-                        );
-                    }
+            if !is_decl {
+                continue;
+            }
+            let lower = trimmed.to_lowercase();
+
+            for noun in ["trajectory", "tenant"] {
+                if inv3_declaration_has_word(&lower, noun) {
+                    panic!(
+                        "INVARIANT 3 VIOLATED in {path_str}: \
+                         product concept `{noun}` in declaration:\n  {trimmed}\n\
+                         Library vocabulary: coordinate, entity, event, outcome, \
+                         gate, region, transition.\n\
+                         See: REFERENCE.md."
+                    );
+                }
+            }
+
+            if inv3_declaration_has_word(&lower, "artifact") {
+                let artifact_decl_ok_in_lib =
+                    path_str == "src/lib.rs" && trimmed == "pub mod artifact;";
+                let artifact_decl_ok_in_prelude =
+                    path_str == "src/prelude.rs" && trimmed.starts_with("pub use crate::artifact");
+                if !(path_str == INV3_ARTIFACT_ALLOWED_PATH
+                    || artifact_decl_ok_in_lib
+                    || artifact_decl_ok_in_prelude)
+                {
+                    panic!(
+                        "INVARIANT 3 VIOLATED in {path_str}: \
+                         product concept `artifact` in declaration:\n  {trimmed}\n\
+                         Lane-A exception: definitions only in `{INV3_ARTIFACT_ALLOWED_PATH}`; \
+                         crate wiring may use `pub mod artifact;` in `src/lib.rs` and \
+                         `pub use crate::artifact::{{...}}` in `src/prelude.rs`.\n\
+                         See: REFERENCE.md."
+                    );
                 }
             }
         }
