@@ -196,6 +196,9 @@ is architectural closure status, not a CI pass result.
 
 ### Matrix changelog
 
+- **Matrix v7.1 (2026-05-08): Lane B seal — B1–B4 matrix rows show `none` next arc where primitives
+  shipped; reservation row documents `batpak::reservation`; tooling/above-batpak wave is the
+  intentional follow-on (no further Lane B core primitives in this rail without a new arc).**
 - **Matrix v7 (2026-05-08): Lane B4 — `batpak::reservation` ships `ReservationTransition`,
   `ReservationEntry`, closed structural `RESERVATION_STATE_*` lanes, `simulate_reservation_ledger`,
   `ReservationLedgerReportBody` + `reservation_ledger_report_body_hash`, reconciliation buckets +
@@ -249,7 +252,7 @@ is architectural closure status, not a CI pass result.
 | AttestedRegistry mechanics (`batpak::registry`) | `RegistryRowBody` + `row_hash`; `CanonicalArtifactEnvelope<RegistryRowBody>` verify path; drift + verification reports with `body_hash`; supersession/dup/cycle findings | `tests/lane_b1_registry_substrate.rs` | cite `batpak::registry` for signed-row / lifecycle / supersession substrate | implement in batpak core | none | **B1 v1 shipped** — extend only with `schema_version` bumps + deterministic ordering rules |
 | BackupEnvelope (`batpak::store` backup_envelope) | `BackupManifestBody` + `backup_manifest_body_hash`; `BackupManifestEnvelope` / `BackupEnvelope`; `RestoreProofReportBody` + `restore_proof_report_body_hash`; `verify_backup_manifest_envelope` | `tests/lane_b2_backup_envelope_substrate.rs` | cite store backup envelope for segment digest restore proof | implement in batpak core | none | **B2 v1 shipped** — extend via `schema_version` + sorted segment / finding rules only |
 | StateTransition report/event (`batpak::transition`) | `StateTransitionEvent` + `state_transition_event_digest`; `build_state_transition_report` + `state_transition_report_body_hash`; sorted causes and allowed-edge hygiene findings | `tests/lane_b3_transition_substrate.rs` | cite `batpak::transition` for generic transition evidence | implement in batpak core | none | **B3 v1 shipped** — extend via `schema_version` + sorted cause/finding/edge rules only |
-| Reservation ledger (`batpak::reservation`) | `ReservationTransition` + normalized transition log digest; `simulate_reservation_ledger` → `ReservationLedgerReportBody` + `reservation_ledger_report_body_hash`; `reservation_reconciliation_report` + body hash; sorted `ReservationFinding` invalid-transition reasons | `tests/lane_b4_reservation_substrate.rs` | cite `batpak::reservation` for generic reserve/commit/refund/expire/orphan lane mechanics | implement in batpak core | lane-b-seal | **B4 v1 shipped** — extend via `schema_version` + sorted entry/finding/cause/reconciliation rules only; no policy vocabulary |
+| Reservation ledger (`batpak::reservation`) | `ReservationTransition` + normalized transition log digest; `simulate_reservation_ledger` → `ReservationLedgerReportBody` + `reservation_ledger_report_body_hash`; `reservation_reconciliation_report` + body hash; sorted `ReservationFinding` invalid-transition reasons | `tests/lane_b4_reservation_substrate.rs` | cite `batpak::reservation` for generic reserve/commit/refund/expire/orphan lane mechanics | implement in batpak core | none | **B4 v1 shipped** — extend via `schema_version` + sorted entry/finding/cause/reconciliation rules only; no policy vocabulary |
 | StoreResourceEnvelope beyond `WriterPressure` | partial via `WriterPressure`; broader counters not stabilized | diagnostics coverage exists; no stable broader envelope contract | unify generic store-resource evidence if stable counters exist | reject / not needed | lane-b-resource-envelope | blocked on stable ownership and semantics of additional counters — reopen as implement in batpak core when facts exist |
 | Audit assertion runner | no core API; integrity + xtask infrastructure exists | integrity/structural checks already tested | centralize doctrine checks in tooling lane | implement in batpak tooling/helper | lane-tooling-audit-runner | choose host surface (`xtask` vs helper crate) |
 | Deterministic phase cache | no dedicated primitive | no dedicated coverage | avoid repeated deterministic-phase glue if pressure proves it | implement in batpak tooling/helper | lane-tooling-phase-cache | needs measured repeated pain before implementation |
@@ -270,7 +273,8 @@ is architectural closure status, not a CI pass result.
 - **B1 `AttestedRegistry` / `batpak::registry` — landed** (signed immutable rows, drift, verification, supersession helpers).
 - **B2 `BackupEnvelope` / `batpak::store::backup_envelope` — landed** (manifest + segment digests + restore proof).
 - **B3 `StateTransition` / `batpak::transition` — landed** (generic event + structural report + edge checks).
-- **B4 `ReservationLedger` / `batpak::reservation` — landed** (structural simulation + ledger/reconciliation report hashes; seal wave next).
+- **B4 `ReservationLedger` / `batpak::reservation` — landed** (structural simulation + ledger/reconciliation report hashes).
+- **Lane B primitive rail (B1–B4) — sealed for this revision** (matrix + harness updated; full `cargo xtask ci` on landing commit; next intentional work is the tooling/above-batpak split, not reflexive core primitives).
 
 ### Tooling/Above-batpak wave (non-core ownership)
 
