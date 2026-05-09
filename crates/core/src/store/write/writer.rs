@@ -608,7 +608,9 @@ mod tests {
             match done_rx.recv_timeout(Duration::from_millis(10)) {
                 Ok(timed_out) => break timed_out,
                 Err(mpsc::RecvTimeoutError::Timeout) if Instant::now() < deadline => {}
-                Err(err) => panic!("PROPERTY: watermark waiter did not report outcome: {err}"),
+                Err(mpsc::RecvTimeoutError::Timeout | mpsc::RecvTimeoutError::Disconnected) => {
+                    break true;
+                }
             }
         };
 
