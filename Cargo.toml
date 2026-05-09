@@ -37,12 +37,10 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
-# `dangerous-test-hooks` is part of the default feature set so that
-# guarded crash-recovery / fault-injection tests run under a bare
-# `cargo test`. The gate still exists so downstream callers can opt out
-# by disabling default features (`default-features = false`) if they
-# prefer the lean production surface.
-default = ["blake3", "dangerous-test-hooks"]
+# Default features are production-safe. Crash/fault injection hooks are
+# intentionally excluded so downstream default builds cannot name test-only
+# writer panic, frontier mutation, or fault injection surfaces.
+default = ["blake3"]
 blake3 = ["dep:blake3"]
 dangerous-test-hooks = ["dep:fastrand"]
 
