@@ -199,9 +199,37 @@ pub(crate) fn run() -> Result<()> {
             ),
         )?;
     }
+    check_examples_artifact_complete(&repo_root, &artifacts)?;
 
     println!("traceability-check: ok");
     Ok(())
+}
+
+fn check_examples_artifact_complete(repo_root: &Path, artifacts: &[ArtifactRecord]) -> Result<()> {
+    let examples_artifact = artifacts
+        .iter()
+        .find(|artifact| artifact.id == "ART-EXAMPLES")
+        .context("ART-EXAMPLES artifact must exist")?;
+    let declared = examples_artifact
+        .paths
+        .iter()
+        .filter(|path| path.starts_with("examples/") && path.ends_with(".rs"))
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let mut actual = BTreeSet::new();
+    for entry in fs::read_dir(repo_root.join("examples")).context("read examples directory")? {
+        let entry = entry.context("read examples directory entry")?;
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) == Some("rs") {
+            actual.insert(relative(repo_root, &path));
+        }
+    }
+    ensure(
+        declared == actual,
+        format!(
+            "ART-EXAMPLES must list every runnable examples/*.rs file exactly once; declared={declared:?}, actual={actual:?}"
+        ),
+    )
 }
 
 pub(crate) fn validate_observation_evidence(

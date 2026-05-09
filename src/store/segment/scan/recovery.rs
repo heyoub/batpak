@@ -154,6 +154,7 @@ impl Reader {
         }
 
         let mut file = File::open(path).map_err(StoreError::Io)?;
+        let file_len = file.metadata().map_err(StoreError::Io)?.len();
         let mut magic = [0u8; 4];
         file.read_exact(&mut magic).map_err(StoreError::Io)?;
         if &magic != SEGMENT_MAGIC {
@@ -208,7 +209,7 @@ impl Reader {
                 tracing::warn!(
                     segment_id,
                     payload_len,
-                    "frame payload exceeds MAX_FRAME_PAYLOAD, stopping segment scan"
+                    "frame payload exceeds MAX_FRAME_PAYLOAD, stopping segment scan as torn tail"
                 );
                 break;
             }
@@ -364,30 +365,26 @@ impl Reader {
                             }
                         }
                         Err(error) => {
-                            tracing::warn!(
-                                segment_id,
-                                offset = frame_offset,
-                                "skipping unreadable frame metadata: {error}"
-                            );
                             if state_ref.in_batch {
                                 tracing::warn!(
                                     segment_id,
                                     staged_count = state_ref.staged.len(),
-                                    "discarding incomplete batch due to corruption"
+                                    "discarding incomplete batch due to unreadable frame metadata"
                                 );
                                 state_ref.staged.clear();
                                 state_ref.in_batch = false;
                             }
+                            return Err(StoreError::CorruptSegment {
+                                segment_id,
+                                detail: format!(
+                                    "frame at offset {frame_offset} has unreadable index metadata: {error}"
+                                ),
+                            });
                         }
                     }
                     cursor += frame_size as u64;
                 }
                 Err(segment::FrameDecodeError::CrcMismatch { .. }) => {
-                    tracing::warn!(
-                        segment_id,
-                        offset = frame_offset,
-                        "CRC mismatch, skipping frame"
-                    );
                     if state_ref.in_batch {
                         tracing::warn!(
                             segment_id,
@@ -397,9 +394,12 @@ impl Reader {
                         state_ref.staged.clear();
                         state_ref.in_batch = false;
                     }
-                    stop_scan = true;
+                    return Err(StoreError::CrcMismatch {
+                        segment_id,
+                        offset: frame_offset,
+                    });
                 }
-                Err(_) => {
+                Err(error) => {
                     if state_ref.in_batch {
                         tracing::warn!(
                             segment_id,
@@ -409,7 +409,15 @@ impl Reader {
                         state_ref.staged.clear();
                         state_ref.in_batch = false;
                     }
-                    stop_scan = true;
+                    if frame_offset + u64::try_from(frame_buf.len()).unwrap_or(u64::MAX) >= file_len
+                    {
+                        stop_scan = true;
+                    } else {
+                        return Err(StoreError::CorruptSegment {
+                            segment_id,
+                            detail: format!("frame at offset {frame_offset} is corrupt: {error}"),
+                        });
+                    }
                 }
             }
             self.release_buffer(frame_buf);

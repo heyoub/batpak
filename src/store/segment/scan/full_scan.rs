@@ -20,6 +20,7 @@ impl Reader {
     /// need the full event stream always get it.
     pub(crate) fn scan_segment(&self, path: &Path) -> Result<Vec<ScannedEntry>, StoreError> {
         let mut file = File::open(path).map_err(StoreError::Io)?;
+        let file_len = file.metadata().map_err(StoreError::Io)?.len();
         let mut magic = [0u8; 4];
         file.read_exact(&mut magic).map_err(StoreError::Io)?;
         if &magic != SEGMENT_MAGIC {
@@ -70,13 +71,10 @@ impl Reader {
                 frame_header[3],
             ]) as usize;
             if Self::payload_len_exceeds_max(payload_len) {
-                // Corrupt or truncated frame header — stop scanning this segment
-                // rather than allocating unbounded memory. Events before this point
-                // are still valid and will be returned.
                 tracing::warn!(
                     segment_id,
                     payload_len,
-                    "frame payload exceeds MAX_FRAME_PAYLOAD, stopping segment scan"
+                    "frame payload exceeds MAX_FRAME_PAYLOAD, stopping segment scan as torn tail"
                 );
                 break;
             }
@@ -109,24 +107,33 @@ impl Reader {
                             });
                         }
                         Err(error) => {
-                            tracing::warn!(
+                            return Err(StoreError::CorruptSegment {
                                 segment_id,
-                                offset = frame_offset,
-                                "skipping unreadable frame: {error}"
-                            );
+                                detail: format!(
+                                    "frame at offset {frame_offset} has unreadable payload: {error}"
+                                ),
+                            });
                         }
                     }
                     cursor += frame_size as u64;
                 }
                 Err(segment::FrameDecodeError::CrcMismatch { .. }) => {
-                    tracing::warn!(
+                    return Err(StoreError::CrcMismatch {
                         segment_id,
-                        offset = frame_offset,
-                        "CRC mismatch, skipping frame"
-                    );
-                    stop_scan = true;
+                        offset: frame_offset,
+                    });
                 }
-                Err(_) => stop_scan = true, // truncated or corrupt — stop
+                Err(error) => {
+                    if frame_offset + u64::try_from(frame_buf.len()).unwrap_or(u64::MAX) >= file_len
+                    {
+                        stop_scan = true;
+                    } else {
+                        return Err(StoreError::CorruptSegment {
+                            segment_id,
+                            detail: format!("frame at offset {frame_offset} is corrupt: {error}"),
+                        });
+                    }
+                }
             }
             self.release_buffer(frame_buf);
             if stop_scan {

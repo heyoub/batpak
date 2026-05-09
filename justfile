@@ -86,7 +86,8 @@ chaos-deep:
 fuzz-chaos:
     cargo xtask fuzz-chaos
 
-stress: fuzz chaos fuzz-chaos bench
+stress:
+    cargo xtask stress
 
 docs:
     cargo xtask docs --open
