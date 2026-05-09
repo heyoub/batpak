@@ -451,7 +451,15 @@ fn report_body_hash(body: &ChainWalkReportBody) -> Result<ChainWalkHash, ChainWa
 }
 
 fn observed_content_hash(stored: &crate::event::StoredEvent<Vec<u8>>) -> ChainWalkHash {
-    crate::evidence::content_hash(&stored.event.payload)
+    #[cfg(feature = "blake3")]
+    {
+        crate::event::hash::compute_hash(&stored.event.payload)
+    }
+    #[cfg(not(feature = "blake3"))]
+    {
+        let _ = stored;
+        [0_u8; 32]
+    }
 }
 
 #[cfg(test)]
