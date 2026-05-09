@@ -1,4 +1,4 @@
-use crate::common::{check_command, command_exists, ensure, repo_root};
+use crate::repo_surface::{check_command, command_exists, ensure, repo_root};
 use anyhow::{Context, Result};
 use std::fs;
 use std::path::Path;

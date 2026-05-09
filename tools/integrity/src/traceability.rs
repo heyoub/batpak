@@ -1,4 +1,4 @@
-use crate::common::{ensure, ensure_unique_ids, load_yaml, relative, repo_root};
+use crate::repo_surface::{ensure, ensure_unique_ids, load_yaml, relative, repo_root};
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
 use std::collections::{BTreeSet, HashMap};

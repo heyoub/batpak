@@ -24,10 +24,13 @@
 //! dead_code silencers are not tolerated in this repo; test-only code uses
 //! `cfg(test)`, unused code is deleted, and shared helpers get restructured.
 mod architecture_lints;
-mod common;
+mod ci_parity;
 mod doctor;
 mod evidence_audit;
 mod harness_lints;
+mod public_surface;
+mod repo_surface;
+mod store_pub_fn_coverage;
 mod structural;
 mod traceability;
 
@@ -62,17 +65,17 @@ fn main() -> Result<()> {
         CommandKind::Doctor { strict } => doctor::run(strict),
         CommandKind::TraceabilityCheck => traceability::run(),
         CommandKind::StructuralCheck => structural::run(),
-        CommandKind::EvidenceAudit => evidence_audit::run(&common::repo_root()?),
+        CommandKind::EvidenceAudit => evidence_audit::run(&repo_surface::repo_root()?),
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::ci_parity::{dockerfile_tool_pins, workflow_list_values};
     use crate::shared_checks::{
         extract_anchors, justification_body, line_carries_justification, load_known_invariants,
         public_item_names, JustifiesAnchor,
     };
-    use crate::structural::{dockerfile_tool_pins, workflow_list_values};
     use crate::traceability::validate_observation_evidence;
     use std::path::Path;
 
