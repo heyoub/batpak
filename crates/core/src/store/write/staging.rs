@@ -70,6 +70,7 @@ impl PreparedBatchItem {
 }
 
 pub(crate) struct PreparedBatchBuilder {
+    expected_len: usize,
     items: Vec<PreparedBatchItem>,
     total_bytes: usize,
     entity_pool: HashMap<String, Arc<str>>,
@@ -79,9 +80,10 @@ pub(crate) struct PreparedBatchBuilder {
 }
 
 impl PreparedBatchBuilder {
-    pub(crate) fn new(capacity: usize) -> Self {
+    pub(crate) fn new(expected_len: usize) -> Self {
         Self {
-            items: Vec::with_capacity(capacity),
+            expected_len,
+            items: Vec::with_capacity(expected_len),
             total_bytes: 0,
             entity_pool: HashMap::new(),
             scope_pool: HashMap::new(),
@@ -125,13 +127,22 @@ impl PreparedBatchBuilder {
         Ok(())
     }
 
-    pub(crate) fn finish(self) -> PreparedBatch {
-        PreparedBatch {
+    pub(crate) fn finish(self) -> Result<PreparedBatch, StoreError> {
+        if self.items.len() != self.expected_len {
+            return Err(StoreError::InvariantViolation {
+                reason: format!(
+                    "prepared batch item count changed during staging: expected {}, got {}",
+                    self.expected_len,
+                    self.items.len()
+                ),
+            });
+        }
+        Ok(PreparedBatch {
             items: self.items,
             total_bytes: self.total_bytes,
             unique_entities: self.unique_entities,
             unique_scopes: self.unique_scopes,
-        }
+        })
     }
 
     fn intern_entity_arc(&mut self, entity: Arc<str>) -> Arc<str> {
@@ -168,7 +179,7 @@ impl PreparedBatch {
         for item in items {
             builder.push_item(item)?;
         }
-        Ok(builder.finish())
+        builder.finish()
     }
 
     pub(crate) fn len(&self) -> usize {
@@ -377,10 +388,10 @@ impl StagedCommittedEvent {
 
 #[cfg(test)]
 mod tests {
-    use super::PreparedBatch;
+    use super::{PreparedBatch, PreparedBatchBuilder};
     use crate::coordinate::Coordinate;
     use crate::event::EventKind;
-    use crate::store::{AppendOptions, BatchAppendItem, CausationRef};
+    use crate::store::{AppendOptions, BatchAppendItem, CausationRef, StoreError};
 
     #[test]
     fn prepared_batch_dedupes_entity_and_scope_strings() {
@@ -440,5 +451,32 @@ mod tests {
             ),
             "duplicate scope text should converge onto one shared Arc<str>"
         );
+    }
+
+    #[test]
+    fn prepared_batch_finish_fails_closed_on_item_count_drift() -> Result<(), String> {
+        let coord = Coordinate::new("entity:a", "scope:shared").expect("coord");
+        let kind = EventKind::custom(0xF, 1);
+        let item = BatchAppendItem::new(
+            coord,
+            kind,
+            &serde_json::json!({"i": 1}),
+            AppendOptions::default(),
+            CausationRef::None,
+        )
+        .expect("item");
+        let mut builder = PreparedBatchBuilder::new(2);
+        builder.push_item(item).expect("stage one item");
+
+        let err = match builder.finish() {
+            Ok(_) => return Err("PROPERTY: item-count drift must fail closed".into()),
+            Err(err) => err,
+        };
+
+        assert!(
+            matches!(err, StoreError::InvariantViolation { ref reason } if reason.contains("expected 2, got 1")),
+            "wrong error for prepared batch count drift: {err:?}"
+        );
+        Ok(())
     }
 }
