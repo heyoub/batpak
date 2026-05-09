@@ -5,9 +5,7 @@
 //! CATCHES: unsorted segment normalization gaps; missing/extra segment at restore; digest mismatches.
 //! SEEDED: synthetic segment ids and fixed digests only.
 
-use batpak::artifact::{
-    artifact_body_hash_from_body, CanonicalArtifactEnvelope, SignatureEnvelope, SignatureRef,
-};
+use batpak::artifact::{artifact_body_hash_from_body, SignatureEnvelope, SignatureRef};
 use batpak::encoding;
 use batpak::store::{
     audit_backup_manifest_segments, backup_manifest_body_bytes, backup_manifest_body_hash,
@@ -203,10 +201,39 @@ fn backup_duplicate_and_inconsistent_segment_findings() {
 }
 
 #[test]
+fn backup_unsupported_manifest_schema_version_is_a_finding() {
+    let mut body = sample_manifest();
+    body.schema_version = BACKUP_MANIFEST_BODY_SCHEMA_VERSION + 1;
+
+    let findings = audit_backup_manifest_segments(&body);
+    assert!(
+        findings.iter().any(|f| matches!(
+            f,
+            BackupEnvelopeFinding::UnsupportedManifestBodySchemaVersion { observed, expected }
+                if *observed == BACKUP_MANIFEST_BODY_SCHEMA_VERSION + 1
+                    && *expected == BACKUP_MANIFEST_BODY_SCHEMA_VERSION
+        )),
+        "PROPERTY: unsupported backup manifest schema must be explicit evidence: {findings:?}"
+    );
+
+    let restore = restore_proof_report_body(&body, &body.segments).expect("restore proof");
+    assert!(
+        restore.findings.iter().any(|f| matches!(
+            f,
+            BackupEnvelopeFinding::UnsupportedManifestBodySchemaVersion { observed, expected }
+                if *observed == BACKUP_MANIFEST_BODY_SCHEMA_VERSION + 1
+                    && *expected == BACKUP_MANIFEST_BODY_SCHEMA_VERSION
+        )),
+        "PROPERTY: restore proof must preserve unsupported manifest schema evidence: {:?}",
+        restore.findings
+    );
+}
+
+#[test]
 fn backup_envelope_metadata_does_not_change_manifest_hash() {
     let body = sample_manifest();
     let raw = backup_manifest_body_bytes(&body).expect("bytes");
-    let e1 = CanonicalArtifactEnvelope {
+    let e1 = BackupManifestEnvelope {
         body: body.clone(),
         envelope_schema_version: 1,
         generated_at_wall_ms: Some(1),
@@ -214,7 +241,7 @@ fn backup_envelope_metadata_does_not_change_manifest_hash() {
         signatures: vec![],
         attestations: vec![],
     };
-    let e2 = CanonicalArtifactEnvelope {
+    let e2 = BackupManifestEnvelope {
         body: body.clone(),
         envelope_schema_version: 1,
         generated_at_wall_ms: Some(99),
@@ -232,7 +259,7 @@ fn backup_envelope_metadata_does_not_change_manifest_hash() {
         "envelope digest should move with metadata"
     );
     let key: SegmentBytesDigest = [3u8; 32];
-    let envelope: BackupManifestEnvelope = CanonicalArtifactEnvelope {
+    let envelope = BackupManifestEnvelope {
         body: body.clone(),
         envelope_schema_version: 1,
         generated_at_wall_ms: None,
@@ -269,7 +296,7 @@ fn backup_manifest_envelope_hash_helpers_normalize_segments() {
     let body = sample_manifest();
     let mut body_reversed = body.clone();
     body_reversed.segments.reverse();
-    let e1 = CanonicalArtifactEnvelope {
+    let e1 = BackupManifestEnvelope {
         body: body.clone(),
         envelope_schema_version: 1,
         generated_at_wall_ms: Some(10),
@@ -277,11 +304,21 @@ fn backup_manifest_envelope_hash_helpers_normalize_segments() {
         signatures: vec![],
         attestations: vec![],
     };
-    let e2 = CanonicalArtifactEnvelope {
+    let e2 = BackupManifestEnvelope {
         body: body_reversed,
         ..e1.clone()
     };
 
+    assert_eq!(
+        e1.body_hash().expect("method body h1"),
+        e2.body_hash().expect("method body h2"),
+        "PROPERTY: backup envelope method must normalize segment order"
+    );
+    assert_eq!(
+        e1.envelope_hash().expect("method env h1"),
+        e2.envelope_hash().expect("method env h2"),
+        "PROPERTY: backup envelope method must not expose raw artifact envelope hashing"
+    );
     assert_eq!(
         backup_manifest_envelope_body_hash(&e1).expect("body h1"),
         backup_manifest_envelope_body_hash(&e2).expect("body h2"),

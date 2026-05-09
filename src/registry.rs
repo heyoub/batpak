@@ -10,7 +10,7 @@ use crate::artifact::{
     verify_canonical_artifact_envelope, ArtifactHash, ArtifactVerificationReport,
     CanonicalArtifactEnvelope, SignatureRef,
 };
-use crate::evidence::content_hash;
+use crate::evidence::{content_hash, sort_findings, sorted_findings};
 use serde::{Deserialize, Serialize};
 
 /// Schema version baked into canonical [`RegistryRowBody`] encoding.
@@ -190,7 +190,7 @@ pub fn registry_drift_findings_sorted(
         });
         j += 1;
     }
-    out.sort();
+    sort_findings(&mut out);
     out
 }
 
@@ -201,8 +201,7 @@ pub fn registry_drift_findings_sorted(
 pub fn registry_drift_report_body_hash(
     report: &RegistryDriftReportBody,
 ) -> Result<ArtifactHash, rmp_serde::encode::Error> {
-    let mut findings = report.findings.clone();
-    findings.sort();
+    let findings = sorted_findings(&report.findings);
     let mut expected = report.expected.clone();
     let mut observed = report.observed.clone();
     sort_registry_row_hash_pairs(&mut expected);
@@ -272,10 +271,9 @@ pub struct RegistryVerificationReport {
 pub fn registry_verification_report_body_hash(
     report: &RegistryVerificationReport,
 ) -> Result<ArtifactHash, rmp_serde::encode::Error> {
-    let mut findings = report.findings.clone();
-    findings.sort();
+    let findings = sorted_findings(&report.findings);
     let mut envelope_plane = report.envelope_plane.clone();
-    envelope_plane.findings.sort();
+    sort_findings(&mut envelope_plane.findings);
     let normalized = RegistryVerificationReport {
         envelope_plane,
         findings,
@@ -445,7 +443,7 @@ where
         });
     }
 
-    findings.sort();
+    sort_findings(&mut findings);
 
     Ok(RegistryVerificationReport {
         schema_version: REGISTRY_VERIFICATION_REPORT_SCHEMA_VERSION,

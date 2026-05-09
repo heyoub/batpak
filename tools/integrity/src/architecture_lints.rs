@@ -1,3 +1,4 @@
+use crate::shared_checks::public_item_names;
 use anyhow::{anyhow, Context, Result};
 use pulldown_cmark::{Event, Options, Parser, Tag};
 use quote::ToTokens;
@@ -1176,34 +1177,6 @@ fn check_public_surface_truth(repo_root: &Path) -> Result<()> {
 fn parse_rust(path: PathBuf) -> Result<syn::File> {
     let content = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
     syn::parse_file(&content).with_context(|| format!("parse {}", path.display()))
-}
-
-fn public_item_names(file: &syn::File) -> BTreeSet<String> {
-    let mut names = BTreeSet::new();
-    for item in &file.items {
-        match item {
-            Item::Struct(item) if matches!(item.vis, syn::Visibility::Public(_)) => {
-                names.insert(item.ident.to_string());
-            }
-            Item::Enum(item) if matches!(item.vis, syn::Visibility::Public(_)) => {
-                names.insert(item.ident.to_string());
-            }
-            Item::Trait(item) if matches!(item.vis, syn::Visibility::Public(_)) => {
-                names.insert(item.ident.to_string());
-            }
-            Item::Type(item) if matches!(item.vis, syn::Visibility::Public(_)) => {
-                names.insert(item.ident.to_string());
-            }
-            Item::Const(item) if matches!(item.vis, syn::Visibility::Public(_)) => {
-                names.insert(item.ident.to_string());
-            }
-            Item::Fn(item) if matches!(item.vis, syn::Visibility::Public(_)) => {
-                names.insert(item.sig.ident.to_string());
-            }
-            _ => {}
-        }
-    }
-    names
 }
 
 fn public_impl_method_names(file: &syn::File, type_name: &str) -> BTreeSet<String> {

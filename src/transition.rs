@@ -6,7 +6,7 @@
 //! application-specific lifecycle vocabulary; callers supply state `u64` lanes and optional
 //! allowed-edge sets.
 
-use crate::evidence::content_hash;
+use crate::evidence::{content_hash, sort_findings, sorted_findings};
 use serde::{Deserialize, Serialize};
 
 /// Schema version for canonical [`StateTransitionEvent`] encoding.
@@ -215,7 +215,7 @@ pub fn build_state_transition_report(
 
     let normalized = normalize_state_transition_event(event);
     let transition_event_digest = state_transition_event_digest(event)?;
-    findings.sort();
+    sort_findings(&mut findings);
 
     Ok(StateTransitionReportBody {
         schema_version: STATE_TRANSITION_REPORT_SCHEMA_VERSION,
@@ -239,8 +239,7 @@ pub fn build_state_transition_report(
 pub fn state_transition_report_body_hash(
     report: &StateTransitionReportBody,
 ) -> Result<TransitionEvidenceDigest, rmp_serde::encode::Error> {
-    let mut findings = report.findings.clone();
-    findings.sort();
+    let findings = sorted_findings(&report.findings);
     let normalized = StateTransitionReportBody {
         findings,
         ..report.clone()

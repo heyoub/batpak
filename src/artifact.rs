@@ -6,7 +6,7 @@
 //!
 //! This module does **not** depend on [`crate::store`].
 
-use crate::evidence::content_hash;
+use crate::evidence::{content_hash, sort_findings, sorted_findings};
 use serde::{Deserialize, Serialize};
 
 /// Fixed-width digest for artifact bodies and envelope framing.
@@ -188,7 +188,7 @@ where
             });
         }
     }
-    findings.sort();
+    sort_findings(&mut findings);
 
     Ok(ArtifactVerificationReport {
         body_hash: body_digest,
@@ -204,8 +204,7 @@ where
 pub fn artifact_verification_report_body_hash(
     report: &ArtifactVerificationReport,
 ) -> Result<ArtifactHash, rmp_serde::encode::Error> {
-    let mut findings = report.findings.clone();
-    findings.sort();
+    let findings = sorted_findings(&report.findings);
     let normalized = ArtifactVerificationReport {
         findings,
         ..report.clone()

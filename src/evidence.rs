@@ -21,6 +21,12 @@ pub(crate) fn sort_findings<T: Ord>(findings: &mut [T]) {
     findings.sort();
 }
 
+pub(crate) fn sorted_findings<T: Clone + Ord>(findings: &[T]) -> Vec<T> {
+    let mut sorted = findings.to_vec();
+    sort_findings(&mut sorted);
+    sorted
+}
+
 #[cfg(feature = "blake3")]
 fn content_hash_impl(bytes: &[u8]) -> EvidenceHash {
     crate::event::hash::compute_hash(bytes)

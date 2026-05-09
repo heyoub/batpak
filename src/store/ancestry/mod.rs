@@ -54,6 +54,7 @@ pub(super) fn read_entry_and_event<State>(
     Some((entry, stored))
 }
 
+#[cfg(feature = "blake3")]
 pub(crate) fn parent_event_id_by_hash(
     entity_stream: &[IndexEntry],
     parent_hash: [u8; 32],

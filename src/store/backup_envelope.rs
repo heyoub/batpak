@@ -9,10 +9,10 @@
 
 use crate::artifact::{
     artifact_envelope_hash_from_identity, artifact_envelope_identity,
-    verify_canonical_artifact_envelope, ArtifactVerificationReport, CanonicalArtifactEnvelope,
-    SignatureRef,
+    verify_canonical_artifact_envelope, ArtifactVerificationReport, AttestationRef,
+    CanonicalArtifactEnvelope, SignatureEnvelope, SignatureRef,
 };
-use crate::evidence::content_hash;
+use crate::evidence::{content_hash, sort_findings, sorted_findings};
 use serde::{Deserialize, Serialize};
 
 /// Schema version for canonical [`BackupManifestBody`] encoding.
@@ -50,21 +50,84 @@ pub struct BackupManifestBody {
 
 /// Attested manifest envelope (signatures and attestations are outside manifest body identity).
 ///
-/// The inherited [`CanonicalArtifactEnvelope::body_hash`] and
-/// [`CanonicalArtifactEnvelope::envelope_hash`] methods hash the raw `body` as stored in the
-/// envelope. For backup manifests, use [`backup_manifest_envelope_body_hash`] and
-/// [`backup_manifest_envelope_hash`] so segment order is normalized first.
-pub type BackupManifestEnvelope = CanonicalArtifactEnvelope<BackupManifestBody>;
+/// This is intentionally not a type alias to [`CanonicalArtifactEnvelope`]: backup manifest segment
+/// refs must be normalized before body and envelope identity hashing. The methods on this type
+/// route through the backup-specific normalized hash helpers.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BackupManifestEnvelope {
+    /// Backup manifest body; segment refs are sorted by normalized hash helpers.
+    pub body: BackupManifestBody,
+    /// Envelope field-layout version.
+    pub envelope_schema_version: u32,
+    /// Envelope-only wall clock (outside body identity).
+    pub generated_at_wall_ms: Option<u64>,
+    /// Envelope-only diagnostics (outside body identity).
+    pub diagnostic_note: Option<String>,
+    /// Signatures (canonical sort before envelope hashing).
+    pub signatures: Vec<SignatureEnvelope>,
+    /// Attestations (canonical sort before envelope hashing).
+    pub attestations: Vec<AttestationRef>,
+}
 
 /// Backwards-compatible alias for callers that prefer the shorter name.
 ///
-/// Use [`backup_manifest_envelope_body_hash`] and [`backup_manifest_envelope_hash`] instead of the
-/// inherited raw-body envelope hash methods when computing backup manifest identity.
 pub type BackupEnvelope = BackupManifestEnvelope;
+
+impl BackupManifestEnvelope {
+    /// Convert to the generic artifact envelope used by signature verification after backup
+    /// normalization has already selected the body bytes.
+    #[must_use]
+    fn to_canonical_envelope(&self) -> CanonicalArtifactEnvelope<BackupManifestBody> {
+        CanonicalArtifactEnvelope {
+            body: self.body.clone(),
+            envelope_schema_version: self.envelope_schema_version,
+            generated_at_wall_ms: self.generated_at_wall_ms,
+            diagnostic_note: self.diagnostic_note.clone(),
+            signatures: self.signatures.clone(),
+            attestations: self.attestations.clone(),
+        }
+    }
+
+    /// Normalized backup manifest body digest.
+    ///
+    /// # Errors
+    /// MessagePack encode failure from `rmp-serde`.
+    pub fn body_hash(&self) -> Result<SegmentBytesDigest, rmp_serde::encode::Error> {
+        backup_manifest_envelope_body_hash(self)
+    }
+
+    /// Normalized backup manifest envelope digest.
+    ///
+    /// # Errors
+    /// MessagePack encode failure from `rmp-serde`.
+    pub fn envelope_hash(&self) -> Result<SegmentBytesDigest, rmp_serde::encode::Error> {
+        backup_manifest_envelope_hash(self)
+    }
+}
+
+impl From<CanonicalArtifactEnvelope<BackupManifestBody>> for BackupManifestEnvelope {
+    fn from(envelope: CanonicalArtifactEnvelope<BackupManifestBody>) -> Self {
+        Self {
+            body: envelope.body,
+            envelope_schema_version: envelope.envelope_schema_version,
+            generated_at_wall_ms: envelope.generated_at_wall_ms,
+            diagnostic_note: envelope.diagnostic_note,
+            signatures: envelope.signatures,
+            attestations: envelope.attestations,
+        }
+    }
+}
 
 /// Structural findings for manifest audit and restore proof (sorted before report `body_hash`).
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum BackupEnvelopeFinding {
+    /// [`BackupManifestBody::schema_version`] is not supported by these v1 helpers.
+    UnsupportedManifestBodySchemaVersion {
+        /// Observed manifest body schema version.
+        observed: u32,
+        /// Supported manifest body schema version.
+        expected: u32,
+    },
     /// Adjacent duplicate segment rows after canonical sort (identical [`BackupSegmentRef`]).
     DuplicateSegmentRef {
         /// Repeated segment id.
@@ -156,7 +219,7 @@ pub fn normalize_backup_manifest_body(body: &BackupManifestBody) -> BackupManife
 pub fn normalize_backup_manifest_envelope(
     envelope: &BackupManifestEnvelope,
 ) -> BackupManifestEnvelope {
-    CanonicalArtifactEnvelope {
+    BackupManifestEnvelope {
         body: normalize_backup_manifest_body(&envelope.body),
         envelope_schema_version: envelope.envelope_schema_version,
         generated_at_wall_ms: envelope.generated_at_wall_ms,
@@ -210,7 +273,8 @@ pub fn backup_manifest_envelope_hash(
 ) -> Result<SegmentBytesDigest, rmp_serde::encode::Error> {
     let normalized = normalize_backup_manifest_envelope(envelope);
     let body_hash = backup_manifest_body_hash(&normalized.body)?;
-    let identity = artifact_envelope_identity(&normalized, body_hash);
+    let artifact_envelope = normalized.to_canonical_envelope();
+    let identity = artifact_envelope_identity(&artifact_envelope, body_hash);
     artifact_envelope_hash_from_identity(&identity)
 }
 
@@ -245,8 +309,16 @@ fn collect_segment_digest_index(
 pub fn audit_backup_manifest_segments(body: &BackupManifestBody) -> Vec<BackupEnvelopeFinding> {
     let normalized = normalize_backup_manifest_body(body);
     let mut findings = Vec::new();
+    if body.schema_version != BACKUP_MANIFEST_BODY_SCHEMA_VERSION {
+        findings.push(
+            BackupEnvelopeFinding::UnsupportedManifestBodySchemaVersion {
+                observed: body.schema_version,
+                expected: BACKUP_MANIFEST_BODY_SCHEMA_VERSION,
+            },
+        );
+    }
     let _map = collect_segment_digest_index(&normalized.segments, &mut findings);
-    findings.sort();
+    sort_findings(&mut findings);
     findings
 }
 
@@ -255,7 +327,7 @@ pub fn audit_backup_manifest_segments(body: &BackupManifestBody) -> Vec<BackupEn
 /// # Errors
 /// MessagePack encode failure from `rmp-serde` while hashing or verifying the body.
 pub fn verify_backup_manifest_envelope<F>(
-    envelope: &CanonicalArtifactEnvelope<BackupManifestBody>,
+    envelope: &BackupManifestEnvelope,
     claimed_manifest_hash: SegmentBytesDigest,
     verify_signature: F,
 ) -> Result<BackupManifestVerification, rmp_serde::encode::Error>
@@ -263,7 +335,8 @@ where
     F: FnMut(&SignatureRef, &[u8]) -> Result<(), String>,
 {
     let envelope_norm = normalize_backup_manifest_envelope(envelope);
-    let envelope_plane = verify_canonical_artifact_envelope(&envelope_norm, verify_signature)?;
+    let artifact_envelope = envelope_norm.to_canonical_envelope();
+    let envelope_plane = verify_canonical_artifact_envelope(&artifact_envelope, verify_signature)?;
     let mut findings = audit_backup_manifest_segments(&envelope.body);
     let computed = backup_manifest_body_hash(&envelope.body)?;
     if computed != claimed_manifest_hash {
@@ -272,7 +345,7 @@ where
             computed,
         });
     }
-    findings.sort();
+    sort_findings(&mut findings);
     Ok(BackupManifestVerification {
         envelope_plane,
         findings,
@@ -284,14 +357,15 @@ where
 /// # Errors
 /// MessagePack encode failure from `rmp-serde`.
 pub fn verify_backup_manifest_signatures_only<F>(
-    envelope: &CanonicalArtifactEnvelope<BackupManifestBody>,
+    envelope: &BackupManifestEnvelope,
     verify_signature: F,
 ) -> Result<ArtifactVerificationReport, rmp_serde::encode::Error>
 where
     F: FnMut(&SignatureRef, &[u8]) -> Result<(), String>,
 {
     let envelope_norm = normalize_backup_manifest_envelope(envelope);
-    verify_canonical_artifact_envelope(&envelope_norm, verify_signature)
+    let artifact_envelope = envelope_norm.to_canonical_envelope();
+    verify_canonical_artifact_envelope(&artifact_envelope, verify_signature)
 }
 
 /// Build a restore proof body: compares normalized manifest segments to sorted `observed` multiset.
@@ -307,6 +381,14 @@ pub fn restore_proof_report_body(
     observed_segments_sorted.sort();
 
     let mut findings = Vec::new();
+    if expected_manifest.schema_version != BACKUP_MANIFEST_BODY_SCHEMA_VERSION {
+        findings.push(
+            BackupEnvelopeFinding::UnsupportedManifestBodySchemaVersion {
+                observed: expected_manifest.schema_version,
+                expected: BACKUP_MANIFEST_BODY_SCHEMA_VERSION,
+            },
+        );
+    }
     let normalized = normalize_backup_manifest_body(expected_manifest);
     let expected_map = collect_segment_digest_index(&normalized.segments, &mut findings);
     let observed_map = collect_segment_digest_index(&observed_segments_sorted, &mut findings);
@@ -329,7 +411,7 @@ pub fn restore_proof_report_body(
             findings.push(BackupEnvelopeFinding::UnexpectedObservedSegment { segment_id: *id });
         }
     }
-    findings.sort();
+    sort_findings(&mut findings);
 
     Ok(RestoreProofReportBody {
         schema_version: RESTORE_PROOF_REPORT_SCHEMA_VERSION,
@@ -346,8 +428,7 @@ pub fn restore_proof_report_body(
 pub fn restore_proof_report_body_hash(
     report: &RestoreProofReportBody,
 ) -> Result<SegmentBytesDigest, rmp_serde::encode::Error> {
-    let mut findings = report.findings.clone();
-    findings.sort();
+    let findings = sorted_findings(&report.findings);
     let mut observed_segments_sorted = report.observed_segments_sorted.clone();
     observed_segments_sorted.sort();
     let normalized = RestoreProofReportBody {
