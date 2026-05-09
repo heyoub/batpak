@@ -16,7 +16,7 @@ batpak's public write surface takes `(coord, kind, payload)` on every append
 path. `EventKind` is a sealed packed `u16` carrying a 4-bit category and a
 12-bit type id: `(category: 4 bits) << 12 | (type_id: 12 bits)`. The
 construction signature is `EventKind::custom(category: u8, type_id: u16)`
-(see `src/event/kind.rs`). Callers had to construct and pass that value at
+(see `crates/core/src/event/kind.rs`). Callers had to construct and pass that value at
 every callsite. There was no mechanism binding a Rust payload type to its
 `EventKind` at the type level, so nothing prevented a caller from appending a
 payload under the wrong kind, or querying by a mistyped constant.
@@ -97,14 +97,14 @@ paths throughout (`::batpak::event::EventPayload`,
 resolves correctly in two contexts:
 
 - **Downstream crates** — via the root re-export
-  `pub use batpak_macros::EventPayload;` at `src/lib.rs`, which makes
+  `pub use batpak_macros::EventPayload;` at `crates/core/src/lib.rs`, which makes
   `batpak::EventPayload` name the derive macro while the trait lives at
   `batpak::event::EventPayload` (mirroring the `serde` pattern: trait and
   derive share a name across different namespaces). The fixture at
-  `fixtures/downstream/` proves this.
+  `crates/core/fixtures/downstream/` proves this.
 - **Inside the `batpak` crate itself** — `pub extern crate self as batpak;`
   at the crate root makes `::batpak::...` resolve to `self::...` from within
-  the crate, so `#[derive(EventPayload)]` inside `src/`-style modules works
+  the crate, so `#[derive(EventPayload)]` inside `crates/core/src/`-style modules works
   identically to the downstream case.
 
 ### Schema evolution
@@ -157,7 +157,7 @@ default when collisions are linked, and callers can set
 whose only type selector is `EventKind` gets a typed sibling where the type
 constraint is meaningful.
 
-**Authoritative list (verified against `src/store/mod.rs`):**
+**Authoritative list (verified against `crates/core/src/store/mod.rs`):**
 
 Write surface:
 - `Store::append_typed<T: EventPayload>(&self, coord: &Coordinate, payload: &T) -> Result<AppendReceipt, StoreError>`
@@ -196,10 +196,10 @@ their code. Specifically:
   fail-fast open error if another type in the same binary claims the same
   `(category, type_id)` pair
 
-All four have shipped. See `tests/event_payload_surface.rs` for the positive
-surface, `tests/derive_eventpayload_errors.rs` + `tests/ui/ep_*.{rs,stderr}`
-for span-pointed compile errors, `fixtures/downstream/` for the
-path-hygiene fixture, and `fixtures/kind-collision-composer/` for cross-crate
+All four have shipped. See `crates/core/tests/event_payload_surface.rs` for the positive
+surface, `crates/core/tests/derive_eventpayload_errors.rs` + `crates/core/tests/ui/ep_*.{rs,stderr}`
+for span-pointed compile errors, `crates/core/fixtures/downstream/` for the
+path-hygiene fixture, and `crates/core/fixtures/kind-collision-composer/` for cross-crate
 collision detection.
 
 ---
@@ -263,8 +263,8 @@ its kind automatically from the payload type. Signature:
 or outside the defining crate. Absolute paths combined with the
 `pub extern crate self as batpak;` alias at the crate root resolve
 identically everywhere, which is verified by three tests: the in-workspace
-smoke test (`tests/event_payload_surface.rs`), the in-crate derive resolver
-test, and the downstream fixture at `fixtures/downstream/`.
+smoke test (`crates/core/tests/event_payload_surface.rs`), the in-crate derive resolver
+test, and the downstream fixture at `crates/core/fixtures/downstream/`.
 
 **Kind-adjacent surfaces** — `Outbox::stage`, `VisibilityFence::submit`,
 `VisibilityFence::submit_reaction` — are closed by the Integrity Closeout

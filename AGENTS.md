@@ -2,8 +2,10 @@
 
 ## Repo Map
 
-- `src/`: runtime crate
-  - `src/store/`: see `mod.rs` for full submodule list. Key subdirectories:
+- `Cargo.toml`: workspace/control-plane manifest; primary package defaults to `crates/core`
+- `crates/core/`: primary package (`package.name = "batpak"`)
+  - `crates/core/src/`: runtime crate
+  - `crates/core/src/store/`: see `mod.rs` for full submodule list. Key subdirectories:
     - `write/` — `writer.rs` (orchestration spine), `writer/{append,batch,fence_runtime,publish,runtime}.rs`, `fanout.rs` (notifications), `staging.rs`, `control/`
     - `segment/` — `mod.rs` (frame format, compaction), `scan.rs` (segment reading), `sidx.rs` (SIDX footer)
     - `index/` — `mod.rs` (in-memory query engine), `columnar.rs` (SoA/AoSoA overlays), `interner.rs` (string interning)
@@ -14,9 +16,11 @@
     - `delivery/` — `subscription.rs` (lossy push), `cursor.rs` (ordered pull replay with optional durable checkpoints), `observation.rs` (delivery witness types)
     - Flat files: `append.rs` (`BatchAppendItem`, `CausationRef`, `AppendOptions`), `gate.rs` (`DurabilityGate`), `lifecycle.rs`, `hidden_ranges.rs`, `config.rs`, `error.rs`, `stats.rs`, `reactor_typed.rs`
     - `fault.rs` — fault injection (dangerous-test-hooks feature)
-- `tests/`: integration, property, compile-fail, and perf-gate tests
-- `examples/`: runnable usage patterns
-- `benches/`: Criterion surfaces
+  - `crates/core/tests/`: integration, property, compile-fail, and perf-gate tests
+  - `crates/core/examples/`: runnable usage patterns
+  - `crates/core/benches/`: Criterion surfaces
+  - `crates/core/fixtures/`: downstream and cross-crate fixture packages
+- `crates/macros/`, `crates/macros-support/`, `crates/bench-support/`: companion workspace crates
 - `tools/integrity/`: traceability and structural detectors
 - `tools/xtask/`: canonical developer command surface
 - `README.md`: primary repo entrypoint
@@ -24,6 +28,15 @@
 - `REFERENCE.md`: technical reference and invariants
 - `docs/adr/`: decision records; start with `docs/adr/README.md` for the index
 - `traceability/`: requirements, invariants, flows, artifacts
+
+## Root Altitudes
+
+- Canonical source lives under `crates/core/` and companion `crates/*` members.
+- Proof and validation live under `crates/core/tests/`, `crates/core/benches/`, `crates/core/fixtures/`, `traceability/`, and `HARNESS_*`.
+- Repo-owned tools live under `tools/`, with `scripts/` reserved for CI/devcontainer boundary wrappers only.
+- Public docs stay at root (`README.md`, `GUIDE.md`, `REFERENCE.md`) or under `docs/`.
+- Tool-standard config paths stay at root (`.cargo/`, `.config/`, `.devcontainer/`, `.github/`, `.githooks/`).
+- Agent/local workspace state (`.cursor/`, `.claude/`, `.codex/`, `.agents/`, `target/`) is not substrate source.
 
 ## Canonical Commands
 
@@ -55,7 +68,7 @@
 - Store internals change:
   - run `cargo xtask ci`
   - run the relevant perf surface
-  - inspect `tests/perf_gates.rs` and `REFERENCE.md`
+  - inspect `crates/core/tests/perf_gates.rs` and `REFERENCE.md`
 - Benchmark harness change:
   - update `cargo xtask bench` surfaces in `tools/xtask/src/bench.rs`
   - refresh baselines intentionally
@@ -76,7 +89,7 @@
 - `.githooks/` is the tracked repo hook surface. `cargo xtask setup --install-tools` will install it when no custom `core.hooksPath` is active; otherwise use `cargo xtask install-hooks` after clearing or changing the custom hook path.
 - **Structural parity checks** — `cargo xtask structural` (called automatically by `cargo xtask ci`) runs two detectors you must not break:
   - `check_ci_parity` — fails if `.github/workflows/ci.yml` drifts from the xtask source tree or `.devcontainer/Dockerfile`. Specifically: every `cargo xtask <subcommand>` referenced in the workflow must exist as a subcommand in xtask; every `taiki-e/install-action` tool must be present in xtask's setup step; tool version pins must agree across all three files. **Rule:** if you modify `tools/xtask/src/main.rs`, `tools/xtask/src/commands.rs`, `.github/workflows/ci.yml`, or `.devcontainer/Dockerfile`, run `cargo xtask structural` before push.
-  - `check_store_pub_fn_coverage` — uses `syn` to parse `src/store/mod.rs`, extracts every `pub fn` on `impl Store`, and asserts that each one has at least one method-call reference somewhere in `tests/` or `src/`. Catches orphan public methods that ship untested and invisible to mutation testing. **Rule:** if you add a `pub fn` to `Store`, ensure it has a call site in tests or the check will fail.
+  - `check_store_pub_fn_coverage` — uses `syn` to parse `crates/core/src/store/`, extracts every `pub fn` on `impl Store`, and asserts that each one has at least one method-call reference somewhere in `crates/core/tests/` or `crates/core/src/`. Catches orphan public methods that ship untested and invisible to mutation testing. **Rule:** if you add a `pub fn` to `Store`, ensure it has a call site in tests or the check will fail.
 
 ## Mutation Testing Gate
 
@@ -96,6 +109,6 @@ let err = match result {
 assert!(matches!(err, StoreError::SpecificVariant { .. }), "wrong variant: {:?}", err);
 ```
 
-Test files that use `panic!()` intentionally (as the loop-escape in property tests) need `#![allow(clippy::panic)]` at the module level. The project's `Cargo.toml` denies `panic` globally for `src/`, but test files use it on purpose and must opt out explicitly.
+Test files that use `panic!()` intentionally (as the loop-escape in property tests) need `#![allow(clippy::panic)]` at the module level. The project's `Cargo.toml` denies `panic` globally for `crates/core/src/`, but test files use it on purpose and must opt out explicitly.
 
-**Extract local visitor structs to module level for testability.** Visitor structs defined inside a function body (e.g., `U128Visitor`, `OptU128Visitor`, `VecU128Visitor` in `src/wire.rs`) are unreachable from `tests/` and invisible to mutation testing — mutations inside them go undetected. The fix is to move them to `pub(super) struct` at module level. Apply this pattern whenever you define a `serde::Visitor` or similar helper inside a function: the slight verbosity is worth the coverage gain.
+**Extract local visitor structs to module level for testability.** Visitor structs defined inside a function body (e.g., `U128Visitor`, `OptU128Visitor`, `VecU128Visitor` in `crates/core/src/wire.rs`) are unreachable from `crates/core/tests/` and invisible to mutation testing — mutations inside them go undetected. The fix is to move them to `pub(super) struct` at module level. Apply this pattern whenever you define a `serde::Visitor` or similar helper inside a function: the slight verbosity is worth the coverage gain.

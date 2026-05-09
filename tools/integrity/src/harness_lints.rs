@@ -1,3 +1,4 @@
+use crate::repo_surface::resolve_repo_or_core_path;
 use anyhow::{bail, Context, Result};
 use std::collections::{BTreeSet, HashMap};
 use std::fs;
@@ -386,14 +387,14 @@ fn check_entries(
         )?;
         for path in &entry.locations {
             ensure(
-                repo_root.join(path).exists(),
+                resolve_repo_or_core_path(repo_root, path).exists(),
                 format!(
                     "HARNESS_LEDGER.md:{}: location `{path}` does not exist",
                     entry.line
                 ),
             )?;
             ensure(
-                tracked.contains(path),
+                tracked.contains(path) || tracked.contains(&format!("crates/core/{path}")),
                 format!(
                     "HARNESS_LEDGER.md:{}: location `{path}` is not git-tracked",
                     entry.line
@@ -418,8 +419,8 @@ fn check_entries(
 fn check_module_headers(repo_root: &Path, rust_files: &BTreeSet<String>) -> Result<()> {
     let allowlist = header_allowlist()?;
     for path in rust_files {
-        let content =
-            fs::read_to_string(repo_root.join(path)).with_context(|| format!("read {path}"))?;
+        let content = fs::read_to_string(resolve_repo_or_core_path(repo_root, path))
+            .with_context(|| format!("read {path}"))?;
         let header = content.lines().take(40).collect::<Vec<_>>().join("\n");
         let complete =
             header.contains("PROVES:") && header.contains("CATCHES:") && header.contains("SEEDED:");
@@ -441,8 +442,8 @@ fn check_module_headers(repo_root: &Path, rust_files: &BTreeSet<String>) -> Resu
 fn check_line_caps(repo_root: &Path, rust_files: &BTreeSet<String>) -> Result<()> {
     let allowlist = oversize_allowlist()?;
     for path in rust_files {
-        let content =
-            fs::read_to_string(repo_root.join(path)).with_context(|| format!("read {path}"))?;
+        let content = fs::read_to_string(resolve_repo_or_core_path(repo_root, path))
+            .with_context(|| format!("read {path}"))?;
         let line_count = content.lines().count();
         if line_count <= 500 {
             ensure(

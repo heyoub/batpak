@@ -18,7 +18,7 @@ the target and which code is deciding store semantics.
 
 ## Decision
 
-Create a private `src/store/platform/` backend room for target-sensitive
+Create a private `crates/core/src/store/platform/` backend room for target-sensitive
 machine-contact helpers, evidence summaries, narrow admission tokens,
 versioned profile records, and opt-in open-time reverify.
 
@@ -33,7 +33,7 @@ frontier code remain the owners of those guarantees.
 
 ## Consequences
 
-- Machine-contact helpers have one internal home under `src/store/platform/`.
+- Machine-contact helpers have one internal home under `crates/core/src/store/platform/`.
 - Store diagnostics expose a platform evidence summary so operators can see
   which target-sensitive mechanics/posture were reported.
 - Store lock, parent-dir sync, mmap-index, and sealed-segment mmap paths use
@@ -44,12 +44,12 @@ frontier code remain the owners of those guarantees.
   observability, but open may still create the data directory and lock file
   before reverify fails.
 - `cargo xtask platform ...` owns operator profile probe/verify/bless/audit
-  workflows. `build.rs` may validate an explicitly configured profile via
+  workflows. `crates/core/build.rs` may validate an explicitly configured profile via
   `BATPAK_PLATFORM_PROFILE`, but it never probes live hardware.
 - Profile fingerprints use non-cryptographic CRC32 for accidental drift
   detection only. Profile signing is explicitly not implemented.
 - Structural checks prevent direct target-sensitive store calls from leaking
-  outside `src/store/platform/`.
+  outside `crates/core/src/store/platform/`.
 - Codegen, proc macros, profile signing, and public API design stay outside
   this store-internal boundary.
 - Safety comments stay at semantic call sites when the proof belongs to store
@@ -61,7 +61,7 @@ frontier code remain the owners of those guarantees.
 
 - Keep the boundary as a private store-internal module.
 - No generic wrapper around all filesystem I/O.
-- No live hardware probing in `build.rs`.
+- No live hardware probing in `crates/core/build.rs`.
 - No profile signing.
 
 ## Traceability

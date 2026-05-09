@@ -12,7 +12,7 @@ deterministic report body.
 
 ## Decision
 batpak adds `Store::subscriber_frontier_observation` and
-`src/store/subscriber_frontier.rs` as a minimal structural evidence surface.
+`crates/core/src/store/subscriber_frontier.rs` as a minimal structural evidence surface.
 
 ### 1) Report-body shape
 
@@ -71,7 +71,7 @@ This slice does not add:
 
 ## References
 
-- `src/store/subscriber_frontier.rs`
-- `src/store/write/fanout.rs`
-- `src/store/delivery/subscription.rs`
+- `crates/core/src/store/subscriber_frontier.rs`
+- `crates/core/src/store/write/fanout.rs`
+- `crates/core/src/store/delivery/subscription.rs`
 - `docs/adr/ADR-0019-canonical-encoding-contract.md`

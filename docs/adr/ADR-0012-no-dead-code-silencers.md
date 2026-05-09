@@ -8,18 +8,18 @@ Accepted
 
 - Test-only code → move it behind `#[cfg(test)]` so non-test builds never compile it.
 - Truly unused code → delete it.
-- Shared infrastructure that appears unused per-binary because each consumer uses only a subset → restructure so the compilation surface matches actual ownership (a dedicated workspace crate, a narrower helper module, or finer-grained `#[path]` includes in `tests/`).
+- Shared infrastructure that appears unused per-binary because each consumer uses only a subset → restructure so the compilation surface matches actual ownership (a dedicated workspace crate, a narrower helper module, or finer-grained `#[path]` includes in `crates/core/tests/`).
 
 Silencing the warning is a fourth answer that erases the signal without addressing any of the three underlying shapes. A live proof found 19+ prior agent interactions that took the silencing path over the restructuring path; the invariant is recorded here so the gate is legible and the answer is mechanical.
 
-A companion post-mortem (`src/test_support.rs`, since removed) made the same point from the other direction: a helper module parked under `src/` avoided the warnings by crossing into production-code lint territory (`clippy::expect_used`, public-surface rules). That was not neutral — hiding test helpers in `src/` upgrades them into production code, which is the wrong category. The fix was to move the helpers back under `tests/` as finer-grained `#[path]`-included modules whose contents each consumer fully uses. See ADR-0005 for the legitimate `dangerous-test-hooks` feature-gated test surface, which remains the only accepted production-adjacent test helper shape.
+A companion post-mortem (`crates/core/src/test_support.rs`, since removed) made the same point from the other direction: a helper module parked under `crates/core/src/` avoided the warnings by crossing into production-code lint territory (`clippy::expect_used`, public-surface rules). That was not neutral — hiding test helpers in `crates/core/src/` upgrades them into production code, which is the wrong category. The fix was to move the helpers back under `crates/core/tests/` as finer-grained `#[path]`-included modules whose contents each consumer fully uses. See ADR-0005 for the legitimate `dangerous-test-hooks` feature-gated test surface, which remains the only accepted production-adjacent test helper shape.
 
 ## Decision
-Any `#[allow(...)]`, `#[expect(...)]`, or `cfg_attr`-wrapped attribute whose lint list mentions `dead_code` or the `unused` lint group (which subsumes `dead_code`) is banned in every tracked Rust source file under `src/`, `tests/`, `examples/`, `benches/`, `build.rs`, `crates/macros/src/`, `crates/macros-support/src/`, `tools/xtask/src/`, and `tools/integrity/src/`.
+Any `#[allow(...)]`, `#[expect(...)]`, or `cfg_attr`-wrapped attribute whose lint list mentions `dead_code` or the `unused` lint group (which subsumes `dead_code`) is banned in every tracked Rust source file under `crates/core/src/`, `crates/core/tests/`, `crates/core/examples/`, `crates/core/benches/`, `crates/core/build.rs`, `crates/macros/src/`, `crates/macros-support/src/`, `tools/xtask/src/`, and `tools/integrity/src/`.
 
 The ban is enforced by the AST walker in `shared_checks::collect_dead_code_silencer_sites` in `tools/shared/shared_checks.rs`, called from two detectors:
 
-- `build.rs::check_no_dead_code_silencers` runs on every `cargo build`, `cargo check`, and `cargo test`.
+- `crates/core/build.rs::check_no_dead_code_silencers` runs on every `cargo build`, `cargo check`, and `cargo test`.
 - `tools/integrity/src/main.rs::check_no_dead_code_silencers` runs as part of `cargo xtask structural`, which `cargo xtask ci` calls automatically.
 
 The walker catches:
@@ -37,7 +37,7 @@ There is one explicit escape hatch: `traceability/dead_code_silencer_allowlist.y
 
 ## Consequences
 - Dead-code warnings surface real structural questions (test-only? unused? shared?) instead of being silenced in place.
-- `src/` stays production code; test helpers live under `tests/` at a granularity that matches consumption. A helper file includable via `#[path]` contains only items that every consuming binary uses.
-- Bench helpers live in their own workspace crate (`crates/bench-support`) rather than hiding under `src/` or `tests/`; the compilation unit matches the ownership surface.
-- The detector is symmetric across `build.rs` and `cargo xtask structural`, so the policy is enforced from both the fast local loop and the CI gate.
+- `crates/core/src/` stays production code; test helpers live under `crates/core/tests/` at a granularity that matches consumption. A helper file includable via `#[path]` contains only items that every consuming binary uses.
+- Bench helpers live in their own workspace crate (`crates/bench-support`) rather than hiding under `crates/core/src/` or `crates/core/tests/`; the compilation unit matches the ownership surface.
+- The detector is symmetric across `crates/core/build.rs` and `cargo xtask structural`, so the policy is enforced from both the fast local loop and the CI gate.
 - Legitimate exceptions are explicit, traceable, and reviewable: add one exact-site entry to `traceability/dead_code_silencer_allowlist.yaml` with a real `reason` and `adr`. There is no narrative `// justifies:` escape hatch for this lint — the whole point is that the pattern does not have a legitimate site-local answer.

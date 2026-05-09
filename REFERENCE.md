@@ -9,7 +9,7 @@ workflow-driven usage.
 
 When repo surfaces disagree, trust them in this order:
 
-1. live code in `src/`
+1. live code in `crates/core/src/`
 2. root docs: `README.md`, `GUIDE.md`, `REFERENCE.md`
 3. traceability registries in `traceability/`
 
@@ -102,25 +102,25 @@ covered by ADR-0011.
 
 ## Runtime Map
 
-- `src/coordinate/mod.rs`: `Coordinate`, `Region`, `KindFilter`
-- `src/event/`: event model and replay-lane types
-- `src/store/config.rs`: `StoreConfig`, `IndexTopology`
-- `src/store/append.rs`: `AppendOptions`, `AppendPositionHint`, batch contracts
-- `src/store/write/control/`: tickets, outbox, visibility fence, submission bridge
-- `src/store/write/fanout.rs`: notification fanout and internal committed-event envelopes
-- `src/store/write/writer.rs`: writer orchestration spine, command router, segment rotation
-- `src/store/write/writer/append.rs`: single-append commit canal
-- `src/store/write/writer/batch.rs`: batch commit canal
-- `src/store/write/writer/fence_runtime.rs`: deferred replies and hidden-write ledger runtime
-- `src/store/write/writer/publish.rs`: committed-event materialization and fanout publish
-- `src/store/write/writer/runtime.rs`: restart loop, shutdown drain, segment bootstrap probe
-- `src/store/write/staging.rs`: shared committed-event staging packets
-- `src/store/platform/`: private target-sensitive machine-contact helpers for
+- `crates/core/src/coordinate/mod.rs`: `Coordinate`, `Region`, `KindFilter`
+- `crates/core/src/event/`: event model and replay-lane types
+- `crates/core/src/store/config.rs`: `StoreConfig`, `IndexTopology`
+- `crates/core/src/store/append.rs`: `AppendOptions`, `AppendPositionHint`, batch contracts
+- `crates/core/src/store/write/control/`: tickets, outbox, visibility fence, submission bridge
+- `crates/core/src/store/write/fanout.rs`: notification fanout and internal committed-event envelopes
+- `crates/core/src/store/write/writer.rs`: writer orchestration spine, command router, segment rotation
+- `crates/core/src/store/write/writer/append.rs`: single-append commit canal
+- `crates/core/src/store/write/writer/batch.rs`: batch commit canal
+- `crates/core/src/store/write/writer/fence_runtime.rs`: deferred replies and hidden-write ledger runtime
+- `crates/core/src/store/write/writer/publish.rs`: committed-event materialization and fanout publish
+- `crates/core/src/store/write/writer/runtime.rs`: restart loop, shutdown drain, segment bootstrap probe
+- `crates/core/src/store/write/staging.rs`: shared committed-event staging packets
+- `crates/core/src/store/platform/`: private target-sensitive machine-contact helpers for
   fs/sync/lock/clock/mmap operations
-- `src/store/index/mod.rs`: in-memory index and visibility gate
-- `src/store/index/columnar.rs`: base AoS plus optional overlays
-- `src/store/projection/flow.rs`: replay, incremental apply, cache path
-- `src/store/projection/watch.rs`: projection watcher
+- `crates/core/src/store/index/mod.rs`: in-memory index and visibility gate
+- `crates/core/src/store/index/columnar.rs`: base AoS plus optional overlays
+- `crates/core/src/store/projection/flow.rs`: replay, incremental apply, cache path
+- `crates/core/src/store/projection/watch.rs`: projection watcher
 - `tools/integrity/src/architecture_lints.rs`: parser-backed truth-surface checks
 - `tools/xtask/src/main.rs`: CLI entrypoint and dispatch only
 - `tools/xtask/src/bench.rs`: benchmark surface and compile orchestration
@@ -169,11 +169,11 @@ measurement before becoming the default mental model.
 
 Current measurement witness:
 
-- `benches/replay_lanes.rs` is the current witness surface and currently shows
+- `crates/core/benches/replay_lanes.rs` is the current witness surface and currently shows
   `RawMsgpackInput` ahead of `JsonValueInput` on the 1k-event counter-shaped
   replay workload in this tree
-- `examples/event_sourced_counter.rs` is the canonical ergonomic lane example
-- `examples/raw_projection_counter.rs` is the canonical performance-lane example
+- `crates/core/examples/event_sourced_counter.rs` is the canonical ergonomic lane example
+- `crates/core/examples/raw_projection_counter.rs` is the canonical performance-lane example
 
 ## Diagnostics And Evidence Boundary
 
@@ -212,11 +212,11 @@ which optional index layout produced equivalent answers.
 
 Important characterization surfaces:
 
-- `tests/atomic_batch.rs`
-- `tests/multi_view_parity.rs`
-- `tests/raw_projection_mode.rs`
-- `tests/store_projection_wiring.rs`
-- `tests/writer_command_flow.rs`
+- `crates/core/tests/atomic_batch.rs`
+- `crates/core/tests/multi_view_parity.rs`
+- `crates/core/tests/raw_projection_mode.rs`
+- `crates/core/tests/store_projection_wiring.rs`
+- `crates/core/tests/writer_command_flow.rs`
 
 ## Storage And Cold Start
 
@@ -233,14 +233,14 @@ Batch append uses BEGIN/COMMIT markers and atomic visibility publication.
 
 ## Store Platform Backend
 
-`src/store/platform/` is a private store-internal room for target-sensitive
+`crates/core/src/store/platform/` is a private store-internal room for target-sensitive
 machine contact. It owns narrow mechanics such as symlink leaf checks,
 same-directory tempfile persistence, parent-directory sync, store-lock open
 policy, segment file creation, active-segment positional reads, segment sync,
 canonical clocks, direct mmap calls, descriptive platform evidence, admission
 tokens, profile records, and opt-in reverify.
 
-The room stays private to `src/store/` and reports target mechanics without
+The room stays private to `crates/core/src/store/` and reports target mechanics without
 deciding store semantics. The rule is: platform observes; store admits; batpak
 guarantees.
 Durability, replay, visibility, and admission meaning stay with store,
@@ -561,13 +561,13 @@ Key tradeoffs:
 
 ## Benchmark Surfaces
 
-- `benches/projection_latency.rs`
-- `benches/unified_bench.rs`
-- `benches/writer_staging.rs`
-- `benches/writer_batch_staging.rs`
-- `benches/replay_lanes.rs`
-- `benches/topology_matrix.rs`
-- `benches/topology_write_cost.rs`
+- `crates/core/benches/projection_latency.rs`
+- `crates/core/benches/unified_bench.rs`
+- `crates/core/benches/writer_staging.rs`
+- `crates/core/benches/writer_batch_staging.rs`
+- `crates/core/benches/replay_lanes.rs`
+- `crates/core/benches/topology_matrix.rs`
+- `crates/core/benches/topology_write_cost.rs`
 
 Canonical commands:
 
@@ -607,7 +607,7 @@ Build-time/runtime policy highlights:
 5. Blake3 only for hash-chain integrity
 6. public surface honesty checks must stay encoded in tooling
 
-`build.rs` and `tools/integrity/src/architecture_lints.rs` are both part of
+`crates/core/build.rs` and `tools/integrity/src/architecture_lints.rs` are both part of
 the enforcement story.
 
 ## Authoritative Paths

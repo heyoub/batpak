@@ -9,14 +9,14 @@ reopening family design.
 
 ## Current State Check
 
-- `tests/evidence_report_family.rs` now exists and is extended rather than forked.
-- `benches/evidence_reports.rs` now exists and is extended rather than forked.
+- `crates/core/tests/evidence_report_family.rs` now exists and is extended rather than forked.
+- `crates/core/benches/evidence_reports.rs` now exists and is extended rather than forked.
 - `docs/extraction/evidence-substrate-audit.md` now exists and is extended
   rather than forked.
 - Evidence report exports intentionally flow through:
-  - `src/lib.rs` (`pub mod schema`, `pub mod store`, `pub mod prelude`)
-  - `src/store/mod.rs` (report-type re-exports)
-  - `src/prelude.rs` (caller-facing evidence report bodies/envelopes and
+  - `crates/core/src/lib.rs` (`pub mod schema`, `pub mod store`, `pub mod prelude`)
+  - `crates/core/src/store/mod.rs` (report-type re-exports)
+  - `crates/core/src/prelude.rs` (caller-facing evidence report bodies/envelopes and
     request/status enums that applications are expected to pattern-match)
 
 ## Evidence QA Rule
@@ -39,7 +39,7 @@ Evidence reports must not fake certainty or fake uncertainty:
 | `EvidenceReportBody` derive | not implemented | implement in batpak tooling/helper | lane-tooling-evidence-derive | measure repeated boilerplate before implementing |
 | `SchemaSnapshotSource` derive/helper | not implemented | implement in batpak tooling/helper | lane-tooling-schema-derive | lock stable input contract before deriving helpers |
 | Declarative report helper macros | no dedicated family macro | reject / not needed | none | revisit only if measured duplication forces a tiny helper surface |
-| `build.rs` report logic | minimal for evidence family; broader invariants in build script | already covered | none | keep tiny/deterministic; no env/network-driven report behavior |
+| `crates/core/build.rs` report logic | minimal for evidence family; broader invariants in build script | already covered | none | keep tiny/deterministic; no env/network-driven report behavior |
 | `cargo xtask` family audit | `cargo xtask evidence-audit` → `batpak-integrity evidence-audit` (schema anchors + export vocabulary) | already covered | none | extend anchors when new `*ReportBody` types ship |
 
 Classification only: macro/report helper rows above are **not** Lane B
@@ -47,7 +47,7 @@ delivery commitments unless a separate arc promotes them.
 
 ## Platform Test Style Note
 
-The prior broad panic/unwrap suppression debt in `tests/platform_backend.rs` is
+The prior broad panic/unwrap suppression debt in `crates/core/tests/platform_backend.rs` is
 closed in the evidence-debt-zero arc. Current platform backend tests use
 `Result`-returning style and explicit error assertions without file-level
 suppression. Keep this posture for new platform and evidence tests.
@@ -103,18 +103,18 @@ Evidence-report posture:
 
 Current coverage:
 
-- `tests/index_topology.rs` covers topology constructors, diagnostics labels,
+- `crates/core/tests/index_topology.rs` covers topology constructors, diagnostics labels,
   and tile-count reporting.
-- `tests/multi_view_parity.rs` checks visible query results and ordering across
+- `crates/core/tests/multi_view_parity.rs` checks visible query results and ordering across
   `aos`, `scan`, `entity-local`, `tiled`, and `all`, including reopen.
-- `tests/unified_topology_red.rs` covers direct topology query correctness and
+- `crates/core/tests/unified_topology_red.rs` covers direct topology query correctness and
   `tiled-simd` parity against `aos`.
-- `tests/evidence_report_family.rs` includes topology-independence checks for
+- `crates/core/tests/evidence_report_family.rs` includes topology-independence checks for
   read-walk and projection-run evidence bodies and `body_hash`.
 
 Topology bench status:
 
-- `benches/evidence_reports.rs` now includes topology-parameterized lanes for
+- `crates/core/benches/evidence_reports.rs` now includes topology-parameterized lanes for
   read-walk and projection-run evidence across `aos`, `scan`, `entity-local`,
   `tiled`, `tiled-simd`, and `all`, plus a `store_resource` sanity lane.
 - Schema/chain/subscriber benches remain layout-neutral by design unless a
@@ -208,60 +208,60 @@ is architectural closure status, not a CI pass result.
   `ReservationEntry`, closed structural `RESERVATION_STATE_*` lanes, `simulate_reservation_ledger`,
   `ReservationLedgerReportBody` + `reservation_ledger_report_body_hash`, reconciliation buckets +
   `reservation_reconciliation_report_body_hash`, sorted structural `ReservationFinding` coverage in
-  `tests/lane_b4_reservation_substrate.rs`.**
+  `crates/core/tests/lane_b4_reservation_substrate.rs`.**
 - **Matrix v6 (2026-05-08): Lane B3 — `batpak::transition` ships `StateTransitionEvent`,
   `build_state_transition_report` / `StateTransitionReportBody` with sorted causes/findings,
   `state_transition_event_digest`, and structural `StateTransitionFinding` coverage in
-  `tests/lane_b3_transition_substrate.rs`.**
+  `crates/core/tests/lane_b3_transition_substrate.rs`.**
 - **Matrix v5 (2026-05-08): Lane B2 — `batpak::store` backup manifest envelope (`BackupManifestBody`,
   `BackupManifestEnvelope` / `BackupEnvelope`), sorted segment digests, deterministic
   `restore_proof_report_body` / `restore_proof_report_body_hash`, and structural
   `BackupEnvelopeFinding` coverage, including unsupported manifest schema findings, in
-  `tests/lane_b2_backup_envelope_substrate.rs`.**
+  `crates/core/tests/lane_b2_backup_envelope_substrate.rs`.**
 - **Matrix v4 (2026-05-08): Lane B1 — `batpak::registry` ships attested row bodies
   (`row_hash` with sorted `named_digests`), drift and verification reports with
   `schema_version` + sorted findings, supersession hygiene helpers, and
   composition with `CanonicalArtifactEnvelope` on normalized signing bytes;
-  proof in `tests/lane_b1_registry_substrate.rs`.**
+  proof in `crates/core/tests/lane_b1_registry_substrate.rs`.**
 - **Matrix v3: Lane A kickoff — Evidence v1 sealed; evidence-debt-zero closed;
   Lane A primitives are CanonicalArtifactEnvelope, CompactionReport,
   IdempotencyLedger prove-or-build, RegionBoundQuery prove-or-build.**
   **Implementation notes (same v3 freeze):** `batpak::artifact` ships with INV-3
-  carve-out in `build.rs` (definitions in `src/artifact.rs`; `pub mod artifact;`
-  in `src/lib.rs`; `pub use crate::artifact::{{ … }}` in `src/prelude.rs`);
+  carve-out in `crates/core/build.rs` (definitions in `crates/core/src/artifact.rs`; `pub mod artifact;`
+  in `crates/core/src/lib.rs`; `pub use crate::artifact::{{ … }}` in `crates/core/src/prelude.rs`);
   `CompactionReportBody` carries `compaction_id`, sorted source segment refs,
   input bounds, and structural findings including pre-swap rollback; A3 proves
   **reject / not needed**; A4 proves **reject / not needed** (proof + batch pin
-  in `tests/lane_a_artifact_substrate.rs`, `tests/lane_a_store_substrate.rs`,
-  `tests/idempotent_batch_crash_recovery.rs`;
-  compaction lifecycle coverage also shares fixtures with `tests/store_snapshot_compaction.rs`).
+  in `crates/core/tests/lane_a_artifact_substrate.rs`, `crates/core/tests/lane_a_store_substrate.rs`,
+  `crates/core/tests/idempotent_batch_crash_recovery.rs`;
+  compaction lifecycle coverage also shares fixtures with `crates/core/tests/store_snapshot_compaction.rs`).
 - **v2 (2026-05-08):** Lane A fullsend — `batpak::envelope` (canonical body vs
   envelope digests), `CompactionReportBody` + `Store::compact_with_report`,
   idempotency and region-bound discipline **proved redundant** as separate
-  ledger/query types (`tests/lane_a_*_substrate.rs` + this matrix).
+  ledger/query types (`crates/core/tests/lane_a_*_substrate.rs` + this matrix).
 
 | Generic substrate need | Current batpak support | Test/reopen/platform coverage | Downstream shrink target | Disposition | Next arc | Blocker |
 | --- | --- | --- | --- | --- | --- | --- |
 | Canonical encoding contract | `batpak::canonical`, `ADR-0019` | schema/report tests; hash-backend parity lane in CI | replace ad-hoc canonical prose with `ADR-0019` citation | already covered | none | none |
-| Schema snapshot evidence | `SchemaSnapshotEvidenceReport` | `tests/schema_snapshot_report.rs`, family invariants, deterministic hash checks | cite schema drift report contract directly | already covered | none | none |
-| Chain walk evidence | `ChainWalkEvidenceReport` + shared ancestry parent-hash helper | `tests/chain_walk_evidence_report.rs`, family invariants, reopen checks | remove custom continuity explanation text | already covered | none | none |
-| Subscriber frontier evidence | `SubscriberFrontierEvidenceReport` | `tests/subscriber_frontier_observations.rs`, family invariants | cite lag/loss/frontier observation contract directly | already covered | none | none |
-| Projection run evidence | `ProjectionRunEvidenceReport` with outcome-bound `input_frontier` | `tests/projection_run_evidence_report.rs`, family topology parity tests | reduce custom projection observability glue | already covered | none | none |
-| Read walk evidence | `ReadWalkEvidenceReport` with index-visible boundary owner | `tests/read_walk_evidence_report.rs`, family topology parity tests, reopen checks | reduce custom read-observation wrappers | already covered | none | none |
-| Forensic query export (nominal envelope) | `ReadWalkEvidenceReport` + `CanonicalArtifactEnvelope` composition | `tests/evidence_report_family.rs`, read-walk suites; `docs/extraction/forensic-query-envelope.md` | cite composition instead of a parallel nominal type | reject / not needed | none | no Downstream query grammar in core |
-| Store resource evidence | `StoreResourceEvidenceReport` (`StoreResourceEnvelope`) over stable diagnostics; path identity via digest only | `tests/lane_store_resource_evidence.rs`; `Store::store_resource_evidence_report` | cite store resource report for operator substrate snapshots | implement in batpak core | none | **v1 shipped** — bodies are point-in-time; full equality across reopen is not a contract |
+| Schema snapshot evidence | `SchemaSnapshotEvidenceReport` | `crates/core/tests/schema_snapshot_report.rs`, family invariants, deterministic hash checks | cite schema drift report contract directly | already covered | none | none |
+| Chain walk evidence | `ChainWalkEvidenceReport` + shared ancestry parent-hash helper | `crates/core/tests/chain_walk_evidence_report.rs`, family invariants, reopen checks | remove custom continuity explanation text | already covered | none | none |
+| Subscriber frontier evidence | `SubscriberFrontierEvidenceReport` | `crates/core/tests/subscriber_frontier_observations.rs`, family invariants | cite lag/loss/frontier observation contract directly | already covered | none | none |
+| Projection run evidence | `ProjectionRunEvidenceReport` with outcome-bound `input_frontier` | `crates/core/tests/projection_run_evidence_report.rs`, family topology parity tests | reduce custom projection observability glue | already covered | none | none |
+| Read walk evidence | `ReadWalkEvidenceReport` with index-visible boundary owner | `crates/core/tests/read_walk_evidence_report.rs`, family topology parity tests, reopen checks | reduce custom read-observation wrappers | already covered | none | none |
+| Forensic query export (nominal envelope) | `ReadWalkEvidenceReport` + `CanonicalArtifactEnvelope` composition | `crates/core/tests/evidence_report_family.rs`, read-walk suites; `docs/extraction/forensic-query-envelope.md` | cite composition instead of a parallel nominal type | reject / not needed | none | no Downstream query grammar in core |
+| Store resource evidence | `StoreResourceEvidenceReport` (`StoreResourceEnvelope`) over stable diagnostics; path identity via digest only | `crates/core/tests/lane_store_resource_evidence.rs`; `Store::store_resource_evidence_report` | cite store resource report for operator substrate snapshots | implement in batpak core | none | **v1 shipped** — bodies are point-in-time; full equality across reopen is not a contract |
 | Typed event compile-time binding | `EventPayload` + `EventSourced` derives | derive tests + compile-fail UI tests | cite derive contracts instead of duplicating macro law | already covered | none | none |
 | Frontier/watermark runtime boundary | `FrontierView`, `WatermarkSnapshot`, wait APIs | store/frontier tests + evidence family coverage | cite frontier APIs directly for generic boundary mechanics | already covered | none | none |
-| Platform/runtime evidence | `PlatformEvidenceSummary` + `cargo xtask platform ...` | `tests/platform_backend.rs`, platform profile tests, xtask verify lanes | cite platform evidence and admission states as substrate facts | already covered | none | per-target verify still required at deploy target |
-| CanonicalArtifactEnvelope (`batpak::artifact`) | `CanonicalArtifactEnvelope<T>`, `ArtifactVerificationReport`, sorted signature/attestation refs, `ARTIFACT_ENVELOPE_FRAMING_VERSION` | `tests/lane_a_artifact_substrate.rs`; INV-3 + `build.rs` gate for `artifact` noun | cite `batpak::artifact` for body vs envelope identity | implement in batpak core | lane-a-core-primitives | **v1 shipped** — future envelope-schema evolution / multi-version verification needs explicit ADR; `trajectory`/`tenant` remain banned crate-wide on declarations |
-| CompactionReport (`CompactionReportBody`, `Store::compact_with_report`) | structural report: `compaction_id`, sorted source segment ids, bounds, output segment byte hash when performed, findings | `tests/lane_a_store_substrate.rs` (incl. performed merge); lifecycle in `src/store/lifecycle.rs`; snapshot/compaction races in `tests/store_snapshot_compaction.rs` | cite compaction report vs ad-hoc merge prose | implement in batpak core | lane-a-core-primitives | **v1 shipped** — extend fields only via `schema_version` + deterministic ordering rules |
-| IdempotencyLedger (prove-or-build) | key = provisional **event id**; single + batch replay via writer/index; TTL **out of scope** | `tests/lane_a_store_substrate.rs`; `tests/idempotent_batch_crash_recovery.rs` | no separate ledger type unless new invariants demand it | reject / not needed | lane-a-core-primitives | prove path complete; redundant ledger would duplicate index facts unless new semantics (e.g. expiry) gain an owner |
-| RegionBoundQuery (prove-or-build) | public APIs require `Region` / entity / scope / kind / `cursor_guaranteed(&Region)` | `tests/lane_a_store_substrate.rs`; topology parity elsewhere | cite explicit bounds instead of a packaged query value | reject / not needed | lane-a-core-primitives | prove path complete unless cross-cutting evidence needs a nominal `RegionBoundQuery` struct |
-| AttestedRegistry mechanics (`batpak::registry`) | `RegistryRowBody` + `row_hash`; `CanonicalArtifactEnvelope<RegistryRowBody>` verify path; drift + verification reports with `body_hash`; supersession/dup/cycle findings | `tests/lane_b1_registry_substrate.rs` | cite `batpak::registry` for signed-row / lifecycle / supersession substrate | implement in batpak core | none | **B1 v1 shipped** — extend only with `schema_version` bumps + deterministic ordering rules |
-| BackupEnvelope (`batpak::store` backup_envelope) | `BackupManifestBody` + `backup_manifest_body_hash`; `BackupManifestEnvelope` / `BackupEnvelope`; `RestoreProofReportBody` + `restore_proof_report_body_hash`; `verify_backup_manifest_envelope` | `tests/lane_b2_backup_envelope_substrate.rs` | cite store backup envelope for segment digest restore proof | implement in batpak core | none | **B2 v1 shipped** — unsupported manifest `schema_version` is explicit evidence; extend via `schema_version` + sorted segment / finding rules only |
-| StateTransition report/event (`batpak::transition`) | `StateTransitionEvent` + `state_transition_event_digest`; `build_state_transition_report` + `state_transition_report_body_hash`; sorted causes and allowed-edge hygiene findings | `tests/lane_b3_transition_substrate.rs` | cite `batpak::transition` for generic transition evidence | implement in batpak core | none | **B3 v1 shipped** — extend via `schema_version` + sorted cause/finding/edge rules only |
-| Reservation ledger (`batpak::reservation`) | `ReservationTransition` + normalized transition log digest; `simulate_reservation_ledger` → `ReservationLedgerReportBody` + `reservation_ledger_report_body_hash`; `reservation_reconciliation_report` + body hash; sorted `ReservationFinding` invalid-transition reasons | `tests/lane_b4_reservation_substrate.rs` | cite `batpak::reservation` for generic reserve/commit/refund/expire/orphan lane mechanics | implement in batpak core | none | **B4 v1 shipped** — extend via `schema_version` + sorted entry/finding/cause/reconciliation rules only; no policy vocabulary |
-| Audit assertion runner | `cargo xtask evidence-audit` (static anchors + vocabulary) | `tools/integrity/src/evidence_audit.rs`; extend with deeper AST rules as needed | run before Downstream host work when touching evidence bodies | implement in batpak tooling/helper | none | **v1 shipped** — runtime doctrine remains in `tests/evidence_report_family.rs` |
+| Platform/runtime evidence | `PlatformEvidenceSummary` + `cargo xtask platform ...` | `crates/core/tests/platform_backend.rs`, platform profile tests, xtask verify lanes | cite platform evidence and admission states as substrate facts | already covered | none | per-target verify still required at deploy target |
+| CanonicalArtifactEnvelope (`batpak::artifact`) | `CanonicalArtifactEnvelope<T>`, `ArtifactVerificationReport`, sorted signature/attestation refs, `ARTIFACT_ENVELOPE_FRAMING_VERSION` | `crates/core/tests/lane_a_artifact_substrate.rs`; INV-3 + `crates/core/build.rs` gate for `artifact` noun | cite `batpak::artifact` for body vs envelope identity | implement in batpak core | lane-a-core-primitives | **v1 shipped** — future envelope-schema evolution / multi-version verification needs explicit ADR; `trajectory`/`tenant` remain banned crate-wide on declarations |
+| CompactionReport (`CompactionReportBody`, `Store::compact_with_report`) | structural report: `compaction_id`, sorted source segment ids, bounds, output segment byte hash when performed, findings | `crates/core/tests/lane_a_store_substrate.rs` (incl. performed merge); lifecycle in `crates/core/src/store/lifecycle.rs`; snapshot/compaction races in `crates/core/tests/store_snapshot_compaction.rs` | cite compaction report vs ad-hoc merge prose | implement in batpak core | lane-a-core-primitives | **v1 shipped** — extend fields only via `schema_version` + deterministic ordering rules |
+| IdempotencyLedger (prove-or-build) | key = provisional **event id**; single + batch replay via writer/index; TTL **out of scope** | `crates/core/tests/lane_a_store_substrate.rs`; `crates/core/tests/idempotent_batch_crash_recovery.rs` | no separate ledger type unless new invariants demand it | reject / not needed | lane-a-core-primitives | prove path complete; redundant ledger would duplicate index facts unless new semantics (e.g. expiry) gain an owner |
+| RegionBoundQuery (prove-or-build) | public APIs require `Region` / entity / scope / kind / `cursor_guaranteed(&Region)` | `crates/core/tests/lane_a_store_substrate.rs`; topology parity elsewhere | cite explicit bounds instead of a packaged query value | reject / not needed | lane-a-core-primitives | prove path complete unless cross-cutting evidence needs a nominal `RegionBoundQuery` struct |
+| AttestedRegistry mechanics (`batpak::registry`) | `RegistryRowBody` + `row_hash`; `CanonicalArtifactEnvelope<RegistryRowBody>` verify path; drift + verification reports with `body_hash`; supersession/dup/cycle findings | `crates/core/tests/lane_b1_registry_substrate.rs` | cite `batpak::registry` for signed-row / lifecycle / supersession substrate | implement in batpak core | none | **B1 v1 shipped** — extend only with `schema_version` bumps + deterministic ordering rules |
+| BackupEnvelope (`batpak::store` backup_envelope) | `BackupManifestBody` + `backup_manifest_body_hash`; `BackupManifestEnvelope` / `BackupEnvelope`; `RestoreProofReportBody` + `restore_proof_report_body_hash`; `verify_backup_manifest_envelope` | `crates/core/tests/lane_b2_backup_envelope_substrate.rs` | cite store backup envelope for segment digest restore proof | implement in batpak core | none | **B2 v1 shipped** — unsupported manifest `schema_version` is explicit evidence; extend via `schema_version` + sorted segment / finding rules only |
+| StateTransition report/event (`batpak::transition`) | `StateTransitionEvent` + `state_transition_event_digest`; `build_state_transition_report` + `state_transition_report_body_hash`; sorted causes and allowed-edge hygiene findings | `crates/core/tests/lane_b3_transition_substrate.rs` | cite `batpak::transition` for generic transition evidence | implement in batpak core | none | **B3 v1 shipped** — extend via `schema_version` + sorted cause/finding/edge rules only |
+| Reservation ledger (`batpak::reservation`) | `ReservationTransition` + normalized transition log digest; `simulate_reservation_ledger` → `ReservationLedgerReportBody` + `reservation_ledger_report_body_hash`; `reservation_reconciliation_report` + body hash; sorted `ReservationFinding` invalid-transition reasons | `crates/core/tests/lane_b4_reservation_substrate.rs` | cite `batpak::reservation` for generic reserve/commit/refund/expire/orphan lane mechanics | implement in batpak core | none | **B4 v1 shipped** — extend via `schema_version` + sorted entry/finding/cause/reconciliation rules only; no policy vocabulary |
+| Audit assertion runner | `cargo xtask evidence-audit` (static anchors + vocabulary) | `tools/integrity/src/evidence_audit.rs`; extend with deeper AST rules as needed | run before Downstream host work when touching evidence bodies | implement in batpak tooling/helper | none | **v1 shipped** — runtime doctrine remains in `crates/core/tests/evidence_report_family.rs` |
 | Deterministic phase cache | design note only (`docs/extraction/deterministic-phase-cache.md`) | no hot-path duplication observed in xtask/integrity | avoid speculative cache crate surface | reject / not needed | none | revisit only after measured repeated deterministic-phase glue |
 | process/sandbox/supervisor evidence | Downstream Host planning (`docs/extraction/downstream-host-process-boundary-evidence.md`) | N/A in batpak core | keep deployment/runtime orchestration semantics above batpak | implement above batpak | downstream-host | composes `PlatformEvidenceSummary`; no store runner primitive |
 | protocol registry semantics / field classes | protocol-registry planning (`docs/extraction/protocol-registry-semantic-field-classes.md`) | N/A in batpak core | keep protocol/domain semantics above batpak | implement above batpak | protocol-registry | composes `batpak::registry` row mechanics only |

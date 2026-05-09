@@ -1,4 +1,5 @@
 use super::ensure;
+use crate::repo_surface::core_path;
 use crate::shared_checks::public_item_names;
 use anyhow::{Context, Result};
 use std::collections::BTreeSet;
@@ -7,11 +8,11 @@ use std::path::{Path, PathBuf};
 use syn::{Item, UseTree};
 
 pub(super) fn check(repo_root: &Path) -> Result<()> {
-    let store_mod = parse_rust(repo_root.join("src/store/mod.rs"))?;
-    let prelude = parse_rust(repo_root.join("src/prelude.rs"))?;
-    let event_mod = parse_rust(repo_root.join("src/event/mod.rs"))?;
-    let event_sourcing = parse_rust(repo_root.join("src/event/sourcing.rs"))?;
-    let config = parse_rust(repo_root.join("src/store/config.rs"))?;
+    let store_mod = parse_rust(core_path(repo_root, "src/store/mod.rs"))?;
+    let prelude = parse_rust(core_path(repo_root, "src/prelude.rs"))?;
+    let event_mod = parse_rust(core_path(repo_root, "src/event/mod.rs"))?;
+    let event_sourcing = parse_rust(core_path(repo_root, "src/event/sourcing.rs"))?;
+    let config = parse_rust(core_path(repo_root, "src/store/config.rs"))?;
 
     let store_exports = public_use_names(&store_mod);
     ensure(

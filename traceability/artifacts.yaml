@@ -75,222 +75,222 @@
 - id: ART-BUILD-RS
   kind: detector
   paths:
-    - build.rs
+    - crates/core/build.rs
 - id: ART-EVENT-SOURCING
   kind: source
   paths:
-    - src/event/mod.rs
-    - src/event/sourcing.rs
-    - src/event/header.rs
+    - crates/core/src/event/mod.rs
+    - crates/core/src/event/sourcing.rs
+    - crates/core/src/event/header.rs
 - id: ART-DELIVERY-WITNESS-SURFACE
   kind: public-api
   paths:
-    - src/store/delivery/observation.rs
-    - src/store/delivery/cursor.rs
-    - src/store/reactor_typed.rs
-    - src/event/sourcing.rs
+    - crates/core/src/store/delivery/observation.rs
+    - crates/core/src/store/delivery/cursor.rs
+    - crates/core/src/store/reactor_typed.rs
+    - crates/core/src/event/sourcing.rs
     - crates/macros/src/lib.rs
 - id: ART-STORE-MOD
   kind: source
   paths:
-    - src/store/mod.rs
+    - crates/core/src/store/mod.rs
 - id: ART-STORE-CONFIG
   kind: source
   paths:
-    - src/store/config.rs
+    - crates/core/src/store/config.rs
 - id: ART-STORE-PLATFORM
   kind: source
   paths:
-    - src/store/platform/mod.rs
-    - src/store/platform/fs.rs
-    - src/store/platform/sync.rs
-    - src/store/platform/lock.rs
-    - src/store/platform/clock.rs
-    - src/store/platform/mmap.rs
-    - src/store/platform/evidence.rs
-    - src/store/platform/profile.rs
+    - crates/core/src/store/platform/mod.rs
+    - crates/core/src/store/platform/fs.rs
+    - crates/core/src/store/platform/sync.rs
+    - crates/core/src/store/platform/lock.rs
+    - crates/core/src/store/platform/clock.rs
+    - crates/core/src/store/platform/mmap.rs
+    - crates/core/src/store/platform/evidence.rs
+    - crates/core/src/store/platform/profile.rs
 - id: ART-STORE-PLATFORM-FIXTURES
   kind: tests
   paths:
-    - tests/fixtures/platform/linux_basic.profile
-    - tests/fixtures/platform/non_unix_best_effort_lock.profile
-    - tests/fixtures/platform/mmap_unavailable.profile
-    - tests/fixtures/platform/profile_mismatch.profile
+    - crates/core/tests/fixtures/platform/linux_basic.profile
+    - crates/core/tests/fixtures/platform/non_unix_best_effort_lock.profile
+    - crates/core/tests/fixtures/platform/mmap_unavailable.profile
+    - crates/core/tests/fixtures/platform/profile_mismatch.profile
 - id: ART-STORE-ERROR
   kind: source
   paths:
-    - src/store/error.rs
+    - crates/core/src/store/error.rs
 - id: ART-STORE-APPEND
   kind: source
   paths:
-    - src/store/append.rs
+    - crates/core/src/store/append.rs
 - id: ART-STORE-ANCESTRY
   kind: source
   paths:
-    - src/store/ancestry/mod.rs
-    - src/store/ancestry/by_hash.rs
-    - src/store/ancestry/by_clock.rs
+    - crates/core/src/store/ancestry/mod.rs
+    - crates/core/src/store/ancestry/by_hash.rs
+    - crates/core/src/store/ancestry/by_clock.rs
 - id: ART-STORE-PROJECTION
   kind: source
   paths:
-    - src/store/projection/flow/mod.rs
-    - src/store/projection/watch.rs
+    - crates/core/src/store/projection/flow/mod.rs
+    - crates/core/src/store/projection/watch.rs
 - id: ART-STORE-LIFECYCLE
   kind: source
   paths:
-    - src/store/lifecycle.rs
+    - crates/core/src/store/lifecycle.rs
 - id: ART-STORE-DANGEROUS-TEST-HOOKS
   kind: source
   paths:
-    - src/store/test_support.rs
+    - crates/core/src/store/test_support.rs
 - id: ART-STORE-RUNTIME-CONTRACTS
   kind: tests
   paths:
-    - src/store/runtime_contracts.rs
+    - crates/core/src/store/runtime_contracts.rs
 - id: ART-STORE-INDEX
   kind: source
   paths:
-    - src/store/index/mod.rs
+    - crates/core/src/store/index/mod.rs
 - id: ART-STORE-WRITER
   kind: source
   paths:
-    - src/store/write/fanout.rs
-    - src/store/write/writer.rs
-    - src/store/write/writer/append.rs
-    - src/store/write/writer/batch.rs
-    - src/store/write/writer/fence_runtime.rs
-    - src/store/write/writer/publish.rs
-    - src/store/write/writer/runtime.rs
-    - src/store/write/staging.rs
-    - src/store/write/control/mod.rs
-    - src/store/write/control/ticket.rs
-    - src/store/write/control/outbox.rs
-    - src/store/write/control/fence.rs
-    - src/store/write/control/submission.rs
-    - src/store/write/control/store_bridge.rs
+    - crates/core/src/store/write/fanout.rs
+    - crates/core/src/store/write/writer.rs
+    - crates/core/src/store/write/writer/append.rs
+    - crates/core/src/store/write/writer/batch.rs
+    - crates/core/src/store/write/writer/fence_runtime.rs
+    - crates/core/src/store/write/writer/publish.rs
+    - crates/core/src/store/write/writer/runtime.rs
+    - crates/core/src/store/write/staging.rs
+    - crates/core/src/store/write/control/mod.rs
+    - crates/core/src/store/write/control/ticket.rs
+    - crates/core/src/store/write/control/outbox.rs
+    - crates/core/src/store/write/control/fence.rs
+    - crates/core/src/store/write/control/submission.rs
+    - crates/core/src/store/write/control/store_bridge.rs
 - id: ART-FRONTIER-BOOTSTRAP
   kind: source
   paths:
-    - src/store/mod.rs
-    - src/store/cold_start/mod.rs
+    - crates/core/src/store/mod.rs
+    - crates/core/src/store/cold_start/mod.rs
 - id: ART-FRONTIER-FAULT-INJECTION
   kind: source
   paths:
-    - src/store/fault.rs
+    - crates/core/src/store/fault.rs
 - id: ART-FRONTIER-PROJECTION-REGISTRY
   kind: source
   paths:
-    - src/store/projection/registry.rs
+    - crates/core/src/store/projection/registry.rs
 - id: ART-FRONTIER-TYPES
   kind: source
   paths:
-    - src/store/stats.rs
+    - crates/core/src/store/stats.rs
 - id: ART-FRONTIER-WATERMARK-STATE
   kind: source
   paths:
-    - src/store/write/writer.rs
+    - crates/core/src/store/write/writer.rs
 - id: ART-FRONTIER-WAIT-API
   kind: source
   paths:
-    - src/store/mod.rs
-    - src/store/write/writer.rs
+    - crates/core/src/store/mod.rs
+    - crates/core/src/store/write/writer.rs
 - id: ART-FRONTIER-APPEND-GATE
   kind: public-api
   paths:
-    - src/store/append.rs
-    - src/store/gate.rs
-    - src/store/mod.rs
+    - crates/core/src/store/append.rs
+    - crates/core/src/store/gate.rs
+    - crates/core/src/store/mod.rs
 - id: ART-STORE-REBUILD
   kind: source
   paths:
-    - src/store/cold_start/mod.rs
-    - src/store/cold_start/rebuild.rs
+    - crates/core/src/store/cold_start/mod.rs
+    - crates/core/src/store/cold_start/rebuild.rs
 - id: ART-STORE-MMAP
   kind: source
   paths:
-    - src/store/cold_start/mmap.rs
+    - crates/core/src/store/cold_start/mmap.rs
 - id: ART-STORE-HIDDEN-RANGES
   kind: source
   paths:
-    - src/store/hidden_ranges.rs
+    - crates/core/src/store/hidden_ranges.rs
 - id: ART-STORE-SEGMENT
   kind: source
   paths:
-    - src/store/segment/mod.rs
-    - src/store/segment/scan/mod.rs
+    - crates/core/src/store/segment/mod.rs
+    - crates/core/src/store/segment/scan/mod.rs
 - id: ART-PROJECTION
   kind: source
   paths:
-    - src/store/projection/mod.rs
+    - crates/core/src/store/projection/mod.rs
 - id: ART-GUARD-RECEIPT
   kind: source
   paths:
-    - src/guard/receipt.rs
+    - crates/core/src/guard/receipt.rs
 - id: ART-TYPESTATE-TESTS
   kind: tests
   paths:
-    - tests/typestate_safety.rs
-    - tests/ui/forge_receipt.rs
+    - crates/core/tests/typestate_safety.rs
+    - crates/core/tests/ui/forge_receipt.rs
 - id: ART-PROJECTION-TESTS
   kind: tests
   paths:
-    - tests/projection_cache.rs
-    - tests/store_projection_wiring.rs
-    - tests/raw_projection_mode.rs
+    - crates/core/tests/projection_cache.rs
+    - crates/core/tests/store_projection_wiring.rs
+    - crates/core/tests/raw_projection_mode.rs
 - id: ART-STORE-ADVANCED
   kind: tests
   paths:
-    - tests/store_advanced.rs
-    - tests/store_restart_policy.rs
+    - crates/core/tests/store_advanced.rs
+    - crates/core/tests/store_restart_policy.rs
 - id: ART-STORE-INTEGRATION
   kind: tests
   paths:
-    - tests/store_integration.rs
+    - crates/core/tests/store_integration.rs
 - id: ART-STORE-PROPERTIES
   kind: tests
   paths:
-    - tests/store_properties.rs
+    - crates/core/tests/store_properties.rs
 - id: ART-OBSERVABILITY-TESTS
   kind: tests
   paths:
-    - tests/observability_flows.rs
+    - crates/core/tests/observability_flows.rs
 - id: ART-DELIVERY-WITNESS-TESTS
   kind: tests
   paths:
-    - tests/cursor_at_least_once_witness.rs
+    - crates/core/tests/cursor_at_least_once_witness.rs
 - id: ART-FRONTIER-CHAOS-TESTS
   kind: tests
   paths:
-    - tests/durable_frontier_chaos.rs
+    - crates/core/tests/durable_frontier_chaos.rs
 - id: ART-FRONTIER-SEMANTICS-TESTS
   kind: tests
   paths:
-    - tests/durable_frontier_semantics.rs
+    - crates/core/tests/durable_frontier_semantics.rs
 - id: ART-FRONTIER-WAIT-TESTS
   kind: tests
   paths:
-    - tests/durable_frontier_waits.rs
+    - crates/core/tests/durable_frontier_waits.rs
 - id: ART-CHAOS-DM-FLAKEY
   kind: tests
   paths:
-    - tests/chaos/dm_flakey.rs
+    - crates/core/tests/chaos/dm_flakey.rs
 - id: ART-CHAOS-HARNESS
   kind: tests
   paths:
-    - tests/chaos/
+    - crates/core/tests/chaos/
 - id: ART-CHAOS-BATCH-COMMIT-WRITTEN
   kind: tests
   paths:
-    - tests/chaos/scenarios/batch_commit_written.rs
+    - crates/core/tests/chaos/scenarios/batch_commit_written.rs
 - id: ART-REPLAY-TESTS
   kind: tests
   paths:
-    - tests/replay_consistency.rs
-    - tests/raw_projection_mode.rs
+    - crates/core/tests/replay_consistency.rs
+    - crates/core/tests/raw_projection_mode.rs
 - id: ART-DETERMINISTIC-CONCURRENCY-TESTS
   kind: tests
   paths:
-    - tests/deterministic_concurrency.rs
+    - crates/core/tests/deterministic_concurrency.rs
 - id: ART-ADR-SYNC
   kind: adr
   paths:
@@ -334,69 +334,69 @@
 - id: ART-STORE-INTERNER
   kind: source
   paths:
-    - src/store/index/interner.rs
+    - crates/core/src/store/index/interner.rs
 - id: ART-STORE-COLUMNAR
   kind: source
   paths:
-    - src/store/index/columnar.rs
+    - crates/core/src/store/index/columnar.rs
 - id: ART-STORE-SIDX
   kind: source
   paths:
-    - src/store/segment/sidx.rs
+    - crates/core/src/store/segment/sidx.rs
 - id: ART-STORE-CHECKPOINT
   kind: source
   paths:
-    - src/store/cold_start/checkpoint.rs
+    - crates/core/src/store/cold_start/checkpoint.rs
 - id: ART-STORE-SCAN
   kind: source
   paths:
-    - src/store/segment/scan/mod.rs
+    - crates/core/src/store/segment/scan/mod.rs
 - id: ART-UNIFIED-TESTS
   kind: tests
   paths:
-    - tests/support/red_kinds.rs
-    - tests/support/red_kind_b.rs
-    - tests/support/red_test_coord.rs
-    - tests/support/red_counters.rs
-    - tests/support/red_versioned_counters.rs
-    - tests/unified_cold_start_red.rs
-    - tests/unified_config_red.rs
-    - tests/unified_group_commit_red.rs
-    - tests/unified_projection_red.rs
-    - tests/unified_reader_red.rs
-    - tests/unified_topology_red.rs
-    - tests/unified_watch_red.rs
-    - tests/index_topology.rs
+    - crates/core/tests/support/red_kinds.rs
+    - crates/core/tests/support/red_kind_b.rs
+    - crates/core/tests/support/red_test_coord.rs
+    - crates/core/tests/support/red_counters.rs
+    - crates/core/tests/support/red_versioned_counters.rs
+    - crates/core/tests/unified_cold_start_red.rs
+    - crates/core/tests/unified_config_red.rs
+    - crates/core/tests/unified_group_commit_red.rs
+    - crates/core/tests/unified_projection_red.rs
+    - crates/core/tests/unified_reader_red.rs
+    - crates/core/tests/unified_topology_red.rs
+    - crates/core/tests/unified_watch_red.rs
+    - crates/core/tests/index_topology.rs
 - id: ART-CONTROL-PLANE-TESTS
   kind: tests
   paths:
-    - tests/control_plane_surface.rs
-    - tests/mmap_cold_start.rs
-    - tests/writer_command_flow.rs
+    - crates/core/tests/control_plane_surface.rs
+    - crates/core/tests/mmap_cold_start.rs
+    - crates/core/tests/writer_command_flow.rs
 - id: ART-GROUP-COMMIT-TESTS
   kind: tests
   paths:
-    - tests/group_commit_crash.rs
+    - crates/core/tests/group_commit_crash.rs
 - id: ART-STORE-FAULT
   kind: source
   paths:
-    - src/store/fault.rs
+    - crates/core/src/store/fault.rs
 - id: ART-BATCH-TESTS
   kind: tests
   paths:
-    - tests/atomic_batch.rs
+    - crates/core/tests/atomic_batch.rs
 - id: ART-BATCH-STAGING-REGRESSION
   kind: tests
   paths:
-    - tests/batch_staging_regression.rs
+    - crates/core/tests/batch_staging_regression.rs
 - id: ART-DAG-POSITION-HINT-TESTS
   kind: tests
   paths:
-    - tests/dag_position_hint.rs
+    - crates/core/tests/dag_position_hint.rs
 - id: ART-SUBSCRIPTION-TESTS
   kind: tests
   paths:
-    - tests/subscription_ops.rs
+    - crates/core/tests/subscription_ops.rs
 - id: ART-DX-DOCS
   kind: docs
   paths:
@@ -409,26 +409,26 @@
 - id: ART-EXAMPLES
   kind: examples
   paths:
-    - examples/batch_append.rs
-    - examples/chat_room.rs
-    - examples/cross_crate_payloads.rs
-    - examples/cursor_worker.rs
-    - examples/dungeon_typestate.rs
-    - examples/event_sourced_counter.rs
-    - examples/append_with_gate.rs
-    - examples/lifecycle_observer.rs
-    - examples/outbox.rs
-    - examples/policy_gates.rs
-    - examples/quickstart.rs
-    - examples/raw_projection_counter.rs
-    - examples/raw_projection_counter_derived.rs
-    - examples/read_only.rs
-    - examples/signed_receipts.rs
-    - examples/submit_pipeline.rs
-    - examples/typed_reactor.rs
-    - examples/typed_reactor_multi.rs
-    - examples/visibility_fence.rs
-    - examples/wait_for_durable.rs
+    - crates/core/examples/batch_append.rs
+    - crates/core/examples/chat_room.rs
+    - crates/core/examples/cross_crate_payloads.rs
+    - crates/core/examples/cursor_worker.rs
+    - crates/core/examples/dungeon_typestate.rs
+    - crates/core/examples/event_sourced_counter.rs
+    - crates/core/examples/append_with_gate.rs
+    - crates/core/examples/lifecycle_observer.rs
+    - crates/core/examples/outbox.rs
+    - crates/core/examples/policy_gates.rs
+    - crates/core/examples/quickstart.rs
+    - crates/core/examples/raw_projection_counter.rs
+    - crates/core/examples/raw_projection_counter_derived.rs
+    - crates/core/examples/read_only.rs
+    - crates/core/examples/signed_receipts.rs
+    - crates/core/examples/submit_pipeline.rs
+    - crates/core/examples/typed_reactor.rs
+    - crates/core/examples/typed_reactor_multi.rs
+    - crates/core/examples/visibility_fence.rs
+    - crates/core/examples/wait_for_durable.rs
 - id: ART-MACROS
   kind: source
   paths:
@@ -437,4 +437,4 @@
 - id: ART-TESTS
   kind: tests
   paths:
-    - tests
+    - crates/core/tests

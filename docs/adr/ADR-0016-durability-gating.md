@@ -82,4 +82,4 @@ guarantee can call the corresponding `wait_for_*` method with a longer timeout.
   `INV-FRONTIER-OPEN-MONOTONIC`, `INV-FRONTIER-WAIT-MONOTONIC`
 - `traceability/flows.yaml`: `FLOW-FRONTIER-WAIT-DURABLE`,
   `FLOW-FRONTIER-WAIT-APPLIED`, `FLOW-FRONTIER-WAIT-VISIBLE`
-- `tests/durable_frontier_waits.rs`
+- `crates/core/tests/durable_frontier_waits.rs`

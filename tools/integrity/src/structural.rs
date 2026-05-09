@@ -1,4 +1,7 @@
-use crate::repo_surface::{ensure, relative, repo_root, rust_files, tracked_repo_files};
+use crate::repo_surface::{
+    core_benches_root, core_examples_root, core_src_root, core_tests_root, ensure, relative,
+    repo_root, rust_files, tracked_repo_files,
+};
 use crate::shared_checks::{
     collect_dead_code_silencer_sites, line_carries_justification,
     load_dead_code_silencer_allowlist, load_known_invariants,
@@ -24,15 +27,15 @@ pub(crate) fn run() -> Result<()> {
 
 fn check_no_dead_code_silencers(repo_root: &Path) -> Result<()> {
     let allowlisted = load_dead_code_silencer_allowlist(repo_root).map_err(|err| anyhow!(err))?;
-    let mut paths = rust_files(&repo_root.join("src"));
+    let mut paths = rust_files(&core_src_root(repo_root));
     paths.extend(rust_files(&repo_root.join("tools/xtask/src")));
     paths.extend(rust_files(&repo_root.join("tools/integrity/src")));
     paths.extend(rust_files(&repo_root.join("crates/macros/src")));
     paths.extend(rust_files(&repo_root.join("crates/macros-support/src")));
-    paths.extend(rust_files(&repo_root.join("tests")));
-    paths.extend(rust_files(&repo_root.join("examples")));
-    paths.extend(rust_files(&repo_root.join("benches")));
-    paths.push(repo_root.join("build.rs"));
+    paths.extend(rust_files(&core_tests_root(repo_root)));
+    paths.extend(rust_files(&core_examples_root(repo_root)));
+    paths.extend(rust_files(&core_benches_root(repo_root)));
+    paths.push(repo_root.join("crates/core/build.rs"));
     for path in paths {
         let content = fs::read_to_string(&path)?;
         let sites = collect_dead_code_silencer_sites(&content)
@@ -61,15 +64,15 @@ fn check_no_dead_code_silencers(repo_root: &Path) -> Result<()> {
 
 fn check_allow_justifications(repo_root: &Path) -> Result<()> {
     let known_invariants = load_known_invariants(repo_root).map_err(|err| anyhow!(err))?;
-    let mut paths = rust_files(&repo_root.join("src"));
+    let mut paths = rust_files(&core_src_root(repo_root));
     paths.extend(rust_files(&repo_root.join("tools/xtask/src")));
     paths.extend(rust_files(&repo_root.join("tools/integrity/src")));
     paths.extend(rust_files(&repo_root.join("crates/macros/src")));
     paths.extend(rust_files(&repo_root.join("crates/macros-support/src")));
-    paths.extend(rust_files(&repo_root.join("tests")));
-    paths.extend(rust_files(&repo_root.join("examples")));
-    paths.extend(rust_files(&repo_root.join("benches")));
-    paths.push(repo_root.join("build.rs"));
+    paths.extend(rust_files(&core_tests_root(repo_root)));
+    paths.extend(rust_files(&core_examples_root(repo_root)));
+    paths.extend(rust_files(&core_benches_root(repo_root)));
+    paths.push(repo_root.join("crates/core/build.rs"));
     for path in paths {
         let content = fs::read_to_string(&path)?;
         let lines: Vec<&str> = content.lines().collect();

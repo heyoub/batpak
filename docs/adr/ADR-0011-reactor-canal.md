@@ -13,7 +13,7 @@ binding, the shipped typed-reactor surface is `TypedReactive<T>` +
 Before designing the public typed-reactor surface, the question was:
 **which canal feeds a typed reactor?**
 
-The raw `react_loop` (`src/store/mod.rs:448-487`) rides an internal
+The raw `react_loop` (`crates/core/src/store/mod.rs:448-487`) rides an internal
 fanout list (`reactor_subscribers: FanoutList<CommittedEventEnvelope>`) that
 broadcasts committed events via a non-blocking `try_send` loop — the canal
 is **lossy by construction**. A slow reactor's bounded channel fills; the
@@ -31,18 +31,18 @@ shipped typed-reactor implementation.
 
 ## Current lossy fanout semantics
 
-**Files cited**: `src/store/write/fanout.rs`, `src/store/mod.rs`, `src/store/write/writer/publish.rs`.
+**Files cited**: `crates/core/src/store/write/fanout.rs`, `crates/core/src/store/mod.rs`, `crates/core/src/store/write/writer/publish.rs`.
 
 - **Delivery guarantee.** `FanoutList::broadcast` calls `sender.try_send(value.clone())`. Result handling: `Ok` or `Full` → retain sender; `Disconnected` → prune. Consequence: when a subscriber's bounded channel is full, the message is dropped at the writer side with no signal to the subscriber. Lossy.
 - **Backpressure.** None. The writer never blocks on reactor capacity (by design — "NEVER use blocking send() — one slow subscriber must not block the writer"). Reactor latency is completely decoupled from writer throughput at the cost of drop-on-full.
-- **Error surface.** None. `react_loop` calls `reactor.react(...)` which returns `Vec<(Coordinate, EventKind, P)>` — no `Result`. Any failure in `store.append_reaction(...)` emits `tracing::warn!` and moves on (`src/store/mod.rs:481`). The calling thread sees no error.
+- **Error surface.** None. `react_loop` calls `reactor.react(...)` which returns `Vec<(Coordinate, EventKind, P)>` — no `Result`. Any failure in `store.append_reaction(...)` emits `tracing::warn!` and moves on (`crates/core/src/store/mod.rs:481`). The calling thread sees no error.
 - **Restart / checkpoint.** None. A reactor-thread panic causes the thread to die. No supervisor, no retry, no checkpoint, no resume. Across store restart, the fanout subscription is gone entirely and any missed events are gone with it.
 - **Writer-throughput coupling.** Zero (by `try_send`).
 - **Decode cost locality.** `CommittedEventEnvelope` in `fanout.rs` carries both `Notification` (summary) and a pre-decoded `StoredEvent<serde_json::Value>`. The writer builds this envelope lazily only if `reactor_subscribers.has_subscribers()` in `writer/publish.rs`, so subscribed reactors pay a per-commit `serde_json::Value` allocation cost but save the re-read + decode on the reactor side.
 
 ## Cursor semantics
 
-**Files cited**: `src/store/delivery/cursor.rs:1-229`, `src/store/mod.rs:858-862`.
+**Files cited**: `crates/core/src/store/delivery/cursor.rs:1-229`, `crates/core/src/store/mod.rs:858-862`.
 
 - **Delivery guarantee.** Pull-based from the in-memory index. `Cursor::poll_batch(max)` at `cursor.rs:42-57` queries by `(region, position, started)` via `StoreIndex::query_hits_after` and returns up to `max` matching hits. The cursor advances only when events are consumed. "Guaranteed" here means at-least-once within process lifetime, and at-least-once across process restart when a `checkpoint_id` is set on `CursorWorkerConfig`.
 - **Backpressure.** Natural — the reactor pulls. A slow reactor simply polls less frequently. The writer's commit-to-index visibility path is untouched.
@@ -147,7 +147,7 @@ chapters:
 
 ## Cross-reference
 
-- Raw surface: `src/store/mod.rs:448-487` (`react_loop`), `src/event/sourcing.rs:129-132` (`Reactive<P>`)
-- Typed surface target: `src/store/reactor_typed.rs` (shipped in Dispatch Chapter T4b)
-- Cursor primitives: `src/store/delivery/cursor.rs:8-229`
-- Decode seam: ADR-0010 + Dispatch Chapter T1 (`src/event/decode.rs`)
+- Raw surface: `crates/core/src/store/mod.rs:448-487` (`react_loop`), `crates/core/src/event/sourcing.rs:129-132` (`Reactive<P>`)
+- Typed surface target: `crates/core/src/store/reactor_typed.rs` (shipped in Dispatch Chapter T4b)
+- Cursor primitives: `crates/core/src/store/delivery/cursor.rs:8-229`
+- Decode seam: ADR-0010 + Dispatch Chapter T1 (`crates/core/src/event/decode.rs`)

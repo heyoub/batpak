@@ -13,9 +13,9 @@ instead of pretending.
 
 - Harness pattern: `Fault-Injection Harness`
 - Location:
-  - `tests/derive_eventpayload_errors.rs`
-  - `tests/derive_event_sourced_errors.rs`
-  - `tests/derive_multi_event_reactor_errors.rs`
+  - `crates/core/tests/derive_eventpayload_errors.rs`
+  - `crates/core/tests/derive_event_sourced_errors.rs`
+  - `crates/core/tests/derive_multi_event_reactor_errors.rs`
 - Command used:
   - `cargo test --test derive_eventpayload_errors`
   - `cargo test --test derive_event_sourced_errors`
@@ -30,8 +30,8 @@ instead of pretending.
 
 - Harness pattern: `Fault-Injection Harness`
 - Location:
-  - `tests/chaos_testing.rs`
-  - `tests/cold_start_recovery.rs`
+  - `crates/core/tests/chaos_testing.rs`
+  - `crates/core/tests/cold_start_recovery.rs`
 - Command used:
   - `cargo test --test chaos_testing --all-features`
   - `cargo test --test cold_start_recovery`
@@ -45,14 +45,14 @@ instead of pretending.
 
 - Harness pattern: `Fault-Injection Harness`
 - Location:
-  - `tests/segment_scan_hardening.rs`
+  - `crates/core/tests/segment_scan_hardening.rs`
 - Command used:
   - `cargo test --test segment_scan_hardening`
   - `cargo test --test segment_scan_hardening corruption_inside_staged_batch_discards_the_whole_batch`
   - `cargo test --test segment_scan_hardening sidx_footer_entry_count_disagreement_falls_back_to_frame_scan`
   - `cargo test --test segment_scan_hardening valid_crc_unreadable_frame_metadata_skips_only_that_frame`
   - `cargo test --test segment_scan_hardening orphan_commit_marker_is_ignored_without_stopping_scan`
-- Line/function coverage delta: targeted rise in `src/store/segment/scan.rs`; exact JSON delta not recorded
+- Line/function coverage delta: targeted rise in `crates/core/src/store/segment/scan.rs`; exact JSON delta not recorded
 - Mutation delta: unmeasured
 - Covered tests:
   - `invalid_batch_begin_count_fails_closed_on_reopen` pins `BEGIN` markers
@@ -78,8 +78,8 @@ instead of pretending.
 
 - Harness pattern: `Fault-Injection Harness`
 - Location:
-  - `tests/durable_frontier_semantics.rs`
-  - `tests/durable_frontier_chaos.rs`
+  - `crates/core/tests/durable_frontier_semantics.rs`
+  - `crates/core/tests/durable_frontier_chaos.rs`
 - Command used:
   - `cargo test --test durable_frontier_semantics --features dangerous-test-hooks`
   - `cargo test --test durable_frontier_chaos --features dangerous-test-hooks`
@@ -93,7 +93,7 @@ instead of pretending.
     intentionally ignored because an in-process writer panic leaves the complete
     unsynced frame recoverable from host page cache; it is superseded by the
     dm-flakey block-layer proof in
-    `tests/chaos/scenarios/single_append_written.rs`
+    `crates/core/tests/chaos/scenarios/single_append_written.rs`
   - the public frontier exposes observation truth, not durability-gated read or
     wait semantics; those are later policy work
 
@@ -101,7 +101,7 @@ instead of pretending.
 
 - Harness pattern: `Fault-Injection Harness`
 - Location:
-  - `tests/durable_frontier_semantics.rs`
+  - `crates/core/tests/durable_frontier_semantics.rs`
 - Command used:
   - `cargo test --test durable_frontier_semantics --features dangerous-test-hooks`
 - Line/function coverage delta: Phase 1A adds explicit-close bootstrap coverage;
@@ -142,7 +142,7 @@ instead of pretending.
 
 - Harness pattern: `State-Machine Harness`
 - Location:
-  - `tests/platform_backend.rs`
+  - `crates/core/tests/platform_backend.rs`
 - Command used:
   - `cargo test --test platform_backend platform_profile_match_allows_open_and_mismatch_fails_before_lifecycle`
   - `cargo test platform_profile_mismatch_fails_closed`
@@ -154,14 +154,14 @@ instead of pretending.
   - profile mismatch rejects store open before writer spawn or
     `SYSTEM_OPEN_COMPLETED` lifecycle append.
 - Remaining known blind spots:
-  - profile command and build.rs env-var validation are covered by structural
+  - profile command and crates/core/build.rs env-var validation are covered by structural
     and compile checks, but not yet by mutation-specific fixtures.
 
 ### Invariant: Durable frontier wait API surfaces honest blocking semantics
 
 - Harness pattern: `State-Machine Harness`
 - Location:
-  - `tests/durable_frontier_waits.rs`
+  - `crates/core/tests/durable_frontier_waits.rs`
 - Command used:
   - `cargo test --test durable_frontier_waits --features dangerous-test-hooks`
 - Line/function coverage delta: not measured; Phase 2.1 adds durable wait API
@@ -231,9 +231,9 @@ instead of pretending.
 
 - Harness pattern: `Fault-Injection Harness`
 - Location:
-  - `tests/chaos.rs`
-  - `tests/chaos/dm_flakey.rs`
-  - `tests/chaos/scenarios/smoke.rs`
+  - `crates/core/tests/chaos.rs`
+  - `crates/core/tests/chaos/dm_flakey.rs`
+  - `crates/core/tests/chaos/scenarios/smoke.rs`
 - Command used:
   - `BATPAK_RUN_CHAOS=1 cargo test --features dangerous-test-hooks --test chaos smoke -- --test-threads=1`
 - Line/function coverage delta: not measured; this scaffold proves harness
@@ -253,10 +253,10 @@ instead of pretending.
 
 - Harness pattern: `Fault-Injection Harness`
 - Location:
-  - `tests/chaos.rs`
-  - `tests/chaos/dm_flakey.rs`
-  - `tests/chaos/scenarios/single_append_written.rs`
-  - `tests/chaos/scenarios/batch_commit_written.rs`
+  - `crates/core/tests/chaos.rs`
+  - `crates/core/tests/chaos/dm_flakey.rs`
+  - `crates/core/tests/chaos/scenarios/single_append_written.rs`
+  - `crates/core/tests/chaos/scenarios/batch_commit_written.rs`
 - Command used:
   - `BATPAK_RUN_CHAOS=1 cargo test --features dangerous-test-hooks --test chaos -- --test-threads=1`
 - Activation gate:
@@ -316,8 +316,8 @@ instead of pretending.
 
 - Harness pattern: `Equivalence Harness`
 - Location:
-  - `tests/derive_event_sourced_parity.rs`
-  - `tests/derive_event_sourced_generic.rs`
+  - `crates/core/tests/derive_event_sourced_parity.rs`
+  - `crates/core/tests/derive_event_sourced_generic.rs`
 - Command used:
   - `cargo test --test derive_event_sourced_parity`
   - `cargo test --test derive_event_sourced_generic`
@@ -330,8 +330,8 @@ instead of pretending.
 
 - Harness pattern: `Equivalence Harness`
 - Location:
-  - `tests/replay_consistency.rs`
-  - `tests/mmap_cold_start.rs`
+  - `crates/core/tests/replay_consistency.rs`
+  - `crates/core/tests/mmap_cold_start.rs`
 - Command used:
   - `cargo test --test replay_consistency`
   - `cargo test --test mmap_cold_start`
@@ -345,13 +345,13 @@ instead of pretending.
 
 - Harness pattern: `Equivalence Harness`
 - Location:
-  - `tests/raw_projection_mode.rs`
+  - `crates/core/tests/raw_projection_mode.rs`
 - Command used:
   - `cargo test --test raw_projection_mode`
   - `cargo test --test raw_projection_mode projection_flow_maybe_stale_keeps_replay_lanes_equivalent`
   - `cargo test --test raw_projection_mode projection_flow_incremental_group_local_keeps_lanes_equivalent`
   - `cargo test --test raw_projection_mode projection_flow_incremental_external_cache_keeps_lanes_equivalent`
-- Line/function coverage delta: targeted rise in `src/store/projection/flow.rs`
+- Line/function coverage delta: targeted rise in `crates/core/src/store/projection/flow.rs`
     and watcher-adjacent paths; exact JSON delta not recorded
 - Mutation delta: unmeasured
 - Remaining known blind spots:
@@ -367,7 +367,7 @@ instead of pretending.
 
 - Harness pattern: `Fault-Injection Harness`
 - Location:
-  - `tests/projection_cache.rs`
+  - `crates/core/tests/projection_cache.rs`
 - Command used:
   - `cargo test --test projection_cache freshness_maybe_stale_replays_when_stale_cache_bytes_are_corrupt`
   - `cargo test --test projection_cache freshness_maybe_stale_replays_when_fresh_cache_bytes_are_corrupt`
@@ -377,7 +377,7 @@ instead of pretending.
   - `cargo test --test projection_cache consistent_replays_when_reopened_native_cache_row_is_stale`
   - `cargo test --test projection_cache maybe_stale_replays_when_cache_row_has_valid_metadata_but_empty_payload`
   - `cargo test --test projection_cache consistent_replays_when_cache_row_has_valid_metadata_but_truncated_payload`
-- Line/function coverage delta: targeted rise in `src/store/projection/flow.rs`; exact JSON delta not recorded
+- Line/function coverage delta: targeted rise in `crates/core/src/store/projection/flow.rs`; exact JSON delta not recorded
 - Mutation delta: unmeasured
 - Remaining known blind spots:
   - this seam now proves that stale-but-young corrupt rows, fresh-but-corrupt rows, cache-get failures, and exact age-boundary rows all fall back to honest replay under `Freshness::MaybeStale`
@@ -390,7 +390,7 @@ instead of pretending.
 
 - Harness pattern: `Property Harness`
 - Location:
-  - `tests/fuzz_chaos_feedback.rs`
+  - `crates/core/tests/fuzz_chaos_feedback.rs`
 - Command used:
   - `cargo test --test fuzz_chaos_feedback --all-features --release`
 - Line/function coverage delta: unmeasured
@@ -403,18 +403,18 @@ instead of pretending.
 
 - Harness pattern: `Property Harness`
 - Location:
-  - `tests/store_error_contract.rs`
-  - `src/store/error.rs`
+  - `crates/core/tests/store_error_contract.rs`
+  - `crates/core/src/store/error.rs`
 - Command used:
   - `cargo test --test store_error_contract`
   - `cargo test store::error::tests`
-- Line/function coverage delta: targeted rise in `src/store/error.rs`; exact JSON delta not recorded
+- Line/function coverage delta: targeted rise in `crates/core/src/store/error.rs`; exact JSON delta not recorded
 - Mutation delta: unmeasured
 - Covered tests:
   - `store_error_contract_table_stays_stable` now includes direct public
     contract rows for helper-shaped `CorruptSegment` construction and
     fail-closed `InvariantViolation` display/classification.
-  - `src/store/error.rs::tests::*_helper_*` directly exercises every
+  - `crates/core/src/store/error.rs::tests::*_helper_*` directly exercises every
     `pub(crate)` `StoreError` helper constructor, including source-bearing
     batch/cache/serialization helpers and segment-corruption helpers.
 - Remaining known blind spots:
@@ -426,7 +426,7 @@ instead of pretending.
 
 - Harness pattern: `Property Harness`
 - Location:
-  - `tests/perf_gates.rs`
+  - `crates/core/tests/perf_gates.rs`
 - Command used:
   - `cargo xtask perf-gates`
 - Line/function coverage delta: not applicable
@@ -439,13 +439,13 @@ instead of pretending.
 
 - Harness pattern: `Property Harness`
 - Location:
-  - `tests/event_payload_registry_policy.rs`
-  - `tests/event_payload_registry_downstream.rs`
+  - `crates/core/tests/event_payload_registry_policy.rs`
+  - `crates/core/tests/event_payload_registry_downstream.rs`
 - Command used:
   - `cargo test --test event_payload_registry_policy`
   - `cargo test --test event_payload_registry_downstream`
-- Line/function coverage delta: targeted rise in `src/event/payload.rs`,
-  `src/store/config.rs`, and `src/store/mod.rs`; exact JSON delta not recorded
+- Line/function coverage delta: targeted rise in `crates/core/src/event/payload.rs`,
+  `crates/core/src/store/config.rs`, and `crates/core/src/store/mod.rs`; exact JSON delta not recorded
 - Mutation delta:
   - `event-payload-registry-validator` critical seam is registered at the 85%
     smoke threshold for collision detection, open-time warn/fail-fast policy,
@@ -492,13 +492,13 @@ instead of pretending.
 
 - Harness pattern: `Property Harness`
 - Location:
-  - `tests/evidence_report_family.rs`
-  - `tests/lane_store_resource_evidence.rs`
-  - `tests/schema_snapshot_report.rs`
-  - `tests/chain_walk_evidence_report.rs`
-  - `tests/subscriber_frontier_observations.rs`
-  - `tests/projection_run_evidence_report.rs`
-  - `tests/read_walk_evidence_report.rs`
+  - `crates/core/tests/evidence_report_family.rs`
+  - `crates/core/tests/lane_store_resource_evidence.rs`
+  - `crates/core/tests/schema_snapshot_report.rs`
+  - `crates/core/tests/chain_walk_evidence_report.rs`
+  - `crates/core/tests/subscriber_frontier_observations.rs`
+  - `crates/core/tests/projection_run_evidence_report.rs`
+  - `crates/core/tests/read_walk_evidence_report.rs`
 - Command used:
   - `cargo test --test evidence_report_family`
   - `cargo test --test lane_store_resource_evidence`
@@ -528,16 +528,16 @@ instead of pretending.
 
 - Harness pattern: `Property Harness`
 - Location:
-  - `tests/lane_a_artifact_substrate.rs`
-  - `tests/lane_a_store_substrate.rs`
-  - `tests/idempotent_batch_crash_recovery.rs` (close+reopen batch idempotency)
-  - `src/artifact.rs`
-  - `src/store/compaction_report.rs`
+  - `crates/core/tests/lane_a_artifact_substrate.rs`
+  - `crates/core/tests/lane_a_store_substrate.rs`
+  - `crates/core/tests/idempotent_batch_crash_recovery.rs` (close+reopen batch idempotency)
+  - `crates/core/src/artifact.rs`
+  - `crates/core/src/store/compaction_report.rs`
 - Command used:
   - `cargo test --test lane_a_artifact_substrate`
   - `cargo test --test lane_a_store_substrate`
-- Line/function coverage delta: targeted rise in `src/artifact.rs` and
-  `src/store/compaction_report.rs`; exact JSON delta not recorded
+- Line/function coverage delta: targeted rise in `crates/core/src/artifact.rs` and
+  `crates/core/src/store/compaction_report.rs`; exact JSON delta not recorded
 - Mutation delta: unmeasured
 - Covered tests:
   - body digest stable while artifact envelope metadata/signatures/attestations move
@@ -547,11 +547,11 @@ instead of pretending.
     and schema echo; `compaction_id` excludes post-hoc findings; `PreSwapRollback`
     structural finding; compaction helper constructors; finding order
     canonicalization in compaction report `body_hash`; performed-merge `compact_with_report` exercise
-    in `tests/lane_a_store_substrate.rs` (sorted sources, stable `body_hash`, output digest);
+    in `crates/core/tests/lane_a_store_substrate.rs` (sorted sources, stable `body_hash`, output digest);
     append idempotency key aliasing event id with global replay; keyed batch replay in-process and
     `IdempotencyPartialBatch` on mixed cached/new keys; explicit `Region` / `by_scope` /
     `stream` / `by_fact` / cursor surfaces (no hidden public full-store cursor); close+reopen batch
-    replay in `tests/idempotent_batch_crash_recovery.rs`.
+    replay in `crates/core/tests/idempotent_batch_crash_recovery.rs`.
 - Remaining known blind spots:
   - deep cryptographic signature verification is intentionally out of scope;
     tests use structural echo verifiers only.
@@ -560,8 +560,8 @@ instead of pretending.
 
 - Harness pattern: `Property Harness`
 - Location:
-  - `tests/lane_b1_registry_substrate.rs`
-  - `src/registry.rs`
+  - `crates/core/tests/lane_b1_registry_substrate.rs`
+  - `crates/core/src/registry.rs`
 - Command used:
   - `cargo test --test lane_b1_registry_substrate`
 - Line/function coverage delta: unmeasured
@@ -580,8 +580,8 @@ instead of pretending.
 
 - Harness pattern: `Property Harness`
 - Location:
-  - `tests/lane_b2_backup_envelope_substrate.rs`
-  - `src/store/backup_envelope.rs`
+  - `crates/core/tests/lane_b2_backup_envelope_substrate.rs`
+  - `crates/core/src/store/backup_envelope.rs`
 - Command used:
   - `cargo test --test lane_b2_backup_envelope_substrate`
 - Line/function coverage delta: unmeasured
@@ -600,8 +600,8 @@ instead of pretending.
 
 - Harness pattern: `Property Harness`
 - Location:
-  - `tests/lane_b3_transition_substrate.rs`
-  - `src/transition.rs`
+  - `crates/core/tests/lane_b3_transition_substrate.rs`
+  - `crates/core/src/transition.rs`
 - Command used:
   - `cargo test --test lane_b3_transition_substrate`
 - Line/function coverage delta: unmeasured
@@ -620,8 +620,8 @@ instead of pretending.
 
 - Harness pattern: `Property Harness`
 - Location:
-  - `tests/lane_b4_reservation_substrate.rs`
-  - `src/reservation.rs`
+  - `crates/core/tests/lane_b4_reservation_substrate.rs`
+  - `crates/core/src/reservation.rs`
 - Command used:
   - `cargo test --test lane_b4_reservation_substrate`
 - Line/function coverage delta: unmeasured
@@ -642,7 +642,7 @@ instead of pretending.
 
 - Harness pattern: `State-Machine Harness`
 - Location:
-  - `tests/deterministic_concurrency.rs`
+  - `crates/core/tests/deterministic_concurrency.rs`
 - Command used:
   - `cargo test --test deterministic_concurrency`
 - Line/function coverage delta: unmeasured
@@ -654,21 +654,21 @@ instead of pretending.
 
 - Harness pattern: `State-Machine Harness`
 - Location:
-  - `tests/cursor_durability.rs`
+  - `crates/core/tests/cursor_durability.rs`
 - Command used:
   - `cargo test --test cursor_durability`
-- Line/function coverage delta: targeted rise in `src/store/delivery/cursor.rs`;
+- Line/function coverage delta: targeted rise in `crates/core/src/store/delivery/cursor.rs`;
     exact JSON delta not recorded
 - Mutation delta: unmeasured
 - Remaining known blind spots:
   - committed progress vs rollback/restart semantics are covered, but this does
-    not yet replace the broader cursor lifecycle tests in `tests/store_advanced.rs`
+    not yet replace the broader cursor lifecycle tests in `crates/core/tests/store_advanced.rs`
 
 ### Invariant: Ready writer tickets surface observable completion through `try_check`
 
 - Harness pattern: `State-Machine Harness`
 - Location:
-  - `tests/control_plane_surface.rs`
+  - `crates/core/tests/control_plane_surface.rs`
 - Command used:
   - `cargo test --test control_plane_surface try_check_surfaces_ready_append_and_batch_tickets`
   - `cargo test --test control_plane_surface fenced_root_submit_stays_hidden_until_commit_and_cancel_discards_it`
@@ -676,18 +676,18 @@ instead of pretending.
   - `cargo test --test control_plane_surface fenced_reaction_submit_stays_hidden_until_commit_and_cancel_discards_it`
   - `cargo test --test control_plane_surface fenced_reaction_commit_preserves_reaction_metadata`
   - `cargo test --test control_plane_surface try_submit_batch_returns_retry_under_pressure`
-  - `CARGO_INCREMENTAL=0 cargo mutants --output tools/xtask/target/mutants/writer-commit-ticket-try-check-none --in-place --baseline run --file 'src/store/write/*.rs' --exclude src/store/ancestry/by_clock.rs --all-features --cargo-arg --locked --test-tool cargo --shard 1/8 --sharding round-robin --build-timeout 300 --timeout 300 --minimum-test-timeout 120 -F 'Ticket<T>::try_check.*with None'`
-  - `CARGO_INCREMENTAL=0 cargo mutants --output tools/xtask/target/mutants/fence-token-root-under-fence-4 --in-place --baseline run --file 'src/store/write/control.rs' --all-features --cargo-arg --locked --test-tool cargo --build-timeout 300 --timeout 300 --minimum-test-timeout 120 -F 'delete field fence_token from struct Self expression in AppendSubmission::root_under_fence'`
-- Line/function coverage delta: targeted rise in `src/store/write/control.rs`; exact JSON delta not recorded
+  - `CARGO_INCREMENTAL=0 cargo mutants --output tools/xtask/target/mutants/writer-commit-ticket-try-check-none --in-place --baseline run --file 'crates/core/src/store/write/*.rs' --exclude crates/core/src/store/ancestry/by_clock.rs --all-features --cargo-arg --locked --test-tool cargo --shard 1/8 --sharding round-robin --build-timeout 300 --timeout 300 --minimum-test-timeout 120 -F 'Ticket<T>::try_check.*with None'`
+  - `CARGO_INCREMENTAL=0 cargo mutants --output tools/xtask/target/mutants/fence-token-root-under-fence-4 --in-place --baseline run --file 'crates/core/src/store/write/control.rs' --all-features --cargo-arg --locked --test-tool cargo --build-timeout 300 --timeout 300 --minimum-test-timeout 120 -F 'delete field fence_token from struct Self expression in AppendSubmission::root_under_fence'`
+- Line/function coverage delta: targeted rise in `crates/core/src/store/write/control.rs`; exact JSON delta not recorded
 - Mutation delta:
-  - exact mutant `src/store/write/control.rs:29:9 replace Ticket<T>::try_check -> Option<Result<T, StoreError>> with None` is now caught by the ready-path proof lane
+  - exact mutant `crates/core/src/store/write/control.rs:29:9 replace Ticket<T>::try_check -> Option<Result<T, StoreError>> with None` is now caught by the ready-path proof lane
   - the exact default-receipt mutants for `AppendTicket::try_check` and `BatchAppendTicket::try_check` are now characterized as unviable at build time:
-    - `src/store/write/control.rs:64:9 replace AppendTicket::try_check -> Option<AppendReply> with Some(Default::default())`
-    - `src/store/write/control.rs:96:9 replace BatchAppendTicket::try_check -> Option<BatchAppendReply> with Some(Default::default())`
+    - `crates/core/src/store/write/control.rs:64:9 replace AppendTicket::try_check -> Option<AppendReply> with Some(Default::default())`
+    - `crates/core/src/store/write/control.rs:96:9 replace BatchAppendTicket::try_check -> Option<BatchAppendReply> with Some(Default::default())`
   - exact field-deletion mutants in the fence/reaction submission constructors are now caught:
-    - `src/store/write/control.rs:551:13 delete field fence_token from struct Self expression in AppendSubmission::root_under_fence`
-    - `src/store/write/control.rs:562:17 delete field causation_id from struct AppendOptions expression in AppendSubmission::reaction`
-    - `src/store/write/control.rs:575:13 delete field fence_token from struct Self expression in AppendSubmission::reaction_under_fence`
+    - `crates/core/src/store/write/control.rs:551:13 delete field fence_token from struct Self expression in AppendSubmission::root_under_fence`
+    - `crates/core/src/store/write/control.rs:562:17 delete field causation_id from struct AppendOptions expression in AppendSubmission::reaction`
+    - `crates/core/src/store/write/control.rs:575:13 delete field fence_token from struct Self expression in AppendSubmission::reaction_under_fence`
 - Remaining known blind spots:
   - this closes the positive-ready edge for append and batch tickets and adds direct root-under-fence, batch-under-fence, reaction-under-fence visibility/cancel, and reaction metadata-preservation proofs
   - batch pressure-retry symmetry is now pinned alongside append pressure-retry, but the wider writer commit protocol still needs broader mutation pressure across `writer.rs`, `staging.rs`, and `fanout.rs`
@@ -698,11 +698,11 @@ instead of pretending.
 
 - Harness pattern: `Oracle Harness`
 - Location:
-  - `tests/index_filter_composition.rs`
+  - `crates/core/tests/index_filter_composition.rs`
 - Command used:
   - `cargo test --test index_filter_composition`
   - `cargo test --test index_filter_composition reopen_matches_live_oracle_across_topologies`
-- Line/function coverage delta: targeted rise in `src/store/index/columnar.rs` and `src/store/index/mod.rs`; exact JSON delta not recorded
+- Line/function coverage delta: targeted rise in `crates/core/src/store/index/columnar.rs` and `crates/core/src/store/index/mod.rs`; exact JSON delta not recorded
 - Mutation delta: unmeasured
 - Remaining known blind spots:
   - the oracle now owns filter composition, cursor batch ordering, and live-vs-reopen parity across topologies
@@ -712,7 +712,7 @@ instead of pretending.
 
 - Harness pattern: `Oracle Harness`
 - Location:
-  - `tests/index_topology.rs`
+  - `crates/core/tests/index_topology.rs`
 - Command used:
   - `cargo test --test index_topology`
 - Line/function coverage delta: unmeasured

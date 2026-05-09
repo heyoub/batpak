@@ -6,7 +6,7 @@ pre-Downstream arc.
 ## What “forensic query” means generically in batpak
 
 Bounded read observability is already shipped as
-`ReadWalkEvidenceReport` / `ReadWalkReportBody` (`src/store/read_walk.rs`):
+`ReadWalkEvidenceReport` / `ReadWalkReportBody` (`crates/core/src/store/read_walk.rs`):
 
 - explicit region / source refs
 - input frontier and freshness intent
@@ -15,7 +15,7 @@ Bounded read observability is already shipped as
 - canonical `body_hash` over the report body (metadata outside the hash)
 
 Export and attestation wrapping use `CanonicalArtifactEnvelope` / artifact
-verification (`src/artifact.rs`, `batpak::prelude`).
+verification (`crates/core/src/artifact.rs`, `batpak::prelude`).
 
 ## When a dedicated `ForensicQueryEnvelope` would return
 

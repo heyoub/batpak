@@ -444,10 +444,10 @@ mod tests {
             .and_then(Path::parent)
             .expect("repo root");
         for fixture in [
-            "tests/fixtures/platform/linux_basic.profile",
-            "tests/fixtures/platform/non_unix_best_effort_lock.profile",
-            "tests/fixtures/platform/mmap_unavailable.profile",
-            "tests/fixtures/platform/profile_mismatch.profile",
+            "crates/core/tests/fixtures/platform/linux_basic.profile",
+            "crates/core/tests/fixtures/platform/non_unix_best_effort_lock.profile",
+            "crates/core/tests/fixtures/platform/mmap_unavailable.profile",
+            "crates/core/tests/fixtures/platform/profile_mismatch.profile",
         ] {
             read_platform_profile(&repo_root.join(fixture)).expect("fixture profile must decode");
         }

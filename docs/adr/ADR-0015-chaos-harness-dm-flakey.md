@@ -17,7 +17,7 @@ explicitly requested.
 
 ## Decision
 Use Linux device-mapper as the block-layer chaos primitive. The first harness
-surface is a private `tests/chaos/` module with a `dm_flakey` wrapper that:
+surface is a private `crates/core/tests/chaos/` module with a `dm_flakey` wrapper that:
 
 - creates a sparse backing file and loop device;
 - exposes it through a device-mapper target;
@@ -60,5 +60,5 @@ operator opts in with `BATPAK_RUN_CHAOS=1`.
 - [ADR-0014: Durable Frontier Observability](ADR-0014-durable-frontier.md)
 - `traceability/invariants.yaml`: `INV-FRONTIER-FAULT-ORDINALS`,
   `INV-CHAOS-LINUX-ONLY`
-- `tests/chaos/dm_flakey.rs`
+- `crates/core/tests/chaos/dm_flakey.rs`
 - `HARNESS_LEDGER.md`

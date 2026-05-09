@@ -3,6 +3,7 @@
 //! Complements runtime doctrine tests in `tests/evidence_report_family.rs` with
 //! repo-local structural assertions that are cheap to run in pre-push loops.
 
+use crate::repo_surface::core_path;
 use anyhow::{bail, Context, Result};
 use regex::Regex;
 use std::fs;
@@ -52,15 +53,15 @@ const FORBIDDEN_PUBLIC_SUBSTRINGS: &[&str] = &[
 
 pub fn run(repo_root: &Path) -> Result<()> {
     for &(rel, struct_name) in SCHEMA_VERSION_BODY_ANCHORS {
-        let path = repo_root.join(rel);
+        let path = core_path(repo_root, rel);
         let text = fs::read_to_string(&path)
             .with_context(|| format!("evidence-audit: read {}", path.display()))?;
         assert_public_struct_has_public_schema_version(&path, &text, struct_name)?;
     }
 
-    let prelude = fs::read_to_string(repo_root.join("src/prelude.rs"))
+    let prelude = fs::read_to_string(core_path(repo_root, "src/prelude.rs"))
         .context("evidence-audit: read src/prelude.rs")?;
-    let store_mod = fs::read_to_string(repo_root.join("src/store/mod.rs"))
+    let store_mod = fs::read_to_string(core_path(repo_root, "src/store/mod.rs"))
         .context("evidence-audit: read src/store/mod.rs")?;
     let blob = format!("{prelude}\n{store_mod}");
     for word in FORBIDDEN_PUBLIC_SUBSTRINGS {

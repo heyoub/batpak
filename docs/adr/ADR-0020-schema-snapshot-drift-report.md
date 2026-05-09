@@ -14,7 +14,7 @@ structural. batpak must avoid turning schema snapshot evidence into protocol
 semantics, migration policy, or downstream application law.
 
 ## Decision
-batpak adds a small schema snapshot evidence surface in `src/schema.rs`.
+batpak adds a small schema snapshot evidence surface in `crates/core/src/schema.rs`.
 
 ### 1) Snapshot input and report body
 
@@ -81,5 +81,5 @@ This slice does not add:
 ## References
 
 - `docs/adr/ADR-0019-canonical-encoding-contract.md`
-- `src/schema.rs`
-- `src/encoding.rs`
+- `crates/core/src/schema.rs`
+- `crates/core/src/encoding.rs`

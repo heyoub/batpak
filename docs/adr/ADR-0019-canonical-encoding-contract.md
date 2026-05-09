@@ -6,7 +6,7 @@ Accepted.
 ## Context
 batpak exposes `batpak::canonical` as the stable encoding helper used by
 receipts, signing cover bytes, and deterministic fixture/report workflows.
-Today, `src/encoding.rs` documents that this surface is stable for the current
+Today, `crates/core/src/encoding.rs` documents that this surface is stable for the current
 crate version but does not claim a cross-version canonical-bytes guarantee.
 
 Extraction work depends on a clear contract boundary before adding new evidence
@@ -72,6 +72,6 @@ and exercised.
 
 ## References
 
-- `src/encoding.rs`
-- `src/lib.rs` (`pub use crate::encoding as canonical`)
+- `crates/core/src/encoding.rs`
+- `crates/core/src/lib.rs` (`pub use crate::encoding as canonical`)
 - `docs/extraction/README.md`

@@ -10,11 +10,11 @@
     WatermarkKind::Durable, timeout } to suppress this skew at append time at
     the cost of blocking until cadence is reached.
   evidence:
-    - "tests/durable_frontier_semantics.rs :: single_append_cadence_gt_1_visible_exceeds_durable_frontier"
-    - "tests/durable_frontier_semantics.rs :: frontier_visible_minus_durable_seq_is_positive_under_cadence_gt_1"
-    - "tests/durable_frontier_semantics.rs :: single_append_published_fault_fires_after_visibility_before_receipt"
-    - "tests/durable_frontier_waits.rs :: wait_for_visible_advances_under_cadence_gt_1_without_durable"
-    - "tests/durable_frontier_waits.rs :: append_with_visible_gate_returns_after_publish"
+    - "crates/core/tests/durable_frontier_semantics.rs :: single_append_cadence_gt_1_visible_exceeds_durable_frontier"
+    - "crates/core/tests/durable_frontier_semantics.rs :: frontier_visible_minus_durable_seq_is_positive_under_cadence_gt_1"
+    - "crates/core/tests/durable_frontier_semantics.rs :: single_append_published_fault_fires_after_visibility_before_receipt"
+    - "crates/core/tests/durable_frontier_waits.rs :: wait_for_visible_advances_under_cadence_gt_1_without_durable"
+    - "crates/core/tests/durable_frontier_waits.rs :: append_with_visible_gate_returns_after_publish"
   replaces_when: >
     Default DurabilityGate becomes non-None for any read path, OR
     sync_every_n_events default changes to 1. Until then, the observation
@@ -33,7 +33,7 @@
     from 'OS preserved.' This is consistent with Meaning-2 durable_hlc
     semantics; under Meaning-1 semantics it would constitute a substrate gap.
   evidence:
-    - "tests/chaos/scenarios/single_append_written.rs :: durable_frontier_covers_recovered_state_after_device_failure_cadence_1000"
+    - "crates/core/tests/chaos/scenarios/single_append_written.rs :: durable_frontier_covers_recovered_state_after_device_failure_cadence_1000"
   replaces_when: >
     Substrate adopts a fsync-history watermark marker (no current plan;
     Meaning-2 is the contract).

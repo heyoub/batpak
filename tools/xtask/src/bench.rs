@@ -296,8 +296,8 @@ mod tests {
 
     #[test]
     fn every_cargo_bench_target_is_wired_to_a_surface() {
-        let manifest: toml::Value =
-            toml::from_str(include_str!("../../../Cargo.toml")).expect("parse workspace manifest");
+        let manifest: toml::Value = toml::from_str(include_str!("../../../crates/core/Cargo.toml"))
+            .expect("parse batpak package manifest");
         let declared = manifest
             .get("bench")
             .and_then(toml::Value::as_array)

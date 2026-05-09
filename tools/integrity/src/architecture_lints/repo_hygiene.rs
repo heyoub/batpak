@@ -48,10 +48,14 @@ fn check_no_live_spec_markers(repo_root: &Path, tracked_files: &[PathBuf]) -> Re
             .unwrap_or_default();
         let is_root_markdown = !rel.contains('/') && ext == "md";
         let is_live_surface = is_root_markdown
+            || rel.starts_with("crates/core/src/")
             || rel.starts_with("src/")
             || rel.starts_with("tools/")
+            || rel.starts_with("crates/core/tests/")
             || rel.starts_with("tests/")
+            || rel.starts_with("crates/core/benches/")
             || rel.starts_with("benches/")
+            || rel.starts_with("crates/core/examples/")
             || rel.starts_with("examples/")
             || rel.starts_with("traceability/")
             || rel.starts_with("docs/reference/");
@@ -110,8 +114,11 @@ fn check_no_legacy_topology_or_replay_names(
         let is_live_surface = rel == "README.md"
             || rel == "GUIDE.md"
             || rel == "REFERENCE.md"
+            || rel.starts_with("crates/core/src/")
             || rel.starts_with("src/")
+            || rel.starts_with("crates/core/examples/")
             || rel.starts_with("examples/")
+            || rel.starts_with("crates/core/tests/")
             || rel.starts_with("tests/");
         if !is_live_surface {
             continue;
@@ -235,7 +242,7 @@ fn check_for_stale_references(repo_root: &Path, tracked_files: &[PathBuf]) -> Re
         repo_root.join("docs/adr/ADR-0003-cache-safety-assumptions.md"),
         repo_root.join("CHANGELOG.md"),
         repo_root.join("AGENTS.md"),
-        repo_root.join("build.rs"),
+        repo_root.join("crates/core/build.rs"),
         repo_root.join("tools/integrity/src/main.rs"),
         repo_root.join("tools/integrity/src/architecture_lints/repo_hygiene.rs"),
     ];
@@ -268,7 +275,7 @@ fn check_for_stale_references(repo_root: &Path, tracked_files: &[PathBuf]) -> Re
 fn check_release_hardening_patterns(repo_root: &Path, tracked_files: &[PathBuf]) -> Result<()> {
     let historical_allow = [
         repo_root.join("CHANGELOG.md"),
-        repo_root.join("build.rs"),
+        repo_root.join("crates/core/build.rs"),
         repo_root.join("tools/integrity/src/main.rs"),
         repo_root.join("tools/integrity/src/architecture_lints/repo_hygiene.rs"),
     ];
@@ -285,7 +292,7 @@ fn check_release_hardening_patterns(repo_root: &Path, tracked_files: &[PathBuf])
         let content =
             fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
 
-        if rel == "src/store/mod.rs" {
+        if rel == "crates/core/src/store/mod.rs" || rel == "src/store/mod.rs" {
             ensure(
                 !content.contains("pub fn subscribe("),
                 "structural-check: src/store/mod.rs still exports ambiguous `subscribe`",
@@ -296,7 +303,7 @@ fn check_release_hardening_patterns(repo_root: &Path, tracked_files: &[PathBuf])
             )?;
         }
 
-        if rel.starts_with("src/store/") {
+        if rel.starts_with("crates/core/src/store/") || rel.starts_with("src/store/") {
             ensure(
                 !content.contains("index.ckpt.tmp"),
                 format!("structural-check: fixed checkpoint temp-file pattern found in {rel}"),

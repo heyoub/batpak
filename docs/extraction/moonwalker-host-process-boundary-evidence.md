@@ -3,7 +3,7 @@
 **Owner layer:** above batpak (Downstream Host support spec).
 
 **Disposition:** do not implement in batpak store or core runtime. batpak may
-supply `PlatformEvidenceSummary` (`src/store/stats.rs`) as an input plane,
+supply `PlatformEvidenceSummary` (`crates/core/src/store/stats.rs`) as an input plane,
 but lifecycle law for supervised processes is host-owned.
 
 ## Evidence subjects (planning surface)

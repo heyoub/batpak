@@ -75,26 +75,31 @@ fn check_justfile_stays_thin(repo_root: &Path) -> Result<()> {
 }
 
 fn check_packaging_surface(repo_root: &Path) -> Result<()> {
-    let cargo_toml = repo_root.join("Cargo.toml");
-    let content = fs::read_to_string(&cargo_toml).context("read Cargo.toml")?;
+    let workspace_toml = repo_root.join("Cargo.toml");
+    let workspace = fs::read_to_string(&workspace_toml).context("read Cargo.toml")?;
     ensure(
-        content.contains("readme = \"README.md\""),
-        "Cargo.toml must keep README.md as the package readme",
+        workspace.contains("\"crates/core\""),
+        "workspace Cargo.toml must keep crates/core as the primary batpak package member",
     )?;
     ensure(
-        !content.contains("\"guide/**\""),
-        "Cargo.toml must not exclude removed guide/** paths",
+        workspace.contains("default-members = [\"crates/core\"]"),
+        "workspace Cargo.toml must default to the primary batpak package",
     )?;
-    for required in [
-        "\"scripts/**\"",
-        "\"tools/integrity/**\"",
-        "\"tools/xtask/**\"",
-    ] {
-        ensure(
-            content.contains(required),
-            format!("Cargo.toml exclude list must keep packaging boundary {required}"),
-        )?;
-    }
+
+    let package_toml = repo_root.join("crates/core/Cargo.toml");
+    let package = fs::read_to_string(&package_toml).context("read crates/core/Cargo.toml")?;
+    ensure(
+        package.contains("readme = \"../../README.md\""),
+        "crates/core/Cargo.toml must keep the root README.md as the package readme",
+    )?;
+    ensure(
+        !package.contains("\"guide/**\""),
+        "crates/core/Cargo.toml must not exclude removed guide/** paths",
+    )?;
+    ensure(
+        !package.contains("\"tools/integrity/**\"") && !package.contains("\"tools/xtask/**\""),
+        "crates/core/Cargo.toml package boundary is physical; root tool paths must not be encoded as package excludes",
+    )?;
     Ok(())
 }
 

@@ -1,4 +1,7 @@
-use crate::repo_surface::{ensure, ensure_unique_ids, load_yaml, relative, repo_root};
+use crate::repo_surface::{
+    core_examples_root, ensure, ensure_unique_ids, load_yaml, relative, repo_root,
+    resolve_repo_or_core_path,
+};
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
 use std::collections::{BTreeSet, HashMap};
@@ -213,11 +216,13 @@ fn check_examples_artifact_complete(repo_root: &Path, artifacts: &[ArtifactRecor
     let declared = examples_artifact
         .paths
         .iter()
-        .filter(|path| path.starts_with("examples/") && path.ends_with(".rs"))
+        .filter(|path| path.starts_with("crates/core/examples/") && path.ends_with(".rs"))
         .cloned()
         .collect::<BTreeSet<_>>();
     let mut actual = BTreeSet::new();
-    for entry in fs::read_dir(repo_root.join("examples")).context("read examples directory")? {
+    for entry in
+        fs::read_dir(core_examples_root(repo_root)).context("read core examples directory")?
+    {
         let entry = entry.context("read examples directory entry")?;
         let path = entry.path();
         if path.extension().and_then(|ext| ext.to_str()) == Some("rs") {
@@ -227,7 +232,7 @@ fn check_examples_artifact_complete(repo_root: &Path, artifacts: &[ArtifactRecor
     ensure(
         declared == actual,
         format!(
-            "ART-EXAMPLES must list every runnable examples/*.rs file exactly once; declared={declared:?}, actual={actual:?}"
+            "ART-EXAMPLES must list every runnable crates/core/examples/*.rs file exactly once; declared={declared:?}, actual={actual:?}"
         ),
     )
 }
@@ -246,7 +251,7 @@ pub(crate) fn validate_observation_evidence(
         !path_part.is_empty(),
         format!("observation {observation_id} evidence `{evidence}` has blank path"),
     )?;
-    let full = repo_root.join(path_part);
+    let full = resolve_repo_or_core_path(repo_root, path_part);
     ensure(
         full.exists(),
         format!(
