@@ -31,6 +31,8 @@
 - `cargo xtask install-hooks`
 - `cargo xtask preflight`     — canonical devcontainer verification bundle for CI + coverage + docs from one in-container session. Prefer this over bare `cargo xtask ci` for pushes that touch store internals, xtask itself, or CI config, but do not describe it as the full proof chain unless you also run the extra hard gates (`mutants smoke`, perf gates, targeted fuzz/chaos).
 - `cargo xtask ci`
+- `cargo xtask structural`
+- `cargo xtask evidence-audit` — static evidence-report schema anchors and prelude/store export vocabulary (runs `batpak-integrity evidence-audit`)
 - `cargo xtask mutants policy`
 - `cargo xtask mutants smoke`
 - `cargo xtask platform doctor --store-path <dir>`

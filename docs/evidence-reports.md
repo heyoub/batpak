@@ -20,6 +20,7 @@ This follows `docs/adr/ADR-0019-canonical-encoding-contract.md`.
 - `SubscriberFrontierEvidenceReport` (`src/store/subscriber_frontier.rs`)
 - `ProjectionRunEvidenceReport` (`src/store/projection_run.rs`)
 - `ReadWalkEvidenceReport` (`src/store/read_walk.rs`)
+- `StoreResourceEvidenceReport` / `StoreResourceEnvelope` (`src/store/store_resource_report.rs`)
 
 ## Arc Seal (v1 Family)
 
@@ -32,6 +33,7 @@ extraction arc:
 - subscriber frontier observations (`ADR-0022`)
 - projection run evidence (`ADR-0024`)
 - read walk evidence (`ADR-0025`)
+- store resource evidence (diagnostics snapshot envelope; schema v1 in-tree)
 
 This family is intentionally bounded. New report types require concrete pressure
 that cannot be satisfied by existing report bodies.
@@ -72,6 +74,19 @@ that cannot be satisfied by existing report bodies.
   limit/proof-ref observations. Its `freshness_intent` records caller intent;
   v1 still samples current visible index state rather than applying a stale-cache
   read policy.
+- `StoreResourceEvidenceReport`: deterministic snapshot over stable
+  `StoreDiagnostics` fields (counts, frontier coordinates, writer pressure,
+  topology label, optional cold-start `OpenIndexReport`, platform evidence).
+  Raw `data_dir` paths never appear in the body; identity uses a path-byte
+  digest. Bodies are point-in-time: full byte equality across `close`/`open` is
+  not a contract because cold-start path and replayed system events can differ.
+
+## Forensic query composition (no extra nominal type)
+
+Generic “forensic query export” in batpak is **`ReadWalkEvidenceReport` plus
+`CanonicalArtifactEnvelope`** when attestation or multi-artifact bundling is
+required. See `docs/extraction/forensic-query-envelope.md` for the closure
+disposition.
 
 ## Public Surface
 
@@ -88,12 +103,13 @@ them to pattern-match report bodies without reaching through private internals.
 
 ## Intentionally Parked
 
-- Store resource envelope beyond `WriterPressure`.
 - Canonical artifact envelope.
 - Attested registry.
 - Reservation ledger.
 - State transition report.
-- Audit assertion runner.
-- Deterministic phase cache.
-- Process/sandbox/supervisor evidence.
-- Protocol registry semantics and semantic field classes.
+- Dedicated forensic query envelope type (composition path documented above).
+- Deterministic phase cache (tooling design only until repeated measured pain).
+- Process/sandbox/supervisor evidence (Downstream Host planning).
+- Protocol registry semantics and semantic field classes (protocol-registry planning).
+
+Tooling hygiene for evidence bodies: `cargo xtask evidence-audit`.

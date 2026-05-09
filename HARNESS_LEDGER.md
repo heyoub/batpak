@@ -493,6 +493,7 @@ instead of pretending.
 - Harness pattern: `Property Harness`
 - Location:
   - `tests/evidence_report_family.rs`
+  - `tests/lane_store_resource_evidence.rs`
   - `tests/schema_snapshot_report.rs`
   - `tests/chain_walk_evidence_report.rs`
   - `tests/subscriber_frontier_observations.rs`
@@ -500,6 +501,8 @@ instead of pretending.
   - `tests/read_walk_evidence_report.rs`
 - Command used:
   - `cargo test --test evidence_report_family`
+  - `cargo test --test lane_store_resource_evidence`
+  - `cargo xtask evidence-audit`
   - `cargo test --test schema_snapshot_report`
   - `cargo test --test chain_walk_evidence_report`
   - `cargo test --test subscriber_frontier_observations`
@@ -510,8 +513,9 @@ instead of pretending.
 - Covered tests:
   - family-wide tests pin canonical `body_hash`, metadata exclusion from body
     identity, deterministic finding order, no automatic append, domain-neutral
-    public type names, close/reopen behavior, and topology-independent
-    read/projection evidence identity.
+    public type names, close/reopen behavior, topology-independent
+    read/projection evidence identity, and store resource evidence helpers plus
+    reopen-stable configuration slice checks.
   - report-specific suites pin schema drift, chain continuity/corruption,
     subscriber loss/frontier precision, projection outcome frontier/cache/
     freshness/output truth, and read-walk visibility/proof-ref/count truth.

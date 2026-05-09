@@ -1,0 +1,19 @@
+---
+description: Substrate work favors concrete specs in code/tests; planning boundaries are not copy-pasted into implementation.
+alwaysApply: true
+---
+
+# Substrate: implementation versus planning prose
+
+High-level arcs (what the crate does *not* own, product names, transport stacks) are **planning context**. They must not be repeated as ceremony in docstrings, comments, or user-facing docs in place of real invariants.
+
+**Do**
+
+- Encode behavior in types, tests, and explicit invariants (hash rules, ordering, report fields, error cases).
+- Ask direct questions when something is ambiguous for the next concrete step.
+
+**Avoid**
+
+- Bulleted “must not own X / Y / Z” lists in code or docs that duplicate planning notes without adding a testable fact.
+
+This keeps models and reviewers aligned on **what the code guarantees**, not on re-stating scope bans.

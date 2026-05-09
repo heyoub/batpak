@@ -24,6 +24,7 @@
 //! dead_code silencers are not tolerated in this repo; test-only code uses
 //! `cfg(test)`, unused code is deleted, and shared helpers get restructured.
 mod architecture_lints;
+mod evidence_audit;
 mod harness_lints;
 #[path = "../../shared/shared_checks.rs"]
 mod shared_checks;
@@ -61,6 +62,8 @@ enum CommandKind {
     },
     TraceabilityCheck,
     StructuralCheck,
+    /// Static checks for evidence report bodies and public export vocabulary.
+    EvidenceAudit,
 }
 
 #[derive(Debug, Deserialize)]
@@ -128,6 +131,7 @@ fn main() -> Result<()> {
         CommandKind::Doctor { strict } => doctor(strict),
         CommandKind::TraceabilityCheck => traceability_check(),
         CommandKind::StructuralCheck => structural_check(),
+        CommandKind::EvidenceAudit => evidence_audit::run(&repo_root()?),
     }
 }
 

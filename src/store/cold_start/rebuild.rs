@@ -31,7 +31,7 @@ pub enum OpenIndexPath {
 }
 
 /// Diagnostic output from `open_index()`. Hard truth, not logs.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub struct OpenIndexReport {
     /// Which restore strategy was selected and completed.

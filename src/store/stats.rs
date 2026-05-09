@@ -142,7 +142,7 @@ pub struct StoreStats {
 }
 
 /// Snapshot of writer mailbox pressure.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[must_use]
 pub struct WriterPressure {
     /// Number of queued commands currently waiting in the writer mailbox.

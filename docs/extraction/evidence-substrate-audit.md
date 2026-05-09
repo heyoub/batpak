@@ -40,7 +40,7 @@ Evidence reports must not fake certainty or fake uncertainty:
 | `SchemaSnapshotSource` derive/helper | not implemented | implement in batpak tooling/helper | lane-tooling-schema-derive | lock stable input contract before deriving helpers |
 | Declarative report helper macros | no dedicated family macro | reject / not needed | none | revisit only if measured duplication forces a tiny helper surface |
 | `build.rs` report logic | minimal for evidence family; broader invariants in build script | already covered | none | keep tiny/deterministic; no env/network-driven report behavior |
-| `cargo xtask` family audit | no dedicated evidence-audit subcommand yet | implement in batpak tooling/helper | lane-tooling-evidence-audit | add subcommand only when drift checks become repetitive |
+| `cargo xtask` family audit | `cargo xtask evidence-audit` → `batpak-integrity evidence-audit` (schema anchors + export vocabulary) | already covered | none | extend anchors when new `*ReportBody` types ship |
 
 Classification only: macro/report helper rows above are **not** Lane B
 delivery commitments unless a separate arc promotes them.
@@ -69,6 +69,7 @@ evidence.
 | `SubscriberFrontierEvidenceReport` | subscriber observation request | explicit available/consumed frontier sequence | yes | projectable/queryable by source + subscriber identity chosen by caller | yes |
 | `ProjectionRunEvidenceReport` | `projection_id` + `source_refs` | explicit `input_frontier` | yes | projectable/queryable by projection id/source refs | yes |
 | `ReadWalkEvidenceReport` | region-derived `source_refs` | explicit read input frontier | yes | projectable/queryable by source refs/region family | yes |
+| `StoreResourceEvidenceReport` | path-byte digest + stable diagnostics slice | explicit `StoreResourceFrontierBody` watermarks | yes | operator/diagnostics plane; not a query selector | yes |
 
 ## Layout / Topology / SIMD / Tile Audit
 
@@ -115,7 +116,7 @@ Topology bench status:
 
 - `benches/evidence_reports.rs` now includes topology-parameterized lanes for
   read-walk and projection-run evidence across `aos`, `scan`, `entity-local`,
-  `tiled`, `tiled-simd`, and `all`.
+  `tiled`, `tiled-simd`, and `all`, plus a `store_resource` sanity lane.
 - Schema/chain/subscriber benches remain layout-neutral by design unless a
   topology-specific hypothesis appears.
 
@@ -196,6 +197,10 @@ is architectural closure status, not a CI pass result.
 
 ### Matrix changelog
 
+- **Matrix v7.2 (2026-05-08): Pre-Downstream closure — `StoreResourceEvidenceReport` ships in core;
+  `cargo xtask evidence-audit` lands; `ForensicQueryEnvelope` disposition documented as ReadWalk +
+  artifact composition; deterministic phase cache documented reject; host process and protocol
+  semantic field planning captured under `docs/extraction/`.**
 - **Matrix v7.1 (2026-05-08): Lane B seal — B1–B4 matrix rows show `none` next arc where primitives
   shipped; reservation row documents `batpak::reservation`; tooling/above-batpak wave is the
   intentional follow-on (no further Lane B core primitives in this rail without a new arc).**
@@ -242,6 +247,8 @@ is architectural closure status, not a CI pass result.
 | Subscriber frontier evidence | `SubscriberFrontierEvidenceReport` | `tests/subscriber_frontier_observations.rs`, family invariants | cite lag/loss/frontier observation contract directly | already covered | none | none |
 | Projection run evidence | `ProjectionRunEvidenceReport` with outcome-bound `input_frontier` | `tests/projection_run_evidence_report.rs`, family topology parity tests | reduce custom projection observability glue | already covered | none | none |
 | Read walk evidence | `ReadWalkEvidenceReport` with index-visible boundary owner | `tests/read_walk_evidence_report.rs`, family topology parity tests, reopen checks | reduce custom read-observation wrappers | already covered | none | none |
+| Forensic query export (nominal envelope) | `ReadWalkEvidenceReport` + `CanonicalArtifactEnvelope` composition | `tests/evidence_report_family.rs`, read-walk suites; `docs/extraction/forensic-query-envelope.md` | cite composition instead of a parallel nominal type | reject / not needed | none | no Downstream query grammar in core |
+| Store resource evidence | `StoreResourceEvidenceReport` (`StoreResourceEnvelope`) over stable diagnostics; path identity via digest only | `tests/lane_store_resource_evidence.rs`; `Store::store_resource_evidence_report` | cite store resource report for operator substrate snapshots | implement in batpak core | none | **v1 shipped** — bodies are point-in-time; full equality across reopen is not a contract |
 | Typed event compile-time binding | `EventPayload` + `EventSourced` derives | derive tests + compile-fail UI tests | cite derive contracts instead of duplicating macro law | already covered | none | none |
 | Frontier/watermark runtime boundary | `FrontierView`, `WatermarkSnapshot`, wait APIs | store/frontier tests + evidence family coverage | cite frontier APIs directly for generic boundary mechanics | already covered | none | none |
 | Platform/runtime evidence | `PlatformEvidenceSummary` + `cargo xtask platform ...` | `tests/platform_backend.rs`, platform profile tests, xtask verify lanes | cite platform evidence and admission states as substrate facts | already covered | none | per-target verify still required at deploy target |
@@ -253,11 +260,10 @@ is architectural closure status, not a CI pass result.
 | BackupEnvelope (`batpak::store` backup_envelope) | `BackupManifestBody` + `backup_manifest_body_hash`; `BackupManifestEnvelope` / `BackupEnvelope`; `RestoreProofReportBody` + `restore_proof_report_body_hash`; `verify_backup_manifest_envelope` | `tests/lane_b2_backup_envelope_substrate.rs` | cite store backup envelope for segment digest restore proof | implement in batpak core | none | **B2 v1 shipped** — extend via `schema_version` + sorted segment / finding rules only |
 | StateTransition report/event (`batpak::transition`) | `StateTransitionEvent` + `state_transition_event_digest`; `build_state_transition_report` + `state_transition_report_body_hash`; sorted causes and allowed-edge hygiene findings | `tests/lane_b3_transition_substrate.rs` | cite `batpak::transition` for generic transition evidence | implement in batpak core | none | **B3 v1 shipped** — extend via `schema_version` + sorted cause/finding/edge rules only |
 | Reservation ledger (`batpak::reservation`) | `ReservationTransition` + normalized transition log digest; `simulate_reservation_ledger` → `ReservationLedgerReportBody` + `reservation_ledger_report_body_hash`; `reservation_reconciliation_report` + body hash; sorted `ReservationFinding` invalid-transition reasons | `tests/lane_b4_reservation_substrate.rs` | cite `batpak::reservation` for generic reserve/commit/refund/expire/orphan lane mechanics | implement in batpak core | none | **B4 v1 shipped** — extend via `schema_version` + sorted entry/finding/cause/reconciliation rules only; no policy vocabulary |
-| StoreResourceEnvelope beyond `WriterPressure` | partial via `WriterPressure`; broader counters not stabilized | diagnostics coverage exists; no stable broader envelope contract | unify generic store-resource evidence if stable counters exist | reject / not needed | lane-b-resource-envelope | blocked on stable ownership and semantics of additional counters — reopen as implement in batpak core when facts exist |
-| Audit assertion runner | no core API; integrity + xtask infrastructure exists | integrity/structural checks already tested | centralize doctrine checks in tooling lane | implement in batpak tooling/helper | lane-tooling-audit-runner | choose host surface (`xtask` vs helper crate) |
-| Deterministic phase cache | no dedicated primitive | no dedicated coverage | avoid repeated deterministic-phase glue if pressure proves it | implement in batpak tooling/helper | lane-tooling-phase-cache | needs measured repeated pain before implementation |
-| process/sandbox/supervisor evidence | intentionally outside store/platform substrate scope | N/A in batpak core | keep deployment/runtime orchestration semantics above batpak | implement above batpak | above-batpak-runtime | would require introducing non-store runtime law into batpak |
-| protocol registry semantics / field classes | intentionally outside generic substrate | N/A in batpak core | keep protocol/domain semantics above batpak | implement above batpak | above-batpak-protocol-semantics | would import domain vocabulary into core |
+| Audit assertion runner | `cargo xtask evidence-audit` (static anchors + vocabulary) | `tools/integrity/src/evidence_audit.rs`; extend with deeper AST rules as needed | run before Downstream host work when touching evidence bodies | implement in batpak tooling/helper | none | **v1 shipped** — runtime doctrine remains in `tests/evidence_report_family.rs` |
+| Deterministic phase cache | design note only (`docs/extraction/deterministic-phase-cache.md`) | no hot-path duplication observed in xtask/integrity | avoid speculative cache crate surface | reject / not needed | none | revisit only after measured repeated deterministic-phase glue |
+| process/sandbox/supervisor evidence | Downstream Host planning (`docs/extraction/downstream-host-process-boundary-evidence.md`) | N/A in batpak core | keep deployment/runtime orchestration semantics above batpak | implement above batpak | downstream-host | composes `PlatformEvidenceSummary`; no store runner primitive |
+| protocol registry semantics / field classes | protocol-registry planning (`docs/extraction/protocol-registry-semantic-field-classes.md`) | N/A in batpak core | keep protocol/domain semantics above batpak | implement above batpak | protocol-registry | composes `batpak::registry` row mechanics only |
 
 ## Implementation Waves
 
@@ -278,10 +284,10 @@ is architectural closure status, not a CI pass result.
 
 ### Tooling/Above-batpak wave (non-core ownership)
 
-- `AuditAssertionRunner` (tooling/helper ownership)
-- `DeterministicPhaseCache` (tooling/helper unless core pressure is proven)
-- process/sandbox/supervisor evidence (above batpak ownership)
-- protocol registry semantics / field classes (above batpak ownership)
+- `cargo xtask evidence-audit` (static evidence anchors — landed v1)
+- `DeterministicPhaseCache` (documented reject until measured pain — `docs/extraction/deterministic-phase-cache.md`)
+- process/sandbox/supervisor evidence (`docs/extraction/downstream-host-process-boundary-evidence.md`)
+- protocol registry semantics / field classes (`docs/extraction/protocol-registry-semantic-field-classes.md`)
 
 ## Native-Quality Gate
 

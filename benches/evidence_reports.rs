@@ -218,6 +218,25 @@ fn bench_projection_run(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_store_resource(c: &mut Criterion) {
+    let mut group = c.benchmark_group("evidence/store_resource");
+    apply_profile(&mut group, BenchProfile::Quick);
+    let (store, data_dir_guard, coord, kind, _) = build_store(256);
+    assert!(data_dir_guard.path().exists());
+    black_box(coord.entity());
+    black_box(kind);
+    group.bench_function("diagnostics_snapshot", |b| {
+        b.iter(|| {
+            black_box(must(
+                store.store_resource_evidence_report(),
+                "build store resource evidence",
+            ))
+        });
+    });
+    must(store.close(), "close store resource bench store");
+    group.finish();
+}
+
 fn bench_subscriber_frontier(c: &mut Criterion) {
     let mut group = c.benchmark_group("evidence/subscriber_frontier");
     apply_profile(&mut group, BenchProfile::Quick);
@@ -251,6 +270,7 @@ criterion_group!(
     bench_chain_walk,
     bench_read_walk,
     bench_projection_run,
+    bench_store_resource,
     bench_subscriber_frontier
 );
 criterion_main!(benches);

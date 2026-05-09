@@ -26,6 +26,8 @@ enum XtaskCommand {
     Doctor,
     Traceability,
     Structural,
+    /// Static evidence-report hygiene (schema anchors, export vocabulary).
+    EvidenceAudit,
     Check,
     Test,
     Clippy,
@@ -190,6 +192,7 @@ fn main() -> Result<()> {
         XtaskCommand::Doctor => commands::doctor(),
         XtaskCommand::Traceability => commands::integrity("traceability-check", []),
         XtaskCommand::Structural => commands::integrity("structural-check", []),
+        XtaskCommand::EvidenceAudit => commands::integrity("evidence-audit", []),
         XtaskCommand::Check => {
             util::cargo(["check", "--all-features"])?;
             util::cargo(["check", "--no-default-features"])

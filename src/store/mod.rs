@@ -38,6 +38,7 @@ pub mod segment;
 mod signing;
 /// Runtime statistics and diagnostic snapshots.
 pub mod stats;
+mod store_resource_report;
 mod subscriber_frontier;
 #[cfg(feature = "dangerous-test-hooks")]
 mod test_support;
@@ -113,6 +114,13 @@ pub use stats::{
     ParentDirSyncEvidence, PlatformAdmissionSummary, PlatformEvidenceSummary, StoreDiagnostics,
     StoreLockAdmissionSummary, StorePathEvidenceSummary, StorePathStatusEvidence, StoreStats,
     WatermarkKind, WatermarkSnapshot, WriterPressure,
+};
+pub use store_resource_report::{
+    store_data_dir_identity_hash, store_resource_evidence_report_from_diagnostics,
+    store_resource_report_body_from_diagnostics, store_resource_report_body_hash,
+    StoreResourceEnvelope, StoreResourceEvidenceReport, StoreResourceFrontierBody,
+    StoreResourceHash, StoreResourceReportBody, StoreResourceReportError,
+    StoreResourceRestartPolicyShape, STORE_RESOURCE_REPORT_SCHEMA_VERSION,
 };
 pub use subscriber_frontier::{
     LossPrecision, SubscriberDeliveryState, SubscriberFrontierEvidenceReport,
@@ -1493,6 +1501,20 @@ impl<State> Store<State> {
     /// Return detailed diagnostic information about the store's internal state.
     pub fn diagnostics(&self) -> StoreDiagnostics {
         lifecycle::diagnostics(self)
+    }
+
+    /// Deterministic store resource evidence over stable [`StoreDiagnostics`] facts.
+    ///
+    /// Canonical identity excludes raw paths (uses [`store_data_dir_identity_hash`]),
+    /// free-form envelope diagnostics, and timestamps outside the structured cold-start
+    /// report. Metadata fields on the returned envelope are unset by default.
+    ///
+    /// # Errors
+    /// Canonical body encoding failure while computing `body_hash`.
+    pub fn store_resource_evidence_report(
+        &self,
+    ) -> Result<StoreResourceEvidenceReport, StoreResourceReportError> {
+        store_resource_evidence_report_from_diagnostics(&lifecycle::diagnostics(self))
     }
 
     /// Return the current operator-facing frontier view.
