@@ -17,7 +17,7 @@ A companion post-mortem (`crates/core/src/test_support.rs`, since removed) made 
 ## Decision
 Any `#[allow(...)]`, `#[expect(...)]`, or `cfg_attr`-wrapped attribute whose lint list mentions `dead_code` or the `unused` lint group (which subsumes `dead_code`) is banned in every tracked Rust source file under `crates/core/src/`, `crates/core/tests/`, `crates/core/examples/`, `crates/core/benches/`, `crates/core/build.rs`, `crates/macros/src/`, `crates/macros-support/src/`, `tools/xtask/src/`, and `tools/integrity/src/`.
 
-The ban is enforced by the AST walker in `shared_checks::collect_dead_code_silencer_sites` in `tools/shared/shared_checks.rs`, called from two detectors:
+The ban is enforced by the AST walker in `shared_checks::collect_dead_code_silencer_sites`. The canonical source lives inside the packaged crate boundary at `crates/core/build_support/shared_checks.rs`; `tools/shared/shared_checks.rs` is a thin include shim for integrity tooling. It is called from two detectors:
 
 - `crates/core/build.rs::check_no_dead_code_silencers` runs on every `cargo build`, `cargo check`, and `cargo test`.
 - `tools/integrity/src/main.rs::check_no_dead_code_silencers` runs as part of `cargo xtask structural`, which `cargo xtask ci` calls automatically.
@@ -31,7 +31,7 @@ The walker catches:
 
 It deliberately does NOT catch sibling `unused_*` lints that do not subsume `dead_code`: `unused_imports`, `unused_variables`, `unused_mut`, `unused_must_use`. Those target unrelated behaviour and remain available with the usual `// justifies:` anchor requirement per INV-ALLOW-IS-DESIGN.
 
-The regression test for the detector lives in `tools/shared/shared_checks.rs` under `#[cfg(test)] mod tests`. It records both single-line and multi-line banned shapes plus explicitly allowed sibling `unused_*` lints, so any future loosening is a deliberate edit.
+The regression test for the detector lives with the canonical source under `#[cfg(test)] mod tests`. It records both single-line and multi-line banned shapes plus explicitly allowed sibling `unused_*` lints, so any future loosening is a deliberate edit.
 
 There is one explicit escape hatch: `traceability/dead_code_silencer_allowlist.yaml`. Each entry names one exact site as `path: "repo/file.rs:line"` and must also provide non-empty `reason` and `adr` fields. Both detectors validate the file schema and the referenced ADR before honoring an entry. The default posture is an empty allowlist.
 
