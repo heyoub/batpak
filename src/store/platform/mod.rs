@@ -9,5 +9,6 @@ pub(crate) mod evidence;
 pub(crate) mod fs;
 pub(crate) mod lock;
 pub(crate) mod mmap;
+pub(crate) mod path_identity;
 pub(crate) mod profile;
 pub(crate) mod sync;

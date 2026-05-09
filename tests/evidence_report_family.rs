@@ -14,9 +14,9 @@ use batpak::schema::{
 };
 use batpak::store::{
     ChainWalkMode, ChainWalkRequest, ChainWalkStartRef, IndexTopology, LossPrecision,
-    ReadWalkRequest, SubscriberDeliveryState, SubscriberFrontierRequest,
-    SubscriberFrontierSource, CHAIN_WALK_REPORT_SCHEMA_VERSION,
-    READ_WALK_REPORT_SCHEMA_VERSION, SUBSCRIBER_FRONTIER_REPORT_SCHEMA_VERSION,
+    ReadWalkRequest, SubscriberDeliveryState, SubscriberFrontierRequest, SubscriberFrontierSource,
+    CHAIN_WALK_REPORT_SCHEMA_VERSION, READ_WALK_REPORT_SCHEMA_VERSION,
+    SUBSCRIBER_FRONTIER_REPORT_SCHEMA_VERSION,
 };
 use serde::Serialize;
 use std::error::Error;

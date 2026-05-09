@@ -80,16 +80,8 @@ fn restart_policy_shape(policy: &RestartPolicy) -> StoreResourceRestartPolicySha
 /// Stable digest of the configured data directory path bytes (not the path string for display).
 #[must_use]
 pub fn store_data_dir_identity_hash(path: &Path) -> StoreResourceHash {
-    #[cfg(unix)]
-    {
-        use std::os::unix::ffi::OsStrExt;
-        crate::evidence::content_hash(path.as_os_str().as_bytes())
-    }
-    #[cfg(not(unix))]
-    {
-        let s = path.to_string_lossy();
-        crate::evidence::content_hash(s.as_bytes())
-    }
+    let bytes = crate::store::platform::path_identity::path_bytes_for_identity_digest(path);
+    crate::evidence::content_hash(&bytes)
 }
 
 /// Frontier coordinates serialized without `HlcPoint` to keep the body fully serde-stable.
