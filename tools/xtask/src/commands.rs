@@ -9,22 +9,6 @@ use crate::util::cargo;
 use crate::{ChaosArgs, FuzzArgs, MutantsArgs, PlatformArgs, ReleaseArgs, SetupArgs};
 use anyhow::Result;
 
-#[derive(Clone, Copy, Eq, PartialEq)]
-enum InstallStrategy {
-    PreferBinstall,
-    SourceOnly,
-}
-
-const REPO_HOOKS_PATH: &str = ".githooks";
-const PRE_COMMIT_HOOK: &str = ".githooks/pre-commit";
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-enum HookStatus {
-    Installed,
-    Default,
-    Custom(String),
-}
-
 pub(crate) fn setup(args: SetupArgs) -> Result<()> {
     setup::setup(args)
 }

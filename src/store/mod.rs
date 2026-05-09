@@ -8,6 +8,7 @@ mod config;
 /// Push subscriptions (lossy) and pull cursors (ordered, with optional durable
 /// checkpoints) for event delivery.
 pub mod delivery;
+mod diagnostics_api;
 mod dir_lock;
 mod error;
 /// Fault injection framework for testing failure scenarios.
@@ -17,6 +18,7 @@ mod error;
     doc(cfg(feature = "dangerous-test-hooks"))
 )]
 pub mod fault;
+mod frontier_api;
 mod gate;
 mod hidden_ranges;
 /// In-memory 2D event index, rebuilt from segments on startup.

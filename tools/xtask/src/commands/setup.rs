@@ -1,9 +1,24 @@
-use super::{HookStatus, InstallStrategy, PRE_COMMIT_HOOK, REPO_HOOKS_PATH};
 use crate::util::{cargo, command_succeeds, repo_root, run};
 use crate::SetupArgs;
 use anyhow::{bail, Context, Result};
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum InstallStrategy {
+    PreferBinstall,
+    SourceOnly,
+}
+
+const REPO_HOOKS_PATH: &str = ".githooks";
+const PRE_COMMIT_HOOK: &str = ".githooks/pre-commit";
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum HookStatus {
+    Installed,
+    Default,
+    Custom(String),
+}
 
 pub(crate) fn setup(args: SetupArgs) -> Result<()> {
     let required = [
