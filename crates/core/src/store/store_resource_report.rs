@@ -77,10 +77,23 @@ fn restart_policy_shape(policy: &RestartPolicy) -> StoreResourceRestartPolicySha
     }
 }
 
-/// Stable digest of the configured data directory path bytes (not the path string for display).
+/// Stable digest of the store data directory identity.
+///
+/// Existing paths are canonicalized before hashing so equivalent spellings of
+/// the same directory share one identity. If canonicalization fails, the raw
+/// path bytes remain the fallback identity material.
 #[must_use]
 pub fn store_data_dir_identity_hash(path: &Path) -> StoreResourceHash {
-    let bytes = crate::store::platform::path_identity::path_bytes_for_identity_digest(path);
+    let canonical;
+    let identity_path = match std::fs::canonicalize(path) {
+        Ok(path) => {
+            canonical = path;
+            canonical.as_path()
+        }
+        Err(_) => path,
+    };
+    let bytes =
+        crate::store::platform::path_identity::path_bytes_for_identity_digest(identity_path);
     crate::evidence::content_hash(&bytes)
 }
 
@@ -240,4 +253,21 @@ pub fn store_resource_evidence_report_from_diagnostics(
         batpak_version: None,
         diagnostics: Vec::new(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::store_data_dir_identity_hash;
+
+    #[test]
+    fn data_dir_identity_hash_canonicalizes_existing_path_spellings() {
+        let dir = tempfile::TempDir::new().expect("create temp dir");
+        let raw_spelling = dir.path().join(".");
+        let canonical = std::fs::canonicalize(dir.path()).expect("canonicalize temp dir");
+
+        assert_eq!(
+            store_data_dir_identity_hash(&raw_spelling),
+            store_data_dir_identity_hash(&canonical)
+        );
+    }
 }

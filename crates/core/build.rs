@@ -9,7 +9,7 @@ use syn::visit::Visit;
 mod shared_checks {
     include!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../tools/shared/shared_checks.rs"
+        "/build_support/shared_checks.rs"
     ));
 }
 
@@ -42,32 +42,40 @@ struct PubItemAllowlistWitness {
 // errors instead of cryptic compiler failures. See README.md, GUIDE.md, and
 // REFERENCE.md for the current truth hierarchy.
 fn main() {
+    let repo_invariants_available = repo_invariant_surface_available();
+
     println!("cargo:rerun-if-env-changed=BATPAK_PLATFORM_PROFILE");
     println!("cargo:rerun-if-changed=Cargo.toml");
-    println!("cargo:rerun-if-changed=../../Cargo.toml");
     println!("cargo:rerun-if-changed=src/");
-    println!("cargo:rerun-if-changed=tests/");
     println!("cargo:rerun-if-changed=examples/");
-    println!("cargo:rerun-if-changed=benches/");
-    println!("cargo:rerun-if-changed=../macros/src/");
-    println!("cargo:rerun-if-changed=../macros-support/src/");
-    println!("cargo:rerun-if-changed=../../tools/xtask/src/");
-    println!("cargo:rerun-if-changed=../../tools/integrity/src/");
-    println!("cargo:rerun-if-changed=../../tools/shared/shared_checks.rs");
-    println!("cargo:rerun-if-changed=../../traceability/dead_code_silencer_allowlist.yaml");
-    println!("cargo:rerun-if-changed=../../traceability/pub_item_allowlist.yaml");
-    println!("cargo:rerun-if-changed=../../traceability/invariants.yaml");
-    println!("cargo:rerun-if-changed=../../docs/");
+    println!("cargo:rerun-if-changed=build_support/shared_checks.rs");
+    if repo_invariants_available {
+        println!("cargo:rerun-if-changed=../../Cargo.toml");
+        println!("cargo:rerun-if-changed=tests/");
+        println!("cargo:rerun-if-changed=benches/");
+        println!("cargo:rerun-if-changed=../macros/src/");
+        println!("cargo:rerun-if-changed=../macros-support/src/");
+        println!("cargo:rerun-if-changed=../../tools/xtask/src/");
+        println!("cargo:rerun-if-changed=../../tools/integrity/src/");
+        println!("cargo:rerun-if-changed=../../traceability/dead_code_silencer_allowlist.yaml");
+        println!("cargo:rerun-if-changed=../../traceability/pub_item_allowlist.yaml");
+        println!("cargo:rerun-if-changed=../../traceability/invariants.yaml");
+        println!("cargo:rerun-if-changed=../../docs/");
+    }
 
     check_no_tokio_in_deps();
     check_no_banned_patterns();
     check_store_config_field_usage();
-    check_no_dead_code_silencers();
-    check_allow_justifications();
+    if repo_invariants_available {
+        check_no_dead_code_silencers();
+        check_allow_justifications();
+    }
     check_no_stubs_in_src();
     check_store_surface_honesty();
     check_no_fixed_temp_patterns();
-    check_pub_items_have_tests();
+    if repo_invariants_available {
+        check_pub_items_have_tests();
+    }
     check_platform_profile_env();
 }
 
@@ -77,6 +85,20 @@ fn repo_root() -> PathBuf {
 
 fn core_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+}
+
+fn repo_invariant_surface_available() -> bool {
+    let repo_root = repo_root();
+    [
+        repo_root.join("Cargo.toml"),
+        repo_root.join("traceability/dead_code_silencer_allowlist.yaml"),
+        repo_root.join("traceability/pub_item_allowlist.yaml"),
+        repo_root.join("traceability/invariants.yaml"),
+        repo_root.join("tools/xtask/src"),
+        repo_root.join("tools/integrity/src"),
+    ]
+    .iter()
+    .all(|path| path.exists())
 }
 
 fn repo_relative_display(path: &Path) -> String {
