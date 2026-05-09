@@ -57,7 +57,7 @@ fn future_point(store: &Store) -> HlcPoint {
 }
 
 fn point_after(store: &Store, sequence_offset: usize) -> HlcPoint {
-    let snapshot = store.dangerous_watermark_snapshot();
+    let snapshot = store.frontier();
     HlcPoint {
         wall_ms: snapshot.accepted_hlc.wall_ms,
         global_sequence: snapshot
@@ -187,6 +187,7 @@ fn bench_waiters(c: &mut Criterion) {
                 },
             );
 
+            #[cfg(feature = "dangerous-test-hooks")]
             group.bench_with_input(
                 BenchmarkId::new(format!("applied/{}", distribution.label()), waiters),
                 &waiters,

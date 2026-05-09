@@ -10,6 +10,8 @@
 //!   * a SIDX footer with an absurd entry_count never causes the loader to
 //!     allocate against the bogus size — the reopen falls back to the
 //!     permissive frame-scan and still surfaces the pre-corruption entries;
+//!   * a fully-read committed frame with a bad CRC or unreadable metadata
+//!     fails closed instead of silently disappearing from the rebuilt index;
 //!   * truncating a segment mid-frame is observable through reduced
 //!     visibility, not through a panic.
 //!
@@ -450,10 +452,11 @@ fn truncating_segment_mid_frame_never_panics() {
 }
 
 #[test]
-fn valid_crc_unreadable_frame_metadata_skips_only_that_frame() {
+fn valid_crc_unreadable_frame_metadata_fails_closed() {
     // Replacing a data frame with CRC-valid bytes that are not valid
-    // MessagePack exercises the non-CRC metadata decode branch. The scanner
-    // should skip that unreadable frame and continue with later frames.
+    // MessagePack exercises the non-CRC metadata decode branch. This is a
+    // fully-read committed frame, so reopening must fail closed instead of
+    // silently deleting that event from the rebuilt index.
     let dir = TempDir::new().expect("temp dir");
     seed_store(&dir, 5);
 
@@ -472,15 +475,14 @@ fn valid_crc_unreadable_frame_metadata_skips_only_that_frame() {
         |_payload| raw_msgpack_frame(&[0xC1]),
     );
 
-    let store = Store::open(config(&dir)).expect("reopen with CRC-valid unreadable frame");
-    let entries = user_entries(&store);
-    assert_eq!(
-        entries.len(),
-        4,
-        "PROPERTY: CRC-valid unreadable metadata should skip exactly the corrupt data frame and preserve later frames; got {} entries",
-        entries.len()
+    let err = match Store::open(config(&dir)) {
+        Ok(_) => panic!("PROPERTY: CRC-valid unreadable committed metadata must fail closed"),
+        Err(err) => err,
+    };
+    assert!(
+        matches!(err, StoreError::CorruptSegment { .. }),
+        "PROPERTY: CRC-valid unreadable committed metadata must surface as corrupt segment; got {err:?}"
     );
-    store.close().expect("close");
 }
 
 #[test]
@@ -591,7 +593,7 @@ fn missing_hash_chain_for_data_frame_fails_closed_on_reopen() {
 }
 
 #[test]
-fn corruption_inside_staged_batch_discards_the_whole_batch() {
+fn corruption_inside_committed_batch_fails_closed() {
     // Slow-path recovery stages batch items until the COMMIT marker arrives.
     // A CRC failure inside that staged window must discard the entire batch,
     // not leak the valid prefix that appeared before the corruption.
@@ -629,35 +631,12 @@ fn corruption_inside_staged_batch_discards_the_whole_batch() {
     let seg = segment_path(&dir);
     corrupt_second_staged_batch_item_crc(&seg);
 
-    let reopened = Store::open(config(&dir)).expect("reopen with corrupted staged batch item");
-    let entries: Vec<_> = reopened
-        .query(&Region::all())
-        .into_iter()
-        .filter(|entry| {
-            !matches!(
-                entry.kind,
-                EventKind::SYSTEM_OPEN_COMPLETED | EventKind::SYSTEM_CLOSE_COMPLETED
-            )
-        })
-        .collect();
-    assert_eq!(
-        entries.len(),
-        1,
-        "PROPERTY: corruption inside an in-flight staged batch must discard the whole batch and preserve only the unrelated pre-batch event."
-    );
-    let visible = reopened
-        .get(entries[0].event_id)
-        .expect("load surviving pre-batch event");
-    assert_eq!(
-        visible.event.payload["pre"],
-        serde_json::json!(true),
-        "PROPERTY: the surviving event after staged-batch corruption must be the unrelated pre-batch event."
-    );
+    let err = match Store::open(config(&dir)) {
+        Ok(_) => panic!("PROPERTY: corrupted committed batch payload must fail closed"),
+        Err(err) => err,
+    };
     assert!(
-        reopened
-            .query(&Region::entity("entity:scan-corrupt-batch"))
-            .is_empty(),
-        "PROPERTY: corruption on the second staged batch item must discard the whole batch, not leak the staged prefix."
+        matches!(err, StoreError::CrcMismatch { .. }),
+        "PROPERTY: corrupted committed batch payload must surface as CRC mismatch; got {err:?}"
     );
-    reopened.close().expect("close");
 }
