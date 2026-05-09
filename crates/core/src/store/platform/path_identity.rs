@@ -50,16 +50,16 @@ mod tests {
     #[test]
     fn non_unix_path_identity_strips_windows_verbatim_prefix() {
         assert_eq!(
-            normalize_non_unix_path_identity_string("\\\\?\\C:\\store").as_ref(),
-            "C:\\store"
+            normalize_non_unix_path_identity_string("\\\\?\\batpak\\store").as_ref(),
+            "batpak\\store"
         );
         assert_eq!(
             normalize_non_unix_path_identity_string("\\\\?\\UNC\\server\\share\\store").as_ref(),
             "\\\\server\\share\\store"
         );
         assert_eq!(
-            normalize_non_unix_path_identity_string("C:\\store").as_ref(),
-            "C:\\store"
+            normalize_non_unix_path_identity_string("batpak\\store").as_ref(),
+            "batpak\\store"
         );
     }
 }
