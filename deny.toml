@@ -35,6 +35,10 @@ external-default-features = "allow"
 allow = []
 deny = []
 skip = [
+    # dashmap 6.1 pins hashbrown 0.14; build-time yaml_serde pulls indexmap →
+    # hashbrown 0.16. Remove when a stable dashmap release aligns on hashbrown 0.16
+    # (or another single-version resolution path exists).
+    { crate = "hashbrown@0.14.5", reason = "transitive dashmap 6.1 pin vs indexmap/yaml_serde build graph on hashbrown 0.16.1" },
 ]
 skip-tree = []
 
