@@ -1,184 +1,184 @@
 - name: EntityIdType
   justification: macro entrypoint tested through define_entity_id! consumers
   witness:
-    - path: tests/event_api.rs
+    - path: crates/core/tests/event_api.rs
       lines: [8, 17, 43, 95, 137]
 - name: ClockKey
   justification: internal index helper exercised indirectly through store queries and cursor tests
   witness:
-    - path: tests/config_propagation.rs
+    - path: crates/core/tests/config_propagation.rs
       lines: [27]
 - name: DiskPos
   justification: append receipts and reader/index internals exercise it indirectly without naming the type directly
   witness:
-    - path: tests/wire_format.rs
+    - path: crates/core/tests/wire_format.rs
       lines: [333]
 - name: RetentionPredicate
   justification: compaction closures are exercised through CompactionStrategy without test code naming the boxed type alias directly
   witness:
-    - path: tests/store_snapshot_compaction.rs
+    - path: crates/core/tests/store_snapshot_compaction.rs
       lines: [553]
 - name: Active
   justification: typestate marker exercised by segment lifecycle tests
   witness:
-    - path: tests/store_edge_cases.rs
+    - path: crates/core/tests/store_edge_cases.rs
       lines: [80, 95]
 - name: Sealed
   justification: typestate marker exercised by compaction and segment lifecycle tests
   witness:
-    - path: tests/store_edge_cases.rs
+    - path: crates/core/tests/store_edge_cases.rs
       lines: [90, 107]
 - name: SegmentHeader
   justification: serialization shape tested indirectly through wire and fuzz coverage
   witness:
-    - path: tests/fuzz_targets.rs
+    - path: crates/core/tests/fuzz_targets.rs
       lines: [17, 474]
 - name: needs_rotation
   justification: internal segment rotation helper exercised through store integration and rotation tests without direct name references
   witness:
-    - path: tests/store_edge_cases.rs
+    - path: crates/core/tests/store_edge_cases.rs
       lines: [117]
 - name: StoreDiagnostics
   justification: surfaced through diagnostics tests instead of direct type-name references
   witness:
-    - path: tests/store_query_behavior.rs
+    - path: crates/core/tests/store_query_behavior.rs
       lines: [12, 29]
 - name: CompactionResult
   justification: returned by compact and asserted through compaction behavior tests
   witness:
-    - path: tests/store_snapshot_compaction.rs
+    - path: crates/core/tests/store_snapshot_compaction.rs
       lines: [288]
 - name: u128_bytes
   justification: serde helper module referenced through serde attributes rather than direct imports
   witness:
-    - path: tests/wire_format.rs
+    - path: crates/core/tests/wire_format.rs
       lines: [24, 323]
 - name: option_u128_bytes
   justification: serde helper module referenced through serde attributes rather than direct imports
   witness:
-    - path: tests/wire_format.rs
+    - path: crates/core/tests/wire_format.rs
       lines: [24, 336]
 - name: vec_u128_bytes
   justification: serde helper module referenced through serde attributes rather than direct imports
   witness:
-    - path: tests/wire_format.rs
+    - path: crates/core/tests/wire_format.rs
       lines: [24, 357]
 - name: IndexTopology
   justification: config topology type tested through index_topology.rs, unified_topology_red.rs, and bench fixtures
   witness:
-    - path: tests/index_topology.rs
+    - path: crates/core/tests/index_topology.rs
       lines: [3, 9]
-    - path: tests/unified_topology_red.rs
+    - path: crates/core/tests/unified_topology_red.rs
       lines: [19, 41, 60, 79]
-    - path: tests/multi_view_parity.rs
+    - path: crates/core/tests/multi_view_parity.rs
       lines: [5, 76, 225]
 - name: watch_projection
   justification: reactive projection API exercised through raw_projection_mode and derive parity tests
   witness:
-    - path: tests/raw_projection_mode.rs
+    - path: crates/core/tests/raw_projection_mode.rs
       lines: [166, 210, 269]
-    - path: tests/derive_event_sourced_parity.rs
+    - path: crates/core/tests/derive_event_sourced_parity.rs
       lines: [340, 342]
 - name: ProjectionWatcher
   justification: returned by watch_projection and exercised directly in raw projection watch tests
   witness:
-    - path: tests/raw_projection_mode.rs
+    - path: crates/core/tests/raw_projection_mode.rs
       lines: [7, 166, 210, 269]
 - name: BatchAppendItem
-  justification: public batch API type tested through tests/atomic_batch.rs and writer_command_flow.rs
+  justification: public batch API type tested through crates/core/tests/atomic_batch.rs and writer_command_flow.rs
   witness:
-    - path: tests/atomic_batch.rs
+    - path: crates/core/tests/atomic_batch.rs
       lines: [25, 27]
-    - path: tests/writer_command_flow.rs
+    - path: crates/core/tests/writer_command_flow.rs
       lines: [4, 79]
-    - path: tests/event_payload_surface.rs
+    - path: crates/core/tests/event_payload_surface.rs
       lines: [21, 270]
 - name: CausationRef
-  justification: batch causation enum tested through tests/atomic_batch.rs intra-batch linking tests
+  justification: batch causation enum tested through crates/core/tests/atomic_batch.rs intra-batch linking tests
   witness:
-    - path: tests/react_loop_typed.rs
+    - path: crates/core/tests/react_loop_typed.rs
       lines: [89]
-    - path: tests/react_loop_multi.rs
+    - path: crates/core/tests/react_loop_multi.rs
       lines: [113]
-    - path: tests/batch_staging_regression.rs
+    - path: crates/core/tests/batch_staging_regression.rs
       lines: [2]
 - name: InjectionPoint
-  justification: fault injection enum tested through tests/atomic_batch.rs chaos injection tests (dangerous-test-hooks feature)
+  justification: fault injection enum tested through crates/core/tests/atomic_batch.rs chaos injection tests (dangerous-test-hooks feature)
   witness:
-    - path: tests/atomic_batch.rs
+    - path: crates/core/tests/atomic_batch.rs
       lines: [541, 563, 867, 871, 877, 913, 1000]
 - name: FaultInjector
-  justification: fault injection trait tested through tests/atomic_batch.rs custom injector implementations
+  justification: fault injection trait tested through crates/core/tests/atomic_batch.rs custom injector implementations
   witness:
-    - path: tests/atomic_batch.rs
+    - path: crates/core/tests/atomic_batch.rs
       lines: [862]
 - name: CountdownInjector
-  justification: countdown fault injector tested through tests/atomic_batch.rs crash-at-N scenarios
+  justification: countdown fault injector tested through crates/core/tests/atomic_batch.rs crash-at-N scenarios
   witness:
-    - path: tests/atomic_batch.rs
+    - path: crates/core/tests/atomic_batch.rs
       lines: [367, 382, 439, 446, 541, 559, 628, 644, 759, 794, 862, 864, 890, 912, 975, 999]
 - name: CountdownAction
-  justification: fault action enum tested through tests/atomic_batch.rs injector configuration
+  justification: fault action enum tested through crates/core/tests/atomic_batch.rs injector configuration
   witness:
-    - path: tests/atomic_batch.rs
+    - path: crates/core/tests/atomic_batch.rs
       lines: [541, 561, 890, 912, 975, 999]
 - name: __private
   justification: doc-hidden module; all contents exist solely for #[derive(EventPayload)] generated code and cannot be named in user-facing tests
   witness:
-    - path: tests/event_payload_surface.rs
+    - path: crates/core/tests/event_payload_surface.rs
       lines: [20, 61]
 - name: EventPayloadRegistration
   justification: __private struct consumed by inventory::submit! in derive-generated test code; not a user-facing API
   witness:
-    - path: tests/event_payload_surface.rs
+    - path: crates/core/tests/event_payload_surface.rs
       lines: [20, 63]
 - name: scan_for_kind_collisions
   justification: __private function called by derive-generated collision scan tests; not a user-facing API
   witness:
-    - path: tests/event_payload_surface.rs
+    - path: crates/core/tests/event_payload_surface.rs
       lines: [20, 77]
 - name: inventory
   justification: __private re-export used by derive-generated code; not a user-facing API
   witness:
-    - path: tests/event_payload_surface.rs
+    - path: crates/core/tests/event_payload_surface.rs
       lines: [20, 62]
 - name: namespace_prefix_matches
   justification: public namespace-boundary predicate exercised in substrate additions coverage
   witness:
-    - path: tests/substrate_additions.rs
+    - path: crates/core/tests/substrate_additions.rs
       lines: [4, 86, 87]
 - name: evaluations
   justification: denial payload accessors are exercised directly in substrate additions coverage
   witness:
-    - path: tests/substrate_additions.rs
+    - path: crates/core/tests/substrate_additions.rs
       lines: [303, 304, 305, 306, 307, 309]
 - name: pipeline_id
   justification: denial payload accessors are exercised directly in substrate additions coverage
   witness:
-    - path: tests/substrate_additions.rs
+    - path: crates/core/tests/substrate_additions.rs
       lines: [300]
 - name: proposed_kind
   justification: denial payload accessors are exercised directly in substrate additions coverage
   witness:
-    - path: tests/substrate_additions.rs
+    - path: crates/core/tests/substrate_additions.rs
       lines: [301]
 - name: proposed_content_hash
   justification: denial payload accessors are exercised directly in substrate additions coverage
   witness:
-    - path: tests/substrate_additions.rs
+    - path: crates/core/tests/substrate_additions.rs
       lines: [302]
 - name: gate_id
   justification: gate evaluation accessors are exercised directly in substrate additions coverage
   witness:
-    - path: tests/substrate_additions.rs
+    - path: crates/core/tests/substrate_additions.rs
       lines: [304, 307]
 - name: verdict
   justification: gate evaluation accessors are exercised directly in substrate additions coverage
   witness:
-    - path: tests/substrate_additions.rs
+    - path: crates/core/tests/substrate_additions.rs
       lines: [305, 309]
 - name: evidence_hash
   justification: gate evaluation accessors are exercised directly in substrate additions coverage
   witness:
-    - path: tests/substrate_additions.rs
+    - path: crates/core/tests/substrate_additions.rs
       lines: [306]

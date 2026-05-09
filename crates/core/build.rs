@@ -4,10 +4,13 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use syn::visit::Visit;
 mod shared_checks {
-    include!("tools/shared/shared_checks.rs");
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../tools/shared/shared_checks.rs"
+    ));
 }
 
 /// Single documented failure path for build.rs. Every invariant violation
@@ -41,19 +44,20 @@ struct PubItemAllowlistWitness {
 fn main() {
     println!("cargo:rerun-if-env-changed=BATPAK_PLATFORM_PROFILE");
     println!("cargo:rerun-if-changed=Cargo.toml");
+    println!("cargo:rerun-if-changed=../../Cargo.toml");
     println!("cargo:rerun-if-changed=src/");
     println!("cargo:rerun-if-changed=tests/");
     println!("cargo:rerun-if-changed=examples/");
     println!("cargo:rerun-if-changed=benches/");
-    println!("cargo:rerun-if-changed=crates/macros/src/");
-    println!("cargo:rerun-if-changed=crates/macros-support/src/");
-    println!("cargo:rerun-if-changed=tools/xtask/src/");
-    println!("cargo:rerun-if-changed=tools/integrity/src/");
-    println!("cargo:rerun-if-changed=tools/shared/shared_checks.rs");
-    println!("cargo:rerun-if-changed=traceability/dead_code_silencer_allowlist.yaml");
-    println!("cargo:rerun-if-changed=traceability/pub_item_allowlist.yaml");
-    println!("cargo:rerun-if-changed=traceability/invariants.yaml");
-    println!("cargo:rerun-if-changed=docs/adr/");
+    println!("cargo:rerun-if-changed=../macros/src/");
+    println!("cargo:rerun-if-changed=../macros-support/src/");
+    println!("cargo:rerun-if-changed=../../tools/xtask/src/");
+    println!("cargo:rerun-if-changed=../../tools/integrity/src/");
+    println!("cargo:rerun-if-changed=../../tools/shared/shared_checks.rs");
+    println!("cargo:rerun-if-changed=../../traceability/dead_code_silencer_allowlist.yaml");
+    println!("cargo:rerun-if-changed=../../traceability/pub_item_allowlist.yaml");
+    println!("cargo:rerun-if-changed=../../traceability/invariants.yaml");
+    println!("cargo:rerun-if-changed=../../docs/adr/");
 
     check_no_tokio_in_deps();
     check_no_banned_patterns();
@@ -65,6 +69,14 @@ fn main() {
     check_no_fixed_temp_patterns();
     check_pub_items_have_tests();
     check_platform_profile_env();
+}
+
+fn repo_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
+}
+
+fn core_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -354,11 +366,7 @@ fn check_no_stubs_in_src() {
 }
 
 fn check_no_dead_code_silencers() {
-    let repo_root = std::env::current_dir().unwrap_or_else(|err| {
-        fail(&format!(
-            "cannot resolve repo root for dead-code silencer check: {err}"
-        ))
-    });
+    let repo_root = repo_root();
     let allowlisted = shared_checks::load_dead_code_silencer_allowlist(&repo_root)
         .unwrap_or_else(|err| fail(&err));
     walk_dead_code_checked_rs_files(&mut |path, contents| {
@@ -397,11 +405,7 @@ fn check_no_dead_code_silencers() {
 /// toolchain Rust code must carry a structured `// justifies:` comment with
 /// >= 5 words AND >= 1 resolvable anchor (INV-id, ADR-NNNN, or repo path).
 fn check_allow_justifications() {
-    let repo_root = std::env::current_dir().unwrap_or_else(|e| {
-        fail(&format!(
-            "cannot read current_dir while checking justifies: anchors: {e}"
-        ))
-    });
+    let repo_root = repo_root();
     let known_invariants =
         shared_checks::load_known_invariants(&repo_root).unwrap_or_else(|err| fail(&err));
     walk_allow_checked_rs_files(&mut |path, contents| {
@@ -764,7 +768,9 @@ fn check_pub_items_have_tests() {
             ));
         }
         for witness in &entry.witness {
-            if !witness.path.starts_with("tests/") {
+            if !witness.path.starts_with("tests/")
+                && !witness.path.starts_with("crates/core/tests/")
+            {
                 fail(&format!(
                     "pub_item_allowlist entry `{}` witness `{}` must point at a file under tests/, not production code",
                     entry.name, witness.path
@@ -776,8 +782,8 @@ fn check_pub_items_have_tests() {
                     entry.name, witness.path
                 ));
             }
-            let witness_path = Path::new(&witness.path);
-            let content = match fs::read_to_string(witness_path) {
+            let witness_path = resolve_repo_or_core_path(&witness.path);
+            let content = match fs::read_to_string(&witness_path) {
                 Ok(c) => c,
                 Err(err) => fail(&format!(
                     "pub_item_allowlist entry `{}` witness `{}` cannot be read: {err}",
@@ -882,8 +888,9 @@ fn item_line_in_file(contents: &str, name: &str) -> (usize, usize) {
 }
 
 fn load_pub_item_allowlist() -> Vec<PubItemAllowlistEntry> {
-    let path = Path::new("traceability/pub_item_allowlist.yaml");
-    let contents = fs::read_to_string(path)
+    let repo_root = repo_root();
+    let path = repo_root.join("traceability/pub_item_allowlist.yaml");
+    let contents = fs::read_to_string(&path)
         .unwrap_or_else(|err| fail(&format!("failed to read {}: {err}", path.display())));
     let entries: Vec<PubItemAllowlistEntry> = yaml_serde::from_str(&contents)
         .unwrap_or_else(|err| fail(&format!("failed to parse {}: {err}", path.display())));
@@ -906,6 +913,24 @@ fn load_pub_item_allowlist() -> Vec<PubItemAllowlistEntry> {
     entries
 }
 
+fn resolve_repo_or_core_path(path: &str) -> PathBuf {
+    let path = Path::new(path);
+    let repo_path = repo_root().join(path);
+    if repo_path.exists() {
+        return repo_path;
+    }
+    if path.starts_with("src")
+        || path.starts_with("tests")
+        || path.starts_with("examples")
+        || path.starts_with("benches")
+        || path.starts_with("fixtures")
+        || path == Path::new("build.rs")
+    {
+        return core_root().join(path);
+    }
+    repo_path
+}
+
 fn walk_rs_files(dir: &Path, check: &mut dyn FnMut(&Path, &str)) {
     //Recursive directory walk. Only reads .rs files.
     //Uses std::fs only — no external deps allowed in build scripts
@@ -925,13 +950,15 @@ fn walk_rs_files(dir: &Path, check: &mut dyn FnMut(&Path, &str)) {
 }
 
 fn walk_allow_checked_rs_files(check: &mut dyn FnMut(&Path, &str)) {
+    let core_root = core_root();
+    let repo_root = repo_root();
     let roots = [
-        Path::new("build.rs"),
-        Path::new("src"),
-        Path::new("tools/xtask/src"),
-        Path::new("tools/integrity/src"),
+        core_root.join("build.rs"),
+        core_root.join("src"),
+        repo_root.join("tools/xtask/src"),
+        repo_root.join("tools/integrity/src"),
     ];
-    for root in roots {
+    for root in &roots {
         if root.is_file() {
             if let Ok(contents) = fs::read_to_string(root) {
                 check(root, &contents);
@@ -943,18 +970,20 @@ fn walk_allow_checked_rs_files(check: &mut dyn FnMut(&Path, &str)) {
 }
 
 fn walk_dead_code_checked_rs_files(check: &mut dyn FnMut(&Path, &str)) {
+    let core_root = core_root();
+    let repo_root = repo_root();
     let roots = [
-        Path::new("build.rs"),
-        Path::new("src"),
-        Path::new("tests"),
-        Path::new("examples"),
-        Path::new("benches"),
-        Path::new("tools/xtask/src"),
-        Path::new("tools/integrity/src"),
-        Path::new("crates/macros/src"),
-        Path::new("crates/macros-support/src"),
+        core_root.join("build.rs"),
+        core_root.join("src"),
+        core_root.join("tests"),
+        core_root.join("examples"),
+        core_root.join("benches"),
+        repo_root.join("tools/xtask/src"),
+        repo_root.join("tools/integrity/src"),
+        repo_root.join("crates/macros/src"),
+        repo_root.join("crates/macros-support/src"),
     ];
-    for root in roots {
+    for root in &roots {
         if root.is_file() {
             if let Ok(contents) = fs::read_to_string(root) {
                 check(root, &contents);

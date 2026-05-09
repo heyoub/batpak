@@ -8,7 +8,7 @@ non-auto-merge policy vocabulary inside batpak core.
 
 ## What batpak already owns
 
-- `batpak::registry` attested row mechanics (`src/registry.rs`):
+- `batpak::registry` attested row mechanics (`crates/core/src/registry.rs`):
   canonical row bodies, `row_hash`, drift and verification reports with sorted
   findings, supersession graph hygiene, and composition with
   `CanonicalArtifactEnvelope`.

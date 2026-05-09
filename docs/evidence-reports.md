@@ -15,12 +15,12 @@ This follows `docs/adr/ADR-0019-canonical-encoding-contract.md`.
 
 ## Family Members
 
-- `SchemaSnapshotEvidenceReport` (`src/schema.rs`)
-- `ChainWalkEvidenceReport` (`src/store/chain_walk.rs`)
-- `SubscriberFrontierEvidenceReport` (`src/store/subscriber_frontier.rs`)
-- `ProjectionRunEvidenceReport` (`src/store/projection_run.rs`)
-- `ReadWalkEvidenceReport` (`src/store/read_walk.rs`)
-- `StoreResourceEvidenceReport` / `StoreResourceEnvelope` (`src/store/store_resource_report.rs`)
+- `SchemaSnapshotEvidenceReport` (`crates/core/src/schema.rs`)
+- `ChainWalkEvidenceReport` (`crates/core/src/store/chain_walk.rs`)
+- `SubscriberFrontierEvidenceReport` (`crates/core/src/store/subscriber_frontier.rs`)
+- `ProjectionRunEvidenceReport` (`crates/core/src/store/projection_run.rs`)
+- `ReadWalkEvidenceReport` (`crates/core/src/store/read_walk.rs`)
+- `StoreResourceEvidenceReport` / `StoreResourceEnvelope` (`crates/core/src/store/store_resource_report.rs`)
 
 ## Arc Seal (v1 Family)
 

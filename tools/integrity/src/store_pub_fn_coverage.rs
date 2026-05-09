@@ -1,4 +1,4 @@
-use crate::repo_surface::rust_files;
+use crate::repo_surface::{core_src_root, core_tests_root, rust_files};
 use anyhow::{bail, Context, Result};
 use std::collections::BTreeSet;
 use std::fs;
@@ -7,7 +7,7 @@ use syn::visit::{self, Visit};
 use syn::Item;
 
 /// Assert that every `pub fn` declared in inherent `impl Store { ... }` blocks
-/// under `src/store/` has at least one reference in the test or source tree.
+/// under `crates/core/src/store/` has at least one reference in the test or source tree.
 ///
 /// This is a structural guard: if a method is added to `Store` and no test
 /// exercises it, a developer (or agent) has likely forgotten to write the test.
@@ -33,7 +33,7 @@ pub(crate) fn check(repo_root: &Path) -> Result<()> {
     // owner modules; the detector follows that architecture instead of
     // hardcoding `src/store/mod.rs`.
     let mut pub_fns: BTreeSet<String> = BTreeSet::new();
-    for store_source_path in rust_files(&repo_root.join("src/store")) {
+    for store_source_path in rust_files(&core_src_root(repo_root).join("store")) {
         let source = fs::read_to_string(&store_source_path)
             .with_context(|| format!("read {}", store_source_path.display()))?;
         let ast = syn::parse_file(&source)
@@ -76,7 +76,7 @@ pub(crate) fn check(repo_root: &Path) -> Result<()> {
     if pub_fns.is_empty() {
         bail!(
             "structural-check: Store pub fn coverage — could not find any `impl Store` \
-             block under src/store/. The Store surface may have moved outside the declared owner."
+             block under crates/core/src/store/. The Store surface may have moved outside the declared owner."
         );
     }
 
@@ -84,9 +84,9 @@ pub(crate) fn check(repo_root: &Path) -> Result<()> {
     // Compile-fail UI fixtures are intentionally invalid Rust and are skipped;
     // comments and string literals never count because reference detection is AST-based.
     let mut search_asts = Vec::new();
-    for path in rust_files(&repo_root.join("tests"))
+    for path in rust_files(&core_tests_root(repo_root))
         .into_iter()
-        .chain(rust_files(&repo_root.join("src")))
+        .chain(rust_files(&core_src_root(repo_root)))
     {
         let content = match fs::read_to_string(&path) {
             Ok(content) => content,
@@ -123,7 +123,7 @@ pub(crate) fn check(repo_root: &Path) -> Result<()> {
             "structural-check: Store pub fn coverage failure — the following methods on\n\
              `impl Store` have ZERO test or source references and are likely orphaned:\n\
              {list}\n\
-             Investigate: src/store/ and add a test exercising each, or remove the\n\
+             Investigate: crates/core/src/store/ and add a test exercising each, or remove the\n\
              method if it's truly unused."
         );
     }

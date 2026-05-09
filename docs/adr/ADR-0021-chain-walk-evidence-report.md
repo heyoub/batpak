@@ -81,7 +81,7 @@ This decision does not:
 
 ## References
 
-- `src/store/mod.rs` (`Store::walk_ancestors`, `Store::chain_walk_evidence`)
-- `src/store/chain_walk.rs`
+- `crates/core/src/store/mod.rs` (`Store::walk_ancestors`, `Store::chain_walk_evidence`)
+- `crates/core/src/store/chain_walk.rs`
 - `docs/adr/ADR-0019-canonical-encoding-contract.md`
 - `docs/adr/ADR-0020-schema-snapshot-drift-report.md`

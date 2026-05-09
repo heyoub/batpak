@@ -1,4 +1,7 @@
-use crate::repo_surface::{ensure, load_yaml, relative, rust_files};
+use crate::repo_surface::{
+    core_src_root, core_tests_root, ensure, load_yaml, relative, resolve_repo_or_core_path,
+    rust_files,
+};
 use crate::shared_checks::{ast_references_name, public_item_names};
 use anyhow::{Context, Result};
 use serde::Deserialize;
@@ -60,7 +63,8 @@ pub(crate) fn check(repo_root: &Path) -> Result<()> {
         )?;
         for witness in &entry.witness {
             ensure(
-                witness.path.starts_with("tests/"),
+                witness.path.starts_with("tests/")
+                    || witness.path.starts_with("crates/core/tests/"),
                 format!(
                     "pub_item_allowlist entry `{}` witness `{}` must point at a file under tests/, not production code",
                     entry.name, witness.path
@@ -73,7 +77,7 @@ pub(crate) fn check(repo_root: &Path) -> Result<()> {
                     entry.name, witness.path
                 ),
             )?;
-            let abs = repo_root.join(&witness.path);
+            let abs = resolve_repo_or_core_path(repo_root, &witness.path);
             ensure(
                 abs.exists(),
                 format!(
@@ -98,7 +102,7 @@ pub(crate) fn check(repo_root: &Path) -> Result<()> {
         }
     }
 
-    let test_files: Vec<PathBuf> = rust_files(&repo_root.join("tests"));
+    let test_files: Vec<PathBuf> = rust_files(&core_tests_root(repo_root));
     let mut parsed_tests: Vec<(PathBuf, syn::File)> = Vec::with_capacity(test_files.len());
     for path in test_files {
         let content = fs::read_to_string(&path)
@@ -108,7 +112,7 @@ pub(crate) fn check(repo_root: &Path) -> Result<()> {
         parsed_tests.push((path, file));
     }
 
-    for path in rust_files(&repo_root.join("src")) {
+    for path in rust_files(&core_src_root(repo_root)) {
         if path.ends_with("prelude.rs") {
             continue;
         }
@@ -138,21 +142,21 @@ pub(crate) fn check(repo_root: &Path) -> Result<()> {
 
 fn check_doc_hidden_public_surface(repo_root: &Path) -> Result<()> {
     let allowed: BTreeSet<&str> = [
-        "src/lib.rs::__private",
-        "src/lib.rs::batpak",
-        "src/store/delivery/subscription.rs::receiver",
-        "src/store/projection/flow/mod.rs::ReplayInput",
-        "src/store/projection/flow/replay_input.rs::ReplayInput",
-        "src/store/projection/watch.rs::subscription",
-        "src/store/segment/scan/mod.rs::Reader",
-        "src/store/test_support.rs::panic_writer_for_test",
-        "src/typestate/transition.rs::sealed",
+        "crates/core/src/lib.rs::__private",
+        "crates/core/src/lib.rs::batpak",
+        "crates/core/src/store/delivery/subscription.rs::receiver",
+        "crates/core/src/store/projection/flow/mod.rs::ReplayInput",
+        "crates/core/src/store/projection/flow/replay_input.rs::ReplayInput",
+        "crates/core/src/store/projection/watch.rs::subscription",
+        "crates/core/src/store/segment/scan/mod.rs::Reader",
+        "crates/core/src/store/test_support.rs::panic_writer_for_test",
+        "crates/core/src/typestate/transition.rs::sealed",
     ]
     .into_iter()
     .collect();
 
     let mut unexpected = Vec::new();
-    for path in rust_files(&repo_root.join("src")) {
+    for path in rust_files(&core_src_root(repo_root)) {
         let rel = relative(repo_root, &path);
         let content = fs::read_to_string(&path)?;
         let file = syn::parse_file(&content)

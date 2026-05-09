@@ -32,8 +32,8 @@ The benchmark and gate surfaces used in this memo are:
 - `cargo xtask doctor`
 - `cargo xtask bench --surface neutral`
 - `cargo xtask perf-gates`
-- targeted native-only benchmark surfaces in `benches/unified_bench.rs` and
-  `benches/batch_throughput.rs`
+- targeted native-only benchmark surfaces in `crates/core/benches/unified_bench.rs` and
+  `crates/core/benches/batch_throughput.rs`
 
 The key environment reading came from `cargo xtask doctor`, whose fsync probe
 reported approximately:
@@ -48,7 +48,7 @@ matters because the sync-heavy write surfaces in this tree are sensitive enough
 that environment quality can dominate the result.
 
 The benchmark session also included the fresh benchmark-harness fix in
-`benches/projection_latency.rs`, which made reopen/close timing reflect the
+`crates/core/benches/projection_latency.rs`, which made reopen/close timing reflect the
 current exclusive store-lock contract instead of relying on a stale harness
 assumption.
 
@@ -131,7 +131,7 @@ Against that, uncontended group-commit drain width helps far less:
 - unbounded: `325 elem/s`
 
 The runtime truth that matches those numbers is in
-`src/store/write/writer/runtime.rs`: the writer drains already-queued ordinary
+`crates/core/src/store/write/writer/runtime.rs`: the writer drains already-queued ordinary
 appends opportunistically, but the cadence loop is what controls when periodic
 sync is attempted.
 
@@ -204,10 +204,10 @@ It is not.
 Current blockers:
 
 - segment scan has skip-and-continue behavior for unreadable payload decode in
-  `src/store/segment/scan/full_scan.rs`
+  `crates/core/src/store/segment/scan/full_scan.rs`
 - `frame_decode` accepts a zero-length frame shape, so a zero-filled tail is
   not a clean terminal condition by default
-- SIDX boundary discovery in `src/store/segment/mod.rs` is anchored to physical
+- SIDX boundary discovery in `crates/core/src/store/segment/mod.rs` is anchored to physical
   EOF, not logical end-of-data
 
 The consequence is that visible-EOF preallocation is not a one-line storage
@@ -280,12 +280,12 @@ Operationally relevant non-commits reinforced by this memo:
 ## Cross-reference
 
 - Environment hint ladder: `tools/integrity/src/main.rs`
-- Writer cadence drain loop: `src/store/write/writer/runtime.rs`
-- Single append path: `src/store/write/writer/append.rs`
-- Batch sync-before-visible path: `src/store/write/writer/batch.rs`
-- Segment frame decode and SIDX boundary discovery: `src/store/segment/mod.rs`
-- Segment scan behavior: `src/store/segment/scan/full_scan.rs`
+- Writer cadence drain loop: `crates/core/src/store/write/writer/runtime.rs`
+- Single append path: `crates/core/src/store/write/writer/append.rs`
+- Batch sync-before-visible path: `crates/core/src/store/write/writer/batch.rs`
+- Segment frame decode and SIDX boundary discovery: `crates/core/src/store/segment/mod.rs`
+- Segment scan behavior: `crates/core/src/store/segment/scan/full_scan.rs`
 - New batching/cadence benchmark surfaces:
-  - `benches/unified_bench.rs`
-  - `benches/batch_throughput.rs`
+  - `crates/core/benches/unified_bench.rs`
+  - `crates/core/benches/batch_throughput.rs`
 - Technical reference tuning surface: `REFERENCE.md`

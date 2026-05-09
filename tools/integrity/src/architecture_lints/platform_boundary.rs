@@ -36,7 +36,8 @@ pub(super) fn check(repo_root: &Path, tracked_files: &[PathBuf]) -> Result<()> {
 
     for path in tracked_files {
         let rel = relative(repo_root, path);
-        if !rel.starts_with("src/store/")
+        if !(rel.starts_with("crates/core/src/store/") || rel.starts_with("src/store/"))
+            || rel.starts_with("crates/core/src/store/platform/")
             || rel.starts_with("src/store/platform/")
             || path.extension().and_then(|ext| ext.to_str()) != Some("rs")
         {

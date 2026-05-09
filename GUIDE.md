@@ -51,7 +51,7 @@ library boundary, keep a checked-in table such as `kinds.yaml`, and allocate
 `validate_event_payload_registry()` in integration tests or set
 `StoreConfig::with_event_payload_validation(EventPayloadValidation::FailFast)`
 when a duplicate linked payload kind must reject store open instead of only
-emitting the default one-time warning. See `examples/cross_crate_payloads.rs`
+emitting the default one-time warning. See `crates/core/examples/cross_crate_payloads.rs`
 for the startup validation pattern.
 
 ## Append And Query
@@ -244,11 +244,11 @@ shows the JSON decode lane is costing real time.
 
 Current bench signal:
 
-- `benches/replay_lanes.rs` is the current witness surface for the replay-lane
+- `crates/core/benches/replay_lanes.rs` is the current witness surface for the replay-lane
   tradeoff and currently shows `RawMsgpackInput` ahead on the 1k-event
   counter-shaped workload in this tree
-- `examples/event_sourced_counter.rs` is the ergonomic default template
-- `examples/raw_projection_counter.rs` is the performance-lane template
+- `crates/core/examples/event_sourced_counter.rs` is the ergonomic default template
+- `crates/core/examples/raw_projection_counter.rs` is the performance-lane template
 
 Use `supports_incremental_apply() -> true` on your `EventSourced` type plus
 `StoreConfig::with_incremental_projection(true)` when the projection is a pure

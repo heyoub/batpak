@@ -67,6 +67,11 @@ pub(crate) fn extract_anchors(body: &str) -> Vec<JustifiesAnchor> {
             "src/",
             "tests/",
             "examples/",
+            "crates/core/src/",
+            "crates/core/tests/",
+            "crates/core/examples/",
+            "crates/core/benches/",
+            "crates/core/fixtures/",
             "crates/macros/",
             "crates/macros-support/",
             "benches/",
@@ -139,8 +144,30 @@ fn resolve_anchor(
                 })
                 .unwrap_or(false)
         }
-        JustifiesAnchor::Path(rel) => repo_root.join(rel).exists(),
+        JustifiesAnchor::Path(rel) => resolve_repo_or_core_path(repo_root, rel).exists(),
     }
+}
+
+fn resolve_repo_or_core_path(repo_root: &Path, rel: &Path) -> PathBuf {
+    let direct = repo_root.join(rel);
+    if direct.exists() {
+        return direct;
+    }
+    if is_primary_crate_relative_path(rel) {
+        return repo_root.join("crates/core").join(rel);
+    }
+    direct
+}
+
+fn is_primary_crate_relative_path(rel: &Path) -> bool {
+    let rel = rel.to_string_lossy().replace('\\', "/");
+    rel == "build.rs"
+        || rel.starts_with("build.rs:")
+        || rel.starts_with("src/")
+        || rel.starts_with("tests/")
+        || rel.starts_with("examples/")
+        || rel.starts_with("benches/")
+        || rel.starts_with("fixtures/")
 }
 
 /// Parse a single source line and return true if it carries a structured
@@ -235,7 +262,7 @@ pub(crate) fn load_dead_code_silencer_allowlist(
                 site
             )
         })?;
-        let abs = repo_root.join(rel_path);
+        let abs = resolve_repo_or_core_path(repo_root, Path::new(rel_path));
         if !abs.exists() {
             return Err(format!(
                 "{} entry `{}` points at missing file `{}`",
@@ -741,8 +768,10 @@ struct UsesDerive;
             "derive macro attributes are real public-item witnesses"
         );
 
-        let config_propagation = syn::parse_file(include_str!("../../tests/config_propagation.rs"))
-            .expect("parse config_propagation fixture");
+        let config_propagation = syn::parse_file(include_str!(
+            "../../crates/core/tests/config_propagation.rs"
+        ))
+        .expect("parse config_propagation fixture");
         assert!(
             super::ast_references_name(&config_propagation, "ClockKey"),
             "pub_item_allowlist witnesses may use struct-literal construction as behavioral coverage"

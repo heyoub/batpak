@@ -70,7 +70,7 @@ jobs:
       - name: Integrity
         run: cargo xtask ci
       - name: Cross-crate EventPayload registry fixture
-        run: cargo test --release --manifest-path fixtures/kind-collision-composer/Cargo.toml
+        run: cargo test --release --manifest-path crates/core/fixtures/kind-collision-composer/Cargo.toml
 
   feature-isolation:
     runs-on: ubuntu-latest

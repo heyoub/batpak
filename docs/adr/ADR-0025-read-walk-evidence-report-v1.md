@@ -45,4 +45,4 @@ visible index state; `freshness_intent` is not a stale-cache execution promise.
 
 - `docs/adr/ADR-0019-canonical-encoding-contract.md`
 - `docs/evidence-reports.md`
-- `src/store/read_walk.rs`
+- `crates/core/src/store/read_walk.rs`

@@ -119,5 +119,5 @@ unchanged by close-event emission.
   `FLOW-FRONTIER-BOOTSTRAP`, `FLOW-FRONTIER-CHAOS-RECOVERY`
 - `traceability/observations.yaml`:
   `OBS-CADENCE-GT-1-VISIBLE-EXCEEDS-DURABLE`
-- `tests/durable_frontier_semantics.rs`
-- `tests/durable_frontier_chaos.rs`
+- `crates/core/tests/durable_frontier_semantics.rs`
+- `crates/core/tests/durable_frontier_chaos.rs`

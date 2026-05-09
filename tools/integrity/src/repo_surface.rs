@@ -6,9 +6,58 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use walkdir::WalkDir;
 
+pub(crate) const CORE_CRATE_REL: &str = "crates/core";
+
+pub(crate) fn core_crate_root(repo_root: &Path) -> PathBuf {
+    repo_root.join(CORE_CRATE_REL)
+}
+
+pub(crate) fn core_src_root(repo_root: &Path) -> PathBuf {
+    core_crate_root(repo_root).join("src")
+}
+
+pub(crate) fn core_tests_root(repo_root: &Path) -> PathBuf {
+    core_crate_root(repo_root).join("tests")
+}
+
+pub(crate) fn core_examples_root(repo_root: &Path) -> PathBuf {
+    core_crate_root(repo_root).join("examples")
+}
+
+pub(crate) fn core_benches_root(repo_root: &Path) -> PathBuf {
+    core_crate_root(repo_root).join("benches")
+}
+
+pub(crate) fn core_path(repo_root: &Path, crate_relative: impl AsRef<Path>) -> PathBuf {
+    core_crate_root(repo_root).join(crate_relative)
+}
+
+pub(crate) fn resolve_repo_or_core_path(repo_root: &Path, rel: impl AsRef<Path>) -> PathBuf {
+    let rel = rel.as_ref();
+    let direct = repo_root.join(rel);
+    if direct.exists() {
+        return direct;
+    }
+    if is_primary_crate_relative_path(rel) {
+        return core_path(repo_root, rel);
+    }
+    direct
+}
+
+fn is_primary_crate_relative_path(rel: &Path) -> bool {
+    let rel = rel.to_string_lossy().replace('\\', "/");
+    rel == "build.rs"
+        || rel.starts_with("build.rs:")
+        || rel.starts_with("src/")
+        || rel.starts_with("tests/")
+        || rel.starts_with("examples/")
+        || rel.starts_with("benches/")
+        || rel.starts_with("fixtures/")
+}
+
 pub(crate) fn tracked_repo_files(repo_root: &Path) -> Result<Vec<PathBuf>> {
     let output = Command::new("git")
-        .args(["ls-files"])
+        .args(["ls-files", "--cached", "--others", "--exclude-standard"])
         .current_dir(repo_root)
         .output()
         .context("git ls-files")?;

@@ -9,7 +9,7 @@ a small proof-object gap: projection run facts were available across existing
 projection/frontier/cache surfaces, but not bound into one deterministic report.
 
 ## Decision
-batpak adds `Store::project_run_evidence` and `src/store/projection_run.rs`.
+batpak adds `Store::project_run_evidence` and `crates/core/src/store/projection_run.rs`.
 v1 reuses existing projection machinery (`project` flow, freshness policy,
 frontier view, projection id derivation) and reports known/not-applicable/
 unavailable states explicitly.
@@ -75,4 +75,4 @@ This slice does not add:
 - `docs/adr/ADR-0019-canonical-encoding-contract.md`
 - `docs/adr/ADR-0023-projection-run-evidence-report-design.md`
 - `docs/evidence-reports.md`
-- `src/store/projection_run.rs`
+- `crates/core/src/store/projection_run.rs`

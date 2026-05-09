@@ -67,4 +67,4 @@ Exactly-once composition now has a type-level path:
 - [ADR-0014: Durable Frontier Observability](ADR-0014-durable-frontier.md)
 - `traceability/invariants.yaml`: `INV-DELIVERY-AT-LEAST-ONCE-WITNESS`
 - `traceability/flows.yaml`: `FLOW-DELIVERY-AT-LEAST-ONCE-WITNESS`
-- `tests/cursor_at_least_once_witness.rs`
+- `crates/core/tests/cursor_at_least_once_witness.rs`
