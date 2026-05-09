@@ -131,21 +131,30 @@ fn resolve_anchor(
         JustifiesAnchor::Invariant(id) => known_invariants.contains(id),
         JustifiesAnchor::Adr(n) => {
             let prefix = format!("ADR-{n:04}");
-            let dir = repo_root.join("docs/adr");
-            fs::read_dir(&dir)
-                .ok()
-                .map(|it| {
-                    it.flatten().any(|entry| {
-                        entry
-                            .file_name()
-                            .to_str()
-                            .is_some_and(|name| name.starts_with(&prefix))
-                    })
-                })
-                .unwrap_or(false)
+            adr_file_with_prefix_exists(repo_root, &prefix)
         }
         JustifiesAnchor::Path(rel) => resolve_repo_or_core_path(repo_root, rel).exists(),
     }
+}
+
+fn adr_file_with_prefix_exists(repo_root: &Path, prefix: &str) -> bool {
+    adr_search_dirs(repo_root).into_iter().any(|dir| {
+        fs::read_dir(&dir)
+            .ok()
+            .map(|it| {
+                it.flatten().any(|entry| {
+                    entry
+                        .file_name()
+                        .to_str()
+                        .is_some_and(|name| name.starts_with(prefix))
+                })
+            })
+            .unwrap_or(false)
+    })
+}
+
+fn adr_search_dirs(repo_root: &Path) -> [PathBuf; 2] {
+    [repo_root.join("docs"), repo_root.join("docs/adr")]
 }
 
 fn resolve_repo_or_core_path(repo_root: &Path, rel: &Path) -> PathBuf {
@@ -299,18 +308,7 @@ fn adr_exists(repo_root: &Path, adr: &str) -> bool {
         return false;
     }
     let prefix = format!("ADR-{digits}");
-    let dir = repo_root.join("docs/adr");
-    fs::read_dir(&dir)
-        .ok()
-        .map(|it| {
-            it.flatten().any(|entry| {
-                entry
-                    .file_name()
-                    .to_str()
-                    .is_some_and(|name| name.starts_with(&prefix))
-            })
-        })
-        .unwrap_or(false)
+    adr_file_with_prefix_exists(repo_root, &prefix)
 }
 
 struct DeadCodeSilencerCollector<'a> {

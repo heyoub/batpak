@@ -294,43 +294,43 @@
 - id: ART-ADR-SYNC
   kind: adr
   paths:
-    - docs/adr/ADR-0001-sync-only-store.md
+    - docs/ADR-0001-sync-only-store.md
 - id: ART-ADR-COMPACTION
   kind: adr
   paths:
-    - docs/adr/ADR-0004-compaction-concurrency.md
+    - docs/ADR-0004-compaction-concurrency.md
 - id: ART-ADR-CONTROL-PLANE
   kind: adr
   paths:
-    - docs/adr/ADR-0007-control-plane-and-fast-start.md
+    - docs/ADR-0007-control-plane-and-fast-start.md
 - id: ART-ADR-DURABLE-FRONTIER
   kind: adr
   paths:
-    - docs/adr/ADR-0014-durable-frontier.md
+    - docs/ADR-0014-durable-frontier.md
 - id: ART-ADR-CHAOS-HARNESS
   kind: adr
   paths:
-    - docs/adr/ADR-0015-chaos-harness-dm-flakey.md
+    - docs/ADR-0015-chaos-harness-dm-flakey.md
 - id: ART-ADR-DURABILITY-GATING
   kind: adr
   paths:
-    - docs/adr/ADR-0016-durability-gating.md
+    - docs/ADR-0016-durability-gating.md
 - id: ART-ADR-AT-LEAST-ONCE-WITNESS
   kind: adr
   paths:
-    - docs/adr/ADR-0017-at-least-once-witness-surface.md
+    - docs/ADR-0017-at-least-once-witness-surface.md
 - id: ART-ADR-STORE-PLATFORM
   kind: adr
   paths:
-    - docs/adr/ADR-0018-store-platform-backend.md
+    - docs/ADR-0018-store-platform-backend.md
 - id: ART-ADR-RESTORE-PLANNER
   kind: adr
   paths:
-    - docs/adr/ADR-0008-restore-planner-and-projection-trait.md
+    - docs/ADR-0008-restore-planner-and-projection-trait.md
 - id: ART-ADR-POSITION-HINTS
   kind: adr
   paths:
-    - docs/adr/ADR-0009-position-hints-and-artifact-upgrades.md
+    - docs/ADR-0009-position-hints-and-artifact-upgrades.md
 - id: ART-STORE-INTERNER
   kind: source
   paths:

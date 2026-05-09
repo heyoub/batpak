@@ -11,7 +11,7 @@ single identity pattern:
 - operational metadata (`generated_at_unix_ms`, `batpak_version`,
   `diagnostics`) outside deterministic body identity
 
-This follows `docs/adr/ADR-0019-canonical-encoding-contract.md`.
+This follows `docs/ADR-0019-canonical-encoding-contract.md`.
 
 ## Family Members
 
@@ -22,10 +22,10 @@ This follows `docs/adr/ADR-0019-canonical-encoding-contract.md`.
 - `ReadWalkEvidenceReport` (`crates/core/src/store/read_walk.rs`)
 - `StoreResourceEvidenceReport` / `StoreResourceEnvelope` (`crates/core/src/store/store_resource_report.rs`)
 
-## Arc Seal (v1 Family)
+## v1 Family Seal
 
-The first batpak evidence-report family is considered complete for this
-extraction arc:
+The first batpak evidence-report family is complete for the current substrate
+surface:
 
 - canonical identity contract (`ADR-0019`)
 - schema/fixture drift evidence (`ADR-0020`)
@@ -35,8 +35,8 @@ extraction arc:
 - read walk evidence (`ADR-0025`)
 - store resource evidence (diagnostics snapshot envelope; schema v1 in-tree)
 
-This family is intentionally bounded. New report types require concrete pressure
-that cannot be satisfied by existing report bodies.
+This family is intentionally bounded. New report types require concrete
+substrate pressure that cannot be satisfied by existing report bodies.
 
 ## Shared Contracts
 
@@ -51,11 +51,12 @@ that cannot be satisfied by existing report bodies.
   facts. Use `Known` when batpak already exposes the value, `NotApplicable` when
   the field does not apply, `NotTracked` only when the substrate does not track
   the fact, and `Unavailable` for deterministic acquisition/encoding failures.
-- **Non-capture of runtime configuration:** canonical report bodies intentionally
-  do not attest to `StoreConfig`, platform profile paths, registry validation
-  mode, signing-key configuration, durability gates, or the active hash feature.
-  Those facts must be correlated through configuration, diagnostics, platform
-  profiles, and build metadata when they matter to an audit.
+- **Non-capture of runtime configuration:** canonical report bodies
+  intentionally do not attest to `StoreConfig`, platform profile paths, registry
+  validation mode, signing-key configuration, durability gates, or the active
+  hash feature. Those facts must be correlated through configuration,
+  diagnostics, platform profiles, and build metadata when they matter to an
+  audit.
 
 ## What Each Report Proves
 
@@ -72,8 +73,8 @@ that cannot be satisfied by existing report bodies.
   projection machinery; not workflow or protocol projection meaning.
 - `ReadWalkEvidenceReport`: deterministic opt-in read selector/boundary/count/
   limit/proof-ref observations. Its `freshness_intent` records caller intent;
-  v1 still samples current visible index state rather than applying a stale-cache
-  read policy.
+  v1 still samples current visible index state rather than applying a
+  stale-cache read policy.
 - `StoreResourceEvidenceReport`: deterministic snapshot over stable
   `StoreDiagnostics` fields (counts, frontier coordinates, writer pressure,
   topology label, optional cold-start `OpenIndexReport`, platform evidence).
@@ -81,19 +82,20 @@ that cannot be satisfied by existing report bodies.
   digest. Bodies are point-in-time: full byte equality across `close`/`open` is
   not a contract because cold-start path and replayed system events can differ.
 
-## Forensic query composition (no extra nominal type)
+## Forensic Query Composition
 
-Generic “forensic query export” in batpak is **`ReadWalkEvidenceReport` plus
-`CanonicalArtifactEnvelope`** when attestation or multi-artifact bundling is
-required. See `docs/extraction/forensic-query-envelope.md` for the closure
-disposition.
+Generic forensic query export in batpak is `ReadWalkEvidenceReport` plus
+`CanonicalArtifactEnvelope` when attestation or multi-artifact bundling is
+required. A dedicated nominal forensic-query envelope is not part of the current
+substrate surface.
 
 ## Public Surface
 
 Evidence reports are exported from `batpak::store` and the prelude when the
-types are practical caller-facing API, not internal fixture details. Hash aliases
-and lower-level helper states stay in their owning modules unless consumers need
-them to pattern-match report bodies without reaching through private internals.
+types are practical caller-facing API, not internal fixture details. Hash
+aliases and lower-level helper states stay in their owning modules unless
+consumers need them to pattern-match report bodies without reaching through
+private internals.
 
 ## Non-goals
 
@@ -101,15 +103,17 @@ them to pattern-match report bodies without reaching through private internals.
 - No downstream application vocabulary.
 - No implied exactness where internals only support coarse or unknown precision.
 
-## Intentionally Parked
+## Owned Outside This Family
 
-- Canonical artifact envelope.
-- Attested registry.
-- Reservation ledger.
-- State transition report.
-- Dedicated forensic query envelope type (composition path documented above).
-- Deterministic phase cache (tooling design only until repeated measured pain).
-- Process/sandbox/supervisor evidence (Downstream Host planning).
-- Protocol registry semantics and semantic field classes (protocol-registry planning).
+- Additional canonical artifact workflows beyond the generic envelope already in
+  `crates/core/src/artifact.rs`.
+- Additional registry attestation flows beyond the registry row envelope already
+  in `crates/core/src/registry.rs`.
+- Reservation ledger expansion.
+- State transition report expansion.
+- Dedicated forensic query envelope type.
+- Deterministic phase cache for tooling, if repeated measured pain justifies it.
+- Process/sandbox/supervisor evidence in a host/supervisor owner.
+- Protocol registry semantics and semantic field classes in a protocol owner.
 
 Tooling hygiene for evidence bodies: `cargo xtask evidence-audit`.

@@ -303,7 +303,7 @@ All notable changes to this project will be documented in this file.
   `cache_map_size_bytes`, `with_cache_map_size_bytes`, `open_with_redb_cache`,
   `open_with_lmdb_cache`) are now structurally denied anywhere outside the
   allowlist (`CHANGELOG.md`, the historical spec snapshots,
-  `docs/adr/ADR-0003-cache-safety-assumptions.md`, the historical audit
+  `docs/ADR-0003-cache-safety-assumptions.md`, the historical audit
   snapshot, `AGENTS.md`, the tool source itself). Any reintroduction via lazy copy-paste
   from old docs fails `cargo xtask structural` (called by `cargo xtask ci`).
 - **Test hardening — variant matching, seeded fuzz, `GOLDEN_UPDATE` sentinel**

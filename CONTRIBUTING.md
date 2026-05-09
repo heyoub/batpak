@@ -78,7 +78,7 @@ No current environment is both canonical and timing-stable.
 - `README.md` is the primary repo entrypoint and should stay enough for orientation
 - `GUIDE.md` is the human-first usage surface
 - `REFERENCE.md` is the technical reference surface
-- ADRs live in `docs/adr/`
+- ADRs live in `docs/`
 
 Before release-oriented changes, run:
 

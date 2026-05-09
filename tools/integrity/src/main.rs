@@ -12,7 +12,7 @@
 //!    naming the design decision that makes the silencer safe.
 //! 3. Cite at least one resolvable anchor - an `INV-<NAME>` from
 //!    `traceability/invariants.yaml`, an `ADR-NNNN` whose file exists under
-//!    `docs/adr/`, or a concrete in-repo path (`src/...`, `tests/...`,
+//!    `docs/`, or a concrete in-repo path (`src/...`, `tests/...`,
 //!    `examples/...`, `crates/macros/...`, `crates/macros-support/...`,
 //!    `build.rs`) whose file exists. Multiple anchors are fine; at least one
 //!    must resolve.
@@ -23,6 +23,8 @@
 //! `structural::check_allow_justifications` on every run.
 //! dead_code silencers are not tolerated in this repo; test-only code uses
 //! `cfg(test)`, unused code is deleted, and shared helpers get restructured.
+mod agent_doctor;
+mod agent_surface;
 mod architecture_lints;
 mod ci_parity;
 mod doctor;
@@ -57,6 +59,10 @@ enum CommandKind {
     StructuralCheck,
     /// Static checks for evidence report bodies and public export vocabulary.
     EvidenceAudit,
+    /// Validate the machine-readable agent intent/API/test surface map.
+    AgentSurfaceCheck,
+    /// Fast agent-oriented repository doctor with stable repair IDs.
+    AgentDoctor,
 }
 
 fn main() -> Result<()> {
@@ -66,6 +72,8 @@ fn main() -> Result<()> {
         CommandKind::TraceabilityCheck => traceability::run(),
         CommandKind::StructuralCheck => structural::run(),
         CommandKind::EvidenceAudit => evidence_audit::run(&repo_surface::repo_root()?),
+        CommandKind::AgentSurfaceCheck => agent_surface::run(&repo_surface::repo_root()?),
+        CommandKind::AgentDoctor => agent_doctor::run(&repo_surface::repo_root()?),
     }
 }
 

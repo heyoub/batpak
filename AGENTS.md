@@ -26,7 +26,7 @@
 - `README.md`: primary repo entrypoint
 - `GUIDE.md`: human-first workflows and usage
 - `REFERENCE.md`: technical reference and invariants
-- `docs/adr/`: decision records; start with `docs/adr/README.md` for the index
+- `docs/`: decision records; start with `docs/README.md` for the index
 - `traceability/`: requirements, invariants, flows, artifacts
 
 ## Root Altitudes
@@ -46,6 +46,8 @@
 - `cargo xtask ci`
 - `cargo xtask structural`
 - `cargo xtask evidence-audit` — static evidence-report schema anchors and prelude/store export vocabulary (runs `batpak-integrity evidence-audit`)
+- `cargo xtask agent-doctor` — fast agent-facing repair hints for topology, stale paths, templates, and surface-map drift
+- `cargo xtask scaffold <pattern> --name <name> [--path <dir>]`
 - `cargo xtask mutants policy`
 - `cargo xtask mutants smoke`
 - `cargo xtask platform doctor --store-path <dir>`

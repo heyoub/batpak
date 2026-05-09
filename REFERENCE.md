@@ -94,7 +94,7 @@ argument, the store exposes a typed sibling that infers the kind from
 
 The raw `EventKind` surfaces stay available for callers that compute
 `EventKind` at runtime; the typed siblings are additive. See
-`docs/adr/ADR-0010-eventpayload-macro-surface.md` for scope and
+`docs/ADR-0010-eventpayload-macro-surface.md` for scope and
 schema-evolution rules. Typed reactor ergonomics
 (`#[derive(EventSourced)]`, `#[derive(MultiEventReactor)]`,
 `react_loop_typed`, `react_loop_multi`, `react_loop_multi_raw`) are
@@ -433,7 +433,7 @@ Single-append fault injection defines three ordinals for frontier tests:
 - `SingleAppendPublished`: after `visible` and `emitted` advance and before
   the receipt is returned
 
-See `docs/adr/ADR-0014-durable-frontier.md` for design rationale, and
+See `docs/ADR-0014-durable-frontier.md` for design rationale, and
 `INV-FRONTIER-*` in `traceability/invariants.yaml` for the formal invariant
 records. The current visible-before-durable cadence gap is intentionally
 registered as `OBS-CADENCE-GT-1-VISIBLE-EXCEEDS-DURABLE` in
@@ -615,7 +615,7 @@ the enforcement story.
 - front door: `README.md`
 - usage/workflows: `GUIDE.md`
 - technical reference: `REFERENCE.md`
-- decision index: `docs/adr/README.md`
+- decision index: `docs/README.md`
 - harness doctrine: `HARNESS_DIRECTIVE.md` and `HARNESS_LEDGER.md`
 - traceability registry: `traceability/artifacts.yaml`
 - integrity entrypoint: `tools/integrity/src/main.rs`

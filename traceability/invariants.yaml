@@ -267,7 +267,7 @@
     - ART-CHAOS-DM-FLAKEY
     - ART-ADR-CHAOS-HARNESS
 - id: INV-ALLOW-IS-DESIGN
-  statement: "Every `#[allow(...)]` in the repo is a deliberate design decision, not a silencer. The allow carries a `// justifies <prose>` comment on the same or preceding line that cites at least one resolvable anchor — an INV-id from this catalog, an `ADR-NNNN` under `docs/adr/`, or a concrete repo path (`crates/core/src/...`, `crates/core/tests/...`, `crates/core/examples/...`, `crates/macros/...`, `crates/macros-support/...`) — so the rationale is traceable, not narrative-only."
+  statement: "Every `#[allow(...)]` in the repo is a deliberate design decision, not a silencer. The allow carries a `// justifies <prose>` comment on the same or preceding line that cites at least one resolvable anchor — an INV-id from this catalog, an `ADR-NNNN` under `docs/`, or a concrete repo path (`crates/core/src/...`, `crates/core/tests/...`, `crates/core/examples/...`, `crates/macros/...`, `crates/macros-support/...`) — so the rationale is traceable, not narrative-only."
   artifacts:
     - ART-DOCTOR
     - ART-STRUCTURAL-CHECK

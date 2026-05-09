@@ -6,7 +6,10 @@ use crate::shared_checks::{
     collect_dead_code_silencer_sites, line_carries_justification,
     load_dead_code_silencer_allowlist, load_known_invariants,
 };
-use crate::{architecture_lints, ci_parity, harness_lints, public_surface, store_pub_fn_coverage};
+use crate::{
+    agent_surface, architecture_lints, ci_parity, harness_lints, public_surface,
+    store_pub_fn_coverage,
+};
 use anyhow::{anyhow, bail, Result};
 use std::fs;
 use std::path::Path;
@@ -15,6 +18,7 @@ pub(crate) fn run() -> Result<()> {
     let repo_root = repo_root()?;
     let tracked_files = tracked_repo_files(&repo_root)?;
     architecture_lints::check(&repo_root, &tracked_files)?;
+    agent_surface::check(&repo_root)?;
     harness_lints::check(&repo_root, &tracked_files)?;
     check_no_dead_code_silencers(&repo_root)?;
     check_allow_justifications(&repo_root)?;
@@ -111,7 +115,7 @@ fn check_allow_justifications(repo_root: &Path) -> Result<()> {
                     justified,
                     format!(
                         "unjustified lint suppression in {}:{} — every #[allow(...)], #[expect(...)], or cfg_attr-wrapped allow/expect must carry a `// justifies: <>=5 words + >=1 resolvable anchor>` comment. \
-                         An anchor is an INV-id from traceability/invariants.yaml, an ADR-NNNN whose file exists under docs/adr/, \
+                         An anchor is an INV-id from traceability/invariants.yaml, an ADR-NNNN whose file exists under docs/, \
                          or a concrete repo path (src/..., tests/..., examples/..., crates/macros/..., crates/macros-support/..., benches/..., tools/..., build.rs). \
                         See INV-ALLOW-IS-DESIGN.",
                         relative(repo_root, &path),

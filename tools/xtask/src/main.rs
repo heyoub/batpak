@@ -28,6 +28,8 @@ enum XtaskCommand {
     Structural,
     /// Static evidence-report hygiene (schema anchors, export vocabulary).
     EvidenceAudit,
+    /// Fast agent-oriented repository doctor with stable repair IDs.
+    AgentDoctor,
     Check,
     Test,
     Clippy,
@@ -36,6 +38,8 @@ enum XtaskCommand {
     Bench(BenchArgs),
     Cover(CoverArgs),
     Mutants(MutantsArgs),
+    /// Copy a golden batpak starter template into a local project directory.
+    Scaffold(ScaffoldArgs),
     Platform(PlatformArgs),
     Fuzz(FuzzArgs),
     Chaos(ChaosArgs),
@@ -118,6 +122,31 @@ pub(crate) struct MutantsArgs {
     shard: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub(crate) enum ScaffoldPattern {
+    TypedStore,
+    Reactor,
+    EvidenceRead,
+    ProjectionCache,
+    ArtifactEnvelope,
+    RegistryRow,
+    BackupEnvelope,
+    StateTransition,
+    ReservationLedger,
+}
+
+#[derive(Args, Clone, Debug)]
+pub(crate) struct ScaffoldArgs {
+    #[arg(value_enum)]
+    pattern: ScaffoldPattern,
+    #[arg(long)]
+    name: String,
+    #[arg(long)]
+    path: Option<PathBuf>,
+    #[arg(long)]
+    force: bool,
+}
+
 #[derive(Args, Clone)]
 pub(crate) struct PlatformArgs {
     #[command(subcommand)]
@@ -193,6 +222,7 @@ fn main() -> Result<()> {
         XtaskCommand::Traceability => commands::integrity("traceability-check", []),
         XtaskCommand::Structural => commands::integrity("structural-check", []),
         XtaskCommand::EvidenceAudit => commands::integrity("evidence-audit", []),
+        XtaskCommand::AgentDoctor => commands::integrity("agent-doctor", []),
         XtaskCommand::Check => {
             util::cargo(["check", "--all-features"])?;
             util::cargo(["check", "--no-default-features"])
@@ -214,6 +244,7 @@ fn main() -> Result<()> {
         XtaskCommand::Bench(args) => bench::bench(args),
         XtaskCommand::Cover(args) => coverage::cover(args),
         XtaskCommand::Mutants(args) => commands::mutants(args),
+        XtaskCommand::Scaffold(args) => commands::scaffold(args),
         XtaskCommand::Platform(args) => commands::platform(args),
         XtaskCommand::Fuzz(args) => commands::fuzz(args),
         XtaskCommand::Chaos(args) => commands::chaos(args),

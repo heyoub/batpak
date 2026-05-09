@@ -239,7 +239,7 @@ fn check_for_stale_references(repo_root: &Path, tracked_files: &[PathBuf]) -> Re
         "store/watch.rs",
     ];
     let allow = [
-        repo_root.join("docs/adr/ADR-0003-cache-safety-assumptions.md"),
+        repo_root.join("docs/ADR-0003-cache-safety-assumptions.md"),
         repo_root.join("CHANGELOG.md"),
         repo_root.join("AGENTS.md"),
         repo_root.join("crates/core/build.rs"),

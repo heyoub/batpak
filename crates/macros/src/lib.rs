@@ -93,7 +93,7 @@ pub fn derive_multi_event_reactor(input: TokenStream) -> TokenStream {
 /// recovery), implement `EventSourced` manually. The derive does not offer a
 /// fallible mode because the trait signature does not support one.
 ///
-/// See `docs/adr/ADR-0011-reactor-canal.md` and the Dispatch Chapter plan
+/// See `docs/ADR-0011-reactor-canal.md` and the Dispatch Chapter plan
 /// for the full contract.
 #[proc_macro_derive(EventSourced, attributes(batpak))]
 pub fn derive_event_sourced(input: TokenStream) -> TokenStream {

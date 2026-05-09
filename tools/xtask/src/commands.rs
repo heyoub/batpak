@@ -2,11 +2,12 @@ mod ci;
 mod mutants;
 mod platform;
 mod release;
+mod scaffold;
 mod setup;
 mod stress;
 
 use crate::util::cargo;
-use crate::{ChaosArgs, FuzzArgs, MutantsArgs, PlatformArgs, ReleaseArgs, SetupArgs};
+use crate::{ChaosArgs, FuzzArgs, MutantsArgs, PlatformArgs, ReleaseArgs, ScaffoldArgs, SetupArgs};
 use anyhow::Result;
 
 pub(crate) fn setup(args: SetupArgs) -> Result<()> {
@@ -36,6 +37,10 @@ pub(crate) fn integrity<const N: usize>(subcommand: &str, extra: [&str; N]) -> R
     let mut args = vec!["run", "--package", "batpak-integrity", "--", subcommand];
     args.extend(extra);
     cargo(args)
+}
+
+pub(crate) fn scaffold(args: ScaffoldArgs) -> Result<()> {
+    scaffold::scaffold(args)
 }
 
 pub(crate) fn deny_split() -> Result<()> {

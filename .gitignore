@@ -22,6 +22,10 @@
 .DS_Store
 .idea/
 .vscode/
+.cursor/plans/
 # Nested Cargo.lock files from path-dependency fixture crates — none of the
 # fixtures ship, so their lockfiles are cache, not source of truth.
 fixtures/*/Cargo.lock
+# Golden template crates are smoke-tested as standalone path-dependency apps;
+# their generated lockfiles are local cache, not template source.
+templates/*/Cargo.lock

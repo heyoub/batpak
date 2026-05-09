@@ -57,7 +57,7 @@ fn main() {
     println!("cargo:rerun-if-changed=../../traceability/dead_code_silencer_allowlist.yaml");
     println!("cargo:rerun-if-changed=../../traceability/pub_item_allowlist.yaml");
     println!("cargo:rerun-if-changed=../../traceability/invariants.yaml");
-    println!("cargo:rerun-if-changed=../../docs/adr/");
+    println!("cargo:rerun-if-changed=../../docs/");
 
     check_no_tokio_in_deps();
     check_no_banned_patterns();
@@ -432,7 +432,7 @@ fn check_allow_justifications() {
                         "ROGUE SILENCE in {path_str}:{}: `{trimmed}`\n\
                          Every #[allow(...)] must carry a `// justifies: <>=5 words + >=1 resolvable anchor>`\n\
                          comment on the same or preceding line. Anchors: INV-<NAME> from\n\
-                         traceability/invariants.yaml, ADR-NNNN from docs/adr/, or a concrete repo path\n\
+                         traceability/invariants.yaml, ADR-NNNN from docs/, or a concrete repo path\n\
                          (src/..., tests/..., examples/..., crates/macros/..., crates/macros-support/...,\n\
                          benches/..., tools/..., build.rs). See INV-ALLOW-IS-DESIGN.",
                         line_no + 1
