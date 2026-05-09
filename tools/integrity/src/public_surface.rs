@@ -2,6 +2,7 @@ use crate::repo_surface::{ensure, load_yaml, relative, rust_files};
 use crate::shared_checks::{ast_references_name, public_item_names};
 use anyhow::{Context, Result};
 use serde::Deserialize;
+use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -28,6 +29,8 @@ impl AllowlistWitness {
 }
 
 pub(crate) fn check(repo_root: &Path) -> Result<()> {
+    check_doc_hidden_public_surface(repo_root)?;
+
     let allowlist: Vec<AllowlistEntry> =
         load_yaml(&repo_root.join("traceability/pub_item_allowlist.yaml"))?;
     let allowed: HashMap<&str, &AllowlistEntry> = allowlist
@@ -131,4 +134,184 @@ pub(crate) fn check(repo_root: &Path) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn check_doc_hidden_public_surface(repo_root: &Path) -> Result<()> {
+    let allowed: BTreeSet<&str> = [
+        "src/lib.rs::__private",
+        "src/lib.rs::batpak",
+        "src/store/delivery/subscription.rs::receiver",
+        "src/store/projection/flow/mod.rs::ReplayInput",
+        "src/store/projection/flow/replay_input.rs::ReplayInput",
+        "src/store/projection/watch.rs::subscription",
+        "src/store/segment/scan/mod.rs::Reader",
+        "src/store/test_support.rs::panic_writer_for_test",
+        "src/typestate/transition.rs::sealed",
+    ]
+    .into_iter()
+    .collect();
+
+    let mut unexpected = Vec::new();
+    for path in rust_files(&repo_root.join("src")) {
+        let rel = relative(repo_root, &path);
+        let content = fs::read_to_string(&path)?;
+        let file = syn::parse_file(&content)
+            .with_context(|| format!("parse {}", relative(repo_root, &path)))?;
+        for name in doc_hidden_public_names(&file) {
+            let key = format!("{rel}::{name}");
+            if !allowed.contains(key.as_str()) {
+                unexpected.push(key);
+            }
+        }
+    }
+
+    ensure(
+        unexpected.is_empty(),
+        format!(
+            "public-surface: unexpected #[doc(hidden)] public item(s): {}\n\
+             Hidden public API is allowed only for explicit compatibility or Rust visibility escape hatches. \
+             Make the item non-public, add a real public-surface witness, or add a reviewed detector allowlist entry.",
+            unexpected.join(", ")
+        ),
+    )
+}
+
+fn doc_hidden_public_names(file: &syn::File) -> BTreeSet<String> {
+    let mut names = BTreeSet::new();
+    for item in &file.items {
+        match item {
+            syn::Item::Const(item) => {
+                record_doc_hidden_public(&mut names, &item.vis, &item.attrs, item.ident.to_string())
+            }
+            syn::Item::Enum(item) => {
+                record_doc_hidden_public(&mut names, &item.vis, &item.attrs, item.ident.to_string())
+            }
+            syn::Item::ExternCrate(item) => {
+                let name = item
+                    .rename
+                    .as_ref()
+                    .map(|(_, ident)| ident.to_string())
+                    .unwrap_or_else(|| item.ident.to_string());
+                record_doc_hidden_public(&mut names, &item.vis, &item.attrs, name);
+            }
+            syn::Item::Fn(item) => record_doc_hidden_public(
+                &mut names,
+                &item.vis,
+                &item.attrs,
+                item.sig.ident.to_string(),
+            ),
+            syn::Item::Impl(item) => {
+                let impl_hidden = has_doc_hidden(&item.attrs);
+                for impl_item in &item.items {
+                    if let syn::ImplItem::Fn(method) = impl_item {
+                        let method_hidden = impl_hidden || has_doc_hidden(&method.attrs);
+                        if method_hidden {
+                            record_doc_hidden_public(
+                                &mut names,
+                                &method.vis,
+                                if impl_hidden {
+                                    &item.attrs
+                                } else {
+                                    &method.attrs
+                                },
+                                method.sig.ident.to_string(),
+                            );
+                        }
+                    }
+                }
+            }
+            syn::Item::Mod(item) => {
+                record_doc_hidden_public(&mut names, &item.vis, &item.attrs, item.ident.to_string())
+            }
+            syn::Item::Struct(item) => {
+                record_doc_hidden_public(&mut names, &item.vis, &item.attrs, item.ident.to_string())
+            }
+            syn::Item::Trait(item) => {
+                record_doc_hidden_public(&mut names, &item.vis, &item.attrs, item.ident.to_string())
+            }
+            syn::Item::Type(item) => {
+                record_doc_hidden_public(&mut names, &item.vis, &item.attrs, item.ident.to_string())
+            }
+            syn::Item::Use(item) => {
+                if matches!(item.vis, syn::Visibility::Public(_)) && has_doc_hidden(&item.attrs) {
+                    collect_use_tree_names(&item.tree, &mut names);
+                }
+            }
+            _ => {}
+        }
+    }
+    names
+}
+
+fn record_doc_hidden_public(
+    names: &mut BTreeSet<String>,
+    vis: &syn::Visibility,
+    attrs: &[syn::Attribute],
+    name: String,
+) {
+    if matches!(vis, syn::Visibility::Public(_)) && has_doc_hidden(attrs) {
+        names.insert(name);
+    }
+}
+
+fn collect_use_tree_names(tree: &syn::UseTree, names: &mut BTreeSet<String>) {
+    match tree {
+        syn::UseTree::Name(name) => {
+            names.insert(name.ident.to_string());
+        }
+        syn::UseTree::Rename(rename) => {
+            names.insert(rename.rename.to_string());
+        }
+        syn::UseTree::Group(group) => {
+            for item in &group.items {
+                collect_use_tree_names(item, names);
+            }
+        }
+        syn::UseTree::Path(path) => collect_use_tree_names(&path.tree, names),
+        syn::UseTree::Glob(_) => {}
+    }
+}
+
+fn has_doc_hidden(attrs: &[syn::Attribute]) -> bool {
+    attrs.iter().any(|attr| {
+        attr.path().is_ident("doc")
+            && match &attr.meta {
+                syn::Meta::List(list) => list.tokens.to_string().contains("hidden"),
+                syn::Meta::Path(_) | syn::Meta::NameValue(_) => false,
+            }
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::doc_hidden_public_names;
+
+    #[test]
+    fn doc_hidden_public_detector_finds_items_uses_and_impl_methods() {
+        let ast = syn::parse_file(
+            r#"
+#[doc(hidden)]
+pub struct HiddenStruct;
+
+#[doc(hidden)]
+pub use inner::HiddenUse;
+
+#[doc(hidden)]
+impl Store {
+    pub fn hidden_method(&self) {}
+}
+
+impl Store {
+    #[doc(hidden)]
+    pub fn hidden_attr_method(&self) {}
+}
+"#,
+        )
+        .expect("parse fixture");
+        let names = doc_hidden_public_names(&ast);
+        assert!(names.contains("HiddenStruct"));
+        assert!(names.contains("HiddenUse"));
+        assert!(names.contains("hidden_method"));
+        assert!(names.contains("hidden_attr_method"));
+    }
 }

@@ -7,6 +7,7 @@ pub(super) fn check(repo_root: &Path) -> Result<()> {
     check_no_mdbook_dependency(repo_root)?;
     check_justfile_stays_thin(repo_root)?;
     check_packaging_surface(repo_root)?;
+    check_default_feature_surface(repo_root)?;
     check_xtask_surface_contract(repo_root)?;
     Ok(())
 }
@@ -97,6 +98,29 @@ fn check_packaging_surface(repo_root: &Path) -> Result<()> {
     Ok(())
 }
 
+fn check_default_feature_surface(repo_root: &Path) -> Result<()> {
+    let metadata = cargo_metadata::MetadataCommand::new()
+        .manifest_path(repo_root.join("Cargo.toml"))
+        .no_deps()
+        .exec()
+        .context("read Cargo metadata for default feature surface")?;
+    let package = metadata
+        .packages
+        .iter()
+        .find(|package| package.name == "batpak")
+        .context("Cargo metadata must contain root batpak package")?;
+    let default_features = package
+        .features
+        .get("default")
+        .context("root batpak package must declare a default feature set")?;
+    ensure(
+        !default_features
+            .iter()
+            .any(|feature| feature == "dangerous-test-hooks"),
+        "Cargo.toml default features must not include dangerous-test-hooks; test/fault APIs must stay opt-in",
+    )
+}
+
 fn check_xtask_surface_contract(repo_root: &Path) -> Result<()> {
     let xtask_main = repo_root.join("tools/xtask/src/main.rs");
     let coverage_rs = repo_root.join("tools/xtask/src/coverage.rs");
@@ -140,6 +164,10 @@ fn check_xtask_surface_contract(repo_root: &Path) -> Result<()> {
     ensure(
         justfile_content.contains("install-hooks:\n    cargo xtask install-hooks"),
         "justfile install-hooks recipe must remain a thin alias over `cargo xtask install-hooks`",
+    )?;
+    ensure(
+        justfile_content.contains("stress:\n    cargo xtask stress"),
+        "justfile stress recipe must remain a thin alias over `cargo xtask stress`",
     )?;
     ensure(
         coverage_content.contains("target/xtask-cover/last-run"),

@@ -411,19 +411,24 @@
   paths:
     - examples/batch_append.rs
     - examples/chat_room.rs
+    - examples/cross_crate_payloads.rs
     - examples/cursor_worker.rs
     - examples/dungeon_typestate.rs
     - examples/event_sourced_counter.rs
+    - examples/append_with_gate.rs
+    - examples/lifecycle_observer.rs
     - examples/outbox.rs
     - examples/policy_gates.rs
     - examples/quickstart.rs
     - examples/raw_projection_counter.rs
     - examples/raw_projection_counter_derived.rs
     - examples/read_only.rs
+    - examples/signed_receipts.rs
     - examples/submit_pipeline.rs
     - examples/typed_reactor.rs
     - examples/typed_reactor_multi.rs
     - examples/visibility_fence.rs
+    - examples/wait_for_durable.rs
 - id: ART-MACROS
   kind: source
   paths:

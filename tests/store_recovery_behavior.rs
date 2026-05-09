@@ -167,7 +167,8 @@ fn cold_start_skips_corrupt_segment_gracefully() {
 #[test]
 fn corrupt_frame_in_segment_is_detected() {
     // Write good events, then inject a corrupt frame into the segment file.
-    // Verify cold start detects the corruption (CRC mismatch stops scanning).
+    // Verify cold start detects committed-frame corruption instead of silently
+    // omitting the bad event and returning a partial index.
     let dir = TempDir::new().expect("temp dir");
     let kind = EventKind::custom(0xF, 1);
 
@@ -180,6 +181,8 @@ fn corrupt_frame_in_segment_is_detected() {
                 ..SyncConfig::default()
             },
             ..StoreConfig::new("")
+                .with_enable_checkpoint(false)
+                .with_enable_mmap_index(false)
         };
         let store = Store::open(config).expect("open");
         let coord = Coordinate::new("entity:crc", "scope:test").expect("valid");
@@ -216,40 +219,52 @@ fn corrupt_frame_in_segment_is_detected() {
 
     let seg_path = segments[0].path();
     let mut data = std::fs::read(&seg_path).expect("read segment");
-    // Flip bytes near the end of the file (inside a frame's msgpack region)
-    if data.len() > 20 {
-        let mid = data.len() - 10;
-        data[mid] ^= 0xFF;
-        data[mid + 1] ^= 0xFF;
-    }
+    let sidx_start = u64::from_le_bytes(
+        data[data.len() - 16..data.len() - 8]
+            .try_into()
+            .expect("SIDX trailer offset"),
+    ) as usize;
+    data.truncate(sidx_start);
+    let header_len = u32::from_be_bytes(data[4..8].try_into().expect("header len")) as usize;
+    let frame_offset = 8 + header_len;
+    let payload_len = u32::from_be_bytes(
+        data[frame_offset..frame_offset + 4]
+            .try_into()
+            .expect("frame payload len"),
+    ) as usize;
+    let frame_end = frame_offset + 8 + payload_len;
+    assert!(
+        frame_end + 8 < data.len(),
+        "PROPERTY: fixture must corrupt a fully committed middle frame, not the torn tail"
+    );
+    let corrupt_at = frame_offset + 8 + (payload_len / 2);
+    data[corrupt_at] ^= 0xFF;
     std::fs::write(&seg_path, &data).expect("write corrupted segment");
 
-    // Phase 3: cold start should still open (corrupt frames are skipped/truncated)
-    // but should have fewer events than originally written
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        ..StoreConfig::new("")
-    };
-    // The store may open successfully (skipping corrupt frames) or may error
-    // depending on where the corruption landed. Either behavior is acceptable
-    // — what matters is it doesn't silently return wrong data.
-    match Store::open(config) {
+    // Phase 3: cold start must fail closed. The old behavior logged the bad
+    // frame and returned a partial index, which made committed data loss look
+    // like successful recovery.
+    let err = match Store::open(
+        StoreConfig::new(dir.path())
+            .with_enable_checkpoint(false)
+            .with_enable_mmap_index(false),
+    ) {
         Ok(store) => {
             let stats = store.stats();
-            // Corrupted segment may have fewer events (some frames skipped)
-            // The key assertion: we don't get MORE events than we wrote
-            assert!(
-                stats.event_count <= 6,
-                "PROPERTY: a store opened with a corrupted segment must not report more events than the original data plus lifecycle rows — no phantom events allowed. Got {}.\n\
-                 Investigate: src/store/segment/scan.rs scan_segment CRC check, src/store/mod.rs open.\n\
-                 Common causes: CRC check skipped, corrupt bytes decoded as valid frames.\n\
-                 Run: cargo test --test store_advanced corrupt_frame_in_segment_is_detected",
+            let _ = store.close();
+            panic!(
+                "PROPERTY: committed middle-frame corruption must fail closed instead of opening with {} events.\n\
+                 Investigate: src/store/segment/scan/full_scan.rs and recovery.rs corrupt-frame handling.",
                 stats.event_count
             );
-            let _ = store.close();
         }
-        Err(_) => {
-            // Store rejected the corrupt segment entirely — also acceptable
-        }
-    }
+        Err(err) => err,
+    };
+    assert!(
+        matches!(
+            err,
+            StoreError::CrcMismatch { .. } | StoreError::CorruptSegment { .. }
+        ),
+        "PROPERTY: committed middle-frame corruption must surface as corruption evidence, got {err:?}"
+    );
 }

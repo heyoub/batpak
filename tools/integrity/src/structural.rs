@@ -73,11 +73,33 @@ fn check_allow_justifications(repo_root: &Path) -> Result<()> {
     for path in paths {
         let content = fs::read_to_string(&path)?;
         let lines: Vec<&str> = content.lines().collect();
-        for (index, line) in lines.iter().enumerate() {
+        let mut index = 0;
+        while index < lines.len() {
+            let start_index = index;
+            let line = lines[index];
             let trimmed = line.trim();
-            if trimmed.starts_with("#![allow(") || trimmed.starts_with("#[allow(") {
+            let mut attr_text = trimmed.to_owned();
+            let starts_suppression_attr = trimmed.starts_with("#![allow(")
+                || trimmed.starts_with("#[allow(")
+                || trimmed.starts_with("#![expect(")
+                || trimmed.starts_with("#[expect(")
+                || trimmed.starts_with("#![cfg_attr(")
+                || trimmed.starts_with("#[cfg_attr(");
+            if starts_suppression_attr {
+                while attr_text.contains("cfg_attr(")
+                    && !attr_text.contains(']')
+                    && index + 1 < lines.len()
+                {
+                    index += 1;
+                    attr_text.push('\n');
+                    attr_text.push_str(lines[index].trim());
+                }
+            }
+            if starts_suppression_attr
+                && (attr_text.contains("allow(") || attr_text.contains("expect("))
+            {
                 let justified = line_carries_justification(line, repo_root, &known_invariants)
-                    || index
+                    || start_index
                         .checked_sub(1)
                         .and_then(|prev| lines.get(prev))
                         .map(|prev| line_carries_justification(prev, repo_root, &known_invariants))
@@ -85,15 +107,16 @@ fn check_allow_justifications(repo_root: &Path) -> Result<()> {
                 ensure(
                     justified,
                     format!(
-                        "unjustified allow in {}:{} — every #[allow(...)] must carry a `// justifies: <>=5 words + >=1 resolvable anchor>` comment. \
+                        "unjustified lint suppression in {}:{} — every #[allow(...)], #[expect(...)], or cfg_attr-wrapped allow/expect must carry a `// justifies: <>=5 words + >=1 resolvable anchor>` comment. \
                          An anchor is an INV-id from traceability/invariants.yaml, an ADR-NNNN whose file exists under docs/adr/, \
                          or a concrete repo path (src/..., tests/..., examples/..., crates/macros/..., crates/macros-support/..., benches/..., tools/..., build.rs). \
-                         See INV-ALLOW-IS-DESIGN.",
+                        See INV-ALLOW-IS-DESIGN.",
                         relative(repo_root, &path),
-                        index + 1
+                        start_index + 1
                     ),
                 )?;
             }
+            index += 1;
         }
     }
     Ok(())

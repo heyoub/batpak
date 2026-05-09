@@ -85,12 +85,15 @@ pub(crate) fn bench_targets(surface: BenchSurface) -> &'static [&'static str] {
             "write_throughput",
         ],
         BenchSurface::Native => &[
+            "ancestry_walk",
             "batch_throughput",
             "cold_start",
+            "columnar_query",
             "compaction",
             "evidence_reports",
             "frontier_waiters",
             "projection_latency",
+            "query_materialization",
             "replay_lanes",
             "subscription_fanout",
             "topology_matrix",
@@ -183,12 +186,15 @@ mod tests {
         assert_eq!(
             bench_targets(BenchSurface::Native),
             &[
+                "ancestry_walk",
                 "batch_throughput",
                 "cold_start",
+                "columnar_query",
                 "compaction",
                 "evidence_reports",
                 "frontier_waiters",
                 "projection_latency",
+                "query_materialization",
                 "replay_lanes",
                 "subscription_fanout",
                 "topology_matrix",
@@ -251,9 +257,13 @@ mod tests {
                 "target/xtask-bench-compile-native",
                 "--all-features",
                 "--bench",
+                "ancestry_walk",
+                "--bench",
                 "batch_throughput",
                 "--bench",
                 "cold_start",
+                "--bench",
+                "columnar_query",
                 "--bench",
                 "compaction",
                 "--bench",
@@ -262,6 +272,8 @@ mod tests {
                 "frontier_waiters",
                 "--bench",
                 "projection_latency",
+                "--bench",
+                "query_materialization",
                 "--bench",
                 "replay_lanes",
                 "--bench",
@@ -279,6 +291,33 @@ mod tests {
                 "--bench",
                 "write_throughput",
             ]
+        );
+    }
+
+    #[test]
+    fn every_cargo_bench_target_is_wired_to_a_surface() {
+        let manifest: toml::Value =
+            toml::from_str(include_str!("../../../Cargo.toml")).expect("parse workspace manifest");
+        let declared = manifest
+            .get("bench")
+            .and_then(toml::Value::as_array)
+            .expect("Cargo.toml declares bench targets")
+            .iter()
+            .map(|bench| {
+                bench
+                    .get("name")
+                    .and_then(toml::Value::as_str)
+                    .expect("bench target has name")
+            })
+            .collect::<std::collections::BTreeSet<_>>();
+        let wired = bench_targets(BenchSurface::Neutral)
+            .iter()
+            .chain(bench_targets(BenchSurface::Native))
+            .copied()
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(
+            declared, wired,
+            "every Cargo.toml [[bench]] target must be wired into at least one cargo xtask bench surface"
         );
     }
 }

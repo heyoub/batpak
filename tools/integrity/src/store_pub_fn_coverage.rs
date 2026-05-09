@@ -2,7 +2,8 @@ use crate::repo_surface::rust_files;
 use anyhow::{bail, Context, Result};
 use std::collections::BTreeSet;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use syn::visit::{self, Visit};
 use syn::Item;
 
 /// Assert that every `pub fn` declared in inherent `impl Store { ... }` blocks
@@ -79,9 +80,23 @@ pub(crate) fn check(repo_root: &Path) -> Result<()> {
         );
     }
 
-    // 2. Build the reference corpus: all .rs files under tests/ and src/.
-    let mut search_files: Vec<PathBuf> = rust_files(&repo_root.join("tests"));
-    search_files.extend(rust_files(&repo_root.join("src")));
+    // 2. Build the reference corpus: parseable .rs files under tests/ and src/.
+    // Compile-fail UI fixtures are intentionally invalid Rust and are skipped;
+    // comments and string literals never count because reference detection is AST-based.
+    let mut search_asts = Vec::new();
+    for path in rust_files(&repo_root.join("tests"))
+        .into_iter()
+        .chain(rust_files(&repo_root.join("src")))
+    {
+        let content = match fs::read_to_string(&path) {
+            Ok(content) => content,
+            Err(_) => continue,
+        };
+        let Ok(ast) = syn::parse_file(&content) else {
+            continue;
+        };
+        search_asts.push(ast);
+    }
 
     // 3. For each pub fn, check that at least one file references it as a call.
     //    Patterns matched: `.name(`, `Store::name(`, `store.name(`
@@ -90,39 +105,10 @@ pub(crate) fn check(repo_root: &Path) -> Result<()> {
         if allowlist.contains(&name.as_str()) {
             continue;
         }
-        // Build patterns that strongly indicate a method call or direct use.
-        // We accept any of:
-        //   `.name(`        — method call syntax
-        //   `.name::<`      — method call with turbofish (e.g., `.watch_projection::<T>(...)`)
-        //   `Store::name(`  — fully-qualified call
-        //   `Store::name::<` — fully-qualified call with turbofish
-        //   `store.name(`   — conventional variable name
-        //   `store.name::<` — conventional variable name with turbofish
-        // The turbofish variants are critical: we miss generic method calls
-        // without them. Caught by the watch_projection false-positive when
-        // this check first ran against the real codebase.
-        let patterns = [
-            format!(".{}(", name),
-            format!(".{}::<", name),
-            format!("Store::{}(", name),
-            format!("Store::{}::<", name),
-            format!("store.{}(", name),
-            format!("store.{}::<", name),
-        ];
-        let mut found = false;
-        'files: for path in &search_files {
-            let content = match fs::read_to_string(path) {
-                Ok(c) => c,
-                Err(_) => continue,
-            };
-            for pat in &patterns {
-                if content.contains(pat.as_str()) {
-                    found = true;
-                    break 'files;
-                }
-            }
-        }
-        if !found {
+        if !search_asts
+            .iter()
+            .any(|ast| ast_references_store_method(ast, name))
+        {
             unreferenced.push(name.clone());
         }
     }
@@ -143,4 +129,91 @@ pub(crate) fn check(repo_root: &Path) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn ast_references_store_method(ast: &syn::File, name: &str) -> bool {
+    struct MethodCallFinder<'a> {
+        name: &'a str,
+        found: bool,
+    }
+
+    impl<'ast> Visit<'ast> for MethodCallFinder<'_> {
+        fn visit_expr_method_call(&mut self, node: &'ast syn::ExprMethodCall) {
+            if node.method == self.name {
+                self.found = true;
+                return;
+            }
+            visit::visit_expr_method_call(self, node);
+        }
+
+        fn visit_expr_call(&mut self, node: &'ast syn::ExprCall) {
+            if let syn::Expr::Path(path) = node.func.as_ref() {
+                let segments = path
+                    .path
+                    .segments
+                    .iter()
+                    .map(|segment| segment.ident.to_string())
+                    .collect::<Vec<_>>();
+                if matches!(
+                    segments.as_slice(),
+                    [owner, method] if owner == "Store" && method == self.name
+                ) || matches!(
+                    segments.as_slice(),
+                    [.., owner, method] if owner == "Store" && method == self.name
+                ) {
+                    self.found = true;
+                    return;
+                }
+            }
+            visit::visit_expr_call(self, node);
+        }
+    }
+
+    let mut finder = MethodCallFinder { name, found: false };
+    finder.visit_file(ast);
+    finder.found
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ast_references_store_method;
+
+    #[test]
+    fn ast_reference_detection_ignores_comments_and_strings() {
+        let ast = syn::parse_file(
+            r#"
+// store.forgotten_method()
+const TEXT: &str = "Store::forgotten_method()";
+fn unrelated() {}
+"#,
+        )
+        .expect("parse fixture");
+        assert!(
+            !ast_references_store_method(&ast, "forgotten_method"),
+            "comments and strings must not satisfy Store pub fn coverage"
+        );
+    }
+
+    #[test]
+    fn ast_reference_detection_accepts_method_and_associated_calls() {
+        let method = syn::parse_file(
+            r#"
+fn exercise(store: &batpak::store::Store) {
+    let _ = store.watch_projection::<Projection>("entity");
+}
+"#,
+        )
+        .expect("parse method fixture");
+        assert!(ast_references_store_method(&method, "watch_projection"));
+
+        let associated = syn::parse_file(
+            r#"
+fn exercise(config: batpak::store::StoreConfig) {
+    let _ = batpak::store::Store::open(config);
+}
+"#,
+        )
+        .expect("parse associated fixture");
+        assert!(ast_references_store_method(&associated, "open"));
+    }
 }
