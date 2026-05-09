@@ -79,6 +79,10 @@ fn core_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
+fn repo_relative_display(path: &Path) -> String {
+    path.display().to_string().replace('\\', "/")
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct BuildPlatformProfile {
     schema_version: u16,
@@ -348,7 +352,7 @@ fn check_no_stubs_in_src() {
     ];
 
     walk_rs_files(Path::new("src"), &mut |path, contents| {
-        let path_str = path.display().to_string();
+        let path_str = repo_relative_display(path);
         for (line_no, line) in contents.lines().enumerate() {
             let lower = line.to_lowercase();
             for (pattern, msg) in &stub_patterns {
@@ -409,7 +413,7 @@ fn check_allow_justifications() {
     let known_invariants =
         shared_checks::load_known_invariants(&repo_root).unwrap_or_else(|err| fail(&err));
     walk_allow_checked_rs_files(&mut |path, contents| {
-        let path_str = path.display().to_string();
+        let path_str = repo_relative_display(path);
         let lines: Vec<&str> = contents.lines().collect();
         for (line_no, line) in lines.iter().enumerate() {
             let trimmed = line.trim();
@@ -468,7 +472,7 @@ fn check_no_banned_patterns() {
     //Walk src/**/*.rs, read each file, check for patterns that violate
     //invariants or red flags.
     walk_rs_files(Path::new("src"), &mut |path, contents| {
-        let path_str = path.display().to_string();
+        let path_str = repo_relative_display(path);
 
         //Red flag: no transmute/mem::read/pointer_cast in any src file.
         //All serialization goes through MessagePack.
@@ -627,7 +631,7 @@ fn check_store_surface_honesty() {
     }
 
     walk_rs_files(Path::new("src/store"), &mut |path, contents| {
-        let path_str = path.display().to_string();
+        let path_str = repo_relative_display(path);
         if contents.contains("test-support") {
             panic!(
                 "FEATURE HONESTY VIOLATION in {path_str}: stale `test-support` reference.\n\
@@ -639,7 +643,7 @@ fn check_store_surface_honesty() {
 
 fn check_no_fixed_temp_patterns() {
     walk_rs_files(Path::new("src/store"), &mut |path, contents| {
-        let path_str = path.display().to_string();
+        let path_str = repo_relative_display(path);
         if contents.contains("index.ckpt.tmp") || contents.contains(".tmp_{pid}_{n}") {
             panic!(
                 "TEMP FILE HARDENING VIOLATION in {path_str}: fixed temp-file pattern found.\n\
@@ -816,7 +820,7 @@ fn check_pub_items_have_tests() {
         if path.ends_with("prelude.rs") {
             return;
         }
-        let path_str = path.display().to_string();
+        let path_str = repo_relative_display(path);
         let file = syn::parse_file(contents).unwrap_or_else(|err| {
             fail(&format!(
                 "PUB ITEM REFERENCE CHECK PARSE FAILURE in {path_str}: {err}\n\
