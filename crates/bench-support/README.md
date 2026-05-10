@@ -6,4 +6,4 @@ This crate is published so `batpak` benchmark dependencies can resolve from crat
 
 Keep this crate's version matched exactly to the root `batpak` crate version; mixing versions keeps benchmark surfaces harder to compare.
 
-Repository: <https://github.com/TheFreeBatteryFactory/batpak>
+Repository: <https://github.com/heyoub/batpak>

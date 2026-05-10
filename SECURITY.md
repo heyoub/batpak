@@ -2,7 +2,7 @@
 
 Please report suspected vulnerabilities privately through the repository
 security advisory flow before opening a public issue:
-<https://github.com/TheFreeBatteryFactory/batpak/security/advisories/new>.
+<https://github.com/heyoub/batpak/security/advisories/new>.
 
 Security-sensitive changes should preserve:
 
