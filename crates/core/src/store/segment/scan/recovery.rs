@@ -4,7 +4,7 @@ use crate::store::segment::{self, SegmentHeader, SEGMENT_MAGIC};
 use crate::store::StoreError;
 use serde::Deserialize;
 use std::fs::File;
-use std::io::{ErrorKind, Read, Seek, SeekFrom};
+use std::io::{Error, ErrorKind, Read, Seek, SeekFrom};
 use std::path::Path;
 use std::sync::atomic::Ordering;
 
@@ -60,13 +60,26 @@ impl Reader {
             .max()
             .unwrap_or(0);
 
-        // Segments with an empty SIDX but frames present are an unusual
-        // case; force frame-scan there too by reporting "not covered".
-        if sidx_entries.is_empty() && sidx_start > (4 + 4) {
-            return Some(false);
-        }
-
         Some(max_tail >= sidx_start)
+    }
+
+    fn classify_payload_read_error(
+        segment_id: u64,
+        error: Error,
+        tail_policy: FrameScanTailPolicy,
+    ) -> Result<PayloadReadFailure, StoreError> {
+        if error.kind() == ErrorKind::UnexpectedEof {
+            if tail_policy.can_recover_torn_tail() {
+                Ok(PayloadReadFailure::RecoverTornTail)
+            } else {
+                Err(StoreError::corrupt_frame(
+                    segment_id,
+                    "frame payload ended before requested length",
+                ))
+            }
+        } else {
+            Err(StoreError::Io(error))
+        }
     }
 
     /// Scan only the metadata required to rebuild the in-memory index.
@@ -229,16 +242,11 @@ impl Reader {
             frame_buf[..8].copy_from_slice(&frame_header);
             if let Err(error) = file.read_exact(&mut frame_buf[8..]) {
                 self.release_buffer(frame_buf);
-                if error.kind() == ErrorKind::UnexpectedEof {
-                    if tail_policy.can_recover_torn_tail() {
+                match Self::classify_payload_read_error(segment_id, error, tail_policy)? {
+                    PayloadReadFailure::RecoverTornTail => {
                         break;
                     }
-                    return Err(StoreError::corrupt_frame(
-                        segment_id,
-                        "frame payload ended before requested length",
-                    ));
                 }
-                return Err(StoreError::Io(error));
             }
 
             match segment::frame_decode(&frame_buf) {
@@ -440,6 +448,11 @@ impl Reader {
 
         Ok(())
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PayloadReadFailure {
+    RecoverTornTail,
 }
 
 #[derive(Default)]
@@ -653,6 +666,67 @@ mod tests {
     }
 
     #[test]
+    fn sidx_covers_segment_tail_rejects_empty_footer_after_frames() {
+        let tmp = footer_file(64, &[]);
+        let (entries, _) = read_footer(tmp.path())
+            .expect("read footer")
+            .expect("footer should be present");
+
+        assert!(
+            entries.is_empty(),
+            "SANITY: fixture should have frames before an empty SIDX footer"
+        );
+        assert_eq!(
+            Reader::sidx_covers_segment_tail(tmp.path(), &entries),
+            Some(false),
+            "PROPERTY: an empty SIDX footer does not cover preceding frame bytes and must force frame-scan fallback"
+        );
+    }
+
+    #[test]
+    fn payload_read_unexpected_eof_respects_tail_policy() {
+        assert_eq!(
+            Reader::classify_payload_read_error(
+                7,
+                std::io::Error::from(ErrorKind::UnexpectedEof),
+                FrameScanTailPolicy::RecoverTornTail,
+            )
+            .expect("latest tail EOF should be recoverable"),
+            PayloadReadFailure::RecoverTornTail,
+            "PROPERTY: only the latest tail policy may turn payload EOF into torn-tail recovery"
+        );
+
+        let err = Reader::classify_payload_read_error(
+            7,
+            std::io::Error::from(ErrorKind::UnexpectedEof),
+            FrameScanTailPolicy::FailClosed,
+        )
+        .expect_err("non-tail payload EOF must fail closed");
+        assert!(
+            matches!(
+                err,
+                StoreError::CorruptSegment { ref detail, .. }
+                if detail.contains("frame payload ended before requested length")
+            ),
+            "PROPERTY: non-tail payload EOF must surface as committed-frame corruption, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn payload_read_non_eof_error_is_never_torn_tail_recovery() {
+        let err = Reader::classify_payload_read_error(
+            7,
+            std::io::Error::from(ErrorKind::PermissionDenied),
+            FrameScanTailPolicy::RecoverTornTail,
+        )
+        .expect_err("non-EOF read errors must remain I/O errors");
+        assert!(
+            matches!(err, StoreError::Io(_)),
+            "PROPERTY: torn-tail recovery applies only to UnexpectedEof, got {err:?}"
+        );
+    }
+
+    #[test]
     fn scan_segment_index_into_uses_sidx_fast_path_for_sealed_segments() {
         let dir = TempDir::new().expect("create temp dir");
         let reader = Reader::new(dir.path().to_path_buf(), 4);
@@ -677,6 +751,72 @@ mod tests {
             rows.len(),
             1,
             "PROPERTY: sealed segments with full SIDX tail coverage should use the footer fast path and emit indexed rows"
+        );
+    }
+
+    #[test]
+    fn scan_segment_index_into_uses_sidx_fast_path_when_batch_state_is_idle() {
+        let dir = TempDir::new().expect("create temp dir");
+        let reader = Reader::new(dir.path().to_path_buf(), 4);
+        let segment_id = 7;
+        let path = footer_segment_path(&dir, segment_id, 64, &[sample_entry(0, 64)]);
+        reader.set_active_segment(segment_id + 1);
+        let mut batch_state = BatchRecoveryState::default();
+
+        let mut rows = Vec::new();
+        reader
+            .scan_segment_index_into_with_tail_policy(
+                &path,
+                Some(&mut batch_state),
+                FrameScanTailPolicy::FailClosed,
+                |row| {
+                    rows.push(row);
+                    Ok(())
+                },
+            )
+            .expect("idle batch state should not disable the SIDX fast path");
+
+        assert_eq!(
+            rows.len(),
+            1,
+            "PROPERTY: an idle cross-segment batch state is equivalent to no batch state for SIDX fast-path admission"
+        );
+    }
+
+    #[test]
+    fn scan_segment_index_into_rejects_sidx_fast_path_when_batch_is_pending() {
+        let dir = TempDir::new().expect("create temp dir");
+        let reader = Reader::new(dir.path().to_path_buf(), 4);
+        let segment_id = 7;
+        let path = footer_segment_path(&dir, segment_id, 64, &[sample_entry(0, 64)]);
+        reader.set_active_segment(segment_id + 1);
+        let mut batch_state = BatchRecoveryState {
+            in_batch: true,
+            remaining: 1,
+            started_count: 1,
+            staged: Vec::new(),
+        };
+
+        let mut rows = Vec::new();
+        let err = reader
+            .scan_segment_index_into_with_tail_policy(
+                &path,
+                Some(&mut batch_state),
+                FrameScanTailPolicy::FailClosed,
+                |row| {
+                    rows.push(row);
+                    Ok(())
+                },
+            )
+            .expect_err("pending batch state must force frame scan over synthetic footer bytes");
+
+        assert!(
+            matches!(err, StoreError::CorruptSegment { .. }),
+            "PROPERTY: a pending cross-segment batch must not trust a SIDX footer until the batch is resolved; got {err:?}"
+        );
+        assert!(
+            rows.is_empty(),
+            "PROPERTY: rejecting the SIDX fast path while a batch is pending must not emit footer rows"
         );
     }
 

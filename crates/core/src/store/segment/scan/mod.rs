@@ -889,6 +889,12 @@ mod tests {
         assert!(Reader::checked_batch_count(1, 0, 0).is_err());
         assert!(Reader::checked_batch_count(1, 0, MAX_BATCH_RECOVERY_ITEMS + 1).is_err());
         assert_eq!(
+            Reader::checked_batch_count(1, 0, MAX_BATCH_RECOVERY_ITEMS)
+                .expect("max batch count remains valid"),
+            MAX_BATCH_RECOVERY_ITEMS,
+            "PROPERTY: the exact MAX_BATCH_RECOVERY_ITEMS boundary is allowed"
+        );
+        assert_eq!(
             Reader::checked_batch_count(1, 0, 3).expect("valid batch count"),
             3
         );
