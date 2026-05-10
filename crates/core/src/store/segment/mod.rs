@@ -357,7 +357,7 @@ impl Segment<Active> {
 /// Check whether a segment file ends with a SIDX footer.
 /// If so, return the byte offset where the string table starts (= end of frames).
 /// If not, return `None` (frames extend to EOF).
-fn detect_sidx_boundary<R: Read + Seek>(
+pub(crate) fn detect_sidx_boundary<R: Read + Seek>(
     source: &mut R,
     file_len: u64,
 ) -> Result<Option<u64>, StoreError> {

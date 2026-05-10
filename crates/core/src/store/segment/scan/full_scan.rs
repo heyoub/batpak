@@ -3,7 +3,7 @@ use crate::event::EventKind;
 use crate::store::segment::{self, SEGMENT_MAGIC};
 use crate::store::StoreError;
 use std::fs::File;
-use std::io::{ErrorKind, Read};
+use std::io::{ErrorKind, Read, Seek, SeekFrom};
 use std::path::Path;
 
 impl Reader {
@@ -16,6 +16,10 @@ impl Reader {
     /// need the full event stream always get it.
     pub(crate) fn scan_segment(&self, path: &Path) -> Result<Vec<ScannedEntry>, StoreError> {
         let mut file = File::open(path).map_err(StoreError::Io)?;
+        let file_len = file.seek(SeekFrom::End(0)).map_err(StoreError::Io)?;
+        let frames_end = segment::detect_sidx_boundary(&mut file, file_len)?.unwrap_or(file_len);
+        file.seek(SeekFrom::Start(0)).map_err(StoreError::Io)?;
+
         let mut magic = [0u8; 4];
         file.read_exact(&mut magic).map_err(StoreError::Io)?;
         if &magic != SEGMENT_MAGIC {
@@ -51,6 +55,9 @@ impl Reader {
         // Read frames until EOF. Each frame: [len:u32 BE][crc32:u32 BE][msgpack]
         let mut entries = Vec::new();
         loop {
+            if cursor >= frames_end {
+                break;
+            }
             let frame_offset = cursor;
             let Some(frame_header) =
                 read_frame_header_or_clean_eof(&mut file).map_err(StoreError::Io)?
@@ -68,6 +75,16 @@ impl Reader {
                 return Err(StoreError::corrupt_frame(
                     segment_id,
                     format!("frame payload length {payload_len} exceeds MAX_FRAME_PAYLOAD"),
+                ));
+            }
+            let frame_tail = frame_offset
+                .checked_add(8)
+                .and_then(|base| base.checked_add(u64::try_from(payload_len).ok()?))
+                .ok_or_else(|| StoreError::corrupt_frame(segment_id, "frame tail overflow"))?;
+            if frame_tail > frames_end {
+                return Err(StoreError::corrupt_frame(
+                    segment_id,
+                    "frame payload extends past the frame region",
                 ));
             }
             let mut frame_buf = self.acquire_buffer(8 + payload_len);
