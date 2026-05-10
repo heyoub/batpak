@@ -11,11 +11,35 @@ use dashmap::DashMap;
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::fs::File;
+use std::io::{Error, ErrorKind, Read};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 const FRAME_HEADER_BYTES: usize = 8;
 const MAX_BATCH_RECOVERY_ITEMS: u32 = 1_000_000;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum FrameScanTailPolicy {
+    FailClosed,
+    RecoverTornTail,
+}
+
+impl FrameScanTailPolicy {
+    fn can_recover_torn_tail(self) -> bool {
+        matches!(self, Self::RecoverTornTail)
+    }
+}
+
+fn read_frame_header_or_clean_eof(
+    reader: &mut impl Read,
+) -> Result<Option<[u8; FRAME_HEADER_BYTES]>, Error> {
+    let mut frame_header = [0u8; FRAME_HEADER_BYTES];
+    match reader.read_exact(&mut frame_header) {
+        Ok(()) => Ok(Some(frame_header)),
+        Err(error) if error.kind() == ErrorKind::UnexpectedEof => Ok(None),
+        Err(error) => Err(error),
+    }
+}
 
 /// Reader: reads events from segment files.
 /// Sealed segments: memory-mapped via `memmap2` for zero-copy reads.
@@ -566,7 +590,18 @@ mod tests {
     use super::*;
     use crate::coordinate::DagPosition;
     use crate::store::DiskPos;
+    use std::io::ErrorKind;
     use tempfile::TempDir;
+
+    struct FailingRead {
+        kind: ErrorKind,
+    }
+
+    impl std::io::Read for FailingRead {
+        fn read(&mut self, _buf: &mut [u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::from(self.kind))
+        }
+    }
 
     fn test_reader() -> (Reader, TempDir) {
         let dir = TempDir::new().expect("create temp dir for reader test");
@@ -577,6 +612,34 @@ mod tests {
     fn write_segment_bytes(dir: &TempDir, segment_id: u64, bytes: &[u8]) {
         let path = dir.path().join(segment::segment_filename(segment_id));
         std::fs::write(&path, bytes).expect("write segment bytes");
+    }
+
+    #[test]
+    fn read_frame_header_policy_treats_unexpected_eof_as_clean_end() {
+        let mut reader = FailingRead {
+            kind: ErrorKind::UnexpectedEof,
+        };
+
+        let result = read_frame_header_or_clean_eof(&mut reader).expect("EOF should be non-fatal");
+
+        assert!(
+            result.is_none(),
+            "PROPERTY: EOF while reading the next frame header is the clean segment terminator"
+        );
+    }
+
+    #[test]
+    fn read_frame_header_policy_surfaces_non_eof_io_errors() {
+        let mut reader = FailingRead {
+            kind: ErrorKind::PermissionDenied,
+        };
+
+        let result = read_frame_header_or_clean_eof(&mut reader);
+
+        assert!(
+            matches!(result, Err(error) if error.kind() == ErrorKind::PermissionDenied),
+            "PROPERTY: non-EOF frame-header read errors must surface as I/O failures"
+        );
     }
 
     #[test]

@@ -50,6 +50,18 @@ fn segment_path(dir: &TempDir) -> std::path::PathBuf {
     out.expect("exactly one segment must exist")
 }
 
+fn segment_paths_sorted(dir: &TempDir) -> Vec<std::path::PathBuf> {
+    let mut paths: Vec<_> = std::fs::read_dir(dir.path())
+        .expect("read data dir")
+        .filter_map(|entry| {
+            let path = entry.expect("read_dir entry").path();
+            (path.extension().and_then(|s| s.to_str()) == Some(SEGMENT_EXTENSION)).then_some(path)
+        })
+        .collect();
+    paths.sort();
+    paths
+}
+
 fn seed_store(dir: &TempDir, count: u32) {
     let store = Store::open(config(dir)).expect("open store");
     let coord = Coordinate::new("entity:scan", "scope:test").expect("valid coord");
@@ -132,6 +144,17 @@ fn raw_msgpack_frame(msgpack: &[u8]) -> Vec<u8> {
     frame.extend_from_slice(&crc32fast::hash(msgpack).to_be_bytes());
     frame.extend_from_slice(msgpack);
     frame
+}
+
+fn poison_first_frame_length_past_max(seg: &std::path::Path) {
+    let mut bytes = strip_sidx(std::fs::read(seg).expect("read segment"));
+    let first_frame_offset = frame_scan_header_end(&bytes);
+    assert!(
+        first_frame_offset + 4 <= bytes.len(),
+        "segment must contain a frame header to poison"
+    );
+    bytes[first_frame_offset..first_frame_offset + 4].copy_from_slice(&u32::MAX.to_be_bytes());
+    std::fs::write(seg, bytes).expect("write poisoned segment");
 }
 
 fn rewrite_first_matching_frame(
@@ -346,6 +369,50 @@ fn pathological_frame_length_is_bounded_not_panicking() {
         .append(&coord, KIND, &serde_json::json!({"post_poison": true}))
         .expect("append after corrupt reopen");
     store.close().expect("close");
+}
+
+#[test]
+fn non_tail_pathological_frame_length_fails_closed_on_reopen() {
+    // Only the latest existing segment is allowed to use torn-tail recovery.
+    // An impossible frame length in older history means committed segment
+    // corruption, not a recoverable crash tail.
+    let dir = TempDir::new().expect("temp dir");
+    let store = Store::open(config(&dir).with_segment_max_bytes(512)).expect("open store");
+    let coord = Coordinate::new("entity:scan-historical", "scope:test").expect("valid coord");
+    for i in 0..40 {
+        store
+            .append(
+                &coord,
+                KIND,
+                &serde_json::json!({"i": i, "pad": "x".repeat(96)}),
+            )
+            .expect("append");
+    }
+    store.close().expect("close");
+
+    let segments = segment_paths_sorted(&dir);
+    assert!(
+        segments.len() >= 2,
+        "test must create historical and latest segments; got {}",
+        segments.len()
+    );
+    poison_first_frame_length_past_max(&segments[0]);
+
+    let err = match Store::open(config(&dir).with_segment_max_bytes(512)) {
+        Ok(_) => {
+            panic!("PROPERTY: non-tail impossible frame length must fail closed during reopen")
+        }
+        Err(err) => err,
+    };
+
+    assert!(
+        matches!(
+            err,
+            StoreError::CorruptSegment { ref detail, .. }
+            if detail.contains("exceeds MAX_FRAME_PAYLOAD")
+        ),
+        "PROPERTY: non-tail impossible frame length must surface as CorruptSegment; got {err:?}"
+    );
 }
 
 #[test]

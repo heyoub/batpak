@@ -1,4 +1,4 @@
-use super::{Reader, ScannedIndexEntry};
+use super::{read_frame_header_or_clean_eof, FrameScanTailPolicy, Reader, ScannedIndexEntry};
 use crate::event::{EventHeader, EventKind, HashChain};
 use crate::store::segment::{self, SegmentHeader, SEGMENT_MAGIC};
 use crate::store::StoreError;
@@ -7,28 +7,6 @@ use std::fs::File;
 use std::io::{ErrorKind, Read};
 use std::path::Path;
 use std::sync::atomic::Ordering;
-
-fn read_frame_header_or_eof(
-    reader: &mut impl Read,
-    segment_id: u64,
-    state: &BatchRecoveryState,
-) -> Result<Option<[u8; 8]>, StoreError> {
-    let mut frame_header = [0u8; 8];
-    match reader.read_exact(&mut frame_header) {
-        Ok(()) => Ok(Some(frame_header)),
-        Err(error) if error.kind() == ErrorKind::UnexpectedEof => {
-            if state.in_batch {
-                tracing::warn!(
-                    segment_id,
-                    staged_count = state.staged.len(),
-                    "incomplete batch at EOF, will discard or continue in next segment"
-                );
-            }
-            Ok(None)
-        }
-        Err(error) => Err(StoreError::Io(error)),
-    }
-}
 
 impl Reader {
     /// Check whether the SIDX entries cover every frame in the segment up to
@@ -112,10 +90,11 @@ impl Reader {
     /// This lets cold-start rebuild stream scanned entries straight into the
     /// replay cursor instead of allocating a per-segment `Vec` only to fold it
     /// again immediately afterward.
-    pub(crate) fn scan_segment_index_into<F>(
+    pub(crate) fn scan_segment_index_into_with_tail_policy<F>(
         &self,
         path: &Path,
         mut batch_state: Option<&mut BatchRecoveryState>,
+        tail_policy: FrameScanTailPolicy,
         mut sink: F,
     ) -> Result<(), StoreError>
     where
@@ -154,7 +133,6 @@ impl Reader {
         }
 
         let mut file = File::open(path).map_err(StoreError::Io)?;
-        let file_len = file.metadata().map_err(StoreError::Io)?.len();
         let mut magic = [0u8; 4];
         file.read_exact(&mut magic).map_err(StoreError::Io)?;
         if &magic != SEGMENT_MAGIC {
@@ -194,8 +172,16 @@ impl Reader {
 
         loop {
             let frame_offset = cursor;
-            let Some(frame_header) = read_frame_header_or_eof(&mut file, segment_id, state_ref)?
+            let Some(frame_header) =
+                read_frame_header_or_clean_eof(&mut file).map_err(StoreError::Io)?
             else {
+                if state_ref.in_batch {
+                    tracing::warn!(
+                        segment_id,
+                        staged_count = state_ref.staged.len(),
+                        "incomplete batch at EOF, will discard or continue in next segment"
+                    );
+                }
                 break;
             };
 
@@ -206,24 +192,35 @@ impl Reader {
                 frame_header[3],
             ]) as usize;
             if Self::payload_len_exceeds_max(payload_len) {
-                tracing::warn!(
+                if tail_policy.can_recover_torn_tail() {
+                    tracing::warn!(
+                        segment_id,
+                        payload_len,
+                        "frame payload exceeds MAX_FRAME_PAYLOAD, stopping segment scan as torn tail"
+                    );
+                    break;
+                }
+                return Err(StoreError::corrupt_frame(
                     segment_id,
-                    payload_len,
-                    "frame payload exceeds MAX_FRAME_PAYLOAD, stopping segment scan as torn tail"
-                );
-                break;
+                    format!("frame payload length {payload_len} exceeds MAX_FRAME_PAYLOAD"),
+                ));
             }
             let mut frame_buf = self.acquire_buffer(8 + payload_len);
             frame_buf[..8].copy_from_slice(&frame_header);
             if let Err(error) = file.read_exact(&mut frame_buf[8..]) {
                 self.release_buffer(frame_buf);
                 if error.kind() == ErrorKind::UnexpectedEof {
-                    break;
+                    if tail_policy.can_recover_torn_tail() {
+                        break;
+                    }
+                    return Err(StoreError::corrupt_frame(
+                        segment_id,
+                        "frame payload ended before requested length",
+                    ));
                 }
                 return Err(StoreError::Io(error));
             }
 
-            let mut stop_scan = false;
             match segment::frame_decode(&frame_buf) {
                 Ok((msgpack, frame_size)) => {
                     match rmp_serde::from_slice::<IndexScanFramePayload>(msgpack) {
@@ -409,21 +406,16 @@ impl Reader {
                         state_ref.staged.clear();
                         state_ref.in_batch = false;
                     }
-                    if frame_offset + u64::try_from(frame_buf.len()).unwrap_or(u64::MAX) >= file_len
-                    {
-                        stop_scan = true;
-                    } else {
-                        return Err(StoreError::CorruptSegment {
-                            segment_id,
-                            detail: format!("frame at offset {frame_offset} is corrupt: {error}"),
-                        });
-                    }
+                    self.release_buffer(frame_buf);
+                    return Err(StoreError::CorruptSegment {
+                        segment_id,
+                        detail: format!(
+                            "frame at offset {frame_offset} is corrupt after full payload read: {error}"
+                        ),
+                    });
                 }
             }
             self.release_buffer(frame_buf);
-            if stop_scan {
-                break;
-            }
         }
 
         Ok(())
@@ -477,18 +469,8 @@ mod tests {
     use crate::coordinate::DagPosition;
     use crate::event::EventKind;
     use crate::store::segment::sidx::{kind_to_raw, read_footer, SidxEntry, SidxEntryCollector};
-    use std::io::{self, Cursor, Seek, SeekFrom, Write};
+    use std::io::{Cursor, Seek, SeekFrom, Write};
     use tempfile::{NamedTempFile, TempDir};
-
-    struct FailingRead {
-        kind: ErrorKind,
-    }
-
-    impl Read for FailingRead {
-        fn read(&mut self, _buf: &mut [u8]) -> io::Result<usize> {
-            Err(io::Error::new(self.kind, "injected header read failure"))
-        }
-    }
 
     fn sample_entry(frame_offset: u64, frame_length: u32) -> SidxEntry {
         SidxEntry {
@@ -568,37 +550,6 @@ mod tests {
             length: 16,
             global_sequence: None,
         }
-    }
-
-    #[test]
-    fn read_frame_header_treats_unexpected_eof_as_segment_end() {
-        let mut reader = FailingRead {
-            kind: ErrorKind::UnexpectedEof,
-        };
-        let state = BatchRecoveryState::default();
-
-        let result =
-            read_frame_header_or_eof(&mut reader, 7, &state).expect("EOF should be non-fatal");
-
-        assert!(
-            result.is_none(),
-            "PROPERTY: an EOF while reading the next frame header ends the segment scan"
-        );
-    }
-
-    #[test]
-    fn read_frame_header_surfaces_non_eof_io_errors() {
-        let mut reader = FailingRead {
-            kind: ErrorKind::PermissionDenied,
-        };
-        let state = BatchRecoveryState::default();
-
-        let result = read_frame_header_or_eof(&mut reader, 7, &state);
-
-        assert!(
-            matches!(result, Err(StoreError::Io(error)) if error.kind() == ErrorKind::PermissionDenied),
-            "PROPERTY: only UnexpectedEof is accepted as segment end; other I/O errors are reported"
-        );
     }
 
     #[test]
@@ -691,10 +642,15 @@ mod tests {
 
         let mut rows = Vec::new();
         reader
-            .scan_segment_index_into(&path, None, |row| {
-                rows.push(row);
-                Ok(())
-            })
+            .scan_segment_index_into_with_tail_policy(
+                &path,
+                None,
+                FrameScanTailPolicy::FailClosed,
+                |row| {
+                    rows.push(row);
+                    Ok(())
+                },
+            )
             .expect("sealed scan should succeed");
 
         assert_eq!(
@@ -726,10 +682,15 @@ mod tests {
 
         let mut rows = Vec::new();
         reader
-            .scan_segment_index_into(&path, None, |row| {
-                rows.push(row);
-                Ok(())
-            })
+            .scan_segment_index_into_with_tail_policy(
+                &path,
+                None,
+                FrameScanTailPolicy::FailClosed,
+                |row| {
+                    rows.push(row);
+                    Ok(())
+                },
+            )
             .expect("sealed scan should succeed");
 
         assert_eq!(
@@ -758,10 +719,15 @@ mod tests {
 
         let mut rows = Vec::new();
         let err = reader
-            .scan_segment_index_into(&path, None, |row| {
-                rows.push(row);
-                Ok(())
-            })
+            .scan_segment_index_into_with_tail_policy(
+                &path,
+                None,
+                FrameScanTailPolicy::FailClosed,
+                |row| {
+                    rows.push(row);
+                    Ok(())
+                },
+            )
             .expect_err("active segment must not trust the synthetic SIDX footer fixture");
 
         assert!(
