@@ -1,14 +1,10 @@
-use super::{Reader, ScannedEntry};
+use super::{read_frame_header_or_clean_eof, Reader, ScannedEntry};
 use crate::event::EventKind;
 use crate::store::segment::{self, SEGMENT_MAGIC};
 use crate::store::StoreError;
 use std::fs::File;
-use std::io::{Error, ErrorKind, Read};
+use std::io::{ErrorKind, Read};
 use std::path::Path;
-
-fn frame_header_error_ends_scan(error: &Error) -> bool {
-    error.kind() == ErrorKind::UnexpectedEof
-}
 
 impl Reader {
     /// Scan an entire segment for cold start. Returns all events in order.
@@ -20,7 +16,6 @@ impl Reader {
     /// need the full event stream always get it.
     pub(crate) fn scan_segment(&self, path: &Path) -> Result<Vec<ScannedEntry>, StoreError> {
         let mut file = File::open(path).map_err(StoreError::Io)?;
-        let file_len = file.metadata().map_err(StoreError::Io)?.len();
         let mut magic = [0u8; 4];
         file.read_exact(&mut magic).map_err(StoreError::Io)?;
         if &magic != SEGMENT_MAGIC {
@@ -57,12 +52,11 @@ impl Reader {
         let mut entries = Vec::new();
         loop {
             let frame_offset = cursor;
-            let mut frame_header = [0u8; 8];
-            match file.read_exact(&mut frame_header) {
-                Ok(()) => {}
-                Err(error) if frame_header_error_ends_scan(&error) => break,
-                Err(error) => return Err(StoreError::Io(error)),
-            }
+            let Some(frame_header) =
+                read_frame_header_or_clean_eof(&mut file).map_err(StoreError::Io)?
+            else {
+                break;
+            };
 
             let payload_len = u32::from_be_bytes([
                 frame_header[0],
@@ -71,24 +65,24 @@ impl Reader {
                 frame_header[3],
             ]) as usize;
             if Self::payload_len_exceeds_max(payload_len) {
-                tracing::warn!(
+                return Err(StoreError::corrupt_frame(
                     segment_id,
-                    payload_len,
-                    "frame payload exceeds MAX_FRAME_PAYLOAD, stopping segment scan as torn tail"
-                );
-                break;
+                    format!("frame payload length {payload_len} exceeds MAX_FRAME_PAYLOAD"),
+                ));
             }
             let mut frame_buf = self.acquire_buffer(8 + payload_len);
             frame_buf[..8].copy_from_slice(&frame_header);
             if let Err(error) = file.read_exact(&mut frame_buf[8..]) {
                 self.release_buffer(frame_buf);
                 if error.kind() == ErrorKind::UnexpectedEof {
-                    break;
+                    return Err(StoreError::corrupt_frame(
+                        segment_id,
+                        "frame payload ended before requested length",
+                    ));
                 }
                 return Err(StoreError::Io(error));
             }
 
-            let mut stop_scan = false;
             match segment::frame_decode(&frame_buf) {
                 Ok((msgpack, frame_size)) => {
                     match Self::decode_frame_payload_value(msgpack) {
@@ -124,21 +118,16 @@ impl Reader {
                     });
                 }
                 Err(error) => {
-                    if frame_offset + u64::try_from(frame_buf.len()).unwrap_or(u64::MAX) >= file_len
-                    {
-                        stop_scan = true;
-                    } else {
-                        return Err(StoreError::CorruptSegment {
-                            segment_id,
-                            detail: format!("frame at offset {frame_offset} is corrupt: {error}"),
-                        });
-                    }
+                    self.release_buffer(frame_buf);
+                    return Err(StoreError::CorruptSegment {
+                        segment_id,
+                        detail: format!(
+                            "frame at offset {frame_offset} is corrupt after full payload read: {error}"
+                        ),
+                    });
                 }
             }
             self.release_buffer(frame_buf);
-            if stop_scan {
-                break;
-            }
         }
         Ok(entries)
     }
@@ -147,16 +136,37 @@ impl Reader {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
 
     #[test]
-    fn frame_header_error_policy_only_treats_eof_as_clean_end() {
+    fn scan_segment_treats_eof_after_header_as_clean_empty_segment() {
+        let dir = tempfile::TempDir::new().expect("create temp dir");
+        let segment_id = 7;
+        let path = dir.path().join(segment::segment_filename(segment_id));
+        let header = segment::SegmentHeader {
+            version: 1,
+            flags: 0,
+            created_ns: 123,
+            segment_id,
+        };
+        let header_bytes = rmp_serde::to_vec_named(&header).expect("encode segment header");
+        let header_len = u32::try_from(header_bytes.len()).expect("segment header length fits u32");
+
+        let mut file = File::create(&path).expect("create segment");
+        file.write_all(SEGMENT_MAGIC).expect("write segment magic");
+        file.write_all(&header_len.to_be_bytes())
+            .expect("write segment header length");
+        file.write_all(&header_bytes).expect("write segment header");
+        file.flush().expect("flush segment");
+
+        let reader = Reader::new(dir.path().to_path_buf(), 4);
+        let entries = reader
+            .scan_segment(&path)
+            .expect("EOF after the segment header is the clean frame terminator");
+
         assert!(
-            frame_header_error_ends_scan(&Error::from(ErrorKind::UnexpectedEof)),
-            "PROPERTY: EOF while reading the next frame header is the clean segment terminator"
-        );
-        assert!(
-            !frame_header_error_ends_scan(&Error::from(ErrorKind::InvalidData)),
-            "PROPERTY: non-EOF frame-header read errors must surface as StoreError::Io, not end the scan"
+            entries.is_empty(),
+            "PROPERTY: a valid segment with no frames scans as empty, not corrupt"
         );
     }
 }

@@ -4,7 +4,7 @@ use crate::store::config::duration_micros;
 use crate::store::index::interner::StringInterner;
 use crate::store::index::{DiskPos, IndexEntry, RoutingSummary, StoreIndex};
 use crate::store::segment;
-use crate::store::segment::scan::{Reader, ScannedIndexEntry};
+use crate::store::segment::scan::{FrameScanTailPolicy, Reader, ScannedIndexEntry};
 use crate::store::segment::sidx::ReservedKindFallbackStats;
 use crate::store::StoreError;
 use rayon::prelude::*;
@@ -548,6 +548,7 @@ fn collect_tail_entries(
     allocator_floor: u64,
 ) -> Result<Vec<IndexEntry>, StoreError> {
     let entries = segment_paths(data_dir)?;
+    let recoverable_tail_segment_id = entries.last().map(|(segment_id, _)| *segment_id);
     let mut batch_state = crate::store::segment::scan::BatchRecoveryState::default();
     let mut tracker = SequenceTracker {
         max_seen: allocator_floor.saturating_sub(1),
@@ -560,18 +561,31 @@ fn collect_tail_entries(
             continue;
         }
 
-        reader.scan_segment_index_into(path, Some(&mut batch_state), |se| {
-            if *seg_id == watermark.watermark_segment_id && se.offset < watermark.watermark_offset {
-                return Ok(());
-            }
-            let global_sequence = se
-                .global_sequence
-                .unwrap_or_else(|| tracker.synthesize_next());
-            let entry = entry_from_scan(interner, se, global_sequence)?;
-            tracker.note_seen(global_sequence);
-            rebuilt_entries.push(entry);
-            Ok(())
-        })?;
+        let tail_policy = if Some(*seg_id) == recoverable_tail_segment_id {
+            FrameScanTailPolicy::RecoverTornTail
+        } else {
+            FrameScanTailPolicy::FailClosed
+        };
+
+        reader.scan_segment_index_into_with_tail_policy(
+            path,
+            Some(&mut batch_state),
+            tail_policy,
+            |se| {
+                if *seg_id == watermark.watermark_segment_id
+                    && se.offset < watermark.watermark_offset
+                {
+                    return Ok(());
+                }
+                let global_sequence = se
+                    .global_sequence
+                    .unwrap_or_else(|| tracker.synthesize_next());
+                let entry = entry_from_scan(interner, se, global_sequence)?;
+                tracker.note_seen(global_sequence);
+                rebuilt_entries.push(entry);
+                Ok(())
+            },
+        )?;
     }
 
     Ok(rebuilt_entries)
@@ -588,6 +602,7 @@ type RebuildResult = (
 
 fn collect_rebuild_entries(reader: &Reader, data_dir: &Path) -> Result<RebuildResult, StoreError> {
     let entries = segment_paths(data_dir)?;
+    let recoverable_tail_segment_id = entries.last().map(|(segment_id, _)| *segment_id);
     let configured_active_segment = reader.active_segment_id();
     let active_segment_id = (configured_active_segment != 0).then_some(configured_active_segment);
     let interner = StringInterner::new();
@@ -620,16 +635,26 @@ fn collect_rebuild_entries(reader: &Reader, data_dir: &Path) -> Result<RebuildRe
             source = RestoreSource::FrameScanFallback;
             chunk_count = 1;
             let mut batch_state = crate::store::segment::scan::BatchRecoveryState::default();
-            for (_, path) in &sealed_segments {
-                reader.scan_segment_index_into(path, Some(&mut batch_state), |se| {
-                    let global_sequence = se
-                        .global_sequence
-                        .unwrap_or_else(|| tracker.synthesize_next());
-                    let entry = entry_from_scan(&interner, se, global_sequence)?;
-                    tracker.note_seen(global_sequence);
-                    rebuilt_entries.push(entry);
-                    Ok(())
-                })?;
+            for (segment_id, path) in &sealed_segments {
+                let tail_policy = if Some(*segment_id) == recoverable_tail_segment_id {
+                    FrameScanTailPolicy::RecoverTornTail
+                } else {
+                    FrameScanTailPolicy::FailClosed
+                };
+                reader.scan_segment_index_into_with_tail_policy(
+                    path,
+                    Some(&mut batch_state),
+                    tail_policy,
+                    |se| {
+                        let global_sequence = se
+                            .global_sequence
+                            .unwrap_or_else(|| tracker.synthesize_next());
+                        let entry = entry_from_scan(&interner, se, global_sequence)?;
+                        tracker.note_seen(global_sequence);
+                        rebuilt_entries.push(entry);
+                        Ok(())
+                    },
+                )?;
             }
         }
     } else {
@@ -641,15 +666,20 @@ fn collect_rebuild_entries(reader: &Reader, data_dir: &Path) -> Result<RebuildRe
         if Some(*segment_id) != active_segment_id {
             continue;
         }
-        reader.scan_segment_index_into(path, Some(&mut batch_state), |se| {
-            let global_sequence = se
-                .global_sequence
-                .unwrap_or_else(|| tracker.synthesize_next());
-            let entry = entry_from_scan(&interner, se, global_sequence)?;
-            tracker.note_seen(global_sequence);
-            rebuilt_entries.push(entry);
-            Ok(())
-        })?;
+        reader.scan_segment_index_into_with_tail_policy(
+            path,
+            Some(&mut batch_state),
+            FrameScanTailPolicy::RecoverTornTail,
+            |se| {
+                let global_sequence = se
+                    .global_sequence
+                    .unwrap_or_else(|| tracker.synthesize_next());
+                let entry = entry_from_scan(&interner, se, global_sequence)?;
+                tracker.note_seen(global_sequence);
+                rebuilt_entries.push(entry);
+                Ok(())
+            },
+        )?;
     }
 
     rebuilt_entries.sort_by_key(|entry| entry.global_sequence);
