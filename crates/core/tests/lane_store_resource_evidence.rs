@@ -10,7 +10,7 @@
 use batpak::prelude::*;
 use batpak::store::{
     store_data_dir_identity_hash, store_resource_evidence_report_from_diagnostics,
-    store_resource_report_body_from_diagnostics, store_resource_report_body_hash,
+    store_resource_report_body_from_diagnostics, store_resource_report_body_hash, OpenIndexReport,
     StoreResourceEnvelope, StoreResourceEvidenceReport, StoreResourceFrontierBody,
     StoreResourceHash, StoreResourceReportBody, StoreResourceReportError,
     StoreResourceRestartPolicyShape, STORE_RESOURCE_REPORT_SCHEMA_VERSION,
@@ -21,6 +21,24 @@ use std::error::Error;
 mod small_store_support;
 
 type TestResult = Result<(), Box<dyn Error>>;
+
+fn assert_open_index_report_phase_micros_sane(report: &OpenIndexReport) {
+    assert!(
+        report.elapsed_us > 0,
+        "PROPERTY: open_index elapsed_us should be non-zero for exercised paths, got {}",
+        report.elapsed_us
+    );
+    let sum = report
+        .phase_plan_build_us
+        .saturating_add(report.phase_interner_us)
+        .saturating_add(report.phase_restore_index_us)
+        .saturating_add(report.phase_hidden_ranges_us);
+    assert!(
+        sum <= report.elapsed_us,
+        "PROPERTY: cold-start phase micros must not exceed total elapsed; sum={sum} elapsed_us={}",
+        report.elapsed_us
+    );
+}
 
 fn assert_stable_resource_shape(left: &StoreResourceReportBody, right: &StoreResourceReportBody) {
     assert_eq!(left.schema_version, right.schema_version);
@@ -55,6 +73,20 @@ fn store_resource_evidence_family_invariants_and_reopen_stable() -> TestResult {
     let rep1: StoreResourceEvidenceReport = store.store_resource_evidence_report()?;
     let envelope: StoreResourceEnvelope = rep1.clone();
     assert_eq!(envelope.body_hash, rep1.body_hash);
+
+    let diag = store.diagnostics();
+    let diag_open = diag
+        .open_report
+        .as_ref()
+        .expect("PROPERTY: diagnostics must carry open_report after open");
+    assert_open_index_report_phase_micros_sane(diag_open);
+    let body_open = rep1
+        .body
+        .open_report
+        .as_ref()
+        .expect("PROPERTY: store resource body must echo open_report when present");
+    assert_eq!(body_open, diag_open);
+    assert_open_index_report_phase_micros_sane(body_open);
 
     let _: StoreResourceFrontierBody = rep1.body.frontier;
     let _: StoreResourceRestartPolicyShape = rep1.body.restart_policy;

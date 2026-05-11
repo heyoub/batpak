@@ -89,6 +89,13 @@
 - Keep root-first commands and paths accurate.
 - If you add a public item or named flow, update `traceability/`.
 - Prefer `cargo xtask` over inventing new one-off local commands.
+- **ExtProfile boundary** — batpak may align with the sibling `EXTERNAL_SPEC`, but this crate
+  does not implement External-Profile or `contract.external_v1` wire validation. Treat
+  `contract.external_v1` as a normative optional ExtProfile profile only when
+  `EXTERNAL_SPEC` is audit-clean; in batpak, ExtProfile references are docs-only alignment
+  unless a change explicitly adds codecs, tests, and traceability for a runtime
+  surface. `authority_required` remains receiver-policy input, never granted
+  authority.
 - `.githooks/` is the tracked repo hook surface. `cargo xtask setup --install-tools` will install it when no custom `core.hooksPath` is active; otherwise use `cargo xtask install-hooks` after clearing or changing the custom hook path.
 - **Structural parity checks** — `cargo xtask structural` (called automatically by `cargo xtask ci`) runs two detectors you must not break:
   - `check_ci_parity` — fails if `.github/workflows/ci.yml` drifts from the xtask source tree or `.devcontainer/Dockerfile`. Specifically: every `cargo xtask <subcommand>` referenced in the workflow must exist as a subcommand in xtask; every `taiki-e/install-action` tool must be present in xtask's setup step; tool version pins must agree across all three files. **Rule:** if you modify `tools/xtask/src/main.rs`, `tools/xtask/src/commands.rs`, `.github/workflows/ci.yml`, or `.devcontainer/Dockerfile`, run `cargo xtask structural` before push.

@@ -384,6 +384,16 @@ where
         ),
     }?;
 
+    tracing::trace!(
+        target: "batpak::projection",
+        flow = "project",
+        entity,
+        cache_status = ?outcome.cache_status(),
+        observed_freshness = ?outcome.observed_freshness(),
+        total_us = duration_micros(t_start.elapsed()),
+        returned_generation = outcome.returned_generation(),
+    );
+
     notify_projection_applied::<T, State>(store, entity, &outcome);
     Ok(outcome)
 }
@@ -426,7 +436,21 @@ where
     let plan_generation = execution.replay.plan.generation;
 
     let t_ext = std::time::Instant::now();
-    match store.cache.get(&execution.replay.cache_key) {
+    let cache_row = store.cache.get(&execution.replay.cache_key);
+    let probe_us = duration_micros(t_ext.elapsed());
+    let probe_outcome = match &cache_row {
+        Ok(Some(_)) => "some",
+        Ok(None) => "none",
+        Err(_) => "error",
+    };
+    tracing::trace!(
+        target: "batpak::projection",
+        flow = "external_cache_probe",
+        entity = execution.entity,
+        outcome = probe_outcome,
+        probe_us,
+    );
+    match cache_row {
         Ok(Some((bytes, meta))) => {
             record_external_cache_probe_time(timings, t_ext);
             let is_fresh = match execution.freshness {

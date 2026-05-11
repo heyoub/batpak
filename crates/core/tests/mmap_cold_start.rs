@@ -15,6 +15,39 @@ use std::sync::{
 };
 use tempfile::TempDir;
 
+fn assert_open_index_report_phase_micros_sane(report: &OpenIndexReport) {
+    assert!(
+        report.elapsed_us > 0,
+        "PROPERTY: open_index elapsed_us should be non-zero for exercised paths, got {}",
+        report.elapsed_us
+    );
+    let sum = report
+        .phase_plan_build_us
+        .saturating_add(report.phase_interner_us)
+        .saturating_add(report.phase_restore_index_us)
+        .saturating_add(report.phase_hidden_ranges_us);
+    assert!(
+        sum <= report.elapsed_us,
+        "PROPERTY: cold-start phase micros must not exceed total elapsed; sum={sum} elapsed_us={}",
+        report.elapsed_us
+    );
+}
+
+/// Seeded mmap/checkpoint reopen paths must record non-zero phase work (guards defaulted zeros).
+fn assert_open_index_report_phase_buckets_nonzero(report: &OpenIndexReport) {
+    assert_open_index_report_phase_micros_sane(report);
+    let sum = report
+        .phase_plan_build_us
+        .saturating_add(report.phase_interner_us)
+        .saturating_add(report.phase_restore_index_us)
+        .saturating_add(report.phase_hidden_ranges_us);
+    assert!(
+        sum > 0,
+        "PROPERTY: seeded reopen must attribute cold-start work to at least one phase bucket (sum={sum}, elapsed_us={})",
+        report.elapsed_us
+    );
+}
+
 fn mmap_entries_offset(bytes: &[u8]) -> usize {
     const PREFIX_LEN: usize = 6 + 2 + 4;
     const HEADER_TAIL_LEN_V2: usize = (8 * 6) + 4;
@@ -210,12 +243,35 @@ fn default_config_reopen_uses_mmap_path() {
         report.tail_entries,
         report.elapsed_us,
     );
+    assert_open_index_report_phase_buckets_nonzero(&report);
     assert_eq!(
         store2.stream("entity:default").len(),
         100,
         "all events must be present after mmap reopen"
     );
     store2.close().expect("close");
+}
+
+#[test]
+fn mmap_reopen_open_report_phase_micros_sane() {
+    let dir = TempDir::new().expect("temp dir");
+    // Larger seed so cold-start phase micros are unlikely to all truncate to 0µs on fast hosts.
+    seed_store(&dir, 256);
+
+    let store = Store::open(mmap_config(&dir)).expect("reopen mmap store");
+    let report = store
+        .diagnostics()
+        .open_report
+        .clone()
+        .expect("open_report after mmap reopen");
+    assert_eq!(report.path, OpenIndexPath::Mmap);
+    assert_open_index_report_phase_buckets_nonzero(&report);
+    assert_eq!(
+        store.stream("entity:mmap").len(),
+        256,
+        "mmap reopen after larger seed must preserve full stream cardinality"
+    );
+    store.close().expect("close");
 }
 
 #[test]

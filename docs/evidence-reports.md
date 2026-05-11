@@ -1,6 +1,7 @@
 # Evidence Reports Family
 
-batpak evidence reports are deterministic structural proof objects. They share a
+batpak evidence reports are deterministic structural proof objects over their
+canonical body inputs (per report type and schema version). They share a
 single identity pattern:
 
 - deterministic `*ReportBody`
@@ -40,8 +41,13 @@ substrate pressure that cannot be satisfied by existing report bodies.
 
 ## Shared Contracts
 
-- **Deterministic body identity:** equal logical inputs produce equal body bytes
-  and `body_hash` within the same report schema version.
+- **Deterministic body identity:** equal stable logical inputs produce equal body
+  bytes and `body_hash` within the same report schema version. Bodies that embed
+  timing or frontier snapshots (notably `StoreResourceEvidenceReport` with
+  optional `OpenIndexReport`) are **point-in-time operational evidence** over
+  the captured diagnostics snapshot: `body_hash` is the identity of that
+  observation, not a replay-stable proof that two opens share identical timing,
+  cold-start path, or watermark coordinates.
 - **Deterministic findings:** findings are emitted in sorted structural order.
 - **Structural scope only:** these reports do not infer policy, protocol, or
   application semantics.
@@ -51,12 +57,18 @@ substrate pressure that cannot be satisfied by existing report bodies.
   facts. Use `Known` when batpak already exposes the value, `NotApplicable` when
   the field does not apply, `NotTracked` only when the substrate does not track
   the fact, and `Unavailable` for deterministic acquisition/encoding failures.
-- **Non-capture of runtime configuration:** canonical report bodies
-  intentionally do not attest to `StoreConfig`, platform profile paths, registry
-  validation mode, signing-key configuration, durability gates, or the active
-  hash feature. Those facts must be correlated through configuration,
-  diagnostics, platform profiles, and build metadata when they matter to an
-  audit.
+- **Runtime configuration scope:** canonical bodies do not embed full serialized
+  `StoreConfig`, platform profile paths, registry validation mode, signing-key
+  material, per-append durability gate wiring, or the active hash feature id.
+  Correlate those facts from configuration, dispatch, platform profiles,
+  receipts, and build metadata when they matter to an audit.
+- **Store resource selected config facets:** `StoreResourceEvidenceReport`
+  intentionally captures a small stable subset derived from open-time
+  configuration and index state: `segment_max_bytes`, `fd_budget`, writer
+  `restart_policy` shape, index topology label, tile counts, frontier
+  coordinates, writer pressure, optional cold-start `OpenIndexReport`, and
+  platform evidence summary (see `crates/core/src/store/store_resource_report.rs`).
+  This is not a complete configuration dump.
 
 ## What Each Report Proves
 
@@ -75,12 +87,14 @@ substrate pressure that cannot be satisfied by existing report bodies.
   limit/proof-ref observations. Its `freshness_intent` records caller intent;
   v1 still samples current visible index state rather than applying a
   stale-cache read policy.
-- `StoreResourceEvidenceReport`: deterministic snapshot over stable
+- `StoreResourceEvidenceReport`: canonical snapshot over stable
   `StoreDiagnostics` fields (counts, frontier coordinates, writer pressure,
-  topology label, optional cold-start `OpenIndexReport`, platform evidence).
+  selected config-derived facets above, optional cold-start `OpenIndexReport`
+  including reopen phase micros when present, platform evidence).
   Raw `data_dir` paths never appear in the body; identity uses a path-byte
   digest. Bodies are point-in-time: full byte equality across `close`/`open` is
-  not a contract because cold-start path and replayed system events can differ.
+  not a contract because cold-start path, timing, frontier coordinates, and
+  replayed system events can differ while the store remains consistent.
 
 ## Forensic Query Composition
 

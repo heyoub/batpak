@@ -281,6 +281,9 @@ Compatibility rules:
 Reopen observability contract:
 
 - `diagnostics().open_report` carries per-reopen reserved-kind fallback totals and histograms plus cumulative totals and histograms persisted through the current store's cold-start artifacts
+- `OpenIndexReport` also records cold-start phase micros (`phase_plan_build_us`, `phase_interner_us`, `phase_restore_index_us`, `phase_hidden_ranges_us`) so reopen cost splits are visible in logs and evidence without a second probe pass
+- at `tracing::info!`, the structured store-open line uses stable target `batpak::open` (cold-start path, phase micros, reserved-kind accounting fields)
+- at `tracing::trace!`, measurement hooks use stable targets: `batpak::frontier_wait` (watermark waits), `batpak::durability_gate` (append gate waits), `batpak::fanout` (subscription/reactor push fanout), `batpak::projection` (`project` summary and external cache probe)
 - `StoreConfig::with_open_report_observer(...)` fires once after each successful open with that same structured receipt; observer panics are warned and ignored
 - mutable opens append one durable `SYSTEM_OPEN_COMPLETED` event at `batpak:store` / `batpak:lifecycle`; read-only opens stay side-effect free
 - `SYSTEM_OPEN_COMPLETED` is an ordinary persisted event after append: it participates in the same query, snapshot, compaction, retention, and tombstone rules as any other stored event, so it does not have a special auto-prune path
@@ -457,6 +460,46 @@ Store ownership contract:
 - Unix lock-file opens use `O_NOFOLLOW`; non-Unix targets currently do a
   best-effort symlink-leaf rejection before opening because `std` exposes no
   equivalent atomic no-follow flag there
+
+### Lawful Context Journal And Composition
+
+batpak is a lawful context journal: it records durable messages into coordinate-scoped streams, derives context through projections, and scales by composing multiple sovereign store roots through explicit observations and receipts.
+
+This subsection compresses consequences of the five-layer model above; it does not replace it.
+
+| Term | Meaning |
+| --- | --- |
+| **Journal** | One `Store` open on one `data_dir`; one commit authority; lifetime-held directory lock. |
+| **Stream** | One `Coordinate` chain inside a journal — a logical context stream. |
+| **Context view** | Output of a projection / projection cache, derived from append history; not a second source of truth; any typed witness wrapper remains product- or example-owned until explicitly stabilized. |
+| **Observation** | A foreign fact recorded locally: journal B may reference journal A’s event or receipt without implying A’s writer executed inside B. |
+| **Composition** | Product-layer routing, bridges, and assemblers — not a `Store` cross-directory invariant. |
+
+Reduction (same substrate, clearer roles):
+
+- **Store root** = lawful journal.
+- **`Coordinate`** = logical context stream.
+- **`Event`** = durable message.
+- **`Projection`** = derived context view.
+- **`AppendReceipt` / `DenialReceipt`** = proof of allowed or denied transition (see receipt surfaces elsewhere in this file).
+- **Observation** = product-level foreign fact recorded as normal journal history when you choose to model it that way.
+- **Multi-journal** = composition and scaling layer, not an extra mutation layer inside one `data_dir`.
+
+**Coordinate sharding gives logical order; journal sharding gives physical relief.** Many hot streams inside one journal still share one writer, one frontier set, and one index; when a domain becomes the bottleneck, route it to another store root instead of treating `Coordinate` as a physical shard.
+
+**Multi-instance** means multiple store roots, not multiple live owners of the same directory. There is no per-coordinate writer, no single `global_sequence` across separate `data_dir` values, and no supported pattern of opening the same live `data_dir` read-only beside the writer under today’s lock contract.
+
+**Cursor vs frontier:** `wait_for_durable`, `wait_for_visible`, and `wait_for_applied` are coordination fences over watermark progress (durable / visible / minimum applied across registered projections). Prefer them for a small number of fence-holders. `Cursor::poll_batch` and the `cursor_worker` pattern are the default ordered pull lane for many consumers asking what changed after events are visible in the index. Subscriptions are lossy / coalesced hints, not an authoritative delivery log. Treat `wait_for_applied` as a rare fence: `applied` is the minimum progress across registered projections, so lagging projections block that watermark.
+
+**Durability lanes:** visible append is the fast observation lane; explicit durability gates are the oath lane; batching plus `sync` cadence (and group commit when configured) is the usual throughput lane. Per-event durable sync remains available but is not the default throughput story. When `AppendOptions::gate` is used, `StoreError::WaitTimeout` means the append committed but the requested watermark was not observed before the timeout — see the Durable Frontier section above.
+
+**Cold-start posture:** mmap and checkpoint artifacts are recovery and proof surfaces unless measured faster than rebuild on your hardware; full scan / rebuild remains the honesty baseline. A future “fast-open manifest” is an optimization target, not a present guarantee.
+
+**JournalBridge (composition, out of core):** a bridge consumes exported or tail-able events from the owning journal process, or reads an offline / copy snapshot of another store under an explicit future read-only contract. It must not open the same live `data_dir` read-only alongside the owner under the current `Store` contract.
+
+**ExtProfile (sibling spec, alignment only):** External-Profile is portable packet + receipt + provenance + deterministic render over a closed top-level packet schema; unknown behavior is carried under the `extensions` map per ExtProfile v0.1. External-Profile does **not** define `authority_required` (or similar policy-input fields) as top-level packet fields. In the sibling **EXTERNAL_SPEC** repository, the optional normative profile **`contract.external_v1`** (reserved `contract.*` namespace) is defined with a JSON Schema (`schemas/v0.1/pcp_contract_context_v1.schema.json`), examples, conformance fixtures, and lint hooks—see `profiles/contract.md` and `profiles/registry.md`. That profile MAY attach context, expectations, and `authority_required` under `extensions["contract.external_v1"]` as **inputs to local policy**; such fields do not grant authority on their own. **batpak does not implement External-Profile or `contract.external_v1` wire validation in this crate**; callers that need ExtProfile on the wire carry their own codecs and policy. batpak remains the local durable journal for events, receipts, and transitions; receipts record what happened. A generic machine-readable “active profiles” tuple on every receipt (beyond today’s assembly-specific hooks) may still be extended in EXTERNAL_SPEC for uniform activation reporting across profiles.
+
+**Benchmark posture (directional, not lab-canonical):** treat microbenchmark digits as environment-specific: cold-start paths can differ by orders of magnitude between rebuild, mmap snapshot, and checkpoint snapshot; batched durable throughput is dramatically higher than naive per-append sync; heavy `wait_for_*` fan-out at high waiter counts can dominate wall time compared to visible progress — treat that as a design smell, not a subscription replacement. Projection cache-hit latency differs materially between neutral and all-features builds — keep hot projection paths free of eager proof work until measured on your hardware and pinned in a dated perf note if you need exact figures.
 
 ### Upgrade and Rollback Procedure
 

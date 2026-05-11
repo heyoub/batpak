@@ -254,6 +254,10 @@
   kind: tests
   paths:
     - crates/core/tests/observability_flows.rs
+- id: ART-STORE-LOCKING-TESTS
+  kind: tests
+  paths:
+    - crates/core/tests/store_locking.rs
 - id: ART-DELIVERY-WITNESS-TESTS
   kind: tests
   paths:

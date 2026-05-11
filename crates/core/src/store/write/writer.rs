@@ -15,7 +15,7 @@ use super::staging::{StagedCommitMeta, StagedCommitTiming, StagedCommittedEvent}
 use crate::coordinate::{Coordinate, DagPosition};
 use crate::event::{Event, EventHeader, EventKind, HashChain};
 use crate::store::append::BatchAppendItem;
-use crate::store::config::ValidatedStoreConfig;
+use crate::store::config::{duration_micros, ValidatedStoreConfig};
 use crate::store::index::{DiskPos, StoreIndex};
 use crate::store::segment::sidx::kind_to_raw;
 use crate::store::segment::{self, Active, FramePayloadRef, Segment};
@@ -108,11 +108,26 @@ impl WatermarkAdvanceHandle {
                 return Err(StoreError::WriterCrashed);
             }
             if watermark.current(guard.snapshot()) >= point {
+                tracing::trace!(
+                    target: "batpak::frontier_wait",
+                    ?watermark,
+                    target = ?point,
+                    waited_us = duration_micros(started.elapsed()),
+                    "frontier wait satisfied",
+                );
                 return Ok(());
             }
 
             let elapsed = started.elapsed();
             if elapsed >= timeout {
+                tracing::trace!(
+                    target: "batpak::frontier_wait",
+                    ?watermark,
+                    target = ?point,
+                    waited_us = duration_micros(elapsed),
+                    timed_out = true,
+                    "frontier wait timed out",
+                );
                 return Err(StoreError::WaitTimeout {
                     watermark,
                     target: point,
@@ -121,6 +136,14 @@ impl WatermarkAdvanceHandle {
             }
             let remaining = timeout.saturating_sub(elapsed);
             if remaining.is_zero() {
+                tracing::trace!(
+                    target: "batpak::frontier_wait",
+                    ?watermark,
+                    target = ?point,
+                    waited_us = duration_micros(elapsed),
+                    timed_out = true,
+                    "frontier wait timed out",
+                );
                 return Err(StoreError::WaitTimeout {
                     watermark,
                     target: point,

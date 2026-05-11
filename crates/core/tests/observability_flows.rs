@@ -1,14 +1,95 @@
 //! Observability proofs for named store flows.
+//!
+//! Tests in this module use `#[serial_test::serial(observability_flows)]` so
+//! `stable_batpak_targets_field_shape_at_info_and_trace` can install a global
+//! `tracing` subscriber once: writer-thread events (`batpak::fanout`, etc.) do
+//! not inherit scoped `with_default` dispatchers from the test thread.
 
+use batpak::coordinate::Region;
 use batpak::prelude::*;
 use batpak::store::{
-    CacheCapabilities, CacheMeta, CompactionConfig, Freshness, ProjectionCache, Store, StoreConfig,
-    StoreError, SyncConfig,
+    AppendOptions, CacheCapabilities, CacheMeta, CompactionConfig, DurabilityGate, Freshness,
+    ProjectionCache, Store, StoreConfig, StoreError, SyncConfig, WatermarkKind,
 };
+use std::collections::BTreeMap;
 use std::io;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, LazyLock, Mutex, Once};
 use tempfile::TempDir;
+use tracing::field::Visit;
+use tracing::Subscriber;
+use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::fmt::MakeWriter;
+use tracing_subscriber::layer::{Context, Layer};
+use tracing_subscriber::prelude::*;
+use tracing_subscriber::registry::Registry;
+use tracing_subscriber::util::SubscriberInitExt;
+
+#[derive(Debug, Clone)]
+struct CapturedEvent {
+    target: String,
+    level: tracing::Level,
+    fields: BTreeMap<String, String>,
+}
+
+struct CaptureVisit(BTreeMap<String, String>);
+
+impl Visit for CaptureVisit {
+    fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+        self.0.insert(field.name().to_string(), value.to_string());
+    }
+
+    fn record_u64(&mut self, field: &tracing::field::Field, value: u64) {
+        self.0.insert(field.name().to_string(), value.to_string());
+    }
+
+    fn record_bool(&mut self, field: &tracing::field::Field, value: bool) {
+        self.0.insert(field.name().to_string(), value.to_string());
+    }
+
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+        self.0
+            .entry(field.name().to_string())
+            .or_insert_with(|| format!("{value:?}"));
+    }
+}
+
+struct CaptureLayer {
+    out: Arc<Mutex<Vec<CapturedEvent>>>,
+}
+
+impl<S: Subscriber> Layer<S> for CaptureLayer {
+    fn on_event(&self, event: &tracing::Event<'_>, _ctx: Context<'_, S>) {
+        let mut visitor = CaptureVisit(BTreeMap::new());
+        event.record(&mut visitor);
+        self.out.lock().expect("lock").push(CapturedEvent {
+            target: event.metadata().target().to_string(),
+            level: *event.metadata().level(),
+            fields: visitor.0,
+        });
+    }
+}
+
+/// Writer-thread `tracing` events (for example `batpak::fanout`) only reach a
+/// **global** default subscriber. Scoped `with_default` is thread-local and
+/// misses the store writer thread, so we install a global `Registry` once and
+/// record structured fields per event.
+static CAPTURED_EVENTS: LazyLock<Arc<Mutex<Vec<CapturedEvent>>>> =
+    LazyLock::new(|| Arc::new(Mutex::new(Vec::new())));
+
+static GLOBAL_TRACE_SUBSCRIBER: Once = Once::new();
+
+fn ensure_global_trace_subscriber() {
+    GLOBAL_TRACE_SUBSCRIBER.call_once(|| {
+        let out = Arc::clone(&*CAPTURED_EVENTS);
+        Registry::default()
+            .with(LevelFilter::TRACE)
+            .with(CaptureLayer { out })
+            .try_init()
+            .expect(
+                "observability_flows must install the global trace subscriber first in this test binary",
+            );
+    });
+}
 
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
 struct Counter {
@@ -102,6 +183,7 @@ impl ProjectionCache for FailingPrefetchCache {
 }
 
 #[test]
+#[serial_test::serial(observability_flows)]
 fn named_store_flows_emit_traceable_events() {
     let sink = SharedWriter::default();
     let subscriber = tracing_subscriber::fmt()
@@ -171,6 +253,208 @@ fn named_store_flows_emit_traceable_events() {
 }
 
 #[test]
+#[serial_test::serial(observability_flows)]
+fn stable_batpak_targets_field_shape_at_info_and_trace() {
+    ensure_global_trace_subscriber();
+    CAPTURED_EVENTS.lock().expect("lock").clear();
+
+    let dir = TempDir::new().expect("temp dir");
+    let config = StoreConfig {
+        data_dir: dir.path().to_path_buf(),
+        segment_max_bytes: 4096,
+        sync: SyncConfig {
+            every_n_events: 1,
+            ..SyncConfig::default()
+        },
+        ..StoreConfig::new("")
+    };
+    let store = Store::open(config).expect("open store");
+    let _sub = store.subscribe_lossy(&Region::all());
+
+    let coord = Coordinate::new("entity:obs:trace", "scope:test").expect("coord");
+    let kind = EventKind::custom(0xF, 1);
+    store
+        .append(&coord, kind, &serde_json::json!({"n": 1}))
+        .expect("append");
+
+    let point = store.frontier().current_visible_hlc;
+    store
+        .wait_for_visible(point, std::time::Duration::from_secs(2))
+        .expect("wait_for_visible");
+
+    store
+        .append_with_options(
+            &coord,
+            kind,
+            &serde_json::json!({"n": 2}),
+            AppendOptions::new().with_gate(DurabilityGate {
+                kind: WatermarkKind::Visible,
+                timeout: std::time::Duration::from_secs(2),
+            }),
+        )
+        .expect("append_with_gate");
+
+    let _: Option<Counter> = store
+        .project("entity:obs:trace", &Freshness::Consistent)
+        .expect("project");
+
+    store.close().expect("close");
+
+    let cap = CAPTURED_EVENTS.lock().expect("lock");
+    let open_line: Vec<&CapturedEvent> = cap
+        .iter()
+        .filter(|e| e.target == "batpak::open" && e.level == tracing::Level::INFO)
+        .collect();
+    assert!(
+        open_line
+            .iter()
+            .any(|e| e.fields.contains_key("elapsed_us")),
+        "expected info-level batpak::open with elapsed_us, got {open_line:?}"
+    );
+
+    let frontier: Vec<&CapturedEvent> = cap
+        .iter()
+        .filter(|e| e.target == "batpak::frontier_wait")
+        .collect();
+    assert!(
+        !frontier.is_empty(),
+        "expected batpak::frontier_wait events, got {cap:?}"
+    );
+    for e in &frontier {
+        assert!(
+            e.fields.contains_key("watermark"),
+            "frontier_wait missing watermark on same event: {e:?}"
+        );
+        assert!(
+            e.fields.contains_key("waited_us"),
+            "frontier_wait missing waited_us on same event: {e:?}"
+        );
+    }
+
+    let gate: Vec<&CapturedEvent> = cap
+        .iter()
+        .filter(|e| e.target == "batpak::durability_gate")
+        .collect();
+    assert!(
+        !gate.is_empty(),
+        "expected batpak::durability_gate events, got {cap:?}"
+    );
+    for e in &gate {
+        assert!(
+            e.fields.contains_key("kind")
+                && e.fields.contains_key("waited_us")
+                && e.fields.contains_key("ok"),
+            "durability_gate missing kind/waited_us/ok on same event: {e:?}"
+        );
+    }
+
+    let fan: Vec<&CapturedEvent> = cap
+        .iter()
+        .filter(|e| e.target == "batpak::fanout")
+        .collect();
+    assert!(
+        !fan.is_empty(),
+        "expected batpak::fanout events, got {cap:?}"
+    );
+    assert!(
+        fan.iter().any(|e| {
+            e.fields.contains_key("push_notifications")
+                || e.fields.contains_key("subscribers_before")
+        }),
+        "fanout events should carry push_notifications and/or subscribers_before: {fan:?}"
+    );
+
+    let proj_main: Vec<&CapturedEvent> = cap
+        .iter()
+        .filter(|e| {
+            e.target == "batpak::projection"
+                && e.fields.get("flow").map_or(false, |f| f == "project")
+        })
+        .collect();
+    assert!(
+        !proj_main.is_empty(),
+        "expected batpak::projection flow=project events, got {cap:?}"
+    );
+    for e in &proj_main {
+        assert!(
+            e.fields.contains_key("cache_status")
+                && e.fields.contains_key("total_us")
+                && e.fields.contains_key("returned_generation"),
+            "projection project trace missing cache_status/total_us/returned_generation: {e:?}"
+        );
+    }
+
+    for e in cap.iter().filter(|e| {
+        e.target == "batpak::projection"
+            && e.fields
+                .get("flow")
+                .map_or(false, |f| f.contains("external_cache"))
+    }) {
+        assert!(
+            e.fields.contains_key("probe_us") && e.fields.contains_key("outcome"),
+            "external_cache_probe trace missing probe_us/outcome: {e:?}"
+        );
+    }
+}
+
+#[test]
+#[serial_test::serial(observability_flows)]
+fn external_cache_projection_probe_event_is_required_on_external_cache_path() {
+    ensure_global_trace_subscriber();
+    CAPTURED_EVENTS.lock().expect("lock").clear();
+
+    let dir = TempDir::new().expect("temp dir");
+    let config = StoreConfig {
+        data_dir: dir.path().to_path_buf(),
+        segment_max_bytes: 4096,
+        sync: SyncConfig {
+            every_n_events: 1,
+            ..SyncConfig::default()
+        },
+        ..StoreConfig::new("")
+    };
+    let store = Store::open_with_cache(config, Box::new(FailingPrefetchCache)).expect("open store");
+    let coord = Coordinate::new("entity:obs:external-cache", "scope:test").expect("coord");
+    let kind = EventKind::custom(0xF, 1);
+    store
+        .append(&coord, kind, &serde_json::json!({"n": 1}))
+        .expect("append");
+
+    let _: Option<Counter> = store
+        .project("entity:obs:external-cache", &Freshness::Consistent)
+        .expect("project");
+    store.close().expect("close");
+
+    let cap = CAPTURED_EVENTS.lock().expect("lock");
+    let probe: Vec<&CapturedEvent> = cap
+        .iter()
+        .filter(|e| {
+            e.target == "batpak::projection"
+                && e.fields
+                    .get("flow")
+                    .map_or(false, |f| f == "external_cache_probe")
+        })
+        .collect();
+    assert!(
+        !probe.is_empty(),
+        "external-cache projection path must emit flow=external_cache_probe, got {cap:?}"
+    );
+    assert!(
+        probe.iter().any(|e| {
+            e.fields
+                .get("entity")
+                .map_or(false, |entity| entity == "entity:obs:external-cache")
+                && e.fields
+                    .get("outcome")
+                    .map_or(false, |outcome| outcome == "none")
+                && e.fields.contains_key("probe_us")
+        }),
+        "external_cache_probe must carry entity/probe_us/outcome=none on the same event: {probe:?}"
+    );
+}
+
+#[test]
+#[serial_test::serial(observability_flows)]
 fn project_failure_paths_emit_cache_warnings_without_hiding_flow() {
     let sink = SharedWriter::default();
     let subscriber = tracing_subscriber::fmt()
@@ -218,6 +502,7 @@ fn project_failure_paths_emit_cache_warnings_without_hiding_flow() {
 }
 
 #[test]
+#[serial_test::serial(observability_flows)]
 fn append_reaction_emits_distinct_flow_telemetry() {
     let sink = SharedWriter::default();
     let subscriber = tracing_subscriber::fmt()

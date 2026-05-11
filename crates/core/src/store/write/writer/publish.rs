@@ -163,12 +163,22 @@ impl WriterState<'_> {
         notifications: impl IntoIterator<Item = Notification>,
         envelopes: impl IntoIterator<Item = CommittedEventEnvelope>,
     ) {
+        let mut push_notifications = 0usize;
         for notification in notifications {
+            push_notifications += 1;
             self.subscribers.broadcast(&notification);
         }
+        let mut push_envelopes = 0usize;
         for envelope in envelopes {
+            push_envelopes += 1;
             self.reactor_subscribers.broadcast(&envelope);
         }
+        tracing::trace!(
+            target: "batpak::fanout",
+            push_notifications,
+            push_envelopes,
+            "commit fanout batch",
+        );
     }
 
     /// Publishes the index boundary for an unfenced commit, then notifies

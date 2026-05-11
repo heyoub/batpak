@@ -84,6 +84,10 @@ impl<T> ProjectionOutcome<T> {
         self.applied_sequence
     }
 
+    pub(crate) fn returned_generation(&self) -> u64 {
+        self.returned_generation
+    }
+
     /// Consume the outcome and return `(generation, state)`.
     pub(crate) fn into_parts(self) -> (u64, Option<T>) {
         (self.returned_generation, self.state)

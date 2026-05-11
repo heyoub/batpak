@@ -1,4 +1,11 @@
 //! Benchmark frontier wake-all fanout costs for wait APIs and append gates.
+//!
+//! **Bench shape:** `TargetDistribution::Spread` issues **one append per waiter**
+//! when waiting on `wait_for_durable` / `wait_for_applied`, so durable/applied
+//! spread runs include **N fsync-level units of work**, not only condvar wake
+//! overhead. `Same` uses a **single** append shared by all waiters on one
+//! target `HlcPoint`. Compare spread vs same only after subtracting that
+//! intended work delta.
 
 use batpak::prelude::*;
 use batpak::store::{Store, StoreConfig, SyncMode};

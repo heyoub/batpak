@@ -99,11 +99,19 @@ impl<T: Clone> FanoutList<T> {
     /// [DEP:flume::TrySendError::Full] / [DEP:flume::TrySendError::Disconnected]
     pub(crate) fn broadcast(&self, value: &T) {
         let mut guard = self.senders.lock();
+        let subscribers_before = guard.len();
         guard.retain(|tx| match tx.try_send(value.clone()) {
             Ok(()) => true,
             Err(TrySendError::Full(_)) => false,
             Err(TrySendError::Disconnected(_)) => false,
         });
+        tracing::trace!(
+            target: "batpak::fanout",
+            subscribers_before,
+            subscribers_after = guard.len(),
+            pruned = subscribers_before.saturating_sub(guard.len()),
+            "reactor fanout try_send pass",
+        );
     }
 }
 
@@ -139,6 +147,7 @@ impl FilteredSubscriberList {
     /// the raw `FanoutList::broadcast`.
     pub(crate) fn broadcast(&self, value: &Notification) {
         let mut guard = self.senders.lock();
+        let subscribers_before = guard.len();
         guard.retain(|sub| {
             match sub
                 .region
@@ -152,5 +161,12 @@ impl FilteredSubscriberList {
                 },
             }
         });
+        tracing::trace!(
+            target: "batpak::fanout",
+            subscribers_before,
+            subscribers_after = guard.len(),
+            pruned = subscribers_before.saturating_sub(guard.len()),
+            "subscription fanout try_send pass",
+        );
     }
 }

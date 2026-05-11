@@ -414,8 +414,17 @@ applications, add a subscriber at process startup:
 
 ```rust
 tracing_subscriber::fmt()
+    .with_env_filter("warn,batpak::open=info,batpak::checkpoint=warn,batpak::mmap_index=warn")
+    .init();
+```
+
+When you need deep pipeline detail (writer thread + main thread), temporarily widen
+filters — for example:
+
+```rust
+tracing_subscriber::fmt()
     .with_env_filter(
-        "warn,batpak::open=info,batpak::checkpoint=warn,batpak::mmap_index=warn",
+        "warn,batpak::open=info,batpak::frontier_wait=trace,batpak::durability_gate=trace,batpak::fanout=trace,batpak::projection=trace,batpak::checkpoint=warn,batpak::mmap_index=warn",
     )
     .init();
 ```
@@ -424,7 +433,11 @@ Useful targets:
 
 | Target | What it reports |
 | --- | --- |
-| `batpak::open` | Store open path, cold-start fallback, and lifecycle bootstrap warnings. |
+| `batpak::open` | Structured store open line (cold-start path, phase micros, reserved-kind accounting). Emitted at **info**; pair with `batpak::open=info` in filters. |
+| `batpak::frontier_wait` | `wait_for_*` watermark waits (`tracing::trace!`). |
+| `batpak::durability_gate` | Append-time `AppendOptions::gate` completion (`tracing::trace!`). |
+| `batpak::fanout` | Commit fanout batch and per-list `try_send` passes (`tracing::trace!`). |
+| `batpak::projection` | `project` summary and external-cache probe (`tracing::trace!`). |
 | `batpak::event_registry` | Duplicate typed payload kind registrations seen during store open. |
 | `batpak::flow` | Append, sync, compact, close, projection, and waiter flow events. |
 | `batpak::checkpoint` | Checkpoint load/write validation and fallback reasons. |

@@ -308,3 +308,42 @@
     - ART-BUILD-RS
     - ART-STRUCTURAL-CHECK
     - ART-DEAD-CODE-SILENCER-ALLOWLIST
+- id: INV-JOURNAL-SINGLE-LIVE-OWNER
+  statement: >-
+    A journal is one Store root at one data_dir with one live owner; mutable and read-only opens
+    both fail with StoreLocked while another owner holds the directory lock.
+  artifacts:
+    - ART-STORE-MOD
+    - ART-STORE-LOCKING-TESTS
+    - ART-DX-DOCS
+- id: INV-JOURNAL-WRITER-SERIALIZES-COMMITS
+  statement: >-
+    All committed events in one journal are serialized through the writer-owned commit path;
+    Coordinate does not create an independent physical writer or global_sequence timeline.
+  artifacts:
+    - ART-STORE-MOD
+    - ART-STORE-WRITER
+    - ART-DX-DOCS
+- id: INV-COORDINATE-IS-LOGICAL-STREAM
+  statement: >-
+    Coordinate names a logical context stream inside one journal; it provides logical
+    ordering and addressing, not physical sharding or cross-directory consistency.
+  artifacts:
+    - ART-STORE-APPEND
+    - ART-DX-DOCS
+- id: INV-CROSS-DIRECTORY-CONSISTENCY-PRODUCT-OWNED
+  statement: >-
+    Cross-data_dir consistency is outside Store invariants; multi-journal systems compose by
+    product-owned routing, observations, receipts, and local policy.
+  artifacts:
+    - ART-STORE-MOD
+    - ART-DX-DOCS
+- id: INV-CONTEXT-VIEWS-DERIVED-FROM-HISTORY
+  statement: >-
+    Projection and cache outputs are derived context views over append history; they are not an
+    alternate source of truth and must not bypass journal receipts or frontier witnesses when proof
+    is required.
+  artifacts:
+    - ART-STORE-PROJECTION
+    - ART-STORE-MOD
+    - ART-DX-DOCS

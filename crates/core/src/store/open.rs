@@ -87,6 +87,10 @@ fn emit_open_report_observability(config: &StoreConfig, report: &OpenIndexReport
         restored_entries = report.restored_entries,
         tail_entries = report.tail_entries,
         elapsed_us = report.elapsed_us,
+        phase_plan_build_us = report.phase_plan_build_us,
+        phase_interner_us = report.phase_interner_us,
+        phase_restore_index_us = report.phase_restore_index_us,
+        phase_hidden_ranges_us = report.phase_hidden_ranges_us,
         unknown_reserved_system_kind_fallbacks = report.unknown_reserved_system_kind_fallbacks,
         unknown_reserved_effect_kind_fallbacks = report.unknown_reserved_effect_kind_fallbacks,
         cumulative_unknown_reserved_system_kind_fallbacks = report

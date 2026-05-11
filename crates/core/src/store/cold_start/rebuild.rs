@@ -42,6 +42,19 @@ pub struct OpenIndexReport {
     pub tail_entries: usize,
     /// Wall-clock microseconds for the entire open_index() call.
     pub elapsed_us: u64,
+    /// Microseconds spent in `RestorePlanner::build()` (snapshot load, tail
+    /// collection, or full rebuild planning).
+    #[serde(default)]
+    pub phase_plan_build_us: u64,
+    /// Microseconds to replace the string interner from the restore plan.
+    #[serde(default)]
+    pub phase_interner_us: u64,
+    /// Microseconds to install sorted index entries and routing overlays.
+    #[serde(default)]
+    pub phase_restore_index_us: u64,
+    /// Microseconds to load and apply cancelled visibility ranges, if any.
+    #[serde(default)]
+    pub phase_hidden_ranges_us: u64,
     /// Number of unknown reserved system-kind SIDX/mmap values that fell back
     /// to `DATA` during reopen.
     pub unknown_reserved_system_kind_fallbacks: usize,
@@ -238,18 +251,28 @@ pub(crate) fn open_index(
         data_dir,
         policy,
     };
+    let t_plan = std::time::Instant::now();
     let plan = planner.build()?;
+    let phase_plan_build_us = duration_micros(t_plan.elapsed());
 
+    let t_interner = std::time::Instant::now();
     index
         .interner
         .replace_from_full_snapshot(&plan.interner_strings);
+    let phase_interner_us = duration_micros(t_interner.elapsed());
+
+    let t_restore = std::time::Instant::now();
     index.restore_sorted_entries_with_routing(plan.entries, plan.allocator_hint, &plan.routing)?;
+    let phase_restore_index_us = duration_micros(t_restore.elapsed());
+
     // G2: cold-start fails closed on corrupt hidden-ranges metadata.
     // A missing file is OK (first open); any other read/parse failure is
     // surfaced so callers cannot silently resurrect cancelled events.
+    let t_hidden = std::time::Instant::now();
     if let Some(ranges) = crate::store::hidden_ranges::load_cancelled_ranges(data_dir)? {
         index.restore_cancelled_visibility_ranges(ranges);
     }
+    let phase_hidden_ranges_us = duration_micros(t_hidden.elapsed());
 
     let cumulative_reserved_kind_fallbacks = plan
         .persisted_cumulative_reserved_kind_fallbacks
@@ -267,6 +290,10 @@ pub(crate) fn open_index(
             restored_entries: plan.restored_entries,
             tail_entries: plan.tail_entries,
             elapsed_us: duration_micros(t0.elapsed()),
+            phase_plan_build_us,
+            phase_interner_us,
+            phase_restore_index_us,
+            phase_hidden_ranges_us,
             unknown_reserved_system_kind_fallbacks: plan.reopen_reserved_kind_fallbacks.system,
             unknown_reserved_system_kind_histogram: plan
                 .reopen_reserved_kind_fallbacks
