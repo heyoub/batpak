@@ -90,6 +90,17 @@ where
         .expect("spawn benchmark thread")
 }
 
+fn sync_until_finished<T>(store: &Store, handles: &[JoinHandle<T>]) -> Duration {
+    let started = Instant::now();
+    loop {
+        store.sync().expect("sync gated append benchmark store");
+        if handles.iter().all(|handle| handle.is_finished()) {
+            return started.elapsed();
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
 fn bench_waiters(c: &mut Criterion) {
     let mut group = c.benchmark_group("frontier_waiter_wake_all");
     apply_profile(&mut group, BenchProfile::Quick);
@@ -292,10 +303,7 @@ fn bench_append_gate_waiters(c: &mut Criterion) {
                                 }));
                             }
                             barrier.wait();
-                            std::thread::sleep(Duration::from_millis(2));
-                            let writer_start = Instant::now();
-                            store.sync().expect("sync gated append benchmark store");
-                            let writer_elapsed = writer_start.elapsed();
+                            let writer_elapsed = sync_until_finished(&store, &handles);
                             for handle in handles {
                                 let receipt = handle.join().expect("join gated append");
                                 std::hint::black_box(receipt.event_id);
