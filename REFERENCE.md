@@ -574,7 +574,7 @@ Important knobs on `StoreConfig`:
 | `writer.shutdown_drain_limit` | `1024` | Raise when graceful shutdown should drain larger queued append bursts. |
 | `writer.stack_size` | OS default | Set only when platform thread defaults are too small for a measured workload. |
 | `batch.max_size` | `256` items | Lower to bound latency; raise for larger atomic import batches. |
-| `batch.max_bytes` | 1 MiB | Lower to bound single-batch memory; raise only within the configured 16 MiB ceiling. |
+| `batch.max_bytes` | 1 MiB | Caps payload bytes plus encoded receipt-extension bytes in one batch; raise only within the configured 16 MiB ceiling. |
 | `batch.group_commit_max_batch` | `1` | Raise for fsync amortization; appends then require idempotency keys. |
 | `index.topology` | `IndexTopology::aos()` | Add overlays when query benchmarks show broad scans or entity-local scans dominate. |
 | `index.incremental_projection` | `false` | Enable when projections support pure incremental apply and replay cost is visible. |

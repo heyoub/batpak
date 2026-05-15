@@ -243,6 +243,27 @@ pub struct DenialReceipt {
 /// Encoded extension payload bytes.
 pub type EncodedBytes = Vec<u8>;
 
+pub(crate) fn encoded_receipt_extensions_len(
+    extensions: &BTreeMap<ExtensionKey, EncodedBytes>,
+) -> Result<usize, StoreError> {
+    if extensions.is_empty() {
+        return Ok(0);
+    }
+    crate::canonical::to_bytes(extensions)
+        .map(|bytes| bytes.len())
+        .map_err(|error| StoreError::Serialization(Box::new(error)))
+}
+
+pub(crate) fn checked_append_bytes(
+    payload_len: usize,
+    extensions: &BTreeMap<ExtensionKey, EncodedBytes>,
+) -> Result<usize, StoreError> {
+    let extension_len = encoded_receipt_extensions_len(extensions)?;
+    payload_len
+        .checked_add(extension_len)
+        .ok_or_else(|| StoreError::ser_msg("append bytes overflow usize"))
+}
+
 /// Receipt extension key.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct ExtensionKey(String);
@@ -422,7 +443,7 @@ pub struct AppendOptions {
     pub gate: Option<DurabilityGate>,
     /// Caller-supplied receipt extensions. The store treats these as opaque
     /// bytes, signs them as part of the receipt cover, and leaves semantic
-    /// validation to profile crates layered above batpak.
+    /// validation to profile-aware code layered above batpak.
     pub extensions: BTreeMap<ExtensionKey, EncodedBytes>,
 }
 

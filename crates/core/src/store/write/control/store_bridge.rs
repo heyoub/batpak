@@ -1,6 +1,7 @@
 use super::{AppendSubmission, AppendTicket, BatchAppendTicket, WriterCommand, WriterHandle};
 use crate::coordinate::Coordinate;
 use crate::event::EventKind;
+use crate::store::append::checked_append_bytes;
 use crate::store::{BatchAppendItem, Open, Store, StoreError};
 use serde::Serialize;
 
@@ -46,11 +47,12 @@ impl Store<Open> {
         submission.validate_route(self)?;
         submission.validate_idempotency(self)?;
         let event = submission.build_event(payload, kind, self.runtime.now_us())?;
-        if event.payload.len() > self.config.single_append_max_bytes as usize {
+        let append_bytes =
+            checked_append_bytes(event.payload.len(), submission.receipt_extensions())?;
+        if append_bytes > self.config.single_append_max_bytes as usize {
             return Err(StoreError::Configuration(format!(
                 "single append bytes {} exceeds max {}",
-                event.payload.len(),
-                self.config.single_append_max_bytes
+                append_bytes, self.config.single_append_max_bytes
             )));
         }
 

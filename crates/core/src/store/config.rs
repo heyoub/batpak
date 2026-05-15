@@ -160,7 +160,8 @@ impl Default for IndexTopology {
 pub struct BatchConfig {
     /// Maximum number of items in a single batch append.
     pub max_size: u32,
-    /// Maximum total payload bytes in a single batch append.
+    /// Maximum total payload bytes plus encoded receipt-extension bytes in a
+    /// single batch append.
     pub max_bytes: u32,
     /// Maximum Append commands drained per writer loop iteration before issuing
     /// a single fsync (group commit). Default: 1 (per-event sync). When > 1,
@@ -262,7 +263,8 @@ pub struct StoreConfig {
     pub fd_budget: usize,
     /// Capacity of each subscriber's broadcast channel.
     pub broadcast_capacity: usize,
-    /// Maximum serialized payload size for a single append operation.
+    /// Maximum serialized payload plus encoded receipt-extension size for a
+    /// single append operation.
     pub single_append_max_bytes: u32,
     /// Batch append limits and group-commit behavior.
     pub batch: BatchConfig,
@@ -456,7 +458,8 @@ impl StoreConfig {
         self
     }
 
-    /// Set the maximum serialized payload size for a single append.
+    /// Set the maximum serialized payload plus encoded receipt-extension size
+    /// for a single append.
     pub fn with_single_append_max_bytes(mut self, single_append_max_bytes: u32) -> Self {
         self.single_append_max_bytes = single_append_max_bytes;
         self
@@ -575,7 +578,8 @@ impl StoreConfig {
         self
     }
 
-    /// Set maximum total payload bytes per batch append. Default: 1MB.
+    /// Set maximum total payload plus encoded receipt-extension bytes per batch append.
+    /// Default: 1MB.
     pub fn with_batch_max_bytes(mut self, batch_max_bytes: u32) -> Self {
         self.batch.max_bytes = batch_max_bytes;
         self

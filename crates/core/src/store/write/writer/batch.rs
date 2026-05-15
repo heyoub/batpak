@@ -5,7 +5,7 @@ use super::{
     segment, DagPosition, DiskPos, Event, EventHeader, EventKind, FenceLedger, FramePayloadRef,
     HashChain, WriterState,
 };
-use crate::store::append::BatchAppendItem;
+use crate::store::append::{checked_append_bytes, BatchAppendItem};
 use crate::store::stats::HlcPoint;
 use crate::store::{AppendReceipt, StoreError};
 use std::collections::BTreeMap;
@@ -48,7 +48,13 @@ impl WriterState<'_> {
                 )),
             ));
         }
-        let total_bytes: usize = items.iter().map(|i| i.payload_bytes().len()).sum();
+        let total_bytes = items.iter().try_fold(0usize, |total, item| {
+            let options = item.options();
+            let item_bytes = checked_append_bytes(item.payload_bytes().len(), &options.extensions)?;
+            total
+                .checked_add(item_bytes)
+                .ok_or_else(|| StoreError::ser_msg("batch bytes overflow usize"))
+        })?;
         if total_bytes > self.config.batch.max_bytes as usize {
             return Err(batch_failed(
                 0,
