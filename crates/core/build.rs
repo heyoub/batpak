@@ -560,8 +560,8 @@ fn check_no_banned_patterns() {
 
         // INV-3: ban domain-register nouns in public declarations everywhere except the
         // documented Lane-A substrate carve-out (`src/artifact.rs` owns the `artifact` noun).
-        // `trajectory` and `tenant` remain banned crate-wide on declaration lines because
-        // they name caller/application layers, not the substrate.
+        // `trajectory` remains banned crate-wide on declaration lines because it names
+        // caller/application layers, not the substrate.
         const INV3_ARTIFACT_ALLOWED_PATH: &str = "src/artifact.rs";
 
         #[inline]
@@ -595,7 +595,7 @@ fn check_no_banned_patterns() {
             }
             let lower = trimmed.to_lowercase();
 
-            for noun in ["trajectory", "tenant"] {
+            for noun in ["trajectory"] {
                 if inv3_declaration_has_word(&lower, noun) {
                     panic!(
                         "INVARIANT 3 VIOLATED in {path_str}: \

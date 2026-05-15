@@ -419,8 +419,8 @@ fn append_common_findings(
     if matches!(cache_status, ProjectionRunCacheStatus::Unavailable { .. }) {
         findings.push(ProjectionRunFinding::CacheStatusUnavailable);
     }
-    // Projection runs return an in-memory folded value and do not publish partial
-    // state from this path.
+    // Projection runs return an in-memory folded value; partial state is not
+    // exposed from this path.
     findings.push(ProjectionRunFinding::PartialVisibilityNotApplicable);
 }
 

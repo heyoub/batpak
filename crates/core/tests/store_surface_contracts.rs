@@ -136,11 +136,11 @@ fn coordinate_error_display() {
 
 #[test]
 fn coordinate_display_format() {
-    let coord = Coordinate::new("user:42", "tenant:acme").expect("valid");
+    let coord = Coordinate::new("entity:42", "scope:alpha").expect("valid");
     let display = format!("{coord}");
     assert_eq!(
-        display, "user:42@tenant:acme",
-        "PROPERTY: Coordinate Display must format as 'entity@scope' (e.g. 'user:42@tenant:acme').\n\
+        display, "entity:42@scope:alpha",
+        "PROPERTY: Coordinate Display must format as 'entity@scope' (e.g. 'entity:42@scope:alpha').\n\
          Investigate: src/store/mod.rs Coordinate Display impl.\n\
          Common causes: separator wrong (e.g. '/' or ':' instead of '@'), fields swapped.\n\
          Run: cargo test --test store_surface_contracts coordinate_display_format"

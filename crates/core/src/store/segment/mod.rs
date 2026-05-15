@@ -40,7 +40,7 @@ pub struct SegmentHeader {
 pub(crate) struct FramePayload<P> {
     /// The event data stored in this frame.
     pub event: Event<P>,
-    /// Entity name string (e.g. `"user:42"`).
+    /// Entity name string (e.g. `"entity:42"`).
     pub entity: String,
     /// Scope name string (e.g. `"profile"`).
     pub scope: String,

@@ -380,16 +380,16 @@ mod tests {
     #[test]
     fn namespace_prefix_rejects_adjacent_namespaces() {
         assert!(!namespace_prefix_matches("alice", "alice2"));
-        assert!(!namespace_prefix_matches("tenant-a", "tenant-aa"));
+        assert!(!namespace_prefix_matches("alpha-a", "alpha-aa"));
         assert!(!namespace_prefix_matches("alice", "alice-prod"));
         assert!(!namespace_prefix_matches("alice", "alіce"));
     }
 
     #[test]
     fn region_entity_uses_namespace_matcher() {
-        let region = Region::entity("tenant:a");
-        assert!(region.matches_entity("tenant:a"));
-        assert!(region.matches_entity("tenant:a:child"));
-        assert!(!region.matches_entity("tenant:aa"));
+        let region = Region::entity("alpha:a");
+        assert!(region.matches_entity("alpha:a"));
+        assert!(region.matches_entity("alpha:a:child"));
+        assert!(!region.matches_entity("alpha:aa"));
     }
 }

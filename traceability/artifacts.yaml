@@ -422,7 +422,7 @@
     - crates/core/examples/append_with_gate.rs
     - crates/core/examples/lifecycle_observer.rs
     - crates/core/examples/outbox.rs
-    - crates/core/examples/policy_gates.rs
+    - crates/core/examples/caller_defined_gates.rs
     - crates/core/examples/quickstart.rs
     - crates/core/examples/raw_projection_counter.rs
     - crates/core/examples/raw_projection_counter_derived.rs
