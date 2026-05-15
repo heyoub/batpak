@@ -64,7 +64,7 @@ Capture release numbers from the merged release commit on stable hardware, not
 from an unmerged PR head, devcontainer, or noisy VM:
 
 ```bash
-cargo xtask bench --surface neutral --save baseline-v0.8.0
+cargo xtask bench --surface neutral --save baseline-v0.7.5
 ```
 
 Record the hardware and OS next to the numbers: CPU model, RAM, disk type, OS,
