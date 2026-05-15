@@ -504,13 +504,13 @@ Reduction (same substrate, clearer roles):
 
 **Durability lanes:** visible append is the fast observation lane; explicit durability gates are the caller-requested wait lane; batching plus `sync` cadence (and group commit when configured) is the usual throughput lane. Per-event durable sync remains available but is not the default throughput story. When `AppendOptions::gate` is used, `StoreError::WaitTimeout` means the append committed but the requested watermark was not observed before the timeout — see the Durable Frontier section above.
 
-**Cold-start posture:** mmap and checkpoint artifacts are recovery and fast-start optimization surfaces, not independent truth or proof surfaces; full scan / rebuild remains the honesty baseline. A future “fast-open manifest” is an optimization target, not a present guarantee.
+**Cold-start posture:** mmap and checkpoint artifacts are recovery and fast-start optimization surfaces, not independent truth or verification surfaces; full scan / rebuild remains the baseline. A future “fast-open manifest” is an optimization target, not a present guarantee.
 
 **JournalBridge (composition, out of core):** a bridge consumes exported or tail-able events from the owning journal process, or reads an offline / copy snapshot of another store under an explicit future read-only contract. It must not open the same live `data_dir` read-only alongside the owner under the current `Store` contract.
 
 **ExtProfile (sibling spec, alignment only):** ExtProfile alignment is docs-only. `batpak` does not implement or validate External-Profile, `contract.external_v1`, active profiles, or `authority_required` semantics. `extprofile.*` and `contract.*` extension bytes are opaque receipt cargo persisted, signed, and replayed like any other extension; callers own ExtProfile codecs, validation, and policy.
 
-**Benchmark posture (directional, not lab-canonical):** treat microbenchmark digits as environment-specific: cold-start paths can differ by orders of magnitude between rebuild, mmap snapshot, and checkpoint snapshot; batched durable throughput is dramatically higher than naive per-append sync; heavy `wait_for_*` fan-out at high waiter counts can dominate wall time compared to visible progress — treat that as a design smell, not a subscription replacement. Projection cache-hit latency differs materially between neutral and all-features builds — keep hot projection paths free of eager proof work until measured on your hardware and pinned in a dated perf note if you need exact figures.
+**Benchmark posture (directional, not lab-canonical):** treat microbenchmark digits as environment-specific: cold-start paths can differ by orders of magnitude between rebuild, mmap snapshot, and checkpoint snapshot; batched durable throughput is dramatically higher than naive per-append sync; heavy `wait_for_*` fan-out at high waiter counts can dominate wall time compared to visible progress — treat that as a design smell, not a subscription replacement. Projection cache-hit latency differs materially between neutral and all-features builds; measure on target hardware before treating exact figures as release criteria.
 
 ### Upgrade and Rollback Procedure
 
@@ -679,7 +679,7 @@ Build-time/runtime policy highlights:
 3. no product-specific concepts in library declarations
 4. no unsafe serialization shortcuts
 5. Blake3 only for hash-chain integrity
-6. public surface honesty checks must stay encoded in tooling
+6. public surface checks must stay encoded in tooling
 
 `crates/core/build.rs` and `tools/integrity/src/architecture_lints.rs` are both part of
 the enforcement story.

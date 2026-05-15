@@ -167,7 +167,7 @@ impl ReceiptSigningRegistry {
         cover: [u8; 32],
     ) -> bool {
         if signature.is_none() {
-            return key_id == [0; 32];
+            return key_id == [0; 32] && self.verifying_keys.is_empty();
         }
         if key_id == [0; 32] {
             return false;

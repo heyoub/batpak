@@ -7,8 +7,8 @@ use batpak::guard::{
     Denial, DenialPayload, Gate, GateEvaluation, GateId, GateIdError, GateSet, Verdict,
 };
 use batpak::store::{
-    AppendOptions, BatchAppendItem, CausationRef, CheckpointId, CursorGapConfig, EncodedBytes,
-    ExtensionKey, ExtensionKeyError, GapObservation, IdempotencyKey, OpenIndexPath,
+    AppendOptions, AppendReceipt, BatchAppendItem, CausationRef, CheckpointId, CursorGapConfig,
+    EncodedBytes, ExtensionKey, ExtensionKeyError, GapObservation, IdempotencyKey, OpenIndexPath,
     ReceiptExtensionKey, ReceiptExtensionNamespace, ReceiptExtensionValue, Store, StoreConfig,
 };
 #[cfg(feature = "blake3")]
@@ -864,4 +864,89 @@ fn signed_receipts_round_trip() {
     assert!(verified_denial_receipt);
 
     store.close().expect("close rotated store");
+}
+
+#[cfg(feature = "blake3")]
+#[test]
+fn receipt_verification_rejects_stripped_signature_and_index_field_tampering() {
+    let dir = TempDir::new().expect("temp dir");
+    let key = SigningKey::from_bytes([0x66; 32]);
+    let coord = Coordinate::new("signed:verify", "scope:test").expect("coord");
+    let kind = EventKind::custom(0xA, 18);
+    let ext_key = ExtensionKey::new("acme.verify").expect("extension key");
+
+    let store =
+        Store::open(StoreConfig::new(dir.path()).with_signing_key(key)).expect("open signed store");
+    let receipt = store
+        .append_with_options(
+            &coord,
+            kind,
+            &serde_json::json!({"n": 1}),
+            AppendOptions::new().with_extension(ext_key.clone(), vec![1, 2, 3]),
+        )
+        .expect("append signed event");
+
+    assert!(
+        store.verify_append_receipt(&receipt),
+        "fresh signed receipt should verify"
+    );
+
+    let mut stripped = receipt.clone();
+    stripped.key_id = [0; 32];
+    stripped.signature = None;
+    assert!(
+        !store.verify_append_receipt(&stripped),
+        "stripping a signature must fail when the store has a verifying key registry"
+    );
+
+    let mut wrong_sequence = receipt.clone();
+    wrong_sequence.sequence += 1;
+    assert!(
+        !store.verify_append_receipt(&wrong_sequence),
+        "sequence must match the committed index entry, not just the signature cover"
+    );
+
+    let mut wrong_disk_pos = receipt.clone();
+    wrong_disk_pos.disk_pos.offset += 1;
+    assert!(
+        !store.verify_append_receipt(&wrong_disk_pos),
+        "disk position must match the committed index entry"
+    );
+
+    let mut wrong_content_hash = receipt.clone();
+    wrong_content_hash.content_hash[0] ^= 0xFF;
+    assert!(
+        !store.verify_append_receipt(&wrong_content_hash),
+        "content hash must match the committed index entry"
+    );
+
+    let mut wrong_extensions = receipt.clone();
+    wrong_extensions.extensions.insert(ext_key, vec![9]);
+    assert!(
+        !store.verify_append_receipt(&wrong_extensions),
+        "receipt extensions must match the committed index entry"
+    );
+}
+
+#[test]
+fn unsigned_receipt_verification_still_checks_committed_index_state() {
+    let dir = TempDir::new().expect("temp dir");
+    let coord = Coordinate::new("unsigned:verify", "scope:test").expect("coord");
+    let kind = EventKind::custom(0xA, 19);
+    let store = Store::open(StoreConfig::new(dir.path())).expect("open unsigned store");
+    let receipt = store
+        .append(&coord, kind, &serde_json::json!({"n": 1}))
+        .expect("append unsigned event");
+
+    assert!(
+        store.verify_append_receipt(&receipt),
+        "unsigned receipts still verify when signing is not configured"
+    );
+
+    let mut wrong_sequence: AppendReceipt = receipt.clone();
+    wrong_sequence.sequence += 1;
+    assert!(
+        !store.verify_append_receipt(&wrong_sequence),
+        "unsigned verification must still reject receipts whose index fields do not match"
+    );
 }
