@@ -115,6 +115,7 @@ impl Reader {
                                 event: payload.event,
                                 entity: payload.entity,
                                 scope: payload.scope,
+                                receipt_extensions: payload.receipt_extensions,
                             });
                         }
                         Err(error) => {

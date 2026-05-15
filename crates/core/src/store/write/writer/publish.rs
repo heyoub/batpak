@@ -4,7 +4,8 @@ use super::{kind_to_raw, Notification, WriterState};
 use crate::store::index::{DiskPos, IndexEntry};
 use crate::store::segment::sidx::SidxEntry;
 use crate::store::stats::HlcPoint;
-use crate::store::AppendReceipt;
+use crate::store::{AppendReceipt, EncodedBytes, ExtensionKey};
+use std::collections::BTreeMap;
 
 pub(super) struct CommitArtifacts {
     pub(super) index_entry: IndexEntry,
@@ -24,6 +25,14 @@ pub(super) struct BatchCommitArtifacts {
     pub(super) sidx_entries: Vec<SidxEntry>,
     pub(super) notifications: Vec<Notification>,
     pub(super) envelopes: Vec<CommittedEventEnvelope>,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct CommitFrameView<'a> {
+    pub(super) payload_bytes: &'a [u8],
+    pub(super) flags: u8,
+    pub(super) receipt_extensions: &'a BTreeMap<ExtensionKey, EncodedBytes>,
+    pub(super) emit_envelope: bool,
 }
 
 impl BatchCommitArtifacts {
@@ -52,9 +61,7 @@ impl WriterState<'_> {
         staged: &StagedCommittedEvent,
         disk_pos: DiskPos,
         interned_ids: CommitInternedIds,
-        payload_bytes: &[u8],
-        flags: u8,
-        emit_envelope: bool,
+        frame: CommitFrameView<'_>,
     ) -> CommitArtifacts {
         let coord = staged.coord.clone();
         let position = staged.position();
@@ -82,6 +89,7 @@ impl WriterState<'_> {
             hash_chain: staged.hash_chain.clone(),
             disk_pos,
             global_sequence: staged.meta.global_sequence,
+            receipt_extensions: frame.receipt_extensions.clone(),
         };
         let sidx_entry = SidxEntry {
             event_id: staged.meta.event_id,
@@ -102,9 +110,9 @@ impl WriterState<'_> {
             correlation_id: staged.meta.correlation_id,
             causation_id: staged.meta.causation_id.unwrap_or(0),
         };
-        let envelope = if emit_envelope {
+        let envelope = if frame.emit_envelope {
             staged
-                .stored_event(payload_bytes, flags)
+                .stored_event(frame.payload_bytes, frame.flags)
                 .map(|stored| CommittedEventEnvelope {
                     notification: notification.clone(),
                     stored,
@@ -148,9 +156,12 @@ impl WriterState<'_> {
                     entity_id: interned_ids.entity_id(item),
                     scope_id: interned_ids.scope_id(item),
                 },
-                item.payload_bytes(),
-                item.options().flags,
-                emit_envelope,
+                CommitFrameView {
+                    payload_bytes: item.payload_bytes(),
+                    flags: item.options().flags,
+                    receipt_extensions: &receipt.extensions,
+                    emit_envelope,
+                },
             );
             artifacts.push(committed);
         }

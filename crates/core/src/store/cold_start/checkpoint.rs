@@ -894,6 +894,7 @@ mod tests {
     use super::*;
     use crate::coordinate::Coordinate;
     use crate::store::index::StoreIndex;
+    use std::collections::BTreeMap;
     use tempfile::TempDir;
 
     /// Build a minimal populated StoreIndex with `n` synthetic entries.
@@ -923,6 +924,7 @@ mod tests {
                     length: 256,
                 },
                 global_sequence: i,
+                receipt_extensions: BTreeMap::new(),
             };
             idx.insert(entry);
         }

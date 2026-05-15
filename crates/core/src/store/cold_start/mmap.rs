@@ -869,6 +869,7 @@ mod tests {
     use crate::coordinate::Coordinate;
     use crate::event::EventKind;
     use crate::store::index::StoreIndex;
+    use std::collections::BTreeMap;
     use tempfile::TempDir;
 
     fn make_index(count: u64) -> StoreIndex {
@@ -900,6 +901,7 @@ mod tests {
                     length: 64,
                 },
                 global_sequence: i,
+                receipt_extensions: BTreeMap::new(),
             });
         }
         idx

@@ -1,12 +1,12 @@
 use super::fence_runtime::FenceLedger;
-use super::publish::CommitInternedIds;
+use super::publish::{CommitFrameView, CommitInternedIds};
 use super::{
     segment, Coordinate, DagPosition, DiskPos, Event, EventKind, FramePayloadRef, HashChain,
     StoreError, WriterState,
 };
 use super::{StagedCommitMeta, StagedCommitTiming, StagedCommittedEvent};
 use crate::store::stats::HlcPoint;
-use crate::store::AppendReceipt;
+use crate::store::{AppendReceipt, EncodedBytes, ExtensionKey};
 use std::collections::BTreeMap;
 use tracing::{debug, info, trace};
 
@@ -20,6 +20,7 @@ pub(crate) struct AppendGuards {
     pub idempotency_key: Option<u128>,
     pub dag_lane: u32,
     pub dag_depth: u32,
+    pub extensions: BTreeMap<ExtensionKey, EncodedBytes>,
 }
 
 impl WriterState<'_> {
@@ -59,7 +60,7 @@ impl WriterState<'_> {
                     content_hash: entry.hash_chain.event_hash,
                     key_id: [0; 32],
                     signature: None,
-                    extensions: BTreeMap::new(),
+                    extensions: entry.receipt_extensions.clone(),
                 };
                 self.runtime.signing_registry.sign_append_receipt(
                     &mut receipt,
@@ -119,6 +120,7 @@ impl WriterState<'_> {
             event: &event,
             entity,
             scope,
+            receipt_extensions: &guards.extensions,
         };
         let frame = segment::frame_encode(&frame_payload)?;
 
@@ -177,9 +179,12 @@ impl WriterState<'_> {
                 entity_id,
                 scope_id,
             },
-            &event.payload,
-            event.header.flags,
-            emit_envelope,
+            CommitFrameView {
+                payload_bytes: &event.payload,
+                flags: event.header.flags,
+                receipt_extensions: &guards.extensions,
+                emit_envelope,
+            },
         );
         self.sidx_collector.record(
             committed.sidx_entry,
@@ -222,7 +227,7 @@ impl WriterState<'_> {
             content_hash: event_hash,
             key_id: [0; 32],
             signature: None,
-            extensions: BTreeMap::new(),
+            extensions: guards.extensions.clone(),
         };
         self.runtime
             .signing_registry

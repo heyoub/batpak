@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Added durable opaque receipt extensions for append and denial receipts.
+  Extension bytes are persisted in `.fbat` frames, restored on cold start,
+  preserved through idempotency replay, and covered by receipt signatures;
+  `pcp.*` and application namespaces are treated as uninterpreted substrate
+  cargo by `batpak` core.
 - Added a private store platform backend for target-sensitive fs/sync/lock/
   clock/mmap mechanics, descriptive platform evidence, admission summaries,
   and opt-in profile-verified open through

@@ -300,7 +300,12 @@ fn idempotency_key_is_event_id_scoped_global_lookup() {
     let opts = AppendOptions::new().with_idempotency(key);
 
     let r1 = store
-        .append_with_options(&coord_a, kind, &serde_json::json!({ "who": "first" }), opts)
+        .append_with_options(
+            &coord_a,
+            kind,
+            &serde_json::json!({ "who": "first" }),
+            opts.clone(),
+        )
         .expect("append a");
     assert_eq!(r1.event_id, key);
 

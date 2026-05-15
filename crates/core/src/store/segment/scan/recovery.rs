@@ -1,8 +1,9 @@
 use super::{read_frame_header_or_clean_eof, FrameScanTailPolicy, Reader, ScannedIndexEntry};
 use crate::event::{EventHeader, EventKind, HashChain};
 use crate::store::segment::{self, SegmentHeader, SEGMENT_MAGIC};
-use crate::store::StoreError;
+use crate::store::{EncodedBytes, ExtensionKey, StoreError};
 use serde::Deserialize;
+use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::{Error, ErrorKind, Read, Seek, SeekFrom};
 use std::path::Path;
@@ -304,6 +305,7 @@ impl Reader {
                                         segment_id,
                                         offset: frame_offset,
                                         length,
+                                        receipt_extensions: payload.receipt_extensions,
                                         global_sequence: None,
                                     })?;
                                 }
@@ -376,6 +378,7 @@ impl Reader {
                                     segment_id,
                                     offset: frame_offset,
                                     length,
+                                    receipt_extensions: payload.receipt_extensions,
                                     global_sequence: None,
                                 };
                                 if !state_ref.stage_entry(entry) {
@@ -486,6 +489,8 @@ pub(crate) struct IndexScanFramePayload {
     pub(crate) event: IndexScanEvent,
     pub(crate) entity: String,
     pub(crate) scope: String,
+    #[serde(default)]
+    pub(crate) receipt_extensions: BTreeMap<ExtensionKey, EncodedBytes>,
 }
 
 #[derive(Deserialize)]
@@ -581,6 +586,7 @@ mod tests {
             segment_id: 7,
             offset: u64::try_from(event_id).expect("test ids fit u64"),
             length: 16,
+            receipt_extensions: std::collections::BTreeMap::new(),
             global_sequence: None,
         }
     }

@@ -291,6 +291,7 @@ impl Store<Open> {
             "BatchAppendItem per-item DurabilityGate is ignored; pass the gate to append_batch_with_options instead"
         );
         let gate = opts.gate;
+        let _consumed_options = opts;
         let receipts = self.submit_batch(items)?.wait()?;
         if let (Some(gate), Some(receipt)) = (gate, receipts.last()) {
             self.wait_for_gate(receipt, gate)?;

@@ -173,6 +173,33 @@ store.append_typed_with_options(&coord, &payload, opts)?;
 
 Idempotency keys are required when `group_commit_max_batch > 1`.
 
+Receipt extensions:
+
+```rust
+let key = ExtensionKey::new("acme.receipt")?;
+let opts = AppendOptions::new().with_extension(key, vec![1, 2, 3]);
+store.append_typed_with_options(&coord, &payload, opts)?;
+```
+
+Profile wrappers can brand those keys without changing the `.fbat` substrate:
+
+```rust
+struct AcmeNamespace;
+impl ReceiptExtensionNamespace for AcmeNamespace {
+    const PREFIX: &'static str = "acme";
+}
+
+let key = ReceiptExtensionKey::<AcmeNamespace>::new("receipt")?;
+let value = ReceiptExtensionValue::<AcmeNamespace>::new(vec![1, 2, 3]);
+let opts = AppendOptions::new().with_receipt_extension(key, value);
+store.append_typed_with_options(&coord, &payload, opts)?;
+```
+
+batpak treats all extension namespaces as opaque substrate cargo. A `pcp.*`
+extension and an application extension are persisted, signed, replayed, and
+reconstructed by the same generic mechanism; namespace-aware code outside
+batpak decides what those bytes mean.
+
 Position hints:
 
 ```rust

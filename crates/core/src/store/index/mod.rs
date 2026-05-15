@@ -14,6 +14,7 @@ use self::visibility::SequenceGate;
 use crate::coordinate::Coordinate;
 use crate::event::{EventKind, HashChain};
 use crate::store::config::IndexConfig;
+use crate::store::{EncodedBytes, ExtensionKey};
 use dashmap::DashMap;
 use parking_lot::RwLock;
 use std::collections::{BTreeMap, HashMap};
@@ -124,6 +125,8 @@ pub struct IndexEntry {
     pub disk_pos: DiskPos,
     /// Globally monotonic sequence number assigned at commit time.
     pub global_sequence: u64,
+    /// Opaque receipt extensions committed with this event.
+    pub receipt_extensions: BTreeMap<ExtensionKey, EncodedBytes>,
 }
 
 /// DiskPos: where to find this event on disk.
@@ -696,6 +699,7 @@ mod tests {
                 length: 16,
             },
             global_sequence: seq,
+            receipt_extensions: BTreeMap::new(),
         }
     }
 

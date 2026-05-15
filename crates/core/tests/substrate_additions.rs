@@ -7,8 +7,9 @@ use batpak::guard::{
     Denial, DenialPayload, Gate, GateEvaluation, GateId, GateIdError, GateSet, Verdict,
 };
 use batpak::store::{
-    CheckpointId, CursorGapConfig, EncodedBytes, ExtensionKey, ExtensionKeyError, GapObservation,
-    IdempotencyKey, Store, StoreConfig,
+    AppendOptions, BatchAppendItem, CausationRef, CheckpointId, CursorGapConfig, EncodedBytes,
+    ExtensionKey, ExtensionKeyError, GapObservation, IdempotencyKey, ReceiptExtensionKey,
+    ReceiptExtensionNamespace, ReceiptExtensionValue, Store, StoreConfig,
 };
 #[cfg(feature = "blake3")]
 use batpak::store::{DenialReceipt, SigningKey};
@@ -16,6 +17,12 @@ use std::path::PathBuf;
 use tempfile::TempDir;
 
 struct AllowAllGate;
+
+struct AcmeNamespace;
+
+impl ReceiptExtensionNamespace for AcmeNamespace {
+    const PREFIX: &'static str = "acme";
+}
 
 impl Gate<()> for AllowAllGate {
     fn name(&self) -> &'static str {
@@ -80,6 +87,336 @@ fn extension_key_validates_namespace_rules() {
     assert_eq!(
         ExtensionKey::new("not-a-namespace"),
         Err(ExtensionKeyError::InvalidNamespaceFormat)
+    );
+}
+
+#[test]
+fn caller_supplied_receipt_extensions_flow_through_append_paths() {
+    let dir = TempDir::new().expect("temp dir");
+    let store = Store::open(
+        StoreConfig::new(dir.path())
+            .with_enable_checkpoint(false)
+            .with_enable_mmap_index(false),
+    )
+    .expect("open store");
+    let coord = Coordinate::new("extension:entity", "scope:test").expect("coord");
+    let kind = EventKind::custom(0xA, 11);
+    let commit_key = ExtensionKey::new("acme.commit").expect("extension key");
+    let batch_key = ExtensionKey::new("acme.batch").expect("extension key");
+    let batch_extra_key = ExtensionKey::new("acme.batch_extra").expect("extension key");
+    let denial_key = ExtensionKey::new("acme.denial").expect("extension key");
+    let typed_key =
+        ReceiptExtensionKey::<AcmeNamespace>::new("typed").expect("typed extension key");
+    assert_eq!(typed_key.as_key().as_str(), "acme.typed");
+    let mut append_extensions = std::collections::BTreeMap::new();
+    append_extensions.insert(commit_key.clone(), vec![1, 2, 3]);
+
+    let append_receipt = store
+        .append_with_options(
+            &coord,
+            kind,
+            &serde_json::json!({"n": 1}),
+            AppendOptions::new()
+                .with_extensions(append_extensions)
+                .with_receipt_extension(typed_key.clone(), ReceiptExtensionValue::new(vec![8])),
+        )
+        .expect("append with extension");
+    assert_eq!(
+        append_receipt.extensions.get(&commit_key),
+        Some(&vec![1, 2, 3])
+    );
+    assert!(store.verify_append_receipt(&append_receipt));
+
+    let mut batch_extensions = std::collections::BTreeMap::new();
+    batch_extensions.insert(batch_key.clone(), vec![4, 5, 6]);
+    let batch_item = BatchAppendItem::new(
+        coord.clone(),
+        kind,
+        &serde_json::json!({"n": 2}),
+        AppendOptions::new(),
+        CausationRef::None,
+    )
+    .expect("batch item")
+    .with_extensions(batch_extensions)
+    .with_extension(batch_extra_key.clone(), vec![9])
+    .with_receipt_extension(typed_key.clone(), ReceiptExtensionValue::new(vec![11]));
+    let batch_receipts = store.append_batch(vec![batch_item]).expect("append batch");
+    assert_eq!(
+        batch_receipts[0].extensions.get(&batch_key),
+        Some(&vec![4, 5, 6])
+    );
+    assert_eq!(
+        batch_receipts[0].extensions.get(&batch_extra_key),
+        Some(&vec![9])
+    );
+    assert_eq!(
+        batch_receipts[0].extensions.get(typed_key.as_key()),
+        Some(&vec![11])
+    );
+
+    let mut gates = GateSet::new();
+    gates.push(AllowAllGate);
+    gates.push(DenyGate);
+    let failing = Denial::new("deny_gate", "blocked");
+    let denial_receipt = store
+        .append_denial(
+            &coord,
+            kind,
+            &gates,
+            &failing,
+            Some([0xA5; 32]),
+            Some("pipeline:extension".to_owned()),
+            AppendOptions::new().with_extension(denial_key.clone(), vec![10]),
+        )
+        .expect("append denial");
+    assert_eq!(denial_receipt.extensions.get(&denial_key), Some(&vec![10]));
+    assert!(store.verify_denial_receipt(&denial_receipt));
+}
+
+#[test]
+fn idempotency_replay_uses_committed_receipt_extensions() {
+    let dir = TempDir::new().expect("temp dir");
+    let store = Store::open(
+        StoreConfig::new(dir.path())
+            .with_enable_checkpoint(false)
+            .with_enable_mmap_index(false),
+    )
+    .expect("open store");
+    let coord = Coordinate::new("extension:idempotent", "scope:test").expect("coord");
+    let kind = EventKind::custom(0xA, 12);
+    let key = ExtensionKey::new("acme.idem").expect("extension key");
+
+    let first = store
+        .append_with_options(
+            &coord,
+            kind,
+            &serde_json::json!({"n": 1}),
+            AppendOptions::new()
+                .with_idempotency(0xA11CE)
+                .with_extension(key.clone(), vec![7, 8, 9]),
+        )
+        .expect("first append");
+    let replay = store
+        .append_with_options(
+            &coord,
+            kind,
+            &serde_json::json!({"n": 99}),
+            AppendOptions::new()
+                .with_idempotency(0xA11CE)
+                .with_extension(key.clone(), vec![0]),
+        )
+        .expect("idempotent replay");
+
+    assert_eq!(replay.event_id, first.event_id);
+    assert_eq!(replay.extensions.get(&key), Some(&vec![7, 8, 9]));
+    assert!(store.verify_append_receipt(&replay));
+}
+
+fn receipt_extension_restore_config(
+    path: &std::path::Path,
+    enable_checkpoint: bool,
+    enable_mmap_index: bool,
+) -> StoreConfig {
+    StoreConfig::new(path)
+        .with_enable_checkpoint(enable_checkpoint)
+        .with_enable_mmap_index(enable_mmap_index)
+}
+
+fn assert_receipt_extensions_survive_close_reopen_case(
+    enable_checkpoint: bool,
+    enable_mmap_index: bool,
+) {
+    let dir = TempDir::new().expect("temp dir");
+    let coord = Coordinate::new("extension:reopen", "scope:test").expect("coord");
+    let kind = EventKind::custom(0xA, 13);
+    let append_key = ExtensionKey::new("acme.reopen_append").expect("extension key");
+    let batch_key = ExtensionKey::new("acme.reopen_batch").expect("extension key");
+    let denial_key = ExtensionKey::new("acme.reopen_denial").expect("extension key");
+
+    {
+        let store = Store::open(receipt_extension_restore_config(
+            dir.path(),
+            enable_checkpoint,
+            enable_mmap_index,
+        ))
+        .expect("open store");
+        store
+            .append_with_options(
+                &coord,
+                kind,
+                &serde_json::json!({"n": 1}),
+                AppendOptions::new()
+                    .with_idempotency(0xE1)
+                    .with_extension(append_key.clone(), vec![1]),
+            )
+            .expect("append");
+        let batch_item = BatchAppendItem::new(
+            coord.clone(),
+            kind,
+            &serde_json::json!({"n": 2}),
+            AppendOptions::new()
+                .with_idempotency(0xE2)
+                .with_extension(batch_key.clone(), vec![2]),
+            CausationRef::None,
+        )
+        .expect("batch item");
+        store.append_batch(vec![batch_item]).expect("append batch");
+
+        let mut gates = GateSet::new();
+        gates.push(DenyGate);
+        let failing = Denial::new("deny_gate", "blocked");
+        store
+            .append_denial(
+                &coord,
+                kind,
+                &gates,
+                &failing,
+                Some([0x5A; 32]),
+                Some("pipeline:reopen".to_owned()),
+                AppendOptions::new()
+                    .with_idempotency(0xE3)
+                    .with_extension(denial_key.clone(), vec![3]),
+            )
+            .expect("append denial");
+        store.close().expect("close store");
+    }
+
+    let reopened = Store::open(receipt_extension_restore_config(
+        dir.path(),
+        enable_checkpoint,
+        enable_mmap_index,
+    ))
+    .expect("reopen store");
+    let append_replay = reopened
+        .append_with_options(
+            &coord,
+            kind,
+            &serde_json::json!({"n": 99}),
+            AppendOptions::new()
+                .with_idempotency(0xE1)
+                .with_extension(append_key.clone(), vec![9]),
+        )
+        .expect("replay append");
+    assert_eq!(append_replay.extensions.get(&append_key), Some(&vec![1]));
+    assert!(reopened.verify_append_receipt(&append_replay));
+
+    let batch_replay_item = BatchAppendItem::new(
+        coord.clone(),
+        kind,
+        &serde_json::json!({"n": 100}),
+        AppendOptions::new()
+            .with_idempotency(0xE2)
+            .with_extension(batch_key.clone(), vec![9]),
+        CausationRef::None,
+    )
+    .expect("batch replay item");
+    let batch_replay = reopened
+        .append_batch(vec![batch_replay_item])
+        .expect("replay batch");
+    assert_eq!(batch_replay[0].extensions.get(&batch_key), Some(&vec![2]));
+
+    let mut gates = GateSet::new();
+    gates.push(DenyGate);
+    let failing = Denial::new("deny_gate", "blocked");
+    let denial_replay = reopened
+        .append_denial(
+            &coord,
+            kind,
+            &gates,
+            &failing,
+            Some([0x5A; 32]),
+            Some("pipeline:reopen".to_owned()),
+            AppendOptions::new()
+                .with_idempotency(0xE3)
+                .with_extension(denial_key.clone(), vec![9]),
+        )
+        .expect("replay denial");
+    assert_eq!(denial_replay.extensions.get(&denial_key), Some(&vec![3]));
+    assert!(reopened.verify_denial_receipt(&denial_replay));
+}
+
+#[test]
+fn receipt_extensions_survive_close_reopen_restore_paths() {
+    for (enable_checkpoint, enable_mmap_index) in [(false, false), (true, false), (true, true)] {
+        assert_receipt_extensions_survive_close_reopen_case(enable_checkpoint, enable_mmap_index);
+    }
+}
+
+#[cfg(feature = "blake3")]
+#[test]
+fn signed_unknown_extensions_survive_reopen_and_verify() {
+    let dir = TempDir::new().expect("temp dir");
+    let key = SigningKey::from_bytes([0x44; 32]);
+    let coord = Coordinate::new("extension:signed", "scope:test").expect("coord");
+    let kind = EventKind::custom(0xA, 14);
+    let pcp_key = ExtensionKey::new("pcp.receipt").expect("pcp extension key");
+    let app_key = ExtensionKey::new("acme.receipt").expect("app extension key");
+
+    {
+        let store = Store::open(
+            StoreConfig::new(dir.path())
+                .with_enable_checkpoint(true)
+                .with_enable_mmap_index(true)
+                .with_signing_key(key.clone()),
+        )
+        .expect("open signed store");
+        let receipt = store
+            .append_with_options(
+                &coord,
+                kind,
+                &serde_json::json!({"n": 1}),
+                AppendOptions::new()
+                    .with_idempotency(0x51_6E_D0)
+                    .with_extension(pcp_key.clone(), vec![0x50, 0x43, 0x50])
+                    .with_extension(app_key.clone(), vec![0x41, 0x50, 0x50]),
+            )
+            .expect("append signed extension receipt");
+        assert_eq!(
+            receipt.extensions.get(&pcp_key),
+            Some(&vec![0x50, 0x43, 0x50])
+        );
+        assert_eq!(
+            receipt.extensions.get(&app_key),
+            Some(&vec![0x41, 0x50, 0x50])
+        );
+        assert!(store.verify_append_receipt(&receipt));
+        store.close().expect("close signed store");
+    }
+
+    let reopened = Store::open(
+        StoreConfig::new(dir.path())
+            .with_enable_checkpoint(true)
+            .with_enable_mmap_index(true)
+            .with_signing_key(key),
+    )
+    .expect("reopen signed store");
+    let replay = reopened
+        .append_with_options(
+            &coord,
+            kind,
+            &serde_json::json!({"n": 2}),
+            AppendOptions::new()
+                .with_idempotency(0x51_6E_D0)
+                .with_extension(pcp_key.clone(), vec![0])
+                .with_extension(app_key.clone(), vec![0]),
+        )
+        .expect("idempotent replay");
+
+    assert_eq!(
+        replay.extensions.get(&pcp_key),
+        Some(&vec![0x50, 0x43, 0x50])
+    );
+    assert_eq!(
+        replay.extensions.get(&app_key),
+        Some(&vec![0x41, 0x50, 0x50])
+    );
+    assert!(reopened.verify_append_receipt(&replay));
+
+    let mut tampered = replay.clone();
+    tampered.extensions.insert(pcp_key, vec![0x66]);
+    assert!(
+        !reopened.verify_append_receipt(&tampered),
+        "pcp.* bytes are opaque substrate cargo and must still be covered by the signature"
     );
 }
 

@@ -61,7 +61,7 @@ impl PreparedBatchItem {
     }
 
     pub(crate) fn options(&self) -> AppendOptions {
-        self.options
+        self.options.clone()
     }
 
     pub(crate) fn causation(&self) -> CausationRef {

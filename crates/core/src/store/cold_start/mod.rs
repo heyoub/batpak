@@ -7,6 +7,7 @@ use crate::event::{EventHeader, HashChain};
 use crate::store::index::interner::InternId;
 use crate::store::index::{DiskPos, IndexEntry};
 use crate::store::StoreError;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -210,6 +211,7 @@ impl ColdStartIndexRow {
             hash_chain: self.hash_chain.clone(),
             disk_pos: self.disk_pos,
             global_sequence: self.global_sequence,
+            receipt_extensions: BTreeMap::new(),
         })
     }
 

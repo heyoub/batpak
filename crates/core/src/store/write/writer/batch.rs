@@ -89,7 +89,7 @@ impl WriterState<'_> {
                         content_hash: entry.hash_chain.event_hash,
                         key_id: [0; 32],
                         signature: None,
-                        extensions: BTreeMap::new(),
+                        extensions: entry.receipt_extensions.clone(),
                     };
                     self.runtime.signing_registry.sign_append_receipt(
                         &mut receipt,
@@ -265,10 +265,12 @@ impl WriterState<'_> {
             kind,
         );
         let event = Event::new(header, Vec::<u8>::new());
+        let receipt_extensions = BTreeMap::new();
         let payload = FramePayloadRef {
             event: &event,
             entity: BATCH_MARKER_ENTITY,
             scope: BATCH_MARKER_SCOPE,
+            receipt_extensions: &receipt_extensions,
         };
         let frame = segment::frame_encode(&payload)
             .map_err(|e| batch_failed(item_index_for_error, BatchFailureStage::Encoding, e))?;
@@ -458,6 +460,7 @@ impl WriterState<'_> {
 
         for (idx, item) in prepared.items().iter().enumerate() {
             let staged = &staged[idx];
+            let item_options = item.options();
             let event = staged
                 .borrowed_frame_event(item.payload_bytes())
                 .map_err(|e| batch_failed(idx, BatchFailureStage::Encoding, e))?;
@@ -466,6 +469,7 @@ impl WriterState<'_> {
                 event: &event,
                 entity: staged.coord.entity(),
                 scope: staged.coord.scope(),
+                receipt_extensions: &item_options.extensions,
             };
             let frame = segment::frame_encode(&frame_payload)
                 .map_err(|e| batch_failed(idx, BatchFailureStage::Encoding, e))?;
@@ -497,7 +501,7 @@ impl WriterState<'_> {
                 content_hash: staged.hash_chain.event_hash,
                 key_id: [0; 32],
                 signature: None,
-                extensions: BTreeMap::new(),
+                extensions: item_options.extensions.clone(),
             };
             self.runtime.signing_registry.sign_append_receipt(
                 &mut receipt,

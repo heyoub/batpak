@@ -656,6 +656,7 @@ mod tests {
     use crate::coordinate::Coordinate;
     use crate::event::{EventKind, HashChain};
     use crate::store::index::{DiskPos, IndexEntry};
+    use std::collections::BTreeMap;
     use std::sync::Arc;
 
     fn make_entry(kind: EventKind, seq: u64, entity: &str, scope: &str) -> Arc<IndexEntry> {
@@ -679,6 +680,7 @@ mod tests {
                 length: 64,
             },
             global_sequence: seq,
+            receipt_extensions: BTreeMap::new(),
         })
     }
 

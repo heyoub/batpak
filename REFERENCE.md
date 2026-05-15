@@ -419,6 +419,7 @@ pub struct DurabilityGate {
 
 pub struct AppendOptions {
     pub gate: Option<DurabilityGate>,
+    pub extensions: BTreeMap<ExtensionKey, EncodedBytes>,
     // other append controls omitted
 }
 ```
@@ -590,6 +591,22 @@ Important knobs on `StoreConfig`:
 - `AppendReceipt` now carries `content_hash`, `key_id`, `signature`, and
   `extensions`.
 - `DenialReceipt` mirrors the same receipt envelope for `SYSTEM_DENIAL`.
+- `AppendOptions::with_extension(...)` and `with_extensions(...)` attach opaque
+  caller-supplied receipt bytes. batpak validates extension keys, signs the
+  bytes into the receipt envelope, and leaves profile meaning to higher layers.
+- `.fbat` frames persist the generic receipt extension map, and cold start
+  rebuilds it into the in-memory index for idempotency replay after reopen.
+- `ReceiptExtensionKey<P>` / `ReceiptExtensionValue<P>` provide a phantom-typed
+  profile surface over the same opaque bytes without adding profile semantics to
+  core.
+- Unknown receipt extensions are substrate cargo: batpak preserves them
+  byte-for-byte when returning, signing, replaying, or reconstructing the same
+  committed receipt. `pcp.*` keys are handled exactly like application keys such
+  as `acme.*`; batpak validates key shape and byte durability, not profile
+  meaning.
+- Derived receipts must not silently inherit old profile truth. Callers that
+  create new receipt meaning should explicitly carry, link, refresh, redact, or
+  invalidate profile extensions according to their own protocol rules.
 - `Store::append_denial(...)` persists denials on the ordinary per-entity
   chain; denial events are not a separate chain class.
 - `verify_append_receipt(...)` and `verify_denial_receipt(...)` validate

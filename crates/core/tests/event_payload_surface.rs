@@ -163,7 +163,7 @@ fn append_typed_with_options_idempotency() {
     let opts = AppendOptions::new().with_idempotency(0xDEAD_BEEF);
 
     let r1 = store
-        .append_typed_with_options(&coord(), &payload, opts)
+        .append_typed_with_options(&coord(), &payload, opts.clone())
         .expect("first append_typed_with_options");
     let r2 = store
         .append_typed_with_options(&coord(), &payload, opts)

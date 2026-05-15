@@ -6,10 +6,10 @@ use crate::coordinate::Coordinate;
 use crate::event::{Event, EventHeader, EventKind, HashChain, StoredEvent};
 use crate::store::cold_start::ColdStartIndexRow;
 use crate::store::segment::{self, FramePayload};
-use crate::store::{DiskPos, StoreError};
+use crate::store::{DiskPos, EncodedBytes, ExtensionKey, StoreError};
 use dashmap::DashMap;
 use parking_lot::Mutex;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
 use std::io::{Error, ErrorKind, Read};
 use std::path::PathBuf;
@@ -78,6 +78,7 @@ pub(crate) struct ScannedEntry {
     pub event: Event<serde_json::Value>,
     pub entity: String,
     pub scope: String,
+    pub receipt_extensions: BTreeMap<ExtensionKey, EncodedBytes>,
 }
 
 pub(crate) struct ScannedIndexEntry {
@@ -88,6 +89,7 @@ pub(crate) struct ScannedIndexEntry {
     pub segment_id: u64,
     pub offset: u64,
     pub length: u32,
+    pub receipt_extensions: BTreeMap<ExtensionKey, EncodedBytes>,
     /// Original `global_sequence` if a durable source (SIDX footer) was available.
     /// `None` for slow-path scans (active segment, missing/corrupt SIDX) — the
     /// rebuild caller must synthesize a sequence in that case.
@@ -108,6 +110,7 @@ impl ScannedIndexEntry {
             segment_id: row.disk_pos.segment_id,
             offset: row.disk_pos.offset,
             length: row.disk_pos.length,
+            receipt_extensions: BTreeMap::new(),
             global_sequence: Some(row.global_sequence),
         })
     }
@@ -160,6 +163,7 @@ impl Reader {
             },
             entity: payload.entity,
             scope: payload.scope,
+            receipt_extensions: payload.receipt_extensions,
         })
     }
 
@@ -529,6 +533,62 @@ impl Reader {
         Ok(payload.event)
     }
 
+    /// Read only the opaque receipt extension map from a frame.
+    pub(crate) fn read_receipt_extensions(
+        &self,
+        pos: &DiskPos,
+    ) -> Result<BTreeMap<ExtensionKey, EncodedBytes>, StoreError> {
+        if self.is_sealed(pos.segment_id) {
+            return self.read_receipt_extensions_mmap(pos);
+        }
+
+        let frame_len = Self::checked_frame_len(pos.segment_id, pos.length)?;
+        let mut buf = self.acquire_buffer(frame_len);
+        self.read_active_frame_into(pos, &mut buf)?;
+
+        let result = segment::frame_decode(&buf).map_err(|e| match e {
+            segment::FrameDecodeError::CrcMismatch { .. } => StoreError::CrcMismatch {
+                segment_id: pos.segment_id,
+                offset: pos.offset,
+            },
+            segment::FrameDecodeError::TooShort | segment::FrameDecodeError::Truncated { .. } => {
+                StoreError::corrupt_frame(pos.segment_id, e.to_string())
+            }
+        });
+        let (msgpack, _) = match result {
+            Ok(v) => v,
+            Err(e) => {
+                self.release_buffer(buf);
+                return Err(e);
+            }
+        };
+        let payload = Self::decode_frame_payload_raw(msgpack)?;
+        self.release_buffer(buf);
+        Ok(payload.receipt_extensions)
+    }
+
+    fn read_receipt_extensions_mmap(
+        &self,
+        pos: &DiskPos,
+    ) -> Result<BTreeMap<ExtensionKey, EncodedBytes>, StoreError> {
+        let mmap_ref = self.get_or_map_sealed(pos.segment_id)?;
+        let mmap: &memmap2::Mmap = mmap_ref.value();
+        let frame_range =
+            Self::checked_frame_range(pos.segment_id, pos.offset, pos.length, mmap.len())?;
+        let frame_buf = &mmap[frame_range];
+        let (msgpack, _) = segment::frame_decode(frame_buf).map_err(|e| match e {
+            segment::FrameDecodeError::CrcMismatch { .. } => StoreError::CrcMismatch {
+                segment_id: pos.segment_id,
+                offset: pos.offset,
+            },
+            segment::FrameDecodeError::TooShort | segment::FrameDecodeError::Truncated { .. } => {
+                StoreError::corrupt_frame(pos.segment_id, e.to_string())
+            }
+        })?;
+        let payload = Self::decode_frame_payload_raw(msgpack)?;
+        Ok(payload.receipt_extensions)
+    }
+
     fn read_event_raw_only_mmap(&self, pos: &DiskPos) -> Result<Event<Vec<u8>>, StoreError> {
         let mmap_ref = self.get_or_map_sealed(pos.segment_id)?;
         let mmap: &memmap2::Mmap = mmap_ref.value();
@@ -792,6 +852,7 @@ mod tests {
             event,
             entity: "entity:batch-marker".to_owned(),
             scope: "scope:test".to_owned(),
+            receipt_extensions: BTreeMap::new(),
         };
         let encoded = rmp_serde::to_vec_named(&frame).expect("encode batch marker frame");
 

@@ -4,6 +4,7 @@ use crate::store::gate::DurabilityGate;
 use crate::store::{DiskPos, StoreError};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::marker::PhantomData;
 
 /// Reference to causation for batch items.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -145,7 +146,7 @@ impl BatchAppendItem {
 
     /// Borrow the append options for this item.
     pub fn options(&self) -> AppendOptions {
-        self.options
+        self.options.clone()
     }
 
     /// Borrow the causation reference for this item.
@@ -170,6 +171,31 @@ impl BatchAppendItem {
 
     pub(crate) fn with_options(mut self, options: AppendOptions) -> Self {
         self.options = options;
+        self
+    }
+
+    /// Attach one receipt extension to this batch item.
+    #[must_use]
+    pub fn with_extension(mut self, key: ExtensionKey, bytes: impl Into<EncodedBytes>) -> Self {
+        self.options = self.options.with_extension(key, bytes);
+        self
+    }
+
+    /// Attach one typed receipt extension to this batch item.
+    #[must_use]
+    pub fn with_receipt_extension<P: ReceiptExtensionNamespace>(
+        mut self,
+        key: ReceiptExtensionKey<P>,
+        value: ReceiptExtensionValue<P>,
+    ) -> Self {
+        self.options = self.options.with_receipt_extension(key, value);
+        self
+    }
+
+    /// Replace this batch item's receipt extension map.
+    #[must_use]
+    pub fn with_extensions(mut self, extensions: BTreeMap<ExtensionKey, EncodedBytes>) -> Self {
+        self.options = self.options.with_extensions(extensions);
         self
     }
 }
@@ -220,6 +246,75 @@ pub type EncodedBytes = Vec<u8>;
 /// Receipt extension key.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct ExtensionKey(String);
+
+/// Marker trait for typed receipt-extension namespaces.
+pub trait ReceiptExtensionNamespace {
+    /// Namespace prefix owned by this extension family.
+    const PREFIX: &'static str;
+}
+
+/// Extension key branded by a receipt-extension namespace marker.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ReceiptExtensionKey<P: ReceiptExtensionNamespace> {
+    raw: ExtensionKey,
+    _namespace: PhantomData<P>,
+}
+
+impl<P: ReceiptExtensionNamespace> Clone for ReceiptExtensionKey<P> {
+    fn clone(&self) -> Self {
+        Self {
+            raw: self.raw.clone(),
+            _namespace: PhantomData,
+        }
+    }
+}
+
+impl<P: ReceiptExtensionNamespace> ReceiptExtensionKey<P> {
+    /// Construct `<P::PREFIX>.<field>` as a validated typed extension key.
+    ///
+    /// # Errors
+    /// Returns [`ExtensionKeyError`] when the composed key fails normal
+    /// extension-key validation.
+    pub fn new(field: impl AsRef<str>) -> Result<Self, ExtensionKeyError> {
+        let raw = ExtensionKey::new(format!("{}.{}", P::PREFIX, field.as_ref()))?;
+        Ok(Self {
+            raw,
+            _namespace: PhantomData,
+        })
+    }
+
+    /// Borrow the raw validated extension key.
+    #[must_use]
+    pub fn as_key(&self) -> &ExtensionKey {
+        &self.raw
+    }
+}
+
+/// Extension value branded by a receipt-extension namespace marker.
+#[derive(Debug, PartialEq, Eq)]
+pub struct ReceiptExtensionValue<P: ReceiptExtensionNamespace> {
+    bytes: EncodedBytes,
+    _namespace: PhantomData<P>,
+}
+
+impl<P: ReceiptExtensionNamespace> Clone for ReceiptExtensionValue<P> {
+    fn clone(&self) -> Self {
+        Self {
+            bytes: self.bytes.clone(),
+            _namespace: PhantomData,
+        }
+    }
+}
+
+impl<P: ReceiptExtensionNamespace> ReceiptExtensionValue<P> {
+    /// Construct a typed extension value from already encoded bytes.
+    pub fn new(bytes: impl Into<EncodedBytes>) -> Self {
+        Self {
+            bytes: bytes.into(),
+            _namespace: PhantomData,
+        }
+    }
+}
 
 /// Validation failures for [`ExtensionKey`].
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -308,7 +403,7 @@ impl AppendPositionHint {
 }
 
 /// AppendOptions: CAS, idempotency, custom correlation/causation.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct AppendOptions {
     /// Expected entity sequence for compare-and-swap; `None` skips the CAS check.
     pub expected_sequence: Option<u32>,
@@ -325,12 +420,16 @@ pub struct AppendOptions {
     pub flags: u8,
     /// Optional append-time wait for a frontier watermark.
     pub gate: Option<DurabilityGate>,
+    /// Caller-supplied receipt extensions. The store treats these as opaque
+    /// bytes, signs them as part of the receipt cover, and leaves semantic
+    /// validation to profile crates layered above batpak.
+    pub extensions: BTreeMap<ExtensionKey, EncodedBytes>,
 }
 
 impl AppendOptions {
     /// No-option baseline: all guards disabled, no hints, no custom IDs.
     /// `Default::default()` delegates here — one source of truth for the zero value.
-    pub const fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             expected_sequence: None,
             idempotency_key: None,
@@ -339,6 +438,7 @@ impl AppendOptions {
             position_hint: None,
             flags: 0,
             gate: None,
+            extensions: BTreeMap::new(),
         }
     }
 
@@ -410,6 +510,31 @@ impl AppendOptions {
     /// Set an append-time durability gate.
     pub fn with_gate(mut self, gate: DurabilityGate) -> Self {
         self.gate = Some(gate);
+        self
+    }
+
+    /// Attach one opaque receipt extension payload.
+    #[must_use]
+    pub fn with_extension(mut self, key: ExtensionKey, bytes: impl Into<EncodedBytes>) -> Self {
+        self.extensions.insert(key, bytes.into());
+        self
+    }
+
+    /// Attach one typed opaque receipt extension payload.
+    #[must_use]
+    pub fn with_receipt_extension<P: ReceiptExtensionNamespace>(
+        mut self,
+        key: ReceiptExtensionKey<P>,
+        value: ReceiptExtensionValue<P>,
+    ) -> Self {
+        self.extensions.insert(key.raw, value.bytes);
+        self
+    }
+
+    /// Replace the full opaque receipt extension map.
+    #[must_use]
+    pub fn with_extensions(mut self, extensions: BTreeMap<ExtensionKey, EncodedBytes>) -> Self {
+        self.extensions = extensions;
         self
     }
 }

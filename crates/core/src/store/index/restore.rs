@@ -241,6 +241,7 @@ mod tests {
     use crate::coordinate::Coordinate;
     use crate::event::{EventKind, HashChain};
     use crate::store::index::{interner::InternId, DiskPos};
+    use std::collections::BTreeMap;
     use std::sync::{mpsc, Arc};
     use std::thread;
     use std::time::Duration;
@@ -261,6 +262,7 @@ mod tests {
             hash_chain: HashChain::default(),
             disk_pos: DiskPos::new(0, seq * 64, 64),
             global_sequence: seq,
+            receipt_extensions: BTreeMap::new(),
         }
     }
 

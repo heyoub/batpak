@@ -195,6 +195,7 @@ impl<'a> RestorePlanner<'a> {
         source: RestoreSource,
         mut snapshot: SnapshotPlanInput,
     ) -> Result<RestorePlan, StoreError> {
+        hydrate_receipt_extensions(self.reader, &mut snapshot.entries)?;
         let interner = StringInterner::new();
         interner.replace_from_full_snapshot(&snapshot.interner_strings);
         let tail_entries = collect_tail_entries(
@@ -443,11 +444,12 @@ fn segment_paths(data_dir: &Path) -> Result<Vec<(u64, std::path::PathBuf)>, Stor
 }
 
 fn read_sealed_sidx_entries_parallel(
+    reader: &Reader,
     sealed_segments: &[(u64, std::path::PathBuf)],
 ) -> Option<(Vec<ScannedIndexEntry>, ReservedKindFallbackStats)> {
     let per_segment: Result<Vec<_>, StoreError> = sealed_segments
         .par_iter()
-        .map(|(segment_id, path)| scanned_entries_from_sidx_footer(*segment_id, path))
+        .map(|(segment_id, path)| scanned_entries_from_sidx_footer(reader, *segment_id, path))
         .collect();
 
     match per_segment {
@@ -473,6 +475,7 @@ fn read_sealed_sidx_entries_parallel(
 }
 
 fn scanned_entries_from_sidx_footer(
+    reader: &Reader,
     segment_id: u64,
     path: &Path,
 ) -> Result<(Vec<ScannedIndexEntry>, ReservedKindFallbackStats), StoreError> {
@@ -488,7 +491,9 @@ fn scanned_entries_from_sidx_footer(
                 {
                     continue;
                 }
-                scanned.push(ScannedIndexEntry::from_cold_start_row(&row, &strings)?);
+                let mut scanned_entry = ScannedIndexEntry::from_cold_start_row(&row, &strings)?;
+                scanned_entry.receipt_extensions = reader.read_receipt_extensions(&row.disk_pos)?;
+                scanned.push(scanned_entry);
             }
             Ok((scanned, reserved_kind_fallbacks))
         }
@@ -507,14 +512,29 @@ fn full_interner_snapshot(interner: &StringInterner) -> Vec<String> {
 
 #[cfg(test)]
 fn read_sealed_sidx_entries_sequential(
+    reader: &Reader,
     sealed_segments: &[(u64, std::path::PathBuf)],
 ) -> Result<Vec<ScannedIndexEntry>, StoreError> {
     let mut flat = Vec::new();
     for (segment_id, path) in sealed_segments {
-        flat.extend(scanned_entries_from_sidx_footer(*segment_id, path)?.0);
+        flat.extend(scanned_entries_from_sidx_footer(reader, *segment_id, path)?.0);
     }
     flat.sort_by_key(|entry| entry.global_sequence.unwrap_or(0));
     Ok(flat)
+}
+
+fn hydrate_receipt_extensions(
+    reader: &Reader,
+    entries: &mut [IndexEntry],
+) -> Result<(), StoreError> {
+    for entry in entries {
+        match reader.read_receipt_extensions(&entry.disk_pos) {
+            Ok(receipt_extensions) => entry.receipt_extensions = receipt_extensions,
+            Err(StoreError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
 }
 
 #[derive(Default)]
@@ -564,6 +584,7 @@ fn entry_from_scan(
         hash_chain: se.hash_chain,
         disk_pos: DiskPos::new(se.segment_id, se.offset, se.length),
         global_sequence,
+        receipt_extensions: se.receipt_extensions,
     })
 }
 
@@ -648,7 +669,8 @@ fn collect_rebuild_entries(reader: &Reader, data_dir: &Path) -> Result<RebuildRe
     let mut reserved_kind_fallbacks = ReservedKindFallbackStats::default();
 
     if !sealed_segments.is_empty() {
-        if let Some((scanned, counts)) = read_sealed_sidx_entries_parallel(&sealed_segments) {
+        if let Some((scanned, counts)) = read_sealed_sidx_entries_parallel(reader, &sealed_segments)
+        {
             reserved_kind_fallbacks = reserved_kind_fallbacks.add(&counts);
             for se in scanned {
                 let global_sequence = se
@@ -812,6 +834,7 @@ mod tests {
                 hash_chain: HashChain::default(),
                 disk_pos: DiskPos::new(segment_id, i * 256, 256),
                 global_sequence: i,
+                receipt_extensions: BTreeMap::new(),
             });
         }
         let interner_strings = full_interner_snapshot(&interner);
@@ -855,9 +878,10 @@ mod tests {
             "PROPERTY: tiny segments should produce at least one sealed segment with an SIDX footer."
         );
 
-        let (parallel, _) = read_sealed_sidx_entries_parallel(&sealed_segments)
+        let reader = Reader::new(dir.path().to_path_buf(), 16);
+        let (parallel, _) = read_sealed_sidx_entries_parallel(&reader, &sealed_segments)
             .expect("parallel SIDX footer read should succeed");
-        let sequential = read_sealed_sidx_entries_sequential(&sealed_segments)
+        let sequential = read_sealed_sidx_entries_sequential(&reader, &sealed_segments)
             .expect("sequential SIDX footer read should succeed");
 
         assert_eq!(
@@ -996,6 +1020,7 @@ mod tests {
             segment_id: 0,
             offset: 0,
             length: 64,
+            receipt_extensions: BTreeMap::new(),
             global_sequence: Some(0),
         };
         let entry = entry_from_scan(&interner, se, 0).expect("entry_from_scan");
@@ -1030,6 +1055,7 @@ mod tests {
             segment_id: 0,
             offset: 0,
             length: 64,
+            receipt_extensions: BTreeMap::new(),
             global_sequence: Some(1),
         };
         let entry = entry_from_scan(&interner, se, 1).expect("entry_from_scan");

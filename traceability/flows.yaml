@@ -7,12 +7,18 @@
     - ART-STORE-INTEGRATION
     - ART-OBSERVABILITY-TESTS
 - id: FLOW-APPEND-OPTIONS
-  summary: Append with CAS/idempotency/correlation options and optional lane/depth position hints enforces guards before commit while leaving HLC wall/counter and sequence under writer control.
+  summary: Append with CAS/idempotency/correlation options, receipt extensions, and optional lane/depth position hints enforces guards before commit while leaving HLC wall/counter and sequence under writer control; committed extension bytes are copied into append and denial receipts before signing, persisted in .fbat frame metadata, and reconstructed for idempotency replay after cold start.
   artifacts:
     - ART-STORE-MOD
     - ART-STORE-PROPERTIES
     - ART-DAG-POSITION-HINT-TESTS
     - ART-ADR-POSITION-HINTS
+- id: FLOW-RECEIPT-EXTENSION-CARGO
+  summary: Unknown receipt extensions are substrate cargo. batpak preserves extension bytes byte-for-byte when returning, signing, replaying, or reconstructing the same committed receipt; pcp.* keys are handled exactly like application keys, and semantic interpretation is left to extension-aware code outside batpak-core.
+  artifacts:
+    - ART-STORE-APPEND
+    - ART-STORE-SEGMENT
+    - ART-STORE-INTEGRATION
 - id: FLOW-APPEND-REACTION
   summary: Causal follow-up appends preserve correlation and causation IDs while emitting distinct telemetry.
   artifacts:

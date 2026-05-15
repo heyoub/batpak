@@ -367,8 +367,7 @@ fn stable_batpak_targets_field_shape_at_info_and_trace() {
     let proj_main: Vec<&CapturedEvent> = cap
         .iter()
         .filter(|e| {
-            e.target == "batpak::projection"
-                && e.fields.get("flow").map_or(false, |f| f == "project")
+            e.target == "batpak::projection" && e.fields.get("flow").is_some_and(|f| f == "project")
         })
         .collect();
     assert!(
@@ -388,7 +387,7 @@ fn stable_batpak_targets_field_shape_at_info_and_trace() {
         e.target == "batpak::projection"
             && e.fields
                 .get("flow")
-                .map_or(false, |f| f.contains("external_cache"))
+                .is_some_and(|f| f.contains("external_cache"))
     }) {
         assert!(
             e.fields.contains_key("probe_us") && e.fields.contains_key("outcome"),
@@ -432,7 +431,7 @@ fn external_cache_projection_probe_event_is_required_on_external_cache_path() {
             e.target == "batpak::projection"
                 && e.fields
                     .get("flow")
-                    .map_or(false, |f| f == "external_cache_probe")
+                    .is_some_and(|f| f == "external_cache_probe")
         })
         .collect();
     assert!(
@@ -443,10 +442,10 @@ fn external_cache_projection_probe_event_is_required_on_external_cache_path() {
         probe.iter().any(|e| {
             e.fields
                 .get("entity")
-                .map_or(false, |entity| entity == "entity:obs:external-cache")
+                .is_some_and(|entity| entity == "entity:obs:external-cache")
                 && e.fields
                     .get("outcome")
-                    .map_or(false, |outcome| outcome == "none")
+                    .is_some_and(|outcome| outcome == "none")
                 && e.fields.contains_key("probe_us")
         }),
         "external_cache_probe must carry entity/probe_us/outcome=none on the same event: {probe:?}"

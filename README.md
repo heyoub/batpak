@@ -128,7 +128,12 @@ reserved for library-owned lifecycle streams; application code should avoid it.
 Receipt signing is opt-in via `StoreConfig::with_signing_key(...)`; signed
 `AppendReceipt` and `DenialReceipt` values carry `key_id` and `signature`, and
 `verify_append_receipt` / `verify_denial_receipt` re-check them against the
-store's configured key registry. Gate denials can be persisted as first-class
+store's configured key registry. Callers can attach opaque receipt extension
+bytes through `AppendOptions::with_extension(...)`; batpak signs those bytes
+without interpreting profile meaning and persists them in `.fbat` frames for
+cold-start reconstruction. Unknown extensions are substrate cargo: `pcp.*`
+bytes and application-owned bytes are preserved and signed by the same generic
+mechanism. Gate denials can be persisted as first-class
 entity-chain events through `Store::append_denial(...)` using
 `EventKind::SYSTEM_DENIAL`.
 

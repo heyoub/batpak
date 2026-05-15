@@ -54,7 +54,8 @@ mod write_api;
 pub use append::{
     AppendOptions, AppendPositionHint, AppendReceipt, BatchAppendItem, CausationRef,
     CompactionConfig, CompactionStrategy, DenialReceipt, EncodedBytes, ExtensionKey,
-    ExtensionKeyError, RetentionPredicate,
+    ExtensionKeyError, ReceiptExtensionKey, ReceiptExtensionNamespace, ReceiptExtensionValue,
+    RetentionPredicate,
 };
 pub use backup_envelope::{
     audit_backup_manifest_segments, backup_manifest_body_bytes, backup_manifest_body_hash,

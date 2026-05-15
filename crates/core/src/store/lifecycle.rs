@@ -238,6 +238,7 @@ fn write_scanned_entry(
         event: entry.event,
         entity: entry.entity,
         scope: entry.scope,
+        receipt_extensions: entry.receipt_extensions,
     };
     let frame = segment::frame_encode(&frame_payload)?;
     merged_segment.write_frame(&frame)?;

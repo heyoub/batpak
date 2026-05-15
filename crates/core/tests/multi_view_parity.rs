@@ -111,10 +111,18 @@ fn summarize_entries<State>(store: &Store<State>, entries: Vec<IndexEntry>) -> V
                 .event
                 .payload;
             if entry.kind == EventKind::SYSTEM_OPEN_COMPLETED {
-                payload
+                let payload_object = payload
                     .as_object_mut()
-                    .expect("SYSTEM_OPEN_COMPLETED payload must be an object")
-                    .insert("elapsed_us".into(), serde_json::Value::from(0));
+                    .expect("SYSTEM_OPEN_COMPLETED payload must be an object");
+                for timing_field in [
+                    "elapsed_us",
+                    "phase_hidden_ranges_us",
+                    "phase_interner_us",
+                    "phase_plan_build_us",
+                    "phase_restore_index_us",
+                ] {
+                    payload_object.insert(timing_field.into(), serde_json::Value::from(0));
+                }
             }
             EventSummary {
                 entity: entry.coord.entity().to_owned(),

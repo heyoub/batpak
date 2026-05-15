@@ -128,7 +128,7 @@ fn idempotency_algebraic_duplicate_produces_no_new_event() {
     };
 
     let r1 = store
-        .append_with_options(&coord, kind, &"hello", opts)
+        .append_with_options(&coord, kind, &"hello", opts.clone())
         .expect("first append");
     let r2 = store
         .append_with_options(&coord, kind, &"hello", opts)

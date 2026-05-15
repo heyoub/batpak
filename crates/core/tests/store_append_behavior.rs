@@ -138,7 +138,7 @@ fn idempotency_returns_same_receipt() {
     };
 
     let r1 = store
-        .append_with_options(&coord, kind, &serde_json::json!({"x": 1}), opts)
+        .append_with_options(&coord, kind, &serde_json::json!({"x": 1}), opts.clone())
         .expect("first append");
 
     // Second append with same key should return same receipt

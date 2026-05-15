@@ -105,7 +105,7 @@ fn batch_append_item_uses_named_msgpack_payloads() {
         coord,
         EventKind::custom(0xF, 9),
         &payload,
-        options,
+        options.clone(),
         causation,
     )
     .expect("serialize batch payload");
@@ -142,7 +142,7 @@ fn batch_append_item_from_msgpack_bytes_preserves_raw_payload() {
         coord.clone(),
         EventKind::custom(0xF, 7),
         encoded.clone(),
-        options,
+        options.clone(),
         causation,
     );
     let item_coord = item.coord();

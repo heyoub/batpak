@@ -796,7 +796,12 @@ fn correctness_gates_self_validate() {
         ..Default::default()
     };
     let r1 = store
-        .append_with_options(&coord, kind, &serde_json::json!({"x": 1}), idem_opts)
+        .append_with_options(
+            &coord,
+            kind,
+            &serde_json::json!({"x": 1}),
+            idem_opts.clone(),
+        )
         .expect("first idem");
     let r2 = store
         .append_with_options(&coord, kind, &serde_json::json!({"x": 2}), idem_opts)

@@ -2,8 +2,9 @@ pub(crate) mod scan;
 pub(crate) mod sidx;
 
 use crate::event::Event;
-use crate::store::StoreError;
+use crate::store::{EncodedBytes, ExtensionKey, StoreError};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::io::{Read, Seek, SeekFrom, Write};
 // serde(with) resolves via string path — no explicit wire import needed.
 
@@ -43,6 +44,9 @@ pub(crate) struct FramePayload<P> {
     pub entity: String,
     /// Scope name string (e.g. `"profile"`).
     pub scope: String,
+    /// Opaque receipt extension bytes committed with this frame.
+    #[serde(default)]
+    pub receipt_extensions: BTreeMap<ExtensionKey, EncodedBytes>,
 }
 
 #[derive(Serialize)]
@@ -50,6 +54,7 @@ pub(crate) struct FramePayloadRef<'a, P> {
     pub event: &'a Event<P>,
     pub entity: &'a str,
     pub scope: &'a str,
+    pub receipt_extensions: &'a BTreeMap<ExtensionKey, EncodedBytes>,
 }
 
 /// Typestate marker for an active (writable) segment.

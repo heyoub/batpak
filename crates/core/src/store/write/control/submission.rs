@@ -5,7 +5,7 @@ use crate::store::append::checked_payload_len;
 use crate::store::{AppendOptions, Open, Store, StoreError};
 use serde::Serialize;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct AppendSubmission {
     event_id: u128,
     correlation_id: u128,
@@ -67,14 +67,14 @@ impl AppendSubmission {
         }
     }
 
-    pub(crate) fn validate_route(self, store: &Store<Open>) -> Result<(), StoreError> {
+    pub(crate) fn validate_route(&self, store: &Store<Open>) -> Result<(), StoreError> {
         if self.fence_token.is_none() {
             store.ensure_no_active_public_fence()?;
         }
         Ok(())
     }
 
-    pub(crate) fn validate_idempotency(self, store: &Store<Open>) -> Result<(), StoreError> {
+    pub(crate) fn validate_idempotency(&self, store: &Store<Open>) -> Result<(), StoreError> {
         if store.runtime.require_idempotency_keys && self.options.idempotency_key.is_none() {
             return Err(StoreError::IdempotencyRequired);
         }
@@ -82,7 +82,7 @@ impl AppendSubmission {
     }
 
     pub(crate) fn build_event(
-        self,
+        &self,
         payload: &impl Serialize,
         kind: EventKind,
         now_us: i64,
@@ -114,6 +114,7 @@ impl AppendSubmission {
             idempotency_key: self.options.idempotency_key,
             dag_lane: position_hint.lane,
             dag_depth: position_hint.depth,
+            extensions: self.options.extensions,
         }
     }
 
@@ -124,8 +125,9 @@ impl AppendSubmission {
         event: Event<Vec<u8>>,
         respond: flume::Sender<AppendReply>,
     ) -> WriterCommand {
+        let fence_token = self.fence_token;
         let guards = self.guards();
-        match self.fence_token {
+        match fence_token {
             Some(token) => WriterCommand::FenceAppend {
                 token,
                 coord,
