@@ -1,0 +1,152 @@
+//! Builder for the synchronous runtime composition root.
+
+use std::collections::BTreeMap;
+
+use crate::core::Core;
+use crate::error::BuildError;
+use crate::{handler, module, operation, receipt};
+
+type BoxedHandler = Box<dyn handler::Handler + 'static>;
+type BoxedReceiptSink = Box<dyn receipt::ReceiptSink + 'static>;
+
+/// Builder for [`Core`].
+///
+/// The builder separates operation descriptors from handlers so modules can
+/// mount descriptors first and callers can register concrete behavior later.
+/// [`CoreBuilder::build`] validates that both sides are present before it
+/// returns a runnable runtime.
+#[derive(Default)]
+pub struct CoreBuilder {
+    descriptors: BTreeMap<String, operation::OperationDescriptor>,
+    handlers: BTreeMap<String, BoxedHandler>,
+    receipt_sink: Option<BoxedReceiptSink>,
+}
+
+impl CoreBuilder {
+    /// Create an empty builder.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Mount a data-oriented module descriptor into this builder.
+    ///
+    /// # Errors
+    /// Returns a build error when the module is invalid or when any descriptor
+    /// duplicates an operation already registered in this builder.
+    pub fn mount(&mut self, module: module::Module) -> Result<&mut Self, BuildError> {
+        module
+            .validate()
+            .map_err(|error| BuildError::invalid_module(module.name(), error.to_string()))?;
+        for (_, descriptor) in module.operations() {
+            self.register_operation(*descriptor)?;
+        }
+        Ok(self)
+    }
+
+    /// Register an operation descriptor without a handler.
+    ///
+    /// # Errors
+    /// Returns [`BuildError::DuplicateOperation`] when the descriptor name is
+    /// already present.
+    pub fn register_operation(
+        &mut self,
+        descriptor: operation::OperationDescriptor,
+    ) -> Result<&mut Self, BuildError> {
+        let name = descriptor.name().to_owned();
+        if self.descriptors.contains_key(&name) {
+            return Err(BuildError::duplicate_operation(name));
+        }
+
+        self.descriptors.insert(name, descriptor);
+        Ok(self)
+    }
+
+    /// Register a handler for an operation name.
+    ///
+    /// # Errors
+    /// Returns [`BuildError::DuplicateHandler`] when a handler for `name` is
+    /// already present.
+    pub fn register_handler<H>(
+        &mut self,
+        name: impl Into<String>,
+        handler: H,
+    ) -> Result<&mut Self, BuildError>
+    where
+        H: handler::Handler + 'static,
+    {
+        let name = name.into();
+        if self.handlers.contains_key(&name) {
+            return Err(BuildError::duplicate_handler(name));
+        }
+
+        self.handlers.insert(name, Box::new(handler));
+        Ok(self)
+    }
+
+    /// Register a descriptor and handler together.
+    ///
+    /// # Errors
+    /// Returns a duplicate descriptor or duplicate handler error if either side
+    /// is already present.
+    pub fn register<H>(
+        &mut self,
+        descriptor: operation::OperationDescriptor,
+        handler: H,
+    ) -> Result<&mut Self, BuildError>
+    where
+        H: handler::Handler + 'static,
+    {
+        let name = descriptor.name().to_owned();
+        if self.descriptors.contains_key(&name) {
+            return Err(BuildError::duplicate_operation(name));
+        }
+        if self.handlers.contains_key(&name) {
+            return Err(BuildError::duplicate_handler(name));
+        }
+
+        self.descriptors.insert(name.clone(), descriptor);
+        self.handlers.insert(name, Box::new(handler));
+        Ok(self)
+    }
+
+    /// Configure the optional receipt sink made available to invocation
+    /// contexts.
+    pub fn receipt_sink<S>(&mut self, sink: S) -> &mut Self
+    where
+        S: receipt::ReceiptSink + 'static,
+    {
+        self.receipt_sink = Some(Box::new(sink));
+        self
+    }
+
+    /// Clear any configured receipt sink.
+    pub fn clear_receipt_sink(&mut self) -> &mut Self {
+        self.receipt_sink = None;
+        self
+    }
+
+    /// Build a runnable [`Core`].
+    ///
+    /// # Errors
+    /// Returns a missing-descriptor or missing-handler error when the mounted
+    /// operation table and handler table do not line up by name.
+    pub fn build(self) -> Result<Core, BuildError> {
+        for name in self.descriptors.keys() {
+            if !self.handlers.contains_key(name) {
+                return Err(BuildError::missing_handler(name.clone()));
+            }
+        }
+        for name in self.handlers.keys() {
+            if !self.descriptors.contains_key(name) {
+                return Err(BuildError::missing_descriptor(name.clone()));
+            }
+        }
+
+        Ok(Core {
+            descriptors: self.descriptors,
+            handlers: self.handlers,
+            receipt_sink: self.receipt_sink,
+        })
+    }
+}

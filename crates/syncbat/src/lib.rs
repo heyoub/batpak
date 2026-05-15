@@ -3,7 +3,30 @@
 //!
 //! This crate is intentionally small at birth. It establishes the runtime
 //! layer boundary over batpak core without importing operation dialect,
-//! network, PCP, or rendering semantics.
+//! network, protocol-profile, or rendering semantics.
+
+pub mod builder;
+pub mod core;
+pub mod error;
+pub mod handler;
+pub mod module;
+pub mod operation;
+pub mod receipt;
+pub mod register;
+pub mod store_sink;
+
+pub use builder::CoreBuilder;
+pub use core::{Core, Cx, InvokeResult};
+pub use error::{BuildError, RuntimeError};
+pub use handler::{Handler, HandlerError, HandlerResult};
+pub use module::Module;
+pub use operation::{EffectClass, OperationDescriptor, OperationInput, OperationOutput};
+pub use receipt::{
+    BatpakReceiptFields, ReceiptEnvelope, ReceiptExtensionDrawer, ReceiptHash, ReceiptOutcome,
+    ReceiptSink, ReceiptSinkError, RecordedReceipt, SYNCBAT_RECEIPT_EVENT_KIND,
+};
+pub use register::{CacheRegister, Register, RegisterValidationError};
+pub use store_sink::{StoreReceiptSink, StoreReceiptSinkError};
 
 /// Receipt-extension namespace owned by the syncbat runtime layer.
 pub const SYNCBAT_EXTENSION_NAMESPACE: &str = "syncbat";
