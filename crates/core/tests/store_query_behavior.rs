@@ -51,10 +51,13 @@ fn store_config_new_uses_sensible_defaults() {
 fn get_nonexistent_returns_not_found() {
     let (store, _dir) = test_store();
     let result = store.get(0xDEAD);
-    let err = result.expect_err(
-        "PROPERTY: get() of a nonexistent event_id must return Err(StoreError::NotFound).\
-         Investigate: src/store/mod.rs get, src/store/segment/scan.rs lookup.",
-    );
+    let err = match result {
+        Ok(_) => panic!(
+            "PROPERTY: get() of a nonexistent event_id must return Err(StoreError::NotFound).\
+             Investigate: src/store/mod.rs get, src/store/segment/scan.rs lookup."
+        ),
+        Err(err) => err,
+    };
     assert!(
         matches!(err, StoreError::NotFound(_)),
         "PROPERTY: get() on a nonexistent event_id must surface as StoreError::NotFound, got {err:?}"
