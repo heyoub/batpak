@@ -28,10 +28,11 @@ use crate::store::index::{
 };
 use crate::store::platform::fs::write_file_atomically;
 use crate::store::segment::sidx::ReservedKindFallbackStats;
-use crate::store::StoreError;
+use crate::store::{EncodedBytes, ExtensionKey, StoreError};
 use rayon::prelude::*;
 use serde::de::{self, DeserializeSeed, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::fmt;
 use std::io::{BufWriter, Write};
 use std::path::Path;
@@ -42,9 +43,9 @@ use std::path::Path;
 pub(crate) const CHECKPOINT_MAGIC: &[u8; 6] = b"FBATCK";
 
 /// Format version stored in the checkpoint header.
-/// v5: v4 plus persisted cumulative reserved-kind fallback stats.
+/// v6: v5 plus receipt-extension maps in checkpoint entries.
 /// v2 checkpoints remain readable as a fallback; v1 is rejected.
-pub(crate) const CHECKPOINT_VERSION: u16 = 5;
+pub(crate) const CHECKPOINT_VERSION: u16 = 6;
 
 /// Final checkpoint filename inside the data directory.
 pub(crate) const CHECKPOINT_FILENAME: &str = "index.ckpt";
@@ -85,9 +86,9 @@ struct CheckpointDataV4 {
     entries: Vec<CheckpointEntry>,
 }
 
-/// Checkpoint format v5: v4 plus cumulative reserved-kind fallback stats.
+/// Checkpoint format v6: v5 plus receipt-extension maps in entries.
 #[derive(Serialize, Deserialize)]
-struct CheckpointDataV5 {
+struct CheckpointDataV6 {
     global_sequence: u64,
     watermark_segment_id: u64,
     watermark_offset: u64,
@@ -125,6 +126,8 @@ pub(crate) struct CheckpointEntry {
     pub offset: u64,
     pub length: u32,
     pub global_sequence: u64,
+    #[serde(default)]
+    pub receipt_extensions: BTreeMap<ExtensionKey, EncodedBytes>,
 }
 
 impl CheckpointEntry {
@@ -152,6 +155,12 @@ impl CheckpointEntry {
             disk_pos: self.to_disk_pos(),
             global_sequence: self.global_sequence,
         }
+    }
+
+    fn to_index_entry(&self, interner_strings: &[String]) -> Result<IndexEntry, StoreError> {
+        let mut entry = self.to_cold_start_row().to_index_entry(interner_strings)?;
+        entry.receipt_extensions = self.receipt_extensions.clone();
+        Ok(entry)
     }
 }
 
@@ -184,6 +193,7 @@ pub(crate) struct LoadedCheckpointSnapshot {
     pub(crate) stored_allocator: u64,
     pub(crate) routing: RoutingSummary,
     pub(crate) cumulative_reserved_kind_fallbacks: ReservedKindFallbackStats,
+    pub(crate) receipt_extensions_hydrated: bool,
 }
 
 struct LoadedCheckpointFile {
@@ -192,7 +202,7 @@ struct LoadedCheckpointFile {
     body: Vec<u8>,
 }
 
-struct CheckpointSnapshotDataV5 {
+struct CheckpointSnapshotDataV6 {
     global_sequence: u64,
     watermark_segment_id: u64,
     watermark_offset: u64,
@@ -204,7 +214,7 @@ struct CheckpointSnapshotDataV5 {
 
 #[derive(Deserialize)]
 #[serde(field_identifier, rename_all = "snake_case")]
-enum CheckpointDataV5Field {
+enum CheckpointDataV6Field {
     GlobalSequence,
     WatermarkSegmentId,
     WatermarkOffset,
@@ -250,7 +260,6 @@ impl<'de, 'a> Visitor<'de> for CheckpointEntriesVisitor<'a> {
         while let Some(entry) = seq.next_element::<CheckpointEntry>()? {
             entries.push(
                 entry
-                    .to_cold_start_row()
                     .to_index_entry(self.interner_strings)
                     .map_err(de::Error::custom)?,
             );
@@ -259,13 +268,13 @@ impl<'de, 'a> Visitor<'de> for CheckpointEntriesVisitor<'a> {
     }
 }
 
-struct CheckpointSnapshotDataV5Visitor;
+struct CheckpointSnapshotDataV6Visitor;
 
-impl<'de> Visitor<'de> for CheckpointSnapshotDataV5Visitor {
-    type Value = CheckpointSnapshotDataV5;
+impl<'de> Visitor<'de> for CheckpointSnapshotDataV6Visitor {
+    type Value = CheckpointSnapshotDataV6;
 
     fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("checkpoint v5 snapshot data")
+        f.write_str("checkpoint v6 snapshot data")
     }
 
     fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
@@ -280,45 +289,45 @@ impl<'de> Visitor<'de> for CheckpointSnapshotDataV5Visitor {
         let mut reserved_kind_fallbacks = None;
         let mut entries = None;
 
-        while let Some(field) = map.next_key::<CheckpointDataV5Field>()? {
+        while let Some(field) = map.next_key::<CheckpointDataV6Field>()? {
             match field {
-                CheckpointDataV5Field::GlobalSequence => {
+                CheckpointDataV6Field::GlobalSequence => {
                     if global_sequence.is_some() {
                         return Err(de::Error::duplicate_field("global_sequence"));
                     }
                     global_sequence = Some(map.next_value()?);
                 }
-                CheckpointDataV5Field::WatermarkSegmentId => {
+                CheckpointDataV6Field::WatermarkSegmentId => {
                     if watermark_segment_id.is_some() {
                         return Err(de::Error::duplicate_field("watermark_segment_id"));
                     }
                     watermark_segment_id = Some(map.next_value()?);
                 }
-                CheckpointDataV5Field::WatermarkOffset => {
+                CheckpointDataV6Field::WatermarkOffset => {
                     if watermark_offset.is_some() {
                         return Err(de::Error::duplicate_field("watermark_offset"));
                     }
                     watermark_offset = Some(map.next_value()?);
                 }
-                CheckpointDataV5Field::InternerStrings => {
+                CheckpointDataV6Field::InternerStrings => {
                     if interner_strings.is_some() {
                         return Err(de::Error::duplicate_field("interner_strings"));
                     }
                     interner_strings = Some(map.next_value()?);
                 }
-                CheckpointDataV5Field::Routing => {
+                CheckpointDataV6Field::Routing => {
                     if routing.is_some() {
                         return Err(de::Error::duplicate_field("routing"));
                     }
                     routing = Some(map.next_value()?);
                 }
-                CheckpointDataV5Field::ReservedKindFallbacks => {
+                CheckpointDataV6Field::ReservedKindFallbacks => {
                     if reserved_kind_fallbacks.is_some() {
                         return Err(de::Error::duplicate_field("reserved_kind_fallbacks"));
                     }
                     reserved_kind_fallbacks = Some(map.next_value()?);
                 }
-                CheckpointDataV5Field::Entries => {
+                CheckpointDataV6Field::Entries => {
                     if entries.is_some() {
                         return Err(de::Error::duplicate_field("entries"));
                     }
@@ -332,7 +341,7 @@ impl<'de> Visitor<'de> for CheckpointSnapshotDataV5Visitor {
             }
         }
 
-        Ok(CheckpointSnapshotDataV5 {
+        Ok(CheckpointSnapshotDataV6 {
             global_sequence: global_sequence
                 .ok_or_else(|| de::Error::missing_field("global_sequence"))?,
             watermark_segment_id: watermark_segment_id
@@ -348,12 +357,12 @@ impl<'de> Visitor<'de> for CheckpointSnapshotDataV5Visitor {
     }
 }
 
-impl<'de> Deserialize<'de> for CheckpointSnapshotDataV5 {
+impl<'de> Deserialize<'de> for CheckpointSnapshotDataV6 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        deserializer.deserialize_map(CheckpointSnapshotDataV5Visitor)
+        deserializer.deserialize_map(CheckpointSnapshotDataV6Visitor)
     }
 }
 
@@ -363,7 +372,7 @@ fn checkpoint_entries_to_index_entries(
 ) -> Result<Vec<IndexEntry>, StoreError> {
     entries
         .iter()
-        .map(|ce| ce.to_cold_start_row().to_index_entry(interner_strings))
+        .map(|ce| ce.to_index_entry(interner_strings))
         .collect()
 }
 
@@ -555,8 +564,8 @@ fn decode_checkpoint_data(
                 ReservedKindFallbackStats::default(),
             )
         }
-        5 => {
-            let data: CheckpointDataV5 = match rmp_serde::from_slice(body) {
+        5 | 6 => {
+            let data: CheckpointDataV6 = match rmp_serde::from_slice(body) {
                 Ok(d) => d,
                 Err(e) => {
                     tracing::warn!(
@@ -612,12 +621,12 @@ fn decode_checkpoint_data(
     })
 }
 
-fn decode_checkpoint_snapshot_v5(
+fn decode_checkpoint_snapshot_v6(
     data_dir: &Path,
     path: &Path,
     body: &[u8],
 ) -> Option<LoadedCheckpointSnapshot> {
-    let data: CheckpointSnapshotDataV5 = match rmp_serde::from_slice(body) {
+    let data: CheckpointSnapshotDataV6 = match rmp_serde::from_slice(body) {
         Ok(data) => data,
         Err(error) => {
             tracing::warn!(
@@ -653,6 +662,7 @@ fn decode_checkpoint_snapshot_v5(
         stored_allocator: data.global_sequence,
         routing: data.routing,
         cumulative_reserved_kind_fallbacks: data.reserved_kind_fallbacks,
+        receipt_extensions_hydrated: true,
     })
 }
 
@@ -717,6 +727,7 @@ pub(crate) fn write_checkpoint_with_reserved_kind_fallbacks(
             offset: e.disk_pos.offset,
             length: e.disk_pos.length,
             global_sequence: e.global_sequence,
+            receipt_extensions: e.receipt_extensions.clone(),
         })
         .collect();
 
@@ -737,7 +748,7 @@ pub(crate) fn write_checkpoint_with_reserved_kind_fallbacks(
         recommended_restore_chunk_count(entries.len()),
     );
 
-    let data = CheckpointDataV5 {
+    let data = CheckpointDataV6 {
         global_sequence: index.global_sequence(),
         watermark_segment_id,
         watermark_offset,
@@ -829,7 +840,7 @@ pub(crate) fn restore_from_checkpoint(
     let mut rebuilt_entries = Vec::with_capacity(entries.len());
 
     for ce in entries {
-        rebuilt_entries.push(ce.to_cold_start_row().to_index_entry(interner_strings)?);
+        rebuilt_entries.push(ce.to_index_entry(interner_strings)?);
     }
 
     index.restore_sorted_entries(rebuilt_entries, stored_allocator)?;
@@ -839,7 +850,7 @@ pub(crate) fn restore_from_checkpoint(
 pub(crate) fn try_load_checkpoint_snapshot(data_dir: &Path) -> Option<LoadedCheckpointSnapshot> {
     let raw = read_checkpoint_file(data_dir)?;
     if raw.version == CHECKPOINT_VERSION {
-        return decode_checkpoint_snapshot_v5(data_dir, &raw.path, &raw.body);
+        return decode_checkpoint_snapshot_v6(data_dir, &raw.path, &raw.body);
     }
 
     let loaded = decode_checkpoint_data(data_dir, &raw.path, raw.version, &raw.body)?;
@@ -884,6 +895,7 @@ pub(crate) fn try_load_checkpoint_snapshot(data_dir: &Path) -> Option<LoadedChec
         stored_allocator: loaded.stored_allocator,
         routing: loaded.routing,
         cumulative_reserved_kind_fallbacks: loaded.cumulative_reserved_kind_fallbacks,
+        receipt_extensions_hydrated: false,
     })
 }
 
@@ -976,7 +988,7 @@ mod tests {
             "write_checkpoint must encode the current checkpoint version"
         );
         let body = &raw[12..];
-        let direct: CheckpointDataV5 =
+        let direct: CheckpointDataV6 =
             rmp_serde::from_slice(body).expect("checkpoint body should deserialize directly");
         assert_eq!(direct.entries.len(), 16);
         assert!(
@@ -1008,7 +1020,7 @@ mod tests {
     }
 
     #[test]
-    fn current_version_snapshot_restores_v5_checkpoint_directly() {
+    fn current_version_snapshot_restores_checkpoint_directly() {
         let tmp = TempDir::new().expect("tempdir");
         let dir = tmp.path();
         touch_segment(dir, 0);
@@ -1021,26 +1033,83 @@ mod tests {
             effect_histogram: std::iter::once((0x1001u16, 1usize)).collect(),
         };
         write_checkpoint_with_reserved_kind_fallbacks(&idx, dir, 0, 4096, &reserved_kind_fallbacks)
-            .expect("write v5 checkpoint");
+            .expect("write checkpoint");
 
-        let loaded = try_load_checkpoint_snapshot(dir).expect("load v5 checkpoint snapshot");
+        let loaded = try_load_checkpoint_snapshot(dir).expect("load checkpoint snapshot");
 
         assert_eq!(loaded.entries.len(), 16);
         assert_eq!(loaded.watermark.watermark_offset, 4096);
+        assert!(
+            loaded.receipt_extensions_hydrated,
+            "PROPERTY: current checkpoint entries carry receipt-extension maps directly."
+        );
         assert_eq!(
             loaded.cumulative_reserved_kind_fallbacks,
             reserved_kind_fallbacks,
-            "PROPERTY: direct v5 snapshot restore must preserve persisted cumulative reserved-kind fallback stats."
+            "PROPERTY: direct checkpoint restore must preserve persisted cumulative reserved-kind fallback stats."
         );
         assert_eq!(
             loaded.entries.first().map(|entry| entry.global_sequence),
             Some(0),
-            "PROPERTY: direct v5 snapshot restore must preserve sorted global-sequence order."
+            "PROPERTY: direct checkpoint restore must preserve sorted global-sequence order."
         );
         assert_eq!(
             loaded.entries.last().map(|entry| entry.global_sequence),
             Some(15),
-            "PROPERTY: direct v5 snapshot restore must preserve the full checkpoint entry set."
+            "PROPERTY: direct checkpoint restore must preserve the full checkpoint entry set."
+        );
+    }
+
+    #[test]
+    fn current_version_checkpoint_restores_receipt_extensions_directly() {
+        let tmp = TempDir::new().expect("tempdir");
+        let dir = tmp.path();
+        touch_segment(dir, 0);
+
+        let idx = StoreIndex::new();
+        let coord = Coordinate::new("entity:checkpoint-ext", "scope:test").expect("coord");
+        let entity_id = idx.interner.intern(coord.entity());
+        let scope_id = idx.interner.intern(coord.scope());
+        let mut receipt_extensions = BTreeMap::new();
+        receipt_extensions.insert(
+            ExtensionKey::new("app.audit").expect("valid extension key"),
+            vec![0xCA, 0xFE, 0x01],
+        );
+        idx.insert(IndexEntry {
+            event_id: 1,
+            correlation_id: 1,
+            causation_id: None,
+            coord,
+            entity_id,
+            scope_id,
+            kind: EventKind::DATA,
+            wall_ms: 1_700_000_000_000,
+            clock: 1,
+            dag_lane: 0,
+            dag_depth: 0,
+            hash_chain: HashChain::default(),
+            disk_pos: DiskPos {
+                segment_id: 0,
+                offset: 0,
+                length: 64,
+            },
+            global_sequence: 0,
+            receipt_extensions: receipt_extensions.clone(),
+        });
+        idx.publish(idx.global_sequence(), "checkpoint-extension-test-publish")
+            .expect("publish");
+
+        write_checkpoint(&idx, dir, 0, 64).expect("write checkpoint");
+
+        let loaded = try_load_checkpoint_snapshot(dir).expect("load checkpoint snapshot");
+        assert!(
+            loaded.receipt_extensions_hydrated,
+            "PROPERTY: current checkpoints must not need frame hydration for receipt extensions."
+        );
+        assert_eq!(loaded.entries.len(), 1);
+        assert_eq!(
+            loaded.entries[0].receipt_extensions, receipt_extensions,
+            "PROPERTY: checkpoint v6 must preserve opaque receipt-extension bytes in the snapshot artifact."
         );
     }
 
@@ -1063,6 +1132,7 @@ mod tests {
             offset: 256,
             length: 64,
             global_sequence: 42,
+            receipt_extensions: BTreeMap::new(),
         };
         let strings = vec![
             String::new(),
@@ -1110,6 +1180,7 @@ mod tests {
             offset: 4,
             length: 5,
             global_sequence: 6,
+            receipt_extensions: BTreeMap::new(),
         };
 
         assert_eq!(entry.to_cold_start_row().causation_id, None);
@@ -1250,6 +1321,7 @@ mod tests {
                 offset: e.disk_pos.offset,
                 length: e.disk_pos.length,
                 global_sequence: e.global_sequence,
+                receipt_extensions: BTreeMap::new(),
             })
             .collect();
         entries.sort_by_key(|entry| entry.global_sequence);
@@ -1424,6 +1496,7 @@ mod tests {
             offset: 0,
             length: 64,
             global_sequence: 0,
+            receipt_extensions: BTreeMap::new(),
         };
         let row = entry.to_cold_start_row();
         assert_eq!(
@@ -1451,6 +1524,7 @@ mod tests {
             offset: 0,
             length: 64,
             global_sequence: 1,
+            receipt_extensions: BTreeMap::new(),
         };
         let row = entry.to_cold_start_row();
         assert_eq!(row.causation_id, Some(99));

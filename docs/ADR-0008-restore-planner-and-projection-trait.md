@@ -19,8 +19,10 @@ frame-scan fallback) normalize through one internal `RestorePlanner`
 that produces entity-partitioned `RoutingSummary` runs. Runtime views
 (streams, SoA, SoAoS, AoSoA, by-id, latest) are materialized from
 those runs in bulk rather than from per-entry insertion. Artifact
-formats carry additive routing summaries; older formats fall back to
-on-load summary synthesis.
+formats carry additive routing summaries. Current checkpoint and mmap
+artifacts also carry receipt-extension maps directly; older formats fall back
+to on-load summary synthesis and hydrate extension maps from authoritative
+`.fbat` frames.
 
 ### Projection Trait
 `EventSourced<P>` replaced with `EventSourced` using an associated

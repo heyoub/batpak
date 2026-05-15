@@ -90,8 +90,10 @@ pub mod typestate;
 /// Serde serialization helpers.
 pub mod wire; // serde helpers — no deps, must come first
 
-/// Preferred public alias for the stable encoding surface while the stronger
-/// canonical-bytes contract is phased in.
+/// Back-compatible alias for batpak-scoped named-field MessagePack helpers.
+///
+/// This is not a cross-protocol canonicalization surface; protocols with their
+/// own canonical byte rules must apply those rules outside batpak core.
 pub use crate::encoding as canonical;
 
 /// Internal types referenced by `#[derive(EventPayload)]` generated code.

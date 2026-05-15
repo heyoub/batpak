@@ -30,6 +30,11 @@ All notable changes to this project will be documented in this file.
 - Checkpoint and mmap cold-start rebuilds now fail closed when snapshot index
   entries cannot be hydrated from their backing `.fbat` frames, preventing
   accidental empty-extension reconstruction.
+- Current checkpoint v6 and mmap v5 artifacts now carry receipt-extension maps
+  directly. Older artifacts still hydrate extensions from authoritative
+  `.fbat` frames instead of trusting missing fast-restore cargo.
+- Clarified that `batpak::canonical` is a batpak-scoped named-field MessagePack
+  helper, not a protocol-wide canonicalization surface.
 - Store internals now route target-sensitive machine contact through
   `src/store/platform/`, and structural checks reject new direct store runtime
   uses of file sync, mmap, target cfg, lock open flag, and positional-read

@@ -1,9 +1,10 @@
 //! Stable batpak encoding helpers.
 //!
-//! These helpers expose the crate's current MessagePack-bytes discipline so
+//! These helpers expose the crate's current named-field MessagePack bytes so
 //! consumers can produce the same encoded extension bytes batpak stores and
 //! signs. The stability contract is crate-version scoped rather than a
-//! cross-version canonical-bytes guarantee.
+//! cross-version canonical-bytes guarantee. This module does not implement
+//! protocol-specific canonicalization such as JSON Canonicalization Scheme.
 
 use serde::de::DeserializeOwned;
 use serde::Serialize;

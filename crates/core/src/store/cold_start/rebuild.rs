@@ -113,6 +113,7 @@ struct SnapshotPlanInput {
     routing: RoutingSummary,
     reopen_reserved_kind_fallbacks: ReservedKindFallbackStats,
     persisted_cumulative_reserved_kind_fallbacks: ReservedKindFallbackStats,
+    receipt_extensions_hydrated: bool,
 }
 
 struct RestorePlanner<'a> {
@@ -143,6 +144,7 @@ impl<'a> RestorePlanner<'a> {
                         reopen_reserved_kind_fallbacks: snapshot.reopen_reserved_kind_fallbacks,
                         persisted_cumulative_reserved_kind_fallbacks: snapshot
                             .cumulative_reserved_kind_fallbacks,
+                        receipt_extensions_hydrated: snapshot.receipt_extensions_hydrated,
                     },
                 );
             }
@@ -161,6 +163,7 @@ impl<'a> RestorePlanner<'a> {
                         reopen_reserved_kind_fallbacks: ReservedKindFallbackStats::default(),
                         persisted_cumulative_reserved_kind_fallbacks: snapshot
                             .cumulative_reserved_kind_fallbacks,
+                        receipt_extensions_hydrated: snapshot.receipt_extensions_hydrated,
                     },
                 );
             }
@@ -195,7 +198,9 @@ impl<'a> RestorePlanner<'a> {
         source: RestoreSource,
         mut snapshot: SnapshotPlanInput,
     ) -> Result<RestorePlan, StoreError> {
-        hydrate_receipt_extensions(self.reader, &mut snapshot.entries)?;
+        if !snapshot.receipt_extensions_hydrated {
+            hydrate_receipt_extensions(self.reader, &mut snapshot.entries)?;
+        }
         let interner = StringInterner::new();
         interner.replace_from_full_snapshot(&snapshot.interner_strings);
         let tail_entries = collect_tail_entries(
@@ -915,6 +920,7 @@ mod tests {
                     reopen_reserved_kind_fallbacks: ReservedKindFallbackStats::default(),
                     persisted_cumulative_reserved_kind_fallbacks:
                         ReservedKindFallbackStats::default(),
+                    receipt_extensions_hydrated: false,
                 },
             )
             .expect("build snapshot plan");
@@ -955,6 +961,7 @@ mod tests {
                 routing,
                 reopen_reserved_kind_fallbacks: ReservedKindFallbackStats::default(),
                 persisted_cumulative_reserved_kind_fallbacks: ReservedKindFallbackStats::default(),
+                receipt_extensions_hydrated: false,
             },
         );
         assert!(
@@ -1010,6 +1017,7 @@ mod tests {
                     reopen_reserved_kind_fallbacks: ReservedKindFallbackStats::default(),
                     persisted_cumulative_reserved_kind_fallbacks:
                         ReservedKindFallbackStats::default(),
+                    receipt_extensions_hydrated: false,
                 },
             )
             .expect("build snapshot plan with tail");

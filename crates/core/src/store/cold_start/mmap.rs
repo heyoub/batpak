@@ -17,24 +17,28 @@ use crate::store::index::{
 #[cfg(test)]
 use crate::store::segment::sidx::raw_to_kind;
 use crate::store::segment::sidx::{kind_to_raw, raw_to_kind_counted, ReservedKindFallbackStats};
-use crate::store::StoreError;
+use crate::store::{EncodedBytes, ExtensionKey, StoreError};
 use memmap2::Mmap;
 use rayon::prelude::*;
+use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::{BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
 pub(crate) const MMAP_INDEX_MAGIC: &[u8; 6] = b"FBATIX";
-pub(crate) const MMAP_INDEX_VERSION: u16 = 4;
+pub(crate) const MMAP_INDEX_VERSION: u16 = 5;
 pub(crate) const MMAP_INDEX_FILENAME: &str = "index.fbati";
 
 const PREFIX_LEN: usize = 6 + 2 + 4;
 const HEADER_TAIL_LEN_V1: usize = 8 + 8 + 8 + 4 + 8 + 8;
 const HEADER_TAIL_LEN_V2: usize = HEADER_TAIL_LEN_V1 + 8;
+const HEADER_TAIL_LEN_V3: usize = HEADER_TAIL_LEN_V2 + 8;
 const HEADER_LEN_V1: usize = PREFIX_LEN + HEADER_TAIL_LEN_V1;
 const HEADER_LEN_V2: usize = PREFIX_LEN + HEADER_TAIL_LEN_V2;
+const HEADER_LEN_V3: usize = PREFIX_LEN + HEADER_TAIL_LEN_V3;
 const MMAP_ENTRY_SIZE_V2: usize = 162;
 const MMAP_ENTRY_SIZE_V3: usize = 170;
+const MMAP_ENTRY_SIZE_V5: usize = MMAP_ENTRY_SIZE_V3 + 8 + 8 + 32;
 
 fn read_le_u16(bytes: &[u8]) -> Option<u16> {
     Some(u16::from_le_bytes(bytes.try_into().ok()?))
@@ -53,8 +57,11 @@ struct LoadedMmapIndex {
     interner_strings: Vec<String>,
     routing: RoutingSummary,
     entries_offset: usize,
+    extension_blob_offset: usize,
+    extension_blob_len: usize,
     entry_count: u64,
     entry_size: usize,
+    version: u16,
     watermark: WatermarkInfo,
     stored_allocator: u64,
     cumulative_reserved_kind_fallbacks: ReservedKindFallbackStats,
@@ -68,6 +75,7 @@ pub(crate) struct LoadedMmapSnapshot {
     pub(crate) routing: RoutingSummary,
     pub(crate) reopen_reserved_kind_fallbacks: ReservedKindFallbackStats,
     pub(crate) cumulative_reserved_kind_fallbacks: ReservedKindFallbackStats,
+    pub(crate) receipt_extensions_hydrated: bool,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -99,6 +107,9 @@ struct MmapIndexEntry {
     global_sequence: u64,
     correlation_id: u128,
     causation_id: u128,
+    extension_offset: u64,
+    extension_len: u64,
+    extension_hash: [u8; 32],
 }
 
 impl MmapIndexEntry {
@@ -209,8 +220,35 @@ impl MmapIndexEntry {
         debug_assert_eq!(pos, MMAP_ENTRY_SIZE_V3);
     }
 
+    fn encode_into_v5(&self, buf: &mut [u8]) {
+        debug_assert_eq!(buf.len(), MMAP_ENTRY_SIZE_V5);
+        self.encode_into(&mut buf[..MMAP_ENTRY_SIZE_V3]);
+        let mut pos = MMAP_ENTRY_SIZE_V3;
+
+        macro_rules! put_le {
+            ($val:expr, $n:expr) => {{
+                buf[pos..pos + $n].copy_from_slice(&($val).to_le_bytes());
+                pos += $n;
+            }};
+        }
+        macro_rules! put_bytes {
+            ($arr:expr) => {{
+                let slice: &[u8] = &$arr;
+                buf[pos..pos + slice.len()].copy_from_slice(slice);
+                pos += slice.len();
+            }};
+        }
+
+        put_le!(self.extension_offset, 8);
+        put_le!(self.extension_len, 8);
+        put_bytes!(self.extension_hash);
+        debug_assert_eq!(pos, MMAP_ENTRY_SIZE_V5);
+    }
+
     fn decode_from(buf: &[u8], version: u16) -> Result<Self, StoreError> {
-        let expected_size = if version >= 3 {
+        let expected_size = if version >= 5 {
+            MMAP_ENTRY_SIZE_V5
+        } else if version >= 3 {
             MMAP_ENTRY_SIZE_V3
         } else {
             MMAP_ENTRY_SIZE_V2
@@ -267,6 +305,9 @@ impl MmapIndexEntry {
             global_sequence: get_le!(u64, 8),
             correlation_id: get_le!(u128, 16),
             causation_id: get_le!(u128, 16),
+            extension_offset: if version >= 5 { get_le!(u64, 8) } else { 0 },
+            extension_len: if version >= 5 { get_le!(u64, 8) } else { 0 },
+            extension_hash: if version >= 5 { get_hash!() } else { [0u8; 32] },
         };
         debug_assert_eq!(pos, expected_size);
         Ok(decoded)
@@ -291,7 +332,66 @@ fn entry_to_mmap(entry: &IndexEntry) -> MmapIndexEntry {
         global_sequence: entry.global_sequence,
         correlation_id: entry.correlation_id,
         causation_id: entry.causation_id.unwrap_or(0),
+        extension_offset: 0,
+        extension_len: 0,
+        extension_hash: [0u8; 32],
     }
+}
+
+fn extension_blob_digest(bytes: &[u8]) -> [u8; 32] {
+    #[cfg(feature = "blake3")]
+    {
+        crate::event::hash::compute_hash(bytes)
+    }
+    #[cfg(not(feature = "blake3"))]
+    {
+        let mut digest = [0u8; 32];
+        for (seed, chunk) in digest.chunks_exact_mut(4).enumerate() {
+            let mut hasher = crc32fast::Hasher::new();
+            hasher.update(&(seed as u32).to_le_bytes());
+            hasher.update(bytes);
+            chunk.copy_from_slice(&hasher.finalize().to_le_bytes());
+        }
+        digest
+    }
+}
+
+fn encode_receipt_extensions(
+    extensions: &BTreeMap<ExtensionKey, EncodedBytes>,
+) -> Result<Vec<u8>, StoreError> {
+    if extensions.is_empty() {
+        return Ok(Vec::new());
+    }
+    crate::canonical::to_bytes(extensions)
+        .map_err(|error| StoreError::Serialization(Box::new(error)))
+}
+
+fn decode_receipt_extensions_from_blob(
+    entry: &MmapIndexEntry,
+    extension_blob: &[u8],
+) -> Result<BTreeMap<ExtensionKey, EncodedBytes>, StoreError> {
+    if entry.extension_len == 0 {
+        return Ok(BTreeMap::new());
+    }
+    let offset = usize::try_from(entry.extension_offset)
+        .map_err(|_| StoreError::ser_msg("mmap receipt-extension offset is too large"))?;
+    let len = usize::try_from(entry.extension_len)
+        .map_err(|_| StoreError::ser_msg("mmap receipt-extension length is too large"))?;
+    let end = offset
+        .checked_add(len)
+        .ok_or_else(|| StoreError::ser_msg("mmap receipt-extension range overflowed"))?;
+    if end > extension_blob.len() {
+        return Err(StoreError::ser_msg(
+            "mmap receipt-extension range exceeds blob section",
+        ));
+    }
+    let bytes = &extension_blob[offset..end];
+    if extension_blob_digest(bytes) != entry.extension_hash {
+        return Err(StoreError::ser_msg(
+            "mmap receipt-extension blob digest mismatch",
+        ));
+    }
+    crate::canonical::from_bytes(bytes).map_err(|error| StoreError::Serialization(Box::new(error)))
 }
 
 /// Atomically write the mmap-first index artifact.
@@ -344,7 +444,27 @@ pub(crate) fn write_mmap_index_with_reserved_kind_fallbacks(
     let summary_bytes_len = u64::try_from(summary_bytes.len())
         .map_err(|_| StoreError::ser_msg("summary payload too large for mmap index"))?;
 
-    let mut header_tail = Vec::with_capacity(HEADER_TAIL_LEN_V2);
+    let mut mmap_entries = Vec::with_capacity(entries.len());
+    let mut extension_blob = Vec::new();
+    for entry in &entries {
+        let extension_bytes = encode_receipt_extensions(&entry.receipt_extensions)?;
+        let mut mmap_entry = entry_to_mmap(entry);
+        if !extension_bytes.is_empty() {
+            mmap_entry.extension_offset = u64::try_from(extension_blob.len()).map_err(|_| {
+                StoreError::ser_msg("receipt-extension blob offset too large for mmap index")
+            })?;
+            mmap_entry.extension_len = u64::try_from(extension_bytes.len()).map_err(|_| {
+                StoreError::ser_msg("receipt-extension blob length too large for mmap index")
+            })?;
+            mmap_entry.extension_hash = extension_blob_digest(&extension_bytes);
+            extension_blob.extend_from_slice(&extension_bytes);
+        }
+        mmap_entries.push(mmap_entry);
+    }
+    let extension_blob_len = u64::try_from(extension_blob.len())
+        .map_err(|_| StoreError::ser_msg("receipt-extension blob too large for mmap index"))?;
+
+    let mut header_tail = Vec::with_capacity(HEADER_TAIL_LEN_V3);
     header_tail.extend_from_slice(&watermark_segment_id.to_le_bytes());
     header_tail.extend_from_slice(&watermark_offset.to_le_bytes());
     header_tail.extend_from_slice(&index.global_sequence().to_le_bytes());
@@ -352,11 +472,13 @@ pub(crate) fn write_mmap_index_with_reserved_kind_fallbacks(
     header_tail.extend_from_slice(&entry_count.to_le_bytes());
     header_tail.extend_from_slice(&interner_bytes_len.to_le_bytes());
     header_tail.extend_from_slice(&summary_bytes_len.to_le_bytes());
+    header_tail.extend_from_slice(&extension_blob_len.to_le_bytes());
 
     let mut hasher = crc32fast::Hasher::new();
     hasher.update(&header_tail);
     hasher.update(&interner_bytes);
     hasher.update(&summary_bytes);
+    hasher.update(&extension_blob);
 
     let final_path = data_dir.join(MMAP_INDEX_FILENAME);
     crate::store::platform::fs::write_file_atomically(
@@ -375,10 +497,11 @@ pub(crate) fn write_mmap_index_with_reserved_kind_fallbacks(
             writer.write_all(&header_tail).map_err(StoreError::Io)?;
             writer.write_all(&interner_bytes).map_err(StoreError::Io)?;
             writer.write_all(&summary_bytes).map_err(StoreError::Io)?;
+            writer.write_all(&extension_blob).map_err(StoreError::Io)?;
 
-            let mut buf = [0u8; MMAP_ENTRY_SIZE_V3];
-            for entry in &entries {
-                entry_to_mmap(entry).encode_into(&mut buf);
+            let mut buf = [0u8; MMAP_ENTRY_SIZE_V5];
+            for entry in &mmap_entries {
+                entry.encode_into_v5(&mut buf);
                 hasher.update(&buf);
                 writer.write_all(&buf).map_err(StoreError::Io)?;
             }
@@ -442,7 +565,7 @@ fn try_load_mmap_index(data_dir: &Path) -> Option<LoadedMmapIndex> {
     }
 
     let version = read_le_u16(&prefix[6..8])?;
-    if version != 1 && version != 2 && version != 3 && version != MMAP_INDEX_VERSION {
+    if !matches!(version, 1..=4) && version != MMAP_INDEX_VERSION {
         tracing::warn!(
             target: "batpak::mmap_index",
             path = %path.display(),
@@ -455,11 +578,15 @@ fn try_load_mmap_index(data_dir: &Path) -> Option<LoadedMmapIndex> {
 
     let header_tail_len = if version == 1 {
         HEADER_TAIL_LEN_V1
+    } else if version >= 5 {
+        HEADER_TAIL_LEN_V3
     } else {
         HEADER_TAIL_LEN_V2
     };
     let header_len = if version == 1 {
         HEADER_LEN_V1
+    } else if version >= 5 {
+        HEADER_LEN_V3
     } else {
         HEADER_LEN_V2
     };
@@ -492,6 +619,14 @@ fn try_load_mmap_index(data_dir: &Path) -> Option<LoadedMmapIndex> {
         0usize
     } else {
         usize::try_from(read_le_u64(header_tail.get(cursor..cursor + 8)?)?).ok()?
+    };
+    if version != 1 {
+        cursor += 8;
+    }
+    let extension_blob_len = if version >= 5 {
+        usize::try_from(read_le_u64(header_tail.get(cursor..cursor + 8)?)?).ok()?
+    } else {
+        0
     };
 
     let metadata = match file.metadata() {
@@ -540,7 +675,9 @@ fn try_load_mmap_index(data_dir: &Path) -> Option<LoadedMmapIndex> {
             return None;
         }
     };
-    let entry_size = if version >= 3 {
+    let entry_size = if version >= 5 {
+        MMAP_ENTRY_SIZE_V5
+    } else if version >= 3 {
         MMAP_ENTRY_SIZE_V3
     } else {
         MMAP_ENTRY_SIZE_V2
@@ -567,13 +704,24 @@ fn try_load_mmap_index(data_dir: &Path) -> Option<LoadedMmapIndex> {
             return None;
         }
     };
-    let entries_offset = match summary_offset.checked_add(summary_bytes_len) {
+    let extension_blob_offset = match summary_offset.checked_add(summary_bytes_len) {
         Some(offset) => offset,
         None => {
             tracing::warn!(
                 target: "batpak::mmap_index",
                 path = %path.display(),
                 "mmap index summary offset overflowed"
+            );
+            return None;
+        }
+    };
+    let entries_offset = match extension_blob_offset.checked_add(extension_blob_len) {
+        Some(offset) => offset,
+        None => {
+            tracing::warn!(
+                target: "batpak::mmap_index",
+                path = %path.display(),
+                "mmap index extension blob offset overflowed"
             );
             return None;
         }
@@ -705,7 +853,7 @@ fn try_load_mmap_index(data_dir: &Path) -> Option<LoadedMmapIndex> {
             ReservedKindFallbackStats::default(),
         )
     } else {
-        let summary_slice = &mmap[summary_offset..entries_offset];
+        let summary_slice = &mmap[summary_offset..extension_blob_offset];
         if version >= 4 {
             match rmp_serde::from_slice::<MmapSummaryDataV4>(summary_slice) {
                 Ok(summary) => (summary.routing, summary.reserved_kind_fallbacks),
@@ -740,8 +888,11 @@ fn try_load_mmap_index(data_dir: &Path) -> Option<LoadedMmapIndex> {
         interner_strings,
         routing,
         entries_offset,
+        extension_blob_offset,
+        extension_blob_len,
         entry_count,
         entry_size,
+        version,
         watermark: WatermarkInfo {
             watermark_segment_id,
             watermark_offset,
@@ -783,6 +934,8 @@ pub(crate) fn try_load_mmap_snapshot(data_dir: &Path) -> Option<LoadedMmapSnapsh
     };
     let entries_end = loaded.entries_offset + (entry_count * loaded.entry_size);
     let entries_slice = &loaded.mmap[loaded.entries_offset..entries_end];
+    let extension_blob_end = loaded.extension_blob_offset + loaded.extension_blob_len;
+    let extension_blob_slice = &loaded.mmap[loaded.extension_blob_offset..extension_blob_end];
     let chunk_ranges = if loaded.routing.chunks.is_empty() {
         let chunk_count = recommended_restore_chunk_count(entry_count);
         let base = entry_count / chunk_count;
@@ -819,18 +972,16 @@ pub(crate) fn try_load_mmap_snapshot(data_dir: &Path) -> Option<LoadedMmapSnapsh
             let end_byte = start_byte + (len * loaded.entry_size);
             let mut rebuilt = Vec::with_capacity(len);
             let mut reserved_kind_fallbacks = ReservedKindFallbackStats::default();
-            let version = if loaded.entry_size == MMAP_ENTRY_SIZE_V3 {
-                3
-            } else {
-                2
-            };
             for chunk in entries_slice[start_byte..end_byte].chunks_exact(loaded.entry_size) {
-                let entry = MmapIndexEntry::decode_from(chunk, version)?;
-                rebuilt.push(
-                    entry
-                        .to_cold_start_row_counted(&mut reserved_kind_fallbacks)
-                        .to_index_entry(&loaded.interner_strings)?,
-                );
+                let entry = MmapIndexEntry::decode_from(chunk, loaded.version)?;
+                let mut rebuilt_entry = entry
+                    .to_cold_start_row_counted(&mut reserved_kind_fallbacks)
+                    .to_index_entry(&loaded.interner_strings)?;
+                if loaded.version >= 5 {
+                    rebuilt_entry.receipt_extensions =
+                        decode_receipt_extensions_from_blob(&entry, extension_blob_slice)?;
+                }
+                rebuilt.push(rebuilt_entry);
             }
             Ok::<_, StoreError>((chunk_idx, rebuilt, reserved_kind_fallbacks))
         })
@@ -860,6 +1011,7 @@ pub(crate) fn try_load_mmap_snapshot(data_dir: &Path) -> Option<LoadedMmapSnapsh
         routing,
         reopen_reserved_kind_fallbacks: reserved_kind_fallbacks,
         cumulative_reserved_kind_fallbacks: loaded.cumulative_reserved_kind_fallbacks,
+        receipt_extensions_hydrated: loaded.version >= 5,
     })
 }
 
@@ -932,6 +1084,57 @@ mod tests {
     }
 
     #[test]
+    fn mmap_index_roundtrip_restores_receipt_extensions() {
+        let tmp = TempDir::new().expect("temp dir");
+        let segment_path = tmp.path().join(crate::store::segment::segment_filename(7));
+        std::fs::write(&segment_path, vec![0u8; 4096]).expect("segment file");
+
+        let idx = StoreIndex::new();
+        let coord = Coordinate::new("entity:mmap-ext", "scope:test").expect("coord");
+        let entity_id = idx.interner.intern(coord.entity());
+        let scope_id = idx.interner.intern(coord.scope());
+        let mut receipt_extensions = BTreeMap::new();
+        receipt_extensions.insert(
+            ExtensionKey::new("app.audit").expect("valid extension key"),
+            vec![0xFA, 0xCE, 0x05],
+        );
+        idx.insert(IndexEntry {
+            event_id: 1,
+            correlation_id: 1,
+            causation_id: None,
+            coord,
+            entity_id,
+            scope_id,
+            kind: EventKind::DATA,
+            wall_ms: 1_700_000_000_000,
+            clock: 1,
+            dag_lane: 0,
+            dag_depth: 0,
+            hash_chain: HashChain::default(),
+            disk_pos: DiskPos {
+                segment_id: 7,
+                offset: 0,
+                length: 64,
+            },
+            global_sequence: 0,
+            receipt_extensions: receipt_extensions.clone(),
+        });
+
+        write_mmap_index(&idx, tmp.path(), 7, 512).expect("write mmap index");
+
+        let snapshot = try_load_mmap_snapshot(tmp.path()).expect("load snapshot");
+        assert!(
+            snapshot.receipt_extensions_hydrated,
+            "PROPERTY: mmap v5 snapshots must carry receipt-extension maps directly."
+        );
+        assert_eq!(snapshot.entries.len(), 1);
+        assert_eq!(
+            snapshot.entries[0].receipt_extensions, receipt_extensions,
+            "PROPERTY: mmap v5 extension blob table must preserve opaque receipt-extension bytes."
+        );
+    }
+
+    #[test]
     fn mmap_entry_to_cold_start_row_preserves_index_fields() {
         let entry = MmapIndexEntry {
             event_id: 0x11,
@@ -950,6 +1153,9 @@ mod tests {
             global_sequence: 77,
             correlation_id: 0x22,
             causation_id: 0x33,
+            extension_offset: 0,
+            extension_len: 0,
+            extension_hash: [0u8; 32],
         };
         let strings = vec![
             String::new(),
@@ -997,6 +1203,9 @@ mod tests {
             global_sequence: 6,
             correlation_id: 2,
             causation_id: 0,
+            extension_offset: 0,
+            extension_len: 0,
+            extension_hash: [0u8; 32],
         }
         .to_cold_start_row();
 
@@ -1020,6 +1229,75 @@ mod tests {
         assert!(
             try_restore_mmap_index(&StoreIndex::new(), tmp.path()).is_none(),
             "corrupt mmap index must be rejected"
+        );
+    }
+
+    #[test]
+    fn mmap_index_rejects_extension_blob_digest_mismatch() {
+        let tmp = TempDir::new().expect("temp dir");
+        let segment_path = tmp.path().join(crate::store::segment::segment_filename(7));
+        std::fs::write(&segment_path, vec![0u8; 4096]).expect("segment file");
+
+        let idx = StoreIndex::new();
+        let coord = Coordinate::new("entity:mmap-ext-corrupt", "scope:test").expect("coord");
+        let entity_id = idx.interner.intern(coord.entity());
+        let scope_id = idx.interner.intern(coord.scope());
+        let mut receipt_extensions = BTreeMap::new();
+        receipt_extensions.insert(
+            ExtensionKey::new("app.audit").expect("valid extension key"),
+            vec![0x10, 0x20, 0x30],
+        );
+        idx.insert(IndexEntry {
+            event_id: 1,
+            correlation_id: 1,
+            causation_id: None,
+            coord,
+            entity_id,
+            scope_id,
+            kind: EventKind::DATA,
+            wall_ms: 1_700_000_000_000,
+            clock: 1,
+            dag_lane: 0,
+            dag_depth: 0,
+            hash_chain: HashChain::default(),
+            disk_pos: DiskPos {
+                segment_id: 7,
+                offset: 0,
+                length: 64,
+            },
+            global_sequence: 0,
+            receipt_extensions,
+        });
+
+        write_mmap_index(&idx, tmp.path(), 7, 128).expect("write mmap index");
+        let path = tmp.path().join(MMAP_INDEX_FILENAME);
+        let mut bytes = std::fs::read(&path).expect("read mmap index");
+        let tail = &bytes[PREFIX_LEN..HEADER_LEN_V3];
+        let mut cursor = 8 + 8 + 8 + 4 + 8;
+        let interner_bytes_len =
+            usize::try_from(read_le_u64(&tail[cursor..cursor + 8]).expect("interner len"))
+                .expect("fits usize");
+        cursor += 8;
+        let summary_bytes_len =
+            usize::try_from(read_le_u64(&tail[cursor..cursor + 8]).expect("summary len"))
+                .expect("fits usize");
+        cursor += 8;
+        let extension_blob_len =
+            usize::try_from(read_le_u64(&tail[cursor..cursor + 8]).expect("extension len"))
+                .expect("fits usize");
+        assert!(
+            extension_blob_len > 0,
+            "fixture should write extension blob bytes"
+        );
+        let extension_blob_offset = HEADER_LEN_V3 + interner_bytes_len + summary_bytes_len;
+        bytes[extension_blob_offset] ^= 0xFF;
+        let crc = crc32fast::hash(&bytes[12..]);
+        bytes[8..12].copy_from_slice(&crc.to_le_bytes());
+        std::fs::write(&path, bytes).expect("rewrite corrupt mmap index");
+
+        assert!(
+            try_load_mmap_snapshot(tmp.path()).is_none(),
+            "PROPERTY: mmap v5 must reject extension blob bytes that pass artifact CRC but fail row digest validation."
         );
     }
 
@@ -1081,6 +1359,10 @@ mod tests {
 
         let snapshot = try_load_mmap_snapshot(tmp.path()).expect("load v1 snapshot");
         assert_eq!(snapshot.entries.len(), 4);
+        assert!(
+            !snapshot.receipt_extensions_hydrated,
+            "PROPERTY: v1 mmap snapshots must require authoritative frame hydration for receipt extensions."
+        );
         assert_eq!(snapshot.routing.entry_count, 4);
         assert!(
             !snapshot.routing.chunks.is_empty(),
@@ -1144,6 +1426,10 @@ mod tests {
 
         let snapshot = try_load_mmap_snapshot(tmp.path()).expect("load v2 snapshot");
         assert_eq!(snapshot.entries.len(), 4);
+        assert!(
+            !snapshot.receipt_extensions_hydrated,
+            "PROPERTY: v2 mmap snapshots must require authoritative frame hydration for receipt extensions."
+        );
         assert!(snapshot.entries.iter().all(|entry| entry.dag_lane == 0));
         assert!(snapshot.entries.iter().all(|entry| entry.dag_depth == 0));
     }

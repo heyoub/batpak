@@ -265,12 +265,22 @@ Operator profile workflows live under `cargo xtask platform ...`:
 Current artifact versions:
 
 - SIDX footer magic: `SDX2`
-- checkpoint format: v5
-- mmap index snapshot: v4
+- checkpoint format: v6
+- mmap index snapshot: v5
 
 Compatibility rules:
 
 - old SIDX footers are ignored and reopen falls back to scan
+- checkpoint v6 stores receipt-extension maps directly in checkpoint entries
+- checkpoint v5 and older checkpoint snapshots do not carry receipt-extension
+  maps; restore hydrates them from authoritative `.fbat` frames and fails
+  closed if the backing frame cannot be read
+- mmap v5 stores receipt-extension maps in a bounded blob section referenced by
+  fixed-width rows; restore validates row ranges and blob digests before using
+  those bytes
+- mmap v4 and older mmap snapshots do not carry receipt-extension maps; restore
+  hydrates them from authoritative `.fbat` frames and fails closed if the
+  backing frame cannot be read
 - checkpoint v4 restores missing cumulative reserved-kind fallback stats as empty
 - checkpoint v3 restores missing `dag_lane` / `dag_depth` as `0`
 - mmap v3 restores missing cumulative reserved-kind fallback stats as empty
@@ -585,17 +595,21 @@ Important knobs on `StoreConfig`:
 
 ## Receipt And Denial Notes
 
-- `batpak::encoding::to_bytes` is the stable named-field MessagePack helper.
-- `batpak::canonical` currently aliases the same encoding surface while the
-  stronger canonical-bytes contract is phased in.
+- `batpak::encoding::to_bytes` is the batpak-scoped named-field MessagePack
+  helper used for substrate-owned deterministic bytes.
+- `batpak::canonical` is a back-compatible alias for the same batpak-scoped
+  MessagePack surface. It is not ExtProfile/JCS or a universal cross-protocol
+  canonicalization promise.
 - `AppendReceipt` now carries `content_hash`, `key_id`, `signature`, and
   `extensions`.
 - `DenialReceipt` mirrors the same receipt envelope for `SYSTEM_DENIAL`.
 - `AppendOptions::with_extension(...)` and `with_extensions(...)` attach opaque
   caller-supplied receipt bytes. batpak validates extension keys, signs the
   bytes into the receipt envelope, and leaves profile meaning to higher layers.
-- `.fbat` frames persist the generic receipt extension map, and cold start
-  rebuilds it into the in-memory index for idempotency replay after reopen.
+- `.fbat` frames persist the generic receipt extension map. Current checkpoint
+  and mmap artifacts also carry extension maps directly; older artifacts
+  hydrate those maps from `.fbat` during cold start and fail closed if the
+  backing frames are unavailable.
 - `ReceiptExtensionKey<P>` / `ReceiptExtensionValue<P>` provide a phantom-typed
   profile surface over the same opaque bytes without adding profile semantics to
   core.

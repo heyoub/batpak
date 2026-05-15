@@ -50,21 +50,27 @@ fn assert_open_index_report_phase_buckets_nonzero(report: &OpenIndexReport) {
 
 fn mmap_entries_offset(bytes: &[u8]) -> usize {
     const PREFIX_LEN: usize = 6 + 2 + 4;
-    const HEADER_TAIL_LEN_V2: usize = (8 * 6) + 4;
+    const HEADER_TAIL_LEN_V3: usize = (8 * 7) + 4;
     let version = u16::from_le_bytes(bytes[6..8].try_into().expect("version slice"));
     assert_eq!(
-        version, 4,
+        version, 5,
         "test helper expects the live mmap snapshot format"
     );
-    let header_tail = &bytes[PREFIX_LEN..PREFIX_LEN + HEADER_TAIL_LEN_V2];
+    let header_tail = &bytes[PREFIX_LEN..PREFIX_LEN + HEADER_TAIL_LEN_V3];
     let interner_bytes_len =
         u64::from_le_bytes(header_tail[36..44].try_into().expect("interner size slice"));
     let summary_bytes_len =
         u64::from_le_bytes(header_tail[44..52].try_into().expect("summary size slice"));
+    let extension_blob_len = u64::from_le_bytes(
+        header_tail[52..60]
+            .try_into()
+            .expect("extension blob size slice"),
+    );
     PREFIX_LEN
-        + HEADER_TAIL_LEN_V2
+        + HEADER_TAIL_LEN_V3
         + usize::try_from(interner_bytes_len).expect("interner bytes fit usize")
         + usize::try_from(summary_bytes_len).expect("summary bytes fit usize")
+        + usize::try_from(extension_blob_len).expect("extension blob bytes fit usize")
 }
 
 fn rewrite_first_mmap_kind(artifact: &std::path::Path, raw_kind: u16) {

@@ -4,8 +4,9 @@
 Accepted.
 
 ## Context
-batpak exposes `batpak::canonical` as the stable encoding helper used by
-receipts, signing cover bytes, and deterministic fixture/report workflows.
+batpak exposes `batpak::canonical` as a back-compatible alias for its
+batpak-scoped named-field MessagePack helper used by receipts, signing cover
+bytes, and deterministic fixture/report workflows.
 Today, `crates/core/src/encoding.rs` documents that this surface is stable for the current
 crate version but does not claim a cross-version canonical-bytes guarantee.
 
@@ -19,11 +20,14 @@ batpak adopts the following canonical encoding compatibility contract.
 
 ### 1) Existing canonical surface
 
-- `batpak::canonical::{to_bytes, from_bytes}` remains the canonical encoding
-  surface.
+- `batpak::canonical::{to_bytes, from_bytes}` remains the legacy public alias
+  for batpak's deterministic named-field MessagePack surface.
 - The encoding format remains named-field MessagePack in this phase.
 - This ADR does not change on-wire format or introduce a second canonical
   encoder.
+- This surface does not implement protocol-specific canonicalization such as
+  JSON Canonicalization Scheme; callers that need another protocol's canonical
+  bytes must compute them outside batpak core.
 
 ### 2) Compatibility class for current canonical bytes
 
