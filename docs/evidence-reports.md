@@ -51,8 +51,8 @@ substrate pressure that cannot be satisfied by existing report bodies.
 - **Deterministic findings:** findings are emitted in sorted structural order.
 - **Structural scope only:** these reports do not infer policy, protocol, or
   application semantics.
-- **Receipt boundary:** reports are observations/proofs; they do not claim
-  append/deny/commit authority like append or denial receipts.
+- **Receipt boundary:** reports are observations; append and denial receipts
+  carry the commit/denial witness surfaces.
 - **No fake uncertainty:** `Unknown` is reserved for genuinely indeterminate
   facts. Use `Known` when batpak already exposes the value, `NotApplicable` when
   the field does not apply, `NotTracked` only when the substrate does not track

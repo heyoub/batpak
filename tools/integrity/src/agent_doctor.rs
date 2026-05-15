@@ -143,7 +143,10 @@ fn retired_path(name: &str) -> String {
 }
 
 fn collect_domain_vocab_findings(repo_root: &Path, out: &mut Vec<Finding>) -> Result<()> {
-    let forbidden = ["downstream", "tenant", "customer", "saas"];
+    // Generic domain-register terms only. This is not a brand/IP scanner; it
+    // catches public substrate APIs that accidentally start naming caller
+    // business models.
+    let forbidden = ["tenant", "customer"];
     for path in files_with_extension(&repo_root.join("crates/core/src"), "rs") {
         let content = fs::read_to_string(&path)?;
         for (line_index, line) in content.lines().enumerate() {

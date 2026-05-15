@@ -8,16 +8,16 @@
 // cast_possible_truncation and cast_sign_loss are enforced via [lints.clippy] in Cargo.toml.
 // Each intentional cast has an inline #[allow] with a justification comment.
 //! Sync-first event sourcing for Rust: append-only segments, causal metadata,
-//! policy gates, and typed projections — no async runtime.
+//! caller-defined gates, and typed projections.
 //!
 //! Batpak stores immutable events in segment files, tracks causation metadata,
-//! evaluates policy gates before commit, and rebuilds typed projections through
+//! evaluates caller-defined gates before commit, and rebuilds typed projections through
 //! a synchronous API that does not require an async runtime.
 //!
 //! Most callers start with typed payloads: derive [`EventPayload`], append with
 //! [`Store::append_typed`](crate::store::Store::append_typed), and read through
 //! the in-memory index. Gates and [`Pipeline`](crate::pipeline::Pipeline) can be
-//! added when a write needs policy evaluation before commit.
+//! added when a write needs caller-owned evaluation before commit.
 //!
 //! ```no_run
 //! use batpak::prelude::*;
@@ -50,7 +50,7 @@
 //! 4. [`registry`]: Attested immutable rows (lifecycle, supersession, drift, verification)
 //! 5. [`transition`]: Generic state transition evidence (events and structural reports)
 //! 6. [`reservation`]: Generic reservation ledger (reserve/commit/refund/expire/orphan)
-//! 7. [`guard`]: Build policy gates
+//! 7. [`guard`]: Build caller-defined gates
 //! 8. [`pipeline`]: Propose and commit
 //! 9. [`store`]: Persist and query
 
@@ -63,7 +63,7 @@ pub mod encoding;
 /// Event types, headers, and sourcing traits.
 pub mod event;
 mod evidence;
-/// Policy gate evaluation before event commitment.
+/// Caller-defined gate evaluation before event commitment.
 pub mod guard;
 /// UUID v7 identifier generation.
 pub mod id;

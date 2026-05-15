@@ -18,7 +18,7 @@ Agent/human transcription rails live in `docs/recipes/` and are indexed by
 | ADR-0004 | Compaction and Concurrent Appends | Accepted |
 | ADR-0005 | Test Support Feature Boundary | Accepted |
 | ADR-0006 | Writer Restart Policy | Accepted |
-| ADR-0007 | Unified Control Plane And Fast-Start Restore | Accepted |
+| ADR-0007 | Unified Store Control Surface And Fast-Start Restore | Accepted |
 | ADR-0008 | Restore Planner and Projection Trait Evolution | Accepted |
 | ADR-0009 | Position Hints and Artifact Upgrade Contract | Accepted |
 | ADR-0010 | EventPayload Macro Surface | Accepted; shipped in 0.6.0 |

@@ -5,15 +5,15 @@
 
 # batpak
 
-Sync-first event sourcing for Rust: append-only segments, causal metadata, policy gates,
-and typed projections — no async runtime.
+Sync-first event sourcing for Rust: append-only segments, causal metadata,
+caller-defined gates, and typed projections.
 
 ```bash
 cargo add batpak
 ```
 
 Choose `batpak` when you want an embedded event log with typed payloads,
-causal metadata, policy gates, and projections in one Rust process. It is a
+causal metadata, caller-defined gates, and projections in one Rust process. It is a
 library substrate, not a hosted database: callers own the process model, disk
 placement, and integration boundaries.
 
@@ -32,7 +32,7 @@ Blake3 hash chain link.
 composes gates. Evaluation is fail-fast by default.
 
 **pipeline**: `Pipeline::evaluate` runs the gates; `Pipeline::commit` persists through a
-caller-supplied closure. The `Receipt` is the unforgeable proof gates passed.
+caller-supplied closure. The `Receipt` records the gate result returned to the caller.
 
 **store**: the persistence engine — append-only segments, in-memory index, background
 writer thread, projections, subscriptions.
@@ -117,7 +117,7 @@ receive `None`.
 write-to-deliver gap observations without introducing a persisted system event.
 `react_loop` is the legacy subscribe-based loop.
 
-**Control plane** — `submit`/`try_submit` for non-blocking fire-and-ticket. `outbox()` for
+**Store control surface** — `submit`/`try_submit` for non-blocking fire-and-ticket. `outbox()` for
 staged batch assembly. `begin_visibility_fence()` for atomic write groups. `open`, `close`,
 `sync`, `snapshot`, `compact` for lifecycle. `stats()` and `diagnostics()` for
 observability. `diagnostics().open_report` exposes the structured cold-start
@@ -167,27 +167,27 @@ cold-start/replay consistency.
 `cargo xtask mutants policy` prints the repo-owned mutation thresholds and
 critical seams without running cargo-mutants.
 
-## What This Is Not
+## Operational Boundaries
 
-**No async runtime in production.** No tokio, no async-std, no futures in `[dependencies]`.
-Async callers integrate at the edges via `spawn_blocking` or flume's `recv_async`.
+**Sync store API.** `Store` methods are synchronous and production builds do not depend on
+tokio, async-std, or smol. Async callers integrate at the edges via `spawn_blocking` or
+flume's `recv_async`.
 
-**No product or domain concepts.** No users, orders, accounts, or payments in the library.
-Only coordinates, events, gates, pipelines, and the store.
+**Domain-free substrate.** Library concepts are coordinates, events, gates, pipelines, and
+the store. Application nouns stay in caller payloads or opaque extension bytes.
 
-**No external database substrate.** Segments are native coordinate-addressed append logs.
-No LMDB, no redb, no SQLite.
+**Native append-log storage.** Segments are coordinate-addressed `.fbat` append logs.
 
-**No concurrent owners.** One live `Store` handle owns the directory lock at a time.
+**Single live owner.** One live `Store` handle owns the directory lock at a time.
 The directory lock is exclusive-only: a second mutable open or a concurrent
 read-only open fails with `StoreLocked` instead of racing the same store
 directory.
 
-**No per-entry integrity.** Each frame carries a CRC32. Cold-start artifacts carry a
-full-file CRC. There is no per-byte or per-field checksum beyond that.
+**Frame-level integrity.** Each frame carries a CRC32. Cold-start artifacts carry a
+full-file CRC.
 
-**No mixed-version concurrent operation.** Stop all writers before upgrading. Different
-binary versions must not share an open store simultaneously.
+**Single-version operation.** Stop all writers before upgrading. Different binary versions
+must not share an open store simultaneously.
 
 See [GUIDE.md](GUIDE.md) for human-first workflows and usage patterns. See
 [REFERENCE.md](REFERENCE.md) for the full technical reference and invariant catalog.

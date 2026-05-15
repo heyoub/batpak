@@ -345,7 +345,7 @@ system events. Startup
 checkpoint load and validation failures are reported asynchronously from
 `join()` / `stop_and_join()`, not from `cursor_worker(...)` itself.
 
-## Control Plane
+## Store Control Surface
 
 The simple path stays simple:
 
@@ -353,7 +353,7 @@ The simple path stays simple:
 let receipt = store.append_typed(&coord, &payload)?;
 ```
 
-But the control plane gives you more explicit execution shapes when needed.
+But the store control surface gives you more explicit execution shapes when needed.
 
 ### Submit and tickets
 
@@ -518,7 +518,7 @@ Before deploying a store path that matters:
 - Treat `StoreLocked` as an ownership signal: only one mutable/read-only owner
   should hold a store directory at a time.
 
-## Policy Gates
+## Caller-Defined Gates
 
 Use `Gate`, `GateSet`, `Proposal`, and `Pipeline` when you want a
 gate-evaluate-commit workflow with receipts and explicit bypasses.
@@ -529,5 +529,5 @@ The rough shape is:
 Proposal<T> -> GateSet::evaluate() -> Receipt<T> -> Pipeline::commit(...)
 ```
 
-This is useful when the domain wants “approval before append” to be explicit
+This is useful when the caller wants “check before append” to be explicit
 instead of scattered across ad hoc precondition checks.

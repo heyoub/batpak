@@ -558,9 +558,10 @@ fn check_no_banned_patterns() {
             }
         }
 
-        // INV-3: ban product-shape nouns in public declarations everywhere except the
+        // INV-3: ban domain-register nouns in public declarations everywhere except the
         // documented Lane-A substrate carve-out (`src/artifact.rs` owns the `artifact` noun).
-        // `trajectory` and `tenant` remain banned crate-wide on declaration lines.
+        // `trajectory` and `tenant` remain banned crate-wide on declaration lines because
+        // they name caller/application layers, not the substrate.
         const INV3_ARTIFACT_ALLOWED_PATH: &str = "src/artifact.rs";
 
         #[inline]

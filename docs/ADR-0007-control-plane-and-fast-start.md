@@ -1,4 +1,4 @@
-# ADR-0007: Unified Control Plane And Fast-Start Restore
+# ADR-0007: Unified Store Control Surface And Fast-Start Restore
 
 ## Status
 Accepted
@@ -22,7 +22,7 @@ Cold start prefers a verified mmap snapshot (`index.fbati`), then checkpoint res
 
 ## Consequences
 
-- The sync-only store contract remains intact for callers who do not need the richer control plane.
+- The sync-only store contract remains intact for callers who do not need the richer store control surface.
 - Callers can pipeline work and react to pressure without introducing Tokio or futures into production.
 - Visibility remains governed by one watermark; all active index views must be populated before publish.
 - Fast start becomes an optimization, not a different truth source, because every path replays into the same normalized internal `StoreIndex` state and restores the same hidden-range metadata.

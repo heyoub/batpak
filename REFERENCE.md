@@ -472,15 +472,15 @@ Store ownership contract:
   best-effort symlink-leaf rejection before opening because `std` exposes no
   equivalent atomic no-follow flag there
 
-### Lawful Context Journal And Composition
+### Store Composition
 
-batpak is a lawful context journal: it records durable messages into coordinate-scoped streams, derives context through projections, and scales by composing multiple sovereign store roots through explicit observations and receipts.
+batpak records durable messages into coordinate-scoped streams, derives views through projections, and composes multiple store roots through explicit observations and receipts.
 
-This subsection compresses consequences of the five-layer model above; it does not replace it.
+This subsection summarizes the store composition rules used by the public API.
 
 | Term | Meaning |
 | --- | --- |
-| **Journal** | One `Store` open on one `data_dir`; one commit authority; lifetime-held directory lock. |
+| **Journal** | One `Store` open on one `data_dir`; one writer owner; lifetime-held directory lock. |
 | **Stream** | One `Coordinate` chain inside a journal — a logical context stream. |
 | **Context view** | Output of a projection / projection cache, derived from append history; not a second source of truth; any typed witness wrapper remains product- or example-owned until explicitly stabilized. |
 | **Observation** | A foreign fact recorded locally: journal B may reference journal A’s event or receipt without implying A’s writer executed inside B. |
@@ -488,11 +488,11 @@ This subsection compresses consequences of the five-layer model above; it does n
 
 Reduction (same substrate, clearer roles):
 
-- **Store root** = lawful journal.
+- **Store root** = one append-only journal.
 - **`Coordinate`** = logical context stream.
 - **`Event`** = durable message.
 - **`Projection`** = derived context view.
-- **`AppendReceipt` / `DenialReceipt`** = proof of allowed or denied transition (see receipt surfaces elsewhere in this file).
+- **`AppendReceipt` / `DenialReceipt`** = commit or denial witness (see receipt surfaces elsewhere in this file).
 - **Observation** = product-level foreign fact recorded as normal journal history when you choose to model it that way.
 - **Multi-journal** = composition and scaling layer, not an extra mutation layer inside one `data_dir`.
 
@@ -502,7 +502,7 @@ Reduction (same substrate, clearer roles):
 
 **Cursor vs frontier:** `wait_for_durable`, `wait_for_visible`, and `wait_for_applied` are coordination fences over watermark progress (durable / visible / minimum applied across registered projections). Prefer them for a small number of fence-holders. `Cursor::poll_batch` and the `cursor_worker` pattern are the default ordered pull lane for many consumers asking what changed after events are visible in the index. Subscriptions are lossy / coalesced hints, not an authoritative delivery log. Treat `wait_for_applied` as a rare fence: `applied` is the minimum progress across registered projections, so lagging projections block that watermark.
 
-**Durability lanes:** visible append is the fast observation lane; explicit durability gates are the oath lane; batching plus `sync` cadence (and group commit when configured) is the usual throughput lane. Per-event durable sync remains available but is not the default throughput story. When `AppendOptions::gate` is used, `StoreError::WaitTimeout` means the append committed but the requested watermark was not observed before the timeout — see the Durable Frontier section above.
+**Durability lanes:** visible append is the fast observation lane; explicit durability gates are the caller-requested wait lane; batching plus `sync` cadence (and group commit when configured) is the usual throughput lane. Per-event durable sync remains available but is not the default throughput story. When `AppendOptions::gate` is used, `StoreError::WaitTimeout` means the append committed but the requested watermark was not observed before the timeout — see the Durable Frontier section above.
 
 **Cold-start posture:** mmap and checkpoint artifacts are recovery and fast-start optimization surfaces, not independent truth or proof surfaces; full scan / rebuild remains the honesty baseline. A future “fast-open manifest” is an optimization target, not a present guarantee.
 
