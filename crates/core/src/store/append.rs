@@ -200,7 +200,7 @@ impl BatchAppendItem {
     }
 }
 
-/// AppendReceipt: proof an event was persisted.
+/// AppendReceipt: witness that an event was persisted.
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub struct AppendReceipt {
@@ -214,7 +214,7 @@ pub struct AppendReceipt {
     pub content_hash: [u8; 32],
     /// Signing-key identity. All zeros when receipt signing is disabled.
     pub key_id: [u8; 32],
-    /// Detached Ed25519 signature over the receipt authority fields.
+    /// Detached Ed25519 signature over the receipt fields.
     pub signature: Option<[u8; 64]>,
     /// Typed side-data attached to the receipt envelope.
     pub extensions: BTreeMap<ExtensionKey, EncodedBytes>,
@@ -234,7 +234,7 @@ pub struct DenialReceipt {
     pub content_hash: [u8; 32],
     /// Signing-key identity. All zeros when receipt signing is disabled.
     pub key_id: [u8; 32],
-    /// Detached Ed25519 signature over the receipt authority fields.
+    /// Detached Ed25519 signature over the receipt fields.
     pub signature: Option<[u8; 64]>,
     /// Typed side-data attached to the denial receipt envelope.
     pub extensions: BTreeMap<ExtensionKey, EncodedBytes>,

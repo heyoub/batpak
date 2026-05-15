@@ -17,7 +17,7 @@ pub struct Proposal<T>(
 /// commit closure does. This type therefore proves only that the commit
 /// path produced metadata that passed [`CommitMetadata::validate`]. When the
 /// closure actually persists through the store, `Committed<T>` is the
-/// caller's persistence proof wrapper; when the closure fabricates metadata,
+/// caller's persistence wrapper; when the closure fabricates metadata,
 /// the wrapper is only as strong as that closure.
 ///
 /// When the commit came via [`Pipeline::commit_bypass`], a [`BypassAudit`] is
@@ -35,7 +35,7 @@ pub struct Committed<T> {
     bypass_audit: Option<BypassAudit>,
 }
 
-/// Narrow commit proof metadata returned by persistence closures.
+/// Narrow commit metadata returned by persistence closures.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CommitMetadata {
     /// Unique identifier assigned to this event by the store.
@@ -116,12 +116,12 @@ impl<T> Committed<T> {
         self.bypass_audit.as_ref()
     }
 
-    /// Consumes the proof and returns the payload.
+    /// Consumes the committed value and returns the payload.
     pub fn into_payload(self) -> T {
         self.payload
     }
 
-    /// Consumes the proof and returns the payload, narrow metadata, and any
+    /// Consumes the committed value and returns the payload, narrow metadata, and any
     /// bypass audit that travelled with the commit.
     pub fn into_parts(self) -> (T, CommitMetadata, Option<BypassAudit>) {
         (self.payload, self.metadata, self.bypass_audit)
@@ -129,7 +129,7 @@ impl<T> Committed<T> {
 }
 
 impl CommitMetadata {
-    /// Creates explicit commit proof metadata for a persisted payload.
+    /// Creates explicit commit metadata for a persisted payload.
     ///
     /// # Errors
     /// Returns [`StoreError::InvalidCommitMetadata`] if the supplied

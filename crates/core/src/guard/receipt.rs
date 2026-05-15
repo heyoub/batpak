@@ -1,4 +1,4 @@
-/// `Receipt<T>`: proof that all gates passed. Consumed exactly once.
+/// `Receipt<T>`: value returned after all gates pass. Consumed exactly once.
 /// The seal module prevents external construction. Only GateSet::evaluate() creates these.
 pub struct Receipt<T> {
     _seal: seal::Token,

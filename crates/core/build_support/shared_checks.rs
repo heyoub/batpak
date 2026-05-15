@@ -766,9 +766,17 @@ struct UsesDerive;
             "derive macro attributes are real public-item witnesses"
         );
 
-        let config_propagation = syn::parse_file(include_str!(
-            "../../crates/core/tests/config_propagation.rs"
-        ))
+        let config_propagation = syn::parse_file(
+            r#"
+fn fixture() {
+    let _key = ClockKey {
+        wall_ms: 1,
+        clock: 2,
+        uuid: 3,
+    };
+}
+"#,
+        )
         .expect("parse config_propagation fixture");
         assert!(
             super::ast_references_name(&config_propagation, "ClockKey"),

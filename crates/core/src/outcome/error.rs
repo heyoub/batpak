@@ -84,7 +84,7 @@ pub enum ErrorKind {
 impl ErrorKind {
     /// Returns true if this error kind is considered retryable.
     ///
-    /// Sole authority for retryability classification (G9): every outcome
+    /// Single source for retryability classification (G9): every outcome
     /// combinator and every `OutcomeError::is_retryable` call funnels
     /// through this method. `StorageError` and `Timeout` are the core
     /// retryable kinds; `Custom` codes are non-retryable by default.

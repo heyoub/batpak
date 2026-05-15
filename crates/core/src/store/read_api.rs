@@ -38,6 +38,9 @@ impl<State> Store<State> {
         let Some(entry) = self.index.get_by_id(receipt.event_id) else {
             return false;
         };
+        if !append_receipt_matches_index(receipt, &entry) {
+            return false;
+        }
         self.runtime.signing_registry.verify_append_receipt(
             receipt,
             &entry.coord,
@@ -53,6 +56,9 @@ impl<State> Store<State> {
         let Some(entry) = self.index.get_by_id(receipt.event_id) else {
             return false;
         };
+        if !denial_receipt_matches_index(receipt, &entry) {
+            return false;
+        }
         self.runtime.signing_registry.verify_denial_receipt(
             receipt,
             &entry.coord,
@@ -161,4 +167,21 @@ impl<State> Store<State> {
     pub fn cursor_guaranteed(&self, region: &Region) -> Cursor {
         Cursor::new(region.clone(), Arc::clone(&self.index))
     }
+}
+
+fn append_receipt_matches_index(receipt: &AppendReceipt, entry: &IndexEntry) -> bool {
+    receipt.event_id == entry.event_id
+        && receipt.sequence == entry.global_sequence
+        && receipt.disk_pos == entry.disk_pos
+        && receipt.content_hash == entry.hash_chain.event_hash
+        && receipt.extensions == entry.receipt_extensions
+}
+
+fn denial_receipt_matches_index(receipt: &DenialReceipt, entry: &IndexEntry) -> bool {
+    entry.kind == EventKind::SYSTEM_DENIAL
+        && receipt.event_id == entry.event_id
+        && receipt.sequence == entry.global_sequence
+        && receipt.disk_pos == entry.disk_pos
+        && receipt.content_hash == entry.hash_chain.event_hash
+        && receipt.extensions == entry.receipt_extensions
 }
