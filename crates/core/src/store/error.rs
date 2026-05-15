@@ -216,15 +216,17 @@ pub enum StoreError {
         /// Human-readable description of why the file could not be parsed.
         reason: String,
     },
-    /// A batch item's serialized payload exceeded `single_append_max_bytes`.
+    /// A batch item's serialized payload plus encoded receipt-extension bytes
+    /// exceeded `single_append_max_bytes`.
     ///
     /// The per-item ceiling is independent of the batch-total cap: a single
     /// oversized item is rejected synchronously at `submit_batch` entry even
-    /// when the sum of all item payloads stays under the batch cap.
+    /// when the sum of all item payloads and extensions stays under the batch cap.
     BatchItemTooLarge {
         /// Index of the offending item within the batch (0-based).
         index: usize,
-        /// Serialized payload size of the offending item, in bytes.
+        /// Serialized payload plus encoded receipt-extension size of the
+        /// offending item, in bytes.
         size: usize,
         /// Configured per-item ceiling (`single_append_max_bytes`).
         limit: usize,
@@ -448,7 +450,7 @@ impl std::fmt::Display for StoreError {
             ),
             Self::BatchItemTooLarge { index, size, limit } => write!(
                 f,
-                "batch item {index} payload size {size} exceeds per-item ceiling {limit}"
+                "batch item {index} append bytes {size} exceeds per-item ceiling {limit}"
             ),
             Self::EntityClockOverflow { entity } => write!(
                 f,

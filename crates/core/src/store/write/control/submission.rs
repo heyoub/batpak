@@ -1,9 +1,10 @@
 use super::{AppendGuards, AppendReply, WriterCommand};
 use crate::coordinate::Coordinate;
 use crate::event::{Event, EventHeader, EventKind};
-use crate::store::append::checked_payload_len;
+use crate::store::append::{checked_payload_len, EncodedBytes, ExtensionKey};
 use crate::store::{AppendOptions, Open, Store, StoreError};
 use serde::Serialize;
+use std::collections::BTreeMap;
 
 #[derive(Clone, Debug)]
 pub(crate) struct AppendSubmission {
@@ -79,6 +80,10 @@ impl AppendSubmission {
             return Err(StoreError::IdempotencyRequired);
         }
         Ok(())
+    }
+
+    pub(crate) fn receipt_extensions(&self) -> &BTreeMap<ExtensionKey, EncodedBytes> {
+        &self.options.extensions
     }
 
     pub(crate) fn build_event(

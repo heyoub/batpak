@@ -25,6 +25,11 @@ All notable changes to this project will be documented in this file.
   `StoreError::PlatformAdmissionFailed` as fail-closed operational errors.
 
 ### Changed
+- Append and batch size limits now include encoded receipt-extension bytes
+  instead of only event payload bytes.
+- Checkpoint and mmap cold-start rebuilds now fail closed when snapshot index
+  entries cannot be hydrated from their backing `.fbat` frames, preventing
+  accidental empty-extension reconstruction.
 - Store internals now route target-sensitive machine contact through
   `src/store/platform/`, and structural checks reject new direct store runtime
   uses of file sync, mmap, target cfg, lock open flag, and positional-read

@@ -212,6 +212,96 @@ fn idempotency_replay_uses_committed_receipt_extensions() {
     assert!(store.verify_append_receipt(&replay));
 }
 
+#[test]
+fn receipt_extensions_count_against_single_append_limit() {
+    let dir = TempDir::new().expect("temp dir");
+    let store = Store::open(
+        StoreConfig::new(dir.path())
+            .with_enable_checkpoint(false)
+            .with_enable_mmap_index(false)
+            .with_single_append_max_bytes(64),
+    )
+    .expect("open store");
+    let coord = Coordinate::new("extension:limit", "scope:test").expect("coord");
+    let kind = EventKind::custom(0xA, 18);
+    let key = ExtensionKey::new("acme.large").expect("extension key");
+
+    let result = store.append_with_options(
+        &coord,
+        kind,
+        &serde_json::json!({"n": 1}),
+        AppendOptions::new().with_extension(key, vec![0xAB; 128]),
+    );
+
+    match result {
+        Ok(_) => panic!("PROPERTY: extension bytes must count against single append limit"),
+        Err(err) => assert!(
+            matches!(err, batpak::store::StoreError::Configuration(ref message) if message.contains("single append bytes")),
+            "wrong error: {err:?}"
+        ),
+    }
+}
+
+#[test]
+fn receipt_extensions_count_against_batch_limits() {
+    let dir = TempDir::new().expect("temp dir");
+    let store = Store::open(
+        StoreConfig::new(dir.path())
+            .with_enable_checkpoint(false)
+            .with_enable_mmap_index(false)
+            .with_single_append_max_bytes(64)
+            .with_batch_max_bytes(1024),
+    )
+    .expect("open store");
+    let coord = Coordinate::new("extension:batch-limit", "scope:test").expect("coord");
+    let kind = EventKind::custom(0xA, 19);
+    let key = ExtensionKey::new("acme.large").expect("extension key");
+    let per_item = BatchAppendItem::new(
+        coord.clone(),
+        kind,
+        &serde_json::json!({"n": 1}),
+        AppendOptions::new().with_extension(key.clone(), vec![0xCD; 128]),
+        CausationRef::None,
+    )
+    .expect("batch item");
+
+    match store.append_batch(vec![per_item]) {
+        Ok(_) => panic!("PROPERTY: extension bytes must count against batch per-item limit"),
+        Err(err) => assert!(
+            matches!(err, batpak::store::StoreError::BatchItemTooLarge { .. }),
+            "wrong error: {err:?}"
+        ),
+    }
+
+    let dir = TempDir::new().expect("temp dir");
+    let store = Store::open(
+        StoreConfig::new(dir.path())
+            .with_enable_checkpoint(false)
+            .with_enable_mmap_index(false)
+            .with_single_append_max_bytes(1024)
+            .with_batch_max_bytes(200),
+    )
+    .expect("open store");
+    let make_item = |n: u32| {
+        BatchAppendItem::new(
+            coord.clone(),
+            kind,
+            &serde_json::json!({"n": n}),
+            AppendOptions::new().with_extension(key.clone(), vec![0xEF; 128]),
+            CausationRef::None,
+        )
+        .expect("batch item")
+    };
+
+    match store.append_batch(vec![make_item(1), make_item(2)]) {
+        Ok(_) => panic!("PROPERTY: extension bytes must count against batch total limit"),
+        Err(err) => assert!(
+            matches!(err, batpak::store::StoreError::BatchFailed { .. }),
+            "wrong error: {err:?}"
+        ),
+    }
+}
+
 fn receipt_extension_restore_config(
     path: &std::path::Path,
     enable_checkpoint: bool,

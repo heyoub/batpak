@@ -528,11 +528,7 @@ fn hydrate_receipt_extensions(
     entries: &mut [IndexEntry],
 ) -> Result<(), StoreError> {
     for entry in entries {
-        match reader.read_receipt_extensions(&entry.disk_pos) {
-            Ok(receipt_extensions) => entry.receipt_extensions = receipt_extensions,
-            Err(StoreError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error),
-        }
+        entry.receipt_extensions = reader.read_receipt_extensions(&entry.disk_pos)?;
     }
     Ok(())
 }
@@ -900,8 +896,9 @@ mod tests {
             data_dir: dir.path(),
             policy: ColdStartPolicy::new(false, false),
         };
-        let (entries, interner_strings) = sample_index_entries(2, 0);
+        let (entries, interner_strings) = sample_index_entries(0, 0);
         let routing = RoutingSummary::from_sorted_entries(&entries, 1);
+        let expected_chunk_count = routing.chunk_count;
 
         let plan = planner
             .build_snapshot_plan(
@@ -928,8 +925,41 @@ mod tests {
         );
         assert_eq!(
             plan.routing.chunk_count,
-            1,
+            expected_chunk_count,
             "PROPERTY: a snapshot plan with no tail entries must preserve the existing routing chunk count instead of synthesizing an extra chunk"
+        );
+    }
+
+    #[test]
+    fn build_snapshot_plan_rejects_snapshot_entries_without_backing_frames() {
+        let dir = TempDir::new().expect("temp dir");
+        let reader = Reader::new(dir.path().to_path_buf(), 4);
+        let planner = RestorePlanner {
+            reader: &reader,
+            data_dir: dir.path(),
+            policy: ColdStartPolicy::new(false, false),
+        };
+        let (entries, interner_strings) = sample_index_entries(1, 0);
+        let routing = RoutingSummary::from_sorted_entries(&entries, 1);
+
+        let result = planner.build_snapshot_plan(
+            RestoreSource::Checkpoint,
+            SnapshotPlanInput {
+                entries,
+                interner_strings,
+                watermark: crate::store::cold_start::checkpoint::WatermarkInfo {
+                    watermark_segment_id: 99,
+                    watermark_offset: 0,
+                },
+                stored_allocator: 1,
+                routing,
+                reopen_reserved_kind_fallbacks: ReservedKindFallbackStats::default(),
+                persisted_cumulative_reserved_kind_fallbacks: ReservedKindFallbackStats::default(),
+            },
+        );
+        assert!(
+            matches!(result, Err(StoreError::Io(_))),
+            "PROPERTY: snapshot entries without backing frames must fail closed with an IO error"
         );
     }
 

@@ -76,14 +76,15 @@ impl Store<Open> {
     /// that invalid coordinates surface to the caller rather than being
     /// deferred to the writer thread. Each item's serialized payload is also
     /// checked against `single_append_max_bytes` (G1): a single oversized
-    /// item is rejected even when the batch-total cap would have allowed it.
+    /// item, including encoded receipt-extension bytes, is rejected even when
+    /// the batch-total cap would have allowed it.
     ///
     /// # Errors
     /// Returns [`StoreError::InvalidCoordinate`] if any item's coordinate
     /// fails validation, [`StoreError::BatchItemTooLarge`] if any item's
-    /// serialized payload exceeds `single_append_max_bytes`, or any enqueue
-    /// or writer error surfaced while staging the batch for background
-    /// execution.
+    /// serialized payload plus encoded receipt-extension bytes exceeds
+    /// `single_append_max_bytes`, or any enqueue or writer error surfaced
+    /// while staging the batch for background execution.
     pub fn submit_batch(
         &self,
         items: Vec<crate::store::append::BatchAppendItem>,
@@ -97,7 +98,11 @@ impl Store<Open> {
                     reason: format!("{err}"),
                 });
             }
-            let size = item.payload_bytes().len();
+            let options = item.options();
+            let size = crate::store::append::checked_append_bytes(
+                item.payload_bytes().len(),
+                &options.extensions,
+            )?;
             if size > per_item_cap {
                 return Err(StoreError::BatchItemTooLarge {
                     index: i,
