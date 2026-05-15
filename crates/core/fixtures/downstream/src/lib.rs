@@ -9,6 +9,7 @@
 //! cannot accidentally leak domain nouns into library space.
 
 use batpak::prelude::*;
+use batpak::store::AtLeastOnce;
 use serde::{Deserialize, Serialize};
 
 // ── EventPayload ────────────────────────────────────────────────────────────
@@ -76,13 +77,14 @@ impl std::error::Error for NeverFails {}
 #[batpak(input = JsonValueInput, error = NeverFails)]
 #[batpak(event = Tick, handler = on_tick)]
 #[batpak(event = ThingHappened, handler = on_thing)]
-pub struct Observer;
+pub struct Observer {}
 
 impl Observer {
     fn on_tick(
         &mut self,
         _event: &batpak::event::StoredEvent<Tick>,
         _out: &mut ReactionBatch,
+        _witness: Option<&AtLeastOnce>,
     ) -> Result<(), NeverFails> {
         Ok(())
     }
@@ -91,6 +93,7 @@ impl Observer {
         &mut self,
         _event: &batpak::event::StoredEvent<ThingHappened>,
         _out: &mut ReactionBatch,
+        _witness: Option<&AtLeastOnce>,
     ) -> Result<(), NeverFails> {
         Ok(())
     }

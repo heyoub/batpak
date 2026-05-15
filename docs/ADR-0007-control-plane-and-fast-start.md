@@ -25,5 +25,5 @@ Cold start prefers a verified mmap snapshot (`index.fbati`), then checkpoint res
 - The sync-only store contract remains intact for callers who do not need the richer control plane.
 - Callers can pipeline work and react to pressure without introducing Tokio or futures into production.
 - Visibility remains governed by one watermark; all active index views must be populated before publish.
-- Fast start becomes an optimization, not a different truth source, because every path replays into the same canonical index and restores the same hidden-range metadata.
+- Fast start becomes an optimization, not a different truth source, because every path replays into the same normalized internal `StoreIndex` state and restores the same hidden-range metadata.
 - Lossy `scan()` remains explicitly lossy; guaranteed folds belong on the cursor-worker path.

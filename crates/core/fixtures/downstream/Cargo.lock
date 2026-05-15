@@ -28,16 +28,19 @@ checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 
 [[package]]
 name = "batpak"
-version = "0.6.0"
+version = "0.8.0"
 dependencies = [
  "batpak-macros",
  "batpak-macros-support",
  "blake3",
  "crc32fast",
  "dashmap",
+ "ed25519-compact",
  "flume",
+ "libc",
  "memmap2",
  "parking_lot",
+ "proc-macro2",
  "rayon",
  "rmp-serde",
  "serde",
@@ -47,6 +50,7 @@ dependencies = [
  "tracing",
  "uuid",
  "yaml_serde",
+ "zeroize",
 ]
 
 [[package]]
@@ -55,11 +59,12 @@ version = "0.1.0"
 dependencies = [
  "batpak",
  "serde",
+ "tempfile",
 ]
 
 [[package]]
 name = "batpak-macros"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "batpak-macros-support",
  "proc-macro2",
@@ -69,7 +74,7 @@ dependencies = [
 
 [[package]]
 name = "batpak-macros-support"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "inventory",
 ]
@@ -167,16 +172,23 @@ checksum = "d0a5c400df2834b80a4c3327b3aad3a4c4cd4de0629063962b03235697506a28"
 
 [[package]]
 name = "dashmap"
-version = "5.5.3"
+version = "6.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "978747c1d849a7d2ee5e8adc0159961c48fb7e5db2f06af6723b80123bb53856"
+checksum = "5041cc499144891f3790297212f32a74fb938e5136a14943f338ef9e0ae276cf"
 dependencies = [
  "cfg-if",
+ "crossbeam-utils",
  "hashbrown 0.14.5",
  "lock_api",
  "once_cell",
  "parking_lot_core",
 ]
+
+[[package]]
+name = "ed25519-compact"
+version = "2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "33ce99a9e19c84beb4cc35ece85374335ccc398240712114c85038319ed709bd"
 
 [[package]]
 name = "either"
@@ -919,6 +931,12 @@ dependencies = [
  "ryu",
  "serde",
 ]
+
+[[package]]
+name = "zeroize"
+version = "1.8.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b97154e67e32c85465826e8bcc1c59429aaaf107c1e4a9e53c8d8ccd5eff88d0"
 
 [[package]]
 name = "zmij"

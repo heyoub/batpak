@@ -235,6 +235,57 @@ pub(crate) fn recommended_restore_chunk_count(entry_count: usize) -> usize {
     chunks.clamp(1, 32)
 }
 
+pub(crate) fn restore_chunk_ranges(
+    entry_count: usize,
+    routing: &RoutingSummary,
+) -> Vec<(usize, usize)> {
+    fn even_ranges(entry_count: usize) -> Vec<(usize, usize)> {
+        let chunk_count = recommended_restore_chunk_count(entry_count);
+        let base = entry_count / chunk_count;
+        let remainder = entry_count % chunk_count;
+        let mut start = 0usize;
+        let mut ranges = Vec::new();
+        for chunk_index in 0..chunk_count {
+            let len = base + usize::from(chunk_index < remainder);
+            if len == 0 {
+                continue;
+            }
+            ranges.push((start, len));
+            start += len;
+        }
+        ranges
+    }
+
+    if routing.chunks.is_empty() {
+        return even_ranges(entry_count);
+    }
+
+    let mut ranges = Vec::with_capacity(routing.chunks.len());
+    let mut expected_start = 0usize;
+    for chunk in &routing.chunks {
+        let Ok(start) = usize::try_from(chunk.start) else {
+            return even_ranges(entry_count);
+        };
+        let Ok(len) = usize::try_from(chunk.len) else {
+            return even_ranges(entry_count);
+        };
+        let Some(end) = start.checked_add(len) else {
+            return even_ranges(entry_count);
+        };
+        if len == 0 || start != expected_start || end > entry_count {
+            return even_ranges(entry_count);
+        }
+        ranges.push((start, len));
+        expected_start = end;
+    }
+
+    if expected_start == entry_count {
+        ranges
+    } else {
+        even_ranges(entry_count)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -276,6 +327,36 @@ mod tests {
                 .then(a.global_sequence.cmp(&b.global_sequence))
         });
         (entries_by_sequence, entries_by_entity)
+    }
+
+    #[test]
+    fn restore_chunk_ranges_uses_valid_persisted_chunks() {
+        let entries = vec![
+            entry(0, "alpha"),
+            entry(1, "alpha"),
+            entry(2, "beta"),
+            entry(3, "beta"),
+        ];
+        let routing = RoutingSummary::from_sorted_entries(&entries, 2);
+
+        assert_eq!(
+            restore_chunk_ranges(entries.len(), &routing),
+            vec![(0, 2), (2, 2)]
+        );
+    }
+
+    #[test]
+    fn restore_chunk_ranges_falls_back_for_malformed_chunks() {
+        let entries = vec![
+            entry(0, "alpha"),
+            entry(1, "alpha"),
+            entry(2, "beta"),
+            entry(3, "beta"),
+        ];
+        let mut routing = RoutingSummary::from_sorted_entries(&entries, 2);
+        routing.chunks[1].start = 3;
+
+        assert_eq!(restore_chunk_ranges(entries.len(), &routing), vec![(0, 4)]);
     }
 
     #[test]

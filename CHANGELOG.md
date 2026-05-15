@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-05-15
+
 ### Added
 - Added durable opaque receipt extensions for append and denial receipts.
   Extension bytes are persisted in `.fbat` frames, restored on cold start,

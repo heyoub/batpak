@@ -8,8 +8,8 @@ use batpak::guard::{
 };
 use batpak::store::{
     AppendOptions, BatchAppendItem, CausationRef, CheckpointId, CursorGapConfig, EncodedBytes,
-    ExtensionKey, ExtensionKeyError, GapObservation, IdempotencyKey, ReceiptExtensionKey,
-    ReceiptExtensionNamespace, ReceiptExtensionValue, Store, StoreConfig,
+    ExtensionKey, ExtensionKeyError, GapObservation, IdempotencyKey, OpenIndexPath,
+    ReceiptExtensionKey, ReceiptExtensionNamespace, ReceiptExtensionValue, Store, StoreConfig,
 };
 #[cfg(feature = "blake3")]
 use batpak::store::{DenialReceipt, SigningKey};
@@ -315,6 +315,7 @@ fn receipt_extension_restore_config(
 fn assert_receipt_extensions_survive_close_reopen_case(
     enable_checkpoint: bool,
     enable_mmap_index: bool,
+    expected_path: OpenIndexPath,
 ) {
     let dir = TempDir::new().expect("temp dir");
     let coord = Coordinate::new("extension:reopen", "scope:test").expect("coord");
@@ -377,6 +378,14 @@ fn assert_receipt_extensions_survive_close_reopen_case(
         enable_mmap_index,
     ))
     .expect("reopen store");
+    let open_report = reopened
+        .diagnostics()
+        .open_report
+        .expect("reopen diagnostics should include open report");
+    assert_eq!(
+        open_report.path, expected_path,
+        "restore-path coverage drifted for checkpoint={enable_checkpoint} mmap={enable_mmap_index}"
+    );
     let append_replay = reopened
         .append_with_options(
             &coord,
@@ -427,8 +436,16 @@ fn assert_receipt_extensions_survive_close_reopen_case(
 
 #[test]
 fn receipt_extensions_survive_close_reopen_restore_paths() {
-    for (enable_checkpoint, enable_mmap_index) in [(false, false), (true, false), (true, true)] {
-        assert_receipt_extensions_survive_close_reopen_case(enable_checkpoint, enable_mmap_index);
+    for (enable_checkpoint, enable_mmap_index, expected_path) in [
+        (false, false, OpenIndexPath::Rebuild),
+        (true, false, OpenIndexPath::Checkpoint),
+        (true, true, OpenIndexPath::Mmap),
+    ] {
+        assert_receipt_extensions_survive_close_reopen_case(
+            enable_checkpoint,
+            enable_mmap_index,
+            expected_path,
+        );
     }
 }
 

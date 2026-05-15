@@ -94,7 +94,7 @@
     - ART-STORE-APPEND
     - ART-GROUP-COMMIT-TESTS
 - id: INV-CHECKPOINT-V2-INTERNED
-  statement: Index checkpoint v2 persists an interner snapshot and uses InternId u32s instead of raw strings, saving ~22 bytes per entry and enabling fast cold-start restore. SIDX footers provide per-segment fast path.
+  statement: Index checkpoint v2 and later persist an interner snapshot and use InternId u32s instead of raw strings, saving ~22 bytes per entry and enabling fast cold-start restore. SIDX footers provide per-segment fast path.
   artifacts:
     - ART-STORE-CHECKPOINT
     - ART-STORE-INTERNER

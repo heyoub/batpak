@@ -14,7 +14,7 @@ instead of sharing one substrate.
 ## Decision
 
 ### Restore Planner
-All cold-start sources (mmap v2, checkpoint v3, parallel SIDX rebuild,
+All cold-start sources (current and older mmap/checkpoint snapshots, parallel SIDX rebuild,
 frame-scan fallback) normalize through one internal `RestorePlanner`
 that produces entity-partitioned `RoutingSummary` runs. Runtime views
 (streams, SoA, SoAoS, AoSoA, by-id, latest) are materialized from

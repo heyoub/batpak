@@ -10,7 +10,7 @@
 //!
 //! ```text
 //! [MAGIC: b"FBATCK"]   — 6 bytes, identifies the file type
-//! [version: u16 LE]    — v2/v3/v4 fallback or v5 current
+//! [version: u16 LE]    — v2/v3/v4/v5 fallback or v6 current
 //! [crc32: u32 LE]      — CRC32 of the msgpack body that follows
 //! [msgpack body]        — versioned checkpoint body serialised via rmp_serde
 //! ```
@@ -24,16 +24,15 @@ use crate::store::cold_start::{
 };
 use crate::store::index::interner::InternId;
 use crate::store::index::{
-    recommended_restore_chunk_count, DiskPos, IndexEntry, RoutingSummary, StoreIndex,
+    recommended_restore_chunk_count, restore_chunk_ranges, DiskPos, IndexEntry, RoutingSummary,
+    StoreIndex,
 };
 use crate::store::platform::fs::write_file_atomically;
 use crate::store::segment::sidx::ReservedKindFallbackStats;
 use crate::store::{EncodedBytes, ExtensionKey, StoreError};
 use rayon::prelude::*;
-use serde::de::{self, DeserializeSeed, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::fmt;
 use std::io::{BufWriter, Write};
 use std::path::Path;
 
@@ -200,170 +199,6 @@ struct LoadedCheckpointFile {
     path: std::path::PathBuf,
     version: u16,
     body: Vec<u8>,
-}
-
-struct CheckpointSnapshotDataV6 {
-    global_sequence: u64,
-    watermark_segment_id: u64,
-    watermark_offset: u64,
-    interner_strings: Vec<String>,
-    routing: RoutingSummary,
-    reserved_kind_fallbacks: ReservedKindFallbackStats,
-    entries: Vec<IndexEntry>,
-}
-
-#[derive(Deserialize)]
-#[serde(field_identifier, rename_all = "snake_case")]
-enum CheckpointDataV6Field {
-    GlobalSequence,
-    WatermarkSegmentId,
-    WatermarkOffset,
-    InternerStrings,
-    Routing,
-    ReservedKindFallbacks,
-    Entries,
-}
-
-struct CheckpointEntriesSeed<'a> {
-    interner_strings: &'a [String],
-}
-
-struct CheckpointEntriesVisitor<'a> {
-    interner_strings: &'a [String],
-}
-
-impl<'de, 'a> DeserializeSeed<'de> for CheckpointEntriesSeed<'a> {
-    type Value = Vec<IndexEntry>;
-
-    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        deserializer.deserialize_seq(CheckpointEntriesVisitor {
-            interner_strings: self.interner_strings,
-        })
-    }
-}
-
-impl<'de, 'a> Visitor<'de> for CheckpointEntriesVisitor<'a> {
-    type Value = Vec<IndexEntry>;
-
-    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("a sequence of checkpoint entries")
-    }
-
-    fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
-    where
-        A: SeqAccess<'de>,
-    {
-        let mut entries = Vec::with_capacity(seq.size_hint().unwrap_or(0));
-        while let Some(entry) = seq.next_element::<CheckpointEntry>()? {
-            entries.push(
-                entry
-                    .to_index_entry(self.interner_strings)
-                    .map_err(de::Error::custom)?,
-            );
-        }
-        Ok(entries)
-    }
-}
-
-struct CheckpointSnapshotDataV6Visitor;
-
-impl<'de> Visitor<'de> for CheckpointSnapshotDataV6Visitor {
-    type Value = CheckpointSnapshotDataV6;
-
-    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("checkpoint v6 snapshot data")
-    }
-
-    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
-    where
-        A: MapAccess<'de>,
-    {
-        let mut global_sequence = None;
-        let mut watermark_segment_id = None;
-        let mut watermark_offset = None;
-        let mut interner_strings = None;
-        let mut routing = None;
-        let mut reserved_kind_fallbacks = None;
-        let mut entries = None;
-
-        while let Some(field) = map.next_key::<CheckpointDataV6Field>()? {
-            match field {
-                CheckpointDataV6Field::GlobalSequence => {
-                    if global_sequence.is_some() {
-                        return Err(de::Error::duplicate_field("global_sequence"));
-                    }
-                    global_sequence = Some(map.next_value()?);
-                }
-                CheckpointDataV6Field::WatermarkSegmentId => {
-                    if watermark_segment_id.is_some() {
-                        return Err(de::Error::duplicate_field("watermark_segment_id"));
-                    }
-                    watermark_segment_id = Some(map.next_value()?);
-                }
-                CheckpointDataV6Field::WatermarkOffset => {
-                    if watermark_offset.is_some() {
-                        return Err(de::Error::duplicate_field("watermark_offset"));
-                    }
-                    watermark_offset = Some(map.next_value()?);
-                }
-                CheckpointDataV6Field::InternerStrings => {
-                    if interner_strings.is_some() {
-                        return Err(de::Error::duplicate_field("interner_strings"));
-                    }
-                    interner_strings = Some(map.next_value()?);
-                }
-                CheckpointDataV6Field::Routing => {
-                    if routing.is_some() {
-                        return Err(de::Error::duplicate_field("routing"));
-                    }
-                    routing = Some(map.next_value()?);
-                }
-                CheckpointDataV6Field::ReservedKindFallbacks => {
-                    if reserved_kind_fallbacks.is_some() {
-                        return Err(de::Error::duplicate_field("reserved_kind_fallbacks"));
-                    }
-                    reserved_kind_fallbacks = Some(map.next_value()?);
-                }
-                CheckpointDataV6Field::Entries => {
-                    if entries.is_some() {
-                        return Err(de::Error::duplicate_field("entries"));
-                    }
-                    let strings = interner_strings.as_deref().ok_or_else(|| {
-                        de::Error::custom("checkpoint v5 requires interner_strings before entries")
-                    })?;
-                    entries = Some(map.next_value_seed(CheckpointEntriesSeed {
-                        interner_strings: strings,
-                    })?);
-                }
-            }
-        }
-
-        Ok(CheckpointSnapshotDataV6 {
-            global_sequence: global_sequence
-                .ok_or_else(|| de::Error::missing_field("global_sequence"))?,
-            watermark_segment_id: watermark_segment_id
-                .ok_or_else(|| de::Error::missing_field("watermark_segment_id"))?,
-            watermark_offset: watermark_offset
-                .ok_or_else(|| de::Error::missing_field("watermark_offset"))?,
-            interner_strings: interner_strings
-                .ok_or_else(|| de::Error::missing_field("interner_strings"))?,
-            routing: routing.ok_or_else(|| de::Error::missing_field("routing"))?,
-            reserved_kind_fallbacks: reserved_kind_fallbacks.unwrap_or_default(),
-            entries: entries.ok_or_else(|| de::Error::missing_field("entries"))?,
-        })
-    }
-}
-
-impl<'de> Deserialize<'de> for CheckpointSnapshotDataV6 {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        deserializer.deserialize_map(CheckpointSnapshotDataV6Visitor)
-    }
 }
 
 fn checkpoint_entries_to_index_entries(
@@ -626,7 +461,7 @@ fn decode_checkpoint_snapshot_v6(
     path: &Path,
     body: &[u8],
 ) -> Option<LoadedCheckpointSnapshot> {
-    let data: CheckpointSnapshotDataV6 = match rmp_serde::from_slice(body) {
+    let data: CheckpointDataV6 = match rmp_serde::from_slice(body) {
         Ok(data) => data,
         Err(error) => {
             tracing::warn!(
@@ -655,8 +490,21 @@ fn decode_checkpoint_snapshot_v6(
         "checkpoint snapshot loaded successfully"
     );
 
+    let entries = match checkpoint_entries_to_index_entries(&data.entries, &data.interner_strings) {
+        Ok(entries) => entries,
+        Err(error) => {
+            tracing::warn!(
+                target: "batpak::checkpoint",
+                path = %path.display(),
+                error = %error,
+                "checkpoint snapshot entry rebuild failed — ignoring"
+            );
+            return None;
+        }
+    };
+
     Some(LoadedCheckpointSnapshot {
-        entries: data.entries,
+        entries,
         interner_strings: data.interner_strings,
         watermark,
         stored_allocator: data.global_sequence,
@@ -854,30 +702,19 @@ pub(crate) fn try_load_checkpoint_snapshot(data_dir: &Path) -> Option<LoadedChec
     }
 
     let loaded = decode_checkpoint_data(data_dir, &raw.path, raw.version, &raw.body)?;
-    let chunk_ranges = if loaded.routing.chunks.is_empty() {
-        vec![(0usize, loaded.entries.len())]
-    } else {
-        loaded
-            .routing
-            .chunks
-            .iter()
-            .map(|chunk| {
-                let start = usize::try_from(chunk.start).ok()?;
-                let len = usize::try_from(chunk.len).ok()?;
-                Some((start, len))
-            })
-            .collect::<Option<Vec<_>>>()?
-    };
+    let chunk_ranges = restore_chunk_ranges(loaded.entries.len(), &loaded.routing);
 
     let mut per_chunk = chunk_ranges
         .into_par_iter()
         .enumerate()
         .map(|(chunk_idx, (start, len))| {
-            let end = start + len;
-            let rebuilt = checkpoint_entries_to_index_entries(
-                &loaded.entries[start..end],
-                &loaded.interner_strings,
-            )?;
+            let end = start
+                .checked_add(len)
+                .ok_or_else(|| StoreError::ser_msg("checkpoint restore chunk range overflowed"))?;
+            let slice = loaded.entries.get(start..end).ok_or_else(|| {
+                StoreError::ser_msg("checkpoint restore chunk range out of bounds")
+            })?;
+            let rebuilt = checkpoint_entries_to_index_entries(slice, &loaded.interner_strings)?;
             Ok::<_, StoreError>((chunk_idx, rebuilt))
         })
         .collect::<Result<Vec<_>, _>>()

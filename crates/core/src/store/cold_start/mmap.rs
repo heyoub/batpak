@@ -12,7 +12,8 @@ use crate::store::cold_start::{
 };
 use crate::store::index::interner::InternId;
 use crate::store::index::{
-    recommended_restore_chunk_count, DiskPos, IndexEntry, RoutingSummary, StoreIndex,
+    recommended_restore_chunk_count, restore_chunk_ranges, DiskPos, IndexEntry, RoutingSummary,
+    StoreIndex,
 };
 #[cfg(test)]
 use crate::store::segment::sidx::raw_to_kind;
@@ -932,47 +933,36 @@ pub(crate) fn try_load_mmap_snapshot(data_dir: &Path) -> Option<LoadedMmapSnapsh
             return None;
         }
     };
-    let entries_end = loaded.entries_offset + (entry_count * loaded.entry_size);
-    let entries_slice = &loaded.mmap[loaded.entries_offset..entries_end];
-    let extension_blob_end = loaded.extension_blob_offset + loaded.extension_blob_len;
-    let extension_blob_slice = &loaded.mmap[loaded.extension_blob_offset..extension_blob_end];
-    let chunk_ranges = if loaded.routing.chunks.is_empty() {
-        let chunk_count = recommended_restore_chunk_count(entry_count);
-        let base = entry_count / chunk_count;
-        let remainder = entry_count % chunk_count;
-        let mut start = 0usize;
-        let mut ranges = Vec::new();
-        for chunk_index in 0..chunk_count {
-            let len = base + usize::from(chunk_index < remainder);
-            if len == 0 {
-                continue;
-            }
-            ranges.push((start, len));
-            start += len;
-        }
-        ranges
-    } else {
-        loaded
-            .routing
-            .chunks
-            .iter()
-            .map(|chunk| {
-                let start = usize::try_from(chunk.start).ok()?;
-                let len = usize::try_from(chunk.len).ok()?;
-                Some((start, len))
-            })
-            .collect::<Option<Vec<_>>>()?
-    };
+    let entries_len = entry_count.checked_mul(loaded.entry_size)?;
+    let entries_end = loaded.entries_offset.checked_add(entries_len)?;
+    let entries_slice = loaded.mmap.get(loaded.entries_offset..entries_end)?;
+    let extension_blob_end = loaded
+        .extension_blob_offset
+        .checked_add(loaded.extension_blob_len)?;
+    let extension_blob_slice = loaded
+        .mmap
+        .get(loaded.extension_blob_offset..extension_blob_end)?;
+    let chunk_ranges = restore_chunk_ranges(entry_count, &loaded.routing);
 
     let mut per_chunk = chunk_ranges
         .into_par_iter()
         .enumerate()
         .map(|(chunk_idx, (start, len))| {
-            let start_byte = start * loaded.entry_size;
-            let end_byte = start_byte + (len * loaded.entry_size);
+            let start_byte = start
+                .checked_mul(loaded.entry_size)
+                .ok_or_else(|| StoreError::ser_msg("mmap restore chunk start overflowed"))?;
+            let len_bytes = len
+                .checked_mul(loaded.entry_size)
+                .ok_or_else(|| StoreError::ser_msg("mmap restore chunk len overflowed"))?;
+            let end_byte = start_byte
+                .checked_add(len_bytes)
+                .ok_or_else(|| StoreError::ser_msg("mmap restore chunk range overflowed"))?;
+            let chunk_bytes = entries_slice
+                .get(start_byte..end_byte)
+                .ok_or_else(|| StoreError::ser_msg("mmap restore chunk range out of bounds"))?;
             let mut rebuilt = Vec::with_capacity(len);
             let mut reserved_kind_fallbacks = ReservedKindFallbackStats::default();
-            for chunk in entries_slice[start_byte..end_byte].chunks_exact(loaded.entry_size) {
+            for chunk in chunk_bytes.chunks_exact(loaded.entry_size) {
                 let entry = MmapIndexEntry::decode_from(chunk, loaded.version)?;
                 let mut rebuilt_entry = entry
                     .to_cold_start_row_counted(&mut reserved_kind_fallbacks)

@@ -41,8 +41,9 @@ manual publish/tag/release steps from a clean `main`.
    linkage:
 
    ```bash
+   cargo test --manifest-path crates/core/fixtures/downstream/Cargo.toml
    cargo test --test event_payload_registry_downstream
-   cargo test --release --manifest-path fixtures/kind-collision-composer/Cargo.toml
+   cargo test --release --manifest-path crates/core/fixtures/kind-collision-composer/Cargo.toml
    ```
 
 9. Inspect package contents before publishing:
@@ -63,7 +64,7 @@ Capture release numbers from the merged release commit on stable hardware, not
 from an unmerged PR head, devcontainer, or noisy VM:
 
 ```bash
-cargo xtask bench --surface neutral --save baseline-v0.7.0
+cargo xtask bench --surface neutral --save baseline-v0.8.0
 ```
 
 Record the hardware and OS next to the numbers: CPU model, RAM, disk type, OS,

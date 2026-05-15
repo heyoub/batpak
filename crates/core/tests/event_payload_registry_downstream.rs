@@ -18,8 +18,17 @@ fn downstream_fixture_detects_dependency_event_kind_collision_in_release() {
 }
 
 fn run_downstream_fixture(args: &[&str]) {
-    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("fixtures/kind-collision-composer/Cargo.toml");
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let manifest = manifest_dir.join("fixtures/kind-collision-composer/Cargo.toml");
+    if !manifest.exists() {
+        if manifest_dir.join(".cargo_vcs_info.json").exists() {
+            return;
+        }
+        panic!(
+            "downstream fixture manifest is missing from repo checkout: {}",
+            manifest.display()
+        );
+    }
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_owned());
     let output = match Command::new(cargo)
         .args(args)

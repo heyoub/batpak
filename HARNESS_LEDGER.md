@@ -439,9 +439,11 @@ instead of pretending.
 
 - Harness pattern: `Property Harness`
 - Location:
+  - `crates/core/fixtures/downstream/src/lib.rs`
   - `crates/core/tests/event_payload_registry_policy.rs`
   - `crates/core/tests/event_payload_registry_downstream.rs`
 - Command used:
+  - `cargo test --manifest-path crates/core/fixtures/downstream/Cargo.toml`
   - `cargo test --test event_payload_registry_policy`
   - `cargo test --test event_payload_registry_downstream`
 - Line/function coverage delta: targeted rise in `crates/core/src/event/payload.rs`,
