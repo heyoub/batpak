@@ -1,3 +1,5 @@
+// justifies: INV-TEST-PANIC-AS-ASSERTION; atomic batch tests use explicit panic branches as assertion failures for Store result error paths.
+#![allow(clippy::panic)]
 //! Atomic batch append tests.
 
 use batpak::prelude::*;
@@ -367,10 +369,13 @@ fn batch_size_limits() {
         .collect();
 
     let result = store.append_batch(items);
-    let err = result.expect_err(
-        "PROPERTY: a batch exceeding batch_max_size must fail. \
-         Investigate: src/store/write/writer.rs validate_batch size check.",
-    );
+    let err = match result {
+        Ok(_) => panic!(
+            "PROPERTY: a batch exceeding batch_max_size must fail. \
+             Investigate: src/store/write/writer.rs validate_batch size check."
+        ),
+        Err(err) => err,
+    };
     assert!(
         matches!(err, StoreError::BatchFailed { item_index: 0, .. }),
         "PROPERTY: batch size violation must surface as BatchFailed on the \
@@ -422,10 +427,13 @@ fn batch_restart_recovery_discards_incomplete_after_begin() {
 
     // Batch append should fail due to fault injection at the BatchBeginWritten point.
     let result = store.append_batch(items);
-    let err = result.expect_err(
-        "PROPERTY: fault injection at BatchBeginWritten must propagate as a \
-         BatchFailed or FaultInjected error.",
-    );
+    let err = match result {
+        Ok(_) => panic!(
+            "PROPERTY: fault injection at BatchBeginWritten must propagate as a \
+             BatchFailed or FaultInjected error."
+        ),
+        Err(err) => err,
+    };
     assert!(
         matches!(err, StoreError::BatchFailed { .. })
             || matches!(err, StoreError::FaultInjected(_)),
@@ -494,10 +502,13 @@ fn batch_restart_recovery_discards_incomplete_mid_items() {
 
     // Batch append should fail due to fault injection after first item.
     let result = store.append_batch(items);
-    let err = result.expect_err(
-        "PROPERTY: fault injection mid-batch must propagate as a BatchFailed \
-         or FaultInjected error.",
-    );
+    let err = match result {
+        Ok(_) => panic!(
+            "PROPERTY: fault injection mid-batch must propagate as a BatchFailed \
+             or FaultInjected error."
+        ),
+        Err(err) => err,
+    };
     assert!(
         matches!(err, StoreError::BatchFailed { .. })
             || matches!(err, StoreError::FaultInjected(_)),
@@ -604,11 +615,14 @@ fn batch_fsync_ambiguity_discards_uncommitted() {
 
     // Fault during fsync.
     let result = store.append_batch(items);
-    let err = result.expect_err(
-        "PROPERTY: a fault injected during BatchFsync must propagate as an \
-         error. Investigate: src/store/write/writer.rs handle_append_batch fsync \
-         site fault injection point.",
-    );
+    let err = match result {
+        Ok(_) => panic!(
+            "PROPERTY: a fault injected during BatchFsync must propagate as an \
+             error. Investigate: src/store/write/writer.rs handle_append_batch fsync \
+             site fault injection point."
+        ),
+        Err(err) => err,
+    };
     assert!(
         matches!(err, StoreError::BatchFailed { .. })
             || matches!(err, StoreError::FaultInjected(_)),
@@ -837,10 +851,13 @@ fn batch_subscription_atomicity_no_partial_visibility() {
     ];
 
     let result = store.append_batch(items);
-    let _err = result.expect_err(
-        "PROPERTY: batch with after_batch_items(1) fault must fail. If this \
-         passes, fault injection is silently swallowed.",
-    );
+    let _err = match result {
+        Ok(_) => panic!(
+            "PROPERTY: batch with after_batch_items(1) fault must fail. If this \
+             passes, fault injection is silently swallowed."
+        ),
+        Err(err) => err,
+    };
 
     let notifications_received = drain(&sub);
     drop(store);
@@ -1035,10 +1052,13 @@ fn batch_publish_atomicity_no_partial_read_during_insert() {
 
     // The batch should fail because BatchPrePublish injects a fault.
     let result = store.append_batch(items);
-    let err = result.expect_err(
-        "PROPERTY: a batch with a BatchPrePublish fault injection must fail. \
-         If this passes, fault injection is being silently swallowed.",
-    );
+    let err = match result {
+        Ok(_) => panic!(
+            "PROPERTY: a batch with a BatchPrePublish fault injection must fail. \
+             If this passes, fault injection is being silently swallowed."
+        ),
+        Err(err) => err,
+    };
     assert!(
         matches!(err, StoreError::BatchFailed { .. })
             || matches!(err, StoreError::FaultInjected(_)),

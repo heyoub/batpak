@@ -575,10 +575,13 @@ fn compact_retention_removes_dropped_events_from_index() {
 
     for dropped_id in &drop_ids {
         let get_result = store.get(*dropped_id);
-        let err = get_result.expect_err(
-            "COMPACT RETENTION INDEX LEAK: get() should return NotFound after retention compaction dropped the event.\
-             Investigate: src/store/mod.rs compact(), src/store/index/mod.rs clear()."
-        );
+        let err = match get_result {
+            Ok(_) => panic!(
+                "COMPACT RETENTION INDEX LEAK: get() should return NotFound after retention compaction dropped the event.\
+                 Investigate: src/store/mod.rs compact(), src/store/index/mod.rs clear()."
+            ),
+            Err(err) => err,
+        };
         assert!(
             matches!(err, StoreError::NotFound(_)),
             "PROPERTY: get() on a compaction-dropped event must surface as StoreError::NotFound, got {err:?}"

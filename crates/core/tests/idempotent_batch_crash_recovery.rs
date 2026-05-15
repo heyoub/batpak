@@ -72,9 +72,12 @@ fn partial_keys_rejected_synchronously() {
     ];
 
     let result = store.append_batch(items);
-    let err = result.expect_err(
-        "PROPERTY: a batch that mixes keyed and unkeyed items must be rejected synchronously",
-    );
+    let err = match result {
+        Ok(_) => panic!(
+            "PROPERTY: a batch that mixes keyed and unkeyed items must be rejected synchronously"
+        ),
+        Err(err) => err,
+    };
     assert!(
         matches!(err, StoreError::IdempotencyPartialBatch { .. }),
         "PROPERTY: partial-key batch must route to StoreError::IdempotencyPartialBatch, got {err:?}"

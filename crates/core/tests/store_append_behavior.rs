@@ -110,11 +110,14 @@ fn cas_fails_on_wrong_sequence() {
         ..Default::default()
     };
     let result = store.append_with_options(&coord, kind, &serde_json::json!({"x": 3}), opts);
-    let err = result.expect_err(
-        "PROPERTY: append_with_options must return Err when expected_sequence is stale (CAS failure).\
-         Investigate: src/store/mod.rs append_with_options CAS check.\
-         Common causes: sequence comparison uses wrong field, CAS check skipped under lock."
-    );
+    let err = match result {
+        Ok(_) => panic!(
+            "PROPERTY: append_with_options must return Err when expected_sequence is stale (CAS failure).\
+             Investigate: src/store/mod.rs append_with_options CAS check.\
+             Common causes: sequence comparison uses wrong field, CAS check skipped under lock."
+        ),
+        Err(err) => err,
+    };
     assert!(
         matches!(err, StoreError::SequenceMismatch { .. }),
         "PROPERTY: CAS failure must surface as StoreError::SequenceMismatch, got {err:?}"
