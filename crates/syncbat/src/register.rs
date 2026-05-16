@@ -5,7 +5,7 @@
 //! a register; it is an optimization surface, not the source of truth.
 
 use crate::core::{Checkout, CheckoutFrame};
-use crate::operation::{OperationDescriptor, OperationInput};
+use crate::operation::{DescriptorValidationError, OperationDescriptor, OperationInput};
 use std::collections::BTreeMap;
 use std::fmt;
 
@@ -18,6 +18,20 @@ pub enum RegisterValidationError {
         /// Duplicate operation name.
         name: String,
     },
+    /// A descriptor field failed shape validation.
+    InvalidDescriptor {
+        /// Operation name being inserted.
+        name: String,
+        /// Descriptor validation failure.
+        source: DescriptorValidationError,
+    },
+    /// A module name failed shape validation.
+    InvalidModuleName {
+        /// Invalid module name.
+        name: String,
+        /// Stable validation message.
+        message: &'static str,
+    },
 }
 
 impl fmt::Display for RegisterValidationError {
@@ -25,6 +39,12 @@ impl fmt::Display for RegisterValidationError {
         match self {
             Self::DuplicateOperationName { name } => {
                 write!(f, "duplicate operation name `{name}`")
+            }
+            Self::InvalidDescriptor { name, source } => {
+                write!(f, "operation `{name}` has invalid descriptor: {source}")
+            }
+            Self::InvalidModuleName { name, message } => {
+                write!(f, "module name `{name}` is invalid: {message}")
             }
         }
     }
@@ -73,6 +93,12 @@ impl Register {
         descriptor: OperationDescriptor,
     ) -> Result<(), RegisterValidationError> {
         let name = descriptor.name().to_owned();
+        descriptor
+            .validate()
+            .map_err(|source| RegisterValidationError::InvalidDescriptor {
+                name: name.clone(),
+                source,
+            })?;
         if self.operations.contains_key(&name) {
             return Err(RegisterValidationError::DuplicateOperationName { name });
         }
@@ -152,6 +178,37 @@ impl Register {
     pub fn into_map(self) -> BTreeMap<String, OperationDescriptor> {
         self.operations
     }
+}
+
+pub(crate) fn validate_module_name(name: &str) -> Result<(), RegisterValidationError> {
+    if name.is_empty() {
+        return Err(RegisterValidationError::InvalidModuleName {
+            name: name.to_owned(),
+            message: "empty",
+        });
+    }
+    if name.len() > crate::operation::MAX_OPERATION_NAME_BYTES {
+        return Err(RegisterValidationError::InvalidModuleName {
+            name: name.to_owned(),
+            message: "too long",
+        });
+    }
+    if name
+        .bytes()
+        .any(|byte| !matches!(byte, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'.' | b'_' | b'-'))
+    {
+        return Err(RegisterValidationError::InvalidModuleName {
+            name: name.to_owned(),
+            message: "expected ASCII letters, digits, '.', '_' or '-'",
+        });
+    }
+    if name.starts_with('.') || name.ends_with('.') || name.contains("..") {
+        return Err(RegisterValidationError::InvalidModuleName {
+            name: name.to_owned(),
+            message: "dot-separated tokens must be non-empty",
+        });
+    }
+    Ok(())
 }
 
 /// Hot lookup projection over a [`Register`].
