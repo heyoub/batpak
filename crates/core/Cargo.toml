@@ -26,7 +26,7 @@ blake3 = ["dep:blake3"]
 dangerous-test-hooks = ["dep:fastrand"]
 
 [dependencies]
-uuid = { version = "1", features = ["v7"] }
+uuid = { version = ">=1.20, <1.21", default-features = false, features = ["std", "v7"] }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
 batpak-macros-support = { path = "../macros-support", version = "0.7.0" }
@@ -41,8 +41,9 @@ tracing = "0.1"
 memmap2 = "0.9"
 rayon = "1.12"
 fastrand = { version = "2", optional = true }
-# tempfile is used for atomic temp-file writes in production storage paths.
-tempfile = "3"
+# tempfile 3.25+ allows getrandom >=0.3,<0.5 and Cargo may pick 0.4,
+# splitting the workspace RNG graph. Stay on the latest 0.3-only line.
+tempfile = ">=3.24, <3.25"
 libc = "0.2"
 ed25519-compact = { version = "2.2.0", default-features = false, features = ["std"] }
 zeroize = "1"
@@ -53,7 +54,7 @@ batpak-bench-support = { path = "../bench-support", version = "0.7.0" }
 proptest = "1"
 arbitrary = { version = "1", features = ["derive"] }
 criterion = { version = "0.8", features = ["html_reports"] }
-tempfile = "3"
+tempfile = ">=3.24, <3.25"
 trybuild = "1"
 fastrand = "2"
 serial_test = { version = "3.4.0", features = ["file_locks"] }
