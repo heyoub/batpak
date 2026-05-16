@@ -1442,6 +1442,7 @@ dependencies = [
  "batpak",
  "serde",
  "syncbat-macros",
+ "tempfile",
  "trybuild",
 ]
 
