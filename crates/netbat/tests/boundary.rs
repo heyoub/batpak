@@ -87,7 +87,7 @@ fn core_with_ping() -> Core {
 #[test]
 fn exposes_syncbat_module_as_boundary_routes_without_dispatch() {
     let module = Module::from_operations("health", [PING]).expect("module builds");
-    let server_module = nb::ServerModule::expose(module, "/nb");
+    let server_module = nb::ServerModule::expose(module, "/nb").expect("module exposes");
 
     assert_eq!(server_module.name(), "health");
     assert_eq!(server_module.operation_count(), 1);
@@ -101,7 +101,9 @@ fn exposes_syncbat_module_as_boundary_routes_without_dispatch() {
 fn server_introspection_reports_modules_routes_and_layer_rule() {
     let module = Module::from_operations("health", [PING]).expect("module builds");
     let mut server = nb::Server::new();
-    server.mount(nb::ServerModule::expose(module, "api"));
+    server
+        .mount(nb::ServerModule::expose(module, "api").expect("module exposes"))
+        .expect("module mounts");
 
     let report = server.introspect();
 

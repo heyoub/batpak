@@ -13,8 +13,82 @@
 //! use netbat as nb;
 //! ```
 
+use std::error::Error;
+use std::fmt;
+use std::io::{self, Read, Write};
+
 /// Stable crate-layer rule for docs, diagnostics, and tests.
 pub const LAYER_RULE: &str = "nb exposes, sb dispatches, bp records";
+
+/// Maximum bytes accepted for a boundary route path.
+pub const MAX_ROUTE_PATH_BYTES: usize = 512;
+
+/// Boundary route validation failure.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum RouteValidationError {
+    /// Operation name failed boundary validation.
+    InvalidOperationName {
+        /// Invalid operation name.
+        name: String,
+        /// Stable validation message.
+        message: &'static str,
+    },
+    /// Boundary path failed validation.
+    InvalidPath {
+        /// Invalid boundary path.
+        path: String,
+        /// Stable validation message.
+        message: &'static str,
+    },
+    /// Boundary method label failed validation.
+    InvalidMethod {
+        /// Invalid method label.
+        method: String,
+        /// Stable validation message.
+        message: &'static str,
+    },
+    /// Wrapped syncbat module descriptor failed validation.
+    InvalidModule(syncbat::RegisterValidationError),
+    /// Two mounted routes would expose the same method/path pair.
+    DuplicateRoute {
+        /// Boundary method label.
+        method: &'static str,
+        /// Boundary path.
+        path: String,
+    },
+}
+
+impl fmt::Display for RouteValidationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidOperationName { name, message } => {
+                write!(
+                    f,
+                    "operation name `{name}` is invalid for a route: {message}"
+                )
+            }
+            Self::InvalidPath { path, message } => {
+                write!(f, "route path `{path}` is invalid: {message}")
+            }
+            Self::InvalidMethod { method, message } => {
+                write!(f, "route method `{method}` is invalid: {message}")
+            }
+            Self::InvalidModule(error) => write!(f, "module is invalid for exposure: {error}"),
+            Self::DuplicateRoute { method, path } => {
+                write!(f, "duplicate boundary route {method} {path}")
+            }
+        }
+    }
+}
+
+impl Error for RouteValidationError {}
+
+impl From<syncbat::RegisterValidationError> for RouteValidationError {
+    fn from(error: syncbat::RegisterValidationError) -> Self {
+        Self::InvalidModule(error)
+    }
+}
 
 /// A syncbat operation exposed at a server/network boundary.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -25,12 +99,22 @@ pub struct Endpoint {
 
 impl Endpoint {
     /// Create an endpoint for an operation and boundary path.
-    #[must_use]
-    pub fn new(operation_name: impl Into<String>, path: impl Into<String>) -> Self {
-        Self {
-            operation_name: operation_name.into(),
-            path: path.into(),
-        }
+    ///
+    /// # Errors
+    /// Returns [`RouteValidationError`] when the operation name or path is not
+    /// valid for a server boundary route.
+    pub fn new(
+        operation_name: impl Into<String>,
+        path: impl Into<String>,
+    ) -> Result<Self, RouteValidationError> {
+        let operation_name = operation_name.into();
+        let path = path.into();
+        validate_route_operation_name(&operation_name)?;
+        validate_route_path(&path)?;
+        Ok(Self {
+            operation_name,
+            path,
+        })
     }
 
     /// Stable syncbat operation name exposed by this endpoint.
@@ -58,9 +142,13 @@ pub struct Route {
 
 impl Route {
     /// Create a route with a stable method label and endpoint.
-    #[must_use]
-    pub fn new(method: &'static str, endpoint: Endpoint) -> Self {
-        Self { method, endpoint }
+    ///
+    /// # Errors
+    /// Returns [`RouteValidationError`] when the method label is not valid for
+    /// a stable boundary route.
+    pub fn new(method: &'static str, endpoint: Endpoint) -> Result<Self, RouteValidationError> {
+        validate_route_method(method)?;
+        Ok(Self { method, endpoint })
     }
 
     /// Stable method label for the boundary route.
@@ -103,15 +191,24 @@ impl ServerModule {
     ///
     /// Paths are formed as `{base_path}/{operation_name}` with a single slash
     /// between the base and the operation name.
-    #[must_use]
-    pub fn expose(module: syncbat::Module, base_path: impl AsRef<str>) -> Self {
+    ///
+    /// # Errors
+    /// Returns [`RouteValidationError`] when the module descriptor or derived
+    /// route metadata fails boundary validation.
+    pub fn expose(
+        module: syncbat::Module,
+        base_path: impl AsRef<str>,
+    ) -> Result<Self, RouteValidationError> {
+        module.validate()?;
         let base_path = normalize_base_path(base_path.as_ref());
-        let routes = module
-            .operations()
-            .map(|(name, _)| Route::new("CALL", Endpoint::new(name, format!("{base_path}/{name}"))))
-            .collect();
+        validate_base_path(&base_path)?;
+        let mut routes = Vec::with_capacity(module.operation_count());
+        for (name, _) in module.operations() {
+            let endpoint = Endpoint::new(name, format!("{base_path}/{name}"))?;
+            routes.push(Route::new("CALL", endpoint)?);
+        }
 
-        Self { module, routes }
+        Ok(Self { module, routes })
     }
 
     /// Wrapped syncbat module descriptor.
@@ -163,9 +260,23 @@ impl Server {
     }
 
     /// Mount server-facing module metadata.
-    pub fn mount(&mut self, module: ServerModule) -> &mut Self {
+    ///
+    /// # Errors
+    /// Returns [`RouteValidationError::DuplicateRoute`] if a mounted module
+    /// already exposes the same method/path pair.
+    pub fn mount(&mut self, module: ServerModule) -> Result<&mut Self, RouteValidationError> {
+        for route in module.routes() {
+            if self.routes().any(|existing| {
+                existing.method() == route.method() && existing.path() == route.path()
+            }) {
+                return Err(RouteValidationError::DuplicateRoute {
+                    method: route.method(),
+                    path: route.path().to_owned(),
+                });
+            }
+        }
         self.modules.push(module);
-        self
+        Ok(self)
     }
 
     /// Mounted server-facing modules.
@@ -279,9 +390,118 @@ fn normalize_base_path(base_path: &str) -> String {
     }
 }
 
-use std::error::Error;
-use std::fmt;
-use std::io::{self, Read, Write};
+fn validate_base_path(path: &str) -> Result<(), RouteValidationError> {
+    if path.is_empty() {
+        return Ok(());
+    }
+    validate_route_path(path)
+}
+
+fn validate_route_method(method: &str) -> Result<(), RouteValidationError> {
+    if method.is_empty() {
+        return Err(RouteValidationError::InvalidMethod {
+            method: method.to_owned(),
+            message: "empty",
+        });
+    }
+    if method
+        .bytes()
+        .any(|byte| !matches!(byte, b'A'..=b'Z' | b'0'..=b'9' | b'_' | b'-'))
+    {
+        return Err(RouteValidationError::InvalidMethod {
+            method: method.to_owned(),
+            message: "expected ASCII uppercase letters, digits, '_' or '-'",
+        });
+    }
+    Ok(())
+}
+
+fn validate_route_operation_name(name: &str) -> Result<(), RouteValidationError> {
+    if name.is_empty() {
+        return Err(RouteValidationError::InvalidOperationName {
+            name: name.to_owned(),
+            message: "empty",
+        });
+    }
+    if name.len() > syncbat::MAX_OPERATION_NAME_BYTES {
+        return Err(RouteValidationError::InvalidOperationName {
+            name: name.to_owned(),
+            message: "too long",
+        });
+    }
+    if name
+        .bytes()
+        .any(|byte| !matches!(byte, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'.' | b'_' | b'-'))
+    {
+        return Err(RouteValidationError::InvalidOperationName {
+            name: name.to_owned(),
+            message: "expected ASCII letters, digits, '.', '_' or '-'",
+        });
+    }
+    if name.starts_with('.') || name.ends_with('.') || name.contains("..") {
+        return Err(RouteValidationError::InvalidOperationName {
+            name: name.to_owned(),
+            message: "dot-separated tokens must be non-empty",
+        });
+    }
+    Ok(())
+}
+
+fn validate_route_path(path: &str) -> Result<(), RouteValidationError> {
+    if path.is_empty() {
+        return Err(RouteValidationError::InvalidPath {
+            path: path.to_owned(),
+            message: "empty",
+        });
+    }
+    if path.len() > MAX_ROUTE_PATH_BYTES {
+        return Err(RouteValidationError::InvalidPath {
+            path: path.to_owned(),
+            message: "too long",
+        });
+    }
+    if !path.starts_with('/') {
+        return Err(RouteValidationError::InvalidPath {
+            path: path.to_owned(),
+            message: "must start with '/'",
+        });
+    }
+    if path == "/" {
+        return Err(RouteValidationError::InvalidPath {
+            path: path.to_owned(),
+            message: "must include at least one segment",
+        });
+    }
+    if path.len() > 1 && path.ends_with('/') {
+        return Err(RouteValidationError::InvalidPath {
+            path: path.to_owned(),
+            message: "must not end with '/'",
+        });
+    }
+    if path.contains("//") {
+        return Err(RouteValidationError::InvalidPath {
+            path: path.to_owned(),
+            message: "empty path segments are not allowed",
+        });
+    }
+    for segment in path.split('/').skip(1) {
+        if segment == "." || segment == ".." {
+            return Err(RouteValidationError::InvalidPath {
+                path: path.to_owned(),
+                message: "relative path segments are not allowed",
+            });
+        }
+        if segment.bytes().any(
+            |byte| !matches!(byte, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'.' | b'_' | b'-'),
+        ) {
+            return Err(RouteValidationError::InvalidPath {
+                path: path.to_owned(),
+                message: "expected ASCII letters, digits, '/', '.', '_' or '-'",
+            });
+        }
+    }
+    Ok(())
+}
 
 /// Default maximum request line size accepted by the line transport.
 pub const DEFAULT_MAX_LINE_BYTES: usize = 64 * 1024;
