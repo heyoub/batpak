@@ -11,4 +11,4 @@ batpak = { path = "../.." }
 batpak-kind-collision-a = { path = "../kind-collision-a" }
 batpak-kind-collision-b = { path = "../kind-collision-b" }
 batpak-kind-feature-split = { path = "../kind-feature-split", features = ["extra-payload"] }
-tempfile = "3"
+tempfile = ">=3.24, <3.25"
