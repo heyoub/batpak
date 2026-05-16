@@ -41,7 +41,7 @@ impl CoreBuilder {
             .validate()
             .map_err(|error| BuildError::invalid_module(module.name(), error.to_string()))?;
         for (_, descriptor) in module.operations() {
-            self.register_operation(*descriptor)?;
+            self.register_operation(descriptor.clone())?;
         }
         Ok(self)
     }
@@ -118,6 +118,18 @@ impl CoreBuilder {
         self.descriptors.insert(name.clone(), descriptor);
         self.handlers.insert(name, Box::new(handler));
         Ok(self)
+    }
+
+    /// Register a macro-generated operation item.
+    ///
+    /// # Errors
+    /// Returns the same duplicate or validation errors as [`Self::register`].
+    pub fn register_item(
+        &mut self,
+        item: operation::OperationRegisterItem,
+    ) -> Result<&mut Self, BuildError> {
+        let (descriptor, handler) = item.into_parts();
+        self.register(descriptor, handler)
     }
 
     /// Configure the optional receipt sink made available to invocation

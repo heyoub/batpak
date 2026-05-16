@@ -185,7 +185,7 @@ impl ReceiptEnvelope {
     /// Construct an envelope from an operation descriptor.
     #[must_use]
     pub fn new(descriptor: &OperationDescriptor, outcome: ReceiptOutcome) -> Self {
-        Self::from_descriptor(descriptor.name, descriptor.receipt_kind, outcome)
+        Self::from_descriptor(descriptor.name(), descriptor.receipt_kind(), outcome)
     }
 
     /// Construct an envelope from stable descriptor receipt fields.

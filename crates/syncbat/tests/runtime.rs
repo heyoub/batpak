@@ -108,7 +108,7 @@ fn register_and_cache_lookup_descriptor_by_name() {
     let cache = syncbat::CacheRegister::from_register(&register);
     assert!(cache.contains_operation("echo"));
     assert_eq!(
-        cache.operation("echo").expect("descriptor").receipt_kind,
+        cache.operation("echo").expect("descriptor").receipt_kind(),
         "receipt.echo.v1"
     );
     assert_eq!(

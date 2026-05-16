@@ -7,6 +7,9 @@ use crate::core::Cx;
 /// Result type returned by syncbat handlers.
 pub type HandlerResult = Result<Vec<u8>, HandlerError>;
 
+/// Function-pointer handler emitted by operation declaration macros.
+pub type HandlerFn = for<'a> fn(&[u8], &mut Cx<'a>) -> HandlerResult;
+
 /// Error returned when a handler cannot produce output bytes.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum HandlerError {
