@@ -347,9 +347,9 @@ fn extension_blob_digest(bytes: &[u8]) -> [u8; 32] {
     #[cfg(not(feature = "blake3"))]
     {
         let mut digest = [0u8; 32];
-        for (seed, chunk) in digest.chunks_exact_mut(4).enumerate() {
+        for (seed, chunk) in (0_u32..).zip(digest.chunks_exact_mut(4)) {
             let mut hasher = crc32fast::Hasher::new();
-            hasher.update(&(seed as u32).to_le_bytes());
+            hasher.update(&seed.to_le_bytes());
             hasher.update(bytes);
             chunk.copy_from_slice(&hasher.finalize().to_le_bytes());
         }
