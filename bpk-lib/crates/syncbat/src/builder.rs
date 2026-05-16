@@ -37,11 +37,12 @@ impl CoreBuilder {
     /// Returns a build error when the module is invalid or when any descriptor
     /// duplicates an operation already registered in this builder.
     pub fn mount(&mut self, module: module::Module) -> Result<&mut Self, BuildError> {
-        module
-            .validate()
-            .map_err(|error| BuildError::invalid_module(module.name(), error.to_string()))?;
-        for (_, descriptor) in module.operations() {
-            self.register_operation(descriptor.clone())?;
+        let module_name = module.name().to_owned();
+        let register = module
+            .into_register()
+            .map_err(|error| BuildError::invalid_module(&module_name, error.to_string()))?;
+        for (_, descriptor) in register.into_map() {
+            self.register_operation(descriptor)?;
         }
         Ok(self)
     }

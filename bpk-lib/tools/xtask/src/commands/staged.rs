@@ -59,7 +59,7 @@ fn staged_entries(root: &Path) -> Result<Vec<StagedEntry>> {
     for line in stdout.lines() {
         let mut parts = line.split('\t');
         let status = parts.next().unwrap_or_default();
-        let path = parts.last().unwrap_or_default();
+        let path = parts.next_back().unwrap_or_default();
         if status.is_empty() || path.is_empty() {
             continue;
         }

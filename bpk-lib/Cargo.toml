@@ -14,6 +14,30 @@ members = [
 default-members = ["crates/core"]
 resolver = "2"
 
+[workspace.lints.clippy]
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
+unwrap_used = "deny"
+panic = "deny"
+needless_return = "deny"
+print_stdout = "deny"
+print_stderr = "deny"
+cast_possible_truncation = "deny"
+cast_sign_loss = "deny"
+wildcard_enum_match_arm = "warn"
+assertions_on_constants = "deny"
+disallowed_methods = "deny"
+large_enum_variant = "warn"
+clone_on_ref_ptr = "warn"
+needless_pass_by_value = "warn"
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "warn"
+
+[workspace.lints.rust]
+deprecated = "deny"
+
 # Profile settings (NOT in .cargo/config.toml — they're ignored there)
 [profile.dev]
 opt-level = 0
