@@ -1,0 +1,10 @@
+# Repository-local Cargo config must stay portable.
+# Put host-specific linker or environment overrides in:
+#   - ~/.cargo/config.toml
+# Cargo does not load a repository-local ".cargo/config.local.toml" automatically.
+
+[alias]
+xtask = "run --quiet --package xtask --"
+
+[build]
+target-dir = "../target"

@@ -61,7 +61,7 @@ All notable changes to this project will be documented in this file.
   `validate_event_payload_registry()` explicitly. This makes release-build
   binaries carry the small static registry entries needed for validation; the
   registry is not used for runtime dispatch.
-- `cargo xtask structural` now enforces `HARNESS_LEDGER.md` schema,
+- `cargo xtask structural` now enforces `041_TESTING_LEDGER.md` schema,
   doctrine-bearing module headers, and capped 500-line harness debt entries.
 - Added a `frontier_waiters` benchmark surface for many concurrent
   `wait_for_*` and append-gate waiters under the shared wake-all strategy,
@@ -118,12 +118,12 @@ All notable changes to this project will be documented in this file.
 - Cold-start restore now normalizes checkpoint, mmap, and SIDX artifact rows through one shared canonical restore seam before rebuilding `IndexEntry` state or lossy SIDX headers
 
 ### Added
-- Root-doc truth surface centered on `README.md`, `GUIDE.md`, and `REFERENCE.md`
-- Parser-backed architecture linting in `tools/integrity/src/architecture_lints.rs`
+- Root-doc truth surface centered on `README.md`, `010_USER_GUIDE.md`, and `020_TECHNICAL_REFERENCE.md`
+- Parser-backed architecture linting in `bpk-lib/tools/integrity/src/architecture_lints.rs`
 - Topology/replay/writer measurement surfaces in `benches/topology_matrix.rs`, `benches/replay_lanes.rs`, and `benches/writer_staging.rs`
 - End-to-end lane/depth position-hint coverage across live append, mmap reopen, checkpoint reopen, full rebuild, and SIDX header reconstruction
 - ADR-0009: Position Hints and Artifact Upgrade Contract
-- Structural doc-completeness checks for required `REFERENCE.md` sections so truncation fails integrity instead of silently shipping
+- Structural doc-completeness checks for required `020_TECHNICAL_REFERENCE.md` sections so truncation fails integrity instead of silently shipping
 
 ### Migration From 0.5.0
 - Rename replay imports and impls:
@@ -302,9 +302,9 @@ All notable changes to this project will be documented in this file.
   `#[ignore]`'d in the normal suite so timing variance on shared CI runners
   cannot cause spurious failures; this command is the designated path to
   exercise them intentionally.
-- **`check_ci_parity` structural check** (`tools/integrity/src/main.rs`): fails
+- **`check_ci_parity` structural check** (`bpk-lib/tools/integrity/src/main.rs`): fails
   the build when `.github/workflows/ci.yml` drifts from
-  `tools/xtask/src/main.rs` or `.devcontainer/Dockerfile`. Four invariants
+  `bpk-lib/tools/xtask/src/main.rs` or `.devcontainer/Dockerfile`. Four invariants
   enforced: (1) every `cargo xtask <subcommand>` referenced in the workflow
   must exist in xtask; (2) every `taiki-e/install-action` tool entry in the
   workflow must use the canonical `name@version` form (a bare `tool: nextest`
@@ -315,12 +315,12 @@ All notable changes to this project will be documented in this file.
   xtask setup step. Together, these close the drift vector identified by the
   infrastructure-QA pass where unpinned Windows installs could resolve to a
   newer release than the canonical container.
-- **`stale_terms` tripwire** (`tools/integrity/src/main.rs::check_for_stale_references`):
+- **`stale_terms` tripwire** (`bpk-lib/tools/integrity/src/main.rs::check_for_stale_references`):
   seven removed-API identifiers (`RedbCache`, `LmdbCache`, `entity_locks`,
   `cache_map_size_bytes`, `with_cache_map_size_bytes`, `open_with_redb_cache`,
   `open_with_lmdb_cache`) are now structurally denied anywhere outside the
   allowlist (`CHANGELOG.md`, the historical spec snapshots,
-  `docs/ADR-0003-cache-safety-assumptions.md`, the historical audit
+  `100_ADR_0003_CACHE_SAFETY_ASSUMPTIONS.md`, the historical audit
   snapshot, `AGENTS.md`, the tool source itself). Any reintroduction via lazy copy-paste
   from old docs fails `cargo xtask structural` (called by `cargo xtask ci`).
 - **Test hardening — variant matching, seeded fuzz, `GOLDEN_UPDATE` sentinel**
@@ -341,7 +341,7 @@ All notable changes to this project will be documented in this file.
   never ran in practice. It now runs on every `push` and `pull_request`.
   Results gate the PR: `cargo-mutants 27.0` exits non-zero on any missed
   mutant by default, and a manual percentage-threshold backup in
-  `tools/xtask/src/main.rs::assert_mutation_score` requires >= 20% catch
+  `bpk-lib/tools/xtask/src/main.rs::assert_mutation_score` requires >= 20% catch
   rate. Removing tests will fail the PR.
 - **`continue-on-error: true` on `actions/deploy-pages@v4` step**
   (`.github/workflows/ci.yml`): the deploy step requires GitHub Pages

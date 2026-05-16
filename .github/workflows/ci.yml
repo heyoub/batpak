@@ -68,8 +68,10 @@ jobs:
           tool: cargo-mutants@27.0.0
       - uses: Swatinem/rust-cache@v2
       - name: Integrity
+        working-directory: bpk-lib
         run: cargo xtask ci
       - name: Cross-crate EventPayload registry fixture
+        working-directory: bpk-lib
         run: cargo test --release --manifest-path crates/core/fixtures/kind-collision-composer/Cargo.toml
 
   feature-isolation:
@@ -203,6 +205,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends dmsetup e2fsprogs util-linux
       - name: dm-flakey harness
+        working-directory: bpk-lib
         env:
           BATPAK_RUN_CHAOS: "1"
         run: cargo test --features dangerous-test-hooks --test chaos -- --test-threads=1

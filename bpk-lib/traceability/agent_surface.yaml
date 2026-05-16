@@ -1,0 +1,350 @@
+tasks:
+  append_typed_event:
+    problem: "Store a typed event with compile-time EventKind binding."
+    use:
+      - "#[derive(EventPayload)]"
+      - "Store::append_typed"
+      - "Coordinate"
+    avoid:
+      - "raw dynamic EventKind unless the kind is computed at runtime"
+      - "serde_json for durable typed payload identity"
+    examples:
+      - "crates/core/examples/quickstart.rs"
+      - "crates/core/examples/cross_crate_payloads.rs"
+    tests:
+      - "crates/core/tests/event_payload_surface.rs"
+      - "crates/core/tests/store_append_behavior.rs"
+    invariants:
+      - "typed payload kind allocation is collision-checked"
+      - "typed append preserves the EventKind declared by the payload"
+    docs:
+      - "cookbook/200_TYPED_EVENT_STORE.md"
+      - "100_ADR_0010_EVENTPAYLOAD_MACRO_SURFACE.md"
+    scaffold:
+      - "typed-store"
+
+  read_region:
+    problem: "Read events through an explicit region boundary."
+    use:
+      - "Region::scope"
+      - "Region::entity"
+      - "Store::query"
+    avoid:
+      - "new unbounded public read helpers"
+      - "manual string-prefix filtering outside the Region API"
+    examples:
+      - "crates/core/examples/read_only.rs"
+    tests:
+      - "crates/core/tests/store_query_behavior.rs"
+      - "crates/core/tests/scope_visibility.rs"
+    invariants:
+      - "public reads remain bounded by substrate coordinates or regions"
+    docs:
+      - "cookbook/200_REGION_READ.md"
+
+  read_with_evidence:
+    problem: "Read events and produce deterministic evidence for the read boundary."
+    use:
+      - "ReadWalkRequest"
+      - "Store::query_with_read_walk_evidence"
+      - "ReadWalkEvidenceReport"
+    avoid:
+      - "ambient read sampling without request intent"
+      - "proof refs that are implied instead of explicitly requested"
+    examples:
+      - "templates/audit-read-report"
+    tests:
+      - "crates/core/tests/read_walk_evidence_report.rs"
+      - "crates/core/tests/evidence_report_family.rs"
+    invariants:
+      - "read evidence records selector, freshness intent, limit, and proof-ref scope deterministically"
+    docs:
+      - "cookbook/200_READ_WALK_EVIDENCE.md"
+      - "080_EVIDENCE_REPORTS.md"
+    scaffold:
+      - "evidence-read"
+
+  build_projection:
+    problem: "Build projection state from replayed store events."
+    use:
+      - "Projection"
+      - "Store::project"
+      - "Freshness"
+    avoid:
+      - "cache success without replay correctness"
+      - "projection logic that owns store ordering"
+    examples:
+      - "crates/core/examples/raw_projection_counter.rs"
+      - "crates/core/examples/raw_projection_counter_derived.rs"
+    tests:
+      - "crates/core/tests/projection_cache.rs"
+      - "crates/core/tests/store_projection_wiring.rs"
+    invariants:
+      - "projection freshness is tied to replay and cache capability evidence"
+    docs:
+      - "cookbook/200_PROJECTION.md"
+    scaffold:
+      - "projection-cache"
+
+  watch_projection:
+    problem: "Observe projection freshness after writes."
+    use:
+      - "Store::watch_projection"
+      - "Store::wait_for_projection"
+      - "ProjectionRunEvidenceReport"
+    avoid:
+      - "sleep-based freshness claims"
+      - "max frontier when global applied requires the min across projections"
+    examples:
+      - "crates/core/examples/lifecycle_observer.rs"
+    tests:
+      - "crates/core/tests/projection_run_evidence_report.rs"
+      - "crates/core/tests/unified_watch_red.rs"
+    invariants:
+      - "projection observations bind to the frontier the mechanism used"
+    docs:
+      - "cookbook/200_PROJECTION.md"
+      - "080_EVIDENCE_REPORTS.md"
+
+  cursor_replay:
+    problem: "Replay events through the at-least-once cursor canal."
+    use:
+      - "Store::cursor_guaranteed"
+      - "CursorCheckpoint"
+      - "AtLeastOnce"
+    avoid:
+      - "lossy subscription when replay is required"
+      - "manual event-id checkpoint files"
+    examples:
+      - "crates/core/examples/cursor_worker.rs"
+      - "crates/core/examples/typed_reactor.rs"
+    tests:
+      - "crates/core/tests/cursor_at_least_once_witness.rs"
+      - "crates/core/tests/store_cursor_behavior.rs"
+    invariants:
+      - "cursor replay exposes at-least-once delivery and optional durable checkpoints"
+    docs:
+      - "cookbook/200_CURSOR_REPLAY.md"
+      - "100_ADR_0011_REACTOR_CANAL.md"
+    scaffold:
+      - "reactor"
+
+  lossy_subscription:
+    problem: "Observe live events when lossy push is acceptable."
+    use:
+      - "Store::subscribe"
+      - "Subscription"
+      - "SubscriberFrontierEvidenceReport"
+    avoid:
+      - "subscription for durable replay"
+      - "unknown loss precision represented as observed loss"
+    examples:
+      - "crates/core/examples/outbox.rs"
+    tests:
+      - "crates/core/tests/store_subscription_behavior.rs"
+      - "crates/core/tests/subscriber_frontier_observations.rs"
+    invariants:
+      - "lossy delivery witnesses never fake exactness"
+    docs:
+      - "cookbook/200_LOSSY_SUBSCRIPTION.md"
+      - "080_EVIDENCE_REPORTS.md"
+
+  schema_snapshot:
+    problem: "Compare expected and observed schema/fixture hashes."
+    use:
+      - "SchemaSnapshot"
+      - "compare_schema_snapshot"
+      - "SchemaSnapshotEvidenceReport"
+    avoid:
+      - "claiming migration or semantic compatibility from structural hash drift"
+      - "unsorted or narrative-only drift findings"
+    examples:
+      - "templates/audit-read-report"
+    tests:
+      - "crates/core/tests/schema_snapshot_report.rs"
+      - "crates/core/tests/evidence_report_family.rs"
+    invariants:
+      - "schema snapshots report structural drift without downstream policy"
+    docs:
+      - "cookbook/200_READ_WALK_EVIDENCE.md"
+      - "080_EVIDENCE_REPORTS.md"
+
+  chain_walk_evidence:
+    problem: "Prove chain continuity from a selected event."
+    use:
+      - "ChainWalkRequest"
+      - "Store::chain_walk_evidence"
+      - "ChainWalkEvidenceReport"
+    avoid:
+      - "silent truncation"
+      - "missing parent links reported as clean continuity"
+    examples:
+      - "templates/audit-read-report"
+    tests:
+      - "crates/core/tests/chain_walk_evidence_report.rs"
+      - "crates/core/tests/evidence_report_family.rs"
+    invariants:
+      - "chain evidence reports missing starts, truncation, and hash mismatches deterministically"
+    docs:
+      - "cookbook/200_READ_WALK_EVIDENCE.md"
+      - "080_EVIDENCE_REPORTS.md"
+
+  subscriber_frontier_evidence:
+    problem: "Report subscriber frontier and loss observations."
+    use:
+      - "SubscriberDeliveryState"
+      - "Store::subscriber_frontier_evidence"
+      - "SubscriberFrontierEvidenceReport"
+    avoid:
+      - "loss findings for Unknown precision"
+      - "subscription state as durable replay proof"
+    examples:
+      - "crates/core/examples/outbox.rs"
+    tests:
+      - "crates/core/tests/subscriber_frontier_observations.rs"
+      - "crates/core/tests/evidence_report_family.rs"
+    invariants:
+      - "subscriber evidence distinguishes known loss from unknown precision"
+    docs:
+      - "cookbook/200_LOSSY_SUBSCRIPTION.md"
+      - "080_EVIDENCE_REPORTS.md"
+
+  projection_run_evidence:
+    problem: "Report projection run boundary, freshness, cache, checkpoint, and output facts."
+    use:
+      - "ProjectionRunEvidenceReport"
+      - "Store::projection_run_evidence"
+      - "ProjectionRunCacheStatus"
+    avoid:
+      - "ambient frontier samples called mechanism input"
+      - "workflow or protocol meaning in projection evidence"
+    examples:
+      - "templates/projection-cache"
+    tests:
+      - "crates/core/tests/projection_run_evidence_report.rs"
+      - "crates/core/tests/evidence_report_family.rs"
+    invariants:
+      - "projection evidence binds report body identity to existing projection machinery"
+    docs:
+      - "cookbook/200_PROJECTION.md"
+      - "080_EVIDENCE_REPORTS.md"
+    scaffold:
+      - "projection-cache"
+
+  artifact_envelope:
+    problem: "Hash a canonical body separately from envelope metadata, signatures, and attestations."
+    use:
+      - "CanonicalArtifactEnvelope"
+      - "artifact_body_hash_from_body"
+      - "verify_canonical_artifact_envelope"
+    avoid:
+      - "metadata inside body identity"
+      - "debug strings as artifact identity"
+    examples:
+      - "templates/artifact-envelope"
+    tests:
+      - "crates/core/tests/lane_a_artifact_substrate.rs"
+    invariants:
+      - "artifact body identity excludes envelope-only metadata"
+    docs:
+      - "cookbook/200_ARTIFACT_ENVELOPE.md"
+    scaffold:
+      - "artifact-envelope"
+
+  attested_registry:
+    problem: "Normalize and verify registry rows without leaking domain semantics into batpak."
+    use:
+      - "RegistryRowBody"
+      - "registry_row_body_hash"
+      - "verify_registry_attested_row"
+    avoid:
+      - "registry row ids derived from display/debug strings"
+      - "protocol semantic fields in the generic substrate registry"
+    examples:
+      - "templates/registry-row"
+    tests:
+      - "crates/core/tests/lane_b1_registry_substrate.rs"
+    invariants:
+      - "registry rows normalize named digests before identity and signing checks"
+    docs:
+      - "cookbook/200_ATTESTED_REGISTRY.md"
+    scaffold:
+      - "registry-row"
+
+  backup_envelope:
+    problem: "Describe backup manifest segment bytes with deterministic identity and restore evidence."
+    use:
+      - "BackupManifestBody"
+      - "BackupManifestEnvelope"
+      - "restore_proof_report_body"
+    avoid:
+      - "segment order as manifest identity"
+      - "restore proof reports that ignore missing or extra segments"
+    examples:
+      - "templates/backup-envelope"
+    tests:
+      - "crates/core/tests/lane_b2_backup_envelope_substrate.rs"
+    invariants:
+      - "backup segment refs are sorted before manifest and restore proof identity"
+    docs:
+      - "cookbook/200_BACKUP_ENVELOPE.md"
+    scaffold:
+      - "backup-envelope"
+
+  state_transition:
+    problem: "Evaluate substrate state transitions with deterministic causes and allowed edges."
+    use:
+      - "StateTransitionEvent"
+      - "build_state_transition_report"
+      - "state_transition_report_body_hash"
+    avoid:
+      - "app workflow names as substrate states"
+      - "unsorted transition causes"
+    examples:
+      - "templates/state-transition"
+    tests:
+      - "crates/core/tests/lane_b3_transition_substrate.rs"
+    invariants:
+      - "transition evidence sorts causes and reports disallowed edges deterministically"
+    docs:
+      - "cookbook/200_STATE_TRANSITION.md"
+    scaffold:
+      - "state-transition"
+
+  reservation_ledger:
+    problem: "Simulate abstract reservations and reconcile open/terminal buckets."
+    use:
+      - "ReservationTransition"
+      - "simulate_reservation_ledger"
+      - "reservation_reconciliation_report"
+    avoid:
+      - "business inventory vocabulary in reservation primitives"
+      - "transition logs without deterministic ordering"
+    examples:
+      - "templates/reservation-ledger"
+    tests:
+      - "crates/core/tests/lane_b4_reservation_substrate.rs"
+    invariants:
+      - "reservation simulation is deterministic on normalized transition order"
+    docs:
+      - "cookbook/200_RESERVATION_LEDGER.md"
+    scaffold:
+      - "reservation-ledger"
+
+  platform_evidence:
+    problem: "Probe and verify machine-contact assumptions at the store path boundary."
+    use:
+      - "cargo xtask platform doctor"
+      - "cargo xtask platform probe"
+      - "cargo xtask platform verify"
+    avoid:
+      - "hard-coded host assumptions in substrate APIs"
+      - "platform profiles blessed without an explicit command"
+    examples:
+      - "templates/minimal-store"
+    tests:
+      - "crates/core/tests/platform_backend.rs"
+    invariants:
+      - "platform evidence is collected at the machine-contact boundary, not inferred by docs"
+    docs:
+      - "cookbook/200_PLATFORM_EVIDENCE.md"

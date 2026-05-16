@@ -51,4 +51,4 @@ RUN git config --system --add safe.directory /workspace/batpak
 RUN chown -R dev:dev /usr/local/cargo /usr/local/rustup
 
 USER dev
-WORKDIR /workspace/batpak
+WORKDIR /workspace/batpak/bpk-lib

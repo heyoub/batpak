@@ -13,7 +13,7 @@
   "remoteUser": "dev",
   "containerEnv": {
     "DEVCONTAINER": "1",
-    "CARGO_TARGET_DIR": "/tmp/batpak-target"
+    "CARGO_TARGET_DIR": "/workspace/batpak/target"
   },
   "customizations": {
     "vscode": {
@@ -24,5 +24,5 @@
       ]
     }
   },
-  "postCreateCommand": "cargo xtask doctor"
+  "postCreateCommand": "cd bpk-lib && cargo xtask doctor"
 }

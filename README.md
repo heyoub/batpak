@@ -17,6 +17,9 @@ causal metadata, caller-defined gates, and projections in one Rust process. It i
 library substrate, not a hosted database: callers own the process model, disk
 placement, and integration boundaries.
 
+For repository navigation, start with
+[`000_REPO_MAP.md`](000_REPO_MAP.md).
+
 ## Batpak Family Layers
 
 The root crate stays substrate-facing. Companion crates layer runtime, kit, and
@@ -24,10 +27,10 @@ network boundaries without changing what batpak core is.
 
 | Prefix | Crate | Role | Doc |
 | --- | --- | --- | --- |
-| `bp` | `batpak` | records events and receipts | [`001_BATPAK.md`](001_BATPAK.md) |
-| `sb` | `syncbat` | runs sync checkouts over registered operations | [`002_SYNCBAT.md`](002_SYNCBAT.md) |
-| `cb` | `clawbat` | declares operation-kit vocabulary | [`003_CLAWBAT.md`](003_CLAWBAT.md) |
-| `nb` | `netbat` | exposes syncbat runtimes at network/server boundaries | [`004_NETBAT.md`](004_NETBAT.md) |
+| `bp` | `batpak` | records events and receipts | [`001_BATPAK_SUBSTRATE.md`](001_BATPAK_SUBSTRATE.md) |
+| `sb` | `syncbat` | runs sync checkouts over registered operations | [`002_SYNCBAT_RUNTIME.md`](002_SYNCBAT_RUNTIME.md) |
+| `cb` | `clawbat` | declares operation-kit vocabulary | [`003_CLAWBAT_KIT.md`](003_CLAWBAT_KIT.md) |
+| `nb` | `netbat` | exposes syncbat runtimes at network/server boundaries | [`004_NETBAT_NETWORK.md`](004_NETBAT_NETWORK.md) |
 
 Layer rule:
 
@@ -176,12 +179,12 @@ entity-chain events through `Store::append_denial(...)` using
 
 ## Testing Doctrine
 
-[HARNESS_DIRECTIVE.md](HARNESS_DIRECTIVE.md) defines the five harness
+[040_TESTING_DOCTRINE.md](040_TESTING_DOCTRINE.md) defines the five harness
 patterns used to classify doctrine-bearing test suites and the module-header
 rule for new harnesses. `cargo xtask structural` now enforces the ledger
 schema, module-header rule, and 500-line split discipline for ledger-listed
 harnesses, with explicit capped legacy debt entries.
-[HARNESS_LEDGER.md](HARNESS_LEDGER.md) records the current canonical witnesses,
+[041_TESTING_LEDGER.md](041_TESTING_LEDGER.md) records the current canonical witnesses,
 including derive compile-fail/parity,
 deterministic concurrency, chaos, fuzz-chaos feedback, perf gates, and
 cold-start/replay consistency.
@@ -210,8 +213,8 @@ full-file CRC.
 **Single-version operation.** Stop all writers before upgrading. Different binary versions
 must not share an open store simultaneously.
 
-See [GUIDE.md](GUIDE.md) for human-first workflows and usage patterns. See
-[REFERENCE.md](REFERENCE.md) for the full technical reference and invariant catalog.
+See [010_USER_GUIDE.md](010_USER_GUIDE.md) for human-first workflows and usage patterns. See
+[020_TECHNICAL_REFERENCE.md](020_TECHNICAL_REFERENCE.md) for the full technical reference and invariant catalog.
 
 ## License
 

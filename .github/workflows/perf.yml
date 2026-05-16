@@ -26,6 +26,7 @@ jobs:
       # remains the loose catastrophic-regression guard surface in
       # `tests/perf_gates.rs`, which should be interpreted on stable hardware.
       - name: Run Criterion trend surface
+        working-directory: bpk-lib
         run: cargo xtask bench --surface ${{ matrix.surface }}
       - name: Upload Criterion trend artifacts
         uses: actions/upload-artifact@v7

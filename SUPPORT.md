@@ -6,4 +6,4 @@
   <https://github.com/heyoub/batpak/issues/new/choose>.
 - Performance questions: include the benchmark surface, whether you saved or
   compared against a baseline, and the relevant benchmark/tuning context from
-  `REFERENCE.md`.
+  `020_TECHNICAL_REFERENCE.md`.

@@ -1,11 +1,11 @@
 .claude/
 .codex/
 # Cargo build artifacts. `**/target/` catches nested targets in any sub-crate
-# (e.g. fixtures/downstream/target/, tools/integrity/target/). Keep the root
-# `/target/` line for clarity; `**/target/` is the real guarantee.
+# or standalone template/fixture package. Keep `/target/` for clarity; the
+# structural gate enforces repo-root target/ as the only target directory.
 /target/
 **/target/
-# Keep the root Cargo.lock tracked: this workspace includes binary developer
+# Keep bpk-lib/Cargo.lock tracked: this workspace includes binary developer
 # tools, and release verification should use a reproducible dependency graph.
 /.artifacts/
 /.integrity-cache/
@@ -23,9 +23,9 @@
 .idea/
 .vscode/
 .cursor/plans/
-# Nested Cargo.lock files from path-dependency fixture crates — none of the
-# fixtures ship, so their lockfiles are cache, not source of truth.
-fixtures/*/Cargo.lock
+# Nested Cargo.lock files from path-dependency fixture crates are cache, not
+# source of truth.
+bpk-lib/crates/core/fixtures/*/Cargo.lock
 # Golden template crates are smoke-tested as standalone path-dependency apps;
 # their generated lockfiles are local cache, not template source.
-templates/*/Cargo.lock
+bpk-lib/templates/*/Cargo.lock

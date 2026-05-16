@@ -1,0 +1,293 @@
+use crate::util::{project_root, repo_root};
+use crate::CleanGeneratedArgs;
+use anyhow::{bail, Context, Result};
+use std::fs;
+use std::path::{Path, PathBuf};
+
+pub(crate) fn disk_audit() -> Result<()> {
+    let workspace_root = repo_root()?;
+    let project_root = project_root()?;
+    let root_target = project_root.join("target");
+
+    if root_target.exists() {
+        let bytes =
+            dir_size(&root_target).with_context(|| format!("measure {}", root_target.display()))?;
+        println!(
+            "disk-audit: root artifact target `{}`: {}",
+            rel(&project_root, &root_target),
+            human_bytes(bytes)
+        );
+    } else {
+        println!("disk-audit: root artifact target `target/`: missing");
+    }
+
+    let mut violations = Vec::new();
+    for target in nested_targets(&workspace_root)? {
+        let relative = rel(&project_root, &target);
+        if dir_has_entries(&target)? {
+            let bytes =
+                dir_size(&target).with_context(|| format!("measure {}", target.display()))?;
+            violations.push(format!(
+                "nested target `{relative}` contains artifacts ({})",
+                human_bytes(bytes)
+            ));
+        } else {
+            println!("disk-audit: nested target `{relative}` is empty");
+        }
+    }
+
+    for lockfile in template_lockfiles(&workspace_root)? {
+        violations.push(format!(
+            "template lockfile `{}` is generated cache",
+            rel(&project_root, &lockfile)
+        ));
+    }
+
+    if !violations.is_empty() {
+        for violation in &violations {
+            eprintln!("disk-audit: {violation}");
+        }
+        bail!(
+            "disk-audit found {} generated artifact issue(s)",
+            violations.len()
+        );
+    }
+
+    println!("disk-audit: ok");
+    Ok(())
+}
+
+pub(crate) fn clean_generated(args: CleanGeneratedArgs) -> Result<()> {
+    let workspace_root = repo_root()?;
+    let project_root = project_root()?;
+    let artifacts = generated_sprawl(&workspace_root)?;
+
+    if artifacts.is_empty() {
+        println!("clean-generated: nothing to remove");
+        return Ok(());
+    }
+
+    for artifact in &artifacts {
+        let rel = rel(&project_root, artifact.path());
+        let action = if args.apply { "remove" } else { "would remove" };
+        println!(
+            "clean-generated: {action} {} `{rel}`",
+            artifact.kind_label()
+        );
+    }
+
+    if !args.apply {
+        println!("clean-generated: dry run; pass --apply to remove these generated artifacts");
+        return Ok(());
+    }
+
+    for artifact in artifacts {
+        artifact.remove()?;
+    }
+    println!("clean-generated: ok");
+    Ok(())
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum GeneratedArtifact {
+    NestedTarget(PathBuf),
+    TemplateLockfile(PathBuf),
+}
+
+impl GeneratedArtifact {
+    fn path(&self) -> &Path {
+        match self {
+            Self::NestedTarget(path) | Self::TemplateLockfile(path) => path,
+        }
+    }
+
+    fn kind_label(&self) -> &'static str {
+        match self {
+            Self::NestedTarget(_) => "nested target dir",
+            Self::TemplateLockfile(_) => "template lockfile",
+        }
+    }
+
+    fn remove(&self) -> Result<()> {
+        match self {
+            Self::NestedTarget(path) => {
+                fs::remove_dir_all(path).with_context(|| format!("remove {}", path.display()))
+            }
+            Self::TemplateLockfile(path) => {
+                fs::remove_file(path).with_context(|| format!("remove {}", path.display()))
+            }
+        }
+    }
+}
+
+fn generated_sprawl(workspace_root: &Path) -> Result<Vec<GeneratedArtifact>> {
+    let mut artifacts = Vec::new();
+    artifacts.extend(
+        nested_targets(workspace_root)?
+            .into_iter()
+            .map(GeneratedArtifact::NestedTarget),
+    );
+    artifacts.extend(
+        template_lockfiles(workspace_root)?
+            .into_iter()
+            .map(GeneratedArtifact::TemplateLockfile),
+    );
+    artifacts.sort_by(|left, right| left.path().cmp(right.path()));
+    Ok(artifacts)
+}
+
+fn nested_targets(workspace_root: &Path) -> Result<Vec<PathBuf>> {
+    let mut targets = Vec::new();
+    collect_nested_targets(workspace_root, workspace_root, &mut targets)?;
+    targets.sort();
+    Ok(targets)
+}
+
+fn collect_nested_targets(root: &Path, dir: &Path, targets: &mut Vec<PathBuf>) -> Result<()> {
+    for entry in fs::read_dir(dir).with_context(|| format!("read {}", dir.display()))? {
+        let entry = entry?;
+        let path = entry.path();
+        let file_type = entry.file_type()?;
+        if !file_type.is_dir() {
+            continue;
+        }
+
+        if entry.file_name() == "target" {
+            if path != root.join("..").join("target") {
+                targets.push(path);
+            }
+            continue;
+        }
+
+        if entry.file_name() == ".git" {
+            continue;
+        }
+
+        collect_nested_targets(root, &path, targets)?;
+    }
+    Ok(())
+}
+
+fn template_lockfiles(workspace_root: &Path) -> Result<Vec<PathBuf>> {
+    let templates = workspace_root.join("templates");
+    let mut lockfiles = Vec::new();
+    if !templates.exists() {
+        return Ok(lockfiles);
+    }
+
+    for entry in fs::read_dir(&templates).context("read templates")? {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
+        let lockfile = entry.path().join("Cargo.lock");
+        if lockfile.exists() {
+            lockfiles.push(lockfile);
+        }
+    }
+    lockfiles.sort();
+    Ok(lockfiles)
+}
+
+fn dir_has_entries(path: &Path) -> Result<bool> {
+    Ok(fs::read_dir(path)
+        .with_context(|| format!("read {}", path.display()))?
+        .next()
+        .is_some())
+}
+
+fn dir_size(path: &Path) -> Result<u64> {
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.is_file() {
+        return Ok(metadata.len());
+    }
+    if !metadata.is_dir() {
+        return Ok(0);
+    }
+
+    let mut total = 0;
+    for entry in fs::read_dir(path).with_context(|| format!("read {}", path.display()))? {
+        let entry = entry?;
+        total += dir_size(&entry.path())?;
+    }
+    Ok(total)
+}
+
+fn rel(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
+fn human_bytes(bytes: u64) -> String {
+    const UNITS: &[&str] = &["B", "KiB", "MiB", "GiB", "TiB"];
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit + 1 < UNITS.len() {
+        value /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{bytes} {}", UNITS[unit])
+    } else {
+        format!("{value:.1} {}", UNITS[unit])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        generated_sprawl, human_bytes, nested_targets, template_lockfiles, GeneratedArtifact,
+    };
+    use std::fs;
+    use tempfile::tempdir;
+
+    #[test]
+    fn human_bytes_formats_binary_units() {
+        assert_eq!(human_bytes(0), "0 B");
+        assert_eq!(human_bytes(1023), "1023 B");
+        assert_eq!(human_bytes(1024), "1.0 KiB");
+        assert_eq!(human_bytes(1024 * 1024), "1.0 MiB");
+    }
+
+    #[test]
+    fn finds_nested_targets_without_descending_into_them() {
+        let temp = tempdir().expect("tempdir");
+        let root = temp.path();
+        fs::create_dir_all(root.join("crates/core/target/debug")).expect("target");
+        fs::create_dir_all(root.join("templates/demo/src")).expect("template");
+
+        let targets = nested_targets(root).expect("scan targets");
+        assert_eq!(targets, vec![root.join("crates/core/target")]);
+    }
+
+    #[test]
+    fn finds_template_lockfiles() {
+        let temp = tempdir().expect("tempdir");
+        let root = temp.path();
+        fs::create_dir_all(root.join("templates/demo")).expect("template");
+        fs::write(root.join("templates/demo/Cargo.lock"), "").expect("lock");
+
+        let lockfiles = template_lockfiles(root).expect("scan locks");
+        assert_eq!(lockfiles, vec![root.join("templates/demo/Cargo.lock")]);
+    }
+
+    #[test]
+    fn generated_sprawl_combines_only_cleanup_owned_artifacts() {
+        let temp = tempdir().expect("tempdir");
+        let root = temp.path();
+        fs::create_dir_all(root.join("crates/core/target/debug")).expect("target");
+        fs::create_dir_all(root.join("templates/demo")).expect("template");
+        fs::write(root.join("templates/demo/Cargo.lock"), "").expect("lock");
+
+        let artifacts = generated_sprawl(root).expect("scan generated artifacts");
+        assert_eq!(
+            artifacts,
+            vec![
+                GeneratedArtifact::NestedTarget(root.join("crates/core/target")),
+                GeneratedArtifact::TemplateLockfile(root.join("templates/demo/Cargo.lock")),
+            ]
+        );
+    }
+}
