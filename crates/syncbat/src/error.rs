@@ -33,6 +33,20 @@ pub enum BuildError {
         /// Validation message.
         message: String,
     },
+    /// An operation descriptor failed shape validation.
+    InvalidOperation {
+        /// Operation name.
+        name: String,
+        /// Validation message.
+        message: String,
+    },
+    /// A handler name failed shape validation.
+    InvalidHandler {
+        /// Handler name.
+        name: String,
+        /// Validation message.
+        message: String,
+    },
 }
 
 impl BuildError {
@@ -68,6 +82,24 @@ impl BuildError {
             message: message.into(),
         }
     }
+
+    /// Build an invalid-operation error.
+    #[must_use]
+    pub fn invalid_operation(name: impl Into<String>, message: impl Into<String>) -> Self {
+        Self::InvalidOperation {
+            name: name.into(),
+            message: message.into(),
+        }
+    }
+
+    /// Build an invalid-handler error.
+    #[must_use]
+    pub fn invalid_handler(name: impl Into<String>, message: impl Into<String>) -> Self {
+        Self::InvalidHandler {
+            name: name.into(),
+            message: message.into(),
+        }
+    }
 }
 
 impl fmt::Display for BuildError {
@@ -87,6 +119,12 @@ impl fmt::Display for BuildError {
             }
             Self::InvalidModule { name, message } => {
                 write!(f, "module `{name}` is invalid: {message}")
+            }
+            Self::InvalidOperation { name, message } => {
+                write!(f, "operation `{name}` is invalid: {message}")
+            }
+            Self::InvalidHandler { name, message } => {
+                write!(f, "handler `{name}` is invalid: {message}")
             }
         }
     }

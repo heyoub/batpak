@@ -5,7 +5,7 @@
 //! on the runtime builder so module descriptors stay declarative.
 
 use crate::operation::OperationDescriptor;
-use crate::register::{Register, RegisterValidationError};
+use crate::register::{validate_module_name, Register, RegisterValidationError};
 use std::collections::BTreeMap;
 
 /// Data-oriented module descriptor.
@@ -73,10 +73,16 @@ impl Module {
     ///
     /// # Errors
     ///
-    /// Currently this only returns duplicate-operation errors during insertion;
-    /// the method is kept explicit so future module-level validation has a
-    /// stable call site.
     pub fn validate(&self) -> Result<(), RegisterValidationError> {
+        validate_module_name(&self.name)?;
+        for descriptor in self.operations.values() {
+            descriptor
+                .validate()
+                .map_err(|source| RegisterValidationError::InvalidDescriptor {
+                    name: descriptor.name().to_owned(),
+                    source,
+                })?;
+        }
         Ok(())
     }
 

@@ -23,7 +23,10 @@ pub use core::{Checkout, CheckoutFrame, CheckoutResult, Core, Cx, InvokeResult};
 pub use error::{BuildError, RuntimeError};
 pub use handler::{Handler, HandlerError, HandlerResult};
 pub use module::Module;
-pub use operation::{EffectClass, OperationDescriptor, OperationInput, OperationOutput};
+pub use operation::{
+    DescriptorValidationError, EffectClass, OperationDescriptor, OperationInput, OperationOutput,
+    MAX_DESCRIPTOR_REF_BYTES, MAX_OPERATION_NAME_BYTES,
+};
 pub use receipt::{
     BatpakReceiptFields, ReceiptEnvelope, ReceiptExtensionDrawer, ReceiptHash, ReceiptHashPolicy,
     ReceiptHasher, ReceiptOutcome, ReceiptSink, ReceiptSinkError, RecordedReceipt,

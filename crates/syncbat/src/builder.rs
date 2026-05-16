@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use crate::core::Core;
 use crate::error::BuildError;
 use crate::receipt::ReceiptHashPolicy;
-use crate::{handler, module, operation, receipt};
+use crate::{handler, module, operation, receipt, register};
 
 type BoxedHandler = Box<dyn handler::Handler + 'static>;
 type BoxedReceiptSink = Box<dyn receipt::ReceiptSink + 'static>;
@@ -56,6 +56,9 @@ impl CoreBuilder {
         descriptor: operation::OperationDescriptor,
     ) -> Result<&mut Self, BuildError> {
         let name = descriptor.name().to_owned();
+        descriptor
+            .validate()
+            .map_err(|error| BuildError::invalid_operation(&name, error.to_string()))?;
         if self.descriptors.contains_key(&name) {
             return Err(BuildError::duplicate_operation(name));
         }
@@ -78,6 +81,8 @@ impl CoreBuilder {
         H: handler::Handler + 'static,
     {
         let name = name.into();
+        register::validate_module_name(&name)
+            .map_err(|error| BuildError::invalid_handler(&name, error.to_string()))?;
         if self.handlers.contains_key(&name) {
             return Err(BuildError::duplicate_handler(name));
         }
@@ -100,6 +105,9 @@ impl CoreBuilder {
         H: handler::Handler + 'static,
     {
         let name = descriptor.name().to_owned();
+        descriptor
+            .validate()
+            .map_err(|error| BuildError::invalid_operation(&name, error.to_string()))?;
         if self.descriptors.contains_key(&name) {
             return Err(BuildError::duplicate_operation(name));
         }

@@ -22,6 +22,11 @@ pub type OperationInput = Vec<u8>;
 /// Byte output returned by a syncbat handler.
 pub type OperationOutput = Vec<u8>;
 
+/// Maximum bytes accepted for a stable operation name.
+pub const MAX_OPERATION_NAME_BYTES: usize = 128;
+/// Maximum bytes accepted for schema and receipt string references.
+pub const MAX_DESCRIPTOR_REF_BYTES: usize = 256;
+
 /// Stable metadata that describes a byte-oriented operation.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct OperationDescriptor {
@@ -71,4 +76,108 @@ impl OperationDescriptor {
     pub const fn name(&self) -> &'static str {
         self.name
     }
+
+    /// Validate descriptor fields before insertion into a live runtime catalog.
+    ///
+    /// # Errors
+    /// Returns [`DescriptorValidationError`] when any stable identifier is
+    /// empty, too long, or contains bytes outside syncbat's descriptor grammar.
+    pub fn validate(&self) -> Result<(), DescriptorValidationError> {
+        validate_stable_token("name", self.name, MAX_OPERATION_NAME_BYTES)?;
+        validate_stable_ref(
+            self.name,
+            "input_schema_ref",
+            self.input_schema_ref,
+            MAX_DESCRIPTOR_REF_BYTES,
+        )?;
+        validate_stable_ref(
+            self.name,
+            "output_schema_ref",
+            self.output_schema_ref,
+            MAX_DESCRIPTOR_REF_BYTES,
+        )?;
+        validate_stable_ref(
+            self.name,
+            "receipt_kind",
+            self.receipt_kind,
+            MAX_DESCRIPTOR_REF_BYTES,
+        )
+    }
+}
+
+/// Descriptor shape validation failure.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DescriptorValidationError {
+    /// Field that failed validation.
+    pub field: &'static str,
+    /// Invalid field value.
+    pub value: String,
+    /// Stable validation message.
+    pub message: &'static str,
+}
+
+impl DescriptorValidationError {
+    fn new(field: &'static str, value: impl Into<String>, message: &'static str) -> Self {
+        Self {
+            field,
+            value: value.into(),
+            message,
+        }
+    }
+}
+
+impl std::fmt::Display for DescriptorValidationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} `{}` is invalid: {}",
+            self.field, self.value, self.message
+        )
+    }
+}
+
+impl std::error::Error for DescriptorValidationError {}
+
+fn validate_stable_ref(
+    operation_name: &str,
+    field: &'static str,
+    value: &str,
+    max: usize,
+) -> Result<(), DescriptorValidationError> {
+    validate_stable_token(field, value, max).map_err(|error| DescriptorValidationError {
+        field: error.field,
+        value: format!("{operation_name}:{}", error.value),
+        message: error.message,
+    })
+}
+
+fn validate_stable_token(
+    field: &'static str,
+    value: &str,
+    max: usize,
+) -> Result<(), DescriptorValidationError> {
+    if value.is_empty() {
+        return Err(DescriptorValidationError::new(field, value, "empty"));
+    }
+    if value.len() > max {
+        return Err(DescriptorValidationError::new(field, value, "too long"));
+    }
+    if value
+        .bytes()
+        .any(|byte| !matches!(byte, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'.' | b'_' | b'-'))
+    {
+        return Err(DescriptorValidationError::new(
+            field,
+            value,
+            "expected ASCII letters, digits, '.', '_' or '-'",
+        ));
+    }
+    if value.starts_with('.') || value.ends_with('.') || value.contains("..") {
+        return Err(DescriptorValidationError::new(
+            field,
+            value,
+            "dot-separated tokens must be non-empty",
+        ));
+    }
+    Ok(())
 }
