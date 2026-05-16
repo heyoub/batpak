@@ -37,6 +37,7 @@ impl Parse for OperationArgs {
 struct ParsedOperationArgs {
     descriptor: Ident,
     register: Option<Ident>,
+    register_item: Option<Ident>,
     name: Lit,
     effect: Ident,
     input_schema: Lit,
@@ -58,13 +59,14 @@ fn expand_operation(args: OperationArgs, function: ItemFn) -> Result<proc_macro2
     let receipt_kind = &parsed.receipt_kind;
     let descriptor_expr = if let Some(title) = &parsed.title {
         quote! {
-            ::syncbat::OperationDescriptor::new(
+            ::syncbat::OperationDescriptor::new_with_title(
                 #name,
                 ::syncbat::EffectClass::#effect,
                 #input_schema,
                 #output_schema,
                 #receipt_kind,
-            ).with_title(#title)
+                #title,
+            )
         }
     } else {
         quote! {
@@ -78,12 +80,26 @@ fn expand_operation(args: OperationArgs, function: ItemFn) -> Result<proc_macro2
         }
     };
 
+    let register_item_fn = parsed.register_item.as_ref().map(|register_item| {
+        quote! {
+            pub fn #register_item() -> ::syncbat::OperationRegisterItem {
+                ::syncbat::OperationRegisterItem::new(#descriptor.clone(), #fn_name)
+            }
+        }
+    });
+
+    let item_expr = if let Some(register_item) = &parsed.register_item {
+        quote! { #register_item() }
+    } else {
+        quote! { ::syncbat::OperationRegisterItem::new(#descriptor.clone(), #fn_name) }
+    };
+
     let register_fn = parsed.register.map(|register| {
         quote! {
             pub fn #register(
                 builder: &mut ::syncbat::CoreBuilder,
             ) -> ::std::result::Result<&mut ::syncbat::CoreBuilder, ::syncbat::BuildError> {
-                builder.register(#descriptor, #fn_name)
+                builder.register_item(#item_expr)
             }
         }
     });
@@ -94,6 +110,8 @@ fn expand_operation(args: OperationArgs, function: ItemFn) -> Result<proc_macro2
         const #descriptor: ::syncbat::OperationDescriptor = #descriptor_expr;
 
         const _: fn(&[u8], &mut ::syncbat::Cx<'_>) -> ::syncbat::HandlerResult = #fn_name;
+
+        #register_item_fn
 
         #register_fn
     })
@@ -152,6 +170,7 @@ fn validate_function(function: &ItemFn) -> Result<()> {
 fn parse_args(args: OperationArgs) -> Result<ParsedOperationArgs> {
     let mut descriptor = None;
     let mut register = None;
+    let mut register_item = None;
     let mut name = None;
     let mut effect = None;
     let mut input_schema = None;
@@ -168,6 +187,7 @@ fn parse_args(args: OperationArgs) -> Result<ParsedOperationArgs> {
         match key.as_str() {
             "descriptor" => set_ident(&mut descriptor, "descriptor", &pair)?,
             "register" => set_ident(&mut register, "register", &pair)?,
+            "register_item" => set_ident(&mut register_item, "register_item", &pair)?,
             "name" => set_string(&mut name, "name", &pair)?,
             "effect" => set_effect(&mut effect, &pair)?,
             "input_schema" => set_string(&mut input_schema, "input_schema", &pair)?,
@@ -186,6 +206,7 @@ fn parse_args(args: OperationArgs) -> Result<ParsedOperationArgs> {
     Ok(ParsedOperationArgs {
         descriptor: required(descriptor, "descriptor")?,
         register,
+        register_item,
         name: required(name, "name")?,
         effect: required(effect, "effect")?,
         input_schema: required(input_schema, "input_schema")?,

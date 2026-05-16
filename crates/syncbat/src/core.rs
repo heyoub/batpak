@@ -63,9 +63,10 @@ impl Core {
     /// # Errors
     /// Returns the same errors as [`Core::invoke`].
     pub fn checkout_frame(&mut self, frame: CheckoutFrame) -> Result<CheckoutResult, RuntimeError> {
-        let descriptor = *self
+        let descriptor = self
             .descriptors
             .get(frame.name())
+            .cloned()
             .ok_or_else(|| RuntimeError::unknown_operation(frame.name()))?;
         self.checkout(Checkout::from_frame(descriptor, frame))
     }
@@ -82,9 +83,10 @@ impl Core {
     /// fail-closed receipt-sink error after a resolved handler invocation.
     pub fn checkout(&mut self, checkout: Checkout) -> Result<CheckoutResult, RuntimeError> {
         let name = checkout.descriptor.name();
-        let descriptor = *self
+        let descriptor = self
             .descriptors
             .get(name)
+            .cloned()
             .ok_or_else(|| RuntimeError::unknown_operation(name))?;
         let handler = self
             .handlers

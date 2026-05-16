@@ -64,7 +64,7 @@ fn descriptor_validation_rejects_empty_overlong_and_path_like_names() {
     ];
 
     for descriptor in cases {
-        let err = match Register::from_operations([descriptor]) {
+        let err = match Register::from_operations([descriptor.clone()]) {
             Ok(_) => panic!("expected descriptor rejection for {:?}", descriptor.name()),
             Err(error) => error,
         };

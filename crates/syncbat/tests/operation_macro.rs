@@ -5,6 +5,7 @@ use syncbat::{Core, HandlerError, RuntimeError};
 #[syncbat::operation(
     descriptor = ECHO,
     register = register_echo,
+    register_item = echo_item,
     name = "echo",
     effect = Compute,
     input_schema = "schema.echo.input.v1",
@@ -34,15 +35,22 @@ fn failing(_input: &[u8], _cx: &mut syncbat::Cx<'_>) -> syncbat::HandlerResult {
 
 #[test]
 fn operation_macro_generates_descriptor_fields() {
-    assert_eq!(ECHO.name, "echo");
-    assert_eq!(ECHO.title, Some("Echo"));
+    assert_eq!(ECHO.name(), "echo");
+    assert_eq!(ECHO.title(), Some("Echo"));
     assert_eq!(ECHO.effect, syncbat::EffectClass::Compute);
-    assert_eq!(ECHO.input_schema_ref, "schema.echo.input.v1");
-    assert_eq!(ECHO.output_schema_ref, "schema.echo.output.v1");
-    assert_eq!(ECHO.receipt_kind, "receipt.echo.v1");
+    assert_eq!(ECHO.input_schema_ref(), "schema.echo.input.v1");
+    assert_eq!(ECHO.output_schema_ref(), "schema.echo.output.v1");
+    assert_eq!(ECHO.receipt_kind(), "receipt.echo.v1");
 
-    assert_eq!(FAILING.name, "failing");
-    assert_eq!(FAILING.title, None);
+    assert_eq!(FAILING.name(), "failing");
+    assert_eq!(FAILING.title(), None);
+}
+
+#[test]
+fn operation_macro_generates_register_item() {
+    let item = echo_item();
+
+    assert_eq!(item.descriptor(), &ECHO);
 }
 
 #[test]

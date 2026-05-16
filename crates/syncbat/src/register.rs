@@ -157,7 +157,7 @@ impl Register {
     #[must_use]
     pub fn checkout(&self, name: impl AsRef<str>, input: OperationInput) -> Option<Checkout> {
         let name = name.as_ref();
-        let descriptor = *self.operation(name)?;
+        let descriptor = self.operation(name)?.clone();
         Some(Checkout::new(descriptor, input))
     }
 

@@ -16,6 +16,7 @@ pub mod module;
 pub mod operation;
 pub mod receipt;
 pub mod register;
+pub mod register_store;
 pub mod store_sink;
 
 pub use builder::CoreBuilder;
@@ -25,7 +26,7 @@ pub use handler::{Handler, HandlerError, HandlerResult};
 pub use module::Module;
 pub use operation::{
     DescriptorValidationError, EffectClass, OperationDescriptor, OperationInput, OperationOutput,
-    MAX_DESCRIPTOR_REF_BYTES, MAX_OPERATION_NAME_BYTES,
+    OperationRegisterItem, MAX_DESCRIPTOR_REF_BYTES, MAX_OPERATION_NAME_BYTES,
 };
 pub use receipt::{
     BatpakReceiptFields, ReceiptEnvelope, ReceiptExtensionDrawer, ReceiptHash, ReceiptHashPolicy,
@@ -33,6 +34,10 @@ pub use receipt::{
     SYNCBAT_RECEIPT_EVENT_KIND,
 };
 pub use register::{CacheRegister, Register, RegisterValidationError};
+pub use register_store::{
+    rebuild_register_from_store, RegisterOperationPutV1, StoreRegisterCatalog,
+    StoreRegisterCatalogError, SYNCBAT_REGISTER_EVENT_KIND,
+};
 pub use store_sink::{StoreReceiptSink, StoreReceiptSinkError};
 pub use syncbat_macros::operation;
 

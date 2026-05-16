@@ -1,5 +1,10 @@
 //! Generic operation metadata for syncbat handlers.
 
+use std::hash::{Hash, Hasher};
+use std::sync::Arc;
+
+use crate::handler::HandlerFn;
+
 /// Runtime-facing side-effect classification for an operation receipt.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[non_exhaustive]
@@ -16,6 +21,33 @@ pub enum EffectClass {
     Control,
 }
 
+impl EffectClass {
+    /// Stable lowercase catalog spelling.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Inspect => "inspect",
+            Self::Compute => "compute",
+            Self::Persist => "persist",
+            Self::Emit => "emit",
+            Self::Control => "control",
+        }
+    }
+
+    /// Parse a stable lowercase catalog spelling.
+    #[must_use]
+    pub fn from_catalog_str(value: &str) -> Option<Self> {
+        match value {
+            "inspect" => Some(Self::Inspect),
+            "compute" => Some(Self::Compute),
+            "persist" => Some(Self::Persist),
+            "emit" => Some(Self::Emit),
+            "control" => Some(Self::Control),
+            _ => None,
+        }
+    }
+}
+
 /// Byte input passed into a syncbat handler.
 pub type OperationInput = Vec<u8>;
 
@@ -28,20 +60,55 @@ pub const MAX_OPERATION_NAME_BYTES: usize = 128;
 pub const MAX_DESCRIPTOR_REF_BYTES: usize = 256;
 
 /// Stable metadata that describes a byte-oriented operation.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct OperationDescriptor {
     /// Stable operation name used for routing and receipts.
-    pub name: &'static str,
+    name: DescriptorText,
     /// Optional human-readable title.
-    pub title: Option<&'static str>,
+    title: Option<DescriptorText>,
     /// Runtime-facing effect class for receipt classification.
     pub effect: EffectClass,
     /// Stable string reference for the operation input schema.
-    pub input_schema_ref: &'static str,
+    input_schema_ref: DescriptorText,
     /// Stable string reference for the operation output schema.
-    pub output_schema_ref: &'static str,
+    output_schema_ref: DescriptorText,
     /// Stable receipt kind emitted for this operation.
-    pub receipt_kind: &'static str,
+    receipt_kind: DescriptorText,
+}
+
+#[derive(Clone, Debug, Eq)]
+enum DescriptorText {
+    Static(&'static str),
+    Owned(Arc<str>),
+}
+
+impl DescriptorText {
+    const fn static_str(value: &'static str) -> Self {
+        Self::Static(value)
+    }
+
+    fn owned(value: impl Into<String>) -> Self {
+        Self::Owned(Arc::from(value.into()))
+    }
+
+    fn as_str(&self) -> &str {
+        match self {
+            Self::Static(value) => value,
+            Self::Owned(value) => value.as_ref(),
+        }
+    }
+}
+
+impl PartialEq for DescriptorText {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_str() == other.as_str()
+    }
+}
+
+impl Hash for DescriptorText {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.as_str().hash(state);
+    }
 }
 
 impl OperationDescriptor {
@@ -55,26 +122,99 @@ impl OperationDescriptor {
         receipt_kind: &'static str,
     ) -> Self {
         Self {
-            name,
+            name: DescriptorText::static_str(name),
             title: None,
             effect,
-            input_schema_ref,
-            output_schema_ref,
-            receipt_kind,
+            input_schema_ref: DescriptorText::static_str(input_schema_ref),
+            output_schema_ref: DescriptorText::static_str(output_schema_ref),
+            receipt_kind: DescriptorText::static_str(receipt_kind),
+        }
+    }
+
+    /// Construct an operation descriptor from stable string references with a
+    /// human-readable title.
+    #[must_use]
+    pub const fn new_with_title(
+        name: &'static str,
+        effect: EffectClass,
+        input_schema_ref: &'static str,
+        output_schema_ref: &'static str,
+        receipt_kind: &'static str,
+        title: &'static str,
+    ) -> Self {
+        Self {
+            name: DescriptorText::static_str(name),
+            title: Some(DescriptorText::static_str(title)),
+            effect,
+            input_schema_ref: DescriptorText::static_str(input_schema_ref),
+            output_schema_ref: DescriptorText::static_str(output_schema_ref),
+            receipt_kind: DescriptorText::static_str(receipt_kind),
+        }
+    }
+
+    /// Construct an operation descriptor from owned strings rebuilt from
+    /// durable catalog rows.
+    #[must_use]
+    pub fn owned(
+        name: impl Into<String>,
+        effect: EffectClass,
+        input_schema_ref: impl Into<String>,
+        output_schema_ref: impl Into<String>,
+        receipt_kind: impl Into<String>,
+    ) -> Self {
+        Self {
+            name: DescriptorText::owned(name),
+            title: None,
+            effect,
+            input_schema_ref: DescriptorText::owned(input_schema_ref),
+            output_schema_ref: DescriptorText::owned(output_schema_ref),
+            receipt_kind: DescriptorText::owned(receipt_kind),
         }
     }
 
     /// Return a copy of this descriptor with a human-readable title attached.
     #[must_use]
-    pub const fn with_title(mut self, title: &'static str) -> Self {
-        self.title = Some(title);
+    pub fn with_title(mut self, title: &'static str) -> Self {
+        self.title = Some(DescriptorText::static_str(title));
+        self
+    }
+
+    /// Return a copy of this descriptor with an owned human-readable title
+    /// attached.
+    #[must_use]
+    pub fn with_owned_title(mut self, title: impl Into<String>) -> Self {
+        self.title = Some(DescriptorText::owned(title));
         self
     }
 
     /// Stable operation name used for routing and receipts.
     #[must_use]
-    pub const fn name(&self) -> &'static str {
-        self.name
+    pub fn name(&self) -> &str {
+        self.name.as_str()
+    }
+
+    /// Optional human-readable title.
+    #[must_use]
+    pub fn title(&self) -> Option<&str> {
+        self.title.as_ref().map(DescriptorText::as_str)
+    }
+
+    /// Stable string reference for the operation input schema.
+    #[must_use]
+    pub fn input_schema_ref(&self) -> &str {
+        self.input_schema_ref.as_str()
+    }
+
+    /// Stable string reference for the operation output schema.
+    #[must_use]
+    pub fn output_schema_ref(&self) -> &str {
+        self.output_schema_ref.as_str()
+    }
+
+    /// Stable receipt kind emitted for this operation.
+    #[must_use]
+    pub fn receipt_kind(&self) -> &str {
+        self.receipt_kind.as_str()
     }
 
     /// Validate descriptor fields before insertion into a live runtime catalog.
@@ -83,25 +223,65 @@ impl OperationDescriptor {
     /// Returns [`DescriptorValidationError`] when any stable identifier is
     /// empty, too long, or contains bytes outside syncbat's descriptor grammar.
     pub fn validate(&self) -> Result<(), DescriptorValidationError> {
-        validate_stable_token("name", self.name, MAX_OPERATION_NAME_BYTES)?;
+        validate_stable_token("name", self.name(), MAX_OPERATION_NAME_BYTES)?;
         validate_stable_ref(
-            self.name,
+            self.name(),
             "input_schema_ref",
-            self.input_schema_ref,
+            self.input_schema_ref(),
             MAX_DESCRIPTOR_REF_BYTES,
         )?;
         validate_stable_ref(
-            self.name,
+            self.name(),
             "output_schema_ref",
-            self.output_schema_ref,
+            self.output_schema_ref(),
             MAX_DESCRIPTOR_REF_BYTES,
         )?;
         validate_stable_ref(
-            self.name,
+            self.name(),
             "receipt_kind",
-            self.receipt_kind,
+            self.receipt_kind(),
             MAX_DESCRIPTOR_REF_BYTES,
         )
+    }
+}
+
+/// Macro-generated operation registration item.
+///
+/// This is data plus a function pointer. It does not own runtime dispatch,
+/// store setup, or receipt persistence; callers still choose when to register
+/// it with a [`crate::CoreBuilder`].
+#[derive(Clone)]
+pub struct OperationRegisterItem {
+    descriptor: OperationDescriptor,
+    handler: HandlerFn,
+}
+
+impl OperationRegisterItem {
+    /// Build an operation registration item.
+    #[must_use]
+    pub fn new(descriptor: OperationDescriptor, handler: HandlerFn) -> Self {
+        Self {
+            descriptor,
+            handler,
+        }
+    }
+
+    /// Descriptor emitted for this operation.
+    #[must_use]
+    pub fn descriptor(&self) -> &OperationDescriptor {
+        &self.descriptor
+    }
+
+    /// Function-pointer handler emitted for this operation.
+    #[must_use]
+    pub fn handler(&self) -> HandlerFn {
+        self.handler
+    }
+
+    /// Consume the item and return descriptor plus handler.
+    #[must_use]
+    pub fn into_parts(self) -> (OperationDescriptor, HandlerFn) {
+        (self.descriptor, self.handler)
     }
 }
 
