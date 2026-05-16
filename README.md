@@ -17,6 +17,27 @@ causal metadata, caller-defined gates, and projections in one Rust process. It i
 library substrate, not a hosted database: callers own the process model, disk
 placement, and integration boundaries.
 
+## Batpak Family Layers
+
+The root crate stays substrate-facing. Companion crates layer runtime, kit, and
+network boundaries without changing what batpak core is.
+
+| Prefix | Crate | Role | Doc |
+| --- | --- | --- | --- |
+| `bp` | `batpak` | records events and receipts | [`001_BATPAK.md`](001_BATPAK.md) |
+| `sb` | `syncbat` | runs sync checkouts over registered operations | [`002_SYNCBAT.md`](002_SYNCBAT.md) |
+| `cb` | `downstream-kit` | declares operation-kit vocabulary | [`003_DownstreamKit.md`](003_DownstreamKit.md) |
+| `nb` | `netbat` | exposes syncbat runtimes at network/server boundaries | [`004_NETBAT.md`](004_NETBAT.md) |
+
+Layer rule:
+
+```text
+cb declares.
+sb runs.
+nb exposes.
+bp records.
+```
+
 ## Mental Model
 
 ```

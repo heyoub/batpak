@@ -10,6 +10,15 @@ For the cross-ADR evidence-report identity pattern, see
 Agent/human transcription rails live in `docs/recipes/` and are indexed by
 `traceability/agent_surface.yaml`.
 
+Root layer docs:
+
+| Doc | Layer |
+| --- | --- |
+| [`001_BATPAK.md`](../001_BATPAK.md) | `bp` substrate |
+| [`002_SYNCBAT.md`](../002_SYNCBAT.md) | `sb` sync runtime |
+| [`003_DownstreamKit.md`](../003_DownstreamKit.md) | `cb` operation kit |
+| [`004_NETBAT.md`](../004_NETBAT.md) | `nb` network/server boundary |
+
 | ADR | Title | Status |
 | --- | --- | --- |
 | ADR-0001 | Sync-Only Store API | Accepted |

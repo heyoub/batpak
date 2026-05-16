@@ -20,6 +20,27 @@ coordinate  ->  event  ->  guard  ->  pipeline  ->  store
   WHO+WHERE     WHAT      MAY I?    COMMIT       PERSIST
 ```
 
+## Family Layer Contracts
+
+The batpak-family workspace keeps engine-facing layer names explicit:
+
+| Prefix | Crate | Contract |
+| --- | --- | --- |
+| `bp` | `batpak` | substrate; records events, receipts, extensions, replay state |
+| `sb` | `syncbat` | sync runtime; registers operations, dispatches checkouts, emits runtime receipts |
+| `cb` | `downstream-kit` | operation kit; declares pass/capability vocabulary and macro wiring |
+| `nb` | `netbat` | boundary layer; validates routes/transports and calls syncbat |
+
+Root layer docs:
+[`001_BATPAK.md`](001_BATPAK.md),
+[`002_SYNCBAT.md`](002_SYNCBAT.md),
+[`003_DownstreamKit.md`](003_DownstreamKit.md), and
+[`004_NETBAT.md`](004_NETBAT.md).
+
+Dependency direction is one-way: `syncbat` may depend on `batpak`, `downstream-kit`
+may depend on `syncbat`, and `netbat` may depend on `syncbat`. The substrate
+does not import the layers above it.
+
 ### Coordinate
 
 - `Coordinate` is `(entity, scope)`
