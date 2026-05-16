@@ -19,6 +19,16 @@ execution, durable records, or operation meaning.
 The TCP listener is sequential and sync-first. It does not spawn worker threads
 inside the crate and does not require syncbat handlers to be `Send`.
 
+The line protocol accepts the versioned frame:
+
+```text
+NETBAT/1 CALL <operation-name> <hex-input>
+```
+
+The first-rung legacy `CALL <operation-name> <hex-input>` frame remains accepted.
+Unsupported `NETBAT/*` versions return a stable error response. Listener stats
+separate malformed frames, limit failures, and runtime failures.
+
 ## Main Types
 
 - `Endpoint`

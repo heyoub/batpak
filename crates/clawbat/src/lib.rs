@@ -10,16 +10,125 @@
 use std::error::Error;
 use std::fmt;
 
+use batpak::guard::{Denial, Gate, GateSet};
+use batpak::pipeline::Pipeline;
+
 pub use syncbat::operation;
 pub use syncbat::{
     EffectClass, OperationDescriptor, OperationRegisterItem, ReceiptEnvelope, ReceiptOutcome,
 };
+
+/// Stable batpak gate name for a required pass check.
+pub const REQUIRED_PASS_GATE_NAME: &str = "downstream-kit.required_pass";
+/// Stable batpak gate name for a required capability check.
+pub const REQUIRED_CAPABILITY_GATE_NAME: &str = "downstream-kit.required_capability";
+/// Machine-readable denial code for a missing pass.
+pub const MISSING_PASS_CODE: &str = "DownstreamKit_MISSING_PASS";
+/// Machine-readable denial code for a missing capability.
+pub const MISSING_CAPABILITY_CODE: &str = "DownstreamKit_MISSING_CAPABILITY";
 
 /// Lightweight validated reference to a pass declared by an operation kit.
 pub type PassRef = Ref<Pass>;
 
 /// Lightweight validated reference to a capability declared by an operation kit.
 pub type CapabilityRef = Ref<Capability>;
+
+/// Caller-provided requirement context used by downstream-kit requirement gates.
+///
+/// This trait is intentionally read-only. It lets downstream-kit declarations compile
+/// into batpak gates while the caller keeps ownership of runtime admission,
+/// dispatch, and evidence gathering.
+pub trait GateContext {
+    /// Return `true` when the requested pass is satisfied for this invocation.
+    fn has_pass(&self, pass: PassRef) -> bool;
+
+    /// Return `true` when the requested capability is satisfied for this invocation.
+    fn has_capability(&self, capability: CapabilityRef) -> bool;
+}
+
+impl<T: GateContext + ?Sized> GateContext for &T {
+    fn has_pass(&self, pass: PassRef) -> bool {
+        (**self).has_pass(pass)
+    }
+
+    fn has_capability(&self, capability: CapabilityRef) -> bool {
+        (**self).has_capability(capability)
+    }
+}
+
+/// Concrete context for callers that already know the satisfied passes and
+/// capabilities for an invocation.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct RequirementEvidence {
+    passes: Vec<PassRef>,
+    capabilities: Vec<CapabilityRef>,
+}
+
+impl RequirementEvidence {
+    /// Construct empty satisfied-requirement evidence.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            passes: Vec::new(),
+            capabilities: Vec::new(),
+        }
+    }
+
+    /// Construct satisfied-requirement evidence from pass and capability iterators.
+    #[must_use]
+    pub fn from_refs(
+        passes: impl IntoIterator<Item = PassRef>,
+        capabilities: impl IntoIterator<Item = CapabilityRef>,
+    ) -> Self {
+        Self {
+            passes: passes.into_iter().collect(),
+            capabilities: capabilities.into_iter().collect(),
+        }
+    }
+
+    /// Return a copy with one pass added.
+    #[must_use]
+    pub fn with_pass(mut self, pass: PassRef) -> Self {
+        self.passes.push(pass);
+        self
+    }
+
+    /// Return a copy with one capability added.
+    #[must_use]
+    pub fn with_capability(mut self, capability: CapabilityRef) -> Self {
+        self.capabilities.push(capability);
+        self
+    }
+
+    /// Borrow the satisfied passes in insertion order.
+    #[must_use]
+    pub fn passes(&self) -> &[PassRef] {
+        &self.passes
+    }
+
+    /// Borrow the satisfied capabilities in insertion order.
+    #[must_use]
+    pub fn capabilities(&self) -> &[CapabilityRef] {
+        &self.capabilities
+    }
+}
+
+impl GateContext for RequirementEvidence {
+    fn has_pass(&self, pass: PassRef) -> bool {
+        self.passes.contains(&pass)
+    }
+
+    fn has_capability(&self, capability: CapabilityRef) -> bool {
+        self.capabilities.contains(&capability)
+    }
+}
+
+/// Compatibility alias for satisfied requirement evidence.
+///
+/// New code should prefer [`RequirementEvidence`] so it is clear that the value
+/// represents refs already satisfied for an invocation, not the operation's
+/// declared requirements.
+pub type RequirementSet = RequirementEvidence;
 
 /// Declared pass metadata for an operation kit.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -52,6 +161,12 @@ impl PassDescriptor {
     #[must_use]
     pub const fn title(&self) -> Option<&'static str> {
         self.title
+    }
+
+    /// Compile this declaration into a batpak gate for one operation.
+    #[must_use]
+    pub fn required_gate(&self, operation_name: impl Into<String>) -> RequiredPassGate {
+        RequiredPassGate::new(operation_name, self.id)
     }
 }
 
@@ -86,6 +201,212 @@ impl CapabilityDescriptor {
     #[must_use]
     pub const fn title(&self) -> Option<&'static str> {
         self.title
+    }
+
+    /// Compile this declaration into a batpak gate for one operation.
+    #[must_use]
+    pub fn required_gate(&self, operation_name: impl Into<String>) -> RequiredCapabilityGate {
+        RequiredCapabilityGate::new(operation_name, self.id)
+    }
+}
+
+/// Batpak gate that denies when an invocation lacks a required pass.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RequiredPassGate {
+    operation_name: String,
+    pass: PassRef,
+}
+
+impl RequiredPassGate {
+    /// Construct a required-pass gate for one operation.
+    #[must_use]
+    pub fn new(operation_name: impl Into<String>, pass: PassRef) -> Self {
+        Self {
+            operation_name: operation_name.into(),
+            pass,
+        }
+    }
+
+    /// Stable operation name attached to denials from this gate.
+    #[must_use]
+    pub fn operation_name(&self) -> &str {
+        &self.operation_name
+    }
+
+    /// Pass required by this gate.
+    #[must_use]
+    pub const fn pass(&self) -> PassRef {
+        self.pass
+    }
+}
+
+impl<Ctx: GateContext> Gate<Ctx> for RequiredPassGate {
+    fn name(&self) -> &'static str {
+        REQUIRED_PASS_GATE_NAME
+    }
+
+    fn evaluate(&self, ctx: &Ctx) -> Result<(), Denial> {
+        if ctx.has_pass(self.pass) {
+            return Ok(());
+        }
+
+        Err(Denial::new(
+            REQUIRED_PASS_GATE_NAME,
+            format!(
+                "operation {} requires pass {}",
+                self.operation_name, self.pass
+            ),
+        )
+        .with_code(MISSING_PASS_CODE)
+        .with_context("operation", self.operation_name.clone())
+        .with_context("pass", self.pass.as_str()))
+    }
+
+    fn description(&self) -> &'static str {
+        "requires a declared downstream-kit pass"
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct RequiredPassSetGate {
+    operation_name: String,
+    passes: Vec<PassRef>,
+}
+
+impl RequiredPassSetGate {
+    fn new(operation_name: impl Into<String>, passes: impl IntoIterator<Item = PassRef>) -> Self {
+        Self {
+            operation_name: operation_name.into(),
+            passes: passes.into_iter().collect(),
+        }
+    }
+}
+
+impl<Ctx: GateContext> Gate<Ctx> for RequiredPassSetGate {
+    fn name(&self) -> &'static str {
+        REQUIRED_PASS_GATE_NAME
+    }
+
+    fn evaluate(&self, ctx: &Ctx) -> Result<(), Denial> {
+        for pass in &self.passes {
+            if !ctx.has_pass(*pass) {
+                return Err(Denial::new(
+                    REQUIRED_PASS_GATE_NAME,
+                    format!("operation {} requires pass {}", self.operation_name, pass),
+                )
+                .with_code(MISSING_PASS_CODE)
+                .with_context("operation", self.operation_name.clone())
+                .with_context("pass", pass.as_str()));
+            }
+        }
+        Ok(())
+    }
+
+    fn description(&self) -> &'static str {
+        "requires declared downstream-kit passes"
+    }
+}
+
+/// Batpak gate that denies when an invocation lacks a required capability.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RequiredCapabilityGate {
+    operation_name: String,
+    capability: CapabilityRef,
+}
+
+impl RequiredCapabilityGate {
+    /// Construct a required-capability gate for one operation.
+    #[must_use]
+    pub fn new(operation_name: impl Into<String>, capability: CapabilityRef) -> Self {
+        Self {
+            operation_name: operation_name.into(),
+            capability,
+        }
+    }
+
+    /// Stable operation name attached to denials from this gate.
+    #[must_use]
+    pub fn operation_name(&self) -> &str {
+        &self.operation_name
+    }
+
+    /// Capability required by this gate.
+    #[must_use]
+    pub const fn capability(&self) -> CapabilityRef {
+        self.capability
+    }
+}
+
+impl<Ctx: GateContext> Gate<Ctx> for RequiredCapabilityGate {
+    fn name(&self) -> &'static str {
+        REQUIRED_CAPABILITY_GATE_NAME
+    }
+
+    fn evaluate(&self, ctx: &Ctx) -> Result<(), Denial> {
+        if ctx.has_capability(self.capability) {
+            return Ok(());
+        }
+
+        Err(Denial::new(
+            REQUIRED_CAPABILITY_GATE_NAME,
+            format!(
+                "operation {} requires capability {}",
+                self.operation_name, self.capability
+            ),
+        )
+        .with_code(MISSING_CAPABILITY_CODE)
+        .with_context("operation", self.operation_name.clone())
+        .with_context("capability", self.capability.as_str()))
+    }
+
+    fn description(&self) -> &'static str {
+        "requires a declared downstream-kit capability"
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct RequiredCapabilitySetGate {
+    operation_name: String,
+    capabilities: Vec<CapabilityRef>,
+}
+
+impl RequiredCapabilitySetGate {
+    fn new(
+        operation_name: impl Into<String>,
+        capabilities: impl IntoIterator<Item = CapabilityRef>,
+    ) -> Self {
+        Self {
+            operation_name: operation_name.into(),
+            capabilities: capabilities.into_iter().collect(),
+        }
+    }
+}
+
+impl<Ctx: GateContext> Gate<Ctx> for RequiredCapabilitySetGate {
+    fn name(&self) -> &'static str {
+        REQUIRED_CAPABILITY_GATE_NAME
+    }
+
+    fn evaluate(&self, ctx: &Ctx) -> Result<(), Denial> {
+        for capability in &self.capabilities {
+            if !ctx.has_capability(*capability) {
+                return Err(Denial::new(
+                    REQUIRED_CAPABILITY_GATE_NAME,
+                    format!(
+                        "operation {} requires capability {}",
+                        self.operation_name, capability
+                    ),
+                )
+                .with_code(MISSING_CAPABILITY_CODE)
+                .with_context("operation", self.operation_name.clone())
+                .with_context("capability", capability.as_str()));
+            }
+        }
+        Ok(())
+    }
+
+    fn description(&self) -> &'static str {
+        "requires declared downstream-kit capabilities"
     }
 }
 
@@ -128,6 +449,37 @@ impl<'a> OperationKitItem<'a> {
     #[must_use]
     pub const fn capabilities(&self) -> &'a [CapabilityRef] {
         self.capabilities
+    }
+
+    /// Compile required passes and capabilities into a batpak gate set.
+    #[must_use]
+    pub fn compile_gate_set<Ctx>(&self) -> GateSet<Ctx>
+    where
+        Ctx: GateContext + 'static,
+    {
+        let mut gates = GateSet::new();
+        if !self.passes.is_empty() {
+            gates.push(RequiredPassSetGate::new(
+                self.descriptor.name().to_owned(),
+                self.passes.iter().copied(),
+            ));
+        }
+        if !self.capabilities.is_empty() {
+            gates.push(RequiredCapabilitySetGate::new(
+                self.descriptor.name().to_owned(),
+                self.capabilities.iter().copied(),
+            ));
+        }
+        gates
+    }
+
+    /// Compile required passes and capabilities into a batpak pipeline.
+    #[must_use]
+    pub fn compile_pipeline<Ctx>(&self) -> Pipeline<Ctx>
+    where
+        Ctx: GateContext + 'static,
+    {
+        Pipeline::new(self.compile_gate_set())
     }
 
     /// Build a syncbat register item from this operation and a handler.
@@ -300,8 +652,10 @@ pub enum Capability {}
 /// Common imports for declaring claw kit operations.
 pub mod prelude {
     pub use crate::{
-        operation, CapabilityDescriptor, CapabilityRef, EffectClass, OperationDescriptor,
-        OperationKitItem, OperationRegisterItem, PassDescriptor, PassRef, ReceiptEnvelope,
-        ReceiptOutcome, Ref, RefError,
+        operation, CapabilityDescriptor, CapabilityRef, EffectClass, GateContext,
+        OperationDescriptor, OperationKitItem, OperationRegisterItem, PassDescriptor, PassRef,
+        ReceiptEnvelope, ReceiptOutcome, Ref, RefError, RequiredCapabilityGate, RequiredPassGate,
+        RequirementEvidence, RequirementSet, MISSING_CAPABILITY_CODE, MISSING_PASS_CODE,
+        REQUIRED_CAPABILITY_GATE_NAME, REQUIRED_PASS_GATE_NAME,
     };
 }

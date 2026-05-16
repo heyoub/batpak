@@ -27,10 +27,33 @@ not become native batpak authority.
 - `CapabilityRef`
 - `PassDescriptor`
 - `CapabilityDescriptor`
+- `GateContext`
+- `RequirementEvidence`
+- `RequiredPassGate`
+- `RequiredCapabilityGate`
+- `MISSING_PASS_CODE`
+- `MISSING_CAPABILITY_CODE`
 - `OperationKitItem`
 - `OperationRegisterItem`
 - `OperationDescriptor`
 - `ReceiptEnvelope`
+
+## Requirement Compiler
+
+`OperationKitItem::compile_gate_set` and
+`OperationKitItem::compile_pipeline` turn declared pass and capability refs into
+batpak `GateSet` / `Pipeline` values over a caller-provided context. The default
+`RequirementEvidence` is a concrete context for callers that already know which refs
+are satisfied.
+
+The compiler emits one gate per requirement class, not one duplicate-named gate
+per ref. Missing refs deny with stable gate names and codes while caller policy
+still owns what makes a pass or capability true.
+
+```rust
+let gates = item.compile_gate_set::<cb::RequirementEvidence>();
+let pipeline = item.compile_pipeline::<cb::RequirementEvidence>();
+```
 
 ## Layer Contract
 

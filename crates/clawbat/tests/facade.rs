@@ -2,6 +2,13 @@
 
 use downstream-kit as cb;
 
+fn explicit_err<T>(result: Result<T, batpak::guard::Denial>) -> batpak::guard::Denial {
+    match result {
+        Ok(_) => panic!("PROPERTY: expected downstream-kit requirement gate denial but got Ok"),
+        Err(error) => error,
+    }
+}
+
 #[cb::operation(
     descriptor = ECHO,
     register = register_echo,
@@ -86,6 +93,172 @@ fn cb_kit_item_builds_syncbat_register_item_without_running_runtime() {
 
     assert_eq!(register_item.descriptor(), &ECHO);
     assert_eq!(echo_item().descriptor(), &ECHO);
+}
+
+#[test]
+fn cb_operation_requirements_compile_to_batpak_gates_and_pass_when_satisfied() {
+    let pass = cb::PassRef::new("pass.local.validate").expect("valid pass ref");
+    let capability =
+        cb::CapabilityRef::new("capability.store:append").expect("valid capability ref");
+    let passes = [pass];
+    let capabilities = [capability];
+    let item = cb::OperationKitItem::new(ECHO.clone(), &passes, &capabilities);
+    let gates = item.compile_gate_set::<cb::RequirementEvidence>();
+    let context = cb::RequirementEvidence::new()
+        .with_pass(pass)
+        .with_capability(capability);
+
+    assert_eq!(
+        gates.names(),
+        vec![
+            cb::REQUIRED_PASS_GATE_NAME,
+            cb::REQUIRED_CAPABILITY_GATE_NAME
+        ]
+    );
+    let receipt = gates
+        .evaluate(&context, batpak::pipeline::Proposal::new("payload"))
+        .expect("all downstream-kit requirements satisfied");
+
+    assert_eq!(
+        receipt.gates_passed(),
+        &[
+            cb::REQUIRED_PASS_GATE_NAME,
+            cb::REQUIRED_CAPABILITY_GATE_NAME
+        ]
+    );
+    assert_eq!(receipt.payload(), &"payload");
+}
+
+#[test]
+fn cb_operation_requirement_gates_deny_missing_pass() {
+    let pass = cb::PassRef::new("pass.local.validate").expect("valid pass ref");
+    let capability =
+        cb::CapabilityRef::new("capability.store:append").expect("valid capability ref");
+    let passes = [pass];
+    let capabilities = [capability];
+    let item = cb::OperationKitItem::new(ECHO.clone(), &passes, &capabilities);
+    let gates = item.compile_gate_set::<cb::RequirementEvidence>();
+    let context = cb::RequirementEvidence::new().with_capability(capability);
+
+    let denial = explicit_err(gates.evaluate(&context, batpak::pipeline::Proposal::new(())));
+
+    assert_eq!(denial.gate, cb::REQUIRED_PASS_GATE_NAME);
+    assert_eq!(denial.code, cb::MISSING_PASS_CODE);
+    assert!(denial
+        .context
+        .iter()
+        .any(|(key, value)| key == "operation" && value == "claw.echo"));
+    assert!(denial
+        .context
+        .iter()
+        .any(|(key, value)| key == "pass" && value == "pass.local.validate"));
+}
+
+#[test]
+fn cb_operation_requirement_gates_deny_missing_capability() {
+    let pass = cb::PassRef::new("pass.local.validate").expect("valid pass ref");
+    let capability =
+        cb::CapabilityRef::new("capability.store:append").expect("valid capability ref");
+    let passes = [pass];
+    let capabilities = [capability];
+    let item = cb::OperationKitItem::new(ECHO.clone(), &passes, &capabilities);
+    let gates = item.compile_gate_set::<cb::RequirementEvidence>();
+    let context = cb::RequirementEvidence::new().with_pass(pass);
+
+    let denial = explicit_err(gates.evaluate(&context, batpak::pipeline::Proposal::new(())));
+
+    assert_eq!(denial.gate, cb::REQUIRED_CAPABILITY_GATE_NAME);
+    assert_eq!(denial.code, cb::MISSING_CAPABILITY_CODE);
+    assert!(denial
+        .context
+        .iter()
+        .any(|(key, value)| key == "operation" && value == "claw.echo"));
+    assert!(denial
+        .context
+        .iter()
+        .any(|(key, value)| key == "capability" && value == "capability.store:append"));
+}
+
+#[test]
+fn cb_operation_requirement_compiler_aggregates_passes_and_capabilities_by_gate_class() {
+    let pass_a = cb::PassRef::new("pass.local.validate").expect("valid pass ref");
+    let pass_b = cb::PassRef::new("pass.local.review").expect("valid pass ref");
+    let capability_a =
+        cb::CapabilityRef::new("capability.store:append").expect("valid capability ref");
+    let capability_b =
+        cb::CapabilityRef::new("capability.mail:send").expect("valid capability ref");
+    let passes = [pass_a, pass_b];
+    let capabilities = [capability_a, capability_b];
+    let item = cb::OperationKitItem::new(ECHO.clone(), &passes, &capabilities);
+    let gates = item.compile_gate_set::<cb::RequirementEvidence>();
+
+    assert_eq!(
+        gates.names(),
+        vec![
+            cb::REQUIRED_PASS_GATE_NAME,
+            cb::REQUIRED_CAPABILITY_GATE_NAME
+        ],
+        "compiler should emit one gate per requirement class, not one duplicate-named gate per ref"
+    );
+
+    let missing_second_pass =
+        cb::RequirementEvidence::from_refs([pass_a], [capability_a, capability_b]);
+    let denial =
+        explicit_err(gates.evaluate(&missing_second_pass, batpak::pipeline::Proposal::new(())));
+    assert_eq!(denial.gate, cb::REQUIRED_PASS_GATE_NAME);
+    assert_eq!(denial.code, cb::MISSING_PASS_CODE);
+    assert!(denial
+        .context
+        .iter()
+        .any(|(key, value)| key == "pass" && value == "pass.local.review"));
+
+    let all_present =
+        cb::RequirementEvidence::from_refs([pass_a, pass_b], [capability_a, capability_b]);
+    gates
+        .evaluate(&all_present, batpak::pipeline::Proposal::new(()))
+        .expect("all aggregate requirements satisfied");
+}
+
+#[test]
+fn cb_descriptors_compile_individual_requirement_gates() {
+    let pass = cb::PassRef::new("pass.local.validate").expect("valid pass ref");
+    let capability =
+        cb::CapabilityRef::new("capability.store:append").expect("valid capability ref");
+    let pass_gate = cb::PassDescriptor::new(pass).required_gate("claw.echo");
+    let capability_gate = cb::CapabilityDescriptor::new(capability).required_gate("claw.echo");
+    let mut gates = batpak::guard::GateSet::<cb::RequirementEvidence>::new();
+    gates.push(pass_gate);
+    gates.push(capability_gate);
+    let context = cb::RequirementEvidence::from_refs([pass], [capability]);
+
+    let receipt = gates
+        .evaluate(&context, batpak::pipeline::Proposal::new(7_u8))
+        .expect("descriptor-compiled gates pass");
+
+    assert_eq!(receipt.payload(), &7);
+    assert_eq!(
+        receipt.gates_passed(),
+        &[
+            cb::REQUIRED_PASS_GATE_NAME,
+            cb::REQUIRED_CAPABILITY_GATE_NAME
+        ]
+    );
+}
+
+#[test]
+fn cb_operation_requirements_compile_to_batpak_pipeline() {
+    let pass = cb::PassRef::new("pass.local.validate").expect("valid pass ref");
+    let passes = [pass];
+    let item = cb::OperationKitItem::new(ECHO.clone(), &passes, &[]);
+    let pipeline = item.compile_pipeline::<cb::RequirementEvidence>();
+    let context = cb::RequirementEvidence::new().with_pass(pass);
+
+    let receipt = pipeline
+        .evaluate(&context, batpak::pipeline::Proposal::new("pipeline"))
+        .expect("pipeline evaluates downstream-kit gate set");
+
+    assert_eq!(receipt.payload(), &"pipeline");
+    assert_eq!(receipt.gates_passed(), &[cb::REQUIRED_PASS_GATE_NAME]);
 }
 
 #[test]

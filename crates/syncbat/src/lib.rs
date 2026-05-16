@@ -35,8 +35,9 @@ pub use receipt::{
 };
 pub use register::{CacheRegister, Register, RegisterValidationError};
 pub use register_store::{
-    rebuild_register_from_store, RegisterOperationPutV1, StoreRegisterCatalog,
-    StoreRegisterCatalogError, SYNCBAT_REGISTER_EVENT_KIND,
+    rebuild_register_from_store, RegisterOperationActionV1, RegisterOperationPutV1,
+    RegisterOperationRowV1, StoreRegisterCatalog, StoreRegisterCatalogError,
+    SYNCBAT_REGISTER_EVENT_KIND,
 };
 pub use store_sink::{StoreReceiptSink, StoreReceiptSinkError};
 pub use syncbat_macros::operation;

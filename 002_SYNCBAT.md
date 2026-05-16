@@ -32,6 +32,8 @@ production async runtime.
 - `ReceiptEnvelope`
 - `StoreReceiptSink`
 - `StoreRegisterCatalog`
+- `RegisterOperationRowV1`
+- `RegisterOperationActionV1`
 
 ## Durable Register
 
@@ -40,8 +42,24 @@ lookup projection over a register and is not truth.
 
 `StoreRegisterCatalog` persists register rows into batpak as typed catalog
 events, and `rebuild_register_from_store` rebuilds a `Register` from those rows.
-Identical duplicate rows are ignored; conflicting rows for the same operation
-name fail closed.
+Rows are folded in store sequence order.
+
+| Action | Writer API | Rebuild behavior |
+| --- | --- | --- |
+| `put` | `persist_operation` / `persist_register` | inserts a new descriptor or repeats the same descriptor idempotently |
+| `update` | `update_operation` | explicitly replaces fields for an active descriptor |
+| `delete` | `delete_operation` | writes a terminal tombstone; deleted descriptors are omitted |
+| `supersede` | `supersede_operation` | tombstones one operation name and activates a replacement descriptor |
+
+Writer APIs preflight the current catalog state before appending lifecycle rows;
+raw malformed lifecycle rows and invalid transitions still fail closed during
+rebuild. `syncbat` keeps these as typed runtime-catalog rows; Lane B registry
+rows remain an evidence projection boundary rather than the live runtime storage
+format.
+
+Delete and supersede tombstones are distinct terminal states. A duplicate
+delete is idempotent, and a duplicate exact supersede is idempotent, but changing
+which terminal state a name entered is rejected during rebuild.
 
 ## Layer Contract
 

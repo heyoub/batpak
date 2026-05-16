@@ -136,6 +136,65 @@ fn decodes_line_protocol_frame() {
 }
 
 #[test]
+fn decodes_versioned_line_protocol_frame() {
+    let frame = nb::decode_line(b"NETBAT/1 CALL ping 68656c6c6f\n", &nb::Limits::default())
+        .expect("versioned frame decodes");
+
+    assert_eq!(frame.operation(), "ping");
+    assert_eq!(frame.input(), b"hello");
+}
+
+#[test]
+fn rejects_unsupported_line_protocol_version() {
+    let err = match nb::decode_line(b"NETBAT/2 CALL ping 00\n", &nb::Limits::default()) {
+        Ok(_) => panic!("expected unsupported protocol version"),
+        Err(error) => error,
+    };
+
+    assert_eq!(
+        err,
+        nb::NetbatError::UnsupportedProtocolVersion {
+            version: "NETBAT/2".to_owned()
+        }
+    );
+}
+
+#[test]
+fn rejects_versioned_frame_with_missing_fields() {
+    let missing_verb = match nb::decode_line(b"NETBAT/1\n", &nb::Limits::default()) {
+        Ok(_) => panic!("expected missing verb"),
+        Err(error) => error,
+    };
+    let missing_operation = match nb::decode_line(b"NETBAT/1 CALL\n", &nb::Limits::default()) {
+        Ok(_) => panic!("expected missing operation"),
+        Err(error) => error,
+    };
+    let missing_input = match nb::decode_line(b"NETBAT/1 CALL ping\n", &nb::Limits::default()) {
+        Ok(_) => panic!("expected missing input"),
+        Err(error) => error,
+    };
+
+    assert_eq!(
+        missing_verb,
+        nb::NetbatError::MalformedRequest {
+            reason: "missing verb"
+        }
+    );
+    assert_eq!(
+        missing_operation,
+        nb::NetbatError::MalformedRequest {
+            reason: "missing operation"
+        }
+    );
+    assert_eq!(
+        missing_input,
+        nb::NetbatError::MalformedRequest {
+            reason: "missing input"
+        }
+    );
+}
+
+#[test]
 fn decodes_crlf_and_bare_cr_line_endings() {
     let crlf =
         nb::decode_line(b"CALL ping 6f6b\r\n", &nb::Limits::default()).expect("crlf decodes");

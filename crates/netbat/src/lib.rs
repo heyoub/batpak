@@ -516,6 +516,8 @@ pub const DEFAULT_MAX_OPERATION_NAME_BYTES: usize = 256;
 pub const DEFAULT_MAX_INPUT_BYTES: usize = 32 * 1024;
 /// Default maximum handler output size encoded into a response frame.
 pub const DEFAULT_MAX_OUTPUT_BYTES: usize = 32 * 1024;
+/// Current version token accepted by netbat's versioned line protocol.
+pub const LINE_PROTOCOL_VERSION: &str = "NETBAT/1";
 
 /// Bounded transport limits for netbat's blocking line protocol.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -621,6 +623,12 @@ pub struct TcpServeStats {
     pub served_requests: usize,
     /// Number of request frames that produced an error response.
     pub failed_requests: usize,
+    /// Failed requests rejected by malformed framing or unsupported protocol.
+    pub malformed_requests: usize,
+    /// Failed requests rejected by configured line/input/output limits.
+    pub limit_failures: usize,
+    /// Failed requests rejected by syncbat dispatch.
+    pub runtime_failures: usize,
     /// True when the listener exited because its shutdown handle was set.
     pub shutdown_requested: bool,
 }
@@ -644,6 +652,11 @@ pub enum NetbatError {
     MalformedRequest {
         /// Stable malformed-request reason.
         reason: &'static str,
+    },
+    /// Request frame declared an unsupported protocol version.
+    UnsupportedProtocolVersion {
+        /// Unsupported version token from the request line.
+        version: String,
     },
     /// Operation name exceeded the configured byte limit.
     OperationNameTooLong {
@@ -673,6 +686,9 @@ impl fmt::Display for NetbatError {
                 write!(f, "request line exceeded {max} bytes")
             }
             Self::MalformedRequest { reason } => write!(f, "malformed request: {reason}"),
+            Self::UnsupportedProtocolVersion { version } => {
+                write!(f, "unsupported protocol version: {version}")
+            }
             Self::OperationNameTooLong { max } => {
                 write!(f, "operation name exceeded {max} bytes")
             }
@@ -704,6 +720,7 @@ impl NetbatError {
             Self::EmptyStream => "empty_stream",
             Self::LineTooLong { .. } => "line_too_long",
             Self::MalformedRequest { .. } => "malformed_request",
+            Self::UnsupportedProtocolVersion { .. } => "unsupported_protocol_version",
             Self::OperationNameTooLong { .. } => "operation_name_too_long",
             Self::InputTooLarge { .. } => "input_too_large",
             Self::OutputTooLarge { .. } => "output_too_large",
@@ -784,6 +801,13 @@ impl ResponseFrame {
 /// Format:
 ///
 /// ```text
+/// NETBAT/1 CALL <operation-name> <hex-input>\n
+/// ```
+///
+/// The legacy first-rung frame is still accepted for callers that already
+/// speak it:
+///
+/// ```text
 /// CALL <operation-name> <hex-input>\n
 /// ```
 ///
@@ -808,15 +832,30 @@ pub fn decode_line(line: &[u8], limits: &Limits) -> Result<RequestFrame, NetbatE
     }
 
     let mut parts = line.split(|byte| *byte == b' ');
-    let verb = parts.next().ok_or(NetbatError::MalformedRequest {
+    let first = parts.next().ok_or(NetbatError::MalformedRequest {
         reason: "missing verb",
     })?;
-    let operation = parts.next().ok_or(NetbatError::MalformedRequest {
-        reason: "missing operation",
-    })?;
-    let input = parts.next().ok_or(NetbatError::MalformedRequest {
-        reason: "missing input",
-    })?;
+    let (verb, operation, input) = if first.starts_with(b"NETBAT/") {
+        validate_protocol_version(first)?;
+        let verb = parts.next().ok_or(NetbatError::MalformedRequest {
+            reason: "missing verb",
+        })?;
+        let operation = parts.next().ok_or(NetbatError::MalformedRequest {
+            reason: "missing operation",
+        })?;
+        let input = parts.next().ok_or(NetbatError::MalformedRequest {
+            reason: "missing input",
+        })?;
+        (verb, operation, input)
+    } else {
+        let operation = parts.next().ok_or(NetbatError::MalformedRequest {
+            reason: "missing operation",
+        })?;
+        let input = parts.next().ok_or(NetbatError::MalformedRequest {
+            reason: "missing input",
+        })?;
+        (first, operation, input)
+    };
 
     if parts.next().is_some() {
         return Err(NetbatError::MalformedRequest {
@@ -997,8 +1036,9 @@ fn serve_tcp_connection(
             Ok(_) => stats.served_requests += 1,
             Err(NetbatError::EmptyStream) => return Ok(()),
             Err(error @ NetbatError::Io { .. }) => return Err(error),
-            Err(_) => {
+            Err(error) => {
                 stats.failed_requests += 1;
+                record_request_failure(stats, &error);
                 return Ok(());
             }
         }
@@ -1044,6 +1084,15 @@ fn strip_line_ending(line: &[u8]) -> &[u8] {
         .unwrap_or_else(|| line.strip_suffix(b"\n").unwrap_or(line))
 }
 
+fn validate_protocol_version(version: &[u8]) -> Result<(), NetbatError> {
+    if version == LINE_PROTOCOL_VERSION.as_bytes() {
+        return Ok(());
+    }
+    Err(NetbatError::UnsupportedProtocolVersion {
+        version: String::from_utf8_lossy(version).into_owned(),
+    })
+}
+
 fn validate_operation_name(operation: &[u8], limits: &Limits) -> Result<(), NetbatError> {
     if operation.is_empty() {
         return Err(NetbatError::MalformedRequest {
@@ -1074,6 +1123,20 @@ fn validate_request_frame(frame: &RequestFrame, limits: &Limits) -> Result<(), N
         });
     }
     Ok(())
+}
+
+fn record_request_failure(stats: &mut TcpServeStats, error: &NetbatError) {
+    match error {
+        NetbatError::LineTooLong { .. }
+        | NetbatError::OperationNameTooLong { .. }
+        | NetbatError::InputTooLarge { .. }
+        | NetbatError::OutputTooLarge { .. } => stats.limit_failures += 1,
+        NetbatError::MalformedRequest { .. } | NetbatError::UnsupportedProtocolVersion { .. } => {
+            stats.malformed_requests += 1
+        }
+        NetbatError::Runtime(_) => stats.runtime_failures += 1,
+        NetbatError::Io { .. } | NetbatError::EmptyStream => {}
+    }
 }
 
 fn decode_hex(input: &[u8], max_input_bytes: usize) -> Result<Vec<u8>, NetbatError> {

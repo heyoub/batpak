@@ -27,9 +27,9 @@ The batpak-family workspace keeps engine-facing layer names explicit:
 | Prefix | Crate | Contract |
 | --- | --- | --- |
 | `bp` | `batpak` | substrate; records events, receipts, extensions, replay state |
-| `sb` | `syncbat` | sync runtime; registers operations, dispatches checkouts, emits runtime receipts |
-| `cb` | `downstream-kit` | operation kit; declares pass/capability vocabulary and macro wiring |
-| `nb` | `netbat` | boundary layer; validates routes/transports and calls syncbat |
+| `sb` | `syncbat` | sync runtime; registers operations, folds durable register lifecycle rows, dispatches checkouts, emits runtime receipts |
+| `cb` | `downstream-kit` | operation kit; declares pass/capability vocabulary, compiles requirement gates, and provides macro wiring |
+| `nb` | `netbat` | boundary layer; validates routes/versioned line frames/transports and calls syncbat |
 
 Root layer docs:
 [`001_BATPAK.md`](001_BATPAK.md),
