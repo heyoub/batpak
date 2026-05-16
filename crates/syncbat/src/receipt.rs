@@ -1,6 +1,7 @@
 //! Generic receipt envelope types for syncbat operation runs.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 use std::{error::Error, fmt};
 
 use batpak::event::{EventKind, EventPayload};
@@ -17,6 +18,50 @@ pub const SYNCBAT_RECEIPT_EVENT_KIND: EventKind = EventKind::custom(0xC, 0x5B7);
 
 /// Stable hash bytes carried by a syncbat receipt.
 pub type ReceiptHash = [u8; 32];
+
+/// Caller-owned raw byte hasher for runtime receipt input/output hashes.
+pub trait ReceiptHasher {
+    /// Return a stable hash for already-encoded operation bytes.
+    fn hash(&self, bytes: &[u8]) -> ReceiptHash;
+}
+
+impl<F> ReceiptHasher for F
+where
+    F: Fn(&[u8]) -> ReceiptHash,
+{
+    fn hash(&self, bytes: &[u8]) -> ReceiptHash {
+        self(bytes)
+    }
+}
+
+/// Runtime policy for populating receipt input/output hashes.
+#[derive(Clone, Default)]
+#[non_exhaustive]
+pub enum ReceiptHashPolicy {
+    /// Defer hash population to a later layer; runtime receipts carry no byte
+    /// hashes.
+    #[default]
+    Deferred,
+    /// Hash raw handler input/output bytes with a deterministic caller-owned hasher.
+    RawBytes(Arc<dyn ReceiptHasher>),
+}
+
+impl ReceiptHashPolicy {
+    /// Build a raw-byte hash policy from a caller-owned deterministic hasher.
+    #[must_use]
+    pub fn raw_bytes(hasher: impl ReceiptHasher + 'static) -> Self {
+        Self::RawBytes(Arc::new(hasher))
+    }
+
+    /// Return the configured raw-byte hash for `bytes`, when enabled.
+    #[must_use]
+    pub fn hash(&self, bytes: &[u8]) -> Option<ReceiptHash> {
+        match self {
+            Self::Deferred => None,
+            Self::RawBytes(hasher) => Some(hasher.hash(bytes)),
+        }
+    }
+}
 
 /// Opaque extension drawer attached to a syncbat receipt.
 ///
@@ -115,6 +160,8 @@ impl From<batpak::store::AppendReceipt> for BatpakReceiptFields {
 pub struct ReceiptEnvelope {
     /// Stable operation descriptor name.
     pub descriptor_name: String,
+    /// Stable receipt kind from the operation descriptor.
+    pub receipt_kind: String,
     /// Optional hash of the operation input bytes.
     pub input_hash: Option<ReceiptHash>,
     /// Optional hash of the operation output bytes.
@@ -131,17 +178,19 @@ impl ReceiptEnvelope {
     /// Construct an envelope from an operation descriptor.
     #[must_use]
     pub fn new(descriptor: &OperationDescriptor, outcome: ReceiptOutcome) -> Self {
-        Self::from_descriptor_name(descriptor.name, outcome)
+        Self::from_descriptor(descriptor.name, descriptor.receipt_kind, outcome)
     }
 
-    /// Construct an envelope from a stable descriptor name.
+    /// Construct an envelope from stable descriptor receipt fields.
     #[must_use]
-    pub fn from_descriptor_name(
+    pub fn from_descriptor(
         descriptor_name: impl Into<String>,
+        receipt_kind: impl Into<String>,
         outcome: ReceiptOutcome,
     ) -> Self {
         Self {
             descriptor_name: descriptor_name.into(),
+            receipt_kind: receipt_kind.into(),
             input_hash: None,
             output_hash: None,
             outcome,

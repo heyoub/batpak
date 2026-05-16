@@ -6,6 +6,7 @@ members = [
     "crates/macros-support",
     "crates/macros",
     "crates/bench-support",
+    "crates/syncbat-macros",
     "crates/syncbat",
 ]
 default-members = ["crates/core"]

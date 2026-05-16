@@ -5,6 +5,9 @@
 //! layer boundary over batpak core without importing operation dialect,
 //! network, protocol-profile, or rendering semantics.
 
+#[doc(hidden)]
+pub extern crate self as syncbat;
+
 pub mod builder;
 pub mod core;
 pub mod error;
@@ -22,11 +25,13 @@ pub use handler::{Handler, HandlerError, HandlerResult};
 pub use module::Module;
 pub use operation::{EffectClass, OperationDescriptor, OperationInput, OperationOutput};
 pub use receipt::{
-    BatpakReceiptFields, ReceiptEnvelope, ReceiptExtensionDrawer, ReceiptHash, ReceiptOutcome,
-    ReceiptSink, ReceiptSinkError, RecordedReceipt, SYNCBAT_RECEIPT_EVENT_KIND,
+    BatpakReceiptFields, ReceiptEnvelope, ReceiptExtensionDrawer, ReceiptHash, ReceiptHashPolicy,
+    ReceiptHasher, ReceiptOutcome, ReceiptSink, ReceiptSinkError, RecordedReceipt,
+    SYNCBAT_RECEIPT_EVENT_KIND,
 };
 pub use register::{CacheRegister, Register, RegisterValidationError};
 pub use store_sink::{StoreReceiptSink, StoreReceiptSinkError};
+pub use syncbat_macros::operation;
 
 /// Receipt-extension namespace owned by the syncbat runtime layer.
 pub const SYNCBAT_EXTENSION_NAMESPACE: &str = "syncbat";

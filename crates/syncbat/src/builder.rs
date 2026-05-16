@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 
 use crate::core::Core;
 use crate::error::BuildError;
+use crate::receipt::ReceiptHashPolicy;
 use crate::{handler, module, operation, receipt};
 
 type BoxedHandler = Box<dyn handler::Handler + 'static>;
@@ -20,6 +21,7 @@ pub struct CoreBuilder {
     descriptors: BTreeMap<String, operation::OperationDescriptor>,
     handlers: BTreeMap<String, BoxedHandler>,
     receipt_sink: Option<BoxedReceiptSink>,
+    receipt_hash_policy: ReceiptHashPolicy,
 }
 
 impl CoreBuilder {
@@ -126,6 +128,12 @@ impl CoreBuilder {
         self
     }
 
+    /// Configure runtime receipt hash population.
+    pub fn receipt_hash_policy(&mut self, policy: ReceiptHashPolicy) -> &mut Self {
+        self.receipt_hash_policy = policy;
+        self
+    }
+
     /// Build a runnable [`Core`].
     ///
     /// # Errors
@@ -147,6 +155,7 @@ impl CoreBuilder {
             descriptors: self.descriptors,
             handlers: self.handlers,
             receipt_sink: self.receipt_sink,
+            receipt_hash_policy: self.receipt_hash_policy,
         })
     }
 }

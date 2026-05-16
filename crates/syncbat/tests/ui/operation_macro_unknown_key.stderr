@@ -1,0 +1,5 @@
+error: unknown key `unknown` in #[syncbat::operation]
+ --> tests/ui/operation_macro_unknown_key.rs:8:5
+  |
+8 |     unknown = "nope"
+  |     ^^^^^^^

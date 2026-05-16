@@ -116,6 +116,13 @@ pub enum RuntimeError {
         /// Handler-supplied error message.
         message: String,
     },
+    /// The configured receipt sink rejected a runtime-emitted receipt.
+    ReceiptSink {
+        /// Operation name whose receipt could not be recorded.
+        name: String,
+        /// Sink error message.
+        message: String,
+    },
 }
 
 impl RuntimeError {
@@ -144,6 +151,15 @@ impl RuntimeError {
             message: message.into(),
         }
     }
+
+    /// Build a receipt-sink error with an operation name and message.
+    #[must_use]
+    pub fn receipt_sink(name: impl Into<String>, message: impl Into<String>) -> Self {
+        Self::ReceiptSink {
+            name: name.into(),
+            message: message.into(),
+        }
+    }
 }
 
 impl fmt::Display for RuntimeError {
@@ -162,6 +178,9 @@ impl fmt::Display for RuntimeError {
                     f,
                     "handler for operation `{name}` failed with {code}: {message}"
                 )
+            }
+            Self::ReceiptSink { name, message } => {
+                write!(f, "receipt sink for operation `{name}` failed: {message}")
             }
         }
     }

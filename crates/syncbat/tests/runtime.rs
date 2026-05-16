@@ -1,8 +1,12 @@
 #![allow(clippy::panic)]
 
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use syncbat::{
-    Core, EffectClass, Handler, HandlerError, HandlerResult, Module, OperationDescriptor, Register,
-    RuntimeError,
+    Core, EffectClass, Handler, HandlerError, HandlerResult, Module, OperationDescriptor,
+    ReceiptEnvelope, ReceiptHash, ReceiptHashPolicy, ReceiptOutcome, ReceiptSink, ReceiptSinkError,
+    RecordedReceipt, Register, RuntimeError,
 };
 
 const ECHO: OperationDescriptor = OperationDescriptor::new(
@@ -30,6 +34,49 @@ impl Handler for FailingHandler {
     fn handle(&mut self, _input: &[u8], _cx: &mut syncbat::Cx<'_>) -> HandlerResult {
         Err(HandlerError::failed("boom"))
     }
+}
+
+#[derive(Clone, Default)]
+struct RecordingReceiptSink {
+    envelopes: Rc<RefCell<Vec<ReceiptEnvelope>>>,
+}
+
+impl RecordingReceiptSink {
+    fn envelopes(&self) -> Vec<ReceiptEnvelope> {
+        self.envelopes.borrow().clone()
+    }
+}
+
+impl ReceiptSink for RecordingReceiptSink {
+    fn record_receipt(
+        &self,
+        envelope: &ReceiptEnvelope,
+    ) -> Result<RecordedReceipt, ReceiptSinkError> {
+        self.envelopes.borrow_mut().push(envelope.clone());
+        Ok(RecordedReceipt::new(envelope.clone()))
+    }
+}
+
+struct FailingReceiptSink;
+
+impl ReceiptSink for FailingReceiptSink {
+    fn record_receipt(
+        &self,
+        _envelope: &ReceiptEnvelope,
+    ) -> Result<RecordedReceipt, ReceiptSinkError> {
+        Err(ReceiptSinkError::new("sink down"))
+    }
+}
+
+fn test_hash(bytes: &[u8]) -> ReceiptHash {
+    let mut hash = [0_u8; 32];
+    for (index, byte) in bytes.iter().enumerate() {
+        hash[index % 32] = hash[index % 32]
+            .wrapping_add(*byte)
+            .wrapping_add(u8::try_from(index % 251).expect("bounded index"));
+    }
+    hash[31] = u8::try_from(bytes.len() % 256).expect("bounded length");
+    hash
 }
 
 #[test]
@@ -64,6 +111,7 @@ fn builder_mounts_module_data_and_invokes_handler() {
     let result = core.invoke("echo", b"hello".to_vec()).expect("invoke");
     assert_eq!(result.descriptor().name(), "echo");
     assert_eq!(result.output().as_slice(), b"hello:ok");
+    assert!(result.recorded_receipt().is_none());
 }
 
 #[test]
@@ -94,6 +142,185 @@ fn invoke_maps_handler_failure_to_runtime_error() {
             err,
             RuntimeError::Handler { ref name, ref code, ref message }
                 if name == "echo" && code == "failed" && message == "boom"
+        ),
+        "unexpected error: {err:?}"
+    );
+}
+
+#[test]
+fn completed_receipt_is_recorded_once() {
+    let sink = RecordingReceiptSink::default();
+    let mut builder = Core::builder();
+    builder.register(ECHO, EchoHandler).expect("register");
+    builder.receipt_sink(sink.clone());
+    let mut core = builder.build().expect("core builds");
+
+    let result = core.invoke("echo", b"hello".to_vec()).expect("invoke");
+
+    let recorded = result.recorded_receipt().expect("recorded receipt");
+    assert_eq!(recorded.envelope.descriptor_name, "echo");
+    assert_eq!(recorded.envelope.receipt_kind, "receipt.echo.v1");
+    assert_eq!(recorded.envelope.outcome, ReceiptOutcome::Completed);
+    assert_eq!(sink.envelopes(), vec![recorded.envelope.clone()]);
+}
+
+#[test]
+fn failed_receipt_is_recorded_once() {
+    let sink = RecordingReceiptSink::default();
+    let mut builder = Core::builder();
+    builder.register(ECHO, FailingHandler).expect("register");
+    builder.receipt_sink(sink.clone());
+    let mut core = builder.build().expect("core builds");
+
+    let err = match core.invoke("echo", b"bad".to_vec()) {
+        Ok(_) => panic!("expected handler failure"),
+        Err(error) => error,
+    };
+
+    assert!(
+        matches!(
+            err,
+            RuntimeError::Handler { ref name, ref code, ref message }
+                if name == "echo" && code == "failed" && message == "boom"
+        ),
+        "unexpected error: {err:?}"
+    );
+    let envelopes = sink.envelopes();
+    assert_eq!(envelopes.len(), 1);
+    assert_eq!(envelopes[0].descriptor_name, "echo");
+    assert_eq!(envelopes[0].receipt_kind, "receipt.echo.v1");
+    assert_eq!(
+        envelopes[0].outcome,
+        ReceiptOutcome::failed("failed", "boom")
+    );
+}
+
+#[test]
+fn no_receipt_sink_preserves_current_success_behavior() {
+    let mut builder = Core::builder();
+    builder.register(ECHO, EchoHandler).expect("register");
+    let mut core = builder.build().expect("core builds");
+
+    let result = core.invoke("echo", b"plain".to_vec()).expect("invoke");
+
+    assert_eq!(result.output().as_slice(), b"plain:ok");
+    assert!(result.recorded_receipt().is_none());
+}
+
+#[test]
+fn unknown_operation_does_not_emit_receipt() {
+    let sink = RecordingReceiptSink::default();
+    let mut builder = Core::builder();
+    builder.register(ECHO, EchoHandler).expect("register");
+    builder.receipt_sink(sink.clone());
+    let mut core = builder.build().expect("core builds");
+
+    let err = match core.invoke("missing", b"plain".to_vec()) {
+        Ok(_) => panic!("expected unknown operation"),
+        Err(error) => error,
+    };
+
+    assert!(matches!(err, RuntimeError::UnknownOperation { name } if name == "missing"));
+    assert!(sink.envelopes().is_empty());
+}
+
+#[test]
+fn deferred_hash_policy_leaves_hashes_empty() {
+    let sink = RecordingReceiptSink::default();
+    let mut builder = Core::builder();
+    builder.register(ECHO, EchoHandler).expect("register");
+    builder.receipt_sink(sink);
+    let mut core = builder.build().expect("core builds");
+
+    let result = core.invoke("echo", b"hello".to_vec()).expect("invoke");
+    let envelope = &result
+        .recorded_receipt()
+        .expect("recorded receipt")
+        .envelope;
+
+    assert_eq!(envelope.input_hash, None);
+    assert_eq!(envelope.output_hash, None);
+}
+
+#[test]
+fn raw_byte_hash_policy_sets_input_and_output_hashes_on_success() {
+    let sink = RecordingReceiptSink::default();
+    let mut builder = Core::builder();
+    builder.register(ECHO, EchoHandler).expect("register");
+    builder.receipt_sink(sink);
+    builder.receipt_hash_policy(ReceiptHashPolicy::raw_bytes(test_hash));
+    let mut core = builder.build().expect("core builds");
+
+    let result = core.invoke("echo", b"hash".to_vec()).expect("invoke");
+    let envelope = &result
+        .recorded_receipt()
+        .expect("recorded receipt")
+        .envelope;
+
+    assert_eq!(envelope.input_hash, Some(test_hash(b"hash")));
+    assert_eq!(envelope.output_hash, Some(test_hash(b"hash:ok")));
+}
+
+#[test]
+fn raw_byte_hash_policy_sets_only_input_hash_on_failure() {
+    let sink = RecordingReceiptSink::default();
+    let mut builder = Core::builder();
+    builder.register(ECHO, FailingHandler).expect("register");
+    builder.receipt_sink(sink.clone());
+    builder.receipt_hash_policy(ReceiptHashPolicy::raw_bytes(test_hash));
+    let mut core = builder.build().expect("core builds");
+
+    let err = match core.invoke("echo", b"hash".to_vec()) {
+        Ok(_) => panic!("expected handler failure"),
+        Err(error) => error,
+    };
+
+    assert!(matches!(err, RuntimeError::Handler { .. }));
+    let envelopes = sink.envelopes();
+    assert_eq!(envelopes.len(), 1);
+    assert_eq!(envelopes[0].input_hash, Some(test_hash(b"hash")));
+    assert_eq!(envelopes[0].output_hash, None);
+}
+
+#[test]
+fn receipt_sink_failure_is_fail_closed() {
+    let mut builder = Core::builder();
+    builder.register(ECHO, EchoHandler).expect("register");
+    builder.receipt_sink(FailingReceiptSink);
+    let mut core = builder.build().expect("core builds");
+
+    let err = match core.invoke("echo", b"hello".to_vec()) {
+        Ok(_) => panic!("expected receipt sink failure"),
+        Err(error) => error,
+    };
+
+    assert!(
+        matches!(
+            err,
+            RuntimeError::ReceiptSink { ref name, ref message }
+                if name == "echo" && message == "sink down"
+        ),
+        "unexpected error: {err:?}"
+    );
+}
+
+#[test]
+fn failed_handler_plus_sink_failure_is_fail_closed() {
+    let mut builder = Core::builder();
+    builder.register(ECHO, FailingHandler).expect("register");
+    builder.receipt_sink(FailingReceiptSink);
+    let mut core = builder.build().expect("core builds");
+
+    let err = match core.invoke("echo", b"hello".to_vec()) {
+        Ok(_) => panic!("expected receipt sink failure"),
+        Err(error) => error,
+    };
+
+    assert!(
+        matches!(
+            err,
+            RuntimeError::ReceiptSink { ref name, ref message }
+                if name == "echo" && message == "sink down"
         ),
         "unexpected error: {err:?}"
     );

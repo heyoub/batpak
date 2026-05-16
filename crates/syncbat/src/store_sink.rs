@@ -12,6 +12,7 @@ use crate::receipt::{
 use crate::{receipt_extension_key, receipt_extension_value};
 
 const EXT_DESCRIPTOR: &str = "descriptor";
+const EXT_KIND: &str = "kind";
 const EXT_OUTCOME: &str = "outcome";
 const EXT_INPUT_HASH: &str = "input";
 const EXT_OUTPUT_HASH: &str = "output";
@@ -109,6 +110,13 @@ impl StoreReceiptSink {
                 receipt_extension_key(EXT_OUTCOME)?,
                 receipt_extension_value(envelope.outcome.class().as_bytes().to_vec()),
             );
+
+        if !envelope.receipt_kind.is_empty() {
+            options = options.with_receipt_extension(
+                receipt_extension_key(EXT_KIND)?,
+                receipt_extension_value(envelope.receipt_kind.as_bytes().to_vec()),
+            );
+        }
 
         if let Some(hash) = envelope.input_hash {
             options = options.with_receipt_extension(

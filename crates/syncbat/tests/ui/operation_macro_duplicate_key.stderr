@@ -1,0 +1,5 @@
+error: duplicate `descriptor` key in #[syncbat::operation]
+ --> tests/ui/operation_macro_duplicate_key.rs:3:5
+  |
+3 |     descriptor = ECHO_AGAIN,
+  |     ^^^^^^^^^^

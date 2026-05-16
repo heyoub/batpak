@@ -1,0 +1,13 @@
+error: #[syncbat::operation] requires `descriptor = ...`
+ --> tests/ui/operation_macro_missing_descriptor.rs:1:1
+  |
+1 | / #[syncbat::operation(
+2 | |     name = "echo",
+3 | |     effect = Compute,
+4 | |     input_schema = "schema.echo.input.v1",
+5 | |     output_schema = "schema.echo.output.v1",
+6 | |     receipt_kind = "receipt.echo.v1"
+7 | | )]
+  | |__^
+  |
+  = note: this error originates in the attribute macro `syncbat::operation` (in Nightly builds, run with -Z macro-backtrace for more info)

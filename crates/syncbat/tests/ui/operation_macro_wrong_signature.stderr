@@ -1,0 +1,8 @@
+error[E0308]: mismatched types
+ --> tests/ui/operation_macro_wrong_signature.rs:9:4
+  |
+9 | fn echo(_input: Vec<u8>, _cx: &mut syncbat::Cx<'_>) -> syncbat::HandlerResult {
+  |    ^^^^ expected fn pointer, found fn item
+  |
+  = note: expected fn pointer `for<'a, 'b, 'c> fn(&'a [u8], &'b mut Cx<'c>) -> Result<Vec<u8>, HandlerError>`
+                found fn item `for<'a, 'b> fn(Vec<u8>, &'a mut Cx<'b>) -> Result<Vec<u8>, HandlerError> {echo}`
