@@ -59,7 +59,7 @@ fn render_manifest(manifest: &ReleaseManifest) -> String {
          - `cargo xtask clean-generated`\n\
          - `cargo xtask template-freshness`\n\
          - `cargo xtask semver-check`\n\
-         - `cargo xtask public-api`\n\
+         - `cargo xtask public-api --strict --check-baseline`\n\
          - `cargo xtask package-leak-scan --allow-dirty`\n\
          - `cargo xtask staged-diff`\n\
          - `cargo xtask ci`\n\n\

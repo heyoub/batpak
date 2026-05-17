@@ -142,19 +142,14 @@ pub(crate) fn check(repo_root: &Path) -> Result<()> {
 }
 
 fn check_internal_justification_grace(allowlist: &[AllowlistEntry]) -> Result<()> {
-    let grace: BTreeSet<&str> = ["needs_rotation"].into_iter().collect();
     let mut unexpected = Vec::new();
-    let mut stale_grace = grace.clone();
 
     for entry in allowlist {
         let justification = entry.justification.to_ascii_lowercase();
         if !justification.contains("internal") {
             continue;
         }
-        stale_grace.remove(entry.name.as_str());
-        if !grace.contains(entry.name.as_str()) {
-            unexpected.push(entry.name.clone());
-        }
+        unexpected.push(entry.name.clone());
     }
 
     ensure(
@@ -162,13 +157,6 @@ fn check_internal_justification_grace(allowlist: &[AllowlistEntry]) -> Result<()
         format!(
             "pub_item_allowlist justification may not describe public API as internal; fix or hide: {}",
             unexpected.join(", ")
-        ),
-    )?;
-    ensure(
-        stale_grace.is_empty(),
-        format!(
-            "pub_item_allowlist internal-justification grace is stale; remove grace for: {}",
-            stale_grace.into_iter().collect::<Vec<_>>().join(", ")
         ),
     )
 }

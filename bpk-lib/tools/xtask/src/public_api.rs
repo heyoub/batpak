@@ -8,6 +8,9 @@ pub(crate) fn public_api(args: PublicApiArgs) -> Result<()> {
     let root = repo_root()?;
     let target_dir = cargo_target_dir()?.join("public-api");
     fs::create_dir_all(&target_dir).with_context(|| format!("create {}", target_dir.display()))?;
+    if args.check_baseline && args.bless_baseline {
+        bail!("public-api: choose either --check-baseline or --bless-baseline, not both");
+    }
 
     if !cargo_public_api_is_available() {
         let message = "public-api: cargo-public-api is not installed; advisory run skipped";
@@ -24,6 +27,9 @@ pub(crate) fn public_api(args: PublicApiArgs) -> Result<()> {
         .env("CARGO_TARGET_DIR", cargo_target_dir()?)
         .args([
             "public-api",
+            "-sss",
+            "--color",
+            "never",
             "--package",
             "batpak",
             "--all-features",
@@ -50,6 +56,28 @@ pub(crate) fn public_api(args: PublicApiArgs) -> Result<()> {
         "public-api: wrote {}",
         target_dir.join("batpak.txt").display()
     );
+
+    let baseline = root.join("traceability/public_api/batpak.txt");
+    if args.bless_baseline {
+        if let Some(parent) = baseline.parent() {
+            fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
+        }
+        fs::write(&baseline, stdout.as_bytes())
+            .with_context(|| format!("write {}", baseline.display()))?;
+        println!("public-api: blessed {}", baseline.display());
+    }
+    if args.check_baseline {
+        let expected = fs::read_to_string(&baseline)
+            .with_context(|| format!("read {}", baseline.display()))?;
+        if expected != stdout {
+            let current = target_dir.join("batpak.txt");
+            bail!(
+                "public-api baseline drifted; inspect {} and refresh intentionally with `cargo xtask public-api --strict --bless-baseline`",
+                current.display()
+            );
+        }
+        println!("public-api: baseline matches {}", baseline.display());
+    }
     Ok(())
 }
 

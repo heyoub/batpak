@@ -257,6 +257,12 @@ pub(crate) struct PublicApiArgs {
     /// Fail when cargo-public-api is missing or the public-api run fails.
     #[arg(long)]
     strict: bool,
+    /// Compare the current public API against the checked-in baseline.
+    #[arg(long)]
+    check_baseline: bool,
+    /// Replace the checked-in public API baseline with the current surface.
+    #[arg(long)]
+    bless_baseline: bool,
 }
 
 #[derive(Args, Clone, Copy)]

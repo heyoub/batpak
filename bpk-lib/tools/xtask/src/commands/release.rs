@@ -114,7 +114,11 @@ pub(crate) fn consumer_smoke() -> Result<()> {
 pub(crate) fn release(args: ReleaseArgs) -> Result<()> {
     ci()?;
     crate::public_api::semver_check(crate::SemverCheckArgs { strict: false })?;
-    crate::public_api::public_api(crate::PublicApiArgs { strict: false })?;
+    crate::public_api::public_api(crate::PublicApiArgs {
+        strict: true,
+        check_baseline: true,
+        bless_baseline: false,
+    })?;
     consumer_smoke()?;
     docs::docs(DocsArgs { open: false })?;
     if args.dry_run {

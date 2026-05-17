@@ -23,11 +23,6 @@
   witness:
     - path: crates/core/tests/fuzz_targets.rs
       lines: [17, 474]
-- name: needs_rotation
-  justification: internal segment rotation helper exercised through store integration and rotation tests without direct name references
-  witness:
-    - path: crates/core/tests/store_edge_cases.rs
-      lines: [117]
 - name: StoreDiagnostics
   justification: surfaced through diagnostics tests instead of direct type-name references
   witness:

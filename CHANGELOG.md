@@ -8,8 +8,9 @@ All notable changes to this project will be documented in this file.
 - Added `ReactorCanal` as the code-level typed-reactor delivery selector.
   `CursorGuaranteed` remains the default at-least-once path; `LossySubscription`
   is explicit opt-in and never supplies an `AtLeastOnce` witness.
-- Added advisory `cargo xtask public-api` and `cargo xtask semver-check`
-  surfaces for the 0.7.6 pre-1.0 correction cut.
+- Added `cargo xtask public-api --strict --check-baseline` as a checked
+  post-cleanup public API snapshot, plus advisory `cargo xtask semver-check`
+  for the intentionally breaking 0.7.6 pre-1.0 correction cut.
 
 ### Changed
 - `ClockKey` is no longer public API; it is an internal index ordering key.

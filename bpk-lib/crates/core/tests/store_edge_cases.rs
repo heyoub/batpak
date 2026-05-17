@@ -146,35 +146,6 @@ fn append_frames_from_segment_copies_frame_bytes_exactly() {
     );
 }
 
-#[test]
-fn segment_needs_rotation_tracks_written_bytes_threshold() {
-    use batpak::store::segment::{frame_encode, Active, Segment};
-
-    let dir = TempDir::new().expect("tmpdir");
-    let mut segment: Segment<Active> = Segment::create(dir.path(), 1).expect("create segment");
-    let frame =
-        frame_encode(&serde_json::json!({"payload": "rotation-threshold"})).expect("encode frame");
-    let initially_needs_rotation = segment.needs_rotation(1024);
-
-    assert!(
-        !initially_needs_rotation,
-        "PROPERTY: a fresh segment must not report rotation before any frames are written"
-    );
-
-    segment.write_frame(&frame).expect("write frame");
-    let needs_rotation_at_one_byte = segment.needs_rotation(1);
-    let still_below_large_threshold = segment.needs_rotation(1024);
-
-    assert!(
-        needs_rotation_at_one_byte,
-        "PROPERTY: needs_rotation(max_bytes=1) must flip true after any real frame write"
-    );
-    assert!(
-        !still_below_large_threshold,
-        "PROPERTY: needs_rotation must stay false when written_bytes remains below the threshold"
-    );
-}
-
 // ===== Subscription lifecycle =====
 
 #[test]

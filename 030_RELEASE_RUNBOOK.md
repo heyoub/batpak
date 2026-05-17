@@ -6,8 +6,12 @@ manual publish/tag/release steps from a clean `main`.
 ## Release-Prep PR
 
 1. Start from a clean, current `main`.
-2. Bump every workspace package version for the release. For a pre-1.0
-   breaking change, bump the minor version, for example `0.6.0` -> `0.7.0`.
+2. Bump every workspace package version for the release. For ordinary pre-1.0
+   breaking changes, bump the minor version, for example `0.6.0` -> `0.7.0`.
+   For the 0.7.6 public-surface correction cut, ADR-0026 explicitly permits
+   a patch release because there is no downstream adoption baseline yet and
+   the work is correcting accidental surface before asking users to depend on
+   it.
 3. Keep internal dependency cross-references in sync. After editing, search
    for the previous version across manifests; this should be clean except for
    historical changelog entries:
@@ -25,7 +29,17 @@ manual publish/tag/release steps from a clean `main`.
    crate-local `README.md`.
 6. Finalize `CHANGELOG.md`: add the dated release section and restore an empty
    `[Unreleased]` section above it.
-7. Run the release dry-run:
+7. Verify that the checked-in public API snapshot matches the intended
+   post-cleanup surface:
+
+   ```bash
+   cargo xtask public-api --strict --check-baseline
+   ```
+
+   Refresh with `cargo xtask public-api --strict --bless-baseline` only when
+   the public-surface change is intentional and has a `CHANGELOG.md` migration
+   entry.
+8. Run the release dry-run:
 
    ```bash
    cargo xtask release --dry-run
@@ -36,7 +50,7 @@ manual publish/tag/release steps from a clean `main`.
    overrides are a dry-run aid only; the real publish still needs dependency
    crates indexed on crates.io.
 
-8. Before publish, explicitly smoke the cross-crate payload registry fixture in
+9. Before publish, explicitly smoke the cross-crate payload registry fixture in
    both debug and release modes so `inventory` registration survives optimized
    linkage:
 
@@ -46,7 +60,7 @@ manual publish/tag/release steps from a clean `main`.
    cargo test --release --manifest-path bpk-lib/crates/core/fixtures/kind-collision-composer/Cargo.toml
    ```
 
-9. Inspect package contents before publishing:
+10. Inspect package contents before publishing:
 
    ```bash
    cargo package --list -p batpak-macros-support

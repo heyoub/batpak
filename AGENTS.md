@@ -74,6 +74,7 @@ Run canonical commands from `bpk-lib/`:
 - `cd bpk-lib && cargo xtask template-freshness` — focused template smoke plus generated-lock drift check
 - `cd bpk-lib && cargo xtask staged-diff` — inspect staged files for generated artifacts, retired paths, and conflict markers
 - `cd bpk-lib && cargo xtask release-manifest` — write a local proof summary under root `target/`
+- `cd bpk-lib && cargo xtask public-api --strict --check-baseline` — verify the checked-in post-cleanup public API snapshot
 - `cd bpk-lib && cargo xtask cover [--ci|--json|--threshold N]`
 - `cd bpk-lib && cargo xtask docs`
 - `cd bpk-lib && cargo xtask release --dry-run`

@@ -37,6 +37,11 @@
   kind: registry
   paths:
     - traceability/pub_item_allowlist.yaml
+- id: ART-PUBLIC-API-BASELINE
+  kind: public-api
+  paths:
+    - traceability/public_api/batpak.txt
+    - tools/xtask/src/public_api.rs
 - id: ART-DEAD-CODE-SILENCER-ALLOWLIST
   kind: registry
   paths:

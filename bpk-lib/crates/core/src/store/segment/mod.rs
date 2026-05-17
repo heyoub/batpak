@@ -316,7 +316,7 @@ impl Segment<Active> {
     }
 
     /// Returns `true` if the segment has reached or exceeded `max_bytes` and should be rotated.
-    pub fn needs_rotation(&self, max_bytes: u64) -> bool {
+    pub(crate) fn needs_rotation(&self, max_bytes: u64) -> bool {
         self.written_bytes >= max_bytes
     }
 
@@ -389,4 +389,34 @@ pub(crate) fn detect_sidx_boundary<R: Read + Seek>(
         trailer[7],
     ]);
     Ok(Some(string_table_offset))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn needs_rotation_tracks_written_bytes_threshold() {
+        let dir = TempDir::new().expect("tmpdir");
+        let mut segment: Segment<Active> = Segment::create(dir.path(), 1).expect("create segment");
+        let frame = frame_encode(&serde_json::json!({"payload": "rotation-threshold"}))
+            .expect("encode frame");
+
+        assert!(
+            !segment.needs_rotation(1024),
+            "PROPERTY: a fresh segment must not report rotation before any frames are written"
+        );
+
+        segment.write_frame(&frame).expect("write frame");
+
+        assert!(
+            segment.needs_rotation(1),
+            "PROPERTY: needs_rotation(max_bytes=1) must flip true after any real frame write"
+        );
+        assert!(
+            !segment.needs_rotation(1024),
+            "PROPERTY: needs_rotation must stay false below the threshold"
+        );
+    }
 }
