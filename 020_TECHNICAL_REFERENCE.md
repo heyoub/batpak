@@ -281,6 +281,12 @@ Cold-start priority:
 3. SIDX footer scan for sealed segments plus active-segment scan
 4. full frame-by-frame rebuild
 
+SIDX, checkpoint, and mmap artifacts are acceleration layers, not authority.
+If all optimization layers are missing or rejected, reopen falls back to an
+O(N) frame scan over segment history. That path is intentionally boring and
+correct, but large stores should treat artifact loss as an operator-visible
+cold-start event rather than a constant-time recovery promise.
+
 Batch append uses BEGIN/COMMIT markers and atomic visibility publication.
 
 ## Store Platform Backend
@@ -554,7 +560,7 @@ Reduction (same substrate, clearer roles):
 
 **Cursor vs frontier:** `wait_for_durable`, `wait_for_visible`, and `wait_for_applied` are coordination fences over watermark progress (durable / visible / minimum applied across registered projections). Prefer them for a small number of fence-holders. `Cursor::poll_batch` and the `cursor_worker` pattern are the default ordered pull lane for many consumers asking what changed after events are visible in the index. Subscriptions are lossy / coalesced hints, not an authoritative delivery log. Treat `wait_for_applied` as a rare fence: `applied` is the minimum progress across registered projections, so lagging projections block that watermark.
 
-**Durability lanes:** visible append is the fast observation lane; explicit durability gates are the caller-requested wait lane; batching plus `sync` cadence (and group commit when configured) is the usual throughput lane. Per-event durable sync remains available but is not the default throughput story. When `AppendOptions::gate` is used, `StoreError::WaitTimeout` means the append committed but the requested watermark was not observed before the timeout — see the Durable Frontier section above.
+**Durability lanes:** visible append is the fast observation lane; explicit durability gates are the caller-requested wait lane; batching plus `sync` cadence (and group commit when configured) is the usual throughput lane. Per-event durable sync remains available but is not the default throughput story. `append_typed` and its synchronous siblings wait for the writer reply on the single-writer command channel, so per-call throughput has a deliberate round-trip ceiling. Use `append_batch`, `submit_typed` / `try_submit_typed`, and measured `SyncConfig::every_n_events` or group-commit settings when the workload needs amortized throughput instead of immediate per-append completion. When `AppendOptions::gate` is used, `StoreError::WaitTimeout` means the append committed but the requested watermark was not observed before the timeout — see the Durable Frontier section above.
 
 **Cold-start posture:** mmap and checkpoint artifacts are recovery and fast-start optimization surfaces, not independent truth or verification surfaces; full scan / rebuild remains the baseline. A future “fast-open manifest” is an optimization target, not a present guarantee.
 
@@ -572,6 +578,8 @@ Operator posture for artifact-format changes is explicit:
 - old optimization artifacts may be ignored and rebuilt or fallback-scanned
 - mixed-version operation does **not** mean two binaries may write the same mutable store directory at once
 - downgrade is **not** assumed safe just because forward-read compatibility exists
+- zero-downtime deployment is an orchestration problem around the store, not a
+  second-writer or mixed-version same-directory mode inside the store
 
 Practical procedure:
 
@@ -580,6 +588,13 @@ Practical procedure:
 3. if reopen ignores an old artifact, let the fallback scan or rebuild complete instead of trying to preserve the stale optimization file
 4. if you must roll back binaries, purge cold-start optimization artifacts (`index.fbati`, `index.ckpt`, old SIDX expectations) before reopening with the older binary unless that downgrade path is explicitly proven
 5. never run two binary versions against the same mutable store directory concurrently
+
+Recommended zero-downtime pattern: keep one mutable owner for each `data_dir`,
+ship traffic through an owning process, and cut over by stopping that owner,
+opening with the new binary, and resuming service. If readers need continuity,
+serve them from exported/tail-able events, a copied offline snapshot, or a
+product-owned replica. Do not solve downtime by opening the same live directory
+from two binaries.
 
 ## Public Surface Witnesses
 
@@ -652,6 +667,10 @@ Important knobs on `StoreConfig`:
 - `batpak::canonical` is a back-compatible alias for the same batpak-scoped
   MessagePack surface. It is not PCP/JCS or a universal cross-protocol
   canonicalization promise.
+- Public deterministic report bodies with schema versions are fixture-locked
+  for patch stability. The root crate pins the exact `rmp-serde` encoder
+  version used by those fixtures; changing that pin requires a deliberate
+  golden refresh and ADR-0019 review.
 - `AppendReceipt` now carries `content_hash`, `key_id`, `signature`, and
   `extensions`.
 - `DenialReceipt` mirrors the same receipt envelope for `SYSTEM_DENIAL`.

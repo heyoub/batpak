@@ -72,6 +72,17 @@ manual publish/tag/release steps from a clean `main`.
    Look for missing READMEs, accidental large fixtures, broken symlinks, and
    tarballs near the crates.io size limit.
 
+11. If canonical encoding dependencies or public report-body schemas changed,
+    run the canonical patch-stability suite without `GOLDEN_UPDATE` and inspect
+    the fixture diff intentionally:
+
+   ```bash
+   cargo test -p batpak --test canonical_patch_stability --all-features
+   ```
+
+   Refresh goldens only as a deliberate compatibility decision paired with
+   ADR-0019 and `CHANGELOG.md` notes.
+
 ## Benchmark Baseline
 
 Capture release numbers from the merged release commit on stable hardware, not
@@ -116,6 +127,16 @@ dependency version.
 
 If a published version is wrong, yank it and publish a patch release. Crates.io
 does not allow replacing the bytes for an existing version.
+
+## Deployment Pattern
+
+`batpak` store directories are single-owner resources. A release may support
+forward-reading old artifacts, but that does not permit two binary versions to
+open the same mutable `data_dir` concurrently. For low-downtime rollouts, route
+traffic through one owning process, stop that owner, reopen with the new binary,
+and resume. Readers that need continuity should use exported/tail-able events,
+offline copied snapshots, or a product-owned replica rather than bypassing the
+directory lock.
 
 ## Tag And GitHub Release
 

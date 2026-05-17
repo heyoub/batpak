@@ -2,8 +2,10 @@
 //!
 //! These helpers expose the crate's current named-field MessagePack bytes so
 //! consumers can produce the same encoded extension bytes batpak stores and
-//! signs. The stability contract is crate-version scoped rather than a
-//! cross-version canonical-bytes guarantee. This module does not implement
+//! signs. Public report-body bytes are patch-stable only where a schema version
+//! and golden fixture pin that boundary. The implementation intentionally pins
+//! the exact `rmp-serde` encoder version; bumping it requires refreshing the
+//! relevant goldens and reviewing ADR-0019. This module does not implement
 //! protocol-specific canonicalization such as JSON Canonicalization Scheme.
 
 use serde::de::DeserializeOwned;

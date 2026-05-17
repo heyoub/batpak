@@ -19,6 +19,9 @@ All notable changes to this project will be documented in this file.
   reopened through current `Store::open` tests.
 
 ### Changed
+- Pinned the canonical MessagePack encoder to the exact `rmp-serde` version
+  covered by checked-in golden fixtures, and expanded report-body golden
+  coverage across substrate and store evidence families.
 - `ClockKey` is no longer public API; it is an internal index ordering key.
 - `DiskPos` remains available from `batpak::store`, but its fields are no
   longer public and it is no longer re-exported by the prelude.
