@@ -241,6 +241,12 @@ fn doc_hidden_public_names(file: &syn::File) -> BTreeSet<String> {
                     collect_use_tree_names(&item.tree, &mut names);
                 }
             }
+            syn::Item::ForeignMod(_)
+            | syn::Item::Macro(_)
+            | syn::Item::Static(_)
+            | syn::Item::TraitAlias(_)
+            | syn::Item::Union(_)
+            | syn::Item::Verbatim(_) => {}
             _ => {}
         }
     }

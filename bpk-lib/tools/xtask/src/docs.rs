@@ -34,13 +34,13 @@ const ROOT_DOCS: &[RootDoc<'_>] = &[
     },
     RootDoc {
         source_path: "040_TESTING_DOCTRINE.md",
-        output_name: "HARNESS_DIRECTIVE.html",
-        title: "Harness Directive",
+        output_name: "TESTING_DOCTRINE.html",
+        title: "Testing Doctrine",
     },
     RootDoc {
         source_path: "041_TESTING_LEDGER.md",
-        output_name: "HARNESS_LEDGER.html",
-        title: "Harness Ledger",
+        output_name: "TESTING_LEDGER.html",
+        title: "Testing Ledger",
     },
     RootDoc {
         source_path: "060_CONTRIBUTING.md",

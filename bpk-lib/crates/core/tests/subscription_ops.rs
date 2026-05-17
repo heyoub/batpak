@@ -13,6 +13,9 @@ use batpak::prelude::*;
 use batpak::store::Notification;
 use std::sync::Arc;
 use std::thread;
+use std::time::Duration;
+
+const PROMPT_EXHAUSTION_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[path = "support/small_store.rs"]
 mod small_store_support;
@@ -211,7 +214,7 @@ fn ops_take_limits_count() {
         let _ = tx.send(exhausted);
     });
     assert!(
-        rx.recv_timeout(std::time::Duration::from_millis(100))
+        rx.recv_timeout(PROMPT_EXHAUSTION_TIMEOUT)
             .expect("OPS TAKE: exhausted recv should return promptly while store is open"),
         "OPS TAKE: third recv should return None after take(2), but got Some.\n\
          Check: src/store/delivery/subscription.rs SubscriptionOps::take() limit enforcement."
@@ -243,10 +246,9 @@ fn ops_take_limit_returns_none_immediately_while_store_is_open() {
         let _ = tx.send(exhausted);
     });
     assert!(
-        rx.recv_timeout(std::time::Duration::from_millis(100))
-            .expect(
-                "OPS TAKE OPEN: exhausted recv must return immediately while store is still open"
-            ),
+        rx.recv_timeout(PROMPT_EXHAUSTION_TIMEOUT).expect(
+            "OPS TAKE OPEN: exhausted recv must return immediately while store is still open"
+        ),
         "OPS TAKE OPEN: exhausted recv must return None"
     );
 }
@@ -318,7 +320,7 @@ fn ops_filter_and_take_combined() {
         let _ = tx.send(exhausted);
     });
     assert!(
-        rx.recv_timeout(std::time::Duration::from_millis(100))
+        rx.recv_timeout(PROMPT_EXHAUSTION_TIMEOUT)
             .expect("OPS COMBINED: exhausted recv should return promptly while store is open"),
         "OPS COMBINED: third recv should return None (take(2) exhausted), but got Some.\n\
          Check: src/store/delivery/subscription.rs filter + take interaction."

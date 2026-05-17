@@ -5,19 +5,18 @@
 //! mmap it, restore the interner snapshot, replay the entry section, then
 //! replay only the durable tail after the recorded watermark.
 
-use super::checkpoint::WatermarkInfo;
 use crate::event::HashChain;
+#[cfg(test)]
+use crate::store::cold_start::raw_to_kind;
 use crate::store::cold_start::{
-    validate_watermark_segment, ColdStartIndexRow, ColdStartSource, WatermarkValidationError,
+    kind_to_raw, raw_to_kind_counted, validate_watermark_segment, ColdStartIndexRow,
+    ColdStartSource, ReservedKindFallbackStats, WatermarkInfo, WatermarkValidationError,
 };
 use crate::store::index::interner::InternId;
 use crate::store::index::{
     recommended_restore_chunk_count, restore_chunk_ranges, DiskPos, IndexEntry, RoutingSummary,
     StoreIndex,
 };
-#[cfg(test)]
-use crate::store::segment::sidx::raw_to_kind;
-use crate::store::segment::sidx::{kind_to_raw, raw_to_kind_counted, ReservedKindFallbackStats};
 use crate::store::{EncodedBytes, ExtensionKey, StoreError};
 use memmap2::Mmap;
 use rayon::prelude::*;

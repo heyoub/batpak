@@ -5,6 +5,9 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 publish = false
 
+[lints]
+workspace = true
+
 [dependencies]
 anyhow = "1"
 cargo_metadata = "0.23"

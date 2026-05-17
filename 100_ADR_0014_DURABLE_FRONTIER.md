@@ -73,23 +73,25 @@ Panic behavior is tested with test-local `FaultInjector` implementations. The
 production fault API does not gain a `Panic` action.
 
 ## Consequences
-The store now has a public, narrow, honest frontier surface for operators and
-for later phases. Phase 1 can build real durability gates on top of
-`durable_hlc` without renaming placeholder fields. Phase 2 can tighten default
-read semantics with a measured baseline for today's visible/durable gap.
+The store has a public, narrow, honest frontier surface for operators and for
+the durability-gating API accepted in ADR-0016. Those gates build on
+`durable_hlc` without renaming placeholder fields. Default read semantics remain
+an explicit policy choice: visible state may still exceed durable state when the
+configured sync cadence is greater than one.
 
 The frontier tests pin both behavior and limits. In-process panic tests can
 prove writer-crash recovery and lifecycle monotonicity, but they cannot prove
 true power-loss durability because the host page cache may preserve unsynced
-bytes after a process panic. A VM-level or block-device torn-tail harness is
-deferred.
+bytes after a process panic. ADR-0015 covers the VM/block-device torn-tail proof
+lane; additional chaos scenarios are separate proof work, not a missing frontier
+API.
 
 Test-local panic injectors must carry a module-level `clippy::panic` opt-out
 with a traceable `justifies:` comment. This keeps panic-as-assertion discipline
 visible while avoiding a production panic injection API.
 
 ## Errata
-Phase 1A closed the lifecycle stub described above by adding
+Phase 1A closed the lifecycle gap described above by adding
 `SYSTEM_CLOSE_COMPLETED` on explicit `Store::close()`. Drop still performs only
 best-effort shutdown and does not emit a close lifecycle event. Reopen scans
 recovered close lifecycle events, verifies they advance monotonically in log

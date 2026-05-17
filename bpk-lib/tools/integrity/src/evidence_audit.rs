@@ -91,9 +91,12 @@ fn assert_public_struct_has_public_schema_version(
             path.display()
         )
     })?;
-    let Some(item_struct) = file.items.iter().find_map(|item| match item {
-        Item::Struct(item_struct) if item_struct.ident == struct_name => Some(item_struct),
-        _ => None,
+    let Some(item_struct) = file.items.iter().find_map(|item| {
+        if let Item::Struct(item_struct) = item {
+            (item_struct.ident == struct_name).then_some(item_struct)
+        } else {
+            None
+        }
     }) else {
         bail!(
             "evidence-audit: {} missing public struct `{struct_name}` anchor",

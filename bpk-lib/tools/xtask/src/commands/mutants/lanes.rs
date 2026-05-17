@@ -60,7 +60,7 @@ pub(super) const PLATFORM_BACKEND_MUTANT_FILES: &[&str] = &[
     "crates/core/src/store/config.rs",
     "crates/core/src/store/mod.rs",
 ];
-pub(super) const HARNESS_LEDGER_LINT_MUTANT_FILES: &[&str] =
+pub(super) const TESTING_LEDGER_LINT_MUTANT_FILES: &[&str] =
     &["tools/integrity/src/harness_lints.rs"];
 pub(super) const ALL_FEATURES_MUTANT_EXCLUDES: &[&str] =
     &["crates/core/src/store/ancestry/by_clock.rs"];
@@ -399,12 +399,12 @@ pub(super) fn critical_mutation_seams() -> &'static [CriticalMutationSeam] {
             paths: PLATFORM_BACKEND_MUTANT_FILES,
         },
         CriticalMutationSeam {
-            slug: "harness-ledger-structural-lint",
-            label: "harness ledger structural lint",
-            description: "HARNESS_LEDGER schema, location, command, header, and line-cap enforcement",
+            slug: "testing-ledger-structural-lint",
+            label: "testing ledger structural lint",
+            description: "testing ledger schema, location, command, header, and line-cap enforcement",
             surface: MutantSurface::AllFeatures,
             package: Some("batpak-integrity"),
-            paths: HARNESS_LEDGER_LINT_MUTANT_FILES,
+            paths: TESTING_LEDGER_LINT_MUTANT_FILES,
         },
     ]
 }

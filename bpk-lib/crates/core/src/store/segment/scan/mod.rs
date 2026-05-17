@@ -167,6 +167,29 @@ impl Reader {
         })
     }
 
+    fn frame_decode_error(
+        segment_id: u64,
+        offset: u64,
+        error: segment::FrameDecodeError,
+    ) -> StoreError {
+        match error {
+            segment::FrameDecodeError::CrcMismatch { .. } => {
+                StoreError::CrcMismatch { segment_id, offset }
+            }
+            error @ (segment::FrameDecodeError::TooShort
+            | segment::FrameDecodeError::Truncated { .. }) => StoreError::CorruptSegment {
+                segment_id,
+                detail: format!(
+                    "frame at offset {offset} is corrupt after full payload read: {error}"
+                ),
+            },
+        }
+    }
+
+    fn frame_decode_error_for_pos(pos: &DiskPos, error: segment::FrameDecodeError) -> StoreError {
+        Self::frame_decode_error(pos.segment_id, pos.offset, error)
+    }
+
     pub(crate) fn new(data_dir: PathBuf, fd_budget: usize) -> Self {
         Self {
             data_dir,
@@ -277,15 +300,8 @@ impl Reader {
         let mut buf = self.acquire_buffer(frame_len);
         self.read_active_frame_into(pos, &mut buf)?;
 
-        let result = segment::frame_decode(&buf).map_err(|e| match e {
-            segment::FrameDecodeError::CrcMismatch { .. } => StoreError::CrcMismatch {
-                segment_id: pos.segment_id,
-                offset: pos.offset,
-            },
-            segment::FrameDecodeError::TooShort | segment::FrameDecodeError::Truncated { .. } => {
-                StoreError::corrupt_frame(pos.segment_id, e.to_string())
-            }
-        });
+        let result = segment::frame_decode(&buf)
+            .map_err(|error| Self::frame_decode_error_for_pos(pos, error));
         let (msgpack, _) = match result {
             Ok(v) => v,
             Err(e) => {
@@ -347,15 +363,8 @@ impl Reader {
         let frame_range =
             Self::checked_frame_range(pos.segment_id, pos.offset, pos.length, mmap.len())?;
         let frame_buf = &mmap[frame_range];
-        let (msgpack, _) = segment::frame_decode(frame_buf).map_err(|e| match e {
-            segment::FrameDecodeError::CrcMismatch { .. } => StoreError::CrcMismatch {
-                segment_id: pos.segment_id,
-                offset: pos.offset,
-            },
-            segment::FrameDecodeError::TooShort | segment::FrameDecodeError::Truncated { .. } => {
-                StoreError::corrupt_frame(pos.segment_id, e.to_string())
-            }
-        })?;
+        let (msgpack, _) = segment::frame_decode(frame_buf)
+            .map_err(|error| Self::frame_decode_error_for_pos(pos, error))?;
         let payload = Self::decode_frame_payload_value(msgpack)?;
         let coord =
             Coordinate::new(&payload.entity, &payload.scope).map_err(StoreError::Coordinate)?;
@@ -377,15 +386,8 @@ impl Reader {
         let mut buf = self.acquire_buffer(frame_len);
         self.read_active_frame_into(pos, &mut buf)?;
 
-        let result = segment::frame_decode(&buf).map_err(|e| match e {
-            segment::FrameDecodeError::CrcMismatch { .. } => StoreError::CrcMismatch {
-                segment_id: pos.segment_id,
-                offset: pos.offset,
-            },
-            segment::FrameDecodeError::TooShort | segment::FrameDecodeError::Truncated { .. } => {
-                StoreError::corrupt_frame(pos.segment_id, e.to_string())
-            }
-        });
+        let result = segment::frame_decode(&buf)
+            .map_err(|error| Self::frame_decode_error_for_pos(pos, error));
         let (msgpack, _) = match result {
             Ok(v) => v,
             Err(e) => {
@@ -410,15 +412,8 @@ impl Reader {
         let frame_range =
             Self::checked_frame_range(pos.segment_id, pos.offset, pos.length, mmap.len())?;
         let frame_buf = &mmap[frame_range];
-        let (msgpack, _) = segment::frame_decode(frame_buf).map_err(|e| match e {
-            segment::FrameDecodeError::CrcMismatch { .. } => StoreError::CrcMismatch {
-                segment_id: pos.segment_id,
-                offset: pos.offset,
-            },
-            segment::FrameDecodeError::TooShort | segment::FrameDecodeError::Truncated { .. } => {
-                StoreError::corrupt_frame(pos.segment_id, e.to_string())
-            }
-        })?;
+        let (msgpack, _) = segment::frame_decode(frame_buf)
+            .map_err(|error| Self::frame_decode_error_for_pos(pos, error))?;
         let payload = Self::decode_frame_payload_raw(msgpack)?;
         let coord =
             Coordinate::new(&payload.entity, &payload.scope).map_err(StoreError::Coordinate)?;
@@ -445,15 +440,8 @@ impl Reader {
         let mut buf = self.acquire_buffer(frame_len);
         self.read_active_frame_into(pos, &mut buf)?;
 
-        let result = segment::frame_decode(&buf).map_err(|e| match e {
-            segment::FrameDecodeError::CrcMismatch { .. } => StoreError::CrcMismatch {
-                segment_id: pos.segment_id,
-                offset: pos.offset,
-            },
-            segment::FrameDecodeError::TooShort | segment::FrameDecodeError::Truncated { .. } => {
-                StoreError::corrupt_frame(pos.segment_id, e.to_string())
-            }
-        });
+        let result = segment::frame_decode(&buf)
+            .map_err(|error| Self::frame_decode_error_for_pos(pos, error));
         let (msgpack, _) = match result {
             Ok(v) => v,
             Err(e) => {
@@ -477,15 +465,8 @@ impl Reader {
         let frame_range =
             Self::checked_frame_range(pos.segment_id, pos.offset, pos.length, mmap.len())?;
         let frame_buf = &mmap[frame_range];
-        let (msgpack, _) = segment::frame_decode(frame_buf).map_err(|e| match e {
-            segment::FrameDecodeError::CrcMismatch { .. } => StoreError::CrcMismatch {
-                segment_id: pos.segment_id,
-                offset: pos.offset,
-            },
-            segment::FrameDecodeError::TooShort | segment::FrameDecodeError::Truncated { .. } => {
-                StoreError::corrupt_frame(pos.segment_id, e.to_string())
-            }
-        })?;
+        let (msgpack, _) = segment::frame_decode(frame_buf)
+            .map_err(|error| Self::frame_decode_error_for_pos(pos, error))?;
         let payload = Self::decode_frame_payload_value(msgpack)?;
         Ok(payload.event)
     }
@@ -512,15 +493,8 @@ impl Reader {
         let mut buf = self.acquire_buffer(frame_len);
         self.read_active_frame_into(pos, &mut buf)?;
 
-        let result = segment::frame_decode(&buf).map_err(|e| match e {
-            segment::FrameDecodeError::CrcMismatch { .. } => StoreError::CrcMismatch {
-                segment_id: pos.segment_id,
-                offset: pos.offset,
-            },
-            segment::FrameDecodeError::TooShort | segment::FrameDecodeError::Truncated { .. } => {
-                StoreError::corrupt_frame(pos.segment_id, e.to_string())
-            }
-        });
+        let result = segment::frame_decode(&buf)
+            .map_err(|error| Self::frame_decode_error_for_pos(pos, error));
         let (msgpack, _) = match result {
             Ok(v) => v,
             Err(e) => {
@@ -546,15 +520,8 @@ impl Reader {
         let mut buf = self.acquire_buffer(frame_len);
         self.read_active_frame_into(pos, &mut buf)?;
 
-        let result = segment::frame_decode(&buf).map_err(|e| match e {
-            segment::FrameDecodeError::CrcMismatch { .. } => StoreError::CrcMismatch {
-                segment_id: pos.segment_id,
-                offset: pos.offset,
-            },
-            segment::FrameDecodeError::TooShort | segment::FrameDecodeError::Truncated { .. } => {
-                StoreError::corrupt_frame(pos.segment_id, e.to_string())
-            }
-        });
+        let result = segment::frame_decode(&buf)
+            .map_err(|error| Self::frame_decode_error_for_pos(pos, error));
         let (msgpack, _) = match result {
             Ok(v) => v,
             Err(e) => {
@@ -576,15 +543,8 @@ impl Reader {
         let frame_range =
             Self::checked_frame_range(pos.segment_id, pos.offset, pos.length, mmap.len())?;
         let frame_buf = &mmap[frame_range];
-        let (msgpack, _) = segment::frame_decode(frame_buf).map_err(|e| match e {
-            segment::FrameDecodeError::CrcMismatch { .. } => StoreError::CrcMismatch {
-                segment_id: pos.segment_id,
-                offset: pos.offset,
-            },
-            segment::FrameDecodeError::TooShort | segment::FrameDecodeError::Truncated { .. } => {
-                StoreError::corrupt_frame(pos.segment_id, e.to_string())
-            }
-        })?;
+        let (msgpack, _) = segment::frame_decode(frame_buf)
+            .map_err(|error| Self::frame_decode_error_for_pos(pos, error))?;
         let payload = Self::decode_frame_payload_raw(msgpack)?;
         Ok(payload.receipt_extensions)
     }
@@ -595,15 +555,8 @@ impl Reader {
         let frame_range =
             Self::checked_frame_range(pos.segment_id, pos.offset, pos.length, mmap.len())?;
         let frame_buf = &mmap[frame_range];
-        let (msgpack, _) = segment::frame_decode(frame_buf).map_err(|e| match e {
-            segment::FrameDecodeError::CrcMismatch { .. } => StoreError::CrcMismatch {
-                segment_id: pos.segment_id,
-                offset: pos.offset,
-            },
-            segment::FrameDecodeError::TooShort | segment::FrameDecodeError::Truncated { .. } => {
-                StoreError::corrupt_frame(pos.segment_id, e.to_string())
-            }
-        })?;
+        let (msgpack, _) = segment::frame_decode(frame_buf)
+            .map_err(|error| Self::frame_decode_error_for_pos(pos, error))?;
         let payload = Self::decode_frame_payload_raw(msgpack)?;
         Ok(payload.event)
     }
@@ -699,6 +652,50 @@ mod tests {
         assert!(
             matches!(result, Err(error) if error.kind() == ErrorKind::PermissionDenied),
             "PROPERTY: non-EOF frame-header read errors must surface as I/O failures"
+        );
+    }
+
+    #[test]
+    fn frame_decode_error_mapping_preserves_segment_and_offset_context() {
+        fn assert_error_trait<E: std::error::Error>() {}
+
+        assert_error_trait::<segment::FrameDecodeError>();
+
+        let crc_error = Reader::frame_decode_error(
+            7,
+            42,
+            segment::FrameDecodeError::CrcMismatch {
+                expected: 0xAAAA_AAAA,
+                actual: 0xBBBB_BBBB,
+            },
+        );
+        assert!(
+            matches!(
+                crc_error,
+                StoreError::CrcMismatch {
+                    segment_id: 7,
+                    offset: 42
+                }
+            ),
+            "PROPERTY: frame CRC failures must retain exact disk position context"
+        );
+
+        let truncated_error = Reader::frame_decode_error(
+            7,
+            42,
+            segment::FrameDecodeError::Truncated {
+                expected_len: 16,
+                available: 12,
+            },
+        );
+        assert!(
+            matches!(
+                truncated_error,
+                StoreError::CorruptSegment { segment_id: 7, ref detail }
+                if detail.contains("frame at offset 42")
+                    && detail.contains("frame truncated: expected 16 bytes, got 12")
+            ),
+            "PROPERTY: structural frame decode failures must retain segment, offset, and decode reason; got {truncated_error:?}"
         );
     }
 

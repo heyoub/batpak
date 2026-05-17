@@ -44,14 +44,14 @@ pub(crate) fn check(repo_root: &Path) -> Result<()> {
                 // Match `impl Store`, `impl Store<Open>`, and `impl<T> Store<T>`.
                 // We only care about blocks whose self type path segment is
                 // exactly `Store`.
-                let is_store_impl = match impl_block.self_ty.as_ref() {
-                    syn::Type::Path(tp) => tp
-                        .path
+                let is_store_impl = if let syn::Type::Path(tp) = impl_block.self_ty.as_ref() {
+                    tp.path
                         .segments
                         .last()
                         .map(|s| s.ident == "Store")
-                        .unwrap_or(false),
-                    _ => false,
+                        .unwrap_or(false)
+                } else {
+                    false
                 };
                 // Trait impls (e.g., `impl Drop for Store`) are excluded — we
                 // only want inherent impls.

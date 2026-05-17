@@ -163,6 +163,12 @@ entity-chain events through `Store::append_denial(...)` using
 
 ## Commands
 
+Run repository commands from the Rust workspace root:
+
+```bash
+cd bpk-lib
+```
+
 | Command | What it does |
 |---|---|
 | `cargo xtask doctor` | Check tools and env |

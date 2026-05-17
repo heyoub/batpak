@@ -5,6 +5,9 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 publish = false
 
+[lints]
+workspace = true
+
 [dependencies]
 anyhow = "1"
 base16ct = { version = "1.0", features = ["alloc"] }

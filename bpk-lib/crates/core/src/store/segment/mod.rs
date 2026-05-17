@@ -177,6 +177,8 @@ impl std::fmt::Display for FrameDecodeError {
     }
 }
 
+impl std::error::Error for FrameDecodeError {}
+
 /// frame_decode: read \[len\]\[crc\]\[msgpack\], verify CRC, return msgpack bytes.
 /// Returns (msgpack_bytes, total_frame_size_consumed).
 ///

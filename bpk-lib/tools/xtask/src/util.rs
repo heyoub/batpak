@@ -9,6 +9,7 @@ where
     S: AsRef<str>,
 {
     let mut command = Command::new("cargo");
+    command.env("CARGO_TARGET_DIR", cargo_target_dir()?);
     for arg in args {
         command.arg(arg.as_ref());
     }
@@ -67,7 +68,7 @@ pub(crate) fn repo_root() -> Result<PathBuf> {
             }
         }
         if !current.pop() {
-            bail!("could not locate workspace root from cwd");
+            bail!("could not locate workspace root from cwd; run repository cargo commands from bpk-lib/ or pass an explicit manifest path");
         }
     }
 }
@@ -82,9 +83,17 @@ pub(crate) fn project_root() -> Result<PathBuf> {
 
 pub(crate) fn cargo_target_dir() -> Result<PathBuf> {
     if let Some(path) = std::env::var_os("CARGO_TARGET_DIR") {
-        return Ok(PathBuf::from(path));
+        let path = PathBuf::from(path);
+        if path.is_absolute() {
+            return Ok(path);
+        }
+        return Ok(repo_root()?.join(path));
     }
     Ok(project_root()?.join("target"))
+}
+
+pub(crate) fn cargo_target_dir_arg() -> Result<String> {
+    Ok(cargo_target_dir()?.to_string_lossy().into_owned())
 }
 
 pub(crate) fn copy_dir(from: &Path, to: &Path) -> Result<()> {

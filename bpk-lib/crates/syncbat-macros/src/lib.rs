@@ -16,7 +16,7 @@ pub fn operation(attr: TokenStream, item: TokenStream) -> TokenStream {
     let args = parse_macro_input!(attr as OperationArgs);
     let function = parse_macro_input!(item as ItemFn);
 
-    match expand_operation(args, function) {
+    match expand_operation(args, &function) {
         Ok(tokens) => tokens.into(),
         Err(error) => error.to_compile_error().into(),
     }
@@ -46,8 +46,8 @@ struct ParsedOperationArgs {
     title: Option<Lit>,
 }
 
-fn expand_operation(args: OperationArgs, function: ItemFn) -> Result<proc_macro2::TokenStream> {
-    validate_function(&function)?;
+fn expand_operation(args: OperationArgs, function: &ItemFn) -> Result<proc_macro2::TokenStream> {
+    validate_function(function)?;
     let parsed = parse_args(args)?;
 
     let fn_name = &function.sig.ident;
@@ -223,16 +223,16 @@ fn set_ident(target: &mut Option<Ident>, key: &str, pair: &MetaNameValue) -> Res
             format!("duplicate `{key}` key in #[syncbat::operation]"),
         ));
     }
-    match &pair.value {
-        Expr::Path(path) if path.path.segments.len() == 1 && path.path.get_ident().is_some() => {
+    if let Expr::Path(path) = &pair.value {
+        if path.path.segments.len() == 1 && path.path.get_ident().is_some() {
             *target = path.path.get_ident().cloned();
-            Ok(())
+            return Ok(());
         }
-        _ => Err(Error::new(
-            pair.value.span(),
-            format!("`{key}` must be a Rust identifier"),
-        )),
     }
+    Err(Error::new(
+        pair.value.span(),
+        format!("`{key}` must be a Rust identifier"),
+    ))
 }
 
 fn set_string(target: &mut Option<Lit>, key: &str, pair: &MetaNameValue) -> Result<()> {
@@ -261,39 +261,37 @@ fn set_effect(target: &mut Option<Ident>, pair: &MetaNameValue) -> Result<()> {
             "duplicate `effect` key in #[syncbat::operation]",
         ));
     }
-    match &pair.value {
-        Expr::Path(path) if path.path.segments.len() == 1 => {
-            let Some(ident) = path.path.get_ident() else {
-                return Err(Error::new(
-                    path.path.span(),
-                    "`effect` must be a syncbat EffectClass variant identifier",
-                ));
-            };
-            match ident.to_string().as_str() {
-                "Inspect" | "Compute" | "Persist" | "Emit" | "Control" => {
-                    *target = Some(ident.clone());
-                    Ok(())
-                }
-                other => Err(Error::new(
-                    ident.span(),
-                    format!("unsupported effect `{other}` in #[syncbat::operation]"),
-                )),
+    if let Expr::Path(path) = &pair.value {
+        if path.path.segments.len() == 1 {
+            if let Some(ident) = path.path.get_ident() {
+                return match ident.to_string().as_str() {
+                    "Inspect" | "Compute" | "Persist" | "Emit" | "Control" => {
+                        *target = Some(ident.clone());
+                        Ok(())
+                    }
+                    other => Err(Error::new(
+                        ident.span(),
+                        format!("unsupported effect `{other}` in #[syncbat::operation]"),
+                    )),
+                };
             }
         }
-        _ => Err(Error::new(
-            pair.value.span(),
-            "`effect` must be a syncbat EffectClass variant identifier",
-        )),
     }
+    Err(Error::new(
+        pair.value.span(),
+        "`effect` must be a syncbat EffectClass variant identifier",
+    ))
 }
 
 fn string_lit(expr: &Expr) -> Option<Lit> {
-    match expr {
-        Expr::Lit(ExprLit {
-            lit: lit @ Lit::Str(_),
-            ..
-        }) => Some(lit.clone()),
-        _ => None,
+    if let Expr::Lit(ExprLit {
+        lit: lit @ Lit::Str(_),
+        ..
+    }) = expr
+    {
+        Some(lit.clone())
+    } else {
+        None
     }
 }
 

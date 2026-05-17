@@ -1,3 +1,9 @@
+[store]
+# Keep Nextest's own run metadata beside Cargo artifacts in the repo-root
+# target/ directory. Without this, Nextest writes bpk-lib/target/nextest even
+# when Cargo builds are routed to ../target.
+dir = "../target/nextest"
+
 [profile.default]
 retries = 0
 slow-timeout = { period = "30s", terminate-after = 2 }
@@ -24,5 +30,12 @@ slow-timeout = { period = "300s", terminate-after = 2 }
 filter = "test(all_view_topologies) | test(reopened_view_topologies) | test(reopen_paths_match)"
 slow-timeout = { period = "120s", terminate-after = 2 }
 
+# Compile-fail and downstream-fixture tests intentionally invoke nested Cargo
+# builds. Cold CI hosts can exceed the global 180s timeout while still making
+# progress, so keep the extra budget local to those compile-heavy surfaces.
+[[profile.ci.overrides]]
+filter = "test(compile_fail) | test(downstream_fixture)"
+slow-timeout = { period = "300s", terminate-after = 2 }
+
 [profile.default.junit]
-path = "target/nextest/default/junit.xml"
+path = "junit.xml"

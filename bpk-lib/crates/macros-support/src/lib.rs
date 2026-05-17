@@ -51,6 +51,13 @@ pub fn find_kind_collisions() -> Vec<EventKindCollision> {
 }
 
 /// Panic if the current binary has duplicate `EventPayload` kind registrations.
+///
+/// # Panics
+///
+/// Panics when more than one registered payload type uses the same
+/// `(category, type_id)` pair in the current binary.
+// justifies: INV-TEST-PANIC-AS-ASSERTION; this proc-macro support assertion is called from generated tests in crates/macros/src/lib.rs and must fail by panicking when duplicate EventKind registrations are present.
+#[allow(clippy::panic)]
 pub fn assert_no_kind_collisions() {
     if let Some(collision) = find_kind_collisions().into_iter().next() {
         panic!(
@@ -89,6 +96,11 @@ pub const TYPE_ID_MAX: u16 = 0x0FFF;
 /// Validate an EventKind category value.
 ///
 /// Valid range: 0x1–0xF, excluding 0xD (reserved for effects).
+///
+/// # Errors
+///
+/// Returns an error when `cat` is zero, reserved for effects, or outside the
+/// four-bit custom category range.
 pub fn validate_category(cat: u8) -> Result<(), &'static str> {
     match cat {
         0x0 => Err("category 0x0 is reserved for system events"),
@@ -101,6 +113,10 @@ pub fn validate_category(cat: u8) -> Result<(), &'static str> {
 /// Validate an EventKind type_id value.
 ///
 /// Valid range: 0x000–0xFFF (12 bits).
+///
+/// # Errors
+///
+/// Returns an error when `tid` does not fit in the 12-bit type-id range.
 pub fn validate_type_id(tid: u16) -> Result<(), &'static str> {
     if tid > TYPE_ID_MAX {
         Err("type_id must fit in 12 bits (0x000–0xFFF)")

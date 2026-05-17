@@ -1,31 +1,17 @@
 pub(crate) mod checkpoint;
 pub(crate) mod mmap;
 pub(crate) mod rebuild;
+pub(crate) mod row;
 
-use crate::coordinate::Coordinate;
-use crate::event::{EventHeader, HashChain};
-use crate::store::index::interner::InternId;
-use crate::store::index::{DiskPos, IndexEntry};
+#[cfg(test)]
+pub(crate) use row::raw_to_kind;
+pub(crate) use row::{
+    kind_to_raw, raw_to_kind_counted, ColdStartIndexRow, ColdStartSource,
+    ReservedKindFallbackStats, WatermarkInfo,
+};
+
 use crate::store::StoreError;
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ColdStartSource {
-    Checkpoint,
-    MmapIndex,
-    Sidx,
-}
-
-impl ColdStartSource {
-    fn label(self) -> &'static str {
-        match self {
-            Self::Checkpoint => "checkpoint",
-            Self::MmapIndex => "mmap index",
-            Self::Sidx => "SIDX",
-        }
-    }
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ColdStartArtifactKind {
@@ -133,145 +119,5 @@ pub(crate) fn validate_watermark_segment(
         Err(_) => Err(WatermarkValidationError::MissingSegment {
             path: watermark_segment_path,
         }),
-    }
-}
-
-/// Canonical persisted-index row shared by cold-start artifact readers.
-///
-/// This is intentionally narrower than `EventHeader`: it carries only the
-/// persisted facts shared across checkpoint, mmap, and SIDX restore paths.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct ColdStartIndexRow {
-    pub(crate) source: ColdStartSource,
-    pub(crate) event_id: u128,
-    pub(crate) correlation_id: u128,
-    pub(crate) causation_id: Option<u128>,
-    pub(crate) entity_id: InternId,
-    pub(crate) scope_id: InternId,
-    pub(crate) kind: crate::event::EventKind,
-    pub(crate) wall_ms: u64,
-    pub(crate) clock: u32,
-    pub(crate) dag_lane: u32,
-    pub(crate) dag_depth: u32,
-    pub(crate) hash_chain: HashChain,
-    pub(crate) disk_pos: DiskPos,
-    pub(crate) global_sequence: u64,
-}
-
-impl ColdStartIndexRow {
-    fn resolve_part<'a>(
-        &self,
-        interner_strings: &'a [String],
-        id: InternId,
-        field: &str,
-    ) -> Result<&'a str, StoreError> {
-        interner_strings
-            .get(id.to_usize())
-            .map(String::as_str)
-            .ok_or_else(|| {
-                StoreError::ser_msg(&format!(
-                    "{} {} is out of interner range",
-                    self.source.label(),
-                    field
-                ))
-            })
-    }
-
-    pub(crate) fn resolve_strings(
-        &self,
-        interner_strings: &[String],
-    ) -> Result<(String, String), StoreError> {
-        Ok((
-            self.resolve_part(interner_strings, self.entity_id, "entity_id")?
-                .to_owned(),
-            self.resolve_part(interner_strings, self.scope_id, "scope_id")?
-                .to_owned(),
-        ))
-    }
-
-    pub(crate) fn to_index_entry(
-        &self,
-        interner_strings: &[String],
-    ) -> Result<IndexEntry, StoreError> {
-        let entity = self.resolve_part(interner_strings, self.entity_id, "entity_id")?;
-        let scope = self.resolve_part(interner_strings, self.scope_id, "scope_id")?;
-        let coord = Coordinate::new(entity, scope)?;
-        Ok(IndexEntry {
-            event_id: self.event_id,
-            correlation_id: self.correlation_id,
-            causation_id: self.causation_id,
-            coord,
-            entity_id: self.entity_id,
-            scope_id: self.scope_id,
-            kind: self.kind,
-            wall_ms: self.wall_ms,
-            clock: self.clock,
-            dag_lane: self.dag_lane,
-            dag_depth: self.dag_depth,
-            hash_chain: self.hash_chain.clone(),
-            disk_pos: self.disk_pos,
-            global_sequence: self.global_sequence,
-            receipt_extensions: BTreeMap::new(),
-        })
-    }
-
-    pub(crate) fn to_event_header(&self) -> EventHeader {
-        EventHeader::new(
-            self.event_id,
-            self.correlation_id,
-            self.causation_id,
-            (self.wall_ms * 1000) as i64,
-            crate::coordinate::DagPosition::with_hlc(
-                self.wall_ms,
-                0,
-                self.dag_depth,
-                self.dag_lane,
-                self.clock,
-            ),
-            0,
-            self.kind,
-        )
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{ColdStartIndexRow, ColdStartSource};
-    use crate::event::{EventKind, HashChain};
-    use crate::store::index::interner::InternId;
-    use crate::store::DiskPos;
-
-    #[test]
-    fn cold_start_row_to_event_header_preserves_lane_depth_and_ids() {
-        let row = ColdStartIndexRow {
-            source: ColdStartSource::Sidx,
-            event_id: 1,
-            correlation_id: 2,
-            causation_id: Some(3),
-            entity_id: InternId(1),
-            scope_id: InternId(2),
-            kind: EventKind::DATA,
-            wall_ms: 1_700_000_000_000,
-            clock: 9,
-            dag_lane: 4,
-            dag_depth: 2,
-            hash_chain: HashChain::default(),
-            disk_pos: DiskPos::new(7, 64, 32),
-            global_sequence: 11,
-        };
-
-        let header = row.to_event_header();
-        assert_eq!(header.event_id, 1);
-        assert_eq!(header.correlation_id, 2);
-        assert_eq!(header.causation_id, Some(3));
-        assert_eq!(header.timestamp_us, 1_700_000_000_000_000);
-        assert_eq!(header.position.wall_ms, 1_700_000_000_000);
-        assert_eq!(header.position.sequence, 9);
-        assert_eq!(header.position.lane, 4);
-        assert_eq!(header.position.depth, 2);
-        assert_eq!(header.event_kind, EventKind::DATA);
-        assert_eq!(header.payload_size, 0);
-        assert_eq!(header.flags, 0);
-        assert_eq!(header.content_hash, [0u8; 32]);
     }
 }

@@ -277,16 +277,22 @@ fn target_cfg_attr_violations(file: &syn::File) -> Vec<String> {
 
     let mut violations = Vec::new();
     for item in &file.items {
-        match item {
-            Item::Fn(item) => collect_attrs(&item.attrs, &mut violations),
-            Item::Mod(item) => collect_attrs(&item.attrs, &mut violations),
-            Item::Struct(item) => collect_attrs(&item.attrs, &mut violations),
-            Item::Enum(item) => collect_attrs(&item.attrs, &mut violations),
-            Item::Impl(item) => collect_attrs(&item.attrs, &mut violations),
-            Item::Use(item) => collect_attrs(&item.attrs, &mut violations),
-            Item::Const(item) => collect_attrs(&item.attrs, &mut violations),
-            Item::Type(item) => collect_attrs(&item.attrs, &mut violations),
-            _ => {}
+        if let Item::Fn(item) = item {
+            collect_attrs(&item.attrs, &mut violations);
+        } else if let Item::Mod(item) = item {
+            collect_attrs(&item.attrs, &mut violations);
+        } else if let Item::Struct(item) = item {
+            collect_attrs(&item.attrs, &mut violations);
+        } else if let Item::Enum(item) = item {
+            collect_attrs(&item.attrs, &mut violations);
+        } else if let Item::Impl(item) = item {
+            collect_attrs(&item.attrs, &mut violations);
+        } else if let Item::Use(item) = item {
+            collect_attrs(&item.attrs, &mut violations);
+        } else if let Item::Const(item) = item {
+            collect_attrs(&item.attrs, &mut violations);
+        } else if let Item::Type(item) = item {
+            collect_attrs(&item.attrs, &mut violations);
         }
     }
     violations

@@ -164,9 +164,8 @@ instead of pretending.
   - `bpk-lib/crates/core/tests/durable_frontier_waits.rs`
 - Command used:
   - `cargo test --test durable_frontier_waits --features dangerous-test-hooks`
-- Line/function coverage delta: not measured; Phase 2.1 adds durable wait API
-  coverage, Phase 2.2 extends the same surface to applied and visible waits,
-  and Phase 2.3 adds append-time gate coverage.
+- Line/function coverage delta: not measured; the suite covers durable wait API
+  semantics, applied/visible wait surfaces, and append-time gate behavior.
 - Mutation delta:
   - `frontier-wait-durable` critical seam is registered at the 85% smoke
     threshold.
@@ -392,7 +391,7 @@ instead of pretending.
 - Location:
   - `bpk-lib/crates/core/tests/fuzz_chaos_feedback.rs`
 - Command used:
-  - `cargo test --test fuzz_chaos_feedback --all-features --release`
+  - `cargo test --test fuzz_chaos_feedback --all-features --release -- --ignored`
 - Line/function coverage delta: unmeasured
 - Mutation delta: unmeasured
 - Remaining known blind spots:
@@ -478,7 +477,7 @@ instead of pretending.
 - Line/function coverage delta: targeted rise in `bpk-lib/tools/integrity/src/harness_lints.rs`;
   exact JSON delta not recorded
 - Mutation delta:
-  - `harness-ledger-structural-lint` critical seam is registered at the 85%
+  - `testing-ledger-structural-lint` critical seam is registered at the 85%
     smoke threshold for ledger schema, command-prefix, location, module-header,
     and capped line-count enforcement.
 - Covered tests:

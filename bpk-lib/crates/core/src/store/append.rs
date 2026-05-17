@@ -354,6 +354,27 @@ pub enum ExtensionKeyError {
     ReservedNamespace,
 }
 
+impl std::fmt::Display for ExtensionKeyError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Empty => write!(f, "extension key is empty"),
+            Self::NonAscii => write!(f, "extension key must be ASCII"),
+            Self::TooLong => write!(f, "extension key exceeds maximum length"),
+            Self::InvalidNamespaceFormat => {
+                write!(
+                    f,
+                    "extension key must have exactly one non-empty namespace separator"
+                )
+            }
+            Self::ReservedNamespace => {
+                write!(f, "extension key uses the reserved batpak namespace")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ExtensionKeyError {}
+
 impl ExtensionKey {
     const MAX_LEN: usize = 256;
 
@@ -653,5 +674,16 @@ mod tests {
     fn extension_key_rejects_keys_over_max_length() {
         let too_long = format!("acme.{}", "a".repeat(252));
         assert_eq!(ExtensionKey::new(too_long), Err(ExtensionKeyError::TooLong));
+    }
+
+    #[test]
+    fn extension_key_error_preserves_display_and_error_trait() {
+        fn assert_error_trait<E: std::error::Error>() {}
+
+        assert_error_trait::<ExtensionKeyError>();
+        assert_eq!(
+            ExtensionKeyError::InvalidNamespaceFormat.to_string(),
+            "extension key must have exactly one non-empty namespace separator"
+        );
     }
 }

@@ -12,6 +12,9 @@ readme = "README.md"
 keywords = ["event-sourcing", "macros"]
 categories = ["development-tools::procedural-macro-helpers"]
 
+[lints]
+workspace = true
+
 [lib]
 proc-macro = true
 

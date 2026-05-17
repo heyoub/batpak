@@ -5,9 +5,14 @@
 The checked-in devcontainer is the canonical environment. Native Windows and Linux are supported too, but they should use the same root-first commands:
 
 ```bash
+cd bpk-lib
 cargo xtask doctor
 cargo xtask ci
 ```
+
+The Rust workspace lives at `bpk-lib/Cargo.toml`; the project root is the
+ordered doc/agent map. Run `cargo xtask ...` from `bpk-lib/` unless a command
+explicitly says otherwise.
 
 If your local toolchain is missing standard cargo helpers, run:
 
@@ -23,6 +28,7 @@ that config if you want the repo-managed pre-commit hook.
 ## Daily Commands
 
 ```bash
+cd bpk-lib
 cargo xtask doctor
 cargo xtask install-hooks
 cargo xtask traceability
@@ -58,7 +64,7 @@ No current environment is both canonical and timing-stable.
 ## Mutation Policy
 
 - `cargo xtask mutants policy` prints the repo-owned mutation policy from xtask itself.
-- `cargo xtask mutants smoke` is the CI smoke lane: it runs the named critical seams first (`writer commit protocol`, `cursor delivery/checkpoint logic`, `projection replay/freshness logic`, `segment scan / corruption handling`, `hash-chain / replay consistency`, platform backend admission/reverify, and harness-ledger linting) and then repo-wide 1/48 ratchet shards on both feature surfaces.
+- `cargo xtask mutants smoke` is the CI smoke lane: it runs the named critical seams first (`writer commit protocol`, `cursor delivery/checkpoint logic`, `projection replay/freshness logic`, `segment scan / corruption handling`, `hash-chain / replay consistency`, platform backend admission/reverify, and testing-ledger linting) and then repo-wide 1/48 ratchet shards on both feature surfaces.
 - `cargo xtask mutants full` with no overrides runs the full policy locally. `cargo xtask mutants full --surface ... --shard ...` stays the targeted repo-wide lane for matrix jobs and focused investigation.
 - Critical seams enforce an `85%` mutation-score threshold immediately. Repo-wide lanes use the staged ratchet phases owned by xtask; the current phase is `Phase0` record-only, which means xtask records the score and reports the next available floor without enforcing it yet.
 - Mutation artifacts live under `target/xtask-mutants/` so xtask owns the scratch surface.

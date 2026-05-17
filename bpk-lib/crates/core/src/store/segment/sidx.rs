@@ -40,15 +40,20 @@
 //! | causation_id    | 16    | u128 LE; 0 = no causation           |
 //! | **Total**       | **162** |                                   |
 
+#[cfg(test)]
 use crate::event::EventKind;
 use crate::event::HashChain;
+#[cfg(test)]
+pub(crate) use crate::store::cold_start::raw_to_kind;
+pub(crate) use crate::store::cold_start::{
+    kind_to_raw, raw_to_kind_counted, ReservedKindFallbackStats,
+};
 use crate::store::cold_start::{ColdStartIndexRow, ColdStartSource};
 use crate::store::index::interner::InternId;
 use crate::store::StoreError;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
-use tracing::warn;
 
 // ── constants ─────────────────────────────────────────────────────────────────
 
@@ -69,44 +74,6 @@ const TRAILER_SIZE: u64 = 16;
 /// - correlation_id(16) + causation_id(16) = 32 → **162**
 pub(crate) const ENTRY_SIZE: usize = 162;
 
-#[derive(Debug, Default, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub(crate) struct ReservedKindFallbackStats {
-    pub(crate) system: usize,
-    pub(crate) effect: usize,
-    #[serde(default)]
-    pub(crate) system_histogram: BTreeMap<u16, usize>,
-    #[serde(default)]
-    pub(crate) effect_histogram: BTreeMap<u16, usize>,
-}
-
-impl ReservedKindFallbackStats {
-    pub(crate) fn record_system(&mut self, raw: u16) {
-        self.system += 1;
-        *self.system_histogram.entry(raw).or_insert(0) += 1;
-    }
-
-    pub(crate) fn record_effect(&mut self, raw: u16) {
-        self.effect += 1;
-        *self.effect_histogram.entry(raw).or_insert(0) += 1;
-    }
-
-    pub(crate) fn merge_from(&mut self, other: &Self) {
-        self.system += other.system;
-        self.effect += other.effect;
-        for (&raw, &count) in &other.system_histogram {
-            *self.system_histogram.entry(raw).or_insert(0) += count;
-        }
-        for (&raw, &count) in &other.effect_histogram {
-            *self.effect_histogram.entry(raw).or_insert(0) += count;
-        }
-    }
-
-    pub(crate) fn add(mut self, other: &Self) -> Self {
-        self.merge_from(other);
-        self
-    }
-}
-
 const _ASSERT_ENTRY_SIZE: () = {
     // Compile-time sanity: update this constant whenever SidxEntry fields change.
     assert!(
@@ -114,84 +81,6 @@ const _ASSERT_ENTRY_SIZE: () = {
         "ENTRY_SIZE must equal 162 — update when SidxEntry layout changes"
     );
 };
-
-// ── EventKind helpers ─────────────────────────────────────────────────────────
-
-/// Convert an [`EventKind`] to the raw `u16` used in the on-disk SIDX entry.
-///
-/// Reconstructs the packed value from the two public bit-field accessors,
-/// mirroring `EventKind`'s internal `(category << 12) | type_id` encoding.
-#[inline]
-pub(crate) fn kind_to_raw(kind: EventKind) -> u16 {
-    (u16::from(kind.category()) << 12) | kind.type_id()
-}
-
-/// Reconstruct an [`EventKind`] from its raw `u16` disk representation.
-///
-/// `EventKind::custom()` rejects the reserved categories `0x0` (system) and `0xD`
-/// (effect) with a panic, so those are matched directly against the known library
-/// constants. Any unrecognised value in a reserved range falls back to the closest
-/// documented constant (system or effect root) so the index can still be rebuilt.
-fn raw_to_kind_impl(raw: u16, counts: Option<&mut ReservedKindFallbackStats>) -> EventKind {
-    let category = (raw >> 12) as u8;
-    match category {
-        // Reserved system category (0x0) — match known constants by full value.
-        0x0 => match raw {
-            0x0001 => EventKind::SYSTEM_INIT,
-            0x0002 => EventKind::SYSTEM_SHUTDOWN,
-            0x0003 => EventKind::SYSTEM_HEARTBEAT,
-            0x0004 => EventKind::SYSTEM_CONFIG_CHANGE,
-            0x0005 => EventKind::SYSTEM_CHECKPOINT,
-            0x0006 => EventKind::SYSTEM_BATCH_BEGIN,
-            0x0007 => EventKind::SYSTEM_BATCH_COMMIT,
-            0x0008 => EventKind::SYSTEM_OPEN_COMPLETED,
-            0x0009 => EventKind::SYSTEM_CLOSE_COMPLETED,
-            0x000F => EventKind::SYSTEM_DENIAL,
-            0x0FFE => EventKind::TOMBSTONE,
-            0x0000 => EventKind::DATA,
-            _ => {
-                if let Some(counts) = counts {
-                    counts.record_system(raw);
-                }
-                warn!(
-                    raw,
-                    "unrecognized reserved system kind in SIDX footer; falling back to DATA"
-                );
-                EventKind::DATA
-            }
-        },
-        // Reserved effect category (0xD) — match known constants.
-        0xD => match raw {
-            0xD001 => EventKind::EFFECT_ERROR,
-            0xD002 => EventKind::EFFECT_RETRY,
-            0xD004 => EventKind::EFFECT_ACK,
-            0xD005 => EventKind::EFFECT_BACKPRESSURE,
-            0xD006 => EventKind::EFFECT_CANCEL,
-            0xD007 => EventKind::EFFECT_CONFLICT,
-            _ => {
-                if let Some(counts) = counts {
-                    counts.record_effect(raw);
-                }
-                warn!(
-                    raw,
-                    "unrecognized reserved effect kind in SIDX footer; falling back to EFFECT_ERROR"
-                );
-                EventKind::EFFECT_ERROR
-            }
-        },
-        // All other categories (0x1–0xC, 0xE–0xF) are open for product use.
-        other => EventKind::custom(other, raw & 0x0FFF),
-    }
-}
-
-#[cfg(test)]
-pub(crate) fn raw_to_kind(raw: u16) -> EventKind {
-    raw_to_kind_impl(raw, None)
-}
-
-pub(crate) fn raw_to_kind_counted(raw: u16, counts: &mut ReservedKindFallbackStats) -> EventKind {
-    raw_to_kind_impl(raw, Some(counts))
-}
 
 // ── SidxEntry ─────────────────────────────────────────────────────────────────
 

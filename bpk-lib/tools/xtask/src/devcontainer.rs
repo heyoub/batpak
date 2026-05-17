@@ -17,7 +17,7 @@ const FORWARDED_ENV_VARS: &[&str] = &[
     "CARGO_INCREMENTAL",
 ];
 
-pub(crate) fn devcontainer_exec(args: DevcontainerExecArgs) -> Result<()> {
+pub(crate) fn devcontainer_exec(args: &DevcontainerExecArgs) -> Result<()> {
     if args.command.is_empty() {
         bail!("`cargo xtask devcontainer-exec -- <command...>` requires an explicit command");
     }

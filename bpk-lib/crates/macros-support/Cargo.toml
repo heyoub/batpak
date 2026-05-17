@@ -12,5 +12,8 @@ readme = "README.md"
 keywords = ["event-sourcing", "macros", "internal"]
 categories = ["development-tools::procedural-macro-helpers"]
 
+[lints]
+workspace = true
+
 [dependencies]
 inventory = "0.3"

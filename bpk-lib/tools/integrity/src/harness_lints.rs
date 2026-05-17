@@ -254,7 +254,7 @@ fn parse_ledger(repo_root: &Path) -> Result<Vec<LedgerEntry>> {
         .parent()
         .unwrap_or(repo_root)
         .join("041_TESTING_LEDGER.md");
-    let content = fs::read_to_string(&path).context("read HARNESS_LEDGER.md")?;
+    let content = fs::read_to_string(&path).context("read 041_TESTING_LEDGER.md")?;
     let mut current_section = String::new();
     let mut entries = Vec::new();
     let mut current: Option<LedgerEntry> = None;
@@ -271,7 +271,7 @@ fn parse_ledger(repo_root: &Path) -> Result<Vec<LedgerEntry>> {
                 ensure(
                     VALID_PATTERNS.contains(&current_section.as_str()),
                     format!(
-                        "HARNESS_LEDGER.md:{line_no}: unknown harness section `{current_section}`"
+                        "041_TESTING_LEDGER.md:{line_no}: unknown harness section `{current_section}`"
                     ),
                 )?;
             }
@@ -333,7 +333,7 @@ fn parse_ledger(repo_root: &Path) -> Result<Vec<LedgerEntry>> {
     }
     ensure(
         !entries.is_empty(),
-        "HARNESS_LEDGER.md has no invariant entries",
+        "041_TESTING_LEDGER.md has no invariant entries",
     )?;
     Ok(entries)
 }
@@ -347,7 +347,7 @@ fn check_entries(
         ensure(
             VALID_PATTERNS.contains(&entry.section.as_str()),
             format!(
-                "HARNESS_LEDGER.md:{}: invariant `{}` appears outside a valid harness section",
+                "041_TESTING_LEDGER.md:{}: invariant `{}` appears outside a valid harness section",
                 entry.line, entry.title
             ),
         )?;
@@ -355,14 +355,14 @@ fn check_entries(
             ensure(
                 entry.fields.contains(*required),
                 format!(
-                    "HARNESS_LEDGER.md:{}: invariant `{}` missing `{required}`",
+                    "041_TESTING_LEDGER.md:{}: invariant `{}` missing `{required}`",
                     entry.line, entry.title
                 ),
             )?;
         }
         let Some(pattern) = entry.pattern.as_deref() else {
             bail!(
-                "HARNESS_LEDGER.md:{}: invariant `{}` missing backticked harness pattern",
+                "041_TESTING_LEDGER.md:{}: invariant `{}` missing backticked harness pattern",
                 entry.line,
                 entry.title
             );
@@ -370,21 +370,21 @@ fn check_entries(
         ensure(
             pattern == entry.section,
             format!(
-                "HARNESS_LEDGER.md:{}: invariant `{}` pattern `{pattern}` must match section `{}`",
+                "041_TESTING_LEDGER.md:{}: invariant `{}` pattern `{pattern}` must match section `{}`",
                 entry.line, entry.title, entry.section
             ),
         )?;
         ensure(
             !entry.locations.is_empty(),
             format!(
-                "HARNESS_LEDGER.md:{}: invariant `{}` has no locations",
+                "041_TESTING_LEDGER.md:{}: invariant `{}` has no locations",
                 entry.line, entry.title
             ),
         )?;
         ensure(
             !entry.commands.is_empty(),
             format!(
-                "HARNESS_LEDGER.md:{}: invariant `{}` has no commands",
+                "041_TESTING_LEDGER.md:{}: invariant `{}` has no commands",
                 entry.line, entry.title
             ),
         )?;
@@ -393,7 +393,7 @@ fn check_entries(
             ensure(
                 resolve_repo_or_core_path(repo_root, path).exists(),
                 format!(
-                    "HARNESS_LEDGER.md:{}: location `{path}` does not exist",
+                    "041_TESTING_LEDGER.md:{}: location `{path}` does not exist",
                     entry.line
                 ),
             )?;
@@ -401,7 +401,7 @@ fn check_entries(
                 tracked.contains(workspace_path.as_str())
                     || tracked.contains(&format!("crates/core/{workspace_path}")),
                 format!(
-                    "HARNESS_LEDGER.md:{}: location `{path}` is not git-tracked",
+                    "041_TESTING_LEDGER.md:{}: location `{path}` is not git-tracked",
                     entry.line
                 ),
             )?;
@@ -412,7 +412,7 @@ fn check_entries(
                     .iter()
                     .any(|prefix| command.starts_with(prefix)),
                 format!(
-                    "HARNESS_LEDGER.md:{}: command `{command}` must start with an approved repo command",
+                    "041_TESTING_LEDGER.md:{}: command `{command}` must start with an approved repo command",
                     entry.line
                 ),
             )?;

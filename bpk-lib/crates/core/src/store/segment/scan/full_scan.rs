@@ -129,20 +129,9 @@ impl Reader {
                     }
                     cursor += frame_size as u64;
                 }
-                Err(segment::FrameDecodeError::CrcMismatch { .. }) => {
-                    return Err(StoreError::CrcMismatch {
-                        segment_id,
-                        offset: frame_offset,
-                    });
-                }
                 Err(error) => {
                     self.release_buffer(frame_buf);
-                    return Err(StoreError::CorruptSegment {
-                        segment_id,
-                        detail: format!(
-                            "frame at offset {frame_offset} is corrupt after full payload read: {error}"
-                        ),
-                    });
+                    return Err(Self::frame_decode_error(segment_id, frame_offset, error));
                 }
             }
             self.release_buffer(frame_buf);

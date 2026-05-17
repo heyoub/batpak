@@ -20,7 +20,8 @@
 
 use crate::event::{EventKind, HashChain};
 use crate::store::cold_start::{
-    validate_watermark_segment, ColdStartIndexRow, ColdStartSource, WatermarkValidationError,
+    validate_watermark_segment, ColdStartIndexRow, ColdStartSource, ReservedKindFallbackStats,
+    WatermarkInfo, WatermarkValidationError,
 };
 use crate::store::index::interner::InternId;
 use crate::store::index::{
@@ -28,7 +29,6 @@ use crate::store::index::{
     StoreIndex,
 };
 use crate::store::platform::fs::write_file_atomically;
-use crate::store::segment::sidx::ReservedKindFallbackStats;
 use crate::store::{EncodedBytes, ExtensionKey, StoreError};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -164,17 +164,6 @@ impl CheckpointEntry {
 }
 
 // ── Public-to-crate surface ───────────────────────────────────────────────────
-
-/// Watermark and global-sequence information returned by [`try_load_checkpoint`].
-///
-/// The caller uses these values to know how far the durable log extends without
-/// reading every segment file.
-pub(crate) struct WatermarkInfo {
-    /// Segment ID of the highest durably-written event.
-    pub watermark_segment_id: u64,
-    /// Byte offset within the watermark segment.
-    pub watermark_offset: u64,
-}
 
 pub(crate) struct LoadedCheckpointData {
     pub(crate) entries: Vec<CheckpointEntry>,

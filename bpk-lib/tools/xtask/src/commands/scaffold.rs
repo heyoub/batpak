@@ -183,8 +183,14 @@ mod tests {
 
     #[test]
     fn safe_package_name_normalizes_agent_input() {
-        assert_eq!(safe_package_name("My App").unwrap(), "my-app");
-        assert_eq!(safe_package_name("my__app").unwrap(), "my-app");
+        assert_eq!(
+            safe_package_name("My App").expect("agent input should normalize"),
+            "my-app"
+        );
+        assert_eq!(
+            safe_package_name("my__app").expect("agent input should normalize"),
+            "my-app"
+        );
         assert!(safe_package_name("99-app").is_err());
     }
 

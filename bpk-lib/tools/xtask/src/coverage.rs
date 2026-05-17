@@ -256,26 +256,10 @@ fn coverage_summary(json: &Value) -> Result<CoverageSummary> {
         .and_then(|item| item.get("totals"))
         .context("coverage json missing data[0].totals")?;
 
-    let lines_total = totals
-        .get("lines")
-        .and_then(|v| v.get("count"))
-        .and_then(Value::as_u64)
-        .context("coverage json missing lines.count")? as u32;
-    let lines_covered = totals
-        .get("lines")
-        .and_then(|v| v.get("covered"))
-        .and_then(Value::as_u64)
-        .context("coverage json missing lines.covered")? as u32;
-    let funcs_total = totals
-        .get("functions")
-        .and_then(|v| v.get("count"))
-        .and_then(Value::as_u64)
-        .context("coverage json missing functions.count")? as u32;
-    let funcs_covered = totals
-        .get("functions")
-        .and_then(|v| v.get("covered"))
-        .and_then(Value::as_u64)
-        .context("coverage json missing functions.covered")? as u32;
+    let lines_total = coverage_total_u32(totals, "lines", "count")?;
+    let lines_covered = coverage_total_u32(totals, "lines", "covered")?;
+    let funcs_total = coverage_total_u32(totals, "functions", "count")?;
+    let funcs_covered = coverage_total_u32(totals, "functions", "covered")?;
 
     if lines_total == 0 {
         bail!("coverage json reported zero total lines");
@@ -292,6 +276,17 @@ fn coverage_summary(json: &Value) -> Result<CoverageSummary> {
         line_pct: (lines_covered * 100) / lines_total,
         func_pct: (funcs_covered * 100) / funcs_total,
     })
+}
+
+fn coverage_total_u32(totals: &Value, section: &str, field: &str) -> Result<u32> {
+    let value = totals
+        .get(section)
+        .and_then(|v| v.get(field))
+        .and_then(Value::as_u64)
+        .with_context(|| format!("coverage json missing {section}.{field}"))?;
+
+    u32::try_from(value)
+        .with_context(|| format!("coverage json value {section}.{field} exceeds u32"))
 }
 
 #[derive(Debug, PartialEq, Eq)]

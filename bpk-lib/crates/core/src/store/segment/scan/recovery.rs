@@ -412,38 +412,28 @@ impl Reader {
                     }
                     cursor += frame_size as u64;
                 }
-                Err(segment::FrameDecodeError::CrcMismatch { .. }) => {
-                    if state_ref.in_batch {
-                        tracing::warn!(
-                            segment_id,
-                            staged_count = state_ref.staged.len(),
-                            "discarding incomplete batch due to CRC mismatch"
-                        );
-                        state_ref.staged.clear();
-                        state_ref.in_batch = false;
-                    }
-                    return Err(StoreError::CrcMismatch {
-                        segment_id,
-                        offset: frame_offset,
-                    });
-                }
                 Err(error) => {
+                    let is_crc_mismatch =
+                        matches!(&error, segment::FrameDecodeError::CrcMismatch { .. });
                     if state_ref.in_batch {
-                        tracing::warn!(
-                            segment_id,
-                            staged_count = state_ref.staged.len(),
-                            "discarding incomplete batch due to decode error"
-                        );
+                        if is_crc_mismatch {
+                            tracing::warn!(
+                                segment_id,
+                                staged_count = state_ref.staged.len(),
+                                "discarding incomplete batch due to CRC mismatch"
+                            );
+                        } else {
+                            tracing::warn!(
+                                segment_id,
+                                staged_count = state_ref.staged.len(),
+                                "discarding incomplete batch due to decode error"
+                            );
+                        }
                         state_ref.staged.clear();
                         state_ref.in_batch = false;
                     }
                     self.release_buffer(frame_buf);
-                    return Err(StoreError::CorruptSegment {
-                        segment_id,
-                        detail: format!(
-                            "frame at offset {frame_offset} is corrupt after full payload read: {error}"
-                        ),
-                    });
+                    return Err(Self::frame_decode_error(segment_id, frame_offset, error));
                 }
             }
             self.release_buffer(frame_buf);

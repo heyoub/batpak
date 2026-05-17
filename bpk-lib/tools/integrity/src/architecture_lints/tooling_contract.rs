@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 pub(super) fn check(repo_root: &Path) -> Result<()> {
     check_project_layout_contract(repo_root)?;
     check_no_mdbook_dependency(repo_root)?;
+    check_testing_doc_renames_stay_current(repo_root)?;
     check_justfile_stays_thin(repo_root)?;
     check_packaging_surface(repo_root)?;
     check_single_target_dir_contract(repo_root)?;
@@ -84,6 +85,26 @@ fn check_project_layout_contract(repo_root: &Path) -> Result<()> {
         )?;
     }
 
+    Ok(())
+}
+
+fn check_testing_doc_renames_stay_current(repo_root: &Path) -> Result<()> {
+    let harness_lints = fs::read_to_string(repo_root.join("tools/integrity/src/harness_lints.rs"))
+        .context("read harness_lints.rs")?;
+    ensure(
+        !harness_lints.contains("HARNESS_LEDGER.md"),
+        "harness lint diagnostics must name 041_TESTING_LEDGER.md, not retired HARNESS_LEDGER.md",
+    )?;
+
+    let docs_rs =
+        fs::read_to_string(repo_root.join("tools/xtask/src/docs.rs")).context("read docs.rs")?;
+    ensure(
+        !docs_rs.contains("HARNESS_DIRECTIVE.html")
+            && !docs_rs.contains("HARNESS_LEDGER.html")
+            && docs_rs.contains("TESTING_DOCTRINE.html")
+            && docs_rs.contains("TESTING_LEDGER.html"),
+        "generated docs must use TESTING_DOCTRINE.html and TESTING_LEDGER.html names",
+    )?;
     Ok(())
 }
 
@@ -189,6 +210,16 @@ fn check_single_target_dir_contract(repo_root: &Path) -> Result<()> {
     ensure(
         cargo_config.contains("target-dir = \"../target\""),
         "bpk-lib/.cargo/config.toml must route all default Cargo output to repo-root target/",
+    )?;
+
+    let nextest_config = fs::read_to_string(repo_root.join(".config/nextest.toml"))
+        .context("read .config/nextest.toml")?;
+    ensure(
+        nextest_config.contains("dir = \"../target/nextest\"")
+            && nextest_config.contains("path = \"junit.xml\"")
+            && !nextest_config.contains("path = \"target/")
+            && !nextest_config.contains("path = \"../target/"),
+        "nextest reports and run metadata must stay under repo-root target/nextest",
     )?;
 
     let devcontainer = fs::read_to_string(project_root.join(".devcontainer/devcontainer.json"))

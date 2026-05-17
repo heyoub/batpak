@@ -578,18 +578,18 @@ mod tests {
     use std::path::Path;
     use syn::visit::Visit;
 
-    fn tokens(leaks: Vec<&'static super::BoundaryTerm>) -> Vec<&'static str> {
+    fn tokens(leaks: &[&'static super::BoundaryTerm]) -> Vec<&'static str> {
         leaks.iter().map(|leak| leak.token).collect()
     }
 
-    fn path_modules(leaks: Vec<&'static super::InternalPathTerm>) -> Vec<&'static str> {
+    fn path_modules(leaks: &[&'static super::InternalPathTerm]) -> Vec<&'static str> {
         leaks.iter().map(|leak| leak.module).collect()
     }
 
     #[test]
     fn detects_core_layer_leaks() {
         let content = "pub struct SyncbatCore;\nconst PROFILE: &str = \"contract.external_v1\";\n";
-        let tokens = tokens(forbidden_layer_terms(SourceLayer::Core, content));
+        let tokens = tokens(&forbidden_layer_terms(SourceLayer::Core, content));
         assert!(tokens.contains(&"Syncbat"));
         assert!(tokens.contains(&"contract.external_v1"));
     }
@@ -597,7 +597,7 @@ mod tests {
     #[test]
     fn detects_syncbat_layer_leaks() {
         let content = "pub struct DownstreamKitRuntime;\nconst CLAIM: &str = \"authority_required\";\n";
-        let tokens = tokens(forbidden_layer_terms(SourceLayer::Syncbat, content));
+        let tokens = tokens(&forbidden_layer_terms(SourceLayer::Syncbat, content));
         assert!(tokens.contains(&"DownstreamKit"));
         assert!(tokens.contains(&"authority_required"));
     }
@@ -605,7 +605,7 @@ mod tests {
     #[test]
     fn detects_downstream-kit_layer_leaks() {
         let content = "pub struct NetbatGateway;\nconst PROFILE: &str = \"contract.external_v1\";\n";
-        let tokens = tokens(forbidden_layer_terms(SourceLayer::DownstreamKit, content));
+        let tokens = tokens(&forbidden_layer_terms(SourceLayer::DownstreamKit, content));
         assert!(tokens.contains(&"Netbat"));
         assert!(tokens.contains(&"contract.external_v1"));
     }
@@ -613,7 +613,7 @@ mod tests {
     #[test]
     fn detects_netbat_layer_leaks() {
         let content = "let _ = batpak::Store::open;\nconst CLAIM: &str = \"authority_required\";\n";
-        let tokens = tokens(forbidden_layer_terms(SourceLayer::Netbat, content));
+        let tokens = tokens(&forbidden_layer_terms(SourceLayer::Netbat, content));
         assert!(tokens.contains(&"batpak::"));
         assert!(tokens.contains(&"authority_required"));
     }
@@ -637,7 +637,7 @@ mod tests {
     #[test]
     fn rejects_syncbat_internal_batpak_paths() {
         let content = "use batpak::store::segment::FrameHeader;\n";
-        let tokens = path_modules(family_internal_batpak_paths(content));
+        let tokens = path_modules(&family_internal_batpak_paths(content));
         assert_eq!(tokens, vec!["segment"]);
     }
 
@@ -648,15 +648,15 @@ mod tests {
         let nested_group = "use batpak::{store::{Store, platform::Probe}};\n";
 
         assert_eq!(
-            path_modules(family_internal_batpak_paths(direct_group)),
+            path_modules(&family_internal_batpak_paths(direct_group)),
             vec!["segment"]
         );
         assert_eq!(
-            path_modules(family_internal_batpak_paths(crate_group)),
+            path_modules(&family_internal_batpak_paths(crate_group)),
             vec!["index"]
         );
         assert_eq!(
-            path_modules(family_internal_batpak_paths(nested_group)),
+            path_modules(&family_internal_batpak_paths(nested_group)),
             vec!["platform"]
         );
     }

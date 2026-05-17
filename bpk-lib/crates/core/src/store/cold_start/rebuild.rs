@@ -1,11 +1,10 @@
 use crate::coordinate::Coordinate;
-use crate::store::cold_start::ColdStartPolicy;
+use crate::store::cold_start::{ColdStartPolicy, ReservedKindFallbackStats, WatermarkInfo};
 use crate::store::config::duration_micros;
 use crate::store::index::interner::StringInterner;
 use crate::store::index::{DiskPos, IndexEntry, RoutingSummary, StoreIndex};
 use crate::store::segment;
 use crate::store::segment::scan::{FrameScanTailPolicy, Reader, ScannedIndexEntry};
-use crate::store::segment::sidx::ReservedKindFallbackStats;
 use crate::store::StoreError;
 use rayon::prelude::*;
 use std::collections::BTreeMap;
@@ -108,7 +107,7 @@ struct RestorePlan {
 struct SnapshotPlanInput {
     entries: Vec<IndexEntry>,
     interner_strings: Vec<String>,
-    watermark: super::checkpoint::WatermarkInfo,
+    watermark: WatermarkInfo,
     stored_allocator: u64,
     routing: RoutingSummary,
     reopen_reserved_kind_fallbacks: ReservedKindFallbackStats,
@@ -593,7 +592,7 @@ fn collect_tail_entries(
     interner: &StringInterner,
     reader: &Reader,
     data_dir: &Path,
-    watermark: &super::checkpoint::WatermarkInfo,
+    watermark: &WatermarkInfo,
     allocator_floor: u64,
 ) -> Result<Vec<IndexEntry>, StoreError> {
     let entries = segment_paths(data_dir)?;
@@ -911,7 +910,7 @@ mod tests {
                 SnapshotPlanInput {
                     entries,
                     interner_strings,
-                    watermark: crate::store::cold_start::checkpoint::WatermarkInfo {
+                    watermark: WatermarkInfo {
                         watermark_segment_id: 99,
                         watermark_offset: 0,
                     },
@@ -953,7 +952,7 @@ mod tests {
             SnapshotPlanInput {
                 entries,
                 interner_strings,
-                watermark: crate::store::cold_start::checkpoint::WatermarkInfo {
+                watermark: WatermarkInfo {
                     watermark_segment_id: 99,
                     watermark_offset: 0,
                 },
@@ -1008,7 +1007,7 @@ mod tests {
                 SnapshotPlanInput {
                     entries: Vec::new(),
                     interner_strings: Vec::new(),
-                    watermark: crate::store::cold_start::checkpoint::WatermarkInfo {
+                    watermark: WatermarkInfo {
                         watermark_segment_id,
                         watermark_offset: 0,
                     },
@@ -1257,7 +1256,7 @@ mod tests {
             &interner,
             &reader,
             dir.path(),
-            &crate::store::cold_start::checkpoint::WatermarkInfo {
+            &WatermarkInfo {
                 watermark_segment_id,
                 watermark_offset: 0,
             },

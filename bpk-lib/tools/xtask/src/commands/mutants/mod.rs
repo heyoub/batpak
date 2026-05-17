@@ -11,8 +11,8 @@ use self::plan::{build_mutant_execution_plan, MutantExecutionPlan};
 use self::policy::print_mutation_policy;
 use self::run::run_mutation_lane;
 
-pub(crate) fn mutants(args: MutantsArgs) -> Result<()> {
-    match build_mutant_execution_plan(&args)? {
+pub(crate) fn mutants(args: &MutantsArgs) -> Result<()> {
+    match build_mutant_execution_plan(args)? {
         MutantExecutionPlan::DescribePolicy => {
             print_mutation_policy();
             Ok(())
@@ -32,10 +32,10 @@ mod tests {
         critical_mutation_lanes, critical_mutation_smoke_lanes, surface_excludes, MutationBaseline,
         MutationLane, MutationScope, MutationSharding, CURSOR_MUTANT_FILES,
         EVENT_PAYLOAD_REGISTRY_MUTANT_FILES, FRONTIER_APPEND_GATE_MUTANT_FILES,
-        FRONTIER_WAIT_MUTANT_FILES, HARNESS_LEDGER_LINT_MUTANT_FILES,
-        INDEX_TOPOLOGY_DEFAULT_EQUIVALENT_MUTANT, PLATFORM_BACKEND_MUTANT_FILES,
-        PROJECTION_MUTANT_FILES, REPO_WIDE_ALL_FEATURES_MUTANT_FILES,
-        REPO_WIDE_NO_DEFAULT_MUTANT_FILES, SIDX_EMPTY_FOOTER_FLOOR_EQUIVALENT_MUTANT,
+        FRONTIER_WAIT_MUTANT_FILES, INDEX_TOPOLOGY_DEFAULT_EQUIVALENT_MUTANT,
+        PLATFORM_BACKEND_MUTANT_FILES, PROJECTION_MUTANT_FILES,
+        REPO_WIDE_ALL_FEATURES_MUTANT_FILES, REPO_WIDE_NO_DEFAULT_MUTANT_FILES,
+        SIDX_EMPTY_FOOTER_FLOOR_EQUIVALENT_MUTANT, TESTING_LEDGER_LINT_MUTANT_FILES,
         WRITER_COMMIT_MUTANT_FILES,
     };
     use super::plan::{build_mutant_execution_plan, mutants_command, MutantExecutionPlan};
@@ -198,7 +198,8 @@ mod tests {
     }
 
     #[test]
-    fn mutants_smoke_lane_uses_round_robin_shard_and_skip_baseline_after_first_lane() {
+    fn mutants_smoke_lane_uses_round_robin_shard_and_skip_baseline_after_first_lane(
+    ) -> anyhow::Result<()> {
         let lanes = critical_mutation_smoke_lanes();
         assert_eq!(lanes[0].shard.as_deref(), Some("1/8"));
         assert_eq!(lanes[0].sharding, Some(MutationSharding::RoundRobin));
@@ -211,17 +212,17 @@ mod tests {
             mode: MutantMode::Smoke,
             surface: None,
             shard: None,
-        })
-        .expect("smoke plan");
+        })?;
 
         let MutantExecutionPlan::Run(lanes) = plan else {
-            panic!("expected runnable smoke plan");
+            anyhow::bail!("expected runnable smoke plan");
         };
 
         assert_eq!(lanes[0].baseline, MutationBaseline::Run);
         assert!(lanes[1..]
             .iter()
             .all(|lane| lane.baseline == MutationBaseline::Skip));
+        Ok(())
     }
 
     #[test]
@@ -262,7 +263,7 @@ mod tests {
             .expect("event payload registry lane");
         let harness_lane = lanes
             .iter()
-            .find(|lane| lane.slug == "harness-ledger-structural-lint")
+            .find(|lane| lane.slug == "testing-ledger-structural-lint")
             .expect("harness lint lane");
         let platform_lane = lanes
             .iter()
@@ -276,7 +277,7 @@ mod tests {
         assert_eq!(gate_lane.paths, FRONTIER_APPEND_GATE_MUTANT_FILES);
         assert_eq!(registry_lane.paths, EVENT_PAYLOAD_REGISTRY_MUTANT_FILES);
         assert_eq!(platform_lane.paths, PLATFORM_BACKEND_MUTANT_FILES);
-        assert_eq!(harness_lane.paths, HARNESS_LEDGER_LINT_MUTANT_FILES);
+        assert_eq!(harness_lane.paths, TESTING_LEDGER_LINT_MUTANT_FILES);
         assert_eq!(harness_lane.package, Some("batpak-integrity"));
         assert_eq!(
             MutationLane::repo_wide(MutantSurface::AllFeatures, None).paths,
@@ -297,11 +298,11 @@ mod tests {
     fn package_scoped_mutation_lane_emits_package_arg() {
         let lane = critical_mutation_lanes()
             .into_iter()
-            .find(|lane| lane.slug == "harness-ledger-structural-lint")
+            .find(|lane| lane.slug == "testing-ledger-structural-lint")
             .expect("harness lint seam");
         let command = mutants_command(
             &lane,
-            Path::new("/repo/target/xtask-mutants/harness-ledger-structural-lint-all-features"),
+            Path::new("/repo/target/xtask-mutants/testing-ledger-structural-lint-all-features"),
         );
         let package_index = command
             .iter()

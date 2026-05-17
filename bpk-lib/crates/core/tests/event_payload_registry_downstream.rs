@@ -34,6 +34,10 @@ fn run_downstream_fixture(args: &[&str]) {
         .args(args)
         .arg("--manifest-path")
         .arg(&manifest)
+        .env(
+            "CARGO_TARGET_DIR",
+            downstream_fixture_target_dir(&manifest_dir),
+        )
         .output()
     {
         Ok(output) => output,
@@ -47,4 +51,20 @@ fn run_downstream_fixture(args: &[&str]) {
             String::from_utf8_lossy(&output.stderr)
         );
     }
+}
+
+fn downstream_fixture_target_dir(manifest_dir: &std::path::Path) -> PathBuf {
+    let workspace_root = manifest_dir
+        .parent()
+        .and_then(std::path::Path::parent)
+        .unwrap_or(manifest_dir);
+    let root_target = match std::env::var_os("CARGO_TARGET_DIR").map(PathBuf::from) {
+        Some(path) if path.is_absolute() => path,
+        Some(path) => workspace_root.join(path),
+        None => workspace_root
+            .parent()
+            .map(|project_root| project_root.join("target"))
+            .unwrap_or_else(|| workspace_root.join("target")),
+    };
+    root_target.join("downstream-fixtures")
 }

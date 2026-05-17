@@ -4,15 +4,15 @@ use crate::shared_checks::public_item_names;
 use anyhow::{Context, Result};
 use std::collections::BTreeSet;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use syn::{Item, UseTree};
 
 pub(super) fn check(repo_root: &Path) -> Result<()> {
-    let store_mod = parse_rust(core_path(repo_root, "src/store/mod.rs"))?;
-    let prelude = parse_rust(core_path(repo_root, "src/prelude.rs"))?;
-    let event_mod = parse_rust(core_path(repo_root, "src/event/mod.rs"))?;
-    let event_sourcing = parse_rust(core_path(repo_root, "src/event/sourcing.rs"))?;
-    let config = parse_rust(core_path(repo_root, "src/store/config.rs"))?;
+    let store_mod = parse_rust(&core_path(repo_root, "src/store/mod.rs"))?;
+    let prelude = parse_rust(&core_path(repo_root, "src/prelude.rs"))?;
+    let event_mod = parse_rust(&core_path(repo_root, "src/event/mod.rs"))?;
+    let event_sourcing = parse_rust(&core_path(repo_root, "src/event/sourcing.rs"))?;
+    let config = parse_rust(&core_path(repo_root, "src/store/config.rs"))?;
 
     let store_exports = public_use_names(&store_mod);
     ensure(
@@ -149,8 +149,8 @@ pub(super) fn check(repo_root: &Path) -> Result<()> {
     Ok(())
 }
 
-fn parse_rust(path: PathBuf) -> Result<syn::File> {
-    let content = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
+fn parse_rust(path: &Path) -> Result<syn::File> {
+    let content = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
     syn::parse_file(&content).with_context(|| format!("parse {}", path.display()))
 }
 
@@ -163,14 +163,14 @@ fn public_impl_method_names(file: &syn::File, type_name: &str) -> BTreeSet<Strin
         if impl_block.trait_.is_some() {
             continue;
         }
-        let is_target_impl = match impl_block.self_ty.as_ref() {
-            syn::Type::Path(tp) => tp
-                .path
+        let is_target_impl = if let syn::Type::Path(tp) = impl_block.self_ty.as_ref() {
+            tp.path
                 .segments
                 .last()
                 .map(|segment| segment.ident == type_name)
-                .unwrap_or(false),
-            _ => false,
+                .unwrap_or(false)
+        } else {
+            false
         };
         if !is_target_impl {
             continue;
@@ -279,30 +279,33 @@ fn impl_const_expr_target(file: &syn::File, type_name: &str, const_name: &str) -
 }
 
 fn self_ty_is(ty: &syn::Type, type_name: &str) -> bool {
-    match ty {
-        syn::Type::Path(tp) => tp
-            .path
+    if let syn::Type::Path(tp) = ty {
+        tp.path
             .segments
             .last()
             .map(|segment| segment.ident == type_name)
-            .unwrap_or(false),
-        _ => false,
+            .unwrap_or(false)
+    } else {
+        false
     }
 }
 
 fn trailing_expr_target(block: &syn::Block) -> Option<String> {
     let stmt = block.stmts.last()?;
-    match stmt {
-        syn::Stmt::Expr(expr, _) => expr_target(expr),
-        _ => None,
+    if let syn::Stmt::Expr(expr, _) = stmt {
+        expr_target(expr)
+    } else {
+        None
     }
 }
 
 fn expr_target(expr: &syn::Expr) -> Option<String> {
-    match expr {
-        syn::Expr::Call(call) => expr_target(&call.func),
-        syn::Expr::Path(path) => Some(path_to_string(&path.path)),
-        _ => None,
+    if let syn::Expr::Call(call) = expr {
+        expr_target(&call.func)
+    } else if let syn::Expr::Path(path) = expr {
+        Some(path_to_string(&path.path))
+    } else {
+        None
     }
 }
 

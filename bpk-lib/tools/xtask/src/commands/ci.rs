@@ -1,6 +1,6 @@
 use super::{deny_split, integrity, templates};
 use crate::bench;
-use crate::util::cargo;
+use crate::util::{cargo, cargo_target_dir_arg};
 use crate::BenchSurface;
 use anyhow::Result;
 
@@ -33,7 +33,7 @@ pub(crate) fn ci() -> Result<()> {
         ])?;
     }
     deny_split()?;
-    cargo(["nextest", "run", "--profile", "ci", "--all-features"])?;
+    run_nextest_ci(["--all-features"])?;
     cargo(["test", "--doc", "--all-features"])?;
     for package in FAMILY_CRATES {
         cargo(["test", "-p", package, "--all-features"])?;
@@ -51,13 +51,25 @@ pub(crate) fn ci() -> Result<()> {
 }
 
 pub(crate) fn perf_gates() -> Result<()> {
-    cargo([
-        "nextest",
-        "run",
+    run_nextest_ci([
         "--test",
         "perf_gates",
         "--all-features",
         "--run-ignored",
         "only",
     ])
+}
+
+pub(crate) fn run_nextest_ci<const N: usize>(args: [&str; N]) -> Result<()> {
+    let target_dir = cargo_target_dir_arg()?;
+    let mut command = vec![
+        "nextest",
+        "run",
+        "--target-dir",
+        target_dir.as_str(),
+        "--profile",
+        "ci",
+    ];
+    command.extend(args);
+    cargo(command)
 }

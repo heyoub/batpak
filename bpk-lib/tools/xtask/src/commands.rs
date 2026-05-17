@@ -81,7 +81,7 @@ pub(crate) fn deny_split() -> Result<()> {
     cargo(["audit", "--deny", "warnings"])
 }
 
-pub(crate) fn mutants(args: MutantsArgs) -> Result<()> {
+pub(crate) fn mutants(args: &MutantsArgs) -> Result<()> {
     mutants::mutants(args)
 }
 
@@ -99,6 +99,10 @@ pub(crate) fn chaos(args: ChaosArgs) -> Result<()> {
 
 pub(crate) fn ci() -> Result<()> {
     ci::ci()
+}
+
+pub(crate) fn run_nextest_ci<const N: usize>(args: [&str; N]) -> Result<()> {
+    ci::run_nextest_ci(args)
 }
 
 pub(crate) fn perf_gates() -> Result<()> {

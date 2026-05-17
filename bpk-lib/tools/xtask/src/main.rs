@@ -1,3 +1,6 @@
+// justifies: INV-ALLOW-IS-DESIGN; xtask is the repository-owned command-line tool and its subcommands intentionally write human and CI status messages to stdout/stderr from tools/xtask/src/main.rs.
+#![allow(clippy::print_stdout, clippy::print_stderr)]
+
 mod bench;
 mod commands;
 mod coverage;
@@ -278,7 +281,7 @@ fn main() -> Result<()> {
             Ok(())
         }
         XtaskCommand::Test => {
-            util::cargo(["nextest", "run", "--profile", "ci", "--all-features"])?;
+            commands::run_nextest_ci(["--all-features"])?;
             util::cargo(["test", "--doc", "--all-features"])?;
             for package in FAMILY_CRATES {
                 util::cargo(["test", "-p", package, "--all-features"])?;
@@ -313,7 +316,7 @@ fn main() -> Result<()> {
         XtaskCommand::Deny => commands::deny_split(),
         XtaskCommand::Bench(args) => bench::bench(args),
         XtaskCommand::Cover(args) => coverage::cover(args),
-        XtaskCommand::Mutants(args) => commands::mutants(args),
+        XtaskCommand::Mutants(args) => commands::mutants(&args),
         XtaskCommand::Templates => commands::templates(),
         XtaskCommand::TemplateFreshness => {
             commands::templates()?;
@@ -332,6 +335,7 @@ fn main() -> Result<()> {
             "--all-features",
             "--release",
             "--",
+            "--ignored",
             "--nocapture",
         ]),
         XtaskCommand::Stress => {
@@ -344,6 +348,7 @@ fn main() -> Result<()> {
                 "--all-features",
                 "--release",
                 "--",
+                "--ignored",
                 "--nocapture",
             ])?;
             bench::bench(BenchArgs {
@@ -354,7 +359,7 @@ fn main() -> Result<()> {
             })
         }
         XtaskCommand::PerfGates => commands::perf_gates(),
-        XtaskCommand::DevcontainerExec(args) => devcontainer::devcontainer_exec(args),
+        XtaskCommand::DevcontainerExec(args) => devcontainer::devcontainer_exec(&args),
         XtaskCommand::Ci => commands::ci(),
         XtaskCommand::Preflight => preflight::preflight(),
         XtaskCommand::PreCommit => {

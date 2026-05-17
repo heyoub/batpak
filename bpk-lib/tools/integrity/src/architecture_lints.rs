@@ -2,6 +2,7 @@ mod docs_contract;
 mod platform_boundary;
 mod public_api_truth;
 mod repo_hygiene;
+mod source_citations;
 mod syncbat_boundary;
 mod tooling_contract;
 
@@ -14,6 +15,7 @@ pub fn check(repo_root: &Path, tracked_files: &[PathBuf]) -> Result<()> {
     syncbat_boundary::check(repo_root, tracked_files)?;
     tooling_contract::check(repo_root)?;
     docs_contract::check(repo_root)?;
+    source_citations::check(repo_root)?;
     public_api_truth::check(repo_root)?;
     Ok(())
 }

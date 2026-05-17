@@ -26,7 +26,7 @@
 //!   3. If all gates pass, launch extended load fuzz + chaos
 //!   4. Extended results feed back through stricter gates
 //!
-//! Run with: cargo test --test fuzz_chaos_feedback --all-features --release
+//! Run with: cargo test --test fuzz_chaos_feedback --all-features --release -- --ignored
 
 use batpak::prelude::*;
 use batpak::store::segment::{frame_decode, frame_encode};

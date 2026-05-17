@@ -23,6 +23,9 @@
 //! `structural::check_allow_justifications` on every run.
 //! dead_code silencers are not tolerated in this repo; test-only code uses
 //! `cfg(test)`, unused code is deleted, and shared helpers get restructured.
+// justifies: INV-ALLOW-IS-DESIGN; batpak-integrity is a repository command-line tool and its check subcommands intentionally report human and CI status messages from tools/integrity/src/main.rs.
+#![allow(clippy::print_stdout, clippy::print_stderr)]
+
 mod agent_doctor;
 mod agent_surface;
 mod architecture_lints;
