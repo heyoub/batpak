@@ -1048,6 +1048,80 @@ mod tests {
         idx
     }
 
+    fn sorted_entries_with_position(idx: &StoreIndex, lane: u32, depth: u32) -> Vec<IndexEntry> {
+        let mut entries = idx.all_entries();
+        for entry in &mut entries {
+            entry.dag_lane = lane;
+            entry.dag_depth = depth;
+        }
+        entries.sort_by_key(|entry| entry.global_sequence);
+        entries
+    }
+
+    fn write_legacy_mmap_index(
+        dir: &Path,
+        version: u16,
+        idx: &StoreIndex,
+        entries: &[IndexEntry],
+        reserved_kind_fallbacks: ReservedKindFallbackStats,
+    ) {
+        assert!(
+            matches!(version, 3 | 4),
+            "legacy mmap helper is scoped to v3/v4"
+        );
+        let mut interner_strings = vec![String::new()];
+        interner_strings.extend(idx.interner.to_snapshot());
+        let interner_bytes = rmp_serde::to_vec_named(&interner_strings).expect("interner bytes");
+        let routing = RoutingSummary::from_sorted_entries(
+            entries,
+            recommended_restore_chunk_count(entries.len()),
+        );
+        let summary_bytes = if version >= 4 {
+            rmp_serde::to_vec_named(&MmapSummaryDataV4 {
+                routing,
+                reserved_kind_fallbacks,
+            })
+            .expect("v4 summary bytes")
+        } else {
+            rmp_serde::to_vec_named(&MmapSummaryDataV2 { routing }).expect("v3 summary bytes")
+        };
+
+        let mut header_tail = Vec::with_capacity(HEADER_TAIL_LEN_V2);
+        header_tail.extend_from_slice(&7u64.to_le_bytes());
+        header_tail.extend_from_slice(&128u64.to_le_bytes());
+        header_tail.extend_from_slice(&idx.global_sequence().to_le_bytes());
+        header_tail.extend_from_slice(
+            &u32::try_from(interner_strings.len())
+                .expect("test interner string count fits in u32")
+                .to_le_bytes(),
+        );
+        header_tail.extend_from_slice(&(entries.len() as u64).to_le_bytes());
+        header_tail.extend_from_slice(&(interner_bytes.len() as u64).to_le_bytes());
+        header_tail.extend_from_slice(&(summary_bytes.len() as u64).to_le_bytes());
+
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(MMAP_INDEX_MAGIC);
+        bytes.extend_from_slice(&version.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes.extend_from_slice(&header_tail);
+        bytes.extend_from_slice(&interner_bytes);
+        bytes.extend_from_slice(&summary_bytes);
+
+        let mut hasher = crc32fast::Hasher::new();
+        hasher.update(&header_tail);
+        hasher.update(&interner_bytes);
+        hasher.update(&summary_bytes);
+        let mut buf = [0u8; MMAP_ENTRY_SIZE_V3];
+        for entry in entries {
+            entry_to_mmap(entry).encode_into(&mut buf);
+            hasher.update(&buf);
+            bytes.extend_from_slice(&buf);
+        }
+        let crc = hasher.finalize();
+        bytes[8..12].copy_from_slice(&crc.to_le_bytes());
+        std::fs::write(dir.join(MMAP_INDEX_FILENAME), bytes).expect("write legacy mmap index");
+    }
+
     #[test]
     fn mmap_index_roundtrip_restores_entries() {
         let tmp = TempDir::new().expect("temp dir");
@@ -1421,5 +1495,78 @@ mod tests {
         );
         assert!(snapshot.entries.iter().all(|entry| entry.dag_lane == 0));
         assert!(snapshot.entries.iter().all(|entry| entry.dag_depth == 0));
+    }
+
+    #[test]
+    fn v3_mmap_preserves_lane_depth_and_defaults_reserved_stats() {
+        let tmp = TempDir::new().expect("temp dir");
+        let segment_path = tmp.path().join(crate::store::segment::segment_filename(7));
+        std::fs::write(&segment_path, vec![0u8; 4096]).expect("segment file");
+
+        let idx = make_index(4);
+        let entries = sorted_entries_with_position(&idx, 6, 4);
+        write_legacy_mmap_index(
+            tmp.path(),
+            3,
+            &idx,
+            &entries,
+            ReservedKindFallbackStats::default(),
+        );
+
+        let snapshot = try_load_mmap_snapshot(tmp.path()).expect("load v3 snapshot");
+        assert_eq!(snapshot.entries.len(), 4);
+        assert!(
+            snapshot.entries.iter().all(|entry| entry.dag_lane == 6),
+            "PROPERTY: mmap v3 must preserve persisted DAG lane coordinates."
+        );
+        assert!(
+            snapshot.entries.iter().all(|entry| entry.dag_depth == 4),
+            "PROPERTY: mmap v3 must preserve persisted DAG depth coordinates."
+        );
+        assert_eq!(
+            snapshot.cumulative_reserved_kind_fallbacks,
+            ReservedKindFallbackStats::default(),
+            "PROPERTY: mmap v3 must default missing cumulative reserved-kind fallback stats to empty."
+        );
+        assert!(
+            !snapshot.receipt_extensions_hydrated,
+            "PROPERTY: mmap v3 must require authoritative frame hydration for receipt extensions."
+        );
+    }
+
+    #[test]
+    fn v4_mmap_preserves_reserved_stats_and_requires_extension_hydration() {
+        let tmp = TempDir::new().expect("temp dir");
+        let segment_path = tmp.path().join(crate::store::segment::segment_filename(7));
+        std::fs::write(&segment_path, vec![0u8; 4096]).expect("segment file");
+
+        let idx = make_index(4);
+        let entries = sorted_entries_with_position(&idx, 8, 2);
+        let reserved_kind_fallbacks = ReservedKindFallbackStats {
+            system: 3,
+            effect: 1,
+            system_histogram: std::iter::once((0x000Bu16, 3usize)).collect(),
+            effect_histogram: std::iter::once((0x1002u16, 1usize)).collect(),
+        };
+        write_legacy_mmap_index(
+            tmp.path(),
+            4,
+            &idx,
+            &entries,
+            reserved_kind_fallbacks.clone(),
+        );
+
+        let snapshot = try_load_mmap_snapshot(tmp.path()).expect("load v4 snapshot");
+        assert_eq!(snapshot.entries.len(), 4);
+        assert!(snapshot.entries.iter().all(|entry| entry.dag_lane == 8));
+        assert!(snapshot.entries.iter().all(|entry| entry.dag_depth == 2));
+        assert_eq!(
+            snapshot.cumulative_reserved_kind_fallbacks, reserved_kind_fallbacks,
+            "PROPERTY: mmap v4 must preserve cumulative reserved-kind fallback stats."
+        );
+        assert!(
+            !snapshot.receipt_extensions_hydrated,
+            "PROPERTY: mmap v4 must require authoritative frame hydration for receipt extensions."
+        );
     }
 }

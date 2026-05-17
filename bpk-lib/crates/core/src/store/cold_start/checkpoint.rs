@@ -778,6 +778,17 @@ mod tests {
         std::fs::write(dir.join(name), vec![0u8; 8192]).expect("write dummy segment");
     }
 
+    fn write_legacy_checkpoint_body<T: Serialize>(dir: &Path, version: u16, body: &T) {
+        let body = rmp_serde::to_vec_named(body).expect("serialize legacy checkpoint");
+        let crc = crc32fast::hash(&body);
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(CHECKPOINT_MAGIC);
+        bytes.extend_from_slice(&version.to_le_bytes());
+        bytes.extend_from_slice(&crc.to_le_bytes());
+        bytes.extend_from_slice(&body);
+        std::fs::write(dir.join(CHECKPOINT_FILENAME), bytes).expect("write legacy checkpoint");
+    }
+
     #[test]
     fn round_trip_empty_index() {
         let tmp = TempDir::new().expect("tempdir");
@@ -1267,6 +1278,224 @@ mod tests {
         let loaded = try_load_checkpoint_snapshot(dir).expect("load v3 checkpoint snapshot");
         assert!(loaded.entries.iter().all(|entry| entry.dag_lane == 0));
         assert!(loaded.entries.iter().all(|entry| entry.dag_depth == 0));
+    }
+
+    #[test]
+    fn v4_checkpoint_preserves_lane_depth_and_defaults_reserved_stats() {
+        #[derive(Serialize)]
+        struct LegacyCheckpointEntryV4 {
+            #[serde(with = "crate::wire::u128_bytes")]
+            event_id: u128,
+            #[serde(with = "crate::wire::u128_bytes")]
+            correlation_id: u128,
+            #[serde(with = "crate::wire::option_u128_bytes")]
+            causation_id: Option<u128>,
+            entity_id: u32,
+            scope_id: u32,
+            kind: EventKind,
+            wall_ms: u64,
+            clock: u32,
+            dag_lane: u32,
+            dag_depth: u32,
+            prev_hash: [u8; 32],
+            event_hash: [u8; 32],
+            segment_id: u64,
+            offset: u64,
+            length: u32,
+            global_sequence: u64,
+        }
+
+        #[derive(Serialize)]
+        struct LegacyCheckpointDataV4 {
+            global_sequence: u64,
+            watermark_segment_id: u64,
+            watermark_offset: u64,
+            interner_strings: Vec<String>,
+            routing: RoutingSummary,
+            entries: Vec<LegacyCheckpointEntryV4>,
+        }
+
+        let tmp = TempDir::new().expect("tempdir");
+        let dir = tmp.path();
+        touch_segment(dir, 0);
+
+        let idx = make_index(4);
+        let mut legacy_entries: Vec<LegacyCheckpointEntryV4> = idx
+            .all_entries()
+            .into_iter()
+            .map(|e| LegacyCheckpointEntryV4 {
+                event_id: e.event_id,
+                correlation_id: e.correlation_id,
+                causation_id: e.causation_id,
+                entity_id: e.entity_id.as_u32(),
+                scope_id: e.scope_id.as_u32(),
+                kind: e.kind,
+                wall_ms: e.wall_ms,
+                clock: e.clock,
+                dag_lane: 7,
+                dag_depth: 3,
+                prev_hash: e.hash_chain.prev_hash,
+                event_hash: e.hash_chain.event_hash,
+                segment_id: e.disk_pos.segment_id,
+                offset: e.disk_pos.offset,
+                length: e.disk_pos.length,
+                global_sequence: e.global_sequence,
+            })
+            .collect();
+        legacy_entries.sort_by_key(|entry| entry.global_sequence);
+        let mut interner_strings = vec![String::new()];
+        interner_strings.extend(idx.interner.to_snapshot());
+        let mut sorted_entries = idx.all_entries();
+        sorted_entries.sort_by_key(|entry| entry.global_sequence);
+        let routing = RoutingSummary::from_sorted_entries(
+            &sorted_entries,
+            recommended_restore_chunk_count(sorted_entries.len()),
+        );
+
+        write_legacy_checkpoint_body(
+            dir,
+            4,
+            &LegacyCheckpointDataV4 {
+                global_sequence: idx.global_sequence(),
+                watermark_segment_id: 0,
+                watermark_offset: 0,
+                interner_strings,
+                routing,
+                entries: legacy_entries,
+            },
+        );
+
+        let loaded = try_load_checkpoint_snapshot(dir).expect("load v4 checkpoint snapshot");
+        assert!(
+            loaded.entries.iter().all(|entry| entry.dag_lane == 7),
+            "PROPERTY: checkpoint v4 must preserve persisted DAG lane coordinates."
+        );
+        assert!(
+            loaded.entries.iter().all(|entry| entry.dag_depth == 3),
+            "PROPERTY: checkpoint v4 must preserve persisted DAG depth coordinates."
+        );
+        assert_eq!(
+            loaded.cumulative_reserved_kind_fallbacks,
+            ReservedKindFallbackStats::default(),
+            "PROPERTY: checkpoint v4 must default missing cumulative reserved-kind fallback stats to empty."
+        );
+        assert!(
+            !loaded.receipt_extensions_hydrated,
+            "PROPERTY: checkpoint v4 must require authoritative frame hydration for receipt extensions."
+        );
+    }
+
+    #[test]
+    fn v5_checkpoint_preserves_reserved_stats_and_requires_extension_hydration() {
+        #[derive(Serialize)]
+        struct LegacyCheckpointEntryV5 {
+            #[serde(with = "crate::wire::u128_bytes")]
+            event_id: u128,
+            #[serde(with = "crate::wire::u128_bytes")]
+            correlation_id: u128,
+            #[serde(with = "crate::wire::option_u128_bytes")]
+            causation_id: Option<u128>,
+            entity_id: u32,
+            scope_id: u32,
+            kind: EventKind,
+            wall_ms: u64,
+            clock: u32,
+            dag_lane: u32,
+            dag_depth: u32,
+            prev_hash: [u8; 32],
+            event_hash: [u8; 32],
+            segment_id: u64,
+            offset: u64,
+            length: u32,
+            global_sequence: u64,
+        }
+
+        #[derive(Serialize)]
+        struct LegacyCheckpointDataV5 {
+            global_sequence: u64,
+            watermark_segment_id: u64,
+            watermark_offset: u64,
+            interner_strings: Vec<String>,
+            routing: RoutingSummary,
+            reserved_kind_fallbacks: ReservedKindFallbackStats,
+            entries: Vec<LegacyCheckpointEntryV5>,
+        }
+
+        let tmp = TempDir::new().expect("tempdir");
+        let dir = tmp.path();
+        touch_segment(dir, 0);
+
+        let idx = make_index(4);
+        let mut legacy_entries: Vec<LegacyCheckpointEntryV5> = idx
+            .all_entries()
+            .into_iter()
+            .map(|e| LegacyCheckpointEntryV5 {
+                event_id: e.event_id,
+                correlation_id: e.correlation_id,
+                causation_id: e.causation_id,
+                entity_id: e.entity_id.as_u32(),
+                scope_id: e.scope_id.as_u32(),
+                kind: e.kind,
+                wall_ms: e.wall_ms,
+                clock: e.clock,
+                dag_lane: 5,
+                dag_depth: 8,
+                prev_hash: e.hash_chain.prev_hash,
+                event_hash: e.hash_chain.event_hash,
+                segment_id: e.disk_pos.segment_id,
+                offset: e.disk_pos.offset,
+                length: e.disk_pos.length,
+                global_sequence: e.global_sequence,
+            })
+            .collect();
+        legacy_entries.sort_by_key(|entry| entry.global_sequence);
+        let mut interner_strings = vec![String::new()];
+        interner_strings.extend(idx.interner.to_snapshot());
+        let mut sorted_entries = idx.all_entries();
+        sorted_entries.sort_by_key(|entry| entry.global_sequence);
+        let routing = RoutingSummary::from_sorted_entries(
+            &sorted_entries,
+            recommended_restore_chunk_count(sorted_entries.len()),
+        );
+        let reserved_kind_fallbacks = ReservedKindFallbackStats {
+            system: 2,
+            effect: 1,
+            system_histogram: std::iter::once((0x000Au16, 2usize)).collect(),
+            effect_histogram: std::iter::once((0x1001u16, 1usize)).collect(),
+        };
+
+        write_legacy_checkpoint_body(
+            dir,
+            5,
+            &LegacyCheckpointDataV5 {
+                global_sequence: idx.global_sequence(),
+                watermark_segment_id: 0,
+                watermark_offset: 0,
+                interner_strings,
+                routing,
+                reserved_kind_fallbacks: reserved_kind_fallbacks.clone(),
+                entries: legacy_entries,
+            },
+        );
+
+        let loaded = try_load_checkpoint_snapshot(dir).expect("load v5 checkpoint snapshot");
+        assert!(loaded.entries.iter().all(|entry| entry.dag_lane == 5));
+        assert!(loaded.entries.iter().all(|entry| entry.dag_depth == 8));
+        assert_eq!(
+            loaded.cumulative_reserved_kind_fallbacks, reserved_kind_fallbacks,
+            "PROPERTY: checkpoint v5 must preserve cumulative reserved-kind fallback stats."
+        );
+        assert!(
+            loaded
+                .entries
+                .iter()
+                .all(|entry| entry.receipt_extensions.is_empty()),
+            "PROPERTY: checkpoint v5 does not directly carry receipt-extension maps."
+        );
+        assert!(
+            !loaded.receipt_extensions_hydrated,
+            "PROPERTY: checkpoint v5 must require authoritative frame hydration for receipt extensions."
+        );
     }
 
     #[test]
