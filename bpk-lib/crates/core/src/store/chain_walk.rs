@@ -4,6 +4,7 @@
 //! This surface reports linear chain continuity findings without inferring
 //! downstream semantics.
 
+use crate::store::index::IndexEntry;
 use crate::store::Store;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -387,11 +388,11 @@ struct ParentHashResolution {
 }
 
 fn resolve_parent_event_id_by_hash(
-    entity_stream: &[crate::store::IndexEntry],
+    entity_stream: &[IndexEntry],
     parent_hash: ChainWalkHash,
     child_sequence: u64,
 ) -> Option<ParentHashResolution> {
-    let mut matches: Vec<&crate::store::IndexEntry> = entity_stream
+    let mut matches: Vec<&IndexEntry> = entity_stream
         .iter()
         .filter(|candidate| {
             candidate.hash_chain.event_hash == parent_hash

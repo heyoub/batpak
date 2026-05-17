@@ -97,13 +97,13 @@ fn append_multiple_events_same_entity() {
     );
     for (idx, entry) in results.iter().enumerate() {
         assert_eq!(
-            entry.coord.entity(),
+            entry.coord().entity(),
             "entity:1",
             "CONTENT VERIFICATION FAILED: event[{idx}] has wrong entity '{}', expected 'entity:1'.\n\
              Check: src/store/mod.rs append(), Arc<str> entity serialization path.\n\
              Common causes: entity string interning bug, coordinate not preserved through write.\n\
              Run: cargo test append_multiple_events_same_entity -- --nocapture",
-            entry.coord.entity()
+            entry.coord().entity()
         );
     }
 
@@ -142,7 +142,7 @@ fn query_by_entity_prefix() {
 
     // Verify content: every returned entry must have an entity starting with "user:"
     for (idx, entry) in results.iter().enumerate() {
-        let entity = entry.coord.entity();
+        let entity = entry.coord().entity();
         assert!(
             entity.starts_with("user:"),
             "ENTITY PREFIX QUERY CONTAMINATION: entry[{idx}] has entity '{}' which does not match prefix 'user:'.\n\
@@ -152,19 +152,21 @@ fn query_by_entity_prefix() {
             entity
         );
         assert_eq!(
-            entry.kind, kind,
+            entry.event_kind(),
+            kind,
             "ENTITY PREFIX QUERY WRONG KIND: entry[{idx}] has kind {:?}, expected {:?}.\n\
              Check: src/store/index/mod.rs insert() kind assignment.\n\
              Common causes: EventKind not propagated to IndexEntry.\n\
              Run: cargo test query_by_entity_prefix -- --nocapture",
-            entry.kind, kind
+            entry.event_kind(),
+            kind
         );
     }
 
     // Verify non-matching entity is excluded
     let order_results: Vec<_> = results
         .iter()
-        .filter(|e| e.coord.entity().starts_with("order:"))
+        .filter(|e| e.coord().entity().starts_with("order:"))
         .collect();
     assert!(
         order_results.is_empty(),
@@ -205,7 +207,7 @@ fn query_by_scope() {
 
     // Verify content: all returned entries must belong to scope:a
     for (idx, entry) in results.iter().enumerate() {
-        let scope = entry.coord.scope();
+        let scope = entry.coord().scope();
         assert_eq!(
             scope, "scope:a",
             "SCOPE QUERY CONTAMINATION: entry[{idx}] has scope '{}', expected 'scope:a'.\n\
@@ -215,28 +217,30 @@ fn query_by_scope() {
             scope
         );
         assert_eq!(
-            entry.coord.entity(),
+            entry.coord().entity(),
             "entity:1",
             "SCOPE QUERY WRONG ENTITY: entry[{idx}] has entity '{}', expected 'entity:1'.\n\
              Check: src/store/index/mod.rs scope index structure, coordinate stored correctly.\n\
              Common causes: coordinate fields swapped during index insertion.\n\
              Run: cargo test query_by_scope -- --nocapture",
-            entry.coord.entity()
+            entry.coord().entity()
         );
         assert_eq!(
-            entry.kind, kind,
+            entry.event_kind(),
+            kind,
             "SCOPE QUERY WRONG KIND: entry[{idx}] has kind {:?}, expected {:?}.\n\
              Check: src/store/index/mod.rs insert() kind assignment.\n\
              Common causes: EventKind not propagated to IndexEntry.\n\
              Run: cargo test query_by_scope -- --nocapture",
-            entry.kind, kind
+            entry.event_kind(),
+            kind
         );
     }
 
     // Verify scope:b event is excluded
     let scope_b_in_results: Vec<_> = results
         .iter()
-        .filter(|e| e.coord.scope() == "scope:b")
+        .filter(|e| e.coord().scope() == "scope:b")
         .collect();
     assert!(
         scope_b_in_results.is_empty(),
@@ -286,12 +290,12 @@ fn by_scope_wrapper_matches_exact_scope_results() {
 
     for (idx, entry) in wrapped.iter().enumerate() {
         assert_eq!(
-            entry.coord.scope(),
+            entry.coord().scope(),
             "scope:wrapper",
             "SCOPE WRAPPER CONTAMINATION: entry[{idx}] has scope '{}', expected 'scope:wrapper'.\n\
              Check: src/store/mod.rs by_scope() and src/store/index/mod.rs query() scope filtering.\n\
              Run: cargo test by_scope_wrapper_matches_exact_scope_results -- --nocapture",
-            entry.coord.scope()
+            entry.coord().scope()
         );
     }
 
@@ -325,19 +329,22 @@ fn query_by_fact() {
     // Verify content: all returned entries must match kind_a, not kind_b
     for (idx, entry) in results.iter().enumerate() {
         assert_eq!(
-            entry.kind,
+            entry.event_kind(),
             kind_a,
             "FACT QUERY WRONG KIND: entry[{idx}] has kind {:?}, expected kind_a {:?}.\n\
              Check: src/store/index/mod.rs by_fact() filter, EventKind comparison in index.\n\
              Common causes: index bucket collision between kind_a and kind_b, wrong EventKind key.\n\
              Run: cargo test query_by_fact -- --nocapture",
-            entry.kind,
+            entry.event_kind(),
             kind_a
         );
     }
 
     // Verify kind_b is excluded
-    let kind_b_in_results: Vec<_> = results.iter().filter(|e| e.kind == kind_b).collect();
+    let kind_b_in_results: Vec<_> = results
+        .iter()
+        .filter(|e| e.event_kind() == kind_b)
+        .collect();
     assert!(
         kind_b_in_results.is_empty(),
         "FACT QUERY LEAKAGE: kind_b ({:?}) leaked into kind_a ({:?}) query ({} events).\n\
@@ -400,7 +407,7 @@ fn cold_start_rebuilds_index() {
         // within a single entity stream, proving index rebuild preserved order.
         let mut prev_clock: Option<u32> = None;
         for (idx, entry) in results.iter().enumerate() {
-            let clk = entry.clock;
+            let clk = entry.clock();
             if let Some(prev) = prev_clock {
                 assert!(
                     clk >= prev,
@@ -414,22 +421,22 @@ fn cold_start_rebuilds_index() {
 
             // Verify coordinate integrity survived cold start
             assert_eq!(
-                entry.coord.entity(),
+                entry.coord().entity(),
                 "entity:1",
                 "COLD START COORDINATE CORRUPTION: entry[{idx}] has entity '{}' after cold start, expected 'entity:1'.\n\
                  Check: src/store/segment/scan.rs coordinate deserialization, Arc<str> round-trip (Phase 1.1 fix).\n\
                  Common causes: Arc<str> serialized as pointer, entity string not persisted correctly.\n\
                  Run: cargo test cold_start_rebuilds_index -- --nocapture",
-                entry.coord.entity()
+                entry.coord().entity()
             );
             assert_eq!(
-                entry.coord.scope(),
+                entry.coord().scope(),
                 "scope:test",
                 "COLD START COORDINATE CORRUPTION: entry[{idx}] has scope '{}' after cold start, expected 'scope:test'.\n\
                  Check: src/store/segment/scan.rs coordinate deserialization, scope field offset in wire format.\n\
                  Common causes: entity/scope fields swapped in codec, scope not written to segment.\n\
                  Run: cargo test cold_start_rebuilds_index -- --nocapture",
-                entry.coord.scope()
+                entry.coord().scope()
             );
         }
 

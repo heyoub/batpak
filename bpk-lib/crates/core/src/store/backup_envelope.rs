@@ -69,10 +69,6 @@ pub struct BackupManifestEnvelope {
     pub attestations: Vec<AttestationRef>,
 }
 
-/// Backwards-compatible alias for callers that prefer the shorter name.
-///
-pub type BackupEnvelope = BackupManifestEnvelope;
-
 impl BackupManifestEnvelope {
     /// Convert to the generic artifact envelope used by signature verification after backup
     /// normalization has already selected the body bytes.
@@ -193,9 +189,6 @@ pub struct RestoreProofReportBody {
     /// Findings (sorted before [`restore_proof_report_body_hash`]).
     pub findings: Vec<BackupEnvelopeFinding>,
 }
-
-/// Alias for evidence-style naming (`RestoreProofReportBody` is the serializable evidence surface).
-pub type RestoreProofEvidenceReport = RestoreProofReportBody;
 
 /// Sort segment refs in place (ascending `segment_id`, then `bytes_digest` lexicographic).
 pub fn sort_backup_segment_refs(segments: &mut [BackupSegmentRef]) {

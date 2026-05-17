@@ -103,22 +103,22 @@ fn capture_snapshot<State>(store: &Store<State>) -> StoreSnapshot {
         .into_iter()
         .filter(|entry| {
             !matches!(
-                entry.kind,
+                entry.event_kind(),
                 EventKind::SYSTEM_OPEN_COMPLETED | EventKind::SYSTEM_CLOSE_COMPLETED
             )
         })
         .map(|entry| {
             let payload = store
-                .get(entry.event_id)
+                .get(entry.event_id())
                 .expect("visible query result must be readable from disk")
                 .event
                 .payload;
             VisibleSummary {
-                entity: entry.coord.entity().to_owned(),
-                scope: entry.coord.scope().to_owned(),
-                category: entry.kind.category(),
-                type_id: entry.kind.type_id(),
-                global_sequence: entry.global_sequence,
+                entity: entry.coord().entity().to_owned(),
+                scope: entry.coord().scope().to_owned(),
+                category: entry.event_kind().category(),
+                type_id: entry.event_kind().type_id(),
+                global_sequence: entry.global_sequence(),
                 payload,
             }
         })

@@ -192,9 +192,6 @@ pub struct ReservationReconciliationReportBody {
     pub refunded_ids: Vec<ReservationId>,
 }
 
-/// Alias for evidence-style naming.
-pub type ReservationReconciliationReport = ReservationReconciliationReportBody;
-
 /// Digest width for reservation reports.
 pub type ReservationDigest = [u8; 32];
 

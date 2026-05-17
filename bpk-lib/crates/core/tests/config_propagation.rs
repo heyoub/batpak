@@ -69,19 +69,19 @@ fn wall_ms_monotonic_under_clock_regression() {
     let mut prev_wall_ms = 0u64;
     for (i, entry) in entries.iter().enumerate() {
         assert!(
-            entry.wall_ms >= prev_wall_ms,
+            entry.wall_ms() >= prev_wall_ms,
             "CLOCK REGRESSION BUG: entry[{i}] wall_ms={} < previous wall_ms={prev_wall_ms}.\n\
              The writer must clamp wall_ms to max(raw_ms, last_wall_ms) per entity.\n\
              Check: src/store/write/writer.rs STEP 4 — HLC wall clock monotonicity.\n\
              Run: cargo test --test config_propagation wall_ms_monotonic",
-            entry.wall_ms
+            entry.wall_ms()
         );
-        prev_wall_ms = entry.wall_ms;
+        prev_wall_ms = entry.wall_ms();
     }
 
     // The third and fourth events should have wall_ms >= 2_000_000 (the high-water mark).
     // Clock at 2_000_000_000 us = 2_000_000 ms = 2000s.
-    let third_wall_ms = entries[2].wall_ms;
+    let third_wall_ms = entries[2].wall_ms();
     assert!(
         third_wall_ms >= 2_000_000,
         "CLOCK REGRESSION BUG: event after clock regression has wall_ms={third_wall_ms}, \
@@ -127,11 +127,11 @@ fn wall_ms_monotonic_per_entity_isolation() {
     // last observed process-wide value rather than moving backward for a later
     // entity.
     assert_eq!(
-        entries_b[0].wall_ms, 2_000_000,
+        entries_b[0].wall_ms(), 2_000_000,
         "CUSTOM CLOCK REGRESSION BUG: entity B's wall_ms should stay clamped at the shared monotonic \
          high-water mark of 2000000 ms after the injected clock regresses, got {}.\n\
          Check: src/store/config.rs MonotonicClock::now_us and the validated runtime clock wrapper.",
-        entries_b[0].wall_ms
+        entries_b[0].wall_ms()
     );
 
     store.close().expect("close");

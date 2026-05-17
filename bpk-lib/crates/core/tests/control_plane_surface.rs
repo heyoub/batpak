@@ -903,15 +903,17 @@ fn fenced_reaction_commit_preserves_reaction_metadata() {
     );
     let reaction_entry = &entries[0];
     assert_eq!(
-        reaction_entry.event_id, reaction.event_id,
+        reaction_entry.event_id(),
+        reaction.event_id,
         "PROPERTY: the committed reaction receipt must identify the stored reaction event."
     );
     assert_eq!(
-        reaction_entry.correlation_id, root.event_id,
+        reaction_entry.correlation_id(),
+        root.event_id,
         "PROPERTY: a committed fenced reaction must preserve the triggering correlation id."
     );
     assert_eq!(
-        reaction_entry.causation_id,
+        reaction_entry.causation_id(),
         Some(root.event_id),
         "PROPERTY: a committed fenced reaction must preserve the triggering causation id."
     );

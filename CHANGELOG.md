@@ -34,15 +34,52 @@ All notable changes to this project will be documented in this file.
   `CoordinateError::ForbiddenSeparator`, keeping region checkpoint identities
   injective.
 - `ClockKey` is no longer public API; it is an internal index ordering key.
-- `DiskPos` remains available from `batpak::store`, but its fields are no
-  longer public and it is no longer re-exported by the prelude.
+- `DiskPos` remains available from `batpak::store::index`, but its fields are
+  no longer public and it is no longer re-exported by `batpak::store` or the
+  prelude.
+- `IndexEntry` remains the return type for query and cursor APIs, but is now
+  named at `batpak::store::index::IndexEntry`, marked `#[non_exhaustive]`, and
+  exposes stable accessors instead of public fields.
 - `FrontierView.current_visible_hlc` was renamed to `visible_hlc`, and
-  `WatermarkSnapshot` is no longer re-exported in normal builds.
+  `WatermarkSnapshot` is now internal raw machinery. The dangerous test hook
+  snapshot API returns `FrontierView`.
+- The public API snapshot and semver check now capture the production feature
+  surface explicitly and exclude `dangerous-test-hooks`; `Store::dangerous_*`
+  methods remain available only when that feature or crate tests enable them.
+- Low-traffic backup-envelope helpers now live under
+  `batpak::store::backup_envelope::*`, and cold-start open reports now live
+  under `batpak::store::cold_start::rebuild::*` instead of root `store::*`
+  re-exports.
 - `StoreConfig` fields are now private. Construction and inspection go through
   `StoreConfig::new(...)`, `with_*` builders, and read-only accessors.
 - `Store::get_raw` was removed; use `Store::read_raw`.
 - `Store::stream` was removed; use `Store::by_entity`.
 - `syncbat::Cx` was removed; use `syncbat::Ctx`.
+
+### Removed
+- Removed the transitional `BackupEnvelope` alias; use
+  `BackupManifestEnvelope`.
+- Removed the transitional `StoreResourceEnvelope` alias; use
+  `StoreResourceEvidenceReport`.
+- Removed the transitional `RestoreProofEvidenceReport` alias; use
+  `RestoreProofReportBody`.
+- Removed the transitional `ReservationReconciliationReport` alias; use
+  `ReservationReconciliationReportBody`.
+- Removed the transitional `StateTransitionReport` alias; use
+  `StateTransitionReportBody`.
+- Removed the transitional `downstream-kit::RequirementSet` alias; use
+  `RequirementEvidence`.
+- Removed the transitional `syncbat::InvokeResult` alias; use
+  `CheckoutResult`.
+- Removed the transitional `syncbat::RegisterOperationPutV1` alias; use
+  `RegisterOperationRowV1`.
+- Removed the low-level `disk_pos` field from `syncbat::BatpakReceiptFields`;
+  syncbat receipt metadata no longer exposes batpak index internals.
+- Removed public `AppendReceipt::disk_pos` and `DenialReceipt::disk_pos`
+  fields; use the `disk_pos()` accessors for focused diagnostics.
+- Removed `WatermarkSnapshot` from the public API; use `FrontierView`.
+- Removed root `batpak::store` re-exports for backup-envelope helper APIs and
+  cold-start open report types; import them from their owning modules.
 
 ### Migration
 - If you constructed `ReactorConfig` with a struct literal, add
@@ -60,7 +97,18 @@ All notable changes to this project will be documented in this file.
   results.
 - If you matched `DiskPos` fields directly, use `segment_id()`, `offset()`,
   and `length()` instead. Prefer receipt-level behavior over importing
-  `DiskPos` from the prelude.
+  `DiskPos`; focused diagnostics can use `batpak::store::index::DiskPos`.
+- If you matched `IndexEntry` fields directly, use `event_id()`,
+  `correlation_id()`, `causation_id()`, `coord()`, `event_kind()`,
+  `wall_ms()`, `clock()`, `dag_lane()`, `dag_depth()`, `hash_chain()`,
+  `disk_pos()`, `global_sequence()`, and `receipt_extensions()`.
+- Replace root `batpak::store` backup-envelope imports with
+  `batpak::store::backup_envelope::*`.
+- Replace root `batpak::store::{OpenIndexPath, OpenIndexReport}` imports with
+  `batpak::store::cold_start::rebuild::{OpenIndexPath, OpenIndexReport}`.
+- If you read `syncbat::BatpakReceiptFields::disk_pos`, query batpak directly
+  by `event_id` from lower-level diagnostic code; syncbat no longer exports
+  the physical index witness.
 - Rename `frontier.current_visible_hlc` to `frontier.visible_hlc`.
 - Replace `StoreConfig { ... }` literals and direct field mutation with
   builder calls such as `StoreConfig::new(path).with_segment_max_bytes(...)`.

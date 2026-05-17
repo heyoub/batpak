@@ -123,13 +123,6 @@ impl GateContext for RequirementEvidence {
     }
 }
 
-/// Compatibility alias for satisfied requirement evidence.
-///
-/// New code should prefer [`RequirementEvidence`] so it is clear that the value
-/// represents refs already satisfied for an invocation, not the operation's
-/// declared requirements.
-pub type RequirementSet = RequirementEvidence;
-
 /// Declared pass metadata for an operation kit.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PassDescriptor {
@@ -655,7 +648,7 @@ pub mod prelude {
         operation, CapabilityDescriptor, CapabilityRef, EffectClass, GateContext,
         OperationDescriptor, OperationKitItem, OperationRegisterItem, PassDescriptor, PassRef,
         ReceiptEnvelope, ReceiptOutcome, Ref, RefError, RequiredCapabilityGate, RequiredPassGate,
-        RequirementEvidence, RequirementSet, MISSING_CAPABILITY_CODE, MISSING_PASS_CODE,
+        RequirementEvidence, MISSING_CAPABILITY_CODE, MISSING_PASS_CODE,
         REQUIRED_CAPABILITY_GATE_NAME, REQUIRED_PASS_GATE_NAME,
     };
 }

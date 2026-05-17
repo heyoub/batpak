@@ -234,9 +234,6 @@ pub struct StoreResourceEvidenceReport {
     pub diagnostics: Vec<String>,
 }
 
-/// Preferred alias for callers who speak in “envelope” vocabulary.
-pub type StoreResourceEnvelope = StoreResourceEvidenceReport;
-
 /// Build evidence from diagnostics, including `body_hash`.
 ///
 /// # Errors

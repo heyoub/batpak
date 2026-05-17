@@ -1,4 +1,5 @@
 use super::*;
+use crate::store::index::IndexEntry;
 
 impl<State> Store<State> {
     /// READ: get a single event by ID.
@@ -184,4 +185,44 @@ fn denial_receipt_matches_index(receipt: &DenialReceipt, entry: &IndexEntry) -> 
         && receipt.disk_pos == entry.disk_pos
         && receipt.content_hash == entry.hash_chain.event_hash
         && receipt.extensions == entry.receipt_extensions
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::coordinate::Coordinate;
+    use crate::event::EventKind;
+    use crate::store::index::DiskPos;
+    use crate::store::{Store, StoreConfig};
+    use tempfile::TempDir;
+
+    #[test]
+    fn append_receipt_verification_rejects_disk_position_tampering() {
+        let dir = TempDir::new().expect("temp dir");
+        let store = Store::open(
+            StoreConfig::new(dir.path())
+                .with_enable_checkpoint(false)
+                .with_enable_mmap_index(false),
+        )
+        .expect("open store");
+        let coord = Coordinate::new("entity:receipt-disk-pos", "scope:test").expect("coord");
+        let mut receipt = store
+            .append(
+                &coord,
+                EventKind::custom(0xA, 20),
+                &serde_json::json!({"n": 1}),
+            )
+            .expect("append");
+
+        assert!(store.verify_append_receipt(&receipt));
+        receipt.disk_pos = DiskPos::new(
+            receipt.disk_pos.segment_id(),
+            receipt.disk_pos.offset() + 1,
+            receipt.disk_pos.length(),
+        );
+
+        assert!(
+            !store.verify_append_receipt(&receipt),
+            "disk position must match the committed index entry"
+        );
+    }
 }

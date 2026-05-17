@@ -12,7 +12,8 @@
 
 use batpak::coordinate::{Coordinate, KindFilter, Region};
 use batpak::event::EventKind;
-use batpak::store::{IndexEntry, IndexTopology, Store, StoreConfig};
+use batpak::store::index::IndexEntry;
+use batpak::store::{IndexTopology, Store, StoreConfig};
 use std::collections::HashSet;
 use tempfile::TempDir;
 
@@ -157,15 +158,15 @@ fn actual(entries: &[IndexEntry]) -> HashSet<(String, String, u32)> {
         .iter()
         .filter(|e| {
             !matches!(
-                e.kind,
+                e.event_kind(),
                 EventKind::SYSTEM_OPEN_COMPLETED | EventKind::SYSTEM_CLOSE_COMPLETED
             )
         })
         .map(|e| {
             (
-                e.coord.entity().to_owned(),
-                e.coord.scope().to_owned(),
-                e.clock,
+                e.coord().entity().to_owned(),
+                e.coord().scope().to_owned(),
+                e.clock(),
             )
         })
         .collect()
@@ -220,18 +221,18 @@ fn actual_ordered(entries: &[IndexEntry]) -> Vec<(u64, String, String, u32)> {
         .iter()
         .filter(|e| {
             !matches!(
-                e.kind,
+                e.event_kind(),
                 EventKind::SYSTEM_OPEN_COMPLETED | EventKind::SYSTEM_CLOSE_COMPLETED
             )
         })
         .map(|e| {
             (
-                e.global_sequence
+                e.global_sequence()
                     .checked_sub(1)
                     .expect("user events follow the mutable-open lifecycle receipt"),
-                e.coord.entity().to_owned(),
-                e.coord.scope().to_owned(),
-                e.clock,
+                e.coord().entity().to_owned(),
+                e.coord().scope().to_owned(),
+                e.clock(),
             )
         })
         .collect()
@@ -249,7 +250,7 @@ fn assert_matches(
         .into_iter()
         .filter(|entry| {
             !matches!(
-                entry.kind,
+                entry.event_kind(),
                 EventKind::SYSTEM_OPEN_COMPLETED | EventKind::SYSTEM_CLOSE_COMPLETED
             )
         })

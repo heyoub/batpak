@@ -1,7 +1,8 @@
 use crate::coordinate::Coordinate;
 use crate::event::{EventKind, EventPayload, StoredEvent};
 use crate::store::gate::DurabilityGate;
-use crate::store::{DiskPos, StoreError};
+use crate::store::index::DiskPos;
+use crate::store::StoreError;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::marker::PhantomData;
@@ -209,7 +210,7 @@ pub struct AppendReceipt {
     /// Global sequence number assigned at commit time.
     pub sequence: u64,
     /// Location of the event frame on disk.
-    pub disk_pos: DiskPos,
+    pub(crate) disk_pos: DiskPos,
     /// Blake3 hash of the committed payload bytes.
     pub content_hash: [u8; 32],
     /// Signing-key identity. All zeros when receipt signing is disabled.
@@ -229,7 +230,7 @@ pub struct DenialReceipt {
     /// Global sequence number assigned at commit time.
     pub sequence: u64,
     /// Location of the denial frame on disk.
-    pub disk_pos: DiskPos,
+    pub(crate) disk_pos: DiskPos,
     /// Blake3 hash of the denial payload bytes.
     pub content_hash: [u8; 32],
     /// Signing-key identity. All zeros when receipt signing is disabled.
@@ -242,6 +243,22 @@ pub struct DenialReceipt {
 
 /// Encoded extension payload bytes.
 pub type EncodedBytes = Vec<u8>;
+
+impl AppendReceipt {
+    /// Location of the committed event frame on disk.
+    #[must_use]
+    pub const fn disk_pos(&self) -> DiskPos {
+        self.disk_pos
+    }
+}
+
+impl DenialReceipt {
+    /// Location of the committed denial frame on disk.
+    #[must_use]
+    pub const fn disk_pos(&self) -> DiskPos {
+        self.disk_pos
+    }
+}
 
 pub(crate) fn encoded_receipt_extensions_len(
     extensions: &BTreeMap<ExtensionKey, EncodedBytes>,

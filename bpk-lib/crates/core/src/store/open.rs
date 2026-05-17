@@ -1,4 +1,5 @@
 use super::*;
+use crate::store::cold_start::rebuild::OpenIndexReport;
 
 struct OpenComponents {
     runtime: Arc<config::ValidatedStoreConfig>,

@@ -124,13 +124,13 @@ fn frame_scan_header_end(bytes: &[u8]) -> usize {
     8 + usize::try_from(header_len).expect("segment header len fits usize")
 }
 
-fn user_entries(store: &Store) -> Vec<batpak::store::IndexEntry> {
+fn user_entries(store: &Store) -> Vec<batpak::store::index::IndexEntry> {
     store
         .query(&Region::all())
         .into_iter()
         .filter(|entry| {
             !matches!(
-                entry.kind,
+                entry.event_kind(),
                 EventKind::SYSTEM_OPEN_COMPLETED | EventKind::SYSTEM_CLOSE_COMPLETED
             )
         })
@@ -346,7 +346,7 @@ fn pathological_frame_length_is_bounded_not_panicking() {
         .into_iter()
         .filter(|entry| {
             !matches!(
-                entry.kind,
+                entry.event_kind(),
                 EventKind::SYSTEM_OPEN_COMPLETED | EventKind::SYSTEM_CLOSE_COMPLETED
             )
         })
@@ -442,7 +442,7 @@ fn sidx_footer_magic_mismatch_falls_back_to_frame_scan() {
         .into_iter()
         .filter(|entry| {
             !matches!(
-                entry.kind,
+                entry.event_kind(),
                 EventKind::SYSTEM_OPEN_COMPLETED | EventKind::SYSTEM_CLOSE_COMPLETED
             )
         })

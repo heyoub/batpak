@@ -32,7 +32,8 @@ pub(crate) fn public_api(args: PublicApiArgs) -> Result<()> {
             "never",
             "--package",
             "batpak",
-            "--all-features",
+            "--features",
+            "blake3",
             "--manifest-path",
             "Cargo.toml",
         ]);
@@ -105,7 +106,8 @@ pub(crate) fn semver_check(args: SemverCheckArgs) -> Result<()> {
             "crates/core/Cargo.toml",
             "--package",
             "batpak",
-            "--all-features",
+            "--features",
+            "blake3",
         ]);
 
     let output = match run_output(command) {

@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::{error::Error, fmt};
 
 use batpak::event::{EventKind, EventPayload};
-use batpak::store::{DiskPos, EncodedBytes, ExtensionKey};
+use batpak::store::{EncodedBytes, ExtensionKey};
 use serde::{Deserialize, Serialize};
 
 use crate::operation::OperationDescriptor;
@@ -130,8 +130,6 @@ pub struct BatpakReceiptFields {
     pub event_id: u128,
     /// Global sequence assigned by batpak at commit time.
     pub sequence: u64,
-    /// Location of the committed receipt event frame on disk.
-    pub disk_pos: DiskPos,
     /// Blake3 hash of the committed receipt payload bytes.
     pub content_hash: ReceiptHash,
     /// Signing-key identity reported by batpak.
@@ -147,7 +145,6 @@ impl From<batpak::store::AppendReceipt> for BatpakReceiptFields {
         Self {
             event_id: receipt.event_id,
             sequence: receipt.sequence,
-            disk_pos: receipt.disk_pos,
             content_hash: receipt.content_hash,
             key_id: receipt.key_id,
             signature: receipt.signature,

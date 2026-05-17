@@ -1,5 +1,5 @@
 use batpak::prelude::*;
-use batpak::store::OpenIndexPath;
+use batpak::store::cold_start::rebuild::OpenIndexPath;
 use serde_json::json;
 use tempfile::TempDir;
 

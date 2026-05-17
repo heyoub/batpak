@@ -144,7 +144,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     println!("  Cursor found {} events total:", cursor_events.len());
     for entry in &cursor_events {
-        let kind_label = match entry.kind {
+        let kind_label = match entry.event_kind() {
             k if k == MessageSent::KIND => "SENT",
             k if k == MessageEdited::KIND => "EDITED",
             k if k == MessageDeleted::KIND => "DELETED",
@@ -152,7 +152,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
         println!(
             "    [{:7}] {} (seq={})",
-            kind_label, entry.coord, entry.clock
+            kind_label,
+            entry.coord(),
+            entry.clock()
         );
     }
 
@@ -161,7 +163,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let bob_events = store.by_entity("user:bob");
     println!("  Bob has {} events:", bob_events.len());
     for entry in &bob_events {
-        println!("    kind={} seq={}", entry.kind, entry.clock);
+        println!("    kind={} seq={}", entry.event_kind(), entry.clock());
     }
 
     // -- Query: filter by event kind --

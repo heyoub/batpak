@@ -80,13 +80,13 @@ fn snapshot_copies_segments() {
     store.close().expect("close");
 }
 
-fn user_visible_entries(store: &Store) -> Vec<batpak::store::IndexEntry> {
+fn user_visible_entries(store: &Store) -> Vec<batpak::store::index::IndexEntry> {
     store
         .query(&Region::all())
         .into_iter()
         .filter(|entry| {
             !matches!(
-                entry.kind,
+                entry.event_kind(),
                 EventKind::SYSTEM_OPEN_COMPLETED | EventKind::SYSTEM_CLOSE_COMPLETED
             )
         })
@@ -351,7 +351,7 @@ fn compact_merge_rebuild_does_not_duplicate_superseded_sealed_segments() {
     );
 
     let all = user_visible_entries(&store);
-    let mut ids: Vec<_> = all.iter().map(|entry| entry.event_id).collect();
+    let mut ids: Vec<_> = all.iter().map(|entry| entry.event_id()).collect();
     ids.sort_unstable();
     ids.dedup();
 

@@ -118,9 +118,6 @@ pub struct StateTransitionReportBody {
     pub findings: Vec<StateTransitionFinding>,
 }
 
-/// Alias for callers that prefer the shorter report name.
-pub type StateTransitionReport = StateTransitionReportBody;
-
 /// Digest width for transition evidence (matches other substrate digests).
 pub type TransitionEvidenceDigest = [u8; 32];
 

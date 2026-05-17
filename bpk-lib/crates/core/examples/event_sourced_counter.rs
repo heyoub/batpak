@@ -136,17 +136,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\nRaw event log:");
     let entries = store.by_entity("counter:hits");
     for entry in &entries {
-        let stored = store.get(entry.event_id)?;
+        let stored = store.get(entry.event_id())?;
         println!(
             "  seq={} kind={} payload={}",
-            entry.clock, entry.kind, stored.event.payload
+            entry.clock(),
+            entry.event_kind(),
+            stored.event.payload
         );
     }
 
     // -- Walk ancestors: trace causation backwards --
     if let Some(last) = entries.last() {
         println!("\nAncestor walk from last event:");
-        let ancestors = store.walk_ancestors(last.event_id, 10);
+        let ancestors = store.walk_ancestors(last.event_id(), 10);
         for (i, a) in ancestors.iter().enumerate() {
             println!(
                 "  {}: kind={} payload={}",

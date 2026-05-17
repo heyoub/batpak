@@ -6,12 +6,12 @@ use batpak::event::EventKind;
 use batpak::guard::{
     Denial, DenialPayload, Gate, GateEvaluation, GateId, GateIdError, GateSet, Verdict,
 };
+use batpak::store::cold_start::rebuild::OpenIndexPath;
 use batpak::store::MAX_CHECKPOINT_ID_LEN;
 use batpak::store::{
     AppendOptions, AppendReceipt, BatchAppendItem, CausationRef, CheckpointId, CheckpointIdError,
-    CursorGapConfig, DiskPos, EncodedBytes, ExtensionKey, ExtensionKeyError, GapObservation,
-    IdempotencyKey, OpenIndexPath, ReceiptExtensionKey, ReceiptExtensionNamespace,
-    ReceiptExtensionValue, Store, StoreConfig,
+    CursorGapConfig, EncodedBytes, ExtensionKey, ExtensionKeyError, GapObservation, IdempotencyKey,
+    ReceiptExtensionKey, ReceiptExtensionNamespace, ReceiptExtensionValue, Store, StoreConfig,
 };
 #[cfg(feature = "blake3")]
 use batpak::store::{DenialReceipt, SigningKey};
@@ -565,7 +565,7 @@ fn namespace_prefix_query_excludes_adjacent_namespaces() {
     let hits = store.query(&Region::entity("alice"));
     let entities = hits
         .into_iter()
-        .map(|entry| entry.coord.entity().to_owned())
+        .map(|entry| entry.coord().entity().to_owned())
         .collect::<Vec<_>>();
 
     assert_eq!(entities, vec!["alice".to_owned(), "alice:child".to_owned()]);
@@ -605,8 +605,8 @@ fn cursor_gap_accessor_drains_once() {
     let gaps: Vec<GapObservation> = cursor.take_gaps();
 
     assert_eq!(delivered.len(), 2);
-    assert_eq!(delivered[0].global_sequence, receipt0.sequence);
-    assert_eq!(delivered[1].global_sequence, receipt2.sequence);
+    assert_eq!(delivered[0].global_sequence(), receipt0.sequence);
+    assert_eq!(delivered[1].global_sequence(), receipt2.sequence);
     assert_eq!(gaps.len(), 1);
     assert_eq!(gaps[0].expected_sequence, receipt0.sequence + 1);
     assert_eq!(gaps[0].delivered_sequence, receipt2.sequence);
@@ -696,9 +696,9 @@ fn cursor_gap_accessor_uses_bounded_ring_buffer() {
     let gaps = cursor.take_gaps();
 
     assert_eq!(delivered.len(), 3);
-    assert_eq!(delivered[0].global_sequence, receipt0.sequence);
-    assert_eq!(delivered[1].global_sequence, receipt2.sequence);
-    assert_eq!(delivered[2].global_sequence, receipt4.sequence);
+    assert_eq!(delivered[0].global_sequence(), receipt0.sequence);
+    assert_eq!(delivered[1].global_sequence(), receipt2.sequence);
+    assert_eq!(delivered[2].global_sequence(), receipt4.sequence);
     assert_eq!(gaps.len(), 1, "bounded ring buffer must evict oldest gaps");
     assert_eq!(gaps[0].expected_sequence, receipt2.sequence + 1);
     assert_eq!(gaps[0].delivered_sequence, receipt4.sequence);
@@ -905,17 +905,6 @@ fn receipt_verification_rejects_stripped_signature_and_index_field_tampering() {
     assert!(
         !store.verify_append_receipt(&wrong_sequence),
         "sequence must match the committed index entry, not just the signature cover"
-    );
-
-    let mut wrong_disk_pos = receipt.clone();
-    wrong_disk_pos.disk_pos = DiskPos::new(
-        wrong_disk_pos.disk_pos.segment_id(),
-        wrong_disk_pos.disk_pos.offset() + 1,
-        wrong_disk_pos.disk_pos.length(),
-    );
-    assert!(
-        !store.verify_append_receipt(&wrong_disk_pos),
-        "disk position must match the committed index entry"
     );
 
     let mut wrong_content_hash = receipt.clone();

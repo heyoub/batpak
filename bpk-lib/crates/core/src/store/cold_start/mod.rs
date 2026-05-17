@@ -1,6 +1,7 @@
 pub(crate) mod checkpoint;
 pub(crate) mod mmap;
-pub(crate) mod rebuild;
+/// Rebuild-path reports and open-index diagnostics.
+pub mod rebuild;
 pub(crate) mod row;
 
 #[cfg(test)]

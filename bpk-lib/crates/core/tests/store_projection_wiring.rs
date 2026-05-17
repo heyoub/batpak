@@ -8,10 +8,10 @@ use std::sync::Arc;
 use tempfile::TempDir;
 
 #[cfg(feature = "dangerous-test-hooks")]
-fn entry_point(entry: &batpak::store::IndexEntry) -> batpak::store::HlcPoint {
+fn entry_point(entry: &batpak::store::index::IndexEntry) -> batpak::store::HlcPoint {
     batpak::store::HlcPoint {
-        wall_ms: entry.wall_ms,
-        global_sequence: entry.global_sequence,
+        wall_ms: entry.wall_ms(),
+        global_sequence: entry.global_sequence(),
     }
 }
 

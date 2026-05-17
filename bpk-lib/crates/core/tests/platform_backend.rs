@@ -10,12 +10,13 @@
 //! SEEDED: not random; deterministic tempdir-based opens and checked-in profile
 //! fixtures.
 
+use batpak::store::cold_start::rebuild::OpenIndexReport;
 use batpak::store::{
     ActiveSegmentReadEvidence, ClockEvidence, HostEvidenceSummary, LockLeafSymlinkProtection,
-    MmapAdmissionSummary, MmapEvidence, OpenIndexReport, OpenReportObserver,
-    ParentDirSyncAdmissionSummary, ParentDirSyncEvidence, PlatformAdmissionSummary,
-    PlatformEvidenceSummary, Store, StoreConfig, StoreDiagnostics, StoreError,
-    StoreLockAdmissionSummary, StorePathEvidenceSummary, StorePathStatusEvidence,
+    MmapAdmissionSummary, MmapEvidence, OpenReportObserver, ParentDirSyncAdmissionSummary,
+    ParentDirSyncEvidence, PlatformAdmissionSummary, PlatformEvidenceSummary, Store, StoreConfig,
+    StoreDiagnostics, StoreError, StoreLockAdmissionSummary, StorePathEvidenceSummary,
+    StorePathStatusEvidence,
 };
 use std::error::Error;
 use std::sync::{Arc, Mutex};

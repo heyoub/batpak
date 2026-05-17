@@ -7,15 +7,14 @@
 
 use batpak::artifact::{artifact_body_hash_from_body, SignatureEnvelope, SignatureRef};
 use batpak::encoding;
-use batpak::store::{
+use batpak::store::backup_envelope::{
     audit_backup_manifest_segments, backup_manifest_body_bytes, backup_manifest_body_hash,
     backup_manifest_envelope_body_hash, backup_manifest_envelope_hash,
     normalize_backup_manifest_body, normalize_backup_manifest_envelope, restore_proof_report_body,
     restore_proof_report_body_hash, sort_backup_segment_refs, verify_backup_manifest_envelope,
-    verify_backup_manifest_signatures_only, BackupEnvelope, BackupEnvelopeFinding,
-    BackupManifestBody, BackupManifestEnvelope, BackupManifestVerification, BackupSegmentRef,
-    RestoreProofEvidenceReport, RestoreProofReportBody, SegmentBytesDigest,
-    BACKUP_MANIFEST_BODY_SCHEMA_VERSION, RESTORE_PROOF_REPORT_SCHEMA_VERSION,
+    verify_backup_manifest_signatures_only, BackupEnvelopeFinding, BackupManifestBody,
+    BackupManifestEnvelope, BackupManifestVerification, BackupSegmentRef, RestoreProofReportBody,
+    SegmentBytesDigest, BACKUP_MANIFEST_BODY_SCHEMA_VERSION, RESTORE_PROOF_REPORT_SCHEMA_VERSION,
 };
 use std::io::Write;
 
@@ -109,7 +108,7 @@ fn backup_sort_backup_segment_refs_and_restore_proof_stable() {
     };
     assert_eq!(g1, restore_proof_report_body_hash(&r_perm).expect("rh2"));
     assert_eq!(r1.schema_version, RESTORE_PROOF_REPORT_SCHEMA_VERSION);
-    let _ev: RestoreProofEvidenceReport = r1.clone();
+    let _ev: RestoreProofReportBody = r1.clone();
 }
 
 #[test]
@@ -288,7 +287,7 @@ fn backup_envelope_metadata_does_not_change_manifest_hash() {
     );
     let plane = verify_backup_manifest_signatures_only(&envelope, echo_sig_ok).expect("sig");
     assert_eq!(plane.body_hash, v.envelope_plane.body_hash);
-    let _be: BackupEnvelope = envelope.clone();
+    let _be: BackupManifestEnvelope = envelope.clone();
 }
 
 #[test]

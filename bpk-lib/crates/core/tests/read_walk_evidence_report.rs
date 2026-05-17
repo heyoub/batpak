@@ -118,11 +118,11 @@ fn read_walk_visibility_matches_plain_query_across_hidden_gap() -> TestResult {
 
     let plain_ids = plain_entries
         .iter()
-        .map(|entry| entry.event_id)
+        .map(|entry| entry.event_id())
         .collect::<Vec<_>>();
     let evidence_ids = evidence_entries
         .iter()
-        .map(|entry| entry.event_id)
+        .map(|entry| entry.event_id())
         .collect::<Vec<_>>();
 
     assert_eq!(

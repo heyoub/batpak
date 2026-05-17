@@ -8,8 +8,8 @@ impl<State> Store<State> {
 
     /// Return a coherent clone of the internal frontier watermarks.
     #[cfg(any(test, feature = "dangerous-test-hooks"))]
-    pub fn dangerous_watermark_snapshot(&self) -> WatermarkSnapshot {
-        self.watermark_handle.lock().snapshot()
+    pub fn dangerous_watermark_snapshot(&self) -> FrontierView {
+        self.watermark_handle.lock().snapshot_view()
     }
 
     /// Register a projection ID in the applied-frontier registry.

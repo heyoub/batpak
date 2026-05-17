@@ -95,12 +95,12 @@ fn query_with_clock_range_filters_events() {
     // Verify all results have clock in [3, 7]
     for entry in &results {
         assert!(
-            entry.clock >= 3 && entry.clock <= 7,
+            entry.clock() >= 3 && entry.clock() <= 7,
             "PROPERTY: every result from a clock_range [3,7] query must have clock in [3,7], got {}.\n\
              Investigate: src/store/index/mod.rs query clock_range filter.\n\
              Common causes: range bounds off-by-one, filter applied before or after wrong index.\n\
              Run: cargo test --test store_advanced query_with_clock_range_filters_events",
-            entry.clock
+            entry.clock()
         );
     }
 

@@ -32,8 +32,8 @@ pub batpak::artifact::CanonicalArtifactEnvelope::signatures: alloc::vec::Vec<bat
 impl<T: serde_core::ser::Serialize> batpak::artifact::CanonicalArtifactEnvelope<T>
 pub fn batpak::artifact::CanonicalArtifactEnvelope<T>::body_hash(&self) -> core::result::Result<batpak::artifact::ArtifactHash, rmp_serde::encode::Error>
 pub fn batpak::artifact::CanonicalArtifactEnvelope<T>::envelope_hash(&self) -> core::result::Result<batpak::artifact::ArtifactHash, rmp_serde::encode::Error>
-impl core::convert::From<batpak::artifact::CanonicalArtifactEnvelope<batpak::store::BackupManifestBody>> for batpak::store::BackupManifestEnvelope
-pub fn batpak::store::BackupManifestEnvelope::from(envelope: batpak::artifact::CanonicalArtifactEnvelope<batpak::store::BackupManifestBody>) -> Self
+impl core::convert::From<batpak::artifact::CanonicalArtifactEnvelope<batpak::store::backup_envelope::BackupManifestBody>> for batpak::store::backup_envelope::BackupManifestEnvelope
+pub fn batpak::store::backup_envelope::BackupManifestEnvelope::from(envelope: batpak::artifact::CanonicalArtifactEnvelope<batpak::store::backup_envelope::BackupManifestBody>) -> Self
 pub struct batpak::artifact::SignatureEnvelope
 pub batpak::artifact::SignatureEnvelope::signature: batpak::artifact::SignatureRef
 pub struct batpak::artifact::SignatureRef
@@ -1243,7 +1243,6 @@ pub batpak::prelude::StoreError::DataDirMalformed::path: std::path::PathBuf
 pub batpak::prelude::StoreError::EntityClockOverflow
 pub batpak::prelude::StoreError::EntityClockOverflow::entity: alloc::string::String
 pub batpak::prelude::StoreError::EventPayloadRegistry(batpak::event::payload::EventPayloadRegistryError)
-pub batpak::prelude::StoreError::FaultInjected(alloc::string::String)
 pub batpak::prelude::StoreError::HiddenRangesCorrupt
 pub batpak::prelude::StoreError::HiddenRangesCorrupt::path: std::path::PathBuf
 pub batpak::prelude::StoreError::HiddenRangesCorrupt::reason: alloc::string::String
@@ -1405,12 +1404,13 @@ impl batpak::prelude::AppendPositionHint
 pub const fn batpak::prelude::AppendPositionHint::new(lane: u32, depth: u32) -> Self
 #[non_exhaustive] pub struct batpak::prelude::AppendReceipt
 pub batpak::prelude::AppendReceipt::content_hash: [u8; 32]
-pub batpak::prelude::AppendReceipt::disk_pos: batpak::store::index::DiskPos
 pub batpak::prelude::AppendReceipt::event_id: u128
 pub batpak::prelude::AppendReceipt::extensions: alloc::collections::btree::map::BTreeMap<batpak::store::ExtensionKey, batpak::store::EncodedBytes>
 pub batpak::prelude::AppendReceipt::key_id: [u8; 32]
 pub batpak::prelude::AppendReceipt::sequence: u64
 pub batpak::prelude::AppendReceipt::signature: core::option::Option<[u8; 64]>
+impl batpak::prelude::AppendReceipt
+pub const fn batpak::prelude::AppendReceipt::disk_pos(&self) -> batpak::store::index::DiskPos
 pub struct batpak::prelude::AppendTicket
 impl batpak::prelude::AppendTicket
 pub fn batpak::prelude::AppendTicket::receiver(&self) -> &flume::Receiver<core::result::Result<batpak::prelude::AppendReceipt, batpak::prelude::StoreError>>
@@ -1465,8 +1465,8 @@ pub batpak::prelude::CanonicalArtifactEnvelope::signatures: alloc::vec::Vec<batp
 impl<T: serde_core::ser::Serialize> batpak::artifact::CanonicalArtifactEnvelope<T>
 pub fn batpak::artifact::CanonicalArtifactEnvelope<T>::body_hash(&self) -> core::result::Result<batpak::artifact::ArtifactHash, rmp_serde::encode::Error>
 pub fn batpak::artifact::CanonicalArtifactEnvelope<T>::envelope_hash(&self) -> core::result::Result<batpak::artifact::ArtifactHash, rmp_serde::encode::Error>
-impl core::convert::From<batpak::artifact::CanonicalArtifactEnvelope<batpak::store::BackupManifestBody>> for batpak::store::BackupManifestEnvelope
-pub fn batpak::store::BackupManifestEnvelope::from(envelope: batpak::artifact::CanonicalArtifactEnvelope<batpak::store::BackupManifestBody>) -> Self
+impl core::convert::From<batpak::artifact::CanonicalArtifactEnvelope<batpak::store::backup_envelope::BackupManifestBody>> for batpak::store::backup_envelope::BackupManifestEnvelope
+pub fn batpak::store::backup_envelope::BackupManifestEnvelope::from(envelope: batpak::artifact::CanonicalArtifactEnvelope<batpak::store::backup_envelope::BackupManifestBody>) -> Self
 pub struct batpak::prelude::CausationId(_)
 impl batpak::id::EntityIdType for batpak::id::CausationId
 pub const batpak::id::CausationId::ENTITY_NAME: &'static str
@@ -1742,24 +1742,6 @@ pub batpak::prelude::IndexConfig::incremental_projection: bool
 pub batpak::prelude::IndexConfig::topology: batpak::prelude::IndexTopology
 impl core::default::Default for batpak::prelude::IndexConfig
 pub fn batpak::prelude::IndexConfig::default() -> Self
-pub struct batpak::prelude::IndexEntry
-pub batpak::prelude::IndexEntry::causation_id: core::option::Option<u128>
-pub batpak::prelude::IndexEntry::clock: u32
-pub batpak::prelude::IndexEntry::coord: batpak::coordinate::Coordinate
-pub batpak::prelude::IndexEntry::correlation_id: u128
-pub batpak::prelude::IndexEntry::dag_depth: u32
-pub batpak::prelude::IndexEntry::dag_lane: u32
-pub batpak::prelude::IndexEntry::disk_pos: batpak::store::index::DiskPos
-pub batpak::prelude::IndexEntry::event_id: u128
-pub batpak::prelude::IndexEntry::global_sequence: u64
-pub batpak::prelude::IndexEntry::hash_chain: batpak::event::hash::HashChain
-pub batpak::prelude::IndexEntry::kind: batpak::event::kind::EventKind
-pub batpak::prelude::IndexEntry::receipt_extensions: alloc::collections::btree::map::BTreeMap<batpak::store::ExtensionKey, batpak::store::EncodedBytes>
-pub batpak::prelude::IndexEntry::wall_ms: u64
-impl batpak::store::index::IndexEntry
-pub fn batpak::store::index::IndexEntry::is_caused_by(&self, event_id: u128) -> bool
-pub fn batpak::store::index::IndexEntry::is_correlated(&self) -> bool
-pub fn batpak::store::index::IndexEntry::is_root_cause(&self) -> bool
 pub struct batpak::prelude::IndexTopology
 impl batpak::prelude::IndexTopology
 pub fn batpak::prelude::IndexTopology::all() -> Self
@@ -2028,17 +2010,11 @@ pub fn batpak::store::Store<State>::walk_ancestors(&self, event_id: u128, limit:
 impl<State> batpak::store::Store<State>
 pub fn batpak::store::Store<State>::chain_walk_evidence(&self, request: &batpak::prelude::ChainWalkRequest) -> core::result::Result<batpak::prelude::ChainWalkEvidenceReport, batpak::prelude::ChainWalkReportError>
 impl<State> batpak::store::Store<State>
-pub fn batpak::store::Store<State>::dangerous_notify_projection_applied(&self, projection_id: &str, point: batpak::store::stats::HlcPoint)
-pub fn batpak::store::Store<State>::dangerous_notify_watermark_waiters(&self)
-pub fn batpak::store::Store<State>::dangerous_register_projection(&self, projection_id: &str)
-pub fn batpak::store::Store<State>::dangerous_register_projection_for<T: 'static>(&self, entity: &str)
-pub fn batpak::store::Store<State>::dangerous_unregister_projection(&self, projection_id: &str)
-pub fn batpak::store::Store<State>::dangerous_watermark_snapshot(&self) -> batpak::store::stats::WatermarkSnapshot
-pub fn batpak::store::Store<State>::frontier(&self) -> batpak::store::stats::FrontierView
-impl<State> batpak::store::Store<State>
 pub fn batpak::store::Store<State>::diagnostics(&self) -> batpak::store::stats::StoreDiagnostics
 pub fn batpak::store::Store<State>::stats(&self) -> batpak::store::stats::StoreStats
 pub fn batpak::store::Store<State>::store_resource_evidence_report(&self) -> core::result::Result<batpak::prelude::StoreResourceEvidenceReport, batpak::prelude::StoreResourceReportError>
+impl<State> batpak::store::Store<State>
+pub fn batpak::store::Store<State>::frontier(&self) -> batpak::store::stats::FrontierView
 impl<State> batpak::store::Store<State>
 pub fn batpak::store::Store<State>::project_run_evidence<T>(&self, entity: &str, freshness: &batpak::store::projection::Freshness) -> core::result::Result<(core::option::Option<T>, batpak::prelude::ProjectionRunEvidenceReport), batpak::prelude::ProjectionRunReportError> where T: batpak::event::sourcing::EventSourced + serde_core::ser::Serialize + serde_core::de::DeserializeOwned + 'static, <T as batpak::event::sourcing::EventSourced>::Input: crate::store::projection::flow::ReplayInput
 impl<State> batpak::store::Store<State>
@@ -2068,7 +2044,6 @@ pub fn batpak::prelude::StoreConfig::with_clock(self, clock: core::option::Optio
 pub fn batpak::prelude::StoreConfig::with_enable_checkpoint(self, enable_checkpoint: bool) -> Self
 pub fn batpak::prelude::StoreConfig::with_enable_mmap_index(self, enable_mmap_index: bool) -> Self
 pub fn batpak::prelude::StoreConfig::with_event_payload_validation(self, validation: batpak::event::payload::EventPayloadValidation) -> Self
-pub fn batpak::prelude::StoreConfig::with_fault_injector(self, injector: core::option::Option<alloc::sync::Arc<dyn batpak::store::fault::FaultInjector>>) -> Self
 pub fn batpak::prelude::StoreConfig::with_fd_budget(self, fd_budget: usize) -> Self
 pub fn batpak::prelude::StoreConfig::with_group_commit_max_batch(self, group_commit_max_batch: u32) -> Self
 pub fn batpak::prelude::StoreConfig::with_incremental_projection(self, incremental_projection: bool) -> Self
@@ -2121,7 +2096,7 @@ pub batpak::prelude::StoreResourceReportBody::fd_budget: u64
 pub batpak::prelude::StoreResourceReportBody::frontier: batpak::prelude::StoreResourceFrontierBody
 pub batpak::prelude::StoreResourceReportBody::global_sequence: u64
 pub batpak::prelude::StoreResourceReportBody::index_topology: alloc::string::String
-pub batpak::prelude::StoreResourceReportBody::open_report: core::option::Option<batpak::store::OpenIndexReport>
+pub batpak::prelude::StoreResourceReportBody::open_report: core::option::Option<batpak::store::cold_start::rebuild::OpenIndexReport>
 pub batpak::prelude::StoreResourceReportBody::platform_evidence: batpak::store::stats::PlatformEvidenceSummary
 pub batpak::prelude::StoreResourceReportBody::restart_policy: batpak::prelude::StoreResourceRestartPolicyShape
 pub batpak::prelude::StoreResourceReportBody::schema_version: u32
@@ -2248,7 +2223,6 @@ pub fn batpak::prelude::validate_event_payload_registry() -> core::result::Resul
 pub type batpak::prelude::ArtifactHash = [u8; 32]
 pub type batpak::prelude::ProjectionEvent<T> = batpak::event::Event<batpak::event::sourcing::ProjectionPayload<T>>
 pub type batpak::prelude::ProjectionPayload<T> = <<T as batpak::event::sourcing::EventSourced>::Input as batpak::event::sourcing::ProjectionInput>::Payload
-pub type batpak::prelude::StoreResourceEnvelope = batpak::prelude::StoreResourceEvidenceReport
 pub type batpak::prelude::StoreResourceHash = [u8; 32]
 pub mod batpak::registry
 pub enum batpak::registry::RegistryDriftFinding
@@ -2409,7 +2383,6 @@ pub fn batpak::reservation::reservation_transition_bytes(t: &batpak::reservation
 pub fn batpak::reservation::reservation_transition_log_digest(transitions_sorted: &[batpak::reservation::ReservationTransition]) -> core::result::Result<batpak::reservation::ReservationDigest, rmp_serde::encode::Error>
 pub fn batpak::reservation::simulate_reservation_ledger(transitions: &[batpak::reservation::ReservationTransition]) -> core::result::Result<batpak::reservation::ReservationLedgerReportBody, rmp_serde::encode::Error>
 pub type batpak::reservation::ReservationDigest = [u8; 32]
-pub type batpak::reservation::ReservationReconciliationReport = batpak::reservation::ReservationReconciliationReportBody
 pub type batpak::reservation::ReservationState = u32
 pub mod batpak::schema
 pub enum batpak::schema::SchemaChangeClass
@@ -2457,6 +2430,96 @@ pub const batpak::schema::SCHEMA_SNAPSHOT_REPORT_SCHEMA_VERSION: u16
 pub fn batpak::schema::compare_schema_snapshot(expected: &batpak::schema::SchemaSnapshot, observed: &batpak::schema::SchemaSnapshot) -> core::result::Result<batpak::schema::SchemaSnapshotEvidenceReport, batpak::schema::SchemaSnapshotReportError>
 pub type batpak::schema::SnapshotHash = [u8; 32]
 pub mod batpak::store
+pub mod batpak::store::backup_envelope
+pub enum batpak::store::backup_envelope::BackupEnvelopeFinding
+pub batpak::store::backup_envelope::BackupEnvelopeFinding::DuplicateSegmentRef
+pub batpak::store::backup_envelope::BackupEnvelopeFinding::DuplicateSegmentRef::bytes_digest: batpak::store::backup_envelope::SegmentBytesDigest
+pub batpak::store::backup_envelope::BackupEnvelopeFinding::DuplicateSegmentRef::segment_id: u64
+pub batpak::store::backup_envelope::BackupEnvelopeFinding::InconsistentSegmentId
+pub batpak::store::backup_envelope::BackupEnvelopeFinding::InconsistentSegmentId::first_digest: batpak::store::backup_envelope::SegmentBytesDigest
+pub batpak::store::backup_envelope::BackupEnvelopeFinding::InconsistentSegmentId::second_digest: batpak::store::backup_envelope::SegmentBytesDigest
+pub batpak::store::backup_envelope::BackupEnvelopeFinding::InconsistentSegmentId::segment_id: u64
+pub batpak::store::backup_envelope::BackupEnvelopeFinding::ManifestBodyHashMismatch
+pub batpak::store::backup_envelope::BackupEnvelopeFinding::ManifestBodyHashMismatch::claimed: batpak::store::backup_envelope::SegmentBytesDigest
+pub batpak::store::backup_envelope::BackupEnvelopeFinding::ManifestBodyHashMismatch::computed: batpak::store::backup_envelope::SegmentBytesDigest
+pub batpak::store::backup_envelope::BackupEnvelopeFinding::MissingExpectedSegment
+pub batpak::store::backup_envelope::BackupEnvelopeFinding::MissingExpectedSegment::segment_id: u64
+pub batpak::store::backup_envelope::BackupEnvelopeFinding::SegmentBytesDigestMismatch
+pub batpak::store::backup_envelope::BackupEnvelopeFinding::SegmentBytesDigestMismatch::expected: batpak::store::backup_envelope::SegmentBytesDigest
+pub batpak::store::backup_envelope::BackupEnvelopeFinding::SegmentBytesDigestMismatch::observed: batpak::store::backup_envelope::SegmentBytesDigest
+pub batpak::store::backup_envelope::BackupEnvelopeFinding::SegmentBytesDigestMismatch::segment_id: u64
+pub batpak::store::backup_envelope::BackupEnvelopeFinding::UnexpectedObservedSegment
+pub batpak::store::backup_envelope::BackupEnvelopeFinding::UnexpectedObservedSegment::segment_id: u64
+pub batpak::store::backup_envelope::BackupEnvelopeFinding::UnsupportedManifestBodySchemaVersion
+pub batpak::store::backup_envelope::BackupEnvelopeFinding::UnsupportedManifestBodySchemaVersion::expected: u32
+pub batpak::store::backup_envelope::BackupEnvelopeFinding::UnsupportedManifestBodySchemaVersion::observed: u32
+pub struct batpak::store::backup_envelope::BackupManifestBody
+pub batpak::store::backup_envelope::BackupManifestBody::backup_id: batpak::store::backup_envelope::SegmentBytesDigest
+pub batpak::store::backup_envelope::BackupManifestBody::layout_revision: u32
+pub batpak::store::backup_envelope::BackupManifestBody::schema_version: u32
+pub batpak::store::backup_envelope::BackupManifestBody::segments: alloc::vec::Vec<batpak::store::backup_envelope::BackupSegmentRef>
+pub batpak::store::backup_envelope::BackupManifestBody::tooling_revision: u32
+pub struct batpak::store::backup_envelope::BackupManifestEnvelope
+pub batpak::store::backup_envelope::BackupManifestEnvelope::attestations: alloc::vec::Vec<batpak::artifact::AttestationRef>
+pub batpak::store::backup_envelope::BackupManifestEnvelope::body: batpak::store::backup_envelope::BackupManifestBody
+pub batpak::store::backup_envelope::BackupManifestEnvelope::diagnostic_note: core::option::Option<alloc::string::String>
+pub batpak::store::backup_envelope::BackupManifestEnvelope::envelope_schema_version: u32
+pub batpak::store::backup_envelope::BackupManifestEnvelope::generated_at_wall_ms: core::option::Option<u64>
+pub batpak::store::backup_envelope::BackupManifestEnvelope::signatures: alloc::vec::Vec<batpak::artifact::SignatureEnvelope>
+impl batpak::store::backup_envelope::BackupManifestEnvelope
+pub fn batpak::store::backup_envelope::BackupManifestEnvelope::body_hash(&self) -> core::result::Result<batpak::store::backup_envelope::SegmentBytesDigest, rmp_serde::encode::Error>
+pub fn batpak::store::backup_envelope::BackupManifestEnvelope::envelope_hash(&self) -> core::result::Result<batpak::store::backup_envelope::SegmentBytesDigest, rmp_serde::encode::Error>
+impl core::convert::From<batpak::artifact::CanonicalArtifactEnvelope<batpak::store::backup_envelope::BackupManifestBody>> for batpak::store::backup_envelope::BackupManifestEnvelope
+pub fn batpak::store::backup_envelope::BackupManifestEnvelope::from(envelope: batpak::artifact::CanonicalArtifactEnvelope<batpak::store::backup_envelope::BackupManifestBody>) -> Self
+pub struct batpak::store::backup_envelope::BackupManifestVerification
+pub batpak::store::backup_envelope::BackupManifestVerification::envelope_plane: batpak::artifact::ArtifactVerificationReport
+pub batpak::store::backup_envelope::BackupManifestVerification::findings: alloc::vec::Vec<batpak::store::backup_envelope::BackupEnvelopeFinding>
+pub struct batpak::store::backup_envelope::BackupSegmentRef
+pub batpak::store::backup_envelope::BackupSegmentRef::bytes_digest: batpak::store::backup_envelope::SegmentBytesDigest
+pub batpak::store::backup_envelope::BackupSegmentRef::segment_id: u64
+pub struct batpak::store::backup_envelope::RestoreProofReportBody
+pub batpak::store::backup_envelope::RestoreProofReportBody::findings: alloc::vec::Vec<batpak::store::backup_envelope::BackupEnvelopeFinding>
+pub batpak::store::backup_envelope::RestoreProofReportBody::manifest_body_hash: batpak::store::backup_envelope::SegmentBytesDigest
+pub batpak::store::backup_envelope::RestoreProofReportBody::observed_segments_sorted: alloc::vec::Vec<batpak::store::backup_envelope::BackupSegmentRef>
+pub batpak::store::backup_envelope::RestoreProofReportBody::schema_version: u32
+pub const batpak::store::backup_envelope::BACKUP_MANIFEST_BODY_SCHEMA_VERSION: u32
+pub const batpak::store::backup_envelope::RESTORE_PROOF_REPORT_SCHEMA_VERSION: u32
+pub fn batpak::store::backup_envelope::audit_backup_manifest_segments(body: &batpak::store::backup_envelope::BackupManifestBody) -> alloc::vec::Vec<batpak::store::backup_envelope::BackupEnvelopeFinding>
+pub fn batpak::store::backup_envelope::backup_manifest_body_bytes(body: &batpak::store::backup_envelope::BackupManifestBody) -> core::result::Result<alloc::vec::Vec<u8>, rmp_serde::encode::Error>
+pub fn batpak::store::backup_envelope::backup_manifest_body_hash(body: &batpak::store::backup_envelope::BackupManifestBody) -> core::result::Result<batpak::store::backup_envelope::SegmentBytesDigest, rmp_serde::encode::Error>
+pub fn batpak::store::backup_envelope::backup_manifest_envelope_body_hash(envelope: &batpak::store::backup_envelope::BackupManifestEnvelope) -> core::result::Result<batpak::store::backup_envelope::SegmentBytesDigest, rmp_serde::encode::Error>
+pub fn batpak::store::backup_envelope::backup_manifest_envelope_hash(envelope: &batpak::store::backup_envelope::BackupManifestEnvelope) -> core::result::Result<batpak::store::backup_envelope::SegmentBytesDigest, rmp_serde::encode::Error>
+pub fn batpak::store::backup_envelope::normalize_backup_manifest_body(body: &batpak::store::backup_envelope::BackupManifestBody) -> batpak::store::backup_envelope::BackupManifestBody
+pub fn batpak::store::backup_envelope::normalize_backup_manifest_envelope(envelope: &batpak::store::backup_envelope::BackupManifestEnvelope) -> batpak::store::backup_envelope::BackupManifestEnvelope
+pub fn batpak::store::backup_envelope::restore_proof_report_body(expected_manifest: &batpak::store::backup_envelope::BackupManifestBody, observed_segments: &[batpak::store::backup_envelope::BackupSegmentRef]) -> core::result::Result<batpak::store::backup_envelope::RestoreProofReportBody, rmp_serde::encode::Error>
+pub fn batpak::store::backup_envelope::restore_proof_report_body_hash(report: &batpak::store::backup_envelope::RestoreProofReportBody) -> core::result::Result<batpak::store::backup_envelope::SegmentBytesDigest, rmp_serde::encode::Error>
+pub fn batpak::store::backup_envelope::sort_backup_segment_refs(segments: &mut [batpak::store::backup_envelope::BackupSegmentRef])
+pub fn batpak::store::backup_envelope::verify_backup_manifest_envelope<F>(envelope: &batpak::store::backup_envelope::BackupManifestEnvelope, claimed_manifest_hash: batpak::store::backup_envelope::SegmentBytesDigest, verify_signature: F) -> core::result::Result<batpak::store::backup_envelope::BackupManifestVerification, rmp_serde::encode::Error> where F: core::ops::function::FnMut(&batpak::artifact::SignatureRef, &[u8]) -> core::result::Result<(), alloc::string::String>
+pub fn batpak::store::backup_envelope::verify_backup_manifest_signatures_only<F>(envelope: &batpak::store::backup_envelope::BackupManifestEnvelope, verify_signature: F) -> core::result::Result<batpak::artifact::ArtifactVerificationReport, rmp_serde::encode::Error> where F: core::ops::function::FnMut(&batpak::artifact::SignatureRef, &[u8]) -> core::result::Result<(), alloc::string::String>
+pub type batpak::store::backup_envelope::SegmentBytesDigest = [u8; 32]
+pub mod batpak::store::cold_start
+pub mod batpak::store::cold_start::rebuild
+pub enum batpak::store::cold_start::rebuild::OpenIndexPath
+pub batpak::store::cold_start::rebuild::OpenIndexPath::Checkpoint
+pub batpak::store::cold_start::rebuild::OpenIndexPath::Mmap
+pub batpak::store::cold_start::rebuild::OpenIndexPath::Rebuild
+#[non_exhaustive] pub struct batpak::store::cold_start::rebuild::OpenIndexReport
+pub batpak::store::cold_start::rebuild::OpenIndexReport::cumulative_unknown_reserved_effect_kind_fallbacks: usize
+pub batpak::store::cold_start::rebuild::OpenIndexReport::cumulative_unknown_reserved_effect_kind_histogram: alloc::collections::btree::map::BTreeMap<u16, usize>
+pub batpak::store::cold_start::rebuild::OpenIndexReport::cumulative_unknown_reserved_system_kind_fallbacks: usize
+pub batpak::store::cold_start::rebuild::OpenIndexReport::cumulative_unknown_reserved_system_kind_histogram: alloc::collections::btree::map::BTreeMap<u16, usize>
+pub batpak::store::cold_start::rebuild::OpenIndexReport::elapsed_us: u64
+pub batpak::store::cold_start::rebuild::OpenIndexReport::path: batpak::store::cold_start::rebuild::OpenIndexPath
+pub batpak::store::cold_start::rebuild::OpenIndexReport::phase_hidden_ranges_us: u64
+pub batpak::store::cold_start::rebuild::OpenIndexReport::phase_interner_us: u64
+pub batpak::store::cold_start::rebuild::OpenIndexReport::phase_plan_build_us: u64
+pub batpak::store::cold_start::rebuild::OpenIndexReport::phase_restore_index_us: u64
+pub batpak::store::cold_start::rebuild::OpenIndexReport::restored_entries: usize
+pub batpak::store::cold_start::rebuild::OpenIndexReport::tail_entries: usize
+pub batpak::store::cold_start::rebuild::OpenIndexReport::unknown_reserved_effect_kind_fallbacks: usize
+pub batpak::store::cold_start::rebuild::OpenIndexReport::unknown_reserved_effect_kind_histogram: alloc::collections::btree::map::BTreeMap<u16, usize>
+pub batpak::store::cold_start::rebuild::OpenIndexReport::unknown_reserved_system_kind_fallbacks: usize
+pub batpak::store::cold_start::rebuild::OpenIndexReport::unknown_reserved_system_kind_histogram: alloc::collections::btree::map::BTreeMap<u16, usize>
 pub mod batpak::store::delivery
 pub mod batpak::store::delivery::canal
 pub enum batpak::store::delivery::canal::ReactorCanal
@@ -2552,67 +2615,6 @@ pub fn batpak::store::delivery::subscription::SubscriptionOps::map<F: core::ops:
 pub fn batpak::store::delivery::subscription::SubscriptionOps::recv(&mut self) -> core::option::Option<batpak::prelude::Notification>
 pub fn batpak::store::delivery::subscription::SubscriptionOps::scan<S, F>(self, initial: S, f: F) -> batpak::store::delivery::subscription::ScanSubscriptionOps<S, F> where S: core::clone::Clone + core::marker::Send + 'static, F: core::ops::function::FnMut(&mut S, &batpak::prelude::Notification) -> core::option::Option<S> + core::marker::Send + 'static
 pub fn batpak::store::delivery::subscription::SubscriptionOps::take(self, n: usize) -> Self
-pub mod batpak::store::fault
-pub enum batpak::store::fault::CountdownAction
-pub batpak::store::fault::CountdownAction::Fail(&'static str)
-pub batpak::store::fault::CountdownAction::Noop
-pub enum batpak::store::fault::InjectionPoint
-pub batpak::store::fault::InjectionPoint::BatchBeginWritten
-pub batpak::store::fault::InjectionPoint::BatchBeginWritten::batch_id: u64
-pub batpak::store::fault::InjectionPoint::BatchBeginWritten::item_count: usize
-pub batpak::store::fault::InjectionPoint::BatchCommitWritten
-pub batpak::store::fault::InjectionPoint::BatchCommitWritten::batch_id: u64
-pub batpak::store::fault::InjectionPoint::BatchFsync
-pub batpak::store::fault::InjectionPoint::BatchFsync::batch_id: u64
-pub batpak::store::fault::InjectionPoint::BatchItemWritten
-pub batpak::store::fault::InjectionPoint::BatchItemWritten::batch_id: u64
-pub batpak::store::fault::InjectionPoint::BatchItemWritten::item_index: usize
-pub batpak::store::fault::InjectionPoint::BatchItemWritten::total_items: usize
-pub batpak::store::fault::InjectionPoint::BatchItemsComplete
-pub batpak::store::fault::InjectionPoint::BatchItemsComplete::batch_id: u64
-pub batpak::store::fault::InjectionPoint::BatchItemsComplete::item_count: usize
-pub batpak::store::fault::InjectionPoint::BatchPrePublish
-pub batpak::store::fault::InjectionPoint::BatchPrePublish::batch_id: u64
-pub batpak::store::fault::InjectionPoint::BatchPrePublish::item_count: usize
-pub batpak::store::fault::InjectionPoint::BatchStart
-pub batpak::store::fault::InjectionPoint::BatchStart::batch_id: u64
-pub batpak::store::fault::InjectionPoint::BatchStart::item_count: usize
-pub batpak::store::fault::InjectionPoint::SegmentRotation
-pub batpak::store::fault::InjectionPoint::SegmentRotation::new_segment: u64
-pub batpak::store::fault::InjectionPoint::SegmentRotation::old_segment: u64
-pub batpak::store::fault::InjectionPoint::SingleAppendPublished
-pub batpak::store::fault::InjectionPoint::SingleAppendPublished::entity: alloc::string::String
-pub batpak::store::fault::InjectionPoint::SingleAppendStart
-pub batpak::store::fault::InjectionPoint::SingleAppendStart::entity: alloc::string::String
-pub batpak::store::fault::InjectionPoint::SingleAppendWritten
-pub batpak::store::fault::InjectionPoint::SingleAppendWritten::entity: alloc::string::String
-pub struct batpak::store::fault::CountdownInjector
-impl batpak::store::fault::CountdownInjector
-pub fn batpak::store::fault::CountdownInjector::after_batch_begin() -> Self
-pub fn batpak::store::fault::CountdownInjector::after_batch_items(n: usize) -> Self
-pub fn batpak::store::fault::CountdownInjector::after_commit_before_fsync() -> Self
-pub fn batpak::store::fault::CountdownInjector::new(trigger_after: usize, action: batpak::store::fault::CountdownAction) -> Self
-pub fn batpak::store::fault::CountdownInjector::with_filter<F>(self, filter: F) -> Self where F: core::ops::function::Fn(&batpak::store::fault::InjectionPoint) -> bool + core::marker::Send + core::marker::Sync + 'static
-impl batpak::store::fault::FaultInjector for batpak::store::fault::CountdownInjector
-pub fn batpak::store::fault::CountdownInjector::check(&self, point: batpak::store::fault::InjectionPoint) -> core::option::Option<batpak::prelude::StoreError>
-pub fn batpak::store::fault::CountdownInjector::validate(&self) -> core::result::Result<(), alloc::string::String>
-pub struct batpak::store::fault::ProbabilisticInjector
-impl batpak::store::fault::ProbabilisticInjector
-pub fn batpak::store::fault::ProbabilisticInjector::new(probability: f64, action: batpak::store::fault::CountdownAction) -> Self
-pub fn batpak::store::fault::ProbabilisticInjector::with_filter<F>(self, filter: F) -> Self where F: core::ops::function::Fn(&batpak::store::fault::InjectionPoint) -> bool + core::marker::Send + core::marker::Sync + 'static
-impl batpak::store::fault::FaultInjector for batpak::store::fault::ProbabilisticInjector
-pub fn batpak::store::fault::ProbabilisticInjector::check(&self, point: batpak::store::fault::InjectionPoint) -> core::option::Option<batpak::prelude::StoreError>
-pub fn batpak::store::fault::ProbabilisticInjector::validate(&self) -> core::result::Result<(), alloc::string::String>
-pub trait batpak::store::fault::FaultInjector: core::marker::Send + core::marker::Sync
-pub fn batpak::store::fault::FaultInjector::check(&self, point: batpak::store::fault::InjectionPoint) -> core::option::Option<batpak::prelude::StoreError>
-pub fn batpak::store::fault::FaultInjector::validate(&self) -> core::result::Result<(), alloc::string::String>
-impl batpak::store::fault::FaultInjector for batpak::store::fault::CountdownInjector
-pub fn batpak::store::fault::CountdownInjector::check(&self, point: batpak::store::fault::InjectionPoint) -> core::option::Option<batpak::prelude::StoreError>
-pub fn batpak::store::fault::CountdownInjector::validate(&self) -> core::result::Result<(), alloc::string::String>
-impl batpak::store::fault::FaultInjector for batpak::store::fault::ProbabilisticInjector
-pub fn batpak::store::fault::ProbabilisticInjector::check(&self, point: batpak::store::fault::InjectionPoint) -> core::option::Option<batpak::prelude::StoreError>
-pub fn batpak::store::fault::ProbabilisticInjector::validate(&self) -> core::result::Result<(), alloc::string::String>
-pub fn batpak::store::fault::maybe_inject(point: batpak::store::fault::InjectionPoint, injector: &core::option::Option<alloc::sync::Arc<dyn batpak::store::fault::FaultInjector>>) -> core::result::Result<(), batpak::prelude::StoreError>
 pub mod batpak::store::index
 pub struct batpak::store::index::DiskPos
 impl batpak::store::index::DiskPos
@@ -2620,24 +2622,24 @@ pub const fn batpak::store::index::DiskPos::length(self) -> u32
 pub const fn batpak::store::index::DiskPos::new(segment_id: u64, offset: u64, length: u32) -> Self
 pub const fn batpak::store::index::DiskPos::offset(self) -> u64
 pub const fn batpak::store::index::DiskPos::segment_id(self) -> u64
-pub struct batpak::store::index::IndexEntry
-pub batpak::store::index::IndexEntry::causation_id: core::option::Option<u128>
-pub batpak::store::index::IndexEntry::clock: u32
-pub batpak::store::index::IndexEntry::coord: batpak::coordinate::Coordinate
-pub batpak::store::index::IndexEntry::correlation_id: u128
-pub batpak::store::index::IndexEntry::dag_depth: u32
-pub batpak::store::index::IndexEntry::dag_lane: u32
-pub batpak::store::index::IndexEntry::disk_pos: batpak::store::index::DiskPos
-pub batpak::store::index::IndexEntry::event_id: u128
-pub batpak::store::index::IndexEntry::global_sequence: u64
-pub batpak::store::index::IndexEntry::hash_chain: batpak::event::hash::HashChain
-pub batpak::store::index::IndexEntry::kind: batpak::event::kind::EventKind
-pub batpak::store::index::IndexEntry::receipt_extensions: alloc::collections::btree::map::BTreeMap<batpak::store::ExtensionKey, batpak::store::EncodedBytes>
-pub batpak::store::index::IndexEntry::wall_ms: u64
+#[non_exhaustive] pub struct batpak::store::index::IndexEntry
 impl batpak::store::index::IndexEntry
+pub const fn batpak::store::index::IndexEntry::causation_id(&self) -> core::option::Option<u128>
+pub const fn batpak::store::index::IndexEntry::clock(&self) -> u32
+pub const fn batpak::store::index::IndexEntry::coord(&self) -> &batpak::coordinate::Coordinate
+pub const fn batpak::store::index::IndexEntry::correlation_id(&self) -> u128
+pub const fn batpak::store::index::IndexEntry::dag_depth(&self) -> u32
+pub const fn batpak::store::index::IndexEntry::dag_lane(&self) -> u32
+pub const fn batpak::store::index::IndexEntry::disk_pos(&self) -> batpak::store::index::DiskPos
+pub const fn batpak::store::index::IndexEntry::event_id(&self) -> u128
+pub const fn batpak::store::index::IndexEntry::event_kind(&self) -> batpak::event::kind::EventKind
+pub const fn batpak::store::index::IndexEntry::global_sequence(&self) -> u64
+pub const fn batpak::store::index::IndexEntry::hash_chain(&self) -> &batpak::event::hash::HashChain
 pub fn batpak::store::index::IndexEntry::is_caused_by(&self, event_id: u128) -> bool
 pub fn batpak::store::index::IndexEntry::is_correlated(&self) -> bool
 pub fn batpak::store::index::IndexEntry::is_root_cause(&self) -> bool
+pub const fn batpak::store::index::IndexEntry::receipt_extensions(&self) -> &alloc::collections::btree::map::BTreeMap<batpak::store::ExtensionKey, batpak::store::EncodedBytes>
+pub const fn batpak::store::index::IndexEntry::wall_ms(&self) -> u64
 pub mod batpak::store::projection
 #[non_exhaustive] pub enum batpak::store::projection::Freshness
 pub batpak::store::projection::Freshness::Consistent
@@ -2837,8 +2839,6 @@ pub batpak::store::stats::FrontierView::visible_minus_durable_seq: i64
 pub batpak::store::stats::FrontierView::written_hlc: batpak::store::stats::HlcPoint
 impl core::convert::From<batpak::store::stats::FrontierView> for batpak::prelude::StoreResourceFrontierBody
 pub fn batpak::prelude::StoreResourceFrontierBody::from(f: batpak::store::stats::FrontierView) -> Self
-impl core::convert::From<batpak::store::stats::WatermarkSnapshot> for batpak::store::stats::FrontierView
-pub fn batpak::store::stats::FrontierView::from(snapshot: batpak::store::stats::WatermarkSnapshot) -> Self
 pub struct batpak::store::stats::HlcPoint
 pub batpak::store::stats::HlcPoint::global_sequence: u64
 pub batpak::store::stats::HlcPoint::wall_ms: u64
@@ -2867,7 +2867,7 @@ pub batpak::store::stats::StoreDiagnostics::fd_budget: usize
 pub batpak::store::stats::StoreDiagnostics::frontier: batpak::store::stats::FrontierView
 pub batpak::store::stats::StoreDiagnostics::global_sequence: u64
 pub batpak::store::stats::StoreDiagnostics::index_topology: &'static str
-pub batpak::store::stats::StoreDiagnostics::open_report: core::option::Option<batpak::store::OpenIndexReport>
+pub batpak::store::stats::StoreDiagnostics::open_report: core::option::Option<batpak::store::cold_start::rebuild::OpenIndexReport>
 pub batpak::store::stats::StoreDiagnostics::platform_evidence: batpak::store::stats::PlatformEvidenceSummary
 pub batpak::store::stats::StoreDiagnostics::restart_policy: batpak::prelude::RestartPolicy
 pub batpak::store::stats::StoreDiagnostics::segment_max_bytes: u64
@@ -2884,18 +2884,6 @@ pub batpak::store::stats::StorePathEvidenceSummary::sealed_segment_mmap: batpak:
 pub struct batpak::store::stats::StoreStats
 pub batpak::store::stats::StoreStats::event_count: usize
 pub batpak::store::stats::StoreStats::global_sequence: u64
-pub struct batpak::store::stats::WatermarkSnapshot
-pub batpak::store::stats::WatermarkSnapshot::accepted_hlc: batpak::store::stats::HlcPoint
-pub batpak::store::stats::WatermarkSnapshot::applied_hlc: batpak::store::stats::HlcPoint
-pub batpak::store::stats::WatermarkSnapshot::durable_hlc: batpak::store::stats::HlcPoint
-pub batpak::store::stats::WatermarkSnapshot::emitted_hlc: batpak::store::stats::HlcPoint
-pub batpak::store::stats::WatermarkSnapshot::oldest_pending_write_age_ms: core::option::Option<u64>
-pub batpak::store::stats::WatermarkSnapshot::visible_hlc: batpak::store::stats::HlcPoint
-pub batpak::store::stats::WatermarkSnapshot::written_hlc: batpak::store::stats::HlcPoint
-impl core::convert::From<batpak::store::stats::WatermarkSnapshot> for batpak::store::stats::FrontierView
-pub fn batpak::store::stats::FrontierView::from(snapshot: batpak::store::stats::WatermarkSnapshot) -> Self
-impl core::default::Default for batpak::store::stats::WatermarkSnapshot
-pub fn batpak::store::stats::WatermarkSnapshot::default() -> Self
 pub struct batpak::store::stats::WriterPressure
 pub batpak::store::stats::WriterPressure::capacity: usize
 pub batpak::store::stats::WriterPressure::queue_len: usize
@@ -2908,28 +2896,6 @@ pub batpak::store::ActiveSegmentReadEvidence::LockedSeekRead
 pub batpak::store::ActiveSegmentReadEvidence::ProbeFailed
 pub batpak::store::ActiveSegmentReadEvidence::UnixReadAt
 pub batpak::store::ActiveSegmentReadEvidence::Unknown
-pub enum batpak::store::BackupEnvelopeFinding
-pub batpak::store::BackupEnvelopeFinding::DuplicateSegmentRef
-pub batpak::store::BackupEnvelopeFinding::DuplicateSegmentRef::bytes_digest: batpak::store::SegmentBytesDigest
-pub batpak::store::BackupEnvelopeFinding::DuplicateSegmentRef::segment_id: u64
-pub batpak::store::BackupEnvelopeFinding::InconsistentSegmentId
-pub batpak::store::BackupEnvelopeFinding::InconsistentSegmentId::first_digest: batpak::store::SegmentBytesDigest
-pub batpak::store::BackupEnvelopeFinding::InconsistentSegmentId::second_digest: batpak::store::SegmentBytesDigest
-pub batpak::store::BackupEnvelopeFinding::InconsistentSegmentId::segment_id: u64
-pub batpak::store::BackupEnvelopeFinding::ManifestBodyHashMismatch
-pub batpak::store::BackupEnvelopeFinding::ManifestBodyHashMismatch::claimed: batpak::store::SegmentBytesDigest
-pub batpak::store::BackupEnvelopeFinding::ManifestBodyHashMismatch::computed: batpak::store::SegmentBytesDigest
-pub batpak::store::BackupEnvelopeFinding::MissingExpectedSegment
-pub batpak::store::BackupEnvelopeFinding::MissingExpectedSegment::segment_id: u64
-pub batpak::store::BackupEnvelopeFinding::SegmentBytesDigestMismatch
-pub batpak::store::BackupEnvelopeFinding::SegmentBytesDigestMismatch::expected: batpak::store::SegmentBytesDigest
-pub batpak::store::BackupEnvelopeFinding::SegmentBytesDigestMismatch::observed: batpak::store::SegmentBytesDigest
-pub batpak::store::BackupEnvelopeFinding::SegmentBytesDigestMismatch::segment_id: u64
-pub batpak::store::BackupEnvelopeFinding::UnexpectedObservedSegment
-pub batpak::store::BackupEnvelopeFinding::UnexpectedObservedSegment::segment_id: u64
-pub batpak::store::BackupEnvelopeFinding::UnsupportedManifestBodySchemaVersion
-pub batpak::store::BackupEnvelopeFinding::UnsupportedManifestBodySchemaVersion::expected: u32
-pub batpak::store::BackupEnvelopeFinding::UnsupportedManifestBodySchemaVersion::observed: u32
 pub enum batpak::store::CausationRef
 pub batpak::store::CausationRef::Absolute(u128)
 pub batpak::store::CausationRef::None
@@ -3016,9 +2982,6 @@ pub enum batpak::store::CompactionStrategyShape
 pub batpak::store::CompactionStrategyShape::Merge
 pub batpak::store::CompactionStrategyShape::Retention
 pub batpak::store::CompactionStrategyShape::Tombstone
-pub enum batpak::store::CountdownAction
-pub batpak::store::CountdownAction::Fail(&'static str)
-pub batpak::store::CountdownAction::Noop
 pub enum batpak::store::CursorGapConfig
 pub batpak::store::CursorGapConfig::Disabled
 pub batpak::store::CursorGapConfig::Enabled
@@ -3040,36 +3003,6 @@ pub fn batpak::store::ExtensionKeyError::fmt(&self, f: &mut core::fmt::Formatter
 pub batpak::store::Freshness::Consistent
 pub batpak::store::Freshness::MaybeStale
 pub batpak::store::Freshness::MaybeStale::max_stale_ms: u64
-pub enum batpak::store::InjectionPoint
-pub batpak::store::InjectionPoint::BatchBeginWritten
-pub batpak::store::InjectionPoint::BatchBeginWritten::batch_id: u64
-pub batpak::store::InjectionPoint::BatchBeginWritten::item_count: usize
-pub batpak::store::InjectionPoint::BatchCommitWritten
-pub batpak::store::InjectionPoint::BatchCommitWritten::batch_id: u64
-pub batpak::store::InjectionPoint::BatchFsync
-pub batpak::store::InjectionPoint::BatchFsync::batch_id: u64
-pub batpak::store::InjectionPoint::BatchItemWritten
-pub batpak::store::InjectionPoint::BatchItemWritten::batch_id: u64
-pub batpak::store::InjectionPoint::BatchItemWritten::item_index: usize
-pub batpak::store::InjectionPoint::BatchItemWritten::total_items: usize
-pub batpak::store::InjectionPoint::BatchItemsComplete
-pub batpak::store::InjectionPoint::BatchItemsComplete::batch_id: u64
-pub batpak::store::InjectionPoint::BatchItemsComplete::item_count: usize
-pub batpak::store::InjectionPoint::BatchPrePublish
-pub batpak::store::InjectionPoint::BatchPrePublish::batch_id: u64
-pub batpak::store::InjectionPoint::BatchPrePublish::item_count: usize
-pub batpak::store::InjectionPoint::BatchStart
-pub batpak::store::InjectionPoint::BatchStart::batch_id: u64
-pub batpak::store::InjectionPoint::BatchStart::item_count: usize
-pub batpak::store::InjectionPoint::SegmentRotation
-pub batpak::store::InjectionPoint::SegmentRotation::new_segment: u64
-pub batpak::store::InjectionPoint::SegmentRotation::old_segment: u64
-pub batpak::store::InjectionPoint::SingleAppendPublished
-pub batpak::store::InjectionPoint::SingleAppendPublished::entity: alloc::string::String
-pub batpak::store::InjectionPoint::SingleAppendStart
-pub batpak::store::InjectionPoint::SingleAppendStart::entity: alloc::string::String
-pub batpak::store::InjectionPoint::SingleAppendWritten
-pub batpak::store::InjectionPoint::SingleAppendWritten::entity: alloc::string::String
 #[non_exhaustive] pub enum batpak::store::LockLeafSymlinkProtection
 pub batpak::store::LockLeafSymlinkProtection::AtomicNoFollow
 pub batpak::store::LockLeafSymlinkProtection::BestEffortCheckThenOpen
@@ -3089,10 +3022,6 @@ pub batpak::store::MmapEvidence::FileBacked
 pub batpak::store::MmapEvidence::ObservedUnsupported
 pub batpak::store::MmapEvidence::ProbeFailed
 pub batpak::store::MmapEvidence::Unknown
-pub enum batpak::store::OpenIndexPath
-pub batpak::store::OpenIndexPath::Checkpoint
-pub batpak::store::OpenIndexPath::Mmap
-pub batpak::store::OpenIndexPath::Rebuild
 #[non_exhaustive] pub enum batpak::store::ParentDirSyncAdmissionSummary
 pub batpak::store::ParentDirSyncAdmissionSummary::Rejected
 pub batpak::store::ParentDirSyncAdmissionSummary::RenameOnly
@@ -3254,7 +3183,6 @@ pub batpak::store::StoreError::DataDirMalformed::path: std::path::PathBuf
 pub batpak::store::StoreError::EntityClockOverflow
 pub batpak::store::StoreError::EntityClockOverflow::entity: alloc::string::String
 pub batpak::store::StoreError::EventPayloadRegistry(batpak::event::payload::EventPayloadRegistryError)
-pub batpak::store::StoreError::FaultInjected(alloc::string::String)
 pub batpak::store::StoreError::HiddenRangesCorrupt
 pub batpak::store::StoreError::HiddenRangesCorrupt::path: std::path::PathBuf
 pub batpak::store::StoreError::HiddenRangesCorrupt::reason: alloc::string::String
@@ -3427,12 +3355,13 @@ impl batpak::prelude::AppendPositionHint
 pub const fn batpak::prelude::AppendPositionHint::new(lane: u32, depth: u32) -> Self
 #[non_exhaustive] pub struct batpak::store::AppendReceipt
 pub batpak::store::AppendReceipt::content_hash: [u8; 32]
-pub batpak::store::AppendReceipt::disk_pos: batpak::store::index::DiskPos
 pub batpak::store::AppendReceipt::event_id: u128
 pub batpak::store::AppendReceipt::extensions: alloc::collections::btree::map::BTreeMap<batpak::store::ExtensionKey, batpak::store::EncodedBytes>
 pub batpak::store::AppendReceipt::key_id: [u8; 32]
 pub batpak::store::AppendReceipt::sequence: u64
 pub batpak::store::AppendReceipt::signature: core::option::Option<[u8; 64]>
+impl batpak::prelude::AppendReceipt
+pub const fn batpak::prelude::AppendReceipt::disk_pos(&self) -> batpak::store::index::DiskPos
 pub struct batpak::store::AppendTicket
 impl batpak::prelude::AppendTicket
 pub fn batpak::prelude::AppendTicket::receiver(&self) -> &flume::Receiver<core::result::Result<batpak::prelude::AppendReceipt, batpak::prelude::StoreError>>
@@ -3441,30 +3370,6 @@ pub fn batpak::prelude::AppendTicket::wait(self) -> core::result::Result<batpak:
 pub struct batpak::store::AtLeastOnce(_)
 impl batpak::store::delivery::observation::AtLeastOnce
 pub fn batpak::store::delivery::observation::AtLeastOnce::checkpoint_id(&self) -> &batpak::store::delivery::observation::CheckpointId
-pub struct batpak::store::BackupManifestBody
-pub batpak::store::BackupManifestBody::backup_id: batpak::store::SegmentBytesDigest
-pub batpak::store::BackupManifestBody::layout_revision: u32
-pub batpak::store::BackupManifestBody::schema_version: u32
-pub batpak::store::BackupManifestBody::segments: alloc::vec::Vec<batpak::store::BackupSegmentRef>
-pub batpak::store::BackupManifestBody::tooling_revision: u32
-pub struct batpak::store::BackupManifestEnvelope
-pub batpak::store::BackupManifestEnvelope::attestations: alloc::vec::Vec<batpak::artifact::AttestationRef>
-pub batpak::store::BackupManifestEnvelope::body: batpak::store::BackupManifestBody
-pub batpak::store::BackupManifestEnvelope::diagnostic_note: core::option::Option<alloc::string::String>
-pub batpak::store::BackupManifestEnvelope::envelope_schema_version: u32
-pub batpak::store::BackupManifestEnvelope::generated_at_wall_ms: core::option::Option<u64>
-pub batpak::store::BackupManifestEnvelope::signatures: alloc::vec::Vec<batpak::artifact::SignatureEnvelope>
-impl batpak::store::BackupManifestEnvelope
-pub fn batpak::store::BackupManifestEnvelope::body_hash(&self) -> core::result::Result<batpak::store::SegmentBytesDigest, rmp_serde::encode::Error>
-pub fn batpak::store::BackupManifestEnvelope::envelope_hash(&self) -> core::result::Result<batpak::store::SegmentBytesDigest, rmp_serde::encode::Error>
-impl core::convert::From<batpak::artifact::CanonicalArtifactEnvelope<batpak::store::BackupManifestBody>> for batpak::store::BackupManifestEnvelope
-pub fn batpak::store::BackupManifestEnvelope::from(envelope: batpak::artifact::CanonicalArtifactEnvelope<batpak::store::BackupManifestBody>) -> Self
-pub struct batpak::store::BackupManifestVerification
-pub batpak::store::BackupManifestVerification::envelope_plane: batpak::artifact::ArtifactVerificationReport
-pub batpak::store::BackupManifestVerification::findings: alloc::vec::Vec<batpak::store::BackupEnvelopeFinding>
-pub struct batpak::store::BackupSegmentRef
-pub batpak::store::BackupSegmentRef::bytes_digest: batpak::store::SegmentBytesDigest
-pub batpak::store::BackupSegmentRef::segment_id: u64
 pub struct batpak::store::BatchAppendItem
 impl batpak::prelude::BatchAppendItem
 pub fn batpak::prelude::BatchAppendItem::causation(&self) -> batpak::prelude::CausationRef
@@ -3549,16 +3454,6 @@ pub batpak::store::CompactionReportBody::source_segment_ids_sorted: alloc::vec::
 pub batpak::store::CompactionReportBody::strategy_shape: batpak::store::CompactionStrategyShape
 impl batpak::store::CompactionReportBody
 pub fn batpak::store::CompactionReportBody::body_hash(&self) -> core::result::Result<[u8; 32], rmp_serde::encode::Error>
-pub struct batpak::store::CountdownInjector
-impl batpak::store::fault::CountdownInjector
-pub fn batpak::store::fault::CountdownInjector::after_batch_begin() -> Self
-pub fn batpak::store::fault::CountdownInjector::after_batch_items(n: usize) -> Self
-pub fn batpak::store::fault::CountdownInjector::after_commit_before_fsync() -> Self
-pub fn batpak::store::fault::CountdownInjector::new(trigger_after: usize, action: batpak::store::fault::CountdownAction) -> Self
-pub fn batpak::store::fault::CountdownInjector::with_filter<F>(self, filter: F) -> Self where F: core::ops::function::Fn(&batpak::store::fault::InjectionPoint) -> bool + core::marker::Send + core::marker::Sync + 'static
-impl batpak::store::fault::FaultInjector for batpak::store::fault::CountdownInjector
-pub fn batpak::store::fault::CountdownInjector::check(&self, point: batpak::store::fault::InjectionPoint) -> core::option::Option<batpak::prelude::StoreError>
-pub fn batpak::store::fault::CountdownInjector::validate(&self) -> core::result::Result<(), alloc::string::String>
 pub struct batpak::store::Cursor
 impl batpak::store::delivery::cursor::Cursor
 pub fn batpak::store::delivery::cursor::Cursor::load_checkpoint(data_dir: &std::path::Path, id: &batpak::store::delivery::observation::CheckpointId) -> std::io::error::Result<core::option::Option<batpak::store::delivery::cursor::CursorCheckpoint>>
@@ -3588,18 +3483,13 @@ impl core::ops::drop::Drop for batpak::store::delivery::cursor::CursorWorkerHand
 pub fn batpak::store::delivery::cursor::CursorWorkerHandle::drop(&mut self)
 #[non_exhaustive] pub struct batpak::store::DenialReceipt
 pub batpak::store::DenialReceipt::content_hash: [u8; 32]
-pub batpak::store::DenialReceipt::disk_pos: batpak::store::index::DiskPos
 pub batpak::store::DenialReceipt::event_id: u128
 pub batpak::store::DenialReceipt::extensions: alloc::collections::btree::map::BTreeMap<batpak::store::ExtensionKey, batpak::store::EncodedBytes>
 pub batpak::store::DenialReceipt::key_id: [u8; 32]
 pub batpak::store::DenialReceipt::sequence: u64
 pub batpak::store::DenialReceipt::signature: core::option::Option<[u8; 64]>
-pub struct batpak::store::DiskPos
-impl batpak::store::index::DiskPos
-pub const fn batpak::store::index::DiskPos::length(self) -> u32
-pub const fn batpak::store::index::DiskPos::new(segment_id: u64, offset: u64, length: u32) -> Self
-pub const fn batpak::store::index::DiskPos::offset(self) -> u64
-pub const fn batpak::store::index::DiskPos::segment_id(self) -> u64
+impl batpak::store::DenialReceipt
+pub const fn batpak::store::DenialReceipt::disk_pos(&self) -> batpak::store::index::DiskPos
 pub struct batpak::store::DurabilityGate
 pub batpak::store::DurabilityGate::kind: batpak::store::stats::WatermarkKind
 pub batpak::store::DurabilityGate::timeout: core::time::Duration
@@ -3618,8 +3508,6 @@ pub batpak::store::FrontierView::visible_minus_durable_seq: i64
 pub batpak::store::FrontierView::written_hlc: batpak::store::stats::HlcPoint
 impl core::convert::From<batpak::store::stats::FrontierView> for batpak::prelude::StoreResourceFrontierBody
 pub fn batpak::prelude::StoreResourceFrontierBody::from(f: batpak::store::stats::FrontierView) -> Self
-impl core::convert::From<batpak::store::stats::WatermarkSnapshot> for batpak::store::stats::FrontierView
-pub fn batpak::store::stats::FrontierView::from(snapshot: batpak::store::stats::WatermarkSnapshot) -> Self
 pub struct batpak::store::GapObservation
 pub batpak::store::GapObservation::cancelled_ranges: alloc::vec::Vec<(u64, u64)>
 pub batpak::store::GapObservation::delivered_sequence: u64
@@ -3647,24 +3535,6 @@ pub batpak::store::IndexConfig::incremental_projection: bool
 pub batpak::store::IndexConfig::topology: batpak::prelude::IndexTopology
 impl core::default::Default for batpak::prelude::IndexConfig
 pub fn batpak::prelude::IndexConfig::default() -> Self
-pub struct batpak::store::IndexEntry
-pub batpak::store::IndexEntry::causation_id: core::option::Option<u128>
-pub batpak::store::IndexEntry::clock: u32
-pub batpak::store::IndexEntry::coord: batpak::coordinate::Coordinate
-pub batpak::store::IndexEntry::correlation_id: u128
-pub batpak::store::IndexEntry::dag_depth: u32
-pub batpak::store::IndexEntry::dag_lane: u32
-pub batpak::store::IndexEntry::disk_pos: batpak::store::index::DiskPos
-pub batpak::store::IndexEntry::event_id: u128
-pub batpak::store::IndexEntry::global_sequence: u64
-pub batpak::store::IndexEntry::hash_chain: batpak::event::hash::HashChain
-pub batpak::store::IndexEntry::kind: batpak::event::kind::EventKind
-pub batpak::store::IndexEntry::receipt_extensions: alloc::collections::btree::map::BTreeMap<batpak::store::ExtensionKey, batpak::store::EncodedBytes>
-pub batpak::store::IndexEntry::wall_ms: u64
-impl batpak::store::index::IndexEntry
-pub fn batpak::store::index::IndexEntry::is_caused_by(&self, event_id: u128) -> bool
-pub fn batpak::store::index::IndexEntry::is_correlated(&self) -> bool
-pub fn batpak::store::index::IndexEntry::is_root_cause(&self) -> bool
 pub struct batpak::store::IndexTopology
 impl batpak::prelude::IndexTopology
 pub fn batpak::prelude::IndexTopology::all() -> Self
@@ -3710,23 +3580,6 @@ impl batpak::store::delivery::observation::ObservedOnce
 pub fn batpak::store::delivery::observation::ObservedOnce::into_parts(self) -> (batpak::store::delivery::observation::AtLeastOnce, batpak::store::delivery::observation::IdempotencyKey)
 pub fn batpak::store::delivery::observation::ObservedOnce::new(at_least_once: batpak::store::delivery::observation::AtLeastOnce, idempotency_key: batpak::store::delivery::observation::IdempotencyKey) -> Self
 pub struct batpak::store::Open
-#[non_exhaustive] pub struct batpak::store::OpenIndexReport
-pub batpak::store::OpenIndexReport::cumulative_unknown_reserved_effect_kind_fallbacks: usize
-pub batpak::store::OpenIndexReport::cumulative_unknown_reserved_effect_kind_histogram: alloc::collections::btree::map::BTreeMap<u16, usize>
-pub batpak::store::OpenIndexReport::cumulative_unknown_reserved_system_kind_fallbacks: usize
-pub batpak::store::OpenIndexReport::cumulative_unknown_reserved_system_kind_histogram: alloc::collections::btree::map::BTreeMap<u16, usize>
-pub batpak::store::OpenIndexReport::elapsed_us: u64
-pub batpak::store::OpenIndexReport::path: batpak::store::OpenIndexPath
-pub batpak::store::OpenIndexReport::phase_hidden_ranges_us: u64
-pub batpak::store::OpenIndexReport::phase_interner_us: u64
-pub batpak::store::OpenIndexReport::phase_plan_build_us: u64
-pub batpak::store::OpenIndexReport::phase_restore_index_us: u64
-pub batpak::store::OpenIndexReport::restored_entries: usize
-pub batpak::store::OpenIndexReport::tail_entries: usize
-pub batpak::store::OpenIndexReport::unknown_reserved_effect_kind_fallbacks: usize
-pub batpak::store::OpenIndexReport::unknown_reserved_effect_kind_histogram: alloc::collections::btree::map::BTreeMap<u16, usize>
-pub batpak::store::OpenIndexReport::unknown_reserved_system_kind_fallbacks: usize
-pub batpak::store::OpenIndexReport::unknown_reserved_system_kind_histogram: alloc::collections::btree::map::BTreeMap<u16, usize>
 pub struct batpak::store::Outbox<'a>
 impl<'a> batpak::store::Outbox<'a>
 pub fn batpak::store::Outbox<'a>::flush(&mut self) -> core::result::Result<alloc::vec::Vec<batpak::prelude::AppendReceipt>, batpak::prelude::StoreError>
@@ -3751,13 +3604,6 @@ pub batpak::store::PlatformAdmissionSummary::store_lock: batpak::store::stats::S
 pub batpak::store::PlatformEvidenceSummary::admission: batpak::store::stats::PlatformAdmissionSummary
 pub batpak::store::PlatformEvidenceSummary::host: batpak::store::stats::HostEvidenceSummary
 pub batpak::store::PlatformEvidenceSummary::store_path: batpak::store::stats::StorePathEvidenceSummary
-pub struct batpak::store::ProbabilisticInjector
-impl batpak::store::fault::ProbabilisticInjector
-pub fn batpak::store::fault::ProbabilisticInjector::new(probability: f64, action: batpak::store::fault::CountdownAction) -> Self
-pub fn batpak::store::fault::ProbabilisticInjector::with_filter<F>(self, filter: F) -> Self where F: core::ops::function::Fn(&batpak::store::fault::InjectionPoint) -> bool + core::marker::Send + core::marker::Sync + 'static
-impl batpak::store::fault::FaultInjector for batpak::store::fault::ProbabilisticInjector
-pub fn batpak::store::fault::ProbabilisticInjector::check(&self, point: batpak::store::fault::InjectionPoint) -> core::option::Option<batpak::prelude::StoreError>
-pub fn batpak::store::fault::ProbabilisticInjector::validate(&self) -> core::result::Result<(), alloc::string::String>
 pub struct batpak::store::ProjectionRunEvidenceReport
 pub batpak::store::ProjectionRunEvidenceReport::batpak_version: core::option::Option<alloc::string::String>
 pub batpak::store::ProjectionRunEvidenceReport::body: batpak::prelude::ProjectionRunReportBody
@@ -3844,11 +3690,6 @@ impl<P: batpak::prelude::ReceiptExtensionNamespace> batpak::prelude::ReceiptExte
 pub fn batpak::prelude::ReceiptExtensionValue<P>::new(bytes: impl core::convert::Into<batpak::store::EncodedBytes>) -> Self
 impl<P: batpak::prelude::ReceiptExtensionNamespace> core::clone::Clone for batpak::prelude::ReceiptExtensionValue<P>
 pub fn batpak::prelude::ReceiptExtensionValue<P>::clone(&self) -> Self
-pub struct batpak::store::RestoreProofReportBody
-pub batpak::store::RestoreProofReportBody::findings: alloc::vec::Vec<batpak::store::BackupEnvelopeFinding>
-pub batpak::store::RestoreProofReportBody::manifest_body_hash: batpak::store::SegmentBytesDigest
-pub batpak::store::RestoreProofReportBody::observed_segments_sorted: alloc::vec::Vec<batpak::store::BackupSegmentRef>
-pub batpak::store::RestoreProofReportBody::schema_version: u32
 pub struct batpak::store::SigningKey
 impl batpak::store::SigningKey
 pub fn batpak::store::SigningKey::from_bytes(bytes: [u8; 32]) -> Self
@@ -3926,17 +3767,11 @@ pub fn batpak::store::Store<State>::walk_ancestors(&self, event_id: u128, limit:
 impl<State> batpak::store::Store<State>
 pub fn batpak::store::Store<State>::chain_walk_evidence(&self, request: &batpak::prelude::ChainWalkRequest) -> core::result::Result<batpak::prelude::ChainWalkEvidenceReport, batpak::prelude::ChainWalkReportError>
 impl<State> batpak::store::Store<State>
-pub fn batpak::store::Store<State>::dangerous_notify_projection_applied(&self, projection_id: &str, point: batpak::store::stats::HlcPoint)
-pub fn batpak::store::Store<State>::dangerous_notify_watermark_waiters(&self)
-pub fn batpak::store::Store<State>::dangerous_register_projection(&self, projection_id: &str)
-pub fn batpak::store::Store<State>::dangerous_register_projection_for<T: 'static>(&self, entity: &str)
-pub fn batpak::store::Store<State>::dangerous_unregister_projection(&self, projection_id: &str)
-pub fn batpak::store::Store<State>::dangerous_watermark_snapshot(&self) -> batpak::store::stats::WatermarkSnapshot
-pub fn batpak::store::Store<State>::frontier(&self) -> batpak::store::stats::FrontierView
-impl<State> batpak::store::Store<State>
 pub fn batpak::store::Store<State>::diagnostics(&self) -> batpak::store::stats::StoreDiagnostics
 pub fn batpak::store::Store<State>::stats(&self) -> batpak::store::stats::StoreStats
 pub fn batpak::store::Store<State>::store_resource_evidence_report(&self) -> core::result::Result<batpak::prelude::StoreResourceEvidenceReport, batpak::prelude::StoreResourceReportError>
+impl<State> batpak::store::Store<State>
+pub fn batpak::store::Store<State>::frontier(&self) -> batpak::store::stats::FrontierView
 impl<State> batpak::store::Store<State>
 pub fn batpak::store::Store<State>::project_run_evidence<T>(&self, entity: &str, freshness: &batpak::store::projection::Freshness) -> core::result::Result<(core::option::Option<T>, batpak::prelude::ProjectionRunEvidenceReport), batpak::prelude::ProjectionRunReportError> where T: batpak::event::sourcing::EventSourced + serde_core::ser::Serialize + serde_core::de::DeserializeOwned + 'static, <T as batpak::event::sourcing::EventSourced>::Input: crate::store::projection::flow::ReplayInput
 impl<State> batpak::store::Store<State>
@@ -3966,7 +3801,6 @@ pub fn batpak::prelude::StoreConfig::with_clock(self, clock: core::option::Optio
 pub fn batpak::prelude::StoreConfig::with_enable_checkpoint(self, enable_checkpoint: bool) -> Self
 pub fn batpak::prelude::StoreConfig::with_enable_mmap_index(self, enable_mmap_index: bool) -> Self
 pub fn batpak::prelude::StoreConfig::with_event_payload_validation(self, validation: batpak::event::payload::EventPayloadValidation) -> Self
-pub fn batpak::prelude::StoreConfig::with_fault_injector(self, injector: core::option::Option<alloc::sync::Arc<dyn batpak::store::fault::FaultInjector>>) -> Self
 pub fn batpak::prelude::StoreConfig::with_fd_budget(self, fd_budget: usize) -> Self
 pub fn batpak::prelude::StoreConfig::with_group_commit_max_batch(self, group_commit_max_batch: u32) -> Self
 pub fn batpak::prelude::StoreConfig::with_incremental_projection(self, incremental_projection: bool) -> Self
@@ -3996,7 +3830,7 @@ pub batpak::store::StoreDiagnostics::fd_budget: usize
 pub batpak::store::StoreDiagnostics::frontier: batpak::store::stats::FrontierView
 pub batpak::store::StoreDiagnostics::global_sequence: u64
 pub batpak::store::StoreDiagnostics::index_topology: &'static str
-pub batpak::store::StoreDiagnostics::open_report: core::option::Option<batpak::store::OpenIndexReport>
+pub batpak::store::StoreDiagnostics::open_report: core::option::Option<batpak::store::cold_start::rebuild::OpenIndexReport>
 pub batpak::store::StoreDiagnostics::platform_evidence: batpak::store::stats::PlatformEvidenceSummary
 pub batpak::store::StoreDiagnostics::restart_policy: batpak::prelude::RestartPolicy
 pub batpak::store::StoreDiagnostics::segment_max_bytes: u64
@@ -4040,7 +3874,7 @@ pub batpak::store::StoreResourceReportBody::fd_budget: u64
 pub batpak::store::StoreResourceReportBody::frontier: batpak::prelude::StoreResourceFrontierBody
 pub batpak::store::StoreResourceReportBody::global_sequence: u64
 pub batpak::store::StoreResourceReportBody::index_topology: alloc::string::String
-pub batpak::store::StoreResourceReportBody::open_report: core::option::Option<batpak::store::OpenIndexReport>
+pub batpak::store::StoreResourceReportBody::open_report: core::option::Option<batpak::store::cold_start::rebuild::OpenIndexReport>
 pub batpak::store::StoreResourceReportBody::platform_evidence: batpak::store::stats::PlatformEvidenceSummary
 pub batpak::store::StoreResourceReportBody::restart_policy: batpak::prelude::StoreResourceRestartPolicyShape
 pub batpak::store::StoreResourceReportBody::schema_version: u32
@@ -4102,18 +3936,6 @@ pub fn batpak::store::VisibilityFence<'a>::submit_reaction_typed<T: batpak::even
 pub fn batpak::store::VisibilityFence<'a>::submit_typed<T: batpak::event::payload::EventPayload>(&self, coord: &batpak::coordinate::Coordinate, payload: &T) -> core::result::Result<batpak::prelude::AppendTicket, batpak::prelude::StoreError>
 impl core::ops::drop::Drop for batpak::store::VisibilityFence<'_>
 pub fn batpak::store::VisibilityFence<'_>::drop(&mut self)
-pub struct batpak::store::WatermarkSnapshot
-pub batpak::store::WatermarkSnapshot::accepted_hlc: batpak::store::stats::HlcPoint
-pub batpak::store::WatermarkSnapshot::applied_hlc: batpak::store::stats::HlcPoint
-pub batpak::store::WatermarkSnapshot::durable_hlc: batpak::store::stats::HlcPoint
-pub batpak::store::WatermarkSnapshot::emitted_hlc: batpak::store::stats::HlcPoint
-pub batpak::store::WatermarkSnapshot::oldest_pending_write_age_ms: core::option::Option<u64>
-pub batpak::store::WatermarkSnapshot::visible_hlc: batpak::store::stats::HlcPoint
-pub batpak::store::WatermarkSnapshot::written_hlc: batpak::store::stats::HlcPoint
-impl core::convert::From<batpak::store::stats::WatermarkSnapshot> for batpak::store::stats::FrontierView
-pub fn batpak::store::stats::FrontierView::from(snapshot: batpak::store::stats::WatermarkSnapshot) -> Self
-impl core::default::Default for batpak::store::stats::WatermarkSnapshot
-pub fn batpak::store::stats::WatermarkSnapshot::default() -> Self
 pub struct batpak::store::WriterConfig
 pub batpak::store::WriterConfig::channel_capacity: usize
 pub batpak::store::WriterConfig::pressure_retry_threshold_pct: u8
@@ -4129,24 +3951,13 @@ impl batpak::store::stats::WriterPressure
 pub fn batpak::store::stats::WriterPressure::headroom(&self) -> usize
 pub fn batpak::store::stats::WriterPressure::is_idle(&self) -> bool
 pub fn batpak::store::stats::WriterPressure::utilization(&self) -> f64
-pub const batpak::store::BACKUP_MANIFEST_BODY_SCHEMA_VERSION: u32
 pub const batpak::store::CHAIN_WALK_REPORT_SCHEMA_VERSION: u16
 pub const batpak::store::COMPACTION_REPORT_SCHEMA_VERSION: u16
 pub const batpak::store::MAX_CHECKPOINT_ID_LEN: usize
 pub const batpak::store::PROJECTION_RUN_REPORT_SCHEMA_VERSION: u16
 pub const batpak::store::READ_WALK_REPORT_SCHEMA_VERSION: u16
-pub const batpak::store::RESTORE_PROOF_REPORT_SCHEMA_VERSION: u32
 pub const batpak::store::STORE_RESOURCE_REPORT_SCHEMA_VERSION: u32
 pub const batpak::store::SUBSCRIBER_FRONTIER_REPORT_SCHEMA_VERSION: u16
-pub trait batpak::store::FaultInjector: core::marker::Send + core::marker::Sync
-pub fn batpak::store::FaultInjector::check(&self, point: batpak::store::fault::InjectionPoint) -> core::option::Option<batpak::prelude::StoreError>
-pub fn batpak::store::FaultInjector::validate(&self) -> core::result::Result<(), alloc::string::String>
-impl batpak::store::fault::FaultInjector for batpak::store::fault::CountdownInjector
-pub fn batpak::store::fault::CountdownInjector::check(&self, point: batpak::store::fault::InjectionPoint) -> core::option::Option<batpak::prelude::StoreError>
-pub fn batpak::store::fault::CountdownInjector::validate(&self) -> core::result::Result<(), alloc::string::String>
-impl batpak::store::fault::FaultInjector for batpak::store::fault::ProbabilisticInjector
-pub fn batpak::store::fault::ProbabilisticInjector::check(&self, point: batpak::store::fault::InjectionPoint) -> core::option::Option<batpak::prelude::StoreError>
-pub fn batpak::store::fault::ProbabilisticInjector::validate(&self) -> core::result::Result<(), alloc::string::String>
 pub trait batpak::store::ProjectionCache: core::marker::Send + core::marker::Sync + 'static
 pub fn batpak::store::ProjectionCache::capabilities(&self) -> batpak::store::projection::CacheCapabilities
 pub fn batpak::store::ProjectionCache::delete_prefix(&self, prefix: &[u8]) -> core::result::Result<u64, batpak::prelude::StoreError>
@@ -4170,35 +3981,19 @@ pub fn batpak::store::projection::NoCache::put(&self, _key: &[u8], _value: &[u8]
 pub fn batpak::store::projection::NoCache::sync(&self) -> core::result::Result<(), batpak::prelude::StoreError>
 pub trait batpak::store::ReceiptExtensionNamespace
 pub const batpak::store::ReceiptExtensionNamespace::PREFIX: &'static str
-pub fn batpak::store::audit_backup_manifest_segments(body: &batpak::store::BackupManifestBody) -> alloc::vec::Vec<batpak::store::BackupEnvelopeFinding>
-pub fn batpak::store::backup_manifest_body_bytes(body: &batpak::store::BackupManifestBody) -> core::result::Result<alloc::vec::Vec<u8>, rmp_serde::encode::Error>
-pub fn batpak::store::backup_manifest_body_hash(body: &batpak::store::BackupManifestBody) -> core::result::Result<batpak::store::SegmentBytesDigest, rmp_serde::encode::Error>
-pub fn batpak::store::backup_manifest_envelope_body_hash(envelope: &batpak::store::BackupManifestEnvelope) -> core::result::Result<batpak::store::SegmentBytesDigest, rmp_serde::encode::Error>
-pub fn batpak::store::backup_manifest_envelope_hash(envelope: &batpak::store::BackupManifestEnvelope) -> core::result::Result<batpak::store::SegmentBytesDigest, rmp_serde::encode::Error>
 pub fn batpak::store::compaction_strategy_shape(strategy: &batpak::prelude::CompactionStrategy) -> batpak::store::CompactionStrategyShape
-pub fn batpak::store::normalize_backup_manifest_body(body: &batpak::store::BackupManifestBody) -> batpak::store::BackupManifestBody
-pub fn batpak::store::normalize_backup_manifest_envelope(envelope: &batpak::store::BackupManifestEnvelope) -> batpak::store::BackupManifestEnvelope
 pub fn batpak::store::report_for_run(config: &batpak::prelude::CompactionConfig, active_segment_id: u64, sealed: &[(u64, std::path::PathBuf)], merged_segment_id: core::option::Option<u64>, result: &batpak::store::segment::CompactionResult, merged_segment_path_for_hash: core::option::Option<&std::path::Path>) -> core::result::Result<batpak::store::CompactionReportBody, rmp_serde::encode::Error>
 pub fn batpak::store::report_skipped(config: &batpak::prelude::CompactionConfig, active_segment_id: u64, sealed: &[(u64, std::path::PathBuf)]) -> core::result::Result<batpak::store::CompactionReportBody, rmp_serde::encode::Error>
-pub fn batpak::store::restore_proof_report_body(expected_manifest: &batpak::store::BackupManifestBody, observed_segments: &[batpak::store::BackupSegmentRef]) -> core::result::Result<batpak::store::RestoreProofReportBody, rmp_serde::encode::Error>
-pub fn batpak::store::restore_proof_report_body_hash(report: &batpak::store::RestoreProofReportBody) -> core::result::Result<batpak::store::SegmentBytesDigest, rmp_serde::encode::Error>
-pub fn batpak::store::sort_backup_segment_refs(segments: &mut [batpak::store::BackupSegmentRef])
 pub fn batpak::store::store_data_dir_identity_hash(path: &std::path::Path) -> batpak::prelude::StoreResourceHash
 pub fn batpak::store::store_resource_evidence_report_from_diagnostics(d: &batpak::store::stats::StoreDiagnostics) -> core::result::Result<batpak::prelude::StoreResourceEvidenceReport, batpak::prelude::StoreResourceReportError>
 pub fn batpak::store::store_resource_report_body_from_diagnostics(d: &batpak::store::stats::StoreDiagnostics) -> batpak::prelude::StoreResourceReportBody
 pub fn batpak::store::store_resource_report_body_hash(body: &batpak::prelude::StoreResourceReportBody) -> core::result::Result<batpak::prelude::StoreResourceHash, batpak::prelude::StoreResourceReportError>
-pub fn batpak::store::verify_backup_manifest_envelope<F>(envelope: &batpak::store::BackupManifestEnvelope, claimed_manifest_hash: batpak::store::SegmentBytesDigest, verify_signature: F) -> core::result::Result<batpak::store::BackupManifestVerification, rmp_serde::encode::Error> where F: core::ops::function::FnMut(&batpak::artifact::SignatureRef, &[u8]) -> core::result::Result<(), alloc::string::String>
-pub fn batpak::store::verify_backup_manifest_signatures_only<F>(envelope: &batpak::store::BackupManifestEnvelope, verify_signature: F) -> core::result::Result<batpak::artifact::ArtifactVerificationReport, rmp_serde::encode::Error> where F: core::ops::function::FnMut(&batpak::artifact::SignatureRef, &[u8]) -> core::result::Result<(), alloc::string::String>
-pub type batpak::store::BackupEnvelope = batpak::store::BackupManifestEnvelope
 pub type batpak::store::ChainWalkHash = [u8; 32]
 pub type batpak::store::EncodedBytes = alloc::vec::Vec<u8>
-pub type batpak::store::OpenReportObserver = alloc::sync::Arc<(dyn core::ops::function::Fn(&batpak::store::OpenIndexReport) + core::marker::Send + core::marker::Sync)>
+pub type batpak::store::OpenReportObserver = alloc::sync::Arc<(dyn core::ops::function::Fn(&batpak::store::cold_start::rebuild::OpenIndexReport) + core::marker::Send + core::marker::Sync)>
 pub type batpak::store::ProjectionRunHash = [u8; 32]
 pub type batpak::store::ReadWalkHash = [u8; 32]
-pub type batpak::store::RestoreProofEvidenceReport = batpak::store::RestoreProofReportBody
 pub type batpak::store::RetentionPredicate = alloc::boxed::Box<(dyn core::ops::function::Fn(&batpak::event::StoredEvent<serde_json::value::Value>) -> bool + core::marker::Send)>
-pub type batpak::store::SegmentBytesDigest = [u8; 32]
-pub type batpak::store::StoreResourceEnvelope = batpak::prelude::StoreResourceEvidenceReport
 pub type batpak::store::StoreResourceHash = [u8; 32]
 pub type batpak::store::SubscriberFrontierHash = [u8; 32]
 pub mod batpak::transition
@@ -4252,7 +4047,6 @@ pub fn batpak::transition::state_transition_event_bytes(event: &batpak::transiti
 pub fn batpak::transition::state_transition_event_digest(event: &batpak::transition::StateTransitionEvent) -> core::result::Result<batpak::transition::TransitionEvidenceDigest, rmp_serde::encode::Error>
 pub fn batpak::transition::state_transition_report_body_hash(report: &batpak::transition::StateTransitionReportBody) -> core::result::Result<batpak::transition::TransitionEvidenceDigest, rmp_serde::encode::Error>
 pub fn batpak::transition::transition_causes_are_sorted(causes: &[batpak::transition::TransitionCauseRef]) -> bool
-pub type batpak::transition::StateTransitionReport = batpak::transition::StateTransitionReportBody
 pub type batpak::transition::TransitionEvidenceDigest = [u8; 32]
 pub mod batpak::typestate
 pub mod batpak::typestate::transition

@@ -5,8 +5,9 @@ mod validate;
 use crate::coordinate::Coordinate;
 use crate::event::{Event, EventHeader, EventKind, HashChain, StoredEvent};
 use crate::store::cold_start::ColdStartIndexRow;
+use crate::store::index::DiskPos;
 use crate::store::segment::{self, FramePayload};
-use crate::store::{DiskPos, EncodedBytes, ExtensionKey, StoreError};
+use crate::store::{EncodedBytes, ExtensionKey, StoreError};
 use dashmap::DashMap;
 use parking_lot::Mutex;
 use std::collections::{BTreeMap, HashMap};
@@ -602,7 +603,7 @@ impl Reader {
 mod tests {
     use super::*;
     use crate::coordinate::DagPosition;
-    use crate::store::DiskPos;
+    use crate::store::index::DiskPos;
     use std::io::ErrorKind;
     use tempfile::TempDir;
 

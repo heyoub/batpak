@@ -179,8 +179,23 @@ fn index_entry_causation_helpers() {
 
     let root_entry = entries
         .iter()
-        .find(|e| e.event_id == root.event_id)
+        .find(|e| e.event_id() == root.event_id)
         .expect("find root");
+    let root_entry: &batpak::store::index::IndexEntry = root_entry;
+    assert_eq!(root_entry.event_id(), root.event_id);
+    assert_eq!(root_entry.correlation_id(), root.event_id);
+    assert_eq!(root_entry.causation_id(), None);
+    assert_eq!(root_entry.coord(), &coord);
+    assert_eq!(root_entry.event_kind(), kind);
+    assert!(root_entry.wall_ms() > 0);
+    assert_eq!(root_entry.clock(), 0);
+    assert_eq!(root_entry.dag_lane(), 0);
+    assert_eq!(root_entry.dag_depth(), 0);
+    assert_ne!(root_entry.hash_chain().event_hash, [0; 32]);
+    assert!(root_entry.disk_pos().length() > 0);
+    assert_eq!(root_entry.global_sequence(), root.sequence);
+    assert!(root_entry.receipt_extensions().is_empty());
+
     let root_is_root_cause = root_entry.is_root_cause();
     let root_is_correlated = root_entry.is_correlated();
     assert!(
@@ -200,7 +215,7 @@ fn index_entry_causation_helpers() {
 
     let react_entry = entries
         .iter()
-        .find(|e| e.event_id == reaction.event_id)
+        .find(|e| e.event_id() == reaction.event_id)
         .expect("find reaction");
     let reaction_is_root_cause = react_entry.is_root_cause();
     let reaction_is_correlated = react_entry.is_correlated();

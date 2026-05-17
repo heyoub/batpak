@@ -148,7 +148,8 @@ fn append_typed_round_trip() {
         "PROPERTY: by_fact_typed::<ThingHappened>() must return exactly the one appended event"
     );
     assert_eq!(
-        hits[0].event_id, receipt.event_id,
+        hits[0].event_id(),
+        receipt.event_id,
         "PROPERTY: by_fact_typed must return the correct event_id"
     );
     store.close().unwrap();
@@ -354,7 +355,8 @@ fn batch_append_item_typed_constructor() {
         "PROPERTY: typed batch item must produce a queryable event"
     );
     assert_eq!(
-        hits[0].event_id, receipts[0].event_id,
+        hits[0].event_id(),
+        receipts[0].event_id,
         "PROPERTY: batch receipt event_id must match by_fact_typed result"
     );
     store.close().unwrap();
@@ -391,7 +393,7 @@ fn transition_from_payload_store_round_trip() {
 
     let hits = store.by_fact_typed::<ThingHappened>();
     assert_eq!(hits.len(), 1);
-    assert_eq!(hits[0].event_id, receipt.event_id);
+    assert_eq!(hits[0].event_id(), receipt.event_id);
     store.close().unwrap();
 }
 
@@ -412,7 +414,7 @@ fn outbox_stage_typed_smoke() {
     );
     let hits = store.by_fact_typed::<ThingHappened>();
     assert_eq!(hits.len(), 1);
-    assert_eq!(hits[0].event_id, receipts[0].event_id);
+    assert_eq!(hits[0].event_id(), receipts[0].event_id);
     store.close().unwrap();
 }
 
@@ -487,7 +489,7 @@ fn fence_submit_typed_smoke() {
     assert_ne!(receipt.event_id, 0);
     let hits = store.by_fact_typed::<ThingHappened>();
     assert_eq!(hits.len(), 1);
-    assert_eq!(hits[0].event_id, receipt.event_id);
+    assert_eq!(hits[0].event_id(), receipt.event_id);
     store.close().unwrap();
 }
 

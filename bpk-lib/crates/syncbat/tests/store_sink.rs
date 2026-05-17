@@ -113,12 +113,11 @@ fn store_receipt_sink_persists_envelope_and_signed_extensions() {
 
     let hits = store.query(&Region::entity("syncbat:receipt"));
     assert_eq!(hits.len(), 1);
-    assert_eq!(hits[0].event_id, fields.event_id);
-    assert_eq!(hits[0].global_sequence, fields.sequence);
-    assert_eq!(hits[0].disk_pos, fields.disk_pos);
-    assert_eq!(hits[0].hash_chain.event_hash, fields.content_hash);
-    assert_eq!(hits[0].receipt_extensions, fields.extensions);
-    assert_eq!(hits[0].kind, SYNCBAT_RECEIPT_EVENT_KIND);
+    assert_eq!(hits[0].event_id(), fields.event_id);
+    assert_eq!(hits[0].global_sequence(), fields.sequence);
+    assert_eq!(hits[0].hash_chain().event_hash, fields.content_hash);
+    assert_eq!(hits[0].receipt_extensions(), &fields.extensions);
+    assert_eq!(hits[0].event_kind(), SYNCBAT_RECEIPT_EVENT_KIND);
 
     let stored = store.get(fields.event_id).expect("stored receipt event");
     assert_eq!(stored.coordinate, receipt_coord());
@@ -157,8 +156,8 @@ fn core_with_store_receipt_sink_banks_success_receipt_once() {
 
     let hits = store.query(&Region::entity("syncbat:receipt"));
     assert_eq!(hits.len(), 1);
-    assert_eq!(hits[0].event_id, fields.event_id);
-    assert_eq!(hits[0].receipt_extensions, fields.extensions);
+    assert_eq!(hits[0].event_id(), fields.event_id);
+    assert_eq!(hits[0].receipt_extensions(), &fields.extensions);
 
     drop(core);
     close_store(store);

@@ -59,13 +59,13 @@ fn find_single_segment(dir: &TempDir) -> std::path::PathBuf {
     entries.into_iter().next().expect("exactly one segment")
 }
 
-fn user_visible_entries<State>(store: &Store<State>) -> Vec<batpak::store::IndexEntry> {
+fn user_visible_entries<State>(store: &Store<State>) -> Vec<batpak::store::index::IndexEntry> {
     store
         .query(&Region::all())
         .into_iter()
         .filter(|entry| {
             !matches!(
-                entry.kind,
+                entry.event_kind(),
                 EventKind::SYSTEM_OPEN_COMPLETED | EventKind::SYSTEM_CLOSE_COMPLETED
             )
         })
