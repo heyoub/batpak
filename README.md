@@ -83,8 +83,8 @@ visible to readers, then broadcasts a `Notification` to subscribers.
 The event now lives in three index structures: a per-entity `BTreeMap<ClockKey,
 Arc<IndexEntry>>` ordered by HLC then clock, an O(1) `by_id` DashMap, and the `latest`
 chain head. Readers access it via `store.get(id)` (index lookup then disk read),
-`store.query(&region)` (index scan, no disk I/O), or `store.stream(entity)` (BTreeMap
-range scan, no disk I/O).
+`store.query(&region)` (index scan, no disk I/O), or `store.by_entity(entity)` (BTreeMap
+range scan, no disk I/O; `stream(entity)` remains as the older alias).
 
 ## Store Internals At A Glance
 
@@ -119,7 +119,7 @@ kind from `T::KIND`, so callsites never write `EventKind::custom(...)` directly.
 `append`, `append_reaction`, `submit`, `try_submit`, `append_with_options` still exist for
 callers computing `EventKind` at runtime.
 
-**Query** — `stream(entity)`, `by_scope(scope)`, `by_fact_typed::<T>()`, `query(&region)`,
+**Query** — `by_entity(entity)`, `by_scope(scope)`, `by_fact_typed::<T>()`, `query(&region)`,
 `get(event_id)`, `walk_ancestors(id, limit)`. All return from the in-memory index; only
 `get` and `walk_ancestors` read from disk. `by_fact(kind)` remains for dynamic-kind lookups.
 

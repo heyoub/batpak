@@ -241,6 +241,12 @@ impl<'a> Cx<'a> {
     }
 }
 
+/// Preferred spelling for the handler invocation context.
+///
+/// `Cx` remains available as the original short form. New code should prefer
+/// `Ctx` because it reads as context rather than a one-off abbreviation.
+pub type Ctx<'a> = Cx<'a>;
+
 /// Result returned by a successful checkout.
 pub struct CheckoutResult {
     descriptor: operation::OperationDescriptor,

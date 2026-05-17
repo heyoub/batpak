@@ -110,7 +110,7 @@ Batch properties:
 ### Query patterns
 
 ```rust
-let stream = store.stream("player:alice");
+let stream = store.by_entity("player:alice");
 let scope = store.by_scope("room:dungeon");
 let by_kind = store.by_fact_typed::<PlayerMoved>();
 let region = store.query(

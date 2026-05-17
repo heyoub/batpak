@@ -416,9 +416,149 @@ fn check_entries(
                     entry.line
                 ),
             )?;
+            check_cargo_test_filter_targets_existing_test(repo_root, entry, command)?;
         }
     }
     Ok(())
+}
+
+fn check_cargo_test_filter_targets_existing_test(
+    repo_root: &Path,
+    entry: &LedgerEntry,
+    command: &str,
+) -> Result<()> {
+    let Some((target, filter)) = cargo_test_target_and_filter(command) else {
+        return Ok(());
+    };
+    let target_path = resolve_repo_or_core_path(repo_root, format!("tests/{target}.rs"));
+    ensure(
+        target_path.exists(),
+        format!(
+            "041_TESTING_LEDGER.md:{}: command `{command}` names missing integration test target `{target}`",
+            entry.line
+        ),
+    )?;
+    let tests = test_names_for_target(repo_root, target)?;
+    ensure(
+        tests.iter().any(|name| name.contains(filter)),
+        format!(
+            "041_TESTING_LEDGER.md:{}: command `{command}` filter `{filter}` matches zero #[test] functions in tests/{target}.rs or tests/{target}/",
+            entry.line
+        ),
+    )
+}
+
+fn cargo_test_target_and_filter(command: &str) -> Option<(&str, &str)> {
+    let parts: Vec<&str> = command.split_whitespace().collect();
+    let target_pos = parts.iter().position(|part| *part == "--test")?;
+    let target = *parts.get(target_pos + 1)?;
+    let mut cursor = target_pos + 2;
+    while let Some(part) = parts.get(cursor) {
+        if *part == "--" {
+            return None;
+        }
+        if flag_takes_value(part) {
+            cursor += 2;
+            continue;
+        }
+        if part.starts_with('-') || part.contains('=') {
+            cursor += 1;
+            continue;
+        }
+        return Some((target, part));
+    }
+    None
+}
+
+fn flag_takes_value(part: &str) -> bool {
+    matches!(
+        part,
+        "--features"
+            | "--profile"
+            | "--package"
+            | "-p"
+            | "--manifest-path"
+            | "--target-dir"
+            | "--target"
+    )
+}
+
+fn test_names_for_target(repo_root: &Path, target: &str) -> Result<BTreeSet<String>> {
+    let target_path = resolve_repo_or_core_path(repo_root, format!("tests/{target}.rs"));
+    let mut tests = test_names_from_file(&target_path, "")?;
+    let target_dir = resolve_repo_or_core_path(repo_root, format!("tests/{target}"));
+    if target_dir.is_dir() {
+        collect_nested_test_names(&target_dir, &target_dir, &mut tests)?;
+    }
+    Ok(tests)
+}
+
+fn collect_nested_test_names(root: &Path, dir: &Path, tests: &mut BTreeSet<String>) -> Result<()> {
+    let mut entries = fs::read_dir(dir)
+        .with_context(|| format!("read nested test directory {}", dir.display()))?
+        .collect::<Result<Vec<_>, _>>()?;
+    entries.sort_by_key(|entry| entry.path());
+
+    for entry in entries {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_nested_test_names(root, &path, tests)?;
+            continue;
+        }
+        if path.extension().and_then(|ext| ext.to_str()) != Some("rs") {
+            continue;
+        }
+
+        let relative = path.strip_prefix(root).unwrap_or(path.as_path());
+        let mut prefix_parts = relative
+            .with_extension("")
+            .components()
+            .filter_map(|component| match component {
+                std::path::Component::Normal(part) => Some(part.to_string_lossy().into_owned()),
+                std::path::Component::Prefix(_)
+                | std::path::Component::RootDir
+                | std::path::Component::CurDir
+                | std::path::Component::ParentDir => None,
+            })
+            .collect::<Vec<_>>();
+        if prefix_parts.last().is_some_and(|part| part == "mod") {
+            prefix_parts.pop();
+        }
+        let module_prefix = if prefix_parts.is_empty() {
+            String::new()
+        } else {
+            format!("{}::", prefix_parts.join("::"))
+        };
+        tests.extend(test_names_from_file(&path, &module_prefix)?);
+    }
+    Ok(())
+}
+
+fn test_names_from_file(path: &Path, module_prefix: &str) -> Result<BTreeSet<String>> {
+    let content = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
+    let file = syn::parse_file(&content).with_context(|| format!("parse {}", path.display()))?;
+    Ok(test_function_names(&file.items, module_prefix))
+}
+
+fn test_function_names(items: &[syn::Item], module_prefix: &str) -> BTreeSet<String> {
+    let mut names = BTreeSet::new();
+    for item in items {
+        if let syn::Item::Fn(function) = item {
+            if has_test_attr(&function.attrs) {
+                names.insert(format!("{module_prefix}{}", function.sig.ident));
+            }
+        } else if let syn::Item::Mod(module) = item {
+            if let Some((_, nested)) = &module.content {
+                let nested_prefix = format!("{module_prefix}{}::", module.ident);
+                names.extend(test_function_names(nested, &nested_prefix));
+            }
+        }
+    }
+    names
+}
+
+fn has_test_attr(attrs: &[syn::Attribute]) -> bool {
+    attrs.iter().any(|attr| attr.path().is_ident("test"))
 }
 
 fn check_module_headers(repo_root: &Path, rust_files: &BTreeSet<String>) -> Result<()> {

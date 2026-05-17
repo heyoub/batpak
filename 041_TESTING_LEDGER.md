@@ -48,9 +48,9 @@ instead of pretending.
   - `bpk-lib/crates/core/tests/segment_scan_hardening.rs`
 - Command used:
   - `cargo test --test segment_scan_hardening`
-  - `cargo test --test segment_scan_hardening corruption_inside_staged_batch_discards_the_whole_batch`
+  - `cargo test --test segment_scan_hardening corruption_inside_committed_batch_fails_closed`
   - `cargo test --test segment_scan_hardening sidx_footer_entry_count_disagreement_falls_back_to_frame_scan`
-  - `cargo test --test segment_scan_hardening valid_crc_unreadable_frame_metadata_skips_only_that_frame`
+  - `cargo test --test segment_scan_hardening valid_crc_unreadable_frame_metadata_fails_closed`
   - `cargo test --test segment_scan_hardening orphan_commit_marker_is_ignored_without_stopping_scan`
 - Line/function coverage delta: targeted rise in `bpk-lib/crates/core/src/store/segment/scan.rs`; exact JSON delta not recorded
 - Mutation delta: unmeasured
@@ -59,14 +59,14 @@ instead of pretending.
     with invalid item counts as fail-closed corruption.
   - `missing_hash_chain_for_data_frame_fails_closed_on_reopen` pins ordinary
     data frames with missing hash-chain metadata as fail-closed corruption.
-  - `corruption_inside_staged_batch_discards_the_whole_batch` pins CRC
+  - `corruption_inside_committed_batch_fails_closed` pins CRC
     corruption inside a staged batch as discarding the whole in-flight batch.
   - `sidx_footer_entry_count_disagreement_falls_back_to_frame_scan` pins SIDX
     footer count disagreement as accelerator corruption that must fall back to
     the authoritative frame scan.
-  - `valid_crc_unreadable_frame_metadata_skips_only_that_frame` pins
-    CRC-valid/non-CRC metadata decode failures as skipping the bad frame while
-    preserving later independent frames.
+  - `valid_crc_unreadable_frame_metadata_fails_closed` pins
+    CRC-valid/non-CRC metadata decode failures in committed data frames as
+    fail-closed segment corruption.
   - `orphan_commit_marker_is_ignored_without_stopping_scan` pins COMMIT without
     prior BEGIN as ignored batch metadata that does not stop the scan.
 - Remaining known blind spots:

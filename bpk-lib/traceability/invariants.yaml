@@ -99,6 +99,12 @@
     - ART-STORE-CHECKPOINT
     - ART-STORE-INTERNER
     - ART-STORE-SIDX
+- id: INV-CANONICAL-PATCH-STABILITY
+  statement: Schema-versioned evidence report bodies keep stable canonical bytes across patch releases; changing a v1 body shape requires an intentional golden fixture update or a new versioned body.
+  artifacts:
+    - ART-SCHEMA-SNAPSHOT
+    - ART-CANONICAL-PATCH-STABILITY-TESTS
+    - ART-ADR-CANONICAL-ENCODING
 - id: INV-MMAP-SEALED-READS
   statement: Sealed segment reads use zero-copy memory-mapped I/O via memmap2. Active segment uses FD cache with pread (Unix) or seek+read (Windows).
   artifacts:

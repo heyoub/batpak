@@ -335,6 +335,19 @@
   kind: adr
   paths:
     - 100_ADR_0009_POSITION_HINTS_AND_ARTIFACT_UPGRADES.md
+- id: ART-ADR-CANONICAL-ENCODING
+  kind: adr
+  paths:
+    - 100_ADR_0019_CANONICAL_ENCODING_CONTRACT.md
+- id: ART-SCHEMA-SNAPSHOT
+  kind: source
+  paths:
+    - crates/core/src/schema.rs
+- id: ART-CANONICAL-PATCH-STABILITY-TESTS
+  kind: tests
+  paths:
+    - crates/core/tests/canonical_patch_stability.rs
+    - crates/core/tests/golden/schema_snapshot_report_body_v1.hex
 - id: ART-STORE-INTERNER
   kind: source
   paths:

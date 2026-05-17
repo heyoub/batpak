@@ -31,6 +31,21 @@ impl<State> Store<State> {
         self.reader.read_entry_raw(&entry.disk_pos)
     }
 
+    /// READ: fetch a single event by ID with the payload left as raw
+    /// MessagePack bytes.
+    ///
+    /// This is the verb-forward alias for [`get_raw`](Self::get_raw). Use
+    /// `read_raw` when the call site is part of a read/replay lane; `get_raw`
+    /// remains available to mirror [`get`](Self::get).
+    ///
+    /// # Errors
+    /// Returns `StoreError::NotFound` if no event with that ID exists.
+    /// Returns `StoreError::Io` or `StoreError::Serialization` if reading
+    /// from disk fails.
+    pub fn read_raw(&self, event_id: u128) -> Result<StoredEvent<Vec<u8>>, StoreError> {
+        self.get_raw(event_id)
+    }
+
     /// Verify an append receipt against the store's signing-key registry and
     /// current index state.
     #[must_use]
@@ -136,6 +151,16 @@ impl<State> Store<State> {
     #[must_use]
     pub fn stream(&self, entity: &str) -> Vec<IndexEntry> {
         self.index.stream(entity)
+    }
+
+    /// READ: query all events for an exact entity id.
+    ///
+    /// This is the explicit-name alias for [`stream`](Self::stream). It keeps
+    /// the return shape honest (`Vec<IndexEntry>`) while giving call sites a
+    /// name that matches the rest of the query helpers.
+    #[must_use]
+    pub fn by_entity(&self, entity: &str) -> Vec<IndexEntry> {
+        self.stream(entity)
     }
 
     /// READ: query all events in the given scope.

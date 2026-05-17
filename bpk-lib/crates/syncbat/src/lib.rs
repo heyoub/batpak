@@ -20,7 +20,7 @@ pub mod register_store;
 pub mod store_sink;
 
 pub use builder::CoreBuilder;
-pub use core::{Checkout, CheckoutFrame, CheckoutResult, Core, Cx, InvokeResult};
+pub use core::{Checkout, CheckoutFrame, CheckoutResult, Core, Ctx, Cx, InvokeResult};
 pub use error::{BuildError, RuntimeError};
 pub use handler::{Handler, HandlerError, HandlerResult};
 pub use module::Module;

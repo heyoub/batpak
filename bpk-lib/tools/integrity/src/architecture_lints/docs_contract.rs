@@ -10,6 +10,7 @@ pub(super) fn check(repo_root: &Path) -> Result<()> {
     check_live_docs_do_not_link_archives(repo_root)?;
     check_root_doc_site_contract(repo_root)?;
     check_reference_doc_completeness(repo_root)?;
+    check_changelog_migration_contract(repo_root)?;
     Ok(())
 }
 
@@ -132,6 +133,50 @@ fn check_reference_doc_completeness(repo_root: &Path) -> Result<()> {
         )?;
     }
     Ok(())
+}
+
+fn check_changelog_migration_contract(repo_root: &Path) -> Result<()> {
+    let changelog = project_root(repo_root).join("CHANGELOG.md");
+    let content = fs::read_to_string(&changelog).context("read CHANGELOG.md")?;
+    for section in changelog_release_sections(&content) {
+        if !section_requires_migration(section) {
+            continue;
+        }
+        ensure(
+            section.contains("### Migration"),
+            "CHANGELOG.md release sections with breaking/removed/rename language must include `### Migration`",
+        )?;
+    }
+    Ok(())
+}
+
+fn changelog_release_sections(content: &str) -> Vec<&str> {
+    let mut sections = Vec::new();
+    let mut current_start: Option<usize> = None;
+    for (offset, line) in content.match_indices('\n') {
+        let line_start = offset + 1;
+        let next_line = &content[line_start..];
+        if next_line.starts_with("## ") {
+            if let Some(start) = current_start.replace(line_start) {
+                sections.push(&content[start..line_start]);
+            }
+        } else if current_start.is_none() && line.starts_with("## ") {
+            current_start = Some(0);
+        }
+    }
+    if let Some(start) = current_start {
+        sections.push(&content[start..]);
+    }
+    sections
+}
+
+fn section_requires_migration(section: &str) -> bool {
+    let lower = section.to_ascii_lowercase();
+    section.contains("**Breaking**")
+        || section.contains("### Removed")
+        || lower.contains("rename")
+        || lower.contains("renamed")
+        || lower.contains("removed")
 }
 
 fn project_root(repo_root: &Path) -> &Path {

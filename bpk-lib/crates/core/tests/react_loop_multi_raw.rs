@@ -165,7 +165,13 @@ fn store_get_raw_round_trip_witness() {
         .append_typed(&coord, &AlphaRaw { n: 42 })
         .expect("append");
     let stored = store.get_raw(receipt.event_id).expect("get_raw");
+    let read = store.read_raw(receipt.event_id).expect("read_raw");
     assert_eq!(stored.event.header.event_id, receipt.event_id);
+    assert_eq!(read.event.header.event_id, receipt.event_id);
+    assert_eq!(
+        read.event.payload, stored.event.payload,
+        "PROPERTY: read_raw must stay a verb-forward alias for get_raw"
+    );
     assert_eq!(stored.event.header.event_kind, AlphaRaw::KIND);
     // Decode the raw bytes back into AlphaRaw and verify.
     let round_trip: AlphaRaw = rmp_serde::from_slice(&stored.event.payload).expect("decode");

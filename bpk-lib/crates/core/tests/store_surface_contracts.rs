@@ -167,12 +167,12 @@ fn index_entry_causation_helpers() {
         )
         .expect("reaction");
 
-    let entries = store.stream("entity:helpers");
+    let entries = store.by_entity("entity:helpers");
     assert_eq!(
         entries.len(),
         2,
-        "PROPERTY: stream must return exactly 2 events (root + reaction) for entity:helpers.\n\
-         Investigate: src/store/mod.rs stream, src/store/index/mod.rs entity lookup.\n\
+        "PROPERTY: by_entity must return exactly 2 events (root + reaction) for entity:helpers.\n\
+         Investigate: src/store/mod.rs by_entity/stream, src/store/index/mod.rs entity lookup.\n\
          Common causes: reaction event stored under wrong entity key, stream skips reaction frames.\n\
          Run: cargo test --test store_surface_contracts index_entry_causation_helpers"
     );
