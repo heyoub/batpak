@@ -150,10 +150,7 @@ fn bench_projection_lanes(c: &mut Criterion) {
     throughput_elements(&mut group, 1_000);
 
     let fixture_dir = TempDir::new().expect("create temp dir");
-    let config = StoreConfig {
-        data_dir: fixture_dir.path().to_path_buf(),
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(fixture_dir.path());
     let store = Store::open(config).expect("open store");
     populate_projection_fixture(&store, "bench:first-pass", 1_000);
     store.sync().expect("sync");
@@ -167,10 +164,7 @@ fn bench_projection_lanes(c: &mut Criterion) {
             b,
             || {
                 reopen_with_retry("projection_first_pass reopen", || {
-                    let config = StoreConfig {
-                        data_dir: fixture_dir.path().to_path_buf(),
-                        ..StoreConfig::new("")
-                    };
+                    let config = StoreConfig::new(fixture_dir.path());
                     Store::open(config)
                 })
             },
@@ -187,10 +181,7 @@ fn bench_projection_lanes(c: &mut Criterion) {
             b,
             || {
                 reopen_with_retry("projection_first_pass_raw reopen", || {
-                    let config = StoreConfig {
-                        data_dir: fixture_dir.path().to_path_buf(),
-                        ..StoreConfig::new("")
-                    };
+                    let config = StoreConfig::new(fixture_dir.path());
                     Store::open(config)
                 })
             },
@@ -210,10 +201,7 @@ fn bench_projection_lanes(c: &mut Criterion) {
             b,
             || {
                 reopen_with_retry("projection_first_pass_with_close reopen", || {
-                    let config = StoreConfig {
-                        data_dir: fixture_dir.path().to_path_buf(),
-                        ..StoreConfig::new("")
-                    };
+                    let config = StoreConfig::new(fixture_dir.path());
                     Store::open(config)
                 })
             },
@@ -260,10 +248,7 @@ fn bench_projection_lanes(c: &mut Criterion) {
     });
 
     let dir = TempDir::new().expect("create temp dir");
-    let config = StoreConfig {
-        data_dir: dir.path().join("data"),
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path().join("data"));
     let store = Store::open_with_native_cache(config, dir.path().join("cache"))
         .expect("open store with native cache");
     populate_projection_fixture(&store, "bench:entity", 1_000);

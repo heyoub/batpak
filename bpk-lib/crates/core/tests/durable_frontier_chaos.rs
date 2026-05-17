@@ -70,8 +70,9 @@ fn point(entry: &batpak::store::IndexEntry) -> HlcPoint {
 
 fn config_with_panic(dir: &TempDir, target: InjectionPoint) -> (StoreConfig, Arc<AtomicBool>) {
     let (injector, fired) = PanicAtInjector::new(target);
-    let mut config = StoreConfig::new(dir.path()).with_sync_every_n_events(1000);
-    config.fault_injector = Some(Arc::new(injector));
+    let config = StoreConfig::new(dir.path())
+        .with_sync_every_n_events(1000)
+        .with_fault_injector(Some(Arc::new(injector)));
     (config, fired)
 }
 

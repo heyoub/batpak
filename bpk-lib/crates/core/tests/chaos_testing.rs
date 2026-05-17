@@ -22,7 +22,7 @@
 
 use batpak::prelude::*;
 use batpak::store::segment::frame_decode;
-use batpak::store::{AppendOptions, Store, StoreConfig, StoreError, SyncConfig};
+use batpak::store::{AppendOptions, Store, StoreConfig, StoreError};
 use std::sync::Arc;
 use tempfile::TempDir;
 
@@ -59,11 +59,7 @@ fn chaos_iterations_default_to_repo_truth() {
 #[test]
 fn chaos_corrupted_segment_bytes() {
     let dir = TempDir::new().expect("temp dir");
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        segment_max_bytes: 4096,
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path()).with_segment_max_bytes(4096);
     let store = Store::open(config).expect("open");
     let coord = Coordinate::new("chaos:corrupt", "chaos:scope").expect("valid");
     let kind = EventKind::custom(0xF, 1);
@@ -113,10 +109,7 @@ fn chaos_corrupted_segment_bytes() {
 
     // Try to reopen — should either succeed (if corruption hit unused area)
     // or fail with StoreError::CrcMismatch / CorruptSegment (NOT panic)
-    let config2 = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        ..StoreConfig::new("")
-    };
+    let config2 = StoreConfig::new(dir.path());
     let result = Store::open(config2);
     // The key invariant: no panic. Either Ok or a structured error.
     match result {
@@ -169,15 +162,9 @@ fn chaos_corrupted_segment_bytes() {
 #[test]
 fn chaos_concurrent_writer_stress() {
     let dir = TempDir::new().expect("temp dir");
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        segment_max_bytes: 8192, // small segments → lots of rotation
-        sync: SyncConfig {
-            every_n_events: 10,
-            ..SyncConfig::default()
-        },
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path())
+        .with_segment_max_bytes(8192) // small segments → lots of rotation
+        .with_sync_every_n_events(10);
     let store = Arc::new(Store::open(config).expect("open"));
     let iterations = chaos_iterations();
     let n_threads = 4;
@@ -262,10 +249,7 @@ fn chaos_concurrent_writer_stress() {
 #[test]
 fn chaos_cas_contention() {
     let dir = TempDir::new().expect("temp dir");
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path());
     let store = Arc::new(Store::open(config).expect("open"));
     let coord = Coordinate::new("chaos:cas", "chaos:scope").expect("valid");
     let kind = EventKind::custom(0xF, 1);
@@ -361,10 +345,7 @@ fn chaos_cas_contention() {
 #[test]
 fn chaos_idempotency_concurrent() {
     let dir = TempDir::new().expect("temp dir");
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path());
     let store = Arc::new(Store::open(config).expect("open"));
     let coord = Coordinate::new("chaos:idem", "chaos:scope").expect("valid");
     let kind = EventKind::custom(0xF, 1);
@@ -434,16 +415,10 @@ fn chaos_idempotency_concurrent() {
 #[test]
 fn chaos_rapid_segment_rotation() {
     let dir = TempDir::new().expect("temp dir");
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        segment_max_bytes: 256, // extremely tiny
-        fd_budget: 3,           // very constrained
-        sync: SyncConfig {
-            every_n_events: 1,
-            ..SyncConfig::default()
-        },
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path())
+        .with_segment_max_bytes(256) // extremely tiny
+        .with_fd_budget(3) // very constrained
+        .with_sync_every_n_events(1);
     let store = Store::open(config).expect("open");
     let coord = Coordinate::new("chaos:rotation", "chaos:scope").expect("valid");
     let kind = EventKind::custom(0xF, 1);
@@ -524,15 +499,9 @@ fn chaos_batch_atomicity_concurrent() {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     let dir = TempDir::new().expect("temp dir");
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        segment_max_bytes: 4096,
-        sync: SyncConfig {
-            every_n_events: 1,
-            ..SyncConfig::default()
-        },
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path())
+        .with_segment_max_bytes(4096)
+        .with_sync_every_n_events(1);
     let store = Arc::new(Store::open(config).expect("open"));
     let kind = EventKind::custom(0xF, 1);
     let n_threads = 4;
@@ -641,15 +610,9 @@ fn chaos_batch_atomicity_concurrent() {
 #[test]
 fn chaos_batch_cross_segment_rotation() {
     let dir = TempDir::new().expect("temp dir");
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        segment_max_bytes: 512, // Tiny - will force rotation mid-batch
-        sync: SyncConfig {
-            every_n_events: 1,
-            ..SyncConfig::default()
-        },
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path())
+        .with_segment_max_bytes(512) // Tiny - will force rotation mid-batch
+        .with_sync_every_n_events(1);
     let store = Store::open(config).expect("open");
     let coord = Coordinate::new("chaos:batch_rot", "chaos:scope").expect("valid");
     let kind = EventKind::custom(0xF, 1);
@@ -752,15 +715,11 @@ fn chaos_frame_decode_random_bombardment() {
 #[test]
 fn chaos_subscription_write_storm() {
     let dir = TempDir::new().expect("temp dir");
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        // Buffer must be >= iterations so the "drain after join" pattern
-        // sees every notification. The lossy-under-backpressure path is
-        // tested separately in subscription_ops::slow_subscriber_*. Here we
-        // want to verify that every append() broadcasts synchronously.
-        broadcast_capacity: 1024,
-        ..StoreConfig::new("")
-    };
+    // Buffer must be >= iterations so the "drain after join" pattern sees
+    // every notification. The lossy-under-backpressure path is tested
+    // separately in subscription_ops::slow_subscriber_*. Here we want to
+    // verify that every append() broadcasts synchronously.
+    let config = StoreConfig::new(dir.path()).with_broadcast_capacity(1024);
     let store = Arc::new(Store::open(config).expect("open"));
     let coord = Coordinate::new("chaos:sub", "chaos:scope").expect("valid");
     let kind = EventKind::custom(0xF, 1);
@@ -816,10 +775,7 @@ fn chaos_subscription_write_storm() {
 #[test]
 fn chaos_cursor_completeness_concurrent() {
     let dir = TempDir::new().expect("temp dir");
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path());
     let store = Arc::new(Store::open(config).expect("open"));
     let coord = Coordinate::new("chaos:cursor", "chaos:scope").expect("valid");
     let kind = EventKind::custom(0xF, 1);

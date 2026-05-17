@@ -10,7 +10,7 @@
 
 use batpak::event::Reactive;
 use batpak::prelude::*;
-use batpak::store::{Store, StoreConfig, StoreError, SyncConfig};
+use batpak::store::{Store, StoreConfig, StoreError};
 use std::sync::Arc;
 use tempfile::TempDir;
 
@@ -99,15 +99,9 @@ fn react_loop_spawns_and_processes() {
     }
 
     let dir = TempDir::new().expect("create temp dir");
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        segment_max_bytes: 4096,
-        sync: SyncConfig {
-            every_n_events: 1,
-            ..SyncConfig::default()
-        },
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path())
+        .with_segment_max_bytes(4096)
+        .with_sync_every_n_events(1);
     let store = Arc::new(Store::open(config).expect("open store"));
 
     let region = Region::entity("entity:trigger");
@@ -180,14 +174,7 @@ fn reactive_subscribe_react_append_pattern() {
     // subscribe → receive → react() → append_reaction()
 
     let dir = TempDir::new().expect("temp dir");
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        sync: SyncConfig {
-            every_n_events: 1,
-            ..SyncConfig::default()
-        },
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path()).with_sync_every_n_events(1);
     let store = Arc::new(Store::open(config).expect("open"));
     let coord = Coordinate::new("order:1", "scope:test").expect("valid");
     let kind = EventKind::custom(0xA, 1); // "create_order"

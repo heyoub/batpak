@@ -12,7 +12,7 @@
 
 use batpak::coordinate::{Coordinate, KindFilter, Region};
 use batpak::event::EventKind;
-use batpak::store::{IndexConfig, IndexEntry, IndexTopology, Store, StoreConfig};
+use batpak::store::{IndexEntry, IndexTopology, Store, StoreConfig};
 use std::collections::HashSet;
 use tempfile::TempDir;
 
@@ -30,16 +30,12 @@ fn topologies() -> Vec<(&'static str, IndexTopology)> {
 }
 
 fn open_store(dir: &TempDir, topology: IndexTopology) -> Store {
-    let config = StoreConfig {
-        index: IndexConfig {
-            topology,
-            incremental_projection: false,
-            enable_checkpoint: false,
-            enable_mmap_index: false,
-        },
-        ..StoreConfig::new(dir.path())
-    }
-    .with_sync_every_n_events(1);
+    let config = StoreConfig::new(dir.path())
+        .with_index_topology(topology)
+        .with_incremental_projection(false)
+        .with_enable_checkpoint(false)
+        .with_enable_mmap_index(false)
+        .with_sync_every_n_events(1);
     Store::open(config).expect("open store")
 }
 

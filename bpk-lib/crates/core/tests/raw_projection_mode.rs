@@ -12,7 +12,7 @@
 use std::sync::Arc;
 
 use batpak::prelude::*;
-use batpak::store::{Freshness, ProjectionWatcher, Store, StoreConfig, SyncConfig};
+use batpak::store::{Freshness, ProjectionWatcher, Store, StoreConfig};
 use serde::{Deserialize, Serialize};
 use tempfile::TempDir;
 
@@ -250,15 +250,9 @@ fn seeded_store() -> (Arc<Store>, TempDir) {
 fn cached_seeded_store() -> (Arc<Store>, TempDir) {
     let dir = TempDir::new().expect("temp dir");
     let cache_path = dir.path().join("cache");
-    let config = StoreConfig {
-        data_dir: dir.path().join("data"),
-        segment_max_bytes: 4096,
-        sync: SyncConfig {
-            every_n_events: 1,
-            ..SyncConfig::default()
-        },
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path().join("data"))
+        .with_segment_max_bytes(4096)
+        .with_sync_every_n_events(1);
     let store = Arc::new(
         Store::open_with_native_cache(config, &cache_path).expect("open with native cache"),
     );
@@ -281,15 +275,9 @@ fn cached_seeded_store() -> (Arc<Store>, TempDir) {
 fn cached_seeded_store_for(entity: &str) -> (Arc<Store>, TempDir) {
     let dir = TempDir::new().expect("temp dir");
     let cache_path = dir.path().join("cache");
-    let config = StoreConfig {
-        data_dir: dir.path().join("data"),
-        segment_max_bytes: 4096,
-        sync: SyncConfig {
-            every_n_events: 1,
-            ..SyncConfig::default()
-        },
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path().join("data"))
+        .with_segment_max_bytes(4096)
+        .with_sync_every_n_events(1);
     let store = Arc::new(
         Store::open_with_native_cache(config, &cache_path).expect("open with native cache"),
     );
@@ -862,15 +850,9 @@ fn projection_flow_incremental_external_cache_keeps_lanes_equivalent() {
     };
     store.close().expect("close seeded store");
 
-    let config = StoreConfig {
-        data_dir: data_path,
-        segment_max_bytes: 4096,
-        sync: SyncConfig {
-            every_n_events: 1,
-            ..SyncConfig::default()
-        },
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(data_path)
+        .with_segment_max_bytes(4096)
+        .with_sync_every_n_events(1);
     let reopened = Arc::new(
         Store::open_with_native_cache(config, &cache_path).expect("reopen with native cache"),
     );

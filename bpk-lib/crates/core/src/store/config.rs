@@ -6,7 +6,7 @@ pub(crate) use crate::store::platform::clock::{
 };
 use crate::store::signing::{ReceiptSigningRegistry, SigningKey};
 use crate::store::RestartPolicy;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 #[cfg(feature = "dangerous-test-hooks")]
@@ -256,36 +256,36 @@ impl Default for IndexConfig {
 /// Manual Clone and Debug impls because `clock` field is `Arc<dyn Fn>`.
 pub struct StoreConfig {
     /// Directory where segment files (.fbat) are stored.
-    pub data_dir: PathBuf,
+    pub(crate) data_dir: PathBuf,
     /// Maximum bytes per segment file before rotation.
-    pub segment_max_bytes: u64,
+    pub(crate) segment_max_bytes: u64,
     /// Maximum number of open segment file descriptors.
-    pub fd_budget: usize,
+    pub(crate) fd_budget: usize,
     /// Capacity of each subscriber's broadcast channel.
-    pub broadcast_capacity: usize,
+    pub(crate) broadcast_capacity: usize,
     /// Maximum serialized payload plus encoded receipt-extension size for a
     /// single append operation.
-    pub single_append_max_bytes: u32,
+    pub(crate) single_append_max_bytes: u32,
     /// Batch append limits and group-commit behavior.
-    pub batch: BatchConfig,
+    pub(crate) batch: BatchConfig,
     /// Writer thread channel, stack, restart, and shutdown-drain configuration.
-    pub writer: WriterConfig,
+    pub(crate) writer: WriterConfig,
     /// fsync strategy and cadence.
-    pub sync: SyncConfig,
+    pub(crate) sync: SyncConfig,
     /// Secondary query index topology, projection, and checkpoint configuration.
-    pub index: IndexConfig,
+    pub(crate) index: IndexConfig,
     /// Injectable clock for deterministic testing. Returns microseconds since epoch.
     /// None = std::time::SystemTime::now() (production default).
-    pub clock: Option<Arc<dyn Fn() -> i64 + Send + Sync>>,
+    pub(crate) clock: Option<Arc<dyn Fn() -> i64 + Send + Sync>>,
     /// Optional callback fired once after a successful open completes.
-    pub open_report_observer: Option<OpenReportObserver>,
+    pub(crate) open_report_observer: Option<OpenReportObserver>,
     /// Optional platform profile record that must match current platform evidence at open.
-    pub platform_profile_path: Option<PathBuf>,
+    pub(crate) platform_profile_path: Option<PathBuf>,
     /// Signing keys known to this store. The last configured key signs new
     /// receipts; earlier keys remain available for verification.
-    pub signing_keys: Vec<SigningKey>,
+    pub(crate) signing_keys: Vec<SigningKey>,
     /// Payload-registry collision policy applied during `Store::open`.
-    pub event_payload_validation: EventPayloadValidation,
+    pub(crate) event_payload_validation: EventPayloadValidation,
     /// Fault injector for testing failure scenarios.
     /// Only available with the `dangerous-test-hooks` feature.
     #[cfg(feature = "dangerous-test-hooks")]
@@ -293,7 +293,7 @@ pub struct StoreConfig {
         all(docsrs, not(batpak_stable_docs)),
         doc(cfg(feature = "dangerous-test-hooks"))
     )]
-    pub fault_injector: Option<Arc<dyn FaultInjector>>,
+    pub(crate) fault_injector: Option<Arc<dyn FaultInjector>>,
 }
 
 #[derive(Clone)]
@@ -582,6 +582,77 @@ impl StoreConfig {
     /// Default: 1MB.
     pub fn with_batch_max_bytes(mut self, batch_max_bytes: u32) -> Self {
         self.batch.max_bytes = batch_max_bytes;
+        self
+    }
+
+    /// Directory where segment files (`.fbat`) are stored.
+    pub fn data_dir(&self) -> &Path {
+        &self.data_dir
+    }
+
+    /// Maximum bytes per segment file before rotation.
+    pub fn segment_max_bytes(&self) -> u64 {
+        self.segment_max_bytes
+    }
+
+    /// Maximum number of concurrently open segment file descriptors.
+    pub fn fd_budget(&self) -> usize {
+        self.fd_budget
+    }
+
+    /// Capacity of each subscriber broadcast channel.
+    pub fn broadcast_capacity(&self) -> usize {
+        self.broadcast_capacity
+    }
+
+    /// Maximum serialized payload plus encoded receipt-extension size for a single append.
+    pub fn single_append_max_bytes(&self) -> u32 {
+        self.single_append_max_bytes
+    }
+
+    /// Batch append limits and group-commit behavior.
+    pub fn batch(&self) -> &BatchConfig {
+        &self.batch
+    }
+
+    /// Writer thread channel, stack, restart, and shutdown-drain configuration.
+    pub fn writer(&self) -> &WriterConfig {
+        &self.writer
+    }
+
+    /// fsync strategy and cadence.
+    pub fn sync(&self) -> &SyncConfig {
+        &self.sync
+    }
+
+    /// Secondary query index topology, projection, and checkpoint configuration.
+    pub fn index(&self) -> &IndexConfig {
+        &self.index
+    }
+
+    /// Whether a custom clock has been configured.
+    pub fn has_custom_clock(&self) -> bool {
+        self.clock.is_some()
+    }
+
+    /// Optional platform profile path.
+    pub fn platform_profile_path(&self) -> Option<&Path> {
+        self.platform_profile_path.as_deref()
+    }
+
+    /// Payload-registry collision policy applied during `Store::open`.
+    pub fn event_payload_validation(&self) -> EventPayloadValidation {
+        self.event_payload_validation
+    }
+
+    /// Configure a fault injector for dangerous test hooks.
+    #[cfg(feature = "dangerous-test-hooks")]
+    #[cfg_attr(
+        all(docsrs, not(batpak_stable_docs)),
+        doc(cfg(feature = "dangerous-test-hooks"))
+    )]
+    pub fn with_fault_injector(mut self, injector: Option<Arc<dyn FaultInjector>>) -> Self {
+        self.fault_injector = injector;
         self
     }
 }

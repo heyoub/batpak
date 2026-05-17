@@ -2,7 +2,7 @@
 //!
 
 use batpak::prelude::*;
-use batpak::store::{Store, StoreConfig, SyncConfig, SyncMode};
+use batpak::store::{Store, StoreConfig, SyncMode};
 use batpak_bench_support::{
     apply_profile, profile_for_event_count, throughput_elements, BenchProfile,
 };
@@ -19,14 +19,9 @@ fn open_bench_store(
     sync_mode: SyncMode,
 ) -> (Store, TempDir, Coordinate, EventKind) {
     let dir = TempDir::new().expect("create temp dir");
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        sync: SyncConfig {
-            every_n_events: sync_every_n_events,
-            mode: sync_mode,
-        },
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path())
+        .with_sync_every_n_events(sync_every_n_events)
+        .with_sync_mode(sync_mode);
     let store = Store::open(config).expect("open store");
     let coord = Coordinate::new("bench:entity", "bench:scope").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);

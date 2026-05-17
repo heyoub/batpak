@@ -15,7 +15,7 @@
 //! `Coordinate` deserialization) through round-trip persistence.
 
 use batpak::prelude::*;
-use batpak::store::{Freshness, Store, StoreConfig, SyncConfig};
+use batpak::store::{Freshness, Store, StoreConfig};
 use tempfile::TempDir;
 
 #[path = "support/small_store.rs"]
@@ -23,6 +23,13 @@ mod small_store_support;
 
 fn test_store() -> (Store, TempDir) {
     small_store_support::small_segment_store().expect("small segment store")
+}
+
+#[test]
+fn store_config_writer_accessor_exposes_defaults() {
+    let config = StoreConfig::new("");
+    let writer: &batpak::store::WriterConfig = config.writer();
+    assert!(writer.channel_capacity > 0);
 }
 
 // --- Basic append/get round-trip ---
@@ -355,10 +362,7 @@ fn cold_start_rebuilds_index() {
 
     // Phase 1: populate
     {
-        let config = StoreConfig {
-            data_dir: dir.path().to_path_buf(),
-            ..StoreConfig::new("")
-        };
+        let config = StoreConfig::new(dir.path());
         let store = Store::open(config).expect("open store");
         let coord = Coordinate::new("entity:1", "scope:test").expect("valid coord");
         for _ in 0..20 {
@@ -370,10 +374,7 @@ fn cold_start_rebuilds_index() {
 
     // Phase 2: cold start — reopen and verify index
     {
-        let config = StoreConfig {
-            data_dir: dir.path().to_path_buf(),
-            ..StoreConfig::new("")
-        };
+        let config = StoreConfig::new(dir.path());
         let store = Store::open(config).expect("cold start open");
         let stats = store.stats();
         assert_eq!(
@@ -441,15 +442,9 @@ fn cold_start_rebuilds_index() {
 #[test]
 fn segment_rotation_on_size() {
     let dir = TempDir::new().expect("create temp dir");
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        segment_max_bytes: 512, // tiny segments
-        sync: SyncConfig {
-            every_n_events: 1,
-            ..SyncConfig::default()
-        },
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path())
+        .with_segment_max_bytes(512) // tiny segments
+        .with_sync_every_n_events(1);
     let store = Store::open(config).expect("open store");
     let coord = Coordinate::new("entity:1", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
@@ -489,10 +484,7 @@ fn segment_rotation_on_size() {
 #[test]
 fn concurrent_append_and_query() {
     let dir = TempDir::new().expect("create temp dir");
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path());
     let store = std::sync::Arc::new(Store::open(config).expect("open store"));
     let coord = Coordinate::new("entity:1", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);

@@ -22,11 +22,7 @@ fn bench_fanout_workload_append(c: &mut Criterion) {
                 b.iter_batched(
                     || {
                         let dir = TempDir::new().expect("create temp dir");
-                        let config = StoreConfig {
-                            data_dir: dir.path().to_path_buf(),
-                            broadcast_capacity: 20_000,
-                            ..StoreConfig::new("")
-                        };
+                        let config = StoreConfig::new(dir.path()).with_broadcast_capacity(20_000);
                         let store = Store::open(config).expect("open store");
                         let region = Region::entity("fanout:entity");
                         for _ in 0..subscribers {
@@ -67,11 +63,7 @@ fn bench_fanout_workload_drain(c: &mut Criterion) {
                 b.iter_batched(
                     || {
                         let dir = TempDir::new().expect("create temp dir");
-                        let config = StoreConfig {
-                            data_dir: dir.path().to_path_buf(),
-                            broadcast_capacity: 20_000,
-                            ..StoreConfig::new("")
-                        };
+                        let config = StoreConfig::new(dir.path()).with_broadcast_capacity(20_000);
                         let store = Store::open(config).expect("open store");
                         let coord =
                             Coordinate::new("fanout:entity", "fanout:scope").expect("valid");
@@ -118,11 +110,7 @@ fn bench_fanout_micro_append(c: &mut Criterion) {
     for subscribers in [1usize, 10, 100] {
         throughput_elements(&mut group, 1);
         let dir = TempDir::new().expect("create temp dir");
-        let config = StoreConfig {
-            data_dir: dir.path().to_path_buf(),
-            broadcast_capacity: 20_000,
-            ..StoreConfig::new("")
-        };
+        let config = StoreConfig::new(dir.path()).with_broadcast_capacity(20_000);
         let store = Store::open(config).expect("open store");
         let region = Region::entity("fanout:entity");
         for _ in 0..subscribers {
@@ -158,11 +146,7 @@ fn bench_fanout_micro_drain(c: &mut Criterion) {
     for subscribers in [1usize, 10, 100] {
         throughput_elements(&mut group, subscribers as u64);
         let dir = TempDir::new().expect("create temp dir");
-        let config = StoreConfig {
-            data_dir: dir.path().to_path_buf(),
-            broadcast_capacity: 20_000,
-            ..StoreConfig::new("")
-        };
+        let config = StoreConfig::new(dir.path()).with_broadcast_capacity(20_000);
         let store = Store::open(config).expect("open store");
         let region = Region::entity("fanout:entity");
         let mut receivers = Vec::new();

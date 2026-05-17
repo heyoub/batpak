@@ -4,7 +4,7 @@
 #![allow(clippy::panic)]
 
 use batpak::prelude::*;
-use batpak::store::{ReadOnly, Store, StoreConfig, SyncConfig};
+use batpak::store::{ReadOnly, Store, StoreConfig};
 use proptest::prelude::*;
 use tempfile::TempDir;
 
@@ -186,13 +186,7 @@ fn seeded_config(dir: &TempDir, enable_checkpoint: bool, enable_mmap_index: bool
 
 fn seeded_store() -> (Store, TempDir) {
     let dir = TempDir::new().expect("temp dir");
-    let config = StoreConfig {
-        sync: SyncConfig {
-            every_n_events: 1,
-            ..SyncConfig::default()
-        },
-        ..seeded_config(&dir, true, true)
-    };
+    let config = seeded_config(&dir, true, true);
     let store = Store::open(config).expect("open");
     let coord = Coordinate::new("entity:replay", "scope:test").expect("coord");
     let kind = EventKind::custom(0xF, 1);

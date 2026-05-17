@@ -6,7 +6,7 @@
 
 use batpak::prelude::*;
 use batpak::store::projection::{CacheMeta, NativeCache, ProjectionCache};
-use batpak::store::{Freshness, IndexTopology, Store, StoreConfig, StoreError, SyncConfig};
+use batpak::store::{Freshness, IndexTopology, Store, StoreConfig, StoreError};
 use tempfile::TempDir;
 
 const GENERATION_KIND: EventKind = EventKind::custom(0xF, 0x51);
@@ -63,16 +63,10 @@ fn native_get_surfaces_non_not_found_io_errors() {
 #[test]
 fn project_if_changed_replays_when_watermark_matches_but_generation_advances() {
     let dir = TempDir::new().expect("temp dir");
-    let config = StoreConfig {
-        data_dir: dir.path().join("data"),
-        segment_max_bytes: 4096,
-        sync: SyncConfig {
-            every_n_events: 1,
-            ..SyncConfig::default()
-        },
-        ..StoreConfig::new("")
-    }
-    .with_index_topology(IndexTopology::entity_local());
+    let config = StoreConfig::new(dir.path().join("data"))
+        .with_segment_max_bytes(4096)
+        .with_sync_every_n_events(1)
+        .with_index_topology(IndexTopology::entity_local());
     let store = Store::open(config).expect("open store");
 
     let coord = Coordinate::new("entity:generation-watermark", "scope:test").expect("coord");

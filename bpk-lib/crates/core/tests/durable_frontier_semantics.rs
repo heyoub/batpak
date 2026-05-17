@@ -300,11 +300,11 @@ fn config_with_fault(
     dir: &TempDir,
     filter: impl Fn(&InjectionPoint) -> bool + Send + Sync + 'static,
 ) -> StoreConfig {
-    let mut config = StoreConfig::new(dir.path()).with_sync_every_n_events(1000);
-    config.fault_injector = Some(Arc::new(
-        CountdownInjector::new(1, CountdownAction::Fail("single append fault")).with_filter(filter),
-    ));
-    config
+    let injector =
+        CountdownInjector::new(1, CountdownAction::Fail("single append fault")).with_filter(filter);
+    StoreConfig::new(dir.path())
+        .with_sync_every_n_events(1000)
+        .with_fault_injector(Some(Arc::new(injector)))
 }
 
 fn assert_fault_injected(result: Result<batpak::store::AppendReceipt, StoreError>) {

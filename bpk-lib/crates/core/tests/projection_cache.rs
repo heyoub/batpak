@@ -349,7 +349,6 @@ mod native_tests {
     // -- Integration: Store + NativeCache --
 
     use batpak::prelude::*;
-    use batpak::store::SyncConfig;
 
     #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq)]
     struct Counter {
@@ -376,15 +375,9 @@ mod native_tests {
         let dir = TempDir::new().expect("temp dir");
         let cache_path = dir.path().join("cache");
 
-        let config = StoreConfig {
-            data_dir: dir.path().join("data"),
-            segment_max_bytes: 4096,
-            sync: SyncConfig {
-                every_n_events: 1,
-                ..SyncConfig::default()
-            },
-            ..StoreConfig::new("")
-        };
+        let config = StoreConfig::new(dir.path().join("data"))
+            .with_segment_max_bytes(4096)
+            .with_sync_every_n_events(1);
         let store = Store::open_with_native_cache(config, &cache_path)
             .expect("open store with native cache");
 
@@ -433,15 +426,9 @@ mod native_tests {
     fn native_delete_prefix_then_project_repopulates_cache() {
         let dir = TempDir::new().expect("temp dir");
         let cache_path = dir.path().join("cache");
-        let config = StoreConfig {
-            data_dir: dir.path().join("data"),
-            segment_max_bytes: 4096,
-            sync: SyncConfig {
-                every_n_events: 1,
-                ..SyncConfig::default()
-            },
-            ..StoreConfig::new("")
-        };
+        let config = StoreConfig::new(dir.path().join("data"))
+            .with_segment_max_bytes(4096)
+            .with_sync_every_n_events(1);
         let coord = Coordinate::new("entity:native-miss", "scope:test").expect("coord");
         let kind = EventKind::custom(0xF, 1);
 
@@ -571,22 +558,16 @@ fn find_only_native_cache_entry(cache_path: &std::path::Path) -> std::path::Path
 #[test]
 fn freshness_maybe_stale_serves_stale_cache_within_window() {
     use batpak::prelude::*;
-    use batpak::store::{Freshness, NativeCache, Store, StoreConfig, SyncConfig};
+    use batpak::store::{Freshness, NativeCache, Store, StoreConfig};
     use tempfile::TempDir;
 
     let dir = TempDir::new().expect("temp dir");
     let cache_path = dir.path().join("cache");
     let cache = NativeCache::open(&cache_path).expect("open native cache");
 
-    let config = StoreConfig {
-        data_dir: dir.path().join("data"),
-        segment_max_bytes: 4096,
-        sync: SyncConfig {
-            every_n_events: 1,
-            ..SyncConfig::default()
-        },
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path().join("data"))
+        .with_segment_max_bytes(4096)
+        .with_sync_every_n_events(1);
     let store = Store::open_with_cache(config, Box::new(cache)).expect("open store");
 
     let coord = Coordinate::new("entity:besteff1", "scope:test").expect("coord");
@@ -646,21 +627,15 @@ fn freshness_maybe_stale_serves_stale_cache_within_window() {
 #[test]
 fn freshness_maybe_stale_replays_when_stale_cache_bytes_are_corrupt() {
     use batpak::prelude::*;
-    use batpak::store::{Freshness, Store, StoreConfig, SyncConfig};
+    use batpak::store::{Freshness, Store, StoreConfig};
     use tempfile::TempDir;
 
     let dir = TempDir::new().expect("temp dir");
     let cache_path = dir.path().join("cache");
 
-    let config = StoreConfig {
-        data_dir: dir.path().join("data"),
-        segment_max_bytes: 4096,
-        sync: SyncConfig {
-            every_n_events: 1,
-            ..SyncConfig::default()
-        },
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path().join("data"))
+        .with_segment_max_bytes(4096)
+        .with_sync_every_n_events(1);
     let coord = Coordinate::new("entity:maybe-stale-corrupt", "scope:test").expect("coord");
     let kind = EventKind::custom(0xF, 1);
 
@@ -717,21 +692,15 @@ fn freshness_maybe_stale_replays_when_stale_cache_bytes_are_corrupt() {
 #[test]
 fn freshness_maybe_stale_replays_when_fresh_cache_bytes_are_corrupt() {
     use batpak::prelude::*;
-    use batpak::store::{Freshness, Store, StoreConfig, SyncConfig};
+    use batpak::store::{Freshness, Store, StoreConfig};
     use tempfile::TempDir;
 
     let dir = TempDir::new().expect("temp dir");
     let cache_path = dir.path().join("cache");
 
-    let config = StoreConfig {
-        data_dir: dir.path().join("data"),
-        segment_max_bytes: 4096,
-        sync: SyncConfig {
-            every_n_events: 1,
-            ..SyncConfig::default()
-        },
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path().join("data"))
+        .with_segment_max_bytes(4096)
+        .with_sync_every_n_events(1);
     let coord = Coordinate::new("entity:maybe-stale-fresh-corrupt", "scope:test").expect("coord");
     let kind = EventKind::custom(0xF, 1);
 
@@ -778,22 +747,16 @@ fn freshness_maybe_stale_replays_when_fresh_cache_bytes_are_corrupt() {
 #[test]
 fn project_if_changed_never_pairs_maybe_stale_cache_with_new_generation() {
     use batpak::prelude::*;
-    use batpak::store::{Freshness, NativeCache, Store, StoreConfig, SyncConfig};
+    use batpak::store::{Freshness, NativeCache, Store, StoreConfig};
     use tempfile::TempDir;
 
     let dir = TempDir::new().expect("temp dir");
     let cache_path = dir.path().join("cache");
     let cache = NativeCache::open(&cache_path).expect("open native cache");
 
-    let config = StoreConfig {
-        data_dir: dir.path().join("data"),
-        segment_max_bytes: 4096,
-        sync: SyncConfig {
-            every_n_events: 1,
-            ..SyncConfig::default()
-        },
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path().join("data"))
+        .with_segment_max_bytes(4096)
+        .with_sync_every_n_events(1);
     let store = Store::open_with_cache(config, Box::new(cache)).expect("open store");
 
     let coord = Coordinate::new("entity:generation-honesty", "scope:test").expect("coord");
@@ -856,7 +819,7 @@ fn project_if_changed_never_pairs_maybe_stale_cache_with_new_generation() {
 
 #[test]
 fn empty_projection_surface_skips_cache_for_no_replay_plan() {
-    use batpak::store::{Freshness, Store, StoreConfig, SyncConfig};
+    use batpak::store::{Freshness, Store, StoreConfig};
     use tempfile::TempDir;
 
     let dir = TempDir::new().expect("temp dir");
@@ -864,15 +827,9 @@ fn empty_projection_surface_skips_cache_for_no_replay_plan() {
     let cache = CountingCache {
         counters: Arc::clone(&counters),
     };
-    let config = StoreConfig {
-        data_dir: dir.path().join("data"),
-        segment_max_bytes: 4096,
-        sync: SyncConfig {
-            every_n_events: 1,
-            ..SyncConfig::default()
-        },
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path().join("data"))
+        .with_segment_max_bytes(4096)
+        .with_sync_every_n_events(1);
     let store = Store::open_with_cache(config, Box::new(cache)).expect("open store");
 
     let consistent: Option<MaybeStaleCounter> = store
@@ -924,20 +881,14 @@ fn empty_projection_surface_skips_cache_for_no_replay_plan() {
 #[test]
 fn consistent_replays_when_reopened_native_cache_row_is_stale() {
     use batpak::prelude::*;
-    use batpak::store::{Freshness, Store, StoreConfig, SyncConfig};
+    use batpak::store::{Freshness, Store, StoreConfig};
     use tempfile::TempDir;
 
     let dir = TempDir::new().expect("temp dir");
     let cache_path = dir.path().join("cache");
-    let config = StoreConfig {
-        data_dir: dir.path().join("data"),
-        segment_max_bytes: 4096,
-        sync: SyncConfig {
-            every_n_events: 1,
-            ..SyncConfig::default()
-        },
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path().join("data"))
+        .with_segment_max_bytes(4096)
+        .with_sync_every_n_events(1);
     let coord = Coordinate::new("entity:consistent-stale-cache", "scope:test").expect("coord");
     let kind = EventKind::custom(0xF, 1);
 
@@ -976,20 +927,14 @@ fn consistent_replays_when_reopened_native_cache_row_is_stale() {
 #[test]
 fn maybe_stale_replays_when_cache_row_has_valid_metadata_but_empty_payload() {
     use batpak::prelude::*;
-    use batpak::store::{Freshness, Store, StoreConfig, SyncConfig};
+    use batpak::store::{Freshness, Store, StoreConfig};
     use tempfile::TempDir;
 
     let dir = TempDir::new().expect("temp dir");
     let cache_path = dir.path().join("cache");
-    let config = StoreConfig {
-        data_dir: dir.path().join("data"),
-        segment_max_bytes: 4096,
-        sync: SyncConfig {
-            every_n_events: 1,
-            ..SyncConfig::default()
-        },
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path().join("data"))
+        .with_segment_max_bytes(4096)
+        .with_sync_every_n_events(1);
     let coord = Coordinate::new("entity:metadata-only-stale", "scope:test").expect("coord");
     let kind = EventKind::custom(0xF, 1);
 
@@ -1035,20 +980,14 @@ fn maybe_stale_replays_when_cache_row_has_valid_metadata_but_empty_payload() {
 #[test]
 fn consistent_replays_when_cache_row_has_valid_metadata_but_truncated_payload() {
     use batpak::prelude::*;
-    use batpak::store::{Freshness, Store, StoreConfig, SyncConfig};
+    use batpak::store::{Freshness, Store, StoreConfig};
     use tempfile::TempDir;
 
     let dir = TempDir::new().expect("temp dir");
     let cache_path = dir.path().join("cache");
-    let config = StoreConfig {
-        data_dir: dir.path().join("data"),
-        segment_max_bytes: 4096,
-        sync: SyncConfig {
-            every_n_events: 1,
-            ..SyncConfig::default()
-        },
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path().join("data"))
+        .with_segment_max_bytes(4096)
+        .with_sync_every_n_events(1);
     let coord = Coordinate::new("entity:metadata-valid-truncated", "scope:test").expect("coord");
     let kind = EventKind::custom(0xF, 1);
 
@@ -1086,19 +1025,13 @@ fn consistent_replays_when_cache_row_has_valid_metadata_but_truncated_payload() 
 #[test]
 fn projection_replays_when_cache_get_errors() {
     use batpak::prelude::*;
-    use batpak::store::{Freshness, Store, StoreConfig, SyncConfig};
+    use batpak::store::{Freshness, Store, StoreConfig};
     use tempfile::TempDir;
 
     let dir = TempDir::new().expect("temp dir");
-    let config = StoreConfig {
-        data_dir: dir.path().join("data"),
-        segment_max_bytes: 4096,
-        sync: SyncConfig {
-            every_n_events: 1,
-            ..SyncConfig::default()
-        },
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path().join("data"))
+        .with_segment_max_bytes(4096)
+        .with_sync_every_n_events(1);
     let store = Store::open_with_cache(config, Box::new(GetErrorCache)).expect("open store");
     let coord = Coordinate::new("entity:cache-get-error", "scope:test").expect("coord");
     let kind = EventKind::custom(0xF, 1);
@@ -1124,7 +1057,7 @@ fn projection_replays_when_cache_get_errors() {
 #[test]
 fn freshness_maybe_stale_replays_at_exact_age_boundary() {
     use batpak::prelude::*;
-    use batpak::store::{Freshness, NativeCache, Store, StoreConfig, SyncConfig};
+    use batpak::store::{Freshness, NativeCache, Store, StoreConfig};
     use tempfile::TempDir;
 
     let dir = TempDir::new().expect("temp dir");
@@ -1136,16 +1069,10 @@ fn freshness_maybe_stale_replays_at_exact_age_boundary() {
         Arc::new(move || now_us.load(Ordering::SeqCst))
     };
 
-    let config = StoreConfig {
-        data_dir: dir.path().join("data"),
-        segment_max_bytes: 4096,
-        sync: SyncConfig {
-            every_n_events: 1,
-            ..SyncConfig::default()
-        },
-        ..StoreConfig::new("")
-    }
-    .with_clock(Some(clock));
+    let config = StoreConfig::new(dir.path().join("data"))
+        .with_segment_max_bytes(4096)
+        .with_sync_every_n_events(1)
+        .with_clock(Some(clock));
     let store = Store::open_with_cache(config, Box::new(cache)).expect("open store");
 
     let coord = Coordinate::new("entity:maybe-stale-boundary", "scope:test").expect("coord");

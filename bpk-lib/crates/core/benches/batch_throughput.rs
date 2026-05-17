@@ -4,7 +4,7 @@
 //! into a single fsync operation.
 
 use batpak::prelude::*;
-use batpak::store::{BatchAppendItem, CausationRef, Store, StoreConfig, SyncConfig, SyncMode};
+use batpak::store::{BatchAppendItem, CausationRef, Store, StoreConfig, SyncMode};
 use batpak_bench_support::{apply_profile, throughput_elements, BenchProfile};
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use tempfile::TempDir;
@@ -14,14 +14,9 @@ fn open_bench_store(
     every_n_events: u32,
 ) -> (Store, TempDir, Coordinate, EventKind) {
     let dir = TempDir::new().expect("create temp dir");
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        sync: SyncConfig {
-            every_n_events,
-            mode: sync_mode,
-        },
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path())
+        .with_sync_every_n_events(every_n_events)
+        .with_sync_mode(sync_mode);
     let store = Store::open(config).expect("open store");
     let coord = Coordinate::new("bench:entity", "bench:scope").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
@@ -294,9 +289,9 @@ fn bench_batch_recovery(c: &mut Criterion) {
 
                 // Inject crash during batch
                 {
-                    let mut config = StoreConfig::new(dir.path());
-                    config.fault_injector =
-                        Some(std::sync::Arc::new(CountdownInjector::after_batch_items(2)));
+                    let config = StoreConfig::new(dir.path()).with_fault_injector(Some(
+                        std::sync::Arc::new(CountdownInjector::after_batch_items(2)),
+                    ));
                     let store =
                         Store::open(config).expect("open fault-injected recovery benchmark store");
                     let items = make_batch_items(

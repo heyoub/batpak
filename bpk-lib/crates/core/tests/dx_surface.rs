@@ -17,25 +17,46 @@ fn store_config_builder_methods_are_chainable() {
         .with_shutdown_drain_limit(13)
         .with_writer_stack_size(Some(14))
         .with_clock(Some(clock))
-        .with_sync_mode(SyncMode::SyncData);
+        .with_sync_mode(SyncMode::SyncData)
+        .with_platform_profile_path("./platform.profile")
+        .with_event_payload_validation(EventPayloadValidation::FailFast);
 
-    assert_eq!(config.segment_max_bytes, 1024);
-    assert_eq!(config.sync.every_n_events, 7);
-    assert_eq!(config.fd_budget, 9);
-    assert_eq!(config.writer.channel_capacity, 10);
-    assert_eq!(config.broadcast_capacity, 11);
-    assert_eq!(config.single_append_max_bytes, 12);
+    assert_eq!(config.data_dir(), std::path::Path::new("./batpak-data"));
+    assert_eq!(config.segment_max_bytes(), 1024);
+    assert_eq!(config.sync().every_n_events, 7);
+    assert_eq!(config.fd_budget(), 9);
+    assert_eq!(config.writer().channel_capacity, 10);
+    assert_eq!(config.broadcast_capacity(), 11);
+    assert_eq!(config.single_append_max_bytes(), 12);
     assert!(matches!(
-        config.writer.restart_policy,
+        config.writer().restart_policy,
         RestartPolicy::Bounded {
             max_restarts: 2,
             within_ms: 30_000
         }
     ));
-    assert_eq!(config.writer.shutdown_drain_limit, 13);
-    assert_eq!(config.writer.stack_size, Some(14));
-    assert!(config.clock.is_some());
-    assert!(matches!(config.sync.mode, SyncMode::SyncData));
+    let _: batpak::store::WriterConfig = config.writer().clone();
+    assert_eq!(config.writer().shutdown_drain_limit, 13);
+    assert_eq!(config.writer().stack_size, Some(14));
+    assert!(config.has_custom_clock());
+    let _: batpak::store::SyncConfig = config.sync().clone();
+    assert!(matches!(config.sync().mode, SyncMode::SyncData));
+    assert_eq!(config.batch().max_size, BatchConfig::default().max_size);
+    let _: batpak::store::IndexConfig = config.index().clone();
+    assert_eq!(config.index().topology, IndexTopology::default());
+    assert_eq!(
+        config.platform_profile_path(),
+        Some(std::path::Path::new("./platform.profile"))
+    );
+    assert!(matches!(
+        config.event_payload_validation(),
+        EventPayloadValidation::FailFast
+    ));
+
+    #[cfg(feature = "dangerous-test-hooks")]
+    {
+        let _dangerous = StoreConfig::new("./batpak-data").with_fault_injector(None);
+    }
 }
 
 #[test]

@@ -12,7 +12,7 @@ use batpak::prelude::*;
 use batpak::store::segment::CompactionOutcome;
 use batpak::store::{
     compaction_strategy_shape, report_for_run, report_skipped, BatchAppendItem, CausationRef,
-    CompactionReportBody, CompactionReportFinding, CompactionStrategyShape, StoreError, SyncConfig,
+    CompactionReportBody, CompactionReportFinding, CompactionStrategyShape, StoreError,
     COMPACTION_REPORT_SCHEMA_VERSION,
 };
 use std::path::PathBuf;
@@ -20,8 +20,7 @@ use tempfile::TempDir;
 
 fn lane_store() -> (Store<Open>, TempDir) {
     let dir = TempDir::new().expect("tmp");
-    let mut cfg = StoreConfig::new(dir.path());
-    cfg.segment_max_bytes = 200;
+    let cfg = StoreConfig::new(dir.path()).with_segment_max_bytes(200);
     let store = Store::open(cfg).expect("open");
     (store, dir)
 }
@@ -78,15 +77,9 @@ fn compaction_report_skipped_is_deterministic() {
 #[test]
 fn compact_with_report_merge_evidence_has_sorted_sources_stable_body_hash_and_output_digest() {
     let dir = tempfile::tempdir().expect("create temp dir");
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        segment_max_bytes: 512,
-        sync: SyncConfig {
-            every_n_events: 1,
-            ..SyncConfig::default()
-        },
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path())
+        .with_segment_max_bytes(512)
+        .with_sync_every_n_events(1);
     let store = Store::open(config).expect("open store");
     let coord = Coordinate::new("entity:compact:report", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 0x41);

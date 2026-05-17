@@ -12,9 +12,7 @@
 //! Each test targets the specific bug class to prevent regression.
 
 use batpak::prelude::*;
-use batpak::store::{
-    BatchConfig, IndexConfig, IndexTopology, Store, StoreConfig, SyncConfig, SyncMode, WriterConfig,
-};
+use batpak::store::{IndexTopology, RestartPolicy, Store, StoreConfig, SyncMode};
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 use tempfile::TempDir;
@@ -32,15 +30,9 @@ fn wall_ms_monotonic_under_clock_regression() {
     let clock_us = Arc::new(AtomicI64::new(1_000_000_000)); // start at 1000s in microseconds
 
     let clock_ref = Arc::clone(&clock_us);
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        sync: SyncConfig {
-            every_n_events: 1,
-            ..SyncConfig::default()
-        },
-        clock: Some(Arc::new(move || clock_ref.load(Ordering::SeqCst))),
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path())
+        .with_sync_every_n_events(1)
+        .with_clock(Some(Arc::new(move || clock_ref.load(Ordering::SeqCst))));
     let store = Store::open(config).expect("open store");
     let coord = Coordinate::new("entity:clock-test", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
@@ -107,15 +99,9 @@ fn wall_ms_monotonic_per_entity_isolation() {
     let clock_us = Arc::new(AtomicI64::new(1_000_000_000));
 
     let clock_ref = Arc::clone(&clock_us);
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        sync: SyncConfig {
-            every_n_events: 1,
-            ..SyncConfig::default()
-        },
-        clock: Some(Arc::new(move || clock_ref.load(Ordering::SeqCst))),
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path())
+        .with_sync_every_n_events(1)
+        .with_clock(Some(Arc::new(move || clock_ref.load(Ordering::SeqCst))));
     let store = Store::open(config).expect("open store");
     let coord_a = Coordinate::new("entity:a", "scope:test").expect("valid coord");
     let coord_b = Coordinate::new("entity:b", "scope:test").expect("valid coord");
@@ -162,14 +148,9 @@ fn sync_mode_sync_data_does_not_panic() {
     // Before the fix, SyncMode was ignored and sync_all was always used.
     // This test verifies SyncData actually works end-to-end without error.
     let dir = TempDir::new().expect("create temp dir");
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        sync: SyncConfig {
-            every_n_events: 1,
-            mode: SyncMode::SyncData,
-        },
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path())
+        .with_sync_every_n_events(1)
+        .with_sync_mode(SyncMode::SyncData);
     let store = Store::open(config).expect("open store with SyncData");
     let coord = Coordinate::new("entity:sync-test", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
@@ -201,15 +182,10 @@ fn sync_mode_sync_data_does_not_panic() {
 fn sync_mode_sync_data_survives_segment_rotation() {
     // The rotation code path has its own sync call. Verify SyncData works there too.
     let dir = TempDir::new().expect("create temp dir");
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        segment_max_bytes: 512, // tiny segments to force rotation
-        sync: SyncConfig {
-            every_n_events: 1,
-            mode: SyncMode::SyncData,
-        },
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path())
+        .with_segment_max_bytes(512) // tiny segments to force rotation
+        .with_sync_every_n_events(1)
+        .with_sync_mode(SyncMode::SyncData);
     let store = Store::open(config).expect("open store");
     let coord = Coordinate::new("entity:rotation-sync", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
@@ -254,14 +230,9 @@ fn sync_mode_sync_data_survives_cold_start() {
 
     // Phase 1: write with SyncData
     {
-        let config = StoreConfig {
-            data_dir: dir.path().to_path_buf(),
-            sync: SyncConfig {
-                every_n_events: 1,
-                mode: SyncMode::SyncData,
-            },
-            ..StoreConfig::new("")
-        };
+        let config = StoreConfig::new(dir.path())
+            .with_sync_every_n_events(1)
+            .with_sync_mode(SyncMode::SyncData);
         let store = Store::open(config).expect("open store");
         let coord = Coordinate::new("entity:cold", "scope:test").expect("valid coord");
         let kind = EventKind::custom(0xF, 1);
@@ -277,10 +248,7 @@ fn sync_mode_sync_data_survives_cold_start() {
 
     // Phase 2: cold start with default SyncAll — verify data survived
     {
-        let config = StoreConfig {
-            data_dir: dir.path().to_path_buf(),
-            ..StoreConfig::new("")
-        };
+        let config = StoreConfig::new(dir.path());
         let store = Store::open(config).expect("cold start");
         let entries = store.stream("entity:cold");
         assert_eq!(
@@ -307,18 +275,9 @@ fn sync_mode_sync_data_survives_cold_start() {
 fn writer_stack_size_custom_value_works() {
     // A reasonable custom stack size (2MB) should work fine.
     let dir = TempDir::new().expect("create temp dir");
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        sync: SyncConfig {
-            every_n_events: 1,
-            ..SyncConfig::default()
-        },
-        writer: WriterConfig {
-            stack_size: Some(2 * 1024 * 1024), // 2MB
-            ..WriterConfig::default()
-        },
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path())
+        .with_sync_every_n_events(1)
+        .with_writer_stack_size(Some(2 * 1024 * 1024)); // 2MB
     let store = Store::open(config).expect("open store with custom stack size");
     let coord = Coordinate::new("entity:stack-test", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
@@ -344,18 +303,9 @@ fn writer_stack_size_custom_value_works() {
 fn writer_stack_size_none_uses_default() {
     // None should use OS default and work normally.
     let dir = TempDir::new().expect("create temp dir");
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        sync: SyncConfig {
-            every_n_events: 1,
-            ..SyncConfig::default()
-        },
-        writer: WriterConfig {
-            stack_size: None,
-            ..WriterConfig::default()
-        },
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path())
+        .with_sync_every_n_events(1)
+        .with_writer_stack_size(None);
     let store = Store::open(config).expect("open store with default stack");
     let coord = Coordinate::new("entity:default-stack", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
@@ -388,48 +338,35 @@ fn store_config_all_fields_overridable() {
         }
     });
 
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        segment_max_bytes: 1024 * 1024, // 1MB (non-default)
-        fd_budget: 8,                   // non-default
-        broadcast_capacity: 256,        // non-default
-        single_append_max_bytes: 32 * 1024,
-        sync: SyncConfig {
-            mode: SyncMode::SyncData, // non-default
-            every_n_events: 5,        // non-default
-        },
-        writer: WriterConfig {
-            channel_capacity: 128,             // non-default
-            pressure_retry_threshold_pct: 60,  // non-default
-            stack_size: Some(4 * 1024 * 1024), // 4MB (non-default)
-            restart_policy: batpak::store::RestartPolicy::Bounded {
-                max_restarts: 3,
-                within_ms: 5000,
-            },
-            shutdown_drain_limit: 64, // non-default
-        },
-        batch: BatchConfig {
-            max_size: 512,              // non-default
-            max_bytes: 2 * 1024 * 1024, // 2MB (non-default)
-            group_commit_max_batch: 1,  // default (not testing group commit here)
-        },
-        index: IndexConfig {
-            topology: IndexTopology::aos()
+    let config = StoreConfig::new(dir.path())
+        .with_segment_max_bytes(1024 * 1024) // 1MB (non-default)
+        .with_fd_budget(8) // non-default
+        .with_broadcast_capacity(256) // non-default
+        .with_single_append_max_bytes(32 * 1024)
+        .with_sync_mode(SyncMode::SyncData) // non-default
+        .with_sync_every_n_events(5) // non-default
+        .with_writer_channel_capacity(128) // non-default
+        .with_writer_pressure_retry_threshold_pct(60) // non-default
+        .with_writer_stack_size(Some(4 * 1024 * 1024)) // 4MB (non-default)
+        .with_restart_policy(RestartPolicy::Bounded {
+            max_restarts: 3,
+            within_ms: 5000,
+        })
+        .with_shutdown_drain_limit(64) // non-default
+        .with_batch_max_size(512) // non-default
+        .with_batch_max_bytes(2 * 1024 * 1024) // 2MB (non-default)
+        .with_group_commit_max_batch(1) // default (not testing group commit here)
+        .with_index_topology(
+            IndexTopology::aos()
                 .with_soa(true)
                 .with_entity_groups(false)
                 .with_tiles64(true),
-            incremental_projection: false, // default
-            enable_checkpoint: false,      // disabled for this test
-            enable_mmap_index: false,      // non-default
-        },
-        clock: Some(clock_fn), // custom clock
-        open_report_observer: None,
-        platform_profile_path: None,
-        signing_keys: Vec::new(),
-        event_payload_validation: EventPayloadValidation::Warn,
-        #[cfg(feature = "dangerous-test-hooks")]
-        fault_injector: None,
-    };
+        )
+        .with_incremental_projection(false) // default
+        .with_enable_checkpoint(false) // disabled for this test
+        .with_enable_mmap_index(false) // non-default
+        .with_clock(Some(clock_fn)) // custom clock
+        .with_event_payload_validation(EventPayloadValidation::Warn);
 
     let store = Store::open(config).expect(
         "STORE CONFIG BUG: store failed to open with all non-default config values.\n\
@@ -461,48 +398,35 @@ fn store_config_all_fields_overridable() {
 fn store_config_debug_lists_all_integrity_relevant_fields() {
     let dir = TempDir::new().expect("create temp dir");
     let clock_fn: Arc<dyn Fn() -> i64 + Send + Sync> = Arc::new(|| 4242);
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        segment_max_bytes: 11_111,
-        fd_budget: 13,
-        broadcast_capacity: 19,
-        single_append_max_bytes: 23,
-        sync: SyncConfig {
-            mode: SyncMode::SyncData,
-            every_n_events: 7,
-        },
-        writer: WriterConfig {
-            channel_capacity: 17,
-            pressure_retry_threshold_pct: 61,
-            stack_size: Some(31 * 1024),
-            restart_policy: batpak::store::RestartPolicy::Bounded {
-                max_restarts: 2,
-                within_ms: 3000,
-            },
-            shutdown_drain_limit: 29,
-        },
-        batch: BatchConfig {
-            max_size: 333,
-            max_bytes: 44_444,
-            group_commit_max_batch: 1,
-        },
-        index: IndexConfig {
-            topology: IndexTopology::aos()
+    let config = StoreConfig::new(dir.path())
+        .with_segment_max_bytes(11_111)
+        .with_fd_budget(13)
+        .with_broadcast_capacity(19)
+        .with_single_append_max_bytes(23)
+        .with_sync_mode(SyncMode::SyncData)
+        .with_sync_every_n_events(7)
+        .with_writer_channel_capacity(17)
+        .with_writer_pressure_retry_threshold_pct(61)
+        .with_writer_stack_size(Some(31 * 1024))
+        .with_restart_policy(RestartPolicy::Bounded {
+            max_restarts: 2,
+            within_ms: 3000,
+        })
+        .with_shutdown_drain_limit(29)
+        .with_batch_max_size(333)
+        .with_batch_max_bytes(44_444)
+        .with_group_commit_max_batch(1)
+        .with_index_topology(
+            IndexTopology::aos()
                 .with_soa(true)
                 .with_entity_groups(false)
                 .with_tiles64(true),
-            incremental_projection: false,
-            enable_checkpoint: true,
-            enable_mmap_index: false,
-        },
-        clock: Some(clock_fn),
-        open_report_observer: None,
-        platform_profile_path: None,
-        signing_keys: Vec::new(),
-        event_payload_validation: EventPayloadValidation::FailFast,
-        #[cfg(feature = "dangerous-test-hooks")]
-        fault_injector: None,
-    };
+        )
+        .with_incremental_projection(false)
+        .with_enable_checkpoint(true)
+        .with_enable_mmap_index(false)
+        .with_clock(Some(clock_fn))
+        .with_event_payload_validation(EventPayloadValidation::FailFast);
 
     let debug = format!("{config:?}");
 

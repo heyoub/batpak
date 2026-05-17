@@ -253,8 +253,7 @@ fn store_drop_without_close_persists_data() {
 #[test]
 fn segment_max_bytes_very_small_forces_frequent_rotation() {
     let dir = TempDir::new().expect("tmpdir");
-    let mut config = StoreConfig::new(dir.path());
-    config.segment_max_bytes = 128; // Tiny — forces rotation after ~1 event
+    let config = StoreConfig::new(dir.path()).with_segment_max_bytes(128); // Tiny — forces rotation after ~1 event
     let store = Store::open(config).expect("open");
     let coord = test_coord();
     let kind = EventKind::custom(1, 1);

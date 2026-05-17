@@ -12,8 +12,7 @@ use tempfile::TempDir;
 /// The caller owns the `TempDir` so a test can reopen the same data directory
 /// across multiple `Store::open` calls.
 pub fn medium_segment_store(dir: &TempDir) -> Store {
-    let mut config = StoreConfig::new(dir.path());
-    config.segment_max_bytes = 64 * 1024;
+    let config = StoreConfig::new(dir.path()).with_segment_max_bytes(64 * 1024);
     Store::open(config).expect("open store")
 }
 

@@ -8,7 +8,7 @@ use batpak::store::delivery::subscription::{ScanSubscriptionOps, SubscriptionOps
 use batpak::store::Freshness;
 use batpak::store::{
     AppendOptions, AppendReceipt, AppendTicket, BatchAppendItem, BatchAppendTicket, IndexTopology,
-    Outbox, ReadOnly, Store, StoreConfig, StoreError, SyncConfig, VisibilityFence, WriterPressure,
+    Outbox, ReadOnly, Store, StoreConfig, StoreError, VisibilityFence, WriterPressure,
 };
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -57,14 +57,7 @@ impl EventSourced for CounterProjection {
 }
 
 fn test_config(dir: &TempDir) -> StoreConfig {
-    StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        sync: SyncConfig {
-            every_n_events: 1,
-            ..SyncConfig::default()
-        },
-        ..StoreConfig::new(dir.path())
-    }
+    StoreConfig::new(dir.path()).with_sync_every_n_events(1)
 }
 
 fn wait_until_ticket_receiver_has_value<T>(
@@ -502,16 +495,10 @@ fn try_check_surfaces_ready_append_and_batch_tickets() {
 #[test]
 fn try_submit_returns_retry_under_pressure() {
     let dir = TempDir::new().expect("temp dir");
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        sync: SyncConfig {
-            every_n_events: 1,
-            ..SyncConfig::default()
-        },
-        ..StoreConfig::new(dir.path())
-    }
-    .with_writer_channel_capacity(8)
-    .with_writer_pressure_retry_threshold_pct(50);
+    let config = StoreConfig::new(dir.path())
+        .with_sync_every_n_events(1)
+        .with_writer_channel_capacity(8)
+        .with_writer_pressure_retry_threshold_pct(50);
 
     let store = Arc::new(Store::open(config).expect("open store"));
     let coord = Coordinate::new("entity:pressure", "scope:test").expect("coord");
@@ -575,16 +562,10 @@ fn try_submit_returns_retry_under_pressure() {
 #[test]
 fn try_submit_batch_returns_retry_under_pressure() {
     let dir = TempDir::new().expect("temp dir");
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        sync: SyncConfig {
-            every_n_events: 1,
-            ..SyncConfig::default()
-        },
-        ..StoreConfig::new(dir.path())
-    }
-    .with_writer_channel_capacity(8)
-    .with_writer_pressure_retry_threshold_pct(50);
+    let config = StoreConfig::new(dir.path())
+        .with_sync_every_n_events(1)
+        .with_writer_channel_capacity(8)
+        .with_writer_pressure_retry_threshold_pct(50);
 
     let store = Arc::new(Store::open(config).expect("open store"));
     let coord = Coordinate::new("entity:pressure-batch", "scope:test").expect("coord");

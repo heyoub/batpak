@@ -39,11 +39,7 @@ fn bench_compaction(c: &mut Criterion) {
                 b.iter_batched(
                     || {
                         let dir = TempDir::new().expect("create temp dir");
-                        let config = StoreConfig {
-                            data_dir: dir.path().to_path_buf(),
-                            segment_max_bytes: 1024,
-                            ..StoreConfig::new("")
-                        };
+                        let config = StoreConfig::new(dir.path()).with_segment_max_bytes(1024);
                         let store = Store::open(config).expect("open store");
                         let coord =
                             Coordinate::new("compact:entity", "compact:scope").expect("coord");

@@ -4,22 +4,16 @@
 //! Restart policy tests split out of store_advanced.rs.
 
 use batpak::prelude::*;
-use batpak::store::{RestartPolicy, Store, StoreConfig, StoreError, WriterConfig};
+use batpak::store::{RestartPolicy, Store, StoreConfig, StoreError};
 use tempfile::TempDir;
 
 #[test]
 #[serial_test::serial(writer_restart)]
 fn writer_restart_once_recovers_from_panic() {
     let dir = TempDir::new().expect("create temp dir");
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        segment_max_bytes: 64 * 1024,
-        writer: WriterConfig {
-            restart_policy: RestartPolicy::Once,
-            ..WriterConfig::default()
-        },
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path())
+        .with_segment_max_bytes(64 * 1024)
+        .with_restart_policy(RestartPolicy::Once);
     let store = Store::open(config).expect("open store");
     let coord = Coordinate::new("restart:test", "restart:scope").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
@@ -41,15 +35,9 @@ fn writer_restart_once_recovers_from_panic() {
 #[serial_test::serial(writer_restart)]
 fn writer_restart_once_gives_up_after_second_panic() {
     let dir = TempDir::new().expect("create temp dir");
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        segment_max_bytes: 64 * 1024,
-        writer: WriterConfig {
-            restart_policy: RestartPolicy::Once,
-            ..WriterConfig::default()
-        },
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path())
+        .with_segment_max_bytes(64 * 1024)
+        .with_restart_policy(RestartPolicy::Once);
     let store = Store::open(config).expect("open store");
     let coord = Coordinate::new("restart:exhaust", "restart:scope").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
@@ -89,18 +77,12 @@ fn writer_restart_once_gives_up_after_second_panic() {
 #[serial_test::serial(writer_restart)]
 fn writer_restart_bounded_respects_limit() {
     let dir = TempDir::new().expect("create temp dir");
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        segment_max_bytes: 64 * 1024,
-        writer: WriterConfig {
-            restart_policy: RestartPolicy::Bounded {
-                max_restarts: 2,
-                within_ms: 60_000,
-            },
-            ..WriterConfig::default()
-        },
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path())
+        .with_segment_max_bytes(64 * 1024)
+        .with_restart_policy(RestartPolicy::Bounded {
+            max_restarts: 2,
+            within_ms: 60_000,
+        });
     let store = Store::open(config).expect("open store");
     let coord = Coordinate::new("restart:bounded", "restart:scope").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);

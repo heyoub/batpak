@@ -71,12 +71,12 @@ fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) {
     }
 }
 
-fn prepare_fixture(count: u64, config: StoreConfig) -> TempDir {
+fn prepare_fixture(
+    count: u64,
+    config_for_dir: impl FnOnce(&std::path::Path) -> StoreConfig,
+) -> TempDir {
     let fixture_dir = TempDir::new().expect("create fixture temp dir");
-    let config = StoreConfig {
-        data_dir: fixture_dir.path().to_path_buf(),
-        ..config
-    };
+    let config = config_for_dir(fixture_dir.path());
     populate_store(config, count);
     fixture_dir
 }
@@ -103,49 +103,15 @@ fn bench_cold_start_paths(c: &mut Criterion) {
         throughput_elements(&mut group, count);
         let tail_count = count.clamp(32, 1_024);
 
-        let default_fixture = prepare_fixture(
-            count,
-            StoreConfig {
-                data_dir: std::path::PathBuf::new(),
-                ..StoreConfig::new("")
-            },
-        );
-        let mmap_fixture = prepare_fixture(
-            count,
-            StoreConfig {
-                data_dir: std::path::PathBuf::new(),
-                ..lane_config(std::path::Path::new(""), SnapshotLane::Mmap)
-            },
-        );
-        let checkpoint_fixture = prepare_fixture(
-            count,
-            StoreConfig {
-                data_dir: std::path::PathBuf::new(),
-                ..lane_config(std::path::Path::new(""), SnapshotLane::Checkpoint)
-            },
-        );
-        let rebuild_fixture = prepare_fixture(
-            count,
-            StoreConfig {
-                data_dir: std::path::PathBuf::new(),
-                ..rebuild_only_config(std::path::Path::new(""))
-            },
-        );
-        let mmap_tail_fixture = prepare_fixture(
-            count,
-            StoreConfig {
-                data_dir: std::path::PathBuf::new(),
-                ..lane_config(std::path::Path::new(""), SnapshotLane::Mmap)
-            },
-        );
+        let default_fixture = prepare_fixture(count, |dir| StoreConfig::new(dir));
+        let mmap_fixture = prepare_fixture(count, |dir| lane_config(dir, SnapshotLane::Mmap));
+        let checkpoint_fixture =
+            prepare_fixture(count, |dir| lane_config(dir, SnapshotLane::Checkpoint));
+        let rebuild_fixture = prepare_fixture(count, rebuild_only_config);
+        let mmap_tail_fixture = prepare_fixture(count, |dir| lane_config(dir, SnapshotLane::Mmap));
         append_tail_without_refreshing_snapshot(&mmap_tail_fixture, tail_count);
-        let checkpoint_tail_fixture = prepare_fixture(
-            count,
-            StoreConfig {
-                data_dir: std::path::PathBuf::new(),
-                ..lane_config(std::path::Path::new(""), SnapshotLane::Checkpoint)
-            },
-        );
+        let checkpoint_tail_fixture =
+            prepare_fixture(count, |dir| lane_config(dir, SnapshotLane::Checkpoint));
         append_tail_without_refreshing_snapshot(&checkpoint_tail_fixture, tail_count);
 
         // open-only: measures ONLY Store::open(), no close().
@@ -161,10 +127,7 @@ fn bench_cold_start_paths(c: &mut Criterion) {
                         iter_dir
                     },
                     |iter_dir| {
-                        let config = StoreConfig {
-                            data_dir: iter_dir.path().to_path_buf(),
-                            ..StoreConfig::new("")
-                        };
+                        let config = StoreConfig::new(iter_dir.path());
                         let _store = Store::open(config).expect("reopen populated store");
                         // close() excluded — drop triggers best-effort shutdown only
                     },
@@ -187,11 +150,8 @@ fn bench_cold_start_paths(c: &mut Criterion) {
                         iter_dir
                     },
                     |iter_dir| {
-                        let config = StoreConfig {
-                            data_dir: iter_dir.path().to_path_buf(),
-                            ..StoreConfig::new("")
-                        }
-                        .with_platform_profile_path(platform_profile_fixture());
+                        let config = StoreConfig::new(iter_dir.path())
+                            .with_platform_profile_path(platform_profile_fixture());
                         let _store =
                             Store::open(config).expect("reopen populated store with profile");
                     },
@@ -214,10 +174,7 @@ fn bench_cold_start_paths(c: &mut Criterion) {
                         iter_dir
                     },
                     |iter_dir| {
-                        let config = StoreConfig {
-                            data_dir: iter_dir.path().to_path_buf(),
-                            ..StoreConfig::new("")
-                        };
+                        let config = StoreConfig::new(iter_dir.path());
                         let store = Store::open(config).expect("reopen populated store");
                         store.close().expect("close");
                     },
@@ -236,10 +193,7 @@ fn bench_cold_start_paths(c: &mut Criterion) {
                     || {
                         let iter_dir = TempDir::new().expect("create iteration dir");
                         copy_dir_recursive(default_fixture.path(), iter_dir.path());
-                        let config = StoreConfig {
-                            data_dir: iter_dir.path().to_path_buf(),
-                            ..StoreConfig::new("")
-                        };
+                        let config = StoreConfig::new(iter_dir.path());
                         (
                             Store::open(config).expect("reopen populated store"),
                             iter_dir,

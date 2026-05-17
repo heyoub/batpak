@@ -23,7 +23,7 @@
 //!     }
 //! }
 //!
-//! config.fault_injector = Some(Arc::new(FailAfterBegin));
+//! let config = StoreConfig::new(path).with_fault_injector(Some(Arc::new(FailAfterBegin)));
 //! ```
 
 use crate::store::StoreError;

@@ -5,21 +5,14 @@
 //! function, which keeps the `dead_code` surface honest (see ADR-0012).
 
 use batpak::prelude::*;
-use batpak::store::SyncConfig;
 use std::path::Path;
 use tempfile::TempDir;
 
 /// Store configuration used by [`small_segment_store`] and reopen tests.
 pub fn small_segment_store_config(data_dir: &Path) -> StoreConfig {
-    StoreConfig {
-        data_dir: data_dir.to_path_buf(),
-        segment_max_bytes: 4096,
-        sync: SyncConfig {
-            every_n_events: 1,
-            ..SyncConfig::default()
-        },
-        ..StoreConfig::new("")
-    }
+    StoreConfig::new(data_dir)
+        .with_segment_max_bytes(4096)
+        .with_sync_every_n_events(1)
 }
 
 /// Open a store with 4 KB segments and per-event fsync, under a fresh temp

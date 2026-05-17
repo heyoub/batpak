@@ -30,7 +30,7 @@
 
 use batpak::prelude::*;
 use batpak::store::segment::{frame_decode, frame_encode};
-use batpak::store::{AppendOptions, Store, StoreConfig, SyncConfig};
+use batpak::store::{AppendOptions, Store, StoreConfig};
 use std::sync::Arc;
 use std::time::Instant;
 use tempfile::TempDir;
@@ -276,17 +276,11 @@ fn run_fuzz_probes() -> (f64, f64, f64, u64) {
 
 fn run_chaos_probes() -> (f64, u64, bool, bool, u64, f64, bool) {
     let dir = TempDir::new().expect("temp dir");
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        segment_max_bytes: 2048,
-        sync: SyncConfig {
-            every_n_events: 10,
-            ..SyncConfig::default()
-        },
-        fd_budget: 4,
-        broadcast_capacity: 128,
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path())
+        .with_segment_max_bytes(2048)
+        .with_sync_every_n_events(10)
+        .with_fd_budget(4)
+        .with_broadcast_capacity(128);
     let store = Arc::new(Store::open(config).expect("open"));
     let kind = EventKind::custom(0xF, 1);
 
@@ -554,12 +548,9 @@ fn run_extended_fuzz_chaos() {
 
     eprintln!("  EXTENDED: Concurrent chaos storm...");
     let dir = TempDir::new().expect("temp dir");
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        segment_max_bytes: 1024,
-        fd_budget: 4,
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path())
+        .with_segment_max_bytes(1024)
+        .with_fd_budget(4);
     let store = Arc::new(Store::open(config).expect("open"));
     let kind = EventKind::custom(0xF, 1);
     let n_threads = 8;
@@ -611,10 +602,7 @@ fn run_extended_fuzz_chaos() {
         Ok(s) => s.close().expect("close"),
         Err(_) => panic!("Arc still has multiple owners"),
     };
-    let config2 = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        ..StoreConfig::new("")
-    };
+    let config2 = StoreConfig::new(dir.path());
     let store2 = Store::open(config2).expect("cold start reopen");
     let mut cold_entries = 0;
     for t in 0..n_threads {

@@ -9,7 +9,7 @@ use batpak::coordinate::Region;
 use batpak::prelude::*;
 use batpak::store::{
     AppendOptions, CacheCapabilities, CacheMeta, CompactionConfig, DurabilityGate, Freshness,
-    ProjectionCache, Store, StoreConfig, StoreError, SyncConfig, WatermarkKind,
+    ProjectionCache, Store, StoreConfig, StoreError, WatermarkKind,
 };
 use std::collections::BTreeMap;
 use std::io;
@@ -195,15 +195,9 @@ fn named_store_flows_emit_traceable_events() {
 
     tracing::subscriber::with_default(subscriber, || {
         let dir = TempDir::new().expect("temp dir");
-        let config = StoreConfig {
-            data_dir: dir.path().to_path_buf(),
-            segment_max_bytes: 4096,
-            sync: SyncConfig {
-                every_n_events: 1,
-                ..SyncConfig::default()
-            },
-            ..StoreConfig::new("")
-        };
+        let config = StoreConfig::new(dir.path())
+            .with_segment_max_bytes(4096)
+            .with_sync_every_n_events(1);
         let store = Store::open(config).expect("open store");
         let coord = Coordinate::new("entity:obs", "scope:test").expect("coord");
         let kind = EventKind::custom(0xF, 1);
@@ -259,15 +253,9 @@ fn stable_batpak_targets_field_shape_at_info_and_trace() {
     CAPTURED_EVENTS.lock().expect("lock").clear();
 
     let dir = TempDir::new().expect("temp dir");
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        segment_max_bytes: 4096,
-        sync: SyncConfig {
-            every_n_events: 1,
-            ..SyncConfig::default()
-        },
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path())
+        .with_segment_max_bytes(4096)
+        .with_sync_every_n_events(1);
     let store = Store::open(config).expect("open store");
     let _sub = store.subscribe_lossy(&Region::all());
 
@@ -403,15 +391,9 @@ fn external_cache_projection_probe_event_is_required_on_external_cache_path() {
     CAPTURED_EVENTS.lock().expect("lock").clear();
 
     let dir = TempDir::new().expect("temp dir");
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        segment_max_bytes: 4096,
-        sync: SyncConfig {
-            every_n_events: 1,
-            ..SyncConfig::default()
-        },
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path())
+        .with_segment_max_bytes(4096)
+        .with_sync_every_n_events(1);
     let store = Store::open_with_cache(config, Box::new(FailingPrefetchCache)).expect("open store");
     let coord = Coordinate::new("entity:obs:external-cache", "scope:test").expect("coord");
     let kind = EventKind::custom(0xF, 1);
@@ -465,15 +447,9 @@ fn project_failure_paths_emit_cache_warnings_without_hiding_flow() {
 
     tracing::subscriber::with_default(subscriber, || {
         let dir = TempDir::new().expect("temp dir");
-        let config = StoreConfig {
-            data_dir: dir.path().to_path_buf(),
-            segment_max_bytes: 4096,
-            sync: SyncConfig {
-                every_n_events: 1,
-                ..SyncConfig::default()
-            },
-            ..StoreConfig::new("")
-        };
+        let config = StoreConfig::new(dir.path())
+            .with_segment_max_bytes(4096)
+            .with_sync_every_n_events(1);
         let store = Store::open_with_cache(config, Box::new(FailingPrefetchCache))
             .expect("open store with failing cache");
         let coord = Coordinate::new("entity:obs:cache", "scope:test").expect("coord");
@@ -513,15 +489,9 @@ fn append_reaction_emits_distinct_flow_telemetry() {
 
     tracing::subscriber::with_default(subscriber, || {
         let dir = TempDir::new().expect("temp dir");
-        let config = StoreConfig {
-            data_dir: dir.path().to_path_buf(),
-            segment_max_bytes: 4096,
-            sync: SyncConfig {
-                every_n_events: 1,
-                ..SyncConfig::default()
-            },
-            ..StoreConfig::new("")
-        };
+        let config = StoreConfig::new(dir.path())
+            .with_segment_max_bytes(4096)
+            .with_sync_every_n_events(1);
         let store = Store::open(config).expect("open store");
         let coord = Coordinate::new("entity:obs:source", "scope:test").expect("coord");
         let kind = EventKind::custom(0xF, 1);

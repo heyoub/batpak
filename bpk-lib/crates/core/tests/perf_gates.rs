@@ -16,7 +16,7 @@
 //! benches provide trend visibility; these gates catch gross regressions.
 
 use batpak::prelude::*;
-use batpak::store::{Store, StoreConfig, SyncConfig, SyncMode};
+use batpak::store::{Store, StoreConfig, SyncMode};
 use std::time::Instant;
 use tempfile::TempDir;
 
@@ -65,10 +65,7 @@ fn cold_start_1k_events_under_threshold() {
 
     // Populate
     {
-        let config = StoreConfig {
-            data_dir: dir.path().to_path_buf(),
-            ..StoreConfig::new("")
-        };
+        let config = StoreConfig::new(dir.path());
         let store = Store::open(config).expect("open store");
         let coord = Coordinate::new("bench:entity", "bench:scope").expect("valid coord");
         for _ in 0..1_000 {
@@ -80,10 +77,7 @@ fn cold_start_1k_events_under_threshold() {
 
     // Measure cold start
     let start = Instant::now();
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path());
     let store = Store::open(config).expect("cold start");
     let cold_start_ms = start.elapsed().as_millis();
 
@@ -289,10 +283,7 @@ impl EventSourced for BenchCounter {
 #[ignore = "hardware-dependent perf gate — run via `cargo xtask perf-gates`. Uses Instant::now() for write/query/projection timing; flakes on shared CI runners."]
 fn multi_gate_performance_feedback() {
     let dir = TempDir::new().expect("temp dir");
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path());
     let store = Store::open(config).expect("open");
     let coord = Coordinate::new("perf:entity", "perf:scope").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
@@ -418,14 +409,10 @@ struct BatchPerfContext {
 #[ignore = "hardware-dependent perf gate — run via `cargo xtask perf-gates`. Already softened to 2K events/sec floor after FLAKY 3/3 / TRY 3 FAIL on Windows CI."]
 fn batch_throughput_performance_gate() {
     let dir = TempDir::new().expect("temp dir");
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        sync: SyncConfig {
-            every_n_events: 1,
-            mode: SyncMode::SyncData,
-        }, // Each batch is a sync on the benchmark-relevant data-fsync path.
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path())
+        .with_sync_every_n_events(1)
+        // Each batch is a sync on the benchmark-relevant data-fsync path.
+        .with_sync_mode(SyncMode::SyncData);
     let store = Store::open(config).expect("open");
     let coord = Coordinate::new("perf:batch", "batch_scope").expect("valid");
     let kind = EventKind::custom(0xF, 1);
@@ -727,16 +714,10 @@ impl Gate<CorrectnessContext> for SnapshotBootGate {
 #[test]
 fn correctness_gates_self_validate() {
     let dir = TempDir::new().expect("temp dir");
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        segment_max_bytes: 512, // tiny → many segments
-        sync: SyncConfig {
-            every_n_events: 1,
-            ..SyncConfig::default()
-        },
-        fd_budget: 2, // tiny → forces LRU eviction
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path())
+        .with_segment_max_bytes(512) // tiny → many segments
+        .with_sync_every_n_events(1)
+        .with_fd_budget(2); // tiny → forces LRU eviction
     let store = Store::open(config).expect("open");
     let coord = Coordinate::new("correctness:entity", "correctness:scope").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
@@ -826,10 +807,7 @@ fn correctness_gates_self_validate() {
     // --- Probe 6: Snapshot bootability ---
     let snap_dir = TempDir::new().expect("snap dir");
     store.snapshot(snap_dir.path()).expect("snapshot");
-    let snap_config = StoreConfig {
-        data_dir: snap_dir.path().to_path_buf(),
-        ..StoreConfig::new("")
-    };
+    let snap_config = StoreConfig::new(snap_dir.path());
     let snap_boot = Store::open(snap_config);
     let snapshot_boots = snap_boot.is_ok();
     if let Ok(s) = snap_boot {
@@ -887,10 +865,7 @@ fn correctness_gates_self_validate() {
 #[ignore = "hardware-dependent perf gate — run via `cargo xtask perf-gates`. Asserts events/sec on shared hardware."]
 fn append_throughput_gate() {
     let dir = TempDir::new().expect("temp dir");
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path());
     let store = Store::open(config).expect("open");
     let coord = Coordinate::new("gate:append", "gate:scope").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
@@ -941,10 +916,7 @@ fn append_throughput_gate() {
 #[ignore = "hardware-dependent perf gate — run via `cargo xtask perf-gates`. Asserts projection latency in ms on shared hardware."]
 fn projection_latency_gate() {
     let dir = TempDir::new().expect("temp dir");
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path());
     let store = Store::open(config).expect("open");
     let coord = Coordinate::new("gate:proj", "gate:scope").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
@@ -997,10 +969,7 @@ fn projection_latency_gate() {
 #[ignore = "hardware-dependent perf gate — run via `cargo xtask perf-gates`. Asserts cold-path projection latency."]
 fn projection_cold_path_gate() {
     let dir = TempDir::new().expect("temp dir");
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path());
     let store = Store::open(config).expect("open");
     let coord = Coordinate::new("gate:cold-proj", "gate:scope").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
@@ -1014,10 +983,7 @@ fn projection_cold_path_gate() {
     store.close().expect("close");
 
     // Reopen for a true cold path
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path());
     let store = Store::open(config).expect("reopen");
 
     let start = Instant::now();

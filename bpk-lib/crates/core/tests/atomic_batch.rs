@@ -402,8 +402,9 @@ fn batch_restart_recovery_discards_incomplete_after_begin() {
     drop(store);
 
     // Reopen with fault injector that panics after BEGIN marker written.
-    let mut config = StoreConfig::new(tmp.path());
-    config.fault_injector = Some(std::sync::Arc::new(CountdownInjector::after_batch_begin()));
+    let config = StoreConfig::new(tmp.path()).with_fault_injector(Some(std::sync::Arc::new(
+        CountdownInjector::after_batch_begin(),
+    )));
 
     let store = Store::open(config).expect("open fault-injected store after begin");
     let items = vec![
@@ -469,8 +470,9 @@ fn batch_restart_recovery_discards_incomplete_mid_items() {
     let coord = Coordinate::new("crash", "test").expect("valid crash-test coordinate");
 
     // Reopen with fault injector that fails after 1st item written.
-    let mut config = StoreConfig::new(tmp.path());
-    config.fault_injector = Some(std::sync::Arc::new(CountdownInjector::after_batch_items(1)));
+    let config = StoreConfig::new(tmp.path()).with_fault_injector(Some(std::sync::Arc::new(
+        CountdownInjector::after_batch_items(1),
+    )));
 
     let store = Store::open(config).expect("open fault-injected store mid-items");
     let items = vec![
@@ -583,15 +585,15 @@ fn batch_fsync_ambiguity_discards_uncommitted() {
 
     // Reopen with fault injector that triggers DURING fsync.
     // This simulates: COMMIT written, power lost before fsync completes.
-    let mut config = StoreConfig::new(tmp.path());
-    config.sync.mode = SyncMode::SyncAll; // Full sync to test real ambiguity
-    config.fault_injector = Some(std::sync::Arc::new(
-        CountdownInjector::new(
-            1,
-            CountdownAction::Fail("simulated power loss during fsync"),
-        )
-        .with_filter(|p| matches!(p, InjectionPoint::BatchFsync { .. })),
-    ));
+    let config = StoreConfig::new(tmp.path())
+        .with_sync_mode(SyncMode::SyncAll) // Full sync to test real ambiguity
+        .with_fault_injector(Some(std::sync::Arc::new(
+            CountdownInjector::new(
+                1,
+                CountdownAction::Fail("simulated power loss during fsync"),
+            )
+            .with_filter(|p| matches!(p, InjectionPoint::BatchFsync { .. })),
+        )));
 
     let store = Store::open(config).expect("open fault-injected store for fsync ambiguity");
     let items = vec![
@@ -673,8 +675,9 @@ fn batch_recovery_system_remains_coherent() {
     drop(store);
 
     // Phase 2: Crash during second batch.
-    let mut config = StoreConfig::new(tmp.path());
-    config.fault_injector = Some(std::sync::Arc::new(CountdownInjector::after_batch_items(1)));
+    let config = StoreConfig::new(tmp.path()).with_fault_injector(Some(std::sync::Arc::new(
+        CountdownInjector::after_batch_items(1),
+    )));
 
     let store = Store::open(config).expect("open fault-injected store for recovery coherence");
     let items = vec![
@@ -805,7 +808,7 @@ fn batch_subscription_atomicity_no_partial_visibility() {
     }
 
     // Phase 1: subscribe, append a baseline event, drain.
-    let mut config = StoreConfig::new(tmp.path());
+    let config = StoreConfig::new(tmp.path());
     let store =
         Store::open(config.clone()).expect("open baseline store for subscription atomicity");
     let sub = store.subscribe_lossy(&Region::all());
@@ -823,8 +826,11 @@ fn batch_subscription_atomicity_no_partial_visibility() {
     drop(store);
 
     // Phase 2: reopen with a fault injector that fails the batch mid-flight.
-    config.fault_injector = Some(std::sync::Arc::new(CountdownInjector::after_batch_items(1)));
-    let store = Store::open(config).expect("open fault-injected store for subscription atomicity");
+    let fault_config = config.with_fault_injector(Some(std::sync::Arc::new(
+        CountdownInjector::after_batch_items(1),
+    )));
+    let store =
+        Store::open(fault_config).expect("open fault-injected store for subscription atomicity");
     let sub = store.subscribe_lossy(&Region::all());
 
     // Phase 3: attempt a batch that will fault. The append_batch call must
@@ -928,8 +934,7 @@ fn batch_cross_segment_fault_recovery() {
     let coord = Coordinate::new("cross", "seg").expect("valid cross-segment coordinate");
 
     // Configure tiny segments to force rotation mid-batch.
-    let mut config = StoreConfig::new(tmp.path());
-    config.segment_max_bytes = 1024; // 1KB segments
+    let config = StoreConfig::new(tmp.path()).with_segment_max_bytes(1024); // 1KB segments
 
     let store = Store::open(config).expect("open baseline store for cross-segment recovery");
 
@@ -941,12 +946,14 @@ fn batch_cross_segment_fault_recovery() {
     drop(store);
 
     // Reopen with fault injector at segment rotation.
-    let mut config = StoreConfig::new(tmp.path());
-    config.segment_max_bytes = 1024;
-    config.fault_injector = Some(std::sync::Arc::new(
-        CountdownInjector::new(1, CountdownAction::Fail("crash at segment rotation"))
-            .with_filter(|p| matches!(p, InjectionPoint::BatchItemWritten { item_index: 2, .. })),
-    ));
+    let config = StoreConfig::new(tmp.path())
+        .with_segment_max_bytes(1024)
+        .with_fault_injector(Some(std::sync::Arc::new(
+            CountdownInjector::new(1, CountdownAction::Fail("crash at segment rotation"))
+                .with_filter(|p| {
+                    matches!(p, InjectionPoint::BatchItemWritten { item_index: 2, .. })
+                }),
+        )));
 
     let store = Store::open(config).expect("open fault-injected store for cross-segment recovery");
 
@@ -1029,11 +1036,10 @@ fn batch_publish_atomicity_no_partial_read_during_insert() {
     // This means insert_batch() has run (entries are in maps) but
     // publish() has NOT been called yet, so the batch attempt fails
     // before advancing the visibility watermark.
-    let mut config = StoreConfig::new(tmp.path());
-    config.fault_injector = Some(Arc::new(
+    let config = StoreConfig::new(tmp.path()).with_fault_injector(Some(Arc::new(
         CountdownInjector::new(1, CountdownAction::Fail("halt before publish"))
             .with_filter(|p| matches!(p, InjectionPoint::BatchPrePublish { .. })),
-    ));
+    )));
     let store = Arc::new(Store::open(config).expect("open fault-injected store"));
 
     let batch_size = 10usize;
@@ -1463,8 +1469,7 @@ fn oversized_batch_reopens_with_sidx_entries_pointing_to_correct_segment() {
     let mut expected = Vec::new();
 
     {
-        let mut config = StoreConfig::new(&data_dir);
-        config.segment_max_bytes = 512;
+        let config = StoreConfig::new(&data_dir).with_segment_max_bytes(512);
         let store = Store::open(config).expect("open store");
         store
             .append(

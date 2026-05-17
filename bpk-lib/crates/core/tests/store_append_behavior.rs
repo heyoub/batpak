@@ -9,7 +9,7 @@
 //! Advanced Store append and append-option integration tests.
 
 use batpak::prelude::*;
-use batpak::store::{Store, StoreConfig, StoreError, StoreStats, SyncConfig};
+use batpak::store::{Store, StoreConfig, StoreError, StoreStats};
 use batpak::typestate::Transition;
 use serde::{Deserialize, Serialize};
 use tempfile::TempDir;
@@ -225,15 +225,9 @@ fn apply_transition_persists_event() {
 #[test]
 fn with_correlation_sets_header_correlation_id() {
     let dir = TempDir::new().expect("create temp dir");
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        segment_max_bytes: 4096,
-        sync: SyncConfig {
-            every_n_events: 1,
-            ..SyncConfig::default()
-        },
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path())
+        .with_segment_max_bytes(4096)
+        .with_sync_every_n_events(1);
     let store = Store::open(config).expect("open store");
     let coord = Coordinate::new("entity:corr", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
@@ -257,15 +251,9 @@ fn with_correlation_sets_header_correlation_id() {
 #[test]
 fn with_causation_sets_header_causation_id() {
     let dir = TempDir::new().expect("create temp dir");
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        segment_max_bytes: 4096,
-        sync: SyncConfig {
-            every_n_events: 1,
-            ..SyncConfig::default()
-        },
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path())
+        .with_segment_max_bytes(4096)
+        .with_sync_every_n_events(1);
     let store = Store::open(config).expect("open store");
     let coord = Coordinate::new("entity:caus", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
@@ -290,15 +278,9 @@ fn with_causation_sets_header_causation_id() {
 #[test]
 fn with_correlation_and_causation_combined() {
     let dir = TempDir::new().expect("create temp dir");
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        segment_max_bytes: 4096,
-        sync: SyncConfig {
-            every_n_events: 1,
-            ..SyncConfig::default()
-        },
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path())
+        .with_segment_max_bytes(4096)
+        .with_sync_every_n_events(1);
     let store = Store::open(config).expect("open store");
     let coord = Coordinate::new("entity:both", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);

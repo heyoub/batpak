@@ -19,7 +19,7 @@
 use batpak::prelude::*;
 use batpak::store::{
     segment::{CompactionOutcome, CompactionResult},
-    ReadOnly, Store, StoreConfig, StoreError, SyncConfig,
+    ReadOnly, Store, StoreConfig, StoreError,
 };
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -67,10 +67,7 @@ fn snapshot_copies_segments() {
          Run: cargo test --test store_snapshot_compaction snapshot_copies_segments"
     );
 
-    let snap_config = StoreConfig {
-        data_dir: snap_dir.path().to_path_buf(),
-        ..StoreConfig::new("")
-    };
+    let snap_config = StoreConfig::new(snap_dir.path());
     let snap_store = Store::<ReadOnly>::open_read_only(snap_config).expect("open snapshot");
     let stats = snap_store.stats();
     assert_eq!(
@@ -161,15 +158,9 @@ fn snapshot_reused_destination_replaces_stale_store_artifacts() {
 #[test]
 fn snapshot_waits_for_in_flight_compaction() {
     let dir = TempDir::new().expect("temp dir");
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        segment_max_bytes: 512,
-        sync: SyncConfig {
-            every_n_events: 1,
-            ..SyncConfig::default()
-        },
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path())
+        .with_segment_max_bytes(512)
+        .with_sync_every_n_events(1);
     let store = Arc::new(Store::open(config).expect("open store"));
     let coord = Coordinate::new("entity:snapshot-vs-compact", "scope:test").expect("coord");
     let kind = EventKind::custom(0xF, 0x44);
@@ -330,15 +321,9 @@ fn compact_does_not_lose_data() {
 #[test]
 fn compact_merge_rebuild_does_not_duplicate_superseded_sealed_segments() {
     let dir = TempDir::new().expect("create temp dir");
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        segment_max_bytes: 512,
-        sync: SyncConfig {
-            every_n_events: 1,
-            ..SyncConfig::default()
-        },
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path())
+        .with_segment_max_bytes(512)
+        .with_sync_every_n_events(1);
     let store = Store::open(config).expect("open store");
     let coord = Coordinate::new("entity:compact:dedupe", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 3);
@@ -350,15 +335,9 @@ fn compact_merge_rebuild_does_not_duplicate_superseded_sealed_segments() {
     }
     store.close().expect("close");
 
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        segment_max_bytes: 512,
-        sync: SyncConfig {
-            every_n_events: 1,
-            ..SyncConfig::default()
-        },
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path())
+        .with_segment_max_bytes(512)
+        .with_sync_every_n_events(1);
     let store = Store::open(config).expect("reopen");
     let compaction = store
         .compact(&CompactionConfig {
@@ -410,15 +389,9 @@ fn compact_merge_rebuild_does_not_duplicate_superseded_sealed_segments() {
 #[test]
 fn compact_fails_closed_on_corrupt_hidden_ranges_metadata() {
     let dir = TempDir::new().expect("temp dir");
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        segment_max_bytes: 512,
-        sync: SyncConfig {
-            every_n_events: 1,
-            ..SyncConfig::default()
-        },
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path())
+        .with_segment_max_bytes(512)
+        .with_sync_every_n_events(1);
     let store = Store::open(config).expect("open store");
     let coord = Coordinate::new("entity:compact:hidden-ranges", "scope:test").expect("coord");
     let kind = EventKind::custom(0xF, 0x55);
@@ -457,15 +430,9 @@ fn compact_fails_closed_on_corrupt_hidden_ranges_metadata() {
 #[test]
 fn compact_rolls_back_marker_on_pre_swap_rename_failure() {
     let dir = TempDir::new().expect("temp dir");
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        segment_max_bytes: 512,
-        sync: SyncConfig {
-            every_n_events: 1,
-            ..SyncConfig::default()
-        },
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path())
+        .with_segment_max_bytes(512)
+        .with_sync_every_n_events(1);
     let store = Store::open(config).expect("open store");
     let coord = Coordinate::new("entity:compact:rollback", "scope:test").expect("coord");
     let kind = EventKind::custom(0xF, 0x56);
@@ -530,15 +497,9 @@ fn compact_retention_removes_dropped_events_from_index() {
 
     let mut drop_ids = Vec::new();
     {
-        let config = StoreConfig {
-            data_dir: dir.path().to_path_buf(),
-            segment_max_bytes: 512,
-            sync: SyncConfig {
-                every_n_events: 1,
-                ..SyncConfig::default()
-            },
-            ..StoreConfig::new("")
-        };
+        let config = StoreConfig::new(dir.path())
+            .with_segment_max_bytes(512)
+            .with_sync_every_n_events(1);
         let store = Store::open(config).expect("open store");
         let coord = Coordinate::new("entity:retention", "scope:test").expect("valid coord");
 
@@ -554,15 +515,9 @@ fn compact_retention_removes_dropped_events_from_index() {
         store.close().expect("close");
     }
 
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        segment_max_bytes: 512,
-        sync: SyncConfig {
-            every_n_events: 1,
-            ..SyncConfig::default()
-        },
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path())
+        .with_segment_max_bytes(512)
+        .with_sync_every_n_events(1);
     let store = Store::open(config).expect("reopen");
 
     let retention: batpak::store::RetentionPredicate =
@@ -606,15 +561,9 @@ fn compact_tombstone_updates_event_kind_in_index() {
     let tombstone_kind = EventKind::TOMBSTONE;
 
     {
-        let config = StoreConfig {
-            data_dir: dir.path().to_path_buf(),
-            segment_max_bytes: 512,
-            sync: SyncConfig {
-                every_n_events: 1,
-                ..SyncConfig::default()
-            },
-            ..StoreConfig::new("")
-        };
+        let config = StoreConfig::new(dir.path())
+            .with_segment_max_bytes(512)
+            .with_sync_every_n_events(1);
         let store = Store::open(config).expect("open store");
         let coord = Coordinate::new("entity:tombstone", "scope:test").expect("valid coord");
 
@@ -627,15 +576,9 @@ fn compact_tombstone_updates_event_kind_in_index() {
         store.close().expect("close");
     }
 
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        segment_max_bytes: 512,
-        sync: SyncConfig {
-            every_n_events: 1,
-            ..SyncConfig::default()
-        },
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path())
+        .with_segment_max_bytes(512)
+        .with_sync_every_n_events(1);
     let store = Store::open(config).expect("reopen");
 
     let tombstone_config = CompactionConfig {

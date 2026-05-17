@@ -2,7 +2,7 @@
 
 use batpak::prelude::*;
 use batpak::store::projection::{CacheCapabilities, CacheMeta, ProjectionCache};
-use batpak::store::{Freshness, Store, StoreConfig, StoreError, SyncConfig};
+use batpak::store::{Freshness, Store, StoreConfig, StoreError};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tempfile::TempDir;
@@ -54,15 +54,9 @@ fn project_calls_prefetch_only_when_supported() {
     };
 
     let dir = TempDir::new().expect("create temp dir");
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        segment_max_bytes: 4096,
-        sync: SyncConfig {
-            every_n_events: 1,
-            ..SyncConfig::default()
-        },
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path())
+        .with_segment_max_bytes(4096)
+        .with_sync_every_n_events(1);
     let store = Store::open_with_cache(config, Box::new(cache)).expect("open store with cache");
     let coord = Coordinate::new("entity:pf", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);

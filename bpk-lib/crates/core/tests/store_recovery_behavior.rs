@@ -9,7 +9,7 @@
 //! Advanced Store segment, fd-budget, and cold-start recovery integration tests.
 
 use batpak::prelude::*;
-use batpak::store::{Store, StoreConfig, StoreError, SyncConfig};
+use batpak::store::{Store, StoreConfig, StoreError};
 use tempfile::TempDir;
 
 // --- fd_budget LRU eviction ---
@@ -17,16 +17,10 @@ use tempfile::TempDir;
 #[test]
 fn fd_budget_evicts_oldest_segments() {
     let dir = TempDir::new().expect("temp dir");
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        segment_max_bytes: 512, // tiny segments → many segment files
-        sync: SyncConfig {
-            every_n_events: 1,
-            ..SyncConfig::default()
-        },
-        fd_budget: 2, // only 2 FDs allowed → forces eviction
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path())
+        .with_segment_max_bytes(512) // tiny segments -> many segment files
+        .with_sync_every_n_events(1)
+        .with_fd_budget(2); // only 2 FDs allowed -> forces eviction
     let store = Store::open(config).expect("open store");
     let coord = Coordinate::new("entity:fd", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
@@ -115,15 +109,9 @@ fn cold_start_skips_corrupt_segment_gracefully() {
 
     // Phase 1: populate with good data
     {
-        let config = StoreConfig {
-            data_dir: dir.path().to_path_buf(),
-            segment_max_bytes: 512,
-            sync: SyncConfig {
-                every_n_events: 1,
-                ..SyncConfig::default()
-            },
-            ..StoreConfig::new("")
-        };
+        let config = StoreConfig::new(dir.path())
+            .with_segment_max_bytes(512)
+            .with_sync_every_n_events(1);
         let store = Store::open(config).expect("open");
         let coord = Coordinate::new("entity:corrupt", "scope:test").expect("valid coord");
         for i in 0..20 {
@@ -142,11 +130,7 @@ fn cold_start_skips_corrupt_segment_gracefully() {
     // Phase 3: cold start — should skip the corrupt segment
     // The store should either skip it or error on it.
     // scan_segment checks magic bytes and returns CorruptSegment error.
-    let config = StoreConfig {
-        data_dir: dir.path().to_path_buf(),
-        segment_max_bytes: 512,
-        ..StoreConfig::new("")
-    };
+    let config = StoreConfig::new(dir.path()).with_segment_max_bytes(512);
     // Note: `Store` doesn't implement Debug (it owns Arc'd internal state),
     // so `Result::expect_err` doesn't compile here. Match instead.
     let err = match Store::open(config) {
@@ -174,16 +158,10 @@ fn corrupt_frame_in_segment_is_detected() {
 
     // Phase 1: populate with good data and sync
     {
-        let config = StoreConfig {
-            data_dir: dir.path().to_path_buf(),
-            sync: SyncConfig {
-                every_n_events: 1,
-                ..SyncConfig::default()
-            },
-            ..StoreConfig::new("")
-                .with_enable_checkpoint(false)
-                .with_enable_mmap_index(false)
-        };
+        let config = StoreConfig::new(dir.path())
+            .with_sync_every_n_events(1)
+            .with_enable_checkpoint(false)
+            .with_enable_mmap_index(false);
         let store = Store::open(config).expect("open");
         let coord = Coordinate::new("entity:crc", "scope:test").expect("valid");
         for i in 0..3 {
