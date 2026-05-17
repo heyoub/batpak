@@ -25,7 +25,7 @@ fn sealed_segment_reads_via_mmap() {
         store.append(&coord, kind_a(), &payload(i)).expect("append");
     }
     store.sync().expect("sync");
-    let entries = store.stream("entity:test");
+    let entries = store.by_entity("entity:test");
     let first = &entries[0];
     let event = store.get(first.event_id).expect("get from sealed segment");
     assert_eq!(

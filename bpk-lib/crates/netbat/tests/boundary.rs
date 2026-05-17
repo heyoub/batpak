@@ -17,7 +17,7 @@ const PING: OperationDescriptor = OperationDescriptor::new(
 struct PingHandler;
 
 impl Handler for PingHandler {
-    fn handle(&mut self, input: &[u8], _cx: &mut syncbat::Cx<'_>) -> HandlerResult {
+    fn handle(&mut self, input: &[u8], _cx: &mut syncbat::Ctx<'_>) -> HandlerResult {
         Ok(input.to_vec())
     }
 }
@@ -25,7 +25,7 @@ impl Handler for PingHandler {
 struct FailingHandler;
 
 impl Handler for FailingHandler {
-    fn handle(&mut self, _input: &[u8], _cx: &mut syncbat::Cx<'_>) -> HandlerResult {
+    fn handle(&mut self, _input: &[u8], _cx: &mut syncbat::Ctx<'_>) -> HandlerResult {
         Err(HandlerError::invalid_input("bad payload"))
     }
 }
@@ -35,7 +35,7 @@ struct CountingHandler {
 }
 
 impl Handler for CountingHandler {
-    fn handle(&mut self, input: &[u8], _cx: &mut syncbat::Cx<'_>) -> HandlerResult {
+    fn handle(&mut self, input: &[u8], _cx: &mut syncbat::Ctx<'_>) -> HandlerResult {
         self.count.set(self.count.get() + 1);
         Ok(input.to_vec())
     }

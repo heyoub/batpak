@@ -158,7 +158,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // -- Query: filter by entity --
     println!("\n--- Query: Bob's messages only ---");
-    let bob_events = store.stream("user:bob");
+    let bob_events = store.by_entity("user:bob");
     println!("  Bob has {} events:", bob_events.len());
     for entry in &bob_events {
         println!("    kind={} seq={}", entry.kind, entry.clock);

@@ -131,7 +131,7 @@ fn mmap_index_written_and_open_read_only_matches_open() {
         "read-only open while mutable owner is live must surface StoreLocked(ReadOnly), got {lock_err:?}"
     );
 
-    let open_stream = open_store.stream("entity:mmap");
+    let open_stream = open_store.by_entity("entity:mmap");
     assert_eq!(
         open_stream.len(),
         24,
@@ -142,7 +142,7 @@ fn mmap_index_written_and_open_read_only_matches_open() {
     open_store.close().expect("close mutable reopen");
 
     let read_only = Store::<ReadOnly>::open_read_only(mmap_config(&dir)).expect("open read-only");
-    let ro_stream = read_only.stream("entity:mmap");
+    let ro_stream = read_only.by_entity("entity:mmap");
     assert_eq!(
         ro_stream.len(),
         open_stream.len(),
@@ -169,7 +169,7 @@ fn corrupt_mmap_index_falls_back_cleanly() {
     std::fs::write(&artifact, bytes).expect("rewrite corrupt mmap artifact");
 
     let store = Store::open(mmap_config(&dir)).expect("reopen with corrupt mmap artifact");
-    let stream = store.stream("entity:mmap");
+    let stream = store.by_entity("entity:mmap");
     assert_eq!(
         stream.len(),
         12,
@@ -196,7 +196,7 @@ fn truncated_mmap_index_falls_back_cleanly() {
     // Reopen must not panic — the store should detect the truncation and
     // fall back to a full segment scan to rebuild the index.
     let store = Store::open(mmap_config(&dir)).expect("reopen with truncated mmap artifact");
-    let stream = store.stream("entity:mmap");
+    let stream = store.by_entity("entity:mmap");
     assert_eq!(
         stream.len(),
         12,
@@ -251,7 +251,7 @@ fn default_config_reopen_uses_mmap_path() {
     );
     assert_open_index_report_phase_buckets_nonzero(&report);
     assert_eq!(
-        store2.stream("entity:default").len(),
+        store2.by_entity("entity:default").len(),
         100,
         "all events must be present after mmap reopen"
     );
@@ -273,7 +273,7 @@ fn mmap_reopen_open_report_phase_micros_sane() {
     assert_eq!(report.path, OpenIndexPath::Mmap);
     assert_open_index_report_phase_buckets_nonzero(&report);
     assert_eq!(
-        store.stream("entity:mmap").len(),
+        store.by_entity("entity:mmap").len(),
         256,
         "mmap reopen after larger seed must preserve full stream cardinality"
     );
@@ -315,7 +315,7 @@ fn mmap_open_report_counts_reserved_kind_fallbacks() {
         Some(&1)
     );
     assert_eq!(
-        store.stream("entity:mmap").len(),
+        store.by_entity("entity:mmap").len(),
         12,
         "reserved-kind fallback accounting must not drop live entries on reopen"
     );

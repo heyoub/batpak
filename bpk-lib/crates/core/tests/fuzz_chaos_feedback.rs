@@ -368,7 +368,7 @@ fn run_chaos_probes() -> (f64, u64, bool, bool, u64, f64, bool) {
             .append(&rot_coord, kind, &serde_json::json!({"i": i}))
             .expect("append");
     }
-    let rot_entries = store.stream("probe:rotation");
+    let rot_entries = store.by_entity("probe:rotation");
     let rotation_loss = rot_n as u64 - rot_entries.len() as u64;
 
     // --- Subscription delivery ---
@@ -588,7 +588,7 @@ fn run_extended_fuzz_chaos() {
     let store_ref = &*store;
     let mut total_entries = 0;
     for t in 0..n_threads {
-        total_entries += store_ref.stream(&format!("ext:t{t}")).len();
+        total_entries += store_ref.by_entity(&format!("ext:t{t}")).len();
     }
     assert_eq!(
         total_entries, total_ok as usize,
@@ -606,7 +606,7 @@ fn run_extended_fuzz_chaos() {
     let store2 = Store::open(config2).expect("cold start reopen");
     let mut cold_entries = 0;
     for t in 0..n_threads {
-        cold_entries += store2.stream(&format!("ext:t{t}")).len();
+        cold_entries += store2.by_entity(&format!("ext:t{t}")).len();
     }
     assert_eq!(
         cold_entries, total_ok as usize,

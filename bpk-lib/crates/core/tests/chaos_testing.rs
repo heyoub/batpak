@@ -224,7 +224,7 @@ fn chaos_concurrent_writer_stress() {
     // Verify data integrity: each thread's events should be readable
     let store_ref = &*store;
     for t in 0..n_threads {
-        let entries = store_ref.stream(&format!("chaos:thread{t}"));
+        let entries = store_ref.by_entity(&format!("chaos:thread{t}"));
         assert!(
             !entries.is_empty(),
             "CHAOS PROPERTY: every writer thread must have its events present in the index after store close.\n\
@@ -323,7 +323,7 @@ fn chaos_cas_contention() {
     }
 
     // Verify the winner's event is actually in the stream
-    let entries = store.stream("chaos:cas");
+    let entries = store.by_entity("chaos:cas");
     assert_eq!(
         entries.len(),
         2, // seed + 1 winner
@@ -390,7 +390,7 @@ fn chaos_idempotency_concurrent() {
     }
 
     // Only one event should exist in the store
-    let entries = store.stream("chaos:idem");
+    let entries = store.by_entity("chaos:idem");
     assert_eq!(
         entries.len(),
         1,
@@ -453,7 +453,7 @@ fn chaos_rapid_segment_rotation() {
     );
 
     // Verify ALL events are still readable after all the rotation
-    let entries = store.stream("chaos:rotation");
+    let entries = store.by_entity("chaos:rotation");
     assert_eq!(
         entries.len(),
         iterations,
@@ -563,7 +563,7 @@ fn chaos_batch_atomicity_concurrent() {
             "chaos:batch_scope",
         )
         .expect("valid");
-        let entries = store.stream(coord.entity());
+        let entries = store.by_entity(coord.entity());
 
         let expected_count = batches_per_thread * items_per_batch;
         assert!(
@@ -636,7 +636,7 @@ fn chaos_batch_cross_segment_rotation() {
     store.sync().expect("sync");
 
     // Verify all items committed despite segment rotation
-    let entries = store.stream(coord.entity());
+    let entries = store.by_entity(coord.entity());
     assert_eq!(
         entries.len(),
         20,
@@ -855,7 +855,7 @@ fn chaos_truncated_segment_recovers() {
     store.sync().expect("sync");
 
     // Capture the event_ids written so we can verify them after recovery
-    let written_entries = store.stream("chaos:truncate");
+    let written_entries = store.by_entity("chaos:truncate");
     assert_eq!(
         written_entries.len(),
         n_events,
@@ -925,7 +925,7 @@ fn chaos_truncated_segment_recovers() {
         .with_enable_checkpoint(false);
     let store2 = Store::open(config2).expect("store must reopen after tail truncation");
 
-    let recovered_entries = store2.stream("chaos:truncate");
+    let recovered_entries = store2.by_entity("chaos:truncate");
 
     // We must recover at least some events — truncating only the last 32 bytes
     // should leave the bulk of the segment intact

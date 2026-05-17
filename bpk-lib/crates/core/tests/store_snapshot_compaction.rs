@@ -590,7 +590,7 @@ fn compact_tombstone_updates_event_kind_in_index() {
     store.compact(&tombstone_config).expect("compact");
 
     assert_eq!(
-        store.stream("entity:tombstone").len(),
+        store.by_entity("entity:tombstone").len(),
         10,
         "COMPACT TOMBSTONE COUNT: expected all 10 user events to remain (5 live + 5 tombstoned).\n\
          Investigate: src/store/mod.rs compact() tombstone path."

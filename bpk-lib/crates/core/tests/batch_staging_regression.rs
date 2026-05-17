@@ -203,12 +203,12 @@ fn duplicate_heavy_batch_preserves_scope_and_stream_queries_after_reopen() {
         "duplicate-heavy batch should surface every event"
     );
     assert_eq!(
-        store.stream("entity:dup:a").len(),
+        store.by_entity("entity:dup:a").len(),
         36,
         "entity stream should preserve duplicate-heavy batch membership"
     );
     assert_eq!(
-        store.stream("entity:dup:b").len(),
+        store.by_entity("entity:dup:b").len(),
         36,
         "entity stream should preserve duplicate-heavy batch membership"
     );
@@ -236,8 +236,8 @@ fn duplicate_heavy_batch_preserves_scope_and_stream_queries_after_reopen() {
     let reopened = Store::open(test_config(&dir)).expect("reopen store");
     let reopened_snapshot = snapshot(&reopened);
     assert_eq!(reopened_snapshot.len(), 72);
-    assert_eq!(reopened.stream("entity:dup:a").len(), 36);
-    assert_eq!(reopened.stream("entity:dup:b").len(), 36);
+    assert_eq!(reopened.by_entity("entity:dup:a").len(), 36);
+    assert_eq!(reopened.by_entity("entity:dup:b").len(), 36);
     assert_eq!(
         reopened_snapshot
             .iter()

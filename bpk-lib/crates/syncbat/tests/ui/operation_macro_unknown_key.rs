@@ -7,7 +7,7 @@
     receipt_kind = "receipt.echo.v1",
     unknown = "nope"
 )]
-fn echo(_input: &[u8], _cx: &mut syncbat::Cx<'_>) -> syncbat::HandlerResult {
+fn echo(_input: &[u8], _cx: &mut syncbat::Ctx<'_>) -> syncbat::HandlerResult {
     Ok(Vec::new())
 }
 

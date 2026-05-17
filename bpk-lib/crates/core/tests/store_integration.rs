@@ -85,7 +85,7 @@ fn append_multiple_events_same_entity() {
     );
 
     // Verify content: all 10 events should be retrievable and have correct payloads
-    let results = store.stream("entity:1");
+    let results = store.by_entity("entity:1");
     assert_eq!(
         results.len(),
         10,
@@ -385,7 +385,7 @@ fn cold_start_rebuilds_index() {
         );
 
         // Verify query still works after cold start
-        let results = store.stream("entity:1");
+        let results = store.by_entity("entity:1");
         assert_eq!(
             results.len(),
             20,
@@ -511,7 +511,7 @@ fn concurrent_append_and_query() {
         .spawn(move || {
             let mut max_seen = 0usize;
             for _ in 0..200 {
-                let results = store_r.stream("entity:1");
+                let results = store_r.by_entity("entity:1");
                 let count = results.len();
                 assert!(
                     count >= max_seen,

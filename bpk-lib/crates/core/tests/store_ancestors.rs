@@ -92,7 +92,7 @@ fn walk_ancestors_respects_limit() {
         store.append(&coord, kind, &payload).expect("append");
     }
 
-    let entries = store.stream("entity:limit");
+    let entries = store.by_entity("entity:limit");
     let last_id = entries.last().expect("has entries").event_id;
     let ancestors = store.walk_ancestors(last_id, 2);
 

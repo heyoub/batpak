@@ -58,7 +58,7 @@ fn fd_budget_evicts_oldest_segments() {
 
     // Read events from different segments — this exercises LRU eviction
     // because fd_budget=2 but we have >2 segments
-    let entries = store.stream("entity:fd");
+    let entries = store.by_entity("entity:fd");
     assert_eq!(
         entries.len(),
         100,

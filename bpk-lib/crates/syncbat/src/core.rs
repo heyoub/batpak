@@ -43,7 +43,7 @@ impl Core {
     /// Invoke a registered operation by name.
     ///
     /// The dispatch path intentionally stays small: resolve the descriptor,
-    /// resolve the handler, borrow a [`Cx`], and run the handler synchronously.
+    /// resolve the handler, borrow a [`Ctx`], and run the handler synchronously.
     ///
     /// # Errors
     /// Returns [`RuntimeError::UnknownOperation`] when no descriptor is mounted
@@ -94,8 +94,8 @@ impl Core {
             .ok_or_else(|| RuntimeError::missing_handler(name))?;
         let input = checkout.input;
         let handler_result = {
-            let mut cx = Cx::new(&descriptor);
-            handler.handle(&input, &mut cx)
+            let mut ctx = Ctx::new(&descriptor);
+            handler.handle(&input, &mut ctx)
         };
 
         let output = match handler_result {
@@ -225,11 +225,11 @@ impl Checkout {
 }
 
 /// Minimal borrowed invocation context passed to handlers.
-pub struct Cx<'a> {
+pub struct Ctx<'a> {
     descriptor: &'a operation::OperationDescriptor,
 }
 
-impl<'a> Cx<'a> {
+impl<'a> Ctx<'a> {
     pub(crate) fn new(descriptor: &'a operation::OperationDescriptor) -> Self {
         Self { descriptor }
     }
@@ -240,12 +240,6 @@ impl<'a> Cx<'a> {
         self.descriptor
     }
 }
-
-/// Preferred spelling for the handler invocation context.
-///
-/// `Cx` remains available as the original short form. New code should prefer
-/// `Ctx` because it reads as context rather than a one-off abbreviation.
-pub type Ctx<'a> = Cx<'a>;
 
 /// Result returned by a successful checkout.
 pub struct CheckoutResult {

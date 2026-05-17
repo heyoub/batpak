@@ -854,7 +854,7 @@ fn signed_receipts_round_trip() {
         .expect("append denial");
     assert_eq!(
         store
-            .get_raw(denial_receipt.event_id)
+            .read_raw(denial_receipt.event_id)
             .expect("read denial")
             .event
             .header

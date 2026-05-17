@@ -18,7 +18,7 @@ const PING: OperationDescriptor = OperationDescriptor::new(
 struct PingHandler;
 
 impl Handler for PingHandler {
-    fn handle(&mut self, input: &[u8], _cx: &mut syncbat::Cx<'_>) -> HandlerResult {
+    fn handle(&mut self, input: &[u8], _cx: &mut syncbat::Ctx<'_>) -> HandlerResult {
         Ok(input.to_vec())
     }
 }

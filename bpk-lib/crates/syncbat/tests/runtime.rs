@@ -28,7 +28,7 @@ const PING: OperationDescriptor = OperationDescriptor::new(
 struct EchoHandler;
 
 impl Handler for EchoHandler {
-    fn handle(&mut self, input: &[u8], cx: &mut syncbat::Cx<'_>) -> HandlerResult {
+    fn handle(&mut self, input: &[u8], cx: &mut syncbat::Ctx<'_>) -> HandlerResult {
         assert_eq!(cx.descriptor().name(), "echo");
         let mut out = Vec::from(input);
         out.extend_from_slice(b":ok");
@@ -39,7 +39,7 @@ impl Handler for EchoHandler {
 struct FailingHandler;
 
 impl Handler for FailingHandler {
-    fn handle(&mut self, _input: &[u8], _cx: &mut syncbat::Cx<'_>) -> HandlerResult {
+    fn handle(&mut self, _input: &[u8], _cx: &mut syncbat::Ctx<'_>) -> HandlerResult {
         Err(HandlerError::failed("boom"))
     }
 }

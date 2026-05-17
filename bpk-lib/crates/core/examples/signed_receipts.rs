@@ -78,7 +78,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
     assert!(store.verify_denial_receipt(&denial_receipt));
 
-    let denial_event = store.get_raw(denial_receipt.event_id)?;
+    let denial_event = store.read_raw(denial_receipt.event_id)?;
     assert_eq!(
         denial_event.event.header.event_kind,
         EventKind::SYSTEM_DENIAL

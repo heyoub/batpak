@@ -1,5 +1,5 @@
 error: #[syncbat::operation] does not support async functions
  --> tests/ui/operation_macro_async_fn.rs:9:1
   |
-9 | async fn echo(_input: &[u8], _cx: &mut syncbat::Cx<'_>) -> syncbat::HandlerResult {
+9 | async fn echo(_input: &[u8], _cx: &mut syncbat::Ctx<'_>) -> syncbat::HandlerResult {
   | ^^^^^

@@ -29,7 +29,7 @@ fn group_commit_batches_under_load() {
             .expect("append");
     }
     assert_eq!(
-        store.stream("entity:test").len(),
+        store.by_entity("entity:test").len(),
         32,
         "PROPERTY: group commit must persist all 32 events.\n\
          Investigate: src/store/write/writer.rs writer_loop batch drain."
@@ -44,7 +44,7 @@ fn group_commit_batch_1_is_backward_compat() {
     let store = Store::open(config).expect("open");
     let coord = test_coord();
     store.append(&coord, kind_a(), &payload(0)).expect("append");
-    assert_eq!(store.stream("entity:test").len(), 1);
+    assert_eq!(store.by_entity("entity:test").len(), 1);
     store.close().expect("close");
 }
 
@@ -81,7 +81,7 @@ fn group_commit_mid_batch_shutdown_safe() {
     store.close().expect("close");
     let store2 = Store::open(StoreConfig::new(dir.path())).expect("reopen");
     assert_eq!(
-        store2.stream("entity:test").len(),
+        store2.by_entity("entity:test").len(),
         10,
         "PROPERTY: events committed before close must survive.\n\
          Investigate: src/store/write/writer.rs shutdown drain."

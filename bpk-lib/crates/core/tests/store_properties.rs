@@ -75,7 +75,7 @@ fn replay_determinism_cold_start_rebuilds_identical_index() {
 
     // Phase 2: Reopen (cold start rebuilds index from segments)
     let store = test_store(&dir);
-    let events = store.stream("entity:test");
+    let events = store.by_entity("entity:test");
 
     // Verify: exact same events in exact same order
     assert_eq!(
@@ -141,7 +141,7 @@ fn idempotency_algebraic_duplicate_produces_no_new_event() {
          Common causes: idempotency map not checked before append."
     );
 
-    let events = store.stream("entity:test");
+    let events = store.by_entity("entity:test");
     assert_eq!(
         events.len(),
         1,
@@ -338,7 +338,7 @@ fn flow_connectivity_full_production_path() {
     );
 
     // Step 5: Read back via stream
-    let events = store.stream("user:alice");
+    let events = store.by_entity("user:alice");
     assert_eq!(
         events.len(),
         1,
@@ -515,15 +515,15 @@ fn commutativity_independent_entity_appends() {
     let s2 = Store::open(StoreConfig::new(dir2.path())).expect("reopen2");
 
     assert_eq!(
-        s1.stream("comm:alpha").len(),
-        s2.stream("comm:alpha").len(),
+        s1.by_entity("comm:alpha").len(),
+        s2.by_entity("comm:alpha").len(),
         "PROPERTY: Independent entity appends must be commutative — \
          same number of events per entity regardless of append order.\n\
          Investigate: src/store/index/mod.rs entity stream storage."
     );
     assert_eq!(
-        s1.stream("comm:beta").len(),
-        s2.stream("comm:beta").len(),
+        s1.by_entity("comm:beta").len(),
+        s2.by_entity("comm:beta").len(),
         "PROPERTY: Independent entity appends must be commutative."
     );
 }
@@ -731,7 +731,7 @@ fn store_drop_drains_pending_events() {
 
     // Reopen and verify events persisted
     let store = Store::open(StoreConfig::new(dir.path())).expect("reopen");
-    let events = store.stream("drop:entity");
+    let events = store.by_entity("drop:entity");
     assert!(
         events.len() >= 10,
         "PROPERTY: Store Drop must drain pending events. Got {} events, expected 10.\n\

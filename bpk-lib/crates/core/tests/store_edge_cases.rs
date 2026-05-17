@@ -244,7 +244,7 @@ fn store_drop_without_close_persists_data() {
 
     // Reopen and verify data survived
     let store = test_store(&dir);
-    let events = store.stream("entity:test");
+    let events = store.by_entity("entity:test");
     assert_eq!(events.len(), 1, "event should survive drop-without-close");
 }
 
@@ -266,7 +266,7 @@ fn segment_max_bytes_very_small_forces_frequent_rotation() {
     store.sync().expect("sync");
 
     // Verify all events survived despite frequent rotation
-    let events = store.stream("entity:test");
+    let events = store.by_entity("entity:test");
     assert_eq!(
         events.len(),
         5,
@@ -451,7 +451,7 @@ fn concurrent_appends_same_entity_all_persisted() {
     }
 
     store.sync().expect("sync");
-    let events = store.stream("entity:test");
+    let events = store.by_entity("entity:test");
     assert_eq!(
         events.len(),
         n_threads * n_per_thread,
@@ -539,7 +539,7 @@ fn scan_recovers_events_before_corruption() {
 
     // Reopen — should recover events before corruption
     let store = test_store(&dir);
-    let events = store.stream("entity:test");
+    let events = store.by_entity("entity:test");
     assert!(
         events.len() >= 3,
         "should recover at least some events before corruption, got {}",

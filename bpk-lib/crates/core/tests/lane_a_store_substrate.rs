@@ -322,7 +322,7 @@ fn public_bulk_reads_require_explicit_bounds_not_implicit_global_cursor() {
     let store = Store::<Open>::open(StoreConfig::new(dir.path())).expect("open");
     let _: Vec<IndexEntry> = store.query(&Region::all());
     let _: Vec<IndexEntry> = store.by_scope("s");
-    let _: Vec<IndexEntry> = store.stream("entity-x");
+    let _: Vec<IndexEntry> = store.by_entity("entity-x");
     let _: Vec<IndexEntry> = store.by_fact(EventKind::custom(0xF, 1));
     let _: Cursor = store.cursor_guaranteed(&Region::all());
     drop(store);

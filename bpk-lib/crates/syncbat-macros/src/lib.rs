@@ -109,7 +109,7 @@ fn expand_operation(args: OperationArgs, function: &ItemFn) -> Result<proc_macro
 
         const #descriptor: ::syncbat::OperationDescriptor = #descriptor_expr;
 
-        const _: fn(&[u8], &mut ::syncbat::Cx<'_>) -> ::syncbat::HandlerResult = #fn_name;
+        const _: fn(&[u8], &mut ::syncbat::Ctx<'_>) -> ::syncbat::HandlerResult = #fn_name;
 
         #register_item_fn
 
@@ -149,7 +149,7 @@ fn validate_function(function: &ItemFn) -> Result<()> {
     if function.sig.inputs.len() != 2 {
         return Err(Error::new(
             function.sig.inputs.span(),
-            "#[syncbat::operation] handlers must accept `&[u8]` and `&mut syncbat::Cx<'_>`",
+            "#[syncbat::operation] handlers must accept `&[u8]` and `&mut syncbat::Ctx<'_>`",
         ));
     }
     if function

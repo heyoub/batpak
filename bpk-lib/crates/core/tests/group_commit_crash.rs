@@ -59,7 +59,7 @@ fn partial_batch_crash_idempotent_retry() {
             .expect("append phase 2");
     }
 
-    let events = store2.stream("crash:entity");
+    let events = store2.by_entity("crash:entity");
     assert_eq!(
         events.len(),
         15,

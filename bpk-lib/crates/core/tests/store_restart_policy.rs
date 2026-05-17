@@ -27,7 +27,7 @@ fn writer_restart_once_recovers_from_panic() {
          Investigate: src/store/write/writer.rs writer_thread_main() catch_unwind logic.",
     );
 
-    let entries = store.stream("restart:test");
+    let entries = store.by_entity("restart:test");
     assert_eq!(entries.len(), 2);
 }
 

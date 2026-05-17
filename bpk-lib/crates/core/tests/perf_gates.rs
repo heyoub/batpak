@@ -732,7 +732,7 @@ fn correctness_gates_self_validate() {
     store.sync().expect("sync");
 
     // --- Probe 1: FD eviction round-trip ---
-    let entries = store.stream("correctness:entity");
+    let entries = store.by_entity("correctness:entity");
     let first = store.get(entries[0].event_id);
     let last = store.get(entries[entries.len() - 1].event_id);
     let first_again = store.get(entries[0].event_id); // re-read after eviction

@@ -157,7 +157,7 @@ fn capture_snapshot<State>(store: &Store<State>, specs: &[AppendSpec]) -> QueryS
         .map(|entity| {
             (
                 entity.clone(),
-                summarize_entries(store, store.stream(entity)),
+                summarize_entries(store, store.by_entity(entity)),
             )
         })
         .collect();

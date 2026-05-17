@@ -21,7 +21,7 @@ production async runtime.
 
 - `Core`
 - `CoreBuilder`
-- `Cx`
+- `Ctx`
 - `Module`
 - `OperationDescriptor`
 - `OperationRegisterItem`

@@ -470,7 +470,7 @@ where
 /// `react_loop_multi_raw` (raw msgpack) flow through the same code.
 ///
 /// `fetch` is the lane-specific "get event by ID" function —
-/// [`Store::get`] for JSON, [`Store::get_raw`] for msgpack.
+/// [`Store::get`] for JSON, [`Store::read_raw`] for msgpack.
 ///
 /// On step error the runner stashes the error in the shared slot and
 /// returns [`CursorWorkerAction::StopWithRollback`] so the cursor rolls
@@ -881,6 +881,6 @@ impl Store<Open> {
         R: MultiReactive<crate::event::RawMsgpackInput>,
     {
         let dispatcher = MultiKindDispatcher::<crate::event::RawMsgpackInput, R>::new(reactor);
-        run_reactor(self, region, config, dispatcher, Store::get_raw)
+        run_reactor(self, region, config, dispatcher, Store::read_raw)
     }
 }

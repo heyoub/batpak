@@ -353,7 +353,7 @@ fn control_plane_surface_smoke() {
         "cancelled fence tickets should surface cancellation"
     );
     let visible_after_cancel = store.by_fact(kind).len();
-    let stream_after_cancel = store.stream("entity:control").len();
+    let stream_after_cancel = store.by_entity("entity:control").len();
     store
         .append(&coord, kind, &serde_json::json!({"n": 15.5}))
         .expect("append after cancelled fence");
@@ -363,7 +363,7 @@ fn control_plane_surface_smoke() {
         "later watermark advances must not surface cancelled fence writes"
     );
     assert_eq!(
-        store.stream("entity:control").len(),
+        store.by_entity("entity:control").len(),
         stream_after_cancel + 1,
         "entity stream must also keep cancelled fence writes hidden"
     );
@@ -710,7 +710,7 @@ fn fenced_root_submit_stays_hidden_until_commit_and_cancel_discards_it() {
         "PROPERTY: a root submission under a live fence must remain invisible before commit."
     );
     assert_eq!(
-        store.stream("entity:fence-root").len(),
+        store.by_entity("entity:fence-root").len(),
         0,
         "PROPERTY: the entity stream must also keep fenced root submissions hidden before commit."
     );
@@ -773,7 +773,7 @@ fn fenced_batch_submit_stays_hidden_until_commit_and_cancel_discards_it() {
         "PROPERTY: a batch submission under a live fence must remain invisible before commit."
     );
     assert_eq!(
-        store.stream("entity:fence-batch").len(),
+        store.by_entity("entity:fence-batch").len(),
         0,
         "PROPERTY: the entity stream must also keep fenced batch submissions hidden before commit."
     );
@@ -831,7 +831,7 @@ fn fenced_reaction_submit_stays_hidden_until_commit_and_cancel_discards_it() {
         "PROPERTY: a reaction submission under a live fence must not resolve before commit."
     );
     assert_eq!(
-        store.stream("entity:fence-reaction-child").len(),
+        store.by_entity("entity:fence-reaction-child").len(),
         0,
         "PROPERTY: a reaction submission under a live fence must remain invisible before commit."
     );
@@ -847,7 +847,7 @@ fn fenced_reaction_submit_stays_hidden_until_commit_and_cancel_discards_it() {
         "PROPERTY: cancelling a fence after a reaction submission must surface VisibilityFenceCancelled."
     );
     assert_eq!(
-        store.stream("entity:fence-reaction-child").len(),
+        store.by_entity("entity:fence-reaction-child").len(),
         0,
         "PROPERTY: cancelling a fence must discard the pending reaction submission."
     );
@@ -855,7 +855,7 @@ fn fenced_reaction_submit_stays_hidden_until_commit_and_cancel_discards_it() {
     store.close().expect("close store");
     let reopened = Store::open(test_config(&dir)).expect("reopen store");
     assert_eq!(
-        reopened.stream("entity:fence-reaction-child").len(),
+        reopened.by_entity("entity:fence-reaction-child").len(),
         0,
         "PROPERTY: a cancelled reaction submission under a fence must stay invisible after reopen."
     );
@@ -887,7 +887,7 @@ fn fenced_reaction_commit_preserves_reaction_metadata() {
         )
         .expect("submit fenced reaction");
     assert_eq!(
-        store.stream("entity:fence-reaction-commit-child").len(),
+        store.by_entity("entity:fence-reaction-commit-child").len(),
         0,
         "PROPERTY: a fenced reaction must stay hidden until the fence commits."
     );
@@ -895,7 +895,7 @@ fn fenced_reaction_commit_preserves_reaction_metadata() {
     fence.commit().expect("commit fence");
     let reaction =
         wait_append_ticket(&ticket, "committed fenced reaction").expect("wait committed reaction");
-    let entries = store.stream("entity:fence-reaction-commit-child");
+    let entries = store.by_entity("entity:fence-reaction-commit-child");
     assert_eq!(
         entries.len(),
         1,

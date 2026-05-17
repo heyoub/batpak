@@ -20,7 +20,7 @@ fn explicit_err<T>(result: Result<T, batpak::guard::Denial>) -> batpak::guard::D
     receipt_kind = "receipt.claw.echo.v1",
     title = "Claw Echo"
 )]
-fn echo(input: &[u8], cx: &mut syncbat::Cx<'_>) -> syncbat::HandlerResult {
+fn echo(input: &[u8], cx: &mut syncbat::Ctx<'_>) -> syncbat::HandlerResult {
     assert_eq!(cx.descriptor().name(), "claw.echo");
     let mut output = b"cb:".to_vec();
     output.extend_from_slice(input);

@@ -63,7 +63,7 @@ fn wall_ms_monotonic_under_clock_regression() {
     store.sync().expect("sync");
 
     // Verify: wall_ms must be monotonically non-decreasing in the stream
-    let entries = store.stream("entity:clock-test");
+    let entries = store.by_entity("entity:clock-test");
     assert_eq!(entries.len(), 4, "should have 4 events");
 
     let mut prev_wall_ms = 0u64;
@@ -119,7 +119,7 @@ fn wall_ms_monotonic_per_entity_isolation() {
         .append(&coord_b, kind, &serde_json::json!({"entity": "b"}))
         .expect("append b");
 
-    let entries_b = store.stream("entity:b");
+    let entries_b = store.by_entity("entity:b");
     assert_eq!(entries_b.len(), 1);
 
     // The validated runtime wraps custom clocks in a monotonic guard shared
@@ -166,7 +166,7 @@ fn sync_mode_sync_data_does_not_panic() {
     store.sync().expect("explicit sync with SyncData");
 
     // Verify data survived
-    let entries = store.stream("entity:sync-test");
+    let entries = store.by_entity("entity:sync-test");
     assert_eq!(
         entries.len(),
         10,
@@ -213,7 +213,7 @@ fn sync_mode_sync_data_survives_segment_rotation() {
     );
 
     // Verify all events readable after rotation + SyncData
-    let entries = store.stream("entity:rotation-sync");
+    let entries = store.by_entity("entity:rotation-sync");
     assert_eq!(
         entries.len(),
         50,
@@ -250,7 +250,7 @@ fn sync_mode_sync_data_survives_cold_start() {
     {
         let config = StoreConfig::new(dir.path());
         let store = Store::open(config).expect("cold start");
-        let entries = store.stream("entity:cold");
+        let entries = store.by_entity("entity:cold");
         assert_eq!(
             entries.len(),
             20,
@@ -288,7 +288,7 @@ fn writer_stack_size_custom_value_works() {
             .expect("append with custom stack");
     }
 
-    let entries = store.stream("entity:stack-test");
+    let entries = store.by_entity("entity:stack-test");
     assert_eq!(
         entries.len(),
         10,
@@ -384,7 +384,7 @@ fn store_config_all_fields_overridable() {
     }
 
     store.sync().expect("sync");
-    let entries = store.stream("entity:config-test");
+    let entries = store.by_entity("entity:config-test");
     assert_eq!(
         entries.len(),
         10,

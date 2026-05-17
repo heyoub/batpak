@@ -102,7 +102,7 @@ fn mixed_append_and_batch_commands_complete_under_group_commit_drain() {
     let receipt_b = append_b.join().expect("append b thread").expect("append b");
 
     store.sync().expect("sync");
-    let stream = store.stream("entity:writer-flow");
+    let stream = store.by_entity("entity:writer-flow");
     let sequences: Vec<u64> = stream.iter().map(|entry| entry.global_sequence).collect();
     assert_eq!(
         stream.len(),

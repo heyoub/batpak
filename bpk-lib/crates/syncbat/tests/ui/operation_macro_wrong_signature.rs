@@ -6,7 +6,7 @@
     output_schema = "schema.echo.output.v1",
     receipt_kind = "receipt.echo.v1"
 )]
-fn echo(_input: Vec<u8>, _cx: &mut syncbat::Cx<'_>) -> syncbat::HandlerResult {
+fn echo(_input: Vec<u8>, _cx: &mut syncbat::Ctx<'_>) -> syncbat::HandlerResult {
     Ok(Vec::new())
 }
 

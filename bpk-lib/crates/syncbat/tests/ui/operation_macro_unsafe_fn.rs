@@ -6,7 +6,7 @@
     output_schema = "schema.echo.output.v1",
     receipt_kind = "receipt.echo.v1"
 )]
-unsafe fn echo(_input: &[u8], _cx: &mut syncbat::Cx<'_>) -> syncbat::HandlerResult {
+unsafe fn echo(_input: &[u8], _cx: &mut syncbat::Ctx<'_>) -> syncbat::HandlerResult {
     Ok(Vec::new())
 }
 

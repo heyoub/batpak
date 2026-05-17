@@ -134,7 +134,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // -- Query: browse the raw event log --
     println!("\nRaw event log:");
-    let entries = store.stream("counter:hits");
+    let entries = store.by_entity("counter:hits");
     for entry in &entries {
         let stored = store.get(entry.event_id)?;
         println!(

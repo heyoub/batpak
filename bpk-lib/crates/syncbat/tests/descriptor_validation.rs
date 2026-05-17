@@ -141,7 +141,7 @@ fn builder_rejects_invalid_descriptor_and_handler_names() {
     let mut builder = Core::builder();
     let err = match builder.register_handler(
         "bad/name",
-        |_input: &[u8], _cx: &mut syncbat::Cx<'_>| -> HandlerResult { Ok(Vec::new()) },
+        |_input: &[u8], _cx: &mut syncbat::Ctx<'_>| -> HandlerResult { Ok(Vec::new()) },
     ) {
         Ok(_) => panic!("expected invalid handler"),
         Err(error) => error,

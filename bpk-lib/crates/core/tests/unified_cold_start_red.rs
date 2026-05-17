@@ -28,7 +28,7 @@ fn sidx_cold_start_uses_footer() {
     let store2 =
         Store::open(StoreConfig::new(dir.path()).with_segment_max_bytes(512)).expect("reopen");
     assert_eq!(
-        store2.stream("entity:test").len(),
+        store2.by_entity("entity:test").len(),
         50,
         "PROPERTY: cold start via SIDX footer must recover all events.\n\
          Investigate: src/store/segment/scan.rs SIDX-aware scan_segment_index."
@@ -50,7 +50,7 @@ fn checkpoint_write_load_roundtrip() {
     let store2 = Store::open(StoreConfig::new(dir.path()).with_enable_checkpoint(true))
         .expect("reopen from checkpoint");
     assert_eq!(
-        store2.stream("entity:test").len(),
+        store2.by_entity("entity:test").len(),
         100,
         "PROPERTY: checkpoint roundtrip must preserve all events.\n\
          Investigate: src/store/cold_start/checkpoint.rs write_checkpoint + try_load_checkpoint."
@@ -76,7 +76,7 @@ fn stale_checkpoint_falls_back_to_full_rebuild() {
     let store2 = Store::open(StoreConfig::new(dir.path()).with_enable_checkpoint(true))
         .expect("reopen with corrupt checkpoint");
     assert_eq!(
-        store2.stream("entity:test").len(),
+        store2.by_entity("entity:test").len(),
         20,
         "PROPERTY: corrupt checkpoint must fall back to full rebuild.\n\
          Investigate: src/store/cold_start/checkpoint.rs try_load_checkpoint -> None."
@@ -107,7 +107,7 @@ fn post_compact_checkpoint_valid() {
     )
     .expect("reopen");
     assert_eq!(
-        store2.stream("entity:test").len(),
+        store2.by_entity("entity:test").len(),
         50,
         "PROPERTY: post-compact checkpoint must be valid.\n\
          Investigate: src/store/lifecycle.rs compact writes checkpoint."
@@ -121,7 +121,7 @@ fn interner_roundtrip() {
     let store = Store::open(StoreConfig::new(dir.path())).expect("open");
     let coord = Coordinate::new("intern:entity", "intern:scope").expect("coord");
     store.append(&coord, kind_a(), &payload(0)).expect("append");
-    let entries = store.stream("intern:entity");
+    let entries = store.by_entity("intern:entity");
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].coord.entity(), "intern:entity");
     assert_eq!(entries[0].coord.scope(), "intern:scope");

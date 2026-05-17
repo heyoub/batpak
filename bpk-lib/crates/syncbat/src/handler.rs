@@ -2,13 +2,13 @@
 
 use std::{error::Error, fmt};
 
-use crate::core::Cx;
+use crate::core::Ctx;
 
 /// Result type returned by syncbat handlers.
 pub type HandlerResult = Result<Vec<u8>, HandlerError>;
 
 /// Function-pointer handler emitted by operation declaration macros.
-pub type HandlerFn = for<'a> fn(&[u8], &mut Cx<'a>) -> HandlerResult;
+pub type HandlerFn = for<'a> fn(&[u8], &mut Ctx<'a>) -> HandlerResult;
 
 /// Error returned when a handler cannot produce output bytes.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -65,14 +65,14 @@ pub trait Handler {
     /// # Errors
     /// Returns [`HandlerError`] when input decoding, validation, or operation
     /// execution fails.
-    fn handle(&mut self, input: &[u8], cx: &mut Cx<'_>) -> HandlerResult;
+    fn handle(&mut self, input: &[u8], cx: &mut Ctx<'_>) -> HandlerResult;
 }
 
 impl<F> Handler for F
 where
-    F: for<'a> FnMut(&[u8], &mut Cx<'a>) -> HandlerResult,
+    F: for<'a> FnMut(&[u8], &mut Ctx<'a>) -> HandlerResult,
 {
-    fn handle(&mut self, input: &[u8], cx: &mut Cx<'_>) -> HandlerResult {
+    fn handle(&mut self, input: &[u8], cx: &mut Ctx<'_>) -> HandlerResult {
         self(input, cx)
     }
 }

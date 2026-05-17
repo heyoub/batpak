@@ -1,5 +1,5 @@
 error: #[syncbat::operation] only supports Rust ABI functions
  --> tests/ui/operation_macro_non_rust_abi.rs:9:1
   |
-9 | extern "C" fn echo(_input: &[u8], _cx: &mut syncbat::Cx<'_>) -> syncbat::HandlerResult {
+9 | extern "C" fn echo(_input: &[u8], _cx: &mut syncbat::Ctx<'_>) -> syncbat::HandlerResult {
   | ^^^^^^

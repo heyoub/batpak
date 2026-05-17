@@ -17,6 +17,11 @@ All notable changes to this project will be documented in this file.
   longer public and it is no longer re-exported by the prelude.
 - `FrontierView.current_visible_hlc` was renamed to `visible_hlc`, and
   `WatermarkSnapshot` is no longer re-exported in normal builds.
+- `StoreConfig` fields are now private. Construction and inspection go through
+  `StoreConfig::new(...)`, `with_*` builders, and read-only accessors.
+- `Store::get_raw` was removed; use `Store::read_raw`.
+- `Store::stream` was removed; use `Store::by_entity`.
+- `syncbat::Cx` was removed; use `syncbat::Ctx`.
 
 ### Migration
 - If you constructed `ReactorConfig` with a struct literal, add
@@ -29,6 +34,12 @@ All notable changes to this project will be documented in this file.
   and `length()` instead. Prefer receipt-level behavior over importing
   `DiskPos` from the prelude.
 - Rename `frontier.current_visible_hlc` to `frontier.visible_hlc`.
+- Replace `StoreConfig { ... }` literals and direct field mutation with
+  builder calls such as `StoreConfig::new(path).with_segment_max_bytes(...)`.
+- Rename `store.get_raw(id)` to `store.read_raw(id)`.
+- Rename `store.stream(entity)` to `store.by_entity(entity)`.
+- Rename handler signatures from `&mut syncbat::Cx<'_>` to
+  `&mut syncbat::Ctx<'_>`.
 
 ## [0.7.5] - 2026-05-15
 

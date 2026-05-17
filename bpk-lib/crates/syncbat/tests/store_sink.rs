@@ -5,7 +5,7 @@ use std::sync::Arc;
 use batpak::prelude::*;
 use batpak::store::{AppendOptions, ExtensionKey, Store, StoreConfig};
 use syncbat::{
-    receipt_extension_key, receipt_extension_value, Core, Cx, EffectClass, Handler, HandlerResult,
+    receipt_extension_key, receipt_extension_value, Core, Ctx, EffectClass, Handler, HandlerResult,
     OperationDescriptor, ReceiptEnvelope, ReceiptOutcome, StoreReceiptSink,
     SYNCBAT_RECEIPT_EVENT_KIND,
 };
@@ -21,7 +21,7 @@ const PING: OperationDescriptor = OperationDescriptor::new(
 struct EchoHandler;
 
 impl Handler for EchoHandler {
-    fn handle(&mut self, input: &[u8], _cx: &mut Cx<'_>) -> HandlerResult {
+    fn handle(&mut self, input: &[u8], _cx: &mut Ctx<'_>) -> HandlerResult {
         Ok(input.to_vec())
     }
 }

@@ -156,21 +156,21 @@ fn raw_msgpack_multi_reactor_dispatches_same_as_json_lane() {
 }
 
 #[test]
-fn store_get_raw_round_trip_witness() {
-    // Witness test for `Store::get_raw` — proves the new public surface
+fn store_read_raw_round_trip_witness() {
+    // Witness test for `Store::read_raw` — proves the new public surface
     // added in T6 is exercised directly (independent of reactor plumbing).
     let (store, _dir) = small_segment_store().unwrap();
-    let coord = Coordinate::new("entity:get-raw-witness", "scope:test").unwrap();
+    let coord = Coordinate::new("entity:read-raw-witness", "scope:test").unwrap();
     let receipt = store
         .append_typed(&coord, &AlphaRaw { n: 42 })
         .expect("append");
-    let stored = store.get_raw(receipt.event_id).expect("get_raw");
+    let stored = store.read_raw(receipt.event_id).expect("read_raw first");
     let read = store.read_raw(receipt.event_id).expect("read_raw");
     assert_eq!(stored.event.header.event_id, receipt.event_id);
     assert_eq!(read.event.header.event_id, receipt.event_id);
     assert_eq!(
         read.event.payload, stored.event.payload,
-        "PROPERTY: read_raw must stay a verb-forward alias for get_raw"
+        "PROPERTY: read_raw must return stable raw payload bytes across repeated reads"
     );
     assert_eq!(stored.event.header.event_kind, AlphaRaw::KIND);
     // Decode the raw bytes back into AlphaRaw and verify.

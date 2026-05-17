@@ -13,7 +13,7 @@ use syncbat::{Core, HandlerError, RuntimeError};
     receipt_kind = "receipt.echo.v1",
     title = "Echo"
 )]
-fn echo(input: &[u8], cx: &mut syncbat::Cx<'_>) -> syncbat::HandlerResult {
+fn echo(input: &[u8], cx: &mut syncbat::Ctx<'_>) -> syncbat::HandlerResult {
     assert_eq!(cx.descriptor().name(), "echo");
     let mut out = Vec::from(input);
     out.extend_from_slice(b":ok");
@@ -29,7 +29,7 @@ fn echo(input: &[u8], cx: &mut syncbat::Cx<'_>) -> syncbat::HandlerResult {
     output_schema = "schema.failing.output.v1",
     receipt_kind = "receipt.failing.v1"
 )]
-fn failing(_input: &[u8], _cx: &mut syncbat::Cx<'_>) -> syncbat::HandlerResult {
+fn failing(_input: &[u8], _cx: &mut syncbat::Ctx<'_>) -> syncbat::HandlerResult {
     Err(HandlerError::failed("boom"))
 }
 

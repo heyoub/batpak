@@ -15,35 +15,20 @@ impl<State> Store<State> {
     }
 
     /// READ: fetch a single event by ID with the payload left as raw
-    /// MessagePack bytes. Mirrors [`get`](Self::get) but skips the
-    /// JSON-decode step, suitable for the `RawMsgpackInput` lane of a
-    /// multi-event reactor.
-    ///
-    /// # Errors
-    /// Returns `StoreError::NotFound` if no event with that ID exists.
-    /// Returns `StoreError::Io` or `StoreError::Serialization` if reading
-    /// from disk fails.
-    pub fn get_raw(&self, event_id: u128) -> Result<StoredEvent<Vec<u8>>, StoreError> {
-        let entry = self
-            .index
-            .get_by_id(event_id)
-            .ok_or(StoreError::NotFound(event_id))?;
-        self.reader.read_entry_raw(&entry.disk_pos)
-    }
-
-    /// READ: fetch a single event by ID with the payload left as raw
     /// MessagePack bytes.
-    ///
-    /// This is the verb-forward alias for [`get_raw`](Self::get_raw). Use
-    /// `read_raw` when the call site is part of a read/replay lane; `get_raw`
-    /// remains available to mirror [`get`](Self::get).
+    /// Mirrors [`get`](Self::get) but skips the JSON-decode step, suitable
+    /// for the `RawMsgpackInput` lane of a multi-event reactor.
     ///
     /// # Errors
     /// Returns `StoreError::NotFound` if no event with that ID exists.
     /// Returns `StoreError::Io` or `StoreError::Serialization` if reading
     /// from disk fails.
     pub fn read_raw(&self, event_id: u128) -> Result<StoredEvent<Vec<u8>>, StoreError> {
-        self.get_raw(event_id)
+        let entry = self
+            .index
+            .get_by_id(event_id)
+            .ok_or(StoreError::NotFound(event_id))?;
+        self.reader.read_entry_raw(&entry.disk_pos)
     }
 
     /// Verify an append receipt against the store's signing-key registry and
@@ -147,20 +132,10 @@ impl<State> Store<State> {
         projection::flow::project_if_changed(self, entity, last_seen_generation, freshness)
     }
 
-    /// CONVENIENCE: sugar over index.stream() for exact entity match.
-    #[must_use]
-    pub fn stream(&self, entity: &str) -> Vec<IndexEntry> {
-        self.index.stream(entity)
-    }
-
     /// READ: query all events for an exact entity id.
-    ///
-    /// This is the explicit-name alias for [`stream`](Self::stream). It keeps
-    /// the return shape honest (`Vec<IndexEntry>`) while giving call sites a
-    /// name that matches the rest of the query helpers.
     #[must_use]
     pub fn by_entity(&self, entity: &str) -> Vec<IndexEntry> {
-        self.stream(entity)
+        self.index.stream(entity)
     }
 
     /// READ: query all events in the given scope.

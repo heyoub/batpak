@@ -26,7 +26,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     store.close()?;
 
     let read_only = Store::<batpak::store::ReadOnly>::open_read_only(config)?;
-    let stream = read_only.stream("player:readonly");
+    let stream = read_only.by_entity("player:readonly");
     println!("read-only reopen recovered {} event(s)", stream.len());
 
     Ok(())
