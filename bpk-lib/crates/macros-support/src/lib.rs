@@ -15,7 +15,8 @@ pub extern crate inventory;
 /// visible to a downstream binary's explicit registry validator instead of
 /// losing them behind each dependency crate's own `cfg(test)` boundary.
 pub struct EventPayloadRegistration {
-    /// Packed (category << 12 | type_id) as stored in EventKind.
+    /// Packed `(category << 12) | type_id`; equals `EventKind::as_raw_u16`
+    /// for the resulting kind.
     pub kind_bits: u16,
     /// `std::any::type_name::<T>()` for the derived type.
     pub type_name: &'static str,

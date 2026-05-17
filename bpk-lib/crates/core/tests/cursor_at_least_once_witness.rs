@@ -89,7 +89,7 @@ fn reactor_config(checkpoint_id: Option<CheckpointId>) -> ReactorConfig {
 #[test]
 fn cursor_worker_with_checkpoint_id_passes_witness() {
     let (store, _dir) = test_store();
-    let checkpoint_id = CheckpointId::new("witness-cursor");
+    let checkpoint_id = CheckpointId::new("witness-cursor").expect("valid checkpoint id");
     store
         .append(
             &source_coord(),
@@ -181,7 +181,7 @@ impl TypedReactive<WitnessPayload> for WitnessTypedReactor {
 fn typed_reactor_handler_receives_witness() {
     let (store, _dir) = test_store();
     let (tx, rx) = mpsc::channel();
-    let checkpoint_id = CheckpointId::new("witness-typed");
+    let checkpoint_id = CheckpointId::new("witness-typed").expect("valid checkpoint id");
     let handle = store
         .react_loop_typed::<WitnessPayload, _>(
             &Region::all(),
@@ -244,7 +244,7 @@ impl WitnessMultiReactor {
 fn multi_reactor_handler_receives_witness() {
     let (store, _dir) = test_store();
     let (tx, rx) = mpsc::channel();
-    let checkpoint_id = CheckpointId::new("witness-multi");
+    let checkpoint_id = CheckpointId::new("witness-multi").expect("valid checkpoint id");
     let handle = store
         .react_loop_multi(
             &Region::all(),
@@ -268,7 +268,7 @@ fn multi_reactor_handler_receives_witness() {
 #[test]
 fn observed_once_composes_from_handler_witness() {
     let (store, _dir) = test_store();
-    let checkpoint_id = CheckpointId::new("witness-observed-once");
+    let checkpoint_id = CheckpointId::new("witness-observed-once").expect("valid checkpoint id");
     store
         .append(
             &source_coord(),

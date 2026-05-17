@@ -15,8 +15,19 @@ pub const DEFAULT_MAX_OPERATION_NAME_BYTES: usize = 256;
 pub const DEFAULT_MAX_INPUT_BYTES: usize = 32 * 1024;
 /// Default maximum handler output size encoded into a response frame.
 pub const DEFAULT_MAX_OUTPUT_BYTES: usize = 32 * 1024;
+
+macro_rules! protocol_prefix {
+    () => {
+        "NETBAT/"
+    };
+}
+
+/// Prefix used by every versioned netbat line-protocol token.
+pub const PROTOCOL_PREFIX: &str = protocol_prefix!();
 /// Current version token accepted by netbat's versioned line protocol.
-pub const LINE_PROTOCOL_VERSION: &str = "NETBAT/1";
+pub const LINE_PROTOCOL_VERSION: &str = concat!(protocol_prefix!(), "1");
+/// Request verb used by netbat's line protocol.
+pub const CALL_VERB: &str = "CALL";
 
 /// Bounded transport limits for netbat's blocking line protocol.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -334,7 +345,7 @@ pub fn decode_line(line: &[u8], limits: &Limits) -> Result<RequestFrame, NetbatE
     let first = parts.next().ok_or(NetbatError::MalformedRequest {
         reason: "missing verb",
     })?;
-    let (verb, operation, input) = if first.starts_with(b"NETBAT/") {
+    let (verb, operation, input) = if first.starts_with(PROTOCOL_PREFIX.as_bytes()) {
         validate_protocol_version(first)?;
         let verb = parts.next().ok_or(NetbatError::MalformedRequest {
             reason: "missing verb",
@@ -361,7 +372,7 @@ pub fn decode_line(line: &[u8], limits: &Limits) -> Result<RequestFrame, NetbatE
             reason: "too many fields",
         });
     }
-    if verb != b"CALL" {
+    if verb != CALL_VERB.as_bytes() {
         return Err(NetbatError::MalformedRequest {
             reason: "unsupported verb",
         });
@@ -376,6 +387,40 @@ pub fn decode_line(line: &[u8], limits: &Limits) -> Result<RequestFrame, NetbatE
         .to_owned();
 
     Ok(RequestFrame::new(operation, input))
+}
+
+/// Encode a stable versioned request line.
+///
+/// Format:
+///
+/// ```text
+/// NETBAT/1 CALL <operation-name> <hex-input>\n
+/// ```
+///
+/// This helper intentionally does not validate the operation name. The decoder
+/// remains the validation boundary so invalid names round-trip into the same
+/// [`NetbatError::MalformedRequest`] shape as hand-written frames.
+#[must_use]
+pub fn encode_request(operation: &str, input: &[u8]) -> Vec<u8> {
+    let mut line = Vec::with_capacity(
+        LINE_PROTOCOL_VERSION.len()
+            + 1
+            + CALL_VERB.len()
+            + 1
+            + operation.len()
+            + 1
+            + input.len() * 2
+            + 1,
+    );
+    line.extend_from_slice(LINE_PROTOCOL_VERSION.as_bytes());
+    line.push(b' ');
+    line.extend_from_slice(CALL_VERB.as_bytes());
+    line.push(b' ');
+    line.extend_from_slice(operation.as_bytes());
+    line.push(b' ');
+    encode_hex_into(input, &mut line);
+    line.push(b'\n');
+    line
 }
 
 /// Encode a stable response line.
@@ -639,7 +684,12 @@ fn record_request_failure(stats: &mut TcpServeStats, error: &NetbatError) {
     }
 }
 
-fn decode_hex(input: &[u8], max_input_bytes: usize) -> Result<Vec<u8>, NetbatError> {
+/// Decode a lowercase or uppercase hexadecimal byte string with a decoded-size limit.
+///
+/// # Errors
+/// Returns [`NetbatError`] when the hex string has odd length, contains a
+/// non-hex byte, or decodes past `max_input_bytes`.
+pub fn decode_hex(input: &[u8], max_input_bytes: usize) -> Result<Vec<u8>, NetbatError> {
     if !input.len().is_multiple_of(2) {
         return Err(NetbatError::MalformedRequest {
             reason: "hex input has odd length",
@@ -671,7 +721,8 @@ fn hex_value(byte: u8) -> Result<u8, NetbatError> {
     }
 }
 
-fn encode_hex_into(bytes: &[u8], output: &mut Vec<u8>) {
+/// Append lowercase hexadecimal encoding of `bytes` into `output`.
+pub fn encode_hex_into(bytes: &[u8], output: &mut Vec<u8>) {
     const HEX: &[u8; 16] = b"0123456789abcdef";
     output.reserve(bytes.len() * 2);
     for byte in bytes {

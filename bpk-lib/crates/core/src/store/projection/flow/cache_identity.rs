@@ -36,19 +36,20 @@ where
 
 /// Stable hash of `T::relevant_event_kinds()` for use as a cache-key component.
 ///
-/// Event kinds are first serialised into their canonical u16 wire representation
-/// (`(category << 12) | type_id`), sorted, then fed into a `DefaultHasher`. The
-/// sort makes the hash order-insensitive: a projection that declares
-/// `[EFFECT_ERROR, DATA]` and one that declares `[DATA, EFFECT_ERROR]` produce
-/// the same key. Uses the same hasher family as the `TypeId` discriminant
-/// above to keep the key derivation stylistically consistent.
+/// Event kinds are first serialised with [`crate::event::EventKind::as_raw_u16`],
+/// the canonical `(category << 12) | type_id` representation, sorted, then fed
+/// into a `DefaultHasher`. The sort makes the hash order-insensitive: a
+/// projection that declares `[EFFECT_ERROR, DATA]` and one that declares
+/// `[DATA, EFFECT_ERROR]` produce the same key. Uses the same hasher family as
+/// the `TypeId` discriminant above to keep the key derivation stylistically
+/// consistent.
 fn relevant_kinds_hash<T>() -> u64
 where
     T: EventSourced + 'static,
 {
     let mut kinds: Vec<u16> = T::relevant_event_kinds()
         .iter()
-        .map(|k| (u16::from(k.category()) << 12) | k.type_id())
+        .map(|k| k.as_raw_u16())
         .collect();
     kinds.sort_unstable();
     let mut h = std::collections::hash_map::DefaultHasher::new();

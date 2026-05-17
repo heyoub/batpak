@@ -42,6 +42,14 @@ separate malformed frames, limit failures, and runtime failures.
 - `RequestFrame`
 - `ResponseFrame`
 
+Helpers:
+
+- `encode_request`
+- `encode_response`
+- `decode_line`
+- `encode_hex_into`
+- `decode_hex`
+
 ## Layer Contract
 
 Use netbat to expose already-assembled syncbat runtimes at process or network

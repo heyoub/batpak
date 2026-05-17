@@ -21,9 +21,10 @@ pub use route::{
     RouteValidationError, Server, ServerModule, LAYER_RULE, MAX_ROUTE_PATH_BYTES,
 };
 pub use transport::{
-    decode_line, dispatch_frame, encode_response, serve_stream, serve_tcp_listener, IoTimeouts,
-    Limits, NetbatError, RequestFrame, ResponseFrame, ShutdownHandle, TcpServeStats,
-    TcpServerConfig, DEFAULT_MAX_CONNECTIONS, DEFAULT_MAX_INPUT_BYTES, DEFAULT_MAX_LINE_BYTES,
-    DEFAULT_MAX_OPERATION_NAME_BYTES, DEFAULT_MAX_OUTPUT_BYTES,
-    DEFAULT_MAX_REQUESTS_PER_CONNECTION, LINE_PROTOCOL_VERSION,
+    decode_hex, decode_line, dispatch_frame, encode_hex_into, encode_request, encode_response,
+    serve_stream, serve_tcp_listener, IoTimeouts, Limits, NetbatError, RequestFrame, ResponseFrame,
+    ShutdownHandle, TcpServeStats, TcpServerConfig, CALL_VERB, DEFAULT_MAX_CONNECTIONS,
+    DEFAULT_MAX_INPUT_BYTES, DEFAULT_MAX_LINE_BYTES, DEFAULT_MAX_OPERATION_NAME_BYTES,
+    DEFAULT_MAX_OUTPUT_BYTES, DEFAULT_MAX_REQUESTS_PER_CONNECTION, LINE_PROTOCOL_VERSION,
+    PROTOCOL_PREFIX,
 };

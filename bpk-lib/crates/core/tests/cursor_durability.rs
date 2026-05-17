@@ -41,6 +41,10 @@ fn config(dir: &TempDir) -> StoreConfig {
         .with_sync_every_n_events(1)
 }
 
+fn valid_checkpoint_id(id: &str) -> CheckpointId {
+    CheckpointId::new(id).expect("valid checkpoint id")
+}
+
 fn wait_until(cond: impl Fn() -> bool, timeout: Duration, description: &str) {
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
@@ -92,7 +96,8 @@ fn assert_checkpoint_position(
     expected_position: u64,
     description: &str,
 ) {
-    let checkpoint = Cursor::load_checkpoint(dir.path(), checkpoint_id)
+    let checkpoint_id = valid_checkpoint_id(checkpoint_id);
+    let checkpoint = Cursor::load_checkpoint(dir.path(), &checkpoint_id)
         .expect("load checkpoint")
         .expect("checkpoint should exist");
     assert_eq!(
@@ -117,8 +122,9 @@ fn cursor_checkpoint_round_trips_through_save_and_load() {
         region_identity: Some("entity=entity:roundtrip|scope=*|fact=none|clock=*".to_owned()),
     };
 
-    Cursor::save_checkpoint(dir.path(), CHECKPOINT_ID, &checkpoint).expect("save checkpoint");
-    let loaded = Cursor::load_checkpoint(dir.path(), CHECKPOINT_ID)
+    let checkpoint_id = valid_checkpoint_id(CHECKPOINT_ID);
+    Cursor::save_checkpoint(dir.path(), &checkpoint_id, &checkpoint).expect("save checkpoint");
+    let loaded = Cursor::load_checkpoint(dir.path(), &checkpoint_id)
         .expect("load checkpoint")
         .expect("checkpoint should exist");
 
@@ -137,9 +143,7 @@ fn cursor_worker_fails_closed_on_corrupt_checkpoint() {
 
     let store = Arc::new(Store::open(config(&dir)).expect("open store"));
     let coord = Coordinate::new("entity:cursor-corrupt", "scope:test").expect("valid coord");
-    // Seed one matching event so a bug that silently skips checkpoint load
-    // cannot idle forever; the correct code still fails closed before the
-    // handler ever sees this batch.
+    // Seed a matching event so silent checkpoint-load skips cannot idle forever.
     store
         .append(&coord, KIND, &serde_json::json!({"i": 0}))
         .expect("append seed event");
@@ -147,7 +151,7 @@ fn cursor_worker_fails_closed_on_corrupt_checkpoint() {
     worker_config.batch_size = 1;
     worker_config.idle_sleep = Duration::from_millis(1);
     worker_config.restart = RestartPolicy::Once;
-    worker_config.checkpoint_id = Some(CheckpointId::new(CORRUPT_START_CHECKPOINT_ID));
+    worker_config.checkpoint_id = Some(valid_checkpoint_id(CORRUPT_START_CHECKPOINT_ID));
 
     let worker = store
         .cursor_worker(
@@ -182,8 +186,7 @@ fn cursor_resumes_from_checkpoint_across_reopen() {
     let checkpoint_guard = StrayCheckpointGuard::new(CHECKPOINT_ID);
     let coord = Coordinate::new("entity:cursor-durable", "scope:test").expect("valid coord");
 
-    // Phase 1: seed 100 events, spawn a cursor worker that stops after
-    // processing the first 50. Capture the exact set of sequences it saw.
+    // Phase 1: stop after the first 50 events and capture exact sequences.
     let first_pass_seen: Arc<Mutex<Vec<u64>>> = {
         let first_pass_seen = Arc::new(Mutex::new(Vec::<u64>::new()));
         let store = Arc::new(Store::open(config(&dir)).expect("open store"));
@@ -201,7 +204,7 @@ fn cursor_resumes_from_checkpoint_across_reopen() {
             worker_config.batch_size = 1;
             worker_config.idle_sleep = Duration::from_millis(1);
             worker_config.restart = RestartPolicy::Once;
-            worker_config.checkpoint_id = Some(CheckpointId::new(CHECKPOINT_ID));
+            worker_config.checkpoint_id = Some(valid_checkpoint_id(CHECKPOINT_ID));
             store
                 .cursor_worker(
                     &Region::entity("entity:cursor-durable"),
@@ -225,8 +228,7 @@ fn cursor_resumes_from_checkpoint_across_reopen() {
                 .expect("spawn cursor worker")
         };
 
-        // The worker issues a durable Stop after it reaches 50 events, so
-        // join() (passive) will return once that stop is observed.
+        // join() returns once the durable Stop is observed.
         worker.join().expect("worker joined cleanly");
 
         let final_processed = processed.load(Ordering::SeqCst);
@@ -250,8 +252,7 @@ fn cursor_resumes_from_checkpoint_across_reopen() {
         .copied()
         .collect();
 
-    // Phase 2: reopen, append 50 more events, spawn a NEW worker with the
-    // same checkpoint_id. It must see ONLY the new events.
+    // Phase 2: reuse the checkpoint id. It must see only the tail.
     {
         let store = Arc::new(Store::open(config(&dir)).expect("reopen store"));
         for i in 100..150u32 {
@@ -270,7 +271,7 @@ fn cursor_resumes_from_checkpoint_across_reopen() {
             worker_config.batch_size = 8;
             worker_config.idle_sleep = Duration::from_millis(1);
             worker_config.restart = RestartPolicy::Once;
-            worker_config.checkpoint_id = Some(CheckpointId::new(CHECKPOINT_ID));
+            worker_config.checkpoint_id = Some(valid_checkpoint_id(CHECKPOINT_ID));
             store
                 .cursor_worker(
                     &Region::entity("entity:cursor-durable"),
@@ -287,11 +288,8 @@ fn cursor_resumes_from_checkpoint_across_reopen() {
                 .expect("spawn second-pass cursor worker")
         };
 
-        // Wait until the second-pass worker has consumed the remaining
-        // new events. The worker keeps polling; we stop it externally once
-        // the observable progress counter reaches the expected count.
-        // The durable checkpoint recorded position ~50, so the second pass
-        // must cover sequences 50..150 — 100 events total.
+        // The durable checkpoint recorded position ~50, so pass two covers
+        // sequences 50..150 before we stop the polling worker externally.
         let processed_for_wait = Arc::clone(&processed);
         wait_until(
             || processed_for_wait.load(Ordering::SeqCst) >= 100,
@@ -356,7 +354,7 @@ fn cursor_worker_rejects_checkpoint_id_reused_for_different_region() {
     worker_config.batch_size = 1;
     worker_config.idle_sleep = Duration::from_millis(1);
     worker_config.restart = RestartPolicy::Once;
-    worker_config.checkpoint_id = Some(CheckpointId::new(REGION_BOUND_CHECKPOINT_ID));
+    worker_config.checkpoint_id = Some(valid_checkpoint_id(REGION_BOUND_CHECKPOINT_ID));
     let first_worker = store
         .cursor_worker(
             &Region::entity("entity:cursor-a"),
@@ -415,7 +413,7 @@ fn cursor_worker_surfaces_checkpoint_write_failure_through_join() {
         worker_config.batch_size = 1;
         worker_config.idle_sleep = Duration::from_millis(1);
         worker_config.restart = RestartPolicy::Once;
-        worker_config.checkpoint_id = Some(CheckpointId::new(CHECKPOINT_WRITE_FAILS_ID));
+        worker_config.checkpoint_id = Some(valid_checkpoint_id(CHECKPOINT_WRITE_FAILS_ID));
         store
             .cursor_worker(
                 &Region::entity("entity:cursor-ckpt-fail"),
@@ -482,7 +480,7 @@ fn durable_cursor_worker_state_machine_preserves_last_committed_checkpoint() {
     worker_config.batch_size = 1;
     worker_config.idle_sleep = Duration::from_millis(1);
     worker_config.restart = RestartPolicy::Once;
-    worker_config.checkpoint_id = Some(CheckpointId::new(checkpoint_id));
+    worker_config.checkpoint_id = Some(valid_checkpoint_id(checkpoint_id));
 
     let phase_one = store
         .cursor_worker(

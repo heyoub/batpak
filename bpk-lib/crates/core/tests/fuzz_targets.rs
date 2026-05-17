@@ -249,11 +249,13 @@ proptest! {
         let entity_invalid = entity.is_empty()
             || entity.contains('/')
             || entity.contains("..")
+            || entity.contains(['|', '='])
             || entity.bytes().any(|byte| byte == 0)
             || entity_has_control;
         let scope_invalid = scope.is_empty()
             || scope.contains('/')
             || scope.contains("..")
+            || scope.contains(['|', '='])
             || scope.bytes().any(|byte| byte == 0)
             || scope_has_control;
 

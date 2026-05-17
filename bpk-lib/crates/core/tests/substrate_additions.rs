@@ -6,14 +6,16 @@ use batpak::event::EventKind;
 use batpak::guard::{
     Denial, DenialPayload, Gate, GateEvaluation, GateId, GateIdError, GateSet, Verdict,
 };
+use batpak::store::MAX_CHECKPOINT_ID_LEN;
 use batpak::store::{
-    AppendOptions, AppendReceipt, BatchAppendItem, CausationRef, CheckpointId, CursorGapConfig,
-    DiskPos, EncodedBytes, ExtensionKey, ExtensionKeyError, GapObservation, IdempotencyKey,
-    OpenIndexPath, ReceiptExtensionKey, ReceiptExtensionNamespace, ReceiptExtensionValue, Store,
-    StoreConfig,
+    AppendOptions, AppendReceipt, BatchAppendItem, CausationRef, CheckpointId, CheckpointIdError,
+    CursorGapConfig, DiskPos, EncodedBytes, ExtensionKey, ExtensionKeyError, GapObservation,
+    IdempotencyKey, OpenIndexPath, ReceiptExtensionKey, ReceiptExtensionNamespace,
+    ReceiptExtensionValue, Store, StoreConfig,
 };
 #[cfg(feature = "blake3")]
 use batpak::store::{DenialReceipt, SigningKey};
+use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use tempfile::TempDir;
 
@@ -63,8 +65,9 @@ fn encoding_surface_round_trips_and_canonical_alias_matches() {
 
 #[test]
 fn observation_witnesses_round_trip() {
-    let _module_witness = batpak::store::delivery::observation::CheckpointId::new("module-path");
-    let checkpoint = CheckpointId::new("typed-checkpoint");
+    let _module_witness = batpak::store::delivery::observation::CheckpointId::new("module-path")
+        .expect("valid checkpoint id");
+    let checkpoint = CheckpointId::new("typed-checkpoint").expect("valid checkpoint id");
     let idempotency = IdempotencyKey::from_bytes([9; 32]);
     let raw_bytes = idempotency.as_bytes();
     let _at_least_once_type_witness: Option<batpak::store::AtLeastOnce> = None;
@@ -72,6 +75,8 @@ fn observation_witnesses_round_trip() {
 
     assert_eq!(raw_bytes, &[9; 32]);
     assert_eq!(checkpoint.as_str(), "typed-checkpoint");
+    assert_eq!(CheckpointId::new(""), Err(CheckpointIdError::Empty));
+    assert!(MAX_CHECKPOINT_ID_LEN >= checkpoint.as_str().len());
 }
 
 #[test]
@@ -593,9 +598,8 @@ fn cursor_gap_accessor_drains_once() {
 
     let mut cursor = store
         .cursor_guaranteed(&Region::entity("gap:test"))
-        .with_gap_config(CursorGapConfig {
-            enabled: true,
-            buffer_capacity: 4,
+        .with_gap_config(CursorGapConfig::Enabled {
+            capacity: NonZeroUsize::new(4).expect("nonzero capacity"),
         });
     let delivered = cursor.poll_batch(8);
     let gaps: Vec<GapObservation> = cursor.take_gaps();
@@ -640,10 +644,7 @@ fn cursor_gap_accessor_is_quiet_when_disabled() {
 
     let mut cursor = store
         .cursor_guaranteed(&Region::entity("gap:disabled"))
-        .with_gap_config(CursorGapConfig {
-            enabled: false,
-            buffer_capacity: 4,
-        });
+        .with_gap_config(CursorGapConfig::Disabled);
     let _delivered = cursor.poll_batch(8);
 
     assert!(
@@ -688,9 +689,8 @@ fn cursor_gap_accessor_uses_bounded_ring_buffer() {
 
     let mut cursor = store
         .cursor_guaranteed(&Region::entity("gap:ring"))
-        .with_gap_config(CursorGapConfig {
-            enabled: true,
-            buffer_capacity: 1,
+        .with_gap_config(CursorGapConfig::Enabled {
+            capacity: NonZeroUsize::new(1).expect("nonzero capacity"),
         });
     let delivered = cursor.poll_batch(8);
     let gaps = cursor.take_gaps();

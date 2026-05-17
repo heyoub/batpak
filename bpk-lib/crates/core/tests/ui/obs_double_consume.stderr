@@ -1,7 +1,7 @@
 error[E0624]: associated function `new` is private
  --> tests/ui/obs_double_consume.rs:5:22
   |
-5 |         AtLeastOnce::new(CheckpointId::new("obs-double-consume")),
+5 |         AtLeastOnce::new(CheckpointId::new("obs-double-consume").expect("valid checkpoint id")),
   |                      ^^^ private associated function
   |
  ::: src/store/delivery/observation.rs

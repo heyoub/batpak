@@ -82,6 +82,7 @@ pub batpak::coordinate::CoordinateError::EmptyScope
 pub batpak::coordinate::CoordinateError::EntityTooLong
 pub batpak::coordinate::CoordinateError::EntityTooLong::len: usize
 pub batpak::coordinate::CoordinateError::EntityTooLong::max: usize
+pub batpak::coordinate::CoordinateError::ForbiddenSeparator
 pub batpak::coordinate::CoordinateError::NulByte
 pub batpak::coordinate::CoordinateError::PathTraversal
 pub batpak::coordinate::CoordinateError::ScopeTooLong
@@ -234,6 +235,7 @@ pub const batpak::event::kind::EventKind::SYSTEM_INIT: Self
 pub const batpak::event::kind::EventKind::SYSTEM_OPEN_COMPLETED: Self
 pub const batpak::event::kind::EventKind::SYSTEM_SHUTDOWN: Self
 pub const batpak::event::kind::EventKind::TOMBSTONE: Self
+pub const fn batpak::event::kind::EventKind::as_raw_u16(self) -> u16
 pub const fn batpak::event::kind::EventKind::category(self) -> u8
 pub const fn batpak::event::kind::EventKind::custom(category: u8, type_id: u16) -> Self
 pub const fn batpak::event::kind::EventKind::is_effect(self) -> bool
@@ -407,6 +409,7 @@ pub const batpak::event::kind::EventKind::SYSTEM_INIT: Self
 pub const batpak::event::kind::EventKind::SYSTEM_OPEN_COMPLETED: Self
 pub const batpak::event::kind::EventKind::SYSTEM_SHUTDOWN: Self
 pub const batpak::event::kind::EventKind::TOMBSTONE: Self
+pub const fn batpak::event::kind::EventKind::as_raw_u16(self) -> u16
 pub const fn batpak::event::kind::EventKind::category(self) -> u8
 pub const fn batpak::event::kind::EventKind::custom(category: u8, type_id: u16) -> Self
 pub const fn batpak::event::kind::EventKind::is_effect(self) -> bool
@@ -958,6 +961,7 @@ pub batpak::prelude::CoordinateError::EmptyScope
 pub batpak::prelude::CoordinateError::EntityTooLong
 pub batpak::prelude::CoordinateError::EntityTooLong::len: usize
 pub batpak::prelude::CoordinateError::EntityTooLong::max: usize
+pub batpak::prelude::CoordinateError::ForbiddenSeparator
 pub batpak::prelude::CoordinateError::NulByte
 pub batpak::prelude::CoordinateError::PathTraversal
 pub batpak::prelude::CoordinateError::ScopeTooLong
@@ -1208,6 +1212,7 @@ pub batpak::prelude::StoreError::BatchSyncFailed
 pub batpak::prelude::StoreError::BatchSyncFailed::item_count: usize
 pub batpak::prelude::StoreError::BatchSyncFailed::source: alloc::boxed::Box<batpak::prelude::StoreError>
 pub batpak::prelude::StoreError::CacheFailed(alloc::boxed::Box<(dyn core::error::Error + core::marker::Send + core::marker::Sync)>)
+pub batpak::prelude::StoreError::CheckpointId(batpak::store::delivery::observation::CheckpointIdError)
 pub batpak::prelude::StoreError::CheckpointWriteFailed
 pub batpak::prelude::StoreError::CheckpointWriteFailed::id: alloc::string::String
 pub batpak::prelude::StoreError::CheckpointWriteFailed::source: std::io::error::Error
@@ -1552,10 +1557,10 @@ pub type batpak::id::CorrelationId::Err = alloc::string::String
 pub fn batpak::id::CorrelationId::from_str(s: &str) -> core::result::Result<Self, Self::Err>
 pub struct batpak::prelude::Cursor
 impl batpak::store::delivery::cursor::Cursor
-pub fn batpak::store::delivery::cursor::Cursor::load_checkpoint(data_dir: &std::path::Path, id: &str) -> std::io::error::Result<core::option::Option<batpak::store::delivery::cursor::CursorCheckpoint>>
+pub fn batpak::store::delivery::cursor::Cursor::load_checkpoint(data_dir: &std::path::Path, id: &batpak::store::delivery::observation::CheckpointId) -> std::io::error::Result<core::option::Option<batpak::store::delivery::cursor::CursorCheckpoint>>
 pub fn batpak::store::delivery::cursor::Cursor::poll(&mut self) -> core::option::Option<batpak::store::index::IndexEntry>
 pub fn batpak::store::delivery::cursor::Cursor::poll_batch(&mut self, max: usize) -> alloc::vec::Vec<batpak::store::index::IndexEntry>
-pub fn batpak::store::delivery::cursor::Cursor::save_checkpoint(data_dir: &std::path::Path, id: &str, ckpt: &batpak::store::delivery::cursor::CursorCheckpoint) -> std::io::error::Result<()>
+pub fn batpak::store::delivery::cursor::Cursor::save_checkpoint(data_dir: &std::path::Path, id: &batpak::store::delivery::observation::CheckpointId, ckpt: &batpak::store::delivery::cursor::CursorCheckpoint) -> std::io::error::Result<()>
 pub fn batpak::store::delivery::cursor::Cursor::take_gaps(&mut self) -> alloc::vec::Vec<batpak::store::delivery::cursor::GapObservation>
 pub fn batpak::store::delivery::cursor::Cursor::with_gap_config(self, config: batpak::store::delivery::cursor::CursorGapConfig) -> Self
 #[non_exhaustive] pub struct batpak::prelude::CursorWorkerConfig
@@ -1685,6 +1690,7 @@ pub const batpak::event::kind::EventKind::SYSTEM_INIT: Self
 pub const batpak::event::kind::EventKind::SYSTEM_OPEN_COMPLETED: Self
 pub const batpak::event::kind::EventKind::SYSTEM_SHUTDOWN: Self
 pub const batpak::event::kind::EventKind::TOMBSTONE: Self
+pub const fn batpak::event::kind::EventKind::as_raw_u16(self) -> u16
 pub const fn batpak::event::kind::EventKind::category(self) -> u8
 pub const fn batpak::event::kind::EventKind::custom(category: u8, type_id: u16) -> Self
 pub const fn batpak::event::kind::EventKind::is_effect(self) -> bool
@@ -2457,16 +2463,20 @@ pub enum batpak::store::delivery::canal::ReactorCanal
 pub batpak::store::delivery::canal::ReactorCanal::CursorGuaranteed
 pub batpak::store::delivery::canal::ReactorCanal::LossySubscription
 pub mod batpak::store::delivery::cursor
+pub enum batpak::store::delivery::cursor::CursorGapConfig
+pub batpak::store::delivery::cursor::CursorGapConfig::Disabled
+pub batpak::store::delivery::cursor::CursorGapConfig::Enabled
+pub batpak::store::delivery::cursor::CursorGapConfig::Enabled::capacity: core::num::nonzero::NonZeroUsize
 pub enum batpak::store::delivery::cursor::CursorWorkerAction
 pub batpak::store::delivery::cursor::CursorWorkerAction::Continue
 pub batpak::store::delivery::cursor::CursorWorkerAction::Stop
 pub batpak::store::delivery::cursor::CursorWorkerAction::StopWithRollback
 pub struct batpak::store::delivery::cursor::Cursor
 impl batpak::store::delivery::cursor::Cursor
-pub fn batpak::store::delivery::cursor::Cursor::load_checkpoint(data_dir: &std::path::Path, id: &str) -> std::io::error::Result<core::option::Option<batpak::store::delivery::cursor::CursorCheckpoint>>
+pub fn batpak::store::delivery::cursor::Cursor::load_checkpoint(data_dir: &std::path::Path, id: &batpak::store::delivery::observation::CheckpointId) -> std::io::error::Result<core::option::Option<batpak::store::delivery::cursor::CursorCheckpoint>>
 pub fn batpak::store::delivery::cursor::Cursor::poll(&mut self) -> core::option::Option<batpak::store::index::IndexEntry>
 pub fn batpak::store::delivery::cursor::Cursor::poll_batch(&mut self, max: usize) -> alloc::vec::Vec<batpak::store::index::IndexEntry>
-pub fn batpak::store::delivery::cursor::Cursor::save_checkpoint(data_dir: &std::path::Path, id: &str, ckpt: &batpak::store::delivery::cursor::CursorCheckpoint) -> std::io::error::Result<()>
+pub fn batpak::store::delivery::cursor::Cursor::save_checkpoint(data_dir: &std::path::Path, id: &batpak::store::delivery::observation::CheckpointId, ckpt: &batpak::store::delivery::cursor::CursorCheckpoint) -> std::io::error::Result<()>
 pub fn batpak::store::delivery::cursor::Cursor::take_gaps(&mut self) -> alloc::vec::Vec<batpak::store::delivery::cursor::GapObservation>
 pub fn batpak::store::delivery::cursor::Cursor::with_gap_config(self, config: batpak::store::delivery::cursor::CursorGapConfig) -> Self
 pub struct batpak::store::delivery::cursor::CursorCheckpoint
@@ -2474,9 +2484,6 @@ pub batpak::store::delivery::cursor::CursorCheckpoint::position: u64
 pub batpak::store::delivery::cursor::CursorCheckpoint::process_boot_ns: core::option::Option<u64>
 pub batpak::store::delivery::cursor::CursorCheckpoint::region_identity: core::option::Option<alloc::string::String>
 pub batpak::store::delivery::cursor::CursorCheckpoint::started: bool
-pub struct batpak::store::delivery::cursor::CursorGapConfig
-pub batpak::store::delivery::cursor::CursorGapConfig::buffer_capacity: usize
-pub batpak::store::delivery::cursor::CursorGapConfig::enabled: bool
 #[non_exhaustive] pub struct batpak::store::delivery::cursor::CursorWorkerConfig
 pub batpak::store::delivery::cursor::CursorWorkerConfig::batch_size: usize
 pub batpak::store::delivery::cursor::CursorWorkerConfig::checkpoint_id: core::option::Option<batpak::store::delivery::observation::CheckpointId>
@@ -2501,13 +2508,25 @@ pub batpak::store::delivery::cursor::GapObservation::cancelled_ranges: alloc::ve
 pub batpak::store::delivery::cursor::GapObservation::delivered_sequence: u64
 pub batpak::store::delivery::cursor::GapObservation::expected_sequence: u64
 pub mod batpak::store::delivery::observation
+#[non_exhaustive] pub enum batpak::store::delivery::observation::CheckpointIdError
+pub batpak::store::delivery::observation::CheckpointIdError::ControlChar
+pub batpak::store::delivery::observation::CheckpointIdError::Empty
+pub batpak::store::delivery::observation::CheckpointIdError::ForbiddenSeparator
+pub batpak::store::delivery::observation::CheckpointIdError::NulByte
+pub batpak::store::delivery::observation::CheckpointIdError::PathTraversal
+pub batpak::store::delivery::observation::CheckpointIdError::TooLong
+pub batpak::store::delivery::observation::CheckpointIdError::TooLong::len: usize
+pub batpak::store::delivery::observation::CheckpointIdError::TooLong::max: usize
+impl core::error::Error for batpak::store::delivery::observation::CheckpointIdError
+impl core::fmt::Display for batpak::store::delivery::observation::CheckpointIdError
+pub fn batpak::store::delivery::observation::CheckpointIdError::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct batpak::store::delivery::observation::AtLeastOnce(_)
 impl batpak::store::delivery::observation::AtLeastOnce
 pub fn batpak::store::delivery::observation::AtLeastOnce::checkpoint_id(&self) -> &batpak::store::delivery::observation::CheckpointId
 pub struct batpak::store::delivery::observation::CheckpointId(_)
 impl batpak::store::delivery::observation::CheckpointId
 pub fn batpak::store::delivery::observation::CheckpointId::as_str(&self) -> &str
-pub fn batpak::store::delivery::observation::CheckpointId::new(value: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn batpak::store::delivery::observation::CheckpointId::new(value: impl core::convert::Into<alloc::string::String>) -> core::result::Result<Self, batpak::store::delivery::observation::CheckpointIdError>
 pub struct batpak::store::delivery::observation::IdempotencyKey(_)
 impl batpak::store::delivery::observation::IdempotencyKey
 pub const fn batpak::store::delivery::observation::IdempotencyKey::as_bytes(&self) -> &[u8; 32]
@@ -2516,6 +2535,7 @@ pub struct batpak::store::delivery::observation::ObservedOnce
 impl batpak::store::delivery::observation::ObservedOnce
 pub fn batpak::store::delivery::observation::ObservedOnce::into_parts(self) -> (batpak::store::delivery::observation::AtLeastOnce, batpak::store::delivery::observation::IdempotencyKey)
 pub fn batpak::store::delivery::observation::ObservedOnce::new(at_least_once: batpak::store::delivery::observation::AtLeastOnce, idempotency_key: batpak::store::delivery::observation::IdempotencyKey) -> Self
+pub const batpak::store::delivery::observation::MAX_CHECKPOINT_ID_LEN: usize
 pub mod batpak::store::delivery::subscription
 pub struct batpak::store::delivery::subscription::ScanSubscriptionOps<S, F>
 impl<S, F> batpak::store::delivery::subscription::ScanSubscriptionOps<S, F> where S: core::clone::Clone + core::marker::Send + 'static, F: core::ops::function::FnMut(&mut S, &batpak::prelude::Notification) -> core::option::Option<S> + core::marker::Send + 'static
@@ -2967,6 +2987,18 @@ pub batpak::store::ChainWalkStartRef::EventId(u128)
 pub batpak::store::ChainWalkStartRef::Receipt
 pub batpak::store::ChainWalkStartRef::Receipt::content_hash: batpak::store::ChainWalkHash
 pub batpak::store::ChainWalkStartRef::Receipt::event_id: u128
+#[non_exhaustive] pub enum batpak::store::CheckpointIdError
+pub batpak::store::CheckpointIdError::ControlChar
+pub batpak::store::CheckpointIdError::Empty
+pub batpak::store::CheckpointIdError::ForbiddenSeparator
+pub batpak::store::CheckpointIdError::NulByte
+pub batpak::store::CheckpointIdError::PathTraversal
+pub batpak::store::CheckpointIdError::TooLong
+pub batpak::store::CheckpointIdError::TooLong::len: usize
+pub batpak::store::CheckpointIdError::TooLong::max: usize
+impl core::error::Error for batpak::store::delivery::observation::CheckpointIdError
+impl core::fmt::Display for batpak::store::delivery::observation::CheckpointIdError
+pub fn batpak::store::delivery::observation::CheckpointIdError::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 #[non_exhaustive] pub enum batpak::store::ClockEvidence
 pub batpak::store::ClockEvidence::ProbeFailed
 pub batpak::store::ClockEvidence::ProcessLocalInstantAnchor
@@ -2987,6 +3019,10 @@ pub batpak::store::CompactionStrategyShape::Tombstone
 pub enum batpak::store::CountdownAction
 pub batpak::store::CountdownAction::Fail(&'static str)
 pub batpak::store::CountdownAction::Noop
+pub enum batpak::store::CursorGapConfig
+pub batpak::store::CursorGapConfig::Disabled
+pub batpak::store::CursorGapConfig::Enabled
+pub batpak::store::CursorGapConfig::Enabled::capacity: core::num::nonzero::NonZeroUsize
 pub enum batpak::store::CursorWorkerAction
 pub batpak::store::CursorWorkerAction::Continue
 pub batpak::store::CursorWorkerAction::Stop
@@ -3187,6 +3223,7 @@ pub batpak::store::StoreError::BatchSyncFailed
 pub batpak::store::StoreError::BatchSyncFailed::item_count: usize
 pub batpak::store::StoreError::BatchSyncFailed::source: alloc::boxed::Box<batpak::prelude::StoreError>
 pub batpak::store::StoreError::CacheFailed(alloc::boxed::Box<(dyn core::error::Error + core::marker::Send + core::marker::Sync)>)
+pub batpak::store::StoreError::CheckpointId(batpak::store::delivery::observation::CheckpointIdError)
 pub batpak::store::StoreError::CheckpointWriteFailed
 pub batpak::store::StoreError::CheckpointWriteFailed::id: alloc::string::String
 pub batpak::store::StoreError::CheckpointWriteFailed::source: std::io::error::Error
@@ -3487,7 +3524,7 @@ pub fn batpak::prelude::ChainWalkRequest::linear(start: batpak::prelude::ChainWa
 pub struct batpak::store::CheckpointId(_)
 impl batpak::store::delivery::observation::CheckpointId
 pub fn batpak::store::delivery::observation::CheckpointId::as_str(&self) -> &str
-pub fn batpak::store::delivery::observation::CheckpointId::new(value: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn batpak::store::delivery::observation::CheckpointId::new(value: impl core::convert::Into<alloc::string::String>) -> core::result::Result<Self, batpak::store::delivery::observation::CheckpointIdError>
 pub struct batpak::store::Closed
 pub struct batpak::store::CompactionConfig
 pub batpak::store::CompactionConfig::min_segments: usize
@@ -3524,15 +3561,12 @@ pub fn batpak::store::fault::CountdownInjector::check(&self, point: batpak::stor
 pub fn batpak::store::fault::CountdownInjector::validate(&self) -> core::result::Result<(), alloc::string::String>
 pub struct batpak::store::Cursor
 impl batpak::store::delivery::cursor::Cursor
-pub fn batpak::store::delivery::cursor::Cursor::load_checkpoint(data_dir: &std::path::Path, id: &str) -> std::io::error::Result<core::option::Option<batpak::store::delivery::cursor::CursorCheckpoint>>
+pub fn batpak::store::delivery::cursor::Cursor::load_checkpoint(data_dir: &std::path::Path, id: &batpak::store::delivery::observation::CheckpointId) -> std::io::error::Result<core::option::Option<batpak::store::delivery::cursor::CursorCheckpoint>>
 pub fn batpak::store::delivery::cursor::Cursor::poll(&mut self) -> core::option::Option<batpak::store::index::IndexEntry>
 pub fn batpak::store::delivery::cursor::Cursor::poll_batch(&mut self, max: usize) -> alloc::vec::Vec<batpak::store::index::IndexEntry>
-pub fn batpak::store::delivery::cursor::Cursor::save_checkpoint(data_dir: &std::path::Path, id: &str, ckpt: &batpak::store::delivery::cursor::CursorCheckpoint) -> std::io::error::Result<()>
+pub fn batpak::store::delivery::cursor::Cursor::save_checkpoint(data_dir: &std::path::Path, id: &batpak::store::delivery::observation::CheckpointId, ckpt: &batpak::store::delivery::cursor::CursorCheckpoint) -> std::io::error::Result<()>
 pub fn batpak::store::delivery::cursor::Cursor::take_gaps(&mut self) -> alloc::vec::Vec<batpak::store::delivery::cursor::GapObservation>
 pub fn batpak::store::delivery::cursor::Cursor::with_gap_config(self, config: batpak::store::delivery::cursor::CursorGapConfig) -> Self
-pub struct batpak::store::CursorGapConfig
-pub batpak::store::CursorGapConfig::buffer_capacity: usize
-pub batpak::store::CursorGapConfig::enabled: bool
 #[non_exhaustive] pub struct batpak::store::CursorWorkerConfig
 pub batpak::store::CursorWorkerConfig::batch_size: usize
 pub batpak::store::CursorWorkerConfig::checkpoint_id: core::option::Option<batpak::store::delivery::observation::CheckpointId>
@@ -4098,6 +4132,7 @@ pub fn batpak::store::stats::WriterPressure::utilization(&self) -> f64
 pub const batpak::store::BACKUP_MANIFEST_BODY_SCHEMA_VERSION: u32
 pub const batpak::store::CHAIN_WALK_REPORT_SCHEMA_VERSION: u16
 pub const batpak::store::COMPACTION_REPORT_SCHEMA_VERSION: u16
+pub const batpak::store::MAX_CHECKPOINT_ID_LEN: usize
 pub const batpak::store::PROJECTION_RUN_REPORT_SCHEMA_VERSION: u16
 pub const batpak::store::READ_WALK_REPORT_SCHEMA_VERSION: u16
 pub const batpak::store::RESTORE_PROOF_REPORT_SCHEMA_VERSION: u32

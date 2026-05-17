@@ -379,6 +379,8 @@ handler has process-local at-least-once delivery but no durable checkpoint
 witness. The substrate is the only constructor for `AtLeastOnce`; handlers may
 inspect its identity with `checkpoint_id()` and clone the witness when they
 need to compose an `ObservedOnce`.
+`CheckpointId::new(...)` validates the file-name component before a durable
+cursor can bind it under `{data_dir}/cursors/`.
 
 Typed reactor surfaces follow the same rule. `TypedReactive::react`,
 `MultiReactive::dispatch`, and derive-generated multi-reactor handlers receive

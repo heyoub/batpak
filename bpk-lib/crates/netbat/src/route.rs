@@ -1,6 +1,8 @@
 use std::error::Error;
 use std::fmt;
 
+use crate::transport::CALL_VERB;
+
 /// Stable crate-layer rule for docs, diagnostics, and tests.
 pub const LAYER_RULE: &str = "nb exposes, sb dispatches, bp records";
 
@@ -189,7 +191,7 @@ impl ServerModule {
         let mut routes = Vec::with_capacity(module.operation_count());
         for (name, _) in module.operations() {
             let endpoint = Endpoint::new(name, format!("{base_path}/{name}"))?;
-            routes.push(Route::new("CALL", endpoint)?);
+            routes.push(Route::new(CALL_VERB, endpoint)?);
         }
 
         Ok(Self { module, routes })

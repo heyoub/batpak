@@ -498,7 +498,7 @@ where
             run_reactor_cursor(store, region, config, dispatcher, fetch)
         }
         ReactorCanal::LossySubscription => {
-            run_reactor_lossy(store, region, config, dispatcher, fetch)
+            run_reactor_lossy(store, region, config.idle_sleep, dispatcher, fetch)
         }
     }
 }
@@ -592,7 +592,7 @@ where
 fn run_reactor_lossy<P, D>(
     store: &Arc<Store<Open>>,
     region: &Region,
-    config: ReactorConfig,
+    idle_sleep: Duration,
     mut dispatcher: D,
     fetch: fn(&Store<Open>, u128) -> Result<StoredEvent<P>, StoreError>,
 ) -> Result<TypedReactorHandle<D::Error>, StoreError>
@@ -608,7 +608,6 @@ where
     let stop = Arc::new(AtomicBool::new(false));
     let stop_for_thread = Arc::clone(&stop);
     let sub = store.subscribe_lossy(region);
-    let idle_sleep = config.idle_sleep;
 
     let join = std::thread::Builder::new()
         .name("batpak-reactor-lossy".into())

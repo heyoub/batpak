@@ -333,7 +333,10 @@ Use `cursor_worker(...)` for restartable background consumers with
 `RestartPolicy` and explicit batch processing. Set
 `CursorWorkerConfig.checkpoint_id: Option<CheckpointId>` to persist
 resume position under `{data_dir}/cursors/{id}.ckpt` (written with
-parent-dir fsync). Without a `checkpoint_id`, resume is in-memory only.
+parent-dir fsync). Construct ids with `CheckpointId::new(...)`; invalid
+path-like, control-byte, or identity-separator strings are rejected before
+they can name checkpoint files. Without a `checkpoint_id`, resume is
+in-memory only.
 The handler receives a third argument, `Option<&AtLeastOnce>`: durable
 checkpoint-backed workers receive `Some`, while process-local workers receive
 `None`. Code that needs exactly-once composition can require `Some(witness)`
@@ -511,8 +514,8 @@ Before deploying a store path that matters:
 - Decide whether checkpoint and mmap index artifacts should stay enabled for
   faster cold start.
 - Configure `SigningKey`s if receipts must be verified after the fact.
-- Give restartable cursor workers stable `CheckpointId`s; process-local
-  cursors do not produce crash-durable delivery witnesses.
+- Give restartable cursor workers stable, validated `CheckpointId`s;
+  process-local cursors do not produce crash-durable delivery witnesses.
 - Benchmark on the deployment hardware before treating perf numbers as a
   contract.
 - Treat `StoreLocked` as an ownership signal: only one mutable/read-only owner

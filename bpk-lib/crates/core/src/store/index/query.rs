@@ -22,22 +22,7 @@ impl StoreIndex {
         self.upgrade_hit_with_visibility(hit, &visibility)
     }
 
-    pub(crate) fn upgrade_hit_with_visible_upper_bound(
-        &self,
-        hit: QueryHit,
-        visible_upper_bound: u64,
-    ) -> Option<IndexEntry> {
-        if hit.global_sequence >= visible_upper_bound {
-            return None;
-        }
-        let upgraded = self
-            .by_id
-            .get(&hit.event_id)
-            .map(|entry| entry.value().as_ref().clone());
-        upgraded.filter(|entry| entry.global_sequence < visible_upper_bound)
-    }
-
-    fn upgrade_hit_with_visibility(
+    pub(crate) fn upgrade_hit_with_visibility(
         &self,
         hit: QueryHit,
         visibility: &VisibilitySnapshot,
@@ -64,21 +49,14 @@ impl StoreIndex {
     /// [`StoreIndex::filter_region_hits`] pipeline: visibility → scope
     /// revalidation → kind/fact → clock range. Output is sorted by
     /// `global_sequence`.
-    pub(crate) fn query_hits(&self, region: &Region) -> Vec<QueryHit> {
-        let _read_guard = self.swap_gate.read();
-        let visibility = self.sequence.snapshot();
-        self.query_hits_with_visibility(region, &visibility)
-    }
-
-    pub(crate) fn query_hits_with_visible_upper_bound(
+    pub(crate) fn query_hits_with_snapshot(
         &self,
         region: &Region,
-    ) -> (Vec<QueryHit>, u64) {
+    ) -> (Vec<QueryHit>, VisibilitySnapshot) {
         let _read_guard = self.swap_gate.read();
         let visibility = self.sequence.snapshot();
-        let visible_upper_bound = visibility.visible_upper_bound();
         let hits = self.query_hits_with_visibility(region, &visibility);
-        (hits, visible_upper_bound)
+        (hits, visibility)
     }
 
     fn query_hits_with_visibility(
@@ -328,9 +306,9 @@ impl StoreIndex {
     }
 
     pub(crate) fn query(&self, region: &Region) -> Vec<IndexEntry> {
-        self.query_hits(region)
-            .into_iter()
-            .filter_map(|hit| self.upgrade_hit(hit))
+        let (hits, visibility) = self.query_hits_with_snapshot(region);
+        hits.into_iter()
+            .filter_map(|hit| self.upgrade_hit_with_visibility(hit, &visibility))
             .collect()
     }
 }

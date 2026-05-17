@@ -1,5 +1,6 @@
 use crate::coordinate::CoordinateError;
 use crate::event::EventPayloadRegistryError;
+use crate::store::delivery::observation::CheckpointIdError;
 use crate::store::stats::{HlcPoint, WatermarkKind};
 use std::path::PathBuf;
 
@@ -28,6 +29,8 @@ pub enum StoreError {
     },
     /// An invalid or malformed coordinate (entity/scope).
     Coordinate(CoordinateError),
+    /// An invalid or malformed durable cursor checkpoint identity.
+    CheckpointId(CheckpointIdError),
     /// MessagePack serialization or deserialization failed.
     Serialization(Box<dyn std::error::Error + Send + Sync>),
     /// CRC32 checksum did not match the frame data.
@@ -313,6 +316,7 @@ impl std::fmt::Display for StoreError {
                 )
             }
             Self::Coordinate(e) => write!(f, "coordinate error: {e}"),
+            Self::CheckpointId(e) => write!(f, "checkpoint id error: {e}"),
             Self::Serialization(e) => write!(f, "serialization error: {e}"),
             Self::CrcMismatch { segment_id, offset } => {
                 write!(f, "CRC mismatch in segment {segment_id} at offset {offset}")
@@ -492,6 +496,7 @@ impl std::error::Error for StoreError {
         match self {
             Self::Io(e) => Some(e),
             Self::Coordinate(e) => Some(e),
+            Self::CheckpointId(e) => Some(e),
             Self::Serialization(e) => Some(e.as_ref()),
             Self::CacheFailed(e) => Some(e.as_ref()),
             Self::StoreLocked { .. }
@@ -614,7 +619,8 @@ impl From<CoordinateError> for StoreError {
             other @ CoordinateError::EmptyEntity
             | other @ CoordinateError::EmptyScope
             | other @ CoordinateError::EntityTooLong { .. }
-            | other @ CoordinateError::ScopeTooLong { .. } => Self::Coordinate(other),
+            | other @ CoordinateError::ScopeTooLong { .. }
+            | other @ CoordinateError::ForbiddenSeparator => Self::Coordinate(other),
         }
     }
 }

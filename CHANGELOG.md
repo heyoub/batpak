@@ -22,6 +22,17 @@ All notable changes to this project will be documented in this file.
 - Pinned the canonical MessagePack encoder to the exact `rmp-serde` version
   covered by checked-in golden fixtures, and expanded report-body golden
   coverage across substrate and store evidence families.
+- `CheckpointId::new(...)` now returns `Result<CheckpointId,
+  CheckpointIdError>` and rejects empty, too-long, control-byte, path-like,
+  and identity-separator values before checkpoint files are named.
+- Cursor checkpoint load/save APIs now take a typed `&CheckpointId` instead of
+  a raw string id.
+- `CursorGapConfig` is now an enum:
+  `Disabled` or `Enabled { capacity: NonZeroUsize }`, so an enabled zero-size
+  gap buffer is unrepresentable.
+- `Coordinate` now rejects `|` and `=` with
+  `CoordinateError::ForbiddenSeparator`, keeping region checkpoint identities
+  injective.
 - `ClockKey` is no longer public API; it is an internal index ordering key.
 - `DiskPos` remains available from `batpak::store`, but its fields are no
   longer public and it is no longer re-exported by the prelude.
@@ -37,6 +48,13 @@ All notable changes to this project will be documented in this file.
 - If you constructed `ReactorConfig` with a struct literal, add
   `canal: ReactorCanal::CursorGuaranteed` or use `ReactorConfig::default()`
   and mutate the fields you need.
+- Handle `CheckpointId::new(...)` as fallible and pass the typed id to
+  checkpoint APIs instead of a raw string.
+- Replace `CursorGapConfig { enabled, buffer_capacity }` literals with
+  `CursorGapConfig::Disabled` or
+  `CursorGapConfig::Enabled { capacity: NonZeroUsize::new(n).expect(...) }`.
+- Remove `|` and `=` from coordinate entity/scope/fact/clock components; those
+  bytes are reserved for region checkpoint identity framing.
 - If you imported or named `ClockKey`, remove that dependency. It was an
   internal index helper; public ordering remains observable through store query
   results.
