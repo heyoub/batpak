@@ -10,7 +10,7 @@ use batpak::transition::{
     allowed_transition_edges_are_sorted, build_state_transition_report,
     normalize_state_transition_event, state_transition_event_bytes, state_transition_event_digest,
     state_transition_report_body_hash, transition_causes_are_sorted, StateTransitionEvent,
-    StateTransitionFinding, StateTransitionReport, StateTransitionReportBody, TransitionCauseRef,
+    StateTransitionFinding, StateTransitionReportBody, TransitionCauseRef,
     TransitionEvidenceDigest, TransitionId, TransitionMachineId, TransitionSubjectId,
     STATE_TRANSITION_EVENT_SCHEMA_VERSION, STATE_TRANSITION_REPORT_SCHEMA_VERSION,
     TRANSITION_INVALID_DISALLOWED_EDGE,
@@ -227,7 +227,7 @@ fn transition_report_alias_and_schema_constants() {
     let edges = [(0u64, 1u64)];
     let body: StateTransitionReportBody =
         build_state_transition_report(&ev_sorted, &edges).expect("b");
-    let _alias: StateTransitionReport = body.clone();
+    let _body: StateTransitionReportBody = body.clone();
     assert_eq!(body.schema_version, STATE_TRANSITION_REPORT_SCHEMA_VERSION);
     let _d: TransitionEvidenceDigest = body.transition_event_digest;
 }

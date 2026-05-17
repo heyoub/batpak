@@ -212,7 +212,7 @@ fn cursor_resumes_from_checkpoint_across_reopen() {
                     move |batch, _store, _witness| {
                         let mut seen = seen.lock().expect("seen mutex");
                         for entry in batch {
-                            seen.push(entry.global_sequence);
+                            seen.push(entry.global_sequence());
                         }
                         let total = processed.fetch_add(batch.len() as u64, Ordering::SeqCst)
                             + batch.len() as u64;
@@ -279,7 +279,7 @@ fn cursor_resumes_from_checkpoint_across_reopen() {
                     move |batch, _store, _witness| {
                         let mut seen = seen.lock().expect("seen mutex");
                         for entry in batch {
-                            seen.push(entry.global_sequence);
+                            seen.push(entry.global_sequence());
                         }
                         processed.fetch_add(batch.len() as u64, Ordering::SeqCst);
                         CursorWorkerAction::Continue
@@ -489,7 +489,7 @@ fn durable_cursor_worker_state_machine_preserves_last_committed_checkpoint() {
             {
                 let seen = Arc::clone(&seen);
                 move |batch, _store, _witness| {
-                    let seq = batch[0].global_sequence;
+                    let seq = batch[0].global_sequence();
                     let mut counts = seen.lock().expect("counts mutex");
                     *counts.entry(seq).or_insert(0) += 1;
                     drop(counts);
@@ -520,7 +520,7 @@ fn durable_cursor_worker_state_machine_preserves_last_committed_checkpoint() {
                 let seen = Arc::clone(&seen);
                 let panic_once = Arc::new(std::sync::atomic::AtomicBool::new(true));
                 move |batch, _store, _witness| {
-                    let seq = batch[0].global_sequence;
+                    let seq = batch[0].global_sequence();
                     let mut counts = seen.lock().expect("counts mutex");
                     *counts.entry(seq).or_insert(0) += 1;
                     drop(counts);

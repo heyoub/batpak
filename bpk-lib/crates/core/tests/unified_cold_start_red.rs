@@ -123,7 +123,7 @@ fn interner_roundtrip() {
     store.append(&coord, kind_a(), &payload(0)).expect("append");
     let entries = store.by_entity("intern:entity");
     assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].coord.entity(), "intern:entity");
-    assert_eq!(entries[0].coord.scope(), "intern:scope");
+    assert_eq!(entries[0].coord().entity(), "intern:entity");
+    assert_eq!(entries[0].coord().scope(), "intern:scope");
     store.close().expect("close");
 }

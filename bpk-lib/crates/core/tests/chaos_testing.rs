@@ -465,13 +465,13 @@ fn chaos_rapid_segment_rotation() {
     );
 
     // Spot-check first and last events
-    let first = store.get(entries[0].event_id).expect("first event");
+    let first = store.get(entries[0].event_id()).expect("first event");
     let last = store
-        .get(entries[entries.len() - 1].event_id)
+        .get(entries[entries.len() - 1].event_id())
         .expect("last event");
     assert_eq!(
         first.event.event_id(),
-        entries[0].event_id,
+        entries[0].event_id(),
         "CHAOS PROPERTY: store.get() for the first indexed event_id must return the matching event.\n\
          Investigate: src/store/segment/scan.rs get(), src/store/index/mod.rs lookup offset.\n\
          Common causes: index stores wrong file offset after rotation, event_id collision from monotonic-clock reset.\n\
@@ -479,7 +479,7 @@ fn chaos_rapid_segment_rotation() {
     );
     assert_eq!(
         last.event.event_id(),
-        entries[entries.len() - 1].event_id,
+        entries[entries.len() - 1].event_id(),
         "CHAOS PROPERTY: store.get() for the last indexed event_id must return the matching event.\n\
          Investigate: src/store/segment/scan.rs get(), src/store/segment/mod.rs seek by offset.\n\
          Common causes: final segment not flushed before get(), write buffer not committed on sync().\n\
@@ -581,10 +581,13 @@ fn chaos_batch_atomicity_concurrent() {
         if !entries.is_empty() {
             for (i, entry) in entries.iter().enumerate() {
                 assert_eq!(
-                    entry.clock as usize, i,
+                    entry.clock() as usize,
+                    i,
                     "CHAOS PROPERTY: entity clocks must be contiguous after concurrent batches.\n\
                      Entry {} has clock {} (expected {}).",
-                    i, entry.clock, i
+                    i,
+                    entry.clock(),
+                    i
                 );
             }
         }
@@ -793,7 +796,7 @@ fn chaos_cursor_completeness_concurrent() {
     let mut cursor = store.cursor_guaranteed(&region);
     let mut seen = Vec::new();
     while let Some(entry) = cursor.poll() {
-        seen.push(entry.event_id);
+        seen.push(entry.event_id());
     }
 
     assert_eq!(
@@ -865,7 +868,7 @@ fn chaos_truncated_segment_recovers() {
          Run: cargo test --test chaos_testing chaos_truncated_segment_recovers",
         written_entries.len()
     );
-    let written_ids: Vec<_> = written_entries.iter().map(|e| e.event_id).collect();
+    let written_ids: Vec<_> = written_entries.iter().map(|e| e.event_id()).collect();
 
     store.close().expect("close");
 
@@ -946,22 +949,22 @@ fn chaos_truncated_segment_recovers() {
     // Every recovered event_id must have been one we originally wrote
     for entry in &recovered_entries {
         assert!(
-            written_ids.contains(&entry.event_id),
+            written_ids.contains(&entry.event_id()),
             "CHAOS PROPERTY: every event recovered after truncation must match an originally written event_id; \
              found unknown id {:?}.\n\
              Investigate: src/store/mod.rs cold-start replay, src/store/segment/mod.rs frame_decode.\n\
              Common causes: partial frame incorrectly accepted as valid, event_id reconstructed from corrupt bytes.\n\
              Run: cargo test --test chaos_testing chaos_truncated_segment_recovers",
-            entry.event_id
+            entry.event_id()
         );
     }
 
     // All recovered events must be readable via get()
     for entry in &recovered_entries {
-        let fetched = store2.get(entry.event_id).expect("get recovered event");
+        let fetched = store2.get(entry.event_id()).expect("get recovered event");
         assert_eq!(
             fetched.event.event_id(),
-            entry.event_id,
+            entry.event_id(),
             "CHAOS PROPERTY: store.get() for a recovered event_id must return the matching event.\n\
              Investigate: src/store/segment/scan.rs get(), src/store/index/mod.rs offset lookup.\n\
              Common causes: index rebuilt with wrong file offsets during cold-start, truncated segment re-indexed past truncation point.\n\

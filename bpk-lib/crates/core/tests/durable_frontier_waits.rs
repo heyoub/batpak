@@ -30,10 +30,10 @@ fn kind() -> EventKind {
     EventKind::custom(0xF, 0x94)
 }
 
-fn point(entry: &batpak::store::IndexEntry) -> HlcPoint {
+fn point(entry: &batpak::store::index::IndexEntry) -> HlcPoint {
     HlcPoint {
-        wall_ms: entry.wall_ms,
-        global_sequence: entry.global_sequence,
+        wall_ms: entry.wall_ms(),
+        global_sequence: entry.global_sequence(),
     }
 }
 

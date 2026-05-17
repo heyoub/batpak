@@ -62,7 +62,7 @@ impl WatermarkKind {
 /// Coherent point-in-time copy of the internal frontier watermarks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[must_use]
-pub struct WatermarkSnapshot {
+pub(crate) struct WatermarkSnapshot {
     /// Highest HLC whose ordering coordinate has been assigned.
     pub accepted_hlc: HlcPoint,
     /// Highest HLC whose frame write returned successfully.
@@ -113,22 +113,6 @@ pub struct FrontierView {
     pub visible_minus_durable_seq: i64,
     /// Real elapsed age of the oldest currently undurable write, if any.
     pub oldest_pending_write_age_ms: Option<u64>,
-}
-
-impl From<WatermarkSnapshot> for FrontierView {
-    fn from(snapshot: WatermarkSnapshot) -> Self {
-        Self {
-            accepted_hlc: snapshot.accepted_hlc,
-            written_hlc: snapshot.written_hlc,
-            durable_hlc: snapshot.durable_hlc,
-            visible_hlc: snapshot.visible_hlc,
-            applied_hlc: snapshot.applied_hlc,
-            emitted_hlc: snapshot.emitted_hlc,
-            visible_minus_durable_seq: (snapshot.visible_hlc.global_sequence as i64)
-                - (snapshot.durable_hlc.global_sequence as i64),
-            oldest_pending_write_age_ms: snapshot.oldest_pending_write_age_ms,
-        }
-    }
 }
 
 /// Lightweight runtime statistics snapshot for the store.

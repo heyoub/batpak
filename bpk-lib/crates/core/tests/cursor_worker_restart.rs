@@ -49,7 +49,7 @@ fn cursor_worker_restarts_from_last_committed_checkpoint_after_panic() {
             let seen = Arc::clone(&seen);
             let panic_once = Arc::clone(&panic_once);
             move |batch, _store, _witness| {
-                let seq = batch[0].global_sequence;
+                let seq = batch[0].global_sequence();
                 let mut counts = seen.lock().expect("counts mutex");
                 *counts.entry(seq).or_insert(0) += 1;
                 drop(counts);

@@ -136,7 +136,7 @@ fn react_loop_spawns_and_processes() {
         std::thread::yield_now();
     };
     assert_eq!(
-        reactions[0].kind,
+        reactions[0].event_kind(),
         EventKind::custom(0xA, 2),
         "PROPERTY: reaction event must have the kind returned by the reactor.\n\
          Investigate: src/store/mod.rs react_loop.\n\

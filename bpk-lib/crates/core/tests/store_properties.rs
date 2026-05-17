@@ -88,7 +88,8 @@ fn replay_determinism_cold_start_rebuilds_identical_index() {
 
     for (i, entry) in events.iter().enumerate() {
         assert_eq!(
-            entry.event_id, event_ids[i],
+            entry.event_id(),
+            event_ids[i],
             "PROPERTY: Replayed event_id must match original at index {i}.\n\
              Investigate: src/store/segment/scan.rs scan_segment event ordering.\n\
              Common causes: events reordered during cold start, BTreeMap key collision."

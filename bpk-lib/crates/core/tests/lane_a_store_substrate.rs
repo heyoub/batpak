@@ -9,6 +9,7 @@
 
 use batpak::event::EventKind;
 use batpak::prelude::*;
+use batpak::store::index::IndexEntry;
 use batpak::store::segment::CompactionOutcome;
 use batpak::store::{
     compaction_strategy_shape, report_for_run, report_skipped, BatchAppendItem, CausationRef,

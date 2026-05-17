@@ -20,7 +20,7 @@ pub mod register_store;
 pub mod store_sink;
 
 pub use builder::CoreBuilder;
-pub use core::{Checkout, CheckoutFrame, CheckoutResult, Core, Ctx, InvokeResult};
+pub use core::{Checkout, CheckoutFrame, CheckoutResult, Core, Ctx};
 pub use error::{BuildError, RuntimeError};
 pub use handler::{Handler, HandlerError, HandlerResult};
 pub use module::Module;
@@ -35,9 +35,8 @@ pub use receipt::{
 };
 pub use register::{CacheRegister, Register, RegisterValidationError};
 pub use register_store::{
-    rebuild_register_from_store, RegisterOperationActionV1, RegisterOperationPutV1,
-    RegisterOperationRowV1, StoreRegisterCatalog, StoreRegisterCatalogError,
-    SYNCBAT_REGISTER_EVENT_KIND,
+    rebuild_register_from_store, RegisterOperationActionV1, RegisterOperationRowV1,
+    StoreRegisterCatalog, StoreRegisterCatalogError, SYNCBAT_REGISTER_EVENT_KIND,
 };
 pub use store_sink::{StoreReceiptSink, StoreReceiptSinkError};
 pub use syncbat_macros::operation;

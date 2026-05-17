@@ -15,7 +15,8 @@
 //! SEEDED: checked-in fixture stores under `tests/fixtures/cold_start/adr0009`.
 
 use batpak::prelude::*;
-use batpak::store::{ExtensionKey, OpenIndexPath};
+use batpak::store::cold_start::rebuild::OpenIndexPath;
+use batpak::store::ExtensionKey;
 use std::fs;
 use std::path::Path;
 use tempfile::TempDir;
@@ -71,10 +72,12 @@ fn assert_historical_fixture_opens(
         "fixture should expose exactly one app event for {}",
         coord.entity()
     );
-    assert_eq!(entries[0].dag_lane, lane);
-    assert_eq!(entries[0].dag_depth, depth);
+    assert_eq!(entries[0].dag_lane(), lane);
+    assert_eq!(entries[0].dag_depth(), depth);
 
-    let stored = store.get(entries[0].event_id).expect("fetch fixture event");
+    let stored = store
+        .get(entries[0].event_id())
+        .expect("fetch fixture event");
     assert_eq!(stored.event.header.position.lane(), lane);
     assert_eq!(stored.event.header.position.depth(), depth);
 

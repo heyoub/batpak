@@ -18,7 +18,7 @@ use batpak::prelude::{
 };
 use batpak::store::{
     CountdownAction, CountdownInjector, FrontierView, HlcPoint, InjectionPoint, ReadOnly, Store,
-    StoreConfig, StoreError, WatermarkSnapshot,
+    StoreConfig, StoreError,
 };
 use std::fs::{self, OpenOptions};
 use std::io::{Seek, SeekFrom, Write};
@@ -63,10 +63,10 @@ fn coord(entity: &str) -> Coordinate {
     Coordinate::new(entity, "scope:test").expect("coord")
 }
 
-fn point(entry: &batpak::store::IndexEntry) -> HlcPoint {
+fn point(entry: &batpak::store::index::IndexEntry) -> HlcPoint {
     HlcPoint {
-        wall_ms: entry.wall_ms,
-        global_sequence: entry.global_sequence,
+        wall_ms: entry.wall_ms(),
+        global_sequence: entry.global_sequence(),
     }
 }
 
@@ -78,15 +78,15 @@ fn lifecycle_open_count<State>(store: &Store<State>) -> usize {
     store
         .query(&Region::entity("batpak:store"))
         .into_iter()
-        .filter(|entry| entry.kind == EventKind::SYSTEM_OPEN_COMPLETED)
+        .filter(|entry| entry.event_kind() == EventKind::SYSTEM_OPEN_COMPLETED)
         .count()
 }
 
-fn lifecycle_close_entries<State>(store: &Store<State>) -> Vec<batpak::store::IndexEntry> {
+fn lifecycle_close_entries<State>(store: &Store<State>) -> Vec<batpak::store::index::IndexEntry> {
     store
         .query(&Region::entity("batpak:store"))
         .into_iter()
-        .filter(|entry| entry.kind == EventKind::SYSTEM_CLOSE_COMPLETED)
+        .filter(|entry| entry.event_kind() == EventKind::SYSTEM_CLOSE_COMPLETED)
         .collect()
 }
 
@@ -322,7 +322,7 @@ fn bootstrap_watermark_snapshot_matches_lifecycle_open_event() {
     let dir = TempDir::new().expect("temp dir");
     let store = Store::open(StoreConfig::new(dir.path())).expect("open store");
 
-    let snapshot: WatermarkSnapshot = store.dangerous_watermark_snapshot();
+    let snapshot: FrontierView = store.dangerous_watermark_snapshot();
     let frontier: FrontierView = store.diagnostics().frontier;
     let open_hlc = snapshot.durable_hlc;
 
@@ -644,7 +644,7 @@ fn single_append_cadence_gt_1_visible_exceeds_durable_frontier() {
 
     let visible = store.query(&Region::entity("entity:frontier"));
     assert_eq!(visible.len(), 1);
-    assert_eq!(visible[0].event_id, receipt.event_id);
+    assert_eq!(visible[0].event_id(), receipt.event_id);
 
     let snapshot = store.dangerous_watermark_snapshot();
     let frontier = store.diagnostics().frontier;
@@ -819,8 +819,8 @@ fn read_only_open_bootstraps_frontier_from_rebuilt_index() {
         assert_eq!(entries.len(), 1);
         let entry = &entries[0];
         let point = HlcPoint {
-            wall_ms: entry.wall_ms,
-            global_sequence: entry.global_sequence,
+            wall_ms: entry.wall_ms(),
+            global_sequence: entry.global_sequence(),
         };
         assert!(point > HlcPoint::ORIGIN);
         store.close().expect("close");

@@ -89,9 +89,9 @@ fn snapshot(store: &Store) -> Vec<(String, String, u64)> {
         .into_iter()
         .map(|entry| {
             (
-                entry.coord.entity().to_owned(),
-                entry.coord.scope().to_owned(),
-                entry.global_sequence,
+                entry.coord().entity().to_owned(),
+                entry.coord().scope().to_owned(),
+                entry.global_sequence(),
             )
         })
         .collect();

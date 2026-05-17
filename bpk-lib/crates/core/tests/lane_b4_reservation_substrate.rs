@@ -11,10 +11,10 @@ use batpak::reservation::{
     reservation_reconciliation_report, reservation_reconciliation_report_body_hash,
     reservation_transition_bytes, reservation_transition_log_digest, simulate_reservation_ledger,
     ReservationCauseRef, ReservationDigest, ReservationEntry, ReservationFinding, ReservationId,
-    ReservationLedgerReportBody, ReservationQuantity, ReservationReconciliationReport,
-    ReservationReconciliationReportBody, ReservationState, ReservationSubjectRef,
-    ReservationTransition, RESERVATION_LEDGER_REPORT_SCHEMA_VERSION, RESERVATION_OP_COMMIT,
-    RESERVATION_OP_EXPIRE, RESERVATION_OP_ORPHAN, RESERVATION_OP_REFUND, RESERVATION_OP_RESERVE,
+    ReservationLedgerReportBody, ReservationQuantity, ReservationReconciliationReportBody,
+    ReservationState, ReservationSubjectRef, ReservationTransition,
+    RESERVATION_LEDGER_REPORT_SCHEMA_VERSION, RESERVATION_OP_COMMIT, RESERVATION_OP_EXPIRE,
+    RESERVATION_OP_ORPHAN, RESERVATION_OP_REFUND, RESERVATION_OP_RESERVE,
     RESERVATION_REASON_COMMIT_WITHOUT_RESERVE, RESERVATION_REASON_DOUBLE_COMMIT,
     RESERVATION_REASON_DUPLICATE_RESERVE, RESERVATION_REASON_EXPIRE_INVALID_STATE,
     RESERVATION_REASON_ORPHAN_INVALID_STATE, RESERVATION_REASON_REFUND_AFTER_COMMIT,
@@ -206,7 +206,6 @@ fn reservation_orphan_and_reconciliation_deterministic() {
     assert_eq!(rep.entries_sorted[1].state, RESERVATION_STATE_EXPIRED);
     let _e: &ReservationEntry = &rep.entries_sorted[0];
     let _q: ReservationQuantity = rep.entries_sorted[0].quantity;
-    let _alias: ReservationReconciliationReport = rec.clone();
     let _rec_body: ReservationReconciliationReportBody = rec.clone();
 }
 

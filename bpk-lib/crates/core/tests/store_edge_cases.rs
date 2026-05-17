@@ -430,7 +430,7 @@ fn concurrent_appends_same_entity_all_persisted() {
     );
 
     // Verify global sequences are unique (contiguous is an implementation detail)
-    let mut global_seqs: Vec<u64> = events.iter().map(|e| e.global_sequence).collect();
+    let mut global_seqs: Vec<u64> = events.iter().map(|e| e.global_sequence()).collect();
     global_seqs.sort();
     global_seqs.dedup();
     assert_eq!(

@@ -1,5 +1,5 @@
 use crate::event::StoredEvent;
-use crate::store::IndexEntry;
+use crate::store::index::IndexEntry;
 use crate::store::Store;
 use std::collections::HashSet;
 

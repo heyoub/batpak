@@ -34,10 +34,10 @@ fn kind() -> EventKind {
     EventKind::custom(0xF, 0x93)
 }
 
-fn point(entry: &batpak::store::IndexEntry) -> HlcPoint {
+fn point(entry: &batpak::store::index::IndexEntry) -> HlcPoint {
     HlcPoint {
-        wall_ms: entry.wall_ms,
-        global_sequence: entry.global_sequence,
+        wall_ms: entry.wall_ms(),
+        global_sequence: entry.global_sequence(),
     }
 }
 
@@ -95,12 +95,12 @@ fn is_device_failure_surface(err: &StoreError) -> bool {
     false
 }
 
-fn recovered_entries(store: &Store) -> Vec<batpak::store::IndexEntry> {
+fn recovered_entries(store: &Store) -> Vec<batpak::store::index::IndexEntry> {
     store.query(&Region::scope(BATCH_TORN_TAIL_SCOPE))
 }
 
-fn event_ids(entries: &[batpak::store::IndexEntry]) -> HashSet<u128> {
-    entries.iter().map(|entry| entry.event_id).collect()
+fn event_ids(entries: &[batpak::store::index::IndexEntry]) -> HashSet<u128> {
+    entries.iter().map(|entry| entry.event_id()).collect()
 }
 
 fn assert_durable_covers_recovered(store: &Store) {

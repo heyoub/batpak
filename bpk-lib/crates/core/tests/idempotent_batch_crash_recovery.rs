@@ -30,13 +30,13 @@ fn config(dir: &TempDir) -> StoreConfig {
         .with_sync_every_n_events(1)
 }
 
-fn user_visible_events(store: &Store) -> Vec<batpak::store::IndexEntry> {
+fn user_visible_events(store: &Store) -> Vec<batpak::store::index::IndexEntry> {
     store
         .query(&Region::all())
         .into_iter()
         .filter(|entry| {
             !matches!(
-                entry.kind,
+                entry.event_kind(),
                 EventKind::SYSTEM_OPEN_COMPLETED | EventKind::SYSTEM_CLOSE_COMPLETED
             )
         })

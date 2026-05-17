@@ -581,7 +581,7 @@ where
     // Uses the projection's replay-input lane, which always skips Coordinate
     // construction and may leave payloads as raw MessagePack bytes.
     let t_disk = std::time::Instant::now();
-    let positions: Vec<&crate::store::DiskPos> = execution
+    let positions: Vec<&crate::store::index::DiskPos> = execution
         .replay
         .plan
         .items

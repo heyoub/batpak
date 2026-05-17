@@ -8,12 +8,13 @@
 //! SEEDED: deterministic / no randomness.
 
 use batpak::prelude::*;
+use batpak::store::cold_start::rebuild::OpenIndexReport;
 use batpak::store::{
     store_data_dir_identity_hash, store_resource_evidence_report_from_diagnostics,
-    store_resource_report_body_from_diagnostics, store_resource_report_body_hash, OpenIndexReport,
-    StoreResourceEnvelope, StoreResourceEvidenceReport, StoreResourceFrontierBody,
-    StoreResourceHash, StoreResourceReportBody, StoreResourceReportError,
-    StoreResourceRestartPolicyShape, STORE_RESOURCE_REPORT_SCHEMA_VERSION,
+    store_resource_report_body_from_diagnostics, store_resource_report_body_hash,
+    StoreResourceEvidenceReport, StoreResourceFrontierBody, StoreResourceHash,
+    StoreResourceReportBody, StoreResourceReportError, StoreResourceRestartPolicyShape,
+    STORE_RESOURCE_REPORT_SCHEMA_VERSION,
 };
 use std::error::Error;
 
@@ -71,7 +72,7 @@ fn store_resource_evidence_family_invariants_and_reopen_stable() -> TestResult {
     assert_eq!(body_hash_direct, from_fn.body_hash);
 
     let rep1: StoreResourceEvidenceReport = store.store_resource_evidence_report()?;
-    let envelope: StoreResourceEnvelope = rep1.clone();
+    let envelope: StoreResourceEvidenceReport = rep1.clone();
     assert_eq!(envelope.body_hash, rep1.body_hash);
 
     let diag = store.diagnostics();

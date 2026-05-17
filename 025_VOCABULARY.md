@@ -18,21 +18,21 @@ machinery as the default userland surface.
 
 ## Canonical Terms
 
-| Term | Use For | Avoid |
-| --- | --- | --- |
-| `Coordinate` | public `(entity, scope)` address | `coord` in public fields |
-| `EventKind` | packed category/type event discriminator | bare `kind` in docs without context |
-| `position` | event position, including lane/depth hints | overloaded `pos` |
-| `DiskPos` | low-level physical receipt witness | prelude/default user import |
-| `frontier` | coherent public operator view of watermarks | public raw watermark snapshots |
-| `FrontierView` | public frontier struct | duplicate public snapshot structs |
-| `WatermarkSnapshot` | internal raw watermark machinery | public operator surface |
-| `Cursor` | ordered pull replay, checkpointable | generic "stream" wording |
-| `Subscription` | lossy push observation | guaranteed delivery wording |
-| `Canal` | delivery adapter concept over cursor/subscription primitives | metaphor-only docs |
-| `by_entity` | exact entity query returning indexed entries | `stream` as a public query name |
-| `read_raw` | raw event read by id | `get_raw` |
-| `Ctx` | runtime context spelling | `Cx` in new public surfaces |
+| Term | Use For | Avoid | Status |
+| --- | --- | --- | --- |
+| `Coordinate` | public `(entity, scope)` address | `coord` in public fields | shipped |
+| `EventKind` | packed category/type event discriminator | bare `kind` in docs without context | shipped |
+| `position` | event position, including lane/depth hints | overloaded `pos` | shipped |
+| `DiskPos` | low-level physical receipt witness | prelude/default user import | shipped: fields hidden, reachable only from `store::index` |
+| `frontier` | coherent public operator view of watermarks | public raw watermark snapshots | shipped |
+| `FrontierView` | public frontier struct | duplicate public snapshot structs | shipped |
+| `WatermarkSnapshot` | internal raw watermark machinery | public operator surface | shipped: `pub(crate)` |
+| `Cursor` | ordered pull replay, checkpointable | generic "stream" wording | shipped |
+| `Subscription` | lossy push observation | guaranteed delivery wording | shipped |
+| `Canal` | delivery adapter concept over cursor/subscription primitives | metaphor-only docs | aspirational: R4.06 owns trait work |
+| `by_entity` | exact entity query returning indexed entries | `stream` as a public query name | shipped |
+| `read_raw` | raw event read by id | `get_raw` | shipped |
+| `Ctx` | runtime context spelling | `Cx` in new public surfaces | shipped |
 
 ## Public Surface Corrections
 
@@ -59,4 +59,3 @@ The store has two shipped delivery primitives:
 `Canal` is the shared delivery adapter vocabulary over those primitives. It
 must stay narrow and compositional: the primitive keeps its own semantics, and
 the canal layer only gives reactor code a common way to consume committed work.
-

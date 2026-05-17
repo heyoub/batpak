@@ -60,13 +60,13 @@ fn populate(store: &Store) {
 }
 
 fn strip_lifecycle_events(
-    entries: Vec<batpak::store::IndexEntry>,
-) -> Vec<batpak::store::IndexEntry> {
+    entries: Vec<batpak::store::index::IndexEntry>,
+) -> Vec<batpak::store::index::IndexEntry> {
     entries
         .into_iter()
         .filter(|entry| {
             !matches!(
-                entry.kind,
+                entry.event_kind(),
                 EventKind::SYSTEM_OPEN_COMPLETED | EventKind::SYSTEM_CLOSE_COMPLETED
             )
         })
@@ -84,11 +84,11 @@ fn run_matrix(label: &str, store: &Store) {
     );
     for entry in &scope_a {
         assert_eq!(
-            entry.coord.scope(),
+            entry.coord().scope(),
             "scope:A",
             "topology `{label}`: scope query returned an event with scope={:?}; \
              the overlay's pre-filter is leaking.",
-            entry.coord.scope()
+            entry.coord().scope()
         );
     }
 
@@ -101,10 +101,10 @@ fn run_matrix(label: &str, store: &Store) {
     );
     for entry in &scope_b {
         assert_eq!(
-            entry.coord.scope(),
+            entry.coord().scope(),
             "scope:B",
             "topology `{label}`: scope:B query returned scope={:?}",
-            entry.coord.scope()
+            entry.coord().scope()
         );
     }
 
@@ -118,8 +118,8 @@ fn run_matrix(label: &str, store: &Store) {
         scope_a_kind_a.len()
     );
     for entry in &scope_a_kind_a {
-        assert_eq!(entry.kind, KIND_A);
-        assert_eq!(entry.coord.scope(), "scope:A");
+        assert_eq!(entry.event_kind(), KIND_A);
+        assert_eq!(entry.coord().scope(), "scope:A");
     }
 
     let scope_a_kind_b =
@@ -149,11 +149,11 @@ fn run_matrix(label: &str, store: &Store) {
         scope_a_clocked.len()
     );
     for entry in &scope_a_clocked {
-        assert_eq!(entry.coord.scope(), "scope:A");
+        assert_eq!(entry.coord().scope(), "scope:A");
         assert!(
-            entry.clock <= 2,
+            entry.clock() <= 2,
             "topology `{label}`: clock_range violation — found clock={}",
-            entry.clock
+            entry.clock()
         );
     }
 
@@ -224,7 +224,7 @@ fn bounded_scope_cursor_skips_hidden_gap_and_reaches_later_visible_event() {
         1,
         "PROPERTY: first bounded scope poll must return the baseline visible event"
     );
-    assert_eq!(first[0].global_sequence, 1);
+    assert_eq!(first[0].global_sequence(), 1);
 
     let second = cursor.poll_batch(1);
     assert_eq!(
@@ -233,7 +233,7 @@ fn bounded_scope_cursor_skips_hidden_gap_and_reaches_later_visible_event() {
         "PROPERTY: second bounded scope poll must skip the cancelled hidden gap and surface the later visible event"
     );
     assert_eq!(
-        second[0].event_id,
+        second[0].event_id(),
         visible_after_gap.event_id,
         "PROPERTY: bounded scope cursor must advance past hidden entries instead of stalling on an empty batch"
     );

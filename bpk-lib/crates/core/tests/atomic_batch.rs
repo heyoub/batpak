@@ -5,12 +5,14 @@
 use batpak::prelude::*;
 use std::collections::HashSet;
 
-fn strip_open_completed(entries: Vec<batpak::store::IndexEntry>) -> Vec<batpak::store::IndexEntry> {
+fn strip_open_completed(
+    entries: Vec<batpak::store::index::IndexEntry>,
+) -> Vec<batpak::store::index::IndexEntry> {
     entries
         .into_iter()
         .filter(|entry| {
             !matches!(
-                entry.kind,
+                entry.event_kind(),
                 EventKind::SYSTEM_OPEN_COMPLETED | EventKind::SYSTEM_CLOSE_COMPLETED
             )
         })
@@ -263,7 +265,7 @@ fn batch_atomicity_full_visibility_on_success() {
     let mut cursor = store.cursor_guaranteed(&Region::all());
     let mut found = HashSet::new();
     for entry in strip_open_completed(cursor.poll_batch(10)) {
-        found.insert(entry.event_id);
+        found.insert(entry.event_id());
     }
 
     for receipt in &receipts {
@@ -300,7 +302,7 @@ fn batch_marker_invisible() {
     let mut cursor = store.cursor_guaranteed(&Region::all());
     let entries = strip_open_completed(cursor.poll_batch(10));
     assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].kind, EventKind::DATA);
+    assert_eq!(entries[0].event_kind(), EventKind::DATA);
 }
 
 /// Test: intra-batch causation linking.
@@ -342,8 +344,8 @@ fn batch_intra_batch_causation() {
     let entries = strip_open_completed(cursor.poll_batch(10));
     assert_eq!(entries.len(), 2);
 
-    let first_id = entries[0].event_id;
-    let second_causation = entries[1].causation_id;
+    let first_id = entries[0].event_id();
+    let second_causation = entries[1].causation_id();
     assert_eq!(second_causation, Some(first_id));
 }
 
@@ -456,7 +458,7 @@ fn batch_restart_recovery_discards_incomplete_after_begin() {
         1,
         "incomplete batch should be discarded on recovery"
     );
-    assert_eq!(entries[0].kind, EventKind::DATA);
+    assert_eq!(entries[0].event_kind(), EventKind::DATA);
 }
 
 /// Test: restart recovery discards incomplete batch (crash mid-batch items).
@@ -554,12 +556,12 @@ fn batch_both_markers_invisible() {
     let mut cursor = store.cursor_guaranteed(&Region::all());
     let entries = strip_open_completed(cursor.poll_batch(10));
     assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].kind, EventKind::DATA);
+    assert_eq!(entries[0].event_kind(), EventKind::DATA);
 
     // Verify no system kinds appear.
     for entry in &entries {
         assert!(
-            !entry.kind.is_system(),
+            !entry.event_kind().is_system(),
             "system events should not be visible"
         );
     }
@@ -647,7 +649,7 @@ fn batch_fsync_ambiguity_discards_uncommitted() {
     );
     assert_eq!(
         store
-            .get(entries[0].event_id)
+            .get(entries[0].event_id())
             .expect("load recovered pre-established event after fsync ambiguity")
             .event
             .payload["pre"],
@@ -715,7 +717,7 @@ fn batch_recovery_system_remains_coherent() {
         1,
         "entity_a should have only committed event"
     );
-    assert_eq!(entries_a[0].global_sequence, receipt_a1.sequence);
+    assert_eq!(entries_a[0].global_sequence(), receipt_a1.sequence);
 
     let mut cursor_b = store.cursor_guaranteed(&Region::entity(coord_b.entity()));
     let entries_b = cursor_b.poll_batch(10);
@@ -765,12 +767,13 @@ fn batch_recovery_system_remains_coherent() {
 
     // Verify hash chain integrity post-recovery.
     for entry in &all_entries {
-        if entry.clock > 0 {
+        if entry.clock() > 0 {
             // Verify entity clock progression.
-            let mut entity_cursor = store.cursor_guaranteed(&Region::entity(entry.coord.entity()));
+            let mut entity_cursor =
+                store.cursor_guaranteed(&Region::entity(entry.coord().entity()));
             let entity_entries = entity_cursor.poll_batch(10);
             for (i, e) in entity_entries.iter().enumerate() {
-                assert_eq!(e.clock as usize, i, "entity clock should be contiguous");
+                assert_eq!(e.clock() as usize, i, "entity clock should be contiguous");
             }
         }
     }
@@ -888,7 +891,7 @@ fn batch_subscription_atomicity_no_partial_visibility() {
     assert_eq!(entries.len(), 1, "only pre-established event visible");
     assert_eq!(
         store
-            .get(entries[0].event_id)
+            .get(entries[0].event_id())
             .expect("load recovered pre-established subscription event")
             .event
             .payload["pre"],
@@ -1088,7 +1091,8 @@ fn batch_publish_atomicity_no_partial_read_during_insert() {
         entries.len(),
     );
     assert_eq!(
-        entries[0].event_id, pre.event_id,
+        entries[0].event_id(),
+        pre.event_id,
         "the single visible entry must be the pre-batch baseline event"
     );
 }
@@ -1281,13 +1285,13 @@ fn batch_multi_item_same_entity_hash_chain_is_continuous() {
 
     // Sort by clock so the order is deterministic regardless of map ordering.
     let mut entries = entries;
-    entries.sort_by_key(|e| e.clock);
+    entries.sort_by_key(|e| e.clock());
 
     // (a) every event_hash distinct (would fail under the
     //     "stage step collapses to LAST item's hash" bug)
-    let h0 = entries[0].hash_chain.event_hash;
-    let h1 = entries[1].hash_chain.event_hash;
-    let h2 = entries[2].hash_chain.event_hash;
+    let h0 = entries[0].hash_chain().event_hash;
+    let h1 = entries[1].hash_chain().event_hash;
+    let h2 = entries[2].hash_chain().event_hash;
     assert_ne!(
         h0, h1,
         "PROPERTY: distinct payloads must produce distinct event_hash values \
@@ -1307,18 +1311,21 @@ fn batch_multi_item_same_entity_hash_chain_is_continuous() {
     //     buggy precompute populated entity_prev_hashes with [0; 32], so
     //     items[1].prev_hash and items[2].prev_hash were both [0; 32].
     assert_eq!(
-        entries[1].hash_chain.prev_hash, h0,
+        entries[1].hash_chain().prev_hash,
+        h0,
         "PROPERTY: items[1].prev_hash MUST equal items[0].event_hash. \
          Buggy precompute_batch_items inserted [0; 32] into entity_prev_hashes \
          before the real hash was computed, so this assertion would fail with \
          actual = [0; 32]."
     );
     assert_eq!(
-        entries[2].hash_chain.prev_hash, h1,
+        entries[2].hash_chain().prev_hash,
+        h1,
         "PROPERTY: items[2].prev_hash MUST equal items[1].event_hash. Same bug."
     );
     assert_eq!(
-        entries[0].hash_chain.prev_hash, [0u8; 32],
+        entries[0].hash_chain().prev_hash,
+        [0u8; 32],
         "items[0] is the genesis for the entity, so prev_hash is the all-zero \
          sentinel. (Entity has no prior history in this test.)"
     );
@@ -1448,7 +1455,7 @@ fn batch_survives_unclean_shutdown_without_sidx_footer() {
         .iter()
         .filter_map(|e| {
             store
-                .get(e.event_id)
+                .get(e.event_id())
                 .ok()
                 .and_then(|stored| stored.event.payload["step"].as_i64())
         })
@@ -1510,10 +1517,10 @@ fn oversized_batch_reopens_with_sidx_entries_pointing_to_correct_segment() {
 
     for (entry, expected_item) in entries.iter().skip(1).zip(expected) {
         let stored = reopened
-            .get(entry.event_id)
+            .get(entry.event_id())
             .expect("SIDX disk position reads committed batch frame");
         assert_eq!(
-            stored.event.header.event_id, entry.event_id,
+            stored.event.header.event_id, entry.event_id(),
             "PROPERTY: SIDX row must point to the segment containing this event frame, not a later batch segment"
         );
         assert_eq!(
@@ -1526,7 +1533,7 @@ fn oversized_batch_reopens_with_sidx_entries_pointing_to_correct_segment() {
 /// REGRESSION: batch wall_ms must remain monotonic per entity even when the
 /// injected clock regresses between batch items.
 ///
-/// Before the fix in `precompute_batch_items` + `BatchItemComputed.wall_ms`,
+/// Before the fix in `precompute_batch_items` + `BatchItemComputed.wall_ms()`,
 /// the batch path sampled the write clock independently for the
 /// header and for the IndexEntry, and never applied the `raw_ms.max(last_ms)`
 /// clamp the single-append path uses. A regressing test/system clock could
@@ -1585,27 +1592,27 @@ fn batch_wall_ms_monotonic_under_regressing_clock() {
 
     // Pull the entries in stream order (BTreeMap-sorted by ClockKey).
     let mut entries = store.query(&Region::entity("regress"));
-    entries.sort_by_key(|e| e.clock);
+    entries.sort_by_key(|e| e.clock());
     assert_eq!(entries.len(), 4, "1 single + 3 batch items expected");
 
-    // PROPERTY: every IndexEntry.wall_ms must be >= the entity's prior
+    // PROPERTY: every IndexEntry.wall_ms() must be >= the entity's prior
     // wall_ms. The batch items must NOT regress below pre_wall_ms.
     for (idx, entry) in entries.iter().enumerate() {
         assert!(
-            entry.wall_ms >= pre_wall_ms,
+            entry.wall_ms() >= pre_wall_ms,
             "PROPERTY: batch item {idx} wall_ms ({}) must NOT regress below \
              the entity's prior wall_ms ({pre_wall_ms}). Buggy precompute \
              never applied raw_ms.max(last_ms) for batches, so a regressing \
              clock would write wall_ms < pre_wall_ms and reorder stream() \
              results.",
-            entry.wall_ms
+            entry.wall_ms()
         );
     }
 
     // PROPERTY: stream order must follow append order across the boundary.
     // If the regression had broken BTreeMap ordering, the batch items would
     // sort BEFORE the pre-established event.
-    let mut sequences: Vec<u64> = entries.iter().map(|e| e.global_sequence).collect();
+    let mut sequences: Vec<u64> = entries.iter().map(|e| e.global_sequence()).collect();
     let sorted_sequences = {
         let mut s = sequences.clone();
         s.sort();

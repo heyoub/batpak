@@ -2,6 +2,7 @@
 
 use batpak::coordinate::KindFilter;
 use batpak::prelude::*;
+use batpak::store::index::IndexEntry;
 use batpak::store::{IndexTopology, Store, StoreConfig};
 use proptest::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
@@ -103,14 +104,14 @@ fn populate(store: &Store, specs: &[AppendSpec]) -> Result<(), StoreError> {
 fn summarize_entries<State>(store: &Store<State>, entries: Vec<IndexEntry>) -> Vec<EventSummary> {
     entries
         .into_iter()
-        .filter(|entry| entry.kind != EventKind::SYSTEM_CLOSE_COMPLETED)
+        .filter(|entry| entry.event_kind() != EventKind::SYSTEM_CLOSE_COMPLETED)
         .map(|entry| {
             let mut payload = store
-                .get(entry.event_id)
+                .get(entry.event_id())
                 .expect("query result must be readable from disk")
                 .event
                 .payload;
-            if entry.kind == EventKind::SYSTEM_OPEN_COMPLETED {
+            if entry.event_kind() == EventKind::SYSTEM_OPEN_COMPLETED {
                 let payload_object = payload
                     .as_object_mut()
                     .expect("SYSTEM_OPEN_COMPLETED payload must be an object");
@@ -125,12 +126,12 @@ fn summarize_entries<State>(store: &Store<State>, entries: Vec<IndexEntry>) -> V
                 }
             }
             EventSummary {
-                entity: entry.coord.entity().to_owned(),
-                scope: entry.coord.scope().to_owned(),
-                category: entry.kind.category(),
-                type_id: entry.kind.type_id(),
-                global_sequence: entry.global_sequence,
-                clock: entry.clock,
+                entity: entry.coord().entity().to_owned(),
+                scope: entry.coord().scope().to_owned(),
+                category: entry.event_kind().category(),
+                type_id: entry.event_kind().type_id(),
+                global_sequence: entry.global_sequence(),
+                clock: entry.clock(),
                 payload,
             }
         })

@@ -35,7 +35,7 @@ fn cursor_batch_sequences(cursor: &mut batpak::store::Cursor, requests: &[usize]
             cursor
                 .poll_batch(*max)
                 .into_iter()
-                .map(|entry| entry.global_sequence)
+                .map(|entry| entry.global_sequence())
                 .collect()
         })
         .collect()
@@ -78,7 +78,7 @@ fn cursor_polls_events_in_order() {
     // Verify global_sequence is monotonically increasing
     for window in polled.windows(2) {
         assert!(
-            window[0].global_sequence < window[1].global_sequence,
+            window[0].global_sequence() < window[1].global_sequence(),
             "PROPERTY: cursor must yield events in strictly ascending global_sequence order.\n\
              Investigate: src/store/delivery/cursor.rs poll.\n\
              Common causes: cursor index not sorted on open, iterator yields unordered segments.\n\
@@ -210,7 +210,8 @@ fn cursor_all_region_first_poll_includes_global_sequence_zero() {
         .poll()
         .expect("fresh all-region cursor must see the lifecycle open event");
     assert_eq!(
-        first.global_sequence, 0,
+        first.global_sequence(),
+        0,
         "PROPERTY: a fresh cursor must not skip global_sequence 0 when started=false"
     );
 }
@@ -368,13 +369,13 @@ fn cursor_position_persists_no_duplicates() {
     );
 
     // Verify no overlap
-    let first_seqs: Vec<u64> = first_three.iter().map(|e| e.global_sequence).collect();
+    let first_seqs: Vec<u64> = first_three.iter().map(|e| e.global_sequence()).collect();
     for entry in &remaining {
         assert!(
-            !first_seqs.contains(&entry.global_sequence),
+            !first_seqs.contains(&entry.global_sequence()),
             "PROPERTY: Cursor must not return duplicate events. Sequence {} appeared twice.\n\
              Investigate: src/store/delivery/cursor.rs started flag and position comparison.",
-            entry.global_sequence
+            entry.global_sequence()
         );
     }
 }

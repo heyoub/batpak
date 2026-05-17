@@ -16,6 +16,7 @@
 //! benches provide trend visibility; these gates catch gross regressions.
 
 use batpak::prelude::*;
+use batpak::store::cold_start::rebuild::OpenIndexPath;
 use batpak::store::{Store, StoreConfig, SyncMode};
 use std::time::Instant;
 use tempfile::TempDir;
@@ -733,9 +734,9 @@ fn correctness_gates_self_validate() {
 
     // --- Probe 1: FD eviction round-trip ---
     let entries = store.by_entity("correctness:entity");
-    let first = store.get(entries[0].event_id);
-    let last = store.get(entries[entries.len() - 1].event_id);
-    let first_again = store.get(entries[0].event_id); // re-read after eviction
+    let first = store.get(entries[0].event_id());
+    let last = store.get(entries[entries.len() - 1].event_id());
+    let first_again = store.get(entries[0].event_id()); // re-read after eviction
     let fd_eviction_round_trips = first.is_ok()
         && last.is_ok()
         && first_again.is_ok()
@@ -1216,7 +1217,7 @@ fn mmap_restore_single_entity_100k_under_threshold() {
         .open_report
         .expect("open report after mmap restore");
     assert!(
-        matches!(report.path, batpak::store::OpenIndexPath::Mmap),
+        matches!(report.path, OpenIndexPath::Mmap),
         "expected mmap restore path, got {:?}",
         report.path
     );
@@ -1254,7 +1255,7 @@ fn rebuild_restore_single_entity_100k_under_threshold() {
         .open_report
         .expect("open report after rebuild restore");
     assert!(
-        matches!(report.path, batpak::store::OpenIndexPath::Rebuild),
+        matches!(report.path, OpenIndexPath::Rebuild),
         "expected rebuild restore path, got {:?}",
         report.path
     );

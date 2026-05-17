@@ -98,37 +98,38 @@ pub(crate) struct ClockKey {
 /// IndexEntry: everything needed for index queries without disk reads.
 /// Shared via `Arc` across all index maps — one allocation per event.
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub struct IndexEntry {
     /// Unique ID of the event.
-    pub event_id: u128,
+    pub(crate) event_id: u128,
     /// Correlation ID linking related events in a causal chain.
-    pub correlation_id: u128,
+    pub(crate) correlation_id: u128,
     /// ID of the event that caused this one; `None` for root-cause events.
-    pub causation_id: Option<u128>,
+    pub(crate) causation_id: Option<u128>,
     /// Entity and scope coordinates for this event.
-    pub coord: Coordinate,
+    pub(crate) coord: Coordinate,
     /// Interned entity string ID for compact checkpoint serialization.
     pub(crate) entity_id: self::interner::InternId,
     /// Interned scope string ID for compact checkpoint serialization.
     pub(crate) scope_id: self::interner::InternId,
     /// Event kind (type discriminant).
-    pub kind: EventKind,
+    pub(crate) kind: EventKind,
     /// HLC wall clock milliseconds — for global causal ordering.
-    pub wall_ms: u64,
+    pub(crate) wall_ms: u64,
     /// Per-entity monotonic sequence number.
-    pub clock: u32,
+    pub(crate) clock: u32,
     /// Branch lane within the logical event DAG.
-    pub dag_lane: u32,
+    pub(crate) dag_lane: u32,
     /// Branch depth within the logical event DAG.
-    pub dag_depth: u32,
+    pub(crate) dag_depth: u32,
     /// Blake3 hash chain linking this event to its predecessor.
-    pub hash_chain: HashChain,
+    pub(crate) hash_chain: HashChain,
     /// Location of the event frame on disk.
-    pub disk_pos: DiskPos,
+    pub(crate) disk_pos: DiskPos,
     /// Globally monotonic sequence number assigned at commit time.
-    pub global_sequence: u64,
+    pub(crate) global_sequence: u64,
     /// Opaque receipt extensions committed with this event.
-    pub receipt_extensions: BTreeMap<ExtensionKey, EncodedBytes>,
+    pub(crate) receipt_extensions: BTreeMap<ExtensionKey, EncodedBytes>,
 }
 
 /// DiskPos: where to find this event on disk.
@@ -222,6 +223,84 @@ impl PartialOrd for ClockKey {
 }
 
 impl IndexEntry {
+    /// Unique ID of the event.
+    #[must_use]
+    pub const fn event_id(&self) -> u128 {
+        self.event_id
+    }
+
+    /// Correlation ID linking related events in a causal chain.
+    #[must_use]
+    pub const fn correlation_id(&self) -> u128 {
+        self.correlation_id
+    }
+
+    /// ID of the event that caused this one; `None` for root-cause events.
+    #[must_use]
+    pub const fn causation_id(&self) -> Option<u128> {
+        self.causation_id
+    }
+
+    /// Entity and scope coordinates for this event.
+    #[must_use]
+    pub const fn coord(&self) -> &Coordinate {
+        &self.coord
+    }
+
+    /// Event kind (type discriminant).
+    #[must_use]
+    pub const fn event_kind(&self) -> EventKind {
+        self.kind
+    }
+
+    /// HLC wall clock milliseconds for global causal ordering.
+    #[must_use]
+    pub const fn wall_ms(&self) -> u64 {
+        self.wall_ms
+    }
+
+    /// Per-entity monotonic sequence number.
+    #[must_use]
+    pub const fn clock(&self) -> u32 {
+        self.clock
+    }
+
+    /// Branch lane within the logical event DAG.
+    #[must_use]
+    pub const fn dag_lane(&self) -> u32 {
+        self.dag_lane
+    }
+
+    /// Branch depth within the logical event DAG.
+    #[must_use]
+    pub const fn dag_depth(&self) -> u32 {
+        self.dag_depth
+    }
+
+    /// Blake3 hash chain linking this event to its predecessor.
+    #[must_use]
+    pub const fn hash_chain(&self) -> &HashChain {
+        &self.hash_chain
+    }
+
+    /// Location of the event frame on disk.
+    #[must_use]
+    pub const fn disk_pos(&self) -> DiskPos {
+        self.disk_pos
+    }
+
+    /// Globally monotonic sequence number assigned at commit time.
+    #[must_use]
+    pub const fn global_sequence(&self) -> u64 {
+        self.global_sequence
+    }
+
+    /// Opaque receipt extensions committed with this event.
+    #[must_use]
+    pub const fn receipt_extensions(&self) -> &BTreeMap<ExtensionKey, EncodedBytes> {
+        &self.receipt_extensions
+    }
+
     /// Returns `true` if this event is part of a causal chain (its correlation ID differs from its event ID).
     pub fn is_correlated(&self) -> bool {
         self.event_id != self.correlation_id

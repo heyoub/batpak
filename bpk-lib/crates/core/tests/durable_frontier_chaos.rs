@@ -61,10 +61,10 @@ fn coord(entity: &str) -> Coordinate {
     Coordinate::new(entity, CHAOS_SCOPE).expect("valid chaos coordinate")
 }
 
-fn point(entry: &batpak::store::IndexEntry) -> HlcPoint {
+fn point(entry: &batpak::store::index::IndexEntry) -> HlcPoint {
     HlcPoint {
-        wall_ms: entry.wall_ms,
-        global_sequence: entry.global_sequence,
+        wall_ms: entry.wall_ms(),
+        global_sequence: entry.global_sequence(),
     }
 }
 
@@ -237,7 +237,7 @@ fn frontier_open_hlc_strictly_advances_across_panic_restart() {
     let lifecycle_open_hlc = reopened
         .query(&Region::entity("batpak:store"))
         .into_iter()
-        .filter(|entry| entry.kind == EventKind::SYSTEM_OPEN_COMPLETED)
+        .filter(|entry| entry.event_kind() == EventKind::SYSTEM_OPEN_COMPLETED)
         .map(|entry| point(&entry))
         .max()
         .expect("mutable reopen emits SYSTEM_OPEN_COMPLETED");

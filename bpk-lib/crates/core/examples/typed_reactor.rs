@@ -127,10 +127,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         reactions.len()
     );
     for entry in &reactions {
-        let stored = store.get(entry.event_id)?;
+        let stored = store.get(entry.event_id())?;
         println!(
             "  reaction event_id={} payload={}",
-            entry.event_id, stored.event.payload
+            entry.event_id(),
+            stored.event.payload
         );
     }
 

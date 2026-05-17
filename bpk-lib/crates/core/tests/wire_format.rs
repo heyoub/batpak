@@ -330,7 +330,10 @@ fn committed_api_contract() {
 #[test]
 fn commit_metadata_from_append_receipt_uses_receipt_hash() {
     let dir = TempDir::new().expect("temp dir");
-    let _disk_pos_witness = batpak::store::DiskPos::new(3, 128, 64);
+    let disk_pos_witness = batpak::store::index::DiskPos::new(3, 128, 64);
+    assert_eq!(disk_pos_witness.segment_id(), 3);
+    assert_eq!(disk_pos_witness.offset(), 128);
+    assert_eq!(disk_pos_witness.length(), 64);
     let store = Store::open(
         StoreConfig::new(dir.path())
             .with_enable_checkpoint(false)

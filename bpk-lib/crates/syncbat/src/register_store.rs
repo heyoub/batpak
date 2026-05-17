@@ -185,12 +185,6 @@ impl RegisterOperationRowV1 {
     }
 }
 
-/// Backward-compatible alias for the original put-only row name.
-///
-/// New code should use [`RegisterOperationRowV1`], which reflects that the v1
-/// payload now carries put, update, delete, and supersede lifecycle actions.
-pub type RegisterOperationPutV1 = RegisterOperationRowV1;
-
 /// Error returned by batpak-backed syncbat register catalog operations.
 #[derive(Debug)]
 #[non_exhaustive]
@@ -593,12 +587,12 @@ fn fold_catalog_entries<State>(
         .with_scope(coordinate.scope())
         .with_fact(KindFilter::Exact(SYNCBAT_REGISTER_EVENT_KIND));
     let mut hits = store.query(&region);
-    hits.retain(|hit| hit.coord == *coordinate);
-    hits.sort_by_key(|hit| hit.global_sequence);
+    hits.retain(|hit| hit.coord() == coordinate);
+    hits.sort_by_key(|hit| hit.global_sequence());
 
     let mut entries = BTreeMap::<String, CatalogEntryState>::new();
     for hit in hits {
-        let stored = store.get(hit.event_id)?;
+        let stored = store.get(hit.event_id())?;
         let row = stored.event.decode_typed::<RegisterOperationRowV1>()?;
         let action = row.action_kind()?;
         match action {

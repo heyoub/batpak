@@ -3,7 +3,8 @@
 //! This report captures what a read observed without appending by default.
 
 use crate::coordinate::{KindFilter, Region};
-use crate::store::{Freshness, HlcPoint, IndexEntry, Store};
+use crate::store::index::IndexEntry;
+use crate::store::{Freshness, HlcPoint, Store};
 use serde::{Deserialize, Serialize};
 
 /// Report-body schema version for read walk evidence.

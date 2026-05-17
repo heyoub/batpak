@@ -28,13 +28,13 @@ fn config(dir: &TempDir) -> StoreConfig {
         .with_sync_every_n_events(1)
 }
 
-fn user_visible_entries(store: &Store) -> Vec<batpak::store::IndexEntry> {
+fn user_visible_entries(store: &Store) -> Vec<batpak::store::index::IndexEntry> {
     store
         .query(&Region::all())
         .into_iter()
         .filter(|entry| {
             !matches!(
-                entry.kind,
+                entry.event_kind(),
                 EventKind::SYSTEM_OPEN_COMPLETED | EventKind::SYSTEM_CLOSE_COMPLETED
             )
         })
@@ -87,7 +87,7 @@ fn cancelled_fence_hides_batch_before_and_after_reopen() {
             entries_open.len()
         );
         assert_eq!(
-            entries_open[0].coord.scope(),
+            entries_open[0].coord().scope(),
             "scope:cancel",
             "baseline event must survive with its original scope"
         );
@@ -109,7 +109,7 @@ fn cancelled_fence_hides_batch_before_and_after_reopen() {
             entries_after_reopen.len()
         );
         assert_eq!(
-            entries_after_reopen[0].coord.scope(),
+            entries_after_reopen[0].coord().scope(),
             "scope:cancel",
             "post-reopen baseline must preserve its scope"
         );
@@ -131,7 +131,9 @@ fn cancelled_fence_hides_batch_before_and_after_reopen() {
             final_entries.len()
         );
         assert!(
-            final_entries.iter().any(|e| e.event_id == receipt.event_id),
+            final_entries
+                .iter()
+                .any(|e| e.event_id() == receipt.event_id),
             "PROPERTY: the post-reopen append must surface by its event id"
         );
 
@@ -176,7 +178,7 @@ fn dropped_fence_auto_cancels_pending_work_and_releases_active_fence() {
         .expect("append after dropped fence");
     let visible = user_visible_entries(&store);
     assert!(
-        visible.iter().any(|entry| entry.event_id == receipt.event_id),
+        visible.iter().any(|entry| entry.event_id() == receipt.event_id),
         "PROPERTY: dropping a visibility fence must release the active fence so subsequent unfenced appends become visible"
     );
 

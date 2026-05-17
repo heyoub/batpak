@@ -27,14 +27,17 @@ use batpak::reservation::{
     RESERVATION_OP_RESERVE, RESERVATION_TRANSITION_SCHEMA_VERSION,
 };
 use batpak::schema::{compare_schema_snapshot, SchemaSnapshot, SchemaSnapshotReportBody};
+use batpak::store::backup_envelope::{
+    backup_manifest_body_hash, normalize_backup_manifest_body, restore_proof_report_body,
+    restore_proof_report_body_hash, BackupManifestBody, BackupSegmentRef, RestoreProofReportBody,
+    BACKUP_MANIFEST_BODY_SCHEMA_VERSION,
+};
 use batpak::store::{
-    backup_manifest_body_hash, report_skipped, restore_proof_report_body,
-    restore_proof_report_body_hash, store_resource_report_body_from_diagnostics,
-    store_resource_report_body_hash, ActiveSegmentReadEvidence, BackupManifestBody,
-    BackupSegmentRef, ChainWalkReportBody, ClockEvidence, CompactionReportBody,
+    report_skipped, store_resource_report_body_from_diagnostics, store_resource_report_body_hash,
+    ActiveSegmentReadEvidence, ChainWalkReportBody, ClockEvidence, CompactionReportBody,
     LockLeafSymlinkProtection, MmapAdmissionSummary, MmapEvidence, ParentDirSyncAdmissionSummary,
-    ParentDirSyncEvidence, ReadWalkReportBody, RestoreProofReportBody, StoreLockAdmissionSummary,
-    StorePathStatusEvidence, StoreResourceReportBody, SubscriberFrontierReportBody,
+    ParentDirSyncEvidence, ReadWalkReportBody, StoreLockAdmissionSummary, StorePathStatusEvidence,
+    StoreResourceReportBody, SubscriberFrontierReportBody,
 };
 use batpak::transition::{
     build_state_transition_report, state_transition_report_body_hash, StateTransitionEvent,
@@ -208,7 +211,7 @@ fn sample_registry_verification_body() -> TestResult<RegistryVerificationReport>
 
 fn sample_backup_manifest_body() -> BackupManifestBody {
     BackupManifestBody {
-        schema_version: batpak::store::BACKUP_MANIFEST_BODY_SCHEMA_VERSION,
+        schema_version: BACKUP_MANIFEST_BODY_SCHEMA_VERSION,
         backup_id: digest(0x55),
         layout_revision: 3,
         tooling_revision: 9,
@@ -588,7 +591,7 @@ fn substrate_report_body_goldens_do_not_drift() -> TestResult {
     assert_golden_round_trip("registry_verification_report_v1.hex", &verification)?;
 
     let backup = sample_backup_manifest_body();
-    let normalized_backup = batpak::store::normalize_backup_manifest_body(&backup);
+    let normalized_backup = normalize_backup_manifest_body(&backup);
     assert_eq!(
         backup_manifest_body_hash(&backup)?,
         body_hash_via_canonical(&normalized_backup)?,

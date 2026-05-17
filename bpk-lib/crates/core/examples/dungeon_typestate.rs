@@ -139,8 +139,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // -- Show the event log --
     println!("\nEvent log for vault door:");
     for entry in store.by_entity("door:vault") {
-        let stored = store.get(entry.event_id)?;
-        println!("  kind={} payload={}", entry.kind, stored.event.payload);
+        let stored = store.get(entry.event_id())?;
+        println!(
+            "  kind={} payload={}",
+            entry.event_kind(),
+            stored.event.payload
+        );
     }
 
     // -- ILLEGAL TRANSITIONS --

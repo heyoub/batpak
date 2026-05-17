@@ -273,6 +273,3 @@ impl CheckoutResult {
         self.output
     }
 }
-
-/// Backward-compatible name for checkout results returned by [`Core::invoke`].
-pub type InvokeResult = CheckoutResult;

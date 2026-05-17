@@ -252,7 +252,7 @@ mod tests {
     use super::{ColdStartIndexRow, ColdStartSource};
     use crate::event::{EventKind, HashChain};
     use crate::store::index::interner::InternId;
-    use crate::store::DiskPos;
+    use crate::store::index::DiskPos;
 
     #[test]
     fn cold_start_row_to_event_header_preserves_lane_depth_and_ids() {

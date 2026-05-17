@@ -1,8 +1,9 @@
 mod ancestry;
 mod append;
-mod backup_envelope;
+pub mod backup_envelope;
 mod chain_walk;
-pub(crate) mod cold_start;
+/// Cold-start recovery reports and artifact readers.
+pub mod cold_start;
 mod compaction_report;
 mod config;
 /// Push subscriptions (lossy) and pull cursors (ordered, with optional durable
@@ -57,21 +58,10 @@ pub use append::{
     ExtensionKeyError, ReceiptExtensionKey, ReceiptExtensionNamespace, ReceiptExtensionValue,
     RetentionPredicate,
 };
-pub use backup_envelope::{
-    audit_backup_manifest_segments, backup_manifest_body_bytes, backup_manifest_body_hash,
-    backup_manifest_envelope_body_hash, backup_manifest_envelope_hash,
-    normalize_backup_manifest_body, normalize_backup_manifest_envelope, restore_proof_report_body,
-    restore_proof_report_body_hash, sort_backup_segment_refs, verify_backup_manifest_envelope,
-    verify_backup_manifest_signatures_only, BackupEnvelope, BackupEnvelopeFinding,
-    BackupManifestBody, BackupManifestEnvelope, BackupManifestVerification, BackupSegmentRef,
-    RestoreProofEvidenceReport, RestoreProofReportBody, SegmentBytesDigest,
-    BACKUP_MANIFEST_BODY_SCHEMA_VERSION, RESTORE_PROOF_REPORT_SCHEMA_VERSION,
-};
 pub use chain_walk::{
     ChainWalkEvidenceReport, ChainWalkFinding, ChainWalkHash, ChainWalkMode, ChainWalkReportBody,
     ChainWalkReportError, ChainWalkRequest, ChainWalkStartRef, CHAIN_WALK_REPORT_SCHEMA_VERSION,
 };
-pub use cold_start::rebuild::{OpenIndexPath, OpenIndexReport};
 pub use compaction_report::{
     compaction_strategy_shape, report_for_run, report_skipped, CompactionReportBody,
     CompactionReportFinding, CompactionStrategyShape, COMPACTION_REPORT_SCHEMA_VERSION,
@@ -100,7 +90,6 @@ pub use fault::{
     CountdownAction, CountdownInjector, FaultInjector, InjectionPoint, ProbabilisticInjector,
 };
 pub use gate::DurabilityGate;
-pub use index::{DiskPos, IndexEntry};
 pub use projection::watch::{ProjectionWatcher, WatcherError};
 pub use projection::{
     CacheCapabilities, CacheMeta, Freshness, NativeCache, NoCache, ProjectionCache,
@@ -121,8 +110,6 @@ pub use read_walk::{
     ReadWalkSourceRef, READ_WALK_REPORT_SCHEMA_VERSION,
 };
 pub use signing::SigningKey;
-#[cfg(any(test, feature = "dangerous-test-hooks"))]
-pub use stats::WatermarkSnapshot;
 pub use stats::{
     ActiveSegmentReadEvidence, ClockEvidence, FrontierView, HlcPoint, HostEvidenceSummary,
     LockLeafSymlinkProtection, MmapAdmissionSummary, MmapEvidence, ParentDirSyncAdmissionSummary,
@@ -133,9 +120,9 @@ pub use stats::{
 pub use store_resource_report::{
     store_data_dir_identity_hash, store_resource_evidence_report_from_diagnostics,
     store_resource_report_body_from_diagnostics, store_resource_report_body_hash,
-    StoreResourceEnvelope, StoreResourceEvidenceReport, StoreResourceFrontierBody,
-    StoreResourceHash, StoreResourceReportBody, StoreResourceReportError,
-    StoreResourceRestartPolicyShape, STORE_RESOURCE_REPORT_SCHEMA_VERSION,
+    StoreResourceEvidenceReport, StoreResourceFrontierBody, StoreResourceHash,
+    StoreResourceReportBody, StoreResourceReportError, StoreResourceRestartPolicyShape,
+    STORE_RESOURCE_REPORT_SCHEMA_VERSION,
 };
 pub use subscriber_frontier::{
     LossPrecision, SubscriberDeliveryState, SubscriberFrontierEvidenceReport,

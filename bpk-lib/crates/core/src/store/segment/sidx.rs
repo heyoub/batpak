@@ -126,8 +126,8 @@ pub(crate) struct SidxEntry {
 }
 
 impl SidxEntry {
-    pub(crate) fn to_disk_pos(&self, segment_id: u64) -> crate::store::DiskPos {
-        crate::store::DiskPos::new(segment_id, self.frame_offset, self.frame_length)
+    pub(crate) fn to_disk_pos(&self, segment_id: u64) -> crate::store::index::DiskPos {
+        crate::store::index::DiskPos::new(segment_id, self.frame_offset, self.frame_length)
     }
 
     pub(crate) fn to_cold_start_row(&self, segment_id: u64) -> ColdStartIndexRow {
@@ -765,7 +765,7 @@ mod tests {
         assert_eq!(row.causation_id, None);
         assert_eq!(
             row.disk_pos,
-            crate::store::DiskPos::new(11, entry.frame_offset, entry.frame_length)
+            crate::store::index::DiskPos::new(11, entry.frame_offset, entry.frame_length)
         );
     }
 

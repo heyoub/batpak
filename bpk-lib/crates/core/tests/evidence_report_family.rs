@@ -67,7 +67,6 @@ fn evidence_public_types_avoid_protocol_product_vocabulary() -> TestResult {
         stringify!(ReadWalkEvidenceReport),
         stringify!(SchemaSnapshotEvidenceReport),
         stringify!(StoreResourceEvidenceReport),
-        stringify!(StoreResourceEnvelope),
     );
     let lower = blob.to_ascii_lowercase();
     const FORBIDDEN: &[&str] = &[

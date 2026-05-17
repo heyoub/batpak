@@ -39,10 +39,10 @@ fn kind() -> EventKind {
     EventKind::custom(0xF, 0x92)
 }
 
-fn point(entry: &batpak::store::IndexEntry) -> HlcPoint {
+fn point(entry: &batpak::store::index::IndexEntry) -> HlcPoint {
     HlcPoint {
-        wall_ms: entry.wall_ms,
-        global_sequence: entry.global_sequence,
+        wall_ms: entry.wall_ms(),
+        global_sequence: entry.global_sequence(),
     }
 }
 
@@ -66,18 +66,21 @@ fn append_named(store: &Store, entity: &str, value: u32) -> AppendReceipt {
         .expect("append named event")
 }
 
-fn recovered_entries(store: &Store) -> Vec<batpak::store::IndexEntry> {
+fn recovered_entries(store: &Store) -> Vec<batpak::store::index::IndexEntry> {
     store.query(&Region::scope(TORN_TAIL_SCOPE))
 }
 
-fn event_ids(entries: &[batpak::store::IndexEntry]) -> Vec<u128> {
-    entries.iter().map(|entry| entry.event_id).collect()
+fn event_ids(entries: &[batpak::store::index::IndexEntry]) -> Vec<u128> {
+    entries.iter().map(|entry| entry.event_id()).collect()
 }
 
-fn entry_point_for(entries: &[batpak::store::IndexEntry], receipt: &AppendReceipt) -> HlcPoint {
+fn entry_point_for(
+    entries: &[batpak::store::index::IndexEntry],
+    receipt: &AppendReceipt,
+) -> HlcPoint {
     entries
         .iter()
-        .find(|entry| entry.event_id == receipt.event_id)
+        .find(|entry| entry.event_id() == receipt.event_id)
         .map(point)
         .expect("receipt event must be query-visible before failure")
 }

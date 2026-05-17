@@ -5,10 +5,8 @@
 
 use batpak::coordinate::{Coordinate, Region};
 use batpak::event::EventKind;
-use batpak::store::{
-    OpenIndexPath, OpenIndexReport, OpenReportObserver, ReadOnly, Store, StoreConfig, StoreError,
-    StoreLockMode,
-};
+use batpak::store::cold_start::rebuild::{OpenIndexPath, OpenIndexReport};
+use batpak::store::{OpenReportObserver, ReadOnly, Store, StoreConfig, StoreError, StoreLockMode};
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc, Mutex,
@@ -394,10 +392,10 @@ fn mutable_open_appends_system_open_completed_and_read_only_does_not() {
         "mutable open must append exactly one SYSTEM_OPEN_COMPLETED event"
     );
     let lifecycle_entry = lifecycle_events[0].clone();
-    assert_eq!(lifecycle_entry.coord.entity(), "batpak:store");
-    assert_eq!(lifecycle_entry.coord.scope(), "batpak:lifecycle");
+    assert_eq!(lifecycle_entry.coord().entity(), "batpak:store");
+    assert_eq!(lifecycle_entry.coord().scope(), "batpak:lifecycle");
     let stored = store
-        .get(lifecycle_entry.event_id)
+        .get(lifecycle_entry.event_id())
         .expect("read lifecycle event payload");
     assert_eq!(
         stored.event.header.event_kind,
