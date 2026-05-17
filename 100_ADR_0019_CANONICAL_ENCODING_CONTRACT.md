@@ -25,6 +25,10 @@ batpak adopts the following canonical encoding compatibility contract.
 - The encoding format remains named-field MessagePack in this phase.
 - This ADR does not change on-wire format or introduce a second canonical
   encoder.
+- The root crate pins the exact `rmp-serde` encoder version used for canonical
+  bytes. Encoder upgrades are intentional compatibility work: update the pin,
+  refresh golden fixtures, and review this ADR instead of accepting silent
+  transitive byte-shape changes.
 - This surface does not implement protocol-specific canonicalization such as
   JSON Canonicalization Scheme; callers that need another protocol's canonical
   bytes must compute them outside batpak core.
@@ -42,7 +46,10 @@ batpak adopts the following canonical encoding compatibility contract.
 Any new public deterministic report API added after this ADR must:
 
 - define an explicit report schema version in its public contract; and
-- treat canonical body bytes as **patch-stable within that schema version**.
+- treat canonical body bytes as **patch-stable within that schema version**;
+  and
+- add or extend a golden fixture covering the report body or explain why an
+  existing fixture already covers the same public byte boundary.
 
 In other words, for two patch releases that keep the same report schema version,
 equal logical report inputs must encode to equal canonical bytes.
@@ -51,6 +58,13 @@ Report `body_hash` values are derived from those canonical body bytes using the
 active batpak hash backend. Default builds use BLAKE3. No-default-feature builds
 use batpak's deterministic CRC32-backed fallback and therefore preserve
 determinism without claiming cryptographic strength.
+
+The compatibility mechanism is deliberately concrete: exact encoder pin plus
+checked-in golden bytes for public deterministic report families. A semver range
+such as `rmp-serde = "1"` or `~1.3` is not sufficient for these bytes because
+downstream resolution could select an encoder patch that the fixture suite never
+observed. A fully owned canonical MessagePack encoder remains a possible future
+decision, but it is a format project, not a release-prep shortcut.
 
 ### 4) Non-promises in this phase
 
@@ -67,6 +81,8 @@ and exercised.
 ## Consequences
 
 - Canonical encoding remains boring and unchanged in this slice.
+- `rmp-serde` updates become deliberate compatibility events instead of ambient
+  dependency drift.
 - New report APIs must carry explicit schema-version discipline instead of
   relying on implicit format stability.
 - Schema snapshot and chain/subscriber evidence report work can proceed with a
