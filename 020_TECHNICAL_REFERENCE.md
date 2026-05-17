@@ -198,16 +198,21 @@ Query routing is capability-driven:
 
 ## Delivery Canals
 
-The store has two delivery primitives and one narrow selector used by typed
-reactors:
+The store has two delivery primitives, one narrow `Canal` trait over their
+pull surface, and one selector used by typed reactors:
 
 - `Cursor`: ordered pull replay with optional durable checkpoints.
 - `Subscription`: lossy push observation through bounded fanout.
+- `Canal`: shared delivery adapter trait. It standardizes "pull the next
+  batch" only; checkpoint policy, restart policy, backpressure, and witness
+  semantics stay on the concrete primitive.
 - `ReactorCanal`: typed-reactor selector over those primitives.
 
 `ReactorCanal::CursorGuaranteed` is the default and is the only path that can
 produce an `AtLeastOnce` witness. `ReactorCanal::LossySubscription` is explicit
 opt-in for live views that may skip work under backpressure.
+`watch_projection_with_cursor` exposes the same projection watcher contract on
+a `Cursor` canal, so its error type has no subscription-pruned branch.
 
 `ReplayLane` is the live replay naming.
 

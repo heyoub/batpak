@@ -1,4 +1,5 @@
 use super::*;
+use std::time::Duration;
 
 fn generation_advanced_after_subscribe(baseline: u64, post_subscribe: u64) -> bool {
     post_subscribe > baseline
@@ -38,16 +39,12 @@ impl Store<Open> {
         let sub = self
             .writer_ref()
             .reactor_subscribers
-            .subscribe(self.config.broadcast_capacity);
+            .subscribe_with_region(self.config.broadcast_capacity, region.clone());
         std::thread::Builder::new()
             .name("batpak-reactor".into())
             .spawn(move || {
                 while let Ok(envelope) = sub.recv() {
                     let notif = envelope.notification;
-                    if !region.matches_event(notif.coord.entity(), notif.coord.scope(), notif.kind)
-                    {
-                        continue;
-                    }
                     for (coord, kind, payload) in reactor.react(&envelope.stored.event) {
                         if let Err(e) = store.append_reaction(
                             &coord,
@@ -100,6 +97,51 @@ impl Store<Open> {
             baseline_generation,
             generation_advanced_after_subscribe(baseline_generation, post_subscribe_generation),
         )
+    }
+
+    /// WATCH: cursor-backed reactive projection subscription.
+    ///
+    /// This returns a guaranteed-delivery watcher over an ordered cursor
+    /// instead of a lossy subscription. A cursor-backed watcher cannot be
+    /// pruned under fanout backpressure; its `recv()` method therefore
+    /// returns `CursorWatcherError`, which has no subscription-pruned branch.
+    ///
+    /// When `checkpoint_id` is provided, the cursor resumes from its durable
+    /// checkpoint. Without a checkpoint it starts from the beginning of the
+    /// current in-memory index, so the first `recv()` can materialize already
+    /// committed entity state instead of relying on a startup catch-up probe.
+    ///
+    /// # Errors
+    /// Returns [`StoreError`] when the checkpoint-bound cursor cannot be
+    /// constructed, for example because an existing checkpoint belongs to a
+    /// different region or is corrupt.
+    pub fn watch_projection_with_cursor<T>(
+        self: &Arc<Self>,
+        entity: &str,
+        freshness: Freshness,
+        checkpoint_id: Option<CheckpointId>,
+    ) -> Result<ProjectionWatcher<T, Cursor>, StoreError>
+    where
+        T: EventSourced + serde::Serialize + serde::de::DeserializeOwned + Send + 'static,
+    {
+        let region = Region::entity(entity);
+        let cursor = match checkpoint_id {
+            Some(id) => Cursor::new_with_checkpoint(
+                region,
+                Arc::clone(&self.index),
+                &self.config.data_dir,
+                &id,
+            )?,
+            None => self.cursor_guaranteed(&region),
+        };
+        Ok(ProjectionWatcher::new_cursor(
+            cursor,
+            Arc::clone(self),
+            entity.to_owned(),
+            freshness,
+            0,
+            Duration::from_millis(10),
+        ))
     }
 }
 

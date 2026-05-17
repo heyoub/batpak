@@ -1,4 +1,5 @@
 use crate::coordinate::Region;
+use crate::store::delivery::canal::{Canal, CanalBatch, CanalClosed, CanalHandle};
 use crate::store::delivery::observation::{AtLeastOnce, CheckpointId};
 use crate::store::index::{IndexEntry, StoreIndex};
 use crate::store::{RestartPolicy, Store, StoreError};
@@ -409,6 +410,39 @@ impl Cursor {
     }
 }
 
+impl Canal for Cursor {
+    type Item = IndexEntry;
+    type Error = CanalClosed;
+
+    fn pull_batch(
+        &mut self,
+        max: usize,
+        deadline: Duration,
+    ) -> Result<CanalBatch<Self::Item>, Self::Error> {
+        if max == 0 {
+            return Ok(CanalBatch::Empty);
+        }
+        let start = Instant::now();
+        loop {
+            let batch = self.poll_batch(max);
+            match batch.len() {
+                0 => {
+                    if start.elapsed() >= deadline {
+                        return Ok(CanalBatch::Empty);
+                    }
+                    let remaining = deadline.saturating_sub(start.elapsed());
+                    std::thread::sleep(remaining.min(Duration::from_millis(1)));
+                }
+                1 => {
+                    let mut batch = batch;
+                    return Ok(CanalBatch::One(batch.remove(0)));
+                }
+                _ => return Ok(CanalBatch::Many(batch)),
+            }
+        }
+    }
+}
+
 /// Outcome returned by a cursor worker batch handler.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CursorWorkerAction {
@@ -640,6 +674,20 @@ impl CursorWorkerHandle {
     pub fn stop_and_join(mut self) -> Result<(), StoreError> {
         self.stop();
         self.finish_join()
+    }
+}
+
+impl CanalHandle for CursorWorkerHandle {
+    fn stop(&self) {
+        CursorWorkerHandle::stop(self);
+    }
+
+    fn join(self: Box<Self>) -> Result<(), StoreError> {
+        (*self).join()
+    }
+
+    fn stop_and_join(self: Box<Self>) -> Result<(), StoreError> {
+        (*self).stop_and_join()
     }
 }
 

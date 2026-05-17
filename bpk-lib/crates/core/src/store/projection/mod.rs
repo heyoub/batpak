@@ -2,7 +2,7 @@ pub(crate) mod flow;
 pub(crate) mod registry;
 pub(crate) mod watch;
 
-pub use watch::{ProjectionWatcher, WatcherError};
+pub use watch::{CursorWatcherError, ProjectionWatcher, WatcherError};
 
 use crate::store::StoreError;
 use serde::{Deserialize, Serialize};

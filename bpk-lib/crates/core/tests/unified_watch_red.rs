@@ -122,7 +122,7 @@ fn subscription_returns_none_on_store_close() {
 }
 
 #[test]
-fn watch_projection_returns_store_closed_when_slow_watcher_is_pruned() {
+fn watch_projection_returns_subscription_pruned_when_slow_watcher_is_pruned() {
     let dir = TempDir::new().expect("temp dir");
     let config = StoreConfig::new(dir.path()).with_broadcast_capacity(1);
     let store = Arc::new(Store::open(config).expect("open"));
@@ -157,12 +157,43 @@ fn watch_projection_returns_store_closed_when_slow_watcher_is_pruned() {
     );
 
     let err: batpak::store::WatcherError = match second {
-        Ok(_) => panic!("PROPERTY: pruned watcher should terminate with WatcherError::StoreClosed"),
+        Ok(_) => {
+            panic!(
+                "PROPERTY: pruned watcher should terminate with WatcherError::SubscriptionPruned"
+            )
+        }
         Err(err) => err,
     };
     assert!(
-        matches!(err, batpak::store::WatcherError::StoreClosed),
-        "PROPERTY: a pruned watcher must surface WatcherError::StoreClosed, got {err:?}"
+        matches!(err, batpak::store::WatcherError::SubscriptionPruned),
+        "PROPERTY: a pruned watcher must surface WatcherError::SubscriptionPruned, got {err:?}"
+    );
+}
+
+#[test]
+fn cursor_watch_projection_replays_without_subscription_prune_error_type() {
+    let dir = TempDir::new().expect("temp dir");
+    let store = Arc::new(Store::open(StoreConfig::new(dir.path())).expect("open"));
+    let coord = Coordinate::new("watch:cursor", "watch:scope").expect("coord");
+
+    for i in 0u32..3 {
+        store
+            .append(&coord, kind_a(), &payload(i))
+            .expect("seed append");
+    }
+
+    let mut watcher: batpak::store::ProjectionWatcher<AllCounter, batpak::store::Cursor> = store
+        .watch_projection_with_cursor::<AllCounter>("watch:cursor", Freshness::Consistent, None)
+        .expect("cursor watcher");
+
+    let result: Result<(u64, Option<AllCounter>), batpak::store::CursorWatcherError> =
+        blocking("unified-watch-cursor-recv", move || watcher.recv());
+    let (_gen, state) = result.expect("cursor watcher recv");
+    let state = state.expect("projection should exist");
+    assert_eq!(
+        state.count, 3,
+        "PROPERTY: cursor-backed projection watch should replay already committed entity state \
+         without a lossy-subscription startup race."
     );
 }
 

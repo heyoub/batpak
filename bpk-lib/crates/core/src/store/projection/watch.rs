@@ -1,9 +1,12 @@
 use super::flow as projection_flow;
 use super::Freshness;
 use crate::event::EventSourced;
+use crate::store::delivery::canal::{Canal, CanalBatch, CanalClosed};
+use crate::store::delivery::cursor::Cursor;
 use crate::store::delivery::subscription::Subscription;
 use crate::store::{Open, Store, StoreError};
 use std::sync::Arc;
+use std::time::Duration;
 
 /// Errors that can be reported by [`ProjectionWatcher::recv`].
 ///
@@ -22,6 +25,8 @@ pub enum WatcherError {
     /// behind. No further events can ever be delivered on this watcher;
     /// callers should break out of their `recv()` loop.
     StoreClosed,
+    /// The lossy subscription backing this watcher was pruned or closed.
+    SubscriptionPruned,
     /// Re-projecting the entity after a relevant notification failed.
     ///
     /// The underlying error is bubbled up verbatim; this variant is a
@@ -37,6 +42,10 @@ impl std::fmt::Display for WatcherError {
                 f,
                 "projection watcher stopped: underlying notification channel closed"
             ),
+            Self::SubscriptionPruned => write!(
+                f,
+                "projection watcher stopped: lossy subscription was pruned or closed"
+            ),
             Self::Store(e) => write!(f, "projection watcher failed: {e}"),
         }
     }
@@ -46,6 +55,7 @@ impl std::error::Error for WatcherError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::StoreClosed => None,
+            Self::SubscriptionPruned => None,
             Self::Store(e) => Some(e),
         }
     }
@@ -57,14 +67,44 @@ impl From<StoreError> for WatcherError {
     }
 }
 
+/// Errors that can be reported by cursor-backed projection watchers.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum CursorWatcherError {
+    /// Re-projecting the entity after a cursor wakeup failed.
+    Store(StoreError),
+}
+
+impl std::fmt::Display for CursorWatcherError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Store(e) => write!(f, "cursor projection watcher failed: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for CursorWatcherError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Store(e) => Some(e),
+        }
+    }
+}
+
+impl From<StoreError> for CursorWatcherError {
+    fn from(e: StoreError) -> Self {
+        Self::Store(e)
+    }
+}
+
 /// Reactive projection watcher: emits updated projections when the entity
 /// receives new events. Created via [`Store::watch_projection`].
 ///
 /// Pull-based: the caller drives the loop by calling [`recv()`](Self::recv).
 /// Each `recv()` blocks until a new event arrives for the entity, re-projects,
 /// and returns the state materialized at the next honest generation.
-pub struct ProjectionWatcher<T> {
-    sub: Subscription,
+pub struct ProjectionWatcher<T, C: Canal = Subscription> {
+    canal: C,
     store: Arc<Store<Open>>,
     entity: String,
     freshness: Freshness,
@@ -82,12 +122,13 @@ pub struct ProjectionWatcher<T> {
     /// the notification channel, otherwise that in-flight append can be
     /// "consumed" by the baseline snapshot and never delivered.
     pending_initial_check: bool,
+    idle_sleep: Duration,
     _phantom: std::marker::PhantomData<T>,
 }
 
-impl<T> ProjectionWatcher<T> {
+impl<T> ProjectionWatcher<T, Subscription> {
     pub(crate) fn new(
-        sub: Subscription,
+        canal: Subscription,
         store: Arc<Store<Open>>,
         entity: String,
         freshness: Freshness,
@@ -95,18 +136,56 @@ impl<T> ProjectionWatcher<T> {
         pending_initial_check: bool,
     ) -> Self {
         Self {
-            sub,
+            canal,
             store,
             entity,
             freshness,
             last_delivered_generation: last_seen_generation,
             pending_initial_check,
+            idle_sleep: Duration::from_secs(24 * 60 * 60),
             _phantom: std::marker::PhantomData,
         }
     }
 }
 
-impl<T> ProjectionWatcher<T>
+impl<T> ProjectionWatcher<T, Cursor> {
+    pub(crate) fn new_cursor(
+        canal: Cursor,
+        store: Arc<Store<Open>>,
+        entity: String,
+        freshness: Freshness,
+        last_seen_generation: u64,
+        idle_sleep: Duration,
+    ) -> Self {
+        Self {
+            canal,
+            store,
+            entity,
+            freshness,
+            last_delivered_generation: last_seen_generation,
+            pending_initial_check: false,
+            idle_sleep,
+            _phantom: std::marker::PhantomData,
+        }
+    }
+}
+
+impl<T, C: Canal> ProjectionWatcher<T, C>
+where
+    T: EventSourced + serde::Serialize + serde::de::DeserializeOwned + 'static,
+    T::Input: projection_flow::ReplayInput,
+{
+    fn project_next_change_raw(&self) -> Result<Option<(u64, Option<T>)>, StoreError> {
+        projection_flow::project_if_changed::<T, Open>(
+            &self.store,
+            &self.entity,
+            self.last_delivered_generation,
+            &self.freshness,
+        )
+    }
+}
+
+impl<T> ProjectionWatcher<T, Subscription>
 where
     T: EventSourced + serde::Serialize + serde::de::DeserializeOwned + 'static,
     T::Input: projection_flow::ReplayInput,
@@ -116,17 +195,17 @@ where
             self.pending_initial_check = false;
             return Ok(());
         }
-        self.sub.recv().map(|_| ()).ok_or(WatcherError::StoreClosed)
+        loop {
+            match self.canal.pull_batch(1, self.idle_sleep) {
+                Ok(batch) if batch.is_empty() => continue,
+                Ok(_) => return Ok(()),
+                Err(CanalClosed) => return Err(WatcherError::SubscriptionPruned),
+            }
+        }
     }
 
     fn project_next_change(&self) -> Result<Option<(u64, Option<T>)>, WatcherError> {
-        projection_flow::project_if_changed::<T, Open>(
-            &self.store,
-            &self.entity,
-            self.last_delivered_generation,
-            &self.freshness,
-        )
-        .map_err(WatcherError::from)
+        self.project_next_change_raw().map_err(WatcherError::from)
     }
 
     /// Block until a new event arrives for the watched entity, then re-project
@@ -142,9 +221,10 @@ where
     ///   cancels out). This is the empty-fold case and is distinct from
     ///   "store closed".
     /// * `Err(WatcherError::StoreClosed)` — the underlying subscription
-    ///   channel closed. This is terminal and can happen either because the
-    ///   store dropped or because the lossy watcher subscription was pruned
-    ///   after the consumer fell behind.
+    ///   channel closed because the store dropped.
+    /// * `Err(WatcherError::SubscriptionPruned)` — the lossy watcher
+    ///   subscription was pruned or closed. This variant is not part of the
+    ///   cursor-backed watcher error type.
     /// * `Err(WatcherError::Store(e))` — transient reconstruction error
     ///   (e.g. segment read failure). The watcher remains usable.
     ///
@@ -211,7 +291,51 @@ where
     /// generation-honest watch semantics.
     #[doc(hidden)]
     pub fn subscription(&self) -> &Subscription {
-        &self.sub
+        &self.canal
+    }
+}
+
+impl<T> ProjectionWatcher<T, Cursor>
+where
+    T: EventSourced + serde::Serialize + serde::de::DeserializeOwned + 'static,
+    T::Input: projection_flow::ReplayInput,
+{
+    fn wait_for_cursor_item(&mut self) {
+        loop {
+            match self.canal.pull_batch(1, self.idle_sleep) {
+                Ok(CanalBatch::Empty) => continue,
+                Ok(_) | Err(CanalClosed) => return,
+            }
+        }
+    }
+
+    fn project_next_change(&self) -> Result<Option<(u64, Option<T>)>, CursorWatcherError> {
+        self.project_next_change_raw()
+            .map_err(CursorWatcherError::from)
+    }
+
+    /// Block until the cursor observes another event for the watched entity,
+    /// then re-project and return the updated state.
+    ///
+    /// Cursor-backed watchers cannot be pruned by a lossy subscription, so
+    /// this method's error type has no subscription-pruning variant.
+    ///
+    /// # Errors
+    /// Returns [`CursorWatcherError::Store`] if reconstruction fails.
+    pub fn recv(&mut self) -> Result<(u64, Option<T>), CursorWatcherError> {
+        loop {
+            self.wait_for_cursor_item();
+            match self.project_next_change()? {
+                Some((returned_gen, projected)) => {
+                    if returned_gen <= self.last_delivered_generation {
+                        continue;
+                    }
+                    self.last_delivered_generation = returned_gen;
+                    return Ok((returned_gen, projected));
+                }
+                None => continue,
+            }
+        }
     }
 }
 

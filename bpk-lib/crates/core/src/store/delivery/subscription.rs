@@ -1,6 +1,8 @@
 use crate::coordinate::Region;
-use crate::store::write::fanout::Notification;
-use flume::Receiver;
+use crate::store::delivery::canal::{Canal, CanalBatch, CanalClosed};
+use crate::store::write::fanout::{notification_matches_region, Notification};
+use flume::{Receiver, RecvTimeoutError, TryRecvError};
+use std::time::Duration;
 
 /// Subscription: push-based per-subscriber flume channel. Lossy.
 /// If subscriber is slow, bounded channel fills. Writer's retain() prunes.
@@ -32,11 +34,7 @@ impl Subscription {
                 Ok(notif) => {
                     // Filter: only return events matching our region.
                     // [FILE:src/coordinate/mod.rs — Region::matches_event]
-                    if self.region.matches_event(
-                        notif.coord.entity(),
-                        notif.coord.scope(),
-                        notif.kind,
-                    ) {
+                    if notification_matches_region(&self.region, &notif) {
                         return Some(notif);
                     }
                     // Didn't match — keep receiving
@@ -86,6 +84,46 @@ impl Subscription {
             map_fn: None,
             limit: None,
             count: 0,
+        }
+    }
+}
+
+impl Canal for Subscription {
+    type Item = Notification;
+    type Error = CanalClosed;
+
+    fn pull_batch(
+        &mut self,
+        max: usize,
+        deadline: Duration,
+    ) -> Result<CanalBatch<Self::Item>, Self::Error> {
+        if max == 0 {
+            return Ok(CanalBatch::Empty);
+        }
+        let first = match self.rx.recv_timeout(deadline) {
+            Ok(notification) => notification,
+            Err(RecvTimeoutError::Timeout) => return Ok(CanalBatch::Empty),
+            Err(RecvTimeoutError::Disconnected) => return Err(CanalClosed),
+        };
+        if max == 1 {
+            return Ok(CanalBatch::One(first));
+        }
+
+        let mut rest = Vec::new();
+        while rest.len() + 1 < max {
+            match self.rx.try_recv() {
+                Ok(notification) => rest.push(notification),
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => return Err(CanalClosed),
+            }
+        }
+        if rest.is_empty() {
+            Ok(CanalBatch::One(first))
+        } else {
+            let mut items = Vec::with_capacity(rest.len() + 1);
+            items.push(first);
+            items.extend(rest);
+            Ok(CanalBatch::Many(items))
         }
     }
 }

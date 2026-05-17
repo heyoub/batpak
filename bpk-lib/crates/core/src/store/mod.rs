@@ -72,7 +72,7 @@ pub use config::{
     BatchConfig, IndexConfig, IndexTopology, OpenReportObserver, StoreConfig, SyncConfig, SyncMode,
     WriterConfig,
 };
-pub use delivery::canal::ReactorCanal;
+pub use delivery::canal::{Canal, CanalBatch, CanalClosed, CanalHandle, CanalItem, ReactorCanal};
 pub use delivery::cursor::{
     Cursor, CursorGapConfig, CursorWorkerAction, CursorWorkerConfig, CursorWorkerHandle,
     GapObservation,
@@ -94,7 +94,7 @@ pub use fault::{
     CountdownAction, CountdownInjector, FaultInjector, InjectionPoint, ProbabilisticInjector,
 };
 pub use gate::DurabilityGate;
-pub use projection::watch::{ProjectionWatcher, WatcherError};
+pub use projection::watch::{CursorWatcherError, ProjectionWatcher, WatcherError};
 pub use projection::{
     CacheCapabilities, CacheMeta, Freshness, NativeCache, NoCache, ProjectionCache,
 };

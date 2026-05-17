@@ -12,11 +12,12 @@ use batpak::prelude::*;
 use batpak::store::index::IndexEntry;
 use batpak::store::segment::CompactionOutcome;
 use batpak::store::{
-    compaction_strategy_shape, report_for_run, report_skipped, BatchAppendItem, CausationRef,
-    CompactionReportBody, CompactionReportFinding, CompactionStrategyShape, StoreError,
-    COMPACTION_REPORT_SCHEMA_VERSION,
+    compaction_strategy_shape, report_for_run, report_skipped, BatchAppendItem, Canal, CanalBatch,
+    CanalClosed, CanalHandle, CanalItem, CausationRef, CompactionReportBody,
+    CompactionReportFinding, CompactionStrategyShape, StoreError, COMPACTION_REPORT_SCHEMA_VERSION,
 };
 use std::path::PathBuf;
+use std::time::Duration;
 use tempfile::TempDir;
 
 fn lane_store() -> (Store<Open>, TempDir) {
@@ -337,6 +338,64 @@ fn public_bulk_reads_require_explicit_bounds_not_implicit_global_cursor() {
     let _: Vec<IndexEntry> = store.by_fact(EventKind::custom(0xF, 1));
     let _: Cursor = store.cursor_guaranteed(&Region::all());
     drop(store);
+}
+
+#[test]
+fn public_canal_trait_pulls_cursor_and_subscription_items() {
+    struct NoopHandle;
+
+    impl CanalHandle for NoopHandle {
+        fn stop(&self) {}
+
+        fn join(self: Box<Self>) -> Result<(), StoreError> {
+            Ok(())
+        }
+
+        fn stop_and_join(self: Box<Self>) -> Result<(), StoreError> {
+            Ok(())
+        }
+    }
+
+    let (store, _dir) = lane_store();
+    let coord = Coordinate::new("entity:canal", "scope:canal").expect("coord");
+    let region = Region::entity("entity:canal");
+    let kind = EventKind::custom(0xF, 0x61);
+
+    let first = store
+        .append(&coord, kind, &serde_json::json!({ "n": 1 }))
+        .expect("append first");
+    let mut cursor = store.cursor_guaranteed(&region);
+    let cursor_batch: CanalBatch<IndexEntry> =
+        Canal::pull_batch(&mut cursor, 1, Duration::from_millis(0)).expect("cursor canal");
+    match cursor_batch {
+        CanalBatch::One(entry) => {
+            assert_eq!(CanalItem::event_id(&entry), first.event_id);
+        }
+        other @ (CanalBatch::Empty | CanalBatch::Many(_)) => {
+            panic!("PROPERTY: cursor canal should yield one entry, got {other:?}")
+        }
+    }
+
+    let mut subscription = store.subscribe_lossy(&region);
+    let second = store
+        .append(&coord, kind, &serde_json::json!({ "n": 2 }))
+        .expect("append second");
+    let subscription_batch: CanalBatch<Notification> =
+        Canal::pull_batch(&mut subscription, 1, Duration::from_secs(1))
+            .expect("subscription canal");
+    match subscription_batch {
+        CanalBatch::One(notification) => {
+            assert_eq!(CanalItem::event_id(&notification), second.event_id);
+        }
+        other @ (CanalBatch::Empty | CanalBatch::Many(_)) => {
+            panic!("PROPERTY: subscription canal should yield one notification, got {other:?}")
+        }
+    }
+
+    let _closed = CanalClosed;
+    let handle: Box<dyn CanalHandle> = Box::new(NoopHandle);
+    handle.stop_and_join().expect("noop handle");
+    store.close().expect("close");
 }
 
 #[test]

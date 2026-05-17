@@ -111,7 +111,7 @@ impl Coordinate {
     /// Coordinate components are logical stream identifiers, not path or
     /// checkpoint-identity fragments. They must be non-empty, bounded, free of
     /// control bytes, free of path traversal shapes, and free of the `|` / `=`
-    /// separators reserved by [`Region::checkpoint_identity`].
+    /// separators reserved by `Region::checkpoint_identity`.
     ///
     /// # Errors
     /// Returns `CoordinateError::EmptyEntity` if the entity string is empty.

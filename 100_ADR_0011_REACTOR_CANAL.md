@@ -1,7 +1,8 @@
 # ADR-0011: Reactor canal for typed reactors
 
 ## Status
-Accepted (shipped in 0.6.0); code-level Canal selector added for 0.7.6.
+Accepted (shipped in 0.6.0); amended in 0.7.6 to add the narrow `Canal`
+trait while preserving `ReactorCanal` as the public selector.
 
 ## Context
 
@@ -168,6 +169,33 @@ same dispatcher contract over the chosen primitive:
 
 This keeps the abstraction compositional: Canal selects a delivery path; it does
 not become a new store, checkpoint, or runtime owner.
+
+## Canal Trait (0.7.6 Correction)
+
+The original code-shape decision remains correct for the public selector:
+`ReactorCanal` is still an enum with explicit `CursorGuaranteed` and
+`LossySubscription` variants. The 0.7.6 correction adds `trait Canal` as the
+body seam beneath that selector, not as a replacement for the selector.
+
+`Canal` is intentionally small. It standardizes "pull up to N committed-work
+items by a deadline" over `Cursor` and `Subscription`; it does not own
+checkpoint policy, restart policy, gap-buffer policy, delivery guarantees, or
+the `AtLeastOnce` witness. Those semantics remain on the concrete primitive.
+This is the ADR-0026 correction: Canal was an owed delivery abstraction, not a
+documentation metaphor to scrub away.
+
+The shipped trait unlocks three concrete simplifications:
+
+- `ProjectionWatcher<T, C: Canal = Subscription>` can ride either the existing
+  lossy subscription canal or a cursor-backed canal.
+- Cursor-backed watchers return `CursorWatcherError`, which has no
+  subscription-pruned branch at the type level.
+- Typed reactor handles use one `Box<dyn CanalHandle>` lifecycle scaffold
+  instead of a local enum plus a lossy-only handle copy.
+
+The raw `react_loop` surface remains the pre-decoded lossy fanout path, but its
+reactor fanout now uses the same writer-side region-filter contract as
+`subscribe_lossy`.
 
 ## Cross-reference
 

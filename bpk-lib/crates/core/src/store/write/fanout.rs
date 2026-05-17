@@ -12,8 +12,13 @@ use flume::{Receiver, Sender, TrySendError};
 use parking_lot::Mutex;
 
 /// Generic push-based notification fanout via bounded flume channels.
-pub(crate) struct FanoutList<T: Clone> {
-    senders: Mutex<Vec<Sender<T>>>,
+pub(crate) struct FanoutList<T: Clone + RegionFanoutItem> {
+    senders: Mutex<Vec<FanoutSender<T>>>,
+}
+
+struct FanoutSender<T: Clone> {
+    tx: Sender<T>,
+    region: Region,
 }
 
 /// F8: region-filtered fanout for [`Notification`] subscribers.
@@ -48,6 +53,10 @@ pub(crate) struct CommittedEventEnvelope {
 pub(crate) type SubscriberList = FilteredSubscriberList;
 pub(crate) type ReactorSubscriberList = FanoutList<CommittedEventEnvelope>;
 
+pub(crate) trait RegionFanoutItem {
+    fn matches_region(&self, region: &Region) -> bool;
+}
+
 /// Notification: lightweight event summary pushed to subscribers.
 /// Must derive `Clone` because the writer fanout uses `try_send` broadcast loops.
 #[derive(Clone, Debug)]
@@ -68,17 +77,27 @@ pub struct Notification {
     pub position: DagPosition,
 }
 
-impl<T: Clone> FanoutList<T> {
+pub(crate) fn notification_matches_region(region: &Region, value: &Notification) -> bool {
+    region.matches_event(value.coord.entity(), value.coord.scope(), value.kind)
+}
+
+impl RegionFanoutItem for CommittedEventEnvelope {
+    fn matches_region(&self, region: &Region) -> bool {
+        notification_matches_region(region, &self.notification)
+    }
+}
+
+impl<T: Clone + RegionFanoutItem> FanoutList<T> {
     pub(crate) fn new() -> Self {
         Self {
             senders: Mutex::new(Vec::new()),
         }
     }
 
-    /// Subscribe: create a new bounded channel, store the sender, return the receiver.
-    pub(crate) fn subscribe(&self, capacity: usize) -> Receiver<T> {
+    /// Subscribe with a [`Region`] filter applied before pushing to the receiver.
+    pub(crate) fn subscribe_with_region(&self, capacity: usize, region: Region) -> Receiver<T> {
         let (tx, rx) = flume::bounded(capacity);
-        self.senders.lock().push(tx);
+        self.senders.lock().push(FanoutSender { tx, region });
         rx
     }
 
@@ -100,10 +119,15 @@ impl<T: Clone> FanoutList<T> {
     pub(crate) fn broadcast(&self, value: &T) {
         let mut guard = self.senders.lock();
         let subscribers_before = guard.len();
-        guard.retain(|tx| match tx.try_send(value.clone()) {
-            Ok(()) => true,
-            Err(TrySendError::Full(_)) => false,
-            Err(TrySendError::Disconnected(_)) => false,
+        guard.retain(|sub| {
+            if !value.matches_region(&sub.region) {
+                return true;
+            }
+            match sub.tx.try_send(value.clone()) {
+                Ok(()) => true,
+                Err(TrySendError::Full(_)) => false,
+                Err(TrySendError::Disconnected(_)) => false,
+            }
         });
         tracing::trace!(
             target: "batpak::fanout",
@@ -149,10 +173,7 @@ impl FilteredSubscriberList {
         let mut guard = self.senders.lock();
         let subscribers_before = guard.len();
         guard.retain(|sub| {
-            match sub
-                .region
-                .matches_event(value.coord.entity(), value.coord.scope(), value.kind)
-            {
+            match notification_matches_region(&sub.region, value) {
                 false => true, // out of region; subscriber remains but gets no push
                 true => match sub.tx.try_send(value.clone()) {
                     Ok(()) => true,

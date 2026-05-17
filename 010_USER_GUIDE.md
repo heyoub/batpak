@@ -259,6 +259,7 @@ Projection APIs:
 - `store.project_if_changed(entity, last_generation, &freshness)` to skip unchanged entities
 - `store.entity_generation(entity)` for a cheap generation check
 - `store.watch_projection(entity, freshness)` for live projection updates over a lossy/prunable watcher canal
+- `store.watch_projection_with_cursor(entity, freshness, checkpoint_id)` for ordered cursor-backed projection updates
 
 Replay lanes:
 

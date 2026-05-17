@@ -29,7 +29,7 @@ machinery as the default userland surface.
 | `WatermarkSnapshot` | internal raw watermark machinery | public operator surface | shipped: `pub(crate)` |
 | `Cursor` | ordered pull replay, checkpointable | generic "stream" wording | shipped |
 | `Subscription` | lossy push observation | guaranteed delivery wording | shipped |
-| `Canal` | delivery adapter concept over cursor/subscription primitives | metaphor-only docs | aspirational: R4.06 owns trait work |
+| `Canal` | shipped trait over cursor/subscription primitives; reactor and watcher bodies consume through the narrow delivery axis | calling Canal a documentation metaphor | shipped |
 | `by_entity` | exact entity query returning indexed entries | `stream` as a public query name | shipped |
 | `read_raw` | raw event read by id | `get_raw` | shipped |
 | `Ctx` | runtime context spelling | `Cx` in new public surfaces | shipped |
@@ -56,6 +56,7 @@ The store has two shipped delivery primitives:
 - `Cursor`: ordered pull replay. It favors completeness and may checkpoint for
   durable at-least-once replay.
 
-`Canal` is the shared delivery adapter vocabulary over those primitives. It
-must stay narrow and compositional: the primitive keeps its own semantics, and
-the canal layer only gives reactor code a common way to consume committed work.
+`Canal` is the shared delivery adapter trait over those primitives. It is
+narrow and compositional: the primitive keeps its own semantics, and the canal
+layer only gives reactor and watcher code a common way to consume committed
+work.

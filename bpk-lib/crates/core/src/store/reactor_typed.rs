@@ -47,7 +47,6 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::thread::JoinHandle;
 use std::time::Duration;
 
 use flume::RecvTimeoutError;
@@ -56,10 +55,8 @@ use parking_lot::Mutex;
 use crate::coordinate::Region;
 use crate::event::sourcing::TypedReactive;
 use crate::event::{DecodeTyped, EventPayload, StoredEvent, TypedDecodeError};
-use crate::store::delivery::canal::ReactorCanal;
-use crate::store::delivery::cursor::{
-    CursorGapConfig, CursorWorkerAction, CursorWorkerConfig, CursorWorkerHandle,
-};
+use crate::store::delivery::canal::{CanalHandle, ReactorCanal, SubscriptionWorkerHandle};
+use crate::store::delivery::cursor::{CursorGapConfig, CursorWorkerAction, CursorWorkerConfig};
 use crate::store::delivery::observation::{AtLeastOnce, CheckpointId};
 use crate::store::reaction::ReactionBatch;
 use crate::store::{Open, RestartPolicy, Store, StoreError};
@@ -227,42 +224,8 @@ impl<E: std::error::Error + Send + Sync + 'static> std::error::Error for Reactor
 
 /// Handle for a running typed reactor loop.
 pub struct TypedReactorHandle<E: std::error::Error + Send + Sync + 'static> {
-    inner: TypedReactorHandleInner,
+    inner: Box<dyn CanalHandle>,
     error_slot: Arc<Mutex<Option<ReactorError<E>>>>,
-}
-
-enum TypedReactorHandleInner {
-    Cursor(CursorWorkerHandle),
-    Lossy(LossyReactorHandle),
-}
-
-struct LossyReactorHandle {
-    stop: Arc<AtomicBool>,
-    join: Option<JoinHandle<()>>,
-    error_slot: Arc<Mutex<Option<StoreError>>>,
-}
-
-impl LossyReactorHandle {
-    fn stop(&self) {
-        self.stop.store(true, Ordering::Release);
-    }
-
-    fn finish_join(&mut self) -> Result<(), StoreError> {
-        if let Some(join) = self.join.take() {
-            join.join().map_err(|_| StoreError::WriterCrashed)?;
-        }
-        let mut guard = self.error_slot.lock();
-        guard.take().map_or(Ok(()), Err)
-    }
-
-    fn join(mut self) -> Result<(), StoreError> {
-        self.finish_join()
-    }
-
-    fn stop_and_join(mut self) -> Result<(), StoreError> {
-        self.stop();
-        self.finish_join()
-    }
 }
 
 type CheckpointFailureCallback = dyn FnMut(&str, std::io::Error) + Send + 'static;
@@ -270,10 +233,7 @@ type CheckpointFailureCallback = dyn FnMut(&str, std::io::Error) + Send + 'stati
 impl<E: std::error::Error + Send + Sync + 'static> TypedReactorHandle<E> {
     /// Request a clean stop. The loop exits after the current dispatch.
     pub fn stop(&self) {
-        match &self.inner {
-            TypedReactorHandleInner::Cursor(inner) => inner.stop(),
-            TypedReactorHandleInner::Lossy(inner) => inner.stop(),
-        }
+        self.inner.stop();
     }
 
     /// Wait passively for the reactor loop to stop on its own.
@@ -294,10 +254,7 @@ impl<E: std::error::Error + Send + Sync + 'static> TypedReactorHandle<E> {
         // Drop cursor-worker `WriterCrashed` result — we already captured
         // richer errors in the slot. If the thread panicked without
         // populating the slot, surface it as a Store/WriterCrashed error.
-        let worker_result = match inner {
-            TypedReactorHandleInner::Cursor(inner) => inner.join(),
-            TypedReactorHandleInner::Lossy(inner) => inner.join(),
-        };
+        let worker_result = inner.join();
         let stashed = error_slot.lock().take();
         match (stashed, worker_result) {
             (Some(err), _) => Err(err),
@@ -317,10 +274,7 @@ impl<E: std::error::Error + Send + Sync + 'static> TypedReactorHandle<E> {
     /// Same as [`join`](Self::join).
     pub fn stop_and_join(self) -> Result<(), ReactorError<E>> {
         let Self { inner, error_slot } = self;
-        let worker_result = match inner {
-            TypedReactorHandleInner::Cursor(inner) => inner.stop_and_join(),
-            TypedReactorHandleInner::Lossy(inner) => inner.stop_and_join(),
-        };
+        let worker_result = inner.stop_and_join();
         let stashed = error_slot.lock().take();
         match (stashed, worker_result) {
             (Some(err), _) => Err(err),
@@ -493,30 +447,43 @@ where
     P: Send + 'static,
     D: ReactorDispatcher<P>,
 {
-    match config.canal {
-        ReactorCanal::CursorGuaranteed => {
-            run_reactor_cursor(store, region, config, dispatcher, fetch)
-        }
-        ReactorCanal::LossySubscription => {
-            run_reactor_lossy(store, region, config.idle_sleep, dispatcher, fetch)
-        }
-    }
+    let error_slot: Arc<Mutex<Option<ReactorError<D::Error>>>> = Arc::new(Mutex::new(None));
+    let inner: Box<dyn CanalHandle> = match config.canal {
+        ReactorCanal::CursorGuaranteed => Box::new(spawn_reactor_cursor(
+            store,
+            region,
+            config,
+            dispatcher,
+            fetch,
+            &error_slot,
+        )?),
+        ReactorCanal::LossySubscription => Box::new(spawn_reactor_lossy(
+            store,
+            region,
+            config.idle_sleep,
+            dispatcher,
+            fetch,
+            &error_slot,
+        )?),
+    };
+
+    Ok(TypedReactorHandle { inner, error_slot })
 }
 
-fn run_reactor_cursor<P, D>(
+fn spawn_reactor_cursor<P, D>(
     store: &Arc<Store<Open>>,
     region: &Region,
     config: ReactorConfig,
     mut dispatcher: D,
     fetch: fn(&Store<Open>, u128) -> Result<StoredEvent<P>, StoreError>,
-) -> Result<TypedReactorHandle<D::Error>, StoreError>
+    error_slot: &Arc<Mutex<Option<ReactorError<D::Error>>>>,
+) -> Result<impl CanalHandle, StoreError>
 where
     P: Send + 'static,
     D: ReactorDispatcher<P>,
 {
-    let error_slot: Arc<Mutex<Option<ReactorError<D::Error>>>> = Arc::new(Mutex::new(None));
-    let slot_for_handler = Arc::clone(&error_slot);
-    let slot_for_budget = Arc::clone(&error_slot);
+    let slot_for_handler = Arc::clone(error_slot);
+    let slot_for_budget = Arc::clone(error_slot);
     let store_for_handler = Arc::clone(store);
 
     // D1: supply the cursor-worker with a callback that writes
@@ -535,7 +502,7 @@ where
     // shared slot when a durable-cursor persist fails. In-memory cursors
     // never invoke this — the callback is harmless for them because the
     // worker only fires it when `checkpoint_id: Some(_)`.
-    let slot_for_checkpoint = Arc::clone(&error_slot);
+    let slot_for_checkpoint = Arc::clone(error_slot);
     let on_checkpoint_failure: Box<CheckpointFailureCallback> =
         Box::new(move |id: &str, source: std::io::Error| {
             let mut guard = slot_for_checkpoint.lock();
@@ -560,7 +527,7 @@ where
         on_checkpoint_failure: Some(on_checkpoint_failure),
     };
 
-    let inner = store.cursor_worker(
+    store.cursor_worker(
         region,
         worker_config,
         move |entries, inner_store, at_least_once| {
@@ -581,28 +548,23 @@ where
                 BatchOutcome::Rollback => CursorWorkerAction::StopWithRollback,
             }
         },
-    )?;
-
-    Ok(TypedReactorHandle {
-        inner: TypedReactorHandleInner::Cursor(inner),
-        error_slot,
-    })
+    )
 }
 
-fn run_reactor_lossy<P, D>(
+fn spawn_reactor_lossy<P, D>(
     store: &Arc<Store<Open>>,
     region: &Region,
     idle_sleep: Duration,
     mut dispatcher: D,
     fetch: fn(&Store<Open>, u128) -> Result<StoredEvent<P>, StoreError>,
-) -> Result<TypedReactorHandle<D::Error>, StoreError>
+    error_slot: &Arc<Mutex<Option<ReactorError<D::Error>>>>,
+) -> Result<impl CanalHandle, StoreError>
 where
     P: Send + 'static,
     D: ReactorDispatcher<P>,
 {
-    let error_slot: Arc<Mutex<Option<ReactorError<D::Error>>>> = Arc::new(Mutex::new(None));
     let store_error_slot: Arc<Mutex<Option<StoreError>>> = Arc::new(Mutex::new(None));
-    let slot_for_handler = Arc::clone(&error_slot);
+    let slot_for_handler = Arc::clone(error_slot);
     let slot_for_store = Arc::clone(&store_error_slot);
     let store_for_handler = Arc::clone(store);
     let stop = Arc::new(AtomicBool::new(false));
@@ -649,15 +611,7 @@ where
         })
         .map_err(StoreError::Io)?;
 
-    let inner = LossyReactorHandle {
-        stop,
-        join: Some(join),
-        error_slot: slot_for_store,
-    };
-    Ok(TypedReactorHandle {
-        inner: TypedReactorHandleInner::Lossy(inner),
-        error_slot,
-    })
+    Ok(SubscriptionWorkerHandle::new(stop, join, slot_for_store))
 }
 
 // ─── T4b single-kind adapter ──────────────────────────────────────────────────

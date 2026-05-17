@@ -1317,6 +1317,8 @@ pub batpak::prelude::StoreError::WaitTimeout::watermark: batpak::store::stats::W
 pub batpak::prelude::StoreError::WriterCrashed
 impl core::convert::From<batpak::coordinate::CoordinateError> for batpak::prelude::StoreError
 pub fn batpak::prelude::StoreError::from(e: batpak::coordinate::CoordinateError) -> Self
+impl core::convert::From<batpak::prelude::StoreError> for batpak::store::CursorWatcherError
+pub fn batpak::store::CursorWatcherError::from(e: batpak::prelude::StoreError) -> Self
 impl core::convert::From<batpak::prelude::StoreError> for batpak::store::WatcherError
 pub fn batpak::store::WatcherError::from(e: batpak::prelude::StoreError) -> Self
 impl core::convert::From<rmp_serde::encode::Error> for batpak::prelude::StoreError
@@ -1578,6 +1580,10 @@ pub fn batpak::store::delivery::cursor::Cursor::poll_batch(&mut self, max: usize
 pub fn batpak::store::delivery::cursor::Cursor::save_checkpoint(data_dir: &std::path::Path, id: &batpak::store::delivery::observation::CheckpointId, ckpt: &batpak::store::delivery::cursor::CursorCheckpoint) -> std::io::error::Result<()>
 pub fn batpak::store::delivery::cursor::Cursor::take_gaps(&mut self) -> alloc::vec::Vec<batpak::store::delivery::cursor::GapObservation>
 pub fn batpak::store::delivery::cursor::Cursor::with_gap_config(self, config: batpak::store::delivery::cursor::CursorGapConfig) -> Self
+impl batpak::store::delivery::canal::Canal for batpak::store::delivery::cursor::Cursor
+pub type batpak::store::delivery::cursor::Cursor::Error = batpak::store::delivery::canal::CanalClosed
+pub type batpak::store::delivery::cursor::Cursor::Item = batpak::store::index::IndexEntry
+pub fn batpak::store::delivery::cursor::Cursor::pull_batch(&mut self, max: usize, deadline: core::time::Duration) -> core::result::Result<batpak::store::delivery::canal::CanalBatch<Self::Item>, Self::Error>
 #[non_exhaustive] pub struct batpak::prelude::CursorWorkerConfig
 pub batpak::prelude::CursorWorkerConfig::batch_size: usize
 pub batpak::prelude::CursorWorkerConfig::checkpoint_id: core::option::Option<batpak::store::delivery::observation::CheckpointId>
@@ -1595,6 +1601,10 @@ impl batpak::store::delivery::cursor::CursorWorkerHandle
 pub fn batpak::store::delivery::cursor::CursorWorkerHandle::join(self) -> core::result::Result<(), batpak::prelude::StoreError>
 pub fn batpak::store::delivery::cursor::CursorWorkerHandle::stop(&self)
 pub fn batpak::store::delivery::cursor::CursorWorkerHandle::stop_and_join(self) -> core::result::Result<(), batpak::prelude::StoreError>
+impl batpak::store::delivery::canal::CanalHandle for batpak::store::delivery::cursor::CursorWorkerHandle
+pub fn batpak::store::delivery::cursor::CursorWorkerHandle::join(self: alloc::boxed::Box<Self>) -> core::result::Result<(), batpak::prelude::StoreError>
+pub fn batpak::store::delivery::cursor::CursorWorkerHandle::stop(&self)
+pub fn batpak::store::delivery::cursor::CursorWorkerHandle::stop_and_join(self: alloc::boxed::Box<Self>) -> core::result::Result<(), batpak::prelude::StoreError>
 impl core::ops::drop::Drop for batpak::store::delivery::cursor::CursorWorkerHandle
 pub fn batpak::store::delivery::cursor::CursorWorkerHandle::drop(&mut self)
 #[repr(C)] pub struct batpak::prelude::DagPosition
@@ -1791,6 +1801,8 @@ pub batpak::prelude::Notification::event_id: u128
 pub batpak::prelude::Notification::kind: batpak::event::kind::EventKind
 pub batpak::prelude::Notification::position: batpak::coordinate::position::DagPosition
 pub batpak::prelude::Notification::sequence: u64
+impl batpak::store::delivery::canal::CanalItem for batpak::prelude::Notification
+pub fn batpak::prelude::Notification::event_id(&self) -> u128
 pub struct batpak::prelude::Open
 pub struct batpak::prelude::OutcomeError
 pub batpak::prelude::OutcomeError::compensation: core::option::Option<batpak::outcome::wait::CompensationAction>
@@ -2028,6 +2040,7 @@ impl batpak::store::Store<batpak::store::Open>
 pub fn batpak::store::Store<batpak::store::Open>::react_loop<R>(self: &alloc::sync::Arc<Self>, region: &batpak::coordinate::Region, reactor: R) -> core::result::Result<std::thread::join_handle::JoinHandle<()>, batpak::prelude::StoreError> where R: batpak::event::sourcing::Reactive<serde_json::value::Value> + core::marker::Send + 'static
 pub fn batpak::store::Store<batpak::store::Open>::subscribe_lossy(&self, region: &batpak::coordinate::Region) -> batpak::store::delivery::subscription::Subscription
 pub fn batpak::store::Store<batpak::store::Open>::watch_projection<T>(self: &alloc::sync::Arc<Self>, entity: &str, freshness: batpak::store::projection::Freshness) -> batpak::store::ProjectionWatcher<T> where T: batpak::event::sourcing::EventSourced + serde_core::ser::Serialize + serde_core::de::DeserializeOwned + core::marker::Send + 'static
+pub fn batpak::store::Store<batpak::store::Open>::watch_projection_with_cursor<T>(self: &alloc::sync::Arc<Self>, entity: &str, freshness: batpak::store::projection::Freshness, checkpoint_id: core::option::Option<batpak::store::delivery::observation::CheckpointId>) -> core::result::Result<batpak::store::ProjectionWatcher<T, batpak::store::delivery::cursor::Cursor>, batpak::prelude::StoreError> where T: batpak::event::sourcing::EventSourced + serde_core::ser::Serialize + serde_core::de::DeserializeOwned + core::marker::Send + 'static
 impl batpak::store::Store<batpak::store::Open>
 pub fn batpak::store::Store<batpak::store::Open>::react_loop_multi<R>(self: &alloc::sync::Arc<Self>, region: &batpak::coordinate::Region, config: batpak::store::reactor_typed::ReactorConfig, reactor: R) -> core::result::Result<batpak::store::reactor_typed::TypedReactorHandle<<R as batpak::event::sourcing::MultiReactive>::Error>, batpak::prelude::StoreError> where R: batpak::event::sourcing::MultiReactive<batpak::event::sourcing::JsonValueInput>
 pub fn batpak::store::Store<batpak::store::Open>::react_loop_multi_raw<R>(self: &alloc::sync::Arc<Self>, region: &batpak::coordinate::Region, config: batpak::store::reactor_typed::ReactorConfig, reactor: R) -> core::result::Result<batpak::store::reactor_typed::TypedReactorHandle<<R as batpak::event::sourcing::MultiReactive>::Error>, batpak::prelude::StoreError> where R: batpak::event::sourcing::MultiReactive<batpak::event::sourcing::RawMsgpackInput>
@@ -2181,6 +2194,10 @@ impl batpak::store::delivery::subscription::Subscription
 pub fn batpak::store::delivery::subscription::Subscription::filtered_receiver(&self) -> &flume::Receiver<batpak::prelude::Notification>
 pub fn batpak::store::delivery::subscription::Subscription::ops(self) -> batpak::store::delivery::subscription::SubscriptionOps
 pub fn batpak::store::delivery::subscription::Subscription::recv(&self) -> core::option::Option<batpak::prelude::Notification>
+impl batpak::store::delivery::canal::Canal for batpak::store::delivery::subscription::Subscription
+pub type batpak::store::delivery::subscription::Subscription::Error = batpak::store::delivery::canal::CanalClosed
+pub type batpak::store::delivery::subscription::Subscription::Item = batpak::prelude::Notification
+pub fn batpak::store::delivery::subscription::Subscription::pull_batch(&mut self, max: usize, deadline: core::time::Duration) -> core::result::Result<batpak::store::delivery::canal::CanalBatch<Self::Item>, Self::Error>
 pub struct batpak::prelude::SubscriptionOps
 impl batpak::store::delivery::subscription::SubscriptionOps
 pub fn batpak::store::delivery::subscription::SubscriptionOps::filter<F: core::ops::function::Fn(&batpak::prelude::Notification) -> bool + core::marker::Send + 'static>(self, f: F) -> Self
@@ -2572,9 +2589,45 @@ pub batpak::store::cold_start::rebuild::OpenIndexReport::unknown_reserved_system
 pub batpak::store::cold_start::rebuild::OpenIndexReport::unknown_reserved_system_kind_histogram: alloc::collections::btree::map::BTreeMap<u16, usize>
 pub mod batpak::store::delivery
 pub mod batpak::store::delivery::canal
+pub enum batpak::store::delivery::canal::CanalBatch<I>
+pub batpak::store::delivery::canal::CanalBatch::Empty
+pub batpak::store::delivery::canal::CanalBatch::Many(alloc::vec::Vec<I>)
+pub batpak::store::delivery::canal::CanalBatch::One(I)
+impl<I> batpak::store::delivery::canal::CanalBatch<I>
+pub const fn batpak::store::delivery::canal::CanalBatch<I>::is_empty(&self) -> bool
 pub enum batpak::store::delivery::canal::ReactorCanal
 pub batpak::store::delivery::canal::ReactorCanal::CursorGuaranteed
 pub batpak::store::delivery::canal::ReactorCanal::LossySubscription
+pub struct batpak::store::delivery::canal::CanalClosed
+impl core::error::Error for batpak::store::delivery::canal::CanalClosed
+impl core::fmt::Display for batpak::store::delivery::canal::CanalClosed
+pub fn batpak::store::delivery::canal::CanalClosed::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub trait batpak::store::delivery::canal::Canal: core::marker::Send
+pub type batpak::store::delivery::canal::Canal::Error: core::error::Error + core::marker::Send + core::marker::Sync + 'static
+pub type batpak::store::delivery::canal::Canal::Item: batpak::store::delivery::canal::CanalItem + core::marker::Send
+pub fn batpak::store::delivery::canal::Canal::pull_batch(&mut self, max: usize, deadline: core::time::Duration) -> core::result::Result<batpak::store::delivery::canal::CanalBatch<Self::Item>, Self::Error>
+impl batpak::store::delivery::canal::Canal for batpak::store::delivery::cursor::Cursor
+pub type batpak::store::delivery::cursor::Cursor::Error = batpak::store::delivery::canal::CanalClosed
+pub type batpak::store::delivery::cursor::Cursor::Item = batpak::store::index::IndexEntry
+pub fn batpak::store::delivery::cursor::Cursor::pull_batch(&mut self, max: usize, deadline: core::time::Duration) -> core::result::Result<batpak::store::delivery::canal::CanalBatch<Self::Item>, Self::Error>
+impl batpak::store::delivery::canal::Canal for batpak::store::delivery::subscription::Subscription
+pub type batpak::store::delivery::subscription::Subscription::Error = batpak::store::delivery::canal::CanalClosed
+pub type batpak::store::delivery::subscription::Subscription::Item = batpak::prelude::Notification
+pub fn batpak::store::delivery::subscription::Subscription::pull_batch(&mut self, max: usize, deadline: core::time::Duration) -> core::result::Result<batpak::store::delivery::canal::CanalBatch<Self::Item>, Self::Error>
+pub trait batpak::store::delivery::canal::CanalHandle: core::marker::Send
+pub fn batpak::store::delivery::canal::CanalHandle::join(self: alloc::boxed::Box<Self>) -> core::result::Result<(), batpak::prelude::StoreError>
+pub fn batpak::store::delivery::canal::CanalHandle::stop(&self)
+pub fn batpak::store::delivery::canal::CanalHandle::stop_and_join(self: alloc::boxed::Box<Self>) -> core::result::Result<(), batpak::prelude::StoreError>
+impl batpak::store::delivery::canal::CanalHandle for batpak::store::delivery::cursor::CursorWorkerHandle
+pub fn batpak::store::delivery::cursor::CursorWorkerHandle::join(self: alloc::boxed::Box<Self>) -> core::result::Result<(), batpak::prelude::StoreError>
+pub fn batpak::store::delivery::cursor::CursorWorkerHandle::stop(&self)
+pub fn batpak::store::delivery::cursor::CursorWorkerHandle::stop_and_join(self: alloc::boxed::Box<Self>) -> core::result::Result<(), batpak::prelude::StoreError>
+pub trait batpak::store::delivery::canal::CanalItem
+pub fn batpak::store::delivery::canal::CanalItem::event_id(&self) -> u128
+impl batpak::store::delivery::canal::CanalItem for batpak::prelude::Notification
+pub fn batpak::prelude::Notification::event_id(&self) -> u128
+impl batpak::store::delivery::canal::CanalItem for batpak::store::index::IndexEntry
+pub fn batpak::store::index::IndexEntry::event_id(&self) -> u128
 pub mod batpak::store::delivery::cursor
 pub enum batpak::store::delivery::cursor::CursorGapConfig
 pub batpak::store::delivery::cursor::CursorGapConfig::Disabled
@@ -2592,6 +2645,10 @@ pub fn batpak::store::delivery::cursor::Cursor::poll_batch(&mut self, max: usize
 pub fn batpak::store::delivery::cursor::Cursor::save_checkpoint(data_dir: &std::path::Path, id: &batpak::store::delivery::observation::CheckpointId, ckpt: &batpak::store::delivery::cursor::CursorCheckpoint) -> std::io::error::Result<()>
 pub fn batpak::store::delivery::cursor::Cursor::take_gaps(&mut self) -> alloc::vec::Vec<batpak::store::delivery::cursor::GapObservation>
 pub fn batpak::store::delivery::cursor::Cursor::with_gap_config(self, config: batpak::store::delivery::cursor::CursorGapConfig) -> Self
+impl batpak::store::delivery::canal::Canal for batpak::store::delivery::cursor::Cursor
+pub type batpak::store::delivery::cursor::Cursor::Error = batpak::store::delivery::canal::CanalClosed
+pub type batpak::store::delivery::cursor::Cursor::Item = batpak::store::index::IndexEntry
+pub fn batpak::store::delivery::cursor::Cursor::pull_batch(&mut self, max: usize, deadline: core::time::Duration) -> core::result::Result<batpak::store::delivery::canal::CanalBatch<Self::Item>, Self::Error>
 pub struct batpak::store::delivery::cursor::CursorCheckpoint
 pub batpak::store::delivery::cursor::CursorCheckpoint::position: u64
 pub batpak::store::delivery::cursor::CursorCheckpoint::process_boot_ns: core::option::Option<u64>
@@ -2614,6 +2671,10 @@ impl batpak::store::delivery::cursor::CursorWorkerHandle
 pub fn batpak::store::delivery::cursor::CursorWorkerHandle::join(self) -> core::result::Result<(), batpak::prelude::StoreError>
 pub fn batpak::store::delivery::cursor::CursorWorkerHandle::stop(&self)
 pub fn batpak::store::delivery::cursor::CursorWorkerHandle::stop_and_join(self) -> core::result::Result<(), batpak::prelude::StoreError>
+impl batpak::store::delivery::canal::CanalHandle for batpak::store::delivery::cursor::CursorWorkerHandle
+pub fn batpak::store::delivery::cursor::CursorWorkerHandle::join(self: alloc::boxed::Box<Self>) -> core::result::Result<(), batpak::prelude::StoreError>
+pub fn batpak::store::delivery::cursor::CursorWorkerHandle::stop(&self)
+pub fn batpak::store::delivery::cursor::CursorWorkerHandle::stop_and_join(self: alloc::boxed::Box<Self>) -> core::result::Result<(), batpak::prelude::StoreError>
 impl core::ops::drop::Drop for batpak::store::delivery::cursor::CursorWorkerHandle
 pub fn batpak::store::delivery::cursor::CursorWorkerHandle::drop(&mut self)
 pub struct batpak::store::delivery::cursor::GapObservation
@@ -2658,6 +2719,10 @@ impl batpak::store::delivery::subscription::Subscription
 pub fn batpak::store::delivery::subscription::Subscription::filtered_receiver(&self) -> &flume::Receiver<batpak::prelude::Notification>
 pub fn batpak::store::delivery::subscription::Subscription::ops(self) -> batpak::store::delivery::subscription::SubscriptionOps
 pub fn batpak::store::delivery::subscription::Subscription::recv(&self) -> core::option::Option<batpak::prelude::Notification>
+impl batpak::store::delivery::canal::Canal for batpak::store::delivery::subscription::Subscription
+pub type batpak::store::delivery::subscription::Subscription::Error = batpak::store::delivery::canal::CanalClosed
+pub type batpak::store::delivery::subscription::Subscription::Item = batpak::prelude::Notification
+pub fn batpak::store::delivery::subscription::Subscription::pull_batch(&mut self, max: usize, deadline: core::time::Duration) -> core::result::Result<batpak::store::delivery::canal::CanalBatch<Self::Item>, Self::Error>
 pub struct batpak::store::delivery::subscription::SubscriptionOps
 impl batpak::store::delivery::subscription::SubscriptionOps
 pub fn batpak::store::delivery::subscription::SubscriptionOps::filter<F: core::ops::function::Fn(&batpak::prelude::Notification) -> bool + core::marker::Send + 'static>(self, f: F) -> Self
@@ -2690,7 +2755,17 @@ pub fn batpak::store::index::IndexEntry::is_correlated(&self) -> bool
 pub fn batpak::store::index::IndexEntry::is_root_cause(&self) -> bool
 pub const fn batpak::store::index::IndexEntry::receipt_extensions(&self) -> &alloc::collections::btree::map::BTreeMap<batpak::store::ExtensionKey, batpak::store::EncodedBytes>
 pub const fn batpak::store::index::IndexEntry::wall_ms(&self) -> u64
+impl batpak::store::delivery::canal::CanalItem for batpak::store::index::IndexEntry
+pub fn batpak::store::index::IndexEntry::event_id(&self) -> u128
 pub mod batpak::store::projection
+#[non_exhaustive] pub enum batpak::store::projection::CursorWatcherError
+pub batpak::store::projection::CursorWatcherError::Store(batpak::prelude::StoreError)
+impl core::convert::From<batpak::prelude::StoreError> for batpak::store::CursorWatcherError
+pub fn batpak::store::CursorWatcherError::from(e: batpak::prelude::StoreError) -> Self
+impl core::error::Error for batpak::store::CursorWatcherError
+pub fn batpak::store::CursorWatcherError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Display for batpak::store::CursorWatcherError
+pub fn batpak::store::CursorWatcherError::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 #[non_exhaustive] pub enum batpak::store::projection::Freshness
 pub batpak::store::projection::Freshness::Consistent
 pub batpak::store::projection::Freshness::MaybeStale
@@ -2698,6 +2773,7 @@ pub batpak::store::projection::Freshness::MaybeStale::max_stale_ms: u64
 #[non_exhaustive] pub enum batpak::store::projection::WatcherError
 pub batpak::store::projection::WatcherError::Store(batpak::prelude::StoreError)
 pub batpak::store::projection::WatcherError::StoreClosed
+pub batpak::store::projection::WatcherError::SubscriptionPruned
 impl core::convert::From<batpak::prelude::StoreError> for batpak::store::WatcherError
 pub fn batpak::store::WatcherError::from(e: batpak::prelude::StoreError) -> Self
 impl core::error::Error for batpak::store::WatcherError
@@ -2733,9 +2809,11 @@ pub fn batpak::store::projection::NoCache::get(&self, _key: &[u8]) -> core::resu
 pub fn batpak::store::projection::NoCache::prefetch(&self, _key: &[u8], _predicted_meta: batpak::store::projection::CacheMeta) -> core::result::Result<(), batpak::prelude::StoreError>
 pub fn batpak::store::projection::NoCache::put(&self, _key: &[u8], _value: &[u8], _meta: batpak::store::projection::CacheMeta) -> core::result::Result<(), batpak::prelude::StoreError>
 pub fn batpak::store::projection::NoCache::sync(&self) -> core::result::Result<(), batpak::prelude::StoreError>
-pub struct batpak::store::projection::ProjectionWatcher<T>
-impl<T> batpak::store::ProjectionWatcher<T> where T: batpak::event::sourcing::EventSourced + serde_core::ser::Serialize + serde_core::de::DeserializeOwned + 'static, <T as batpak::event::sourcing::EventSourced>::Input: projection_flow::ReplayInput
-pub fn batpak::store::ProjectionWatcher<T>::recv(&mut self) -> core::result::Result<(u64, core::option::Option<T>), batpak::store::WatcherError>
+pub struct batpak::store::projection::ProjectionWatcher<T, C: batpak::store::delivery::canal::Canal>
+impl<T> batpak::store::ProjectionWatcher<T, batpak::store::delivery::cursor::Cursor> where T: batpak::event::sourcing::EventSourced + serde_core::ser::Serialize + serde_core::de::DeserializeOwned + 'static, <T as batpak::event::sourcing::EventSourced>::Input: projection_flow::ReplayInput
+pub fn batpak::store::ProjectionWatcher<T, batpak::store::delivery::cursor::Cursor>::recv(&mut self) -> core::result::Result<(u64, core::option::Option<T>), batpak::store::CursorWatcherError>
+impl<T> batpak::store::ProjectionWatcher<T, batpak::store::delivery::subscription::Subscription> where T: batpak::event::sourcing::EventSourced + serde_core::ser::Serialize + serde_core::de::DeserializeOwned + 'static, <T as batpak::event::sourcing::EventSourced>::Input: projection_flow::ReplayInput
+pub fn batpak::store::ProjectionWatcher<T, batpak::store::delivery::subscription::Subscription>::recv(&mut self) -> core::result::Result<(u64, core::option::Option<T>), batpak::store::WatcherError>
 pub trait batpak::store::projection::ProjectionCache: core::marker::Send + core::marker::Sync + 'static
 pub fn batpak::store::projection::ProjectionCache::capabilities(&self) -> batpak::store::projection::CacheCapabilities
 pub fn batpak::store::projection::ProjectionCache::delete_prefix(&self, prefix: &[u8]) -> core::result::Result<u64, batpak::prelude::StoreError>
@@ -2946,6 +3024,12 @@ pub batpak::store::ActiveSegmentReadEvidence::LockedSeekRead
 pub batpak::store::ActiveSegmentReadEvidence::ProbeFailed
 pub batpak::store::ActiveSegmentReadEvidence::UnixReadAt
 pub batpak::store::ActiveSegmentReadEvidence::Unknown
+pub enum batpak::store::CanalBatch<I>
+pub batpak::store::CanalBatch::Empty
+pub batpak::store::CanalBatch::Many(alloc::vec::Vec<I>)
+pub batpak::store::CanalBatch::One(I)
+impl<I> batpak::store::delivery::canal::CanalBatch<I>
+pub const fn batpak::store::delivery::canal::CanalBatch<I>::is_empty(&self) -> bool
 pub enum batpak::store::CausationRef
 pub batpak::store::CausationRef::Absolute(u128)
 pub batpak::store::CausationRef::None
@@ -3036,6 +3120,14 @@ pub enum batpak::store::CursorGapConfig
 pub batpak::store::CursorGapConfig::Disabled
 pub batpak::store::CursorGapConfig::Enabled
 pub batpak::store::CursorGapConfig::Enabled::capacity: core::num::nonzero::NonZeroUsize
+#[non_exhaustive] pub enum batpak::store::CursorWatcherError
+pub batpak::store::CursorWatcherError::Store(batpak::prelude::StoreError)
+impl core::convert::From<batpak::prelude::StoreError> for batpak::store::CursorWatcherError
+pub fn batpak::store::CursorWatcherError::from(e: batpak::prelude::StoreError) -> Self
+impl core::error::Error for batpak::store::CursorWatcherError
+pub fn batpak::store::CursorWatcherError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Display for batpak::store::CursorWatcherError
+pub fn batpak::store::CursorWatcherError::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub enum batpak::store::CursorWorkerAction
 pub batpak::store::CursorWorkerAction::Continue
 pub batpak::store::CursorWorkerAction::Stop
@@ -3351,6 +3443,8 @@ pub batpak::store::StoreError::WaitTimeout::watermark: batpak::store::stats::Wat
 pub batpak::store::StoreError::WriterCrashed
 impl core::convert::From<batpak::coordinate::CoordinateError> for batpak::prelude::StoreError
 pub fn batpak::prelude::StoreError::from(e: batpak::coordinate::CoordinateError) -> Self
+impl core::convert::From<batpak::prelude::StoreError> for batpak::store::CursorWatcherError
+pub fn batpak::store::CursorWatcherError::from(e: batpak::prelude::StoreError) -> Self
 impl core::convert::From<batpak::prelude::StoreError> for batpak::store::WatcherError
 pub fn batpak::store::WatcherError::from(e: batpak::prelude::StoreError) -> Self
 impl core::convert::From<rmp_serde::encode::Error> for batpak::prelude::StoreError
@@ -3442,6 +3536,7 @@ pub batpak::store::SyncMode::SyncData
 #[non_exhaustive] pub enum batpak::store::WatcherError
 pub batpak::store::WatcherError::Store(batpak::prelude::StoreError)
 pub batpak::store::WatcherError::StoreClosed
+pub batpak::store::WatcherError::SubscriptionPruned
 impl core::convert::From<batpak::prelude::StoreError> for batpak::store::WatcherError
 pub fn batpak::store::WatcherError::from(e: batpak::prelude::StoreError) -> Self
 impl core::error::Error for batpak::store::WatcherError
@@ -3535,6 +3630,10 @@ pub batpak::store::CacheMeta::cached_at_mono_ns: core::option::Option<i64>
 pub batpak::store::CacheMeta::cached_at_us: i64
 pub batpak::store::CacheMeta::process_boot_ns: core::option::Option<u64>
 pub batpak::store::CacheMeta::watermark: u64
+pub struct batpak::store::CanalClosed
+impl core::error::Error for batpak::store::delivery::canal::CanalClosed
+impl core::fmt::Display for batpak::store::delivery::canal::CanalClosed
+pub fn batpak::store::delivery::canal::CanalClosed::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct batpak::store::ChainWalkEvidenceReport
 pub batpak::store::ChainWalkEvidenceReport::batpak_version: core::option::Option<alloc::string::String>
 pub batpak::store::ChainWalkEvidenceReport::body: batpak::prelude::ChainWalkReportBody
@@ -3592,6 +3691,10 @@ pub fn batpak::store::delivery::cursor::Cursor::poll_batch(&mut self, max: usize
 pub fn batpak::store::delivery::cursor::Cursor::save_checkpoint(data_dir: &std::path::Path, id: &batpak::store::delivery::observation::CheckpointId, ckpt: &batpak::store::delivery::cursor::CursorCheckpoint) -> std::io::error::Result<()>
 pub fn batpak::store::delivery::cursor::Cursor::take_gaps(&mut self) -> alloc::vec::Vec<batpak::store::delivery::cursor::GapObservation>
 pub fn batpak::store::delivery::cursor::Cursor::with_gap_config(self, config: batpak::store::delivery::cursor::CursorGapConfig) -> Self
+impl batpak::store::delivery::canal::Canal for batpak::store::delivery::cursor::Cursor
+pub type batpak::store::delivery::cursor::Cursor::Error = batpak::store::delivery::canal::CanalClosed
+pub type batpak::store::delivery::cursor::Cursor::Item = batpak::store::index::IndexEntry
+pub fn batpak::store::delivery::cursor::Cursor::pull_batch(&mut self, max: usize, deadline: core::time::Duration) -> core::result::Result<batpak::store::delivery::canal::CanalBatch<Self::Item>, Self::Error>
 #[non_exhaustive] pub struct batpak::store::CursorWorkerConfig
 pub batpak::store::CursorWorkerConfig::batch_size: usize
 pub batpak::store::CursorWorkerConfig::checkpoint_id: core::option::Option<batpak::store::delivery::observation::CheckpointId>
@@ -3609,6 +3712,10 @@ impl batpak::store::delivery::cursor::CursorWorkerHandle
 pub fn batpak::store::delivery::cursor::CursorWorkerHandle::join(self) -> core::result::Result<(), batpak::prelude::StoreError>
 pub fn batpak::store::delivery::cursor::CursorWorkerHandle::stop(&self)
 pub fn batpak::store::delivery::cursor::CursorWorkerHandle::stop_and_join(self) -> core::result::Result<(), batpak::prelude::StoreError>
+impl batpak::store::delivery::canal::CanalHandle for batpak::store::delivery::cursor::CursorWorkerHandle
+pub fn batpak::store::delivery::cursor::CursorWorkerHandle::join(self: alloc::boxed::Box<Self>) -> core::result::Result<(), batpak::prelude::StoreError>
+pub fn batpak::store::delivery::cursor::CursorWorkerHandle::stop(&self)
+pub fn batpak::store::delivery::cursor::CursorWorkerHandle::stop_and_join(self: alloc::boxed::Box<Self>) -> core::result::Result<(), batpak::prelude::StoreError>
 impl core::ops::drop::Drop for batpak::store::delivery::cursor::CursorWorkerHandle
 pub fn batpak::store::delivery::cursor::CursorWorkerHandle::drop(&mut self)
 #[non_exhaustive] pub struct batpak::store::DenialReceipt
@@ -3705,6 +3812,8 @@ pub batpak::store::Notification::event_id: u128
 pub batpak::store::Notification::kind: batpak::event::kind::EventKind
 pub batpak::store::Notification::position: batpak::coordinate::position::DagPosition
 pub batpak::store::Notification::sequence: u64
+impl batpak::store::delivery::canal::CanalItem for batpak::prelude::Notification
+pub fn batpak::prelude::Notification::event_id(&self) -> u128
 pub struct batpak::store::ObservedOnce
 impl batpak::store::delivery::observation::ObservedOnce
 pub fn batpak::store::delivery::observation::ObservedOnce::into_parts(self) -> (batpak::store::delivery::observation::AtLeastOnce, batpak::store::delivery::observation::IdempotencyKey)
@@ -3756,9 +3865,11 @@ pub batpak::store::ProjectionRunReportBody::replay_mode: batpak::prelude::Projec
 pub batpak::store::ProjectionRunReportBody::requested_freshness: batpak::prelude::ProjectionRunRequestedFreshness
 pub batpak::store::ProjectionRunReportBody::schema_version: u16
 pub batpak::store::ProjectionRunReportBody::source_refs: alloc::vec::Vec<batpak::prelude::ProjectionSourceRef>
-pub struct batpak::store::ProjectionWatcher<T>
-impl<T> batpak::store::ProjectionWatcher<T> where T: batpak::event::sourcing::EventSourced + serde_core::ser::Serialize + serde_core::de::DeserializeOwned + 'static, <T as batpak::event::sourcing::EventSourced>::Input: projection_flow::ReplayInput
-pub fn batpak::store::ProjectionWatcher<T>::recv(&mut self) -> core::result::Result<(u64, core::option::Option<T>), batpak::store::WatcherError>
+pub struct batpak::store::ProjectionWatcher<T, C: batpak::store::delivery::canal::Canal>
+impl<T> batpak::store::ProjectionWatcher<T, batpak::store::delivery::cursor::Cursor> where T: batpak::event::sourcing::EventSourced + serde_core::ser::Serialize + serde_core::de::DeserializeOwned + 'static, <T as batpak::event::sourcing::EventSourced>::Input: projection_flow::ReplayInput
+pub fn batpak::store::ProjectionWatcher<T, batpak::store::delivery::cursor::Cursor>::recv(&mut self) -> core::result::Result<(u64, core::option::Option<T>), batpak::store::CursorWatcherError>
+impl<T> batpak::store::ProjectionWatcher<T, batpak::store::delivery::subscription::Subscription> where T: batpak::event::sourcing::EventSourced + serde_core::ser::Serialize + serde_core::de::DeserializeOwned + 'static, <T as batpak::event::sourcing::EventSourced>::Input: projection_flow::ReplayInput
+pub fn batpak::store::ProjectionWatcher<T, batpak::store::delivery::subscription::Subscription>::recv(&mut self) -> core::result::Result<(u64, core::option::Option<T>), batpak::store::WatcherError>
 pub struct batpak::store::ReactionBatch
 impl batpak::store::reaction::ReactionBatch
 pub fn batpak::store::reaction::ReactionBatch::is_empty(&self) -> bool
@@ -3900,6 +4011,7 @@ impl batpak::store::Store<batpak::store::Open>
 pub fn batpak::store::Store<batpak::store::Open>::react_loop<R>(self: &alloc::sync::Arc<Self>, region: &batpak::coordinate::Region, reactor: R) -> core::result::Result<std::thread::join_handle::JoinHandle<()>, batpak::prelude::StoreError> where R: batpak::event::sourcing::Reactive<serde_json::value::Value> + core::marker::Send + 'static
 pub fn batpak::store::Store<batpak::store::Open>::subscribe_lossy(&self, region: &batpak::coordinate::Region) -> batpak::store::delivery::subscription::Subscription
 pub fn batpak::store::Store<batpak::store::Open>::watch_projection<T>(self: &alloc::sync::Arc<Self>, entity: &str, freshness: batpak::store::projection::Freshness) -> batpak::store::ProjectionWatcher<T> where T: batpak::event::sourcing::EventSourced + serde_core::ser::Serialize + serde_core::de::DeserializeOwned + core::marker::Send + 'static
+pub fn batpak::store::Store<batpak::store::Open>::watch_projection_with_cursor<T>(self: &alloc::sync::Arc<Self>, entity: &str, freshness: batpak::store::projection::Freshness, checkpoint_id: core::option::Option<batpak::store::delivery::observation::CheckpointId>) -> core::result::Result<batpak::store::ProjectionWatcher<T, batpak::store::delivery::cursor::Cursor>, batpak::prelude::StoreError> where T: batpak::event::sourcing::EventSourced + serde_core::ser::Serialize + serde_core::de::DeserializeOwned + core::marker::Send + 'static
 impl batpak::store::Store<batpak::store::Open>
 pub fn batpak::store::Store<batpak::store::Open>::react_loop_multi<R>(self: &alloc::sync::Arc<Self>, region: &batpak::coordinate::Region, config: batpak::store::reactor_typed::ReactorConfig, reactor: R) -> core::result::Result<batpak::store::reactor_typed::TypedReactorHandle<<R as batpak::event::sourcing::MultiReactive>::Error>, batpak::prelude::StoreError> where R: batpak::event::sourcing::MultiReactive<batpak::event::sourcing::JsonValueInput>
 pub fn batpak::store::Store<batpak::store::Open>::react_loop_multi_raw<R>(self: &alloc::sync::Arc<Self>, region: &batpak::coordinate::Region, config: batpak::store::reactor_typed::ReactorConfig, reactor: R) -> core::result::Result<batpak::store::reactor_typed::TypedReactorHandle<<R as batpak::event::sourcing::MultiReactive>::Error>, batpak::prelude::StoreError> where R: batpak::event::sourcing::MultiReactive<batpak::event::sourcing::RawMsgpackInput>
@@ -4074,6 +4186,10 @@ impl batpak::store::delivery::subscription::Subscription
 pub fn batpak::store::delivery::subscription::Subscription::filtered_receiver(&self) -> &flume::Receiver<batpak::prelude::Notification>
 pub fn batpak::store::delivery::subscription::Subscription::ops(self) -> batpak::store::delivery::subscription::SubscriptionOps
 pub fn batpak::store::delivery::subscription::Subscription::recv(&self) -> core::option::Option<batpak::prelude::Notification>
+impl batpak::store::delivery::canal::Canal for batpak::store::delivery::subscription::Subscription
+pub type batpak::store::delivery::subscription::Subscription::Error = batpak::store::delivery::canal::CanalClosed
+pub type batpak::store::delivery::subscription::Subscription::Item = batpak::prelude::Notification
+pub fn batpak::store::delivery::subscription::Subscription::pull_batch(&mut self, max: usize, deadline: core::time::Duration) -> core::result::Result<batpak::store::delivery::canal::CanalBatch<Self::Item>, Self::Error>
 pub struct batpak::store::SyncConfig
 pub batpak::store::SyncConfig::every_n_events: u32
 pub batpak::store::SyncConfig::mode: batpak::prelude::SyncMode
@@ -4120,6 +4236,32 @@ pub const batpak::store::SIGNING_DOWNGRADE_SCHEMA_VERSION: u16
 pub const batpak::store::SNAPSHOT_EVIDENCE_REPORT_SCHEMA_VERSION: u16
 pub const batpak::store::STORE_RESOURCE_REPORT_SCHEMA_VERSION: u32
 pub const batpak::store::SUBSCRIBER_FRONTIER_REPORT_SCHEMA_VERSION: u16
+pub trait batpak::store::Canal: core::marker::Send
+pub type batpak::store::Canal::Error: core::error::Error + core::marker::Send + core::marker::Sync + 'static
+pub type batpak::store::Canal::Item: batpak::store::delivery::canal::CanalItem + core::marker::Send
+pub fn batpak::store::Canal::pull_batch(&mut self, max: usize, deadline: core::time::Duration) -> core::result::Result<batpak::store::delivery::canal::CanalBatch<Self::Item>, Self::Error>
+impl batpak::store::delivery::canal::Canal for batpak::store::delivery::cursor::Cursor
+pub type batpak::store::delivery::cursor::Cursor::Error = batpak::store::delivery::canal::CanalClosed
+pub type batpak::store::delivery::cursor::Cursor::Item = batpak::store::index::IndexEntry
+pub fn batpak::store::delivery::cursor::Cursor::pull_batch(&mut self, max: usize, deadline: core::time::Duration) -> core::result::Result<batpak::store::delivery::canal::CanalBatch<Self::Item>, Self::Error>
+impl batpak::store::delivery::canal::Canal for batpak::store::delivery::subscription::Subscription
+pub type batpak::store::delivery::subscription::Subscription::Error = batpak::store::delivery::canal::CanalClosed
+pub type batpak::store::delivery::subscription::Subscription::Item = batpak::prelude::Notification
+pub fn batpak::store::delivery::subscription::Subscription::pull_batch(&mut self, max: usize, deadline: core::time::Duration) -> core::result::Result<batpak::store::delivery::canal::CanalBatch<Self::Item>, Self::Error>
+pub trait batpak::store::CanalHandle: core::marker::Send
+pub fn batpak::store::CanalHandle::join(self: alloc::boxed::Box<Self>) -> core::result::Result<(), batpak::prelude::StoreError>
+pub fn batpak::store::CanalHandle::stop(&self)
+pub fn batpak::store::CanalHandle::stop_and_join(self: alloc::boxed::Box<Self>) -> core::result::Result<(), batpak::prelude::StoreError>
+impl batpak::store::delivery::canal::CanalHandle for batpak::store::delivery::cursor::CursorWorkerHandle
+pub fn batpak::store::delivery::cursor::CursorWorkerHandle::join(self: alloc::boxed::Box<Self>) -> core::result::Result<(), batpak::prelude::StoreError>
+pub fn batpak::store::delivery::cursor::CursorWorkerHandle::stop(&self)
+pub fn batpak::store::delivery::cursor::CursorWorkerHandle::stop_and_join(self: alloc::boxed::Box<Self>) -> core::result::Result<(), batpak::prelude::StoreError>
+pub trait batpak::store::CanalItem
+pub fn batpak::store::CanalItem::event_id(&self) -> u128
+impl batpak::store::delivery::canal::CanalItem for batpak::prelude::Notification
+pub fn batpak::prelude::Notification::event_id(&self) -> u128
+impl batpak::store::delivery::canal::CanalItem for batpak::store::index::IndexEntry
+pub fn batpak::store::index::IndexEntry::event_id(&self) -> u128
 pub trait batpak::store::ProjectionCache: core::marker::Send + core::marker::Sync + 'static
 pub fn batpak::store::ProjectionCache::capabilities(&self) -> batpak::store::projection::CacheCapabilities
 pub fn batpak::store::ProjectionCache::delete_prefix(&self, prefix: &[u8]) -> core::result::Result<u64, batpak::prelude::StoreError>

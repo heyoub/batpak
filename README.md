@@ -126,7 +126,9 @@ callers computing `EventKind` at runtime.
 **Projection** — `project::<T>(entity, &freshness)` folds events into any type
 implementing `EventSourced`. `project_if_changed` skips work when nothing changed.
 `watch_projection` returns a `ProjectionWatcher` that re-projects on subscription
-events from a lossy/prunable watcher canal.
+events from a lossy/prunable watcher canal. `watch_projection_with_cursor`
+returns a cursor-backed watcher when the consumer needs ordered replay instead
+of subscription fanout.
 Two replay lanes: `JsonValueInput` (default, ergonomic) and `RawMsgpackInput` (perf).
 
 **Delivery** — `subscribe_lossy(&region)` for push-based broadcast (may drop under load).
