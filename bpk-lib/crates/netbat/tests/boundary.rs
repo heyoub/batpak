@@ -137,11 +137,23 @@ fn decodes_line_protocol_frame() {
 
 #[test]
 fn decodes_versioned_line_protocol_frame() {
-    let frame = nb::decode_line(b"NETBAT/1 CALL ping 68656c6c6f\n", &nb::Limits::default())
-        .expect("versioned frame decodes");
+    let frame = nb::decode_line(
+        &nb::encode_request("ping", b"hello"),
+        &nb::Limits::default(),
+    )
+    .expect("versioned frame decodes");
 
     assert_eq!(frame.operation(), "ping");
     assert_eq!(frame.input(), b"hello");
+}
+
+#[test]
+fn encodes_request_with_stable_versioned_line_protocol() {
+    let encoded = nb::encode_request("ping", b"hi");
+    assert_eq!(encoded, b"NETBAT/1 CALL ping 6869\n");
+
+    let decoded = nb::decode_line(&encoded, &nb::Limits::default()).expect("request decodes");
+    assert_eq!(decoded, nb::RequestFrame::new("ping", b"hi".to_vec()));
 }
 
 #[test]

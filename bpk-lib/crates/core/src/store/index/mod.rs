@@ -806,4 +806,44 @@ mod tests {
         assert_eq!(index.query(&Region::all()).len(), 3);
         assert_eq!(index.visible_sequence(), 3);
     }
+
+    #[test]
+    fn upgrade_with_visibility_snapshot_rejects_cancelled_ranges() {
+        let index = StoreIndex::new();
+        let entity_id = index.interner.intern("entity:visibility");
+        let scope_id = index.interner.intern("scope:visibility");
+        for seq in 0..3 {
+            let mut entry = make_entry(seq, "entity:visibility", "scope:visibility");
+            entry.entity_id = entity_id;
+            entry.scope_id = scope_id;
+            index.insert(entry);
+        }
+        index
+            .publish(3, "test-publish")
+            .expect("publish test entries");
+        index.restore_cancelled_visibility_ranges(vec![(1, 2)]);
+
+        let hidden = QueryHit {
+            event_id: 2,
+            global_sequence: 1,
+            disk_pos: DiskPos::new(0, 16, 16),
+            kind: EventKind::custom(0xF, 1),
+            clock: 1,
+        };
+        let (hits, visibility) = index.query_hits_with_snapshot(&Region::all());
+
+        assert_eq!(
+            hits.iter()
+                .map(|hit| hit.global_sequence)
+                .collect::<Vec<_>>(),
+            vec![0, 2],
+            "PROPERTY: query-hit collection must skip cancelled hidden ranges below the visible watermark"
+        );
+        assert!(
+            index
+                .upgrade_hit_with_visibility(hidden, &visibility)
+                .is_none(),
+            "PROPERTY: hit upgrade must use the same hidden-range visibility predicate as query collection"
+        );
+    }
 }

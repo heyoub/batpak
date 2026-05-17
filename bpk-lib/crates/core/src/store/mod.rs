@@ -85,7 +85,10 @@ pub use delivery::cursor::{
     Cursor, CursorGapConfig, CursorWorkerAction, CursorWorkerConfig, CursorWorkerHandle,
     GapObservation,
 };
-pub use delivery::observation::{AtLeastOnce, CheckpointId, IdempotencyKey, ObservedOnce};
+pub use delivery::observation::{
+    AtLeastOnce, CheckpointId, CheckpointIdError, IdempotencyKey, ObservedOnce,
+    MAX_CHECKPOINT_ID_LEN,
+};
 pub use delivery::subscription::Subscription;
 pub use error::{StoreError, StoreLockMode};
 #[cfg(feature = "dangerous-test-hooks")]

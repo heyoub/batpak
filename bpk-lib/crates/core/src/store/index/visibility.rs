@@ -32,13 +32,13 @@ pub(crate) struct SequenceGate {
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct VisibilitySnapshot {
+pub(crate) struct VisibilitySnapshot {
     visible: u64,
     cancelled_ranges: Arc<Vec<(u64, u64)>>,
 }
 
 impl VisibilitySnapshot {
-    pub(super) fn is_visible(&self, sequence: u64) -> bool {
+    pub(crate) fn is_visible(&self, sequence: u64) -> bool {
         if sequence >= self.visible {
             return false;
         }
@@ -48,7 +48,7 @@ impl VisibilitySnapshot {
             .any(|(start, end)| sequence >= *start && sequence < *end)
     }
 
-    pub(super) fn visible_upper_bound(&self) -> u64 {
+    pub(crate) fn visible_upper_bound(&self) -> u64 {
         self.visible
     }
 }
@@ -233,7 +233,7 @@ impl SequenceGate {
         Ok(())
     }
 
-    pub(super) fn snapshot(&self) -> VisibilitySnapshot {
+    pub(crate) fn snapshot(&self) -> VisibilitySnapshot {
         VisibilitySnapshot {
             visible: self.visible.load(Ordering::Acquire),
             cancelled_ranges: Arc::clone(&self.cancelled_ranges.read()),

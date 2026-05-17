@@ -452,6 +452,7 @@ fn event_kind_custom_is_neither_system_nor_effect() {
     let is_effect = custom.is_effect();
     let category = custom.category();
     let type_id = custom.type_id();
+    let raw = custom.as_raw_u16();
     assert!(
         !is_system,
         "PROPERTY: Custom EventKind must NOT be classified as a system event.\n\
@@ -482,6 +483,15 @@ fn event_kind_custom_is_neither_system_nor_effect() {
          Investigate: src/event/kind.rs EventKind::custom() type_id() packing.\n\
          Common causes: type_id packed into wrong byte position, or type_id() \
          extracting bits that include the category nibble.\n\
+         Run: cargo test --test event_api event_kind_custom_is_neither_system_nor_effect"
+    );
+    assert_eq!(
+        raw, 0x502A,
+        "PROPERTY: EventKind::as_raw_u16() must expose the canonical \
+         (category << 12) | type_id encoding.\n\
+         Investigate: src/event/kind.rs EventKind::as_raw_u16().\n\
+         Common causes: raw kind encoding changed, or the accessor stopped \
+         returning the exact packed u16 used by disk/signing/cache paths.\n\
          Run: cargo test --test event_api event_kind_custom_is_neither_system_nor_effect"
     );
 }

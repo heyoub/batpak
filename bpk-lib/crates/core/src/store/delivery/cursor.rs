@@ -4,6 +4,7 @@ use crate::store::index::{IndexEntry, StoreIndex};
 use crate::store::{RestartPolicy, Store, StoreError};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
+use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -56,8 +57,8 @@ fn cursor_checkpoint_dir(data_dir: &Path) -> PathBuf {
     data_dir.join("cursors")
 }
 
-fn cursor_checkpoint_path(data_dir: &Path, id: &str) -> PathBuf {
-    cursor_checkpoint_dir(data_dir).join(format!("{id}.ckpt"))
+fn cursor_checkpoint_path(data_dir: &Path, id: &CheckpointId) -> PathBuf {
+    cursor_checkpoint_dir(data_dir).join(format!("{}.ckpt", id.as_str()))
 }
 
 /// Cursor: pull-based event consumption with ordered replay.
@@ -102,13 +103,23 @@ struct CursorDurableBinding {
 }
 
 /// Configuration for in-memory write-to-deliver gap observation.
+///
+/// A zero-capacity enabled configuration is structurally unrepresentable:
+///
+/// ```compile_fail
+/// # use batpak::store::CursorGapConfig;
+/// CursorGapConfig::Enabled { capacity: 0 };
+/// ```
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct CursorGapConfig {
-    /// When `true`, the cursor retains write-to-deliver gaps in memory.
-    pub enabled: bool,
-    /// Maximum number of retained gap observations before the oldest
-    /// entry is dropped.
-    pub buffer_capacity: usize,
+pub enum CursorGapConfig {
+    /// Gap observation disabled.
+    #[default]
+    Disabled,
+    /// Retain up to `capacity` gap observations before dropping the oldest.
+    Enabled {
+        /// Non-zero retained observation capacity.
+        capacity: NonZeroUsize,
+    },
 }
 
 /// A substrate-detectable write-to-deliver gap.
@@ -130,11 +141,12 @@ struct GapBuffer {
 }
 
 impl GapBuffer {
-    fn new(capacity: usize) -> Option<Self> {
-        (capacity > 0).then(|| Self {
+    fn new_nonzero(capacity: NonZeroUsize) -> Self {
+        let capacity = capacity.get();
+        Self {
             capacity,
             observations: VecDeque::with_capacity(capacity),
-        })
+        }
     }
 
     fn push(&mut self, observation: GapObservation) {
@@ -165,7 +177,7 @@ impl Cursor {
         region: Region,
         index: Arc<StoreIndex>,
         data_dir: &Path,
-        id: &str,
+        id: CheckpointId,
     ) -> Self {
         Self {
             region,
@@ -175,7 +187,7 @@ impl Cursor {
             gap_buffer: None,
             durable: Some(CursorDurableBinding {
                 data_dir: data_dir.to_path_buf(),
-                id: CheckpointId::new(id),
+                id,
             }),
         }
     }
@@ -189,9 +201,9 @@ impl Cursor {
         region: Region,
         index: Arc<StoreIndex>,
         data_dir: &Path,
-        id: &str,
+        id: &CheckpointId,
     ) -> Result<Self, StoreError> {
-        let mut cursor = Self::new_bound_checkpoint(region, index, data_dir, id);
+        let mut cursor = Self::new_bound_checkpoint(region, index, data_dir, id.clone());
         match Self::load_checkpoint(data_dir, id) {
             Ok(Some(ckpt)) => {
                 let expected_region = cursor.region.checkpoint_identity();
@@ -258,10 +270,9 @@ impl Cursor {
     /// Configure this cursor's in-memory write-to-deliver gap observation.
     #[must_use]
     pub fn with_gap_config(mut self, config: CursorGapConfig) -> Self {
-        self.gap_buffer = if config.enabled {
-            GapBuffer::new(config.buffer_capacity)
-        } else {
-            None
+        self.gap_buffer = match config {
+            CursorGapConfig::Disabled => None,
+            CursorGapConfig::Enabled { capacity } => Some(GapBuffer::new_nonzero(capacity)),
         };
         self
     }
@@ -294,7 +305,7 @@ impl Cursor {
             self.started,
             self.region.checkpoint_identity(),
         );
-        Self::save_checkpoint(&binding.data_dir, binding.id.as_str(), &ckpt)
+        Self::save_checkpoint(&binding.data_dir, &binding.id, &ckpt)
     }
 
     /// Load a persisted cursor checkpoint, or `Ok(None)` if none exists.
@@ -304,7 +315,10 @@ impl Cursor {
     /// read. A decoding error yields `io::ErrorKind::InvalidData` so
     /// durable-resume callers can fail closed instead of silently
     /// rewinding to position 0.
-    pub fn load_checkpoint(data_dir: &Path, id: &str) -> std::io::Result<Option<CursorCheckpoint>> {
+    pub fn load_checkpoint(
+        data_dir: &Path,
+        id: &CheckpointId,
+    ) -> std::io::Result<Option<CursorCheckpoint>> {
         let path = cursor_checkpoint_path(data_dir, id);
         let bytes = match std::fs::read(&path) {
             Ok(b) => b,
@@ -330,7 +344,7 @@ impl Cursor {
     /// `Other`.
     pub fn save_checkpoint(
         data_dir: &Path,
-        id: &str,
+        id: &CheckpointId,
         ckpt: &CursorCheckpoint,
     ) -> std::io::Result<()> {
         let dir = cursor_checkpoint_dir(data_dir);
@@ -449,13 +463,13 @@ fn build_worker_cursor(
 ) -> Result<Cursor, StoreError> {
     match checkpoint_id {
         Some(id) if load_saved_checkpoint => {
-            Cursor::new_with_checkpoint(region.clone(), Arc::clone(index), data_dir, id.as_str())
+            Cursor::new_with_checkpoint(region.clone(), Arc::clone(index), data_dir, id)
         }
         Some(id) => Ok(Cursor::new_bound_checkpoint(
             region.clone(),
             Arc::clone(index),
             data_dir,
-            id.as_str(),
+            id.clone(),
         )),
         None => Ok(Cursor::new(region.clone(), Arc::clone(index))),
     }
@@ -684,7 +698,9 @@ impl Store<crate::store::Open> {
         } = config;
         let at_least_once = checkpoint_id
             .as_ref()
-            .map(|id| AtLeastOnce::from_cursor_callback(id.as_str()));
+            .map(|id| AtLeastOnce::from_cursor_callback(id.as_str()))
+            .transpose()
+            .map_err(StoreError::CheckpointId)?;
 
         let join = std::thread::Builder::new()
             .name("batpak-cursor-worker".into())

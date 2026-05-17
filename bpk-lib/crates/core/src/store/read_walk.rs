@@ -235,9 +235,8 @@ impl<State> Store<State> {
         &self,
         request: &ReadWalkRequest,
     ) -> Result<(Vec<IndexEntry>, ReadWalkEvidenceReport), ReadWalkReportError> {
-        let (hits, visible_upper_bound) = self
-            .index
-            .query_hits_with_visible_upper_bound(&request.region);
+        let (hits, visibility) = self.index.query_hits_with_snapshot(&request.region);
+        let visible_upper_bound = visibility.visible_upper_bound();
 
         let matched_count = hits.len() as u64;
         let requested_limit = request.limit.map(|value| value as u64);
@@ -261,10 +260,7 @@ impl<State> Store<State> {
 
         let mut entries = Vec::with_capacity(selected_hits.len());
         for hit in &selected_hits {
-            match self
-                .index
-                .upgrade_hit_with_visible_upper_bound(*hit, visible_upper_bound)
-            {
+            match self.index.upgrade_hit_with_visibility(*hit, &visibility) {
                 Some(entry) => entries.push(entry),
                 None => findings.push(ReadWalkFinding::MissingBackingEntry {
                     event_id: hit.event_id,

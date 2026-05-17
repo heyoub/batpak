@@ -74,11 +74,12 @@ impl ReservedKindFallbackStats {
 
 /// Convert an [`EventKind`] to the raw `u16` used in cold-start index artifacts.
 ///
-/// Reconstructs the packed value from the two public bit-field accessors,
-/// mirroring `EventKind`'s internal `(category << 12) | type_id` encoding.
+/// Delegates to [`EventKind::as_raw_u16`], the canonical
+/// `(category << 12) | type_id` encoding shared by signing covers, projection
+/// cache keys, SIDX footers, mmap rows, and writer notifications.
 #[inline]
 pub(crate) fn kind_to_raw(kind: EventKind) -> u16 {
-    (u16::from(kind.category()) << 12) | kind.type_id()
+    kind.as_raw_u16()
 }
 
 /// Reconstruct an [`EventKind`] from its raw `u16` disk representation.

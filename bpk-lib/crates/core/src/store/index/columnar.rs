@@ -60,11 +60,11 @@ type ProjectionCandidates = (u64, u64, Vec<(u64, DiskPos)>);
 
 /// Reconstruct the raw `u16` wire value from an `EventKind`.
 ///
-/// `EventKind` stores `(category << 12) | type_id` but the inner field is
-/// private. Reconstructing from the public accessors gives the same bits.
+/// Delegates to [`EventKind::as_raw_u16`], the canonical
+/// `(category << 12) | type_id` encoding.
 #[inline]
 fn event_kind_raw(kind: EventKind) -> u16 {
-    ((kind.category() as u16) << 12) | kind.type_id()
+    kind.as_raw_u16()
 }
 
 /// Post-filter, sort, and truncate for non-SoA bounded-scan fallback.

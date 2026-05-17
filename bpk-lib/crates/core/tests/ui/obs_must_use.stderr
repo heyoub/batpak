@@ -1,8 +1,8 @@
 error[E0624]: associated function `new` is private
- --> tests/ui/obs_must_use.rs:6:39
+ --> tests/ui/obs_must_use.rs:7:22
   |
-6 |     let _at_least_once = AtLeastOnce::new(CheckpointId::new("obs-must-use"));
-  |                                       ^^^ private associated function
+7 |         AtLeastOnce::new(CheckpointId::new("obs-must-use").expect("valid checkpoint id"));
+  |                      ^^^ private associated function
   |
  ::: src/store/delivery/observation.rs
   |
@@ -10,9 +10,9 @@ error[E0624]: associated function `new` is private
   |     ------------------------------------------------------ private associated function defined here
 
 error[E0624]: associated function `new` is private
- --> tests/ui/obs_must_use.rs:8:22
+ --> tests/ui/obs_must_use.rs:9:22
   |
-8 |         AtLeastOnce::new(CheckpointId::new("obs-must-use")),
+9 |         AtLeastOnce::new(CheckpointId::new("obs-must-use").expect("valid checkpoint id")),
   |                      ^^^ private associated function
   |
  ::: src/store/delivery/observation.rs

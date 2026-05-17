@@ -132,8 +132,9 @@ Two replay lanes: `JsonValueInput` (default, ergonomic) and `RawMsgpackInput` (p
 **Delivery** — `subscribe_lossy(&region)` for push-based broadcast (may drop under load).
 `cursor_guaranteed(&region)` for process-local pull-based ordered replay from the
 in-memory index. Durable at-least-once across restarts is exposed by
-`cursor_worker(..., CursorWorkerConfig { checkpoint_id: Some(CheckpointId::new(..)), .. })`
-and typed reactors via `ReactorConfig::checkpoint_id: Option<CheckpointId>`.
+`cursor_worker(..., CursorWorkerConfig { checkpoint_id: Some(CheckpointId::new(..)?), .. })`
+and typed reactors via `ReactorConfig::checkpoint_id: Option<CheckpointId>`;
+checkpoint ids are validated before they can name files under the store.
 Checkpoint-backed handlers receive `Some(&AtLeastOnce)` for exactly-once
 composition with a caller-supplied `IdempotencyKey`; process-local handlers
 receive `None`.

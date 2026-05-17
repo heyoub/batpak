@@ -94,6 +94,20 @@ impl EventKind {
         Self(((category as u16) << 12) | type_id)
     }
 
+    /// Returns the canonical on-disk and over-the-wire `u16` encoding.
+    ///
+    /// This value must stay byte-for-byte equal to `(category << 12) | type_id`.
+    /// Receipt signing covers, projection cache keys, cold-start rows, SIDX
+    /// footers, mmap rows, and writer notifications all depend on this stable
+    /// encoding. See ADR-0019.
+    ///
+    /// The derive macro intentionally inlines the same formula while expanding
+    /// user code, before this type is available in the generated expression.
+    #[inline]
+    pub const fn as_raw_u16(self) -> u16 {
+        self.0
+    }
+
     /// Returns the upper 4-bit category of this kind.
     pub const fn category(self) -> u8 {
         (self.0 >> 12) as u8

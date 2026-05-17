@@ -12,6 +12,7 @@ use batpak::store::{
     ReadWalkSourceRef, READ_WALK_REPORT_SCHEMA_VERSION,
 };
 use std::error::Error;
+use std::time::Duration;
 
 #[path = "support/small_store.rs"]
 mod small_store_support;
@@ -25,6 +26,26 @@ fn append_events(store: &Store<Open>, entity: &str, scope: &str, count: u64) -> 
         store.append(&coord, kind, &serde_json::json!({ "n": n }))?;
     }
     Ok(())
+}
+
+fn expect_cancelled_fence_ticket(
+    ticket: &batpak::store::AppendTicket,
+) -> Result<(), Box<dyn Error>> {
+    let outcome = ticket
+        .receiver()
+        .recv_timeout(Duration::from_secs(2))
+        .map_err(|err| std::io::Error::other(format!("timed out waiting for writer: {err}")))?;
+    match outcome {
+        Ok(_) => Err(std::io::Error::other(
+            "PROPERTY: cancelled fence work must not resolve as visible success",
+        )
+        .into()),
+        Err(batpak::store::StoreError::VisibilityFenceCancelled) => Ok(()),
+        Err(err) => Err(std::io::Error::other(format!(
+            "PROPERTY: expected VisibilityFenceCancelled, got {err:?}"
+        ))
+        .into()),
+    }
 }
 
 #[test]
@@ -72,6 +93,48 @@ fn read_walk_limit_reports_known_dropped_count() -> TestResult {
             .iter()
             .any(|f| matches!(f, ReadWalkFinding::LimitedResults { dropped_count: 3 })),
         "PROPERTY: limited read walk must emit deterministic LimitedResults finding"
+    );
+    Ok(())
+}
+
+#[test]
+fn read_walk_visibility_matches_plain_query_across_hidden_gap() -> TestResult {
+    let (store, data_dir_guard) = small_store_support::small_segment_store()?;
+    assert!(data_dir_guard.path().exists());
+    let coord = Coordinate::new("entity:readwalk:visibility", "scope:visibility-gap")?;
+    let kind = EventKind::custom(0xE, 0x42);
+
+    let before_gap = store.append(&coord, kind, &serde_json::json!({"visible": "before"}))?;
+    let fence = store.begin_visibility_fence()?;
+    let hidden_ticket = fence.submit(&coord, kind, &serde_json::json!({"hidden": true}))?;
+    fence.cancel()?;
+    expect_cancelled_fence_ticket(&hidden_ticket)?;
+    let after_gap = store.append(&coord, kind, &serde_json::json!({"visible": "after"}))?;
+
+    let region = Region::scope("scope:visibility-gap");
+    let plain_entries = store.query(&region);
+    let request = ReadWalkRequest::full(region);
+    let (evidence_entries, report) = store.query_with_read_walk_evidence(&request)?;
+
+    let plain_ids = plain_entries
+        .iter()
+        .map(|entry| entry.event_id)
+        .collect::<Vec<_>>();
+    let evidence_ids = evidence_entries
+        .iter()
+        .map(|entry| entry.event_id)
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        plain_ids, evidence_ids,
+        "PROPERTY: read-walk evidence must apply the same hidden-range visibility predicate as plain query"
+    );
+    assert_eq!(plain_ids, vec![before_gap.event_id, after_gap.event_id]);
+    assert_eq!(report.body.matched_count, 2);
+    assert_eq!(report.body.returned_count, 2);
+    assert!(
+        report.body.findings.is_empty(),
+        "PROPERTY: hidden-range filtering must not be reported as missing backing entries"
     );
     Ok(())
 }

@@ -76,6 +76,8 @@ pub enum CoordinateError {
     ControlChar,
     /// A coordinate component contained a path-traversal substring (`..` or `/`).
     PathTraversal,
+    /// A coordinate component contained a checkpoint identity separator (`|` or `=`).
+    ForbiddenSeparator,
 }
 
 /// Region: the ONE predicate type for query, subscription, cursor, traversal.
@@ -105,6 +107,11 @@ pub enum KindFilter {
 
 impl Coordinate {
     /// Creates a new `Coordinate` from an entity and scope string.
+    ///
+    /// Coordinate components are logical stream identifiers, not path or
+    /// checkpoint-identity fragments. They must be non-empty, bounded, free of
+    /// control bytes, free of path traversal shapes, and free of the `|` / `=`
+    /// separators reserved by [`Region::checkpoint_identity`].
     ///
     /// # Errors
     /// Returns `CoordinateError::EmptyEntity` if the entity string is empty.
@@ -193,6 +200,9 @@ impl Coordinate {
         if value.contains('/') || value.contains("..") {
             return Err(CoordinateError::PathTraversal);
         }
+        if value.contains('|') || value.contains('=') {
+            return Err(CoordinateError::ForbiddenSeparator);
+        }
         Ok(())
     }
 }
@@ -223,6 +233,10 @@ impl fmt::Display for CoordinateError {
             Self::PathTraversal => write!(
                 f,
                 "coordinate component contains a forbidden path-traversal substring (`..` or `/`)"
+            ),
+            Self::ForbiddenSeparator => write!(
+                f,
+                "coordinate component contains a forbidden identity-separator character (`|` or `=`)"
             ),
         }
     }
@@ -338,6 +352,8 @@ impl Region {
 
     /// Stable identity string for persisted cursor checkpoints.
     pub(crate) fn checkpoint_identity(&self) -> String {
+        // `Coordinate::validate_component_bytes` rejects `|` and `=`, so the
+        // separator grammar below is injective for entity/scope components.
         let entity = self.entity_prefix.as_deref().unwrap_or("*");
         let scope = self.scope.as_deref().unwrap_or("*");
         let fact = match self.fact.as_ref() {
@@ -368,7 +384,8 @@ pub fn namespace_prefix_matches(prefix: &str, candidate: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{namespace_prefix_matches, Region};
+    use super::{namespace_prefix_matches, Coordinate, CoordinateError, Region};
+    use std::sync::Arc;
 
     #[test]
     fn namespace_prefix_matches_exact_and_descendants() {
@@ -391,5 +408,40 @@ mod tests {
         assert!(region.matches_entity("alpha:a"));
         assert!(region.matches_entity("alpha:a:child"));
         assert!(!region.matches_entity("alpha:aa"));
+    }
+
+    #[test]
+    fn coordinate_rejects_checkpoint_identity_separators() {
+        assert_eq!(
+            Coordinate::new("entity|injection", "scope"),
+            Err(CoordinateError::ForbiddenSeparator)
+        );
+        assert_eq!(
+            Coordinate::new("entity", "scope=injection"),
+            Err(CoordinateError::ForbiddenSeparator)
+        );
+        assert_eq!(
+            Coordinate::new("entity", "*|fact=any|clock=*"),
+            Err(CoordinateError::ForbiddenSeparator)
+        );
+    }
+
+    #[test]
+    fn coordinate_validate_rejects_internally_forged_separator_values() {
+        let coord = Coordinate {
+            entity: Arc::from("entity"),
+            scope: Arc::from("*|fact=any|clock=*"),
+        };
+
+        assert_eq!(coord.validate(), Err(CoordinateError::ForbiddenSeparator));
+    }
+
+    #[test]
+    fn coordinate_separator_error_is_displayable_std_error() {
+        fn assert_error_trait(_: &dyn std::error::Error) {}
+
+        let error = CoordinateError::ForbiddenSeparator;
+        assert_error_trait(&error);
+        assert!(error.to_string().contains("`|` or `=`"));
     }
 }

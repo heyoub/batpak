@@ -236,6 +236,9 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     // ─── Codegen ─────────────────────────────────────────────────────────────
     let ident = &input.ident;
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
+    // Must agree byte-for-byte with EventKind::as_raw_u16. The proc macro runs
+    // at expansion time before EventKind is available in this expression, so
+    // the packed formula is intentionally inlined here.
     let kind_bits: u16 = (u16::from(category) << 12) | type_id;
     let test_fn_name = format_ident!("__batpak_kind_collision_check_{}", ident);
 

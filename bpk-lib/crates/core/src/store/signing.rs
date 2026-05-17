@@ -249,7 +249,7 @@ fn cover_bytes(
     let coord_bytes =
         crate::canonical::to_bytes(coord).map_err(CoverBuildError::CoordinateEncoding)?;
     cover.extend_from_slice(&coord_bytes);
-    let raw_kind = (u16::from(kind.category()) << 12) | kind.type_id();
+    let raw_kind = kind.as_raw_u16();
     cover.extend_from_slice(&raw_kind.to_le_bytes());
     cover.extend_from_slice(&prev_hash);
     cover.extend_from_slice(&content_hash);
