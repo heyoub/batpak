@@ -1,4 +1,4 @@
-use crate::store::StoreError;
+use crate::store::{HiddenRangesCorruption, StoreError};
 use serde::{Deserialize, Serialize};
 use std::io::{BufWriter, Write};
 use std::path::Path;
@@ -110,7 +110,7 @@ pub(crate) fn load_cancelled_ranges(
         Err(error) => {
             return Err(corrupt_ranges(
                 &path,
-                format!("failed to read visibility-ranges metadata: {error}"),
+                HiddenRangesCorruption::ReadFailed(error),
             ));
         }
     };
@@ -119,22 +119,25 @@ pub(crate) fn load_cancelled_ranges(
     if raw.len() < HEADER_LEN {
         return Err(corrupt_ranges(
             &path,
-            "visibility-ranges file too short".to_string(),
+            HiddenRangesCorruption::TooShort {
+                actual: raw.len(),
+                required: HEADER_LEN,
+            },
         ));
     }
 
     if &raw[..6] != VISIBILITY_RANGES_MAGIC {
-        return Err(corrupt_ranges(
-            &path,
-            "visibility-ranges file has wrong magic".to_string(),
-        ));
+        return Err(corrupt_ranges(&path, HiddenRangesCorruption::BadMagic));
     }
 
     let version = u16::from_le_bytes([raw[6], raw[7]]);
     if version != VISIBILITY_RANGES_VERSION {
         return Err(corrupt_ranges(
             &path,
-            format!("unsupported visibility-ranges version: {version}"),
+            HiddenRangesCorruption::UnsupportedVersion {
+                observed: version,
+                expected: VISIBILITY_RANGES_VERSION,
+            },
         ));
     }
 
@@ -144,7 +147,10 @@ pub(crate) fn load_cancelled_ranges(
     if stored_crc != actual_crc {
         return Err(corrupt_ranges(
             &path,
-            "visibility-ranges CRC mismatch".to_string(),
+            HiddenRangesCorruption::CrcMismatch {
+                stored: stored_crc,
+                computed: actual_crc,
+            },
         ));
     }
 
@@ -153,7 +159,7 @@ pub(crate) fn load_cancelled_ranges(
         Err(error) => {
             return Err(corrupt_ranges(
                 &path,
-                format!("visibility-ranges deserialisation failed: {error}"),
+                HiddenRangesCorruption::DecodeFailed(error),
             ));
         }
     };
@@ -167,20 +173,22 @@ pub(crate) fn load_cancelled_ranges(
         Ok(normalized) => Ok(Some(normalized)),
         Err(err) => Err(corrupt_ranges(
             &path,
-            format!("visibility-ranges file contained malformed entries: {err}"),
+            HiddenRangesCorruption::MalformedEntries {
+                source: Box::new(err),
+            },
         )),
     }
 }
 
-fn corrupt_ranges(path: &Path, reason: String) -> StoreError {
+fn corrupt_ranges(path: &Path, kind: HiddenRangesCorruption) -> StoreError {
     tracing::warn!(
         target: "batpak::visibility",
         path = %path.display(),
-        reason = %reason,
+        reason = %kind,
         "visibility-ranges metadata unreadable; failing closed"
     );
     StoreError::HiddenRangesCorrupt {
         path: path.to_path_buf(),
-        reason,
+        kind,
     }
 }

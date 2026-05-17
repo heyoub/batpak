@@ -1,5 +1,7 @@
 use crate::store::config::duration_micros;
-use crate::store::{AppendReceipt, HlcPoint, Open, Store, StoreError, WatermarkKind};
+use crate::store::{
+    AppendReceipt, HlcPoint, Open, Store, StoreError, StoreInvariant, WatermarkKind,
+};
 use std::time::{Duration, Instant};
 
 struct GateWaitMeasurement {
@@ -47,10 +49,9 @@ impl Store<Open> {
                 global_sequence: entry.global_sequence,
             })
             .ok_or_else(|| StoreError::InvariantViolation {
-                reason: format!(
-                    "append receipt {:032x} was not visible for durability gate lookup",
-                    receipt.event_id
-                ),
+                kind: StoreInvariant::GateReceiptNotIndexed {
+                    event_id: receipt.event_id,
+                },
             })
     }
 

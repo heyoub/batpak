@@ -130,7 +130,7 @@ impl Reader {
                     if bytes_read == 0 {
                         StoreError::corrupt_eof(segment_id)
                     } else {
-                        StoreError::corrupt_frame(
+                        StoreError::corrupt_segment_with_detail(
                             segment_id,
                             "active frame read ended before requested length",
                         )

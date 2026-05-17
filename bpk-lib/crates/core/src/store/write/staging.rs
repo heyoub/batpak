@@ -4,7 +4,7 @@ use crate::store::append::checked_payload_len;
 use crate::store::append::{AppendOptions, BatchAppendItem, CausationRef};
 use crate::store::index::interner::InternId;
 use crate::store::index::StoreIndex;
-use crate::store::StoreError;
+use crate::store::{StoreError, StoreInvariant};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -130,11 +130,10 @@ impl PreparedBatchBuilder {
     pub(crate) fn finish(self) -> Result<PreparedBatch, StoreError> {
         if self.items.len() != self.expected_len {
             return Err(StoreError::InvariantViolation {
-                reason: format!(
-                    "prepared batch item count changed during staging: expected {}, got {}",
-                    self.expected_len,
-                    self.items.len()
-                ),
+                kind: StoreInvariant::PreparedBatchItemCountDrift {
+                    expected: self.expected_len,
+                    actual: self.items.len(),
+                },
             });
         }
         Ok(PreparedBatch {
@@ -391,7 +390,7 @@ mod tests {
     use super::{PreparedBatch, PreparedBatchBuilder};
     use crate::coordinate::Coordinate;
     use crate::event::EventKind;
-    use crate::store::{AppendOptions, BatchAppendItem, CausationRef, StoreError};
+    use crate::store::{AppendOptions, BatchAppendItem, CausationRef, StoreError, StoreInvariant};
 
     #[test]
     fn prepared_batch_dedupes_entity_and_scope_strings() {
@@ -474,7 +473,15 @@ mod tests {
         };
 
         assert!(
-            matches!(err, StoreError::InvariantViolation { ref reason } if reason.contains("expected 2, got 1")),
+            matches!(
+                err,
+                StoreError::InvariantViolation {
+                    kind: StoreInvariant::PreparedBatchItemCountDrift {
+                        expected: 2,
+                        actual: 1
+                    }
+                }
+            ),
             "wrong error for prepared batch count drift: {err:?}"
         );
         Ok(())

@@ -1,17 +1,15 @@
 // justifies: INV-TEST-PANIC-AS-ASSERTION; this contract-table harness uses panic! to make variant/source drift fail loudly and locally.
 #![allow(clippy::panic)]
-//! PROVES: representative `StoreError` variants preserve a stable downstream
-//! handling contract: domain rejections stay distinct from retryable
-//! operational failures and fail-closed operational failures, source-bearing
-//! variants keep forwarding their underlying error, and user-facing `Display`
-//! text keeps surfacing the fields callers need to diagnose the failure.
-//! CATCHES: drift where a public `StoreError` arm stops exposing its key
-//! identity in `Display`, silently drops an underlying source error, or moves
-//! between downstream handling classes without an explicit table update.
-//! SEEDED: not random; deterministic contract table.
-
+//! PROVES: representative `StoreError` variants preserve downstream handling
+//! class, source forwarding, and diagnostic `Display` fields.
+//! CATCHES: drift where a public `StoreError` arm drops identity, source, or
+//! handling-class stability without an explicit table update.
+//! SEEDED: deterministic contract table.
 use batpak::coordinate::{Coordinate, CoordinateError};
-use batpak::store::{HlcPoint, StoreError, StoreLockMode, WatermarkKind};
+use batpak::store::{
+    HiddenRangesCorruption, HlcPoint, ProfileInvalidKind, StoreError, StoreInvariant,
+    StoreLockMode, WatermarkKind,
+};
 use std::error::Error as _;
 use std::io;
 use std::path::PathBuf;
@@ -244,10 +242,13 @@ fn store_error_contract_table_stays_stable() {
             name: "hidden_ranges_corrupt",
             error: StoreError::HiddenRangesCorrupt {
                 path: PathBuf::from("fixtures/hidden-ranges.json"),
-                reason: "unexpected EOF".into(),
+                kind: HiddenRangesCorruption::ReadFailed(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "unexpected EOF",
+                )),
             },
             class: HandlingClass::FailClosedOperational,
-            source_needle: None,
+            source_needle: Some("unexpected EOF"),
             display_needles: &["fixtures/hidden-ranges.json", "unexpected EOF", "corrupt"],
         },
         Case {
@@ -278,11 +279,20 @@ fn store_error_contract_table_stays_stable() {
         Case {
             name: "invariant_violation",
             error: StoreError::InvariantViolation {
-                reason: "close_hlc regressed below prior close".into(),
+                kind: StoreInvariant::CloseHlcRegression {
+                    previous: HlcPoint {
+                        wall_ms: 2,
+                        global_sequence: 2,
+                    },
+                    later: HlcPoint {
+                        wall_ms: 1,
+                        global_sequence: 3,
+                    },
+                },
             },
             class: HandlingClass::FailClosedOperational,
             source_needle: None,
-            display_needles: &["invariant violation", "close_hlc regressed"],
+            display_needles: &["invariant violation", "HLC regressed"],
         },
         Case {
             name: "invalid_clock",
@@ -298,7 +308,10 @@ fn store_error_contract_table_stays_stable() {
             name: "platform_profile_invalid",
             error: StoreError::PlatformProfileInvalid {
                 path: PathBuf::from("fixtures/platform/bad.profile"),
-                reason: "expected schema_version 1".into(),
+                kind: ProfileInvalidKind::UnsupportedSchemaVersion {
+                    observed: 2,
+                    expected: 1,
+                },
             },
             class: HandlingClass::FailClosedOperational,
             source_needle: None,

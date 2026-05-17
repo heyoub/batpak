@@ -80,7 +80,9 @@ pub use delivery::observation::{
     MAX_CHECKPOINT_ID_LEN,
 };
 pub use delivery::subscription::Subscription;
-pub use error::{StoreError, StoreLockMode};
+pub use error::{
+    HiddenRangesCorruption, ProfileInvalidKind, StoreError, StoreInvariant, StoreLockMode,
+};
 #[cfg(feature = "dangerous-test-hooks")]
 #[cfg_attr(
     all(docsrs, not(batpak_stable_docs)),

@@ -4,7 +4,7 @@ use crate::store::stats::{
     PlatformEvidenceSummary, StoreLockAdmissionSummary, StorePathEvidenceSummary,
     StorePathStatusEvidence,
 };
-use crate::store::StoreError;
+use crate::store::{ProfileInvalidKind, StoreError};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -47,9 +47,9 @@ impl PlatformProfile {
         profile.fingerprint_crc32 =
             profile
                 .compute_fingerprint()
-                .map_err(|reason| StoreError::PlatformProfileInvalid {
+                .map_err(|error| StoreError::PlatformProfileInvalid {
                     path: PathBuf::from("<generated>"),
-                    reason,
+                    kind: ProfileInvalidKind::FingerprintEncode(error),
                 })?;
         Ok(profile)
     }
@@ -57,12 +57,12 @@ impl PlatformProfile {
     pub(crate) fn load(path: &Path) -> Result<Self, StoreError> {
         let bytes = std::fs::read(path).map_err(|error| StoreError::PlatformProfileInvalid {
             path: path.to_path_buf(),
-            reason: error.to_string(),
+            kind: ProfileInvalidKind::Io(error),
         })?;
         let profile: Self =
             serde_json::from_slice(&bytes).map_err(|error| StoreError::PlatformProfileInvalid {
                 path: path.to_path_buf(),
-                reason: error.to_string(),
+                kind: ProfileInvalidKind::DecodeJson(error),
             })?;
         profile.validate_fingerprint(path)?;
         Ok(profile)
@@ -80,12 +80,7 @@ impl PlatformProfile {
     ) -> Result<PlatformEvidenceSummary, StoreError> {
         let expected = Self::load(profile_path)?;
         let current_evidence = crate::store::platform::evidence::collect_for_store_path(data_dir);
-        let current = Self::from_evidence(&current_evidence).map_err(|error| {
-            StoreError::PlatformProfileInvalid {
-                path: profile_path.to_path_buf(),
-                reason: error.to_string(),
-            }
-        })?;
+        let current = Self::from_evidence(&current_evidence)?;
         if expected.profile_body_tuple() != current.profile_body_tuple() {
             return Err(StoreError::PlatformProfileMismatch {
                 path: profile_path.to_path_buf(),
@@ -103,25 +98,25 @@ impl PlatformProfile {
         if self.schema_version != PLATFORM_PROFILE_SCHEMA_VERSION {
             return Err(StoreError::PlatformProfileInvalid {
                 path: path.to_path_buf(),
-                reason: format!(
-                    "schema_version {} is not supported; expected {}",
-                    self.schema_version, PLATFORM_PROFILE_SCHEMA_VERSION
-                ),
+                kind: ProfileInvalidKind::UnsupportedSchemaVersion {
+                    observed: self.schema_version,
+                    expected: PLATFORM_PROFILE_SCHEMA_VERSION,
+                },
             });
         }
         let computed =
             self.compute_fingerprint()
-                .map_err(|reason| StoreError::PlatformProfileInvalid {
+                .map_err(|error| StoreError::PlatformProfileInvalid {
                     path: path.to_path_buf(),
-                    reason,
+                    kind: ProfileInvalidKind::FingerprintEncode(error),
                 })?;
         if self.fingerprint_crc32 != computed {
             return Err(StoreError::PlatformProfileInvalid {
                 path: path.to_path_buf(),
-                reason: format!(
-                    "fingerprint_crc32 {} does not match computed {}",
-                    self.fingerprint_crc32, computed
-                ),
+                kind: ProfileInvalidKind::FingerprintMismatch {
+                    observed: self.fingerprint_crc32,
+                    computed,
+                },
             });
         }
         self.validate_admission_semantics(path)?;
@@ -141,10 +136,10 @@ impl PlatformProfile {
         if self.admission.store_lock != expected_store_lock {
             return Err(StoreError::PlatformProfileInvalid {
                 path: path.to_path_buf(),
-                reason: format!(
-                    "store_lock admission {:?} is inconsistent with lock evidence {:?}",
-                    self.admission.store_lock, self.store_path.lock_leaf_symlink_protection
-                ),
+                kind: ProfileInvalidKind::InconsistentLockAdmission {
+                    admission: self.admission.store_lock,
+                    evidence: self.store_path.lock_leaf_symlink_protection,
+                },
             });
         }
 
@@ -158,10 +153,10 @@ impl PlatformProfile {
         if self.admission.parent_dir_sync != expected_parent_dir_sync {
             return Err(StoreError::PlatformProfileInvalid {
                 path: path.to_path_buf(),
-                reason: format!(
-                    "parent_dir_sync admission {:?} is inconsistent with evidence {:?}",
-                    self.admission.parent_dir_sync, self.store_path.parent_dir_sync
-                ),
+                kind: ProfileInvalidKind::InconsistentParentDirSyncAdmission {
+                    admission: self.admission.parent_dir_sync,
+                    evidence: self.store_path.parent_dir_sync,
+                },
             });
         }
 
@@ -202,10 +197,12 @@ impl PlatformProfile {
         if evidence != required {
             return Err(StoreError::PlatformProfileInvalid {
                 path: path.to_path_buf(),
-                reason: format!(
-                    "{field} evidence {evidence:?} is inconsistent with path_status {:?}; expected {required:?}",
-                    self.store_path.path_status
-                ),
+                kind: ProfileInvalidKind::InconsistentMmapPath {
+                    field,
+                    evidence,
+                    expected: required,
+                    path_status: self.store_path.path_status.clone(),
+                },
             });
         }
         Ok(())
@@ -227,22 +224,24 @@ impl PlatformProfile {
         if admission != expected {
             return Err(StoreError::PlatformProfileInvalid {
                 path: path.to_path_buf(),
-                reason: format!(
-                    "{field} admission {admission:?} is inconsistent with mmap evidence {evidence:?}"
-                ),
+                kind: ProfileInvalidKind::InconsistentMmapAdmission {
+                    field,
+                    admission,
+                    evidence,
+                },
             });
         }
         Ok(())
     }
 
-    fn compute_fingerprint(&self) -> Result<u32, String> {
+    fn compute_fingerprint(&self) -> Result<u32, serde_json::Error> {
         let body = PlatformProfileBody {
             schema_version: self.schema_version,
             host: &self.host,
             store_path: &self.store_path,
             admission: &self.admission,
         };
-        let bytes = serde_json::to_vec(&body).map_err(|error| error.to_string())?;
+        let bytes = serde_json::to_vec(&body)?;
         Ok(crc32fast::hash(&bytes))
     }
 

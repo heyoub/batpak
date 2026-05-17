@@ -1244,8 +1244,8 @@ pub batpak::prelude::StoreError::EntityClockOverflow
 pub batpak::prelude::StoreError::EntityClockOverflow::entity: alloc::string::String
 pub batpak::prelude::StoreError::EventPayloadRegistry(batpak::event::payload::EventPayloadRegistryError)
 pub batpak::prelude::StoreError::HiddenRangesCorrupt
+pub batpak::prelude::StoreError::HiddenRangesCorrupt::kind: batpak::store::HiddenRangesCorruption
 pub batpak::prelude::StoreError::HiddenRangesCorrupt::path: std::path::PathBuf
-pub batpak::prelude::StoreError::HiddenRangesCorrupt::reason: alloc::string::String
 pub batpak::prelude::StoreError::IdempotencyPartialBatch
 pub batpak::prelude::StoreError::IdempotencyPartialBatch::reason: alloc::string::String
 pub batpak::prelude::StoreError::IdempotencyRequired
@@ -1262,15 +1262,15 @@ pub batpak::prelude::StoreError::InvalidCoordinate
 pub batpak::prelude::StoreError::InvalidCoordinate::index: core::option::Option<usize>
 pub batpak::prelude::StoreError::InvalidCoordinate::reason: alloc::string::String
 pub batpak::prelude::StoreError::InvariantViolation
-pub batpak::prelude::StoreError::InvariantViolation::reason: alloc::string::String
+pub batpak::prelude::StoreError::InvariantViolation::kind: batpak::store::StoreInvariant
 pub batpak::prelude::StoreError::Io(std::io::error::Error)
 pub batpak::prelude::StoreError::NotFound(u128)
 pub batpak::prelude::StoreError::PlatformAdmissionFailed
 pub batpak::prelude::StoreError::PlatformAdmissionFailed::capability: &'static str
 pub batpak::prelude::StoreError::PlatformAdmissionFailed::reason: alloc::string::String
 pub batpak::prelude::StoreError::PlatformProfileInvalid
+pub batpak::prelude::StoreError::PlatformProfileInvalid::kind: batpak::store::ProfileInvalidKind
 pub batpak::prelude::StoreError::PlatformProfileInvalid::path: std::path::PathBuf
-pub batpak::prelude::StoreError::PlatformProfileInvalid::reason: alloc::string::String
 pub batpak::prelude::StoreError::PlatformProfileMismatch
 pub batpak::prelude::StoreError::PlatformProfileMismatch::path: std::path::PathBuf
 pub batpak::prelude::StoreError::PlatformProfileMismatch::reason: alloc::string::String
@@ -3003,6 +3003,23 @@ pub fn batpak::store::ExtensionKeyError::fmt(&self, f: &mut core::fmt::Formatter
 pub batpak::store::Freshness::Consistent
 pub batpak::store::Freshness::MaybeStale
 pub batpak::store::Freshness::MaybeStale::max_stale_ms: u64
+#[non_exhaustive] pub enum batpak::store::HiddenRangesCorruption
+pub batpak::store::HiddenRangesCorruption::BadMagic
+pub batpak::store::HiddenRangesCorruption::CrcMismatch
+pub batpak::store::HiddenRangesCorruption::CrcMismatch::computed: u32
+pub batpak::store::HiddenRangesCorruption::CrcMismatch::stored: u32
+pub batpak::store::HiddenRangesCorruption::DecodeFailed(rmp_serde::decode::Error)
+pub batpak::store::HiddenRangesCorruption::MalformedEntries
+pub batpak::store::HiddenRangesCorruption::MalformedEntries::source: alloc::boxed::Box<batpak::prelude::StoreError>
+pub batpak::store::HiddenRangesCorruption::ReadFailed(std::io::error::Error)
+pub batpak::store::HiddenRangesCorruption::TooShort
+pub batpak::store::HiddenRangesCorruption::TooShort::actual: usize
+pub batpak::store::HiddenRangesCorruption::TooShort::required: usize
+pub batpak::store::HiddenRangesCorruption::UnsupportedVersion
+pub batpak::store::HiddenRangesCorruption::UnsupportedVersion::expected: u16
+pub batpak::store::HiddenRangesCorruption::UnsupportedVersion::observed: u16
+impl core::fmt::Display for batpak::store::HiddenRangesCorruption
+pub fn batpak::store::HiddenRangesCorruption::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 #[non_exhaustive] pub enum batpak::store::LockLeafSymlinkProtection
 pub batpak::store::LockLeafSymlinkProtection::AtomicNoFollow
 pub batpak::store::LockLeafSymlinkProtection::BestEffortCheckThenOpen
@@ -3031,6 +3048,33 @@ pub batpak::store::ParentDirSyncEvidence::ProbeFailed
 pub batpak::store::ParentDirSyncEvidence::RenameOnly
 pub batpak::store::ParentDirSyncEvidence::UnixFsync
 pub batpak::store::ParentDirSyncEvidence::Unknown
+#[non_exhaustive] pub enum batpak::store::ProfileInvalidKind
+pub batpak::store::ProfileInvalidKind::DecodeJson(serde_json::error::Error)
+pub batpak::store::ProfileInvalidKind::FingerprintEncode(serde_json::error::Error)
+pub batpak::store::ProfileInvalidKind::FingerprintMismatch
+pub batpak::store::ProfileInvalidKind::FingerprintMismatch::computed: u32
+pub batpak::store::ProfileInvalidKind::FingerprintMismatch::observed: u32
+pub batpak::store::ProfileInvalidKind::InconsistentLockAdmission
+pub batpak::store::ProfileInvalidKind::InconsistentLockAdmission::admission: batpak::store::stats::StoreLockAdmissionSummary
+pub batpak::store::ProfileInvalidKind::InconsistentLockAdmission::evidence: batpak::store::stats::LockLeafSymlinkProtection
+pub batpak::store::ProfileInvalidKind::InconsistentMmapAdmission
+pub batpak::store::ProfileInvalidKind::InconsistentMmapAdmission::admission: batpak::store::stats::MmapAdmissionSummary
+pub batpak::store::ProfileInvalidKind::InconsistentMmapAdmission::evidence: batpak::store::stats::MmapEvidence
+pub batpak::store::ProfileInvalidKind::InconsistentMmapAdmission::field: &'static str
+pub batpak::store::ProfileInvalidKind::InconsistentMmapPath
+pub batpak::store::ProfileInvalidKind::InconsistentMmapPath::evidence: batpak::store::stats::MmapEvidence
+pub batpak::store::ProfileInvalidKind::InconsistentMmapPath::expected: batpak::store::stats::MmapEvidence
+pub batpak::store::ProfileInvalidKind::InconsistentMmapPath::field: &'static str
+pub batpak::store::ProfileInvalidKind::InconsistentMmapPath::path_status: batpak::store::stats::StorePathStatusEvidence
+pub batpak::store::ProfileInvalidKind::InconsistentParentDirSyncAdmission
+pub batpak::store::ProfileInvalidKind::InconsistentParentDirSyncAdmission::admission: batpak::store::stats::ParentDirSyncAdmissionSummary
+pub batpak::store::ProfileInvalidKind::InconsistentParentDirSyncAdmission::evidence: batpak::store::stats::ParentDirSyncEvidence
+pub batpak::store::ProfileInvalidKind::Io(std::io::error::Error)
+pub batpak::store::ProfileInvalidKind::UnsupportedSchemaVersion
+pub batpak::store::ProfileInvalidKind::UnsupportedSchemaVersion::expected: u16
+pub batpak::store::ProfileInvalidKind::UnsupportedSchemaVersion::observed: u16
+impl core::fmt::Display for batpak::store::ProfileInvalidKind
+pub fn batpak::store::ProfileInvalidKind::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub enum batpak::store::ProjectionRunCacheStatus
 pub batpak::store::ProjectionRunCacheStatus::Bypassed
 pub batpak::store::ProjectionRunCacheStatus::Hit
@@ -3184,8 +3228,8 @@ pub batpak::store::StoreError::EntityClockOverflow
 pub batpak::store::StoreError::EntityClockOverflow::entity: alloc::string::String
 pub batpak::store::StoreError::EventPayloadRegistry(batpak::event::payload::EventPayloadRegistryError)
 pub batpak::store::StoreError::HiddenRangesCorrupt
+pub batpak::store::StoreError::HiddenRangesCorrupt::kind: batpak::store::HiddenRangesCorruption
 pub batpak::store::StoreError::HiddenRangesCorrupt::path: std::path::PathBuf
-pub batpak::store::StoreError::HiddenRangesCorrupt::reason: alloc::string::String
 pub batpak::store::StoreError::IdempotencyPartialBatch
 pub batpak::store::StoreError::IdempotencyPartialBatch::reason: alloc::string::String
 pub batpak::store::StoreError::IdempotencyRequired
@@ -3202,15 +3246,15 @@ pub batpak::store::StoreError::InvalidCoordinate
 pub batpak::store::StoreError::InvalidCoordinate::index: core::option::Option<usize>
 pub batpak::store::StoreError::InvalidCoordinate::reason: alloc::string::String
 pub batpak::store::StoreError::InvariantViolation
-pub batpak::store::StoreError::InvariantViolation::reason: alloc::string::String
+pub batpak::store::StoreError::InvariantViolation::kind: batpak::store::StoreInvariant
 pub batpak::store::StoreError::Io(std::io::error::Error)
 pub batpak::store::StoreError::NotFound(u128)
 pub batpak::store::StoreError::PlatformAdmissionFailed
 pub batpak::store::StoreError::PlatformAdmissionFailed::capability: &'static str
 pub batpak::store::StoreError::PlatformAdmissionFailed::reason: alloc::string::String
 pub batpak::store::StoreError::PlatformProfileInvalid
+pub batpak::store::StoreError::PlatformProfileInvalid::kind: batpak::store::ProfileInvalidKind
 pub batpak::store::StoreError::PlatformProfileInvalid::path: std::path::PathBuf
-pub batpak::store::StoreError::PlatformProfileInvalid::reason: alloc::string::String
 pub batpak::store::StoreError::PlatformProfileMismatch
 pub batpak::store::StoreError::PlatformProfileMismatch::path: std::path::PathBuf
 pub batpak::store::StoreError::PlatformProfileMismatch::reason: alloc::string::String
@@ -3253,6 +3297,27 @@ impl core::error::Error for batpak::prelude::StoreError
 pub fn batpak::prelude::StoreError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
 impl core::fmt::Display for batpak::prelude::StoreError
 pub fn batpak::prelude::StoreError::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub enum batpak::store::StoreInvariant
+pub batpak::store::StoreInvariant::BootstrapHlcOutOfOrder
+pub batpak::store::StoreInvariant::BootstrapHlcOutOfOrder::last_close_hlc: batpak::store::stats::HlcPoint
+pub batpak::store::StoreInvariant::BootstrapHlcOutOfOrder::max_recovered_hlc: batpak::store::stats::HlcPoint
+pub batpak::store::StoreInvariant::BootstrapHlcOutOfOrder::open_hlc: batpak::store::stats::HlcPoint
+pub batpak::store::StoreInvariant::CloseHlcRegression
+pub batpak::store::StoreInvariant::CloseHlcRegression::later: batpak::store::stats::HlcPoint
+pub batpak::store::StoreInvariant::CloseHlcRegression::previous: batpak::store::stats::HlcPoint
+pub batpak::store::StoreInvariant::GateReceiptNotIndexed
+pub batpak::store::StoreInvariant::GateReceiptNotIndexed::event_id: u128
+pub batpak::store::StoreInvariant::OpenHlcTimestampOutOfRange
+pub batpak::store::StoreInvariant::OpenHlcTimestampOutOfRange::wall_ms: u64
+pub batpak::store::StoreInvariant::OpenHlcWallMsOverflow
+pub batpak::store::StoreInvariant::OpenHlcWallMsOverflow::wall_ms: u64
+pub batpak::store::StoreInvariant::OpenReceiptNotIndexed
+pub batpak::store::StoreInvariant::OpenReceiptNotIndexed::event_id: u128
+pub batpak::store::StoreInvariant::PreparedBatchItemCountDrift
+pub batpak::store::StoreInvariant::PreparedBatchItemCountDrift::actual: usize
+pub batpak::store::StoreInvariant::PreparedBatchItemCountDrift::expected: usize
+impl core::fmt::Display for batpak::store::StoreInvariant
+pub fn batpak::store::StoreInvariant::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 #[non_exhaustive] pub enum batpak::store::StoreLockAdmissionSummary
 pub batpak::store::StoreLockAdmissionSummary::AtomicNoFollow
 pub batpak::store::StoreLockAdmissionSummary::BestEffortCheckThenOpen

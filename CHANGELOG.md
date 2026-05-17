@@ -50,6 +50,14 @@ All notable changes to this project will be documented in this file.
   `batpak::store::backup_envelope::*`, and cold-start open reports now live
   under `batpak::store::cold_start::rebuild::*` instead of root `store::*`
   re-exports.
+- `StoreError::PlatformProfileInvalid`, `StoreError::HiddenRangesCorrupt`,
+  and `StoreError::InvariantViolation` now carry typed `kind` discriminants:
+  `ProfileInvalidKind`, `HiddenRangesCorruption`, and `StoreInvariant`.
+  Display text remains diagnostic, while downstream matches no longer need
+  substring parsing.
+- Segment-scan corruption helpers now name their actual behavior:
+  `corrupt_segment_with_detail` builds `CorruptSegment`, while recovery sites
+  with frame offsets use `CorruptFrame`.
 - `StoreConfig` fields are now private. Construction and inspection go through
   `StoreConfig::new(...)`, `with_*` builders, and read-only accessors.
 - `Store::get_raw` was removed; use `Store::read_raw`.
@@ -106,6 +114,9 @@ All notable changes to this project will be documented in this file.
   `batpak::store::backup_envelope::*`.
 - Replace root `batpak::store::{OpenIndexPath, OpenIndexReport}` imports with
   `batpak::store::cold_start::rebuild::{OpenIndexPath, OpenIndexReport}`.
+- Update matches on `StoreError::PlatformProfileInvalid`,
+  `StoreError::HiddenRangesCorrupt`, and `StoreError::InvariantViolation` to
+  inspect `kind` instead of `reason`.
 - If you read `syncbat::BatpakReceiptFields::disk_pos`, query batpak directly
   by `event_id` from lower-level diagnostic code; syncbat no longer exports
   the physical index witness.

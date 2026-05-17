@@ -147,10 +147,10 @@ fn last_close_hlc(index: &StoreIndex) -> Result<HlcPoint, StoreError> {
     for close_hlc in close_points {
         if close_hlc < latest {
             return Err(StoreError::InvariantViolation {
-                reason: format!(
-                    "SYSTEM_CLOSE_COMPLETED HLC regressed in log order: previous {:?}, later {:?}",
-                    latest, close_hlc
-                ),
+                kind: StoreInvariant::CloseHlcRegression {
+                    previous: latest,
+                    later: close_hlc,
+                },
             });
         }
         latest = close_hlc;
@@ -182,10 +182,11 @@ fn validate_bootstrap_hlc(
 ) -> Result<(), StoreError> {
     if open_hlc < max_recovered_hlc || open_hlc < last_close_hlc {
         return Err(StoreError::InvariantViolation {
-            reason: format!(
-                "open_hlc {:?} must be >= max_recovered_hlc {:?} and last_close_hlc {:?}",
-                open_hlc, max_recovered_hlc, last_close_hlc
-            ),
+            kind: StoreInvariant::BootstrapHlcOutOfOrder {
+                open_hlc,
+                max_recovered_hlc,
+                last_close_hlc,
+            },
         });
     }
     Ok(())
@@ -208,13 +209,14 @@ pub(super) fn timestamp_us_for_hlc(point: HlcPoint) -> Result<i64, StoreError> {
             .wall_ms
             .checked_mul(1000)
             .ok_or_else(|| StoreError::InvariantViolation {
-                reason: format!("open_hlc wall_ms {} overflows timestamp_us", point.wall_ms),
+                kind: StoreInvariant::OpenHlcWallMsOverflow {
+                    wall_ms: point.wall_ms,
+                },
             })?;
     i64::try_from(timestamp_us).map_err(|_| StoreError::InvariantViolation {
-        reason: format!(
-            "open_hlc wall_ms {} exceeds i64 timestamp_us range",
-            point.wall_ms
-        ),
+        kind: StoreInvariant::OpenHlcTimestampOutOfRange {
+            wall_ms: point.wall_ms,
+        },
     })
 }
 
@@ -251,10 +253,9 @@ fn append_open_completed_event(
             global_sequence: entry.global_sequence,
         })
         .ok_or_else(|| StoreError::InvariantViolation {
-            reason: format!(
-                "SYSTEM_OPEN_COMPLETED receipt {:032x} was not visible in the rebuilt index",
-                receipt.event_id
-            ),
+            kind: StoreInvariant::OpenReceiptNotIndexed {
+                event_id: receipt.event_id,
+            },
         })?;
     validate_bootstrap_hlc(open_hlc, open_candidate, last_close_hlc(&store.index)?)?;
     Ok(open_hlc)

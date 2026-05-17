@@ -1,7 +1,11 @@
 use crate::coordinate::CoordinateError;
 use crate::event::EventPayloadRegistryError;
 use crate::store::delivery::observation::CheckpointIdError;
-use crate::store::stats::{HlcPoint, WatermarkKind};
+use crate::store::stats::{
+    HlcPoint, LockLeafSymlinkProtection, MmapAdmissionSummary, MmapEvidence,
+    ParentDirSyncAdmissionSummary, ParentDirSyncEvidence, StoreLockAdmissionSummary,
+    StorePathStatusEvidence, WatermarkKind,
+};
 use std::path::PathBuf;
 
 /// Store open mode for lifetime-held directory locking.
@@ -12,6 +16,153 @@ pub enum StoreLockMode {
     /// Read-only open: no writer thread, but still exclusive under the
     /// current store-ownership contract.
     ReadOnly,
+}
+
+/// Typed reason a persisted platform profile was rejected.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum ProfileInvalidKind {
+    /// Reading the profile file failed.
+    Io(std::io::Error),
+    /// Decoding the JSON profile failed.
+    DecodeJson(serde_json::Error),
+    /// Encoding the canonical fingerprint body failed.
+    FingerprintEncode(serde_json::Error),
+    /// The profile schema version is not supported by this crate.
+    UnsupportedSchemaVersion {
+        /// Version observed in the profile.
+        observed: u16,
+        /// Version this crate accepts.
+        expected: u16,
+    },
+    /// The stored fingerprint did not match the computed fingerprint.
+    FingerprintMismatch {
+        /// Fingerprint stored in the profile.
+        observed: u32,
+        /// Fingerprint computed from the profile body.
+        computed: u32,
+    },
+    /// Store-lock admission contradicts the observed lock evidence.
+    InconsistentLockAdmission {
+        /// Admission recorded in the profile.
+        admission: StoreLockAdmissionSummary,
+        /// Evidence recorded in the profile.
+        evidence: LockLeafSymlinkProtection,
+    },
+    /// Parent-directory sync admission contradicts the observed evidence.
+    InconsistentParentDirSyncAdmission {
+        /// Admission recorded in the profile.
+        admission: ParentDirSyncAdmissionSummary,
+        /// Evidence recorded in the profile.
+        evidence: ParentDirSyncEvidence,
+    },
+    /// mmap evidence contradicts the store-path status.
+    InconsistentMmapPath {
+        /// Profile field whose evidence was inconsistent.
+        field: &'static str,
+        /// Evidence recorded in the profile.
+        evidence: MmapEvidence,
+        /// Evidence required by the path status.
+        expected: MmapEvidence,
+        /// Path status that determined the expected evidence.
+        path_status: StorePathStatusEvidence,
+    },
+    /// mmap admission contradicts the observed mmap evidence.
+    InconsistentMmapAdmission {
+        /// Profile field whose admission was inconsistent.
+        field: &'static str,
+        /// Admission recorded in the profile.
+        admission: MmapAdmissionSummary,
+        /// Evidence recorded in the profile.
+        evidence: MmapEvidence,
+    },
+}
+
+/// Typed reason hidden-range metadata could not be admitted.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum HiddenRangesCorruption {
+    /// Reading the visibility-ranges file failed.
+    ReadFailed(std::io::Error),
+    /// The file was shorter than the fixed header.
+    TooShort {
+        /// Bytes available in the file.
+        actual: usize,
+        /// Bytes required for the fixed header.
+        required: usize,
+    },
+    /// The file did not start with the visibility-ranges magic.
+    BadMagic,
+    /// The visibility-ranges version is unsupported.
+    UnsupportedVersion {
+        /// Version observed on disk.
+        observed: u16,
+        /// Version this crate accepts.
+        expected: u16,
+    },
+    /// The stored CRC did not match the decoded body.
+    CrcMismatch {
+        /// CRC stored in the metadata header.
+        stored: u32,
+        /// CRC computed from the metadata body.
+        computed: u32,
+    },
+    /// MessagePack decoding of the visibility body failed.
+    DecodeFailed(rmp_serde::decode::Error),
+    /// Decoded ranges were structurally malformed.
+    MalformedEntries {
+        /// Precise range normalization error.
+        source: Box<StoreError>,
+    },
+}
+
+/// Typed internal invariant violation.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum StoreInvariant {
+    /// A later close event carried an older HLC point in log order.
+    CloseHlcRegression {
+        /// Previous close HLC in log order.
+        previous: HlcPoint,
+        /// Later close HLC in log order.
+        later: HlcPoint,
+    },
+    /// The lifecycle open HLC candidate was older than recovered store state.
+    BootstrapHlcOutOfOrder {
+        /// Candidate open HLC.
+        open_hlc: HlcPoint,
+        /// Highest HLC recovered from the index.
+        max_recovered_hlc: HlcPoint,
+        /// Latest close HLC recovered from lifecycle events.
+        last_close_hlc: HlcPoint,
+    },
+    /// Converting open HLC wall milliseconds to microseconds overflowed.
+    OpenHlcWallMsOverflow {
+        /// HLC wall milliseconds.
+        wall_ms: u64,
+    },
+    /// Converted open HLC timestamp exceeded the signed timestamp range.
+    OpenHlcTimestampOutOfRange {
+        /// HLC wall milliseconds.
+        wall_ms: u64,
+    },
+    /// The SYSTEM_OPEN_COMPLETED receipt was not visible in the rebuilt index.
+    OpenReceiptNotIndexed {
+        /// Receipt event id.
+        event_id: u128,
+    },
+    /// A durability gate could not find the append receipt in the index.
+    GateReceiptNotIndexed {
+        /// Receipt event id.
+        event_id: u128,
+    },
+    /// Prepared batch staging ended with a different item count than declared.
+    PreparedBatchItemCountDrift {
+        /// Declared item count.
+        expected: usize,
+        /// Actual staged item count.
+        actual: usize,
+    },
 }
 
 /// StoreError: every error the store can produce.
@@ -89,8 +240,8 @@ pub enum StoreError {
     PlatformProfileInvalid {
         /// Path of the profile file.
         path: PathBuf,
-        /// Human-readable rejection reason.
-        reason: String,
+        /// Typed rejection reason.
+        kind: ProfileInvalidKind,
     },
     /// The configured platform profile did not match current platform evidence.
     PlatformProfileMismatch {
@@ -216,8 +367,8 @@ pub enum StoreError {
     HiddenRangesCorrupt {
         /// Path of the unreadable metadata file.
         path: PathBuf,
-        /// Human-readable description of why the file could not be parsed.
-        reason: String,
+        /// Typed corruption reason.
+        kind: HiddenRangesCorruption,
     },
     /// A batch item's serialized payload plus encoded receipt-extension bytes
     /// exceeded `single_append_max_bytes`.
@@ -294,9 +445,149 @@ pub enum StoreError {
     /// bootstrap. Returned as an error so adversarial recovery inputs fail
     /// closed instead of panicking the process.
     InvariantViolation {
-        /// Human-readable invariant failure.
-        reason: String,
+        /// Typed invariant failure.
+        kind: StoreInvariant,
     },
+}
+
+impl std::fmt::Display for ProfileInvalidKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Io(error) => write!(f, "{error}"),
+            Self::DecodeJson(error) | Self::FingerprintEncode(error) => write!(f, "{error}"),
+            Self::UnsupportedSchemaVersion { observed, expected } => write!(
+                f,
+                "schema_version {observed} is not supported; expected {expected}"
+            ),
+            Self::FingerprintMismatch { observed, computed } => write!(
+                f,
+                "fingerprint_crc32 {observed} does not match computed {computed}"
+            ),
+            Self::InconsistentLockAdmission {
+                admission,
+                evidence,
+            } => write!(
+                f,
+                "store_lock admission {admission:?} is inconsistent with lock evidence {evidence:?}"
+            ),
+            Self::InconsistentParentDirSyncAdmission {
+                admission,
+                evidence,
+            } => write!(
+                f,
+                "parent_dir_sync admission {admission:?} is inconsistent with evidence {evidence:?}"
+            ),
+            Self::InconsistentMmapPath {
+                field,
+                evidence,
+                expected,
+                path_status,
+            } => write!(
+                f,
+                "{field} evidence {evidence:?} is inconsistent with path_status {path_status:?}; expected {expected:?}"
+            ),
+            Self::InconsistentMmapAdmission {
+                field,
+                admission,
+                evidence,
+            } => write!(
+                f,
+                "{field} admission {admission:?} is inconsistent with mmap evidence {evidence:?}"
+            ),
+        }
+    }
+}
+
+impl std::fmt::Display for HiddenRangesCorruption {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ReadFailed(error) => {
+                write!(f, "failed to read visibility-ranges metadata: {error}")
+            }
+            Self::TooShort { .. } => write!(f, "visibility-ranges file too short"),
+            Self::BadMagic => write!(f, "visibility-ranges file has wrong magic"),
+            Self::UnsupportedVersion { observed, .. } => {
+                write!(f, "unsupported visibility-ranges version: {observed}")
+            }
+            Self::CrcMismatch { .. } => write!(f, "visibility-ranges CRC mismatch"),
+            Self::DecodeFailed(error) => {
+                write!(f, "visibility-ranges deserialisation failed: {error}")
+            }
+            Self::MalformedEntries { source } => {
+                write!(
+                    f,
+                    "visibility-ranges file contained malformed entries: {source}"
+                )
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for StoreInvariant {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::CloseHlcRegression { previous, later } => write!(
+                f,
+                "SYSTEM_CLOSE_COMPLETED HLC regressed in log order: previous {previous:?}, later {later:?}"
+            ),
+            Self::BootstrapHlcOutOfOrder {
+                open_hlc,
+                max_recovered_hlc,
+                last_close_hlc,
+            } => write!(
+                f,
+                "open_hlc {open_hlc:?} must be >= max_recovered_hlc {max_recovered_hlc:?} and last_close_hlc {last_close_hlc:?}"
+            ),
+            Self::OpenHlcWallMsOverflow { wall_ms } => {
+                write!(f, "open_hlc wall_ms {wall_ms} overflows timestamp_us")
+            }
+            Self::OpenHlcTimestampOutOfRange { wall_ms } => write!(
+                f,
+                "open_hlc wall_ms {wall_ms} exceeds i64 timestamp_us range"
+            ),
+            Self::OpenReceiptNotIndexed { event_id } => write!(
+                f,
+                "SYSTEM_OPEN_COMPLETED receipt {event_id:032x} was not visible in the rebuilt index"
+            ),
+            Self::GateReceiptNotIndexed { event_id } => write!(
+                f,
+                "append receipt {event_id:032x} was not visible for durability gate lookup"
+            ),
+            Self::PreparedBatchItemCountDrift { expected, actual } => write!(
+                f,
+                "prepared batch item count changed during staging: expected {expected}, got {actual}"
+            ),
+        }
+    }
+}
+
+impl ProfileInvalidKind {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io(error) => Some(error),
+            Self::DecodeJson(error) | Self::FingerprintEncode(error) => Some(error),
+            Self::UnsupportedSchemaVersion { .. }
+            | Self::FingerprintMismatch { .. }
+            | Self::InconsistentLockAdmission { .. }
+            | Self::InconsistentParentDirSyncAdmission { .. }
+            | Self::InconsistentMmapPath { .. }
+            | Self::InconsistentMmapAdmission { .. } => None,
+        }
+    }
+}
+
+impl HiddenRangesCorruption {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::ReadFailed(error) => Some(error),
+            Self::DecodeFailed(error) => Some(error),
+            Self::MalformedEntries { source } => Some(source.as_ref()),
+            Self::TooShort { .. }
+            | Self::BadMagic
+            | Self::UnsupportedVersion { .. }
+            | Self::CrcMismatch { .. } => None,
+        }
+    }
 }
 
 impl std::fmt::Display for StoreError {
@@ -353,9 +644,9 @@ impl std::fmt::Display for StoreError {
                 "sequence gate rejected {operation} publish({requested}) with allocated={allocated} visible={visible}"
             ),
             Self::Configuration(msg) => write!(f, "invalid config: {msg}"),
-            Self::PlatformProfileInvalid { path, reason } => write!(
+            Self::PlatformProfileInvalid { path, kind } => write!(
                 f,
-                "platform profile at {} is invalid: {reason}",
+                "platform profile at {} is invalid: {kind}",
                 path.display()
             ),
             Self::PlatformProfileMismatch { path, reason } => write!(
@@ -447,9 +738,9 @@ impl std::fmt::Display for StoreError {
                 f,
                 "coordinate component contains forbidden ASCII control character"
             ),
-            Self::HiddenRangesCorrupt { path, reason } => write!(
+            Self::HiddenRangesCorrupt { path, kind } => write!(
                 f,
-                "hidden-ranges metadata at {} is corrupt: {reason}",
+                "hidden-ranges metadata at {} is corrupt: {kind}",
                 path.display()
             ),
             Self::BatchItemTooLarge { index, size, limit } => write!(
@@ -486,7 +777,7 @@ impl std::fmt::Display for StoreError {
                 stored,
                 expected
             ),
-            Self::InvariantViolation { reason } => write!(f, "invariant violation: {reason}"),
+            Self::InvariantViolation { kind } => write!(f, "invariant violation: {kind}"),
         }
     }
 }
@@ -499,6 +790,8 @@ impl std::error::Error for StoreError {
             Self::CheckpointId(e) => Some(e),
             Self::Serialization(e) => Some(e.as_ref()),
             Self::CacheFailed(e) => Some(e.as_ref()),
+            Self::PlatformProfileInvalid { kind, .. } => kind.source(),
+            Self::HiddenRangesCorrupt { kind, .. } => kind.source(),
             Self::StoreLocked { .. }
             | Self::CrcMismatch { .. }
             | Self::CorruptSegment { .. }
@@ -508,7 +801,6 @@ impl std::error::Error for StoreError {
             | Self::WaitTimeout { .. }
             | Self::SequenceGateViolation { .. }
             | Self::Configuration(_)
-            | Self::PlatformProfileInvalid { .. }
             | Self::PlatformProfileMismatch { .. }
             | Self::PlatformAdmissionFailed { .. }
             | Self::IdempotencyRequired
@@ -527,7 +819,6 @@ impl std::error::Error for StoreError {
             | Self::CoordinateNulByte
             | Self::CoordinatePathTraversal
             | Self::CoordinateControlChar
-            | Self::HiddenRangesCorrupt { .. }
             | Self::BatchItemTooLarge { .. }
             | Self::EntityClockOverflow { .. }
             | Self::InvalidClock { .. }
@@ -599,8 +890,8 @@ impl StoreError {
         Self::Serialization(msg.into())
     }
 
-    /// Frame deserialization failed.
-    pub(crate) fn corrupt_frame(segment_id: u64, detail: impl Into<String>) -> Self {
+    /// Segment-level corruption with caller-supplied detail.
+    pub(crate) fn corrupt_segment_with_detail(segment_id: u64, detail: impl Into<String>) -> Self {
         Self::CorruptSegment {
             segment_id,
             detail: detail.into(),
@@ -803,8 +1094,8 @@ mod tests {
     }
 
     #[test]
-    fn corrupt_frame_helper_builds_corrupt_segment_with_detail() {
-        let error = StoreError::corrupt_frame(13, "valid CRC but malformed msgpack");
+    fn corrupt_segment_with_detail_helper_builds_corrupt_segment() {
+        let error = StoreError::corrupt_segment_with_detail(13, "valid CRC but malformed msgpack");
 
         assert!(
             matches!(

@@ -408,10 +408,10 @@ fn non_tail_pathological_frame_length_fails_closed_on_reopen() {
     assert!(
         matches!(
             err,
-            StoreError::CorruptSegment { ref detail, .. }
-            if detail.contains("exceeds MAX_FRAME_PAYLOAD")
+            StoreError::CorruptFrame { ref reason, .. }
+            if reason.contains("exceeds MAX_FRAME_PAYLOAD")
         ),
-        "PROPERTY: non-tail impossible frame length must surface as CorruptSegment; got {err:?}"
+        "PROPERTY: non-tail impossible frame length must surface as CorruptFrame; got {err:?}"
     );
 }
 

@@ -48,9 +48,11 @@ impl Reader {
         }
 
         let mut cursor = u64::try_from(8usize.checked_add(header_len).ok_or_else(|| {
-            StoreError::corrupt_frame(segment_id, "segment header offset overflow")
+            StoreError::corrupt_segment_with_detail(segment_id, "segment header offset overflow")
         })?)
-        .map_err(|_| StoreError::corrupt_frame(segment_id, "segment header offset overflow"))?; // past magic + header_len + header
+        .map_err(|_| {
+            StoreError::corrupt_segment_with_detail(segment_id, "segment header offset overflow")
+        })?; // past magic + header_len + header
 
         // Read frames until EOF. Each frame: [len:u32 BE][crc32:u32 BE][msgpack]
         let mut entries = Vec::new();
@@ -72,7 +74,7 @@ impl Reader {
                 frame_header[3],
             ]) as usize;
             if Self::payload_len_exceeds_max(payload_len) {
-                return Err(StoreError::corrupt_frame(
+                return Err(StoreError::corrupt_segment_with_detail(
                     segment_id,
                     format!("frame payload length {payload_len} exceeds MAX_FRAME_PAYLOAD"),
                 ));
@@ -80,9 +82,11 @@ impl Reader {
             let frame_tail = frame_offset
                 .checked_add(8)
                 .and_then(|base| base.checked_add(u64::try_from(payload_len).ok()?))
-                .ok_or_else(|| StoreError::corrupt_frame(segment_id, "frame tail overflow"))?;
+                .ok_or_else(|| {
+                    StoreError::corrupt_segment_with_detail(segment_id, "frame tail overflow")
+                })?;
             if frame_tail > frames_end {
-                return Err(StoreError::corrupt_frame(
+                return Err(StoreError::corrupt_segment_with_detail(
                     segment_id,
                     "frame payload extends past the frame region",
                 ));
@@ -92,7 +96,7 @@ impl Reader {
             if let Err(error) = file.read_exact(&mut frame_buf[8..]) {
                 self.release_buffer(frame_buf);
                 if error.kind() == ErrorKind::UnexpectedEof {
-                    return Err(StoreError::corrupt_frame(
+                    return Err(StoreError::corrupt_segment_with_detail(
                         segment_id,
                         "frame payload ended before requested length",
                     ));

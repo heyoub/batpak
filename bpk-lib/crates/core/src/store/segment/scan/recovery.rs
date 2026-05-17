@@ -73,7 +73,7 @@ impl Reader {
             if tail_policy.can_recover_torn_tail() {
                 Ok(PayloadReadFailure::RecoverTornTail)
             } else {
-                Err(StoreError::corrupt_frame(
+                Err(StoreError::corrupt_segment_with_detail(
                     segment_id,
                     "frame payload ended before requested length",
                 ))
@@ -221,23 +221,27 @@ impl Reader {
                     );
                     break;
                 }
-                return Err(StoreError::corrupt_frame(
+                return Err(StoreError::CorruptFrame {
                     segment_id,
-                    format!("frame payload length {payload_len} exceeds MAX_FRAME_PAYLOAD"),
-                ));
+                    offset: frame_offset,
+                    reason: format!("frame payload length {payload_len} exceeds MAX_FRAME_PAYLOAD"),
+                });
             }
             let frame_tail = frame_offset
                 .checked_add(8)
                 .and_then(|base| base.checked_add(u64::try_from(payload_len).ok()?))
-                .ok_or_else(|| StoreError::corrupt_frame(segment_id, "frame tail overflow"))?;
+                .ok_or_else(|| {
+                    StoreError::corrupt_segment_with_detail(segment_id, "frame tail overflow")
+                })?;
             if frame_tail > frames_end {
                 if tail_policy.can_recover_torn_tail() && frames_end == file_len {
                     break;
                 }
-                return Err(StoreError::corrupt_frame(
+                return Err(StoreError::CorruptFrame {
                     segment_id,
-                    "frame payload extends past the frame region",
-                ));
+                    offset: frame_offset,
+                    reason: "frame payload extends past the frame region".into(),
+                });
             }
             let mut frame_buf = self.acquire_buffer(8 + payload_len);
             frame_buf[..8].copy_from_slice(&frame_header);
