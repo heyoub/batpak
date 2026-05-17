@@ -210,6 +210,15 @@
   paths:
     - crates/core/src/store/cold_start/mod.rs
     - crates/core/src/store/cold_start/rebuild.rs
+- id: ART-ADR0009-COLD-START-FIXTURES
+  kind: tests
+  paths:
+    - crates/core/tests/cold_start_artifact_fixtures.rs
+    - crates/core/tests/fixtures/cold_start/adr0009/README.md
+    - crates/core/tests/fixtures/cold_start/adr0009/checkpoint-v5/index.ckpt
+    - crates/core/tests/fixtures/cold_start/adr0009/checkpoint-v5/000001.fbat
+    - crates/core/tests/fixtures/cold_start/adr0009/mmap-v4/index.fbati
+    - crates/core/tests/fixtures/cold_start/adr0009/mmap-v4/000001.fbat
 - id: ART-STORE-MMAP
   kind: source
   paths:

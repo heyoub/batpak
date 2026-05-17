@@ -14,6 +14,9 @@ All notable changes to this project will be documented in this file.
 - Added focused ADR-0009 compatibility proofs for checkpoint v4/v5 and mmap
   v3/v4 artifact restore semantics, completing the named legacy-version matrix
   around the existing v2/v3 checkpoint and v1/v2/v5 mmap tests.
+- Added ADR-0009 historical fixture stores for checkpoint v5 and mmap v4,
+  generated from the last local commit that wrote those artifact versions and
+  reopened through current `Store::open` tests.
 
 ### Changed
 - `ClockKey` is no longer public API; it is an internal index ordering key.
