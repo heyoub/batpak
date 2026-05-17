@@ -36,6 +36,7 @@ pub(crate) fn check(repo_root: &Path) -> Result<()> {
 
     let allowlist: Vec<AllowlistEntry> =
         load_yaml(&repo_root.join("traceability/pub_item_allowlist.yaml"))?;
+    check_internal_justification_grace(&allowlist)?;
     let allowed: HashMap<&str, &AllowlistEntry> = allowlist
         .iter()
         .map(|entry| (entry.name.as_str(), entry))
@@ -138,6 +139,38 @@ pub(crate) fn check(repo_root: &Path) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn check_internal_justification_grace(allowlist: &[AllowlistEntry]) -> Result<()> {
+    let grace: BTreeSet<&str> = ["needs_rotation"].into_iter().collect();
+    let mut unexpected = Vec::new();
+    let mut stale_grace = grace.clone();
+
+    for entry in allowlist {
+        let justification = entry.justification.to_ascii_lowercase();
+        if !justification.contains("internal") {
+            continue;
+        }
+        stale_grace.remove(entry.name.as_str());
+        if !grace.contains(entry.name.as_str()) {
+            unexpected.push(entry.name.clone());
+        }
+    }
+
+    ensure(
+        unexpected.is_empty(),
+        format!(
+            "pub_item_allowlist justification may not describe public API as internal; fix or hide: {}",
+            unexpected.join(", ")
+        ),
+    )?;
+    ensure(
+        stale_grace.is_empty(),
+        format!(
+            "pub_item_allowlist internal-justification grace is stale; remove grace for: {}",
+            stale_grace.into_iter().collect::<Vec<_>>().join(", ")
+        ),
+    )
 }
 
 fn check_doc_hidden_public_surface(repo_root: &Path) -> Result<()> {

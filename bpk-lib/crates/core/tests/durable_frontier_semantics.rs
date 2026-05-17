@@ -337,7 +337,7 @@ fn bootstrap_watermark_snapshot_matches_lifecycle_open_event() {
     assert_eq!(snapshot.oldest_pending_write_age_ms, None);
 
     assert_eq!(frontier.durable_hlc, open_hlc);
-    assert_eq!(frontier.current_visible_hlc, open_hlc);
+    assert_eq!(frontier.visible_hlc, open_hlc);
     assert_eq!(frontier.visible_minus_durable_seq, 0);
     assert_eq!(frontier.oldest_pending_write_age_ms, None);
 }
@@ -657,7 +657,7 @@ fn single_append_cadence_gt_1_visible_exceeds_durable_frontier() {
     assert_eq!(snapshot.emitted_hlc, snapshot.visible_hlc);
     assert!(snapshot.oldest_pending_write_age_ms.is_some());
 
-    assert_eq!(frontier.current_visible_hlc, snapshot.visible_hlc);
+    assert_eq!(frontier.visible_hlc, snapshot.visible_hlc);
     assert_eq!(frontier.durable_hlc, snapshot.durable_hlc);
     assert!(frontier.visible_minus_durable_seq > 0);
     assert!(frontier.oldest_pending_write_age_ms.is_some());
@@ -708,9 +708,9 @@ fn frontier_api_is_public_and_returns_consistent_view() {
     assert!(frontier.accepted_hlc > HlcPoint::ORIGIN);
     assert_eq!(frontier.accepted_hlc, frontier.written_hlc);
     assert_eq!(frontier.accepted_hlc, frontier.durable_hlc);
-    assert_eq!(frontier.accepted_hlc, frontier.current_visible_hlc);
-    assert_eq!(frontier.emitted_hlc, frontier.current_visible_hlc);
-    assert!(frontier.current_visible_hlc >= frontier.applied_hlc);
+    assert_eq!(frontier.accepted_hlc, frontier.visible_hlc);
+    assert_eq!(frontier.emitted_hlc, frontier.visible_hlc);
+    assert!(frontier.visible_hlc >= frontier.applied_hlc);
     assert_eq!(frontier.visible_minus_durable_seq, 0);
     assert_eq!(frontier.oldest_pending_write_age_ms, None);
     assert_eq!(store.diagnostics().frontier, frontier);
@@ -730,14 +730,14 @@ fn frontier_visible_minus_durable_seq_is_positive_under_cadence_gt_1() {
     }
 
     let before_sync = store.frontier();
-    assert!(before_sync.current_visible_hlc > before_sync.durable_hlc);
+    assert!(before_sync.visible_hlc > before_sync.durable_hlc);
     assert!(before_sync.visible_minus_durable_seq > 0);
     assert!(before_sync.oldest_pending_write_age_ms.is_some());
 
     store.sync().expect("sync");
 
     let after_sync = store.frontier();
-    assert_eq!(after_sync.current_visible_hlc, after_sync.durable_hlc);
+    assert_eq!(after_sync.visible_hlc, after_sync.durable_hlc);
     assert_eq!(after_sync.visible_minus_durable_seq, 0);
     assert_eq!(after_sync.oldest_pending_write_age_ms, None);
 }
@@ -762,14 +762,14 @@ fn concurrent_snapshot_never_observes_torn_emitted_below_visible() {
             let mut snapshots = Vec::new();
             while !observer_done.load(Ordering::Acquire) {
                 let frontier = observer_store.frontier();
-                if frontier.current_visible_hlc > HlcPoint::ORIGIN {
+                if frontier.visible_hlc > HlcPoint::ORIGIN {
                     snapshots.push(frontier);
                 }
                 thread::yield_now();
             }
             for _ in 0..256 {
                 let frontier = observer_store.frontier();
-                if frontier.current_visible_hlc > HlcPoint::ORIGIN {
+                if frontier.visible_hlc > HlcPoint::ORIGIN {
                     snapshots.push(frontier);
                 }
             }
@@ -795,11 +795,11 @@ fn concurrent_snapshot_never_observes_torn_emitted_below_visible() {
     );
     for frontier in snapshots {
         assert!(
-            frontier.emitted_hlc >= frontier.current_visible_hlc,
+            frontier.emitted_hlc >= frontier.visible_hlc,
             "PROPERTY: emitted must never be observed below visible: {frontier:?}"
         );
         assert!(
-            frontier.current_visible_hlc >= frontier.applied_hlc,
+            frontier.visible_hlc >= frontier.applied_hlc,
             "PROPERTY: applied must never be observed above visible: {frontier:?}"
         );
     }

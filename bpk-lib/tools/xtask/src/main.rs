@@ -7,6 +7,7 @@ mod coverage;
 mod devcontainer;
 mod docs;
 mod preflight;
+mod public_api;
 mod util;
 
 use anyhow::Result;
@@ -61,6 +62,10 @@ enum XtaskCommand {
     TemplateFreshness,
     /// Inspect staged files for generated artifacts, retired paths, and conflict markers.
     StagedDiff,
+    /// Record the current public API surface. Advisory by default during 0.7.6 cleanup.
+    PublicApi(PublicApiArgs),
+    /// Run release-oriented semver checks. Advisory by default during 0.7.6 cleanup.
+    SemverCheck(SemverCheckArgs),
     /// Write a local release proof manifest under target/.
     ReleaseManifest,
     /// Copy a golden batpak starter template into a local project directory.
@@ -247,6 +252,20 @@ pub(crate) struct PackageLeakScanArgs {
     strict_language: bool,
 }
 
+#[derive(Args, Clone, Copy)]
+pub(crate) struct PublicApiArgs {
+    /// Fail when cargo-public-api is missing or the public-api run fails.
+    #[arg(long)]
+    strict: bool,
+}
+
+#[derive(Args, Clone, Copy)]
+pub(crate) struct SemverCheckArgs {
+    /// Fail when cargo-semver-checks is missing or reports an incompatibility.
+    #[arg(long)]
+    strict: bool,
+}
+
 #[derive(Args, Clone, Debug)]
 pub(crate) struct DevcontainerExecArgs {
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
@@ -323,6 +342,8 @@ fn main() -> Result<()> {
             commands::integrity("structural-check", [])
         }
         XtaskCommand::StagedDiff => commands::staged_diff(),
+        XtaskCommand::PublicApi(args) => public_api::public_api(args),
+        XtaskCommand::SemverCheck(args) => public_api::semver_check(args),
         XtaskCommand::ReleaseManifest => commands::release_manifest(),
         XtaskCommand::Scaffold(args) => commands::scaffold(args),
         XtaskCommand::Platform(args) => commands::platform(args),

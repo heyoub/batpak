@@ -19,6 +19,7 @@ Root layer docs:
 | [`002_SYNCBAT_RUNTIME.md`](002_SYNCBAT_RUNTIME.md) | `sb` sync runtime |
 | [`003_CLAWBAT_KIT.md`](003_CLAWBAT_KIT.md) | `cb` operation kit |
 | [`004_NETBAT_NETWORK.md`](004_NETBAT_NETWORK.md) | `nb` network/server boundary |
+| [`025_VOCABULARY.md`](025_VOCABULARY.md) | canonical naming and public-surface correction target |
 
 | ADR | Title | Status |
 | --- | --- | --- |
@@ -47,3 +48,4 @@ Root layer docs:
 | ADR-0023 | Projection Run Evidence Report (Design Precursor) | Accepted; superseded for v1 implementation by ADR-0024 |
 | ADR-0024 | Projection Run Evidence Report v1 | Accepted |
 | ADR-0025 | Read Walk Evidence Report v1 | Accepted |
+| ADR-0026 | Pre-1.0 Public Surface Strategy | Accepted; correction strategy for 0.7.6 |

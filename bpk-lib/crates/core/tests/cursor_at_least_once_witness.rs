@@ -13,7 +13,8 @@ use batpak::prelude::{
     RestartPolicy, Store, StoreConfig, TypedReactive,
 };
 use batpak::store::{
-    AtLeastOnce, CheckpointId, CursorWorkerAction, CursorWorkerConfig, IdempotencyKey, ObservedOnce,
+    AtLeastOnce, CheckpointId, CursorWorkerAction, CursorWorkerConfig, IdempotencyKey,
+    ObservedOnce, ReactorCanal,
 };
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, EventPayload)]
@@ -81,6 +82,7 @@ fn reactor_config(checkpoint_id: Option<CheckpointId>) -> ReactorConfig {
         idle_sleep: Duration::from_millis(5),
         restart_policy: RestartPolicy::Once,
         checkpoint_id,
+        canal: ReactorCanal::CursorGuaranteed,
     }
 }
 

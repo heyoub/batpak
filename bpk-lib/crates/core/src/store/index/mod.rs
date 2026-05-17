@@ -86,13 +86,13 @@ pub(crate) struct StoreIndex {
 /// `wall_ms` enables global causal ordering across entities (HLC layer 1).
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ClockKey {
+pub(crate) struct ClockKey {
     /// HLC wall clock milliseconds — global ordering across entities.
-    pub wall_ms: u64,
+    pub(crate) wall_ms: u64,
     /// Per-entity monotonic sequence number used as the HLC logical counter.
-    pub clock: u32,
+    pub(crate) clock: u32,
     /// Event UUID tiebreaker for deterministic ordering within the same clock tick.
-    pub uuid: u128,
+    pub(crate) uuid: u128,
 }
 
 /// IndexEntry: everything needed for index queries without disk reads.
@@ -135,11 +135,11 @@ pub struct IndexEntry {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DiskPos {
     /// Numeric identifier of the segment file containing this event.
-    pub segment_id: u64,
+    pub(crate) segment_id: u64,
     /// Byte offset of the frame within the segment file.
-    pub offset: u64,
+    pub(crate) offset: u64,
     /// Total byte length of the encoded frame.
-    pub length: u32,
+    pub(crate) length: u32,
 }
 
 impl DiskPos {
@@ -150,6 +150,21 @@ impl DiskPos {
             offset,
             length,
         }
+    }
+
+    /// Numeric identifier of the segment file containing this event.
+    pub const fn segment_id(self) -> u64 {
+        self.segment_id
+    }
+
+    /// Byte offset of the frame within the segment file.
+    pub const fn offset(self) -> u64 {
+        self.offset
+    }
+
+    /// Total byte length of the encoded frame.
+    pub const fn length(self) -> u32 {
+        self.length
     }
 }
 
@@ -703,6 +718,61 @@ mod tests {
             global_sequence: seq,
             receipt_extensions: BTreeMap::new(),
         }
+    }
+
+    #[test]
+    fn clock_key_orders_by_wall_then_clock_then_uuid() {
+        let mut keys = [
+            ClockKey {
+                wall_ms: 10,
+                clock: 3,
+                uuid: 9,
+            },
+            ClockKey {
+                wall_ms: 9,
+                clock: 99,
+                uuid: 1,
+            },
+            ClockKey {
+                wall_ms: 10,
+                clock: 2,
+                uuid: 99,
+            },
+            ClockKey {
+                wall_ms: 10,
+                clock: 3,
+                uuid: 4,
+            },
+        ];
+
+        keys.sort();
+
+        assert_eq!(
+            keys,
+            [
+                ClockKey {
+                    wall_ms: 9,
+                    clock: 99,
+                    uuid: 1,
+                },
+                ClockKey {
+                    wall_ms: 10,
+                    clock: 2,
+                    uuid: 99,
+                },
+                ClockKey {
+                    wall_ms: 10,
+                    clock: 3,
+                    uuid: 4,
+                },
+                ClockKey {
+                    wall_ms: 10,
+                    clock: 3,
+                    uuid: 9,
+                },
+            ],
+            "PROPERTY: ClockKey ordering must be wall_ms first, then clock, then uuid as the deterministic tiebreaker"
+        );
     }
 
     #[test]

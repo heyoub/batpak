@@ -113,6 +113,8 @@ pub(crate) fn consumer_smoke() -> Result<()> {
 
 pub(crate) fn release(args: ReleaseArgs) -> Result<()> {
     ci()?;
+    crate::public_api::semver_check(crate::SemverCheckArgs { strict: false })?;
+    crate::public_api::public_api(crate::PublicApiArgs { strict: false })?;
     consumer_smoke()?;
     docs::docs(DocsArgs { open: false })?;
     if args.dry_run {

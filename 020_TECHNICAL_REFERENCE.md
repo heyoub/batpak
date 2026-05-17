@@ -196,6 +196,19 @@ Query routing is capability-driven:
 
 ## Replay Lanes
 
+## Delivery Canals
+
+The store has two delivery primitives and one narrow selector used by typed
+reactors:
+
+- `Cursor`: ordered pull replay with optional durable checkpoints.
+- `Subscription`: lossy push observation through bounded fanout.
+- `ReactorCanal`: typed-reactor selector over those primitives.
+
+`ReactorCanal::CursorGuaranteed` is the default and is the only path that can
+produce an `AtLeastOnce` witness. `ReactorCanal::LossySubscription` is explicit
+opt-in for live views that may skip work under backpressure.
+
 `ReplayLane` is the live replay naming.
 
 - `JsonValueInput`
@@ -399,7 +412,7 @@ derived lag fields:
 - `accepted_hlc`
 - `written_hlc`
 - `durable_hlc`
-- `current_visible_hlc`
+- `visible_hlc`
 - `applied_hlc`
 - `emitted_hlc`
 - `visible_minus_durable_seq`

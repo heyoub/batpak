@@ -104,7 +104,7 @@ pub struct FrontierView {
     /// Highest HLC whose containing segment range has been synced.
     pub durable_hlc: HlcPoint,
     /// Highest HLC currently visible to query readers.
-    pub current_visible_hlc: HlcPoint,
+    pub visible_hlc: HlcPoint,
     /// Highest HLC consumed by registered in-process projections.
     pub applied_hlc: HlcPoint,
     /// Highest HLC for which broadcast artifacts were attempted.
@@ -121,7 +121,7 @@ impl From<WatermarkSnapshot> for FrontierView {
             accepted_hlc: snapshot.accepted_hlc,
             written_hlc: snapshot.written_hlc,
             durable_hlc: snapshot.durable_hlc,
-            current_visible_hlc: snapshot.visible_hlc,
+            visible_hlc: snapshot.visible_hlc,
             applied_hlc: snapshot.applied_hlc,
             emitted_hlc: snapshot.emitted_hlc,
             visible_minus_durable_seq: (snapshot.visible_hlc.global_sequence as i64)

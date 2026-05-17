@@ -3,16 +3,6 @@
   witness:
     - path: crates/core/tests/event_api.rs
       lines: [8, 17, 43, 95, 137]
-- name: ClockKey
-  justification: internal index helper exercised indirectly through store queries and cursor tests
-  witness:
-    - path: crates/core/tests/config_propagation.rs
-      lines: [27]
-- name: DiskPos
-  justification: append receipts and reader/index internals exercise it indirectly without naming the type directly
-  witness:
-    - path: crates/core/tests/wire_format.rs
-      lines: [333]
 - name: RetentionPredicate
   justification: compaction closures are exercised through CompactionStrategy without test code naming the boxed type alias directly
   witness:

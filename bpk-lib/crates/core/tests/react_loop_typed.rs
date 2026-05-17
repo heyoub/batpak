@@ -119,6 +119,28 @@ impl TypedReactive<PayloadA> for FailOnThird {
     }
 }
 
+struct WitnessRecordingReactor {
+    seen: Arc<AtomicUsize>,
+    witness_seen: Arc<AtomicUsize>,
+}
+
+impl TypedReactive<PayloadA> for WitnessRecordingReactor {
+    type Error = NeverFails;
+
+    fn react(
+        &mut self,
+        _event: &StoredEvent<PayloadA>,
+        _out: &mut ReactionBatch,
+        witness: Option<&batpak::store::AtLeastOnce>,
+    ) -> Result<(), Self::Error> {
+        self.seen.fetch_add(1, Ordering::SeqCst);
+        if witness.is_some() {
+            self.witness_seen.fetch_add(1, Ordering::SeqCst);
+        }
+        Ok(())
+    }
+}
+
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
 fn source_coord() -> Coordinate {
@@ -155,6 +177,7 @@ fn happy_path_reactor_filters_wrong_kind_and_reacts_to_matched() {
                 idle_sleep: Duration::from_millis(5),
                 restart_policy: RestartPolicy::Once,
                 checkpoint_id: None,
+                canal: ReactorCanal::CursorGuaranteed,
             },
             CountingReactor {
                 seen: Arc::clone(&seen),
@@ -219,6 +242,7 @@ fn user_error_stops_loop_and_surfaces_through_join() {
                 // worker a single restart attempt before it gives up.
                 restart_policy: RestartPolicy::Once,
                 checkpoint_id: None,
+                canal: ReactorCanal::CursorGuaranteed,
             },
             FailOnThird {
                 seen: Arc::clone(&seen),
@@ -246,6 +270,45 @@ fn user_error_stops_loop_and_surfaces_through_join() {
         }
         other => panic!("expected ReactorError::User, got {other:?}"),
     }
+}
+
+#[test]
+fn lossy_subscription_canal_is_explicit_and_never_mints_at_least_once() {
+    let (store, _dir) = test_store();
+    let seen = Arc::new(AtomicUsize::new(0));
+    let witness_seen = Arc::new(AtomicUsize::new(0));
+    let handle: TypedReactorHandle<NeverFails> = store
+        .react_loop_typed::<PayloadA, _>(
+            &Region::all(),
+            ReactorConfig {
+                batch_size: 1,
+                idle_sleep: Duration::from_millis(5),
+                restart_policy: RestartPolicy::Once,
+                checkpoint_id: None,
+                canal: ReactorCanal::LossySubscription,
+            },
+            WitnessRecordingReactor {
+                seen: Arc::clone(&seen),
+                witness_seen: Arc::clone(&witness_seen),
+            },
+        )
+        .expect("spawn lossy reactor");
+
+    store
+        .append_typed(&source_coord(), &PayloadA { n: 77 })
+        .unwrap();
+
+    assert!(
+        wait_for(|| seen.load(Ordering::SeqCst) == 1, Duration::from_secs(3)),
+        "lossy subscription canal should process the matching event when the subscriber keeps up"
+    );
+    assert_eq!(
+        witness_seen.load(Ordering::SeqCst),
+        0,
+        "lossy subscription canal must not fabricate an AtLeastOnce witness"
+    );
+
+    handle.stop_and_join().unwrap();
 }
 
 // ─── Matched-kind decode failure path ─────────────────────────────────────────
@@ -287,6 +350,7 @@ fn matched_kind_decode_failure_surfaces_reactor_error_decode() {
                 idle_sleep: Duration::from_millis(5),
                 restart_policy: RestartPolicy::Once,
                 checkpoint_id: None,
+                canal: ReactorCanal::CursorGuaranteed,
             },
             ShapeXReactor,
         )

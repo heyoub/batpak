@@ -8,8 +8,9 @@ use batpak::guard::{
 };
 use batpak::store::{
     AppendOptions, AppendReceipt, BatchAppendItem, CausationRef, CheckpointId, CursorGapConfig,
-    EncodedBytes, ExtensionKey, ExtensionKeyError, GapObservation, IdempotencyKey, OpenIndexPath,
-    ReceiptExtensionKey, ReceiptExtensionNamespace, ReceiptExtensionValue, Store, StoreConfig,
+    DiskPos, EncodedBytes, ExtensionKey, ExtensionKeyError, GapObservation, IdempotencyKey,
+    OpenIndexPath, ReceiptExtensionKey, ReceiptExtensionNamespace, ReceiptExtensionValue, Store,
+    StoreConfig,
 };
 #[cfg(feature = "blake3")]
 use batpak::store::{DenialReceipt, SigningKey};
@@ -907,7 +908,11 @@ fn receipt_verification_rejects_stripped_signature_and_index_field_tampering() {
     );
 
     let mut wrong_disk_pos = receipt.clone();
-    wrong_disk_pos.disk_pos.offset += 1;
+    wrong_disk_pos.disk_pos = DiskPos::new(
+        wrong_disk_pos.disk_pos.segment_id(),
+        wrong_disk_pos.disk_pos.offset() + 1,
+        wrong_disk_pos.disk_pos.length(),
+    );
     assert!(
         !store.verify_append_receipt(&wrong_disk_pos),
         "disk position must match the committed index entry"

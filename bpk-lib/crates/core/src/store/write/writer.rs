@@ -322,7 +322,7 @@ impl WatermarkState {
             accepted_hlc: self.accepted_hlc,
             written_hlc: self.written_hlc,
             durable_hlc: self.durable_hlc,
-            current_visible_hlc: self.visible_hlc,
+            visible_hlc: self.visible_hlc,
             applied_hlc: self.applied_hlc,
             emitted_hlc: self.emitted_hlc,
             visible_minus_durable_seq: (self.visible_hlc.global_sequence as i64)

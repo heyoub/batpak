@@ -198,7 +198,7 @@ fn projection_failure_returns_structured_error_with_deterministic_finding() -> T
     let receipt = store.append(&coord, kind, &serde_json::json!({"n": 1}))?;
 
     let path = dir.path().join(batpak::store::segment::segment_filename(
-        receipt.disk_pos.segment_id,
+        receipt.disk_pos.segment_id(),
     ));
     std::fs::remove_file(path)?;
 

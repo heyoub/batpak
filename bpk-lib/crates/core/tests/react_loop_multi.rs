@@ -254,6 +254,7 @@ fn matched_kind_decode_failure_surfaces_reactor_error_decode() {
                 idle_sleep: Duration::from_millis(5),
                 restart_policy: RestartPolicy::Once,
                 checkpoint_id: None,
+                canal: ReactorCanal::CursorGuaranteed,
             },
             ShapeYReactor { _marker: () },
         )

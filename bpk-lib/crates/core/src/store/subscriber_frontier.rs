@@ -210,7 +210,7 @@ impl<State> Store<State> {
         let frontier = self.frontier();
         let available_frontier_sequence = match request.source {
             SubscriberFrontierSource::LossyPush => frontier.emitted_hlc.global_sequence,
-            SubscriberFrontierSource::CursorBacked => frontier.current_visible_hlc.global_sequence,
+            SubscriberFrontierSource::CursorBacked => frontier.visible_hlc.global_sequence,
         };
 
         let lag_events = request

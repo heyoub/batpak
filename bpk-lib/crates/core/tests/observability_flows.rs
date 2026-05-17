@@ -277,7 +277,7 @@ fn stable_batpak_targets_field_shape_at_info_and_trace() {
         .append(&coord, kind, &serde_json::json!({"n": 1}))
         .expect("append");
 
-    let point = store.frontier().current_visible_hlc;
+    let point = store.frontier().visible_hlc;
     store
         .wait_for_visible(point, std::time::Duration::from_secs(2))
         .expect("wait_for_visible");

@@ -2,7 +2,7 @@
   status: current-fact
   statement: >
     On single append with sync.every_n_events > 1 and no DurabilityGate set on
-    AppendOptions, current_visible_hlc can exceed durable_hlc until the next
+    AppendOptions, visible_hlc can exceed durable_hlc until the next
     explicit or cadence-driven sync because publish runs after frame-write
     regardless of sync cadence. Batch append and cadence=1 do not exhibit this
     gap at the observation points defended by the durable frontier semantics

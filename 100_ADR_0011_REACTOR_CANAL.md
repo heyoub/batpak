@@ -1,7 +1,7 @@
 # ADR-0011: Reactor canal for typed reactors
 
 ## Status
-Accepted (shipped in 0.6.0).
+Accepted (shipped in 0.6.0); code-level Canal selector added for 0.7.6.
 
 ## Context
 
@@ -27,7 +27,9 @@ It is already wrapped by `cursor_worker`, which supplies restart policy,
 panic recovery, checkpoint/resume, and clean stop.
 
 This ADR compares the two canals and records the verdict consumed by the
-shipped typed-reactor implementation.
+shipped typed-reactor implementation. In 0.7.6 the canal vocabulary becomes a
+small code seam: `ReactorCanal` selects between the existing cursor-backed and
+subscription-backed primitives without moving ownership of either primitive.
 
 ## Current lossy fanout semantics
 
@@ -65,7 +67,7 @@ shipped typed-reactor implementation.
 
 ## Verdict
 
-**(a) `cursor_guaranteed` is the canal for typed reactors.**
+**(a) `cursor_guaranteed` is the default canal for typed reactors.**
 
 Derivation from the matrix:
 
@@ -91,12 +93,18 @@ want the lossy, decoupled, pre-decoded-envelope path keep it. Typed
 reactors are the additive at-least-once delivery variant built on
 `cursor_worker`.
 
+**Lossy typed canal is explicit opt-in.** `ReactorConfig::canal` defaults to
+`ReactorCanal::CursorGuaranteed`. `ReactorCanal::LossySubscription` runs typed
+dispatch over the lossy `Subscription` primitive for live views that can skip
+work under backpressure. That path never supplies an `AtLeastOnce` witness, does
+not checkpoint, and does not claim restart/rollback semantics.
+
 ## Consequences
 
 - **`TypedReactive<T>` + `react_loop_typed<T, R>()`** is implemented as a
   thin wrapper over `cursor_worker`. Its public `ReactorConfig` carries
-  `RestartPolicy` and cursor-worker-compatible fields (`batch_size`,
-  `idle_sleep`). The loop polls via `Cursor`, decodes via the
+  `RestartPolicy`, a `ReactorCanal` selector, and cursor-worker-compatible
+  fields (`batch_size`, `idle_sleep`). The default loop polls via `Cursor`, decodes via the
   `DecodeTyped` seam, builds a `ReactionBatch`, and flushes atomically on
   `Ok(())` from the reactor. Error path routes user errors and store
   errors through `TypedReactorHandle::join()` → `ReactorError<E>`.
@@ -137,13 +145,29 @@ chapters:
 ## Scope boundary
 
 - The lossy fanout's semantics and capacity are unchanged. It remains the
-  raw reactor canal for callers using `react_loop` + `Reactive<P>`
-  directly.
+  raw reactor canal for callers using `react_loop` + `Reactive<P>` directly,
+  and is now also available to typed reactors only through the explicit
+  `ReactorCanal::LossySubscription` selector.
 - Multi-cursor reactors (one cursor per event type) are not part of this
   ADR; `react_loop_multi` intentionally runs a single cursor so that
   `&mut self` spans all event types and dispatch remains strictly serial.
 - Any guaranteed-delivery upgrade to the existing `reactor_subscribers`
   fanout is out of scope for this ADR.
+
+## Code Shape
+
+`ReactorCanal` is an enum, not a trait hierarchy. Cursor and subscription keep
+their own concrete APIs. The reactor runner matches the selector and drives the
+same dispatcher contract over the chosen primitive:
+
+- `CursorGuaranteed`: `cursor_worker` owns polling, rollback, checkpoint
+  persistence, and optional `AtLeastOnce` witness construction.
+- `LossySubscription`: a bounded subscription receiver owns push delivery. The
+  runner fetches by notification `event_id`, dispatches, flushes reactions, and
+  passes `None` for the witness.
+
+This keeps the abstraction compositional: Canal selects a delivery path; it does
+not become a new store, checkpoint, or runtime owner.
 
 ## Cross-reference
 

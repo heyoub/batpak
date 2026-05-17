@@ -144,7 +144,7 @@ fn writer_panic_at_single_append_published_is_durable_on_reopen() {
     let third = point(&entries[2]);
     let frontier = reopened.frontier();
     assert!(frontier.accepted_hlc >= third);
-    assert_eq!(frontier.current_visible_hlc, frontier.accepted_hlc);
+    assert_eq!(frontier.visible_hlc, frontier.accepted_hlc);
 }
 
 #[test]

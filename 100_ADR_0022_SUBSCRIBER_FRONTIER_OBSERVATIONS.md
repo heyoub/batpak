@@ -48,7 +48,7 @@ This surface is observation-first:
 ### 3) Source-specific available frontier
 
 - `LossyPush` compares consumed frontier against `frontier.emitted_hlc`
-- `CursorBacked` compares consumed frontier against `frontier.current_visible_hlc`
+- `CursorBacked` compares consumed frontier against `frontier.visible_hlc`
 
 This keeps the report anchored to substrate-observable frontiers without policy
 interpretation.

@@ -14,6 +14,8 @@
 //!   `#[doc(hidden)]` for back-compat and has identical semantics
 //!   post-F8.
 
+/// Shared delivery selector for typed reactor runners.
+pub mod canal;
 /// Pull-based cursor for ordered delivery with optional durable checkpoints.
 pub mod cursor;
 /// Delivery observation witnesses for composing at-least-once with

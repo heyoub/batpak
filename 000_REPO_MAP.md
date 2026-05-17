@@ -9,7 +9,7 @@ Root Markdown files are canonical navigation and governance documents.
 
 - `000_REPO_MAP.md`: repository grammar and reading order.
 - `001_*` through `004_*`: batpak-family layer primers.
-- `010_*` through `080_*`: operating manuals, references, runbooks, testing
+- `010_*` through `080_*`: operating manuals, vocabulary, references, runbooks, testing
   doctrine, security, contribution, and evidence docs.
 - `099_DECISION_INDEX.md`: decision navigation index.
 - `100_ADR_*.md`: architecture decision records.

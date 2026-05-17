@@ -80,6 +80,7 @@ pub use config::{
     BatchConfig, IndexConfig, IndexTopology, OpenReportObserver, StoreConfig, SyncConfig, SyncMode,
     WriterConfig,
 };
+pub use delivery::canal::ReactorCanal;
 pub use delivery::cursor::{
     Cursor, CursorGapConfig, CursorWorkerAction, CursorWorkerConfig, CursorWorkerHandle,
     GapObservation,
@@ -96,7 +97,7 @@ pub use fault::{
     CountdownAction, CountdownInjector, FaultInjector, InjectionPoint, ProbabilisticInjector,
 };
 pub use gate::DurabilityGate;
-pub use index::{ClockKey, DiskPos, IndexEntry};
+pub use index::{DiskPos, IndexEntry};
 pub use projection::watch::{ProjectionWatcher, WatcherError};
 pub use projection::{
     CacheCapabilities, CacheMeta, Freshness, NativeCache, NoCache, ProjectionCache,
@@ -117,12 +118,14 @@ pub use read_walk::{
     ReadWalkSourceRef, READ_WALK_REPORT_SCHEMA_VERSION,
 };
 pub use signing::SigningKey;
+#[cfg(any(test, feature = "dangerous-test-hooks"))]
+pub use stats::WatermarkSnapshot;
 pub use stats::{
     ActiveSegmentReadEvidence, ClockEvidence, FrontierView, HlcPoint, HostEvidenceSummary,
     LockLeafSymlinkProtection, MmapAdmissionSummary, MmapEvidence, ParentDirSyncAdmissionSummary,
     ParentDirSyncEvidence, PlatformAdmissionSummary, PlatformEvidenceSummary, StoreDiagnostics,
     StoreLockAdmissionSummary, StorePathEvidenceSummary, StorePathStatusEvidence, StoreStats,
-    WatermarkKind, WatermarkSnapshot, WriterPressure,
+    WatermarkKind, WriterPressure,
 };
 pub use store_resource_report::{
     store_data_dir_identity_hash, store_resource_evidence_report_from_diagnostics,

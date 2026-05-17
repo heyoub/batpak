@@ -4,6 +4,32 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- Added `ReactorCanal` as the code-level typed-reactor delivery selector.
+  `CursorGuaranteed` remains the default at-least-once path; `LossySubscription`
+  is explicit opt-in and never supplies an `AtLeastOnce` witness.
+- Added advisory `cargo xtask public-api` and `cargo xtask semver-check`
+  surfaces for the 0.7.6 pre-1.0 correction cut.
+
+### Changed
+- `ClockKey` is no longer public API; it is an internal index ordering key.
+- `DiskPos` remains available from `batpak::store`, but its fields are no
+  longer public and it is no longer re-exported by the prelude.
+- `FrontierView.current_visible_hlc` was renamed to `visible_hlc`, and
+  `WatermarkSnapshot` is no longer re-exported in normal builds.
+
+### Migration
+- If you constructed `ReactorConfig` with a struct literal, add
+  `canal: ReactorCanal::CursorGuaranteed` or use `ReactorConfig::default()`
+  and mutate the fields you need.
+- If you imported or named `ClockKey`, remove that dependency. It was an
+  internal index helper; public ordering remains observable through store query
+  results.
+- If you matched `DiskPos` fields directly, use `segment_id()`, `offset()`,
+  and `length()` instead. Prefer receipt-level behavior over importing
+  `DiskPos` from the prelude.
+- Rename `frontier.current_visible_hlc` to `frontier.visible_hlc`.
+
 ## [0.7.5] - 2026-05-15
 
 ### Added

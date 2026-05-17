@@ -56,6 +56,8 @@ Run canonical commands from `bpk-lib/`:
 - `cd bpk-lib && cargo xtask disk-audit` — read-only report for repo-local artifact/cache sprawl
 - `cd bpk-lib && cargo xtask clean-generated [--apply]` — dry-run by default; removes only generated sprawl outside root `target/`
 - `cd bpk-lib && cargo xtask package-leak-scan [--allow-dirty] [--strict-language]` — builds the local `.crate` and scans package contents for leak-shaped text
+- `cd bpk-lib && cargo xtask semver-check [--strict]` — release-oriented semver check; advisory by default during the 0.7.6 correction cut
+- `cd bpk-lib && cargo xtask public-api [--strict]` — human-readable public API snapshot under root `target/`; advisory by default during the 0.7.6 correction cut
 - `cd bpk-lib && cargo xtask evidence-audit` — static evidence-report schema anchors and prelude/store export vocabulary (runs `batpak-integrity evidence-audit`)
 - `cd bpk-lib && cargo xtask agent-doctor` — fast agent-facing repair hints for topology, stale paths, templates, and surface-map drift
 - `cd bpk-lib && cargo xtask scaffold <pattern> --name <name> [--path <dir>]`
