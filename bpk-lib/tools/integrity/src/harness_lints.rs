@@ -15,12 +15,15 @@ const VALID_PATTERNS: &[&str] = &[
 
 const REQUIRED_FIELDS: &[&str] = &[
     "Harness pattern",
+    "Status",
     "Location",
     "Command used",
     "Line/function coverage delta",
     "Mutation delta",
     "Remaining known blind spots",
 ];
+
+const VALID_STATUS: &[&str] = &["green", "amber", "red", "unmeasured"];
 
 const APPROVED_COMMAND_PREFIXES: &[&str] = &[
     "cargo test",
@@ -235,6 +238,7 @@ struct LedgerEntry {
     section: String,
     line: usize,
     pattern: Option<String>,
+    status: Option<String>,
     fields: BTreeSet<String>,
     locations: Vec<String>,
     commands: Vec<String>,
@@ -310,6 +314,12 @@ fn parse_ledger(repo_root: &Path) -> Result<Vec<LedgerEntry>> {
             if field == "Harness pattern" {
                 entry.pattern = backtick_value(line).map(str::to_owned);
             }
+            if field == "Status" {
+                entry.status = line
+                    .split_once(':')
+                    .map(|(_, value)| value.trim().to_owned())
+                    .filter(|value| !value.is_empty());
+            }
             continue;
         }
 
@@ -370,6 +380,20 @@ fn check_entries(
                 entry.title
             );
         };
+        let Some(status) = entry.status.as_deref() else {
+            bail!(
+                "041_TESTING_LEDGER.md:{}: invariant `{}` missing `Status`",
+                entry.line,
+                entry.title
+            );
+        };
+        ensure(
+            VALID_STATUS.contains(&status),
+            format!(
+                "041_TESTING_LEDGER.md:{}: invariant `{}` Status `{status}` not in {{green,amber,red,unmeasured}}",
+                entry.line, entry.title
+            ),
+        )?;
         ensure(
             pattern == entry.section,
             format!(

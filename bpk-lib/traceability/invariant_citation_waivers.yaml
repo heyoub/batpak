@@ -1,0 +1,4 @@
+# Schema mirrors pub_item_allowlist.yaml.
+# Required per entry: name, justification, adr, witness.
+# Loader: invariant_bridge.rs::load_waivers.
+[]
