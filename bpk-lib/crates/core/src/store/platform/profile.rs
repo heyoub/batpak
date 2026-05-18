@@ -70,16 +70,19 @@ impl PlatformProfile {
 
     #[cfg(test)]
     fn from_store_path_for_test(data_dir: &Path) -> Result<Self, StoreError> {
-        let evidence = crate::store::platform::evidence::collect_for_store_path(data_dir);
+        let clock = crate::store::SystemClock::new();
+        let evidence = crate::store::platform::evidence::collect_for_store_path(data_dir, &clock);
         Self::from_evidence(&evidence)
     }
 
     pub(crate) fn verify_current_store_path(
         profile_path: &Path,
         data_dir: &Path,
+        clock: &dyn crate::store::Clock,
     ) -> Result<PlatformEvidenceSummary, StoreError> {
         let expected = Self::load(profile_path)?;
-        let current_evidence = crate::store::platform::evidence::collect_for_store_path(data_dir);
+        let current_evidence =
+            crate::store::platform::evidence::collect_for_store_path(data_dir, clock);
         let current = Self::from_evidence(&current_evidence)?;
         if expected.profile_body_tuple() != current.profile_body_tuple() {
             return Err(StoreError::PlatformProfileMismatch {
@@ -291,7 +294,8 @@ mod tests {
         std::fs::write(&path, serde_json::to_vec_pretty(&profile)?)?;
         let missing = dir.path().join("missing-store-path");
 
-        let Err(error) = PlatformProfile::verify_current_store_path(&path, &missing) else {
+        let clock = crate::store::SystemClock::new();
+        let Err(error) = PlatformProfile::verify_current_store_path(&path, &missing, &clock) else {
             return Err(std::io::Error::other("expected profile mismatch").into());
         };
         assert!(matches!(error, StoreError::PlatformProfileMismatch { .. }));

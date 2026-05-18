@@ -50,11 +50,16 @@ fn open_components(
             platform::profile::PlatformProfile::verify_current_store_path(
                 profile_path,
                 &config.data_dir,
+                runtime.clock(),
             )?;
     }
     let config = Arc::new(config);
     let index = Arc::new(StoreIndex::with_config(&config.index));
-    let reader = Arc::new(Reader::new(config.data_dir.clone(), config.fd_budget));
+    let reader = Arc::new(Reader::new(
+        config.data_dir.clone(),
+        config.fd_budget,
+        runtime.clock_arc(),
+    ));
 
     // Cold start: checkpoint/mmap fast paths or full segment scan.
     // Segment files are named so lexicographic order matches replay order.

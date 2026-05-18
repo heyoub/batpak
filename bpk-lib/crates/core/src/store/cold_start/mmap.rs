@@ -528,7 +528,10 @@ pub(crate) fn write_mmap_index_with_reserved_kind_fallbacks(
     Ok(())
 }
 
-fn try_load_mmap_index(data_dir: &Path) -> Option<LoadedMmapIndex> {
+fn try_load_mmap_index(
+    data_dir: &Path,
+    clock: &dyn crate::store::Clock,
+) -> Option<LoadedMmapIndex> {
     let path = data_dir.join(MMAP_INDEX_FILENAME);
     let mut file = match File::open(&path) {
         Ok(file) => file,
@@ -782,7 +785,7 @@ fn try_load_mmap_index(data_dir: &Path) -> Option<LoadedMmapIndex> {
     // handle remains open for the duration of the mapping. The mmap index
     // file is read-only and not written to while open — external modification
     // would be a usage error, not a correctness concern for safe Rust callers.
-    let evidence = crate::store::platform::evidence::collect_for_store_path(data_dir);
+    let evidence = crate::store::platform::evidence::collect_for_store_path(data_dir, clock);
     let admission =
         match crate::store::platform::mmap::admit_mmap_index(evidence.store_path.mmap_index) {
             Ok(admission) => admission,
@@ -909,7 +912,8 @@ pub(crate) fn try_restore_mmap_index(
     index: &StoreIndex,
     data_dir: &Path,
 ) -> Option<(WatermarkInfo, u64)> {
-    let loaded = try_load_mmap_snapshot(data_dir)?;
+    let clock = crate::store::SystemClock::new();
+    let loaded = try_load_mmap_snapshot(data_dir, &clock)?;
     index
         .interner
         .replace_from_full_snapshot(&loaded.interner_strings);
@@ -919,8 +923,11 @@ pub(crate) fn try_restore_mmap_index(
     Some((loaded.watermark, loaded.stored_allocator))
 }
 
-pub(crate) fn try_load_mmap_snapshot(data_dir: &Path) -> Option<LoadedMmapSnapshot> {
-    let loaded = try_load_mmap_index(data_dir)?;
+pub(crate) fn try_load_mmap_snapshot(
+    data_dir: &Path,
+    clock: &dyn crate::store::Clock,
+) -> Option<LoadedMmapSnapshot> {
+    let loaded = try_load_mmap_index(data_dir, clock)?;
 
     let entry_count = match usize::try_from(loaded.entry_count) {
         Ok(count) => count,
@@ -1131,7 +1138,8 @@ mod tests {
         let src = make_index(8);
         write_mmap_index(&src, tmp.path(), 7, 512).expect("write mmap index");
 
-        let snapshot = try_load_mmap_snapshot(tmp.path()).expect("load snapshot");
+        let snapshot = try_load_mmap_snapshot(tmp.path(), &crate::store::SystemClock::new())
+            .expect("load snapshot");
         assert_eq!(snapshot.routing.entry_count, 8);
         assert!(
             !snapshot.routing.chunks.is_empty(),
@@ -1185,7 +1193,8 @@ mod tests {
 
         write_mmap_index(&idx, tmp.path(), 7, 512).expect("write mmap index");
 
-        let snapshot = try_load_mmap_snapshot(tmp.path()).expect("load snapshot");
+        let snapshot = try_load_mmap_snapshot(tmp.path(), &crate::store::SystemClock::new())
+            .expect("load snapshot");
         assert!(
             snapshot.receipt_extensions_hydrated,
             "PROPERTY: mmap v5 snapshots must carry receipt-extension maps directly."
@@ -1359,7 +1368,7 @@ mod tests {
         std::fs::write(&path, bytes).expect("rewrite corrupt mmap index");
 
         assert!(
-            try_load_mmap_snapshot(tmp.path()).is_none(),
+            try_load_mmap_snapshot(tmp.path(), &crate::store::SystemClock::new()).is_none(),
             "PROPERTY: mmap v5 must reject extension blob bytes that pass artifact CRC but fail row digest validation."
         );
     }
@@ -1420,7 +1429,8 @@ mod tests {
         bytes[8..12].copy_from_slice(&crc.to_le_bytes());
         std::fs::write(tmp.path().join(MMAP_INDEX_FILENAME), bytes).expect("write v1 mmap index");
 
-        let snapshot = try_load_mmap_snapshot(tmp.path()).expect("load v1 snapshot");
+        let snapshot = try_load_mmap_snapshot(tmp.path(), &crate::store::SystemClock::new())
+            .expect("load v1 snapshot");
         assert_eq!(snapshot.entries.len(), 4);
         assert!(
             !snapshot.receipt_extensions_hydrated,
@@ -1487,7 +1497,8 @@ mod tests {
         bytes[8..12].copy_from_slice(&crc.to_le_bytes());
         std::fs::write(tmp.path().join(MMAP_INDEX_FILENAME), bytes).expect("write v2 mmap index");
 
-        let snapshot = try_load_mmap_snapshot(tmp.path()).expect("load v2 snapshot");
+        let snapshot = try_load_mmap_snapshot(tmp.path(), &crate::store::SystemClock::new())
+            .expect("load v2 snapshot");
         assert_eq!(snapshot.entries.len(), 4);
         assert!(
             !snapshot.receipt_extensions_hydrated,
@@ -1513,7 +1524,8 @@ mod tests {
             ReservedKindFallbackStats::default(),
         );
 
-        let snapshot = try_load_mmap_snapshot(tmp.path()).expect("load v3 snapshot");
+        let snapshot = try_load_mmap_snapshot(tmp.path(), &crate::store::SystemClock::new())
+            .expect("load v3 snapshot");
         assert_eq!(snapshot.entries.len(), 4);
         assert!(
             snapshot.entries.iter().all(|entry| entry.dag_lane == 6),
@@ -1556,7 +1568,8 @@ mod tests {
             reserved_kind_fallbacks.clone(),
         );
 
-        let snapshot = try_load_mmap_snapshot(tmp.path()).expect("load v4 snapshot");
+        let snapshot = try_load_mmap_snapshot(tmp.path(), &crate::store::SystemClock::new())
+            .expect("load v4 snapshot");
         assert_eq!(snapshot.entries.len(), 4);
         assert!(snapshot.entries.iter().all(|entry| entry.dag_lane == 8));
         assert!(snapshot.entries.iter().all(|entry| entry.dag_depth == 2));

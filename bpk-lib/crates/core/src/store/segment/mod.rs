@@ -229,15 +229,7 @@ impl Segment<Active> {
     /// # Errors
     /// Returns `StoreError::Io` if the segment file cannot be created or the header cannot be written.
     /// Returns `StoreError::Serialization` if the segment header cannot be serialized.
-    pub fn create(dir: &std::path::Path, segment_id: u64) -> Result<Self, StoreError> {
-        Self::create_with_created_ns(
-            dir,
-            segment_id,
-            crate::store::Clock::now_wall_ns(&crate::store::SystemClock::new()),
-        )
-    }
-
-    pub(crate) fn create_with_created_ns(
+    pub fn create_with_created_ns(
         dir: &std::path::Path,
         segment_id: u64,
         created_ns: i64,
@@ -411,7 +403,8 @@ mod tests {
     #[test]
     fn needs_rotation_tracks_written_bytes_threshold() {
         let dir = TempDir::new().expect("tmpdir");
-        let mut segment: Segment<Active> = Segment::create(dir.path(), 1).expect("create segment");
+        let mut segment: Segment<Active> =
+            Segment::create_with_created_ns(dir.path(), 1, 0).expect("create segment");
         let frame = frame_encode(&serde_json::json!({"payload": "rotation-threshold"}))
             .expect("encode frame");
 

@@ -12,7 +12,11 @@ fn test_store_with_writer(tx: flume::Sender<writer::WriterCommand>) -> (Store, T
     let watermark_handle = writer::WatermarkState::handle(runtime.clock_arc());
     let store = Store {
         index: Arc::new(index::StoreIndex::new()),
-        reader: Arc::new(reader::Reader::new(dir.path().to_path_buf(), 4)),
+        reader: Arc::new(reader::Reader::new(
+            dir.path().to_path_buf(),
+            4,
+            std::sync::Arc::new(crate::store::SystemClock::new()),
+        )),
         cache: Box::new(NoCache),
         writer: Some(writer::WriterHandle::from_parts_for_test(tx, subscribers)),
         projection_registry: projection::registry::ProjectionRegistry::new(

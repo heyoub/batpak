@@ -676,6 +676,7 @@ pub(crate) fn diagnostics<State>(store: &Store<State>) -> StoreDiagnostics {
         open_report: store.open_report.clone(),
         platform_evidence: crate::store::platform::evidence::collect_for_store_path(
             &store.config.data_dir,
+            store.runtime.clock(),
         ),
     }
 }

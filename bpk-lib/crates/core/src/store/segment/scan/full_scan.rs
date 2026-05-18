@@ -170,7 +170,11 @@ mod tests {
         file.write_all(&header_bytes).expect("write segment header");
         file.flush().expect("flush segment");
 
-        let reader = Reader::new(dir.path().to_path_buf(), 4);
+        let reader = Reader::new(
+            dir.path().to_path_buf(),
+            4,
+            std::sync::Arc::new(crate::store::SystemClock::new()),
+        );
         let entries = reader
             .scan_segment(&path)
             .expect("EOF after the segment header is the clean frame terminator");

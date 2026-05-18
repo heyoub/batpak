@@ -2907,7 +2907,7 @@ pub batpak::store::segment::Segment::header: batpak::store::segment::SegmentHead
 pub batpak::store::segment::Segment::path: std::path::PathBuf
 impl batpak::store::segment::Segment<batpak::store::segment::Active>
 pub fn batpak::store::segment::Segment<batpak::store::segment::Active>::append_frames_from_segment(&mut self, path: &std::path::Path) -> core::result::Result<u64, batpak::prelude::StoreError>
-pub fn batpak::store::segment::Segment<batpak::store::segment::Active>::create(dir: &std::path::Path, segment_id: u64) -> core::result::Result<Self, batpak::prelude::StoreError>
+pub fn batpak::store::segment::Segment<batpak::store::segment::Active>::create_with_created_ns(dir: &std::path::Path, segment_id: u64, created_ns: i64) -> core::result::Result<Self, batpak::prelude::StoreError>
 pub fn batpak::store::segment::Segment<batpak::store::segment::Active>::seal(self) -> batpak::store::segment::Segment<batpak::store::segment::Sealed>
 pub fn batpak::store::segment::Segment<batpak::store::segment::Active>::sync_with_mode(&mut self, mode: &batpak::prelude::SyncMode) -> core::result::Result<(), batpak::prelude::StoreError>
 pub fn batpak::store::segment::Segment<batpak::store::segment::Active>::write_frame(&mut self, frame: &[u8]) -> core::result::Result<u64, batpak::prelude::StoreError>

@@ -729,7 +729,11 @@ mod tests {
     #[test]
     fn scan_segment_index_into_uses_sidx_fast_path_for_sealed_segments() {
         let dir = TempDir::new().expect("create temp dir");
-        let reader = Reader::new(dir.path().to_path_buf(), 4);
+        let reader = Reader::new(
+            dir.path().to_path_buf(),
+            4,
+            std::sync::Arc::new(crate::store::SystemClock::new()),
+        );
         let segment_id = 7;
         let path = footer_segment_path(&dir, segment_id, 64, &[sample_entry(0, 64)]);
         reader.set_active_segment(segment_id + 1);
@@ -757,7 +761,11 @@ mod tests {
     #[test]
     fn scan_segment_index_into_uses_sidx_fast_path_when_batch_state_is_idle() {
         let dir = TempDir::new().expect("create temp dir");
-        let reader = Reader::new(dir.path().to_path_buf(), 4);
+        let reader = Reader::new(
+            dir.path().to_path_buf(),
+            4,
+            std::sync::Arc::new(crate::store::SystemClock::new()),
+        );
         let segment_id = 7;
         let path = footer_segment_path(&dir, segment_id, 64, &[sample_entry(0, 64)]);
         reader.set_active_segment(segment_id + 1);
@@ -786,7 +794,11 @@ mod tests {
     #[test]
     fn scan_segment_index_into_rejects_sidx_fast_path_when_batch_is_pending() {
         let dir = TempDir::new().expect("create temp dir");
-        let reader = Reader::new(dir.path().to_path_buf(), 4);
+        let reader = Reader::new(
+            dir.path().to_path_buf(),
+            4,
+            std::sync::Arc::new(crate::store::SystemClock::new()),
+        );
         let segment_id = 7;
         let path = footer_segment_path(&dir, segment_id, 64, &[sample_entry(0, 64)]);
         reader.set_active_segment(segment_id + 1);
@@ -823,7 +835,11 @@ mod tests {
     #[test]
     fn scan_segment_index_into_filters_batch_markers_from_sidx_fast_path() {
         let dir = TempDir::new().expect("create temp dir");
-        let reader = Reader::new(dir.path().to_path_buf(), 4);
+        let reader = Reader::new(
+            dir.path().to_path_buf(),
+            4,
+            std::sync::Arc::new(crate::store::SystemClock::new()),
+        );
         let segment_id = 7;
         let mut begin = sample_entry(0, 64);
         begin.event_id = 10;
@@ -872,7 +888,11 @@ mod tests {
     #[test]
     fn scan_segment_index_into_ignores_sidx_footer_for_active_segments() {
         let dir = TempDir::new().expect("create temp dir");
-        let reader = Reader::new(dir.path().to_path_buf(), 4);
+        let reader = Reader::new(
+            dir.path().to_path_buf(),
+            4,
+            std::sync::Arc::new(crate::store::SystemClock::new()),
+        );
         let segment_id = 7;
         let path = footer_segment_path(&dir, segment_id, 64, &[sample_entry(0, 64)]);
         reader.set_active_segment(segment_id);

@@ -86,6 +86,10 @@ All notable changes to this project will be documented in this file.
 - `Store::get_raw` was removed; use `Store::read_raw`.
 - `Store::stream` was removed; use `Store::by_entity`.
 - `syncbat::Cx` was removed; use `syncbat::Ctx`.
+- `Segment::create(dir, segment_id)` was removed. Segment creation now routes
+  through `Segment::create_with_created_ns(dir, segment_id, created_ns)`, so
+  the segment header clock anchor is supplied explicitly by the store clock
+  path instead of reading ambient wall time.
 
 ### Removed
 - Removed the transitional `BackupEnvelope` alias; use

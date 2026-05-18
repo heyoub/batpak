@@ -7,7 +7,7 @@ use crate::event::{Event, EventHeader, EventKind, HashChain, StoredEvent};
 use crate::store::cold_start::ColdStartIndexRow;
 use crate::store::index::DiskPos;
 use crate::store::segment::{self, FramePayload};
-use crate::store::{EncodedBytes, ExtensionKey, StoreError};
+use crate::store::{Clock, EncodedBytes, ExtensionKey, StoreError};
 use dashmap::DashMap;
 use parking_lot::Mutex;
 use std::collections::{BTreeMap, HashMap};
@@ -15,6 +15,7 @@ use std::fs::File;
 use std::io::{Error, ErrorKind, Read};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 const FRAME_HEADER_BYTES: usize = 8;
 const MAX_BATCH_RECOVERY_ITEMS: u32 = 1_000_000;
@@ -56,6 +57,7 @@ fn read_frame_header_or_clean_eof(
 #[doc(hidden)]
 pub struct Reader {
     data_dir: PathBuf,
+    clock: Arc<dyn Clock>,
     /// FD cache for the active segment only. Sealed segments use mmap.
     /// [DEP:parking_lot::Mutex] — lock() returns guard directly, no poisoning
     fd_cache: Mutex<FdCache>,
@@ -191,9 +193,10 @@ impl Reader {
         Self::frame_decode_error(pos.segment_id, pos.offset, error)
     }
 
-    pub(crate) fn new(data_dir: PathBuf, fd_budget: usize) -> Self {
+    pub(crate) fn new(data_dir: PathBuf, fd_budget: usize, clock: Arc<dyn Clock>) -> Self {
         Self {
             data_dir,
+            clock,
             fd_cache: Mutex::new(FdCache {
                 fds: HashMap::new(),
                 order: Vec::new(),
@@ -235,7 +238,8 @@ impl Reader {
         // SAFETY: memmap2::Mmap::map is unsafe because the file could be modified externally.
         // Sealed segments are immutable by design — only compaction deletes them, and
         // evict_segment drops the mapping before deletion.
-        let evidence = crate::store::platform::evidence::collect_for_store_path(&self.data_dir);
+        let evidence =
+            crate::store::platform::evidence::collect_for_store_path(&self.data_dir, &*self.clock);
         let admission = crate::store::platform::mmap::admit_sealed_segment_mmap(
             evidence.store_path.sealed_segment_mmap,
         )?;
@@ -619,7 +623,11 @@ mod tests {
 
     fn test_reader() -> (Reader, TempDir) {
         let dir = TempDir::new().expect("create temp dir for reader test");
-        let reader = Reader::new(dir.path().to_path_buf(), 4);
+        let reader = Reader::new(
+            dir.path().to_path_buf(),
+            4,
+            std::sync::Arc::new(crate::store::SystemClock::new()),
+        );
         (reader, dir)
     }
 

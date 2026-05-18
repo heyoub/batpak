@@ -118,6 +118,7 @@ struct RestorePlanner<'a> {
     reader: &'a Reader,
     data_dir: &'a Path,
     policy: ColdStartPolicy,
+    clock: &'a dyn crate::store::Clock,
 }
 
 impl<'a> RestorePlanner<'a> {
@@ -130,7 +131,7 @@ impl<'a> RestorePlanner<'a> {
         let has_pending_compaction = load_pending_compaction(self.data_dir)?.is_some();
 
         if !has_pending_compaction && self.policy.try_mmap_index() {
-            if let Some(snapshot) = super::mmap::try_load_mmap_snapshot(self.data_dir) {
+            if let Some(snapshot) = super::mmap::try_load_mmap_snapshot(self.data_dir, self.clock) {
                 return self.build_snapshot_plan(
                     RestoreSource::Mmap,
                     SnapshotPlanInput {
@@ -255,6 +256,7 @@ pub(crate) fn open_index(
         reader,
         data_dir,
         policy,
+        clock,
     };
     let t_plan = clock.now_mono_ns();
     let plan = planner.build()?;
@@ -882,7 +884,11 @@ mod tests {
             "PROPERTY: tiny segments should produce at least one sealed segment with an SIDX footer."
         );
 
-        let reader = Reader::new(dir.path().to_path_buf(), 16);
+        let reader = Reader::new(
+            dir.path().to_path_buf(),
+            16,
+            std::sync::Arc::new(crate::store::SystemClock::new()),
+        );
         let (parallel, _) = read_sealed_sidx_entries_parallel(&reader, &sealed_segments)
             .expect("parallel SIDX footer read should succeed");
         let sequential = read_sealed_sidx_entries_sequential(&reader, &sealed_segments)
@@ -898,11 +904,17 @@ mod tests {
     #[test]
     fn build_snapshot_plan_keeps_chunk_count_when_tail_is_empty() {
         let dir = TempDir::new().expect("temp dir");
-        let reader = Reader::new(dir.path().to_path_buf(), 4);
+        let reader = Reader::new(
+            dir.path().to_path_buf(),
+            4,
+            std::sync::Arc::new(crate::store::SystemClock::new()),
+        );
+        let clock = crate::store::SystemClock::new();
         let planner = RestorePlanner {
             reader: &reader,
             data_dir: dir.path(),
             policy: ColdStartPolicy::new(false, false),
+            clock: &clock,
         };
         let (entries, interner_strings) = sample_index_entries(0, 0);
         let routing = RoutingSummary::from_sorted_entries(&entries, 1);
@@ -942,11 +954,17 @@ mod tests {
     #[test]
     fn build_snapshot_plan_rejects_snapshot_entries_without_backing_frames() {
         let dir = TempDir::new().expect("temp dir");
-        let reader = Reader::new(dir.path().to_path_buf(), 4);
+        let reader = Reader::new(
+            dir.path().to_path_buf(),
+            4,
+            std::sync::Arc::new(crate::store::SystemClock::new()),
+        );
+        let clock = crate::store::SystemClock::new();
         let planner = RestorePlanner {
             reader: &reader,
             data_dir: dir.path(),
             policy: ColdStartPolicy::new(false, false),
+            clock: &clock,
         };
         let (entries, interner_strings) = sample_index_entries(1, 0);
         let routing = RoutingSummary::from_sorted_entries(&entries, 1);
@@ -996,12 +1014,18 @@ mod tests {
             .map(|(segment_id, _)| segment_id.saturating_add(1))
             .expect("active segment id");
 
-        let reader = Reader::new(dir.path().to_path_buf(), 4);
+        let reader = Reader::new(
+            dir.path().to_path_buf(),
+            4,
+            std::sync::Arc::new(crate::store::SystemClock::new()),
+        );
         reader.set_active_segment(active_after_tail);
+        let clock = crate::store::SystemClock::new();
         let planner = RestorePlanner {
             reader: &reader,
             data_dir: dir.path(),
             policy: ColdStartPolicy::new(false, false),
+            clock: &clock,
         };
         let routing = RoutingSummary::from_sorted_entries(&[], 1);
 
@@ -1208,7 +1232,11 @@ mod tests {
         let merged_id = existing.first().expect("segment id").0;
         write_pending_compaction(dir.path(), merged_id, &[merged_id]).expect("write marker");
 
-        let reader = Reader::new(dir.path().to_path_buf(), 4);
+        let reader = Reader::new(
+            dir.path().to_path_buf(),
+            4,
+            std::sync::Arc::new(crate::store::SystemClock::new()),
+        );
         let index = StoreIndex::new();
         let report = open_index(
             &index,
@@ -1255,7 +1283,11 @@ mod tests {
             .expect("highest segment id");
 
         let interner = StringInterner::new();
-        let reader = Reader::new(dir.path().to_path_buf(), 4);
+        let reader = Reader::new(
+            dir.path().to_path_buf(),
+            4,
+            std::sync::Arc::new(crate::store::SystemClock::new()),
+        );
         reader.set_active_segment(highest_segment_id + 1);
         let tail_entries = collect_tail_entries(
             &interner,

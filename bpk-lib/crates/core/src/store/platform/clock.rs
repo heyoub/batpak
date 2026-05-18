@@ -5,6 +5,12 @@ use std::time::Instant;
 
 /// Runtime clock source for store timestamping, evidence, and deterministic tests.
 ///
+/// Boundary: this seam owns every clock value that lands on disk, appears in a
+/// public report or receipt, or participates in identity such as UUIDv7 wall
+/// bits. Process-local wait deadlines still use `Instant`: cursor pull waits,
+/// frontier waits, and writer idle backoff compute elapsed time for local
+/// scheduling only, and never become durable bytes or receipt/report identity.
+///
 /// Production uses [`SystemClock`]. Tests and embeddings that need repeatable
 /// store behavior can provide a custom implementation and install it with
 /// [`crate::store::StoreConfig::with_clock`].

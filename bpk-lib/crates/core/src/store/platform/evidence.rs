@@ -9,7 +9,10 @@ use memmap2::MmapOptions;
 use std::io::Write;
 use std::path::Path;
 
-pub(crate) fn collect_for_store_path(data_dir: &Path) -> PlatformEvidenceSummary {
+pub(crate) fn collect_for_store_path(
+    data_dir: &Path,
+    clock: &dyn Clock,
+) -> PlatformEvidenceSummary {
     let mmap_evidence = mmap_evidence_for_store_path(data_dir);
     let store_path = StorePathEvidenceSummary {
         path_status: path_status(data_dir),
@@ -22,7 +25,7 @@ pub(crate) fn collect_for_store_path(data_dir: &Path) -> PlatformEvidenceSummary
     let admission = admission_from_store_path(&store_path);
     PlatformEvidenceSummary {
         host: HostEvidenceSummary {
-            process_clock_epoch_marker_ns: crate::store::SystemClock::new().process_boot_ns(),
+            process_clock_epoch_marker_ns: clock.process_boot_ns(),
             monotonic_clock: ClockEvidence::ProcessLocalInstantAnchor,
         },
         store_path,

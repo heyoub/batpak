@@ -102,7 +102,7 @@ fn append_frames_from_segment_copies_frame_bytes_exactly() {
     let source_path;
     {
         let mut source: Segment<Active> =
-            Segment::create(dir.path(), 1).expect("create source segment");
+            Segment::create_with_created_ns(dir.path(), 1, 0).expect("create source segment");
         let frame_a = frame_encode(&serde_json::json!({"a": 1})).expect("encode frame a");
         let frame_b = frame_encode(&serde_json::json!({"b": 2})).expect("encode frame b");
         source.write_frame(&frame_a).expect("write frame a");
@@ -117,7 +117,7 @@ fn append_frames_from_segment_copies_frame_bytes_exactly() {
     let destination_path;
     {
         let mut destination: Segment<Active> =
-            Segment::create(dir.path(), 2).expect("create destination segment");
+            Segment::create_with_created_ns(dir.path(), 2, 0).expect("create destination segment");
         destination
             .append_frames_from_segment(&source_path)
             .expect("append frames");
