@@ -7,6 +7,15 @@ use crate::store::stats::HlcPoint;
 use crate::store::{AppendReceipt, EncodedBytes, ExtensionKey};
 use std::collections::BTreeMap;
 
+fn broadcast_all<T>(values: impl IntoIterator<Item = T>, mut broadcast: impl FnMut(&T)) -> usize {
+    let mut count = 0usize;
+    for value in values {
+        count += 1;
+        broadcast(&value);
+    }
+    count
+}
+
 pub(super) struct CommitArtifacts {
     pub(super) index_entry: IndexEntry,
     pub(super) sidx_entry: SidxEntry,
@@ -174,16 +183,12 @@ impl WriterState<'_> {
         notifications: impl IntoIterator<Item = Notification>,
         envelopes: impl IntoIterator<Item = CommittedEventEnvelope>,
     ) {
-        let mut push_notifications = 0usize;
-        for notification in notifications {
-            push_notifications += 1;
-            self.subscribers.broadcast(&notification);
-        }
-        let mut push_envelopes = 0usize;
-        for envelope in envelopes {
-            push_envelopes += 1;
-            self.reactor_subscribers.broadcast(&envelope);
-        }
+        let push_notifications = broadcast_all(notifications, |notification| {
+            self.subscribers.broadcast(notification)
+        });
+        let push_envelopes = broadcast_all(envelopes, |envelope| {
+            self.reactor_subscribers.broadcast(envelope);
+        });
         tracing::trace!(
             target: "batpak::fanout",
             push_notifications,
@@ -246,5 +251,26 @@ impl WriterState<'_> {
                 .advance_visible_and_emitted(point);
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::broadcast_all;
+
+    #[test]
+    fn broadcast_all_counts_every_pushed_item() {
+        let mut pushed = Vec::new();
+        let count = broadcast_all([10, 20, 30], |item| pushed.push(*item));
+
+        assert_eq!(
+            count, 3,
+            "PROPERTY: fanout telemetry count must advance once per pushed item"
+        );
+        assert_eq!(
+            pushed,
+            vec![10, 20, 30],
+            "PROPERTY: count helper must still broadcast each item in order"
+        );
     }
 }

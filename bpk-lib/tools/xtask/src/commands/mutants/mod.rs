@@ -137,9 +137,9 @@ mod tests {
                 "--baseline",
                 "run",
                 "--file",
-                "crates/core/src/store/write/*.rs",
-                "--exclude",
-                "crates/core/src/store/ancestry/by_clock.rs",
+                "crates/core/src/store/write/**/*.rs",
+                "--file",
+                "crates/core/src/store/write/control/**/*.rs",
                 "--all-features",
                 "--cargo-arg",
                 "--locked",
@@ -279,6 +279,10 @@ mod tests {
         assert_eq!(platform_lane.paths, PLATFORM_BACKEND_MUTANT_FILES);
         assert_eq!(harness_lane.paths, TESTING_LEDGER_LINT_MUTANT_FILES);
         assert_eq!(harness_lane.package, Some("batpak-integrity"));
+        assert!(
+            lanes.iter().all(|lane| lane.excludes.is_empty()),
+            "critical seam lanes must not carry surface excludes; repo-wide lanes own cfg-gated excludes"
+        );
         assert_eq!(
             MutationLane::repo_wide(MutantSurface::AllFeatures, None).paths,
             REPO_WIDE_ALL_FEATURES_MUTANT_FILES

@@ -28,7 +28,10 @@ pub(super) const REPO_WIDE_NO_DEFAULT_MUTANT_FILES: &[&str] = &[
     "crates/core/src/schema.rs",
     "crates/core/src/store/**/*.rs",
 ];
-pub(super) const WRITER_COMMIT_MUTANT_FILES: &[&str] = &["crates/core/src/store/write/*.rs"];
+pub(super) const WRITER_COMMIT_MUTANT_FILES: &[&str] = &[
+    "crates/core/src/store/write/**/*.rs",
+    "crates/core/src/store/write/control/**/*.rs",
+];
 pub(super) const CURSOR_MUTANT_FILES: &[&str] = &[
     "crates/core/src/store/delivery/cursor.rs",
     "crates/core/src/store/delivery/observation.rs",
@@ -37,16 +40,22 @@ pub(super) const CURSOR_MUTANT_FILES: &[&str] = &[
 pub(super) const PROJECTION_MUTANT_FILES: &[&str] = &[
     "crates/core/src/store/projection/flow/**/*.rs",
     "crates/core/src/store/projection/registry.rs",
+    "crates/core/src/store/projection/mod.rs",
+    "crates/core/src/store/projection/watch.rs",
 ];
 pub(super) const SEGMENT_SCAN_MUTANT_FILES: &[&str] =
     &["crates/core/src/store/segment/scan/**/*.rs"];
 pub(super) const HASH_CHAIN_REPLAY_ALL_FEATURES_MUTANT_FILES: &[&str] = &[
     "crates/core/src/store/ancestry/by_hash.rs",
     "crates/core/src/store/cold_start/rebuild.rs",
+    "crates/core/src/store/chain_walk.rs",
+    "crates/core/src/store/read_walk.rs",
 ];
 pub(super) const HASH_CHAIN_REPLAY_NO_DEFAULT_MUTANT_FILES: &[&str] = &[
     "crates/core/src/store/ancestry/by_clock.rs",
     "crates/core/src/store/cold_start/rebuild.rs",
+    "crates/core/src/store/chain_walk.rs",
+    "crates/core/src/store/read_walk.rs",
 ];
 pub(super) const FRONTIER_WAIT_MUTANT_FILES: &[&str] = &["crates/core/src/store/write/writer.rs"];
 pub(super) const FRONTIER_APPEND_GATE_MUTANT_FILES: &[&str] = &["crates/core/src/store/gate.rs"];
@@ -147,7 +156,7 @@ impl MutationLane {
             },
             package: seam.package,
             paths: seam.paths,
-            excludes: surface_excludes(seam.surface),
+            excludes: &[],
             exclude_res: critical_seam_exclude_res(seam.slug),
         }
     }
@@ -171,7 +180,7 @@ impl MutationLane {
             },
             package: seam.package,
             paths: seam.paths,
-            excludes: surface_excludes(seam.surface),
+            excludes: &[],
             exclude_res: critical_seam_exclude_res(seam.slug),
         }
     }
