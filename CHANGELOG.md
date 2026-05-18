@@ -42,10 +42,33 @@ All notable changes to this project will be documented in this file.
   exposes stable accessors instead of public fields.
 - `FrontierView.current_visible_hlc` was renamed to `visible_hlc`, and
   `WatermarkSnapshot` is now internal raw machinery. The dangerous test hook
-  snapshot API returns `FrontierView`.
+  snapshot API returns `FrontierView`. If you constructed
+  `FrontierView { ... }` directly, semver-check reports this as both a field
+  addition and field removal (`target/semver-public-api/semver-checks.txt:30`,
+  `:212`); use `Store::frontier()` or `Store::diagnostics().frontier` instead
+  of direct construction
+  (`bpk-lib/crates/core/src/store/stats.rs:99-115`).
 - The public API snapshot and semver check now capture the production feature
   surface explicitly and exclude `dangerous-test-hooks`; `Store::dangerous_*`
   methods remain available only when that feature or crate tests enable them.
+- `AppendOptions` gained a required `extensions: BTreeMap<ExtensionKey,
+  EncodedBytes>` field (`bpk-lib/crates/core/src/store/append.rs:531`), no
+  longer derives `Copy` (`bpk-lib/crates/core/src/store/append.rs:511`), and
+  `AppendOptions::new` is no longer `const fn`
+  (`bpk-lib/crates/core/src/store/append.rs:537`). Semver-check reports these
+  as `constructible_struct_adds_field`,
+  `derive_trait_impl_removed`, and `inherent_method_const_removed`
+  (`target/semver-public-api/semver-checks.txt:24`, `:40`, `:113`). The
+  receipt-extensions feature shipped in `[0.7.5]` documented the receipt-reader
+  side of this contract; the writer-caller side is part of this release.
+- `TypedReactorHandle<E>` no longer implements `Sync`
+  (`bpk-lib/crates/core/src/store/reactor_typed.rs:226-228`;
+  `target/semver-public-api/semver-checks.txt:12`). The handle now owns a
+  `Box<dyn CanalHandle>` field that is `Send`-only. The new Canal delivery
+  abstraction landed in this release; see the ADR-0011 amendment in
+  `100_ADR_0011_REACTOR_CANAL.md`. Single-owner handoff across threads
+  (`Send`) is unchanged; shared `&TypedReactorHandle<_>` across threads no
+  longer compiles.
 - Low-traffic backup-envelope helpers now live under
   `batpak::store::backup_envelope::*`, and cold-start open reports now live
   under `batpak::store::cold_start::rebuild::*` instead of root `store::*`
@@ -87,13 +110,40 @@ All notable changes to this project will be documented in this file.
 - Removed public `AppendReceipt::disk_pos` and `DenialReceipt::disk_pos`
   fields; use the `disk_pos()` accessors for focused diagnostics.
 - Removed `WatermarkSnapshot` from the public API; use `FrontierView`.
+- Removed public `Segment::needs_rotation`
+  (`bpk-lib/crates/core/src/store/segment/mod.rs:331`;
+  `target/semver-public-api/semver-checks.txt:128`). Segment rotation is
+  writer-internal policy; no replacement is exposed on the supported public
+  surface.
 - Removed root `batpak::store` re-exports for backup-envelope helper APIs and
   cold-start open report types; import them from their owning modules.
 
 ### Migration
-- If you constructed `ReactorConfig` with a struct literal, add
-  `canal: ReactorCanal::CursorGuaranteed` or use `ReactorConfig::default()`
-  and mutate the fields you need.
+- If you constructed `ReactorConfig` with a struct literal, either prepend
+  `..ReactorConfig::default()` to inherit
+  `canal: ReactorCanal::CursorGuaranteed`, or set
+  `canal: ReactorCanal::CursorGuaranteed` explicitly. That value preserves the
+  prior at-least-once delivery semantics from ADR-0011. Semver-check reports
+  the required field addition at
+  `target/semver-public-api/semver-checks.txt:26-28`.
+  `ReactorCanal::LossySubscription` is opt-in and changes delivery semantics:
+  it never supplies an `AtLeastOnce` witness and is not semantics-equivalent to
+  the prior default.
+- If you constructed `AppendOptions` with a struct literal, either append
+  `..AppendOptions::new()` or `..Default::default()` to inherit
+  `extensions: BTreeMap::new()`, or include the field explicitly. Prefer the
+  builder form: `AppendOptions::new().with_cas(seq).with_extensions(...)`.
+  Callers that relied on `Copy` must use `.clone()` instead; `AppendOptions`
+  is now `Clone`-only. Replace
+  `const APPEND_OPTS: AppendOptions = AppendOptions::new();` with a function,
+  `once_cell::sync::Lazy`, or `std::sync::LazyLock`; `AppendOptions::new()` is
+  no longer valid in const context. Semver-check rows:
+  `target/semver-public-api/semver-checks.txt:24`, `:40`, `:113`.
+- If you previously shared `&TypedReactorHandle<_>` from multiple threads, wrap
+  it in `Arc<Mutex<TypedReactorHandle<_>>>` or `Arc<RwLock<_>>` at the
+  ownership boundary. If you only moved the handle into one driver thread, no
+  change is required. Semver-check row:
+  `target/semver-public-api/semver-checks.txt:12`.
 - Handle `CheckpointId::new(...)` as fallible and pass the typed id to
   checkpoint APIs instead of a raw string.
 - Replace `CursorGapConfig { enabled, buffer_capacity }` literals with
