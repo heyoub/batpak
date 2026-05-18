@@ -21,7 +21,7 @@ pub mod store_sink;
 
 pub use builder::CoreBuilder;
 pub use core::{Checkout, CheckoutFrame, CheckoutResult, Core, Ctx};
-pub use error::{BuildError, RuntimeError};
+pub use error::{BuildError, ReceiptSinkHandlerCause, RuntimeError};
 pub use handler::{Handler, HandlerError, HandlerResult};
 pub use module::Module;
 pub use operation::{

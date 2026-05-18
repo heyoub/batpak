@@ -83,7 +83,12 @@ pub enum ReceiptOutcome {
         /// Human-readable failure detail.
         message: String,
     },
-    /// The runtime declined to execute or publish the operation result.
+    /// The direct sink or policy layer declined to execute or publish the
+    /// operation result.
+    ///
+    /// `Core` checkout dispatch emits `Completed` or `Failed`; `Denied` is
+    /// reserved for direct receipt sinks, policy gates, and network guards
+    /// that reject a call before handler execution.
     Denied {
         /// Stable denial class.
         code: String,

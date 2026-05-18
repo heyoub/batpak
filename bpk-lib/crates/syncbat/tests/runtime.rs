@@ -431,8 +431,11 @@ fn receipt_sink_failure_is_fail_closed() {
     assert!(
         matches!(
             err,
-            RuntimeError::ReceiptSink { ref name, ref message }
-                if name == "echo" && message == "sink down"
+            RuntimeError::ReceiptSink {
+                ref name,
+                ref message,
+                caused_by_handler: None,
+            } if name == "echo" && message == "sink down"
         ),
         "unexpected error: {err:?}"
     );
@@ -453,8 +456,14 @@ fn failed_handler_plus_sink_failure_is_fail_closed() {
     assert!(
         matches!(
             err,
-            RuntimeError::ReceiptSink { ref name, ref message }
-                if name == "echo" && message == "sink down"
+            RuntimeError::ReceiptSink {
+                ref name,
+                ref message,
+                caused_by_handler: Some(ref cause),
+            } if name == "echo"
+                && message == "sink down"
+                && cause.code() == "failed"
+                && cause.message() == "boom"
         ),
         "unexpected error: {err:?}"
     );

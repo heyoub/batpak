@@ -90,6 +90,11 @@ All notable changes to this project will be documented in this file.
   through `Segment::create_with_created_ns(dir, segment_id, created_ns)`, so
   the segment header clock anchor is supplied explicitly by the store clock
   path instead of reading ambient wall time.
+- `syncbat::RuntimeError::ReceiptSink` now includes
+  `caused_by_handler: Option<ReceiptSinkHandlerCause>`. Receipt-sink failures
+  after failed handler execution preserve the handler's stable class and
+  message, so callers can distinguish completed-receipt sink failure from
+  failed-receipt sink failure without parsing text.
 
 ### Removed
 - Removed the transitional `BackupEnvelope` alias; use

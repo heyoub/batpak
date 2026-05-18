@@ -81,6 +81,7 @@ pub syncbat::error::RuntimeError::Handler::name: alloc::string::String
 pub syncbat::error::RuntimeError::MissingHandler
 pub syncbat::error::RuntimeError::MissingHandler::name: alloc::string::String
 pub syncbat::error::RuntimeError::ReceiptSink
+pub syncbat::error::RuntimeError::ReceiptSink::caused_by_handler: core::option::Option<syncbat::error::ReceiptSinkHandlerCause>
 pub syncbat::error::RuntimeError::ReceiptSink::message: alloc::string::String
 pub syncbat::error::RuntimeError::ReceiptSink::name: alloc::string::String
 pub syncbat::error::RuntimeError::UnknownOperation
@@ -89,10 +90,18 @@ impl syncbat::error::RuntimeError
 pub fn syncbat::error::RuntimeError::handler(name: impl core::convert::Into<alloc::string::String>, code: impl core::convert::Into<alloc::string::String>, message: impl core::convert::Into<alloc::string::String>) -> Self
 pub fn syncbat::error::RuntimeError::missing_handler(name: impl core::convert::Into<alloc::string::String>) -> Self
 pub fn syncbat::error::RuntimeError::receipt_sink(name: impl core::convert::Into<alloc::string::String>, message: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn syncbat::error::RuntimeError::receipt_sink_after_handler_failure(name: impl core::convert::Into<alloc::string::String>, message: impl core::convert::Into<alloc::string::String>, cause: syncbat::error::ReceiptSinkHandlerCause) -> Self
 pub fn syncbat::error::RuntimeError::unknown_operation(name: impl core::convert::Into<alloc::string::String>) -> Self
 impl core::error::Error for syncbat::error::RuntimeError
 impl core::fmt::Display for syncbat::error::RuntimeError
 pub fn syncbat::error::RuntimeError::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct syncbat::error::ReceiptSinkHandlerCause
+pub syncbat::error::ReceiptSinkHandlerCause::code: alloc::string::String
+pub syncbat::error::ReceiptSinkHandlerCause::message: alloc::string::String
+impl syncbat::error::ReceiptSinkHandlerCause
+pub fn syncbat::error::ReceiptSinkHandlerCause::code(&self) -> &str
+pub fn syncbat::error::ReceiptSinkHandlerCause::message(&self) -> &str
+pub fn syncbat::error::ReceiptSinkHandlerCause::new(code: impl core::convert::Into<alloc::string::String>, message: impl core::convert::Into<alloc::string::String>) -> Self
 pub mod syncbat::handler
 pub enum syncbat::handler::HandlerError
 pub syncbat::handler::HandlerError::Failed(alloc::string::String)
@@ -454,6 +463,7 @@ pub syncbat::RuntimeError::Handler::name: alloc::string::String
 pub syncbat::RuntimeError::MissingHandler
 pub syncbat::RuntimeError::MissingHandler::name: alloc::string::String
 pub syncbat::RuntimeError::ReceiptSink
+pub syncbat::RuntimeError::ReceiptSink::caused_by_handler: core::option::Option<syncbat::error::ReceiptSinkHandlerCause>
 pub syncbat::RuntimeError::ReceiptSink::message: alloc::string::String
 pub syncbat::RuntimeError::ReceiptSink::name: alloc::string::String
 pub syncbat::RuntimeError::UnknownOperation
@@ -462,6 +472,7 @@ impl syncbat::error::RuntimeError
 pub fn syncbat::error::RuntimeError::handler(name: impl core::convert::Into<alloc::string::String>, code: impl core::convert::Into<alloc::string::String>, message: impl core::convert::Into<alloc::string::String>) -> Self
 pub fn syncbat::error::RuntimeError::missing_handler(name: impl core::convert::Into<alloc::string::String>) -> Self
 pub fn syncbat::error::RuntimeError::receipt_sink(name: impl core::convert::Into<alloc::string::String>, message: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn syncbat::error::RuntimeError::receipt_sink_after_handler_failure(name: impl core::convert::Into<alloc::string::String>, message: impl core::convert::Into<alloc::string::String>, cause: syncbat::error::ReceiptSinkHandlerCause) -> Self
 pub fn syncbat::error::RuntimeError::unknown_operation(name: impl core::convert::Into<alloc::string::String>) -> Self
 impl core::error::Error for syncbat::error::RuntimeError
 impl core::fmt::Display for syncbat::error::RuntimeError
@@ -634,6 +645,13 @@ pub fn syncbat::receipt::ReceiptSinkError::from(error: syncbat::store_sink::Stor
 impl core::error::Error for syncbat::receipt::ReceiptSinkError
 impl core::fmt::Display for syncbat::receipt::ReceiptSinkError
 pub fn syncbat::receipt::ReceiptSinkError::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct syncbat::ReceiptSinkHandlerCause
+pub syncbat::ReceiptSinkHandlerCause::code: alloc::string::String
+pub syncbat::ReceiptSinkHandlerCause::message: alloc::string::String
+impl syncbat::error::ReceiptSinkHandlerCause
+pub fn syncbat::error::ReceiptSinkHandlerCause::code(&self) -> &str
+pub fn syncbat::error::ReceiptSinkHandlerCause::message(&self) -> &str
+pub fn syncbat::error::ReceiptSinkHandlerCause::new(code: impl core::convert::Into<alloc::string::String>, message: impl core::convert::Into<alloc::string::String>) -> Self
 #[non_exhaustive] pub struct syncbat::RecordedReceipt
 pub syncbat::RecordedReceipt::batpak_receipt: core::option::Option<syncbat::receipt::BatpakReceiptFields>
 pub syncbat::RecordedReceipt::envelope: syncbat::receipt::ReceiptEnvelope

@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::error::RuntimeError;
+use crate::error::{ReceiptSinkHandlerCause, RuntimeError};
 use crate::receipt::{ReceiptHashPolicy, ReceiptOutcome, RecordedReceipt};
 use crate::{handler, operation, receipt};
 
@@ -101,9 +101,16 @@ impl Core {
         let output = match handler_result {
             Ok(output) => output,
             Err(error) => {
-                let outcome = ReceiptOutcome::failed(error.class(), error.message());
-                self.record_runtime_receipt(&descriptor, &input, None, outcome)?;
-                return Err(RuntimeError::handler(name, error.class(), error.message()));
+                let cause = ReceiptSinkHandlerCause::new(error.class(), error.message());
+                let outcome = ReceiptOutcome::failed(cause.code(), cause.message());
+                self.record_runtime_receipt(
+                    &descriptor,
+                    &input,
+                    None,
+                    outcome,
+                    Some(cause.clone()),
+                )?;
+                return Err(RuntimeError::handler(name, cause.code(), cause.message()));
             }
         };
         let recorded_receipt = self.record_runtime_receipt(
@@ -111,6 +118,7 @@ impl Core {
             &input,
             Some(output.as_slice()),
             ReceiptOutcome::Completed,
+            None,
         )?;
 
         Ok(CheckoutResult {
@@ -126,6 +134,7 @@ impl Core {
         input: &[u8],
         output: Option<&[u8]>,
         outcome: ReceiptOutcome,
+        handler_cause: Option<ReceiptSinkHandlerCause>,
     ) -> Result<Option<RecordedReceipt>, RuntimeError> {
         let Some(sink) = self.receipt_sink.as_deref() else {
             return Ok(None);
@@ -141,9 +150,14 @@ impl Core {
             }
         }
 
-        sink.record_receipt(&envelope)
-            .map(Some)
-            .map_err(|error| RuntimeError::receipt_sink(descriptor.name(), error.to_string()))
+        sink.record_receipt(&envelope).map(Some).map_err(|error| {
+            let message = error.to_string();
+            if let Some(cause) = handler_cause {
+                RuntimeError::receipt_sink_after_handler_failure(descriptor.name(), message, cause)
+            } else {
+                RuntimeError::receipt_sink(descriptor.name(), message)
+            }
+        })
     }
 }
 

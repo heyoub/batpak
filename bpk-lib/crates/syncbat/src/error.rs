@@ -132,6 +132,38 @@ impl fmt::Display for BuildError {
 
 impl Error for BuildError {}
 
+/// Handler failure preserved when receipt recording also fails.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReceiptSinkHandlerCause {
+    /// Handler-supplied error class.
+    pub code: String,
+    /// Handler-supplied error message.
+    pub message: String,
+}
+
+impl ReceiptSinkHandlerCause {
+    /// Build a handler cause for a receipt-sink failure.
+    #[must_use]
+    pub fn new(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            code: code.into(),
+            message: message.into(),
+        }
+    }
+
+    /// Stable handler error class.
+    #[must_use]
+    pub fn code(&self) -> &str {
+        &self.code
+    }
+
+    /// Handler-supplied error message.
+    #[must_use]
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+}
+
 /// Error returned by synchronous operation dispatch.
 #[derive(Debug, Eq, PartialEq)]
 pub enum RuntimeError {
@@ -160,6 +192,8 @@ pub enum RuntimeError {
         name: String,
         /// Sink error message.
         message: String,
+        /// Handler failure that preceded this sink failure, when present.
+        caused_by_handler: Option<ReceiptSinkHandlerCause>,
     },
 }
 
@@ -196,6 +230,21 @@ impl RuntimeError {
         Self::ReceiptSink {
             name: name.into(),
             message: message.into(),
+            caused_by_handler: None,
+        }
+    }
+
+    /// Build a receipt-sink error after a handler failure.
+    #[must_use]
+    pub fn receipt_sink_after_handler_failure(
+        name: impl Into<String>,
+        message: impl Into<String>,
+        cause: ReceiptSinkHandlerCause,
+    ) -> Self {
+        Self::ReceiptSink {
+            name: name.into(),
+            message: message.into(),
+            caused_by_handler: Some(cause),
         }
     }
 }
@@ -217,8 +266,21 @@ impl fmt::Display for RuntimeError {
                     "handler for operation `{name}` failed with {code}: {message}"
                 )
             }
-            Self::ReceiptSink { name, message } => {
-                write!(f, "receipt sink for operation `{name}` failed: {message}")
+            Self::ReceiptSink {
+                name,
+                message,
+                caused_by_handler,
+            } => {
+                if let Some(cause) = caused_by_handler {
+                    write!(
+                        f,
+                        "receipt sink for operation `{name}` failed after handler error {}: {}: {message}",
+                        cause.code(),
+                        cause.message()
+                    )
+                } else {
+                    write!(f, "receipt sink for operation `{name}` failed: {message}")
+                }
             }
         }
     }
