@@ -1,6 +1,6 @@
 [package]
 name = "syncbat"
-version = "0.1.0"
+version = "0.7.6"
 edition = "2021"
 rust-version = "1.92"
 license = "MIT OR Apache-2.0"
@@ -8,6 +8,7 @@ description = "Sync-first runtime layer for batpak-family operation kits."
 repository = "https://github.com/heyoub/batpak"
 homepage = "https://github.com/heyoub/batpak"
 documentation = "https://docs.rs/syncbat"
+readme = "README.md"
 
 [features]
 default = []
@@ -15,7 +16,7 @@ default = []
 [dependencies]
 batpak = { path = "../core", version = "0.7.6", default-features = false }
 serde = { version = "1", features = ["derive"] }
-syncbat-macros = { path = "../syncbat-macros", version = "0.1.0" }
+syncbat-macros = { path = "../syncbat-macros", version = "0.7.6" }
 
 [dev-dependencies]
 tempfile = ">=3.24, <3.25"

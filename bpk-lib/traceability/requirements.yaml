@@ -48,6 +48,32 @@
     - ART-STRUCTURAL-CHECK
     - ART-PUB-ALLOWLIST
     - ART-PUBLIC-API-BASELINE
+- id: REQ-SYNCBAT-RUNTIME-CONTRACT
+  summary: syncbat must remain the sync-first runtime layer that validates operation registration, dispatches handlers by stable operation name, emits honest runtime receipts, and persists durable catalog rows through batpak public APIs.
+  artifacts:
+    - ART-SYNCBAT-SOURCE
+    - ART-SYNCBAT-TESTS
+    - ART-SYNCBAT-WIRE-GOLDENS
+    - ART-ADR-SYNCBAT-CONTRACT
+    - ART-PUBLIC-API-BASELINE
+- id: REQ-NETBAT-BOUNDARY-CONTRACT
+  summary: netbat must remain the bounded exposure layer over syncbat, owning line-protocol validation, stable request/response encoding, and error-code mapping without taking ownership of runtime, receipt, or durability semantics.
+  artifacts:
+    - ART-NETBAT-SOURCE
+    - ART-NETBAT-TESTS
+    - ART-NETBAT-WIRE-GOLDENS
+    - ART-ADR-NETBAT-CONTRACT
+    - ART-PUBLIC-API-BASELINE
+- id: REQ-RELEASE-FAMILY-PUBLIC
+  summary: The 0.7.6 correction cut must ship every publishable batpak-family crate as one public release train with aligned internal version pins, package-local entrypoints, traceability artifacts, and explicit release proof gates.
+  artifacts:
+    - ART-CARGO
+    - ART-PACKAGE-READMES
+    - ART-RELEASE-HISTORY
+    - ART-PUBLIC-API-BASELINE
+    - ART-SYNCBAT-WIRE-GOLDENS
+    - ART-NETBAT-WIRE-GOLDENS
+    - ART-ADR-RELEASE-PROOF-POSTURE
 - id: REQ-DX-ROOT-FIRST
   summary: The repository must present a root-first, beginner-friendly command and documentation surface without hiding the maintainer lane.
   artifacts:

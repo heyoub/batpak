@@ -8,10 +8,9 @@ manual publish/tag/release steps from a clean `main`.
 1. Start from a clean, current `main`.
 2. Bump every workspace package version for the release. For ordinary pre-1.0
    breaking changes, bump the minor version, for example `0.6.0` -> `0.7.0`.
-   For the 0.7.6 public-surface correction cut, ADR-0026 explicitly permits
-   a patch release because there is no downstream adoption baseline yet and
-   the work is correcting accidental surface before asking users to depend on
-   it.
+   For the 0.7.6 public-surface correction cut, ADR-0026 permits the patch
+   release shape and ADR-0031 defines the release proof posture for the whole
+   publishable substrate family.
 3. Keep internal dependency cross-references in sync. After editing, run the
    workspace-owned pin check:
 
@@ -20,10 +19,9 @@ manual publish/tag/release steps from a clean `main`.
    ```
 
 4. Make every crate in the release chain publishable. For the 0.7.6 correction
-   cut the publishable substrate family is `batpak`, `syncbat`, and `netbat`;
-   `syncbat-macros`, `batpak-macros-support`, `batpak-macros`, and
-   `batpak-bench-support` are published in the chain because those crates are
-   required by the family manifests.
+   cut, ADR-0031 names the release train: `batpak`,
+   `batpak-macros-support`, `batpak-macros`, `batpak-bench-support`,
+   `syncbat-macros`, `syncbat`, and `netbat`.
 5. Give each publishable internal crate crates.io metadata and a small
    crate-local `README.md`.
 6. Finalize `CHANGELOG.md`: add the dated release section and restore an empty

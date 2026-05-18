@@ -17,8 +17,9 @@
     - "crates/core/tests/durable_frontier_waits.rs :: append_with_visible_gate_returns_after_publish"
   replaces_when: >
     Default DurabilityGate becomes non-None for any read path, OR
-    sync_every_n_events default changes to 1. Until then, the observation
-    remains current-fact for default-configured stores without explicit gates.
+    sync_every_n_events default changes to 1. The observation remains
+    current-fact for default-configured stores without explicit gates while
+    neither condition holds.
   artifacts:
     - ART-FRONTIER-WATERMARK-STATE
     - ART-FRONTIER-SEMANTICS-TESTS

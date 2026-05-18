@@ -24,8 +24,22 @@ All notable changes to this project will be documented in this file.
 - Added `CompactionEvidenceReport` and `RestoreProofEvidenceReport` envelopes
   so compaction decisions and restore proofs carry the same body-plus-hash
   evidence shape as the rest of the report family.
+- Added syncbat and netbat committed `.hex` wire goldens for runtime receipt,
+  durable catalog row, request, response, and boundary-error frame families.
+- Added critical mutation lane metadata for syncbat runtime dispatch, syncbat
+  durable register catalog, and netbat boundary protocol surfaces. The metadata
+  is checked in; execution remains an explicit machine-budgeted gate.
+- Added ADR-0030 for the netbat streaming contract shape:
+  `NETBAT/2 STREAM` is a separate protocol rung from `NETBAT/1 CALL`.
+- Added ADR-0031 for the 0.7.6 release proof posture across `batpak`,
+  `syncbat`, `netbat`, and required support crates.
+- Added crate-local READMEs for `batpak`, `syncbat`, `netbat`, and
+  `syncbat-macros` so every publishable crate in the release chain carries its
+  own package entrypoint.
 
 ### Changed
+- Aligned `syncbat`, `netbat`, and `syncbat-macros` to the 0.7.6 release train
+  and updated internal path-dependency pins accordingly.
 - Pinned the canonical MessagePack encoder to the exact `rmp-serde` version
   covered by checked-in golden fixtures, and expanded report-body golden
   coverage across substrate and store evidence families.

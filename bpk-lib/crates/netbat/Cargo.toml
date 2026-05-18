@@ -1,6 +1,6 @@
 [package]
 name = "netbat"
-version = "0.1.0"
+version = "0.7.6"
 edition = "2021"
 rust-version = "1.92"
 license = "MIT OR Apache-2.0"
@@ -8,12 +8,13 @@ description = "Thin sync-first server/network boundary exposure layer for syncba
 repository = "https://github.com/heyoub/batpak"
 homepage = "https://github.com/heyoub/batpak"
 documentation = "https://docs.rs/netbat"
+readme = "README.md"
 
 [features]
 default = []
 
 [dependencies]
-syncbat = { path = "../syncbat", version = "0.1.0" }
+syncbat = { path = "../syncbat", version = "0.7.6" }
 
 [lints]
 workspace = true

@@ -80,7 +80,5 @@ This slice does not add:
 - `100_ADR_0019_CANONICAL_ENCODING_CONTRACT.md`
 - `100_ADR_0024_PROJECTION_RUN_EVIDENCE_REPORT_V1.md`
 - `080_EVIDENCE_REPORTS.md`
-- `.claude/audits/r2/01-receipt-matrix.md`
-- `.claude/codex-briefs/R4-04-receipts.md`
 - `bpk-lib/crates/core/src/store/lifecycle.rs`
 - `bpk-lib/crates/core/src/store/snapshot_report.rs`

@@ -8,18 +8,21 @@
   artifacts:
     - ART-SYNCBAT-SOURCE
     - ART-SYNCBAT-TESTS
+    - ART-SYNCBAT-WIRE-GOLDENS
     - ART-ADR-SYNCBAT-CONTRACT
 - id: INV-SYNCBAT-REGISTER-CATALOG-DETERMINISTIC
   statement: syncbat durable register catalog rows fold in store sequence order, reject malformed or conflicting lifecycle transitions, and rebuild the same active register after reopen.
   artifacts:
     - ART-SYNCBAT-SOURCE
     - ART-SYNCBAT-TESTS
+    - ART-SYNCBAT-WIRE-GOLDENS
     - ART-ADR-SYNCBAT-CONTRACT
 - id: INV-NETBAT-LINE-PROTOCOL-STABLE
   statement: netbat request and response frames keep stable NETBAT/1 CALL and OK/ERR line shapes, bounded decode behavior, and deterministic error-code mapping.
   artifacts:
     - ART-NETBAT-SOURCE
     - ART-NETBAT-TESTS
+    - ART-NETBAT-WIRE-GOLDENS
     - ART-ADR-NETBAT-CONTRACT
 - id: INV-NETBAT-BOUNDARY-THIN
   statement: netbat remains a sync-first boundary over syncbat; it validates and frames calls but does not own handler execution, receipt emission, durable writes, async runtime policy, or application protocol semantics.

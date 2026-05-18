@@ -51,3 +51,5 @@ Root layer docs:
 | ADR-0027 | Snapshot Evidence Report v1 | Accepted |
 | ADR-0028 | Syncbat Runtime Contract | Accepted; 0.7.6 correction cut |
 | ADR-0029 | Netbat Boundary Contract | Accepted; 0.7.6 correction cut |
+| ADR-0030 | Netbat Streaming Contract | Draft contract; keyed to batpak stream item vocabulary |
+| ADR-0031 | 0.7.6 Release Proof Posture | Accepted; 0.7.6 correction cut |

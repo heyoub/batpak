@@ -480,9 +480,9 @@ The release benchmark surface includes `frontier_waiters`, which measures both
 waiter wake completion and writer-side wake cost at 1, 8, 32, 128, and 512
 concurrent waiters. Each count runs same-target waits, where every waiter waits
 for one HLC, and spread-target waits, where waiters cover distinct future HLCs.
-Precise waiter lists stay deferred unless that benchmark shows writer-side wake
-cost dominating append/sync latency or an order-of-magnitude wake-completion
-jump between adjacent waiter-count tiers on stable hardware.
+Precise waiter lists enter the implementation only if that benchmark shows
+writer-side wake cost dominating append/sync latency or an order-of-magnitude
+wake-completion jump between adjacent waiter-count tiers on stable hardware.
 
 Append-time gating is opt-in through `AppendOptions::gate`:
 

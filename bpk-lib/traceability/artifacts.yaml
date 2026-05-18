@@ -75,6 +75,23 @@
   kind: manifest
   paths:
     - Cargo.toml
+    - crates/core/Cargo.toml
+    - crates/macros-support/Cargo.toml
+    - crates/macros/Cargo.toml
+    - crates/bench-support/Cargo.toml
+    - crates/syncbat-macros/Cargo.toml
+    - crates/syncbat/Cargo.toml
+    - crates/netbat/Cargo.toml
+- id: ART-PACKAGE-READMES
+  kind: package-docs
+  paths:
+    - crates/core/README.md
+    - crates/macros-support/README.md
+    - crates/macros/README.md
+    - crates/bench-support/README.md
+    - crates/syncbat-macros/README.md
+    - crates/syncbat/README.md
+    - crates/netbat/README.md
 - id: ART-SYNCBAT-SOURCE
   kind: source
   paths:
@@ -100,6 +117,12 @@
     - crates/syncbat/tests/register_store_catalog.rs
     - crates/syncbat/tests/runtime.rs
     - crates/syncbat/tests/store_sink.rs
+    - crates/syncbat/tests/wire_stability.rs
+- id: ART-SYNCBAT-WIRE-GOLDENS
+  kind: golden-fixtures
+  paths:
+    - crates/syncbat/tests/golden/receipt_envelope_completed.hex
+    - crates/syncbat/tests/golden/register_operation_row_put.hex
 - id: ART-NETBAT-SOURCE
   kind: source
   paths:
@@ -112,6 +135,19 @@
     - crates/netbat/tests/boundary.rs
     - crates/netbat/tests/route_validation.rs
     - crates/netbat/tests/tcp_transport.rs
+- id: ART-NETBAT-WIRE-GOLDENS
+  kind: golden-fixtures
+  paths:
+    - crates/netbat/tests/golden/request_call_v1.hex
+    - crates/netbat/tests/golden/request_call_legacy.hex
+    - crates/netbat/tests/golden/request_decode_input.hex
+    - crates/netbat/tests/golden/request_empty_line.hex
+    - crates/netbat/tests/golden/request_input_too_large.hex
+    - crates/netbat/tests/golden/request_missing_verb.hex
+    - crates/netbat/tests/golden/request_unsupported_protocol.hex
+    - crates/netbat/tests/golden/response_ok.hex
+    - crates/netbat/tests/golden/response_ok_hi.hex
+    - crates/netbat/tests/golden/response_err_malformed.hex
 - id: ART-ADR-SYNCBAT-CONTRACT
   kind: adr
   paths:
@@ -120,6 +156,11 @@
   kind: adr
   paths:
     - 100_ADR_0029_NETBAT_BOUNDARY_CONTRACT.md
+    - 100_ADR_0030_NETBAT_STREAMING_CONTRACT.md
+- id: ART-ADR-RELEASE-PROOF-POSTURE
+  kind: adr
+  paths:
+    - 100_ADR_0031_0_7_6_RELEASE_PROOF_POSTURE.md
 - id: ART-RELEASE-HISTORY
   kind: release-history
   paths:

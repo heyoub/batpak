@@ -9,6 +9,18 @@ use syncbat::{
     Core, EffectClass, Handler, HandlerError, HandlerResult, Module, OperationDescriptor,
 };
 
+const REQUEST_CALL_V1_HEX: &str = include_str!("golden/request_call_v1.hex");
+const REQUEST_CALL_LEGACY_HEX: &str = include_str!("golden/request_call_legacy.hex");
+const REQUEST_DECODE_INPUT_HEX: &str = include_str!("golden/request_decode_input.hex");
+const REQUEST_EMPTY_LINE_HEX: &str = include_str!("golden/request_empty_line.hex");
+const REQUEST_INPUT_TOO_LARGE_HEX: &str = include_str!("golden/request_input_too_large.hex");
+const REQUEST_MISSING_VERB_HEX: &str = include_str!("golden/request_missing_verb.hex");
+const REQUEST_UNSUPPORTED_PROTOCOL_HEX: &str =
+    include_str!("golden/request_unsupported_protocol.hex");
+const RESPONSE_OK_HEX: &str = include_str!("golden/response_ok.hex");
+const RESPONSE_OK_HI_HEX: &str = include_str!("golden/response_ok_hi.hex");
+const RESPONSE_ERR_MALFORMED_HEX: &str = include_str!("golden/response_err_malformed.hex");
+
 const PING: OperationDescriptor = OperationDescriptor::new(
     "ping",
     EffectClass::Inspect,
@@ -16,6 +28,28 @@ const PING: OperationDescriptor = OperationDescriptor::new(
     "schema.ping.output.v1",
     "receipt.ping.v1",
 );
+
+fn hex(bytes: &[u8]) -> String {
+    bytes
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>()
+}
+
+fn fixture_bytes(name: &str, hex: &str) -> Vec<u8> {
+    let hex = hex.trim();
+    assert!(
+        hex.len() % 2 == 0,
+        "golden fixture {name} must contain even-length hex"
+    );
+    hex.as_bytes()
+        .chunks_exact(2)
+        .map(|pair| {
+            let pair = std::str::from_utf8(pair).expect("fixture hex is utf8");
+            u8::from_str_radix(pair, 16).expect("fixture hex decodes")
+        })
+        .collect()
+}
 
 struct PingHandler;
 
@@ -131,8 +165,11 @@ fn inspects_borrowed_syncbat_core_without_invoking_handlers() {
 
 #[test]
 fn decodes_line_protocol_frame() {
-    let frame =
-        nb::decode_line(b"CALL ping 68656c6c6f\n", &nb::Limits::default()).expect("frame decodes");
+    let frame = nb::decode_line(
+        &fixture_bytes("request_call_legacy", REQUEST_CALL_LEGACY_HEX),
+        &nb::Limits::default(),
+    )
+    .expect("frame decodes");
 
     assert_eq!(frame.operation(), "ping");
     assert_eq!(frame.input(), b"hello");
@@ -153,7 +190,7 @@ fn decodes_versioned_line_protocol_frame() {
 #[test]
 fn encodes_request_with_stable_versioned_line_protocol() {
     let encoded = nb::encode_request("ping", b"hi");
-    assert_eq!(encoded, b"NETBAT/1 CALL ping 6869\n");
+    assert_eq!(hex(&encoded), REQUEST_CALL_V1_HEX.trim());
 
     let decoded = nb::decode_line(&encoded, &nb::Limits::default()).expect("request decodes");
     assert_eq!(decoded, nb::RequestFrame::new("ping", b"hi".to_vec()));
@@ -161,7 +198,13 @@ fn encodes_request_with_stable_versioned_line_protocol() {
 
 #[test]
 fn rejects_unsupported_line_protocol_version() {
-    let err = match nb::decode_line(b"NETBAT/2 CALL ping 00\n", &nb::Limits::default()) {
+    let err = match nb::decode_line(
+        &fixture_bytes(
+            "request_unsupported_protocol",
+            REQUEST_UNSUPPORTED_PROTOCOL_HEX,
+        ),
+        &nb::Limits::default(),
+    ) {
         Ok(_) => panic!("expected unsupported protocol version"),
         Err(error) => error,
     };
@@ -176,7 +219,10 @@ fn rejects_unsupported_line_protocol_version() {
 
 #[test]
 fn rejects_versioned_frame_with_missing_fields() {
-    let missing_verb = match nb::decode_line(b"NETBAT/1\n", &nb::Limits::default()) {
+    let missing_verb = match nb::decode_line(
+        &fixture_bytes("request_missing_verb", REQUEST_MISSING_VERB_HEX),
+        &nb::Limits::default(),
+    ) {
         Ok(_) => panic!("expected missing verb"),
         Err(error) => error,
     };
@@ -274,13 +320,15 @@ fn dispatch_revalidates_public_request_frames() {
 #[test]
 fn serve_stream_writes_stable_success_response() {
     let mut core = core_with_ping();
-    let mut stream = Cursor::new(b"CALL ping 6869\n".to_vec());
+    let mut stream = Cursor::new(fixture_bytes("request_call_v1", REQUEST_CALL_V1_HEX));
 
     let response =
         nb::serve_stream(&mut stream, &mut core, &nb::Limits::default()).expect("served");
 
     assert_eq!(response.output(), b"hi");
-    assert!(stream.into_inner().ends_with(b"OK 6869\n"));
+    assert!(stream
+        .into_inner()
+        .ends_with(&fixture_bytes("response_ok_hi", RESPONSE_OK_HI_HEX)));
 }
 
 #[test]
@@ -307,7 +355,10 @@ fn handler_failure_maps_without_losing_class_or_message() {
     let mut builder = Core::builder();
     builder.register(PING, FailingHandler).expect("register");
     let mut core = builder.build().expect("core builds");
-    let mut stream = Cursor::new(b"CALL ping 00\n".to_vec());
+    let mut stream = Cursor::new(fixture_bytes(
+        "request_decode_input",
+        REQUEST_DECODE_INPUT_HEX,
+    ));
 
     let err = match nb::serve_stream(&mut stream, &mut core, &nb::Limits::default()) {
         Ok(_) => panic!("expected handler failure"),
@@ -332,7 +383,10 @@ fn rejects_line_too_long() {
         ..nb::Limits::default()
     };
 
-    let err = match nb::decode_line(b"CALL ping 00\n", &limits) {
+    let err = match nb::decode_line(
+        &fixture_bytes("request_decode_input", REQUEST_DECODE_INPUT_HEX),
+        &limits,
+    ) {
         Ok(_) => panic!("expected line limit failure"),
         Err(error) => error,
     };
@@ -347,7 +401,10 @@ fn rejects_operation_name_too_long() {
         ..nb::Limits::default()
     };
 
-    let err = match nb::decode_line(b"CALL ping 00\n", &limits) {
+    let err = match nb::decode_line(
+        &fixture_bytes("request_decode_input", REQUEST_DECODE_INPUT_HEX),
+        &limits,
+    ) {
         Ok(_) => panic!("expected operation limit failure"),
         Err(error) => error,
     };
@@ -362,7 +419,10 @@ fn rejects_input_body_too_large() {
         ..nb::Limits::default()
     };
 
-    let err = match nb::decode_line(b"CALL ping 0001\n", &limits) {
+    let err = match nb::decode_line(
+        &fixture_bytes("request_input_too_large", REQUEST_INPUT_TOO_LARGE_HEX),
+        &limits,
+    ) {
         Ok(_) => panic!("expected input limit failure"),
         Err(error) => error,
     };
@@ -452,7 +512,10 @@ fn rejects_odd_hex_unsupported_verb_missing_fields_and_whitespace_operation() {
 
 #[test]
 fn rejects_empty_line_and_non_utf8_operation() {
-    let empty = match nb::decode_line(b"\n", &nb::Limits::default()) {
+    let empty = match nb::decode_line(
+        &fixture_bytes("request_empty_line", REQUEST_EMPTY_LINE_HEX),
+        &nb::Limits::default(),
+    ) {
         Ok(_) => panic!("expected empty-line rejection"),
         Err(error) => error,
     };
@@ -484,7 +547,9 @@ fn partial_read_followed_by_eof_is_a_complete_frame() {
         nb::serve_stream(&mut stream, &mut core, &nb::Limits::default()).expect("served");
 
     assert_eq!(response.output(), b"ok");
-    assert!(stream.into_inner().ends_with(b"OK 6f6b\n"));
+    assert!(stream
+        .into_inner()
+        .ends_with(&fixture_bytes("response_ok", RESPONSE_OK_HEX)));
 }
 
 #[test]
@@ -494,7 +559,10 @@ fn serve_stream_writes_stable_error_for_line_read_failures() {
         max_line_bytes: 4,
         ..nb::Limits::default()
     };
-    let mut too_long = Cursor::new(b"CALL ping 00\n".to_vec());
+    let mut too_long = Cursor::new(fixture_bytes(
+        "request_decode_input",
+        REQUEST_DECODE_INPUT_HEX,
+    ));
     let mut empty = Cursor::new(Vec::new());
 
     let long_err = match nb::serve_stream(&mut too_long, &mut core, &limits) {
@@ -525,7 +593,11 @@ fn serve_stream_retries_interrupted_reads() {
         nb::serve_stream(&mut stream, &mut core, &nb::Limits::default()).expect("served");
 
     assert_eq!(response.output(), b"ok");
-    assert_eq!(stream.written, b"OK 6f6b\n");
+    assert_eq!(
+        hex(&stream.written),
+        RESPONSE_OK_HEX.trim(),
+        "stable response fixture changed"
+    );
 }
 
 #[test]
@@ -533,11 +605,8 @@ fn stable_response_encoder_shapes_success_and_error() {
     let success = nb::encode_response(Ok(b"ok"));
     let error = nb::encode_response(Err(&nb::NetbatError::MalformedRequest { reason: "bad" }));
 
-    assert_eq!(success, b"OK 6f6b\n");
-    assert_eq!(
-        error,
-        b"ERR malformed_request 6d616c666f726d656420726571756573743a20626164\n"
-    );
+    assert_eq!(hex(&success), RESPONSE_OK_HEX.trim());
+    assert_eq!(hex(&error), RESPONSE_ERR_MALFORMED_HEX.trim());
 }
 
 #[test]

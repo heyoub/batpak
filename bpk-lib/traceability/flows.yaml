@@ -11,18 +11,21 @@
   artifacts:
     - ART-SYNCBAT-SOURCE
     - ART-SYNCBAT-TESTS
+    - ART-SYNCBAT-WIRE-GOLDENS
     - ART-ADR-SYNCBAT-CONTRACT
 - id: FLOW-SYNCBAT-REGISTER-CATALOG
   summary: StoreRegisterCatalog validates operation descriptors, appends typed lifecycle rows to one batpak coordinate, and rebuild_register_from_store folds those rows in store sequence order into the active runtime Register while rejecting malformed rows and invalid lifecycle transitions.
   artifacts:
     - ART-SYNCBAT-SOURCE
     - ART-SYNCBAT-TESTS
+    - ART-SYNCBAT-WIRE-GOLDENS
     - ART-ADR-SYNCBAT-CONTRACT
 - id: FLOW-NETBAT-CALL
   summary: netbat decodes a bounded NETBAT/1 CALL line or legacy CALL line, revalidates the RequestFrame, dispatches through syncbat Core::checkout_frame, enforces output limits, and writes a stable OK or ERR response without taking ownership of runtime or durability semantics.
   artifacts:
     - ART-NETBAT-SOURCE
     - ART-NETBAT-TESTS
+    - ART-NETBAT-WIRE-GOLDENS
     - ART-ADR-NETBAT-CONTRACT
 - id: FLOW-APPEND-OPTIONS
   summary: Append with CAS/idempotency/correlation options, receipt extensions, and optional lane/depth position hints enforces guards before commit while leaving HLC wall/counter and sequence under writer control; committed extension bytes are copied into append and denial receipts before signing, persisted in .fbat frame metadata, and reconstructed for idempotency replay after cold start.

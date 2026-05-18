@@ -71,6 +71,24 @@ pub(super) const PLATFORM_BACKEND_MUTANT_FILES: &[&str] = &[
 ];
 pub(super) const TESTING_LEDGER_LINT_MUTANT_FILES: &[&str] =
     &["tools/integrity/src/harness_lints.rs"];
+pub(super) const SYNCBAT_RUNTIME_MUTANT_FILES: &[&str] = &[
+    "crates/syncbat/src/builder.rs",
+    "crates/syncbat/src/core.rs",
+    "crates/syncbat/src/error.rs",
+    "crates/syncbat/src/handler.rs",
+    "crates/syncbat/src/operation.rs",
+    "crates/syncbat/src/receipt.rs",
+    "crates/syncbat/src/store_sink.rs",
+];
+pub(super) const SYNCBAT_CATALOG_MUTANT_FILES: &[&str] = &[
+    "crates/syncbat/src/register.rs",
+    "crates/syncbat/src/register_store.rs",
+];
+pub(super) const NETBAT_BOUNDARY_MUTANT_FILES: &[&str] = &[
+    "crates/netbat/src/lib.rs",
+    "crates/netbat/src/route.rs",
+    "crates/netbat/src/transport.rs",
+];
 pub(super) const ALL_FEATURES_MUTANT_EXCLUDES: &[&str] =
     &["crates/core/src/store/ancestry/by_clock.rs"];
 pub(super) const NO_DEFAULT_FEATURES_MUTANT_EXCLUDES: &[&str] =
@@ -414,6 +432,30 @@ pub(super) fn critical_mutation_seams() -> &'static [CriticalMutationSeam] {
             surface: MutantSurface::AllFeatures,
             package: Some("batpak-integrity"),
             paths: TESTING_LEDGER_LINT_MUTANT_FILES,
+        },
+        CriticalMutationSeam {
+            slug: "syncbat-runtime-dispatch",
+            label: "syncbat runtime dispatch and receipts",
+            description: "syncbat build, dispatch, handler failure, and receipt sink semantics",
+            surface: MutantSurface::AllFeatures,
+            package: Some("syncbat"),
+            paths: SYNCBAT_RUNTIME_MUTANT_FILES,
+        },
+        CriticalMutationSeam {
+            slug: "syncbat-register-catalog",
+            label: "syncbat durable register catalog",
+            description: "syncbat descriptor validation, catalog row lifecycle, and deterministic rebuild",
+            surface: MutantSurface::AllFeatures,
+            package: Some("syncbat"),
+            paths: SYNCBAT_CATALOG_MUTANT_FILES,
+        },
+        CriticalMutationSeam {
+            slug: "netbat-boundary-protocol",
+            label: "netbat boundary protocol",
+            description: "netbat request/response framing, limit checks, error mapping, and syncbat dispatch boundary",
+            surface: MutantSurface::AllFeatures,
+            package: Some("netbat"),
+            paths: NETBAT_BOUNDARY_MUTANT_FILES,
         },
     ]
 }

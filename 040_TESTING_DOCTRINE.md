@@ -36,7 +36,7 @@ Every new doctrine-bearing harness module must declare:
 - `CATCHES:` the failure mode it is meant to surface
 - `SEEDED:` how it is seeded if random, or `deterministic / no randomness`
 
-Keep these declarations at module scope so a future reader can understand why
+Keep these declarations at module scope so a subsequent reader can understand why
 the file exists without spelunking.
 
 ## The Five Allowed Harness Patterns
@@ -78,6 +78,11 @@ Use this for:
 - fuzz-style invariants
 - catastrophic regression thresholds
 - generated edge-matrix coverage
+
+Property fuzzing uses the repo's proptest harness and committed regression
+seeds. The correction-cut machine budget is zero local fuzz execution unless a
+maintainer explicitly opens that gate; CI and named thermal windows own broad
+case-count runs.
 
 ### 3. State-Machine Harness
 

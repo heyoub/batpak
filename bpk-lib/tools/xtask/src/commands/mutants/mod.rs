@@ -33,10 +33,10 @@ mod tests {
         MutationLane, MutationScope, MutationSharding, CURSOR_MUTANT_FILES,
         EVENT_PAYLOAD_REGISTRY_MUTANT_FILES, FRONTIER_APPEND_GATE_MUTANT_FILES,
         FRONTIER_WAIT_MUTANT_FILES, INDEX_TOPOLOGY_DEFAULT_EQUIVALENT_MUTANT,
-        PLATFORM_BACKEND_MUTANT_FILES, PROJECTION_MUTANT_FILES,
+        NETBAT_BOUNDARY_MUTANT_FILES, PLATFORM_BACKEND_MUTANT_FILES, PROJECTION_MUTANT_FILES,
         REPO_WIDE_ALL_FEATURES_MUTANT_FILES, REPO_WIDE_NO_DEFAULT_MUTANT_FILES,
-        SIDX_EMPTY_FOOTER_FLOOR_EQUIVALENT_MUTANT, TESTING_LEDGER_LINT_MUTANT_FILES,
-        WRITER_COMMIT_MUTANT_FILES,
+        SIDX_EMPTY_FOOTER_FLOOR_EQUIVALENT_MUTANT, SYNCBAT_CATALOG_MUTANT_FILES,
+        SYNCBAT_RUNTIME_MUTANT_FILES, TESTING_LEDGER_LINT_MUTANT_FILES, WRITER_COMMIT_MUTANT_FILES,
     };
     use super::plan::{build_mutant_execution_plan, mutants_command, MutantExecutionPlan};
     use super::policy::{
@@ -56,48 +56,25 @@ mod tests {
         })
         .expect("smoke plan");
 
-        assert_eq!(
-            plan,
-            MutantExecutionPlan::Run(vec![
-                critical_mutation_smoke_lanes()[0]
-                    .clone()
-                    .with_baseline(MutationBaseline::Run),
-                critical_mutation_smoke_lanes()[1]
-                    .clone()
-                    .with_baseline(MutationBaseline::Skip),
-                critical_mutation_smoke_lanes()[2]
-                    .clone()
-                    .with_baseline(MutationBaseline::Skip),
-                critical_mutation_smoke_lanes()[3]
-                    .clone()
-                    .with_baseline(MutationBaseline::Skip),
-                critical_mutation_smoke_lanes()[4]
-                    .clone()
-                    .with_baseline(MutationBaseline::Skip),
-                critical_mutation_smoke_lanes()[5]
-                    .clone()
-                    .with_baseline(MutationBaseline::Skip),
-                critical_mutation_smoke_lanes()[6]
-                    .clone()
-                    .with_baseline(MutationBaseline::Skip),
-                critical_mutation_smoke_lanes()[7]
-                    .clone()
-                    .with_baseline(MutationBaseline::Skip),
-                critical_mutation_smoke_lanes()[8]
-                    .clone()
-                    .with_baseline(MutationBaseline::Skip),
-                critical_mutation_smoke_lanes()[9]
-                    .clone()
-                    .with_baseline(MutationBaseline::Skip),
-                critical_mutation_smoke_lanes()[10]
-                    .clone()
-                    .with_baseline(MutationBaseline::Skip),
-                MutationLane::repo_wide_smoke(MutantSurface::AllFeatures)
-                    .with_baseline(MutationBaseline::Skip),
-                MutationLane::repo_wide_smoke(MutantSurface::NoDefaultFeatures)
-                    .with_baseline(MutationBaseline::Skip),
-            ])
-        );
+        let mut expected = critical_mutation_smoke_lanes()
+            .into_iter()
+            .enumerate()
+            .map(|(index, lane)| {
+                lane.with_baseline(if index == 0 {
+                    MutationBaseline::Run
+                } else {
+                    MutationBaseline::Skip
+                })
+            })
+            .collect::<Vec<_>>();
+        expected.extend([
+            MutationLane::repo_wide_smoke(MutantSurface::AllFeatures)
+                .with_baseline(MutationBaseline::Skip),
+            MutationLane::repo_wide_smoke(MutantSurface::NoDefaultFeatures)
+                .with_baseline(MutationBaseline::Skip),
+        ]);
+
+        assert_eq!(plan, MutantExecutionPlan::Run(expected));
     }
 
     #[test]
@@ -269,6 +246,18 @@ mod tests {
             .iter()
             .find(|lane| lane.slug == "platform-backend")
             .expect("platform backend lane");
+        let syncbat_runtime_lane = lanes
+            .iter()
+            .find(|lane| lane.slug == "syncbat-runtime-dispatch")
+            .expect("syncbat runtime lane");
+        let syncbat_catalog_lane = lanes
+            .iter()
+            .find(|lane| lane.slug == "syncbat-register-catalog")
+            .expect("syncbat catalog lane");
+        let netbat_boundary_lane = lanes
+            .iter()
+            .find(|lane| lane.slug == "netbat-boundary-protocol")
+            .expect("netbat boundary lane");
 
         assert_eq!(cursor_lane.scope, MutationScope::CriticalSeam);
         assert_eq!(cursor_lane.paths, CURSOR_MUTANT_FILES);
@@ -279,6 +268,12 @@ mod tests {
         assert_eq!(platform_lane.paths, PLATFORM_BACKEND_MUTANT_FILES);
         assert_eq!(harness_lane.paths, TESTING_LEDGER_LINT_MUTANT_FILES);
         assert_eq!(harness_lane.package, Some("batpak-integrity"));
+        assert_eq!(syncbat_runtime_lane.paths, SYNCBAT_RUNTIME_MUTANT_FILES);
+        assert_eq!(syncbat_runtime_lane.package, Some("syncbat"));
+        assert_eq!(syncbat_catalog_lane.paths, SYNCBAT_CATALOG_MUTANT_FILES);
+        assert_eq!(syncbat_catalog_lane.package, Some("syncbat"));
+        assert_eq!(netbat_boundary_lane.paths, NETBAT_BOUNDARY_MUTANT_FILES);
+        assert_eq!(netbat_boundary_lane.package, Some("netbat"));
         assert!(
             lanes.iter().all(|lane| lane.excludes.is_empty()),
             "critical seam lanes must not carry surface excludes; repo-wide lanes own cfg-gated excludes"

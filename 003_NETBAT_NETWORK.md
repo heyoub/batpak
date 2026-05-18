@@ -61,3 +61,9 @@ dispatches. Batpak records.
 
 The normative boundary contract is ADR-0029. The public API is locked by
 `bpk-lib/traceability/public_api/netbat.txt`.
+
+## Streaming Contract
+
+`NETBAT/1` is request/response only. Streaming uses the separate
+`NETBAT/2 STREAM` contract described in ADR-0030 once the batpak-side stream
+item vocabulary is present. Netbat does not add chunked `CALL` responses.

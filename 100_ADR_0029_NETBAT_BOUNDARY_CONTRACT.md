@@ -101,8 +101,8 @@ non-`TcpStream` transports.
 ## Streaming
 
 R4 added batpak's `Canal` trait, but `NETBAT/1` remains request/response only.
-Streaming transport requires a new explicit protocol decision rather than a
-hidden extension to `CALL`.
+ADR-0030 defines the separate `NETBAT/2 STREAM` contract shape. `CALL` does not
+gain chunked responses.
 
 ## Consequences
 
@@ -114,6 +114,7 @@ hidden extension to `CALL`.
 ## References
 
 - `003_NETBAT_NETWORK.md`
+- `100_ADR_0030_NETBAT_STREAMING_CONTRACT.md`
 - `bpk-lib/crates/netbat/src/`
 - `bpk-lib/crates/netbat/tests/`
 - `bpk-lib/traceability/public_api/netbat.txt`
