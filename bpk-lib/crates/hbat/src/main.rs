@@ -1,0 +1,148 @@
+// justifies: INV-ALLOW-IS-DESIGN; hbat is the repository-owned reference
+// host for the batpak family and intentionally writes machine-readable
+// rendezvous lines and human status messages to stdout/stderr from
+// crates/hbat/src/main.rs. Other Rust crates in this workspace must not
+// rely on this allow — it is local to the reference host binary.
+#![allow(clippy::print_stdout, clippy::print_stderr)]
+
+use std::io::Write as _;
+use std::net::{IpAddr, SocketAddr, TcpListener};
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use anyhow::{anyhow, Context, Result};
+use batpak::store::{Store, StoreConfig};
+use clap::{Args, Parser, Subcommand};
+use netbat::{serve_tcp_listener, ShutdownHandle, TcpServerConfig};
+
+#[derive(Parser, Debug)]
+#[command(
+    name = "hbat",
+    about = "Reference NETBAT/1 host for the batpak family. Not a product daemon.",
+    long_about = None,
+)]
+struct Cli {
+    #[command(subcommand)]
+    command: HbatCommand,
+}
+
+#[derive(Subcommand, Debug)]
+enum HbatCommand {
+    /// Start a NETBAT/1 TCP listener with the bundled reference operations.
+    Serve(ServeArgs),
+}
+
+#[derive(Args, Debug)]
+struct ServeArgs {
+    /// Directory used as the BatPAK store. The directory is created if it
+    /// does not already exist.
+    #[arg(long, value_name = "PATH")]
+    store: PathBuf,
+
+    /// TCP socket address to bind. Use `127.0.0.1:0` to let the OS pick an
+    /// ephemeral port and discover it via `--print-port`.
+    #[arg(long, value_name = "ADDR", default_value = "127.0.0.1:0")]
+    tcp: String,
+
+    /// After binding, emit exactly one machine-readable ready line to
+    /// stdout (prefix `HBAT_READY ` followed by JSON), then enter the
+    /// serve loop. Intended for CI rendezvous.
+    #[arg(long)]
+    print_port: bool,
+
+    /// Allow binding to a non-loopback interface. Refused by default
+    /// because this binary is a reference host, not a product daemon, and
+    /// must not accidentally expose itself to the LAN.
+    #[arg(long)]
+    allow_non_loopback: bool,
+}
+
+fn main() -> Result<()> {
+    let cli = Cli::parse();
+    match cli.command {
+        HbatCommand::Serve(args) => serve(&args),
+    }
+}
+
+fn serve(args: &ServeArgs) -> Result<()> {
+    let addr: SocketAddr = args
+        .tcp
+        .parse()
+        .with_context(|| format!("parse --tcp address {:?}", args.tcp))?;
+
+    if !args.allow_non_loopback && !is_loopback(addr.ip()) {
+        return Err(anyhow!(
+            "hbat refuses to bind to non-loopback address {addr}. Pass --allow-non-loopback to override (reference host only; not for production exposure)."
+        ));
+    }
+    if args.allow_non_loopback && !is_loopback(addr.ip()) {
+        eprintln!(
+            "hbat: warning: binding non-loopback address {addr}; reference host only, not a product daemon"
+        );
+    }
+
+    std::fs::create_dir_all(&args.store)
+        .with_context(|| format!("create store directory {:?}", args.store))?;
+
+    let store = Store::open(StoreConfig::new(&args.store)).context("open BatPAK store")?;
+    let _store = Arc::new(store);
+
+    let mut core = build_core()?;
+    let listener =
+        TcpListener::bind(addr).with_context(|| format!("bind TCP listener on {addr}"))?;
+    let local_addr = listener
+        .local_addr()
+        .context("read local_addr from listener")?;
+
+    if args.print_port {
+        let ready = format!(
+            "HBAT_READY {{\"addr\":\"{}\",\"port\":{},\"protocol\":\"NETBAT/1\"}}\n",
+            local_addr,
+            local_addr.port()
+        );
+        let mut stdout = std::io::stdout().lock();
+        stdout
+            .write_all(ready.as_bytes())
+            .context("write HBAT_READY line")?;
+        stdout.flush().context("flush stdout after HBAT_READY")?;
+    }
+
+    let shutdown = ShutdownHandle::new();
+    install_signal_handler(&shutdown)?;
+
+    let config = TcpServerConfig::default();
+    let stats = serve_tcp_listener(listener, &mut core, &config, &shutdown)
+        .context("netbat::serve_tcp_listener")?;
+
+    eprintln!(
+        "hbat: shutdown — accepted={}, served={}, failed={}, shutdown_requested={}",
+        stats.accepted_connections,
+        stats.served_requests,
+        stats.failed_requests,
+        stats.shutdown_requested
+    );
+    Ok(())
+}
+
+fn is_loopback(ip: IpAddr) -> bool {
+    ip.is_loopback()
+}
+
+fn build_core() -> Result<syncbat::Core> {
+    let mut builder = syncbat::Core::builder();
+    builder
+        .register(hbat::HEARTBEAT_DESCRIPTOR.clone(), hbat::HeartbeatHandler)
+        .map_err(|error| anyhow!("register system.heartbeat: {error}"))?;
+    builder
+        .build()
+        .map_err(|error| anyhow!("build syncbat core: {error}"))
+}
+
+fn install_signal_handler(shutdown: &ShutdownHandle) -> Result<()> {
+    let handle = shutdown.clone();
+    ctrlc::set_handler(move || {
+        handle.shutdown();
+    })
+    .context("install ctrlc handler")?;
+    Ok(())
+}

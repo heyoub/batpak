@@ -69,6 +69,9 @@ enum XtaskCommand {
     SemverCheck(SemverCheckArgs),
     /// Write a local release proof manifest under target/.
     ReleaseManifest(ReleaseManifestArgs),
+    /// Export the BatPAK TypeScript SDK manifest from the reference host
+    /// descriptors. Consumed by `bpk-ts/packages/codegen`.
+    ExportTsManifest(ExportTsManifestArgs),
     /// Copy a golden batpak starter template into a local project directory.
     Scaffold(ScaffoldArgs),
     Platform(PlatformArgs),
@@ -286,6 +289,14 @@ pub(crate) struct ReleaseManifestArgs {
 }
 
 #[derive(Args, Clone, Debug)]
+pub(crate) struct ExportTsManifestArgs {
+    /// Output path for the rendered manifest. The parent directory is
+    /// created on demand.
+    #[arg(long, value_name = "PATH")]
+    pub(crate) out: PathBuf,
+}
+
+#[derive(Args, Clone, Debug)]
 pub(crate) struct DevcontainerExecArgs {
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     command: Vec<String>,
@@ -365,6 +376,7 @@ fn main() -> Result<()> {
         XtaskCommand::PublicApi(args) => public_api::public_api(args),
         XtaskCommand::SemverCheck(args) => public_api::semver_check(args),
         XtaskCommand::ReleaseManifest(args) => commands::release_manifest(args),
+        XtaskCommand::ExportTsManifest(args) => commands::export_ts_manifest(&args),
         XtaskCommand::Scaffold(args) => commands::scaffold(args),
         XtaskCommand::Platform(args) => commands::platform(args),
         XtaskCommand::Fuzz(args) => commands::fuzz(args),

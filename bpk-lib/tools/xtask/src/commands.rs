@@ -1,5 +1,6 @@
 mod ci;
 mod disk_audit;
+mod export_ts_manifest;
 mod loom;
 mod mutants;
 mod package_scan;
@@ -16,8 +17,8 @@ mod version_pins;
 use crate::util::cargo;
 use crate::CleanGeneratedArgs;
 use crate::{
-    ChaosArgs, FuzzArgs, MutantsArgs, PackageLeakScanArgs, PlatformArgs, ReleaseArgs, ScaffoldArgs,
-    SetupArgs,
+    ChaosArgs, ExportTsManifestArgs, FuzzArgs, MutantsArgs, PackageLeakScanArgs, PlatformArgs,
+    ReleaseArgs, ScaffoldArgs, SetupArgs,
 };
 use anyhow::Result;
 
@@ -80,6 +81,10 @@ pub(crate) fn staged_diff() -> Result<()> {
 
 pub(crate) fn release_manifest(args: crate::ReleaseManifestArgs) -> Result<()> {
     release_manifest::release_manifest(args)
+}
+
+pub(crate) fn export_ts_manifest(args: &ExportTsManifestArgs) -> Result<()> {
+    export_ts_manifest::export_ts_manifest(args)
 }
 
 pub(crate) fn deny_split() -> Result<()> {

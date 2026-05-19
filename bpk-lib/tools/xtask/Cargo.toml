@@ -20,3 +20,6 @@ serde = { version = "1", features = ["derive"] }
 sha2 = "0.11"
 tempfile = ">=3.24, <3.25"
 toml = "1.1"
+# Reference host crate. Provides hbat::manifest::descriptors() consumed by
+# `cargo xtask export-ts-manifest`. Not part of FAMILY_CRATES; not published.
+hbat = { path = "../../crates/hbat" }

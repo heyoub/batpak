@@ -9,6 +9,7 @@ members = [
     "crates/syncbat-macros",
     "crates/syncbat",
     "crates/netbat",
+    "crates/hbat",
 ]
 default-members = ["crates/core"]
 resolver = "2"
