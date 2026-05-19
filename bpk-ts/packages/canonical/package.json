@@ -16,5 +16,8 @@
     "build": "tsc -b",
     "test": "vitest run --root .",
     "clean": "rm -rf dist"
+  },
+  "devDependencies": {
+    "fast-check": "3.23.2"
   }
 }
