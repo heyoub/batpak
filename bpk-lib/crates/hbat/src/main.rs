@@ -85,9 +85,9 @@ fn serve(args: &ServeArgs) -> Result<()> {
         .with_context(|| format!("create store directory {:?}", args.store))?;
 
     let store = Store::open(StoreConfig::new(&args.store)).context("open BatPAK store")?;
-    let _store = Arc::new(store);
+    let store = Arc::new(store);
 
-    let mut core = build_core()?;
+    let mut core = build_core(&store)?;
     let listener =
         TcpListener::bind(addr).with_context(|| format!("bind TCP listener on {addr}"))?;
     let local_addr = listener
@@ -128,11 +128,27 @@ fn is_loopback(ip: IpAddr) -> bool {
     ip.is_loopback()
 }
 
-fn build_core() -> Result<syncbat::Core> {
+fn build_core(store: &Arc<batpak::store::Store>) -> Result<syncbat::Core> {
     let mut builder = syncbat::Core::builder();
     builder
         .register(hbat::HEARTBEAT_DESCRIPTOR.clone(), hbat::HeartbeatHandler)
         .map_err(|error| anyhow!("register system.heartbeat: {error}"))?;
+    builder
+        .register(
+            hbat::BANK_COMMIT_DESCRIPTOR.clone(),
+            hbat::BankCommitHandler {
+                store: Arc::clone(&store),
+            },
+        )
+        .map_err(|error| anyhow!("register bank.commit: {error}"))?;
+    builder
+        .register(
+            hbat::EVENT_GET_DESCRIPTOR.clone(),
+            hbat::EventGetHandler {
+                store: Arc::clone(&store),
+            },
+        )
+        .map_err(|error| anyhow!("register event.get: {error}"))?;
     builder
         .build()
         .map_err(|error| anyhow!("build syncbat core: {error}"))

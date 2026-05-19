@@ -13,6 +13,7 @@
     "@batpak/canonical": "workspace:*",
     "@batpak/client": "workspace:*",
     "@batpak/codegen": "workspace:*",
-    "@batpak/generated": "workspace:*"
+    "@batpak/generated": "workspace:*",
+    "@batpak/schema": "workspace:*"
   }
 }

@@ -1,57 +1,91 @@
 /**
- * `@batpak/schema` — Phase 0 stub.
+ * `@batpak/schema` — Effect 4 Schema bridge for the BatPAK canonical wire.
  *
- * This package is the **future** authoring surface for BatPAK TS events.
- * In Phase 0 it is intentionally non-authoritative: the Rust descriptor
- * registry exported via `cargo xtask export-ts-manifest` is the source
- * of truth, and `@batpak/codegen` consumes that manifest to produce the
- * generated TS in `@batpak/generated`.
+ * What this package actually does (production, not stub):
  *
- * The Effect Schema v4 beta dependency is pinned exact in `package.json`
- * so the lockfile records the precise build the SDK shipped against. A
- * v4 beta bump is a deliberate, reviewed action; betas can break between
- * patch numbers.
+ *   1. Wraps Effect 4 Schema decode/encode around `@batpak/canonical`
+ *      MessagePack bytes. Consumers parse incoming wire bytes through
+ *      a generated Schema and get back a validated typed value; encode
+ *      a typed value and get back wire-canonical bytes.
+ *   2. Exposes the Effect `Schema` namespace so consumers can compose
+ *      additional refinements on top of generated types.
+ *   3. Exposes `bank.event()` — the long-term TS authoring entry point.
+ *      In 0.7.6 this is a typed alias over `Schema.Struct({...})` so
+ *      consumers can begin defining downstream-only event shapes today;
+ *      Phase 2+ will round-trip TS declarations back to Rust generation,
+ *      but the symbol stays stable across that transition.
  *
- * `bank.event()` below is the planned authoring entry point. In Phase 0
- * it is exported as a placeholder so downstream callers can pin against
- * the symbol without triggering authoring behavior. Calling it throws
- * — there is no Phase 0 use case.
- *
- * Phase 1+ will:
- *   1. Implement `bank.event()` against Effect Schema v4 declarations.
- *   2. Co-check those declarations against the Rust-emitted manifest
- *      (drift = build failure).
- * Phase 2+ will:
- *   3. Switch the authority direction: TS declarations generate Rust
- *      payload structs (with `#[derive(EventPayload)]`).
- *
- * See `bpk-lib/.phase0-audit-report.md` and the plan at
- * `/root/.claude/plans/yes-this-is-the-warm-finch.md` for context.
+ * Authority direction in 0.7.6:
+ *   - Rust `#[derive(EventPayload)]` + the manifest is still the source
+ *     of truth for events that need to ride the canonical wire.
+ *   - `bank.event()` is for downstream-only TS event shapes (e.g. agent
+ *     internal state) that never leave the TS world.
  */
 
 import * as Schema from "effect/Schema";
 
-/**
- * Phase 0 placeholder for the future authoring surface. Calling this in
- * Phase 0 throws — generated bindings in `@batpak/generated` are the
- * only authoritative TS event surface today.
- */
-export const bank = {
-  event<A>(_definition: unknown): Schema.Schema<A> {
-    throw new BankNotAuthoritativeInPhase0(
-      "bank.event() is a Phase 1+ authoring surface; use @batpak/generated for Phase 0.",
-    );
-  },
-} as const;
+import { decode as canonicalDecode, encode as canonicalEncode } from "@batpak/canonical";
 
-/** Thrown by [`bank.event`] when invoked in Phase 0. */
-export class BankNotAuthoritativeInPhase0 extends Error {
-  readonly code = "bank_event_not_authoritative" as const;
-  constructor(message: string) {
-    super(message);
-    this.name = "BankNotAuthoritativeInPhase0";
-  }
+/** Re-export the Effect Schema namespace so downstreams can pin against it. */
+export { Schema };
+
+/**
+ * Decode canonical MessagePack bytes into a typed value validated by the
+ * given Effect Schema.
+ *
+ * Throws if either MessagePack decoding fails or the decoded shape does
+ * not match the schema.
+ */
+export function decodeBytes<T, E>(
+  schema: Schema.Codec<T, E>,
+  bytes: Uint8Array,
+): T {
+  const raw = canonicalDecode(bytes);
+  return Schema.decodeUnknownSync(schema)(raw);
 }
 
-/** Re-export the Effect Schema namespace so consumers can pin against it. */
-export { Schema };
+/**
+ * Encode a typed value into canonical MessagePack bytes, validating the
+ * value against the given schema first.
+ */
+export function encodeBytes<T, E>(
+  schema: Schema.Codec<T, E>,
+  value: T,
+): Uint8Array {
+  const validated = Schema.encodeUnknownSync(schema)(value);
+  return canonicalEncode(validated);
+}
+
+/**
+ * `bank.event()` — declare a TS-side event by specifying its field
+ * shape.
+ *
+ * Phase 0/0.7.6 semantics:
+ *   - Returns an `effect/Schema.Struct(...)` directly. No magic.
+ *   - The schema is REAL — `Schema.decodeUnknownSync(myEvent)` validates
+ *     incoming objects and `Schema.encodeUnknownSync(myEvent)` encodes
+ *     them.
+ *   - This entry point is intended for downstream-only TS events. Events
+ *     that need to ride the canonical wire MUST currently be authored
+ *     in Rust via `#[derive(EventPayload)]` so their numeric kind and
+ *     canonical bytes stay byte-exact between languages.
+ *
+ * Phase 2+: this symbol will also drive Rust generation, so the
+ * downstream pinning stays stable across the authority flip.
+ */
+export const bank = {
+  /**
+   * Build an Effect Schema struct for a TS-side event.
+   *
+   * @example
+   *   const Move = bank.event({
+   *     x: Schema.Number,
+   *     y: Schema.Number,
+   *     reason: Schema.String,
+   *   });
+   *   type Move = typeof Move.Type;
+   */
+  event<Fields extends Schema.Struct.Fields>(fields: Fields): Schema.Struct<Fields> {
+    return Schema.Struct(fields);
+  },
+} as const;

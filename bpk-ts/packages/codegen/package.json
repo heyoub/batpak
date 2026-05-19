@@ -11,7 +11,7 @@
   },
   "scripts": {
     "build": "tsc -b",
-    "test": "vitest run --root . --passWithNoTests",
+    "test": "vitest run --root .",
     "generate": "node ./bin/batpak-codegen.js --manifest ../../batpak.manifest.json --out ../generated/src",
     "clean": "rm -rf dist"
   }

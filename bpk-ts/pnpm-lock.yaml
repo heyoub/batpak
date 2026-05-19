@@ -29,6 +29,9 @@ importers:
       '@batpak/generated':
         specifier: workspace:*
         version: link:../../packages/generated
+      '@batpak/schema':
+        specifier: workspace:*
+        version: link:../../packages/schema
 
   packages/canonical: {}
 
@@ -40,10 +43,17 @@ importers:
 
   packages/codegen: {}
 
-  packages/generated: {}
+  packages/generated:
+    dependencies:
+      effect:
+        specifier: 4.0.0-beta.68
+        version: 4.0.0-beta.68
 
   packages/schema:
     dependencies:
+      '@batpak/canonical':
+        specifier: workspace:*
+        version: link:../canonical
       effect:
         specifier: 4.0.0-beta.68
         version: 4.0.0-beta.68
@@ -62,6 +72,9 @@ importers:
       '@batpak/generated':
         specifier: workspace:*
         version: link:../generated
+      '@batpak/schema':
+        specifier: workspace:*
+        version: link:../schema
 
 packages:
 

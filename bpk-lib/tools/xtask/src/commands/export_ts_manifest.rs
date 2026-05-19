@@ -111,19 +111,31 @@ mod tests {
             json["canonicalEncoding"]["rmpSerdeVersion"],
             RMP_SERDE_VERSION
         );
+        // 0.7.6 ships 6 events (heartbeat req/ack, bank.commit req/ack,
+        // event.get req/ack) and 3 operations (heartbeat, bank.commit,
+        // event.get).
         assert_eq!(
             json["events"].as_array().expect("events is an array").len(),
-            2
+            6
         );
         assert_eq!(
             json["operations"]
                 .as_array()
                 .expect("operations is an array")
                 .len(),
-            1
+            3
         );
-        let op = &json["operations"][0];
-        assert_eq!(op["name"], "system.heartbeat");
-        assert_eq!(op["errorFixture"]["code"], "unknown_operation");
+        let op_names: Vec<&str> = json["operations"]
+            .as_array()
+            .expect("operations array")
+            .iter()
+            .map(|op| op["name"].as_str().expect("op name is string"))
+            .collect();
+        assert!(op_names.contains(&"system.heartbeat"));
+        assert!(op_names.contains(&"bank.commit"));
+        assert!(op_names.contains(&"event.get"));
+        for op in json["operations"].as_array().expect("operations array") {
+            assert_eq!(op["errorFixture"]["code"], "unknown_operation");
+        }
     }
 }

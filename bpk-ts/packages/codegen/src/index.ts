@@ -1,19 +1,20 @@
 /**
  * BatPAK TypeScript codegen.
  *
- * Reads `batpak.manifest.json` and emits TypeScript symbols into a
- * fresh `packages/generated/src` tree. Output is FULLY OVERWRITTEN on
- * each run; the codegen never patches existing files.
+ * Reads `batpak.manifest.json` and emits TypeScript symbols into a fresh
+ * `packages/generated/src` tree. Output is FULLY OVERWRITTEN on each
+ * run; the codegen never patches existing files.
  *
- * Phase 0 supports the BatPAK TS manifest at `manifestVersion: 1`.
- * Other versions are refused with a clear error message.
+ * Each manifest event produces three exports in `events.ts`:
+ *   - `export const X = Schema.Struct({...})` — the Effect 4 Schema
+ *     (runtime validation + serialization shape).
+ *   - `export type X = typeof X.Type` — the TS interface derived from
+ *     the schema.
+ *   - `export const X_GOLDEN_HEX` / `X_FIXTURE` — golden test data.
  *
- * The plan-locked Phase 0 wire-token vocabulary:
- *   - "string"      -> TypeScript `string`
- *   - "u64-millis"  -> TypeScript `number` (safe-integer bounded)
- *
- * Anything outside that vocabulary is refused so future expansions
- * become deliberate.
+ * Each manifest operation produces an `operations.ts` entry binding the
+ * op name + golden frames + error fixture + the request/response
+ * Schema references.
  */
 
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -21,7 +22,23 @@ import { dirname, join, resolve } from "node:path";
 
 export const SUPPORTED_MANIFEST_VERSION = 1;
 
-const SUPPORTED_FIELD_TYPES = new Set<string>(["string", "u64-millis"]);
+/**
+ * Phase 0 wire-token vocabulary. Adding a new entry here requires:
+ *   1. Updating [`tsTypeForToken`] (the plain TS type lane).
+ *   2. Updating [`schemaForToken`] (the Effect 4 Schema lane).
+ *   3. Ensuring the Rust manifest exporter actually emits it.
+ */
+const SUPPORTED_FIELD_TYPES = new Set<string>([
+  "string",
+  "u8",
+  "u16",
+  "u32",
+  "u64-safe",
+  "u64-millis",
+  "i64-microseconds",
+  "option<string>",
+  "map<string,string>",
+]);
 
 export interface ManifestField {
   wireName: string;
@@ -99,7 +116,7 @@ export function readManifest(path: string): BatpakTsManifest {
 }
 
 function validateManifest(value: unknown, source: string): BatpakTsManifest {
-  if (typeof value !== "object" || value === null) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new CodegenError(
       "invalid_manifest_shape",
       `${source}: manifest root must be a JSON object`,
@@ -145,7 +162,7 @@ function validateManifest(value: unknown, source: string): BatpakTsManifest {
       if (!SUPPORTED_FIELD_TYPES.has(field.typeToken)) {
         throw new CodegenError(
           "unsupported_field_type",
-          `${source}: ${event.name}.${field.wireName} uses unsupported typeToken ${JSON.stringify(field.typeToken)}; Phase 0 supports ${[...SUPPORTED_FIELD_TYPES].join(", ")}`,
+          `${source}: ${event.name}.${field.wireName} uses unsupported typeToken ${JSON.stringify(field.typeToken)}; supported: ${[...SUPPORTED_FIELD_TYPES].join(", ")}`,
         );
       }
     }
@@ -161,7 +178,6 @@ export interface GenerateOptions {
 export function generate(options: GenerateOptions): void {
   const manifest = readManifest(options.manifestPath);
   const outDir = resolve(options.outDir);
-  // Full overwrite: codegen never patches an existing tree.
   rmSync(outDir, { recursive: true, force: true });
   mkdirSync(outDir, { recursive: true });
 
@@ -199,31 +215,83 @@ function renderManifestModule(
 }
 
 function renderEventsModule(manifest: BatpakTsManifest): string {
-  const lines: string[] = [FILE_HEADER];
+  const lines: string[] = [
+    FILE_HEADER,
+    `import * as Schema from "effect/Schema";`,
+    "",
+  ];
   for (const event of manifest.events) {
-    lines.push(`/** Source: ${event.rustType}; category=${event.category}, typeId=${event.typeId} */`);
-    lines.push(`export interface ${event.tsName} {`);
+    lines.push(
+      `/** Source: ${event.rustType}; category=${event.category}, typeId=${event.typeId} */`,
+    );
+    lines.push(`export const ${event.tsName} = Schema.Struct({`);
     for (const field of event.fields) {
-      lines.push(`  ${field.wireName}: ${tsTypeForToken(field.typeToken)};`);
+      lines.push(`  ${field.wireName}: ${schemaForToken(field.typeToken)},`);
     }
-    lines.push(`}`);
+    lines.push(`});`);
+    // Type alias derived from the schema (same name; lives in type
+    // namespace).
+    lines.push(`// eslint-disable-next-line @typescript-eslint/no-redeclare`);
+    lines.push(`export type ${event.tsName} = typeof ${event.tsName}.Type;`);
     lines.push("");
+
     const constSafeName = constCase(event.tsName);
+    // CRITICAL: Rust's rmp-serde::to_vec_named emits struct fields in
+    // DECLARATION order; serde_json::to_value uses BTreeMap (alphabetical).
+    // The TS canonical encoder iterates object insertion order. So the
+    // fixture object literal MUST have keys in declaration order — i.e.
+    // the order of the `fields` array — to round-trip against the golden
+    // hex.
+    const orderedFixture = reorderObjectByFields(event.fixtureValue, event.fields);
     lines.push(
       `export const ${constSafeName}_GOLDEN_HEX = ${JSON.stringify(event.goldenPayloadHex)} as const;`,
     );
     lines.push(
-      `export const ${constSafeName}_FIXTURE: ${event.tsName} = ${JSON.stringify(event.fixtureValue, null, 2)};`,
+      `export const ${constSafeName}_FIXTURE: ${event.tsName} = ${JSON.stringify(orderedFixture, null, 2)};`,
     );
     lines.push("");
   }
   return lines.join("\n");
 }
 
+/**
+ * Reorder a JSON-shaped fixture object so its keys appear in the
+ * declaration order specified by `fields[*].wireName`. Required because
+ * the Rust manifest exporter goes through `serde_json::to_value` which
+ * loses declaration order to BTreeMap (alphabetical).
+ *
+ * Unknown keys (none expected) are preserved at the end in their
+ * original order, so a future field added in Rust but not yet in
+ * `fields` would still appear.
+ */
+function reorderObjectByFields(
+  value: unknown,
+  fields: readonly ManifestField[],
+): unknown {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return value;
+  }
+  const obj = value as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const field of fields) {
+    if (field.wireName in obj) {
+      out[field.wireName] = obj[field.wireName];
+    }
+  }
+  for (const key of Object.keys(obj)) {
+    if (!(key in out)) {
+      out[key] = obj[key];
+    }
+  }
+  return out;
+}
+
 function renderOperationsModule(manifest: BatpakTsManifest): string {
-  const lines: string[] = [FILE_HEADER];
-  lines.push(`import type { ${manifest.events.map((e) => e.tsName).join(", ")} } from "./events.js";`);
-  lines.push("");
+  const lines: string[] = [
+    FILE_HEADER,
+    `import type { ${manifest.events.map((e) => e.tsName).join(", ")} } from "./events.js";`,
+    "",
+  ];
   for (const op of manifest.operations) {
     const requestEvent = manifest.events.find((e) => e.name === op.inputEvent);
     const responseEvent = manifest.events.find((e) => e.name === op.outputEvent);
@@ -233,7 +301,7 @@ function renderOperationsModule(manifest: BatpakTsManifest): string {
         `operation ${op.name}: missing referenced event (${op.inputEvent} or ${op.outputEvent})`,
       );
     }
-    const constName = constCase(op.name).replace(/\./gu, "_").toUpperCase();
+    const constName = constCase(op.name.replace(/\./gu, "_")).toUpperCase();
     lines.push(`/** Source: syncbat operation "${op.name}" */`);
     lines.push(`export const ${constName} = {`);
     lines.push(`  name: ${JSON.stringify(op.name)},`);
@@ -244,12 +312,16 @@ function renderOperationsModule(manifest: BatpakTsManifest): string {
     lines.push(`  receiptKind: ${JSON.stringify(op.receiptKind)},`);
     lines.push(`  goldenInputHex: ${JSON.stringify(op.goldenInputHex)},`);
     lines.push(`  goldenOutputHex: ${JSON.stringify(op.goldenOutputHex)},`);
-    lines.push(`  goldenRequestFrameHex: ${JSON.stringify(op.goldenRequestFrameHex)},`);
+    lines.push(
+      `  goldenRequestFrameHex: ${JSON.stringify(op.goldenRequestFrameHex)},`,
+    );
     lines.push(`  goldenOkFrameHex: ${JSON.stringify(op.goldenOkFrameHex)},`);
     lines.push(`  errorFixture: {`);
     lines.push(`    name: ${JSON.stringify(op.errorFixture.name)},`);
     lines.push(`    code: ${JSON.stringify(op.errorFixture.code)},`);
-    lines.push(`    requestFrameHex: ${JSON.stringify(op.errorFixture.requestFrameHex)},`);
+    lines.push(
+      `    requestFrameHex: ${JSON.stringify(op.errorFixture.requestFrameHex)},`,
+    );
     lines.push(`    errFrameHex: ${JSON.stringify(op.errorFixture.errFrameHex)},`);
     lines.push(`    messageUtf8: ${JSON.stringify(op.errorFixture.messageUtf8)},`);
     lines.push(`  },`);
@@ -272,21 +344,64 @@ function renderIndexModule(): string {
   ].join("\n");
 }
 
-function tsTypeForToken(token: string): string {
+const SAFE_MIN = Number.MIN_SAFE_INTEGER;
+const SAFE_MAX = Number.MAX_SAFE_INTEGER;
+
+function schemaForToken(token: string): string {
+  switch (token) {
+    case "string":
+      return "Schema.String";
+    case "u8":
+      return checkedNumber(0, 255);
+    case "u16":
+      return checkedNumber(0, 65535);
+    case "u32":
+      return checkedNumber(0, 4294967295);
+    case "u64-safe":
+    case "u64-millis":
+      return checkedNumber(0, SAFE_MAX);
+    case "i64-microseconds":
+      return checkedNumber(SAFE_MIN, SAFE_MAX);
+    case "option<string>":
+      return "Schema.NullOr(Schema.String)";
+    case "map<string,string>":
+      return "Schema.Record(Schema.String, Schema.String)";
+    default:
+      throw new CodegenError(
+        "unsupported_field_type",
+        `internal: schemaForToken called with unknown token ${JSON.stringify(token)}`,
+      );
+  }
+}
+
+function checkedNumber(min: number, max: number): string {
+  return `Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: ${min}, maximum: ${max} })))`;
+}
+
+function constCase(input: string): string {
+  return input.replace(/([a-z0-9])([A-Z])/gu, "$1_$2").toUpperCase();
+}
+
+// Re-export the TS type generator for unit tests.
+export function tsTypeForToken(token: string): string {
   switch (token) {
     case "string":
       return "string";
+    case "u8":
+    case "u16":
+    case "u32":
+    case "u64-safe":
     case "u64-millis":
-      // Safe-JS-integer-bounded; parity tests assert <= Number.MAX_SAFE_INTEGER.
+    case "i64-microseconds":
       return "number";
+    case "option<string>":
+      return "string | null";
+    case "map<string,string>":
+      return "Record<string, string>";
     default:
       throw new CodegenError(
         "unsupported_field_type",
         `internal: tsTypeForToken called with unknown token ${JSON.stringify(token)}`,
       );
   }
-}
-
-function constCase(input: string): string {
-  return input.replace(/([a-z0-9])([A-Z])/gu, "$1_$2").toUpperCase();
 }

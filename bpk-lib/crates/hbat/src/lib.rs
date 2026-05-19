@@ -21,12 +21,25 @@
 //!   binary. The explicit registry function is Phase 0 plumbing and will
 //!   be replaced once a cross-binary descriptor-discovery story exists.
 
+/// `bank.commit` and `event.get` payload types + descriptors.
+pub mod bank;
+/// Runtime handlers for [`bank`] operations. Capture `Arc<Store>`; pulled
+/// into the binary via [`crate::main`] and not part of the library's
+/// pure-data surface that `xtask` depends on.
+pub mod handlers;
 /// Heartbeat payload types and the registered operation descriptor.
 pub mod heartbeat;
 /// Manifest snapshot consumed by `xtask export-ts-manifest` and by the
 /// `hbat` binary.
 pub mod manifest;
 
+pub use bank::{
+    BankCommitAck, BankCommitRequest, EventGetAck, EventGetRequest, BANK_COMMIT_DESCRIPTOR,
+    BANK_COMMIT_INPUT_SCHEMA_REF, BANK_COMMIT_OPERATION_NAME, BANK_COMMIT_OUTPUT_SCHEMA_REF,
+    BANK_COMMIT_RECEIPT_KIND, EVENT_GET_DESCRIPTOR, EVENT_GET_INPUT_SCHEMA_REF,
+    EVENT_GET_OPERATION_NAME, EVENT_GET_OUTPUT_SCHEMA_REF, EVENT_GET_RECEIPT_KIND,
+};
+pub use handlers::{BankCommitHandler, EventGetHandler};
 pub use heartbeat::{
     handle_heartbeat, HeartbeatHandler, SystemHeartbeatAck, SystemHeartbeatRequest,
     HEARTBEAT_DESCRIPTOR, HEARTBEAT_OPERATION_NAME,

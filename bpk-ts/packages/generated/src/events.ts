@@ -2,10 +2,14 @@
 // Re-run `pnpm -w generate` (or `cargo xtask export-ts-manifest` followed
 // by codegen) to refresh this directory.
 
+import * as Schema from "effect/Schema";
+
 /** Source: hbat::heartbeat::SystemHeartbeatRequest; category=15, typeId=2561 */
-export interface SystemHeartbeatRequest {
-  nonce: string;
-}
+export const SystemHeartbeatRequest = Schema.Struct({
+  nonce: Schema.String,
+});
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export type SystemHeartbeatRequest = typeof SystemHeartbeatRequest.Type;
 
 export const SYSTEM_HEARTBEAT_REQUEST_GOLDEN_HEX = "81a56e6f6e6365b66865617274626561742d666978747572652d30303031" as const;
 export const SYSTEM_HEARTBEAT_REQUEST_FIXTURE: SystemHeartbeatRequest = {
@@ -13,13 +17,103 @@ export const SYSTEM_HEARTBEAT_REQUEST_FIXTURE: SystemHeartbeatRequest = {
 };
 
 /** Source: hbat::heartbeat::SystemHeartbeatAck; category=15, typeId=2562 */
-export interface SystemHeartbeatAck {
-  nonce: string;
-  server_ts_ms: number;
-}
+export const SystemHeartbeatAck = Schema.Struct({
+  nonce: Schema.String,
+  server_ts_ms: Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 9007199254740991 }))),
+});
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export type SystemHeartbeatAck = typeof SystemHeartbeatAck.Type;
 
 export const SYSTEM_HEARTBEAT_ACK_GOLDEN_HEX = "82a56e6f6e6365b66865617274626561742d666978747572652d30303031ac7365727665725f74735f6d73cf0000018bcfe56800" as const;
 export const SYSTEM_HEARTBEAT_ACK_FIXTURE: SystemHeartbeatAck = {
   "nonce": "heartbeat-fixture-0001",
   "server_ts_ms": 1700000000000
+};
+
+/** Source: hbat::bank::BankCommitRequest; category=15, typeId=2576 */
+export const BankCommitRequest = Schema.Struct({
+  entity: Schema.String,
+  scope: Schema.String,
+  kind_category: Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 255 }))),
+  kind_type_id: Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 65535 }))),
+  payload_hex: Schema.String,
+});
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export type BankCommitRequest = typeof BankCommitRequest.Type;
+
+export const BANK_COMMIT_REQUEST_GOLDEN_HEX = "85a6656e74697479ac666978747572653a62616e6ba573636f7065ad666978747572652d73636f7065ad6b696e645f63617465676f72790fac6b696e645f747970655f6964cd0a01ab7061796c6f61645f686578d93c383161353665366636653633363562363638363536313732373436323635363137343264363636393738373437353732363532643330333033303331" as const;
+export const BANK_COMMIT_REQUEST_FIXTURE: BankCommitRequest = {
+  "entity": "fixture:bank",
+  "scope": "fixture-scope",
+  "kind_category": 15,
+  "kind_type_id": 2561,
+  "payload_hex": "81a56e6f6e6365b66865617274626561742d666978747572652d30303031"
+};
+
+/** Source: hbat::bank::BankCommitAck; category=15, typeId=2577 */
+export const BankCommitAck = Schema.Struct({
+  event_id_hex: Schema.String,
+  sequence: Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 9007199254740991 }))),
+  content_hash_hex: Schema.String,
+  key_id_hex: Schema.String,
+  signature_hex: Schema.NullOr(Schema.String),
+  extensions: Schema.Record(Schema.String, Schema.String),
+});
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export type BankCommitAck = typeof BankCommitAck.Type;
+
+export const BANK_COMMIT_ACK_GOLDEN_HEX = "86ac6576656e745f69645f686578d9203031323334353637383961626364656630313233343536373839616263646566a873657175656e63652ab0636f6e74656e745f686173685f686578d94061616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161aa6b65795f69645f686578d94062626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262ad7369676e61747572655f686578c0aa657874656e73696f6e7381b273796e636261742e64657363726970746f72b636323631366536623265363336663664366436393734" as const;
+export const BANK_COMMIT_ACK_FIXTURE: BankCommitAck = {
+  "event_id_hex": "0123456789abcdef0123456789abcdef",
+  "sequence": 42,
+  "content_hash_hex": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "key_id_hex": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "signature_hex": null,
+  "extensions": {
+    "syncbat.descriptor": "62616e6b2e636f6d6d6974"
+  }
+};
+
+/** Source: hbat::bank::EventGetRequest; category=15, typeId=2592 */
+export const EventGetRequest = Schema.Struct({
+  event_id_hex: Schema.String,
+});
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export type EventGetRequest = typeof EventGetRequest.Type;
+
+export const EVENT_GET_REQUEST_GOLDEN_HEX = "81ac6576656e745f69645f686578d9203031323334353637383961626364656630313233343536373839616263646566" as const;
+export const EVENT_GET_REQUEST_FIXTURE: EventGetRequest = {
+  "event_id_hex": "0123456789abcdef0123456789abcdef"
+};
+
+/** Source: hbat::bank::EventGetAck; category=15, typeId=2593 */
+export const EventGetAck = Schema.Struct({
+  event_id_hex: Schema.String,
+  sequence: Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 9007199254740991 }))),
+  timestamp_us: Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: -9007199254740991, maximum: 9007199254740991 }))),
+  correlation_id_hex: Schema.String,
+  causation_id_hex: Schema.NullOr(Schema.String),
+  kind_category: Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 255 }))),
+  kind_type_id: Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 65535 }))),
+  entity: Schema.String,
+  scope: Schema.String,
+  payload_hex: Schema.String,
+  content_hash_hex: Schema.String,
+});
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export type EventGetAck = typeof EventGetAck.Type;
+
+export const EVENT_GET_ACK_GOLDEN_HEX = "8bac6576656e745f69645f686578d9203031323334353637383961626364656630313233343536373839616263646566a873657175656e63652aac74696d657374616d705f7573cf00060a24181e4000b2636f7272656c6174696f6e5f69645f686578d9203030303030303030303030303030303030303030303030303030303030303030b0636175736174696f6e5f69645f686578c0ad6b696e645f63617465676f72790fac6b696e645f747970655f6964cd0a01a6656e74697479ac666978747572653a62616e6ba573636f7065ad666978747572652d73636f7065ab7061796c6f61645f686578d93c383161353665366636653633363562363638363536313732373436323635363137343264363636393738373437353732363532643330333033303331b0636f6e74656e745f686173685f686578d94061616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161" as const;
+export const EVENT_GET_ACK_FIXTURE: EventGetAck = {
+  "event_id_hex": "0123456789abcdef0123456789abcdef",
+  "sequence": 42,
+  "timestamp_us": 1700000000000000,
+  "correlation_id_hex": "00000000000000000000000000000000",
+  "causation_id_hex": null,
+  "kind_category": 15,
+  "kind_type_id": 2561,
+  "entity": "fixture:bank",
+  "scope": "fixture-scope",
+  "payload_hex": "81a56e6f6e6365b66865617274626561742d666978747572652d30303031",
+  "content_hash_hex": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 };

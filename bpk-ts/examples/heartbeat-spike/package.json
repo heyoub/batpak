@@ -13,6 +13,7 @@
   "dependencies": {
     "@batpak/canonical": "workspace:*",
     "@batpak/client": "workspace:*",
-    "@batpak/generated": "workspace:*"
+    "@batpak/generated": "workspace:*",
+    "@batpak/schema": "workspace:*"
   }
 }

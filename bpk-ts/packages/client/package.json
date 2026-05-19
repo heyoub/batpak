@@ -14,7 +14,7 @@
   },
   "scripts": {
     "build": "tsc -b",
-    "test": "vitest run --root . --passWithNoTests",
+    "test": "vitest run --root .",
     "clean": "rm -rf dist"
   },
   "dependencies": {
