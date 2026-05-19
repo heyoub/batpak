@@ -80,7 +80,7 @@ fn entry_point_for(
 ) -> HlcPoint {
     entries
         .iter()
-        .find(|entry| entry.event_id() == receipt.event_id)
+        .find(|entry| entry.event_id() == u128::from(receipt.event_id))
         .map(point)
         .expect("receipt event must be query-visible before failure")
 }
@@ -135,7 +135,7 @@ fn durable_frontier_covers_recovered_state_after_device_failure_cadence_1000() {
     let ids = event_ids(&entries);
 
     assert!(
-        ids.contains(&durable.event_id),
+        ids.contains(&u128::from(durable.event_id)),
         "PROPERTY: fsynced lower-bound event must recover"
     );
     let recovered_durable_hlc = reopened.frontier().durable_hlc;
@@ -219,10 +219,10 @@ fn post_fsync_events_survive_device_failure_durability_floor() {
         "PROPERTY: device failure after fsync must not drop durable events"
     );
     for receipt in receipts {
+        let raw = u128::from(receipt.event_id);
         assert!(
-            ids.contains(&receipt.event_id),
-            "PROPERTY: fsynced event {} must recover",
-            receipt.event_id
+            ids.contains(&raw),
+            "PROPERTY: fsynced event {raw} must recover",
         );
     }
 }

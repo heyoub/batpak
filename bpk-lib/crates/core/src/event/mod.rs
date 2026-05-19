@@ -66,7 +66,7 @@ impl<P> Event<P> {
     }
 
     /// Returns the unique event identifier.
-    pub fn event_id(&self) -> u128 {
+    pub fn event_id(&self) -> crate::id::EventId {
         self.header.event_id
     }
 

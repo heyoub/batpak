@@ -76,7 +76,7 @@ fn append_receipt_to_ack(receipt: &AppendReceipt) -> BankCommitAck {
         .map(|(key, value)| (key.as_str().to_owned(), encode_hex_str(value)))
         .collect();
     BankCommitAck {
-        event_id_hex: format!("{:032x}", receipt.event_id),
+        event_id_hex: format!("{:032x}", u128::from(receipt.event_id)),
         sequence: receipt.sequence,
         content_hash_hex: encode_hex_str(&receipt.content_hash),
         key_id_hex: encode_hex_str(&receipt.key_id),
@@ -116,19 +116,22 @@ fn handle_event_get(store: &Store, input: &[u8]) -> HandlerResult {
     let event_id = u128::from_be_bytes(be);
 
     let stored = store
-        .read_raw(event_id)
+        .read_raw(batpak::id::EventId::from(event_id))
         .map_err(|error| HandlerError::failed(format!("read event: {error}")))?;
 
     let ack = EventGetAck {
-        event_id_hex: format!("{:032x}", stored.event.header.event_id),
+        event_id_hex: format!("{:032x}", u128::from(stored.event.header.event_id)),
         sequence: 0,
         timestamp_us: stored.event.header.timestamp_us,
-        correlation_id_hex: format!("{:032x}", stored.event.header.correlation_id),
+        correlation_id_hex: format!(
+            "{:032x}",
+            u128::from(stored.event.header.correlation_id)
+        ),
         causation_id_hex: stored
             .event
             .header
             .causation_id
-            .map(|c| format!("{c:032x}")),
+            .map(|c| format!("{:032x}", u128::from(c))),
         kind_category: stored.event.header.event_kind.category(),
         kind_type_id: stored.event.header.event_kind.type_id(),
         entity: stored.coordinate.entity().to_owned(),

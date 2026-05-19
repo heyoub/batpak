@@ -162,8 +162,8 @@ fn index_entry_causation_helpers() {
             &coord,
             kind,
             &serde_json::json!({"evt": "created"}),
-            root.event_id,
-            root.event_id,
+            batpak::id::CorrelationId::from(u128::from(root.event_id)),
+            batpak::id::CausationId::from(u128::from(root.event_id)),
         )
         .expect("reaction");
 
@@ -179,11 +179,11 @@ fn index_entry_causation_helpers() {
 
     let root_entry = entries
         .iter()
-        .find(|e| e.event_id() == root.event_id)
+        .find(|e| e.event_id() == u128::from(root.event_id))
         .expect("find root");
     let root_entry: &batpak::store::index::IndexEntry = root_entry;
-    assert_eq!(root_entry.event_id(), root.event_id);
-    assert_eq!(root_entry.correlation_id(), root.event_id);
+    assert_eq!(root_entry.event_id(), u128::from(root.event_id));
+    assert_eq!(root_entry.correlation_id(), u128::from(root.event_id));
     assert_eq!(root_entry.causation_id(), None);
     assert_eq!(root_entry.coord(), &coord);
     assert_eq!(root_entry.event_kind(), kind);
@@ -215,12 +215,14 @@ fn index_entry_causation_helpers() {
 
     let react_entry = entries
         .iter()
-        .find(|e| e.event_id() == reaction.event_id)
+        .find(|e| e.event_id() == u128::from(reaction.event_id))
         .expect("find reaction");
     let reaction_is_root_cause = react_entry.is_root_cause();
     let reaction_is_correlated = react_entry.is_correlated();
     let reaction_is_caused_by_root = react_entry.is_caused_by(root.event_id);
-    let reaction_is_caused_by_unrelated = react_entry.is_caused_by(root.event_id.wrapping_add(1));
+    let reaction_is_caused_by_unrelated = react_entry.is_caused_by(batpak::id::EventId::from(
+        u128::from(root.event_id).wrapping_add(1),
+    ));
     assert!(
         !reaction_is_root_cause,
         "PROPERTY: a reaction event with an explicit cause must not be identified as a root cause.\n\

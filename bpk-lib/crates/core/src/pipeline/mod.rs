@@ -166,7 +166,12 @@ impl CommitMetadata {
     /// Returns [`StoreError::InvalidCommitMetadata`] if the append receipt
     /// would produce invalid commit metadata.
     pub fn from_append_receipt(receipt: &crate::store::AppendReceipt) -> Result<Self, StoreError> {
-        Self::new(receipt.event_id, receipt.sequence, receipt.content_hash)
+        use crate::id::EntityIdType;
+        Self::new(
+            receipt.event_id.as_u128(),
+            receipt.sequence,
+            receipt.content_hash,
+        )
     }
 
     /// Validate that this metadata represents a legal commit.

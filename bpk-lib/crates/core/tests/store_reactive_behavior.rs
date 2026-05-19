@@ -56,7 +56,9 @@ fn pipeline_commit_bypass_persists() {
         .expect("commit_bypass should retain bypass audit");
 
     // Verify persisted
-    let stored = store.get(committed_event_id).expect("get");
+    let stored = store
+        .get(batpak::id::EventId::from(committed_event_id))
+        .expect("get");
     assert_eq!(
         stored.event.event_kind(),
         kind,
@@ -234,8 +236,8 @@ fn reactive_subscribe_react_append_pattern() {
                 &react_coord,
                 react_kind,
                 &react_payload,
-                root_receipt.event_id,
-                root_receipt.event_id,
+                batpak::id::CorrelationId::from(u128::from(root_receipt.event_id)),
+                batpak::id::CausationId::from(u128::from(root_receipt.event_id)),
             )
             .expect("append reaction");
     }

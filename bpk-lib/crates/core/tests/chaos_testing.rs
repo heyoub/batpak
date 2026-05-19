@@ -360,7 +360,7 @@ fn chaos_idempotency_concurrent() {
                 .name(format!("chaos-idem-{t}"))
                 .spawn(move || {
                     let opts = AppendOptions {
-                        idempotency_key: Some(idem_key),
+                        idempotency_key: Some(batpak::id::IdempotencyKey::from(idem_key)),
                         ..Default::default()
                     };
                     store.append_with_options(&coord, kind, &serde_json::json!({"thread": t}), opts)
@@ -465,12 +465,12 @@ fn chaos_rapid_segment_rotation() {
     );
 
     // Spot-check first and last events
-    let first = store.get(entries[0].event_id()).expect("first event");
+    let first = store.get(batpak::id::EventId::from(entries[0].event_id())).expect("first event");
     let last = store
-        .get(entries[entries.len() - 1].event_id())
+        .get(batpak::id::EventId::from(entries[entries.len() - 1].event_id()))
         .expect("last event");
     assert_eq!(
-        first.event.event_id(),
+        u128::from(first.event.event_id()),
         entries[0].event_id(),
         "CHAOS PROPERTY: store.get() for the first indexed event_id must return the matching event.\n\
          Investigate: src/store/segment/scan.rs get(), src/store/index/mod.rs lookup offset.\n\
@@ -478,7 +478,7 @@ fn chaos_rapid_segment_rotation() {
          Run: cargo test --test chaos_testing chaos_rapid_segment_rotation"
     );
     assert_eq!(
-        last.event.event_id(),
+        u128::from(last.event.event_id()),
         entries[entries.len() - 1].event_id(),
         "CHAOS PROPERTY: store.get() for the last indexed event_id must return the matching event.\n\
          Investigate: src/store/segment/scan.rs get(), src/store/segment/mod.rs seek by offset.\n\
@@ -961,9 +961,11 @@ fn chaos_truncated_segment_recovers() {
 
     // All recovered events must be readable via get()
     for entry in &recovered_entries {
-        let fetched = store2.get(entry.event_id()).expect("get recovered event");
+        let fetched = store2
+            .get(batpak::id::EventId::from(entry.event_id()))
+            .expect("get recovered event");
         assert_eq!(
-            fetched.event.event_id(),
+            u128::from(fetched.event.event_id()),
             entry.event_id(),
             "CHAOS PROPERTY: store.get() for a recovered event_id must return the matching event.\n\
              Investigate: src/store/segment/scan.rs get(), src/store/index/mod.rs offset lookup.\n\

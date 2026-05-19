@@ -575,10 +575,15 @@ fn entry_from_scan(
     let entity_id = interner.intern(&se.entity);
     let scope_id = interner.intern(&se.scope);
     let clock = se.header.position.sequence;
+    use crate::id::EntityIdType;
     Ok(IndexEntry {
-        event_id: se.header.event_id,
-        correlation_id: se.header.correlation_id,
-        causation_id: se.header.causation_id.filter(|&id| id != 0),
+        event_id: se.header.event_id.as_u128(),
+        correlation_id: se.header.correlation_id.as_u128(),
+        causation_id: se
+            .header
+            .causation_id
+            .map(|id| id.as_u128())
+            .filter(|&id| id != 0),
         coord,
         entity_id,
         scope_id,
@@ -799,10 +804,11 @@ mod tests {
     fn scanned_summary(
         entries: &[crate::store::segment::scan::ScannedIndexEntry],
     ) -> Vec<ScanSummaryRow> {
+        use crate::id::EntityIdType;
         entries
             .iter()
             .map(|entry| ScanSummaryRow {
-                event_id: entry.header.event_id,
+                event_id: entry.header.event_id.as_u128(),
                 entity: entry.entity.clone(),
                 scope: entry.scope.clone(),
                 category: entry.header.event_kind.category(),
@@ -1069,9 +1075,9 @@ mod tests {
         let interner = StringInterner::new();
         let se = ScannedIndexEntry {
             header: EventHeader {
-                event_id: 1,
-                correlation_id: 1,
-                causation_id: Some(0),
+                event_id: crate::id::EventId::from(1u128),
+                correlation_id: crate::id::CorrelationId::from(1u128),
+                causation_id: Some(crate::id::CausationId::from(0u128)),
                 timestamp_us: 0,
                 position: DagPosition::new(0, 0, 1),
                 payload_size: 0,
@@ -1104,9 +1110,9 @@ mod tests {
         let interner = StringInterner::new();
         let se = ScannedIndexEntry {
             header: EventHeader {
-                event_id: 2,
-                correlation_id: 1,
-                causation_id: Some(99),
+                event_id: crate::id::EventId::from(2u128),
+                correlation_id: crate::id::CorrelationId::from(1u128),
+                causation_id: Some(crate::id::CausationId::from(99u128)),
                 timestamp_us: 0,
                 position: DagPosition::new(0, 0, 1),
                 payload_size: 0,

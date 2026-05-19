@@ -24,8 +24,9 @@ fn append_close_completed_event(store: &Store<Open>) -> Result<(), StoreError> {
     let close_hlc = store.watermark_handle.lock().snapshot().visible_hlc;
     let coord = Coordinate::new("batpak:store", "batpak:lifecycle")?;
     let submission = AppendSubmission::with_options(
-        AppendOptions::default()
-            .with_idempotency(crate::id::generate_v7_id_with_clock(store.runtime.clock())),
+        AppendOptions::default().with_idempotency(crate::id::IdempotencyKey::from(
+            crate::id::generate_v7_id_with_clock(store.runtime.clock()),
+        )),
         store.runtime.clock(),
     );
     submission.validate_route(store)?;

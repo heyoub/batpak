@@ -36,7 +36,7 @@ fn reused_coordinate_batch() -> Vec<BatchAppendItem> {
                 templates[idx % templates.len()].clone(),
                 KIND,
                 &serde_json::json!({"batch": "reused", "i": idx, "bucket": idx % 4}),
-                AppendOptions::new().with_idempotency(0xA000 + idx as u128),
+                AppendOptions::new().with_idempotency(batpak::id::IdempotencyKey::from(0xA000 + idx as u128)),
                 CausationRef::None,
             )
             .expect("reused batch item")
@@ -52,7 +52,7 @@ fn fresh_coordinate_batch() -> Vec<BatchAppendItem> {
                 Coordinate::new(entity, scope).expect("fresh coordinate"),
                 KIND,
                 &serde_json::json!({"batch": "fresh", "i": idx, "bucket": idx % 4}),
-                AppendOptions::new().with_idempotency(0xB000 + idx as u128),
+                AppendOptions::new().with_idempotency(batpak::id::IdempotencyKey::from(0xB000 + idx as u128)),
                 CausationRef::None,
             )
             .expect("fresh batch item")
@@ -77,7 +77,7 @@ fn duplicate_heavy_batch() -> Vec<BatchAppendItem> {
                 Coordinate::new(entity, scope).expect("duplicate-heavy coordinate"),
                 KIND,
                 &serde_json::json!({"i": idx, "entity": entity, "scope": scope}),
-                AppendOptions::new().with_idempotency(0xC000 + idx as u128),
+                AppendOptions::new().with_idempotency(batpak::id::IdempotencyKey::from(0xC000 + idx as u128)),
                 CausationRef::None,
             )
             .expect("duplicate-heavy item")

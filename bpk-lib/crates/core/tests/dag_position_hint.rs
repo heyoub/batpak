@@ -150,7 +150,7 @@ fn idempotent_replay_preserves_original_position_hint() {
             data_kind(),
             &json!({"x": 1}),
             AppendOptions::new()
-                .with_idempotency(key)
+                .with_idempotency(batpak::id::IdempotencyKey::from(key))
                 .with_position_hint(AppendPositionHint::new(4, 2)),
         )
         .expect("first append");
@@ -160,7 +160,7 @@ fn idempotent_replay_preserves_original_position_hint() {
             data_kind(),
             &json!({"x": 2}),
             AppendOptions::new()
-                .with_idempotency(key)
+                .with_idempotency(batpak::id::IdempotencyKey::from(key))
                 .with_position_hint(AppendPositionHint::new(9, 9)),
         )
         .expect("idempotent replay");

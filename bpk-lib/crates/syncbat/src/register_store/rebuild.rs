@@ -48,7 +48,7 @@ pub(super) fn fold_catalog_entries<State>(
 
     let mut entries = BTreeMap::<String, CatalogEntryState>::new();
     for hit in hits {
-        let stored = store.get(hit.event_id())?;
+        let stored = store.get(batpak::id::EventId::from(hit.event_id()))?;
         let row = stored.event.decode_typed::<RegisterOperationRowV1>()?;
         let action = row.action_kind()?;
         match action {

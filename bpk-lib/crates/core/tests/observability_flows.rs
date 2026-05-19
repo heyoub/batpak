@@ -211,7 +211,7 @@ fn named_store_flows_emit_traceable_events() {
                 &coord,
                 kind,
                 &serde_json::json!({"n": 2}),
-                batpak::store::AppendOptions::new().with_idempotency(0xBEEF),
+                batpak::store::AppendOptions::new().with_idempotency(batpak::id::IdempotencyKey::from(0xBEEF)),
             )
             .expect("append_with_options");
         let _: Option<Counter> = store
@@ -506,8 +506,8 @@ fn append_reaction_emits_distinct_flow_telemetry() {
                 &Coordinate::new("entity:obs:reaction", "scope:test").expect("coord"),
                 EventKind::custom(0xF, 2),
                 &serde_json::json!({"from": receipt.event_id.to_string()}),
-                receipt.event_id,
-                receipt.event_id,
+                batpak::id::CorrelationId::from(u128::from(receipt.event_id)),
+                batpak::id::CausationId::from(u128::from(receipt.event_id)),
             )
             .expect("append reaction");
         store.close().expect("close");

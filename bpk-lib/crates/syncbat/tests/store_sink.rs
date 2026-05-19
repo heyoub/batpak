@@ -116,7 +116,7 @@ fn store_receipt_sink_persists_envelope_and_signed_extensions() {
 
     let hits = store.query(&Region::entity("syncbat:receipt"));
     assert_eq!(hits.len(), 1);
-    assert_eq!(hits[0].event_id(), fields.event_id);
+    assert_eq!(hits[0].event_id(), u128::from(fields.event_id));
     assert_eq!(hits[0].global_sequence(), fields.sequence);
     assert_eq!(hits[0].hash_chain().event_hash, fields.content_hash);
     assert_eq!(hits[0].receipt_extensions(), &fields.extensions);
@@ -159,7 +159,7 @@ fn core_with_store_receipt_sink_banks_success_receipt_once() {
 
     let hits = store.query(&Region::entity("syncbat:receipt"));
     assert_eq!(hits.len(), 1);
-    assert_eq!(hits[0].event_id(), fields.event_id);
+    assert_eq!(hits[0].event_id(), u128::from(fields.event_id));
     assert_eq!(hits[0].receipt_extensions(), &fields.extensions);
 
     drop(core);

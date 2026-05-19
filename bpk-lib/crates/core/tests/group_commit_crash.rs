@@ -41,7 +41,7 @@ fn partial_batch_crash_idempotent_retry() {
 
     // Phase 1: write events 0..10
     for i in 0u32..10 {
-        let opts = AppendOptions::new().with_idempotency(i as u128 + 1);
+        let opts = AppendOptions::new().with_idempotency(batpak::id::IdempotencyKey::from(i as u128 + 1));
         store
             .append_with_options(&coord, kind, &serde_json::json!({"i": i}), opts)
             .expect("append phase 1");
@@ -54,7 +54,7 @@ fn partial_batch_crash_idempotent_retry() {
         .with_sync_every_n_events(1);
     let store2 = Store::open(config2).expect("reopen");
     for i in 5u32..15 {
-        let opts = AppendOptions::new().with_idempotency(i as u128 + 1);
+        let opts = AppendOptions::new().with_idempotency(batpak::id::IdempotencyKey::from(i as u128 + 1));
         store2
             .append_with_options(&coord, kind, &serde_json::json!({"i": i}), opts)
             .expect("append phase 2");

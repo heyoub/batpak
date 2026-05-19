@@ -182,7 +182,8 @@ fn truncated_segment_mid_frame_does_not_crash_reopen() {
         .append(&coord, KIND, &serde_json::json!({"post_truncation": true}))
         .expect("append after corrupt reopen");
     assert_ne!(
-        post.event_id, 0,
+        post.event_id,
+        batpak::id::EventId::from(0u128),
         "PROPERTY: post-truncation append must succeed with a non-zero event id"
     );
     store.close().expect("close after recovery");

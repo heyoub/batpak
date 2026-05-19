@@ -52,8 +52,8 @@ fn append_reaction_links_causation() {
             &coord,
             kind_evt,
             &serde_json::json!({"evt": "created"}),
-            root.event_id,
-            root.event_id,
+            batpak::id::CorrelationId::from(u128::from(root.event_id)),
+            batpak::id::CausationId::from(u128::from(root.event_id)),
         )
         .expect("reaction append");
 
@@ -136,7 +136,7 @@ fn idempotency_returns_same_receipt() {
 
     let key: u128 = 0xDEAD_BEEF_CAFE_BABE_1234_5678_9ABC_DEF0;
     let opts = batpak::store::AppendOptions {
-        idempotency_key: Some(key),
+        idempotency_key: Some(batpak::id::IdempotencyKey::from(key)),
         ..Default::default()
     };
 
@@ -233,14 +233,16 @@ fn with_correlation_sets_header_correlation_id() {
     let kind = EventKind::custom(0xF, 1);
 
     let custom_corr: u128 = 0xDEAD_BEEF_CAFE_BABE_1234_5678_9ABC_DEF0;
-    let opts = AppendOptions::new().with_correlation(custom_corr);
+    let opts =
+        AppendOptions::new().with_correlation(batpak::id::CorrelationId::from(custom_corr));
     let receipt = store
         .append_with_options(&coord, kind, &"corr_test", opts)
         .expect("append with correlation");
 
     let event = store.get(receipt.event_id).expect("get event");
     assert_eq!(
-        event.event.header.correlation_id, custom_corr,
+        event.event.header.correlation_id,
+        batpak::id::CorrelationId::from(custom_corr),
         "WITH_CORRELATION: correlation_id on stored event should match the value \
          set via AppendOptions::with_correlation().\n\
          Investigate: src/store/mod.rs append_with_options → writer.rs AppendGuards.\n\
@@ -259,7 +261,7 @@ fn with_causation_sets_header_causation_id() {
     let kind = EventKind::custom(0xF, 1);
 
     let custom_cause: u128 = 0x1111_2222_3333_4444_5555_6666_7777_8888;
-    let opts = AppendOptions::new().with_causation(custom_cause);
+    let opts = AppendOptions::new().with_causation(batpak::id::CausationId::from(custom_cause));
     let receipt = store
         .append_with_options(&coord, kind, &"cause_test", opts)
         .expect("append with causation");
@@ -267,7 +269,7 @@ fn with_causation_sets_header_causation_id() {
     let event = store.get(receipt.event_id).expect("get event");
     assert_eq!(
         event.event.header.causation_id,
-        Some(custom_cause),
+        Some(batpak::id::CausationId::from(custom_cause)),
         "WITH_CAUSATION: causation_id on stored event should match the value \
          set via AppendOptions::with_causation().\n\
          Investigate: src/store/mod.rs append_with_options → writer.rs AppendGuards.\n\
@@ -288,20 +290,21 @@ fn with_correlation_and_causation_combined() {
     let corr: u128 = 0xAAAA_BBBB_CCCC_DDDD_EEEE_FFFF_0000_1111;
     let cause: u128 = 0x2222_3333_4444_5555_6666_7777_8888_9999;
     let opts = AppendOptions::new()
-        .with_correlation(corr)
-        .with_causation(cause);
+        .with_correlation(batpak::id::CorrelationId::from(corr))
+        .with_causation(batpak::id::CausationId::from(cause));
     let receipt = store
         .append_with_options(&coord, kind, &"both_test", opts)
         .expect("append with both");
 
     let event = store.get(receipt.event_id).expect("get event");
     assert_eq!(
-        event.event.header.correlation_id, corr,
+        event.event.header.correlation_id,
+        batpak::id::CorrelationId::from(corr),
         "COMBINED: correlation_id should be set when both with_correlation and with_causation used."
     );
     assert_eq!(
         event.event.header.causation_id,
-        Some(cause),
+        Some(batpak::id::CausationId::from(cause)),
         "COMBINED: causation_id should be set when both with_correlation and with_causation used."
     );
 
@@ -311,7 +314,8 @@ fn with_correlation_and_causation_combined() {
         .expect("default append");
     let default_event = store.get(default_receipt.event_id).expect("get default");
     assert_ne!(
-        default_event.event.header.correlation_id, corr,
+        default_event.event.header.correlation_id,
+        batpak::id::CorrelationId::from(corr),
         "VARIANCE: default append should auto-generate a different correlation_id."
     );
     assert_eq!(

@@ -61,8 +61,8 @@ fn batch_append_reaction_batch() {
         .collect();
 
     // Use append_reaction_batch with explicit correlation/causation.
-    let correlation_id = trigger.event_id;
-    let causation_id = trigger.event_id;
+    let correlation_id = batpak::id::CorrelationId::from(u128::from(trigger.event_id));
+    let causation_id = batpak::id::CausationId::from(u128::from(trigger.event_id));
     let receipts = store
         .append_reaction_batch(correlation_id, causation_id, items)
         .expect("append reaction batch");
@@ -136,7 +136,7 @@ fn batch_empty_is_noop_and_store_remains_usable() {
         )
         .expect("append post-empty-batch event");
     assert!(
-        receipt.event_id != 0,
+        receipt.event_id != batpak::id::EventId::from(0u128),
         "PROPERTY: after an empty batch, the next append must succeed \
          and produce a non-zero event_id (the writer must not be in a \
          broken state). Got event_id = 0."
@@ -271,9 +271,9 @@ fn batch_atomicity_full_visibility_on_success() {
 
     for receipt in &receipts {
         assert!(
-            found.contains(&receipt.event_id),
+            found.contains(&u128::from(receipt.event_id)),
             "event {} should be visible",
-            receipt.event_id
+            u128::from(receipt.event_id)
         );
     }
 }
@@ -650,7 +650,7 @@ fn batch_fsync_ambiguity_discards_uncommitted() {
     );
     assert_eq!(
         store
-            .get(entries[0].event_id())
+            .get(batpak::id::EventId::from(entries[0].event_id()))
             .expect("load recovered pre-established event after fsync ambiguity")
             .event
             .payload["pre"],
@@ -892,7 +892,7 @@ fn batch_subscription_atomicity_no_partial_visibility() {
     assert_eq!(entries.len(), 1, "only pre-established event visible");
     assert_eq!(
         store
-            .get(entries[0].event_id())
+            .get(batpak::id::EventId::from(entries[0].event_id()))
             .expect("load recovered pre-established subscription event")
             .event
             .payload["pre"],
@@ -1093,7 +1093,7 @@ fn batch_publish_atomicity_no_partial_read_during_insert() {
     );
     assert_eq!(
         entries[0].event_id(),
-        pre.event_id,
+        u128::from(pre.event_id),
         "the single visible entry must be the pre-batch baseline event"
     );
 }
@@ -1335,11 +1335,14 @@ fn batch_multi_item_same_entity_hash_chain_is_continuous() {
     //     Buggy code would terminate at items[2] because items[2].prev_hash
     //     was [0; 32] and walk_ancestors_by_hash bails on prev == [0; 32].
     let walked = store.walk_ancestors(receipts[2].event_id, 8);
-    let walked_ids: Vec<u128> = walked.iter().map(|s| s.event.event_id()).collect();
+    let walked_ids: Vec<u128> = walked
+        .iter()
+        .map(|s| u128::from(s.event.event_id()))
+        .collect();
     let expected: Vec<u128> = vec![
-        receipts[2].event_id,
-        receipts[1].event_id,
-        receipts[0].event_id,
+        u128::from(receipts[2].event_id),
+        u128::from(receipts[1].event_id),
+        u128::from(receipts[0].event_id),
     ];
     assert_eq!(
         walked_ids, expected,
@@ -1456,7 +1459,7 @@ fn batch_survives_unclean_shutdown_without_sidx_footer() {
         .iter()
         .filter_map(|e| {
             store
-                .get(e.event_id())
+                .get(batpak::id::EventId::from(e.event_id()))
                 .ok()
                 .and_then(|stored| stored.event.payload["step"].as_i64())
         })
@@ -1518,10 +1521,11 @@ fn oversized_batch_reopens_with_sidx_entries_pointing_to_correct_segment() {
 
     for (entry, expected_item) in entries.iter().skip(1).zip(expected) {
         let stored = reopened
-            .get(entry.event_id())
+            .get(batpak::id::EventId::from(entry.event_id()))
             .expect("SIDX disk position reads committed batch frame");
         assert_eq!(
-            stored.event.header.event_id, entry.event_id(),
+            stored.event.header.event_id,
+            batpak::id::EventId::from(entry.event_id()),
             "PROPERTY: SIDX row must point to the segment containing this event frame, not a later batch segment"
         );
         assert_eq!(
@@ -1657,7 +1661,7 @@ fn outbox_stage_with_causation_links_item_to_prior_item() {
     let second = store.get(receipts[1].event_id).expect("fetch second event");
     assert_eq!(
         second.event.header.causation_id,
-        Some(receipts[0].event_id),
+        Some(batpak::id::CausationId::from(u128::from(receipts[0].event_id))),
         "second item causation_id must resolve to first item event_id"
     );
 }

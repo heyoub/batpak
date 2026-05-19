@@ -137,7 +137,8 @@ fn append_typed_round_trip() {
         .append_typed(&coord(), &payload)
         .expect("append_typed");
     assert_ne!(
-        receipt.event_id, 0,
+        receipt.event_id,
+        batpak::id::EventId::from(0u128),
         "PROPERTY: append_typed must return a non-zero event_id"
     );
 
@@ -149,7 +150,7 @@ fn append_typed_round_trip() {
     );
     assert_eq!(
         hits[0].event_id(),
-        receipt.event_id,
+        u128::from(receipt.event_id),
         "PROPERTY: by_fact_typed must return the correct event_id"
     );
     store.close().unwrap();
@@ -161,7 +162,7 @@ fn append_typed_round_trip() {
 fn append_typed_with_options_idempotency() {
     let (store, _dir) = test_store();
     let payload = ThingHappened { value: 7 };
-    let opts = AppendOptions::new().with_idempotency(0xDEAD_BEEF);
+    let opts = AppendOptions::new().with_idempotency(batpak::id::IdempotencyKey::from(0xDEAD_BEEF));
 
     let r1 = store
         .append_typed_with_options(&coord(), &payload, opts.clone())
@@ -187,7 +188,8 @@ fn submit_typed_wait_returns_receipt() {
         .expect("submit_typed");
     let receipt = writer_reply(ticket.receiver(), "typed writer ticket").expect("ticket.wait");
     assert_ne!(
-        receipt.event_id, 0,
+        receipt.event_id,
+        batpak::id::EventId::from(0u128),
         "PROPERTY: submit_typed ticket must resolve to a non-zero event_id"
     );
     store.close().unwrap();
@@ -223,13 +225,14 @@ fn append_reaction_typed_links_causation() {
             &OtherThingHappened {
                 label: "caused".into(),
             },
-            root.event_id,
-            root.event_id,
+            batpak::id::CorrelationId::from(u128::from(root.event_id)),
+            batpak::id::CausationId::from(u128::from(root.event_id)),
         )
         .expect("append_reaction_typed");
 
     assert_ne!(
-        receipt.event_id, 0,
+        receipt.event_id,
+        batpak::id::EventId::from(0u128),
         "PROPERTY: append_reaction_typed must return a non-zero event_id"
     );
     let hits = store.by_fact_typed::<OtherThingHappened>();
@@ -257,8 +260,8 @@ fn submit_reaction_typed_ticket_resolves() {
             &OtherThingHappened {
                 label: "submitted".into(),
             },
-            root.event_id,
-            root.event_id,
+            batpak::id::CorrelationId::from(u128::from(root.event_id)),
+            batpak::id::CausationId::from(u128::from(root.event_id)),
         )
         .expect("submit_reaction_typed");
     writer_reply(ticket.receiver(), "typed writer ticket").expect("ticket.wait");
@@ -281,8 +284,8 @@ fn try_submit_reaction_typed_ok_path() {
             &OtherThingHappened {
                 label: "try-reaction".into(),
             },
-            root.event_id,
-            root.event_id,
+            batpak::id::CorrelationId::from(u128::from(root.event_id)),
+            batpak::id::CausationId::from(u128::from(root.event_id)),
         )
         .expect("try_submit_reaction_typed");
     let ticket = outcome.into_result().expect("outcome is Ok");
@@ -356,7 +359,7 @@ fn batch_append_item_typed_constructor() {
     );
     assert_eq!(
         hits[0].event_id(),
-        receipts[0].event_id,
+        u128::from(receipts[0].event_id),
         "PROPERTY: batch receipt event_id must match by_fact_typed result"
     );
     store.close().unwrap();
@@ -389,11 +392,11 @@ fn transition_from_payload_store_round_trip() {
     let receipt = store
         .apply_transition(&coord(), transition)
         .expect("apply_transition with from_payload");
-    assert_ne!(receipt.event_id, 0);
+    assert_ne!(receipt.event_id, batpak::id::EventId::from(0u128));
 
     let hits = store.by_fact_typed::<ThingHappened>();
     assert_eq!(hits.len(), 1);
-    assert_eq!(hits[0].event_id(), receipt.event_id);
+    assert_eq!(hits[0].event_id(), u128::from(receipt.event_id));
     store.close().unwrap();
 }
 
@@ -414,14 +417,14 @@ fn outbox_stage_typed_smoke() {
     );
     let hits = store.by_fact_typed::<ThingHappened>();
     assert_eq!(hits.len(), 1);
-    assert_eq!(hits[0].event_id(), receipts[0].event_id);
+    assert_eq!(hits[0].event_id(), u128::from(receipts[0].event_id));
     store.close().unwrap();
 }
 
 #[test]
 fn outbox_stage_typed_with_options_smoke() {
     let (store, _dir) = test_store();
-    let opts = AppendOptions::new().with_idempotency(0xDEAD_BEEF);
+    let opts = AppendOptions::new().with_idempotency(batpak::id::IdempotencyKey::from(0xDEAD_BEEF));
     let mut outbox = store.outbox();
     outbox
         .stage_typed_with_options(coord(), &ThingHappened { value: 2 }, opts)
@@ -444,7 +447,7 @@ fn outbox_stage_typed_with_causation_smoke() {
             &OtherThingHappened {
                 label: "caused".into(),
             },
-            CausationRef::Absolute(root.event_id),
+            CausationRef::Absolute(u128::from(root.event_id)),
         )
         .expect("stage_typed_with_causation");
     let receipts = outbox.flush().expect("flush");
@@ -458,7 +461,7 @@ fn outbox_stage_typed_with_options_and_causation_smoke() {
     let root = store
         .append_typed(&coord(), &ThingHappened { value: 4 })
         .expect("root");
-    let opts = AppendOptions::new().with_idempotency(0xCAFE_F00D);
+    let opts = AppendOptions::new().with_idempotency(batpak::id::IdempotencyKey::from(0xCAFE_F00D));
     let mut outbox = store.outbox();
     outbox
         .stage_typed_with_options_and_causation(
@@ -467,7 +470,7 @@ fn outbox_stage_typed_with_options_and_causation_smoke() {
                 label: "caused+opts".into(),
             },
             opts,
-            CausationRef::Absolute(root.event_id),
+            CausationRef::Absolute(u128::from(root.event_id)),
         )
         .expect("stage_typed_with_options_and_causation");
     let receipts = outbox.flush().expect("flush");
@@ -486,10 +489,10 @@ fn fence_submit_typed_smoke() {
         .expect("submit_typed");
     fence.commit().expect("commit fence");
     let receipt = writer_reply(ticket.receiver(), "typed writer ticket").expect("ticket.wait");
-    assert_ne!(receipt.event_id, 0);
+    assert_ne!(receipt.event_id, batpak::id::EventId::from(0u128));
     let hits = store.by_fact_typed::<ThingHappened>();
     assert_eq!(hits.len(), 1);
-    assert_eq!(hits[0].event_id(), receipt.event_id);
+    assert_eq!(hits[0].event_id(), u128::from(receipt.event_id));
     store.close().unwrap();
 }
 
@@ -507,12 +510,12 @@ fn fence_submit_reaction_typed_smoke() {
             &OtherThingHappened {
                 label: "fenced-reaction".into(),
             },
-            root.event_id,
-            root.event_id,
+            batpak::id::CorrelationId::from(u128::from(root.event_id)),
+            batpak::id::CausationId::from(u128::from(root.event_id)),
         )
         .expect("submit_reaction_typed");
     fence.commit().expect("commit fence");
     let receipt = writer_reply(ticket.receiver(), "typed writer ticket").expect("ticket.wait");
-    assert_ne!(receipt.event_id, 0);
+    assert_ne!(receipt.event_id, batpak::id::EventId::from(0u128));
     store.close().unwrap();
 }

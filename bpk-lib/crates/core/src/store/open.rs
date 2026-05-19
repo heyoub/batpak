@@ -237,8 +237,9 @@ fn append_open_completed_event(
 ) -> Result<HlcPoint, StoreError> {
     let coord = Coordinate::new("batpak:store", "batpak:lifecycle")?;
     let submission = AppendSubmission::with_options(
-        AppendOptions::default()
-            .with_idempotency(crate::id::generate_v7_id_with_clock(store.runtime.clock())),
+        AppendOptions::default().with_idempotency(crate::id::IdempotencyKey::from(
+            crate::id::generate_v7_id_with_clock(store.runtime.clock()),
+        )),
         store.runtime.clock(),
     );
     submission.validate_route(store)?;
@@ -257,16 +258,20 @@ fn append_open_completed_event(
         .send(command)
         .map_err(|_| StoreError::WriterCrashed)?;
     let receipt = recv_writer_reply(&rx)?;
+    let receipt_event_id_raw = {
+        use crate::id::EntityIdType;
+        receipt.event_id.as_u128()
+    };
     let open_hlc = store
         .index
-        .get_by_id(receipt.event_id)
+        .get_by_id(receipt_event_id_raw)
         .map(|entry| HlcPoint {
             wall_ms: entry.wall_ms,
             global_sequence: entry.global_sequence,
         })
         .ok_or_else(|| StoreError::InvariantViolation {
             kind: StoreInvariant::OpenReceiptNotIndexed {
-                event_id: receipt.event_id,
+                event_id: receipt_event_id_raw,
             },
         })?;
     validate_bootstrap_hlc(open_hlc, open_candidate, last_close_hlc(&store.index)?)?;

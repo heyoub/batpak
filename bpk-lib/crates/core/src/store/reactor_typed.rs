@@ -358,7 +358,7 @@ fn dispatch_and_gather_batch<P, D>(
     inner_store: &Store<Open>,
     store_for_handler: &Arc<Store<Open>>,
     dispatcher: &mut D,
-    fetch: fn(&Store<Open>, u128) -> Result<StoredEvent<P>, StoreError>,
+    fetch: fn(&Store<Open>, crate::id::EventId) -> Result<StoredEvent<P>, StoreError>,
     slot_for_handler: &Arc<Mutex<Option<ReactorError<D::Error>>>>,
     at_least_once: Option<&AtLeastOnce>,
 ) -> BatchOutcome
@@ -373,7 +373,7 @@ where
 
     for entry in entries {
         // Fetch the full event using the lane's specific reader.
-        let stored = match fetch(inner_store, entry.event_id) {
+        let stored = match fetch(inner_store, crate::id::EventId::from(entry.event_id)) {
             Ok(s) => s,
             Err(e) => {
                 *slot_for_handler.lock() = Some(ReactorError::Store(e));
@@ -386,10 +386,11 @@ where
         match step {
             Ok(()) => {
                 if !batch.is_empty() {
+                    use crate::id::EntityIdType;
                     gathered.push((
                         batch,
-                        stored.event.header.correlation_id,
-                        stored.event.header.event_id,
+                        stored.event.header.correlation_id.as_u128(),
+                        stored.event.header.event_id.as_u128(),
                     ));
                 }
             }
@@ -441,7 +442,7 @@ pub(crate) fn run_reactor<P, D>(
     region: &Region,
     config: ReactorConfig,
     dispatcher: D,
-    fetch: fn(&Store<Open>, u128) -> Result<StoredEvent<P>, StoreError>,
+    fetch: fn(&Store<Open>, crate::id::EventId) -> Result<StoredEvent<P>, StoreError>,
 ) -> Result<TypedReactorHandle<D::Error>, StoreError>
 where
     P: Send + 'static,
@@ -475,7 +476,7 @@ fn spawn_reactor_cursor<P, D>(
     region: &Region,
     config: ReactorConfig,
     mut dispatcher: D,
-    fetch: fn(&Store<Open>, u128) -> Result<StoredEvent<P>, StoreError>,
+    fetch: fn(&Store<Open>, crate::id::EventId) -> Result<StoredEvent<P>, StoreError>,
     error_slot: &Arc<Mutex<Option<ReactorError<D::Error>>>>,
 ) -> Result<impl CanalHandle, StoreError>
 where
@@ -556,7 +557,7 @@ fn spawn_reactor_lossy<P, D>(
     region: &Region,
     idle_sleep: Duration,
     mut dispatcher: D,
-    fetch: fn(&Store<Open>, u128) -> Result<StoredEvent<P>, StoreError>,
+    fetch: fn(&Store<Open>, crate::id::EventId) -> Result<StoredEvent<P>, StoreError>,
     error_slot: &Arc<Mutex<Option<ReactorError<D::Error>>>>,
 ) -> Result<impl CanalHandle, StoreError>
 where
@@ -580,7 +581,10 @@ where
                     Err(RecvTimeoutError::Timeout) => continue,
                     Err(RecvTimeoutError::Disconnected) => break,
                 };
-                let stored = match fetch(&store_for_handler, notif.event_id) {
+                let stored = match fetch(
+                    &store_for_handler,
+                    crate::id::EventId::from(notif.event_id),
+                ) {
                     Ok(stored) => stored,
                     Err(error) => {
                         *slot_for_handler.lock() = Some(ReactorError::Store(error));

@@ -875,7 +875,8 @@ mod tests {
             "PROPERTY: SIDX fast-path recovery must filter BEGIN/COMMIT markers and emit only logical user rows"
         );
         assert_eq!(
-            rows[0].header.event_id, 11,
+            rows[0].header.event_id,
+            crate::id::EventId::from(11u128),
             "PROPERTY: filtering batch markers must preserve the real batch item"
         );
         assert_eq!(

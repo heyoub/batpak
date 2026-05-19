@@ -73,7 +73,9 @@ fn append_ordinary_events(
     for i in 0..total_events {
         let payload = serde_json::json!({ "i": i });
         if use_idempotency {
-            let opts = AppendOptions::new().with_idempotency(idempotency_base + u128::from(i));
+            let opts = AppendOptions::new().with_idempotency(batpak::id::IdempotencyKey::from(
+                idempotency_base + u128::from(i),
+            ));
             store
                 .append_with_options(coord, kind, &payload, opts)
                 .expect("append with idempotency");

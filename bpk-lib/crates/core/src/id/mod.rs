@@ -119,6 +119,7 @@ macro_rules! define_entity_id {
 define_entity_id!(EventId, "event");
 define_entity_id!(CorrelationId, "correlation");
 define_entity_id!(CausationId, "causation");
+define_entity_id!(IdempotencyKey, "idempotency");
 
 impl From<u128> for EventId {
     fn from(id: u128) -> Self {
@@ -153,5 +154,70 @@ impl From<u128> for CausationId {
 impl From<CausationId> for u128 {
     fn from(id: CausationId) -> Self {
         id.as_u128()
+    }
+}
+
+impl From<u128> for IdempotencyKey {
+    fn from(id: u128) -> Self {
+        <Self as EntityIdType>::new(id)
+    }
+}
+
+impl From<IdempotencyKey> for u128 {
+    fn from(id: IdempotencyKey) -> Self {
+        id.as_u128()
+    }
+}
+
+// Serde impls for the typed ids. Wire format is unchanged from the raw u128
+// path: each newtype serializes as 16 big-endian bytes via the existing
+// crate::wire::u128_bytes helpers. EventHeader's #[serde(with = ...)] field
+// annotations point at the typed wrappers (event_id_bytes etc) below.
+
+impl serde::Serialize for EventId {
+    fn serialize<S: serde::Serializer>(&self, ser: S) -> Result<S::Ok, S::Error> {
+        crate::wire::u128_bytes::serialize(&self.0, ser)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for EventId {
+    fn deserialize<D: serde::Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
+        crate::wire::u128_bytes::deserialize(de).map(Self)
+    }
+}
+
+impl serde::Serialize for CorrelationId {
+    fn serialize<S: serde::Serializer>(&self, ser: S) -> Result<S::Ok, S::Error> {
+        crate::wire::u128_bytes::serialize(&self.0, ser)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for CorrelationId {
+    fn deserialize<D: serde::Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
+        crate::wire::u128_bytes::deserialize(de).map(Self)
+    }
+}
+
+impl serde::Serialize for CausationId {
+    fn serialize<S: serde::Serializer>(&self, ser: S) -> Result<S::Ok, S::Error> {
+        crate::wire::u128_bytes::serialize(&self.0, ser)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for CausationId {
+    fn deserialize<D: serde::Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
+        crate::wire::u128_bytes::deserialize(de).map(Self)
+    }
+}
+
+impl serde::Serialize for IdempotencyKey {
+    fn serialize<S: serde::Serializer>(&self, ser: S) -> Result<S::Ok, S::Error> {
+        crate::wire::u128_bytes::serialize(&self.0, ser)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for IdempotencyKey {
+    fn deserialize<D: serde::Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
+        crate::wire::u128_bytes::deserialize(de).map(Self)
     }
 }

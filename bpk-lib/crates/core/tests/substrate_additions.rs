@@ -211,7 +211,7 @@ fn idempotency_replay_uses_committed_receipt_extensions() {
             kind,
             &serde_json::json!({"n": 1}),
             AppendOptions::new()
-                .with_idempotency(0xA11CE)
+                .with_idempotency(batpak::id::IdempotencyKey::from(0xA11CE))
                 .with_extension(key.clone(), vec![7, 8, 9]),
         )
         .expect("first append");
@@ -221,7 +221,7 @@ fn idempotency_replay_uses_committed_receipt_extensions() {
             kind,
             &serde_json::json!({"n": 99}),
             AppendOptions::new()
-                .with_idempotency(0xA11CE)
+                .with_idempotency(batpak::id::IdempotencyKey::from(0xA11CE))
                 .with_extension(key.clone(), vec![0]),
         )
         .expect("idempotent replay");
@@ -356,7 +356,7 @@ fn assert_receipt_extensions_survive_close_reopen_case(
                 kind,
                 &serde_json::json!({"n": 1}),
                 AppendOptions::new()
-                    .with_idempotency(0xE1)
+                    .with_idempotency(batpak::id::IdempotencyKey::from(0xE1))
                     .with_extension(append_key.clone(), vec![1]),
             )
             .expect("append");
@@ -365,7 +365,7 @@ fn assert_receipt_extensions_survive_close_reopen_case(
             kind,
             &serde_json::json!({"n": 2}),
             AppendOptions::new()
-                .with_idempotency(0xE2)
+                .with_idempotency(batpak::id::IdempotencyKey::from(0xE2))
                 .with_extension(batch_key.clone(), vec![2]),
             CausationRef::None,
         )
@@ -384,7 +384,7 @@ fn assert_receipt_extensions_survive_close_reopen_case(
                 Some([0x5A; 32]),
                 Some("pipeline:reopen".to_owned()),
                 AppendOptions::new()
-                    .with_idempotency(0xE3)
+                    .with_idempotency(batpak::id::IdempotencyKey::from(0xE3))
                     .with_extension(denial_key.clone(), vec![3]),
             )
             .expect("append denial");
@@ -411,7 +411,7 @@ fn assert_receipt_extensions_survive_close_reopen_case(
             kind,
             &serde_json::json!({"n": 99}),
             AppendOptions::new()
-                .with_idempotency(0xE1)
+                .with_idempotency(batpak::id::IdempotencyKey::from(0xE1))
                 .with_extension(append_key.clone(), vec![9]),
         )
         .expect("replay append");
@@ -423,7 +423,7 @@ fn assert_receipt_extensions_survive_close_reopen_case(
         kind,
         &serde_json::json!({"n": 100}),
         AppendOptions::new()
-            .with_idempotency(0xE2)
+            .with_idempotency(batpak::id::IdempotencyKey::from(0xE2))
             .with_extension(batch_key.clone(), vec![9]),
         CausationRef::None,
     )
@@ -445,7 +445,7 @@ fn assert_receipt_extensions_survive_close_reopen_case(
             Some([0x5A; 32]),
             Some("pipeline:reopen".to_owned()),
             AppendOptions::new()
-                .with_idempotency(0xE3)
+                .with_idempotency(batpak::id::IdempotencyKey::from(0xE3))
                 .with_extension(denial_key.clone(), vec![9]),
         )
         .expect("replay denial");
@@ -492,7 +492,7 @@ fn signed_unknown_extensions_survive_reopen_and_verify() {
                 kind,
                 &serde_json::json!({"n": 1}),
                 AppendOptions::new()
-                    .with_idempotency(0x51_6E_D0)
+                    .with_idempotency(batpak::id::IdempotencyKey::from(0x51_6E_D0))
                     .with_extension(pcp_key.clone(), vec![0x50, 0x43, 0x50])
                     .with_extension(app_key.clone(), vec![0x41, 0x50, 0x50]),
             )
@@ -522,7 +522,7 @@ fn signed_unknown_extensions_survive_reopen_and_verify() {
             kind,
             &serde_json::json!({"n": 2}),
             AppendOptions::new()
-                .with_idempotency(0x51_6E_D0)
+                .with_idempotency(batpak::id::IdempotencyKey::from(0x51_6E_D0))
                 .with_extension(pcp_key.clone(), vec![0])
                 .with_extension(app_key.clone(), vec![0]),
         )

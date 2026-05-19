@@ -109,7 +109,11 @@ impl ReactionBatch {
         if self.items.is_empty() {
             return Ok(Vec::new());
         }
-        store.append_reaction_batch(correlation_id, causation_id, self.items)
+        store.append_reaction_batch(
+            crate::id::CorrelationId::from(correlation_id),
+            crate::id::CausationId::from(causation_id),
+            self.items,
+        )
     }
 }
 
@@ -199,7 +203,17 @@ mod tests {
         assert_eq!(batch.len(), 2);
 
         let receipts = batch
-            .flush(&store, source.event_id, source.event_id)
+            .flush(
+                &store,
+                {
+                    use crate::id::EntityIdType;
+                    source.event_id.as_u128()
+                },
+                {
+                    use crate::id::EntityIdType;
+                    source.event_id.as_u128()
+                },
+            )
             .expect("flush");
         assert_eq!(
             receipts.len(),
@@ -244,7 +258,17 @@ mod tests {
             )
             .unwrap();
         let receipts = batch
-            .flush(&store, source.event_id, source.event_id)
+            .flush(
+                &store,
+                {
+                    use crate::id::EntityIdType;
+                    source.event_id.as_u128()
+                },
+                {
+                    use crate::id::EntityIdType;
+                    source.event_id.as_u128()
+                },
+            )
             .expect("flush");
         assert_eq!(receipts.len(), 2);
 
@@ -252,7 +276,10 @@ mod tests {
         let second = store.get(receipts[1].event_id).expect("get second");
         assert_eq!(
             second.event.header.causation_id,
-            Some(receipts[0].event_id),
+            Some({
+                use crate::id::EntityIdType;
+                crate::id::CausationId::from(receipts[0].event_id.as_u128())
+            }),
             "PROPERTY: PriorItem causation resolves to first item's event_id"
         );
     }

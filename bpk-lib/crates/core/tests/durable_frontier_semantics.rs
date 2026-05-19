@@ -644,7 +644,7 @@ fn single_append_cadence_gt_1_visible_exceeds_durable_frontier() {
 
     let visible = store.query(&Region::entity("entity:frontier"));
     assert_eq!(visible.len(), 1);
-    assert_eq!(visible[0].event_id(), receipt.event_id);
+    assert_eq!(visible[0].event_id(), u128::from(receipt.event_id));
 
     let snapshot = store.dangerous_watermark_snapshot();
     let frontier = store.diagnostics().frontier;

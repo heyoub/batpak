@@ -225,17 +225,18 @@ fn event_header_new_typed_preserves_typed_ids() {
     );
 
     assert_eq!(
-        header.event_id, 0x11,
+        header.event_id,
+        batpak::id::EventId::from(0x11u128),
         "PROPERTY: EventHeader::new_typed must write the typed event id into the raw header field."
     );
     assert_eq!(
         header.correlation_id,
-        0x22,
+        batpak::id::CorrelationId::from(0x22u128),
         "PROPERTY: EventHeader::new_typed must write the typed correlation id into the raw header field."
     );
     assert_eq!(
         header.causation_id,
-        Some(0x33),
+        Some(batpak::id::CausationId::from(0x33u128)),
         "PROPERTY: EventHeader::new_typed must write the typed causation id into the raw header field."
     );
 }
@@ -245,19 +246,19 @@ fn typed_append_surfaces_preserve_underlying_ids() {
     let correlation = batpak::id::CorrelationId::new(0xAA);
     let causation = batpak::id::CausationId::new(0xBB);
     let options = AppendOptions::new()
-        .with_correlation_typed(correlation)
-        .with_causation_typed(causation);
+        .with_correlation(correlation)
+        .with_causation(causation);
     let absolute_typed = CausationRef::absolute_typed(causation);
 
     assert_eq!(
         options.correlation_id,
-        Some(0xAA),
-        "PROPERTY: AppendOptions::with_correlation_typed must preserve the underlying correlation id."
+        Some(batpak::id::CorrelationId::from(0xAAu128)),
+        "PROPERTY: AppendOptions::with_correlation must preserve the underlying correlation id."
     );
     assert_eq!(
         options.causation_id,
-        Some(0xBB),
-        "PROPERTY: AppendOptions::with_causation_typed must preserve the underlying causation id."
+        Some(batpak::id::CausationId::from(0xBBu128)),
+        "PROPERTY: AppendOptions::with_causation must preserve the underlying causation id."
     );
     assert_eq!(
         absolute_typed,
@@ -632,7 +633,8 @@ fn event_map_payload_transforms_preserving_header() {
          Run: cargo test --test event_api event_map_payload_transforms_preserving_header"
     );
     assert_eq!(
-        mapped.header.event_id, 42,
+        mapped.header.event_id,
+        batpak::id::EventId::from(42u128),
         "PROPERTY: Event::map_payload must preserve the original header unchanged.\n\
          Investigate: src/event/mod.rs Event::map_payload().\n\
          Common causes: map_payload() creating a new header instead of moving the original, \

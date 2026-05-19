@@ -88,7 +88,7 @@ fn partial_keys_rejected_synchronously() {
             coord.clone(),
             KIND,
             &serde_json::json!({"step": 0}),
-            AppendOptions::new().with_idempotency(0xAAAA_BBBB_CCCC_DDDD),
+            AppendOptions::new().with_idempotency(batpak::id::IdempotencyKey::from(0xAAAA_BBBB_CCCC_DDDD)),
             CausationRef::None,
         )
         .expect("keyed item"),
@@ -183,7 +183,7 @@ fn idempotent_batch_replayable_without_duplicates() {
                 coord.clone(),
                 KIND,
                 &serde_json::json!({"step": 0}),
-                AppendOptions::new().with_idempotency(0x1111_1111_1111_1111),
+                AppendOptions::new().with_idempotency(batpak::id::IdempotencyKey::from(0x1111_1111_1111_1111)),
                 CausationRef::None,
             )
             .expect("keyed item 0"),
@@ -191,7 +191,7 @@ fn idempotent_batch_replayable_without_duplicates() {
                 coord.clone(),
                 KIND,
                 &serde_json::json!({"step": 1}),
-                AppendOptions::new().with_idempotency(0x2222_2222_2222_2222),
+                AppendOptions::new().with_idempotency(batpak::id::IdempotencyKey::from(0x2222_2222_2222_2222)),
                 CausationRef::None,
             )
             .expect("keyed item 1"),
@@ -233,7 +233,8 @@ fn idempotent_batch_replayable_without_duplicates() {
                 orig.event_id, replay.event_id,
                 "PROPERTY: idempotent replay must return the original event_id; \
                  first={:x} replay={:x} — a fresh UUID here means dedup failed.",
-                orig.event_id, replay.event_id
+                u128::from(orig.event_id),
+                u128::from(replay.event_id),
             );
             assert_eq!(
                 orig.sequence, replay.sequence,

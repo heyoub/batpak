@@ -121,8 +121,8 @@ fn control_plane_surface_smoke() {
             &coord,
             kind,
             &serde_json::json!({"n": 2}),
-            receipt.event_id,
-            receipt.event_id,
+            batpak::id::CorrelationId::from(u128::from(receipt.event_id)),
+            batpak::id::CausationId::from(u128::from(receipt.event_id)),
         )
         .expect("submit reaction");
     let reaction = wait_append_ticket(&reaction_ticket, "control-plane submit reaction")
@@ -141,8 +141,8 @@ fn control_plane_surface_smoke() {
             &coord,
             kind,
             &serde_json::json!({"n": 3.5}),
-            receipt.event_id,
-            receipt.event_id,
+            batpak::id::CorrelationId::from(u128::from(receipt.event_id)),
+            batpak::id::CausationId::from(u128::from(receipt.event_id)),
         )
         .expect("try submit reaction")
         .into_result()
@@ -155,7 +155,7 @@ fn control_plane_surface_smoke() {
             coord.clone(),
             kind,
             &serde_json::json!({"n": 4}),
-            AppendOptions::new().with_idempotency(0xAA),
+            AppendOptions::new().with_idempotency(batpak::id::IdempotencyKey::from(0xAA)),
             batpak::store::CausationRef::None,
         )
         .expect("batch item"),
@@ -163,7 +163,7 @@ fn control_plane_surface_smoke() {
             coord.clone(),
             kind,
             &serde_json::json!({"n": 5}),
-            AppendOptions::new().with_idempotency(0xBB),
+            AppendOptions::new().with_idempotency(batpak::id::IdempotencyKey::from(0xBB)),
             batpak::store::CausationRef::None,
         )
         .expect("batch item"),
@@ -177,7 +177,7 @@ fn control_plane_surface_smoke() {
         coord.clone(),
         kind,
         &serde_json::json!({"n": 6}),
-        AppendOptions::new().with_idempotency(0xCC),
+        AppendOptions::new().with_idempotency(batpak::id::IdempotencyKey::from(0xCC)),
         batpak::store::CausationRef::None,
     )
     .expect("batch item")];
@@ -197,7 +197,7 @@ fn control_plane_surface_smoke() {
             coord.clone(),
             kind,
             &serde_json::json!({"n": 7}),
-            AppendOptions::new().with_idempotency(0xDC),
+            AppendOptions::new().with_idempotency(batpak::id::IdempotencyKey::from(0xDC)),
         )
         .expect("stage");
     outbox
@@ -205,7 +205,7 @@ fn control_plane_surface_smoke() {
             coord.clone(),
             kind,
             &serde_json::json!({"n": 8}),
-            AppendOptions::new().with_idempotency(0xDD),
+            AppendOptions::new().with_idempotency(batpak::id::IdempotencyKey::from(0xDD)),
         )
         .expect("stage with options");
     outbox
@@ -213,8 +213,8 @@ fn control_plane_surface_smoke() {
             coord.clone(),
             kind,
             &serde_json::json!({"n": 8.5}),
-            AppendOptions::new().with_idempotency(0xDDE),
-            batpak::store::CausationRef::Absolute(receipt.event_id),
+            AppendOptions::new().with_idempotency(batpak::id::IdempotencyKey::from(0xDDE)),
+            batpak::store::CausationRef::Absolute(u128::from(receipt.event_id)),
         )
         .expect("stage with options and causation");
     outbox.push_item(
@@ -222,7 +222,7 @@ fn control_plane_surface_smoke() {
             coord.clone(),
             kind,
             &serde_json::json!({"n": 9}),
-            AppendOptions::new().with_idempotency(0xEE),
+            AppendOptions::new().with_idempotency(batpak::id::IdempotencyKey::from(0xEE)),
             batpak::store::CausationRef::None,
         )
         .expect("push item"),
@@ -241,7 +241,7 @@ fn control_plane_surface_smoke() {
             coord.clone(),
             kind,
             &serde_json::json!({"n": 10}),
-            AppendOptions::new().with_idempotency(0xFF),
+            AppendOptions::new().with_idempotency(batpak::id::IdempotencyKey::from(0xFF)),
         )
         .expect("stage flush");
     let flushed = outbox2.flush().expect("flush");
@@ -325,7 +325,7 @@ fn control_plane_surface_smoke() {
             coord.clone(),
             kind,
             &serde_json::json!({"n": 14}),
-            AppendOptions::new().with_idempotency(0x1234),
+            AppendOptions::new().with_idempotency(batpak::id::IdempotencyKey::from(0x1234)),
         )
         .expect("fence outbox stage");
     let fenced_batch: BatchAppendTicket = fence_outbox.submit_flush().expect("fence submit flush");
@@ -440,7 +440,8 @@ fn try_check_surfaces_ready_append_and_batch_tickets() {
     };
     assert_eq!(append_receipt.sequence, 1);
     assert_ne!(
-        append_receipt.event_id, 0,
+        append_receipt.event_id,
+        batpak::id::EventId::from(0u128),
         "PROPERTY: ready append ticket must surface the committed event identity, not a default receipt."
     );
 
@@ -450,7 +451,7 @@ fn try_check_surfaces_ready_append_and_batch_tickets() {
                 coord.clone(),
                 kind,
                 &serde_json::json!({"n": "batch-a"}),
-                AppendOptions::new().with_idempotency(0xFACE),
+                AppendOptions::new().with_idempotency(batpak::id::IdempotencyKey::from(0xFACE)),
                 batpak::store::CausationRef::None,
             )
             .expect("batch item a"),
@@ -458,7 +459,7 @@ fn try_check_surfaces_ready_append_and_batch_tickets() {
                 coord.clone(),
                 kind,
                 &serde_json::json!({"n": "batch-b"}),
-                AppendOptions::new().with_idempotency(0xB00C),
+                AppendOptions::new().with_idempotency(batpak::id::IdempotencyKey::from(0xB00C)),
                 batpak::store::CausationRef::None,
             )
             .expect("batch item b"),
@@ -476,7 +477,9 @@ fn try_check_surfaces_ready_append_and_batch_tickets() {
     };
     assert_eq!(batch_receipts.len(), 2);
     assert!(
-        batch_receipts.iter().all(|receipt| receipt.event_id != 0),
+        batch_receipts
+            .iter()
+            .all(|receipt| receipt.event_id != batpak::id::EventId::from(0u128)),
         "PROPERTY: ready batch ticket must surface committed event identities, not default receipts."
     );
     assert_ne!(
@@ -589,9 +592,9 @@ fn try_submit_batch_returns_retry_under_pressure() {
                             coord.clone(),
                             kind,
                             &serde_json::json!({"t": i, "n": n}),
-                            AppendOptions::new().with_idempotency(
-                                (((i as u64) << 32) | u64::from(n) | 0xB000_0000).into(),
-                            ),
+                            AppendOptions::new().with_idempotency(batpak::id::IdempotencyKey::from(
+                                u128::from(((i as u64) << 32) | u64::from(n) | 0xB000_0000),
+                            )),
                             batpak::store::CausationRef::None,
                         )
                         .expect("batch item")];
@@ -609,7 +612,7 @@ fn try_submit_batch_returns_retry_under_pressure() {
             coord.clone(),
             kind,
             &serde_json::json!({"probe": true}),
-            AppendOptions::new().with_idempotency(0xCAFE_BA5E),
+            AppendOptions::new().with_idempotency(batpak::id::IdempotencyKey::from(0xCAFE_BA5E)),
             batpak::store::CausationRef::None,
         )
         .expect("batch probe item")];
@@ -751,7 +754,7 @@ fn fenced_batch_submit_stays_hidden_until_commit_and_cancel_discards_it() {
             coord.clone(),
             kind,
             &serde_json::json!({"batch": "a"}),
-            AppendOptions::new().with_idempotency(0xAAA1),
+            AppendOptions::new().with_idempotency(batpak::id::IdempotencyKey::from(0xAAA1)),
         )
         .expect("stage item a");
     outbox
@@ -759,7 +762,7 @@ fn fenced_batch_submit_stays_hidden_until_commit_and_cancel_discards_it() {
             coord,
             kind,
             &serde_json::json!({"batch": "b"}),
-            AppendOptions::new().with_idempotency(0xAAA2),
+            AppendOptions::new().with_idempotency(batpak::id::IdempotencyKey::from(0xAAA2)),
         )
         .expect("stage item b");
     let ticket = outbox.submit_flush().expect("submit fenced batch");
@@ -822,8 +825,8 @@ fn fenced_reaction_submit_stays_hidden_until_commit_and_cancel_discards_it() {
             &reaction_coord,
             kind,
             &serde_json::json!({"reaction": true}),
-            root.event_id,
-            root.event_id,
+            batpak::id::CorrelationId::from(u128::from(root.event_id)),
+            batpak::id::CausationId::from(u128::from(root.event_id)),
         )
         .expect("submit fenced reaction");
 
@@ -883,8 +886,8 @@ fn fenced_reaction_commit_preserves_reaction_metadata() {
             &reaction_coord,
             kind,
             &serde_json::json!({"reaction": "commit"}),
-            root.event_id,
-            root.event_id,
+            batpak::id::CorrelationId::from(u128::from(root.event_id)),
+            batpak::id::CausationId::from(u128::from(root.event_id)),
         )
         .expect("submit fenced reaction");
     assert_eq!(
@@ -905,17 +908,17 @@ fn fenced_reaction_commit_preserves_reaction_metadata() {
     let reaction_entry = &entries[0];
     assert_eq!(
         reaction_entry.event_id(),
-        reaction.event_id,
+        u128::from(reaction.event_id),
         "PROPERTY: the committed reaction receipt must identify the stored reaction event."
     );
     assert_eq!(
         reaction_entry.correlation_id(),
-        root.event_id,
+        u128::from(root.event_id),
         "PROPERTY: a committed fenced reaction must preserve the triggering correlation id."
     );
     assert_eq!(
         reaction_entry.causation_id(),
-        Some(root.event_id),
+        Some(u128::from(root.event_id)),
         "PROPERTY: a committed fenced reaction must preserve the triggering causation id."
     );
 

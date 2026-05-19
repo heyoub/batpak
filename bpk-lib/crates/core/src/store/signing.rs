@@ -86,7 +86,10 @@ impl ReceiptSigningRegistry {
         prev_hash: [u8; 32],
     ) {
         let cover = match cover_bytes(
-            receipt.event_id,
+            {
+                use crate::id::EntityIdType;
+                receipt.event_id.as_u128()
+            },
             receipt.sequence,
             coord,
             kind,
@@ -118,7 +121,10 @@ impl ReceiptSigningRegistry {
         prev_hash: [u8; 32],
     ) -> bool {
         let cover = match cover_bytes(
-            receipt.event_id,
+            {
+                use crate::id::EntityIdType;
+                receipt.event_id.as_u128()
+            },
             receipt.sequence,
             coord,
             kind,
@@ -143,7 +149,10 @@ impl ReceiptSigningRegistry {
         prev_hash: [u8; 32],
     ) -> bool {
         let cover = match cover_bytes(
-            receipt.event_id,
+            {
+                use crate::id::EntityIdType;
+                receipt.event_id.as_u128()
+            },
             receipt.sequence,
             coord,
             kind,
@@ -342,7 +351,7 @@ mod tests {
     #[test]
     fn cover_build_failure_adds_signing_downgrade_extension() {
         let mut receipt = AppendReceipt {
-            event_id: 7,
+            event_id: crate::id::EventId::from(7u128),
             sequence: 9,
             disk_pos: crate::store::index::DiskPos {
                 segment_id: 1,

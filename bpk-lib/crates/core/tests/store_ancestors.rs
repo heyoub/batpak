@@ -94,7 +94,7 @@ fn walk_ancestors_respects_limit() {
 
     let entries = store.by_entity("entity:limit");
     let last_id = entries.last().expect("has entries").event_id();
-    let ancestors = store.walk_ancestors(last_id, 2);
+    let ancestors = store.walk_ancestors(batpak::id::EventId::from(last_id), 2);
 
     assert_eq!(
         ancestors.len(),

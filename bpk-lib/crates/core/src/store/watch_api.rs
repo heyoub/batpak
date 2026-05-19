@@ -50,8 +50,8 @@ impl Store<Open> {
                             &coord,
                             kind,
                             &payload,
-                            notif.correlation_id,
-                            notif.event_id,
+                            crate::id::CorrelationId::from(notif.correlation_id),
+                            crate::id::CausationId::from(notif.event_id),
                         ) {
                             tracing::warn!("react_loop: failed to append reaction: {e}");
                         }

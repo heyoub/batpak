@@ -71,7 +71,7 @@ fn push_typed_stamps_kind_and_advances_len() {
 #[test]
 fn push_typed_with_options_accepts_append_options() {
     let mut batch = ReactionBatch::default();
-    let opts = AppendOptions::new().with_idempotency(0xFEED_BEEF);
+    let opts = AppendOptions::new().with_idempotency(batpak::id::IdempotencyKey::from(0xFEED_BEEF));
     batch
         .push_typed_with_options(
             reaction_coord(),
@@ -110,7 +110,7 @@ fn drop_without_flush_leaves_store_unchanged() {
                 &Reaction {
                     note: "never-flushed".into(),
                 },
-                CausationRef::Absolute(root.event_id),
+                CausationRef::Absolute(u128::from(root.event_id)),
             )
             .unwrap();
         batch

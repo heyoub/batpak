@@ -35,7 +35,7 @@ fn sync_append_with_idempotency(
         coord,
         KIND,
         payload,
-        AppendOptions::new().with_idempotency(key),
+        AppendOptions::new().with_idempotency(batpak::id::IdempotencyKey::from(key)),
     )
 }
 
@@ -44,7 +44,7 @@ fn flow_batch_item(coord: Coordinate, key: u128, payload: &serde_json::Value) ->
         coord,
         KIND,
         payload,
-        AppendOptions::new().with_idempotency(key),
+        AppendOptions::new().with_idempotency(batpak::id::IdempotencyKey::from(key)),
         batpak::store::CausationRef::None,
     )
     .expect("construct writer flow batch item")
@@ -215,7 +215,7 @@ fn begin_visibility_fence_after_unfenced_drain_keeps_pre_fence_work_visible() {
             coord.clone(),
             KIND,
             &serde_json::json!({"fenced": true}),
-            AppendOptions::new().with_idempotency(0x2FF),
+            AppendOptions::new().with_idempotency(batpak::id::IdempotencyKey::from(0x2FF)),
         )
         .expect("stage fenced work");
     let fenced_ticket = fenced_outbox.submit_flush().expect("submit fenced work");
@@ -279,7 +279,7 @@ fn shutdown_auto_cancels_pending_fenced_responses_after_drain_mix() {
                 coord.clone(),
                 KIND,
                 &serde_json::json!({"fenced": "shutdown"}),
-                AppendOptions::new().with_idempotency(0x3FF),
+                AppendOptions::new().with_idempotency(batpak::id::IdempotencyKey::from(0x3FF)),
             )
             .expect("stage fenced work");
         let ticket = outbox.submit_flush().expect("submit fenced work");

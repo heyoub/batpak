@@ -234,7 +234,7 @@ fn bounded_scope_cursor_skips_hidden_gap_and_reaches_later_visible_event() {
     );
     assert_eq!(
         second[0].event_id(),
-        visible_after_gap.event_id,
+        u128::from(visible_after_gap.event_id),
         "PROPERTY: bounded scope cursor must advance past hidden entries instead of stalling on an empty batch"
     );
 

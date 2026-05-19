@@ -1,5 +1,6 @@
 use crate::coordinate::Coordinate;
 use crate::event::{EventKind, EventPayload, StoredEvent};
+use crate::id::{CausationId, CorrelationId, EventId, IdempotencyKey};
 use crate::store::gate::DurabilityGate;
 use crate::store::index::DiskPos;
 use crate::store::StoreError;
@@ -206,7 +207,7 @@ impl BatchAppendItem {
 #[non_exhaustive]
 pub struct AppendReceipt {
     /// Unique ID of the persisted event.
-    pub event_id: u128,
+    pub event_id: EventId,
     /// Global sequence number assigned at commit time.
     pub sequence: u64,
     /// Location of the event frame on disk.
@@ -226,7 +227,7 @@ pub struct AppendReceipt {
 #[non_exhaustive]
 pub struct DenialReceipt {
     /// Unique ID of the persisted denial event.
-    pub event_id: u128,
+    pub event_id: EventId,
     /// Global sequence number assigned at commit time.
     pub sequence: u64,
     /// Location of the denial frame on disk.
@@ -513,11 +514,11 @@ pub struct AppendOptions {
     /// Expected entity sequence for compare-and-swap; `None` skips the CAS check.
     pub expected_sequence: Option<u32>,
     /// Idempotency key; duplicate appends with the same key return the original receipt.
-    pub idempotency_key: Option<u128>,
+    pub idempotency_key: Option<IdempotencyKey>,
     /// Custom correlation ID; defaults to the generated event ID if `None`.
-    pub correlation_id: Option<u128>,
+    pub correlation_id: Option<CorrelationId>,
     /// ID of the event that caused this append; `None` for root-cause events.
-    pub causation_id: Option<u128>,
+    pub causation_id: Option<CausationId>,
     /// Optional caller-supplied branch hint; writer still owns HLC wall/counter and sequence.
     pub position_hint: Option<AppendPositionHint>,
     /// EventHeader flags (FLAG_REQUIRES_ACK, FLAG_TRANSACTIONAL, FLAG_REPLAY).
@@ -554,7 +555,10 @@ impl AppendOptions {
     }
 
     /// Set idempotency key. Duplicate appends with the same key return the original receipt.
-    pub fn with_idempotency(mut self, key: u128) -> Self {
+    ///
+    /// Accepts the typed [`IdempotencyKey`] newtype; pass `IdempotencyKey::from(raw_u128)`
+    /// if a wire-decode path holds the value as a raw integer.
+    pub fn with_idempotency(mut self, key: IdempotencyKey) -> Self {
         self.idempotency_key = Some(key);
         self
     }
@@ -565,45 +569,23 @@ impl AppendOptions {
         self
     }
 
-    /// Set custom correlation ID.
-    ///
-    /// This accepts a raw `u128` to keep wire-decode code paths unchanged.
-    /// Public callers that already hold a typed [`crate::id::CorrelationId`]
-    /// should prefer [`AppendOptions::with_correlation_typed`].
-    pub fn with_correlation(mut self, id: u128) -> Self {
+    /// Set custom correlation ID. The typed newtype makes it structurally
+    /// impossible to pass (e.g.) an [`crate::id::EventId`] where a
+    /// correlation id was intended.
+    pub fn with_correlation(mut self, id: CorrelationId) -> Self {
         self.correlation_id = Some(id);
         self
     }
 
-    /// Typed-id variant of [`AppendOptions::with_correlation`]. See
-    /// [`crate::id::CorrelationId`]. The typed newtype makes it structurally
-    /// impossible to pass (e.g.) an [`crate::id::EventId`] where a
-    /// correlation id was intended.
-    pub fn with_correlation_typed(self, id: crate::id::CorrelationId) -> Self {
+    /// Set custom causation ID. Passing a [`CausationId`] wrapping `0` is a
+    /// no-op — 0 is the wire sentinel for "no causation" and is treated
+    /// identically to not calling this method.
+    pub fn with_causation(mut self, id: CausationId) -> Self {
         use crate::id::EntityIdType;
-        self.with_correlation(id.as_u128())
-    }
-
-    /// Set custom causation ID. Passing `0` is a no-op — 0 is the wire sentinel
-    /// for "no causation" and is treated identically to not calling this method.
-    ///
-    /// This accepts a raw `u128` to keep wire-decode code paths unchanged.
-    /// Public callers that already hold a typed [`crate::id::CausationId`]
-    /// should prefer [`AppendOptions::with_causation_typed`].
-    pub fn with_causation(mut self, id: u128) -> Self {
-        if id != 0 {
+        if id.as_u128() != 0 {
             self.causation_id = Some(id);
         }
         self
-    }
-
-    /// Typed-id variant of [`AppendOptions::with_causation`]. See
-    /// [`crate::id::CausationId`]. The sentinel-zero behavior carries over:
-    /// a [`crate::id::CausationId`] wrapping `0` is still treated as
-    /// "no causation".
-    pub fn with_causation_typed(self, id: crate::id::CausationId) -> Self {
-        use crate::id::EntityIdType;
-        self.with_causation(id.as_u128())
     }
 
     /// Set the DAG lane/depth hint while leaving HLC and sequence to the writer.
@@ -717,7 +699,7 @@ mod tests {
 
     #[test]
     fn with_causation_zero_is_noop() {
-        let opts = AppendOptions::default().with_causation(0);
+        let opts = AppendOptions::default().with_causation(CausationId::from(0u128));
         assert_eq!(
             opts.causation_id, None,
             "0 is the wire sentinel — must not become Some(0)"
@@ -726,8 +708,8 @@ mod tests {
 
     #[test]
     fn with_causation_nonzero_is_recorded() {
-        let opts = AppendOptions::default().with_causation(42);
-        assert_eq!(opts.causation_id, Some(42));
+        let opts = AppendOptions::default().with_causation(CausationId::from(42u128));
+        assert_eq!(opts.causation_id, Some(CausationId::from(42u128)));
     }
 
     #[test]

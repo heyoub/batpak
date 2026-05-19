@@ -744,9 +744,15 @@ mod tests {
         assert_eq!(rebuilt.hash_chain.event_hash, entry.event_hash);
         assert_eq!(rebuilt.disk_pos, entry.to_disk_pos(7));
         assert_eq!(rebuilt.global_sequence, entry.global_sequence);
-        assert_eq!(header.event_id, entry.event_id);
-        assert_eq!(header.correlation_id, entry.correlation_id);
-        assert_eq!(header.causation_id, Some(entry.causation_id));
+        assert_eq!(header.event_id, crate::id::EventId::from(entry.event_id));
+        assert_eq!(
+            header.correlation_id,
+            crate::id::CorrelationId::from(entry.correlation_id)
+        );
+        assert_eq!(
+            header.causation_id,
+            Some(crate::id::CausationId::from(entry.causation_id))
+        );
         assert_eq!(header.position.wall_ms, entry.wall_ms);
         assert_eq!(header.position.sequence, entry.clock);
         assert_eq!(header.position.lane, entry.dag_lane);

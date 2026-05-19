@@ -89,7 +89,7 @@ fn replay_determinism_cold_start_rebuilds_identical_index() {
     for (i, entry) in events.iter().enumerate() {
         assert_eq!(
             entry.event_id(),
-            event_ids[i],
+            u128::from(event_ids[i]),
             "PROPERTY: Replayed event_id must match original at index {i}.\n\
              Investigate: src/store/segment/scan.rs scan_segment event ordering.\n\
              Common causes: events reordered during cold start, BTreeMap key collision."
@@ -124,7 +124,7 @@ fn idempotency_algebraic_duplicate_produces_no_new_event() {
     let kind = EventKind::custom(1, 1);
 
     let opts = AppendOptions {
-        idempotency_key: Some(12345),
+        idempotency_key: Some(batpak::id::IdempotencyKey::from(12345u128)),
         ..AppendOptions::default()
     };
 
@@ -325,9 +325,12 @@ fn flow_connectivity_full_production_path() {
     let store = test_store(&dir);
 
     // Step 4: Read back via get — verify event exists and has correct metadata
-    let stored = store.get(event_id).expect("get after cold start");
+    let stored = store
+        .get(batpak::id::EventId::from(event_id))
+        .expect("get after cold start");
     assert_eq!(
-        stored.event.header.event_id, event_id,
+        stored.event.header.event_id,
+        batpak::id::EventId::from(event_id),
         "PROPERTY: Full pipeline flow must preserve event_id through write→sync→close→reopen→read.\n\
          Investigate: pipeline commit → store.append → segment write → cold start → index rebuild → get.\n\
          Common causes: Island Syndrome (FM-007) — pipeline not wired to store, or store not persisting."
@@ -412,7 +415,7 @@ fn errors_propagate_not_launder_to_defaults() {
     let store = test_store(&dir);
 
     // get() on nonexistent event must return NotFound, not a default
-    let result = store.get(999999);
+    let result = store.get(batpak::id::EventId::from(999999u128));
     let err = match result {
         Ok(_) => panic!(
             "PROPERTY: get() for nonexistent event must return Err(NotFound), not a default. \
@@ -986,10 +989,10 @@ fn error_kind_is_retryable() {
 
 #[test]
 fn append_options_with_idempotency_builder() {
-    let opts = AppendOptions::new().with_idempotency(0xDEAD_BEEF_CAFE_BABE);
+    let opts = AppendOptions::new().with_idempotency(batpak::id::IdempotencyKey::from(0xDEAD_BEEF_CAFE_BABE));
     assert_eq!(
         opts.idempotency_key,
-        Some(0xDEAD_BEEF_CAFE_BABE),
+        Some(batpak::id::IdempotencyKey::from(0xDEAD_BEEF_CAFE_BABEu128)),
         "PROPERTY: with_idempotency(key) must set idempotency_key to Some(key).\n\
          Investigate: src/store/mod.rs AppendOptions::with_idempotency.\n\
          Common causes: builder returning Self without setting idempotency_key."
@@ -1038,10 +1041,11 @@ fn append_options_with_flags_builder() {
 
 #[test]
 fn append_options_with_correlation_builder() {
-    let opts = AppendOptions::new().with_correlation(0xCAFE_BABE_1234_5678);
+    let opts = AppendOptions::new()
+        .with_correlation(batpak::id::CorrelationId::from(0xCAFE_BABE_1234_5678u128));
     assert_eq!(
         opts.correlation_id,
-        Some(0xCAFE_BABE_1234_5678),
+        Some(batpak::id::CorrelationId::from(0xCAFE_BABE_1234_5678u128)),
         "PROPERTY: with_correlation(id) must set correlation_id to Some(id).\n\
          Investigate: src/store/mod.rs AppendOptions::with_correlation.\n\
          Common causes: method writing to causation_id by mistake."
@@ -1051,10 +1055,11 @@ fn append_options_with_correlation_builder() {
 
 #[test]
 fn append_options_with_causation_builder() {
-    let opts = AppendOptions::new().with_causation(0xABCD_EF01_2345_6789);
+    let opts = AppendOptions::new()
+        .with_causation(batpak::id::CausationId::from(0xABCD_EF01_2345_6789u128));
     assert_eq!(
         opts.causation_id,
-        Some(0xABCD_EF01_2345_6789),
+        Some(batpak::id::CausationId::from(0xABCD_EF01_2345_6789u128)),
         "PROPERTY: with_causation(id) must set causation_id to Some(id).\n\
          Investigate: src/store/mod.rs AppendOptions::with_causation.\n\
          Common causes: method writing to correlation_id by mistake."
@@ -1069,14 +1074,23 @@ fn append_options_with_causation_builder() {
 fn append_options_builder_chain() {
     // All builders must be chainable and independent
     let opts = AppendOptions::new()
-        .with_idempotency(1)
+        .with_idempotency(batpak::id::IdempotencyKey::from(1u128))
         .with_cas(5)
         .with_flags(0x01)
-        .with_correlation(2)
-        .with_causation(3);
-    assert_eq!(opts.idempotency_key, Some(1));
+        .with_correlation(batpak::id::CorrelationId::from(2u128))
+        .with_causation(batpak::id::CausationId::from(3u128));
+    assert_eq!(
+        opts.idempotency_key,
+        Some(batpak::id::IdempotencyKey::from(1u128))
+    );
     assert_eq!(opts.expected_sequence, Some(5));
     assert_eq!(opts.flags, 0x01);
-    assert_eq!(opts.correlation_id, Some(2));
-    assert_eq!(opts.causation_id, Some(3));
+    assert_eq!(
+        opts.correlation_id,
+        Some(batpak::id::CorrelationId::from(2u128))
+    );
+    assert_eq!(
+        opts.causation_id,
+        Some(batpak::id::CausationId::from(3u128))
+    );
 }

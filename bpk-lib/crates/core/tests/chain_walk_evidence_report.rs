@@ -30,7 +30,7 @@ fn linear_chain_reports_no_findings_and_deterministic_body_hash() -> TestResult 
     let second_receipt = store.append(&coord, kind, &serde_json::json!({"step": 1}))?;
     assert_ne!(first_receipt.event_id, second_receipt.event_id);
 
-    let request = ChainWalkRequest::linear(ChainWalkStartRef::EventId(second_receipt.event_id), 16);
+    let request = ChainWalkRequest::linear(ChainWalkStartRef::EventId(u128::from(second_receipt.event_id)), 16);
     let first = store.chain_walk_evidence(&request)?;
     let second = store.chain_walk_evidence(&request)?;
 
@@ -83,9 +83,11 @@ fn limit_truncation_is_reported_not_silent() -> TestResult {
 
     let mut last = 0_u128;
     for step in 0..5 {
-        last = store
-            .append(&coord, kind, &serde_json::json!({ "step": step }))?
-            .event_id;
+        last = u128::from(
+            store
+                .append(&coord, kind, &serde_json::json!({ "step": step }))?
+                .event_id,
+        );
     }
 
     let report = store.chain_walk_evidence(&ChainWalkRequest::linear(
@@ -122,7 +124,7 @@ fn zero_limit_is_reported_as_invalid() -> TestResult {
     let receipt = store.append(&coord, kind, &serde_json::json!({"step": 0}))?;
 
     let report = store.chain_walk_evidence(&ChainWalkRequest::linear(
-        ChainWalkStartRef::EventId(receipt.event_id),
+        ChainWalkStartRef::EventId(u128::from(receipt.event_id)),
         0,
     ))?;
 
@@ -147,15 +149,15 @@ fn duplicate_payload_parent_hash_chooses_nearest_prior_and_reports_ambiguity() -
     let child = store.append(&coord, kind, &serde_json::json!({"child": true}))?;
 
     let report = store.chain_walk_evidence(&ChainWalkRequest {
-        start: ChainWalkStartRef::EventId(child.event_id),
-        end_event_id: Some(second_same.event_id),
+        start: ChainWalkStartRef::EventId(u128::from(child.event_id)),
+        end_event_id: Some(u128::from(second_same.event_id)),
         limit: 8,
         mode: ChainWalkMode::Linear,
     })?;
 
     if cfg!(feature = "blake3") {
         assert_eq!(report.body.checked_count, 2);
-        assert_eq!(report.body.last_ref, Some(second_same.event_id));
+        assert_eq!(report.body.last_ref, Some(u128::from(second_same.event_id)));
         assert!(
             report.body.findings.iter().any(|finding| matches!(
                 finding,
@@ -164,21 +166,21 @@ fn duplicate_payload_parent_hash_chooses_nearest_prior_and_reports_ambiguity() -
                     selected_parent_event_id,
                     matching_parent_count: 2,
                     ..
-                } if *child_event_id == child.event_id
-                    && *selected_parent_event_id == second_same.event_id
+                } if *child_event_id == u128::from(child.event_id)
+                    && *selected_parent_event_id == u128::from(second_same.event_id)
             )),
             "PROPERTY: duplicate payload parent hashes must select the nearest prior match and report ambiguity, got {:?}",
             report.body.findings
         );
     } else {
         assert_eq!(report.body.checked_count, 1);
-        assert_eq!(report.body.last_ref, Some(child.event_id));
+        assert_eq!(report.body.last_ref, Some(u128::from(child.event_id)));
         assert!(
             matches!(
                 report.body.findings.as_slice(),
                 [ChainWalkFinding::EndNotReached {
                     expected_end_event_id
-                }] if *expected_end_event_id == second_same.event_id
+                }] if *expected_end_event_id == u128::from(second_same.event_id)
             ),
             "PROPERTY: no-blake builds must report the explicit end as unreached instead of inventing duplicate-parent ambiguity without a configured content hash surface, got {:?}",
             report.body.findings
@@ -197,7 +199,7 @@ fn receipt_start_hash_mismatch_is_reported() -> TestResult {
 
     let report = store.chain_walk_evidence(&ChainWalkRequest {
         start: ChainWalkStartRef::Receipt {
-            event_id: receipt.event_id,
+            event_id: u128::from(receipt.event_id),
             content_hash: hash(9),
         },
         end_event_id: None,
@@ -212,14 +214,14 @@ fn receipt_start_hash_mismatch_is_reported() -> TestResult {
                 event_id,
                 expected,
                 ..
-            }) if *event_id == receipt.event_id && *expected == hash(9)
+            }) if *event_id == u128::from(receipt.event_id) && *expected == hash(9)
         ),
         "PROPERTY: receipt-based start checks must report deterministic start hash mismatch when receipt hash does not match stored chain hash",
     );
     let body: ChainWalkReportBody = report.body;
     assert_eq!(body.schema_version, CHAIN_WALK_REPORT_SCHEMA_VERSION);
     let envelope: ChainWalkEvidenceReport = store.chain_walk_evidence(
-        &ChainWalkRequest::linear(ChainWalkStartRef::EventId(receipt.event_id), 4),
+        &ChainWalkRequest::linear(ChainWalkStartRef::EventId(u128::from(receipt.event_id)), 4),
     )?;
     assert_eq!(envelope.body.mode, ChainWalkMode::Linear);
     Ok(())

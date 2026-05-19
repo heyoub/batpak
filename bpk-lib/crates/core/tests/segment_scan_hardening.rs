@@ -81,7 +81,7 @@ fn seed_batched_store(dir: &TempDir) {
             coord.clone(),
             KIND,
             &serde_json::json!({"i": 0}),
-            batpak::store::AppendOptions::new().with_idempotency(0xA1),
+            batpak::store::AppendOptions::new().with_idempotency(batpak::id::IdempotencyKey::from(0xA1)),
             batpak::store::CausationRef::None,
         )
         .expect("batch item 0"),
@@ -89,7 +89,7 @@ fn seed_batched_store(dir: &TempDir) {
             coord,
             KIND,
             &serde_json::json!({"i": 1}),
-            batpak::store::AppendOptions::new().with_idempotency(0xA2),
+            batpak::store::AppendOptions::new().with_idempotency(batpak::id::IdempotencyKey::from(0xA2)),
             batpak::store::CausationRef::None,
         )
         .expect("batch item 1"),
@@ -679,7 +679,7 @@ fn corruption_inside_committed_batch_fails_closed() {
                 batch_coord.clone(),
                 KIND,
                 &serde_json::json!({"batched": 0}),
-                batpak::store::AppendOptions::new().with_idempotency(0xC0),
+                batpak::store::AppendOptions::new().with_idempotency(batpak::id::IdempotencyKey::from(0xC0)),
                 batpak::store::CausationRef::None,
             )
             .expect("batch item 0"),
@@ -687,7 +687,7 @@ fn corruption_inside_committed_batch_fails_closed() {
                 batch_coord,
                 KIND,
                 &serde_json::json!({"batched": 1}),
-                batpak::store::AppendOptions::new().with_idempotency(0xC1),
+                batpak::store::AppendOptions::new().with_idempotency(batpak::id::IdempotencyKey::from(0xC1)),
                 batpak::store::CausationRef::None,
             )
             .expect("batch item 1"),
