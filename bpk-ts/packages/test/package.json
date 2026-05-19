@@ -1,0 +1,18 @@
+{
+  "name": "@batpak/test",
+  "version": "0.0.0",
+  "private": true,
+  "description": "BatPAK TS SDK parity harness: payload + frame + roundtrip + drift guards.",
+  "type": "module",
+  "scripts": {
+    "build": "echo 'tests-only package'",
+    "test": "vitest run --root .",
+    "clean": "echo 'no build artifacts'"
+  },
+  "dependencies": {
+    "@batpak/canonical": "workspace:*",
+    "@batpak/client": "workspace:*",
+    "@batpak/codegen": "workspace:*",
+    "@batpak/generated": "workspace:*"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "name": "@batpak/client",
+  "version": "0.0.0",
+  "private": true,
+  "description": "NETBAT/1 frame client. Phase 0: TCP only.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run --root . --passWithNoTests",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@batpak/canonical": "workspace:*"
+  }
+}

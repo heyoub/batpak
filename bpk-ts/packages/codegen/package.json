@@ -1,0 +1,18 @@
+{
+  "name": "@batpak/codegen",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Generate TS bindings from a batpak.manifest.json.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "batpak-codegen": "./bin/batpak-codegen.js"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run --root . --passWithNoTests",
+    "generate": "node ./bin/batpak-codegen.js --manifest ../../batpak.manifest.json --out ../generated/src",
+    "clean": "rm -rf dist"
+  }
+}

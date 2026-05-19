@@ -1,0 +1,7 @@
+node_modules/
+**/dist/
+**/*.tsbuildinfo
+
+# pnpm-lock.yaml IS committed — required for `pnpm install --frozen-lockfile` in CI.
+# packages/generated/src/ IS committed — Phase 0 release-packaging baseline.
+# packages/generated/dist/ IS NOT committed — re-built from src/ by codegen.
