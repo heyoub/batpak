@@ -74,6 +74,11 @@ enum XtaskCommand {
     /// Backed by `cargo-machete` (separate install:
     /// `cargo install cargo-machete --locked`).
     UnusedDeps,
+    /// Verify the publish crates (batpak, syncbat, netbat) compile under
+    /// their declared `rust-version` MSRV. Requires the relevant
+    /// toolchain installed via `rustup toolchain install <msrv>
+    /// --profile minimal`.
+    MsrvCheck,
     /// Focused alias for template smoke + generated-lock drift checks.
     TemplateFreshness,
     /// Inspect staged files for generated artifacts, retired paths, and conflict markers.
@@ -411,6 +416,7 @@ fn main() -> Result<()> {
         XtaskCommand::Templates => commands::templates(),
         XtaskCommand::Sbom => commands::sbom(),
         XtaskCommand::UnusedDeps => commands::unused_deps(),
+        XtaskCommand::MsrvCheck => commands::msrv_check(),
         XtaskCommand::TemplateFreshness => {
             commands::templates()?;
             commands::integrity("structural-check", [])

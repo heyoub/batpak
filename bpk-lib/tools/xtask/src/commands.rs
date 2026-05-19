@@ -2,6 +2,7 @@ mod ci;
 mod disk_audit;
 mod export_ts_manifest;
 mod loom;
+mod msrv_check;
 mod mutants;
 mod package_scan;
 mod platform;
@@ -76,6 +77,14 @@ pub(crate) fn sbom() -> Result<()> {
 /// `cargo install cargo-machete --locked`.
 pub(crate) fn unused_deps() -> Result<()> {
     unused_deps::unused_deps()
+}
+
+/// Verify each publish crate compiles under its declared
+/// `rust-version`. Requires the relevant toolchain installed via
+/// `rustup toolchain install <msrv>`. Fails fast with an install
+/// hint when the toolchain is missing.
+pub(crate) fn msrv_check() -> Result<()> {
+    msrv_check::msrv_check()
 }
 
 pub(crate) fn disk_audit() -> Result<()> {
