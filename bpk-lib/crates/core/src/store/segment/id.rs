@@ -188,10 +188,13 @@ mod tests {
     fn from_filename_accepts_boundary_ids() {
         for raw in [0u64, 1, u64::MAX] {
             let name = format!("{raw}.fbat");
-            let id = SegmentId::from_filename(&PathBuf::from(&name))
-                .unwrap_or_else(|_| panic!("boundary id {raw} must parse"));
+            let parsed = SegmentId::from_filename(&PathBuf::from(&name));
+            assert!(
+                parsed.is_ok(),
+                "PROPERTY: boundary id {raw} must round-trip; got {parsed:?}"
+            );
             assert_eq!(
-                id.as_u64(),
+                parsed.expect("checked above").as_u64(),
                 raw,
                 "PROPERTY: u64 boundary values round-trip through SegmentId::from_filename"
             );
