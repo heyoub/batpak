@@ -1,0 +1,246 @@
+use std::io::{self, Read, Write};
+use std::net::{TcpListener, TcpStream};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::thread;
+use std::time::Duration;
+
+use super::error::NetbatError;
+use super::frame::{decode_line, dispatch_frame, encode_response, ResponseFrame};
+use super::limits::{IoTimeouts, Limits};
+
+/// Default maximum accepted connections for [`serve_tcp_listener`].
+pub const DEFAULT_MAX_CONNECTIONS: usize = 1024;
+/// Default maximum requests served from one accepted TCP connection.
+pub const DEFAULT_MAX_REQUESTS_PER_CONNECTION: usize = 1;
+
+/// Blocking TCP server limits.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TcpServerConfig {
+    /// Line-protocol request and response limits.
+    pub limits: Limits,
+    /// Optional per-connection read/write timeouts.
+    pub timeouts: IoTimeouts,
+    /// Maximum accepted connections before the listener returns.
+    pub max_connections: usize,
+    /// Maximum requests served per accepted connection.
+    pub max_requests_per_connection: usize,
+    /// Sleep interval used by the nonblocking accept loop when no connection
+    /// is ready.
+    pub idle_sleep: Duration,
+}
+
+impl Default for TcpServerConfig {
+    fn default() -> Self {
+        Self {
+            limits: Limits::default(),
+            timeouts: IoTimeouts::default(),
+            max_connections: DEFAULT_MAX_CONNECTIONS,
+            max_requests_per_connection: DEFAULT_MAX_REQUESTS_PER_CONNECTION,
+            idle_sleep: Duration::from_millis(10),
+        }
+    }
+}
+
+/// Shared shutdown flag for blocking TCP listener loops.
+#[derive(Clone, Debug, Default)]
+pub struct ShutdownHandle {
+    inner: Arc<AtomicBool>,
+}
+
+impl ShutdownHandle {
+    /// Create a new unset shutdown handle.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Request listener shutdown.
+    pub fn shutdown(&self) {
+        self.inner.store(true, Ordering::Release);
+    }
+
+    /// Return true once shutdown has been requested.
+    #[must_use]
+    pub fn is_shutdown(&self) -> bool {
+        self.inner.load(Ordering::Acquire)
+    }
+}
+
+/// Summary returned after a blocking TCP listener exits.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct TcpServeStats {
+    /// Number of accepted TCP connections.
+    pub accepted_connections: usize,
+    /// Number of request frames that produced a successful response.
+    pub served_requests: usize,
+    /// Number of request frames that produced an error response.
+    pub failed_requests: usize,
+    /// Failed requests rejected by malformed framing or unsupported protocol.
+    pub malformed_requests: usize,
+    /// Failed requests rejected by configured line/input/output limits.
+    pub limit_failures: usize,
+    /// Failed requests rejected by syncbat dispatch.
+    pub runtime_failures: usize,
+    /// True when the listener exited because its shutdown handle was set.
+    pub shutdown_requested: bool,
+}
+
+/// Serve one request from an already-accepted blocking stream.
+///
+/// The caller owns listener setup, accept loops, thread pools, TLS, shutdown,
+/// admission, and any timeout application. This helper reads one bounded
+/// request line, dispatches it through syncbat, writes one response line, and
+/// returns the dispatch result.
+///
+/// # Errors
+/// Returns [`NetbatError`] when reading, decoding, dispatching, or writing
+/// fails.
+///
+/// `max_output_bytes` is a transport serialization limit. It is enforced after
+/// syncbat dispatch returns output bytes; use runtime gates or handler-level
+/// validation when output size must be an admission rule.
+pub fn serve_stream<S>(
+    stream: &mut S,
+    core: &mut syncbat::Core,
+    limits: &Limits,
+) -> Result<ResponseFrame, NetbatError>
+where
+    S: Read + Write,
+{
+    let line = match read_line(stream, limits.max_line_bytes) {
+        Ok(line) => line,
+        Err(error) => {
+            let encoded = encode_response(Err(&error));
+            stream.write_all(&encoded)?;
+            return Err(error);
+        }
+    };
+    let frame = decode_line(&line, limits);
+    let response = match frame {
+        Ok(frame) => match dispatch_frame(core, frame, limits) {
+            Ok(response) => {
+                let encoded = encode_response(Ok(response.output()));
+                stream.write_all(&encoded)?;
+                return Ok(response);
+            }
+            Err(error) => {
+                let encoded = encode_response(Err(&error));
+                stream.write_all(&encoded)?;
+                Err(error)
+            }
+        },
+        Err(error) => {
+            let encoded = encode_response(Err(&error));
+            stream.write_all(&encoded)?;
+            Err(error)
+        }
+    };
+    response
+}
+
+/// Serve a blocking TCP listener sequentially until shutdown or limits stop it.
+///
+/// The listener is switched to nonblocking mode so [`ShutdownHandle`] can stop
+/// the accept loop without opening a synthetic connection. Each accepted
+/// connection is served on the caller's thread; `netbat` does not spawn worker
+/// threads and does not require syncbat handlers to be `Send`.
+///
+/// # Errors
+/// Returns [`NetbatError`] when listener configuration, accept, timeout
+/// configuration, or response writes fail. Per-request decode/runtime errors
+/// are counted in [`TcpServeStats::failed_requests`] after their error response
+/// is written.
+pub fn serve_tcp_listener(
+    listener: TcpListener,
+    core: &mut syncbat::Core,
+    config: &TcpServerConfig,
+    shutdown: &ShutdownHandle,
+) -> Result<TcpServeStats, NetbatError> {
+    listener.set_nonblocking(true)?;
+    let mut stats = TcpServeStats::default();
+
+    while !shutdown.is_shutdown() && stats.accepted_connections < config.max_connections {
+        match listener.accept() {
+            Ok((stream, _addr)) => {
+                stats.accepted_connections += 1;
+                apply_timeouts(&stream, config.timeouts)?;
+                serve_tcp_connection(stream, core, config, &mut stats)?;
+            }
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                thread::sleep(config.idle_sleep);
+            }
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+
+    stats.shutdown_requested = shutdown.is_shutdown();
+    drop(listener);
+    Ok(stats)
+}
+
+fn serve_tcp_connection(
+    mut stream: TcpStream,
+    core: &mut syncbat::Core,
+    config: &TcpServerConfig,
+    stats: &mut TcpServeStats,
+) -> Result<(), NetbatError> {
+    for _ in 0..config.max_requests_per_connection {
+        match serve_stream(&mut stream, core, &config.limits) {
+            Ok(_) => stats.served_requests += 1,
+            Err(NetbatError::EmptyStream) => return Ok(()),
+            Err(error @ NetbatError::Io { .. }) => return Err(error),
+            Err(error) => {
+                stats.failed_requests += 1;
+                record_request_failure(stats, &error);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn apply_timeouts(stream: &TcpStream, timeouts: IoTimeouts) -> Result<(), NetbatError> {
+    stream.set_read_timeout(timeouts.read)?;
+    stream.set_write_timeout(timeouts.write)?;
+    Ok(())
+}
+
+fn read_line<R: Read>(reader: &mut R, max_line_bytes: usize) -> Result<Vec<u8>, NetbatError> {
+    let mut line = Vec::new();
+    let mut byte = [0_u8; 1];
+
+    loop {
+        match reader.read(&mut byte) {
+            Ok(0) if line.is_empty() => return Err(NetbatError::EmptyStream),
+            Ok(0) => return Ok(line),
+            Ok(_) => {
+                line.push(byte[0]);
+                if line.len() > max_line_bytes {
+                    return Err(NetbatError::LineTooLong {
+                        max: max_line_bytes,
+                    });
+                }
+                if byte[0] == b'\n' {
+                    return Ok(line);
+                }
+            }
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+}
+
+fn record_request_failure(stats: &mut TcpServeStats, error: &NetbatError) {
+    match error {
+        NetbatError::LineTooLong { .. }
+        | NetbatError::OperationNameTooLong { .. }
+        | NetbatError::InputTooLarge { .. }
+        | NetbatError::OutputTooLarge { .. } => stats.limit_failures += 1,
+        NetbatError::MalformedRequest { .. } | NetbatError::UnsupportedProtocolVersion { .. } => {
+            stats.malformed_requests += 1;
+        }
+        NetbatError::Runtime(_) => stats.runtime_failures += 1,
+        NetbatError::Io { .. } | NetbatError::EmptyStream => {}
+    }
+}
