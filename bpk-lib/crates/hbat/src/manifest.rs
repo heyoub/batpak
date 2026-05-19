@@ -1,28 +1,29 @@
-//! Explicit descriptor registry consumed by both `xtask export-ts-manifest`
-//! and the `hbat` binary.
+//! Inventory-driven descriptor registry consumed by both
+//! `xtask export-ts-manifest` and the `hbat` binary.
 //!
-//! `#[derive(EventPayload)]` registers payloads via the `inventory` crate,
-//! which collects per-binary. `xtask` cannot see registrations linked into
-//! the `hbat` binary. The function [`descriptors`] is the Phase 0 shim
-//! that lets both callers materialize the same descriptor set without
-//! requiring a cross-binary discovery story.
+//! Each `EventPayload`-deriving module submits an
+//! [`EventDescriptorRegistration`] via the `inventory` crate. The function
+//! [`descriptors`] iterates the registry at runtime and materializes the
+//! [`ManifestSnapshot`] — no centralized hand-rolled describe table.
+//!
+//! Adding a new event in a downstream crate (or in `hbat` itself) is one
+//! `inventory::submit!` next to the type's `#[derive(EventPayload)]`. The
+//! event then appears in the exported TS manifest automatically, sorted
+//! by `(category, type_id)` for stable ordering across link configurations.
 
-use batpak::event::EventPayload;
 use netbat::{encode_request, encode_response, NetbatError};
 use serde::Serialize;
 use syncbat::RuntimeError;
 
 use crate::bank::{
-    BankCommitAck, BankCommitRequest, EventGetAck, EventGetRequest, BANK_COMMIT_INPUT_SCHEMA_REF,
-    BANK_COMMIT_OPERATION_NAME, BANK_COMMIT_OUTPUT_SCHEMA_REF, BANK_COMMIT_RECEIPT_KIND,
-    EVENT_GET_INPUT_SCHEMA_REF, EVENT_GET_OPERATION_NAME, EVENT_GET_OUTPUT_SCHEMA_REF,
-    EVENT_GET_RECEIPT_KIND,
+    BANK_COMMIT_INPUT_SCHEMA_REF, BANK_COMMIT_OPERATION_NAME, BANK_COMMIT_OUTPUT_SCHEMA_REF,
+    BANK_COMMIT_RECEIPT_KIND, EVENT_GET_INPUT_SCHEMA_REF, EVENT_GET_OPERATION_NAME,
+    EVENT_GET_OUTPUT_SCHEMA_REF, EVENT_GET_RECEIPT_KIND,
 };
 use crate::heartbeat::{
     HEARTBEAT_INPUT_SCHEMA_REF, HEARTBEAT_OPERATION_NAME, HEARTBEAT_OUTPUT_SCHEMA_REF,
     HEARTBEAT_RECEIPT_KIND,
 };
-use crate::{EventPayloadFixture, SystemHeartbeatAck, SystemHeartbeatRequest};
 
 /// Wire/manifest version emitted in the JSON envelope.
 pub const MANIFEST_VERSION: u32 = 1;
@@ -132,23 +133,108 @@ pub struct ManifestErrorFixture {
     pub message_utf8: String,
 }
 
+/// One static field row submitted alongside an
+/// [`EventDescriptorRegistration`]. Mirrors [`FieldDescriptor`] but uses
+/// `&'static str` so the row can live in static memory next to the
+/// `inventory::submit!` call.
+#[derive(Clone, Copy, Debug)]
+pub struct FieldRow {
+    /// Exact serde key on the wire. `ts_name` equals this string today
+    /// per the Phase 0 invariant.
+    pub wire_name: &'static str,
+    /// Canonical type token consumed by the codegen.
+    pub type_token: &'static str,
+    /// Declaration order, starting at 0.
+    pub order: usize,
+}
+
+/// Compile-time inventory entry for one `EventPayload`-deriving struct.
+///
+/// Each event-defining module emits one of these via `inventory::submit!`
+/// next to its `#[derive(EventPayload)]`. The [`descriptors`] function
+/// iterates them at runtime and produces the full [`EventDescriptor`]
+/// list. The fixture closures defer encoding/JSON work to manifest
+/// export time so callers that only consume the schema-ref constants do
+/// not pay it.
+pub struct EventDescriptorRegistration {
+    /// Fully-qualified Rust type path (e.g. `hbat::heartbeat::SystemHeartbeatRequest`).
+    pub rust_type: &'static str,
+    /// PascalCase TypeScript symbol for the type.
+    pub ts_name: &'static str,
+    /// Stable schema reference advertised by the operation descriptor.
+    pub schema_ref: &'static str,
+    /// Packed `(category << 12) | type_id` — equals `EventKind::as_raw_u16()`.
+    pub kind_bits: u16,
+    /// Field rows in declaration order.
+    pub fields: &'static [FieldRow],
+    /// Returns the canonically-encoded fixture payload bytes. Returns
+    /// `None` if encoding fails — the caller panics with the
+    /// `rust_type` so the failing event is named in the diagnostic.
+    pub fixture_bytes: fn() -> Option<Vec<u8>>,
+    /// Returns the JSON view of the fixture value.
+    pub fixture_json: fn() -> Option<serde_json::Value>,
+}
+
+inventory::collect!(EventDescriptorRegistration);
+
+impl EventDescriptorRegistration {
+    fn materialize(&self) -> EventDescriptor {
+        let payload_bytes = (self.fixture_bytes)()
+            .unwrap_or_else(|| panic!("encode fixture bytes for {}", self.rust_type));
+        let fixture_value = (self.fixture_json)()
+            .unwrap_or_else(|| panic!("encode fixture json for {}", self.rust_type));
+        // justifies: ADR-0010, src/event/kind.rs; kind_bits upper nibble fits in u8 by construction so narrowing into u8 cannot truncate
+        #[allow(clippy::cast_possible_truncation)]
+        let category = (self.kind_bits >> 12) as u8;
+        let type_id = self.kind_bits & 0x0FFF;
+        EventDescriptor {
+            name: self.schema_ref.to_owned(),
+            rust_type: self.rust_type.to_owned(),
+            ts_name: self.ts_name.to_owned(),
+            category,
+            type_id,
+            fields: self
+                .fields
+                .iter()
+                .map(|row| FieldDescriptor {
+                    wire_name: row.wire_name.to_owned(),
+                    ts_name: row.wire_name.to_owned(),
+                    type_token: row.type_token.to_owned(),
+                    order: row.order,
+                })
+                .collect(),
+            fixture_value,
+            golden_payload_hex: encode_hex(&payload_bytes),
+        }
+    }
+}
+
 /// Build the 0.7.6 descriptor snapshot for hbat's operation surface.
+///
+/// Walks the `inventory` registry, materializes one [`EventDescriptor`]
+/// per submitted [`EventDescriptorRegistration`], sorts by
+/// `(category, type_id)` for link-order stability, then builds the
+/// operation table on top.
 #[must_use]
 pub fn descriptors() -> ManifestSnapshot {
-    let request_event = describe_heartbeat_request_event();
-    let ack_event = describe_heartbeat_ack_event();
-    let bank_commit_request_event = describe_bank_commit_request_event();
-    let bank_commit_ack_event = describe_bank_commit_ack_event();
-    let event_get_request_event = describe_event_get_request_event();
-    let event_get_ack_event = describe_event_get_ack_event();
+    let mut events: Vec<EventDescriptor> = inventory::iter::<EventDescriptorRegistration>
+        .into_iter()
+        .map(EventDescriptorRegistration::materialize)
+        .collect();
+    // Link order is implementation-defined; sort by the wire-stable
+    // (category, type_id) pair so the manifest JSON is byte-identical
+    // across builds.
+    events.sort_by_key(|event| (event.category, event.type_id));
+
+    let index = EventIndex::new(&events);
 
     let heartbeat_op = build_operation(
         HEARTBEAT_OPERATION_NAME,
         HEARTBEAT_INPUT_SCHEMA_REF,
         HEARTBEAT_OUTPUT_SCHEMA_REF,
         HEARTBEAT_RECEIPT_KIND,
-        &request_event.golden_payload_hex,
-        &ack_event.golden_payload_hex,
+        index.golden_for(HEARTBEAT_INPUT_SCHEMA_REF),
+        index.golden_for(HEARTBEAT_OUTPUT_SCHEMA_REF),
     );
 
     let bank_commit_op = build_operation(
@@ -156,8 +242,8 @@ pub fn descriptors() -> ManifestSnapshot {
         BANK_COMMIT_INPUT_SCHEMA_REF,
         BANK_COMMIT_OUTPUT_SCHEMA_REF,
         BANK_COMMIT_RECEIPT_KIND,
-        &bank_commit_request_event.golden_payload_hex,
-        &bank_commit_ack_event.golden_payload_hex,
+        index.golden_for(BANK_COMMIT_INPUT_SCHEMA_REF),
+        index.golden_for(BANK_COMMIT_OUTPUT_SCHEMA_REF),
     );
 
     let event_get_op = build_operation(
@@ -165,20 +251,38 @@ pub fn descriptors() -> ManifestSnapshot {
         EVENT_GET_INPUT_SCHEMA_REF,
         EVENT_GET_OUTPUT_SCHEMA_REF,
         EVENT_GET_RECEIPT_KIND,
-        &event_get_request_event.golden_payload_hex,
-        &event_get_ack_event.golden_payload_hex,
+        index.golden_for(EVENT_GET_INPUT_SCHEMA_REF),
+        index.golden_for(EVENT_GET_OUTPUT_SCHEMA_REF),
     );
 
     ManifestSnapshot {
-        events: vec![
-            request_event,
-            ack_event,
-            bank_commit_request_event,
-            bank_commit_ack_event,
-            event_get_request_event,
-            event_get_ack_event,
-        ],
+        events,
         operations: vec![heartbeat_op, bank_commit_op, event_get_op],
+    }
+}
+
+/// Internal lookup from schema-ref to materialized golden-payload hex.
+/// Each operation row carries the same hex string already on its event
+/// descriptor; the index just lets `build_operation` find it without
+/// duplicating the descriptor walk.
+struct EventIndex<'a> {
+    by_schema_ref: std::collections::HashMap<&'a str, &'a str>,
+}
+
+impl<'a> EventIndex<'a> {
+    fn new(events: &'a [EventDescriptor]) -> Self {
+        let mut by_schema_ref = std::collections::HashMap::with_capacity(events.len());
+        for event in events {
+            by_schema_ref.insert(event.name.as_str(), event.golden_payload_hex.as_str());
+        }
+        Self { by_schema_ref }
+    }
+
+    fn golden_for(&self, schema_ref: &str) -> &'a str {
+        self.by_schema_ref
+            .get(schema_ref)
+            .copied()
+            .unwrap_or_else(|| panic!("event descriptor missing for schema ref {schema_ref}"))
     }
 }
 
@@ -207,148 +311,6 @@ fn build_operation(
         golden_request_frame_hex: encode_hex(&request_frame),
         golden_ok_frame_hex: encode_hex(&ok_frame),
         error_fixture,
-    }
-}
-
-fn describe_heartbeat_request_event() -> EventDescriptor {
-    let fixture = SystemHeartbeatRequest::fixture_value();
-    let payload_bytes = batpak::encoding::to_bytes(&fixture).expect("encode heartbeat request");
-    let fixture_json = serde_json::to_value(&fixture).expect("json-shaped");
-    EventDescriptor {
-        name: HEARTBEAT_INPUT_SCHEMA_REF.to_owned(),
-        rust_type: "hbat::heartbeat::SystemHeartbeatRequest".to_owned(),
-        ts_name: "SystemHeartbeatRequest".to_owned(),
-        category: SystemHeartbeatRequest::KIND.category(),
-        type_id: SystemHeartbeatRequest::KIND.type_id(),
-        fields: vec![field("nonce", "string", 0)],
-        fixture_value: fixture_json,
-        golden_payload_hex: encode_hex(&payload_bytes),
-    }
-}
-
-fn describe_heartbeat_ack_event() -> EventDescriptor {
-    let fixture = SystemHeartbeatAck::fixture_value();
-    let payload_bytes = batpak::encoding::to_bytes(&fixture).expect("encode heartbeat ack");
-    let fixture_json = serde_json::to_value(&fixture).expect("json-shaped");
-    EventDescriptor {
-        name: HEARTBEAT_OUTPUT_SCHEMA_REF.to_owned(),
-        rust_type: "hbat::heartbeat::SystemHeartbeatAck".to_owned(),
-        ts_name: "SystemHeartbeatAck".to_owned(),
-        category: SystemHeartbeatAck::KIND.category(),
-        type_id: SystemHeartbeatAck::KIND.type_id(),
-        fields: vec![
-            field("nonce", "string", 0),
-            field("server_ts_ms", "u64-millis", 1),
-        ],
-        fixture_value: fixture_json,
-        golden_payload_hex: encode_hex(&payload_bytes),
-    }
-}
-
-fn describe_bank_commit_request_event() -> EventDescriptor {
-    let fixture = BankCommitRequest::fixture_value();
-    let payload_bytes = batpak::encoding::to_bytes(&fixture).expect("encode bank.commit request");
-    let fixture_json = serde_json::to_value(&fixture).expect("json-shaped");
-    EventDescriptor {
-        name: BANK_COMMIT_INPUT_SCHEMA_REF.to_owned(),
-        rust_type: "hbat::bank::BankCommitRequest".to_owned(),
-        ts_name: "BankCommitRequest".to_owned(),
-        category: BankCommitRequest::KIND.category(),
-        type_id: BankCommitRequest::KIND.type_id(),
-        fields: vec![
-            field("entity", "string", 0),
-            field("scope", "string", 1),
-            field("kind_category", "u8", 2),
-            field("kind_type_id", "u16", 3),
-            // payload is a free-form hex blob (variable length, lowercase).
-            // Branded as HexBlob on the TS side so callers cannot
-            // accidentally pass an event_id or content hash here.
-            field("payload_hex", "hex-blob", 4),
-        ],
-        fixture_value: fixture_json,
-        golden_payload_hex: encode_hex(&payload_bytes),
-    }
-}
-
-fn describe_bank_commit_ack_event() -> EventDescriptor {
-    let fixture = BankCommitAck::fixture_value();
-    let payload_bytes = batpak::encoding::to_bytes(&fixture).expect("encode bank.commit ack");
-    let fixture_json = serde_json::to_value(&fixture).expect("json-shaped");
-    EventDescriptor {
-        name: BANK_COMMIT_OUTPUT_SCHEMA_REF.to_owned(),
-        rust_type: "hbat::bank::BankCommitAck".to_owned(),
-        ts_name: "BankCommitAck".to_owned(),
-        category: BankCommitAck::KIND.category(),
-        type_id: BankCommitAck::KIND.type_id(),
-        fields: vec![
-            // Branded hex tokens prevent passing the wrong hex shape
-            // (e.g. a content hash where an event id was expected).
-            field("event_id_hex", "u128-hex", 0),
-            field("sequence", "u64-safe", 1),
-            field("content_hash_hex", "blake3-32-hex", 2),
-            field("key_id_hex", "key-id-hex", 3),
-            field("signature_hex", "option<ed25519-sig-hex>", 4),
-            field("extensions", "map<string,hex-blob>", 5),
-        ],
-        fixture_value: fixture_json,
-        golden_payload_hex: encode_hex(&payload_bytes),
-    }
-}
-
-fn describe_event_get_request_event() -> EventDescriptor {
-    let fixture = EventGetRequest::fixture_value();
-    let payload_bytes = batpak::encoding::to_bytes(&fixture).expect("encode event.get request");
-    let fixture_json = serde_json::to_value(&fixture).expect("json-shaped");
-    EventDescriptor {
-        name: EVENT_GET_INPUT_SCHEMA_REF.to_owned(),
-        rust_type: "hbat::bank::EventGetRequest".to_owned(),
-        ts_name: "EventGetRequest".to_owned(),
-        category: EventGetRequest::KIND.category(),
-        type_id: EventGetRequest::KIND.type_id(),
-        fields: vec![field("event_id_hex", "u128-hex", 0)],
-        fixture_value: fixture_json,
-        golden_payload_hex: encode_hex(&payload_bytes),
-    }
-}
-
-fn describe_event_get_ack_event() -> EventDescriptor {
-    let fixture = EventGetAck::fixture_value();
-    let payload_bytes = batpak::encoding::to_bytes(&fixture).expect("encode event.get ack");
-    let fixture_json = serde_json::to_value(&fixture).expect("json-shaped");
-    EventDescriptor {
-        name: EVENT_GET_OUTPUT_SCHEMA_REF.to_owned(),
-        rust_type: "hbat::bank::EventGetAck".to_owned(),
-        ts_name: "EventGetAck".to_owned(),
-        category: EventGetAck::KIND.category(),
-        type_id: EventGetAck::KIND.type_id(),
-        fields: vec![
-            field("event_id_hex", "u128-hex", 0),
-            field("sequence", "u64-safe", 1),
-            field("timestamp_us", "i64-microseconds", 2),
-            field("correlation_id_hex", "u128-hex", 3),
-            // causation_id is optional u128 hex — keep option<string>
-            // for now to avoid a third option-of-brand token; brand
-            // emission for option<u128-hex> can come in a follow-on
-            // patch once the codegen test coverage proves the pattern.
-            field("causation_id_hex", "option<string>", 4),
-            field("kind_category", "u8", 5),
-            field("kind_type_id", "u16", 6),
-            field("entity", "string", 7),
-            field("scope", "string", 8),
-            field("payload_hex", "hex-blob", 9),
-            field("content_hash_hex", "blake3-32-hex", 10),
-        ],
-        fixture_value: fixture_json,
-        golden_payload_hex: encode_hex(&payload_bytes),
-    }
-}
-
-fn field(name: &str, type_token: &str, order: usize) -> FieldDescriptor {
-    FieldDescriptor {
-        wire_name: name.to_owned(),
-        ts_name: name.to_owned(),
-        type_token: type_token.to_owned(),
-        order,
     }
 }
 
@@ -447,5 +409,18 @@ mod tests {
                 rmp_serde::from_slice(&bytes).expect("decode msgpack");
             assert_eq!(payload_json, event.fixture_value, "event {}", event.name);
         }
+    }
+
+    #[test]
+    fn events_sort_by_kind_for_link_order_stability() {
+        let snap = descriptors();
+        let pairs: Vec<(u8, u16)> = snap
+            .events
+            .iter()
+            .map(|e| (e.category, e.type_id))
+            .collect();
+        let mut sorted = pairs.clone();
+        sorted.sort();
+        assert_eq!(pairs, sorted, "events must be sorted by (category, type_id)");
     }
 }

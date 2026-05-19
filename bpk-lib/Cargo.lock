@@ -747,6 +747,7 @@ dependencies = [
  "batpak",
  "clap",
  "ctrlc",
+ "inventory",
  "netbat",
  "rmp-serde",
  "serde",

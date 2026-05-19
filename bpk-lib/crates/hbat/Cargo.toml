@@ -37,6 +37,12 @@ ctrlc = { version = "3", features = ["termination"] }
 # verbosity; the env filter feature is optional.
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "std", "env-filter"] }
+# inventory: link-time registry that lets each EventPayload-deriving
+# module submit its full manifest descriptor (field list, fixture
+# closures, schema ref) at compile time. `manifest::descriptors()`
+# walks the registry at runtime so adding a new event no longer
+# requires touching a centralized describe_* table.
+inventory = "0.3"
 
 [dev-dependencies]
 tempfile = ">=3.24, <3.25"

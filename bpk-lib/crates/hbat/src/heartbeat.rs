@@ -129,6 +129,41 @@ const _REQUEST_KIND_LINK: batpak::event::EventKind = SystemHeartbeatRequest::KIN
 #[allow(dead_code)]
 const _ACK_KIND_LINK: batpak::event::EventKind = SystemHeartbeatAck::KIND;
 
+// ─── Manifest registry submissions ──────────────────────────────────────────
+//
+// One `inventory::submit!` per `EventPayload`-deriving type. The fixture
+// closures defer encoding/JSON work to manifest export time so library
+// callers that only need the schema-ref constants do not pay it.
+
+inventory::submit! {
+    crate::manifest::EventDescriptorRegistration {
+        rust_type: "hbat::heartbeat::SystemHeartbeatRequest",
+        ts_name: "SystemHeartbeatRequest",
+        schema_ref: HEARTBEAT_INPUT_SCHEMA_REF,
+        kind_bits: SystemHeartbeatRequest::KIND.as_raw_u16(),
+        fields: &[
+            crate::manifest::FieldRow { wire_name: "nonce", type_token: "string", order: 0 },
+        ],
+        fixture_bytes: || batpak::encoding::to_bytes(&SystemHeartbeatRequest::fixture_value()).ok(),
+        fixture_json: || serde_json::to_value(SystemHeartbeatRequest::fixture_value()).ok(),
+    }
+}
+
+inventory::submit! {
+    crate::manifest::EventDescriptorRegistration {
+        rust_type: "hbat::heartbeat::SystemHeartbeatAck",
+        ts_name: "SystemHeartbeatAck",
+        schema_ref: HEARTBEAT_OUTPUT_SCHEMA_REF,
+        kind_bits: SystemHeartbeatAck::KIND.as_raw_u16(),
+        fields: &[
+            crate::manifest::FieldRow { wire_name: "nonce", type_token: "string", order: 0 },
+            crate::manifest::FieldRow { wire_name: "server_ts_ms", type_token: "u64-millis", order: 1 },
+        ],
+        fixture_bytes: || batpak::encoding::to_bytes(&SystemHeartbeatAck::fixture_value()).ok(),
+        fixture_json: || serde_json::to_value(SystemHeartbeatAck::fixture_value()).ok(),
+    }
+}
+
 #[cfg(test)]
 // justifies: INV-ALLOW-IS-DESIGN; tests in this module assert fixture invariants
 // using panic!/assert! patterns. Suppressing these workspace-level denies for

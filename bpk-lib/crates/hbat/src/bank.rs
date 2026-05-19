@@ -222,6 +222,97 @@ const _EVENT_GET_REQUEST_KIND: batpak::event::EventKind = EventGetRequest::KIND;
 #[allow(dead_code)]
 const _EVENT_GET_ACK_KIND: batpak::event::EventKind = EventGetAck::KIND;
 
+// ─── Manifest registry submissions ──────────────────────────────────────────
+//
+// One `inventory::submit!` per `EventPayload`-deriving type. The
+// `manifest::descriptors()` runtime walker materializes each entry into
+// a full `EventDescriptor`. Field rows mirror the serde declaration
+// order on the struct above.
+
+inventory::submit! {
+    crate::manifest::EventDescriptorRegistration {
+        rust_type: "hbat::bank::BankCommitRequest",
+        ts_name: "BankCommitRequest",
+        schema_ref: BANK_COMMIT_INPUT_SCHEMA_REF,
+        kind_bits: BankCommitRequest::KIND.as_raw_u16(),
+        fields: &[
+            crate::manifest::FieldRow { wire_name: "entity", type_token: "string", order: 0 },
+            crate::manifest::FieldRow { wire_name: "scope", type_token: "string", order: 1 },
+            crate::manifest::FieldRow { wire_name: "kind_category", type_token: "u8", order: 2 },
+            crate::manifest::FieldRow { wire_name: "kind_type_id", type_token: "u16", order: 3 },
+            // payload is a free-form hex blob (variable length, lowercase).
+            // Branded as HexBlob on the TS side so callers cannot
+            // accidentally pass an event_id or content hash here.
+            crate::manifest::FieldRow { wire_name: "payload_hex", type_token: "hex-blob", order: 4 },
+        ],
+        fixture_bytes: || batpak::encoding::to_bytes(&BankCommitRequest::fixture_value()).ok(),
+        fixture_json: || serde_json::to_value(BankCommitRequest::fixture_value()).ok(),
+    }
+}
+
+inventory::submit! {
+    crate::manifest::EventDescriptorRegistration {
+        rust_type: "hbat::bank::BankCommitAck",
+        ts_name: "BankCommitAck",
+        schema_ref: BANK_COMMIT_OUTPUT_SCHEMA_REF,
+        kind_bits: BankCommitAck::KIND.as_raw_u16(),
+        fields: &[
+            // Branded hex tokens prevent passing the wrong hex shape
+            // (e.g. a content hash where an event id was expected).
+            crate::manifest::FieldRow { wire_name: "event_id_hex", type_token: "u128-hex", order: 0 },
+            crate::manifest::FieldRow { wire_name: "sequence", type_token: "u64-safe", order: 1 },
+            crate::manifest::FieldRow { wire_name: "content_hash_hex", type_token: "blake3-32-hex", order: 2 },
+            crate::manifest::FieldRow { wire_name: "key_id_hex", type_token: "key-id-hex", order: 3 },
+            crate::manifest::FieldRow { wire_name: "signature_hex", type_token: "option<ed25519-sig-hex>", order: 4 },
+            crate::manifest::FieldRow { wire_name: "extensions", type_token: "map<string,hex-blob>", order: 5 },
+        ],
+        fixture_bytes: || batpak::encoding::to_bytes(&BankCommitAck::fixture_value()).ok(),
+        fixture_json: || serde_json::to_value(BankCommitAck::fixture_value()).ok(),
+    }
+}
+
+inventory::submit! {
+    crate::manifest::EventDescriptorRegistration {
+        rust_type: "hbat::bank::EventGetRequest",
+        ts_name: "EventGetRequest",
+        schema_ref: EVENT_GET_INPUT_SCHEMA_REF,
+        kind_bits: EventGetRequest::KIND.as_raw_u16(),
+        fields: &[
+            crate::manifest::FieldRow { wire_name: "event_id_hex", type_token: "u128-hex", order: 0 },
+        ],
+        fixture_bytes: || batpak::encoding::to_bytes(&EventGetRequest::fixture_value()).ok(),
+        fixture_json: || serde_json::to_value(EventGetRequest::fixture_value()).ok(),
+    }
+}
+
+inventory::submit! {
+    crate::manifest::EventDescriptorRegistration {
+        rust_type: "hbat::bank::EventGetAck",
+        ts_name: "EventGetAck",
+        schema_ref: EVENT_GET_OUTPUT_SCHEMA_REF,
+        kind_bits: EventGetAck::KIND.as_raw_u16(),
+        fields: &[
+            crate::manifest::FieldRow { wire_name: "event_id_hex", type_token: "u128-hex", order: 0 },
+            crate::manifest::FieldRow { wire_name: "sequence", type_token: "u64-safe", order: 1 },
+            crate::manifest::FieldRow { wire_name: "timestamp_us", type_token: "i64-microseconds", order: 2 },
+            crate::manifest::FieldRow { wire_name: "correlation_id_hex", type_token: "u128-hex", order: 3 },
+            // causation_id is optional u128 hex — keep option<string>
+            // for now to avoid a third option-of-brand token; brand
+            // emission for option<u128-hex> can come in a follow-on
+            // patch once the codegen test coverage proves the pattern.
+            crate::manifest::FieldRow { wire_name: "causation_id_hex", type_token: "option<string>", order: 4 },
+            crate::manifest::FieldRow { wire_name: "kind_category", type_token: "u8", order: 5 },
+            crate::manifest::FieldRow { wire_name: "kind_type_id", type_token: "u16", order: 6 },
+            crate::manifest::FieldRow { wire_name: "entity", type_token: "string", order: 7 },
+            crate::manifest::FieldRow { wire_name: "scope", type_token: "string", order: 8 },
+            crate::manifest::FieldRow { wire_name: "payload_hex", type_token: "hex-blob", order: 9 },
+            crate::manifest::FieldRow { wire_name: "content_hash_hex", type_token: "blake3-32-hex", order: 10 },
+        ],
+        fixture_bytes: || batpak::encoding::to_bytes(&EventGetAck::fixture_value()).ok(),
+        fixture_json: || serde_json::to_value(EventGetAck::fixture_value()).ok(),
+    }
+}
+
 
 #[cfg(test)]
 #[allow(clippy::panic, clippy::unwrap_used)]
