@@ -36,10 +36,7 @@ export { Schema };
  * Throws if either MessagePack decoding fails or the decoded shape does
  * not match the schema.
  */
-export function decodeBytes<T, E>(
-  schema: Schema.Codec<T, E>,
-  bytes: Uint8Array,
-): T {
+export function decodeBytes<T, E>(schema: Schema.Codec<T, E>, bytes: Uint8Array): T {
   const raw = canonicalDecode(bytes);
   return Schema.decodeUnknownSync(schema)(raw);
 }
@@ -48,10 +45,7 @@ export function decodeBytes<T, E>(
  * Encode a typed value into canonical MessagePack bytes, validating the
  * value against the given schema first.
  */
-export function encodeBytes<T, E>(
-  schema: Schema.Codec<T, E>,
-  value: T,
-): Uint8Array {
+export function encodeBytes<T, E>(schema: Schema.Codec<T, E>, value: T): Uint8Array {
   const validated = Schema.encodeUnknownSync(schema)(value);
   return canonicalEncode(validated);
 }

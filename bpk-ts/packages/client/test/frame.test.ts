@@ -28,9 +28,7 @@ const hex = encodeHex;
 describe("encodeRequest", () => {
   it("emits the literal NETBAT/1 CALL prefix + lowercase hex + \\n", () => {
     const out = encodeRequest("system.heartbeat", new Uint8Array([0xde, 0xad]));
-    expect(new TextDecoder().decode(out)).toBe(
-      "NETBAT/1 CALL system.heartbeat dead\n",
-    );
+    expect(new TextDecoder().decode(out)).toBe("NETBAT/1 CALL system.heartbeat dead\n");
   });
 
   it("encodes empty input as the empty hex segment", () => {
@@ -102,21 +100,15 @@ describe("parseRequestFrame", () => {
   });
 
   it("rejects a missing CALL verb", () => {
-    expect(() => parseRequestFrame(utf8("NETBAT/1 PING ping cafe\n"))).toThrow(
-      /must start with/,
-    );
+    expect(() => parseRequestFrame(utf8("NETBAT/1 PING ping cafe\n"))).toThrow(/must start with/);
   });
 
   it("rejects a missing protocol prefix", () => {
-    expect(() => parseRequestFrame(utf8("HTTP/1.1 CALL ping cafe\n"))).toThrow(
-      /must start with/,
-    );
+    expect(() => parseRequestFrame(utf8("HTTP/1.1 CALL ping cafe\n"))).toThrow(/must start with/);
   });
 
   it("rejects a frame without a hex segment", () => {
-    expect(() => parseRequestFrame(utf8("NETBAT/1 CALL ping\n"))).toThrow(
-      /missing space/,
-    );
+    expect(() => parseRequestFrame(utf8("NETBAT/1 CALL ping\n"))).toThrow(/missing space/);
   });
 });
 
@@ -161,17 +153,13 @@ describe("parseResponseFrame", () => {
   });
 
   it("rejects responses that are neither OK nor ERR", () => {
-    expect(() => parseResponseFrame(utf8("MAYBE deadbeef\n"))).toThrow(
-      /must start with/,
-    );
+    expect(() => parseResponseFrame(utf8("MAYBE deadbeef\n"))).toThrow(/must start with/);
   });
 
   it("covers every NetbatError code declared in the union", () => {
     // Sanity: every code we declared parses correctly.
     for (const code of NETBAT_ERROR_CODES) {
-      const parsed = parseResponseFrame(
-        utf8(`ERR ${code} ${encodeHex(utf8("ok"))}\n`),
-      );
+      const parsed = parseResponseFrame(utf8(`ERR ${code} ${encodeHex(utf8("ok"))}\n`));
       if (parsed.kind !== "netbat-error") throw new Error("expected error");
       const c: NetbatErrorCode = parsed.code;
       expect(c).toBe(code);

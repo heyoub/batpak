@@ -11,9 +11,7 @@ describe("decodeBytes / encodeBytes round-trip", () => {
 
   it("encodes a typed value to canonical bytes that match the manual encoder", () => {
     const bytes = encodeBytes(Heartbeat, { nonce: "heartbeat-fixture-0001" });
-    expect(encodeHex(bytes)).toBe(
-      "81a56e6f6e6365b66865617274626561742d666978747572652d30303031",
-    );
+    expect(encodeHex(bytes)).toBe("81a56e6f6e6365b66865617274626561742d666978747572652d30303031");
   });
 
   it("decodes canonical bytes back into a typed value", () => {
@@ -34,9 +32,7 @@ describe("decodeBytes / encodeBytes round-trip", () => {
 
   it("rejects values that fail schema validation on encode", () => {
     const PositiveInt = Schema.Struct({
-      n: Schema.Number.pipe(
-        Schema.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
-      ),
+      n: Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))),
     });
     expect(() => encodeBytes(PositiveInt, { n: -1 })).toThrow();
   });

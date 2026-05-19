@@ -6,7 +6,7 @@
  * producing wrong TypeScript.
  */
 
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -208,9 +208,7 @@ describe("readManifest validates the envelope", () => {
       events: [
         {
           ...MINIMAL_MANIFEST.events[0],
-          fields: [
-            { wireName: "x", tsName: "x", typeToken: "geocode", order: 0 },
-          ],
+          fields: [{ wireName: "x", tsName: "x", typeToken: "geocode", order: 0 }],
         },
       ],
     });
@@ -242,7 +240,7 @@ describe("generate writes the expected files", () => {
     const path = writeManifest(MINIMAL_MANIFEST);
     const out = join(workDir, "generated-out");
     // Pre-populate with a stray file that codegen should remove.
-    require("node:fs").mkdirSync(out, { recursive: true });
+    mkdirSync(out, { recursive: true });
     writeFileSync(join(out, "stray.ts"), "// stray", "utf-8");
     generate({ manifestPath: path, outDir: out });
     expect(existsSync(join(out, "stray.ts"))).toBe(false);

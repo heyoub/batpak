@@ -2,17 +2,25 @@
   "name": "batpak-ts-workspace",
   "version": "0.0.0",
   "private": true,
-  "description": "BatPAK TypeScript SDK workspace. Phase 0: NETBAT/1 wire-parity slice.",
+  "description": "BatPAK TypeScript SDK workspace. 0.7.6 catch-all release.",
   "scripts": {
     "build": "pnpm -r run build",
     "test": "pnpm -r run test",
     "generate": "pnpm --filter @batpak/codegen run generate",
+    "lint": "eslint 'packages/*/src/**/*.ts' 'packages/*/test/**/*.ts' 'examples/*/src/**/*.ts'",
+    "format": "prettier --write 'packages/*/{src,test}/**/*.{ts,json}' 'examples/*/src/**/*.ts'",
+    "format:check": "prettier --check 'packages/*/{src,test}/**/*.{ts,json}' 'examples/*/src/**/*.ts'",
     "clean": "pnpm -r run clean"
   },
   "devDependencies": {
     "typescript": "5.6.3",
     "vitest": "2.1.9",
-    "@types/node": "22.10.5"
+    "@types/node": "22.10.5",
+    "eslint": "9.20.0",
+    "typescript-eslint": "8.24.0",
+    "@eslint/js": "9.20.0",
+    "prettier": "3.4.2",
+    "fast-check": "3.23.2"
   },
   "packageManager": "pnpm@10.33.0"
 }

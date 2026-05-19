@@ -18,9 +18,10 @@
  *   9. Effect 4 schema round-trip on the generated symbols
  */
 
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { decode, decodeHex, encode, encodeHex } from "@batpak/canonical";
@@ -30,30 +31,13 @@ import {
   parseResponseFrame,
   NETBAT_ERROR_CODES,
 } from "@batpak/client";
-import {
-  readManifest,
-  type BatpakTsManifest,
-  type ManifestEvent,
-  type ManifestOperation,
-} from "@batpak/codegen";
+import { readManifest, type BatpakTsManifest } from "@batpak/codegen";
 import { decodeBytes, encodeBytes } from "@batpak/schema";
 import * as Generated from "@batpak/generated";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const MANIFEST_PATH = resolve(here, "../../../batpak.manifest.json");
 const manifest: BatpakTsManifest = readManifest(MANIFEST_PATH);
-
-function eventByName(name: string): ManifestEvent {
-  const event = manifest.events.find((e) => e.name === name);
-  if (!event) throw new Error(`manifest missing event ${name}`);
-  return event;
-}
-
-function operation(name: string): ManifestOperation {
-  const op = manifest.operations.find((o) => o.name === name);
-  if (!op) throw new Error(`manifest missing operation ${name}`);
-  return op;
-}
 
 describe("manifest envelope", () => {
   it("declares the 0.7.6 protocol versions", () => {
@@ -169,19 +153,14 @@ describe("manifest-version guard", () => {
     expect(() => readManifest(MANIFEST_PATH)).not.toThrow();
   });
 
-  it("readManifest refuses an unsupported manifestVersion", async () => {
-    const { writeFileSync, mkdtempSync, rmSync } = await import("node:fs");
-    const { tmpdir } = await import("node:os");
-    const { join } = await import("node:path");
+  it("readManifest refuses an unsupported manifestVersion", () => {
     const tmp = mkdtempSync(join(tmpdir(), "batpak-ts-manifest-"));
     try {
       const path = join(tmp, "batpak.manifest.json");
       const raw = readFileSync(MANIFEST_PATH, "utf-8");
       const tampered = raw.replace(`"manifestVersion": 1`, `"manifestVersion": 99`);
       writeFileSync(path, tampered, "utf-8");
-      expect(() => readManifest(path)).toThrow(
-        /manifestVersion 99 is not supported/,
-      );
+      expect(() => readManifest(path)).toThrow(/manifestVersion 99 is not supported/);
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
@@ -210,10 +189,7 @@ describe("Effect 4 schema round-trip via @batpak/schema", () => {
   });
 
   it("encodes the bank.commit request fixture back to the golden bytes", () => {
-    const bytes = encodeBytes(
-      Generated.BankCommitRequest,
-      Generated.BANK_COMMIT_REQUEST_FIXTURE,
-    );
+    const bytes = encodeBytes(Generated.BankCommitRequest, Generated.BANK_COMMIT_REQUEST_FIXTURE);
     expect(encodeHex(bytes)).toBe(Generated.BANK_COMMIT_REQUEST_GOLDEN_HEX);
   });
 
@@ -224,10 +200,7 @@ describe("Effect 4 schema round-trip via @batpak/schema", () => {
   });
 
   it("encodes the bank.commit ack fixture (Option + Record) back to the golden bytes", () => {
-    const bytes = encodeBytes(
-      Generated.BankCommitAck,
-      Generated.BANK_COMMIT_ACK_FIXTURE,
-    );
+    const bytes = encodeBytes(Generated.BankCommitAck, Generated.BANK_COMMIT_ACK_FIXTURE);
     expect(encodeHex(bytes)).toBe(Generated.BANK_COMMIT_ACK_GOLDEN_HEX);
   });
 

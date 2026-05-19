@@ -62,7 +62,7 @@ export class Reader {
     const b = this.readByte();
     const c = this.readByte();
     const d = this.readByte();
-    return ((a * 0x1000000) + (b << 16) + (c << 8) + d) >>> 0;
+    return (a * 0x1000000 + (b << 16) + (c << 8) + d) >>> 0;
   }
 
   readUInt64BE(): number {

@@ -9,8 +9,7 @@ import { decode, decodeHex, encode, encodeHex } from "../src/index.js";
 const FIXTURE_NONCE = "heartbeat-fixture-0001";
 const FIXTURE_SERVER_TS_MS = 1_700_000_000_000;
 
-const GOLDEN_REQUEST_HEX =
-  "81a56e6f6e6365b66865617274626561742d666978747572652d30303031";
+const GOLDEN_REQUEST_HEX = "81a56e6f6e6365b66865617274626561742d666978747572652d30303031";
 const GOLDEN_ACK_HEX =
   "82a56e6f6e6365b66865617274626561742d666978747572652d30303031ac7365727665725f74735f6d73cf0000018bcfe56800";
 
@@ -65,9 +64,7 @@ describe("encoder rejects out-of-subset values", () => {
   });
 
   it("rejects undefined", () => {
-    expect(() => encode({ x: undefined } as unknown)).toThrow(
-      /rejects value of type undefined/,
-    );
+    expect(() => encode({ x: undefined } as unknown)).toThrow(/rejects value of type undefined/);
   });
 });
 
@@ -95,7 +92,7 @@ describe("integer width rules match rmp-serde shortest-encoding", () => {
 describe("hex helpers", () => {
   it("encodeHex matches the netbat lowercase convention", () => {
     expect(encodeHex(new Uint8Array([0x4e, 0x45, 0x54, 0x42, 0x41, 0x54]))).toBe(
-      "4e455442415"+"4",
+      "4e455442415" + "4",
     );
   });
 

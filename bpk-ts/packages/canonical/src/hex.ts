@@ -47,8 +47,5 @@ function hexCharValue(code: number): number {
   if (code >= 48 && code <= 57) return code - 48;
   if (code >= 97 && code <= 102) return code - 97 + 10;
   if (code >= 65 && code <= 70) return code - 65 + 10;
-  throw new CanonicalDecodeError(
-    "non_hex_char",
-    `non-hex character at code point ${code}`,
-  );
+  throw new CanonicalDecodeError("non_hex_char", `non-hex character at code point ${code}`);
 }

@@ -91,9 +91,7 @@ async function runHeartbeat(host: string, port: number): Promise<typeof SystemHe
     }
     const ack = decodeBytes(SystemHeartbeatAck, response.output);
     if (ack.nonce !== request.nonce) {
-      throw new Error(
-        `heartbeat: nonce mismatch — sent ${request.nonce}, received ${ack.nonce}`,
-      );
+      throw new Error(`heartbeat: nonce mismatch — sent ${request.nonce}, received ${ack.nonce}`);
     }
     return ack;
   } finally {
@@ -207,9 +205,7 @@ async function main(): Promise<void> {
   //    schema — proves the bytes round-trip through commit + get + Effect 4.
   const recovered = decodeBytes(
     SystemHeartbeatRequest,
-    new Uint8Array(
-      event.payload_hex.match(/.{1,2}/gu)!.map((b) => parseInt(b, 16)),
-    ),
+    new Uint8Array(event.payload_hex.match(/.{1,2}/gu)!.map((b) => parseInt(b, 16))),
   );
   if (recovered.nonce !== "spike-bank-commit") {
     throw new Error(`event.get: payload nonce mismatch — got ${recovered.nonce}`);
@@ -220,7 +216,9 @@ async function main(): Promise<void> {
 
   // 5. Error path.
   const err = await runUnknownOperationPath(host, port);
-  console.log(`spike: unknown_operation ERR { code=${err.code}, message=${JSON.stringify(err.message)} }`);
+  console.log(
+    `spike: unknown_operation ERR { code=${err.code}, message=${JSON.stringify(err.message)} }`,
+  );
   if (err.code !== "unknown_operation") {
     throw new Error(`unknown_operation: expected code=unknown_operation, got ${err.code}`);
   }
