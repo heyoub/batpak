@@ -38,6 +38,24 @@ const SUPPORTED_FIELD_TYPES = new Set<string>([
   "i64-microseconds",
   "option<string>",
   "map<string,string>",
+  // Branded hex tokens. Each emits a Schema.String guarded by a pattern
+  // refinement and a Schema.brand("…") so passing a wrong hex shape
+  // (e.g. an event_id where a content hash was expected) fails at the
+  // type checker — not just at runtime.
+  "u128-hex", // 32 lowercase hex chars
+  "blake3-32-hex", // 64 lowercase hex chars
+  "ed25519-sig-hex", // 128 lowercase hex chars
+  "key-id-hex", // 64 lowercase hex chars (Ed25519 verifier identity)
+  "option<ed25519-sig-hex>",
+  // Free-form hex payload (variable length, lowercase). Branded so
+  // callers can prove "I built this via the canonical encoder" at the
+  // type system, but not constrained to a fixed length.
+  "hex-blob",
+  // Receipt-extension map: keys are extension keys
+  // (`namespace.field`), values are hex-blobs. Same shape as the
+  // existing `map<string,string>` but the value type is the branded
+  // hex blob.
+  "map<string,hex-blob>",
 ]);
 
 export interface ManifestField {
@@ -247,7 +265,12 @@ function renderEventsModule(manifest: BatpakTsManifest): string {
       `export const ${constSafeName}_GOLDEN_HEX = ${JSON.stringify(event.goldenPayloadHex)} as const;`,
     );
     lines.push(
-      `export const ${constSafeName}_FIXTURE: ${event.tsName} = ${JSON.stringify(orderedFixture, null, 2)};`,
+      // Fixture literal is cast through `unknown` to the event's
+      // branded shape. Brands are phantom types — sound at runtime,
+      // but TS treats `string` and `string & Brand<...>` as
+      // non-overlapping for direct casts, so the double cast is the
+      // documented escape hatch.
+      `export const ${constSafeName}_FIXTURE: ${event.tsName} = ${JSON.stringify(orderedFixture, null, 2)} as unknown as ${event.tsName};`,
     );
     lines.push("");
   }
@@ -366,6 +389,20 @@ function schemaForToken(token: string): string {
       return "Schema.NullOr(Schema.String)";
     case "map<string,string>":
       return "Schema.Record(Schema.String, Schema.String)";
+    case "u128-hex":
+      return brandedHex("EventIdHex", 32);
+    case "blake3-32-hex":
+      return brandedHex("ContentHashHex", 64);
+    case "ed25519-sig-hex":
+      return brandedHex("SignatureHex", 128);
+    case "key-id-hex":
+      return brandedHex("KeyIdHex", 64);
+    case "option<ed25519-sig-hex>":
+      return `Schema.NullOr(${brandedHex("SignatureHex", 128)})`;
+    case "hex-blob":
+      return brandedHexBlob();
+    case "map<string,hex-blob>":
+      return `Schema.Record(Schema.String, ${brandedHexBlob()})`;
     default:
       throw new CodegenError(
         "unsupported_field_type",
@@ -376,6 +413,16 @@ function schemaForToken(token: string): string {
 
 function checkedNumber(min: number, max: number): string {
   return `Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: ${min}, maximum: ${max} })))`;
+}
+
+function brandedHex(brand: string, exactLength: number): string {
+  // Lowercase-hex string of an exact length, branded so that passing a
+  // wrong hex shape fails at the TS type checker.
+  return `Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{${exactLength}}$/u)), Schema.brand(${JSON.stringify(brand)}))`;
+}
+
+function brandedHexBlob(): string {
+  return `Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]*$/u)), Schema.brand("HexBlob"))`;
 }
 
 function constCase(input: string): string {
@@ -398,6 +445,20 @@ export function tsTypeForToken(token: string): string {
       return "string | null";
     case "map<string,string>":
       return "Record<string, string>";
+    case "u128-hex":
+      return "string & Schema.Brand<\"EventIdHex\">";
+    case "blake3-32-hex":
+      return "string & Schema.Brand<\"ContentHashHex\">";
+    case "ed25519-sig-hex":
+      return "string & Schema.Brand<\"SignatureHex\">";
+    case "key-id-hex":
+      return "string & Schema.Brand<\"KeyIdHex\">";
+    case "option<ed25519-sig-hex>":
+      return "(string & Schema.Brand<\"SignatureHex\">) | null";
+    case "hex-blob":
+      return "string & Schema.Brand<\"HexBlob\">";
+    case "map<string,hex-blob>":
+      return "Record<string, string & Schema.Brand<\"HexBlob\">>";
     default:
       throw new CodegenError(
         "unsupported_field_type",

@@ -14,7 +14,7 @@ export type SystemHeartbeatRequest = typeof SystemHeartbeatRequest.Type;
 export const SYSTEM_HEARTBEAT_REQUEST_GOLDEN_HEX = "81a56e6f6e6365b66865617274626561742d666978747572652d30303031" as const;
 export const SYSTEM_HEARTBEAT_REQUEST_FIXTURE: SystemHeartbeatRequest = {
   "nonce": "heartbeat-fixture-0001"
-};
+} as unknown as SystemHeartbeatRequest;
 
 /** Source: hbat::heartbeat::SystemHeartbeatAck; category=15, typeId=2562 */
 export const SystemHeartbeatAck = Schema.Struct({
@@ -28,7 +28,7 @@ export const SYSTEM_HEARTBEAT_ACK_GOLDEN_HEX = "82a56e6f6e6365b66865617274626561
 export const SYSTEM_HEARTBEAT_ACK_FIXTURE: SystemHeartbeatAck = {
   "nonce": "heartbeat-fixture-0001",
   "server_ts_ms": 1700000000000
-};
+} as unknown as SystemHeartbeatAck;
 
 /** Source: hbat::bank::BankCommitRequest; category=15, typeId=2576 */
 export const BankCommitRequest = Schema.Struct({
@@ -36,7 +36,7 @@ export const BankCommitRequest = Schema.Struct({
   scope: Schema.String,
   kind_category: Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 255 }))),
   kind_type_id: Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 65535 }))),
-  payload_hex: Schema.String,
+  payload_hex: Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]*$/u)), Schema.brand("HexBlob")),
 });
 // eslint-disable-next-line @typescript-eslint/no-redeclare
 export type BankCommitRequest = typeof BankCommitRequest.Type;
@@ -48,16 +48,16 @@ export const BANK_COMMIT_REQUEST_FIXTURE: BankCommitRequest = {
   "kind_category": 15,
   "kind_type_id": 2561,
   "payload_hex": "81a56e6f6e6365b66865617274626561742d666978747572652d30303031"
-};
+} as unknown as BankCommitRequest;
 
 /** Source: hbat::bank::BankCommitAck; category=15, typeId=2577 */
 export const BankCommitAck = Schema.Struct({
-  event_id_hex: Schema.String,
+  event_id_hex: Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{32}$/u)), Schema.brand("EventIdHex")),
   sequence: Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 9007199254740991 }))),
-  content_hash_hex: Schema.String,
-  key_id_hex: Schema.String,
-  signature_hex: Schema.NullOr(Schema.String),
-  extensions: Schema.Record(Schema.String, Schema.String),
+  content_hash_hex: Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{64}$/u)), Schema.brand("ContentHashHex")),
+  key_id_hex: Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{64}$/u)), Schema.brand("KeyIdHex")),
+  signature_hex: Schema.NullOr(Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{128}$/u)), Schema.brand("SignatureHex"))),
+  extensions: Schema.Record(Schema.String, Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]*$/u)), Schema.brand("HexBlob"))),
 });
 // eslint-disable-next-line @typescript-eslint/no-redeclare
 export type BankCommitAck = typeof BankCommitAck.Type;
@@ -72,11 +72,11 @@ export const BANK_COMMIT_ACK_FIXTURE: BankCommitAck = {
   "extensions": {
     "syncbat.descriptor": "62616e6b2e636f6d6d6974"
   }
-};
+} as unknown as BankCommitAck;
 
 /** Source: hbat::bank::EventGetRequest; category=15, typeId=2592 */
 export const EventGetRequest = Schema.Struct({
-  event_id_hex: Schema.String,
+  event_id_hex: Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{32}$/u)), Schema.brand("EventIdHex")),
 });
 // eslint-disable-next-line @typescript-eslint/no-redeclare
 export type EventGetRequest = typeof EventGetRequest.Type;
@@ -84,21 +84,21 @@ export type EventGetRequest = typeof EventGetRequest.Type;
 export const EVENT_GET_REQUEST_GOLDEN_HEX = "81ac6576656e745f69645f686578d9203031323334353637383961626364656630313233343536373839616263646566" as const;
 export const EVENT_GET_REQUEST_FIXTURE: EventGetRequest = {
   "event_id_hex": "0123456789abcdef0123456789abcdef"
-};
+} as unknown as EventGetRequest;
 
 /** Source: hbat::bank::EventGetAck; category=15, typeId=2593 */
 export const EventGetAck = Schema.Struct({
-  event_id_hex: Schema.String,
+  event_id_hex: Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{32}$/u)), Schema.brand("EventIdHex")),
   sequence: Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 9007199254740991 }))),
   timestamp_us: Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: -9007199254740991, maximum: 9007199254740991 }))),
-  correlation_id_hex: Schema.String,
+  correlation_id_hex: Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{32}$/u)), Schema.brand("EventIdHex")),
   causation_id_hex: Schema.NullOr(Schema.String),
   kind_category: Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 255 }))),
   kind_type_id: Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 65535 }))),
   entity: Schema.String,
   scope: Schema.String,
-  payload_hex: Schema.String,
-  content_hash_hex: Schema.String,
+  payload_hex: Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]*$/u)), Schema.brand("HexBlob")),
+  content_hash_hex: Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{64}$/u)), Schema.brand("ContentHashHex")),
 });
 // eslint-disable-next-line @typescript-eslint/no-redeclare
 export type EventGetAck = typeof EventGetAck.Type;
@@ -116,4 +116,4 @@ export const EVENT_GET_ACK_FIXTURE: EventGetAck = {
   "scope": "fixture-scope",
   "payload_hex": "81a56e6f6e6365b66865617274626561742d666978747572652d30303031",
   "content_hash_hex": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-};
+} as unknown as EventGetAck;

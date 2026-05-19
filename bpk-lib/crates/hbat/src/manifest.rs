@@ -260,7 +260,10 @@ fn describe_bank_commit_request_event() -> EventDescriptor {
             field("scope", "string", 1),
             field("kind_category", "u8", 2),
             field("kind_type_id", "u16", 3),
-            field("payload_hex", "string", 4),
+            // payload is a free-form hex blob (variable length, lowercase).
+            // Branded as HexBlob on the TS side so callers cannot
+            // accidentally pass an event_id or content hash here.
+            field("payload_hex", "hex-blob", 4),
         ],
         fixture_value: fixture_json,
         golden_payload_hex: encode_hex(&payload_bytes),
@@ -278,12 +281,14 @@ fn describe_bank_commit_ack_event() -> EventDescriptor {
         category: BankCommitAck::KIND.category(),
         type_id: BankCommitAck::KIND.type_id(),
         fields: vec![
-            field("event_id_hex", "string", 0),
+            // Branded hex tokens prevent passing the wrong hex shape
+            // (e.g. a content hash where an event id was expected).
+            field("event_id_hex", "u128-hex", 0),
             field("sequence", "u64-safe", 1),
-            field("content_hash_hex", "string", 2),
-            field("key_id_hex", "string", 3),
-            field("signature_hex", "option<string>", 4),
-            field("extensions", "map<string,string>", 5),
+            field("content_hash_hex", "blake3-32-hex", 2),
+            field("key_id_hex", "key-id-hex", 3),
+            field("signature_hex", "option<ed25519-sig-hex>", 4),
+            field("extensions", "map<string,hex-blob>", 5),
         ],
         fixture_value: fixture_json,
         golden_payload_hex: encode_hex(&payload_bytes),
@@ -300,7 +305,7 @@ fn describe_event_get_request_event() -> EventDescriptor {
         ts_name: "EventGetRequest".to_owned(),
         category: EventGetRequest::KIND.category(),
         type_id: EventGetRequest::KIND.type_id(),
-        fields: vec![field("event_id_hex", "string", 0)],
+        fields: vec![field("event_id_hex", "u128-hex", 0)],
         fixture_value: fixture_json,
         golden_payload_hex: encode_hex(&payload_bytes),
     }
@@ -317,17 +322,21 @@ fn describe_event_get_ack_event() -> EventDescriptor {
         category: EventGetAck::KIND.category(),
         type_id: EventGetAck::KIND.type_id(),
         fields: vec![
-            field("event_id_hex", "string", 0),
+            field("event_id_hex", "u128-hex", 0),
             field("sequence", "u64-safe", 1),
             field("timestamp_us", "i64-microseconds", 2),
-            field("correlation_id_hex", "string", 3),
+            field("correlation_id_hex", "u128-hex", 3),
+            // causation_id is optional u128 hex — keep option<string>
+            // for now to avoid a third option-of-brand token; brand
+            // emission for option<u128-hex> can come in a follow-on
+            // patch once the codegen test coverage proves the pattern.
             field("causation_id_hex", "option<string>", 4),
             field("kind_category", "u8", 5),
             field("kind_type_id", "u16", 6),
             field("entity", "string", 7),
             field("scope", "string", 8),
-            field("payload_hex", "string", 9),
-            field("content_hash_hex", "string", 10),
+            field("payload_hex", "hex-blob", 9),
+            field("content_hash_hex", "blake3-32-hex", 10),
         ],
         fixture_value: fixture_json,
         golden_payload_hex: encode_hex(&payload_bytes),

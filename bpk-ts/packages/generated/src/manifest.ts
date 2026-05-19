@@ -95,7 +95,7 @@ export const BATPAK_TS_MANIFEST = {
         {
           "wireName": "payload_hex",
           "tsName": "payload_hex",
-          "typeToken": "string",
+          "typeToken": "hex-blob",
           "order": 4
         }
       ],
@@ -118,7 +118,7 @@ export const BATPAK_TS_MANIFEST = {
         {
           "wireName": "event_id_hex",
           "tsName": "event_id_hex",
-          "typeToken": "string",
+          "typeToken": "u128-hex",
           "order": 0
         },
         {
@@ -130,25 +130,25 @@ export const BATPAK_TS_MANIFEST = {
         {
           "wireName": "content_hash_hex",
           "tsName": "content_hash_hex",
-          "typeToken": "string",
+          "typeToken": "blake3-32-hex",
           "order": 2
         },
         {
           "wireName": "key_id_hex",
           "tsName": "key_id_hex",
-          "typeToken": "string",
+          "typeToken": "key-id-hex",
           "order": 3
         },
         {
           "wireName": "signature_hex",
           "tsName": "signature_hex",
-          "typeToken": "option<string>",
+          "typeToken": "option<ed25519-sig-hex>",
           "order": 4
         },
         {
           "wireName": "extensions",
           "tsName": "extensions",
-          "typeToken": "map<string,string>",
+          "typeToken": "map<string,hex-blob>",
           "order": 5
         }
       ],
@@ -174,7 +174,7 @@ export const BATPAK_TS_MANIFEST = {
         {
           "wireName": "event_id_hex",
           "tsName": "event_id_hex",
-          "typeToken": "string",
+          "typeToken": "u128-hex",
           "order": 0
         }
       ],
@@ -193,7 +193,7 @@ export const BATPAK_TS_MANIFEST = {
         {
           "wireName": "event_id_hex",
           "tsName": "event_id_hex",
-          "typeToken": "string",
+          "typeToken": "u128-hex",
           "order": 0
         },
         {
@@ -211,7 +211,7 @@ export const BATPAK_TS_MANIFEST = {
         {
           "wireName": "correlation_id_hex",
           "tsName": "correlation_id_hex",
-          "typeToken": "string",
+          "typeToken": "u128-hex",
           "order": 3
         },
         {
@@ -247,13 +247,13 @@ export const BATPAK_TS_MANIFEST = {
         {
           "wireName": "payload_hex",
           "tsName": "payload_hex",
-          "typeToken": "string",
+          "typeToken": "hex-blob",
           "order": 9
         },
         {
           "wireName": "content_hash_hex",
           "tsName": "content_hash_hex",
-          "typeToken": "string",
+          "typeToken": "blake3-32-hex",
           "order": 10
         }
       ],
