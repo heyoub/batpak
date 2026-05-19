@@ -154,7 +154,7 @@ fn build_core(store: &Arc<batpak::store::Store>) -> Result<syncbat::Core> {
         .register(
             hbat::BANK_COMMIT_DESCRIPTOR.clone(),
             hbat::BankCommitHandler {
-                store: Arc::clone(&store),
+                store: Arc::clone(store),
             },
         )
         .map_err(|error| anyhow!("register bank.commit: {error}"))?;
@@ -162,7 +162,7 @@ fn build_core(store: &Arc<batpak::store::Store>) -> Result<syncbat::Core> {
         .register(
             hbat::EVENT_GET_DESCRIPTOR.clone(),
             hbat::EventGetHandler {
-                store: Arc::clone(&store),
+                store: Arc::clone(store),
             },
         )
         .map_err(|error| anyhow!("register event.get: {error}"))?;

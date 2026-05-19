@@ -95,10 +95,11 @@ impl HbatProcess {
         let payload = ready_line.trim_start_matches(READY_PREFIX).trim();
         let parsed: serde_json::Value =
             serde_json::from_str(payload).expect("HBAT_READY payload is JSON");
-        let port = parsed
+        let port_u64 = parsed
             .get("port")
             .and_then(|v| v.as_u64())
-            .expect("HBAT_READY carries a numeric port") as u16;
+            .expect("HBAT_READY carries a numeric port");
+        let port = u16::try_from(port_u64).expect("HBAT_READY port fits in u16");
 
         Self {
             child,
