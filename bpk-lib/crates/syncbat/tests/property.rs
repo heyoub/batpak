@@ -33,11 +33,7 @@ fn arb_operation_name() -> impl Strategy<Value = String> {
     // the allowed alphabet (no dots inside the segment). Dot-joining
     // 1..=4 segments keeps the total well under the 128-byte cap and
     // guarantees no leading/trailing dot, no `..`.
-    proptest::collection::vec(
-        "[A-Za-z0-9_-]{1,16}",
-        1..=4,
-    )
-    .prop_map(|segments| segments.join("."))
+    proptest::collection::vec("[A-Za-z0-9_-]{1,16}", 1..=4).prop_map(|segments| segments.join("."))
 }
 
 /// Generator for schema-ref / receipt-kind strings using the same

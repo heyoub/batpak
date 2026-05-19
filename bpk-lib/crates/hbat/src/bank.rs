@@ -313,7 +313,6 @@ inventory::submit! {
     }
 }
 
-
 #[cfg(test)]
 #[allow(clippy::panic, clippy::unwrap_used)]
 mod tests {

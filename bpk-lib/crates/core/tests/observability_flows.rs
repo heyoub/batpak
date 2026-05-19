@@ -211,7 +211,8 @@ fn named_store_flows_emit_traceable_events() {
                 &coord,
                 kind,
                 &serde_json::json!({"n": 2}),
-                batpak::store::AppendOptions::new().with_idempotency(batpak::id::IdempotencyKey::from(0xBEEF)),
+                batpak::store::AppendOptions::new()
+                    .with_idempotency(batpak::id::IdempotencyKey::from(0xBEEF)),
             )
             .expect("append_with_options");
         let _: Option<Counter> = store

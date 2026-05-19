@@ -132,7 +132,10 @@ impl HbatProcess {
                 }
             }
         }
-        panic!("failed to connect to hbat on 127.0.0.1:{}: {last_error:?}", self.port);
+        panic!(
+            "failed to connect to hbat on 127.0.0.1:{}: {last_error:?}",
+            self.port
+        );
     }
 }
 
@@ -170,9 +173,12 @@ fn parse_ok(response: &[u8]) -> Vec<u8> {
     let trimmed = response
         .strip_suffix(b"\n")
         .expect("response ends with newline");
-    let body = trimmed
-        .strip_prefix(b"OK ")
-        .unwrap_or_else(|| panic!("expected OK frame, got {:?}", String::from_utf8_lossy(trimmed)));
+    let body = trimmed.strip_prefix(b"OK ").unwrap_or_else(|| {
+        panic!(
+            "expected OK frame, got {:?}",
+            String::from_utf8_lossy(trimmed)
+        )
+    });
     netbat::decode_hex_str(std::str::from_utf8(body).expect("hex ASCII")).expect("hex decodes")
 }
 
@@ -180,14 +186,19 @@ fn parse_err(response: &[u8]) -> (String, String) {
     let trimmed = response
         .strip_suffix(b"\n")
         .expect("response ends with newline");
-    let body = trimmed
-        .strip_prefix(b"ERR ")
-        .unwrap_or_else(|| panic!("expected ERR frame, got {:?}", String::from_utf8_lossy(trimmed)));
+    let body = trimmed.strip_prefix(b"ERR ").unwrap_or_else(|| {
+        panic!(
+            "expected ERR frame, got {:?}",
+            String::from_utf8_lossy(trimmed)
+        )
+    });
     let space = body
         .iter()
         .position(|b| *b == b' ')
         .expect("ERR frame has a space between code and hex");
-    let code = std::str::from_utf8(&body[..space]).expect("ASCII code").to_owned();
+    let code = std::str::from_utf8(&body[..space])
+        .expect("ASCII code")
+        .to_owned();
     let hex = std::str::from_utf8(&body[space + 1..]).expect("ASCII hex");
     let message_bytes = netbat::decode_hex_str(hex).expect("hex decodes");
     let message = String::from_utf8(message_bytes).expect("UTF-8 message");
@@ -230,7 +241,8 @@ fn bank_commit_then_event_get_recovers_canonical_bytes() {
     let original_payload = SystemHeartbeatRequest {
         nonce: "tcp-e2e-bank-commit-007".to_owned(),
     };
-    let original_payload_bytes = batpak::encoding::to_bytes(&original_payload).expect("encode payload");
+    let original_payload_bytes =
+        batpak::encoding::to_bytes(&original_payload).expect("encode payload");
 
     let commit_request = BankCommitRequest {
         entity: "tcp:e2e".to_owned(),
@@ -337,7 +349,10 @@ fn malformed_frame_returns_typed_err() {
     // Either malformed_request or unsupported_protocol_version, both
     // are stable wire-error codes from netbat::NetbatError::code().
     assert!(
-        matches!(code.as_str(), "malformed_request" | "unsupported_protocol_version"),
+        matches!(
+            code.as_str(),
+            "malformed_request" | "unsupported_protocol_version"
+        ),
         "unexpected code {code:?}"
     );
 }

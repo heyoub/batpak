@@ -435,6 +435,9 @@ mod tests {
             .collect();
         let mut sorted = pairs.clone();
         sorted.sort();
-        assert_eq!(pairs, sorted, "events must be sorted by (category, type_id)");
+        assert_eq!(
+            pairs, sorted,
+            "events must be sorted by (category, type_id)"
+        );
     }
 }

@@ -179,8 +179,7 @@ mod tests {
     #[test]
     fn from_filename_rejects_missing_stem() {
         // An empty path has no file_stem.
-        let err = SegmentId::from_filename(&PathBuf::from(""))
-            .expect_err("empty path has no stem");
+        let err = SegmentId::from_filename(&PathBuf::from("")).expect_err("empty path has no stem");
         assert_eq!(err, SegmentNameError::MissingStem);
     }
 

@@ -145,8 +145,7 @@ fn bench_chain_walk(c: &mut Criterion) {
         assert!(data_dir_guard.path().exists());
         black_box(coord.entity());
         black_box(kind);
-        let request =
-            ChainWalkRequest::linear(ChainWalkStartRef::EventId(last.into()), n as usize);
+        let request = ChainWalkRequest::linear(ChainWalkStartRef::EventId(last.into()), n as usize);
         group.throughput(Throughput::Elements(n as u64));
         group.bench_with_input(BenchmarkId::new("linear", n), &n, |b, _| {
             b.iter(|| {

@@ -8,9 +8,7 @@ mod row;
 pub use catalog::StoreRegisterCatalog;
 pub use error::StoreRegisterCatalogError;
 pub use rebuild::rebuild_register_from_store;
-pub use row::{
-    RegisterOperationActionV1, RegisterOperationRowV1, SYNCBAT_REGISTER_EVENT_KIND,
-};
+pub use row::{RegisterOperationActionV1, RegisterOperationRowV1, SYNCBAT_REGISTER_EVENT_KIND};
 
 use crate::operation::{EffectClass, OperationDescriptor};
 

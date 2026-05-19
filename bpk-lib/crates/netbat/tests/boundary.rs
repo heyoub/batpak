@@ -705,8 +705,8 @@ fn emit_response_ok_then_parse_returns_output_unchanged() {
             .strip_prefix(b"OK ")
             .and_then(|s| s.strip_suffix(b"\n"))
             .expect("response shape OK <hex>\\n");
-        let decoded = nb::decode_hex_str(std::str::from_utf8(line).expect("hex ascii"))
-            .expect("hex decodes");
+        let decoded =
+            nb::decode_hex_str(std::str::from_utf8(line).expect("hex ascii")).expect("hex decodes");
         assert_eq!(decoded, payload);
     }
 }

@@ -465,9 +465,13 @@ fn chaos_rapid_segment_rotation() {
     );
 
     // Spot-check first and last events
-    let first = store.get(batpak::id::EventId::from(entries[0].event_id())).expect("first event");
+    let first = store
+        .get(batpak::id::EventId::from(entries[0].event_id()))
+        .expect("first event");
     let last = store
-        .get(batpak::id::EventId::from(entries[entries.len() - 1].event_id()))
+        .get(batpak::id::EventId::from(
+            entries[entries.len() - 1].event_id(),
+        ))
         .expect("last event");
     assert_eq!(
         u128::from(first.event.event_id()),

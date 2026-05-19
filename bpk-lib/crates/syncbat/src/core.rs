@@ -93,21 +93,14 @@ impl Core {
     )]
     pub fn checkout(&mut self, checkout: Checkout) -> Result<CheckoutResult, RuntimeError> {
         let name = checkout.descriptor.name();
-        let descriptor = self
-            .descriptors
-            .get(name)
-            .cloned()
-            .ok_or_else(|| {
-                tracing::warn!(operation = %name, outcome = "unknown_operation", "checkout rejected");
-                RuntimeError::unknown_operation(name)
-            })?;
-        let handler = self
-            .handlers
-            .get_mut(name)
-            .ok_or_else(|| {
-                tracing::error!(operation = %name, outcome = "missing_handler", "checkout rejected");
-                RuntimeError::missing_handler(name)
-            })?;
+        let descriptor = self.descriptors.get(name).cloned().ok_or_else(|| {
+            tracing::warn!(operation = %name, outcome = "unknown_operation", "checkout rejected");
+            RuntimeError::unknown_operation(name)
+        })?;
+        let handler = self.handlers.get_mut(name).ok_or_else(|| {
+            tracing::error!(operation = %name, outcome = "missing_handler", "checkout rejected");
+            RuntimeError::missing_handler(name)
+        })?;
         let input = checkout.input;
         let handler_result = {
             let mut ctx = Ctx::new(&descriptor);

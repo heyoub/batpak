@@ -581,16 +581,14 @@ where
                     Err(RecvTimeoutError::Timeout) => continue,
                     Err(RecvTimeoutError::Disconnected) => break,
                 };
-                let stored = match fetch(
-                    &store_for_handler,
-                    crate::id::EventId::from(notif.event_id),
-                ) {
-                    Ok(stored) => stored,
-                    Err(error) => {
-                        *slot_for_handler.lock() = Some(ReactorError::Store(error));
-                        break;
-                    }
-                };
+                let stored =
+                    match fetch(&store_for_handler, crate::id::EventId::from(notif.event_id)) {
+                        Ok(stored) => stored,
+                        Err(error) => {
+                            *slot_for_handler.lock() = Some(ReactorError::Store(error));
+                            break;
+                        }
+                    };
                 let mut batch = ReactionBatch::new();
                 match dispatcher.dispatch(&stored, &mut batch, None) {
                     Ok(()) if !batch.is_empty() => {

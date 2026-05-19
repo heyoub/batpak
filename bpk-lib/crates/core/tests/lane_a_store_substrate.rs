@@ -226,7 +226,8 @@ fn idempotency_keyed_batch_double_submit_returns_cached_receipts_without_reopen(
                 coord.clone(),
                 kind,
                 &serde_json::json!({"step": 0}),
-                AppendOptions::new().with_idempotency(batpak::id::IdempotencyKey::from(0xB0_B1_B2_B3_B4_B5_B6_B7)),
+                AppendOptions::new()
+                    .with_idempotency(batpak::id::IdempotencyKey::from(0xB0_B1_B2_B3_B4_B5_B6_B7)),
                 CausationRef::None,
             )
             .expect("item 0"),
@@ -234,7 +235,8 @@ fn idempotency_keyed_batch_double_submit_returns_cached_receipts_without_reopen(
                 coord.clone(),
                 kind,
                 &serde_json::json!({"step": 1}),
-                AppendOptions::new().with_idempotency(batpak::id::IdempotencyKey::from(0xC0_C1_C2_C3_C4_C5_C6_C7)),
+                AppendOptions::new()
+                    .with_idempotency(batpak::id::IdempotencyKey::from(0xC0_C1_C2_C3_C4_C5_C6_C7)),
                 CausationRef::None,
             )
             .expect("item 1"),
@@ -282,7 +284,8 @@ fn idempotency_batch_partial_cache_rejected_instead_of_silent_success() {
             coord.clone(),
             kind,
             &serde_json::json!({"fresh": true}),
-            AppendOptions::new().with_idempotency(batpak::id::IdempotencyKey::from(0xF1_F2_F3_F4_F5_F6_F7_F8)),
+            AppendOptions::new()
+                .with_idempotency(batpak::id::IdempotencyKey::from(0xF1_F2_F3_F4_F5_F6_F7_F8)),
             CausationRef::None,
         )
         .expect("new item"),
@@ -389,7 +392,10 @@ fn public_canal_trait_pulls_cursor_and_subscription_items() {
             .expect("subscription canal");
     match subscription_batch {
         CanalBatch::One(notification) => {
-            assert_eq!(CanalItem::event_id(&notification), u128::from(second.event_id));
+            assert_eq!(
+                CanalItem::event_id(&notification),
+                u128::from(second.event_id)
+            );
         }
         other @ (CanalBatch::Empty | CanalBatch::Many(_)) => {
             panic!("PROPERTY: subscription canal should yield one notification, got {other:?}")

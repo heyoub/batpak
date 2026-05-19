@@ -277,7 +277,10 @@ mod tests {
 
         assert_eq!(header.event_id, crate::id::EventId::from(1u128));
         assert_eq!(header.correlation_id, crate::id::CorrelationId::from(2u128));
-        assert_eq!(header.causation_id, Some(crate::id::CausationId::from(3u128)));
+        assert_eq!(
+            header.causation_id,
+            Some(crate::id::CausationId::from(3u128))
+        );
         assert_eq!(header.timestamp_us, 1_700_000_000_000_000);
         assert_eq!(header.position.wall_ms, 1_700_000_000_000);
         assert_eq!(header.position.sequence, 9);

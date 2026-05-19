@@ -1661,7 +1661,9 @@ fn outbox_stage_with_causation_links_item_to_prior_item() {
     let second = store.get(receipts[1].event_id).expect("fetch second event");
     assert_eq!(
         second.event.header.causation_id,
-        Some(batpak::id::CausationId::from(u128::from(receipts[0].event_id))),
+        Some(batpak::id::CausationId::from(u128::from(
+            receipts[0].event_id
+        ))),
         "second item causation_id must resolve to first item event_id"
     );
 }

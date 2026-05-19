@@ -74,8 +74,17 @@ pub(crate) fn ci() -> Result<()> {
 /// `docs` job.
 fn doc_deny_warnings() -> Result<()> {
     let mut cmd = std::process::Command::new("cargo");
-    cmd.args(["doc", "--no-deps", "-p", "batpak", "-p", "syncbat", "-p", "netbat"])
-        .env("RUSTDOCFLAGS", "-D warnings");
+    cmd.args([
+        "doc",
+        "--no-deps",
+        "-p",
+        "batpak",
+        "-p",
+        "syncbat",
+        "-p",
+        "netbat",
+    ])
+    .env("RUSTDOCFLAGS", "-D warnings");
     crate::util::run(cmd)
 }
 

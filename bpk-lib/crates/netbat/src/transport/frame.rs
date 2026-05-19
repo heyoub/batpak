@@ -284,29 +284,31 @@ fn validate_operation_name(operation: &[u8], limits: &Limits) -> Result<(), Netb
     let s = std::str::from_utf8(operation).map_err(|_| NetbatError::MalformedRequest {
         reason: "operation has invalid bytes",
     })?;
-    syncbat::OperationName::new(s).map(|_| ()).map_err(|error| match error {
-        syncbat::OperationNameError::Empty => NetbatError::MalformedRequest {
-            reason: "empty operation",
-        },
-        // Reachable only when `limits.max_operation_name_bytes` is configured
-        // *above* the type-level `MAX_BYTES`; preserves the wire token.
-        syncbat::OperationNameError::TooLong { .. } => NetbatError::OperationNameTooLong {
-            max: syncbat::OperationName::MAX_BYTES,
-        },
-        syncbat::OperationNameError::IllegalCharacter { .. } => NetbatError::MalformedRequest {
-            reason: "operation has invalid bytes",
-        },
-        syncbat::OperationNameError::LeadingOrTrailingDot
-        | syncbat::OperationNameError::ConsecutiveDots => NetbatError::MalformedRequest {
-            reason: "operation dot segments must be non-empty",
-        },
-        // `OperationNameError` is `#[non_exhaustive]`; any post-1.0 variant
-        // surfaces under the existing malformed-request token until netbat
-        // grows a more specific mapping.
-        _ => NetbatError::MalformedRequest {
-            reason: "operation has invalid bytes",
-        },
-    })
+    syncbat::OperationName::new(s)
+        .map(|_| ())
+        .map_err(|error| match error {
+            syncbat::OperationNameError::Empty => NetbatError::MalformedRequest {
+                reason: "empty operation",
+            },
+            // Reachable only when `limits.max_operation_name_bytes` is configured
+            // *above* the type-level `MAX_BYTES`; preserves the wire token.
+            syncbat::OperationNameError::TooLong { .. } => NetbatError::OperationNameTooLong {
+                max: syncbat::OperationName::MAX_BYTES,
+            },
+            syncbat::OperationNameError::IllegalCharacter { .. } => NetbatError::MalformedRequest {
+                reason: "operation has invalid bytes",
+            },
+            syncbat::OperationNameError::LeadingOrTrailingDot
+            | syncbat::OperationNameError::ConsecutiveDots => NetbatError::MalformedRequest {
+                reason: "operation dot segments must be non-empty",
+            },
+            // `OperationNameError` is `#[non_exhaustive]`; any post-1.0 variant
+            // surfaces under the existing malformed-request token until netbat
+            // grows a more specific mapping.
+            _ => NetbatError::MalformedRequest {
+                reason: "operation has invalid bytes",
+            },
+        })
 }
 
 fn validate_request_frame(frame: &RequestFrame, limits: &Limits) -> Result<(), NetbatError> {

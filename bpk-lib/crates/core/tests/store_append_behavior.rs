@@ -233,8 +233,7 @@ fn with_correlation_sets_header_correlation_id() {
     let kind = EventKind::custom(0xF, 1);
 
     let custom_corr: u128 = 0xDEAD_BEEF_CAFE_BABE_1234_5678_9ABC_DEF0;
-    let opts =
-        AppendOptions::new().with_correlation(batpak::id::CorrelationId::from(custom_corr));
+    let opts = AppendOptions::new().with_correlation(batpak::id::CorrelationId::from(custom_corr));
     let receipt = store
         .append_with_options(&coord, kind, &"corr_test", opts)
         .expect("append with correlation");

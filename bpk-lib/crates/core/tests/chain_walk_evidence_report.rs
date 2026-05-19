@@ -30,7 +30,10 @@ fn linear_chain_reports_no_findings_and_deterministic_body_hash() -> TestResult 
     let second_receipt = store.append(&coord, kind, &serde_json::json!({"step": 1}))?;
     assert_ne!(first_receipt.event_id, second_receipt.event_id);
 
-    let request = ChainWalkRequest::linear(ChainWalkStartRef::EventId(u128::from(second_receipt.event_id)), 16);
+    let request = ChainWalkRequest::linear(
+        ChainWalkStartRef::EventId(u128::from(second_receipt.event_id)),
+        16,
+    );
     let first = store.chain_walk_evidence(&request)?;
     let second = store.chain_walk_evidence(&request)?;
 

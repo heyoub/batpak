@@ -71,8 +71,12 @@ fn fd_budget_evicts_oldest_segments() {
     // Read first event (oldest segment), last event (newest), then first again
     // This forces eviction: open seg1, open seg_last (evicts seg1 if budget=2),
     // then re-open seg1 (evicts seg_last)
-    let first = store.get(batpak::id::EventId::from(entries[0].event_id())).expect("get first");
-    let last = store.get(batpak::id::EventId::from(entries[99].event_id())).expect("get last");
+    let first = store
+        .get(batpak::id::EventId::from(entries[0].event_id()))
+        .expect("get first");
+    let last = store
+        .get(batpak::id::EventId::from(entries[99].event_id()))
+        .expect("get last");
     let first_again = store
         .get(batpak::id::EventId::from(entries[0].event_id()))
         .expect("get first again after eviction");

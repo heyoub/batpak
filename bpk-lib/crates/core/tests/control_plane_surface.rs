@@ -592,9 +592,11 @@ fn try_submit_batch_returns_retry_under_pressure() {
                             coord.clone(),
                             kind,
                             &serde_json::json!({"t": i, "n": n}),
-                            AppendOptions::new().with_idempotency(batpak::id::IdempotencyKey::from(
-                                u128::from(((i as u64) << 32) | u64::from(n) | 0xB000_0000),
-                            )),
+                            AppendOptions::new().with_idempotency(
+                                batpak::id::IdempotencyKey::from(u128::from(
+                                    ((i as u64) << 32) | u64::from(n) | 0xB000_0000,
+                                )),
+                            ),
                             batpak::store::CausationRef::None,
                         )
                         .expect("batch item")];

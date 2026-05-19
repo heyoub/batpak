@@ -735,7 +735,9 @@ fn correctness_gates_self_validate() {
     // --- Probe 1: FD eviction round-trip ---
     let entries = store.by_entity("correctness:entity");
     let first = store.get(batpak::id::EventId::from(entries[0].event_id()));
-    let last = store.get(batpak::id::EventId::from(entries[entries.len() - 1].event_id()));
+    let last = store.get(batpak::id::EventId::from(
+        entries[entries.len() - 1].event_id(),
+    ));
     let first_again = store.get(batpak::id::EventId::from(entries[0].event_id())); // re-read after eviction
     let fd_eviction_round_trips = first.is_ok()
         && last.is_ok()

@@ -83,14 +83,10 @@ mod tests {
         let (store, _dir) = test_store();
         let ids = seeded_chain(&store, "entity:hash-helper");
 
-        let actual: Vec<_> = walk_ancestors_by_hash(
-            &store,
-            ids.last().expect("last").as_u128(),
-            8,
-        )
-        .into_iter()
-        .map(|stored| stored.event.event_id())
-        .collect();
+        let actual: Vec<_> = walk_ancestors_by_hash(&store, ids.last().expect("last").as_u128(), 8)
+            .into_iter()
+            .map(|stored| stored.event.event_id())
+            .collect();
         let expected: Vec<_> = ids.iter().rev().copied().collect();
 
         assert_eq!(

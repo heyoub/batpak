@@ -131,7 +131,10 @@ fn read_walk_visibility_matches_plain_query_across_hidden_gap() -> TestResult {
     );
     assert_eq!(
         plain_ids,
-        vec![u128::from(before_gap.event_id), u128::from(after_gap.event_id)]
+        vec![
+            u128::from(before_gap.event_id),
+            u128::from(after_gap.event_id)
+        ]
     );
     assert_eq!(report.body.matched_count, 2);
     assert_eq!(report.body.returned_count, 2);

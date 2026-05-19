@@ -989,7 +989,8 @@ fn error_kind_is_retryable() {
 
 #[test]
 fn append_options_with_idempotency_builder() {
-    let opts = AppendOptions::new().with_idempotency(batpak::id::IdempotencyKey::from(0xDEAD_BEEF_CAFE_BABE));
+    let opts = AppendOptions::new()
+        .with_idempotency(batpak::id::IdempotencyKey::from(0xDEAD_BEEF_CAFE_BABE));
     assert_eq!(
         opts.idempotency_key,
         Some(batpak::id::IdempotencyKey::from(0xDEAD_BEEF_CAFE_BABEu128)),

@@ -143,10 +143,7 @@ fn handle_event_get(store: &Store, input: &[u8]) -> HandlerResult {
         event_id_hex: format!("{:032x}", u128::from(stored.event.header.event_id)),
         sequence,
         timestamp_us: stored.event.header.timestamp_us,
-        correlation_id_hex: format!(
-            "{:032x}",
-            u128::from(stored.event.header.correlation_id)
-        ),
+        correlation_id_hex: format!("{:032x}", u128::from(stored.event.header.correlation_id)),
         causation_id_hex: stored
             .event
             .header

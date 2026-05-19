@@ -29,8 +29,7 @@ use proptest::prelude::*;
 /// syncbat::OperationName::new accepts: `[A-Za-z0-9._-]+`, no
 /// leading/trailing `.`, no `..`, 1..=128 bytes.
 fn arb_operation_name() -> impl Strategy<Value = String> {
-    proptest::collection::vec("[A-Za-z0-9_-]{1,16}", 1..=4)
-        .prop_map(|segments| segments.join("."))
+    proptest::collection::vec("[A-Za-z0-9_-]{1,16}", 1..=4).prop_map(|segments| segments.join("."))
 }
 
 /// Generator for input payload bytes — capped at 1 KiB so the
