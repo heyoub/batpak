@@ -160,9 +160,26 @@ where
 {
     let line = match read_line(stream, limits.max_line_bytes) {
         Ok(line) => line,
+        Err(NetbatError::EmptyStream) => {
+            // Connect-and-close: the client closed before sending any
+            // bytes. Writing an ERR frame here would race a
+            // BrokenPipe/ConnectionReset IO error, which
+            // `serve_tcp_connection` treats as fatal — letting a single
+            // connect-and-close client kill the whole listener. Return
+            // the typed EmptyStream so the caller's graceful arm
+            // handles it. PROVES: tcp_transport.rs ::
+            // connect_and_close_does_not_kill_the_listener.
+            tracing::debug!("client closed before sending request");
+            return Err(NetbatError::EmptyStream);
+        }
         Err(error) => {
             let encoded = encode_response(Err(&error));
-            stream.write_all(&encoded)?;
+            // Best-effort write: if the peer half-closed, the ERR write
+            // surfaces as BrokenPipe which we DROP rather than escalate.
+            // Same reasoning — a misbehaving client must not be able to
+            // tear down the listener via the consequences of its own
+            // half-shut state.
+            let _ = stream.write_all(&encoded);
             return Err(error);
         }
     };

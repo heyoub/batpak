@@ -115,13 +115,33 @@ fn handle_event_get(store: &Store, input: &[u8]) -> HandlerResult {
     be.copy_from_slice(&event_id_bytes);
     let event_id = u128::from_be_bytes(be);
 
+    let typed_event_id = batpak::id::EventId::from(event_id);
     let stored = store
-        .read_raw(batpak::id::EventId::from(event_id))
+        .read_raw(typed_event_id)
         .map_err(|error| HandlerError::failed(format!("read event: {error}")))?;
+
+    // Look up the IndexEntry to pull the real global_sequence. The
+    // EventHeader does not carry sequence (sequence is assigned at
+    // commit-time into the index), so we query the entity's region
+    // and find the entry by event_id. O(N) over the entity but
+    // correct — and EventGetAck.sequence is part of the declared
+    // wire contract that consumers use for monotonic replay,
+    // checkpointing, and dedup, so it must be truthful.
+    let region = batpak::coordinate::Region::entity(stored.coordinate.entity());
+    let sequence = store
+        .query(&region)
+        .into_iter()
+        .find(|entry| entry.event_id() == event_id)
+        .map(|entry| entry.global_sequence())
+        .ok_or_else(|| {
+            HandlerError::failed(format!(
+                "event_id {event_id:032x} was read_raw-able but missing from the index query"
+            ))
+        })?;
 
     let ack = EventGetAck {
         event_id_hex: format!("{:032x}", u128::from(stored.event.header.event_id)),
-        sequence: 0,
+        sequence,
         timestamp_us: stored.event.header.timestamp_us,
         correlation_id_hex: format!(
             "{:032x}",

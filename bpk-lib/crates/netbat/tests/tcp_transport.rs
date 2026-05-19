@@ -296,3 +296,55 @@ fn shutdown_handle_stops_idle_listener() {
     assert_eq!(stats.served_requests, 0);
     assert!(stats.shutdown_requested);
 }
+
+#[test]
+fn connect_and_close_does_not_kill_the_listener() {
+    // REGRESSION: serve_stream used to write an ERR frame for every
+    // read_line failure, including EmptyStream. Writing to a
+    // peer-closed socket returns BrokenPipe (NetbatError::Io), which
+    // serve_tcp_connection treated as fatal — a single
+    // connect-and-close client would terminate the whole listener.
+    // Now: EmptyStream short-circuits the write and bubbles cleanly
+    // through serve_tcp_connection's graceful arm. The other read
+    // failure paths use a best-effort write that swallows any
+    // resulting BrokenPipe so they can't escalate to fatal either.
+    let listener = localhost_listener();
+    let addr = listener.local_addr().expect("listener addr");
+    let shutdown = nb::ShutdownHandle::new();
+    let server_shutdown = shutdown.clone();
+
+    let config = nb::TcpServerConfig::default()
+        .with_max_connections(3)
+        .with_idle_sleep(Duration::from_millis(1));
+    let handle = spawn_server("netbat-empty-stream", listener, config, server_shutdown);
+
+    // Connect and close, twice. If the first connection-close had
+    // killed the listener, the second connect would error before
+    // the server's next accept.
+    for _ in 0..2 {
+        let stream = connect_client(addr);
+        drop(stream);
+        thread::sleep(Duration::from_millis(20));
+    }
+
+    // A real request must still go through afterwards — proves the
+    // listener survived both hostile clients and still serves.
+    let mut real = connect_client(addr);
+    real.write_all(b"NETBAT/1 CALL ping 6869\n")
+        .expect("write request");
+    let mut response = String::new();
+    BufReader::new(real)
+        .read_line(&mut response)
+        .expect("read response");
+    assert_eq!(response, "OK 6869\n");
+
+    shutdown.shutdown();
+    let stats = handle.join().expect("server thread joins");
+    assert_eq!(stats.served_requests, 1);
+    assert_eq!(stats.accepted_connections, 3);
+    // EmptyStream peers are NOT counted as failures — they're a
+    // normal lifecycle event (TCP keepalive probes, eager TLS probes,
+    // misbehaving health checks, etc.).
+    assert_eq!(stats.failed_requests, 0);
+    assert_eq!(stats.malformed_requests, 0);
+}

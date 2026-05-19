@@ -261,6 +261,15 @@ fn bank_commit_then_event_get_recovers_canonical_bytes() {
     assert_eq!(event.event_id_hex, ack.event_id_hex);
     assert_eq!(event.entity, "tcp:e2e");
     assert_eq!(event.scope, "tcp-e2e-scope");
+    // REGRESSION: event.get used to hard-code sequence to 0,
+    // breaking consumers that depend on the wire contract for
+    // monotonic replay / checkpointing / dedup. The handler now
+    // resolves the IndexEntry and returns its real global_sequence.
+    assert_eq!(
+        event.sequence, ack.sequence,
+        "event.get must echo the same sequence number returned by bank.commit",
+    );
+    assert!(event.sequence >= 1);
     assert_eq!(event.kind_category, SystemHeartbeatRequest::KIND.category());
     assert_eq!(event.kind_type_id, SystemHeartbeatRequest::KIND.type_id());
 
