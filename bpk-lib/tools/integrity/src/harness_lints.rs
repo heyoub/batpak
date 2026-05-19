@@ -798,6 +798,7 @@ mod tests {
             section: "Property Harness".to_owned(),
             line: 12,
             pattern: Some("Property Harness".to_owned()),
+            status: Some("green".to_owned()),
             fields: REQUIRED_FIELDS
                 .iter()
                 .map(|field| (*field).to_owned())
