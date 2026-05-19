@@ -65,14 +65,11 @@ describe("canonical codec round-trip (property)", () => {
 
   it("integers across the safe-int domain survive round-trip", () => {
     fc.assert(
-      fc.property(
-        fc.integer({ min: 0, max: Number.MAX_SAFE_INTEGER }),
-        (n) => {
-          const bytes = encode(n);
-          const decoded = decode(bytes);
-          expect(decoded).toBe(n);
-        },
-      ),
+      fc.property(fc.integer({ min: 0, max: Number.MAX_SAFE_INTEGER }), (n) => {
+        const bytes = encode(n);
+        const decoded = decode(bytes);
+        expect(decoded).toBe(n);
+      }),
       { numRuns: 500 },
     );
   });

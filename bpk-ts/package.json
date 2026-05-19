@@ -2,6 +2,7 @@
   "name": "batpak-ts-workspace",
   "version": "0.0.0",
   "private": true,
+  "type": "module",
   "description": "BatPAK TypeScript SDK workspace. 0.7.6 catch-all release.",
   "scripts": {
     "build": "pnpm -r run build",
