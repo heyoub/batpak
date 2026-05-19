@@ -110,7 +110,10 @@ impl EventPayloadFixture for BankCommitAck {
             signature_hex: None,
             extensions: {
                 let mut m = BTreeMap::new();
-                m.insert("syncbat.descriptor".to_owned(), encode_hex(b"bank.commit"));
+                m.insert(
+                    "syncbat.descriptor".to_owned(),
+                    netbat::encode_hex_str(b"bank.commit"),
+                );
                 m
             },
         }
@@ -219,17 +222,6 @@ const _EVENT_GET_REQUEST_KIND: batpak::event::EventKind = EventGetRequest::KIND;
 #[allow(dead_code)]
 const _EVENT_GET_ACK_KIND: batpak::event::EventKind = EventGetAck::KIND;
 
-// ─── helpers ────────────────────────────────────────────────────────────────
-
-fn encode_hex(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        out.push(char::from(HEX[(*byte >> 4) as usize]));
-        out.push(char::from(HEX[(*byte & 0x0F) as usize]));
-    }
-    out
-}
 
 #[cfg(test)]
 #[allow(clippy::panic, clippy::unwrap_used)]

@@ -39,7 +39,7 @@ fn hex(bytes: &[u8]) -> String {
 fn fixture_bytes(name: &str, hex: &str) -> Vec<u8> {
     let hex = hex.trim();
     assert!(
-        hex.len() % 2 == 0,
+        hex.len().is_multiple_of(2),
         "golden fixture {name} must contain even-length hex"
     );
     hex.as_bytes()
@@ -279,11 +279,9 @@ fn dispatches_decoded_frame_through_syncbat_core() {
 #[test]
 fn dispatch_revalidates_public_request_frames() {
     let mut core = core_with_ping();
-    let limits = nb::Limits {
-        max_operation_name_bytes: 3,
-        max_input_bytes: 1,
-        ..nb::Limits::default()
-    };
+    let limits = nb::Limits::default()
+        .with_max_operation_name_bytes(3)
+        .with_max_input_bytes(1);
 
     let name_err = match nb::dispatch_frame(
         &mut core,
@@ -378,10 +376,7 @@ fn handler_failure_maps_without_losing_class_or_message() {
 
 #[test]
 fn rejects_line_too_long() {
-    let limits = nb::Limits {
-        max_line_bytes: 4,
-        ..nb::Limits::default()
-    };
+    let limits = nb::Limits::default().with_max_line_bytes(4);
 
     let err = match nb::decode_line(
         &fixture_bytes("request_decode_input", REQUEST_DECODE_INPUT_HEX),
@@ -396,10 +391,7 @@ fn rejects_line_too_long() {
 
 #[test]
 fn rejects_operation_name_too_long() {
-    let limits = nb::Limits {
-        max_operation_name_bytes: 3,
-        ..nb::Limits::default()
-    };
+    let limits = nb::Limits::default().with_max_operation_name_bytes(3);
 
     let err = match nb::decode_line(
         &fixture_bytes("request_decode_input", REQUEST_DECODE_INPUT_HEX),
@@ -414,10 +406,7 @@ fn rejects_operation_name_too_long() {
 
 #[test]
 fn rejects_input_body_too_large() {
-    let limits = nb::Limits {
-        max_input_bytes: 1,
-        ..nb::Limits::default()
-    };
+    let limits = nb::Limits::default().with_max_input_bytes(1);
 
     let err = match nb::decode_line(
         &fixture_bytes("request_input_too_large", REQUEST_INPUT_TOO_LARGE_HEX),
@@ -555,10 +544,7 @@ fn partial_read_followed_by_eof_is_a_complete_frame() {
 #[test]
 fn serve_stream_writes_stable_error_for_line_read_failures() {
     let mut core = core_with_ping();
-    let limits = nb::Limits {
-        max_line_bytes: 4,
-        ..nb::Limits::default()
-    };
+    let limits = nb::Limits::default().with_max_line_bytes(4);
     let mut too_long = Cursor::new(fixture_bytes(
         "request_decode_input",
         REQUEST_DECODE_INPUT_HEX,
@@ -622,10 +608,7 @@ fn output_limit_fails_closed_after_dispatch() {
         )
         .expect("register");
     let mut core = builder.build().expect("core builds");
-    let limits = nb::Limits {
-        max_output_bytes: 1,
-        ..nb::Limits::default()
-    };
+    let limits = nb::Limits::default().with_max_output_bytes(1);
 
     let err = match nb::dispatch_frame(
         &mut core,

@@ -3,7 +3,12 @@ use std::fmt;
 use std::io;
 
 /// Error returned by netbat transport framing or syncbat dispatch.
+///
+/// `#[non_exhaustive]` so post-1.0 we can add wire-format variants
+/// (or new runtime-error mappings) without breaking downstream
+/// exhaustive `match` arms.
 #[derive(Debug, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum NetbatError {
     /// Underlying IO failed.
     Io {
@@ -105,6 +110,10 @@ impl NetbatError {
             Self::Runtime(syncbat::RuntimeError::MissingHandler { .. }) => "missing_handler",
             Self::Runtime(syncbat::RuntimeError::Handler { .. }) => "handler",
             Self::Runtime(syncbat::RuntimeError::ReceiptSink { .. }) => "receipt_sink",
+            // `syncbat::RuntimeError` is `#[non_exhaustive]`; any variant
+            // added post-0.7.6 surfaces under the generic `runtime` code
+            // until netbat learns a more specific token for it.
+            Self::Runtime(_) => "runtime",
         }
     }
 }

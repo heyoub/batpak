@@ -12,6 +12,9 @@ use std::sync::Arc;
 use batpak::coordinate::Coordinate;
 use batpak::event::EventKind;
 use batpak::store::{AppendOptions, AppendReceipt, BatchAppendItem, CausationRef, Store};
+// Hex codec is the canonical netbat implementation; hbat does not
+// re-roll its own. See netbat::transport::hex.
+use netbat::{decode_hex_str, encode_hex_str};
 use syncbat::{Ctx, Handler, HandlerError, HandlerResult};
 
 use crate::bank::{BankCommitAck, BankCommitRequest, EventGetAck, EventGetRequest};
@@ -41,7 +44,7 @@ fn handle_bank_commit(store: &Store, input: &[u8]) -> HandlerResult {
     let kind = EventKind::try_custom(request.kind_category, request.kind_type_id)
         .map_err(|error| HandlerError::invalid_input(format!("event kind: {error:?}")))?;
 
-    let payload_bytes = decode_hex(&request.payload_hex)
+    let payload_bytes = decode_hex_str(&request.payload_hex)
         .map_err(|error| HandlerError::invalid_input(format!("payload_hex: {error}")))?;
 
     let item = BatchAppendItem::from_msgpack_bytes(
@@ -70,14 +73,14 @@ fn append_receipt_to_ack(receipt: &AppendReceipt) -> BankCommitAck {
     let extensions = receipt
         .extensions
         .iter()
-        .map(|(key, value)| (key.as_str().to_owned(), encode_hex(value)))
+        .map(|(key, value)| (key.as_str().to_owned(), encode_hex_str(value)))
         .collect();
     BankCommitAck {
         event_id_hex: format!("{:032x}", receipt.event_id),
         sequence: receipt.sequence,
-        content_hash_hex: encode_hex(&receipt.content_hash),
-        key_id_hex: encode_hex(&receipt.key_id),
-        signature_hex: receipt.signature.map(|s| encode_hex(&s)),
+        content_hash_hex: encode_hex_str(&receipt.content_hash),
+        key_id_hex: encode_hex_str(&receipt.key_id),
+        signature_hex: receipt.signature.map(|s| encode_hex_str(&s)),
         extensions,
     }
 }
@@ -100,7 +103,7 @@ fn handle_event_get(store: &Store, input: &[u8]) -> HandlerResult {
     let request: EventGetRequest = batpak::encoding::from_bytes(input)
         .map_err(|error| HandlerError::invalid_input(format!("decode request: {error}")))?;
 
-    let event_id_bytes = decode_hex(&request.event_id_hex)
+    let event_id_bytes = decode_hex_str(&request.event_id_hex)
         .map_err(|error| HandlerError::invalid_input(format!("event_id_hex: {error}")))?;
     if event_id_bytes.len() != 16 {
         return Err(HandlerError::invalid_input(format!(
@@ -130,47 +133,12 @@ fn handle_event_get(store: &Store, input: &[u8]) -> HandlerResult {
         kind_type_id: stored.event.header.event_kind.type_id(),
         entity: stored.coordinate.entity().to_owned(),
         scope: stored.coordinate.scope().to_owned(),
-        payload_hex: encode_hex(&stored.event.payload),
-        content_hash_hex: encode_hex(&stored.event.header.content_hash),
+        payload_hex: encode_hex_str(&stored.event.payload),
+        content_hash_hex: encode_hex_str(&stored.event.header.content_hash),
     };
 
     batpak::encoding::to_bytes(&ack)
         .map_err(|error| HandlerError::failed(format!("encode ack: {error}")))
-}
-
-// ─── helpers ────────────────────────────────────────────────────────────────
-
-fn encode_hex(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        out.push(char::from(HEX[(*byte >> 4) as usize]));
-        out.push(char::from(HEX[(*byte & 0x0F) as usize]));
-    }
-    out
-}
-
-fn decode_hex(hex: &str) -> Result<Vec<u8>, &'static str> {
-    if !hex.len().is_multiple_of(2) {
-        return Err("hex string has odd length");
-    }
-    let bytes = hex.as_bytes();
-    let mut out = Vec::with_capacity(hex.len() / 2);
-    for pair in bytes.chunks_exact(2) {
-        let high = hex_value(pair[0])?;
-        let low = hex_value(pair[1])?;
-        out.push((high << 4) | low);
-    }
-    Ok(out)
-}
-
-fn hex_value(byte: u8) -> Result<u8, &'static str> {
-    match byte {
-        b'0'..=b'9' => Ok(byte - b'0'),
-        b'a'..=b'f' => Ok(byte - b'a' + 10),
-        b'A'..=b'F' => Ok(byte - b'A' + 10),
-        _ => Err("non-hex character in hex string"),
-    }
 }
 
 #[cfg(test)]
@@ -234,7 +202,7 @@ mod tests {
             scope: "test-scope".to_owned(),
             kind_category: SystemHeartbeatRequest::KIND.category(),
             kind_type_id: SystemHeartbeatRequest::KIND.type_id(),
-            payload_hex: encode_hex(&heartbeat_bytes),
+            payload_hex: encode_hex_str(&heartbeat_bytes),
         };
         let request_bytes = batpak::encoding::to_bytes(&request).expect("encode request");
 
@@ -262,7 +230,7 @@ mod tests {
             scope: "test-scope".to_owned(),
             kind_category: SystemHeartbeatRequest::KIND.category(),
             kind_type_id: SystemHeartbeatRequest::KIND.type_id(),
-            payload_hex: encode_hex(&heartbeat_bytes),
+            payload_hex: encode_hex_str(&heartbeat_bytes),
         };
         let request_bytes = batpak::encoding::to_bytes(&request).expect("encode request");
         let commit_result = core
@@ -290,7 +258,7 @@ mod tests {
 
         // Decoding the returned payload_hex back into the original payload
         // proves the bytes round-trip end-to-end through commit + get.
-        let payload_bytes = decode_hex(&event.payload_hex).expect("decode payload hex");
+        let payload_bytes = decode_hex_str(&event.payload_hex).expect("decode payload hex");
         let decoded: SystemHeartbeatRequest =
             batpak::encoding::from_bytes(&payload_bytes).expect("decode payload");
         assert_eq!(decoded, heartbeat);

@@ -55,3 +55,32 @@ pub fn encode_hex(bytes: &[u8]) -> Vec<u8> {
     encode_hex_into(bytes, &mut output);
     output
 }
+
+/// Encode `bytes` as a lowercase hexadecimal [`String`].
+///
+/// Convenience wrapper around [`encode_hex`] for callers (such as
+/// substrate operations that carry hex on the wire as msgpack strings)
+/// that need an owned `String` rather than `Vec<u8>`. The conversion
+/// is allocation-free past [`encode_hex`] because every byte produced
+/// by the lowercase-hex encoder is ASCII.
+#[must_use]
+pub fn encode_hex_str(bytes: &[u8]) -> String {
+    let buf = encode_hex(bytes);
+    // SAFETY: encode_hex_into emits only ASCII bytes from the
+    // 0123456789abcdef alphabet.
+    String::from_utf8(buf).expect("lowercase-hex encoder produces ASCII")
+}
+
+/// Decode a lowercase or uppercase hexadecimal `&str`.
+///
+/// Convenience wrapper around [`decode_hex`] without the input-size
+/// guard, for callers that already trust the source. Use [`decode_hex`]
+/// directly when receiving bytes from an untrusted transport that
+/// needs a bound.
+///
+/// # Errors
+/// Returns [`NetbatError::MalformedRequest`] when the input has odd
+/// length or contains a non-hex byte.
+pub fn decode_hex_str(input: &str) -> Result<Vec<u8>, NetbatError> {
+    decode_hex(input.as_bytes(), usize::MAX)
+}

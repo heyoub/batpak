@@ -15,7 +15,11 @@ pub const DEFAULT_MAX_CONNECTIONS: usize = 1024;
 pub const DEFAULT_MAX_REQUESTS_PER_CONNECTION: usize = 1;
 
 /// Blocking TCP server limits.
+///
+/// `#[non_exhaustive]` so adding TLS config, listen-backlog, or
+/// connection-accept timeouts post-0.7.6 stays SemVer-safe.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
 pub struct TcpServerConfig {
     /// Line-protocol request and response limits.
     pub limits: Limits,
@@ -39,6 +43,50 @@ impl Default for TcpServerConfig {
             max_requests_per_connection: DEFAULT_MAX_REQUESTS_PER_CONNECTION,
             idle_sleep: Duration::from_millis(10),
         }
+    }
+}
+
+impl TcpServerConfig {
+    /// Construct the default TCP server config. Equivalent to
+    /// [`TcpServerConfig::default`].
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Override the line-protocol [`Limits`].
+    #[must_use]
+    pub const fn with_limits(mut self, limits: Limits) -> Self {
+        self.limits = limits;
+        self
+    }
+
+    /// Override the read/write [`IoTimeouts`].
+    #[must_use]
+    pub const fn with_timeouts(mut self, timeouts: IoTimeouts) -> Self {
+        self.timeouts = timeouts;
+        self
+    }
+
+    /// Override [`TcpServerConfig::max_connections`].
+    #[must_use]
+    pub const fn with_max_connections(mut self, value: usize) -> Self {
+        self.max_connections = value;
+        self
+    }
+
+    /// Override [`TcpServerConfig::max_requests_per_connection`].
+    #[must_use]
+    pub const fn with_max_requests_per_connection(mut self, value: usize) -> Self {
+        self.max_requests_per_connection = value;
+        self
+    }
+
+    /// Override [`TcpServerConfig::idle_sleep`].
+    #[must_use]
+    pub const fn with_idle_sleep(mut self, value: Duration) -> Self {
+        self.idle_sleep = value;
+        self
     }
 }
 
@@ -69,6 +117,7 @@ impl ShutdownHandle {
 
 /// Summary returned after a blocking TCP listener exits.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[non_exhaustive]
 pub struct TcpServeStats {
     /// Number of accepted TCP connections.
     pub accepted_connections: usize,

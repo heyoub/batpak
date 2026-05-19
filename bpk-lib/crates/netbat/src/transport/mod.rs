@@ -8,7 +8,7 @@ pub use error::NetbatError;
 pub use frame::{
     decode_line, dispatch_frame, encode_request, encode_response, RequestFrame, ResponseFrame,
 };
-pub use hex::{decode_hex, encode_hex, encode_hex_into};
+pub use hex::{decode_hex, decode_hex_str, encode_hex, encode_hex_into, encode_hex_str};
 pub use limits::{
     IoTimeouts, Limits, CALL_VERB, DEFAULT_MAX_INPUT_BYTES, DEFAULT_MAX_LINE_BYTES,
     DEFAULT_MAX_OPERATION_NAME_BYTES, DEFAULT_MAX_OUTPUT_BYTES, LINE_PROTOCOL_VERSION,

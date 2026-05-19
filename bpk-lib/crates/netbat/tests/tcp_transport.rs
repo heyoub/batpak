@@ -69,10 +69,7 @@ fn tcp_listener_serves_one_real_socket_request() {
     let shutdown = nb::ShutdownHandle::new();
     let server_shutdown = shutdown.clone();
 
-    let config = nb::TcpServerConfig {
-        max_connections: 1,
-        ..nb::TcpServerConfig::default()
-    };
+    let config = nb::TcpServerConfig::default().with_max_connections(1);
     let handle = spawn_server("netbat-tcp-one", listener, config, server_shutdown);
 
     let mut stream = connect_client(addr);
@@ -102,11 +99,9 @@ fn tcp_listener_enforces_request_limit_per_connection() {
     let shutdown = nb::ShutdownHandle::new();
     let server_shutdown = shutdown.clone();
 
-    let config = nb::TcpServerConfig {
-        max_connections: 1,
-        max_requests_per_connection: 1,
-        ..nb::TcpServerConfig::default()
-    };
+    let config = nb::TcpServerConfig::default()
+        .with_max_connections(1)
+        .with_max_requests_per_connection(1);
     let handle = spawn_server("netbat-tcp-limit", listener, config, server_shutdown);
 
     let mut stream = connect_client(addr);
@@ -138,10 +133,7 @@ fn tcp_listener_writes_stable_error_response_for_bad_request() {
     let shutdown = nb::ShutdownHandle::new();
     let server_shutdown = shutdown.clone();
 
-    let config = nb::TcpServerConfig {
-        max_connections: 1,
-        ..nb::TcpServerConfig::default()
-    };
+    let config = nb::TcpServerConfig::default().with_max_connections(1);
     let handle = spawn_server("netbat-tcp-error", listener, config, server_shutdown);
 
     let mut stream = connect_client(addr);
@@ -167,11 +159,9 @@ fn tcp_listener_keeps_connection_after_request_error_when_limit_allows() {
     let shutdown = nb::ShutdownHandle::new();
     let server_shutdown = shutdown.clone();
 
-    let config = nb::TcpServerConfig {
-        max_connections: 1,
-        max_requests_per_connection: 2,
-        ..nb::TcpServerConfig::default()
-    };
+    let config = nb::TcpServerConfig::default()
+        .with_max_connections(1)
+        .with_max_requests_per_connection(2);
     let handle = spawn_server(
         "netbat-tcp-keepalive-error",
         listener,
@@ -207,10 +197,7 @@ fn tcp_listener_rejects_unsupported_protocol_version() {
     let shutdown = nb::ShutdownHandle::new();
     let server_shutdown = shutdown.clone();
 
-    let config = nb::TcpServerConfig {
-        max_connections: 1,
-        ..nb::TcpServerConfig::default()
-    };
+    let config = nb::TcpServerConfig::default().with_max_connections(1);
     let handle = spawn_server("netbat-tcp-version", listener, config, server_shutdown);
 
     let mut stream = connect_client(addr);
@@ -239,14 +226,9 @@ fn tcp_listener_accounts_limit_failures() {
     let shutdown = nb::ShutdownHandle::new();
     let server_shutdown = shutdown.clone();
 
-    let config = nb::TcpServerConfig {
-        max_connections: 1,
-        limits: nb::Limits {
-            max_line_bytes: 8,
-            ..nb::Limits::default()
-        },
-        ..nb::TcpServerConfig::default()
-    };
+    let config = nb::TcpServerConfig::default()
+        .with_max_connections(1)
+        .with_limits(nb::Limits::default().with_max_line_bytes(8));
     let handle = spawn_server("netbat-tcp-line-limit", listener, config, server_shutdown);
 
     let mut stream = connect_client(addr);
@@ -275,10 +257,7 @@ fn tcp_listener_accounts_runtime_failures() {
     let shutdown = nb::ShutdownHandle::new();
     let server_shutdown = shutdown.clone();
 
-    let config = nb::TcpServerConfig {
-        max_connections: 1,
-        ..nb::TcpServerConfig::default()
-    };
+    let config = nb::TcpServerConfig::default().with_max_connections(1);
     let handle = spawn_server("netbat-tcp-runtime", listener, config, server_shutdown);
 
     let mut stream = connect_client(addr);
@@ -306,10 +285,7 @@ fn shutdown_handle_stops_idle_listener() {
     let shutdown = nb::ShutdownHandle::new();
     let server_shutdown = shutdown.clone();
 
-    let config = nb::TcpServerConfig {
-        idle_sleep: Duration::from_millis(1),
-        ..nb::TcpServerConfig::default()
-    };
+    let config = nb::TcpServerConfig::default().with_idle_sleep(Duration::from_millis(1));
     let handle = spawn_server("netbat-tcp-shutdown", listener, config, server_shutdown);
 
     thread::sleep(Duration::from_millis(20));

@@ -360,40 +360,25 @@ fn build_error_fixture(request_input_bytes: &[u8]) -> ManifestErrorFixture {
     }
 }
 
+// Hex codec lives in `netbat::transport::hex`. The canonical
+// implementation is re-exported via `netbat::encode_hex_str` /
+// `netbat::decode_hex_str`. The `pub fn encode_hex` that used to live
+// here is preserved as a re-export below so existing callers continue
+// to compile.
+
 /// Lowercase-hex encode the given bytes.
+///
+/// Deprecated wrapper kept for backward compatibility with internal
+/// callers that imported `crate::manifest::encode_hex`. New code
+/// should call [`netbat::encode_hex_str`] directly.
 #[must_use]
 pub fn encode_hex(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        out.push(char::from(HEX[(*byte >> 4) as usize]));
-        out.push(char::from(HEX[(*byte & 0x0F) as usize]));
-    }
-    out
+    netbat::encode_hex_str(bytes)
 }
 
-/// Decode a hex string back to bytes.
-fn decode_hex(hex: &str) -> Result<Vec<u8>, &'static str> {
-    if !hex.len().is_multiple_of(2) {
-        return Err("hex string has odd length");
-    }
-    let bytes = hex.as_bytes();
-    let mut out = Vec::with_capacity(hex.len() / 2);
-    for pair in bytes.chunks_exact(2) {
-        let high = hex_value(pair[0])?;
-        let low = hex_value(pair[1])?;
-        out.push((high << 4) | low);
-    }
-    Ok(out)
-}
-
-fn hex_value(byte: u8) -> Result<u8, &'static str> {
-    match byte {
-        b'0'..=b'9' => Ok(byte - b'0'),
-        b'a'..=b'f' => Ok(byte - b'a' + 10),
-        b'A'..=b'F' => Ok(byte - b'A' + 10),
-        _ => Err("non-hex character in hex string"),
-    }
+/// Decode a hex string back to bytes via `netbat::decode_hex_str`.
+fn decode_hex(hex: &str) -> Result<Vec<u8>, netbat::NetbatError> {
+    netbat::decode_hex_str(hex)
 }
 
 #[cfg(test)]

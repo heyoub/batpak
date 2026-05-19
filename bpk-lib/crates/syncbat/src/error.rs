@@ -4,7 +4,12 @@ use std::error::Error;
 use std::fmt;
 
 /// Error returned while assembling a [`crate::core::Core`].
+///
+/// `#[non_exhaustive]` so post-1.0 we can add validation variants
+/// (e.g. cross-module descriptor checks, schema-version drift) without
+/// breaking downstream exhaustive matches.
 #[derive(Debug, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum BuildError {
     /// An operation descriptor was registered more than once.
     DuplicateOperation {
@@ -134,6 +139,7 @@ impl Error for BuildError {}
 
 /// Handler failure preserved when receipt recording also fails.
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[non_exhaustive]
 pub struct ReceiptSinkHandlerCause {
     /// Handler-supplied error class.
     pub code: String,
@@ -165,7 +171,13 @@ impl ReceiptSinkHandlerCause {
 }
 
 /// Error returned by synchronous operation dispatch.
+///
+/// `#[non_exhaustive]` so the wire-error vocabulary can grow (e.g.
+/// rate-limit, auth, schema-mismatch variants) without breaking
+/// downstream matches that translate `RuntimeError` into transport-
+/// layer error codes.
 #[derive(Debug, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum RuntimeError {
     /// The requested operation name is not known to the runtime.
     UnknownOperation {
