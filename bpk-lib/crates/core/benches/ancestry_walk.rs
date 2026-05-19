@@ -31,13 +31,13 @@ use tempfile::TempDir;
 
 const KIND: EventKind = EventKind::custom(0xA, 1);
 
-fn build_chain(chain_len: u32) -> (Store, TempDir, u128) {
+fn build_chain(chain_len: u32) -> (Store, TempDir, batpak::id::EventId) {
     let dir = TempDir::new().expect("temp dir");
     let store =
         Store::open(StoreConfig::new(dir.path()).with_sync_every_n_events(100_000)).expect("open");
 
     let coord = Coordinate::new("bench:entity:chain", "bench:scope").expect("coord");
-    let mut last_id = 0u128;
+    let mut last_id = batpak::id::EventId::from(0u128);
     for step in 0..chain_len {
         last_id = store
             .append(&coord, KIND, &serde_json::json!({"step": step}))
