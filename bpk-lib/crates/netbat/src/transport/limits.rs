@@ -103,7 +103,7 @@ impl IoTimeouts {
 
 /// Optional read/write timeout hints for listener owners.
 ///
-/// The generic [`serve_stream`] helper works with any [`Read`] + [`Write`]
+/// The generic [`crate::serve_stream`] helper works with any [`std::io::Read`] + [`std::io::Write`]
 /// value and cannot apply timeouts itself. Listener owners that use
 /// `std::net::TcpStream` can apply these values before passing the stream in.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

@@ -90,7 +90,7 @@ impl From<syncbat::RuntimeError> for NetbatError {
 impl NetbatError {
     /// Return the stable ASCII token used on the wire for this error.
     ///
-    /// The same token is emitted by [`encode_response`] in the `ERR <code> ...`
+    /// The same token is emitted by [`crate::encode_response`] in the `ERR <code> ...`
     /// frame and is therefore already part of the public wire contract; this
     /// accessor exposes the mapping to callers that need to reproduce or
     /// compare against the token without going through a full frame
