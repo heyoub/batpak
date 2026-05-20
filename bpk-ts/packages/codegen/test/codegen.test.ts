@@ -280,11 +280,12 @@ describe("generate writes the expected files", () => {
   });
 
   it("emits valid TS identifiers even when the operation name contains hyphens", () => {
-    // REGRESSION: renderOperationsModule used to strip only `.` from
-    // op.name when forming the const identifier. Hyphens were left
-    // in place, producing illegal TS like `export const BANK-COMMIT
-    // = ...`. The OperationName grammar allows `[A-Za-z0-9._-]+`,
-    // so hyphens must collapse to underscores too.
+    // REGRESSION (Codex P2 on commit c6fdfdb): renderOperationsModule
+    // used to strip only `.` from op.name when forming the const
+    // identifier. Hyphens were left in place, producing illegal TS
+    // like `export const BANK-COMMIT = ...`. The OperationName
+    // grammar allows `[A-Za-z0-9._-]+`, so hyphens must collapse to
+    // underscores too.
     const manifest = {
       ...MINIMAL_MANIFEST,
       operations: [
@@ -298,9 +299,32 @@ describe("generate writes the expected files", () => {
     const out = join(workDir, "out");
     generate({ manifestPath: path, outDir: out });
     const ops = readFileSync(join(out, "operations.ts"), "utf-8");
-    // Must produce a valid identifier — no hyphen.
     expect(ops).toContain("export const BANK_COMMIT_V2");
     expect(ops).not.toContain("BANK-COMMIT");
+  });
+
+  it("emits valid TS identifiers when the operation name starts with a digit", () => {
+    // REGRESSION (Codex P2 on commit e6279a3): the
+    // OperationName grammar `[A-Za-z0-9._-]+` allows a leading digit
+    // (e.g. `1.sync`). Uppercasing produces `1_SYNC` — invalid TS
+    // because JS identifiers cannot start with [0-9]. The fix
+    // prefixes `_` so the emitted constant becomes `_1_SYNC`.
+    const manifest = {
+      ...MINIMAL_MANIFEST,
+      operations: [
+        {
+          ...MINIMAL_MANIFEST.operations[0],
+          name: "1.sync",
+        },
+      ],
+    };
+    const path = writeManifest(manifest);
+    const out = join(workDir, "out");
+    generate({ manifestPath: path, outDir: out });
+    const ops = readFileSync(join(out, "operations.ts"), "utf-8");
+    expect(ops).toContain("export const _1_SYNC");
+    // The illegal `export const 1_SYNC` MUST NOT appear.
+    expect(ops).not.toMatch(/export const 1_SYNC\b/u);
   });
 });
 

@@ -315,13 +315,19 @@ function renderOperationsModule(manifest: BatpakTsManifest): string {
       );
     }
     // The OperationName grammar (syncbat::OperationName::new) accepts
-    // `[A-Za-z0-9._-]+`. The TS const identifier we emit MUST be a
-    // valid JS identifier, so collapse every separator the grammar
-    // allows (dot AND hyphen) into underscore. Plain `replace(/\./gu)`
-    // alone would leave hyphens, producing illegal output like
-    // `export const BANK-COMMIT = ...` when a downstream manifest
-    // names an operation with a hyphen.
-    const constName = constCase(op.name.replace(/[.-]/gu, "_")).toUpperCase();
+    // `[A-Za-z0-9._-]+`, which means valid wire names can also START
+    // with a digit (e.g. "1.sync") or contain hyphens. The TS const
+    // identifier we emit MUST be a valid JS identifier, so:
+    //   1. collapse every separator the grammar allows (dot AND
+    //      hyphen) into underscore — otherwise `bank-commit.v2`
+    //      becomes `export const BANK-COMMIT = ...` (invalid TS),
+    //   2. prefix `_` when the result starts with a digit — JS
+    //      identifiers cannot start with `[0-9]`, so `1.sync` would
+    //      become `export const 1_SYNC = ...` (invalid TS).
+    let constName = constCase(op.name.replace(/[.-]/gu, "_")).toUpperCase();
+    if (/^[0-9]/u.test(constName)) {
+      constName = `_${constName}`;
+    }
     lines.push(`/** Source: syncbat operation "${op.name}" */`);
     lines.push(`export const ${constName} = {`);
     lines.push(`  name: ${JSON.stringify(op.name)},`);
