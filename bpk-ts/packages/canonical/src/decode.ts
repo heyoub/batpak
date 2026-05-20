@@ -168,7 +168,15 @@ function decodeArray(reader: Reader, length: number): unknown[] {
 }
 
 function decodeMap(reader: Reader, length: number): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
+  // Null-prototype accumulator. The decoder accepts MessagePack from an
+  // untrusted peer; if a payload carries a key like "__proto__",
+  // "constructor", or "prototype", writing it into a regular `{}`
+  // via `out[key] = ...` would mutate the object's prototype chain
+  // instead of creating a normal data property. Using
+  // `Object.create(null)` makes those keys plain own-property names
+  // with no prototype side-effect, closing a prototype-pollution
+  // surface flagged by the Codex review on canonical/src/decode.ts.
+  const out = Object.create(null) as Record<string, unknown>;
   for (let i = 0; i < length; i += 1) {
     const key = decodeValue(reader);
     if (typeof key !== "string") {

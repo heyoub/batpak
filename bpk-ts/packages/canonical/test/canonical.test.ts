@@ -127,3 +127,40 @@ describe("hex helpers", () => {
     expect(() => decodeHex("abc")).toThrow(/not byte-aligned/);
   });
 });
+
+describe("decoder resists prototype pollution from untrusted peers", () => {
+  // REGRESSION: decodeMap used to accumulate into a plain `{}` via
+  // `out[key] = value`. A payload with key "__proto__" would mutate
+  // the decoded object's prototype chain rather than creating a
+  // normal data property, breaking every downstream consumer that
+  // does `obj.someField` later in the pipeline. Object.create(null)
+  // closes the surface.
+
+  it("treats __proto__ as a data field, not a prototype mutation", () => {
+    // Build a payload with a literal `__proto__` STRING key as a
+    // data field. JS object-literal syntax `{ __proto__: ... }`
+    // mutates the prototype slot, NOT a data key — so we construct
+    // the object via Object.create(null) + assignment to force
+    // __proto__ as a regular property.
+    const payload = Object.create(null) as Record<string, unknown>;
+    payload["__proto__"] = { polluted: true };
+    const dangerous = encode(payload);
+    const decoded = decode(dangerous) as Record<string, unknown>;
+    // The literal "__proto__" key must appear as an own property
+    // carrying the value we put there — proves decodeMap didn't
+    // route the key through the prototype slot.
+    expect(Object.prototype.hasOwnProperty.call(decoded, "__proto__")).toBe(true);
+    // A fresh `{}` must NOT have a `polluted` field — global
+    // Object.prototype unchanged.
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  });
+
+  it("treats constructor as a data field, not a constructor swap", () => {
+    const dangerous = encode({ constructor: "hijack" });
+    const decoded = decode(dangerous) as Record<string, unknown>;
+    expect(decoded.constructor).toBe("hijack");
+    // The decoded object has no prototype, so it has no real
+    // constructor — but the data field "constructor" is its own
+    // string, which is the safe outcome.
+  });
+});

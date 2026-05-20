@@ -127,8 +127,6 @@ fn partial_keys_rejected_synchronously() {
 }
 
 #[test]
-// justifies: INV-ALLOW-IS-DESIGN; this test asserts the error is NOT BatchFailed — the wildcard catch-all over `#[non_exhaustive] StoreError` is the right shape because the assertion is variant-agnostic at crates/core/tests/idempotent_batch_crash_recovery.rs.
-#[allow(clippy::wildcard_enum_match_arm)]
 fn batch_max_bytes_accepts_exact_limit_and_rejects_one_byte_over() {
     let coord = coord();
     let items = byte_counted_batch(&coord);
@@ -154,24 +152,22 @@ fn batch_max_bytes_accepts_exact_limit_and_rejects_one_byte_over() {
         Ok(_) => panic!("PROPERTY: batch one byte over max_bytes must be rejected"),
         Err(err) => err,
     };
-    match err {
-        StoreError::BatchFailed { item_index, source } => {
-            assert_eq!(
-                item_index, 0,
-                "PROPERTY: aggregate batch byte-limit failures are reported at batch index 0"
-            );
-            assert!(
-                matches!(*source, StoreError::Configuration(_)),
-                "PROPERTY: batch byte-limit failure must preserve Configuration source"
-            );
-        }
-        // Wildcard intentional: this assertion only cares that the
-        // error IS StoreError::BatchFailed; the function-level allow
-        // silences clippy's wildcard_enum_match_arm because StoreError
-        // is #[non_exhaustive] and a generic catch-all is the right
-        // shape for a property-assertion failure path.
-        other => panic!("PROPERTY: expected StoreError::BatchFailed, got {other:?}"),
-    }
+    // let-else is the canonical "destructure or panic" idiom used
+    // throughout core tests (see cursor_durability.rs::*_corrupt). It
+    // does NOT trigger clippy::wildcard_enum_match_arm over the
+    // #[non_exhaustive] StoreError, so we don't need to silence the
+    // lint or list every variant.
+    let StoreError::BatchFailed { item_index, source } = err else {
+        panic!("PROPERTY: expected StoreError::BatchFailed, got {err:?}");
+    };
+    assert_eq!(
+        item_index, 0,
+        "PROPERTY: aggregate batch byte-limit failures are reported at batch index 0"
+    );
+    assert!(
+        matches!(*source, StoreError::Configuration(_)),
+        "PROPERTY: batch byte-limit failure must preserve Configuration source"
+    );
     over_store.close().expect("close over");
 }
 
