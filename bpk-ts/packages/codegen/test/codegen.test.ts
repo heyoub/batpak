@@ -236,6 +236,28 @@ describe("generate writes the expected files", () => {
     expect(existsSync(join(out, "index.ts"))).toBe(true);
   });
 
+  it("does not leak the host absolute path of the manifest into manifest.ts", () => {
+    // REGRESSION (CI determinism gate on commit c67394b):
+    // `cli.ts` resolves the user-supplied manifest path with
+    // `path.resolve(...)` before calling `generate`, and
+    // `renderManifestModule` used to emit `${options.manifestPath}`
+    // verbatim in a `// Source manifest: ...` comment. That leaks
+    // the host filesystem layout into the generated file —
+    // `/home/user/...` on a developer laptop vs
+    // `/home/runner/work/...` on GitHub-hosted CI — so the
+    // determinism gate (rm -rf generated && rebuild && diff)
+    // would deterministically fail any time the file was
+    // regenerated on a different host. Now the comment carries
+    // only `basename(options.manifestPath)`.
+    const path = writeManifest(MINIMAL_MANIFEST);
+    const out = join(workDir, "generated-path-leak");
+    generate({ manifestPath: path, outDir: out });
+    const manifestTs = readFileSync(join(out, "manifest.ts"), "utf-8");
+    expect(manifestTs).toContain("// Source manifest: ");
+    expect(manifestTs).not.toContain(workDir);
+    expect(manifestTs).not.toMatch(/Source manifest: \//u);
+  });
+
   it("FULLY OVERWRITES the output directory on each run", () => {
     const path = writeManifest(MINIMAL_MANIFEST);
     const out = join(workDir, "generated-out");

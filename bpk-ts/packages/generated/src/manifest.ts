@@ -2,7 +2,7 @@
 // Re-run `pnpm -w generate` (or `cargo xtask export-ts-manifest` followed
 // by codegen) to refresh this directory.
 
-// Source manifest: /home/user/batpak/bpk-ts/batpak.manifest.json
+// Source manifest: batpak.manifest.json
 export const MANIFEST_VERSION = 1 as const;
 export const NETBAT_VERSION = "NETBAT/1" as const;
 export const BATPAK_VERSION = "0.7.6" as const;
