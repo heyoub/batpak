@@ -18,8 +18,10 @@ impl Reader {
     /// frame in the segment is represented. Returns `Some(false)` when
     /// there are trailing frames that SIDX doesn't know about (the
     /// cross-segment batch case — see `scan_segment_index_into`'s
-    /// contract). Returns `None` on I/O trouble; callers interpret as
-    /// "can't prove coverage, frame-scan to be safe".
+    /// contract), or when the SIDX claims to cover bytes that overlap
+    /// the footer itself (structural corruption). Returns `None` on I/O
+    /// trouble; callers interpret as "can't prove coverage, frame-scan
+    /// to be safe".
     fn sidx_covers_segment_tail(
         path: &Path,
         sidx_entries: &[crate::store::segment::sidx::SidxEntry],
@@ -61,7 +63,7 @@ impl Reader {
             .max()
             .unwrap_or(0);
 
-        Some(max_tail >= sidx_start)
+        Some(max_tail == sidx_start)
     }
 
     fn classify_payload_read_error(
@@ -117,8 +119,9 @@ impl Reader {
         // Fast path: try SIDX footer for sealed segments only.
         // Sealed segments cannot have incomplete batches, so SIDX is safe.
         // Active segment might have incomplete batches, so use slow path.
-        // Falls back to 0 if the filename is malformed, but surfaces the parse
-        // failure so a corrupt name on disk is not invisible.
+        // A malformed filename is soft-skipped: we cannot safely attribute
+        // its frames to any segment id, so the safe move is to log and
+        // return rather than guess.
         let segment_id = match segment::SegmentId::from_filename(path) {
             Ok(parsed) => parsed.as_u64(),
             Err(error) => {
@@ -127,7 +130,7 @@ impl Reader {
                     %error,
                     "skipping malformed segment filename"
                 );
-                0
+                return Ok(());
             }
         };
         let is_active = self.active_segment_id.load(Ordering::Acquire) == segment_id;
@@ -162,20 +165,8 @@ impl Reader {
         let mut magic = [0u8; 4];
         file.read_exact(&mut magic).map_err(StoreError::Io)?;
         if &magic != SEGMENT_MAGIC {
-            return Err(StoreError::corrupt_magic(0));
+            return Err(StoreError::corrupt_magic(segment_id));
         }
-
-        let segment_id = match segment::SegmentId::from_filename(path) {
-            Ok(parsed) => parsed.as_u64(),
-            Err(error) => {
-                tracing::warn!(
-                    path = %path.display(),
-                    %error,
-                    "skipping malformed segment filename"
-                );
-                return Ok(());
-            }
-        };
 
         let mut header_len_buf = [0u8; 4];
         file.read_exact(&mut header_len_buf)

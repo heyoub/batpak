@@ -6,5 +6,5 @@ edition = "2021"
 [workspace]
 
 [dependencies]
-batpak = { path = "../../crates/core", features = ["blake3"] }
+batpak = { path = "../../crates/core" }
 serde_json = "1"

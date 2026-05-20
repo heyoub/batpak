@@ -7,8 +7,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
+use parking_lot::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tempfile::NamedTempFile;
 
@@ -621,10 +622,7 @@ impl CursorWorkerHandle {
         if let Some(join) = self.join.take() {
             join.join().map_err(|_| StoreError::WriterCrashed)?;
         }
-        let mut guard = self
-            .error_slot
-            .lock()
-            .map_err(|_| StoreError::WriterCrashed)?;
+        let mut guard = self.error_slot.lock();
         guard.take().map_or(Ok(()), Err)
     }
 
@@ -762,10 +760,9 @@ impl Store<crate::store::Open> {
                 ) {
                     Ok(cursor) => cursor,
                     Err(error) => {
-                        if let Ok(mut guard) = error_slot_thread.lock() {
-                            if guard.is_none() {
-                                *guard = Some(error);
-                            }
+                        let mut guard = error_slot_thread.lock();
+                        if guard.is_none() {
+                            *guard = Some(error);
                         }
                         stop_thread.store(true, Ordering::Release);
                         return;
@@ -818,7 +815,8 @@ impl Store<crate::store::Open> {
                                     stop_thread.store(true, Ordering::Release);
                                     continue;
                                 };
-                                if let Ok(mut guard) = checkpoint_error_slot.lock() {
+                                {
+                                    let mut guard = checkpoint_error_slot.lock();
                                     if guard.is_none() {
                                         *guard = Some(checkpoint_write_failed(id.as_str(), &error));
                                     }
@@ -854,7 +852,8 @@ impl Store<crate::store::Open> {
                                     stop_thread.store(true, Ordering::Release);
                                     continue;
                                 };
-                                if let Ok(mut guard) = checkpoint_error_slot.lock() {
+                                {
+                                    let mut guard = checkpoint_error_slot.lock();
                                     if guard.is_none() {
                                         *guard = Some(checkpoint_write_failed(id.as_str(), &error));
                                     }
@@ -947,10 +946,9 @@ impl Store<crate::store::Open> {
                             ) {
                                 Ok(cursor) => cursor,
                                 Err(error) => {
-                                    if let Ok(mut guard) = error_slot_thread.lock() {
-                                        if guard.is_none() {
-                                            *guard = Some(error);
-                                        }
+                                    let mut guard = error_slot_thread.lock();
+                                    if guard.is_none() {
+                                        *guard = Some(error);
                                     }
                                     stop_thread.store(true, Ordering::Release);
                                     continue;

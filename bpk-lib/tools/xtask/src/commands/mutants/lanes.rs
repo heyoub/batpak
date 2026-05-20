@@ -45,14 +45,8 @@ pub(super) const PROJECTION_MUTANT_FILES: &[&str] = &[
 ];
 pub(super) const SEGMENT_SCAN_MUTANT_FILES: &[&str] =
     &["crates/core/src/store/segment/scan/**/*.rs"];
-pub(super) const HASH_CHAIN_REPLAY_ALL_FEATURES_MUTANT_FILES: &[&str] = &[
+pub(super) const HASH_CHAIN_REPLAY_MUTANT_FILES: &[&str] = &[
     "crates/core/src/store/ancestry/by_hash.rs",
-    "crates/core/src/store/cold_start/rebuild.rs",
-    "crates/core/src/store/chain_walk.rs",
-    "crates/core/src/store/read_walk.rs",
-];
-pub(super) const HASH_CHAIN_REPLAY_NO_DEFAULT_MUTANT_FILES: &[&str] = &[
-    "crates/core/src/store/ancestry/by_clock.rs",
     "crates/core/src/store/cold_start/rebuild.rs",
     "crates/core/src/store/chain_walk.rs",
     "crates/core/src/store/read_walk.rs",
@@ -89,21 +83,11 @@ pub(super) const NETBAT_BOUNDARY_MUTANT_FILES: &[&str] = &[
     "crates/netbat/src/route.rs",
     "crates/netbat/src/transport.rs",
 ];
-pub(super) const ALL_FEATURES_MUTANT_EXCLUDES: &[&str] =
-    &["crates/core/src/store/ancestry/by_clock.rs"];
-pub(super) const NO_DEFAULT_FEATURES_MUTANT_EXCLUDES: &[&str] =
-    &["crates/core/src/store/ancestry/by_hash.rs"];
 pub(super) const INDEX_TOPOLOGY_DEFAULT_EQUIVALENT_MUTANT: &str = r"crates/core/src/store/config\.rs:.*replace IndexTopology::aos -> Self with Default::default\(\)";
-pub(super) const SIDX_EMPTY_FOOTER_FLOOR_EQUIVALENT_MUTANT: &str = r"crates/core/src/store/segment/scan/recovery\.rs:.*replace \+ with . in Reader::sidx_covers_segment_tail";
-pub(super) const ALL_FEATURES_MUTANT_EXCLUDE_RES: &[&str] = &[
+pub(super) const MUTANT_EXCLUDE_RES: &[&str] = &[
     INDEX_TOPOLOGY_DEFAULT_EQUIVALENT_MUTANT,
-    SIDX_EMPTY_FOOTER_FLOOR_EQUIVALENT_MUTANT,
 ];
-pub(super) const NO_DEFAULT_FEATURES_MUTANT_EXCLUDE_RES: &[&str] = &[
-    INDEX_TOPOLOGY_DEFAULT_EQUIVALENT_MUTANT,
-    SIDX_EMPTY_FOOTER_FLOOR_EQUIVALENT_MUTANT,
-];
-const SEGMENT_SCAN_MUTANT_EXCLUDE_RES: &[&str] = &[SIDX_EMPTY_FOOTER_FLOOR_EQUIVALENT_MUTANT];
+const SEGMENT_SCAN_MUTANT_EXCLUDE_RES: &[&str] = &[];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum MutationScope {
@@ -322,18 +306,15 @@ fn repo_wide_paths(surface: MutantSurface) -> &'static [&'static str] {
     }
 }
 
-pub(super) fn surface_excludes(surface: MutantSurface) -> &'static [&'static str] {
-    match surface {
-        MutantSurface::AllFeatures => ALL_FEATURES_MUTANT_EXCLUDES,
-        MutantSurface::NoDefaultFeatures => NO_DEFAULT_FEATURES_MUTANT_EXCLUDES,
-    }
+pub(super) fn surface_excludes(_surface: MutantSurface) -> &'static [&'static str] {
+    // blake3 is mandatory, so the surface-specific by_hash/by_clock excludes
+    // are gone. The two surfaces only differ by the dangerous-test-hooks
+    // feature now, and neither exposes additional file-level excludes.
+    &[]
 }
 
-fn surface_exclude_res(surface: MutantSurface) -> &'static [&'static str] {
-    match surface {
-        MutantSurface::AllFeatures => ALL_FEATURES_MUTANT_EXCLUDE_RES,
-        MutantSurface::NoDefaultFeatures => NO_DEFAULT_FEATURES_MUTANT_EXCLUDE_RES,
-    }
+fn surface_exclude_res(_surface: MutantSurface) -> &'static [&'static str] {
+    MUTANT_EXCLUDE_RES
 }
 
 fn critical_seam_exclude_res(slug: &str) -> &'static [&'static str] {
@@ -378,20 +359,12 @@ pub(super) fn critical_mutation_seams() -> &'static [CriticalMutationSeam] {
             paths: SEGMENT_SCAN_MUTANT_FILES,
         },
         CriticalMutationSeam {
-            slug: "hash-chain-replay-all-features",
+            slug: "hash-chain-replay",
             label: "hash-chain and replay consistency",
-            description: "hash-chain / replay consistency logic (blake3 lane)",
+            description: "hash-chain / replay consistency logic",
             surface: MutantSurface::AllFeatures,
             package: None,
-            paths: HASH_CHAIN_REPLAY_ALL_FEATURES_MUTANT_FILES,
-        },
-        CriticalMutationSeam {
-            slug: "hash-chain-replay-no-default",
-            label: "hash-chain and replay consistency",
-            description: "hash-chain / replay consistency logic (no-default lane)",
-            surface: MutantSurface::NoDefaultFeatures,
-            package: None,
-            paths: HASH_CHAIN_REPLAY_NO_DEFAULT_MUTANT_FILES,
+            paths: HASH_CHAIN_REPLAY_MUTANT_FILES,
         },
         CriticalMutationSeam {
             slug: "frontier-wait-durable",

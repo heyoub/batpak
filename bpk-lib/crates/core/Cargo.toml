@@ -21,8 +21,10 @@ rustdoc-args = ["--cfg", "docsrs"]
 # Default features are production-safe. Crash/fault injection hooks are
 # intentionally excluded so downstream default builds cannot name test-only
 # writer panic, frontier mutation, or fault injection surfaces.
-default = ["blake3"]
-blake3 = ["dep:blake3"]
+# blake3 is a mandatory dependency (formerly a feature); evidence hashes,
+# chain integrity, and receipt signing all rely on it and have no honest
+# degraded mode worth maintaining.
+default = []
 dangerous-test-hooks = ["dep:fastrand"]
 
 [dependencies]
@@ -31,7 +33,7 @@ serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
 batpak-macros-support = { path = "../macros-support", version = "0.7.6" }
 batpak-macros = { path = "../macros", version = "0.7.6" }
-blake3 = { version = "1", optional = true }
+blake3 = "1"
 flume = "0.12"
 crc32fast = "1"
 # Canonical report and receipt bytes are fixture-locked against this exact

@@ -122,7 +122,7 @@ mod tests {
 matrix:
   features:
     - ""
-    - "--features blake3"
+    - "--features dangerous-test-hooks"
     - "--all-features"
 "#;
 
@@ -132,7 +132,7 @@ matrix:
             values,
             vec![
                 "".to_string(),
-                "--features blake3".to_string(),
+                "--features dangerous-test-hooks".to_string(),
                 "--all-features".to_string()
             ]
         );

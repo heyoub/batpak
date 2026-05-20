@@ -285,15 +285,7 @@ fn forge_close_payload(
 }
 
 fn close_payload_hash(payload: &[u8]) -> [u8; 32] {
-    #[cfg(feature = "blake3")]
-    {
-        batpak::event::hash::compute_hash(payload)
-    }
-    #[cfg(not(feature = "blake3"))]
-    {
-        let _ = payload;
-        [0u8; 32]
-    }
+    batpak::event::hash::compute_hash(payload)
 }
 
 fn config_with_fault(

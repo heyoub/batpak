@@ -14,7 +14,7 @@ where
 }
 
 pub(crate) fn content_hash(bytes: &[u8]) -> EvidenceHash {
-    content_hash_impl(bytes)
+    crate::event::hash::compute_hash(bytes)
 }
 
 pub(crate) fn sort_findings<T: Ord>(findings: &mut [T]) {
@@ -25,17 +25,4 @@ pub(crate) fn sorted_findings<T: Clone + Ord>(findings: &[T]) -> Vec<T> {
     let mut sorted = findings.to_vec();
     sort_findings(&mut sorted);
     sorted
-}
-
-#[cfg(feature = "blake3")]
-fn content_hash_impl(bytes: &[u8]) -> EvidenceHash {
-    crate::event::hash::compute_hash(bytes)
-}
-
-#[cfg(not(feature = "blake3"))]
-fn content_hash_impl(bytes: &[u8]) -> EvidenceHash {
-    let crc = crc32fast::hash(bytes).to_be_bytes();
-    let mut out = [0_u8; 32];
-    out[..4].copy_from_slice(&crc);
-    out
 }

@@ -107,10 +107,7 @@ impl WriterState<'_> {
             .filter(|&id| id != 0)
             .map(crate::id::CausationId::from);
 
-        #[cfg(feature = "blake3")]
         let event_hash = crate::event::hash::compute_hash(&event.payload);
-        #[cfg(not(feature = "blake3"))]
-        let event_hash = [0u8; 32];
 
         event.hash_chain = Some(HashChain {
             prev_hash,

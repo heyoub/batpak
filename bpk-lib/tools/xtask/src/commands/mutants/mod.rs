@@ -35,8 +35,8 @@ mod tests {
         FRONTIER_WAIT_MUTANT_FILES, INDEX_TOPOLOGY_DEFAULT_EQUIVALENT_MUTANT,
         NETBAT_BOUNDARY_MUTANT_FILES, PLATFORM_BACKEND_MUTANT_FILES, PROJECTION_MUTANT_FILES,
         REPO_WIDE_ALL_FEATURES_MUTANT_FILES, REPO_WIDE_NO_DEFAULT_MUTANT_FILES,
-        SIDX_EMPTY_FOOTER_FLOOR_EQUIVALENT_MUTANT, SYNCBAT_CATALOG_MUTANT_FILES,
-        SYNCBAT_RUNTIME_MUTANT_FILES, TESTING_LEDGER_LINT_MUTANT_FILES, WRITER_COMMIT_MUTANT_FILES,
+        SYNCBAT_CATALOG_MUTANT_FILES, SYNCBAT_RUNTIME_MUTANT_FILES,
+        TESTING_LEDGER_LINT_MUTANT_FILES, WRITER_COMMIT_MUTANT_FILES,
     };
     use super::plan::{build_mutant_execution_plan, mutants_command, MutantExecutionPlan};
     use super::policy::{
@@ -156,12 +156,8 @@ mod tests {
                 "crates/core/src/schema.rs",
                 "--file",
                 "crates/core/src/store/**/*.rs",
-                "--exclude",
-                "crates/core/src/store/ancestry/by_hash.rs",
                 "--exclude-re",
                 INDEX_TOPOLOGY_DEFAULT_EQUIVALENT_MUTANT,
-                "--exclude-re",
-                SIDX_EMPTY_FOOTER_FLOOR_EQUIVALENT_MUTANT,
                 "--no-default-features",
                 "--cargo-arg",
                 "--locked",

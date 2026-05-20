@@ -42,8 +42,6 @@ impl SchemaSnapshot {
     }
 
     /// Build a snapshot from schema and fixture bytes.
-    #[cfg(feature = "blake3")]
-    #[cfg_attr(all(docsrs, not(batpak_stable_docs)), doc(cfg(feature = "blake3")))]
     #[must_use]
     pub fn from_bytes(
         stable_id: impl Into<String>,

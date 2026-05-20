@@ -40,10 +40,9 @@ fn linear_chain_reports_no_findings_and_deterministic_body_hash() -> TestResult 
     assert_eq!(first.body.schema_version, CHAIN_WALK_REPORT_SCHEMA_VERSION);
     assert_eq!(first.body.mode, ChainWalkMode::Linear);
     assert!(first.body.findings.is_empty());
-    let expected_checked_count = if cfg!(feature = "blake3") { 2 } else { 1 };
     assert_eq!(
-        first.body.checked_count, expected_checked_count,
-        "PROPERTY: no-blake builds can only prove the configured zero-hash chain surface; blake3 builds prove full parent depth"
+        first.body.checked_count, 2,
+        "PROPERTY: blake3 chain-walk evidence proves full parent depth"
     );
     assert_eq!(first.body_hash, second.body_hash);
     assert_eq!(first.body.walk_digest, second.body.walk_digest);
@@ -98,23 +97,14 @@ fn limit_truncation_is_reported_not_silent() -> TestResult {
         2,
     ))?;
 
-    if cfg!(feature = "blake3") {
-        assert_eq!(report.body.checked_count, 2);
-        assert!(
-            matches!(
-                report.body.findings.first(),
-                Some(ChainWalkFinding::TruncatedByLimit { limit, .. }) if *limit == 2
-            ),
-            "PROPERTY: limit-bound linear walk must emit TruncatedByLimit when ancestry continues beyond the checked prefix",
-        );
-    } else {
-        assert_eq!(report.body.checked_count, 1);
-        assert!(
-            report.body.findings.is_empty(),
-            "PROPERTY: no-blake builds must not fake a truncation edge after the configured zero-hash chain surface ends, got {:?}",
-            report.body.findings
-        );
-    }
+    assert_eq!(report.body.checked_count, 2);
+    assert!(
+        matches!(
+            report.body.findings.first(),
+            Some(ChainWalkFinding::TruncatedByLimit { limit, .. }) if *limit == 2
+        ),
+        "PROPERTY: limit-bound linear walk must emit TruncatedByLimit when ancestry continues beyond the checked prefix",
+    );
     Ok(())
 }
 
@@ -158,37 +148,22 @@ fn duplicate_payload_parent_hash_chooses_nearest_prior_and_reports_ambiguity() -
         mode: ChainWalkMode::Linear,
     })?;
 
-    if cfg!(feature = "blake3") {
-        assert_eq!(report.body.checked_count, 2);
-        assert_eq!(report.body.last_ref, Some(u128::from(second_same.event_id)));
-        assert!(
-            report.body.findings.iter().any(|finding| matches!(
-                finding,
-                ChainWalkFinding::ParentHashAmbiguous {
-                    child_event_id,
-                    selected_parent_event_id,
-                    matching_parent_count: 2,
-                    ..
-                } if *child_event_id == u128::from(child.event_id)
-                    && *selected_parent_event_id == u128::from(second_same.event_id)
-            )),
-            "PROPERTY: duplicate payload parent hashes must select the nearest prior match and report ambiguity, got {:?}",
-            report.body.findings
-        );
-    } else {
-        assert_eq!(report.body.checked_count, 1);
-        assert_eq!(report.body.last_ref, Some(u128::from(child.event_id)));
-        assert!(
-            matches!(
-                report.body.findings.as_slice(),
-                [ChainWalkFinding::EndNotReached {
-                    expected_end_event_id
-                }] if *expected_end_event_id == u128::from(second_same.event_id)
-            ),
-            "PROPERTY: no-blake builds must report the explicit end as unreached instead of inventing duplicate-parent ambiguity without a configured content hash surface, got {:?}",
-            report.body.findings
-        );
-    }
+    assert_eq!(report.body.checked_count, 2);
+    assert_eq!(report.body.last_ref, Some(u128::from(second_same.event_id)));
+    assert!(
+        report.body.findings.iter().any(|finding| matches!(
+            finding,
+            ChainWalkFinding::ParentHashAmbiguous {
+                child_event_id,
+                selected_parent_event_id,
+                matching_parent_count: 2,
+                ..
+            } if *child_event_id == u128::from(child.event_id)
+                && *selected_parent_event_id == u128::from(second_same.event_id)
+        )),
+        "PROPERTY: duplicate payload parent hashes must select the nearest prior match and report ambiguity, got {:?}",
+        report.body.findings
+    );
     Ok(())
 }
 

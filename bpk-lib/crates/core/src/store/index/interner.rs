@@ -143,12 +143,17 @@ impl StringInterner {
             reverse.push(string);
         }
 
-        *self.forward.write() = forward_map;
-        *self.reverse.write() = reverse;
-        self.next_id.store(
-            u32::try_from(self.reverse.read().len()).expect("interner size exceeds u32 slots"),
-            Ordering::Release,
-        );
+        // Acquire both write locks up front so no concurrent reader can
+        // observe the new forward map without the matching reverse table
+        // (or vice versa). next_id is stored Release while both guards are
+        // still held; readers that take forward.read() after our drop also
+        // synchronise with next_id.
+        let next = u32::try_from(reverse.len()).expect("interner size exceeds u32 slots");
+        let mut forward_guard = self.forward.write();
+        let mut reverse_guard = self.reverse.write();
+        *forward_guard = forward_map;
+        *reverse_guard = reverse;
+        self.next_id.store(next, Ordering::Release);
     }
 
     /// Return the [`InternId`] for `s`, creating a new one if `s` has not been
@@ -181,9 +186,12 @@ impl StringInterner {
             return id;
         }
 
-        // Allocate a new ID.  `fetch_add` is AcqRel so the increment is visible
-        // to any thread that subsequently observes the forward map entry.
-        let raw = self.next_id.fetch_add(1, Ordering::AcqRel);
+        // Reserve the next ID without publishing it yet. We hold `forward.write()`
+        // exclusively, so no other intern() call can race this load+store; the
+        // publish (Release store) happens *after* the reverse table push so any
+        // reader that observes `next_id` past `raw` is guaranteed to also see
+        // a reverse-table slot at index `raw`.
+        let raw = self.next_id.load(Ordering::Acquire);
         let id = InternId(raw);
 
         let arc: Arc<str> = Arc::from(s);
@@ -206,6 +214,11 @@ impl StringInterner {
             );
             rev.push(arc);
         }
+
+        // justifies: src/store/index/interner.rs documents a u32-sized ID domain (4B entries); exhaustion is an exceptional invariant, not a routinely-recoverable runtime condition.
+        #[allow(clippy::expect_used)]
+        let next = raw.checked_add(1).expect("interner ID space exhausted (u32 wraparound)");
+        self.next_id.store(next, Ordering::Release);
 
         id
     }

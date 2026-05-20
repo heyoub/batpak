@@ -3,9 +3,6 @@ use crate::store::index::IndexEntry;
 use crate::store::Store;
 use std::collections::HashSet;
 
-#[cfg(not(feature = "blake3"))]
-mod by_clock;
-#[cfg(feature = "blake3")]
 mod by_hash;
 
 /// Bounded ancestor collection with cycle detection; on cycle it
@@ -57,7 +54,6 @@ pub(super) fn read_entry_and_event<State>(
     Some((entry, stored))
 }
 
-#[cfg(feature = "blake3")]
 pub(crate) fn parent_event_id_by_hash(
     entity_stream: &[IndexEntry],
     parent_hash: [u8; 32],
@@ -68,35 +64,10 @@ pub(crate) fn parent_event_id_by_hash(
         .map(|candidate| candidate.event_id)
 }
 
-#[cfg(not(feature = "blake3"))]
-pub(super) fn clock_cursor<State>(
-    store: &Store<State>,
-    event_id: u128,
-) -> Option<std::vec::IntoIter<u128>> {
-    let start_entry = store.index.get_by_id(event_id)?;
-    let ids = store
-        .index
-        .stream(start_entry.coord.entity())
-        .iter()
-        .rev()
-        .filter(|entry| entry.clock <= start_entry.clock)
-        .map(|entry| entry.event_id)
-        .collect::<Vec<_>>();
-    Some(ids.into_iter())
-}
-
 pub(crate) fn walk_ancestors<State>(
     store: &Store<State>,
     event_id: u128,
     limit: usize,
 ) -> Vec<StoredEvent<serde_json::Value>> {
-    #[cfg(feature = "blake3")]
-    {
-        by_hash::walk_ancestors_by_hash(store, event_id, limit)
-    }
-
-    #[cfg(not(feature = "blake3"))]
-    {
-        by_clock::walk_ancestors_by_clock(store, event_id, limit)
-    }
+    by_hash::walk_ancestors_by_hash(store, event_id, limit)
 }
