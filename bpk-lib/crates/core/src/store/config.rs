@@ -379,12 +379,6 @@ impl StoreConfig {
                 "batch.max_bytes must be 1..=16MB".into(),
             ));
         }
-        #[cfg(not(feature = "blake3"))]
-        if !self.signing_keys.is_empty() {
-            return Err(crate::store::StoreError::Configuration(
-                "receipt signing requires the blake3 feature".into(),
-            ));
-        }
         // group_commit_max_batch: 0 = unbounded drain (writer drains all pending
         // appends before syncing); 1 = per-event sync (default single-event behavior);
         // N > 1 = drain up to N-1 additional appends before syncing.
