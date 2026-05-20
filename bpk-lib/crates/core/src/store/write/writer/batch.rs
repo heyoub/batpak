@@ -336,6 +336,12 @@ impl WriterState<'_> {
         fence: Option<&mut FenceLedger>,
     ) -> Result<Vec<AppendReceipt>, StoreError> {
         debug_assert_eq!(
+            prepared.len(),
+            prepared.items().len(),
+            "PreparedBatch::len must equal items().len(); writer derives sequence \
+             reservation, commit marker offset, and publish span from it"
+        );
+        debug_assert_eq!(
             prepared.total_bytes(),
             prepared
                 .items()
