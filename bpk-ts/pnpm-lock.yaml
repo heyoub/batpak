@@ -48,7 +48,11 @@ importers:
         specifier: workspace:*
         version: link:../../packages/schema
 
-  packages/canonical: {}
+  packages/canonical:
+    devDependencies:
+      fast-check:
+        specifier: 3.23.2
+        version: 3.23.2
 
   packages/client:
     dependencies:

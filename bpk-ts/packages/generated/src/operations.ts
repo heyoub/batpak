@@ -25,9 +25,6 @@ export const SYSTEM_HEARTBEAT = {
   },
 } as const;
 
-export type SystemHeartbeatRequestInput = SystemHeartbeatRequest;
-export type SystemHeartbeatAckOutput = SystemHeartbeatAck;
-
 /** Source: syncbat operation "bank.commit" */
 export const BANK_COMMIT = {
   name: "bank.commit",
@@ -48,9 +45,6 @@ export const BANK_COMMIT = {
     messageUtf8: "runtime error: unknown operation `system.heartbeat.nope`",
   },
 } as const;
-
-export type BankCommitRequestInput = BankCommitRequest;
-export type BankCommitAckOutput = BankCommitAck;
 
 /** Source: syncbat operation "event.get" */
 export const EVENT_GET = {
@@ -73,5 +67,10 @@ export const EVENT_GET = {
   },
 } as const;
 
+// ─── shared event type aliases ──────────────────────
+export type SystemHeartbeatRequestInput = SystemHeartbeatRequest;
+export type BankCommitRequestInput = BankCommitRequest;
 export type EventGetRequestInput = EventGetRequest;
+export type SystemHeartbeatAckOutput = SystemHeartbeatAck;
+export type BankCommitAckOutput = BankCommitAck;
 export type EventGetAckOutput = EventGetAck;
