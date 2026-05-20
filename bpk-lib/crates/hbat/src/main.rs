@@ -9,11 +9,12 @@ use std::io::Write as _;
 use std::net::{IpAddr, SocketAddr, TcpListener};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use batpak::store::{Store, StoreConfig};
 use clap::{Args, Parser, Subcommand};
-use netbat::{serve_tcp_listener, ShutdownHandle, TcpServerConfig};
+use netbat::{serve_tcp_listener, IoTimeouts, ShutdownHandle, TcpServerConfig};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -127,7 +128,17 @@ fn serve(args: &ServeArgs) -> Result<()> {
     let shutdown = ShutdownHandle::new();
     install_signal_handler(&shutdown)?;
 
-    let config = TcpServerConfig::default();
+    // The reference host serves accepted connections sequentially on
+    // the listener thread, so a single client that connects and
+    // sends no bytes would otherwise block `read_line` indefinitely
+    // and starve the accept loop — a trivial single-connection DoS.
+    // Apply finite read/write timeouts so misbehaved peers can never
+    // hold the listener.
+    let config = TcpServerConfig::default().with_timeouts(
+        IoTimeouts::default()
+            .with_read(Some(Duration::from_secs(10)))
+            .with_write(Some(Duration::from_secs(10))),
+    );
     let stats = serve_tcp_listener(listener, &mut core, &config, &shutdown)
         .context("netbat::serve_tcp_listener")?;
 

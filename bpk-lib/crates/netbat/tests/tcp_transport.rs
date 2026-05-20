@@ -350,6 +350,70 @@ fn connect_and_close_does_not_kill_the_listener() {
 }
 
 #[test]
+fn line_too_long_closes_connection_to_keep_framing_synchronized() {
+    // REGRESSION (Codex P2): read_line returns LineTooLong as soon as
+    // the buffer overflows `max_line_bytes`, without consuming through
+    // the terminating `\n`. The unread tail is still on the wire — if
+    // the connection loop kept iterating on `max_requests_per_connection
+    // > 1`, the next read would start MID-FRAME and either re-emit
+    // garbage ERR responses or mis-decode a fragment of the truncated
+    // line as a fresh frame. Now we close the connection after a
+    // LineTooLong: the ERR frame is delivered, the failure is counted,
+    // and the framing window resyncs on the next CONNECTION (the only
+    // safe boundary after a truncated line).
+    let listener = localhost_listener();
+    let addr = listener.local_addr().expect("listener addr");
+    let shutdown = nb::ShutdownHandle::new();
+    let server_shutdown = shutdown.clone();
+
+    let tiny_limits = nb::Limits::default().with_max_line_bytes(32);
+    let config = nb::TcpServerConfig::default()
+        .with_limits(tiny_limits)
+        .with_max_connections(1)
+        .with_max_requests_per_connection(5);
+    let handle = spawn_server("netbat-line-too-long", listener, config, server_shutdown);
+
+    // First "line" overflows the 32-byte cap before any newline. The
+    // trailing bytes after the overflow point would, under the old
+    // behavior, get re-parsed as a fresh request on the same
+    // connection.
+    let oversize_then_pipelined =
+        b"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA-NETBAT/1 CALL ping 6869\n";
+    let mut stream = connect_client(addr);
+    stream
+        .write_all(oversize_then_pipelined)
+        .expect("write oversize line");
+
+    let mut response = String::new();
+    BufReader::new(&stream)
+        .read_line(&mut response)
+        .expect("read first response");
+    assert!(
+        response.starts_with("ERR line_too_long "),
+        "expected line_too_long; got {response:?}",
+    );
+
+    // Server must close after the ERR. A read on a closed connection
+    // returns 0 bytes (Ok(0)) or a connection-aborted error; either
+    // way, no further response frame follows on this socket.
+    let mut tail = String::new();
+    let _ = BufReader::new(stream).read_line(&mut tail);
+    assert!(
+        tail.is_empty(),
+        "server must close after LineTooLong; got trailing bytes {tail:?}",
+    );
+
+    shutdown.shutdown();
+    let stats = handle.join().expect("server thread joins");
+    assert_eq!(stats.accepted_connections, 1);
+    assert_eq!(stats.served_requests, 0);
+    assert_eq!(stats.failed_requests, 1);
+    assert_eq!(stats.limit_failures, 1);
+    assert_eq!(stats.malformed_requests, 0);
+    assert_eq!(stats.runtime_failures, 0);
+}
+
+#[test]
 fn peer_close_mid_response_does_not_kill_the_listener() {
     // REGRESSION: previously, `serve_stream`'s `stream.write_all(...)?`
     // would propagate BrokenPipe / ConnectionReset on the response

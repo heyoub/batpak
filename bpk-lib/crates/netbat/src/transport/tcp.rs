@@ -302,6 +302,22 @@ fn serve_connection_loop<S: Read + Write>(
                 tracing::debug!("connection torn down by peer IO error");
                 return Ok(());
             }
+            // LineTooLong cuts off the request line mid-stream — the
+            // unread bytes from `max_line_bytes + 1` onwards remain on
+            // the wire and are NOT followed by a fresh frame boundary.
+            // Continuing this connection would re-parse that garbage as
+            // the next request and emit a cascade of ERR frames or
+            // worse, mis-frame on subsequent newlines. Record the
+            // failure (ERR was already written by serve_stream) and
+            // drop the connection so framing stays synchronized on
+            // persistent sessions. PROVES: tcp_transport.rs ::
+            // line_too_long_closes_connection_to_keep_framing_synchronized.
+            Err(error @ NetbatError::LineTooLong { .. }) => {
+                stats.failed_requests += 1;
+                record_request_failure(stats, &error);
+                tracing::debug!("closing connection after LineTooLong to resync framing");
+                return Ok(());
+            }
             Err(error) => {
                 stats.failed_requests += 1;
                 record_request_failure(stats, &error);
