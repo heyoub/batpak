@@ -132,14 +132,15 @@ pub(crate) fn ensure_unique_ids<'a>(
     Ok(())
 }
 
-pub(crate) fn check_command(program: &str, args: &[&str]) -> Result<()> {
-    ensure(
-        command_exists(program, args),
-        format!(
-            "required command missing or failing: {program} {}",
-            args.join(" ")
-        ),
-    )
+pub(crate) fn missing_commands<'a, I>(commands: I) -> Vec<String>
+where
+    I: IntoIterator<Item = (&'a str, &'a [&'a str])>,
+{
+    commands
+        .into_iter()
+        .filter(|(program, args)| !command_exists(program, args))
+        .map(|(program, args)| format!("{program} {}", args.join(" ")))
+        .collect()
 }
 
 pub(crate) fn command_exists(program: &str, args: &[&str]) -> bool {
