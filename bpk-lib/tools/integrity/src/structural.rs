@@ -22,11 +22,49 @@ pub(crate) fn run() -> Result<()> {
     harness_lints::check(&repo_root, &tracked_files)?;
     invariant_bridge::check(&repo_root, &tracked_files)?;
     check_no_dead_code_silencers(&repo_root)?;
+    check_no_placeholder_runtime_macros(&repo_root)?;
     check_allow_justifications(&repo_root)?;
     public_surface::check(&repo_root)?;
     ci_parity::check(&repo_root)?;
     store_pub_fn_coverage::check(&repo_root)?;
     println!("structural-check: ok");
+    Ok(())
+}
+
+fn check_no_placeholder_runtime_macros(repo_root: &Path) -> Result<()> {
+    let mut paths = rust_files(&core_src_root(repo_root));
+    paths.extend(rust_files(&repo_root.join("tools/xtask/src")));
+    paths.extend(rust_files(&repo_root.join("tools/integrity/src")));
+    paths.extend(rust_files(&repo_root.join("crates/macros/src")));
+    paths.extend(rust_files(&repo_root.join("crates/macros-support/src")));
+    paths.push(repo_root.join("crates/core/build.rs"));
+
+    for path in paths {
+        let rel = relative(repo_root, &path);
+        let content = fs::read_to_string(&path)?;
+        for (line_no, line) in content.lines().enumerate() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("//") {
+                continue;
+            }
+            for needle in [
+                "to".to_owned() + "do!(",
+                "unimplemented".to_owned() + "!(",
+                "d".to_owned() + "bg!(",
+            ] {
+                if line.contains(&needle) {
+                    bail!(
+                        "structural-check: disallowed placeholder/debug macro `{}` in {}:{}.\n\
+                         Remove the macro and implement explicit behavior or diagnostics.\n\
+                         See INV-BUILD-FAIL-FAST and INV-TRACEABILITY-COMPLETE.",
+                        needle,
+                        rel,
+                        line_no + 1
+                    );
+                }
+            }
+        }
+    }
     Ok(())
 }
 
