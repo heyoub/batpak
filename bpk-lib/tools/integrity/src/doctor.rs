@@ -1,4 +1,4 @@
-use crate::repo_surface::{check_command, command_exists, ensure, repo_root};
+use crate::repo_surface::{command_exists, ensure, missing_commands, repo_root};
 use anyhow::{Context, Result};
 use std::fs;
 use std::path::Path;
@@ -19,16 +19,26 @@ pub(crate) fn run(strict: bool) -> Result<()> {
         )?;
     }
 
-    check_command("git", &["--version"])?;
-    check_command("rustc", &["--version"])?;
-    check_command("cargo", &["--version"])?;
-    check_command("cargo", &["fmt", "--version"])?;
-    check_command("cargo", &["clippy", "--version"])?;
-    check_command("cargo", &["deny", "--version"])?;
-    check_command("cargo", &["audit", "--version"])?;
-    check_command("cargo", &["nextest", "--version"])?;
-    check_command("cargo", &["llvm-cov", "--version"])?;
-    check_command("cargo", &["mutants", "--version"])?;
+    let required_commands: [(&str, &[&str]); 10] = [
+        ("git", &["--version"]),
+        ("rustc", &["--version"]),
+        ("cargo", &["--version"]),
+        ("cargo", &["fmt", "--version"]),
+        ("cargo", &["clippy", "--version"]),
+        ("cargo", &["deny", "--version"]),
+        ("cargo", &["audit", "--version"]),
+        ("cargo", &["nextest", "--version"]),
+        ("cargo", &["llvm-cov", "--version"]),
+        ("cargo", &["mutants", "--version"]),
+    ];
+    let missing = missing_commands(required_commands);
+    ensure(
+        missing.is_empty(),
+        format!(
+            "required developer commands missing or failing: {}. Run `cargo xtask setup --install-tools` in `bpk-lib/`.",
+            missing.join(", ")
+        ),
+    )?;
 
     let in_container = Path::new("/.dockerenv").exists() || std::env::var("DEVCONTAINER").is_ok();
     if strict && !in_container {
