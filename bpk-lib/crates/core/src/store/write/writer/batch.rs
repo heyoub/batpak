@@ -205,10 +205,7 @@ impl WriterState<'_> {
                 )
                 .map_err(|e| batch_failed(idx, BatchFailureStage::Validation, e))?;
 
-            #[cfg(feature = "blake3")]
             let event_hash = crate::event::hash::compute_hash(item.payload_bytes());
-            #[cfg(not(feature = "blake3"))]
-            let event_hash = [0u8; 32];
 
             state.prev_hash = event_hash;
             state.next_clock =
@@ -335,6 +332,12 @@ impl WriterState<'_> {
         prepared: &PreparedBatch,
         fence: Option<&mut FenceLedger>,
     ) -> Result<Vec<AppendReceipt>, StoreError> {
+        debug_assert_eq!(
+            prepared.len(),
+            prepared.items().len(),
+            "PreparedBatch::len must equal items().len(); writer derives sequence \
+             reservation, commit marker offset, and publish span from it"
+        );
         debug_assert_eq!(
             prepared.total_bytes(),
             prepared

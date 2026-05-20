@@ -135,10 +135,8 @@ pub(crate) fn check(repo_root: &Path) -> Result<()> {
         "features",
         &[
             "",
-            "--features blake3",
             "--features dangerous-test-hooks",
             "--no-default-features",
-            "--no-default-features --features blake3",
             "--no-default-features --features dangerous-test-hooks",
             "--all-features",
         ],

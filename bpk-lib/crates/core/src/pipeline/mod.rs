@@ -42,7 +42,7 @@ pub struct CommitMetadata {
     event_id: u128,
     /// Monotonically increasing sequence number within the stream.
     sequence: u64,
-    /// Content hash of the committed payload (blake3, or all-zeros if feature is off).
+    /// Content hash of the committed payload (blake3).
     hash: [u8; 32],
     /// True when this metadata describes the genesis marker. Genesis metadata
     /// is an explicit marker; sequence `0` is also a legitimate store-assigned

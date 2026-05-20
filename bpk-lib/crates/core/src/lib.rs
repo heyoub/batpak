@@ -141,5 +141,5 @@ compile_error!(
 #[cfg(feature = "sha256")]
 compile_error!(
     "INVARIANT 5: blake3 is the only hash. No HashAlgorithm enum. \
-     One function: compute_hash(bytes) -> [u8; 32], behind feature = blake3."
+     One function: compute_hash(bytes) -> [u8; 32], blake3 is a mandatory dependency."
 );

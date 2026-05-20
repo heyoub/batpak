@@ -110,7 +110,6 @@ fn schema_snapshot_version_mismatch_is_explicit() -> TestResult {
     Ok(())
 }
 
-#[cfg(feature = "blake3")]
 #[test]
 fn schema_snapshot_from_bytes_hashes_input_bytes() -> TestResult {
     let snap = SchemaSnapshot::from_bytes("event.bytes.v1", b"{schema}", b"{fixture}");

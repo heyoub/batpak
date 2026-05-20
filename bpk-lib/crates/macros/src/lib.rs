@@ -205,11 +205,19 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
         .ok_or_else(|| syn::Error::new(attr.span(), "`#[batpak(...)]` requires `type_id = N`"))?;
 
     // ─── Value validation: parse wide, then narrow + check reserved ranges ──
+    // The local guards reject values outside the narrow integer width so the
+    // `as u8` / `as u16` casts cannot silently truncate. The actual 4-bit /
+    // 12-bit + reserved-value constraint lives in `validate_category` /
+    // `validate_type_id` below; surface both in the error so a caller writing
+    // `category = 0x100` is not told to "fit in 4 bits" without context.
     let category_u64: u64 = category_lit.base10_parse()?;
     if category_u64 > u64::from(u8::MAX) {
         return Err(syn::Error::new(
             category_lit.span(),
-            "category must fit in 4 bits (0x1–0xF, excluding 0x0 and 0xD)",
+            format!(
+                "category {category_u64:#x} exceeds u8 range; \
+                 category must fit in 4 bits (0x1–0xF, excluding 0x0 and 0xD)"
+            ),
         ));
     }
     // justifies: INV-MACRO-BOUNDED-CAST; narrowing u64 to u8 is bounds-checked by the u8::MAX comparison on the preceding lines in crates/macros/src/lib.rs so truncation cannot occur here.
@@ -223,7 +231,10 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     if type_id_u64 > u64::from(u16::MAX) {
         return Err(syn::Error::new(
             type_id_lit.span(),
-            "type_id must fit in 12 bits (0x000–0xFFF)",
+            format!(
+                "type_id {type_id_u64:#x} exceeds u16 range; \
+                 type_id must fit in 12 bits (0x000–0xFFF)"
+            ),
         ));
     }
     // justifies: INV-MACRO-BOUNDED-CAST; narrowing u64 to u16 is bounds-checked by the u16::MAX comparison on the preceding lines in crates/macros/src/lib.rs so truncation cannot occur here.

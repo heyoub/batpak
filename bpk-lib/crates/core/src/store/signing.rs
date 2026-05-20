@@ -120,6 +120,13 @@ impl ReceiptSigningRegistry {
         kind: EventKind,
         prev_hash: [u8; 32],
     ) -> bool {
+        // Sentinel-signed receipts (no signature, no key) bypass the cover
+        // rebuild: signing was either not configured or it downgraded due to
+        // a coordinate/extension encoding failure. Their validity is a
+        // property of the registry state, not of any computed cover.
+        if receipt.signature.is_none() && receipt.key_id == [0; 32] {
+            return self.verifying_keys.is_empty();
+        }
         let cover = match cover_bytes(
             {
                 use crate::id::EntityIdType;
@@ -148,6 +155,9 @@ impl ReceiptSigningRegistry {
         kind: EventKind,
         prev_hash: [u8; 32],
     ) -> bool {
+        if receipt.signature.is_none() && receipt.key_id == [0; 32] {
+            return self.verifying_keys.is_empty();
+        }
         let cover = match cover_bytes(
             {
                 use crate::id::EntityIdType;
@@ -217,8 +227,6 @@ fn downgrade_receipt_signing(receipt: &mut AppendReceipt, error: impl Into<Strin
 enum CoverBuildError {
     CoordinateEncoding(rmp_serde::encode::Error),
     ExtensionsEncoding(rmp_serde::encode::Error),
-    #[cfg(not(feature = "blake3"))]
-    Blake3Unavailable,
 }
 
 impl std::fmt::Display for CoverBuildError {
@@ -236,13 +244,6 @@ impl std::fmt::Display for CoverBuildError {
                     "extension encoding failed while building receipt cover: {error}"
                 )
             }
-            #[cfg(not(feature = "blake3"))]
-            Self::Blake3Unavailable => {
-                write!(
-                    f,
-                    "receipt signing requires the blake3 feature for cover hashing"
-                )
-            }
         }
     }
 }
@@ -250,15 +251,7 @@ impl std::fmt::Display for CoverBuildError {
 impl std::error::Error for CoverBuildError {}
 
 fn key_id_for_public_key(public_key: &[u8; 32]) -> [u8; 32] {
-    #[cfg(feature = "blake3")]
-    {
-        crate::event::hash::compute_hash(public_key)
-    }
-    #[cfg(not(feature = "blake3"))]
-    {
-        let _ = public_key;
-        [0; 32]
-    }
+    crate::event::hash::compute_hash(public_key)
 }
 
 fn cover_bytes(
@@ -284,24 +277,13 @@ fn cover_bytes(
     let extension_bytes =
         crate::canonical::to_bytes(extensions).map_err(CoverBuildError::ExtensionsEncoding)?;
     cover.extend_from_slice(&extension_bytes);
-    digest_bytes(&cover)
-}
-
-#[cfg(feature = "blake3")]
-fn digest_bytes(bytes: &[u8]) -> Result<[u8; 32], CoverBuildError> {
-    Ok(crate::event::hash::compute_hash(bytes))
-}
-
-#[cfg(not(feature = "blake3"))]
-fn digest_bytes(_bytes: &[u8]) -> Result<[u8; 32], CoverBuildError> {
-    Err(CoverBuildError::Blake3Unavailable)
+    Ok(crate::event::hash::compute_hash(&cover))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[cfg(feature = "blake3")]
     #[test]
     fn cover_bytes_separates_event_kind_category_and_type_bits() {
         let coord = Coordinate::new("receipt:cover", "scope:test").expect("coordinate");
