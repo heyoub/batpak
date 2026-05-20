@@ -218,14 +218,38 @@ jobs:
         working-directory: bpk-ts
         run: |
           rm -rf packages/generated/src packages/generated/dist
-          pnpm -w build
+          pnpm -w build || true
           pnpm --filter @batpak/codegen run generate
           pnpm -w build
-          if [ -n "$(git status --porcelain packages/generated)" ]; then
-            echo "Codegen is non-deterministic. Differences:"
-            git diff packages/generated
+          STATUS=$(git status --porcelain packages/generated)
+          if [ -n "$STATUS" ]; then
+            echo "::error title=Codegen non-deterministic::see step output for diff"
+            echo "=== git status --porcelain packages/generated ==="
+            echo "$STATUS"
+            echo "=== git diff --no-color packages/generated ==="
+            git --no-pager diff --no-color packages/generated
+            echo "=== git diff -- packages/generated/src/manifest.ts ==="
+            git --no-pager diff --no-color -- packages/generated/src/manifest.ts | head -200
+            echo "=== md5sums of generated/src ==="
+            find packages/generated/src -type f -exec md5sum {} \;
+            echo "=== first 20 lines of each generated/src file ==="
+            for f in packages/generated/src/*.ts; do
+              echo "--- $f ---"
+              head -20 "$f"
+            done
             exit 1
           fi
+          echo "determinism gate: ok"
+      - name: Upload generated artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ts-parity-generated-debug
+          path: |
+            bpk-ts/packages/generated/
+            bpk-ts/batpak.manifest.json
+          if-no-files-found: warn
+          retention-days: 7
 
   mutants:
     # Mutation testing smoke run — repo-owned representative shards.
