@@ -13,6 +13,7 @@ import { encodeHex } from "@batpak/canonical";
 import {
   encodeRequest,
   FrameValidationError,
+  isKnownNetbatErrorCode,
   parseRequestFrame,
   parseResponseFrame,
   validateOperationName,
@@ -158,9 +159,30 @@ describe("parseResponseFrame", () => {
     expect(parsed.message).toBe(message);
   });
 
-  it("rejects ERR frames carrying an unknown code", () => {
-    expect(() => parseResponseFrame(utf8("ERR not_a_real_code 626f6f6d\n"))).toThrow(
-      /unknown code/,
+  it("accepts ERR frames with unknown codes for forward compatibility", () => {
+    // The Rust side promotes its error vocabulary forward (e.g.
+    // netbat::transport::error.rs::Self::Runtime(_) catch-all emits
+    // "runtime" when syncbat::RuntimeError gains a variant). A newer
+    // server can legitimately emit a code this client doesn't know
+    // yet. parseResponseFrame surfaces it as a typed NetbatError so
+    // callers can handle it, rather than rejecting the frame as
+    // malformed.
+    const parsed = parseResponseFrame(utf8("ERR future_only_code 626f6f6d\n"));
+    expect(parsed.kind).toBe("netbat-error");
+    if (parsed.kind !== "netbat-error") return;
+    expect(parsed.code).toBe("future_only_code");
+    expect(parsed.message).toBe("boom");
+    // The code is NOT in the known set, but the type still admits it
+    // (NetbatErrorCode = KnownNetbatErrorCode | (string & {})).
+    expect(isKnownNetbatErrorCode(parsed.code)).toBe(false);
+  });
+
+  it("rejects ERR frames whose code contains illegal characters", () => {
+    // The forward-compat path still enforces a token-shape sanity
+    // check (ASCII [A-Za-z0-9_]+). A spaceless garbage code with a
+    // dot or dash slips, but spaces / non-ASCII garbage doesn't.
+    expect(() => parseResponseFrame(utf8("ERR bad-code 626f6f6d\n"))).toThrow(
+      /ill-formed code/,
     );
   });
 

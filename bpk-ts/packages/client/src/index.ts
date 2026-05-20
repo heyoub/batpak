@@ -47,7 +47,17 @@ export type OperationName = string & { readonly __brand: "OperationName" };
 
 const OPERATION_NAME_PATTERN = /^[A-Za-z0-9._-]+$/u;
 
-/** All NETBAT/1 error codes emitted by `netbat::NetbatError::code()`. */
+/**
+ * Known NETBAT/1 error codes emitted by `netbat::NetbatError::code()`.
+ *
+ * The Rust side promotes the union forward (e.g. the `Runtime(_)`
+ * catch-all over a `#[non_exhaustive]` syncbat::RuntimeError emits the
+ * generic `"runtime"` code when a newer server gains a variant that
+ * the wire vocabulary hasn't yet named). For forward-compat,
+ * `parseResponseFrame` accepts ANY code string the server sends and
+ * exposes it as the typed `NetbatErrorCode` union OR as a string via
+ * the `KnownNetbatErrorCode | (string & {})` pattern below.
+ */
 export const NETBAT_ERROR_CODES = [
   "io",
   "empty_stream",
@@ -61,8 +71,25 @@ export const NETBAT_ERROR_CODES = [
   "missing_handler",
   "handler",
   "receipt_sink",
+  // Generic forward-compat token emitted by the netbat
+  // Self::Runtime(_) catch-all when syncbat::RuntimeError gains a
+  // variant that this vocabulary doesn't yet name. Keep in sync with
+  // bpk-lib/crates/netbat/src/transport/error.rs::NetbatError::code.
+  "runtime",
 ] as const;
-export type NetbatErrorCode = (typeof NETBAT_ERROR_CODES)[number];
+
+/** Known NETBAT/1 error codes — exhaustive at the current wire version. */
+export type KnownNetbatErrorCode = (typeof NETBAT_ERROR_CODES)[number];
+
+/**
+ * NETBAT/1 error code as it appears on the wire. Known values are
+ * surfaced via the {@link KnownNetbatErrorCode} union for autocomplete
+ * and exhaustive-match; the `(string & {})` carve-out keeps the type
+ * forward-compatible — a newer server can emit a code we don't know
+ * yet, and we surface it as a typed `NetbatError` rather than
+ * rejecting it as a `FrameValidationError`.
+ */
+export type NetbatErrorCode = KnownNetbatErrorCode | (string & {});
 
 export interface NetbatError {
   readonly kind: "netbat-error";
@@ -288,10 +315,18 @@ export function parseResponseFrame(line: Uint8Array): NetbatResponse {
     }
     const codeRaw = remainder.slice(0, spaceIdx);
     const hex = remainder.slice(spaceIdx + 1);
-    if (!isNetbatErrorCode(codeRaw)) {
+    // Forward-compat: don't reject unknown codes. A newer server (or
+    // a netbat Self::Runtime(_) catch-all firing on a syncbat
+    // RuntimeError variant this client doesn't know yet) will emit
+    // codes outside KnownNetbatErrorCode. Surface them as a typed
+    // NetbatError so callers handle the failure rather than seeing a
+    // "malformed_request" FrameValidationError. A bare token-format
+    // sanity check (non-empty + ASCII graphic, matching the Rust
+    // `code()` shape) keeps total garbage out.
+    if (codeRaw.length === 0 || /[^A-Za-z0-9_]/u.test(codeRaw)) {
       throw new FrameValidationError(
         "malformed_request",
-        `ERR frame carries unknown code ${JSON.stringify(codeRaw)} (expected one of ${NETBAT_ERROR_CODES.join(", ")})`,
+        `ERR frame carries ill-formed code ${JSON.stringify(codeRaw)} (expected ASCII [A-Za-z0-9_]+)`,
       );
     }
     const messageBytes = decodeHex(hex);
@@ -306,7 +341,13 @@ export function parseResponseFrame(line: Uint8Array): NetbatResponse {
   );
 }
 
-function isNetbatErrorCode(value: string): value is NetbatErrorCode {
+/**
+ * Type-guard that narrows an arbitrary string to one of the known
+ * NETBAT/1 codes. Useful for exhaustive switch dispatch: callers can
+ * branch on known cases and fall through unknown ones into a generic
+ * handler.
+ */
+export function isKnownNetbatErrorCode(value: string): value is KnownNetbatErrorCode {
   for (const code of NETBAT_ERROR_CODES) {
     if (code === value) return true;
   }
