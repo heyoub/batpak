@@ -77,12 +77,16 @@ pub(crate) fn latest_segment_watermark(data_dir: &Path) -> Result<(u64, u64), St
         if !is_segment {
             continue;
         }
-        let Some(segment_id) = path
-            .file_stem()
-            .and_then(|stem| stem.to_str())
-            .and_then(|stem| stem.parse::<u64>().ok())
-        else {
-            continue;
+        let segment_id = match crate::store::segment::SegmentId::from_filename(&path) {
+            Ok(parsed) => parsed.as_u64(),
+            Err(error) => {
+                tracing::warn!(
+                    path = %path.display(),
+                    %error,
+                    "skipping malformed segment filename"
+                );
+                continue;
+            }
         };
         if max
             .as_ref()

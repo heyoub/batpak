@@ -58,15 +58,16 @@ impl<'a> VisibilityFence<'a> {
         coord: &Coordinate,
         kind: EventKind,
         payload: &impl Serialize,
-        correlation_id: u128,
-        causation_id: u128,
+        correlation_id: crate::id::CorrelationId,
+        causation_id: crate::id::CausationId,
     ) -> Result<AppendTicket, StoreError> {
+        use crate::id::EntityIdType;
         self.store.submit_reaction_with_fence(
             coord,
             kind,
             payload,
-            correlation_id,
-            causation_id,
+            correlation_id.as_u128(),
+            causation_id.as_u128(),
             self.token,
         )
     }
@@ -93,8 +94,8 @@ impl<'a> VisibilityFence<'a> {
         &self,
         coord: &Coordinate,
         payload: &T,
-        correlation_id: u128,
-        causation_id: u128,
+        correlation_id: crate::id::CorrelationId,
+        causation_id: crate::id::CausationId,
     ) -> Result<AppendTicket, StoreError> {
         self.submit_reaction(coord, T::KIND, payload, correlation_id, causation_id)
     }

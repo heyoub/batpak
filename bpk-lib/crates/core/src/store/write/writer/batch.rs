@@ -86,10 +86,11 @@ impl WriterState<'_> {
         let mut keyed_count = 0usize;
         for (idx, item) in items.iter().enumerate() {
             if let Some(key) = item.options().idempotency_key {
+                use crate::id::EntityIdType;
                 keyed_count += 1;
-                if let Some(entry) = self.index.get_by_id(key) {
+                if let Some(entry) = self.index.get_by_id(key.as_u128()) {
                     let mut receipt = AppendReceipt {
-                        event_id: entry.event_id,
+                        event_id: crate::id::EventId::from(entry.event_id),
                         sequence: entry.global_sequence,
                         disk_pos: entry.disk_pos,
                         content_hash: entry.hash_chain.event_hash,
@@ -188,16 +189,20 @@ impl WriterState<'_> {
             let clock = state.next_clock;
             let wall_ms = now_ms.max(state.last_wall_ms);
 
+            use crate::id::EntityIdType;
             let event_id = item
                 .options()
                 .idempotency_key
+                .map(|k| k.as_u128())
                 .unwrap_or_else(|| crate::id::generate_v7_id_with_clock(self.runtime.clock()));
 
             let causation_id = item
                 .causation()
-                .resolve(item.options().causation_id, idx, |prior_idx| {
-                    computed[prior_idx].event_id()
-                })
+                .resolve(
+                    item.options().causation_id.map(|id| id.as_u128()),
+                    idx,
+                    |prior_idx| computed[prior_idx].event_id(),
+                )
                 .map_err(|e| batch_failed(idx, BatchFailureStage::Validation, e))?;
 
             #[cfg(feature = "blake3")]
@@ -221,7 +226,10 @@ impl WriterState<'_> {
             });
             let meta = StagedCommitMeta::new(
                 event_id,
-                item.options().correlation_id.unwrap_or(event_id),
+                item.options()
+                    .correlation_id
+                    .map(|id| id.as_u128())
+                    .unwrap_or(event_id),
                 causation_id,
                 item.kind(),
                 global_seq,
@@ -472,7 +480,7 @@ impl WriterState<'_> {
                 .map_err(|e| batch_failed(idx, BatchFailureStage::Encoding, e))?;
 
             let mut receipt = AppendReceipt {
-                event_id: staged.event_id(),
+                event_id: crate::id::EventId::from(staged.event_id()),
                 sequence: staged.global_sequence(),
                 disk_pos: DiskPos {
                     segment_id: *self.segment_id,

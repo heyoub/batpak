@@ -104,7 +104,11 @@
     - crates/syncbat/src/operation.rs
     - crates/syncbat/src/receipt.rs
     - crates/syncbat/src/register.rs
-    - crates/syncbat/src/register_store.rs
+    - crates/syncbat/src/register_store/mod.rs
+    - crates/syncbat/src/register_store/row.rs
+    - crates/syncbat/src/register_store/error.rs
+    - crates/syncbat/src/register_store/catalog.rs
+    - crates/syncbat/src/register_store/rebuild.rs
     - crates/syncbat/src/store_sink.rs
 - id: ART-SYNCBAT-TESTS
   kind: tests
@@ -128,7 +132,12 @@
   paths:
     - crates/netbat/src/lib.rs
     - crates/netbat/src/route.rs
-    - crates/netbat/src/transport.rs
+    - crates/netbat/src/transport/mod.rs
+    - crates/netbat/src/transport/error.rs
+    - crates/netbat/src/transport/frame.rs
+    - crates/netbat/src/transport/hex.rs
+    - crates/netbat/src/transport/limits.rs
+    - crates/netbat/src/transport/tcp.rs
 - id: ART-NETBAT-TESTS
   kind: tests
   paths:

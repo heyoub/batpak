@@ -395,7 +395,7 @@ fn mutable_open_appends_system_open_completed_and_read_only_does_not() {
     assert_eq!(lifecycle_entry.coord().entity(), "batpak:store");
     assert_eq!(lifecycle_entry.coord().scope(), "batpak:lifecycle");
     let stored = store
-        .get(lifecycle_entry.event_id())
+        .get(batpak::id::EventId::from(lifecycle_entry.event_id()))
         .expect("read lifecycle event payload");
     assert_eq!(
         stored.event.header.event_kind,

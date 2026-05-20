@@ -118,10 +118,10 @@ fn assert_durable_covers_recovered(store: &Store) {
 fn assert_all_receipts_recovered(store: &Store, receipts: &[AppendReceipt]) {
     let ids = event_ids(&recovered_entries(store));
     for receipt in receipts {
+        let raw = u128::from(receipt.event_id);
         assert!(
-            ids.contains(&receipt.event_id),
-            "PROPERTY: fsynced receipt {} must recover; recovered ids={ids:?}",
-            receipt.event_id
+            ids.contains(&raw),
+            "PROPERTY: fsynced receipt {raw} must recover; recovered ids={ids:?}",
         );
     }
 }

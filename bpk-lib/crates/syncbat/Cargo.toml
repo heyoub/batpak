@@ -17,10 +17,15 @@ default = []
 batpak = { path = "../core", version = "0.7.6", default-features = false }
 serde = { version = "1", features = ["derive"] }
 syncbat-macros = { path = "../syncbat-macros", version = "0.7.6" }
+# `tracing` provides structured spans + events around dispatch.
+# Subscribers come from the binary (hbat or downstream); syncbat just
+# emits. No runtime cost when no subscriber is installed.
+tracing = "0.1"
 
 [dev-dependencies]
 tempfile = ">=3.24, <3.25"
 trybuild = "1"
+proptest = "1"
 
 [lints]
 workspace = true

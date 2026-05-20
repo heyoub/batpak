@@ -31,7 +31,10 @@ where
         let Some((stored, next)) = step(store, current) else {
             break;
         };
-        let next_id = stored.event.header.event_id;
+        let next_id = {
+            use crate::id::EntityIdType;
+            stored.event.header.event_id.as_u128()
+        };
         if !visited.insert(next_id) {
             tracing::error!(
                 cycle_at = %format!("{next_id:#034x}"),

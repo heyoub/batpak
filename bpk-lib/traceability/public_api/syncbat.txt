@@ -44,7 +44,7 @@ pub struct syncbat::core::Ctx<'a>
 impl<'a> syncbat::core::Ctx<'a>
 pub fn syncbat::core::Ctx<'a>::descriptor(&self) -> &'a syncbat::operation::OperationDescriptor
 pub mod syncbat::error
-pub enum syncbat::error::BuildError
+#[non_exhaustive] pub enum syncbat::error::BuildError
 pub syncbat::error::BuildError::DuplicateHandler
 pub syncbat::error::BuildError::DuplicateHandler::name: alloc::string::String
 pub syncbat::error::BuildError::DuplicateOperation
@@ -73,7 +73,7 @@ pub fn syncbat::error::BuildError::missing_handler(name: impl core::convert::Int
 impl core::error::Error for syncbat::error::BuildError
 impl core::fmt::Display for syncbat::error::BuildError
 pub fn syncbat::error::BuildError::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-pub enum syncbat::error::RuntimeError
+#[non_exhaustive] pub enum syncbat::error::RuntimeError
 pub syncbat::error::RuntimeError::Handler
 pub syncbat::error::RuntimeError::Handler::code: alloc::string::String
 pub syncbat::error::RuntimeError::Handler::message: alloc::string::String
@@ -95,7 +95,7 @@ pub fn syncbat::error::RuntimeError::unknown_operation(name: impl core::convert:
 impl core::error::Error for syncbat::error::RuntimeError
 impl core::fmt::Display for syncbat::error::RuntimeError
 pub fn syncbat::error::RuntimeError::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-pub struct syncbat::error::ReceiptSinkHandlerCause
+#[non_exhaustive] pub struct syncbat::error::ReceiptSinkHandlerCause
 pub syncbat::error::ReceiptSinkHandlerCause::code: alloc::string::String
 pub syncbat::error::ReceiptSinkHandlerCause::message: alloc::string::String
 impl syncbat::error::ReceiptSinkHandlerCause
@@ -103,7 +103,7 @@ pub fn syncbat::error::ReceiptSinkHandlerCause::code(&self) -> &str
 pub fn syncbat::error::ReceiptSinkHandlerCause::message(&self) -> &str
 pub fn syncbat::error::ReceiptSinkHandlerCause::new(code: impl core::convert::Into<alloc::string::String>, message: impl core::convert::Into<alloc::string::String>) -> Self
 pub mod syncbat::handler
-pub enum syncbat::handler::HandlerError
+#[non_exhaustive] pub enum syncbat::handler::HandlerError
 pub syncbat::handler::HandlerError::Failed(alloc::string::String)
 pub syncbat::handler::HandlerError::InvalidInput(alloc::string::String)
 impl syncbat::handler::HandlerError
@@ -173,6 +173,28 @@ pub const syncbat::operation::MAX_DESCRIPTOR_REF_BYTES: usize
 pub const syncbat::operation::MAX_OPERATION_NAME_BYTES: usize
 pub type syncbat::operation::OperationInput = alloc::vec::Vec<u8>
 pub type syncbat::operation::OperationOutput = alloc::vec::Vec<u8>
+pub mod syncbat::operation_name
+#[non_exhaustive] pub enum syncbat::operation_name::OperationNameError
+pub syncbat::operation_name::OperationNameError::ConsecutiveDots
+pub syncbat::operation_name::OperationNameError::Empty
+pub syncbat::operation_name::OperationNameError::IllegalCharacter
+pub syncbat::operation_name::OperationNameError::IllegalCharacter::byte: u8
+pub syncbat::operation_name::OperationNameError::LeadingOrTrailingDot
+pub syncbat::operation_name::OperationNameError::TooLong
+pub syncbat::operation_name::OperationNameError::TooLong::len: usize
+pub syncbat::operation_name::OperationNameError::TooLong::max: usize
+impl core::error::Error for syncbat::operation_name::OperationNameError
+impl core::fmt::Display for syncbat::operation_name::OperationNameError
+pub fn syncbat::operation_name::OperationNameError::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct syncbat::operation_name::OperationName(_)
+impl syncbat::operation_name::OperationName
+pub const syncbat::operation_name::OperationName::MAX_BYTES: usize
+pub fn syncbat::operation_name::OperationName::as_str(&self) -> &str
+pub fn syncbat::operation_name::OperationName::new(value: impl core::convert::Into<alloc::sync::Arc<str>>) -> core::result::Result<Self, syncbat::operation_name::OperationNameError>
+impl core::convert::AsRef<str> for syncbat::operation_name::OperationName
+pub fn syncbat::operation_name::OperationName::as_ref(&self) -> &str
+impl core::fmt::Display for syncbat::operation_name::OperationName
+pub fn syncbat::operation_name::OperationName::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub mod syncbat::receipt
 #[non_exhaustive] pub enum syncbat::receipt::ReceiptHashPolicy
 pub syncbat::receipt::ReceiptHashPolicy::Deferred
@@ -194,7 +216,7 @@ pub fn syncbat::receipt::ReceiptOutcome::denied(code: impl core::convert::Into<a
 pub fn syncbat::receipt::ReceiptOutcome::failed(code: impl core::convert::Into<alloc::string::String>, message: impl core::convert::Into<alloc::string::String>) -> Self
 #[non_exhaustive] pub struct syncbat::receipt::BatpakReceiptFields
 pub syncbat::receipt::BatpakReceiptFields::content_hash: syncbat::receipt::ReceiptHash
-pub syncbat::receipt::BatpakReceiptFields::event_id: u128
+pub syncbat::receipt::BatpakReceiptFields::event_id: batpak::id::EventId
 pub syncbat::receipt::BatpakReceiptFields::extensions: alloc::collections::btree::map::BTreeMap<batpak::store::append::ExtensionKey, batpak::store::append::EncodedBytes>
 pub syncbat::receipt::BatpakReceiptFields::key_id: syncbat::receipt::ReceiptHash
 pub syncbat::receipt::BatpakReceiptFields::sequence: u64
@@ -291,8 +313,8 @@ pub syncbat::register_store::RegisterOperationActionV1::Delete
 pub syncbat::register_store::RegisterOperationActionV1::Put
 pub syncbat::register_store::RegisterOperationActionV1::Supersede
 pub syncbat::register_store::RegisterOperationActionV1::Update
-impl syncbat::register_store::RegisterOperationActionV1
-pub const fn syncbat::register_store::RegisterOperationActionV1::as_str(self) -> &'static str
+impl syncbat::RegisterOperationActionV1
+pub const fn syncbat::RegisterOperationActionV1::as_str(self) -> &'static str
 #[non_exhaustive] pub enum syncbat::register_store::StoreRegisterCatalogError
 pub syncbat::register_store::StoreRegisterCatalogError::CatalogConflict
 pub syncbat::register_store::StoreRegisterCatalogError::CatalogConflict::action: alloc::string::String
@@ -312,14 +334,14 @@ pub syncbat::register_store::StoreRegisterCatalogError::InvalidSchemaVersion
 pub syncbat::register_store::StoreRegisterCatalogError::InvalidSchemaVersion::version: u16
 pub syncbat::register_store::StoreRegisterCatalogError::Register(syncbat::register::RegisterValidationError)
 pub syncbat::register_store::StoreRegisterCatalogError::Store(batpak::store::error::StoreError)
-impl core::convert::From<batpak::event::decode::TypedDecodeError> for syncbat::register_store::StoreRegisterCatalogError
-pub fn syncbat::register_store::StoreRegisterCatalogError::from(error: batpak::event::decode::TypedDecodeError) -> Self
-impl core::convert::From<batpak::store::error::StoreError> for syncbat::register_store::StoreRegisterCatalogError
-pub fn syncbat::register_store::StoreRegisterCatalogError::from(error: batpak::store::error::StoreError) -> Self
-impl core::error::Error for syncbat::register_store::StoreRegisterCatalogError
-pub fn syncbat::register_store::StoreRegisterCatalogError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
-impl core::fmt::Display for syncbat::register_store::StoreRegisterCatalogError
-pub fn syncbat::register_store::StoreRegisterCatalogError::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::convert::From<batpak::event::decode::TypedDecodeError> for syncbat::StoreRegisterCatalogError
+pub fn syncbat::StoreRegisterCatalogError::from(error: batpak::event::decode::TypedDecodeError) -> Self
+impl core::convert::From<batpak::store::error::StoreError> for syncbat::StoreRegisterCatalogError
+pub fn syncbat::StoreRegisterCatalogError::from(error: batpak::store::error::StoreError) -> Self
+impl core::error::Error for syncbat::StoreRegisterCatalogError
+pub fn syncbat::StoreRegisterCatalogError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Display for syncbat::StoreRegisterCatalogError
+pub fn syncbat::StoreRegisterCatalogError::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct syncbat::register_store::RegisterOperationRowV1
 pub syncbat::register_store::RegisterOperationRowV1::action: alloc::string::String
 pub syncbat::register_store::RegisterOperationRowV1::effect: alloc::string::String
@@ -330,24 +352,24 @@ pub syncbat::register_store::RegisterOperationRowV1::receipt_kind: alloc::string
 pub syncbat::register_store::RegisterOperationRowV1::schema_version: u16
 pub syncbat::register_store::RegisterOperationRowV1::supersedes: core::option::Option<alloc::string::String>
 pub syncbat::register_store::RegisterOperationRowV1::title: core::option::Option<alloc::string::String>
-impl syncbat::register_store::RegisterOperationRowV1
-pub fn syncbat::register_store::RegisterOperationRowV1::delete(name: impl core::convert::Into<alloc::string::String>) -> Self
-pub fn syncbat::register_store::RegisterOperationRowV1::from_descriptor(descriptor: &syncbat::operation::OperationDescriptor) -> Self
-pub fn syncbat::register_store::RegisterOperationRowV1::supersede(superseded_name: impl core::convert::Into<alloc::string::String>, descriptor: &syncbat::operation::OperationDescriptor) -> Self
-pub fn syncbat::register_store::RegisterOperationRowV1::update(descriptor: &syncbat::operation::OperationDescriptor) -> Self
-impl batpak::event::payload::EventPayload for syncbat::register_store::RegisterOperationRowV1
-pub const syncbat::register_store::RegisterOperationRowV1::KIND: batpak::event::kind::EventKind
+impl syncbat::RegisterOperationRowV1
+pub fn syncbat::RegisterOperationRowV1::delete(name: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn syncbat::RegisterOperationRowV1::from_descriptor(descriptor: &syncbat::operation::OperationDescriptor) -> Self
+pub fn syncbat::RegisterOperationRowV1::supersede(superseded_name: impl core::convert::Into<alloc::string::String>, descriptor: &syncbat::operation::OperationDescriptor) -> Self
+pub fn syncbat::RegisterOperationRowV1::update(descriptor: &syncbat::operation::OperationDescriptor) -> Self
+impl batpak::event::payload::EventPayload for syncbat::RegisterOperationRowV1
+pub const syncbat::RegisterOperationRowV1::KIND: batpak::event::kind::EventKind
 pub struct syncbat::register_store::StoreRegisterCatalog
-impl syncbat::register_store::StoreRegisterCatalog
-pub fn syncbat::register_store::StoreRegisterCatalog::delete_operation(&self, name: impl core::convert::AsRef<str>) -> core::result::Result<batpak::store::append::AppendReceipt, syncbat::register_store::StoreRegisterCatalogError>
-pub fn syncbat::register_store::StoreRegisterCatalog::new(store: alloc::sync::Arc<batpak::store::Store<batpak::store::Open>>, coordinate: batpak::coordinate::Coordinate) -> Self
-pub fn syncbat::register_store::StoreRegisterCatalog::persist_operation(&self, descriptor: &syncbat::operation::OperationDescriptor) -> core::result::Result<batpak::store::append::AppendReceipt, syncbat::register_store::StoreRegisterCatalogError>
-pub fn syncbat::register_store::StoreRegisterCatalog::persist_register(&self, register: &syncbat::register::Register) -> core::result::Result<alloc::vec::Vec<batpak::store::append::AppendReceipt>, syncbat::register_store::StoreRegisterCatalogError>
-pub fn syncbat::register_store::StoreRegisterCatalog::supersede_operation(&self, superseded_name: impl core::convert::AsRef<str>, descriptor: &syncbat::operation::OperationDescriptor) -> core::result::Result<batpak::store::append::AppendReceipt, syncbat::register_store::StoreRegisterCatalogError>
-pub fn syncbat::register_store::StoreRegisterCatalog::update_operation(&self, descriptor: &syncbat::operation::OperationDescriptor) -> core::result::Result<batpak::store::append::AppendReceipt, syncbat::register_store::StoreRegisterCatalogError>
-pub fn syncbat::register_store::StoreRegisterCatalog::with_options(self, options: batpak::store::append::AppendOptions) -> Self
+impl syncbat::StoreRegisterCatalog
+pub fn syncbat::StoreRegisterCatalog::delete_operation(&self, name: impl core::convert::AsRef<str>) -> core::result::Result<batpak::store::append::AppendReceipt, syncbat::StoreRegisterCatalogError>
+pub fn syncbat::StoreRegisterCatalog::new(store: alloc::sync::Arc<batpak::store::Store<batpak::store::Open>>, coordinate: batpak::coordinate::Coordinate) -> Self
+pub fn syncbat::StoreRegisterCatalog::persist_operation(&self, descriptor: &syncbat::operation::OperationDescriptor) -> core::result::Result<batpak::store::append::AppendReceipt, syncbat::StoreRegisterCatalogError>
+pub fn syncbat::StoreRegisterCatalog::persist_register(&self, register: &syncbat::register::Register) -> core::result::Result<alloc::vec::Vec<batpak::store::append::AppendReceipt>, syncbat::StoreRegisterCatalogError>
+pub fn syncbat::StoreRegisterCatalog::supersede_operation(&self, superseded_name: impl core::convert::AsRef<str>, descriptor: &syncbat::operation::OperationDescriptor) -> core::result::Result<batpak::store::append::AppendReceipt, syncbat::StoreRegisterCatalogError>
+pub fn syncbat::StoreRegisterCatalog::update_operation(&self, descriptor: &syncbat::operation::OperationDescriptor) -> core::result::Result<batpak::store::append::AppendReceipt, syncbat::StoreRegisterCatalogError>
+pub fn syncbat::StoreRegisterCatalog::with_options(self, options: batpak::store::append::AppendOptions) -> Self
 pub const syncbat::register_store::SYNCBAT_REGISTER_EVENT_KIND: batpak::event::kind::EventKind
-pub fn syncbat::register_store::rebuild_register_from_store<State>(store: &batpak::store::Store<State>, coordinate: &batpak::coordinate::Coordinate) -> core::result::Result<syncbat::register::Register, syncbat::register_store::StoreRegisterCatalogError>
+pub fn syncbat::register_store::rebuild_register_from_store<State>(store: &batpak::store::Store<State>, coordinate: &batpak::coordinate::Coordinate) -> core::result::Result<syncbat::register::Register, syncbat::StoreRegisterCatalogError>
 pub mod syncbat::store_sink
 #[non_exhaustive] pub enum syncbat::store_sink::StoreReceiptSinkError
 pub syncbat::store_sink::StoreReceiptSinkError::ExtensionKey(batpak::store::append::ExtensionKeyError)
@@ -369,7 +391,7 @@ pub fn syncbat::store_sink::StoreReceiptSink::record_typed(&self, envelope: &syn
 pub fn syncbat::store_sink::StoreReceiptSink::with_options(self, options: batpak::store::append::AppendOptions) -> Self
 impl syncbat::receipt::ReceiptSink for syncbat::store_sink::StoreReceiptSink
 pub fn syncbat::store_sink::StoreReceiptSink::record_receipt(&self, envelope: &syncbat::receipt::ReceiptEnvelope) -> core::result::Result<syncbat::receipt::RecordedReceipt, syncbat::receipt::ReceiptSinkError>
-pub enum syncbat::BuildError
+#[non_exhaustive] pub enum syncbat::BuildError
 pub syncbat::BuildError::DuplicateHandler
 pub syncbat::BuildError::DuplicateHandler::name: alloc::string::String
 pub syncbat::BuildError::DuplicateOperation
@@ -407,7 +429,7 @@ pub syncbat::EffectClass::Persist
 impl syncbat::operation::EffectClass
 pub const fn syncbat::operation::EffectClass::as_str(self) -> &'static str
 pub fn syncbat::operation::EffectClass::from_catalog_str(value: &str) -> core::option::Option<Self>
-pub enum syncbat::HandlerError
+#[non_exhaustive] pub enum syncbat::HandlerError
 pub syncbat::HandlerError::Failed(alloc::string::String)
 pub syncbat::HandlerError::InvalidInput(alloc::string::String)
 impl syncbat::handler::HandlerError
@@ -418,6 +440,18 @@ pub fn syncbat::handler::HandlerError::message(&self) -> &str
 impl core::error::Error for syncbat::handler::HandlerError
 impl core::fmt::Display for syncbat::handler::HandlerError
 pub fn syncbat::handler::HandlerError::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub enum syncbat::OperationNameError
+pub syncbat::OperationNameError::ConsecutiveDots
+pub syncbat::OperationNameError::Empty
+pub syncbat::OperationNameError::IllegalCharacter
+pub syncbat::OperationNameError::IllegalCharacter::byte: u8
+pub syncbat::OperationNameError::LeadingOrTrailingDot
+pub syncbat::OperationNameError::TooLong
+pub syncbat::OperationNameError::TooLong::len: usize
+pub syncbat::OperationNameError::TooLong::max: usize
+impl core::error::Error for syncbat::operation_name::OperationNameError
+impl core::fmt::Display for syncbat::operation_name::OperationNameError
+pub fn syncbat::operation_name::OperationNameError::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 #[non_exhaustive] pub enum syncbat::ReceiptHashPolicy
 pub syncbat::ReceiptHashPolicy::Deferred
 pub syncbat::ReceiptHashPolicy::RawBytes(alloc::sync::Arc<dyn syncbat::receipt::ReceiptHasher>)
@@ -441,8 +475,8 @@ pub syncbat::RegisterOperationActionV1::Delete
 pub syncbat::RegisterOperationActionV1::Put
 pub syncbat::RegisterOperationActionV1::Supersede
 pub syncbat::RegisterOperationActionV1::Update
-impl syncbat::register_store::RegisterOperationActionV1
-pub const fn syncbat::register_store::RegisterOperationActionV1::as_str(self) -> &'static str
+impl syncbat::RegisterOperationActionV1
+pub const fn syncbat::RegisterOperationActionV1::as_str(self) -> &'static str
 #[non_exhaustive] pub enum syncbat::RegisterValidationError
 pub syncbat::RegisterValidationError::DuplicateOperationName
 pub syncbat::RegisterValidationError::DuplicateOperationName::name: alloc::string::String
@@ -455,7 +489,7 @@ pub syncbat::RegisterValidationError::InvalidModuleName::name: alloc::string::St
 impl core::error::Error for syncbat::register::RegisterValidationError
 impl core::fmt::Display for syncbat::register::RegisterValidationError
 pub fn syncbat::register::RegisterValidationError::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-pub enum syncbat::RuntimeError
+#[non_exhaustive] pub enum syncbat::RuntimeError
 pub syncbat::RuntimeError::Handler
 pub syncbat::RuntimeError::Handler::code: alloc::string::String
 pub syncbat::RuntimeError::Handler::message: alloc::string::String
@@ -509,20 +543,20 @@ pub syncbat::StoreRegisterCatalogError::InvalidSchemaVersion
 pub syncbat::StoreRegisterCatalogError::InvalidSchemaVersion::version: u16
 pub syncbat::StoreRegisterCatalogError::Register(syncbat::register::RegisterValidationError)
 pub syncbat::StoreRegisterCatalogError::Store(batpak::store::error::StoreError)
-impl core::convert::From<batpak::event::decode::TypedDecodeError> for syncbat::register_store::StoreRegisterCatalogError
-pub fn syncbat::register_store::StoreRegisterCatalogError::from(error: batpak::event::decode::TypedDecodeError) -> Self
-impl core::convert::From<batpak::store::error::StoreError> for syncbat::register_store::StoreRegisterCatalogError
-pub fn syncbat::register_store::StoreRegisterCatalogError::from(error: batpak::store::error::StoreError) -> Self
-impl core::error::Error for syncbat::register_store::StoreRegisterCatalogError
-pub fn syncbat::register_store::StoreRegisterCatalogError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
-impl core::fmt::Display for syncbat::register_store::StoreRegisterCatalogError
-pub fn syncbat::register_store::StoreRegisterCatalogError::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::convert::From<batpak::event::decode::TypedDecodeError> for syncbat::StoreRegisterCatalogError
+pub fn syncbat::StoreRegisterCatalogError::from(error: batpak::event::decode::TypedDecodeError) -> Self
+impl core::convert::From<batpak::store::error::StoreError> for syncbat::StoreRegisterCatalogError
+pub fn syncbat::StoreRegisterCatalogError::from(error: batpak::store::error::StoreError) -> Self
+impl core::error::Error for syncbat::StoreRegisterCatalogError
+pub fn syncbat::StoreRegisterCatalogError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Display for syncbat::StoreRegisterCatalogError
+pub fn syncbat::StoreRegisterCatalogError::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub enum syncbat::SyncbatReceiptNamespace
 impl batpak::store::append::ReceiptExtensionNamespace for syncbat::SyncbatReceiptNamespace
 pub const syncbat::SyncbatReceiptNamespace::PREFIX: &'static str
 #[non_exhaustive] pub struct syncbat::BatpakReceiptFields
 pub syncbat::BatpakReceiptFields::content_hash: syncbat::receipt::ReceiptHash
-pub syncbat::BatpakReceiptFields::event_id: u128
+pub syncbat::BatpakReceiptFields::event_id: batpak::id::EventId
 pub syncbat::BatpakReceiptFields::extensions: alloc::collections::btree::map::BTreeMap<batpak::store::append::ExtensionKey, batpak::store::append::EncodedBytes>
 pub syncbat::BatpakReceiptFields::key_id: syncbat::receipt::ReceiptHash
 pub syncbat::BatpakReceiptFields::sequence: u64
@@ -613,6 +647,15 @@ pub fn syncbat::operation::OperationDescriptor::title(&self) -> core::option::Op
 pub fn syncbat::operation::OperationDescriptor::validate(&self) -> core::result::Result<(), syncbat::operation::DescriptorValidationError>
 pub fn syncbat::operation::OperationDescriptor::with_owned_title(self, title: impl core::convert::Into<alloc::string::String>) -> Self
 pub fn syncbat::operation::OperationDescriptor::with_title(self, title: &'static str) -> Self
+pub struct syncbat::OperationName(_)
+impl syncbat::operation_name::OperationName
+pub const syncbat::operation_name::OperationName::MAX_BYTES: usize
+pub fn syncbat::operation_name::OperationName::as_str(&self) -> &str
+pub fn syncbat::operation_name::OperationName::new(value: impl core::convert::Into<alloc::sync::Arc<str>>) -> core::result::Result<Self, syncbat::operation_name::OperationNameError>
+impl core::convert::AsRef<str> for syncbat::operation_name::OperationName
+pub fn syncbat::operation_name::OperationName::as_ref(&self) -> &str
+impl core::fmt::Display for syncbat::operation_name::OperationName
+pub fn syncbat::operation_name::OperationName::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct syncbat::OperationRegisterItem
 impl syncbat::operation::OperationRegisterItem
 pub fn syncbat::operation::OperationRegisterItem::descriptor(&self) -> &syncbat::operation::OperationDescriptor
@@ -645,7 +688,7 @@ pub fn syncbat::receipt::ReceiptSinkError::from(error: syncbat::store_sink::Stor
 impl core::error::Error for syncbat::receipt::ReceiptSinkError
 impl core::fmt::Display for syncbat::receipt::ReceiptSinkError
 pub fn syncbat::receipt::ReceiptSinkError::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-pub struct syncbat::ReceiptSinkHandlerCause
+#[non_exhaustive] pub struct syncbat::ReceiptSinkHandlerCause
 pub syncbat::ReceiptSinkHandlerCause::code: alloc::string::String
 pub syncbat::ReceiptSinkHandlerCause::message: alloc::string::String
 impl syncbat::error::ReceiptSinkHandlerCause
@@ -685,13 +728,13 @@ pub syncbat::RegisterOperationRowV1::receipt_kind: alloc::string::String
 pub syncbat::RegisterOperationRowV1::schema_version: u16
 pub syncbat::RegisterOperationRowV1::supersedes: core::option::Option<alloc::string::String>
 pub syncbat::RegisterOperationRowV1::title: core::option::Option<alloc::string::String>
-impl syncbat::register_store::RegisterOperationRowV1
-pub fn syncbat::register_store::RegisterOperationRowV1::delete(name: impl core::convert::Into<alloc::string::String>) -> Self
-pub fn syncbat::register_store::RegisterOperationRowV1::from_descriptor(descriptor: &syncbat::operation::OperationDescriptor) -> Self
-pub fn syncbat::register_store::RegisterOperationRowV1::supersede(superseded_name: impl core::convert::Into<alloc::string::String>, descriptor: &syncbat::operation::OperationDescriptor) -> Self
-pub fn syncbat::register_store::RegisterOperationRowV1::update(descriptor: &syncbat::operation::OperationDescriptor) -> Self
-impl batpak::event::payload::EventPayload for syncbat::register_store::RegisterOperationRowV1
-pub const syncbat::register_store::RegisterOperationRowV1::KIND: batpak::event::kind::EventKind
+impl syncbat::RegisterOperationRowV1
+pub fn syncbat::RegisterOperationRowV1::delete(name: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn syncbat::RegisterOperationRowV1::from_descriptor(descriptor: &syncbat::operation::OperationDescriptor) -> Self
+pub fn syncbat::RegisterOperationRowV1::supersede(superseded_name: impl core::convert::Into<alloc::string::String>, descriptor: &syncbat::operation::OperationDescriptor) -> Self
+pub fn syncbat::RegisterOperationRowV1::update(descriptor: &syncbat::operation::OperationDescriptor) -> Self
+impl batpak::event::payload::EventPayload for syncbat::RegisterOperationRowV1
+pub const syncbat::RegisterOperationRowV1::KIND: batpak::event::kind::EventKind
 pub struct syncbat::StoreReceiptSink
 impl syncbat::store_sink::StoreReceiptSink
 pub fn syncbat::store_sink::StoreReceiptSink::new(store: alloc::sync::Arc<batpak::store::Store<batpak::store::Open>>, coordinate: batpak::coordinate::Coordinate) -> Self
@@ -700,14 +743,14 @@ pub fn syncbat::store_sink::StoreReceiptSink::with_options(self, options: batpak
 impl syncbat::receipt::ReceiptSink for syncbat::store_sink::StoreReceiptSink
 pub fn syncbat::store_sink::StoreReceiptSink::record_receipt(&self, envelope: &syncbat::receipt::ReceiptEnvelope) -> core::result::Result<syncbat::receipt::RecordedReceipt, syncbat::receipt::ReceiptSinkError>
 pub struct syncbat::StoreRegisterCatalog
-impl syncbat::register_store::StoreRegisterCatalog
-pub fn syncbat::register_store::StoreRegisterCatalog::delete_operation(&self, name: impl core::convert::AsRef<str>) -> core::result::Result<batpak::store::append::AppendReceipt, syncbat::register_store::StoreRegisterCatalogError>
-pub fn syncbat::register_store::StoreRegisterCatalog::new(store: alloc::sync::Arc<batpak::store::Store<batpak::store::Open>>, coordinate: batpak::coordinate::Coordinate) -> Self
-pub fn syncbat::register_store::StoreRegisterCatalog::persist_operation(&self, descriptor: &syncbat::operation::OperationDescriptor) -> core::result::Result<batpak::store::append::AppendReceipt, syncbat::register_store::StoreRegisterCatalogError>
-pub fn syncbat::register_store::StoreRegisterCatalog::persist_register(&self, register: &syncbat::register::Register) -> core::result::Result<alloc::vec::Vec<batpak::store::append::AppendReceipt>, syncbat::register_store::StoreRegisterCatalogError>
-pub fn syncbat::register_store::StoreRegisterCatalog::supersede_operation(&self, superseded_name: impl core::convert::AsRef<str>, descriptor: &syncbat::operation::OperationDescriptor) -> core::result::Result<batpak::store::append::AppendReceipt, syncbat::register_store::StoreRegisterCatalogError>
-pub fn syncbat::register_store::StoreRegisterCatalog::update_operation(&self, descriptor: &syncbat::operation::OperationDescriptor) -> core::result::Result<batpak::store::append::AppendReceipt, syncbat::register_store::StoreRegisterCatalogError>
-pub fn syncbat::register_store::StoreRegisterCatalog::with_options(self, options: batpak::store::append::AppendOptions) -> Self
+impl syncbat::StoreRegisterCatalog
+pub fn syncbat::StoreRegisterCatalog::delete_operation(&self, name: impl core::convert::AsRef<str>) -> core::result::Result<batpak::store::append::AppendReceipt, syncbat::StoreRegisterCatalogError>
+pub fn syncbat::StoreRegisterCatalog::new(store: alloc::sync::Arc<batpak::store::Store<batpak::store::Open>>, coordinate: batpak::coordinate::Coordinate) -> Self
+pub fn syncbat::StoreRegisterCatalog::persist_operation(&self, descriptor: &syncbat::operation::OperationDescriptor) -> core::result::Result<batpak::store::append::AppendReceipt, syncbat::StoreRegisterCatalogError>
+pub fn syncbat::StoreRegisterCatalog::persist_register(&self, register: &syncbat::register::Register) -> core::result::Result<alloc::vec::Vec<batpak::store::append::AppendReceipt>, syncbat::StoreRegisterCatalogError>
+pub fn syncbat::StoreRegisterCatalog::supersede_operation(&self, superseded_name: impl core::convert::AsRef<str>, descriptor: &syncbat::operation::OperationDescriptor) -> core::result::Result<batpak::store::append::AppendReceipt, syncbat::StoreRegisterCatalogError>
+pub fn syncbat::StoreRegisterCatalog::update_operation(&self, descriptor: &syncbat::operation::OperationDescriptor) -> core::result::Result<batpak::store::append::AppendReceipt, syncbat::StoreRegisterCatalogError>
+pub fn syncbat::StoreRegisterCatalog::with_options(self, options: batpak::store::append::AppendOptions) -> Self
 pub const syncbat::MAX_DESCRIPTOR_REF_BYTES: usize
 pub const syncbat::MAX_OPERATION_NAME_BYTES: usize
 pub const syncbat::SYNCBAT_EXTENSION_NAMESPACE: &str
@@ -725,7 +768,7 @@ pub trait syncbat::ReceiptSink
 pub fn syncbat::ReceiptSink::record_receipt(&self, envelope: &syncbat::receipt::ReceiptEnvelope) -> core::result::Result<syncbat::receipt::RecordedReceipt, syncbat::receipt::ReceiptSinkError>
 impl syncbat::receipt::ReceiptSink for syncbat::store_sink::StoreReceiptSink
 pub fn syncbat::store_sink::StoreReceiptSink::record_receipt(&self, envelope: &syncbat::receipt::ReceiptEnvelope) -> core::result::Result<syncbat::receipt::RecordedReceipt, syncbat::receipt::ReceiptSinkError>
-pub fn syncbat::rebuild_register_from_store<State>(store: &batpak::store::Store<State>, coordinate: &batpak::coordinate::Coordinate) -> core::result::Result<syncbat::register::Register, syncbat::register_store::StoreRegisterCatalogError>
+pub fn syncbat::rebuild_register_from_store<State>(store: &batpak::store::Store<State>, coordinate: &batpak::coordinate::Coordinate) -> core::result::Result<syncbat::register::Register, syncbat::StoreRegisterCatalogError>
 pub fn syncbat::receipt_extension_key(field: impl core::convert::AsRef<str>) -> core::result::Result<syncbat::SyncbatReceiptExtensionKey, batpak::store::append::ExtensionKeyError>
 pub fn syncbat::receipt_extension_value(bytes: impl core::convert::Into<batpak::store::append::EncodedBytes>) -> syncbat::SyncbatReceiptExtensionValue
 pub type syncbat::HandlerResult = core::result::Result<alloc::vec::Vec<u8>, syncbat::handler::HandlerError>

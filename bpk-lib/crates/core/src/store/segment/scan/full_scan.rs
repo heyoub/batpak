@@ -26,12 +26,20 @@ impl Reader {
             return Err(StoreError::corrupt_magic(0));
         }
 
-        // Extract segment_id from filename: "000042.fbat" → 42
-        let segment_id = path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .and_then(|s| s.parse::<u64>().ok())
-            .unwrap_or(0);
+        // Extract segment_id from filename: "000042.fbat" → 42.
+        // Falls back to 0 if the filename is malformed, but surfaces the parse
+        // failure via tracing so a corrupt name on disk is not invisible.
+        let segment_id = match segment::SegmentId::from_filename(path) {
+            Ok(parsed) => parsed.as_u64(),
+            Err(error) => {
+                tracing::warn!(
+                    path = %path.display(),
+                    %error,
+                    "skipping malformed segment filename"
+                );
+                0
+            }
+        };
 
         let mut header_len_buf = [0u8; 4];
         file.read_exact(&mut header_len_buf)

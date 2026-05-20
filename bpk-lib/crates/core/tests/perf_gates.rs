@@ -734,9 +734,11 @@ fn correctness_gates_self_validate() {
 
     // --- Probe 1: FD eviction round-trip ---
     let entries = store.by_entity("correctness:entity");
-    let first = store.get(entries[0].event_id());
-    let last = store.get(entries[entries.len() - 1].event_id());
-    let first_again = store.get(entries[0].event_id()); // re-read after eviction
+    let first = store.get(batpak::id::EventId::from(entries[0].event_id()));
+    let last = store.get(batpak::id::EventId::from(
+        entries[entries.len() - 1].event_id(),
+    ));
+    let first_again = store.get(batpak::id::EventId::from(entries[0].event_id())); // re-read after eviction
     let fd_eviction_round_trips = first.is_ok()
         && last.is_ok()
         && first_again.is_ok()
@@ -774,7 +776,7 @@ fn correctness_gates_self_validate() {
     // --- Probe 4: Idempotency ---
     let idem_key: u128 = 0xCAFE_BABE_DEAD_BEEF_1234_5678_9ABC_DEF0;
     let idem_opts = batpak::store::AppendOptions {
-        idempotency_key: Some(idem_key),
+        idempotency_key: Some(batpak::id::IdempotencyKey::from(idem_key)),
         ..Default::default()
     };
     let r1 = store

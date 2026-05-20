@@ -226,7 +226,8 @@ fn idempotency_keyed_batch_double_submit_returns_cached_receipts_without_reopen(
                 coord.clone(),
                 kind,
                 &serde_json::json!({"step": 0}),
-                AppendOptions::new().with_idempotency(0xB0_B1_B2_B3_B4_B5_B6_B7),
+                AppendOptions::new()
+                    .with_idempotency(batpak::id::IdempotencyKey::from(0xB0_B1_B2_B3_B4_B5_B6_B7)),
                 CausationRef::None,
             )
             .expect("item 0"),
@@ -234,7 +235,8 @@ fn idempotency_keyed_batch_double_submit_returns_cached_receipts_without_reopen(
                 coord.clone(),
                 kind,
                 &serde_json::json!({"step": 1}),
-                AppendOptions::new().with_idempotency(0xC0_C1_C2_C3_C4_C5_C6_C7),
+                AppendOptions::new()
+                    .with_idempotency(batpak::id::IdempotencyKey::from(0xC0_C1_C2_C3_C4_C5_C6_C7)),
                 CausationRef::None,
             )
             .expect("item 1"),
@@ -265,7 +267,7 @@ fn idempotency_batch_partial_cache_rejected_instead_of_silent_success() {
             &coord,
             kind,
             &serde_json::json!({"solo": true}),
-            AppendOptions::new().with_idempotency(existing_key),
+            AppendOptions::new().with_idempotency(batpak::id::IdempotencyKey::from(existing_key)),
         )
         .expect("seed keyed append");
 
@@ -274,7 +276,7 @@ fn idempotency_batch_partial_cache_rejected_instead_of_silent_success() {
             coord.clone(),
             kind,
             &serde_json::json!({"replay": true}),
-            AppendOptions::new().with_idempotency(existing_key),
+            AppendOptions::new().with_idempotency(batpak::id::IdempotencyKey::from(existing_key)),
             CausationRef::None,
         )
         .expect("cached item"),
@@ -282,7 +284,8 @@ fn idempotency_batch_partial_cache_rejected_instead_of_silent_success() {
             coord.clone(),
             kind,
             &serde_json::json!({"fresh": true}),
-            AppendOptions::new().with_idempotency(0xF1_F2_F3_F4_F5_F6_F7_F8),
+            AppendOptions::new()
+                .with_idempotency(batpak::id::IdempotencyKey::from(0xF1_F2_F3_F4_F5_F6_F7_F8)),
             CausationRef::None,
         )
         .expect("new item"),
@@ -306,7 +309,7 @@ fn idempotency_key_is_event_id_scoped_global_lookup() {
     let kind = EventKind::custom(0xF, 1);
 
     let key = 0xC0FFEE_u128;
-    let opts = AppendOptions::new().with_idempotency(key);
+    let opts = AppendOptions::new().with_idempotency(batpak::id::IdempotencyKey::from(key));
 
     let r1 = store
         .append_with_options(
@@ -316,7 +319,7 @@ fn idempotency_key_is_event_id_scoped_global_lookup() {
             opts.clone(),
         )
         .expect("append a");
-    assert_eq!(r1.event_id, key);
+    assert_eq!(r1.event_id, batpak::id::EventId::from(key));
 
     let r2 = store
         .append_with_options(
@@ -373,7 +376,7 @@ fn public_canal_trait_pulls_cursor_and_subscription_items() {
         Canal::pull_batch(&mut cursor, 1, Duration::from_millis(0)).expect("cursor canal");
     match cursor_batch {
         CanalBatch::One(entry) => {
-            assert_eq!(CanalItem::event_id(&entry), first.event_id);
+            assert_eq!(CanalItem::event_id(&entry), u128::from(first.event_id));
         }
         other @ (CanalBatch::Empty | CanalBatch::Many(_)) => {
             panic!("PROPERTY: cursor canal should yield one entry, got {other:?}")
@@ -389,7 +392,10 @@ fn public_canal_trait_pulls_cursor_and_subscription_items() {
             .expect("subscription canal");
     match subscription_batch {
         CanalBatch::One(notification) => {
-            assert_eq!(CanalItem::event_id(&notification), second.event_id);
+            assert_eq!(
+                CanalItem::event_id(&notification),
+                u128::from(second.event_id)
+            );
         }
         other @ (CanalBatch::Empty | CanalBatch::Many(_)) => {
             panic!("PROPERTY: subscription canal should yield one notification, got {other:?}")

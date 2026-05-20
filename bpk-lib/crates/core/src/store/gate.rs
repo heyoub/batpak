@@ -42,16 +42,16 @@ pub struct DurabilityGate {
 
 impl Store<Open> {
     fn receipt_point(&self, receipt: &AppendReceipt) -> Result<HlcPoint, StoreError> {
+        use crate::id::EntityIdType;
+        let raw = receipt.event_id.as_u128();
         self.index
-            .get_by_id(receipt.event_id)
+            .get_by_id(raw)
             .map(|entry| HlcPoint {
                 wall_ms: entry.wall_ms,
                 global_sequence: entry.global_sequence,
             })
             .ok_or_else(|| StoreError::InvariantViolation {
-                kind: StoreInvariant::GateReceiptNotIndexed {
-                    event_id: receipt.event_id,
-                },
+                kind: StoreInvariant::GateReceiptNotIndexed { event_id: raw },
             })
     }
 

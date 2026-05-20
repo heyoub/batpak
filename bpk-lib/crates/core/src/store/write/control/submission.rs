@@ -38,7 +38,8 @@ impl AppendSubmission {
             event_id,
             correlation_id,
             options: AppendOptions {
-                causation_id: (causation_id != 0).then_some(causation_id),
+                causation_id: (causation_id != 0)
+                    .then_some(crate::id::CausationId::from(causation_id)),
                 ..AppendOptions::default()
             },
             fence_token: None,
@@ -58,12 +59,17 @@ impl AppendSubmission {
     }
 
     pub(crate) fn with_options(options: AppendOptions, clock: &dyn Clock) -> Self {
+        use crate::id::EntityIdType;
         let event_id = options
             .idempotency_key
+            .map(|key| key.as_u128())
             .unwrap_or_else(|| crate::id::generate_v7_id_with_clock(clock));
         Self {
             event_id,
-            correlation_id: options.correlation_id.unwrap_or(event_id),
+            correlation_id: options
+                .correlation_id
+                .map(|id| id.as_u128())
+                .unwrap_or(event_id),
             options,
             fence_token: None,
         }
@@ -93,13 +99,14 @@ impl AppendSubmission {
         kind: EventKind,
         now_us: i64,
     ) -> Result<Event<Vec<u8>>, StoreError> {
+        use crate::id::EntityIdType;
         let payload_bytes =
             rmp_serde::to_vec_named(payload).map_err(|e| StoreError::Serialization(Box::new(e)))?;
         let payload_len = checked_payload_len(&payload_bytes)?;
         let mut header = EventHeader::new(
             self.event_id,
             self.correlation_id,
-            self.options.causation_id,
+            self.options.causation_id.map(|id| id.as_u128()),
             now_us,
             crate::coordinate::DagPosition::root(),
             payload_len,
@@ -112,12 +119,13 @@ impl AppendSubmission {
     }
 
     fn guards(self) -> AppendGuards {
+        use crate::id::EntityIdType;
         let position_hint = self.options.position_hint.unwrap_or_default();
         AppendGuards {
             correlation_id: self.correlation_id,
-            causation_id: self.options.causation_id,
+            causation_id: self.options.causation_id.map(|id| id.as_u128()),
             expected_sequence: self.options.expected_sequence,
-            idempotency_key: self.options.idempotency_key,
+            idempotency_key: self.options.idempotency_key.map(|id| id.as_u128()),
             dag_lane: position_hint.lane,
             dag_depth: position_hint.depth,
             extensions: self.options.extensions,

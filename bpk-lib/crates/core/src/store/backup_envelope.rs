@@ -464,8 +464,8 @@ pub fn restore_proof_report_body_hash(
 /// hash.
 pub fn restore_proof_evidence_report(
     expected_manifest: &BackupManifestBody,
-    observed_segments: Vec<BackupSegmentRef>,
+    observed_segments: &[BackupSegmentRef],
 ) -> Result<RestoreProofEvidenceReport, rmp_serde::encode::Error> {
-    let body = restore_proof_report_body(expected_manifest, &observed_segments)?;
+    let body = restore_proof_report_body(expected_manifest, observed_segments)?;
     RestoreProofEvidenceReport::from_body(body)
 }

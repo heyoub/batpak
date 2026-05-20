@@ -1,0 +1,51 @@
+[package]
+name = "hbat"
+version = "0.7.6"
+edition = "2021"
+rust-version = "1.92"
+license = "MIT OR Apache-2.0"
+description = "Reference NETBAT/1 host for the batpak family — typed-append, event-lookup, receipt-decode."
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "hbat"
+path = "src/main.rs"
+
+[features]
+default = []
+
+[dependencies]
+batpak = { path = "../core", version = "0.7.6", default-features = false }
+syncbat = { path = "../syncbat", version = "0.7.6" }
+netbat = { path = "../netbat", version = "0.7.6" }
+serde = { version = "1", features = ["derive"] }
+# preserve_order: rmp-serde::to_vec_named emits struct fields in Rust
+# declaration order. serde_json::to_value defaults to BTreeMap
+# (alphabetical), which would silently shuffle the manifest's
+# fixtureValue away from wire order. preserve_order swaps in indexmap
+# so insertion order is preserved end-to-end through the manifest JSON.
+serde_json = { version = "1", features = ["preserve_order"] }
+rmp-serde = "=1.3.1"
+clap = { version = "4.6", features = ["derive"] }
+anyhow = "1"
+ctrlc = { version = "3", features = ["termination"] }
+# Tracing: hbat installs a fmt subscriber so operators see structured
+# spans (operation, byte counts, errors) by default. RUST_LOG drives
+# verbosity; the env filter feature is optional.
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "std", "env-filter"] }
+# inventory: link-time registry that lets each EventPayload-deriving
+# module submit its full manifest descriptor (field list, fixture
+# closures, schema ref) at compile time. `manifest::descriptors()`
+# walks the registry at runtime so adding a new event no longer
+# requires touching a centralized describe_* table.
+inventory = "0.3"
+
+[dev-dependencies]
+tempfile = ">=3.24, <3.25"
+
+[lints]
+workspace = true

@@ -4,6 +4,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use crate::handler::HandlerFn;
+use crate::operation_name::{OperationName, OperationNameError};
 
 /// Runtime-facing side-effect classification for an operation receipt.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -223,7 +224,11 @@ impl OperationDescriptor {
     /// Returns [`DescriptorValidationError`] when any stable identifier is
     /// empty, too long, or contains bytes outside syncbat's descriptor grammar.
     pub fn validate(&self) -> Result<(), DescriptorValidationError> {
-        validate_stable_token("name", self.name(), MAX_OPERATION_NAME_BYTES)?;
+        // Run the operation-name grammar through the single
+        // [`OperationName`] constructor so every layer agrees on the rules.
+        OperationName::new(self.name()).map_err(|error| {
+            DescriptorValidationError::from_operation_name_error("name", self.name(), &error)
+        })?;
         validate_stable_ref(
             self.name(),
             "input_schema_ref",
@@ -304,6 +309,27 @@ impl DescriptorValidationError {
             message,
         }
     }
+
+    /// Map an [`OperationNameError`] from the substrate-wide newtype into the
+    /// descriptor-layer error shape so existing callers keep observing the
+    /// same `field` + stable `message` columns.
+    fn from_operation_name_error(
+        field: &'static str,
+        value: &str,
+        error: &OperationNameError,
+    ) -> Self {
+        let message = match error {
+            OperationNameError::Empty => "empty",
+            OperationNameError::TooLong { .. } => "too long",
+            OperationNameError::LeadingOrTrailingDot | OperationNameError::ConsecutiveDots => {
+                "dot-separated tokens must be non-empty"
+            }
+            OperationNameError::IllegalCharacter { .. } => {
+                "expected ASCII letters, digits, '.', '_' or '-'"
+            }
+        };
+        Self::new(field, value, message)
+    }
 }
 
 impl std::fmt::Display for DescriptorValidationError {
@@ -324,14 +350,19 @@ fn validate_stable_ref(
     value: &str,
     max: usize,
 ) -> Result<(), DescriptorValidationError> {
-    validate_stable_token(field, value, max).map_err(|error| DescriptorValidationError {
+    validate_stable_ref_token(field, value, max).map_err(|error| DescriptorValidationError {
         field: error.field,
         value: format!("{operation_name}:{}", error.value),
         message: error.message,
     })
 }
 
-fn validate_stable_token(
+/// Schema/receipt-ref grammar check.
+///
+/// Shares the operation-name grammar by intent but applies to a different
+/// field with a larger byte bound. The operation-name path goes through
+/// [`OperationName`] in `operation_name.rs` instead.
+fn validate_stable_ref_token(
     field: &'static str,
     value: &str,
     max: usize,

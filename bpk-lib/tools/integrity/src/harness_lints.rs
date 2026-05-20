@@ -220,8 +220,8 @@ const OVERSIZE_HARNESS_ALLOWLIST: &[OversizeDebt] = &[
     },
     OversizeDebt {
         path: "tests/segment_scan_hardening.rs",
-        max_lines: 709,
-        reason: "segment corruption shapes share frame-building helpers",
+        max_lines: 713,
+        reason: "segment corruption shapes share frame-building helpers; bumped 709 -> 713 after SegmentId::from_filename integration test landed",
         target: "split helper module from case table by 0.7.6 correction cut",
     },
     OversizeDebt {
@@ -798,6 +798,7 @@ mod tests {
             section: "Property Harness".to_owned(),
             line: 12,
             pattern: Some("Property Harness".to_owned()),
+            status: Some("green".to_owned()),
             fields: REQUIRED_FIELDS
                 .iter()
                 .map(|field| (*field).to_owned())

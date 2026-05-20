@@ -64,14 +64,19 @@ impl Store<Open> {
         coord: &Coordinate,
         kind: EventKind,
         payload: &impl Serialize,
-        correlation_id: u128,
-        causation_id: u128,
+        correlation_id: crate::id::CorrelationId,
+        causation_id: crate::id::CausationId,
     ) -> Result<AppendTicket, StoreError> {
+        use crate::id::EntityIdType;
         self.submit_prepared(
             coord,
             kind,
             payload,
-            AppendSubmission::reaction(self.runtime.clock(), correlation_id, causation_id),
+            AppendSubmission::reaction(
+                self.runtime.clock(),
+                correlation_id.as_u128(),
+                causation_id.as_u128(),
+            ),
         )
     }
 
@@ -152,8 +157,8 @@ impl Store<Open> {
         coord: &Coordinate,
         kind: EventKind,
         payload: &impl Serialize,
-        correlation_id: u128,
-        causation_id: u128,
+        correlation_id: crate::id::CorrelationId,
+        causation_id: crate::id::CausationId,
     ) -> Result<crate::outcome::Outcome<AppendTicket>, StoreError> {
         if self.index.active_visibility_fence().is_some() {
             return Ok(crate::outcome::Outcome::cancelled(
@@ -251,16 +256,17 @@ impl Store<Open> {
         coord: &Coordinate,
         kind: EventKind,
         payload: &impl Serialize,
-        correlation_id: u128,
-        causation_id: u128,
+        correlation_id: crate::id::CorrelationId,
+        causation_id: crate::id::CausationId,
     ) -> Result<AppendReceipt, StoreError> {
+        use crate::id::EntityIdType;
         tracing::debug!(
             target: "batpak::flow",
             flow = "append_reaction",
             entity = coord.entity(),
             scope = coord.scope(),
-            correlation_id = format_args!("{correlation_id:032x}"),
-            causation_id = format_args!("{causation_id:032x}")
+            correlation_id = format_args!("{:032x}", correlation_id.as_u128()),
+            causation_id = format_args!("{:032x}", causation_id.as_u128())
         );
         self.submit_reaction(coord, kind, payload, correlation_id, causation_id)?
             .wait()
@@ -319,8 +325,8 @@ impl Store<Open> {
     /// boundary and segment sync fails before publish.
     pub fn append_reaction_batch(
         &self,
-        correlation_id: u128,
-        causation_id: u128,
+        correlation_id: crate::id::CorrelationId,
+        causation_id: crate::id::CausationId,
         items: Vec<crate::store::append::BatchAppendItem>,
     ) -> Result<Vec<AppendReceipt>, StoreError> {
         // Set correlation_id and causation_id on all items.
@@ -476,8 +482,8 @@ impl Store<Open> {
         &self,
         coord: &Coordinate,
         payload: &T,
-        correlation_id: u128,
-        causation_id: u128,
+        correlation_id: crate::id::CorrelationId,
+        causation_id: crate::id::CausationId,
     ) -> Result<AppendReceipt, StoreError> {
         self.append_reaction(coord, T::KIND, payload, correlation_id, causation_id)
     }
@@ -490,8 +496,8 @@ impl Store<Open> {
         &self,
         coord: &Coordinate,
         payload: &T,
-        correlation_id: u128,
-        causation_id: u128,
+        correlation_id: crate::id::CorrelationId,
+        causation_id: crate::id::CausationId,
     ) -> Result<AppendTicket, StoreError> {
         self.submit_reaction(coord, T::KIND, payload, correlation_id, causation_id)
     }
@@ -504,8 +510,8 @@ impl Store<Open> {
         &self,
         coord: &Coordinate,
         payload: &T,
-        correlation_id: u128,
-        causation_id: u128,
+        correlation_id: crate::id::CorrelationId,
+        causation_id: crate::id::CausationId,
     ) -> Result<crate::outcome::Outcome<AppendTicket>, StoreError> {
         self.try_submit_reaction(coord, T::KIND, payload, correlation_id, causation_id)
     }

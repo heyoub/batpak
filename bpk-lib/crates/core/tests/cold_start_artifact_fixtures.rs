@@ -76,7 +76,7 @@ fn assert_historical_fixture_opens(
     assert_eq!(entries[0].dag_depth(), depth);
 
     let stored = store
-        .get(entries[0].event_id())
+        .get(batpak::id::EventId::from(entries[0].event_id()))
         .expect("fetch fixture event");
     assert_eq!(stored.event.header.position.lane(), lane);
     assert_eq!(stored.event.header.position.depth(), depth);
@@ -88,7 +88,7 @@ fn assert_historical_fixture_opens(
             EventKind::DATA,
             &serde_json::json!({"fixture": "replay"}),
             AppendOptions::new()
-                .with_idempotency(0xAD00 + u128::from(lane))
+                .with_idempotency(batpak::id::IdempotencyKey::from(0xAD00 + u128::from(lane)))
                 .with_position_hint(AppendPositionHint::new(99, 99))
                 .with_extension(extension_key.clone(), vec![0xFF]),
         )

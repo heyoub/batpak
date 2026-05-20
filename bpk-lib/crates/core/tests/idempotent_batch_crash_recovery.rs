@@ -88,7 +88,8 @@ fn partial_keys_rejected_synchronously() {
             coord.clone(),
             KIND,
             &serde_json::json!({"step": 0}),
-            AppendOptions::new().with_idempotency(0xAAAA_BBBB_CCCC_DDDD),
+            AppendOptions::new()
+                .with_idempotency(batpak::id::IdempotencyKey::from(0xAAAA_BBBB_CCCC_DDDD)),
             CausationRef::None,
         )
         .expect("keyed item"),
@@ -151,19 +152,22 @@ fn batch_max_bytes_accepts_exact_limit_and_rejects_one_byte_over() {
         Ok(_) => panic!("PROPERTY: batch one byte over max_bytes must be rejected"),
         Err(err) => err,
     };
-    match err {
-        StoreError::BatchFailed { item_index, source } => {
-            assert_eq!(
-                item_index, 0,
-                "PROPERTY: aggregate batch byte-limit failures are reported at batch index 0"
-            );
-            assert!(
-                matches!(*source, StoreError::Configuration(_)),
-                "PROPERTY: batch byte-limit failure must preserve Configuration source"
-            );
-        }
-        other => panic!("PROPERTY: expected StoreError::BatchFailed, got {other:?}"),
-    }
+    // let-else is the canonical "destructure or panic" idiom used
+    // throughout core tests (see cursor_durability.rs::*_corrupt). It
+    // does NOT trigger clippy::wildcard_enum_match_arm over the
+    // #[non_exhaustive] StoreError, so we don't need to silence the
+    // lint or list every variant.
+    let StoreError::BatchFailed { item_index, source } = err else {
+        panic!("PROPERTY: expected StoreError::BatchFailed, got {err:?}");
+    };
+    assert_eq!(
+        item_index, 0,
+        "PROPERTY: aggregate batch byte-limit failures are reported at batch index 0"
+    );
+    assert!(
+        matches!(*source, StoreError::Configuration(_)),
+        "PROPERTY: batch byte-limit failure must preserve Configuration source"
+    );
     over_store.close().expect("close over");
 }
 
@@ -183,7 +187,8 @@ fn idempotent_batch_replayable_without_duplicates() {
                 coord.clone(),
                 KIND,
                 &serde_json::json!({"step": 0}),
-                AppendOptions::new().with_idempotency(0x1111_1111_1111_1111),
+                AppendOptions::new()
+                    .with_idempotency(batpak::id::IdempotencyKey::from(0x1111_1111_1111_1111)),
                 CausationRef::None,
             )
             .expect("keyed item 0"),
@@ -191,7 +196,8 @@ fn idempotent_batch_replayable_without_duplicates() {
                 coord.clone(),
                 KIND,
                 &serde_json::json!({"step": 1}),
-                AppendOptions::new().with_idempotency(0x2222_2222_2222_2222),
+                AppendOptions::new()
+                    .with_idempotency(batpak::id::IdempotencyKey::from(0x2222_2222_2222_2222)),
                 CausationRef::None,
             )
             .expect("keyed item 1"),
@@ -230,10 +236,12 @@ fn idempotent_batch_replayable_without_duplicates() {
 
         for (orig, replay) in first_receipts.iter().zip(replay_receipts.iter()) {
             assert_eq!(
-                orig.event_id, replay.event_id,
+                orig.event_id,
+                replay.event_id,
                 "PROPERTY: idempotent replay must return the original event_id; \
                  first={:x} replay={:x} — a fresh UUID here means dedup failed.",
-                orig.event_id, replay.event_id
+                u128::from(orig.event_id),
+                u128::from(replay.event_id),
             );
             assert_eq!(
                 orig.sequence, replay.sequence,

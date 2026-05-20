@@ -1,0 +1,102 @@
+name: Advisory Ratchet
+
+# Runs every day at 06:00 UTC plus on-demand. Surfaces CVEs published
+# between PRs that the per-PR `cargo deny check + audit` pass would
+# otherwise notice only when someone happens to open a PR.
+#
+# Failure mode: opens (or updates) a tracking issue labeled
+# `advisory-ratchet`. The CI loop is intentionally non-blocking on PRs
+# — we hear about new CVEs proactively rather than discovering them
+# during merge.
+
+on:
+  schedule:
+    # 06:00 UTC daily.
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: advisory-ratchet
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    name: cargo audit + cargo deny advisories
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: bpk-lib
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: bpk-lib
+      - name: Install cargo-audit
+        run: cargo install --locked cargo-audit
+      - name: Install cargo-deny
+        run: cargo install --locked cargo-deny
+      - name: cargo audit
+        id: audit
+        run: |
+          set +e
+          cargo audit --deny warnings 2>&1 | tee ../advisory-audit.txt
+          status=$?
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: cargo deny check advisories
+        id: deny
+        run: |
+          set +e
+          cargo deny check advisories 2>&1 | tee ../advisory-deny.txt
+          status=$?
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Fail if any advisory tripped
+        if: steps.audit.outputs.status != '0' || steps.deny.outputs.status != '0'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AUDIT_STATUS: ${{ steps.audit.outputs.status }}
+          DENY_STATUS: ${{ steps.deny.outputs.status }}
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## Advisory ratchet — failure on $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo
+            echo "- \`cargo audit\` exit status: $AUDIT_STATUS"
+            echo "- \`cargo deny check advisories\` exit status: $DENY_STATUS"
+            echo
+            echo "### cargo audit output"
+            echo
+            echo '```text'
+            cat advisory-audit.txt
+            echo '```'
+            echo
+            echo "### cargo deny check advisories output"
+            echo
+            echo '```text'
+            cat advisory-deny.txt
+            echo '```'
+          } > advisory-report.md
+
+          # Attach as an artifact for direct download.
+          mkdir -p .ratchet-artifacts
+          cp advisory-report.md .ratchet-artifacts/
+          echo "ADVISORY_REPORT=$(pwd)/advisory-report.md" >> "$GITHUB_ENV"
+          echo "::error::Advisory ratchet failed. See report below."
+          cat advisory-report.md
+          exit 1
+      - name: Upload advisory report artifact
+        if: always() && (steps.audit.outputs.status != '0' || steps.deny.outputs.status != '0')
+        uses: actions/upload-artifact@v4
+        with:
+          name: advisory-ratchet-report
+          path: advisory-report.md
+          if-no-files-found: ignore
+          retention-days: 30

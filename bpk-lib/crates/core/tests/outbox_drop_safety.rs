@@ -66,7 +66,8 @@ fn dropping_outbox_without_flush_commits_nothing() {
         .append(&coord, kind, &serde_json::json!({"post_drop": true}))
         .expect("append after outbox drop must succeed");
     assert_ne!(
-        receipt.event_id, 0,
+        receipt.event_id,
+        batpak::id::EventId::from(0u128),
         "PROPERTY: append after Outbox drop must produce a non-zero event id"
     );
 }

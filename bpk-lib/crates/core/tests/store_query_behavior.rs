@@ -50,7 +50,7 @@ fn store_config_new_uses_sensible_defaults() {
 #[test]
 fn get_nonexistent_returns_not_found() {
     let (store, _dir) = test_store();
-    let result = store.get(0xDEAD);
+    let result = store.get(batpak::id::EventId::from(0xDEADu128));
     let err = match result {
         Ok(_) => panic!(
             "PROPERTY: get() of a nonexistent event_id must return Err(StoreError::NotFound).\

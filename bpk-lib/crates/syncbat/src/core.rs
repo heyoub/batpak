@@ -81,17 +81,26 @@ impl Core {
     /// mount the checkout descriptor, [`RuntimeError::MissingHandler`] when no
     /// matching handler is present, a handler-provided runtime error, or a
     /// fail-closed receipt-sink error after a resolved handler invocation.
+    #[tracing::instrument(
+        name = "syncbat.checkout",
+        skip_all,
+        fields(
+            operation = %checkout.descriptor.name(),
+            input_bytes = checkout.input.len(),
+            output_bytes = tracing::field::Empty,
+            outcome = tracing::field::Empty,
+        ),
+    )]
     pub fn checkout(&mut self, checkout: Checkout) -> Result<CheckoutResult, RuntimeError> {
         let name = checkout.descriptor.name();
-        let descriptor = self
-            .descriptors
-            .get(name)
-            .cloned()
-            .ok_or_else(|| RuntimeError::unknown_operation(name))?;
-        let handler = self
-            .handlers
-            .get_mut(name)
-            .ok_or_else(|| RuntimeError::missing_handler(name))?;
+        let descriptor = self.descriptors.get(name).cloned().ok_or_else(|| {
+            tracing::warn!(operation = %name, outcome = "unknown_operation", "checkout rejected");
+            RuntimeError::unknown_operation(name)
+        })?;
+        let handler = self.handlers.get_mut(name).ok_or_else(|| {
+            tracing::error!(operation = %name, outcome = "missing_handler", "checkout rejected");
+            RuntimeError::missing_handler(name)
+        })?;
         let input = checkout.input;
         let handler_result = {
             let mut ctx = Ctx::new(&descriptor);
@@ -103,6 +112,13 @@ impl Core {
             Err(error) => {
                 let cause = ReceiptSinkHandlerCause::new(error.class(), error.message());
                 let outcome = ReceiptOutcome::failed(cause.code(), cause.message());
+                tracing::warn!(
+                    operation = %name,
+                    code = %cause.code(),
+                    message = %cause.message(),
+                    outcome = "handler_failed",
+                    "checkout failed in handler",
+                );
                 self.record_runtime_receipt(
                     &descriptor,
                     &input,
@@ -120,6 +136,9 @@ impl Core {
             ReceiptOutcome::Completed,
             None,
         )?;
+        let span = tracing::Span::current();
+        span.record("output_bytes", output.len());
+        span.record("outcome", "completed");
 
         Ok(CheckoutResult {
             descriptor,

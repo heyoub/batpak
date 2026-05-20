@@ -15,5 +15,5 @@ pub fn run() -> Result<u128, Box<dyn std::error::Error>> {
     let store = Store::open(StoreConfig::new(&dir))?;
     let coord = Coordinate::new("entity:item", "scope:template")?;
     let receipt = store.append_typed(&coord, &ItemRecorded { value: 7 })?;
-    Ok(receipt.event_id)
+    Ok(receipt.event_id.into())
 }

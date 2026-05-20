@@ -38,6 +38,13 @@ RUN cargo binstall --no-confirm cargo-deny@0.19.0 || cargo install --locked carg
 RUN cargo binstall --no-confirm cargo-audit@0.22.1 || cargo install --locked cargo-audit@0.22.1
 RUN cargo binstall --no-confirm cargo-nextest@0.9.132 || cargo install --locked cargo-nextest@0.9.132
 RUN cargo binstall --no-confirm cargo-llvm-cov@0.8.5 || cargo install --locked cargo-llvm-cov@0.8.5
+# cargo-public-api generates rustdoc JSON, which is only available on
+# nightly. Install a minimal nightly toolchain alongside the pinned
+# stable so `cargo xtask public-api --strict` can auto-fall-back to
+# nightly for rustdoc-json generation without forcing the rest of
+# the build off the canonical 1.92 stable channel.
+RUN rustup toolchain install nightly --profile minimal --no-self-update
+RUN cargo binstall --no-confirm cargo-public-api@0.51.0 || cargo install --locked cargo-public-api@0.51.0
 # The published GNU binary currently requires a newer glibc than bookworm ships,
 # so install cargo-mutants from source in the canonical container.
 RUN cargo install --locked cargo-mutants@27.0.0

@@ -197,15 +197,17 @@ fn chain_walk_evidence_family_invariants_and_no_append_side_effect() -> TestResu
     let second_event_id = store
         .append(&coord, kind, &serde_json::json!({"s": 1}))?
         .event_id;
-    let last = store
-        .append(&coord, kind, &serde_json::json!({"s": 2}))?
-        .event_id;
+    let last = u128::from(
+        store
+            .append(&coord, kind, &serde_json::json!({"s": 2}))?
+            .event_id,
+    );
 
     let request = ChainWalkRequest::linear(ChainWalkStartRef::EventId(last), 32);
     let report = store.chain_walk_evidence(&request)?;
 
     assert_ne!(first_event_id, second_event_id);
-    assert_ne!(second_event_id, last);
+    assert_ne!(u128::from(second_event_id), last);
     assert_eq!(
         store.stats().event_count,
         before + 3,
@@ -233,9 +235,11 @@ fn chain_walk_three_link_chain_checked_count_stable_across_close_reopen() -> Tes
 
     let mut last = 0_u128;
     for s in 0..3 {
-        last = store
-            .append(&coord, kind, &serde_json::json!({"s": s}))?
-            .event_id;
+        last = u128::from(
+            store
+                .append(&coord, kind, &serde_json::json!({"s": s}))?
+                .event_id,
+        );
     }
 
     let request = ChainWalkRequest::linear(ChainWalkStartRef::EventId(last), 64);

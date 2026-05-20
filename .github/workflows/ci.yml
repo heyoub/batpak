@@ -48,6 +48,16 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy,rustfmt,llvm-tools-preview
+      # cargo-public-api uses rustdoc JSON, which is only available
+      # on nightly. Install a minimal nightly toolchain alongside
+      # stable so the public-api gate in `cargo xtask ci` can
+      # auto-fall-back to nightly. We install via `rustup` directly
+      # (not dtolnay/rust-toolchain@nightly) so the *default* toolchain
+      # stays whatever `rust-toolchain.toml` pins (1.92 stable) and
+      # the rest of the build is unaffected.
+      - name: Install nightly for cargo-public-api rustdoc JSON
+        shell: bash
+        run: rustup toolchain install nightly --profile minimal --no-self-update
       # Tool version pins MUST stay in lock-step with `.devcontainer/Dockerfile`
       # and `cargo xtask setup --install-tools`. Drift is caught by `check_ci_parity` in
       # `tools/integrity/src/main.rs` (run via `cargo xtask structural`).
@@ -63,6 +73,9 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-llvm-cov@0.8.5
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-public-api@0.51.0
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-mutants@27.0.0
@@ -130,6 +143,89 @@ jobs:
             cargo xtask consumer-smoke &&
             cargo xtask templates
           '
+
+  ts-parity:
+    # BatPAK TypeScript SDK Phase 0 wire-parity gate.
+    #
+    # Generates the manifest, builds + tests every TS package, boots `hbat`
+    # on an ephemeral loopback port, parses the structured `HBAT_READY` line
+    # to discover the port, runs the live `heartbeat-spike` example, and
+    # finally verifies the codegen is deterministic by deleting the
+    # generated tree and rebuilding.
+    name: TS Parity (manifest + canonical + heartbeat-spike)
+    runs-on: ubuntu-latest
+    needs: [integrity-linux-container]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: Swatinem/rust-cache@v2
+      - name: Install pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.33.0 --activate
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: bpk-ts/pnpm-lock.yaml
+      - name: Cargo build (hbat + xtask)
+        working-directory: bpk-lib
+        run: |
+          cargo build -p hbat
+          cargo build -p xtask
+      - name: Export BatPAK TS manifest
+        working-directory: bpk-lib
+        run: cargo run -p xtask -- export-ts-manifest --out ../bpk-ts/batpak.manifest.json
+      - name: Install TS deps
+        working-directory: bpk-ts
+        run: pnpm install --frozen-lockfile
+      - name: TS build (codegen runs as part of build)
+        working-directory: bpk-ts
+        run: |
+          pnpm -w build
+          pnpm --filter @batpak/codegen run generate
+      - name: TS parity tests
+        working-directory: bpk-ts
+        run: pnpm -w test
+      - name: Live heartbeat roundtrip
+        working-directory: bpk-ts
+        run: |
+          set -uo pipefail
+          STORE=$(mktemp -d)
+          HBAT_PID=""
+          cleanup() {
+            if [ -n "$HBAT_PID" ]; then
+              kill "$HBAT_PID" 2>/dev/null || true
+              wait "$HBAT_PID" 2>/dev/null || true
+            fi
+            rm -rf "$STORE"
+          }
+          trap cleanup EXIT
+          ../target/debug/hbat serve --store "$STORE" --tcp 127.0.0.1:0 --print-port > /tmp/hbat-ready.txt 2> /tmp/hbat-err.txt &
+          HBAT_PID=$!
+          for _ in $(seq 1 50); do
+            if [ -s /tmp/hbat-ready.txt ]; then break; fi
+            sleep 0.1
+          done
+          if [ ! -s /tmp/hbat-ready.txt ]; then
+            echo "hbat did not emit HBAT_READY within 5s"
+            cat /tmp/hbat-err.txt
+            exit 1
+          fi
+          PORT=$(node -e 'const l=require("fs").readFileSync("/tmp/hbat-ready.txt","utf-8").trim();process.stdout.write(String(JSON.parse(l.replace(/^HBAT_READY /,"")).port))')
+          echo "hbat: $(cat /tmp/hbat-ready.txt)"
+          node examples/heartbeat-spike/dist/index.js --port "$PORT"
+      - name: Determinism — rm -rf generated, rebuild, diff
+        working-directory: bpk-ts
+        run: |
+          rm -rf packages/generated/src packages/generated/dist
+          pnpm -w build
+          pnpm --filter @batpak/codegen run generate
+          pnpm -w build
+          if [ -n "$(git status --porcelain packages/generated)" ]; then
+            echo "Codegen is non-deterministic. Differences:"
+            git diff packages/generated
+            exit 1
+          fi
 
   mutants:
     # Mutation testing smoke run — repo-owned representative shards.

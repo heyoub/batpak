@@ -1,4 +1,6 @@
 use super::*;
+use crate::id::EntityIdType;
+use crate::id::EventId;
 use crate::store::index::IndexEntry;
 
 impl<State> Store<State> {
@@ -7,11 +9,9 @@ impl<State> Store<State> {
     /// # Errors
     /// Returns `StoreError::NotFound` if no event with that ID exists.
     /// Returns `StoreError::Io` or `StoreError::Serialization` if reading from disk fails.
-    pub fn get(&self, event_id: u128) -> Result<StoredEvent<serde_json::Value>, StoreError> {
-        let entry = self
-            .index
-            .get_by_id(event_id)
-            .ok_or(StoreError::NotFound(event_id))?;
+    pub fn get(&self, event_id: EventId) -> Result<StoredEvent<serde_json::Value>, StoreError> {
+        let raw = event_id.as_u128();
+        let entry = self.index.get_by_id(raw).ok_or(StoreError::NotFound(raw))?;
         self.reader.read_entry(&entry.disk_pos)
     }
 
@@ -24,11 +24,9 @@ impl<State> Store<State> {
     /// Returns `StoreError::NotFound` if no event with that ID exists.
     /// Returns `StoreError::Io` or `StoreError::Serialization` if reading
     /// from disk fails.
-    pub fn read_raw(&self, event_id: u128) -> Result<StoredEvent<Vec<u8>>, StoreError> {
-        let entry = self
-            .index
-            .get_by_id(event_id)
-            .ok_or(StoreError::NotFound(event_id))?;
+    pub fn read_raw(&self, event_id: EventId) -> Result<StoredEvent<Vec<u8>>, StoreError> {
+        let raw = event_id.as_u128();
+        let entry = self.index.get_by_id(raw).ok_or(StoreError::NotFound(raw))?;
         self.reader.read_entry_raw(&entry.disk_pos)
     }
 
@@ -36,7 +34,7 @@ impl<State> Store<State> {
     /// current index state.
     #[must_use]
     pub fn verify_append_receipt(&self, receipt: &AppendReceipt) -> bool {
-        let Some(entry) = self.index.get_by_id(receipt.event_id) else {
+        let Some(entry) = self.index.get_by_id(receipt.event_id.as_u128()) else {
             return false;
         };
         if !append_receipt_matches_index(receipt, &entry) {
@@ -54,7 +52,7 @@ impl<State> Store<State> {
     /// registry and current index state.
     #[must_use]
     pub fn verify_denial_receipt(&self, receipt: &DenialReceipt) -> bool {
-        let Some(entry) = self.index.get_by_id(receipt.event_id) else {
+        let Some(entry) = self.index.get_by_id(receipt.event_id.as_u128()) else {
             return false;
         };
         if !denial_receipt_matches_index(receipt, &entry) {
@@ -77,10 +75,10 @@ impl<State> Store<State> {
     /// READ: walk hash chain ancestors.
     pub fn walk_ancestors(
         &self,
-        event_id: u128,
+        event_id: EventId,
         limit: usize,
     ) -> Vec<StoredEvent<serde_json::Value>> {
-        ancestry::walk_ancestors(self, event_id, limit)
+        ancestry::walk_ancestors(self, event_id.as_u128(), limit)
     }
 
     /// PROJECT: reconstruct typed state from events, with cache support.
@@ -171,7 +169,7 @@ impl<State> Store<State> {
 }
 
 fn append_receipt_matches_index(receipt: &AppendReceipt, entry: &IndexEntry) -> bool {
-    receipt.event_id == entry.event_id
+    receipt.event_id.as_u128() == entry.event_id
         && receipt.sequence == entry.global_sequence
         && receipt.disk_pos == entry.disk_pos
         && receipt.content_hash == entry.hash_chain.event_hash
@@ -180,7 +178,7 @@ fn append_receipt_matches_index(receipt: &AppendReceipt, entry: &IndexEntry) -> 
 
 fn denial_receipt_matches_index(receipt: &DenialReceipt, entry: &IndexEntry) -> bool {
     entry.kind == EventKind::SYSTEM_DENIAL
-        && receipt.event_id == entry.event_id
+        && receipt.event_id.as_u128() == entry.event_id
         && receipt.sequence == entry.global_sequence
         && receipt.disk_pos == entry.disk_pos
         && receipt.content_hash == entry.hash_chain.event_hash

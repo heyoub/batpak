@@ -1,0 +1,19 @@
+{
+  "name": "@batpak/example-heartbeat-spike",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Phase 0 spike: boot hbat, send a system.heartbeat, decode the ack.",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -b",
+    "test": "echo 'roundtrip is run from packages/test or CI script, not here'",
+    "start": "node ./dist/index.js",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@batpak/canonical": "workspace:*",
+    "@batpak/client": "workspace:*",
+    "@batpak/generated": "workspace:*",
+    "@batpak/schema": "workspace:*"
+  }
+}

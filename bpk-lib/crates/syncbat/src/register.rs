@@ -6,6 +6,7 @@
 
 use crate::core::{Checkout, CheckoutFrame};
 use crate::operation::{DescriptorValidationError, OperationDescriptor, OperationInput};
+use crate::operation_name::{OperationName, OperationNameError};
 use std::collections::BTreeMap;
 use std::fmt;
 
@@ -181,34 +182,25 @@ impl Register {
 }
 
 pub(crate) fn validate_module_name(name: &str) -> Result<(), RegisterValidationError> {
-    if name.is_empty() {
-        return Err(RegisterValidationError::InvalidModuleName {
+    // Module names share the operation-name grammar; defer to the single
+    // validating constructor and map the typed error onto this layer's
+    // `InvalidModuleName` shape so the stable `message` column is preserved.
+    OperationName::new(name).map(|_| ()).map_err(|error| {
+        let message: &'static str = match error {
+            OperationNameError::Empty => "empty",
+            OperationNameError::TooLong { .. } => "too long",
+            OperationNameError::LeadingOrTrailingDot | OperationNameError::ConsecutiveDots => {
+                "dot-separated tokens must be non-empty"
+            }
+            OperationNameError::IllegalCharacter { .. } => {
+                "expected ASCII letters, digits, '.', '_' or '-'"
+            }
+        };
+        RegisterValidationError::InvalidModuleName {
             name: name.to_owned(),
-            message: "empty",
-        });
-    }
-    if name.len() > crate::operation::MAX_OPERATION_NAME_BYTES {
-        return Err(RegisterValidationError::InvalidModuleName {
-            name: name.to_owned(),
-            message: "too long",
-        });
-    }
-    if name
-        .bytes()
-        .any(|byte| !matches!(byte, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'.' | b'_' | b'-'))
-    {
-        return Err(RegisterValidationError::InvalidModuleName {
-            name: name.to_owned(),
-            message: "expected ASCII letters, digits, '.', '_' or '-'",
-        });
-    }
-    if name.starts_with('.') || name.ends_with('.') || name.contains("..") {
-        return Err(RegisterValidationError::InvalidModuleName {
-            name: name.to_owned(),
-            message: "dot-separated tokens must be non-empty",
-        });
-    }
-    Ok(())
+            message,
+        }
+    })
 }
 
 /// Hot lookup projection over a [`Register`].

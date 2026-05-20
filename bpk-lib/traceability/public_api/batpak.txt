@@ -184,10 +184,10 @@ pub fn batpak::event::hash::compute_hash(content_bytes: &[u8]) -> [u8; 32]
 pub fn batpak::event::hash::verify_chain(content_bytes: &[u8], chain: &batpak::event::hash::HashChain, expected_prev: &[u8; 32]) -> bool
 pub mod batpak::event::header
 #[repr(C)] pub struct batpak::event::header::EventHeader
-pub batpak::event::header::EventHeader::causation_id: core::option::Option<u128>
+pub batpak::event::header::EventHeader::causation_id: core::option::Option<batpak::id::CausationId>
 pub batpak::event::header::EventHeader::content_hash: [u8; 32]
-pub batpak::event::header::EventHeader::correlation_id: u128
-pub batpak::event::header::EventHeader::event_id: u128
+pub batpak::event::header::EventHeader::correlation_id: batpak::id::CorrelationId
+pub batpak::event::header::EventHeader::event_id: batpak::id::EventId
 pub batpak::event::header::EventHeader::event_kind: batpak::event::kind::EventKind
 pub batpak::event::header::EventHeader::flags: u8
 pub batpak::event::header::EventHeader::payload_size: u32
@@ -231,6 +231,8 @@ pub const batpak::event::kind::EventKind::SYSTEM_CLOSE_COMPLETED: Self
 pub const batpak::event::kind::EventKind::SYSTEM_CONFIG_CHANGE: Self
 pub const batpak::event::kind::EventKind::SYSTEM_DENIAL: Self
 pub const batpak::event::kind::EventKind::SYSTEM_HEARTBEAT: Self
+pub const batpak::event::kind::EventKind::SYSTEM_HEARTBEAT_ACK: Self
+pub const batpak::event::kind::EventKind::SYSTEM_HEARTBEAT_REQUEST: Self
 pub const batpak::event::kind::EventKind::SYSTEM_INIT: Self
 pub const batpak::event::kind::EventKind::SYSTEM_OPEN_COMPLETED: Self
 pub const batpak::event::kind::EventKind::SYSTEM_SHUTDOWN: Self
@@ -358,7 +360,7 @@ pub batpak::event::Event::hash_chain: core::option::Option<batpak::event::hash::
 pub batpak::event::Event::header: batpak::event::header::EventHeader
 pub batpak::event::Event::payload: P
 impl<P> batpak::event::Event<P>
-pub fn batpak::event::Event<P>::event_id(&self) -> u128
+pub fn batpak::event::Event<P>::event_id(&self) -> batpak::id::EventId
 pub fn batpak::event::Event<P>::event_kind(&self) -> batpak::event::kind::EventKind
 pub fn batpak::event::Event<P>::is_genesis(&self) -> bool
 pub fn batpak::event::Event<P>::map_payload<U, F: core::ops::function::FnOnce(P) -> U>(self, f: F) -> batpak::event::Event<U>
@@ -372,10 +374,10 @@ impl batpak::event::decode::DecodeTyped for batpak::event::Event<serde_json::val
 pub fn batpak::event::Event<serde_json::value::Value>::decode_typed<T: batpak::event::payload::EventPayload>(&self) -> core::result::Result<T, batpak::event::decode::TypedDecodeError>
 pub fn batpak::event::Event<serde_json::value::Value>::route_typed<T: batpak::event::payload::EventPayload>(&self) -> core::result::Result<core::option::Option<T>, batpak::event::decode::TypedDecodeError>
 #[repr(C)] pub struct batpak::event::EventHeader
-pub batpak::event::EventHeader::causation_id: core::option::Option<u128>
+pub batpak::event::EventHeader::causation_id: core::option::Option<batpak::id::CausationId>
 pub batpak::event::EventHeader::content_hash: [u8; 32]
-pub batpak::event::EventHeader::correlation_id: u128
-pub batpak::event::EventHeader::event_id: u128
+pub batpak::event::EventHeader::correlation_id: batpak::id::CorrelationId
+pub batpak::event::EventHeader::event_id: batpak::id::EventId
 pub batpak::event::EventHeader::event_kind: batpak::event::kind::EventKind
 pub batpak::event::EventHeader::flags: u8
 pub batpak::event::EventHeader::payload_size: u32
@@ -405,6 +407,8 @@ pub const batpak::event::kind::EventKind::SYSTEM_CLOSE_COMPLETED: Self
 pub const batpak::event::kind::EventKind::SYSTEM_CONFIG_CHANGE: Self
 pub const batpak::event::kind::EventKind::SYSTEM_DENIAL: Self
 pub const batpak::event::kind::EventKind::SYSTEM_HEARTBEAT: Self
+pub const batpak::event::kind::EventKind::SYSTEM_HEARTBEAT_ACK: Self
+pub const batpak::event::kind::EventKind::SYSTEM_HEARTBEAT_REQUEST: Self
 pub const batpak::event::kind::EventKind::SYSTEM_INIT: Self
 pub const batpak::event::kind::EventKind::SYSTEM_OPEN_COMPLETED: Self
 pub const batpak::event::kind::EventKind::SYSTEM_SHUTDOWN: Self
@@ -613,6 +617,10 @@ pub fn batpak::id::CausationId::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> 
 impl core::str::traits::FromStr for batpak::id::CausationId
 pub type batpak::id::CausationId::Err = alloc::string::String
 pub fn batpak::id::CausationId::from_str(s: &str) -> core::result::Result<Self, Self::Err>
+impl serde_core::ser::Serialize for batpak::id::CausationId
+pub fn batpak::id::CausationId::serialize<S: serde_core::ser::Serializer>(&self, ser: S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
+impl<'de> serde_core::de::Deserialize<'de> for batpak::id::CausationId
+pub fn batpak::id::CausationId::deserialize<D: serde_core::de::Deserializer<'de>>(de: D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
 pub struct batpak::id::CorrelationId(_)
 impl batpak::id::EntityIdType for batpak::id::CorrelationId
 pub const batpak::id::CorrelationId::ENTITY_NAME: &'static str
@@ -630,6 +638,10 @@ pub fn batpak::id::CorrelationId::fmt(&self, f: &mut core::fmt::Formatter<'_>) -
 impl core::str::traits::FromStr for batpak::id::CorrelationId
 pub type batpak::id::CorrelationId::Err = alloc::string::String
 pub fn batpak::id::CorrelationId::from_str(s: &str) -> core::result::Result<Self, Self::Err>
+impl serde_core::ser::Serialize for batpak::id::CorrelationId
+pub fn batpak::id::CorrelationId::serialize<S: serde_core::ser::Serializer>(&self, ser: S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
+impl<'de> serde_core::de::Deserialize<'de> for batpak::id::CorrelationId
+pub fn batpak::id::CorrelationId::deserialize<D: serde_core::de::Deserializer<'de>>(de: D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
 pub struct batpak::id::EventId(_)
 impl batpak::id::EntityIdType for batpak::id::EventId
 pub const batpak::id::EventId::ENTITY_NAME: &'static str
@@ -647,6 +659,31 @@ pub fn batpak::id::EventId::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core
 impl core::str::traits::FromStr for batpak::id::EventId
 pub type batpak::id::EventId::Err = alloc::string::String
 pub fn batpak::id::EventId::from_str(s: &str) -> core::result::Result<Self, Self::Err>
+impl serde_core::ser::Serialize for batpak::id::EventId
+pub fn batpak::id::EventId::serialize<S: serde_core::ser::Serializer>(&self, ser: S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
+impl<'de> serde_core::de::Deserialize<'de> for batpak::id::EventId
+pub fn batpak::id::EventId::deserialize<D: serde_core::de::Deserializer<'de>>(de: D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
+pub struct batpak::id::IdempotencyKey(_)
+impl batpak::id::EntityIdType for batpak::id::IdempotencyKey
+pub const batpak::id::IdempotencyKey::ENTITY_NAME: &'static str
+pub fn batpak::id::IdempotencyKey::as_u128(&self) -> u128
+pub fn batpak::id::IdempotencyKey::new(id: u128) -> Self
+pub fn batpak::id::IdempotencyKey::nil() -> Self
+pub fn batpak::id::IdempotencyKey::now_v7() -> Self
+pub fn batpak::id::IdempotencyKey::now_v7_with_clock(clock: &dyn batpak::store::Clock) -> Self
+impl core::convert::From<batpak::id::IdempotencyKey> for u128
+pub fn u128::from(id: batpak::id::IdempotencyKey) -> Self
+impl core::convert::From<u128> for batpak::id::IdempotencyKey
+pub fn batpak::id::IdempotencyKey::from(id: u128) -> Self
+impl core::fmt::Display for batpak::id::IdempotencyKey
+pub fn batpak::id::IdempotencyKey::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::str::traits::FromStr for batpak::id::IdempotencyKey
+pub type batpak::id::IdempotencyKey::Err = alloc::string::String
+pub fn batpak::id::IdempotencyKey::from_str(s: &str) -> core::result::Result<Self, Self::Err>
+impl serde_core::ser::Serialize for batpak::id::IdempotencyKey
+pub fn batpak::id::IdempotencyKey::serialize<S: serde_core::ser::Serializer>(&self, ser: S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
+impl<'de> serde_core::de::Deserialize<'de> for batpak::id::IdempotencyKey
+pub fn batpak::id::IdempotencyKey::deserialize<D: serde_core::de::Deserializer<'de>>(de: D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
 pub trait batpak::id::EntityIdType: core::marker::Copy + core::clone::Clone + core::cmp::Eq + core::hash::Hash + core::fmt::Debug + core::fmt::Display + core::str::traits::FromStr + core::marker::Send + core::marker::Sync + 'static
 pub const batpak::id::EntityIdType::ENTITY_NAME: &'static str
 pub fn batpak::id::EntityIdType::as_u128(&self) -> u128
@@ -675,6 +712,13 @@ pub fn batpak::id::EventId::new(id: u128) -> Self
 pub fn batpak::id::EventId::nil() -> Self
 pub fn batpak::id::EventId::now_v7() -> Self
 pub fn batpak::id::EventId::now_v7_with_clock(clock: &dyn batpak::store::Clock) -> Self
+impl batpak::id::EntityIdType for batpak::id::IdempotencyKey
+pub const batpak::id::IdempotencyKey::ENTITY_NAME: &'static str
+pub fn batpak::id::IdempotencyKey::as_u128(&self) -> u128
+pub fn batpak::id::IdempotencyKey::new(id: u128) -> Self
+pub fn batpak::id::IdempotencyKey::nil() -> Self
+pub fn batpak::id::IdempotencyKey::now_v7() -> Self
+pub fn batpak::id::IdempotencyKey::now_v7_with_clock(clock: &dyn batpak::store::Clock) -> Self
 pub fn batpak::id::generate_v7_id() -> u128
 pub fn batpak::id::generate_v7_id_with_clock(clock: &dyn batpak::store::Clock) -> u128
 pub mod batpak::outcome
@@ -1397,26 +1441,24 @@ pub batpak::prelude::WatermarkKind::Applied
 pub batpak::prelude::WatermarkKind::Durable
 pub batpak::prelude::WatermarkKind::Visible
 pub struct batpak::prelude::AppendOptions
-pub batpak::prelude::AppendOptions::causation_id: core::option::Option<u128>
-pub batpak::prelude::AppendOptions::correlation_id: core::option::Option<u128>
+pub batpak::prelude::AppendOptions::causation_id: core::option::Option<batpak::id::CausationId>
+pub batpak::prelude::AppendOptions::correlation_id: core::option::Option<batpak::id::CorrelationId>
 pub batpak::prelude::AppendOptions::expected_sequence: core::option::Option<u32>
 pub batpak::prelude::AppendOptions::extensions: alloc::collections::btree::map::BTreeMap<batpak::store::ExtensionKey, batpak::store::EncodedBytes>
 pub batpak::prelude::AppendOptions::flags: u8
 pub batpak::prelude::AppendOptions::gate: core::option::Option<batpak::prelude::DurabilityGate>
-pub batpak::prelude::AppendOptions::idempotency_key: core::option::Option<u128>
+pub batpak::prelude::AppendOptions::idempotency_key: core::option::Option<batpak::id::IdempotencyKey>
 pub batpak::prelude::AppendOptions::position_hint: core::option::Option<batpak::prelude::AppendPositionHint>
 impl batpak::prelude::AppendOptions
 pub fn batpak::prelude::AppendOptions::new() -> Self
 pub fn batpak::prelude::AppendOptions::with_cas(self, seq: u32) -> Self
-pub fn batpak::prelude::AppendOptions::with_causation(self, id: u128) -> Self
-pub fn batpak::prelude::AppendOptions::with_causation_typed(self, id: batpak::id::CausationId) -> Self
-pub fn batpak::prelude::AppendOptions::with_correlation(self, id: u128) -> Self
-pub fn batpak::prelude::AppendOptions::with_correlation_typed(self, id: batpak::id::CorrelationId) -> Self
+pub fn batpak::prelude::AppendOptions::with_causation(self, id: batpak::id::CausationId) -> Self
+pub fn batpak::prelude::AppendOptions::with_correlation(self, id: batpak::id::CorrelationId) -> Self
 pub fn batpak::prelude::AppendOptions::with_extension(self, key: batpak::store::ExtensionKey, bytes: impl core::convert::Into<batpak::store::EncodedBytes>) -> Self
 pub fn batpak::prelude::AppendOptions::with_extensions(self, extensions: alloc::collections::btree::map::BTreeMap<batpak::store::ExtensionKey, batpak::store::EncodedBytes>) -> Self
 pub fn batpak::prelude::AppendOptions::with_flags(self, flags: u8) -> Self
 pub fn batpak::prelude::AppendOptions::with_gate(self, gate: batpak::prelude::DurabilityGate) -> Self
-pub fn batpak::prelude::AppendOptions::with_idempotency(self, key: u128) -> Self
+pub fn batpak::prelude::AppendOptions::with_idempotency(self, key: batpak::id::IdempotencyKey) -> Self
 pub fn batpak::prelude::AppendOptions::with_position_hint(self, hint: batpak::prelude::AppendPositionHint) -> Self
 pub fn batpak::prelude::AppendOptions::with_receipt_extension<P: batpak::prelude::ReceiptExtensionNamespace>(self, key: batpak::prelude::ReceiptExtensionKey<P>, value: batpak::prelude::ReceiptExtensionValue<P>) -> Self
 impl core::default::Default for batpak::prelude::AppendOptions
@@ -1428,7 +1470,7 @@ impl batpak::prelude::AppendPositionHint
 pub const fn batpak::prelude::AppendPositionHint::new(lane: u32, depth: u32) -> Self
 #[non_exhaustive] pub struct batpak::prelude::AppendReceipt
 pub batpak::prelude::AppendReceipt::content_hash: [u8; 32]
-pub batpak::prelude::AppendReceipt::event_id: u128
+pub batpak::prelude::AppendReceipt::event_id: batpak::id::EventId
 pub batpak::prelude::AppendReceipt::extensions: alloc::collections::btree::map::BTreeMap<batpak::store::ExtensionKey, batpak::store::EncodedBytes>
 pub batpak::prelude::AppendReceipt::key_id: [u8; 32]
 pub batpak::prelude::AppendReceipt::sequence: u64
@@ -1509,6 +1551,10 @@ pub fn batpak::id::CausationId::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> 
 impl core::str::traits::FromStr for batpak::id::CausationId
 pub type batpak::id::CausationId::Err = alloc::string::String
 pub fn batpak::id::CausationId::from_str(s: &str) -> core::result::Result<Self, Self::Err>
+impl serde_core::ser::Serialize for batpak::id::CausationId
+pub fn batpak::id::CausationId::serialize<S: serde_core::ser::Serializer>(&self, ser: S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
+impl<'de> serde_core::de::Deserialize<'de> for batpak::id::CausationId
+pub fn batpak::id::CausationId::deserialize<D: serde_core::de::Deserializer<'de>>(de: D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
 pub struct batpak::prelude::ChainWalkEvidenceReport
 pub batpak::prelude::ChainWalkEvidenceReport::batpak_version: core::option::Option<alloc::string::String>
 pub batpak::prelude::ChainWalkEvidenceReport::body: batpak::prelude::ChainWalkReportBody
@@ -1582,6 +1628,10 @@ pub fn batpak::id::CorrelationId::fmt(&self, f: &mut core::fmt::Formatter<'_>) -
 impl core::str::traits::FromStr for batpak::id::CorrelationId
 pub type batpak::id::CorrelationId::Err = alloc::string::String
 pub fn batpak::id::CorrelationId::from_str(s: &str) -> core::result::Result<Self, Self::Err>
+impl serde_core::ser::Serialize for batpak::id::CorrelationId
+pub fn batpak::id::CorrelationId::serialize<S: serde_core::ser::Serializer>(&self, ser: S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
+impl<'de> serde_core::de::Deserialize<'de> for batpak::id::CorrelationId
+pub fn batpak::id::CorrelationId::deserialize<D: serde_core::de::Deserializer<'de>>(de: D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
 pub struct batpak::prelude::Cursor
 impl batpak::store::delivery::cursor::Cursor
 pub fn batpak::store::delivery::cursor::Cursor::load_checkpoint(data_dir: &std::path::Path, id: &batpak::store::delivery::observation::CheckpointId) -> std::io::error::Result<core::option::Option<batpak::store::delivery::cursor::CursorCheckpoint>>
@@ -1658,7 +1708,7 @@ pub batpak::prelude::Event::hash_chain: core::option::Option<batpak::event::hash
 pub batpak::prelude::Event::header: batpak::event::header::EventHeader
 pub batpak::prelude::Event::payload: P
 impl<P> batpak::event::Event<P>
-pub fn batpak::event::Event<P>::event_id(&self) -> u128
+pub fn batpak::event::Event<P>::event_id(&self) -> batpak::id::EventId
 pub fn batpak::event::Event<P>::event_kind(&self) -> batpak::event::kind::EventKind
 pub fn batpak::event::Event<P>::is_genesis(&self) -> bool
 pub fn batpak::event::Event<P>::map_payload<U, F: core::ops::function::FnOnce(P) -> U>(self, f: F) -> batpak::event::Event<U>
@@ -1672,10 +1722,10 @@ impl batpak::event::decode::DecodeTyped for batpak::event::Event<serde_json::val
 pub fn batpak::event::Event<serde_json::value::Value>::decode_typed<T: batpak::event::payload::EventPayload>(&self) -> core::result::Result<T, batpak::event::decode::TypedDecodeError>
 pub fn batpak::event::Event<serde_json::value::Value>::route_typed<T: batpak::event::payload::EventPayload>(&self) -> core::result::Result<core::option::Option<T>, batpak::event::decode::TypedDecodeError>
 #[repr(C)] pub struct batpak::prelude::EventHeader
-pub batpak::prelude::EventHeader::causation_id: core::option::Option<u128>
+pub batpak::prelude::EventHeader::causation_id: core::option::Option<batpak::id::CausationId>
 pub batpak::prelude::EventHeader::content_hash: [u8; 32]
-pub batpak::prelude::EventHeader::correlation_id: u128
-pub batpak::prelude::EventHeader::event_id: u128
+pub batpak::prelude::EventHeader::correlation_id: batpak::id::CorrelationId
+pub batpak::prelude::EventHeader::event_id: batpak::id::EventId
 pub batpak::prelude::EventHeader::event_kind: batpak::event::kind::EventKind
 pub batpak::prelude::EventHeader::flags: u8
 pub batpak::prelude::EventHeader::payload_size: u32
@@ -1706,6 +1756,10 @@ pub fn batpak::id::EventId::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core
 impl core::str::traits::FromStr for batpak::id::EventId
 pub type batpak::id::EventId::Err = alloc::string::String
 pub fn batpak::id::EventId::from_str(s: &str) -> core::result::Result<Self, Self::Err>
+impl serde_core::ser::Serialize for batpak::id::EventId
+pub fn batpak::id::EventId::serialize<S: serde_core::ser::Serializer>(&self, ser: S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
+impl<'de> serde_core::de::Deserialize<'de> for batpak::id::EventId
+pub fn batpak::id::EventId::deserialize<D: serde_core::de::Deserializer<'de>>(de: D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
 pub struct batpak::prelude::EventKind(_)
 impl batpak::event::kind::EventKind
 pub const batpak::event::kind::EventKind::DATA: Self
@@ -1722,6 +1776,8 @@ pub const batpak::event::kind::EventKind::SYSTEM_CLOSE_COMPLETED: Self
 pub const batpak::event::kind::EventKind::SYSTEM_CONFIG_CHANGE: Self
 pub const batpak::event::kind::EventKind::SYSTEM_DENIAL: Self
 pub const batpak::event::kind::EventKind::SYSTEM_HEARTBEAT: Self
+pub const batpak::event::kind::EventKind::SYSTEM_HEARTBEAT_ACK: Self
+pub const batpak::event::kind::EventKind::SYSTEM_HEARTBEAT_REQUEST: Self
 pub const batpak::event::kind::EventKind::SYSTEM_INIT: Self
 pub const batpak::event::kind::EventKind::SYSTEM_OPEN_COMPLETED: Self
 pub const batpak::event::kind::EventKind::SYSTEM_SHUTDOWN: Self
@@ -2011,9 +2067,9 @@ pub fn batpak::store::Store<batpak::store::Open>::append(&self, coord: &batpak::
 pub fn batpak::store::Store<batpak::store::Open>::append_batch(&self, items: alloc::vec::Vec<batpak::prelude::BatchAppendItem>) -> core::result::Result<alloc::vec::Vec<batpak::prelude::AppendReceipt>, batpak::prelude::StoreError>
 pub fn batpak::store::Store<batpak::store::Open>::append_batch_with_options(&self, items: alloc::vec::Vec<batpak::prelude::BatchAppendItem>, opts: batpak::prelude::AppendOptions) -> core::result::Result<alloc::vec::Vec<batpak::prelude::AppendReceipt>, batpak::prelude::StoreError>
 pub fn batpak::store::Store<batpak::store::Open>::append_denial<Ctx>(&self, coord: &batpak::coordinate::Coordinate, proposed_kind: batpak::event::kind::EventKind, gate_set: &batpak::guard::GateSet<Ctx>, failing: &batpak::guard::denial::Denial, proposed_content_hash: core::option::Option<[u8; 32]>, pipeline_id: core::option::Option<alloc::string::String>, options: batpak::prelude::AppendOptions) -> core::result::Result<batpak::store::DenialReceipt, batpak::prelude::StoreError>
-pub fn batpak::store::Store<batpak::store::Open>::append_reaction(&self, coord: &batpak::coordinate::Coordinate, kind: batpak::event::kind::EventKind, payload: &impl serde_core::ser::Serialize, correlation_id: u128, causation_id: u128) -> core::result::Result<batpak::prelude::AppendReceipt, batpak::prelude::StoreError>
-pub fn batpak::store::Store<batpak::store::Open>::append_reaction_batch(&self, correlation_id: u128, causation_id: u128, items: alloc::vec::Vec<batpak::prelude::BatchAppendItem>) -> core::result::Result<alloc::vec::Vec<batpak::prelude::AppendReceipt>, batpak::prelude::StoreError>
-pub fn batpak::store::Store<batpak::store::Open>::append_reaction_typed<T: batpak::event::payload::EventPayload>(&self, coord: &batpak::coordinate::Coordinate, payload: &T, correlation_id: u128, causation_id: u128) -> core::result::Result<batpak::prelude::AppendReceipt, batpak::prelude::StoreError>
+pub fn batpak::store::Store<batpak::store::Open>::append_reaction(&self, coord: &batpak::coordinate::Coordinate, kind: batpak::event::kind::EventKind, payload: &impl serde_core::ser::Serialize, correlation_id: batpak::id::CorrelationId, causation_id: batpak::id::CausationId) -> core::result::Result<batpak::prelude::AppendReceipt, batpak::prelude::StoreError>
+pub fn batpak::store::Store<batpak::store::Open>::append_reaction_batch(&self, correlation_id: batpak::id::CorrelationId, causation_id: batpak::id::CausationId, items: alloc::vec::Vec<batpak::prelude::BatchAppendItem>) -> core::result::Result<alloc::vec::Vec<batpak::prelude::AppendReceipt>, batpak::prelude::StoreError>
+pub fn batpak::store::Store<batpak::store::Open>::append_reaction_typed<T: batpak::event::payload::EventPayload>(&self, coord: &batpak::coordinate::Coordinate, payload: &T, correlation_id: batpak::id::CorrelationId, causation_id: batpak::id::CausationId) -> core::result::Result<batpak::prelude::AppendReceipt, batpak::prelude::StoreError>
 pub fn batpak::store::Store<batpak::store::Open>::append_typed<T: batpak::event::payload::EventPayload>(&self, coord: &batpak::coordinate::Coordinate, payload: &T) -> core::result::Result<batpak::prelude::AppendReceipt, batpak::prelude::StoreError>
 pub fn batpak::store::Store<batpak::store::Open>::append_typed_with_options<T: batpak::event::payload::EventPayload>(&self, coord: &batpak::coordinate::Coordinate, payload: &T, opts: batpak::prelude::AppendOptions) -> core::result::Result<batpak::prelude::AppendReceipt, batpak::prelude::StoreError>
 pub fn batpak::store::Store<batpak::store::Open>::append_with_options(&self, coord: &batpak::coordinate::Coordinate, kind: batpak::event::kind::EventKind, payload: &impl serde_core::ser::Serialize, opts: batpak::prelude::AppendOptions) -> core::result::Result<batpak::prelude::AppendReceipt, batpak::prelude::StoreError>
@@ -2022,13 +2078,13 @@ pub fn batpak::store::Store<batpak::store::Open>::begin_visibility_fence(&self) 
 pub fn batpak::store::Store<batpak::store::Open>::outbox(&self) -> batpak::store::Outbox<'_>
 pub fn batpak::store::Store<batpak::store::Open>::submit(&self, coord: &batpak::coordinate::Coordinate, kind: batpak::event::kind::EventKind, payload: &impl serde_core::ser::Serialize) -> core::result::Result<batpak::prelude::AppendTicket, batpak::prelude::StoreError>
 pub fn batpak::store::Store<batpak::store::Open>::submit_batch(&self, items: alloc::vec::Vec<batpak::prelude::BatchAppendItem>) -> core::result::Result<batpak::prelude::BatchAppendTicket, batpak::prelude::StoreError>
-pub fn batpak::store::Store<batpak::store::Open>::submit_reaction(&self, coord: &batpak::coordinate::Coordinate, kind: batpak::event::kind::EventKind, payload: &impl serde_core::ser::Serialize, correlation_id: u128, causation_id: u128) -> core::result::Result<batpak::prelude::AppendTicket, batpak::prelude::StoreError>
-pub fn batpak::store::Store<batpak::store::Open>::submit_reaction_typed<T: batpak::event::payload::EventPayload>(&self, coord: &batpak::coordinate::Coordinate, payload: &T, correlation_id: u128, causation_id: u128) -> core::result::Result<batpak::prelude::AppendTicket, batpak::prelude::StoreError>
+pub fn batpak::store::Store<batpak::store::Open>::submit_reaction(&self, coord: &batpak::coordinate::Coordinate, kind: batpak::event::kind::EventKind, payload: &impl serde_core::ser::Serialize, correlation_id: batpak::id::CorrelationId, causation_id: batpak::id::CausationId) -> core::result::Result<batpak::prelude::AppendTicket, batpak::prelude::StoreError>
+pub fn batpak::store::Store<batpak::store::Open>::submit_reaction_typed<T: batpak::event::payload::EventPayload>(&self, coord: &batpak::coordinate::Coordinate, payload: &T, correlation_id: batpak::id::CorrelationId, causation_id: batpak::id::CausationId) -> core::result::Result<batpak::prelude::AppendTicket, batpak::prelude::StoreError>
 pub fn batpak::store::Store<batpak::store::Open>::submit_typed<T: batpak::event::payload::EventPayload>(&self, coord: &batpak::coordinate::Coordinate, payload: &T) -> core::result::Result<batpak::prelude::AppendTicket, batpak::prelude::StoreError>
 pub fn batpak::store::Store<batpak::store::Open>::try_submit(&self, coord: &batpak::coordinate::Coordinate, kind: batpak::event::kind::EventKind, payload: &impl serde_core::ser::Serialize) -> core::result::Result<batpak::outcome::Outcome<batpak::prelude::AppendTicket>, batpak::prelude::StoreError>
 pub fn batpak::store::Store<batpak::store::Open>::try_submit_batch(&self, items: alloc::vec::Vec<batpak::prelude::BatchAppendItem>) -> core::result::Result<batpak::outcome::Outcome<batpak::prelude::BatchAppendTicket>, batpak::prelude::StoreError>
-pub fn batpak::store::Store<batpak::store::Open>::try_submit_reaction(&self, coord: &batpak::coordinate::Coordinate, kind: batpak::event::kind::EventKind, payload: &impl serde_core::ser::Serialize, correlation_id: u128, causation_id: u128) -> core::result::Result<batpak::outcome::Outcome<batpak::prelude::AppendTicket>, batpak::prelude::StoreError>
-pub fn batpak::store::Store<batpak::store::Open>::try_submit_reaction_typed<T: batpak::event::payload::EventPayload>(&self, coord: &batpak::coordinate::Coordinate, payload: &T, correlation_id: u128, causation_id: u128) -> core::result::Result<batpak::outcome::Outcome<batpak::prelude::AppendTicket>, batpak::prelude::StoreError>
+pub fn batpak::store::Store<batpak::store::Open>::try_submit_reaction(&self, coord: &batpak::coordinate::Coordinate, kind: batpak::event::kind::EventKind, payload: &impl serde_core::ser::Serialize, correlation_id: batpak::id::CorrelationId, causation_id: batpak::id::CausationId) -> core::result::Result<batpak::outcome::Outcome<batpak::prelude::AppendTicket>, batpak::prelude::StoreError>
+pub fn batpak::store::Store<batpak::store::Open>::try_submit_reaction_typed<T: batpak::event::payload::EventPayload>(&self, coord: &batpak::coordinate::Coordinate, payload: &T, correlation_id: batpak::id::CorrelationId, causation_id: batpak::id::CausationId) -> core::result::Result<batpak::outcome::Outcome<batpak::prelude::AppendTicket>, batpak::prelude::StoreError>
 pub fn batpak::store::Store<batpak::store::Open>::try_submit_typed<T: batpak::event::payload::EventPayload>(&self, coord: &batpak::coordinate::Coordinate, payload: &T) -> core::result::Result<batpak::outcome::Outcome<batpak::prelude::AppendTicket>, batpak::prelude::StoreError>
 pub fn batpak::store::Store<batpak::store::Open>::writer_pressure(&self) -> batpak::store::stats::WriterPressure
 impl batpak::store::Store<batpak::store::Open>
@@ -2068,14 +2124,14 @@ pub fn batpak::store::Store<State>::by_fact_typed<T: batpak::event::payload::Eve
 pub fn batpak::store::Store<State>::by_scope(&self, scope: &str) -> alloc::vec::Vec<batpak::store::index::IndexEntry>
 pub fn batpak::store::Store<State>::cursor_guaranteed(&self, region: &batpak::coordinate::Region) -> batpak::store::delivery::cursor::Cursor
 pub fn batpak::store::Store<State>::entity_generation(&self, entity: &str) -> core::option::Option<u64>
-pub fn batpak::store::Store<State>::get(&self, event_id: u128) -> core::result::Result<batpak::event::StoredEvent<serde_json::value::Value>, batpak::prelude::StoreError>
+pub fn batpak::store::Store<State>::get(&self, event_id: batpak::id::EventId) -> core::result::Result<batpak::event::StoredEvent<serde_json::value::Value>, batpak::prelude::StoreError>
 pub fn batpak::store::Store<State>::project<T>(&self, entity: &str, freshness: &batpak::store::projection::Freshness) -> core::result::Result<core::option::Option<T>, batpak::prelude::StoreError> where T: batpak::event::sourcing::EventSourced + serde_core::ser::Serialize + serde_core::de::DeserializeOwned + 'static, <T as batpak::event::sourcing::EventSourced>::Input: projection::flow::ReplayInput
 pub fn batpak::store::Store<State>::project_if_changed<T>(&self, entity: &str, last_seen_generation: u64, freshness: &batpak::store::projection::Freshness) -> core::result::Result<core::option::Option<(u64, core::option::Option<T>)>, batpak::prelude::StoreError> where T: batpak::event::sourcing::EventSourced + serde_core::ser::Serialize + serde_core::de::DeserializeOwned + 'static, <T as batpak::event::sourcing::EventSourced>::Input: projection::flow::ReplayInput
 pub fn batpak::store::Store<State>::query(&self, region: &batpak::coordinate::Region) -> alloc::vec::Vec<batpak::store::index::IndexEntry>
-pub fn batpak::store::Store<State>::read_raw(&self, event_id: u128) -> core::result::Result<batpak::event::StoredEvent<alloc::vec::Vec<u8>>, batpak::prelude::StoreError>
+pub fn batpak::store::Store<State>::read_raw(&self, event_id: batpak::id::EventId) -> core::result::Result<batpak::event::StoredEvent<alloc::vec::Vec<u8>>, batpak::prelude::StoreError>
 pub fn batpak::store::Store<State>::verify_append_receipt(&self, receipt: &batpak::prelude::AppendReceipt) -> bool
 pub fn batpak::store::Store<State>::verify_denial_receipt(&self, receipt: &batpak::store::DenialReceipt) -> bool
-pub fn batpak::store::Store<State>::walk_ancestors(&self, event_id: u128, limit: usize) -> alloc::vec::Vec<batpak::event::StoredEvent<serde_json::value::Value>>
+pub fn batpak::store::Store<State>::walk_ancestors(&self, event_id: batpak::id::EventId, limit: usize) -> alloc::vec::Vec<batpak::event::StoredEvent<serde_json::value::Value>>
 impl<State> batpak::store::Store<State>
 pub fn batpak::store::Store<State>::chain_walk_evidence(&self, request: &batpak::prelude::ChainWalkRequest) -> core::result::Result<batpak::prelude::ChainWalkEvidenceReport, batpak::prelude::ChainWalkReportError>
 impl<State> batpak::store::Store<State>
@@ -2575,7 +2631,7 @@ pub fn batpak::store::backup_envelope::backup_manifest_envelope_body_hash(envelo
 pub fn batpak::store::backup_envelope::backup_manifest_envelope_hash(envelope: &batpak::store::backup_envelope::BackupManifestEnvelope) -> core::result::Result<batpak::store::backup_envelope::SegmentBytesDigest, rmp_serde::encode::Error>
 pub fn batpak::store::backup_envelope::normalize_backup_manifest_body(body: &batpak::store::backup_envelope::BackupManifestBody) -> batpak::store::backup_envelope::BackupManifestBody
 pub fn batpak::store::backup_envelope::normalize_backup_manifest_envelope(envelope: &batpak::store::backup_envelope::BackupManifestEnvelope) -> batpak::store::backup_envelope::BackupManifestEnvelope
-pub fn batpak::store::backup_envelope::restore_proof_evidence_report(expected_manifest: &batpak::store::backup_envelope::BackupManifestBody, observed_segments: alloc::vec::Vec<batpak::store::backup_envelope::BackupSegmentRef>) -> core::result::Result<batpak::store::backup_envelope::RestoreProofEvidenceReport, rmp_serde::encode::Error>
+pub fn batpak::store::backup_envelope::restore_proof_evidence_report(expected_manifest: &batpak::store::backup_envelope::BackupManifestBody, observed_segments: &[batpak::store::backup_envelope::BackupSegmentRef]) -> core::result::Result<batpak::store::backup_envelope::RestoreProofEvidenceReport, rmp_serde::encode::Error>
 pub fn batpak::store::backup_envelope::restore_proof_report_body(expected_manifest: &batpak::store::backup_envelope::BackupManifestBody, observed_segments: &[batpak::store::backup_envelope::BackupSegmentRef]) -> core::result::Result<batpak::store::backup_envelope::RestoreProofReportBody, rmp_serde::encode::Error>
 pub fn batpak::store::backup_envelope::restore_proof_report_body_hash(report: &batpak::store::backup_envelope::RestoreProofReportBody) -> core::result::Result<batpak::store::backup_envelope::SegmentBytesDigest, rmp_serde::encode::Error>
 pub fn batpak::store::backup_envelope::sort_backup_segment_refs(segments: &mut [batpak::store::backup_envelope::BackupSegmentRef])
@@ -2769,7 +2825,7 @@ pub const fn batpak::store::index::IndexEntry::event_id(&self) -> u128
 pub const fn batpak::store::index::IndexEntry::event_kind(&self) -> batpak::event::kind::EventKind
 pub const fn batpak::store::index::IndexEntry::global_sequence(&self) -> u64
 pub const fn batpak::store::index::IndexEntry::hash_chain(&self) -> &batpak::event::hash::HashChain
-pub fn batpak::store::index::IndexEntry::is_caused_by(&self, event_id: u128) -> bool
+pub fn batpak::store::index::IndexEntry::is_caused_by(&self, event_id: batpak::id::EventId) -> bool
 pub fn batpak::store::index::IndexEntry::is_correlated(&self) -> bool
 pub fn batpak::store::index::IndexEntry::is_root_cause(&self) -> bool
 pub const fn batpak::store::index::IndexEntry::receipt_extensions(&self) -> &alloc::collections::btree::map::BTreeMap<batpak::store::ExtensionKey, batpak::store::EncodedBytes>
@@ -3567,26 +3623,24 @@ pub batpak::store::WatermarkKind::Applied
 pub batpak::store::WatermarkKind::Durable
 pub batpak::store::WatermarkKind::Visible
 pub struct batpak::store::AppendOptions
-pub batpak::store::AppendOptions::causation_id: core::option::Option<u128>
-pub batpak::store::AppendOptions::correlation_id: core::option::Option<u128>
+pub batpak::store::AppendOptions::causation_id: core::option::Option<batpak::id::CausationId>
+pub batpak::store::AppendOptions::correlation_id: core::option::Option<batpak::id::CorrelationId>
 pub batpak::store::AppendOptions::expected_sequence: core::option::Option<u32>
 pub batpak::store::AppendOptions::extensions: alloc::collections::btree::map::BTreeMap<batpak::store::ExtensionKey, batpak::store::EncodedBytes>
 pub batpak::store::AppendOptions::flags: u8
 pub batpak::store::AppendOptions::gate: core::option::Option<batpak::prelude::DurabilityGate>
-pub batpak::store::AppendOptions::idempotency_key: core::option::Option<u128>
+pub batpak::store::AppendOptions::idempotency_key: core::option::Option<batpak::id::IdempotencyKey>
 pub batpak::store::AppendOptions::position_hint: core::option::Option<batpak::prelude::AppendPositionHint>
 impl batpak::prelude::AppendOptions
 pub fn batpak::prelude::AppendOptions::new() -> Self
 pub fn batpak::prelude::AppendOptions::with_cas(self, seq: u32) -> Self
-pub fn batpak::prelude::AppendOptions::with_causation(self, id: u128) -> Self
-pub fn batpak::prelude::AppendOptions::with_causation_typed(self, id: batpak::id::CausationId) -> Self
-pub fn batpak::prelude::AppendOptions::with_correlation(self, id: u128) -> Self
-pub fn batpak::prelude::AppendOptions::with_correlation_typed(self, id: batpak::id::CorrelationId) -> Self
+pub fn batpak::prelude::AppendOptions::with_causation(self, id: batpak::id::CausationId) -> Self
+pub fn batpak::prelude::AppendOptions::with_correlation(self, id: batpak::id::CorrelationId) -> Self
 pub fn batpak::prelude::AppendOptions::with_extension(self, key: batpak::store::ExtensionKey, bytes: impl core::convert::Into<batpak::store::EncodedBytes>) -> Self
 pub fn batpak::prelude::AppendOptions::with_extensions(self, extensions: alloc::collections::btree::map::BTreeMap<batpak::store::ExtensionKey, batpak::store::EncodedBytes>) -> Self
 pub fn batpak::prelude::AppendOptions::with_flags(self, flags: u8) -> Self
 pub fn batpak::prelude::AppendOptions::with_gate(self, gate: batpak::prelude::DurabilityGate) -> Self
-pub fn batpak::prelude::AppendOptions::with_idempotency(self, key: u128) -> Self
+pub fn batpak::prelude::AppendOptions::with_idempotency(self, key: batpak::id::IdempotencyKey) -> Self
 pub fn batpak::prelude::AppendOptions::with_position_hint(self, hint: batpak::prelude::AppendPositionHint) -> Self
 pub fn batpak::prelude::AppendOptions::with_receipt_extension<P: batpak::prelude::ReceiptExtensionNamespace>(self, key: batpak::prelude::ReceiptExtensionKey<P>, value: batpak::prelude::ReceiptExtensionValue<P>) -> Self
 impl core::default::Default for batpak::prelude::AppendOptions
@@ -3598,7 +3652,7 @@ impl batpak::prelude::AppendPositionHint
 pub const fn batpak::prelude::AppendPositionHint::new(lane: u32, depth: u32) -> Self
 #[non_exhaustive] pub struct batpak::store::AppendReceipt
 pub batpak::store::AppendReceipt::content_hash: [u8; 32]
-pub batpak::store::AppendReceipt::event_id: u128
+pub batpak::store::AppendReceipt::event_id: batpak::id::EventId
 pub batpak::store::AppendReceipt::extensions: alloc::collections::btree::map::BTreeMap<batpak::store::ExtensionKey, batpak::store::EncodedBytes>
 pub batpak::store::AppendReceipt::key_id: [u8; 32]
 pub batpak::store::AppendReceipt::sequence: u64
@@ -3744,7 +3798,7 @@ impl core::ops::drop::Drop for batpak::store::delivery::cursor::CursorWorkerHand
 pub fn batpak::store::delivery::cursor::CursorWorkerHandle::drop(&mut self)
 #[non_exhaustive] pub struct batpak::store::DenialReceipt
 pub batpak::store::DenialReceipt::content_hash: [u8; 32]
-pub batpak::store::DenialReceipt::event_id: u128
+pub batpak::store::DenialReceipt::event_id: batpak::id::EventId
 pub batpak::store::DenialReceipt::extensions: alloc::collections::btree::map::BTreeMap<batpak::store::ExtensionKey, batpak::store::EncodedBytes>
 pub batpak::store::DenialReceipt::key_id: [u8; 32]
 pub batpak::store::DenialReceipt::sequence: u64
@@ -3995,9 +4049,9 @@ pub fn batpak::store::Store<batpak::store::Open>::append(&self, coord: &batpak::
 pub fn batpak::store::Store<batpak::store::Open>::append_batch(&self, items: alloc::vec::Vec<batpak::prelude::BatchAppendItem>) -> core::result::Result<alloc::vec::Vec<batpak::prelude::AppendReceipt>, batpak::prelude::StoreError>
 pub fn batpak::store::Store<batpak::store::Open>::append_batch_with_options(&self, items: alloc::vec::Vec<batpak::prelude::BatchAppendItem>, opts: batpak::prelude::AppendOptions) -> core::result::Result<alloc::vec::Vec<batpak::prelude::AppendReceipt>, batpak::prelude::StoreError>
 pub fn batpak::store::Store<batpak::store::Open>::append_denial<Ctx>(&self, coord: &batpak::coordinate::Coordinate, proposed_kind: batpak::event::kind::EventKind, gate_set: &batpak::guard::GateSet<Ctx>, failing: &batpak::guard::denial::Denial, proposed_content_hash: core::option::Option<[u8; 32]>, pipeline_id: core::option::Option<alloc::string::String>, options: batpak::prelude::AppendOptions) -> core::result::Result<batpak::store::DenialReceipt, batpak::prelude::StoreError>
-pub fn batpak::store::Store<batpak::store::Open>::append_reaction(&self, coord: &batpak::coordinate::Coordinate, kind: batpak::event::kind::EventKind, payload: &impl serde_core::ser::Serialize, correlation_id: u128, causation_id: u128) -> core::result::Result<batpak::prelude::AppendReceipt, batpak::prelude::StoreError>
-pub fn batpak::store::Store<batpak::store::Open>::append_reaction_batch(&self, correlation_id: u128, causation_id: u128, items: alloc::vec::Vec<batpak::prelude::BatchAppendItem>) -> core::result::Result<alloc::vec::Vec<batpak::prelude::AppendReceipt>, batpak::prelude::StoreError>
-pub fn batpak::store::Store<batpak::store::Open>::append_reaction_typed<T: batpak::event::payload::EventPayload>(&self, coord: &batpak::coordinate::Coordinate, payload: &T, correlation_id: u128, causation_id: u128) -> core::result::Result<batpak::prelude::AppendReceipt, batpak::prelude::StoreError>
+pub fn batpak::store::Store<batpak::store::Open>::append_reaction(&self, coord: &batpak::coordinate::Coordinate, kind: batpak::event::kind::EventKind, payload: &impl serde_core::ser::Serialize, correlation_id: batpak::id::CorrelationId, causation_id: batpak::id::CausationId) -> core::result::Result<batpak::prelude::AppendReceipt, batpak::prelude::StoreError>
+pub fn batpak::store::Store<batpak::store::Open>::append_reaction_batch(&self, correlation_id: batpak::id::CorrelationId, causation_id: batpak::id::CausationId, items: alloc::vec::Vec<batpak::prelude::BatchAppendItem>) -> core::result::Result<alloc::vec::Vec<batpak::prelude::AppendReceipt>, batpak::prelude::StoreError>
+pub fn batpak::store::Store<batpak::store::Open>::append_reaction_typed<T: batpak::event::payload::EventPayload>(&self, coord: &batpak::coordinate::Coordinate, payload: &T, correlation_id: batpak::id::CorrelationId, causation_id: batpak::id::CausationId) -> core::result::Result<batpak::prelude::AppendReceipt, batpak::prelude::StoreError>
 pub fn batpak::store::Store<batpak::store::Open>::append_typed<T: batpak::event::payload::EventPayload>(&self, coord: &batpak::coordinate::Coordinate, payload: &T) -> core::result::Result<batpak::prelude::AppendReceipt, batpak::prelude::StoreError>
 pub fn batpak::store::Store<batpak::store::Open>::append_typed_with_options<T: batpak::event::payload::EventPayload>(&self, coord: &batpak::coordinate::Coordinate, payload: &T, opts: batpak::prelude::AppendOptions) -> core::result::Result<batpak::prelude::AppendReceipt, batpak::prelude::StoreError>
 pub fn batpak::store::Store<batpak::store::Open>::append_with_options(&self, coord: &batpak::coordinate::Coordinate, kind: batpak::event::kind::EventKind, payload: &impl serde_core::ser::Serialize, opts: batpak::prelude::AppendOptions) -> core::result::Result<batpak::prelude::AppendReceipt, batpak::prelude::StoreError>
@@ -4006,13 +4060,13 @@ pub fn batpak::store::Store<batpak::store::Open>::begin_visibility_fence(&self) 
 pub fn batpak::store::Store<batpak::store::Open>::outbox(&self) -> batpak::store::Outbox<'_>
 pub fn batpak::store::Store<batpak::store::Open>::submit(&self, coord: &batpak::coordinate::Coordinate, kind: batpak::event::kind::EventKind, payload: &impl serde_core::ser::Serialize) -> core::result::Result<batpak::prelude::AppendTicket, batpak::prelude::StoreError>
 pub fn batpak::store::Store<batpak::store::Open>::submit_batch(&self, items: alloc::vec::Vec<batpak::prelude::BatchAppendItem>) -> core::result::Result<batpak::prelude::BatchAppendTicket, batpak::prelude::StoreError>
-pub fn batpak::store::Store<batpak::store::Open>::submit_reaction(&self, coord: &batpak::coordinate::Coordinate, kind: batpak::event::kind::EventKind, payload: &impl serde_core::ser::Serialize, correlation_id: u128, causation_id: u128) -> core::result::Result<batpak::prelude::AppendTicket, batpak::prelude::StoreError>
-pub fn batpak::store::Store<batpak::store::Open>::submit_reaction_typed<T: batpak::event::payload::EventPayload>(&self, coord: &batpak::coordinate::Coordinate, payload: &T, correlation_id: u128, causation_id: u128) -> core::result::Result<batpak::prelude::AppendTicket, batpak::prelude::StoreError>
+pub fn batpak::store::Store<batpak::store::Open>::submit_reaction(&self, coord: &batpak::coordinate::Coordinate, kind: batpak::event::kind::EventKind, payload: &impl serde_core::ser::Serialize, correlation_id: batpak::id::CorrelationId, causation_id: batpak::id::CausationId) -> core::result::Result<batpak::prelude::AppendTicket, batpak::prelude::StoreError>
+pub fn batpak::store::Store<batpak::store::Open>::submit_reaction_typed<T: batpak::event::payload::EventPayload>(&self, coord: &batpak::coordinate::Coordinate, payload: &T, correlation_id: batpak::id::CorrelationId, causation_id: batpak::id::CausationId) -> core::result::Result<batpak::prelude::AppendTicket, batpak::prelude::StoreError>
 pub fn batpak::store::Store<batpak::store::Open>::submit_typed<T: batpak::event::payload::EventPayload>(&self, coord: &batpak::coordinate::Coordinate, payload: &T) -> core::result::Result<batpak::prelude::AppendTicket, batpak::prelude::StoreError>
 pub fn batpak::store::Store<batpak::store::Open>::try_submit(&self, coord: &batpak::coordinate::Coordinate, kind: batpak::event::kind::EventKind, payload: &impl serde_core::ser::Serialize) -> core::result::Result<batpak::outcome::Outcome<batpak::prelude::AppendTicket>, batpak::prelude::StoreError>
 pub fn batpak::store::Store<batpak::store::Open>::try_submit_batch(&self, items: alloc::vec::Vec<batpak::prelude::BatchAppendItem>) -> core::result::Result<batpak::outcome::Outcome<batpak::prelude::BatchAppendTicket>, batpak::prelude::StoreError>
-pub fn batpak::store::Store<batpak::store::Open>::try_submit_reaction(&self, coord: &batpak::coordinate::Coordinate, kind: batpak::event::kind::EventKind, payload: &impl serde_core::ser::Serialize, correlation_id: u128, causation_id: u128) -> core::result::Result<batpak::outcome::Outcome<batpak::prelude::AppendTicket>, batpak::prelude::StoreError>
-pub fn batpak::store::Store<batpak::store::Open>::try_submit_reaction_typed<T: batpak::event::payload::EventPayload>(&self, coord: &batpak::coordinate::Coordinate, payload: &T, correlation_id: u128, causation_id: u128) -> core::result::Result<batpak::outcome::Outcome<batpak::prelude::AppendTicket>, batpak::prelude::StoreError>
+pub fn batpak::store::Store<batpak::store::Open>::try_submit_reaction(&self, coord: &batpak::coordinate::Coordinate, kind: batpak::event::kind::EventKind, payload: &impl serde_core::ser::Serialize, correlation_id: batpak::id::CorrelationId, causation_id: batpak::id::CausationId) -> core::result::Result<batpak::outcome::Outcome<batpak::prelude::AppendTicket>, batpak::prelude::StoreError>
+pub fn batpak::store::Store<batpak::store::Open>::try_submit_reaction_typed<T: batpak::event::payload::EventPayload>(&self, coord: &batpak::coordinate::Coordinate, payload: &T, correlation_id: batpak::id::CorrelationId, causation_id: batpak::id::CausationId) -> core::result::Result<batpak::outcome::Outcome<batpak::prelude::AppendTicket>, batpak::prelude::StoreError>
 pub fn batpak::store::Store<batpak::store::Open>::try_submit_typed<T: batpak::event::payload::EventPayload>(&self, coord: &batpak::coordinate::Coordinate, payload: &T) -> core::result::Result<batpak::outcome::Outcome<batpak::prelude::AppendTicket>, batpak::prelude::StoreError>
 pub fn batpak::store::Store<batpak::store::Open>::writer_pressure(&self) -> batpak::store::stats::WriterPressure
 impl batpak::store::Store<batpak::store::Open>
@@ -4052,14 +4106,14 @@ pub fn batpak::store::Store<State>::by_fact_typed<T: batpak::event::payload::Eve
 pub fn batpak::store::Store<State>::by_scope(&self, scope: &str) -> alloc::vec::Vec<batpak::store::index::IndexEntry>
 pub fn batpak::store::Store<State>::cursor_guaranteed(&self, region: &batpak::coordinate::Region) -> batpak::store::delivery::cursor::Cursor
 pub fn batpak::store::Store<State>::entity_generation(&self, entity: &str) -> core::option::Option<u64>
-pub fn batpak::store::Store<State>::get(&self, event_id: u128) -> core::result::Result<batpak::event::StoredEvent<serde_json::value::Value>, batpak::prelude::StoreError>
+pub fn batpak::store::Store<State>::get(&self, event_id: batpak::id::EventId) -> core::result::Result<batpak::event::StoredEvent<serde_json::value::Value>, batpak::prelude::StoreError>
 pub fn batpak::store::Store<State>::project<T>(&self, entity: &str, freshness: &batpak::store::projection::Freshness) -> core::result::Result<core::option::Option<T>, batpak::prelude::StoreError> where T: batpak::event::sourcing::EventSourced + serde_core::ser::Serialize + serde_core::de::DeserializeOwned + 'static, <T as batpak::event::sourcing::EventSourced>::Input: projection::flow::ReplayInput
 pub fn batpak::store::Store<State>::project_if_changed<T>(&self, entity: &str, last_seen_generation: u64, freshness: &batpak::store::projection::Freshness) -> core::result::Result<core::option::Option<(u64, core::option::Option<T>)>, batpak::prelude::StoreError> where T: batpak::event::sourcing::EventSourced + serde_core::ser::Serialize + serde_core::de::DeserializeOwned + 'static, <T as batpak::event::sourcing::EventSourced>::Input: projection::flow::ReplayInput
 pub fn batpak::store::Store<State>::query(&self, region: &batpak::coordinate::Region) -> alloc::vec::Vec<batpak::store::index::IndexEntry>
-pub fn batpak::store::Store<State>::read_raw(&self, event_id: u128) -> core::result::Result<batpak::event::StoredEvent<alloc::vec::Vec<u8>>, batpak::prelude::StoreError>
+pub fn batpak::store::Store<State>::read_raw(&self, event_id: batpak::id::EventId) -> core::result::Result<batpak::event::StoredEvent<alloc::vec::Vec<u8>>, batpak::prelude::StoreError>
 pub fn batpak::store::Store<State>::verify_append_receipt(&self, receipt: &batpak::prelude::AppendReceipt) -> bool
 pub fn batpak::store::Store<State>::verify_denial_receipt(&self, receipt: &batpak::store::DenialReceipt) -> bool
-pub fn batpak::store::Store<State>::walk_ancestors(&self, event_id: u128, limit: usize) -> alloc::vec::Vec<batpak::event::StoredEvent<serde_json::value::Value>>
+pub fn batpak::store::Store<State>::walk_ancestors(&self, event_id: batpak::id::EventId, limit: usize) -> alloc::vec::Vec<batpak::event::StoredEvent<serde_json::value::Value>>
 impl<State> batpak::store::Store<State>
 pub fn batpak::store::Store<State>::chain_walk_evidence(&self, request: &batpak::prelude::ChainWalkRequest) -> core::result::Result<batpak::prelude::ChainWalkEvidenceReport, batpak::prelude::ChainWalkReportError>
 impl<State> batpak::store::Store<State>
@@ -4242,8 +4296,8 @@ pub fn batpak::store::VisibilityFence<'a>::commit(self) -> core::result::Result<
 pub fn batpak::store::VisibilityFence<'a>::outbox(&self) -> batpak::store::Outbox<'_>
 pub fn batpak::store::VisibilityFence<'a>::submit(&self, coord: &batpak::coordinate::Coordinate, kind: batpak::event::kind::EventKind, payload: &impl serde_core::ser::Serialize) -> core::result::Result<batpak::prelude::AppendTicket, batpak::prelude::StoreError>
 pub fn batpak::store::VisibilityFence<'a>::submit_batch(&self, items: alloc::vec::Vec<batpak::prelude::BatchAppendItem>) -> core::result::Result<batpak::prelude::BatchAppendTicket, batpak::prelude::StoreError>
-pub fn batpak::store::VisibilityFence<'a>::submit_reaction(&self, coord: &batpak::coordinate::Coordinate, kind: batpak::event::kind::EventKind, payload: &impl serde_core::ser::Serialize, correlation_id: u128, causation_id: u128) -> core::result::Result<batpak::prelude::AppendTicket, batpak::prelude::StoreError>
-pub fn batpak::store::VisibilityFence<'a>::submit_reaction_typed<T: batpak::event::payload::EventPayload>(&self, coord: &batpak::coordinate::Coordinate, payload: &T, correlation_id: u128, causation_id: u128) -> core::result::Result<batpak::prelude::AppendTicket, batpak::prelude::StoreError>
+pub fn batpak::store::VisibilityFence<'a>::submit_reaction(&self, coord: &batpak::coordinate::Coordinate, kind: batpak::event::kind::EventKind, payload: &impl serde_core::ser::Serialize, correlation_id: batpak::id::CorrelationId, causation_id: batpak::id::CausationId) -> core::result::Result<batpak::prelude::AppendTicket, batpak::prelude::StoreError>
+pub fn batpak::store::VisibilityFence<'a>::submit_reaction_typed<T: batpak::event::payload::EventPayload>(&self, coord: &batpak::coordinate::Coordinate, payload: &T, correlation_id: batpak::id::CorrelationId, causation_id: batpak::id::CausationId) -> core::result::Result<batpak::prelude::AppendTicket, batpak::prelude::StoreError>
 pub fn batpak::store::VisibilityFence<'a>::submit_typed<T: batpak::event::payload::EventPayload>(&self, coord: &batpak::coordinate::Coordinate, payload: &T) -> core::result::Result<batpak::prelude::AppendTicket, batpak::prelude::StoreError>
 impl core::ops::drop::Drop for batpak::store::VisibilityFence<'_>
 pub fn batpak::store::VisibilityFence<'_>::drop(&mut self)

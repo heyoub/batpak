@@ -28,7 +28,7 @@ instead of pretending.
 - Mutation delta: `syncbat-runtime-dispatch` lane is defined in
   `bpk-lib/tools/xtask/src/commands/mutants/lanes.rs`; no run receipt is
   recorded.
-- Unmeasured proof obligations:
+- Remaining known blind spots:
   - receipt hashing policy has deterministic unit coverage; arbitrary-byte
     proptest coverage has no recorded run.
 
@@ -55,7 +55,7 @@ instead of pretending.
 - Mutation delta: `syncbat-register-catalog` lane is defined in
   `bpk-lib/tools/xtask/src/commands/mutants/lanes.rs`; no run receipt is
   recorded.
-- Unmeasured proof obligations:
+- Remaining known blind spots:
   - catalog row order is covered through store sequence order, but no separate
     mutation score is recorded for lifecycle conflict branches.
 
@@ -68,7 +68,7 @@ instead of pretending.
   - `bpk-lib/crates/netbat/tests/boundary.rs`
   - `bpk-lib/crates/netbat/tests/route_validation.rs`
   - `bpk-lib/crates/netbat/tests/tcp_transport.rs`
-  - `bpk-lib/crates/netbat/tests/golden/*.hex`
+  - `bpk-lib/crates/netbat/tests/golden/request_call_v1.hex`
 - Command used:
   - `cargo test -p netbat --test boundary`
   - `cargo test -p netbat --test route_validation`
@@ -77,7 +77,7 @@ instead of pretending.
 - Mutation delta: `netbat-boundary-protocol` lane is defined in
   `bpk-lib/tools/xtask/src/commands/mutants/lanes.rs`; no run receipt is
   recorded.
-- Unmeasured proof obligations:
+- Remaining known blind spots:
   - NETBAT/1 is request/response only; streaming over Canal requires a separate
     protocol contract rather than an implicit extension.
 
@@ -98,7 +98,7 @@ instead of pretending.
   - `cargo test --test derive_multi_event_reactor_errors`
 - Line/function coverage delta: unmeasured
 - Mutation delta: unmeasured
-- Unmeasured proof obligations:
+- Remaining known blind spots:
   - compile-fail suites prove invalid macro shapes and error quality, but they
     do not prove successful derived runtime behaviour by themselves
 
@@ -115,7 +115,7 @@ instead of pretending.
   - `cargo test --test cold_start_recovery`
 - Line/function coverage delta: unmeasured
 - Mutation delta: unmeasured
-- Unmeasured proof obligations:
+- Remaining known blind spots:
   - broad chaos coverage exists, but not every low-level segment-scan defensive
     branch is table-driven yet
 
@@ -149,7 +149,7 @@ instead of pretending.
     fail-closed segment corruption.
   - `orphan_commit_marker_is_ignored_without_stopping_scan` pins COMMIT without
     prior BEGIN as ignored batch metadata that does not stop the scan.
-- Unmeasured proof obligations:
+- Remaining known blind spots:
   - low-level unit coverage still owns some byte-range helper boundaries, but
     the black-box slow-path corruption shapes currently called out in this
     ledger are covered.
@@ -170,7 +170,7 @@ instead of pretending.
 - Mutation delta:
   - writer commit protocol and projection replay/freshness are policy-owned
     critical seams; current thresholds are printed by `cargo xtask mutants policy`.
-- Unmeasured proof obligations:
+- Remaining known blind spots:
   - `writer_panic_at_single_append_written_is_not_durable_on_reopen` is
     intentionally ignored because an in-process writer panic leaves the complete
     unsynced frame recoverable from host page cache; it is superseded by the
@@ -218,7 +218,7 @@ instead of pretending.
     are fast mutation-smoke pins added with Phase 1A so repo-wide cursor
     progression mutants fail quickly instead of exhausting the smoke-lane
     timeout.
-- Unmeasured proof obligations:
+- Remaining known blind spots:
   - none for the explicit-close lifecycle frontier shape currently in scope.
 
 ## State-Machine Harness
@@ -240,7 +240,7 @@ instead of pretending.
   - profile fingerprint round-trip pins the private JSON + CRC32 shape.
   - profile mismatch rejects store open before writer spawn or
     `SYSTEM_OPEN_COMPLETED` lifecycle append.
-- Unmeasured proof obligations:
+- Remaining known blind spots:
   - profile command and crates/core/build.rs env-var validation are covered by structural
     and compile checks; mutation-specific fixtures have no recorded run.
 
@@ -310,7 +310,7 @@ instead of pretending.
   - `OBS-CADENCE-GT-1-VISIBLE-EXCEEDS-DURABLE` is narrowed, not retired:
     cadence>1 without a `DurabilityGate` still exhibits the skew, and the gate
     is the opt-in escape hatch.
-- Unmeasured proof obligations:
+- Remaining known blind spots:
   - Precise waiter lists are not implemented; wake-all remains the current wait
     strategy.
 
@@ -336,7 +336,7 @@ instead of pretending.
     `INV-CHAOS-LINUX-ONLY` by proving the privileged Linux device-mapper
     wrapper can create a mapped ext4 device, write before flip, flip the mapper
     to an error target, and observe synchronous write failure afterward.
-- Unmeasured proof obligations:
+- Remaining known blind spots:
   - This scaffold entry proves wrapper viability only; batpak-specific
     durability claims are recorded in the torn-tail scenario entry below.
 
@@ -395,7 +395,7 @@ instead of pretending.
   - `batch_append_surfaces_io_error_after_device_failure_cadence_1` defends
     that cadence=1 batch appends surface device failure on the first batch
     attempt after the mapper flips.
-- Unmeasured proof obligations:
+- Remaining known blind spots:
   - the legacy in-process `FaultInjector` test remains ignored as a documented
     contrast with host page-cache behavior; the privileged dm-flakey scenario
     now pins the recovered-state accounting contract. Batpak deliberately does
@@ -418,7 +418,7 @@ instead of pretending.
   - `cargo test --test derive_event_sourced_generic`
 - Line/function coverage delta: unmeasured
 - Mutation delta: unmeasured
-- Unmeasured proof obligations:
+- Remaining known blind spots:
   - these suites pin behavioural equivalence, not compile-fail diagnostics
 
 ### Invariant: Live, reopen, and replay paths converge on the same visible truth
@@ -434,7 +434,7 @@ instead of pretending.
   - `cargo test --test mmap_cold_start`
 - Line/function coverage delta: unmeasured
 - Mutation delta: unmeasured
-- Unmeasured proof obligations:
+- Remaining known blind spots:
   - parity across all artifact paths is strong, but some corruption-only
     branches still live in separate fault-injection suites
 
@@ -453,7 +453,7 @@ instead of pretending.
 - Line/function coverage delta: targeted rise in `bpk-lib/crates/core/src/store/projection/flow.rs`
     and watcher-adjacent paths; exact JSON delta not recorded
 - Mutation delta: unmeasured
-- Unmeasured proof obligations:
+- Remaining known blind spots:
   - current matrix now covers relevant and irrelevant appends across the two replay
     lanes, the cache-enabled `Freshness::MaybeStale` stale-hit vs forced-replay branch,
     and both incremental branches (group-local and external-cache replay)
@@ -480,7 +480,7 @@ instead of pretending.
   - `cargo test --test projection_cache consistent_replays_when_cache_row_has_valid_metadata_but_truncated_payload`
 - Line/function coverage delta: targeted rise in `bpk-lib/crates/core/src/store/projection/flow.rs`; exact JSON delta not recorded
 - Mutation delta: unmeasured
-- Unmeasured proof obligations:
+- Remaining known blind spots:
   - this seam now proves that stale-but-young corrupt rows, fresh-but-corrupt rows, cache-get failures, and exact age-boundary rows all fall back to honest replay under `Freshness::MaybeStale`
   - coverage-closure sweep also pins empty/no-replay-plan behavior, reopened stale external-cache replay under `Freshness::Consistent`, and valid-metadata/undecodable-payload cache rows that bypass metadata corruption but still must replay honestly
   - remaining cache-edge blind spots are now limited to backend-specific OS error shapes that are difficult to force portably without changing production behavior
@@ -499,7 +499,7 @@ instead of pretending.
   - `cargo test --test fuzz_chaos_feedback --all-features --release -- --ignored`
 - Line/function coverage delta: unmeasured
 - Mutation delta: unmeasured
-- Unmeasured proof obligations:
+- Remaining known blind spots:
   - feedback policy is explicit, but it does not replace direct seam-level
     fault-injection or state-machine proofs
 
@@ -524,7 +524,7 @@ instead of pretending.
   - `bpk-lib/crates/core/src/store/error.rs::tests::*_helper_*` directly exercises every
     `pub(crate)` `StoreError` helper constructor, including source-bearing
     batch/cache/serialization helpers and segment-corruption helpers.
-- Unmeasured proof obligations:
+- Remaining known blind spots:
   - none for the representative `StoreError` handling, `Display`, `source()`,
     conversion routing, and internal helper-constructor surface currently in
     scope.
@@ -541,7 +541,7 @@ instead of pretending.
   - `cargo xtask perf-gates`
 - Line/function coverage delta: not applicable
 - Mutation delta: not applicable
-- Unmeasured proof obligations:
+- Remaining known blind spots:
   - these are intentionally loose catastrophic guards, not precise benchmark
     baselines; stable trend authority belongs to `cargo xtask bench`
 
@@ -574,7 +574,7 @@ instead of pretending.
     dependency-crate collisions in a composing debug test binary.
   - `downstream_fixture_detects_dependency_event_kind_collision_in_release`
     pins the same inventory-registration behavior under release linkage.
-- Unmeasured proof obligations:
+- Remaining known blind spots:
   - the validator reports linked registrations, not whether a particular store
     will ever append every linked payload kind. Store open warns by default and
     can be made fail-fast, but explicit per-application allocation discipline
@@ -602,7 +602,7 @@ instead of pretending.
     doctrine-bearing ledger entry, tracked Rust file, header, and line cap.
   - `synthetic_malformed_ledger_entry_is_rejected` pins schema rejection for a
     missing required ledger field.
-- Unmeasured proof obligations:
+- Remaining known blind spots:
   - allowlist entries are explicit debt with reason and shrinkage target; new
     entries should be treated as review-visible debt, not routine bypasses.
 
@@ -639,7 +639,7 @@ instead of pretending.
   - report-specific suites pin schema drift, chain continuity/corruption,
     subscriber loss/frontier precision, projection outcome frontier/cache/
     freshness/output truth, and read-walk visibility/proof-ref/count truth.
-- Unmeasured proof obligations:
+- Remaining known blind spots:
   - the v1 report family is covered as structural evidence; any new report body
     needs its own schema-version, canonical-body, findings-order, and
     append-boundary pins before promotion.
@@ -674,7 +674,7 @@ instead of pretending.
     `IdempotencyPartialBatch` on mixed cached/new keys; explicit `Region` / `by_scope` /
     `stream` / `by_fact` / cursor surfaces (no hidden public full-store cursor); close+reopen batch
     replay in `bpk-lib/crates/core/tests/idempotent_batch_crash_recovery.rs`.
-- Unmeasured proof obligations:
+- Remaining known blind spots:
   - deep cryptographic signature verification is represented by signing and
     verifier harnesses; these tests use structural echo verifiers only.
 
@@ -696,7 +696,7 @@ instead of pretending.
     `verify_registry_attested_row` composes `CanonicalArtifactEnvelope` with normalized verify plane;
     lifecycle / row-id / row-hash mismatch findings; supersession dangling target, removed row with
     `supersedes`, simple cycle, and duplicate `row_id` in sorted catalog inputs.
-- Unmeasured proof obligations:
+- Remaining known blind spots:
   - full graph-theoretic SCC classification for supersession is not exposed; only deterministic
     structural findings used by callers today.
 
@@ -719,7 +719,7 @@ instead of pretending.
     missing / unexpected / digest-mismatch segments; duplicate and inconsistent `segment_id` rows;
     `verify_backup_manifest_envelope` with `ManifestBodyHashMismatch`; envelope-only metadata changes
     `envelope_hash` without changing manifest body hash; MessagePack disk round-trip preserves hash.
-- Unmeasured proof obligations:
+- Remaining known blind spots:
   - restore proof does not execute a real store open; it compares digest maps only.
 
 ### Invariant: Lane B3 transition substrate — canonical event digest, allowed-edge report, finding order
@@ -741,7 +741,7 @@ instead of pretending.
     allowed-edge inputs emit structural findings; `state_transition_report_body_hash` sorts findings;
     sort-order helpers; normalized event digest parity; MessagePack round-trip on
     `state_transition_event_bytes`; `StateTransitionReport` alias + schema constants.
-- Unmeasured proof obligations:
+- Remaining known blind spots:
   - allowed-edge membership is a flat sorted list only (no labeled edge families or weights).
 
 ### Invariant: Lane B4 reservation ledger — structural lanes, invalid transitions, reconciliation buckets, body hashes
@@ -763,7 +763,7 @@ instead of pretending.
     list permutation invariance after normalization; `cause_refs` sort stabilizes transition log digest;
     subject key sort normalizes subject bytes; ledger `body_hash` independent of finding vector order;
     `ReservationReconciliationReport` alias + schema constants exercised.
-- Unmeasured proof obligations:
+- Remaining known blind spots:
   - simulation is pure transition replay over an in-memory map; no store append or cross-session recovery.
 
 ## State-Machine Harness
@@ -779,7 +779,7 @@ instead of pretending.
   - `cargo xtask loom`
 - Line/function coverage delta: unmeasured
 - Mutation delta: unmeasured
-- Unmeasured proof obligations:
+- Remaining known blind spots:
   - loom proofs cover bounded interleavings, not unbounded stress or real I/O
 
 ### Invariant: Durable cursor checkpoints only commit honest progress
@@ -794,7 +794,7 @@ instead of pretending.
 - Line/function coverage delta: targeted rise in `bpk-lib/crates/core/src/store/delivery/cursor.rs`;
     exact JSON delta not recorded
 - Mutation delta: unmeasured
-- Unmeasured proof obligations:
+- Remaining known blind spots:
   - committed progress vs rollback/restart semantics are covered, but this does
     not replace the broader cursor lifecycle tests in `bpk-lib/crates/core/tests/store_advanced.rs`
 
@@ -824,7 +824,7 @@ instead of pretending.
     - `bpk-lib/crates/core/src/store/write/control.rs:551:13 delete field fence_token from struct Self expression in AppendSubmission::root_under_fence`
     - `bpk-lib/crates/core/src/store/write/control.rs:562:17 delete field causation_id from struct AppendOptions expression in AppendSubmission::reaction`
     - `bpk-lib/crates/core/src/store/write/control.rs:575:13 delete field fence_token from struct Self expression in AppendSubmission::reaction_under_fence`
-- Unmeasured proof obligations:
+- Remaining known blind spots:
   - this closes the positive-ready edge for append and batch tickets and adds direct root-under-fence, batch-under-fence, reaction-under-fence visibility/cancel, and reaction metadata-preservation proofs
   - batch pressure-retry symmetry is now pinned alongside append pressure-retry, but the wider writer commit protocol still needs broader mutation pressure across `writer.rs`, `staging.rs`, and `fanout.rs`
 
@@ -842,7 +842,7 @@ instead of pretending.
   - `cargo test --test index_filter_composition reopen_matches_live_oracle_across_topologies`
 - Line/function coverage delta: targeted rise in `bpk-lib/crates/core/src/store/index/columnar.rs` and `bpk-lib/crates/core/src/store/index/mod.rs`; exact JSON delta not recorded
 - Mutation delta: unmeasured
-- Unmeasured proof obligations:
+- Remaining known blind spots:
   - the oracle now owns filter composition, cursor batch ordering, and live-vs-reopen parity across topologies
   - remaining blind spots are deeper restore-artifact mismatches outside this pure query surface, which still belong to cold-start parity suites rather than the overlay oracle itself
 
@@ -861,6 +861,6 @@ instead of pretending.
   - constructor checks pin the public presets to their intended overlay sets.
   - diagnostics checks pin `index_topology` labels and `tile_count` reporting
     for base, scan, entity-local, tiled, tiled-simd, and all-overlay postures.
-- Unmeasured proof obligations:
+- Remaining known blind spots:
   - this suite proves diagnostic truth for topology posture; query/cursor
     semantic equivalence remains owned by the linear-reference oracle above.

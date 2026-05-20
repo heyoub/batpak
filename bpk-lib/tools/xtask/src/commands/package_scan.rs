@@ -68,6 +68,26 @@ fn package(root: &Path, package_name: &str, allow_dirty: bool) -> Result<()> {
     if allow_dirty {
         command.arg("--allow-dirty");
     }
+    // Internal path-deps (batpak-macros, batpak-macros-support,
+    // syncbat-macros, batpak-bench-support) are at version 0.7.6 in
+    // this workspace but only 0.7.0 is published on crates.io. Without
+    // these `--config patch.crates-io.<name>.path=...` overrides,
+    // `cargo package` would try to resolve the path-dep from
+    // crates.io and fail with "failed to select a version for the
+    // requirement". Mirrors release.rs::consumer_smoke which uses
+    // the same pattern.
+    for (name, relative_path) in [
+        ("batpak-macros-support", "crates/macros-support"),
+        ("batpak-macros", "crates/macros"),
+        ("batpak-bench-support", "crates/bench-support"),
+        ("syncbat-macros", "crates/syncbat-macros"),
+        ("batpak", "crates/core"),
+        ("syncbat", "crates/syncbat"),
+    ] {
+        command
+            .arg("--config")
+            .arg(format!("patch.crates-io.{name}.path=\"{relative_path}\""));
+    }
     run(command)
 }
 

@@ -1,5 +1,8 @@
+pub(crate) mod id;
 pub(crate) mod scan;
 pub(crate) mod sidx;
+
+pub(crate) use id::SegmentId;
 
 use crate::event::Event;
 use crate::store::{EncodedBytes, ExtensionKey, StoreError};

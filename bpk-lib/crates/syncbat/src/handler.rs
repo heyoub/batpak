@@ -11,7 +11,12 @@ pub type HandlerResult = Result<Vec<u8>, HandlerError>;
 pub type HandlerFn = for<'a> fn(&[u8], &mut Ctx<'a>) -> HandlerResult;
 
 /// Error returned when a handler cannot produce output bytes.
+///
+/// `#[non_exhaustive]` so we can introduce post-0.7.6 variants (e.g.
+/// `RateLimited`, `Unauthorized`, `Conflict`) without breaking
+/// downstream exhaustive matches.
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum HandlerError {
     /// Input bytes could not be decoded or validated by the handler.
     InvalidInput(String),

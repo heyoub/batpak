@@ -1,5 +1,7 @@
 pub mod netbat
-pub enum netbat::NetbatError
+pub use netbat::OperationName
+pub use netbat::OperationNameError
+#[non_exhaustive] pub enum netbat::NetbatError
 pub netbat::NetbatError::EmptyStream
 pub netbat::NetbatError::InputTooLarge
 pub netbat::NetbatError::InputTooLarge::max: usize
@@ -16,6 +18,8 @@ pub netbat::NetbatError::OutputTooLarge::max: usize
 pub netbat::NetbatError::Runtime(syncbat::error::RuntimeError)
 pub netbat::NetbatError::UnsupportedProtocolVersion
 pub netbat::NetbatError::UnsupportedProtocolVersion::version: alloc::string::String
+impl netbat::NetbatError
+pub fn netbat::NetbatError::code(&self) -> &'static str
 impl core::convert::From<std::io::error::Error> for netbat::NetbatError
 pub fn netbat::NetbatError::from(error: std::io::error::Error) -> Self
 impl core::convert::From<syncbat::error::RuntimeError> for netbat::NetbatError
@@ -58,14 +62,23 @@ pub netbat::Introspection::layer_rule: &'static str
 pub netbat::Introspection::module_count: usize
 pub netbat::Introspection::operation_count: usize
 pub netbat::Introspection::route_count: usize
-pub struct netbat::IoTimeouts
+#[non_exhaustive] pub struct netbat::IoTimeouts
 pub netbat::IoTimeouts::read: core::option::Option<core::time::Duration>
 pub netbat::IoTimeouts::write: core::option::Option<core::time::Duration>
-pub struct netbat::Limits
+impl netbat::IoTimeouts
+pub const fn netbat::IoTimeouts::with_read(self, value: core::option::Option<core::time::Duration>) -> Self
+pub const fn netbat::IoTimeouts::with_write(self, value: core::option::Option<core::time::Duration>) -> Self
+#[non_exhaustive] pub struct netbat::Limits
 pub netbat::Limits::max_input_bytes: usize
 pub netbat::Limits::max_line_bytes: usize
 pub netbat::Limits::max_operation_name_bytes: usize
 pub netbat::Limits::max_output_bytes: usize
+impl netbat::Limits
+pub fn netbat::Limits::new() -> Self
+pub const fn netbat::Limits::with_max_input_bytes(self, value: usize) -> Self
+pub const fn netbat::Limits::with_max_line_bytes(self, value: usize) -> Self
+pub const fn netbat::Limits::with_max_operation_name_bytes(self, value: usize) -> Self
+pub const fn netbat::Limits::with_max_output_bytes(self, value: usize) -> Self
 impl core::default::Default for netbat::Limits
 pub fn netbat::Limits::default() -> Self
 pub struct netbat::RequestFrame
@@ -106,20 +119,28 @@ impl netbat::ShutdownHandle
 pub fn netbat::ShutdownHandle::is_shutdown(&self) -> bool
 pub fn netbat::ShutdownHandle::new() -> Self
 pub fn netbat::ShutdownHandle::shutdown(&self)
-pub struct netbat::TcpServeStats
+#[non_exhaustive] pub struct netbat::TcpServeStats
 pub netbat::TcpServeStats::accepted_connections: usize
+pub netbat::TcpServeStats::connection_io_failures: usize
 pub netbat::TcpServeStats::failed_requests: usize
 pub netbat::TcpServeStats::limit_failures: usize
 pub netbat::TcpServeStats::malformed_requests: usize
 pub netbat::TcpServeStats::runtime_failures: usize
 pub netbat::TcpServeStats::served_requests: usize
 pub netbat::TcpServeStats::shutdown_requested: bool
-pub struct netbat::TcpServerConfig
+#[non_exhaustive] pub struct netbat::TcpServerConfig
 pub netbat::TcpServerConfig::idle_sleep: core::time::Duration
 pub netbat::TcpServerConfig::limits: netbat::Limits
 pub netbat::TcpServerConfig::max_connections: usize
 pub netbat::TcpServerConfig::max_requests_per_connection: usize
 pub netbat::TcpServerConfig::timeouts: netbat::IoTimeouts
+impl netbat::TcpServerConfig
+pub fn netbat::TcpServerConfig::new() -> Self
+pub const fn netbat::TcpServerConfig::with_idle_sleep(self, value: core::time::Duration) -> Self
+pub const fn netbat::TcpServerConfig::with_limits(self, limits: netbat::Limits) -> Self
+pub const fn netbat::TcpServerConfig::with_max_connections(self, value: usize) -> Self
+pub const fn netbat::TcpServerConfig::with_max_requests_per_connection(self, value: usize) -> Self
+pub const fn netbat::TcpServerConfig::with_timeouts(self, timeouts: netbat::IoTimeouts) -> Self
 impl core::default::Default for netbat::TcpServerConfig
 pub fn netbat::TcpServerConfig::default() -> Self
 pub const netbat::CALL_VERB: &str
@@ -134,9 +155,12 @@ pub const netbat::LINE_PROTOCOL_VERSION: &str
 pub const netbat::MAX_ROUTE_PATH_BYTES: usize
 pub const netbat::PROTOCOL_PREFIX: &str
 pub fn netbat::decode_hex(input: &[u8], max_input_bytes: usize) -> core::result::Result<alloc::vec::Vec<u8>, netbat::NetbatError>
+pub fn netbat::decode_hex_str(input: &str) -> core::result::Result<alloc::vec::Vec<u8>, netbat::NetbatError>
 pub fn netbat::decode_line(line: &[u8], limits: &netbat::Limits) -> core::result::Result<netbat::RequestFrame, netbat::NetbatError>
 pub fn netbat::dispatch_frame(core: &mut syncbat::core::Core, frame: netbat::RequestFrame, limits: &netbat::Limits) -> core::result::Result<netbat::ResponseFrame, netbat::NetbatError>
+pub fn netbat::encode_hex(bytes: &[u8]) -> alloc::vec::Vec<u8>
 pub fn netbat::encode_hex_into(bytes: &[u8], output: &mut alloc::vec::Vec<u8>)
+pub fn netbat::encode_hex_str(bytes: &[u8]) -> alloc::string::String
 pub fn netbat::encode_request(operation: &str, input: &[u8]) -> alloc::vec::Vec<u8>
 pub fn netbat::encode_response(result: core::result::Result<&[u8], &netbat::NetbatError>) -> alloc::vec::Vec<u8>
 pub fn netbat::inspect_core_operations<I, S>(core: &syncbat::core::Core, operation_names: I) -> netbat::CoreHealth where I: core::iter::traits::collect::IntoIterator<Item = S>, S: core::convert::AsRef<str>

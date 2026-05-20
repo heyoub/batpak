@@ -24,8 +24,9 @@ fn append_close_completed_event(store: &Store<Open>) -> Result<(), StoreError> {
     let close_hlc = store.watermark_handle.lock().snapshot().visible_hlc;
     let coord = Coordinate::new("batpak:store", "batpak:lifecycle")?;
     let submission = AppendSubmission::with_options(
-        AppendOptions::default()
-            .with_idempotency(crate::id::generate_v7_id_with_clock(store.runtime.clock())),
+        AppendOptions::default().with_idempotency(crate::id::IdempotencyKey::from(
+            crate::id::generate_v7_id_with_clock(store.runtime.clock()),
+        )),
         store.runtime.clock(),
     );
     submission.validate_route(store)?;
@@ -156,9 +157,17 @@ fn snapshot_source_file_kind(path: &std::path::Path) -> Option<SnapshotFileKind>
 }
 
 fn snapshot_segment_id(path: &std::path::Path) -> Option<u64> {
-    path.file_stem()
-        .and_then(|stem| stem.to_str())
-        .and_then(|stem| stem.parse::<u64>().ok())
+    match segment::SegmentId::from_filename(path) {
+        Ok(parsed) => Some(parsed.as_u64()),
+        Err(error) => {
+            tracing::warn!(
+                path = %path.display(),
+                %error,
+                "skipping malformed segment filename"
+            );
+            None
+        }
+    }
 }
 
 fn snapshot_destination_should_clear(path: &std::path::Path) -> bool {
@@ -454,10 +463,17 @@ pub(crate) fn compact(
                 if !ext_ok {
                     return None;
                 }
-                let seg_id = path
-                    .file_stem()
-                    .and_then(|stem| stem.to_str())
-                    .and_then(|stem| stem.parse::<u64>().ok())?;
+                let seg_id = match segment::SegmentId::from_filename(&path) {
+                    Ok(parsed) => parsed.as_u64(),
+                    Err(error) => {
+                        tracing::warn!(
+                            path = %path.display(),
+                            %error,
+                            "skipping malformed segment filename"
+                        );
+                        return None;
+                    }
+                };
                 Some((seg_id, path))
             })
             .collect();

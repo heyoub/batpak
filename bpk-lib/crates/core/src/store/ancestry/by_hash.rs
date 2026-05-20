@@ -64,7 +64,7 @@ mod tests {
         (store, dir)
     }
 
-    fn seeded_chain(store: &Store, entity: &str) -> Vec<u128> {
+    fn seeded_chain(store: &Store, entity: &str) -> Vec<crate::id::EventId> {
         let coord = Coordinate::new(entity, "scope:test").expect("coord");
         let kind = EventKind::custom(0xF, 1);
         (0..4)
@@ -79,10 +79,11 @@ mod tests {
 
     #[test]
     fn hash_helper_returns_exact_chain_in_reverse_order() {
+        use crate::id::EntityIdType;
         let (store, _dir) = test_store();
         let ids = seeded_chain(&store, "entity:hash-helper");
 
-        let actual: Vec<_> = walk_ancestors_by_hash(&store, *ids.last().expect("last"), 8)
+        let actual: Vec<_> = walk_ancestors_by_hash(&store, ids.last().expect("last").as_u128(), 8)
             .into_iter()
             .map(|stored| stored.event.event_id())
             .collect();
@@ -97,11 +98,12 @@ mod tests {
 
     #[test]
     fn hash_helper_honors_zero_limit_and_unknown_anchor() {
+        use crate::id::EntityIdType;
         let (store, _dir) = test_store();
         let ids = seeded_chain(&store, "entity:hash-zero");
 
         assert!(
-            walk_ancestors_by_hash(&store, *ids.last().expect("last"), 0).is_empty(),
+            walk_ancestors_by_hash(&store, ids.last().expect("last").as_u128(), 0).is_empty(),
             "PROPERTY: hash-based ancestor traversal with limit=0 must return an empty vector."
         );
         assert!(

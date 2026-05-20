@@ -403,34 +403,31 @@ fn validate_route_method(method: &str) -> Result<(), RouteValidationError> {
 }
 
 fn validate_route_operation_name(name: &str) -> Result<(), RouteValidationError> {
-    if name.is_empty() {
-        return Err(RouteValidationError::InvalidOperationName {
-            name: name.to_owned(),
-            message: "empty",
-        });
-    }
-    if name.len() > syncbat::MAX_OPERATION_NAME_BYTES {
-        return Err(RouteValidationError::InvalidOperationName {
-            name: name.to_owned(),
-            message: "too long",
-        });
-    }
-    if name
-        .bytes()
-        .any(|byte| !matches!(byte, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'.' | b'_' | b'-'))
-    {
-        return Err(RouteValidationError::InvalidOperationName {
-            name: name.to_owned(),
-            message: "expected ASCII letters, digits, '.', '_' or '-'",
-        });
-    }
-    if name.starts_with('.') || name.ends_with('.') || name.contains("..") {
-        return Err(RouteValidationError::InvalidOperationName {
-            name: name.to_owned(),
-            message: "dot-separated tokens must be non-empty",
-        });
-    }
-    Ok(())
+    // Boundary check defers to the syncbat operation-name newtype so the
+    // route layer never re-parses the grammar.
+    syncbat::OperationName::new(name)
+        .map(|_| ())
+        .map_err(|error| {
+            let message: &'static str = match error {
+                syncbat::OperationNameError::Empty => "empty",
+                syncbat::OperationNameError::TooLong { .. } => "too long",
+                syncbat::OperationNameError::LeadingOrTrailingDot
+                | syncbat::OperationNameError::ConsecutiveDots => {
+                    "dot-separated tokens must be non-empty"
+                }
+                syncbat::OperationNameError::IllegalCharacter { .. } => {
+                    "expected ASCII letters, digits, '.', '_' or '-'"
+                }
+                // `OperationNameError` is `#[non_exhaustive]`; any variant added
+                // post-1.0 surfaces under a generic message until this layer
+                // learns a more specific one.
+                _ => "invalid operation name",
+            };
+            RouteValidationError::InvalidOperationName {
+                name: name.to_owned(),
+                message,
+            }
+        })
 }
 
 fn validate_route_path(path: &str) -> Result<(), RouteValidationError> {

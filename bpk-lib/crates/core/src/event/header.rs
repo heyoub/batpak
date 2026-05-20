@@ -1,5 +1,6 @@
 use crate::coordinate::DagPosition;
 use crate::event::EventKind;
+use crate::id::{CausationId, CorrelationId, EventId};
 use serde::{Deserialize, Serialize};
 
 /// EventHeader: metadata for every event. Store generates this — users don't call new directly.
@@ -8,14 +9,15 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EventHeader {
     /// Globally unique identifier for this event, assigned by the store.
-    #[serde(with = "crate::wire::u128_bytes")]
-    pub event_id: u128,
+    ///
+    /// Wire format is the typed id's own serde impl (16 big-endian bytes) — the
+    /// bytes are byte-identical to the prior raw `u128` encoding so MessagePack
+    /// goldens do not move.
+    pub event_id: EventId,
     /// Groups related events that share a single originating request or saga.
-    #[serde(with = "crate::wire::u128_bytes")]
-    pub correlation_id: u128,
+    pub correlation_id: CorrelationId,
     /// Identifies the direct predecessor event that caused this one, if any.
-    #[serde(with = "crate::wire::option_u128_bytes")]
-    pub causation_id: Option<u128>,
+    pub causation_id: Option<CausationId>,
     /// Wall-clock timestamp in microseconds when the event was appended.
     pub timestamp_us: i64,
     /// Logical position of this event within its stream DAG.
@@ -60,9 +62,9 @@ impl EventHeader {
         event_kind: EventKind,
     ) -> Self {
         Self {
-            event_id,
-            correlation_id,
-            causation_id,
+            event_id: EventId::from(event_id),
+            correlation_id: CorrelationId::from(correlation_id),
+            causation_id: causation_id.map(CausationId::from),
             timestamp_us,
             position,
             payload_size,
@@ -87,16 +89,17 @@ impl EventHeader {
         payload_size: u32,
         event_kind: EventKind,
     ) -> Self {
-        use crate::id::EntityIdType;
-        Self::new(
-            event_id.as_u128(),
-            correlation_id.as_u128(),
-            causation_id.map(|id| id.as_u128()),
+        Self {
+            event_id,
+            correlation_id,
+            causation_id,
             timestamp_us,
             position,
             payload_size,
             event_kind,
-        )
+            flags: 0,
+            content_hash: [0u8; 32],
+        }
     }
 
     /// Sets the flags byte on this header.

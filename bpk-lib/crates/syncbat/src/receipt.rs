@@ -87,7 +87,7 @@ pub enum ReceiptOutcome {
     /// operation result.
     ///
     /// `Core` checkout dispatch emits `Completed` or `Failed`; `Denied` is
-    /// reserved for direct receipt sinks, policy gates, and network guards
+    /// reserved for direct receipt sinks, admission checks, and network guards
     /// that reject a call before handler execution.
     Denied {
         /// Stable denial class.
@@ -132,7 +132,7 @@ impl ReceiptOutcome {
 #[non_exhaustive]
 pub struct BatpakReceiptFields {
     /// Unique ID of the persisted receipt event.
-    pub event_id: u128,
+    pub event_id: batpak::id::EventId,
     /// Global sequence assigned by batpak at commit time.
     pub sequence: u64,
     /// Blake3 hash of the committed receipt payload bytes.

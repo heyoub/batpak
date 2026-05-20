@@ -85,7 +85,7 @@ fn open_with_native_cache_is_available_for_common_setup() {
     let receipt = store
         .append(&coord, kind, &serde_json::json!({"hello": "native"}))
         .expect("append");
-    assert!(receipt.event_id != 0);
+    assert!(receipt.event_id != batpak::id::EventId::from(0u128));
     let _closed = store.close().expect("close");
 }
 

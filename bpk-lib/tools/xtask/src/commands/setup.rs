@@ -43,6 +43,11 @@ pub(crate) fn setup(args: SetupArgs) -> Result<()> {
             InstallStrategy::PreferBinstall,
         ),
         (
+            "cargo-public-api",
+            "cargo-public-api@0.51.0",
+            InstallStrategy::PreferBinstall,
+        ),
+        (
             "cargo-mutants",
             "cargo-mutants@27.0.0",
             InstallStrategy::SourceOnly,

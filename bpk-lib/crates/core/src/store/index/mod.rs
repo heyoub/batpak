@@ -307,8 +307,9 @@ impl IndexEntry {
     }
 
     /// Returns `true` if this event was directly caused by the given event ID.
-    pub fn is_caused_by(&self, event_id: u128) -> bool {
-        self.causation_id == Some(event_id)
+    pub fn is_caused_by(&self, event_id: crate::id::EventId) -> bool {
+        use crate::id::EntityIdType;
+        self.causation_id == Some(event_id.as_u128())
     }
 
     /// Returns `true` if this event has no causation ID (it is a root-cause event).

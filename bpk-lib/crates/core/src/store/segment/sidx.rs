@@ -456,11 +456,19 @@ pub(crate) type SidxFooterData = (Vec<SidxEntry>, Vec<String>);
 
 pub(crate) fn read_footer(path: &Path) -> Result<Option<SidxFooterData>, StoreError> {
     // Derive a segment_id for error messages from the filename ("000042.fbat" → 42).
-    let segment_id = path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .and_then(|s| s.parse::<u64>().ok())
-        .unwrap_or(0);
+    // Falls back to 0 if the filename is malformed, but surfaces the parse failure
+    // so a corrupt name on disk is not invisible.
+    let segment_id = match crate::store::segment::SegmentId::from_filename(path) {
+        Ok(parsed) => parsed.as_u64(),
+        Err(error) => {
+            tracing::warn!(
+                path = %path.display(),
+                %error,
+                "skipping malformed segment filename"
+            );
+            0
+        }
+    };
 
     let mut file = std::fs::File::open(path).map_err(StoreError::Io)?;
 
@@ -744,9 +752,15 @@ mod tests {
         assert_eq!(rebuilt.hash_chain.event_hash, entry.event_hash);
         assert_eq!(rebuilt.disk_pos, entry.to_disk_pos(7));
         assert_eq!(rebuilt.global_sequence, entry.global_sequence);
-        assert_eq!(header.event_id, entry.event_id);
-        assert_eq!(header.correlation_id, entry.correlation_id);
-        assert_eq!(header.causation_id, Some(entry.causation_id));
+        assert_eq!(header.event_id, crate::id::EventId::from(entry.event_id));
+        assert_eq!(
+            header.correlation_id,
+            crate::id::CorrelationId::from(entry.correlation_id)
+        );
+        assert_eq!(
+            header.causation_id,
+            Some(crate::id::CausationId::from(entry.causation_id))
+        );
         assert_eq!(header.position.wall_ms, entry.wall_ms);
         assert_eq!(header.position.sequence, entry.clock);
         assert_eq!(header.position.lane, entry.dag_lane);

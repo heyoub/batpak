@@ -1,23 +1,27 @@
 mod ci;
 mod disk_audit;
+mod export_ts_manifest;
 mod loom;
+mod msrv_check;
 mod mutants;
 mod package_scan;
 mod platform;
 mod release;
 mod release_manifest;
+mod sbom;
 mod scaffold;
 mod setup;
 mod staged;
 mod stress;
 mod templates;
+mod unused_deps;
 mod version_pins;
 
 use crate::util::cargo;
 use crate::CleanGeneratedArgs;
 use crate::{
-    ChaosArgs, FuzzArgs, MutantsArgs, PackageLeakScanArgs, PlatformArgs, ReleaseArgs, ScaffoldArgs,
-    SetupArgs,
+    ChaosArgs, ExportTsManifestArgs, FuzzArgs, MutantsArgs, PackageLeakScanArgs, PlatformArgs,
+    ReleaseArgs, ScaffoldArgs, SetupArgs,
 };
 use anyhow::Result;
 
@@ -58,6 +62,31 @@ pub(crate) fn templates() -> Result<()> {
     templates::templates()
 }
 
+/// Drive `cargo cyclonedx` over every publishable crate and emit a
+/// CycloneDX 1.5 SBOM JSON under `target/sbom/`.
+///
+/// `cargo-cyclonedx` is a separate install: `cargo install cargo-cyclonedx
+/// --locked`. The subcommand fails fast with a clear install hint when
+/// the binary is missing rather than auto-installing or no-opping.
+pub(crate) fn sbom() -> Result<()> {
+    sbom::sbom()
+}
+
+/// Detect dependencies declared in `Cargo.toml` that are never referenced
+/// from source. Backed by `cargo-machete`. Install with
+/// `cargo install cargo-machete --locked`.
+pub(crate) fn unused_deps() -> Result<()> {
+    unused_deps::unused_deps()
+}
+
+/// Verify each publish crate compiles under its declared
+/// `rust-version`. Requires the relevant toolchain installed via
+/// `rustup toolchain install <msrv>`. Fails fast with an install
+/// hint when the toolchain is missing.
+pub(crate) fn msrv_check() -> Result<()> {
+    msrv_check::msrv_check()
+}
+
 pub(crate) fn disk_audit() -> Result<()> {
     disk_audit::disk_audit()
 }
@@ -80,6 +109,10 @@ pub(crate) fn staged_diff() -> Result<()> {
 
 pub(crate) fn release_manifest(args: crate::ReleaseManifestArgs) -> Result<()> {
     release_manifest::release_manifest(args)
+}
+
+pub(crate) fn export_ts_manifest(args: &ExportTsManifestArgs) -> Result<()> {
+    export_ts_manifest::export_ts_manifest(args)
 }
 
 pub(crate) fn deny_split() -> Result<()> {
@@ -111,7 +144,10 @@ pub(crate) fn loom() -> Result<()> {
     loom::loom()
 }
 
-pub(crate) fn run_nextest_ci<const N: usize>(args: [&str; N]) -> Result<()> {
+pub(crate) fn run_nextest_ci<'a, I>(args: I) -> Result<()>
+where
+    I: IntoIterator<Item = &'a str>,
+{
     ci::run_nextest_ci(args)
 }
 

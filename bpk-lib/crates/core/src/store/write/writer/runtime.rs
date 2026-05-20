@@ -325,12 +325,24 @@ pub(crate) fn find_latest_segment_id(dir: &std::path::Path) -> Option<u64> {
         .ok()?
         .filter_map(|e| e.ok())
         .filter_map(|e| {
-            let name = e.file_name();
-            let name = name.to_str()?;
-            if name.ends_with(".fbat") {
-                name.trim_end_matches(".fbat").parse::<u64>().ok()
-            } else {
-                None
+            let path = e.path();
+            if !path
+                .extension()
+                .map(|ext| ext == crate::store::segment::SEGMENT_EXTENSION)
+                .unwrap_or(false)
+            {
+                return None;
+            }
+            match crate::store::segment::SegmentId::from_filename(&path) {
+                Ok(parsed) => Some(parsed.as_u64()),
+                Err(error) => {
+                    tracing::warn!(
+                        path = %path.display(),
+                        %error,
+                        "skipping malformed segment filename"
+                    );
+                    None
+                }
             }
         })
         .max()

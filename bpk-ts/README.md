@@ -1,0 +1,160 @@
+# BatPAK TypeScript SDK — 0.7.6
+
+The TypeScript surface for the BatPAK family. Catch-all 0.7.6 release.
+
+Three operations live on NETBAT/1 over TCP today:
+
+```
+system.heartbeat   — wire-parity liveness probe.
+bank.commit        — append a typed event to the underlying batpak store;
+                     returns the full AppendReceipt (event_id, sequence,
+                     content_hash, key_id, optional signature, extensions).
+event.get          — read a stored event by event_id; returns header
+                     + canonical payload bytes + coordinate.
+```
+
+Authority direction:
+
+```
+Rust #[derive(EventPayload)]
+  +
+hbat::manifest::descriptors()   (substrate-owned registry)
+  ↓
+cargo xtask export-ts-manifest
+  ↓
+bpk-ts/batpak.manifest.json
+  ↓
+@batpak/codegen
+  ↓
+@batpak/generated   (Effect 4 schemas + TS types + golden hex)
+```
+
+## Workspace layout
+
+```
+packages/
+  canonical/  Named-field MessagePack codec matching rmp-serde 1.3.1
+              byte-for-byte. 22 direct tests.
+  client/     NETBAT/1 frame writer/reader; typed NetbatError union
+              covering all 12 codes from netbat::NetbatError::code();
+              TCP transport via duck-typed NodeSocketLike. 24 direct tests.
+  codegen/    Reads batpak.manifest.json, emits @batpak/generated.
+              Refuses unsupported manifestVersion, netbatVersion,
+              canonicalEncoding, field-name drift, unknown typeToken.
+              14 direct tests.
+  generated/  AUTO-GENERATED Effect 4 schemas + TS types + golden hex.
+              Fully overwritten by each codegen run.
+  schema/     Effect 4 Schema bridge — decodeBytes/encodeBytes wrap
+              @batpak/canonical with runtime validation; bank.event() is
+              the real Effect Schema authoring API for downstream-only
+              TS events. 6 direct tests.
+  test/       End-to-end parity harness across every event and every
+              operation in the manifest. 44 parity assertions.
+examples/
+  heartbeat-spike/  Live spike against hbat:
+                    - sends system.heartbeat
+                    - sends bank.commit (appends a typed event)
+                    - sends event.get (reads it back, decodes through
+                      Effect 4 schema; proves byte round-trip)
+                    - sends an unknown_operation to validate the typed
+                      ERR-frame path.
+```
+
+## hbat — the reference host
+
+`hbat` (in `bpk-lib/crates/hbat/`) registers all three operations against
+a real BatPAK store. `publish = false`. Loopback-only by default; bind
+to a non-loopback interface only with `--allow-non-loopback`.
+
+Boot:
+
+```sh
+cargo run -p hbat -- serve \
+  --store $(mktemp -d) \
+  --tcp 127.0.0.1:0 \
+  --print-port
+```
+
+The first stdout line is a machine-readable rendezvous:
+
+```
+HBAT_READY {"addr":"127.0.0.1:54321","port":54321,"protocol":"NETBAT/1"}
+```
+
+Parse the JSON, take `port`, connect.
+
+## Running locally
+
+```sh
+# Regenerate the manifest from the substrate.
+cd bpk-lib
+cargo run -p xtask -- export-ts-manifest --out ../bpk-ts/batpak.manifest.json
+
+# Build + test the TS workspace.
+cd ../bpk-ts
+pnpm install
+pnpm -w build
+pnpm -w test          # 110 tests across all packages
+
+# Live integration:
+cd ../bpk-lib
+cargo run -p hbat -- serve --store "$(mktemp -d)" --tcp 127.0.0.1:0 --print-port \
+  > /tmp/hbat-ready.txt 2>&1 &
+sleep 0.5
+PORT=$(node -e 'const j=require("fs").readFileSync("/tmp/hbat-ready.txt","utf-8").trim();process.stdout.write(String(JSON.parse(j.replace(/^HBAT_READY /,"")).port))')
+
+cd ../bpk-ts
+node examples/heartbeat-spike/dist/index.js --port "$PORT"
+# spike: ok  ← all three operations + ERR path proven on the wire
+```
+
+## Wire encoding contract
+
+Canonical bytes are named-field MessagePack via `rmp-serde 1.3.1` on the
+Rust side and a minimal byte-equivalent encoder on the TS side. Both
+respect Rust struct **declaration order** for fields (not alphabetical).
+
+Token vocabulary supported by the codegen:
+
+```
+string              → string
+u8 / u16 / u32      → number with isInt + isBetween bounds
+u64-safe            → number bounded to Number.MAX_SAFE_INTEGER
+u64-millis          → same as u64-safe; semantically milliseconds since epoch
+i64-microseconds    → number bounded to ±Number.MAX_SAFE_INTEGER
+option<string>      → string | null
+map<string,string>  → Record<string, string>
+u128 values         → emitted as 32-char lowercase hex string (overflows safe-int)
+```
+
+NETBAT/1 frame format (verbatim from `netbat::transport`):
+
+```
+NETBAT/1 CALL <operation-name> <hex-input>\n
+OK <hex-output>\n
+ERR <code> <hex-message>\n
+```
+
+ERR `<code>` is one of the 12 stable ASCII tokens from
+`netbat::NetbatError::code()`. The message is hex-encoded **UTF-8 text**
+— never hex-encoded MessagePack.
+
+## Determinism
+
+`@batpak/generated/src` is **fully overwritten** on every `pnpm generate`.
+A CI step verifies `rm -rf packages/generated/src && pnpm -w build`
+produces a byte-identical tree.
+
+## Out of scope for 0.7.6
+
+- NETBAT/2 STREAM (reserved per ADR-0030).
+- TS-authored events generating Rust kinds (Phase 2; `bank.event()`
+  exists for downstream-only TS schemas in the meantime).
+- Browser / WebSocket / NAPI / WASM transports.
+- A `Bank` Rust type (composition vocabulary stays in TS until proven
+  necessary).
+
+## Plan + audit
+
+- Plan: `/root/.claude/plans/yes-this-is-the-warm-finch.md` (not in repo).
+- Phase 0 loose-end audit report: `bpk-lib/.phase0-audit-report.md`.

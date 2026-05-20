@@ -106,7 +106,7 @@ fn backup_sort_backup_segment_refs_and_restore_proof_stable() {
     let _: RestoreProofHash = envelope.body_hash;
     assert_eq!(envelope.body_hash, g1);
     let built_envelope =
-        restore_proof_evidence_report(&manifest, observed.clone()).expect("built envelope");
+        restore_proof_evidence_report(&manifest, &observed).expect("built envelope");
     assert_eq!(built_envelope.body_hash, g1);
     let mut findings = r1.findings.clone();
     findings.reverse();

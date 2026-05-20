@@ -742,9 +742,11 @@ proptest! {
         let value = serde_json::Value::Array(
             payload.iter().copied().map(serde_json::Value::from).collect()
         );
+        let correlation_id_typed = correlation_id.map(batpak::id::CorrelationId::from);
+        let causation_id_typed = causation_id.map(batpak::id::CausationId::from);
         let options = AppendOptions {
-            correlation_id,
-            causation_id,
+            correlation_id: correlation_id_typed,
+            causation_id: causation_id_typed,
             flags,
             ..AppendOptions::default()
         };
@@ -769,9 +771,9 @@ proptest! {
             "BATCH ITEM COORD MISMATCH. Investigate: src/store/append.rs BatchAppendItem::new.");
         prop_assert_eq!(item.kind(), EventKind::DATA,
             "BATCH ITEM KIND MISMATCH. Investigate: src/store/append.rs BatchAppendItem::new.");
-        prop_assert_eq!(item.options().correlation_id, correlation_id,
+        prop_assert_eq!(item.options().correlation_id, correlation_id_typed,
             "BATCH ITEM CORRELATION MISMATCH. Investigate: src/store/append.rs AppendOptions preservation.");
-        prop_assert_eq!(item.options().causation_id, causation_id,
+        prop_assert_eq!(item.options().causation_id, causation_id_typed,
             "BATCH ITEM CAUSATION OPTION MISMATCH. Investigate: src/store/append.rs AppendOptions preservation.");
         prop_assert_eq!(item.options().flags, flags,
             "BATCH ITEM FLAGS MISMATCH. Investigate: src/store/append.rs AppendOptions preservation.");

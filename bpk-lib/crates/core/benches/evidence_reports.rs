@@ -43,14 +43,14 @@ impl EventSourced for BenchProjection {
     }
 }
 
-fn build_store(count: u32) -> (Store, TempDir, Coordinate, EventKind, u128) {
+fn build_store(count: u32) -> (Store, TempDir, Coordinate, EventKind, batpak::id::EventId) {
     build_store_with_topology(count, IndexTopology::default())
 }
 
 fn build_store_with_topology(
     count: u32,
     topology: IndexTopology,
-) -> (Store, TempDir, Coordinate, EventKind, u128) {
+) -> (Store, TempDir, Coordinate, EventKind, batpak::id::EventId) {
     let dir = must(TempDir::new(), "create temp dir");
     let store = must(
         Store::open(
@@ -66,7 +66,7 @@ fn build_store_with_topology(
         "build bench coordinate",
     );
     let kind = EventKind::custom(0xF, 0x51);
-    let mut last = 0_u128;
+    let mut last = batpak::id::EventId::from(0_u128);
     for i in 0..count {
         last = must(
             store.append(&coord, kind, &serde_json::json!({ "i": i })),
@@ -145,7 +145,7 @@ fn bench_chain_walk(c: &mut Criterion) {
         assert!(data_dir_guard.path().exists());
         black_box(coord.entity());
         black_box(kind);
-        let request = ChainWalkRequest::linear(ChainWalkStartRef::EventId(last), n as usize);
+        let request = ChainWalkRequest::linear(ChainWalkStartRef::EventId(last.into()), n as usize);
         group.throughput(Throughput::Elements(n as u64));
         group.bench_with_input(BenchmarkId::new("linear", n), &n, |b, _| {
             b.iter(|| {

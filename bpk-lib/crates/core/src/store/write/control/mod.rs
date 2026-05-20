@@ -33,6 +33,9 @@ mod tests {
     fn reaction_with_nonzero_causation_is_preserved() {
         let clock = crate::store::SystemClock::new();
         let submission = AppendSubmission::reaction(&clock, 42, 99);
-        assert_eq!(submission.options.causation_id, Some(99));
+        assert_eq!(
+            submission.options.causation_id,
+            Some(crate::id::CausationId::from(99u128))
+        );
     }
 }

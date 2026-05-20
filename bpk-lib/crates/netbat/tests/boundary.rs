@@ -39,7 +39,7 @@ fn hex(bytes: &[u8]) -> String {
 fn fixture_bytes(name: &str, hex: &str) -> Vec<u8> {
     let hex = hex.trim();
     assert!(
-        hex.len() % 2 == 0,
+        hex.len().is_multiple_of(2),
         "golden fixture {name} must contain even-length hex"
     );
     hex.as_bytes()
@@ -279,11 +279,9 @@ fn dispatches_decoded_frame_through_syncbat_core() {
 #[test]
 fn dispatch_revalidates_public_request_frames() {
     let mut core = core_with_ping();
-    let limits = nb::Limits {
-        max_operation_name_bytes: 3,
-        max_input_bytes: 1,
-        ..nb::Limits::default()
-    };
+    let limits = nb::Limits::default()
+        .with_max_operation_name_bytes(3)
+        .with_max_input_bytes(1);
 
     let name_err = match nb::dispatch_frame(
         &mut core,
@@ -378,10 +376,7 @@ fn handler_failure_maps_without_losing_class_or_message() {
 
 #[test]
 fn rejects_line_too_long() {
-    let limits = nb::Limits {
-        max_line_bytes: 4,
-        ..nb::Limits::default()
-    };
+    let limits = nb::Limits::default().with_max_line_bytes(4);
 
     let err = match nb::decode_line(
         &fixture_bytes("request_decode_input", REQUEST_DECODE_INPUT_HEX),
@@ -396,10 +391,7 @@ fn rejects_line_too_long() {
 
 #[test]
 fn rejects_operation_name_too_long() {
-    let limits = nb::Limits {
-        max_operation_name_bytes: 3,
-        ..nb::Limits::default()
-    };
+    let limits = nb::Limits::default().with_max_operation_name_bytes(3);
 
     let err = match nb::decode_line(
         &fixture_bytes("request_decode_input", REQUEST_DECODE_INPUT_HEX),
@@ -414,10 +406,7 @@ fn rejects_operation_name_too_long() {
 
 #[test]
 fn rejects_input_body_too_large() {
-    let limits = nb::Limits {
-        max_input_bytes: 1,
-        ..nb::Limits::default()
-    };
+    let limits = nb::Limits::default().with_max_input_bytes(1);
 
     let err = match nb::decode_line(
         &fixture_bytes("request_input_too_large", REQUEST_INPUT_TOO_LARGE_HEX),
@@ -555,10 +544,7 @@ fn partial_read_followed_by_eof_is_a_complete_frame() {
 #[test]
 fn serve_stream_writes_stable_error_for_line_read_failures() {
     let mut core = core_with_ping();
-    let limits = nb::Limits {
-        max_line_bytes: 4,
-        ..nb::Limits::default()
-    };
+    let limits = nb::Limits::default().with_max_line_bytes(4);
     let mut too_long = Cursor::new(fixture_bytes(
         "request_decode_input",
         REQUEST_DECODE_INPUT_HEX,
@@ -581,7 +567,18 @@ fn serve_stream_writes_stable_error_for_line_read_failures() {
     assert!(too_long_bytes
         .windows(b"ERR line_too_long ".len())
         .any(|window| window == b"ERR line_too_long "));
-    assert!(empty_bytes.starts_with(b"ERR empty_stream "));
+    // EmptyStream returns without writing an ERR frame: the most
+    // common cause is a client connecting then closing before any
+    // bytes, and writing to a peer-closed socket would race a
+    // BrokenPipe IO error that serve_tcp_connection used to treat
+    // as fatal — letting a connect-and-close client kill the
+    // listener. The Codex P1 fix (netbat/src/transport/tcp.rs)
+    // short-circuits this case; the test now asserts the silent
+    // graceful path.
+    assert!(
+        empty_bytes.is_empty(),
+        "EmptyStream must not write an ERR frame (BrokenPipe-fatal race fix)"
+    );
 }
 
 #[test]
@@ -622,10 +619,7 @@ fn output_limit_fails_closed_after_dispatch() {
         )
         .expect("register");
     let mut core = builder.build().expect("core builds");
-    let limits = nb::Limits {
-        max_output_bytes: 1,
-        ..nb::Limits::default()
-    };
+    let limits = nb::Limits::default().with_max_output_bytes(1);
 
     let err = match nb::dispatch_frame(
         &mut core,
@@ -638,4 +632,92 @@ fn output_limit_fails_closed_after_dispatch() {
 
     assert_eq!(err, nb::NetbatError::OutputTooLarge { max: 1 });
     assert_eq!(count.get(), 1);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Wire-compat emit gate
+//
+// PROVES: emitter byte-stability against the same golden .hex fixtures
+// already used by the parser. The previous boundary suite proves
+// `decode_line` accepts these bytes; this section proves
+// `encode_request` / `encode_response` produces them. Without this
+// gate, the encoder could drift while the parser still accepts the
+// older shape — a silent wire-format break.
+// CATCHES: any change to encoder framing (separator, trailing newline,
+// hex case, protocol version token, operation-name placement, OK/ERR
+// keyword spelling) that would not be caught by parser-only tests.
+// SEEDED: the same `tests/golden/*.hex` artifacts the parser tests
+// consume. New goldens added MUST also appear here.
+
+#[test]
+fn emit_request_v1_matches_golden_bytes() {
+    let frame = nb::encode_request("ping", b"hi");
+    let golden_hex = REQUEST_CALL_V1_HEX.trim();
+    let golden_bytes = nb::decode_hex_str(golden_hex).expect("golden hex decodes");
+    assert_eq!(
+        frame, golden_bytes,
+        "encode_request drifted from request_call_v1.hex"
+    );
+}
+
+#[test]
+fn emit_response_ok_matches_golden_bytes() {
+    let frame = nb::encode_response(Ok(b"ok"));
+    let golden_bytes = nb::decode_hex_str(RESPONSE_OK_HEX.trim()).expect("golden hex decodes");
+    assert_eq!(
+        frame, golden_bytes,
+        "encode_response drifted from response_ok.hex"
+    );
+}
+
+#[test]
+fn emit_response_ok_hi_matches_golden_bytes() {
+    let frame = nb::encode_response(Ok(b"hi"));
+    let golden_bytes = nb::decode_hex_str(RESPONSE_OK_HI_HEX.trim()).expect("golden hex decodes");
+    assert_eq!(
+        frame, golden_bytes,
+        "encode_response drifted from response_ok_hi.hex"
+    );
+}
+
+#[test]
+fn emit_response_err_carries_typed_code_and_hex_message() {
+    let error = nb::NetbatError::MalformedRequest { reason: "bad" };
+    let frame = nb::encode_response(Err(&error));
+    let golden_bytes =
+        nb::decode_hex_str(RESPONSE_ERR_MALFORMED_HEX.trim()).expect("golden hex decodes");
+    assert_eq!(
+        frame, golden_bytes,
+        "encode_response(Err) drifted from response_err_malformed.hex"
+    );
+}
+
+#[test]
+fn emit_request_then_parse_returns_input_unchanged() {
+    // Closed-loop round-trip across every (op, payload) shape we ship.
+    for (op, payload) in [
+        ("ping", &[][..]),
+        ("ping", &b"hi"[..]),
+        ("system.heartbeat", &[0_u8, 1, 255][..]),
+        ("bank.commit", &b"\x81\xa0"[..]),
+    ] {
+        let frame = nb::encode_request(op, payload);
+        let parsed = nb::decode_line(&frame, &nb::Limits::default()).expect("parse");
+        assert_eq!(parsed.operation(), op);
+        assert_eq!(parsed.input(), payload);
+    }
+}
+
+#[test]
+fn emit_response_ok_then_parse_returns_output_unchanged() {
+    for payload in [&[][..], &b"hi"[..], &[0_u8, 1, 255][..]] {
+        let frame = nb::encode_response(Ok(payload));
+        let line = frame
+            .strip_prefix(b"OK ")
+            .and_then(|s| s.strip_suffix(b"\n"))
+            .expect("response shape OK <hex>\\n");
+        let decoded =
+            nb::decode_hex_str(std::str::from_utf8(line).expect("hex ascii")).expect("hex decodes");
+        assert_eq!(decoded, payload);
+    }
 }

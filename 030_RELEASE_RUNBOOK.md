@@ -102,6 +102,10 @@ cargo xtask release-manifest --strict
 cargo xtask release --dry-run
 ```
 
+- `cargo xtask sbom` writes CycloneDX SBOMs per publishable crate
+  into `target/sbom/`. Consulting clients receive these alongside
+  the .crate archives.
+
 ## Benchmark Baseline
 
 Capture release numbers from the merged release commit on stable hardware, not

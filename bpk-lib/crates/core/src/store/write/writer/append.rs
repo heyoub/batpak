@@ -54,7 +54,7 @@ impl WriterState<'_> {
         if let Some(key) = guards.idempotency_key {
             if let Some(entry) = self.index.get_by_id(key) {
                 let mut receipt = AppendReceipt {
-                    event_id: entry.event_id,
+                    event_id: crate::id::EventId::from(entry.event_id),
                     sequence: entry.global_sequence,
                     disk_pos: entry.disk_pos,
                     content_hash: entry.hash_chain.event_hash,
@@ -102,8 +102,10 @@ impl WriterState<'_> {
         let position = DagPosition::with_hlc(now_ms, 0, guards.dag_depth, guards.dag_lane, clock);
         event.header.position = position;
         event.header.event_kind = kind;
-        event.header.correlation_id = correlation_id;
-        event.header.causation_id = causation_id.filter(|&id| id != 0);
+        event.header.correlation_id = crate::id::CorrelationId::from(correlation_id);
+        event.header.causation_id = causation_id
+            .filter(|&id| id != 0)
+            .map(crate::id::CausationId::from);
 
         #[cfg(feature = "blake3")]
         let event_hash = crate::event::hash::compute_hash(&event.payload);
@@ -164,13 +166,16 @@ impl WriterState<'_> {
                 .map_err(|_| StoreError::ser_msg("encoded frame length exceeds u32::MAX"))?,
         };
         receipt.disk_pos = disk_pos;
-        let meta = StagedCommitMeta::new(
-            event.header.event_id,
-            correlation_id,
-            causation_id,
-            kind,
-            global_seq,
-        );
+        let meta = {
+            use crate::id::EntityIdType;
+            StagedCommitMeta::new(
+                event.header.event_id.as_u128(),
+                correlation_id,
+                causation_id,
+                kind,
+                global_seq,
+            )
+        };
         let timing = StagedCommitTiming::new(
             event.header.timestamp_us,
             now_ms,
