@@ -1,10 +1,15 @@
 [package]
-name = "batpak-minimal-app"
-version = "0.1.0"
+name = "minimal-app-template"
+version = "0.7.6"
 edition = "2021"
+publish = false
+rust-version = "1.92"
 
-[workspace]
+[lints]
+workspace = true
 
 [dependencies]
-batpak = { path = "../../crates/core", features = ["blake3"] }
+batpak = { path = "../../crates/core" }
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+tempfile = ">=3.24, <3.25"
