@@ -38,6 +38,7 @@ RUN cargo binstall --no-confirm cargo-deny@0.19.0 || cargo install --locked carg
 RUN cargo binstall --no-confirm cargo-audit@0.22.1 || cargo install --locked cargo-audit@0.22.1
 RUN cargo binstall --no-confirm cargo-nextest@0.9.132 || cargo install --locked cargo-nextest@0.9.132
 RUN cargo binstall --no-confirm cargo-llvm-cov@0.8.5 || cargo install --locked cargo-llvm-cov@0.8.5
+RUN cargo binstall --no-confirm cargo-public-api@0.51.0 || cargo install --locked cargo-public-api@0.51.0
 # The published GNU binary currently requires a newer glibc than bookworm ships,
 # so install cargo-mutants from source in the canonical container.
 RUN cargo install --locked cargo-mutants@27.0.0
