@@ -45,7 +45,7 @@ rayon = "1.12"
 fastrand = { version = "2", optional = true }
 # tempfile 3.25+ allows getrandom >=0.3,<0.5 and Cargo may pick 0.4,
 # splitting the workspace RNG graph. Stay on the latest 0.3-only line.
-tempfile = ">=3.24, <3.25"
+tempfile = ">=3.24, <3.28"
 libc = "0.2"
 ed25519-compact = { version = "2.2.0", default-features = false, features = ["std"] }
 zeroize = "1"
@@ -56,7 +56,7 @@ batpak-bench-support = { path = "../bench-support", version = "0.7.6" }
 proptest = "1"
 arbitrary = { version = "1", features = ["derive"] }
 criterion = { version = "0.8", features = ["html_reports"] }
-tempfile = ">=3.24, <3.25"
+tempfile = ">=3.24, <3.28"
 trybuild = "1"
 fastrand = "2"
 serial_test = { version = "3.4.0", features = ["file_locks"] }
