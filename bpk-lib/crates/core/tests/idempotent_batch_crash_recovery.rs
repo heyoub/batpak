@@ -127,7 +127,8 @@ fn partial_keys_rejected_synchronously() {
 }
 
 #[test]
-#[allow(clippy::wildcard_enum_match_arm)] // intentional catch-all over #[non_exhaustive] StoreError
+// justifies: INV-ALLOW-IS-DESIGN; this test asserts the error is NOT BatchFailed — the wildcard catch-all over `#[non_exhaustive] StoreError` is the right shape because the assertion is variant-agnostic at crates/core/tests/idempotent_batch_crash_recovery.rs.
+#[allow(clippy::wildcard_enum_match_arm)]
 fn batch_max_bytes_accepts_exact_limit_and_rejects_one_byte_over() {
     let coord = coord();
     let items = byte_counted_batch(&coord);

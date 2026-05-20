@@ -187,7 +187,7 @@ jobs:
             rm -rf "$STORE"
           }
           trap cleanup EXIT
-          ../bpk-lib/target/debug/hbat serve --store "$STORE" --tcp 127.0.0.1:0 --print-port > /tmp/hbat-ready.txt 2> /tmp/hbat-err.txt &
+          ../target/debug/hbat serve --store "$STORE" --tcp 127.0.0.1:0 --print-port > /tmp/hbat-ready.txt 2> /tmp/hbat-err.txt &
           HBAT_PID=$!
           for _ in $(seq 1 50); do
             if [ -s /tmp/hbat-ready.txt ]; then break; fi
