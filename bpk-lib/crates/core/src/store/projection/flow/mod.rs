@@ -42,6 +42,30 @@ fn elapsed_us(clock: &dyn Clock, started_at_ns: i64) -> u64 {
         .unwrap_or(u64::MAX)
 }
 
+#[must_use]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ProjectionExternalCacheStoreOutcome {
+    Stored,
+    PutFailed,
+}
+
+#[must_use]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ProjectionIndexCacheStoreOutcome {
+    Stored,
+    UnsupportedTopology,
+}
+
+#[must_use]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ProjectionCacheStoreOutcome {
+    Stored {
+        external: ProjectionExternalCacheStoreOutcome,
+        index: ProjectionIndexCacheStoreOutcome,
+    },
+    SerializationFailed,
+}
+
 fn fallback_to_full_replay<T, I, State>(
     store: &Store<State>,
     entity: &str,
@@ -347,7 +371,11 @@ where
                     &mut cached_state,
                     slot.watermark,
                 )?;
-                store_projection_value(store, &execution, &cached_state);
+                observe_projection_cache_store_outcome(
+                    "group_local_incremental",
+                    execution.entity,
+                    store_projection_value(store, &execution, &cached_state),
+                );
                 Ok(finish_projection(
                     &mut timings,
                     store.runtime.clock(),
@@ -494,7 +522,11 @@ where
                         &mut cached_state,
                         meta.watermark,
                     )?;
-                    store_projection_value(store, &execution, &cached_state);
+                    observe_projection_cache_store_outcome(
+                        "incremental",
+                        execution.entity,
+                        store_projection_value(store, &execution, &cached_state),
+                    );
                     return Ok(finish_projection(
                         timings,
                         store.runtime.clock(),
@@ -517,11 +549,18 @@ where
                     &bytes,
                     "cache deserialize failed (falling back to replay)",
                 ) {
-                    let _ = store.index.store_cached_projection(
+                    let index_outcome = store_index_cached_projection(
+                        store,
                         execution.entity,
                         execution.replay.type_id,
                         bytes,
                         meta.watermark,
+                    );
+                    tracing::trace!(
+                        target: "batpak::projection",
+                        flow = "group_local_cache_warm",
+                        entity = execution.entity,
+                        outcome = ?index_outcome,
                     );
                     return Ok(finish_projection(
                         timings,
@@ -621,7 +660,11 @@ where
     // Cache store-back
     let t_store = store.runtime.now_mono_ns();
     if let Some(ref value) = result {
-        store_projection_value(store, &execution, value);
+        observe_projection_cache_store_outcome(
+            "full_replay",
+            execution.entity,
+            store_projection_value(store, &execution, value),
+        );
     }
     if let Some(t) = timings.as_deref_mut() {
         t.cache_store_us = elapsed_us(store.runtime.clock(), t_store);
@@ -669,34 +712,83 @@ fn store_projection_value<T, State>(
     store: &Store<State>,
     execution: &ReplayExecution<'_>,
     value: &T,
-) where
+) -> ProjectionCacheStoreOutcome
+where
     T: serde::Serialize,
 {
-    if let Ok(bytes) = serde_json::to_vec(value) {
-        // G6: stamp `cached_at_*` at the moment the bytes are actually
-        // handed to `ProjectionCache::put`, not at the moment the plan was
-        // built. Plan-build time can be microseconds to milliseconds earlier
-        // — anything that depends on "how old is this cache row" must see
-        // the real put timestamp, not the plan-build timestamp.
-        //
-        // Wall-clock and monotonic metadata both flow through the runtime
-        // clock; tests that install a full `Clock` can control wall time,
-        // monotonic age, and process-epoch evidence from one seam.
-        let meta = super::CacheMeta {
-            watermark: execution.replay.watermark,
-            cached_at_us: store.runtime.cache_now_us(),
-            cached_at_mono_ns: Some(store.runtime.now_mono_ns()),
-            process_boot_ns: Some(store.runtime.process_boot_ns()),
-        };
-        if let Err(error) = store.cache.put(&execution.replay.cache_key, &bytes, meta) {
-            tracing::warn!("cache put failed (non-fatal): {error}");
+    let bytes = match serde_json::to_vec(value) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            tracing::warn!(
+                target: "batpak::projection",
+                flow = "cache_store",
+                entity = execution.entity,
+                error = %error,
+                "projection cache serialization failed; skipping cache store-back"
+            );
+            return ProjectionCacheStoreOutcome::SerializationFailed;
         }
-        let _ = store.index.store_cached_projection(
-            execution.entity,
-            execution.replay.type_id,
-            bytes,
-            execution.replay.watermark,
-        );
+    };
+
+    // G6: stamp `cached_at_*` at the moment the bytes are actually
+    // handed to `ProjectionCache::put`, not at the moment the plan was
+    // built. Plan-build time can be microseconds to milliseconds earlier
+    // — anything that depends on "how old is this cache row" must see
+    // the real put timestamp, not the plan-build timestamp.
+    //
+    // Wall-clock and monotonic metadata both flow through the runtime
+    // clock; tests that install a full `Clock` can control wall time,
+    // monotonic age, and process-epoch evidence from one seam.
+    let meta = super::CacheMeta {
+        watermark: execution.replay.watermark,
+        cached_at_us: store.runtime.cache_now_us(),
+        cached_at_mono_ns: Some(store.runtime.now_mono_ns()),
+        process_boot_ns: Some(store.runtime.process_boot_ns()),
+    };
+    let external = if let Err(error) = store.cache.put(&execution.replay.cache_key, &bytes, meta) {
+        tracing::warn!("cache put failed (non-fatal): {error}");
+        ProjectionExternalCacheStoreOutcome::PutFailed
+    } else {
+        ProjectionExternalCacheStoreOutcome::Stored
+    };
+    let index = store_index_cached_projection(
+        store,
+        execution.entity,
+        execution.replay.type_id,
+        bytes,
+        execution.replay.watermark,
+    );
+    ProjectionCacheStoreOutcome::Stored { external, index }
+}
+
+fn observe_projection_cache_store_outcome(
+    flow: &'static str,
+    entity: &str,
+    outcome: ProjectionCacheStoreOutcome,
+) {
+    tracing::trace!(
+        target: "batpak::projection",
+        flow,
+        entity,
+        outcome = ?outcome,
+        "projection cache store outcome"
+    );
+}
+
+fn store_index_cached_projection<State>(
+    store: &Store<State>,
+    entity: &str,
+    type_id: TypeId,
+    bytes: Vec<u8>,
+    watermark: u64,
+) -> ProjectionIndexCacheStoreOutcome {
+    if store
+        .index
+        .store_cached_projection(entity, type_id, bytes, watermark)
+    {
+        ProjectionIndexCacheStoreOutcome::Stored
+    } else {
+        ProjectionIndexCacheStoreOutcome::UnsupportedTopology
     }
 }
 

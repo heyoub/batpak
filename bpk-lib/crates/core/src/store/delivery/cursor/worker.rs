@@ -55,6 +55,16 @@ fn checkpoint_write_failed(id: &str, error: &std::io::Error) -> StoreError {
     }
 }
 
+fn stringify_panic_payload(panic_info: &(dyn std::any::Any + Send)) -> String {
+    if let Some(s) = panic_info.downcast_ref::<&str>() {
+        (*s).to_string()
+    } else if let Some(s) = panic_info.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "unknown panic".to_string()
+    }
+}
+
 fn build_worker_cursor(
     region: &Region,
     index: &Arc<StoreIndex>,
@@ -449,7 +459,8 @@ impl Store<crate::store::Open> {
                             cursor.restore_checkpoint(committed.0, committed.1);
                             stop_thread.store(true, Ordering::Release);
                         }
-                        Err(_) => {
+                        Err(panic_info) => {
+                            let panic_msg = stringify_panic_payload(panic_info.as_ref());
                             let budget_ok = match &restart {
                                 RestartPolicy::Once => {
                                     if restarts >= 1 {
@@ -484,7 +495,8 @@ impl Store<crate::store::Open> {
 
                             if !budget_ok {
                                 tracing::error!(
-                                    "cursor worker restart budget exhausted; stopping worker"
+                                    "cursor worker restart budget exhausted; stopping worker. \
+                                     Last panic: {panic_msg}"
                                 );
                                 // D1: fire the reactor-runner callback
                                 // so its error slot receives
@@ -501,7 +513,8 @@ impl Store<crate::store::Open> {
                             }
 
                             tracing::warn!(
-                                "cursor worker panicked; restarting from last checkpoint"
+                                "cursor worker panicked; restarting from last checkpoint. \
+                                 Panic: {panic_msg}"
                             );
                             cursor = match build_worker_cursor(
                                 &region,
@@ -533,5 +546,44 @@ impl Store<crate::store::Open> {
             join: Some(join),
             error_slot,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::stringify_panic_payload;
+    use std::any::Any;
+
+    #[test]
+    fn stringify_panic_payload_preserves_static_str_payload() {
+        let payload: Box<dyn Any + Send> = Box::new("cursor panic detail");
+
+        assert_eq!(
+            stringify_panic_payload(payload.as_ref()),
+            "cursor panic detail",
+            "PROPERTY: cursor worker panic evidence should include literal panic payloads"
+        );
+    }
+
+    #[test]
+    fn stringify_panic_payload_preserves_string_payload() {
+        let payload: Box<dyn Any + Send> = Box::new(String::from("owned cursor panic detail"));
+
+        assert_eq!(
+            stringify_panic_payload(payload.as_ref()),
+            "owned cursor panic detail",
+            "PROPERTY: cursor worker panic evidence should include owned String panic payloads"
+        );
+    }
+
+    #[test]
+    fn stringify_panic_payload_falls_back_for_non_string_payload() {
+        let payload: Box<dyn Any + Send> = Box::new(17_u32);
+
+        assert_eq!(
+            stringify_panic_payload(payload.as_ref()),
+            "unknown panic",
+            "PROPERTY: cursor worker panic evidence should remain well-formed for opaque payloads"
+        );
     }
 }

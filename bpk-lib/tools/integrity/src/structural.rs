@@ -13,6 +13,7 @@ use crate::{
 use anyhow::{anyhow, bail, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
+use syn::spanned::Spanned;
 
 pub(crate) fn run() -> Result<()> {
     let repo_root = repo_root()?;
@@ -26,6 +27,7 @@ pub(crate) fn run() -> Result<()> {
     check_canonical_encoding_boundary(&repo_root)?;
     check_allow_justifications(&repo_root)?;
     check_rust_file_size_pressure(&repo_root)?;
+    check_inline_test_island_pressure(&repo_root)?;
     public_surface::check(&repo_root)?;
     ci_parity::check(&repo_root)?;
     store_pub_fn_coverage::check(&repo_root)?;
@@ -36,17 +38,17 @@ pub(crate) fn run() -> Result<()> {
 fn check_rust_file_size_pressure(repo_root: &Path) -> Result<()> {
     const DEFAULT_LINE_BUDGET: usize = 850;
     const RATCHELED_OVER_BUDGET_FILES: &[(&str, usize)] = &[
-        ("crates/core/src/store/index/columnar.rs", 1474),
-        ("crates/core/src/store/cold_start/rebuild.rs", 1194),
-        ("crates/core/src/store/segment/sidx.rs", 995),
-        ("crates/core/src/store/index/mod.rs", 929),
-        ("crates/macros/src/lib.rs", 915),
+        ("crates/core/src/store/index/columnar.rs", 1372),
+        ("crates/core/src/store/cold_start/rebuild.rs", 1099),
+        ("crates/core/src/store/segment/sidx.rs", 885),
+        ("crates/core/src/store/index/mod.rs", 835),
+        ("crates/macros/src/lib.rs", 849),
     ];
 
     for path in production_rust_files(repo_root) {
         let rel = relative(repo_root, &path);
         let content = fs::read_to_string(&path)?;
-        let line_count = content.lines().count();
+        let line_count = nonblank_line_count(&content);
         let budget = RATCHELED_OVER_BUDGET_FILES
             .iter()
             .find_map(|(known_rel, budget)| (*known_rel == rel).then_some(*budget))
@@ -55,10 +57,47 @@ fn check_rust_file_size_pressure(repo_root: &Path) -> Result<()> {
             line_count <= budget,
             format!(
                 "structural-check: production Rust file size pressure in {rel}: {line_count} lines exceeds budget {budget}.\n\
-                 New production files must stay at or below {DEFAULT_LINE_BUDGET} lines. \
+                 New production files must stay at or below {DEFAULT_LINE_BUDGET} nonblank lines. \
                  Existing oversized files are ratcheted at their current ceiling until they are extracted."
             ),
         )?;
+    }
+    Ok(())
+}
+
+fn check_inline_test_island_pressure(repo_root: &Path) -> Result<()> {
+    const DEFAULT_TEST_ISLAND_BUDGET: usize = 200;
+    const RATCHELED_OVER_BUDGET_TEST_ISLANDS: &[(&str, usize)] = &[
+        ("crates/core/src/store/index/columnar.rs", 770),
+        ("crates/core/src/store/cold_start/rebuild.rs", 495),
+        ("crates/core/src/store/segment/sidx.rs", 396),
+        ("crates/core/src/store/segment/scan/recovery.rs", 391),
+        ("crates/core/src/store/segment/scan/mod.rs", 351),
+    ];
+
+    for path in production_rust_files(repo_root) {
+        let rel = relative(repo_root, &path);
+        let content = fs::read_to_string(&path)?;
+        let file = syn::parse_file(&content)
+            .map_err(|err| anyhow!("parse inline test islands in {rel}: {err}"))?;
+        let lines = content.lines().collect::<Vec<_>>();
+        for island in inline_test_islands(&file, &lines) {
+            let budget = RATCHELED_OVER_BUDGET_TEST_ISLANDS
+                .iter()
+                .find_map(|(known_rel, budget)| (*known_rel == rel).then_some(*budget))
+                .unwrap_or(DEFAULT_TEST_ISLAND_BUDGET);
+            ensure(
+                island.nonblank_lines <= budget,
+                format!(
+                    "structural-check: oversized inline `mod tests` island in {rel}:{}-{} has {} nonblank lines, exceeding budget {budget}.\n\
+                     New inline test islands in production src files must stay at or below {DEFAULT_TEST_ISLAND_BUDGET} nonblank lines. \
+                     Existing oversized islands are ratcheted at their current ceiling; extract growth into integration tests or focused test modules.",
+                    island.start_line,
+                    island.end_line,
+                    island.nonblank_lines
+                ),
+            )?;
+        }
     }
     Ok(())
 }
@@ -218,6 +257,63 @@ fn check_canonical_encoding_boundary(repo_root: &Path) -> Result<()> {
     Ok(())
 }
 
+#[derive(Debug, Eq, PartialEq)]
+struct InlineTestIsland {
+    start_line: usize,
+    end_line: usize,
+    nonblank_lines: usize,
+}
+
+fn inline_test_islands(file: &syn::File, source_lines: &[&str]) -> Vec<InlineTestIsland> {
+    let mut islands = Vec::new();
+    collect_inline_test_islands(&file.items, source_lines, &mut islands);
+    islands
+}
+
+fn collect_inline_test_islands(
+    items: &[syn::Item],
+    source_lines: &[&str],
+    islands: &mut Vec<InlineTestIsland>,
+) {
+    for item in items {
+        let syn::Item::Mod(module) = item else {
+            continue;
+        };
+        if module.ident == "tests" && module.content.is_some() {
+            let span = module.span();
+            let start_line = span.start().line;
+            let end_line = span.end().line;
+            islands.push(InlineTestIsland {
+                start_line,
+                end_line,
+                nonblank_lines: nonblank_line_count_in_range(source_lines, start_line, end_line),
+            });
+        }
+        if let Some((_, nested_items)) = &module.content {
+            collect_inline_test_islands(nested_items, source_lines, islands);
+        }
+    }
+}
+
+fn nonblank_line_count(content: &str) -> usize {
+    content
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .count()
+}
+
+fn nonblank_line_count_in_range(lines: &[&str], start_line: usize, end_line: usize) -> usize {
+    if start_line == 0 || end_line < start_line {
+        return 0;
+    }
+    lines
+        .iter()
+        .skip(start_line - 1)
+        .take(end_line - start_line + 1)
+        .filter(|line| !line.trim().is_empty())
+        .count()
+}
+
 fn production_rust_files(repo_root: &Path) -> Vec<PathBuf> {
     let mut paths = rust_files(&core_src_root(repo_root));
     for rel in [
@@ -231,4 +327,44 @@ fn production_rust_files(repo_root: &Path) -> Vec<PathBuf> {
         paths.extend(rust_files(&repo_root.join(rel)));
     }
     paths
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{inline_test_islands, nonblank_line_count};
+
+    #[test]
+    fn file_size_ratchet_counts_nonblank_lines() {
+        assert_eq!(nonblank_line_count("one\n\n  \n two\n"), 2);
+    }
+
+    #[test]
+    fn inline_test_island_detection_counts_inline_tests_only() {
+        let source = r#"
+mod production {
+    fn helper() {}
+
+    mod tests {
+        #[test]
+        fn nested_island() {}
+
+    }
+}
+
+mod tests {
+    #[test]
+    fn top_level_island() {}
+
+}
+
+mod external_tests;
+"#;
+        let file = syn::parse_file(source).expect("parse fixture");
+        let lines = source.lines().collect::<Vec<_>>();
+        let islands = inline_test_islands(&file, &lines);
+
+        assert_eq!(islands.len(), 2);
+        assert_eq!(islands[0].nonblank_lines, 4);
+        assert_eq!(islands[1].nonblank_lines, 4);
+    }
 }

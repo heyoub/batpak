@@ -1,7 +1,8 @@
 use super::*;
 use crate::event::{Event, EventKind};
 use crate::store::index::columnar::CachedProjectionSlot;
-use crate::store::StoreConfig;
+use crate::store::index::ProjectionReplayPlan;
+use crate::store::{IndexTopology, Open, StoreConfig};
 use std::error::Error;
 use tempfile::TempDir;
 
@@ -24,6 +25,54 @@ impl EventSourced for Counter {
     fn relevant_event_kinds() -> &'static [EventKind] {
         static KINDS: [EventKind; 1] = [EventKind::custom(0xF, 1)];
         &KINDS
+    }
+}
+
+struct FailingProjection;
+
+impl serde::Serialize for FailingProjection {
+    fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        Err(serde::ser::Error::custom(
+            "intentional projection serialization failure",
+        ))
+    }
+}
+
+fn append_counter_event(store: &Store<Open>, entity: &str) -> TestResult {
+    let coord = crate::coordinate::Coordinate::new(entity, "scope:test")?;
+    store.append(
+        &coord,
+        Counter::relevant_event_kinds()[0],
+        &serde_json::json!({"n": 1}),
+    )?;
+    Ok(())
+}
+
+fn replay_context_for<State>(
+    store: &Store<State>,
+    entity: &str,
+    type_id: std::any::TypeId,
+    cache_key: Vec<u8>,
+) -> ReplayContext {
+    let plan = store
+        .index
+        .projection_replay_plan(entity, Counter::relevant_event_kinds())
+        .unwrap_or_else(|| ProjectionReplayPlan {
+            watermark: 1,
+            generation: 1,
+            items: vec![],
+        });
+    ReplayContext {
+        watermark: plan.watermark,
+        cached_at_us: store.runtime.cache_now_us(),
+        cached_at_mono_ns: store.runtime.now_mono_ns(),
+        process_boot_ns: store.runtime.process_boot_ns(),
+        type_id,
+        cache_key,
+        plan,
     }
 }
 
@@ -76,6 +125,110 @@ fn projection_replay_plan_matches_legacy_stream_filtering() -> TestResult {
     assert_eq!(planned_items, legacy_items);
 
     store.close()?;
+    Ok(())
+}
+
+#[test]
+fn cache_store_reports_serialization_failure_without_touching_index() -> TestResult {
+    let dir = TempDir::new()?;
+    let store = Store::open(StoreConfig::new(dir.path()))?;
+    let entity = "entity:serialize-fail";
+    append_counter_event(&store, entity)?;
+    let freshness = Freshness::Consistent;
+    let replay = replay_context_for(
+        &store,
+        entity,
+        std::any::TypeId::of::<FailingProjection>(),
+        b"serialize-failure-cache-key".to_vec(),
+    );
+    let execution = replay_execution(entity, &freshness, &replay, store.runtime.now_mono_ns());
+
+    let outcome = store_projection_value(&store, &execution, &FailingProjection);
+
+    assert_eq!(outcome, ProjectionCacheStoreOutcome::SerializationFailed);
+    assert!(
+        store
+            .index
+            .cached_projection(entity, std::any::TypeId::of::<FailingProjection>())
+            .is_none(),
+        "PROPERTY: serialization failure must not populate the group-local projection cache"
+    );
+
+    store.close()?;
+    Ok(())
+}
+
+#[test]
+fn cache_store_reports_index_store_success_and_unsupported_topology() -> TestResult {
+    let supported_dir = TempDir::new()?;
+    let supported = Store::open(
+        StoreConfig::new(supported_dir.path()).with_index_topology(IndexTopology::entity_local()),
+    )?;
+    let entity = "entity:index-store-supported";
+    append_counter_event(&supported, entity)?;
+    let freshness = Freshness::Consistent;
+    let replay = replay_context_for(
+        &supported,
+        entity,
+        std::any::TypeId::of::<Counter>(),
+        projection_cache_key::<Counter>(entity),
+    );
+    let execution = replay_execution(entity, &freshness, &replay, supported.runtime.now_mono_ns());
+
+    let outcome = store_projection_value(&supported, &execution, &Counter);
+
+    assert_eq!(
+        outcome,
+        ProjectionCacheStoreOutcome::Stored {
+            external: ProjectionExternalCacheStoreOutcome::Stored,
+            index: ProjectionIndexCacheStoreOutcome::Stored,
+        }
+    );
+    assert!(
+        supported
+            .index
+            .cached_projection(entity, std::any::TypeId::of::<Counter>())
+            .is_some(),
+        "PROPERTY: a true index-side store return must leave a group-local slot"
+    );
+    supported.close()?;
+
+    let unsupported_dir = TempDir::new()?;
+    let unsupported = Store::open(
+        StoreConfig::new(unsupported_dir.path()).with_index_topology(IndexTopology::scan()),
+    )?;
+    let entity = "entity:index-store-unsupported";
+    append_counter_event(&unsupported, entity)?;
+    let replay = replay_context_for(
+        &unsupported,
+        entity,
+        std::any::TypeId::of::<Counter>(),
+        projection_cache_key::<Counter>(entity),
+    );
+    let execution = replay_execution(
+        entity,
+        &freshness,
+        &replay,
+        unsupported.runtime.now_mono_ns(),
+    );
+
+    let outcome = store_projection_value(&unsupported, &execution, &Counter);
+
+    assert_eq!(
+        outcome,
+        ProjectionCacheStoreOutcome::Stored {
+            external: ProjectionExternalCacheStoreOutcome::Stored,
+            index: ProjectionIndexCacheStoreOutcome::UnsupportedTopology,
+        }
+    );
+    assert!(
+        unsupported
+            .index
+            .cached_projection(entity, std::any::TypeId::of::<Counter>())
+            .is_none(),
+        "PROPERTY: unsupported topology must be reported instead of silently ignored"
+    );
+    unsupported.close()?;
     Ok(())
 }
 
