@@ -248,6 +248,22 @@ mod tests {
     use super::{interpret_cyclonedx_status, INSTALL_HINT};
     use std::process::Command;
 
+    fn nonzero_status() -> std::process::ExitStatus {
+        #[cfg(windows)]
+        let mut command = {
+            let mut command = Command::new("cmd");
+            command.args(["/C", "exit", "/B", "1"]);
+            command
+        };
+
+        #[cfg(not(windows))]
+        let mut command = Command::new("false");
+
+        command
+            .status()
+            .expect("platform command must synthesize a failed ExitStatus")
+    }
+
     #[test]
     fn missing_cyclonedx_binary_reports_install_hint() {
         // Spawn a binary that is guaranteed not to exist. We then ask the
@@ -257,16 +273,14 @@ mod tests {
         let mut command = Command::new("cargo-cyclonedx-definitely-not-installed");
         // Best-effort: run the program to obtain a real ExitStatus when
         // possible. On platforms where spawn fails outright (the common
-        // case) we synthesise a non-zero ExitStatus by running `false`,
-        // which is portable enough for CI.
+        // case) we synthesize a non-zero ExitStatus through the platform
+        // shell.
         let status = match command.status() {
             Ok(status) => {
                 assert!(!status.success(), "missing binary should not exit 0");
                 status
             }
-            Err(_) => Command::new("false")
-                .status()
-                .expect("the `false` utility must be runnable to synthesise a failed ExitStatus"),
+            Err(_) => nonzero_status(),
         };
 
         let err = interpret_cyclonedx_status(&command, status)

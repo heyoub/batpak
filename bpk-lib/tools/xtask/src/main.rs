@@ -486,19 +486,17 @@ fn main() -> Result<()> {
                 "-D",
                 "warnings",
             ])?;
-            for package in ["netbat"] {
-                util::cargo([
-                    "clippy",
-                    "-p",
-                    package,
-                    "--no-deps",
-                    "--all-features",
-                    "--all-targets",
-                    "--",
-                    "-D",
-                    "warnings",
-                ])?;
-            }
+            util::cargo([
+                "clippy",
+                "-p",
+                "netbat",
+                "--no-deps",
+                "--all-features",
+                "--all-targets",
+                "--",
+                "-D",
+                "warnings",
+            ])?;
             commands::integrity("traceability-check", [])?;
             commands::integrity("structural-check", [])
         }
@@ -510,7 +508,7 @@ fn main() -> Result<()> {
 fn features_flag(features: Option<&str>) -> Vec<String> {
     match features {
         None => vec!["--all-features".to_owned()],
-        Some(spec) if spec.is_empty() => Vec::new(),
+        Some("") => Vec::new(),
         Some(spec) => vec!["--features".to_owned(), spec.to_owned()],
     }
 }

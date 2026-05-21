@@ -15,7 +15,7 @@
   "scripts": {
     "build": "tsc -b",
     "test": "vitest run --root .",
-    "clean": "rm -rf dist"
+    "clean": "node -e \"for (const p of ['dist','tsconfig.tsbuildinfo']) require('node:fs').rmSync(p,{recursive:true,force:true})\""
   },
   "devDependencies": {
     "fast-check": "3.23.2"

@@ -37,7 +37,7 @@ pub(crate) fn msrv_check() -> Result<()> {
     for package in PUBLISH_CRATES {
         let manifest = bpk_lib
             .join("crates")
-            .join(crate_dir_for(package))
+            .join(crate_dir_for(package)?)
             .join("Cargo.toml");
         let msrv = read_rust_version(&manifest)
             .with_context(|| format!("read rust-version from {}", manifest.display()))?;
@@ -74,12 +74,12 @@ pub(crate) fn msrv_check() -> Result<()> {
 
 /// Map a published-crate name (e.g. `"batpak"`) to the directory under
 /// `bpk-lib/crates/` (e.g. `"core"` for batpak).
-fn crate_dir_for(package: &str) -> &'static str {
+fn crate_dir_for(package: &str) -> Result<&'static str> {
     match package {
-        "batpak" => "core",
-        "syncbat" => "syncbat",
-        "netbat" => "netbat",
-        other => panic!("msrv-check: unknown publish crate {other}"),
+        "batpak" => Ok("core"),
+        "syncbat" => Ok("syncbat"),
+        "netbat" => Ok("netbat"),
+        other => bail!("msrv-check: unknown publish crate {other}"),
     }
 }
 
@@ -163,8 +163,12 @@ mod tests {
 
     #[test]
     fn crate_dir_lookup_covers_publish_crates() {
-        assert_eq!(crate_dir_for("batpak"), "core");
-        assert_eq!(crate_dir_for("syncbat"), "syncbat");
-        assert_eq!(crate_dir_for("netbat"), "netbat");
+        assert_eq!(crate_dir_for("batpak").expect("batpak dir"), "core");
+        assert_eq!(crate_dir_for("syncbat").expect("syncbat dir"), "syncbat");
+        assert_eq!(crate_dir_for("netbat").expect("netbat dir"), "netbat");
+        let err = crate_dir_for("other").expect_err("unknown crate fails");
+        assert!(err
+            .to_string()
+            .contains("msrv-check: unknown publish crate other"));
     }
 }

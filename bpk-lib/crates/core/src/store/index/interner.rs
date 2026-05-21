@@ -217,7 +217,9 @@ impl StringInterner {
 
         // justifies: src/store/index/interner.rs documents a u32-sized ID domain (4B entries); exhaustion is an exceptional invariant, not a routinely-recoverable runtime condition.
         #[allow(clippy::expect_used)]
-        let next = raw.checked_add(1).expect("interner ID space exhausted (u32 wraparound)");
+        let next = raw
+            .checked_add(1)
+            .expect("interner ID space exhausted (u32 wraparound)");
         self.next_id.store(next, Ordering::Release);
 
         id

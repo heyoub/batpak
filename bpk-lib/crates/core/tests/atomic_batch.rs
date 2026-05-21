@@ -1254,7 +1254,6 @@ fn batch_publish_atomicity_concurrent_reader_sees_zero_or_all() {
 /// instead of using a per-item field. This test would have caught both
 /// halves: hash uniqueness, prev/event linking, and `walk_ancestors`
 /// traversal all fail loud against the buggy code.
-#[cfg(feature = "blake3")]
 #[test]
 fn batch_multi_item_same_entity_hash_chain_is_continuous() {
     let tmp = tempfile::tempdir().expect("create temp dir for hash chain regression");

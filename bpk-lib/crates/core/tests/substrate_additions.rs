@@ -15,7 +15,6 @@ use batpak::store::{
     SigningDowngradeReason, SigningExtensionNamespace, Store, StoreConfig,
     SIGNING_DOWNGRADE_SCHEMA_VERSION,
 };
-#[cfg(feature = "blake3")]
 use batpak::store::{DenialReceipt, SigningKey};
 use std::num::NonZeroUsize;
 use std::path::PathBuf;
@@ -468,7 +467,6 @@ fn receipt_extensions_survive_close_reopen_restore_paths() {
     }
 }
 
-#[cfg(feature = "blake3")]
 #[test]
 fn signed_unknown_extensions_survive_reopen_and_verify() {
     let dir = TempDir::new().expect("temp dir");
@@ -789,7 +787,6 @@ fn denial_trace_round_trip() {
     let _payload_witness: DenialPayload = traced;
 }
 
-#[cfg(feature = "blake3")]
 #[test]
 fn signed_receipts_round_trip() {
     let dir = TempDir::new().expect("temp dir");
@@ -900,7 +897,6 @@ fn unsigned_receipt_without_keys_has_no_signing_downgrade() {
     assert!(store.verify_append_receipt(&receipt));
 }
 
-#[cfg(feature = "blake3")]
 #[test]
 fn receipt_verification_rejects_stripped_signature_and_index_field_tampering() {
     let dir = TempDir::new().expect("temp dir");

@@ -11,7 +11,6 @@
 //! Run with: cargo test --test fuzz_targets --all-features
 //! Deep fuzz: PROPTEST_CASES=100000 cargo test --test fuzz_targets --all-features --release
 
-#[cfg(feature = "blake3")]
 use batpak::event::hash::HashChain;
 use batpak::outcome::wait::{CompensationAction, WaitCondition};
 use batpak::prelude::*;
@@ -535,7 +534,6 @@ proptest! {
 // FUZZ TARGET 9: HashChain serde + verification
 // ============================================================
 
-#[cfg(feature = "blake3")]
 proptest! {
     #![proptest_config(proptest_support::cfg(32))]
 

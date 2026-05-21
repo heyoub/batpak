@@ -113,17 +113,7 @@ where
 }
 
 fn evidence_content_hash(bytes: &[u8]) -> [u8; 32] {
-    #[cfg(feature = "blake3")]
-    {
-        batpak::event::hash::compute_hash(bytes)
-    }
-    #[cfg(not(feature = "blake3"))]
-    {
-        let crc = crc32fast::hash(bytes).to_be_bytes();
-        let mut out = [0_u8; 32];
-        out[..4].copy_from_slice(&crc);
-        out
-    }
+    batpak::event::hash::compute_hash(bytes)
 }
 
 fn sample_report_body(

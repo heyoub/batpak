@@ -181,9 +181,7 @@ describe("parseResponseFrame", () => {
     // The forward-compat path still enforces a token-shape sanity
     // check (ASCII [A-Za-z0-9_]+). A spaceless garbage code with a
     // dot or dash slips, but spaces / non-ASCII garbage doesn't.
-    expect(() => parseResponseFrame(utf8("ERR bad-code 626f6f6d\n"))).toThrow(
-      /ill-formed code/,
-    );
+    expect(() => parseResponseFrame(utf8("ERR bad-code 626f6f6d\n"))).toThrow(/ill-formed code/);
   });
 
   it("rejects responses that are neither OK nor ERR", () => {

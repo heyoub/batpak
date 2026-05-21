@@ -42,7 +42,9 @@ mod tests {
     use super::policy::{
         assert_mutation_policy, next_ratchet_floor, RepoMutationPhase, REPO_MUTATION_PHASE,
     };
-    use super::score::{cargo_mutants_results_dir, mutation_score, MutationScore};
+    use super::score::{
+        cargo_mutants_receipt_path, cargo_mutants_results_dir, mutation_score, MutationScore,
+    };
     use crate::{MutantMode, MutantSurface, MutantsArgs};
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -417,10 +419,13 @@ mod tests {
             score_pct: None,
         };
 
-        let err = assert_mutation_policy(&lane, &fake_output_dir(), score).expect_err("must fail");
+        let output_dir = fake_output_dir();
+        let timeout_path = cargo_mutants_receipt_path(&output_dir, "timeout.txt")
+            .display()
+            .to_string();
+        let err = assert_mutation_policy(&lane, &output_dir, score).expect_err("must fail");
         assert!(
-            err.to_string()
-                .contains("/repo/target/xtask-mutants/fake-lane/mutants.out/timeout.txt"),
+            err.to_string().contains(&timeout_path),
             "timeout guidance must point at nested cargo-mutants receipts, got: {err:#}"
         );
     }
@@ -438,10 +443,13 @@ mod tests {
             score_pct: Some(0),
         };
 
-        let err = assert_mutation_policy(&lane, &fake_output_dir(), score).expect_err("must fail");
+        let output_dir = fake_output_dir();
+        let missed_path = cargo_mutants_receipt_path(&output_dir, "missed.txt")
+            .display()
+            .to_string();
+        let err = assert_mutation_policy(&lane, &output_dir, score).expect_err("must fail");
         assert!(
-            err.to_string()
-                .contains("/repo/target/xtask-mutants/fake-lane/mutants.out/missed.txt"),
+            err.to_string().contains(&missed_path),
             "threshold guidance must point at nested cargo-mutants receipts, got: {err:#}"
         );
     }

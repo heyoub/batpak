@@ -8,9 +8,9 @@
     "build": "pnpm -r run build",
     "test": "pnpm -r run test",
     "generate": "pnpm --filter @batpak/codegen run generate",
-    "lint": "eslint 'packages/*/src/**/*.ts' 'packages/*/test/**/*.ts' 'examples/*/src/**/*.ts'",
-    "format": "prettier --write 'packages/*/{src,test}/**/*.{ts,json}' 'examples/*/src/**/*.ts'",
-    "format:check": "prettier --check 'packages/*/{src,test}/**/*.{ts,json}' 'examples/*/src/**/*.ts'",
+    "lint": "eslint \"packages/*/src/**/*.ts\" \"packages/*/test/**/*.ts\" \"examples/*/src/**/*.ts\"",
+    "format": "prettier --write \"packages/*/{src,test}/**/*.{ts,json}\" \"examples/*/src/**/*.ts\"",
+    "format:check": "prettier --check \"packages/*/{src,test}/**/*.{ts,json}\" \"examples/*/src/**/*.ts\"",
     "clean": "pnpm -r run clean"
   },
   "devDependencies": {

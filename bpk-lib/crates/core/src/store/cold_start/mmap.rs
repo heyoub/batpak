@@ -6,8 +6,6 @@
 //! replay only the durable tail after the recorded watermark.
 
 use crate::event::HashChain;
-#[cfg(test)]
-use crate::store::cold_start::raw_to_kind;
 use crate::store::cold_start::{
     kind_to_raw, raw_to_kind_counted, validate_watermark_segment, ColdStartIndexRow,
     ColdStartSource, ReservedKindFallbackStats, WatermarkInfo, WatermarkValidationError,
@@ -117,11 +115,6 @@ impl MmapIndexEntry {
         DiskPos::new(self.segment_id, self.frame_offset, self.frame_length)
     }
 
-    #[cfg(test)]
-    fn to_cold_start_row(&self) -> ColdStartIndexRow {
-        self.to_cold_start_row_counted(&mut ReservedKindFallbackStats::default())
-    }
-
     fn to_cold_start_row_counted(
         &self,
         counts: &mut ReservedKindFallbackStats,
@@ -145,42 +138,6 @@ impl MmapIndexEntry {
             disk_pos: self.to_disk_pos(),
             global_sequence: self.global_sequence,
         }
-    }
-
-    #[cfg(test)]
-    fn encode_into_v2(&self, buf: &mut [u8]) {
-        debug_assert_eq!(buf.len(), MMAP_ENTRY_SIZE_V2);
-        let mut pos = 0usize;
-
-        macro_rules! put_le {
-            ($val:expr, $n:expr) => {{
-                buf[pos..pos + $n].copy_from_slice(&($val).to_le_bytes());
-                pos += $n;
-            }};
-        }
-        macro_rules! put_bytes {
-            ($arr:expr) => {{
-                let slice: &[u8] = &$arr;
-                buf[pos..pos + slice.len()].copy_from_slice(slice);
-                pos += slice.len();
-            }};
-        }
-
-        put_le!(self.event_id, 16);
-        put_le!(self.entity_idx, 4);
-        put_le!(self.scope_idx, 4);
-        put_le!(self.kind, 2);
-        put_le!(self.wall_ms, 8);
-        put_le!(self.clock, 4);
-        put_bytes!(self.prev_hash);
-        put_bytes!(self.event_hash);
-        put_le!(self.segment_id, 8);
-        put_le!(self.frame_offset, 8);
-        put_le!(self.frame_length, 4);
-        put_le!(self.global_sequence, 8);
-        put_le!(self.correlation_id, 16);
-        put_le!(self.causation_id, 16);
-        debug_assert_eq!(pos, MMAP_ENTRY_SIZE_V2);
     }
 
     fn encode_into(&self, buf: &mut [u8]) {
@@ -1039,80 +996,6 @@ mod tests {
             });
         }
         idx
-    }
-
-    fn sorted_entries_with_position(idx: &StoreIndex, lane: u32, depth: u32) -> Vec<IndexEntry> {
-        let mut entries = idx.all_entries();
-        for entry in &mut entries {
-            entry.dag_lane = lane;
-            entry.dag_depth = depth;
-        }
-        entries.sort_by_key(|entry| entry.global_sequence);
-        entries
-    }
-
-    fn write_legacy_mmap_index(
-        dir: &Path,
-        version: u16,
-        idx: &StoreIndex,
-        entries: &[IndexEntry],
-        reserved_kind_fallbacks: ReservedKindFallbackStats,
-    ) {
-        assert!(
-            matches!(version, 3 | 4),
-            "legacy mmap helper is scoped to v3/v4"
-        );
-        let mut interner_strings = vec![String::new()];
-        interner_strings.extend(idx.interner.to_snapshot());
-        let interner_bytes = rmp_serde::to_vec_named(&interner_strings).expect("interner bytes");
-        let routing = RoutingSummary::from_sorted_entries(
-            entries,
-            recommended_restore_chunk_count(entries.len()),
-        );
-        let summary_bytes = if version >= 4 {
-            rmp_serde::to_vec_named(&MmapSummaryDataV4 {
-                routing,
-                reserved_kind_fallbacks,
-            })
-            .expect("v4 summary bytes")
-        } else {
-            rmp_serde::to_vec_named(&MmapSummaryDataV2 { routing }).expect("v3 summary bytes")
-        };
-
-        let mut header_tail = Vec::with_capacity(HEADER_TAIL_LEN_V2);
-        header_tail.extend_from_slice(&7u64.to_le_bytes());
-        header_tail.extend_from_slice(&128u64.to_le_bytes());
-        header_tail.extend_from_slice(&idx.global_sequence().to_le_bytes());
-        header_tail.extend_from_slice(
-            &u32::try_from(interner_strings.len())
-                .expect("test interner string count fits in u32")
-                .to_le_bytes(),
-        );
-        header_tail.extend_from_slice(&(entries.len() as u64).to_le_bytes());
-        header_tail.extend_from_slice(&(interner_bytes.len() as u64).to_le_bytes());
-        header_tail.extend_from_slice(&(summary_bytes.len() as u64).to_le_bytes());
-
-        let mut bytes = Vec::new();
-        bytes.extend_from_slice(MMAP_INDEX_MAGIC);
-        bytes.extend_from_slice(&version.to_le_bytes());
-        bytes.extend_from_slice(&0u32.to_le_bytes());
-        bytes.extend_from_slice(&header_tail);
-        bytes.extend_from_slice(&interner_bytes);
-        bytes.extend_from_slice(&summary_bytes);
-
-        let mut hasher = crc32fast::Hasher::new();
-        hasher.update(&header_tail);
-        hasher.update(&interner_bytes);
-        hasher.update(&summary_bytes);
-        let mut buf = [0u8; MMAP_ENTRY_SIZE_V3];
-        for entry in entries {
-            entry_to_mmap(entry).encode_into(&mut buf);
-            hasher.update(&buf);
-            bytes.extend_from_slice(&buf);
-        }
-        let crc = hasher.finalize();
-        bytes[8..12].copy_from_slice(&crc.to_le_bytes());
-        std::fs::write(dir.join(MMAP_INDEX_FILENAME), bytes).expect("write legacy mmap index");
     }
 
     #[test]

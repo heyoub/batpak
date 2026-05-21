@@ -84,9 +84,7 @@ pub(super) const NETBAT_BOUNDARY_MUTANT_FILES: &[&str] = &[
     "crates/netbat/src/transport.rs",
 ];
 pub(super) const INDEX_TOPOLOGY_DEFAULT_EQUIVALENT_MUTANT: &str = r"crates/core/src/store/config\.rs:.*replace IndexTopology::aos -> Self with Default::default\(\)";
-pub(super) const MUTANT_EXCLUDE_RES: &[&str] = &[
-    INDEX_TOPOLOGY_DEFAULT_EQUIVALENT_MUTANT,
-];
+pub(super) const MUTANT_EXCLUDE_RES: &[&str] = &[INDEX_TOPOLOGY_DEFAULT_EQUIVALENT_MUTANT];
 const SEGMENT_SCAN_MUTANT_EXCLUDE_RES: &[&str] = &[];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

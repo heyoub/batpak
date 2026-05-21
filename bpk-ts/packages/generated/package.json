@@ -15,7 +15,7 @@
   "scripts": {
     "build": "tsc -b",
     "test": "echo 'no tests'",
-    "clean": "rm -rf dist src"
+    "clean": "node -e \"for (const p of ['dist','tsconfig.tsbuildinfo']) require('node:fs').rmSync(p,{recursive:true,force:true})\""
   },
   "dependencies": {
     "effect": "4.0.0-beta.68"

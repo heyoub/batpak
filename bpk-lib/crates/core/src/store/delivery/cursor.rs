@@ -3,11 +3,11 @@ use crate::store::delivery::canal::{Canal, CanalBatch, CanalClosed, CanalHandle}
 use crate::store::delivery::observation::{AtLeastOnce, CheckpointId};
 use crate::store::index::{IndexEntry, StoreIndex};
 use crate::store::{RestartPolicy, Store, StoreError};
+use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
-use parking_lot::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};

@@ -8,7 +8,7 @@
     "build": "tsc -b",
     "test": "echo 'roundtrip is run from packages/test or CI script, not here'",
     "start": "node ./dist/index.js",
-    "clean": "rm -rf dist"
+    "clean": "node -e \"for (const p of ['dist','tsconfig.tsbuildinfo']) require('node:fs').rmSync(p,{recursive:true,force:true})\""
   },
   "dependencies": {
     "@batpak/canonical": "workspace:*",
