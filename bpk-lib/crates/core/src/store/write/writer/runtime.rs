@@ -122,7 +122,7 @@ pub(super) fn writer_thread_main(
                 tracing::warn!(
                     "writer panic — restarting ({restarts}/{max}). Panic: {panic_msg}",
                     max = match &runtime.config.writer.restart_policy {
-                        RestartPolicy::Once => 1,
+                        RestartPolicy::Once => 1_u32,
                         RestartPolicy::Bounded { max_restarts, .. } => *max_restarts,
                     }
                 );

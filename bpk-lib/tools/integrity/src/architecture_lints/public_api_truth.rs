@@ -13,6 +13,7 @@ pub(super) fn check(repo_root: &Path) -> Result<()> {
     let event_mod = parse_rust(&core_path(repo_root, "src/event/mod.rs"))?;
     let event_sourcing = parse_rust(&core_path(repo_root, "src/event/sourcing.rs"))?;
     let config = parse_rust(&core_path(repo_root, "src/store/config.rs"))?;
+    let config_types = parse_rust(&core_path(repo_root, "src/store/config/types.rs"))?;
 
     let store_exports = public_use_names(&store_mod);
     ensure(
@@ -56,15 +57,16 @@ pub(super) fn check(repo_root: &Path) -> Result<()> {
         )?;
     }
 
-    let config_types = public_item_names(&config);
+    let mut config_items = public_item_names(&config);
+    config_items.extend(public_item_names(&config_types));
     ensure(
-        config_types.contains("IndexTopology"),
-        "src/store/config.rs must define IndexTopology as a live public type",
+        config_items.contains("IndexTopology"),
+        "store config surface must define or re-export IndexTopology as a live public type",
     )?;
     for banned in ["IndexLayout", "ViewConfig"] {
         ensure(
-            !config_types.contains(banned),
-            format!("src/store/config.rs still defines removed topology name {banned}"),
+            !config_items.contains(banned),
+            format!("store config surface still defines removed topology name {banned}"),
         )?;
     }
 
@@ -94,7 +96,7 @@ pub(super) fn check(repo_root: &Path) -> Result<()> {
         )?;
     }
 
-    let topology_constructors = public_impl_method_names(&config, "IndexTopology");
+    let topology_constructors = public_impl_method_names(&config_types, "IndexTopology");
     for required in [
         "aos",
         "scan",
@@ -110,7 +112,7 @@ pub(super) fn check(repo_root: &Path) -> Result<()> {
             format!("IndexTopology must expose builder/constructor `{required}`"),
         )?;
     }
-    let topology_public_fields = public_struct_field_names(&config, "IndexTopology");
+    let topology_public_fields = public_struct_field_names(&config_types, "IndexTopology");
     ensure(
         topology_public_fields.is_empty(),
         format!(
@@ -118,7 +120,7 @@ pub(super) fn check(repo_root: &Path) -> Result<()> {
             topology_public_fields
         ),
     )?;
-    let topology_default = default_impl_return_target(&config, "IndexTopology");
+    let topology_default = default_impl_return_target(&config_types, "IndexTopology");
     ensure(
         matches!(
             topology_default.as_deref(),

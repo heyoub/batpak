@@ -40,7 +40,6 @@ fn check_rust_file_size_pressure(repo_root: &Path) -> Result<()> {
         ("crates/core/src/store/cold_start/rebuild.rs", 1194),
         ("crates/core/src/store/error.rs", 1129),
         ("crates/core/src/store/segment/sidx.rs", 995),
-        ("crates/core/src/store/config.rs", 1003),
         ("crates/core/src/store/delivery/cursor.rs", 971),
         ("crates/core/src/store/index/mod.rs", 929),
         ("crates/macros/src/lib.rs", 915),
