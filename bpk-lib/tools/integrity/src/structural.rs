@@ -38,7 +38,6 @@ fn check_rust_file_size_pressure(repo_root: &Path) -> Result<()> {
     const RATCHELED_OVER_BUDGET_FILES: &[(&str, usize)] = &[
         ("crates/core/src/store/index/columnar.rs", 1474),
         ("crates/core/src/store/cold_start/rebuild.rs", 1194),
-        ("crates/core/src/store/error.rs", 1129),
         ("crates/core/src/store/segment/sidx.rs", 995),
         ("crates/core/src/store/index/mod.rs", 929),
         ("crates/macros/src/lib.rs", 915),
