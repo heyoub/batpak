@@ -5,75 +5,19 @@ use crate::store::index::{DiskPos, IndexEntry, RoutingSummary, StoreIndex};
 use crate::store::segment::scan::{FrameScanTailPolicy, Reader, ScannedIndexEntry};
 use crate::store::StoreError;
 use rayon::prelude::*;
-use std::collections::BTreeMap;
 use std::path::Path;
 
+mod load_status;
+mod report;
 mod topology;
 
+pub use load_status::OpenIndexLoadStatus;
+use load_status::SnapshotLoadDiagnostics;
+pub use report::{OpenIndexPath, OpenIndexReport};
 pub(crate) use topology::{
     clear_pending_compaction, write_pending_compaction, COMPACTION_MARKER_FILENAME,
 };
 use topology::{load_pending_compaction, segment_paths};
-
-/// Which cold-start restore strategy was actually used.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum OpenIndexPath {
-    /// Restored from the mmap snapshot (`index.fbati`) plus tail replay.
-    Mmap,
-    /// Restored from the checkpoint (`index.ckpt`) plus tail replay.
-    Checkpoint,
-    /// Full rebuild from segment files (parallel SIDX + sequential active).
-    Rebuild,
-}
-
-/// Diagnostic output from `open_index()`. Hard truth, not logs.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[non_exhaustive]
-pub struct OpenIndexReport {
-    /// Which restore strategy was selected and completed.
-    pub path: OpenIndexPath,
-    /// Number of entries restored from the snapshot (mmap or checkpoint body).
-    pub restored_entries: usize,
-    /// Number of entries replayed from the tail after the snapshot watermark.
-    pub tail_entries: usize,
-    /// Wall-clock microseconds for the entire open_index() call.
-    pub elapsed_us: u64,
-    /// Microseconds spent in `RestorePlanner::build()` (snapshot load, tail
-    /// collection, or full rebuild planning).
-    #[serde(default)]
-    pub phase_plan_build_us: u64,
-    /// Microseconds to replace the string interner from the restore plan.
-    #[serde(default)]
-    pub phase_interner_us: u64,
-    /// Microseconds to install sorted index entries and routing overlays.
-    #[serde(default)]
-    pub phase_restore_index_us: u64,
-    /// Microseconds to load and apply cancelled visibility ranges, if any.
-    #[serde(default)]
-    pub phase_hidden_ranges_us: u64,
-    /// Number of unknown reserved system-kind SIDX/mmap values that fell back
-    /// to `DATA` during reopen.
-    pub unknown_reserved_system_kind_fallbacks: usize,
-    /// Histogram of raw reserved system-kind values encountered during this reopen.
-    pub unknown_reserved_system_kind_histogram: BTreeMap<u16, usize>,
-    /// Number of unknown reserved effect-kind SIDX/mmap values that fell back
-    /// to `EFFECT_ERROR` during reopen.
-    pub unknown_reserved_effect_kind_fallbacks: usize,
-    /// Histogram of raw reserved effect-kind values encountered during this reopen.
-    pub unknown_reserved_effect_kind_histogram: BTreeMap<u16, usize>,
-    /// Cumulative number of unknown reserved system-kind fallbacks persisted
-    /// through this store's cold-start artifacts, including this reopen.
-    pub cumulative_unknown_reserved_system_kind_fallbacks: usize,
-    /// Cumulative histogram of raw reserved system-kind values persisted through
-    /// this store's cold-start artifacts, including this reopen.
-    pub cumulative_unknown_reserved_system_kind_histogram: BTreeMap<u16, usize>,
-    /// Cumulative number of unknown reserved effect-kind fallbacks persisted
-    /// through this store's cold-start artifacts, including this reopen.
-    pub cumulative_unknown_reserved_effect_kind_fallbacks: usize,
-    /// Cumulative histogram of raw reserved effect-kind values persisted
-    /// through this store's cold-start artifacts, including this reopen.
-    pub cumulative_unknown_reserved_effect_kind_histogram: BTreeMap<u16, usize>,
-}
 
 #[derive(Debug, Clone)]
 pub(crate) struct OpenIndexOutcome {
@@ -99,6 +43,7 @@ struct RestorePlan {
     tail_entries: usize,
     reopen_reserved_kind_fallbacks: ReservedKindFallbackStats,
     persisted_cumulative_reserved_kind_fallbacks: ReservedKindFallbackStats,
+    snapshot_loads: SnapshotLoadDiagnostics,
 }
 
 struct SnapshotPlanInput {
@@ -110,6 +55,7 @@ struct SnapshotPlanInput {
     reopen_reserved_kind_fallbacks: ReservedKindFallbackStats,
     persisted_cumulative_reserved_kind_fallbacks: ReservedKindFallbackStats,
     receipt_extensions_hydrated: bool,
+    snapshot_loads: SnapshotLoadDiagnostics,
 }
 
 struct RestorePlanner<'a> {
@@ -124,9 +70,12 @@ impl<'a> RestorePlanner<'a> {
         // Pending compaction requires marker-aware segment reconciliation
         // before stale mmap/checkpoint artifacts can be trusted.
         let has_pending_compaction = load_pending_compaction(self.data_dir)?.is_some();
+        let mut snapshot_loads = SnapshotLoadDiagnostics::default();
 
         if !has_pending_compaction && self.policy.try_mmap_index() {
-            if let Some(snapshot) = super::mmap::try_load_mmap_snapshot(self.data_dir, self.clock) {
+            let mmap_load = super::mmap::load_mmap_snapshot(self.data_dir, self.clock);
+            snapshot_loads.record_mmap(&mmap_load);
+            if let super::FileLoad::Loaded(snapshot) = mmap_load {
                 return self.build_snapshot_plan(
                     RestoreSource::Mmap,
                     SnapshotPlanInput {
@@ -139,15 +88,16 @@ impl<'a> RestorePlanner<'a> {
                         persisted_cumulative_reserved_kind_fallbacks: snapshot
                             .cumulative_reserved_kind_fallbacks,
                         receipt_extensions_hydrated: snapshot.receipt_extensions_hydrated,
+                        snapshot_loads,
                     },
                 );
             }
         }
 
         if !has_pending_compaction && self.policy.try_checkpoint() {
-            if let super::FileLoad::Loaded(snapshot) =
-                super::checkpoint::load_checkpoint_snapshot(self.data_dir)
-            {
+            let checkpoint_load = super::checkpoint::load_checkpoint_snapshot(self.data_dir);
+            snapshot_loads.record_checkpoint(&checkpoint_load);
+            if let super::FileLoad::Loaded(snapshot) = checkpoint_load {
                 return self.build_snapshot_plan(
                     RestoreSource::Checkpoint,
                     SnapshotPlanInput {
@@ -160,6 +110,7 @@ impl<'a> RestorePlanner<'a> {
                         persisted_cumulative_reserved_kind_fallbacks: snapshot
                             .cumulative_reserved_kind_fallbacks,
                         receipt_extensions_hydrated: snapshot.receipt_extensions_hydrated,
+                        snapshot_loads,
                     },
                 );
             }
@@ -184,6 +135,7 @@ impl<'a> RestorePlanner<'a> {
             entries,
             reopen_reserved_kind_fallbacks,
             persisted_cumulative_reserved_kind_fallbacks: ReservedKindFallbackStats::default(),
+            snapshot_loads,
         })
     }
 
@@ -233,6 +185,7 @@ impl<'a> RestorePlanner<'a> {
             reopen_reserved_kind_fallbacks: snapshot.reopen_reserved_kind_fallbacks,
             persisted_cumulative_reserved_kind_fallbacks: snapshot
                 .persisted_cumulative_reserved_kind_fallbacks,
+            snapshot_loads: snapshot.snapshot_loads,
         })
     }
 }
@@ -298,6 +251,10 @@ pub(crate) fn open_index(
             phase_interner_us,
             phase_restore_index_us,
             phase_hidden_ranges_us,
+            mmap_load_status: plan.snapshot_loads.mmap_status,
+            mmap_invalid_reason: plan.snapshot_loads.mmap_invalid_reason.clone(),
+            checkpoint_load_status: plan.snapshot_loads.checkpoint_status,
+            checkpoint_invalid_reason: plan.snapshot_loads.checkpoint_invalid_reason.clone(),
             unknown_reserved_system_kind_fallbacks: plan.reopen_reserved_kind_fallbacks.system,
             unknown_reserved_system_kind_histogram: plan
                 .reopen_reserved_kind_fallbacks
@@ -655,6 +612,7 @@ mod tests {
     use super::*;
     use crate::prelude::*;
     use crate::store::segment;
+    use std::collections::BTreeMap;
     use tempfile::TempDir;
 
     #[derive(Clone, Debug, Eq, PartialEq)]
@@ -751,11 +709,7 @@ mod tests {
         store.close().expect("close store");
 
         let entries = segment_paths(dir.path()).expect("segment paths");
-        let active_segment = entries
-            .iter()
-            .map(|(segment_id, _)| *segment_id)
-            .max()
-            .expect("at least one segment");
+        let active_segment = entries.last().expect("at least one segment").0;
         let sealed_segments: Vec<_> = entries
             .into_iter()
             .filter(|(segment_id, _)| *segment_id < active_segment)
@@ -818,6 +772,7 @@ mod tests {
                     persisted_cumulative_reserved_kind_fallbacks:
                         ReservedKindFallbackStats::default(),
                     receipt_extensions_hydrated: false,
+                    snapshot_loads: SnapshotLoadDiagnostics::default(),
                 },
             )
             .expect("build snapshot plan");
@@ -865,6 +820,7 @@ mod tests {
                 reopen_reserved_kind_fallbacks: ReservedKindFallbackStats::default(),
                 persisted_cumulative_reserved_kind_fallbacks: ReservedKindFallbackStats::default(),
                 receipt_extensions_hydrated: false,
+                snapshot_loads: SnapshotLoadDiagnostics::default(),
             },
         );
         assert!(
@@ -927,6 +883,7 @@ mod tests {
                     persisted_cumulative_reserved_kind_fallbacks:
                         ReservedKindFallbackStats::default(),
                     receipt_extensions_hydrated: false,
+                    snapshot_loads: SnapshotLoadDiagnostics::default(),
                 },
             )
             .expect("build snapshot plan with tail");

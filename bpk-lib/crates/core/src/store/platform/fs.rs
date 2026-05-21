@@ -68,6 +68,10 @@ pub(crate) fn create_new_file(path: &Path) -> Result<File, StoreError> {
     File::create_new(path).map_err(StoreError::Io)
 }
 
+pub(crate) fn open_file(path: &Path) -> io::Result<File> {
+    File::open(path)
+}
+
 #[derive(Debug)]
 pub(crate) enum PositionedReadError {
     Io(std::io::Error),
