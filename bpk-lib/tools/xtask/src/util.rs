@@ -89,7 +89,7 @@ pub(crate) fn cargo_target_dir() -> Result<PathBuf> {
         }
         return Ok(repo_root()?.join(path));
     }
-    Ok(project_root()?.join("target"))
+    Ok(repo_root()?.join("target"))
 }
 
 pub(crate) fn cargo_target_dir_arg() -> Result<String> {

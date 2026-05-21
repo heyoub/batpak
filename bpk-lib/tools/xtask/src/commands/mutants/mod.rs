@@ -106,12 +106,12 @@ mod tests {
         assert_eq!(
             mutants_command(
                 &lane,
-                Path::new("/repo/target/xtask-mutants/writer-commit-all-features")
+                Path::new("/repo/bpk-lib/target/xtask-mutants/writer-commit-all-features")
             ),
             vec![
                 "mutants",
                 "--output",
-                "/repo/target/xtask-mutants/writer-commit-all-features",
+                "/repo/bpk-lib/target/xtask-mutants/writer-commit-all-features",
                 "--in-place",
                 "--baseline",
                 "run",
@@ -137,12 +137,12 @@ mod tests {
         assert_eq!(
             mutants_command(
                 &lane,
-                Path::new("/repo/target/xtask-mutants/repo-wide-no-default-features")
+                Path::new("/repo/bpk-lib/target/xtask-mutants/repo-wide-no-default-features")
             ),
             vec![
                 "mutants",
                 "--output",
-                "/repo/target/xtask-mutants/repo-wide-no-default-features",
+                "/repo/bpk-lib/target/xtask-mutants/repo-wide-no-default-features",
                 "--in-place",
                 "--baseline",
                 "run",
@@ -299,7 +299,9 @@ mod tests {
             .expect("harness lint seam");
         let command = mutants_command(
             &lane,
-            Path::new("/repo/target/xtask-mutants/testing-ledger-structural-lint-all-features"),
+            Path::new(
+                "/repo/bpk-lib/target/xtask-mutants/testing-ledger-structural-lint-all-features",
+            ),
         );
         let package_index = command
             .iter()
@@ -316,7 +318,7 @@ mod tests {
     }
 
     fn fake_output_dir() -> PathBuf {
-        PathBuf::from("/repo/target/xtask-mutants/fake-lane")
+        PathBuf::from("/repo/bpk-lib/target/xtask-mutants/fake-lane")
     }
 
     #[test]

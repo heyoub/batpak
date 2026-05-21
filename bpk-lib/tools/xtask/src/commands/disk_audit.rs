@@ -7,18 +7,18 @@ use std::path::{Path, PathBuf};
 pub(crate) fn disk_audit() -> Result<()> {
     let workspace_root = repo_root()?;
     let project_root = project_root()?;
-    let root_target = project_root.join("target");
+    let workspace_target = workspace_root.join("target");
 
-    if root_target.exists() {
-        let bytes =
-            dir_size(&root_target).with_context(|| format!("measure {}", root_target.display()))?;
+    if workspace_target.exists() {
+        let bytes = dir_size(&workspace_target)
+            .with_context(|| format!("measure {}", workspace_target.display()))?;
         println!(
-            "disk-audit: root artifact target `{}`: {}",
-            rel(&project_root, &root_target),
+            "disk-audit: workspace artifact target `{}`: {}",
+            rel(&project_root, &workspace_target),
             human_bytes(bytes)
         );
     } else {
-        println!("disk-audit: root artifact target `target/`: missing");
+        println!("disk-audit: workspace artifact target `bpk-lib/target/`: missing");
     }
 
     let mut violations = Vec::new();
@@ -153,7 +153,7 @@ fn collect_nested_targets(root: &Path, dir: &Path, targets: &mut Vec<PathBuf>) -
         }
 
         if entry.file_name() == "target" {
-            if path != root.join("..").join("target") {
+            if path != root.join("target") {
                 targets.push(path);
             }
             continue;

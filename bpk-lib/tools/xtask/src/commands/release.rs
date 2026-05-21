@@ -16,7 +16,7 @@ pub(crate) fn consumer_smoke() -> Result<()> {
     let root = repo_root()?;
     let smoke_root = cargo_target_dir()?.join("consumer-smoke");
     if smoke_root.exists() {
-        fs::remove_dir_all(&smoke_root).context("clear target/consumer-smoke")?;
+        fs::remove_dir_all(&smoke_root).context("clear Cargo target consumer-smoke")?;
     }
 
     let packaged_root = smoke_root.join("packaged");

@@ -5,7 +5,7 @@
 //! Materials next to every deliverable. This subcommand drives
 //! [`cargo-cyclonedx`](https://crates.io/crates/cargo-cyclonedx) over every
 //! crate in [`crate::publish::PUBLISH_CRATES`] and writes
-//! `target/sbom/<crate>.cdx.json` for each.
+//! `target/sbom/<crate>.cdx.json` under the Cargo workspace target dir for each.
 //!
 //! `cargo-cyclonedx` is **a separate install** and is intentionally not
 //! auto-installed by this subcommand: consulting clients run the release
@@ -31,7 +31,7 @@ pub(crate) const INSTALL_HINT: &str =
     "cargo-cyclonedx is not installed; install with `cargo install cargo-cyclonedx --locked`";
 
 /// Drive `cargo cyclonedx` across every publishable crate and copy each
-/// generated CycloneDX 1.5 SBOM into `target/sbom/<crate>.cdx.json`.
+/// generated CycloneDX 1.5 SBOM into the Cargo workspace target dir.
 ///
 /// `cargo-cyclonedx` is a separate install (`cargo install cargo-cyclonedx
 /// --locked`); this command never auto-installs it.
@@ -54,7 +54,7 @@ pub(crate) fn sbom() -> Result<()> {
         // workspace member into that member's directory, with the same
         // filename as the override we passed. Sweep them so the working
         // tree stays clean — consulting clients expect a single canonical
-        // artifact under target/sbom/, not litter scattered across the
+        // artifact under the Cargo workspace target dir, not litter scattered across the
         // workspace.
         sweep_workspace_residue(&repo_root, crate_name)?;
         let bytes = fs::metadata(&dest)

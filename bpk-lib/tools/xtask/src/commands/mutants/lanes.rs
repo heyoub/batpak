@@ -282,7 +282,7 @@ impl MutationLane {
 pub(super) fn mutants_output_root() -> PathBuf {
     std::env::var_os("CARGO_TARGET_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("../target"))
+        .unwrap_or_else(|| PathBuf::from("target"))
         .join("xtask-mutants")
 }
 

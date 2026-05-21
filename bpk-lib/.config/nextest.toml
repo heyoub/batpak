@@ -1,8 +1,6 @@
 [store]
-# Keep Nextest's own run metadata beside Cargo artifacts in the repo-root
-# target/ directory. Without this, Nextest writes bpk-lib/target/nextest even
-# when Cargo builds are routed to ../target.
-dir = "../target/nextest"
+# Keep Nextest's own run metadata beside the Cargo workspace artifacts.
+dir = "target/nextest"
 
 [profile.default]
 retries = 0

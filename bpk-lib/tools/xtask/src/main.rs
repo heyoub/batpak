@@ -60,7 +60,7 @@ enum XtaskCommand {
     /// Smoke-test every standalone Cargo template under `templates/`.
     Templates,
     /// Emit a CycloneDX 1.5 SBOM JSON file per publishable crate into
-    /// `target/sbom/<crate>.cdx.json`.
+    /// `target/sbom/<crate>.cdx.json` under the Cargo workspace target dir.
     ///
     /// `cargo-cyclonedx` is a separate install:
     /// `cargo install cargo-cyclonedx --locked`. The subcommand never
@@ -87,7 +87,7 @@ enum XtaskCommand {
     PublicApi(PublicApiArgs),
     /// Run release-oriented semver checks. Advisory by default during 0.7.6 cleanup.
     SemverCheck(SemverCheckArgs),
-    /// Write a local release proof manifest under target/.
+    /// Write a local release proof manifest under the Cargo workspace target dir.
     ReleaseManifest(ReleaseManifestArgs),
     /// Export the BatPAK TypeScript SDK manifest from the reference host
     /// descriptors. Consumed by `bpk-ts/packages/codegen`.

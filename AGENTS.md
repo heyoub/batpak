@@ -39,7 +39,7 @@
 - Repo-owned Rust tools live under `bpk-lib/tools/`, with root `scripts/` reserved for CI/devcontainer boundary wrappers only.
 - Public docs stay flat at root (`README.md`, `001_*.md`, `010_*.md`, `020_*.md`, `100_ADR_*.md`, `cookbook/200_*.md`).
 - Tool-standard config paths live where their tools require them: `bpk-lib/.cargo/` and `bpk-lib/.config/` for the Cargo workspace; root `.devcontainer/`, `.github/`, and `.githooks/` for repo/CI entrypoints.
-- Agent/local workspace state (`.cursor/`, `.claude/`, `.codex/`, `.agents/`, `target/`) is not substrate source.
+- Agent/local workspace state (`.cursor/`, `.claude/`, `.codex/`, `.agents/`, `bpk-lib/target/`) is not substrate source.
 
 ## Canonical Commands
 
@@ -54,10 +54,10 @@ Run canonical commands from `bpk-lib/`:
 - `cd bpk-lib && cargo xtask boundary` — discoverable alias for stack dependency direction and runtime boundary discipline
 - `cd bpk-lib && cargo xtask stale-paths` — discoverable alias for moved/retired path reference checks
 - `cd bpk-lib && cargo xtask disk-audit` — read-only report for repo-local artifact/cache sprawl
-- `cd bpk-lib && cargo xtask clean-generated [--apply]` — dry-run by default; removes only generated sprawl outside root `target/`
+- `cd bpk-lib && cargo xtask clean-generated [--apply]` — dry-run by default; removes only generated sprawl outside the Cargo workspace `target/`
 - `cd bpk-lib && cargo xtask package-leak-scan [--allow-dirty] [--strict-language]` — builds the local `.crate` and scans package contents for leak-shaped text
 - `cd bpk-lib && cargo xtask semver-check [--strict]` — release-oriented semver check; advisory by default during the 0.7.6 correction cut
-- `cd bpk-lib && cargo xtask public-api [--strict]` — human-readable public API snapshot under root `target/`; advisory by default during the 0.7.6 correction cut
+- `cd bpk-lib && cargo xtask public-api [--strict]` — human-readable public API snapshot under `bpk-lib/target/`; advisory by default during the 0.7.6 correction cut
 - `cd bpk-lib && cargo xtask evidence-audit` — static evidence-report schema anchors and prelude/store export vocabulary (runs `batpak-integrity evidence-audit`)
 - `cd bpk-lib && cargo xtask agent-doctor` — fast agent-facing repair hints for topology, stale paths, templates, and surface-map drift
 - `cd bpk-lib && cargo xtask scaffold <pattern> --name <name> [--path <dir>]`
@@ -73,7 +73,7 @@ Run canonical commands from `bpk-lib/`:
 - `cd bpk-lib && cargo xtask templates`
 - `cd bpk-lib && cargo xtask template-freshness` — focused template smoke plus generated-lock drift check
 - `cd bpk-lib && cargo xtask staged-diff` — inspect staged files for generated artifacts, retired paths, and conflict markers
-- `cd bpk-lib && cargo xtask release-manifest` — write a local proof summary under root `target/`
+- `cd bpk-lib && cargo xtask release-manifest` — write a local proof summary under `bpk-lib/target/`
 - `cd bpk-lib && cargo xtask public-api --strict --check-baseline` — verify the checked-in post-cleanup public API snapshot
 - `cd bpk-lib && cargo xtask cover [--ci|--json|--threshold N]`
 - `cd bpk-lib && cargo xtask docs`
@@ -96,7 +96,7 @@ Run canonical commands from `bpk-lib/`:
 - Coverage harness change:
   - update `bpk-lib/tools/xtask/src/coverage.rs`
   - keep JSON mode stdout-clean
-  - keep retained artifacts under `target/xtask-cover/last-run/`
+  - keep retained artifacts under `bpk-lib/target/xtask-cover/last-run/`
 - Docs-only change:
   - keep `README.md`, `010_USER_GUIDE.md`, and `020_TECHNICAL_REFERENCE.md` consistent
 

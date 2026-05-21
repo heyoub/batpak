@@ -63,7 +63,7 @@ pub(crate) fn templates() -> Result<()> {
 }
 
 /// Drive `cargo cyclonedx` over every publishable crate and emit a
-/// CycloneDX 1.5 SBOM JSON under `target/sbom/`.
+/// CycloneDX 1.5 SBOM JSON under the Cargo workspace `target/sbom/`.
 ///
 /// `cargo-cyclonedx` is a separate install: `cargo install cargo-cyclonedx
 /// --locked`. The subcommand fails fast with a clear install hint when

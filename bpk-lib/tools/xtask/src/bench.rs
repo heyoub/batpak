@@ -247,7 +247,7 @@ mod tests {
             "bench",
             "--no-run",
             "--target-dir",
-            "/repo/target/xtask-bench-compile-neutral",
+            "/repo/bpk-lib/target/xtask-bench-compile-neutral",
             "--bench",
             "cold_start",
             "--bench",
@@ -270,7 +270,7 @@ mod tests {
         assert_eq!(
             bench_compile_args(
                 BenchSurface::Neutral,
-                Path::new("/repo/target/xtask-bench-compile-neutral")
+                Path::new("/repo/bpk-lib/target/xtask-bench-compile-neutral")
             ),
             expected
         );
@@ -282,7 +282,7 @@ mod tests {
             "bench",
             "--no-run",
             "--target-dir",
-            "/repo/target/xtask-bench-compile-native",
+            "/repo/bpk-lib/target/xtask-bench-compile-native",
             "--all-features",
             "--bench",
             "ancestry_walk",
@@ -326,7 +326,7 @@ mod tests {
         assert_eq!(
             bench_compile_args(
                 BenchSurface::Native,
-                Path::new("/repo/target/xtask-bench-compile-native")
+                Path::new("/repo/bpk-lib/target/xtask-bench-compile-native")
             ),
             expected
         );

@@ -207,39 +207,38 @@ fn check_single_target_dir_contract(repo_root: &Path) -> Result<()> {
     let cargo_config = fs::read_to_string(repo_root.join(".cargo/config.toml"))
         .context("read .cargo/config.toml")?;
     ensure(
-        cargo_config.contains("target-dir = \"../target\""),
-        "bpk-lib/.cargo/config.toml must route all default Cargo output to repo-root target/",
+        !cargo_config.contains("target-dir"),
+        "bpk-lib/.cargo/config.toml must not override Cargo's default bpk-lib/target/ artifact directory",
     )?;
 
     let nextest_config = fs::read_to_string(repo_root.join(".config/nextest.toml"))
         .context("read .config/nextest.toml")?;
     ensure(
-        nextest_config.contains("dir = \"../target/nextest\"")
+        nextest_config.contains("dir = \"target/nextest\"")
             && nextest_config.contains("path = \"junit.xml\"")
-            && !nextest_config.contains("path = \"target/")
             && !nextest_config.contains("path = \"../target/"),
-        "nextest reports and run metadata must stay under repo-root target/nextest",
+        "nextest reports and run metadata must stay under bpk-lib/target/nextest",
     )?;
 
     let devcontainer = fs::read_to_string(project_root.join(".devcontainer/devcontainer.json"))
         .context("read devcontainer.json")?;
     ensure(
-        devcontainer.contains("\"CARGO_TARGET_DIR\": \"/workspace/batpak/target\""),
-        "devcontainer must keep Cargo output under repo-root target/",
+        devcontainer.contains("\"CARGO_TARGET_DIR\": \"/workspace/batpak/bpk-lib/target\""),
+        "devcontainer must keep Cargo output under bpk-lib/target/",
     )?;
 
     let ci = fs::read_to_string(project_root.join(".github/workflows/ci.yml"))
         .context("read ci workflow")?;
     ensure(
-        ci.contains("path: target/site") && !ci.contains("bpk-lib/target"),
-        "CI artifact paths must use repo-root target/, not bpk-lib/target/",
+        ci.contains("path: bpk-lib/target/site") && !ci.contains("path: target/site"),
+        "CI artifact paths must use bpk-lib/target/, not repo-root target/",
     )?;
 
     let perf = fs::read_to_string(project_root.join(".github/workflows/perf.yml"))
         .context("read perf workflow")?;
     ensure(
-        perf.contains("path: target/criterion") && !perf.contains("bpk-lib/target"),
-        "perf artifact paths must use repo-root target/, not bpk-lib/target/",
+        perf.contains("path: bpk-lib/target/criterion") && !perf.contains("path: target/criterion"),
+        "perf artifact paths must use bpk-lib/target/, not repo-root target/",
     )?;
 
     for entry in walkdir::WalkDir::new(repo_root)
@@ -249,12 +248,15 @@ fn check_single_target_dir_contract(repo_root: &Path) -> Result<()> {
     {
         if entry.file_name() == "target" {
             let rel = relative(repo_root, entry.path());
+            if rel == "target" {
+                continue;
+            }
             let mut children = fs::read_dir(entry.path())
                 .with_context(|| format!("read nested target dir `{rel}`"))?;
             ensure(
                 children.next().is_none(),
                 format!(
-                    "nested Cargo target dir `{rel}` contains artifacts; use repo-root target/ only"
+                    "nested Cargo target dir `{rel}` contains artifacts; use bpk-lib/target/ only"
                 ),
             )?;
         }

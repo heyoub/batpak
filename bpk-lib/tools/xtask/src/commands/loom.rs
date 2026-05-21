@@ -1,4 +1,4 @@
-use crate::util::{cargo_target_dir, project_root, run};
+use crate::util::{cargo_target_dir, run};
 use anyhow::Result;
 use std::process::Command;
 
@@ -12,7 +12,7 @@ pub(crate) fn loom() -> Result<()> {
             .arg(test)
             .arg("--all-features")
             .arg("--target-dir")
-            .arg(project_root()?.join("target/loom"))
+            .arg(cargo_target_dir()?.join("loom"))
             .env("CARGO_TARGET_DIR", cargo_target_dir()?)
             .env("LOOM_MAX_PREEMPTIONS", "3")
             .env(

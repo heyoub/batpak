@@ -13,7 +13,7 @@
   "remoteUser": "dev",
   "containerEnv": {
     "DEVCONTAINER": "1",
-    "CARGO_TARGET_DIR": "/workspace/batpak/target"
+    "CARGO_TARGET_DIR": "/workspace/batpak/bpk-lib/target"
   },
   "customizations": {
     "vscode": {

@@ -198,7 +198,7 @@ jobs:
             rm -rf "$STORE"
           }
           trap cleanup EXIT
-          ../target/debug/hbat serve --store "$STORE" --tcp 127.0.0.1:0 --print-port > /tmp/hbat-ready.txt 2> /tmp/hbat-err.txt &
+          ../bpk-lib/target/debug/hbat serve --store "$STORE" --tcp 127.0.0.1:0 --print-port > /tmp/hbat-ready.txt 2> /tmp/hbat-err.txt &
           HBAT_PID=$!
           for _ in $(seq 1 50); do
             if [ -s /tmp/hbat-ready.txt ]; then break; fi
@@ -366,7 +366,7 @@ jobs:
         run: bash ./scripts/run-in-devcontainer.sh 'cargo xtask docs'
       - uses: actions/upload-pages-artifact@v5
         with:
-          path: target/site
+          path: bpk-lib/target/site
       - id: deploy
         # `continue-on-error: true` because the deploy step will hard-fail
         # with `404 Not Found` until GitHub Pages is enabled in repository
