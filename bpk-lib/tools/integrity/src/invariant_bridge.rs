@@ -315,12 +315,6 @@ fn check_catalog_test_coverage(
         .filter(|invariant| !invariant_has_test_artifact(repo_root, invariant, artifact_map))
         .map(|invariant| invariant.id.clone())
         .collect::<Vec<_>>();
-    if !uncovered.is_empty() {
-        println!(
-            "invariant-bridge: catalog invariants without direct test artifact: {}",
-            uncovered.join(", ")
-        );
-    }
     let waiver_names = citation_waivers.names();
     let escalate = uncovered
         .iter()
@@ -328,12 +322,13 @@ fn check_catalog_test_coverage(
         .filter(|invariant| !waives_invariant(&waiver_names, invariant))
         .cloned()
         .collect::<Vec<_>>();
-    if !escalate.is_empty() {
-        println!(
-            "invariant-bridge: ESCALATE — uncovered AND no ledger entry AND no waiver: {}",
+    ensure(
+        escalate.is_empty(),
+        format!(
+            "invariant-bridge: catalog invariants without direct test artifact, ledger entry, or waiver: {}",
             escalate.join(", ")
-        );
-    }
+        ),
+    )?;
     Ok(())
 }
 

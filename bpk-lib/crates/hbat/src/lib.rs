@@ -45,8 +45,9 @@ pub use heartbeat::{
     HEARTBEAT_DESCRIPTOR, HEARTBEAT_OPERATION_NAME,
 };
 pub use manifest::{
-    descriptors, EventDescriptor, FieldDescriptor, ManifestErrorFixture, ManifestSnapshot,
-    OperationDescriptorRecord, FIXTURE_NONCE, FIXTURE_SERVER_TS_MS, MANIFEST_VERSION,
+    descriptors, EventDescriptor, FieldDescriptor, ManifestBuildError, ManifestErrorFixture,
+    ManifestSnapshot, OperationDescriptorRecord, FIXTURE_NONCE, FIXTURE_SERVER_TS_MS,
+    MANIFEST_VERSION,
 };
 
 /// Fixture-value supplier for an [`batpak::event::EventPayload`].

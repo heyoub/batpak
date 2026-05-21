@@ -316,7 +316,7 @@ fn decode_checkpoint_data(
         cumulative_reserved_kind_fallbacks,
     ) = match version {
         2 => {
-            let data: CheckpointDataV2 = match rmp_serde::from_slice(body) {
+            let data: CheckpointDataV2 = match crate::encoding::from_bytes(body) {
                 Ok(d) => d,
                 Err(e) => {
                     tracing::warn!(
@@ -343,7 +343,7 @@ fn decode_checkpoint_data(
             )
         }
         3 => {
-            let data: CheckpointDataV3 = match rmp_serde::from_slice(body) {
+            let data: CheckpointDataV3 = match crate::encoding::from_bytes(body) {
                 Ok(d) => d,
                 Err(e) => {
                     tracing::warn!(
@@ -366,7 +366,7 @@ fn decode_checkpoint_data(
             )
         }
         4 => {
-            let data: CheckpointDataV4 = match rmp_serde::from_slice(body) {
+            let data: CheckpointDataV4 = match crate::encoding::from_bytes(body) {
                 Ok(d) => d,
                 Err(e) => {
                     tracing::warn!(
@@ -389,7 +389,7 @@ fn decode_checkpoint_data(
             )
         }
         5 | 6 => {
-            let data: CheckpointDataV6 = match rmp_serde::from_slice(body) {
+            let data: CheckpointDataV6 = match crate::encoding::from_bytes(body) {
                 Ok(d) => d,
                 Err(e) => {
                     tracing::warn!(
@@ -450,7 +450,7 @@ fn decode_checkpoint_snapshot_v6(
     path: &Path,
     body: &[u8],
 ) -> Option<LoadedCheckpointSnapshot> {
-    let data: CheckpointDataV6 = match rmp_serde::from_slice(body) {
+    let data: CheckpointDataV6 = match crate::encoding::from_bytes(body) {
         Ok(data) => data,
         Err(error) => {
             tracing::warn!(
@@ -597,7 +597,7 @@ pub(crate) fn write_checkpoint_with_reserved_kind_fallbacks(
 
     // ── 3. Serialise to msgpack ───────────────────────────────────────────────
     let body =
-        rmp_serde::to_vec_named(&data).map_err(|e| StoreError::Serialization(Box::new(e)))?;
+        crate::encoding::to_bytes(&data).map_err(|e| StoreError::Serialization(Box::new(e)))?;
 
     // ── 4. Compute CRC of the body ────────────────────────────────────────────
     let crc: u32 = crc32fast::hash(&body);
@@ -779,7 +779,7 @@ mod tests {
     }
 
     fn write_legacy_checkpoint_body<T: Serialize>(dir: &Path, version: u16, body: &T) {
-        let body = rmp_serde::to_vec_named(body).expect("serialize legacy checkpoint");
+        let body = crate::encoding::to_bytes(body).expect("serialize legacy checkpoint");
         let crc = crc32fast::hash(&body);
         let mut bytes = Vec::new();
         bytes.extend_from_slice(CHECKPOINT_MAGIC);
@@ -826,7 +826,7 @@ mod tests {
         );
         let body = &raw[12..];
         let direct: CheckpointDataV6 =
-            rmp_serde::from_slice(body).expect("checkpoint body should deserialize directly");
+            crate::encoding::from_bytes(body).expect("checkpoint body should deserialize directly");
         assert_eq!(direct.entries.len(), 16);
         assert!(
             validate_watermark_segment(dir, 0, 4096).is_ok(),
@@ -1164,7 +1164,7 @@ mod tests {
         entries.sort_by_key(|entry| entry.global_sequence);
         let mut interner_strings = vec![String::new()];
         interner_strings.extend(idx.interner.to_snapshot());
-        let body = rmp_serde::to_vec_named(&CheckpointDataV2 {
+        let body = crate::encoding::to_bytes(&CheckpointDataV2 {
             global_sequence: idx.global_sequence(),
             watermark_segment_id: 0,
             watermark_offset: 0,
@@ -1257,7 +1257,7 @@ mod tests {
             &sorted_entries,
             recommended_restore_chunk_count(sorted_entries.len()),
         );
-        let body = rmp_serde::to_vec_named(&LegacyCheckpointDataV3 {
+        let body = crate::encoding::to_bytes(&LegacyCheckpointDataV3 {
             global_sequence: idx.global_sequence(),
             watermark_segment_id: 0,
             watermark_offset: 0,

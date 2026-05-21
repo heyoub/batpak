@@ -864,3 +864,43 @@ instead of pretending.
 - Remaining known blind spots:
   - this suite proves diagnostic truth for topology posture; query/cursor
     semantic equivalence remains owned by the linear-reference oracle above.
+
+## Structural Harness
+
+### Invariant: Structural gates own non-runtime policy and bridge coverage
+
+- Harness pattern: `Structural Harness`
+- Status: unmeasured
+- Catalog invariants: `INV-NO-TOKIO-PROD`, `INV-STORE-SYNC-ONLY`, `INV-PAYLOAD-LENGTH-EXACT`, `INV-TRACEABILITY-COMPLETE`, `INV-CANONICAL-CONTAINER-CI`, `INV-CHECKPOINT-V2-INTERNED`, `INV-SIDX-TIMESTAMP-US-APPROXIMATION`, `INV-EXAMPLES-OBSERVABLE-OUTPUT`, `INV-LITERAL-REGEX-UNWRAP-SAFE`, `INV-TYPESTATE-OPEN-HAS-WRITER`, `INV-COORDINATE-IS-LOGICAL-STREAM`, `INV-CROSS-DIRECTORY-CONSISTENCY-PRODUCT-OWNED`, `INV-CONTEXT-VIEWS-DERIVED-FROM-HISTORY`
+- Location:
+  - `bpk-lib/tools/integrity/src/invariant_bridge.rs`
+  - `bpk-lib/tools/integrity/src/structural.rs`
+  - `bpk-lib/tools/integrity/src/ci_parity.rs`
+  - `bpk-lib/tools/integrity/src/architecture_lints/syncbat_boundary.rs`
+  - `bpk-lib/tools/xtask/src/main.rs`
+  - `bpk-lib/crates/core/tests/typestate_safety.rs`
+  - `bpk-lib/crates/core/tests/mmap_cold_start.rs`
+  - `bpk-lib/crates/core/tests/wire_format.rs`
+- Command used:
+  - `cargo xtask structural`
+  - `cargo xtask boundary`
+  - `cargo xtask stale-paths`
+  - `cargo xtask evidence-audit`
+  - `cargo test --test typestate_safety`
+  - `cargo test --test mmap_cold_start`
+  - `cargo test --test wire_format`
+- Line/function coverage delta: unmeasured
+- Mutation delta: unmeasured
+- Covered tests:
+  - the invariant bridge now hard-fails any catalog invariant that has neither
+    a direct test artifact nor a ledger/waiver witness, so structural policy
+    drift cannot remain a green-but-noisy warning.
+  - structural owns runtime-boundary policy, stale path checks, CI/devcontainer
+    parity, allow/dead-code discipline, example-output doctrine, and traceability
+    graph completeness.
+  - targeted core suites pin typestate writer availability, cold-start/SIDX
+    restore behavior, and canonical wire/payload length boundaries.
+- Remaining known blind spots:
+  - this entry covers structural and doctrine-shaped invariants; runtime behavior
+    still belongs in direct test artifacts whenever a catalog invariant can be
+    exercised as code.

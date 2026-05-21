@@ -5,6 +5,8 @@
 //! AND that generated types work correctly at runtime.
 //!
 //! PROVES: LAW-004 (Composition Over Construction — typestate enforces phase)
+//! CATCHES: invalid typestate construction, forged receipts, and generated transitions that drop payload data.
+//! SEEDED: deterministic trybuild fixtures plus runtime generated-state-machine checks.
 //! DEFENDS: FM-009 (Polite Downgrade — generated methods must carry real data)
 //! INVARIANTS: INV-TYPESTATE-OPEN-HAS-WRITER (typestate round-trip fidelity), INV-RECEIPT-SEALED (receipt construction boundary)
 

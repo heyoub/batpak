@@ -174,7 +174,7 @@ impl Reader {
         let header_len = u32::from_be_bytes(header_len_buf) as usize;
         let mut header_buf = vec![0u8; header_len];
         file.read_exact(&mut header_buf).map_err(StoreError::Io)?;
-        let header: SegmentHeader = rmp_serde::from_slice(&header_buf)
+        let header: SegmentHeader = crate::encoding::from_bytes(&header_buf)
             .map_err(|e| StoreError::Serialization(Box::new(e)))?;
         if header.version != 1 {
             return Err(StoreError::corrupt_version(segment_id, header.version));
@@ -255,7 +255,7 @@ impl Reader {
 
             match segment::frame_decode(&frame_buf) {
                 Ok((msgpack, frame_size)) => {
-                    match rmp_serde::from_slice::<IndexScanFramePayload>(msgpack) {
+                    match crate::encoding::from_bytes::<IndexScanFramePayload>(msgpack) {
                         Ok(payload) => {
                             let kind = payload.event.header.event_kind;
 

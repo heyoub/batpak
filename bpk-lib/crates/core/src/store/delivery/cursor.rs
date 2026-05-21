@@ -327,7 +327,7 @@ impl Cursor {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(error) => return Err(error),
         };
-        match rmp_serde::from_slice::<CursorCheckpoint>(&bytes) {
+        match crate::encoding::from_bytes::<CursorCheckpoint>(&bytes) {
             Ok(ckpt) => Ok(Some(ckpt)),
             Err(error) => Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
@@ -352,7 +352,7 @@ impl Cursor {
         let dir = cursor_checkpoint_dir(data_dir);
         std::fs::create_dir_all(&dir)?;
         let bytes =
-            rmp_serde::to_vec_named(ckpt).map_err(|e| std::io::Error::other(e.to_string()))?;
+            crate::encoding::to_bytes(ckpt).map_err(|e| std::io::Error::other(e.to_string()))?;
         let final_path = cursor_checkpoint_path(data_dir, id);
 
         let mut tmp = NamedTempFile::new_in(&dir)?;

@@ -47,7 +47,7 @@ impl Reader {
         let header_len = u32::from_be_bytes(header_len_buf) as usize;
         let mut header_buf = vec![0u8; header_len];
         file.read_exact(&mut header_buf).map_err(StoreError::Io)?;
-        let header: segment::SegmentHeader = rmp_serde::from_slice(&header_buf)
+        let header: segment::SegmentHeader = crate::encoding::from_bytes(&header_buf)
             .map_err(|e| StoreError::Serialization(Box::new(e)))?;
 
         // Version check — reject unknown segment versions
@@ -168,7 +168,7 @@ mod tests {
             created_ns: 123,
             segment_id,
         };
-        let header_bytes = rmp_serde::to_vec_named(&header).expect("encode segment header");
+        let header_bytes = crate::encoding::to_bytes(&header).expect("encode segment header");
         let header_len = u32::try_from(header_bytes.len()).expect("segment header length fits u32");
 
         let mut file = File::create(&path).expect("create segment");

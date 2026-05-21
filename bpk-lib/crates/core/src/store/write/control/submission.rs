@@ -100,8 +100,8 @@ impl AppendSubmission {
         now_us: i64,
     ) -> Result<Event<Vec<u8>>, StoreError> {
         use crate::id::EntityIdType;
-        let payload_bytes =
-            rmp_serde::to_vec_named(payload).map_err(|e| StoreError::Serialization(Box::new(e)))?;
+        let payload_bytes = crate::encoding::to_bytes(payload)
+            .map_err(|e| StoreError::Serialization(Box::new(e)))?;
         let payload_len = checked_payload_len(&payload_bytes)?;
         let mut header = EventHeader::new(
             self.event_id,

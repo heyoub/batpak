@@ -91,8 +91,8 @@ impl BatchAppendItem {
         options: AppendOptions,
         causation: CausationRef,
     ) -> Result<Self, StoreError> {
-        let payload_bytes =
-            rmp_serde::to_vec_named(payload).map_err(|e| StoreError::Serialization(Box::new(e)))?;
+        let payload_bytes = crate::encoding::to_bytes(payload)
+            .map_err(|e| StoreError::Serialization(Box::new(e)))?;
         Ok(Self {
             coord,
             kind,

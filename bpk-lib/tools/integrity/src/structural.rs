@@ -12,7 +12,7 @@ use crate::{
 };
 use anyhow::{anyhow, bail, Result};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub(crate) fn run() -> Result<()> {
     let repo_root = repo_root()?;
@@ -23,6 +23,7 @@ pub(crate) fn run() -> Result<()> {
     invariant_bridge::check(&repo_root, &tracked_files)?;
     check_no_dead_code_silencers(&repo_root)?;
     check_no_placeholder_runtime_macros(&repo_root)?;
+    check_canonical_encoding_boundary(&repo_root)?;
     check_allow_justifications(&repo_root)?;
     public_surface::check(&repo_root)?;
     ci_parity::check(&repo_root)?;
@@ -32,11 +33,9 @@ pub(crate) fn run() -> Result<()> {
 }
 
 fn check_no_placeholder_runtime_macros(repo_root: &Path) -> Result<()> {
-    let mut paths = rust_files(&core_src_root(repo_root));
+    let mut paths = production_rust_files(repo_root);
     paths.extend(rust_files(&repo_root.join("tools/xtask/src")));
     paths.extend(rust_files(&repo_root.join("tools/integrity/src")));
-    paths.extend(rust_files(&repo_root.join("crates/macros/src")));
-    paths.extend(rust_files(&repo_root.join("crates/macros-support/src")));
     paths.push(repo_root.join("crates/core/build.rs"));
 
     for path in paths {
@@ -70,11 +69,9 @@ fn check_no_placeholder_runtime_macros(repo_root: &Path) -> Result<()> {
 
 fn check_no_dead_code_silencers(repo_root: &Path) -> Result<()> {
     let allowlisted = load_dead_code_silencer_allowlist(repo_root).map_err(|err| anyhow!(err))?;
-    let mut paths = rust_files(&core_src_root(repo_root));
+    let mut paths = production_rust_files(repo_root);
     paths.extend(rust_files(&repo_root.join("tools/xtask/src")));
     paths.extend(rust_files(&repo_root.join("tools/integrity/src")));
-    paths.extend(rust_files(&repo_root.join("crates/macros/src")));
-    paths.extend(rust_files(&repo_root.join("crates/macros-support/src")));
     paths.extend(rust_files(&core_tests_root(repo_root)));
     paths.extend(rust_files(&core_examples_root(repo_root)));
     paths.extend(rust_files(&core_benches_root(repo_root)));
@@ -107,11 +104,9 @@ fn check_no_dead_code_silencers(repo_root: &Path) -> Result<()> {
 
 fn check_allow_justifications(repo_root: &Path) -> Result<()> {
     let known_invariants = load_known_invariants(repo_root).map_err(|err| anyhow!(err))?;
-    let mut paths = rust_files(&core_src_root(repo_root));
+    let mut paths = production_rust_files(repo_root);
     paths.extend(rust_files(&repo_root.join("tools/xtask/src")));
     paths.extend(rust_files(&repo_root.join("tools/integrity/src")));
-    paths.extend(rust_files(&repo_root.join("crates/macros/src")));
-    paths.extend(rust_files(&repo_root.join("crates/macros-support/src")));
     paths.extend(rust_files(&core_tests_root(repo_root)));
     paths.extend(rust_files(&core_examples_root(repo_root)));
     paths.extend(rust_files(&core_benches_root(repo_root)));
@@ -166,4 +161,43 @@ fn check_allow_justifications(repo_root: &Path) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn check_canonical_encoding_boundary(repo_root: &Path) -> Result<()> {
+    for path in production_rust_files(repo_root) {
+        let rel = relative(repo_root, &path);
+        if rel == "crates/core/src/encoding.rs" {
+            continue;
+        }
+        let content = fs::read_to_string(&path)?;
+        for (line_no, line) in content.lines().enumerate() {
+            if line.contains("rmp_serde::from_slice")
+                || line.contains("rmp_serde::to_vec")
+                || line.contains("rmp_serde::to_vec_named")
+            {
+                bail!(
+                    "structural-check: raw rmp_serde call in {}:{}.\n\
+                     Route production MessagePack through crate::encoding so ADR-0019 has one enforceable boundary.",
+                    rel,
+                    line_no + 1
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+fn production_rust_files(repo_root: &Path) -> Vec<PathBuf> {
+    let mut paths = rust_files(&core_src_root(repo_root));
+    for rel in [
+        "crates/macros/src",
+        "crates/macros-support/src",
+        "crates/syncbat-macros/src",
+        "crates/syncbat/src",
+        "crates/netbat/src",
+        "crates/hbat/src",
+    ] {
+        paths.extend(rust_files(&repo_root.join(rel)));
+    }
+    paths
 }

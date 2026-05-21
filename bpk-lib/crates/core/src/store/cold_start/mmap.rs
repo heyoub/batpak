@@ -370,9 +370,9 @@ pub(crate) fn write_mmap_index_with_reserved_kind_fallbacks(
 
     let mut interner_strings = vec![String::new()];
     interner_strings.extend(index.interner.to_snapshot());
-    let interner_bytes = rmp_serde::to_vec_named(&interner_strings)
+    let interner_bytes = crate::encoding::to_bytes(&interner_strings)
         .map_err(|e| StoreError::Serialization(Box::new(e)))?;
-    let summary_bytes = rmp_serde::to_vec_named(&MmapSummaryDataV4 {
+    let summary_bytes = crate::encoding::to_bytes(&MmapSummaryDataV4 {
         routing,
         reserved_kind_fallbacks: reserved_kind_fallbacks.clone(),
     })
@@ -769,7 +769,7 @@ fn try_load_mmap_index(
     }
 
     let interner_slice = &mmap[header_len..summary_offset];
-    let interner_strings: Vec<String> = match rmp_serde::from_slice(interner_slice) {
+    let interner_strings: Vec<String> = match crate::encoding::from_bytes(interner_slice) {
         Ok(strings) => strings,
         Err(error) => {
             tracing::warn!(
@@ -801,7 +801,7 @@ fn try_load_mmap_index(
     } else {
         let summary_slice = &mmap[summary_offset..extension_blob_offset];
         if version >= 4 {
-            match rmp_serde::from_slice::<MmapSummaryDataV4>(summary_slice) {
+            match crate::encoding::from_bytes::<MmapSummaryDataV4>(summary_slice) {
                 Ok(summary) => (summary.routing, summary.reserved_kind_fallbacks),
                 Err(error) => {
                     tracing::warn!(
@@ -814,7 +814,7 @@ fn try_load_mmap_index(
                 }
             }
         } else {
-            match rmp_serde::from_slice::<MmapSummaryDataV2>(summary_slice) {
+            match crate::encoding::from_bytes::<MmapSummaryDataV2>(summary_slice) {
                 Ok(summary) => (summary.routing, ReservedKindFallbackStats::default()),
                 Err(error) => {
                     tracing::warn!(

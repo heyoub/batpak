@@ -59,7 +59,7 @@ pub(crate) fn write_cancelled_ranges(
         return Ok(());
     }
 
-    let body = rmp_serde::to_vec_named(&VisibilityRangesData {
+    let body = crate::encoding::to_bytes(&VisibilityRangesData {
         ranges: normalized
             .into_iter()
             .map(|(start, end)| VisibilityRangeEntry { start, end })
@@ -154,7 +154,7 @@ pub(crate) fn load_cancelled_ranges(
         ));
     }
 
-    let data: VisibilityRangesData = match rmp_serde::from_slice(body) {
+    let data: VisibilityRangesData = match crate::encoding::from_bytes(body) {
         Ok(data) => data,
         Err(error) => {
             return Err(corrupt_ranges(

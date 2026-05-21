@@ -8,6 +8,8 @@
 //! Verifies MessagePack serialization matches known-good byte sequences.
 //!
 //! PROVES: LAW-005 (Architecture Freeze — wire format stability)
+//! CATCHES: unnamed MessagePack encoding, drifted golden bytes, and malformed canonical wire round-trips.
+//! SEEDED: checked-in golden fixtures plus deterministic helper round-trips.
 //! DEFENDS: FM-010 (Semantic Drift — byte-level determinism prevents silent serde changes)
 //! INVARIANTS: INV-WIRE-ROUNDTRIP-TOTALITY (round-trip fidelity), INV-CHECKPOINT-V2-INTERNED (backward compatibility)
 //!

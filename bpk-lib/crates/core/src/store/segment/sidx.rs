@@ -374,7 +374,7 @@ impl SidxEntryCollector {
         segment_id: u64,
     ) -> Result<(), StoreError> {
         // 1. Encode string table to msgpack.
-        let string_table_bytes = rmp_serde::to_vec_named(&self.strings)
+        let string_table_bytes = crate::encoding::to_bytes(&self.strings)
             .map_err(|e| StoreError::Serialization(Box::new(e)))?;
 
         // 2. Record the file position where the string table will start.
@@ -560,7 +560,7 @@ pub(crate) fn read_footer(path: &Path) -> Result<Option<SidxFooterData>, StoreEr
     file.read_exact(&mut string_table_buf)
         .map_err(StoreError::Io)?;
 
-    let strings: Vec<String> = rmp_serde::from_slice(&string_table_buf)
+    let strings: Vec<String> = crate::encoding::from_bytes(&string_table_buf)
         .map_err(|e| StoreError::Serialization(Box::new(e)))?;
 
     // ── 5. Read and decode entries ─────────────────────────────────────────────

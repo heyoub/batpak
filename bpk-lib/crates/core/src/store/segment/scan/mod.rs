@@ -143,7 +143,7 @@ impl Reader {
     }
 
     fn decode_frame_payload_raw(msgpack: &[u8]) -> Result<FramePayload<Vec<u8>>, StoreError> {
-        rmp_serde::from_slice(msgpack).map_err(|e| StoreError::Serialization(Box::new(e)))
+        crate::encoding::from_bytes(msgpack).map_err(|e| StoreError::Serialization(Box::new(e)))
     }
 
     fn decode_frame_payload_value(
@@ -155,7 +155,7 @@ impl Reader {
             EventKind::SYSTEM_BATCH_BEGIN | EventKind::SYSTEM_BATCH_COMMIT => {
                 serde_json::Value::Null
             }
-            _ => rmp_serde::from_slice(&event.payload)
+            _ => crate::encoding::from_bytes(&event.payload)
                 .map_err(|e| StoreError::Serialization(Box::new(e)))?,
         };
         Ok(FramePayload {
@@ -860,7 +860,7 @@ mod tests {
             scope: "scope:test".to_owned(),
             receipt_extensions: BTreeMap::new(),
         };
-        let encoded = rmp_serde::to_vec_named(&frame).expect("encode batch marker frame");
+        let encoded = crate::encoding::to_bytes(&frame).expect("encode batch marker frame");
 
         let decoded = Reader::decode_frame_payload_value(&encoded)
             .expect("batch marker payload bytes are ignored by value decode");
