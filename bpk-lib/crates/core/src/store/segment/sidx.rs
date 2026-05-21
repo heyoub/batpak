@@ -468,7 +468,7 @@ pub(crate) fn read_footer(path: &Path) -> Result<Option<SidxFooterData>, StoreEr
         }
     };
 
-    let mut file = std::fs::File::open(path).map_err(StoreError::Io)?;
+    let mut file = crate::store::platform::fs::open_file(path).map_err(StoreError::Io)?;
 
     let Some(layout) = footer::read_layout(&mut file, segment_id)? else {
         return Ok(None);

@@ -214,7 +214,7 @@ impl Reader {
         }
         // Map the segment file
         let path = self.data_dir.join(segment::segment_filename(segment_id));
-        let file = File::open(&path).map_err(StoreError::Io)?;
+        let file = crate::store::platform::fs::open_file(&path).map_err(StoreError::Io)?;
         // SAFETY: memmap2::Mmap::map is unsafe because the file could be modified externally.
         // Sealed segments are immutable by design — only compaction deletes them, and
         // evict_segment drops the mapping before deletion.

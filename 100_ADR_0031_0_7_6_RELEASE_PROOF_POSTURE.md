@@ -78,6 +78,7 @@ The release-prep branch owns these proof classes:
 | Public API | `traceability/public_api/*.txt` | `cargo xtask public-api --strict --check-baseline` |
 | Wire stability | `.hex` golden fixtures | owning crate tests |
 | Traceability | `traceability/*.yaml` | `cargo xtask structural` and `cargo xtask evidence-audit` |
+| Architecture IR | workspace manifests and `traceability/*.yaml` | `cargo xtask architecture-ir` |
 | Mutation scope | xtask lane metadata | explicit mutation lane run under thermal headroom |
 | Package contents | manifests and crate READMEs | `cargo package --list -p ...` |
 | Release proof bundle | runbook and xtask release manifest | `cargo xtask release-manifest --strict` |

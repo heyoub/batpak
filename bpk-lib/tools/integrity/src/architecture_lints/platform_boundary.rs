@@ -132,7 +132,6 @@ fn check_direct_fs_contact_ratchet(repo_root: &Path, tracked_files: &[PathBuf]) 
             "std::fs::write(",
             5,
         ),
-        ("crates/core/src/store/cold_start/mmap.rs", "File::open", 1),
         (
             "crates/core/src/store/cold_start/mmap.rs",
             "std::fs::write(",
@@ -260,49 +259,18 @@ fn check_direct_fs_contact_ratchet(repo_root: &Path, tracked_files: &[PathBuf]) 
             2,
         ),
         (
-            "crates/core/src/store/segment/mod.rs",
-            "std::fs::File::open",
-            1,
-        ),
-        (
-            "crates/core/src/store/segment/scan/full_scan.rs",
-            "File::open",
-            1,
-        ),
-        ("crates/core/src/store/segment/scan/mod.rs", "File::open", 1),
-        (
             "crates/core/src/store/segment/scan/mod.rs",
             "std::fs::write(",
             1,
         ),
         (
-            "crates/core/src/store/segment/scan/point_read.rs",
-            "File::open",
-            1,
-        ),
-        (
-            "crates/core/src/store/segment/scan/recovery.rs",
-            "File::open",
-            1,
-        ),
-        (
             "crates/core/src/store/segment/scan/recovery.rs",
             "std::fs::write(",
             1,
         ),
         (
             "crates/core/src/store/segment/scan/recovery/sidx_fast_path.rs",
-            "std::fs::File::open",
-            1,
-        ),
-        (
-            "crates/core/src/store/segment/scan/recovery/sidx_fast_path.rs",
             "std::fs::metadata",
-            1,
-        ),
-        (
-            "crates/core/src/store/segment/sidx.rs",
-            "std::fs::File::open",
             1,
         ),
         (

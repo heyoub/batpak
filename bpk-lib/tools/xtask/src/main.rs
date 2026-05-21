@@ -49,6 +49,8 @@ enum XtaskCommand {
     EvidenceAudit,
     /// Fast agent-oriented repository doctor with stable repair IDs.
     AgentDoctor,
+    /// Emit the machine-readable architecture IR into target/ by default.
+    ArchitectureIr(ArchitectureIrArgs),
     Check(CheckArgs),
     Test(TestArgs),
     Clippy(ClippyArgs),
@@ -384,6 +386,16 @@ pub(crate) struct ExportTsManifestArgs {
 }
 
 #[derive(Args, Clone, Debug)]
+pub(crate) struct ArchitectureIrArgs {
+    /// Output path for the rendered IR. Defaults to target/architecture.ir.json.
+    #[arg(long, value_name = "PATH")]
+    pub(crate) out: Option<PathBuf>,
+    /// Refuse drift instead of rewriting the IR file.
+    #[arg(long)]
+    pub(crate) check: bool,
+}
+
+#[derive(Args, Clone, Debug)]
 pub(crate) struct DevcontainerExecArgs {
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     command: Vec<String>,
@@ -408,6 +420,7 @@ fn main() -> Result<()> {
         XtaskCommand::CheckVersionPins => commands::check_version_pins(),
         XtaskCommand::EvidenceAudit => commands::integrity("evidence-audit", []),
         XtaskCommand::AgentDoctor => commands::integrity("agent-doctor", []),
+        XtaskCommand::ArchitectureIr(args) => commands::architecture_ir(&args),
         XtaskCommand::Check(args) => run_check(&args),
         XtaskCommand::Test(args) => run_test(&args),
         XtaskCommand::Clippy(args) => run_clippy(&args),

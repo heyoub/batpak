@@ -105,7 +105,7 @@ name = "batch_throughput"
 harness = false
 
 [[bench]]
-name = "writer_staging"
+name = "writer_coordinate_churn"
 harness = false
 
 [[bench]]

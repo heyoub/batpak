@@ -11,7 +11,6 @@ use crate::store::segment::{self, SegmentHeader, SEGMENT_MAGIC};
 use crate::store::{EncodedBytes, ExtensionKey, StoreError};
 use serde::Deserialize;
 use std::collections::BTreeMap;
-use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
@@ -69,7 +68,7 @@ impl Reader {
             return Ok(());
         }
 
-        let mut file = File::open(path).map_err(StoreError::Io)?;
+        let mut file = crate::store::platform::fs::open_file(path).map_err(StoreError::Io)?;
         let file_len = file.seek(SeekFrom::End(0)).map_err(StoreError::Io)?;
         let frames_end = segment::detect_sidx_boundary(&mut file, file_len)?.unwrap_or(file_len);
         file.seek(SeekFrom::Start(0)).map_err(StoreError::Io)?;

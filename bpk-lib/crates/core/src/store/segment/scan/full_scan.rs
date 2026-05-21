@@ -2,7 +2,6 @@ use super::{read_frame_header_or_clean_eof, Reader, ScannedEntry};
 use crate::event::EventKind;
 use crate::store::segment::{self, SEGMENT_MAGIC};
 use crate::store::StoreError;
-use std::fs::File;
 use std::io::{ErrorKind, Read, Seek, SeekFrom};
 use std::path::Path;
 
@@ -15,7 +14,7 @@ impl Reader {
     /// cross-segment batches; here we return every frame so callers that
     /// need the full event stream always get it.
     pub(crate) fn scan_segment(&self, path: &Path) -> Result<Vec<ScannedEntry>, StoreError> {
-        let mut file = File::open(path).map_err(StoreError::Io)?;
+        let mut file = crate::store::platform::fs::open_file(path).map_err(StoreError::Io)?;
         let file_len = file.seek(SeekFrom::End(0)).map_err(StoreError::Io)?;
         let frames_end = segment::detect_sidx_boundary(&mut file, file_len)?.unwrap_or(file_len);
         file.seek(SeekFrom::Start(0)).map_err(StoreError::Io)?;
@@ -155,6 +154,7 @@ impl Reader {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs::File;
     use std::io::Write;
 
     #[test]

@@ -60,6 +60,7 @@ Run canonical commands from `bpk-lib/`:
 - `cd bpk-lib && cargo xtask public-api [--strict]` — human-readable public API snapshot under `bpk-lib/target/`; advisory by default during the 0.7.6 correction cut
 - `cd bpk-lib && cargo xtask evidence-audit` — static evidence-report schema anchors and prelude/store export vocabulary (runs `batpak-integrity evidence-audit`)
 - `cd bpk-lib && cargo xtask agent-doctor` — fast agent-facing repair hints for topology, stale paths, templates, and surface-map drift
+- `cd bpk-lib && cargo xtask architecture-ir [--out <path>] [--check]` — emit or verify the machine-readable architecture view under `bpk-lib/target/` by default
 - `cd bpk-lib && cargo xtask scaffold <pattern> --name <name> [--path <dir>]`
 - `cd bpk-lib && cargo xtask mutants policy`
 - `cd bpk-lib && cargo xtask mutants smoke`

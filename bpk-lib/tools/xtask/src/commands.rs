@@ -17,11 +17,11 @@ mod templates;
 mod unused_deps;
 mod version_pins;
 
-use crate::util::cargo;
+use crate::util::{cargo, cargo_target_dir};
 use crate::CleanGeneratedArgs;
 use crate::{
-    ChaosArgs, ExportTsManifestArgs, FuzzArgs, MutantsArgs, PackageLeakScanArgs, PlatformArgs,
-    ReleaseArgs, ScaffoldArgs, SetupArgs,
+    ArchitectureIrArgs, ChaosArgs, ExportTsManifestArgs, FuzzArgs, MutantsArgs,
+    PackageLeakScanArgs, PlatformArgs, ReleaseArgs, ScaffoldArgs, SetupArgs,
 };
 use anyhow::Result;
 
@@ -113,6 +113,27 @@ pub(crate) fn release_manifest(args: crate::ReleaseManifestArgs) -> Result<()> {
 
 pub(crate) fn export_ts_manifest(args: &ExportTsManifestArgs) -> Result<()> {
     export_ts_manifest::export_ts_manifest(args)
+}
+
+pub(crate) fn architecture_ir(args: &ArchitectureIrArgs) -> Result<()> {
+    let out = args
+        .out
+        .clone()
+        .unwrap_or(cargo_target_dir()?.join("architecture.ir.json"));
+    let out_arg = out.to_string_lossy().into_owned();
+    let mut cargo_args = vec![
+        "run".to_owned(),
+        "--package".to_owned(),
+        "batpak-integrity".to_owned(),
+        "--".to_owned(),
+        "architecture-ir".to_owned(),
+        "--out".to_owned(),
+        out_arg,
+    ];
+    if args.check {
+        cargo_args.push("--check".to_owned());
+    }
+    cargo(cargo_args.iter().map(String::as_str))
 }
 
 pub(crate) fn deny_split() -> Result<()> {

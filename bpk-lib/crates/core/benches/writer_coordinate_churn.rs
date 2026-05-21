@@ -1,4 +1,4 @@
-//! Benchmark writer-path coordinate construction vs reuse to size staging payoff.
+//! Benchmark writer-path coordinate construction vs reuse.
 
 use batpak::prelude::*;
 use batpak::store::{Store, StoreConfig};
@@ -7,7 +7,7 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use tempfile::TempDir;
 
 fn bench_writer_coordinate_churn(c: &mut Criterion) {
-    let mut group = c.benchmark_group("writer_staging");
+    let mut group = c.benchmark_group("writer_coordinate_churn");
     apply_profile(&mut group, BenchProfile::Quick);
     throughput_elements(&mut group, 1_000);
 

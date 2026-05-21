@@ -288,7 +288,7 @@ impl Segment<Active> {
         &mut self,
         path: &std::path::Path,
     ) -> Result<u64, StoreError> {
-        let mut source = std::fs::File::open(path).map_err(StoreError::Io)?;
+        let mut source = crate::store::platform::fs::open_file(path).map_err(StoreError::Io)?;
         let mut magic = [0u8; 4];
         source.read_exact(&mut magic).map_err(StoreError::Io)?;
         if &magic != SEGMENT_MAGIC {

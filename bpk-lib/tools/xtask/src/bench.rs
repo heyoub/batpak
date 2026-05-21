@@ -101,7 +101,7 @@ pub(crate) fn bench_targets(surface: BenchSurface) -> &'static [&'static str] {
             "topology_write_cost",
             "unified_bench",
             "writer_batch_staging",
-            "writer_staging",
+            "writer_coordinate_churn",
             "write_throughput",
         ],
     }
@@ -307,7 +307,7 @@ mod tests {
                 "topology_write_cost",
                 "unified_bench",
                 "writer_batch_staging",
-                "writer_staging",
+                "writer_coordinate_churn",
                 "write_throughput",
             ]
         );
@@ -409,7 +409,7 @@ mod tests {
             "--bench",
             "writer_batch_staging",
             "--bench",
-            "writer_staging",
+            "writer_coordinate_churn",
             "--bench",
             "write_throughput",
         ]

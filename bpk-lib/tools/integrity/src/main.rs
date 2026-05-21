@@ -28,6 +28,7 @@
 
 mod agent_doctor;
 mod agent_surface;
+mod architecture_ir;
 mod architecture_lints;
 mod ci_parity;
 mod doctor;
@@ -67,6 +68,13 @@ enum CommandKind {
     AgentSurfaceCheck,
     /// Fast agent-oriented repository doctor with stable repair IDs.
     AgentDoctor,
+    /// Emit the repo architecture IR used by docs, agents, and drift queries.
+    ArchitectureIr {
+        #[arg(long)]
+        out: Option<std::path::PathBuf>,
+        #[arg(long)]
+        check: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -78,6 +86,9 @@ fn main() -> Result<()> {
         CommandKind::EvidenceAudit => evidence_audit::run(&repo_surface::repo_root()?),
         CommandKind::AgentSurfaceCheck => agent_surface::run(&repo_surface::repo_root()?),
         CommandKind::AgentDoctor => agent_doctor::run(&repo_surface::repo_root()?),
+        CommandKind::ArchitectureIr { out, check } => {
+            architecture_ir::run(&repo_surface::repo_root()?, out, check)
+        }
     }
 }
 

@@ -22,7 +22,7 @@ impl Reader {
         sidx_entries: &[SidxEntry],
     ) -> Option<bool> {
         let file_len = std::fs::metadata(path).ok()?.len();
-        let mut file = std::fs::File::open(path).ok()?;
+        let mut file = crate::store::platform::fs::open_file(path).ok()?;
         if file_len < 16 {
             return Some(false);
         }

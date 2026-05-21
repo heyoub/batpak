@@ -316,7 +316,7 @@ impl Reader {
             cache.order.push(segment_id);
         } else {
             let path = self.data_dir.join(segment::segment_filename(segment_id));
-            let file = File::open(&path).map_err(StoreError::Io)?;
+            let file = crate::store::platform::fs::open_file(&path).map_err(StoreError::Io)?;
             if cache.fds.len() >= cache.budget {
                 if let Some(oldest) = cache.order.first().copied() {
                     cache.fds.remove(&oldest);

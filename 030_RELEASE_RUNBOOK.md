@@ -91,6 +91,7 @@ review:
 ```bash
 cargo xtask preflight
 cargo xtask evidence-audit
+cargo xtask architecture-ir
 cargo xtask check-version-pins
 cargo xtask package-leak-scan --strict-language
 cargo xtask perf-gates
