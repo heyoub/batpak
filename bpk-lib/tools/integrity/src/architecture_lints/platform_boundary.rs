@@ -148,7 +148,7 @@ fn check_direct_fs_contact_ratchet(repo_root: &Path, tracked_files: &[PathBuf]) 
             1,
         ),
         (
-            "crates/core/src/store/cold_start/rebuild.rs",
+            "crates/core/src/store/cold_start/rebuild/tests.rs",
             "std::fs::write(",
             8,
         ),

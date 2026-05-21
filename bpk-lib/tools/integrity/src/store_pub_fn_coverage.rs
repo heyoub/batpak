@@ -6,6 +6,19 @@ use std::path::Path;
 use syn::visit::{self, Visit};
 use syn::Item;
 
+const ALLOWLIST: &[&str] = &[
+    // `subscription` is doc(hidden) glue for async integration, exercised
+    // indirectly via `subscribe` in every subscription test.
+    "subscription",
+];
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct StorePubFnCoverage {
+    pub(crate) name: String,
+    pub(crate) covered: bool,
+    pub(crate) allowlisted: bool,
+}
+
 /// Assert that every `pub fn` declared in inherent `impl Store { ... }` blocks
 /// under `crates/core/src/store/` has at least one reference in the test or source tree.
 ///
@@ -19,15 +32,32 @@ use syn::Item;
 /// `src/` (which covers both standalone test files and `#[cfg(test)] mod tests`
 /// inline in source files).
 pub(crate) fn check(repo_root: &Path) -> Result<()> {
-    // Methods that are deliberately exercised only indirectly or are
-    // intentionally infrastructure-only. Start empty and add only proven
-    // false positives with a justification comment.
-    let allowlist: &[&str] = &[
-        // `subscription` is doc(hidden) glue for async integration, exercised
-        // indirectly via `subscribe` in every subscription test.
-        "subscription",
-    ];
+    let inventory = inventory(repo_root)?;
+    let unreferenced = inventory
+        .iter()
+        .filter(|entry| !entry.covered && !entry.allowlisted)
+        .map(|entry| entry.name.clone())
+        .collect::<Vec<_>>();
 
+    if !unreferenced.is_empty() {
+        let list = unreferenced
+            .iter()
+            .map(|n| format!("  - {n}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        bail!(
+            "structural-check: Store pub fn coverage failure — the following methods on\n\
+             `impl Store` have ZERO test or source references and are likely orphaned:\n\
+             {list}\n\
+             Investigate: crates/core/src/store/ and add a test exercising each, or remove the\n\
+             method if it's truly unused."
+        );
+    }
+
+    Ok(())
+}
+
+pub(crate) fn inventory(repo_root: &Path) -> Result<Vec<StorePubFnCoverage>> {
     // 1. Parse every store source file with syn and walk all inherent
     // `impl Store` blocks. Store's public surface is intentionally split by
     // owner modules; the detector follows that architecture instead of
@@ -98,37 +128,16 @@ pub(crate) fn check(repo_root: &Path) -> Result<()> {
         search_asts.push(ast);
     }
 
-    // 3. For each pub fn, check that at least one file references it as a call.
-    //    Patterns matched: `.name(`, `Store::name(`, `store.name(`
-    let mut unreferenced: Vec<String> = Vec::new();
-    for name in &pub_fns {
-        if allowlist.contains(&name.as_str()) {
-            continue;
-        }
-        if !search_asts
-            .iter()
-            .any(|ast| ast_references_store_method(ast, name))
-        {
-            unreferenced.push(name.clone());
-        }
-    }
-
-    if !unreferenced.is_empty() {
-        let list = unreferenced
-            .iter()
-            .map(|n| format!("  - {n}"))
-            .collect::<Vec<_>>()
-            .join("\n");
-        bail!(
-            "structural-check: Store pub fn coverage failure — the following methods on\n\
-             `impl Store` have ZERO test or source references and are likely orphaned:\n\
-             {list}\n\
-             Investigate: crates/core/src/store/ and add a test exercising each, or remove the\n\
-             method if it's truly unused."
-        );
-    }
-
-    Ok(())
+    Ok(pub_fns
+        .into_iter()
+        .map(|name| StorePubFnCoverage {
+            allowlisted: ALLOWLIST.contains(&name.as_str()),
+            covered: search_asts
+                .iter()
+                .any(|ast| ast_references_store_method(ast, &name)),
+            name,
+        })
+        .collect())
 }
 
 fn ast_references_store_method(ast: &syn::File, name: &str) -> bool {

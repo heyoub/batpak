@@ -1,13 +1,15 @@
-use crate::repo_surface::{ensure, load_yaml, relative};
+use crate::repo_surface::{ensure, load_yaml, relative, resolve_repo_or_core_path};
+use crate::shared_checks::{extract_anchors, JustifiesAnchor};
+use crate::store_pub_fn_coverage;
 use anyhow::{bail, Context, Result};
 use cargo_metadata::{Metadata, MetadataCommand};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const SCHEMA_VERSION: u32 = 2;
+const SCHEMA_VERSION: u32 = 3;
 
 #[derive(Debug, Serialize)]
 struct ArchitectureIr {
@@ -18,6 +20,8 @@ struct ArchitectureIr {
     gates: Vec<GateIr>,
     platform_allowlist: PlatformAllowlistIr,
     benches: BenchIr,
+    store_pub_fns: Vec<StorePubFnIr>,
+    invariant_gate_links: Vec<InvariantGateLinkIr>,
 }
 
 #[derive(Debug, Serialize)]
@@ -113,6 +117,22 @@ struct FamilyBenchIr {
     targets: Vec<String>,
 }
 
+#[derive(Debug, Serialize)]
+struct StorePubFnIr {
+    name: String,
+    covered: bool,
+    allowlisted: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct InvariantGateLinkIr {
+    id: String,
+    direct_test_artifact: bool,
+    testing_ledger_entry: bool,
+    waiver: bool,
+    gate_links: Vec<&'static str>,
+}
+
 #[derive(Debug, Deserialize)]
 struct RequirementRecord {
     id: String,
@@ -148,6 +168,11 @@ struct ArtifactRecord {
     id: String,
     kind: String,
     paths: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct WaiverNameRecord {
+    name: String,
 }
 
 pub(crate) fn run(repo_root: &Path, out: Option<PathBuf>, check: bool) -> Result<()> {
@@ -214,15 +239,31 @@ fn build(repo_root: &Path) -> Result<ArchitectureIr> {
         .collect::<Vec<_>>();
     packages.sort_by(|a, b| a.name.cmp(&b.name));
 
+    let traceability = load_traceability(repo_root)?;
+    let invariant_gate_links = load_invariant_gate_links(repo_root, &traceability)?;
+
     Ok(ArchitectureIr {
         schema_version: SCHEMA_VERSION,
         generated_by: "batpak-integrity architecture-ir",
         packages,
-        traceability: load_traceability(repo_root)?,
+        traceability,
         gates: gate_catalog(),
         platform_allowlist: load_platform_allowlist(repo_root)?,
         benches: load_benches(repo_root, &metadata)?,
+        store_pub_fns: load_store_pub_fns(repo_root)?,
+        invariant_gate_links,
     })
+}
+
+fn load_store_pub_fns(repo_root: &Path) -> Result<Vec<StorePubFnIr>> {
+    Ok(store_pub_fn_coverage::inventory(repo_root)?
+        .into_iter()
+        .map(|entry| StorePubFnIr {
+            name: entry.name,
+            covered: entry.covered,
+            allowlisted: entry.allowlisted,
+        })
+        .collect())
 }
 
 fn load_platform_allowlist(repo_root: &Path) -> Result<PlatformAllowlistIr> {
@@ -271,6 +312,97 @@ fn load_benches(repo_root: &Path, metadata: &Metadata) -> Result<BenchIr> {
         ],
         family_targets: parse_family_bench_targets(&bench_source)?,
     })
+}
+
+fn load_invariant_gate_links(
+    repo_root: &Path,
+    traceability: &TraceabilityIr,
+) -> Result<Vec<InvariantGateLinkIr>> {
+    let artifact_map = traceability
+        .artifacts
+        .iter()
+        .map(|artifact| (artifact.id.as_str(), artifact))
+        .collect::<BTreeMap<_, _>>();
+    let ledger_citations = ledger_invariant_citations(repo_root)?;
+    let waiver_names = load_invariant_waiver_names(repo_root)?;
+
+    Ok(traceability
+        .invariants
+        .iter()
+        .map(|invariant| {
+            let direct_test_artifact = invariant.artifacts.iter().any(|artifact_id| {
+                artifact_map
+                    .get(artifact_id.as_str())
+                    .is_some_and(|artifact| {
+                        artifact
+                            .paths
+                            .iter()
+                            .any(|path| is_test_artifact(repo_root, path))
+                    })
+            });
+            let testing_ledger_entry = ledger_citations.contains(&invariant.id);
+            let waiver = waives_invariant(&waiver_names, &invariant.id);
+            let mut gate_links = vec!["traceability-check", "structural-check:invariant-bridge"];
+            if direct_test_artifact {
+                gate_links.push("structural-check:doctrine-header-anchors");
+            }
+            InvariantGateLinkIr {
+                id: invariant.id.clone(),
+                direct_test_artifact,
+                testing_ledger_entry,
+                waiver,
+                gate_links,
+            }
+        })
+        .collect())
+}
+
+fn ledger_invariant_citations(repo_root: &Path) -> Result<BTreeSet<String>> {
+    let path = repo_root
+        .parent()
+        .unwrap_or(repo_root)
+        .join("041_TESTING_LEDGER.md");
+    let content = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
+    let mut citations = BTreeSet::new();
+    for line in content.lines() {
+        for anchor in extract_anchors(line) {
+            if let JustifiesAnchor::Invariant(id) = anchor {
+                citations.insert(id);
+            }
+        }
+    }
+    Ok(citations)
+}
+
+fn load_invariant_waiver_names(repo_root: &Path) -> Result<BTreeSet<String>> {
+    let path = repo_root
+        .join("traceability")
+        .join("invariant_citation_waivers.yaml");
+    if !path.exists() {
+        return Ok(BTreeSet::new());
+    }
+    let records: Vec<WaiverNameRecord> =
+        load_yaml(&path).with_context(|| format!("parse {}", path.display()))?;
+    Ok(records.into_iter().map(|record| record.name).collect())
+}
+
+fn waives_invariant(waiver_names: &BTreeSet<String>, invariant: &str) -> bool {
+    let prefix = format!("{invariant}:");
+    waiver_names
+        .iter()
+        .any(|name| name == invariant || name.starts_with(&prefix))
+}
+
+fn is_test_artifact(repo_root: &Path, path: &str) -> bool {
+    if path.starts_with("crates/core/tests") {
+        return true;
+    }
+    let resolved = resolve_repo_or_core_path(repo_root, path);
+    resolved
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext == "rs")
+        && path.contains("/tests/")
 }
 
 fn parse_string_list_const(source: &str, const_name: &str) -> Result<Vec<String>> {
