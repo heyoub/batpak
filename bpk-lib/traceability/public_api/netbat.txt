@@ -6,7 +6,7 @@ pub netbat::NetbatError::EmptyStream
 pub netbat::NetbatError::InputTooLarge
 pub netbat::NetbatError::InputTooLarge::max: usize
 pub netbat::NetbatError::Io
-pub netbat::NetbatError::Io::kind: core::io::error::ErrorKind
+pub netbat::NetbatError::Io::kind: std::io::error::ErrorKind
 pub netbat::NetbatError::LineTooLong
 pub netbat::NetbatError::LineTooLong::max: usize
 pub netbat::NetbatError::MalformedRequest
