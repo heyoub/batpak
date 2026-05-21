@@ -25,6 +25,7 @@ pub(crate) fn run() -> Result<()> {
     check_no_dead_code_silencers(&repo_root)?;
     check_no_placeholder_runtime_macros(&repo_root)?;
     check_canonical_encoding_boundary(&repo_root)?;
+    check_no_store_read_dir_entry_error_swallowing(&repo_root)?;
     check_allow_justifications(&repo_root)?;
     check_rust_file_size_pressure(&repo_root)?;
     check_inline_test_island_pressure(&repo_root)?;
@@ -249,6 +250,34 @@ fn check_canonical_encoding_boundary(repo_root: &Path) -> Result<()> {
                     "structural-check: raw rmp_serde call in {}:{}.\n\
                      Route production MessagePack through crate::encoding so ADR-0019 has one enforceable boundary.",
                     rel,
+                    line_no + 1
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+fn check_no_store_read_dir_entry_error_swallowing(repo_root: &Path) -> Result<()> {
+    for path in production_rust_files(repo_root) {
+        let rel = relative(repo_root, &path);
+        if !rel.starts_with("crates/core/src/store/") {
+            continue;
+        }
+        let content = fs::read_to_string(&path)?;
+        for (line_no, line) in content.lines().enumerate() {
+            let trimmed = line.trim_start();
+            if trimmed.starts_with("//") || trimmed.starts_with("///") || trimmed.starts_with("//!")
+            {
+                continue;
+            }
+            let swallows_entry_error = line.contains(".filter_map(Result::ok)")
+                || (line.contains(".filter_map(|") && line.contains(".ok())"))
+                || line.contains(".flatten()");
+            if swallows_entry_error {
+                bail!(
+                    "structural-check: read_dir entry errors must not be swallowed in {rel}:{}.\n\
+                     Collect or iterate directory entries as Result values and propagate DirEntry errors through StoreError.",
                     line_no + 1
                 );
             }

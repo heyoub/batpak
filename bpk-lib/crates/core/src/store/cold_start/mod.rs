@@ -11,13 +11,20 @@ pub(crate) use row::{
     ReservedKindFallbackStats, WatermarkInfo,
 };
 
-use crate::store::StoreError;
+use crate::store::{file_classification::StoreFileKind, StoreError};
 use std::path::{Path, PathBuf};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ColdStartArtifactKind {
     MmapIndex,
     Checkpoint,
+}
+
+#[derive(Debug)]
+pub(crate) enum FileLoad<T> {
+    Missing,
+    Loaded(T),
+    Invalid { reason: String },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -70,16 +77,9 @@ pub(crate) fn latest_segment_watermark(data_dir: &Path) -> Result<(u64, u64), St
     for entry in std::fs::read_dir(data_dir).map_err(StoreError::Io)? {
         let entry = entry.map_err(StoreError::Io)?;
         let path = entry.path();
-        let is_segment = path
-            .extension()
-            .map(|ext| ext == crate::store::segment::SEGMENT_EXTENSION)
-            .unwrap_or(false);
-        if !is_segment {
-            continue;
-        }
-        let segment_id = match crate::store::segment::SegmentId::from_filename(&path) {
-            Ok(parsed) => parsed.as_u64(),
-            Err(error) => {
+        let segment_id = match StoreFileKind::from_path(&path) {
+            StoreFileKind::Segment(segment_id) => segment_id.as_u64(),
+            StoreFileKind::MalformedSegment(error) => {
                 tracing::warn!(
                     path = %path.display(),
                     %error,
@@ -87,6 +87,7 @@ pub(crate) fn latest_segment_watermark(data_dir: &Path) -> Result<(u64, u64), St
                 );
                 continue;
             }
+            _ => continue,
         };
         if max
             .as_ref()

@@ -19,6 +19,7 @@ mod error;
     doc(cfg(feature = "dangerous-test-hooks"))
 )]
 pub mod fault;
+mod file_classification;
 mod frontier_api;
 mod gate;
 mod hidden_ranges;

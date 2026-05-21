@@ -378,6 +378,9 @@ pub(crate) struct ExportTsManifestArgs {
     /// created on demand.
     #[arg(long, value_name = "PATH")]
     pub(crate) out: PathBuf,
+    /// Refuse descriptor drift instead of rewriting the manifest.
+    #[arg(long)]
+    pub(crate) check: bool,
 }
 
 #[derive(Args, Clone, Debug)]

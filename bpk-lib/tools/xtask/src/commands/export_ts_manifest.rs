@@ -8,7 +8,7 @@
 //! documented at the top of `crates/hbat/src/manifest.rs`.
 
 use crate::ExportTsManifestArgs;
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use serde::Serialize;
 use std::fs;
 
@@ -79,6 +79,21 @@ pub(crate) fn export_ts_manifest(args: &ExportTsManifestArgs) -> Result<()> {
     // and `git diff` are both happy.
     let mut content = json;
     content.push('\n');
+
+    if args.check {
+        let existing = fs::read_to_string(&args.out)
+            .with_context(|| format!("read {}", args.out.display()))?;
+        if existing != content {
+            bail!(
+                "export-ts-manifest: {} is stale; run `cargo xtask export-ts-manifest --out {}` before regenerating bpk-ts",
+                args.out.display(),
+                args.out.display()
+            );
+        }
+        println!("export-ts-manifest: {} is current", args.out.display());
+        return Ok(());
+    }
+
     fs::write(&args.out, content).with_context(|| format!("write {}", args.out.display()))?;
     println!("export-ts-manifest: wrote {}", args.out.display());
 
@@ -137,5 +152,20 @@ mod tests {
         for op in json["operations"].as_array().expect("operations array") {
             assert_eq!(op["errorFixture"]["code"], "unknown_operation");
         }
+    }
+
+    #[test]
+    fn check_mode_rejects_stale_manifest() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let out = dir.path().join("batpak.manifest.json");
+        fs::write(&out, "{}\n").expect("write stale manifest");
+
+        let error = export_ts_manifest(&ExportTsManifestArgs { out, check: true })
+            .expect_err("stale manifest should fail check mode");
+
+        assert!(
+            error.to_string().contains("export-ts-manifest:"),
+            "wrong error: {error:?}"
+        );
     }
 }

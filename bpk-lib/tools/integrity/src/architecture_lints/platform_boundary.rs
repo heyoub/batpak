@@ -1,7 +1,7 @@
 use super::{ensure, relative};
 use anyhow::{Context, Result};
 use quote::ToTokens;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use syn::visit::{self, Visit};
@@ -91,6 +91,280 @@ pub(super) fn check(repo_root: &Path, tracked_files: &[PathBuf]) -> Result<()> {
             }
         }
     }
+    check_direct_fs_contact_ratchet(repo_root, tracked_files)?;
+    Ok(())
+}
+
+fn check_direct_fs_contact_ratchet(repo_root: &Path, tracked_files: &[PathBuf]) -> Result<()> {
+    const DIRECT_FS_NEEDLES: &[&str] = &[
+        "std::fs::read_dir",
+        "std::fs::metadata",
+        "std::fs::read(",
+        "std::fs::write(",
+        "std::fs::remove_file",
+        "std::fs::remove_dir_all",
+        "std::fs::rename",
+        "std::fs::copy",
+        "std::fs::create_dir_all",
+        "std::fs::canonicalize",
+        "std::fs::File::open",
+        "File::open",
+        "NamedTempFile::new_in",
+    ];
+    const ALLOWED_DIRECT_FS_CONTACTS: &[(&str, &str, usize)] = &[
+        (
+            "crates/core/src/store/cold_start/checkpoint/format.rs",
+            "std::fs::read(",
+            1,
+        ),
+        (
+            "crates/core/src/store/cold_start/checkpoint/test_support.rs",
+            "std::fs::write(",
+            2,
+        ),
+        (
+            "crates/core/src/store/cold_start/checkpoint/tests.rs",
+            "std::fs::read(",
+            3,
+        ),
+        (
+            "crates/core/src/store/cold_start/checkpoint/tests.rs",
+            "std::fs::write(",
+            5,
+        ),
+        ("crates/core/src/store/cold_start/mmap.rs", "File::open", 1),
+        (
+            "crates/core/src/store/cold_start/mmap.rs",
+            "std::fs::write(",
+            2,
+        ),
+        (
+            "crates/core/src/store/cold_start/mod.rs",
+            "std::fs::metadata",
+            2,
+        ),
+        (
+            "crates/core/src/store/cold_start/mod.rs",
+            "std::fs::read_dir",
+            1,
+        ),
+        (
+            "crates/core/src/store/cold_start/rebuild.rs",
+            "std::fs::write(",
+            8,
+        ),
+        (
+            "crates/core/src/store/cold_start/rebuild/topology.rs",
+            "std::fs::read_dir",
+            1,
+        ),
+        (
+            "crates/core/src/store/cold_start/rebuild/topology.rs",
+            "std::fs::read(",
+            1,
+        ),
+        (
+            "crates/core/src/store/cold_start/rebuild/topology.rs",
+            "std::fs::remove_file",
+            1,
+        ),
+        (
+            "crates/core/src/store/compaction_report.rs",
+            "std::fs::read(",
+            1,
+        ),
+        (
+            "crates/core/src/store/delivery/cursor/checkpoint.rs",
+            "NamedTempFile::new_in",
+            1,
+        ),
+        (
+            "crates/core/src/store/delivery/cursor/checkpoint.rs",
+            "std::fs::create_dir_all",
+            1,
+        ),
+        (
+            "crates/core/src/store/delivery/cursor/checkpoint.rs",
+            "std::fs::read(",
+            1,
+        ),
+        (
+            "crates/core/src/store/dir_lock.rs",
+            "std::fs::canonicalize",
+            1,
+        ),
+        (
+            "crates/core/src/store/hidden_ranges.rs",
+            "NamedTempFile::new_in",
+            1,
+        ),
+        (
+            "crates/core/src/store/hidden_ranges.rs",
+            "std::fs::read(",
+            1,
+        ),
+        (
+            "crates/core/src/store/hidden_ranges.rs",
+            "std::fs::remove_file",
+            1,
+        ),
+        ("crates/core/src/store/lifecycle.rs", "std::fs::copy", 1),
+        (
+            "crates/core/src/store/lifecycle.rs",
+            "std::fs::create_dir_all",
+            1,
+        ),
+        ("crates/core/src/store/lifecycle.rs", "std::fs::metadata", 1),
+        ("crates/core/src/store/lifecycle.rs", "std::fs::read_dir", 3),
+        (
+            "crates/core/src/store/lifecycle.rs",
+            "std::fs::remove_dir_all",
+            1,
+        ),
+        (
+            "crates/core/src/store/lifecycle.rs",
+            "std::fs::remove_file",
+            6,
+        ),
+        ("crates/core/src/store/lifecycle.rs", "std::fs::rename", 2),
+        ("crates/core/src/store/open.rs", "std::fs::canonicalize", 1),
+        (
+            "crates/core/src/store/open.rs",
+            "std::fs::create_dir_all",
+            1,
+        ),
+        ("crates/core/src/store/open.rs", "std::fs::write(", 2),
+        (
+            "crates/core/src/store/projection/mod.rs",
+            "std::fs::create_dir_all",
+            2,
+        ),
+        (
+            "crates/core/src/store/projection/mod.rs",
+            "std::fs::metadata",
+            1,
+        ),
+        (
+            "crates/core/src/store/projection/mod.rs",
+            "std::fs::read_dir",
+            2,
+        ),
+        (
+            "crates/core/src/store/projection/mod.rs",
+            "std::fs::read(",
+            1,
+        ),
+        (
+            "crates/core/src/store/projection/mod.rs",
+            "std::fs::remove_file",
+            2,
+        ),
+        (
+            "crates/core/src/store/segment/mod.rs",
+            "std::fs::File::open",
+            1,
+        ),
+        (
+            "crates/core/src/store/segment/scan/full_scan.rs",
+            "File::open",
+            1,
+        ),
+        ("crates/core/src/store/segment/scan/mod.rs", "File::open", 1),
+        (
+            "crates/core/src/store/segment/scan/mod.rs",
+            "std::fs::write(",
+            1,
+        ),
+        (
+            "crates/core/src/store/segment/scan/point_read.rs",
+            "File::open",
+            1,
+        ),
+        (
+            "crates/core/src/store/segment/scan/recovery.rs",
+            "File::open",
+            1,
+        ),
+        (
+            "crates/core/src/store/segment/scan/recovery.rs",
+            "std::fs::write(",
+            1,
+        ),
+        (
+            "crates/core/src/store/segment/scan/recovery/sidx_fast_path.rs",
+            "std::fs::File::open",
+            1,
+        ),
+        (
+            "crates/core/src/store/segment/scan/recovery/sidx_fast_path.rs",
+            "std::fs::metadata",
+            1,
+        ),
+        (
+            "crates/core/src/store/segment/sidx.rs",
+            "std::fs::File::open",
+            1,
+        ),
+        (
+            "crates/core/src/store/store_resource_report.rs",
+            "std::fs::canonicalize",
+            2,
+        ),
+        (
+            "crates/core/src/store/write/writer.rs",
+            "std::fs::create_dir_all",
+            1,
+        ),
+        (
+            "crates/core/src/store/write/writer/runtime.rs",
+            "std::fs::read_dir",
+            1,
+        ),
+    ];
+
+    let mut observed: BTreeMap<(String, &'static str), usize> = BTreeMap::new();
+    for path in tracked_files {
+        let rel = relative(repo_root, path);
+        if !(rel.starts_with("crates/core/src/store/") || rel.starts_with("src/store/"))
+            || rel.starts_with("crates/core/src/store/platform/")
+            || rel.starts_with("src/store/platform/")
+            || path.extension().and_then(|ext| ext.to_str()) != Some("rs")
+        {
+            continue;
+        }
+        let content =
+            fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
+        for line in content.lines() {
+            let trimmed = line.trim_start();
+            if trimmed.starts_with("//") || trimmed.starts_with("///") || trimmed.starts_with("//!")
+            {
+                continue;
+            }
+            let stripped = strip_string_literals(line);
+            for needle in DIRECT_FS_NEEDLES {
+                if stripped.contains(needle) {
+                    *observed.entry((rel.clone(), *needle)).or_default() += 1;
+                    break;
+                }
+            }
+        }
+    }
+
+    for ((rel, needle), count) in observed {
+        let allowed = ALLOWED_DIRECT_FS_CONTACTS
+            .iter()
+            .find_map(|(allowed_rel, allowed_needle, allowed_count)| {
+                (*allowed_rel == rel && *allowed_needle == needle).then_some(*allowed_count)
+            })
+            .unwrap_or(0);
+        ensure(
+            count <= allowed,
+            format!(
+                "structural-check: direct filesystem contact ratchet exceeded in {rel}: `{needle}` observed {count}, allowed {allowed}. Route new store machine-contact through src/store/platform or deliberately shrink/adjust the ratchet."
+            ),
+        )?;
+    }
+
     Ok(())
 }
 

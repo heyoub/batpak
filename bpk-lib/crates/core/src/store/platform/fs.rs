@@ -1,5 +1,6 @@
 use crate::store::StoreError;
 use std::fs::File;
+use std::io::{self, Write};
 use std::path::Path;
 use tempfile::NamedTempFile;
 
@@ -39,6 +40,27 @@ pub(crate) fn write_file_atomically(
     let admission = crate::store::platform::sync::admit_current_parent_dir_sync()?;
     crate::store::platform::sync::persist_temp_with_parent_sync(tmp, final_path, admission)
         .map_err(StoreError::Io)?;
+    Ok(())
+}
+
+pub(crate) fn write_derivative_file_atomically(
+    data_dir: &Path,
+    final_path: &Path,
+    purpose: &str,
+    bytes: &[u8],
+) -> io::Result<()> {
+    match reject_symlink_leaf(final_path, purpose) {
+        Ok(()) => {}
+        Err(StoreError::Io(error)) => return Err(error),
+        Err(error) => return Err(io::Error::other(error.to_string())),
+    }
+    let tmp = NamedTempFile::new_in(data_dir)?;
+    {
+        let mut file = io::BufWriter::new(tmp.as_file());
+        file.write_all(bytes)?;
+        file.into_inner().map_err(|error| error.into_error())?;
+    }
+    tmp.persist(final_path).map_err(|error| error.error)?;
     Ok(())
 }
 

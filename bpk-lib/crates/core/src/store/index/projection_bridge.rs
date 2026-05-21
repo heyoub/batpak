@@ -1,4 +1,4 @@
-use super::columnar::CachedProjectionSlot;
+use super::columnar::{CachedProjectionSlot, ProjectionCacheStoreStatus};
 use super::{DiskPos, StoreIndex};
 use crate::event::EventKind;
 use std::any::TypeId;
@@ -51,7 +51,7 @@ impl StoreIndex {
         type_id: TypeId,
         bytes: Vec<u8>,
         watermark: u64,
-    ) -> bool {
+    ) -> ProjectionCacheStoreStatus {
         self.scan
             .store_cached_projection(entity, type_id, bytes, watermark)
     }

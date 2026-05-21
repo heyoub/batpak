@@ -1,6 +1,7 @@
 use super::{checkpoint_entries_to_index_entries, format};
 use crate::store::cold_start::{
-    validate_watermark_segment, ReservedKindFallbackStats, WatermarkInfo, WatermarkValidationError,
+    validate_watermark_segment, FileLoad, ReservedKindFallbackStats, WatermarkInfo,
+    WatermarkValidationError,
 };
 use crate::store::index::{restore_chunk_ranges, IndexEntry, RoutingSummary};
 use crate::store::StoreError;
@@ -43,12 +44,26 @@ pub(crate) struct LoadedCheckpointSnapshot {
 /// which may be higher than `entries.len()` due to burned batch slots.
 #[cfg(test)]
 pub(crate) fn try_load_checkpoint(data_dir: &Path) -> Option<LoadedCheckpointData> {
-    let loaded = format::read_checkpoint_file(data_dir)?;
+    let loaded = match format::read_checkpoint_file(data_dir) {
+        FileLoad::Loaded(loaded) => loaded,
+        FileLoad::Missing | FileLoad::Invalid { .. } => return None,
+    };
     decode_checkpoint_data(data_dir, &loaded.path, loaded.version, &loaded.body)
 }
 
 pub(crate) fn try_load_checkpoint_snapshot(data_dir: &Path) -> Option<LoadedCheckpointSnapshot> {
-    let raw = format::read_checkpoint_file(data_dir)?;
+    let raw = match format::read_checkpoint_file(data_dir) {
+        FileLoad::Loaded(raw) => raw,
+        FileLoad::Missing => return None,
+        FileLoad::Invalid { reason } => {
+            tracing::debug!(
+                target: "batpak::checkpoint",
+                %reason,
+                "checkpoint fast path skipped after invalid checkpoint file"
+            );
+            return None;
+        }
+    };
     if raw.version == format::CHECKPOINT_VERSION {
         return decode_checkpoint_snapshot_v6(data_dir, &raw.path, &raw.body);
     }

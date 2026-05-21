@@ -1,5 +1,5 @@
 use super::{checkpoint_entries_to_index_entries, CheckpointEntry};
-use crate::store::cold_start::ReservedKindFallbackStats;
+use crate::store::cold_start::{FileLoad, ReservedKindFallbackStats};
 use crate::store::index::{recommended_restore_chunk_count, RoutingSummary};
 use crate::store::platform::fs::write_file_atomically;
 use crate::store::StoreError;
@@ -83,12 +83,12 @@ pub(super) struct DecodedCheckpointData {
     pub(super) cumulative_reserved_kind_fallbacks: ReservedKindFallbackStats,
 }
 
-pub(super) fn read_checkpoint_file(data_dir: &Path) -> Option<LoadedCheckpointFile> {
+pub(super) fn read_checkpoint_file(data_dir: &Path) -> FileLoad<LoadedCheckpointFile> {
     let path = data_dir.join(CHECKPOINT_FILENAME);
 
     let raw = match std::fs::read(&path) {
         Ok(bytes) => bytes,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return FileLoad::Missing,
         Err(error) => {
             tracing::warn!(
                 target: "batpak::checkpoint",
@@ -96,7 +96,9 @@ pub(super) fn read_checkpoint_file(data_dir: &Path) -> Option<LoadedCheckpointFi
                 error = %error,
                 "failed to read checkpoint file"
             );
-            return None;
+            return FileLoad::Invalid {
+                reason: format!("read failed: {error}"),
+            };
         }
     };
 
@@ -107,7 +109,9 @@ pub(super) fn read_checkpoint_file(data_dir: &Path) -> Option<LoadedCheckpointFi
             len = raw.len(),
             "checkpoint file too short to contain a valid header"
         );
-        return None;
+        return FileLoad::Invalid {
+            reason: format!("checkpoint file too short: {} bytes", raw.len()),
+        };
     }
 
     if &raw[..6] != CHECKPOINT_MAGIC.as_ref() {
@@ -116,7 +120,9 @@ pub(super) fn read_checkpoint_file(data_dir: &Path) -> Option<LoadedCheckpointFi
             path = %path.display(),
             "checkpoint file has wrong magic bytes — ignoring"
         );
-        return None;
+        return FileLoad::Invalid {
+            reason: "wrong magic bytes".to_owned(),
+        };
     }
 
     let version = u16::from_le_bytes([raw[6], raw[7]]);
@@ -131,10 +137,12 @@ pub(super) fn read_checkpoint_file(data_dir: &Path) -> Option<LoadedCheckpointFi
             computed = computed_crc,
             "checkpoint CRC mismatch — file is corrupt, ignoring"
         );
-        return None;
+        return FileLoad::Invalid {
+            reason: format!("crc mismatch: stored {stored_crc}, computed {computed_crc}"),
+        };
     }
 
-    Some(LoadedCheckpointFile {
+    FileLoad::Loaded(LoadedCheckpointFile {
         path,
         version,
         body,

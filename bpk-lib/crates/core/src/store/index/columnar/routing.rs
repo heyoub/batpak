@@ -1,6 +1,8 @@
 #[cfg(test)]
 use super::apply_after_bounds;
-use super::{CachedProjectionSlot, EntryQuery, ProjectionCandidates, ScanIndex};
+use super::{
+    CachedProjectionSlot, EntryQuery, ProjectionCacheStoreStatus, ProjectionCandidates, ScanIndex,
+};
 use crate::event::EventKind;
 use crate::store::index::QueryHit;
 use std::any::TypeId;
@@ -413,13 +415,16 @@ impl ScanIndex {
         type_id: TypeId,
         bytes: Vec<u8>,
         watermark: u64,
-    ) -> bool {
+    ) -> ProjectionCacheStoreStatus {
         let projection = self.capabilities().projection;
-        projection.cached_projection
-            && self
-                .entity_groups
-                .as_ref()
-                .is_some_and(|idx| idx.store_cached_projection(entity, type_id, bytes, watermark))
+        if !projection.cached_projection {
+            return ProjectionCacheStoreStatus::UnsupportedTopology;
+        }
+        self.entity_groups
+            .as_ref()
+            .map_or(ProjectionCacheStoreStatus::UnsupportedTopology, |idx| {
+                idx.store_cached_projection(entity, type_id, bytes, watermark)
+            })
     }
 
     pub(crate) fn projection_candidates(

@@ -392,18 +392,25 @@ fn resolve_parent_event_id_by_hash(
     parent_hash: ChainWalkHash,
     child_sequence: u64,
 ) -> Option<ParentHashResolution> {
-    let mut matches: Vec<&IndexEntry> = entity_stream
-        .iter()
-        .filter(|candidate| {
-            candidate.hash_chain.event_hash == parent_hash
-                && candidate.global_sequence < child_sequence
-        })
-        .collect();
-    matches.sort_by_key(|candidate| candidate.global_sequence);
-    let selected = matches.last()?;
+    let mut matching_parent_count = 0u64;
+    let mut selected: Option<&IndexEntry> = None;
+
+    for candidate in entity_stream.iter().filter(|candidate| {
+        candidate.hash_chain.event_hash == parent_hash && candidate.global_sequence < child_sequence
+    }) {
+        matching_parent_count = matching_parent_count.saturating_add(1);
+        if selected
+            .map(|current| candidate.global_sequence > current.global_sequence)
+            .unwrap_or(true)
+        {
+            selected = Some(candidate);
+        }
+    }
+
+    let selected = selected?;
     Some(ParentHashResolution {
         event_id: selected.event_id,
-        matching_parent_count: matches.len() as u64,
+        matching_parent_count,
     })
 }
 

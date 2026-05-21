@@ -7,7 +7,6 @@ pub use watch::{CursorWatcherError, ProjectionWatcher, WatcherError};
 use crate::store::StoreError;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use tempfile::NamedTempFile;
 
 /// Describes optional capabilities supported by a cache backend.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -351,20 +350,13 @@ impl ProjectionCache for NativeCache {
         // an explicit non-goal of this backend, since the segment log is the
         // source of truth and a missing cache entry simply triggers a
         // replay-and-rewrite on the next `project()` call.
-        let write_result = (|| -> Result<(), StoreError> {
-            let tmp = NamedTempFile::new_in(&shard_dir).map_err(StoreError::cache_error)?;
-            {
-                use std::io::Write;
-                let mut f = std::io::BufWriter::new(tmp.as_file());
-                f.write_all(&buf).map_err(StoreError::cache_error)?;
-                f.into_inner()
-                    .map_err(|e| StoreError::CacheFailed(Box::new(e.into_error())))?;
-            }
-            tmp.persist(&final_path)
-                .map_err(|e| StoreError::CacheFailed(Box::new(e.error)))?;
-            Ok(())
-        })();
-        write_result
+        crate::store::platform::fs::write_derivative_file_atomically(
+            &shard_dir,
+            &final_path,
+            "projection cache file",
+            &buf,
+        )
+        .map_err(StoreError::cache_error)
     }
 
     fn delete_prefix(&self, prefix: &[u8]) -> Result<u64, StoreError> {
@@ -378,7 +370,8 @@ impl ProjectionCache for NativeCache {
             Err(e) => return Err(StoreError::CacheFailed(Box::new(e))),
         };
 
-        for dir_entry in entries.filter_map(|e| e.ok()) {
+        for dir_entry in entries {
+            let dir_entry = dir_entry.map_err(StoreError::cache_error)?;
             let shard_path = dir_entry.path();
             if !shard_path.is_dir() {
                 continue;
@@ -395,12 +388,10 @@ impl ProjectionCache for NativeCache {
                 }
             }
 
-            let shard_entries = match std::fs::read_dir(&shard_path) {
-                Ok(e) => e,
-                Err(_) => continue,
-            };
+            let shard_entries = std::fs::read_dir(&shard_path).map_err(StoreError::cache_error)?;
 
-            for file_entry in shard_entries.filter_map(|e| e.ok()) {
+            for file_entry in shard_entries {
+                let file_entry = file_entry.map_err(StoreError::cache_error)?;
                 let file_name = file_entry.file_name();
                 let name = match file_name.to_str() {
                     Some(n) if n.ends_with(".bin") => &n[..n.len() - 4],

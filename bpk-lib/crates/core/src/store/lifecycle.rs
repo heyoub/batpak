@@ -1,6 +1,7 @@
 use crate::coordinate::Coordinate;
 use crate::event::{EventKind, StoredEvent};
 use crate::store::cold_start::{latest_segment_watermark, ColdStartArtifactKind};
+use crate::store::file_classification::StoreFileKind;
 use crate::store::segment::scan as reader;
 use crate::store::segment::{self, Active, FramePayload};
 use crate::store::snapshot_report::{
@@ -98,14 +99,15 @@ pub(crate) fn snapshot(
     for entry in entries {
         let entry = entry.map_err(StoreError::Io)?;
         let path = entry.path();
-        if let Some(file_kind) = snapshot_source_file_kind(&path) {
+        let file_kind = StoreFileKind::from_path(&path);
+        if let Some(file_kind) = snapshot_source_file_kind(&file_kind) {
             let dest_path = dest.join(entry.file_name());
             crate::store::platform::fs::reject_symlink_leaf(&dest_path, "snapshot entry")?;
             std::fs::copy(&path, &dest_path).map_err(StoreError::Io)?;
             match file_kind {
                 SnapshotFileKind::Segment => {
-                    if let Some(segment_id) = snapshot_segment_id(&path) {
-                        copied_segment_ids_sorted.push(segment_id);
+                    if let Some(segment_id) = file_kind.segment_id() {
+                        copied_segment_ids_sorted.push(segment_id.as_u64());
                     }
                 }
                 SnapshotFileKind::VisibilityRanges => {
@@ -138,52 +140,20 @@ pub(crate) fn snapshot(
     Ok(report)
 }
 
-fn snapshot_source_file_kind(path: &std::path::Path) -> Option<SnapshotFileKind> {
-    path.extension()
-        .map(|ext| ext == segment::SEGMENT_EXTENSION)
-        .unwrap_or(false)
-        .then_some(SnapshotFileKind::Segment)
-        .or_else(|| {
-            path.file_name()
-                .map(|name| name == crate::store::hidden_ranges::VISIBILITY_RANGES_FILENAME)
-                .unwrap_or(false)
-                .then_some(SnapshotFileKind::VisibilityRanges)
-        })
-        .or_else(|| {
-            path.file_name()
-                .map(|name| name == crate::store::cold_start::rebuild::COMPACTION_MARKER_FILENAME)
-                .unwrap_or(false)
-                .then_some(SnapshotFileKind::PendingCompactionMarker)
-        })
-}
-
-fn snapshot_segment_id(path: &std::path::Path) -> Option<u64> {
-    match segment::SegmentId::from_filename(path) {
-        Ok(parsed) => Some(parsed.as_u64()),
-        Err(error) => {
-            tracing::warn!(
-                path = %path.display(),
-                %error,
-                "skipping malformed segment filename"
-            );
-            None
-        }
+fn snapshot_source_file_kind(file_kind: &StoreFileKind) -> Option<SnapshotFileKind> {
+    if !file_kind.should_copy_into_snapshot() {
+        return None;
+    }
+    match file_kind {
+        StoreFileKind::Segment(_) => Some(SnapshotFileKind::Segment),
+        StoreFileKind::VisibilityRanges => Some(SnapshotFileKind::VisibilityRanges),
+        StoreFileKind::PendingCompactionMarker => Some(SnapshotFileKind::PendingCompactionMarker),
+        _ => None,
     }
 }
 
 fn snapshot_destination_should_clear(path: &std::path::Path) -> bool {
-    path.extension()
-        .map(|ext| ext == segment::SEGMENT_EXTENSION || ext == "compact-src")
-        .unwrap_or(false)
-        || path
-            .file_name()
-            .map(|name| {
-                name == crate::store::hidden_ranges::VISIBILITY_RANGES_FILENAME
-                    || name == crate::store::cold_start::checkpoint::CHECKPOINT_FILENAME
-                    || name == crate::store::cold_start::mmap::MMAP_INDEX_FILENAME
-                    || name == crate::store::cold_start::rebuild::COMPACTION_MARKER_FILENAME
-            })
-            .unwrap_or(false)
+    StoreFileKind::from_path(path).should_clear_from_snapshot_destination()
 }
 
 fn remove_file_if_present(path: &std::path::Path) -> Result<bool, StoreError> {
@@ -213,12 +183,7 @@ fn clear_snapshot_store_artifacts(dest: &std::path::Path) -> Result<usize, Store
             continue;
         }
 
-        if path.is_dir()
-            && path
-                .file_name()
-                .map(|name| name == "cursors")
-                .unwrap_or(false)
-        {
+        if path.is_dir() && StoreFileKind::from_path(&path) == StoreFileKind::CursorDirectory {
             removed += usize::from(remove_dir_all_if_present(&path)?);
         }
     }
@@ -452,33 +417,30 @@ pub(crate) fn compact(
     sync(store)?;
 
     // Single read_dir: collect all segment IDs and paths, then partition.
-    let mut all_segments: Vec<(u64, std::path::PathBuf)> =
-        std::fs::read_dir(&store.config.data_dir)
-            .map_err(StoreError::Io)?
-            .filter_map(Result::ok)
-            .filter_map(|entry| {
-                let path = entry.path();
-                let ext_ok = path
-                    .extension()
-                    .map(|ext| ext == segment::SEGMENT_EXTENSION)
-                    .unwrap_or(false);
-                if !ext_ok {
-                    return None;
-                }
-                let seg_id = match segment::SegmentId::from_filename(&path) {
-                    Ok(parsed) => parsed.as_u64(),
-                    Err(error) => {
-                        tracing::warn!(
-                            path = %path.display(),
-                            %error,
-                            "skipping malformed segment filename"
-                        );
-                        return None;
-                    }
-                };
-                Some((seg_id, path))
-            })
-            .collect();
+    let mut all_segments: Vec<(u64, std::path::PathBuf)> = Vec::new();
+    for entry in std::fs::read_dir(&store.config.data_dir).map_err(StoreError::Io)? {
+        let entry = entry.map_err(StoreError::Io)?;
+        let path = entry.path();
+        let ext_ok = path
+            .extension()
+            .map(|ext| ext == segment::SEGMENT_EXTENSION)
+            .unwrap_or(false);
+        if !ext_ok {
+            continue;
+        }
+        let seg_id = match segment::SegmentId::from_filename(&path) {
+            Ok(parsed) => parsed.as_u64(),
+            Err(error) => {
+                tracing::warn!(
+                    path = %path.display(),
+                    %error,
+                    "skipping malformed segment filename"
+                );
+                continue;
+            }
+        };
+        all_segments.push((seg_id, path));
+    }
     all_segments.sort_by_key(|(id, _)| *id);
 
     let active_segment_id = all_segments.last().map(|(id, _)| *id).unwrap_or(0);

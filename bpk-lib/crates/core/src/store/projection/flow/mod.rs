@@ -4,6 +4,7 @@ mod replay_input;
 mod strategy;
 
 use crate::event::{EventSourced, ProjectionInput};
+use crate::store::index::columnar::ProjectionCacheStoreStatus;
 use crate::store::{Clock, Freshness, HlcPoint, Store, StoreError};
 use std::any::TypeId;
 
@@ -53,6 +54,7 @@ enum ProjectionExternalCacheStoreOutcome {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ProjectionIndexCacheStoreOutcome {
     Stored,
+    MissingEntity,
     UnsupportedTopology,
 }
 
@@ -782,13 +784,17 @@ fn store_index_cached_projection<State>(
     bytes: Vec<u8>,
     watermark: u64,
 ) -> ProjectionIndexCacheStoreOutcome {
-    if store
+    match store
         .index
         .store_cached_projection(entity, type_id, bytes, watermark)
     {
-        ProjectionIndexCacheStoreOutcome::Stored
-    } else {
-        ProjectionIndexCacheStoreOutcome::UnsupportedTopology
+        ProjectionCacheStoreStatus::Stored => ProjectionIndexCacheStoreOutcome::Stored,
+        ProjectionCacheStoreStatus::MissingEntity => {
+            ProjectionIndexCacheStoreOutcome::MissingEntity
+        }
+        ProjectionCacheStoreStatus::UnsupportedTopology => {
+            ProjectionIndexCacheStoreOutcome::UnsupportedTopology
+        }
     }
 }
 

@@ -58,6 +58,13 @@ use soaos::SoAoSInner;
 
 type ProjectionCandidates = (u64, u64, Vec<(u64, DiskPos)>);
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ProjectionCacheStoreStatus {
+    Stored,
+    MissingEntity,
+    UnsupportedTopology,
+}
+
 /// Reconstruct the raw `u16` wire value from an `EventKind`.
 ///
 /// Delegates to [`EventKind::as_raw_u16`], the canonical
@@ -460,16 +467,25 @@ impl ColumnarIndex {
         type_id: TypeId,
         bytes: Vec<u8>,
         watermark: u64,
-    ) -> bool {
+    ) -> ProjectionCacheStoreStatus {
         match &self.inner {
-            ColumnarVariant::SoAoS(lock) => lock
-                .write()
-                .store_cached_projection(entity, type_id, bytes, watermark),
+            ColumnarVariant::SoAoS(lock) => {
+                if lock
+                    .write()
+                    .store_cached_projection(entity, type_id, bytes, watermark)
+                {
+                    ProjectionCacheStoreStatus::Stored
+                } else {
+                    ProjectionCacheStoreStatus::MissingEntity
+                }
+            }
             ColumnarVariant::SoA(_)
             | ColumnarVariant::AoSoA64(_)
-            | ColumnarVariant::AoSoA64Simd(_) => false,
+            | ColumnarVariant::AoSoA64Simd(_) => ProjectionCacheStoreStatus::UnsupportedTopology,
             #[cfg(test)]
-            ColumnarVariant::AoSoA8(_) | ColumnarVariant::AoSoA16(_) => false,
+            ColumnarVariant::AoSoA8(_) | ColumnarVariant::AoSoA16(_) => {
+                ProjectionCacheStoreStatus::UnsupportedTopology
+            }
         }
     }
 
@@ -1100,8 +1116,9 @@ mod tests {
         );
 
         let type_id = std::any::TypeId::of::<u64>();
-        assert!(
+        assert_eq!(
             si.store_cached_projection("entity:projection", type_id, b"cached".to_vec(), 1),
+            ProjectionCacheStoreStatus::Stored,
             "PROPERTY: storing a group-local projection for an existing entity must report success"
         );
         let slot = si
