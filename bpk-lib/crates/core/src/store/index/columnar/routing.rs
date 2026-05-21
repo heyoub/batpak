@@ -1,10 +1,8 @@
 #[cfg(test)]
 use super::apply_after_bounds;
-use super::{
-    CachedProjectionSlot, EntryQuery, ProjectionCacheStoreStatus, ProjectionCandidates, ScanIndex,
-};
+use super::{CachedProjectionSlot, EntryQuery, ProjectionCandidates, ScanIndex};
 use crate::event::EventKind;
-use crate::store::index::QueryHit;
+use crate::store::index::{ProjectionCacheStoreStatus, QueryHit};
 use std::any::TypeId;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

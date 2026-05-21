@@ -121,11 +121,8 @@ struct RestorePlanner<'a> {
 
 impl<'a> RestorePlanner<'a> {
     fn build(&self) -> Result<RestorePlan, StoreError> {
-        // A pending compaction marker means the on-disk segment set still
-        // needs marker-aware reconciliation. Skip stale mmap/checkpoint
-        // fast paths until that reconciliation has run; otherwise reopen can
-        // resurrect pre-compaction truth from an artifact written before the
-        // marker.
+        // Pending compaction requires marker-aware segment reconciliation
+        // before stale mmap/checkpoint artifacts can be trusted.
         let has_pending_compaction = load_pending_compaction(self.data_dir)?.is_some();
 
         if !has_pending_compaction && self.policy.try_mmap_index() {
@@ -148,7 +145,9 @@ impl<'a> RestorePlanner<'a> {
         }
 
         if !has_pending_compaction && self.policy.try_checkpoint() {
-            if let Some(snapshot) = super::checkpoint::try_load_checkpoint_snapshot(self.data_dir) {
+            if let super::FileLoad::Loaded(snapshot) =
+                super::checkpoint::load_checkpoint_snapshot(self.data_dir)
+            {
                 return self.build_snapshot_plan(
                     RestoreSource::Checkpoint,
                     SnapshotPlanInput {

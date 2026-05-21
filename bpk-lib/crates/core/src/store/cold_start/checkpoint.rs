@@ -23,8 +23,10 @@ mod snapshot;
 mod write;
 
 pub(crate) use format::CHECKPOINT_FILENAME;
+pub(crate) use snapshot::load_checkpoint_snapshot;
 #[cfg(test)]
 pub(crate) use snapshot::try_load_checkpoint;
+#[cfg(test)]
 pub(crate) use snapshot::try_load_checkpoint_snapshot;
 #[cfg(test)]
 pub(crate) use write::write_checkpoint;

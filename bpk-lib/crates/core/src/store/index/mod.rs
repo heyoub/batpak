@@ -7,7 +7,7 @@ mod visibility;
 
 use self::columnar::ScanIndex;
 use self::interner::StringInterner;
-pub(crate) use self::projection_bridge::{projection_kind_matches, ProjectionReplayPlan};
+pub(crate) use self::projection_bridge::{ProjectionCacheStoreStatus, ProjectionReplayPlan};
 use self::restore::RestoreBase;
 pub(crate) use self::restore::{
     recommended_restore_chunk_count, restore_chunk_ranges, RoutingSummary,

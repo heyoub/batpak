@@ -23,9 +23,14 @@ syncbat-macros = { path = "../syncbat-macros", version = "0.7.6" }
 tracing = "0.1"
 
 [dev-dependencies]
+criterion = { version = "0.8", features = ["html_reports"] }
 tempfile = ">=3.24, <3.25"
 trybuild = "1"
 proptest = "1"
+
+[[bench]]
+name = "dispatch"
+harness = false
 
 [lints]
 workspace = true

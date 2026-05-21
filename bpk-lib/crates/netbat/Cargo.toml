@@ -21,7 +21,12 @@ syncbat = { path = "../syncbat", version = "0.7.6" }
 tracing = "0.1"
 
 [dev-dependencies]
+criterion = { version = "0.8", features = ["html_reports"] }
 proptest = "1"
+
+[[bench]]
+name = "boundary"
+harness = false
 
 [lints]
 workspace = true

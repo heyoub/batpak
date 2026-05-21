@@ -99,14 +99,14 @@ pub(crate) fn snapshot(
     for entry in entries {
         let entry = entry.map_err(StoreError::Io)?;
         let path = entry.path();
-        let file_kind = StoreFileKind::from_path(&path);
-        if let Some(file_kind) = snapshot_source_file_kind(&file_kind) {
+        let source_kind = StoreFileKind::from_path(&path);
+        if let Some(file_kind) = snapshot_source_file_kind(&source_kind) {
             let dest_path = dest.join(entry.file_name());
             crate::store::platform::fs::reject_symlink_leaf(&dest_path, "snapshot entry")?;
             std::fs::copy(&path, &dest_path).map_err(StoreError::Io)?;
             match file_kind {
                 SnapshotFileKind::Segment => {
-                    if let Some(segment_id) = file_kind.segment_id() {
+                    if let Some(segment_id) = source_kind.segment_id() {
                         copied_segment_ids_sorted.push(segment_id.as_u64());
                     }
                 }
@@ -148,7 +148,12 @@ fn snapshot_source_file_kind(file_kind: &StoreFileKind) -> Option<SnapshotFileKi
         StoreFileKind::Segment(_) => Some(SnapshotFileKind::Segment),
         StoreFileKind::VisibilityRanges => Some(SnapshotFileKind::VisibilityRanges),
         StoreFileKind::PendingCompactionMarker => Some(SnapshotFileKind::PendingCompactionMarker),
-        _ => None,
+        StoreFileKind::MalformedSegment(_)
+        | StoreFileKind::Checkpoint
+        | StoreFileKind::MmapIndex
+        | StoreFileKind::CompactSource
+        | StoreFileKind::CursorDirectory
+        | StoreFileKind::Other => None,
     }
 }
 
@@ -421,16 +426,9 @@ pub(crate) fn compact(
     for entry in std::fs::read_dir(&store.config.data_dir).map_err(StoreError::Io)? {
         let entry = entry.map_err(StoreError::Io)?;
         let path = entry.path();
-        let ext_ok = path
-            .extension()
-            .map(|ext| ext == segment::SEGMENT_EXTENSION)
-            .unwrap_or(false);
-        if !ext_ok {
-            continue;
-        }
-        let seg_id = match segment::SegmentId::from_filename(&path) {
-            Ok(parsed) => parsed.as_u64(),
-            Err(error) => {
+        let seg_id = match StoreFileKind::from_path(&path) {
+            StoreFileKind::Segment(segment_id) => segment_id.as_u64(),
+            StoreFileKind::MalformedSegment(error) => {
                 tracing::warn!(
                     path = %path.display(),
                     %error,
@@ -438,6 +436,13 @@ pub(crate) fn compact(
                 );
                 continue;
             }
+            StoreFileKind::VisibilityRanges
+            | StoreFileKind::Checkpoint
+            | StoreFileKind::MmapIndex
+            | StoreFileKind::PendingCompactionMarker
+            | StoreFileKind::CompactSource
+            | StoreFileKind::CursorDirectory
+            | StoreFileKind::Other => continue,
         };
         all_segments.push((seg_id, path));
     }

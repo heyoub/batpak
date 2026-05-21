@@ -1,4 +1,4 @@
-use super::columnar::{CachedProjectionSlot, ProjectionCacheStoreStatus};
+use super::columnar::CachedProjectionSlot;
 use super::{DiskPos, StoreIndex};
 use crate::event::EventKind;
 use std::any::TypeId;
@@ -24,6 +24,20 @@ pub(crate) struct ProjectionReplayPlan {
     pub(crate) watermark: u64,
     pub(crate) generation: u64,
     pub(crate) items: Vec<ProjectionReplayItem>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ProjectionCacheStoreStatus {
+    Stored,
+    MissingEntity,
+    UnsupportedTopology,
+}
+
+#[cfg(test)]
+impl ProjectionCacheStoreStatus {
+    pub(crate) fn is_stored(self) -> bool {
+        matches!(self, Self::Stored)
+    }
 }
 
 impl StoreIndex {

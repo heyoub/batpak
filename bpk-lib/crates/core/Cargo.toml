@@ -143,3 +143,7 @@ harness = false
 [[bench]]
 name = "evidence_reports"
 harness = false
+
+[[bench]]
+name = "recovery_lanes"
+harness = false

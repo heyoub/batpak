@@ -48,30 +48,45 @@ pub(crate) fn try_load_checkpoint(data_dir: &Path) -> Option<LoadedCheckpointDat
         FileLoad::Loaded(loaded) => loaded,
         FileLoad::Missing | FileLoad::Invalid { .. } => return None,
     };
-    decode_checkpoint_data(data_dir, &loaded.path, loaded.version, &loaded.body)
+    match decode_checkpoint_data(data_dir, &loaded.path, loaded.version, &loaded.body) {
+        FileLoad::Loaded(loaded) => Some(loaded),
+        FileLoad::Missing | FileLoad::Invalid { .. } => None,
+    }
 }
 
+#[cfg(test)]
 pub(crate) fn try_load_checkpoint_snapshot(data_dir: &Path) -> Option<LoadedCheckpointSnapshot> {
+    match load_checkpoint_snapshot(data_dir) {
+        FileLoad::Loaded(snapshot) => Some(snapshot),
+        FileLoad::Missing | FileLoad::Invalid { .. } => None,
+    }
+}
+
+pub(crate) fn load_checkpoint_snapshot(data_dir: &Path) -> FileLoad<LoadedCheckpointSnapshot> {
     let raw = match format::read_checkpoint_file(data_dir) {
         FileLoad::Loaded(raw) => raw,
-        FileLoad::Missing => return None,
+        FileLoad::Missing => return FileLoad::Missing,
         FileLoad::Invalid { reason } => {
             tracing::debug!(
                 target: "batpak::checkpoint",
                 %reason,
                 "checkpoint fast path skipped after invalid checkpoint file"
             );
-            return None;
+            return FileLoad::Invalid { reason };
         }
     };
     if raw.version == format::CHECKPOINT_VERSION {
         return decode_checkpoint_snapshot_v6(data_dir, &raw.path, &raw.body);
     }
 
-    let loaded = decode_checkpoint_data(data_dir, &raw.path, raw.version, &raw.body)?;
+    let loaded = match decode_checkpoint_data(data_dir, &raw.path, raw.version, &raw.body) {
+        FileLoad::Loaded(loaded) => loaded,
+        FileLoad::Missing => return FileLoad::Missing,
+        FileLoad::Invalid { reason } => return FileLoad::Invalid { reason },
+    };
     let chunk_ranges = restore_chunk_ranges(loaded.entries.len(), &loaded.routing);
 
-    let mut per_chunk = chunk_ranges
+    let per_chunk = chunk_ranges
         .into_par_iter()
         .enumerate()
         .map(|(chunk_idx, (start, len))| {
@@ -84,8 +99,21 @@ pub(crate) fn try_load_checkpoint_snapshot(data_dir: &Path) -> Option<LoadedChec
             let rebuilt = checkpoint_entries_to_index_entries(slice, &loaded.interner_strings)?;
             Ok::<_, StoreError>((chunk_idx, rebuilt))
         })
-        .collect::<Result<Vec<_>, _>>()
-        .ok()?;
+        .collect::<Result<Vec<_>, _>>();
+    let mut per_chunk = match per_chunk {
+        Ok(per_chunk) => per_chunk,
+        Err(error) => {
+            tracing::warn!(
+                target: "batpak::checkpoint",
+                path = %raw.path.display(),
+                error = %error,
+                "checkpoint snapshot entry rebuild failed"
+            );
+            return FileLoad::Invalid {
+                reason: format!("checkpoint snapshot entry rebuild failed: {error}"),
+            };
+        }
+    };
     per_chunk.sort_by_key(|(chunk_idx, _)| *chunk_idx);
 
     let mut rebuilt_entries = Vec::with_capacity(loaded.entries.len());
@@ -93,7 +121,7 @@ pub(crate) fn try_load_checkpoint_snapshot(data_dir: &Path) -> Option<LoadedChec
         rebuilt_entries.extend(chunk_entries);
     }
 
-    Some(LoadedCheckpointSnapshot {
+    FileLoad::Loaded(LoadedCheckpointSnapshot {
         entries: rebuilt_entries,
         interner_strings: loaded.interner_strings,
         watermark: loaded.watermark,
@@ -109,15 +137,26 @@ fn decode_checkpoint_data(
     path: &Path,
     version: u16,
     body: &[u8],
-) -> Option<LoadedCheckpointData> {
-    let data = format::decode_checkpoint_data(path, version, body)?;
+) -> FileLoad<LoadedCheckpointData> {
+    let data = match format::decode_checkpoint_data(path, version, body) {
+        Some(data) => data,
+        None => {
+            return FileLoad::Invalid {
+                reason: format!("checkpoint body decode failed for version {version}"),
+            };
+        }
+    };
 
-    let watermark = validate_checkpoint_watermark(
+    let watermark = match validate_checkpoint_watermark(
         data_dir,
         path,
         data.watermark_segment_id,
         data.watermark_offset,
-    )?;
+    ) {
+        FileLoad::Loaded(watermark) => watermark,
+        FileLoad::Missing => return FileLoad::Missing,
+        FileLoad::Invalid { reason } => return FileLoad::Invalid { reason },
+    };
 
     tracing::debug!(
         target: "batpak::checkpoint",
@@ -128,7 +167,7 @@ fn decode_checkpoint_data(
         "checkpoint loaded successfully"
     );
 
-    Some(LoadedCheckpointData {
+    FileLoad::Loaded(LoadedCheckpointData {
         entries: data.entries,
         interner_strings: data.interner_strings,
         watermark,
@@ -142,15 +181,26 @@ fn decode_checkpoint_snapshot_v6(
     data_dir: &Path,
     path: &Path,
     body: &[u8],
-) -> Option<LoadedCheckpointSnapshot> {
-    let data = format::decode_checkpoint_snapshot_v6(path, body)?;
+) -> FileLoad<LoadedCheckpointSnapshot> {
+    let data = match format::decode_checkpoint_snapshot_v6(path, body) {
+        Some(data) => data,
+        None => {
+            return FileLoad::Invalid {
+                reason: "checkpoint snapshot body decode failed".to_owned(),
+            };
+        }
+    };
 
-    let watermark = validate_checkpoint_watermark(
+    let watermark = match validate_checkpoint_watermark(
         data_dir,
         path,
         data.watermark_segment_id,
         data.watermark_offset,
-    )?;
+    ) {
+        FileLoad::Loaded(watermark) => watermark,
+        FileLoad::Missing => return FileLoad::Missing,
+        FileLoad::Invalid { reason } => return FileLoad::Invalid { reason },
+    };
 
     tracing::debug!(
         target: "batpak::checkpoint",
@@ -170,11 +220,13 @@ fn decode_checkpoint_snapshot_v6(
                 error = %error,
                 "checkpoint snapshot entry rebuild failed — ignoring"
             );
-            return None;
+            return FileLoad::Invalid {
+                reason: format!("checkpoint snapshot entry rebuild failed: {error}"),
+            };
         }
     };
 
-    Some(LoadedCheckpointSnapshot {
+    FileLoad::Loaded(LoadedCheckpointSnapshot {
         entries,
         interner_strings: data.interner_strings,
         watermark,
@@ -190,7 +242,7 @@ fn validate_checkpoint_watermark(
     path: &Path,
     watermark_segment_id: u64,
     watermark_offset: u64,
-) -> Option<WatermarkInfo> {
+) -> FileLoad<WatermarkInfo> {
     match validate_watermark_segment(data_dir, watermark_segment_id, watermark_offset) {
         Ok(()) => {}
         Err(WatermarkValidationError::MissingSegment { path: seg_path }) => {
@@ -200,7 +252,12 @@ fn validate_checkpoint_watermark(
                 missing_segment = %seg_path.display(),
                 "watermark segment referenced by checkpoint is missing — ignoring checkpoint"
             );
-            return None;
+            return FileLoad::Invalid {
+                reason: format!(
+                    "checkpoint watermark segment is missing: {}",
+                    seg_path.display()
+                ),
+            };
         }
         Err(WatermarkValidationError::OffsetPastTail {
             path: seg_path,
@@ -215,11 +272,17 @@ fn validate_checkpoint_watermark(
                 watermark_offset,
                 "checkpoint watermark points past the segment tail"
             );
-            return None;
+            return FileLoad::Invalid {
+                reason: format!(
+                    "checkpoint watermark {} points past segment tail {}",
+                    watermark_offset,
+                    seg_path.display()
+                ),
+            };
         }
     }
 
-    Some(WatermarkInfo {
+    FileLoad::Loaded(WatermarkInfo {
         watermark_segment_id,
         watermark_offset,
     })

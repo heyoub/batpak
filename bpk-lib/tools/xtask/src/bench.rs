@@ -4,57 +4,42 @@ use anyhow::{bail, Result};
 use std::process::Command;
 
 pub(crate) fn bench(args: BenchArgs) -> Result<()> {
-    if args.compile {
-        return bench_compile(args.surface);
+    let BenchArgs {
+        surface,
+        save,
+        compare,
+        compile,
+    } = args;
+    if compile {
+        return bench_compile(surface);
     }
 
-    let baseline = args
-        .save
+    let baseline = save
         .as_deref()
-        .map(|label| explicit_baseline_name(os_slug(), args.surface, label))
-        .unwrap_or_else(|| baseline_name(os_slug(), args.surface));
-    let benches = bench_targets(args.surface);
+        .map(|label| explicit_baseline_name(os_slug(), surface, label))
+        .unwrap_or_else(|| baseline_name(os_slug(), surface));
+    let benches = bench_targets(surface);
+    let criterion_args = criterion_args(surface, save.as_deref(), compare, &baseline)?;
     let mut command = Command::new("cargo");
     command.arg("bench");
-    if matches!(args.surface, BenchSurface::Native) {
+    if matches!(surface, BenchSurface::Native) {
         command.arg("--all-features");
     }
     for bench in benches {
         command.arg("--bench").arg(bench);
     }
-
-    match (args.save, args.compare) {
-        (Some(_), true) => bail!("--save and --compare are mutually exclusive"),
-        (Some(_), false) => {
-            println!(
-                "Running {} benchmarks and saving baseline {}...",
-                surface_name(args.surface),
-                baseline
-            );
-            command.arg("--").arg("--save-baseline").arg(baseline);
-        }
-        (None, true) => {
-            if !baseline_exists(&baseline)? {
-                bail!(
-                    "baseline {} does not exist yet. Run `cargo xtask bench --surface {} --save` first.",
-                    baseline,
-                    surface_name(args.surface)
-                );
-            }
-            println!(
-                "Comparing {} benchmarks against baseline {}...",
-                surface_name(args.surface),
-                baseline
-            );
-            command.arg("--").arg("--baseline").arg(baseline);
-        }
-        (None, false) => {
-            println!("Running {} benchmarks...", surface_name(args.surface));
-            println!("Baseline name: {}", baseline);
-        }
+    if !criterion_args.is_empty() {
+        command.arg("--").args(&criterion_args);
     }
 
-    run(command)
+    print_bench_plan(surface, save.as_deref(), compare, &baseline);
+    run(command)?;
+    if matches!(surface, BenchSurface::Native) {
+        for (package, benches) in FAMILY_BENCH_TARGETS {
+            run(family_bench_run_command(package, benches, &criterion_args))?;
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn bench_compile(surface: BenchSurface) -> Result<()> {
@@ -62,7 +47,13 @@ pub(crate) fn bench_compile(surface: BenchSurface) -> Result<()> {
         BenchSurface::Neutral => cargo_target_dir()?.join("xtask-bench-compile-neutral"),
         BenchSurface::Native => cargo_target_dir()?.join("xtask-bench-compile-native"),
     };
-    cargo(bench_compile_args(surface, &target_dir))
+    cargo(bench_compile_args(surface, &target_dir))?;
+    if matches!(surface, BenchSurface::Native) {
+        for (package, benches) in FAMILY_BENCH_TARGETS {
+            cargo(family_bench_compile_args(package, benches, &target_dir))?;
+        }
+    }
+    Ok(())
 }
 
 fn bench_compile_args(surface: BenchSurface, target_dir: &std::path::Path) -> Vec<String> {
@@ -103,6 +94,7 @@ pub(crate) fn bench_targets(surface: BenchSurface) -> &'static [&'static str] {
             "frontier_waiters",
             "projection_latency",
             "query_materialization",
+            "recovery_lanes",
             "replay_lanes",
             "subscription_fanout",
             "topology_matrix",
@@ -112,6 +104,102 @@ pub(crate) fn bench_targets(surface: BenchSurface) -> &'static [&'static str] {
             "writer_staging",
             "write_throughput",
         ],
+    }
+}
+
+const FAMILY_BENCH_TARGETS: &[(&str, &[&str])] = &[
+    ("syncbat", &["dispatch"]),
+    ("netbat", &["boundary"]),
+    ("hbat", &["live_operations"]),
+];
+
+fn family_bench_compile_args(
+    package: &str,
+    benches: &[&str],
+    target_dir: &std::path::Path,
+) -> Vec<String> {
+    let mut args = vec![
+        "bench".to_owned(),
+        "-p".to_owned(),
+        package.to_owned(),
+        "--no-run".to_owned(),
+        "--target-dir".to_owned(),
+        target_dir.to_string_lossy().into_owned(),
+    ];
+    for bench in benches {
+        args.push("--bench".to_owned());
+        args.push((*bench).to_owned());
+    }
+    args
+}
+
+fn family_bench_run_command(package: &str, benches: &[&str], criterion_args: &[String]) -> Command {
+    let mut command = Command::new("cargo");
+    command.args(family_bench_run_args(package, benches, criterion_args));
+    command
+}
+
+fn family_bench_run_args(
+    package: &str,
+    benches: &[&str],
+    criterion_args: &[String],
+) -> Vec<String> {
+    let mut args = vec!["bench".to_owned(), "-p".to_owned(), package.to_owned()];
+    for bench in benches {
+        args.push("--bench".to_owned());
+        args.push((*bench).to_owned());
+    }
+    if !criterion_args.is_empty() {
+        args.push("--".to_owned());
+        args.extend_from_slice(criterion_args);
+    }
+    args
+}
+
+fn criterion_args(
+    surface: BenchSurface,
+    save: Option<&str>,
+    compare: bool,
+    baseline: &str,
+) -> Result<Vec<String>> {
+    match (save, compare) {
+        (Some(_), true) => bail!("--save and --compare are mutually exclusive"),
+        (Some(_), false) => Ok(vec!["--save-baseline".to_owned(), baseline.to_owned()]),
+        (None, true) => {
+            if !baseline_exists(baseline)? {
+                bail!(
+                    "baseline {} does not exist yet. Run `cargo xtask bench --surface {} --save` first.",
+                    baseline,
+                    surface_name(surface)
+                );
+            }
+            Ok(vec!["--baseline".to_owned(), baseline.to_owned()])
+        }
+        (None, false) => Ok(Vec::new()),
+    }
+}
+
+fn print_bench_plan(surface: BenchSurface, save: Option<&str>, compare: bool, baseline: &str) {
+    match (save, compare) {
+        (Some(_), false) => {
+            println!(
+                "Running {} benchmarks and saving baseline {}...",
+                surface_name(surface),
+                baseline
+            );
+        }
+        (None, true) => {
+            println!(
+                "Comparing {} benchmarks against baseline {}...",
+                surface_name(surface),
+                baseline
+            );
+        }
+        (None, false) => {
+            println!("Running {} benchmarks...", surface_name(surface));
+            println!("Baseline name: {}", baseline);
+        }
+        (Some(_), true) => {}
     }
 }
 
@@ -175,7 +263,10 @@ fn walk_dir(root: &std::path::Path) -> Result<Vec<std::fs::DirEntry>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{baseline_name, bench_compile_args, bench_targets, explicit_baseline_name};
+    use super::{
+        baseline_name, bench_compile_args, bench_targets, explicit_baseline_name,
+        family_bench_run_args, FAMILY_BENCH_TARGETS,
+    };
     use crate::BenchSurface;
     use std::path::Path;
 
@@ -209,6 +300,7 @@ mod tests {
                 "frontier_waiters",
                 "projection_latency",
                 "query_materialization",
+                "recovery_lanes",
                 "replay_lanes",
                 "subscription_fanout",
                 "topology_matrix",
@@ -303,6 +395,8 @@ mod tests {
             "--bench",
             "query_materialization",
             "--bench",
+            "recovery_lanes",
+            "--bench",
             "replay_lanes",
             "--bench",
             "subscription_fanout",
@@ -357,5 +451,82 @@ mod tests {
             declared, wired,
             "every Cargo.toml [[bench]] target must be wired into at least one cargo xtask bench surface"
         );
+    }
+
+    #[test]
+    fn family_bench_run_args_include_package_and_criterion_args() {
+        let args = family_bench_run_args(
+            "hbat",
+            &["live_operations"],
+            &["--save-baseline".to_owned(), "windows-native-v3".to_owned()],
+        );
+        assert_eq!(
+            args,
+            vec![
+                "bench",
+                "-p",
+                "hbat",
+                "--bench",
+                "live_operations",
+                "--",
+                "--save-baseline",
+                "windows-native-v3"
+            ]
+            .into_iter()
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn every_family_bench_target_is_declared_by_its_package() {
+        for (package, benches, manifest) in [
+            (
+                "syncbat",
+                FAMILY_BENCH_TARGETS
+                    .iter()
+                    .find_map(|(name, benches)| (*name == "syncbat").then_some(*benches))
+                    .expect("syncbat family benches are wired"),
+                include_str!("../../../crates/syncbat/Cargo.toml"),
+            ),
+            (
+                "netbat",
+                FAMILY_BENCH_TARGETS
+                    .iter()
+                    .find_map(|(name, benches)| (*name == "netbat").then_some(*benches))
+                    .expect("netbat family benches are wired"),
+                include_str!("../../../crates/netbat/Cargo.toml"),
+            ),
+            (
+                "hbat",
+                FAMILY_BENCH_TARGETS
+                    .iter()
+                    .find_map(|(name, benches)| (*name == "hbat").then_some(*benches))
+                    .expect("hbat family benches are wired"),
+                include_str!("../../../crates/hbat/Cargo.toml"),
+            ),
+        ] {
+            let manifest: toml::Value = toml::from_str(manifest).expect("parse package manifest");
+            let declared = manifest
+                .get("bench")
+                .and_then(toml::Value::as_array)
+                .expect("Cargo.toml declares bench targets")
+                .iter()
+                .map(|bench| {
+                    bench
+                        .get("name")
+                        .and_then(toml::Value::as_str)
+                        .expect("bench target has name")
+                })
+                .collect::<std::collections::BTreeSet<_>>();
+            let wired = benches
+                .iter()
+                .copied()
+                .collect::<std::collections::BTreeSet<_>>();
+            assert_eq!(
+                declared, wired,
+                "{package} Cargo.toml benches must stay wired into cargo xtask bench --surface native"
+            );
+        }
     }
 }

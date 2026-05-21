@@ -4,7 +4,7 @@ mod replay_input;
 mod strategy;
 
 use crate::event::{EventSourced, ProjectionInput};
-use crate::store::index::columnar::ProjectionCacheStoreStatus;
+use crate::store::index::ProjectionCacheStoreStatus;
 use crate::store::{Clock, Freshness, HlcPoint, Store, StoreError};
 use std::any::TypeId;
 

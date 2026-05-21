@@ -1,6 +1,7 @@
 use super::ProjectionCandidates;
 use crate::event::EventKind;
-use crate::store::index::{projection_kind_matches, IndexEntry, QueryHit, RoutingSummary};
+use crate::store::index::projection_bridge::projection_kind_matches;
+use crate::store::index::{IndexEntry, QueryHit, RoutingSummary};
 use std::any::TypeId;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;

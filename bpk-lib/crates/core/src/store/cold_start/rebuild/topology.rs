@@ -1,3 +1,4 @@
+use crate::store::file_classification::StoreFileKind;
 use crate::store::segment;
 use crate::store::StoreError;
 use std::path::{Path, PathBuf};
@@ -71,16 +72,9 @@ pub(super) fn segment_paths(data_dir: &Path) -> Result<Vec<(u64, PathBuf)>, Stor
     for entry in std::fs::read_dir(data_dir).map_err(StoreError::Io)? {
         let entry = entry.map_err(StoreError::Io)?;
         let path = entry.path();
-        let is_segment = path
-            .extension()
-            .map(|ext| ext == segment::SEGMENT_EXTENSION)
-            .unwrap_or(false);
-        if !is_segment {
-            continue;
-        }
-        let segment_id = match segment::SegmentId::from_filename(&path) {
-            Ok(parsed) => parsed.as_u64(),
-            Err(error) => {
+        let segment_id = match StoreFileKind::from_path(&path) {
+            StoreFileKind::Segment(segment_id) => segment_id.as_u64(),
+            StoreFileKind::MalformedSegment(error) => {
                 tracing::warn!(
                     path = %path.display(),
                     %error,
@@ -88,6 +82,13 @@ pub(super) fn segment_paths(data_dir: &Path) -> Result<Vec<(u64, PathBuf)>, Stor
                 );
                 continue;
             }
+            StoreFileKind::VisibilityRanges
+            | StoreFileKind::Checkpoint
+            | StoreFileKind::MmapIndex
+            | StoreFileKind::PendingCompactionMarker
+            | StoreFileKind::CompactSource
+            | StoreFileKind::CursorDirectory
+            | StoreFileKind::Other => continue,
         };
         entries.push((segment_id, path));
     }

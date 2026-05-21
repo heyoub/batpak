@@ -87,7 +87,13 @@ pub(crate) fn latest_segment_watermark(data_dir: &Path) -> Result<(u64, u64), St
                 );
                 continue;
             }
-            _ => continue,
+            StoreFileKind::VisibilityRanges
+            | StoreFileKind::Checkpoint
+            | StoreFileKind::MmapIndex
+            | StoreFileKind::PendingCompactionMarker
+            | StoreFileKind::CompactSource
+            | StoreFileKind::CursorDirectory
+            | StoreFileKind::Other => continue,
         };
         if max
             .as_ref()

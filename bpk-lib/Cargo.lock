@@ -735,6 +735,7 @@ dependencies = [
  "anyhow",
  "batpak",
  "clap",
+ "criterion",
  "ctrlc",
  "inventory",
  "netbat",
@@ -892,6 +893,7 @@ dependencies = [
 name = "netbat"
 version = "0.7.6"
 dependencies = [
+ "criterion",
  "proptest",
  "syncbat",
  "tracing",
@@ -1451,6 +1453,7 @@ name = "syncbat"
 version = "0.7.6"
 dependencies = [
  "batpak",
+ "criterion",
  "proptest",
  "serde",
  "syncbat-macros",

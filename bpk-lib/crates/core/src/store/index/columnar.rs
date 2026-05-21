@@ -34,6 +34,7 @@
 
 mod aosoa;
 mod aosoa64simd;
+mod projection_fast_paths;
 mod routing;
 mod soa;
 mod soaos;
@@ -42,7 +43,6 @@ use crate::event::EventKind;
 use crate::store::index::{ClockKey, DiskPos, IndexEntry, QueryHit, RoutingSummary};
 use dashmap::DashMap;
 use parking_lot::RwLock;
-use std::any::TypeId;
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 
@@ -57,13 +57,6 @@ pub(crate) use soaos::CachedProjectionSlot;
 use soaos::SoAoSInner;
 
 type ProjectionCandidates = (u64, u64, Vec<(u64, DiskPos)>);
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum ProjectionCacheStoreStatus {
-    Stored,
-    MissingEntity,
-    UnsupportedTopology,
-}
 
 /// Reconstruct the raw `u16` wire value from an `EventKind`.
 ///
@@ -432,77 +425,6 @@ impl ColumnarIndex {
             ColumnarVariant::SoA(_) | ColumnarVariant::SoAoS(_) => 0,
             #[cfg(test)]
             ColumnarVariant::AoSoA8(_) | ColumnarVariant::AoSoA16(_) => 0,
-        }
-    }
-
-    pub(crate) fn entity_generation(&self, entity: &str) -> Option<u64> {
-        match &self.inner {
-            ColumnarVariant::SoAoS(lock) => lock.read().entity_generation(entity),
-            ColumnarVariant::SoA(_)
-            | ColumnarVariant::AoSoA64(_)
-            | ColumnarVariant::AoSoA64Simd(_) => None,
-            #[cfg(test)]
-            ColumnarVariant::AoSoA8(_) | ColumnarVariant::AoSoA16(_) => None,
-        }
-    }
-
-    pub(crate) fn cached_projection(
-        &self,
-        entity: &str,
-        type_id: TypeId,
-    ) -> Option<CachedProjectionSlot> {
-        match &self.inner {
-            ColumnarVariant::SoAoS(lock) => lock.read().cached_projection(entity, type_id),
-            ColumnarVariant::SoA(_)
-            | ColumnarVariant::AoSoA64(_)
-            | ColumnarVariant::AoSoA64Simd(_) => None,
-            #[cfg(test)]
-            ColumnarVariant::AoSoA8(_) | ColumnarVariant::AoSoA16(_) => None,
-        }
-    }
-
-    pub(crate) fn store_cached_projection(
-        &self,
-        entity: &str,
-        type_id: TypeId,
-        bytes: Vec<u8>,
-        watermark: u64,
-    ) -> ProjectionCacheStoreStatus {
-        match &self.inner {
-            ColumnarVariant::SoAoS(lock) => {
-                if lock
-                    .write()
-                    .store_cached_projection(entity, type_id, bytes, watermark)
-                {
-                    ProjectionCacheStoreStatus::Stored
-                } else {
-                    ProjectionCacheStoreStatus::MissingEntity
-                }
-            }
-            ColumnarVariant::SoA(_)
-            | ColumnarVariant::AoSoA64(_)
-            | ColumnarVariant::AoSoA64Simd(_) => ProjectionCacheStoreStatus::UnsupportedTopology,
-            #[cfg(test)]
-            ColumnarVariant::AoSoA8(_) | ColumnarVariant::AoSoA16(_) => {
-                ProjectionCacheStoreStatus::UnsupportedTopology
-            }
-        }
-    }
-
-    pub(crate) fn projection_candidates(
-        &self,
-        entity: &str,
-        relevant_kinds: &[EventKind],
-    ) -> Option<ProjectionCandidates> {
-        match &self.inner {
-            ColumnarVariant::SoAoS(lock) => {
-                lock.read().projection_candidates(entity, relevant_kinds)
-            }
-            ColumnarVariant::SoA(_)
-            | ColumnarVariant::AoSoA64(_)
-            | ColumnarVariant::AoSoA64Simd(_) => None,
-            #[cfg(test)]
-            ColumnarVariant::AoSoA8(_) | ColumnarVariant::AoSoA16(_) => None,
         }
     }
 }
@@ -1116,11 +1038,9 @@ mod tests {
         );
 
         let type_id = std::any::TypeId::of::<u64>();
-        assert_eq!(
-            si.store_cached_projection("entity:projection", type_id, b"cached".to_vec(), 1),
-            ProjectionCacheStoreStatus::Stored,
-            "PROPERTY: storing a group-local projection for an existing entity must report success"
-        );
+        let stored =
+            si.store_cached_projection("entity:projection", type_id, b"cached".to_vec(), 1);
+        assert!(stored.is_stored());
         let slot = si
             .cached_projection("entity:projection", type_id)
             .expect("cached projection slot");
@@ -1153,7 +1073,6 @@ mod tests {
         assert!(!capabilities.projection.projection_candidates);
     }
 
-    // --- Cross-layout oracle: all layouts must agree on query results ---
     //
     // This test is the correctness contract that makes the AoSoA64 SIMD
     // specialization (Step 4) safe to add: any specialized executor must

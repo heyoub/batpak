@@ -3,7 +3,7 @@
 //! This keeps segment, snapshot, and cold-start artifact recognition in one
 //! place so lifecycle code does not grow local filename folklore.
 
-use crate::store::segment::{SegmentId, SegmentNameError, SEGMENT_EXTENSION};
+use crate::store::segment::{id::SegmentNameError, SegmentId, SEGMENT_EXTENSION};
 use std::path::Path;
 
 pub(crate) const COMPACT_SOURCE_EXTENSION: &str = "compact-src";
@@ -58,7 +58,14 @@ impl StoreFileKind {
     pub(crate) fn segment_id(&self) -> Option<SegmentId> {
         match self {
             Self::Segment(segment_id) => Some(*segment_id),
-            _ => None,
+            Self::MalformedSegment(_)
+            | Self::VisibilityRanges
+            | Self::Checkpoint
+            | Self::MmapIndex
+            | Self::PendingCompactionMarker
+            | Self::CompactSource
+            | Self::CursorDirectory
+            | Self::Other => None,
         }
     }
 

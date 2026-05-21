@@ -26,6 +26,7 @@ pub(crate) fn run() -> Result<()> {
     check_no_placeholder_runtime_macros(&repo_root)?;
     check_canonical_encoding_boundary(&repo_root)?;
     check_no_store_read_dir_entry_error_swallowing(&repo_root)?;
+    check_store_segment_classification_boundary(&repo_root)?;
     check_allow_justifications(&repo_root)?;
     check_rust_file_size_pressure(&repo_root)?;
     check_inline_test_island_pressure(&repo_root)?;
@@ -265,16 +266,9 @@ fn check_no_store_read_dir_entry_error_swallowing(repo_root: &Path) -> Result<()
             continue;
         }
         let content = fs::read_to_string(&path)?;
-        for (line_no, line) in content.lines().enumerate() {
-            let trimmed = line.trim_start();
-            if trimmed.starts_with("//") || trimmed.starts_with("///") || trimmed.starts_with("//!")
-            {
-                continue;
-            }
-            let swallows_entry_error = line.contains(".filter_map(Result::ok)")
-                || (line.contains(".filter_map(|") && line.contains(".ok())"))
-                || line.contains(".flatten()");
-            if swallows_entry_error {
+        let lines = content.lines().collect::<Vec<_>>();
+        for line_no in 0..lines.len() {
+            if read_dir_entry_error_is_swallowed(&lines, line_no) {
                 bail!(
                     "structural-check: read_dir entry errors must not be swallowed in {rel}:{}.\n\
                      Collect or iterate directory entries as Result values and propagate DirEntry errors through StoreError.",
@@ -284,6 +278,66 @@ fn check_no_store_read_dir_entry_error_swallowing(repo_root: &Path) -> Result<()
         }
     }
     Ok(())
+}
+
+fn check_store_segment_classification_boundary(repo_root: &Path) -> Result<()> {
+    for path in production_rust_files(repo_root) {
+        let rel = relative(repo_root, &path);
+        if !rel.starts_with("crates/core/src/store/")
+            || rel == "crates/core/src/store/file_classification.rs"
+            || rel == "crates/core/src/store/segment/mod.rs"
+        {
+            continue;
+        }
+        let content = fs::read_to_string(&path)?;
+        let lines = content.lines().collect::<Vec<_>>();
+        for line_no in 0..lines.len() {
+            if local_segment_extension_classification(&lines, line_no) {
+                bail!(
+                    "structural-check: local segment filename classification in {rel}:{}.\n\
+                     Use StoreFileKind::from_path so malformed segment names, cold-start artifacts, snapshots, and lifecycle cleanup share one store-owned classifier.",
+                    line_no + 1
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+fn read_dir_entry_error_is_swallowed(lines: &[&str], line_no: usize) -> bool {
+    if !line_swallows_iterator_error(lines[line_no]) {
+        return false;
+    }
+
+    let start = line_no.saturating_sub(4);
+    let end = (line_no + 5).min(lines.len());
+    lines[start..end]
+        .iter()
+        .any(|line| code_line_contains(line, "read_dir("))
+}
+
+fn local_segment_extension_classification(lines: &[&str], line_no: usize) -> bool {
+    let start = line_no.saturating_sub(3);
+    let end = (line_no + 4).min(lines.len());
+    let window = &lines[start..end];
+    window
+        .iter()
+        .any(|line| code_line_contains(line, ".extension()"))
+        && window
+            .iter()
+            .any(|line| code_line_contains(line, "SEGMENT_EXTENSION"))
+}
+
+fn line_swallows_iterator_error(line: &str) -> bool {
+    code_line_contains(line, ".filter_map(Result::ok)")
+        || (code_line_contains(line, ".filter_map(|") && code_line_contains(line, ".ok())"))
+        || code_line_contains(line, ".flatten()")
+}
+
+fn code_line_contains(line: &str, needle: &str) -> bool {
+    let trimmed = line.trim_start();
+    !(trimmed.starts_with("//") || trimmed.starts_with("///") || trimmed.starts_with("//!"))
+        && line.contains(needle)
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -360,7 +414,10 @@ fn production_rust_files(repo_root: &Path) -> Vec<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::{inline_test_islands, nonblank_line_count};
+    use super::{
+        inline_test_islands, local_segment_extension_classification, nonblank_line_count,
+        read_dir_entry_error_is_swallowed,
+    };
 
     #[test]
     fn file_size_ratchet_counts_nonblank_lines() {
@@ -395,5 +452,46 @@ mod external_tests;
         assert_eq!(islands.len(), 2);
         assert_eq!(islands[0].nonblank_lines, 4);
         assert_eq!(islands[1].nonblank_lines, 4);
+    }
+
+    #[test]
+    fn read_dir_swallow_gate_is_scoped_to_directory_entries() {
+        let unrelated = [
+            "fn helper(items: Vec<Option<u8>>) {",
+            "    let _values = items.into_iter().flatten().collect::<Vec<_>>();",
+            "}",
+        ];
+        assert!(!read_dir_entry_error_is_swallowed(&unrelated, 1));
+
+        let directory = [
+            "fn helper(path: &Path) {",
+            "    let _paths = std::fs::read_dir(path)",
+            "        .expect(\"read dir\")",
+            "        .flatten()",
+            "        .map(|entry| entry.path())",
+            "        .collect::<Vec<_>>();",
+            "}",
+        ];
+        assert!(read_dir_entry_error_is_swallowed(&directory, 3));
+    }
+
+    #[test]
+    fn segment_classification_gate_allows_generation_but_rejects_extension_tests() {
+        let generation = [
+            "fn segment_path(segment_id: u64) -> String {",
+            "    format!(\"{segment_id:06}.{}\", SEGMENT_EXTENSION)",
+            "}",
+        ];
+        assert!(!local_segment_extension_classification(&generation, 1));
+
+        let classification = [
+            "fn helper(path: &Path) -> bool {",
+            "    path",
+            "        .extension()",
+            "        .map(|ext| ext == segment::SEGMENT_EXTENSION)",
+            "        .unwrap_or(false)",
+            "}",
+        ];
+        assert!(local_segment_extension_classification(&classification, 2));
     }
 }

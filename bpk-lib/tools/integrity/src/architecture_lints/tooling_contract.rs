@@ -277,8 +277,13 @@ fn check_crate_layout_contract(repo_root: &Path) -> Result<()> {
         "crates/core/fixtures",
         "crates/syncbat/src",
         "crates/syncbat/tests",
+        "crates/syncbat/benches",
         "crates/netbat/src",
         "crates/netbat/tests",
+        "crates/netbat/benches",
+        "crates/hbat/src",
+        "crates/hbat/tests",
+        "crates/hbat/benches",
         "crates/macros/src",
         "crates/macros-support/src",
         "crates/syncbat-macros/src",
@@ -301,11 +306,11 @@ fn check_crate_layout_contract(repo_root: &Path) -> Result<()> {
 
     for crate_name in ["syncbat", "netbat"] {
         let crate_root = repo_root.join("crates").join(crate_name);
-        for dir in ["examples", "benches", "fixtures"] {
+        for dir in ["examples", "fixtures"] {
             ensure(
                 !crate_root.join(dir).exists(),
                 format!(
-                    "`crates/{crate_name}/{dir}` would blur ownership; companion crate demos belong in root docs/cookbook or explicit tests"
+                    "`crates/{crate_name}/{dir}` would blur ownership; companion crate demos belong in root docs/cookbook or explicit tests; benchmarks belong in `crates/{crate_name}/benches`"
                 ),
             )?;
         }

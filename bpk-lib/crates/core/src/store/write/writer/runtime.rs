@@ -3,6 +3,7 @@ use super::{
     Active, Receiver, RestartPolicy, Segment, StoreConfig, StoreError, ValidatedStoreConfig,
     WriterCommand, WriterLoopPhase, WriterState,
 };
+use crate::store::file_classification::StoreFileKind;
 use crate::store::index::StoreIndex;
 use std::panic::AssertUnwindSafe;
 use std::path::Path;
@@ -333,24 +334,24 @@ pub(crate) fn find_latest_segment_id(dir: &std::path::Path) -> Result<Option<u64
     for entry in std::fs::read_dir(dir).map_err(StoreError::Io)? {
         let entry = entry.map_err(StoreError::Io)?;
         let path = entry.path();
-        if !path
-            .extension()
-            .map(|ext| ext == crate::store::segment::SEGMENT_EXTENSION)
-            .unwrap_or(false)
-        {
-            continue;
-        }
-        match crate::store::segment::SegmentId::from_filename(&path) {
-            Ok(parsed) => {
-                latest = Some(latest.unwrap_or(0).max(parsed.as_u64()));
+        match StoreFileKind::from_path(&path) {
+            StoreFileKind::Segment(segment_id) => {
+                latest = Some(latest.unwrap_or(0).max(segment_id.as_u64()));
             }
-            Err(error) => {
+            StoreFileKind::MalformedSegment(error) => {
                 tracing::warn!(
                     path = %path.display(),
                     %error,
                     "skipping malformed segment filename"
                 );
             }
+            StoreFileKind::VisibilityRanges
+            | StoreFileKind::Checkpoint
+            | StoreFileKind::MmapIndex
+            | StoreFileKind::PendingCompactionMarker
+            | StoreFileKind::CompactSource
+            | StoreFileKind::CursorDirectory
+            | StoreFileKind::Other => {}
         }
     }
     Ok(latest)
