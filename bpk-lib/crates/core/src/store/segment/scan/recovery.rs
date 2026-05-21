@@ -1,3 +1,10 @@
+mod batch;
+mod sidx_fast_path;
+mod tail;
+
+pub(crate) use batch::BatchRecoveryState;
+use tail::PayloadReadFailure;
+
 use super::{read_frame_header_or_clean_eof, FrameScanTailPolicy, Reader, ScannedIndexEntry};
 use crate::event::{EventHeader, EventKind, HashChain};
 use crate::store::segment::{self, SegmentHeader, SEGMENT_MAGIC};
@@ -5,86 +12,10 @@ use crate::store::{EncodedBytes, ExtensionKey, StoreError};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::fs::File;
-use std::io::{Error, ErrorKind, Read, Seek, SeekFrom};
+use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
-use std::sync::atomic::Ordering;
 
 impl Reader {
-    /// Check whether the SIDX entries cover every frame in the segment up to
-    /// the SIDX footer.
-    ///
-    /// Returns `Some(true)` when the max (frame_offset + frame_length)
-    /// across SIDX entries equals the SIDX footer start — meaning every
-    /// frame in the segment is represented. Returns `Some(false)` when
-    /// there are trailing frames that SIDX doesn't know about (the
-    /// cross-segment batch case — see `scan_segment_index_into`'s
-    /// contract), or when the SIDX claims to cover bytes that overlap
-    /// the footer itself (structural corruption). Returns `None` on I/O
-    /// trouble; callers interpret as "can't prove coverage, frame-scan
-    /// to be safe".
-    fn sidx_covers_segment_tail(
-        path: &Path,
-        sidx_entries: &[crate::store::segment::sidx::SidxEntry],
-    ) -> Option<bool> {
-        // file_len - TRAILER_SIZE - entries_block - string_table = SIDX start,
-        // which is also the `string_table_offset` written in the trailer.
-        // We want to compare the tail of the last SIDX entry to that start.
-        let file_len = std::fs::metadata(path).ok()?.len();
-        // Trailer is 16 bytes: string_table_offset(8) + entry_count(4) + magic(4).
-        // Read only the trailer to get string_table_offset without reparsing
-        // the entire footer.
-        use std::io::{Read, Seek, SeekFrom};
-        let mut file = std::fs::File::open(path).ok()?;
-        if file_len < 16 {
-            return Some(false);
-        }
-        file.seek(SeekFrom::End(-16)).ok()?;
-        let mut trailer = [0u8; 16];
-        file.read_exact(&mut trailer).ok()?;
-        // If this isn't a SIDX footer the caller shouldn't have reached
-        // this path — but guard anyway.
-        if &trailer[12..16] != crate::store::segment::sidx::SIDX_MAGIC {
-            return None;
-        }
-        let offset_bytes: [u8; 8] = trailer[0..8].try_into().ok()?;
-        let sidx_start = u64::from_le_bytes(offset_bytes);
-
-        // Max tail across entries. Batch markers are written as frames but
-        // are NOT recorded into the SIDX collector, so a segment with a
-        // BEGIN at its tail will have sidx_max_tail < sidx_start. Items
-        // written between BEGIN and rotation are also not in SIDX (they
-        // land in the collector only at COMMIT time, and the segment
-        // rotated before COMMIT), so they push sidx_max_tail further
-        // below sidx_start. Either case fails this check and forces the
-        // frame-scan path.
-        let max_tail = sidx_entries
-            .iter()
-            .map(|e| e.frame_offset.saturating_add(u64::from(e.frame_length)))
-            .max()
-            .unwrap_or(0);
-
-        Some(max_tail == sidx_start)
-    }
-
-    fn classify_payload_read_error(
-        segment_id: u64,
-        error: Error,
-        tail_policy: FrameScanTailPolicy,
-    ) -> Result<PayloadReadFailure, StoreError> {
-        if error.kind() == ErrorKind::UnexpectedEof {
-            if tail_policy.can_recover_torn_tail() {
-                Ok(PayloadReadFailure::RecoverTornTail)
-            } else {
-                Err(StoreError::corrupt_segment_with_detail(
-                    segment_id,
-                    "frame payload ended before requested length",
-                ))
-            }
-        } else {
-            Err(StoreError::Io(error))
-        }
-    }
-
     /// Scan only the metadata required to rebuild the in-memory index.
     /// Tries the SIDX footer first (O(1) seek + bulk read); falls back to
     /// frame-by-frame msgpack deserialization if no SIDX footer is present.
@@ -133,28 +64,8 @@ impl Reader {
                 return Ok(());
             }
         };
-        let is_active = self.active_segment_id.load(Ordering::Acquire) == segment_id;
-
-        if !is_active && batch_state.as_ref().is_none_or(|s| !s.in_batch) {
-            if let Ok(Some((sidx_entries, strings))) =
-                crate::store::segment::sidx::read_footer(path)
-            {
-                let sidx_covers_tail =
-                    Self::sidx_covers_segment_tail(path, &sidx_entries).unwrap_or(false);
-                if sidx_covers_tail {
-                    for se in sidx_entries {
-                        let row = se.to_cold_start_row(segment_id);
-                        let kind = row.kind;
-                        if kind == EventKind::SYSTEM_BATCH_BEGIN
-                            || kind == EventKind::SYSTEM_BATCH_COMMIT
-                        {
-                            continue;
-                        }
-                        sink(ScannedIndexEntry::from_cold_start_row(&row, &strings)?)?;
-                    }
-                    return Ok(());
-                }
-            }
+        if self.try_sidx_fast_path(path, segment_id, batch_state.as_deref_mut(), &mut sink)? {
+            return Ok(());
         }
 
         let mut file = File::open(path).map_err(StoreError::Io)?;
@@ -246,7 +157,7 @@ impl Reader {
             frame_buf[..8].copy_from_slice(&frame_header);
             if let Err(error) = file.read_exact(&mut frame_buf[8..]) {
                 self.release_buffer(frame_buf);
-                match Self::classify_payload_read_error(segment_id, error, tail_policy)? {
+                match tail::classify_payload_read_error(segment_id, error, tail_policy)? {
                     PayloadReadFailure::RecoverTornTail => {
                         break;
                     }
@@ -446,37 +357,6 @@ impl Reader {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum PayloadReadFailure {
-    RecoverTornTail,
-}
-
-#[derive(Default)]
-pub(crate) struct BatchRecoveryState {
-    pub staged: Vec<ScannedIndexEntry>,
-    pub remaining: u32,
-    pub started_count: u32,
-    pub in_batch: bool,
-}
-
-impl BatchRecoveryState {
-    fn stage_entry(&mut self, entry: ScannedIndexEntry) -> bool {
-        if self.remaining == 0 {
-            return false;
-        }
-        self.staged.push(entry);
-        self.remaining -= 1;
-        true
-    }
-
-    fn discard_incomplete(&mut self) {
-        self.in_batch = false;
-        self.remaining = 0;
-        self.started_count = 0;
-        self.staged.clear();
-    }
-}
-
 #[derive(Deserialize)]
 pub(crate) struct IndexScanFramePayload {
     pub(crate) event: IndexScanEvent,
@@ -500,6 +380,7 @@ mod tests {
     use crate::coordinate::DagPosition;
     use crate::event::EventKind;
     use crate::store::segment::sidx::{kind_to_raw, read_footer, SidxEntry, SidxEntryCollector};
+    use std::io::ErrorKind;
     use std::io::{Cursor, Seek, SeekFrom, Write};
     use tempfile::{NamedTempFile, TempDir};
 
@@ -685,7 +566,7 @@ mod tests {
     #[test]
     fn payload_read_unexpected_eof_respects_tail_policy() {
         assert_eq!(
-            Reader::classify_payload_read_error(
+            tail::classify_payload_read_error(
                 7,
                 std::io::Error::from(ErrorKind::UnexpectedEof),
                 FrameScanTailPolicy::RecoverTornTail,
@@ -695,7 +576,7 @@ mod tests {
             "PROPERTY: only the latest tail policy may turn payload EOF into torn-tail recovery"
         );
 
-        let err = Reader::classify_payload_read_error(
+        let err = tail::classify_payload_read_error(
             7,
             std::io::Error::from(ErrorKind::UnexpectedEof),
             FrameScanTailPolicy::FailClosed,
@@ -713,7 +594,7 @@ mod tests {
 
     #[test]
     fn payload_read_non_eof_error_is_never_torn_tail_recovery() {
-        let err = Reader::classify_payload_read_error(
+        let err = tail::classify_payload_read_error(
             7,
             std::io::Error::from(ErrorKind::PermissionDenied),
             FrameScanTailPolicy::RecoverTornTail,
