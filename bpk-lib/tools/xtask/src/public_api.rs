@@ -14,7 +14,7 @@ const PUBLIC_API_PACKAGES: &[PublicApiPackage] = &[
     PublicApiPackage {
         package: "batpak",
         baseline: "batpak.txt",
-        features: &["blake3"],
+        features: &[],
     },
     PublicApiPackage {
         package: "syncbat",

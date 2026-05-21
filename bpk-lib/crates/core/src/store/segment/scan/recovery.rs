@@ -64,7 +64,8 @@ impl Reader {
                 return Ok(());
             }
         };
-        if self.try_sidx_fast_path(path, segment_id, batch_state.as_deref_mut(), &mut sink)? {
+        let batch_in_progress = batch_state.as_ref().is_some_and(|state| state.in_batch);
+        if self.try_sidx_fast_path(path, segment_id, batch_in_progress, &mut sink)? {
             return Ok(());
         }
 

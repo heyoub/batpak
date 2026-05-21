@@ -1,4 +1,3 @@
-use super::BatchRecoveryState;
 use crate::event::EventKind;
 use crate::store::segment::scan::{Reader, ScannedIndexEntry};
 use crate::store::segment::{self, sidx::SidxEntry};
@@ -49,14 +48,14 @@ impl Reader {
         &self,
         path: &Path,
         segment_id: u64,
-        batch_state: Option<&mut BatchRecoveryState>,
+        batch_in_progress: bool,
         sink: &mut F,
     ) -> Result<bool, StoreError>
     where
         F: FnMut(ScannedIndexEntry) -> Result<(), StoreError>,
     {
         let is_active = self.active_segment_id.load(Ordering::Acquire) == segment_id;
-        if is_active || batch_state.as_ref().is_some_and(|s| s.in_batch) {
+        if is_active || batch_in_progress {
             return Ok(false);
         }
 
