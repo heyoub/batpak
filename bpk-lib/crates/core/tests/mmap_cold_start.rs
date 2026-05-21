@@ -9,7 +9,7 @@
 
 use batpak::coordinate::{Coordinate, Region};
 use batpak::event::EventKind;
-use batpak::store::cold_start::rebuild::{OpenIndexPath, OpenIndexReport};
+use batpak::store::cold_start::rebuild::{OpenIndexLoadStatus, OpenIndexPath, OpenIndexReport};
 use batpak::store::{OpenReportObserver, ReadOnly, Store, StoreConfig, StoreError, StoreLockMode};
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
@@ -171,6 +171,22 @@ fn corrupt_mmap_index_falls_back_cleanly() {
     std::fs::write(&artifact, bytes).expect("rewrite corrupt mmap artifact");
 
     let store = Store::open(mmap_config(&dir)).expect("reopen with corrupt mmap artifact");
+    let report = store
+        .diagnostics()
+        .open_report
+        .clone()
+        .expect("open report after corrupt mmap fallback");
+    assert_eq!(report.path, OpenIndexPath::Rebuild);
+    assert_eq!(report.mmap_load_status, OpenIndexLoadStatus::Invalid);
+    assert!(
+        report
+            .mmap_invalid_reason
+            .as_deref()
+            .unwrap_or_default()
+            .contains("CRC mismatch"),
+        "PROPERTY: corrupt mmap fallback must preserve the invalid-load reason, got {:?}",
+        report.mmap_invalid_reason
+    );
     let stream = store.by_entity("entity:mmap");
     assert_eq!(
         stream.len(),
@@ -198,6 +214,22 @@ fn truncated_mmap_index_falls_back_cleanly() {
     // Reopen must not panic — the store should detect the truncation and
     // fall back to a full segment scan to rebuild the index.
     let store = Store::open(mmap_config(&dir)).expect("reopen with truncated mmap artifact");
+    let report = store
+        .diagnostics()
+        .open_report
+        .clone()
+        .expect("open report after truncated mmap fallback");
+    assert_eq!(report.path, OpenIndexPath::Rebuild);
+    assert_eq!(report.mmap_load_status, OpenIndexLoadStatus::Invalid);
+    assert!(
+        report
+            .mmap_invalid_reason
+            .as_deref()
+            .unwrap_or_default()
+            .contains("size does not match header"),
+        "PROPERTY: truncated mmap fallback must preserve the invalid-load reason, got {:?}",
+        report.mmap_invalid_reason
+    );
     let stream = store.by_entity("entity:mmap");
     assert_eq!(
         stream.len(),
@@ -251,6 +283,8 @@ fn default_config_reopen_uses_mmap_path() {
         report.tail_entries,
         report.elapsed_us,
     );
+    assert_eq!(report.mmap_load_status, OpenIndexLoadStatus::Loaded);
+    assert_eq!(report.checkpoint_load_status, OpenIndexLoadStatus::NotTried);
     assert_open_index_report_phase_buckets_nonzero(&report);
     assert_eq!(
         store2.by_entity("entity:default").len(),
@@ -389,6 +423,14 @@ fn mutable_open_appends_system_open_completed_and_read_only_does_not() {
     let config = mmap_config(&dir);
 
     let store = Store::open(config.clone()).expect("first mutable open");
+    let report = store
+        .diagnostics()
+        .open_report
+        .clone()
+        .expect("open report after first mutable open");
+    assert_eq!(report.path, OpenIndexPath::Rebuild);
+    assert_eq!(report.mmap_load_status, OpenIndexLoadStatus::Missing);
+    assert_eq!(report.checkpoint_load_status, OpenIndexLoadStatus::NotTried);
     let lifecycle_events = store.by_fact(EventKind::SYSTEM_OPEN_COMPLETED);
     assert_eq!(
         lifecycle_events.len(),
