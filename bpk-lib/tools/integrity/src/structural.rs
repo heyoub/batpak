@@ -40,7 +40,6 @@ pub(crate) fn run() -> Result<()> {
 fn check_rust_file_size_pressure(repo_root: &Path) -> Result<()> {
     const DEFAULT_LINE_BUDGET: usize = 850;
     const RATCHELED_OVER_BUDGET_FILES: &[(&str, usize)] = &[
-        ("crates/core/src/store/segment/sidx.rs", 885),
         ("crates/core/src/store/index/mod.rs", 835),
         ("crates/macros/src/lib.rs", 849),
     ];
@@ -67,11 +66,8 @@ fn check_rust_file_size_pressure(repo_root: &Path) -> Result<()> {
 
 fn check_inline_test_island_pressure(repo_root: &Path) -> Result<()> {
     const DEFAULT_TEST_ISLAND_BUDGET: usize = 200;
-    const RATCHELED_OVER_BUDGET_TEST_ISLANDS: &[(&str, usize)] = &[
-        ("crates/core/src/store/segment/sidx.rs", 396),
-        ("crates/core/src/store/segment/scan/recovery.rs", 391),
-        ("crates/core/src/store/segment/scan/mod.rs", 351),
-    ];
+    const RATCHELED_OVER_BUDGET_TEST_ISLANDS: &[(&str, usize)] =
+        &[("crates/core/src/store/segment/scan/mod.rs", 351)];
 
     for path in production_rust_files(repo_root) {
         let rel = relative(repo_root, &path);

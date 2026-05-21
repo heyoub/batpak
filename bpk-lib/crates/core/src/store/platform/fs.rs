@@ -1,5 +1,5 @@
 use crate::store::StoreError;
-use std::fs::File;
+use std::fs::{File, Metadata};
 use std::io::{self, Write};
 use std::path::Path;
 use tempfile::NamedTempFile;
@@ -70,6 +70,10 @@ pub(crate) fn create_new_file(path: &Path) -> Result<File, StoreError> {
 
 pub(crate) fn open_file(path: &Path) -> io::Result<File> {
     File::open(path)
+}
+
+pub(crate) fn metadata(path: &Path) -> io::Result<Metadata> {
+    std::fs::metadata(path)
 }
 
 #[derive(Debug)]

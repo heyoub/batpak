@@ -264,13 +264,8 @@ fn check_direct_fs_contact_ratchet(repo_root: &Path, tracked_files: &[PathBuf]) 
             1,
         ),
         (
-            "crates/core/src/store/segment/scan/recovery.rs",
+            "crates/core/src/store/segment/scan/recovery/tests.rs",
             "std::fs::write(",
-            1,
-        ),
-        (
-            "crates/core/src/store/segment/scan/recovery/sidx_fast_path.rs",
-            "std::fs::metadata",
             1,
         ),
         (

@@ -6,33 +6,53 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 use std::sync::atomic::Ordering;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum SidxTailCoverage {
+    Complete,
+    Incomplete,
+    Unreadable,
+}
+
 impl Reader {
     /// Check whether the SIDX entries cover every frame in the segment up to
     /// the SIDX footer.
     ///
-    /// Returns `Some(true)` when the max (frame_offset + frame_length)
-    /// across SIDX entries equals the SIDX footer start — meaning every
-    /// frame in the segment is represented. Returns `Some(false)` when
-    /// there are trailing frames that SIDX doesn't know about (the
-    /// cross-segment batch case), or when the SIDX claims to cover bytes
-    /// that overlap the footer itself. Returns `None` on I/O trouble;
-    /// callers interpret as "can't prove coverage, frame-scan to be safe".
+    /// Returns `Complete` when the max (frame_offset + frame_length) across
+    /// SIDX entries equals the SIDX footer start, meaning every frame in the
+    /// segment is represented. Returns `Incomplete` when there are trailing
+    /// frames that SIDX does not know about (the cross-segment batch case), or
+    /// when the SIDX claims to cover bytes that overlap the footer itself.
+    /// Returns `Unreadable` when disk/footer evidence cannot prove coverage.
+    /// Callers frame-scan unless this returns `Complete`.
     pub(super) fn sidx_covers_segment_tail(
         path: &Path,
         sidx_entries: &[SidxEntry],
-    ) -> Option<bool> {
-        let file_len = std::fs::metadata(path).ok()?.len();
-        let mut file = crate::store::platform::fs::open_file(path).ok()?;
+    ) -> SidxTailCoverage {
+        let file_len = match crate::store::platform::fs::metadata(path) {
+            Ok(metadata) => metadata.len(),
+            Err(_) => return SidxTailCoverage::Unreadable,
+        };
+        let mut file = match crate::store::platform::fs::open_file(path) {
+            Ok(file) => file,
+            Err(_) => return SidxTailCoverage::Unreadable,
+        };
         if file_len < 16 {
-            return Some(false);
+            return SidxTailCoverage::Incomplete;
         }
-        file.seek(SeekFrom::End(-16)).ok()?;
+        if file.seek(SeekFrom::End(-16)).is_err() {
+            return SidxTailCoverage::Unreadable;
+        }
         let mut trailer = [0u8; 16];
-        file.read_exact(&mut trailer).ok()?;
-        if &trailer[12..16] != crate::store::segment::sidx::SIDX_MAGIC {
-            return None;
+        if file.read_exact(&mut trailer).is_err() {
+            return SidxTailCoverage::Unreadable;
         }
-        let offset_bytes: [u8; 8] = trailer[0..8].try_into().ok()?;
+        if &trailer[12..16] != crate::store::segment::sidx::SIDX_MAGIC {
+            return SidxTailCoverage::Unreadable;
+        }
+        let offset_bytes: [u8; 8] = match trailer[0..8].try_into() {
+            Ok(bytes) => bytes,
+            Err(_) => return SidxTailCoverage::Unreadable,
+        };
         let sidx_start = u64::from_le_bytes(offset_bytes);
 
         let max_tail = sidx_entries
@@ -41,7 +61,11 @@ impl Reader {
             .max()
             .unwrap_or(0);
 
-        Some(max_tail == sidx_start)
+        if max_tail == sidx_start {
+            SidxTailCoverage::Complete
+        } else {
+            SidxTailCoverage::Incomplete
+        }
     }
 
     pub(super) fn try_sidx_fast_path<F>(
@@ -59,10 +83,11 @@ impl Reader {
             return Ok(false);
         }
 
-        if let Ok(Some((sidx_entries, strings))) = segment::sidx::read_footer(path) {
-            let sidx_covers_tail =
-                Self::sidx_covers_segment_tail(path, &sidx_entries).unwrap_or(false);
-            if sidx_covers_tail {
+        match segment::sidx::read_footer(path) {
+            Ok(Some((sidx_entries, strings)))
+                if Self::sidx_covers_segment_tail(path, &sidx_entries)
+                    == SidxTailCoverage::Complete =>
+            {
                 for se in sidx_entries {
                     let row = se.to_cold_start_row(segment_id);
                     let kind = row.kind;
@@ -73,10 +98,9 @@ impl Reader {
                     }
                     sink(ScannedIndexEntry::from_cold_start_row(&row, &strings)?)?;
                 }
-                return Ok(true);
+                Ok(true)
             }
+            Ok(Some(_)) | Ok(None) | Err(_) => Ok(false),
         }
-
-        Ok(false)
     }
 }
