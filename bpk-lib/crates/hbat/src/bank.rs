@@ -301,51 +301,51 @@ inventory::submit! {
 }
 
 #[cfg(test)]
-// justifies: INV-TEST-PANIC-AS-ASSERTION; hbat fixture tests use panic and unwrap as assertion signals for canonical encoding roundtrips.
-#[allow(clippy::panic, clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use anyhow::Result;
 
     #[test]
-    fn bank_commit_fixture_request_roundtrips() {
+    fn bank_commit_fixture_request_roundtrips() -> Result<()> {
         let v = BankCommitRequest::fixture_value();
-        let bytes = batpak::encoding::to_bytes(&v).expect("encode");
-        let decoded: BankCommitRequest = batpak::encoding::from_bytes(&bytes).expect("decode");
+        let bytes = batpak::encoding::to_bytes(&v)?;
+        let decoded: BankCommitRequest = batpak::encoding::from_bytes(&bytes)?;
         assert_eq!(decoded, v);
+        Ok(())
     }
 
     #[test]
-    fn bank_commit_fixture_ack_roundtrips() {
+    fn bank_commit_fixture_ack_roundtrips() -> Result<()> {
         let v = BankCommitAck::fixture_value();
-        let bytes = batpak::encoding::to_bytes(&v).expect("encode");
-        let decoded: BankCommitAck = batpak::encoding::from_bytes(&bytes).expect("decode");
+        let bytes = batpak::encoding::to_bytes(&v)?;
+        let decoded: BankCommitAck = batpak::encoding::from_bytes(&bytes)?;
         assert_eq!(decoded, v);
+        Ok(())
     }
 
     #[test]
-    fn event_get_fixture_request_roundtrips() {
+    fn event_get_fixture_request_roundtrips() -> Result<()> {
         let v = EventGetRequest::fixture_value();
-        let bytes = batpak::encoding::to_bytes(&v).expect("encode");
-        let decoded: EventGetRequest = batpak::encoding::from_bytes(&bytes).expect("decode");
+        let bytes = batpak::encoding::to_bytes(&v)?;
+        let decoded: EventGetRequest = batpak::encoding::from_bytes(&bytes)?;
         assert_eq!(decoded, v);
+        Ok(())
     }
 
     #[test]
-    fn event_get_fixture_ack_roundtrips() {
+    fn event_get_fixture_ack_roundtrips() -> Result<()> {
         let v = EventGetAck::fixture_value();
-        let bytes = batpak::encoding::to_bytes(&v).expect("encode");
-        let decoded: EventGetAck = batpak::encoding::from_bytes(&bytes).expect("decode");
+        let bytes = batpak::encoding::to_bytes(&v)?;
+        let decoded: EventGetAck = batpak::encoding::from_bytes(&bytes)?;
         assert_eq!(decoded, v);
+        Ok(())
     }
 
     #[test]
-    fn descriptors_validate() {
-        BANK_COMMIT_DESCRIPTOR
-            .validate()
-            .expect("bank.commit descriptor must validate");
-        EVENT_GET_DESCRIPTOR
-            .validate()
-            .expect("event.get descriptor must validate");
+    fn descriptors_validate() -> Result<()> {
+        BANK_COMMIT_DESCRIPTOR.validate()?;
+        EVENT_GET_DESCRIPTOR.validate()?;
+        Ok(())
     }
 
     #[test]

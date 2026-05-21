@@ -413,14 +413,13 @@ fn decode_hex(hex: &str) -> Result<Vec<u8>, netbat::NetbatError> {
 }
 
 #[cfg(test)]
-// justifies: INV-TEST-PANIC-AS-ASSERTION; manifest tests use panic and unwrap as assertion signals for deterministic fixture shape invariants.
-#[allow(clippy::panic, clippy::unwrap_used, clippy::assertions_on_constants)]
 mod tests {
     use super::*;
+    use anyhow::Result;
 
     #[test]
-    fn snapshot_has_all_0_7_6_events_and_operations() {
-        let snap = descriptors().expect("build manifest snapshot");
+    fn snapshot_has_all_0_7_6_events_and_operations() -> Result<()> {
+        let snap = descriptors()?;
         // 6 events: heartbeat request/ack, bank.commit request/ack, event.get request/ack.
         assert_eq!(snap.events.len(), 6, "event count: {snap:?}");
         // 3 operations: heartbeat, bank.commit, event.get.
@@ -429,11 +428,12 @@ mod tests {
         assert!(names.contains(&"system.heartbeat"));
         assert!(names.contains(&"bank.commit"));
         assert!(names.contains(&"event.get"));
+        Ok(())
     }
 
     #[test]
-    fn fixture_field_metadata_matches_phase0_invariants() {
-        let snap = descriptors().expect("build manifest snapshot");
+    fn fixture_field_metadata_matches_phase0_invariants() -> Result<()> {
+        let snap = descriptors()?;
         for event in &snap.events {
             for field in &event.fields {
                 assert_eq!(
@@ -443,11 +443,12 @@ mod tests {
                 );
             }
         }
+        Ok(())
     }
 
     #[test]
-    fn all_operations_carry_an_error_fixture() {
-        let snap = descriptors().expect("build manifest snapshot");
+    fn all_operations_carry_an_error_fixture() -> Result<()> {
+        let snap = descriptors()?;
         for op in &snap.operations {
             assert_eq!(op.error_fixture.code, "unknown_operation");
             assert_eq!(op.error_fixture.name, "unknown_operation");
@@ -456,25 +457,26 @@ mod tests {
                 .message_utf8
                 .contains(ERROR_FIXTURE_OPERATION));
         }
+        Ok(())
     }
 
     #[test]
-    fn each_event_decodes_back_to_its_fixture_value() {
-        let snap = descriptors().expect("build manifest snapshot");
+    fn each_event_decodes_back_to_its_fixture_value() -> Result<()> {
+        let snap = descriptors()?;
         for event in &snap.events {
-            let bytes = decode_hex(&event.golden_payload_hex).expect("decode golden hex");
+            let bytes = decode_hex(&event.golden_payload_hex)?;
             // Re-encode the fixture value through serde_json roundtrip to
             // confirm the JSON form is structurally consistent with what
             // msgpack decode would produce.
-            let payload_json: serde_json::Value =
-                batpak::encoding::from_bytes(&bytes).expect("decode msgpack");
+            let payload_json: serde_json::Value = batpak::encoding::from_bytes(&bytes)?;
             assert_eq!(payload_json, event.fixture_value, "event {}", event.name);
         }
+        Ok(())
     }
 
     #[test]
-    fn events_sort_by_kind_for_link_order_stability() {
-        let snap = descriptors().expect("build manifest snapshot");
+    fn events_sort_by_kind_for_link_order_stability() -> Result<()> {
+        let snap = descriptors()?;
         let pairs: Vec<(u8, u16)> = snap
             .events
             .iter()
@@ -486,5 +488,6 @@ mod tests {
             pairs, sorted,
             "events must be sorted by (category, type_id)"
         );
+        Ok(())
     }
 }

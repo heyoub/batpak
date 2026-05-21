@@ -26,7 +26,6 @@
 
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpStream;
-use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
@@ -362,13 +361,4 @@ fn ready_payload_carries_addr_port_and_protocol() {
     // Spawn-and-introspect smoke test: just ensure HBAT_READY parses.
     let host = HbatProcess::spawn();
     assert!(host.port() > 0);
-}
-
-// Silence unused-import warning when running in environments where
-// PathBuf is not actually referenced (defensive: PathBuf is currently
-// only used transitively via Command::new(HBAT_BIN), but keeping the
-// import explicit makes the dependency graph readable).
-#[allow(dead_code)]
-fn _unused_path_check() -> PathBuf {
-    PathBuf::from(HBAT_BIN)
 }

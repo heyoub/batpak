@@ -25,10 +25,48 @@ pub(crate) fn run() -> Result<()> {
     check_no_placeholder_runtime_macros(&repo_root)?;
     check_canonical_encoding_boundary(&repo_root)?;
     check_allow_justifications(&repo_root)?;
+    check_rust_file_size_pressure(&repo_root)?;
     public_surface::check(&repo_root)?;
     ci_parity::check(&repo_root)?;
     store_pub_fn_coverage::check(&repo_root)?;
     println!("structural-check: ok");
+    Ok(())
+}
+
+fn check_rust_file_size_pressure(repo_root: &Path) -> Result<()> {
+    const DEFAULT_LINE_BUDGET: usize = 850;
+    const RATCHELED_OVER_BUDGET_FILES: &[(&str, usize)] = &[
+        ("crates/core/src/store/index/columnar.rs", 1474),
+        ("crates/core/src/store/cold_start/checkpoint.rs", 1326),
+        ("crates/core/src/store/cold_start/rebuild.rs", 1324),
+        ("crates/core/src/store/error.rs", 1129),
+        ("crates/core/src/store/segment/sidx.rs", 1065),
+        ("crates/core/src/store/config.rs", 1003),
+        ("crates/core/src/store/delivery/cursor.rs", 971),
+        ("crates/core/src/store/index/mod.rs", 929),
+        ("crates/core/src/store/segment/scan/recovery.rs", 922),
+        ("crates/macros/src/lib.rs", 915),
+        ("crates/core/src/store/write/writer.rs", 903),
+        ("crates/core/src/store/projection/flow/mod.rs", 893),
+    ];
+
+    for path in production_rust_files(repo_root) {
+        let rel = relative(repo_root, &path);
+        let content = fs::read_to_string(&path)?;
+        let line_count = content.lines().count();
+        let budget = RATCHELED_OVER_BUDGET_FILES
+            .iter()
+            .find_map(|(known_rel, budget)| (*known_rel == rel).then_some(*budget))
+            .unwrap_or(DEFAULT_LINE_BUDGET);
+        ensure(
+            line_count <= budget,
+            format!(
+                "structural-check: production Rust file size pressure in {rel}: {line_count} lines exceeds budget {budget}.\n\
+                 New production files must stay at or below {DEFAULT_LINE_BUDGET} lines. \
+                 Existing oversized files are ratcheted at their current ceiling until they are extracted."
+            ),
+        )?;
+    }
     Ok(())
 }
 

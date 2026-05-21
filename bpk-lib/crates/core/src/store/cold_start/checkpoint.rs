@@ -18,6 +18,10 @@
 //! The magic + version occupy the first 8 bytes; the 4-byte CRC immediately follows;
 //! the variable-length msgpack body fills the rest of the file.
 
+mod format;
+
+pub(crate) use format::CHECKPOINT_FILENAME;
+
 use crate::event::{EventKind, HashChain};
 use crate::store::cold_start::{
     validate_watermark_segment, ColdStartIndexRow, ColdStartSource, ReservedKindFallbackStats,
@@ -28,75 +32,11 @@ use crate::store::index::{
     recommended_restore_chunk_count, restore_chunk_ranges, DiskPos, IndexEntry, RoutingSummary,
     StoreIndex,
 };
-use crate::store::platform::fs::write_file_atomically;
 use crate::store::{EncodedBytes, ExtensionKey, StoreError};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::io::{BufWriter, Write};
 use std::path::Path;
-
-// ── Constants ────────────────────────────────────────────────────────────────
-
-/// Magic bytes at the start of every checkpoint file.
-pub(crate) const CHECKPOINT_MAGIC: &[u8; 6] = b"FBATCK";
-
-/// Format version stored in the checkpoint header.
-/// v6: v5 plus receipt-extension maps in checkpoint entries.
-/// v2 checkpoints remain readable as a fallback; v1 is rejected.
-pub(crate) const CHECKPOINT_VERSION: u16 = 6;
-
-/// Final checkpoint filename inside the data directory.
-pub(crate) const CHECKPOINT_FILENAME: &str = "index.ckpt";
-
-// ── Wire types ───────────────────────────────────────────────────────────────
-
-/// Checkpoint format v2: includes interner snapshot + InternId-based entries.
-#[derive(Serialize, Deserialize)]
-struct CheckpointDataV2 {
-    global_sequence: u64,
-    watermark_segment_id: u64,
-    watermark_offset: u64,
-    /// Interner snapshot: ordered list of interned strings (index = InternId).
-    /// The sentinel (empty string at index 0) is included.
-    interner_strings: Vec<String>,
-    entries: Vec<CheckpointEntry>,
-}
-
-/// Checkpoint format v3: v2 plus additive routing/chunk summaries.
-#[derive(Serialize, Deserialize)]
-struct CheckpointDataV3 {
-    global_sequence: u64,
-    watermark_segment_id: u64,
-    watermark_offset: u64,
-    interner_strings: Vec<String>,
-    routing: RoutingSummary,
-    entries: Vec<CheckpointEntry>,
-}
-
-/// Checkpoint format v4: v3 plus DAG lane/depth inside each entry.
-#[derive(Serialize, Deserialize)]
-struct CheckpointDataV4 {
-    global_sequence: u64,
-    watermark_segment_id: u64,
-    watermark_offset: u64,
-    interner_strings: Vec<String>,
-    routing: RoutingSummary,
-    entries: Vec<CheckpointEntry>,
-}
-
-/// Checkpoint format v6: v5 plus receipt-extension maps in entries.
-#[derive(Serialize, Deserialize)]
-struct CheckpointDataV6 {
-    global_sequence: u64,
-    watermark_segment_id: u64,
-    watermark_offset: u64,
-    interner_strings: Vec<String>,
-    routing: RoutingSummary,
-    #[serde(default)]
-    reserved_kind_fallbacks: ReservedKindFallbackStats,
-    entries: Vec<CheckpointEntry>,
-}
 
 /// Checkpoint entry v2: uses InternId u32s instead of raw entity/scope strings.
 /// ~22 bytes smaller per entry than v1.
@@ -184,12 +124,6 @@ pub(crate) struct LoadedCheckpointSnapshot {
     pub(crate) receipt_extensions_hydrated: bool,
 }
 
-struct LoadedCheckpointFile {
-    path: std::path::PathBuf,
-    version: u16,
-    body: Vec<u8>,
-}
-
 fn checkpoint_entries_to_index_entries(
     entries: &[CheckpointEntry],
     interner_strings: &[String],
@@ -198,65 +132,6 @@ fn checkpoint_entries_to_index_entries(
         .iter()
         .map(|ce| ce.to_index_entry(interner_strings))
         .collect()
-}
-
-fn read_checkpoint_file(data_dir: &Path) -> Option<LoadedCheckpointFile> {
-    let path = data_dir.join(CHECKPOINT_FILENAME);
-
-    let raw = match std::fs::read(&path) {
-        Ok(bytes) => bytes,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
-        Err(error) => {
-            tracing::warn!(
-                target: "batpak::checkpoint",
-                path = %path.display(),
-                error = %error,
-                "failed to read checkpoint file"
-            );
-            return None;
-        }
-    };
-
-    const HEADER_LEN: usize = 6 + 2 + 4;
-    if raw.len() < HEADER_LEN {
-        tracing::warn!(
-            target: "batpak::checkpoint",
-            path = %path.display(),
-            len = raw.len(),
-            "checkpoint file too short to contain a valid header"
-        );
-        return None;
-    }
-
-    if &raw[..6] != CHECKPOINT_MAGIC.as_ref() {
-        tracing::warn!(
-            target: "batpak::checkpoint",
-            path = %path.display(),
-            "checkpoint file has wrong magic bytes — ignoring"
-        );
-        return None;
-    }
-
-    let version = u16::from_le_bytes([raw[6], raw[7]]);
-    let stored_crc = u32::from_le_bytes([raw[8], raw[9], raw[10], raw[11]]);
-    let body = raw[HEADER_LEN..].to_vec();
-    let computed_crc = crc32fast::hash(&body);
-    if stored_crc != computed_crc {
-        tracing::warn!(
-            target: "batpak::checkpoint",
-            path = %path.display(),
-            stored = stored_crc,
-            computed = computed_crc,
-            "checkpoint CRC mismatch — file is corrupt, ignoring"
-        );
-        return None;
-    }
-
-    Some(LoadedCheckpointFile {
-        path,
-        version,
-        body,
-    })
 }
 
 fn validate_checkpoint_watermark(
@@ -305,143 +180,31 @@ fn decode_checkpoint_data(
     version: u16,
     body: &[u8],
 ) -> Option<LoadedCheckpointData> {
-    // ── 6. Deserialise msgpack body ───────────────────────────────────────────
-    let (
-        entries,
-        interner_strings,
-        watermark_segment_id,
-        watermark_offset,
-        global_sequence,
-        routing,
-        cumulative_reserved_kind_fallbacks,
-    ) = match version {
-        2 => {
-            let data: CheckpointDataV2 = match crate::encoding::from_bytes(body) {
-                Ok(d) => d,
-                Err(e) => {
-                    tracing::warn!(
-                        target: "batpak::checkpoint",
-                        path = %path.display(),
-                        error = %e,
-                        "checkpoint deserialisation failed — ignoring"
-                    );
-                    return None;
-                }
-            };
-            let routing = RoutingSummary::from_sorted_entries(
-                &checkpoint_entries_to_index_entries(&data.entries, &data.interner_strings).ok()?,
-                recommended_restore_chunk_count(data.entries.len()),
-            );
-            (
-                data.entries,
-                data.interner_strings,
-                data.watermark_segment_id,
-                data.watermark_offset,
-                data.global_sequence,
-                routing,
-                ReservedKindFallbackStats::default(),
-            )
-        }
-        3 => {
-            let data: CheckpointDataV3 = match crate::encoding::from_bytes(body) {
-                Ok(d) => d,
-                Err(e) => {
-                    tracing::warn!(
-                        target: "batpak::checkpoint",
-                        path = %path.display(),
-                        error = %e,
-                        "checkpoint deserialisation failed — ignoring"
-                    );
-                    return None;
-                }
-            };
-            (
-                data.entries,
-                data.interner_strings,
-                data.watermark_segment_id,
-                data.watermark_offset,
-                data.global_sequence,
-                data.routing,
-                ReservedKindFallbackStats::default(),
-            )
-        }
-        4 => {
-            let data: CheckpointDataV4 = match crate::encoding::from_bytes(body) {
-                Ok(d) => d,
-                Err(e) => {
-                    tracing::warn!(
-                        target: "batpak::checkpoint",
-                        path = %path.display(),
-                        error = %e,
-                        "checkpoint deserialisation failed — ignoring"
-                    );
-                    return None;
-                }
-            };
-            (
-                data.entries,
-                data.interner_strings,
-                data.watermark_segment_id,
-                data.watermark_offset,
-                data.global_sequence,
-                data.routing,
-                ReservedKindFallbackStats::default(),
-            )
-        }
-        5 | 6 => {
-            let data: CheckpointDataV6 = match crate::encoding::from_bytes(body) {
-                Ok(d) => d,
-                Err(e) => {
-                    tracing::warn!(
-                        target: "batpak::checkpoint",
-                        path = %path.display(),
-                        error = %e,
-                        "checkpoint deserialisation failed — ignoring"
-                    );
-                    return None;
-                }
-            };
-            (
-                data.entries,
-                data.interner_strings,
-                data.watermark_segment_id,
-                data.watermark_offset,
-                data.global_sequence,
-                data.routing,
-                data.reserved_kind_fallbacks,
-            )
-        }
-        _ => {
-            tracing::warn!(
-                target: "batpak::checkpoint",
-                path = %path.display(),
-                version,
-                expected = CHECKPOINT_VERSION,
-                "unsupported checkpoint version — ignoring"
-            );
-            return None;
-        }
-    };
+    let data = format::decode_checkpoint_data(path, version, body)?;
 
-    let watermark =
-        validate_checkpoint_watermark(data_dir, path, watermark_segment_id, watermark_offset)?;
+    let watermark = validate_checkpoint_watermark(
+        data_dir,
+        path,
+        data.watermark_segment_id,
+        data.watermark_offset,
+    )?;
 
     tracing::debug!(
         target: "batpak::checkpoint",
-        entries = entries.len(),
-        global_sequence,
-        watermark_segment_id,
-        watermark_offset,
+        entries = data.entries.len(),
+        global_sequence = data.global_sequence,
+        watermark_segment_id = data.watermark_segment_id,
+        watermark_offset = data.watermark_offset,
         "checkpoint loaded successfully"
     );
 
     Some(LoadedCheckpointData {
-        entries,
-        interner_strings,
+        entries: data.entries,
+        interner_strings: data.interner_strings,
         watermark,
-        stored_allocator: global_sequence,
-        routing,
-        cumulative_reserved_kind_fallbacks,
+        stored_allocator: data.global_sequence,
+        routing: data.routing,
+        cumulative_reserved_kind_fallbacks: data.cumulative_reserved_kind_fallbacks,
     })
 }
 
@@ -450,18 +213,7 @@ fn decode_checkpoint_snapshot_v6(
     path: &Path,
     body: &[u8],
 ) -> Option<LoadedCheckpointSnapshot> {
-    let data: CheckpointDataV6 = match crate::encoding::from_bytes(body) {
-        Ok(data) => data,
-        Err(error) => {
-            tracing::warn!(
-                target: "batpak::checkpoint",
-                path = %path.display(),
-                error = %error,
-                "checkpoint snapshot deserialisation failed — ignoring"
-            );
-            return None;
-        }
-    };
+    let data = format::decode_checkpoint_snapshot_v6(path, body)?;
 
     let watermark = validate_checkpoint_watermark(
         data_dir,
@@ -585,7 +337,7 @@ pub(crate) fn write_checkpoint_with_reserved_kind_fallbacks(
         recommended_restore_chunk_count(entries.len()),
     );
 
-    let data = CheckpointDataV6 {
+    let data = format::CheckpointDataV6 {
         global_sequence: index.global_sequence(),
         watermark_segment_id,
         watermark_offset,
@@ -596,25 +348,11 @@ pub(crate) fn write_checkpoint_with_reserved_kind_fallbacks(
     };
 
     // ── 3. Serialise to msgpack ───────────────────────────────────────────────
-    let body =
-        crate::encoding::to_bytes(&data).map_err(|e| StoreError::Serialization(Box::new(e)))?;
+    let body = format::encode_checkpoint_body(&data)
+        .map_err(|e| StoreError::Serialization(Box::new(e)))?;
 
-    // ── 4. Compute CRC of the body ────────────────────────────────────────────
-    let crc: u32 = crc32fast::hash(&body);
-
-    // ── 5. Write to a same-directory tempfile with fsync ─────────────────────
-    let final_path = data_dir.join(CHECKPOINT_FILENAME);
-    write_file_atomically(data_dir, &final_path, "checkpoint", |file| {
-        let mut w = BufWriter::new(file);
-
-        // Header: MAGIC (6) + version (2 LE) + crc (4 LE)
-        w.write_all(CHECKPOINT_MAGIC)?;
-        w.write_all(&CHECKPOINT_VERSION.to_le_bytes())?;
-        w.write_all(&crc.to_le_bytes())?;
-        w.write_all(&body)?;
-        w.flush()?;
-        Ok(())
-    })?;
+    // ── 4. Write to a same-directory tempfile with fsync ─────────────────────
+    format::write_checkpoint_file(data_dir, &body)?;
 
     tracing::debug!(
         target: "batpak::checkpoint",
@@ -646,7 +384,7 @@ pub(crate) fn write_checkpoint_with_reserved_kind_fallbacks(
 /// which may be higher than `entries.len()` due to burned batch slots.
 #[cfg(test)]
 pub(crate) fn try_load_checkpoint(data_dir: &Path) -> Option<LoadedCheckpointData> {
-    let loaded = read_checkpoint_file(data_dir)?;
+    let loaded = format::read_checkpoint_file(data_dir)?;
     decode_checkpoint_data(data_dir, &loaded.path, loaded.version, &loaded.body)
 }
 
@@ -685,8 +423,8 @@ pub(crate) fn restore_from_checkpoint(
 }
 
 pub(crate) fn try_load_checkpoint_snapshot(data_dir: &Path) -> Option<LoadedCheckpointSnapshot> {
-    let raw = read_checkpoint_file(data_dir)?;
-    if raw.version == CHECKPOINT_VERSION {
+    let raw = format::read_checkpoint_file(data_dir)?;
+    if raw.version == format::CHECKPOINT_VERSION {
         return decode_checkpoint_snapshot_v6(data_dir, &raw.path, &raw.body);
     }
 
@@ -782,11 +520,12 @@ mod tests {
         let body = crate::encoding::to_bytes(body).expect("serialize legacy checkpoint");
         let crc = crc32fast::hash(&body);
         let mut bytes = Vec::new();
-        bytes.extend_from_slice(CHECKPOINT_MAGIC);
+        bytes.extend_from_slice(format::CHECKPOINT_MAGIC);
         bytes.extend_from_slice(&version.to_le_bytes());
         bytes.extend_from_slice(&crc.to_le_bytes());
         bytes.extend_from_slice(&body);
-        std::fs::write(dir.join(CHECKPOINT_FILENAME), bytes).expect("write legacy checkpoint");
+        std::fs::write(dir.join(format::CHECKPOINT_FILENAME), bytes)
+            .expect("write legacy checkpoint");
     }
 
     #[test]
@@ -818,14 +557,14 @@ mod tests {
         let idx = make_index(16);
         write_checkpoint(&idx, dir, 0, 4096).expect("write");
 
-        let raw = std::fs::read(dir.join(CHECKPOINT_FILENAME)).expect("read checkpoint");
+        let raw = std::fs::read(dir.join(format::CHECKPOINT_FILENAME)).expect("read checkpoint");
         assert_eq!(
             u16::from_le_bytes([raw[6], raw[7]]),
-            CHECKPOINT_VERSION,
+            format::CHECKPOINT_VERSION,
             "write_checkpoint must encode the current checkpoint version"
         );
         let body = &raw[12..];
-        let direct: CheckpointDataV6 =
+        let direct: format::CheckpointDataV6 =
             crate::encoding::from_bytes(body).expect("checkpoint body should deserialize directly");
         assert_eq!(direct.entries.len(), 16);
         assert!(
@@ -1055,7 +794,7 @@ mod tests {
     #[test]
     fn bad_magic_returns_none() {
         let tmp = TempDir::new().expect("tempdir");
-        let path = tmp.path().join(CHECKPOINT_FILENAME);
+        let path = tmp.path().join(format::CHECKPOINT_FILENAME);
         std::fs::write(&path, b"BADMAGIC\x00\x00\x00\x00").expect("write");
         assert!(
             try_load_checkpoint(tmp.path()).is_none(),
@@ -1073,7 +812,7 @@ mod tests {
         write_checkpoint(&idx, dir, 0, 0).expect("write");
 
         // Corrupt the last byte of the file
-        let path = dir.join(CHECKPOINT_FILENAME);
+        let path = dir.join(format::CHECKPOINT_FILENAME);
         let mut raw = std::fs::read(&path).expect("read");
         let last = raw.len() - 1;
         raw[last] ^= 0xFF;
@@ -1111,7 +850,7 @@ mod tests {
         write_checkpoint(&idx, dir, 0, 0).expect("write");
 
         // Overwrite the two version bytes with an unsupported future version
-        let path = dir.join(CHECKPOINT_FILENAME);
+        let path = dir.join(format::CHECKPOINT_FILENAME);
         let mut raw = std::fs::read(&path).expect("read");
         // bytes [6..8] are the version — set to 99
         raw[6] = 99;
@@ -1164,7 +903,7 @@ mod tests {
         entries.sort_by_key(|entry| entry.global_sequence);
         let mut interner_strings = vec![String::new()];
         interner_strings.extend(idx.interner.to_snapshot());
-        let body = crate::encoding::to_bytes(&CheckpointDataV2 {
+        let body = crate::encoding::to_bytes(&format::CheckpointDataV2 {
             global_sequence: idx.global_sequence(),
             watermark_segment_id: 0,
             watermark_offset: 0,
@@ -1173,9 +912,9 @@ mod tests {
         })
         .expect("serialize v2 checkpoint");
         let crc = crc32fast::hash(&body);
-        let path = dir.join(CHECKPOINT_FILENAME);
+        let path = dir.join(format::CHECKPOINT_FILENAME);
         let mut bytes = Vec::new();
-        bytes.extend_from_slice(CHECKPOINT_MAGIC);
+        bytes.extend_from_slice(format::CHECKPOINT_MAGIC);
         bytes.extend_from_slice(&2u16.to_le_bytes());
         bytes.extend_from_slice(&crc.to_le_bytes());
         bytes.extend_from_slice(&body);
@@ -1267,9 +1006,9 @@ mod tests {
         })
         .expect("serialize v3 checkpoint");
         let crc = crc32fast::hash(&body);
-        let path = dir.join(CHECKPOINT_FILENAME);
+        let path = dir.join(format::CHECKPOINT_FILENAME);
         let mut bytes = Vec::new();
-        bytes.extend_from_slice(CHECKPOINT_MAGIC);
+        bytes.extend_from_slice(format::CHECKPOINT_MAGIC);
         bytes.extend_from_slice(&3u16.to_le_bytes());
         bytes.extend_from_slice(&crc.to_le_bytes());
         bytes.extend_from_slice(&body);

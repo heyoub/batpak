@@ -156,35 +156,33 @@ inventory::submit! {
 }
 
 #[cfg(test)]
-// justifies: INV-TEST-PANIC-AS-ASSERTION; heartbeat tests use panic and unwrap as assertion signals for fixture and descriptor invariants.
-#[allow(clippy::panic, clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use anyhow::Result;
 
     #[test]
-    fn fixture_request_roundtrips_through_canonical_encoding() {
+    fn fixture_request_roundtrips_through_canonical_encoding() -> Result<()> {
         let value = SystemHeartbeatRequest::fixture_value();
-        let bytes = batpak::encoding::to_bytes(&value).expect("encode request");
-        let decoded: SystemHeartbeatRequest =
-            batpak::encoding::from_bytes(&bytes).expect("decode request");
+        let bytes = batpak::encoding::to_bytes(&value)?;
+        let decoded: SystemHeartbeatRequest = batpak::encoding::from_bytes(&bytes)?;
         assert_eq!(decoded, value);
+        Ok(())
     }
 
     #[test]
-    fn fixture_ack_roundtrips_through_canonical_encoding() {
+    fn fixture_ack_roundtrips_through_canonical_encoding() -> Result<()> {
         let value = SystemHeartbeatAck::fixture_value();
-        let bytes = batpak::encoding::to_bytes(&value).expect("encode ack");
-        let decoded: SystemHeartbeatAck = batpak::encoding::from_bytes(&bytes).expect("decode ack");
+        let bytes = batpak::encoding::to_bytes(&value)?;
+        let decoded: SystemHeartbeatAck = batpak::encoding::from_bytes(&bytes)?;
         assert_eq!(decoded, value);
+        Ok(())
     }
 
     #[test]
-    fn handler_echoes_nonce_and_stamps_safe_integer_clock() {
-        let request_bytes =
-            batpak::encoding::to_bytes(&SystemHeartbeatRequest::fixture_value()).expect("encode");
-        let output_bytes = handle_heartbeat(&request_bytes).expect("handle");
-        let ack: SystemHeartbeatAck =
-            batpak::encoding::from_bytes(&output_bytes).expect("decode ack");
+    fn handler_echoes_nonce_and_stamps_safe_integer_clock() -> Result<()> {
+        let request_bytes = batpak::encoding::to_bytes(&SystemHeartbeatRequest::fixture_value())?;
+        let output_bytes = handle_heartbeat(&request_bytes)?;
+        let ack: SystemHeartbeatAck = batpak::encoding::from_bytes(&output_bytes)?;
         assert_eq!(ack.nonce, crate::manifest::FIXTURE_NONCE);
         // Safe-JS upper bound; mirrors the parity test on the TS side.
         const NUMBER_MAX_SAFE_INTEGER: u64 = (1_u64 << 53) - 1;
@@ -193,10 +191,11 @@ mod tests {
             "server_ts_ms {} exceeds Number.MAX_SAFE_INTEGER",
             ack.server_ts_ms
         );
+        Ok(())
     }
 
     #[test]
-    fn descriptor_advertises_stable_strings() {
+    fn descriptor_advertises_stable_strings() -> Result<()> {
         assert_eq!(HEARTBEAT_DESCRIPTOR.name(), HEARTBEAT_OPERATION_NAME);
         assert_eq!(
             HEARTBEAT_DESCRIPTOR.input_schema_ref(),
@@ -207,9 +206,8 @@ mod tests {
             HEARTBEAT_OUTPUT_SCHEMA_REF
         );
         assert_eq!(HEARTBEAT_DESCRIPTOR.receipt_kind(), HEARTBEAT_RECEIPT_KIND);
-        HEARTBEAT_DESCRIPTOR
-            .validate()
-            .expect("descriptor must validate");
+        HEARTBEAT_DESCRIPTOR.validate()?;
+        Ok(())
     }
 
     #[test]
