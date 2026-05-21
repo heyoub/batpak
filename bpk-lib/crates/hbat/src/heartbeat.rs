@@ -120,15 +120,6 @@ fn current_unix_ms() -> u64 {
     u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX)
 }
 
-// Force the `EventPayload` impl for both heartbeat types to remain
-// referenced from this module, since their kind constants are consumed by
-// the manifest registry via [`SystemHeartbeatRequest::KIND`] /
-// [`SystemHeartbeatAck::KIND`].
-#[allow(dead_code)]
-const _REQUEST_KIND_LINK: batpak::event::EventKind = SystemHeartbeatRequest::KIND;
-#[allow(dead_code)]
-const _ACK_KIND_LINK: batpak::event::EventKind = SystemHeartbeatAck::KIND;
-
 // ─── Manifest registry submissions ──────────────────────────────────────────
 //
 // One `inventory::submit!` per `EventPayload`-deriving type. The fixture
@@ -165,9 +156,7 @@ inventory::submit! {
 }
 
 #[cfg(test)]
-// justifies: INV-ALLOW-IS-DESIGN; tests in this module assert fixture invariants
-// using panic!/assert! patterns. Suppressing these workspace-level denies for
-// the test module only matches the precedent set by other syncbat tests.
+// justifies: INV-TEST-PANIC-AS-ASSERTION; heartbeat tests use panic and unwrap as assertion signals for fixture and descriptor invariants.
 #[allow(clippy::panic, clippy::unwrap_used)]
 mod tests {
     use super::*;

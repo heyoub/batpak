@@ -25,6 +25,52 @@ use crate::heartbeat::{
     HEARTBEAT_RECEIPT_KIND,
 };
 
+/// Manifest construction failure.
+#[derive(Debug)]
+pub enum ManifestBuildError {
+    /// A registered event failed to provide canonical fixture bytes.
+    FixtureBytes {
+        /// Fully-qualified Rust type that failed.
+        rust_type: &'static str,
+    },
+    /// A registered event failed to provide its JSON fixture view.
+    FixtureJson {
+        /// Fully-qualified Rust type that failed.
+        rust_type: &'static str,
+    },
+    /// An operation refers to an event schema ref that was not registered.
+    MissingSchemaRef {
+        /// Missing schema reference.
+        schema_ref: String,
+    },
+    /// A manifest-owned golden hex string did not decode.
+    GoldenHex {
+        /// Golden field being decoded.
+        field: &'static str,
+        /// Decode error text.
+        error: String,
+    },
+}
+
+impl std::fmt::Display for ManifestBuildError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::FixtureBytes { rust_type } => {
+                write!(f, "encode fixture bytes for {rust_type}")
+            }
+            Self::FixtureJson { rust_type } => write!(f, "encode fixture json for {rust_type}"),
+            Self::MissingSchemaRef { schema_ref } => {
+                write!(f, "event descriptor missing for schema ref {schema_ref}")
+            }
+            Self::GoldenHex { field, error } => {
+                write!(f, "decode manifest golden hex field {field}: {error}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ManifestBuildError {}
+
 /// Wire/manifest version emitted in the JSON envelope.
 pub const MANIFEST_VERSION: u32 = 1;
 
@@ -168,7 +214,7 @@ pub struct EventDescriptorRegistration {
     /// Field rows in declaration order.
     pub fields: &'static [FieldRow],
     /// Returns the canonically-encoded fixture payload bytes. Returns
-    /// `None` if encoding fails — the caller panics with the
+    /// `None` if encoding fails; manifest construction reports the
     /// `rust_type` so the failing event is named in the diagnostic.
     pub fixture_bytes: fn() -> Option<Vec<u8>>,
     /// Returns the JSON view of the fixture value.
@@ -178,23 +224,18 @@ pub struct EventDescriptorRegistration {
 inventory::collect!(EventDescriptorRegistration);
 
 impl EventDescriptorRegistration {
-    // justifies: INV-MANIFEST-FIXTURE-DETERMINISM; manifest fixture encoders are
-    // deterministic on Phase 0 payload types per the EventPayloadFixture trait
-    // contract in crates/hbat/src/lib.rs. A None return here means the upstream
-    // fixture impl has drifted off the canonical encoding contract — fail
-    // loud at manifest export time with the offending rust_type named in the
-    // panic so the regression points at the responsible module.
-    #[allow(clippy::panic)]
-    fn materialize(&self) -> EventDescriptor {
-        let payload_bytes = (self.fixture_bytes)()
-            .unwrap_or_else(|| panic!("encode fixture bytes for {}", self.rust_type));
-        let fixture_value = (self.fixture_json)()
-            .unwrap_or_else(|| panic!("encode fixture json for {}", self.rust_type));
+    fn materialize(&self) -> Result<EventDescriptor, ManifestBuildError> {
+        let payload_bytes = (self.fixture_bytes)().ok_or(ManifestBuildError::FixtureBytes {
+            rust_type: self.rust_type,
+        })?;
+        let fixture_value = (self.fixture_json)().ok_or(ManifestBuildError::FixtureJson {
+            rust_type: self.rust_type,
+        })?;
         // justifies: ADR-0010, src/event/kind.rs; kind_bits upper nibble fits in u8 by construction so narrowing into u8 cannot truncate
         #[allow(clippy::cast_possible_truncation)]
         let category = (self.kind_bits >> 12) as u8;
         let type_id = self.kind_bits & 0x0FFF;
-        EventDescriptor {
+        Ok(EventDescriptor {
             name: self.schema_ref.to_owned(),
             rust_type: self.rust_type.to_owned(),
             ts_name: self.ts_name.to_owned(),
@@ -212,7 +253,7 @@ impl EventDescriptorRegistration {
                 .collect(),
             fixture_value,
             golden_payload_hex: encode_hex(&payload_bytes),
-        }
+        })
     }
 }
 
@@ -222,12 +263,15 @@ impl EventDescriptorRegistration {
 /// per submitted [`EventDescriptorRegistration`], sorts by
 /// `(category, type_id)` for link-order stability, then builds the
 /// operation table on top.
-#[must_use]
-pub fn descriptors() -> ManifestSnapshot {
+///
+/// # Errors
+/// Returns [`ManifestBuildError`] if a registered fixture cannot be
+/// materialized or if an operation references a missing event descriptor.
+pub fn descriptors() -> Result<ManifestSnapshot, ManifestBuildError> {
     let mut events: Vec<EventDescriptor> = inventory::iter::<EventDescriptorRegistration>
         .into_iter()
         .map(EventDescriptorRegistration::materialize)
-        .collect();
+        .collect::<Result<_, _>>()?;
     // Link order is implementation-defined; sort by the wire-stable
     // (category, type_id) pair so the manifest JSON is byte-identical
     // across builds.
@@ -240,32 +284,32 @@ pub fn descriptors() -> ManifestSnapshot {
         HEARTBEAT_INPUT_SCHEMA_REF,
         HEARTBEAT_OUTPUT_SCHEMA_REF,
         HEARTBEAT_RECEIPT_KIND,
-        index.golden_for(HEARTBEAT_INPUT_SCHEMA_REF),
-        index.golden_for(HEARTBEAT_OUTPUT_SCHEMA_REF),
-    );
+        index.golden_for(HEARTBEAT_INPUT_SCHEMA_REF)?,
+        index.golden_for(HEARTBEAT_OUTPUT_SCHEMA_REF)?,
+    )?;
 
     let bank_commit_op = build_operation(
         BANK_COMMIT_OPERATION_NAME,
         BANK_COMMIT_INPUT_SCHEMA_REF,
         BANK_COMMIT_OUTPUT_SCHEMA_REF,
         BANK_COMMIT_RECEIPT_KIND,
-        index.golden_for(BANK_COMMIT_INPUT_SCHEMA_REF),
-        index.golden_for(BANK_COMMIT_OUTPUT_SCHEMA_REF),
-    );
+        index.golden_for(BANK_COMMIT_INPUT_SCHEMA_REF)?,
+        index.golden_for(BANK_COMMIT_OUTPUT_SCHEMA_REF)?,
+    )?;
 
     let event_get_op = build_operation(
         EVENT_GET_OPERATION_NAME,
         EVENT_GET_INPUT_SCHEMA_REF,
         EVENT_GET_OUTPUT_SCHEMA_REF,
         EVENT_GET_RECEIPT_KIND,
-        index.golden_for(EVENT_GET_INPUT_SCHEMA_REF),
-        index.golden_for(EVENT_GET_OUTPUT_SCHEMA_REF),
-    );
+        index.golden_for(EVENT_GET_INPUT_SCHEMA_REF)?,
+        index.golden_for(EVENT_GET_OUTPUT_SCHEMA_REF)?,
+    )?;
 
-    ManifestSnapshot {
+    Ok(ManifestSnapshot {
         events,
         operations: vec![heartbeat_op, bank_commit_op, event_get_op],
-    }
+    })
 }
 
 /// Internal lookup from schema-ref to materialized golden-payload hex.
@@ -285,18 +329,12 @@ impl<'a> EventIndex<'a> {
         Self { by_schema_ref }
     }
 
-    // justifies: INV-MANIFEST-SCHEMA-REF-INTEGRITY; build_operation only ever
-    // requests schema refs declared as `pub const` in the same crate that
-    // submitted the matching EventDescriptorRegistration. A missing schema ref
-    // here is a build-time misconfiguration (e.g. someone added an operation
-    // without the matching inventory::submit!) and must fail loud — not
-    // silently emit an empty hex string into the exported manifest.
-    #[allow(clippy::panic)]
-    fn golden_for(&self, schema_ref: &str) -> &'a str {
-        self.by_schema_ref
-            .get(schema_ref)
-            .copied()
-            .unwrap_or_else(|| panic!("event descriptor missing for schema ref {schema_ref}"))
+    fn golden_for(&self, schema_ref: &str) -> Result<&'a str, ManifestBuildError> {
+        self.by_schema_ref.get(schema_ref).copied().ok_or_else(|| {
+            ManifestBuildError::MissingSchemaRef {
+                schema_ref: schema_ref.to_owned(),
+            }
+        })
     }
 }
 
@@ -307,13 +345,21 @@ fn build_operation(
     receipt_kind: &str,
     golden_input_hex: &str,
     golden_output_hex: &str,
-) -> OperationDescriptorRecord {
-    let input_bytes = decode_hex(golden_input_hex).expect("hex internally produced");
-    let output_bytes = decode_hex(golden_output_hex).expect("hex internally produced");
+) -> Result<OperationDescriptorRecord, ManifestBuildError> {
+    let input_bytes =
+        decode_hex(golden_input_hex).map_err(|error| ManifestBuildError::GoldenHex {
+            field: "golden_input_hex",
+            error: error.to_string(),
+        })?;
+    let output_bytes =
+        decode_hex(golden_output_hex).map_err(|error| ManifestBuildError::GoldenHex {
+            field: "golden_output_hex",
+            error: error.to_string(),
+        })?;
     let request_frame = encode_request(op_name, &input_bytes);
     let ok_frame = encode_response(Ok(&output_bytes));
     let error_fixture = build_error_fixture(&input_bytes);
-    OperationDescriptorRecord {
+    Ok(OperationDescriptorRecord {
         name: op_name.to_owned(),
         input_event: input_schema_ref.to_owned(),
         output_event: output_schema_ref.to_owned(),
@@ -325,7 +371,7 @@ fn build_operation(
         golden_request_frame_hex: encode_hex(&request_frame),
         golden_ok_frame_hex: encode_hex(&ok_frame),
         error_fixture,
-    }
+    })
 }
 
 fn build_error_fixture(request_input_bytes: &[u8]) -> ManifestErrorFixture {
@@ -367,13 +413,14 @@ fn decode_hex(hex: &str) -> Result<Vec<u8>, netbat::NetbatError> {
 }
 
 #[cfg(test)]
+// justifies: INV-TEST-PANIC-AS-ASSERTION; manifest tests use panic and unwrap as assertion signals for deterministic fixture shape invariants.
 #[allow(clippy::panic, clippy::unwrap_used, clippy::assertions_on_constants)]
 mod tests {
     use super::*;
 
     #[test]
     fn snapshot_has_all_0_7_6_events_and_operations() {
-        let snap = descriptors();
+        let snap = descriptors().expect("build manifest snapshot");
         // 6 events: heartbeat request/ack, bank.commit request/ack, event.get request/ack.
         assert_eq!(snap.events.len(), 6, "event count: {snap:?}");
         // 3 operations: heartbeat, bank.commit, event.get.
@@ -386,7 +433,7 @@ mod tests {
 
     #[test]
     fn fixture_field_metadata_matches_phase0_invariants() {
-        let snap = descriptors();
+        let snap = descriptors().expect("build manifest snapshot");
         for event in &snap.events {
             for field in &event.fields {
                 assert_eq!(
@@ -400,7 +447,7 @@ mod tests {
 
     #[test]
     fn all_operations_carry_an_error_fixture() {
-        let snap = descriptors();
+        let snap = descriptors().expect("build manifest snapshot");
         for op in &snap.operations {
             assert_eq!(op.error_fixture.code, "unknown_operation");
             assert_eq!(op.error_fixture.name, "unknown_operation");
@@ -413,21 +460,21 @@ mod tests {
 
     #[test]
     fn each_event_decodes_back_to_its_fixture_value() {
-        let snap = descriptors();
+        let snap = descriptors().expect("build manifest snapshot");
         for event in &snap.events {
             let bytes = decode_hex(&event.golden_payload_hex).expect("decode golden hex");
             // Re-encode the fixture value through serde_json roundtrip to
             // confirm the JSON form is structurally consistent with what
             // msgpack decode would produce.
             let payload_json: serde_json::Value =
-                rmp_serde::from_slice(&bytes).expect("decode msgpack");
+                batpak::encoding::from_bytes(&bytes).expect("decode msgpack");
             assert_eq!(payload_json, event.fixture_value, "event {}", event.name);
         }
     }
 
     #[test]
     fn events_sort_by_kind_for_link_order_stability() {
-        let snap = descriptors();
+        let snap = descriptors().expect("build manifest snapshot");
         let pairs: Vec<(u8, u16)> = snap
             .events
             .iter()

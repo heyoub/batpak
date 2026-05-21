@@ -209,19 +209,6 @@ impl EventPayloadFixture for EventGetAck {
     }
 }
 
-// ─── shared kind anchors ────────────────────────────────────────────────────
-
-// Force the EventPayload impls to stay referenced from this module so the
-// const KIND lookups remain alive across cargo build configurations.
-#[allow(dead_code)]
-const _BANK_COMMIT_REQUEST_KIND: batpak::event::EventKind = BankCommitRequest::KIND;
-#[allow(dead_code)]
-const _BANK_COMMIT_ACK_KIND: batpak::event::EventKind = BankCommitAck::KIND;
-#[allow(dead_code)]
-const _EVENT_GET_REQUEST_KIND: batpak::event::EventKind = EventGetRequest::KIND;
-#[allow(dead_code)]
-const _EVENT_GET_ACK_KIND: batpak::event::EventKind = EventGetAck::KIND;
-
 // ─── Manifest registry submissions ──────────────────────────────────────────
 //
 // One `inventory::submit!` per `EventPayload`-deriving type. The
@@ -314,6 +301,7 @@ inventory::submit! {
 }
 
 #[cfg(test)]
+// justifies: INV-TEST-PANIC-AS-ASSERTION; hbat fixture tests use panic and unwrap as assertion signals for canonical encoding roundtrips.
 #[allow(clippy::panic, clippy::unwrap_used)]
 mod tests {
     use super::*;

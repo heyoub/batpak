@@ -372,7 +372,7 @@ impl StagedCommittedEvent {
         let mut event = Event::new(
             self.event_header(checked_payload_len(payload_bytes)?)
                 .with_flags(flags),
-            rmp_serde::from_slice::<serde_json::Value>(payload_bytes)
+            crate::encoding::from_bytes::<serde_json::Value>(payload_bytes)
                 .map_err(|error| StoreError::Serialization(Box::new(error)))?,
         );
         event.hash_chain = Some(self.hash_chain.clone());

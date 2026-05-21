@@ -138,12 +138,11 @@ fn validate(value: &str) -> Result<(), OperationNameError> {
 }
 
 #[cfg(test)]
-#[allow(clippy::panic, clippy::unwrap_used)]
 mod tests {
     use super::*;
 
     #[test]
-    fn accepts_canonical_names() {
+    fn accepts_canonical_names() -> Result<(), String> {
         for name in [
             "system.heartbeat",
             "bank.commit",
@@ -153,61 +152,70 @@ mod tests {
             "0",
             "a",
         ] {
-            let op = OperationName::new(name).unwrap_or_else(|e| panic!("{name:?}: {e:?}"));
-            assert_eq!(op.as_str(), name);
+            let op = OperationName::new(name).map_err(|error| format!("{name:?}: {error:?}"))?;
+            check_eq(op.as_str(), name, name)?;
         }
+        Ok(())
     }
 
     #[test]
-    fn rejects_empty() {
-        assert_eq!(OperationName::new(""), Err(OperationNameError::Empty));
+    fn rejects_empty() -> Result<(), String> {
+        check_eq(
+            &OperationName::new(""),
+            &Err(OperationNameError::Empty),
+            "empty",
+        )
     }
 
     #[test]
-    fn rejects_too_long() {
+    fn rejects_too_long() -> Result<(), String> {
         let overlong = "a".repeat(OperationName::MAX_BYTES + 1);
-        let err = OperationName::new(overlong.clone()).expect_err("too long");
-        assert_eq!(
-            err,
-            OperationNameError::TooLong {
+        let err = expect_err(OperationName::new(overlong.clone()), "too long")?;
+        check_eq(
+            &err,
+            &OperationNameError::TooLong {
                 len: OperationName::MAX_BYTES + 1,
                 max: OperationName::MAX_BYTES,
-            }
-        );
+            },
+            "too long",
+        )
     }
 
     #[test]
-    fn accepts_exact_length_boundary() {
+    fn accepts_exact_length_boundary() -> Result<(), String> {
         let exact = "a".repeat(OperationName::MAX_BYTES);
-        let op = OperationName::new(exact.clone()).expect("exact length is valid");
-        assert_eq!(op.as_str(), exact);
+        let op = OperationName::new(exact.clone()).map_err(|error| error.to_string())?;
+        check_eq(op.as_str(), exact.as_str(), "exact length")
     }
 
     #[test]
-    fn rejects_leading_or_trailing_dot() {
+    fn rejects_leading_or_trailing_dot() -> Result<(), String> {
         for name in [".x", "x.", ".", ".a.b", "a.b."] {
-            assert_eq!(
-                OperationName::new(name),
-                Err(OperationNameError::LeadingOrTrailingDot),
-                "{name:?}",
-            );
+            check_eq(
+                &OperationName::new(name),
+                &Err(OperationNameError::LeadingOrTrailingDot),
+                name,
+            )?;
         }
+        Ok(())
     }
 
     #[test]
-    fn rejects_consecutive_dots() {
-        assert_eq!(
-            OperationName::new("a..b"),
-            Err(OperationNameError::ConsecutiveDots),
-        );
-        assert_eq!(
-            OperationName::new("foo..bar..baz"),
-            Err(OperationNameError::ConsecutiveDots),
-        );
+    fn rejects_consecutive_dots() -> Result<(), String> {
+        check_eq(
+            &OperationName::new("a..b"),
+            &Err(OperationNameError::ConsecutiveDots),
+            "a..b",
+        )?;
+        check_eq(
+            &OperationName::new("foo..bar..baz"),
+            &Err(OperationNameError::ConsecutiveDots),
+            "foo..bar..baz",
+        )
     }
 
     #[test]
-    fn rejects_illegal_characters() {
+    fn rejects_illegal_characters() -> Result<(), String> {
         for (name, byte) in [
             ("a b", b' '),
             ("a/b", b'/'),
@@ -216,61 +224,116 @@ mod tests {
             ("a$b", b'$'),
             ("a\tb", b'\t'),
         ] {
-            assert_eq!(
-                OperationName::new(name),
-                Err(OperationNameError::IllegalCharacter { byte }),
-                "{name:?}",
-            );
+            check_eq(
+                &OperationName::new(name),
+                &Err(OperationNameError::IllegalCharacter { byte }),
+                name,
+            )?;
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_non_ascii() -> Result<(), String> {
+        let name = "café";
+        let err = expect_err(OperationName::new(name), "non-ascii rejected")?;
+        match err {
+            OperationNameError::IllegalCharacter { byte } if byte >= 0x80 => Ok(()),
+            OperationNameError::IllegalCharacter { byte } => Err(format!(
+                "expected high-bit illegal-character variant, got low byte {byte:#04x}"
+            )),
+            OperationNameError::Empty => Err(
+                "expected high-bit illegal-character variant, got empty-name error".to_owned(),
+            ),
+            OperationNameError::TooLong { len, max } => Err(format!(
+                "expected high-bit illegal-character variant, got too-long error len={len} max={max}"
+            )),
+            OperationNameError::LeadingOrTrailingDot => Err(
+                "expected high-bit illegal-character variant, got leading/trailing-dot error"
+                    .to_owned(),
+            ),
+            OperationNameError::ConsecutiveDots => Err(
+                "expected high-bit illegal-character variant, got consecutive-dot error".to_owned(),
+            ),
         }
     }
 
     #[test]
-    fn rejects_non_ascii() {
-        let name = "café";
-        let err = OperationName::new(name).expect_err("non-ascii rejected");
-        let OperationNameError::IllegalCharacter { byte } = err else {
-            panic!("expected illegal-character variant, got {err:?}");
-        };
-        assert!(byte >= 0x80);
+    fn accepts_all_numeric() -> Result<(), String> {
+        let op = OperationName::new("0123456789").map_err(|error| error.to_string())?;
+        check_eq(op.as_str(), "0123456789", "digits")
     }
 
     #[test]
-    fn accepts_all_numeric() {
-        let op = OperationName::new("0123456789").expect("digits are valid");
-        assert_eq!(op.as_str(), "0123456789");
-    }
-
-    #[test]
-    fn accepts_punctuation_only_names_when_not_dot_only() {
-        OperationName::new("-").expect("hyphen alone is valid");
-        OperationName::new("_").expect("underscore alone is valid");
+    fn accepts_punctuation_only_names_when_not_dot_only() -> Result<(), String> {
+        OperationName::new("-").map_err(|error| format!("hyphen: {error}"))?;
+        OperationName::new("_").map_err(|error| format!("underscore: {error}"))?;
         // A bare "." is leading-and-trailing dot -> rejected.
-        assert_eq!(
-            OperationName::new("."),
-            Err(OperationNameError::LeadingOrTrailingDot),
-        );
+        check_eq(
+            &OperationName::new("."),
+            &Err(OperationNameError::LeadingOrTrailingDot),
+            "bare dot",
+        )
     }
 
     #[test]
-    fn display_round_trips_value() {
-        let op = OperationName::new("system.heartbeat").unwrap();
-        assert_eq!(format!("{op}"), "system.heartbeat");
+    fn display_round_trips_value() -> Result<(), String> {
+        let op = OperationName::new("system.heartbeat").map_err(|error| error.to_string())?;
+        let rendered = format!("{op}");
+        check_eq(rendered.as_str(), "system.heartbeat", "display")
     }
 
     #[test]
-    fn error_display_is_human_readable() {
-        assert!(OperationNameError::Empty.to_string().contains("empty"));
-        assert!(OperationNameError::TooLong { len: 200, max: 128 }
-            .to_string()
-            .contains("max 128"));
-        assert!(OperationNameError::LeadingOrTrailingDot
-            .to_string()
-            .contains("'.'"));
-        assert!(OperationNameError::ConsecutiveDots
-            .to_string()
-            .contains("'..'"));
-        assert!(OperationNameError::IllegalCharacter { byte: b'/' }
-            .to_string()
-            .contains("0x2f"));
+    fn error_display_is_human_readable() -> Result<(), String> {
+        check_contains(&OperationNameError::Empty.to_string(), "empty", "empty")?;
+        check_contains(
+            &OperationNameError::TooLong { len: 200, max: 128 }.to_string(),
+            "max 128",
+            "too long",
+        )?;
+        check_contains(
+            &OperationNameError::LeadingOrTrailingDot.to_string(),
+            "'.'",
+            "leading/trailing dot",
+        )?;
+        check_contains(
+            &OperationNameError::ConsecutiveDots.to_string(),
+            "'..'",
+            "consecutive dots",
+        )?;
+        check_contains(
+            &OperationNameError::IllegalCharacter { byte: b'/' }.to_string(),
+            "0x2f",
+            "illegal character",
+        )
+    }
+
+    fn expect_err<T, E>(result: Result<T, E>, label: &str) -> Result<E, String> {
+        match result {
+            Ok(_) => Err(format!("{label}: expected Err, got Ok")),
+            Err(error) => Ok(error),
+        }
+    }
+
+    fn check_eq<T: PartialEq + std::fmt::Debug + ?Sized>(
+        actual: &T,
+        expected: &T,
+        label: &str,
+    ) -> Result<(), String> {
+        if actual == expected {
+            Ok(())
+        } else {
+            Err(format!("{label}: expected {expected:?}, got {actual:?}"))
+        }
+    }
+
+    fn check_contains(haystack: &str, needle: &str, label: &str) -> Result<(), String> {
+        if haystack.contains(needle) {
+            Ok(())
+        } else {
+            Err(format!(
+                "{label}: expected {haystack:?} to contain {needle:?}"
+            ))
+        }
     }
 }

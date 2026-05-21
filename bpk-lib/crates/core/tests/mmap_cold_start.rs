@@ -2,6 +2,10 @@
 #![allow(clippy::panic)]
 //! Mmap cold-start path proofs.
 //! Harness pattern: Equivalence Harness (artifact-path parity lane).
+//!
+//! PROVES: mmap cold-start restores the same visible store truth as checkpoint and scan paths.
+//! CATCHES: stale mmap summaries, bad phase accounting, and sealed-read restore regressions.
+//! SEEDED: deterministic temp-store reopen scenarios cover scan, checkpoint, and mmap branches.
 
 use batpak::coordinate::{Coordinate, Region};
 use batpak::event::EventKind;

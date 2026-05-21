@@ -61,7 +61,7 @@ pub(crate) fn export_ts_manifest(args: &ExportTsManifestArgs) -> Result<()> {
             kind: "named-field-msgpack",
             rmp_serde_version: RMP_SERDE_VERSION,
         },
-        snapshot: hbat::manifest::descriptors(),
+        snapshot: hbat::manifest::descriptors().context("build hbat manifest snapshot")?,
     };
 
     let json =
@@ -99,7 +99,7 @@ mod tests {
                 kind: "named-field-msgpack",
                 rmp_serde_version: RMP_SERDE_VERSION,
             },
-            snapshot: hbat::manifest::descriptors(),
+            snapshot: hbat::manifest::descriptors().expect("build hbat manifest snapshot"),
         };
         let json = serde_json::to_value(&manifest).expect("serialize manifest");
 

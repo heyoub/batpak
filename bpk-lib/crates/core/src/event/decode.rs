@@ -19,8 +19,8 @@
 //!   kind matched and the payload bytes could not be deserialized into `T`.
 //!
 //! Both replay lanes implement the trait: [`Event<serde_json::Value>`] via
-//! [`serde_json::from_value`] and [`Event<Vec<u8>>`] via
-//! [`rmp_serde::from_slice`]. Neither lane is privileged; callers consuming
+//! [`serde_json::from_value`] and [`Event<Vec<u8>>`] via the canonical
+//! MessagePack decoder. Neither lane is privileged; callers consuming
 //! the seam cannot accidentally lock themselves into JSON-only behaviour.
 //!
 //! `P::KIND` is the sole identity check. The seam does not consult any
@@ -34,7 +34,7 @@ use serde::de::DeserializeOwned;
 pub enum DecodeSource {
     /// Decode via `serde_json::from_value` failed.
     Json(serde_json::Error),
-    /// Decode via `rmp_serde::from_slice` failed.
+    /// Decode via the canonical MessagePack decoder failed.
     Msgpack(rmp_serde::decode::Error),
 }
 
@@ -204,7 +204,7 @@ fn decode_msgpack<T: DeserializeOwned>(
     kind: EventKind,
     bytes: &[u8],
 ) -> Result<T, TypedDecodeError> {
-    rmp_serde::from_slice::<T>(bytes).map_err(|e| TypedDecodeError::DecodeFailure {
+    crate::encoding::from_bytes::<T>(bytes).map_err(|e| TypedDecodeError::DecodeFailure {
         kind,
         source: DecodeSource::Msgpack(e),
     })

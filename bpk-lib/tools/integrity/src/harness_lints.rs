@@ -11,6 +11,7 @@ const VALID_PATTERNS: &[&str] = &[
     "State-Machine Harness",
     "Oracle Harness",
     "Runtime And Boundary Harness",
+    "Structural Harness",
 ];
 
 const REQUIRED_FIELDS: &[&str] = &[
@@ -130,11 +131,6 @@ const HEADER_DEBT_ALLOWLIST: &[HeaderDebt] = &[
         path: "tests/index_filter_composition.rs",
         reason: "oracle suite predates module-header doctrine",
         target: "add header when query oracle changes",
-    },
-    HeaderDebt {
-        path: "tests/mmap_cold_start.rs",
-        reason: "mmap parity suite predates module-header doctrine",
-        target: "add header when mmap path changes",
     },
     HeaderDebt {
         path: "tests/perf_gates.rs",

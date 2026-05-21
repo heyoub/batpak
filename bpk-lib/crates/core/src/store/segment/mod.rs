@@ -115,15 +115,15 @@ pub struct CompactionResult {
 }
 
 /// frame_encode: serialize data to msgpack, wrap in \[len:u32 BE\]\[crc32:u32 BE\]\[msgpack\]
-/// Segment payloads are always encoded with `rmp_serde::to_vec_named()`.
-/// \[DEP:rmp_serde::to_vec_named\] → `Result<Vec<u8>, encode::Error>`
+/// Segment payloads are always encoded with the canonical named-field MessagePack helper.
+/// \[DEP:crate::encoding::to_bytes\] -> `Result<Vec<u8>, encode::Error>`
 /// \[DEP:crc32fast::hash\] → u32
 ///
 /// # Errors
 /// Returns `StoreError::Serialization` if the data cannot be serialized to MessagePack.
 pub fn frame_encode<T: serde::Serialize>(data: &T) -> Result<Vec<u8>, StoreError> {
     let msgpack =
-        rmp_serde::to_vec_named(data).map_err(|e| StoreError::Serialization(Box::new(e)))?;
+        crate::encoding::to_bytes(data).map_err(|e| StoreError::Serialization(Box::new(e)))?;
     let crc = crc32fast::hash(&msgpack);
     let len = u32::try_from(msgpack.len()).map_err(|_| StoreError::ser_msg("frame exceeds 4GB"))?;
 
@@ -249,8 +249,8 @@ impl Segment<Active> {
 
         // Write magic + header_len(u32 BE) + header(msgpack)
         file.write_all(SEGMENT_MAGIC).map_err(StoreError::Io)?;
-        let header_bytes =
-            rmp_serde::to_vec_named(&header).map_err(|e| StoreError::Serialization(Box::new(e)))?;
+        let header_bytes = crate::encoding::to_bytes(&header)
+            .map_err(|e| StoreError::Serialization(Box::new(e)))?;
         let header_len = u32::try_from(header_bytes.len())
             .map_err(|_| StoreError::ser_msg("segment header length exceeds u32::MAX"))?
             .to_be_bytes();

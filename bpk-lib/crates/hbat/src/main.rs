@@ -1,8 +1,4 @@
-// justifies: INV-ALLOW-IS-DESIGN; hbat is the repository-owned reference
-// host for the batpak family and intentionally writes machine-readable
-// rendezvous lines and human status messages to stdout/stderr from
-// crates/hbat/src/main.rs. Other Rust crates in this workspace must not
-// rely on this allow — it is local to the reference host binary.
+// justifies: INV-ALLOW-IS-DESIGN; hbat reference host intentionally emits machine-readable rendezvous lines and local status messages.
 #![allow(clippy::print_stdout, clippy::print_stderr)]
 
 use std::io::Write as _;

@@ -162,6 +162,7 @@ fn handle_event_get(store: &Store, input: &[u8]) -> HandlerResult {
 }
 
 #[cfg(test)]
+// justifies: INV-TEST-PANIC-AS-ASSERTION; hbat handler tests use panic and unwrap as assertion signals for reference host dispatch behavior.
 #[allow(clippy::panic, clippy::unwrap_used)]
 mod tests {
     use std::sync::Arc;
