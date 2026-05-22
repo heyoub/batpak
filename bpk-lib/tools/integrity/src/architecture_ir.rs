@@ -366,7 +366,7 @@ fn ledger_invariant_citations(repo_root: &Path) -> Result<BTreeSet<String>> {
     let path = repo_root
         .parent()
         .unwrap_or(repo_root)
-        .join("041_TESTING_LEDGER.md");
+        .join("archive/legacy-docs/041_TESTING_LEDGER.md");
     let content = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
     let mut citations = BTreeSet::new();
     for line in content.lines() {

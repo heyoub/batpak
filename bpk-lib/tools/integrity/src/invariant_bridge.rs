@@ -242,7 +242,7 @@ fn collect_ledger_citations(
     let path = repo_root
         .parent()
         .unwrap_or(repo_root)
-        .join("041_TESTING_LEDGER.md");
+        .join("archive/legacy-docs/041_TESTING_LEDGER.md");
     let content = fs::read_to_string(&path).context("read 041_TESTING_LEDGER.md")?;
     let mut current_title: Option<(String, usize)> = None;
     let mut current_citations = BTreeSet::new();

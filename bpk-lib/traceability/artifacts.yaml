@@ -568,9 +568,11 @@
   kind: docs
   paths:
     - README.md
-    - 010_USER_GUIDE.md
-    - 020_TECHNICAL_REFERENCE.md
-    - 060_CONTRIBUTING.md
+    - FACTORY.md
+    - MODEL.md
+    - INVARIANTS.md
+    - CONFORMANCE.md
+    - CONTRIBUTING.md
     - AGENTS.md
     - templates/minimal-app/Cargo.toml
 - id: ART-EXAMPLES

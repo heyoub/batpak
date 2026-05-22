@@ -58,9 +58,7 @@ fn is_root_doc(file_name: &str) -> bool {
             | "INTEGRATION.md"
             | "CONFORMANCE.md"
             | "COOKBOOK.md"
-            | "040_TESTING_DOCTRINE.md"
-            | "041_TESTING_LEDGER.md"
-            | "060_CONTRIBUTING.md"
+            | "CONTRIBUTING.md"
             | "AGENTS.md"
             | "CHANGELOG.md"
     )

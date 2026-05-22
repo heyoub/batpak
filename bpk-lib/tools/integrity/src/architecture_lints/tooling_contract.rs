@@ -45,7 +45,9 @@ fn check_project_layout_contract(repo_root: &Path) -> Result<()> {
         "INTEGRATION.md",
         "CONFORMANCE.md",
         "COOKBOOK.md",
+        "CONTRIBUTING.md",
         "archive/decisions/099_DECISION_INDEX.md",
+        "archive/legacy-docs/041_TESTING_LEDGER.md",
         "cookbook",
         "bpk-lib/Cargo.toml",
         "bpk-lib/.cargo/config.toml",
@@ -111,9 +113,9 @@ fn check_testing_doc_renames_stay_current(repo_root: &Path) -> Result<()> {
     ensure(
         !docs_rs.contains("HARNESS_DIRECTIVE.html")
             && !docs_rs.contains("HARNESS_LEDGER.html")
-            && docs_rs.contains("TESTING_DOCTRINE.html")
-            && docs_rs.contains("TESTING_LEDGER.html"),
-        "generated docs must use TESTING_DOCTRINE.html and TESTING_LEDGER.html names",
+            && !docs_rs.contains("TESTING_DOCTRINE.html")
+            && !docs_rs.contains("TESTING_LEDGER.html"),
+        "generated docs must not render retired harness docs as live pages",
     )?;
     Ok(())
 }
@@ -129,7 +131,7 @@ fn check_no_mdbook_dependency(repo_root: &Path) -> Result<()> {
         project_root.join("MODEL.md"),
         project_root.join("INVARIANTS.md"),
         project_root.join("CONFORMANCE.md"),
-        project_root.join("060_CONTRIBUTING.md"),
+        project_root.join("CONTRIBUTING.md"),
         project_root.join("AGENTS.md"),
         project_root.join("justfile"),
     ];

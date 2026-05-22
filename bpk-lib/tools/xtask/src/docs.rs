@@ -83,17 +83,7 @@ const ROOT_DOCS: &[RootDoc<'_>] = &[
         title: "Cookbook",
     },
     RootDoc {
-        source_path: "040_TESTING_DOCTRINE.md",
-        output_name: "TESTING_DOCTRINE.html",
-        title: "Testing Doctrine",
-    },
-    RootDoc {
-        source_path: "041_TESTING_LEDGER.md",
-        output_name: "TESTING_LEDGER.html",
-        title: "Testing Ledger",
-    },
-    RootDoc {
-        source_path: "060_CONTRIBUTING.md",
+        source_path: "CONTRIBUTING.md",
         output_name: "CONTRIBUTING.html",
         title: "Contributing",
     },

@@ -80,7 +80,7 @@ fn check_live_docs_do_not_link_archives(repo_root: &Path) -> Result<()> {
         doc_root.join("INTEGRATION.md"),
         doc_root.join("CONFORMANCE.md"),
         doc_root.join("COOKBOOK.md"),
-        doc_root.join("060_CONTRIBUTING.md"),
+        doc_root.join("CONTRIBUTING.md"),
     ];
     for path in files {
         let rel = relative(doc_root, &path);
