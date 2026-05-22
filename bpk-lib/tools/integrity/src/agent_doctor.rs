@@ -128,8 +128,8 @@ fn collect_stale_path_findings(repo_root: &Path, out: &mut Vec<Finding>) -> Resu
                     id: "BATPAK-E-STALE-DOC-PATH",
                     violates: "tracked docs and tools must point at live owner paths",
                     why: format!("{rel} still references retired path `{stale}`"),
-                    fix: "Update the reference to 100_ADR_*.md or a current owner path; do not recreate retired extraction docs by accident.",
-                    example: "100_ADR_0019_CANONICAL_ENCODING_CONTRACT.md",
+                    fix: "Update the reference to a factory root doc, archive/decisions path, or current owner path; do not recreate retired extraction docs by accident.",
+                    example: "archive/decisions/100_ADR_0019_CANONICAL_ENCODING_CONTRACT.md",
                     warning_only: false,
                 });
             }

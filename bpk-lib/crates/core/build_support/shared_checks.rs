@@ -78,7 +78,7 @@ pub(crate) fn extract_anchors(body: &str) -> Vec<JustifiesAnchor> {
             "benches/",
             "tools/",
             "fixtures/",
-            "100_ADR_",
+            "archive/decisions/",
             "cookbook/",
             "traceability/",
         ]
@@ -160,7 +160,10 @@ fn adr_file_with_prefix_exists(repo_root: &Path, prefix: &str) -> bool {
 
 fn adr_search_dirs(repo_root: &Path) -> Vec<PathBuf> {
     let project_root = repo_root.parent().unwrap_or(repo_root);
-    vec![project_root.to_path_buf()]
+    vec![
+        project_root.to_path_buf(),
+        project_root.join("archive/decisions"),
+    ]
 }
 
 fn flattened_adr_name_matches(name: &str, prefix: &str) -> bool {

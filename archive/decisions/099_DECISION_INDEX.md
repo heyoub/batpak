@@ -1,12 +1,12 @@
 # Decision Index
 
-Architecture Decision Records live as flat root `100_ADR_*.md` files. All
-current ADRs are accepted; shipped notes identify the first release where a
-decision became part of the public or repository contract when that release is
-known.
+Architecture Decision Records live in `archive/decisions/`. They are historical
+decision material, not the public reading path. All current ADRs are accepted;
+shipped notes identify the first release where a decision became part of the
+public or repository contract when that release is known.
 
 For the cross-ADR evidence-report identity pattern, see
-`080_EVIDENCE_REPORTS.md`.
+`../../RECEIPTS.md`.
 
 Agent/human transcription rails live as `cookbook/200_*.md` files and are
 indexed by `bpk-lib/traceability/agent_surface.yaml`.
@@ -15,10 +15,10 @@ Root layer docs:
 
 | Doc | Layer |
 | --- | --- |
-| [`001_BATPAK_SUBSTRATE.md`](001_BATPAK_SUBSTRATE.md) | `bp` substrate |
-| [`002_SYNCBAT_RUNTIME.md`](002_SYNCBAT_RUNTIME.md) | `sb` sync runtime |
-| [`003_NETBAT_NETWORK.md`](003_NETBAT_NETWORK.md) | `nb` network/server boundary |
-| [`025_VOCABULARY.md`](025_VOCABULARY.md) | canonical naming and public-surface correction target |
+| [`../../BATTERIES.md`](../../BATTERIES.md) | shipped battery family |
+| [`../../MODEL.md`](../../MODEL.md) | canonical current ontology |
+| [`../../INVARIANTS.md`](../../INVARIANTS.md) | narrative invariants; traceability remains machine law |
+| [`../../CONFORMANCE.md`](../../CONFORMANCE.md) | command and proof contract |
 
 | ADR | Title | Status |
 | --- | --- | --- |

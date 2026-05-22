@@ -26,7 +26,7 @@
 - `README.md`: primary repo entrypoint
 - `FACTORY.md`, `MODEL.md`, `INVARIANTS.md`, `BATTERIES.md`, `TERMINALS.md`, `EVENTS.md`, `RECEIPTS.md`, `CIRCUITS.md`, `REPLAY.md`, `PROJECTIONS.md`, `INTEGRATION.md`, `CONFORMANCE.md`, `COOKBOOK.md`: canonical factory reading surface
 - `cookbook/README.md`, `cookbook/200_*.md`: recipe library indexed by `COOKBOOK.md`
-- `000_REPO_MAP.md`, `001_*.md`, `010_*.md`, `020_*.md`, `025_*.md`, `030_*.md`, `040_*.md`, `041_*.md`, `050_*.md`, `060_*.md`, `080_*.md`, `099_DECISION_INDEX.md`, `100_ADR_*.md`: legacy root docs retained during the ordnance cut until machine references are migrated
+- `archive/decisions/099_DECISION_INDEX.md`, `archive/decisions/100_ADR_*.md`: historical decisions; not the public reading path
 - `bpk-lib/traceability/`: requirements, invariants, flows, artifacts
 
 ## Root Altitudes

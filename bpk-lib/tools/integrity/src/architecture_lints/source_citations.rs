@@ -21,8 +21,20 @@ fn root_source_citation_docs(repo_root: &Path) -> Result<Vec<PathBuf>> {
         let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
             continue;
         };
-        if file_name.starts_with("100_ADR_") || is_root_doc(file_name) {
+        if is_root_doc(file_name) {
             docs.push(path);
+        }
+    }
+    let archive = root.join("archive/decisions");
+    if archive.exists() {
+        for entry in
+            fs::read_dir(&archive).with_context(|| format!("read {}", archive.display()))?
+        {
+            let entry = entry.with_context(|| format!("read entry under {}", archive.display()))?;
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) == Some("md") {
+                docs.push(path);
+            }
         }
     }
     docs.sort();
@@ -32,10 +44,20 @@ fn root_source_citation_docs(repo_root: &Path) -> Result<Vec<PathBuf>> {
 fn is_root_doc(file_name: &str) -> bool {
     matches!(
         file_name,
-        "000_REPO_MAP.md"
-            | "README.md"
-            | "010_USER_GUIDE.md"
-            | "020_TECHNICAL_REFERENCE.md"
+        "README.md"
+            | "FACTORY.md"
+            | "MODEL.md"
+            | "INVARIANTS.md"
+            | "BATTERIES.md"
+            | "TERMINALS.md"
+            | "EVENTS.md"
+            | "RECEIPTS.md"
+            | "CIRCUITS.md"
+            | "REPLAY.md"
+            | "PROJECTIONS.md"
+            | "INTEGRATION.md"
+            | "CONFORMANCE.md"
+            | "COOKBOOK.md"
             | "040_TESTING_DOCTRINE.md"
             | "041_TESTING_LEDGER.md"
             | "060_CONTRIBUTING.md"

@@ -39,8 +39,8 @@ struct PubItemAllowlistWitness {
 
 // build.rs runs before every cargo build/check/test. Cannot be skipped.
 // It enforces live runtime invariants at build time so agents get English
-// errors instead of cryptic compiler failures. See README.md, 010_USER_GUIDE.md,
-// and 020_TECHNICAL_REFERENCE.md for the current truth hierarchy.
+// errors instead of cryptic compiler failures. See README.md, MODEL.md,
+// INVARIANTS.md, and CONFORMANCE.md for the current truth hierarchy.
 fn main() {
     let repo_invariants_available = repo_invariant_surface_available();
 
@@ -61,9 +61,12 @@ fn main() {
         println!("cargo:rerun-if-changed=../../traceability/pub_item_allowlist.yaml");
         println!("cargo:rerun-if-changed=../../traceability/invariants.yaml");
         println!("cargo:rerun-if-changed=../../../README.md");
-        println!("cargo:rerun-if-changed=../../../010_USER_GUIDE.md");
-        println!("cargo:rerun-if-changed=../../../020_TECHNICAL_REFERENCE.md");
-        println!("cargo:rerun-if-changed=../../../100_ADR_0001_SYNC_ONLY_STORE.md");
+        println!("cargo:rerun-if-changed=../../../MODEL.md");
+        println!("cargo:rerun-if-changed=../../../INVARIANTS.md");
+        println!("cargo:rerun-if-changed=../../../CONFORMANCE.md");
+        println!(
+            "cargo:rerun-if-changed=../../../archive/decisions/100_ADR_0001_SYNC_ONLY_STORE.md"
+        );
     }
 
     check_no_tokio_in_deps();
@@ -487,7 +490,7 @@ fn check_no_tokio_in_deps() {
                 "INVARIANT 1 VIOLATED: tokio found in [dependencies].\n\
                  tokio belongs in [dev-dependencies] only.\n\
                  The library is runtime-agnostic. Fan-out uses Vec<flume::Sender>.\n\
-                 See: 020_TECHNICAL_REFERENCE.md."
+                 See: INVARIANTS.md."
             );
         }
     }
@@ -507,7 +510,7 @@ fn check_no_banned_patterns() {
                     "RED FLAG VIOLATED in {path_str}: found `{banned}`.\n\
                      repr(C) is for field ordering, not a wire format.\n\
                      All serialization goes through rmp-serde. Always.\n\
-                     See: 020_TECHNICAL_REFERENCE.md."
+                     See: INVARIANTS.md."
                 );
             }
         }
@@ -519,7 +522,7 @@ fn check_no_banned_patterns() {
                 "INVARIANT 2 VIOLATED in {path_str}: found `async fn`.\n\
                  Store API is sync. Async callers use spawn_blocking()\n\
                  or flume's recv_async(). See: store/subscription.rs.\n\
-                 See: 020_TECHNICAL_REFERENCE.md."
+                 See: INVARIANTS.md."
             );
         }
 
@@ -605,7 +608,7 @@ fn check_no_banned_patterns() {
                          product concept `{noun}` in declaration:\n  {trimmed}\n\
                          Library vocabulary: coordinate, entity, event, outcome, \
                          gate, region, transition.\n\
-                         See: 020_TECHNICAL_REFERENCE.md."
+                         See: INVARIANTS.md."
                     );
                 }
             }
@@ -625,7 +628,7 @@ fn check_no_banned_patterns() {
                          Lane-A exception: definitions only in `{INV3_ARTIFACT_ALLOWED_PATH}`; \
                          crate wiring may use `pub mod artifact;` in `src/lib.rs` and \
                          `pub use crate::artifact::{{...}}` in `src/prelude.rs`.\n\
-                         See: 020_TECHNICAL_REFERENCE.md."
+                         See: INVARIANTS.md."
                     );
                 }
             }

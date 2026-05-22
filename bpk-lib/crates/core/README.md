@@ -12,7 +12,7 @@ bp records.
 Start with the root repository docs:
 
 - `README.md`
-- `001_BATPAK_SUBSTRATE.md`
-- `010_USER_GUIDE.md`
-- `020_TECHNICAL_REFERENCE.md`
-
+- `FACTORY.md`
+- `MODEL.md`
+- `INVARIANTS.md`
+- `CONFORMANCE.md`

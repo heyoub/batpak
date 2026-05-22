@@ -12,7 +12,8 @@ single identity pattern:
 - operational metadata (`generated_at_unix_ms`, `batpak_version`,
   `diagnostics`) outside deterministic body identity
 
-This follows `100_ADR_0019_CANONICAL_ENCODING_CONTRACT.md`.
+This follows the canonical encoding rule in `INVARIANTS.md`; historical design
+context lives in `archive/decisions/100_ADR_0019_CANONICAL_ENCODING_CONTRACT.md`.
 
 ## Family Members
 

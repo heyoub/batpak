@@ -109,8 +109,19 @@ fn check_no_legacy_topology_or_replay_names(
         }
         let rel = relative(repo_root, path);
         let is_live_surface = rel == "README.md"
-            || rel == "010_USER_GUIDE.md"
-            || rel == "020_TECHNICAL_REFERENCE.md"
+            || rel == "FACTORY.md"
+            || rel == "MODEL.md"
+            || rel == "INVARIANTS.md"
+            || rel == "BATTERIES.md"
+            || rel == "TERMINALS.md"
+            || rel == "EVENTS.md"
+            || rel == "RECEIPTS.md"
+            || rel == "CIRCUITS.md"
+            || rel == "REPLAY.md"
+            || rel == "PROJECTIONS.md"
+            || rel == "INTEGRATION.md"
+            || rel == "CONFORMANCE.md"
+            || rel == "COOKBOOK.md"
             || rel.starts_with("crates/core/src/")
             || rel.starts_with("src/")
             || rel.starts_with("crates/core/examples/")
@@ -239,7 +250,7 @@ fn check_for_stale_references(repo_root: &Path, tracked_files: &[PathBuf]) -> Re
         repo_root
             .parent()
             .unwrap_or(repo_root)
-            .join("100_ADR_0003_CACHE_SAFETY_ASSUMPTIONS.md"),
+            .join("archive/decisions/100_ADR_0003_CACHE_SAFETY_ASSUMPTIONS.md"),
         repo_root.join("CHANGELOG.md"),
         repo_root.join("AGENTS.md"),
         repo_root.join("crates/core/build.rs"),

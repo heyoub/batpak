@@ -19,7 +19,7 @@ tasks:
       - "typed append preserves the EventKind declared by the payload"
     docs:
       - "cookbook/200_TYPED_EVENT_STORE.md"
-      - "100_ADR_0010_EVENTPAYLOAD_MACRO_SURFACE.md"
+      - "EVENTS.md"
     scaffold:
       - "typed-store"
 
@@ -60,7 +60,7 @@ tasks:
       - "read evidence records selector, freshness intent, limit, and proof-ref scope deterministically"
     docs:
       - "cookbook/200_READ_WALK_EVIDENCE.md"
-      - "080_EVIDENCE_REPORTS.md"
+      - "RECEIPTS.md"
     scaffold:
       - "evidence-read"
 
@@ -104,7 +104,7 @@ tasks:
       - "projection observations bind to the frontier the mechanism used"
     docs:
       - "cookbook/200_PROJECTION.md"
-      - "080_EVIDENCE_REPORTS.md"
+      - "RECEIPTS.md"
 
   cursor_replay:
     problem: "Replay events through the at-least-once cursor canal."
@@ -125,7 +125,7 @@ tasks:
       - "cursor replay exposes at-least-once delivery and optional durable checkpoints"
     docs:
       - "cookbook/200_CURSOR_REPLAY.md"
-      - "100_ADR_0011_REACTOR_CANAL.md"
+      - "TERMINALS.md"
     scaffold:
       - "reactor"
 
@@ -147,7 +147,7 @@ tasks:
       - "lossy delivery witnesses never fake exactness"
     docs:
       - "cookbook/200_LOSSY_SUBSCRIPTION.md"
-      - "080_EVIDENCE_REPORTS.md"
+      - "RECEIPTS.md"
 
   schema_snapshot:
     problem: "Compare expected and observed schema/fixture hashes."
@@ -167,7 +167,7 @@ tasks:
       - "schema snapshots report structural drift without downstream policy"
     docs:
       - "cookbook/200_READ_WALK_EVIDENCE.md"
-      - "080_EVIDENCE_REPORTS.md"
+      - "RECEIPTS.md"
 
   chain_walk_evidence:
     problem: "Prove chain continuity from a selected event."
@@ -187,7 +187,7 @@ tasks:
       - "chain evidence reports missing starts, truncation, and hash mismatches deterministically"
     docs:
       - "cookbook/200_READ_WALK_EVIDENCE.md"
-      - "080_EVIDENCE_REPORTS.md"
+      - "RECEIPTS.md"
 
   subscriber_frontier_evidence:
     problem: "Report subscriber frontier and loss observations."
@@ -207,7 +207,7 @@ tasks:
       - "subscriber evidence distinguishes known loss from unknown precision"
     docs:
       - "cookbook/200_LOSSY_SUBSCRIPTION.md"
-      - "080_EVIDENCE_REPORTS.md"
+      - "RECEIPTS.md"
 
   projection_run_evidence:
     problem: "Report projection run boundary, freshness, cache, checkpoint, and output facts."
@@ -227,7 +227,7 @@ tasks:
       - "projection evidence binds report body identity to existing projection machinery"
     docs:
       - "cookbook/200_PROJECTION.md"
-      - "080_EVIDENCE_REPORTS.md"
+      - "RECEIPTS.md"
     scaffold:
       - "projection-cache"
 
