@@ -16,50 +16,49 @@ pub(super) fn check(repo_root: &Path) -> Result<()> {
 
 fn check_portable_context_links(repo_root: &Path) -> Result<()> {
     let doc_root = project_root(repo_root);
-    let repo_map = doc_root.join("000_REPO_MAP.md");
     let readme = doc_root.join("README.md");
-    let guide = doc_root.join("010_USER_GUIDE.md");
-    let reference = doc_root.join("020_TECHNICAL_REFERENCE.md");
+    let factory = doc_root.join("FACTORY.md");
+    let model = doc_root.join("MODEL.md");
+    let invariants = doc_root.join("INVARIANTS.md");
+    let conformance = doc_root.join("CONFORMANCE.md");
+    let cookbook = doc_root.join("COOKBOOK.md");
 
     let readme_links = markdown_links(doc_root, &readme)?;
-    ensure(
-        readme_links.contains("000_REPO_MAP.md"),
-        "README.md must link to 000_REPO_MAP.md",
-    )?;
-    ensure(
-        readme_links.contains("010_USER_GUIDE.md"),
-        "README.md must link to 010_USER_GUIDE.md",
-    )?;
-    ensure(
-        readme_links.contains("020_TECHNICAL_REFERENCE.md"),
-        "README.md must link to 020_TECHNICAL_REFERENCE.md",
-    )?;
+    for target in [
+        "FACTORY.md",
+        "MODEL.md",
+        "INVARIANTS.md",
+        "BATTERIES.md",
+        "TERMINALS.md",
+        "EVENTS.md",
+        "RECEIPTS.md",
+        "CIRCUITS.md",
+        "REPLAY.md",
+        "PROJECTIONS.md",
+        "INTEGRATION.md",
+        "CONFORMANCE.md",
+        "COOKBOOK.md",
+    ] {
+        ensure(
+            readme_links.contains(target),
+            format!("README.md must link to canonical factory doc {target}"),
+        )?;
+    }
 
-    let guide_links = markdown_links(doc_root, &guide)?;
-    ensure(
-        guide_links.contains("README.md"),
-        "GUIDE.md must link back to README.md",
-    )?;
-    ensure(
-        guide_links.contains("020_TECHNICAL_REFERENCE.md"),
-        "010_USER_GUIDE.md must link to 020_TECHNICAL_REFERENCE.md",
-    )?;
-
-    let reference_links = markdown_links(doc_root, &reference)?;
-    ensure(
-        reference_links.contains("README.md"),
-        "REFERENCE.md must link back to README.md",
-    )?;
-    ensure(
-        reference_links.contains("010_USER_GUIDE.md"),
-        "020_TECHNICAL_REFERENCE.md must link to 010_USER_GUIDE.md",
-    )?;
-
-    let repo_map_links = markdown_links(doc_root, &repo_map)?;
-    ensure(
-        repo_map_links.contains("cookbook"),
-        "000_REPO_MAP.md must point agents at cookbook/",
-    )?;
+    for (label, path) in [
+        ("FACTORY.md", factory),
+        ("MODEL.md", model),
+        ("INVARIANTS.md", invariants),
+        ("CONFORMANCE.md", conformance),
+        ("COOKBOOK.md", cookbook),
+    ] {
+        let links = markdown_links(doc_root, &path)?;
+        ensure(
+            !links.contains("099_DECISION_INDEX.md")
+                && !links.iter().any(|link| link.contains("100_ADR_")),
+            format!("{label} must not route readers through ADR lineage"),
+        )?;
+    }
 
     Ok(())
 }
@@ -67,17 +66,30 @@ fn check_portable_context_links(repo_root: &Path) -> Result<()> {
 fn check_live_docs_do_not_link_archives(repo_root: &Path) -> Result<()> {
     let doc_root = project_root(repo_root);
     let files = vec![
-        doc_root.join("000_REPO_MAP.md"),
         doc_root.join("README.md"),
-        doc_root.join("010_USER_GUIDE.md"),
-        doc_root.join("020_TECHNICAL_REFERENCE.md"),
+        doc_root.join("FACTORY.md"),
+        doc_root.join("MODEL.md"),
+        doc_root.join("INVARIANTS.md"),
+        doc_root.join("BATTERIES.md"),
+        doc_root.join("TERMINALS.md"),
+        doc_root.join("EVENTS.md"),
+        doc_root.join("RECEIPTS.md"),
+        doc_root.join("CIRCUITS.md"),
+        doc_root.join("REPLAY.md"),
+        doc_root.join("PROJECTIONS.md"),
+        doc_root.join("INTEGRATION.md"),
+        doc_root.join("CONFORMANCE.md"),
+        doc_root.join("COOKBOOK.md"),
         doc_root.join("060_CONTRIBUTING.md"),
     ];
     for path in files {
         let rel = relative(doc_root, &path);
         for link in markdown_links(doc_root, &path)? {
             ensure(
-                !link.starts_with("docs/"),
+                !link.starts_with("docs/")
+                    && !link.starts_with("archive/")
+                    && !link.contains("100_ADR_")
+                    && link != "099_DECISION_INDEX.md",
                 format!("live doc {rel} links archive material as if it were live: {link}"),
             )?;
         }
@@ -89,10 +101,12 @@ fn check_root_doc_site_contract(repo_root: &Path) -> Result<()> {
     let docs_rs = repo_root.join("tools/xtask/src/docs.rs");
     let content = fs::read_to_string(&docs_rs).context("read tools/xtask/src/docs.rs")?;
     for (source, rendered) in [
-        ("000_REPO_MAP.md", "REPO_MAP.html"),
         ("README.md", "README.html"),
-        ("010_USER_GUIDE.md", "GUIDE.html"),
-        ("020_TECHNICAL_REFERENCE.md", "REFERENCE.html"),
+        ("FACTORY.md", "FACTORY.html"),
+        ("MODEL.md", "MODEL.html"),
+        ("INVARIANTS.md", "INVARIANTS.html"),
+        ("CONFORMANCE.md", "CONFORMANCE.html"),
+        ("COOKBOOK.md", "COOKBOOK.html"),
     ] {
         ensure(
             content.contains(source),
@@ -115,21 +129,19 @@ fn check_root_doc_site_contract(repo_root: &Path) -> Result<()> {
 }
 
 fn check_reference_doc_completeness(repo_root: &Path) -> Result<()> {
-    let reference = project_root(repo_root).join("020_TECHNICAL_REFERENCE.md");
-    let content = fs::read_to_string(&reference).context("read 020_TECHNICAL_REFERENCE.md")?;
-    for heading in [
-        "## Storage And Cold Start",
-        "## Public Surface Witnesses",
-        "## Tuning Highlights",
-        "## Benchmark Surfaces",
-        "## Invariants",
-        "## Authoritative Paths",
-        "Key tradeoffs:",
-        "Canonical commands:",
+    let doc_root = project_root(repo_root);
+    for (path, heading) in [
+        ("FACTORY.md", "## Factory Contract"),
+        ("MODEL.md", "## Objects"),
+        ("INVARIANTS.md", "## Batteries Do Not Own The Machine"),
+        ("CONFORMANCE.md", "## Command Authority"),
+        ("CONFORMANCE.md", "## Machine Law"),
     ] {
+        let content =
+            fs::read_to_string(doc_root.join(path)).with_context(|| format!("read {path}"))?;
         ensure(
             content.contains(heading),
-            format!("020_TECHNICAL_REFERENCE.md is missing required section or anchor `{heading}`"),
+            format!("{path} is missing required section or anchor `{heading}`"),
         )?;
     }
     Ok(())

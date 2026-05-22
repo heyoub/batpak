@@ -13,24 +13,74 @@ struct RootDoc<'a> {
 
 const ROOT_DOCS: &[RootDoc<'_>] = &[
     RootDoc {
-        source_path: "000_REPO_MAP.md",
-        output_name: "REPO_MAP.html",
-        title: "Repository Map",
-    },
-    RootDoc {
         source_path: "README.md",
         output_name: "README.html",
         title: "README",
     },
     RootDoc {
-        source_path: "010_USER_GUIDE.md",
-        output_name: "GUIDE.html",
-        title: "Guide",
+        source_path: "FACTORY.md",
+        output_name: "FACTORY.html",
+        title: "Factory",
     },
     RootDoc {
-        source_path: "020_TECHNICAL_REFERENCE.md",
-        output_name: "REFERENCE.html",
-        title: "Reference",
+        source_path: "MODEL.md",
+        output_name: "MODEL.html",
+        title: "Model",
+    },
+    RootDoc {
+        source_path: "INVARIANTS.md",
+        output_name: "INVARIANTS.html",
+        title: "Invariants",
+    },
+    RootDoc {
+        source_path: "BATTERIES.md",
+        output_name: "BATTERIES.html",
+        title: "Batteries",
+    },
+    RootDoc {
+        source_path: "TERMINALS.md",
+        output_name: "TERMINALS.html",
+        title: "Terminals",
+    },
+    RootDoc {
+        source_path: "EVENTS.md",
+        output_name: "EVENTS.html",
+        title: "Events",
+    },
+    RootDoc {
+        source_path: "RECEIPTS.md",
+        output_name: "RECEIPTS.html",
+        title: "Receipts",
+    },
+    RootDoc {
+        source_path: "CIRCUITS.md",
+        output_name: "CIRCUITS.html",
+        title: "Circuits",
+    },
+    RootDoc {
+        source_path: "REPLAY.md",
+        output_name: "REPLAY.html",
+        title: "Replay",
+    },
+    RootDoc {
+        source_path: "PROJECTIONS.md",
+        output_name: "PROJECTIONS.html",
+        title: "Projections",
+    },
+    RootDoc {
+        source_path: "INTEGRATION.md",
+        output_name: "INTEGRATION.html",
+        title: "Integration",
+    },
+    RootDoc {
+        source_path: "CONFORMANCE.md",
+        output_name: "CONFORMANCE.html",
+        title: "Conformance",
+    },
+    RootDoc {
+        source_path: "COOKBOOK.md",
+        output_name: "COOKBOOK.html",
+        title: "Cookbook",
     },
     RootDoc {
         source_path: "040_TESTING_DOCTRINE.md",
@@ -60,10 +110,12 @@ const ROOT_DOCS: &[RootDoc<'_>] = &[
 ];
 
 const REQUIRED_DOC_NAV: &[(&str, &str)] = &[
-    ("000_REPO_MAP.md", "REPO_MAP.html"),
     ("README.md", "README.html"),
-    ("010_USER_GUIDE.md", "GUIDE.html"),
-    ("020_TECHNICAL_REFERENCE.md", "REFERENCE.html"),
+    ("FACTORY.md", "FACTORY.html"),
+    ("MODEL.md", "MODEL.html"),
+    ("INVARIANTS.md", "INVARIANTS.html"),
+    ("CONFORMANCE.md", "CONFORMANCE.html"),
+    ("COOKBOOK.md", "COOKBOOK.html"),
 ];
 
 pub(crate) fn docs(args: DocsArgs) -> Result<()> {
@@ -288,11 +340,12 @@ mod tests {
     #[test]
     fn rewrite_root_doc_links_updates_canonical_docs() {
         let rewritten = rewrite_root_doc_links(
-            "[map](000_REPO_MAP.md) [readme](README.md) [guide](010_USER_GUIDE.md) [reference](020_TECHNICAL_REFERENCE.md)",
+            "[factory](FACTORY.md) [readme](README.md) [model](MODEL.md) [conformance](CONFORMANCE.md)",
         );
+        assert!(rewritten.contains("FACTORY.html"));
         assert!(rewritten.contains("README.html"));
-        assert!(rewritten.contains("GUIDE.html"));
-        assert!(rewritten.contains("REFERENCE.html"));
+        assert!(rewritten.contains("MODEL.html"));
+        assert!(rewritten.contains("CONFORMANCE.html"));
     }
 
     #[test]

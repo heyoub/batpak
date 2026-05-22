@@ -23,11 +23,10 @@
 - `bpk-lib/crates/macros/`, `bpk-lib/crates/macros-support/`, `bpk-lib/crates/bench-support/`: companion workspace crates
 - `bpk-lib/tools/integrity/`: traceability and structural detectors
 - `bpk-lib/tools/xtask/`: canonical developer command surface
-- `000_REPO_MAP.md`: root reading order and layout contract
 - `README.md`: primary repo entrypoint
-- `010_USER_GUIDE.md`: human-first workflows and usage
-- `020_TECHNICAL_REFERENCE.md`: technical reference and invariants
-- `099_DECISION_INDEX.md`, `100_ADR_*.md`, `cookbook/README.md`, `cookbook/200_*.md`: flat root decision and recipe surface
+- `FACTORY.md`, `MODEL.md`, `INVARIANTS.md`, `BATTERIES.md`, `TERMINALS.md`, `EVENTS.md`, `RECEIPTS.md`, `CIRCUITS.md`, `REPLAY.md`, `PROJECTIONS.md`, `INTEGRATION.md`, `CONFORMANCE.md`, `COOKBOOK.md`: canonical factory reading surface
+- `cookbook/README.md`, `cookbook/200_*.md`: recipe library indexed by `COOKBOOK.md`
+- `000_REPO_MAP.md`, `001_*.md`, `010_*.md`, `020_*.md`, `025_*.md`, `030_*.md`, `040_*.md`, `041_*.md`, `050_*.md`, `060_*.md`, `080_*.md`, `099_DECISION_INDEX.md`, `100_ADR_*.md`: legacy root docs retained during the ordnance cut until machine references are migrated
 - `bpk-lib/traceability/`: requirements, invariants, flows, artifacts
 
 ## Root Altitudes
@@ -37,13 +36,24 @@
 - Package-owned Cargo examples live under the owning crate. Today that means `bpk-lib/crates/core/examples/` for `batpak`; do not add root `examples/`.
 - Runtime/network crates (`syncbat`, `netbat`) must have integration `tests/`. Proc-macro/support crates may be tested through their owning consumer crates instead of carrying empty `tests/` folders.
 - Repo-owned Rust tools live under `bpk-lib/tools/`, with root `scripts/` reserved for CI/devcontainer boundary wrappers only.
-- Public docs stay flat at root (`README.md`, `001_*.md`, `010_*.md`, `020_*.md`, `100_ADR_*.md`, `cookbook/200_*.md`).
+- Public docs stay flat at root. The canonical reading surface is `README.md` plus the factory docs listed above; historical numbered docs are migration inputs until archived.
 - Tool-standard config paths live where their tools require them: `bpk-lib/.cargo/` and `bpk-lib/.config/` for the Cargo workspace; root `.devcontainer/`, `.github/`, and `.githooks/` for repo/CI entrypoints.
 - Agent/local workspace state (`.cursor/`, `.claude/`, `.codex/`, `.agents/`, `bpk-lib/target/`) is not substrate source.
 
 ## Canonical Commands
 
-Run canonical commands from `bpk-lib/`:
+At repo root, agents use `just`. Raw `cargo`, `npm`, and `pnpm` are implementation details unless routed through an explicit escape hatch.
+
+- `just list` — show the command surface
+- `just inspect` — structural doctrine, boundary checks, architecture IR, and ast-grep calipers
+- `just verify` — canonical preflight proof bundle
+- `just seal` — release-readiness checks for a clean tree
+- `just ship dry` — release dry run
+- `just cargo -- <args>` — explicit Cargo escape hatch
+- `just pnpm -- <args>` — explicit pnpm escape hatch
+- `just npm -- <args>` — explicit npm escape hatch
+
+Implementation commands still live under `bpk-lib/` and remain valid when a task specifically needs the machinery layer:
 
 - `cd bpk-lib && cargo xtask doctor`
 - `cd bpk-lib && cargo xtask install-hooks`
@@ -83,13 +93,14 @@ Run canonical commands from `bpk-lib/`:
 ## Change Map
 
 - Public API change:
-  - update `README.md`, `010_USER_GUIDE.md`, or `020_TECHNICAL_REFERENCE.md` as appropriate
+  - update `README.md`, `EVENTS.md`, `RECEIPTS.md`, `REPLAY.md`, `PROJECTIONS.md`, `INTEGRATION.md`, or `CONFORMANCE.md` as appropriate
   - update examples if onboarding changed
-  - update traceability and ADRs if invariants/flows changed
+  - update traceability if invariants/flows changed
 - Store internals change:
-  - run `cargo xtask ci`
+  - run `just inspect`
+  - run `just verify` when the change affects store behavior, xtask itself, or CI config
   - run the relevant perf surface
-  - inspect `bpk-lib/crates/core/tests/perf_gates.rs` and `020_TECHNICAL_REFERENCE.md`
+  - inspect `bpk-lib/crates/core/tests/perf_gates.rs` and the relevant factory root doc
 - Benchmark harness change:
   - update `cargo xtask bench` surfaces in `bpk-lib/tools/xtask/src/bench.rs`
   - refresh baselines intentionally
@@ -99,14 +110,14 @@ Run canonical commands from `bpk-lib/`:
   - keep JSON mode stdout-clean
   - keep retained artifacts under `bpk-lib/target/xtask-cover/last-run/`
 - Docs-only change:
-  - keep `README.md`, `010_USER_GUIDE.md`, and `020_TECHNICAL_REFERENCE.md` consistent
+  - keep `README.md`, `MODEL.md`, `INVARIANTS.md`, `CONFORMANCE.md`, and related factory docs consistent
 
 ## Guardrails
 
 - Do not introduce async runtime dependencies in production.
 - Keep root-first commands and paths accurate.
 - If you add a public item or named flow, update `bpk-lib/traceability/`.
-- Prefer `cargo xtask` over inventing new one-off local commands.
+- Prefer root `just` recipes over inventing new one-off local commands; use `xtask` for machinery that needs parsing, walking, validation, or receipts.
 - **PCP boundary** — batpak may align with the sibling `PCP_SPEC`, but this crate
   does not implement PCP-Core or `contract.context_v1` wire validation. Treat
   `contract.context_v1` as a normative optional PCP profile only when
@@ -115,7 +126,7 @@ Run canonical commands from `bpk-lib/`:
   surface. `authority_required` remains receiver-policy input, never granted
   authority.
 - `.githooks/` is the tracked repo hook surface. `cargo xtask setup --install-tools` will install it when no custom `core.hooksPath` is active; otherwise use `cargo xtask install-hooks` after clearing or changing the custom hook path.
-- **Structural parity checks** — `cd bpk-lib && cargo xtask structural` (called automatically by `cargo xtask ci`) runs two detectors you must not break:
+- **Structural parity checks** — `just inspect` runs the focused structural surface. The underlying `cd bpk-lib && cargo xtask structural` command (called automatically by `cargo xtask ci`) runs two detectors you must not break:
   - `check_ci_parity` — fails if `.github/workflows/ci.yml` drifts from the xtask source tree or `.devcontainer/Dockerfile`. Specifically: every `cargo xtask <subcommand>` referenced in the workflow must exist as a subcommand in xtask; every `taiki-e/install-action` tool must be present in xtask's setup step; tool version pins must agree across all three files. **Rule:** if you modify `bpk-lib/tools/xtask/src/main.rs`, `bpk-lib/tools/xtask/src/commands.rs`, `.github/workflows/ci.yml`, or `.devcontainer/Dockerfile`, run `cd bpk-lib && cargo xtask structural` before push.
   - `check_store_pub_fn_coverage` — uses `syn` to parse `bpk-lib/crates/core/src/store/`, extracts every `pub fn` on `impl Store`, and asserts that each one has at least one method-call reference somewhere in `bpk-lib/crates/core/tests/` or `bpk-lib/crates/core/src/`. Catches orphan public methods that ship untested and invisible to mutation testing. **Rule:** if you add a `pub fn` to `Store`, ensure it has a call site in tests or the check will fail.
 - **Stack boundary checks** — `cd bpk-lib && cargo xtask boundary` is the focused name for the layer checks enforced by structural. It keeps `batpak` below `syncbat` and `syncbat` below `netbat`, while downstream kit/agent layers stay outside this workspace; it also rejects production async runtime dependencies and unsafe/async runtime shapes in the family crates.
