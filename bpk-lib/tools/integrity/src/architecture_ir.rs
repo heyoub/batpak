@@ -1,5 +1,6 @@
 use crate::repo_surface::{ensure, load_yaml, relative, resolve_repo_or_core_path};
 use crate::shared_checks::{extract_anchors, JustifiesAnchor};
+use crate::source_cache::SourceCache;
 use crate::store_pub_fn_coverage;
 use anyhow::{bail, Context, Result};
 use cargo_metadata::{Metadata, MetadataCommand};
@@ -241,6 +242,7 @@ fn build(repo_root: &Path) -> Result<ArchitectureIr> {
 
     let traceability = load_traceability(repo_root)?;
     let invariant_gate_links = load_invariant_gate_links(repo_root, &traceability)?;
+    let mut source_cache = SourceCache::new();
 
     Ok(ArchitectureIr {
         schema_version: SCHEMA_VERSION,
@@ -250,13 +252,16 @@ fn build(repo_root: &Path) -> Result<ArchitectureIr> {
         gates: gate_catalog(),
         platform_allowlist: load_platform_allowlist(repo_root)?,
         benches: load_benches(repo_root, &metadata)?,
-        store_pub_fns: load_store_pub_fns(repo_root)?,
+        store_pub_fns: load_store_pub_fns(repo_root, &mut source_cache)?,
         invariant_gate_links,
     })
 }
 
-fn load_store_pub_fns(repo_root: &Path) -> Result<Vec<StorePubFnIr>> {
-    Ok(store_pub_fn_coverage::inventory(repo_root)?
+fn load_store_pub_fns(
+    repo_root: &Path,
+    source_cache: &mut SourceCache,
+) -> Result<Vec<StorePubFnIr>> {
+    Ok(store_pub_fn_coverage::inventory(repo_root, source_cache)?
         .into_iter()
         .map(|entry| StorePubFnIr {
             name: entry.name,

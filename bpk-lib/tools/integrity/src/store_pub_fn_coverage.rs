@@ -1,8 +1,9 @@
 use crate::repo_surface::{core_src_root, core_tests_root, rust_files};
+use crate::source_cache::{path_segments, SourceCache};
 use anyhow::{bail, Context, Result};
 use std::collections::BTreeSet;
-use std::fs;
 use std::path::Path;
+use std::sync::Arc;
 use syn::visit::{self, Visit};
 use syn::Item;
 
@@ -31,8 +32,8 @@ pub(crate) struct StorePubFnCoverage {
 /// Reference detection uses regex against the combined text of `tests/` and
 /// `src/` (which covers both standalone test files and `#[cfg(test)] mod tests`
 /// inline in source files).
-pub(crate) fn check(repo_root: &Path) -> Result<()> {
-    let inventory = inventory(repo_root)?;
+pub(crate) fn check(repo_root: &Path, source_cache: &mut SourceCache) -> Result<()> {
+    let inventory = inventory(repo_root, source_cache)?;
     let unreferenced = inventory
         .iter()
         .filter(|entry| !entry.covered && !entry.allowlisted)
@@ -57,16 +58,18 @@ pub(crate) fn check(repo_root: &Path) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn inventory(repo_root: &Path) -> Result<Vec<StorePubFnCoverage>> {
+pub(crate) fn inventory(
+    repo_root: &Path,
+    source_cache: &mut SourceCache,
+) -> Result<Vec<StorePubFnCoverage>> {
     // 1. Parse every store source file with syn and walk all inherent
     // `impl Store` blocks. Store's public surface is intentionally split by
     // owner modules; the detector follows that architecture instead of
     // hardcoding `src/store/mod.rs`.
     let mut pub_fns: BTreeSet<String> = BTreeSet::new();
     for store_source_path in rust_files(&core_src_root(repo_root).join("store")) {
-        let source = fs::read_to_string(&store_source_path)
-            .with_context(|| format!("read {}", store_source_path.display()))?;
-        let ast = syn::parse_file(&source)
+        let ast = source_cache
+            .parse_rust(&store_source_path)
             .with_context(|| format!("syn parse {}", store_source_path.display()))?;
 
         for item in &ast.items {
@@ -113,19 +116,14 @@ pub(crate) fn inventory(repo_root: &Path) -> Result<Vec<StorePubFnCoverage>> {
     // 2. Build the reference corpus: parseable .rs files under tests/ and src/.
     // Compile-fail UI fixtures are intentionally invalid Rust and are skipped;
     // comments and string literals never count because reference detection is AST-based.
-    let mut search_asts = Vec::new();
+    let mut search_asts: Vec<Arc<syn::File>> = Vec::new();
     for path in rust_files(&core_tests_root(repo_root))
         .into_iter()
         .chain(rust_files(&core_src_root(repo_root)))
     {
-        let content = match fs::read_to_string(&path) {
-            Ok(content) => content,
-            Err(_) => continue,
-        };
-        let Ok(ast) = syn::parse_file(&content) else {
-            continue;
-        };
-        search_asts.push(ast);
+        if let Some(ast) = source_cache.parse_rust_if_valid(&path)? {
+            search_asts.push(ast);
+        }
     }
 
     Ok(pub_fns
@@ -157,12 +155,7 @@ fn ast_references_store_method(ast: &syn::File, name: &str) -> bool {
 
         fn visit_expr_call(&mut self, node: &'ast syn::ExprCall) {
             if let syn::Expr::Path(path) = node.func.as_ref() {
-                let segments = path
-                    .path
-                    .segments
-                    .iter()
-                    .map(|segment| segment.ident.to_string())
-                    .collect::<Vec<_>>();
+                let segments = path_segments(&path.path);
                 if matches!(
                     segments.as_slice(),
                     [owner, method] if owner == "Store" && method == self.name

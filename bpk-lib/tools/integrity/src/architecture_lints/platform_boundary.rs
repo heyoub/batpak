@@ -1,13 +1,17 @@
 use super::{ensure, relative};
-use anyhow::{Context, Result};
+use crate::source_cache::{path_segments, SourceCache};
+use anyhow::Result;
 use quote::ToTokens;
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs;
 use std::path::{Path, PathBuf};
 use syn::visit::{self, Visit};
 use syn::{Attribute, Expr, ExprCall, ExprMethodCall, Item, UseTree};
 
-pub(super) fn check(repo_root: &Path, tracked_files: &[PathBuf]) -> Result<()> {
+pub(super) fn check(
+    repo_root: &Path,
+    tracked_files: &[PathBuf],
+    source_cache: &mut SourceCache,
+) -> Result<()> {
     let banned_calls = [
         ("File::create_new", "exclusive file creation"),
         (".sync_all(", "file or directory sync_all"),
@@ -44,9 +48,8 @@ pub(super) fn check(repo_root: &Path, tracked_files: &[PathBuf]) -> Result<()> {
             continue;
         }
 
-        let content =
-            fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
-        if let Ok(file) = syn::parse_file(&content) {
+        let content = source_cache.read_to_string(path)?;
+        if let Some(file) = source_cache.parse_rust_if_valid(path)? {
             for violation in target_cfg_attr_violations(&file) {
                 ensure(
                     false,
@@ -91,11 +94,15 @@ pub(super) fn check(repo_root: &Path, tracked_files: &[PathBuf]) -> Result<()> {
             }
         }
     }
-    check_direct_fs_contact_ratchet(repo_root, tracked_files)?;
+    check_direct_fs_contact_ratchet(repo_root, tracked_files, source_cache)?;
     Ok(())
 }
 
-fn check_direct_fs_contact_ratchet(repo_root: &Path, tracked_files: &[PathBuf]) -> Result<()> {
+fn check_direct_fs_contact_ratchet(
+    repo_root: &Path,
+    tracked_files: &[PathBuf],
+    source_cache: &mut SourceCache,
+) -> Result<()> {
     const DIRECT_FS_NEEDLES: &[&str] = &[
         "std::fs::read_dir",
         "std::fs::metadata",
@@ -295,8 +302,7 @@ fn check_direct_fs_contact_ratchet(repo_root: &Path, tracked_files: &[PathBuf]) 
         {
             continue;
         }
-        let content =
-            fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
+        let content = source_cache.read_to_string(path)?;
         for line in content.lines() {
             let trimmed = line.trim_start();
             if trimmed.starts_with("//") || trimmed.starts_with("///") || trimmed.starts_with("//!")
@@ -421,11 +427,7 @@ struct PlatformContactVisitor {
 
 impl PlatformContactVisitor {
     fn call_path_violation(&self, path: &syn::Path) -> Option<&'static str> {
-        let segments = path
-            .segments
-            .iter()
-            .map(|segment| segment.ident.to_string())
-            .collect::<Vec<_>>();
+        let segments = path_segments(path);
         let (owner, method) = match segments.as_slice() {
             [owner, method] => (owner.as_str(), method.as_str()),
             [.., owner, method] => (owner.as_str(), method.as_str()),
@@ -459,12 +461,7 @@ impl PlatformContactVisitor {
         let Expr::Path(path) = func.as_ref() else {
             return false;
         };
-        let segments = path
-            .path
-            .segments
-            .iter()
-            .map(|segment| segment.ident.to_string())
-            .collect::<Vec<_>>();
+        let segments = path_segments(&path.path);
         let (owner, method) = match segments.as_slice() {
             [owner, method] => (owner.as_str(), method.as_str()),
             [.., owner, method] => (owner.as_str(), method.as_str()),

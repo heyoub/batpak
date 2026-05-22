@@ -6,12 +6,17 @@ mod source_citations;
 mod syncbat_boundary;
 mod tooling_contract;
 
+use crate::source_cache::SourceCache;
 use anyhow::{anyhow, Result};
 use std::path::{Path, PathBuf};
 
-pub fn check(repo_root: &Path, tracked_files: &[PathBuf]) -> Result<()> {
+pub fn check(
+    repo_root: &Path,
+    tracked_files: &[PathBuf],
+    source_cache: &mut SourceCache,
+) -> Result<()> {
     repo_hygiene::check(repo_root, tracked_files)?;
-    platform_boundary::check(repo_root, tracked_files)?;
+    platform_boundary::check(repo_root, tracked_files, source_cache)?;
     syncbat_boundary::check(repo_root, tracked_files)?;
     tooling_contract::check(repo_root)?;
     docs_contract::check(repo_root)?;

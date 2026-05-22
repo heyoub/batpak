@@ -6,6 +6,7 @@ use crate::shared_checks::{
     collect_dead_code_silencer_sites, line_carries_justification,
     load_dead_code_silencer_allowlist, load_known_invariants,
 };
+use crate::source_cache::SourceCache;
 use crate::{
     agent_surface, architecture_lints, ci_parity, harness_lints, invariant_bridge, public_surface,
     store_pub_fn_coverage,
@@ -18,7 +19,8 @@ use syn::spanned::Spanned;
 pub(crate) fn run() -> Result<()> {
     let repo_root = repo_root()?;
     let tracked_files = tracked_repo_files(&repo_root)?;
-    architecture_lints::check(&repo_root, &tracked_files)?;
+    let mut source_cache = SourceCache::new();
+    architecture_lints::check(&repo_root, &tracked_files, &mut source_cache)?;
     agent_surface::check(&repo_root)?;
     harness_lints::check(&repo_root, &tracked_files)?;
     invariant_bridge::check(&repo_root, &tracked_files)?;
@@ -30,9 +32,9 @@ pub(crate) fn run() -> Result<()> {
     check_allow_justifications(&repo_root)?;
     check_rust_file_size_pressure(&repo_root)?;
     check_inline_test_island_pressure(&repo_root)?;
-    public_surface::check(&repo_root)?;
+    public_surface::check(&repo_root, &mut source_cache)?;
     ci_parity::check(&repo_root)?;
-    store_pub_fn_coverage::check(&repo_root)?;
+    store_pub_fn_coverage::check(&repo_root, &mut source_cache)?;
     println!("structural-check: ok");
     Ok(())
 }

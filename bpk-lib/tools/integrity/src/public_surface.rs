@@ -3,12 +3,13 @@ use crate::repo_surface::{
     rust_files,
 };
 use crate::shared_checks::{ast_references_name, public_item_names};
+use crate::source_cache::SourceCache;
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
-use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 #[derive(Debug, Deserialize)]
 struct AllowlistEntry {
@@ -31,8 +32,8 @@ impl AllowlistWitness {
     }
 }
 
-pub(crate) fn check(repo_root: &Path) -> Result<()> {
-    check_doc_hidden_public_surface(repo_root)?;
+pub(crate) fn check(repo_root: &Path, source_cache: &mut SourceCache) -> Result<()> {
+    check_doc_hidden_public_surface(repo_root, source_cache)?;
 
     let allowlist: Vec<AllowlistEntry> =
         load_yaml(&repo_root.join("traceability/pub_item_allowlist.yaml"))?;
@@ -86,9 +87,8 @@ pub(crate) fn check(repo_root: &Path) -> Result<()> {
                     entry.name, witness.path
                 ),
             )?;
-            let content = fs::read_to_string(&abs)
-                .with_context(|| format!("read witness {}", witness.path))?;
-            let file = syn::parse_file(&content)
+            let file = source_cache
+                .parse_rust(&abs)
                 .with_context(|| format!("parse witness {}", witness.path))?;
             ensure(
                 ast_references_name(&file, &entry.name),
@@ -104,11 +104,10 @@ pub(crate) fn check(repo_root: &Path) -> Result<()> {
     }
 
     let test_files: Vec<PathBuf> = rust_files(&core_tests_root(repo_root));
-    let mut parsed_tests: Vec<(PathBuf, syn::File)> = Vec::with_capacity(test_files.len());
+    let mut parsed_tests: Vec<(PathBuf, Arc<syn::File>)> = Vec::with_capacity(test_files.len());
     for path in test_files {
-        let content = fs::read_to_string(&path)
-            .with_context(|| format!("read {}", relative(repo_root, &path)))?;
-        let file = syn::parse_file(&content)
+        let file = source_cache
+            .parse_rust(&path)
             .with_context(|| format!("parse {}", relative(repo_root, &path)))?;
         parsed_tests.push((path, file));
     }
@@ -117,8 +116,8 @@ pub(crate) fn check(repo_root: &Path) -> Result<()> {
         if path.ends_with("prelude.rs") {
             continue;
         }
-        let content = fs::read_to_string(&path)?;
-        let file = syn::parse_file(&content)
+        let file = source_cache
+            .parse_rust(&path)
             .with_context(|| format!("parse {}", relative(repo_root, &path)))?;
         for name in public_item_names(&file) {
             if allowed.contains_key(name.as_str()) {
@@ -161,7 +160,7 @@ fn check_internal_justification_grace(allowlist: &[AllowlistEntry]) -> Result<()
     )
 }
 
-fn check_doc_hidden_public_surface(repo_root: &Path) -> Result<()> {
+fn check_doc_hidden_public_surface(repo_root: &Path, source_cache: &mut SourceCache) -> Result<()> {
     let allowed: BTreeSet<&str> = [
         "crates/core/src/lib.rs::__private",
         "crates/core/src/lib.rs::batpak",
@@ -179,8 +178,8 @@ fn check_doc_hidden_public_surface(repo_root: &Path) -> Result<()> {
     let mut unexpected = Vec::new();
     for path in rust_files(&core_src_root(repo_root)) {
         let rel = relative(repo_root, &path);
-        let content = fs::read_to_string(&path)?;
-        let file = syn::parse_file(&content)
+        let file = source_cache
+            .parse_rust(&path)
             .with_context(|| format!("parse {}", relative(repo_root, &path)))?;
         for name in doc_hidden_public_names(&file) {
             let key = format!("{rel}::{name}");
