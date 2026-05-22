@@ -50,14 +50,7 @@ impl RestoreBase {
     ) -> Self {
         let entries_by_sequence: Vec<Arc<IndexEntry>> = entries.into_iter().map(Arc::new).collect();
         let mut entries_by_entity = entries_by_sequence.clone();
-        entries_by_entity.sort_by(|left, right| {
-            left.coord
-                .entity()
-                .cmp(right.coord.entity())
-                .then(left.wall_ms.cmp(&right.wall_ms))
-                .then(left.clock.cmp(&right.clock))
-                .then(left.event_id.cmp(&right.event_id))
-        });
+        sort_entries_by_entity(&mut entries_by_entity);
 
         Self {
             routing: routing_hint
@@ -78,21 +71,11 @@ impl RestoreBase {
 
 impl RoutingSummary {
     pub(crate) fn from_sorted_entries(entries: &[IndexEntry], chunk_count: usize) -> Self {
-        let arcs: Vec<Arc<IndexEntry>> = entries.iter().cloned().map(Arc::new).collect();
-        let mut entity_sorted = arcs;
-        entity_sorted.sort_by(|left, right| {
-            left.coord
-                .entity()
-                .cmp(right.coord.entity())
-                .then(left.wall_ms.cmp(&right.wall_ms))
-                .then(left.clock.cmp(&right.clock))
-                .then(left.event_id.cmp(&right.event_id))
-        });
-        Self::from_entries(
-            &entries.iter().cloned().map(Arc::new).collect::<Vec<_>>(),
-            &entity_sorted,
-            chunk_count,
-        )
+        let entries_by_sequence: Vec<Arc<IndexEntry>> =
+            entries.iter().cloned().map(Arc::new).collect();
+        let mut entries_by_entity = entries_by_sequence.clone();
+        sort_entries_by_entity(&mut entries_by_entity);
+        Self::from_entries(&entries_by_sequence, &entries_by_entity, chunk_count)
     }
 
     pub(super) fn from_entries(
@@ -230,6 +213,17 @@ impl RoutingSummary {
     }
 }
 
+fn sort_entries_by_entity(entries: &mut [Arc<IndexEntry>]) {
+    entries.sort_by(|left, right| {
+        left.coord
+            .entity()
+            .cmp(right.coord.entity())
+            .then(left.wall_ms.cmp(&right.wall_ms))
+            .then(left.clock.cmp(&right.clock))
+            .then(left.event_id.cmp(&right.event_id))
+    });
+}
+
 pub(crate) fn recommended_restore_chunk_count(entry_count: usize) -> usize {
     let chunks = entry_count.div_ceil(65_536);
     chunks.clamp(1, 32)
@@ -320,12 +314,7 @@ mod tests {
     fn sorted_arcs(entries: Vec<IndexEntry>) -> (Vec<Arc<IndexEntry>>, Vec<Arc<IndexEntry>>) {
         let entries_by_sequence: Vec<_> = entries.into_iter().map(Arc::new).collect();
         let mut entries_by_entity = entries_by_sequence.clone();
-        entries_by_entity.sort_by(|a, b| {
-            a.coord
-                .entity()
-                .cmp(b.coord.entity())
-                .then(a.global_sequence.cmp(&b.global_sequence))
-        });
+        sort_entries_by_entity(&mut entries_by_entity);
         (entries_by_sequence, entries_by_entity)
     }
 
