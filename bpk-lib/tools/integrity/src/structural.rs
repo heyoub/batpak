@@ -40,10 +40,7 @@ pub(crate) fn run() -> Result<()> {
 
 fn check_rust_file_size_pressure(repo_root: &Path, source_cache: &mut SourceCache) -> Result<()> {
     const DEFAULT_LINE_BUDGET: usize = 850;
-    const RATCHELED_OVER_BUDGET_FILES: &[(&str, usize)] = &[
-        ("crates/core/src/store/index/mod.rs", 835),
-        ("crates/macros/src/lib.rs", 849),
-    ];
+    const RATCHELED_OVER_BUDGET_FILES: &[(&str, usize)] = &[];
 
     for path in production_rust_files(repo_root) {
         let rel = relative(repo_root, &path);
