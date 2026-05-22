@@ -11,9 +11,9 @@ use batpak::store::MAX_CHECKPOINT_ID_LEN;
 use batpak::store::{
     AppendOptions, AppendReceipt, BatchAppendItem, CausationRef, CheckpointId, CheckpointIdError,
     CursorGapConfig, EncodedBytes, ExtensionKey, ExtensionKeyError, GapObservation, IdempotencyKey,
-    ReceiptExtensionKey, ReceiptExtensionNamespace, ReceiptExtensionValue, SigningDowngradeBody,
-    SigningDowngradeReason, SigningExtensionNamespace, Store, StoreConfig,
-    SIGNING_DOWNGRADE_SCHEMA_VERSION,
+    ReceiptExtensionKey, ReceiptExtensionNamespace, ReceiptExtensionValue, ReceiptVerification,
+    ReceiptVerificationError, SigningDowngradeBody, SigningDowngradeReason,
+    SigningExtensionNamespace, Store, StoreConfig, SIGNING_DOWNGRADE_SCHEMA_VERSION,
 };
 use batpak::store::{DenialReceipt, SigningKey};
 use std::num::NonZeroUsize;
@@ -872,6 +872,10 @@ fn signed_receipts_round_trip() {
         EventKind::SYSTEM_DENIAL
     );
     let verified_denial_receipt = store.verify_denial_receipt(&denial_receipt);
+    assert_eq!(
+        store.verify_denial_receipt_detailed(&denial_receipt),
+        ReceiptVerification::Signed
+    );
     assert!(verified_denial_receipt);
 
     store.close().expect("close rotated store");
@@ -920,10 +924,17 @@ fn receipt_verification_rejects_stripped_signature_and_index_field_tampering() {
         store.verify_append_receipt(&receipt),
         "fresh signed receipt should verify"
     );
+    let detailed = store.verify_append_receipt_detailed(&receipt);
+    assert!(detailed.is_valid());
+    assert!(detailed.error().is_none());
 
     let mut stripped = receipt.clone();
     stripped.key_id = [0; 32];
     stripped.signature = None;
+    assert_eq!(
+        store.verify_append_receipt_detailed(&stripped),
+        ReceiptVerification::Invalid(ReceiptVerificationError::UnsignedReceiptRejected)
+    );
     assert!(
         !store.verify_append_receipt(&stripped),
         "stripping a signature must fail when the store has a verifying key registry"
@@ -931,6 +942,10 @@ fn receipt_verification_rejects_stripped_signature_and_index_field_tampering() {
 
     let mut wrong_sequence = receipt.clone();
     wrong_sequence.sequence += 1;
+    assert_eq!(
+        store.verify_append_receipt_detailed(&wrong_sequence),
+        ReceiptVerification::Invalid(ReceiptVerificationError::SequenceMismatch)
+    );
     assert!(
         !store.verify_append_receipt(&wrong_sequence),
         "sequence must match the committed index entry, not just the signature cover"
@@ -938,6 +953,10 @@ fn receipt_verification_rejects_stripped_signature_and_index_field_tampering() {
 
     let mut wrong_content_hash = receipt.clone();
     wrong_content_hash.content_hash[0] ^= 0xFF;
+    assert_eq!(
+        store.verify_append_receipt_detailed(&wrong_content_hash),
+        ReceiptVerification::Invalid(ReceiptVerificationError::ContentHashMismatch)
+    );
     assert!(
         !store.verify_append_receipt(&wrong_content_hash),
         "content hash must match the committed index entry"
@@ -945,6 +964,10 @@ fn receipt_verification_rejects_stripped_signature_and_index_field_tampering() {
 
     let mut wrong_extensions = receipt.clone();
     wrong_extensions.extensions.insert(ext_key, vec![9]);
+    assert_eq!(
+        store.verify_append_receipt_detailed(&wrong_extensions),
+        ReceiptVerification::Invalid(ReceiptVerificationError::ExtensionsMismatch)
+    );
     assert!(
         !store.verify_append_receipt(&wrong_extensions),
         "receipt extensions must match the committed index entry"
@@ -968,6 +991,10 @@ fn unsigned_receipt_verification_still_checks_committed_index_state() {
 
     let mut wrong_sequence: AppendReceipt = receipt.clone();
     wrong_sequence.sequence += 1;
+    assert_eq!(
+        store.verify_append_receipt_detailed(&wrong_sequence),
+        ReceiptVerification::Invalid(ReceiptVerificationError::SequenceMismatch)
+    );
     assert!(
         !store.verify_append_receipt(&wrong_sequence),
         "unsigned verification must still reject receipts whose index fields do not match"

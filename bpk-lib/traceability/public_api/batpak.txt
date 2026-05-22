@@ -2131,7 +2131,9 @@ pub fn batpak::store::Store<State>::project_if_changed<T>(&self, entity: &str, l
 pub fn batpak::store::Store<State>::query(&self, region: &batpak::coordinate::Region) -> alloc::vec::Vec<batpak::store::index::IndexEntry>
 pub fn batpak::store::Store<State>::read_raw(&self, event_id: batpak::id::EventId) -> core::result::Result<batpak::event::StoredEvent<alloc::vec::Vec<u8>>, batpak::prelude::StoreError>
 pub fn batpak::store::Store<State>::verify_append_receipt(&self, receipt: &batpak::prelude::AppendReceipt) -> bool
+pub fn batpak::store::Store<State>::verify_append_receipt_detailed(&self, receipt: &batpak::prelude::AppendReceipt) -> batpak::store::ReceiptVerification
 pub fn batpak::store::Store<State>::verify_denial_receipt(&self, receipt: &batpak::store::DenialReceipt) -> bool
+pub fn batpak::store::Store<State>::verify_denial_receipt_detailed(&self, receipt: &batpak::store::DenialReceipt) -> batpak::store::ReceiptVerification
 pub fn batpak::store::Store<State>::walk_ancestors(&self, event_id: batpak::id::EventId, limit: usize) -> alloc::vec::Vec<batpak::event::StoredEvent<serde_json::value::Value>>
 impl<State> batpak::store::Store<State>
 pub fn batpak::store::Store<State>::chain_walk_evidence(&self, request: &batpak::prelude::ChainWalkRequest) -> core::result::Result<batpak::prelude::ChainWalkEvidenceReport, batpak::prelude::ChainWalkReportError>
@@ -3405,6 +3407,28 @@ pub batpak::store::ReadWalkSourceRef::FactExact::category: u8
 pub batpak::store::ReadWalkSourceRef::FactExact::type_id: u16
 pub batpak::store::ReadWalkSourceRef::Scope
 pub batpak::store::ReadWalkSourceRef::Scope::scope: alloc::string::String
+pub enum batpak::store::ReceiptVerification
+pub batpak::store::ReceiptVerification::Invalid(batpak::store::ReceiptVerificationError)
+pub batpak::store::ReceiptVerification::Signed
+pub batpak::store::ReceiptVerification::UnsignedAccepted
+impl batpak::store::ReceiptVerification
+pub fn batpak::store::ReceiptVerification::error(&self) -> core::option::Option<&batpak::store::ReceiptVerificationError>
+pub fn batpak::store::ReceiptVerification::is_valid(&self) -> bool
+pub enum batpak::store::ReceiptVerificationError
+pub batpak::store::ReceiptVerificationError::ContentHashMismatch
+pub batpak::store::ReceiptVerificationError::CoverBuildFailed
+pub batpak::store::ReceiptVerificationError::CoverBuildFailed::reason: alloc::string::String
+pub batpak::store::ReceiptVerificationError::DenialKindMismatch
+pub batpak::store::ReceiptVerificationError::DiskPositionMismatch
+pub batpak::store::ReceiptVerificationError::EventIdMismatch
+pub batpak::store::ReceiptVerificationError::ExtensionsMismatch
+pub batpak::store::ReceiptVerificationError::InvalidSignature
+pub batpak::store::ReceiptVerificationError::MissingCommittedEvent
+pub batpak::store::ReceiptVerificationError::MissingSignature
+pub batpak::store::ReceiptVerificationError::SequenceMismatch
+pub batpak::store::ReceiptVerificationError::UnknownSigningKey
+pub batpak::store::ReceiptVerificationError::UnsignedReceiptRejected
+pub batpak::store::ReceiptVerificationError::ZeroKeyWithSignature
 #[non_exhaustive] pub enum batpak::store::RestartPolicy
 pub batpak::store::RestartPolicy::Bounded
 pub batpak::store::RestartPolicy::Bounded::max_restarts: u32
@@ -4124,7 +4148,9 @@ pub fn batpak::store::Store<State>::project_if_changed<T>(&self, entity: &str, l
 pub fn batpak::store::Store<State>::query(&self, region: &batpak::coordinate::Region) -> alloc::vec::Vec<batpak::store::index::IndexEntry>
 pub fn batpak::store::Store<State>::read_raw(&self, event_id: batpak::id::EventId) -> core::result::Result<batpak::event::StoredEvent<alloc::vec::Vec<u8>>, batpak::prelude::StoreError>
 pub fn batpak::store::Store<State>::verify_append_receipt(&self, receipt: &batpak::prelude::AppendReceipt) -> bool
+pub fn batpak::store::Store<State>::verify_append_receipt_detailed(&self, receipt: &batpak::prelude::AppendReceipt) -> batpak::store::ReceiptVerification
 pub fn batpak::store::Store<State>::verify_denial_receipt(&self, receipt: &batpak::store::DenialReceipt) -> bool
+pub fn batpak::store::Store<State>::verify_denial_receipt_detailed(&self, receipt: &batpak::store::DenialReceipt) -> batpak::store::ReceiptVerification
 pub fn batpak::store::Store<State>::walk_ancestors(&self, event_id: batpak::id::EventId, limit: usize) -> alloc::vec::Vec<batpak::event::StoredEvent<serde_json::value::Value>>
 impl<State> batpak::store::Store<State>
 pub fn batpak::store::Store<State>::chain_walk_evidence(&self, request: &batpak::prelude::ChainWalkRequest) -> core::result::Result<batpak::prelude::ChainWalkEvidenceReport, batpak::prelude::ChainWalkReportError>

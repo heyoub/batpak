@@ -38,6 +38,7 @@ pub mod reaction;
 pub mod reactor_typed;
 mod read_api;
 mod read_walk;
+mod receipt_verification;
 #[cfg(test)]
 mod runtime_contracts;
 /// On-disk segment format, frame encoding/decoding, and compaction helpers.
@@ -116,6 +117,7 @@ pub use read_walk::{
     ReadWalkReplayMode, ReadWalkReportBody, ReadWalkReportError, ReadWalkRequest,
     ReadWalkSourceRef, READ_WALK_REPORT_SCHEMA_VERSION,
 };
+pub use receipt_verification::{ReceiptVerification, ReceiptVerificationError};
 pub use signing::SigningKey;
 pub use snapshot_report::{
     snapshot_report_body_hash, SnapshotEvidenceHash, SnapshotEvidenceReport, SnapshotFenceTokenRef,

@@ -1,7 +1,9 @@
 use crate::coordinate::Coordinate;
 use crate::event::EventKind;
 use crate::store::append::{signing_downgrade_extension_key, SigningDowngradeBody};
-use crate::store::{AppendReceipt, DenialReceipt, ExtensionKey};
+use crate::store::{
+    AppendReceipt, DenialReceipt, ExtensionKey, ReceiptVerification, ReceiptVerificationError,
+};
 use ed25519_compact::{KeyPair, PublicKey, Seed, Signature};
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -119,13 +121,17 @@ impl ReceiptSigningRegistry {
         coord: &Coordinate,
         kind: EventKind,
         prev_hash: [u8; 32],
-    ) -> bool {
+    ) -> ReceiptVerification {
         // Sentinel-signed receipts (no signature, no key) bypass the cover
         // rebuild: signing was either not configured or it downgraded due to
         // a coordinate/extension encoding failure. Their validity is a
         // property of the registry state, not of any computed cover.
         if receipt.signature.is_none() && receipt.key_id == [0; 32] {
-            return self.verifying_keys.is_empty();
+            return if self.verifying_keys.is_empty() {
+                ReceiptVerification::UnsignedAccepted
+            } else {
+                ReceiptVerification::Invalid(ReceiptVerificationError::UnsignedReceiptRejected)
+            };
         }
         let cover = match cover_bytes(
             {
@@ -142,7 +148,9 @@ impl ReceiptSigningRegistry {
             Ok(cover) => cover,
             Err(error) => {
                 tracing::error!(error = %error, "failed to rebuild append receipt signature cover");
-                return false;
+                return ReceiptVerification::Invalid(ReceiptVerificationError::CoverBuildFailed {
+                    reason: error.to_string(),
+                });
             }
         };
         self.verify_signature(receipt.key_id, receipt.signature, cover)
@@ -154,9 +162,13 @@ impl ReceiptSigningRegistry {
         coord: &Coordinate,
         kind: EventKind,
         prev_hash: [u8; 32],
-    ) -> bool {
+    ) -> ReceiptVerification {
         if receipt.signature.is_none() && receipt.key_id == [0; 32] {
-            return self.verifying_keys.is_empty();
+            return if self.verifying_keys.is_empty() {
+                ReceiptVerification::UnsignedAccepted
+            } else {
+                ReceiptVerification::Invalid(ReceiptVerificationError::UnsignedReceiptRejected)
+            };
         }
         let cover = match cover_bytes(
             {
@@ -173,7 +185,9 @@ impl ReceiptSigningRegistry {
             Ok(cover) => cover,
             Err(error) => {
                 tracing::error!(error = %error, "failed to rebuild denial receipt signature cover");
-                return false;
+                return ReceiptVerification::Invalid(ReceiptVerificationError::CoverBuildFailed {
+                    reason: error.to_string(),
+                });
             }
         };
         self.verify_signature(receipt.key_id, receipt.signature, cover)
@@ -184,23 +198,31 @@ impl ReceiptSigningRegistry {
         key_id: [u8; 32],
         signature: Option<[u8; 64]>,
         cover: [u8; 32],
-    ) -> bool {
-        if signature.is_none() {
-            return key_id == [0; 32] && self.verifying_keys.is_empty();
-        }
-        if key_id == [0; 32] {
-            return false;
-        }
+    ) -> ReceiptVerification {
         let Some(signature_bytes) = signature else {
-            return false;
+            return if key_id == [0; 32] && self.verifying_keys.is_empty() {
+                ReceiptVerification::UnsignedAccepted
+            } else if key_id == [0; 32] {
+                ReceiptVerification::Invalid(ReceiptVerificationError::UnsignedReceiptRejected)
+            } else {
+                ReceiptVerification::Invalid(ReceiptVerificationError::MissingSignature)
+            };
+        };
+        if key_id == [0; 32] {
+            return ReceiptVerification::Invalid(ReceiptVerificationError::ZeroKeyWithSignature);
         };
         let Some(public_key_bytes) = self.verifying_keys.get(&key_id) else {
-            return false;
+            return ReceiptVerification::Invalid(ReceiptVerificationError::UnknownSigningKey);
         };
         let signature = Signature::new(signature_bytes);
-        PublicKey::new(*public_key_bytes)
+        if PublicKey::new(*public_key_bytes)
             .verify(cover, &signature)
             .is_ok()
+        {
+            ReceiptVerification::Signed
+        } else {
+            ReceiptVerification::Invalid(ReceiptVerificationError::InvalidSignature)
+        }
     }
 }
 

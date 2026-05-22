@@ -34,11 +34,18 @@ impl<State> Store<State> {
     /// current index state.
     #[must_use]
     pub fn verify_append_receipt(&self, receipt: &AppendReceipt) -> bool {
+        self.verify_append_receipt_detailed(receipt).is_valid()
+    }
+
+    /// Verify an append receipt and return the exact acceptance or rejection
+    /// reason.
+    #[must_use]
+    pub fn verify_append_receipt_detailed(&self, receipt: &AppendReceipt) -> ReceiptVerification {
         let Some(entry) = self.index.get_by_id(receipt.event_id.as_u128()) else {
-            return false;
+            return ReceiptVerification::Invalid(ReceiptVerificationError::MissingCommittedEvent);
         };
-        if !append_receipt_matches_index(receipt, &entry) {
-            return false;
+        if let Some(error) = append_receipt_index_mismatch(receipt, &entry) {
+            return ReceiptVerification::Invalid(error);
         }
         self.runtime.signing_registry.verify_append_receipt(
             receipt,
@@ -52,11 +59,18 @@ impl<State> Store<State> {
     /// registry and current index state.
     #[must_use]
     pub fn verify_denial_receipt(&self, receipt: &DenialReceipt) -> bool {
+        self.verify_denial_receipt_detailed(receipt).is_valid()
+    }
+
+    /// Verify a persisted denial receipt and return the exact acceptance or
+    /// rejection reason.
+    #[must_use]
+    pub fn verify_denial_receipt_detailed(&self, receipt: &DenialReceipt) -> ReceiptVerification {
         let Some(entry) = self.index.get_by_id(receipt.event_id.as_u128()) else {
-            return false;
+            return ReceiptVerification::Invalid(ReceiptVerificationError::MissingCommittedEvent);
         };
-        if !denial_receipt_matches_index(receipt, &entry) {
-            return false;
+        if let Some(error) = denial_receipt_index_mismatch(receipt, &entry) {
+            return ReceiptVerification::Invalid(error);
         }
         self.runtime.signing_registry.verify_denial_receipt(
             receipt,
@@ -168,21 +182,51 @@ impl<State> Store<State> {
     }
 }
 
-fn append_receipt_matches_index(receipt: &AppendReceipt, entry: &IndexEntry) -> bool {
-    receipt.event_id.as_u128() == entry.event_id
-        && receipt.sequence == entry.global_sequence
-        && receipt.disk_pos == entry.disk_pos
-        && receipt.content_hash == entry.hash_chain.event_hash
-        && receipt.extensions == entry.receipt_extensions
+fn append_receipt_index_mismatch(
+    receipt: &AppendReceipt,
+    entry: &IndexEntry,
+) -> Option<ReceiptVerificationError> {
+    if receipt.event_id.as_u128() != entry.event_id {
+        return Some(ReceiptVerificationError::EventIdMismatch);
+    }
+    if receipt.sequence != entry.global_sequence {
+        return Some(ReceiptVerificationError::SequenceMismatch);
+    }
+    if receipt.disk_pos != entry.disk_pos {
+        return Some(ReceiptVerificationError::DiskPositionMismatch);
+    }
+    if receipt.content_hash != entry.hash_chain.event_hash {
+        return Some(ReceiptVerificationError::ContentHashMismatch);
+    }
+    if receipt.extensions != entry.receipt_extensions {
+        return Some(ReceiptVerificationError::ExtensionsMismatch);
+    }
+    None
 }
 
-fn denial_receipt_matches_index(receipt: &DenialReceipt, entry: &IndexEntry) -> bool {
-    entry.kind == EventKind::SYSTEM_DENIAL
-        && receipt.event_id.as_u128() == entry.event_id
-        && receipt.sequence == entry.global_sequence
-        && receipt.disk_pos == entry.disk_pos
-        && receipt.content_hash == entry.hash_chain.event_hash
-        && receipt.extensions == entry.receipt_extensions
+fn denial_receipt_index_mismatch(
+    receipt: &DenialReceipt,
+    entry: &IndexEntry,
+) -> Option<ReceiptVerificationError> {
+    if entry.kind != EventKind::SYSTEM_DENIAL {
+        return Some(ReceiptVerificationError::DenialKindMismatch);
+    }
+    if receipt.event_id.as_u128() != entry.event_id {
+        return Some(ReceiptVerificationError::EventIdMismatch);
+    }
+    if receipt.sequence != entry.global_sequence {
+        return Some(ReceiptVerificationError::SequenceMismatch);
+    }
+    if receipt.disk_pos != entry.disk_pos {
+        return Some(ReceiptVerificationError::DiskPositionMismatch);
+    }
+    if receipt.content_hash != entry.hash_chain.event_hash {
+        return Some(ReceiptVerificationError::ContentHashMismatch);
+    }
+    if receipt.extensions != entry.receipt_extensions {
+        return Some(ReceiptVerificationError::ExtensionsMismatch);
+    }
+    None
 }
 
 #[cfg(test)]
@@ -190,7 +234,7 @@ mod tests {
     use crate::coordinate::Coordinate;
     use crate::event::EventKind;
     use crate::store::index::DiskPos;
-    use crate::store::{Store, StoreConfig};
+    use crate::store::{ReceiptVerification, ReceiptVerificationError, Store, StoreConfig};
     use tempfile::TempDir;
 
     #[test]
@@ -211,6 +255,10 @@ mod tests {
             )
             .expect("append");
 
+        assert_eq!(
+            store.verify_append_receipt_detailed(&receipt),
+            ReceiptVerification::UnsignedAccepted
+        );
         assert!(store.verify_append_receipt(&receipt));
         receipt.disk_pos = DiskPos::new(
             receipt.disk_pos.segment_id(),
@@ -221,6 +269,10 @@ mod tests {
         assert!(
             !store.verify_append_receipt(&receipt),
             "disk position must match the committed index entry"
+        );
+        assert_eq!(
+            store.verify_append_receipt_detailed(&receipt),
+            ReceiptVerification::Invalid(ReceiptVerificationError::DiskPositionMismatch)
         );
     }
 }

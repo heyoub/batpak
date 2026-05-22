@@ -1,0 +1,63 @@
+/// Detailed outcome from receipt verification against the current store.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ReceiptVerification {
+    /// The receipt signature verified against a configured signing key.
+    Signed,
+    /// The receipt was intentionally unsigned and the store has no verifying
+    /// key registry, so unsigned admission is valid for this store.
+    UnsignedAccepted,
+    /// The receipt does not match the store's committed index/signing state.
+    Invalid(ReceiptVerificationError),
+}
+
+impl ReceiptVerification {
+    /// Return true when the receipt is valid for the current store state.
+    #[must_use]
+    pub fn is_valid(&self) -> bool {
+        matches!(self, Self::Signed | Self::UnsignedAccepted)
+    }
+
+    /// Return the rejection reason, if verification failed.
+    #[must_use]
+    pub fn error(&self) -> Option<&ReceiptVerificationError> {
+        if let Self::Invalid(error) = self {
+            Some(error)
+        } else {
+            None
+        }
+    }
+}
+
+/// Reason a receipt failed verification.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ReceiptVerificationError {
+    /// The receipt's event id is absent from the current store index.
+    MissingCommittedEvent,
+    /// The receipt event id differs from the committed index entry.
+    EventIdMismatch,
+    /// The receipt sequence differs from the committed index entry.
+    SequenceMismatch,
+    /// The receipt disk position differs from the committed index entry.
+    DiskPositionMismatch,
+    /// The receipt content hash differs from the committed index entry.
+    ContentHashMismatch,
+    /// The receipt extension cargo differs from the committed index entry.
+    ExtensionsMismatch,
+    /// A denial receipt points at an index entry that is not a system denial.
+    DenialKindMismatch,
+    /// The receipt is unsigned, but this store has verifying keys configured.
+    UnsignedReceiptRejected,
+    /// The receipt omitted a signature while naming a non-sentinel key id.
+    MissingSignature,
+    /// The receipt carried a signature while naming the unsigned sentinel key.
+    ZeroKeyWithSignature,
+    /// The receipt key id is not in this store's verifying-key registry.
+    UnknownSigningKey,
+    /// The receipt signature did not verify against its cover bytes.
+    InvalidSignature,
+    /// The signature cover could not be rebuilt from the committed entry.
+    CoverBuildFailed {
+        /// Human-readable encoding failure returned while rebuilding the cover.
+        reason: String,
+    },
+}
