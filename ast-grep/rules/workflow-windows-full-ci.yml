@@ -6,4 +6,4 @@ message: >-
 severity: error
 language: Yaml
 rule:
-  pattern: cargo xtask ci'
+  pattern: cargo xtask ci

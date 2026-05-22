@@ -19,7 +19,6 @@ batpak is not a database server, queue, ORM, workflow engine, async runtime, net
 The deeper project identity is Free Battery Factory:
 
 > The Free Battery Factory makes batteries for software boundaries.
-
 > A battery does not own the machine. It powers one boundary.
 
 ## Install

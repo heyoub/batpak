@@ -7,4 +7,4 @@ message: >-
 severity: error
 language: Yaml
 rule:
-  pattern: cargo xtask mutants smoke'
+  pattern: cargo xtask mutants smoke

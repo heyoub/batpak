@@ -2,18 +2,17 @@
 
 batpak owns a local truth boundary. It does not own the whole application.
 
-## Negative Space
+## Enforced boundaries
 
-batpak does not:
+| Invariant | Proof surface |
+| --- | --- |
+| Production family crates stay sync-first (no async runtime dependencies) | `just boundary` |
+| `batpak` core does not own network wire surfaces (`netbat` sits above `syncbat`) | `just boundary` |
+| Store machine contact routes through `store/platform` rather than ad hoc filesystem calls | `just boundary` |
+| `authority_required` is receiver policy input, never granted authority | traceability + substrate docs; no runtime grant path in core |
+| External-Profile wire validation ships only with explicit codecs, tests, and traceability | absence of undeclared ExtProfile codecs in core; ADR/traceability when added |
 
-- start an async runtime
-- choose your task queue
-- become your database server
-- become your ORM
-- become your workflow engine
-- open network connections from the core substrate
-- grant authority from `authority_required`
-- implement External-Profile wire validation without explicit codecs, tests, and traceability
+batpak ships as an embedded event substrate, not as a hosted database, queue, ORM, or workflow product. Callers own process model, disk placement, and integration boundaries.
 
 ## Async Hosts
 

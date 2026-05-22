@@ -1,6 +1,6 @@
 # Projections
 
-The log is source truth. A projection is a cached interpretation.
+The log is the source of truth. A projection is a cached interpretation.
 
 Factory prose may call projections gauges. The Rust API should keep the engineering name `Projection`.
 

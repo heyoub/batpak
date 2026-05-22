@@ -34,6 +34,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
+          persist-credentials: false
           fetch-depth: 0
       - id: detect
         shell: bash
@@ -54,6 +55,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: ci-fast
@@ -70,6 +73,8 @@ jobs:
     needs: [ci-fast-linux]
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: verify
@@ -85,6 +90,8 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy,rustfmt
@@ -113,6 +120,8 @@ jobs:
           - "--all-features"
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - uses: Swatinem/rust-cache@v2
       - uses: ./.github/actions/setup-devcontainer
       - name: Feature-isolation test matrix
@@ -127,6 +136,8 @@ jobs:
     needs: [verify-linux]
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - uses: Swatinem/rust-cache@v2
       - uses: ./.github/actions/setup-devcontainer
       - name: Run onboarding smoke checks
@@ -153,6 +164,8 @@ jobs:
     needs: [verify-linux]
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - uses: Swatinem/rust-cache@v2
       - name: Install pnpm
         run: |
@@ -273,6 +286,8 @@ jobs:
           - netbat-boundary-protocol
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: mutants-smoke-${{ matrix.seam }}
@@ -292,6 +307,8 @@ jobs:
     needs: [ci-fast-linux, rust-changed]
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: mutants-smoke-repo-wide
@@ -311,6 +328,8 @@ jobs:
     needs: [ci-fast-linux, verify-linux]
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - uses: Swatinem/rust-cache@v2
       - uses: ./.github/actions/setup-devcontainer
       - name: Bounded loom schedule proofs
@@ -344,6 +363,8 @@ jobs:
     name: Mutation full (${{ matrix.surface }} shard ${{ matrix.shard }})
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: mutants-full-${{ matrix.surface }}-${{ matrix.shard }}
@@ -363,6 +384,8 @@ jobs:
       (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-chaos'))
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Install block-device chaos tools
@@ -387,6 +410,8 @@ jobs:
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - uses: Swatinem/rust-cache@v2
       - uses: ./.github/actions/setup-devcontainer
       - name: Build root docs site + rustdoc

@@ -249,10 +249,10 @@ pub(crate) struct MutantsArgs {
     #[arg(long)]
     shard: Option<String>,
     /// Run one critical smoke seam (CI matrix shard). Mutually exclusive with `--repo-wide-only`.
-    #[arg(long)]
+    #[arg(long, conflicts_with = "repo_wide_only")]
     seam: Option<String>,
     /// Run only repo-wide smoke ratchet lanes. Mutually exclusive with `--seam`.
-    #[arg(long)]
+    #[arg(long, conflicts_with = "seam")]
     repo_wide_only: bool,
 }
 

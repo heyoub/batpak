@@ -2,7 +2,7 @@
 
 An event records a domain fact at a coordinate.
 
-Events are source truth. Projections, indexes, caches, and reports may be rebuilt or rederived from accepted events and their artifacts.
+Events are the source of truth. Projections, indexes, caches, and reports may be rebuilt or rederived from accepted events and their artifacts.
 
 ## Valid Append Shape
 
