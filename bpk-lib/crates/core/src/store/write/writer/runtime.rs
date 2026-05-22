@@ -331,7 +331,7 @@ fn drain_shutdown_queue(
 /// Find the latest segment ID by scanning data_dir for .fbat files.
 pub(crate) fn find_latest_segment_id(dir: &std::path::Path) -> Result<Option<u64>, StoreError> {
     let mut latest = None;
-    for entry in std::fs::read_dir(dir).map_err(StoreError::Io)? {
+    for entry in crate::store::platform::fs::read_dir(dir).map_err(StoreError::Io)? {
         let entry = entry.map_err(StoreError::Io)?;
         let path = entry.path();
         match StoreFileKind::from_path(&path) {

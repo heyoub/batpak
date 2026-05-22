@@ -1,5 +1,6 @@
 use super::Cursor;
 use crate::store::delivery::observation::CheckpointId;
+use crate::store::platform;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
@@ -73,7 +74,7 @@ impl Cursor {
         id: &CheckpointId,
     ) -> std::io::Result<Option<CursorCheckpoint>> {
         let path = cursor_checkpoint_path(data_dir, id);
-        let bytes = match std::fs::read(&path) {
+        let bytes = match platform::fs::read(&path) {
             Ok(b) => b,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(error) => return Err(error),
@@ -101,7 +102,7 @@ impl Cursor {
         ckpt: &CursorCheckpoint,
     ) -> std::io::Result<()> {
         let dir = cursor_checkpoint_dir(data_dir);
-        std::fs::create_dir_all(&dir)?;
+        platform::fs::create_dir_all(&dir)?;
         let bytes =
             crate::encoding::to_bytes(ckpt).map_err(|e| std::io::Error::other(e.to_string()))?;
         let final_path = cursor_checkpoint_path(data_dir, id);

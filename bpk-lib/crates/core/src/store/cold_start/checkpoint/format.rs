@@ -1,7 +1,7 @@
 use super::{checkpoint_entries_to_index_entries, CheckpointEntry};
 use crate::store::cold_start::{FileLoad, ReservedKindFallbackStats};
 use crate::store::index::{recommended_restore_chunk_count, RoutingSummary};
-use crate::store::platform::fs::write_file_atomically;
+use crate::store::platform::fs::{read, write_file_atomically};
 use crate::store::StoreError;
 use serde::{Deserialize, Serialize};
 use std::io::{BufWriter, Write};
@@ -86,7 +86,7 @@ pub(super) struct DecodedCheckpointData {
 pub(super) fn read_checkpoint_file(data_dir: &Path) -> FileLoad<LoadedCheckpointFile> {
     let path = data_dir.join(CHECKPOINT_FILENAME);
 
-    let raw = match std::fs::read(&path) {
+    let raw = match read(&path) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return FileLoad::Missing,
         Err(error) => {

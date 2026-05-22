@@ -2,6 +2,7 @@ use crate::coordinate::Coordinate;
 use crate::event::{EventKind, StoredEvent};
 use crate::store::cold_start::{latest_segment_watermark, ColdStartArtifactKind};
 use crate::store::file_classification::StoreFileKind;
+use crate::store::platform::fs as platform_fs;
 use crate::store::segment::scan as reader;
 use crate::store::segment::{self, Active, FramePayload};
 use crate::store::snapshot_report::{
@@ -83,10 +84,10 @@ pub(crate) fn snapshot(
     sync(store)?;
     let (source_watermark_segment_id, source_watermark_offset) =
         latest_segment_watermark(&store.config.data_dir)?;
-    crate::store::platform::fs::reject_symlink_leaf(dest, "snapshot destination")?;
-    std::fs::create_dir_all(dest).map_err(StoreError::Io)?;
+    platform_fs::reject_symlink_leaf(dest, "snapshot destination")?;
+    platform_fs::create_dir_all(dest).map_err(StoreError::Io)?;
     let cleared_artifact_count = clear_snapshot_store_artifacts(dest)?;
-    let entries = std::fs::read_dir(&store.config.data_dir).map_err(StoreError::Io)?;
+    let entries = platform_fs::read_dir(&store.config.data_dir).map_err(StoreError::Io)?;
     let mut copied_segment_ids_sorted = Vec::new();
     let mut copied_visibility_ranges_present = false;
     let mut copied_pending_compaction_marker_present = false;
@@ -102,8 +103,8 @@ pub(crate) fn snapshot(
         let source_kind = StoreFileKind::from_path(&path);
         if let Some(file_kind) = snapshot_source_file_kind(&source_kind) {
             let dest_path = dest.join(entry.file_name());
-            crate::store::platform::fs::reject_symlink_leaf(&dest_path, "snapshot entry")?;
-            std::fs::copy(&path, &dest_path).map_err(StoreError::Io)?;
+            platform_fs::reject_symlink_leaf(&dest_path, "snapshot entry")?;
+            platform_fs::copy(&path, &dest_path).map_err(StoreError::Io)?;
             match file_kind {
                 SnapshotFileKind::Segment => {
                     if let Some(segment_id) = source_kind.segment_id() {
@@ -162,7 +163,7 @@ fn snapshot_destination_should_clear(path: &std::path::Path) -> bool {
 }
 
 fn remove_file_if_present(path: &std::path::Path) -> Result<bool, StoreError> {
-    match std::fs::remove_file(path) {
+    match platform_fs::remove_file(path) {
         Ok(()) => Ok(true),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
         Err(error) => Err(StoreError::Io(error)),
@@ -170,7 +171,7 @@ fn remove_file_if_present(path: &std::path::Path) -> Result<bool, StoreError> {
 }
 
 fn remove_dir_all_if_present(path: &std::path::Path) -> Result<bool, StoreError> {
-    match std::fs::remove_dir_all(path) {
+    match platform_fs::remove_dir_all(path) {
         Ok(()) => Ok(true),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
         Err(error) => Err(StoreError::Io(error)),
@@ -178,7 +179,7 @@ fn remove_dir_all_if_present(path: &std::path::Path) -> Result<bool, StoreError>
 }
 
 fn clear_snapshot_store_artifacts(dest: &std::path::Path) -> Result<usize, StoreError> {
-    let entries = std::fs::read_dir(dest).map_err(StoreError::Io)?;
+    let entries = platform_fs::read_dir(dest).map_err(StoreError::Io)?;
     let mut removed = 0;
     for entry in entries {
         let entry = entry.map_err(StoreError::Io)?;
@@ -200,13 +201,13 @@ fn rollback_compaction_disk_state(
     merged_path: &std::path::Path,
     compact_source_path: Option<&std::path::Path>,
 ) -> Result<(), StoreError> {
-    if let Err(remove_err) = std::fs::remove_file(merged_path) {
+    if let Err(remove_err) = platform_fs::remove_file(merged_path) {
         if remove_err.kind() != std::io::ErrorKind::NotFound {
             return Err(StoreError::Io(remove_err));
         }
     }
     if let Some(temp_source_path) = compact_source_path {
-        std::fs::rename(temp_source_path, merged_path).map_err(StoreError::Io)?;
+        platform_fs::rename(temp_source_path, merged_path).map_err(StoreError::Io)?;
     }
     crate::store::cold_start::rebuild::clear_pending_compaction(data_dir)?;
     Ok(())
@@ -307,7 +308,7 @@ fn materialize_compacted_segment(
             segment::SEGMENT_EXTENSION
         ));
         remove_file_if_present(&temp_source_path)?;
-        std::fs::rename(&*source_path, &temp_source_path).map_err(StoreError::Io)?;
+        platform_fs::rename(&*source_path, &temp_source_path).map_err(StoreError::Io)?;
         *source_path = temp_source_path.clone();
         *compact_source_path = Some(temp_source_path);
     }
@@ -423,7 +424,7 @@ pub(crate) fn compact(
 
     // Single read_dir: collect all segment IDs and paths, then partition.
     let mut all_segments: Vec<(u64, std::path::PathBuf)> = Vec::new();
-    for entry in std::fs::read_dir(&store.config.data_dir).map_err(StoreError::Io)? {
+    for entry in platform_fs::read_dir(&store.config.data_dir).map_err(StoreError::Io)? {
         let entry = entry.map_err(StoreError::Io)?;
         let path = entry.path();
         let seg_id = match StoreFileKind::from_path(&path) {
@@ -530,10 +531,10 @@ pub(crate) fn compact(
     let mut bytes_reclaimed = 0_u64;
     let mut segments_removed = 0_usize;
     for (_, path) in &sealed {
-        if let Ok(meta) = std::fs::metadata(path) {
+        if let Ok(meta) = platform_fs::metadata(path) {
             bytes_reclaimed += meta.len();
         }
-        std::fs::remove_file(path).map_err(StoreError::Io)?;
+        platform_fs::remove_file(path).map_err(StoreError::Io)?;
         segments_removed += 1;
     }
 

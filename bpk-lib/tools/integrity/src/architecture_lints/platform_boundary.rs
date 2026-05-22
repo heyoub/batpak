@@ -120,11 +120,6 @@ fn check_direct_fs_contact_ratchet(
     ];
     const ALLOWED_DIRECT_FS_CONTACTS: &[(&str, &str, usize)] = &[
         (
-            "crates/core/src/store/cold_start/checkpoint/format.rs",
-            "std::fs::read(",
-            1,
-        ),
-        (
             "crates/core/src/store/cold_start/checkpoint/test_support.rs",
             "std::fs::write(",
             2,
@@ -145,126 +140,21 @@ fn check_direct_fs_contact_ratchet(
             2,
         ),
         (
-            "crates/core/src/store/cold_start/mod.rs",
-            "std::fs::metadata",
-            2,
-        ),
-        (
-            "crates/core/src/store/cold_start/mod.rs",
-            "std::fs::read_dir",
-            1,
-        ),
-        (
             "crates/core/src/store/cold_start/rebuild/tests.rs",
             "std::fs::write(",
             8,
         ),
         (
-            "crates/core/src/store/cold_start/rebuild/topology.rs",
-            "std::fs::read_dir",
-            1,
-        ),
-        (
-            "crates/core/src/store/cold_start/rebuild/topology.rs",
-            "std::fs::read(",
-            1,
-        ),
-        (
-            "crates/core/src/store/cold_start/rebuild/topology.rs",
-            "std::fs::remove_file",
-            1,
-        ),
-        (
-            "crates/core/src/store/compaction_report.rs",
-            "std::fs::read(",
-            1,
-        ),
-        (
             "crates/core/src/store/delivery/cursor/checkpoint.rs",
             "NamedTempFile::new_in",
             1,
         ),
         (
-            "crates/core/src/store/delivery/cursor/checkpoint.rs",
-            "std::fs::create_dir_all",
-            1,
-        ),
-        (
-            "crates/core/src/store/delivery/cursor/checkpoint.rs",
-            "std::fs::read(",
-            1,
-        ),
-        (
-            "crates/core/src/store/dir_lock.rs",
-            "std::fs::canonicalize",
-            1,
-        ),
-        (
             "crates/core/src/store/hidden_ranges.rs",
             "NamedTempFile::new_in",
-            1,
-        ),
-        (
-            "crates/core/src/store/hidden_ranges.rs",
-            "std::fs::read(",
-            1,
-        ),
-        (
-            "crates/core/src/store/hidden_ranges.rs",
-            "std::fs::remove_file",
-            1,
-        ),
-        ("crates/core/src/store/lifecycle.rs", "std::fs::copy", 1),
-        (
-            "crates/core/src/store/lifecycle.rs",
-            "std::fs::create_dir_all",
-            1,
-        ),
-        ("crates/core/src/store/lifecycle.rs", "std::fs::metadata", 1),
-        ("crates/core/src/store/lifecycle.rs", "std::fs::read_dir", 3),
-        (
-            "crates/core/src/store/lifecycle.rs",
-            "std::fs::remove_dir_all",
-            1,
-        ),
-        (
-            "crates/core/src/store/lifecycle.rs",
-            "std::fs::remove_file",
-            6,
-        ),
-        ("crates/core/src/store/lifecycle.rs", "std::fs::rename", 2),
-        ("crates/core/src/store/open.rs", "std::fs::canonicalize", 1),
-        (
-            "crates/core/src/store/open.rs",
-            "std::fs::create_dir_all",
             1,
         ),
         ("crates/core/src/store/open.rs", "std::fs::write(", 2),
-        (
-            "crates/core/src/store/projection/mod.rs",
-            "std::fs::create_dir_all",
-            2,
-        ),
-        (
-            "crates/core/src/store/projection/mod.rs",
-            "std::fs::metadata",
-            1,
-        ),
-        (
-            "crates/core/src/store/projection/mod.rs",
-            "std::fs::read_dir",
-            2,
-        ),
-        (
-            "crates/core/src/store/projection/mod.rs",
-            "std::fs::read(",
-            1,
-        ),
-        (
-            "crates/core/src/store/projection/mod.rs",
-            "std::fs::remove_file",
-            2,
-        ),
         (
             "crates/core/src/store/segment/scan/tests.rs",
             "std::fs::write(",
@@ -278,16 +168,6 @@ fn check_direct_fs_contact_ratchet(
         (
             "crates/core/src/store/store_resource_report.rs",
             "std::fs::canonicalize",
-            2,
-        ),
-        (
-            "crates/core/src/store/write/writer.rs",
-            "std::fs::create_dir_all",
-            1,
-        ),
-        (
-            "crates/core/src/store/write/writer/runtime.rs",
-            "std::fs::read_dir",
             1,
         ),
     ];

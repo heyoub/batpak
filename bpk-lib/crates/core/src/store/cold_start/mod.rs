@@ -11,7 +11,7 @@ pub(crate) use row::{
     ReservedKindFallbackStats, WatermarkInfo,
 };
 
-use crate::store::{file_classification::StoreFileKind, StoreError};
+use crate::store::{file_classification::StoreFileKind, platform, StoreError};
 use std::path::{Path, PathBuf};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -74,7 +74,7 @@ pub(crate) enum WatermarkValidationError {
 
 pub(crate) fn latest_segment_watermark(data_dir: &Path) -> Result<(u64, u64), StoreError> {
     let mut max: Option<(u64, PathBuf)> = None;
-    for entry in std::fs::read_dir(data_dir).map_err(StoreError::Io)? {
+    for entry in platform::fs::read_dir(data_dir).map_err(StoreError::Io)? {
         let entry = entry.map_err(StoreError::Io)?;
         let path = entry.path();
         let segment_id = match StoreFileKind::from_path(&path) {
@@ -106,7 +106,7 @@ pub(crate) fn latest_segment_watermark(data_dir: &Path) -> Result<(u64, u64), St
 
     match max {
         Some((segment_id, path)) => {
-            let offset = std::fs::metadata(&path).map_err(StoreError::Io)?.len();
+            let offset = platform::fs::metadata(&path).map_err(StoreError::Io)?.len();
             Ok((segment_id, offset))
         }
         None => Ok((0, 0)),
@@ -121,7 +121,7 @@ pub(crate) fn validate_watermark_segment(
     let watermark_segment_path = data_dir.join(crate::store::segment::segment_filename(
         watermark_segment_id,
     ));
-    match std::fs::metadata(&watermark_segment_path) {
+    match platform::fs::metadata(&watermark_segment_path) {
         Ok(meta) if meta.len() >= watermark_offset => Ok(()),
         Ok(meta) => Err(WatermarkValidationError::OffsetPastTail {
             path: watermark_segment_path,
