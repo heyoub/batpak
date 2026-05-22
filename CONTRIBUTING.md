@@ -21,7 +21,7 @@ just install-hooks
 
 That setup command also installs the tracked `.githooks/` surface when no
 custom `core.hooksPath` is active. If you keep a custom hooks path, batpak
-will leave it alone; run `cargo xtask install-hooks` after clearing or changing
+will leave it alone; run `just install-hooks` after clearing or changing
 that config if you want the repo-managed pre-commit hook.
 
 ## Daily Commands
@@ -39,7 +39,7 @@ just mutants-smoke
 
 `just` recipes are wrappers around the same `xtask` machinery.
 
-`cargo xtask doctor` warns when the repo-managed hooks are not installed.
+`just doctor` warns when the repo-managed hooks are not installed.
 
 ## Contributor Workflow
 
@@ -52,16 +52,16 @@ just mutants-smoke
 
 No current environment is both canonical and timing-stable.
 
-- `cargo xtask ci` compiles the benchmark surfaces (`cargo xtask bench --compile`) as a build-integrity check only; it does not interpret timings.
-- `cargo xtask perf-gates` is a catastrophic-regression guard with generous thresholds. Run it on stable hardware when you want a "something is badly wrong" signal.
+- `just ci` compiles the benchmark surfaces (`just bench-compile`) as a build-integrity check only; it does not interpret timings.
+- `just cargo -- xtask perf-gates` is a catastrophic-regression guard with generous thresholds. Run it on stable hardware when you want a "something is badly wrong" signal.
 - `.github/workflows/perf.yml` is Criterion trend collection, not a hard gate.
-- `cargo xtask bench --surface ...` is the measurement lane for comparing surfaces and baselines intentionally.
+- `just bench-save` and `just bench-compare` are the measurement lanes for comparing surfaces and baselines intentionally.
 
 ## Mutation Policy
 
-- `cargo xtask mutants policy` prints the repo-owned mutation policy from xtask itself.
-- `cargo xtask mutants smoke` is the CI smoke lane: it runs the named critical seams first (`writer commit protocol`, `cursor delivery/checkpoint logic`, `projection replay/freshness logic`, `segment scan / corruption handling`, `hash-chain / replay consistency`, platform backend admission/reverify, and testing-ledger linting) and then repo-wide 1/48 ratchet shards on both feature surfaces.
-- `cargo xtask mutants full` with no overrides runs the full policy locally. `cargo xtask mutants full --surface ... --shard ...` stays the targeted repo-wide lane for matrix jobs and focused investigation.
+- `just cargo -- xtask mutants policy` prints the repo-owned mutation policy from xtask itself.
+- `just mutants-smoke` is the CI smoke lane: it runs the named critical seams first (`writer commit protocol`, `cursor delivery/checkpoint logic`, `projection replay/freshness logic`, `segment scan / corruption handling`, `hash-chain / replay consistency`, platform backend admission/reverify, and testing-ledger linting) and then repo-wide 1/48 ratchet shards on both feature surfaces.
+- `just mutants-full` with no overrides runs the full policy locally. `just cargo -- xtask mutants full --surface ... --shard ...` stays the targeted repo-wide lane for matrix jobs and focused investigation.
 - Critical seams enforce an `85%` mutation-score threshold immediately. Repo-wide lanes use the staged ratchet phases owned by xtask; the current phase is `Phase0` record-only, which means xtask records the score and reports the next available floor without enforcing it yet.
 - Mutation artifacts live under `target/xtask-mutants/` so xtask owns the scratch surface.
 
@@ -85,8 +85,8 @@ No current environment is both canonical and timing-stable.
 Before release-oriented changes, run:
 
 ```bash
-cargo xtask docs
-cargo xtask release --dry-run
+just docs
+just ship dry
 ```
 
 If a change touches persistence artifacts or cold-start behavior, update the

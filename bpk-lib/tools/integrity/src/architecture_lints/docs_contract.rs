@@ -8,6 +8,7 @@ use std::path::{Component, Path};
 pub(super) fn check(repo_root: &Path) -> Result<()> {
     check_portable_context_links(repo_root)?;
     check_live_docs_do_not_link_archives(repo_root)?;
+    check_factory_docs_use_just_commands(repo_root)?;
     check_root_doc_site_contract(repo_root)?;
     check_reference_doc_completeness(repo_root)?;
     check_changelog_migration_contract(repo_root)?;
@@ -91,6 +92,38 @@ fn check_live_docs_do_not_link_archives(repo_root: &Path) -> Result<()> {
                     && !link.contains("100_ADR_")
                     && link != "099_DECISION_INDEX.md",
                 format!("live doc {rel} links archive material as if it were live: {link}"),
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn check_factory_docs_use_just_commands(repo_root: &Path) -> Result<()> {
+    let doc_root = project_root(repo_root);
+    for doc in [
+        "README.md",
+        "FACTORY.md",
+        "MODEL.md",
+        "INVARIANTS.md",
+        "BATTERIES.md",
+        "TERMINALS.md",
+        "EVENTS.md",
+        "RECEIPTS.md",
+        "CIRCUITS.md",
+        "REPLAY.md",
+        "PROJECTIONS.md",
+        "INTEGRATION.md",
+        "CONFORMANCE.md",
+        "COOKBOOK.md",
+    ] {
+        let content =
+            fs::read_to_string(doc_root.join(doc)).with_context(|| format!("read {doc}"))?;
+        for banned in ["cargo xtask", "pnpm test", "npm run"] {
+            ensure(
+                !content.contains(banned),
+                format!(
+                    "{doc} must route repeatable command examples through `just`, not `{banned}`"
+                ),
             )?;
         }
     }
