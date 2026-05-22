@@ -306,13 +306,13 @@ fn materialize_compacted_segment(
             "{merged_id:06}.{}.compact-src",
             segment::SEGMENT_EXTENSION
         ));
-        let _ = std::fs::remove_file(&temp_source_path);
+        remove_file_if_present(&temp_source_path)?;
         std::fs::rename(&*source_path, &temp_source_path).map_err(StoreError::Io)?;
         *source_path = temp_source_path.clone();
         *compact_source_path = Some(temp_source_path);
     }
 
-    let _ = std::fs::remove_file(merged_path);
+    remove_file_if_present(merged_path)?;
     let mut merged_segment = segment::Segment::<Active>::create_with_created_ns(
         &store.config.data_dir,
         merged_id,
@@ -538,7 +538,7 @@ pub(crate) fn compact(
     }
 
     if let Some(temp_source_path) = compact_source_path {
-        let _ = std::fs::remove_file(temp_source_path);
+        remove_file_if_present(&temp_source_path)?;
     }
     crate::store::cold_start::rebuild::clear_pending_compaction(&store.config.data_dir)?;
 
