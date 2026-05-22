@@ -1,3 +1,4 @@
+mod ast_grep;
 mod ci;
 mod disk_audit;
 mod export_ts_manifest;
@@ -47,6 +48,10 @@ pub(crate) fn quickstart() -> Result<()> {
 
 pub(crate) fn consumer_smoke() -> Result<()> {
     release::consumer_smoke()
+}
+
+pub(crate) fn ast_grep() -> Result<()> {
+    ast_grep::ast_grep()
 }
 
 pub(crate) fn integrity<const N: usize>(subcommand: &str, extra: [&str; N]) -> Result<()> {

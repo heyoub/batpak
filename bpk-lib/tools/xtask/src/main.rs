@@ -28,6 +28,8 @@ enum XtaskCommand {
     InstallHooks,
     Quickstart,
     ConsumerSmoke,
+    /// Run scoped ast-grep calipers for production store smell shapes.
+    AstGrep,
     Doctor,
     Traceability,
     Structural,
@@ -408,6 +410,7 @@ fn main() -> Result<()> {
         XtaskCommand::InstallHooks => commands::install_hooks(),
         XtaskCommand::Quickstart => commands::quickstart(),
         XtaskCommand::ConsumerSmoke => commands::consumer_smoke(),
+        XtaskCommand::AstGrep => commands::ast_grep(),
         XtaskCommand::Doctor => commands::doctor(),
         XtaskCommand::Traceability => commands::integrity("traceability-check", []),
         XtaskCommand::Structural => commands::integrity("structural-check", []),
