@@ -1,4 +1,5 @@
 use super::{ensure, relative};
+use crate::source_cache::SourceCache;
 use anyhow::{Context, Result};
 use std::collections::BTreeSet;
 use std::fs;
@@ -160,14 +161,19 @@ const ASYNC_RUNTIME_DEPS: &[&str] = &[
     "async-executor",
 ];
 
-pub(super) fn check(repo_root: &Path, tracked_files: &[PathBuf]) -> Result<()> {
+pub(super) fn check(
+    repo_root: &Path,
+    tracked_files: &[PathBuf],
+    source_cache: &mut SourceCache,
+) -> Result<()> {
     for path in tracked_files {
         let layer = match source_layer(repo_root, path) {
             Some(layer) => layer,
             None => continue,
         };
-        let content =
-            fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
+        let content = source_cache
+            .read_to_string(path)
+            .with_context(|| format!("read {}", path.display()))?;
 
         let semantic_content = semantic_content(&content);
 
@@ -200,7 +206,7 @@ pub(super) fn check(repo_root: &Path, tracked_files: &[PathBuf]) -> Result<()> {
         }
 
         if checks_runtime_shape(repo_root, path) {
-            check_no_async_or_unsafe_runtime_source(repo_root, path, &content)?;
+            check_no_async_or_unsafe_runtime_source(repo_root, path, source_cache)?;
         }
     }
     check_family_manifest_boundaries(repo_root)?;
@@ -253,10 +259,11 @@ fn checks_runtime_shape(repo_root: &Path, path: &Path) -> bool {
 fn check_no_async_or_unsafe_runtime_source(
     repo_root: &Path,
     path: &Path,
-    content: &str,
+    source_cache: &mut SourceCache,
 ) -> Result<()> {
-    let parsed =
-        syn::parse_file(content).with_context(|| format!("parse {}", relative(repo_root, path)))?;
+    let parsed = source_cache
+        .parse_rust(path)
+        .with_context(|| format!("parse {}", relative(repo_root, path)))?;
     let mut visitor = RuntimeShapeVisitor::default();
     visitor.visit_file(&parsed);
     if visitor.findings.is_empty() {
