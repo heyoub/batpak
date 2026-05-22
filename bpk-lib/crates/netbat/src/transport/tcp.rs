@@ -215,9 +215,13 @@ where
 /// Serve a blocking TCP listener sequentially until shutdown or limits stop it.
 ///
 /// The listener is switched to nonblocking mode so [`ShutdownHandle`] can stop
-/// the accept loop without opening a synthetic connection. Each accepted
-/// connection is served on the caller's thread; `netbat` does not spawn worker
-/// threads and does not require syncbat handlers to be `Send`.
+/// the accept loop without opening a synthetic connection. Each accepted stream
+/// is switched back to blocking mode before reads: on Windows (and most
+/// non-Linux platforms) accepted sockets inherit the listener's nonblocking
+/// flag, which would otherwise surface `WouldBlock` from `read_line` instead of
+/// waiting for request bytes. Each connection is served on the caller's thread;
+/// `netbat` does not spawn worker threads and does not require syncbat handlers
+/// to be `Send`.
 ///
 /// # Errors
 /// Returns [`NetbatError`] when listener configuration, accept, timeout
@@ -243,6 +247,7 @@ pub fn serve_tcp_listener(
             Ok((stream, addr)) => {
                 stats.accepted_connections += 1;
                 tracing::debug!(peer = %addr, "connection accepted");
+                stream.set_nonblocking(false)?;
                 apply_timeouts(&stream, config.timeouts)?;
                 serve_tcp_connection(stream, core, config, &mut stats)?;
             }
