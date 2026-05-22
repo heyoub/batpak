@@ -156,16 +156,29 @@ fn check_no_mdbook_dependency(repo_root: &Path) -> Result<()> {
 fn check_justfile_stays_thin(repo_root: &Path) -> Result<()> {
     let path = project_root(repo_root).join("justfile");
     let content = fs::read_to_string(&path).context("read justfile")?;
+    let mut current_recipe = None;
     for (index, line) in content.lines().enumerate() {
         let trimmed = line.trim();
         if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with("set ") {
             continue;
         }
+        if !line.starts_with(' ') && !line.starts_with('\t') {
+            current_recipe = trimmed.split(':').next();
+        }
         if line.starts_with(' ') || line.starts_with('\t') {
+            let is_escape_hatch = matches!(
+                current_recipe,
+                Some("cargo +args") | Some("pnpm +args") | Some("npm +args")
+            );
             ensure(
-                trimmed.starts_with("cd bpk-lib && cargo xtask ")
+                trimmed.starts_with("cd bpk-lib; cargo xtask ")
+                    || trimmed.starts_with("cd bpk-lib && cargo xtask ")
                     || trimmed.starts_with("cargo xtask ")
-                    || trimmed.starts_with("just "),
+                    || trimmed.starts_with("just ")
+                    || (is_escape_hatch
+                        && (trimmed.starts_with("cd bpk-lib; cargo ")
+                            || trimmed.starts_with("pnpm ")
+                            || trimmed.starts_with("npm "))),
                 format!(
                     "justfile command at line {} must stay a thin alias over cargo xtask or just",
                     index + 1
@@ -514,16 +527,16 @@ fn check_xtask_surface_contract(repo_root: &Path) -> Result<()> {
         "xtask main must expose install-hooks and devcontainer-exec as first-class command surfaces",
     )?;
     ensure(
-        justfile_content.contains("bench-compile:\n    cd bpk-lib && cargo xtask bench --compile"),
-        "justfile bench-compile recipe must remain a thin alias over `cd bpk-lib && cargo xtask bench --compile`",
+        justfile_content.contains("bench-compile:\n    cd bpk-lib; cargo xtask bench --compile"),
+        "justfile bench-compile recipe must remain a thin alias over `cd bpk-lib; cargo xtask bench --compile`",
     )?;
     ensure(
-        justfile_content.contains("install-hooks:\n    cd bpk-lib && cargo xtask install-hooks"),
-        "justfile install-hooks recipe must remain a thin alias over `cd bpk-lib && cargo xtask install-hooks`",
+        justfile_content.contains("install-hooks:\n    cd bpk-lib; cargo xtask install-hooks"),
+        "justfile install-hooks recipe must remain a thin alias over `cd bpk-lib; cargo xtask install-hooks`",
     )?;
     ensure(
-        justfile_content.contains("stress:\n    cd bpk-lib && cargo xtask stress"),
-        "justfile stress recipe must remain a thin alias over `cd bpk-lib && cargo xtask stress`",
+        justfile_content.contains("stress:\n    cd bpk-lib; cargo xtask stress"),
+        "justfile stress recipe must remain a thin alias over `cd bpk-lib; cargo xtask stress`",
     )?;
     for command in [
         XtaskDocCommand {
