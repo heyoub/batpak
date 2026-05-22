@@ -224,15 +224,17 @@ pub fn report_for_run(
     push_failed_finding(&mut findings, &result.outcome);
 
     let output_segment_bytes_hash = match (&result.outcome, merged_segment_path_for_hash) {
-        (CompactionOutcome::Performed, Some(path)) => match std::fs::read(path) {
-            Ok(bytes) => Some(content_hash(&bytes)),
-            Err(err) => {
-                findings.push(CompactionReportFinding::OutputSegmentHashUnavailable {
-                    reason: format!("read merged segment for evidence hash: {err}"),
-                });
-                None
+        (CompactionOutcome::Performed, Some(path)) => {
+            match crate::store::platform::fs::read(path) {
+                Ok(bytes) => Some(content_hash(&bytes)),
+                Err(err) => {
+                    findings.push(CompactionReportFinding::OutputSegmentHashUnavailable {
+                        reason: format!("read merged segment for evidence hash: {err}"),
+                    });
+                    None
+                }
             }
-        },
+        }
         (CompactionOutcome::Performed, None) => {
             findings.push(CompactionReportFinding::OutputSegmentHashUnavailable {
                 reason: "merged segment path unavailable for evidence hash".into(),

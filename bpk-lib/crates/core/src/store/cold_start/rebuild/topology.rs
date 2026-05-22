@@ -1,4 +1,5 @@
 use crate::store::file_classification::StoreFileKind;
+use crate::store::platform;
 use crate::store::segment;
 use crate::store::StoreError;
 use std::path::{Path, PathBuf};
@@ -29,7 +30,7 @@ pub(super) fn load_pending_compaction(
     if !path.exists() {
         return Ok(None);
     }
-    let bytes = std::fs::read(&path).map_err(StoreError::Io)?;
+    let bytes = platform::fs::read(&path).map_err(StoreError::Io)?;
     let marker = serde_json::from_slice::<PendingCompaction>(&bytes)
         .map_err(|_| StoreError::DataDirMalformed { path: path.clone() })?;
     Ok(Some(marker))
@@ -57,7 +58,7 @@ pub(crate) fn write_pending_compaction(
 
 pub(crate) fn clear_pending_compaction(data_dir: &Path) -> Result<(), StoreError> {
     let path = pending_compaction_path(data_dir);
-    match std::fs::remove_file(&path) {
+    match platform::fs::remove_file(&path) {
         Ok(()) => {
             crate::store::platform::sync::sync_parent_dir(&path)?;
             Ok(())
@@ -69,7 +70,7 @@ pub(crate) fn clear_pending_compaction(data_dir: &Path) -> Result<(), StoreError
 
 pub(super) fn segment_paths(data_dir: &Path) -> Result<Vec<(u64, PathBuf)>, StoreError> {
     let mut entries = Vec::new();
-    for entry in std::fs::read_dir(data_dir).map_err(StoreError::Io)? {
+    for entry in platform::fs::read_dir(data_dir).map_err(StoreError::Io)? {
         let entry = entry.map_err(StoreError::Io)?;
         let path = entry.path();
         let segment_id = match StoreFileKind::from_path(&path) {

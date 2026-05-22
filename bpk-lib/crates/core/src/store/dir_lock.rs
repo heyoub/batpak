@@ -1,4 +1,4 @@
-use crate::store::{StoreError, StoreLockMode};
+use crate::store::{platform, StoreError, StoreLockMode};
 use std::fs::File;
 use std::path::Path;
 
@@ -14,7 +14,7 @@ pub(crate) struct StoreDirLock {
 
 impl StoreDirLock {
     pub(crate) fn acquire(data_dir: &Path, mode: StoreLockMode) -> Result<Self, StoreError> {
-        let canonical_dir = std::fs::canonicalize(data_dir).map_err(StoreError::Io)?;
+        let canonical_dir = platform::fs::canonicalize(data_dir).map_err(StoreError::Io)?;
         let path = canonical_dir.join(STORE_LOCK_FILENAME);
         let file = crate::store::platform::lock::open_store_lock_file(&path)?;
 

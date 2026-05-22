@@ -85,7 +85,7 @@ fn restart_policy_shape(policy: &RestartPolicy) -> StoreResourceRestartPolicySha
 #[must_use]
 pub fn store_data_dir_identity_hash(path: &Path) -> StoreResourceHash {
     let canonical;
-    let identity_path = match std::fs::canonicalize(path) {
+    let identity_path = match crate::store::platform::fs::canonicalize(path) {
         Ok(path) => {
             canonical = path;
             canonical.as_path()

@@ -1,7 +1,7 @@
 use crate::store::StoreError;
-use std::fs::{File, Metadata};
+use std::fs::{File, Metadata, ReadDir};
 use std::io::{self, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
 
 pub(crate) fn reject_symlink_leaf(path: &Path, purpose: &str) -> Result<(), StoreError> {
@@ -72,8 +72,40 @@ pub(crate) fn open_file(path: &Path) -> io::Result<File> {
     File::open(path)
 }
 
+pub(crate) fn read(path: &Path) -> io::Result<Vec<u8>> {
+    std::fs::read(path)
+}
+
+pub(crate) fn read_dir(path: &Path) -> io::Result<ReadDir> {
+    std::fs::read_dir(path)
+}
+
+pub(crate) fn create_dir_all(path: &Path) -> io::Result<()> {
+    std::fs::create_dir_all(path)
+}
+
+pub(crate) fn canonicalize(path: &Path) -> io::Result<PathBuf> {
+    std::fs::canonicalize(path)
+}
+
 pub(crate) fn metadata(path: &Path) -> io::Result<Metadata> {
     std::fs::metadata(path)
+}
+
+pub(crate) fn remove_file(path: &Path) -> io::Result<()> {
+    std::fs::remove_file(path)
+}
+
+pub(crate) fn remove_dir_all(path: &Path) -> io::Result<()> {
+    std::fs::remove_dir_all(path)
+}
+
+pub(crate) fn rename(from: &Path, to: &Path) -> io::Result<()> {
+    std::fs::rename(from, to)
+}
+
+pub(crate) fn copy(from: &Path, to: &Path) -> io::Result<u64> {
+    std::fs::copy(from, to)
 }
 
 #[derive(Debug)]

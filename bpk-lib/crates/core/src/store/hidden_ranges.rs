@@ -1,4 +1,4 @@
-use crate::store::{HiddenRangesCorruption, StoreError};
+use crate::store::{platform, HiddenRangesCorruption, StoreError};
 use serde::{Deserialize, Serialize};
 use std::io::{BufWriter, Write};
 use std::path::Path;
@@ -51,7 +51,7 @@ pub(crate) fn write_cancelled_ranges(
 
     let normalized = normalize_ranges(ranges)?;
     if normalized.is_empty() {
-        match std::fs::remove_file(&final_path) {
+        match platform::fs::remove_file(&final_path) {
             Ok(()) => crate::store::platform::sync::sync_parent_dir(&final_path)?,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => return Err(StoreError::Io(error)),
@@ -104,7 +104,7 @@ pub(crate) fn load_cancelled_ranges(
     data_dir: &Path,
 ) -> Result<Option<Vec<(u64, u64)>>, StoreError> {
     let path = data_dir.join(VISIBILITY_RANGES_FILENAME);
-    let raw = match std::fs::read(&path) {
+    let raw = match platform::fs::read(&path) {
         Ok(raw) => raw,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => {

@@ -4,6 +4,7 @@ pub(crate) mod watch;
 
 pub use watch::{CursorWatcherError, ProjectionWatcher, WatcherError};
 
+use crate::store::platform::fs as platform_fs;
 use crate::store::StoreError;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -276,8 +277,8 @@ impl NativeCache {
     /// Returns `StoreError::CacheFailed` if the root directory cannot be created.
     pub fn open(path: impl AsRef<std::path::Path>) -> Result<Self, StoreError> {
         let root = path.as_ref().to_path_buf();
-        crate::store::platform::fs::reject_cache_symlink_leaf(&root)?;
-        std::fs::create_dir_all(&root).map_err(StoreError::cache_error)?;
+        platform_fs::reject_cache_symlink_leaf(&root)?;
+        platform_fs::create_dir_all(&root).map_err(StoreError::cache_error)?;
         Ok(Self { root })
     }
 
@@ -298,7 +299,7 @@ impl ProjectionCache for NativeCache {
 
     fn get(&self, key: &[u8]) -> Result<Option<(Vec<u8>, CacheMeta)>, StoreError> {
         let (shard, path) = self.key_path(key);
-        match std::fs::metadata(&shard) {
+        match platform_fs::metadata(&shard) {
             Ok(meta) if meta.is_dir() => {}
             Ok(_) => {
                 return Err(StoreError::CacheFailed(Box::new(std::io::Error::other(
@@ -306,15 +307,15 @@ impl ProjectionCache for NativeCache {
                 ))));
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(e) => return Err(StoreError::CacheFailed(Box::new(e))),
+            Err(e) => return Err(StoreError::cache_error(e)),
         }
-        match std::fs::read(&path) {
+        match platform_fs::read(&path) {
             Ok(bytes) => match CacheMeta::decode_from_bytes(&bytes) {
                 Ok((value, meta)) => Ok(Some((value, meta))),
                 Err(_) => {
                     // Corrupt cache file — self-heal by deleting it.
                     tracing::warn!("corrupt cache file, deleting: {}", path.display());
-                    match std::fs::remove_file(&path) {
+                    match platform_fs::remove_file(&path) {
                         Ok(()) => {}
                         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
                         Err(error) => return Err(StoreError::cache_error(error)),
@@ -325,7 +326,7 @@ impl ProjectionCache for NativeCache {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
             // Real IO errors (permissions, bad mount, etc.) surface as CacheFailed
             // per the trait contract. Silent degradation would hide real problems.
-            Err(e) => Err(StoreError::CacheFailed(Box::new(e))),
+            Err(e) => Err(StoreError::cache_error(e)),
         }
     }
 
@@ -333,9 +334,9 @@ impl ProjectionCache for NativeCache {
         let (shard_dir, final_path) = self.key_path(key);
 
         // Ensure shard directory exists (lazy creation).
-        crate::store::platform::fs::reject_cache_symlink_leaf(&shard_dir)?;
-        std::fs::create_dir_all(&shard_dir).map_err(StoreError::cache_error)?;
-        crate::store::platform::fs::reject_cache_symlink_leaf(&final_path)?;
+        platform_fs::reject_cache_symlink_leaf(&shard_dir)?;
+        platform_fs::create_dir_all(&shard_dir).map_err(StoreError::cache_error)?;
+        platform_fs::reject_cache_symlink_leaf(&final_path)?;
 
         let buf = meta.encode_with_value(value);
 
@@ -343,7 +344,7 @@ impl ProjectionCache for NativeCache {
         //
         // The projection cache is rebuildable from segments — losing a cache
         // file on power loss is recoverable by replaying events. Atomicity
-        // (no torn reads) comes from `std::fs::rename`, which is atomic on
+        // (no torn reads) comes from the platform rename helper, which is atomic on
         // POSIX and on Windows since Rust 1.57. We do NOT need durability.
         //
         // Skipping the per-write `sync_all()` and directory fsync removes
@@ -354,7 +355,7 @@ impl ProjectionCache for NativeCache {
         // an explicit non-goal of this backend, since the segment log is the
         // source of truth and a missing cache entry simply triggers a
         // replay-and-rewrite on the next `project()` call.
-        crate::store::platform::fs::write_derivative_file_atomically(
+        platform_fs::write_derivative_file_atomically(
             &shard_dir,
             &final_path,
             "projection cache file",
@@ -368,10 +369,10 @@ impl ProjectionCache for NativeCache {
         let mut count = 0u64;
 
         // Read all shard directories.
-        let entries = match std::fs::read_dir(&self.root) {
+        let entries = match platform_fs::read_dir(&self.root) {
             Ok(e) => e,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(0),
-            Err(e) => return Err(StoreError::CacheFailed(Box::new(e))),
+            Err(e) => return Err(StoreError::cache_error(e)),
         };
 
         for dir_entry in entries {
@@ -392,7 +393,8 @@ impl ProjectionCache for NativeCache {
                 }
             }
 
-            let shard_entries = std::fs::read_dir(&shard_path).map_err(StoreError::cache_error)?;
+            let shard_entries =
+                platform_fs::read_dir(&shard_path).map_err(StoreError::cache_error)?;
 
             for file_entry in shard_entries {
                 let file_entry = file_entry.map_err(StoreError::cache_error)?;
@@ -402,7 +404,7 @@ impl ProjectionCache for NativeCache {
                     _ => continue,
                 };
                 if name.starts_with(&hex_prefix) {
-                    match std::fs::remove_file(file_entry.path()) {
+                    match platform_fs::remove_file(&file_entry.path()) {
                         Ok(()) => count += 1,
                         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
                         Err(error) => return Err(StoreError::cache_error(error)),
