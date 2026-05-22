@@ -1,4 +1,5 @@
 use super::ci;
+use super::manifest::batpak_path_dependency_line;
 use crate::docs;
 use crate::publish::RELEASE_CHAIN;
 use crate::util::{cargo, cargo_target_dir, repo_root, run};
@@ -45,6 +46,7 @@ pub(crate) fn consumer_smoke() -> Result<()> {
     let macros_name = unpack_crate(&packaged_root, &macros_archive)?;
     let bench_support_name = unpack_crate(&packaged_root, &bench_support_archive)?;
     let unpacked_name = unpack_crate(&packaged_root, &batpak_archive)?;
+    let batpak_dependency = batpak_path_dependency_line(&format!("../packaged/{unpacked_name}"));
 
     fs::write(
         consumer_root.join("Cargo.toml"),
@@ -58,7 +60,7 @@ pub(crate) fn consumer_smoke() -> Result<()> {
              [workspace]\n\
              \n\
              [dependencies]\n\
-             batpak = {{ path = \"../packaged/{unpacked_name}\", features = [\"blake3\"] }}\n\
+             {batpak_dependency}\n\
              serde = {{ version = \"1\", features = [\"derive\"] }}\n\
              \n\
              [patch.crates-io]\n\

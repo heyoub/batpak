@@ -1,3 +1,4 @@
+use super::manifest::rewrite_batpak_path_dependency;
 use crate::util::{copy_dir, repo_root};
 use crate::{ScaffoldArgs, ScaffoldPattern};
 use anyhow::{bail, Context, Result};
@@ -78,17 +79,7 @@ fn rewrite_manifest(repo_root: &Path, manifest: &Path, package_name: &str) -> Re
         .join("crates/core")
         .to_string_lossy()
         .replace('\\', "/");
-    content = content
-        .lines()
-        .map(|line| {
-            if line.trim_start().starts_with("batpak = { path = ") {
-                format!("batpak = {{ path = \"{core_path}\", features = [\"blake3\"] }}")
-            } else {
-                line.to_string()
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
+    content = rewrite_batpak_path_dependency(&content, &core_path);
     content.push('\n');
     fs::write(manifest, content).with_context(|| format!("write {}", manifest.display()))
 }
