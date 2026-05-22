@@ -21,7 +21,7 @@ pub(crate) fn run() -> Result<()> {
     let mut source_cache = SourceCache::new();
     architecture_lints::check(&repo_root, &tracked_files, &mut source_cache)?;
     agent_surface::check(&repo_root)?;
-    harness_lints::check(&repo_root, &tracked_files)?;
+    harness_lints::check(&repo_root, &tracked_files, &mut source_cache)?;
     invariant_bridge::check(&repo_root, &tracked_files)?;
     check_no_dead_code_silencers(&repo_root, &mut source_cache)?;
     check_no_placeholder_runtime_macros(&repo_root, &mut source_cache)?;

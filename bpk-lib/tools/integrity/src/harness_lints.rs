@@ -1,4 +1,5 @@
 use crate::repo_surface::resolve_repo_or_core_path;
+use crate::source_cache::SourceCache;
 use anyhow::{bail, Context, Result};
 use std::collections::{BTreeSet, HashMap};
 use std::fs;
@@ -240,15 +241,19 @@ struct LedgerEntry {
     commands: Vec<String>,
 }
 
-pub fn check(repo_root: &Path, tracked_files: &[PathBuf]) -> Result<()> {
+pub fn check(
+    repo_root: &Path,
+    tracked_files: &[PathBuf],
+    source_cache: &mut SourceCache,
+) -> Result<()> {
     let tracked = tracked_set(repo_root, tracked_files);
     let entries = parse_ledger(repo_root)?;
-    check_entries(repo_root, &tracked, &entries)?;
+    check_entries(repo_root, &tracked, &entries, source_cache)?;
     let ledger_rust_files = ledger_rust_files(&entries);
-    check_module_headers(repo_root, &ledger_rust_files)?;
-    check_line_caps(repo_root, &ledger_rust_files)?;
-    check_no_silent_repo_fixture_skips(repo_root, tracked_files)?;
-    check_no_tombstone_ignores(repo_root, tracked_files)?;
+    check_module_headers(repo_root, &ledger_rust_files, source_cache)?;
+    check_line_caps(repo_root, &ledger_rust_files, source_cache)?;
+    check_no_silent_repo_fixture_skips(repo_root, tracked_files, source_cache)?;
+    check_no_tombstone_ignores(repo_root, tracked_files, source_cache)?;
     Ok(())
 }
 
@@ -351,6 +356,7 @@ fn check_entries(
     repo_root: &Path,
     tracked: &BTreeSet<String>,
     entries: &[LedgerEntry],
+    source_cache: &mut SourceCache,
 ) -> Result<()> {
     for entry in entries {
         ensure(
@@ -439,7 +445,7 @@ fn check_entries(
                     entry.line
                 ),
             )?;
-            check_cargo_test_filter_targets_existing_test(repo_root, entry, command)?;
+            check_cargo_test_filter_targets_existing_test(repo_root, entry, command, source_cache)?;
         }
     }
     Ok(())
@@ -449,6 +455,7 @@ fn check_cargo_test_filter_targets_existing_test(
     repo_root: &Path,
     entry: &LedgerEntry,
     command: &str,
+    source_cache: &mut SourceCache,
 ) -> Result<()> {
     let Some((target, filter)) = cargo_test_target_and_filter(command) else {
         return Ok(());
@@ -461,7 +468,7 @@ fn check_cargo_test_filter_targets_existing_test(
             entry.line
         ),
     )?;
-    let tests = test_names_for_target(repo_root, target)?;
+    let tests = test_names_for_target(repo_root, target, source_cache)?;
     ensure(
         tests.iter().any(|name| name.contains(filter)),
         format!(
@@ -506,17 +513,26 @@ fn flag_takes_value(part: &str) -> bool {
     )
 }
 
-fn test_names_for_target(repo_root: &Path, target: &str) -> Result<BTreeSet<String>> {
+fn test_names_for_target(
+    repo_root: &Path,
+    target: &str,
+    source_cache: &mut SourceCache,
+) -> Result<BTreeSet<String>> {
     let target_path = resolve_repo_or_core_path(repo_root, format!("tests/{target}.rs"));
-    let mut tests = test_names_from_file(&target_path, "")?;
+    let mut tests = test_names_from_file(&target_path, "", source_cache)?;
     let target_dir = resolve_repo_or_core_path(repo_root, format!("tests/{target}"));
     if target_dir.is_dir() {
-        collect_nested_test_names(&target_dir, &target_dir, &mut tests)?;
+        collect_nested_test_names(&target_dir, &target_dir, &mut tests, source_cache)?;
     }
     Ok(tests)
 }
 
-fn collect_nested_test_names(root: &Path, dir: &Path, tests: &mut BTreeSet<String>) -> Result<()> {
+fn collect_nested_test_names(
+    root: &Path,
+    dir: &Path,
+    tests: &mut BTreeSet<String>,
+    source_cache: &mut SourceCache,
+) -> Result<()> {
     let mut entries = fs::read_dir(dir)
         .with_context(|| format!("read nested test directory {}", dir.display()))?
         .collect::<Result<Vec<_>, _>>()?;
@@ -525,7 +541,7 @@ fn collect_nested_test_names(root: &Path, dir: &Path, tests: &mut BTreeSet<Strin
     for entry in entries {
         let path = entry.path();
         if path.is_dir() {
-            collect_nested_test_names(root, &path, tests)?;
+            collect_nested_test_names(root, &path, tests, source_cache)?;
             continue;
         }
         if path.extension().and_then(|ext| ext.to_str()) != Some("rs") {
@@ -552,14 +568,19 @@ fn collect_nested_test_names(root: &Path, dir: &Path, tests: &mut BTreeSet<Strin
         } else {
             format!("{}::", prefix_parts.join("::"))
         };
-        tests.extend(test_names_from_file(&path, &module_prefix)?);
+        tests.extend(test_names_from_file(&path, &module_prefix, source_cache)?);
     }
     Ok(())
 }
 
-fn test_names_from_file(path: &Path, module_prefix: &str) -> Result<BTreeSet<String>> {
-    let content = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
-    let file = syn::parse_file(&content).with_context(|| format!("parse {}", path.display()))?;
+fn test_names_from_file(
+    path: &Path,
+    module_prefix: &str,
+    source_cache: &mut SourceCache,
+) -> Result<BTreeSet<String>> {
+    let file = source_cache
+        .parse_rust(path)
+        .with_context(|| format!("parse {}", path.display()))?;
     Ok(test_function_names(&file.items, module_prefix))
 }
 
@@ -584,10 +605,16 @@ fn has_test_attr(attrs: &[syn::Attribute]) -> bool {
     attrs.iter().any(|attr| attr.path().is_ident("test"))
 }
 
-fn check_module_headers(repo_root: &Path, rust_files: &BTreeSet<String>) -> Result<()> {
+fn check_module_headers(
+    repo_root: &Path,
+    rust_files: &BTreeSet<String>,
+    source_cache: &mut SourceCache,
+) -> Result<()> {
     let allowlist = header_allowlist()?;
     for path in rust_files {
-        let content = fs::read_to_string(resolve_repo_or_core_path(repo_root, path))
+        let resolved = resolve_repo_or_core_path(repo_root, path);
+        let content = source_cache
+            .read_to_string(&resolved)
             .with_context(|| format!("read {path}"))?;
         let header = content.lines().take(40).collect::<Vec<_>>().join("\n");
         let complete =
@@ -607,10 +634,16 @@ fn check_module_headers(repo_root: &Path, rust_files: &BTreeSet<String>) -> Resu
     Ok(())
 }
 
-fn check_line_caps(repo_root: &Path, rust_files: &BTreeSet<String>) -> Result<()> {
+fn check_line_caps(
+    repo_root: &Path,
+    rust_files: &BTreeSet<String>,
+    source_cache: &mut SourceCache,
+) -> Result<()> {
     let allowlist = oversize_allowlist()?;
     for path in rust_files {
-        let content = fs::read_to_string(resolve_repo_or_core_path(repo_root, path))
+        let resolved = resolve_repo_or_core_path(repo_root, path);
+        let content = source_cache
+            .read_to_string(&resolved)
             .with_context(|| format!("read {path}"))?;
         let line_count = content.lines().count();
         if line_count <= 500 {
@@ -720,13 +753,19 @@ fn tracked_set(repo_root: &Path, tracked_files: &[PathBuf]) -> BTreeSet<String> 
         .collect()
 }
 
-fn check_no_silent_repo_fixture_skips(repo_root: &Path, tracked_files: &[PathBuf]) -> Result<()> {
+fn check_no_silent_repo_fixture_skips(
+    repo_root: &Path,
+    tracked_files: &[PathBuf],
+    source_cache: &mut SourceCache,
+) -> Result<()> {
     for path in tracked_files {
         let rel = relative(repo_root, path);
         if !rel.starts_with("crates/core/tests/") || !rel.ends_with(".rs") {
             continue;
         }
-        let content = fs::read_to_string(path).with_context(|| format!("read {rel}"))?;
+        let content = source_cache
+            .read_to_string(path)
+            .with_context(|| format!("read {rel}"))?;
         if content.contains(".cargo_vcs_info.json") && content.contains("return;") {
             bail!(
                 "{rel}: packaged-source fixture tests must fail loudly when required fixtures are absent, not silently return under .cargo_vcs_info.json"
@@ -736,13 +775,19 @@ fn check_no_silent_repo_fixture_skips(repo_root: &Path, tracked_files: &[PathBuf
     Ok(())
 }
 
-fn check_no_tombstone_ignores(repo_root: &Path, tracked_files: &[PathBuf]) -> Result<()> {
+fn check_no_tombstone_ignores(
+    repo_root: &Path,
+    tracked_files: &[PathBuf],
+    source_cache: &mut SourceCache,
+) -> Result<()> {
     for path in tracked_files {
         let rel = relative(repo_root, path);
         if !rel.starts_with("crates/core/tests/") || !rel.ends_with(".rs") {
             continue;
         }
-        let content = fs::read_to_string(path).with_context(|| format!("read {rel}"))?;
+        let content = source_cache
+            .read_to_string(path)
+            .with_context(|| format!("read {rel}"))?;
         for (index, line) in content.lines().enumerate() {
             if line.contains("#[ignore = \"SUPERSEDED:") {
                 bail!(
@@ -816,10 +861,13 @@ mod tests {
         .expect("write synthetic test");
         let tracked = BTreeSet::from([location.to_owned()]);
         let entries = vec![complete_entry(location)];
+        let mut source_cache = SourceCache::new();
 
-        check_entries(&repo, &tracked, &entries).expect("valid ledger entry");
-        check_module_headers(&repo, &ledger_rust_files(&entries)).expect("valid header");
-        check_line_caps(&repo, &ledger_rust_files(&entries)).expect("valid line cap");
+        check_entries(&repo, &tracked, &entries, &mut source_cache).expect("valid ledger entry");
+        check_module_headers(&repo, &ledger_rust_files(&entries), &mut source_cache)
+            .expect("valid header");
+        check_line_caps(&repo, &ledger_rust_files(&entries), &mut source_cache)
+            .expect("valid line cap");
 
         fs::remove_dir_all(repo).expect("remove temp repo");
     }
@@ -835,8 +883,10 @@ mod tests {
         let mut entry = complete_entry(location);
         entry.fields.remove("Mutation delta");
         let entries = vec![entry];
+        let mut source_cache = SourceCache::new();
 
-        let err = check_entries(&repo, &tracked, &entries).expect_err("missing field rejected");
+        let err = check_entries(&repo, &tracked, &entries, &mut source_cache)
+            .expect_err("missing field rejected");
         assert!(
             err.to_string().contains("missing `Mutation delta`"),
             "unexpected error: {err:?}"

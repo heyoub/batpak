@@ -3,6 +3,7 @@ use crate::repo_surface::{
     core_examples_root, ensure, ensure_unique_ids, load_yaml, relative, repo_root,
     resolve_repo_or_core_path,
 };
+use crate::source_cache::SourceCache;
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
 use std::collections::{BTreeSet, HashMap};
@@ -60,6 +61,7 @@ pub(crate) fn run() -> Result<()> {
         load_yaml(&trace_dir.join("observations.yaml")).context("observations")?;
     let artifacts: Vec<ArtifactRecord> =
         load_yaml(&trace_dir.join("artifacts.yaml")).context("artifacts")?;
+    let mut source_cache = SourceCache::new();
 
     ensure_unique_ids(
         requirements.iter().map(|r| r.id.as_str()),
@@ -176,7 +178,12 @@ pub(crate) fn run() -> Result<()> {
                 !evidence.trim().is_empty(),
                 format!("observation {} has blank evidence", observation.id),
             )?;
-            validate_observation_evidence(&repo_root, &observation.id, evidence)?;
+            validate_observation_evidence_with_cache(
+                &repo_root,
+                &observation.id,
+                evidence,
+                &mut source_cache,
+            )?;
         }
         for artifact_id in &observation.artifacts {
             ensure(
@@ -249,10 +256,21 @@ fn check_examples_artifact_complete(repo_root: &Path, artifacts: &[ArtifactRecor
     )
 }
 
+#[cfg(test)]
 pub(crate) fn validate_observation_evidence(
     repo_root: &Path,
     observation_id: &str,
     evidence: &str,
+) -> Result<()> {
+    let mut source_cache = SourceCache::new();
+    validate_observation_evidence_with_cache(repo_root, observation_id, evidence, &mut source_cache)
+}
+
+fn validate_observation_evidence_with_cache(
+    repo_root: &Path,
+    observation_id: &str,
+    evidence: &str,
+    source_cache: &mut SourceCache,
 ) -> Result<()> {
     let trimmed = evidence.trim();
     let (path_part, symbol_part) = trimmed
@@ -282,9 +300,8 @@ pub(crate) fn validate_observation_evidence(
         !symbol.is_empty(),
         format!("observation {observation_id} evidence `{evidence}` has blank function name"),
     )?;
-    let content = fs::read_to_string(&full)
-        .with_context(|| format!("read observation evidence {}", relative(repo_root, &full)))?;
-    let file = syn::parse_file(&content)
+    let file = source_cache
+        .parse_rust(&full)
         .with_context(|| format!("parse observation evidence {}", relative(repo_root, &full)))?;
     ensure(
         rust_file_declares_fn(&file, symbol),

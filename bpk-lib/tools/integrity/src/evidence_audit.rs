@@ -4,9 +4,9 @@
 //! repo-local structural assertions that are cheap to run in pre-push loops.
 
 use crate::repo_surface::core_path;
+use crate::source_cache::SourceCache;
 use anyhow::{bail, Context, Result};
 use regex::Regex;
-use std::fs;
 use std::path::Path;
 use syn::{Fields, Item, Visibility};
 
@@ -53,16 +53,17 @@ const FORBIDDEN_PUBLIC_SUBSTRINGS: &[&str] = &[
 ];
 
 pub fn run(repo_root: &Path) -> Result<()> {
+    let mut source_cache = SourceCache::new();
     for &(rel, struct_name) in SCHEMA_VERSION_BODY_ANCHORS {
         let path = core_path(repo_root, rel);
-        let text = fs::read_to_string(&path)
-            .with_context(|| format!("evidence-audit: read {}", path.display()))?;
-        assert_public_struct_has_public_schema_version(&path, &text, struct_name)?;
+        assert_public_struct_has_public_schema_version(&path, &mut source_cache, struct_name)?;
     }
 
-    let prelude = fs::read_to_string(core_path(repo_root, "src/prelude.rs"))
+    let prelude = source_cache
+        .read_to_string(&core_path(repo_root, "src/prelude.rs"))
         .context("evidence-audit: read src/prelude.rs")?;
-    let store_mod = fs::read_to_string(core_path(repo_root, "src/store/mod.rs"))
+    let store_mod = source_cache
+        .read_to_string(&core_path(repo_root, "src/store/mod.rs"))
         .context("evidence-audit: read src/store/mod.rs")?;
     let blob = format!("{prelude}\n{store_mod}");
     for word in FORBIDDEN_PUBLIC_SUBSTRINGS {
@@ -83,15 +84,23 @@ pub fn run(repo_root: &Path) -> Result<()> {
 
 fn assert_public_struct_has_public_schema_version(
     path: &Path,
-    text: &str,
+    source_cache: &mut SourceCache,
     struct_name: &str,
 ) -> Result<()> {
-    let file = syn::parse_file(text).with_context(|| {
+    let file = source_cache.parse_rust(path).with_context(|| {
         format!(
             "evidence-audit: parse {} while checking `{struct_name}`",
             path.display()
         )
     })?;
+    assert_public_struct_has_public_schema_version_in_file(path, &file, struct_name)
+}
+
+fn assert_public_struct_has_public_schema_version_in_file(
+    path: &Path,
+    file: &syn::File,
+    struct_name: &str,
+) -> Result<()> {
     let Some(item_struct) = file.items.iter().find_map(|item| {
         if let Item::Struct(item_struct) = item {
             (item_struct.ident == struct_name).then_some(item_struct)
@@ -136,7 +145,7 @@ fn assert_public_struct_has_public_schema_version(
 
 #[cfg(test)]
 mod tests {
-    use super::assert_public_struct_has_public_schema_version;
+    use super::assert_public_struct_has_public_schema_version_in_file;
     use std::path::Path;
 
     #[test]
@@ -147,9 +156,10 @@ pub struct ReportBody {
 }
 "#;
 
-        assert!(assert_public_struct_has_public_schema_version(
+        let file = syn::parse_file(source).expect("parse fixture");
+        assert!(assert_public_struct_has_public_schema_version_in_file(
             Path::new("fixture.rs"),
-            source,
+            &file,
             "ReportBody",
         )
         .is_ok());
@@ -167,9 +177,10 @@ pub struct ReportBody {
 }
 "#;
 
-        let err = assert_public_struct_has_public_schema_version(
+        let file = syn::parse_file(source).expect("parse fixture");
+        let err = assert_public_struct_has_public_schema_version_in_file(
             Path::new("fixture.rs"),
-            source,
+            &file,
             "ReportBody",
         )
         .expect_err("must reject missing field on named struct");

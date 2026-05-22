@@ -1,19 +1,23 @@
 use super::ensure;
 use crate::repo_surface::core_path;
 use crate::shared_checks::public_item_names;
+use crate::source_cache::SourceCache;
 use anyhow::{Context, Result};
 use std::collections::BTreeSet;
-use std::fs;
 use std::path::Path;
 use syn::{Item, UseTree};
 
-pub(super) fn check(repo_root: &Path) -> Result<()> {
-    let store_mod = parse_rust(&core_path(repo_root, "src/store/mod.rs"))?;
-    let prelude = parse_rust(&core_path(repo_root, "src/prelude.rs"))?;
-    let event_mod = parse_rust(&core_path(repo_root, "src/event/mod.rs"))?;
-    let event_sourcing = parse_rust(&core_path(repo_root, "src/event/sourcing.rs"))?;
-    let config = parse_rust(&core_path(repo_root, "src/store/config.rs"))?;
-    let config_types = parse_rust(&core_path(repo_root, "src/store/config/types.rs"))?;
+pub(super) fn check(repo_root: &Path, source_cache: &mut SourceCache) -> Result<()> {
+    let store_mod = parse_public_api_rust(source_cache, &core_path(repo_root, "src/store/mod.rs"))?;
+    let prelude = parse_public_api_rust(source_cache, &core_path(repo_root, "src/prelude.rs"))?;
+    let event_mod = parse_public_api_rust(source_cache, &core_path(repo_root, "src/event/mod.rs"))?;
+    let event_sourcing =
+        parse_public_api_rust(source_cache, &core_path(repo_root, "src/event/sourcing.rs"))?;
+    let config = parse_public_api_rust(source_cache, &core_path(repo_root, "src/store/config.rs"))?;
+    let config_types = parse_public_api_rust(
+        source_cache,
+        &core_path(repo_root, "src/store/config/types.rs"),
+    )?;
 
     let store_exports = public_use_names(&store_mod);
     ensure(
@@ -151,9 +155,13 @@ pub(super) fn check(repo_root: &Path) -> Result<()> {
     Ok(())
 }
 
-fn parse_rust(path: &Path) -> Result<syn::File> {
-    let content = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
-    syn::parse_file(&content).with_context(|| format!("parse {}", path.display()))
+fn parse_public_api_rust(
+    source_cache: &mut SourceCache,
+    path: &Path,
+) -> Result<std::sync::Arc<syn::File>> {
+    source_cache
+        .parse_rust(path)
+        .with_context(|| format!("parse {}", path.display()))
 }
 
 fn public_impl_method_names(file: &syn::File, type_name: &str) -> BTreeSet<String> {
