@@ -23,8 +23,11 @@ rustdoc-args = ["--cfg", "docsrs"]
 # writer panic, frontier mutation, or fault injection surfaces.
 # blake3 is a mandatory dependency (formerly a feature); evidence hashes,
 # chain integrity, and receipt signing all rely on it and have no honest
-# degraded mode worth maintaining.
-default = []
+# degraded mode worth maintaining. Keep the feature name as a no-op
+# default compatibility alias so older consumers and generated templates that
+# request `features = ["blake3"]` still resolve to the mandatory implementation.
+default = ["blake3"]
+blake3 = []
 dangerous-test-hooks = ["dep:fastrand"]
 
 [dependencies]

@@ -231,7 +231,6 @@
   paths:
     - crates/core/src/store/ancestry/mod.rs
     - crates/core/src/store/ancestry/by_hash.rs
-    - crates/core/src/store/ancestry/by_clock.rs
 - id: ART-STORE-PROJECTION
   kind: source
   paths:

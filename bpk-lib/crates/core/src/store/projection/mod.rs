@@ -397,9 +397,12 @@ impl ProjectionCache for NativeCache {
                     Some(n) if n.ends_with(".bin") => &n[..n.len() - 4],
                     _ => continue,
                 };
-                if name.starts_with(&hex_prefix) && std::fs::remove_file(file_entry.path()).is_ok()
-                {
-                    count += 1;
+                if name.starts_with(&hex_prefix) {
+                    match std::fs::remove_file(file_entry.path()) {
+                        Ok(()) => count += 1,
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                        Err(error) => return Err(StoreError::cache_error(error)),
+                    }
                 }
             }
         }
@@ -488,5 +491,37 @@ mod tests {
         assert_eq!(meta.cached_at_us, 1_234_567);
         assert!(meta.cached_at_mono_ns.is_none());
         assert!(meta.process_boot_ns.is_none());
+    }
+
+    #[test]
+    fn native_cache_delete_prefix_reports_removed_entries() {
+        fn meta() -> CacheMeta {
+            CacheMeta {
+                watermark: 7,
+                cached_at_us: 11,
+                cached_at_mono_ns: Some(13),
+                process_boot_ns: Some(17),
+            }
+        }
+
+        let dir = tempfile::tempdir().expect("temp dir");
+        let cache = NativeCache::open(dir.path()).expect("open cache");
+
+        cache
+            .put(&[0xab, 0x01], b"first", meta())
+            .expect("put first");
+        cache
+            .put(&[0xab, 0x02], b"second", meta())
+            .expect("put second");
+        cache
+            .put(&[0xcd, 0x03], b"third", meta())
+            .expect("put third");
+
+        let removed = cache.delete_prefix(&[0xab]).expect("delete prefix");
+
+        assert_eq!(removed, 2);
+        assert!(cache.get(&[0xab, 0x01]).expect("get first").is_none());
+        assert!(cache.get(&[0xab, 0x02]).expect("get second").is_none());
+        assert!(cache.get(&[0xcd, 0x03]).expect("get third").is_some());
     }
 }
