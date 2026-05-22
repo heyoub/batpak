@@ -338,3 +338,58 @@ fn compute_strategy_exhaustive() {
         ProjectionStrategy::ExternalCacheThenReplay,
     );
 }
+
+#[test]
+fn group_local_projection_freshness_is_typed() {
+    let replay = ReplayContext {
+        watermark: 42,
+        cached_at_us: 0,
+        cached_at_mono_ns: 0,
+        process_boot_ns: 0,
+        type_id: std::any::TypeId::of::<Counter>(),
+        cache_key: b"freshness-key".to_vec(),
+        plan: ProjectionReplayPlan {
+            watermark: 42,
+            generation: 7,
+            items: vec![],
+        },
+    };
+    let fresh = CachedProjectionSlot {
+        bytes: vec![],
+        watermark: 42,
+        generation: 7,
+    };
+    let stale_watermark = CachedProjectionSlot {
+        bytes: vec![],
+        watermark: 41,
+        generation: 7,
+    };
+    let stale_generation = CachedProjectionSlot {
+        bytes: vec![],
+        watermark: 42,
+        generation: 6,
+    };
+
+    assert_eq!(
+        group_local_projection_freshness(None, &replay, &Freshness::Consistent),
+        GroupLocalProjectionFreshness::Missing
+    );
+    assert_eq!(
+        group_local_projection_freshness(Some(&fresh), &replay, &Freshness::Consistent),
+        GroupLocalProjectionFreshness::Fresh
+    );
+    assert_eq!(
+        group_local_projection_freshness(Some(&stale_watermark), &replay, &Freshness::Consistent),
+        GroupLocalProjectionFreshness::Stale
+    );
+    assert_eq!(
+        group_local_projection_freshness(
+            Some(&stale_generation),
+            &replay,
+            &Freshness::MaybeStale {
+                max_stale_ms: 1_000,
+            },
+        ),
+        GroupLocalProjectionFreshness::Stale
+    );
+}

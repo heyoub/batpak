@@ -277,7 +277,7 @@ impl StringInterner {
         for s in strings {
             // `intern` handles sentinel-avoidance and double-insertion protection
             // automatically; duplicates in the snapshot are silently deduplicated.
-            let _ = interner.intern(&s);
+            let _ignored_id = interner.intern(&s);
         }
 
         interner
@@ -355,11 +355,11 @@ mod tests {
     fn len_excludes_sentinel() {
         let interner = StringInterner::new();
         assert_eq!(interner.len(), 0);
-        let _ = interner.intern("a");
+        let _a = interner.intern("a");
         assert_eq!(interner.len(), 1);
-        let _ = interner.intern("a"); // duplicate
+        let _duplicate_a = interner.intern("a");
         assert_eq!(interner.len(), 1);
-        let _ = interner.intern("b");
+        let _b = interner.intern("b");
         assert_eq!(interner.len(), 2);
     }
 
@@ -379,7 +379,7 @@ mod tests {
     #[test]
     fn snapshot_excludes_sentinel() {
         let interner = StringInterner::new();
-        let _ = interner.intern("x");
+        let _x = interner.intern("x");
         let snap = interner.to_snapshot();
         // Sentinel ("") must not appear in the snapshot.
         assert!(!snap.iter().any(|s| s.is_empty()));

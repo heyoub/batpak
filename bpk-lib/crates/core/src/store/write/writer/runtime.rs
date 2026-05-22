@@ -1,7 +1,7 @@
 use super::fence_runtime::CommandResult;
 use super::{
-    Active, Receiver, RestartPolicy, Segment, StoreConfig, StoreError, ValidatedStoreConfig,
-    WriterCommand, WriterLoopPhase, WriterState,
+    ignore_closed_response_channel, Active, Receiver, RestartPolicy, Segment, StoreConfig,
+    StoreError, ValidatedStoreConfig, WriterCommand, WriterLoopPhase, WriterState,
 };
 use crate::store::file_classification::StoreFileKind;
 use crate::store::index::StoreIndex;
@@ -235,7 +235,7 @@ fn writer_loop(
                 runtime.rx,
                 runtime.validated_cfg.shutdown_drain_limit,
             );
-            let _ = respond.send(shutdown_result);
+            ignore_closed_response_channel(respond.send(shutdown_result));
             return;
         }
 
@@ -286,7 +286,7 @@ fn settle_command_result(
         if let Err(error) = &sync_result {
             tracing::error!("writer sync barrier failed: {error}");
         }
-        let _ = result.deferred_reply.send(state, sync_result);
+        drop(result.deferred_reply.send(state, sync_result));
         *events_since_sync = 0;
     }
 
@@ -310,7 +310,7 @@ fn drain_shutdown_queue(
             break;
         };
         let result = state.execute_command(WriterLoopPhase::ShutdownDrain, cmd);
-        let _ = settle_command_result(state, &mut shutdown_sync_count, result);
+        let _loop_outcome = settle_command_result(state, &mut shutdown_sync_count, result);
         drained += 1;
     }
 

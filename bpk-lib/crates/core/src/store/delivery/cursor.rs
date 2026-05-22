@@ -19,7 +19,7 @@ pub use worker::{CursorWorkerAction, CursorWorkerConfig, CursorWorkerHandle};
 
 /// Cursor: pull-based event consumption with ordered replay.
 ///
-/// [`Store::cursor_guaranteed`] exposes the process-local surface of this
+/// [`crate::store::Store::cursor_guaranteed`] exposes the process-local surface of this
 /// type: ordered, at-least-once pull replay from the in-memory index.
 /// Checkpoint-backed cursors are the internal mechanism used by
 /// `cursor_worker` and typed reactors when `checkpoint_id` is set.

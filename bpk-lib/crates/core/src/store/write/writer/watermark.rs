@@ -120,7 +120,7 @@ impl WatermarkAdvanceHandle {
                 });
             }
 
-            let _ = self.cv.wait_for(&mut guard, remaining);
+            let _wait_result = self.cv.wait_for(&mut guard, remaining);
         }
     }
 

@@ -1,0 +1,12 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/rule.json
+
+id: unwrap-or-false
+message: Optional truth collapses to false. Trust-path callers often deserve a typed status enum instead of a boolean default.
+severity: info
+language: Rust
+rule:
+  pattern: $EXPR.unwrap_or(false)
+note: >
+  Audit-only caliper. Predicate helpers may be fine; admission, routing,
+  verification, and freshness paths should be checked for typed outcomes.
+

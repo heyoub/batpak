@@ -471,7 +471,7 @@ impl WriterState<'_> {
         &mut self,
         prepared: &PreparedBatch,
         staged: &[StagedCommittedEvent],
-        batch_id: u64,
+        _batch_id: u64,
     ) -> Result<Vec<AppendReceipt>, StoreError> {
         let mut receipts: Vec<AppendReceipt> = Vec::with_capacity(prepared.len());
 
@@ -536,7 +536,7 @@ impl WriterState<'_> {
             #[cfg(feature = "dangerous-test-hooks")]
             crate::store::fault::maybe_inject(
                 crate::store::fault::InjectionPoint::BatchItemWritten {
-                    batch_id,
+                    batch_id: _batch_id,
                     item_index: idx,
                     total_items: prepared.len(),
                 },
@@ -544,7 +544,6 @@ impl WriterState<'_> {
             )?;
         }
 
-        let _ = batch_id;
         Ok(receipts)
     }
 }

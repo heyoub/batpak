@@ -185,12 +185,12 @@ impl SequenceGate {
         if self.active_fence.load(Ordering::Acquire) != token {
             return Err(crate::store::StoreError::VisibilityFenceNotActive);
         }
-        let _ =
+        let _start_update =
             self.active_fence_start
                 .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
                     Some(current.min(start))
                 });
-        let _ =
+        let _end_update =
             self.active_fence_end
                 .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
                     Some(current.max(end))

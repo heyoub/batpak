@@ -59,8 +59,8 @@ fn drop_sends_shutdown_to_writer_thread() {
         .name("store-drop-shutdown-test".into())
         .spawn(move || {
             if let Ok(writer::WriterCommand::Shutdown { respond }) = rx.recv() {
-                let _ = respond.send(Ok(()));
-                let _ = signal_tx.send(());
+                let _shutdown_response = respond.send(Ok(()));
+                let _signal_result = signal_tx.send(());
             }
         })
         .expect("spawn shutdown listener");

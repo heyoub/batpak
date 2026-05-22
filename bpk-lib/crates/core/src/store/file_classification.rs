@@ -24,11 +24,7 @@ pub(crate) enum StoreFileKind {
 
 impl StoreFileKind {
     pub(crate) fn from_path(path: &Path) -> Self {
-        if path
-            .extension()
-            .map(|ext| ext == SEGMENT_EXTENSION)
-            .unwrap_or(false)
-        {
+        if path.extension().is_some_and(|ext| ext == SEGMENT_EXTENSION) {
             return match SegmentId::from_filename(path) {
                 Ok(segment_id) => Self::Segment(segment_id),
                 Err(error) => Self::MalformedSegment(error),
@@ -37,8 +33,7 @@ impl StoreFileKind {
 
         if path
             .extension()
-            .map(|ext| ext == COMPACT_SOURCE_EXTENSION)
-            .unwrap_or(false)
+            .is_some_and(|ext| ext == COMPACT_SOURCE_EXTENSION)
         {
             return Self::CompactSource;
         }

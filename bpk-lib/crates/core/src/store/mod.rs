@@ -235,8 +235,16 @@ impl<State> Drop for Store<State> {
             .send(WriterCommand::Shutdown { respond: tx })
             .is_ok()
         {
-            let _ = rx.recv();
+            wait_for_drop_shutdown_ack(&rx);
         }
-        let _ = writer.join();
+        join_drop_shutdown_writer(&mut writer);
     }
+}
+
+fn wait_for_drop_shutdown_ack(rx: &flume::Receiver<Result<(), StoreError>>) {
+    let _ack = rx.recv();
+}
+
+fn join_drop_shutdown_writer(writer: &mut WriterHandle) {
+    let _join_result = writer.join();
 }

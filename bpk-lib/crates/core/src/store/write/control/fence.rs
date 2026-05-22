@@ -201,7 +201,7 @@ impl<'a> VisibilityFence<'a> {
             Err(TrySendError::Full(command)) => std::thread::Builder::new()
                 .name("batpak-fence-drop-cancel".to_string())
                 .spawn(move || {
-                    let _ = writer_tx.send(command);
+                    drop(writer_tx.send(command));
                 })
                 .map(|_| ())
                 .map_err(|error| format!("failed to spawn drop-cancel helper: {error}")),

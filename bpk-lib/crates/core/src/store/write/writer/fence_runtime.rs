@@ -1,7 +1,7 @@
 use super::super::fanout::CommittedEventEnvelope;
 use super::{
-    AppendGuards, AppendReceipt, BatchAppendItem, Coordinate, Event, EventKind, Notification,
-    StoreError, WriterState,
+    ignore_closed_response_channel, AppendGuards, AppendReceipt, BatchAppendItem, Coordinate,
+    Event, EventKind, Notification, StoreError, WriterState,
 };
 use crate::store::stats::HlcPoint;
 use flume::Sender;
@@ -21,10 +21,14 @@ impl PendingFenceResponse {
     fn complete_cancelled(self) {
         match self {
             Self::Single { respond, .. } => {
-                let _ = respond.send(Err(StoreError::VisibilityFenceCancelled));
+                ignore_closed_response_channel(
+                    respond.send(Err(StoreError::VisibilityFenceCancelled)),
+                );
             }
             Self::Batch { respond, .. } => {
-                let _ = respond.send(Err(StoreError::VisibilityFenceCancelled));
+                ignore_closed_response_channel(
+                    respond.send(Err(StoreError::VisibilityFenceCancelled)),
+                );
             }
         }
     }
@@ -32,10 +36,10 @@ impl PendingFenceResponse {
     fn complete_ok(self) {
         match self {
             Self::Single { respond, receipt } => {
-                let _ = respond.send(Ok(receipt));
+                ignore_closed_response_channel(respond.send(Ok(receipt)));
             }
             Self::Batch { respond, receipts } => {
-                let _ = respond.send(Ok(receipts));
+                ignore_closed_response_channel(respond.send(Ok(receipts)));
             }
         }
     }
@@ -119,21 +123,21 @@ impl DeferredReply {
         match self {
             Self::None => Ok(()),
             Self::Sync { respond } => {
-                let _ = respond.send(sync_result);
+                ignore_closed_response_channel(respond.send(sync_result));
                 Ok(())
             }
             Self::BeginVisibilityFence { token, respond } => {
                 let result = sync_result.and_then(|_| state.begin_visibility_fence(token));
-                let _ = respond.send(result);
+                ignore_closed_response_channel(respond.send(result));
                 Ok(())
             }
             Self::CommitVisibilityFence { token, respond } => {
                 let result = sync_result.and_then(|_| state.commit_visibility_fence(token));
-                let _ = respond.send(result);
+                ignore_closed_response_channel(respond.send(result));
                 Ok(())
             }
             Self::Shutdown { respond } => {
-                let _ = respond.send(sync_result);
+                ignore_closed_response_channel(respond.send(sync_result));
                 Ok(())
             }
         }

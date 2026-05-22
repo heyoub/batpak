@@ -424,7 +424,7 @@ mod tests {
                 let result = watcher
                     .recv()
                     .map(|(generation, state)| (generation, state.map(|s| s.0)));
-                let _ = tx.send(result);
+                drop(tx.send(result));
             })
             .expect("spawn watcher test helper thread");
 

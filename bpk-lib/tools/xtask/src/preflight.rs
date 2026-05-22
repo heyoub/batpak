@@ -1,9 +1,10 @@
 use crate::coverage;
 use crate::devcontainer::run_in_devcontainer;
-use crate::util::repo_root;
+use crate::util::{project_root, repo_root};
 use crate::{CoverArgs, DocsArgs};
 use anyhow::{bail, Context, Result};
 use std::fs;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use toml::Value as TomlValue;
 
@@ -36,8 +37,9 @@ fn preflight_inner() -> Result<()> {
 /// devcontainer images that were rebuilt with a drifted rustc and any host
 /// environment that tries to `cargo xtask preflight` with the wrong toolchain.
 pub(crate) fn assert_rustc_matches_toolchain_pin() -> Result<()> {
-    let root = repo_root()?;
-    let toolchain_path = root.join("rust-toolchain.toml");
+    let workspace_root = repo_root()?;
+    let project_root = project_root()?;
+    let toolchain_path = toolchain_pin_path(&workspace_root, &project_root);
     let toolchain_toml = fs::read_to_string(&toolchain_path)
         .with_context(|| format!("read {}", toolchain_path.display()))?;
     let pinned_channel = parse_toolchain_channel(&toolchain_toml).with_context(|| {
@@ -69,6 +71,14 @@ pub(crate) fn assert_rustc_matches_toolchain_pin() -> Result<()> {
         );
     }
     Ok(())
+}
+
+fn toolchain_pin_path(workspace_root: &Path, project_root: &Path) -> PathBuf {
+    let workspace_pin = workspace_root.join("rust-toolchain.toml");
+    if workspace_pin.exists() {
+        return workspace_pin;
+    }
+    project_root.join("rust-toolchain.toml")
 }
 
 fn parse_toolchain_channel(toml: &str) -> Result<String> {
@@ -116,7 +126,8 @@ fn channels_match(pinned: &str, active: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{channels_match, parse_rustc_version, parse_toolchain_channel};
+    use super::{channels_match, parse_rustc_version, parse_toolchain_channel, toolchain_pin_path};
+    use std::fs;
 
     #[test]
     fn parse_channel_from_toolchain_toml() {
@@ -161,5 +172,45 @@ mod tests {
         assert!(channels_match("1.92", "1.92.0"));
         assert!(!channels_match("1.92.1", "1.92.0"));
         assert!(!channels_match("1.91", "1.92.0"));
+    }
+
+    #[test]
+    fn toolchain_pin_path_prefers_workspace_pin_when_present() -> anyhow::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let project = temp.path();
+        let workspace = project.join("bpk-lib");
+        fs::create_dir(&workspace)?;
+        fs::write(
+            project.join("rust-toolchain.toml"),
+            "[toolchain]\nchannel = \"1.92.0\"\n",
+        )?;
+        fs::write(
+            workspace.join("rust-toolchain.toml"),
+            "[toolchain]\nchannel = \"1.93.0\"\n",
+        )?;
+
+        assert_eq!(
+            toolchain_pin_path(&workspace, project),
+            workspace.join("rust-toolchain.toml")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn toolchain_pin_path_falls_back_to_project_pin() -> anyhow::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let project = temp.path();
+        let workspace = project.join("bpk-lib");
+        fs::create_dir(&workspace)?;
+        fs::write(
+            project.join("rust-toolchain.toml"),
+            "[toolchain]\nchannel = \"1.92.0\"\n",
+        )?;
+
+        assert_eq!(
+            toolchain_pin_path(&workspace, project),
+            project.join("rust-toolchain.toml")
+        );
+        Ok(())
     }
 }

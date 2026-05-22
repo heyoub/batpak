@@ -52,6 +52,10 @@ pub(super) fn checked_next_clock(
     }
 }
 
+pub(super) fn ignore_closed_response_channel<T>(result: Result<(), flume::SendError<T>>) {
+    drop(result);
+}
+
 /// WriterCommand: messages sent to the background writer thread via flume.
 /// All respond channels use `flume::Sender`: sync send from the writer, async recv from callers.
 pub(crate) enum WriterCommand {
@@ -416,7 +420,9 @@ impl WriterState<'_> {
         match cmd {
             WriterCommand::BeginVisibilityFence { token, respond } => match phase {
                 WriterLoopPhase::Main | WriterLoopPhase::ShutdownDrain => {
-                    let _ = respond.send(self.begin_visibility_fence(token));
+                    ignore_closed_response_channel(
+                        respond.send(self.begin_visibility_fence(token)),
+                    );
                     CommandResult::immediate(0)
                 }
                 WriterLoopPhase::GroupCommitDrain => CommandResult::immediate(0)
@@ -431,7 +437,7 @@ impl WriterState<'_> {
                 respond,
             } => {
                 let result = self.handle_append(&coord, *event, kind, &guards, None);
-                let _ = respond.send(result);
+                ignore_closed_response_channel(respond.send(result));
                 let base = CommandResult::immediate(1);
                 if matches!(phase, WriterLoopPhase::Main) {
                     base.enter_group_commit_drain()
@@ -455,7 +461,7 @@ impl WriterState<'_> {
                     &guards,
                     respond.clone(),
                 ) {
-                    let _ = respond.send(Err(error));
+                    ignore_closed_response_channel(respond.send(Err(error)));
                     CommandResult::immediate(0)
                 } else {
                     CommandResult::immediate(1)
@@ -463,7 +469,7 @@ impl WriterState<'_> {
             }
             WriterCommand::AppendBatch { items, respond } => {
                 let result = self.handle_append_batch(items, None);
-                let _ = respond.send(result);
+                ignore_closed_response_channel(respond.send(result));
                 CommandResult::immediate(1)
             }
             WriterCommand::FenceAppendBatch {
@@ -474,7 +480,7 @@ impl WriterState<'_> {
                 if let Err(error) =
                     self.handle_fence_append_batch_command(token, items, respond.clone())
                 {
-                    let _ = respond.send(Err(error));
+                    ignore_closed_response_channel(respond.send(Err(error)));
                     CommandResult::immediate(0)
                 } else {
                     CommandResult::immediate(1)
@@ -487,12 +493,14 @@ impl WriterState<'_> {
                         .break_after_reply_if(matches!(phase, WriterLoopPhase::GroupCommitDrain))
                 }
                 WriterLoopPhase::ShutdownDrain => {
-                    let _ = respond.send(self.commit_visibility_fence(token));
+                    ignore_closed_response_channel(
+                        respond.send(self.commit_visibility_fence(token)),
+                    );
                     CommandResult::immediate(0)
                 }
             },
             WriterCommand::CancelVisibilityFence { token, respond } => {
-                let _ = respond.send(self.cancel_visibility_fence(token));
+                ignore_closed_response_channel(respond.send(self.cancel_visibility_fence(token)));
                 let base = CommandResult::immediate(0);
                 if matches!(phase, WriterLoopPhase::GroupCommitDrain) {
                     base.break_after_reply()
@@ -507,7 +515,7 @@ impl WriterState<'_> {
                         .break_after_reply_if(matches!(phase, WriterLoopPhase::GroupCommitDrain))
                 }
                 WriterLoopPhase::ShutdownDrain => {
-                    let _ = respond.send(self.sync_active_segment());
+                    ignore_closed_response_channel(respond.send(self.sync_active_segment()));
                     CommandResult::immediate(0)
                 }
             },
@@ -518,20 +526,20 @@ impl WriterState<'_> {
                     .break_after_reply()
                     .exit_writer(),
                 WriterLoopPhase::ShutdownDrain => {
-                    let _ = respond.send(Ok(()));
+                    ignore_closed_response_channel(respond.send(Ok(())));
                     CommandResult::immediate(0)
                 }
             },
             #[cfg(feature = "dangerous-test-hooks")]
             WriterCommand::PanicForTest { respond } => match phase {
                 WriterLoopPhase::Main => {
-                    let _ = respond.send(Ok(()));
+                    ignore_closed_response_channel(respond.send(Ok(())));
                     std::panic::resume_unwind(Box::new(
                         "PanicForTest: intentional writer panic for restart_policy testing",
                     ));
                 }
                 WriterLoopPhase::GroupCommitDrain | WriterLoopPhase::ShutdownDrain => {
-                    let _ = respond.send(Ok(()));
+                    ignore_closed_response_channel(respond.send(Ok(())));
                     CommandResult::immediate(0).break_after_reply()
                 }
             },

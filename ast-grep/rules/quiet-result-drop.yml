@@ -1,0 +1,12 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/rule.json
+
+id: quiet-result-drop
+message: Classify ignored results. Channel send/recv during shutdown may be intentional; disk, cache, and evidence paths need a typed reason or witness.
+severity: info
+language: Rust
+rule:
+  pattern: let _ = $EXPR;
+note: >
+  Audit-only caliper. Promote recurring fail-open classes to integrity gates
+  after classifying intentional channel shutdown patterns.
+

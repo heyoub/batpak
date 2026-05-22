@@ -1,0 +1,12 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/rule.json
+
+id: result-ok-collapse
+message: Result errors collapse into absence here. Prefer typed Missing/Invalid/Loaded style outcomes on artifact and recovery paths.
+severity: info
+language: Rust
+rule:
+  pattern: $ITER.filter_map(Result::ok)
+note: >
+  Audit-only caliper for quiet I/O. Promote concrete read_dir/artifact cases to
+  structural gates once the allowed uses are classified.
+

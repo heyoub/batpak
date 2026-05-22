@@ -4,6 +4,7 @@ mod replay_input;
 mod strategy;
 
 use crate::event::{EventSourced, ProjectionInput};
+use crate::store::index::columnar::CachedProjectionSlot;
 use crate::store::index::ProjectionCacheStoreStatus;
 use crate::store::{Clock, Freshness, HlcPoint, Store, StoreError};
 use std::any::TypeId;
@@ -66,6 +67,62 @@ enum ProjectionCacheStoreOutcome {
         index: ProjectionIndexCacheStoreOutcome,
     },
     SerializationFailed,
+}
+
+#[must_use]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GroupLocalProjectionFreshness {
+    Missing,
+    Fresh,
+    Stale,
+}
+
+impl GroupLocalProjectionFreshness {
+    fn is_fresh(self) -> bool {
+        matches!(self, Self::Fresh)
+    }
+}
+
+fn group_local_projection_freshness(
+    slot: Option<&CachedProjectionSlot>,
+    replay: &ReplayContext,
+    freshness: &Freshness,
+) -> GroupLocalProjectionFreshness {
+    let Some(slot) = slot else {
+        return GroupLocalProjectionFreshness::Missing;
+    };
+
+    let unchanged = slot.watermark == replay.watermark && slot.generation == replay.plan.generation;
+    match freshness {
+        Freshness::Consistent => {
+            if unchanged {
+                GroupLocalProjectionFreshness::Fresh
+            } else {
+                GroupLocalProjectionFreshness::Stale
+            }
+        }
+        Freshness::MaybeStale { max_stale_ms: _ } => {
+            // `slot.watermark == replay.watermark` — a slot with a lower
+            // watermark can legitimately happen if the replay plan advanced,
+            // but treating it as fresh would return a state that omits newer
+            // events. Equality here is the honest invariant.
+            //
+            // The age-based branch (`age_us < max_stale_ms * 1000`) is
+            // omitted because the group-local slot stores only wall-clock
+            // `cached_at_us` — a regression-prone basis for age comparison.
+            // Until the slot carries a monotonic counterpart, MaybeStale
+            // collapses to the same invariant as `Consistent` for
+            // group-local: hit only when state is unchanged.
+            //
+            // justifies: INV-CACHE-CAPABILITIES-EXPLICIT; legacy-cache rows lack monotonic time in src/store/projection/flow.rs;
+            // conservatively treat as stale for MaybeStale.
+            if unchanged {
+                GroupLocalProjectionFreshness::Fresh
+            } else {
+                GroupLocalProjectionFreshness::Stale
+            }
+        }
+    }
 }
 
 fn fallback_to_full_replay<T, I, State>(
@@ -246,35 +303,9 @@ where
 
             let t_group = store.runtime.now_mono_ns();
             let group_local_slot = store.index.cached_projection(entity, replay.type_id);
-            let group_local_fresh = group_local_slot
-                .as_ref()
-                .map(|slot| match freshness {
-                    Freshness::Consistent => {
-                        slot.watermark == replay.watermark
-                            && slot.generation == replay.plan.generation
-                    }
-                    Freshness::MaybeStale { max_stale_ms: _ } => {
-                        // `slot.watermark == replay.watermark` — a slot with a
-                        // lower watermark can legitimately happen if the replay
-                        // plan advanced, but treating it as fresh would return
-                        // a state that omits the newer events. Equality here
-                        // is the honest invariant.
-                        //
-                        // The age-based branch (`age_us < max_stale_ms * 1000`)
-                        // is omitted because the group-local slot stores only
-                        // wall-clock `cached_at_us` — a regression-prone basis
-                        // for age comparison. Until the slot carries a
-                        // monotonic counterpart, MaybeStale collapses to the
-                        // same invariant as `Consistent` for group-local: hit
-                        // only when state is unchanged.
-                        //
-                        // justifies: INV-CACHE-CAPABILITIES-EXPLICIT; legacy-cache rows lack monotonic time in src/store/projection/flow.rs;
-                        // conservatively treat as stale for MaybeStale.
-                        slot.watermark == replay.watermark
-                            && slot.generation == replay.plan.generation
-                    }
-                })
-                .unwrap_or(false);
+            let group_local_fresh =
+                group_local_projection_freshness(group_local_slot.as_ref(), &replay, freshness)
+                    .is_fresh();
             if let Some(t) = timings.as_deref_mut() {
                 t.group_local_lookup_us = elapsed_us(store.runtime.clock(), t_group);
             }

@@ -57,7 +57,7 @@ fn sync_parent_dir_io(path: &Path) -> std::io::Result<()> {
         // Non-unix: File::sync_all on a directory handle is not meaningful
         // and returns an error on some platforms. The rename itself is
         // the durability point the OS provides here.
-        let _ = path;
+        let _path_is_intentionally_unused_on_non_unix = path;
     }
     Ok(())
 }

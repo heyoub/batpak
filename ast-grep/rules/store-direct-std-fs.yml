@@ -1,0 +1,12 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/rule.json
+
+id: store-direct-std-fs
+message: Direct std::fs contact found. Production store paths should route through store::platform::fs unless this is platform code, a fixture, or test-only setup.
+severity: info
+language: Rust
+rule:
+  pattern: std::fs::$F($$$ARGS)
+note: >
+  Audit-only caliper for platform-boundary shrink work. Structural owns the
+  enforceable allowlist; this rule is for discovery and review.
+
