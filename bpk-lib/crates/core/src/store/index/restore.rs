@@ -42,6 +42,42 @@ pub(super) struct RestoreBase {
     pub(super) routing: RoutingSummary,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum RoutingValidation {
+    Valid,
+    Invalid(RoutingValidationError),
+}
+
+impl RoutingValidation {
+    pub(crate) fn is_valid(self) -> bool {
+        matches!(self, Self::Valid)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum RoutingValidationError {
+    EntryCountMismatch,
+    ChunkCountMismatch,
+    ChunkStartOverflow,
+    ChunkLenOverflow,
+    ChunkLenZero,
+    ChunkEndOverflow,
+    ChunkEndOutOfBounds,
+    ChunkFirstSequenceMismatch,
+    ChunkLastSequenceMismatch,
+    ChunkTotalMismatch,
+    EntityRunStartOverflow,
+    EntityRunLenOverflow,
+    EntityRunLenZero,
+    EntityRunEndOverflow,
+    EntityRunEndOutOfBounds,
+    EntityRunEntityMismatch,
+    EntityRunFirstSequenceMismatch,
+    EntityRunLastSequenceMismatch,
+    EntityRunInternalEntityMismatch,
+    EntityRunTotalMismatch,
+}
+
 impl RestoreBase {
     pub(super) fn from_sorted_entries(
         entries: Vec<IndexEntry>,
@@ -54,8 +90,25 @@ impl RestoreBase {
 
         Self {
             routing: routing_hint
-                .filter(|routing| routing.validate(&entries_by_sequence, &entries_by_entity))
-                .cloned()
+                .and_then(|routing| {
+                    let validation =
+                        routing.validate_detailed(&entries_by_sequence, &entries_by_entity);
+                    debug_assert_eq!(
+                        routing.validate(&entries_by_sequence, &entries_by_entity),
+                        validation.is_valid(),
+                        "restore routing bool validation must stay a projection of detailed validation"
+                    );
+                    match validation {
+                        RoutingValidation::Valid => Some(routing.clone()),
+                        RoutingValidation::Invalid(error) => {
+                            tracing::debug!(
+                                ?error,
+                                "ignored stale restore routing hint and rebuilt routing summary"
+                            );
+                            None
+                        }
+                    }
+                })
                 .unwrap_or_else(|| {
                     RoutingSummary::from_entries(
                         &entries_by_sequence,
@@ -146,70 +199,127 @@ impl RoutingSummary {
         entries_by_sequence: &[Arc<IndexEntry>],
         entries_by_entity: &[Arc<IndexEntry>],
     ) -> bool {
+        self.validate_detailed(entries_by_sequence, entries_by_entity)
+            .is_valid()
+    }
+
+    pub(crate) fn validate_detailed(
+        &self,
+        entries_by_sequence: &[Arc<IndexEntry>],
+        entries_by_entity: &[Arc<IndexEntry>],
+    ) -> RoutingValidation {
         if self.entry_count != entries_by_sequence.len() as u64
             || self.entry_count != entries_by_entity.len() as u64
         {
-            return false;
+            return RoutingValidation::Invalid(RoutingValidationError::EntryCountMismatch);
+        }
+        if self.chunk_count != self.chunks.len() as u64 {
+            return RoutingValidation::Invalid(RoutingValidationError::ChunkCountMismatch);
         }
 
         let mut chunk_total = 0usize;
         for chunk in &self.chunks {
             let start = match usize::try_from(chunk.start) {
                 Ok(start) => start,
-                Err(_) => return false,
+                Err(_) => {
+                    return RoutingValidation::Invalid(RoutingValidationError::ChunkStartOverflow);
+                }
             };
             let len = match usize::try_from(chunk.len) {
                 Ok(len) => len,
-                Err(_) => return false,
+                Err(_) => {
+                    return RoutingValidation::Invalid(RoutingValidationError::ChunkLenOverflow);
+                }
             };
             let end = match start.checked_add(len) {
                 Some(end) => end,
-                None => return false,
+                None => {
+                    return RoutingValidation::Invalid(RoutingValidationError::ChunkEndOverflow);
+                }
             };
-            if len == 0 || end > entries_by_sequence.len() {
-                return false;
+            if len == 0 {
+                return RoutingValidation::Invalid(RoutingValidationError::ChunkLenZero);
             }
-            if entries_by_sequence[start].global_sequence != chunk.first_sequence
-                || entries_by_sequence[end - 1].global_sequence != chunk.last_sequence
-            {
-                return false;
+            if end > entries_by_sequence.len() {
+                return RoutingValidation::Invalid(RoutingValidationError::ChunkEndOutOfBounds);
+            }
+            if entries_by_sequence[start].global_sequence != chunk.first_sequence {
+                return RoutingValidation::Invalid(
+                    RoutingValidationError::ChunkFirstSequenceMismatch,
+                );
+            }
+            if entries_by_sequence[end - 1].global_sequence != chunk.last_sequence {
+                return RoutingValidation::Invalid(
+                    RoutingValidationError::ChunkLastSequenceMismatch,
+                );
             }
             chunk_total += len;
         }
         if chunk_total != entries_by_sequence.len() {
-            return false;
+            return RoutingValidation::Invalid(RoutingValidationError::ChunkTotalMismatch);
         }
 
         let mut run_total = 0usize;
         for run in &self.entity_runs {
             let start = match usize::try_from(run.start) {
                 Ok(start) => start,
-                Err(_) => return false,
+                Err(_) => {
+                    return RoutingValidation::Invalid(
+                        RoutingValidationError::EntityRunStartOverflow,
+                    );
+                }
             };
             let len = match usize::try_from(run.len) {
                 Ok(len) => len,
-                Err(_) => return false,
+                Err(_) => {
+                    return RoutingValidation::Invalid(
+                        RoutingValidationError::EntityRunLenOverflow,
+                    );
+                }
             };
             let end = match start.checked_add(len) {
                 Some(end) => end,
-                None => return false,
+                None => {
+                    return RoutingValidation::Invalid(
+                        RoutingValidationError::EntityRunEndOverflow,
+                    );
+                }
             };
-            if len == 0 || end > entries_by_entity.len() {
-                return false;
+            if len == 0 {
+                return RoutingValidation::Invalid(RoutingValidationError::EntityRunLenZero);
+            }
+            if end > entries_by_entity.len() {
+                return RoutingValidation::Invalid(RoutingValidationError::EntityRunEndOutOfBounds);
             }
             let slice = &entries_by_entity[start..end];
             if slice[0].coord.entity() != run.entity
                 || slice[end - start - 1].coord.entity() != run.entity
-                || slice[0].global_sequence != run.first_sequence
-                || slice[end - start - 1].global_sequence != run.last_sequence
-                || slice.iter().any(|entry| entry.coord.entity() != run.entity)
             {
-                return false;
+                return RoutingValidation::Invalid(RoutingValidationError::EntityRunEntityMismatch);
+            }
+            if slice[0].global_sequence != run.first_sequence {
+                return RoutingValidation::Invalid(
+                    RoutingValidationError::EntityRunFirstSequenceMismatch,
+                );
+            }
+            if slice[end - start - 1].global_sequence != run.last_sequence {
+                return RoutingValidation::Invalid(
+                    RoutingValidationError::EntityRunLastSequenceMismatch,
+                );
+            }
+            if slice.iter().any(|entry| entry.coord.entity() != run.entity) {
+                return RoutingValidation::Invalid(
+                    RoutingValidationError::EntityRunInternalEntityMismatch,
+                );
             }
             run_total += len;
         }
 
-        run_total == entries_by_entity.len()
+        if run_total == entries_by_entity.len() {
+            RoutingValidation::Valid
+        } else {
+            RoutingValidation::Invalid(RoutingValidationError::EntityRunTotalMismatch)
+        }
     }
 }
 
@@ -281,169 +391,4 @@ pub(crate) fn restore_chunk_ranges(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::coordinate::Coordinate;
-    use crate::event::{EventKind, HashChain};
-    use crate::store::index::{interner::InternId, DiskPos};
-    use std::collections::BTreeMap;
-    use std::sync::{mpsc, Arc};
-    use std::thread;
-    use std::time::Duration;
-
-    fn entry(seq: u64, entity: &str) -> IndexEntry {
-        IndexEntry {
-            event_id: u128::from(seq),
-            correlation_id: u128::from(seq),
-            causation_id: None,
-            coord: Coordinate::new(entity, "scope").expect("coordinate"),
-            entity_id: InternId::sentinel(),
-            scope_id: InternId::sentinel(),
-            kind: EventKind::custom(0x1, 1),
-            wall_ms: seq,
-            clock: u32::try_from(seq).expect("test sequence fits u32"),
-            dag_lane: 0,
-            dag_depth: 0,
-            hash_chain: HashChain::default(),
-            disk_pos: DiskPos::new(0, seq * 64, 64),
-            global_sequence: seq,
-            receipt_extensions: BTreeMap::new(),
-        }
-    }
-
-    fn sorted_arcs(entries: Vec<IndexEntry>) -> (Vec<Arc<IndexEntry>>, Vec<Arc<IndexEntry>>) {
-        let entries_by_sequence: Vec<_> = entries.into_iter().map(Arc::new).collect();
-        let mut entries_by_entity = entries_by_sequence.clone();
-        sort_entries_by_entity(&mut entries_by_entity);
-        (entries_by_sequence, entries_by_entity)
-    }
-
-    #[test]
-    fn restore_chunk_ranges_uses_valid_persisted_chunks() {
-        let entries = vec![
-            entry(0, "alpha"),
-            entry(1, "alpha"),
-            entry(2, "beta"),
-            entry(3, "beta"),
-        ];
-        let routing = RoutingSummary::from_sorted_entries(&entries, 2);
-
-        assert_eq!(
-            restore_chunk_ranges(entries.len(), &routing),
-            vec![(0, 2), (2, 2)]
-        );
-    }
-
-    #[test]
-    fn restore_chunk_ranges_falls_back_for_malformed_chunks() {
-        let entries = vec![
-            entry(0, "alpha"),
-            entry(1, "alpha"),
-            entry(2, "beta"),
-            entry(3, "beta"),
-        ];
-        let mut routing = RoutingSummary::from_sorted_entries(&entries, 2);
-        routing.chunks[1].start = 3;
-
-        assert_eq!(restore_chunk_ranges(entries.len(), &routing), vec![(0, 4)]);
-    }
-
-    #[test]
-    fn routing_summary_entity_run_scan_makes_forward_progress() {
-        let entries = vec![
-            entry(0, "alpha"),
-            entry(1, "alpha"),
-            entry(2, "beta"),
-            entry(3, "beta"),
-        ];
-        let (tx, rx) = mpsc::channel();
-
-        thread::Builder::new()
-            .name("routing-summary-progress-regression".to_owned())
-            .spawn(move || {
-                let summary = RoutingSummary::from_sorted_entries(&entries, 2);
-                tx.send(summary.entity_runs)
-                    .expect("routing summary receiver is alive");
-            })
-            .expect("spawn routing summary progress regression thread");
-
-        let runs = rx
-            .recv_timeout(Duration::from_secs(2))
-            .expect("PROPERTY: routing summary entity scan must not stall");
-        assert_eq!(runs.len(), 2);
-        assert_eq!(runs[0].entity, "alpha");
-        assert_eq!(runs[0].len, 2);
-        assert_eq!(runs[1].entity, "beta");
-        assert_eq!(runs[1].len, 2);
-    }
-
-    #[test]
-    fn routing_summary_validate_accepts_in_bounds_entity_runs() {
-        let entries = vec![
-            entry(0, "alpha"),
-            entry(1, "alpha"),
-            entry(2, "beta"),
-            entry(3, "beta"),
-        ];
-        let summary = RoutingSummary::from_sorted_entries(&entries, 2);
-        let (entries_by_sequence, entries_by_entity) = sorted_arcs(entries);
-
-        assert!(
-            summary.validate(&entries_by_sequence, &entries_by_entity),
-            "PROPERTY: valid in-bounds entity runs must validate; a run ending before the full entity array length is still valid when its own slice is correct"
-        );
-    }
-
-    #[test]
-    fn routing_summary_validate_rejects_chunk_boundary_mismatches_independently() {
-        let entries = vec![
-            entry(0, "alpha"),
-            entry(1, "alpha"),
-            entry(2, "beta"),
-            entry(3, "beta"),
-        ];
-        let summary = RoutingSummary::from_sorted_entries(&entries, 2);
-        let (entries_by_sequence, entries_by_entity) = sorted_arcs(entries);
-
-        let mut wrong_first = summary.clone();
-        wrong_first.chunks[0].first_sequence += 100;
-        assert!(
-            !wrong_first.validate(&entries_by_sequence, &entries_by_entity),
-            "PROPERTY: chunk validation must reject a mismatched first sequence even when the last sequence still matches"
-        );
-
-        let mut wrong_last = summary;
-        wrong_last.chunks[0].last_sequence += 100;
-        assert!(
-            !wrong_last.validate(&entries_by_sequence, &entries_by_entity),
-            "PROPERTY: chunk validation must reject a mismatched last sequence even when the first sequence still matches"
-        );
-    }
-
-    #[test]
-    fn routing_summary_validate_rejects_empty_or_out_of_bounds_entity_runs() {
-        let entries = vec![
-            entry(0, "alpha"),
-            entry(1, "alpha"),
-            entry(2, "beta"),
-            entry(3, "beta"),
-        ];
-        let summary = RoutingSummary::from_sorted_entries(&entries, 2);
-        let (entries_by_sequence, entries_by_entity) = sorted_arcs(entries);
-
-        let mut empty_run = summary.clone();
-        empty_run.entity_runs[0].len = 0;
-        assert!(
-            !empty_run.validate(&entries_by_sequence, &entries_by_entity),
-            "PROPERTY: zero-length entity runs are invalid and must not be accepted as harmless no-ops"
-        );
-
-        let mut out_of_bounds_run = summary;
-        out_of_bounds_run.entity_runs[0].start = entries_by_entity.len() as u64;
-        out_of_bounds_run.entity_runs[0].len = 1;
-        assert!(
-            !out_of_bounds_run.validate(&entries_by_sequence, &entries_by_entity),
-            "PROPERTY: entity runs whose end exceeds the entity-sorted table are invalid"
-        );
-    }
-}
+mod tests;
