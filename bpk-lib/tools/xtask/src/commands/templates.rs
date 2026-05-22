@@ -1,3 +1,4 @@
+use super::manifest::rewrite_batpak_path_dependency;
 use crate::util::{cargo_target_dir, repo_root, run};
 use anyhow::{bail, Context, Result};
 use std::fs;
@@ -103,17 +104,7 @@ fn rewrite_manifest_for_smoke(repo_root: &Path, manifest: &Path) -> Result<()> {
         .join("crates/core")
         .to_string_lossy()
         .replace('\\', "/");
-    let updated = content
-        .lines()
-        .map(|line| {
-            if line.trim_start().starts_with("batpak = { path = ") {
-                format!("batpak = {{ path = \"{core_path}\", features = [\"blake3\"] }}")
-            } else {
-                line.to_string()
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
+    let updated = rewrite_batpak_path_dependency(&content, &core_path);
     fs::write(manifest, format!("{updated}\n"))
         .with_context(|| format!("write {}", manifest.display()))
 }

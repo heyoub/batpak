@@ -2,6 +2,7 @@ mod ci;
 mod disk_audit;
 mod export_ts_manifest;
 mod loom;
+mod manifest;
 mod msrv_check;
 mod mutants;
 mod package_scan;
