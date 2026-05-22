@@ -64,62 +64,93 @@ impl StoreIndex {
         region: &Region,
         visibility: &VisibilitySnapshot,
     ) -> Vec<QueryHit> {
-        let mut hits: Vec<QueryHit> = if region.entity_prefix.is_some() {
-            let mut candidates = Vec::new();
-            for stream in self
-                .streams
-                .iter()
-                .filter(|r| region.matches_entity(r.key().as_ref()))
-            {
-                for entry in stream.value().values() {
-                    candidates.push(QueryHit::from_entry(entry));
-                }
-            }
-            candidates
-        } else if let Some(ref scope) = region.scope {
-            let scan_hits = self.scan.query_hits_by_scope(scope.as_ref());
-            if !scan_hits.is_empty() {
-                scan_hits
-            } else if let Some(entities) = self.scan.scope_entity_set(scope.as_ref()) {
-                let mut candidates = Vec::new();
-                for entity in &entities {
-                    if let Some(stream) = self.streams.get(entity.as_ref()) {
-                        for entry in stream.value().values() {
-                            candidates.push(QueryHit::from_entry(entry));
-                        }
-                    }
-                }
-                candidates
-            } else {
-                Vec::new()
-            }
-        } else if let Some(ref fact) = region.fact {
-            match fact {
-                KindFilter::Exact(k) => self.scan.query_hits_by_kind(*k),
-                KindFilter::Category(c) => self.scan.query_hits_by_category(*c),
-                KindFilter::Any => {
-                    let mut candidates = Vec::new();
-                    for stream in self.streams.iter() {
-                        for entry in stream.value().values() {
-                            candidates.push(QueryHit::from_entry(entry));
-                        }
-                    }
-                    candidates
-                }
-            }
-        } else {
-            let mut candidates = Vec::new();
-            for stream in self.streams.iter() {
-                for entry in stream.value().values() {
-                    candidates.push(QueryHit::from_entry(entry));
-                }
-            }
-            candidates
-        };
+        let mut hits = self.query_candidate_hits(region, |_| true);
 
         self.filter_region_hits(&mut hits, region, visibility);
         hits.sort_by_key(|h| h.global_sequence);
         hits
+    }
+
+    /// Produce the unfiltered candidate set for the primary query axis.
+    ///
+    /// The caller supplies `include_stream_entry` for stream-backed candidates
+    /// only. Overlay-backed candidates keep their historical behavior and are
+    /// narrowed by the shared filter pipeline after selection.
+    fn query_candidate_hits<F>(&self, region: &Region, mut include_stream_entry: F) -> Vec<QueryHit>
+    where
+        F: FnMut(&IndexEntry) -> bool,
+    {
+        if region.entity_prefix.is_some() {
+            return self.stream_hits_matching(region, |entry| include_stream_entry(entry));
+        }
+
+        if let Some(ref scope) = region.scope {
+            let scan_hits = self.scan.query_hits_by_scope(scope.as_ref());
+            if !scan_hits.is_empty() {
+                return scan_hits;
+            }
+            return self
+                .scan
+                .scope_entity_set(scope.as_ref())
+                .map(|entities| {
+                    let mut candidates = Vec::new();
+                    for entity in &entities {
+                        if let Some(stream) = self.streams.get(entity.as_ref()) {
+                            for entry in stream.value().values() {
+                                if include_stream_entry(entry) {
+                                    candidates.push(QueryHit::from_entry(entry));
+                                }
+                            }
+                        }
+                    }
+                    candidates
+                })
+                .unwrap_or_default();
+        }
+
+        if let Some(ref fact) = region.fact {
+            return match fact {
+                KindFilter::Exact(k) => self.scan.query_hits_by_kind(*k),
+                KindFilter::Category(c) => self.scan.query_hits_by_category(*c),
+                KindFilter::Any => self.all_stream_hits_where(include_stream_entry),
+            };
+        }
+
+        self.all_stream_hits_where(include_stream_entry)
+    }
+
+    fn stream_hits_matching<F>(&self, region: &Region, mut include_entry: F) -> Vec<QueryHit>
+    where
+        F: FnMut(&IndexEntry) -> bool,
+    {
+        let mut candidates = Vec::new();
+        for stream in self
+            .streams
+            .iter()
+            .filter(|r| region.matches_entity(r.key().as_ref()))
+        {
+            for entry in stream.value().values() {
+                if include_entry(entry) {
+                    candidates.push(QueryHit::from_entry(entry));
+                }
+            }
+        }
+        candidates
+    }
+
+    fn all_stream_hits_where<F>(&self, mut include_entry: F) -> Vec<QueryHit>
+    where
+        F: FnMut(&IndexEntry) -> bool,
+    {
+        let mut candidates = Vec::new();
+        for stream in self.streams.iter() {
+            for entry in stream.value().values() {
+                if include_entry(entry) {
+                    candidates.push(QueryHit::from_entry(entry));
+                }
+            }
+        }
+        candidates
     }
 
     /// Apply every non-candidate Region filter in a single pass:
@@ -186,91 +217,14 @@ impl StoreIndex {
         let visibility = self.sequence.snapshot();
         let seq_ok = |seq: u64| !started || seq > after_seq;
 
-        let mut hits: Vec<QueryHit> = if region.entity_prefix.is_some() {
-            let mut candidates = Vec::new();
-            for stream in self
-                .streams
-                .iter()
-                .filter(|r| region.matches_entity(r.key().as_ref()))
-            {
-                for entry in stream.value().values() {
-                    if !seq_ok(entry.global_sequence) {
-                        continue;
-                    }
-                    candidates.push(QueryHit::from_entry(entry));
-                }
-            }
-            candidates
-        } else if let Some(ref scope) = region.scope {
-            let overlay_hits = self.scan.query_hits_by_scope(scope.as_ref());
-            if !overlay_hits.is_empty() {
-                overlay_hits
-            } else if let Some(entities) = self.scan.scope_entity_set(scope.as_ref()) {
-                let mut candidates = Vec::new();
-                for entity in &entities {
-                    if let Some(stream) = self.streams.get(entity.as_ref()) {
-                        for entry in stream.value().values() {
-                            if seq_ok(entry.global_sequence) {
-                                candidates.push(QueryHit::from_entry(entry));
-                            }
-                        }
-                    }
-                }
-                candidates
-            } else {
-                Vec::new()
-            }
-        } else if let Some(ref fact) = region.fact {
-            match fact {
-                KindFilter::Exact(k) => self.scan.query_hits_by_kind(*k),
-                KindFilter::Category(c) => self.scan.query_hits_by_category(*c),
-                KindFilter::Any => {
-                    let clock_range = region.clock_range;
-                    let trim_threshold = limit
-                        .saturating_mul(2)
-                        .max(limit.saturating_add(1))
-                        .min(1 << 20);
-                    let initial_cap = limit.min(1 << 20);
-                    let mut buf: Vec<QueryHit> = Vec::with_capacity(initial_cap);
-                    let trim = |buf: &mut Vec<QueryHit>, limit: usize| {
-                        buf.sort_by_key(|h| h.global_sequence);
-                        buf.truncate(limit);
-                    };
-                    for stream in self.streams.iter() {
-                        for entry in stream.value().values() {
-                            if !seq_ok(entry.global_sequence) {
-                                continue;
-                            }
-                            if !visibility.is_visible(entry.global_sequence) {
-                                continue;
-                            }
-                            if let Some((min, max)) = clock_range {
-                                if entry.clock < min || entry.clock > max {
-                                    continue;
-                                }
-                            }
-                            buf.push(QueryHit::from_entry(entry));
-                            if buf.len() >= trim_threshold {
-                                trim(&mut buf, limit);
-                            }
-                        }
-                    }
-                    trim(&mut buf, limit);
-                    return buf;
-                }
-            }
-        } else {
-            let mut candidates = Vec::new();
-            for stream in self.streams.iter() {
-                for entry in stream.value().values() {
-                    if !seq_ok(entry.global_sequence) {
-                        continue;
-                    }
-                    candidates.push(QueryHit::from_entry(entry));
-                }
-            }
-            candidates
-        };
+        if region.entity_prefix.is_none()
+            && region.scope.is_none()
+            && matches!(region.fact, Some(KindFilter::Any))
+        {
+            return self.query_any_hits_after(region, &visibility, seq_ok, limit);
+        }
+
+        let mut hits = self.query_candidate_hits(region, |entry| seq_ok(entry.global_sequence));
 
         self.filter_region_hits(&mut hits, region, &visibility);
         if started {
@@ -280,6 +234,50 @@ impl StoreIndex {
         hits.sort_by_key(|h| h.global_sequence);
         hits.truncate(limit);
         hits
+    }
+
+    fn query_any_hits_after<F>(
+        &self,
+        region: &Region,
+        visibility: &VisibilitySnapshot,
+        mut seq_ok: F,
+        limit: usize,
+    ) -> Vec<QueryHit>
+    where
+        F: FnMut(u64) -> bool,
+    {
+        let clock_range = region.clock_range;
+        let trim_threshold = limit
+            .saturating_mul(2)
+            .max(limit.saturating_add(1))
+            .min(1 << 20);
+        let initial_cap = limit.min(1 << 20);
+        let mut buf: Vec<QueryHit> = Vec::with_capacity(initial_cap);
+        let trim = |buf: &mut Vec<QueryHit>, limit: usize| {
+            buf.sort_by_key(|h| h.global_sequence);
+            buf.truncate(limit);
+        };
+        for stream in self.streams.iter() {
+            for entry in stream.value().values() {
+                if !seq_ok(entry.global_sequence) {
+                    continue;
+                }
+                if !visibility.is_visible(entry.global_sequence) {
+                    continue;
+                }
+                if let Some((min, max)) = clock_range {
+                    if entry.clock < min || entry.clock > max {
+                        continue;
+                    }
+                }
+                buf.push(QueryHit::from_entry(entry));
+                if buf.len() >= trim_threshold {
+                    trim(&mut buf, limit);
+                }
+            }
+        }
+        trim(&mut buf, limit);
+        buf
     }
 
     /// Returns the latest entry for `entity`, filtered by visibility.
