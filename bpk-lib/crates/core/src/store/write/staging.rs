@@ -426,6 +426,7 @@ mod tests {
 
         let prepared = PreparedBatch::from_items(items).expect("prepare batch");
         assert_eq!(prepared.len(), 3);
+        assert_eq!(prepared.len(), prepared.items().len());
         assert_eq!(prepared.unique_entity_count(), 2);
         assert_eq!(prepared.unique_scope_count(), 1);
         assert_eq!(

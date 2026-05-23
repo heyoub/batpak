@@ -51,8 +51,19 @@ fn route_constructors_accept_stable_boundary_shapes() {
 
 #[test]
 fn endpoint_rejects_bad_operation_names() {
+    let err = match nb::Endpoint::new("", "/api/ping") {
+        Ok(_) => panic!("expected operation-name rejection for empty name"),
+        Err(error) => error,
+    };
+    match err {
+        nb::RouteValidationError::InvalidOperationName { name, message } => {
+            assert_eq!(name, "");
+            assert_eq!(message, "empty");
+        }
+        other => panic!("wrong error for empty operation name: {other:?}"),
+    }
+
     for name in [
-        "",
         ".ping",
         "ping.",
         "ping..now",

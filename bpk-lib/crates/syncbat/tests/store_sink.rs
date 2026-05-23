@@ -112,6 +112,11 @@ fn store_receipt_sink_persists_envelope_and_signed_extensions() {
         .get(&syncbat_key("signed"))
         .expect("signed drawer extension");
     assert!(signed_drawer.starts_with(b"syncbat.drawer.v1\0"));
+    let drawer_body = &signed_drawer[b"syncbat.drawer.v1\0".len()..];
+    let key_len = u64::from_be_bytes(drawer_body[..8].try_into().expect("key length prefix"));
+    assert_eq!(key_len, u64::try_from("kit.ref".len()).expect("key len"));
+    let key_end = 8 + usize::try_from(key_len).expect("key end");
+    assert_eq!(&drawer_body[8..key_end], b"kit.ref");
     assert!(!fields.extensions.contains_key(&syncbat_key("local")));
 
     let hits = store.query(&Region::entity("syncbat:receipt"));

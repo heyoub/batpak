@@ -271,6 +271,23 @@ fn unknown_operation_does_not_emit_receipt() {
 }
 
 #[test]
+fn checkout_frame_input_exposes_staged_bytes() {
+    let frame = CheckoutFrame::new("echo", b"staged-input".to_vec());
+    assert_eq!(frame.input(), b"staged-input");
+}
+
+#[test]
+fn runtime_error_display_mentions_operation_name() {
+    let err = RuntimeError::UnknownOperation {
+        name: "missing-op".to_owned(),
+    };
+    assert!(
+        err.to_string().contains("missing-op"),
+        "display must mention operation name, got {err}"
+    );
+}
+
+#[test]
 fn unknown_checkout_frame_does_not_emit_receipt() {
     let sink = RecordingReceiptSink::default();
     let mut builder = Core::builder();

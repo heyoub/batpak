@@ -50,14 +50,32 @@ fn cache_register_is_projection_equivalent_to_register() {
     let cache = syncbat::CacheRegister::from_register(&register);
 
     assert_eq!(cache.len(), register.len());
+    assert!(!cache.is_empty());
     assert_eq!(
         cache.names().collect::<Vec<_>>(),
+        register.names().collect::<Vec<_>>()
+    );
+    assert_eq!(cache.descriptors().count(), register.len());
+    assert_eq!(
+        cache.descriptors()
+            .map(|(name, _)| name)
+            .collect::<Vec<_>>(),
         register.names().collect::<Vec<_>>()
     );
 
     for (name, descriptor) in register.descriptors() {
         assert_eq!(cache.descriptor(name), Some(descriptor));
     }
+}
+
+#[test]
+fn register_as_map_exposes_inserted_operations() {
+    let register = Register::from_operations([ALPHA, BRAVO]).expect("register");
+    let map = register.as_map();
+
+    assert_eq!(map.len(), 2);
+    assert!(map.contains_key("alpha"));
+    assert!(map.contains_key("bravo"));
 }
 
 #[test]

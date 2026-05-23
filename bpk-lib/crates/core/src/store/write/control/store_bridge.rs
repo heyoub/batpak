@@ -148,3 +148,25 @@ impl Store<Open> {
         ))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::store::StoreConfig;
+    use tempfile::TempDir;
+
+    #[test]
+    fn pressure_retry_threshold_reflects_validated_config() {
+        let dir = TempDir::new().expect("tempdir");
+        let store = Store::open(
+            StoreConfig::new(dir.path())
+                .with_segment_max_bytes(4096)
+                .with_writer_channel_capacity(10)
+                .with_writer_pressure_retry_threshold_pct(60),
+        )
+        .expect("open store");
+        assert_eq!(store.pressure_retry_threshold(), 6);
+        assert!(store.submit_pressure_gate().is_none());
+        store.close().expect("close store");
+    }
+}

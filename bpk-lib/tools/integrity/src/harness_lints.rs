@@ -229,7 +229,7 @@ const OVERSIZE_HARNESS_ALLOWLIST: &[OversizeDebt] = &[
     },
 ];
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct LedgerEntry {
     title: String,
     section: String,
@@ -891,6 +891,342 @@ mod tests {
             err.to_string().contains("missing `Mutation delta`"),
             "unexpected error: {err:?}"
         );
+
+        fs::remove_dir_all(repo).expect("remove temp repo");
+    }
+
+    fn write_ledger(parent: &Path, body: &str) {
+        let ledger_dir = parent.join("archive/legacy-docs");
+        fs::create_dir_all(&ledger_dir).expect("create ledger dir");
+        fs::write(ledger_dir.join("041_TESTING_LEDGER.md"), body).expect("write ledger");
+    }
+
+    #[test]
+    fn parse_ledger_rejects_unknown_harness_section() {
+        let parent = temp_repo("ledger-parent");
+        write_ledger(
+            &parent,
+            r"## Not A Real Pattern
+### Invariant: INV-BAD
+",
+        );
+        let repo = parent.join("core");
+        fs::create_dir_all(&repo).expect("create core repo");
+
+        let result = parse_ledger(&repo);
+        let err = match result {
+            Ok(_) => panic!("expected unknown section rejection"),
+            Err(error) => error,
+        };
+        assert!(
+            err.to_string().contains("unknown harness section"),
+            "unexpected error: {err:?}"
+        );
+
+        fs::remove_dir_all(parent).expect("remove temp parent");
+    }
+
+    #[test]
+    fn parse_ledger_collects_locations_and_commands() {
+        let parent = temp_repo("ledger-parse");
+        write_ledger(
+            &parent,
+            r"## Property Harness
+### Invariant: INV-PARSE
+- Harness pattern: `Property Harness`
+- Status: green
+- Location:
+  - `tests/synthetic.rs`
+- Command used:
+  - cargo test --test synthetic
+- Line/function coverage delta: n/a
+- Mutation delta: n/a
+- Remaining known blind spots: n/a
+",
+        );
+        let repo = parent.join("core");
+        fs::create_dir_all(&repo).expect("create core repo");
+
+        let entries = parse_ledger(&repo).expect("ledger parses");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].title, "INV-PARSE");
+        assert_eq!(entries[0].locations, vec!["tests/synthetic.rs"]);
+        assert_eq!(entries[0].commands, vec!["cargo test --test synthetic"]);
+
+        fs::remove_dir_all(parent).expect("remove temp parent");
+    }
+
+    #[test]
+    fn check_entries_rejects_invalid_status_and_pattern_mismatch() {
+        let repo = temp_repo("status");
+        let location = "tests/synthetic.rs";
+        fs::create_dir_all(repo.join("tests")).expect("create tests dir");
+        fs::write(
+            repo.join(location),
+            "//! PROVES: synthetic proof.\n//! CATCHES: synthetic regression.\n//! SEEDED: deterministic.\n\
+             #[test]\nfn synthetic_proof() {}\n",
+        )
+        .expect("write synthetic test");
+        let tracked = BTreeSet::from([location.to_owned()]);
+        let mut source_cache = SourceCache::new();
+
+        let mut entry = complete_entry(location);
+        entry.status = Some("purple".to_owned());
+        let err = check_entries(&repo, &tracked, &[entry.clone()], &mut source_cache)
+            .expect_err("invalid status rejected");
+        assert!(err.to_string().contains("Status `purple`"), "{err:?}");
+
+        entry.status = Some("green".to_owned());
+        entry.pattern = Some("Oracle Harness".to_owned());
+        entry.section = "Property Harness".to_owned();
+        let err = check_entries(&repo, &tracked, &[entry], &mut source_cache)
+            .expect_err("pattern mismatch rejected");
+        assert!(err.to_string().contains("pattern"), "{err:?}");
+
+        fs::remove_dir_all(repo).expect("remove temp repo");
+    }
+
+    #[test]
+    fn check_entries_rejects_empty_locations_commands_and_bad_command_prefix() {
+        let repo = temp_repo("empty-fields");
+        let location = "tests/synthetic.rs";
+        fs::create_dir_all(repo.join("tests")).expect("create tests dir");
+        fs::write(repo.join(location), "//! PROVES: x\n//! CATCHES: y\n//! SEEDED: z\n")
+            .expect("write synthetic test");
+        let tracked = BTreeSet::from([location.to_owned()]);
+        let mut source_cache = SourceCache::new();
+        let mut entry = complete_entry(location);
+
+        entry.locations.clear();
+        let err = check_entries(&repo, &tracked, &[entry.clone()], &mut source_cache)
+            .expect_err("empty locations rejected");
+        assert!(err.to_string().contains("no locations"), "{err:?}");
+
+        entry.locations = vec![location.to_owned()];
+        entry.commands.clear();
+        let err = check_entries(&repo, &tracked, &[entry.clone()], &mut source_cache)
+            .expect_err("empty commands rejected");
+        assert!(err.to_string().contains("no commands"), "{err:?}");
+
+        entry.commands = vec!["npm test".to_owned()];
+        let err = check_entries(&repo, &tracked, &[entry], &mut source_cache)
+            .expect_err("unapproved command rejected");
+        assert!(err.to_string().contains("approved repo command"), "{err:?}");
+
+        fs::remove_dir_all(repo).expect("remove temp repo");
+    }
+
+    #[test]
+    fn check_entries_rejects_missing_location_and_bad_cargo_test_filter() {
+        let repo = temp_repo("location-filter");
+        let location = "tests/synthetic.rs";
+        fs::create_dir_all(repo.join("tests")).expect("create tests dir");
+        fs::write(
+            repo.join(location),
+            "//! PROVES: synthetic proof.\n//! CATCHES: synthetic regression.\n//! SEEDED: deterministic.\n\
+             #[test]\nfn synthetic_proof() {}\n",
+        )
+        .expect("write synthetic test");
+        let tracked = BTreeSet::from([location.to_owned()]);
+        let mut source_cache = SourceCache::new();
+        let mut entry = complete_entry(location);
+
+        entry.locations = vec!["tests/missing.rs".to_owned()];
+        let err = check_entries(&repo, &tracked, &[entry.clone()], &mut source_cache)
+            .expect_err("missing location rejected");
+        assert!(err.to_string().contains("does not exist"), "{err:?}");
+
+        entry.locations = vec![location.to_owned()];
+        entry.commands = vec!["cargo test --test synthetic no_such_filter".to_owned()];
+        let err = check_entries(&repo, &tracked, &[entry], &mut source_cache)
+            .expect_err("bad filter rejected");
+        assert!(err.to_string().contains("matches zero"), "{err:?}");
+
+        fs::remove_dir_all(repo).expect("remove temp repo");
+    }
+
+    #[test]
+    fn cargo_test_target_and_filter_parsing_handles_flags_and_filters() {
+        assert_eq!(
+            cargo_test_target_and_filter("cargo test --test synthetic synthetic_proof"),
+            Some(("synthetic", "synthetic_proof"))
+        );
+        assert_eq!(
+            cargo_test_target_and_filter(
+                "cargo test --test synthetic --features native -- synthetic_proof"
+            ),
+            None
+        );
+        assert_eq!(
+            cargo_test_target_and_filter("cargo test --test synthetic --package batpak proof"),
+            Some(("synthetic", "proof"))
+        );
+        assert!(flag_takes_value("--features"));
+        assert!(!flag_takes_value("--locked"));
+    }
+
+    #[test]
+    fn helper_parsers_extract_field_names_and_list_items() {
+        assert_eq!(field_name("- Harness pattern: `Property Harness`"), Some("Harness pattern"));
+        assert_eq!(
+            backtick_value("- Location: `tests/synthetic.rs`"),
+            Some("tests/synthetic.rs")
+        );
+        assert_eq!(list_item("- cargo test --test synthetic"), Some("cargo test --test synthetic"));
+        assert_eq!(workspace_relative_location("bpk-lib/crates/core/tests/x.rs"), "crates/core/tests/x.rs");
+        assert_eq!(core_relative_location("bpk-lib/crates/core/tests/x.rs"), "tests/x.rs");
+    }
+
+    #[test]
+    fn check_module_headers_requires_canonical_fields_or_allowlist() {
+        let repo = temp_repo("headers");
+        let path = "tests/synthetic.rs";
+        fs::create_dir_all(repo.join("tests")).expect("create tests dir");
+        fs::write(repo.join(path), "fn main() {}\n").expect("write headerless test");
+        let files = BTreeSet::from([path.to_owned()]);
+        let mut source_cache = SourceCache::new();
+
+        let err = check_module_headers(&repo, &files, &mut source_cache)
+            .expect_err("headerless harness rejected");
+        assert!(err.to_string().contains("PROVES/CATCHES/SEEDED"), "{err:?}");
+
+        fs::write(
+            repo.join(path),
+            "//! PROVES: synthetic proof.\n//! CATCHES: synthetic regression.\n//! SEEDED: deterministic.\n",
+        )
+        .expect("write complete header");
+        let mut fresh_cache = SourceCache::new();
+        check_module_headers(&repo, &files, &mut fresh_cache).expect("complete header accepted");
+
+        fs::remove_dir_all(repo).expect("remove temp repo");
+    }
+
+    #[test]
+    fn check_line_caps_rejects_unlisted_oversize_harness() {
+        let repo = temp_repo("line-cap");
+        let path = "tests/synthetic.rs";
+        fs::create_dir_all(repo.join("tests")).expect("create tests dir");
+        let body = (0..501)
+            .map(|line| format!("// line {line}\n"))
+            .collect::<String>();
+        fs::write(repo.join(path), body).expect("write oversize harness");
+        let files = BTreeSet::from([path.to_owned()]);
+        let mut source_cache = SourceCache::new();
+
+        let err = check_line_caps(&repo, &files, &mut source_cache).expect_err("oversize rejected");
+        assert!(err.to_string().contains("501 lines"), "{err:?}");
+
+        fs::remove_dir_all(repo).expect("remove temp repo");
+    }
+
+    #[test]
+    fn check_no_silent_repo_fixture_skips_and_tombstone_ignores() {
+        let repo = temp_repo("fixture-tombstone");
+        let fixture_path = repo.join("crates/core/tests/fixture.rs");
+        let tombstone_path = repo.join("crates/core/tests/tombstone.rs");
+        fs::create_dir_all(fixture_path.parent().unwrap()).expect("create tests dir");
+        fs::write(
+            &fixture_path,
+            "fn packaged_fixture() {\n    if std::path::Path::new(\".cargo_vcs_info.json\").exists() {\n        return;\n    }\n}\n",
+        )
+        .expect("write fixture test");
+        fs::write(
+            &tombstone_path,
+            "#[ignore = \"SUPERSEDED: old test\"]\nfn dead() {}\n",
+        )
+        .expect("write tombstone test");
+        let tracked = vec![fixture_path, tombstone_path];
+        let mut source_cache = SourceCache::new();
+
+        let err = check_no_silent_repo_fixture_skips(&repo, &tracked, &mut source_cache)
+            .expect_err("silent fixture skip rejected");
+        assert!(err.to_string().contains(".cargo_vcs_info.json"), "{err:?}");
+
+        let err = check_no_tombstone_ignores(&repo, &tracked, &mut source_cache)
+            .expect_err("tombstone ignore rejected");
+        assert!(err.to_string().contains("superseded"), "{err:?}");
+
+        fs::remove_dir_all(repo).expect("remove temp repo");
+    }
+
+    #[test]
+    fn check_module_headers_rejects_partial_canonical_header() {
+        let repo = temp_repo("partial-header");
+        let path = "tests/synthetic.rs";
+        fs::create_dir_all(repo.join("tests")).expect("create tests dir");
+        fs::write(repo.join(path), "//! PROVES: only proves field.\n")
+            .expect("write partial header");
+        let files = BTreeSet::from([path.to_owned()]);
+        let mut source_cache = SourceCache::new();
+
+        let err = check_module_headers(&repo, &files, &mut source_cache)
+            .expect_err("partial header rejected");
+        assert!(err.to_string().contains("PROVES/CATCHES/SEEDED"), "{err:?}");
+
+        fs::remove_dir_all(repo).expect("remove temp repo");
+    }
+
+    #[test]
+    fn check_entries_rejects_untracked_location_and_missing_pattern() {
+        let repo = temp_repo("untracked");
+        let location = "tests/synthetic.rs";
+        fs::create_dir_all(repo.join("tests")).expect("create tests dir");
+        fs::write(
+            repo.join(location),
+            "//! PROVES: synthetic proof.\n//! CATCHES: synthetic regression.\n//! SEEDED: deterministic.\n",
+        )
+        .expect("write synthetic test");
+        let tracked = BTreeSet::<String>::new();
+        let mut source_cache = SourceCache::new();
+        let mut entry = complete_entry(location);
+
+        let err = check_entries(&repo, &tracked, &[entry.clone()], &mut source_cache)
+            .expect_err("untracked location rejected");
+        assert!(err.to_string().contains("not git-tracked"), "{err:?}");
+
+        entry.pattern = None;
+        let tracked = BTreeSet::from([location.to_owned()]);
+        let err = check_entries(&repo, &tracked, &[entry], &mut source_cache)
+            .expect_err("missing pattern rejected");
+        assert!(err.to_string().contains("missing backticked harness pattern"), "{err:?}");
+
+        fs::remove_dir_all(repo).expect("remove temp repo");
+    }
+
+    #[test]
+    fn test_names_for_target_collects_nested_module_tests() {
+        let repo = temp_repo("nested-tests");
+        let target = repo.join("tests/nested.rs");
+        fs::create_dir_all(target.parent().unwrap()).expect("create tests dir");
+        fs::write(
+            target,
+            "#[cfg(test)]\nmod cases {\n    #[test]\n    fn nested_proof() {}\n}\n",
+        )
+        .expect("write nested module");
+        let mut source_cache = SourceCache::new();
+
+        let names = test_names_for_target(&repo, "nested", &mut source_cache).expect("collect names");
+        assert!(names.iter().any(|name| name.contains("nested_proof")), "{names:?}");
+
+        fs::remove_dir_all(repo).expect("remove temp repo");
+    }
+
+    #[test]
+    fn check_cargo_test_filter_rejects_missing_integration_target() {
+        let repo = temp_repo("missing-target");
+        let mut entry = complete_entry("tests/synthetic.rs");
+        entry.commands = vec!["cargo test --test missing_target filter".to_owned()];
+        let tracked = BTreeSet::from(["tests/synthetic.rs".to_owned()]);
+        let mut source_cache = SourceCache::new();
+
+        let err = check_cargo_test_filter_targets_existing_test(
+            &repo,
+            &entry,
+            &entry.commands[0],
+            &mut source_cache,
+        )
+        .expect_err("missing integration target rejected");
+        assert!(err.to_string().contains("missing integration test target"), "{err:?}");
 
         fs::remove_dir_all(repo).expect("remove temp repo");
     }
