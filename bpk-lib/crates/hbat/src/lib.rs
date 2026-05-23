@@ -17,12 +17,9 @@
 //!   event id.
 //! - [`bank::EVENT_QUERY_DESCRIPTOR`] (`event.query`) pages bounded,
 //!   domain-neutral event summaries for external replay.
-//! - A hand-built descriptor registry in [`manifest::descriptors`] consumed
-//!   by both `xtask export-ts-manifest` and the `hbat` binary. The
-//!   `#[derive(EventPayload)]` macro uses `inventory`, which is collected
-//!   per binary; `xtask` cannot see registrations linked into the `hbat`
-//!   binary. The explicit registry function is Phase 0 plumbing and will
-//!   be replaced once a cross-binary descriptor-discovery story exists.
+//! - [`manifest::descriptors`] consumes inventory registrations for both
+//!   event payloads and operations. Explicit fixture metadata (`FieldRow`,
+//!   golden hex assembly via `build_operation`) remains Phase 0 plumbing.
 
 /// `bank.commit` and `event.get` payload types + descriptors.
 pub mod bank;

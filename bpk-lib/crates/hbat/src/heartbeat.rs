@@ -37,6 +37,18 @@ pub const HEARTBEAT_DESCRIPTOR: OperationDescriptor = OperationDescriptor::new(
     HEARTBEAT_RECEIPT_KIND,
 );
 
+static HEARTBEAT_DESCRIPTOR_STORAGE: OperationDescriptor = HEARTBEAT_DESCRIPTOR;
+
+fn heartbeat_descriptor() -> &'static OperationDescriptor {
+    &HEARTBEAT_DESCRIPTOR_STORAGE
+}
+
+inventory::submit! {
+    crate::manifest::OperationDescriptorRegistration {
+        descriptor: heartbeat_descriptor,
+    }
+}
+
 /// NETBAT input payload for `system.heartbeat`.
 ///
 /// Wire field names match the Rust field names byte-for-byte; the Phase 0

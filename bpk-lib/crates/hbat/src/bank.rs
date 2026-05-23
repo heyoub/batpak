@@ -39,6 +39,18 @@ pub const BANK_COMMIT_DESCRIPTOR: OperationDescriptor = OperationDescriptor::new
     BANK_COMMIT_RECEIPT_KIND,
 );
 
+static BANK_COMMIT_DESCRIPTOR_STORAGE: OperationDescriptor = BANK_COMMIT_DESCRIPTOR;
+
+fn bank_commit_descriptor() -> &'static OperationDescriptor {
+    &BANK_COMMIT_DESCRIPTOR_STORAGE
+}
+
+inventory::submit! {
+    crate::manifest::OperationDescriptorRegistration {
+        descriptor: bank_commit_descriptor,
+    }
+}
+
 /// Wire input for [`BANK_COMMIT_DESCRIPTOR`].
 ///
 /// The client supplies the target coordinate (`entity` + `scope`), the
@@ -141,6 +153,18 @@ pub const EVENT_GET_DESCRIPTOR: OperationDescriptor = OperationDescriptor::new(
     EVENT_GET_RECEIPT_KIND,
 );
 
+static EVENT_GET_DESCRIPTOR_STORAGE: OperationDescriptor = EVENT_GET_DESCRIPTOR;
+
+fn event_get_descriptor() -> &'static OperationDescriptor {
+    &EVENT_GET_DESCRIPTOR_STORAGE
+}
+
+inventory::submit! {
+    crate::manifest::OperationDescriptorRegistration {
+        descriptor: event_get_descriptor,
+    }
+}
+
 /// Wire input for [`EVENT_GET_DESCRIPTOR`].
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, EventPayload)]
 #[batpak(category = 0xF, type_id = 0xA20)]
@@ -233,6 +257,18 @@ pub const EVENT_QUERY_DESCRIPTOR: OperationDescriptor = OperationDescriptor::new
     EVENT_QUERY_OUTPUT_SCHEMA_REF,
     EVENT_QUERY_RECEIPT_KIND,
 );
+
+static EVENT_QUERY_DESCRIPTOR_STORAGE: OperationDescriptor = EVENT_QUERY_DESCRIPTOR;
+
+fn event_query_descriptor() -> &'static OperationDescriptor {
+    &EVENT_QUERY_DESCRIPTOR_STORAGE
+}
+
+inventory::submit! {
+    crate::manifest::OperationDescriptorRegistration {
+        descriptor: event_query_descriptor,
+    }
+}
 
 /// Wire input for [`EVENT_QUERY_DESCRIPTOR`].
 ///
