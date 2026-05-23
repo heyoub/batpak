@@ -166,4 +166,4 @@ pub fn netbat::encode_response(result: core::result::Result<&[u8], &netbat::Netb
 pub fn netbat::inspect_core_operations<I, S>(core: &syncbat::core::Core, operation_names: I) -> netbat::CoreHealth where I: core::iter::traits::collect::IntoIterator<Item = S>, S: core::convert::AsRef<str>
 pub fn netbat::introspect_modules(modules: &[netbat::ServerModule]) -> netbat::Introspection
 pub fn netbat::serve_stream<S>(stream: &mut S, core: &mut syncbat::core::Core, limits: &netbat::Limits) -> core::result::Result<netbat::ResponseFrame, netbat::NetbatError> where S: std::io::Read + std::io::Write
-pub fn netbat::serve_tcp_listener(listener: std::net::tcp::TcpListener, core: &mut syncbat::core::Core, config: &netbat::TcpServerConfig, shutdown: &netbat::ShutdownHandle) -> core::result::Result<netbat::TcpServeStats, netbat::NetbatError>
+pub fn netbat::serve_tcp_listener(listener: std::net::TcpListener, core: &mut syncbat::core::Core, config: &netbat::TcpServerConfig, shutdown: &netbat::ShutdownHandle) -> core::result::Result<netbat::TcpServeStats, netbat::NetbatError>
