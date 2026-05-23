@@ -613,3 +613,96 @@ fn register_row_round_trips_descriptor_fields() {
     );
     assert_eq!(supersede.supersedes.as_deref(), Some("owned.alpha"));
 }
+
+#[test]
+fn persist_operation_is_idempotent_for_same_descriptor() {
+    let (store, _dir) = test_store();
+    let catalog = StoreRegisterCatalog::new(Arc::clone(&store), register_coord());
+    catalog.persist_operation(&ALPHA).expect("persist alpha");
+    catalog
+        .persist_operation(&ALPHA)
+        .expect("idempotent persist succeeds");
+
+    let register = rebuild_register_from_store(&store, &register_coord()).expect("rebuild");
+    assert_eq!(register.descriptor("alpha"), Some(&ALPHA));
+
+    drop(catalog);
+    close_store(store);
+}
+
+#[test]
+fn update_operation_rejects_tombstoned_operation() {
+    let (store, _dir) = test_store();
+    let catalog = StoreRegisterCatalog::new(Arc::clone(&store), register_coord());
+    catalog.persist_operation(&ALPHA).expect("persist alpha");
+    catalog.delete_operation("alpha").expect("delete alpha");
+
+    let err = match catalog.update_operation(&ALPHA_V2) {
+        Ok(_) => panic!("expected update on tombstoned operation rejection"),
+        Err(error) => error,
+    };
+
+    assert!(matches!(
+        err,
+        StoreRegisterCatalogError::CatalogConflict {
+            ref name,
+            ref action,
+            ..
+        } if name == "alpha" && action == RegisterOperationActionV1::Update.as_str()
+    ));
+
+    drop(catalog);
+    close_store(store);
+}
+
+#[test]
+fn delete_operation_rejects_already_deleted_operation() {
+    let (store, _dir) = test_store();
+    let catalog = StoreRegisterCatalog::new(Arc::clone(&store), register_coord());
+    catalog.persist_operation(&ALPHA).expect("persist alpha");
+    catalog.delete_operation("alpha").expect("delete alpha");
+
+    let err = match catalog.delete_operation("alpha") {
+        Ok(_) => panic!("expected delete-on-deleted rejection"),
+        Err(error) => error,
+    };
+
+    assert!(matches!(
+        err,
+        StoreRegisterCatalogError::CatalogConflict {
+            ref name,
+            ref action,
+            ..
+        } if name == "alpha" && action == RegisterOperationActionV1::Delete.as_str()
+    ));
+
+    drop(catalog);
+    close_store(store);
+}
+
+#[test]
+fn supersede_operation_rejects_idempotent_duplicate() {
+    let (store, _dir) = test_store();
+    let catalog = StoreRegisterCatalog::new(Arc::clone(&store), register_coord());
+    catalog.persist_operation(&ALPHA).expect("persist alpha");
+    catalog
+        .supersede_operation("alpha", &CHARLIE)
+        .expect("supersede alpha");
+
+    let err = match catalog.supersede_operation("alpha", &CHARLIE) {
+        Ok(_) => panic!("expected duplicate supersede rejection"),
+        Err(error) => error,
+    };
+
+    assert!(matches!(
+        err,
+        StoreRegisterCatalogError::CatalogConflict {
+            ref name,
+            ref action,
+            ..
+        } if name == "alpha" && action == RegisterOperationActionV1::Supersede.as_str()
+    ));
+
+    drop(catalog);
+    close_store(store);
+}

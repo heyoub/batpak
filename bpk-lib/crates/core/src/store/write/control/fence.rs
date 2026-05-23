@@ -225,3 +225,25 @@ impl Drop for VisibilityFence<'_> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::store::StoreConfig;
+    use tempfile::TempDir;
+
+    #[test]
+    fn visibility_fence_token_matches_begin_handle() {
+        let dir = TempDir::new().expect("tempdir");
+        let store = Store::open(
+            StoreConfig::new(dir.path())
+                .with_segment_max_bytes(4096)
+                .with_sync_every_n_events(1),
+        )
+        .expect("open store");
+        let fence = store.begin_visibility_fence().expect("begin fence");
+        assert_ne!(fence.token(), 0);
+        fence.commit().expect("commit fence");
+        store.close().expect("close store");
+    }
+}

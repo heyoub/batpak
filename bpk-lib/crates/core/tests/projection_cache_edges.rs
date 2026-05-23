@@ -125,3 +125,15 @@ fn native_get_put_smoke_keeps_test_meta_used() {
         "PROPERTY: the focused edge file still exercises a successful NativeCache get path"
     );
 }
+
+#[test]
+fn native_get_returns_none_for_missing_cache_key() {
+    let dir = TempDir::new().expect("temp dir");
+    let cache = NativeCache::open(dir.path().join("cache")).expect("open native cache");
+
+    let result = cache.get(b"missing-key").expect("get missing key");
+    assert!(
+        result.is_none(),
+        "PROPERTY: NativeCache::get must return None for absent keys"
+    );
+}

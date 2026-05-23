@@ -164,6 +164,17 @@ fn inspects_borrowed_syncbat_core_without_invoking_handlers() {
 }
 
 #[test]
+fn inspect_core_reports_healthy_when_all_operations_are_mounted() {
+    let core = core_with_ping();
+
+    let health = nb::inspect_core_operations(&core, ["ping"]);
+
+    assert!(health.is_healthy());
+    assert!(health.missing_operations.is_empty());
+    assert_eq!(health.mounted_operations, vec!["ping"]);
+}
+
+#[test]
 fn decodes_line_protocol_frame() {
     let frame = nb::decode_line(
         &fixture_bytes("request_call_legacy", REQUEST_CALL_LEGACY_HEX),
