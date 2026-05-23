@@ -991,8 +991,11 @@ mod tests {
         let repo = temp_repo("empty-fields");
         let location = "tests/synthetic.rs";
         fs::create_dir_all(repo.join("tests")).expect("create tests dir");
-        fs::write(repo.join(location), "//! PROVES: x\n//! CATCHES: y\n//! SEEDED: z\n")
-            .expect("write synthetic test");
+        fs::write(
+            repo.join(location),
+            "//! PROVES: x\n//! CATCHES: y\n//! SEEDED: z\n",
+        )
+        .expect("write synthetic test");
         let tracked = BTreeSet::from([location.to_owned()]);
         let mut source_cache = SourceCache::new();
         let mut entry = complete_entry(location);
@@ -1067,14 +1070,26 @@ mod tests {
 
     #[test]
     fn helper_parsers_extract_field_names_and_list_items() {
-        assert_eq!(field_name("- Harness pattern: `Property Harness`"), Some("Harness pattern"));
+        assert_eq!(
+            field_name("- Harness pattern: `Property Harness`"),
+            Some("Harness pattern")
+        );
         assert_eq!(
             backtick_value("- Location: `tests/synthetic.rs`"),
             Some("tests/synthetic.rs")
         );
-        assert_eq!(list_item("- cargo test --test synthetic"), Some("cargo test --test synthetic"));
-        assert_eq!(workspace_relative_location("bpk-lib/crates/core/tests/x.rs"), "crates/core/tests/x.rs");
-        assert_eq!(core_relative_location("bpk-lib/crates/core/tests/x.rs"), "tests/x.rs");
+        assert_eq!(
+            list_item("- cargo test --test synthetic"),
+            Some("cargo test --test synthetic")
+        );
+        assert_eq!(
+            workspace_relative_location("bpk-lib/crates/core/tests/x.rs"),
+            "crates/core/tests/x.rs"
+        );
+        assert_eq!(
+            core_relative_location("bpk-lib/crates/core/tests/x.rs"),
+            "tests/x.rs"
+        );
     }
 
     #[test]
@@ -1188,7 +1203,11 @@ mod tests {
         let tracked = BTreeSet::from([location.to_owned()]);
         let err = check_entries(&repo, &tracked, &[entry], &mut source_cache)
             .expect_err("missing pattern rejected");
-        assert!(err.to_string().contains("missing backticked harness pattern"), "{err:?}");
+        assert!(
+            err.to_string()
+                .contains("missing backticked harness pattern"),
+            "{err:?}"
+        );
 
         fs::remove_dir_all(repo).expect("remove temp repo");
     }
@@ -1205,8 +1224,12 @@ mod tests {
         .expect("write nested module");
         let mut source_cache = SourceCache::new();
 
-        let names = test_names_for_target(&repo, "nested", &mut source_cache).expect("collect names");
-        assert!(names.iter().any(|name| name.contains("nested_proof")), "{names:?}");
+        let names =
+            test_names_for_target(&repo, "nested", &mut source_cache).expect("collect names");
+        assert!(
+            names.iter().any(|name| name.contains("nested_proof")),
+            "{names:?}"
+        );
 
         fs::remove_dir_all(repo).expect("remove temp repo");
     }
@@ -1226,7 +1249,10 @@ mod tests {
             &mut source_cache,
         )
         .expect_err("missing integration target rejected");
-        assert!(err.to_string().contains("missing integration test target"), "{err:?}");
+        assert!(
+            err.to_string().contains("missing integration test target"),
+            "{err:?}"
+        );
 
         fs::remove_dir_all(repo).expect("remove temp repo");
     }

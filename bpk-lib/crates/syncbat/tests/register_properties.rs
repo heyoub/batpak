@@ -57,7 +57,8 @@ fn cache_register_is_projection_equivalent_to_register() {
     );
     assert_eq!(cache.descriptors().count(), register.len());
     assert_eq!(
-        cache.descriptors()
+        cache
+            .descriptors()
             .map(|(name, _)| name)
             .collect::<Vec<_>>(),
         register.names().collect::<Vec<_>>()
