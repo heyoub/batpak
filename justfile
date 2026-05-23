@@ -85,6 +85,9 @@ mutants-full:
 host-dev:
     cd bpk-lib; cargo xtask host-dev
 
+host-loop:
+    cd bpk-lib; cargo xtask host-loop
+
 ci-fast:
     cd bpk-lib; cargo xtask ci-fast
 

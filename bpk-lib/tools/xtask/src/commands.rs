@@ -3,6 +3,7 @@ mod ci;
 mod disk_audit;
 mod export_ts_manifest;
 mod host_dev;
+mod host_loop;
 mod loom;
 mod manifest;
 mod msrv_check;
@@ -124,6 +125,10 @@ pub(crate) fn export_ts_manifest(args: &ExportTsManifestArgs) -> Result<()> {
 
 pub(crate) fn host_dev(args: &HostDevArgs) -> Result<()> {
     host_dev::host_dev(args)
+}
+
+pub(crate) fn host_loop() -> Result<()> {
+    host_loop::host_loop()
 }
 
 pub(crate) fn architecture_ir(args: &ArchitectureIrArgs) -> Result<()> {
