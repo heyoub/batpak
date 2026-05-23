@@ -64,6 +64,15 @@
     - ART-NETBAT-WIRE-GOLDENS
     - ART-ADR-NETBAT-CONTRACT
     - ART-PUBLIC-API-BASELINE
+- id: REQ-BIDIRECTIONAL-SUBSTRATE-LANE
+  summary: Non-Rust terminals that can commit substrate events must also expose bounded, domain-neutral traversal so external replay can be reconstructed from substrate truth without sidecar authority.
+  artifacts:
+    - ART-HBAT-SOURCE
+    - ART-HBAT-TESTS
+    - ART-HBAT-MANIFEST-EXPORT
+    - ART-STORE-QUERY-TRAVERSAL
+    - ART-STORE-QUERY-TRAVERSAL-TESTS
+    - ART-DX-DOCS
 - id: REQ-RELEASE-FAMILY-PUBLIC
   summary: The 0.7.6 correction cut must ship every publishable batpak-family crate as one public release train with aligned internal version pins, package-local entrypoints, traceability artifacts, and explicit release proof gates.
   artifacts:

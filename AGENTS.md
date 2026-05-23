@@ -122,6 +122,15 @@ Implementation commands still live under `bpk-lib/` and remain valid when a task
 - Keep root-first commands and paths accurate.
 - If you add a public item or named flow, update `bpk-lib/traceability/`.
 - Prefer root `just` recipes over inventing new one-off local commands; use `xtask` for machinery that needs parsing, walking, validation, or receipts.
+- **Bidirectional substrate lane** — if a NETBAT terminal can commit substrate
+  events, it must also preserve bounded domain-neutral traversal. The reference
+  loop is `bank.commit` for write, `event.get` for point-read, and `event.query`
+  for log walking. New traversal fields must name the axis as
+  `global_sequence`; do not introduce ambiguous cursor names.
+- **Domain graph boundary** — do not add Moonwalker, workflow, mission, or
+  receipt-body verbs as batpak/hbat/netbat operations. Domain layers decode
+  envelope payloads above batpak after `event.query` + `event.get`; substrate
+  traversal returns metadata only.
 - **PCP boundary** — batpak may align with the sibling `PCP_SPEC`, but this crate
   does not implement PCP-Core or `contract.context_v1` wire validation. Treat
   `contract.context_v1` as a normative optional PCP profile only when

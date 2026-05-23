@@ -48,7 +48,7 @@ describe("manifest envelope", () => {
     expect(manifest.batpakVersion).toBe("0.7.6");
   });
 
-  it("carries all 0.7.6 events", () => {
+  it("carries all reference hbat events", () => {
     const names = manifest.events.map((e) => e.name).sort();
     expect(names).toEqual(
       [
@@ -56,15 +56,18 @@ describe("manifest envelope", () => {
         "bank.commit.request",
         "event.get.ack",
         "event.get.request",
+        "event.query.ack",
+        "event.query.request",
+        "event.query.summary",
         "system.heartbeat.ack",
         "system.heartbeat.request",
       ].sort(),
     );
   });
 
-  it("carries all 0.7.6 operations", () => {
+  it("carries all reference hbat operations", () => {
     const names = manifest.operations.map((o) => o.name).sort();
-    expect(names).toEqual(["bank.commit", "event.get", "system.heartbeat"]);
+    expect(names).toEqual(["bank.commit", "event.get", "event.query", "system.heartbeat"]);
   });
 
   it("enforces the Phase 0 wireName === tsName invariant on every field", () => {
@@ -199,6 +202,15 @@ describe("Effect 4 schema round-trip via @batpak/schema", () => {
     expect(value).toEqual(Generated.EVENT_GET_ACK_FIXTURE);
   });
 
+  it("decodes the event.query ack fixture (summary array + global sequence)", () => {
+    const bytes = decodeHex(Generated.EVENT_QUERY_ACK_GOLDEN_HEX);
+    const value = decodeBytes(Generated.EventQueryAck, bytes);
+    expect(value).toEqual(Generated.EVENT_QUERY_ACK_FIXTURE);
+    expect(value.entries[0]?.global_sequence).toBe(42);
+    expect(value.entries[0]).not.toHaveProperty("payload_hex");
+    expect(value.entries[0]).not.toHaveProperty("receipt_kind");
+  });
+
   it("encodes the bank.commit ack fixture (Option + Record) back to the golden bytes", () => {
     const bytes = encodeBytes(Generated.BankCommitAck, Generated.BANK_COMMIT_ACK_FIXTURE);
     expect(encodeHex(bytes)).toBe(Generated.BANK_COMMIT_ACK_GOLDEN_HEX);
@@ -218,10 +230,11 @@ describe("Effect 4 schema round-trip via @batpak/schema", () => {
 });
 
 describe("operation handles in generated/operations", () => {
-  it("exports SYSTEM_HEARTBEAT, BANK_COMMIT, EVENT_GET with golden hex", () => {
+  it("exports SYSTEM_HEARTBEAT, BANK_COMMIT, EVENT_GET, EVENT_QUERY with golden hex", () => {
     expect(Generated.SYSTEM_HEARTBEAT.name).toBe("system.heartbeat");
     expect(Generated.BANK_COMMIT.name).toBe("bank.commit");
     expect(Generated.EVENT_GET.name).toBe("event.get");
+    expect(Generated.EVENT_QUERY.name).toBe("event.query");
     expect(Generated.BANK_COMMIT.errorFixture.code).toBe("unknown_operation");
   });
 });

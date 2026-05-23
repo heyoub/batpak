@@ -2,7 +2,7 @@
 
 The TypeScript surface for the BatPAK family. Catch-all 0.7.6 release.
 
-Three operations live on NETBAT/1 over TCP today:
+Four operations live on NETBAT/1 over TCP today:
 
 ```
 system.heartbeat   — wire-parity liveness probe.
@@ -11,6 +11,9 @@ bank.commit        — append a typed event to the underlying batpak store;
                      content_hash, key_id, optional signature, extensions).
 event.get          — read a stored event by event_id; returns header
                      + canonical payload bytes + coordinate.
+event.query        — bounded, domain-neutral traversal over event
+                     summaries; page by after_global_sequence, then
+                     fetch payload bytes with event.get.
 ```
 
 Authority direction:
@@ -41,7 +44,7 @@ packages/
   codegen/    Reads batpak.manifest.json, emits @batpak/generated.
               Refuses unsupported manifestVersion, netbatVersion,
               canonicalEncoding, field-name drift, unknown typeToken.
-              14 direct tests.
+              21 direct tests.
   generated/  AUTO-GENERATED Effect 4 schemas + TS types + golden hex.
               Fully overwritten by each codegen run.
   schema/     Effect 4 Schema bridge — decodeBytes/encodeBytes wrap
@@ -49,11 +52,12 @@ packages/
               the real Effect Schema authoring API for downstream-only
               TS events. 6 direct tests.
   test/       End-to-end parity harness across every event and every
-              operation in the manifest. 44 parity assertions.
+              operation in the manifest. 57 parity assertions.
 examples/
   heartbeat-spike/  Live spike against hbat:
                     - sends system.heartbeat
                     - sends bank.commit (appends a typed event)
+                    - sends event.query (walks metadata by coordinate)
                     - sends event.get (reads it back, decodes through
                       Effect 4 schema; proves byte round-trip)
                     - sends an unknown_operation to validate the typed
@@ -62,7 +66,7 @@ examples/
 
 ## hbat — the reference host
 
-`hbat` (in `bpk-lib/crates/hbat/`) registers all three operations against
+`hbat` (in `bpk-lib/crates/hbat/`) registers all four operations against
 a real BatPAK store. `publish = false`. Loopback-only by default; bind
 to a non-loopback interface only with `--allow-non-loopback`.
 
@@ -105,7 +109,7 @@ PORT=$(node -e 'const j=require("fs").readFileSync("/tmp/hbat-ready.txt","utf-8"
 
 cd ../bpk-ts
 node examples/heartbeat-spike/dist/index.js --port "$PORT"
-# spike: ok  ← all three operations + ERR path proven on the wire
+# spike: ok  ← all four operations + ERR path proven on the wire
 ```
 
 ## Wire encoding contract
@@ -123,6 +127,11 @@ u64-safe            → number bounded to Number.MAX_SAFE_INTEGER
 u64-millis          → same as u64-safe; semantically milliseconds since epoch
 i64-microseconds    → number bounded to ±Number.MAX_SAFE_INTEGER
 option<string>      → string | null
+option<u8>          → number | null, bounded to 0..255
+option<u16>         → number | null, bounded to 0..65535
+option<u64-safe>    → number | null, bounded to Number.MAX_SAFE_INTEGER
+bool                → boolean
+array<EventSummary> → EventSummary[]
 map<string,string>  → Record<string, string>
 u128 values         → emitted as 32-char lowercase hex string (overflows safe-int)
 ```

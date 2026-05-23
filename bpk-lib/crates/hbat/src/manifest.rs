@@ -18,7 +18,8 @@ use syncbat::RuntimeError;
 use crate::bank::{
     BANK_COMMIT_INPUT_SCHEMA_REF, BANK_COMMIT_OPERATION_NAME, BANK_COMMIT_OUTPUT_SCHEMA_REF,
     BANK_COMMIT_RECEIPT_KIND, EVENT_GET_INPUT_SCHEMA_REF, EVENT_GET_OPERATION_NAME,
-    EVENT_GET_OUTPUT_SCHEMA_REF, EVENT_GET_RECEIPT_KIND,
+    EVENT_GET_OUTPUT_SCHEMA_REF, EVENT_GET_RECEIPT_KIND, EVENT_QUERY_INPUT_SCHEMA_REF,
+    EVENT_QUERY_OPERATION_NAME, EVENT_QUERY_OUTPUT_SCHEMA_REF, EVENT_QUERY_RECEIPT_KIND,
 };
 use crate::heartbeat::{
     HEARTBEAT_INPUT_SCHEMA_REF, HEARTBEAT_OPERATION_NAME, HEARTBEAT_OUTPUT_SCHEMA_REF,
@@ -257,7 +258,7 @@ impl EventDescriptorRegistration {
     }
 }
 
-/// Build the 0.7.6 descriptor snapshot for hbat's operation surface.
+/// Build the descriptor snapshot for hbat's operation surface.
 ///
 /// Walks the `inventory` registry, materializes one [`EventDescriptor`]
 /// per submitted [`EventDescriptorRegistration`], sorts by
@@ -306,9 +307,18 @@ pub fn descriptors() -> Result<ManifestSnapshot, ManifestBuildError> {
         index.golden_for(EVENT_GET_OUTPUT_SCHEMA_REF)?,
     )?;
 
+    let event_query_op = build_operation(
+        EVENT_QUERY_OPERATION_NAME,
+        EVENT_QUERY_INPUT_SCHEMA_REF,
+        EVENT_QUERY_OUTPUT_SCHEMA_REF,
+        EVENT_QUERY_RECEIPT_KIND,
+        index.golden_for(EVENT_QUERY_INPUT_SCHEMA_REF)?,
+        index.golden_for(EVENT_QUERY_OUTPUT_SCHEMA_REF)?,
+    )?;
+
     Ok(ManifestSnapshot {
         events,
-        operations: vec![heartbeat_op, bank_commit_op, event_get_op],
+        operations: vec![heartbeat_op, bank_commit_op, event_get_op, event_query_op],
     })
 }
 
@@ -418,16 +428,18 @@ mod tests {
     use anyhow::Result;
 
     #[test]
-    fn snapshot_has_all_0_7_6_events_and_operations() -> Result<()> {
+    fn snapshot_has_all_reference_events_and_operations() -> Result<()> {
         let snap = descriptors()?;
-        // 6 events: heartbeat request/ack, bank.commit request/ack, event.get request/ack.
-        assert_eq!(snap.events.len(), 6, "event count: {snap:?}");
-        // 3 operations: heartbeat, bank.commit, event.get.
-        assert_eq!(snap.operations.len(), 3);
+        // 9 events: heartbeat request/ack, bank.commit request/ack,
+        // event.get request/ack, event.query request/summary/ack.
+        assert_eq!(snap.events.len(), 9, "event count: {snap:?}");
+        // 4 operations: heartbeat, bank.commit, event.get, event.query.
+        assert_eq!(snap.operations.len(), 4);
         let names: Vec<&str> = snap.operations.iter().map(|o| o.name.as_str()).collect();
         assert!(names.contains(&"system.heartbeat"));
         assert!(names.contains(&"bank.commit"));
         assert!(names.contains(&"event.get"));
+        assert!(names.contains(&"event.query"));
         Ok(())
     }
 

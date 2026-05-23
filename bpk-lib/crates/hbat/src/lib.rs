@@ -7,13 +7,16 @@
 //! over `NETBAT/1`, and so the workspace can prove cross-language wire parity
 //! against a known-good Rust handler.
 //!
-//! ## Phase 0 scope
+//! ## Reference terminal scope
 //!
-//! - One operation: [`heartbeat::HEARTBEAT_DESCRIPTOR`] (`system.heartbeat`),
-//!   echoing a nonce and stamping a server clock value.
-//! - Two `EventPayload` types in [`heartbeat`]:
-//!   [`heartbeat::SystemHeartbeatRequest`] and
-//!   [`heartbeat::SystemHeartbeatAck`].
+//! - [`heartbeat::HEARTBEAT_DESCRIPTOR`] (`system.heartbeat`) echoes a
+//!   nonce and stamps a server clock value.
+//! - [`bank::BANK_COMMIT_DESCRIPTOR`] (`bank.commit`) writes substrate
+//!   events.
+//! - [`bank::EVENT_GET_DESCRIPTOR`] (`event.get`) point-reads one known
+//!   event id.
+//! - [`bank::EVENT_QUERY_DESCRIPTOR`] (`event.query`) pages bounded,
+//!   domain-neutral event summaries for external replay.
 //! - A hand-built descriptor registry in [`manifest::descriptors`] consumed
 //!   by both `xtask export-ts-manifest` and the `hbat` binary. The
 //!   `#[derive(EventPayload)]` macro uses `inventory`, which is collected
@@ -34,12 +37,15 @@ pub mod heartbeat;
 pub mod manifest;
 
 pub use bank::{
-    BankCommitAck, BankCommitRequest, EventGetAck, EventGetRequest, BANK_COMMIT_DESCRIPTOR,
-    BANK_COMMIT_INPUT_SCHEMA_REF, BANK_COMMIT_OPERATION_NAME, BANK_COMMIT_OUTPUT_SCHEMA_REF,
-    BANK_COMMIT_RECEIPT_KIND, EVENT_GET_DESCRIPTOR, EVENT_GET_INPUT_SCHEMA_REF,
-    EVENT_GET_OPERATION_NAME, EVENT_GET_OUTPUT_SCHEMA_REF, EVENT_GET_RECEIPT_KIND,
+    BankCommitAck, BankCommitRequest, EventGetAck, EventGetRequest, EventQueryAck,
+    EventQueryRequest, EventSummary, BANK_COMMIT_DESCRIPTOR, BANK_COMMIT_INPUT_SCHEMA_REF,
+    BANK_COMMIT_OPERATION_NAME, BANK_COMMIT_OUTPUT_SCHEMA_REF, BANK_COMMIT_RECEIPT_KIND,
+    EVENT_GET_DESCRIPTOR, EVENT_GET_INPUT_SCHEMA_REF, EVENT_GET_OPERATION_NAME,
+    EVENT_GET_OUTPUT_SCHEMA_REF, EVENT_GET_RECEIPT_KIND, EVENT_QUERY_DESCRIPTOR,
+    EVENT_QUERY_INPUT_SCHEMA_REF, EVENT_QUERY_MAX_LIMIT, EVENT_QUERY_OPERATION_NAME,
+    EVENT_QUERY_OUTPUT_SCHEMA_REF, EVENT_QUERY_RECEIPT_KIND, EVENT_QUERY_SUMMARY_SCHEMA_REF,
 };
-pub use handlers::{BankCommitHandler, EventGetHandler};
+pub use handlers::{BankCommitHandler, EventGetHandler, EventQueryHandler};
 pub use heartbeat::{
     handle_heartbeat, HeartbeatHandler, SystemHeartbeatAck, SystemHeartbeatRequest,
     HEARTBEAT_DESCRIPTOR, HEARTBEAT_OPERATION_NAME,

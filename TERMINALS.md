@@ -23,6 +23,15 @@ Current terminal-shaped surfaces include:
 - projection and replay entry points
 - netbat routes and operation handling surfaces
 
+The reference NETBAT terminal exposes three substrate directions:
+
+- `bank.commit` is the write terminal.
+- `event.get` is the point-read terminal.
+- `event.query` is the traversal terminal.
+
+Push subscription is lossy awareness, not replay. Durable replay uses query,
+cursor, or projection-owned pull surfaces.
+
 ## Terminal Versus Function
 
 A function is an implementation unit. A terminal is a boundary promise.
@@ -32,4 +41,3 @@ Many functions are not terminals. A terminal is where authority, input, evidence
 ## Breakers
 
 Gates and policy checks act like breakers. They do not make work disappear; they accept, deny, or classify it with evidence.
-

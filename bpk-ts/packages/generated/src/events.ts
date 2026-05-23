@@ -117,3 +117,87 @@ export const EVENT_GET_ACK_FIXTURE: EventGetAck = {
   "payload_hex": "81a56e6f6e6365b66865617274626561742d666978747572652d30303031",
   "content_hash_hex": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 } as unknown as EventGetAck;
+
+/** Source: hbat::bank::EventQueryRequest; category=15, typeId=2594 */
+export const EventQueryRequest = Schema.Struct({
+  entity: Schema.NullOr(Schema.String),
+  scope: Schema.NullOr(Schema.String),
+  kind_category: Schema.NullOr(Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 255 })))),
+  kind_type_id: Schema.NullOr(Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 65535 })))),
+  after_global_sequence: Schema.NullOr(Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 9007199254740991 })))),
+  limit: Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 9007199254740991 }))),
+});
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export type EventQueryRequest = typeof EventQueryRequest.Type;
+
+export const EVENT_QUERY_REQUEST_GOLDEN_HEX = "86a6656e74697479ac666978747572653a62616e6ba573636f7065ad666978747572652d73636f7065ad6b696e645f63617465676f72790fac6b696e645f747970655f6964cd0a01b561667465725f676c6f62616c5f73657175656e636529a56c696d697402" as const;
+export const EVENT_QUERY_REQUEST_FIXTURE: EventQueryRequest = {
+  "entity": "fixture:bank",
+  "scope": "fixture-scope",
+  "kind_category": 15,
+  "kind_type_id": 2561,
+  "after_global_sequence": 41,
+  "limit": 2
+} as unknown as EventQueryRequest;
+
+/** Source: hbat::bank::EventSummary; category=15, typeId=2595 */
+export const EventSummary = Schema.Struct({
+  event_id_hex: Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{32}$/u)), Schema.brand("EventIdHex")),
+  global_sequence: Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 9007199254740991 }))),
+  wall_ms: Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 9007199254740991 }))),
+  clock: Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 4294967295 }))),
+  correlation_id_hex: Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{32}$/u)), Schema.brand("EventIdHex")),
+  causation_id_hex: Schema.NullOr(Schema.String),
+  kind_category: Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 255 }))),
+  kind_type_id: Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 65535 }))),
+  entity: Schema.String,
+  scope: Schema.String,
+  content_hash_hex: Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{64}$/u)), Schema.brand("ContentHashHex")),
+});
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export type EventSummary = typeof EventSummary.Type;
+
+export const EVENT_SUMMARY_GOLDEN_HEX = "8bac6576656e745f69645f686578d9203031323334353637383961626364656630313233343536373839616263646566af676c6f62616c5f73657175656e63652aa777616c6c5f6d73cf0000018bcfe56800a5636c6f636b07b2636f7272656c6174696f6e5f69645f686578d9203030303030303030303030303030303030303030303030303030303030303030b0636175736174696f6e5f69645f686578c0ad6b696e645f63617465676f72790fac6b696e645f747970655f6964cd0a01a6656e74697479ac666978747572653a62616e6ba573636f7065ad666978747572652d73636f7065b0636f6e74656e745f686173685f686578d94061616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161" as const;
+export const EVENT_SUMMARY_FIXTURE: EventSummary = {
+  "event_id_hex": "0123456789abcdef0123456789abcdef",
+  "global_sequence": 42,
+  "wall_ms": 1700000000000,
+  "clock": 7,
+  "correlation_id_hex": "00000000000000000000000000000000",
+  "causation_id_hex": null,
+  "kind_category": 15,
+  "kind_type_id": 2561,
+  "entity": "fixture:bank",
+  "scope": "fixture-scope",
+  "content_hash_hex": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+} as unknown as EventSummary;
+
+/** Source: hbat::bank::EventQueryAck; category=15, typeId=2596 */
+export const EventQueryAck = Schema.Struct({
+  entries: Schema.Array(EventSummary),
+  next_after_global_sequence: Schema.NullOr(Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 9007199254740991 })))),
+  truncated: Schema.Boolean,
+});
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export type EventQueryAck = typeof EventQueryAck.Type;
+
+export const EVENT_QUERY_ACK_GOLDEN_HEX = "83a7656e7472696573918bac6576656e745f69645f686578d9203031323334353637383961626364656630313233343536373839616263646566af676c6f62616c5f73657175656e63652aa777616c6c5f6d73cf0000018bcfe56800a5636c6f636b07b2636f7272656c6174696f6e5f69645f686578d9203030303030303030303030303030303030303030303030303030303030303030b0636175736174696f6e5f69645f686578c0ad6b696e645f63617465676f72790fac6b696e645f747970655f6964cd0a01a6656e74697479ac666978747572653a62616e6ba573636f7065ad666978747572652d73636f7065b0636f6e74656e745f686173685f686578d94061616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161ba6e6578745f61667465725f676c6f62616c5f73657175656e63652aa97472756e6361746564c2" as const;
+export const EVENT_QUERY_ACK_FIXTURE: EventQueryAck = {
+  "entries": [
+    {
+      "event_id_hex": "0123456789abcdef0123456789abcdef",
+      "global_sequence": 42,
+      "wall_ms": 1700000000000,
+      "clock": 7,
+      "correlation_id_hex": "00000000000000000000000000000000",
+      "causation_id_hex": null,
+      "kind_category": 15,
+      "kind_type_id": 2561,
+      "entity": "fixture:bank",
+      "scope": "fixture-scope",
+      "content_hash_hex": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  ],
+  "next_after_global_sequence": 42,
+  "truncated": false
+} as unknown as EventQueryAck;

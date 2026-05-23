@@ -2,8 +2,8 @@
 //!
 //! These tests spawn the actual `hbat` binary as a subprocess, parse
 //! the `HBAT_READY {…}` rendezvous line from its stdout, connect over
-//! TCP, and drive all three NETBAT/1 operations the binary exposes
-//! (`system.heartbeat`, `bank.commit`, `event.get`) plus the error
+//! TCP, and drive all four NETBAT/1 operations the binary exposes
+//! (`system.heartbeat`, `bank.commit`, `event.get`, `event.query`) plus the error
 //! path. They close the cross-language parity loop on the Rust side
 //! the same way `bpk-ts/examples/heartbeat-spike` does on the TS side.
 //!
@@ -13,7 +13,7 @@
 //!
 //! PROVES:
 //!   - HBAT_READY rendezvous is a parseable JSON line on stdout.
-//!   - NETBAT/1 frames over TCP round-trip cleanly for the 3 operations.
+//!   - NETBAT/1 frames over TCP round-trip cleanly for the 4 operations.
 //!   - Wire-format error path returns a typed ERR with the
 //!     `unknown_operation` code and a UTF-8 message body.
 //!   - `bank.commit` -> `event.get` recovers the canonical payload
@@ -21,6 +21,10 @@
 //!
 //! SEEDED: fresh temp store per test; binds to 127.0.0.1:0 so tests
 //! can run in parallel without port collisions.
+//!
+//! PROVES: INV-BIDIRECTIONAL-SUBSTRATE-LANE,
+//! INV-SUBSTRATE-TRAVERSAL-DOMAIN-NEUTRAL,
+//! INV-EXTERNAL-REPLAY-NO-SIDECAR-TRUTH.
 
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpStream;
@@ -31,7 +35,10 @@ use std::time::{Duration, Instant};
 use anyhow::{bail, Context, Result};
 use batpak::EventPayload;
 use hbat::{
-    bank::{BankCommitAck, BankCommitRequest, EventGetAck, EventGetRequest},
+    bank::{
+        BankCommitAck, BankCommitRequest, EventGetAck, EventGetRequest, EventQueryAck,
+        EventQueryRequest,
+    },
     heartbeat::{SystemHeartbeatAck, SystemHeartbeatRequest},
     EventPayloadFixture,
 };
@@ -295,6 +302,138 @@ fn bank_commit_then_event_get_recovers_canonical_bytes() -> Result<()> {
     assert_eq!(recovered_bytes, original_payload_bytes);
     let recovered: SystemHeartbeatRequest = batpak::encoding::from_bytes(&recovered_bytes)?;
     assert_eq!(recovered, original_payload);
+    Ok(())
+}
+
+#[test]
+fn bank_commit_then_event_query_pages_global_sequence_and_event_get_fetches() -> Result<()> {
+    let host = HbatProcess::spawn()?;
+
+    let original_payload = SystemHeartbeatRequest {
+        nonce: "tcp-e2e-event-query-001".to_owned(),
+    };
+    let original_payload_bytes = batpak::encoding::to_bytes(&original_payload)?;
+
+    let mut committed = Vec::new();
+    for _ in 0..3 {
+        let commit_request = BankCommitRequest {
+            entity: "tcp:e2e-query".to_owned(),
+            scope: "tcp-e2e-query-scope".to_owned(),
+            kind_category: SystemHeartbeatRequest::KIND.category(),
+            kind_type_id: SystemHeartbeatRequest::KIND.type_id(),
+            payload_hex: lowercase_hex(&original_payload_bytes),
+        };
+        let commit_input = batpak::encoding::to_bytes(&commit_request)?;
+        let commit_response = call_one(&host, "bank.commit", &commit_input)?;
+        let commit_output = parse_ok(&commit_response)?;
+        let ack: BankCommitAck = batpak::encoding::from_bytes(&commit_output)?;
+        committed.push(ack);
+    }
+
+    let first_query = EventQueryRequest {
+        entity: Some("tcp:e2e-query".to_owned()),
+        scope: Some("tcp-e2e-query-scope".to_owned()),
+        kind_category: Some(SystemHeartbeatRequest::KIND.category()),
+        kind_type_id: Some(SystemHeartbeatRequest::KIND.type_id()),
+        after_global_sequence: None,
+        limit: 2,
+    };
+    let first_response = call_one(
+        &host,
+        "event.query",
+        &batpak::encoding::to_bytes(&first_query)?,
+    )?;
+    let first_output = parse_ok(&first_response)?;
+    let first_page: EventQueryAck = batpak::encoding::from_bytes(&first_output)?;
+
+    assert_eq!(first_page.entries.len(), 2);
+    assert!(first_page.truncated);
+    assert_eq!(
+        first_page.next_after_global_sequence,
+        Some(committed[1].sequence)
+    );
+    assert_eq!(
+        first_page.entries[0].event_id_hex,
+        committed[0].event_id_hex
+    );
+    assert_eq!(first_page.entries[0].global_sequence, committed[0].sequence);
+    assert_eq!(
+        first_page.entries[1].event_id_hex,
+        committed[1].event_id_hex
+    );
+    assert_eq!(first_page.entries[1].global_sequence, committed[1].sequence);
+    for summary in &first_page.entries {
+        assert_eq!(summary.entity, "tcp:e2e-query");
+        assert_eq!(summary.scope, "tcp-e2e-query-scope");
+        assert_eq!(
+            summary.kind_category,
+            SystemHeartbeatRequest::KIND.category()
+        );
+        assert_eq!(summary.kind_type_id, SystemHeartbeatRequest::KIND.type_id());
+        assert_eq!(summary.content_hash_hex.len(), 64);
+    }
+
+    let second_query = EventQueryRequest {
+        after_global_sequence: first_page.next_after_global_sequence,
+        ..first_query
+    };
+    let second_response = call_one(
+        &host,
+        "event.query",
+        &batpak::encoding::to_bytes(&second_query)?,
+    )?;
+    let second_output = parse_ok(&second_response)?;
+    let second_page: EventQueryAck = batpak::encoding::from_bytes(&second_output)?;
+
+    assert_eq!(second_page.entries.len(), 1);
+    assert!(!second_page.truncated);
+    assert_eq!(
+        second_page.next_after_global_sequence,
+        Some(committed[2].sequence)
+    );
+    assert_eq!(
+        second_page.entries[0].global_sequence,
+        committed[2].sequence
+    );
+
+    let get_request = EventGetRequest {
+        event_id_hex: second_page.entries[0].event_id_hex.clone(),
+    };
+    let get_response = call_one(
+        &host,
+        "event.get",
+        &batpak::encoding::to_bytes(&get_request)?,
+    )?;
+    let get_output = parse_ok(&get_response)?;
+    let event: EventGetAck = batpak::encoding::from_bytes(&get_output)?;
+    assert_eq!(event.event_id_hex, committed[2].event_id_hex);
+    assert_eq!(event.sequence, committed[2].sequence);
+    assert_eq!(
+        netbat::decode_hex_str(&event.payload_hex)?,
+        original_payload_bytes
+    );
+    Ok(())
+}
+
+#[test]
+fn event_query_rejects_zero_limit_over_tcp() -> Result<()> {
+    let host = HbatProcess::spawn()?;
+
+    let request = EventQueryRequest {
+        entity: None,
+        scope: None,
+        kind_category: None,
+        kind_type_id: None,
+        after_global_sequence: None,
+        limit: 0,
+    };
+    let response = call_one(&host, "event.query", &batpak::encoding::to_bytes(&request)?)?;
+    let (code, message) = parse_err(&response)?;
+    assert_eq!(code, "handler");
+    assert!(
+        message.to_lowercase().contains("limit"),
+        "expected error mentioning limit, got {message:?}"
+    );
     Ok(())
 }
 

@@ -24,8 +24,8 @@ const MANIFEST_VERSION: u32 = hbat::manifest::MANIFEST_VERSION;
 const RMP_SERDE_VERSION: &str = "1.3.1";
 
 /// NETBAT protocol version this manifest binds to. ADR-0030 reserves
-/// `NETBAT/2 STREAM` for a future substrate workstream — explicitly out
-/// of scope for the Phase 0 manifest.
+/// `NETBAT/2 STREAM` for a future substrate workstream; bounded
+/// traversal today is the `event.query` NETBAT/1 operation.
 const NETBAT_VERSION: &str = "NETBAT/1";
 
 /// `batpak` package version pinned to the workspace release line. The
@@ -126,19 +126,19 @@ mod tests {
             json["canonicalEncoding"]["rmpSerdeVersion"],
             RMP_SERDE_VERSION
         );
-        // 0.7.6 ships 6 events (heartbeat req/ack, bank.commit req/ack,
-        // event.get req/ack) and 3 operations (heartbeat, bank.commit,
-        // event.get).
+        // Current hbat ships 9 events (heartbeat req/ack, bank.commit
+        // req/ack, event.get req/ack, event.query req/summary/ack) and
+        // 4 operations (heartbeat, bank.commit, event.get, event.query).
         assert_eq!(
             json["events"].as_array().expect("events is an array").len(),
-            6
+            9
         );
         assert_eq!(
             json["operations"]
                 .as_array()
                 .expect("operations is an array")
                 .len(),
-            3
+            4
         );
         let op_names: Vec<&str> = json["operations"]
             .as_array()
@@ -149,6 +149,7 @@ mod tests {
         assert!(op_names.contains(&"system.heartbeat"));
         assert!(op_names.contains(&"bank.commit"));
         assert!(op_names.contains(&"event.get"));
+        assert!(op_names.contains(&"event.query"));
         for op in json["operations"].as_array().expect("operations array") {
             assert_eq!(op["errorFixture"]["code"], "unknown_operation");
         }

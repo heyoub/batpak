@@ -27,6 +27,15 @@
     - ART-NETBAT-TESTS
     - ART-NETBAT-WIRE-GOLDENS
     - ART-ADR-NETBAT-CONTRACT
+- id: FLOW-HBAT-EVENT-QUERY
+  summary: event.query accepts bounded domain-neutral filters, validates kind and coordinate axes, pages visible Store index entries in global_sequence order through Store::query_entries_after, and returns metadata-only summaries; callers fetch full payloads with event.get and decode domain envelopes above batpak.
+  artifacts:
+    - ART-HBAT-SOURCE
+    - ART-HBAT-TESTS
+    - ART-HBAT-MANIFEST-EXPORT
+    - ART-STORE-QUERY-TRAVERSAL
+    - ART-STORE-QUERY-TRAVERSAL-TESTS
+    - ART-DX-DOCS
 - id: FLOW-APPEND-OPTIONS
   summary: Append with CAS/idempotency/correlation options, receipt extensions, and optional lane/depth position hints enforces guards before commit while leaving HLC wall/counter and sequence under writer control; committed extension bytes are copied into append and denial receipts before signing, persisted in .fbat frame metadata, and reconstructed for idempotency replay after cold start.
   artifacts:

@@ -1,10 +1,11 @@
-//! `bank.commit` and `event.get` operation surface.
+//! `bank.commit`, `event.get`, and `event.query` operation surface.
 //!
 //! These are the irreducible verbs a NETBAT/1 client needs to do real work:
 //! commit a typed event into the underlying [`batpak::store::Store`] and
-//! retrieve a previously-committed event by its `event_id`.
+//! retrieve a previously-committed event by its `event_id`, or page through
+//! index summaries for a region.
 //!
-//! Both verbs are exposed via [`OperationDescriptor`] constants here, with
+//! All three verbs are exposed via [`OperationDescriptor`] constants here, with
 //! request/response payload types deriving [`batpak::EventPayload`] so the
 //! TypeScript SDK manifest carries their full shape. The actual handlers
 //! capture a runtime `Arc<batpak::store::Store>` and live in
@@ -209,6 +210,141 @@ impl EventPayloadFixture for EventGetAck {
     }
 }
 
+// ─── event.query ────────────────────────────────────────────────────────────
+
+/// Stable operation name for querying stored event summaries.
+pub const EVENT_QUERY_OPERATION_NAME: &str = "event.query";
+/// Schema reference for the request payload.
+pub const EVENT_QUERY_INPUT_SCHEMA_REF: &str = "event.query.request";
+/// Schema reference for the ack payload.
+pub const EVENT_QUERY_OUTPUT_SCHEMA_REF: &str = "event.query.ack";
+/// Schema reference for one summary embedded in `event.query` acks.
+pub const EVENT_QUERY_SUMMARY_SCHEMA_REF: &str = "event.query.summary";
+/// Receipt kind emitted for `event.query` calls.
+pub const EVENT_QUERY_RECEIPT_KIND: &str = "receipt.event.query.v1";
+/// Maximum number of event summaries returned by one `event.query` call.
+pub const EVENT_QUERY_MAX_LIMIT: u64 = 1024;
+
+/// Operation descriptor for `event.query`.
+pub const EVENT_QUERY_DESCRIPTOR: OperationDescriptor = OperationDescriptor::new(
+    EVENT_QUERY_OPERATION_NAME,
+    EffectClass::Inspect,
+    EVENT_QUERY_INPUT_SCHEMA_REF,
+    EVENT_QUERY_OUTPUT_SCHEMA_REF,
+    EVENT_QUERY_RECEIPT_KIND,
+);
+
+/// Wire input for [`EVENT_QUERY_DESCRIPTOR`].
+///
+/// Omitted filters match all values on that axis. `after_global_sequence`
+/// is an exclusive cursor: a value of `Some(10)` returns only events with
+/// `global_sequence > 10`; `None` starts from the beginning of the region.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, EventPayload)]
+#[batpak(category = 0xF, type_id = 0xA22)]
+pub struct EventQueryRequest {
+    /// Optional entity namespace prefix. Supplying both `entity` and
+    /// `scope` gives coordinate-level traversal.
+    pub entity: Option<String>,
+    /// Optional exact scope filter.
+    pub scope: Option<String>,
+    /// Optional event-kind category filter.
+    pub kind_category: Option<u8>,
+    /// Optional event-kind type id. Requires `kind_category` when present.
+    pub kind_type_id: Option<u16>,
+    /// Exclusive global-sequence cursor for pagination.
+    pub after_global_sequence: Option<u64>,
+    /// Maximum number of summaries to return. Values above
+    /// [`EVENT_QUERY_MAX_LIMIT`] are capped by the handler.
+    pub limit: u64,
+}
+
+/// One payload-free event summary returned by [`EventQueryAck`].
+///
+/// This intentionally excludes `payload_hex`, receipt extensions, and any
+/// receipt-kind field so query pages remain metadata-only.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, EventPayload)]
+#[batpak(category = 0xF, type_id = 0xA23)]
+pub struct EventSummary {
+    /// `event_id` as 32-char lowercase hex.
+    pub event_id_hex: String,
+    /// Globally monotonic commit-order sequence.
+    pub global_sequence: u64,
+    /// HLC wall-clock component in milliseconds.
+    pub wall_ms: u64,
+    /// Per-entity HLC logical clock.
+    pub clock: u32,
+    /// Correlation id as 32-char lowercase hex.
+    pub correlation_id_hex: String,
+    /// Causation id as 32-char lowercase hex, or `None` when no causation
+    /// is recorded.
+    pub causation_id_hex: Option<String>,
+    /// Event-kind upper 4 bits.
+    pub kind_category: u8,
+    /// Event-kind lower 12 bits.
+    pub kind_type_id: u16,
+    /// Coordinate entity at commit time.
+    pub entity: String,
+    /// Coordinate scope at commit time.
+    pub scope: String,
+    /// Lowercase hex of the blake3 content hash of the payload bytes.
+    pub content_hash_hex: String,
+}
+
+/// Wire output for [`EVENT_QUERY_DESCRIPTOR`].
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, EventPayload)]
+#[batpak(category = 0xF, type_id = 0xA24)]
+pub struct EventQueryAck {
+    /// Metadata-only summaries for the requested page.
+    pub entries: Vec<EventSummary>,
+    /// Cursor to pass as the next request's `after_global_sequence`, or
+    /// `None` when this page is empty.
+    pub next_after_global_sequence: Option<u64>,
+    /// True when the bounded page filled and another page may exist.
+    pub truncated: bool,
+}
+
+impl EventPayloadFixture for EventQueryRequest {
+    fn fixture_value() -> Self {
+        Self {
+            entity: Some("fixture:bank".to_owned()),
+            scope: Some("fixture-scope".to_owned()),
+            kind_category: Some(0xF),
+            kind_type_id: Some(0xA01),
+            after_global_sequence: Some(41),
+            limit: 2,
+        }
+    }
+}
+
+impl EventPayloadFixture for EventSummary {
+    fn fixture_value() -> Self {
+        Self {
+            event_id_hex: "0123456789abcdef0123456789abcdef".to_owned(),
+            global_sequence: 42,
+            wall_ms: 1_700_000_000_000,
+            clock: 7,
+            correlation_id_hex: "00000000000000000000000000000000".to_owned(),
+            causation_id_hex: None,
+            kind_category: 0xF,
+            kind_type_id: 0xA01,
+            entity: "fixture:bank".to_owned(),
+            scope: "fixture-scope".to_owned(),
+            content_hash_hex: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                .to_owned(),
+        }
+    }
+}
+
+impl EventPayloadFixture for EventQueryAck {
+    fn fixture_value() -> Self {
+        Self {
+            entries: vec![EventSummary::fixture_value()],
+            next_after_global_sequence: Some(42),
+            truncated: false,
+        }
+    }
+}
+
 // ─── Manifest registry submissions ──────────────────────────────────────────
 //
 // One `inventory::submit!` per `EventPayload`-deriving type. The
@@ -300,6 +436,65 @@ inventory::submit! {
     }
 }
 
+inventory::submit! {
+    crate::manifest::EventDescriptorRegistration {
+        rust_type: "hbat::bank::EventQueryRequest",
+        ts_name: "EventQueryRequest",
+        schema_ref: EVENT_QUERY_INPUT_SCHEMA_REF,
+        kind_bits: EventQueryRequest::KIND.as_raw_u16(),
+        fields: &[
+            crate::manifest::FieldRow { wire_name: "entity", type_token: "option<string>", order: 0 },
+            crate::manifest::FieldRow { wire_name: "scope", type_token: "option<string>", order: 1 },
+            crate::manifest::FieldRow { wire_name: "kind_category", type_token: "option<u8>", order: 2 },
+            crate::manifest::FieldRow { wire_name: "kind_type_id", type_token: "option<u16>", order: 3 },
+            crate::manifest::FieldRow { wire_name: "after_global_sequence", type_token: "option<u64-safe>", order: 4 },
+            crate::manifest::FieldRow { wire_name: "limit", type_token: "u64-safe", order: 5 },
+        ],
+        fixture_bytes: || batpak::encoding::to_bytes(&EventQueryRequest::fixture_value()).ok(),
+        fixture_json: || serde_json::to_value(EventQueryRequest::fixture_value()).ok(),
+    }
+}
+
+inventory::submit! {
+    crate::manifest::EventDescriptorRegistration {
+        rust_type: "hbat::bank::EventSummary",
+        ts_name: "EventSummary",
+        schema_ref: EVENT_QUERY_SUMMARY_SCHEMA_REF,
+        kind_bits: EventSummary::KIND.as_raw_u16(),
+        fields: &[
+            crate::manifest::FieldRow { wire_name: "event_id_hex", type_token: "u128-hex", order: 0 },
+            crate::manifest::FieldRow { wire_name: "global_sequence", type_token: "u64-safe", order: 1 },
+            crate::manifest::FieldRow { wire_name: "wall_ms", type_token: "u64-millis", order: 2 },
+            crate::manifest::FieldRow { wire_name: "clock", type_token: "u32", order: 3 },
+            crate::manifest::FieldRow { wire_name: "correlation_id_hex", type_token: "u128-hex", order: 4 },
+            crate::manifest::FieldRow { wire_name: "causation_id_hex", type_token: "option<string>", order: 5 },
+            crate::manifest::FieldRow { wire_name: "kind_category", type_token: "u8", order: 6 },
+            crate::manifest::FieldRow { wire_name: "kind_type_id", type_token: "u16", order: 7 },
+            crate::manifest::FieldRow { wire_name: "entity", type_token: "string", order: 8 },
+            crate::manifest::FieldRow { wire_name: "scope", type_token: "string", order: 9 },
+            crate::manifest::FieldRow { wire_name: "content_hash_hex", type_token: "blake3-32-hex", order: 10 },
+        ],
+        fixture_bytes: || batpak::encoding::to_bytes(&EventSummary::fixture_value()).ok(),
+        fixture_json: || serde_json::to_value(EventSummary::fixture_value()).ok(),
+    }
+}
+
+inventory::submit! {
+    crate::manifest::EventDescriptorRegistration {
+        rust_type: "hbat::bank::EventQueryAck",
+        ts_name: "EventQueryAck",
+        schema_ref: EVENT_QUERY_OUTPUT_SCHEMA_REF,
+        kind_bits: EventQueryAck::KIND.as_raw_u16(),
+        fields: &[
+            crate::manifest::FieldRow { wire_name: "entries", type_token: "array<EventSummary>", order: 0 },
+            crate::manifest::FieldRow { wire_name: "next_after_global_sequence", type_token: "option<u64-safe>", order: 1 },
+            crate::manifest::FieldRow { wire_name: "truncated", type_token: "bool", order: 2 },
+        ],
+        fixture_bytes: || batpak::encoding::to_bytes(&EventQueryAck::fixture_value()).ok(),
+        fixture_json: || serde_json::to_value(EventQueryAck::fixture_value()).ok(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -342,9 +537,37 @@ mod tests {
     }
 
     #[test]
+    fn event_query_fixture_request_roundtrips() -> Result<()> {
+        let v = EventQueryRequest::fixture_value();
+        let bytes = batpak::encoding::to_bytes(&v)?;
+        let decoded: EventQueryRequest = batpak::encoding::from_bytes(&bytes)?;
+        assert_eq!(decoded, v);
+        Ok(())
+    }
+
+    #[test]
+    fn event_query_fixture_summary_roundtrips() -> Result<()> {
+        let v = EventSummary::fixture_value();
+        let bytes = batpak::encoding::to_bytes(&v)?;
+        let decoded: EventSummary = batpak::encoding::from_bytes(&bytes)?;
+        assert_eq!(decoded, v);
+        Ok(())
+    }
+
+    #[test]
+    fn event_query_fixture_ack_roundtrips() -> Result<()> {
+        let v = EventQueryAck::fixture_value();
+        let bytes = batpak::encoding::to_bytes(&v)?;
+        let decoded: EventQueryAck = batpak::encoding::from_bytes(&bytes)?;
+        assert_eq!(decoded, v);
+        Ok(())
+    }
+
+    #[test]
     fn descriptors_validate() -> Result<()> {
         BANK_COMMIT_DESCRIPTOR.validate()?;
         EVENT_GET_DESCRIPTOR.validate()?;
+        EVENT_QUERY_DESCRIPTOR.validate()?;
         Ok(())
     }
 
@@ -355,6 +578,9 @@ mod tests {
             BankCommitAck::KIND.as_raw_u16(),
             EventGetRequest::KIND.as_raw_u16(),
             EventGetAck::KIND.as_raw_u16(),
+            EventQueryRequest::KIND.as_raw_u16(),
+            EventSummary::KIND.as_raw_u16(),
+            EventQueryAck::KIND.as_raw_u16(),
         ];
         let mut sorted = kinds;
         sorted.sort_unstable();

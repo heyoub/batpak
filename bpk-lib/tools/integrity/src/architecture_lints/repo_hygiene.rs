@@ -11,6 +11,7 @@ pub(super) fn check(repo_root: &Path, tracked_files: &[PathBuf]) -> Result<()> {
     check_for_absolute_paths(repo_root, tracked_files)?;
     check_for_stale_references(repo_root, tracked_files)?;
     check_release_hardening_patterns(repo_root, tracked_files)?;
+    check_bidirectional_substrate_lane_terms(repo_root, tracked_files)?;
     check_boundary_scripts_only(repo_root, tracked_files)?;
     check_removed_script_references(repo_root, tracked_files)?;
     Ok(())
@@ -333,6 +334,60 @@ fn check_release_hardening_patterns(repo_root: &Path, tracked_files: &[PathBuf])
             !content.contains("test-support"),
             format!("structural-check: stale `test-support` reference found in {rel}"),
         )?;
+    }
+    Ok(())
+}
+
+fn check_bidirectional_substrate_lane_terms(
+    repo_root: &Path,
+    tracked_files: &[PathBuf],
+) -> Result<()> {
+    let forbidden_substrate_ops = [
+        "mission.replay",
+        "moonwalker.query",
+        "workflow.events",
+        "receipt.walk",
+    ];
+    for path in tracked_files {
+        let rel = relative(repo_root, path);
+        if rel == "tools/integrity/src/architecture_lints/repo_hygiene.rs" {
+            continue;
+        }
+        let ext = path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .unwrap_or_default();
+        let is_substrate_wire_surface = rel.starts_with("crates/hbat/")
+            || rel.starts_with("crates/netbat/")
+            || rel.starts_with("crates/syncbat/")
+            || rel.starts_with("bpk-ts/");
+        if is_substrate_wire_surface && matches!(ext, "rs" | "ts" | "json" | "md") {
+            let content =
+                fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
+            for op in forbidden_substrate_ops {
+                ensure(
+                    !content.contains(op),
+                    format!(
+                        "domain-specific operation `{op}` found in substrate wire surface {rel}; use domain-neutral event.query/event.get and decode above batpak"
+                    ),
+                )?;
+            }
+        }
+
+        let is_live_doc = matches!(
+            rel.as_str(),
+            "REPLAY.md" | "INTEGRATION.md" | "EVENTS.md" | "TERMINALS.md" | "CONFORMANCE.md"
+        );
+        if is_live_doc && ext == "md" {
+            let content =
+                fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
+            ensure(
+                !content.contains("after_sequence"),
+                format!(
+                    "ambiguous traversal cursor `after_sequence` found in {rel}; say after_global_sequence"
+                ),
+            )?;
+        }
     }
     Ok(())
 }

@@ -1,15 +1,16 @@
 /**
  * 0.7.6 live integration spike.
  *
- * Boots against a running `hbat` on `--port N` and exercises ALL three
+ * Boots against a running `hbat` on `--port N` and exercises ALL four
  * operations in sequence:
  *
  *   1. `system.heartbeat`  — proves the wire is open.
  *   2. `bank.commit`        — appends a typed event, returns AppendReceipt.
- *   3. `event.get`          — reads the event back by event_id; the
+ *   3. `event.query`        — walks metadata by coordinate and global sequence.
+ *   4. `event.get`          — reads the event back by event_id; the
  *                              payload bytes round-trip back into the
  *                              original Rust-typed struct via Effect 4.
- *   4. Error path           — unknown_operation returns typed NetbatError.
+ *   5. Error path           — unknown_operation returns typed NetbatError.
  *
  * Boot `hbat` separately:
  *
@@ -30,10 +31,13 @@ import {
   BankCommitRequest,
   EventGetAck,
   EventGetRequest,
+  EventQueryAck,
+  EventQueryRequest,
   SystemHeartbeatAck,
   SystemHeartbeatRequest,
   BANK_COMMIT,
   EVENT_GET,
+  EVENT_QUERY,
   SYSTEM_HEARTBEAT,
 } from "@batpak/generated";
 
@@ -156,6 +160,30 @@ async function runEventGet(
   }
 }
 
+async function runEventQuery(host: string, port: number): Promise<typeof EventQueryAck.Type> {
+  const socket = await openSocket(host, port);
+  try {
+    const request: typeof EventQueryRequest.Type = {
+      entity: "spike:demo",
+      scope: "spike-scope",
+      kind_category: 15,
+      kind_type_id: 2561,
+      after_global_sequence: null,
+      limit: 16,
+    };
+    const payload = encodeBytes(EventQueryRequest, request);
+    const response = await call(socket, EVENT_QUERY.name, payload);
+    if (response.kind !== "netbat-ok") {
+      throw new Error(
+        `event.query: expected OK, got ${response.kind} ${response.code}: ${response.message}`,
+      );
+    }
+    return decodeBytes(EventQueryAck, response.output);
+  } finally {
+    socket.end();
+  }
+}
+
 async function runUnknownOperationPath(
   host: string,
   port: number,
@@ -194,8 +222,23 @@ async function main(): Promise<void> {
     throw new Error(`bank.commit: event_id_hex length=${commit.event_id_hex.length}, want 32`);
   }
 
-  // 3. event.get with the just-committed id.
-  const event = await runEventGet(host, port, commit.event_id_hex);
+  // 3. event.query over the coordinate/kind, paged by global sequence.
+  const page = await runEventQuery(host, port);
+  console.log(
+    `spike: event.query OK { entries=${page.entries.length}, truncated=${page.truncated}, next_after_global_sequence=${page.next_after_global_sequence} }`,
+  );
+  const summary = page.entries.find((entry) => entry.event_id_hex === commit.event_id_hex);
+  if (!summary) {
+    throw new Error("event.query: did not enumerate the just-committed event");
+  }
+  if (summary.global_sequence !== commit.sequence) {
+    throw new Error(
+      `event.query: global_sequence ${summary.global_sequence} did not match bank.commit sequence ${commit.sequence}`,
+    );
+  }
+
+  // 4. event.get with the id discovered through event.query.
+  const event = await runEventGet(host, port, summary.event_id_hex);
   console.log(
     `spike: event.get OK { event_id_hex=${event.event_id_hex}, entity=${event.entity}, scope=${event.scope}, kind=${event.kind_category}/${event.kind_type_id} }`,
   );
@@ -206,7 +249,7 @@ async function main(): Promise<void> {
     throw new Error("event.get: coordinate mismatch with bank.commit");
   }
 
-  // 4. Decode the original payload back through the SystemHeartbeatRequest
+  // 5. Decode the original payload back through the SystemHeartbeatRequest
   //    schema — proves the bytes round-trip through commit + get + Effect 4.
   const recovered = decodeBytes(
     SystemHeartbeatRequest,
@@ -219,7 +262,7 @@ async function main(): Promise<void> {
     `spike: event.get payload decoded back through SystemHeartbeatRequest schema { nonce=${JSON.stringify(recovered.nonce)} }`,
   );
 
-  // 5. Error path.
+  // 6. Error path.
   const err = await runUnknownOperationPath(host, port);
   console.log(
     `spike: unknown_operation ERR { code=${err.code}, message=${JSON.stringify(err.message)} }`,

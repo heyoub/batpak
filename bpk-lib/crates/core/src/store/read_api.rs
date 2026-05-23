@@ -86,6 +86,28 @@ impl<State> Store<State> {
         self.index.query(region)
     }
 
+    /// READ: query a bounded page of events by Region in ascending
+    /// `global_sequence` order.
+    ///
+    /// Pass `None` for the first page. Pass the last returned entry's
+    /// [`IndexEntry::global_sequence`] as `Some(after_global_sequence)` to
+    /// resume strictly after that entry.
+    #[must_use]
+    pub fn query_entries_after(
+        &self,
+        region: &Region,
+        after_global_sequence: Option<u64>,
+        limit: usize,
+    ) -> Vec<IndexEntry> {
+        let after_seq = after_global_sequence.unwrap_or(0);
+        let started = after_global_sequence.is_some();
+        self.index
+            .query_hits_after(region, after_seq, started, limit)
+            .into_iter()
+            .filter_map(|hit| self.index.upgrade_hit(hit))
+            .collect()
+    }
+
     /// READ: walk hash chain ancestors.
     pub fn walk_ancestors(
         &self,

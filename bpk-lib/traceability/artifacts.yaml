@@ -157,6 +157,22 @@
     - crates/netbat/tests/golden/response_ok.hex
     - crates/netbat/tests/golden/response_ok_hi.hex
     - crates/netbat/tests/golden/response_err_malformed.hex
+- id: ART-HBAT-SOURCE
+  kind: source
+  paths:
+    - crates/hbat/src/lib.rs
+    - crates/hbat/src/bank.rs
+    - crates/hbat/src/handlers.rs
+    - crates/hbat/src/manifest.rs
+    - crates/hbat/src/main.rs
+- id: ART-HBAT-TESTS
+  kind: tests
+  paths:
+    - crates/hbat/tests/tcp_e2e.rs
+- id: ART-HBAT-MANIFEST-EXPORT
+  kind: tool
+  paths:
+    - tools/xtask/src/commands/export_ts_manifest.rs
 - id: ART-ADR-SYNCBAT-CONTRACT
   kind: adr
   paths:
@@ -252,6 +268,15 @@
   kind: source
   paths:
     - crates/core/src/store/index/mod.rs
+- id: ART-STORE-QUERY-TRAVERSAL
+  kind: source
+  paths:
+    - crates/core/src/store/read_api.rs
+    - crates/core/src/store/index/query.rs
+- id: ART-STORE-QUERY-TRAVERSAL-TESTS
+  kind: tests
+  paths:
+    - crates/core/tests/read_api_pagination.rs
 - id: ART-STORE-WRITER
   kind: source
   paths:
@@ -571,6 +596,10 @@
     - FACTORY.md
     - MODEL.md
     - INVARIANTS.md
+    - TERMINALS.md
+    - EVENTS.md
+    - REPLAY.md
+    - INTEGRATION.md
     - CONFORMANCE.md
     - CONTRIBUTING.md
     - AGENTS.md

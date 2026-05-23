@@ -37,7 +37,12 @@ const SUPPORTED_FIELD_TYPES = new Set<string>([
   "u64-millis",
   "i64-microseconds",
   "option<string>",
+  "option<u8>",
+  "option<u16>",
+  "option<u64-safe>",
+  "bool",
   "map<string,string>",
+  "array<EventSummary>",
   // Branded hex tokens. Each emits a Schema.String guarded by a pattern
   // refinement and a Schema.brand("…") so passing a wrong hex shape
   // (e.g. an event_id where a content hash was expected) fails at the
@@ -460,8 +465,18 @@ function schemaForToken(token: string): string {
       return checkedNumber(SAFE_MIN, SAFE_MAX);
     case "option<string>":
       return "Schema.NullOr(Schema.String)";
+    case "option<u8>":
+      return `Schema.NullOr(${checkedNumber(0, 255)})`;
+    case "option<u16>":
+      return `Schema.NullOr(${checkedNumber(0, 65535)})`;
+    case "option<u64-safe>":
+      return `Schema.NullOr(${checkedNumber(0, SAFE_MAX)})`;
+    case "bool":
+      return "Schema.Boolean";
     case "map<string,string>":
       return "Schema.Record(Schema.String, Schema.String)";
+    case "array<EventSummary>":
+      return "Schema.Array(EventSummary)";
     case "u128-hex":
       return brandedHex("EventIdHex", 32);
     case "blake3-32-hex":
@@ -516,8 +531,16 @@ export function tsTypeForToken(token: string): string {
       return "number";
     case "option<string>":
       return "string | null";
+    case "option<u8>":
+    case "option<u16>":
+    case "option<u64-safe>":
+      return "number | null";
+    case "bool":
+      return "boolean";
     case "map<string,string>":
       return "Record<string, string>";
+    case "array<EventSummary>":
+      return "Array<EventSummary>";
     case "u128-hex":
       return 'string & Schema.Brand<"EventIdHex">';
     case "blake3-32-hex":

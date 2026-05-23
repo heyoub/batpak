@@ -18,6 +18,23 @@ batpak ships as an embedded event substrate, not as a hosted database, queue, OR
 
 Async hosts may integrate with batpak by moving blocking work to their own runtime boundary. The substrate remains sync-first.
 
+## Bidirectional Terminal Lane
+
+The reference NETBAT terminal is a loop, not just a mailbox:
+
+| Direction | Operation | Meaning |
+| --- | --- | --- |
+| Write | `bank.commit` | append a substrate event and receive a commit receipt |
+| Point | `event.get` | read a known event id and its canonical payload bytes |
+| Walk | `event.query` | page bounded substrate summaries for replay and audit |
+
+`event.query` is domain-neutral. It filters on substrate coordinates, kind
+category/type, and `global_sequence`; it does not know Moonwalker missions,
+workflows, movement graphs, or receipt-body taxonomies.
+
+`entity` filters use `Region::entity`, which is prefix-based. Supplying both
+`entity` and `scope` gives the normal coordinate-level replay shape.
+
 ## Platform Contact
 
 Filesystem, clock, lock, sync, and mmap contact should route through the platform boundary where the store owns that behavior.
@@ -25,4 +42,3 @@ Filesystem, clock, lock, sync, and mmap contact should route through the platfor
 ## Larger Systems
 
 Use circuits and terminals to connect batteries. Do not hide ownership by letting one battery mutate another battery's state through an unmodeled route.
-

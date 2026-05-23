@@ -174,6 +174,14 @@ fn build_core(store: &Arc<batpak::store::Store>) -> Result<syncbat::Core> {
         )
         .map_err(|error| anyhow!("register event.get: {error}"))?;
     builder
+        .register(
+            hbat::EVENT_QUERY_DESCRIPTOR.clone(),
+            hbat::EventQueryHandler {
+                store: Arc::clone(store),
+            },
+        )
+        .map_err(|error| anyhow!("register event.query: {error}"))?;
+    builder
         .build()
         .map_err(|error| anyhow!("build syncbat core: {error}"))
 }

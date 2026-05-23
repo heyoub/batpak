@@ -9,15 +9,19 @@
 
 use std::sync::Arc;
 
-use batpak::coordinate::Coordinate;
+use batpak::coordinate::{Coordinate, Region};
 use batpak::event::EventKind;
+use batpak::store::index::IndexEntry;
 use batpak::store::{AppendOptions, AppendReceipt, BatchAppendItem, CausationRef, Store};
 // Hex codec is the canonical netbat implementation; hbat does not
 // re-roll its own. See netbat::transport::hex.
 use netbat::{decode_hex_str, encode_hex_str};
 use syncbat::{Ctx, Handler, HandlerError, HandlerResult};
 
-use crate::bank::{BankCommitAck, BankCommitRequest, EventGetAck, EventGetRequest};
+use crate::bank::{
+    BankCommitAck, BankCommitRequest, EventGetAck, EventGetRequest, EventQueryAck,
+    EventQueryRequest, EventSummary, EVENT_QUERY_MAX_LIMIT,
+};
 
 // ─── bank.commit handler ────────────────────────────────────────────────────
 
@@ -159,6 +163,119 @@ fn handle_event_get(store: &Store, input: &[u8]) -> HandlerResult {
 
     batpak::encoding::to_bytes(&ack)
         .map_err(|error| HandlerError::failed(format!("encode ack: {error}")))
+}
+
+// ─── event.query handler ────────────────────────────────────────────────────
+
+/// Handler binding for [`crate::bank::EVENT_QUERY_DESCRIPTOR`].
+pub struct EventQueryHandler {
+    /// Shared handle to the BatPAK store. Cloning the `Arc` is cheap.
+    pub store: Arc<Store>,
+}
+
+impl Handler for EventQueryHandler {
+    fn handle(&mut self, input: &[u8], _cx: &mut Ctx<'_>) -> HandlerResult {
+        handle_event_query(&self.store, input)
+    }
+}
+
+fn handle_event_query(store: &Store, input: &[u8]) -> HandlerResult {
+    let request: EventQueryRequest = batpak::encoding::from_bytes(input)
+        .map_err(|error| HandlerError::invalid_input(format!("decode request: {error}")))?;
+
+    if request.limit == 0 {
+        return Err(HandlerError::invalid_input("limit must be greater than 0"));
+    }
+    let bounded_limit = request.limit.min(EVENT_QUERY_MAX_LIMIT);
+    let limit = usize::try_from(bounded_limit)
+        .map_err(|error| HandlerError::invalid_input(format!("limit: {error}")))?;
+
+    let region = event_query_region(&request)?;
+    let entries = query_event_summaries(
+        store,
+        &region,
+        request.after_global_sequence,
+        limit.saturating_add(1),
+    );
+    let truncated = entries.len() > limit;
+    let entries: Vec<EventSummary> = entries.into_iter().take(limit).collect();
+    let next_after_global_sequence = entries.last().map(|summary| summary.global_sequence);
+
+    let ack = EventQueryAck {
+        entries,
+        next_after_global_sequence,
+        truncated,
+    };
+
+    batpak::encoding::to_bytes(&ack)
+        .map_err(|error| HandlerError::failed(format!("encode ack: {error}")))
+}
+
+fn event_query_region(request: &EventQueryRequest) -> Result<Region, HandlerError> {
+    if let Some(entity) = request.entity.as_deref() {
+        Coordinate::new(entity, "hbat-query")
+            .map_err(|error| HandlerError::invalid_input(format!("entity: {error}")))?;
+    }
+    if let Some(scope) = request.scope.as_deref() {
+        Coordinate::new("hbat:query", scope)
+            .map_err(|error| HandlerError::invalid_input(format!("scope: {error}")))?;
+    }
+
+    let mut region = request
+        .entity
+        .as_deref()
+        .map_or_else(Region::all, Region::entity);
+
+    if let Some(scope) = request.scope.as_deref() {
+        region = region.with_scope(scope);
+    }
+
+    match (request.kind_category, request.kind_type_id) {
+        (Some(category), Some(type_id)) => {
+            let kind = EventKind::try_custom(category, type_id)
+                .map_err(|error| HandlerError::invalid_input(format!("event kind: {error:?}")))?;
+            Ok(region.with_fact(batpak::coordinate::KindFilter::Exact(kind)))
+        }
+        (Some(category), None) if category <= 0xF => Ok(region.with_fact_category(category)),
+        (Some(category), None) => Err(HandlerError::invalid_input(format!(
+            "kind_category must fit in 4 bits, got {category}"
+        ))),
+        (None, Some(_)) => Err(HandlerError::invalid_input(
+            "kind_type_id requires kind_category",
+        )),
+        (None, None) => Ok(region),
+    }
+}
+
+fn query_event_summaries(
+    store: &Store,
+    region: &Region,
+    after_global_sequence: Option<u64>,
+    limit: usize,
+) -> Vec<EventSummary> {
+    store
+        .query_entries_after(region, after_global_sequence, limit)
+        .into_iter()
+        .map(|entry| index_entry_to_query_summary(&entry))
+        .collect()
+}
+
+fn index_entry_to_query_summary(entry: &IndexEntry) -> EventSummary {
+    EventSummary {
+        event_id_hex: format!("{:032x}", entry.event_id()),
+        global_sequence: entry.global_sequence(),
+        wall_ms: entry.wall_ms(),
+        clock: entry.clock(),
+        correlation_id_hex: format!("{:032x}", entry.correlation_id()),
+        causation_id_hex: entry
+            .causation_id()
+            .map(|causation_id| format!("{causation_id:032x}")),
+        kind_category: entry.event_kind().category(),
+        kind_type_id: entry.event_kind().type_id(),
+        entity: entry.coord().entity().to_owned(),
+        scope: entry.coord().scope().to_owned(),
+        content_hash_hex: encode_hex_str(&entry.hash_chain().event_hash),
+    }
 }
 
 #[cfg(test)]
