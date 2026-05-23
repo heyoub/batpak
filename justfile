@@ -88,6 +88,12 @@ host-dev:
 host-loop:
     cd bpk-lib; cargo xtask host-loop
 
+ledger-list:
+    cd bpk-lib; cargo xtask factory-ledger list
+
+ledger-run command *args:
+    cd bpk-lib; cargo xtask factory-ledger run -- {{command}} {{args}}
+
 ci-fast:
     cd bpk-lib; cargo xtask ci-fast
 

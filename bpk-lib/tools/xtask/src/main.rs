@@ -100,6 +100,8 @@ enum XtaskCommand {
     HostDev(HostDevArgs),
     /// Prove the living TS audit-loop: seed, restart hbat, replay-only.
     HostLoop,
+    /// Opt-in factory command proof ledger backed by a local BatPAK store.
+    FactoryLedger(FactoryLedgerArgs),
     /// Copy a golden batpak starter template into a local project directory.
     Scaffold(ScaffoldArgs),
     Platform(PlatformArgs),
@@ -283,6 +285,95 @@ pub(crate) struct ScaffoldArgs {
     path: Option<PathBuf>,
     #[arg(long)]
     force: bool,
+}
+
+#[derive(Args, Clone)]
+pub(crate) struct FactoryLedgerArgs {
+    #[command(subcommand)]
+    pub(crate) command: FactoryLedgerCommand,
+}
+
+#[derive(Subcommand, Clone)]
+pub(crate) enum FactoryLedgerCommand {
+    /// Append one ledger event explicitly (tests and future hooks).
+    Record(FactoryLedgerRecordArgs),
+    /// Query recent ledger events in global_sequence order.
+    List(FactoryLedgerListArgs),
+    /// Run a command, recording started/completed/failed proof events.
+    Run(FactoryLedgerRunArgs),
+}
+
+#[derive(Subcommand, Clone)]
+pub(crate) enum FactoryLedgerRecordCommand {
+    Started(FactoryLedgerRecordStartedArgs),
+    Completed(FactoryLedgerRecordCompletedArgs),
+    Failed(FactoryLedgerRecordFailedArgs),
+}
+
+#[derive(Args, Clone)]
+pub(crate) struct FactoryLedgerRecordArgs {
+    #[command(subcommand)]
+    pub(crate) command: FactoryLedgerRecordCommand,
+}
+
+#[derive(Args, Clone)]
+pub(crate) struct FactoryLedgerRecordStartedArgs {
+    #[arg(long)]
+    pub(crate) run_id: String,
+    #[arg(long)]
+    pub(crate) command: String,
+    #[arg(long)]
+    pub(crate) args: Vec<String>,
+    #[arg(long)]
+    pub(crate) cwd: Option<String>,
+    #[arg(long)]
+    pub(crate) branch: Option<String>,
+    #[arg(long)]
+    pub(crate) head: Option<String>,
+    #[arg(long)]
+    pub(crate) started_ms: Option<u64>,
+}
+
+#[derive(Args, Clone)]
+pub(crate) struct FactoryLedgerRecordCompletedArgs {
+    #[arg(long)]
+    pub(crate) run_id: String,
+    #[arg(long)]
+    pub(crate) command: String,
+    #[arg(long, default_value_t = 0)]
+    pub(crate) status_code: i32,
+    #[arg(long)]
+    pub(crate) duration_ms: u64,
+    #[arg(long)]
+    pub(crate) completed_ms: Option<u64>,
+}
+
+#[derive(Args, Clone)]
+pub(crate) struct FactoryLedgerRecordFailedArgs {
+    #[arg(long)]
+    pub(crate) run_id: String,
+    #[arg(long)]
+    pub(crate) command: String,
+    #[arg(long)]
+    pub(crate) status_code: i32,
+    #[arg(long)]
+    pub(crate) duration_ms: u64,
+    #[arg(long, default_value = "")]
+    pub(crate) stderr_tail: String,
+    #[arg(long)]
+    pub(crate) completed_ms: Option<u64>,
+}
+
+#[derive(Args, Clone)]
+pub(crate) struct FactoryLedgerListArgs {
+    #[arg(long, default_value_t = 50)]
+    pub(crate) limit: usize,
+}
+
+#[derive(Args, Clone, Debug)]
+pub(crate) struct FactoryLedgerRunArgs {
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true, required = true)]
+    pub(crate) command: Vec<String>,
 }
 
 #[derive(Args, Clone)]
@@ -471,6 +562,7 @@ fn main() -> Result<()> {
         XtaskCommand::ExportTsManifest(args) => commands::export_ts_manifest(&args),
         XtaskCommand::HostDev(args) => commands::host_dev(&args),
         XtaskCommand::HostLoop => commands::host_loop(),
+        XtaskCommand::FactoryLedger(args) => commands::factory_ledger(args),
         XtaskCommand::Scaffold(args) => commands::scaffold(args),
         XtaskCommand::Platform(args) => commands::platform(args),
         XtaskCommand::Fuzz(args) => commands::fuzz(args),

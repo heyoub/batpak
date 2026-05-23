@@ -48,6 +48,8 @@ At repo root, agents use `just`. Raw `cargo`, `npm`, and `pnpm` are implementati
 - `just inspect` — structural doctrine, boundary checks, architecture IR, and ast-grep calipers
 - `just host-dev` — host profile end-to-end proof after hbat, manifest, or TS changes
 - `just host-loop` — living audit-loop proof after audit-loop example changes
+- `just ledger-list` — list recent factory command proof events from the opt-in ledger store
+- `just ledger-run -- <command>` — run a command through the opt-in factory ledger wrapper
 - `just ci-fast` — early PR signal (format, clippy, checks, tests, dependency gates, traceability, structural)
 - `just verify` — canonical preflight proof bundle
 - `just ci-windows` — native Windows surface compatibility lane
@@ -61,6 +63,9 @@ Implementation commands still live under `bpk-lib/` and remain valid when a task
 
 - `cd bpk-lib && cargo xtask doctor`
 - `cd bpk-lib && cargo xtask install-hooks`
+- `cd bpk-lib && cargo xtask host-loop`
+- `cd bpk-lib && cargo xtask factory-ledger list`
+- `cd bpk-lib && cargo xtask factory-ledger run -- <command> [args...]`
 - `cd bpk-lib && cargo xtask ci-fast`       — early PR signal; version pins, format, clippy, checks, nextest, deny/audit, traceability, structural
 - `cd bpk-lib && cargo xtask preflight`     — canonical devcontainer verification bundle for CI + coverage + docs from one in-container session. Prefer this over bare `cargo xtask ci` for pushes that touch store internals, xtask itself, or CI config, but do not describe it as the full proof chain unless you also run the extra hard gates (`mutants smoke`, perf gates, targeted fuzz/chaos).
 - `cd bpk-lib && cargo xtask ci`            — full merge bundle (`ci-fast` plus doctor, templates, public-api, package-leak-scan, bench compile, unused-deps advisory)

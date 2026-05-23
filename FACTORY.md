@@ -38,12 +38,15 @@ just list
 just inspect
 just host-dev
 just host-loop
+just ledger-list
 just verify
 just seal
 just ship dry
 ```
 
 `just` is the command counter. `xtask` is the factory machinery. `ast-grep` is the semantic inspection camera. Tests inspect behavior. Receipts preserve evidence.
+
+The opt-in factory ledger (`just ledger-run -- …`, `just ledger-list`) records command proof events into `bpk-lib/target/factory-ledger/store/`. Normal builds do not depend on it; use it when you want a queryable local proof trail for wrapped commands such as `just ledger-run -- just host-loop`.
 
 ## Current Batteries
 
