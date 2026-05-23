@@ -2,6 +2,7 @@ mod ast_grep;
 mod ci;
 mod disk_audit;
 mod export_ts_manifest;
+mod host_dev;
 mod loom;
 mod manifest;
 mod msrv_check;
@@ -22,7 +23,7 @@ mod version_pins;
 use crate::util::{cargo, cargo_target_dir};
 use crate::CleanGeneratedArgs;
 use crate::{
-    ArchitectureIrArgs, ChaosArgs, ExportTsManifestArgs, FuzzArgs, MutantsArgs,
+    ArchitectureIrArgs, ChaosArgs, ExportTsManifestArgs, FuzzArgs, HostDevArgs, MutantsArgs,
     PackageLeakScanArgs, PlatformArgs, ReleaseArgs, ScaffoldArgs, SetupArgs,
 };
 use anyhow::Result;
@@ -119,6 +120,10 @@ pub(crate) fn release_manifest(args: crate::ReleaseManifestArgs) -> Result<()> {
 
 pub(crate) fn export_ts_manifest(args: &ExportTsManifestArgs) -> Result<()> {
     export_ts_manifest::export_ts_manifest(args)
+}
+
+pub(crate) fn host_dev(args: &HostDevArgs) -> Result<()> {
+    host_dev::host_dev(args)
 }
 
 pub(crate) fn architecture_ir(args: &ArchitectureIrArgs) -> Result<()> {

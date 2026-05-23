@@ -42,3 +42,11 @@ Filesystem, clock, lock, sync, and mmap contact should route through the platfor
 ## Larger Systems
 
 Use circuits and terminals to connect batteries. Do not hide ownership by letting one battery mutate another battery's state through an unmodeled route.
+
+## Local Host Loop
+
+After hbat, manifest, or TypeScript SDK changes, run `just host-dev` from the
+repository root. It mirrors the CI ts-parity lane locally: export manifest,
+codegen, build and test the workspace, boot hbat on an ephemeral store, run
+the heartbeat-spike example (heartbeat, commit, query, get), and verify
+committed generated sources stay deterministic.
