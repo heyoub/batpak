@@ -96,6 +96,8 @@ enum XtaskCommand {
     /// Export the BatPAK TypeScript SDK manifest from the reference host
     /// descriptors. Consumed by `bpk-ts/packages/codegen`.
     ExportTsManifest(ExportTsManifestArgs),
+    /// Prove the host profile end-to-end: manifest, codegen, TS, hbat, spike.
+    HostDev(HostDevArgs),
     /// Copy a golden batpak starter template into a local project directory.
     Scaffold(ScaffoldArgs),
     Platform(PlatformArgs),
@@ -387,6 +389,16 @@ pub(crate) struct ReleaseManifestArgs {
 }
 
 #[derive(Args, Clone, Debug)]
+pub(crate) struct HostDevArgs {
+    /// Skip `pnpm -w test` (inner loop only; canonical proof runs tests).
+    #[arg(long)]
+    pub(crate) skip_tests: bool,
+    /// Skip the regeneration git-diff determinism check.
+    #[arg(long)]
+    pub(crate) skip_determinism: bool,
+}
+
+#[derive(Args, Clone, Debug)]
 pub(crate) struct ExportTsManifestArgs {
     /// Output path for the rendered manifest. The parent directory is
     /// created on demand.
@@ -455,6 +467,7 @@ fn main() -> Result<()> {
         XtaskCommand::SemverCheck(args) => public_api::semver_check(args),
         XtaskCommand::ReleaseManifest(args) => commands::release_manifest(args),
         XtaskCommand::ExportTsManifest(args) => commands::export_ts_manifest(&args),
+        XtaskCommand::HostDev(args) => commands::host_dev(&args),
         XtaskCommand::Scaffold(args) => commands::scaffold(args),
         XtaskCommand::Platform(args) => commands::platform(args),
         XtaskCommand::Fuzz(args) => commands::fuzz(args),

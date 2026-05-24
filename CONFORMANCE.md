@@ -44,6 +44,7 @@ The factory uses tiered verification so humans, agents, and CI all speak the sam
 | Tier | Human face | Policy face (xtask) | Blocks merge? | Meaning |
 | --- | --- | --- | --- | --- |
 | Inspect | `just inspect` | structural, boundary, architecture IR, ast-grep | Optional/path-based | Fast shape checks before expensive proof. |
+| Host profile | `just host-dev` | `host-dev` | No | Local end-to-end host proof: manifest → codegen → TS build/test → hbat boot → heartbeat-spike → deterministic regeneration. |
 | Fast | `just ci-fast` | `ci-fast` | Yes | Early PR signal: format, clippy, checks, tests, dependency gates, traceability, structural law. |
 | Integrity | `just verify` | `preflight` | Yes | Canonical Linux devcontainer proof: full CI, coverage threshold 80%, docs. |
 | Windows surface | `just ci-windows` | `ci-windows-surface` | Yes | Native Windows compatibility surface, including platform-sensitive cargo/test behavior and kind-collision fixture. |

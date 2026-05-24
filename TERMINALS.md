@@ -32,6 +32,9 @@ The reference NETBAT terminal exposes three substrate directions:
 Push subscription is lossy awareness, not replay. Durable replay uses query,
 cursor, or projection-owned pull surfaces.
 
+Run `just host-dev` to prove the four reference NETBAT operations through hbat
+and the TypeScript heartbeat-spike in one local motion.
+
 ## Terminal Versus Function
 
 A function is an implementation unit. A terminal is a boundary promise.

@@ -7,6 +7,7 @@ use std::path::Path;
 
 /// Human-facing `just` recipes map to one or more xtask policy commands.
 const JUST_TO_XTASK_COMMANDS: &[(&str, &[&str])] = &[
+    ("host-dev", &["host-dev"]),
     ("ci-fast", &["ci-fast"]),
     ("ci-windows", &["ci-windows-surface"]),
     ("verify", &["preflight"]),

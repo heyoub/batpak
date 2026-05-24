@@ -82,6 +82,9 @@ mutants-smoke:
 mutants-full:
     cd bpk-lib; cargo xtask mutants full
 
+host-dev:
+    cd bpk-lib; cargo xtask host-dev
+
 ci-fast:
     cd bpk-lib; cargo xtask ci-fast
 
