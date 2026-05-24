@@ -182,6 +182,22 @@ fn build_core(store: &Arc<batpak::store::Store>) -> Result<syncbat::Core> {
         )
         .map_err(|error| anyhow!("register event.query: {error}"))?;
     builder
+        .register(
+            hbat::RECEIPT_VERIFY_DESCRIPTOR.clone(),
+            hbat::ReceiptVerifyHandler {
+                store: Arc::clone(store),
+            },
+        )
+        .map_err(|error| anyhow!("register receipt.verify: {error}"))?;
+    builder
+        .register(
+            hbat::EVENT_WALK_DESCRIPTOR.clone(),
+            hbat::EventWalkHandler {
+                store: Arc::clone(store),
+            },
+        )
+        .map_err(|error| anyhow!("register event.walk: {error}"))?;
+    builder
         .build()
         .map_err(|error| anyhow!("build syncbat core: {error}"))
 }

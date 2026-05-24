@@ -2,6 +2,7 @@ use super::*;
 use crate::id::EntityIdType;
 use crate::id::EventId;
 use crate::store::index::IndexEntry;
+use std::collections::BTreeMap;
 
 impl<State> Store<State> {
     /// READ: get a single event by ID.
@@ -35,6 +36,37 @@ impl<State> Store<State> {
     #[must_use]
     pub fn verify_append_receipt(&self, receipt: &AppendReceipt) -> bool {
         self.verify_append_receipt_detailed(receipt).is_valid()
+    }
+
+    /// Verify ack-shaped append receipt fields against the store's signing-key
+    /// registry and current index state.
+    ///
+    /// Wire transports omit [`AppendReceipt::disk_pos`]; this helper hydrates
+    /// it from the committed index entry before delegating to
+    /// [`Self::verify_append_receipt_detailed`].
+    #[must_use]
+    pub fn verify_append_receipt_wire_detailed(
+        &self,
+        event_id: EventId,
+        sequence: u64,
+        content_hash: [u8; 32],
+        key_id: [u8; 32],
+        signature: Option<[u8; 64]>,
+        extensions: BTreeMap<ExtensionKey, EncodedBytes>,
+    ) -> ReceiptVerification {
+        let Some(entry) = self.index.get_by_id(event_id.as_u128()) else {
+            return ReceiptVerification::Invalid(ReceiptVerificationError::MissingCommittedEvent);
+        };
+        let receipt = AppendReceipt {
+            event_id,
+            sequence,
+            disk_pos: entry.disk_pos,
+            content_hash,
+            key_id,
+            signature,
+            extensions,
+        };
+        self.verify_append_receipt_detailed(&receipt)
     }
 
     /// Verify an append receipt and return the exact acceptance or rejection
@@ -296,5 +328,34 @@ mod tests {
             store.verify_append_receipt_detailed(&receipt),
             ReceiptVerification::Invalid(ReceiptVerificationError::DiskPositionMismatch)
         );
+    }
+
+    #[test]
+    fn wire_append_receipt_verification_hydrates_disk_pos_from_index() {
+        let dir = TempDir::new().expect("temp dir");
+        let store = Store::open(
+            StoreConfig::new(dir.path())
+                .with_enable_checkpoint(false)
+                .with_enable_mmap_index(false),
+        )
+        .expect("open store");
+        let coord = Coordinate::new("entity:wire-verify", "scope:test").expect("coord");
+        let receipt = store
+            .append(
+                &coord,
+                EventKind::custom(0xA, 22),
+                &serde_json::json!({"n": 1}),
+            )
+            .expect("append");
+
+        let verification = store.verify_append_receipt_wire_detailed(
+            receipt.event_id,
+            receipt.sequence,
+            receipt.content_hash,
+            receipt.key_id,
+            receipt.signature,
+            receipt.extensions.clone(),
+        );
+        assert_eq!(verification, ReceiptVerification::UnsignedAccepted);
     }
 }

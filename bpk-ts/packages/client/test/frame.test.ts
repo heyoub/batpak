@@ -57,7 +57,14 @@ describe("encodeRequest", () => {
 
 describe("validateOperationName", () => {
   it("accepts the canonical names from the manifest", () => {
-    for (const name of ["system.heartbeat", "bank.commit", "event.get", "event.query"]) {
+    for (const name of [
+      "system.heartbeat",
+      "bank.commit",
+      "event.get",
+      "event.query",
+      "receipt.verify",
+      "event.walk",
+    ]) {
       expect(() => validateOperationName(name)).not.toThrow();
     }
   });

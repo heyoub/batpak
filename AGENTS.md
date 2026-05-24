@@ -135,9 +135,11 @@ Implementation commands still live under `bpk-lib/` and remain valid when a task
 - Prefer root `just` recipes over inventing new one-off local commands; use `xtask` for machinery that needs parsing, walking, validation, or receipts.
 - **Bidirectional substrate lane** — if a NETBAT terminal can commit substrate
   events, it must also preserve bounded domain-neutral traversal. The reference
-  loop is `bank.commit` for write, `event.get` for point-read, and `event.query`
-  for log walking. New traversal fields must name the axis as
-  `global_sequence`; do not introduce ambiguous cursor names.
+  loop is `bank.commit` for write, `event.get` for point-read, `event.query`
+  for commit-order log walking, `receipt.verify` for ack-shaped proof checks, and
+  `event.walk` for bounded hash-chain ancestry (relation order, not DAG law).
+  New traversal fields must name the axis as `global_sequence` when the axis is
+  commit order; do not introduce ambiguous cursor names.
 - **Domain graph boundary** — do not add Downstream, workflow, mission, or
   receipt-body verbs as batpak/hbat/netbat operations. Domain layers decode
   envelope payloads above batpak after `event.query` + `event.get`; substrate

@@ -2,10 +2,11 @@
 //!
 //! These tests spawn the actual `hbat` binary as a subprocess, parse
 //! the `HBAT_READY {…}` rendezvous line from its stdout, connect over
-//! TCP, and drive all four NETBAT/1 operations the binary exposes
-//! (`system.heartbeat`, `bank.commit`, `event.get`, `event.query`) plus the error
-//! path. They close the cross-language parity loop on the Rust side
-//! the same way `bpk-ts/examples/heartbeat-spike` does on the TS side.
+//! TCP, and drive all six NETBAT/1 operations the binary exposes
+//! (`system.heartbeat`, `bank.commit`, `event.get`, `event.query`,
+//! `receipt.verify`, `event.walk`) plus the error path. They close the
+//! cross-language parity loop on the Rust side the same way
+//! `bpk-ts/examples/heartbeat-spike` does on the TS side.
 //!
 //! Audit reference: maturity-gap audit flagged that hbat had NO
 //! integration tests (only inline #[test] fns) — this file fills that
@@ -13,7 +14,7 @@
 //!
 //! PROVES:
 //!   - HBAT_READY rendezvous is a parseable JSON line on stdout.
-//!   - NETBAT/1 frames over TCP round-trip cleanly for the 4 operations.
+//!   - NETBAT/1 frames over TCP round-trip cleanly for the 6 operations.
 //!   - Wire-format error path returns a typed ERR with the
 //!     `unknown_operation` code and a UTF-8 message body.
 //!   - `bank.commit` -> `event.get` recovers the canonical payload
@@ -40,6 +41,8 @@ use hbat::{
         EventQueryRequest,
     },
     heartbeat::{SystemHeartbeatAck, SystemHeartbeatRequest},
+    receipt::{ReceiptVerifyAck, ReceiptVerifyRequest},
+    walk::{EventWalkAck, EventWalkRequest},
     EventPayloadFixture,
 };
 
@@ -213,6 +216,24 @@ fn parse_err(response: &[u8]) -> Result<(String, String)> {
     let message_bytes = netbat::decode_hex_str(hex).context("hex decodes")?;
     let message = String::from_utf8(message_bytes).context("UTF-8 message")?;
     Ok((code, message))
+}
+
+fn commit_heartbeat_event(host: &HbatProcess, entity: &str, nonce: &str) -> Result<BankCommitAck> {
+    let original_payload = SystemHeartbeatRequest {
+        nonce: nonce.to_owned(),
+    };
+    let original_payload_bytes = batpak::encoding::to_bytes(&original_payload)?;
+    let commit_request = BankCommitRequest {
+        entity: entity.to_owned(),
+        scope: "tcp-e2e-scope".to_owned(),
+        kind_category: SystemHeartbeatRequest::KIND.category(),
+        kind_type_id: SystemHeartbeatRequest::KIND.type_id(),
+        payload_hex: lowercase_hex(&original_payload_bytes),
+    };
+    let commit_input = batpak::encoding::to_bytes(&commit_request)?;
+    let commit_response = call_one(host, "bank.commit", &commit_input)?;
+    let commit_output = parse_ok(&commit_response)?;
+    Ok(batpak::encoding::from_bytes(&commit_output)?)
 }
 
 // ─── tests ──────────────────────────────────────────────────────────────────
@@ -434,6 +455,114 @@ fn event_query_rejects_zero_limit_over_tcp() -> Result<()> {
         message.to_lowercase().contains("limit"),
         "expected error mentioning limit, got {message:?}"
     );
+    Ok(())
+}
+
+#[test]
+fn bank_commit_then_receipt_verify_accepts_ack_over_tcp() -> Result<()> {
+    let host = HbatProcess::spawn()?;
+    let ack = commit_heartbeat_event(&host, "tcp:verify", "tcp-e2e-receipt-verify-001")?;
+
+    let request = ReceiptVerifyRequest {
+        event_id_hex: ack.event_id_hex.clone(),
+        sequence: ack.sequence,
+        content_hash_hex: ack.content_hash_hex.clone(),
+        key_id_hex: ack.key_id_hex.clone(),
+        signature_hex: ack.signature_hex.clone(),
+        extensions: ack.extensions.clone(),
+    };
+    let response = call_one(
+        &host,
+        "receipt.verify",
+        &batpak::encoding::to_bytes(&request)?,
+    )?;
+    let output = parse_ok(&response)?;
+    let verify: ReceiptVerifyAck = batpak::encoding::from_bytes(&output)?;
+    assert!(verify.valid);
+    assert_eq!(verify.outcome, "unsigned_accepted");
+    assert!(verify.reason_code.is_none());
+    Ok(())
+}
+
+#[test]
+fn receipt_verify_rejects_tampered_fields_over_tcp() -> Result<()> {
+    let host = HbatProcess::spawn()?;
+    let ack = commit_heartbeat_event(&host, "tcp:verify-tamper", "tcp-e2e-receipt-verify-002")?;
+
+    let request = ReceiptVerifyRequest {
+        event_id_hex: ack.event_id_hex.clone(),
+        sequence: ack.sequence + 1,
+        content_hash_hex: ack.content_hash_hex.clone(),
+        key_id_hex: ack.key_id_hex.clone(),
+        signature_hex: ack.signature_hex.clone(),
+        extensions: ack.extensions.clone(),
+    };
+    let response = call_one(
+        &host,
+        "receipt.verify",
+        &batpak::encoding::to_bytes(&request)?,
+    )?;
+    let output = parse_ok(&response)?;
+    let verify: ReceiptVerifyAck = batpak::encoding::from_bytes(&output)?;
+    assert!(!verify.valid);
+    assert_eq!(verify.outcome, "invalid");
+    assert_eq!(verify.reason_code.as_deref(), Some("sequence_mismatch"));
+    Ok(())
+}
+
+#[test]
+fn event_walk_rejects_zero_limit_over_tcp() -> Result<()> {
+    let host = HbatProcess::spawn()?;
+    let request = EventWalkRequest {
+        event_id_hex: "0123456789abcdef0123456789abcdef".to_owned(),
+        limit: 0,
+    };
+    let response = call_one(&host, "event.walk", &batpak::encoding::to_bytes(&request)?)?;
+    let (code, message) = parse_err(&response)?;
+    assert_eq!(code, "handler");
+    assert!(
+        message.to_lowercase().contains("limit"),
+        "expected error mentioning limit, got {message:?}"
+    );
+    Ok(())
+}
+
+#[test]
+fn bank_commit_then_event_walk_then_event_get_works_over_tcp() -> Result<()> {
+    let host = HbatProcess::spawn()?;
+    let first = commit_heartbeat_event(&host, "tcp:walk", "tcp-e2e-walk-001")?;
+    let second = commit_heartbeat_event(&host, "tcp:walk", "tcp-e2e-walk-002")?;
+    let third = commit_heartbeat_event(&host, "tcp:walk", "tcp-e2e-walk-003")?;
+
+    let walk_request = EventWalkRequest {
+        event_id_hex: second.event_id_hex.clone(),
+        limit: 10,
+    };
+    let walk_response = call_one(
+        &host,
+        "event.walk",
+        &batpak::encoding::to_bytes(&walk_request)?,
+    )?;
+    let walk_output = parse_ok(&walk_response)?;
+    let walk: EventWalkAck = batpak::encoding::from_bytes(&walk_output)?;
+
+    assert_eq!(walk.entries.len(), 2);
+    assert_eq!(walk.entries[0].event_id_hex, second.event_id_hex);
+    assert_eq!(walk.entries[1].event_id_hex, first.event_id_hex);
+    assert_ne!(walk.entries[0].event_id_hex, third.event_id_hex);
+
+    let get_request = EventGetRequest {
+        event_id_hex: walk.entries[1].event_id_hex.clone(),
+    };
+    let get_response = call_one(
+        &host,
+        "event.get",
+        &batpak::encoding::to_bytes(&get_request)?,
+    )?;
+    let get_output = parse_ok(&get_response)?;
+    let event: EventGetAck = batpak::encoding::from_bytes(&get_output)?;
+    assert_eq!(event.event_id_hex, first.event_id_hex);
+    assert_eq!(event.sequence, first.sequence);
     Ok(())
 }
 

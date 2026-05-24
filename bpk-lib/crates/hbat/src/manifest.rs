@@ -415,16 +415,20 @@ mod tests {
     #[test]
     fn snapshot_has_all_reference_events_and_operations() -> Result<()> {
         let snap = descriptors()?;
-        // 9 events: heartbeat request/ack, bank.commit request/ack,
-        // event.get request/ack, event.query request/summary/ack.
-        assert_eq!(snap.events.len(), 9, "event count: {snap:?}");
-        // 4 operations: heartbeat, bank.commit, event.get, event.query.
-        assert_eq!(snap.operations.len(), 4);
+        // 13 events: heartbeat request/ack, bank.commit request/ack,
+        // event.get request/ack, event.query request/summary/ack,
+        // receipt.verify request/ack, event.walk request/ack.
+        assert_eq!(snap.events.len(), 13, "event count: {snap:?}");
+        // 6 operations: heartbeat, bank.commit, event.get, event.query,
+        // receipt.verify, event.walk.
+        assert_eq!(snap.operations.len(), 6);
         let names: Vec<&str> = snap.operations.iter().map(|o| o.name.as_str()).collect();
         assert!(names.contains(&"system.heartbeat"));
         assert!(names.contains(&"bank.commit"));
         assert!(names.contains(&"event.get"));
         assert!(names.contains(&"event.query"));
+        assert!(names.contains(&"receipt.verify"));
+        assert!(names.contains(&"event.walk"));
         Ok(())
     }
 

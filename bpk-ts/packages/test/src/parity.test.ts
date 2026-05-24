@@ -59,6 +59,10 @@ describe("manifest envelope", () => {
         "event.query.ack",
         "event.query.request",
         "event.query.summary",
+        "event.walk.ack",
+        "event.walk.request",
+        "receipt.verify.ack",
+        "receipt.verify.request",
         "system.heartbeat.ack",
         "system.heartbeat.request",
       ].sort(),
@@ -67,7 +71,14 @@ describe("manifest envelope", () => {
 
   it("carries all reference hbat operations", () => {
     const names = manifest.operations.map((o) => o.name).sort();
-    expect(names).toEqual(["bank.commit", "event.get", "event.query", "system.heartbeat"]);
+    expect(names).toEqual([
+      "bank.commit",
+      "event.get",
+      "event.query",
+      "event.walk",
+      "receipt.verify",
+      "system.heartbeat",
+    ]);
   });
 
   it("enforces the Phase 0 wireName === tsName invariant on every field", () => {
@@ -211,6 +222,21 @@ describe("Effect 4 schema round-trip via @batpak/schema", () => {
     expect(value.entries[0]).not.toHaveProperty("receipt_kind");
   });
 
+  it("decodes the receipt.verify ack fixture (valid/outcome/reason_code)", () => {
+    const bytes = decodeHex(Generated.RECEIPT_VERIFY_ACK_GOLDEN_HEX);
+    const value = decodeBytes(Generated.ReceiptVerifyAck, bytes);
+    expect(value).toEqual(Generated.RECEIPT_VERIFY_ACK_FIXTURE);
+    expect(value.valid).toBe(true);
+    expect(value.outcome).toBe("unsigned_accepted");
+  });
+
+  it("decodes the event.walk ack fixture (summary array in relation order)", () => {
+    const bytes = decodeHex(Generated.EVENT_WALK_ACK_GOLDEN_HEX);
+    const value = decodeBytes(Generated.EventWalkAck, bytes);
+    expect(value).toEqual(Generated.EVENT_WALK_ACK_FIXTURE);
+    expect(value.entries[0]?.event_id_hex).toHaveLength(32);
+  });
+
   it("encodes the bank.commit ack fixture (Option + Record) back to the golden bytes", () => {
     const bytes = encodeBytes(Generated.BankCommitAck, Generated.BANK_COMMIT_ACK_FIXTURE);
     expect(encodeHex(bytes)).toBe(Generated.BANK_COMMIT_ACK_GOLDEN_HEX);
@@ -243,11 +269,13 @@ describe("Effect 4 schema round-trip via @batpak/schema", () => {
 });
 
 describe("operation handles in generated/operations", () => {
-  it("exports SYSTEM_HEARTBEAT, BANK_COMMIT, EVENT_GET, EVENT_QUERY with golden hex", () => {
+  it("exports all six reference operations with golden hex", () => {
     expect(Generated.SYSTEM_HEARTBEAT.name).toBe("system.heartbeat");
     expect(Generated.BANK_COMMIT.name).toBe("bank.commit");
     expect(Generated.EVENT_GET.name).toBe("event.get");
     expect(Generated.EVENT_QUERY.name).toBe("event.query");
+    expect(Generated.RECEIPT_VERIFY.name).toBe("receipt.verify");
+    expect(Generated.EVENT_WALK.name).toBe("event.walk");
     expect(Generated.BANK_COMMIT.errorFixture.code).toBe("unknown_operation");
   });
 });

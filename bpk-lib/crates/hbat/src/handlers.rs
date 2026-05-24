@@ -7,12 +7,18 @@
 //! store handle — the descriptors and payload types are pure data and
 //! must be linkable from `xtask` without dragging the runtime in.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use batpak::coordinate::{Coordinate, Region};
 use batpak::event::EventKind;
+use batpak::id::EntityIdType;
+use batpak::id::EventId;
 use batpak::store::index::IndexEntry;
-use batpak::store::{AppendOptions, AppendReceipt, BatchAppendItem, CausationRef, Store};
+use batpak::store::{
+    AppendOptions, AppendReceipt, BatchAppendItem, CausationRef, EncodedBytes, ExtensionKey,
+    ReceiptVerification, ReceiptVerificationError, Store,
+};
 // Hex codec is the canonical netbat implementation; hbat does not
 // re-roll its own. See netbat::transport::hex.
 use netbat::{decode_hex_str, encode_hex_str};
@@ -22,6 +28,8 @@ use crate::bank::{
     BankCommitAck, BankCommitRequest, EventGetAck, EventGetRequest, EventQueryAck,
     EventQueryRequest, EventSummary, EVENT_QUERY_MAX_LIMIT,
 };
+use crate::receipt::{ReceiptVerifyAck, ReceiptVerifyRequest};
+use crate::walk::{EventWalkAck, EventWalkRequest, EVENT_WALK_MAX_LIMIT};
 
 // ─── bank.commit handler ────────────────────────────────────────────────────
 
@@ -107,19 +115,9 @@ fn handle_event_get(store: &Store, input: &[u8]) -> HandlerResult {
     let request: EventGetRequest = batpak::encoding::from_bytes(input)
         .map_err(|error| HandlerError::invalid_input(format!("decode request: {error}")))?;
 
-    let event_id_bytes = decode_hex_str(&request.event_id_hex)
-        .map_err(|error| HandlerError::invalid_input(format!("event_id_hex: {error}")))?;
-    if event_id_bytes.len() != 16 {
-        return Err(HandlerError::invalid_input(format!(
-            "event_id_hex must decode to 16 bytes, got {}",
-            event_id_bytes.len()
-        )));
-    }
-    let mut be = [0_u8; 16];
-    be.copy_from_slice(&event_id_bytes);
-    let event_id = u128::from_be_bytes(be);
+    let event_id = decode_event_id_hex(&request.event_id_hex)?;
+    let typed_event_id = EventId::from(event_id);
 
-    let typed_event_id = batpak::id::EventId::from(event_id);
     let stored = store
         .read_raw(typed_event_id)
         .map_err(|error| HandlerError::failed(format!("read event: {error}")))?;
@@ -278,185 +276,180 @@ fn index_entry_to_query_summary(entry: &IndexEntry) -> EventSummary {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use std::sync::Arc;
+fn decode_event_id_hex(event_id_hex: &str) -> Result<u128, HandlerError> {
+    let event_id_bytes = decode_hex_str(event_id_hex)
+        .map_err(|error| HandlerError::invalid_input(format!("event_id_hex: {error}")))?;
+    if event_id_bytes.len() != 16 {
+        return Err(HandlerError::invalid_input(format!(
+            "event_id_hex must decode to 16 bytes, got {}",
+            event_id_bytes.len()
+        )));
+    }
+    let mut be = [0_u8; 16];
+    be.copy_from_slice(&event_id_bytes);
+    Ok(u128::from_be_bytes(be))
+}
 
-    use anyhow::{bail, Result};
-    use batpak::store::{Store, StoreConfig};
+fn decode_fixed_hex<const N: usize>(field: &str, hex: &str) -> Result<[u8; N], HandlerError> {
+    let bytes = decode_hex_str(hex)
+        .map_err(|error| HandlerError::invalid_input(format!("{field}: {error}")))?;
+    if bytes.len() != N {
+        return Err(HandlerError::invalid_input(format!(
+            "{field} must decode to {N} bytes, got {}",
+            bytes.len()
+        )));
+    }
+    let mut out = [0_u8; N];
+    out.copy_from_slice(&bytes);
+    Ok(out)
+}
 
-    use super::*;
-    use crate::bank::{
-        BankCommitAck, BankCommitRequest, EventGetAck, EventGetRequest, BANK_COMMIT_DESCRIPTOR,
-        EVENT_GET_DESCRIPTOR,
+fn decode_wire_extensions(
+    wire: &BTreeMap<String, String>,
+) -> Result<BTreeMap<ExtensionKey, EncodedBytes>, HandlerError> {
+    let mut decoded = BTreeMap::new();
+    for (key_str, value_hex) in wire {
+        let key = ExtensionKey::new(key_str)
+            .map_err(|error| HandlerError::invalid_input(format!("extension key: {error}")))?;
+        let value = decode_hex_str(value_hex).map_err(|error| {
+            HandlerError::invalid_input(format!("extension value hex: {error}"))
+        })?;
+        decoded.insert(key, value);
+    }
+    Ok(decoded)
+}
+
+fn summary_for_event_id(store: &Store, event_id: EventId) -> Result<EventSummary, HandlerError> {
+    let stored = store
+        .read_raw(event_id)
+        .map_err(|error| HandlerError::failed(format!("read event: {error}")))?;
+    let region = Region::entity(stored.coordinate.entity());
+    let entry = store
+        .query(&region)
+        .into_iter()
+        .find(|entry| entry.event_id() == event_id.as_u128())
+        .ok_or_else(|| {
+            HandlerError::failed(format!(
+                "event_id {:032x} was read_raw-able but missing from the index query",
+                event_id.as_u128()
+            ))
+        })?;
+    Ok(index_entry_to_query_summary(&entry))
+}
+
+fn receipt_verification_reason_code(error: &ReceiptVerificationError) -> &'static str {
+    match error {
+        ReceiptVerificationError::MissingCommittedEvent => "missing_committed_event",
+        ReceiptVerificationError::EventIdMismatch => "event_id_mismatch",
+        ReceiptVerificationError::SequenceMismatch => "sequence_mismatch",
+        ReceiptVerificationError::DiskPositionMismatch => "disk_position_mismatch",
+        ReceiptVerificationError::ContentHashMismatch => "content_hash_mismatch",
+        ReceiptVerificationError::ExtensionsMismatch => "extensions_mismatch",
+        ReceiptVerificationError::DenialKindMismatch => "denial_kind_mismatch",
+        ReceiptVerificationError::UnsignedReceiptRejected => "unsigned_receipt_rejected",
+        ReceiptVerificationError::MissingSignature => "missing_signature",
+        ReceiptVerificationError::ZeroKeyWithSignature => "zero_key_with_signature",
+        ReceiptVerificationError::UnknownSigningKey => "unknown_signing_key",
+        ReceiptVerificationError::InvalidSignature => "invalid_signature",
+        ReceiptVerificationError::CoverBuildFailed { .. } => "cover_build_failed",
+    }
+}
+
+fn receipt_verification_to_ack(verification: ReceiptVerification) -> ReceiptVerifyAck {
+    match verification {
+        ReceiptVerification::Signed => ReceiptVerifyAck {
+            valid: true,
+            outcome: "signed".to_owned(),
+            reason_code: None,
+        },
+        ReceiptVerification::UnsignedAccepted => ReceiptVerifyAck {
+            valid: true,
+            outcome: "unsigned_accepted".to_owned(),
+            reason_code: None,
+        },
+        ReceiptVerification::Invalid(error) => ReceiptVerifyAck {
+            valid: false,
+            outcome: "invalid".to_owned(),
+            reason_code: Some(receipt_verification_reason_code(&error).to_owned()),
+        },
+    }
+}
+
+// ─── receipt.verify handler ───────────────────────────────────────────────────
+
+/// Handler binding for [`crate::receipt::RECEIPT_VERIFY_DESCRIPTOR`].
+pub struct ReceiptVerifyHandler {
+    /// Shared handle to the BatPAK store. Cloning the `Arc` is cheap.
+    pub store: Arc<Store>,
+}
+
+impl Handler for ReceiptVerifyHandler {
+    fn handle(&mut self, input: &[u8], _cx: &mut Ctx<'_>) -> HandlerResult {
+        handle_receipt_verify(&self.store, input)
+    }
+}
+
+fn handle_receipt_verify(store: &Store, input: &[u8]) -> HandlerResult {
+    let request: ReceiptVerifyRequest = batpak::encoding::from_bytes(input)
+        .map_err(|error| HandlerError::invalid_input(format!("decode request: {error}")))?;
+
+    let event_id_raw = decode_event_id_hex(&request.event_id_hex)?;
+    let event_id = EventId::from(event_id_raw);
+    let content_hash = decode_fixed_hex("content_hash_hex", &request.content_hash_hex)?;
+    let key_id = decode_fixed_hex("key_id_hex", &request.key_id_hex)?;
+    let signature = match request.signature_hex.as_deref() {
+        None => None,
+        Some(hex) => Some(decode_fixed_hex("signature_hex", hex)?),
     };
-    use crate::heartbeat::SystemHeartbeatRequest;
-    use crate::EventPayloadFixture;
-    use batpak::EventPayload;
+    let extensions = decode_wire_extensions(&request.extensions)?;
 
-    fn fresh_store() -> Result<(Arc<Store>, tempfile::TempDir)> {
-        let dir = tempfile::TempDir::new()?;
-        let store = Store::open(
-            StoreConfig::new(dir.path())
-                .with_enable_checkpoint(false)
-                .with_enable_mmap_index(false),
-        )?;
-        Ok((Arc::new(store), dir))
+    let verification = store.verify_append_receipt_wire_detailed(
+        event_id,
+        request.sequence,
+        content_hash,
+        key_id,
+        signature,
+        extensions,
+    );
+    let ack = receipt_verification_to_ack(verification);
+    batpak::encoding::to_bytes(&ack)
+        .map_err(|error| HandlerError::failed(format!("encode ack: {error}")))
+}
+
+// ─── event.walk handler ───────────────────────────────────────────────────────
+
+/// Handler binding for [`crate::walk::EVENT_WALK_DESCRIPTOR`].
+pub struct EventWalkHandler {
+    /// Shared handle to the BatPAK store. Cloning the `Arc` is cheap.
+    pub store: Arc<Store>,
+}
+
+impl Handler for EventWalkHandler {
+    fn handle(&mut self, input: &[u8], _cx: &mut Ctx<'_>) -> HandlerResult {
+        handle_event_walk(&self.store, input)
     }
+}
 
-    fn fresh_core(store: &Arc<Store>) -> Result<syncbat::Core> {
-        let mut builder = syncbat::Core::builder();
-        builder.register(
-            BANK_COMMIT_DESCRIPTOR.clone(),
-            BankCommitHandler {
-                store: Arc::clone(store),
-            },
-        )?;
-        builder.register(
-            EVENT_GET_DESCRIPTOR.clone(),
-            EventGetHandler {
-                store: Arc::clone(store),
-            },
-        )?;
-        Ok(builder.build()?)
+fn handle_event_walk(store: &Store, input: &[u8]) -> HandlerResult {
+    let request: EventWalkRequest = batpak::encoding::from_bytes(input)
+        .map_err(|error| HandlerError::invalid_input(format!("decode request: {error}")))?;
+
+    if request.limit == 0 {
+        return Err(HandlerError::invalid_input("limit must be greater than 0"));
     }
+    let bounded_limit = request.limit.min(EVENT_WALK_MAX_LIMIT);
+    let limit = usize::try_from(bounded_limit)
+        .map_err(|error| HandlerError::invalid_input(format!("limit: {error}")))?;
 
-    #[test]
-    fn bank_commit_appends_a_heartbeat_request_event() -> Result<()> {
-        let (store, _dir) = fresh_store()?;
-        let mut core = fresh_core(&store)?;
+    let event_id_raw = decode_event_id_hex(&request.event_id_hex)?;
+    let event_id = EventId::from(event_id_raw);
+    let ancestors = store.walk_ancestors(event_id, limit);
+    let entries: Vec<EventSummary> = ancestors
+        .iter()
+        .map(|stored| summary_for_event_id(store, stored.event.header.event_id))
+        .collect::<Result<_, _>>()?;
 
-        let heartbeat = SystemHeartbeatRequest::fixture_value();
-        let heartbeat_bytes = batpak::encoding::to_bytes(&heartbeat)?;
-
-        let request = BankCommitRequest {
-            entity: "test:bank".to_owned(),
-            scope: "test-scope".to_owned(),
-            kind_category: SystemHeartbeatRequest::KIND.category(),
-            kind_type_id: SystemHeartbeatRequest::KIND.type_id(),
-            payload_hex: encode_hex_str(&heartbeat_bytes),
-        };
-        let request_bytes = batpak::encoding::to_bytes(&request)?;
-
-        let result = core.invoke("bank.commit", request_bytes)?;
-
-        let ack: BankCommitAck = batpak::encoding::from_bytes(result.output())?;
-        assert_eq!(ack.event_id_hex.len(), 32);
-        assert_eq!(ack.content_hash_hex.len(), 64);
-        assert_eq!(ack.key_id_hex.len(), 64);
-        assert!(ack.sequence >= 1);
-        Ok(())
-    }
-
-    #[test]
-    fn event_get_returns_what_bank_commit_wrote() -> Result<()> {
-        let (store, _dir) = fresh_store()?;
-        let mut core = fresh_core(&store)?;
-
-        // Append via bank.commit.
-        let heartbeat = SystemHeartbeatRequest::fixture_value();
-        let heartbeat_bytes = batpak::encoding::to_bytes(&heartbeat)?;
-        let request = BankCommitRequest {
-            entity: "test:bank".to_owned(),
-            scope: "test-scope".to_owned(),
-            kind_category: SystemHeartbeatRequest::KIND.category(),
-            kind_type_id: SystemHeartbeatRequest::KIND.type_id(),
-            payload_hex: encode_hex_str(&heartbeat_bytes),
-        };
-        let request_bytes = batpak::encoding::to_bytes(&request)?;
-        let commit_result = core.invoke("bank.commit", request_bytes)?;
-        let ack: BankCommitAck = batpak::encoding::from_bytes(commit_result.output())?;
-
-        // Fetch via event.get.
-        let get_request = EventGetRequest {
-            event_id_hex: ack.event_id_hex.clone(),
-        };
-        let get_bytes = batpak::encoding::to_bytes(&get_request)?;
-        let get_result = core.invoke("event.get", get_bytes)?;
-        let event: EventGetAck = batpak::encoding::from_bytes(get_result.output())?;
-
-        assert_eq!(event.event_id_hex, ack.event_id_hex);
-        assert_eq!(event.entity, "test:bank");
-        assert_eq!(event.scope, "test-scope");
-        assert_eq!(event.kind_category, SystemHeartbeatRequest::KIND.category());
-        assert_eq!(event.kind_type_id, SystemHeartbeatRequest::KIND.type_id());
-
-        // Decoding the returned payload_hex back into the original payload
-        // proves the bytes round-trip end-to-end through commit + get.
-        let payload_bytes = decode_hex_str(&event.payload_hex)?;
-        let decoded: SystemHeartbeatRequest = batpak::encoding::from_bytes(&payload_bytes)?;
-        assert_eq!(decoded, heartbeat);
-        Ok(())
-    }
-
-    fn invoke_expect_err(core: &mut syncbat::Core, op: &str, input: Vec<u8>) -> Result<String> {
-        match core.invoke(op, input) {
-            Ok(_) => bail!("{op} must fail but returned Ok"),
-            Err(err) => Ok(err.to_string()),
-        }
-    }
-
-    #[test]
-    fn bank_commit_rejects_reserved_kind_category() -> Result<()> {
-        let (store, _dir) = fresh_store()?;
-        let mut core = fresh_core(&store)?;
-        let request = BankCommitRequest {
-            entity: "test:bank".to_owned(),
-            scope: "test-scope".to_owned(),
-            kind_category: 0x0,
-            kind_type_id: 0xA01,
-            payload_hex: "81a0".to_owned(),
-        };
-        let request_bytes = batpak::encoding::to_bytes(&request)?;
-        let msg = invoke_expect_err(&mut core, "bank.commit", request_bytes)?;
-        assert!(
-            msg.contains("kind") || msg.contains("invalid_input"),
-            "expected error mentioning invalid kind, got {msg:?}"
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn bank_commit_rejects_invalid_coordinate() -> Result<()> {
-        let (store, _dir) = fresh_store()?;
-        let mut core = fresh_core(&store)?;
-        let request = BankCommitRequest {
-            entity: "".to_owned(),
-            scope: "test-scope".to_owned(),
-            kind_category: 0xF,
-            kind_type_id: 0xA01,
-            payload_hex: "81a0".to_owned(),
-        };
-        let request_bytes = batpak::encoding::to_bytes(&request)?;
-        let msg = invoke_expect_err(&mut core, "bank.commit", request_bytes)?;
-        assert!(
-            msg.contains("coordinate") || msg.contains("invalid_input"),
-            "expected error mentioning coordinate, got {msg:?}"
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn event_get_returns_failed_for_unknown_id() -> Result<()> {
-        let (store, _dir) = fresh_store()?;
-        let mut core = fresh_core(&store)?;
-        let request = EventGetRequest {
-            event_id_hex: "deadbeefdeadbeefdeadbeefdeadbeef".to_owned(),
-        };
-        let request_bytes = batpak::encoding::to_bytes(&request)?;
-        let _ = invoke_expect_err(&mut core, "event.get", request_bytes)?;
-        Ok(())
-    }
-
-    #[test]
-    fn event_get_rejects_malformed_event_id_hex() -> Result<()> {
-        let (store, _dir) = fresh_store()?;
-        let mut core = fresh_core(&store)?;
-        let request = EventGetRequest {
-            event_id_hex: "not-hex".to_owned(),
-        };
-        let request_bytes = batpak::encoding::to_bytes(&request)?;
-        let _ = invoke_expect_err(&mut core, "event.get", request_bytes)?;
-        Ok(())
-    }
+    let ack = EventWalkAck { entries };
+    batpak::encoding::to_bytes(&ack)
+        .map_err(|error| HandlerError::failed(format!("encode ack: {error}")))
 }

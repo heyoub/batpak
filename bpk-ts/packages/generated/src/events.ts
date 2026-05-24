@@ -201,3 +201,81 @@ export const EVENT_QUERY_ACK_FIXTURE: EventQueryAck = {
   "next_after_global_sequence": 42,
   "truncated": false
 } as unknown as EventQueryAck;
+
+/** Source: hbat::receipt::ReceiptVerifyRequest; category=15, typeId=2608 */
+export const ReceiptVerifyRequest = Schema.Struct({
+  event_id_hex: Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{32}$/u)), Schema.brand("EventIdHex")),
+  sequence: Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 9007199254740991 }))),
+  content_hash_hex: Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{64}$/u)), Schema.brand("ContentHashHex")),
+  key_id_hex: Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{64}$/u)), Schema.brand("KeyIdHex")),
+  signature_hex: Schema.NullOr(Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{128}$/u)), Schema.brand("SignatureHex"))),
+  extensions: Schema.Record(Schema.String, Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]*$/u)), Schema.brand("HexBlob"))),
+});
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export type ReceiptVerifyRequest = typeof ReceiptVerifyRequest.Type;
+
+export const RECEIPT_VERIFY_REQUEST_GOLDEN_HEX = "86ac6576656e745f69645f686578d9203031323334353637383961626364656630313233343536373839616263646566a873657175656e63652ab0636f6e74656e745f686173685f686578d94061616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161aa6b65795f69645f686578d94062626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262ad7369676e61747572655f686578c0aa657874656e73696f6e7380" as const;
+export const RECEIPT_VERIFY_REQUEST_FIXTURE: ReceiptVerifyRequest = {
+  "event_id_hex": "0123456789abcdef0123456789abcdef",
+  "sequence": 42,
+  "content_hash_hex": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "key_id_hex": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "signature_hex": null,
+  "extensions": {}
+} as unknown as ReceiptVerifyRequest;
+
+/** Source: hbat::receipt::ReceiptVerifyAck; category=15, typeId=2609 */
+export const ReceiptVerifyAck = Schema.Struct({
+  valid: Schema.Boolean,
+  outcome: Schema.String,
+  reason_code: Schema.NullOr(Schema.String),
+});
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export type ReceiptVerifyAck = typeof ReceiptVerifyAck.Type;
+
+export const RECEIPT_VERIFY_ACK_GOLDEN_HEX = "83a576616c6964c3a76f7574636f6d65b1756e7369676e65645f6163636570746564ab726561736f6e5f636f6465c0" as const;
+export const RECEIPT_VERIFY_ACK_FIXTURE: ReceiptVerifyAck = {
+  "valid": true,
+  "outcome": "unsigned_accepted",
+  "reason_code": null
+} as unknown as ReceiptVerifyAck;
+
+/** Source: hbat::walk::EventWalkRequest; category=15, typeId=2624 */
+export const EventWalkRequest = Schema.Struct({
+  event_id_hex: Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{32}$/u)), Schema.brand("EventIdHex")),
+  limit: Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 9007199254740991 }))),
+});
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export type EventWalkRequest = typeof EventWalkRequest.Type;
+
+export const EVENT_WALK_REQUEST_GOLDEN_HEX = "82ac6576656e745f69645f686578d9203031323334353637383961626364656630313233343536373839616263646566a56c696d697403" as const;
+export const EVENT_WALK_REQUEST_FIXTURE: EventWalkRequest = {
+  "event_id_hex": "0123456789abcdef0123456789abcdef",
+  "limit": 3
+} as unknown as EventWalkRequest;
+
+/** Source: hbat::walk::EventWalkAck; category=15, typeId=2625 */
+export const EventWalkAck = Schema.Struct({
+  entries: Schema.Array(EventSummary),
+});
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export type EventWalkAck = typeof EventWalkAck.Type;
+
+export const EVENT_WALK_ACK_GOLDEN_HEX = "81a7656e7472696573918bac6576656e745f69645f686578d9203031323334353637383961626364656630313233343536373839616263646566af676c6f62616c5f73657175656e63652aa777616c6c5f6d73cf0000018bcfe56800a5636c6f636b07b2636f7272656c6174696f6e5f69645f686578d9203030303030303030303030303030303030303030303030303030303030303030b0636175736174696f6e5f69645f686578c0ad6b696e645f63617465676f72790fac6b696e645f747970655f6964cd0a01a6656e74697479ac666978747572653a62616e6ba573636f7065ad666978747572652d73636f7065b0636f6e74656e745f686173685f686578d94061616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161" as const;
+export const EVENT_WALK_ACK_FIXTURE: EventWalkAck = {
+  "entries": [
+    {
+      "event_id_hex": "0123456789abcdef0123456789abcdef",
+      "global_sequence": 42,
+      "wall_ms": 1700000000000,
+      "clock": 7,
+      "correlation_id_hex": "00000000000000000000000000000000",
+      "causation_id_hex": null,
+      "kind_category": 15,
+      "kind_type_id": 2561,
+      "entity": "fixture:bank",
+      "scope": "fixture-scope",
+      "content_hash_hex": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  ]
+} as unknown as EventWalkAck;

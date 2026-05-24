@@ -1000,3 +1000,50 @@ fn unsigned_receipt_verification_still_checks_committed_index_state() {
         "unsigned verification must still reject receipts whose index fields do not match"
     );
 }
+
+#[test]
+fn wire_append_receipt_verification_hydrates_disk_pos_from_index() {
+    let dir = TempDir::new().expect("temp dir");
+    let coord = Coordinate::new("wire:verify", "scope:test").expect("coord");
+    let kind = EventKind::custom(0xA, 21);
+    let store = Store::open(StoreConfig::new(dir.path())).expect("open store");
+    let receipt = store
+        .append(&coord, kind, &serde_json::json!({"n": 1}))
+        .expect("append");
+
+    let verification = store.verify_append_receipt_wire_detailed(
+        receipt.event_id,
+        receipt.sequence,
+        receipt.content_hash,
+        receipt.key_id,
+        receipt.signature,
+        receipt.extensions.clone(),
+    );
+    assert_eq!(verification, ReceiptVerification::UnsignedAccepted);
+
+    assert_eq!(
+        store.verify_append_receipt_wire_detailed(
+            receipt.event_id,
+            receipt.sequence + 1,
+            receipt.content_hash,
+            receipt.key_id,
+            receipt.signature,
+            receipt.extensions.clone(),
+        ),
+        ReceiptVerification::Invalid(ReceiptVerificationError::SequenceMismatch)
+    );
+
+    let mut wrong_hash = receipt.content_hash;
+    wrong_hash[0] ^= 0xFF;
+    assert_eq!(
+        store.verify_append_receipt_wire_detailed(
+            receipt.event_id,
+            receipt.sequence,
+            wrong_hash,
+            receipt.key_id,
+            receipt.signature,
+            receipt.extensions.clone(),
+        ),
+        ReceiptVerification::Invalid(ReceiptVerificationError::ContentHashMismatch)
+    );
+}

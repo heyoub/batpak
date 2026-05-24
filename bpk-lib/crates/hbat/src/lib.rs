@@ -17,6 +17,10 @@
 //!   event id.
 //! - [`bank::EVENT_QUERY_DESCRIPTOR`] (`event.query`) pages bounded,
 //!   domain-neutral event summaries for external replay.
+//! - [`receipt::RECEIPT_VERIFY_DESCRIPTOR`] (`receipt.verify`) checks
+//!   ack-shaped append receipt fields.
+//! - [`walk::EVENT_WALK_DESCRIPTOR`] (`event.walk`) walks bounded
+//!   hash-chain ancestry.
 //! - [`manifest::descriptors`] consumes inventory registrations for both
 //!   event payloads and operations. Explicit fixture metadata (`FieldRow`,
 //!   golden hex assembly via `build_operation`) remains Phase 0 plumbing.
@@ -32,6 +36,10 @@ pub mod heartbeat;
 /// Manifest snapshot consumed by `xtask export-ts-manifest` and by the
 /// `hbat` binary.
 pub mod manifest;
+/// `receipt.verify` payload types + descriptor.
+pub mod receipt;
+/// `event.walk` payload types + descriptor.
+pub mod walk;
 
 pub use bank::{
     BankCommitAck, BankCommitRequest, EventGetAck, EventGetRequest, EventQueryAck,
@@ -42,7 +50,9 @@ pub use bank::{
     EVENT_QUERY_INPUT_SCHEMA_REF, EVENT_QUERY_MAX_LIMIT, EVENT_QUERY_OPERATION_NAME,
     EVENT_QUERY_OUTPUT_SCHEMA_REF, EVENT_QUERY_RECEIPT_KIND, EVENT_QUERY_SUMMARY_SCHEMA_REF,
 };
-pub use handlers::{BankCommitHandler, EventGetHandler, EventQueryHandler};
+pub use handlers::{
+    BankCommitHandler, EventGetHandler, EventQueryHandler, EventWalkHandler, ReceiptVerifyHandler,
+};
 pub use heartbeat::{
     handle_heartbeat, HeartbeatHandler, SystemHeartbeatAck, SystemHeartbeatRequest,
     HEARTBEAT_DESCRIPTOR, HEARTBEAT_OPERATION_NAME,
@@ -51,6 +61,16 @@ pub use manifest::{
     descriptors, EventDescriptor, FieldDescriptor, ManifestBuildError, ManifestErrorFixture,
     ManifestSnapshot, OperationDescriptorRecord, FIXTURE_NONCE, FIXTURE_SERVER_TS_MS,
     MANIFEST_VERSION,
+};
+pub use receipt::{
+    ReceiptVerifyAck, ReceiptVerifyRequest, RECEIPT_VERIFY_DESCRIPTOR,
+    RECEIPT_VERIFY_INPUT_SCHEMA_REF, RECEIPT_VERIFY_OPERATION_NAME,
+    RECEIPT_VERIFY_OUTPUT_SCHEMA_REF, RECEIPT_VERIFY_RECEIPT_KIND,
+};
+pub use walk::{
+    EventWalkAck, EventWalkRequest, EVENT_WALK_DESCRIPTOR, EVENT_WALK_INPUT_SCHEMA_REF,
+    EVENT_WALK_MAX_LIMIT, EVENT_WALK_OPERATION_NAME, EVENT_WALK_OUTPUT_SCHEMA_REF,
+    EVENT_WALK_RECEIPT_KIND,
 };
 
 /// Fixture-value supplier for an [`batpak::event::EventPayload`].

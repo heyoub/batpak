@@ -36,6 +36,12 @@ bounded NETBAT lane:
 2. `event.get` fetches the canonical payload bytes for selected event ids.
 3. Domain code decodes the payload envelope and dispatches on its own taxonomy.
 
+`event.walk` is a separate axis: bounded hash-chain ancestry from a starting
+`event_id`, returned in relation order (anchor first). It is not commit-order
+pagination and must not be sorted by `global_sequence`. Use `event.query` when
+you need commit-order pages; use `event.walk` when you need ancestor summaries
+along the hash chain.
+
 Pagination uses `after_global_sequence`, an exclusive cursor on global commit
 order. Existing `bank.commit` and `event.get` ack fields named `sequence` are
 legacy wire spellings for that same global commit sequence, not per-entity

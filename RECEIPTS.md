@@ -27,6 +27,12 @@ Only canonize a receipt category as public when code, tests, and traceability ma
 
 Verification should expose typed outcomes where callers need to distinguish failure reasons. Boolean projections may remain as ergonomic helpers over typed truth.
 
+On the reference host, `receipt.verify` accepts ack-shaped append receipt fields
+(the same shape as a `bank.commit` ack) and returns `{ valid, outcome, reason_code }`.
+Wire `outcome` is `"signed"`, `"unsigned_accepted"`, or `"invalid"`. When invalid,
+`reason_code` is a stable snake-case string mapped from substrate verification
+errors — never debug formatting.
+
 ## Reports
 
 Evidence reports are receipt-shaped artifacts for inspections and derived views. They should name inputs, output hashes, versions, and the reason for any refusal or fallback.

@@ -23,16 +23,18 @@ Current terminal-shaped surfaces include:
 - projection and replay entry points
 - netbat routes and operation handling surfaces
 
-The reference NETBAT terminal exposes three substrate directions:
+The reference NETBAT terminal exposes five substrate directions:
 
 - `bank.commit` is the write terminal.
 - `event.get` is the point-read terminal.
-- `event.query` is the traversal terminal.
+- `event.query` is the commit-order traversal terminal.
+- `receipt.verify` is the proof terminal for ack-shaped append receipts.
+- `event.walk` is the relation-walk terminal for bounded hash-chain ancestry.
 
 Push subscription is lossy awareness, not replay. Durable replay uses query,
 cursor, or projection-owned pull surfaces.
 
-Run `just host-dev` to prove the four reference NETBAT operations through hbat
+Run `just host-dev` to prove the six reference NETBAT operations through hbat
 and the TypeScript heartbeat-spike in one local motion.
 
 ## Terminal Versus Function

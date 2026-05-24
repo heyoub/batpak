@@ -71,13 +71,16 @@ Docs explain the current contract. Gates decide whether the contract still holds
 
 ## Terminal Manifest
 
-The hbat manifest must expose the four reference NETBAT operations:
+The hbat manifest must expose the six reference NETBAT operations:
 
 - `system.heartbeat`
 - `bank.commit`
 - `event.get`
 - `event.query`
+- `receipt.verify`
+- `event.walk`
 
 `event.query` keeps external replay substrate-complete without introducing a
-wire cursor session. Cursor-style open/next/checkpoint protocols belong to a
-later NETBAT version or product-specific layer.
+wire cursor session. `event.walk` exposes bounded hash-chain ancestry only —
+not DAG or Downstream graph law. Cursor-style open/next/checkpoint protocols
+belong to a later NETBAT version or product-specific layer.

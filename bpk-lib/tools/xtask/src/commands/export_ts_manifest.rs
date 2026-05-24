@@ -126,19 +126,19 @@ mod tests {
             json["canonicalEncoding"]["rmpSerdeVersion"],
             RMP_SERDE_VERSION
         );
-        // Current hbat ships 9 events (heartbeat req/ack, bank.commit
-        // req/ack, event.get req/ack, event.query req/summary/ack) and
-        // 4 operations (heartbeat, bank.commit, event.get, event.query).
+        // Current hbat ships 13 events (heartbeat req/ack, bank.commit
+        // req/ack, event.get req/ack, event.query req/summary/ack,
+        // receipt.verify req/ack, event.walk req/ack) and 6 operations.
         assert_eq!(
             json["events"].as_array().expect("events is an array").len(),
-            9
+            13
         );
         assert_eq!(
             json["operations"]
                 .as_array()
                 .expect("operations is an array")
                 .len(),
-            4
+            6
         );
         let op_names: Vec<&str> = json["operations"]
             .as_array()
@@ -150,6 +150,8 @@ mod tests {
         assert!(op_names.contains(&"bank.commit"));
         assert!(op_names.contains(&"event.get"));
         assert!(op_names.contains(&"event.query"));
+        assert!(op_names.contains(&"receipt.verify"));
+        assert!(op_names.contains(&"event.walk"));
         for op in json["operations"].as_array().expect("operations array") {
             assert_eq!(op["errorFixture"]["code"], "unknown_operation");
         }
