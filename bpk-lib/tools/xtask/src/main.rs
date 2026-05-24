@@ -98,6 +98,8 @@ enum XtaskCommand {
     ExportTsManifest(ExportTsManifestArgs),
     /// Prove the host profile end-to-end: manifest, codegen, TS, hbat, spike.
     HostDev(HostDevArgs),
+    /// Prove the living TS audit-loop: seed, restart hbat, replay-only.
+    HostLoop,
     /// Copy a golden batpak starter template into a local project directory.
     Scaffold(ScaffoldArgs),
     Platform(PlatformArgs),
@@ -468,6 +470,7 @@ fn main() -> Result<()> {
         XtaskCommand::ReleaseManifest(args) => commands::release_manifest(args),
         XtaskCommand::ExportTsManifest(args) => commands::export_ts_manifest(&args),
         XtaskCommand::HostDev(args) => commands::host_dev(&args),
+        XtaskCommand::HostLoop => commands::host_loop(),
         XtaskCommand::Scaffold(args) => commands::scaffold(args),
         XtaskCommand::Platform(args) => commands::platform(args),
         XtaskCommand::Fuzz(args) => commands::fuzz(args),
