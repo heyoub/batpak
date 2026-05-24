@@ -12,6 +12,10 @@ All notable changes to this project will be documented in this file.
 - Added `bpk-lib/traceability/public_api/batpak_semver_checklist.yaml` as the
   batpak-only semver-check classification ledger for the 0.7.6 correction cut
   (expected red until 0.8 release truth).
+- Added `bpk-lib/traceability/public_api/syncbat_semver_checklist.yaml` and
+  `bpk-lib/traceability/public_api/netbat_semver_checklist.yaml` as the family
+  semver-check classification ledgers for syncbat and netbat (registry baseline
+  unavailable until first publish; no family accidental leaks hidden in this cut).
 - Added `ReactorCanal` as the code-level typed-reactor delivery selector.
   `CursorGuaranteed` remains the default at-least-once path; `LossySubscription`
   is explicit opt-in and never supplies an `AtLeastOnce` witness.
