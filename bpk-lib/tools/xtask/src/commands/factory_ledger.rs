@@ -224,6 +224,25 @@ fn ledger_store_dir() -> Result<PathBuf> {
     Ok(cargo_target_dir()?.join("factory-ledger").join("store"))
 }
 
+/// Read recent factory-ledger lines without creating the store directory.
+pub(crate) fn collect_ledger_lines(limit: usize) -> Result<Vec<String>> {
+    let store_dir = ledger_store_dir()?;
+    if !store_dir.exists() {
+        return Ok(Vec::new());
+    }
+    validate_event_payload_registry().context("validate EventPayload registry")?;
+    let store = Store::open(
+        StoreConfig::new(&store_dir)
+            .with_event_payload_validation(EventPayloadValidation::FailFast)
+            .with_sync_every_n_events(1)
+            .with_sync_mode(SyncMode::SyncData),
+    )
+    .context("open existing factory ledger store")?;
+    let lines = collect_list_lines(&store, limit)?;
+    store.close().context("close factory ledger store")?;
+    Ok(lines)
+}
+
 pub(crate) fn open_ledger_store_at(dir: &Path) -> Result<Store> {
     validate_event_payload_registry().context("validate EventPayload registry")?;
     std::fs::create_dir_all(dir).with_context(|| format!("create {}", dir.display()))?;
@@ -296,7 +315,7 @@ fn append_failed(store: &mut Store, args: FactoryLedgerRecordFailedArgs) -> Resu
     Ok(())
 }
 
-fn collect_list_lines(store: &Store, limit: usize) -> Result<Vec<String>> {
+pub(crate) fn collect_list_lines(store: &Store, limit: usize) -> Result<Vec<String>> {
     if limit == 0 {
         return Ok(Vec::new());
     }
