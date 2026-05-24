@@ -32,7 +32,7 @@ pub(crate) fn write_file_atomically(
     write: impl FnOnce(&mut File) -> Result<(), StoreError>,
 ) -> Result<(), StoreError> {
     reject_symlink_leaf(final_path, purpose)?;
-    let tmp = NamedTempFile::new_in(data_dir)?;
+    let tmp = named_temp_in(data_dir)?;
     let mut file = tmp.reopen().map_err(StoreError::Io)?;
     write(&mut file)?;
     file.sync_all().map_err(StoreError::Io)?;
@@ -54,7 +54,7 @@ pub(crate) fn write_derivative_file_atomically(
         Err(StoreError::Io(error)) => return Err(error),
         Err(error) => return Err(io::Error::other(error.to_string())),
     }
-    let tmp = NamedTempFile::new_in(data_dir)?;
+    let tmp = named_temp_in(data_dir)?;
     {
         let mut file = io::BufWriter::new(tmp.as_file());
         file.write_all(bytes)?;
@@ -96,8 +96,28 @@ pub(crate) fn remove_file(path: &Path) -> io::Result<()> {
     std::fs::remove_file(path)
 }
 
+pub(crate) fn remove_file_if_present(path: &Path) -> io::Result<bool> {
+    match remove_file(path) {
+        Ok(()) => Ok(true),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+
 pub(crate) fn remove_dir_all(path: &Path) -> io::Result<()> {
     std::fs::remove_dir_all(path)
+}
+
+pub(crate) fn remove_dir_all_if_present(path: &Path) -> io::Result<bool> {
+    match remove_dir_all(path) {
+        Ok(()) => Ok(true),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+
+pub(crate) fn named_temp_in(dir: &Path) -> io::Result<NamedTempFile> {
+    NamedTempFile::new_in(dir)
 }
 
 pub(crate) fn rename(from: &Path, to: &Path) -> io::Result<()> {

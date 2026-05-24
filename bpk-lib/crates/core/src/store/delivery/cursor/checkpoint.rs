@@ -3,7 +3,6 @@ use crate::store::delivery::observation::CheckpointId;
 use crate::store::platform;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use tempfile::NamedTempFile;
 
 /// Durable cursor checkpoint.
 ///
@@ -107,7 +106,7 @@ impl Cursor {
             crate::encoding::to_bytes(ckpt).map_err(|e| std::io::Error::other(e.to_string()))?;
         let final_path = cursor_checkpoint_path(data_dir, id);
 
-        let mut tmp = NamedTempFile::new_in(&dir)?;
+        let mut tmp = platform::fs::named_temp_in(&dir)?;
         {
             use std::io::Write;
             tmp.write_all(&bytes)?;
