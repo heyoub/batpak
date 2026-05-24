@@ -822,23 +822,32 @@ fn check_hbat_manifest_wiring_contract(repo_root: &Path) -> Result<()> {
 
         for payload in hbat_event_payload_structs(&content) {
             let rust_type = format!("hbat::{module}::{payload}");
+            let manual_rust_type =
+                count_occurrences(&content, &format!("rust_type: \"{rust_type}\""));
+            let manual_ts_name = count_occurrences(&content, &format!("ts_name: \"{payload}\""));
+            let manual_kind_bits = count_occurrences(
+                &content,
+                &format!("kind_bits: {payload}::KIND.as_raw_u16()"),
+            );
+            let macro_type = count_occurrences(&content, &format!("type = {payload},"));
+            let macro_ts_name = count_occurrences(&content, &format!("ts_name = \"{payload}\""));
+
+            let manual = manual_rust_type == 1 && manual_ts_name == 1 && manual_kind_bits == 1;
+            let via_macro = macro_type == 1 && macro_ts_name == 1;
+
             ensure(
-                count_occurrences(&content, &format!("rust_type: \"{rust_type}\"")) == 1,
+                manual || via_macro,
                 format!(
-                    "hbat EventPayload `{rust_type}` in {rel} must have exactly one EventDescriptorRegistration rust_type row"
+                    "hbat EventPayload `{rust_type}` in {rel} must register exactly once via \
+                     `hbat_event_descriptor!` (type/ts_name) or EventDescriptorRegistration \
+                     (rust_type/ts_name/kind_bits)"
                 ),
             )?;
             ensure(
-                count_occurrences(&content, &format!("ts_name: \"{payload}\"")) == 1,
+                !(manual && via_macro),
                 format!(
-                    "hbat EventPayload `{rust_type}` in {rel} must have exactly one EventDescriptorRegistration ts_name row"
-                ),
-            )?;
-            ensure(
-                count_occurrences(&content, &format!("kind_bits: {payload}::KIND.as_raw_u16()"))
-                    == 1,
-                format!(
-                    "hbat EventPayload `{rust_type}` in {rel} must register its derive-generated KIND in the manifest"
+                    "hbat EventPayload `{rust_type}` in {rel} must not register via both \
+                     `hbat_event_descriptor!` and manual EventDescriptorRegistration"
                 ),
             )?;
         }

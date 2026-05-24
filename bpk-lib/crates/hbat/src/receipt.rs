@@ -102,39 +102,29 @@ impl EventPayloadFixture for ReceiptVerifyAck {
     }
 }
 
-inventory::submit! {
-    crate::manifest::EventDescriptorRegistration {
-        rust_type: "hbat::receipt::ReceiptVerifyRequest",
-        ts_name: "ReceiptVerifyRequest",
-        schema_ref: RECEIPT_VERIFY_INPUT_SCHEMA_REF,
-        kind_bits: ReceiptVerifyRequest::KIND.as_raw_u16(),
-        fields: &[
-            crate::manifest::FieldRow { wire_name: "event_id_hex", type_token: "u128-hex", order: 0 },
-            crate::manifest::FieldRow { wire_name: "sequence", type_token: "u64-safe", order: 1 },
-            crate::manifest::FieldRow { wire_name: "content_hash_hex", type_token: "blake3-32-hex", order: 2 },
-            crate::manifest::FieldRow { wire_name: "key_id_hex", type_token: "key-id-hex", order: 3 },
-            crate::manifest::FieldRow { wire_name: "signature_hex", type_token: "option<ed25519-sig-hex>", order: 4 },
-            crate::manifest::FieldRow { wire_name: "extensions", type_token: "map<string,hex-blob>", order: 5 },
-        ],
-        fixture_bytes: || batpak::encoding::to_bytes(&ReceiptVerifyRequest::fixture_value()).ok(),
-        fixture_json: || serde_json::to_value(ReceiptVerifyRequest::fixture_value()).ok(),
-    }
+crate::hbat_event_descriptor! {
+    type = ReceiptVerifyRequest,
+    schema_ref = RECEIPT_VERIFY_INPUT_SCHEMA_REF,
+    ts_name = "ReceiptVerifyRequest",
+    fields = [
+        ("event_id_hex", "u128-hex"),
+        ("sequence", "u64-safe"),
+        ("content_hash_hex", "blake3-32-hex"),
+        ("key_id_hex", "key-id-hex"),
+        ("signature_hex", "option<ed25519-sig-hex>"),
+        ("extensions", "map<string,hex-blob>"),
+    ],
 }
 
-inventory::submit! {
-    crate::manifest::EventDescriptorRegistration {
-        rust_type: "hbat::receipt::ReceiptVerifyAck",
-        ts_name: "ReceiptVerifyAck",
-        schema_ref: RECEIPT_VERIFY_OUTPUT_SCHEMA_REF,
-        kind_bits: ReceiptVerifyAck::KIND.as_raw_u16(),
-        fields: &[
-            crate::manifest::FieldRow { wire_name: "valid", type_token: "bool", order: 0 },
-            crate::manifest::FieldRow { wire_name: "outcome", type_token: "string", order: 1 },
-            crate::manifest::FieldRow { wire_name: "reason_code", type_token: "option<string>", order: 2 },
-        ],
-        fixture_bytes: || batpak::encoding::to_bytes(&ReceiptVerifyAck::fixture_value()).ok(),
-        fixture_json: || serde_json::to_value(ReceiptVerifyAck::fixture_value()).ok(),
-    }
+crate::hbat_event_descriptor! {
+    type = ReceiptVerifyAck,
+    schema_ref = RECEIPT_VERIFY_OUTPUT_SCHEMA_REF,
+    ts_name = "ReceiptVerifyAck",
+    fields = [
+        ("valid", "bool"),
+        ("outcome", "string"),
+        ("reason_code", "option<string>"),
+    ],
 }
 
 #[cfg(test)]

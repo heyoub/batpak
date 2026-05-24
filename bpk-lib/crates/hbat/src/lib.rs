@@ -22,11 +22,18 @@
 //! - [`walk::EVENT_WALK_DESCRIPTOR`] (`event.walk`) walks bounded
 //!   hash-chain ancestry.
 //! - [`manifest::descriptors`] consumes inventory registrations for both
-//!   event payloads and operations. Explicit fixture metadata (`FieldRow`,
-//!   golden hex assembly via `build_operation`) remains Phase 0 plumbing.
+//!   event payloads and operations. Payload descriptors submit via
+//!   [`hbat_event_descriptor!`]; operation descriptors use
+//!   [`manifest::OperationDescriptorRegistration`] + `inventory::submit!`.
+//!   Fixtures remain hand-authored on [`EventPayloadFixture`]; the macro
+//!   wires field rows and fixture closures only.
 
 /// `bank.commit` and `event.get` payload types + descriptors.
 pub mod bank;
+/// Declarative macro for payload [`manifest::EventDescriptorRegistration`]
+/// inventory submissions.
+#[macro_use]
+mod descriptor;
 /// Runtime handlers for [`bank`] operations. Capture `Arc<Store>`; pulled
 /// into the binary via [`crate::main`] and not part of the library's
 /// pure-data surface that `xtask` depends on.

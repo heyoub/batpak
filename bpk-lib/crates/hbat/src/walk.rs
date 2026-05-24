@@ -77,33 +77,23 @@ impl EventPayloadFixture for EventWalkAck {
     }
 }
 
-inventory::submit! {
-    crate::manifest::EventDescriptorRegistration {
-        rust_type: "hbat::walk::EventWalkRequest",
-        ts_name: "EventWalkRequest",
-        schema_ref: EVENT_WALK_INPUT_SCHEMA_REF,
-        kind_bits: EventWalkRequest::KIND.as_raw_u16(),
-        fields: &[
-            crate::manifest::FieldRow { wire_name: "event_id_hex", type_token: "u128-hex", order: 0 },
-            crate::manifest::FieldRow { wire_name: "limit", type_token: "u64-safe", order: 1 },
-        ],
-        fixture_bytes: || batpak::encoding::to_bytes(&EventWalkRequest::fixture_value()).ok(),
-        fixture_json: || serde_json::to_value(EventWalkRequest::fixture_value()).ok(),
-    }
+crate::hbat_event_descriptor! {
+    type = EventWalkRequest,
+    schema_ref = EVENT_WALK_INPUT_SCHEMA_REF,
+    ts_name = "EventWalkRequest",
+    fields = [
+        ("event_id_hex", "u128-hex"),
+        ("limit", "u64-safe"),
+    ],
 }
 
-inventory::submit! {
-    crate::manifest::EventDescriptorRegistration {
-        rust_type: "hbat::walk::EventWalkAck",
-        ts_name: "EventWalkAck",
-        schema_ref: EVENT_WALK_OUTPUT_SCHEMA_REF,
-        kind_bits: EventWalkAck::KIND.as_raw_u16(),
-        fields: &[
-            crate::manifest::FieldRow { wire_name: "entries", type_token: "array<EventSummary>", order: 0 },
-        ],
-        fixture_bytes: || batpak::encoding::to_bytes(&EventWalkAck::fixture_value()).ok(),
-        fixture_json: || serde_json::to_value(EventWalkAck::fixture_value()).ok(),
-    }
+crate::hbat_event_descriptor! {
+    type = EventWalkAck,
+    schema_ref = EVENT_WALK_OUTPUT_SCHEMA_REF,
+    ts_name = "EventWalkAck",
+    fields = [
+        ("entries", "array<EventSummary>"),
+    ],
 }
 
 #[cfg(test)]
