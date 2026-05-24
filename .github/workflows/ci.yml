@@ -4,6 +4,22 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, labeled]
   workflow_dispatch:
+    # Default manual runs are intentionally cheap. Choose an explicit proof
+    # profile when you want to spend hosted CI minutes on deeper evidence.
+    inputs:
+      proof:
+        description: "Proof profile to run"
+        required: true
+        default: fast
+        type: choice
+        options:
+          - fast
+          - verify
+          - windows
+          - mutants
+          - loom
+          - chaos
+          - heavy
   schedule:
     - cron: "0 7 * * 1"
     - cron: "30 7 * * *"
@@ -26,13 +42,16 @@ env:
   CHAOS_ITERATIONS: 500
 
 jobs:
+  # Cost posture: pull requests run the fast devcontainer lane by default.
+  # Expensive proof jobs are label-gated (`run-heavy-ci`, `run-mutants`,
+  # `run-windows`, `run-loom`, `run-chaos`) or manual-profile gated.
   rust-changed:
     name: Detect Rust-relevant changes
     runs-on: ubuntu-latest
     outputs:
       rust: ${{ steps.detect.outputs.rust }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           persist-credentials: false
           fetch-depth: 0
@@ -54,10 +73,10 @@ jobs:
     name: CI fast (ubuntu-devcontainer)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           persist-credentials: false
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
         with:
           shared-key: ci-fast
       - uses: ./.github/actions/setup-devcontainer
@@ -65,17 +84,25 @@ jobs:
         env:
           BATPAK_DEVCONTAINER_IMAGE: batpak-devcontainer:ci
           BATPAK_DEVCONTAINER_SKIP_BUILD: "1"
-        run: bash ./scripts/run-in-devcontainer.sh 'just ci-fast'
+        run: bash ./scripts/run-in-devcontainer.sh 'cargo xtask ci-fast'
 
   verify-linux:
     name: Verify (ubuntu-devcontainer)
     runs-on: ubuntu-latest
+    if: >-
+      (github.event_name == 'workflow_dispatch' &&
+        (github.event.inputs.proof == 'verify' ||
+         github.event.inputs.proof == 'loom' ||
+         github.event.inputs.proof == 'heavy')) ||
+      (github.event_name == 'pull_request' &&
+        (contains(github.event.pull_request.labels.*.name, 'run-heavy-ci') ||
+         contains(github.event.pull_request.labels.*.name, 'run-loom')))
     needs: [ci-fast-linux]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           persist-credentials: false
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
         with:
           shared-key: verify
       - uses: ./.github/actions/setup-devcontainer
@@ -83,22 +110,29 @@ jobs:
         env:
           BATPAK_DEVCONTAINER_IMAGE: batpak-devcontainer:ci
           BATPAK_DEVCONTAINER_SKIP_BUILD: "1"
-        run: bash ./scripts/run-in-devcontainer.sh 'just verify'
+        run: bash ./scripts/run-in-devcontainer.sh 'cargo xtask preflight'
 
   ci-windows:
     name: CI Windows surface (native)
     runs-on: windows-latest
+    if: >-
+      (github.event_name == 'workflow_dispatch' &&
+        (github.event.inputs.proof == 'windows' ||
+         github.event.inputs.proof == 'heavy')) ||
+      (github.event_name == 'pull_request' &&
+        (contains(github.event.pull_request.labels.*.name, 'run-heavy-ci') ||
+         contains(github.event.pull_request.labels.*.name, 'run-windows')))
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
           components: clippy,rustfmt
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@f48d2f8ba2b452934c948b7be1a768079c3632ff # v2
         with:
           tool: cargo-nextest@0.9.132
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
         with:
           shared-key: ci-windows
       - name: Native Windows surface lane
@@ -108,7 +142,13 @@ jobs:
   feature-isolation:
     runs-on: ubuntu-latest
     needs: [ci-fast-linux, verify-linux, rust-changed]
-    if: needs.rust-changed.outputs.rust == 'true'
+    if: >-
+      needs.rust-changed.outputs.rust == 'true' &&
+      ((github.event_name == 'workflow_dispatch' &&
+        (github.event.inputs.proof == 'verify' ||
+         github.event.inputs.proof == 'heavy')) ||
+       (github.event_name == 'pull_request' &&
+        contains(github.event.pull_request.labels.*.name, 'run-heavy-ci')))
     strategy:
       fail-fast: false
       matrix:
@@ -119,10 +159,10 @@ jobs:
           - "--no-default-features --features dangerous-test-hooks"
           - "--all-features"
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           persist-credentials: false
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
       - uses: ./.github/actions/setup-devcontainer
       - name: Feature-isolation test matrix
         env:
@@ -134,11 +174,17 @@ jobs:
     name: Smoke (quickstart, packaged consumer, template)
     runs-on: ubuntu-latest
     needs: [verify-linux]
+    if: >-
+      (github.event_name == 'workflow_dispatch' &&
+        (github.event.inputs.proof == 'verify' ||
+         github.event.inputs.proof == 'heavy')) ||
+      (github.event_name == 'pull_request' &&
+        contains(github.event.pull_request.labels.*.name, 'run-heavy-ci'))
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           persist-credentials: false
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
       - uses: ./.github/actions/setup-devcontainer
       - name: Run onboarding smoke checks
         env:
@@ -162,16 +208,22 @@ jobs:
     name: TS Parity (manifest + canonical + heartbeat-spike)
     runs-on: ubuntu-latest
     needs: [verify-linux]
+    if: >-
+      (github.event_name == 'workflow_dispatch' &&
+        (github.event.inputs.proof == 'verify' ||
+         github.event.inputs.proof == 'heavy')) ||
+      (github.event_name == 'pull_request' &&
+        contains(github.event.pull_request.labels.*.name, 'run-heavy-ci'))
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           persist-credentials: false
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
       - name: Install pnpm
         run: |
           corepack enable
           corepack prepare pnpm@10.33.0 --activate
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22"
           cache: pnpm
@@ -251,7 +303,7 @@ jobs:
           echo "determinism gate: ok"
       - name: Upload generated artifacts on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ts-parity-generated-debug
           path: |
@@ -264,7 +316,12 @@ jobs:
     name: Mutation smoke (${{ matrix.seam }})
     runs-on: ubuntu-latest
     if: >-
-      (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch') &&
+      ((github.event_name == 'workflow_dispatch' &&
+        (github.event.inputs.proof == 'mutants' ||
+         github.event.inputs.proof == 'heavy')) ||
+       (github.event_name == 'pull_request' &&
+        (contains(github.event.pull_request.labels.*.name, 'run-heavy-ci') ||
+         contains(github.event.pull_request.labels.*.name, 'run-mutants')))) &&
       needs.rust-changed.outputs.rust == 'true'
     needs: [ci-fast-linux, rust-changed]
     strategy:
@@ -285,10 +342,10 @@ jobs:
           - syncbat-register-catalog
           - netbat-boundary-protocol
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           persist-credentials: false
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
         with:
           shared-key: mutants-smoke-${{ matrix.seam }}
       - uses: ./.github/actions/setup-devcontainer
@@ -302,14 +359,19 @@ jobs:
     name: Mutation smoke (repo-wide ratchet)
     runs-on: ubuntu-latest
     if: >-
-      (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch') &&
+      ((github.event_name == 'workflow_dispatch' &&
+        (github.event.inputs.proof == 'mutants' ||
+         github.event.inputs.proof == 'heavy')) ||
+       (github.event_name == 'pull_request' &&
+        (contains(github.event.pull_request.labels.*.name, 'run-heavy-ci') ||
+         contains(github.event.pull_request.labels.*.name, 'run-mutants')))) &&
       needs.rust-changed.outputs.rust == 'true'
     needs: [ci-fast-linux, rust-changed]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           persist-credentials: false
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
         with:
           shared-key: mutants-smoke-repo-wide
       - uses: ./.github/actions/setup-devcontainer
@@ -323,14 +385,18 @@ jobs:
     name: Loom schedule proof
     runs-on: ubuntu-latest
     if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-loom'))
+      (github.event_name == 'workflow_dispatch' &&
+        (github.event.inputs.proof == 'loom' ||
+         github.event.inputs.proof == 'heavy')) ||
+      (github.event_name == 'pull_request' &&
+        (contains(github.event.pull_request.labels.*.name, 'run-heavy-ci') ||
+         contains(github.event.pull_request.labels.*.name, 'run-loom')))
     needs: [ci-fast-linux, verify-linux]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           persist-credentials: false
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
       - uses: ./.github/actions/setup-devcontainer
       - name: Bounded loom schedule proofs
         env:
@@ -362,10 +428,10 @@ jobs:
           - 12/12
     name: Mutation full (${{ matrix.surface }} shard ${{ matrix.shard }})
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           persist-credentials: false
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
         with:
           shared-key: mutants-full-${{ matrix.surface }}-${{ matrix.shard }}
       - uses: ./.github/actions/setup-devcontainer
@@ -379,15 +445,17 @@ jobs:
     name: Chaos nightly (dm-flakey)
     runs-on: ubuntu-latest
     if: >-
-      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_dispatch' &&
+        (github.event.inputs.proof == 'chaos' ||
+         github.event.inputs.proof == 'heavy')) ||
       (github.event_name == 'schedule' && github.event.schedule == '30 7 * * *') ||
       (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-chaos'))
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
       - name: Install block-device chaos tools
         run: |
           sudo apt-get update
@@ -409,17 +477,17 @@ jobs:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           persist-credentials: false
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
       - uses: ./.github/actions/setup-devcontainer
       - name: Build root docs site + rustdoc
         env:
           BATPAK_DEVCONTAINER_IMAGE: batpak-devcontainer:ci
           BATPAK_DEVCONTAINER_SKIP_BUILD: "1"
         run: bash ./scripts/run-in-devcontainer.sh 'cargo xtask docs'
-      - uses: actions/upload-pages-artifact@v5
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
         with:
           path: bpk-lib/target/site
       - id: deploy
@@ -433,4 +501,4 @@ jobs:
         # step succeeds silently and `continue-on-error` becomes a no-op.
         # See: https://github.com/TheFreeBatteryFactory/batpak/settings/pages
         continue-on-error: true
-        uses: actions/deploy-pages@v5
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5

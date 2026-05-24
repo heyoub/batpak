@@ -229,6 +229,11 @@ fn control_plane_surface_smoke() {
     );
     let outbox_len = outbox.len();
     assert_eq!(outbox_len, 4);
+    assert!(
+        !outbox.is_empty(),
+        "PROPERTY: staged outbox work must make is_empty false before flush.\n\
+         Investigate: src/store/write/control/outbox.rs Outbox::is_empty."
+    );
     let flush_ticket = outbox.submit_flush().expect("submit flush");
     let _ =
         wait_batch_ticket(&flush_ticket, "control-plane outbox submit flush").expect("wait flush");

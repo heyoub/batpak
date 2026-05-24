@@ -227,6 +227,19 @@ describe("Effect 4 schema round-trip via @batpak/schema", () => {
       }),
     ).toThrow();
   });
+
+  it("rejects zero limits for bounded query requests", () => {
+    expect(() =>
+      encodeBytes(Generated.EventQueryRequest, {
+        entity: null,
+        scope: null,
+        kind_category: null,
+        kind_type_id: null,
+        after_global_sequence: null,
+        limit: 0,
+      }),
+    ).toThrow();
+  });
 });
 
 describe("operation handles in generated/operations", () => {

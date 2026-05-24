@@ -34,9 +34,11 @@ const SUPPORTED_FIELD_TYPES = new Set<string>([
   "u16",
   "u32",
   "u64-safe",
+  "u64-safe-positive",
   "u64-millis",
   "i64-microseconds",
   "option<string>",
+  "option<u128-hex>",
   "option<u8>",
   "option<u16>",
   "option<u64-safe>",
@@ -461,10 +463,14 @@ function schemaForToken(token: string): string {
     case "u64-safe":
     case "u64-millis":
       return checkedNumber(0, SAFE_MAX);
+    case "u64-safe-positive":
+      return checkedNumber(1, SAFE_MAX);
     case "i64-microseconds":
       return checkedNumber(SAFE_MIN, SAFE_MAX);
     case "option<string>":
       return "Schema.NullOr(Schema.String)";
+    case "option<u128-hex>":
+      return `Schema.NullOr(${brandedHex("EventIdHex", 32)})`;
     case "option<u8>":
       return `Schema.NullOr(${checkedNumber(0, 255)})`;
     case "option<u16>":
@@ -526,11 +532,14 @@ export function tsTypeForToken(token: string): string {
     case "u16":
     case "u32":
     case "u64-safe":
+    case "u64-safe-positive":
     case "u64-millis":
     case "i64-microseconds":
       return "number";
     case "option<string>":
       return "string | null";
+    case "option<u128-hex>":
+      return '(string & Schema.Brand<"EventIdHex">) | null';
     case "option<u8>":
     case "option<u16>":
     case "option<u64-safe>":

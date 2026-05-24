@@ -35,7 +35,7 @@ RUN groupadd --gid ${USER_GID} dev \
 RUN curl -L --proto '=https' --tlsv1.2 -sSf \
     https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh \
     | bash
-RUN cargo binstall --no-confirm just || cargo install --locked just
+RUN cargo binstall --no-confirm just@1.48.1 || cargo install --locked just@1.48.1
 RUN cargo binstall --no-confirm cargo-deny@0.19.0 || cargo install --locked cargo-deny@0.19.0
 RUN cargo binstall --no-confirm cargo-audit@0.22.1 || cargo install --locked cargo-audit@0.22.1
 RUN cargo binstall --no-confirm cargo-nextest@0.9.132 || cargo install --locked cargo-nextest@0.9.132

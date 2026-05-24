@@ -126,6 +126,8 @@ mod tests {
                 "crates/core/src/store/write/**/*.rs",
                 "--file",
                 "crates/core/src/store/write/control/**/*.rs",
+                "--exclude-re",
+                lane.exclude_res[0],
                 "--all-features",
                 "--cargo-arg",
                 "--locked",

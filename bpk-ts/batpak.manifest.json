@@ -208,7 +208,7 @@
         {
           "wireName": "causation_id_hex",
           "tsName": "causation_id_hex",
-          "typeToken": "option<string>",
+          "typeToken": "option<u128-hex>",
           "order": 4
         },
         {
@@ -303,7 +303,7 @@
         {
           "wireName": "limit",
           "tsName": "limit",
-          "typeToken": "u64-safe",
+          "typeToken": "u64-safe-positive",
           "order": 5
         }
       ],
@@ -357,7 +357,7 @@
         {
           "wireName": "causation_id_hex",
           "tsName": "causation_id_hex",
-          "typeToken": "option<string>",
+          "typeToken": "option<u128-hex>",
           "order": 5
         },
         {

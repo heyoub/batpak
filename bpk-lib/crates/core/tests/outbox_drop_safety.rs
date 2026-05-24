@@ -50,6 +50,10 @@ fn dropping_outbox_without_flush_commits_nothing() {
             outbox_len, 2,
             "PROPERTY: staged items must be visible to the local outbox view"
         );
+        assert!(
+            !outbox.is_empty(),
+            "PROPERTY: Outbox::is_empty must reflect staged items before flush/drop"
+        );
         // Drop the outbox implicitly at scope exit without calling flush.
     }
 
@@ -118,6 +122,10 @@ fn re_staging_after_flush_stays_coherent() {
         "PROPERTY: flush must fully drain the outbox — len after flush was {}",
         outbox_len_after_flush
     );
+    assert!(
+        outbox.is_empty(),
+        "PROPERTY: Outbox::is_empty must return to true after flush drains staged items"
+    );
 
     // Stage more items but do NOT flush. Drop the outbox at scope end.
     outbox
@@ -126,6 +134,10 @@ fn re_staging_after_flush_stays_coherent() {
     outbox
         .stage(coord.clone(), kind, &serde_json::json!({"discarded": 2}))
         .expect("re-stage after flush");
+    assert!(
+        !outbox.is_empty(),
+        "PROPERTY: Outbox::is_empty must flip back to false after re-staging"
+    );
     drop(outbox);
 
     // Only the initially flushed item is visible.

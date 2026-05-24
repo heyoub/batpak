@@ -5,6 +5,7 @@ use batpak::prelude::*;
 use batpak::store::{AppendOptions, BatchAppendItem, Store, StoreConfig, StoreError};
 use std::sync::{Arc, Barrier};
 use std::thread;
+use std::time::Duration;
 use tempfile::TempDir;
 
 #[path = "support/bounded_writer_reply.rs"]
@@ -301,4 +302,55 @@ fn shutdown_auto_cancels_pending_fenced_responses_after_drain_mix() {
         "PROPERTY: shutdown auto-cancel must preserve visible unfenced work while keeping fenced work hidden."
     );
     reopened.close().expect("close reopened");
+}
+
+#[test]
+fn notification_is_not_observable_before_published_visibility() {
+    let dir = TempDir::new().expect("temp dir");
+    let store = Store::open(command_flow_config(&dir)).expect("open store");
+    let coord = Coordinate::new("entity:writer-notify", "scope:test").expect("coord");
+    let subscription = store.subscribe_lossy(&Region::entity("entity:writer-notify"));
+
+    let ticket = store
+        .submit_batch(vec![flow_batch_item(
+            coord.clone(),
+            0x4FF,
+            &serde_json::json!({"notify": "visible"}),
+        )])
+        .expect("submit append batch");
+    let notification = subscription
+        .receiver()
+        .recv_timeout(Duration::from_secs(2))
+        .expect("notification for submitted append");
+
+    let visible = store.by_entity("entity:writer-notify");
+    assert_eq!(
+        visible.len(),
+        1,
+        "PROPERTY: observing a writer notification must imply the event is already published and query-visible."
+    );
+    assert_eq!(
+        visible[0].event_id(),
+        notification.event_id,
+        "PROPERTY: the notified event id must identify the visible index entry."
+    );
+    assert_eq!(
+        visible[0].global_sequence(),
+        notification.sequence,
+        "PROPERTY: the notified sequence must already be visible in the published index."
+    );
+
+    let receipts =
+        writer_reply(ticket.receiver(), "notified append batch ticket").expect("append receipt");
+    assert_eq!(
+        receipts.len(),
+        1,
+        "PROPERTY: the notification test batch must commit exactly one item."
+    );
+    assert_eq!(
+        u128::from(receipts[0].event_id),
+        notification.event_id,
+        "PROPERTY: notification, receipt, and visible entry must agree on event identity."
+    );
+    store.close().expect("close");
 }

@@ -157,3 +157,26 @@ pub(crate) fn read_exact_at(
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::remove_dir_all;
+    use std::error::Error;
+
+    #[test]
+    fn remove_dir_all_removes_nested_directory_tree() -> Result<(), Box<dyn Error>> {
+        let dir = tempfile::tempdir()?;
+        let root = dir.path().join("tree");
+        let nested = root.join("nested");
+        std::fs::create_dir_all(&nested)?;
+        std::fs::write(nested.join("leaf.txt"), b"leaf")?;
+
+        remove_dir_all(&root)?;
+
+        assert!(
+            !root.exists(),
+            "PROPERTY: platform remove_dir_all must remove directories, not only files or leaves"
+        );
+        Ok(())
+    }
+}

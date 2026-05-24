@@ -30,6 +30,28 @@ impl EventSourced for Counter {
 
 struct FailingProjection;
 
+struct FixedMonoClock {
+    mono_ns: i64,
+}
+
+impl crate::store::Clock for FixedMonoClock {
+    fn now_us(&self) -> i64 {
+        0
+    }
+
+    fn now_wall_ns(&self) -> i64 {
+        0
+    }
+
+    fn now_mono_ns(&self) -> i64 {
+        self.mono_ns
+    }
+
+    fn process_boot_ns(&self) -> u64 {
+        0
+    }
+}
+
 impl serde::Serialize for FailingProjection {
     fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -39,6 +61,19 @@ impl serde::Serialize for FailingProjection {
             "intentional projection serialization failure",
         ))
     }
+}
+
+#[test]
+fn elapsed_us_converts_nanoseconds_by_division() {
+    let clock = FixedMonoClock { mono_ns: 3_456 };
+
+    assert_eq!(
+        elapsed_us(&clock, 123),
+        3,
+        "PROPERTY: projection flow timing must convert elapsed nanoseconds to microseconds by division.\n\
+         Investigate: src/store/projection/flow.rs elapsed_us.\n\
+         Common causes: using remainder/modulo instead of / 1_000."
+    );
 }
 
 fn append_counter_event(store: &Store<Open>, entity: &str) -> TestResult {

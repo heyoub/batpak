@@ -45,7 +45,7 @@ pub(crate) fn path_bytes_for_identity_digest(path: &Path) -> Cow<'_, [u8]> {
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_non_unix_path_identity_string;
+    use super::{normalize_non_unix_path_identity_string, path_bytes_for_identity_digest};
 
     #[test]
     fn non_unix_path_identity_strips_windows_verbatim_prefix() {
@@ -60,6 +60,18 @@ mod tests {
         assert_eq!(
             normalize_non_unix_path_identity_string("batpak\\store").as_ref(),
             "batpak\\store"
+        );
+    }
+
+    #[test]
+    fn path_identity_bytes_differ_by_path() {
+        let alpha = std::path::Path::new("batpak-store-alpha");
+        let beta = std::path::Path::new("batpak-store-beta");
+
+        assert_ne!(
+            path_bytes_for_identity_digest(alpha).as_ref(),
+            path_bytes_for_identity_digest(beta).as_ref(),
+            "PROPERTY: path identity material must include the actual path bytes"
         );
     }
 }

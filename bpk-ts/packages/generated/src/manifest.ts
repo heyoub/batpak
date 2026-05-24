@@ -217,7 +217,7 @@ export const BATPAK_TS_MANIFEST = {
         {
           "wireName": "causation_id_hex",
           "tsName": "causation_id_hex",
-          "typeToken": "option<string>",
+          "typeToken": "option<u128-hex>",
           "order": 4
         },
         {
@@ -312,7 +312,7 @@ export const BATPAK_TS_MANIFEST = {
         {
           "wireName": "limit",
           "tsName": "limit",
-          "typeToken": "u64-safe",
+          "typeToken": "u64-safe-positive",
           "order": 5
         }
       ],
@@ -366,7 +366,7 @@ export const BATPAK_TS_MANIFEST = {
         {
           "wireName": "causation_id_hex",
           "tsName": "causation_id_hex",
-          "typeToken": "option<string>",
+          "typeToken": "option<u128-hex>",
           "order": 5
         },
         {

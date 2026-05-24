@@ -249,3 +249,29 @@ impl Clock for MonotonicClock {
         self.inner.process_boot_ns()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{Clock, FnClock};
+    use std::sync::Arc;
+
+    #[test]
+    fn fn_clock_preserves_negative_wall_values_but_not_monotonic_time() {
+        let clock = FnClock::new(Arc::new(|| -7));
+
+        assert_eq!(
+            clock.now_us(),
+            -7,
+            "PROPERTY: FnClock must expose malformed caller wall time for validation"
+        );
+        assert_eq!(
+            clock.now_wall_ns(),
+            -7_000,
+            "PROPERTY: wall nanoseconds come from the caller wall clock, not the monotonic anchor"
+        );
+        assert!(
+            clock.now_mono_ns() >= 0,
+            "PROPERTY: process-local monotonic evidence must not echo a negative caller wall clock"
+        );
+    }
+}

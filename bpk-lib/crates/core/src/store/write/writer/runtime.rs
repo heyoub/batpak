@@ -144,7 +144,7 @@ pub(super) fn writer_thread_main(
                 }
 
                 seg_id = match find_latest_segment_id(&runtime.config.data_dir) {
-                    Ok(latest) => latest.unwrap_or(seg_id) + 1,
+                    Ok(latest) => next_restart_segment_id(latest, seg_id),
                     Err(error) => {
                         tracing::error!(
                             "writer restart failed — cannot enumerate segments: {error}. Thread exiting."
@@ -204,6 +204,14 @@ fn restart_budget_allows(
     }
 }
 
+fn next_restart_segment_id(latest: Option<u64>, fallback: u64) -> u64 {
+    latest.unwrap_or(fallback).saturating_add(1)
+}
+
+fn group_commit_drain_budget_remaining(drained: u32, extra_budget: u32) -> bool {
+    drained < extra_budget
+}
+
 /// The writer's main loop. Runs on the background thread.
 /// The spawn closure owns the Arcs; this function borrows them.
 fn writer_loop(
@@ -247,7 +255,7 @@ fn writer_loop(
         if outcome.enter_group_commit_drain {
             let extra_budget = runtime.validated_cfg.group_commit_drain_budget;
             let mut drained = 0u32;
-            while drained < extra_budget {
+            while group_commit_drain_budget_remaining(drained, extra_budget) {
                 let Ok(next_cmd) = runtime.rx.try_recv() else {
                     break;
                 };
@@ -358,9 +366,19 @@ pub(crate) fn find_latest_segment_id(dir: &std::path::Path) -> Result<Option<u64
 }
 
 #[cfg(test)]
+mod mutation_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
+    use crate::store::index::StoreIndex;
+    use crate::store::segment::scan::Reader;
+    use crate::store::write::writer::{ReactorSubscriberList, SubscriberList, WatermarkState};
+    use crate::store::SystemClock;
     use std::path::Path;
+    use std::sync::Arc;
+    use std::time::Duration;
+    use tempfile::TempDir;
 
     #[test]
     fn writer_thread_name_is_stable_nonempty_and_prefixed() {
@@ -435,6 +453,83 @@ mod tests {
         assert_eq!(
             restarts, 1,
             "PROPERTY: reset starts a fresh window with one accepted restart"
+        );
+    }
+
+    #[test]
+    fn shutdown_drain_limit_is_exclusive_upper_bound() {
+        let dir = TempDir::new().expect("temp dir");
+        let config = Arc::new(
+            StoreConfig::new(dir.path())
+                .with_shutdown_drain_limit(1)
+                .with_enable_checkpoint(false)
+                .with_enable_mmap_index(false),
+        );
+        crate::store::platform::fs::create_dir_all(&config.data_dir).expect("create store dir");
+        let validated_cfg = Arc::new(config.validated().expect("validated config"));
+        let index = Arc::new(StoreIndex::with_config(&config.index));
+        let reader = Arc::new(Reader::new(
+            config.data_dir.clone(),
+            config.fd_budget,
+            validated_cfg.clock_arc(),
+        ));
+        let subscribers = SubscriberList::new();
+        let reactor_subscribers = ReactorSubscriberList::new();
+        let watermark_handle = WatermarkState::handle(Arc::new(SystemClock::new()));
+        let segment = Segment::<Active>::create_with_created_ns(
+            &config.data_dir,
+            1,
+            validated_cfg.now_wall_ns(),
+        )
+        .expect("create active segment");
+        let (tx, rx) = flume::bounded(3);
+        let (shutdown_tx, shutdown_rx) = flume::bounded(1);
+        let (first_sync_tx, first_sync_rx) = flume::bounded(1);
+        let (second_sync_tx, second_sync_rx) = flume::bounded(1);
+
+        tx.send(WriterCommand::Shutdown {
+            respond: shutdown_tx,
+        })
+        .expect("queue shutdown");
+        tx.send(WriterCommand::Sync {
+            respond: first_sync_tx,
+        })
+        .expect("queue first sync behind shutdown");
+        tx.send(WriterCommand::Sync {
+            respond: second_sync_tx,
+        })
+        .expect("queue second sync behind shutdown");
+        drop(tx);
+
+        writer_loop(
+            WriterRuntime {
+                rx: &rx,
+                config: &config,
+                validated_cfg: &validated_cfg,
+                index: &index,
+                subscribers: &subscribers,
+                reactor_subscribers: &reactor_subscribers,
+                reader: &reader,
+                watermark_handle: &watermark_handle,
+            },
+            segment,
+            1,
+        );
+
+        shutdown_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("shutdown reply")
+            .expect("shutdown succeeds");
+        first_sync_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("first queued sync reply")
+            .expect("first queued sync succeeds");
+        assert!(
+            second_sync_rx
+                .recv_timeout(Duration::from_millis(50))
+                .is_err(),
+            "PROPERTY: shutdown_drain_limit=1 must drain exactly one queued command after Shutdown; \
+             a <= loop drains the second Sync too."
         );
     }
 }

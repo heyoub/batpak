@@ -92,7 +92,7 @@ export const EventGetAck = Schema.Struct({
   sequence: Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 9007199254740991 }))),
   timestamp_us: Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: -9007199254740991, maximum: 9007199254740991 }))),
   correlation_id_hex: Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{32}$/u)), Schema.brand("EventIdHex")),
-  causation_id_hex: Schema.NullOr(Schema.String),
+  causation_id_hex: Schema.NullOr(Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{32}$/u)), Schema.brand("EventIdHex"))),
   kind_category: Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 255 }))),
   kind_type_id: Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 65535 }))),
   entity: Schema.String,
@@ -125,7 +125,7 @@ export const EventQueryRequest = Schema.Struct({
   kind_category: Schema.NullOr(Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 255 })))),
   kind_type_id: Schema.NullOr(Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 65535 })))),
   after_global_sequence: Schema.NullOr(Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 9007199254740991 })))),
-  limit: Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 9007199254740991 }))),
+  limit: Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 1, maximum: 9007199254740991 }))),
 });
 // eslint-disable-next-line @typescript-eslint/no-redeclare
 export type EventQueryRequest = typeof EventQueryRequest.Type;
@@ -147,7 +147,7 @@ export const EventSummary = Schema.Struct({
   wall_ms: Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 9007199254740991 }))),
   clock: Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 4294967295 }))),
   correlation_id_hex: Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{32}$/u)), Schema.brand("EventIdHex")),
-  causation_id_hex: Schema.NullOr(Schema.String),
+  causation_id_hex: Schema.NullOr(Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{32}$/u)), Schema.brand("EventIdHex"))),
   kind_category: Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 255 }))),
   kind_type_id: Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 65535 }))),
   entity: Schema.String,

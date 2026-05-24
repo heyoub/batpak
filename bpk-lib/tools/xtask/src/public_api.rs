@@ -188,8 +188,18 @@ pub(crate) fn semver_check(args: SemverCheckArgs) -> Result<()> {
 fn normalize_public_api_snapshot(text: &str) -> Cow<'_, str> {
     let mut normalized = Cow::Borrowed(text);
     for (from, to) in [
-        ("std::net::tcp::TcpListener", "std::net::TcpListener"),
-        ("std::net::tcp::TcpStream", "std::net::TcpStream"),
+        ("\r\n", "\n"),
+        ("std::net::tcp::", "std::net::"),
+        ("std::io::error::ErrorKind", "std::io::ErrorKind"),
+        ("std::io::error::Error", "std::io::Error"),
+        (
+            "core::iter::traits::collect::IntoIterator",
+            "core::iter::IntoIterator",
+        ),
+        (
+            "core::iter::traits::iterator::Iterator",
+            "core::iter::Iterator",
+        ),
     ] {
         if normalized.contains(from) {
             normalized = Cow::Owned(normalized.replace(from, to));
@@ -234,11 +244,28 @@ mod tests {
 
     #[test]
     fn normalize_public_api_snapshot_collapses_tcp_module_paths() {
-        let input = "pub fn netbat::serve_tcp_listener(listener: std::net::tcp::TcpListener)";
+        let input = "pub fn netbat::serve_tcp_listener(listener: std::net::tcp::TcpListener)\r\n";
         assert_eq!(
             normalize_public_api_snapshot(input),
-            "pub fn netbat::serve_tcp_listener(listener: std::net::TcpListener)"
+            "pub fn netbat::serve_tcp_listener(listener: std::net::TcpListener)\n"
         );
+    }
+
+    #[test]
+    fn normalize_public_api_snapshot_collapses_std_path_aliases() {
+        let input = concat!(
+            "impl core::convert::From<std::io::error::Error> for netbat::NetbatError\n",
+            "pub netbat::NetbatError::Io::kind: std::io::error::ErrorKind\n",
+            "pub fn netbat::Server::routes(&self) -> impl core::iter::traits::iterator::Iterator<Item = &netbat::Route>\n",
+            "pub fn netbat::inspect_core_operations<I, S>(core: &syncbat::core::Core, operation_names: I) -> netbat::CoreHealth where I: core::iter::traits::collect::IntoIterator<Item = S>, S: core::convert::AsRef<str>\n",
+        );
+        let expected = concat!(
+            "impl core::convert::From<std::io::Error> for netbat::NetbatError\n",
+            "pub netbat::NetbatError::Io::kind: std::io::ErrorKind\n",
+            "pub fn netbat::Server::routes(&self) -> impl core::iter::Iterator<Item = &netbat::Route>\n",
+            "pub fn netbat::inspect_core_operations<I, S>(core: &syncbat::core::Core, operation_names: I) -> netbat::CoreHealth where I: core::iter::IntoIterator<Item = S>, S: core::convert::AsRef<str>\n",
+        );
+        assert_eq!(normalize_public_api_snapshot(input), expected);
     }
 
     #[test]

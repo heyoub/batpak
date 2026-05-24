@@ -61,6 +61,42 @@ fn native_get_surfaces_non_not_found_io_errors() {
 }
 
 #[test]
+fn native_get_surfaces_cache_entry_path_that_is_directory() {
+    let dir = TempDir::new().expect("temp dir");
+    let cache_path = dir.path().join("cache");
+    let cache = NativeCache::open(&cache_path).expect("open native cache");
+    let shard_path = cache_path.join("61");
+    let entry_path = shard_path.join("61.bin");
+    std::fs::create_dir_all(&entry_path).expect("create entry path as directory");
+
+    let result = cache.get(b"a");
+    assert!(
+        matches!(result, Err(StoreError::CacheFailed(_))),
+        "PROPERTY: a cache entry path that is a directory must surface as CacheFailed, not as a cache miss or decoded value.\n\
+         Investigate: src/store/projection/mod.rs NativeCache::get.\n\
+         Common causes: treating directories as readable cache files."
+    );
+}
+
+#[test]
+fn native_delete_prefix_visits_matching_overlong_shard_directory() {
+    let dir = TempDir::new().expect("temp dir");
+    let cache_path = dir.path().join("cache");
+    let cache = NativeCache::open(&cache_path).expect("open native cache");
+    let overlong_shard = cache_path.join("616");
+    std::fs::create_dir_all(&overlong_shard).expect("create overlong shard");
+    std::fs::write(overlong_shard.join("6162.bin"), b"legacy").expect("write cache file");
+
+    let removed = cache.delete_prefix(b"a").expect("delete prefix");
+    assert_eq!(
+        removed, 1,
+        "PROPERTY: delete_prefix must scan shard directories that extend a matching prefix.\n\
+         Investigate: src/store/projection/mod.rs NativeCache::delete_prefix shard filter.\n\
+         Common causes: changing the bidirectional prefix condition from && to ||."
+    );
+}
+
+#[test]
 fn project_if_changed_replays_when_watermark_matches_but_generation_advances() {
     let dir = TempDir::new().expect("temp dir");
     let config = StoreConfig::new(dir.path().join("data"))

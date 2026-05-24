@@ -419,11 +419,7 @@ inventory::submit! {
             crate::manifest::FieldRow { wire_name: "sequence", type_token: "u64-safe", order: 1 },
             crate::manifest::FieldRow { wire_name: "timestamp_us", type_token: "i64-microseconds", order: 2 },
             crate::manifest::FieldRow { wire_name: "correlation_id_hex", type_token: "u128-hex", order: 3 },
-            // causation_id is optional u128 hex — keep option<string>
-            // for now to avoid a third option-of-brand token; brand
-            // emission for option<u128-hex> can come in a follow-on
-            // patch once the codegen test coverage proves the pattern.
-            crate::manifest::FieldRow { wire_name: "causation_id_hex", type_token: "option<string>", order: 4 },
+            crate::manifest::FieldRow { wire_name: "causation_id_hex", type_token: "option<u128-hex>", order: 4 },
             crate::manifest::FieldRow { wire_name: "kind_category", type_token: "u8", order: 5 },
             crate::manifest::FieldRow { wire_name: "kind_type_id", type_token: "u16", order: 6 },
             crate::manifest::FieldRow { wire_name: "entity", type_token: "string", order: 7 },
@@ -448,7 +444,7 @@ inventory::submit! {
             crate::manifest::FieldRow { wire_name: "kind_category", type_token: "option<u8>", order: 2 },
             crate::manifest::FieldRow { wire_name: "kind_type_id", type_token: "option<u16>", order: 3 },
             crate::manifest::FieldRow { wire_name: "after_global_sequence", type_token: "option<u64-safe>", order: 4 },
-            crate::manifest::FieldRow { wire_name: "limit", type_token: "u64-safe", order: 5 },
+            crate::manifest::FieldRow { wire_name: "limit", type_token: "u64-safe-positive", order: 5 },
         ],
         fixture_bytes: || batpak::encoding::to_bytes(&EventQueryRequest::fixture_value()).ok(),
         fixture_json: || serde_json::to_value(EventQueryRequest::fixture_value()).ok(),
@@ -467,7 +463,7 @@ inventory::submit! {
             crate::manifest::FieldRow { wire_name: "wall_ms", type_token: "u64-millis", order: 2 },
             crate::manifest::FieldRow { wire_name: "clock", type_token: "u32", order: 3 },
             crate::manifest::FieldRow { wire_name: "correlation_id_hex", type_token: "u128-hex", order: 4 },
-            crate::manifest::FieldRow { wire_name: "causation_id_hex", type_token: "option<string>", order: 5 },
+            crate::manifest::FieldRow { wire_name: "causation_id_hex", type_token: "option<u128-hex>", order: 5 },
             crate::manifest::FieldRow { wire_name: "kind_category", type_token: "u8", order: 6 },
             crate::manifest::FieldRow { wire_name: "kind_type_id", type_token: "u16", order: 7 },
             crate::manifest::FieldRow { wire_name: "entity", type_token: "string", order: 8 },

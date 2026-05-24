@@ -127,6 +127,7 @@ u64-safe            → number bounded to Number.MAX_SAFE_INTEGER
 u64-millis          → same as u64-safe; semantically milliseconds since epoch
 i64-microseconds    → number bounded to ±Number.MAX_SAFE_INTEGER
 option<string>      → string | null
+option<u128-hex>    → 32-char lowercase hex string | null
 option<u8>          → number | null, bounded to 0..255
 option<u16>         → number | null, bounded to 0..65535
 option<u64-safe>    → number | null, bounded to Number.MAX_SAFE_INTEGER

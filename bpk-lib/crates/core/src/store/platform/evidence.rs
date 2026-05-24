@@ -100,16 +100,18 @@ pub(crate) fn mmap_evidence_for_store_path(data_dir: &Path) -> MmapEvidence {
     // mechanism; it does not establish store semantics.
     match unsafe { MmapOptions::new().len(1).map(probe.as_file()) } {
         Ok(_map) => MmapEvidence::FileBacked,
-        Err(error)
-            if matches!(
-                error.kind(),
-                std::io::ErrorKind::Unsupported | std::io::ErrorKind::PermissionDenied
-            ) =>
-        {
-            MmapEvidence::ObservedUnsupported
-        }
-        Err(_) => MmapEvidence::ProbeFailed,
+        Err(error) => mmap_map_error_evidence(&error),
     }
+}
+
+fn mmap_map_error_evidence(error: &std::io::Error) -> MmapEvidence {
+    if matches!(
+        error.kind(),
+        std::io::ErrorKind::Unsupported | std::io::ErrorKind::PermissionDenied
+    ) {
+        return MmapEvidence::ObservedUnsupported;
+    }
+    MmapEvidence::ProbeFailed
 }
 
 pub(crate) fn admission_from_store_path(
@@ -162,5 +164,37 @@ mod tests {
             "PROPERTY: a missing store path is unknown/missing evidence, not a probe failure"
         );
         Ok(())
+    }
+
+    #[test]
+    fn mmap_evidence_keeps_missing_paths_unknown() -> Result<(), Box<dyn Error>> {
+        let dir = tempfile::tempdir()?;
+        let missing = dir.path().join("missing-store-path");
+
+        assert_eq!(
+            mmap_evidence_for_store_path(&missing),
+            MmapEvidence::Unknown,
+            "PROPERTY: mmap evidence for a missing path must stay Unknown, not ProbeFailed"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn mmap_map_error_classifies_unsupported_and_permission_as_observed_unsupported() {
+        assert_eq!(
+            mmap_map_error_evidence(&std::io::Error::from(std::io::ErrorKind::Unsupported)),
+            MmapEvidence::ObservedUnsupported,
+            "PROPERTY: unsupported mmap must be descriptive evidence, not a probe failure"
+        );
+        assert_eq!(
+            mmap_map_error_evidence(&std::io::Error::from(std::io::ErrorKind::PermissionDenied)),
+            MmapEvidence::ObservedUnsupported,
+            "PROPERTY: permission-denied mmap must be descriptive evidence, not a probe failure"
+        );
+        assert_eq!(
+            mmap_map_error_evidence(&std::io::Error::from(std::io::ErrorKind::Other)),
+            MmapEvidence::ProbeFailed,
+            "PROPERTY: unrelated mmap errors must remain probe failures"
+        );
     }
 }
