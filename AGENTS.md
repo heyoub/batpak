@@ -47,6 +47,7 @@ At repo root, agents use `just`. Raw `cargo`, `npm`, and `pnpm` are implementati
 - `just list` — show the command surface
 - `just inspect` — structural doctrine, boundary checks, architecture IR, and ast-grep calipers
 - `just host-dev` — host profile end-to-end proof after hbat, manifest, or TS changes
+- `just host-loop` — living audit-loop proof after audit-loop example changes
 - `just ci-fast` — early PR signal (format, clippy, checks, tests, dependency gates, traceability, structural)
 - `just verify` — canonical preflight proof bundle
 - `just ci-windows` — native Windows surface compatibility lane
@@ -108,6 +109,8 @@ Implementation commands still live under `bpk-lib/` and remain valid when a task
   - inspect `bpk-lib/crates/core/tests/perf_gates.rs` and the relevant factory root doc
 - hbat, manifest, or TypeScript SDK change:
   - run `just host-dev`
+- audit-loop / living-loop example change:
+  - run `just host-loop`
 - Benchmark harness change:
   - update `cargo xtask bench` surfaces in `bpk-lib/tools/xtask/src/bench.rs`
   - refresh baselines intentionally

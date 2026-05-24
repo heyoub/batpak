@@ -45,8 +45,14 @@ Use circuits and terminals to connect batteries. Do not hide ownership by lettin
 
 ## Local Host Loop
 
-After hbat, manifest, or TypeScript SDK changes, run `just host-dev` from the
-repository root. It mirrors the CI ts-parity lane locally: export manifest,
-codegen, build and test the workspace, boot hbat on an ephemeral store, run
-the heartbeat-spike example (heartbeat, commit, query, get), and verify
-committed generated sources stay deterministic.
+**Calibration pulse:** `just host-dev` mirrors the CI ts-parity lane: export
+manifest, codegen, build and test the workspace, boot hbat on an ephemeral
+store, run heartbeat-spike (heartbeat, commit, query, get), and verify committed
+generated sources stay deterministic. heartbeat-spike proves the four-op
+terminal; it does not grow UI or domain rendering.
+
+**Living loop:** `just host-loop` runs the audit-loop example against a
+persistent store under `target/host-loop/store/`. It seeds app-owned events
+(`kind_category = 0x01`), rebuilds the rendered view from `event.query` +
+`event.get` (not commit acks), kills hbat, restarts on the same store, and
+runs `--replay-only` to prove substrate replay.

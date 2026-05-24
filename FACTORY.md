@@ -37,6 +37,7 @@ Humans and agents enter through `just` at the repository root:
 just list
 just inspect
 just host-dev
+just host-loop
 just verify
 just seal
 just ship dry

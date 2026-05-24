@@ -54,7 +54,7 @@ packages/
   test/       End-to-end parity harness across every event and every
               operation in the manifest. 57 parity assertions.
 examples/
-  heartbeat-spike/  Live spike against hbat:
+  heartbeat-spike/  Calibration pulse against hbat:
                     - sends system.heartbeat
                     - sends bank.commit (appends a typed event)
                     - sends event.query (walks metadata by coordinate)
@@ -62,6 +62,12 @@ examples/
                       Effect 4 schema; proves byte round-trip)
                     - sends an unknown_operation to validate the typed
                       ERR-frame path.
+  audit-loop/       Living loop against hbat:
+                    - commits app-owned events (kind_category=0x01)
+                    - rebuilds an ordered stream view from event.query +
+                      event.get (not commit acks)
+                    - supports --replay-only after hbat restart on the
+                      same store directory
 ```
 
 ## hbat — the reference host
