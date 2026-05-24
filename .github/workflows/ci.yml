@@ -79,6 +79,7 @@ jobs:
       - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
         with:
           shared-key: ci-fast
+          workspaces: bpk-lib
       - uses: ./.github/actions/setup-devcontainer
       - name: Fast PR signal
         env:
@@ -105,6 +106,7 @@ jobs:
       - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
         with:
           shared-key: verify
+          workspaces: bpk-lib
       - uses: ./.github/actions/setup-devcontainer
       - name: Canonical preflight proof bundle
         env:
@@ -135,6 +137,7 @@ jobs:
       - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
         with:
           shared-key: ci-windows
+          workspaces: bpk-lib
       - name: Native Windows surface lane
         working-directory: bpk-lib
         run: cargo xtask ci-windows-surface
@@ -163,6 +166,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+        with:
+          workspaces: bpk-lib
       - uses: ./.github/actions/setup-devcontainer
       - name: Feature-isolation test matrix
         env:
@@ -185,6 +190,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+        with:
+          workspaces: bpk-lib
       - uses: ./.github/actions/setup-devcontainer
       - name: Run onboarding smoke checks
         env:
@@ -219,6 +226,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+        with:
+          workspaces: bpk-lib
       - name: Install pnpm
         run: |
           corepack enable
@@ -348,6 +357,7 @@ jobs:
       - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
         with:
           shared-key: mutants-smoke-${{ matrix.seam }}
+          workspaces: bpk-lib
       - uses: ./.github/actions/setup-devcontainer
       - name: Mutation smoke (critical seam shard)
         env:
@@ -374,6 +384,7 @@ jobs:
       - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
         with:
           shared-key: mutants-smoke-repo-wide
+          workspaces: bpk-lib
       - uses: ./.github/actions/setup-devcontainer
       - name: Mutation smoke (repo-wide shard 1/48)
         env:
@@ -397,6 +408,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+        with:
+          workspaces: bpk-lib
       - uses: ./.github/actions/setup-devcontainer
       - name: Bounded loom schedule proofs
         env:
@@ -434,6 +447,7 @@ jobs:
       - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
         with:
           shared-key: mutants-full-${{ matrix.surface }}-${{ matrix.shard }}
+          workspaces: bpk-lib
       - uses: ./.github/actions/setup-devcontainer
       - name: Full mutation shard
         env:
@@ -456,6 +470,8 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
       - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+        with:
+          workspaces: bpk-lib
       - name: Install block-device chaos tools
         run: |
           sudo apt-get update
@@ -481,6 +497,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+        with:
+          workspaces: bpk-lib
       - uses: ./.github/actions/setup-devcontainer
       - name: Build root docs site + rustdoc
         env:
