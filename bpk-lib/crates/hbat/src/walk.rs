@@ -83,7 +83,7 @@ crate::hbat_event_descriptor! {
     ts_name = "EventWalkRequest",
     fields = [
         ("event_id_hex", "u128-hex"),
-        ("limit", "u64-safe"),
+        ("limit", "u64-safe-positive"),
     ],
 }
 

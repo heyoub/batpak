@@ -450,7 +450,11 @@ pub(crate) fn collect_list_lines(store: &Store, limit: usize) -> Result<Vec<Stri
     }
     let region = Region::scope(LEDGER_SCOPE);
     let scan_limit = limit.saturating_mul(50).max(200);
-    let entries = store.query_entries_after(&region, None, scan_limit);
+    let mut entries = store.query_entries_after(&region, None, scan_limit);
+    if entries.len() > limit {
+        entries.drain(..entries.len() - limit);
+    }
+    entries.reverse();
     let mut lines = Vec::with_capacity(entries.len());
     for entry in entries {
         let event_id = entry.event_id();
@@ -499,10 +503,6 @@ pub(crate) fn collect_list_lines(store: &Store, limit: usize) -> Result<Vec<Stri
             lines.push(format_gate_line(seq, &gate));
         }
     }
-    if lines.len() > limit {
-        lines.drain(..lines.len() - limit);
-    }
-    lines.reverse();
     Ok(lines)
 }
 
@@ -789,6 +789,31 @@ mod tests {
             })
             .collect();
         assert_eq!(seqs, vec![4, 3, 2]);
+    }
+
+    #[test]
+    fn list_limit_keeps_most_recent_entries() {
+        let (_dir, mut store) = temp_store();
+        for idx in 0..3 {
+            append_started(
+                &mut store,
+                FactoryLedgerRecordStartedArgs {
+                    run_id: format!("{idx:032x}"),
+                    command: format!("cmd{idx}"),
+                    args: Vec::new(),
+                    cwd: Some("/".to_owned()),
+                    branch: Some("b".to_owned()),
+                    head: Some("h".to_owned()),
+                    started_ms: Some(idx),
+                },
+            )
+            .expect("started");
+        }
+        let lines = collect_list_lines(&store, 2).expect("list");
+        store.close().expect("close");
+        assert_eq!(lines.len(), 2);
+        assert!(lines[0].contains("seq=3"));
+        assert!(lines[1].contains("seq=2"));
     }
 
     #[test]
