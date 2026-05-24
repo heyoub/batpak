@@ -2,29 +2,15 @@
 //! `xtask export-ts-manifest` and the `hbat` binary.
 //!
 //! Each `EventPayload`-deriving module submits an
-//! [`EventDescriptorRegistration`] via the `inventory` crate. The function
-//! [`descriptors`] iterates the registry at runtime and materializes the
-//! [`ManifestSnapshot`] — no centralized hand-rolled describe table.
-//!
-//! Adding a new event in a downstream crate (or in `hbat` itself) is one
-//! `inventory::submit!` next to the type's `#[derive(EventPayload)]`. The
-//! event then appears in the exported TS manifest automatically, sorted
-//! by `(category, type_id)` for stable ordering across link configurations.
+//! [`EventDescriptorRegistration`] via the `inventory` crate. Each
+//! operation module submits an [`OperationDescriptorRegistration`] next
+//! to its `*_DESCRIPTOR` const. The function [`descriptors`] iterates both
+//! registries at runtime and materializes the [`ManifestSnapshot`] — no
+//! centralized hand-rolled describe table for events or operations.
 
 use netbat::{encode_request, encode_response, NetbatError};
 use serde::Serialize;
-use syncbat::RuntimeError;
-
-use crate::bank::{
-    BANK_COMMIT_INPUT_SCHEMA_REF, BANK_COMMIT_OPERATION_NAME, BANK_COMMIT_OUTPUT_SCHEMA_REF,
-    BANK_COMMIT_RECEIPT_KIND, EVENT_GET_INPUT_SCHEMA_REF, EVENT_GET_OPERATION_NAME,
-    EVENT_GET_OUTPUT_SCHEMA_REF, EVENT_GET_RECEIPT_KIND, EVENT_QUERY_INPUT_SCHEMA_REF,
-    EVENT_QUERY_OPERATION_NAME, EVENT_QUERY_OUTPUT_SCHEMA_REF, EVENT_QUERY_RECEIPT_KIND,
-};
-use crate::heartbeat::{
-    HEARTBEAT_INPUT_SCHEMA_REF, HEARTBEAT_OPERATION_NAME, HEARTBEAT_OUTPUT_SCHEMA_REF,
-    HEARTBEAT_RECEIPT_KIND,
-};
+use syncbat::{OperationDescriptor, RuntimeError};
 
 /// Manifest construction failure.
 #[derive(Debug)]
@@ -224,6 +210,36 @@ pub struct EventDescriptorRegistration {
 
 inventory::collect!(EventDescriptorRegistration);
 
+/// Compile-time inventory entry for one syncbat operation exposed to the
+/// TS-binding manifest.
+///
+/// Each operation-defining module emits one of these via `inventory::submit!`
+/// next to its `*_DESCRIPTOR` const. The [`descriptors`] function iterates
+/// them at runtime and materializes [`OperationDescriptorRecord`] rows.
+pub struct OperationDescriptorRegistration {
+    /// Returns the syncbat descriptor — single source of truth for name/schema refs.
+    pub descriptor: fn() -> &'static OperationDescriptor,
+}
+
+inventory::collect!(OperationDescriptorRegistration);
+
+impl OperationDescriptorRegistration {
+    fn materialize(
+        &self,
+        index: &EventIndex<'_>,
+    ) -> Result<OperationDescriptorRecord, ManifestBuildError> {
+        let desc = (self.descriptor)();
+        build_operation(
+            desc.name(),
+            desc.input_schema_ref(),
+            desc.output_schema_ref(),
+            desc.receipt_kind(),
+            index.golden_for(desc.input_schema_ref())?,
+            index.golden_for(desc.output_schema_ref())?,
+        )
+    }
+}
+
 impl EventDescriptorRegistration {
     fn materialize(&self) -> Result<EventDescriptor, ManifestBuildError> {
         let payload_bytes = (self.fixture_bytes)().ok_or(ManifestBuildError::FixtureBytes {
@@ -262,8 +278,9 @@ impl EventDescriptorRegistration {
 ///
 /// Walks the `inventory` registry, materializes one [`EventDescriptor`]
 /// per submitted [`EventDescriptorRegistration`], sorts by
-/// `(category, type_id)` for link-order stability, then builds the
-/// operation table on top.
+/// `(category, type_id)` for link-order stability, then materializes the
+/// operation table from [`OperationDescriptorRegistration`] entries sorted
+/// by operation name.
 ///
 /// # Errors
 /// Returns [`ManifestBuildError`] if a registered fixture cannot be
@@ -280,46 +297,14 @@ pub fn descriptors() -> Result<ManifestSnapshot, ManifestBuildError> {
 
     let index = EventIndex::new(&events);
 
-    let heartbeat_op = build_operation(
-        HEARTBEAT_OPERATION_NAME,
-        HEARTBEAT_INPUT_SCHEMA_REF,
-        HEARTBEAT_OUTPUT_SCHEMA_REF,
-        HEARTBEAT_RECEIPT_KIND,
-        index.golden_for(HEARTBEAT_INPUT_SCHEMA_REF)?,
-        index.golden_for(HEARTBEAT_OUTPUT_SCHEMA_REF)?,
-    )?;
+    let mut operations: Vec<OperationDescriptorRecord> =
+        inventory::iter::<OperationDescriptorRegistration>
+            .into_iter()
+            .map(|registration| registration.materialize(&index))
+            .collect::<Result<_, _>>()?;
+    operations.sort_by(|left, right| left.name.cmp(&right.name));
 
-    let bank_commit_op = build_operation(
-        BANK_COMMIT_OPERATION_NAME,
-        BANK_COMMIT_INPUT_SCHEMA_REF,
-        BANK_COMMIT_OUTPUT_SCHEMA_REF,
-        BANK_COMMIT_RECEIPT_KIND,
-        index.golden_for(BANK_COMMIT_INPUT_SCHEMA_REF)?,
-        index.golden_for(BANK_COMMIT_OUTPUT_SCHEMA_REF)?,
-    )?;
-
-    let event_get_op = build_operation(
-        EVENT_GET_OPERATION_NAME,
-        EVENT_GET_INPUT_SCHEMA_REF,
-        EVENT_GET_OUTPUT_SCHEMA_REF,
-        EVENT_GET_RECEIPT_KIND,
-        index.golden_for(EVENT_GET_INPUT_SCHEMA_REF)?,
-        index.golden_for(EVENT_GET_OUTPUT_SCHEMA_REF)?,
-    )?;
-
-    let event_query_op = build_operation(
-        EVENT_QUERY_OPERATION_NAME,
-        EVENT_QUERY_INPUT_SCHEMA_REF,
-        EVENT_QUERY_OUTPUT_SCHEMA_REF,
-        EVENT_QUERY_RECEIPT_KIND,
-        index.golden_for(EVENT_QUERY_INPUT_SCHEMA_REF)?,
-        index.golden_for(EVENT_QUERY_OUTPUT_SCHEMA_REF)?,
-    )?;
-
-    Ok(ManifestSnapshot {
-        events,
-        operations: vec![heartbeat_op, bank_commit_op, event_get_op, event_query_op],
-    })
+    Ok(ManifestSnapshot { events, operations })
 }
 
 /// Internal lookup from schema-ref to materialized golden-payload hex.
@@ -500,6 +485,16 @@ mod tests {
             pairs, sorted,
             "events must be sorted by (category, type_id)"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn operations_sort_by_name_for_link_order_stability() -> Result<()> {
+        let snap = descriptors()?;
+        let names: Vec<&str> = snap.operations.iter().map(|op| op.name.as_str()).collect();
+        let mut sorted = names.clone();
+        sorted.sort_unstable();
+        assert_eq!(names, sorted, "operations must be sorted by name");
         Ok(())
     }
 }

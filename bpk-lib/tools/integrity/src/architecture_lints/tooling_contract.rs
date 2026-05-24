@@ -778,10 +778,7 @@ fn check_hbat_manifest_wiring_contract(repo_root: &Path) -> Result<()> {
         return Ok(());
     }
 
-    let manifest_path = hbat_src.join("manifest.rs");
     let main_path = hbat_src.join("main.rs");
-    let manifest =
-        fs::read_to_string(&manifest_path).context("read crates/hbat/src/manifest.rs")?;
     let main = fs::read_to_string(&main_path).context("read crates/hbat/src/main.rs")?;
 
     for path in files_with_extension(&hbat_src, "rs") {
@@ -802,10 +799,17 @@ fn check_hbat_manifest_wiring_contract(repo_root: &Path) -> Result<()> {
                 )?;
                 continue;
             };
+            let helper_name = format!("{}_descriptor", prefix.to_lowercase());
             ensure(
-                manifest.contains(&format!("{prefix}_OPERATION_NAME")),
+                count_occurrences(&content, &format!("descriptor: {helper_name}")) == 1,
                 format!(
-                    "hbat operation descriptor `{descriptor}` in {rel} is not represented in manifest::descriptors()"
+                    "hbat operation descriptor `{descriptor}` in {rel} must have exactly one OperationDescriptorRegistration inventory::submit! referencing it"
+                ),
+            )?;
+            ensure(
+                content.contains(&format!("&{descriptor}_STORAGE")),
+                format!(
+                    "hbat operation descriptor `{descriptor}` in {rel} must be referenced by its manifest inventory helper"
                 ),
             )?;
             ensure(
