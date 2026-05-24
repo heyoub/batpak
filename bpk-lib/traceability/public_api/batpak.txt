@@ -143,7 +143,6 @@ pub fn batpak::coordinate::Region::with_fact(self, filter: batpak::coordinate::K
 pub fn batpak::coordinate::Region::with_fact_category(self, cat: u8) -> Self
 pub fn batpak::coordinate::Region::with_scope(self, scope: impl core::convert::AsRef<str>) -> Self
 pub const batpak::coordinate::MAX_COORDINATE_COMPONENT_LEN: usize
-pub fn batpak::coordinate::namespace_prefix_matches(prefix: &str, candidate: &str) -> bool
 pub mod batpak::encoding
 pub fn batpak::encoding::from_bytes<T: serde_core::de::DeserializeOwned>(bytes: &[u8]) -> core::result::Result<T, rmp_serde::decode::Error>
 pub fn batpak::encoding::to_bytes<T: serde_core::ser::Serialize + ?core::marker::Sized>(value: &T) -> core::result::Result<alloc::vec::Vec<u8>, rmp_serde::encode::Error>
@@ -2133,6 +2132,7 @@ pub fn batpak::store::Store<State>::query_entries_after(&self, region: &batpak::
 pub fn batpak::store::Store<State>::read_raw(&self, event_id: batpak::id::EventId) -> core::result::Result<batpak::event::StoredEvent<alloc::vec::Vec<u8>>, batpak::prelude::StoreError>
 pub fn batpak::store::Store<State>::verify_append_receipt(&self, receipt: &batpak::prelude::AppendReceipt) -> bool
 pub fn batpak::store::Store<State>::verify_append_receipt_detailed(&self, receipt: &batpak::prelude::AppendReceipt) -> batpak::store::ReceiptVerification
+pub fn batpak::store::Store<State>::verify_append_receipt_wire_detailed(&self, event_id: batpak::id::EventId, sequence: u64, content_hash: [u8; 32], key_id: [u8; 32], signature: core::option::Option<[u8; 64]>, extensions: alloc::collections::btree::map::BTreeMap<batpak::store::ExtensionKey, batpak::store::EncodedBytes>) -> batpak::store::ReceiptVerification
 pub fn batpak::store::Store<State>::verify_denial_receipt(&self, receipt: &batpak::store::DenialReceipt) -> bool
 pub fn batpak::store::Store<State>::verify_denial_receipt_detailed(&self, receipt: &batpak::store::DenialReceipt) -> batpak::store::ReceiptVerification
 pub fn batpak::store::Store<State>::walk_ancestors(&self, event_id: batpak::id::EventId, limit: usize) -> alloc::vec::Vec<batpak::event::StoredEvent<serde_json::value::Value>>
@@ -4151,6 +4151,7 @@ pub fn batpak::store::Store<State>::query_entries_after(&self, region: &batpak::
 pub fn batpak::store::Store<State>::read_raw(&self, event_id: batpak::id::EventId) -> core::result::Result<batpak::event::StoredEvent<alloc::vec::Vec<u8>>, batpak::prelude::StoreError>
 pub fn batpak::store::Store<State>::verify_append_receipt(&self, receipt: &batpak::prelude::AppendReceipt) -> bool
 pub fn batpak::store::Store<State>::verify_append_receipt_detailed(&self, receipt: &batpak::prelude::AppendReceipt) -> batpak::store::ReceiptVerification
+pub fn batpak::store::Store<State>::verify_append_receipt_wire_detailed(&self, event_id: batpak::id::EventId, sequence: u64, content_hash: [u8; 32], key_id: [u8; 32], signature: core::option::Option<[u8; 64]>, extensions: alloc::collections::btree::map::BTreeMap<batpak::store::ExtensionKey, batpak::store::EncodedBytes>) -> batpak::store::ReceiptVerification
 pub fn batpak::store::Store<State>::verify_denial_receipt(&self, receipt: &batpak::store::DenialReceipt) -> bool
 pub fn batpak::store::Store<State>::verify_denial_receipt_detailed(&self, receipt: &batpak::store::DenialReceipt) -> batpak::store::ReceiptVerification
 pub fn batpak::store::Store<State>::walk_ancestors(&self, event_id: batpak::id::EventId, limit: usize) -> alloc::vec::Vec<batpak::event::StoredEvent<serde_json::value::Value>>

@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Added `Store::query_entries_after` for bounded, global-sequence-ordered index paging
+  with the same visibility rules as `Store::query`.
+- Added `Store::verify_append_receipt_wire_detailed` so wire-shaped receipt fields can
+  be verified without constructing an `AppendReceipt` value first.
+- Added `bpk-lib/traceability/public_api/batpak_semver_checklist.yaml` as the
+  batpak-only semver-check classification ledger for the 0.7.6 correction cut
+  (expected red until 0.8 release truth).
 - Added `ReactorCanal` as the code-level typed-reactor delivery selector.
   `CursorGuaranteed` remains the default at-least-once path; `LossySubscription`
   is explicit opt-in and never supplies an `AtLeastOnce` witness.
@@ -38,6 +45,11 @@ All notable changes to this project will be documented in this file.
   own package entrypoint.
 
 ### Changed
+- `coordinate::namespace_prefix_matches` is no longer public API. Region prefix
+  matching remains available through `Region::entity` / `Region::scope` query paths.
+- Refreshed the checked-in `traceability/public_api/batpak.txt` baseline to match
+  the current intentional batpak surface (adds read/query pagination helpers,
+  removes the internal prefix helper).
 - Aligned `syncbat`, `netbat`, and `syncbat-macros` to the 0.7.6 release train
   and updated internal path-dependency pins accordingly.
 - Pinned the canonical MessagePack encoder to the exact `rmp-serde` version

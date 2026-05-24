@@ -1,0 +1,241 @@
+# BatPAK semver-check --strict checklist (baseline: crates.io batpak 0.7.0).
+# Expected red until 0.8 release truth (Cut 21). No compatibility shims in 0.7.6.
+package: batpak
+baseline_version: 0.7.0
+current_version: 0.7.6
+witness: target/semver-public-api/batpak-semver-raw.txt
+summary: "14 major semver-check rules fail; all classified intentional_0_8 or path_relocation unless noted."
+
+entries:
+  - rule: auto_trait_impl_removed
+    item: TypedReactorHandle::Sync
+    disposition: intentional_0_8
+    changelog: CHANGELOG.md
+    note: Send-only Canal handle; shared &TypedReactorHandle across threads no longer compiles.
+
+  - rule: constructible_struct_adds_field
+    item: AppendOptions.extensions
+    disposition: intentional_0_8
+    changelog: CHANGELOG.md
+
+  - rule: constructible_struct_adds_field
+    item: ReactorConfig.canal
+    disposition: intentional_0_8
+    changelog: CHANGELOG.md
+
+  - rule: constructible_struct_adds_field
+    item: FrontierView.visible_hlc
+    disposition: intentional_0_8
+    changelog: CHANGELOG.md
+    note: Renamed from current_visible_hlc; do not construct FrontierView directly.
+
+  - rule: derive_trait_impl_removed
+    item: AppendOptions::Copy
+    disposition: intentional_0_8
+    changelog: CHANGELOG.md
+
+  - rule: enum_missing
+    item: batpak::store::OpenIndexPath
+    disposition: path_relocation
+    changelog: CHANGELOG.md
+    replacement: batpak::store::cold_start::rebuild::OpenIndexPath
+
+  - rule: enum_missing
+    item: batpak::store::BackupEnvelopeFinding
+    disposition: path_relocation
+    changelog: CHANGELOG.md
+    replacement: batpak::store::backup_envelope::BackupEnvelopeFinding
+
+  - rule: enum_struct_variant_field_added
+    item: StoreError::PlatformProfileInvalid.kind
+    disposition: intentional_0_8
+    changelog: CHANGELOG.md
+
+  - rule: enum_struct_variant_field_added
+    item: StoreError::HiddenRangesCorrupt.kind
+    disposition: intentional_0_8
+    changelog: CHANGELOG.md
+
+  - rule: enum_struct_variant_field_added
+    item: StoreError::InvariantViolation.kind
+    disposition: intentional_0_8
+    changelog: CHANGELOG.md
+
+  - rule: enum_struct_variant_field_missing
+    item: StoreError::PlatformProfileInvalid.reason
+    disposition: intentional_0_8
+    changelog: CHANGELOG.md
+    note: Replaced by typed kind discriminants.
+
+  - rule: enum_struct_variant_field_missing
+    item: StoreError::HiddenRangesCorrupt.reason
+    disposition: intentional_0_8
+    changelog: CHANGELOG.md
+
+  - rule: enum_struct_variant_field_missing
+    item: StoreError::InvariantViolation.reason
+    disposition: intentional_0_8
+    changelog: CHANGELOG.md
+
+  - rule: function_missing
+    item: batpak::store::backup_* helpers
+    disposition: path_relocation
+    changelog: CHANGELOG.md
+    replacement: batpak::store::backup_envelope::*
+
+  - rule: inherent_method_const_removed
+    item: AppendOptions::new
+    disposition: intentional_0_8
+    changelog: CHANGELOG.md
+
+  - rule: inherent_method_missing
+    item: Store::get_raw
+    disposition: intentional_0_8
+    changelog: CHANGELOG.md
+    replacement: Store::read_raw
+
+  - rule: inherent_method_missing
+    item: Store::stream
+    disposition: intentional_0_8
+    changelog: CHANGELOG.md
+    replacement: Store::by_entity
+
+  - rule: inherent_method_missing
+    item: Segment::create
+    disposition: intentional_0_8
+    changelog: CHANGELOG.md
+    replacement: Segment::create_with_created_ns
+
+  - rule: inherent_method_missing
+    item: Segment::needs_rotation
+    disposition: intentional_0_8
+    changelog: CHANGELOG.md
+
+  - rule: inherent_method_missing
+    item: AppendOptions::with_correlation_typed
+    disposition: intentional_0_8
+    changelog: CHANGELOG.md
+
+  - rule: inherent_method_missing
+    item: AppendOptions::with_causation_typed
+    disposition: intentional_0_8
+    changelog: CHANGELOG.md
+
+  - rule: pub_module_level_const_missing
+    item: BACKUP_MANIFEST_BODY_SCHEMA_VERSION
+    disposition: path_relocation
+    changelog: CHANGELOG.md
+    replacement: batpak::store::backup_envelope::BACKUP_MANIFEST_BODY_SCHEMA_VERSION
+
+  - rule: pub_module_level_const_missing
+    item: RESTORE_PROOF_REPORT_SCHEMA_VERSION
+    disposition: path_relocation
+    changelog: CHANGELOG.md
+    replacement: batpak::store::backup_envelope::RESTORE_PROOF_REPORT_SCHEMA_VERSION
+
+  - rule: struct_missing
+    item: ClockKey
+    disposition: hide_in_0_7_6
+    changelog: CHANGELOG.md
+    note: Internal index ordering key; no longer public.
+
+  - rule: struct_missing
+    item: batpak::prelude::DiskPos
+    disposition: path_relocation
+    changelog: CHANGELOG.md
+    replacement: batpak::store::index::DiskPos
+
+  - rule: struct_missing
+    item: WatermarkSnapshot
+    disposition: hide_in_0_7_6
+    changelog: CHANGELOG.md
+    replacement: FrontierView via Store::frontier
+
+  - rule: struct_missing
+    item: batpak::store::backup_envelope types at store root
+    disposition: path_relocation
+    changelog: CHANGELOG.md
+    replacement: batpak::store::backup_envelope::*
+
+  - rule: struct_missing
+    item: StoreResourceEnvelope
+    disposition: path_relocation
+    changelog: CHANGELOG.md
+
+  - rule: struct_missing
+    item: ReservationReconciliationReport
+    disposition: intentional_0_8
+    changelog: CHANGELOG.md
+
+  - rule: struct_missing
+    item: OpenIndexReport at store root
+    disposition: path_relocation
+    changelog: CHANGELOG.md
+    replacement: batpak::store::cold_start::rebuild::OpenIndexReport
+
+  - rule: struct_missing
+    item: StateTransitionReport
+    disposition: intentional_0_8
+    changelog: CHANGELOG.md
+
+  - rule: struct_missing
+    item: IndexEntry at prelude/store root
+    disposition: path_relocation
+    changelog: CHANGELOG.md
+    replacement: batpak::store::index::IndexEntry
+
+  - rule: struct_pub_field_missing
+    item: DiskPos.{segment_id,offset,length}
+    disposition: intentional_0_8
+    changelog: CHANGELOG.md
+    note: Use DiskPos accessors; fields are doc-hidden.
+
+  - rule: struct_pub_field_missing
+    item: StoreConfig public fields
+    disposition: intentional_0_8
+    changelog: CHANGELOG.md
+    note: Use StoreConfig::new and with_* builders.
+
+  - rule: struct_pub_field_missing
+    item: IndexEntry public fields
+    disposition: intentional_0_8
+    changelog: CHANGELOG.md
+    note: Non-exhaustive; use stable accessors.
+
+  - rule: struct_pub_field_missing
+    item: AppendReceipt.disk_pos / DenialReceipt.disk_pos
+    disposition: intentional_0_8
+    changelog: CHANGELOG.md
+    note: disk_pos fields are doc-hidden; use typed receipt accessors.
+
+  - rule: struct_pub_field_missing
+    item: FrontierView.current_visible_hlc
+    disposition: intentional_0_8
+    changelog: CHANGELOG.md
+    replacement: visible_hlc
+
+  - rule: struct_pub_field_now_doc_hidden
+    item: DiskPos / StoreConfig / IndexEntry / receipt disk_pos fields
+    disposition: intentional_0_8
+    changelog: CHANGELOG.md
+    note: Companion to struct_pub_field_missing rows; fields remain for in-crate/tests.
+
+  - rule: struct_with_pub_fields_changed_type
+    item: CursorGapConfig
+    disposition: intentional_0_8
+    changelog: CHANGELOG.md
+    note: Struct replaced by Disabled | Enabled { capacity } enum.
+
+public_api_baseline_additions:
+  - item: Store::query_entries_after
+    disposition: intentional_public
+    witness: crates/core/tests/read_api_pagination.rs
+
+  - item: Store::verify_append_receipt_wire_detailed
+    disposition: intentional_public
+    witness: crates/core/tests/substrate_additions.rs
+
+public_api_baseline_removals:
+  - item: coordinate::namespace_prefix_matches
+    disposition: hidden_in_cut_12a
+    note: Internal Region prefix helper; behavior covered by Region::entity queries.

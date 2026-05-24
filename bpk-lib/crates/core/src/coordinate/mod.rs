@@ -375,7 +375,7 @@ impl Region {
 /// Returns `true` when `candidate` is exactly `prefix` or is nested beneath it
 /// at a `:` namespace boundary.
 #[must_use]
-pub fn namespace_prefix_matches(prefix: &str, candidate: &str) -> bool {
+pub(crate) fn namespace_prefix_matches(prefix: &str, candidate: &str) -> bool {
     candidate == prefix
         || candidate
             .strip_prefix(prefix)

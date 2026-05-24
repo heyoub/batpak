@@ -127,11 +127,6 @@
   witness:
     - path: crates/core/tests/event_payload_surface.rs
       lines: [20, 62]
-- name: namespace_prefix_matches
-  justification: public namespace-boundary predicate exercised in substrate additions coverage
-  witness:
-    - path: crates/core/tests/substrate_additions.rs
-      lines: [4, 86, 87]
 - name: evaluations
   justification: denial payload accessors are exercised directly in substrate additions coverage
   witness:

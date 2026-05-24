@@ -43,6 +43,7 @@
     - traceability/public_api/batpak.txt
     - traceability/public_api/syncbat.txt
     - traceability/public_api/netbat.txt
+    - traceability/public_api/batpak_semver_checklist.yaml
     - tools/xtask/src/public_api.rs
 - id: ART-DEAD-CODE-SILENCER-ALLOWLIST
   kind: registry

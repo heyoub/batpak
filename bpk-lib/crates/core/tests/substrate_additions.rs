@@ -1,7 +1,7 @@
 // justifies: INV-TEST-PANIC-AS-ASSERTION; this integration harness uses panic! to surface structural regressions with explicit messages.
 #![allow(clippy::panic, clippy::unwrap_used)]
 
-use batpak::coordinate::{namespace_prefix_matches, Coordinate, Region};
+use batpak::coordinate::{Coordinate, Region};
 use batpak::event::EventKind;
 use batpak::guard::{
     Denial, DenialPayload, Gate, GateEvaluation, GateId, GateIdError, GateSet, Verdict,
@@ -546,11 +546,6 @@ fn signed_unknown_extensions_survive_reopen_and_verify() {
 
 #[test]
 fn namespace_prefix_query_excludes_adjacent_namespaces() {
-    let child_matches = namespace_prefix_matches("alice", "alice:child");
-    let adjacent_matches = namespace_prefix_matches("alice", "alice2");
-    assert!(child_matches);
-    assert!(!adjacent_matches);
-
     let dir = TempDir::new().expect("temp dir");
     let store = Store::open(
         StoreConfig::new(dir.path())
