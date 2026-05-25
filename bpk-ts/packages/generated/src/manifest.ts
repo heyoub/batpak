@@ -565,7 +565,7 @@ export const BATPAK_TS_MANIFEST = {
         {
           "wireName": "limit",
           "tsName": "limit",
-          "typeToken": "u64-safe",
+          "typeToken": "u64-safe-positive",
           "order": 1
         }
       ],

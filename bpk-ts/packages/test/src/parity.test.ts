@@ -254,7 +254,7 @@ describe("Effect 4 schema round-trip via @batpak/schema", () => {
     ).toThrow();
   });
 
-  it("rejects zero limits for bounded query requests", () => {
+  it("rejects zero limits for bounded traversal requests", () => {
     expect(() =>
       encodeBytes(Generated.EventQueryRequest, {
         entity: null,
@@ -262,6 +262,13 @@ describe("Effect 4 schema round-trip via @batpak/schema", () => {
         kind_category: null,
         kind_type_id: null,
         after_global_sequence: null,
+        limit: 0,
+      }),
+    ).toThrow();
+
+    expect(() =>
+      encodeBytes(Generated.EventWalkRequest, {
+        event_id_hex: "00000000000000000000000000000000",
         limit: 0,
       }),
     ).toThrow();
