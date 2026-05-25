@@ -4,7 +4,7 @@ version = "0.7.6"
 edition = "2021"
 rust-version = "1.92"
 license = "MIT OR Apache-2.0"
-description = "Reference NETBAT/1 host for the batpak family — typed-append, event-lookup, receipt-decode."
+description = "Publish-false NETBAT/1 reference host for heartbeat, commit, query, get, receipt verification, and ancestry walk."
 publish = false
 
 [lib]

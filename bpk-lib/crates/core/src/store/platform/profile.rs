@@ -268,11 +268,26 @@ impl PlatformProfile {
 #[cfg(test)]
 mod tests {
     use super::PlatformProfile;
-    use crate::store::StoreError;
+    use crate::store::stats::{
+        LockLeafSymlinkProtection, MmapAdmissionSummary, MmapEvidence,
+        ParentDirSyncAdmissionSummary, ParentDirSyncEvidence, StoreLockAdmissionSummary,
+        StorePathStatusEvidence,
+    };
+    use crate::store::{ProfileInvalidKind, StoreError};
     use std::error::Error;
+    use std::path::Path;
     use tempfile::TempDir;
 
     type TestResult = Result<(), Box<dyn Error>>;
+
+    fn write_profile_with_recomputed_fingerprint(
+        path: &Path,
+        profile: &mut PlatformProfile,
+    ) -> TestResult {
+        profile.fingerprint_crc32 = profile.compute_fingerprint()?;
+        std::fs::write(path, serde_json::to_vec_pretty(profile)?)?;
+        Ok(())
+    }
 
     #[test]
     fn platform_profile_round_trips_with_valid_fingerprint() -> TestResult {
@@ -299,6 +314,146 @@ mod tests {
             return Err(std::io::Error::other("expected profile mismatch").into());
         };
         assert!(matches!(error, StoreError::PlatformProfileMismatch { .. }));
+        Ok(())
+    }
+
+    #[test]
+    fn platform_profile_rejects_semantically_inconsistent_lock_admission() -> TestResult {
+        let dir = TempDir::new()?;
+        let mut profile = PlatformProfile::from_store_path_for_test(dir.path())?;
+        profile.store_path.lock_leaf_symlink_protection = LockLeafSymlinkProtection::Unknown;
+        profile.admission.store_lock = StoreLockAdmissionSummary::AtomicNoFollow;
+        let path = dir.path().join("platform.profile.json");
+        write_profile_with_recomputed_fingerprint(&path, &mut profile)?;
+
+        let err = match PlatformProfile::load(&path) {
+            Ok(_) => {
+                return Err(std::io::Error::other(
+                    "PROPERTY: inconsistent lock admission must fail profile load",
+                )
+                .into());
+            }
+            Err(error) => error,
+        };
+        assert!(
+            matches!(
+                err,
+                StoreError::PlatformProfileInvalid {
+                    kind: ProfileInvalidKind::InconsistentLockAdmission {
+                        admission: StoreLockAdmissionSummary::AtomicNoFollow,
+                        evidence: LockLeafSymlinkProtection::Unknown,
+                    },
+                    ..
+                }
+            ),
+            "expected inconsistent lock admission, got {err:?}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn platform_profile_rejects_semantically_inconsistent_parent_sync_admission() -> TestResult {
+        let dir = TempDir::new()?;
+        let mut profile = PlatformProfile::from_store_path_for_test(dir.path())?;
+        profile.store_path.parent_dir_sync = ParentDirSyncEvidence::ProbeFailed;
+        profile.admission.parent_dir_sync = ParentDirSyncAdmissionSummary::UnixFsync;
+        let path = dir.path().join("platform.profile.json");
+        write_profile_with_recomputed_fingerprint(&path, &mut profile)?;
+
+        let err = match PlatformProfile::load(&path) {
+            Ok(_) => {
+                return Err(std::io::Error::other(
+                    "PROPERTY: inconsistent parent-dir sync admission must fail profile load",
+                )
+                .into());
+            }
+            Err(error) => error,
+        };
+        assert!(
+            matches!(
+                err,
+                StoreError::PlatformProfileInvalid {
+                    kind: ProfileInvalidKind::InconsistentParentDirSyncAdmission {
+                        admission: ParentDirSyncAdmissionSummary::UnixFsync,
+                        evidence: ParentDirSyncEvidence::ProbeFailed,
+                    },
+                    ..
+                }
+            ),
+            "expected inconsistent parent-dir sync admission, got {err:?}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn platform_profile_rejects_mmap_evidence_that_contradicts_missing_path() -> TestResult {
+        let dir = TempDir::new()?;
+        let mut profile = PlatformProfile::from_store_path_for_test(dir.path())?;
+        profile.store_path.path_status = StorePathStatusEvidence::UnknownMissing;
+        profile.store_path.mmap_index = MmapEvidence::FileBacked;
+        profile.admission.mmap_index = MmapAdmissionSummary::FileBacked;
+        let path = dir.path().join("platform.profile.json");
+        write_profile_with_recomputed_fingerprint(&path, &mut profile)?;
+
+        let err = match PlatformProfile::load(&path) {
+            Ok(_) => {
+                return Err(std::io::Error::other(
+                    "PROPERTY: mmap evidence inconsistent with missing path must fail profile load",
+                )
+                .into());
+            }
+            Err(error) => error,
+        };
+        assert!(
+            matches!(
+                err,
+                StoreError::PlatformProfileInvalid {
+                    kind: ProfileInvalidKind::InconsistentMmapPath {
+                        field: "mmap_index",
+                        evidence: MmapEvidence::FileBacked,
+                        expected: MmapEvidence::Unknown,
+                        path_status: StorePathStatusEvidence::UnknownMissing,
+                    },
+                    ..
+                }
+            ),
+            "expected inconsistent mmap/path evidence, got {err:?}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn platform_profile_rejects_mmap_admission_that_contradicts_evidence() -> TestResult {
+        let dir = TempDir::new()?;
+        let mut profile = PlatformProfile::from_store_path_for_test(dir.path())?;
+        profile.store_path.sealed_segment_mmap = MmapEvidence::ProbeFailed;
+        profile.admission.sealed_segment_mmap = MmapAdmissionSummary::FileBacked;
+        let path = dir.path().join("platform.profile.json");
+        write_profile_with_recomputed_fingerprint(&path, &mut profile)?;
+
+        let err = match PlatformProfile::load(&path) {
+            Ok(_) => {
+                return Err(std::io::Error::other(
+                    "PROPERTY: mmap admission inconsistent with evidence must fail profile load",
+                )
+                .into());
+            }
+            Err(error) => error,
+        };
+        assert!(
+            matches!(
+                err,
+                StoreError::PlatformProfileInvalid {
+                    kind: ProfileInvalidKind::InconsistentMmapAdmission {
+                        field: "sealed_segment_mmap",
+                        admission: MmapAdmissionSummary::FileBacked,
+                        evidence: MmapEvidence::ProbeFailed,
+                    },
+                    ..
+                }
+            ),
+            "expected inconsistent mmap admission, got {err:?}"
+        );
         Ok(())
     }
 }

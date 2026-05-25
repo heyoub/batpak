@@ -273,7 +273,7 @@ inventory::submit! {
 /// Wire input for [`EVENT_QUERY_DESCRIPTOR`].
 ///
 /// Omitted filters match all values on that axis. `after_global_sequence`
-/// is an exclusive cursor: a value of `Some(10)` returns only events with
+/// is an exclusive resume point: a value of `Some(10)` returns only events with
 /// `global_sequence > 10`; `None` starts from the beginning of the region.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, EventPayload)]
 #[batpak(category = 0xF, type_id = 0xA22)]
@@ -287,7 +287,7 @@ pub struct EventQueryRequest {
     pub kind_category: Option<u8>,
     /// Optional event-kind type id. Requires `kind_category` when present.
     pub kind_type_id: Option<u16>,
-    /// Exclusive global-sequence cursor for pagination.
+    /// Exclusive global-sequence resume point for pagination.
     pub after_global_sequence: Option<u64>,
     /// Maximum number of summaries to return. Values above
     /// [`EVENT_QUERY_MAX_LIMIT`] are capped by the handler.
@@ -332,7 +332,7 @@ pub struct EventSummary {
 pub struct EventQueryAck {
     /// Metadata-only summaries for the requested page.
     pub entries: Vec<EventSummary>,
-    /// Cursor to pass as the next request's `after_global_sequence`, or
+    /// Resume point to pass as the next request's `after_global_sequence`, or
     /// `None` when this page is empty.
     pub next_after_global_sequence: Option<u64>,
     /// True when the bounded page filled and another page may exist.

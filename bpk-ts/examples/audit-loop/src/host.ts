@@ -69,29 +69,44 @@ export async function commitAppEvent(
   });
 }
 
-export async function queryAuditStream(host: string, port: number): Promise<readonly EventSummary[]> {
-  const request: typeof EventQueryRequest.Type = {
-    entity: DEMO_ENTITY,
-    scope: DEMO_SCOPE,
-    kind_category: null,
-    kind_type_id: null,
-    after_global_sequence: null,
-    limit: 64,
-  };
+export async function queryAuditSummariesByGlobalSequence(
+  host: string,
+  port: number,
+): Promise<readonly EventSummary[]> {
+  let after_global_sequence: typeof EventQueryRequest.Type["after_global_sequence"] = null;
+  const entries: EventSummary[] = [];
 
-  return withSocket(host, port, async (socket) => {
-    const response = await call(socket, EVENT_QUERY.name, encodeBytes(EventQueryRequest, request));
-    if (response.kind !== "netbat-ok") {
+  for (;;) {
+    const request: typeof EventQueryRequest.Type = {
+      entity: DEMO_ENTITY,
+      scope: DEMO_SCOPE,
+      kind_category: null,
+      kind_type_id: null,
+      after_global_sequence,
+      limit: 64,
+    };
+
+    const page = await withSocket(host, port, async (socket) => {
+      const response = await call(socket, EVENT_QUERY.name, encodeBytes(EventQueryRequest, request));
+      if (response.kind !== "netbat-ok") {
+        throw new Error(
+          `event.query: expected OK, got ${response.kind} ${response.code}: ${response.message}`,
+        );
+      }
+      return decodeBytes(EventQueryAck, response.output);
+    });
+
+    entries.push(...page.entries);
+    if (!page.truncated) {
+      return entries;
+    }
+    if (page.next_after_global_sequence === null) {
       throw new Error(
-        `event.query: expected OK, got ${response.kind} ${response.code}: ${response.message}`,
+        "event.query: truncated page did not provide next_after_global_sequence",
       );
     }
-    const page = decodeBytes(EventQueryAck, response.output);
-    if (page.truncated) {
-      throw new Error("event.query: demo stream truncated; increase limit");
-    }
-    return page.entries;
-  });
+    after_global_sequence = page.next_after_global_sequence;
+  }
 }
 
 export async function getEvent(

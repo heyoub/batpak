@@ -2,8 +2,6 @@ name: Criterion Trends
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "0 9 * * 1"
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -18,9 +16,9 @@ jobs:
         surface: [neutral, native]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
       # No current environment is both canonical and timing-stable, so this
       # workflow is visibility-only trend collection. Hard perf enforcement
       # remains the loose catastrophic-regression guard surface in
@@ -29,7 +27,7 @@ jobs:
         working-directory: bpk-lib
         run: cargo xtask bench --surface ${{ matrix.surface }}
       - name: Upload Criterion trend artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: criterion-${{ matrix.os }}-${{ matrix.surface }}
           path: bpk-lib/target/criterion

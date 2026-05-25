@@ -116,3 +116,37 @@ mod tests {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod admission_tests {
+    use super::*;
+
+    #[test]
+    fn parent_dir_sync_admission_accepts_only_reported_sync_modes() {
+        for evidence in [
+            ParentDirSyncEvidence::UnixFsync,
+            ParentDirSyncEvidence::RenameOnly,
+        ] {
+            assert!(
+                admit_parent_dir_sync(evidence).is_ok(),
+                "PROPERTY: parent-dir sync evidence {evidence:?} must be admissible"
+            );
+        }
+
+        for evidence in [
+            ParentDirSyncEvidence::Unknown,
+            ParentDirSyncEvidence::ProbeFailed,
+        ] {
+            assert!(
+                matches!(
+                    admit_parent_dir_sync(evidence),
+                    Err(StoreError::PlatformAdmissionFailed {
+                        capability: "parent directory sync",
+                        ..
+                    })
+                ),
+                "PROPERTY: parent-dir sync evidence {evidence:?} must reject with a parent-dir admission failure"
+            );
+        }
+    }
+}

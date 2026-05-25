@@ -11,8 +11,18 @@ batpak owns a local truth boundary. It does not own the whole application.
 | Store machine contact routes through `store/platform` rather than ad hoc filesystem calls | `just boundary` |
 | `authority_required` is receiver policy input, never granted authority | traceability + substrate docs; no runtime grant path in core |
 | PCP-Core wire validation ships only with explicit codecs, tests, and traceability | absence of undeclared PCP codecs in core; ADR/traceability when added |
+| Downstream product doctrine maps to existing substrate terminals, not new BatPAK product APIs | traceability/product_doctrine_audit.yaml + `just inspect` |
 
 batpak ships as an embedded event substrate, not as a hosted database, queue, ORM, or workflow product. Callers own process model, disk placement, and integration boundaries.
+
+## Product Projection Boundary
+
+Downstream product and agent frameworks may translate substrate truth into docs,
+apps, dashboards, timelines, reports, CLIs, context packets, or delegated action
+loops. BatPAK's job is to keep the source truth bounded and replayable through
+`bank.commit`, `event.get`, `event.query`, `event.walk`, receipts, regions, and
+projection mechanisms. The semantic payloads, role policies, UI surfaces,
+workflow meaning, and representation routing live above BatPAK.
 
 ## Async Hosts
 
@@ -26,11 +36,13 @@ The reference NETBAT terminal is a loop, not just a mailbox:
 | --- | --- | --- |
 | Write | `bank.commit` | append a substrate event and receive a commit receipt |
 | Point | `event.get` | read a known event id and its canonical payload bytes |
-| Walk | `event.query` | page bounded substrate summaries for replay and audit |
+| Page | `event.query` | page bounded substrate summaries by `global_sequence` for replay and audit |
 
-`event.query` is domain-neutral. It filters on substrate coordinates, kind
-category/type, and `global_sequence`; it does not know Moonwalker missions,
-workflows, movement graphs, or receipt-body taxonomies.
+`event.query` is domain-neutral commit-order pagination. It filters on
+substrate coordinates, kind category/type, and `global_sequence`; it does not
+know Moonwalker missions, workflows, movement graphs, or receipt-body
+taxonomies. `after_global_sequence` is the strict resume point for the next
+page, not a server-held stream cursor.
 
 `entity` filters use `Region::entity`, which is prefix-based. Supplying both
 `entity` and `scope` gives the normal coordinate-level replay shape.
@@ -48,11 +60,13 @@ Use circuits and terminals to connect batteries. Do not hide ownership by lettin
 **Calibration pulse:** `just host-dev` mirrors the CI ts-parity lane: export
 manifest, codegen, build and test the workspace, boot hbat on an ephemeral
 store, run heartbeat-spike (heartbeat, commit, query, get), and verify committed
-generated sources stay deterministic. heartbeat-spike proves the four-op
-terminal; it does not grow UI or domain rendering.
+generated sources stay deterministic. heartbeat-spike proves the live heartbeat
++ commit/query/get + ERR calibration path; `receipt.verify` and `event.walk`
+remain part of the six-op host profile and are covered by manifest/parity and
+hbat tests.
 
 **Living loop:** `just host-loop` runs the audit-loop example against a
 persistent store under `target/host-loop/store/`. It seeds app-owned events
-(`kind_category = 0x01`), rebuilds the rendered view from `event.query` +
+(`kind_category = 0x01`), rebuilds the rendered audit view from `event.query` +
 `event.get` (not commit acks), kills hbat, restarts on the same store, and
 runs `--replay-only` to prove substrate replay.

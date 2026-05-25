@@ -95,3 +95,10 @@
     - ART-STORE-CONFIG
     - ART-CONTROL-PLANE-TESTS
     - ART-ADR-CONTROL-PLANE
+- id: REQ-DX-SUBSTRATE-PRODUCT-FIREWALL
+  summary: Product and agent-framework doctrine may guide naming and documentation, but BatPAK public surfaces must remain substrate-neutral and must not own Moonwalker, PCP-Core, workflow-builder, role-surface, or living-work-artifact semantics.
+  artifacts:
+    - ART-DX-PRODUCT-DOCTRINE-AUDIT
+    - ART-DX-DOCS
+    - ART-HBAT-SOURCE
+    - ART-STORE-QUERY-TRAVERSAL

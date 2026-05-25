@@ -1,0 +1,155 @@
+schema_version: 1
+summary: >
+  Cut 17 substrate/product firewall. Product doctrine informs BatPAK naming and
+  boundaries, but does not authorize product, agent-framework, Moonwalker, or
+  PCP-Core semantics inside the substrate.
+entries:
+  - id: onboarding_pressure
+    downstream_pressure: >
+      First-run product experiences may start from a user's pain statement and
+      shape a higher-level work object. BatPAK should make the resulting
+      substrate writes replayable and inspectable without owning the intake
+      dialogue or product seed model.
+    batpak_surface:
+      - typed append
+      - coordinates and regions
+      - query/get replay
+      - receipts
+      - examples and root command surface
+    proof_commands:
+      - just host-dev
+      - just host-loop
+    owning_layer: downstream product / Moonwalker
+    explicit_non_goals:
+      - pain intake
+      - onboarding wizard
+      - generated app model
+      - living work artifact seed grammar
+      - product recommendation policy
+
+  - id: bounded_autonomy
+    downstream_pressure: >
+      Agent frameworks need bounded autonomy: durable memory outside the model
+      context window, explicit limits, replayable decisions, and proof that a
+      delegated action actually reached substrate truth.
+    batpak_surface:
+      - append events
+      - receipts and denial/proof evidence
+      - regions and query limits
+      - projection evidence
+      - opaque extension bytes
+    proof_commands:
+      - just host-loop
+      - just inspect
+    owning_layer: downstream agent framework / Moonwalker
+    explicit_non_goals:
+      - agent policy
+      - role authority
+      - autonomy planner
+      - approval UX
+      - delegated/shaping/review modes
+
+  - id: receipt_proof_pressure
+    downstream_pressure: >
+      Downstream systems need to prove what was written, verify returned
+      receipts, and distinguish durable substrate proof from product-level trust
+      or authority.
+    batpak_surface:
+      - append receipts
+      - denial receipts
+      - receipt.verify
+      - receipt extension coverage
+      - evidence reports
+    proof_commands:
+      - just host-dev
+      - cargo test -p hbat
+    owning_layer: BatPAK substrate proof / downstream trust policy
+    explicit_non_goals:
+      - granted authority
+      - product permission model
+      - agent trust policy
+      - receipt-body domain semantics
+      - PCP-Core validation
+
+  - id: multi_representation_surfaces
+    downstream_pressure: >
+      Higher layers may project one durable work object into docs, apps,
+      dashboards, CLIs, timelines, reports, or other surfaces.
+    batpak_surface:
+      - projection mechanisms
+      - source-truth replay
+      - projection freshness and evidence reports
+      - canonical substrate artifact envelopes
+    proof_commands:
+      - just host-loop
+      - just inspect
+    owning_layer: product surface registry / Moonwalker
+    explicit_non_goals:
+      - UI framework
+      - role dashboard
+      - representation router
+      - product object model
+      - living work artifact API
+
+  - id: context_curation
+    downstream_pressure: >
+      Agent handoff needs curated context packets rather than raw history dumps.
+      Missing GitHub, ledger, or proof inputs must stay visible rather than
+      silently pretending the packet is complete.
+    batpak_surface:
+      - cargo xtask context
+      - factory ledger tail
+      - opaque extension-byte preservation
+      - explicit boundary reminders
+    proof_commands:
+      - just context
+      - just inspect
+    owning_layer: PCP_SPEC / local tooling / downstream agent framework
+    explicit_non_goals:
+      - PCP-Core validation
+      - context hydration law
+      - pcp.recall
+      - agent memory protocol
+      - runtime authority grant
+
+  - id: traversal_boundary
+    downstream_pressure: >
+      External clients need enough traversal to replay substrate truth without
+      sidecar authority while avoiding stream, graph, or workflow semantics.
+    batpak_surface:
+      - event.query
+      - event.get
+      - event.walk
+      - after_global_sequence
+      - Store::query_entries_after
+      - Store::walk_ancestors
+    proof_commands:
+      - just host-dev
+      - just host-loop
+    owning_layer: hbat NETBAT/1 reference host
+    explicit_non_goals:
+      - event.cursor
+      - event.stream
+      - session cursor
+      - workflow graph traversal
+      - Moonwalker route semantics
+
+  - id: overloaded_vocabulary
+    downstream_pressure: >
+      Words like artifact, workflow, context, route, and role are useful in
+      downstream product conversations but can contaminate substrate APIs if not
+      classified.
+    batpak_surface:
+      - canonical artifact envelopes as proof primitives
+      - traceability workflow metadata
+      - generic context/denial metadata
+      - netbat route validation
+    proof_commands:
+      - just inspect
+    owning_layer: BatPAK vocabulary firewall
+    explicit_non_goals:
+      - artifact studio
+      - product workflow engine
+      - PCP context-packet semantics in core
+      - Moonwalker routes
+      - role-aware product surface

@@ -18,6 +18,16 @@ The rule:
 
 Use factory words for mental model and composition. Use engineering words for exact API contracts.
 
+## Product Pressure Boundary
+
+The downstream product direction is to describe a pain, shape a living work
+artifact, and project it wherever the work needs to happen. That sentence is
+pressure on BatPAK's naming and boundaries, not a BatPAK feature list.
+
+BatPAK supplies durable append/event truth, receipts, replay, projections as
+mechanisms, evidence, and opaque extension bytes. Higher layers own the product,
+agent-framework, Moonwalker, and PCP-Core semantics that interpret those bytes.
+
 ## Factory Contract
 
 Every shipped battery should preserve the same shape:
@@ -56,4 +66,3 @@ The opt-in context packet (`just context`) writes a PCP-aligned handoff artifact
 ## Current Batteries
 
 The shipped family is described in [BATTERIES.md](BATTERIES.md). Do not treat reserved names as shipped products.
-

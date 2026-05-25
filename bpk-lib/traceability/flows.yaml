@@ -221,3 +221,10 @@
     - ART-FRONTIER-WAIT-API
     - ART-FRONTIER-WAIT-TESTS
     - ART-ADR-DURABILITY-GATING
+- id: FLOW-DX-SUBSTRATE-TO-DOWNSTREAM-SURFACE
+  summary: Downstream product and agent frameworks may translate BatPAK truth into living work artifacts, role-specific surfaces, context packets, or delegated action loops, but BatPAK exposes only substrate-neutral events, receipts, regions, query/get/walk traversal, projection mechanics, evidence, and opaque extension cargo.
+  artifacts:
+    - ART-DX-PRODUCT-DOCTRINE-AUDIT
+    - ART-DX-DOCS
+    - ART-HBAT-SOURCE
+    - ART-STORE-QUERY-TRAVERSAL

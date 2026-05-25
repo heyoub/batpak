@@ -62,3 +62,56 @@ pub(crate) unsafe fn map_sealed_segment_file(
 ) -> std::io::Result<Mmap> {
     unsafe { Mmap::map(file) }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mmap_index_admission_only_accepts_file_backed_evidence() {
+        assert!(
+            admit_mmap_index(MmapEvidence::FileBacked).is_ok(),
+            "PROPERTY: file-backed mmap evidence must admit index mmap"
+        );
+        for evidence in [
+            MmapEvidence::Unknown,
+            MmapEvidence::ObservedUnsupported,
+            MmapEvidence::ProbeFailed,
+        ] {
+            assert!(
+                matches!(
+                    admit_mmap_index(evidence),
+                    Err(StoreError::PlatformAdmissionFailed {
+                        capability: "mmap index",
+                        ..
+                    })
+                ),
+                "PROPERTY: mmap index evidence {evidence:?} must reject with a mmap-index admission failure"
+            );
+        }
+    }
+
+    #[test]
+    fn sealed_segment_mmap_admission_only_accepts_file_backed_evidence() {
+        assert!(
+            admit_sealed_segment_mmap(MmapEvidence::FileBacked).is_ok(),
+            "PROPERTY: file-backed mmap evidence must admit sealed-segment mmap"
+        );
+        for evidence in [
+            MmapEvidence::Unknown,
+            MmapEvidence::ObservedUnsupported,
+            MmapEvidence::ProbeFailed,
+        ] {
+            assert!(
+                matches!(
+                    admit_sealed_segment_mmap(evidence),
+                    Err(StoreError::PlatformAdmissionFailed {
+                        capability: "sealed segment mmap",
+                        ..
+                    })
+                ),
+                "PROPERTY: sealed-segment mmap evidence {evidence:?} must reject with a sealed-segment admission failure"
+            );
+        }
+    }
+}

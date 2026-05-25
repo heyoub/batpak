@@ -57,3 +57,38 @@ pub(crate) fn admit_store_lock(
     };
     Ok(StoreLockAdmission { _private: () })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn store_lock_admission_accepts_only_reported_lock_protection_modes() {
+        for evidence in [
+            LockLeafSymlinkProtection::AtomicNoFollow,
+            LockLeafSymlinkProtection::BestEffortCheckThenOpen,
+        ] {
+            assert!(
+                admit_store_lock(evidence).is_ok(),
+                "PROPERTY: lock evidence {evidence:?} must be admissible"
+            );
+        }
+
+        for evidence in [
+            LockLeafSymlinkProtection::Unknown,
+            LockLeafSymlinkProtection::ObservedUnsupported,
+            LockLeafSymlinkProtection::ProbeFailed,
+        ] {
+            assert!(
+                matches!(
+                    admit_store_lock(evidence),
+                    Err(StoreError::PlatformAdmissionFailed {
+                        capability: "store lock symlink-leaf protection",
+                        ..
+                    })
+                ),
+                "PROPERTY: lock evidence {evidence:?} must reject with a store-lock admission failure"
+            );
+        }
+    }
+}

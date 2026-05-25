@@ -77,6 +77,68 @@ fn dropping_outbox_without_flush_commits_nothing() {
 }
 
 #[test]
+fn flushing_empty_outbox_is_a_noop_and_stays_empty() {
+    let (store, _dir) = small_segment_store().unwrap();
+    let coord = test_coord();
+    let kind = EventKind::custom(0xF, 1);
+
+    let mut outbox: Outbox<'_> = store.outbox();
+    assert_eq!(
+        outbox.len(),
+        0,
+        "PROPERTY: a new Outbox starts with an empty staged buffer"
+    );
+    assert!(
+        outbox.is_empty(),
+        "PROPERTY: Outbox::is_empty must report true before any staging"
+    );
+
+    let receipts = outbox.flush().expect("flush empty outbox");
+    assert!(
+        receipts.is_empty(),
+        "PROPERTY: flushing an empty Outbox must return no receipts"
+    );
+    assert_eq!(
+        outbox.len(),
+        0,
+        "PROPERTY: empty flush must leave the Outbox staged buffer empty"
+    );
+    assert!(
+        outbox.is_empty(),
+        "PROPERTY: empty flush must preserve Outbox::is_empty"
+    );
+    assert!(
+        user_visible_events(&store).is_empty(),
+        "PROPERTY: flushing an empty Outbox must not publish any user event"
+    );
+
+    store
+        .append(&coord, kind, &serde_json::json!({"post_empty_flush": true}))
+        .expect("append after empty outbox flush");
+}
+
+#[test]
+fn submit_flushing_empty_outbox_resolves_empty_without_visibility() {
+    let (store, _dir) = small_segment_store().unwrap();
+    let mut outbox: Outbox<'_> = store.outbox();
+
+    let ticket = outbox.submit_flush().expect("submit empty outbox");
+    assert!(
+        outbox.is_empty(),
+        "PROPERTY: submit_flush on an empty Outbox must leave the staged buffer empty"
+    );
+    let receipts = ticket.wait().expect("wait for empty outbox ticket");
+    assert!(
+        receipts.is_empty(),
+        "PROPERTY: submitted empty Outbox must resolve with no receipts"
+    );
+    assert!(
+        user_visible_events(&store).is_empty(),
+        "PROPERTY: submitted empty Outbox must not publish any user event"
+    );
+}
+
+#[test]
 fn flushed_outbox_lands_all_items_atomically() {
     let (store, _dir) = small_segment_store().unwrap();
     let coord = test_coord();

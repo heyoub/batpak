@@ -61,6 +61,21 @@ fn native_get_surfaces_non_not_found_io_errors() {
 }
 
 #[test]
+fn native_open_rejects_regular_file_cache_root() {
+    let dir = TempDir::new().expect("temp dir");
+    let cache_path = dir.path().join("cache");
+    std::fs::write(&cache_path, b"not a directory").expect("create cache root as file");
+
+    let result = NativeCache::open(&cache_path);
+    assert!(
+        matches!(result, Err(StoreError::CacheFailed(_))),
+        "PROPERTY: NativeCache::open must reject an existing regular file at the cache root instead of treating it as a usable directory.\n\
+         Investigate: src/store/projection/mod.rs NativeCache::open.\n\
+         Common causes: swallowing create_dir_all failures or failing open after root path validation."
+    );
+}
+
+#[test]
 fn native_get_surfaces_cache_entry_path_that_is_directory() {
     let dir = TempDir::new().expect("temp dir");
     let cache_path = dir.path().join("cache");
@@ -79,6 +94,28 @@ fn native_get_surfaces_cache_entry_path_that_is_directory() {
 }
 
 #[test]
+fn native_put_surfaces_shard_path_that_is_file() {
+    let dir = TempDir::new().expect("temp dir");
+    let cache_path = dir.path().join("cache");
+    let cache = NativeCache::open(&cache_path).expect("open native cache");
+    let shard_path = cache_path.join("61");
+    std::fs::write(&shard_path, b"not a directory").expect("create shard path as file");
+
+    let result = cache.put(b"a", b"value", cache_meta());
+    assert!(
+        matches!(result, Err(StoreError::CacheFailed(_))),
+        "PROPERTY: NativeCache::put must reject a shard path that is a regular file instead of overwriting or pretending to cache.\n\
+         Investigate: src/store/projection/mod.rs NativeCache::put.\n\
+         Common causes: ignoring create_dir_all failures on the shard directory."
+    );
+    assert_eq!(
+        std::fs::read(&shard_path).expect("read shard file"),
+        b"not a directory",
+        "PROPERTY: failed NativeCache::put must leave the obstructing shard file intact."
+    );
+}
+
+#[test]
 fn native_delete_prefix_visits_matching_overlong_shard_directory() {
     let dir = TempDir::new().expect("temp dir");
     let cache_path = dir.path().join("cache");
@@ -93,6 +130,41 @@ fn native_delete_prefix_visits_matching_overlong_shard_directory() {
         "PROPERTY: delete_prefix must scan shard directories that extend a matching prefix.\n\
          Investigate: src/store/projection/mod.rs NativeCache::delete_prefix shard filter.\n\
          Common causes: changing the bidirectional prefix condition from && to ||."
+    );
+}
+
+#[test]
+fn native_delete_prefix_matches_full_key_prefix_inside_shared_shard() {
+    let dir = TempDir::new().expect("temp dir");
+    let cache_path = dir.path().join("cache");
+    let cache = NativeCache::open(&cache_path).expect("open native cache");
+
+    cache
+        .put(b"ab", b"match", cache_meta())
+        .expect("put matching key");
+    cache
+        .put(b"ac", b"same shard sibling", cache_meta())
+        .expect("put same-shard sibling");
+    cache
+        .put(b"b", b"other shard", cache_meta())
+        .expect("put other shard");
+
+    let removed = cache.delete_prefix(b"ab").expect("delete prefix");
+    assert_eq!(
+        removed, 1,
+        "PROPERTY: delete_prefix must match the full hex prefix, not just the shard directory."
+    );
+    assert!(
+        cache.get(b"ab").expect("get deleted key").is_none(),
+        "PROPERTY: the exact matching key must be removed."
+    );
+    assert!(
+        cache.get(b"ac").expect("get same-shard sibling").is_some(),
+        "PROPERTY: a key in the same shard with a different full prefix must survive."
+    );
+    assert!(
+        cache.get(b"b").expect("get other shard key").is_some(),
+        "PROPERTY: a key in another shard must survive."
     );
 }
 

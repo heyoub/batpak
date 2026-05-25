@@ -151,6 +151,10 @@ fn mmap_admission(evidence: MmapEvidence) -> MmapAdmissionSummary {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::store::stats::{
+        ActiveSegmentReadEvidence, LockLeafSymlinkProtection, ParentDirSyncEvidence,
+        StorePathEvidenceSummary,
+    };
     use std::error::Error;
 
     #[test]
@@ -167,6 +171,20 @@ mod tests {
     }
 
     #[test]
+    fn path_status_distinguishes_regular_files_from_directories() -> Result<(), Box<dyn Error>> {
+        let dir = tempfile::tempdir()?;
+        let file_path = dir.path().join("store-file");
+        std::fs::write(&file_path, b"not a directory")?;
+
+        assert_eq!(
+            path_status(&file_path),
+            StorePathStatusEvidence::ObservedUnsupportedNotDirectory,
+            "PROPERTY: an existing non-directory path must be unsupported evidence, not accepted as a store directory"
+        );
+        Ok(())
+    }
+
+    #[test]
     fn mmap_evidence_keeps_missing_paths_unknown() -> Result<(), Box<dyn Error>> {
         let dir = tempfile::tempdir()?;
         let missing = dir.path().join("missing-store-path");
@@ -177,6 +195,55 @@ mod tests {
             "PROPERTY: mmap evidence for a missing path must stay Unknown, not ProbeFailed"
         );
         Ok(())
+    }
+
+    #[test]
+    fn mmap_evidence_rejects_non_directory_store_paths() -> Result<(), Box<dyn Error>> {
+        let dir = tempfile::tempdir()?;
+        let file_path = dir.path().join("store-file");
+        std::fs::write(&file_path, b"not a directory")?;
+
+        assert_eq!(
+            mmap_evidence_for_store_path(&file_path),
+            MmapEvidence::ObservedUnsupported,
+            "PROPERTY: mmap probing must not create temp probes under a non-directory store path"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn admission_from_store_path_maps_each_evidence_family_independently() {
+        let store_path = StorePathEvidenceSummary {
+            path_status: StorePathStatusEvidence::ObservedDirectory,
+            parent_dir_sync: ParentDirSyncEvidence::ProbeFailed,
+            lock_leaf_symlink_protection: LockLeafSymlinkProtection::ObservedUnsupported,
+            mmap_index: MmapEvidence::FileBacked,
+            sealed_segment_mmap: MmapEvidence::Unknown,
+            active_segment_read: ActiveSegmentReadEvidence::ProbeFailed,
+        };
+
+        let admission = admission_from_store_path(&store_path);
+
+        assert_eq!(
+            admission.store_lock,
+            StoreLockAdmissionSummary::Rejected,
+            "PROPERTY: unsupported lock evidence must fail only the lock admission"
+        );
+        assert_eq!(
+            admission.parent_dir_sync,
+            ParentDirSyncAdmissionSummary::Rejected,
+            "PROPERTY: failed parent-dir sync evidence must fail only the sync admission"
+        );
+        assert_eq!(
+            admission.mmap_index,
+            MmapAdmissionSummary::FileBacked,
+            "PROPERTY: file-backed mmap evidence remains admitted even when other families reject"
+        );
+        assert_eq!(
+            admission.sealed_segment_mmap,
+            MmapAdmissionSummary::Rejected,
+            "PROPERTY: unknown sealed-segment mmap evidence must be rejected"
+        );
     }
 
     #[test]

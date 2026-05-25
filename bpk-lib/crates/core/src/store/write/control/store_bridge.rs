@@ -167,6 +167,19 @@ mod tests {
         .expect("open store");
         assert_eq!(store.pressure_retry_threshold(), 6);
         assert!(store.submit_pressure_gate().is_none());
+        assert!(
+            store
+                .pressure_retry_outcome::<BatchAppendTicket>(5)
+                .is_none(),
+            "PROPERTY: queued commands below the retry threshold must pass without retry advice"
+        );
+        assert!(
+            store
+                .pressure_retry_outcome::<BatchAppendTicket>(6)
+                .is_some(),
+            "PROPERTY: queued commands exactly at the retry threshold must produce retry advice; \
+             a <= comparison waits one command too long"
+        );
         store.close().expect("close store");
     }
 }

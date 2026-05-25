@@ -20,10 +20,6 @@ on:
           - loom
           - chaos
           - heavy
-  schedule:
-    - cron: "0 7 * * 1"
-    - cron: "30 7 * * *"
-
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -44,7 +40,10 @@ env:
 jobs:
   # Cost posture: pull requests run the fast devcontainer lane by default.
   # Expensive proof jobs are label-gated (`run-heavy-ci`, `run-mutants`,
-  # `run-windows`, `run-loom`, `run-chaos`) or manual-profile gated.
+  # `run-windows`, `run-loom`, `run-chaos`) or manual-profile gated. This
+  # workflow intentionally has no scheduled heavy runs; full mutation is too
+  # expensive to let it starve PR feedback without an operator explicitly
+  # asking for the `heavy` proof profile.
   rust-changed:
     name: Detect Rust-relevant changes
     runs-on: ubuntu-latest
@@ -419,7 +418,7 @@ jobs:
 
   mutants-full:
     runs-on: ubuntu-latest
-    if: github.event_name == 'schedule' && github.event.schedule == '0 7 * * 1'
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.proof == 'heavy'
     strategy:
       fail-fast: false
       matrix:
@@ -455,14 +454,13 @@ jobs:
           BATPAK_DEVCONTAINER_SKIP_BUILD: "1"
         run: bash ./scripts/run-in-devcontainer.sh 'cargo xtask mutants full --surface ${{ matrix.surface }} --shard ${{ matrix.shard }}'
 
-  chaos-nightly:
-    name: Chaos nightly (dm-flakey)
+  chaos-proof:
+    name: Chaos (dm-flakey)
     runs-on: ubuntu-latest
     if: >-
       (github.event_name == 'workflow_dispatch' &&
         (github.event.inputs.proof == 'chaos' ||
          github.event.inputs.proof == 'heavy')) ||
-      (github.event_name == 'schedule' && github.event.schedule == '30 7 * * *') ||
       (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-chaos'))
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
