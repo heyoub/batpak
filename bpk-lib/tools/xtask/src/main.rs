@@ -310,6 +310,7 @@ pub(crate) enum FactoryLedgerRecordCommand {
     Started(FactoryLedgerRecordStartedArgs),
     Completed(FactoryLedgerRecordCompletedArgs),
     Failed(FactoryLedgerRecordFailedArgs),
+    GateCompleted(FactoryLedgerRecordGateCompletedArgs),
 }
 
 #[derive(Args, Clone)]
@@ -367,6 +368,28 @@ pub(crate) struct FactoryLedgerRecordFailedArgs {
 }
 
 #[derive(Args, Clone)]
+pub(crate) struct FactoryLedgerRecordGateCompletedArgs {
+    #[arg(long)]
+    pub(crate) run_id: String,
+    #[arg(long)]
+    pub(crate) gate: String,
+    #[arg(long)]
+    pub(crate) command: String,
+    #[arg(long, default_value_t = 0)]
+    pub(crate) status_code: i32,
+    #[arg(long)]
+    pub(crate) duration_ms: u64,
+    #[arg(long)]
+    pub(crate) completed_ms: Option<u64>,
+    #[arg(long)]
+    pub(crate) branch: Option<String>,
+    #[arg(long)]
+    pub(crate) head: Option<String>,
+    #[arg(long)]
+    pub(crate) summary: String,
+}
+
+#[derive(Args, Clone)]
 pub(crate) struct FactoryLedgerListArgs {
     #[arg(long, default_value_t = 50)]
     pub(crate) limit: usize,
@@ -374,6 +397,8 @@ pub(crate) struct FactoryLedgerListArgs {
 
 #[derive(Args, Clone, Debug)]
 pub(crate) struct FactoryLedgerRunArgs {
+    #[arg(long)]
+    pub(crate) gate: Option<String>,
     #[arg(trailing_var_arg = true, allow_hyphen_values = true, required = true)]
     pub(crate) command: Vec<String>,
 }

@@ -18,7 +18,7 @@ use crate::util::{cargo_target_dir, project_root, run_output};
 use crate::{
     FactoryLedgerArgs, FactoryLedgerCommand, FactoryLedgerListArgs, FactoryLedgerRecordArgs,
     FactoryLedgerRecordCommand, FactoryLedgerRecordCompletedArgs, FactoryLedgerRecordFailedArgs,
-    FactoryLedgerRecordStartedArgs, FactoryLedgerRunArgs,
+    FactoryLedgerRecordGateCompletedArgs, FactoryLedgerRecordStartedArgs, FactoryLedgerRunArgs,
 };
 
 const STDERR_TAIL_CAP: usize = 4096;
@@ -58,14 +58,31 @@ struct FactoryCommandFailed {
     completed_ms: u64,
 }
 
-/// Reserved for future gate events; no write path in v0.
+/// Named proof gate completion (`factory.gate.completed`).
 #[derive(Clone, Debug, Serialize, Deserialize, EventPayload)]
 #[batpak(category = 0x02, type_id = 0x004)]
 struct FactoryGateCompleted {
     run_id_hex: String,
     gate: String,
+    command: String,
     status_code: i32,
+    duration_ms: u64,
     completed_ms: u64,
+    branch: String,
+    head: String,
+    summary: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct LedgerGateRow {
+    pub(crate) gate: String,
+    pub(crate) command: String,
+    pub(crate) status_code: i32,
+    pub(crate) duration_ms: u64,
+    pub(crate) branch: String,
+    pub(crate) head: String,
+    pub(crate) summary: String,
+    pub(crate) completed_ms: u64,
 }
 
 pub(crate) fn factory_ledger(args: FactoryLedgerArgs) -> Result<()> {
@@ -87,6 +104,9 @@ fn record_command(args: FactoryLedgerRecordArgs) -> Result<()> {
         }
         FactoryLedgerRecordCommand::Failed(failed) => {
             append_failed(&mut store, failed)?;
+        }
+        FactoryLedgerRecordCommand::GateCompleted(gate) => {
+            append_gate_completed(&mut store, gate)?;
         }
     }
     store.close().context("close factory ledger store")?;
@@ -192,14 +212,32 @@ fn run_command(args: FactoryLedgerRunArgs) -> Result<()> {
         append_completed(
             &mut store,
             FactoryLedgerRecordCompletedArgs {
-                run_id: run_id_hex,
-                command: argv0,
+                run_id: run_id_hex.clone(),
+                command: argv0.clone(),
                 status_code,
                 duration_ms,
                 completed_ms: Some(completed_ms),
             },
         )
         .context("factory-ledger: failed to record command completed event")?;
+        if let Some(gate) = args.gate {
+            let summary = format!("{gate} ok @ {head} duration={duration_ms}ms");
+            append_gate_completed(
+                &mut store,
+                FactoryLedgerRecordGateCompletedArgs {
+                    run_id: run_id_hex,
+                    gate,
+                    command: display_command,
+                    status_code,
+                    duration_ms,
+                    completed_ms: Some(completed_ms),
+                    branch: Some(branch),
+                    head: Some(head),
+                    summary,
+                },
+            )
+            .context("factory-ledger: failed to record gate completed event")?;
+        }
         store.close().context("close factory ledger store")?;
         Ok(())
     } else {
@@ -226,9 +264,28 @@ fn ledger_store_dir() -> Result<PathBuf> {
 
 /// Read recent factory-ledger lines without creating the store directory.
 pub(crate) fn collect_ledger_lines(limit: usize) -> Result<Vec<String>> {
+    let Some(store) = open_existing_ledger_store()? else {
+        return Ok(Vec::new());
+    };
+    let lines = collect_list_lines(&store, limit)?;
+    store.close().context("close factory ledger store")?;
+    Ok(lines)
+}
+
+/// Read recent gate rows without creating the store directory (newest-first).
+pub(crate) fn collect_gate_rows(limit: usize) -> Result<Vec<LedgerGateRow>> {
+    let Some(store) = open_existing_ledger_store()? else {
+        return Ok(Vec::new());
+    };
+    let rows = collect_gate_rows_from_store(&store, limit)?;
+    store.close().context("close factory ledger store")?;
+    Ok(rows)
+}
+
+fn open_existing_ledger_store() -> Result<Option<Store>> {
     let store_dir = ledger_store_dir()?;
     if !store_dir.exists() {
-        return Ok(Vec::new());
+        return Ok(None);
     }
     validate_event_payload_registry().context("validate EventPayload registry")?;
     let store = Store::open(
@@ -238,9 +295,7 @@ pub(crate) fn collect_ledger_lines(limit: usize) -> Result<Vec<String>> {
             .with_sync_mode(SyncMode::SyncData),
     )
     .context("open existing factory ledger store")?;
-    let lines = collect_list_lines(&store, limit)?;
-    store.close().context("close factory ledger store")?;
-    Ok(lines)
+    Ok(Some(store))
 }
 
 pub(crate) fn open_ledger_store_at(dir: &Path) -> Result<Store> {
@@ -315,6 +370,80 @@ fn append_failed(store: &mut Store, args: FactoryLedgerRecordFailedArgs) -> Resu
     Ok(())
 }
 
+fn append_gate_completed(
+    store: &mut Store,
+    args: FactoryLedgerRecordGateCompletedArgs,
+) -> Result<()> {
+    let coord = ledger_coordinate().context("ledger coordinate")?;
+    let payload = FactoryGateCompleted {
+        run_id_hex: args.run_id,
+        gate: args.gate,
+        command: args.command,
+        status_code: args.status_code,
+        duration_ms: args.duration_ms,
+        completed_ms: args.completed_ms.unwrap_or_else(now_ms),
+        branch: args.branch.unwrap_or_else(default_branch),
+        head: args.head.unwrap_or_else(default_head),
+        summary: args.summary,
+    };
+    store
+        .append_typed(&coord, &payload)
+        .context("append factory.gate.completed")?;
+    Ok(())
+}
+
+fn gate_to_row(gate: FactoryGateCompleted) -> LedgerGateRow {
+    LedgerGateRow {
+        gate: gate.gate,
+        command: gate.command,
+        status_code: gate.status_code,
+        duration_ms: gate.duration_ms,
+        branch: gate.branch,
+        head: gate.head,
+        summary: gate.summary,
+        completed_ms: gate.completed_ms,
+    }
+}
+
+fn format_gate_line(seq: u64, gate: &FactoryGateCompleted) -> String {
+    format!(
+        "run_id={} seq={seq} gate={} status={} duration_ms={} command={:?} branch={} head={} summary={:?}",
+        gate.run_id_hex,
+        gate.gate,
+        gate.status_code,
+        gate.duration_ms,
+        gate.command,
+        gate.branch,
+        gate.head,
+        gate.summary
+    )
+}
+
+fn collect_gate_rows_from_store(store: &Store, limit: usize) -> Result<Vec<LedgerGateRow>> {
+    let region = Region::scope(LEDGER_SCOPE);
+    let scan_limit = limit.saturating_mul(50).max(200);
+    let entries = store.query_entries_after(&region, None, scan_limit);
+    let mut gates = Vec::new();
+    for entry in entries {
+        let event_id = entry.event_id();
+        let stored = store
+            .read_raw(EventId::from(event_id))
+            .with_context(|| format!("read ledger event {event_id:032x}"))?;
+        if let Some(gate) = stored
+            .event
+            .route_typed::<FactoryGateCompleted>()
+            .context("decode FactoryGateCompleted")?
+        {
+            gates.push(gate_to_row(gate));
+        }
+    }
+    if gates.len() > limit {
+        gates.drain(..gates.len() - limit);
+    }
+    gates.reverse();
+    Ok(gates)
+}
+
 pub(crate) fn collect_list_lines(store: &Store, limit: usize) -> Result<Vec<String>> {
     if limit == 0 {
         return Ok(Vec::new());
@@ -362,13 +491,12 @@ pub(crate) fn collect_list_lines(store: &Store, limit: usize) -> Result<Vec<Stri
             ));
             continue;
         }
-        if stored
+        if let Some(gate) = stored
             .event
             .route_typed::<FactoryGateCompleted>()
             .context("decode FactoryGateCompleted")?
-            .is_some()
         {
-            lines.push(format!("seq={seq} gate.completed"));
+            lines.push(format_gate_line(seq, &gate));
         }
     }
     if lines.len() > limit {
@@ -661,5 +789,154 @@ mod tests {
             })
             .collect();
         assert_eq!(seqs, vec![4, 3, 2]);
+    }
+
+    #[test]
+    fn record_gate_completed_roundtrip() {
+        let (_dir, mut store) = temp_store();
+        append_gate_completed(
+            &mut store,
+            FactoryLedgerRecordGateCompletedArgs {
+                run_id: "0123456789abcdef0123456789abcdef".to_owned(),
+                gate: "host-dev".to_owned(),
+                command: "cargo xtask host-dev".to_owned(),
+                status_code: 0,
+                duration_ms: 42,
+                completed_ms: Some(99),
+                branch: Some("factory/test".to_owned()),
+                head: Some("afb63dc".to_owned()),
+                summary: "host-dev ok @ afb63dc duration=42ms".to_owned(),
+            },
+        )
+        .expect("gate");
+        let lines = collect_list_lines(&store, 10).expect("list");
+        store.close().expect("close");
+        let gate_line = lines
+            .iter()
+            .find(|line| line.contains("gate=host-dev"))
+            .expect("gate line");
+        assert!(gate_line.contains("summary=\"host-dev ok @ afb63dc duration=42ms\""));
+        assert!(gate_line.contains("head=afb63dc"));
+    }
+
+    #[test]
+    fn run_with_gate_appends_gate_on_success() {
+        let (_dir, mut store) = temp_store();
+        let run_id = "aaaabbbbccccddddeeeeffff00001111".to_owned();
+        append_started(
+            &mut store,
+            FactoryLedgerRecordStartedArgs {
+                run_id: run_id.clone(),
+                command: "cargo".to_owned(),
+                args: vec!["xtask".to_owned(), "context".to_owned()],
+                cwd: Some("/".to_owned()),
+                branch: Some("factory/test".to_owned()),
+                head: Some("abc123".to_owned()),
+                started_ms: Some(1),
+            },
+        )
+        .expect("started");
+        append_completed(
+            &mut store,
+            FactoryLedgerRecordCompletedArgs {
+                run_id: run_id.clone(),
+                command: "cargo".to_owned(),
+                status_code: 0,
+                duration_ms: 10,
+                completed_ms: Some(2),
+            },
+        )
+        .expect("completed");
+        append_gate_completed(
+            &mut store,
+            FactoryLedgerRecordGateCompletedArgs {
+                run_id,
+                gate: "context".to_owned(),
+                command: "cargo xtask context".to_owned(),
+                status_code: 0,
+                duration_ms: 10,
+                completed_ms: Some(2),
+                branch: Some("factory/test".to_owned()),
+                head: Some("abc123".to_owned()),
+                summary: "context ok @ abc123 duration=10ms".to_owned(),
+            },
+        )
+        .expect("gate");
+        let gates = collect_gate_rows_from_store(&store, 10).expect("gates");
+        store.close().expect("close");
+        assert_eq!(gates.len(), 1);
+        assert_eq!(gates[0].gate, "context");
+    }
+
+    #[test]
+    fn run_with_gate_skips_gate_on_failure() {
+        let (_dir, mut store) = temp_store();
+        append_started(
+            &mut store,
+            FactoryLedgerRecordStartedArgs {
+                run_id: "fedcba9876543210fedcba9876543210".to_owned(),
+                command: "fail".to_owned(),
+                args: Vec::new(),
+                cwd: Some("/".to_owned()),
+                branch: Some("factory/test".to_owned()),
+                head: Some("deadbeef".to_owned()),
+                started_ms: Some(1),
+            },
+        )
+        .expect("started");
+        append_failed(
+            &mut store,
+            FactoryLedgerRecordFailedArgs {
+                run_id: "fedcba9876543210fedcba9876543210".to_owned(),
+                command: "fail".to_owned(),
+                status_code: 1,
+                duration_ms: 3,
+                stderr_tail: String::new(),
+                completed_ms: Some(2),
+            },
+        )
+        .expect("failed");
+        let gates = collect_gate_rows_from_store(&store, 10).expect("gates");
+        store.close().expect("close");
+        assert!(gates.is_empty());
+    }
+
+    #[test]
+    fn collect_gate_rows_read_only_absent_store() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let missing = dir.path().join("missing-store");
+        std::env::set_var("CARGO_TARGET_DIR", dir.path());
+        let rows = collect_gate_rows(5)?;
+        std::env::remove_var("CARGO_TARGET_DIR");
+        assert!(rows.is_empty());
+        assert!(!missing.exists());
+        Ok(())
+    }
+
+    #[test]
+    fn collect_gate_rows_newest_first() {
+        let (_dir, mut store) = temp_store();
+        for idx in 0..3 {
+            append_gate_completed(
+                &mut store,
+                FactoryLedgerRecordGateCompletedArgs {
+                    run_id: format!("{idx:032x}"),
+                    gate: format!("gate{idx}"),
+                    command: format!("cmd{idx}"),
+                    status_code: 0,
+                    duration_ms: idx,
+                    completed_ms: Some(idx),
+                    branch: Some("b".to_owned()),
+                    head: Some(format!("head{idx}")),
+                    summary: format!("gate{idx} ok"),
+                },
+            )
+            .expect("gate");
+        }
+        let gates = collect_gate_rows_from_store(&store, 2).expect("gates");
+        store.close().expect("close");
+        assert_eq!(gates.len(), 2);
+        assert_eq!(gates[0].gate, "gate2");
+        assert_eq!(gates[1].gate, "gate1");
     }
 }

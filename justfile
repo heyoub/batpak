@@ -97,6 +97,9 @@ context:
 ledger-run command *args:
     cd bpk-lib; cargo xtask factory-ledger run -- {{command}} {{args}}
 
+ledger-run-gate gate command *args:
+    cd bpk-lib; cargo xtask factory-ledger run --gate {{gate}} -- {{command}} {{args}}
+
 ci-fast:
     cd bpk-lib; cargo xtask ci-fast
 
