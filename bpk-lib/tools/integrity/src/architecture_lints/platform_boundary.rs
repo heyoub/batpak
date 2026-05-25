@@ -1,5 +1,6 @@
 use super::{ensure, relative};
-use crate::source_cache::{path_segments, SourceCache};
+use crate::rust_ast::{callee_path_segments, path_segments, tail_owner_method};
+use crate::source_cache::SourceCache;
 use anyhow::Result;
 use quote::ToTokens;
 use std::collections::{BTreeMap, BTreeSet};
@@ -308,11 +309,7 @@ struct PlatformContactVisitor {
 impl PlatformContactVisitor {
     fn call_path_violation(&self, path: &syn::Path) -> Option<&'static str> {
         let segments = path_segments(path);
-        let (owner, method) = match segments.as_slice() {
-            [owner, method] => (owner.as_str(), method.as_str()),
-            [.., owner, method] => (owner.as_str(), method.as_str()),
-            _ => return None,
-        };
+        let (owner, method) = tail_owner_method(&segments)?;
         if method == "create_new"
             && (self.aliases.file.contains(owner)
                 || path_ends_with(&segments, &["std", "fs", "File", "create_new"]))
@@ -335,17 +332,9 @@ impl PlatformContactVisitor {
     }
 
     fn receiver_is_mmap_options_new(&self, receiver: &Expr) -> bool {
-        let Expr::Call(ExprCall { func, .. }) = receiver else {
+        let segments = callee_path_segments(receiver).unwrap_or_default();
+        let Some((owner, method)) = tail_owner_method(&segments) else {
             return false;
-        };
-        let Expr::Path(path) = func.as_ref() else {
-            return false;
-        };
-        let segments = path_segments(&path.path);
-        let (owner, method) = match segments.as_slice() {
-            [owner, method] => (owner.as_str(), method.as_str()),
-            [.., owner, method] => (owner.as_str(), method.as_str()),
-            _ => return false,
         };
         method == "new"
             && (self.aliases.mmap_options.contains(owner)

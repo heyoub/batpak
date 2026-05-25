@@ -37,6 +37,7 @@ mod harness_lints;
 mod invariant_bridge;
 mod public_surface;
 mod repo_surface;
+mod rust_ast;
 mod source_cache;
 mod store_pub_fn_coverage;
 mod structural;
