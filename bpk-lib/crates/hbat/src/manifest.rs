@@ -1,12 +1,16 @@
 //! Inventory-driven descriptor registry consumed by both
 //! `xtask export-ts-manifest` and the `hbat` binary.
 //!
-//! Each `EventPayload`-deriving module submits an
-//! [`EventDescriptorRegistration`] via the `inventory` crate. Each
-//! operation module submits an [`OperationDescriptorRegistration`] next
-//! to its `*_DESCRIPTOR` const. The function [`descriptors`] iterates both
-//! registries at runtime and materializes the [`ManifestSnapshot`] — no
-//! centralized hand-rolled describe table for events or operations.
+//! **Payload descriptors** — each `EventPayload`-deriving module submits
+//! via [`crate::hbat_event_descriptor!`], which expands to
+//! [`EventDescriptorRegistration`] + `inventory::submit!`.
+//!
+//! **Operation descriptors** — each operation module submits
+//! [`OperationDescriptorRegistration`] next to its `*_DESCRIPTOR` const
+//! (Cut 4 inventory pattern).
+//!
+//! [`descriptors`] iterates both registries at runtime and materializes
+//! the [`ManifestSnapshot`].
 
 use netbat::{encode_request, encode_response, NetbatError};
 use serde::Serialize;
@@ -499,6 +503,62 @@ mod tests {
         let mut sorted = names.clone();
         sorted.sort_unstable();
         assert_eq!(names, sorted, "operations must be sorted by name");
+        Ok(())
+    }
+
+    #[test]
+    fn in_process_manifest_matches_checked_in_bpk_ts_file() -> Result<()> {
+        use serde::Serialize;
+        use std::path::PathBuf;
+
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct BatpakTsManifest {
+            manifest_version: u32,
+            netbat_version: &'static str,
+            batpak_version: &'static str,
+            canonical_encoding: CanonicalEncoding,
+            #[serde(flatten)]
+            snapshot: ManifestSnapshot,
+        }
+
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct CanonicalEncoding {
+            kind: &'static str,
+            rmp_serde_version: &'static str,
+        }
+
+        const RMP_SERDE_VERSION: &str = "1.3.1";
+        const NETBAT_VERSION: &str = "NETBAT/1";
+        const BATPAK_VERSION: &str = "0.7.6";
+
+        let manifest = BatpakTsManifest {
+            manifest_version: MANIFEST_VERSION,
+            netbat_version: NETBAT_VERSION,
+            batpak_version: BATPAK_VERSION,
+            canonical_encoding: CanonicalEncoding {
+                kind: "named-field-msgpack",
+                rmp_serde_version: RMP_SERDE_VERSION,
+            },
+            snapshot: descriptors()?,
+        };
+
+        let mut actual = serde_json::to_string_pretty(&manifest)?;
+        actual.push('\n');
+
+        let checked_in =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../bpk-ts/batpak.manifest.json");
+        let expected = std::fs::read_to_string(&checked_in).map_err(|e| {
+            anyhow::anyhow!("read checked-in manifest {}: {e}", checked_in.display())
+        })?;
+
+        assert_eq!(
+            actual,
+            expected,
+            "in-process manifest drifted from {}",
+            checked_in.display()
+        );
         Ok(())
     }
 }

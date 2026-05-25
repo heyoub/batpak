@@ -383,148 +383,111 @@ impl EventPayloadFixture for EventQueryAck {
 
 // ─── Manifest registry submissions ──────────────────────────────────────────
 //
-// One `inventory::submit!` per `EventPayload`-deriving type. The
-// `manifest::descriptors()` runtime walker materializes each entry into
-// a full `EventDescriptor`. Field rows mirror the serde declaration
-// order on the struct above.
+// Payload descriptors submit via `hbat_event_descriptor!`. Field rows mirror
+// serde declaration order on the structs above.
 
-inventory::submit! {
-    crate::manifest::EventDescriptorRegistration {
-        rust_type: "hbat::bank::BankCommitRequest",
-        ts_name: "BankCommitRequest",
-        schema_ref: BANK_COMMIT_INPUT_SCHEMA_REF,
-        kind_bits: BankCommitRequest::KIND.as_raw_u16(),
-        fields: &[
-            crate::manifest::FieldRow { wire_name: "entity", type_token: "string", order: 0 },
-            crate::manifest::FieldRow { wire_name: "scope", type_token: "string", order: 1 },
-            crate::manifest::FieldRow { wire_name: "kind_category", type_token: "u8", order: 2 },
-            crate::manifest::FieldRow { wire_name: "kind_type_id", type_token: "u16", order: 3 },
-            // payload is a free-form hex blob (variable length, lowercase).
-            // Branded as HexBlob on the TS side so callers cannot
-            // accidentally pass an event_id or content hash here.
-            crate::manifest::FieldRow { wire_name: "payload_hex", type_token: "hex-blob", order: 4 },
-        ],
-        fixture_bytes: || batpak::encoding::to_bytes(&BankCommitRequest::fixture_value()).ok(),
-        fixture_json: || serde_json::to_value(BankCommitRequest::fixture_value()).ok(),
-    }
+// payload_hex is a free-form hex blob (variable length, lowercase).
+// Branded as HexBlob on the TS side so callers cannot accidentally pass
+// an event_id or content hash here.
+crate::hbat_event_descriptor! {
+    type = BankCommitRequest,
+    schema_ref = BANK_COMMIT_INPUT_SCHEMA_REF,
+    ts_name = "BankCommitRequest",
+    fields = [
+        ("entity", "string"),
+        ("scope", "string"),
+        ("kind_category", "u8"),
+        ("kind_type_id", "u16"),
+        ("payload_hex", "hex-blob"),
+    ],
 }
 
-inventory::submit! {
-    crate::manifest::EventDescriptorRegistration {
-        rust_type: "hbat::bank::BankCommitAck",
-        ts_name: "BankCommitAck",
-        schema_ref: BANK_COMMIT_OUTPUT_SCHEMA_REF,
-        kind_bits: BankCommitAck::KIND.as_raw_u16(),
-        fields: &[
-            // Branded hex tokens prevent passing the wrong hex shape
-            // (e.g. a content hash where an event id was expected).
-            crate::manifest::FieldRow { wire_name: "event_id_hex", type_token: "u128-hex", order: 0 },
-            crate::manifest::FieldRow { wire_name: "sequence", type_token: "u64-safe", order: 1 },
-            crate::manifest::FieldRow { wire_name: "content_hash_hex", type_token: "blake3-32-hex", order: 2 },
-            crate::manifest::FieldRow { wire_name: "key_id_hex", type_token: "key-id-hex", order: 3 },
-            crate::manifest::FieldRow { wire_name: "signature_hex", type_token: "option<ed25519-sig-hex>", order: 4 },
-            crate::manifest::FieldRow { wire_name: "extensions", type_token: "map<string,hex-blob>", order: 5 },
-        ],
-        fixture_bytes: || batpak::encoding::to_bytes(&BankCommitAck::fixture_value()).ok(),
-        fixture_json: || serde_json::to_value(BankCommitAck::fixture_value()).ok(),
-    }
+// Branded hex tokens prevent passing the wrong hex shape (e.g. a content
+// hash where an event id was expected).
+crate::hbat_event_descriptor! {
+    type = BankCommitAck,
+    schema_ref = BANK_COMMIT_OUTPUT_SCHEMA_REF,
+    ts_name = "BankCommitAck",
+    fields = [
+        ("event_id_hex", "u128-hex"),
+        ("sequence", "u64-safe"),
+        ("content_hash_hex", "blake3-32-hex"),
+        ("key_id_hex", "key-id-hex"),
+        ("signature_hex", "option<ed25519-sig-hex>"),
+        ("extensions", "map<string,hex-blob>"),
+    ],
 }
 
-inventory::submit! {
-    crate::manifest::EventDescriptorRegistration {
-        rust_type: "hbat::bank::EventGetRequest",
-        ts_name: "EventGetRequest",
-        schema_ref: EVENT_GET_INPUT_SCHEMA_REF,
-        kind_bits: EventGetRequest::KIND.as_raw_u16(),
-        fields: &[
-            crate::manifest::FieldRow { wire_name: "event_id_hex", type_token: "u128-hex", order: 0 },
-        ],
-        fixture_bytes: || batpak::encoding::to_bytes(&EventGetRequest::fixture_value()).ok(),
-        fixture_json: || serde_json::to_value(EventGetRequest::fixture_value()).ok(),
-    }
+crate::hbat_event_descriptor! {
+    type = EventGetRequest,
+    schema_ref = EVENT_GET_INPUT_SCHEMA_REF,
+    ts_name = "EventGetRequest",
+    fields = [
+        ("event_id_hex", "u128-hex"),
+    ],
 }
 
-inventory::submit! {
-    crate::manifest::EventDescriptorRegistration {
-        rust_type: "hbat::bank::EventGetAck",
-        ts_name: "EventGetAck",
-        schema_ref: EVENT_GET_OUTPUT_SCHEMA_REF,
-        kind_bits: EventGetAck::KIND.as_raw_u16(),
-        fields: &[
-            crate::manifest::FieldRow { wire_name: "event_id_hex", type_token: "u128-hex", order: 0 },
-            crate::manifest::FieldRow { wire_name: "sequence", type_token: "u64-safe", order: 1 },
-            crate::manifest::FieldRow { wire_name: "timestamp_us", type_token: "i64-microseconds", order: 2 },
-            crate::manifest::FieldRow { wire_name: "correlation_id_hex", type_token: "u128-hex", order: 3 },
-            crate::manifest::FieldRow { wire_name: "causation_id_hex", type_token: "option<u128-hex>", order: 4 },
-            crate::manifest::FieldRow { wire_name: "kind_category", type_token: "u8", order: 5 },
-            crate::manifest::FieldRow { wire_name: "kind_type_id", type_token: "u16", order: 6 },
-            crate::manifest::FieldRow { wire_name: "entity", type_token: "string", order: 7 },
-            crate::manifest::FieldRow { wire_name: "scope", type_token: "string", order: 8 },
-            crate::manifest::FieldRow { wire_name: "payload_hex", type_token: "hex-blob", order: 9 },
-            crate::manifest::FieldRow { wire_name: "content_hash_hex", type_token: "blake3-32-hex", order: 10 },
-        ],
-        fixture_bytes: || batpak::encoding::to_bytes(&EventGetAck::fixture_value()).ok(),
-        fixture_json: || serde_json::to_value(EventGetAck::fixture_value()).ok(),
-    }
+crate::hbat_event_descriptor! {
+    type = EventGetAck,
+    schema_ref = EVENT_GET_OUTPUT_SCHEMA_REF,
+    ts_name = "EventGetAck",
+    fields = [
+        ("event_id_hex", "u128-hex"),
+        ("sequence", "u64-safe"),
+        ("timestamp_us", "i64-microseconds"),
+        ("correlation_id_hex", "u128-hex"),
+        ("causation_id_hex", "option<u128-hex>"),
+        ("kind_category", "u8"),
+        ("kind_type_id", "u16"),
+        ("entity", "string"),
+        ("scope", "string"),
+        ("payload_hex", "hex-blob"),
+        ("content_hash_hex", "blake3-32-hex"),
+    ],
 }
 
-inventory::submit! {
-    crate::manifest::EventDescriptorRegistration {
-        rust_type: "hbat::bank::EventQueryRequest",
-        ts_name: "EventQueryRequest",
-        schema_ref: EVENT_QUERY_INPUT_SCHEMA_REF,
-        kind_bits: EventQueryRequest::KIND.as_raw_u16(),
-        fields: &[
-            crate::manifest::FieldRow { wire_name: "entity", type_token: "option<string>", order: 0 },
-            crate::manifest::FieldRow { wire_name: "scope", type_token: "option<string>", order: 1 },
-            crate::manifest::FieldRow { wire_name: "kind_category", type_token: "option<u8>", order: 2 },
-            crate::manifest::FieldRow { wire_name: "kind_type_id", type_token: "option<u16>", order: 3 },
-            crate::manifest::FieldRow { wire_name: "after_global_sequence", type_token: "option<u64-safe>", order: 4 },
-            crate::manifest::FieldRow { wire_name: "limit", type_token: "u64-safe-positive", order: 5 },
-        ],
-        fixture_bytes: || batpak::encoding::to_bytes(&EventQueryRequest::fixture_value()).ok(),
-        fixture_json: || serde_json::to_value(EventQueryRequest::fixture_value()).ok(),
-    }
+crate::hbat_event_descriptor! {
+    type = EventQueryRequest,
+    schema_ref = EVENT_QUERY_INPUT_SCHEMA_REF,
+    ts_name = "EventQueryRequest",
+    fields = [
+        ("entity", "option<string>"),
+        ("scope", "option<string>"),
+        ("kind_category", "option<u8>"),
+        ("kind_type_id", "option<u16>"),
+        ("after_global_sequence", "option<u64-safe>"),
+        ("limit", "u64-safe-positive"),
+    ],
 }
 
-inventory::submit! {
-    crate::manifest::EventDescriptorRegistration {
-        rust_type: "hbat::bank::EventSummary",
-        ts_name: "EventSummary",
-        schema_ref: EVENT_QUERY_SUMMARY_SCHEMA_REF,
-        kind_bits: EventSummary::KIND.as_raw_u16(),
-        fields: &[
-            crate::manifest::FieldRow { wire_name: "event_id_hex", type_token: "u128-hex", order: 0 },
-            crate::manifest::FieldRow { wire_name: "global_sequence", type_token: "u64-safe", order: 1 },
-            crate::manifest::FieldRow { wire_name: "wall_ms", type_token: "u64-millis", order: 2 },
-            crate::manifest::FieldRow { wire_name: "clock", type_token: "u32", order: 3 },
-            crate::manifest::FieldRow { wire_name: "correlation_id_hex", type_token: "u128-hex", order: 4 },
-            crate::manifest::FieldRow { wire_name: "causation_id_hex", type_token: "option<u128-hex>", order: 5 },
-            crate::manifest::FieldRow { wire_name: "kind_category", type_token: "u8", order: 6 },
-            crate::manifest::FieldRow { wire_name: "kind_type_id", type_token: "u16", order: 7 },
-            crate::manifest::FieldRow { wire_name: "entity", type_token: "string", order: 8 },
-            crate::manifest::FieldRow { wire_name: "scope", type_token: "string", order: 9 },
-            crate::manifest::FieldRow { wire_name: "content_hash_hex", type_token: "blake3-32-hex", order: 10 },
-        ],
-        fixture_bytes: || batpak::encoding::to_bytes(&EventSummary::fixture_value()).ok(),
-        fixture_json: || serde_json::to_value(EventSummary::fixture_value()).ok(),
-    }
+crate::hbat_event_descriptor! {
+    type = EventSummary,
+    schema_ref = EVENT_QUERY_SUMMARY_SCHEMA_REF,
+    ts_name = "EventSummary",
+    fields = [
+        ("event_id_hex", "u128-hex"),
+        ("global_sequence", "u64-safe"),
+        ("wall_ms", "u64-millis"),
+        ("clock", "u32"),
+        ("correlation_id_hex", "u128-hex"),
+        ("causation_id_hex", "option<u128-hex>"),
+        ("kind_category", "u8"),
+        ("kind_type_id", "u16"),
+        ("entity", "string"),
+        ("scope", "string"),
+        ("content_hash_hex", "blake3-32-hex"),
+    ],
 }
 
-inventory::submit! {
-    crate::manifest::EventDescriptorRegistration {
-        rust_type: "hbat::bank::EventQueryAck",
-        ts_name: "EventQueryAck",
-        schema_ref: EVENT_QUERY_OUTPUT_SCHEMA_REF,
-        kind_bits: EventQueryAck::KIND.as_raw_u16(),
-        fields: &[
-            crate::manifest::FieldRow { wire_name: "entries", type_token: "array<EventSummary>", order: 0 },
-            crate::manifest::FieldRow { wire_name: "next_after_global_sequence", type_token: "option<u64-safe>", order: 1 },
-            crate::manifest::FieldRow { wire_name: "truncated", type_token: "bool", order: 2 },
-        ],
-        fixture_bytes: || batpak::encoding::to_bytes(&EventQueryAck::fixture_value()).ok(),
-        fixture_json: || serde_json::to_value(EventQueryAck::fixture_value()).ok(),
-    }
+crate::hbat_event_descriptor! {
+    type = EventQueryAck,
+    schema_ref = EVENT_QUERY_OUTPUT_SCHEMA_REF,
+    ts_name = "EventQueryAck",
+    fields = [
+        ("entries", "array<EventSummary>"),
+        ("next_after_global_sequence", "option<u64-safe>"),
+        ("truncated", "bool"),
+    ],
 }
 
 #[cfg(test)]
