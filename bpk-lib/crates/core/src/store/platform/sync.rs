@@ -137,19 +137,15 @@ mod admission_tests {
             ParentDirSyncEvidence::Unknown,
             ParentDirSyncEvidence::ProbeFailed,
         ] {
-            let err = match admit_parent_dir_sync(evidence) {
-                Ok(_) => panic!("PROPERTY: parent-dir sync evidence {evidence:?} must reject"),
-                Err(error) => error,
-            };
             assert!(
                 matches!(
-                    err,
-                    StoreError::PlatformAdmissionFailed {
+                    admit_parent_dir_sync(evidence),
+                    Err(StoreError::PlatformAdmissionFailed {
                         capability: "parent directory sync",
                         ..
-                    }
+                    })
                 ),
-                "expected parent-dir sync admission failure for {evidence:?}, got {err:?}"
+                "PROPERTY: parent-dir sync evidence {evidence:?} must reject with a parent-dir admission failure"
             );
         }
     }

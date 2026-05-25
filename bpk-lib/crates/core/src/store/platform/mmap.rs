@@ -78,19 +78,15 @@ mod tests {
             MmapEvidence::ObservedUnsupported,
             MmapEvidence::ProbeFailed,
         ] {
-            let err = match admit_mmap_index(evidence) {
-                Ok(_) => panic!("PROPERTY: index mmap evidence {evidence:?} must reject"),
-                Err(error) => error,
-            };
             assert!(
                 matches!(
-                    err,
-                    StoreError::PlatformAdmissionFailed {
+                    admit_mmap_index(evidence),
+                    Err(StoreError::PlatformAdmissionFailed {
                         capability: "mmap index",
                         ..
-                    }
+                    })
                 ),
-                "expected mmap index admission failure for {evidence:?}, got {err:?}"
+                "PROPERTY: mmap index evidence {evidence:?} must reject with a mmap-index admission failure"
             );
         }
     }
@@ -106,19 +102,15 @@ mod tests {
             MmapEvidence::ObservedUnsupported,
             MmapEvidence::ProbeFailed,
         ] {
-            let err = match admit_sealed_segment_mmap(evidence) {
-                Ok(_) => panic!("PROPERTY: sealed-segment mmap evidence {evidence:?} must reject"),
-                Err(error) => error,
-            };
             assert!(
                 matches!(
-                    err,
-                    StoreError::PlatformAdmissionFailed {
+                    admit_sealed_segment_mmap(evidence),
+                    Err(StoreError::PlatformAdmissionFailed {
                         capability: "sealed segment mmap",
                         ..
-                    }
+                    })
                 ),
-                "expected sealed-segment mmap admission failure for {evidence:?}, got {err:?}"
+                "PROPERTY: sealed-segment mmap evidence {evidence:?} must reject with a sealed-segment admission failure"
             );
         }
     }

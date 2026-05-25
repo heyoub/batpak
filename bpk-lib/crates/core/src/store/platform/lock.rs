@@ -79,19 +79,15 @@ mod tests {
             LockLeafSymlinkProtection::ObservedUnsupported,
             LockLeafSymlinkProtection::ProbeFailed,
         ] {
-            let err = match admit_store_lock(evidence) {
-                Ok(_) => panic!("PROPERTY: lock evidence {evidence:?} must reject"),
-                Err(error) => error,
-            };
             assert!(
                 matches!(
-                    err,
-                    StoreError::PlatformAdmissionFailed {
+                    admit_store_lock(evidence),
+                    Err(StoreError::PlatformAdmissionFailed {
                         capability: "store lock symlink-leaf protection",
                         ..
-                    }
+                    })
                 ),
-                "expected store-lock admission failure for {evidence:?}, got {err:?}"
+                "PROPERTY: lock evidence {evidence:?} must reject with a store-lock admission failure"
             );
         }
     }
