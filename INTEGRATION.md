@@ -26,11 +26,13 @@ The reference NETBAT terminal is a loop, not just a mailbox:
 | --- | --- | --- |
 | Write | `bank.commit` | append a substrate event and receive a commit receipt |
 | Point | `event.get` | read a known event id and its canonical payload bytes |
-| Walk | `event.query` | page bounded substrate summaries for replay and audit |
+| Page | `event.query` | page bounded substrate summaries by `global_sequence` for replay and audit |
 
-`event.query` is domain-neutral. It filters on substrate coordinates, kind
-category/type, and `global_sequence`; it does not know Moonwalker missions,
-workflows, movement graphs, or receipt-body taxonomies.
+`event.query` is domain-neutral commit-order pagination. It filters on
+substrate coordinates, kind category/type, and `global_sequence`; it does not
+know Moonwalker missions, workflows, movement graphs, or receipt-body
+taxonomies. `after_global_sequence` is the strict resume point for the next
+page, not a server-held stream cursor.
 
 `entity` filters use `Region::entity`, which is prefix-based. Supplying both
 `entity` and `scope` gives the normal coordinate-level replay shape.
@@ -53,6 +55,6 @@ terminal; it does not grow UI or domain rendering.
 
 **Living loop:** `just host-loop` runs the audit-loop example against a
 persistent store under `target/host-loop/store/`. It seeds app-owned events
-(`kind_category = 0x01`), rebuilds the rendered view from `event.query` +
+(`kind_category = 0x01`), rebuilds the rendered audit view from `event.query` +
 `event.get` (not commit acks), kills hbat, restarts on the same store, and
 runs `--replay-only` to prove substrate replay.

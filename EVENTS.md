@@ -35,6 +35,8 @@ That split is intentional:
   dispatch.
 - `event.query` returns metadata summaries only; it does not return payload
   bytes, extension maps, or decoded domain fields.
+- `event.query` orders those summaries by `global_sequence`; it is not a
+  domain graph walk.
 
 Use `event.get` to fetch payload bytes after traversal, then decode the envelope
 above batpak.

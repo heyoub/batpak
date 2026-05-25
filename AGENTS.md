@@ -142,7 +142,8 @@ Implementation commands still live under `bpk-lib/` and remain valid when a task
   for commit-order log walking, `receipt.verify` for ack-shaped proof checks, and
   `event.walk` for bounded hash-chain ancestry (relation order, not DAG law).
   New traversal fields must name the axis as `global_sequence` when the axis is
-  commit order; do not introduce ambiguous cursor names.
+  commit order. `after_global_sequence` is an exclusive resume point, not a
+  stream cursor or server-held session; do not introduce ambiguous cursor names.
 - **Domain graph boundary** — do not add Moonwalker, workflow, mission, or
   receipt-body verbs as batpak/hbat/netbat operations. Domain layers decode
   envelope payloads above batpak after `event.query` + `event.get`; substrate

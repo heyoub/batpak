@@ -82,6 +82,8 @@ The hbat manifest must expose the six reference NETBAT operations:
 - `event.walk`
 
 `event.query` keeps external replay substrate-complete without introducing a
-wire cursor session. `event.walk` exposes bounded hash-chain ancestry only —
-not DAG or Moonwalker graph law. Cursor-style open/next/checkpoint protocols
+wire cursor session. It pages by `global_sequence`; callers resume by sending
+the previous response's `next_after_global_sequence` as the next
+`after_global_sequence`. `event.walk` exposes bounded hash-chain ancestry only
+— not DAG or Moonwalker graph law. Cursor-style open/next/checkpoint protocols
 belong to a later NETBAT version or product-specific layer.
