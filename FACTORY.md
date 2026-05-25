@@ -47,7 +47,9 @@ just ship dry
 
 `just` is the command counter. `xtask` is the factory machinery. `ast-grep` is the semantic inspection camera. Tests inspect behavior. Receipts preserve evidence.
 
-The opt-in factory ledger (`just ledger-run -- …`, `just ledger-list`) records command proof events into `bpk-lib/target/factory-ledger/store/`. Normal builds do not depend on it; use it when you want a queryable local proof trail for wrapped commands such as `just ledger-run -- just host-loop`.
+The opt-in factory ledger (`just ledger-run -- …`, `just ledger-list`, `just ledger-run-gate …`) records command proof events into `bpk-lib/target/factory-ledger/store/`. Normal builds do not depend on it; use it when you want a queryable local proof trail for wrapped commands such as `just ledger-run -- just host-loop`.
+
+Command events (`factory.command.*`) record that a wrapped command ran. Gate events (`factory.gate.completed`) record which named proof that command represented when using `just ledger-run-gate …`.
 
 The opt-in context packet (`just context`) writes a portable-context handoff artifact to `bpk-lib/target/context/latest.json` and `latest.md`. It captures git state, stacked-PR hints, factory-ledger tail, and boundary reminders for agent/operator handoff. It is local tooling only — not External-Profile, not a CI gate.
 

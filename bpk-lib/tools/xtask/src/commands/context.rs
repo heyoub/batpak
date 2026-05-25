@@ -12,11 +12,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::commands::factory_ledger::collect_ledger_lines;
+use crate::commands::factory_ledger::{collect_gate_rows, collect_ledger_lines, LedgerGateRow};
 use crate::util::{cargo_target_dir, command_succeeds, project_root, run_output};
 use crate::ContextArgs;
 
-const SCHEMA_VERSION: u32 = 1;
+const SCHEMA_VERSION: u32 = 2;
 
 const FACTORY_STACK_PARENTS: &[(&str, &str)] = &[
     ("factory/host-dev-profile", "factory/ordnance-cut"),
@@ -25,6 +25,7 @@ const FACTORY_STACK_PARENTS: &[(&str, &str)] = &[
     ("factory/factory-ledger", "factory/descriptor-inventory"),
     ("factory/host-proof-verbs", "factory/factory-ledger"),
     ("factory/context-packets", "factory/host-proof-verbs"),
+    ("factory/factory-ledger-gates", "factory/context-packets"),
 ];
 
 const BOUNDARY_REMINDERS: &[&str] = &[
@@ -105,8 +106,18 @@ pub(crate) struct ChangedFileRow {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct VerificationSummary {
+    recent_gates: Vec<GateHighlightRow>,
     ledger_tail: Vec<String>,
     operator_notes: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) struct GateHighlightRow {
+    gate: String,
+    status: String,
+    head: String,
+    duration_ms: u64,
+    summary: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -186,8 +197,14 @@ fn capture_context_packet(
     let base_branch = infer_base_branch(&branch, gh_pr.as_ref(), || remote_default_branch(root));
 
     let factory_ledger = collect_ledger_lines(ledger_limit).unwrap_or_default();
+    let recent_gates = collect_gate_rows(ledger_limit)
+        .unwrap_or_default()
+        .into_iter()
+        .map(gate_row_to_highlight)
+        .collect();
     let ledger_tail = proof_lines_from_ledger(&factory_ledger);
     let verification_summary = VerificationSummary {
+        recent_gates,
         ledger_tail,
         operator_notes: notes.clone(),
     };
@@ -425,6 +442,24 @@ fn proof_lines_from_ledger(lines: &[String]) -> Vec<String> {
     hits
 }
 
+fn gate_status_label(status_code: i32) -> &'static str {
+    if status_code == 0 {
+        "ok"
+    } else {
+        "failed"
+    }
+}
+
+fn gate_row_to_highlight(row: LedgerGateRow) -> GateHighlightRow {
+    GateHighlightRow {
+        gate: row.gate,
+        status: gate_status_label(row.status_code).to_owned(),
+        head: row.head,
+        duration_ms: row.duration_ms,
+        summary: row.summary,
+    }
+}
+
 pub(crate) fn render_context_markdown(packet: &ContextPacket) -> String {
     let mut out = String::from("# BatPAK Context Packet (portable-context handoff v0)\n\n");
     out.push_str(
@@ -498,6 +533,18 @@ pub(crate) fn render_context_markdown(packet: &ContextPacket) -> String {
     } else {
         for warning in &packet.untracked_warnings {
             out.push_str(&format!("- {warning}\n"));
+        }
+    }
+
+    out.push_str("\n## Recent gates\n\n");
+    if packet.verification_summary.recent_gates.is_empty() {
+        out.push_str("- no recent gate completions in ledger\n");
+    } else {
+        for gate in &packet.verification_summary.recent_gates {
+            out.push_str(&format!(
+                "- {} {} @ {} duration={}ms\n",
+                gate.gate, gate.status, gate.head, gate.duration_ms
+            ));
         }
     }
 
@@ -654,6 +701,7 @@ mod tests {
             },
             untracked_warnings: Vec::new(),
             verification_summary: VerificationSummary {
+                recent_gates: Vec::new(),
                 ledger_tail: Vec::new(),
                 operator_notes: None,
             },
@@ -708,6 +756,13 @@ mod tests {
             },
             untracked_warnings: vec!["path: untracked".to_owned()],
             verification_summary: VerificationSummary {
+                recent_gates: vec![GateHighlightRow {
+                    gate: "context".to_owned(),
+                    status: "ok".to_owned(),
+                    head: "abc".to_owned(),
+                    duration_ms: 10,
+                    summary: "context ok @ abc duration=10ms".to_owned(),
+                }],
                 ledger_tail: vec!["inspect".to_owned()],
                 operator_notes: Some("note".to_owned()),
             },
@@ -738,5 +793,111 @@ mod tests {
             .iter()
             .any(|w| w.contains("intentional local lock")));
         assert!(warnings.iter().any(|w| w.contains("build artifact")));
+    }
+
+    #[test]
+    fn render_markdown_includes_recent_gates() {
+        let packet = ContextPacket {
+            schema_version: SCHEMA_VERSION,
+            generated_at_ms: 1,
+            git: GitSection {
+                branch: "factory/factory-ledger-gates".to_owned(),
+                head: "abc".to_owned(),
+                head_short: "abc".to_owned(),
+                head_oneline: "abc msg".to_owned(),
+                dirty: false,
+                status_short: Vec::new(),
+                diff_stat: String::new(),
+                staged_diff_stat: String::new(),
+            },
+            base_branch: BaseBranchHint {
+                value: "factory/context-packets".to_owned(),
+                source: BaseBranchSource::StackParent,
+                detail: None,
+            },
+            tracking_branch: None,
+            stacked_prs: Vec::new(),
+            github_context_note: None,
+            factory_ledger: Vec::new(),
+            changed_files: ChangedFilesSection {
+                worktree: Vec::new(),
+                staged: Vec::new(),
+            },
+            untracked_warnings: Vec::new(),
+            verification_summary: VerificationSummary {
+                recent_gates: vec![GateHighlightRow {
+                    gate: "host-dev".to_owned(),
+                    status: "ok".to_owned(),
+                    head: "afb63dc".to_owned(),
+                    duration_ms: 1234,
+                    summary: "host-dev ok @ afb63dc duration=1234ms".to_owned(),
+                }],
+                ledger_tail: Vec::new(),
+                operator_notes: None,
+            },
+            next_cut_notes: None,
+            boundary_reminders: BOUNDARY_REMINDERS
+                .iter()
+                .map(|line| (*line).to_owned())
+                .collect(),
+        };
+        let rendered = render_context_markdown(&packet);
+        assert!(rendered.contains("## Recent gates"));
+        assert!(rendered.contains("host-dev ok @ afb63dc duration=1234ms"));
+    }
+
+    #[test]
+    fn verification_summary_includes_recent_gates() {
+        let packet = ContextPacket {
+            schema_version: SCHEMA_VERSION,
+            generated_at_ms: 42,
+            git: GitSection {
+                branch: "b".to_owned(),
+                head: "full".to_owned(),
+                head_short: "short".to_owned(),
+                head_oneline: "line".to_owned(),
+                dirty: false,
+                status_short: Vec::new(),
+                diff_stat: String::new(),
+                staged_diff_stat: String::new(),
+            },
+            base_branch: BaseBranchHint {
+                value: "main".to_owned(),
+                source: BaseBranchSource::RemoteDefault,
+                detail: None,
+            },
+            tracking_branch: None,
+            stacked_prs: Vec::new(),
+            github_context_note: None,
+            factory_ledger: Vec::new(),
+            changed_files: ChangedFilesSection {
+                worktree: Vec::new(),
+                staged: Vec::new(),
+            },
+            untracked_warnings: Vec::new(),
+            verification_summary: VerificationSummary {
+                recent_gates: vec![GateHighlightRow {
+                    gate: "context".to_owned(),
+                    status: "ok".to_owned(),
+                    head: "aa34b09".to_owned(),
+                    duration_ms: 567,
+                    summary: "context ok @ aa34b09 duration=567ms".to_owned(),
+                }],
+                ledger_tail: Vec::new(),
+                operator_notes: None,
+            },
+            next_cut_notes: None,
+            boundary_reminders: vec!["reminder".to_owned()],
+        };
+        let json = serde_json::to_string(&packet).expect("serialize");
+        let decoded: ContextPacket = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(decoded.verification_summary.recent_gates.len(), 1);
+        assert_eq!(decoded.verification_summary.recent_gates[0].gate, "context");
+    }
+
+    #[test]
+    fn gate_status_label_maps_exit_code() {
+        assert_eq!(gate_status_label(0), "ok");
+        assert_eq!(gate_status_label(1), "failed");
     }
 }

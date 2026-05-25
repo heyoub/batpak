@@ -66,6 +66,8 @@ Implementation commands still live under `bpk-lib/` and remain valid when a task
 - `cd bpk-lib && cargo xtask host-loop`
 - `cd bpk-lib && cargo xtask factory-ledger list`
 - `cd bpk-lib && cargo xtask factory-ledger run -- <command> [args...]`
+- `cd bpk-lib && cargo xtask factory-ledger run --gate <name> -- <command> [args...]` — on success, records command completed + named gate completed
+- `cd bpk-lib && cargo xtask factory-ledger record gate-completed --run-id … --gate … --command … --duration-ms … --summary …` — manual gate record (any status_code; for tests/import hooks)
 - `cd bpk-lib && cargo xtask context [--ledger-limit N] [--notes TEXT]` — portable-context handoff packet under `target/context/`; local capture only, not External-Profile runtime
 - `cd bpk-lib && cargo xtask ci-fast`       — early PR signal; version pins, format, clippy, checks, nextest, deny/audit, traceability, structural
 - `cd bpk-lib && cargo xtask preflight`     — canonical devcontainer verification bundle for CI + coverage + docs from one in-container session. Prefer this over bare `cargo xtask ci` for pushes that touch store internals, xtask itself, or CI config, but do not describe it as the full proof chain unless you also run the extra hard gates (`mutants smoke`, perf gates, targeted fuzz/chaos).
