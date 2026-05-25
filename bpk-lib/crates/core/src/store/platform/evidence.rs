@@ -34,7 +34,7 @@ pub(crate) fn collect_for_store_path(
 }
 
 pub(crate) fn path_status(data_dir: &Path) -> StorePathStatusEvidence {
-    match std::fs::metadata(data_dir) {
+    match super::fs::metadata(data_dir) {
         Ok(metadata) if metadata.is_dir() => StorePathStatusEvidence::ObservedDirectory,
         Ok(_) => StorePathStatusEvidence::ObservedUnsupportedNotDirectory,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {

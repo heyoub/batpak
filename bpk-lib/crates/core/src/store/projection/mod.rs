@@ -315,11 +315,7 @@ impl ProjectionCache for NativeCache {
                 Err(_) => {
                     // Corrupt cache file — self-heal by deleting it.
                     tracing::warn!("corrupt cache file, deleting: {}", path.display());
-                    match platform_fs::remove_file(&path) {
-                        Ok(()) => {}
-                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                        Err(error) => return Err(StoreError::cache_error(error)),
-                    }
+                    platform_fs::remove_file_if_present(&path).map_err(StoreError::cache_error)?;
                     Ok(None)
                 }
             },
@@ -403,12 +399,11 @@ impl ProjectionCache for NativeCache {
                     Some(n) if n.ends_with(".bin") => &n[..n.len() - 4],
                     _ => continue,
                 };
-                if name.starts_with(&hex_prefix) {
-                    match platform_fs::remove_file(&file_entry.path()) {
-                        Ok(()) => count += 1,
-                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                        Err(error) => return Err(StoreError::cache_error(error)),
-                    }
+                if name.starts_with(&hex_prefix)
+                    && platform_fs::remove_file_if_present(&file_entry.path())
+                        .map_err(StoreError::cache_error)?
+                {
+                    count += 1;
                 }
             }
         }

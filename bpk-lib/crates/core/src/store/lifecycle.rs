@@ -163,19 +163,11 @@ fn snapshot_destination_should_clear(path: &std::path::Path) -> bool {
 }
 
 fn remove_file_if_present(path: &std::path::Path) -> Result<bool, StoreError> {
-    match platform_fs::remove_file(path) {
-        Ok(()) => Ok(true),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(StoreError::Io(error)),
-    }
+    platform_fs::remove_file_if_present(path).map_err(StoreError::Io)
 }
 
 fn remove_dir_all_if_present(path: &std::path::Path) -> Result<bool, StoreError> {
-    match platform_fs::remove_dir_all(path) {
-        Ok(()) => Ok(true),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(StoreError::Io(error)),
-    }
+    platform_fs::remove_dir_all_if_present(path).map_err(StoreError::Io)
 }
 
 fn clear_snapshot_store_artifacts(dest: &std::path::Path) -> Result<usize, StoreError> {
@@ -201,11 +193,7 @@ fn rollback_compaction_disk_state(
     merged_path: &std::path::Path,
     compact_source_path: Option<&std::path::Path>,
 ) -> Result<(), StoreError> {
-    if let Err(remove_err) = platform_fs::remove_file(merged_path) {
-        if remove_err.kind() != std::io::ErrorKind::NotFound {
-            return Err(StoreError::Io(remove_err));
-        }
-    }
+    platform_fs::remove_file_if_present(merged_path).map_err(StoreError::Io)?;
     if let Some(temp_source_path) = compact_source_path {
         platform_fs::rename(temp_source_path, merged_path).map_err(StoreError::Io)?;
     }
