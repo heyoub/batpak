@@ -2,7 +2,6 @@ use crate::store::{platform, HiddenRangesCorruption, StoreError};
 use serde::{Deserialize, Serialize};
 use std::io::{BufWriter, Write};
 use std::path::Path;
-use tempfile::NamedTempFile;
 
 pub(crate) const VISIBILITY_RANGES_MAGIC: &[u8; 6] = b"FBATVR";
 pub(crate) const VISIBILITY_RANGES_VERSION: u16 = 1;
@@ -51,10 +50,8 @@ pub(crate) fn write_cancelled_ranges(
 
     let normalized = normalize_ranges(ranges)?;
     if normalized.is_empty() {
-        match platform::fs::remove_file(&final_path) {
-            Ok(()) => crate::store::platform::sync::sync_parent_dir(&final_path)?,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(StoreError::Io(error)),
+        if platform::fs::remove_file_if_present(&final_path).map_err(StoreError::Io)? {
+            crate::store::platform::sync::sync_parent_dir(&final_path)?;
         }
         return Ok(());
     }
@@ -68,7 +65,7 @@ pub(crate) fn write_cancelled_ranges(
     .map_err(|error| StoreError::Serialization(Box::new(error)))?;
     let crc = crc32fast::hash(&body);
 
-    let tmp = NamedTempFile::new_in(data_dir)?;
+    let tmp = platform::fs::named_temp_in(data_dir).map_err(StoreError::Io)?;
     {
         let file = tmp.as_file();
         let mut writer = BufWriter::new(file);

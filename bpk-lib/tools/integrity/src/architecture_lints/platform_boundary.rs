@@ -136,26 +136,10 @@ fn check_direct_fs_contact_ratchet(
             5,
         ),
         (
-            "crates/core/src/store/cold_start/mmap.rs",
-            "std::fs::write(",
-            2,
-        ),
-        (
             "crates/core/src/store/cold_start/rebuild/tests.rs",
             "std::fs::write(",
             8,
         ),
-        (
-            "crates/core/src/store/delivery/cursor/checkpoint.rs",
-            "NamedTempFile::new_in",
-            1,
-        ),
-        (
-            "crates/core/src/store/hidden_ranges.rs",
-            "NamedTempFile::new_in",
-            1,
-        ),
-        ("crates/core/src/store/open.rs", "std::fs::write(", 2),
         (
             "crates/core/src/store/segment/scan/tests.rs",
             "std::fs::write(",
@@ -164,11 +148,6 @@ fn check_direct_fs_contact_ratchet(
         (
             "crates/core/src/store/segment/scan/recovery/tests.rs",
             "std::fs::write(",
-            1,
-        ),
-        (
-            "crates/core/src/store/store_resource_report.rs",
-            "std::fs::canonicalize",
             1,
         ),
     ];
