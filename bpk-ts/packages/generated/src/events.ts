@@ -243,7 +243,7 @@ export const RECEIPT_VERIFY_ACK_FIXTURE: ReceiptVerifyAck = {
 /** Source: hbat::walk::EventWalkRequest; category=15, typeId=2624 */
 export const EventWalkRequest = Schema.Struct({
   event_id_hex: Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{32}$/u)), Schema.brand("EventIdHex")),
-  limit: Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 9007199254740991 }))),
+  limit: Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 1, maximum: 9007199254740991 }))),
 });
 // eslint-disable-next-line @typescript-eslint/no-redeclare
 export type EventWalkRequest = typeof EventWalkRequest.Type;
