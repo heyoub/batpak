@@ -102,6 +102,8 @@ enum XtaskCommand {
     HostLoop,
     /// Opt-in factory command proof ledger backed by a local BatPAK store.
     FactoryLedger(FactoryLedgerArgs),
+    /// Emit a portable-context handoff packet under `target/context/`.
+    Context(ContextArgs),
     /// Copy a golden batpak starter template into a local project directory.
     Scaffold(ScaffoldArgs),
     Platform(PlatformArgs),
@@ -377,6 +379,14 @@ pub(crate) struct FactoryLedgerRunArgs {
 }
 
 #[derive(Args, Clone)]
+pub(crate) struct ContextArgs {
+    #[arg(long, default_value_t = 20)]
+    pub(crate) ledger_limit: usize,
+    #[arg(long)]
+    pub(crate) notes: Option<String>,
+}
+
+#[derive(Args, Clone)]
 pub(crate) struct PlatformArgs {
     #[command(subcommand)]
     command: PlatformCommand,
@@ -563,6 +573,7 @@ fn main() -> Result<()> {
         XtaskCommand::HostDev(args) => commands::host_dev(&args),
         XtaskCommand::HostLoop => commands::host_loop(),
         XtaskCommand::FactoryLedger(args) => commands::factory_ledger(args),
+        XtaskCommand::Context(args) => commands::context(args),
         XtaskCommand::Scaffold(args) => commands::scaffold(args),
         XtaskCommand::Platform(args) => commands::platform(args),
         XtaskCommand::Fuzz(args) => commands::fuzz(args),

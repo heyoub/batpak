@@ -1,5 +1,6 @@
 mod ast_grep;
 mod ci;
+mod context;
 mod disk_audit;
 mod export_ts_manifest;
 mod factory_ledger;
@@ -25,8 +26,9 @@ mod version_pins;
 use crate::util::{cargo, cargo_target_dir};
 use crate::CleanGeneratedArgs;
 use crate::{
-    ArchitectureIrArgs, ChaosArgs, ExportTsManifestArgs, FactoryLedgerArgs, FuzzArgs, HostDevArgs,
-    MutantsArgs, PackageLeakScanArgs, PlatformArgs, ReleaseArgs, ScaffoldArgs, SetupArgs,
+    ArchitectureIrArgs, ChaosArgs, ContextArgs, ExportTsManifestArgs, FactoryLedgerArgs, FuzzArgs,
+    HostDevArgs, MutantsArgs, PackageLeakScanArgs, PlatformArgs, ReleaseArgs, ScaffoldArgs,
+    SetupArgs,
 };
 use anyhow::Result;
 
@@ -134,6 +136,10 @@ pub(crate) fn host_loop() -> Result<()> {
 
 pub(crate) fn factory_ledger(args: FactoryLedgerArgs) -> Result<()> {
     factory_ledger::factory_ledger(args)
+}
+
+pub(crate) fn context(args: ContextArgs) -> Result<()> {
+    context::context(args)
 }
 
 pub(crate) fn architecture_ir(args: &ArchitectureIrArgs) -> Result<()> {
