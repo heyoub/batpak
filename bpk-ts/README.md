@@ -2,7 +2,7 @@
 
 The TypeScript surface for the BatPAK family. Catch-all 0.7.6 release.
 
-Four operations live on NETBAT/1 over TCP today:
+Six reference operations live on NETBAT/1 over TCP today:
 
 ```
 system.heartbeat   — wire-parity liveness probe.
@@ -11,9 +11,14 @@ bank.commit        — append a typed event to the underlying batpak store;
                      content_hash, key_id, optional signature, extensions).
 event.get          — read a stored event by event_id; returns header
                      + canonical payload bytes + coordinate.
-event.query        — bounded, domain-neutral traversal over event
-                     summaries; page by after_global_sequence, then
+event.query        — bounded, domain-neutral commit-order pages over event
+                     summaries; resume by sending after_global_sequence =
+                     the previous page's next_after_global_sequence, then
                      fetch payload bytes with event.get.
+receipt.verify     — verify ack-shaped append receipt fields against the
+                     committed store.
+event.walk         — bounded hash-chain ancestry from a starting event_id;
+                     relation order, not commit-order pagination.
 ```
 
 Authority direction:
@@ -57,14 +62,15 @@ examples/
   heartbeat-spike/  Calibration pulse against hbat:
                     - sends system.heartbeat
                     - sends bank.commit (appends a typed event)
-                    - sends event.query (walks metadata by coordinate)
+                    - sends event.query (pages metadata by coordinate and
+                      global_sequence)
                     - sends event.get (reads it back, decodes through
                       Effect 4 schema; proves byte round-trip)
                     - sends an unknown_operation to validate the typed
                       ERR-frame path.
   audit-loop/       Living loop against hbat:
                     - commits app-owned events (kind_category=0x01)
-                    - rebuilds an ordered stream view from event.query +
+                    - rebuilds an ordered audit view from event.query +
                       event.get (not commit acks)
                     - supports --replay-only after hbat restart on the
                       same store directory
@@ -72,7 +78,7 @@ examples/
 
 ## hbat — the reference host
 
-`hbat` (in `bpk-lib/crates/hbat/`) registers all four operations against
+`hbat` (in `bpk-lib/crates/hbat/`) registers all six reference operations against
 a real BatPAK store. `publish = false`. Loopback-only by default; bind
 to a non-loopback interface only with `--allow-non-loopback`.
 
@@ -115,7 +121,9 @@ PORT=$(node -e 'const j=require("fs").readFileSync("/tmp/hbat-ready.txt","utf-8"
 
 cd ../bpk-ts
 node examples/heartbeat-spike/dist/index.js --port "$PORT"
-# spike: ok  ← all four operations + ERR path proven on the wire
+# spike: ok  ← calibration pulse proves heartbeat + commit/query/get + ERR
+#              path on the wire; receipt.verify/event.walk remain manifest-
+#              and parity-tested reference operations.
 ```
 
 ## Wire encoding contract

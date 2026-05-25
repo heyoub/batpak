@@ -42,10 +42,12 @@ pagination and must not be sorted by `global_sequence`. Use `event.query` when
 you need commit-order pages; use `event.walk` when you need ancestor summaries
 along the hash chain.
 
-Pagination uses `after_global_sequence`, an exclusive cursor on global commit
-order. Existing `bank.commit` and `event.get` ack fields named `sequence` are
-legacy wire spellings for that same global commit sequence, not per-entity
-clock order.
+Pagination uses `after_global_sequence`, an exclusive resume point on global
+commit order. It is not a stream cursor or server-held session: the next request
+sets `after_global_sequence` to the prior response's
+`next_after_global_sequence`. Existing `bank.commit` and `event.get` ack fields
+named `sequence` are legacy wire spellings for that same global commit
+sequence, not per-entity clock order.
 
 Sidecar indexes may exist as caches or projections. They are not source truth:
 authoritative external replay must be reconstructable from `event.query` plus

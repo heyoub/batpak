@@ -6,7 +6,7 @@
  *
  *   1. `system.heartbeat`  — proves the wire is open.
  *   2. `bank.commit`        — appends a typed event, returns AppendReceipt.
- *   3. `event.query`        — walks metadata by coordinate and global sequence.
+ *   3. `event.query`        — pages metadata by coordinate and global sequence.
  *   4. `event.get`          — reads the event back by event_id; the
  *                              payload bytes round-trip back into the
  *                              original Rust-typed struct via Effect 4.

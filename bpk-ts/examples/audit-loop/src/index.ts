@@ -6,7 +6,7 @@ import {
   type NotePosted as NotePostedType,
   type TaskOpened as TaskOpenedType,
 } from "./events.js";
-import { commitAppEvent, getEvent, queryAuditStream } from "./host.js";
+import { commitAppEvent, getEvent, queryAuditSummariesByGlobalSequence } from "./host.js";
 import { formatStream, printStream, rowFromSubstrate } from "./render.js";
 import { DEMO_ENTITY, DEMO_SCOPE, KIND_TYPE_CHAT, KIND_TYPE_NOTE, KIND_TYPE_TASK } from "./constants.js";
 
@@ -82,8 +82,8 @@ async function seedDemoEvents(host: string, port: number): Promise<void> {
   }
 }
 
-async function rebuildStreamFromSubstrate(host: string, port: number): Promise<string[]> {
-  const summaries = await queryAuditStream(host, port);
+async function rebuildAuditViewFromSubstrate(host: string, port: number): Promise<string[]> {
+  const summaries = await queryAuditSummariesByGlobalSequence(host, port);
   const rows = [];
   for (const summary of summaries) {
     const event = await getEvent(host, port, summary.event_id_hex);
@@ -102,9 +102,9 @@ async function main(): Promise<void> {
     await seedDemoEvents(host, port);
   }
 
-  const lines = await rebuildStreamFromSubstrate(host, port);
+  const lines = await rebuildAuditViewFromSubstrate(host, port);
   if (lines.length === 0) {
-    throw new Error("audit-loop: substrate stream is empty");
+    throw new Error("audit-loop: substrate audit view is empty");
   }
   printStream(lines);
   console.log("audit-loop: ok");
