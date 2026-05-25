@@ -1,10 +1,11 @@
 use super::{ensure, relative};
+use crate::source_cache::SourceCache;
 use anyhow::{Context, Result};
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub(super) fn check(repo_root: &Path) -> Result<()> {
+pub(super) fn check(repo_root: &Path, source_cache: &mut SourceCache) -> Result<()> {
     check_project_layout_contract(repo_root)?;
     check_no_mdbook_dependency(repo_root)?;
     check_testing_doc_renames_stay_current(repo_root)?;
@@ -16,7 +17,7 @@ pub(super) fn check(repo_root: &Path) -> Result<()> {
     check_core_feature_cfg_contract(repo_root)?;
     check_xtask_surface_contract(repo_root)?;
     check_syncbat_is_explicitly_gated(repo_root)?;
-    check_hbat_manifest_wiring_contract(repo_root)?;
+    check_hbat_manifest_wiring_contract(repo_root, source_cache)?;
     Ok(())
 }
 
@@ -772,24 +773,31 @@ fn check_syncbat_is_explicitly_gated(repo_root: &Path) -> Result<()> {
     Ok(())
 }
 
-fn check_hbat_manifest_wiring_contract(repo_root: &Path) -> Result<()> {
+fn check_hbat_manifest_wiring_contract(
+    repo_root: &Path,
+    source_cache: &mut SourceCache,
+) -> Result<()> {
     let hbat_src = repo_root.join("crates/hbat/src");
     if !hbat_src.is_dir() {
         return Ok(());
     }
 
-    let main_path = hbat_src.join("main.rs");
-    let main = fs::read_to_string(&main_path).context("read crates/hbat/src/main.rs")?;
+    let main = source_cache
+        .rust_file("crates/hbat/src/main.rs")?
+        .text
+        .clone();
 
-    for path in files_with_extension(&hbat_src, "rs") {
-        let rel = relative(repo_root, &path);
-        let module = path
+    for relative in source_cache.rust_files_under("crates/hbat/src")? {
+        let source = source_cache.rust_file(&relative)?;
+        let rel = display_path(&source.relative_path);
+        let module = source
+            .relative_path
             .file_stem()
             .and_then(|stem| stem.to_str())
             .context("hbat source file has UTF-8 stem")?;
-        let content = fs::read_to_string(&path).with_context(|| format!("read {rel}"))?;
+        let content = source.text.as_ref();
 
-        for descriptor in hbat_operation_descriptors(&content) {
+        for descriptor in hbat_operation_descriptors(content) {
             let Some(prefix) = descriptor.strip_suffix("_DESCRIPTOR") else {
                 ensure(
                     false,
@@ -820,7 +828,7 @@ fn check_hbat_manifest_wiring_contract(repo_root: &Path) -> Result<()> {
             )?;
         }
 
-        for payload in hbat_event_payload_structs(&content) {
+        for payload in hbat_event_payload_structs(content) {
             let rust_type = format!("hbat::{module}::{payload}");
             let manual_rust_type =
                 count_occurrences(&content, &format!("rust_type: \"{rust_type}\""));
@@ -901,6 +909,10 @@ fn hbat_event_payload_structs(content: &str) -> Vec<String> {
 
 fn count_occurrences(haystack: &str, needle: &str) -> usize {
     haystack.match_indices(needle).count()
+}
+
+fn display_path(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
 }
 
 fn files_with_extension(root: &Path, extension: &str) -> Vec<PathBuf> {

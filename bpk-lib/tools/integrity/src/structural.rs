@@ -18,7 +18,7 @@ use syn::spanned::Spanned;
 pub(crate) fn run() -> Result<()> {
     let repo_root = repo_root()?;
     let tracked_files = tracked_repo_files(&repo_root)?;
-    let mut source_cache = SourceCache::new();
+    let mut source_cache = SourceCache::new(&repo_root);
     architecture_lints::check(&repo_root, &tracked_files, &mut source_cache)?;
     agent_surface::check(&repo_root)?;
     harness_lints::check(&repo_root, &tracked_files, &mut source_cache)?;

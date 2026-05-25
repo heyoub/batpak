@@ -1,5 +1,6 @@
 use crate::repo_surface::{core_src_root, core_tests_root, rust_files};
-use crate::source_cache::{path_segments, SourceCache};
+use crate::rust_ast::{callee_path_segments, tail_owner_method};
+use crate::source_cache::SourceCache;
 use anyhow::{bail, Context, Result};
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -154,17 +155,12 @@ fn ast_references_store_method(ast: &syn::File, name: &str) -> bool {
         }
 
         fn visit_expr_call(&mut self, node: &'ast syn::ExprCall) {
-            if let syn::Expr::Path(path) = node.func.as_ref() {
-                let segments = path_segments(&path.path);
-                if matches!(
-                    segments.as_slice(),
-                    [owner, method] if owner == "Store" && method == self.name
-                ) || matches!(
-                    segments.as_slice(),
-                    [.., owner, method] if owner == "Store" && method == self.name
-                ) {
-                    self.found = true;
-                    return;
+            if let Some(segments) = callee_path_segments(&node.func) {
+                if let Some((owner, method)) = tail_owner_method(&segments) {
+                    if owner == "Store" && method == self.name {
+                        self.found = true;
+                        return;
+                    }
                 }
             }
             visit::visit_expr_call(self, node);

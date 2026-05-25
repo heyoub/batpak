@@ -53,7 +53,7 @@ const FORBIDDEN_PUBLIC_SUBSTRINGS: &[&str] = &[
 ];
 
 pub fn run(repo_root: &Path) -> Result<()> {
-    let mut source_cache = SourceCache::new();
+    let mut source_cache = SourceCache::new(repo_root);
     for &(rel, struct_name) in SCHEMA_VERSION_BODY_ANCHORS {
         let path = core_path(repo_root, rel);
         assert_public_struct_has_public_schema_version(&path, &mut source_cache, struct_name)?;

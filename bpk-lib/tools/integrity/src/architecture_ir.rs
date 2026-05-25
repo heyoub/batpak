@@ -242,7 +242,7 @@ fn build(repo_root: &Path) -> Result<ArchitectureIr> {
 
     let traceability = load_traceability(repo_root)?;
     let invariant_gate_links = load_invariant_gate_links(repo_root, &traceability)?;
-    let mut source_cache = SourceCache::new();
+    let mut source_cache = SourceCache::new(repo_root);
 
     Ok(ArchitectureIr {
         schema_version: SCHEMA_VERSION,

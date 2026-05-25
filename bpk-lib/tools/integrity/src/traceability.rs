@@ -61,7 +61,7 @@ pub(crate) fn run() -> Result<()> {
         load_yaml(&trace_dir.join("observations.yaml")).context("observations")?;
     let artifacts: Vec<ArtifactRecord> =
         load_yaml(&trace_dir.join("artifacts.yaml")).context("artifacts")?;
-    let mut source_cache = SourceCache::new();
+    let mut source_cache = SourceCache::new(&repo_root);
 
     ensure_unique_ids(
         requirements.iter().map(|r| r.id.as_str()),
@@ -262,7 +262,7 @@ pub(crate) fn validate_observation_evidence(
     observation_id: &str,
     evidence: &str,
 ) -> Result<()> {
-    let mut source_cache = SourceCache::new();
+    let mut source_cache = SourceCache::new(&repo_root);
     validate_observation_evidence_with_cache(repo_root, observation_id, evidence, &mut source_cache)
 }
 

@@ -861,7 +861,7 @@ mod tests {
         .expect("write synthetic test");
         let tracked = BTreeSet::from([location.to_owned()]);
         let entries = vec![complete_entry(location)];
-        let mut source_cache = SourceCache::new();
+        let mut source_cache = SourceCache::new(&repo);
 
         check_entries(&repo, &tracked, &entries, &mut source_cache).expect("valid ledger entry");
         check_module_headers(&repo, &ledger_rust_files(&entries), &mut source_cache)
@@ -883,7 +883,7 @@ mod tests {
         let mut entry = complete_entry(location);
         entry.fields.remove("Mutation delta");
         let entries = vec![entry];
-        let mut source_cache = SourceCache::new();
+        let mut source_cache = SourceCache::new(&repo);
 
         let err = check_entries(&repo, &tracked, &entries, &mut source_cache)
             .expect_err("missing field rejected");
@@ -968,7 +968,7 @@ mod tests {
         )
         .expect("write synthetic test");
         let tracked = BTreeSet::from([location.to_owned()]);
-        let mut source_cache = SourceCache::new();
+        let mut source_cache = SourceCache::new(&repo);
 
         let mut entry = complete_entry(location);
         entry.status = Some("purple".to_owned());
@@ -997,7 +997,7 @@ mod tests {
         )
         .expect("write synthetic test");
         let tracked = BTreeSet::from([location.to_owned()]);
-        let mut source_cache = SourceCache::new();
+        let mut source_cache = SourceCache::new(&repo);
         let mut entry = complete_entry(location);
 
         entry.locations.clear();
@@ -1031,7 +1031,7 @@ mod tests {
         )
         .expect("write synthetic test");
         let tracked = BTreeSet::from([location.to_owned()]);
-        let mut source_cache = SourceCache::new();
+        let mut source_cache = SourceCache::new(&repo);
         let mut entry = complete_entry(location);
 
         entry.locations = vec!["tests/missing.rs".to_owned()];
@@ -1099,7 +1099,7 @@ mod tests {
         fs::create_dir_all(repo.join("tests")).expect("create tests dir");
         fs::write(repo.join(path), "fn main() {}\n").expect("write headerless test");
         let files = BTreeSet::from([path.to_owned()]);
-        let mut source_cache = SourceCache::new();
+        let mut source_cache = SourceCache::new(&repo);
 
         let err = check_module_headers(&repo, &files, &mut source_cache)
             .expect_err("headerless harness rejected");
@@ -1110,7 +1110,7 @@ mod tests {
             "//! PROVES: synthetic proof.\n//! CATCHES: synthetic regression.\n//! SEEDED: deterministic.\n",
         )
         .expect("write complete header");
-        let mut fresh_cache = SourceCache::new();
+        let mut fresh_cache = SourceCache::new(&repo);
         check_module_headers(&repo, &files, &mut fresh_cache).expect("complete header accepted");
 
         fs::remove_dir_all(repo).expect("remove temp repo");
@@ -1126,7 +1126,7 @@ mod tests {
             .collect::<String>();
         fs::write(repo.join(path), body).expect("write oversize harness");
         let files = BTreeSet::from([path.to_owned()]);
-        let mut source_cache = SourceCache::new();
+        let mut source_cache = SourceCache::new(&repo);
 
         let err = check_line_caps(&repo, &files, &mut source_cache).expect_err("oversize rejected");
         assert!(err.to_string().contains("501 lines"), "{err:?}");
@@ -1151,7 +1151,7 @@ mod tests {
         )
         .expect("write tombstone test");
         let tracked = vec![fixture_path, tombstone_path];
-        let mut source_cache = SourceCache::new();
+        let mut source_cache = SourceCache::new(&repo);
 
         let err = check_no_silent_repo_fixture_skips(&repo, &tracked, &mut source_cache)
             .expect_err("silent fixture skip rejected");
@@ -1172,7 +1172,7 @@ mod tests {
         fs::write(repo.join(path), "//! PROVES: only proves field.\n")
             .expect("write partial header");
         let files = BTreeSet::from([path.to_owned()]);
-        let mut source_cache = SourceCache::new();
+        let mut source_cache = SourceCache::new(&repo);
 
         let err = check_module_headers(&repo, &files, &mut source_cache)
             .expect_err("partial header rejected");
@@ -1192,7 +1192,7 @@ mod tests {
         )
         .expect("write synthetic test");
         let tracked = BTreeSet::<String>::new();
-        let mut source_cache = SourceCache::new();
+        let mut source_cache = SourceCache::new(&repo);
         let mut entry = complete_entry(location);
 
         let err = check_entries(&repo, &tracked, &[entry.clone()], &mut source_cache)
@@ -1222,7 +1222,7 @@ mod tests {
             "#[cfg(test)]\nmod cases {\n    #[test]\n    fn nested_proof() {}\n}\n",
         )
         .expect("write nested module");
-        let mut source_cache = SourceCache::new();
+        let mut source_cache = SourceCache::new(&repo);
 
         let names =
             test_names_for_target(&repo, "nested", &mut source_cache).expect("collect names");
@@ -1239,8 +1239,7 @@ mod tests {
         let repo = temp_repo("missing-target");
         let mut entry = complete_entry("tests/synthetic.rs");
         entry.commands = vec!["cargo test --test missing_target filter".to_owned()];
-        let tracked = BTreeSet::from(["tests/synthetic.rs".to_owned()]);
-        let mut source_cache = SourceCache::new();
+        let mut source_cache = SourceCache::new(&repo);
 
         let err = check_cargo_test_filter_targets_existing_test(
             &repo,
