@@ -62,3 +62,64 @@ pub(crate) unsafe fn map_sealed_segment_file(
 ) -> std::io::Result<Mmap> {
     unsafe { Mmap::map(file) }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mmap_index_admission_only_accepts_file_backed_evidence() {
+        assert!(
+            admit_mmap_index(MmapEvidence::FileBacked).is_ok(),
+            "PROPERTY: file-backed mmap evidence must admit index mmap"
+        );
+        for evidence in [
+            MmapEvidence::Unknown,
+            MmapEvidence::ObservedUnsupported,
+            MmapEvidence::ProbeFailed,
+        ] {
+            let err = match admit_mmap_index(evidence) {
+                Ok(_) => panic!("PROPERTY: index mmap evidence {evidence:?} must reject"),
+                Err(error) => error,
+            };
+            assert!(
+                matches!(
+                    err,
+                    StoreError::PlatformAdmissionFailed {
+                        capability: "mmap index",
+                        ..
+                    }
+                ),
+                "expected mmap index admission failure for {evidence:?}, got {err:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn sealed_segment_mmap_admission_only_accepts_file_backed_evidence() {
+        assert!(
+            admit_sealed_segment_mmap(MmapEvidence::FileBacked).is_ok(),
+            "PROPERTY: file-backed mmap evidence must admit sealed-segment mmap"
+        );
+        for evidence in [
+            MmapEvidence::Unknown,
+            MmapEvidence::ObservedUnsupported,
+            MmapEvidence::ProbeFailed,
+        ] {
+            let err = match admit_sealed_segment_mmap(evidence) {
+                Ok(_) => panic!("PROPERTY: sealed-segment mmap evidence {evidence:?} must reject"),
+                Err(error) => error,
+            };
+            assert!(
+                matches!(
+                    err,
+                    StoreError::PlatformAdmissionFailed {
+                        capability: "sealed segment mmap",
+                        ..
+                    }
+                ),
+                "expected sealed-segment mmap admission failure for {evidence:?}, got {err:?}"
+            );
+        }
+    }
+}
