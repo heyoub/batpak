@@ -68,6 +68,9 @@ examples/
                       Effect 4 schema; proves byte round-trip)
                     - sends an unknown_operation to validate the typed
                       ERR-frame path.
+                    - note: receipt.verify and event.walk remain part of the
+                      six-op host profile and are covered by manifest/parity
+                      tests.
   audit-loop/       Living loop against hbat:
                     - commits app-owned events (kind_category=0x01)
                     - rebuilds an ordered audit view from event.query +

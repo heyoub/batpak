@@ -47,11 +47,12 @@ The factory uses tiered verification so humans, agents, and CI all speak the sam
 | Host profile | `just host-dev` | `host-dev` | No | Local end-to-end host proof: manifest → codegen → TS build/test → hbat boot → heartbeat-spike → deterministic regeneration. |
 | Factory ledger | `just ledger-list`, `just ledger-run -- …`, `just ledger-run-gate …` | `factory-ledger` | No | Opt-in local proof trail: command events plus optional named gate completions under `target/factory-ledger/store/`. Gates are proof markers, not CI enforcement. |
 | Context packet | `just context` | `context` | No | Opt-in portable-context handoff artifact under `target/context/latest.{json,md}`; captures git state, stack hints, ledger tail, boundary reminders. |
+| Doctrine audit | traceability/docs artifact | traceability metadata | No | Records the substrate/product semantic firewall; not a CI or release gate unless promoted to an explicit command later. |
 | Fast | `just ci-fast` | `ci-fast` | Yes | Early PR signal: format, clippy, checks, tests, dependency gates, traceability, structural law. |
 | Integrity | `just verify` | `preflight` | Yes | Canonical Linux devcontainer proof: full CI, coverage threshold 80%, docs. |
 | Windows surface | `just ci-windows` | `ci-windows-surface` | Yes | Native Windows compatibility surface, including platform-sensitive cargo/test behavior and kind-collision fixture. |
 | Mutant smoke | `just mutants-smoke` | `mutants smoke` | Yes for Rust paths | Critical seam mutation gates; CI shards by seam, local runs all seams. |
-| Mutant full | `just mutants-full` | `mutants full --shard …` | No | Scheduled/manual repo-wide mutation ratchet. |
+| Mutant full | `just mutants-full` | `mutants full --shard …` | No | Manual repo-wide mutation ratchet; never scheduled in PR CI. |
 | Release | `just seal`, `just ship dry` | seal / release manifest / dry-run release | Publish only | Packaging, manifests, provenance, and publish dry-run proof. |
 
 Windows does not duplicate the canonical Linux devcontainer philosophy lane. It proves native surface compatibility. `just verify` remains the full merge-confidence bundle.
@@ -69,6 +70,8 @@ Machine law lives in:
 - tests, benches, fixtures, and release manifests
 
 Docs explain the current contract. Gates decide whether the contract still holds.
+`traceability/product_doctrine_audit.yaml` is doctrine law for naming and
+boundary review; it is not a runtime feature and not a CI gate by itself.
 
 ## Terminal Manifest
 

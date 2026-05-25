@@ -23,6 +23,7 @@
     - traceability/invariants.yaml
     - traceability/flows.yaml
     - traceability/artifacts.yaml
+    - traceability/product_doctrine_audit.yaml
 - id: ART-TRACEABILITY-CHECK
   kind: tool
   paths:
@@ -47,6 +48,10 @@
     - traceability/public_api/syncbat_semver_checklist.yaml
     - traceability/public_api/netbat_semver_checklist.yaml
     - tools/xtask/src/public_api.rs
+- id: ART-DX-PRODUCT-DOCTRINE-AUDIT
+  kind: traceability
+  paths:
+    - traceability/product_doctrine_audit.yaml
 - id: ART-DEAD-CODE-SILENCER-ALLOWLIST
   kind: registry
   paths:

@@ -18,8 +18,8 @@
  * Authority direction in 0.7.6:
  *   - Rust `#[derive(EventPayload)]` + the manifest is still the source
  *     of truth for events that need to ride the canonical wire.
- *   - `bank.event()` is for downstream-only TS event shapes (e.g. agent
- *     internal state) that never leave the TS world.
+ *   - `bank.event()` is for downstream-only TS event shapes (e.g.
+ *     application-local/internal state) that never leave the TS world.
  */
 
 import * as Schema from "effect/Schema";

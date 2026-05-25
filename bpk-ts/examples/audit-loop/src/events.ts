@@ -7,6 +7,8 @@ import {
   KIND_TYPE_TASK,
 } from "./constants.js";
 
+// App-owned demo payloads only. `task`, `assignee`, and `chat` are example
+// fields above the substrate, not BatPAK workflow semantics or NETBAT/1 ops.
 export const NotePosted = bank.event({
   title: Schema.String,
   body: Schema.String,

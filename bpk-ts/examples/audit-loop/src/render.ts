@@ -16,7 +16,7 @@ export function rowFromSubstrate(summary: EventSummary, event: EventGetAck): Str
   };
 }
 
-/** Stable ordering by substrate global_sequence (not commit order or wall clock). */
+/** Stable ordering by substrate global_sequence (commit order, not wall clock or hash-chain order). */
 export function sortRowsByGlobalSequence(rows: readonly StreamRow[]): StreamRow[] {
   return [...rows].sort((left, right) => left.globalSequence - right.globalSequence);
 }

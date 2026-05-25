@@ -43,7 +43,7 @@ const JUST_TO_XTASK_COMMANDS: &[(&str, &[&str])] = &[
 /// 3. The Dockerfile and the workflow must agree on tool versions for
 ///    `cargo-deny`, `cargo-llvm-cov`, `cargo-mutants`, `cargo-nextest`, and
 ///    `cargo-audit` (the tools we care about pinning).
-/// 4. Workflow-owned matrix values for perf surfaces and scheduled mutation
+/// 4. Workflow-owned matrix values for perf surfaces and manual full-mutation
 ///    shards must stay inside the exact xtask-owned truth set.
 ///
 /// The implementation uses string-grep instead of YAML parsing to keep the

@@ -348,3 +348,31 @@ tasks:
       - "platform evidence is collected at the machine-contact boundary, not inferred by docs"
     docs:
       - "cookbook/200_PLATFORM_EVIDENCE.md"
+
+  map_downstream_product_pressure:
+    problem: "Map downstream product or agent-framework pressure to existing BatPAK substrate surfaces without importing product semantics."
+    use:
+      - "event.query + event.get for commit-order replay"
+      - "event.walk for bounded hash-chain ancestry"
+      - "receipts and evidence reports for proof"
+      - "projections as substrate mechanisms"
+      - "opaque extension bytes for profile/spec cargo"
+    avoid:
+      - "product artifact APIs in BatPAK core"
+      - "Downstream route or graph semantics in substrate traversal"
+      - "External-Profile validation without explicit codecs, tests, and traceability"
+      - "role, workflow, studio, or delegated-mode vocabulary as public substrate API"
+    examples:
+      - "bpk-ts/examples/heartbeat-spike"
+      - "bpk-ts/examples/audit-loop"
+    tests:
+      - "crates/hbat/tests/tcp_e2e.rs"
+      - "crates/core/tests/read_api_pagination.rs"
+    invariants:
+      - "downstream layers decode semantic payloads above BatPAK after bounded traversal"
+      - "BatPAK names stay true for many downstream representations"
+    docs:
+      - "INTEGRATION.md"
+      - "CONFORMANCE.md"
+      - "EVENTS.md"
+      - "REPLAY.md"

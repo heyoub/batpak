@@ -2,7 +2,7 @@
   "name": "@batpak/example-audit-loop",
   "version": "0.0.0",
   "private": true,
-  "description": "Living loop: commit domain events, rebuild view from event.query + event.get.",
+  "description": "Demo-owned loop: commit app events and rebuild a view from event.query + event.get.",
   "type": "module",
   "scripts": {
     "build": "tsc -b",

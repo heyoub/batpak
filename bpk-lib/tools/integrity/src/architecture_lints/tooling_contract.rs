@@ -681,8 +681,9 @@ fn check_xtask_surface_contract(repo_root: &Path) -> Result<()> {
         "xtask devcontainer logic must own image reuse, env forwarding, and single-string shell compatibility",
     )?;
     ensure(
-        setup_devcontainer_action_content.contains("dtolnay/rust-toolchain@stable"),
-        "setup-devcontainer action must install a host Rust toolchain so the thin wrapper can delegate to cargo xtask",
+        setup_devcontainer_action_content.contains("dtolnay/rust-toolchain@")
+            && setup_devcontainer_action_content.contains("# stable"),
+        "setup-devcontainer action must install a pinned host Rust toolchain so the thin wrapper can delegate to cargo xtask",
     )?;
     ensure(
         dockerfile_content.contains("ENV PATH=\"/usr/local/cargo/bin:${PATH}\"")

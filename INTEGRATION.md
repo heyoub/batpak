@@ -11,8 +11,18 @@ batpak owns a local truth boundary. It does not own the whole application.
 | Store machine contact routes through `store/platform` rather than ad hoc filesystem calls | `just boundary` |
 | `authority_required` is receiver policy input, never granted authority | traceability + substrate docs; no runtime grant path in core |
 | External-Profile wire validation ships only with explicit codecs, tests, and traceability | absence of undeclared ExtProfile codecs in core; ADR/traceability when added |
+| Downstream product doctrine maps to existing substrate terminals, not new BatPAK product APIs | traceability/product_doctrine_audit.yaml + `just inspect` |
 
 batpak ships as an embedded event substrate, not as a hosted database, queue, ORM, or workflow product. Callers own process model, disk placement, and integration boundaries.
+
+## Product Projection Boundary
+
+Downstream product and agent frameworks may translate substrate truth into docs,
+apps, dashboards, timelines, reports, CLIs, context packets, or delegated action
+loops. BatPAK's job is to keep the source truth bounded and replayable through
+`bank.commit`, `event.get`, `event.query`, `event.walk`, receipts, regions, and
+projection mechanisms. The semantic payloads, role policies, UI surfaces,
+workflow meaning, and representation routing live above BatPAK.
 
 ## Async Hosts
 
@@ -50,8 +60,10 @@ Use circuits and terminals to connect batteries. Do not hide ownership by lettin
 **Calibration pulse:** `just host-dev` mirrors the CI ts-parity lane: export
 manifest, codegen, build and test the workspace, boot hbat on an ephemeral
 store, run heartbeat-spike (heartbeat, commit, query, get), and verify committed
-generated sources stay deterministic. heartbeat-spike proves the four-op
-terminal; it does not grow UI or domain rendering.
+generated sources stay deterministic. heartbeat-spike proves the live heartbeat
++ commit/query/get + ERR calibration path; `receipt.verify` and `event.walk`
+remain part of the six-op host profile and are covered by manifest/parity and
+hbat tests.
 
 **Living loop:** `just host-loop` runs the audit-loop example against a
 persistent store under `target/host-loop/store/`. It seeds app-owned events
