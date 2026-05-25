@@ -46,6 +46,7 @@ The factory uses tiered verification so humans, agents, and CI all speak the sam
 | Inspect | `just inspect` | structural, boundary, architecture IR, ast-grep | Optional/path-based | Fast shape checks before expensive proof. |
 | Host profile | `just host-dev` | `host-dev` | No | Local end-to-end host proof: manifest → codegen → TS build/test → hbat boot → heartbeat-spike → deterministic regeneration. |
 | Factory ledger | `just ledger-list`, `just ledger-run -- …` | `factory-ledger` | No | Opt-in local proof trail: records wrapped command started/completed/failed events into `target/factory-ledger/store/`. |
+| Context packet | `just context` | `context` | No | Opt-in PCP-aligned handoff artifact under `target/context/latest.{json,md}`; captures git state, stack hints, ledger tail, boundary reminders. |
 | Fast | `just ci-fast` | `ci-fast` | Yes | Early PR signal: format, clippy, checks, tests, dependency gates, traceability, structural law. |
 | Integrity | `just verify` | `preflight` | Yes | Canonical Linux devcontainer proof: full CI, coverage threshold 80%, docs. |
 | Windows surface | `just ci-windows` | `ci-windows-surface` | Yes | Native Windows compatibility surface, including platform-sensitive cargo/test behavior and kind-collision fixture. |

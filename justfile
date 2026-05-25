@@ -91,6 +91,9 @@ host-loop:
 ledger-list:
     cd bpk-lib; cargo xtask factory-ledger list
 
+context:
+    cd bpk-lib; cargo xtask context
+
 ledger-run command *args:
     cd bpk-lib; cargo xtask factory-ledger run -- {{command}} {{args}}
 
