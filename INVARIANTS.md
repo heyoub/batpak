@@ -24,6 +24,13 @@ A receipt records what the system accepted, denied, replayed, verified, projecte
 
 A projection may be rebuilt from the log. If a projection cannot be rebuilt, it is application state outside batpak's projection model.
 
+## Traversal Axes Stay Separate
+
+Commit-order pagination uses `global_sequence` and the
+`after_global_sequence` resume point. Hash-chain ancestry uses `event.walk` /
+`walk_ancestors`. Delivery cursors are ordered pull mechanics. These names must
+not collapse into one generic cursor story.
+
 ## Sync-First Means No Hidden Runtime
 
 batpak does not require an async runtime. Async hosts may integrate by moving blocking work to their own runtime boundary.
@@ -36,7 +43,12 @@ When batpak hashes structured content, the same logical content must produce the
 
 Low-level access is allowed when necessary, but it must be named, visible, and non-default.
 
+## Advanced Surfaces Are Still Real
+
+An API can be public without being beginner-hot. Evidence reports, reactors,
+outbox writes, visibility fences, delivery cursors, and platform diagnostics are
+expert surfaces unless the root docs explicitly promote them.
+
 ## Current Docs, Not Lineage
 
 Canonical docs describe the current system. Historical notes belong only where compatibility, migration, or security requires them.
-

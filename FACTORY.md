@@ -51,6 +51,8 @@ just host-loop
 just ledger-list
 just context
 just verify
+just perf-gates
+just loom
 just seal
 just ship dry
 ```
@@ -62,6 +64,11 @@ The opt-in factory ledger (`just ledger-run -- …`, `just ledger-list`, `just l
 Command events (`factory.command.*`) record that a wrapped command ran. Gate events (`factory.gate.completed`) record which named proof that command represented when using `just ledger-run-gate …`.
 
 The opt-in context packet (`just context`) writes a PCP-aligned handoff artifact to `bpk-lib/target/context/latest.json` and `latest.md`. It captures git state, stacked-PR hints, factory-ledger tail, and boundary reminders for agent/operator handoff. It is local tooling only — not PCP-Core, not a CI gate.
+
+The manual proof commands (`just perf-gates`, `just loom`) run the existing
+xtask proof surfaces from the root counter. They are release-confidence tools:
+perf gates are hardware-dependent and should run alone; loom explores bounded
+concurrency schedules. They do not change the public Rust API.
 
 ## Current Batteries
 

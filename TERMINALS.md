@@ -23,8 +23,10 @@ Current terminal-shaped surfaces include:
 - projection and replay entry points
 - netbat routes and operation handling surfaces
 
-The reference NETBAT terminal exposes five substrate directions:
+The reference NETBAT profile exposes six operations: five substrate terminals
+plus one liveness terminal.
 
+- `system.heartbeat` is the liveness terminal.
 - `bank.commit` is the write terminal.
 - `event.get` is the point-read terminal.
 - `event.query` is the commit-order paging terminal.
