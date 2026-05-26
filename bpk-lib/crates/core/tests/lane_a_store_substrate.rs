@@ -82,19 +82,7 @@ fn compaction_report_skipped_is_deterministic() {
 }
 
 #[test]
-// justifies: ADR-0027 and tests/lane_a_store_substrate.rs exercise the one-cut deprecated compaction evidence alias.
-#[allow(deprecated)]
-fn compact_with_report_alias_preserves_report_shape_for_one_cut() {
-    let (store, _dir) = lane_store();
-    let cfg = CompactionConfig::default();
-    let (result, report) = store.compact_with_report(&cfg).expect("compact alias");
-    assert!(matches!(result.outcome, CompactionOutcome::Skipped));
-    assert_eq!(report.schema_version, COMPACTION_REPORT_SCHEMA_VERSION);
-    store.close().expect("close");
-}
-
-#[test]
-fn compact_with_report_merge_evidence_has_sorted_sources_stable_body_hash_and_output_digest() {
+fn compact_merge_evidence_has_sorted_sources_stable_body_hash_and_output_digest() {
     let dir = tempfile::tempdir().expect("create temp dir");
     let config = StoreConfig::new(dir.path())
         .with_segment_max_bytes(512)

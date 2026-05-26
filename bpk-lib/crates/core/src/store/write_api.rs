@@ -1,12 +1,20 @@
 use super::*;
 
 impl Store<Open> {
-    /// Build a producer-side outbox for staged batch submission.
+    /// Advanced producer API: build an outbox for staged batch submission.
+    ///
+    /// The beginner write path is [`Store::append_typed`] or [`Store::append`].
+    /// Use an outbox when a producer needs to stage multiple items before
+    /// flushing them as one batch.
     pub fn outbox(&self) -> Outbox<'_> {
         Outbox::new(self, None)
     }
 
-    /// Begin a public visibility fence. Only one fence may be active at a time.
+    /// Advanced producer API: begin a public visibility fence.
+    ///
+    /// Only one fence may be active at a time. Writes submitted through the
+    /// returned [`VisibilityFence`] become durable but stay hidden until the
+    /// fence commits.
     ///
     /// # Errors
     /// Returns an error if another public visibility fence is already active or
@@ -41,7 +49,11 @@ impl Store<Open> {
         }
     }
 
-    /// Nonblocking root-cause append submission.
+    /// Advanced producer API: nonblocking root-cause append submission.
+    ///
+    /// The beginner write path is [`Store::append_typed`] or [`Store::append`].
+    /// Use `submit*` when the caller needs an [`AppendTicket`] and explicit
+    /// control over waiting for the writer result.
     ///
     /// # Errors
     /// Returns any serialization, enqueue, or writer error surfaced while
@@ -60,7 +72,11 @@ impl Store<Open> {
         )
     }
 
-    /// Nonblocking reaction append submission.
+    /// Advanced producer API: nonblocking reaction append submission.
+    ///
+    /// The beginner write path is [`Store::append_typed`] or [`Store::append`].
+    /// Use this when constructing a causation-linked producer pipeline that
+    /// waits on [`AppendTicket`] explicitly.
     ///
     /// # Errors
     /// Returns any serialization, enqueue, or writer error surfaced while
@@ -86,7 +102,10 @@ impl Store<Open> {
         )
     }
 
-    /// Nonblocking batch append submission.
+    /// Advanced producer API: nonblocking batch append submission.
+    ///
+    /// The beginner write path is [`Store::append_typed`] or [`Store::append`].
+    /// Use this when the caller needs an explicit [`BatchAppendTicket`].
     ///
     /// Every item's coordinate is revalidated synchronously at this entry so
     /// that invalid coordinates surface to the caller rather than being
@@ -130,7 +149,8 @@ impl Store<Open> {
         self.submit_batch_with_fence_impl(items, None)
     }
 
-    /// Attempt a root-cause submission without blocking if the writer is under pressure.
+    /// Advanced producer API: attempt a root-cause submission without blocking
+    /// if the writer is under pressure.
     ///
     /// # Errors
     /// Returns any serialization, enqueue, or writer error surfaced when the
@@ -153,7 +173,8 @@ impl Store<Open> {
             .map(crate::outcome::Outcome::ok)
     }
 
-    /// Attempt a reaction submission without blocking if the writer is under pressure.
+    /// Advanced producer API: attempt a reaction submission without blocking if
+    /// the writer is under pressure.
     ///
     /// # Errors
     /// Returns any serialization, enqueue, or writer error surfaced when the
@@ -178,7 +199,8 @@ impl Store<Open> {
             .map(crate::outcome::Outcome::ok)
     }
 
-    /// Attempt a batch submission without blocking if the writer is under pressure.
+    /// Advanced producer API: attempt a batch submission without blocking if
+    /// the writer is under pressure.
     ///
     /// # Errors
     /// Returns any enqueue or writer error surfaced when the operation
@@ -452,7 +474,8 @@ impl Store<Open> {
         self.append_with_options(coord, T::KIND, payload, opts)
     }
 
-    /// WRITE (typed): nonblocking submit — kind derived from `T::KIND`.
+    /// Advanced typed producer API: nonblocking submit — kind derived from
+    /// `T::KIND`.
     ///
     /// # Errors
     /// Returns any serialization, enqueue, or writer error.
@@ -464,7 +487,8 @@ impl Store<Open> {
         self.submit(coord, T::KIND, payload)
     }
 
-    /// WRITE (typed): attempt submit without blocking under pressure — kind derived from `T::KIND`.
+    /// Advanced typed producer API: attempt submit without blocking under
+    /// pressure — kind derived from `T::KIND`.
     ///
     /// # Errors
     /// Returns any serialization, enqueue, or writer error.
@@ -494,7 +518,8 @@ impl Store<Open> {
         self.append_reaction(coord, T::KIND, payload, correlation_id, causation_id)
     }
 
-    /// WRITE (typed): nonblocking reaction submit — kind derived from `T::KIND`.
+    /// Advanced typed producer API: nonblocking reaction submit — kind derived
+    /// from `T::KIND`.
     ///
     /// # Errors
     /// Returns any serialization, enqueue, or writer error.
@@ -508,7 +533,8 @@ impl Store<Open> {
         self.submit_reaction(coord, T::KIND, payload, correlation_id, causation_id)
     }
 
-    /// WRITE (typed): attempt reaction submit without blocking under pressure — kind derived from `T::KIND`.
+    /// Advanced typed producer API: attempt reaction submit without blocking
+    /// under pressure — kind derived from `T::KIND`.
     ///
     /// # Errors
     /// Returns any serialization, enqueue, or writer error.
