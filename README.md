@@ -33,6 +33,19 @@ Use `batpak` when you want an embedded append log with typed payloads, causal me
 
 Callers own process model, disk placement, runtime integration, network boundaries, and application authority.
 
+The beginner Rust path is intentionally small:
+
+1. open a `Store`
+2. append typed events
+3. page commit order with `query_entries_after`
+4. fetch payloads with `get`
+5. walk hash-chain ancestry with `walk_ancestors`
+6. verify receipts with typed outcomes
+7. derive projections
+8. close the store
+
+See `bpk-lib/crates/core/examples/eight_jobs.rs` for the contract example.
+
 ## Reading Order
 
 Read the current substrate contract in this order:
@@ -61,11 +74,13 @@ Use the root `justfile`.
 just list
 just inspect
 just verify
+just perf-gates
+just loom
 just seal
 just ship dry
 ```
 
-`just` is the command counter. `xtask` is the factory machinery. `ast-grep` inspects structural doctrine. Tests inspect behavior. Receipts preserve evidence.
+`just` is the command counter. `xtask` is the factory machinery. `ast-grep` inspects structural doctrine. Tests inspect behavior. Receipts preserve evidence. `perf-gates` and `loom` are manual release-confidence proofs, not part of `just verify`.
 
 Raw `cargo`, `npm`, and `pnpm` are implementation details unless routed through an explicit escape hatch:
 

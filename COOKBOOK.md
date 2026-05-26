@@ -26,8 +26,11 @@ Use the root command surface:
 ```sh
 just inspect
 just verify
+just perf-gates
+just loom
 just seal
 ```
 
-If a repeated workflow needs raw `cargo`, `npm`, or `pnpm`, promote it to a named `just` recipe.
+`perf-gates` and `loom` are manual proof tiers; they are not part of `just verify`.
 
+If a repeated workflow needs raw `cargo`, `npm`, or `pnpm`, promote it to a named `just` recipe.
