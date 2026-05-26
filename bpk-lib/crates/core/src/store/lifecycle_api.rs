@@ -125,24 +125,6 @@ impl Store<Open> {
         lifecycle::compact(self, config)
     }
 
-    /// Deprecated alias for [`Store::compact`].
-    ///
-    /// # Errors
-    /// Same error paths as [`Store::compact`].
-    #[deprecated(note = "use Store::compact; the report is now always returned")]
-    pub fn compact_with_report(
-        &self,
-        config: &CompactionConfig,
-    ) -> Result<
-        (
-            crate::store::segment::CompactionResult,
-            CompactionReportBody,
-        ),
-        StoreError,
-    > {
-        lifecycle::compact(self, config)
-    }
-
     /// LIFECYCLE: flush pending writes and shut down the writer thread cleanly.
     ///
     /// # Errors
