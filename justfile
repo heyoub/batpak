@@ -64,6 +64,12 @@ deny:
 bench-compile:
     cd bpk-lib; cargo xtask bench --compile
 
+perf-gates:
+    cd bpk-lib; cargo xtask perf-gates
+
+loom:
+    cd bpk-lib; cargo xtask loom
+
 template-freshness:
     cd bpk-lib; cargo xtask template-freshness
 
