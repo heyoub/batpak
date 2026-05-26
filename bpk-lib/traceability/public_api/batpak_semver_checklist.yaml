@@ -3,8 +3,8 @@
 package: batpak
 baseline_version: 0.7.0
 current_version: 0.7.6
-witness: target/semver-public-api/batpak-semver-raw.txt
-summary: "14 major semver-check rules fail in the 12a witness; Cut 17 additionally narrows batpak::prelude aliases. All classified intentional_0_8 or path_relocation unless noted."
+witness: target/semver-public-api/cut17-semver-raw.txt
+summary: "15 major semver-check rules fail in the Cut 17 witness; prelude narrowing adds intentional enum/function/struct/trait alias removals. All classified intentional_0_8 or path_relocation unless noted."
 
 entries:
   - rule: auto_trait_impl_removed
@@ -46,6 +46,12 @@ entries:
     changelog: CHANGELOG.md
     replacement: batpak::store::backup_envelope::BackupEnvelopeFinding
 
+  - rule: enum_missing
+    item: batpak::prelude advanced enum aliases
+    disposition: intentional_0_8
+    changelog: CHANGELOG.md
+    note: Cut 17 keeps owning module paths public while narrowing batpak::prelude to the beginner store path.
+
   - rule: enum_struct_variant_field_added
     item: StoreError::PlatformProfileInvalid.kind
     disposition: intentional_0_8
@@ -82,6 +88,12 @@ entries:
     disposition: path_relocation
     changelog: CHANGELOG.md
     replacement: batpak::store::backup_envelope::*
+
+  - rule: function_missing
+    item: batpak::prelude advanced function aliases
+    disposition: intentional_0_8
+    changelog: CHANGELOG.md
+    note: Advanced helpers remain public from owning modules; the default prelude no longer teaches schema/evidence/tooling helpers.
 
   - rule: inherent_method_const_removed
     item: AppendOptions::new
@@ -184,6 +196,12 @@ entries:
     changelog: CHANGELOG.md
     replacement: batpak::store::index::IndexEntry
 
+  - rule: struct_missing
+    item: batpak::prelude advanced struct aliases
+    disposition: intentional_0_8
+    changelog: CHANGELOG.md
+    note: Advanced batteries such as artifact envelopes, cursor workers, evidence reports, gates, pipelines, schema snapshots, tickets, and diagnostics remain public under owning modules.
+
   - rule: struct_pub_field_missing
     item: DiskPos.{segment_id,offset,length}
     disposition: intentional_0_8
@@ -225,6 +243,12 @@ entries:
     disposition: intentional_0_8
     changelog: CHANGELOG.md
     note: Struct replaced by Disabled | Enabled { capacity } enum.
+
+  - rule: trait_missing
+    item: batpak::prelude advanced trait aliases
+    disposition: intentional_0_8
+    changelog: CHANGELOG.md
+    note: Gate/reactor traits remain public from owning modules; Cut 17 removes them from the beginner import path.
 
 public_api_baseline_additions:
   - item: Store::query_entries_after

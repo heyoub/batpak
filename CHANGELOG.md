@@ -54,6 +54,9 @@ All notable changes to this project will be documented in this file.
   freshness, and decode helpers. Advanced batteries such as artifact envelopes,
   gates, pipelines, reactors, delivery cursors, schema snapshots, and evidence
   reports remain public under their owning modules instead of default imports.
+- Updated the batpak semver-check checklist to the current Cut 17 witness:
+  prelude enum/function/struct/trait alias removals are intentional 0.8
+  curriculum changes, not compatibility-shim candidates.
 - Removed the deprecated `Store::compact_with_report` alias. `Store::compact`
   already returns `(CompactionResult, CompactionReportBody)` and is the 0.8
   compaction evidence API.
