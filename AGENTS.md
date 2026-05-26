@@ -53,6 +53,8 @@ At repo root, agents use `just`. Raw `cargo`, `npm`, and `pnpm` are implementati
 - `just ci-fast` — early PR signal (format, clippy, checks, tests, dependency gates, traceability, structural)
 - `just verify` — canonical preflight proof bundle
 - `just ci-windows` — native Windows surface compatibility lane
+- `just perf-gates` — hardware-dependent performance gates; run alone when proving perf posture
+- `just loom` — bounded loom schedule proofs
 - `just seal` — release-readiness checks for a clean tree
 - `just ship dry` — release dry run
 - `just cargo -- <args>` — explicit Cargo escape hatch
@@ -94,6 +96,7 @@ Implementation commands still live under `bpk-lib/` and remain valid when a task
 - `cd bpk-lib && cargo xtask platform bless --store-path <dir> --profile <file>`
 - `cd bpk-lib && cargo xtask platform audit`
 - `cd bpk-lib && cargo xtask perf-gates`
+- `cd bpk-lib && cargo xtask loom`
 - `cd bpk-lib && cargo xtask bench --surface neutral|native [--save <baseline-label>|--compare|--compile]`
 - `cd bpk-lib && cargo xtask templates`
 - `cd bpk-lib && cargo xtask template-freshness` — focused template smoke plus generated-lock drift check

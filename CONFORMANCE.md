@@ -31,6 +31,8 @@ Repeated raw commands should become named `just` recipes.
 | Command | Meaning |
 | --- | --- |
 | `just bench` | Benchmark or compile benchmark surfaces. |
+| `just perf-gates` | Run ignored, hardware-dependent performance gates through the repo-owned xtask surface. |
+| `just loom` | Run bounded loom schedule proofs through the repo-owned xtask surface. |
 | `just inspect` | Structural doctrine, boundary checks, architecture IR, and ast-grep calipers. |
 | `just verify` | Canonical preflight proof bundle. |
 | `just seal` | Release-readiness checks for a clean tree. |
@@ -51,6 +53,8 @@ The factory uses tiered verification so humans, agents, and CI all speak the sam
 | Fast | `just ci-fast` | `ci-fast` | Yes | Early PR signal: format, clippy, checks, tests, dependency gates, traceability, structural law. |
 | Integrity | `just verify` | `preflight` | Yes | Canonical Linux devcontainer proof: full CI, coverage threshold 80%, docs. |
 | Windows surface | `just ci-windows` | `ci-windows-surface` | Yes | Native Windows compatibility surface, including platform-sensitive cargo/test behavior and kind-collision fixture. |
+| Performance gates | `just perf-gates` | `perf-gates` | Manual / release proof | Hardware-dependent ignored tests for cold start, append/query/projection throughput, restore, and lifecycle timing. Run alone, not in parallel with other heavy Rust jobs. |
+| Loom schedule proof | `just loom` | `loom` | Manual / label-gated CI | Bounded concurrency schedule proofs for writer/batch visibility, restart ownership, interner publication, group commit, and crash retry models. |
 | Mutant smoke | `just mutants-smoke` | `mutants smoke` | Yes for Rust paths | Critical seam mutation gates; CI shards by seam, local runs all seams. |
 | Mutant full | `just mutants-full` | `mutants full --shard …` | No | Manual repo-wide mutation ratchet; never scheduled in PR CI. |
 | Release | `just seal`, `just ship dry` | seal / release manifest / dry-run release | Publish only | Packaging, manifests, provenance, and publish dry-run proof. |
