@@ -243,3 +243,7 @@ public_api_baseline_removals:
   - item: batpak::prelude advanced re-export aliases
     disposition: intentional_0_8
     note: Cut 17 keeps the owning module paths public while narrowing the default prelude to the beginner store path.
+
+  - item: Store::compact_with_report
+    disposition: intentional_0_8
+    note: Cut 17 removes the deprecated alias; Store::compact already returns CompactionResult plus CompactionReportBody.

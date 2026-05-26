@@ -1335,7 +1335,6 @@ pub fn batpak::store::Store<batpak::store::Open>::writer_pressure(&self) -> batp
 impl batpak::store::Store<batpak::store::Open>
 pub fn batpak::store::Store<batpak::store::Open>::close(self) -> core::result::Result<batpak::store::Closed, batpak::prelude::StoreError>
 pub fn batpak::store::Store<batpak::store::Open>::compact(&self, config: &batpak::store::CompactionConfig) -> core::result::Result<(batpak::store::segment::CompactionResult, batpak::store::CompactionReportBody), batpak::prelude::StoreError>
-pub fn batpak::store::Store<batpak::store::Open>::compact_with_report(&self, config: &batpak::store::CompactionConfig) -> core::result::Result<(batpak::store::segment::CompactionResult, batpak::store::CompactionReportBody), batpak::prelude::StoreError>
 pub fn batpak::store::Store<batpak::store::Open>::snapshot(&self, dest: &std::path::Path) -> core::result::Result<(), batpak::prelude::StoreError>
 pub fn batpak::store::Store<batpak::store::Open>::snapshot_with_evidence(&self, dest: &std::path::Path) -> core::result::Result<batpak::store::SnapshotEvidenceReport, batpak::prelude::StoreError>
 pub fn batpak::store::Store<batpak::store::Open>::sync(&self) -> core::result::Result<(), batpak::prelude::StoreError>
@@ -3221,7 +3220,6 @@ pub fn batpak::store::Store<batpak::store::Open>::writer_pressure(&self) -> batp
 impl batpak::store::Store<batpak::store::Open>
 pub fn batpak::store::Store<batpak::store::Open>::close(self) -> core::result::Result<batpak::store::Closed, batpak::prelude::StoreError>
 pub fn batpak::store::Store<batpak::store::Open>::compact(&self, config: &batpak::store::CompactionConfig) -> core::result::Result<(batpak::store::segment::CompactionResult, batpak::store::CompactionReportBody), batpak::prelude::StoreError>
-pub fn batpak::store::Store<batpak::store::Open>::compact_with_report(&self, config: &batpak::store::CompactionConfig) -> core::result::Result<(batpak::store::segment::CompactionResult, batpak::store::CompactionReportBody), batpak::prelude::StoreError>
 pub fn batpak::store::Store<batpak::store::Open>::snapshot(&self, dest: &std::path::Path) -> core::result::Result<(), batpak::prelude::StoreError>
 pub fn batpak::store::Store<batpak::store::Open>::snapshot_with_evidence(&self, dest: &std::path::Path) -> core::result::Result<batpak::store::SnapshotEvidenceReport, batpak::prelude::StoreError>
 pub fn batpak::store::Store<batpak::store::Open>::sync(&self) -> core::result::Result<(), batpak::prelude::StoreError>

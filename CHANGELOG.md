@@ -54,6 +54,12 @@ All notable changes to this project will be documented in this file.
   freshness, and decode helpers. Advanced batteries such as artifact envelopes,
   gates, pipelines, reactors, delivery cursors, schema snapshots, and evidence
   reports remain public under their owning modules instead of default imports.
+- Removed the deprecated `Store::compact_with_report` alias. `Store::compact`
+  already returns `(CompactionResult, CompactionReportBody)` and is the 0.8
+  compaction evidence API.
+- Documented `submit*`, `try_submit*`, outbox, and visibility-fence writes as
+  advanced producer APIs; the beginner write path remains `append_typed` /
+  `append`.
 - `coordinate::namespace_prefix_matches` is no longer public API. Region prefix
   matching remains available through `Region::entity` / `Region::scope` query paths.
 - Refreshed the checked-in `traceability/public_api/batpak.txt` baseline to match

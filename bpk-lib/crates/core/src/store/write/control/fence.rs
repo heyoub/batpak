@@ -5,8 +5,12 @@ use crate::store::{BatchAppendItem, Open, Store, StoreError};
 use flume::TrySendError;
 use serde::Serialize;
 
-/// Public visibility fence: writes become durable immediately but remain hidden
-/// until the fence commits.
+/// Advanced producer visibility fence.
+///
+/// Writes submitted through a fence become durable immediately but remain
+/// hidden until the fence commits. Most callers should start with
+/// [`Store::append_typed`] or [`Store::append`]; fences are for producers that
+/// need a deliberate publish boundary across one or more submitted writes.
 ///
 /// `Drop` is best-effort cancellation: it tries to enqueue a
 /// `CancelVisibilityFence` command without waiting for acknowledgement. If the

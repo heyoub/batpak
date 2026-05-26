@@ -6,7 +6,13 @@ use crate::store::{
 };
 use serde::Serialize;
 
-/// Producer-side staging buffer for batch submission.
+/// Advanced producer staging buffer for batch submission.
+///
+/// Most callers should start with [`Store::append_typed`] or [`Store::append`].
+/// `Outbox` is for producer code that needs to stage several events and flush
+/// them as one batch, optionally through a [`VisibilityFence`].
+///
+/// [`VisibilityFence`]: crate::store::VisibilityFence
 pub struct Outbox<'a> {
     store: &'a Store<Open>,
     fence_token: Option<u64>,
