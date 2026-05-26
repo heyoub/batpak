@@ -19,10 +19,7 @@ struct PlayerMoved {
 #[allow(clippy::print_stdout)]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let dir = tempfile::tempdir()?;
-    let config = StoreConfig::new(dir.path())
-        .with_sync_every_n_events(25)
-        .with_sync_mode(SyncMode::SyncData);
-    let store = Store::open(config)?;
+    let store = Store::open(StoreConfig::new(dir.path()))?;
 
     let coord = Coordinate::new("player:alice", "room:dungeon")?;
     let receipt = store.append_typed(&coord, &PlayerMoved { x: 10, y: 20 })?;

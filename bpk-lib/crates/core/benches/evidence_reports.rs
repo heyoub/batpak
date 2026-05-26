@@ -3,9 +3,10 @@
 //! This bench is regression-sensitive, not a precision performance contract.
 
 use batpak::prelude::*;
+use batpak::schema::{compare_schema_snapshot, SchemaSnapshot};
 use batpak::store::{
-    ChainWalkRequest, ChainWalkStartRef, LossPrecision, ReadWalkRequest, SubscriberDeliveryState,
-    SubscriberFrontierRequest, SubscriberFrontierSource,
+    ChainWalkRequest, ChainWalkStartRef, IndexTopology, LossPrecision, ReadWalkRequest,
+    SubscriberDeliveryState, SubscriberFrontierRequest, SubscriberFrontierSource,
 };
 use batpak_bench_support::{apply_profile, BenchProfile};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};

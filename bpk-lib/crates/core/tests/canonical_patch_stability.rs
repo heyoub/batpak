@@ -11,7 +11,7 @@ use batpak::artifact::{
     verify_canonical_artifact_envelope, AttestationRef, CanonicalArtifactEnvelope,
     SignatureEnvelope, SignatureRef,
 };
-use batpak::prelude::*;
+mod support;
 use batpak::registry::{
     registry_drift_findings_sorted, registry_drift_report_body_hash, registry_row_body_hash,
     registry_verification_report_body_hash, NamedDigest, RegistryDriftReportBody, RegistryRowBody,
@@ -50,6 +50,7 @@ use proptest::prelude::*;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::error::Error;
+use support::prelude::*;
 
 #[path = "common/proptest.rs"]
 mod proptest_support;

@@ -8,9 +8,10 @@
 )]
 //! Advanced Store subscription delivery and SubscriptionOps integration tests.
 
-use batpak::prelude::*;
+mod support;
 use batpak::store::Store;
 use std::sync::Arc;
+use support::prelude::*;
 use tempfile::TempDir;
 
 #[path = "support/small_store.rs"]

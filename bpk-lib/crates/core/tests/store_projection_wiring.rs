@@ -1,10 +1,11 @@
 //! Projection wiring tests split out of store_advanced.rs.
 
-use batpak::prelude::*;
+mod support;
 use batpak::store::projection::{CacheCapabilities, CacheMeta, ProjectionCache};
 use batpak::store::{Freshness, Store, StoreConfig, StoreError};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use support::prelude::*;
 use tempfile::TempDir;
 
 #[cfg(feature = "dangerous-test-hooks")]

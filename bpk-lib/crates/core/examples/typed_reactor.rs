@@ -23,8 +23,9 @@
 //!
 //! Run: `cargo run --example typed_reactor`
 
-use batpak::event::StoredEvent;
+use batpak::event::{StoredEvent, TypedReactive};
 use batpak::prelude::*;
+use batpak::store::{CausationRef, ReactionBatch, ReactorConfig};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 

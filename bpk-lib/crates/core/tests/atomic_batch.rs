@@ -3,8 +3,9 @@
 //! Atomic batch append tests.
 //! PROVES: INV-BATCH-ATOMIC-VISIBILITY, INV-BATCH-CRASH-RECOVERY.
 
-use batpak::prelude::*;
+mod support;
 use std::collections::HashSet;
+use support::prelude::*;
 
 fn strip_open_completed(
     entries: Vec<batpak::store::index::IndexEntry>,

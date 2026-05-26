@@ -8,7 +8,7 @@
 //! **Compaction vs snapshot interplay:** `tests/store_snapshot_compaction.rs`.
 
 use batpak::event::EventKind;
-use batpak::prelude::*;
+mod support;
 use batpak::store::index::IndexEntry;
 use batpak::store::segment::CompactionOutcome;
 use batpak::store::{
@@ -19,6 +19,7 @@ use batpak::store::{
 };
 use std::path::PathBuf;
 use std::time::Duration;
+use support::prelude::*;
 use tempfile::TempDir;
 
 fn lane_store() -> (Store<Open>, TempDir) {

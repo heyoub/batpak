@@ -13,7 +13,8 @@
 //! DEFENDS: user-visible message drift, coordinate formatting regressions,
 //! causation helper regressions, and append flag propagation loss.
 
-use batpak::prelude::*;
+mod support;
+use support::prelude::*;
 
 #[path = "support/small_store.rs"]
 mod small_store_support;

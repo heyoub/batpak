@@ -8,8 +8,9 @@
 //! INVARIANTS: INV-REPLAY-LANE-SELECTION (replay determinism), INV-GROUP-COMMIT-IDEMPOTENCY (idempotency), INV-WIRE-ROUNDTRIP-TOTALITY (round-trip),
 //!             INV-MACRO-BOUNDED-CAST (EventKind category enforcement), INV-STORE-ERROR-TAXONOMY (error shape stability)
 
-use batpak::prelude::*;
+mod support;
 use proptest::prelude::*;
+use support::prelude::*;
 use tempfile::TempDir;
 
 #[path = "support/medium_store.rs"]
@@ -546,10 +547,7 @@ fn closure_outcome_combinators_preserve_type() {
     );
 
     // map on Err stays Err
-    let err: Outcome<i32> = Outcome::Err(OutcomeError::new(
-        batpak::prelude::ErrorKind::Internal,
-        "test",
-    ));
+    let err: Outcome<i32> = Outcome::Err(OutcomeError::new(ErrorKind::Internal, "test"));
     let mapped_err = err.map(|x| x * 2);
     assert!(
         matches!(mapped_err, Outcome::Err(_)),
@@ -702,7 +700,6 @@ fn error_variant_coverage_all_store_errors_display() {
 
 #[test]
 fn dag_position_different_depths_are_incomparable() {
-    use batpak::prelude::DagPosition;
     let shallow = DagPosition::new(0, 0, 5);
     let deep = DagPosition::new(1, 0, 5);
 

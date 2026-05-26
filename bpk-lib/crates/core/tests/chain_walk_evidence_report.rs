@@ -4,12 +4,13 @@
 //! unchecked hash mismatches, unsorted findings, and body-hash drift.
 //! SEEDED: deterministic / no randomness.
 
-use batpak::prelude::*;
+mod support;
 use batpak::store::{
     ChainWalkEvidenceReport, ChainWalkFinding, ChainWalkHash, ChainWalkMode, ChainWalkReportBody,
     ChainWalkReportError, ChainWalkRequest, ChainWalkStartRef, CHAIN_WALK_REPORT_SCHEMA_VERSION,
 };
 use std::error::Error;
+use support::prelude::*;
 
 #[path = "support/small_store.rs"]
 mod small_store_support;

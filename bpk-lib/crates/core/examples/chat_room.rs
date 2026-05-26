@@ -224,7 +224,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     drop(store);
     println!("\nSubscriptions are push (lossy, filtered, composable).");
-    println!("Cursors are pull (ordered, complete, sequential).");
+    println!(
+        "Cursors are pull (ordered, at-least-once; restart durability uses checkpointed workers)."
+    );
     println!("Queries are instant (in-memory index).");
 
     Ok(())

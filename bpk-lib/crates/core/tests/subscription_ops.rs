@@ -9,11 +9,12 @@
 //! after deterministic producer appends; exhaustion probes are bounded by an
 //! outer `recv_timeout` channel.
 
-use batpak::prelude::*;
+mod support;
 use batpak::store::Notification;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
+use support::prelude::*;
 
 const PROMPT_EXHAUSTION_TIMEOUT: Duration = Duration::from_secs(2);
 

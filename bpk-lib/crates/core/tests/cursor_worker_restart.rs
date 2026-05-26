@@ -1,13 +1,14 @@
 // justifies: INV-TEST-PANIC-AS-ASSERTION; cursor worker restart tests in tests/cursor_worker_restart.rs use panic! to escape retry-poll loops when the expected event fails to arrive within the bound.
 #![allow(clippy::panic)]
 
-use batpak::prelude::*;
+mod support;
 use batpak::store::delivery::cursor::{CursorWorkerAction, CursorWorkerConfig};
 use batpak::store::{RestartPolicy, Store, StoreConfig};
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use support::prelude::*;
 use tempfile::TempDir;
 
 fn test_config(dir: &TempDir) -> StoreConfig {

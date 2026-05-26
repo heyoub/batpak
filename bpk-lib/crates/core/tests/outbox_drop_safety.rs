@@ -7,8 +7,9 @@
 //! notification fires. Flushing an outbox after staging is atomic — all items
 //! land together.
 
-use batpak::prelude::*;
+mod support;
 use batpak::store::Outbox;
+use support::prelude::*;
 
 #[path = "support/small_store.rs"]
 mod small_store_support;

@@ -13,8 +13,9 @@
 //!
 //! SEEDED: deterministic tempdir-based open.
 
+use batpak::coordinate::DagPosition;
 use batpak::prelude::{
-    Coordinate, DagPosition, Event, EventKind, EventSourced, Freshness, JsonValueInput, Region,
+    Coordinate, Event, EventKind, EventSourced, Freshness, JsonValueInput, Region,
 };
 use batpak::store::{
     CountdownAction, CountdownInjector, FrontierView, HlcPoint, InjectionPoint, ReadOnly, Store,

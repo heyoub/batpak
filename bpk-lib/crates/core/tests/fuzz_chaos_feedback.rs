@@ -28,11 +28,12 @@
 //!
 //! Run with: cargo test --test fuzz_chaos_feedback --all-features --release -- --ignored
 
-use batpak::prelude::*;
+mod support;
 use batpak::store::segment::{frame_decode, frame_encode};
 use batpak::store::{AppendOptions, Store, StoreConfig};
 use std::sync::Arc;
 use std::time::Instant;
+use support::prelude::*;
 use tempfile::TempDir;
 
 // ============================================================

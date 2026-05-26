@@ -11,8 +11,9 @@ mod red_test_coord;
 use red_kinds::*;
 use red_test_coord::*;
 
-use batpak::prelude::*;
+mod support;
 use std::sync::Arc;
+use support::prelude::*;
 use tempfile::TempDir;
 
 #[test]

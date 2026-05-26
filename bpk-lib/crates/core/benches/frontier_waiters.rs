@@ -8,7 +8,7 @@
 //! intended work delta.
 
 use batpak::prelude::*;
-use batpak::store::{Store, StoreConfig, SyncMode};
+use batpak::store::{DurabilityGate, HlcPoint, Store, StoreConfig, SyncMode, WatermarkKind};
 use batpak_bench_support::{apply_profile, BenchProfile};
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use std::sync::{Arc, Barrier};

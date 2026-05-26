@@ -8,10 +8,11 @@
 )]
 //! Advanced Store append and append-option integration tests.
 
-use batpak::prelude::*;
+mod support;
 use batpak::store::{Store, StoreConfig, StoreError, StoreStats};
 use batpak::typestate::Transition;
 use serde::{Deserialize, Serialize};
+use support::prelude::*;
 use tempfile::TempDir;
 
 // Test-local EventPayload used by the apply_transition test. FREEZE-7 removed

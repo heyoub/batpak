@@ -11,9 +11,10 @@
 
 use std::sync::Arc;
 
-use batpak::prelude::*;
+mod support;
 use batpak::store::{Freshness, ProjectionWatcher, Store, StoreConfig};
 use serde::{Deserialize, Serialize};
+use support::prelude::*;
 use tempfile::TempDir;
 
 #[path = "support/bounded_blocking.rs"]

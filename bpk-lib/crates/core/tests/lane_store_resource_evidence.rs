@@ -7,7 +7,7 @@
 //! identity, and silent drift between free-function and `Store` entrypoints.
 //! SEEDED: deterministic / no randomness.
 
-use batpak::prelude::*;
+mod support;
 use batpak::store::cold_start::rebuild::OpenIndexReport;
 use batpak::store::{
     store_data_dir_identity_hash, store_resource_evidence_report_from_diagnostics,
@@ -17,6 +17,7 @@ use batpak::store::{
     STORE_RESOURCE_REPORT_SCHEMA_VERSION,
 };
 use std::error::Error;
+use support::prelude::*;
 
 #[path = "support/small_store.rs"]
 mod small_store_support;

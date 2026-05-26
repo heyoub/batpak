@@ -6,8 +6,9 @@
 //! INVARIANTS: INV-HASH-CHAIN-INTEGRITY (cryptographic chain integrity)
 
 use batpak::event::hash::{compute_hash, verify_chain};
-use batpak::prelude::*;
+mod support;
 use proptest::prelude::*;
+use support::prelude::*;
 
 #[path = "common/proptest.rs"]
 mod proptest_support;

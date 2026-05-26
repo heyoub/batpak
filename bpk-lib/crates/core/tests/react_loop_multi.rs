@@ -18,8 +18,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use batpak::event::StoredEvent;
-use batpak::prelude::*;
-use batpak::prelude::{EventPayload, MultiEventReactor, MultiReactive};
+mod support;
+use support::prelude::*;
 
 #[path = "support/small_store.rs"]
 mod small_store_support;

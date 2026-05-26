@@ -13,7 +13,8 @@
 //! DEFENDS: ancestor traversal truncation drift, descendant leakage, and
 //! strict-ordering regressions in `DagPosition::is_ancestor_of`.
 
-use batpak::prelude::*;
+mod support;
+use support::prelude::*;
 
 #[path = "support/small_store.rs"]
 mod small_store_support;

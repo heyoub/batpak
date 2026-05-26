@@ -4,7 +4,7 @@
 //! incorrect limit/drop counts, unsorted findings, and body-hash drift.
 //! SEEDED: deterministic / no randomness.
 
-use batpak::prelude::*;
+mod support;
 use batpak::store::{
     ReadWalkDroppedCount, ReadWalkEvidenceReport, ReadWalkFinding, ReadWalkFreshnessIntent,
     ReadWalkFrontierKind, ReadWalkHash, ReadWalkInputFrontier, ReadWalkProofRef, ReadWalkProofRefs,
@@ -13,6 +13,7 @@ use batpak::store::{
 };
 use std::error::Error;
 use std::time::Duration;
+use support::prelude::*;
 
 #[path = "support/small_store.rs"]
 mod small_store_support;

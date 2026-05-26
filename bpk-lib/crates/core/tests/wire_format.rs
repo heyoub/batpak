@@ -26,9 +26,10 @@
 //! Inspect `git diff tests/golden/` carefully before committing regenerated goldens.
 
 use batpak::outcome::wait::{CompensationAction, WaitCondition};
-use batpak::prelude::*;
+mod support;
 use batpak::wire::{option_u128_bytes, u128_bytes, vec_u128_bytes};
 use serde::Serialize;
+use support::prelude::*;
 use tempfile::TempDir;
 
 fn golden_dir() -> std::path::PathBuf {

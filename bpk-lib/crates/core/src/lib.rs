@@ -14,10 +14,17 @@
 //! evaluates caller-defined gates before commit, and rebuilds typed projections through
 //! a synchronous API that does not require an async runtime.
 //!
-//! Most callers start with typed payloads: derive [`EventPayload`], append with
-//! [`Store::append_typed`](crate::store::Store::append_typed), and read through
-//! the in-memory index. Gates and [`Pipeline`](crate::pipeline::Pipeline) can be
-//! added when a write needs caller-owned evaluation before commit.
+//! Most callers start with the eight-job path: open a [`Store`], append typed
+//! events, page commit order with
+//! [`Store::query_entries_after`](crate::store::Store::query_entries_after),
+//! point-read with [`Store::get`](crate::store::Store::get), walk bounded
+//! hash-chain ancestry with
+//! [`Store::walk_ancestors`](crate::store::Store::walk_ancestors), verify
+//! receipts with
+//! [`Store::verify_append_receipt_detailed`](crate::store::Store::verify_append_receipt_detailed),
+//! project derived state with [`Store::project`](crate::store::Store::project),
+//! then close the store. Gates and [`Pipeline`](crate::pipeline::Pipeline) are
+//! advanced batteries for caller-owned evaluation before commit.
 //!
 //! ```no_run
 //! use batpak::prelude::*;
@@ -44,15 +51,13 @@
 //! ```
 //!
 //! **Reading order:**
-//! 1. [`coordinate`]: Identify entities and scopes
-//! 2. [`event`]: Structure your events
-//! 3. [`artifact`]: Canonical body-vs-envelope digests for signed attachments
-//! 4. [`registry`]: Attested immutable rows (lifecycle, supersession, drift, verification)
-//! 5. [`transition`]: Generic state transition evidence (events and structural reports)
-//! 6. [`reservation`]: Generic reservation ledger (reserve/commit/refund/expire/orphan)
-//! 7. [`guard`]: Build caller-defined gates
-//! 8. [`pipeline`]: Propose and commit
-//! 9. [`store`]: Persist and query
+//! 1. [`coordinate`]: Identify entities and scopes.
+//! 2. [`event`]: Structure typed payloads and projection inputs.
+//! 3. [`store`]: Persist, page, point-read, walk, verify, and project.
+//! 4. [`guard`] and [`pipeline`]: Add caller-defined write evaluation.
+//! 5. [`artifact`], [`registry`], [`transition`], [`reservation`], and
+//!    [`schema`]: Advanced substrate batteries for envelopes, ledgers,
+//!    transition evidence, reservation mechanics, and drift reports.
 
 /// Crate-level substrate: canonical artifact body digest vs envelope digest.
 pub mod artifact;

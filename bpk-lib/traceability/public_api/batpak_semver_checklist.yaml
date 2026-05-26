@@ -4,7 +4,7 @@ package: batpak
 baseline_version: 0.7.0
 current_version: 0.7.6
 witness: target/semver-public-api/batpak-semver-raw.txt
-summary: "14 major semver-check rules fail; all classified intentional_0_8 or path_relocation unless noted."
+summary: "14 major semver-check rules fail in the 12a witness; Cut 17 additionally narrows batpak::prelude aliases. All classified intentional_0_8 or path_relocation unless noted."
 
 entries:
   - rule: auto_trait_impl_removed
@@ -239,3 +239,7 @@ public_api_baseline_removals:
   - item: coordinate::namespace_prefix_matches
     disposition: hidden_in_cut_12a
     note: Internal Region prefix helper; behavior covered by Region::entity queries.
+
+  - item: batpak::prelude advanced re-export aliases
+    disposition: intentional_0_8
+    note: Cut 17 keeps the owning module paths public while narrowing the default prelude to the beginner store path.

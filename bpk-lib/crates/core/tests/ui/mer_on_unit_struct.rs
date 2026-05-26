@@ -4,6 +4,7 @@
 //! all three derives reject unit structs with the same error style.
 
 use batpak::prelude::*;
+use batpak::MultiEventReactor;
 
 #[derive(serde::Serialize, serde::Deserialize, EventPayload)]
 #[batpak(category = 8, type_id = 1)]

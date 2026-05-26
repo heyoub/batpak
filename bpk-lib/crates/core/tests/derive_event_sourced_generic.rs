@@ -12,8 +12,9 @@
 //!   2. The concrete instantiation `Foo<u64>` runs a real projection through
 //!      the store — end-to-end behaviour matches a non-generic equivalent.
 
-use batpak::prelude::*;
+mod support;
 use serde::{Deserialize, Serialize};
+use support::prelude::*;
 
 #[path = "support/small_store.rs"]
 mod small_store_support;

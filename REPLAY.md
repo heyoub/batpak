@@ -27,9 +27,11 @@ Replay paths should produce evidence where user-visible trust depends on the res
 
 ## External Traversal
 
-In-process Rust replay can use `Store::query`, `Store::query_entries_after`,
-`cursor_guaranteed`, and projection replay directly. Non-Rust terminals use the
-bounded NETBAT lane:
+In-process Rust replay should use `Store::query_entries_after` for bounded
+commit-order pages and projection replay for derived state. `Store::query` is a
+small-region snapshot convenience, and delivery cursors are ordered pull
+mechanics rather than query pagination. Non-Rust terminals use the bounded
+NETBAT lane:
 
 1. `event.query` pages substrate summaries by coordinate/region/kind in
    ascending `global_sequence` order.

@@ -8,8 +8,9 @@
 )]
 //! Advanced Store config, lookup, and query integration tests.
 
-use batpak::prelude::*;
+mod support;
 use batpak::store::{Store, StoreConfig, StoreDiagnostics, StoreError};
+use support::prelude::*;
 use tempfile::TempDir;
 
 #[path = "support/small_store.rs"]

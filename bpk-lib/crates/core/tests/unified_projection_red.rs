@@ -18,9 +18,10 @@ use red_kind_b::*;
 use red_kinds::*;
 use red_versioned_counters::*;
 
-use batpak::prelude::*;
+mod support;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
+use support::prelude::*;
 use tempfile::TempDir;
 
 #[test]

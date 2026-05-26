@@ -17,8 +17,9 @@ use red_counters::*;
 use red_kind_b::*;
 use red_kinds::*;
 
-use batpak::prelude::*;
+mod support;
 use std::sync::Arc;
+use support::prelude::*;
 use tempfile::TempDir;
 
 #[test]

@@ -14,11 +14,12 @@
 //!
 //! SEEDED: checked-in fixture stores under `tests/fixtures/cold_start/adr0009`.
 
-use batpak::prelude::*;
+mod support;
 use batpak::store::cold_start::rebuild::OpenIndexPath;
 use batpak::store::ExtensionKey;
 use std::fs;
 use std::path::Path;
+use support::prelude::*;
 use tempfile::TempDir;
 
 const FIXTURE_ROOT: &str = concat!(

@@ -12,9 +12,10 @@
 //! DEFENDS: FM-011 (Error Path Hollowing), FM-013 (Coverage Mirage)
 //! INVARIANTS: INV-WIRE-ROUNDTRIP-TOTALITY (frame decode totality), INV-CONCURRENCY-SCHEDULE-PROOF (concurrent appends)
 
-use batpak::prelude::*;
+mod support;
 use std::io::Write;
 use std::time::Duration;
+use support::prelude::*;
 use tempfile::TempDir;
 
 #[path = "support/medium_store.rs"]

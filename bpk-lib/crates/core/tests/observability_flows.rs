@@ -7,7 +7,7 @@
 //! not inherit scoped `with_default` dispatchers from the test thread.
 
 use batpak::coordinate::Region;
-use batpak::prelude::*;
+mod support;
 use batpak::store::{
     AppendOptions, CacheCapabilities, CacheMeta, CompactionConfig, DurabilityGate, Freshness,
     ProjectionCache, Store, StoreConfig, StoreError, WatermarkKind,
@@ -15,6 +15,7 @@ use batpak::store::{
 use std::collections::BTreeMap;
 use std::io;
 use std::sync::{Arc, LazyLock, Mutex, Once};
+use support::prelude::*;
 use tempfile::TempDir;
 use tracing::field::Visit;
 use tracing::Subscriber;

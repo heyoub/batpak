@@ -6,8 +6,9 @@
 //! INVARIANTS: INV-WIRE-ROUNDTRIP-TOTALITY (event round-trip fidelity), INV-TRACEABILITY-COMPLETE (every pub API has a test witness)
 
 use batpak::id::EntityIdType;
-use batpak::prelude::*;
+mod support;
 use batpak::store::Clock;
+use support::prelude::*;
 
 fn assert_entity_id_type<T: batpak::id::EntityIdType>(id: T) -> u128 {
     id.as_u128()

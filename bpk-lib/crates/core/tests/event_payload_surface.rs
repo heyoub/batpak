@@ -12,9 +12,10 @@
 //! CATCHES: typed payload public surface drift and clean-registry validator regressions.
 //! SEEDED: deterministic / no randomness.
 
-use batpak::prelude::*;
+mod support;
 use batpak::store::{AppendOptions, BatchAppendItem, CausationRef, Store};
 use batpak::typestate::transition::{StateMarker, Transition};
+use support::prelude::*;
 
 #[path = "support/bounded_writer_reply.rs"]
 mod bounded_writer_reply;

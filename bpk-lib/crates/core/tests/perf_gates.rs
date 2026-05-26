@@ -15,10 +15,11 @@
 //! claim that these tests are the sole performance authority. Criterion
 //! benches provide trend visibility; these gates catch gross regressions.
 
-use batpak::prelude::*;
+mod support;
 use batpak::store::cold_start::rebuild::OpenIndexPath;
 use batpak::store::{Store, StoreConfig, SyncMode};
 use std::time::Instant;
+use support::prelude::*;
 use tempfile::TempDir;
 
 /// A Gate that checks cold-start performance.

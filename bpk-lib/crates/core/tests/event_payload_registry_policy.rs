@@ -4,8 +4,9 @@
 //! CATCHES: registry validator cache, error, and StoreConfig policy regressions.
 //! SEEDED: deterministic / no randomness.
 
-use batpak::prelude::*;
+mod support;
 use batpak::store::Store;
+use support::prelude::*;
 
 #[test]
 fn public_payload_registry_validator_reports_clean_registry() {

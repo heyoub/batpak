@@ -11,6 +11,8 @@
 //!
 //! Run: `cargo run --example caller_defined_gates`
 
+use batpak::guard::{Denial, Gate, GateSet};
+use batpak::pipeline::{CommitMetadata, Pipeline, Proposal};
 use batpak::prelude::*;
 use serde::{Deserialize, Serialize};
 

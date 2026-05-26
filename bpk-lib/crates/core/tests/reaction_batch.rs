@@ -10,7 +10,8 @@
 //! exercise the public push-side contract and the drop-on-error-is-structural
 //! guarantee from a downstream consumer's point of view.
 
-use batpak::prelude::*;
+mod support;
+use support::prelude::*;
 
 #[path = "support/small_store.rs"]
 mod small_store_support;

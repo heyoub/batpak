@@ -9,9 +9,10 @@
 //! INVARIANTS: INV-TYPELEVEL-COMBINATOR-LAWS (combinator type safety), INV-FRONTIER-WAIT-MONOTONIC (WaitCondition semantics)
 
 use batpak::outcome::WaitCondition;
-use batpak::prelude::*;
+mod support;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use support::prelude::*;
 
 fn test_err() -> OutcomeError {
     OutcomeError::new(ErrorKind::Internal, "test error")

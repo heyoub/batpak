@@ -7,6 +7,8 @@
 //!
 //! Run: `cargo run --example signed_receipts`
 
+use batpak::guard::{Denial, Gate, GateSet};
+use batpak::pipeline::Proposal;
 use batpak::prelude::*;
 use batpak::store::SigningKey;
 

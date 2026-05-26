@@ -7,6 +7,7 @@ stem without `.rs`, for example `cargo run --example quickstart`.
 
 ## Start Here
 
+- `eight_jobs.rs` - canonical 0.8 store path: open, append, page, get, walk, verify, project, close. Run: `cargo run --example eight_jobs`.
 - `quickstart.rs` - minimal open, append, read flow. Run: `cargo run --example quickstart`.
 - `batch_append.rs` - atomic multi-event append with intra-batch causation. Run: `cargo run --example batch_append`.
 - `caller_defined_gates.rs` - guard decisions before commit. Run: `cargo run --example caller_defined_gates`.

@@ -10,7 +10,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use batpak::event::StoredEvent;
-use batpak::prelude::*;
+mod support;
+use support::prelude::*;
 
 #[path = "support/small_store.rs"]
 mod small_store_support;

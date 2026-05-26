@@ -23,9 +23,10 @@
 //! that property is not needed — removing a binding removes both arms and
 //! kind entries simultaneously.
 
-use batpak::prelude::*;
+mod support;
 use batpak::prelude::{EventPayload, EventSourced};
 use serde::{Deserialize, Serialize};
+use support::prelude::*;
 
 #[path = "support/bounded_blocking.rs"]
 mod bounded_blocking;

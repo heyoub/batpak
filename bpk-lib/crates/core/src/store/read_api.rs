@@ -32,7 +32,10 @@ impl<State> Store<State> {
     }
 
     /// Verify an append receipt against the store's signing-key registry and
-    /// current index state.
+    /// current index state, returning only a boolean.
+    ///
+    /// Prefer [`Self::verify_append_receipt_detailed`] in new code when the
+    /// caller needs proof language or a stable rejection reason.
     #[must_use]
     pub fn verify_append_receipt(&self, receipt: &AppendReceipt) -> bool {
         self.verify_append_receipt_detailed(receipt).is_valid()
@@ -69,8 +72,13 @@ impl<State> Store<State> {
         self.verify_append_receipt_detailed(&receipt)
     }
 
-    /// Verify an append receipt and return the exact acceptance or rejection
-    /// reason.
+    /// Verify a full persisted append receipt and return the exact acceptance
+    /// or rejection reason.
+    ///
+    /// This API expects the native [`AppendReceipt`], including its committed
+    /// disk position. Wire transports that only carry ack-shaped fields should
+    /// use [`Self::verify_append_receipt_wire_detailed`] so the store can
+    /// hydrate the disk position from the committed index entry.
     #[must_use]
     pub fn verify_append_receipt_detailed(&self, receipt: &AppendReceipt) -> ReceiptVerification {
         let Some(entry) = self.index.get_by_id(receipt.event_id.as_u128()) else {
@@ -112,18 +120,26 @@ impl<State> Store<State> {
         )
     }
 
-    /// READ: query by Region.
+    /// READ: return every currently visible index entry matching a Region.
+    ///
+    /// This is a convenience snapshot read for small, already-bounded regions.
+    /// For replay, audit, host parity, or user-facing pagination, prefer
+    /// [`Self::query_entries_after`], which pages strictly by
+    /// `global_sequence`.
     #[must_use]
     pub fn query(&self, region: &Region) -> Vec<IndexEntry> {
         self.index.query(region)
     }
 
-    /// READ: query a bounded page of events by Region in ascending
+    /// READ: query a bounded page of visible events by Region in ascending
     /// `global_sequence` order.
     ///
     /// Pass `None` for the first page. Pass the last returned entry's
     /// [`IndexEntry::global_sequence`] as `Some(after_global_sequence)` to
-    /// resume strictly after that entry.
+    /// resume strictly after that entry. `limit == 0` returns an empty page.
+    ///
+    /// This is commit-order pagination, not a live cursor or server-held
+    /// session. Durable delivery cursors live under the delivery APIs.
     #[must_use]
     pub fn query_entries_after(
         &self,
@@ -140,7 +156,9 @@ impl<State> Store<State> {
             .collect()
     }
 
-    /// READ: walk hash chain ancestors.
+    /// READ: walk bounded hash-chain ancestors from an event id.
+    ///
+    /// This is substrate ancestry, not domain graph traversal.
     pub fn walk_ancestors(
         &self,
         event_id: EventId,
@@ -228,9 +246,10 @@ impl<State> Store<State> {
     /// CURSOR: pull-based, ordered delivery from the in-memory index.
     ///
     /// Available on both `Store<Open>` and `Store<ReadOnly>`. This cursor is
-    /// process-local only: it does not persist its position, so restart-time
-    /// at-least-once semantics require the checkpoint-bound cursor worker
-    /// surface rather than this constructor.
+    /// process-local durable-delivery vocabulary, not query pagination. It
+    /// does not persist its position, so restart-time at-least-once semantics
+    /// require the checkpoint-bound cursor worker surface rather than this
+    /// constructor.
     pub fn cursor_guaranteed(&self, region: &Region) -> Cursor {
         Cursor::new(region.clone(), Arc::clone(&self.index))
     }

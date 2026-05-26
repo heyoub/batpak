@@ -1,11 +1,12 @@
 // justifies: INV-TEST-PANIC-AS-ASSERTION, ADR-0002; writer command-flow tests in tests/writer_command_flow.rs use panic! to surface unexpected writer states when the WriterCommand handshake breaks.
 #![allow(clippy::panic)]
 
-use batpak::prelude::*;
+mod support;
 use batpak::store::{AppendOptions, BatchAppendItem, Store, StoreConfig, StoreError};
 use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::Duration;
+use support::prelude::*;
 use tempfile::TempDir;
 
 #[path = "support/bounded_writer_reply.rs"]

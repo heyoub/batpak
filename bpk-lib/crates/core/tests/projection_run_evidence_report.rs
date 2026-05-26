@@ -5,7 +5,7 @@
 //! structured evidence.
 //! SEEDED: deterministic / no randomness.
 
-use batpak::prelude::*;
+mod support;
 use batpak::store::projection::{CacheCapabilities, CacheMeta, ProjectionCache};
 use batpak::store::{
     ProjectionRunCacheStatus, ProjectionRunCheckpointRef, ProjectionRunEvidenceReport,
@@ -15,6 +15,7 @@ use batpak::store::{
     ProjectionRunRequestedFreshness, ProjectionSourceRef, PROJECTION_RUN_REPORT_SCHEMA_VERSION,
 };
 use std::error::Error;
+use support::prelude::*;
 
 #[path = "support/small_store.rs"]
 mod small_store_support;

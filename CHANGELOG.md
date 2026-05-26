@@ -49,6 +49,11 @@ All notable changes to this project will be documented in this file.
   own package entrypoint.
 
 ### Changed
+- Narrowed `batpak::prelude` to the beginner store path: typed payloads,
+  coordinates/regions, `Store`/`StoreConfig`, receipt verification outcomes,
+  freshness, and decode helpers. Advanced batteries such as artifact envelopes,
+  gates, pipelines, reactors, delivery cursors, schema snapshots, and evidence
+  reports remain public under their owning modules instead of default imports.
 - `coordinate::namespace_prefix_matches` is no longer public API. Region prefix
   matching remains available through `Region::entity` / `Region::scope` query paths.
 - Refreshed the checked-in `traceability/public_api/batpak.txt` baseline to match

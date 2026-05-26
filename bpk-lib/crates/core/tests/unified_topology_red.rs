@@ -11,7 +11,8 @@ mod red_kinds;
 use red_kind_b::*;
 use red_kinds::*;
 
-use batpak::prelude::*;
+mod support;
+use support::prelude::*;
 use tempfile::TempDir;
 
 #[test]

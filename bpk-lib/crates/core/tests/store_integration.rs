@@ -14,8 +14,9 @@
 //! (regression coverage for the missing `serde 'rc'` feature flag that broke
 //! `Coordinate` deserialization) through round-trip persistence.
 
-use batpak::prelude::*;
+mod support;
 use batpak::store::{Freshness, Store, StoreConfig};
+use support::prelude::*;
 use tempfile::TempDir;
 
 #[path = "support/small_store.rs"]

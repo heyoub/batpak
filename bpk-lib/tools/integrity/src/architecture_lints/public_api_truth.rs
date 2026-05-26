@@ -34,13 +34,19 @@ pub(super) fn check(repo_root: &Path, source_cache: &mut SourceCache) -> Result<
     )?;
 
     let prelude_exports = public_use_names(&prelude);
-    for required in ["IndexTopology", "ReplayLane", "JsonValueInput"] {
+    for required in ["ReplayLane", "JsonValueInput"] {
         ensure(
             prelude_exports.contains(required),
             format!("src/prelude.rs must re-export {required}"),
         )?;
     }
-    for banned in ["IndexLayout", "ViewConfig", "ProjectionMode", "ValueInput"] {
+    for banned in [
+        "IndexTopology",
+        "IndexLayout",
+        "ViewConfig",
+        "ProjectionMode",
+        "ValueInput",
+    ] {
         ensure(
             !prelude_exports.contains(banned),
             format!("src/prelude.rs still exposes removed public name {banned}"),

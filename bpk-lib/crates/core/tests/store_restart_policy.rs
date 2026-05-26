@@ -3,8 +3,9 @@
 #![allow(clippy::panic)]
 //! Restart policy tests split out of store_advanced.rs.
 
-use batpak::prelude::*;
+mod support;
 use batpak::store::{RestartPolicy, Store, StoreConfig, StoreError};
+use support::prelude::*;
 use tempfile::TempDir;
 
 #[test]

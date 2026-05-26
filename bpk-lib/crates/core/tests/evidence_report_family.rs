@@ -8,7 +8,7 @@
 //! vocabulary leaks.
 //! SEEDED: deterministic / no randomness.
 
-use batpak::prelude::*;
+mod support;
 use batpak::schema::{
     compare_schema_snapshot, SchemaSnapshot, SCHEMA_SNAPSHOT_REPORT_SCHEMA_VERSION,
 };
@@ -20,6 +20,7 @@ use batpak::store::{
 };
 use serde::Serialize;
 use std::error::Error;
+use support::prelude::*;
 use tempfile::TempDir;
 
 #[path = "support/small_store.rs"]

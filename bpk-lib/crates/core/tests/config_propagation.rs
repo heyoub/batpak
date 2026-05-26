@@ -11,10 +11,11 @@
 //!
 //! Each test targets the specific bug class to prevent regression.
 
-use batpak::prelude::*;
+mod support;
 use batpak::store::{IndexTopology, RestartPolicy, Store, StoreConfig, SyncMode};
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
+use support::prelude::*;
 use tempfile::TempDir;
 
 // ============================================================================

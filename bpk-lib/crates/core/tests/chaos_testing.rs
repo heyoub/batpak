@@ -20,10 +20,11 @@
 //! Default depth: 500 iterations (override with `CHAOS_ITERATIONS=<n>`)
 //! Extended: CHAOS_ITERATIONS=5000 cargo test --test chaos_testing --all-features --release
 
-use batpak::prelude::*;
+mod support;
 use batpak::store::segment::frame_decode;
 use batpak::store::{AppendOptions, Store, StoreConfig, StoreError};
 use std::sync::Arc;
+use support::prelude::*;
 use tempfile::TempDir;
 
 const DEFAULT_CHAOS_ITERATIONS: usize = 500;

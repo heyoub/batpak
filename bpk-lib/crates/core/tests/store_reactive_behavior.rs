@@ -9,9 +9,10 @@
 //! Advanced Store pipeline and reactive-flow integration tests.
 
 use batpak::event::Reactive;
-use batpak::prelude::*;
+mod support;
 use batpak::store::{Store, StoreConfig, StoreError};
 use std::sync::Arc;
+use support::prelude::*;
 use tempfile::TempDir;
 
 #[path = "support/small_store.rs"]

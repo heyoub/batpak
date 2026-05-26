@@ -5,6 +5,7 @@
 //! Run: `cargo run --example append_with_gate`
 
 use batpak::prelude::*;
+use batpak::store::{BatchAppendItem, CausationRef, DurabilityGate, WatermarkKind};
 use std::time::Duration;
 
 #[derive(serde::Serialize, serde::Deserialize, EventPayload)]

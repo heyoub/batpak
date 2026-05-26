@@ -3,9 +3,10 @@
 // justifies: INV-TEST-PANIC-AS-ASSERTION; test bodies in tests/replay_consistency.rs treat invariant violations as test failures; panic! is the assertion style throughout this file.
 #![allow(clippy::panic)]
 
-use batpak::prelude::*;
+mod support;
 use batpak::store::{ReadOnly, Store, StoreConfig};
 use proptest::prelude::*;
+use support::prelude::*;
 use tempfile::TempDir;
 
 #[path = "support/bounded_writer_reply.rs"]

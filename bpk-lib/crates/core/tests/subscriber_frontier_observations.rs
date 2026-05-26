@@ -5,7 +5,7 @@
 //! observations for unknown precision, and nondeterministic body hashes.
 //! SEEDED: deterministic / no randomness.
 
-use batpak::prelude::*;
+mod support;
 use batpak::store::{
     LossPrecision, SubscriberDeliveryState, SubscriberFrontierEvidenceReport,
     SubscriberFrontierFinding, SubscriberFrontierHash, SubscriberFrontierReportBody,
@@ -13,6 +13,7 @@ use batpak::store::{
     SUBSCRIBER_FRONTIER_REPORT_SCHEMA_VERSION,
 };
 use std::error::Error;
+use support::prelude::*;
 
 #[path = "support/small_store.rs"]
 mod small_store_support;

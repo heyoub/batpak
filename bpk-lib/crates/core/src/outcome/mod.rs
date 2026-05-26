@@ -125,7 +125,8 @@ impl<T> Outcome<T> {
     ///
     /// # Example
     /// ```
-    /// use batpak::prelude::*;
+    /// use batpak::outcome::Outcome;
+    ///
     /// let doubled: Outcome<i32> = Outcome::ok(21).map(|x| x * 2);
     /// assert_eq!(doubled, Outcome::ok(42));
     /// ```

@@ -620,6 +620,7 @@
     - crates/core/examples/cross_crate_payloads.rs
     - crates/core/examples/cursor_worker.rs
     - crates/core/examples/dungeon_typestate.rs
+    - crates/core/examples/eight_jobs.rs
     - crates/core/examples/event_sourced_counter.rs
     - crates/core/examples/append_with_gate.rs
     - crates/core/examples/lifecycle_observer.rs

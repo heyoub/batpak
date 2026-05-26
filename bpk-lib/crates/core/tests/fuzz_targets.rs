@@ -13,10 +13,11 @@
 
 use batpak::event::hash::HashChain;
 use batpak::outcome::wait::{CompensationAction, WaitCondition};
-use batpak::prelude::*;
+mod support;
 use batpak::store::segment::{frame_decode, frame_encode, SegmentHeader};
 use proptest::prelude::*;
 use proptest::strategy::BoxedStrategy;
+use support::prelude::*;
 #[path = "common/proptest.rs"]
 mod proptest_support;
 

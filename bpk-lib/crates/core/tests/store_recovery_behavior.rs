@@ -8,8 +8,9 @@
 )]
 //! Advanced Store segment, fd-budget, and cold-start recovery integration tests.
 
-use batpak::prelude::*;
+mod support;
 use batpak::store::{Store, StoreConfig, StoreError};
+use support::prelude::*;
 use tempfile::TempDir;
 
 // --- fd_budget LRU eviction ---
