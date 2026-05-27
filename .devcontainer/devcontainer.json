@@ -9,7 +9,6 @@
     }
   },
   "workspaceFolder": "/workspace/batpak",
-  "overrideCommand": false,
   "remoteUser": "dev",
   "containerEnv": {
     "DEVCONTAINER": "1",
