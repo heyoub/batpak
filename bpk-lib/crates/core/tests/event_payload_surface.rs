@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION, ADR-0010; test body in tests/event_payload_surface.rs exercises precondition-holds invariants; .unwrap is acceptable in test code where a panic is a test failure.
-#![allow(clippy::unwrap_used, clippy::panic, clippy::cast_possible_truncation)]
 //! Integration tests for the EventPayload typed API surface (ADR-0010).
 //!
 //! Covers every new public item introduced by the payload-binding layer:
@@ -78,11 +76,12 @@ impl StateMarker for Closed {}
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
 fn test_store() -> (Store, tempfile::TempDir) {
-    small_segment_store().unwrap()
+    small_segment_store().expect("EventPayload surface test precondition holds")
 }
 
 fn coord() -> Coordinate {
-    Coordinate::new("entity:payload-test", "scope:test").unwrap()
+    Coordinate::new("entity:payload-test", "scope:test")
+        .expect("EventPayload surface test precondition holds")
 }
 
 #[test]
@@ -154,7 +153,9 @@ fn append_typed_round_trip() {
         u128::from(receipt.event_id),
         "PROPERTY: by_fact_typed must return the correct event_id"
     );
-    store.close().unwrap();
+    store
+        .close()
+        .expect("EventPayload surface test precondition holds");
 }
 
 // ─── append_typed_with_options ────────────────────────────────────────────────
@@ -175,7 +176,9 @@ fn append_typed_with_options_idempotency() {
         r1.event_id, r2.event_id,
         "PROPERTY: append_typed_with_options with the same idempotency key must return the same event_id"
     );
-    store.close().unwrap();
+    store
+        .close()
+        .expect("EventPayload surface test precondition holds");
 }
 
 // ─── submit_typed ─────────────────────────────────────────────────────────────
@@ -193,7 +196,9 @@ fn submit_typed_wait_returns_receipt() {
         batpak::id::EventId::from(0u128),
         "PROPERTY: submit_typed ticket must resolve to a non-zero event_id"
     );
-    store.close().unwrap();
+    store
+        .close()
+        .expect("EventPayload surface test precondition holds");
 }
 
 // ─── try_submit_typed ─────────────────────────────────────────────────────────
@@ -207,7 +212,9 @@ fn try_submit_typed_ok_path() {
         .expect("try_submit_typed");
     let ticket = outcome.into_result().expect("outcome is Ok");
     writer_reply(ticket.receiver(), "typed writer ticket").expect("ticket.wait");
-    store.close().unwrap();
+    store
+        .close()
+        .expect("EventPayload surface test precondition holds");
 }
 
 // ─── append_reaction_typed ────────────────────────────────────────────────────
@@ -219,7 +226,8 @@ fn append_reaction_typed_links_causation() {
         .append_typed(&coord(), &ThingHappened { value: 0 })
         .expect("root append_typed");
 
-    let reaction_coord = Coordinate::new("entity:payload-reaction", "scope:test").unwrap();
+    let reaction_coord = Coordinate::new("entity:payload-reaction", "scope:test")
+        .expect("EventPayload surface test precondition holds");
     let receipt = store
         .append_reaction_typed(
             &reaction_coord,
@@ -242,7 +250,9 @@ fn append_reaction_typed_links_causation() {
         1,
         "PROPERTY: by_fact_typed must find the reaction event"
     );
-    store.close().unwrap();
+    store
+        .close()
+        .expect("EventPayload surface test precondition holds");
 }
 
 // ─── submit_reaction_typed ────────────────────────────────────────────────────
@@ -254,7 +264,8 @@ fn submit_reaction_typed_ticket_resolves() {
         .append_typed(&coord(), &ThingHappened { value: 0 })
         .expect("root");
 
-    let reaction_coord = Coordinate::new("entity:payload-submit-reaction", "scope:test").unwrap();
+    let reaction_coord = Coordinate::new("entity:payload-submit-reaction", "scope:test")
+        .expect("EventPayload surface test precondition holds");
     let ticket = store
         .submit_reaction_typed(
             &reaction_coord,
@@ -266,7 +277,9 @@ fn submit_reaction_typed_ticket_resolves() {
         )
         .expect("submit_reaction_typed");
     writer_reply(ticket.receiver(), "typed writer ticket").expect("ticket.wait");
-    store.close().unwrap();
+    store
+        .close()
+        .expect("EventPayload surface test precondition holds");
 }
 
 // ─── try_submit_reaction_typed ────────────────────────────────────────────────
@@ -278,7 +291,8 @@ fn try_submit_reaction_typed_ok_path() {
         .append_typed(&coord(), &ThingHappened { value: 0 })
         .expect("root");
 
-    let reaction_coord = Coordinate::new("entity:payload-try-reaction", "scope:test").unwrap();
+    let reaction_coord = Coordinate::new("entity:payload-try-reaction", "scope:test")
+        .expect("EventPayload surface test precondition holds");
     let outcome = store
         .try_submit_reaction_typed(
             &reaction_coord,
@@ -291,7 +305,9 @@ fn try_submit_reaction_typed_ok_path() {
         .expect("try_submit_reaction_typed");
     let ticket = outcome.into_result().expect("outcome is Ok");
     writer_reply(ticket.receiver(), "typed writer ticket").expect("ticket.wait");
-    store.close().unwrap();
+    store
+        .close()
+        .expect("EventPayload surface test precondition holds");
 }
 
 // ─── by_fact_typed ────────────────────────────────────────────────────────────
@@ -301,12 +317,13 @@ fn by_fact_typed_filters_by_kind() {
     let (store, _dir) = test_store();
     store
         .append_typed(&coord(), &ThingHappened { value: 1 })
-        .unwrap();
+        .expect("EventPayload surface test precondition holds");
     store
         .append_typed(&coord(), &ThingHappened { value: 2 })
-        .unwrap();
+        .expect("EventPayload surface test precondition holds");
 
-    let other_coord = Coordinate::new("entity:other", "scope:test").unwrap();
+    let other_coord = Coordinate::new("entity:other", "scope:test")
+        .expect("EventPayload surface test precondition holds");
     store
         .append_typed(
             &other_coord,
@@ -314,7 +331,7 @@ fn by_fact_typed_filters_by_kind() {
                 label: "noise".into(),
             },
         )
-        .unwrap();
+        .expect("EventPayload surface test precondition holds");
 
     let thing_hits = store.by_fact_typed::<ThingHappened>();
     let other_hits = store.by_fact_typed::<OtherThingHappened>();
@@ -329,7 +346,9 @@ fn by_fact_typed_filters_by_kind() {
         1,
         "PROPERTY: by_fact_typed must return only OtherThingHappened events"
     );
-    store.close().unwrap();
+    store
+        .close()
+        .expect("EventPayload surface test precondition holds");
 }
 
 // ─── BatchAppendItem::typed ───────────────────────────────────────────────────
@@ -363,7 +382,9 @@ fn batch_append_item_typed_constructor() {
         u128::from(receipts[0].event_id),
         "PROPERTY: batch receipt event_id must match by_fact_typed result"
     );
-    store.close().unwrap();
+    store
+        .close()
+        .expect("EventPayload surface test precondition holds");
 }
 
 // ─── Transition::from_payload ─────────────────────────────────────────────────
@@ -398,7 +419,9 @@ fn transition_from_payload_store_round_trip() {
     let hits = store.by_fact_typed::<ThingHappened>();
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].event_id(), u128::from(receipt.event_id));
-    store.close().unwrap();
+    store
+        .close()
+        .expect("EventPayload surface test precondition holds");
 }
 
 // ─── Outbox::stage_typed family (Dispatch Chapter T5) ────────────────────────
@@ -419,7 +442,9 @@ fn outbox_stage_typed_smoke() {
     let hits = store.by_fact_typed::<ThingHappened>();
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].event_id(), u128::from(receipts[0].event_id));
-    store.close().unwrap();
+    store
+        .close()
+        .expect("EventPayload surface test precondition holds");
 }
 
 #[test]
@@ -432,7 +457,9 @@ fn outbox_stage_typed_with_options_smoke() {
         .expect("stage_typed_with_options");
     let receipts = outbox.flush().expect("flush");
     assert_eq!(receipts.len(), 1);
-    store.close().unwrap();
+    store
+        .close()
+        .expect("EventPayload surface test precondition holds");
 }
 
 #[test]
@@ -453,7 +480,9 @@ fn outbox_stage_typed_with_causation_smoke() {
         .expect("stage_typed_with_causation");
     let receipts = outbox.flush().expect("flush");
     assert_eq!(receipts.len(), 1);
-    store.close().unwrap();
+    store
+        .close()
+        .expect("EventPayload surface test precondition holds");
 }
 
 #[test]
@@ -476,7 +505,9 @@ fn outbox_stage_typed_with_options_and_causation_smoke() {
         .expect("stage_typed_with_options_and_causation");
     let receipts = outbox.flush().expect("flush");
     assert_eq!(receipts.len(), 1);
-    store.close().unwrap();
+    store
+        .close()
+        .expect("EventPayload surface test precondition holds");
 }
 
 // ─── VisibilityFence typed submit family (Dispatch Chapter T5) ───────────────
@@ -494,7 +525,9 @@ fn fence_submit_typed_smoke() {
     let hits = store.by_fact_typed::<ThingHappened>();
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].event_id(), u128::from(receipt.event_id));
-    store.close().unwrap();
+    store
+        .close()
+        .expect("EventPayload surface test precondition holds");
 }
 
 #[test]
@@ -503,7 +536,8 @@ fn fence_submit_reaction_typed_smoke() {
     let root = store
         .append_typed(&coord(), &ThingHappened { value: 6 })
         .expect("root");
-    let reaction_coord = Coordinate::new("entity:payload-fence-reaction", "scope:test").unwrap();
+    let reaction_coord = Coordinate::new("entity:payload-fence-reaction", "scope:test")
+        .expect("EventPayload surface test precondition holds");
     let fence = store.begin_visibility_fence().expect("begin fence");
     let ticket = fence
         .submit_reaction_typed(
@@ -518,5 +552,7 @@ fn fence_submit_reaction_typed_smoke() {
     fence.commit().expect("commit fence");
     let receipt = writer_reply(ticket.receiver(), "typed writer ticket").expect("ticket.wait");
     assert_ne!(receipt.event_id, batpak::id::EventId::from(0u128));
-    store.close().unwrap();
+    store
+        .close()
+        .expect("EventPayload surface test precondition holds");
 }

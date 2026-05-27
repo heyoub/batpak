@@ -14,7 +14,7 @@
 //! evaluates caller-defined gates before commit, and rebuilds typed projections through
 //! a synchronous API that does not require an async runtime.
 //!
-//! Most callers start with the eight-job path: open a [`Store`], append typed
+//! Most callers start with the eight-job path: open a [`Store`](crate::store::Store), append typed
 //! events, page commit order with
 //! [`Store::query_entries_after`](crate::store::Store::query_entries_after),
 //! point-read with [`Store::get`](crate::store::Store::get), walk bounded

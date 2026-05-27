@@ -18,8 +18,6 @@
 //! Property tests run 256 cases by default; CI's PROPTEST_CASES env
 //! var can lift the floor in stress runs.
 
-#![allow(clippy::panic, clippy::unwrap_used, clippy::expect_used)]
-
 use netbat as nb;
 use proptest::prelude::*;
 

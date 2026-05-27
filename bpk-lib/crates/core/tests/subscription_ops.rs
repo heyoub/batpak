@@ -1,5 +1,5 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; subscription tests in tests/subscription_ops.rs spawn producer threads via std::thread::spawn and use unwrap as the assertion style throughout the file.
-#![allow(clippy::disallowed_methods, clippy::unwrap_used)]
+// justifies: INV-SUBSCRIPTION-STATE-MACHINE; subscription tests intentionally exercise blocking recv APIs under bounded producer/timeout probes.
+#![allow(clippy::disallowed_methods)]
 //! Integration tests for SubscriptionOps: filter, take, and combined chains.
 //!
 //! PROVES: LAW-004 (Composition Over Construction — ops chain correctly)

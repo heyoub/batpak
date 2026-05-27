@@ -203,7 +203,16 @@ fn coverage_export_dir() -> Result<PathBuf> {
 }
 
 fn coverage_staging_dir() -> Result<PathBuf> {
-    let path = std::env::temp_dir().join("batpak-xtask-cover-staging");
+    let repo_slug = cargo_target_dir()?
+        .to_string_lossy()
+        .chars()
+        .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '-' })
+        .collect::<String>();
+    let path = std::env::temp_dir().join(format!(
+        "batpak-xtask-cover-staging-{}-{}",
+        repo_slug,
+        std::process::id()
+    ));
     if path.exists() {
         fs::remove_dir_all(&path).with_context(|| format!("clear {}", path.display()))?;
     }
@@ -470,6 +479,10 @@ TOTAL 22 3 86.36% 50 4 92.00%\n";
             !path.starts_with(std::path::Path::new("target")),
             "staging dir should stay outside target so cargo-llvm-cov cleanup cannot remove it"
         );
-        assert!(path.ends_with("batpak-xtask-cover-staging"));
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .expect("staging dir has utf8 leaf");
+        assert!(name.starts_with("batpak-xtask-cover-staging-"));
     }
 }

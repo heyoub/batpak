@@ -206,7 +206,7 @@ mod tests {
     }
 
     #[test]
-    fn mutants_smoke_seam_runs_only_requested_lane_with_run_baseline() {
+    fn mutants_smoke_seam_runs_only_requested_lane_with_run_baseline() -> anyhow::Result<()> {
         let plan = build_mutant_execution_plan(&MutantsArgs {
             mode: MutantMode::Smoke,
             surface: None,
@@ -217,15 +217,16 @@ mod tests {
         .expect("seam plan");
 
         let MutantExecutionPlan::Run(lanes) = plan else {
-            panic!("expected runnable seam plan");
+            anyhow::bail!("expected runnable seam plan");
         };
         assert_eq!(lanes.len(), 1);
         assert_eq!(lanes[0].slug, "writer-commit");
         assert_eq!(lanes[0].baseline, MutationBaseline::Run);
+        Ok(())
     }
 
     #[test]
-    fn mutants_smoke_repo_wide_only_runs_repo_wide_lanes_with_run_baseline() {
+    fn mutants_smoke_repo_wide_only_runs_repo_wide_lanes_with_run_baseline() -> anyhow::Result<()> {
         let plan = build_mutant_execution_plan(&MutantsArgs {
             mode: MutantMode::Smoke,
             surface: None,
@@ -236,7 +237,7 @@ mod tests {
         .expect("repo-wide plan");
 
         let MutantExecutionPlan::Run(lanes) = plan else {
-            panic!("expected runnable repo-wide plan");
+            anyhow::bail!("expected runnable repo-wide plan");
         };
         assert_eq!(lanes.len(), 2);
         assert!(lanes
@@ -245,6 +246,7 @@ mod tests {
         assert!(lanes
             .iter()
             .all(|lane| lane.scope == MutationScope::RepoWide));
+        Ok(())
     }
 
     #[test]

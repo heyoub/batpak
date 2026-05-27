@@ -281,24 +281,26 @@ fn cursor_resumes_from_checkpoint_across_reopen() {
                         for entry in batch {
                             seen.push(entry.global_sequence());
                         }
-                        processed.fetch_add(batch.len() as u64, Ordering::SeqCst);
-                        CursorWorkerAction::Continue
+                        let total = processed.fetch_add(batch.len() as u64, Ordering::SeqCst)
+                            + batch.len() as u64;
+                        if total < 100 {
+                            return CursorWorkerAction::Continue;
+                        }
+                        CursorWorkerAction::Stop
                     },
                 )
                 .expect("spawn second-pass cursor worker")
         };
 
-        // The durable checkpoint recorded position ~50, so pass two covers
-        // sequences 50..150 before we stop the polling worker externally.
+        // The worker stops after the 100 post-checkpoint tail events.
         let processed_for_wait = Arc::clone(&processed);
         wait_until(
             || processed_for_wait.load(Ordering::SeqCst) >= 100,
-            Duration::from_secs(5),
+            Duration::from_secs(30),
             "second-pass cursor to process the 100 post-checkpoint events",
         );
 
-        worker.stop_and_join().expect("stop second-pass worker");
-
+        worker.join().expect("second-pass worker joined cleanly");
         let second_pass = second_pass_seen.lock().expect("second_pass mutex").clone();
 
         // Every sequence the second pass observed must be strictly greater

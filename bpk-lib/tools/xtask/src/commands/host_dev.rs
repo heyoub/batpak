@@ -1,5 +1,5 @@
 //! `cargo xtask host-dev` — prove the host profile in one motion:
-//! manifest → codegen → TS build/test → hbat boot → heartbeat-spike → determinism.
+//! manifest → TS tool build → codegen → TS build/test → hbat boot → heartbeat-spike → determinism.
 
 use super::export_ts_manifest;
 use crate::util::{cargo, cargo_target_dir, project_root, run, run_output};
@@ -33,6 +33,9 @@ pub(crate) fn host_dev(args: &HostDevArgs) -> Result<()> {
         out: manifest_out.clone(),
         check: false,
     })?;
+
+    println!("host-dev: pnpm -w build (tool bootstrap)");
+    run_pnpm(&bpk_ts, &["-w", "build"])?;
 
     println!("host-dev: codegen generate");
     run_pnpm(&bpk_ts, &["--filter", "@batpak/codegen", "run", "generate"])?;
@@ -203,33 +206,36 @@ fn read_hbat_ready_line(child: &mut Child) -> Result<String> {
     let thread_last_line = Arc::clone(&last_line);
     let (tx, rx) = mpsc::channel();
 
-    thread::spawn(move || {
-        let mut reader = BufReader::new(stdout);
-        let mut line = String::new();
-        loop {
-            line.clear();
-            match reader.read_line(&mut line) {
-                Ok(0) => {
-                    let _ = tx.send(ReadyReadResult::Eof);
-                    return;
-                }
-                Ok(_) => {
-                    if let Ok(mut last) = thread_last_line.lock() {
-                        last.clear();
-                        last.push_str(&line);
+    thread::Builder::new()
+        .name("host-dev-hbat-ready-reader".to_owned())
+        .spawn(move || {
+            let mut reader = BufReader::new(stdout);
+            let mut line = String::new();
+            loop {
+                line.clear();
+                match reader.read_line(&mut line) {
+                    Ok(0) => {
+                        let _ = tx.send(ReadyReadResult::Eof);
+                        return;
                     }
-                    if line.starts_with(READY_PREFIX) {
-                        let _ = tx.send(ReadyReadResult::Ready(line.clone()));
+                    Ok(_) => {
+                        if let Ok(mut last) = thread_last_line.lock() {
+                            last.clear();
+                            last.push_str(&line);
+                        }
+                        if line.starts_with(READY_PREFIX) {
+                            let _ = tx.send(ReadyReadResult::Ready(line.clone()));
+                            return;
+                        }
+                    }
+                    Err(error) => {
+                        let _ = tx.send(ReadyReadResult::Error(error));
                         return;
                     }
                 }
-                Err(error) => {
-                    let _ = tx.send(ReadyReadResult::Error(error));
-                    return;
-                }
             }
-        }
-    });
+        })
+        .context("spawn hbat ready reader thread")?;
 
     match rx.recv_timeout(HBAT_READY_TIMEOUT) {
         Ok(ReadyReadResult::Ready(line)) => Ok(line),

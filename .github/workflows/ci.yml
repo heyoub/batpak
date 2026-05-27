@@ -68,6 +68,30 @@ jobs:
             echo "rust=false" >> "$GITHUB_OUTPUT"
           fi
 
+  ts-host-changed:
+    name: Detect TS/host-profile changes
+    runs-on: ubuntu-latest
+    outputs:
+      touched: ${{ steps.detect.outputs.touched }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - id: detect
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "touched=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          base="${{ github.event.pull_request.base.sha }}"
+          if git diff --name-only "$base" HEAD | grep -qE '^(bpk-ts/|bpk-lib/crates/hbat/|bpk-lib/crates/netbat/|bpk-lib/crates/syncbat/|bpk-lib/tools/xtask/src/commands/(export_ts_manifest|host_dev)\.rs|bpk-lib/tools/xtask/src/(main|commands)\.rs)'; then
+            echo "touched=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "touched=false" >> "$GITHUB_OUTPUT"
+          fi
+
   ci-fast-linux:
     name: CI fast (ubuntu-devcontainer)
     runs-on: ubuntu-latest
@@ -127,8 +151,9 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # 1.92.0
         with:
+          toolchain: 1.92.0
           components: clippy,rustfmt
       - uses: taiki-e/install-action@f48d2f8ba2b452934c948b7be1a768079c3632ff # v2
         with:
@@ -206,20 +231,19 @@ jobs:
   ts-parity:
     # BatPAK TypeScript SDK Phase 0 wire-parity gate.
     #
-    # Generates the manifest, builds + tests every TS package, boots `hbat`
-    # on an ephemeral loopback port, parses the structured `HBAT_READY` line
-    # to discover the port, runs the live `heartbeat-spike` example, and
-    # finally verifies the codegen is deterministic by deleting the
-    # generated tree and rebuilding.
-    name: TS Parity (manifest + canonical + heartbeat-spike)
+    # Delegates to the canonical host proof command so bpk-ts, hbat, netbat,
+    # syncbat, and manifest/codegen changes cannot pass default PR CI without
+    # the same manifest -> TS -> hbat live roundtrip proof used locally.
+    name: TS/host profile proof
     runs-on: ubuntu-latest
-    needs: [verify-linux]
+    needs: [ci-fast-linux, ts-host-changed]
     if: >-
       (github.event_name == 'workflow_dispatch' &&
         (github.event.inputs.proof == 'verify' ||
          github.event.inputs.proof == 'heavy')) ||
       (github.event_name == 'pull_request' &&
-        contains(github.event.pull_request.labels.*.name, 'run-heavy-ci'))
+        (needs.ts-host-changed.outputs.touched == 'true' ||
+         contains(github.event.pull_request.labels.*.name, 'run-heavy-ci')))
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
@@ -227,6 +251,10 @@ jobs:
       - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
         with:
           workspaces: bpk-lib
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # 1.92.0
+        with:
+          toolchain: 1.92.0
+          components: clippy,rustfmt
       - name: Install pnpm
         run: |
           corepack enable
@@ -236,79 +264,9 @@ jobs:
           node-version: "22"
           cache: pnpm
           cache-dependency-path: bpk-ts/pnpm-lock.yaml
-      - name: Cargo build (hbat + xtask)
+      - name: Host profile proof
         working-directory: bpk-lib
-        run: |
-          cargo build -p hbat
-          cargo build -p xtask
-      - name: Export BatPAK TS manifest
-        working-directory: bpk-lib
-        run: cargo run -p xtask -- export-ts-manifest --out ../bpk-ts/batpak.manifest.json
-      - name: Install TS deps
-        working-directory: bpk-ts
-        run: pnpm install --frozen-lockfile
-      - name: TS build (codegen runs as part of build)
-        working-directory: bpk-ts
-        run: |
-          pnpm -w build
-          pnpm --filter @batpak/codegen run generate
-      - name: TS parity tests
-        working-directory: bpk-ts
-        run: pnpm -w test
-      - name: Live heartbeat roundtrip
-        working-directory: bpk-ts
-        run: |
-          set -uo pipefail
-          STORE=$(mktemp -d)
-          HBAT_PID=""
-          cleanup() {
-            if [ -n "$HBAT_PID" ]; then
-              kill "$HBAT_PID" 2>/dev/null || true
-              wait "$HBAT_PID" 2>/dev/null || true
-            fi
-            rm -rf "$STORE"
-          }
-          trap cleanup EXIT
-          ../bpk-lib/target/debug/hbat serve --store "$STORE" --tcp 127.0.0.1:0 --print-port > /tmp/hbat-ready.txt 2> /tmp/hbat-err.txt &
-          HBAT_PID=$!
-          for _ in $(seq 1 50); do
-            if [ -s /tmp/hbat-ready.txt ]; then break; fi
-            sleep 0.1
-          done
-          if [ ! -s /tmp/hbat-ready.txt ]; then
-            echo "hbat did not emit HBAT_READY within 5s"
-            cat /tmp/hbat-err.txt
-            exit 1
-          fi
-          PORT=$(node -e 'const l=require("fs").readFileSync("/tmp/hbat-ready.txt","utf-8").trim();process.stdout.write(String(JSON.parse(l.replace(/^HBAT_READY /,"")).port))')
-          echo "hbat: $(cat /tmp/hbat-ready.txt)"
-          node examples/heartbeat-spike/dist/index.js --port "$PORT"
-      - name: Determinism — rm -rf generated, rebuild, diff
-        working-directory: bpk-ts
-        run: |
-          rm -rf packages/generated/src packages/generated/dist
-          pnpm -w build || true
-          pnpm --filter @batpak/codegen run generate
-          pnpm -w build
-          STATUS=$(git status --porcelain packages/generated)
-          if [ -n "$STATUS" ]; then
-            echo "::error title=Codegen non-deterministic::see step output for diff"
-            echo "=== git status --porcelain packages/generated ==="
-            echo "$STATUS"
-            echo "=== git diff --no-color packages/generated ==="
-            git --no-pager diff --no-color packages/generated
-            echo "=== git diff -- packages/generated/src/manifest.ts ==="
-            git --no-pager diff --no-color -- packages/generated/src/manifest.ts | head -200
-            echo "=== md5sums of generated/src ==="
-            find packages/generated/src -type f -exec md5sum {} \;
-            echo "=== first 20 lines of each generated/src file ==="
-            for f in packages/generated/src/*.ts; do
-              echo "--- $f ---"
-              head -20 "$f"
-            done
-            exit 1
-          fi
-          echo "determinism gate: ok"
+        run: cargo xtask host-dev
       - name: Upload generated artifacts on failure
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -466,7 +424,9 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # 1.92.0
+        with:
+          toolchain: 1.92.0
       - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
         with:
           workspaces: bpk-lib

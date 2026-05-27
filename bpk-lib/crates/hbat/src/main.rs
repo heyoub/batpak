@@ -31,8 +31,8 @@ enum HbatCommand {
 
 #[derive(Args, Debug)]
 struct ServeArgs {
-    /// Directory used as the BatPAK store. The directory is created if it
-    /// does not already exist.
+    /// Directory used as the BatPAK store. Store opening owns creation through
+    /// the BatPAK platform filesystem boundary.
     #[arg(long, value_name = "PATH")]
     store: PathBuf,
 
@@ -94,9 +94,6 @@ fn serve(args: &ServeArgs) -> Result<()> {
             "hbat: warning: binding non-loopback address {addr}; reference host only, not a product daemon"
         );
     }
-
-    std::fs::create_dir_all(&args.store)
-        .with_context(|| format!("create store directory {:?}", args.store))?;
 
     let store = Store::open(StoreConfig::new(&args.store)).context("open BatPAK store")?;
     let store = Arc::new(store);

@@ -1,9 +1,5 @@
-// justifies: INV-EXAMPLES-OBSERVABLE-OUTPUT; example binary in examples/event_sourced_counter.rs demonstrates counter output via println, matches only the variants used in the demo with a wildcard fallback, and narrows bounded demo counters to smaller integer types.
-#![allow(
-    clippy::print_stdout,
-    clippy::wildcard_enum_match_arm,
-    clippy::cast_possible_truncation
-)]
+// justifies: INV-EXAMPLES-OBSERVABLE-OUTPUT; example binary in examples/event_sourced_counter.rs demonstrates counter output via println and matches only the variants used in the demo with a wildcard fallback.
+#![allow(clippy::print_stdout, clippy::wildcard_enum_match_arm)]
 //! # event_sourced_counter
 //!
 //! **Teaches:** `#[derive(EventSourced)]` with `JsonValueInput` replay lane.

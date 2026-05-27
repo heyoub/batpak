@@ -1,11 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION, INV-MACRO-BOUNDED-CAST; ancestry tests in tests/store_ancestors.rs rely on unwrap/panic as assertion style and use bounded fixture data that intentionally fits target types.
-#![allow(
-    clippy::unwrap_used,
-    clippy::disallowed_methods,
-    clippy::cast_possible_truncation,
-    clippy::needless_borrows_for_generic_args,
-    clippy::panic
-)]
 //! Ancestry and DAG-position contract tests extracted from `store_advanced.rs`.
 //!
 //! PROVES: hash-chain ancestry traversal remains correct across anchor, limit,

@@ -88,7 +88,7 @@ pub(crate) struct LedgerGateRow {
 pub(crate) fn factory_ledger(args: FactoryLedgerArgs) -> Result<()> {
     match args.command {
         FactoryLedgerCommand::Record(record_args) => record_command(record_args),
-        FactoryLedgerCommand::List(list_args) => list_command(list_args),
+        FactoryLedgerCommand::List(list_args) => list_command(&list_args),
         FactoryLedgerCommand::Run(run_args) => run_command(run_args),
     }
 }
@@ -113,7 +113,7 @@ fn record_command(args: FactoryLedgerRecordArgs) -> Result<()> {
     Ok(())
 }
 
-fn list_command(args: FactoryLedgerListArgs) -> Result<()> {
+fn list_command(args: &FactoryLedgerListArgs) -> Result<()> {
     let store = open_ledger_store()?;
     for line in collect_list_lines(&store, args.limit)? {
         println!("{line}");
@@ -170,7 +170,7 @@ fn run_command(args: FactoryLedgerRunArgs) -> Result<()> {
     let mut child = match spawn_result {
         Ok(child) => child,
         Err(error) => {
-            let duration_ms = started.elapsed().as_millis() as u64;
+            let duration_ms = elapsed_ms_u64(started);
             append_failed(
                 &mut store,
                 FactoryLedgerRecordFailedArgs {
@@ -194,7 +194,10 @@ fn run_command(args: FactoryLedgerRunArgs) -> Result<()> {
         .context("factory-ledger run: missing stderr pipe")?;
     let tail = Arc::new(Mutex::new(Vec::<u8>::new()));
     let tail_for_thread = Arc::clone(&tail);
-    let stderr_thread = thread::spawn(move || echo_stderr_and_tail(stderr, tail_for_thread));
+    let stderr_thread = thread::Builder::new()
+        .name("factory-ledger-stderr-tail".to_owned())
+        .spawn(move || echo_stderr_and_tail(stderr, &tail_for_thread))
+        .context("factory-ledger run: spawn stderr echo thread")?;
 
     let status = child
         .wait()
@@ -203,7 +206,7 @@ fn run_command(args: FactoryLedgerRunArgs) -> Result<()> {
         .join()
         .map_err(|_| anyhow::anyhow!("factory-ledger run: stderr echo thread panicked"))?;
 
-    let duration_ms = started.elapsed().as_millis() as u64;
+    let duration_ms = elapsed_ms_u64(started);
     let completed_ms = now_ms();
     let status_code = status.code().unwrap_or(-1);
     let stderr_tail = tail_to_string(&tail);
@@ -284,12 +287,16 @@ pub(crate) fn collect_gate_rows(limit: usize) -> Result<Vec<LedgerGateRow>> {
 
 fn open_existing_ledger_store() -> Result<Option<Store>> {
     let store_dir = ledger_store_dir()?;
+    open_existing_ledger_store_at(&store_dir)
+}
+
+fn open_existing_ledger_store_at(store_dir: &Path) -> Result<Option<Store>> {
     if !store_dir.exists() {
         return Ok(None);
     }
     validate_event_payload_registry().context("validate EventPayload registry")?;
     let store = Store::open(
-        StoreConfig::new(&store_dir)
+        StoreConfig::new(store_dir)
             .with_event_payload_validation(EventPayloadValidation::FailFast)
             .with_sync_every_n_events(1)
             .with_sync_mode(SyncMode::SyncData),
@@ -506,7 +513,7 @@ pub(crate) fn collect_list_lines(store: &Store, limit: usize) -> Result<Vec<Stri
     Ok(lines)
 }
 
-fn echo_stderr_and_tail(mut stderr: impl Read + Send + 'static, tail: Arc<Mutex<Vec<u8>>>) {
+fn echo_stderr_and_tail(mut stderr: impl Read + Send + 'static, tail: &Arc<Mutex<Vec<u8>>>) {
     let mut buf = [0u8; 1024];
     loop {
         match stderr.read(&mut buf) {
@@ -543,8 +550,12 @@ fn cap_stderr_tail(text: String) -> String {
 fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis() as u64)
+        .map(|duration| u64::try_from(duration.as_millis()).unwrap_or(u64::MAX))
         .unwrap_or(0)
+}
+
+fn elapsed_ms_u64(started: Instant) -> u64 {
+    u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX)
 }
 
 fn generate_run_id(command: &str) -> u128 {
@@ -589,6 +600,9 @@ fn git_output<const N: usize>(root: &Path, args: [&str; N]) -> Result<String> {
 mod tests {
     use super::*;
     use std::process::Command as ProcessCommand;
+    use std::sync::Mutex;
+
+    static CARGO_TARGET_DIR_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     fn temp_store() -> (tempfile::TempDir, Store) {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -703,7 +717,7 @@ mod tests {
                 run_id: run_id_hex,
                 command: "xtask-factory-ledger-fail-test".to_owned(),
                 status_code,
-                duration_ms: started.elapsed().as_millis() as u64,
+                duration_ms: elapsed_ms_u64(started),
                 stderr_tail,
                 completed_ms: Some(2),
             },
@@ -930,9 +944,13 @@ mod tests {
     fn collect_gate_rows_read_only_absent_store() -> Result<()> {
         let dir = tempfile::tempdir()?;
         let missing = dir.path().join("missing-store");
-        std::env::set_var("CARGO_TARGET_DIR", dir.path());
-        let rows = collect_gate_rows(5)?;
-        std::env::remove_var("CARGO_TARGET_DIR");
+        let _guard = CARGO_TARGET_DIR_TEST_LOCK
+            .lock()
+            .expect("lock read-only store fixture");
+        let rows = match open_existing_ledger_store_at(&missing)? {
+            Some(store) => collect_gate_rows_from_store(&store, 5)?,
+            None => Vec::new(),
+        };
         assert!(rows.is_empty());
         assert!(!missing.exists());
         Ok(())

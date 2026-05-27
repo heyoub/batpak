@@ -598,7 +598,7 @@ fn git_output<const N: usize>(root: &Path, args: [&str; N]) -> Result<String> {
 fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis() as u64)
+        .map(|duration| u64::try_from(duration.as_millis()).unwrap_or(u64::MAX))
         .unwrap_or(0)
 }
 
@@ -668,7 +668,7 @@ mod tests {
         let tracking = Some("origin/factory/context-packets".to_owned());
         let hint = infer_base_branch("factory/context-packets", None, || tracking.clone());
         assert_eq!(hint.source, BaseBranchSource::StackParent);
-        assert_ne!(hint.value, tracking.unwrap());
+        assert_ne!(hint.value, "origin/factory/context-packets");
     }
 
     #[test]

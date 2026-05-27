@@ -1,6 +1,7 @@
 # Keep the devcontainer build context small and prevent host build artifacts
-# from leaking into the image. Container builds use CARGO_TARGET_DIR=/tmp/batpak-target
-# (set in devcontainer.json), so target/ is host-only and must never cross.
+# from leaking into the image. Container builds use the workspace-local
+# CARGO_TARGET_DIR=/workspace/batpak/bpk-lib/target (set in devcontainer.json),
+# so repo-root and nested target/ trees are host-only sprawl and must never cross.
 
 target/
 **/target/

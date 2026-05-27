@@ -1,8 +1,6 @@
 //! PROVES: INV-SYNCBAT-DISPATCH-RECEIPTS, INV-SYNCBAT-REGISTER-CATALOG-DETERMINISTIC
 //! CATCHES: MessagePack byte drift in syncbat receipt envelopes and durable catalog rows.
 //! SEEDED: deterministic descriptors, fixed hashes, and sorted extension drawers.
-#![allow(clippy::panic)]
-
 use syncbat::{
     EffectClass, OperationDescriptor, ReceiptEnvelope, ReceiptOutcome, RegisterOperationRowV1,
 };

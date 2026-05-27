@@ -1,8 +1,7 @@
 .claude/
 .codex/
-# Cargo build artifacts. `**/target/` catches nested targets in any sub-crate
-# or standalone template/fixture package. Keep `/target/` for clarity; the
-# structural gate enforces repo-root target/ as the only target directory.
+# Cargo build artifacts. The canonical Cargo output for this repo is
+# `bpk-lib/target/`; repo-root and nested target dirs are cleanup-owned sprawl.
 /target/
 **/target/
 # Keep bpk-lib/Cargo.lock tracked: this workspace includes binary developer
@@ -24,9 +23,13 @@
 .vscode/
 .cursor/plans/
 .cursor
-# Nested Cargo.lock files from path-dependency fixture crates are cache, not
-# source of truth.
+# Most nested Cargo.lock files from path-dependency fixture crates are cache,
+# not source of truth. The two committed fixture locks below are intentional
+# downstream-package witnesses and must remain visible to staged-diff/package
+# hygiene checks.
 bpk-lib/crates/core/fixtures/*/Cargo.lock
+!bpk-lib/crates/core/fixtures/downstream/Cargo.lock
+!bpk-lib/crates/core/fixtures/kind-collision-composer/Cargo.lock
 # Golden template crates are smoke-tested as standalone path-dependency apps;
 # their generated lockfiles are local cache, not template source.
 bpk-lib/templates/*/Cargo.lock

@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; Lane B1 registry substrate doctrine uses panic for PROPERTY mismatches only.
-#![allow(clippy::panic)]
 //! PROVES: `batpak::registry` row bodies hash with sorted `named_digests`; drift and verification report
 //! `body_hash` are stable; attested rows compose `CanonicalArtifactEnvelope` with normalized signing bytes.
 //! CATCHES: permutation-sensitive row hashing; drift/verification finding order sensitivity; broken supersession edges.

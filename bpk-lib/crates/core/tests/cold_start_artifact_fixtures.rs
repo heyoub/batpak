@@ -1,6 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; historical fixture tests copy immutable store directories to temp space and use panic/assert as the invariant signal.
-#![allow(clippy::panic)]
-
 //! PROVES:
 //!   - ADR-0009 historical cold-start artifact fixtures remain readable by
 //!     current `Store::open`.

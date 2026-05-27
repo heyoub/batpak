@@ -15,8 +15,6 @@
 //! Property tests run 256 cases by default (see CI's PROPTEST_CASES
 //! env var which can lift this floor in stress runs).
 
-#![allow(clippy::panic, clippy::unwrap_used, clippy::expect_used)]
-
 use proptest::prelude::*;
 
 use syncbat::{EffectClass, OperationDescriptor, OperationName, RegisterOperationRowV1};

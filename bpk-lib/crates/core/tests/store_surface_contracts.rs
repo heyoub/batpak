@@ -1,11 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION, INV-MACRO-BOUNDED-CAST; store surface contract tests rely on unwrap/panic as assertion style and intentionally bounded fixture data.
-#![allow(
-    clippy::unwrap_used,
-    clippy::disallowed_methods,
-    clippy::cast_possible_truncation,
-    clippy::needless_borrows_for_generic_args,
-    clippy::panic
-)]
 //! Store surface contract tests extracted from `store_advanced.rs`.
 //!
 //! PROVES: display helpers, coordinate formatting, causation helpers, and

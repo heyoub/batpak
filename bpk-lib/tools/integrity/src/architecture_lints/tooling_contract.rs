@@ -682,15 +682,22 @@ fn check_xtask_surface_contract(repo_root: &Path) -> Result<()> {
     )?;
     ensure(
         setup_devcontainer_action_content.contains("dtolnay/rust-toolchain@")
-            && setup_devcontainer_action_content.contains("# stable"),
+            && setup_devcontainer_action_content.contains("# 1.92.0")
+            && setup_devcontainer_action_content.contains("toolchain: 1.92.0"),
         "setup-devcontainer action must install a pinned host Rust toolchain so the thin wrapper can delegate to cargo xtask",
     )?;
     ensure(
         dockerfile_content.contains("ENV PATH=\"/usr/local/cargo/bin:${PATH}\"")
             && dockerfile_content.contains("install-from-binstall-release.sh")
+            && !dockerfile_content.contains("cargo-binstall/main/")
             && dockerfile_content.contains("cargo binstall --no-confirm cargo-deny@0.19.0")
             && dockerfile_content.contains("cargo binstall --no-confirm cargo-llvm-cov@0.8.5"),
-        "devcontainer bootstrap must expose cargo on PATH and prefer binstall for pinned cargo helper tools before falling back to source builds",
+        "devcontainer bootstrap must expose cargo on PATH and prefer binstall for pinned cargo helper tools before falling back to source builds; cargo-binstall bootstrap must not follow mutable main",
+    )?;
+    ensure(
+        dockerfile_content.contains("FROM rust:1.92-bookworm@sha256:")
+            && dockerfile_content.contains("nightly-2025-12-11"),
+        "devcontainer base image and rustdoc-json nightly must stay pinned for reproducible supply-chain posture",
     )?;
     ensure(
         dockerfile_content.contains("cargo install --locked cargo-mutants@27.0.0"),

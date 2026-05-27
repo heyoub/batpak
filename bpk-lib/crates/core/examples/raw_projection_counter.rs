@@ -1,9 +1,5 @@
-// justifies: INV-EXAMPLES-OBSERVABLE-OUTPUT; example binary in examples/raw_projection_counter.rs demonstrates hand-written raw projection via println output, matches only the demo variants with a wildcard fallback, and narrows bounded counters into smaller integer types.
-#![allow(
-    clippy::print_stdout,
-    clippy::wildcard_enum_match_arm,
-    clippy::cast_possible_truncation
-)]
+// justifies: INV-EXAMPLES-OBSERVABLE-OUTPUT; example binary in examples/raw_projection_counter.rs demonstrates hand-written raw projection via println output and matches only the demo variants with a wildcard fallback.
+#![allow(clippy::print_stdout, clippy::wildcard_enum_match_arm)]
 //! # raw_projection_counter
 //!
 //! **Teaches:** hand-written raw projection replay for performance-sensitive folds.

@@ -244,7 +244,7 @@ fn ensure_binstall_helper() -> Result<()> {
     }
 
     let mut install = Command::new("cargo");
-    install.args(["install", "cargo-binstall"]);
+    install.args(["install", "--locked", "cargo-binstall@1.19.1"]);
     run(install)
 }
 
