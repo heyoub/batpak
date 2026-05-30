@@ -45,6 +45,16 @@ pub(crate) fn run_output(mut command: Command) -> Result<Output> {
     }
 }
 
+pub(crate) fn git_output<const N: usize>(root: &Path, args: [&str; N]) -> Result<String> {
+    let mut command = Command::new("git");
+    command.current_dir(root).args(args);
+    let output = run_output(command)?;
+    Ok(String::from_utf8(output.stdout)
+        .context("git output utf8")?
+        .trim()
+        .to_owned())
+}
+
 pub(crate) fn command_succeeds<const N: usize>(program: &str, args: [&str; N]) -> bool {
     Command::new(program)
         .args(args)

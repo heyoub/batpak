@@ -183,7 +183,7 @@ pub(super) fn finish_empty_projection<T>(
     )
 }
 
-fn elapsed_us(clock: &dyn Clock, started_at_ns: i64) -> u64 {
+pub(super) fn elapsed_us(clock: &dyn Clock, started_at_ns: i64) -> u64 {
     u64::try_from(clock.now_mono_ns().saturating_sub(started_at_ns).max(0) / 1_000)
         .unwrap_or(u64::MAX)
 }

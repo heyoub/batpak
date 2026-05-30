@@ -173,7 +173,7 @@ fn flattened_adr_name_matches(name: &str, prefix: &str) -> bool {
     name.starts_with(&format!("100_ADR_{digits}_"))
 }
 
-fn resolve_repo_or_core_path(repo_root: &Path, rel: &Path) -> PathBuf {
+pub(crate) fn resolve_repo_or_core_path(repo_root: &Path, rel: &Path) -> PathBuf {
     let direct = repo_root.join(rel);
     if direct.exists() {
         return direct;
