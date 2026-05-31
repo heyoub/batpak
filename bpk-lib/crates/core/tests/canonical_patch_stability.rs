@@ -443,7 +443,7 @@ fn sample_store_reports() -> TestResult<(
         findings: read_findings,
     };
 
-    let (store, _guard) = small_store_support::small_segment_store()?;
+    let (_guard, store) = small_store_support::small_segment_store()?;
     let mut resource = store_resource_report_body_from_diagnostics(&store.diagnostics());
     resource.schema_version = STORE_RESOURCE_REPORT_SCHEMA_VERSION;
     resource.data_dir_identity_hash = digest(0x95);

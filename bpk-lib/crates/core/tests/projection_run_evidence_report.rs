@@ -76,7 +76,7 @@ impl ProjectionCache for CacheGetError {
 
 #[test]
 fn projection_run_report_is_deterministic_for_same_inputs() -> TestResult {
-    let (store, data_dir_guard) = small_store_support::small_segment_store()?;
+    let (data_dir_guard, store) = small_store_support::small_segment_store()?;
     assert!(data_dir_guard.path().exists());
     let coord = Coordinate::new("entity:projection-run-deterministic", "scope:test")?;
     let kind = EventKind::custom(0xF, 0x61);
@@ -107,7 +107,7 @@ fn projection_run_report_is_deterministic_for_same_inputs() -> TestResult {
 
 #[test]
 fn projection_run_success_records_known_output_hash_when_available() -> TestResult {
-    let (store, data_dir_guard) = small_store_support::small_segment_store()?;
+    let (data_dir_guard, store) = small_store_support::small_segment_store()?;
     assert!(data_dir_guard.path().exists());
     let coord = Coordinate::new("entity:projection-run-output-hash", "scope:test")?;
     let kind = EventKind::custom(0xF, 0x61);
@@ -135,7 +135,7 @@ fn projection_run_success_records_known_output_hash_when_available() -> TestResu
 
 #[test]
 fn projection_run_input_frontier_is_bound_to_replay_watermark() -> TestResult {
-    let (store, data_dir_guard) = small_store_support::small_segment_store()?;
+    let (data_dir_guard, store) = small_store_support::small_segment_store()?;
     assert!(data_dir_guard.path().exists());
     let coord = Coordinate::new("entity:projection-run-frontier", "scope:test")?;
     let kind = EventKind::custom(0xF, 0x61);
@@ -193,7 +193,7 @@ fn cache_status_unavailable_emits_explicit_finding() -> TestResult {
 
 #[test]
 fn projection_failure_returns_structured_error_with_deterministic_finding() -> TestResult {
-    let (store, dir) = small_store_support::small_segment_store()?;
+    let (dir, store) = small_store_support::small_segment_store()?;
     let coord = Coordinate::new("entity:projection-run-failure", "scope:test")?;
     let kind = EventKind::custom(0xF, 0x61);
     let receipt = store.append(&coord, kind, &serde_json::json!({"n": 1}))?;
@@ -232,7 +232,7 @@ fn projection_failure_returns_structured_error_with_deterministic_finding() -> T
 
 #[test]
 fn findings_are_sorted_deterministically() -> TestResult {
-    let (store, data_dir_guard) = small_store_support::small_segment_store()?;
+    let (data_dir_guard, store) = small_store_support::small_segment_store()?;
     assert!(data_dir_guard.path().exists());
     let (state, report) = store.project_run_evidence::<CounterProjection>(
         "entity:projection-run-empty",

@@ -22,11 +22,11 @@ use std::time::Duration;
 use support::prelude::*;
 use tempfile::TempDir;
 
-fn lane_store() -> (Store<Open>, TempDir) {
+fn lane_store() -> (TempDir, Store<Open>) {
     let dir = TempDir::new().expect("tmp");
     let cfg = StoreConfig::new(dir.path()).with_segment_max_bytes(200);
     let store = Store::open(cfg).expect("open");
-    (store, dir)
+    (dir, store)
 }
 
 #[test]
@@ -59,7 +59,7 @@ fn compaction_report_helpers_cover_engine_paths() {
 
 #[test]
 fn compaction_report_skipped_is_deterministic() {
-    let (store, _dir) = lane_store();
+    let (_dir, store) = lane_store();
     let coord = Coordinate::new("e", "s").expect("coord");
     let kind = EventKind::custom(0xF, 1);
     store
@@ -206,7 +206,7 @@ fn compaction_performed_without_output_path_emits_hash_unavailable() {
 
 #[test]
 fn idempotency_keyed_batch_double_submit_returns_cached_receipts_without_reopen() {
-    let (store, _dir) = lane_store();
+    let (_dir, store) = lane_store();
     let coord = Coordinate::new("e-batch", "s-lane").expect("coord");
     let kind = EventKind::custom(0xF, 0x42);
     let build = || {
@@ -247,7 +247,7 @@ fn idempotency_keyed_batch_double_submit_returns_cached_receipts_without_reopen(
 
 #[test]
 fn idempotency_batch_partial_cache_rejected_instead_of_silent_success() {
-    let (store, _dir) = lane_store();
+    let (_dir, store) = lane_store();
     let coord = Coordinate::new("e-partial", "s").expect("coord");
     let kind = EventKind::custom(0xF, 0x43);
     let existing_key = 0xE0_E1_E2_E3_E4_E5_E6_E7_u128;
@@ -292,7 +292,7 @@ fn idempotency_batch_partial_cache_rejected_instead_of_silent_success() {
 
 #[test]
 fn idempotency_key_is_event_id_scoped_global_lookup() {
-    let (store, _dir) = lane_store();
+    let (_dir, store) = lane_store();
     let coord_a = Coordinate::new("e-a", "s").expect("c1");
     let coord_b = Coordinate::new("e-b", "s").expect("c2");
     let kind = EventKind::custom(0xF, 1);
@@ -352,7 +352,7 @@ fn public_canal_trait_pulls_cursor_and_subscription_items() {
         }
     }
 
-    let (store, _dir) = lane_store();
+    let (_dir, store) = lane_store();
     let coord = Coordinate::new("entity:canal", "scope:canal").expect("coord");
     let region = Region::entity("entity:canal");
     let kind = EventKind::custom(0xF, 0x61);

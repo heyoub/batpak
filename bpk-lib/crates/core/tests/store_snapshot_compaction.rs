@@ -31,13 +31,13 @@ use tempfile::TempDir;
 #[path = "support/small_store.rs"]
 mod small_store_support;
 
-fn test_store() -> (Store, TempDir) {
+fn test_store() -> (TempDir, Store) {
     small_store_support::small_segment_store().expect("small segment store")
 }
 
 #[test]
 fn snapshot_copies_segments() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let coord = Coordinate::new("entity:snap", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
 
@@ -87,7 +87,7 @@ fn snapshot_copies_segments() {
 
 #[test]
 fn snapshot_with_evidence_reports_fence_watermark_and_copied_segments() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let coord = Coordinate::new("entity:snap:evidence", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 0x11);
 
@@ -144,7 +144,7 @@ fn snapshot_with_evidence_reports_fence_watermark_and_copied_segments() {
 // justifies: ADR-0027 and tests/store_snapshot_compaction.rs exercise the one-cut deprecated snapshot wrapper.
 #[allow(deprecated)]
 fn snapshot_alias_preserves_copy_behavior_for_one_cut() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let snap_dir = TempDir::new().expect("snap dir");
     store.snapshot(snap_dir.path()).expect("snapshot alias");
     store.close().expect("close");
@@ -165,7 +165,7 @@ fn user_visible_entries(store: &Store) -> Vec<batpak::store::index::IndexEntry> 
 
 #[test]
 fn snapshot_rejects_when_visibility_fence_is_active() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let fence = store
         .begin_visibility_fence()
         .expect("begin visibility fence");
@@ -186,7 +186,7 @@ fn snapshot_rejects_when_visibility_fence_is_active() {
 
 #[test]
 fn snapshot_reused_destination_replaces_stale_store_artifacts() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let coord = Coordinate::new("entity:snap:source", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 7);
     for i in 0..6 {
@@ -328,7 +328,7 @@ fn snapshot_waits_for_in_flight_compaction() {
 
 #[test]
 fn snapshot_preserves_pending_compaction_marker() {
-    let (store, dir) = test_store();
+    let (dir, store) = test_store();
     let coord = Coordinate::new("entity:snapshot:marker", "scope:test").expect("coord");
     let kind = EventKind::custom(0xF, 0x66);
     store
@@ -355,7 +355,7 @@ fn snapshot_preserves_pending_compaction_marker() {
 
 #[test]
 fn compact_does_not_lose_data() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let coord = Coordinate::new("entity:compact", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
 

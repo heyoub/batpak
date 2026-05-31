@@ -229,7 +229,7 @@ fn _assert_projection_type_aliases() {
     fn _is_value_event(_: ProjectionEvent<ValueCounter>) {}
 }
 
-fn seeded_store() -> (Arc<Store>, TempDir) {
+fn seeded_store() -> (TempDir, Arc<Store>) {
     let dir = TempDir::new().expect("temp dir");
     let store = Arc::new(Store::open(StoreConfig::new(dir.path())).expect("open"));
     let coord = Coordinate::new("entity:raw-proj", "scope:test").expect("coord");
@@ -245,10 +245,10 @@ fn seeded_store() -> (Arc<Store>, TempDir) {
             )
             .expect("append");
     }
-    (store, dir)
+    (dir, store)
 }
 
-fn cached_seeded_store() -> (Arc<Store>, TempDir) {
+fn cached_seeded_store() -> (TempDir, Arc<Store>) {
     let dir = TempDir::new().expect("temp dir");
     let cache_path = dir.path().join("cache");
     let config = StoreConfig::new(dir.path().join("data"))
@@ -270,10 +270,10 @@ fn cached_seeded_store() -> (Arc<Store>, TempDir) {
             )
             .expect("append");
     }
-    (store, dir)
+    (dir, store)
 }
 
-fn cached_seeded_store_for(entity: &str) -> (Arc<Store>, TempDir) {
+fn cached_seeded_store_for(entity: &str) -> (TempDir, Arc<Store>) {
     let dir = TempDir::new().expect("temp dir");
     let cache_path = dir.path().join("cache");
     let config = StoreConfig::new(dir.path().join("data"))
@@ -295,13 +295,13 @@ fn cached_seeded_store_for(entity: &str) -> (Arc<Store>, TempDir) {
             )
             .expect("append");
     }
-    (store, dir)
+    (dir, store)
 }
 
 macro_rules! observe_projection_flow_matrix_case {
     ($ty:ty, $case:expr) => {{
         let case = $case;
-        let (store, _dir) = seeded_store();
+        let (_dir, store) = seeded_store();
         let baseline_generation = store
             .entity_generation("entity:raw-proj")
             .expect("seeded entity generation");
@@ -401,7 +401,7 @@ macro_rules! observe_projection_flow_matrix_case {
 
 #[test]
 fn raw_projection_matches_value_projection_live_and_reopen() {
-    let (store, dir) = seeded_store();
+    let (dir, store) = seeded_store();
 
     let value_live: Option<ValueCounter> = store
         .project("entity:raw-proj", &Freshness::Consistent)
@@ -440,7 +440,7 @@ fn raw_projection_matches_value_projection_live_and_reopen() {
 
 #[test]
 fn raw_watch_projection_emits_updated_state() {
-    let (store, _dir) = seeded_store();
+    let (_dir, store) = seeded_store();
     let baseline_generation = store
         .entity_generation("entity:raw-proj")
         .expect("seeded entity generation");
@@ -483,7 +483,7 @@ fn raw_watch_projection_emits_updated_state() {
 
 #[test]
 fn raw_watch_projection_matches_project_if_changed_after_relevant_append() {
-    let (store, _dir) = seeded_store();
+    let (_dir, store) = seeded_store();
     let baseline_generation = store
         .entity_generation("entity:raw-proj")
         .expect("seeded entity generation");
@@ -537,7 +537,7 @@ fn raw_watch_projection_matches_project_if_changed_after_relevant_append() {
 
 #[test]
 fn raw_watch_projection_matches_project_if_changed_after_irrelevant_append() {
-    let (store, _dir) = seeded_store();
+    let (_dir, store) = seeded_store();
     let baseline_generation = store
         .entity_generation("entity:raw-proj")
         .expect("seeded entity generation");
@@ -648,7 +648,7 @@ fn projection_flow_maybe_stale_keeps_replay_lanes_equivalent() {
     // replay lanes: a generous stale window may serve cached bytes, but a
     // zero window must force replay, and raw/value lanes must agree in both
     // branches.
-    let (store, _dir) = cached_seeded_store();
+    let (_dir, store) = cached_seeded_store();
     let baseline_value = store
         .project::<ValueCounter>("entity:raw-proj", &Freshness::Consistent)
         .expect("seed value cache")
@@ -757,7 +757,7 @@ fn projection_flow_maybe_stale_keeps_replay_lanes_equivalent() {
 
 #[test]
 fn projection_flow_incremental_group_local_keeps_lanes_equivalent() {
-    let (store, _dir) = cached_seeded_store_for("entity:raw-proj-incremental-group-local");
+    let (_dir, store) = cached_seeded_store_for("entity:raw-proj-incremental-group-local");
     let baseline_value = store
         .project::<ValueIncrementalCounter>(
             "entity:raw-proj-incremental-group-local",
@@ -824,7 +824,7 @@ fn projection_flow_incremental_group_local_keeps_lanes_equivalent() {
 
 #[test]
 fn projection_flow_incremental_external_cache_keeps_lanes_equivalent() {
-    let (store, dir) = cached_seeded_store_for("entity:raw-proj-incremental-external");
+    let (dir, store) = cached_seeded_store_for("entity:raw-proj-incremental-external");
     let cache_path = dir.path().join("cache");
     let data_path = dir.path().join("data");
     let baseline_value = store

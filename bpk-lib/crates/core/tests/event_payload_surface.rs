@@ -75,7 +75,7 @@ impl StateMarker for Closed {}
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
-fn test_store() -> (Store, tempfile::TempDir) {
+fn test_store() -> (tempfile::TempDir, Store) {
     small_segment_store().expect("EventPayload surface test precondition holds")
 }
 
@@ -131,7 +131,7 @@ fn derive_registry_type_names_are_fully_qualified() {
 
 #[test]
 fn append_typed_round_trip() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let payload = ThingHappened { value: 42 };
     let receipt = store
         .append_typed(&coord(), &payload)
@@ -162,7 +162,7 @@ fn append_typed_round_trip() {
 
 #[test]
 fn append_typed_with_options_idempotency() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let payload = ThingHappened { value: 7 };
     let opts = AppendOptions::new().with_idempotency(batpak::id::IdempotencyKey::from(0xDEAD_BEEF));
 
@@ -185,7 +185,7 @@ fn append_typed_with_options_idempotency() {
 
 #[test]
 fn submit_typed_wait_returns_receipt() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let payload = ThingHappened { value: 99 };
     let ticket = store
         .submit_typed(&coord(), &payload)
@@ -205,7 +205,7 @@ fn submit_typed_wait_returns_receipt() {
 
 #[test]
 fn try_submit_typed_ok_path() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let payload = ThingHappened { value: 1 };
     let outcome = store
         .try_submit_typed(&coord(), &payload)
@@ -221,7 +221,7 @@ fn try_submit_typed_ok_path() {
 
 #[test]
 fn append_reaction_typed_links_causation() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let root = store
         .append_typed(&coord(), &ThingHappened { value: 0 })
         .expect("root append_typed");
@@ -259,7 +259,7 @@ fn append_reaction_typed_links_causation() {
 
 #[test]
 fn submit_reaction_typed_ticket_resolves() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let root = store
         .append_typed(&coord(), &ThingHappened { value: 0 })
         .expect("root");
@@ -286,7 +286,7 @@ fn submit_reaction_typed_ticket_resolves() {
 
 #[test]
 fn try_submit_reaction_typed_ok_path() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let root = store
         .append_typed(&coord(), &ThingHappened { value: 0 })
         .expect("root");
@@ -314,7 +314,7 @@ fn try_submit_reaction_typed_ok_path() {
 
 #[test]
 fn by_fact_typed_filters_by_kind() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     store
         .append_typed(&coord(), &ThingHappened { value: 1 })
         .expect("EventPayload surface test precondition holds");
@@ -355,7 +355,7 @@ fn by_fact_typed_filters_by_kind() {
 
 #[test]
 fn batch_append_item_typed_constructor() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let item = BatchAppendItem::typed(
         coord(),
         &ThingHappened { value: 55 },
@@ -407,7 +407,7 @@ fn transition_from_payload_uses_kind_constant() {
 
 #[test]
 fn transition_from_payload_store_round_trip() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let payload = ThingHappened { value: 13 };
     let transition: Transition<Open, Closed, ThingHappened> = Transition::from_payload(payload);
 
@@ -428,7 +428,7 @@ fn transition_from_payload_store_round_trip() {
 
 #[test]
 fn outbox_stage_typed_smoke() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let mut outbox = store.outbox();
     outbox
         .stage_typed(coord(), &ThingHappened { value: 1 })
@@ -449,7 +449,7 @@ fn outbox_stage_typed_smoke() {
 
 #[test]
 fn outbox_stage_typed_with_options_smoke() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let opts = AppendOptions::new().with_idempotency(batpak::id::IdempotencyKey::from(0xDEAD_BEEF));
     let mut outbox = store.outbox();
     outbox
@@ -464,7 +464,7 @@ fn outbox_stage_typed_with_options_smoke() {
 
 #[test]
 fn outbox_stage_typed_with_causation_smoke() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let root = store
         .append_typed(&coord(), &ThingHappened { value: 3 })
         .expect("root");
@@ -487,7 +487,7 @@ fn outbox_stage_typed_with_causation_smoke() {
 
 #[test]
 fn outbox_stage_typed_with_options_and_causation_smoke() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let root = store
         .append_typed(&coord(), &ThingHappened { value: 4 })
         .expect("root");
@@ -514,7 +514,7 @@ fn outbox_stage_typed_with_options_and_causation_smoke() {
 
 #[test]
 fn fence_submit_typed_smoke() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let fence = store.begin_visibility_fence().expect("begin fence");
     let ticket = fence
         .submit_typed(&coord(), &ThingHappened { value: 5 })
@@ -532,7 +532,7 @@ fn fence_submit_typed_smoke() {
 
 #[test]
 fn fence_submit_reaction_typed_smoke() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let root = store
         .append_typed(&coord(), &ThingHappened { value: 6 })
         .expect("root");

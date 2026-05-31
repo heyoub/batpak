@@ -159,16 +159,16 @@ fn wait_for<F: Fn() -> bool>(cond: F, timeout: Duration) -> bool {
     cond()
 }
 
-fn test_store() -> (Arc<Store>, tempfile::TempDir) {
-    let (s, d) = small_segment_store().unwrap();
-    (Arc::new(s), d)
+fn test_store() -> (tempfile::TempDir, Arc<Store>) {
+    let (d, s) = small_segment_store().unwrap();
+    (d, Arc::new(s))
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 #[test]
 fn happy_path_reactor_filters_wrong_kind_and_reacts_to_matched() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let seen = Arc::new(AtomicUsize::new(0));
     let handle: TypedReactorHandle<NeverFails> = store
         .react_loop_typed::<PayloadA, _>(
@@ -231,7 +231,7 @@ fn happy_path_reactor_filters_wrong_kind_and_reacts_to_matched() {
 
 #[test]
 fn user_error_stops_loop_and_surfaces_through_join() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let seen = Arc::new(AtomicUsize::new(0));
     let handle: TypedReactorHandle<ThirdFailure> = store
         .react_loop_typed::<PayloadA, _>(
@@ -275,7 +275,7 @@ fn user_error_stops_loop_and_surfaces_through_join() {
 
 #[test]
 fn lossy_subscription_canal_is_explicit_and_never_mints_at_least_once() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let seen = Arc::new(AtomicUsize::new(0));
     let witness_seen = Arc::new(AtomicUsize::new(0));
     let handle: TypedReactorHandle<NeverFails> = store
@@ -342,7 +342,7 @@ impl TypedReactive<ShapeX> for ShapeXReactor {
 
 #[test]
 fn matched_kind_decode_failure_surfaces_reactor_error_decode() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let handle: batpak::store::reactor_typed::TypedReactorHandle<NeverFails> = store
         .react_loop_typed::<ShapeX, _>(
             &Region::all(),

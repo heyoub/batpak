@@ -103,7 +103,7 @@ fn wait_for<F: Fn() -> bool>(cond: F, timeout: Duration) -> bool {
 
 #[test]
 fn raw_msgpack_multi_reactor_dispatches_same_as_json_lane() {
-    let (store, _dir) = small_segment_store().unwrap();
+    let (_dir, store) = small_segment_store().unwrap();
     let store = Arc::new(store);
     let alphas = Arc::new(AtomicUsize::new(0));
     let betas = Arc::new(AtomicUsize::new(0));
@@ -160,7 +160,7 @@ fn raw_msgpack_multi_reactor_dispatches_same_as_json_lane() {
 fn store_read_raw_round_trip_witness() {
     // Witness test for `Store::read_raw` — proves the new public surface
     // added in T6 is exercised directly (independent of reactor plumbing).
-    let (store, _dir) = small_segment_store().unwrap();
+    let (_dir, store) = small_segment_store().unwrap();
     let coord = Coordinate::new("entity:read-raw-witness", "scope:test").unwrap();
     let receipt = store
         .append_typed(&coord, &AlphaRaw { n: 42 })

@@ -22,7 +22,7 @@ type TestResult = Result<(), Box<dyn Error>>;
 
 #[test]
 fn current_subscriber_reports_deterministic_frontier_state() -> TestResult {
-    let (store, data_dir_guard) = small_store_support::small_segment_store()?;
+    let (data_dir_guard, store) = small_store_support::small_segment_store()?;
     assert!(data_dir_guard.path().exists());
     let coord = Coordinate::new("entity:subscriber-frontier-current", "scope:test")?;
     let kind = EventKind::custom(0xF, 0x30);
@@ -56,7 +56,7 @@ fn current_subscriber_reports_deterministic_frontier_state() -> TestResult {
 
 #[test]
 fn dropped_subscriber_emits_explicit_drop_finding() -> TestResult {
-    let (store, data_dir_guard) = small_store_support::small_segment_store()?;
+    let (data_dir_guard, store) = small_store_support::small_segment_store()?;
     assert!(data_dir_guard.path().exists());
     let report = store.subscriber_frontier_observation(&SubscriberFrontierRequest::lossy_push(
         Some(3),
@@ -86,7 +86,7 @@ fn dropped_subscriber_emits_explicit_drop_finding() -> TestResult {
 
 #[test]
 fn unknown_precision_and_unknown_consumed_frontier_are_explicit() -> TestResult {
-    let (store, data_dir_guard) = small_store_support::small_segment_store()?;
+    let (data_dir_guard, store) = small_store_support::small_segment_store()?;
     assert!(data_dir_guard.path().exists());
     let report =
         store.subscriber_frontier_observation(&SubscriberFrontierRequest::cursor_backed(
@@ -131,7 +131,7 @@ fn unknown_precision_and_unknown_consumed_frontier_are_explicit() -> TestResult 
 
 #[test]
 fn consumed_frontier_ahead_of_available_is_explicit() -> TestResult {
-    let (store, data_dir_guard) = small_store_support::small_segment_store()?;
+    let (data_dir_guard, store) = small_store_support::small_segment_store()?;
     assert!(data_dir_guard.path().exists());
     let report =
         store.subscriber_frontier_observation(&SubscriberFrontierRequest::cursor_backed(

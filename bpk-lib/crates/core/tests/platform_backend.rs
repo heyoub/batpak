@@ -24,19 +24,19 @@ use tempfile::TempDir;
 
 type TestResult = Result<(), Box<dyn Error>>;
 
-fn test_store() -> Result<(Store, TempDir), Box<dyn Error>> {
+fn test_store() -> Result<(TempDir, Store), Box<dyn Error>> {
     let dir = TempDir::new()?;
     let store = Store::open(
         StoreConfig::new(dir.path())
             .with_segment_max_bytes(4096)
             .with_sync_every_n_events(1),
     )?;
-    Ok((store, dir))
+    Ok((dir, store))
 }
 
 #[test]
 fn diagnostics_reports_config() -> TestResult {
-    let (store, dir) = test_store()?;
+    let (dir, store) = test_store()?;
     let diag: StoreDiagnostics = store.diagnostics();
     let expected_data_dir = std::fs::canonicalize(dir.path())?;
 

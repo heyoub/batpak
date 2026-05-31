@@ -16,7 +16,7 @@ use tempfile::TempDir;
 #[path = "support/small_store.rs"]
 mod small_store_support;
 
-fn test_store() -> (Store, TempDir) {
+fn test_store() -> (TempDir, Store) {
     small_store_support::small_segment_store().expect("small segment store")
 }
 
@@ -50,7 +50,7 @@ fn store_config_new_uses_sensible_defaults() {
 
 #[test]
 fn get_nonexistent_returns_not_found() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let result = store.get(batpak::id::EventId::from(0xDEADu128));
     let err = match result {
         Ok(_) => panic!(
@@ -69,7 +69,7 @@ fn get_nonexistent_returns_not_found() {
 
 #[test]
 fn query_with_clock_range_filters_events() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let coord = Coordinate::new("entity:clock", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
 
@@ -110,7 +110,7 @@ fn query_with_clock_range_filters_events() {
 
 #[test]
 fn query_clock_range_with_scope_filter() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let kind = EventKind::custom(0xF, 1);
 
     // Two entities, same scope
@@ -145,7 +145,7 @@ fn query_clock_range_with_scope_filter() {
 
 #[test]
 fn query_by_fact_category() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let coord = Coordinate::new("entity:cat", "scope:test").expect("valid coord");
 
     // Category 0xA: types 1 and 2

@@ -51,7 +51,7 @@ fn expect_cancelled_fence_ticket(
 
 #[test]
 fn read_walk_report_body_hash_is_deterministic() -> TestResult {
-    let (store, data_dir_guard) = small_store_support::small_segment_store()?;
+    let (data_dir_guard, store) = small_store_support::small_segment_store()?;
     assert!(data_dir_guard.path().exists());
     append_events(&store, "entity:readwalk:det", "scope:det", 3)?;
     let mut request = ReadWalkRequest::full(Region::scope("scope:det"));
@@ -69,7 +69,7 @@ fn read_walk_report_body_hash_is_deterministic() -> TestResult {
 
 #[test]
 fn read_walk_limit_reports_known_dropped_count() -> TestResult {
-    let (store, data_dir_guard) = small_store_support::small_segment_store()?;
+    let (data_dir_guard, store) = small_store_support::small_segment_store()?;
     assert!(data_dir_guard.path().exists());
     append_events(&store, "entity:readwalk:limit", "scope:limit", 5)?;
     let request = ReadWalkRequest {
@@ -100,7 +100,7 @@ fn read_walk_limit_reports_known_dropped_count() -> TestResult {
 
 #[test]
 fn read_walk_visibility_matches_plain_query_across_hidden_gap() -> TestResult {
-    let (store, data_dir_guard) = small_store_support::small_segment_store()?;
+    let (data_dir_guard, store) = small_store_support::small_segment_store()?;
     assert!(data_dir_guard.path().exists());
     let coord = Coordinate::new("entity:readwalk:visibility", "scope:visibility-gap")?;
     let kind = EventKind::custom(0xE, 0x42);
@@ -148,7 +148,7 @@ fn read_walk_visibility_matches_plain_query_across_hidden_gap() -> TestResult {
 
 #[test]
 fn read_walk_proof_refs_known_when_requested() -> TestResult {
-    let (store, data_dir_guard) = small_store_support::small_segment_store()?;
+    let (data_dir_guard, store) = small_store_support::small_segment_store()?;
     assert!(data_dir_guard.path().exists());
     append_events(&store, "entity:readwalk:proof", "scope:proof", 2)?;
     let request = ReadWalkRequest {
@@ -179,7 +179,7 @@ fn read_walk_proof_refs_known_when_requested() -> TestResult {
 
 #[test]
 fn read_walk_findings_are_sorted_deterministically() -> TestResult {
-    let (store, data_dir_guard) = small_store_support::small_segment_store()?;
+    let (data_dir_guard, store) = small_store_support::small_segment_store()?;
     assert!(data_dir_guard.path().exists());
     append_events(&store, "entity:readwalk:sort", "scope:sort", 4)?;
     let request = ReadWalkRequest {
@@ -227,7 +227,7 @@ fn read_walk_findings_are_sorted_deterministically() -> TestResult {
 
 #[test]
 fn read_walk_report_round_trips_through_canonical_encoding() -> TestResult {
-    let (store, data_dir_guard) = small_store_support::small_segment_store()?;
+    let (data_dir_guard, store) = small_store_support::small_segment_store()?;
     assert!(data_dir_guard.path().exists());
     append_events(
         &store,

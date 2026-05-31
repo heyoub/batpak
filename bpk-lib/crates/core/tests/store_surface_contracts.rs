@@ -11,7 +11,7 @@ use support::prelude::*;
 #[path = "support/small_store.rs"]
 mod small_store_support;
 
-fn test_store() -> (Store, tempfile::TempDir) {
+fn test_store() -> (tempfile::TempDir, Store) {
     small_store_support::small_segment_store().expect("small segment store")
 }
 
@@ -142,7 +142,7 @@ fn coordinate_display_format() {
 
 #[test]
 fn index_entry_causation_helpers() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let coord = Coordinate::new("entity:helpers", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
 
@@ -252,7 +252,7 @@ fn index_entry_causation_helpers() {
 fn append_with_flags_round_trips() {
     use batpak::event::header::{FLAG_REPLAY, FLAG_REQUIRES_ACK, FLAG_TRANSACTIONAL};
 
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let coord = Coordinate::new("entity:flags", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
     let flags = FLAG_REQUIRES_ACK | FLAG_TRANSACTIONAL | FLAG_REPLAY;
