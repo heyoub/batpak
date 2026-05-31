@@ -18,6 +18,6 @@
     "clean": "node -e \"for (const p of ['dist','tsconfig.tsbuildinfo']) require('node:fs').rmSync(p,{recursive:true,force:true})\""
   },
   "devDependencies": {
-    "fast-check": "3.23.2"
+    "fast-check": "4.8.0"
   }
 }
