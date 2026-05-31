@@ -35,7 +35,7 @@ fn fault_injector_check<I: batpak::store::fault::FaultInjector>(
 /// Test: append_reaction_batch sets correlation/causation on all items.
 #[test]
 fn batch_append_reaction_batch() {
-    let (store, _tmp) = default_temp_store();
+    let (_tmp, store) = default_temp_store();
 
     // First, append an initial event to use as causation source.
     let trigger_coord = Coordinate::new("user", "trigger").expect("valid trigger coordinate");
@@ -241,7 +241,7 @@ fn batch_oversized_item_no_partial_visibility() {
 /// Test: full batch visibility on success.
 #[test]
 fn batch_atomicity_full_visibility_on_success() {
-    let (store, _tmp) = default_temp_store();
+    let (_tmp, store) = default_temp_store();
 
     let coord = Coordinate::new("user", "profile").expect("valid profile coordinate");
     let items: Vec<BatchAppendItem> = (0..5)
@@ -281,7 +281,7 @@ fn batch_atomicity_full_visibility_on_success() {
 /// Test: batch envelope marker is invisible to queries.
 #[test]
 fn batch_marker_invisible() {
-    let (store, _tmp) = default_temp_store();
+    let (_tmp, store) = default_temp_store();
 
     let coord = Coordinate::new("test", "marker").expect("valid marker coordinate");
     let items = vec![BatchAppendItem::new(
@@ -307,7 +307,7 @@ fn batch_marker_invisible() {
 /// Test: intra-batch causation linking.
 #[test]
 fn batch_intra_batch_causation() {
-    let (store, _tmp) = default_temp_store();
+    let (_tmp, store) = default_temp_store();
 
     let coord = Coordinate::new("chain", "test").expect("valid chain coordinate");
 
@@ -1252,7 +1252,7 @@ fn batch_publish_atomicity_concurrent_reader_sees_zero_or_all() {
 /// traversal all fail loud against the buggy code.
 #[test]
 fn batch_multi_item_same_entity_hash_chain_is_continuous() {
-    let (store, _tmp) = default_temp_store();
+    let (_tmp, store) = default_temp_store();
     let coord = Coordinate::new("regress", "hashchain").expect("valid coord");
 
     // Three distinct payloads on the SAME entity. Distinct payloads matter:
@@ -1628,7 +1628,7 @@ fn batch_wall_ms_monotonic_under_regressing_clock() {
 
 #[test]
 fn outbox_stage_with_causation_links_item_to_prior_item() {
-    let (store, _tmp) = default_temp_store();
+    let (_tmp, store) = default_temp_store();
     let coord = Coordinate::new("entity:causation", "scope:test").expect("valid coordinate");
 
     let receipts = store
