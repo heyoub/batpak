@@ -64,7 +64,7 @@ criterion = { version = "0.8", features = ["html_reports"] }
 tempfile = ">=3.24, <3.25"
 trybuild = "1"
 fastrand = "2"
-serial_test = { version = "3.4.0", features = ["file_locks"] }
+serial_test = { version = "3.5.0", features = ["file_locks"] }
 loom = "0.7"
 tracing-subscriber = { version = "0.3", features = ["fmt", "std"] }
 
