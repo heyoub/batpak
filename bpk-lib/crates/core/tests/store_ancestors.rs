@@ -11,13 +11,13 @@ use support::prelude::*;
 #[path = "support/small_store.rs"]
 mod small_store_support;
 
-fn test_store() -> (Store, tempfile::TempDir) {
+fn test_store() -> (tempfile::TempDir, Store) {
     small_store_support::small_segment_store().expect("small segment store")
 }
 
 #[test]
 fn walk_ancestors_follows_chain() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let coord = Coordinate::new("entity:walk", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
 
@@ -76,7 +76,7 @@ fn walk_ancestors_follows_chain() {
 
 #[test]
 fn walk_ancestors_respects_limit() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let coord = Coordinate::new("entity:limit", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
 
@@ -103,7 +103,7 @@ fn walk_ancestors_respects_limit() {
 
 #[test]
 fn walk_ancestors_from_middle_excludes_descendants() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let coord = Coordinate::new("entity:middle", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
 
@@ -140,7 +140,7 @@ fn walk_ancestors_from_middle_excludes_descendants() {
 
 #[test]
 fn walk_ancestors_zero_limit_returns_empty() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let coord = Coordinate::new("entity:zero-limit", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
 
@@ -162,7 +162,7 @@ fn walk_ancestors_zero_limit_returns_empty() {
 
 #[test]
 fn walk_ancestors_genesis_returns_single_event() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let coord = Coordinate::new("entity:gen", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
 

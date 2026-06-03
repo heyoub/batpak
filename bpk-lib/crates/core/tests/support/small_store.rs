@@ -16,12 +16,14 @@ pub fn small_segment_store_config(data_dir: &Path) -> StoreConfig {
 }
 
 /// Open a store with 4 KB segments and per-event fsync, under a fresh temp
-/// directory. The returned `TempDir` must stay alive for the lifetime of the
-/// `Store`; drop either before the other only if the test deliberately
-/// exercises that shape.
-pub fn small_segment_store() -> Result<(Store, TempDir), Box<dyn std::error::Error>> {
+/// directory. Returns `(TempDir, Store)` so the natural
+/// `let (_dir, store) = small_segment_store()?;` binding drops `store` before
+/// the `TempDir`: `Store::drop` syncs the active segment during shutdown, so the
+/// backing directory must outlive the store. Reuse the `TempDir` to reopen the
+/// same data directory across `Store::open` calls.
+pub fn small_segment_store() -> Result<(TempDir, Store), Box<dyn std::error::Error>> {
     let dir = TempDir::new()?;
     let config = small_segment_store_config(dir.path());
     let store = Store::open(config)?;
-    Ok((store, dir))
+    Ok((dir, store))
 }

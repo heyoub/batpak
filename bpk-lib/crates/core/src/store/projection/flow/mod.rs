@@ -6,12 +6,12 @@ mod strategy;
 use crate::event::{EventSourced, ProjectionInput};
 use crate::store::index::columnar::CachedProjectionSlot;
 use crate::store::index::ProjectionCacheStoreStatus;
-use crate::store::{Clock, Freshness, HlcPoint, Store, StoreError};
+use crate::store::{Freshness, HlcPoint, Store, StoreError};
 use std::any::TypeId;
 
 pub(crate) use cache_identity::projection_cache_key;
 use outcome::{
-    finish_empty_projection, finish_projection, record_external_cache_probe_time,
+    elapsed_us, finish_empty_projection, finish_projection, record_external_cache_probe_time,
     ProjectionFinishObservation,
 };
 pub(crate) use outcome::{
@@ -37,11 +37,6 @@ where
             None
         }
     }
-}
-
-fn elapsed_us(clock: &dyn Clock, started_at_ns: i64) -> u64 {
-    u64::try_from(clock.now_mono_ns().saturating_sub(started_at_ns).max(0) / 1_000)
-        .unwrap_or(u64::MAX)
 }
 
 #[must_use]

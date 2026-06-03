@@ -57,7 +57,7 @@ fn assert_stable_resource_shape(left: &StoreResourceReportBody, right: &StoreRes
 
 #[test]
 fn store_resource_evidence_family_invariants_and_reopen_stable() -> TestResult {
-    let (store, dir) = small_store_support::small_segment_store()?;
+    let (dir, store) = small_store_support::small_segment_store()?;
     let path = dir.path().to_path_buf();
     let coord = Coordinate::new("entity:lane-store-resource", "scope:lane_sr")?;
     let kind = EventKind::custom(0xE, 0x91);

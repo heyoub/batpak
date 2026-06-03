@@ -14,7 +14,7 @@ use batpak::id::EventId;
 use batpak::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::util::{cargo_target_dir, project_root, run_output};
+use crate::util::{cargo_target_dir, git_output, project_root};
 use crate::{
     FactoryLedgerArgs, FactoryLedgerCommand, FactoryLedgerListArgs, FactoryLedgerRecordArgs,
     FactoryLedgerRecordCommand, FactoryLedgerRecordCompletedArgs, FactoryLedgerRecordFailedArgs,
@@ -584,16 +584,6 @@ fn default_head() -> String {
         .ok()
         .and_then(|root| git_output(&root, ["rev-parse", "--short", "HEAD"]).ok())
         .unwrap_or_else(|| "unknown".to_owned())
-}
-
-fn git_output<const N: usize>(root: &Path, args: [&str; N]) -> Result<String> {
-    let mut command = Command::new("git");
-    command.current_dir(root).args(args);
-    let output = run_output(command)?;
-    Ok(String::from_utf8(output.stdout)
-        .context("git output utf8")?
-        .trim()
-        .to_owned())
 }
 
 #[cfg(test)]

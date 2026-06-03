@@ -136,7 +136,7 @@ fn schema_snapshot_evidence_family_invariants() -> TestResult {
 
 #[test]
 fn snapshot_evidence_family_invariants_and_no_append_side_effect() -> TestResult {
-    let (store, _data_dir_guard) = small_store_support::small_segment_store()?;
+    let (_data_dir_guard, store) = small_store_support::small_segment_store()?;
     let coord = Coordinate::new("entity:family-snapshot", "scope:fam_snapshot")?;
     let kind = EventKind::custom(0xF, 0x22);
     store.append(&coord, kind, &serde_json::json!({"s": 0}))?;
@@ -176,7 +176,7 @@ fn snapshot_evidence_family_invariants_and_no_append_side_effect() -> TestResult
 
 #[test]
 fn chain_walk_evidence_family_invariants_and_no_append_side_effect() -> TestResult {
-    let (store, data_dir_guard) = small_store_support::small_segment_store()?;
+    let (data_dir_guard, store) = small_store_support::small_segment_store()?;
     assert!(data_dir_guard.path().exists());
     let coord = Coordinate::new("entity:family-chain", "scope:fam")?;
     let kind = EventKind::custom(0xF, 0x20);
@@ -219,7 +219,7 @@ fn chain_walk_evidence_family_invariants_and_no_append_side_effect() -> TestResu
 
 #[test]
 fn chain_walk_three_link_chain_checked_count_stable_across_close_reopen() -> TestResult {
-    let (store, dir) = small_store_support::small_segment_store()?;
+    let (dir, store) = small_store_support::small_segment_store()?;
     let path = dir.path().to_path_buf();
     let coord = Coordinate::new("entity:family-chain-reopen", "scope:fam")?;
     let kind = EventKind::custom(0xF, 0x21);
@@ -252,7 +252,7 @@ fn chain_walk_three_link_chain_checked_count_stable_across_close_reopen() -> Tes
 
 #[test]
 fn subscriber_frontier_exact_range_only_when_precision_demands_it() -> TestResult {
-    let (store, data_dir_guard) = small_store_support::small_segment_store()?;
+    let (data_dir_guard, store) = small_store_support::small_segment_store()?;
     assert!(data_dir_guard.path().exists());
     let before = store.stats().event_count;
     let request = SubscriberFrontierRequest {
@@ -293,7 +293,7 @@ fn subscriber_frontier_exact_range_only_when_precision_demands_it() -> TestResul
 
 #[test]
 fn projection_run_body_hash_changes_after_relevant_append() -> TestResult {
-    let (store, dir) = small_store_support::small_segment_store()?;
+    let (dir, store) = small_store_support::small_segment_store()?;
     let path = dir.path().to_path_buf();
     let coord = Coordinate::new("entity:family-projection-reopen", "scope:fam")?;
     let kind = EventKind::custom(0xE, 0x71);
@@ -344,7 +344,7 @@ fn projection_run_body_hash_changes_after_relevant_append() -> TestResult {
 
 #[test]
 fn read_walk_evidence_matches_across_close_reopen() -> TestResult {
-    let (store, dir) = small_store_support::small_segment_store()?;
+    let (dir, store) = small_store_support::small_segment_store()?;
     let path = dir.path().to_path_buf();
     let coord = Coordinate::new("entity:family-readwalk", "scope:fam_rw")?;
     let kind = EventKind::custom(0xE, 0x81);

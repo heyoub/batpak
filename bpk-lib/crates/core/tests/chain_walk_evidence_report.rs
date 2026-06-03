@@ -23,7 +23,7 @@ fn hash(fill: u8) -> [u8; 32] {
 
 #[test]
 fn linear_chain_reports_no_findings_and_deterministic_body_hash() -> TestResult {
-    let (store, data_dir_guard) = small_store_support::small_segment_store()?;
+    let (data_dir_guard, store) = small_store_support::small_segment_store()?;
     assert!(data_dir_guard.path().exists());
     let coord = Coordinate::new("entity:chain-evidence-ok", "scope:test")?;
     let kind = EventKind::custom(0xF, 0x10);
@@ -58,7 +58,7 @@ fn linear_chain_reports_no_findings_and_deterministic_body_hash() -> TestResult 
 
 #[test]
 fn missing_start_event_reports_deterministic_finding() -> TestResult {
-    let (store, data_dir_guard) = small_store_support::small_segment_store()?;
+    let (data_dir_guard, store) = small_store_support::small_segment_store()?;
     assert!(data_dir_guard.path().exists());
     let report = store.chain_walk_evidence(&ChainWalkRequest::linear(
         ChainWalkStartRef::EventId(0xDEAD_BEEF),
@@ -79,7 +79,7 @@ fn missing_start_event_reports_deterministic_finding() -> TestResult {
 
 #[test]
 fn limit_truncation_is_reported_not_silent() -> TestResult {
-    let (store, data_dir_guard) = small_store_support::small_segment_store()?;
+    let (data_dir_guard, store) = small_store_support::small_segment_store()?;
     assert!(data_dir_guard.path().exists());
     let coord = Coordinate::new("entity:chain-evidence-limit", "scope:test")?;
     let kind = EventKind::custom(0xF, 0x11);
@@ -111,7 +111,7 @@ fn limit_truncation_is_reported_not_silent() -> TestResult {
 
 #[test]
 fn zero_limit_is_reported_as_invalid() -> TestResult {
-    let (store, data_dir_guard) = small_store_support::small_segment_store()?;
+    let (data_dir_guard, store) = small_store_support::small_segment_store()?;
     assert!(data_dir_guard.path().exists());
     let coord = Coordinate::new("entity:chain-evidence-zero-limit", "scope:test")?;
     let kind = EventKind::custom(0xF, 0x14);
@@ -133,7 +133,7 @@ fn zero_limit_is_reported_as_invalid() -> TestResult {
 
 #[test]
 fn duplicate_payload_parent_hash_chooses_nearest_prior_and_reports_ambiguity() -> TestResult {
-    let (store, data_dir_guard) = small_store_support::small_segment_store()?;
+    let (data_dir_guard, store) = small_store_support::small_segment_store()?;
     assert!(data_dir_guard.path().exists());
     let coord = Coordinate::new("entity:chain-evidence-duplicate-parent", "scope:test")?;
     let kind = EventKind::custom(0xF, 0x15);
@@ -170,7 +170,7 @@ fn duplicate_payload_parent_hash_chooses_nearest_prior_and_reports_ambiguity() -
 
 #[test]
 fn receipt_start_hash_mismatch_is_reported() -> TestResult {
-    let (store, data_dir_guard) = small_store_support::small_segment_store()?;
+    let (data_dir_guard, store) = small_store_support::small_segment_store()?;
     assert!(data_dir_guard.path().exists());
     let coord = Coordinate::new("entity:chain-evidence-receipt", "scope:test")?;
     let kind = EventKind::custom(0xF, 0x12);

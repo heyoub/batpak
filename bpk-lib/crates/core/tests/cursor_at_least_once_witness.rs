@@ -45,10 +45,10 @@ impl std::fmt::Display for NeverFails {
 
 impl std::error::Error for NeverFails {}
 
-fn test_store() -> (Arc<Store>, tempfile::TempDir) {
+fn test_store() -> (tempfile::TempDir, Arc<Store>) {
     let dir = tempfile::TempDir::new().expect("temp dir");
     let store = Store::open(StoreConfig::new(dir.path())).expect("open store");
-    (Arc::new(store), dir)
+    (dir, Arc::new(store))
 }
 
 fn source_coord() -> Coordinate {
@@ -87,7 +87,7 @@ fn reactor_config(checkpoint_id: Option<CheckpointId>) -> ReactorConfig {
 
 #[test]
 fn cursor_worker_with_checkpoint_id_passes_witness() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let checkpoint_id = CheckpointId::new("witness-cursor").expect("valid checkpoint id");
     store
         .append(
@@ -119,7 +119,7 @@ fn cursor_worker_with_checkpoint_id_passes_witness() {
 
 #[test]
 fn cursor_worker_without_checkpoint_id_passes_none() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     store
         .append(
             &source_coord(),
@@ -178,7 +178,7 @@ impl TypedReactive<WitnessPayload> for WitnessTypedReactor {
 
 #[test]
 fn typed_reactor_handler_receives_witness() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let (tx, rx) = mpsc::channel();
     let checkpoint_id = CheckpointId::new("witness-typed").expect("valid checkpoint id");
     let handle = store
@@ -241,7 +241,7 @@ impl WitnessMultiReactor {
 
 #[test]
 fn multi_reactor_handler_receives_witness() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let (tx, rx) = mpsc::channel();
     let checkpoint_id = CheckpointId::new("witness-multi").expect("valid checkpoint id");
     let handle = store
@@ -266,7 +266,7 @@ fn multi_reactor_handler_receives_witness() {
 
 #[test]
 fn observed_once_composes_from_handler_witness() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let checkpoint_id = CheckpointId::new("witness-observed-once").expect("valid checkpoint id");
     store
         .append(

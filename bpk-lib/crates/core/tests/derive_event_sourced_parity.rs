@@ -166,7 +166,7 @@ fn write_canonical_stream(store: &Store) -> Coordinate {
 
 #[test]
 fn derive_json_matches_hand_written_json_via_project() {
-    let (store, _dir) = small_segment_store().unwrap();
+    let (_dir, store) = small_segment_store().unwrap();
     let _coord = write_canonical_stream(&store);
 
     let hand = store
@@ -189,7 +189,7 @@ fn derive_json_matches_hand_written_json_via_project() {
 
 #[test]
 fn json_lane_and_msgpack_lane_produce_identical_state() {
-    let (store, _dir) = small_segment_store().unwrap();
+    let (_dir, store) = small_segment_store().unwrap();
     let _coord = write_canonical_stream(&store);
 
     let json = store
@@ -247,7 +247,7 @@ fn schema_version_derives_from_cache_version_not_type_id() {
 
 #[test]
 fn project_if_changed_parity_between_hand_and_derived() {
-    let (store, _dir) = small_segment_store().unwrap();
+    let (_dir, store) = small_segment_store().unwrap();
     let _coord = write_canonical_stream(&store);
 
     // Fetch the generation baseline via initial project.
@@ -325,7 +325,7 @@ fn project_if_changed_parity_between_hand_and_derived() {
 fn watch_projection_parity_between_hand_and_derived() {
     use std::sync::Arc;
 
-    let (store, _dir) = small_segment_store().unwrap();
+    let (_dir, store) = small_segment_store().unwrap();
     let store = Arc::new(store);
     let coord = Coordinate::new("entity:parity-watch", "scope:test").unwrap();
 

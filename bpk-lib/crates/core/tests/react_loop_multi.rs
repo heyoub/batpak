@@ -126,9 +126,9 @@ fn source_coord() -> Coordinate {
     Coordinate::new("entity:multi-src", "scope:test").unwrap()
 }
 
-fn test_store() -> (Arc<Store>, tempfile::TempDir) {
-    let (s, d) = small_segment_store().unwrap();
-    (Arc::new(s), d)
+fn test_store() -> (tempfile::TempDir, Arc<Store>) {
+    let (d, s) = small_segment_store().unwrap();
+    (d, Arc::new(s))
 }
 
 fn join_with_timeout(
@@ -156,7 +156,7 @@ fn join_with_timeout(
 
 #[test]
 fn multi_kind_dispatch_routes_each_kind_to_right_handler() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let a = Arc::new(AtomicUsize::new(0));
     let b = Arc::new(AtomicUsize::new(0));
     let c = Arc::new(AtomicUsize::new(0));
@@ -245,7 +245,7 @@ impl ShapeYReactor {
 
 #[test]
 fn matched_kind_decode_failure_surfaces_reactor_error_decode() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let handle: TypedReactorHandle<NeverFails> = store
         .react_loop_multi(
             &Region::all(),

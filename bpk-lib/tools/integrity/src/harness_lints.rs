@@ -1,4 +1,4 @@
-use crate::repo_surface::resolve_repo_or_core_path;
+use crate::repo_surface::{resolve_repo_or_core_path, rust_files};
 use crate::source_cache::SourceCache;
 use anyhow::{bail, Context, Result};
 use std::collections::{BTreeSet, HashMap};
@@ -521,56 +521,36 @@ fn test_names_for_target(
     let target_path = resolve_repo_or_core_path(repo_root, format!("tests/{target}.rs"));
     let mut tests = test_names_from_file(&target_path, "", source_cache)?;
     let target_dir = resolve_repo_or_core_path(repo_root, format!("tests/{target}"));
-    if target_dir.is_dir() {
-        collect_nested_test_names(&target_dir, &target_dir, &mut tests, source_cache)?;
+    let mut nested = rust_files(&target_dir);
+    nested.sort();
+    for path in &nested {
+        let module_prefix = nested_module_prefix(&target_dir, path);
+        tests.extend(test_names_from_file(path, &module_prefix, source_cache)?);
     }
     Ok(tests)
 }
 
-fn collect_nested_test_names(
-    root: &Path,
-    dir: &Path,
-    tests: &mut BTreeSet<String>,
-    source_cache: &mut SourceCache,
-) -> Result<()> {
-    let mut entries = fs::read_dir(dir)
-        .with_context(|| format!("read nested test directory {}", dir.display()))?
-        .collect::<Result<Vec<_>, _>>()?;
-    entries.sort_by_key(|entry| entry.path());
-
-    for entry in entries {
-        let path = entry.path();
-        if path.is_dir() {
-            collect_nested_test_names(root, &path, tests, source_cache)?;
-            continue;
-        }
-        if path.extension().and_then(|ext| ext.to_str()) != Some("rs") {
-            continue;
-        }
-
-        let relative = path.strip_prefix(root).unwrap_or(path.as_path());
-        let mut prefix_parts = relative
-            .with_extension("")
-            .components()
-            .filter_map(|component| match component {
-                std::path::Component::Normal(part) => Some(part.to_string_lossy().into_owned()),
-                std::path::Component::Prefix(_)
-                | std::path::Component::RootDir
-                | std::path::Component::CurDir
-                | std::path::Component::ParentDir => None,
-            })
-            .collect::<Vec<_>>();
-        if prefix_parts.last().is_some_and(|part| part == "mod") {
-            prefix_parts.pop();
-        }
-        let module_prefix = if prefix_parts.is_empty() {
-            String::new()
-        } else {
-            format!("{}::", prefix_parts.join("::"))
-        };
-        tests.extend(test_names_from_file(&path, &module_prefix, source_cache)?);
+fn nested_module_prefix(root: &Path, path: &Path) -> String {
+    let relative = path.strip_prefix(root).unwrap_or(path);
+    let mut prefix_parts = relative
+        .with_extension("")
+        .components()
+        .filter_map(|component| match component {
+            std::path::Component::Normal(part) => Some(part.to_string_lossy().into_owned()),
+            std::path::Component::Prefix(_)
+            | std::path::Component::RootDir
+            | std::path::Component::CurDir
+            | std::path::Component::ParentDir => None,
+        })
+        .collect::<Vec<_>>();
+    if prefix_parts.last().is_some_and(|part| part == "mod") {
+        prefix_parts.pop();
     }
-    Ok(())
+    if prefix_parts.is_empty() {
+        String::new()
+    } else {
+        format!("{}::", prefix_parts.join("::"))
+    }
 }
 
 fn test_names_from_file(
@@ -687,42 +667,67 @@ fn core_relative_location(path: &str) -> String {
     path.strip_prefix("crates/core/").unwrap_or(path).to_owned()
 }
 
-fn header_allowlist() -> Result<HashMap<&'static str, &'static HeaderDebt>> {
+trait DebtEntry: 'static {
+    fn path(&self) -> &'static str;
+    fn reason(&self) -> &'static str;
+    fn target(&self) -> &'static str;
+}
+
+impl DebtEntry for HeaderDebt {
+    fn path(&self) -> &'static str {
+        self.path
+    }
+    fn reason(&self) -> &'static str {
+        self.reason
+    }
+    fn target(&self) -> &'static str {
+        self.target
+    }
+}
+
+impl DebtEntry for OversizeDebt {
+    fn path(&self) -> &'static str {
+        self.path
+    }
+    fn reason(&self) -> &'static str {
+        self.reason
+    }
+    fn target(&self) -> &'static str {
+        self.target
+    }
+}
+
+/// Validate a static debt allowlist: every entry must carry a non-empty reason
+/// and target, and no path may appear twice. `noun` names the debt kind in
+/// error messages (e.g. "header debt", "oversize debt").
+fn validate_debt_allowlist<T: DebtEntry>(
+    entries: &'static [T],
+    noun: &str,
+) -> Result<HashMap<&'static str, &'static T>> {
     let mut map = HashMap::new();
-    for debt in HEADER_DEBT_ALLOWLIST {
+    for debt in entries {
         ensure(
-            !debt.reason.is_empty(),
-            format!("header debt `{}` missing reason", debt.path),
+            !debt.reason().is_empty(),
+            format!("{noun} `{}` missing reason", debt.path()),
         )?;
         ensure(
-            !debt.target.is_empty(),
-            format!("header debt `{}` missing target", debt.path),
+            !debt.target().is_empty(),
+            format!("{noun} `{}` missing target", debt.path()),
         )?;
         ensure(
-            map.insert(debt.path, debt).is_none(),
-            format!("duplicate header debt `{}`", debt.path),
+            map.insert(debt.path(), debt).is_none(),
+            format!("duplicate {noun} `{}`", debt.path()),
         )?;
     }
     Ok(map)
 }
 
+fn header_allowlist() -> Result<HashMap<&'static str, &'static HeaderDebt>> {
+    validate_debt_allowlist(HEADER_DEBT_ALLOWLIST, "header debt")
+}
+
 fn oversize_allowlist() -> Result<HashMap<&'static str, &'static OversizeDebt>> {
-    let mut map = HashMap::new();
-    for debt in OVERSIZE_HARNESS_ALLOWLIST {
-        ensure(
-            !debt.reason.is_empty(),
-            format!("oversize debt `{}` missing reason", debt.path),
-        )?;
-        ensure(
-            !debt.target.is_empty(),
-            format!("oversize debt `{}` missing target", debt.path),
-        )?;
-        ensure(
-            map.insert(debt.path, debt).is_none(),
-            format!("duplicate oversize debt `{}`", debt.path),
-        )?;
-    }
-    Ok(map)
+    validate_debt_allowlist(OVERSIZE_HARNESS_ALLOWLIST, "oversize debt")
 }
 
 fn field_name(line: &str) -> Option<&str> {

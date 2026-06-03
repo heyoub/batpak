@@ -88,7 +88,7 @@ fn push_typed_with_options_accepts_append_options() {
 
 #[test]
 fn drop_without_flush_leaves_store_unchanged() {
-    let (store, _dir) = small_segment_store().unwrap();
+    let (_dir, store) = small_segment_store().unwrap();
 
     // Write a root event so the store has non-zero sequence state.
     let root = store

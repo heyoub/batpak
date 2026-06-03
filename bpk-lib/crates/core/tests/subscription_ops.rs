@@ -21,13 +21,13 @@ const PROMPT_EXHAUSTION_TIMEOUT: Duration = Duration::from_secs(2);
 #[path = "support/small_store.rs"]
 mod small_store_support;
 
-fn test_store() -> (Store, tempfile::TempDir) {
+fn test_store() -> (tempfile::TempDir, Store) {
     small_store_support::small_segment_store().expect("small segment store")
 }
 
 #[test]
 fn ops_recv_without_filters() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let store = Arc::new(store);
     let coord = Coordinate::new("entity:1", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
@@ -66,7 +66,7 @@ fn ops_recv_without_filters() {
 
 #[test]
 fn subscription_notifications_preserve_committed_position() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let store = Arc::new(store);
     let coord = Coordinate::new("entity:position", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
@@ -99,7 +99,7 @@ fn subscription_notifications_preserve_committed_position() {
 
 #[test]
 fn ops_filter_passes_matching() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let store = Arc::new(store);
     let coord = Coordinate::new("entity:1", "scope:test").expect("valid coord");
     let target_kind = EventKind::custom(0xF, 1);
@@ -137,7 +137,7 @@ fn ops_filter_passes_matching() {
 
 #[test]
 fn ops_filter_rejects_non_matching() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let store = Arc::new(store);
     let coord = Coordinate::new("entity:1", "scope:test").expect("valid coord");
     let wanted_kind = EventKind::custom(0xF, 1);
@@ -183,7 +183,7 @@ fn ops_filter_rejects_non_matching() {
 
 #[test]
 fn ops_take_limits_count() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let store = Arc::new(store);
     let coord = Coordinate::new("entity:1", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
@@ -226,7 +226,7 @@ fn ops_take_limits_count() {
 
 #[test]
 fn ops_take_limit_returns_none_immediately_while_store_is_open() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let store = Arc::new(store);
     let coord = Coordinate::new("entity:take-open", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 9);
@@ -256,7 +256,7 @@ fn ops_take_limit_returns_none_immediately_while_store_is_open() {
 
 #[test]
 fn ops_filter_and_take_combined() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let store = Arc::new(store);
     let coord = Coordinate::new("entity:1", "scope:test").expect("valid coord");
     let wanted_kind = EventKind::custom(0xF, 1);
@@ -337,7 +337,7 @@ fn ops_filter_and_take_combined() {
 
 #[test]
 fn ops_map_transforms_notification() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let store = Arc::new(store);
     let coord = Coordinate::new("entity:1", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
@@ -389,7 +389,7 @@ fn ops_map_transforms_notification() {
 
 #[test]
 fn ops_map_returning_none_skips_event() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let store = Arc::new(store);
     let coord = Coordinate::new("entity:1", "scope:test").expect("valid coord");
     let skip_kind = EventKind::custom(0xF, 1);
@@ -442,7 +442,7 @@ fn ops_map_returning_none_skips_event() {
 
 #[test]
 fn ops_multiple_filters_all_must_pass() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let store = Arc::new(store);
     let coord = Coordinate::new("entity:multi", "scope:test").expect("valid coord");
     let kind_a = EventKind::custom(0xF, 1);
@@ -490,7 +490,7 @@ fn ops_multiple_filters_all_must_pass() {
 
 #[test]
 fn ops_channel_closed_returns_none() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let store = Arc::new(store);
 
     let region = Region::entity("entity");

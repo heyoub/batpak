@@ -3,7 +3,10 @@
 //! Atomic batch append tests.
 //! PROVES: INV-BATCH-ATOMIC-VISIBILITY, INV-BATCH-CRASH-RECOVERY.
 
+#[path = "support/default_store.rs"]
+mod default_store;
 mod support;
+use default_store::default_temp_store;
 use std::collections::HashSet;
 use support::prelude::*;
 
@@ -32,9 +35,7 @@ fn fault_injector_check<I: batpak::store::fault::FaultInjector>(
 /// Test: append_reaction_batch sets correlation/causation on all items.
 #[test]
 fn batch_append_reaction_batch() {
-    let tmp = tempfile::tempdir().expect("create temp dir for reaction batch test");
-    let config = StoreConfig::new(tmp.path());
-    let store = Store::open(config).expect("open store for reaction batch test");
+    let (_tmp, store) = default_temp_store();
 
     // First, append an initial event to use as causation source.
     let trigger_coord = Coordinate::new("user", "trigger").expect("valid trigger coordinate");
@@ -240,9 +241,7 @@ fn batch_oversized_item_no_partial_visibility() {
 /// Test: full batch visibility on success.
 #[test]
 fn batch_atomicity_full_visibility_on_success() {
-    let tmp = tempfile::tempdir().expect("create temp dir for full-visibility test");
-    let config = StoreConfig::new(tmp.path());
-    let store = Store::open(config).expect("open store for full-visibility test");
+    let (_tmp, store) = default_temp_store();
 
     let coord = Coordinate::new("user", "profile").expect("valid profile coordinate");
     let items: Vec<BatchAppendItem> = (0..5)
@@ -282,9 +281,7 @@ fn batch_atomicity_full_visibility_on_success() {
 /// Test: batch envelope marker is invisible to queries.
 #[test]
 fn batch_marker_invisible() {
-    let tmp = tempfile::tempdir().expect("create temp dir for marker invisibility test");
-    let config = StoreConfig::new(tmp.path());
-    let store = Store::open(config).expect("open store for marker invisibility test");
+    let (_tmp, store) = default_temp_store();
 
     let coord = Coordinate::new("test", "marker").expect("valid marker coordinate");
     let items = vec![BatchAppendItem::new(
@@ -310,9 +307,7 @@ fn batch_marker_invisible() {
 /// Test: intra-batch causation linking.
 #[test]
 fn batch_intra_batch_causation() {
-    let tmp = tempfile::tempdir().expect("create temp dir for intra-batch causation test");
-    let config = StoreConfig::new(tmp.path());
-    let store = Store::open(config).expect("open store for intra-batch causation test");
+    let (_tmp, store) = default_temp_store();
 
     let coord = Coordinate::new("chain", "test").expect("valid chain coordinate");
 
@@ -1257,8 +1252,7 @@ fn batch_publish_atomicity_concurrent_reader_sees_zero_or_all() {
 /// traversal all fail loud against the buggy code.
 #[test]
 fn batch_multi_item_same_entity_hash_chain_is_continuous() {
-    let tmp = tempfile::tempdir().expect("create temp dir for hash chain regression");
-    let store = Store::open(StoreConfig::new(tmp.path())).expect("open store");
+    let (_tmp, store) = default_temp_store();
     let coord = Coordinate::new("regress", "hashchain").expect("valid coord");
 
     // Three distinct payloads on the SAME entity. Distinct payloads matter:
@@ -1634,8 +1628,7 @@ fn batch_wall_ms_monotonic_under_regressing_clock() {
 
 #[test]
 fn outbox_stage_with_causation_links_item_to_prior_item() {
-    let tmp = tempfile::tempdir().expect("temp dir");
-    let store = Store::open(StoreConfig::new(tmp.path())).expect("open store");
+    let (_tmp, store) = default_temp_store();
     let coord = Coordinate::new("entity:causation", "scope:test").expect("valid coordinate");
 
     let receipts = store

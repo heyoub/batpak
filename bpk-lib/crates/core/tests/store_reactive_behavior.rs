@@ -18,7 +18,7 @@ use tempfile::TempDir;
 #[path = "support/small_store.rs"]
 mod small_store_support;
 
-fn test_store() -> (Store, TempDir) {
+fn test_store() -> (TempDir, Store) {
     small_store_support::small_segment_store().expect("small segment store")
 }
 
@@ -38,7 +38,7 @@ fn pipeline_commit_bypass_persists() {
         }
     }
 
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let coord = Coordinate::new("entity:bypass", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
 

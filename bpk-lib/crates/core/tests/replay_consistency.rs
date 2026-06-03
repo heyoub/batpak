@@ -185,7 +185,7 @@ fn seeded_config(dir: &TempDir, enable_checkpoint: bool, enable_mmap_index: bool
         .with_sync_every_n_events(1)
 }
 
-fn seeded_store() -> (Store, TempDir) {
+fn seeded_store() -> (TempDir, Store) {
     let dir = TempDir::new().expect("temp dir");
     let config = seeded_config(&dir, true, true);
     let store = Store::open(config).expect("open");
@@ -197,12 +197,12 @@ fn seeded_store() -> (Store, TempDir) {
             .expect("append");
     }
     store.sync().expect("sync");
-    (store, dir)
+    (dir, store)
 }
 
 #[test]
 fn cold_start_replay_matches_live_projection() {
-    let (store, dir) = seeded_store();
+    let (dir, store) = seeded_store();
     let live: Option<Counter> = store
         .project("entity:replay", &batpak::store::Freshness::Consistent)
         .expect("live project");
@@ -221,7 +221,7 @@ fn cold_start_replay_matches_live_projection() {
 
 #[test]
 fn snapshot_checkpoint_matches_source_projection() {
-    let (store, _dir) = seeded_store();
+    let (_dir, store) = seeded_store();
     let live_stats = store.stats();
     let live: Option<Counter> = store
         .project("entity:replay", &batpak::store::Freshness::Consistent)

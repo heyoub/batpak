@@ -815,7 +815,8 @@ fn check_pub_items_have_tests() {
                     entry.name, witness.path
                 ));
             }
-            let witness_path = resolve_repo_or_core_path(&witness.path);
+            let witness_path =
+                shared_checks::resolve_repo_or_core_path(&repo_root(), Path::new(&witness.path));
             let content = match fs::read_to_string(&witness_path) {
                 Ok(c) => c,
                 Err(err) => fail(&format!(
@@ -944,24 +945,6 @@ fn load_pub_item_allowlist() -> Vec<PubItemAllowlistEntry> {
         }
     }
     entries
-}
-
-fn resolve_repo_or_core_path(path: &str) -> PathBuf {
-    let path = Path::new(path);
-    let repo_path = repo_root().join(path);
-    if repo_path.exists() {
-        return repo_path;
-    }
-    if path.starts_with("src")
-        || path.starts_with("tests")
-        || path.starts_with("examples")
-        || path.starts_with("benches")
-        || path.starts_with("fixtures")
-        || path == Path::new("build.rs")
-    {
-        return core_root().join(path);
-    }
-    repo_path
 }
 
 fn walk_rs_files(dir: &Path, check: &mut dyn FnMut(&Path, &str)) {

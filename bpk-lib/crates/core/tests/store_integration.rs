@@ -22,7 +22,7 @@ use tempfile::TempDir;
 #[path = "support/small_store.rs"]
 mod small_store_support;
 
-fn test_store() -> (Store, TempDir) {
+fn test_store() -> (TempDir, Store) {
     small_store_support::small_segment_store().expect("small segment store")
 }
 
@@ -37,7 +37,7 @@ fn store_config_writer_accessor_exposes_defaults() {
 
 #[test]
 fn append_and_get_single_event() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let coord = Coordinate::new("entity:1", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
     let payload = serde_json::json!({"key": "value"});
@@ -66,7 +66,7 @@ fn append_and_get_single_event() {
 
 #[test]
 fn append_multiple_events_same_entity() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let coord = Coordinate::new("entity:1", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
 
@@ -115,7 +115,7 @@ fn append_multiple_events_same_entity() {
 
 #[test]
 fn query_by_entity_prefix() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let kind = EventKind::custom(0xF, 1);
     let payload = serde_json::json!({"x": 1});
 
@@ -183,7 +183,7 @@ fn query_by_entity_prefix() {
 
 #[test]
 fn query_by_scope() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let kind = EventKind::custom(0xF, 1);
     let payload = serde_json::json!({"x": 1});
 
@@ -257,7 +257,7 @@ fn query_by_scope() {
 
 #[test]
 fn by_scope_wrapper_matches_exact_scope_results() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let kind = EventKind::custom(0xF, 1);
     let payload = serde_json::json!({"x": 1});
 
@@ -305,7 +305,7 @@ fn by_scope_wrapper_matches_exact_scope_results() {
 
 #[test]
 fn query_by_fact() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let coord = Coordinate::new("entity:1", "scope:test").expect("valid coord");
     let kind_a = EventKind::custom(0xF, 1);
     let kind_b = EventKind::custom(0xF, 2);
@@ -560,7 +560,7 @@ fn concurrent_append_and_query() {
 
 #[test]
 fn append_with_cas_success() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let coord = Coordinate::new("entity:cas", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
     let payload = serde_json::json!({"x": 1});
@@ -635,7 +635,7 @@ impl EventSourced for Counter {
 
 #[test]
 fn projection_replays_events() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let coord = Coordinate::new("entity:proj", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
 

@@ -29,7 +29,7 @@ struct PublishedDoc {
 #[path = "support/small_store.rs"]
 mod small_store_support;
 
-fn test_store() -> (Store, TempDir) {
+fn test_store() -> (TempDir, Store) {
     small_store_support::small_segment_store().expect("small segment store")
 }
 
@@ -37,7 +37,7 @@ fn test_store() -> (Store, TempDir) {
 
 #[test]
 fn append_reaction_links_causation() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let coord = Coordinate::new("entity:react", "scope:test").expect("valid coord");
     let kind_cmd = EventKind::custom(0xF, 1);
     let kind_evt = EventKind::custom(0xF, 2);
@@ -94,7 +94,7 @@ fn append_reaction_links_causation() {
 
 #[test]
 fn cas_fails_on_wrong_sequence() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let coord = Coordinate::new("entity:cas-fail", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
 
@@ -131,7 +131,7 @@ fn cas_fails_on_wrong_sequence() {
 
 #[test]
 fn idempotency_returns_same_receipt() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let coord = Coordinate::new("entity:idemp", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
 
@@ -179,7 +179,7 @@ batpak::define_state_machine!(document_state_seal, DocumentState { Draft, Publis
 
 #[test]
 fn apply_transition_persists_event() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let coord = Coordinate::new("entity:transition", "scope:test").expect("valid coord");
 
     // Simulate: Draft -> Published transition with a payload. FREEZE-7:

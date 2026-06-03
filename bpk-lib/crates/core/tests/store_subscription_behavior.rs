@@ -11,13 +11,13 @@ use tempfile::TempDir;
 #[path = "support/small_store.rs"]
 mod small_store_support;
 
-fn test_store() -> (Store, TempDir) {
+fn test_store() -> (TempDir, Store) {
     small_store_support::small_segment_store().expect("small segment store")
 }
 
 #[test]
 fn subscription_receives_matching_events() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let store = Arc::new(store);
     let coord = Coordinate::new("entity:sub", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
@@ -62,7 +62,7 @@ fn subscription_receives_matching_events() {
 
 #[test]
 fn subscription_filters_by_region() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let store = Arc::new(store);
     let kind = EventKind::custom(0xF, 1);
 
@@ -111,7 +111,7 @@ fn subscription_filters_by_region() {
 // --- SubscriptionOps::map ---
 #[test]
 fn subscription_ops_map_transforms_notifications() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let store = Arc::new(store);
     let coord = Coordinate::new("entity:map", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
@@ -173,7 +173,7 @@ fn subscription_ops_map_transforms_notifications() {
 
 #[test]
 fn subscription_ops_filter_chains_correctly() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let store = Arc::new(store);
     let kind1 = EventKind::custom(0xF, 1);
     let kind2 = EventKind::custom(0xF, 2);
@@ -245,7 +245,7 @@ fn subscription_ops_filter_chains_correctly() {
 
 #[test]
 fn subscription_ops_take_limits_count() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let store = Arc::new(store);
     let coord = Coordinate::new("entity:take", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);

@@ -9,7 +9,7 @@ use tempfile::TempDir;
 #[path = "support/small_store.rs"]
 mod small_store_support;
 
-fn test_store() -> (Store, TempDir) {
+fn test_store() -> (TempDir, Store) {
     small_store_support::small_segment_store().expect("small segment store")
 }
 
@@ -36,7 +36,7 @@ fn cursor_batch_sequences(cursor: &mut batpak::store::Cursor, requests: &[usize]
 
 #[test]
 fn cursor_polls_events_in_order() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let coord = Coordinate::new("entity:cur", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
 
@@ -84,7 +84,7 @@ fn cursor_polls_events_in_order() {
 
 #[test]
 fn cursor_poll_batch_respects_boundaries_without_duplicates() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let kind = EventKind::custom(0xF, 1);
     let plans: &[(&str, &[usize], &[usize])] = &[
         ("entity:batch:stepped", &[3, 3, 100, 100], &[3, 3, 4, 0]),
@@ -155,7 +155,7 @@ fn cursor_poll_batch_respects_boundaries_without_duplicates() {
 
 #[test]
 fn cursor_empty_stream_stays_empty_across_poll_and_batch_calls() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let region = Region::entity("entity:nothing");
     let mut cursor = store.cursor_guaranteed(&region);
 
@@ -197,7 +197,7 @@ fn cursor_empty_stream_stays_empty_across_poll_and_batch_calls() {
 
 #[test]
 fn cursor_all_region_first_poll_includes_global_sequence_zero() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let mut cursor = store.cursor_guaranteed(&Region::all());
     let first = cursor
         .poll()
@@ -211,7 +211,7 @@ fn cursor_all_region_first_poll_includes_global_sequence_zero() {
 
 #[test]
 fn cursor_sees_events_appended_after_creation() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let coord = Coordinate::new("entity:late", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
     let region = Region::entity("entity:late");
@@ -243,7 +243,7 @@ fn cursor_sees_events_appended_after_creation() {
 
 #[test]
 fn cursor_ordered_delivery_under_load() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let store = Arc::new(store);
     let coord = Coordinate::new("entity:load", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
@@ -300,7 +300,7 @@ fn cursor_ordered_delivery_under_load() {
 
 #[test]
 fn cursor_repoll_after_eof_sees_new_events() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let coord = Coordinate::new("cursor:repoll", "cursor:scope").expect("valid");
     let kind = EventKind::custom(1, 1);
     let region = Region::entity("cursor:repoll");
@@ -330,7 +330,7 @@ fn cursor_repoll_after_eof_sees_new_events() {
 
 #[test]
 fn cursor_position_persists_no_duplicates() {
-    let (store, _dir) = test_store();
+    let (_dir, store) = test_store();
     let coord = Coordinate::new("cursor:nodup", "cursor:scope").expect("valid");
     let kind = EventKind::custom(1, 1);
     let region = Region::entity("cursor:nodup");

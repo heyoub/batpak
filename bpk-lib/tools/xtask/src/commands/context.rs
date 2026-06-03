@@ -13,7 +13,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::commands::factory_ledger::{collect_gate_rows, collect_ledger_lines, LedgerGateRow};
-use crate::util::{cargo_target_dir, command_succeeds, project_root, run_output};
+use crate::util::{cargo_target_dir, command_succeeds, git_output, project_root, run_output};
 use crate::ContextArgs;
 
 const SCHEMA_VERSION: u32 = 2;
@@ -583,16 +583,6 @@ pub(crate) fn render_context_markdown(packet: &ContextPacket) -> String {
         packet.generated_at_ms, packet.schema_version
     ));
     out
-}
-
-fn git_output<const N: usize>(root: &Path, args: [&str; N]) -> Result<String> {
-    let mut command = Command::new("git");
-    command.current_dir(root).args(args);
-    let output = run_output(command)?;
-    Ok(String::from_utf8(output.stdout)
-        .context("git output utf8")?
-        .trim()
-        .to_owned())
 }
 
 fn now_ms() -> u64 {
