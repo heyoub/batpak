@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-06-05
+
 ### Added
 - Added `Store::query_entries_after` for bounded, global-sequence-ordered index paging
   with the same visibility rules as `Store::query`.

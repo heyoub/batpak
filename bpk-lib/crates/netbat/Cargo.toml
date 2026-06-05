@@ -1,6 +1,6 @@
 [package]
 name = "netbat"
-version = "0.7.6"
+version = "0.8.0"
 edition = "2021"
 rust-version = "1.92"
 license = "MIT OR Apache-2.0"
@@ -9,12 +9,14 @@ repository = "https://github.com/heyoub/batpak"
 homepage = "https://github.com/heyoub/batpak"
 documentation = "https://docs.rs/netbat"
 readme = "README.md"
+keywords = ["event-sourcing", "network", "sync", "server"]
+categories = ["network-programming"]
 
 [features]
 default = []
 
 [dependencies]
-syncbat = { path = "../syncbat", version = "0.7.6" }
+syncbat = { path = "../syncbat", version = "0.8.0" }
 # Tracing spans around the accept loop, per-connection serve, and
 # dispatch are emitted from the wire layer. Subscribers come from
 # the binary.
