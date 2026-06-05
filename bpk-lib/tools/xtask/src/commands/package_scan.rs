@@ -69,7 +69,7 @@ fn package(root: &Path, package_name: &str, allow_dirty: bool) -> Result<()> {
         command.arg("--allow-dirty");
     }
     // Internal path-deps (batpak-macros, batpak-macros-support,
-    // syncbat-macros, batpak-bench-support) are at version 0.7.6 in
+    // syncbat-macros, batpak-bench-support) are at version 0.8.0 in
     // this workspace but only 0.7.0 is published on crates.io. Without
     // these `--config patch.crates-io.<name>.path=...` overrides,
     // `cargo package` would try to resolve the path-dep from
