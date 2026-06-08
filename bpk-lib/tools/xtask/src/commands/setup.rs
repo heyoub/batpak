@@ -67,6 +67,11 @@ pub(crate) fn setup(args: SetupArgs) -> Result<()> {
             "cargo-semver-checks@0.48.0",
             InstallStrategy::PreferBinstall,
         ),
+        RequiredTool::direct(
+            "cargo-machete",
+            "cargo-machete@0.9.2",
+            InstallStrategy::PreferBinstall,
+        ),
         RequiredTool::direct("sg", "ast-grep@0.43.0", InstallStrategy::PreferBinstall),
         RequiredTool::cargo_subcommand(
             "cargo-mutants",

@@ -768,7 +768,6 @@ dependencies = [
  "ctrlc",
  "inventory",
  "netbat",
- "rmp-serde",
  "serde",
  "serde_json",
  "syncbat",

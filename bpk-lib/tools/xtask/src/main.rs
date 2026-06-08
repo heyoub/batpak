@@ -75,8 +75,7 @@ enum XtaskCommand {
     /// never referenced from source. Each unused dep widens the supply-chain
     /// blast radius and slows builds; this gate keeps the dep set tight.
     ///
-    /// Backed by `cargo-machete` (separate install:
-    /// `cargo install cargo-machete --locked`).
+    /// Backed by `cargo-machete`, installed by `cargo xtask setup --install-tools`.
     UnusedDeps,
     /// Verify the publish crates (batpak, syncbat, netbat) compile under
     /// their declared `rust-version` MSRV. Requires the relevant

@@ -8,7 +8,7 @@ description = "Event sourcing with causal graphs and caller-defined gates. Sync 
 repository = "https://github.com/heyoub/batpak"
 homepage = "https://github.com/heyoub/batpak"
 documentation = "https://docs.rs/batpak"
-readme = "../../../README.md"
+readme = "README.md"
 keywords = ["event-sourcing", "audit-trail", "causal-graph", "hash-chain", "append-only"]
 categories = ["database-implementations", "data-structures"]
 exclude = []
@@ -49,7 +49,8 @@ memmap2 = "0.9"
 rayon = "1.12"
 fastrand = { version = "2", optional = true }
 # tempfile 3.25+ allows getrandom >=0.3,<0.5 and Cargo may pick 0.4,
-# splitting the workspace RNG graph. Stay on the latest 0.3-only line.
+# adding another 0.4 route beside uuid's production UUIDv7 RNG path. Stay on
+# the latest 0.3-only tempfile line until the test/tooling RNG graph converges.
 tempfile = ">=3.24, <3.25"
 libc = "0.2"
 ed25519-compact = { version = "2.2.0", default-features = false, features = ["std"] }

@@ -84,8 +84,8 @@ pub(crate) fn sbom() -> Result<()> {
 }
 
 /// Detect dependencies declared in `Cargo.toml` that are never referenced
-/// from source. Backed by `cargo-machete`. Install with
-/// `cargo install cargo-machete --locked`.
+/// from source. Backed by `cargo-machete`, installed by
+/// `cargo xtask setup --install-tools`.
 pub(crate) fn unused_deps() -> Result<()> {
     unused_deps::unused_deps()
 }

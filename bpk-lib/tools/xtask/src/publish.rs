@@ -11,3 +11,28 @@ pub(crate) const RELEASE_CHAIN: &[&str] = &[
     "syncbat",
     "netbat",
 ];
+
+pub(crate) fn local_patch_overrides(package: &str) -> &'static [(&'static str, &'static str)] {
+    match package {
+        "batpak-macros" => &[("batpak-macros-support", "crates/macros-support")],
+        "batpak" => &[
+            ("batpak-macros-support", "crates/macros-support"),
+            ("batpak-macros", "crates/macros"),
+            ("batpak-bench-support", "crates/bench-support"),
+        ],
+        "syncbat" => &[
+            ("batpak-macros-support", "crates/macros-support"),
+            ("batpak-macros", "crates/macros"),
+            ("syncbat-macros", "crates/syncbat-macros"),
+            ("batpak", "crates/core"),
+        ],
+        "netbat" => &[
+            ("batpak-macros-support", "crates/macros-support"),
+            ("batpak-macros", "crates/macros"),
+            ("syncbat-macros", "crates/syncbat-macros"),
+            ("batpak", "crates/core"),
+            ("syncbat", "crates/syncbat"),
+        ],
+        _ => &[],
+    }
+}

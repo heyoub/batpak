@@ -216,8 +216,8 @@ fn check_packaging_surface(repo_root: &Path) -> Result<()> {
     let package_toml = repo_root.join("crates/core/Cargo.toml");
     let package = fs::read_to_string(&package_toml).context("read crates/core/Cargo.toml")?;
     ensure(
-        package.contains("readme = \"../../../README.md\""),
-        "crates/core/Cargo.toml must keep the project-root README.md as the package readme",
+        package.contains("readme = \"README.md\""),
+        "crates/core/Cargo.toml must point at the crate-local README.md so Cargo packaging stays warning-free",
     )?;
     ensure(
         !package.contains("\"guide/**\""),

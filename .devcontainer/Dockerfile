@@ -51,6 +51,7 @@ RUN cargo binstall --no-confirm cargo-llvm-cov@0.8.5 || cargo install --locked c
 RUN rustup toolchain install nightly-2025-12-11 --profile minimal --no-self-update
 RUN cargo binstall --no-confirm cargo-public-api@0.51.0 || cargo install --locked cargo-public-api@0.51.0
 RUN cargo binstall --no-confirm cargo-semver-checks@0.48.0 || cargo install --locked cargo-semver-checks@0.48.0
+RUN cargo binstall --no-confirm cargo-machete@0.9.2 || cargo install --locked cargo-machete@0.9.2
 RUN cargo binstall --no-confirm ast-grep@0.43.0 || cargo install --locked ast-grep@0.43.0
 RUN npm install -g pnpm@10.33.0
 # The published GNU binary currently requires a newer glibc than bookworm ships,

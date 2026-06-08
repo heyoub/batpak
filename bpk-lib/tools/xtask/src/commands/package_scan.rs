@@ -1,4 +1,4 @@
-use crate::publish::PUBLISH_CRATES;
+use crate::publish::{local_patch_overrides, PUBLISH_CRATES};
 use crate::util::{cargo_target_dir, repo_root, run, run_output};
 use crate::PackageLeakScanArgs;
 use anyhow::{bail, Context, Result};
@@ -68,22 +68,10 @@ fn package(root: &Path, package_name: &str, allow_dirty: bool) -> Result<()> {
     if allow_dirty {
         command.arg("--allow-dirty");
     }
-    // Internal path-deps (batpak-macros, batpak-macros-support,
-    // syncbat-macros, batpak-bench-support) are at version 0.8.0 in
-    // this workspace but only 0.7.0 is published on crates.io. Without
-    // these `--config patch.crates-io.<name>.path=...` overrides,
-    // `cargo package` would try to resolve the path-dep from
-    // crates.io and fail with "failed to select a version for the
-    // requirement". Mirrors release.rs::consumer_smoke which uses
-    // the same pattern.
-    for (name, relative_path) in [
-        ("batpak-macros-support", "crates/macros-support"),
-        ("batpak-macros", "crates/macros"),
-        ("batpak-bench-support", "crates/bench-support"),
-        ("syncbat-macros", "crates/syncbat-macros"),
-        ("batpak", "crates/core"),
-        ("syncbat", "crates/syncbat"),
-    ] {
+    // Internal path-deps are at version 0.8.0 in this workspace but only
+    // 0.7.0 is published on crates.io. Pass only the patches needed for this
+    // package graph so Cargo does not emit unused-patch warnings.
+    for (name, relative_path) in local_patch_overrides(package_name) {
         command
             .arg("--config")
             .arg(format!("patch.crates-io.{name}.path=\"{relative_path}\""));
