@@ -383,7 +383,9 @@ pub struct ReadWalkEvidenceRequest {
     pub entity: Option<String>,
     /// Optional exact scope selector.
     pub scope: Option<String>,
-    /// Optional output limit (bounded to [`EVIDENCE_MAX_LIMIT`]).
+    /// Optional output limit. Bounded to [`EVIDENCE_MAX_LIMIT`] (or the tighter
+    /// [`EVIDENCE_READ_WALK_PROOF_MAX_LIMIT`] when `include_proof_refs` is set);
+    /// omitting it applies that same bound rather than scanning the whole region.
     pub limit: Option<u64>,
     /// Include deterministic proof refs for returned entries.
     pub include_proof_refs: bool,
@@ -422,20 +424,18 @@ impl ReadWalkEvidenceRequest {
             region = region.with_scope(scope);
         }
 
-        // Proof refs add a per-entry hash to the body, so they get a tighter
-        // bound — and an unbounded (`None`) request is forced onto that bound
-        // rather than streaming every match into a single oversized frame.
+        // Always bound the read, even when `limit` is omitted: an unbounded
+        // request makes the store materialize every matching entry (work
+        // proportional to the whole store) before producing an otherwise small
+        // report. Proof refs additionally add a per-entry hash to the body, so
+        // they get a tighter bound to keep the hex-expanded ack within frame.
         let max_limit = if self.include_proof_refs {
             EVIDENCE_READ_WALK_PROOF_MAX_LIMIT
         } else {
             EVIDENCE_MAX_LIMIT
         };
-        let bounded_limit = match self.limit {
-            Some(value) => Some(value.min(max_limit)),
-            None if self.include_proof_refs => Some(max_limit),
-            None => None,
-        };
-        let limit = bounded_limit.map(|value| usize::try_from(value).unwrap_or(usize::MAX));
+        let bounded_limit = self.limit.map_or(max_limit, |value| value.min(max_limit));
+        let limit = Some(usize::try_from(bounded_limit).unwrap_or(usize::MAX));
 
         Ok(ReadWalkRequest {
             region,
@@ -766,7 +766,9 @@ mod tests {
     }
 
     #[test]
-    fn read_walk_request_allows_unbounded_region() -> Result<()> {
+    fn read_walk_request_bounds_omitted_limit() -> Result<()> {
+        // An all-store request that omits `limit` must still be bounded so the
+        // store does not scan/materialize the whole region.
         let request = ReadWalkEvidenceRequest {
             entity: None,
             scope: None,
@@ -774,7 +776,7 @@ mod tests {
             include_proof_refs: false,
         };
         let core = request.to_core()?;
-        assert_eq!(core.limit, None);
+        assert_eq!(core.limit, Some(usize::try_from(EVIDENCE_MAX_LIMIT)?));
         Ok(())
     }
 
