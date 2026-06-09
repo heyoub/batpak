@@ -195,6 +195,44 @@ fn build_core(store: &Arc<batpak::store::Store>) -> Result<syncbat::Core> {
         )
         .map_err(|error| anyhow!("register event.walk: {error}"))?;
     builder
+        .register(
+            hbat::EVIDENCE_CHAIN_WALK_DESCRIPTOR.clone(),
+            hbat::ChainWalkEvidenceHandler {
+                store: Arc::clone(store),
+            },
+        )
+        .map_err(|error| anyhow!("register evidence.chain_walk: {error}"))?;
+    builder
+        .register(
+            hbat::EVIDENCE_STORE_RESOURCE_DESCRIPTOR.clone(),
+            hbat::StoreResourceEvidenceHandler {
+                store: Arc::clone(store),
+            },
+        )
+        .map_err(|error| anyhow!("register evidence.store_resource: {error}"))?;
+    builder
+        .register(
+            hbat::EVIDENCE_READ_WALK_DESCRIPTOR.clone(),
+            hbat::ReadWalkEvidenceHandler {
+                store: Arc::clone(store),
+            },
+        )
+        .map_err(|error| anyhow!("register evidence.read_walk: {error}"))?;
+    // The reference host is domain-neutral, so it registers an empty projection
+    // table: `evidence.projection_run` is advertised on the wire but resolves
+    // every projection id to an `unknown projection` error. An embedder builds
+    // its own host and calls `registry.register::<T>(..)` for each projection.
+    let projection_registry = Arc::new(batpak::store::ProjectionEvidenceRegistry::new());
+    builder
+        .register(
+            hbat::EVIDENCE_PROJECTION_RUN_DESCRIPTOR.clone(),
+            hbat::ProjectionRunEvidenceHandler {
+                store: Arc::clone(store),
+                registry: Arc::clone(&projection_registry),
+            },
+        )
+        .map_err(|error| anyhow!("register evidence.projection_run: {error}"))?;
+    builder
         .build()
         .map_err(|error| anyhow!("build syncbat core: {error}"))
 }

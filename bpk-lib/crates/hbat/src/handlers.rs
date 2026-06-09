@@ -17,7 +17,8 @@ use batpak::id::EventId;
 use batpak::store::index::IndexEntry;
 use batpak::store::{
     AppendOptions, AppendReceipt, BatchAppendItem, CausationRef, EncodedBytes, ExtensionKey,
-    ReceiptVerification, ReceiptVerificationError, Store,
+    ProjectionEvidenceRegistry, ProjectionRunReportError, ReceiptVerification,
+    ReceiptVerificationError, Store,
 };
 // Hex codec is the canonical netbat implementation; hbat does not
 // re-roll its own. See netbat::transport::hex.
@@ -27,6 +28,11 @@ use syncbat::{Ctx, Handler, HandlerError, HandlerResult};
 use crate::bank::{
     BankCommitAck, BankCommitRequest, EventGetAck, EventGetRequest, EventQueryAck,
     EventQueryRequest, EventSummary, EVENT_QUERY_MAX_LIMIT,
+};
+use crate::evidence::{
+    ChainWalkEvidenceAck, ChainWalkEvidenceRequest, ProjectionRunEvidenceAck,
+    ProjectionRunEvidenceRequest, ReadWalkEvidenceAck, ReadWalkEvidenceRequest,
+    StoreResourceEvidenceAck, StoreResourceEvidenceRequest, EVIDENCE_MAX_LIMIT,
 };
 use crate::receipt::{ReceiptVerifyAck, ReceiptVerifyRequest};
 use crate::walk::{EventWalkAck, EventWalkRequest, EVENT_WALK_MAX_LIMIT};
@@ -450,6 +456,191 @@ fn handle_event_walk(store: &Store, input: &[u8]) -> HandlerResult {
         .collect::<Result<_, _>>()?;
 
     let ack = EventWalkAck { entries };
+    batpak::encoding::to_bytes(&ack)
+        .map_err(|error| HandlerError::failed(format!("encode ack: {error}")))
+}
+
+// ─── evidence.chain_walk handler ──────────────────────────────────────────────
+
+/// Handler binding for [`crate::evidence::EVIDENCE_CHAIN_WALK_DESCRIPTOR`].
+pub struct ChainWalkEvidenceHandler {
+    /// Shared handle to the BatPAK store. Cloning the `Arc` is cheap.
+    pub store: Arc<Store>,
+}
+
+impl Handler for ChainWalkEvidenceHandler {
+    fn handle(&mut self, input: &[u8], _cx: &mut Ctx<'_>) -> HandlerResult {
+        handle_evidence_chain_walk(&self.store, input)
+    }
+}
+
+fn handle_evidence_chain_walk(store: &Store, input: &[u8]) -> HandlerResult {
+    let request: ChainWalkEvidenceRequest = batpak::encoding::from_bytes(input)
+        .map_err(|error| HandlerError::invalid_input(format!("decode request: {error}")))?;
+
+    let bounded_limit = request.limit.min(EVIDENCE_MAX_LIMIT);
+    let core_request = request
+        .to_core()
+        .map_err(|error| HandlerError::invalid_input(error.to_string()))?;
+
+    let report = store
+        .chain_walk_evidence(&core_request)
+        .map_err(|error| HandlerError::failed(format!("chain walk evidence: {error}")))?;
+
+    // checked_count reaching the bound means the walk stopped on `limit`, so
+    // more ancestry may exist — a safe over-approximation matching event.query.
+    let truncated = report.body.checked_count >= bounded_limit;
+    let (report_hex, body_hash_hex) = encode_report_body(&report.body, &report.body_hash)?;
+    let ack = ChainWalkEvidenceAck {
+        report_hex,
+        body_hash_hex,
+        truncated,
+    };
+    batpak::encoding::to_bytes(&ack)
+        .map_err(|error| HandlerError::failed(format!("encode ack: {error}")))
+}
+
+/// Encode an evidence report body to its canonical `(report_hex, body_hash_hex)`
+/// wire pair.
+///
+/// `report_hex` is the exact byte material `body_hash` is computed over, so a
+/// consumer can re-hash `report_hex` and confirm it equals `body_hash_hex`
+/// (evidence-report identity per `RECEIPTS.md`).
+fn encode_report_body<B: serde::Serialize>(
+    body: &B,
+    body_hash: &[u8; 32],
+) -> Result<(String, String), HandlerError> {
+    let body_bytes = batpak::encoding::to_bytes(body)
+        .map_err(|error| HandlerError::failed(format!("encode report body: {error}")))?;
+    Ok((encode_hex_str(&body_bytes), encode_hex_str(body_hash)))
+}
+
+// ─── evidence.store_resource handler ──────────────────────────────────────────
+
+/// Handler binding for [`crate::evidence::EVIDENCE_STORE_RESOURCE_DESCRIPTOR`].
+pub struct StoreResourceEvidenceHandler {
+    /// Shared handle to the BatPAK store. Cloning the `Arc` is cheap.
+    pub store: Arc<Store>,
+}
+
+impl Handler for StoreResourceEvidenceHandler {
+    fn handle(&mut self, input: &[u8], _cx: &mut Ctx<'_>) -> HandlerResult {
+        handle_evidence_store_resource(&self.store, input)
+    }
+}
+
+fn handle_evidence_store_resource(store: &Store, input: &[u8]) -> HandlerResult {
+    // The request is empty, but decode it so a malformed frame is rejected
+    // rather than silently ignored.
+    let _request: StoreResourceEvidenceRequest = batpak::encoding::from_bytes(input)
+        .map_err(|error| HandlerError::invalid_input(format!("decode request: {error}")))?;
+
+    let report = store
+        .store_resource_evidence_report()
+        .map_err(|error| HandlerError::failed(format!("store resource evidence: {error}")))?;
+
+    let (report_hex, body_hash_hex) = encode_report_body(&report.body, &report.body_hash)?;
+    let ack = StoreResourceEvidenceAck {
+        report_hex,
+        body_hash_hex,
+        truncated: false,
+    };
+    batpak::encoding::to_bytes(&ack)
+        .map_err(|error| HandlerError::failed(format!("encode ack: {error}")))
+}
+
+// ─── evidence.read_walk handler ───────────────────────────────────────────────
+
+/// Handler binding for [`crate::evidence::EVIDENCE_READ_WALK_DESCRIPTOR`].
+pub struct ReadWalkEvidenceHandler {
+    /// Shared handle to the BatPAK store. Cloning the `Arc` is cheap.
+    pub store: Arc<Store>,
+}
+
+impl Handler for ReadWalkEvidenceHandler {
+    fn handle(&mut self, input: &[u8], _cx: &mut Ctx<'_>) -> HandlerResult {
+        handle_evidence_read_walk(&self.store, input)
+    }
+}
+
+fn handle_evidence_read_walk(store: &Store, input: &[u8]) -> HandlerResult {
+    let request: ReadWalkEvidenceRequest = batpak::encoding::from_bytes(input)
+        .map_err(|error| HandlerError::invalid_input(format!("decode request: {error}")))?;
+
+    let core_request = request
+        .to_core()
+        .map_err(|error| HandlerError::invalid_input(error.to_string()))?;
+
+    let (_entries, report) = store
+        .query_with_read_walk_evidence(&core_request)
+        .map_err(|error| HandlerError::failed(format!("read walk evidence: {error}")))?;
+
+    let truncated = report.body.matched_count > report.body.returned_count;
+    let (report_hex, body_hash_hex) = encode_report_body(&report.body, &report.body_hash)?;
+    let ack = ReadWalkEvidenceAck {
+        report_hex,
+        body_hash_hex,
+        truncated,
+    };
+    batpak::encoding::to_bytes(&ack)
+        .map_err(|error| HandlerError::failed(format!("encode ack: {error}")))
+}
+
+// ─── evidence.projection_run handler ──────────────────────────────────────────
+
+/// Handler binding for [`crate::evidence::EVIDENCE_PROJECTION_RUN_DESCRIPTOR`].
+///
+/// Dispatches the request's domain-neutral `projection` id through an
+/// embedder-populated [`ProjectionEvidenceRegistry`]. The reference `hbat`
+/// binary registers an empty registry, so every projection id resolves to an
+/// `unknown projection` error; an embedder that registers its projections makes
+/// them reachable without changing the wire contract.
+pub struct ProjectionRunEvidenceHandler {
+    /// Shared handle to the BatPAK store. Cloning the `Arc` is cheap.
+    pub store: Arc<Store>,
+    /// Embedder-populated projection dispatch table.
+    pub registry: Arc<ProjectionEvidenceRegistry>,
+}
+
+impl Handler for ProjectionRunEvidenceHandler {
+    fn handle(&mut self, input: &[u8], _cx: &mut Ctx<'_>) -> HandlerResult {
+        handle_evidence_projection_run(&self.store, &self.registry, input)
+    }
+}
+
+fn handle_evidence_projection_run(
+    store: &Store,
+    registry: &ProjectionEvidenceRegistry,
+    input: &[u8],
+) -> HandlerResult {
+    let request: ProjectionRunEvidenceRequest = batpak::encoding::from_bytes(input)
+        .map_err(|error| HandlerError::invalid_input(format!("decode request: {error}")))?;
+
+    let freshness = request.freshness();
+    let report = match registry.run(&request.projection, store, &request.entity, &freshness) {
+        // A failed projection still yields a deterministic evidence report
+        // (findings record the failure); surface it rather than erroring.
+        Some(Ok(report)) => report,
+        Some(Err(ProjectionRunReportError::ProjectionFailed { report, .. })) => *report,
+        Some(Err(other)) => {
+            return Err(HandlerError::failed(format!(
+                "projection run evidence: {other}"
+            )))
+        }
+        None => {
+            return Err(HandlerError::invalid_input(format!(
+                "unknown projection: {}",
+                request.projection
+            )))
+        }
+    };
+
+    let (report_hex, body_hash_hex) = encode_report_body(&report.body, &report.body_hash)?;
+    let ack = ProjectionRunEvidenceAck {
+        report_hex,
+        body_hash_hex,
+        truncated: false,
+    };
     batpak::encoding::to_bytes(&ack)
         .map_err(|error| HandlerError::failed(format!("encode ack: {error}")))
 }

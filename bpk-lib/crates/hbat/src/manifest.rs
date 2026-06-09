@@ -419,13 +419,14 @@ mod tests {
     #[test]
     fn snapshot_has_all_reference_events_and_operations() -> Result<()> {
         let snap = descriptors()?;
-        // 13 events: heartbeat request/ack, bank.commit request/ack,
+        // 21 events: heartbeat request/ack, bank.commit request/ack,
         // event.get request/ack, event.query request/summary/ack,
-        // receipt.verify request/ack, event.walk request/ack.
-        assert_eq!(snap.events.len(), 13, "event count: {snap:?}");
-        // 6 operations: heartbeat, bank.commit, event.get, event.query,
-        // receipt.verify, event.walk.
-        assert_eq!(snap.operations.len(), 6);
+        // receipt.verify request/ack, event.walk request/ack, plus the four
+        // evidence.* request/ack pairs (chain_walk, store_resource, read_walk,
+        // projection_run).
+        assert_eq!(snap.events.len(), 21, "event count: {snap:?}");
+        // 10 operations: the six reference ops plus the four evidence.* ops.
+        assert_eq!(snap.operations.len(), 10);
         let names: Vec<&str> = snap.operations.iter().map(|o| o.name.as_str()).collect();
         assert!(names.contains(&"system.heartbeat"));
         assert!(names.contains(&"bank.commit"));
@@ -433,6 +434,10 @@ mod tests {
         assert!(names.contains(&"event.query"));
         assert!(names.contains(&"receipt.verify"));
         assert!(names.contains(&"event.walk"));
+        assert!(names.contains(&"evidence.chain_walk"));
+        assert!(names.contains(&"evidence.store_resource"));
+        assert!(names.contains(&"evidence.read_walk"));
+        assert!(names.contains(&"evidence.projection_run"));
         Ok(())
     }
 
