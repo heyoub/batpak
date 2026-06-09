@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "BatPAK TypeScript SDK workspace. 0.8.0 release.",
+  "description": "BatPAK TypeScript SDK workspace. 0.8.2 release.",
   "scripts": {
     "build": "pnpm -r run build",
     "test": "pnpm -r run test",

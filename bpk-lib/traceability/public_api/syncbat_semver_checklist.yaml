@@ -4,7 +4,7 @@
 # surface. hbat is reference-host only (`publish = false`); out of scope for this cut.
 package: syncbat
 baseline_version: 0.7.0
-current_version: 0.8.1
+current_version: 0.8.2
 witness: target/semver-public-api/semver-checks.txt
 summary: "syncbat not on crates.io; 5 intentional breaks classified from CHANGELOG vs pre-0.8.0 transitional surface."
 

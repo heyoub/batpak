@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-06-09
+
+### Added
+- Landed `@batpak/sdk` in the monorepo as the one-install npm entry for
+  NETBAT/1 TypeScript consumers.
+
+### Changed
+- Aligned every publishable Rust crate and `@batpak/*` npm package on
+  `0.8.2`, catching npm up to the substrate evidence surface already in
+  git from `0.8.1`.
+- Regenerated `bpk-ts` manifest bindings so `@batpak/generated` carries the
+  `evidence.*` wire ops on the unified release line.
+- Made `pnpm generate` force-rebuild codegen before emit so stale
+  `tsconfig.tsbuildinfo` cannot skip `dist/` and reject manifest tokens.
+
 ## [0.8.1] - 2026-06-09
 
 ### Added

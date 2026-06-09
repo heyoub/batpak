@@ -32,7 +32,7 @@ const NETBAT_VERSION: &str = "NETBAT/1";
 /// TS codegen does not gate on this today, but it is recorded so the
 /// generated TS can advertise which BatPAK family snapshot it was
 /// generated against.
-const BATPAK_VERSION: &str = "0.8.1";
+const BATPAK_VERSION: &str = "0.8.2";
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]

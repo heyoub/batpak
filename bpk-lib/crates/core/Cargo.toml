@@ -1,6 +1,6 @@
 [package]
 name = "batpak"
-version = "0.8.1"
+version = "0.8.2"
 edition = "2021"
 rust-version = "1.92"
 license = "MIT OR Apache-2.0"
@@ -34,8 +34,8 @@ dangerous-test-hooks = ["dep:fastrand"]
 uuid = { version = ">=1.20, <1.24", default-features = false, features = ["std", "v7"] }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
-batpak-macros-support = { path = "../macros-support", version = "0.8.1" }
-batpak-macros = { path = "../macros", version = "0.8.1" }
+batpak-macros-support = { path = "../macros-support", version = "0.8.2" }
+batpak-macros = { path = "../macros", version = "0.8.2" }
 blake3 = "1"
 flume = "0.12"
 crc32fast = "1"
@@ -58,7 +58,7 @@ zeroize = "1"
 # NO TOKIO. Invariant 1.
 
 [dev-dependencies]
-batpak-bench-support = { path = "../bench-support", version = "0.8.1" }
+batpak-bench-support = { path = "../bench-support", version = "0.8.2" }
 proptest = "1"
 arbitrary = { version = "1", features = ["derive"] }
 criterion = { version = "0.8", features = ["html_reports"] }

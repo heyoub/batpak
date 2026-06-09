@@ -1,5 +1,5 @@
 /**
- * 0.8.0 live integration spike.
+ * 0.8.2 live integration spike.
  *
  * Boots against a running `hbat` on `--port N` and exercises the live
  * calibration path: heartbeat + commit/query/get + typed ERR. The full

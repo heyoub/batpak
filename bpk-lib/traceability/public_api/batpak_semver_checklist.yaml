@@ -5,7 +5,7 @@
 # rules over 0.8.0; additive wire ops are a patch pre-1.0.
 package: batpak
 baseline_version: 0.7.0
-current_version: 0.8.1
+current_version: 0.8.2
 witness: target/semver-public-api/semver-checks.txt
 summary: "15 major semver-check rules are classified in the 0.8.0 witness; prelude narrowing adds intentional enum/function/struct/trait alias removals. All classified intentional_0_8 or path_relocation unless noted. 0.8.1 adds only new public items (additive, patch pre-1.0)."
 

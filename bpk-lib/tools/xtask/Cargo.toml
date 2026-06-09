@@ -22,6 +22,6 @@ tempfile = ">=3.24, <3.25"
 toml = "1.1"
 # Reference host crate. Provides hbat::manifest::descriptors() consumed by
 # `cargo xtask export-ts-manifest`. Not part of FAMILY_CRATES; not published.
-hbat = { path = "../../crates/hbat", version = "0.8.1" }
+hbat = { path = "../../crates/hbat", version = "0.8.2" }
 # Substrate store for the opt-in factory command ledger (`factory-ledger`).
-batpak = { path = "../../crates/core", version = "0.8.1", default-features = false }
+batpak = { path = "../../crates/core", version = "0.8.2", default-features = false }

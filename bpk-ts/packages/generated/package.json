@@ -1,6 +1,6 @@
 {
   "name": "@batpak/generated",
-  "version": "0.8.1",
+  "version": "0.8.2",
   "description": "Auto-generated bindings from batpak.manifest.json. FULLY OVERWRITTEN on each pnpm generate.",
   "license": "MIT OR Apache-2.0",
   "repository": {

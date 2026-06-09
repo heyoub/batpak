@@ -1,6 +1,6 @@
 [package]
 name = "syncbat"
-version = "0.8.1"
+version = "0.8.2"
 edition = "2021"
 rust-version = "1.92"
 license = "MIT OR Apache-2.0"
@@ -16,9 +16,9 @@ categories = ["database-implementations"]
 default = []
 
 [dependencies]
-batpak = { path = "../core", version = "0.8.1", default-features = false }
+batpak = { path = "../core", version = "0.8.2", default-features = false }
 serde = { version = "1", features = ["derive"] }
-syncbat-macros = { path = "../syncbat-macros", version = "0.8.1" }
+syncbat-macros = { path = "../syncbat-macros", version = "0.8.2" }
 # `tracing` provides structured spans + events around dispatch.
 # Subscribers come from the binary (hbat or downstream); syncbat just
 # emits. No runtime cost when no subscriber is installed.

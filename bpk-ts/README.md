@@ -1,6 +1,6 @@
-# BatPAK TypeScript SDK — 0.8.0
+# BatPAK TypeScript SDK — 0.8.2
 
-The TypeScript surface for the BatPAK family. 0.8.0 release.
+The TypeScript surface for the BatPAK family. 0.8.2 release.
 
 Six reference operations live on NETBAT/1 over TCP today:
 
@@ -44,7 +44,7 @@ bpk-ts/batpak.manifest.json
 For apps talking to a NETBAT/1 host (for example `hbat`), install one package:
 
 ```sh
-npm install @batpak/sdk@0.8.0
+npm install @batpak/sdk@0.8.2
 ```
 
 That pulls `@batpak/client`, `@batpak/schema`, `@batpak/generated`, and

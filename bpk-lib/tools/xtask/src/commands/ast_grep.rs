@@ -6,6 +6,7 @@ use std::process::Command;
 pub(crate) fn ast_grep() -> Result<()> {
     ast_grep_store()?;
     ast_grep_devops()?;
+    super::ast_grep_family_version::ast_grep_family_version()?;
     Ok(())
 }
 
