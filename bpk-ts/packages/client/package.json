@@ -1,8 +1,19 @@
 {
   "name": "@batpak/client",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.8.0",
   "description": "NETBAT/1 frame client. Phase 0: TCP only.",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/heyoub/batpak.git",
+    "directory": "bpk-ts/packages/client"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist"
+  ],
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

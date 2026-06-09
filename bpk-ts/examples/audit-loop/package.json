@@ -11,10 +11,7 @@
     "clean": "node -e \"for (const p of ['dist','tsconfig.tsbuildinfo']) require('node:fs').rmSync(p,{recursive:true,force:true})\""
   },
   "dependencies": {
-    "@batpak/canonical": "workspace:*",
-    "@batpak/client": "workspace:*",
-    "@batpak/generated": "workspace:*",
-    "@batpak/schema": "workspace:*"
+    "@batpak/sdk": "workspace:*"
   },
   "devDependencies": {
     "vitest": "2.1.9"

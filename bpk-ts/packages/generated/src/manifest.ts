@@ -4,7 +4,6 @@
 
 // Source manifest: batpak.manifest.json
 export const MANIFEST_VERSION = 1 as const;
-export const NETBAT_VERSION = "NETBAT/1" as const;
 export const BATPAK_VERSION = "0.8.1" as const;
 export const CANONICAL_ENCODING = {"kind":"named-field-msgpack","rmpSerdeVersion":"1.3.1"} as const;
 export const BATPAK_TS_MANIFEST = {

@@ -1,4 +1,4 @@
-import { Schema, bank, decodeBytes } from "@batpak/schema";
+import { Schema, bank, decodeBytes } from "@batpak/sdk";
 
 import {
   DEMO_KIND_CATEGORY,

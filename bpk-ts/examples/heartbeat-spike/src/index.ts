@@ -25,23 +25,24 @@
 
 import { createConnection, type Socket } from "node:net";
 
-import { encodeHex } from "@batpak/canonical";
-import { call } from "@batpak/client";
-import { decodeBytes, encodeBytes } from "@batpak/schema";
 import {
   BankCommitAck,
   BankCommitRequest,
+  BANK_COMMIT,
+  call,
+  decodeBytes,
+  encodeBytes,
+  encodeHex,
   EventGetAck,
   EventGetRequest,
+  EVENT_GET,
   EventQueryAck,
   EventQueryRequest,
+  EVENT_QUERY,
   SystemHeartbeatAck,
   SystemHeartbeatRequest,
-  BANK_COMMIT,
-  EVENT_GET,
-  EVENT_QUERY,
   SYSTEM_HEARTBEAT,
-} from "@batpak/generated";
+} from "@batpak/sdk";
 
 interface CliArgs {
   port: number;

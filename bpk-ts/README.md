@@ -35,7 +35,34 @@ bpk-ts/batpak.manifest.json
 @batpak/codegen
   ↓
 @batpak/generated   (Effect 4 schemas + TS types + golden hex)
+  ↓
+@batpak/sdk         (one-install re-export for npm consumers)
 ```
+
+## npm
+
+For apps talking to a NETBAT/1 host (for example `hbat`), install one package:
+
+```sh
+npm install @batpak/sdk@0.8.0
+```
+
+That pulls `@batpak/client`, `@batpak/schema`, `@batpak/generated`, and
+`@batpak/canonical` transitively. Import everything from `@batpak/sdk`:
+
+```typescript
+import {
+  call,
+  decodeBytes,
+  encodeBytes,
+  encodeHex,
+  BankCommitRequest,
+  BANK_COMMIT,
+} from "@batpak/sdk";
+```
+
+Lower-level packages remain published separately for consumers that want
+a narrower dependency surface.
 
 ## Workspace layout
 
@@ -56,6 +83,8 @@ packages/
               @batpak/canonical with runtime validation; bank.event() is
               the real Effect Schema authoring API for downstream-only
               TS events. 6 direct tests.
+  sdk/        One-install npm entry; re-exports canonical, client,
+              schema, and generated for downstream apps.
   test/       End-to-end parity harness across every event and every
               operation in the manifest. 57 parity assertions.
 examples/

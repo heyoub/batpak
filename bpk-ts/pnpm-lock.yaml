@@ -35,18 +35,9 @@ importers:
 
   examples/audit-loop:
     dependencies:
-      '@batpak/canonical':
+      '@batpak/sdk':
         specifier: workspace:*
-        version: link:../../packages/canonical
-      '@batpak/client':
-        specifier: workspace:*
-        version: link:../../packages/client
-      '@batpak/generated':
-        specifier: workspace:*
-        version: link:../../packages/generated
-      '@batpak/schema':
-        specifier: workspace:*
-        version: link:../../packages/schema
+        version: link:../../packages/sdk
     devDependencies:
       vitest:
         specifier: 2.1.9
@@ -54,18 +45,9 @@ importers:
 
   examples/heartbeat-spike:
     dependencies:
-      '@batpak/canonical':
+      '@batpak/sdk':
         specifier: workspace:*
-        version: link:../../packages/canonical
-      '@batpak/client':
-        specifier: workspace:*
-        version: link:../../packages/client
-      '@batpak/generated':
-        specifier: workspace:*
-        version: link:../../packages/generated
-      '@batpak/schema':
-        specifier: workspace:*
-        version: link:../../packages/schema
+        version: link:../../packages/sdk
 
   packages/canonical:
     devDependencies:
@@ -95,6 +77,21 @@ importers:
       effect:
         specifier: 4.0.0-beta.78
         version: 4.0.0-beta.78
+
+  packages/sdk:
+    dependencies:
+      '@batpak/canonical':
+        specifier: workspace:*
+        version: link:../canonical
+      '@batpak/client':
+        specifier: workspace:*
+        version: link:../client
+      '@batpak/generated':
+        specifier: workspace:*
+        version: link:../generated
+      '@batpak/schema':
+        specifier: workspace:*
+        version: link:../schema
 
   packages/test:
     dependencies:

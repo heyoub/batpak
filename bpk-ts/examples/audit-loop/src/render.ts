@@ -1,4 +1,4 @@
-import type { EventGetAck, EventSummary } from "@batpak/generated";
+import type { EventGetAck, EventSummary } from "@batpak/sdk";
 
 import { decodePayload, kindLabel } from "./events.js";
 

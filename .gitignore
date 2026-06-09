@@ -23,6 +23,8 @@
 .vscode/
 .cursor/plans/
 .cursor
+# Local pnpm content store when install runs with a repo-local store-dir.
+.pnpm-store/
 # Most nested Cargo.lock files from path-dependency fixture crates are cache,
 # not source of truth. The two committed fixture locks below are intentional
 # downstream-package witnesses and must remain visible to staged-diff/package

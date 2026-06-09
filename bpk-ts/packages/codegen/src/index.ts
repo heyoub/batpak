@@ -235,7 +235,6 @@ function renderManifestModule(manifest: BatpakTsManifest, options: GenerateOptio
     FILE_HEADER,
     `// Source manifest: ${basename(options.manifestPath)}`,
     `export const MANIFEST_VERSION = ${manifest.manifestVersion} as const;`,
-    `export const NETBAT_VERSION = ${JSON.stringify(manifest.netbatVersion)} as const;`,
     `export const BATPAK_VERSION = ${JSON.stringify(manifest.batpakVersion)} as const;`,
     `export const CANONICAL_ENCODING = ${JSON.stringify(manifest.canonicalEncoding)} as const;`,
     `export const BATPAK_TS_MANIFEST = ${json} as const;`,
