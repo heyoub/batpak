@@ -40,12 +40,12 @@ const MANIFEST_PATH = resolve(here, "../../../batpak.manifest.json");
 const manifest: BatpakTsManifest = readManifest(MANIFEST_PATH);
 
 describe("manifest envelope", () => {
-  it("declares the 0.8.0 protocol versions", () => {
+  it("declares the 0.8.1 protocol versions", () => {
     expect(manifest.manifestVersion).toBe(1);
     expect(manifest.netbatVersion).toBe("NETBAT/1");
     expect(manifest.canonicalEncoding.kind).toBe("named-field-msgpack");
     expect(manifest.canonicalEncoding.rmpSerdeVersion).toBe("1.3.1");
-    expect(manifest.batpakVersion).toBe("0.8.0");
+    expect(manifest.batpakVersion).toBe("0.8.1");
   });
 
   it("carries all reference hbat events", () => {
