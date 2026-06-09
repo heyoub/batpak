@@ -4,20 +4,63 @@
 use std::sync::Arc;
 
 use anyhow::{bail, Result};
-use batpak::store::{Store, StoreConfig};
-use batpak::EventPayload;
+use batpak::event::{Event, EventKind, JsonValueInput};
+use batpak::store::{
+    ChainWalkReportBody, ProjectionEvidenceRegistry, ProjectionRunReportBody, ReadWalkReportBody,
+    Store, StoreConfig, StoreResourceReportBody,
+};
+use batpak::{EventPayload, EventSourced};
 use hbat::bank::{
     BankCommitAck, BankCommitRequest, EventGetAck, EventGetRequest, BANK_COMMIT_DESCRIPTOR,
     EVENT_GET_DESCRIPTOR, EVENT_QUERY_DESCRIPTOR,
 };
+use hbat::evidence::{
+    ChainWalkEvidenceAck, ChainWalkEvidenceRequest, ProjectionRunEvidenceAck,
+    ProjectionRunEvidenceRequest, ReadWalkEvidenceAck, ReadWalkEvidenceRequest,
+    StoreResourceEvidenceAck, StoreResourceEvidenceRequest, EVIDENCE_CHAIN_WALK_DESCRIPTOR,
+    EVIDENCE_PROJECTION_RUN_DESCRIPTOR, EVIDENCE_READ_WALK_DESCRIPTOR,
+    EVIDENCE_STORE_RESOURCE_DESCRIPTOR,
+};
 use hbat::handlers::{
-    BankCommitHandler, EventGetHandler, EventQueryHandler, EventWalkHandler, ReceiptVerifyHandler,
+    BankCommitHandler, ChainWalkEvidenceHandler, EventGetHandler, EventQueryHandler,
+    EventWalkHandler, ProjectionRunEvidenceHandler, ReadWalkEvidenceHandler, ReceiptVerifyHandler,
+    StoreResourceEvidenceHandler,
 };
 use hbat::heartbeat::SystemHeartbeatRequest;
 use hbat::receipt::{ReceiptVerifyAck, ReceiptVerifyRequest, RECEIPT_VERIFY_DESCRIPTOR};
 use hbat::walk::{EventWalkAck, EventWalkRequest, EVENT_WALK_DESCRIPTOR};
 use hbat::EventPayloadFixture;
 use netbat::{decode_hex_str, encode_hex_str};
+
+/// Minimal fixture projection used to exercise the `evidence.projection_run`
+/// registry dispatch path end to end.
+#[derive(Default, Debug, serde::Serialize, serde::Deserialize)]
+struct TestCounter {
+    count: u64,
+}
+
+impl EventSourced for TestCounter {
+    type Input = JsonValueInput;
+
+    fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
+        (!events.is_empty()).then_some(Self {
+            count: events.len() as u64,
+        })
+    }
+
+    fn apply_event(&mut self, event: &Event<serde_json::Value>) {
+        std::hint::black_box(event.event_kind());
+        self.count += 1;
+    }
+
+    fn relevant_event_kinds() -> &'static [EventKind] {
+        static KINDS: [EventKind; 1] = [EventKind::custom(0xF, 1)];
+        &KINDS
+    }
+}
+
+/// Stable id the test registry registers [`TestCounter`] under.
+const TEST_PROJECTION_ID: &str = "test.counter";
 
 fn fresh_store() -> Result<(Arc<Store>, tempfile::TempDir)> {
     let dir = tempfile::TempDir::new()?;
@@ -59,6 +102,33 @@ fn fresh_core(store: &Arc<Store>) -> Result<syncbat::Core> {
         EVENT_WALK_DESCRIPTOR.clone(),
         EventWalkHandler {
             store: Arc::clone(store),
+        },
+    )?;
+    builder.register(
+        EVIDENCE_CHAIN_WALK_DESCRIPTOR.clone(),
+        ChainWalkEvidenceHandler {
+            store: Arc::clone(store),
+        },
+    )?;
+    builder.register(
+        EVIDENCE_STORE_RESOURCE_DESCRIPTOR.clone(),
+        StoreResourceEvidenceHandler {
+            store: Arc::clone(store),
+        },
+    )?;
+    builder.register(
+        EVIDENCE_READ_WALK_DESCRIPTOR.clone(),
+        ReadWalkEvidenceHandler {
+            store: Arc::clone(store),
+        },
+    )?;
+    let mut registry = ProjectionEvidenceRegistry::new();
+    registry.register::<TestCounter>(TEST_PROJECTION_ID);
+    builder.register(
+        EVIDENCE_PROJECTION_RUN_DESCRIPTOR.clone(),
+        ProjectionRunEvidenceHandler {
+            store: Arc::clone(store),
+            registry: Arc::new(registry),
         },
     )?;
     Ok(builder.build()?)
@@ -296,6 +366,126 @@ fn event_walk_returns_bounded_ancestry_in_order() -> Result<()> {
     assert!(
         walk.entries[0].global_sequence > walk.entries[1].global_sequence,
         "anchor-first walk order is relation order, not ascending global_sequence"
+    );
+    Ok(())
+}
+
+// ─── evidence.* ops ───────────────────────────────────────────────────────────
+
+#[test]
+fn evidence_chain_walk_ack_carries_report_body_and_matching_identity() -> Result<()> {
+    let (store, _dir) = fresh_store()?;
+    let mut core = fresh_core(&store)?;
+    let _first = commit_heartbeat(&mut core, "test:evidence-chain")?;
+    let second = commit_heartbeat(&mut core, "test:evidence-chain")?;
+
+    let request = ChainWalkEvidenceRequest {
+        start_event_id_hex: second.event_id_hex.clone(),
+        start_expected_hash_hex: None,
+        end_event_id_hex: None,
+        limit: 16,
+    };
+    let result = core.invoke("evidence.chain_walk", batpak::encoding::to_bytes(&request)?)?;
+    let ack: ChainWalkEvidenceAck = batpak::encoding::from_bytes(result.output())?;
+
+    // report_hex decodes to the real report body, and body_hash_hex is that
+    // body's identity hash — byte-for-byte equal to a direct typed call.
+    let wire_body: ChainWalkReportBody =
+        batpak::encoding::from_bytes(&decode_hex_str(&ack.report_hex)?)?;
+    let direct = store.chain_walk_evidence(&request.to_core()?)?;
+    assert_eq!(wire_body, direct.body);
+    assert_eq!(ack.body_hash_hex, encode_hex_str(&direct.body_hash));
+    Ok(())
+}
+
+#[test]
+fn evidence_store_resource_ack_carries_snapshot() -> Result<()> {
+    let (store, _dir) = fresh_store()?;
+    let mut core = fresh_core(&store)?;
+    let _ = commit_heartbeat(&mut core, "test:evidence-store")?;
+
+    let request = StoreResourceEvidenceRequest {};
+    let result = core.invoke(
+        "evidence.store_resource",
+        batpak::encoding::to_bytes(&request)?,
+    )?;
+    let ack: StoreResourceEvidenceAck = batpak::encoding::from_bytes(result.output())?;
+
+    let wire_body: StoreResourceReportBody =
+        batpak::encoding::from_bytes(&decode_hex_str(&ack.report_hex)?)?;
+    let direct = store.store_resource_evidence_report()?;
+    assert_eq!(wire_body, direct.body);
+    assert_eq!(ack.body_hash_hex, encode_hex_str(&direct.body_hash));
+    assert!(!ack.truncated);
+    Ok(())
+}
+
+#[test]
+fn evidence_read_walk_ack_carries_report_body() -> Result<()> {
+    let (store, _dir) = fresh_store()?;
+    let mut core = fresh_core(&store)?;
+    let _ = commit_heartbeat(&mut core, "test:evidence-read")?;
+
+    let request = ReadWalkEvidenceRequest {
+        entity: Some("test:evidence-read".to_owned()),
+        scope: None,
+        limit: Some(32),
+        include_proof_refs: false,
+    };
+    let result = core.invoke("evidence.read_walk", batpak::encoding::to_bytes(&request)?)?;
+    let ack: ReadWalkEvidenceAck = batpak::encoding::from_bytes(result.output())?;
+
+    let wire_body: ReadWalkReportBody =
+        batpak::encoding::from_bytes(&decode_hex_str(&ack.report_hex)?)?;
+    let (_entries, direct) = store.query_with_read_walk_evidence(&request.to_core()?)?;
+    assert_eq!(wire_body, direct.body);
+    assert_eq!(ack.body_hash_hex, encode_hex_str(&direct.body_hash));
+    Ok(())
+}
+
+#[test]
+fn evidence_projection_run_dispatches_registered_projection() -> Result<()> {
+    let (store, _dir) = fresh_store()?;
+    let mut core = fresh_core(&store)?;
+    let _ = commit_heartbeat(&mut core, "test:evidence-proj")?;
+
+    let request = ProjectionRunEvidenceRequest {
+        projection: TEST_PROJECTION_ID.to_owned(),
+        entity: "test:evidence-proj".to_owned(),
+        max_stale_ms: None,
+    };
+    let result = core.invoke(
+        "evidence.projection_run",
+        batpak::encoding::to_bytes(&request)?,
+    )?;
+    let ack: ProjectionRunEvidenceAck = batpak::encoding::from_bytes(result.output())?;
+
+    let wire_body: ProjectionRunReportBody =
+        batpak::encoding::from_bytes(&decode_hex_str(&ack.report_hex)?)?;
+    // The report identifies the registered projection by its substrate id.
+    assert!(wire_body.projection_id.contains("test:evidence-proj"));
+    assert_ne!(ack.body_hash_hex, "0".repeat(64));
+    Ok(())
+}
+
+#[test]
+fn evidence_projection_run_unknown_projection_errors() -> Result<()> {
+    let (store, _dir) = fresh_store()?;
+    let mut core = fresh_core(&store)?;
+
+    let request = ProjectionRunEvidenceRequest {
+        projection: "nope.not.registered".to_owned(),
+        entity: "test:evidence-proj".to_owned(),
+        max_stale_ms: None,
+    };
+    let message = invoke_expect_err(
+        &mut core,
+        "evidence.projection_run",
+        batpak::encoding::to_bytes(&request)?,
+    )?;
+    assert!(
+        message.contains("unknown projection"),
+        "expected unknown-projection error, got: {message}"
     );
     Ok(())
 }

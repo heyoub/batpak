@@ -40,6 +40,9 @@ use hbat::{
         BankCommitAck, BankCommitRequest, EventGetAck, EventGetRequest, EventQueryAck,
         EventQueryRequest,
     },
+    evidence::{
+        ChainWalkEvidenceAck, ChainWalkEvidenceRequest, ProjectionRunEvidenceRequest,
+    },
     heartbeat::{SystemHeartbeatAck, SystemHeartbeatRequest},
     receipt::{ReceiptVerifyAck, ReceiptVerifyRequest},
     walk::{EventWalkAck, EventWalkRequest},
@@ -637,5 +640,77 @@ fn ready_payload_carries_addr_port_and_protocol() -> Result<()> {
     // Spawn-and-introspect smoke test: just ensure HBAT_READY parses.
     let host = HbatProcess::spawn()?;
     assert!(host.port() > 0);
+    Ok(())
+}
+
+#[test]
+fn evidence_chain_walk_round_trips_over_tcp() -> Result<()> {
+    let host = HbatProcess::spawn()?;
+
+    // Commit two events to the same entity so a chain exists to walk.
+    let payload = SystemHeartbeatRequest {
+        nonce: "tcp-e2e-evidence-chain".to_owned(),
+    };
+    let payload_bytes = batpak::encoding::to_bytes(&payload)?;
+    let mut last_event_id = String::new();
+    for _ in 0..2 {
+        let commit = BankCommitRequest {
+            entity: "tcp:e2e-evidence".to_owned(),
+            scope: "tcp-e2e-evidence-scope".to_owned(),
+            kind_category: SystemHeartbeatRequest::KIND.category(),
+            kind_type_id: SystemHeartbeatRequest::KIND.type_id(),
+            payload_hex: lowercase_hex(&payload_bytes),
+        };
+        let response = call_one(&host, "bank.commit", &batpak::encoding::to_bytes(&commit)?)?;
+        let ack: BankCommitAck = batpak::encoding::from_bytes(&parse_ok(&response)?)?;
+        last_event_id = ack.event_id_hex;
+    }
+
+    let request = ChainWalkEvidenceRequest {
+        start_event_id_hex: last_event_id,
+        start_expected_hash_hex: None,
+        end_event_id_hex: None,
+        limit: 16,
+    };
+    let response = call_one(
+        &host,
+        "evidence.chain_walk",
+        &batpak::encoding::to_bytes(&request)?,
+    )?;
+    let ack: ChainWalkEvidenceAck = batpak::encoding::from_bytes(&parse_ok(&response)?)?;
+
+    // The ack carries the report body as a canonical blob whose content hash is
+    // the advertised body_hash. Re-hashing the blob with the same function core
+    // uses must reproduce it — the evidence identity contract, over TCP.
+    let report_bytes = netbat::decode_hex_str(&ack.report_hex)?;
+    let rehashed = lowercase_hex(&batpak::event::hash::compute_hash(&report_bytes));
+    assert_eq!(
+        rehashed, ack.body_hash_hex,
+        "report_hex must re-hash to body_hash_hex (evidence identity)"
+    );
+    Ok(())
+}
+
+#[test]
+fn evidence_projection_run_unknown_projection_over_tcp() -> Result<()> {
+    // The reference host is domain-neutral: it advertises evidence.projection_run
+    // but registers no projections, so every projection id is unknown.
+    let host = HbatProcess::spawn()?;
+    let request = ProjectionRunEvidenceRequest {
+        projection: "any.projection".to_owned(),
+        entity: "tcp:e2e-evidence".to_owned(),
+        max_stale_ms: None,
+    };
+    let response = call_one(
+        &host,
+        "evidence.projection_run",
+        &batpak::encoding::to_bytes(&request)?,
+    )?;
+    let (code, message) = parse_err(&response)?;
+    assert_eq!(code, "handler");
+    assert!(
+        message.contains("unknown projection"),
+        "message did not name the unknown projection: {message:?}"
+    );
     Ok(())
 }
