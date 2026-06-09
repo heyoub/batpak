@@ -202,6 +202,30 @@ describe("readManifest validates the envelope", () => {
     }
   });
 
+  it("accepts option<blake3-32-hex> for evidence chain-walk anchors", () => {
+    const path = writeManifest({
+      ...MINIMAL_MANIFEST,
+      events: [
+        {
+          ...MINIMAL_MANIFEST.events[0],
+          name: "evidence.chain_walk.request",
+          tsName: "EvidenceChainWalkRequest",
+          fields: [
+            {
+              wireName: "start_expected_hash_hex",
+              tsName: "start_expected_hash_hex",
+              typeToken: "option<blake3-32-hex>",
+              order: 0,
+            },
+          ],
+          fixtureValue: { start_expected_hash_hex: null },
+          goldenPayloadHex: "c0",
+        },
+      ],
+    });
+    expect(() => readManifest(path)).not.toThrow();
+  });
+
   it("rejects unknown typeToken values", () => {
     const path = writeManifest({
       ...MINIMAL_MANIFEST,
@@ -533,6 +557,14 @@ describe("token vocabulary mapping", () => {
       "bool",
       "map<string,string>",
       "array<EventSummary>",
+      "u128-hex",
+      "blake3-32-hex",
+      "ed25519-sig-hex",
+      "key-id-hex",
+      "option<ed25519-sig-hex>",
+      "option<blake3-32-hex>",
+      "hex-blob",
+      "map<string,hex-blob>",
     ] as const;
     const expected: Record<(typeof tokens)[number], string> = {
       string: "string",
@@ -551,6 +583,14 @@ describe("token vocabulary mapping", () => {
       bool: "boolean",
       "map<string,string>": "Record<string, string>",
       "array<EventSummary>": "Array<EventSummary>",
+      "u128-hex": 'string & Schema.Brand<"EventIdHex">',
+      "blake3-32-hex": 'string & Schema.Brand<"ContentHashHex">',
+      "ed25519-sig-hex": 'string & Schema.Brand<"SignatureHex">',
+      "key-id-hex": 'string & Schema.Brand<"KeyIdHex">',
+      "option<ed25519-sig-hex>": '(string & Schema.Brand<"SignatureHex">) | null',
+      "option<blake3-32-hex>": '(string & Schema.Brand<"ContentHashHex">) | null',
+      "hex-blob": 'string & Schema.Brand<"HexBlob">',
+      "map<string,hex-blob>": 'Record<string, string & Schema.Brand<"HexBlob">>',
     };
     for (const t of tokens) {
       expect(tsTypeForToken(t)).toBe(expected[t]);

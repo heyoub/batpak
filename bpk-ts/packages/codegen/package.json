@@ -12,7 +12,7 @@
   "scripts": {
     "build": "tsc -b",
     "test": "vitest run --root .",
-    "generate": "node ./bin/batpak-codegen.js --manifest ../../batpak.manifest.json --out ../generated/src",
+    "generate": "tsc -b --force && node ./bin/batpak-codegen.js --manifest ../../batpak.manifest.json --out ../generated/src",
     "clean": "node -e \"for (const p of ['dist','tsconfig.tsbuildinfo']) require('node:fs').rmSync(p,{recursive:true,force:true})\""
   }
 }
