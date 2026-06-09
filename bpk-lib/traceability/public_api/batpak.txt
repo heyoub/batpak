@@ -3069,6 +3069,15 @@ pub batpak::store::PlatformAdmissionSummary::store_lock: batpak::store::stats::S
 pub batpak::store::PlatformEvidenceSummary::admission: batpak::store::stats::PlatformAdmissionSummary
 pub batpak::store::PlatformEvidenceSummary::host: batpak::store::stats::HostEvidenceSummary
 pub batpak::store::PlatformEvidenceSummary::store_path: batpak::store::stats::StorePathEvidenceSummary
+pub struct batpak::store::ProjectionEvidenceRegistry<State>
+impl<State> batpak::store::ProjectionEvidenceRegistry<State>
+pub fn batpak::store::ProjectionEvidenceRegistry<State>::contains(&self, projection: &str) -> bool
+pub fn batpak::store::ProjectionEvidenceRegistry<State>::new() -> Self
+pub fn batpak::store::ProjectionEvidenceRegistry<State>::projection_ids(&self) -> impl core::iter::Iterator<Item = &str>
+pub fn batpak::store::ProjectionEvidenceRegistry<State>::register<T>(&mut self, projection: impl core::convert::Into<alloc::string::String>) where T: batpak::event::sourcing::EventSourced + serde_core::ser::Serialize + serde_core::de::DeserializeOwned + 'static, <T as batpak::event::sourcing::EventSourced>::Input: ReplayInput
+pub fn batpak::store::ProjectionEvidenceRegistry<State>::run(&self, projection: &str, store: &batpak::store::Store<State>, entity: &str, freshness: &batpak::store::projection::Freshness) -> core::option::Option<core::result::Result<batpak::store::ProjectionRunEvidenceReport, batpak::store::ProjectionRunReportError>>
+impl<State> core::default::Default for batpak::store::ProjectionEvidenceRegistry<State>
+pub fn batpak::store::ProjectionEvidenceRegistry<State>::default() -> Self
 pub struct batpak::store::ProjectionRunEvidenceReport
 pub batpak::store::ProjectionRunEvidenceReport::batpak_version: core::option::Option<alloc::string::String>
 pub batpak::store::ProjectionRunEvidenceReport::body: batpak::store::ProjectionRunReportBody
