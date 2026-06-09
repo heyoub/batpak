@@ -117,7 +117,7 @@ checksum = "fd307490d624467aa6f74b0eabb77633d1f758a7b25f12bceb0b22e08d9726f6"
 
 [[package]]
 name = "batpak"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "arbitrary",
  "batpak-bench-support",
@@ -153,7 +153,7 @@ dependencies = [
 
 [[package]]
 name = "batpak-bench-support"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "criterion",
 ]
@@ -178,7 +178,7 @@ dependencies = [
 
 [[package]]
 name = "batpak-macros"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "batpak-macros-support",
  "proc-macro2",
@@ -188,7 +188,7 @@ dependencies = [
 
 [[package]]
 name = "batpak-macros-support"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "inventory",
 ]
@@ -759,7 +759,7 @@ checksum = "841d1cc9bed7f9236f321df977030373f4a4163ae1a7dbfe1a51a2c1a51d9100"
 
 [[package]]
 name = "hbat"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "anyhow",
  "batpak",
@@ -933,7 +933,7 @@ dependencies = [
 
 [[package]]
 name = "netbat"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "criterion",
  "proptest",
@@ -1492,7 +1492,7 @@ dependencies = [
 
 [[package]]
 name = "syncbat"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "batpak",
  "criterion",
@@ -1506,7 +1506,7 @@ dependencies = [
 
 [[package]]
 name = "syncbat-macros"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "proc-macro2",
  "quote",

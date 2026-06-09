@@ -536,7 +536,7 @@ mod tests {
 
         const RMP_SERDE_VERSION: &str = "1.3.1";
         const NETBAT_VERSION: &str = "NETBAT/1";
-        const BATPAK_VERSION: &str = "0.8.0";
+        const BATPAK_VERSION: &str = "0.8.1";
 
         let manifest = BatpakTsManifest {
             manifest_version: MANIFEST_VERSION,

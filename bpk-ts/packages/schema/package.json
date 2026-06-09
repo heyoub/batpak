@@ -1,6 +1,6 @@
 {
   "name": "@batpak/schema",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "private": true,
   "description": "Effect 4 Schema bridge for the BatPAK canonical wire. Runtime parse/encode + bank.event() authoring API.",
   "type": "module",

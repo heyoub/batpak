@@ -4,7 +4,7 @@
 # release. hbat is reference-host only (`publish = false`); out of scope.
 package: netbat
 baseline_version: 0.7.0
-current_version: 0.8.0
+current_version: 0.8.1
 witness: target/semver-public-api/semver-checks.txt
 summary: "No netbat semver-check failures against 0.7.0."
 

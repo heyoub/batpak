@@ -4,6 +4,26 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-06-09
+
+### Added
+- Surfaced the substrate evidence-report family on the `NETBAT/1` wire as four
+  domain-neutral `evidence.*` operations in `hbat`, each a thin adapter over an
+  existing `Store` evidence method (no new analysis):
+  `evidence.chain_walk` (`Store::chain_walk_evidence`),
+  `evidence.store_resource` (`Store::store_resource_evidence_report`),
+  `evidence.read_walk` (`Store::query_with_read_walk_evidence`), and
+  `evidence.projection_run` (`Store::project_run_evidence`). Each ack carries the
+  report body as a canonical-encoding blob (`report_hex`) plus its `body_hash`
+  identity and a `truncated` flag, preserving byte-exact evidence identity.
+- Added `batpak::store::ProjectionEvidenceRegistry`, a domain-neutral, embedder-
+  populated dispatch from a projection id to a type-erased
+  `Store::project_run_evidence` runner. It backs `evidence.projection_run` while
+  keeping the wire surface free of domain types; the reference `hbat` host
+  registers no projections and answers every projection id with an
+  unknown-projection error.
+- Extended the TypeScript codegen with the `option<blake3-32-hex>` field token.
+
 ## [0.8.0] - 2026-06-05
 
 ### Added
