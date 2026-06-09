@@ -454,7 +454,9 @@ pub struct ReadWalkEvidenceAck {
     pub report_hex: String,
     /// Lowercase hex of the 32-byte report-body identity hash.
     pub body_hash_hex: String,
-    /// True when matched entries exceeded the returned set (limit dropped some).
+    /// True only when the `limit` dropped matching entries (more results exist).
+    /// Degraded reports (e.g. an entry missing its backing index) are not
+    /// truncation and leave this `false`.
     pub truncated: bool,
 }
 

@@ -17,8 +17,8 @@ use batpak::id::EventId;
 use batpak::store::index::IndexEntry;
 use batpak::store::{
     AppendOptions, AppendReceipt, BatchAppendItem, CausationRef, ChainWalkFinding, EncodedBytes,
-    ExtensionKey, ProjectionEvidenceRegistry, ProjectionRunReportError, ReceiptVerification,
-    ReceiptVerificationError, Store,
+    ExtensionKey, ProjectionEvidenceRegistry, ProjectionRunReportError, ReadWalkDroppedCount,
+    ReceiptVerification, ReceiptVerificationError, Store,
 };
 // Hex codec is the canonical netbat implementation; hbat does not
 // re-roll its own. See netbat::transport::hex.
@@ -597,7 +597,14 @@ fn handle_evidence_read_walk(store: &Store, input: &[u8]) -> HandlerResult {
         .query_with_read_walk_evidence(&core_request)
         .map_err(|error| HandlerError::failed(format!("read walk evidence: {error}")))?;
 
-    let truncated = report.body.matched_count > report.body.returned_count;
+    // Truncation means the limit dropped matches — use core's explicit
+    // dropped-by-limit count, not `matched > returned`. The latter also fires
+    // when a hit cannot be upgraded to a backing entry (MissingBackingEntry),
+    // a degraded-but-complete report that must not look pageable.
+    let truncated = matches!(
+        report.body.dropped_limited_count,
+        ReadWalkDroppedCount::Known(dropped) if dropped > 0
+    );
     let (report_hex, body_hash_hex) = encode_report_body(&report.body, &report.body_hash)?;
     let ack = ReadWalkEvidenceAck {
         report_hex,

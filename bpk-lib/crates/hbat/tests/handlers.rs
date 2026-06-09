@@ -489,3 +489,41 @@ fn evidence_projection_run_unknown_projection_errors() -> Result<()> {
     );
     Ok(())
 }
+
+#[test]
+fn evidence_read_walk_truncated_reflects_limit_drops() -> Result<()> {
+    let (store, _dir) = fresh_store()?;
+    let mut core = fresh_core(&store)?;
+    for _ in 0..3 {
+        let _ = commit_heartbeat(&mut core, "test:rw-trunc")?;
+    }
+
+    // A limit below the match count drops entries by limit -> truncated.
+    let limited = ReadWalkEvidenceRequest {
+        entity: Some("test:rw-trunc".to_owned()),
+        scope: None,
+        limit: Some(2),
+        include_proof_refs: false,
+    };
+    let result = core.invoke("evidence.read_walk", batpak::encoding::to_bytes(&limited)?)?;
+    let ack: ReadWalkEvidenceAck = batpak::encoding::from_bytes(result.output())?;
+    assert!(
+        ack.truncated,
+        "limit below the match count must report truncated"
+    );
+
+    // A limit above the match count drops nothing -> not truncated.
+    let full = ReadWalkEvidenceRequest {
+        entity: Some("test:rw-trunc".to_owned()),
+        scope: None,
+        limit: Some(10),
+        include_proof_refs: false,
+    };
+    let result = core.invoke("evidence.read_walk", batpak::encoding::to_bytes(&full)?)?;
+    let ack: ReadWalkEvidenceAck = batpak::encoding::from_bytes(result.output())?;
+    assert!(
+        !ack.truncated,
+        "limit above the match count must not report truncated"
+    );
+    Ok(())
+}
