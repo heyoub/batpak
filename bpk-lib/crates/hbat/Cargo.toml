@@ -1,6 +1,6 @@
 [package]
 name = "hbat"
-version = "0.8.0"
+version = "0.8.1"
 edition = "2021"
 rust-version = "1.92"
 license = "MIT OR Apache-2.0"
@@ -18,9 +18,9 @@ path = "src/main.rs"
 default = []
 
 [dependencies]
-batpak = { path = "../core", version = "0.8.0", default-features = false }
-syncbat = { path = "../syncbat", version = "0.8.0" }
-netbat = { path = "../netbat", version = "0.8.0" }
+batpak = { path = "../core", version = "0.8.1", default-features = false }
+syncbat = { path = "../syncbat", version = "0.8.1" }
+netbat = { path = "../netbat", version = "0.8.1" }
 serde = { version = "1", features = ["derive"] }
 # preserve_order: canonical named-field MessagePack emits struct fields in Rust
 # declaration order. serde_json::to_value defaults to BTreeMap (alphabetical),

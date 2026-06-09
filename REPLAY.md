@@ -44,6 +44,13 @@ pagination and must not be sorted by `global_sequence`. Use `event.query` when
 you need commit-order pages; use `event.walk` when you need ancestor summaries
 along the hash chain.
 
+The `evidence.*` ops expose batpak's own substrate evidence reports over the
+wire, so an external consumer can fetch chain-walk, read-walk, projection-run,
+and store-resource evidence directly instead of approximating it from
+`event.walk` + `receipt.verify` + `event.query`. They surface evidence and
+metadata only — never decoded payload bytes — and resume points stay on the
+`global_sequence` axis, never a stream cursor.
+
 Pagination uses `after_global_sequence`, an exclusive resume point on global
 commit order. It is not a stream cursor or server-held session: the next request
 sets `after_global_sequence` to the prior response's

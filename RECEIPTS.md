@@ -37,3 +37,18 @@ errors — never debug formatting.
 
 Evidence reports are receipt-shaped artifacts for inspections and derived views. They should name inputs, output hashes, versions, and the reason for any refusal or fallback.
 
+The reference host surfaces the substrate evidence-report family over `NETBAT/1`
+through the domain-neutral `evidence.*` ops, with domain-neutral receipt kinds:
+
+- `receipt.evidence.chain_walk.v1` — `evidence.chain_walk`
+- `receipt.evidence.store_resource.v1` — `evidence.store_resource`
+- `receipt.evidence.read_walk.v1` — `evidence.read_walk`
+- `receipt.evidence.projection_run.v1` — `evidence.projection_run`
+
+Each ack ships the report **body** as a canonical-encoding blob (`report_hex`)
+alongside its `body_hash`. Evidence-report identity is the content hash over the
+canonical body bytes, so the wire ships the exact bytes the hash covers: a
+consumer re-hashes `report_hex` and confirms it equals `body_hash`. A typed
+field-by-field mirror would re-encode and break that identity, so the blob form
+is the identity-preserving shape.
+

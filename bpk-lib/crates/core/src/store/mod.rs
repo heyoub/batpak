@@ -103,11 +103,12 @@ pub use projection::{
     CacheCapabilities, CacheMeta, Freshness, NativeCache, NoCache, ProjectionCache,
 };
 pub use projection_run::{
-    ProjectionRunCacheStatus, ProjectionRunCheckpointRef, ProjectionRunEvidenceReport,
-    ProjectionRunFinding, ProjectionRunFreshnessStatus, ProjectionRunFrontierKind,
-    ProjectionRunHash, ProjectionRunInputFrontier, ProjectionRunOutputHash,
-    ProjectionRunReplayMode, ProjectionRunReportBody, ProjectionRunReportError,
-    ProjectionRunRequestedFreshness, ProjectionSourceRef, PROJECTION_RUN_REPORT_SCHEMA_VERSION,
+    ProjectionEvidenceRegistry, ProjectionRunCacheStatus, ProjectionRunCheckpointRef,
+    ProjectionRunEvidenceReport, ProjectionRunFinding, ProjectionRunFreshnessStatus,
+    ProjectionRunFrontierKind, ProjectionRunHash, ProjectionRunInputFrontier,
+    ProjectionRunOutputHash, ProjectionRunReplayMode, ProjectionRunReportBody,
+    ProjectionRunReportError, ProjectionRunRequestedFreshness, ProjectionSourceRef,
+    PROJECTION_RUN_REPORT_SCHEMA_VERSION,
 };
 pub use reaction::ReactionBatch;
 pub use reactor_typed::{ReactorConfig, ReactorError, TypedReactorHandle};

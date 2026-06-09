@@ -54,6 +54,7 @@ const SUPPORTED_FIELD_TYPES = new Set<string>([
   "ed25519-sig-hex", // 128 lowercase hex chars
   "key-id-hex", // 64 lowercase hex chars (Ed25519 verifier identity)
   "option<ed25519-sig-hex>",
+  "option<blake3-32-hex>",
   // Free-form hex payload (variable length, lowercase). Branded so
   // callers can prove "I built this via the canonical encoder" at the
   // type system, but not constrained to a fixed length.
@@ -493,6 +494,8 @@ function schemaForToken(token: string): string {
       return brandedHex("KeyIdHex", 64);
     case "option<ed25519-sig-hex>":
       return `Schema.NullOr(${brandedHex("SignatureHex", 128)})`;
+    case "option<blake3-32-hex>":
+      return `Schema.NullOr(${brandedHex("ContentHashHex", 64)})`;
     case "hex-blob":
       return brandedHexBlob();
     case "map<string,hex-blob>":
@@ -560,6 +563,8 @@ export function tsTypeForToken(token: string): string {
       return 'string & Schema.Brand<"KeyIdHex">';
     case "option<ed25519-sig-hex>":
       return '(string & Schema.Brand<"SignatureHex">) | null';
+    case "option<blake3-32-hex>":
+      return '(string & Schema.Brand<"ContentHashHex">) | null';
     case "hex-blob":
       return 'string & Schema.Brand<"HexBlob">';
     case "map<string,hex-blob>":

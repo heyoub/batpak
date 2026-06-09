@@ -73,9 +73,9 @@ mod tests {
     use crate::manifest::descriptors;
 
     #[test]
-    fn macro_registered_events_still_number_thirteen() {
+    fn macro_registered_events_still_number_twenty_one() {
         let snap = descriptors().expect("build manifest snapshot");
-        assert_eq!(snap.events.len(), 13);
-        assert_eq!(snap.operations.len(), 6);
+        assert_eq!(snap.events.len(), 21);
+        assert_eq!(snap.operations.len(), 10);
     }
 }

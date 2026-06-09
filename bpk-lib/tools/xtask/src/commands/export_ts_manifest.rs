@@ -32,7 +32,7 @@ const NETBAT_VERSION: &str = "NETBAT/1";
 /// TS codegen does not gate on this today, but it is recorded so the
 /// generated TS can advertise which BatPAK family snapshot it was
 /// generated against.
-const BATPAK_VERSION: &str = "0.8.0";
+const BATPAK_VERSION: &str = "0.8.1";
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -126,19 +126,18 @@ mod tests {
             json["canonicalEncoding"]["rmpSerdeVersion"],
             RMP_SERDE_VERSION
         );
-        // Current hbat ships 13 events (heartbeat req/ack, bank.commit
-        // req/ack, event.get req/ack, event.query req/summary/ack,
-        // receipt.verify req/ack, event.walk req/ack) and 6 operations.
+        // Current hbat ships 21 events (the six core ops' req/ack/summary
+        // events plus the four evidence.* req/ack pairs) and 10 operations.
         assert_eq!(
             json["events"].as_array().expect("events is an array").len(),
-            13
+            21
         );
         assert_eq!(
             json["operations"]
                 .as_array()
                 .expect("operations is an array")
                 .len(),
-            6
+            10
         );
         let op_names: Vec<&str> = json["operations"]
             .as_array()
@@ -152,6 +151,10 @@ mod tests {
         assert!(op_names.contains(&"event.query"));
         assert!(op_names.contains(&"receipt.verify"));
         assert!(op_names.contains(&"event.walk"));
+        assert!(op_names.contains(&"evidence.chain_walk"));
+        assert!(op_names.contains(&"evidence.store_resource"));
+        assert!(op_names.contains(&"evidence.read_walk"));
+        assert!(op_names.contains(&"evidence.projection_run"));
         for op in json["operations"].as_array().expect("operations array") {
             assert_eq!(op["errorFixture"]["code"], "unknown_operation");
         }

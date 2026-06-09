@@ -279,3 +279,128 @@ export const EVENT_WALK_ACK_FIXTURE: EventWalkAck = {
     }
   ]
 } as unknown as EventWalkAck;
+
+/** Source: hbat::evidence::ChainWalkEvidenceRequest; category=15, typeId=2640 */
+export const ChainWalkEvidenceRequest = Schema.Struct({
+  start_event_id_hex: Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{32}$/u)), Schema.brand("EventIdHex")),
+  start_expected_hash_hex: Schema.NullOr(Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{64}$/u)), Schema.brand("ContentHashHex"))),
+  end_event_id_hex: Schema.NullOr(Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{32}$/u)), Schema.brand("EventIdHex"))),
+  limit: Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 1, maximum: 9007199254740991 }))),
+});
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export type ChainWalkEvidenceRequest = typeof ChainWalkEvidenceRequest.Type;
+
+export const CHAIN_WALK_EVIDENCE_REQUEST_GOLDEN_HEX = "84b273746172745f6576656e745f69645f686578d9203031323334353637383961626364656630313233343536373839616263646566b773746172745f65787065637465645f686173685f686578c0b0656e645f6576656e745f69645f686578c0a56c696d697410" as const;
+export const CHAIN_WALK_EVIDENCE_REQUEST_FIXTURE: ChainWalkEvidenceRequest = {
+  "start_event_id_hex": "0123456789abcdef0123456789abcdef",
+  "start_expected_hash_hex": null,
+  "end_event_id_hex": null,
+  "limit": 16
+} as unknown as ChainWalkEvidenceRequest;
+
+/** Source: hbat::evidence::ChainWalkEvidenceAck; category=15, typeId=2641 */
+export const ChainWalkEvidenceAck = Schema.Struct({
+  report_hex: Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]*$/u)), Schema.brand("HexBlob")),
+  body_hash_hex: Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{64}$/u)), Schema.brand("ContentHashHex")),
+  truncated: Schema.Boolean,
+});
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export type ChainWalkEvidenceAck = typeof ChainWalkEvidenceAck.Type;
+
+export const CHAIN_WALK_EVIDENCE_ACK_GOLDEN_HEX = "83aa7265706f72745f686578a86131623263336434ad626f64795f686173685f686578d94030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030a97472756e6361746564c2" as const;
+export const CHAIN_WALK_EVIDENCE_ACK_FIXTURE: ChainWalkEvidenceAck = {
+  "report_hex": "a1b2c3d4",
+  "body_hash_hex": "0000000000000000000000000000000000000000000000000000000000000000",
+  "truncated": false
+} as unknown as ChainWalkEvidenceAck;
+
+/** Source: hbat::evidence::StoreResourceEvidenceRequest; category=15, typeId=2656 */
+export const StoreResourceEvidenceRequest = Schema.Struct({
+});
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export type StoreResourceEvidenceRequest = typeof StoreResourceEvidenceRequest.Type;
+
+export const STORE_RESOURCE_EVIDENCE_REQUEST_GOLDEN_HEX = "80" as const;
+export const STORE_RESOURCE_EVIDENCE_REQUEST_FIXTURE: StoreResourceEvidenceRequest = {} as unknown as StoreResourceEvidenceRequest;
+
+/** Source: hbat::evidence::StoreResourceEvidenceAck; category=15, typeId=2657 */
+export const StoreResourceEvidenceAck = Schema.Struct({
+  report_hex: Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]*$/u)), Schema.brand("HexBlob")),
+  body_hash_hex: Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{64}$/u)), Schema.brand("ContentHashHex")),
+  truncated: Schema.Boolean,
+});
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export type StoreResourceEvidenceAck = typeof StoreResourceEvidenceAck.Type;
+
+export const STORE_RESOURCE_EVIDENCE_ACK_GOLDEN_HEX = "83aa7265706f72745f686578a86131623263336434ad626f64795f686173685f686578d94030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030a97472756e6361746564c2" as const;
+export const STORE_RESOURCE_EVIDENCE_ACK_FIXTURE: StoreResourceEvidenceAck = {
+  "report_hex": "a1b2c3d4",
+  "body_hash_hex": "0000000000000000000000000000000000000000000000000000000000000000",
+  "truncated": false
+} as unknown as StoreResourceEvidenceAck;
+
+/** Source: hbat::evidence::ReadWalkEvidenceRequest; category=15, typeId=2672 */
+export const ReadWalkEvidenceRequest = Schema.Struct({
+  entity: Schema.NullOr(Schema.String),
+  scope: Schema.NullOr(Schema.String),
+  limit: Schema.NullOr(Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 9007199254740991 })))),
+  include_proof_refs: Schema.Boolean,
+});
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export type ReadWalkEvidenceRequest = typeof ReadWalkEvidenceRequest.Type;
+
+export const READ_WALK_EVIDENCE_REQUEST_GOLDEN_HEX = "84a6656e74697479ac666978747572653a62616e6ba573636f7065c0a56c696d697440b2696e636c7564655f70726f6f665f72656673c2" as const;
+export const READ_WALK_EVIDENCE_REQUEST_FIXTURE: ReadWalkEvidenceRequest = {
+  "entity": "fixture:bank",
+  "scope": null,
+  "limit": 64,
+  "include_proof_refs": false
+} as unknown as ReadWalkEvidenceRequest;
+
+/** Source: hbat::evidence::ReadWalkEvidenceAck; category=15, typeId=2673 */
+export const ReadWalkEvidenceAck = Schema.Struct({
+  report_hex: Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]*$/u)), Schema.brand("HexBlob")),
+  body_hash_hex: Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{64}$/u)), Schema.brand("ContentHashHex")),
+  truncated: Schema.Boolean,
+});
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export type ReadWalkEvidenceAck = typeof ReadWalkEvidenceAck.Type;
+
+export const READ_WALK_EVIDENCE_ACK_GOLDEN_HEX = "83aa7265706f72745f686578a86131623263336434ad626f64795f686173685f686578d94030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030a97472756e6361746564c2" as const;
+export const READ_WALK_EVIDENCE_ACK_FIXTURE: ReadWalkEvidenceAck = {
+  "report_hex": "a1b2c3d4",
+  "body_hash_hex": "0000000000000000000000000000000000000000000000000000000000000000",
+  "truncated": false
+} as unknown as ReadWalkEvidenceAck;
+
+/** Source: hbat::evidence::ProjectionRunEvidenceRequest; category=15, typeId=2688 */
+export const ProjectionRunEvidenceRequest = Schema.Struct({
+  projection: Schema.String,
+  entity: Schema.String,
+  max_stale_ms: Schema.NullOr(Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 9007199254740991 })))),
+});
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export type ProjectionRunEvidenceRequest = typeof ProjectionRunEvidenceRequest.Type;
+
+export const PROJECTION_RUN_EVIDENCE_REQUEST_GOLDEN_HEX = "83aa70726f6a656374696f6eb2666978747572652e70726f6a656374696f6ea6656e74697479ac666978747572653a62616e6bac6d61785f7374616c655f6d73c0" as const;
+export const PROJECTION_RUN_EVIDENCE_REQUEST_FIXTURE: ProjectionRunEvidenceRequest = {
+  "projection": "fixture.projection",
+  "entity": "fixture:bank",
+  "max_stale_ms": null
+} as unknown as ProjectionRunEvidenceRequest;
+
+/** Source: hbat::evidence::ProjectionRunEvidenceAck; category=15, typeId=2689 */
+export const ProjectionRunEvidenceAck = Schema.Struct({
+  report_hex: Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]*$/u)), Schema.brand("HexBlob")),
+  body_hash_hex: Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{64}$/u)), Schema.brand("ContentHashHex")),
+  truncated: Schema.Boolean,
+});
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export type ProjectionRunEvidenceAck = typeof ProjectionRunEvidenceAck.Type;
+
+export const PROJECTION_RUN_EVIDENCE_ACK_GOLDEN_HEX = "83aa7265706f72745f686578a86131623263336434ad626f64795f686173685f686578d94030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030a97472756e6361746564c2" as const;
+export const PROJECTION_RUN_EVIDENCE_ACK_FIXTURE: ProjectionRunEvidenceAck = {
+  "report_hex": "a1b2c3d4",
+  "body_hash_hex": "0000000000000000000000000000000000000000000000000000000000000000",
+  "truncated": false
+} as unknown as ProjectionRunEvidenceAck;

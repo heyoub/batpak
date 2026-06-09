@@ -34,6 +34,10 @@ pub mod bank;
 /// inventory submissions.
 #[macro_use]
 mod descriptor;
+/// `evidence.*` operation surface — domain-neutral wire access to the
+/// substrate evidence reports produced by `Store`. Pure-data payloads +
+/// descriptors; the runtime handlers live in [`handlers`].
+pub mod evidence;
 /// Runtime handlers for [`bank`] operations. Capture `Arc<Store>`; pulled
 /// into the binary via [`crate::main`] and not part of the library's
 /// pure-data surface that `xtask` depends on.
@@ -57,8 +61,25 @@ pub use bank::{
     EVENT_QUERY_INPUT_SCHEMA_REF, EVENT_QUERY_MAX_LIMIT, EVENT_QUERY_OPERATION_NAME,
     EVENT_QUERY_OUTPUT_SCHEMA_REF, EVENT_QUERY_RECEIPT_KIND, EVENT_QUERY_SUMMARY_SCHEMA_REF,
 };
+pub use evidence::{
+    ChainWalkEvidenceAck, ChainWalkEvidenceRequest, EvidenceRequestError, ProjectionRunEvidenceAck,
+    ProjectionRunEvidenceRequest, ReadWalkEvidenceAck, ReadWalkEvidenceRequest,
+    StoreResourceEvidenceAck, StoreResourceEvidenceRequest, EVIDENCE_CHAIN_WALK_DESCRIPTOR,
+    EVIDENCE_CHAIN_WALK_INPUT_SCHEMA_REF, EVIDENCE_CHAIN_WALK_OPERATION_NAME,
+    EVIDENCE_CHAIN_WALK_OUTPUT_SCHEMA_REF, EVIDENCE_CHAIN_WALK_RECEIPT_KIND, EVIDENCE_MAX_LIMIT,
+    EVIDENCE_PROJECTION_RUN_DESCRIPTOR, EVIDENCE_PROJECTION_RUN_INPUT_SCHEMA_REF,
+    EVIDENCE_PROJECTION_RUN_OPERATION_NAME, EVIDENCE_PROJECTION_RUN_OUTPUT_SCHEMA_REF,
+    EVIDENCE_PROJECTION_RUN_RECEIPT_KIND, EVIDENCE_READ_WALK_DESCRIPTOR,
+    EVIDENCE_READ_WALK_INPUT_SCHEMA_REF, EVIDENCE_READ_WALK_OPERATION_NAME,
+    EVIDENCE_READ_WALK_OUTPUT_SCHEMA_REF, EVIDENCE_READ_WALK_RECEIPT_KIND,
+    EVIDENCE_STORE_RESOURCE_DESCRIPTOR, EVIDENCE_STORE_RESOURCE_INPUT_SCHEMA_REF,
+    EVIDENCE_STORE_RESOURCE_OPERATION_NAME, EVIDENCE_STORE_RESOURCE_OUTPUT_SCHEMA_REF,
+    EVIDENCE_STORE_RESOURCE_RECEIPT_KIND,
+};
 pub use handlers::{
-    BankCommitHandler, EventGetHandler, EventQueryHandler, EventWalkHandler, ReceiptVerifyHandler,
+    BankCommitHandler, ChainWalkEvidenceHandler, EventGetHandler, EventQueryHandler,
+    EventWalkHandler, ProjectionRunEvidenceHandler, ReadWalkEvidenceHandler, ReceiptVerifyHandler,
+    StoreResourceEvidenceHandler,
 };
 pub use heartbeat::{
     handle_heartbeat, HeartbeatHandler, SystemHeartbeatAck, SystemHeartbeatRequest,

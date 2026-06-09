@@ -37,12 +37,24 @@ The reference NETBAT terminal is a loop, not just a mailbox:
 | Write | `bank.commit` | append a substrate event and receive a commit receipt |
 | Point | `event.get` | read a known event id and its canonical payload bytes |
 | Page | `event.query` | page bounded substrate summaries by `global_sequence` for replay and audit |
+| Walk | `event.walk` | bounded hash-chain ancestry from a starting event id |
+| Evidence | `evidence.*` | fetch batpak's own substrate evidence reports over the wire |
 
 `event.query` is domain-neutral commit-order pagination. It filters on
 substrate coordinates, kind category/type, and `global_sequence`; it does not
 know Downstream missions, workflows, movement graphs, or receipt-body
 taxonomies. `after_global_sequence` is the strict resume point for the next
 page, not a server-held stream cursor.
+
+The `evidence.*` family (`evidence.chain_walk`, `evidence.store_resource`,
+`evidence.read_walk`, `evidence.projection_run`) gives a wire consumer direct
+access to the substrate evidence reports `Store` already produces, instead of
+re-deriving them from `event.walk` + `receipt.verify` + `event.query`. Each ack
+carries the canonical report body (`report_hex`) plus its `body_hash` identity
+and a `truncated` flag, so the consumer can verify the report by re-hashing the
+blob. Requests are keyed only on substrate coordinates;
+`evidence.projection_run` resolves a domain-neutral projection id through an
+embedder-registered table and the reference host registers none.
 
 `entity` filters use `Region::entity`, which is prefix-based. Supplying both
 `entity` and `scope` gives the normal coordinate-level replay shape.
@@ -61,9 +73,9 @@ Use circuits and terminals to connect batteries. Do not hide ownership by lettin
 manifest, codegen, build and test the workspace, boot hbat on an ephemeral
 store, run heartbeat-spike (heartbeat, commit, query, get), and verify committed
 generated sources stay deterministic. heartbeat-spike proves the live heartbeat
-+ commit/query/get + ERR calibration path; `receipt.verify` and `event.walk`
-remain part of the six-op host profile and are covered by manifest/parity and
-hbat tests.
++ commit/query/get + ERR calibration path; `receipt.verify`, `event.walk`, and
+the four `evidence.*` ops round out the ten-op host profile and are covered by
+manifest/parity and hbat tests.
 
 **Living loop:** `just host-loop` runs the audit-loop example against a
 persistent store under `target/host-loop/store/`. It seeds app-owned events

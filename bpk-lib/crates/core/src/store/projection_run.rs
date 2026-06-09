@@ -1,10 +1,12 @@
 //! Deterministic evidence report for a single projection run.
 
+use crate::event::EventSourced;
 use crate::store::projection::flow::{
-    project_outcome, ProjectionCacheObservation, ProjectionObservedFreshness,
+    project_outcome, ProjectionCacheObservation, ProjectionObservedFreshness, ReplayInput,
 };
-use crate::store::{Freshness, HlcPoint, Store, StoreError};
+use crate::store::{Freshness, HlcPoint, Open, Store, StoreError};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 /// Report-body schema version for projection run evidence.
 pub const PROJECTION_RUN_REPORT_SCHEMA_VERSION: u16 = 1;
@@ -444,4 +446,101 @@ fn report_body_hash(
     crate::evidence::report_body_hash(body, |message| ProjectionRunReportError::BodyEncoding {
         message,
     })
+}
+
+/// Type-erased runner that produces projection-run evidence for one registered
+/// projection type, hiding the domain `EventSourced` type behind the
+/// domain-neutral [`ProjectionRunEvidenceReport`].
+type ProjectionEvidenceRunner<State> = Box<
+    dyn Fn(
+            &Store<State>,
+            &str,
+            &Freshness,
+        ) -> Result<ProjectionRunEvidenceReport, ProjectionRunReportError>
+        + Send
+        + Sync,
+>;
+
+/// Embedder-populated dispatch from a domain-neutral projection id to a
+/// type-erased [`Store::project_run_evidence`] runner.
+///
+/// `Store::project_run_evidence::<T>` is generic over a domain projection type
+/// because running a projection *is* executing that type's fold. A
+/// domain-neutral wire host (for example `hbat`) therefore cannot reconstruct
+/// `T` from a request string on its own. The embedder registers each projection
+/// once (`registry.register::<MyProjection>("my.projection")`); the registry
+/// stores a monomorphized closure that discards the folded `T` state and yields
+/// only the report. The public surface stays domain-neutral: keys are opaque
+/// strings, values are [`ProjectionRunEvidenceReport`], and the domain type
+/// appears solely as a generic parameter at registration time.
+pub struct ProjectionEvidenceRegistry<State = Open> {
+    runners: BTreeMap<String, ProjectionEvidenceRunner<State>>,
+}
+
+impl<State> ProjectionEvidenceRegistry<State> {
+    /// Create an empty registry. A host with no registered projections answers
+    /// every projection id with [`ProjectionEvidenceRegistry::run`] returning
+    /// `None`.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            runners: BTreeMap::new(),
+        }
+    }
+
+    /// Register projection type `T` under a stable, domain-neutral `projection`
+    /// id. Re-registering the same id replaces the prior runner.
+    ///
+    /// Callers satisfy the `T::Input: ReplayInput` bound structurally and need
+    /// not name `ReplayInput`, which stays crate-private.
+    pub fn register<T>(&mut self, projection: impl Into<String>)
+    where
+        T: EventSourced + serde::Serialize + serde::de::DeserializeOwned + 'static,
+        T::Input: ReplayInput,
+    {
+        self.runners.insert(
+            projection.into(),
+            Box::new(
+                |store: &Store<State>, entity: &str, freshness: &Freshness| {
+                    store
+                        .project_run_evidence::<T>(entity, freshness)
+                        .map(|(_state, report)| report)
+                },
+            ),
+        );
+    }
+
+    /// Returns `true` when `projection` has a registered runner.
+    #[must_use]
+    pub fn contains(&self, projection: &str) -> bool {
+        self.runners.contains_key(projection)
+    }
+
+    /// Run projection-run evidence for `projection` against `store`/`entity`.
+    ///
+    /// Returns `None` when no runner is registered under `projection` (the
+    /// caller maps this to a domain-neutral "unknown projection" response);
+    /// otherwise returns the runner's report result.
+    pub fn run(
+        &self,
+        projection: &str,
+        store: &Store<State>,
+        entity: &str,
+        freshness: &Freshness,
+    ) -> Option<Result<ProjectionRunEvidenceReport, ProjectionRunReportError>> {
+        self.runners
+            .get(projection)
+            .map(|runner| runner(store, entity, freshness))
+    }
+
+    /// Iterate the registered projection ids in sorted order.
+    pub fn projection_ids(&self) -> impl Iterator<Item = &str> {
+        self.runners.keys().map(String::as_str)
+    }
+}
+
+impl<State> Default for ProjectionEvidenceRegistry<State> {
+    fn default() -> Self {
+        Self::new()
+    }
 }

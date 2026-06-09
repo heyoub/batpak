@@ -79,7 +79,8 @@ boundary review; it is not a runtime feature and not a CI gate by itself.
 
 ## Terminal Manifest
 
-The hbat manifest must expose the six reference NETBAT operations:
+The hbat manifest must expose the ten reference NETBAT operations — the six
+core ops plus the four domain-neutral `evidence.*` ops:
 
 - `system.heartbeat`
 - `bank.commit`
@@ -87,6 +88,10 @@ The hbat manifest must expose the six reference NETBAT operations:
 - `event.query`
 - `receipt.verify`
 - `event.walk`
+- `evidence.chain_walk`
+- `evidence.store_resource`
+- `evidence.read_walk`
+- `evidence.projection_run`
 
 `event.query` keeps external replay substrate-complete without introducing a
 wire cursor session. It pages by `global_sequence`; callers resume by sending
@@ -94,3 +99,14 @@ the previous response's `next_after_global_sequence` as the next
 `after_global_sequence`. `event.walk` exposes bounded hash-chain ancestry only
 — not DAG or Downstream graph law. Cursor-style open/next/checkpoint protocols
 belong to a later NETBAT version or product-specific layer.
+
+The `evidence.*` ops are thin wire adapters over the substrate evidence reports
+`Store` already produces (`chain_walk_evidence`, `store_resource_evidence_report`,
+`query_with_read_walk_evidence`, `project_run_evidence`). Each ack carries the
+report body as a canonical blob (`report_hex`) plus its `body_hash` identity and
+a `truncated` flag; a consumer re-hashes `report_hex` to confirm it equals
+`body_hash`. Requests are keyed only on substrate coordinates, and traversal
+returns evidence/metadata only — never decoded domain payloads.
+`evidence.projection_run` is dispatched through an embedder-populated projection
+registry; the reference host registers none, so it answers every projection id
+with an unknown-projection error.

@@ -37,6 +37,8 @@ That split is intentional:
   bytes, extension maps, or decoded domain fields.
 - `event.query` orders those summaries by `global_sequence`; it is not a
   domain graph walk.
+- the `evidence.*` ops return batpak's own evidence-report bodies (and their
+  `body_hash` identity) only; traversal never returns decoded domain payloads.
 
 Use `event.get` to fetch payload bytes after traversal, then decode the envelope
 above batpak.

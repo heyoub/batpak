@@ -280,3 +280,53 @@ fn findings_are_sorted_deterministically() -> TestResult {
     );
     Ok(())
 }
+
+#[test]
+fn projection_evidence_registry_dispatches_registered_projection() -> TestResult {
+    use batpak::store::ProjectionEvidenceRegistry;
+
+    let (data_dir_guard, store) = small_store_support::small_segment_store()?;
+    assert!(data_dir_guard.path().exists());
+    let coord = Coordinate::new("entity:registry-dispatch", "scope:test")?;
+    let kind = EventKind::custom(0xF, 0x61);
+    store.append(&coord, kind, &serde_json::json!({"n": 1}))?;
+
+    let mut registry = ProjectionEvidenceRegistry::new();
+    registry.register::<CounterProjection>("counter.projection");
+    assert!(registry.contains("counter.projection"));
+    assert_eq!(
+        registry.projection_ids().collect::<Vec<_>>(),
+        vec!["counter.projection"]
+    );
+
+    // A registered id dispatches to the same report a direct typed call yields:
+    // identity hash and body are byte-for-byte equal.
+    let direct = store
+        .project_run_evidence::<CounterProjection>(
+            "entity:registry-dispatch",
+            &Freshness::Consistent,
+        )?
+        .1;
+    let via_registry = registry
+        .run(
+            "counter.projection",
+            &store,
+            "entity:registry-dispatch",
+            &Freshness::Consistent,
+        )
+        .expect("registered projection resolves")?;
+    assert_eq!(via_registry.body, direct.body);
+    assert_eq!(via_registry.body_hash, direct.body_hash);
+
+    // An unknown id resolves to None so a wire host can answer "unknown
+    // projection" without inventing a report.
+    assert!(registry
+        .run(
+            "nope.projection",
+            &store,
+            "entity:registry-dispatch",
+            &Freshness::Consistent,
+        )
+        .is_none());
+    Ok(())
+}
