@@ -500,11 +500,13 @@ impl<State> ProjectionEvidenceRegistry<State> {
     {
         self.runners.insert(
             projection.into(),
-            Box::new(|store: &Store<State>, entity: &str, freshness: &Freshness| {
-                store
-                    .project_run_evidence::<T>(entity, freshness)
-                    .map(|(_state, report)| report)
-            }),
+            Box::new(
+                |store: &Store<State>, entity: &str, freshness: &Freshness| {
+                    store
+                        .project_run_evidence::<T>(entity, freshness)
+                        .map(|(_state, report)| report)
+                },
+            ),
         );
     }
 

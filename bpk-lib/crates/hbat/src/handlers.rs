@@ -16,8 +16,8 @@ use batpak::id::EntityIdType;
 use batpak::id::EventId;
 use batpak::store::index::IndexEntry;
 use batpak::store::{
-    AppendOptions, AppendReceipt, BatchAppendItem, CausationRef, EncodedBytes, ExtensionKey,
-    ProjectionEvidenceRegistry, ProjectionRunReportError, ReceiptVerification,
+    AppendOptions, AppendReceipt, BatchAppendItem, CausationRef, ChainWalkFinding, EncodedBytes,
+    ExtensionKey, ProjectionEvidenceRegistry, ProjectionRunReportError, ReceiptVerification,
     ReceiptVerificationError, Store,
 };
 // Hex codec is the canonical netbat implementation; hbat does not
@@ -32,7 +32,7 @@ use crate::bank::{
 use crate::evidence::{
     ChainWalkEvidenceAck, ChainWalkEvidenceRequest, ProjectionRunEvidenceAck,
     ProjectionRunEvidenceRequest, ReadWalkEvidenceAck, ReadWalkEvidenceRequest,
-    StoreResourceEvidenceAck, StoreResourceEvidenceRequest, EVIDENCE_MAX_LIMIT,
+    StoreResourceEvidenceAck, StoreResourceEvidenceRequest,
 };
 use crate::receipt::{ReceiptVerifyAck, ReceiptVerifyRequest};
 use crate::walk::{EventWalkAck, EventWalkRequest, EVENT_WALK_MAX_LIMIT};
@@ -478,7 +478,6 @@ fn handle_evidence_chain_walk(store: &Store, input: &[u8]) -> HandlerResult {
     let request: ChainWalkEvidenceRequest = batpak::encoding::from_bytes(input)
         .map_err(|error| HandlerError::invalid_input(format!("decode request: {error}")))?;
 
-    let bounded_limit = request.limit.min(EVIDENCE_MAX_LIMIT);
     let core_request = request
         .to_core()
         .map_err(|error| HandlerError::invalid_input(error.to_string()))?;
@@ -487,17 +486,22 @@ fn handle_evidence_chain_walk(store: &Store, input: &[u8]) -> HandlerResult {
         .chain_walk_evidence(&core_request)
         .map_err(|error| HandlerError::failed(format!("chain walk evidence: {error}")))?;
 
-    // checked_count reaching the bound means the walk stopped on `limit`, so
-    // more ancestry may exist — a safe over-approximation matching event.query.
-    let truncated = report.body.checked_count >= bounded_limit;
+    // Trust core's explicit truncation finding rather than inferring from the
+    // checked count: a walk that ends exactly at the limit is NOT truncated.
+    // Core emits `TruncatedByLimit` only when it stopped on the limit with a
+    // parent edge still to follow.
+    let truncated = report
+        .body
+        .findings
+        .iter()
+        .any(|finding| matches!(finding, ChainWalkFinding::TruncatedByLimit { .. }));
     let (report_hex, body_hash_hex) = encode_report_body(&report.body, &report.body_hash)?;
     let ack = ChainWalkEvidenceAck {
         report_hex,
         body_hash_hex,
         truncated,
     };
-    batpak::encoding::to_bytes(&ack)
-        .map_err(|error| HandlerError::failed(format!("encode ack: {error}")))
+    finish_evidence_ack(&ack)
 }
 
 /// Encode an evidence report body to its canonical `(report_hex, body_hash_hex)`
@@ -513,6 +517,25 @@ fn encode_report_body<B: serde::Serialize>(
     let body_bytes = batpak::encoding::to_bytes(body)
         .map_err(|error| HandlerError::failed(format!("encode report body: {error}")))?;
     Ok((encode_hex_str(&body_bytes), encode_hex_str(body_hash)))
+}
+
+/// Encode an evidence ack and reject it if it would overrun the NETBAT output
+/// frame cap, with a deterministic, domain-neutral error instead of an opaque
+/// transport `OutputTooLarge`. A backstop: bounded `limit`s keep report bodies
+/// small in the normal case, but a pathological report (e.g. many proof refs or
+/// findings) must fail loudly rather than overrun the wire.
+fn finish_evidence_ack<A: serde::Serialize>(ack: &A) -> HandlerResult {
+    let bytes = batpak::encoding::to_bytes(ack)
+        .map_err(|error| HandlerError::failed(format!("encode ack: {error}")))?;
+    if bytes.len() > netbat::DEFAULT_MAX_OUTPUT_BYTES {
+        return Err(HandlerError::invalid_input(format!(
+            "evidence response is {} bytes, over the {}-byte transport limit; \
+             lower `limit` or disable proof refs",
+            bytes.len(),
+            netbat::DEFAULT_MAX_OUTPUT_BYTES
+        )));
+    }
+    Ok(bytes)
 }
 
 // ─── evidence.store_resource handler ──────────────────────────────────────────
@@ -545,8 +568,7 @@ fn handle_evidence_store_resource(store: &Store, input: &[u8]) -> HandlerResult 
         body_hash_hex,
         truncated: false,
     };
-    batpak::encoding::to_bytes(&ack)
-        .map_err(|error| HandlerError::failed(format!("encode ack: {error}")))
+    finish_evidence_ack(&ack)
 }
 
 // ─── evidence.read_walk handler ───────────────────────────────────────────────
@@ -582,8 +604,7 @@ fn handle_evidence_read_walk(store: &Store, input: &[u8]) -> HandlerResult {
         body_hash_hex,
         truncated,
     };
-    batpak::encoding::to_bytes(&ack)
-        .map_err(|error| HandlerError::failed(format!("encode ack: {error}")))
+    finish_evidence_ack(&ack)
 }
 
 // ─── evidence.projection_run handler ──────────────────────────────────────────
@@ -616,6 +637,12 @@ fn handle_evidence_projection_run(
     let request: ProjectionRunEvidenceRequest = batpak::encoding::from_bytes(input)
         .map_err(|error| HandlerError::invalid_input(format!("decode request: {error}")))?;
 
+    // Validate the entity as a substrate coordinate at the boundary, matching
+    // bank.commit/event.query, so a malformed entity is a deterministic
+    // invalid_input rather than reaching the projection/report path.
+    Coordinate::new(&request.entity, "hbat:evidence-projection-run")
+        .map_err(|error| HandlerError::invalid_input(format!("entity: {error}")))?;
+
     let freshness = request.freshness();
     let report = match registry.run(&request.projection, store, &request.entity, &freshness) {
         // A failed projection still yields a deterministic evidence report
@@ -641,6 +668,5 @@ fn handle_evidence_projection_run(
         body_hash_hex,
         truncated: false,
     };
-    batpak::encoding::to_bytes(&ack)
-        .map_err(|error| HandlerError::failed(format!("encode ack: {error}")))
+    finish_evidence_ack(&ack)
 }

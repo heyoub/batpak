@@ -40,9 +40,7 @@ use hbat::{
         BankCommitAck, BankCommitRequest, EventGetAck, EventGetRequest, EventQueryAck,
         EventQueryRequest,
     },
-    evidence::{
-        ChainWalkEvidenceAck, ChainWalkEvidenceRequest, ProjectionRunEvidenceRequest,
-    },
+    evidence::{ChainWalkEvidenceAck, ChainWalkEvidenceRequest, ProjectionRunEvidenceRequest},
     heartbeat::{SystemHeartbeatAck, SystemHeartbeatRequest},
     receipt::{ReceiptVerifyAck, ReceiptVerifyRequest},
     walk::{EventWalkAck, EventWalkRequest},

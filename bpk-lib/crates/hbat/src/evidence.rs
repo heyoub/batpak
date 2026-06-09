@@ -30,6 +30,15 @@ use crate::EventPayloadFixture;
 /// report body stays within the [`netbat::DEFAULT_MAX_OUTPUT_BYTES`] frame cap.
 pub const EVIDENCE_MAX_LIMIT: u64 = 1024;
 
+/// Tighter `limit` bound for read walks that request proof refs. Each returned
+/// entry then contributes a proof ref (event id + global sequence + 32-byte
+/// hash) to the report body, which is hex-expanded into the ack; without proof
+/// refs the body is `O(1)` in the result count, so the looser
+/// [`EVIDENCE_MAX_LIMIT`] applies. This keeps the worst-case proof-ref body well
+/// under [`netbat::DEFAULT_MAX_OUTPUT_BYTES`]; the handler also guards the
+/// encoded size as a backstop.
+pub const EVIDENCE_READ_WALK_PROOF_MAX_LIMIT: u64 = 64;
+
 /// Reason an evidence wire request could not be mapped onto its substrate
 /// request. Domain-neutral: only substrate-coordinate decode failures.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -70,13 +79,14 @@ fn decode_u128_hex(field: &'static str, hex: &str) -> Result<u128, EvidenceReque
         field,
         message: error.to_string(),
     })?;
-    let array: [u8; 16] = bytes
-        .as_slice()
-        .try_into()
-        .map_err(|_| EvidenceRequestError::InvalidHex {
-            field,
-            message: format!("expected 16 bytes, got {}", bytes.len()),
-        })?;
+    let array: [u8; 16] =
+        bytes
+            .as_slice()
+            .try_into()
+            .map_err(|_| EvidenceRequestError::InvalidHex {
+                field,
+                message: format!("expected 16 bytes, got {}", bytes.len()),
+            })?;
     Ok(u128::from_be_bytes(array))
 }
 
@@ -210,8 +220,8 @@ impl EventPayloadFixture for ChainWalkEvidenceAck {
     fn fixture_value() -> Self {
         Self {
             report_hex: "a1b2c3d4".to_owned(),
-            body_hash_hex:
-                "0000000000000000000000000000000000000000000000000000000000000000".to_owned(),
+            body_hash_hex: "0000000000000000000000000000000000000000000000000000000000000000"
+                .to_owned(),
             truncated: false,
         }
     }
@@ -304,8 +314,8 @@ impl EventPayloadFixture for StoreResourceEvidenceAck {
     fn fixture_value() -> Self {
         Self {
             report_hex: "a1b2c3d4".to_owned(),
-            body_hash_hex:
-                "0000000000000000000000000000000000000000000000000000000000000000".to_owned(),
+            body_hash_hex: "0000000000000000000000000000000000000000000000000000000000000000"
+                .to_owned(),
             truncated: false,
         }
     }
@@ -404,15 +414,28 @@ impl ReadWalkEvidenceRequest {
             })?;
         }
 
-        let mut region = self.entity.as_deref().map_or_else(Region::all, Region::entity);
+        let mut region = self
+            .entity
+            .as_deref()
+            .map_or_else(Region::all, Region::entity);
         if let Some(scope) = self.scope.as_deref() {
             region = region.with_scope(scope);
         }
 
-        let limit = self.limit.map(|value| {
-            let bounded = value.min(EVIDENCE_MAX_LIMIT);
-            usize::try_from(bounded).unwrap_or(usize::MAX)
-        });
+        // Proof refs add a per-entry hash to the body, so they get a tighter
+        // bound — and an unbounded (`None`) request is forced onto that bound
+        // rather than streaming every match into a single oversized frame.
+        let max_limit = if self.include_proof_refs {
+            EVIDENCE_READ_WALK_PROOF_MAX_LIMIT
+        } else {
+            EVIDENCE_MAX_LIMIT
+        };
+        let bounded_limit = match self.limit {
+            Some(value) => Some(value.min(max_limit)),
+            None if self.include_proof_refs => Some(max_limit),
+            None => None,
+        };
+        let limit = bounded_limit.map(|value| usize::try_from(value).unwrap_or(usize::MAX));
 
         Ok(ReadWalkRequest {
             region,
@@ -450,8 +473,8 @@ impl EventPayloadFixture for ReadWalkEvidenceAck {
     fn fixture_value() -> Self {
         Self {
             report_hex: "a1b2c3d4".to_owned(),
-            body_hash_hex:
-                "0000000000000000000000000000000000000000000000000000000000000000".to_owned(),
+            body_hash_hex: "0000000000000000000000000000000000000000000000000000000000000000"
+                .to_owned(),
             truncated: false,
         }
     }
@@ -567,8 +590,8 @@ impl EventPayloadFixture for ProjectionRunEvidenceAck {
     fn fixture_value() -> Self {
         Self {
             report_hex: "a1b2c3d4".to_owned(),
-            body_hash_hex:
-                "0000000000000000000000000000000000000000000000000000000000000000".to_owned(),
+            body_hash_hex: "0000000000000000000000000000000000000000000000000000000000000000"
+                .to_owned(),
             truncated: false,
         }
     }
@@ -648,7 +671,7 @@ mod tests {
             ..ChainWalkEvidenceRequest::fixture_value()
         };
         let core = request.to_core()?;
-        assert_eq!(core.limit, EVIDENCE_MAX_LIMIT as usize);
+        assert_eq!(core.limit, usize::try_from(EVIDENCE_MAX_LIMIT)?);
         Ok(())
     }
 
@@ -658,7 +681,10 @@ mod tests {
             limit: 0,
             ..ChainWalkEvidenceRequest::fixture_value()
         };
-        assert_eq!(request.to_core().unwrap_err(), EvidenceRequestError::ZeroLimit);
+        assert_eq!(
+            request.to_core().expect_err("zero limit must be rejected"),
+            EvidenceRequestError::ZeroLimit
+        );
     }
 
     #[test]
@@ -698,16 +724,44 @@ mod tests {
     }
 
     #[test]
-    fn read_walk_request_maps_region_and_bounds_limit() -> Result<()> {
+    fn read_walk_request_bounds_limit_without_proof_refs() -> Result<()> {
         let request = ReadWalkEvidenceRequest {
             entity: Some("fixture:bank".to_owned()),
             scope: Some("fixture-scope".to_owned()),
             limit: Some(EVIDENCE_MAX_LIMIT * 4),
-            include_proof_refs: true,
+            include_proof_refs: false,
         };
         let core = request.to_core()?;
-        assert_eq!(core.limit, Some(EVIDENCE_MAX_LIMIT as usize));
-        assert!(core.include_proof_refs);
+        assert_eq!(core.limit, Some(usize::try_from(EVIDENCE_MAX_LIMIT)?));
+        assert!(!core.include_proof_refs);
+        Ok(())
+    }
+
+    #[test]
+    fn read_walk_request_uses_tighter_bound_with_proof_refs() -> Result<()> {
+        // Proof refs add a per-entry hash, so the limit is capped harder and an
+        // unbounded request is forced onto the proof-ref bound.
+        let capped = ReadWalkEvidenceRequest {
+            entity: Some("fixture:bank".to_owned()),
+            scope: None,
+            limit: Some(EVIDENCE_MAX_LIMIT),
+            include_proof_refs: true,
+        };
+        assert_eq!(
+            capped.to_core()?.limit,
+            Some(usize::try_from(EVIDENCE_READ_WALK_PROOF_MAX_LIMIT)?)
+        );
+
+        let unbounded = ReadWalkEvidenceRequest {
+            entity: None,
+            scope: None,
+            limit: None,
+            include_proof_refs: true,
+        };
+        assert_eq!(
+            unbounded.to_core()?.limit,
+            Some(usize::try_from(EVIDENCE_READ_WALK_PROOF_MAX_LIMIT)?)
+        );
         Ok(())
     }
 
