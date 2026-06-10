@@ -1,6 +1,17 @@
-# BatPAK TypeScript SDK — 0.8.2
+# BatPAK TypeScript SDK
 
-The TypeScript surface for the BatPAK family. 0.8.2 release.
+Typed TypeScript clients for a batpak host: a NETBAT/1 wire client, a
+canonical MessagePack codec that is byte-for-byte identical to the Rust
+encoder, and manifest-generated event types with Effect 4 runtime validation.
+
+The Rust substrate ([batpak](../README.md)) owns source truth; this workspace
+is how TypeScript applications talk to it across a network boundary —
+appending events, paging commit order, verifying receipts, and walking
+hash-chain ancestry, with the same canonical bytes on both sides.
+
+```sh
+npm install @batpak/sdk
+```
 
 Six reference operations live on NETBAT/1 over TCP today:
 
@@ -44,7 +55,7 @@ bpk-ts/batpak.manifest.json
 For apps talking to a NETBAT/1 host (for example `hbat`), install one package:
 
 ```sh
-npm install @batpak/sdk@0.8.2
+npm install @batpak/sdk
 ```
 
 That pulls `@batpak/client`, `@batpak/schema`, `@batpak/generated`, and
@@ -201,7 +212,7 @@ ERR `<code>` is one of the 12 stable ASCII tokens from
 A CI step verifies `rm -rf packages/generated/src && pnpm -w build`
 produces a byte-identical tree.
 
-## Out of scope for 0.8.0
+## Out of scope for 0.8.x
 
 - NETBAT/2 STREAM (reserved per ADR-0030).
 - TS-authored events generating Rust kinds (Phase 2; `bank.event()`
@@ -209,8 +220,3 @@ produces a byte-identical tree.
 - Browser / WebSocket / NAPI / WASM transports.
 - A `Bank` Rust type (composition vocabulary stays in TS until proven
   necessary).
-
-## Plan + audit
-
-- Plan: `/root/.claude/plans/yes-this-is-the-warm-finch.md` (not in repo).
-- Phase 0 loose-end audit report: `bpk-lib/.phase0-audit-report.md`.

@@ -4,13 +4,24 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-## [0.8.2] - 2026-06-09
+## [0.8.2] - 2026-06-10
 
 ### Added
 - Landed `@batpak/sdk` in the monorepo as the one-install npm entry for
   NETBAT/1 TypeScript consumers.
+- Added npm-facing `README.md` files for `@batpak/sdk`, `@batpak/client`,
+  `@batpak/canonical`, `@batpak/schema`, and `@batpak/generated` so every
+  published package page describes itself and routes to the sdk entry point.
 
 ### Changed
+- Rebuilt the evaluator-facing doc surfaces (root `README.md`, the `batpak`
+  crates.io `README.md`, the `bpk-ts` workspace `README.md`, and the crate-level
+  rustdoc opening) around a plain-engineering first screen: what the store is,
+  when to use it, why not SQLite with an events table, and the verification
+  evidence behind the 0.x version number. The factory mental model now enters
+  through a Rosetta table (factory word → Rust surface → plain meaning) and
+  intent-based reading paths instead of a prerequisite reading order. Factory
+  docs themselves (`FACTORY.md`, `MODEL.md`) are unchanged.
 - Aligned every publishable Rust crate and `@batpak/*` npm package on
   `0.8.2`, catching npm up to the substrate evidence surface already in
   git from `0.8.1`.

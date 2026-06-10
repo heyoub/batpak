@@ -91,9 +91,7 @@ rule:
     writeln!(inline_rules, "---").unwrap();
     let rust_any = stale
         .iter()
-        .map(|version| {
-            format!("    - pattern: 'const BATPAK_VERSION: &str = \"{version}\";'")
-        })
+        .map(|version| format!("    - pattern: 'const BATPAK_VERSION: &str = \"{version}\";'"))
         .collect::<Vec<_>>()
         .join("\n");
     writeln!(
@@ -147,9 +145,7 @@ rule:
 
     scan_family_cargo_versions(&root, &stale, &current)?;
 
-    println!(
-        "ast-grep-family-version: ok; no stale patch versions below {current}"
-    );
+    println!("ast-grep-family-version: ok; no stale patch versions below {current}");
     Ok(())
 }
 
@@ -239,10 +235,7 @@ fn scan_family_cargo_versions(
         }
     }
     if !hits.is_empty() {
-        bail!(
-            "family Cargo.toml version drift:\n{}",
-            hits.join("\n")
-        );
+        bail!("family Cargo.toml version drift:\n{}", hits.join("\n"));
     }
     Ok(())
 }

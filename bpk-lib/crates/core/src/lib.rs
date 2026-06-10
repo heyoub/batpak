@@ -14,6 +14,11 @@
 //! evaluates caller-defined gates before commit, and rebuilds typed projections through
 //! a synchronous API that does not require an async runtime.
 //!
+//! Use it when you need a tamper-evident, replayable record of what happened:
+//! every event is hash-bound to its per-entity ancestor with Blake3, every
+//! accepted write returns a verifiable (optionally Ed25519-signed) receipt,
+//! and projections are derived views rebuilt from the log by construction.
+//!
 //! Most callers start with the eight-job path: open a [`Store`](crate::store::Store), append typed
 //! events, page commit order with
 //! [`Store::query_entries_after`](crate::store::Store::query_entries_after),

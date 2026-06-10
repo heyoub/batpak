@@ -1,18 +1,83 @@
 # batpak
 
-Sync-first event sourcing for Rust: append-only segment files, causal metadata,
-caller-defined gates, durable receipts, evidence reports, and typed projections.
+batpak is an embedded, sync-first event store for Rust: an append-only log
+with typed payloads, Blake3 hash-chained ancestry, verifiable (optionally
+Ed25519-signed) receipts, deterministic replay, and derived projections — in
+one process, with no server and no async runtime.
 
-This is the substrate crate in the batpak family.
+Use it when you need a tamper-evident, replayable record of what happened:
+agent action audit trails, local-first app logs, compliance evidence,
+event-sourced application state.
+
+```rust
+use batpak::prelude::*;
+
+#[derive(serde::Serialize, serde::Deserialize, EventPayload)]
+#[batpak(category = 0xF, type_id = 1)]
+struct PlayerMoved {
+    x: i32,
+    y: i32,
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let dir = tempfile::tempdir()?;
+
+    // The Store owns this directory and nothing else.
+    let store = Store::open(StoreConfig::new(dir.path()))?;
+
+    // A Coordinate names where events belong: an entity within a scope.
+    let coord = Coordinate::new("player:alice", "room:dungeon")?;
+
+    // Append source truth. The receipt is verifiable evidence of what
+    // was accepted.
+    let receipt = store.append_typed(&coord, &PlayerMoved { x: 10, y: 20 })?;
+
+    // Accepted events are immutable.
+    let fetched = store.get(receipt.event_id)?;
+    println!("stored {} at sequence {}", fetched.event.header.event_id, receipt.sequence);
+
+    store.close()?;
+    Ok(())
+}
+```
+
+## Why not SQLite with an events table?
+
+SQLite gives you durable rows. batpak gives you durable rows plus proof:
+every event is hash-bound to its per-entity ancestor with Blake3, every
+accepted write returns a receipt you can verify later, and projections are
+derived views rebuilt from the log by construction — read models cannot
+silently drift from source truth.
+
+When batpak is the wrong tool: ad-hoc SQL over relational data, many writer
+processes sharing one store, raw write throughput over verifiable history,
+or distributed replication. batpak is a local truth boundary, on purpose.
+
+## Trust
+
+Judge the evidence, not the 0.x version number: roughly one line of tests
+per line of source, deterministic concurrency proofs with `loom`,
+property-based tests over hash-chain integrity and canonical encoding,
+crash-recovery and fault-injection suites, mutation testing on critical
+seams, and 71 named invariants enforced by an executable integrity gate.
+
+## Docs
+
+Full documentation lives in the
+[repository](https://github.com/heyoub/batpak): the
+[README](https://github.com/heyoub/batpak/blob/main/README.md) for the
+evaluator path, the
+[COOKBOOK](https://github.com/heyoub/batpak/blob/main/COOKBOOK.md) for
+task-shaped recipes, and
+[MODEL](https://github.com/heyoub/batpak/blob/main/MODEL.md) /
+[INVARIANTS](https://github.com/heyoub/batpak/blob/main/INVARIANTS.md) /
+[CONFORMANCE](https://github.com/heyoub/batpak/blob/main/CONFORMANCE.md)
+for the mental model and the guarantees.
+
+This is the substrate crate in the batpak family. TypeScript clients talk to
+a networked batpak host through
+[`@batpak/sdk`](https://www.npmjs.com/package/@batpak/sdk).
 
 ```text
 bp records.
 ```
-
-Start with the root repository docs:
-
-- `README.md`
-- `FACTORY.md`
-- `MODEL.md`
-- `INVARIANTS.md`
-- `CONFORMANCE.md`
