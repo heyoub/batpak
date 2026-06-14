@@ -1,4 +1,4 @@
-use crate::util::{cargo, command_succeeds, repo_root, run};
+use crate::util::{cargo, command_succeeds, project_root, run};
 use crate::SetupArgs;
 use anyhow::{bail, Context, Result};
 use std::path::{Component, Path, PathBuf};
@@ -196,7 +196,7 @@ pub(crate) fn doctor() -> Result<()> {
 }
 
 fn maybe_install_repo_hooks() -> Result<HookStatus> {
-    let root = repo_root()?;
+    let root = project_root()?;
     let hook = root.join(PRE_COMMIT_HOOK);
     if !hook.exists() {
         bail!(
@@ -220,7 +220,7 @@ fn maybe_install_repo_hooks() -> Result<HookStatus> {
 }
 
 fn repo_hook_status() -> Result<HookStatus> {
-    let root = repo_root()?;
+    let root = project_root()?;
     let output = Command::new("git")
         .current_dir(&root)
         .args(["config", "--get", "core.hooksPath"])
