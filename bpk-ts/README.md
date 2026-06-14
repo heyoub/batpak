@@ -13,7 +13,8 @@ hash-chain ancestry, with the same canonical bytes on both sides.
 npm install @batpak/sdk
 ```
 
-Six reference operations live on NETBAT/1 over TCP today:
+Ten reference operations live on NETBAT/1 over TCP today — six core substrate
+ops plus four domain-neutral `evidence.*` ops:
 
 ```
 system.heartbeat   — wire-parity liveness probe.
@@ -30,6 +31,12 @@ receipt.verify     — verify ack-shaped append receipt fields against the
                      committed store.
 event.walk         — bounded hash-chain ancestry from a starting event_id;
                      relation order, not commit-order pagination.
+evidence.chain_walk — chain-walk evidence report over bounded hash-chain ancestry.
+evidence.store_resource — point-in-time store resource evidence snapshot.
+evidence.read_walk — read-walk evidence report with full Region selector axes.
+evidence.projection_run — projection-run evidence; reference hbat registers
+                     no projections, so unknown projection ids return a
+                     handler error unless an embedder registers projections.
 ```
 
 Authority direction:
@@ -108,9 +115,9 @@ examples/
                       Effect 4 schema; proves byte round-trip)
                     - sends an unknown_operation to validate the typed
                       ERR-frame path.
-                    - note: receipt.verify and event.walk remain part of the
-                      six-op host profile and are covered by manifest/parity
-                      tests.
+                    - note: receipt.verify, event.walk, and the four
+                      evidence.* ops round out the ten-op host profile and
+                      are covered by manifest/parity tests and hbat tests.
   audit-loop/       Living loop against hbat:
                     - commits app-owned events (kind_category=0x01)
                     - rebuilds an ordered audit view from event.query +
@@ -121,7 +128,7 @@ examples/
 
 ## hbat — the reference host
 
-`hbat` (in `bpk-lib/crates/hbat/`) registers all six reference operations against
+`hbat` (in `bpk-lib/crates/hbat/`) registers all ten reference operations against
 a real BatPAK store. `publish = false`. Loopback-only by default; bind
 to a non-loopback interface only with `--allow-non-loopback`.
 

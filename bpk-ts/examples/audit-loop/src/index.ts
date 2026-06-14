@@ -8,7 +8,13 @@ import {
 } from "./events.js";
 import { commitAppEvent, getEvent, queryAuditSummariesByGlobalSequence } from "./host.js";
 import { formatStream, printStream, rowFromSubstrate } from "./render.js";
-import { DEMO_ENTITY, DEMO_SCOPE, KIND_TYPE_CHAT, KIND_TYPE_NOTE, KIND_TYPE_TASK } from "./constants.js";
+import {
+  DEMO_ENTITY,
+  DEMO_SCOPE,
+  KIND_TYPE_CHAT,
+  KIND_TYPE_NOTE,
+  KIND_TYPE_TASK,
+} from "./constants.js";
 
 interface CliArgs {
   host: string;

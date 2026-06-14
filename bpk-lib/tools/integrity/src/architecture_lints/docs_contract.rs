@@ -11,6 +11,7 @@ pub(super) fn check(repo_root: &Path) -> Result<()> {
     check_factory_docs_use_just_commands(repo_root)?;
     check_root_doc_site_contract(repo_root)?;
     check_reference_doc_completeness(repo_root)?;
+    check_terminal_manifest_doc_parity(repo_root)?;
     check_changelog_migration_contract(repo_root)?;
     Ok(())
 }
@@ -176,6 +177,27 @@ fn check_reference_doc_completeness(repo_root: &Path) -> Result<()> {
             content.contains(heading),
             format!("{path} is missing required section or anchor `{heading}`"),
         )?;
+    }
+    Ok(())
+}
+
+fn check_terminal_manifest_doc_parity(repo_root: &Path) -> Result<()> {
+    let doc_root = project_root(repo_root);
+    let evidence_ops = [
+        "evidence.chain_walk",
+        "evidence.store_resource",
+        "evidence.read_walk",
+        "evidence.projection_run",
+    ];
+    for doc in ["TERMINALS.md", "CONFORMANCE.md"] {
+        let content =
+            fs::read_to_string(doc_root.join(doc)).with_context(|| format!("read {doc}"))?;
+        for op in evidence_ops {
+            ensure(
+                content.contains(op),
+                format!("{doc} must mention manifest operation `{op}`"),
+            )?;
+        }
     }
     Ok(())
 }

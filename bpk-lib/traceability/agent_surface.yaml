@@ -213,7 +213,7 @@ tasks:
     problem: "Report projection run boundary, freshness, cache, checkpoint, and output facts."
     use:
       - "ProjectionRunEvidenceReport"
-      - "Store::projection_run_evidence"
+      - "Store::project_run_evidence"
       - "ProjectionRunCacheStatus"
     avoid:
       - "ambient frontier samples called mechanism input"
@@ -367,6 +367,7 @@ tasks:
       - "bpk-ts/examples/audit-loop"
     tests:
       - "crates/hbat/tests/tcp_e2e.rs"
+      - "crates/hbat/tests/handlers.rs"
       - "crates/core/tests/read_api_pagination.rs"
     invariants:
       - "downstream layers decode semantic payloads above BatPAK after bounded traversal"

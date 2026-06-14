@@ -429,8 +429,13 @@ fn evidence_read_walk_ack_carries_report_body() -> Result<()> {
     let request = ReadWalkEvidenceRequest {
         entity: Some("test:evidence-read".to_owned()),
         scope: None,
+        kind_category: None,
+        kind_type_id: None,
+        start_clock: None,
+        end_clock: None,
         limit: Some(32),
         include_proof_refs: false,
+        max_stale_ms: None,
     };
     let result = core.invoke("evidence.read_walk", batpak::encoding::to_bytes(&request)?)?;
     let ack: ReadWalkEvidenceAck = batpak::encoding::from_bytes(result.output())?;
@@ -502,8 +507,13 @@ fn evidence_read_walk_truncated_reflects_limit_drops() -> Result<()> {
     let limited = ReadWalkEvidenceRequest {
         entity: Some("test:rw-trunc".to_owned()),
         scope: None,
+        kind_category: None,
+        kind_type_id: None,
+        start_clock: None,
+        end_clock: None,
         limit: Some(2),
         include_proof_refs: false,
+        max_stale_ms: None,
     };
     let result = core.invoke("evidence.read_walk", batpak::encoding::to_bytes(&limited)?)?;
     let ack: ReadWalkEvidenceAck = batpak::encoding::from_bytes(result.output())?;
@@ -516,8 +526,13 @@ fn evidence_read_walk_truncated_reflects_limit_drops() -> Result<()> {
     let full = ReadWalkEvidenceRequest {
         entity: Some("test:rw-trunc".to_owned()),
         scope: None,
+        kind_category: None,
+        kind_type_id: None,
+        start_clock: None,
+        end_clock: None,
         limit: Some(10),
         include_proof_refs: false,
+        max_stale_ms: None,
     };
     let result = core.invoke("evidence.read_walk", batpak::encoding::to_bytes(&full)?)?;
     let ack: ReadWalkEvidenceAck = batpak::encoding::from_bytes(result.output())?;

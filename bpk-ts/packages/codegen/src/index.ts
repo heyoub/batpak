@@ -41,7 +41,9 @@ const SUPPORTED_FIELD_TYPES = new Set<string>([
   "option<u128-hex>",
   "option<u8>",
   "option<u16>",
+  "option<u32>",
   "option<u64-safe>",
+  "option<u64-safe-positive>",
   "bool",
   "map<string,string>",
   "array<EventSummary>",
@@ -450,7 +452,8 @@ function renderIndexModule(): string {
 const SAFE_MIN = Number.MIN_SAFE_INTEGER;
 const SAFE_MAX = Number.MAX_SAFE_INTEGER;
 
-function schemaForToken(token: string): string {
+// Re-export the schema generator for unit tests.
+export function schemaForToken(token: string): string {
   switch (token) {
     case "string":
       return "Schema.String";
@@ -475,8 +478,12 @@ function schemaForToken(token: string): string {
       return `Schema.NullOr(${checkedNumber(0, 255)})`;
     case "option<u16>":
       return `Schema.NullOr(${checkedNumber(0, 65535)})`;
+    case "option<u32>":
+      return `Schema.NullOr(${checkedNumber(0, 4294967295)})`;
     case "option<u64-safe>":
       return `Schema.NullOr(${checkedNumber(0, SAFE_MAX)})`;
+    case "option<u64-safe-positive>":
+      return `Schema.NullOr(${checkedNumber(1, SAFE_MAX)})`;
     case "bool":
       return "Schema.Boolean";
     case "map<string,string>":
@@ -544,7 +551,9 @@ export function tsTypeForToken(token: string): string {
       return '(string & Schema.Brand<"EventIdHex">) | null';
     case "option<u8>":
     case "option<u16>":
+    case "option<u32>":
     case "option<u64-safe>":
+    case "option<u64-safe-positive>":
       return "number | null";
     case "bool":
       return "boolean";

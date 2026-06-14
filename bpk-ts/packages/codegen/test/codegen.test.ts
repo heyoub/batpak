@@ -16,6 +16,7 @@ import {
   CodegenError,
   generate,
   readManifest,
+  schemaForToken,
   SUPPORTED_MANIFEST_VERSION,
   tsTypeForToken,
 } from "../src/index.js";
@@ -553,7 +554,9 @@ describe("token vocabulary mapping", () => {
       "option<u128-hex>",
       "option<u8>",
       "option<u16>",
+      "option<u32>",
       "option<u64-safe>",
+      "option<u64-safe-positive>",
       "bool",
       "map<string,string>",
       "array<EventSummary>",
@@ -579,7 +582,9 @@ describe("token vocabulary mapping", () => {
       "option<u128-hex>": '(string & Schema.Brand<"EventIdHex">) | null',
       "option<u8>": "number | null",
       "option<u16>": "number | null",
+      "option<u32>": "number | null",
       "option<u64-safe>": "number | null",
+      "option<u64-safe-positive>": "number | null",
       bool: "boolean",
       "map<string,string>": "Record<string, string>",
       "array<EventSummary>": "Array<EventSummary>",
@@ -607,5 +612,18 @@ describe("token vocabulary mapping", () => {
         expect(error.code).toBe("unsupported_field_type");
       }
     }
+  });
+});
+
+describe("schemaForToken ranges", () => {
+  it("emits checked bounds for option<u32> and option<u64-safe-positive>", () => {
+    expect(schemaForToken("option<u32>")).toContain("minimum: 0, maximum: 4294967295");
+    expect(schemaForToken("option<u64-safe-positive>")).toContain(
+      "minimum: 1, maximum: 9007199254740991",
+    );
+  });
+
+  it("keeps option<u64-safe> allowing zero", () => {
+    expect(schemaForToken("option<u64-safe>")).toContain("minimum: 0, maximum: 9007199254740991");
   });
 });

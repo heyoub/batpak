@@ -2,11 +2,10 @@
 //!
 //! These tests spawn the actual `hbat` binary as a subprocess, parse
 //! the `HBAT_READY {…}` rendezvous line from its stdout, connect over
-//! TCP, and drive all six NETBAT/1 operations the binary exposes
-//! (`system.heartbeat`, `bank.commit`, `event.get`, `event.query`,
-//! `receipt.verify`, `event.walk`) plus the error path. They close the
-//! cross-language parity loop on the Rust side the same way
-//! `bpk-ts/examples/heartbeat-spike` does on the TS side.
+//! TCP, and drive the ten-op NETBAT/1 manifest the reference host
+//! advertises. They close the cross-language parity loop on the Rust
+//! side the same way `bpk-ts/examples/heartbeat-spike` does on the TS
+//! side.
 //!
 //! Audit reference: maturity-gap audit flagged that hbat had NO
 //! integration tests (only inline #[test] fns) — this file fills that
@@ -14,7 +13,11 @@
 //!
 //! PROVES:
 //!   - HBAT_READY rendezvous is a parseable JSON line on stdout.
-//!   - NETBAT/1 frames over TCP round-trip cleanly for the 6 operations.
+//!   - NETBAT/1 reachability for the ten-op manifest over TCP.
+//!   - Success-path evidence identity for `evidence.chain_walk`,
+//!     `evidence.store_resource`, and `evidence.read_walk`.
+//!   - Intentional handler-error reachability for `evidence.projection_run`
+//!     on the domain-neutral reference host (empty projection registry).
 //!   - Wire-format error path returns a typed ERR with the
 //!     `unknown_operation` code and a UTF-8 message body.
 //!   - `bank.commit` -> `event.get` recovers the canonical payload
@@ -40,7 +43,11 @@ use hbat::{
         BankCommitAck, BankCommitRequest, EventGetAck, EventGetRequest, EventQueryAck,
         EventQueryRequest,
     },
-    evidence::{ChainWalkEvidenceAck, ChainWalkEvidenceRequest, ProjectionRunEvidenceRequest},
+    evidence::{
+        ChainWalkEvidenceAck, ChainWalkEvidenceRequest, ProjectionRunEvidenceRequest,
+        ReadWalkEvidenceAck, ReadWalkEvidenceRequest, StoreResourceEvidenceAck,
+        StoreResourceEvidenceRequest,
+    },
     heartbeat::{SystemHeartbeatAck, SystemHeartbeatRequest},
     receipt::{ReceiptVerifyAck, ReceiptVerifyRequest},
     walk::{EventWalkAck, EventWalkRequest},
@@ -680,12 +687,115 @@ fn evidence_chain_walk_round_trips_over_tcp() -> Result<()> {
     // The ack carries the report body as a canonical blob whose content hash is
     // the advertised body_hash. Re-hashing the blob with the same function core
     // uses must reproduce it — the evidence identity contract, over TCP.
-    let report_bytes = netbat::decode_hex_str(&ack.report_hex)?;
+    assert_evidence_report_identity(&ack.report_hex, &ack.body_hash_hex)?;
+    Ok(())
+}
+
+fn assert_evidence_report_identity(ack_report_hex: &str, ack_body_hash_hex: &str) -> Result<()> {
+    let report_bytes = netbat::decode_hex_str(ack_report_hex)?;
     let rehashed = lowercase_hex(&batpak::event::hash::compute_hash(&report_bytes));
     assert_eq!(
-        rehashed, ack.body_hash_hex,
+        rehashed, ack_body_hash_hex,
         "report_hex must re-hash to body_hash_hex (evidence identity)"
     );
+    Ok(())
+}
+
+#[test]
+fn evidence_store_resource_round_trips_over_tcp() -> Result<()> {
+    let host = HbatProcess::spawn()?;
+    let request = StoreResourceEvidenceRequest::fixture_value();
+    let response = call_one(
+        &host,
+        "evidence.store_resource",
+        &batpak::encoding::to_bytes(&request)?,
+    )?;
+    let ack: StoreResourceEvidenceAck = batpak::encoding::from_bytes(&parse_ok(&response)?)?;
+    assert_evidence_report_identity(&ack.report_hex, &ack.body_hash_hex)?;
+    Ok(())
+}
+
+#[test]
+fn evidence_read_walk_round_trips_over_tcp() -> Result<()> {
+    let host = HbatProcess::spawn()?;
+
+    let payload = SystemHeartbeatRequest {
+        nonce: "tcp-e2e-evidence-read-walk".to_owned(),
+    };
+    let payload_bytes = batpak::encoding::to_bytes(&payload)?;
+    for _ in 0..2 {
+        let commit = BankCommitRequest {
+            entity: "tcp:e2e-read-walk".to_owned(),
+            scope: "tcp-e2e-read-walk-scope".to_owned(),
+            kind_category: SystemHeartbeatRequest::KIND.category(),
+            kind_type_id: SystemHeartbeatRequest::KIND.type_id(),
+            payload_hex: lowercase_hex(&payload_bytes),
+        };
+        let _ = call_one(&host, "bank.commit", &batpak::encoding::to_bytes(&commit)?)?;
+    }
+
+    let request = ReadWalkEvidenceRequest {
+        entity: Some("tcp:e2e-read-walk".to_owned()),
+        scope: None,
+        kind_category: Some(SystemHeartbeatRequest::KIND.category()),
+        kind_type_id: Some(SystemHeartbeatRequest::KIND.type_id()),
+        start_clock: None,
+        end_clock: None,
+        limit: Some(16),
+        include_proof_refs: false,
+        max_stale_ms: None,
+    };
+    let response = call_one(
+        &host,
+        "evidence.read_walk",
+        &batpak::encoding::to_bytes(&request)?,
+    )?;
+    let ack: ReadWalkEvidenceAck = batpak::encoding::from_bytes(&parse_ok(&response)?)?;
+    assert_evidence_report_identity(&ack.report_hex, &ack.body_hash_hex)?;
+    Ok(())
+}
+
+#[test]
+fn evidence_read_walk_truncated_over_tcp() -> Result<()> {
+    let host = HbatProcess::spawn()?;
+
+    let payload = SystemHeartbeatRequest {
+        nonce: "tcp-e2e-evidence-read-walk-trunc".to_owned(),
+    };
+    let payload_bytes = batpak::encoding::to_bytes(&payload)?;
+    for _ in 0..3 {
+        let commit = BankCommitRequest {
+            entity: "tcp:e2e-read-walk-trunc".to_owned(),
+            scope: "tcp-e2e-read-walk-trunc-scope".to_owned(),
+            kind_category: SystemHeartbeatRequest::KIND.category(),
+            kind_type_id: SystemHeartbeatRequest::KIND.type_id(),
+            payload_hex: lowercase_hex(&payload_bytes),
+        };
+        let _ = call_one(&host, "bank.commit", &batpak::encoding::to_bytes(&commit)?)?;
+    }
+
+    let request = ReadWalkEvidenceRequest {
+        entity: Some("tcp:e2e-read-walk-trunc".to_owned()),
+        scope: None,
+        kind_category: None,
+        kind_type_id: None,
+        start_clock: None,
+        end_clock: None,
+        limit: Some(1),
+        include_proof_refs: false,
+        max_stale_ms: None,
+    };
+    let response = call_one(
+        &host,
+        "evidence.read_walk",
+        &batpak::encoding::to_bytes(&request)?,
+    )?;
+    let ack: ReadWalkEvidenceAck = batpak::encoding::from_bytes(&parse_ok(&response)?)?;
+    assert!(
+        ack.truncated,
+        "limit below the match count must report truncated over TCP"
+    );
+    assert_evidence_report_identity(&ack.report_hex, &ack.body_hash_hex)?;
     Ok(())
 }
 

@@ -216,39 +216,15 @@ fn handle_event_query(store: &Store, input: &[u8]) -> HandlerResult {
 }
 
 fn event_query_region(request: &EventQueryRequest) -> Result<Region, HandlerError> {
-    if let Some(entity) = request.entity.as_deref() {
-        Coordinate::new(entity, "hbat-query")
-            .map_err(|error| HandlerError::invalid_input(format!("entity: {error}")))?;
-    }
-    if let Some(scope) = request.scope.as_deref() {
-        Coordinate::new("hbat:query", scope)
-            .map_err(|error| HandlerError::invalid_input(format!("scope: {error}")))?;
-    }
-
-    let mut region = request
-        .entity
-        .as_deref()
-        .map_or_else(Region::all, Region::entity);
-
-    if let Some(scope) = request.scope.as_deref() {
-        region = region.with_scope(scope);
-    }
-
-    match (request.kind_category, request.kind_type_id) {
-        (Some(category), Some(type_id)) => {
-            let kind = EventKind::try_custom(category, type_id)
-                .map_err(|error| HandlerError::invalid_input(format!("event kind: {error:?}")))?;
-            Ok(region.with_fact(batpak::coordinate::KindFilter::Exact(kind)))
-        }
-        (Some(category), None) if category <= 0xF => Ok(region.with_fact_category(category)),
-        (Some(category), None) => Err(HandlerError::invalid_input(format!(
-            "kind_category must fit in 4 bits, got {category}"
-        ))),
-        (None, Some(_)) => Err(HandlerError::invalid_input(
-            "kind_type_id requires kind_category",
-        )),
-        (None, None) => Ok(region),
-    }
+    crate::region_wire::wire_axes_to_region(
+        request.entity.as_deref(),
+        request.scope.as_deref(),
+        request.kind_category,
+        request.kind_type_id,
+        None,
+        None,
+    )
+    .map_err(|error| HandlerError::invalid_input(error.to_string()))
 }
 
 fn query_event_summaries(

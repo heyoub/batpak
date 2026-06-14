@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- Expanded `evidence.read_walk` wire request to full `Region` selector parity
+  (`kind_category`/`kind_type_id`, `start_clock`/`end_clock`, `max_stale_ms`);
+  omitted fields remain backward compatible. Tightened the manifest `limit`
+  token to `option<u64-safe-positive>` so TypeScript encode rejects `limit: 0`.
+- Updated reference-host docs, traceability, parity tests, and integrity guards
+  for the ten-op NETBAT manifest (six core ops + four `evidence.*` ops).
+
 ## [0.8.2] - 2026-06-10
 
 ### Added

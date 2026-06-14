@@ -52,12 +52,18 @@ access to the substrate evidence reports `Store` already produces, instead of
 re-deriving them from `event.walk` + `receipt.verify` + `event.query`. Each ack
 carries the canonical report body (`report_hex`) plus its `body_hash` identity
 and a `truncated` flag, so the consumer can verify the report by re-hashing the
-blob. Requests are keyed only on substrate coordinates;
+blob. Evidence requests use domain-neutral substrate selectors — entity/scope
+prefixes, optional kind filters, optional per-entity clock range on
+`evidence.read_walk`, projection ids on `evidence.projection_run`, and
+event-id hex on `evidence.chain_walk` — and traversal returns evidence/metadata
+only, never decoded domain payloads.
 `evidence.projection_run` resolves a domain-neutral projection id through an
 embedder-registered table and the reference host registers none.
 
 `entity` filters use `Region::entity`, which is prefix-based. Supplying both
 `entity` and `scope` gives the normal coordinate-level replay shape.
+`evidence.read_walk` additionally accepts `kind_category`/`kind_type_id`,
+`start_clock`/`end_clock`, `max_stale_ms`, and a positive-only `limit`.
 
 ## Platform Contact
 

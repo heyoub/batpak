@@ -343,18 +343,28 @@ export const STORE_RESOURCE_EVIDENCE_ACK_FIXTURE: StoreResourceEvidenceAck = {
 export const ReadWalkEvidenceRequest = Schema.Struct({
   entity: Schema.NullOr(Schema.String),
   scope: Schema.NullOr(Schema.String),
-  limit: Schema.NullOr(Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 9007199254740991 })))),
+  kind_category: Schema.NullOr(Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 255 })))),
+  kind_type_id: Schema.NullOr(Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 65535 })))),
+  start_clock: Schema.NullOr(Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 4294967295 })))),
+  end_clock: Schema.NullOr(Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 4294967295 })))),
+  limit: Schema.NullOr(Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 1, maximum: 9007199254740991 })))),
   include_proof_refs: Schema.Boolean,
+  max_stale_ms: Schema.NullOr(Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 9007199254740991 })))),
 });
 // eslint-disable-next-line @typescript-eslint/no-redeclare
 export type ReadWalkEvidenceRequest = typeof ReadWalkEvidenceRequest.Type;
 
-export const READ_WALK_EVIDENCE_REQUEST_GOLDEN_HEX = "84a6656e74697479ac666978747572653a62616e6ba573636f7065c0a56c696d697440b2696e636c7564655f70726f6f665f72656673c2" as const;
+export const READ_WALK_EVIDENCE_REQUEST_GOLDEN_HEX = "89a6656e74697479ac666978747572653a62616e6ba573636f7065c0ad6b696e645f63617465676f72790fac6b696e645f747970655f6964c0ab73746172745f636c6f636bc0a9656e645f636c6f636bc0a56c696d697440b2696e636c7564655f70726f6f665f72656673c2ac6d61785f7374616c655f6d73c0" as const;
 export const READ_WALK_EVIDENCE_REQUEST_FIXTURE: ReadWalkEvidenceRequest = {
   "entity": "fixture:bank",
   "scope": null,
+  "kind_category": 15,
+  "kind_type_id": null,
+  "start_clock": null,
+  "end_clock": null,
   "limit": 64,
-  "include_proof_refs": false
+  "include_proof_refs": false,
+  "max_stale_ms": null
 } as unknown as ReadWalkEvidenceRequest;
 
 /** Source: hbat::evidence::ReadWalkEvidenceAck; category=15, typeId=2673 */

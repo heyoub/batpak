@@ -17,11 +17,7 @@ import {
   type EventSummary,
 } from "@batpak/sdk";
 
-import {
-  DEMO_ENTITY,
-  DEMO_KIND_CATEGORY,
-  DEMO_SCOPE,
-} from "./constants.js";
+import { DEMO_ENTITY, DEMO_KIND_CATEGORY, DEMO_SCOPE } from "./constants.js";
 
 async function openSocket(host: string, port: number): Promise<Socket> {
   return new Promise((resolveSocket, reject) => {
@@ -74,7 +70,7 @@ export async function queryAuditSummariesByGlobalSequence(
   host: string,
   port: number,
 ): Promise<readonly EventSummary[]> {
-  let after_global_sequence: typeof EventQueryRequest.Type["after_global_sequence"] = null;
+  let after_global_sequence: (typeof EventQueryRequest.Type)["after_global_sequence"] = null;
   const entries: EventSummary[] = [];
 
   for (;;) {
@@ -88,7 +84,11 @@ export async function queryAuditSummariesByGlobalSequence(
     };
 
     const page = await withSocket(host, port, async (socket) => {
-      const response = await call(socket, EVENT_QUERY.name, encodeBytes(EventQueryRequest, request));
+      const response = await call(
+        socket,
+        EVENT_QUERY.name,
+        encodeBytes(EventQueryRequest, request),
+      );
       if (response.kind !== "netbat-ok") {
         throw new Error(
           `event.query: expected OK, got ${response.kind} ${response.code}: ${response.message}`,
@@ -102,9 +102,7 @@ export async function queryAuditSummariesByGlobalSequence(
       return entries;
     }
     if (page.next_after_global_sequence === null) {
-      throw new Error(
-        "event.query: truncated page did not provide next_after_global_sequence",
-      );
+      throw new Error("event.query: truncated page did not provide next_after_global_sequence");
     }
     after_global_sequence = page.next_after_global_sequence;
   }

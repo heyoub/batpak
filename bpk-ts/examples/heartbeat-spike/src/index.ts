@@ -3,8 +3,9 @@
  *
  * Boots against a running `hbat` on `--port N` and exercises the live
  * calibration path: heartbeat + commit/query/get + typed ERR. The full
- * six-operation NETBAT/1 host profile also includes `receipt.verify` and
- * `event.walk`, which are covered by manifest/parity and hbat tests.
+ * ten-operation NETBAT/1 host profile also includes `receipt.verify`,
+ * `event.walk`, and the four `evidence.*` ops, which are covered by
+ * manifest/parity and hbat tests.
  *
  *   1. `system.heartbeat`  — proves the wire is open.
  *   2. `bank.commit`        — appends a typed event, returns AppendReceipt.

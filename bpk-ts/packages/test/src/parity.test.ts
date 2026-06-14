@@ -284,17 +284,48 @@ describe("Effect 4 schema round-trip via @batpak/schema", () => {
         limit: 0,
       }),
     ).toThrow();
+
+    expect(() =>
+      encodeBytes(Generated.ReadWalkEvidenceRequest, {
+        entity: null,
+        scope: null,
+        kind_category: null,
+        kind_type_id: null,
+        start_clock: null,
+        end_clock: null,
+        limit: 0,
+        include_proof_refs: false,
+        max_stale_ms: null,
+      }),
+    ).toThrow();
   });
 });
 
 describe("operation handles in generated/operations", () => {
-  it("exports all six reference operations with golden hex", () => {
+  it("exports all ten reference operations with golden hex", () => {
     expect(Generated.SYSTEM_HEARTBEAT.name).toBe("system.heartbeat");
     expect(Generated.BANK_COMMIT.name).toBe("bank.commit");
     expect(Generated.EVENT_GET.name).toBe("event.get");
     expect(Generated.EVENT_QUERY.name).toBe("event.query");
     expect(Generated.RECEIPT_VERIFY.name).toBe("receipt.verify");
     expect(Generated.EVENT_WALK.name).toBe("event.walk");
+    expect(Generated.EVIDENCE_CHAIN_WALK.name).toBe("evidence.chain_walk");
+    expect(Generated.EVIDENCE_STORE_RESOURCE.name).toBe("evidence.store_resource");
+    expect(Generated.EVIDENCE_READ_WALK.name).toBe("evidence.read_walk");
+    expect(Generated.EVIDENCE_PROJECTION_RUN.name).toBe("evidence.projection_run");
+    expect(Generated.BANK_COMMIT.goldenInputHex).toBe(
+      "85a6656e74697479ac666978747572653a62616e6ba573636f7065ad666978747572652d73636f7065ad6b696e645f63617465676f72790fac6b696e645f747970655f6964cd0a01ab7061796c6f61645f686578d93c383161353665366636653633363562363638363536313732373436323635363137343264363636393738373437353732363532643330333033303331",
+    );
+    expect(Generated.EVIDENCE_CHAIN_WALK.goldenInputHex).toBe(
+      "84b273746172745f6576656e745f69645f686578d9203031323334353637383961626364656630313233343536373839616263646566b773746172745f65787065637465645f686173685f686578c0b0656e645f6576656e745f69645f686578c0a56c696d697410",
+    );
+    expect(Generated.EVIDENCE_STORE_RESOURCE.goldenInputHex).toBe("80");
+    expect(Generated.EVIDENCE_READ_WALK.goldenInputHex).toBe(
+      "89a6656e74697479ac666978747572653a62616e6ba573636f7065c0ad6b696e645f63617465676f72790fac6b696e645f747970655f6964c0ab73746172745f636c6f636bc0a9656e645f636c6f636bc0a56c696d697440b2696e636c7564655f70726f6f665f72656673c2ac6d61785f7374616c655f6d73c0",
+    );
+    expect(Generated.EVIDENCE_PROJECTION_RUN.goldenInputHex).toBe(
+      "83aa70726f6a656374696f6eb2666978747572652e70726f6a656374696f6ea6656e74697479ac666978747572653a62616e6bac6d61785f7374616c655f6d73c0",
+    );
     expect(Generated.BANK_COMMIT.errorFixture.code).toBe("unknown_operation");
   });
 });

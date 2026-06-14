@@ -1,11 +1,6 @@
 import { Schema, bank, decodeBytes } from "@batpak/sdk";
 
-import {
-  DEMO_KIND_CATEGORY,
-  KIND_TYPE_CHAT,
-  KIND_TYPE_NOTE,
-  KIND_TYPE_TASK,
-} from "./constants.js";
+import { DEMO_KIND_CATEGORY, KIND_TYPE_CHAT, KIND_TYPE_NOTE, KIND_TYPE_TASK } from "./constants.js";
 
 // App-owned demo payloads only. `task`, `assignee`, and `chat` are example
 // fields above the substrate, not BatPAK workflow semantics or NETBAT/1 ops.

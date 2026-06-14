@@ -246,6 +246,10 @@ fn check_for_stale_references(repo_root: &Path, tracked_files: &[PathBuf]) -> Re
         "store/staging.rs",
         "store/cursor.rs",
         "store/watch.rs",
+        "Six reference operations live",
+        "six-op host profile",
+        "six reference NETBAT operations",
+        "for the 6 operations",
     ];
     let allow = [
         repo_root

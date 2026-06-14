@@ -105,8 +105,11 @@ The `evidence.*` ops are thin wire adapters over the substrate evidence reports
 `query_with_read_walk_evidence`, `project_run_evidence`). Each ack carries the
 report body as a canonical blob (`report_hex`) plus its `body_hash` identity and
 a `truncated` flag; a consumer re-hashes `report_hex` to confirm it equals
-`body_hash`. Requests are keyed only on substrate coordinates, and traversal
-returns evidence/metadata only — never decoded domain payloads.
+`body_hash`. Evidence requests use domain-neutral substrate selectors —
+entity/scope prefixes, optional kind filters, optional per-entity clock range
+on `evidence.read_walk`, projection ids on `evidence.projection_run`, and
+event-id hex on `evidence.chain_walk` — and traversal returns evidence/metadata
+only, never decoded domain payloads.
 `evidence.projection_run` is dispatched through an embedder-populated projection
 registry; the reference host registers none, so it answers every projection id
 with an unknown-projection error.

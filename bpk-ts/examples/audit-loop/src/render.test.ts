@@ -24,9 +24,6 @@ describe("render stream ordering", () => {
       { globalSequence: 2, kindLabel: "task", body: "beta" },
     ];
 
-    expect(formatStream(rows)).toEqual([
-      "1. seq=1 note: alpha",
-      "2. seq=2 task: beta",
-    ]);
+    expect(formatStream(rows)).toEqual(["1. seq=1 note: alpha", "2. seq=2 task: beta"]);
   });
 });

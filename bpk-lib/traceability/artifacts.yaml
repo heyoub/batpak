@@ -170,6 +170,8 @@
   paths:
     - crates/hbat/src/lib.rs
     - crates/hbat/src/bank.rs
+    - crates/hbat/src/evidence.rs
+    - crates/hbat/src/region_wire.rs
     - crates/hbat/src/handlers.rs
     - crates/hbat/src/manifest.rs
     - crates/hbat/src/main.rs
@@ -177,10 +179,33 @@
   kind: tests
   paths:
     - crates/hbat/tests/tcp_e2e.rs
+    - crates/hbat/tests/handlers.rs
+    - crates/hbat/tests/evidence.rs
 - id: ART-HBAT-MANIFEST-EXPORT
   kind: tool
   paths:
     - tools/xtask/src/commands/export_ts_manifest.rs
+- id: ART-STORE-EVIDENCE-REPORTS
+  kind: tests
+  paths:
+    - crates/core/tests/evidence_report_family.rs
+    - crates/core/tests/chain_walk_evidence_report.rs
+    - crates/core/tests/read_walk_evidence_report.rs
+    - crates/core/tests/projection_run_evidence_report.rs
+    - crates/core/src/store/read_walk.rs
+    - crates/core/src/store/projection_run.rs
+- id: ART-BPK-TS-MANIFEST
+  kind: generated
+  paths:
+    - ../bpk-ts/batpak.manifest.json
+    - ../bpk-ts/packages/generated/src/events.ts
+    - ../bpk-ts/packages/generated/src/operations.ts
+    - ../bpk-ts/packages/generated/src/manifest.ts
+- id: ART-BPK-TS-CODEGEN
+  kind: tool
+  paths:
+    - ../bpk-ts/packages/codegen/src/index.ts
+    - ../bpk-ts/packages/codegen/test/codegen.test.ts
 - id: ART-ADR-SYNCBAT-CONTRACT
   kind: adr
   paths:

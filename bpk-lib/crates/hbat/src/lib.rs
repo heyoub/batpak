@@ -21,6 +21,14 @@
 //!   ack-shaped append receipt fields.
 //! - [`walk::EVENT_WALK_DESCRIPTOR`] (`event.walk`) walks bounded
 //!   hash-chain ancestry.
+//! - [`evidence::EVIDENCE_CHAIN_WALK_DESCRIPTOR`] (`evidence.chain_walk`)
+//!   returns chain-walk evidence reports.
+//! - [`evidence::EVIDENCE_STORE_RESOURCE_DESCRIPTOR`] (`evidence.store_resource`)
+//!   returns store-resource snapshot evidence.
+//! - [`evidence::EVIDENCE_READ_WALK_DESCRIPTOR`] (`evidence.read_walk`)
+//!   returns read-walk evidence reports.
+//! - [`evidence::EVIDENCE_PROJECTION_RUN_DESCRIPTOR`] (`evidence.projection_run`)
+//!   returns projection-run evidence via an embedder-populated registry.
 //! - [`manifest::descriptors`] consumes inventory registrations for both
 //!   event payloads and operations. Payload descriptors submit via
 //!   [`hbat_event_descriptor!`]; operation descriptors use
@@ -49,6 +57,9 @@ pub mod heartbeat;
 pub mod manifest;
 /// `receipt.verify` payload types + descriptor.
 pub mod receipt;
+/// Shared wire-to-[`batpak::coordinate::Region`] mapping for query-shaped
+/// NETBAT requests.
+mod region_wire;
 /// `event.walk` payload types + descriptor.
 pub mod walk;
 

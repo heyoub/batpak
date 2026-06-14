@@ -2,10 +2,11 @@
 //!
 //! Domain-neutral wire access to batpak's substrate evidence reports. Each
 //! op is a thin adapter over an existing `Store` evidence method; no new
-//! analysis happens here. Requests are keyed only on substrate coordinates
-//! (event ids, regions, projection ids, commit-order). Acks carry the
-//! report **body** as a canonical-encoding blob (`report_hex`) plus its
-//! `body_hash` (evidence-report identity per `RECEIPTS.md`) and a
+//! analysis happens here. Requests use domain-neutral substrate selectors
+//! (entity/scope prefixes, optional kind filters, optional per-entity clock
+//! range on read walks, projection ids, event-id hex on chain walks). Acks
+//! carry the report **body** as a canonical-encoding blob (`report_hex`) plus
+//! its `body_hash` (evidence-report identity per `RECEIPTS.md`) and a
 //! `truncated` flag — never a decoded domain payload.
 //!
 //! ## Why a report blob instead of a typed mirror
@@ -16,7 +17,6 @@
 //! exact canonical body bytes preserves byte-exact evidence identity: a
 //! consumer re-hashes `report_hex` and checks it equals `body_hash_hex`.
 
-use batpak::coordinate::{Coordinate, Region};
 use batpak::store::{ChainWalkRequest, ChainWalkStartRef, Freshness, ReadWalkRequest};
 use batpak::EventPayload;
 use netbat::decode_hex_str;
@@ -59,6 +59,18 @@ pub enum EvidenceRequestError {
         /// Human-readable validation error.
         message: String,
     },
+    /// A kind filter axis was invalid.
+    InvalidKind {
+        /// Field whose kind validation failed.
+        field: &'static str,
+        /// Human-readable validation error.
+        message: String,
+    },
+    /// A clock-range axis was invalid.
+    InvalidClockRange {
+        /// Human-readable validation error.
+        message: String,
+    },
 }
 
 impl std::fmt::Display for EvidenceRequestError {
@@ -67,6 +79,24 @@ impl std::fmt::Display for EvidenceRequestError {
             Self::InvalidHex { field, message } => write!(f, "{field}: {message}"),
             Self::ZeroLimit => write!(f, "limit must be greater than 0"),
             Self::InvalidCoordinate { field, message } => write!(f, "{field}: {message}"),
+            Self::InvalidKind { field, message } => write!(f, "{field}: {message}"),
+            Self::InvalidClockRange { message } => write!(f, "{message}"),
+        }
+    }
+}
+
+impl EvidenceRequestError {
+    fn from_wire_region(error: crate::region_wire::WireRegionError) -> Self {
+        match error {
+            crate::region_wire::WireRegionError::InvalidCoordinate { field, message } => {
+                Self::InvalidCoordinate { field, message }
+            }
+            crate::region_wire::WireRegionError::InvalidKind { field, message } => {
+                Self::InvalidKind { field, message }
+            }
+            crate::region_wire::WireRegionError::InvalidClockRange { message } => {
+                Self::InvalidClockRange { message }
+            }
         }
     }
 }
@@ -373,9 +403,9 @@ inventory::submit! {
 
 /// Wire input for [`EVIDENCE_READ_WALK_DESCRIPTOR`].
 ///
-/// Selects a region by optional `entity` prefix and/or exact `scope`. Maps onto
-/// [`batpak::store::ReadWalkRequest`] with `Freshness::Consistent` intent (v1
-/// read walks always sample current visible state).
+/// Selects a [`batpak::coordinate::Region`] by optional entity prefix, exact
+/// scope, kind filters, and per-entity clock range. Maps onto
+/// [`batpak::store::ReadWalkRequest`] with caller-declared freshness intent.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, EventPayload)]
 #[batpak(category = 0xF, type_id = 0xA70)]
 pub struct ReadWalkEvidenceRequest {
@@ -383,46 +413,44 @@ pub struct ReadWalkEvidenceRequest {
     pub entity: Option<String>,
     /// Optional exact scope selector.
     pub scope: Option<String>,
+    /// Optional event-kind category filter.
+    pub kind_category: Option<u8>,
+    /// Optional event-kind type id. Requires `kind_category` when present.
+    pub kind_type_id: Option<u16>,
+    /// Optional inclusive per-entity clock range start.
+    pub start_clock: Option<u32>,
+    /// Optional inclusive per-entity clock range end.
+    pub end_clock: Option<u32>,
     /// Optional output limit. Bounded to [`EVIDENCE_MAX_LIMIT`] (or the tighter
     /// [`EVIDENCE_READ_WALK_PROOF_MAX_LIMIT`] when `include_proof_refs` is set);
     /// omitting it applies that same bound rather than scanning the whole region.
     pub limit: Option<u64>,
     /// Include deterministic proof refs for returned entries.
     pub include_proof_refs: bool,
+    /// Optional stale-allowance bound in milliseconds; `None` is consistent.
+    pub max_stale_ms: Option<u64>,
 }
 
 impl ReadWalkEvidenceRequest {
-    /// Convert to the substrate [`ReadWalkRequest`], validating coordinates and
+    /// Convert to the substrate [`ReadWalkRequest`], validating region axes and
     /// bounding `limit` to [`EVIDENCE_MAX_LIMIT`].
     ///
     /// # Errors
-    /// Returns [`EvidenceRequestError`] when an `entity`/`scope` selector is not
-    /// a valid coordinate.
+    /// Returns [`EvidenceRequestError`] when region axes or `limit` are invalid.
     pub fn to_core(&self) -> Result<ReadWalkRequest, EvidenceRequestError> {
-        if let Some(entity) = self.entity.as_deref() {
-            Coordinate::new(entity, "hbat:evidence-read-walk").map_err(|error| {
-                EvidenceRequestError::InvalidCoordinate {
-                    field: "entity",
-                    message: error.to_string(),
-                }
-            })?;
-        }
-        if let Some(scope) = self.scope.as_deref() {
-            Coordinate::new("hbat:evidence-read-walk", scope).map_err(|error| {
-                EvidenceRequestError::InvalidCoordinate {
-                    field: "scope",
-                    message: error.to_string(),
-                }
-            })?;
+        if self.limit == Some(0) {
+            return Err(EvidenceRequestError::ZeroLimit);
         }
 
-        let mut region = self
-            .entity
-            .as_deref()
-            .map_or_else(Region::all, Region::entity);
-        if let Some(scope) = self.scope.as_deref() {
-            region = region.with_scope(scope);
-        }
+        let region = crate::region_wire::wire_axes_to_region(
+            self.entity.as_deref(),
+            self.scope.as_deref(),
+            self.kind_category,
+            self.kind_type_id,
+            self.start_clock,
+            self.end_clock,
+        )
+        .map_err(EvidenceRequestError::from_wire_region)?;
 
         // Always bound the read, even when `limit` is omitted: an unbounded
         // request makes the store materialize every matching entry (work
@@ -437,11 +465,16 @@ impl ReadWalkEvidenceRequest {
         let bounded_limit = self.limit.map_or(max_limit, |value| value.min(max_limit));
         let limit = Some(usize::try_from(bounded_limit).unwrap_or(usize::MAX));
 
+        let freshness_intent = match self.max_stale_ms {
+            Some(max_stale_ms) => Freshness::MaybeStale { max_stale_ms },
+            None => Freshness::Consistent,
+        };
+
         Ok(ReadWalkRequest {
             region,
             limit,
             include_proof_refs: self.include_proof_refs,
-            freshness_intent: Freshness::Consistent,
+            freshness_intent,
         })
     }
 }
@@ -465,8 +498,13 @@ impl EventPayloadFixture for ReadWalkEvidenceRequest {
         Self {
             entity: Some("fixture:bank".to_owned()),
             scope: None,
+            kind_category: Some(0xF),
+            kind_type_id: None,
+            start_clock: None,
+            end_clock: None,
             limit: Some(64),
             include_proof_refs: false,
+            max_stale_ms: None,
         }
     }
 }
@@ -489,8 +527,13 @@ crate::hbat_event_descriptor! {
     fields = [
         ("entity", "option<string>"),
         ("scope", "option<string>"),
-        ("limit", "option<u64-safe>"),
+        ("kind_category", "option<u8>"),
+        ("kind_type_id", "option<u16>"),
+        ("start_clock", "option<u32>"),
+        ("end_clock", "option<u32>"),
+        ("limit", "option<u64-safe-positive>"),
         ("include_proof_refs", "bool"),
+        ("max_stale_ms", "option<u64-safe>"),
     ],
 }
 
@@ -619,198 +662,4 @@ crate::hbat_event_descriptor! {
         ("body_hash_hex", "blake3-32-hex"),
         ("truncated", "bool"),
     ],
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use anyhow::Result;
-
-    #[test]
-    fn chain_walk_request_fixture_roundtrips() -> Result<()> {
-        let value = ChainWalkEvidenceRequest::fixture_value();
-        let bytes = batpak::encoding::to_bytes(&value)?;
-        let decoded: ChainWalkEvidenceRequest = batpak::encoding::from_bytes(&bytes)?;
-        assert_eq!(decoded, value);
-        Ok(())
-    }
-
-    #[test]
-    fn chain_walk_ack_fixture_roundtrips() -> Result<()> {
-        let value = ChainWalkEvidenceAck::fixture_value();
-        let bytes = batpak::encoding::to_bytes(&value)?;
-        let decoded: ChainWalkEvidenceAck = batpak::encoding::from_bytes(&bytes)?;
-        assert_eq!(decoded, value);
-        Ok(())
-    }
-
-    #[test]
-    fn chain_walk_request_maps_event_id_start() -> Result<()> {
-        let core = ChainWalkEvidenceRequest::fixture_value().to_core()?;
-        assert!(matches!(core.start, ChainWalkStartRef::EventId(_)));
-        assert_eq!(core.limit, 16);
-        assert_eq!(core.mode, batpak::store::ChainWalkMode::Linear);
-        Ok(())
-    }
-
-    #[test]
-    fn chain_walk_request_maps_receipt_start_when_hash_present() -> Result<()> {
-        let request = ChainWalkEvidenceRequest {
-            start_expected_hash_hex: Some(
-                "0000000000000000000000000000000000000000000000000000000000000000".to_owned(),
-            ),
-            ..ChainWalkEvidenceRequest::fixture_value()
-        };
-        let core = request.to_core()?;
-        assert!(matches!(core.start, ChainWalkStartRef::Receipt { .. }));
-        Ok(())
-    }
-
-    #[test]
-    fn chain_walk_request_bounds_limit() -> Result<()> {
-        let request = ChainWalkEvidenceRequest {
-            limit: EVIDENCE_MAX_LIMIT * 4,
-            ..ChainWalkEvidenceRequest::fixture_value()
-        };
-        let core = request.to_core()?;
-        assert_eq!(core.limit, usize::try_from(EVIDENCE_MAX_LIMIT)?);
-        Ok(())
-    }
-
-    #[test]
-    fn chain_walk_request_rejects_zero_limit() {
-        let request = ChainWalkEvidenceRequest {
-            limit: 0,
-            ..ChainWalkEvidenceRequest::fixture_value()
-        };
-        assert_eq!(
-            request.to_core().expect_err("zero limit must be rejected"),
-            EvidenceRequestError::ZeroLimit
-        );
-    }
-
-    #[test]
-    fn store_resource_request_fixture_roundtrips() -> Result<()> {
-        let value = StoreResourceEvidenceRequest::fixture_value();
-        let bytes = batpak::encoding::to_bytes(&value)?;
-        let decoded: StoreResourceEvidenceRequest = batpak::encoding::from_bytes(&bytes)?;
-        assert_eq!(decoded, value);
-        Ok(())
-    }
-
-    #[test]
-    fn store_resource_ack_fixture_roundtrips() -> Result<()> {
-        let value = StoreResourceEvidenceAck::fixture_value();
-        let bytes = batpak::encoding::to_bytes(&value)?;
-        let decoded: StoreResourceEvidenceAck = batpak::encoding::from_bytes(&bytes)?;
-        assert_eq!(decoded, value);
-        Ok(())
-    }
-
-    #[test]
-    fn read_walk_request_fixture_roundtrips() -> Result<()> {
-        let value = ReadWalkEvidenceRequest::fixture_value();
-        let bytes = batpak::encoding::to_bytes(&value)?;
-        let decoded: ReadWalkEvidenceRequest = batpak::encoding::from_bytes(&bytes)?;
-        assert_eq!(decoded, value);
-        Ok(())
-    }
-
-    #[test]
-    fn read_walk_ack_fixture_roundtrips() -> Result<()> {
-        let value = ReadWalkEvidenceAck::fixture_value();
-        let bytes = batpak::encoding::to_bytes(&value)?;
-        let decoded: ReadWalkEvidenceAck = batpak::encoding::from_bytes(&bytes)?;
-        assert_eq!(decoded, value);
-        Ok(())
-    }
-
-    #[test]
-    fn read_walk_request_bounds_limit_without_proof_refs() -> Result<()> {
-        let request = ReadWalkEvidenceRequest {
-            entity: Some("fixture:bank".to_owned()),
-            scope: Some("fixture-scope".to_owned()),
-            limit: Some(EVIDENCE_MAX_LIMIT * 4),
-            include_proof_refs: false,
-        };
-        let core = request.to_core()?;
-        assert_eq!(core.limit, Some(usize::try_from(EVIDENCE_MAX_LIMIT)?));
-        assert!(!core.include_proof_refs);
-        Ok(())
-    }
-
-    #[test]
-    fn read_walk_request_uses_tighter_bound_with_proof_refs() -> Result<()> {
-        // Proof refs add a per-entry hash, so the limit is capped harder and an
-        // unbounded request is forced onto the proof-ref bound.
-        let capped = ReadWalkEvidenceRequest {
-            entity: Some("fixture:bank".to_owned()),
-            scope: None,
-            limit: Some(EVIDENCE_MAX_LIMIT),
-            include_proof_refs: true,
-        };
-        assert_eq!(
-            capped.to_core()?.limit,
-            Some(usize::try_from(EVIDENCE_READ_WALK_PROOF_MAX_LIMIT)?)
-        );
-
-        let unbounded = ReadWalkEvidenceRequest {
-            entity: None,
-            scope: None,
-            limit: None,
-            include_proof_refs: true,
-        };
-        assert_eq!(
-            unbounded.to_core()?.limit,
-            Some(usize::try_from(EVIDENCE_READ_WALK_PROOF_MAX_LIMIT)?)
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn read_walk_request_bounds_omitted_limit() -> Result<()> {
-        // An all-store request that omits `limit` must still be bounded so the
-        // store does not scan/materialize the whole region.
-        let request = ReadWalkEvidenceRequest {
-            entity: None,
-            scope: None,
-            limit: None,
-            include_proof_refs: false,
-        };
-        let core = request.to_core()?;
-        assert_eq!(core.limit, Some(usize::try_from(EVIDENCE_MAX_LIMIT)?));
-        Ok(())
-    }
-
-    #[test]
-    fn projection_run_request_fixture_roundtrips() -> Result<()> {
-        let value = ProjectionRunEvidenceRequest::fixture_value();
-        let bytes = batpak::encoding::to_bytes(&value)?;
-        let decoded: ProjectionRunEvidenceRequest = batpak::encoding::from_bytes(&bytes)?;
-        assert_eq!(decoded, value);
-        Ok(())
-    }
-
-    #[test]
-    fn projection_run_ack_fixture_roundtrips() -> Result<()> {
-        let value = ProjectionRunEvidenceAck::fixture_value();
-        let bytes = batpak::encoding::to_bytes(&value)?;
-        let decoded: ProjectionRunEvidenceAck = batpak::encoding::from_bytes(&bytes)?;
-        assert_eq!(decoded, value);
-        Ok(())
-    }
-
-    #[test]
-    fn projection_run_request_maps_freshness() {
-        let consistent = ProjectionRunEvidenceRequest::fixture_value();
-        assert!(matches!(consistent.freshness(), Freshness::Consistent));
-        let stale = ProjectionRunEvidenceRequest {
-            max_stale_ms: Some(250),
-            ..ProjectionRunEvidenceRequest::fixture_value()
-        };
-        assert!(matches!(
-            stale.freshness(),
-            Freshness::MaybeStale { max_stale_ms: 250 }
-        ));
-    }
 }
