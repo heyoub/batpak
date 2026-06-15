@@ -185,7 +185,7 @@ mod tests {
     fn mutants_smoke_lane_uses_round_robin_shard_and_skip_baseline_after_first_lane(
     ) -> anyhow::Result<()> {
         let lanes = critical_mutation_smoke_lanes();
-        assert_eq!(lanes[0].shard.as_deref(), Some("1/8"));
+        assert_eq!(lanes[0].shard.as_deref(), Some("0/8"));
         assert_eq!(lanes[0].sharding, Some(MutationSharding::RoundRobin));
         assert_eq!(
             MutationLane::repo_wide_smoke(MutantSurface::AllFeatures).sharding,

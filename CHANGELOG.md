@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- Corrected `cargo-mutants` shard indices to the 0-based `k/n` convention
+  (`0/12`…`11/12` for full CI matrix; smoke lanes use `0/8` and `0/48`).
+
 ### Changed
 - Expanded `evidence.read_walk` wire request to full `Region` selector parity
   (`kind_category`/`kind_type_id`, `start_clock`/`end_clock`, `max_stale_ms`);
