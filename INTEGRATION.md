@@ -1,6 +1,13 @@
 # Integration
 
-batpak owns a local truth boundary. It does not own the whole application.
+batpak owns a **local truth boundary** per journal: one `Store`, one `data_dir`,
+one exclusive writer. That scopes source truth to a single append-only journal;
+it does not mean distributed systems are out of scope. Larger hosts compose
+**multiple journals** through explicit circuits — `netbat` routes, `syncbat`
+dispatch, reference `hbat`, and cross-store observations — without one battery
+mutating another's state through a hidden path. See [CIRCUITS.md](CIRCUITS.md)
+for journal composition rules and [README.md](README.md) for the scale-out
+model. batpak does not own the whole application.
 
 ## Enforced boundaries
 

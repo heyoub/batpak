@@ -87,14 +87,14 @@ a narrower dependency surface.
 ```
 packages/
   canonical/  Named-field MessagePack codec matching rmp-serde 1.3.1
-              byte-for-byte. 22 direct tests.
+              byte-for-byte. 29 direct tests.
   client/     NETBAT/1 frame writer/reader; typed NetbatError union
               covering all 12 codes from netbat::NetbatError::code();
-              TCP transport via duck-typed NodeSocketLike. 24 direct tests.
+              TCP transport via duck-typed NodeSocketLike. 29 direct tests.
   codegen/    Reads batpak.manifest.json, emits @batpak/generated.
               Refuses unsupported manifestVersion, netbatVersion,
               canonicalEncoding, field-name drift, unknown typeToken.
-              21 direct tests.
+              24 direct tests.
   generated/  AUTO-GENERATED Effect 4 schemas + TS types + golden hex.
               Fully overwritten by each codegen run.
   schema/     Effect 4 Schema bridge — decodeBytes/encodeBytes wrap
@@ -104,7 +104,7 @@ packages/
   sdk/        One-install npm entry; re-exports canonical, client,
               schema, and generated for downstream apps.
   test/       End-to-end parity harness across every event and every
-              operation in the manifest. 57 parity assertions.
+              operation in the manifest. 120 parity assertions.
 examples/
   heartbeat-spike/  Calibration pulse against hbat:
                     - sends system.heartbeat
@@ -160,7 +160,7 @@ cargo run -p xtask -- export-ts-manifest --out ../bpk-ts/batpak.manifest.json
 cd ../bpk-ts
 pnpm install
 pnpm -w build
-pnpm -w test          # 110 tests across all packages
+pnpm -w test          # 211 tests across all packages
 
 # Live integration:
 cd ../bpk-lib

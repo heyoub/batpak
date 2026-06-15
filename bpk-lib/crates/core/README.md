@@ -1,9 +1,15 @@
 # batpak
 
-batpak is an embedded, sync-first event store for Rust: an append-only log
-with typed payloads, Blake3 hash-chained ancestry, verifiable (optionally
-Ed25519-signed) receipts, deterministic replay, and derived projections — in
-one process, with no server and no async runtime.
+The Free Battery Factory makes batteries for software boundaries. **batpak** is
+the core battery: an embedded, sync-first append-only journal with typed
+payloads, Blake3 hash-chained ancestry, verifiable receipts, deterministic
+replay, and derived projections.
+
+The family around it — `syncbat`, `netbat`, `hbat`, and `@batpak/sdk` — wires
+that journal into networked hosts and TypeScript clients through explicit
+terminals and circuits. See the
+[repository README](https://github.com/heyoub/batpak/blob/main/README.md) for
+the full family map, scale-out model, and host path.
 
 Use it when you need a tamper-evident, replayable record of what happened:
 agent action audit trails, local-first app logs, compliance evidence,
@@ -49,9 +55,11 @@ accepted write returns a receipt you can verify later, and projections are
 derived views rebuilt from the log by construction — read models cannot
 silently drift from source truth.
 
-When batpak is the wrong tool: ad-hoc SQL over relational data, many writer
-processes sharing one store, raw write throughput over verifiable history,
-or distributed replication. batpak is a local truth boundary, on purpose.
+When batpak is the wrong tool: ad-hoc SQL over relational data; many writers
+on one mutable `data_dir`; raw write throughput over verifiable history; or
+automatic Raft replication inside the core crate. Scale with multiple
+journals and explicit host circuits instead — one writer per `data_dir`, by
+design.
 
 ## Trust
 

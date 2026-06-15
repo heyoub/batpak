@@ -46,7 +46,7 @@ just mutants-smoke
 1. Make the change.
 2. Update docs, examples, and traceability if the public surface or behavior changed.
 3. Run `just pre-commit`.
-4. Run `just verify` before pushing. This enters the canonical devcontainer once, then runs CI, coverage, and docs from that single in-container proof session. It remains the closest local match to the GH `Integrity (ubuntu-devcontainer)` job, so it eliminates "passes locally, fails CI" surprises that a native host cannot catch (different toolchain, missing system deps, wrong env vars). Use faster inner-loop recipes during iterative development, but finish with `just verify` before the push that matters.
+4. Run `just verify` before pushing. This enters the canonical devcontainer once, then runs CI, coverage, and docs from that single in-container proof session. It remains the closest local match to the GH `Verify (ubuntu-devcontainer)` job, so it eliminates "passes locally, fails CI" surprises that a native host cannot catch (different toolchain, missing system deps, wrong env vars). Use faster inner-loop recipes during iterative development, but finish with `just verify` before the push that matters.
 
 ## Performance Surfaces
 

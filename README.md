@@ -1,14 +1,21 @@
-[![crates.io](https://img.shields.io/crates/v/batpak.svg)](https://crates.io/crates/batpak)
+[![crates.io](https://img.shields.io/crates/v/batpak.svg)](https://crates.io/crates/v/batpak)
 [![docs.rs](https://docs.rs/batpak/badge.svg)](https://docs.rs/batpak)
 [![CI](https://github.com/heyoub/batpak/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/heyoub/batpak/actions/workflows/ci.yml)
 [![license](https://img.shields.io/crates/l/batpak.svg)](#license)
 
 # batpak
 
-batpak is an embedded, sync-first event store for Rust: an append-only log
-with typed payloads, Blake3 hash-chained ancestry, verifiable (optionally
-Ed25519-signed) receipts, deterministic replay, and derived projections — in
-one process, with no server and no async runtime.
+The Free Battery Factory makes batteries for software boundaries.
+
+> A battery does not own the machine. It powers one boundary.
+
+**batpak** is the core battery: an embedded, sync-first append-only journal with
+typed payloads, Blake3 hash-chained ancestry, verifiable receipts, deterministic
+replay, and derived projections. The **family** around it wires that journal into
+larger hosts — `syncbat` for runtime dispatch, `netbat` for NETBAT/1 network
+terminals, `hbat` as the reference host, and `@batpak/sdk` for TypeScript clients
+on the other side of the wire. Circuits connect batteries without one owning
+another's state.
 
 Use it when you need a tamper-evident, replayable record of what happened:
 agent action audit trails, local-first app logs, compliance evidence,
@@ -18,14 +25,42 @@ batpak is not a database server, queue, ORM, workflow engine, async runtime,
 network framework, or agent framework. Callers own process model, disk
 placement, runtime integration, network boundaries, and application authority.
 
-## Install
+## What Ships
+
+| Battery / surface | Crate / package | Role |
+| --- | --- | --- |
+| Core journal | `batpak` | Append-only store, HLC frontier, receipts, replay, projections |
+| Runtime dispatch | `syncbat` | Operation descriptors, handler registration, runtime receipts |
+| Network terminal | `netbat` | NETBAT/1 frames, bounded request/response |
+| Reference host | `hbat` | Live operation handling (manifest-owned) |
+| TypeScript clients | `@batpak/sdk` | Wire client, canonical codec, generated types |
+
+See [BATTERIES.md](BATTERIES.md) for the full battery map and
+[bpk-ts/README.md](bpk-ts/README.md) for npm install and the ten-op NETBAT
+profile.
+
+## Two Doors
+
+**Door A — Rust embedded.** Add the core crate and open a `Store` on a
+directory you own:
 
 ```sh
 cargo add batpak
 ```
 
-TypeScript clients for a networked batpak host install one npm package:
-`@batpak/sdk`. See [bpk-ts/README.md](bpk-ts/README.md).
+**Door B — Networked host.** Install the TypeScript SDK and prove the live
+host loop against `hbat`:
+
+```sh
+npm install @batpak/sdk
+just host-dev
+```
+
+`just host-dev` exports the manifest, builds the workspace, boots `hbat` on an
+ephemeral store, and runs the heartbeat-spike through commit, query, and get.
+The ten reference NETBAT terminals — `bank.commit`, `event.query`, `event.get`,
+`receipt.verify`, `event.walk`, and the four `evidence.*` ops — are documented
+in [TERMINALS.md](TERMINALS.md).
 
 ## First Shape
 
@@ -75,6 +110,23 @@ The full beginner path is eight jobs — open, append, page commit order with
 `bpk-lib/crates/core/examples/eight_jobs.rs` for the contract example and
 [COOKBOOK.md](COOKBOOK.md) for task-shaped recipes.
 
+## Scale And Composition
+
+A **journal** is one `Store` on one `data_dir` with one exclusive writer. That
+scope is the **local truth boundary** — truth is bounded to that journal, not
+denied to distributed systems.
+
+**Scale out** with multiple journals and explicit circuits: `netbat` routes,
+cross-store observations, and host wiring documented in
+[CIRCUITS.md](CIRCUITS.md) and [INTEGRATION.md](INTEGRATION.md). There is no
+single `global_sequence` across separate store roots, and no in-core Raft over
+one mutable directory.
+
+**HLC** (hybrid logical clock) is the per-journal frontier inside one writer:
+accepted → written → durable → visible → applied watermarks. `wait_for_durable`,
+batch gates, and projection progress use those watermarks. HLC coordinates
+durability and visibility inside a journal; it is not cross-machine consensus.
+
 ## Why Not SQLite With An Events Table?
 
 SQLite gives you durable rows. batpak gives you durable rows plus proof:
@@ -90,13 +142,12 @@ SQLite gives you durable rows. batpak gives you durable rows plus proof:
 
 When batpak is the wrong tool:
 
-- You need ad-hoc SQL queries over relational data → SQLite or Postgres.
-- You need one store shared by many writer processes or machines → a
-  database server.
-- You need maximum write throughput over verifiable history → batpak
-  serializes appends through a single writer on purpose.
-- You need distributed consensus or replication → batpak is a local truth
-  boundary, by design.
+| Need | Reach for |
+| --- | --- |
+| Ad-hoc SQL over relational data | SQLite or Postgres |
+| Many writers on one mutable directory with leader election | A database server or etcd — batpak is one writer per `data_dir` |
+| Maximum write throughput over verifiable history | batpak serializes appends through a single writer on purpose |
+| Automatic Raft replication inside the core crate | Compose multiple journals and explicit host circuits instead |
 
 ## Can You Trust A 0.x Store?
 
@@ -108,7 +159,7 @@ Judge the evidence, not the version number:
 - Property-based tests over hash-chain integrity and canonical encoding.
 - Chaos testing with fault injection, including disk-fault integration.
 - Mutation testing on critical seams, so the tests are themselves tested.
-- 71 named invariants traced to 116 concrete artifacts, enforced by an
+- 71 named invariants traced to 119 concrete artifacts, enforced by an
   integrity gate that fails CI on orphaned or stale claims —
   see [INVARIANTS.md](INVARIANTS.md) and [CONFORMANCE.md](CONFORMANCE.md).
 
@@ -121,30 +172,27 @@ ever adopting it — the code above is the whole beginner story. But composition
 gets much easier once you think in it, because every boundary question
 ("who owns this state? where may it cross?") already has a name.
 
-The deeper project identity is Free Battery Factory:
-
-> The Free Battery Factory makes batteries for software boundaries.
-> A battery does not own the machine. It powers one boundary.
-
 The Rosetta table — factory words on the left, the precise engineering
 surface on the right:
 
-| Factory word | Rust surface          | Plain engineering meaning                                          |
-| ------------ | --------------------- | ------------------------------------------------------------------ |
-| Battery      | `Store`               | An embedded append log that owns one directory, one boundary.      |
-| Cell         | `Event`               | An immutable typed record; source truth.                           |
-| —            | `Coordinate`          | Names where an event belongs: an entity within a scope.            |
-| Terminal     | named API entry points| The only places where state or evidence crosses the boundary.      |
-| Receipt      | `Receipt`             | Verifiable evidence of what was accepted, denied, or replayed.     |
-| Discharge    | `Replay`              | Rebuild state from the cells.                                      |
-| Gauge        | `Projection`          | A derived view: disposable, rebuildable, never source truth.       |
-| Gate         | `Gate`                | Caller-defined policy evaluated before commit.                     |
-| Circuit      | host wiring           | Connects terminals across batteries without hiding ownership.      |
-| —            | `Capability`          | Explicit authority to perform an operation.                        |
+| Factory word | Rust surface | Plain engineering meaning |
+| --- | --- | --- |
+| Battery | `Store` | An embedded append log that owns one directory, one boundary. |
+| Journal | one `data_dir` | One append-only store root; one exclusive writer. |
+| Cell | `Event` | An immutable typed record; source truth. |
+| — | `Coordinate` | Names where an event belongs: an entity within a scope. |
+| Terminal | named API entry points | The only places where state or evidence crosses the boundary. |
+| Receipt | `Receipt` | Verifiable evidence of what was accepted, denied, or replayed. |
+| Discharge | `Replay` | Rebuild state from the cells. |
+| Gauge | `Projection` | A derived view: disposable, rebuildable, never source truth. |
+| Frontier | HLC watermarks | Per-journal accepted → durable → visible → applied progress inside one writer. |
+| Gate | `Gate` | Caller-defined policy evaluated before commit. |
+| Circuit | host wiring | Connects terminals across batteries without hiding ownership. |
+| — | `Capability` | Explicit authority to perform an operation. |
 
 Factory words explain the shape. Engineering names stay precise in the API,
 and factory language never renames a Rust contract unless the type model
-earns that name.
+earns that name. Deeper factory identity lives in [FACTORY.md](FACTORY.md).
 
 ## Reading Paths
 
@@ -174,6 +222,7 @@ Use the root `justfile`.
 just list
 just inspect
 just verify
+just host-dev
 just perf-gates
 just loom
 just seal
@@ -193,22 +242,6 @@ just cargo -- <args>
 just pnpm -- <args>
 just npm -- <args>
 ```
-
-## Current Rust Surface
-
-Engineering names remain precise:
-
-- `Store`
-- `Coordinate`
-- `Event`
-- `Receipt`
-- `Projection`
-- `Replay`
-- `Gate`
-- `Capability`
-
-Factory words explain the model. They do not rename the Rust API unless the
-type model earns that name.
 
 ## License
 

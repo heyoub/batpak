@@ -9,6 +9,12 @@ All notable changes to this project will be documented in this file.
   (`0/12`…`11/12` for full CI matrix; smoke lanes use `0/8` and `0/48`).
 
 ### Changed
+- Synced factory docs with the full-system README: INTEGRATION/MODEL/BATTERIES/
+  CIRCUITS composition language, `hbat` crate README, bpk-ts test counts, and
+  README artifact tally (119).
+- Rewrote the root README as a full-system front door: battery family table
+  (`batpak`, `syncbat`, `netbat`, `hbat`, `@batpak/sdk`), Rust and TypeScript
+  entry paths, multi-journal composition, and per-journal HLC frontier language.
 - Expanded `evidence.read_walk` wire request to full `Region` selector parity
   (`kind_category`/`kind_type_id`, `start_clock`/`end_clock`, `max_stale_ms`);
   omitted fields remain backward compatible. Tightened the manifest `limit`

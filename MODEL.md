@@ -56,6 +56,20 @@ One paragraph version:
 
 > A battery owns a boundary. Terminals expose what may cross that boundary. Operations enter through terminals. Durable operations emit receipts. Events are the cells of source truth. Replay discharges those cells into projections. Projections are gauges, not truth.
 
+## Family Stack
+
+| Layer | Surface | Role |
+| --- | --- | --- |
+| Journal | `batpak::Store` | Source truth, HLC frontier, receipts |
+| Runtime | `syncbat` | Handler dispatch, runtime receipts |
+| Network | `netbat` | NETBAT/1 framing |
+| Reference host | `hbat` | Ten-op manifest |
+| TS clients | `@batpak/sdk` | Wire client, canonical codec, generated types |
+
+The in-process path opens `Store` directly. The networked path crosses
+terminals documented in [TERMINALS.md](TERMINALS.md). Journal and multi-journal
+composition rules live in [README.md](README.md) and [CIRCUITS.md](CIRCUITS.md).
+
 ## Beginner Store Path
 
 The 0.8-facing Rust curriculum is one path through the substrate:
