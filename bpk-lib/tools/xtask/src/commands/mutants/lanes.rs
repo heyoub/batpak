@@ -7,8 +7,8 @@ use super::score::MutationScore;
 
 pub(super) const MUTANTS_OUTPUT_ROOT_LABEL: &str = "$CARGO_TARGET_DIR/xtask-mutants";
 pub(super) const CRITICAL_SEAM_MIN_CATCH_PCT: u32 = 85;
-pub(super) const CRITICAL_SMOKE_SHARD: &str = "1/8";
-pub(super) const REPO_WIDE_SMOKE_SHARD: &str = "1/48";
+pub(super) const CRITICAL_SMOKE_SHARD: &str = "0/8";
+pub(super) const REPO_WIDE_SMOKE_SHARD: &str = "0/48";
 
 pub(super) const REPO_WIDE_ALL_FEATURES_MUTANT_FILES: &[&str] = &[
     "crates/core/src/artifact.rs",

@@ -343,7 +343,7 @@ jobs:
           shared-key: mutants-smoke-repo-wide
           workspaces: bpk-lib
       - uses: ./.github/actions/setup-devcontainer
-      - name: Mutation smoke (repo-wide shard 1/48)
+      - name: Mutation smoke (repo-wide shard 0/48)
         env:
           BATPAK_DEVCONTAINER_IMAGE: batpak-devcontainer:ci
           BATPAK_DEVCONTAINER_SKIP_BUILD: "1"
@@ -384,6 +384,7 @@ jobs:
           - all-features
           - no-default-features
         shard:
+          - 0/12
           - 1/12
           - 2/12
           - 3/12
@@ -395,7 +396,6 @@ jobs:
           - 9/12
           - 10/12
           - 11/12
-          - 12/12
     name: Mutation full (${{ matrix.surface }} shard ${{ matrix.shard }})
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
