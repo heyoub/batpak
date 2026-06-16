@@ -9,7 +9,12 @@ use std::sync::Arc;
 /// `visible` is the exclusive upper bound readers filter against:
 /// an entry is visible iff `entry.global_sequence < visible`.
 ///
-/// Invariant: `visible <= allocated` (enforced by `debug_assert` in `publish`).
+/// Invariant: `visible <= allocated`, and `visible` advances monotonically.
+/// Enforced at runtime in [`SequenceGate::publish`], which returns
+/// [`StoreError::SequenceGateViolation`](crate::store::StoreError) when an
+/// `up_to` would exceed `allocated` or regress below the current `visible` —
+/// a fail-closed `Result`, not a `debug_assert` (a regression must be a hard
+/// error in release, not a debug-only check).
 pub(crate) struct SequenceGate {
     /// Next sequence to be assigned. Only the writer thread advances this.
     allocated: AtomicU64,

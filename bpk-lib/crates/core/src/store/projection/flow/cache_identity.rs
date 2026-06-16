@@ -19,6 +19,11 @@ where
     T: EventSourced + 'static,
 {
     let schema_v = T::schema_version();
+    // NOTE: `TypeId` + `DefaultHasher` are NOT stable across toolchain versions,
+    // so a compiler upgrade changes this discriminant and orphans existing cache
+    // files. That is benign — orphaned entries simply miss and are recomputed on
+    // next access — so a stable author-declared discriminant is deferred (0.8.3
+    // audit R17). Do not rely on this key being portable across rustc versions.
     let type_disc = {
         let mut h = std::collections::hash_map::DefaultHasher::new();
         TypeId::of::<T>().hash(&mut h);

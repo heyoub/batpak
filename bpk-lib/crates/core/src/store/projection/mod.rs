@@ -141,6 +141,11 @@ impl CacheMeta {
     /// Decode value + metadata from a cache-stored byte buffer. Handles both
     /// current (40-byte trailer + magic) and legacy (16-byte trailer) formats.
     /// Legacy entries return `None` for the monotonic fields.
+    ///
+    /// Current-vs-legacy is disambiguated by a trailing-8-byte magic heuristic
+    /// (there is no leading magic/version/length header). This is safe because
+    /// the cache is fully rebuildable — a misread is a miss, not corruption — so
+    /// a leading versioned header is deferred (0.8.3 audit R18).
     pub(crate) fn decode_from_bytes(bytes: &[u8]) -> Result<(Vec<u8>, Self), StoreError> {
         // Try current format first: last 8 bytes == magic.
         if bytes.len() >= CACHE_META_CURRENT_SIZE {

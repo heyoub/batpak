@@ -27,6 +27,7 @@ impl<T> Ticket<T> {
 }
 
 /// Nonblocking handle for a single append result.
+#[must_use = "an AppendTicket must be awaited (`.wait()`) or polled; dropping it discards the append outcome and any writer error"]
 pub struct AppendTicket {
     inner: Ticket<AppendReceipt>,
 }
@@ -59,6 +60,7 @@ impl AppendTicket {
 }
 
 /// Nonblocking handle for a batch append result.
+#[must_use = "a BatchAppendTicket must be awaited (`.wait()`) or polled; dropping it discards the batch outcome and any writer error"]
 pub struct BatchAppendTicket {
     inner: Ticket<Vec<AppendReceipt>>,
 }

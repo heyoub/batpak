@@ -713,6 +713,14 @@ where
     ))
 }
 
+/// Fold post-watermark events onto a decoded cached state.
+///
+/// Correctness rests on the [`EventSourced::supports_incremental_apply`]
+/// contract: `from_events` must equal a fold over `apply_event`. That contract
+/// is documented but NOT machine-enforced here — a projection that violates it
+/// silently diverges from a full replay. A debug-only cross-check is deferred
+/// (0.8.3 audit R9); only call this for types whose `supports_incremental_apply`
+/// returns `true`.
 fn apply_incremental_events<T, I, State>(
     store: &Store<State>,
     execution: &ReplayExecution<'_>,
