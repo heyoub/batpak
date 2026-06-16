@@ -58,6 +58,19 @@ pub(super) fn assert_mutation_policy(
     output_dir: &Path,
     score: MutationScore,
 ) -> Result<()> {
+    if lane.diff_scoped && score.executed == 0 {
+        // A diff-scoped lane with zero mutants means the PR touched no mutable
+        // lines inside this seam's --file globs. That is a legitimate PASS: there
+        // is nothing for the gate to prove. This early-return is gated STRICTLY
+        // on diff_scoped so non-diff lanes still hard-fail on zero mutants below
+        // (the one place a mistake could silently weaken the gate).
+        println!(
+            "mutants: `{}` => no mutable lines in PR diff for this seam; nothing to prove.",
+            lane.label
+        );
+        return Ok(());
+    }
+
     if score.executed == 0 {
         bail!(
             "mutants: `{}` produced no executed mutants in {}. Treating this as a failure because \
@@ -173,7 +186,7 @@ pub(super) fn next_ratchet_floor(score_pct: usize, current_floor: Option<u32>) -
 pub(super) fn print_mutation_policy() {
     println!("Mutation policy:");
     println!(
-        "- `cargo xtask mutants smoke`: run representative round-robin shards of every critical seam at {}%, then repo-wide {} lanes using the current ratchet phase. Only the first lane runs a fresh baseline; later lanes reuse it with `--baseline skip`.",
+        "- `cargo xtask mutants smoke`: run diff-scoped (--in-diff against PR base) mutation of every critical seam at {}%, then repo-wide {} lanes using the current ratchet phase. Only the first lane runs a fresh baseline; later lanes reuse it with `--baseline skip`.",
         CRITICAL_SEAM_MIN_CATCH_PCT,
         REPO_WIDE_SMOKE_SHARD,
     );

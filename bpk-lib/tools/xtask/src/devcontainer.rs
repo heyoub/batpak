@@ -15,6 +15,11 @@ const FORWARDED_ENV_VARS: &[&str] = &[
     "PROPTEST_CASES",
     "CHAOS_ITERATIONS",
     "CARGO_INCREMENTAL",
+    // Path (inside the container) to the PR base..head patch consumed by the
+    // diff-scoped mutation smoke gate via `cargo mutants --in-diff`. CI writes
+    // the patch onto the mounted workspace, so this value resolves identically
+    // on the host and inside the devcontainer.
+    "BATPAK_MUTANTS_DIFF",
 ];
 
 pub(crate) fn devcontainer_exec(args: &DevcontainerExecArgs) -> Result<()> {

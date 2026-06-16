@@ -7,7 +7,6 @@ use super::score::MutationScore;
 
 pub(super) const MUTANTS_OUTPUT_ROOT_LABEL: &str = "$CARGO_TARGET_DIR/xtask-mutants";
 pub(super) const CRITICAL_SEAM_MIN_CATCH_PCT: u32 = 85;
-pub(super) const CRITICAL_SMOKE_SHARD: &str = "0/8";
 pub(super) const REPO_WIDE_SMOKE_SHARD: &str = "0/48";
 
 pub(super) const REPO_WIDE_ALL_FEATURES_MUTANT_FILES: &[&str] = &[
@@ -182,6 +181,11 @@ pub(super) struct MutationLane {
     pub(super) baseline: MutationBaseline,
     pub(super) shard: Option<String>,
     pub(super) sharding: Option<MutationSharding>,
+    /// When true, this lane scopes mutation to the lines changed in the PR diff
+    /// (`cargo mutants --in-diff <patch>`) instead of a content-derived
+    /// round-robin shard. The gated mutant population is then deterministic with
+    /// respect to the PR rather than drifting on unrelated source edits.
+    pub(super) diff_scoped: bool,
     pub(super) enforcement: MutationEnforcement,
     pub(super) package: Option<&'static str>,
     pub(super) paths: &'static [&'static str],
@@ -200,6 +204,7 @@ impl MutationLane {
             baseline: MutationBaseline::Run,
             shard: None,
             sharding: None,
+            diff_scoped: false,
             enforcement: MutationEnforcement::Threshold {
                 min_catch_pct: CRITICAL_SEAM_MIN_CATCH_PCT,
             },
@@ -211,23 +216,24 @@ impl MutationLane {
     }
 
     fn critical_smoke(seam: CriticalMutationSeam) -> Self {
-        let smoke_shard = critical_seam_smoke_shard(seam.slug);
         Self {
-            label: match smoke_shard {
-                Some(shard) => format!(
-                    "{} ({}, smoke shard {shard})",
-                    seam.label,
-                    surface_name(seam.surface)
-                ),
-                None => format!("{} ({}, smoke)", seam.label, surface_name(seam.surface)),
-            },
+            label: format!(
+                "{} ({}, diff-scoped)",
+                seam.label,
+                surface_name(seam.surface)
+            ),
             slug: seam.slug.to_owned(),
             description: seam.description,
             scope: MutationScope::CriticalSeam,
             surface: seam.surface,
             baseline: MutationBaseline::Run,
-            shard: smoke_shard.map(str::to_owned),
-            sharding: smoke_shard.map(|_| MutationSharding::RoundRobin),
+            // Diff-scoped smoke lanes never carry a fixed fractional shard: the
+            // mutant set is the intersection of the seam `--file` globs and the
+            // PR diff, so the round-robin slice (and its frontier-append-gate
+            // special case) disappear entirely.
+            shard: None,
+            sharding: None,
+            diff_scoped: true,
             enforcement: MutationEnforcement::Threshold {
                 min_catch_pct: CRITICAL_SEAM_MIN_CATCH_PCT,
             },
@@ -251,6 +257,7 @@ impl MutationLane {
             baseline: MutationBaseline::Run,
             shard: shard.map(str::to_owned),
             sharding: None,
+            diff_scoped: false,
             enforcement: current_repo_mutation_enforcement(),
             package: None,
             paths: repo_wide_paths(surface),
@@ -272,6 +279,7 @@ impl MutationLane {
             baseline: MutationBaseline::Run,
             shard: Some(REPO_WIDE_SMOKE_SHARD.to_owned()),
             sharding: Some(MutationSharding::RoundRobin),
+            diff_scoped: false,
             enforcement: current_repo_mutation_enforcement(),
             package: None,
             paths: repo_wide_paths(surface),
@@ -306,22 +314,34 @@ impl MutationLane {
 
     pub(super) fn policy_line(&self) -> String {
         match self.enforcement {
-            MutationEnforcement::Threshold { min_catch_pct } => match self.shard.as_deref() {
-                Some(shard) => format!(
-                    "{} `{}` on {} shard {shard}: threshold {}%",
-                    self.scope.name(),
-                    self.label,
-                    surface_name(self.surface),
-                    min_catch_pct,
-                ),
-                None => format!(
-                    "{} `{}` on {}: threshold {}%",
-                    self.scope.name(),
-                    self.label,
-                    surface_name(self.surface),
-                    min_catch_pct,
-                ),
-            },
+            MutationEnforcement::Threshold { min_catch_pct } => {
+                if self.diff_scoped {
+                    format!(
+                        "{} `{}` on {} diff-scoped (--in-diff against PR base): threshold {}%",
+                        self.scope.name(),
+                        self.label,
+                        surface_name(self.surface),
+                        min_catch_pct,
+                    )
+                } else {
+                    match self.shard.as_deref() {
+                        Some(shard) => format!(
+                            "{} `{}` on {} shard {shard}: threshold {}%",
+                            self.scope.name(),
+                            self.label,
+                            surface_name(self.surface),
+                            min_catch_pct,
+                        ),
+                        None => format!(
+                            "{} `{}` on {}: threshold {}%",
+                            self.scope.name(),
+                            self.label,
+                            surface_name(self.surface),
+                            min_catch_pct,
+                        ),
+                    }
+                }
+            }
             MutationEnforcement::RecordOnly => format!(
                 "{} `{}` on {}: record-only for current ratchet phase",
                 self.scope.name(),
@@ -373,20 +393,6 @@ fn critical_seam_exclude_res(slug: &str) -> &'static [&'static str] {
         "writer-commit" => WRITER_COMMIT_MUTANT_EXCLUDE_RES,
         "projection-flow" => PROJECTION_MUTANT_EXCLUDE_RES,
         _ => &[],
-    }
-}
-
-/// Smoke-shard selector for a critical seam.
-///
-/// Most seams round-robin shard `0/8` so the smoke lane stays fast. Tiny seams
-/// (a single small file) can have a `0/8` slice that lands on a single unviable
-/// mutant, tripping the "no scoreable mutants" threshold gate. Those run the
-/// whole seam in smoke (`None`) so they always carry scoreable evidence.
-fn critical_seam_smoke_shard(slug: &str) -> Option<&'static str> {
-    match slug {
-        // gate.rs is ~120 lines; a 1/8 round-robin slice can be all-unviable.
-        "frontier-append-gate" => None,
-        _ => Some(CRITICAL_SMOKE_SHARD),
     }
 }
 

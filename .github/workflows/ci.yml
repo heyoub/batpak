@@ -311,15 +311,31 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           persist-credentials: false
+          # Diff-scoped mutation needs the PR base reachable so we can write the
+          # base..head patch that cargo-mutants consumes via --in-diff.
+          fetch-depth: 0
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           shared-key: mutants-smoke-${{ matrix.seam }}
           workspaces: bpk-lib
       - uses: ./.github/actions/setup-devcontainer
-      - name: Mutation smoke (critical seam shard)
+      - name: Resolve PR diff for diff-scoped mutation
+        shell: bash
+        run: |
+          base="${{ github.event.pull_request.base.sha }}"
+          # Write the base..head patch onto the mounted workspace so the path
+          # resolves identically inside the devcontainer. `-C bpk-lib --relative`
+          # emits `crates/...` paths relative to bpk-lib/ (where cargo-mutants
+          # runs); without it the diff carries `bpk-lib/...` prefixes that
+          # cargo-mutants' --in-diff matcher silently drops.
+          mkdir -p bpk-lib/target
+          git -C bpk-lib diff --relative "$base" HEAD > bpk-lib/target/smoke-diff.patch
+          echo "wrote $(wc -l < bpk-lib/target/smoke-diff.patch) lines of diff for base $base"
+      - name: Mutation smoke (critical seam, diff-scoped)
         env:
           BATPAK_DEVCONTAINER_IMAGE: batpak-devcontainer:ci
           BATPAK_DEVCONTAINER_SKIP_BUILD: "1"
+          BATPAK_MUTANTS_DIFF: /workspace/batpak/bpk-lib/target/smoke-diff.patch
         run: bash ./scripts/run-in-devcontainer.sh 'cargo xtask mutants smoke --seam ${{ matrix.seam }}'
 
   mutants-smoke-repo-wide:
