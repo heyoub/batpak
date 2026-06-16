@@ -58,6 +58,9 @@ impl Store<Open> {
     /// # Errors
     /// Returns any serialization, enqueue, or writer error surfaced while
     /// staging the append for background execution.
+    /// Returns [`StoreError::ReservedKind`] if `kind` is a reserved
+    /// system/effect/tombstone kind (see [`EventKind::is_reserved`]); reserved
+    /// kinds are emitted only by the substrate.
     pub fn submit(
         &self,
         coord: &Coordinate,
@@ -81,6 +84,9 @@ impl Store<Open> {
     /// # Errors
     /// Returns any serialization, enqueue, or writer error surfaced while
     /// staging the reaction append for background execution.
+    /// Returns [`StoreError::ReservedKind`] if `kind` is a reserved
+    /// system/effect/tombstone kind (see [`EventKind::is_reserved`]); reserved
+    /// kinds are emitted only by the substrate.
     pub fn submit_reaction(
         &self,
         coord: &Coordinate,
@@ -120,6 +126,8 @@ impl Store<Open> {
     /// serialized payload plus encoded receipt-extension bytes exceeds
     /// `single_append_max_bytes`, or any enqueue or writer error surfaced
     /// while staging the batch for background execution.
+    /// Returns [`StoreError::ReservedKind`] `{ index: Some(i), .. }` directly
+    /// (NOT wrapped in `BatchFailed`) if item `i` carries a reserved kind.
     pub fn submit_batch(
         &self,
         items: Vec<crate::store::append::BatchAppendItem>,
@@ -155,6 +163,9 @@ impl Store<Open> {
     /// # Errors
     /// Returns any serialization, enqueue, or writer error surfaced when the
     /// operation proceeds past the soft-pressure gate.
+    /// Returns [`StoreError::ReservedKind`] if `kind` is a reserved
+    /// system/effect/tombstone kind (see [`EventKind::is_reserved`]); reserved
+    /// kinds are emitted only by the substrate.
     pub fn try_submit(
         &self,
         coord: &Coordinate,
@@ -179,6 +190,9 @@ impl Store<Open> {
     /// # Errors
     /// Returns any serialization, enqueue, or writer error surfaced when the
     /// operation proceeds past the soft-pressure gate.
+    /// Returns [`StoreError::ReservedKind`] if `kind` is a reserved
+    /// system/effect/tombstone kind (see [`EventKind::is_reserved`]); reserved
+    /// kinds are emitted only by the substrate.
     pub fn try_submit_reaction(
         &self,
         coord: &Coordinate,
@@ -205,6 +219,8 @@ impl Store<Open> {
     /// # Errors
     /// Returns any enqueue or writer error surfaced when the operation
     /// proceeds past the soft-pressure gate.
+    /// Returns [`StoreError::ReservedKind`] `{ index: Some(i), .. }` directly
+    /// (NOT wrapped in `BatchFailed`) if item `i` carries a reserved kind.
     pub fn try_submit_batch(
         &self,
         items: Vec<crate::store::append::BatchAppendItem>,
@@ -226,6 +242,9 @@ impl Store<Open> {
     /// # Errors
     /// Returns `StoreError::Serialization` if the payload cannot be serialized.
     /// Returns `StoreError::WriterCrashed` if the writer thread has exited unexpectedly.
+    /// Returns [`StoreError::ReservedKind`] if `kind` is a reserved
+    /// system/effect/tombstone kind (see [`EventKind::is_reserved`]); reserved
+    /// kinds are emitted only by the substrate.
     pub fn append(
         &self,
         coord: &Coordinate,
@@ -293,6 +312,9 @@ impl Store<Open> {
     /// # Errors
     /// Returns `StoreError::Serialization` if the payload cannot be serialized.
     /// Returns `StoreError::WriterCrashed` if the writer thread has exited unexpectedly.
+    /// Returns [`StoreError::ReservedKind`] if `kind` is a reserved
+    /// system/effect/tombstone kind (see [`EventKind::is_reserved`]); reserved
+    /// kinds are emitted only by the substrate.
     pub fn append_reaction(
         &self,
         coord: &Coordinate,
@@ -322,6 +344,8 @@ impl Store<Open> {
     /// encoding, marker writing, or publish preparation. Returns
     /// `StoreError::BatchSyncFailed` if the batch reaches the final durability
     /// boundary and segment sync fails before publish.
+    /// Returns [`StoreError::ReservedKind`] `{ index: Some(i), .. }` directly
+    /// (NOT wrapped in `BatchFailed`) if item `i` carries a reserved kind.
     pub fn append_batch(
         &self,
         items: Vec<crate::store::append::BatchAppendItem>,
@@ -339,6 +363,8 @@ impl Store<Open> {
     /// Returns any batch append error surfaced by [`Store::append_batch`].
     /// Returns [`StoreError::WaitTimeout`] or [`StoreError::WriterCrashed`] if
     /// the optional batch-level gate is not satisfied after the batch commits.
+    /// Returns [`StoreError::ReservedKind`] `{ index: Some(i), .. }` directly
+    /// (NOT wrapped in `BatchFailed`) if item `i` carries a reserved kind.
     pub fn append_batch_with_options(
         &self,
         items: Vec<crate::store::append::BatchAppendItem>,
@@ -365,6 +391,8 @@ impl Store<Open> {
     /// encoding, marker writing, or publish preparation. Returns
     /// `StoreError::BatchSyncFailed` if the batch reaches the final durability
     /// boundary and segment sync fails before publish.
+    /// Returns [`StoreError::ReservedKind`] `{ index: Some(i), .. }` directly
+    /// (NOT wrapped in `BatchFailed`) if item `i` carries a reserved kind.
     pub fn append_reaction_batch(
         &self,
         correlation_id: crate::id::CorrelationId,
@@ -409,6 +437,9 @@ impl Store<Open> {
     /// Returns `StoreError::Serialization` if the payload cannot be serialized.
     /// Returns `StoreError::SequenceMismatch` if the expected sequence does not match.
     /// Returns `StoreError::WriterCrashed` if the writer thread has exited unexpectedly.
+    /// Returns [`StoreError::ReservedKind`] if `kind` is a reserved
+    /// system/effect/tombstone kind (see [`EventKind::is_reserved`]); reserved
+    /// kinds are emitted only by the substrate.
     pub fn append_with_options(
         &self,
         coord: &Coordinate,

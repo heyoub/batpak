@@ -13,6 +13,11 @@ The exact Rust constructor may change, but a valid append supplies:
 - enough metadata to canonicalize and link the event
 - policy input for gates where required
 
+Callers append product kinds (category `>= 0x1`, e.g. `DATA`). The system
+category `0x0` and the effect category `0xD` are substrate-reserved and are
+rejected at the public append surface with `StoreError::ReservedKind` (see
+`EventKind::is_reserved`); the substrate emits those reserved kinds itself.
+
 ## Coordinates
 
 A coordinate names where an event belongs. Keep the engineering name `Coordinate`; factory prose may describe it as where a cell lands in the pack.
