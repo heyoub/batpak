@@ -78,11 +78,6 @@ const ROOT_DOCS: &[RootDoc<'_>] = &[
         title: "Conformance",
     },
     RootDoc {
-        source_path: "COOKBOOK.md",
-        output_name: "COOKBOOK.html",
-        title: "Cookbook",
-    },
-    RootDoc {
         source_path: "CONTRIBUTING.md",
         output_name: "CONTRIBUTING.html",
         title: "Contributing",
@@ -105,7 +100,6 @@ const REQUIRED_DOC_NAV: &[(&str, &str)] = &[
     ("MODEL.md", "MODEL.html"),
     ("INVARIANTS.md", "INVARIANTS.html"),
     ("CONFORMANCE.md", "CONFORMANCE.html"),
-    ("COOKBOOK.md", "COOKBOOK.html"),
 ];
 
 pub(crate) fn docs(args: DocsArgs) -> Result<()> {

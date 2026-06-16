@@ -24,8 +24,8 @@
 - `bpk-lib/tools/integrity/`: traceability and structural detectors
 - `bpk-lib/tools/xtask/`: canonical developer command surface
 - `README.md`: primary repo entrypoint
-- `FACTORY.md`, `MODEL.md`, `INVARIANTS.md`, `BATTERIES.md`, `TERMINALS.md`, `EVENTS.md`, `RECEIPTS.md`, `CIRCUITS.md`, `REPLAY.md`, `PROJECTIONS.md`, `INTEGRATION.md`, `CONFORMANCE.md`, `COOKBOOK.md`: canonical factory reading surface
-- `cookbook/README.md`, `cookbook/200_*.md`: recipe library indexed by `COOKBOOK.md`
+- `FACTORY.md`, `MODEL.md`, `INVARIANTS.md`, `BATTERIES.md`, `TERMINALS.md`, `EVENTS.md`, `RECEIPTS.md`, `CIRCUITS.md`, `REPLAY.md`, `PROJECTIONS.md`, `INTEGRATION.md`, `CONFORMANCE.md`: canonical factory reading surface
+- `cookbook/README.md`, `cookbook/200_*.md`: recipe library indexed by `cookbook/README.md`
 - `archive/decisions/099_DECISION_INDEX.md`, `archive/decisions/100_ADR_*.md`: historical decisions; not the public reading path
 - `bpk-lib/traceability/`: requirements, invariants, flows, artifacts
 

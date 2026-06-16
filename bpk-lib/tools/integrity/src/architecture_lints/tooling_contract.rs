@@ -45,7 +45,6 @@ fn check_project_layout_contract(repo_root: &Path) -> Result<()> {
         "PROJECTIONS.md",
         "INTEGRATION.md",
         "CONFORMANCE.md",
-        "COOKBOOK.md",
         "CONTRIBUTING.md",
         "archive/decisions/099_DECISION_INDEX.md",
         "archive/legacy-docs/041_TESTING_LEDGER.md",

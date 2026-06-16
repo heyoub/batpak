@@ -107,8 +107,10 @@ Run it for real: `cargo run --example quickstart` under `bpk-lib/crates/core`.
 The full beginner path is eight jobs — open, append, page commit order with
 `query_entries_after`, point-read with `get`, walk hash-chain ancestry with
 `walk_ancestors`, verify receipts, derive projections, close. See
-`bpk-lib/crates/core/examples/eight_jobs.rs` for the contract example and
-[COOKBOOK.md](COOKBOOK.md) for task-shaped recipes.
+`bpk-lib/crates/core/examples/eight_jobs.rs` for the contract example and the
+[cookbook](cookbook/README.md) for task-shaped recipes. The cookbook is the
+task-shaped field guide: each recipe maps intent to API to proof surface, and
+its index lives at [cookbook/README.md](cookbook/README.md).
 
 ## Scale And Composition
 
@@ -200,11 +202,11 @@ Pick the door that matches your intent — the docs are one model, but nobody
 is required to read all of them:
 
 - **Evaluating?** You have already read enough. Run the quickstart, skim
-  [COOKBOOK.md](COOKBOOK.md), decide.
+  the [cookbook](cookbook/README.md), decide.
 - **Building on the store?** [MODEL.md](MODEL.md) →
   [EVENTS.md](EVENTS.md) → [RECEIPTS.md](RECEIPTS.md) →
   [REPLAY.md](REPLAY.md) → [PROJECTIONS.md](PROJECTIONS.md) →
-  [COOKBOOK.md](COOKBOOK.md).
+  [cookbook](cookbook/README.md).
 - **Composing batteries or operating a host?** [FACTORY.md](FACTORY.md) →
   [BATTERIES.md](BATTERIES.md) → [TERMINALS.md](TERMINALS.md) →
   [CIRCUITS.md](CIRCUITS.md) → [INTEGRATION.md](INTEGRATION.md).
