@@ -228,12 +228,40 @@ impl ColdStartIndexRow {
         })
     }
 
+    /// Convert the persisted `wall_ms` to microseconds for the event header,
+    /// saturating to `i64::MAX` instead of panicking on corrupt/extreme input.
+    ///
+    /// Cold-start readers consume untrusted on-disk bytes (SIDX / mmap /
+    /// checkpoint). With `overflow-checks=true` on the release profile, a plain
+    /// `self.wall_ms * 1000` panics for any `wall_ms > u64::MAX / 1000`, aborting
+    /// recovery on a single corrupt row. `checked_mul` guards the u64 overflow
+    /// and `i64::try_from` guards the u64->i64 truncation; on either failure we
+    /// warn and clamp to `i64::MAX`. The timestamp is a derived display/ordering
+    /// field, not an integrity invariant, so saturation keeps this infallible.
+    fn wall_us_saturating(&self) -> i64 {
+        match self
+            .wall_ms
+            .checked_mul(1000)
+            .and_then(|us| i64::try_from(us).ok())
+        {
+            Some(us) => us,
+            None => {
+                warn!(
+                    wall_ms = self.wall_ms,
+                    source = self.source.label(),
+                    "cold-start wall_ms * 1000 overflows i64; saturating timestamp_us to i64::MAX"
+                );
+                i64::MAX
+            }
+        }
+    }
+
     pub(crate) fn to_event_header(&self) -> EventHeader {
         EventHeader::new(
             self.event_id,
             self.correlation_id,
             self.causation_id,
-            (self.wall_ms * 1000) as i64,
+            self.wall_us_saturating(),
             crate::coordinate::DagPosition::with_hlc(
                 self.wall_ms,
                 0,
@@ -290,5 +318,60 @@ mod tests {
         assert_eq!(header.payload_size, 0);
         assert_eq!(header.flags, 0);
         assert_eq!(header.content_hash, [0u8; 32]);
+    }
+
+    fn row_with_wall_ms(wall_ms: u64) -> ColdStartIndexRow {
+        ColdStartIndexRow {
+            source: ColdStartSource::Sidx,
+            event_id: 1,
+            correlation_id: 2,
+            causation_id: Some(3),
+            entity_id: InternId(1),
+            scope_id: InternId(2),
+            kind: EventKind::DATA,
+            wall_ms,
+            clock: 9,
+            dag_lane: 4,
+            dag_depth: 2,
+            hash_chain: HashChain::default(),
+            disk_pos: DiskPos::new(7, 64, 32),
+            global_sequence: 11,
+        }
+    }
+
+    #[test]
+    fn cold_start_row_to_event_header_saturates_overflowing_wall_ms() {
+        // u64::MAX * 1000 overflows u64 (caught by checked_mul). Under release
+        // overflow-checks the old `* 1000` would panic; this must not panic and
+        // must saturate the derived timestamp while preserving the raw wall_ms.
+        let row = row_with_wall_ms(u64::MAX);
+        let header = row.to_event_header();
+        assert_eq!(
+            header.timestamp_us,
+            i64::MAX,
+            "PROPERTY: overflowing wall_ms saturates timestamp_us to i64::MAX without panic"
+        );
+        assert_eq!(
+            header.position.wall_ms,
+            u64::MAX,
+            "PROPERTY: raw wall_ms is preserved unchanged in the DAG position"
+        );
+    }
+
+    #[test]
+    fn cold_start_row_to_event_header_saturates_at_i64_try_from_boundary() {
+        // This value multiplies cleanly by 1000 in u64 but exceeds i64::MAX,
+        // so checked_mul succeeds and i64::try_from is the guard that fires.
+        // Locks the i64::try_from guard against a revert to plain `as i64`,
+        // which would wrap to a negative value here.
+        let wall_ms = (i64::MAX as u64) / 1000 + 1;
+        let row = row_with_wall_ms(wall_ms);
+        let header = row.to_event_header();
+        assert_eq!(
+            header.timestamp_us,
+            i64::MAX,
+            "PROPERTY: u64->i64 truncation boundary saturates to i64::MAX, never wraps negative"
+        );
+        assert_eq!(header.position.wall_ms, wall_ms);
     }
 }

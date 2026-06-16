@@ -194,16 +194,45 @@ pub(crate) fn clock_from_fn(inner: Arc<dyn Fn() -> i64 + Send + Sync>) -> Arc<dy
 pub(crate) struct MonotonicClock {
     inner: Arc<dyn Clock>,
     last: Arc<AtomicI64>,
+    last_wall_ns: Arc<AtomicI64>,
 }
 
 impl MonotonicClock {
     /// Wrap a clock. The returned handle is cloneable
     /// and stores shared state (`AtomicI64`) in an `Arc`, so clones observe the
     /// same non-decreasing sequence.
+    ///
+    /// `now_us` (microseconds) and `now_wall_ns` (nanoseconds) are each clamped
+    /// against their own atomic. They are independent sequences — `SystemClock`
+    /// derives them from two separate `SystemTime::now()` calls — so sharing a
+    /// single atomic would cross-contaminate the two.
     pub(crate) fn wrap(inner: Arc<dyn Clock>) -> Self {
         Self {
             inner,
             last: Arc::new(AtomicI64::new(i64::MIN)),
+            last_wall_ns: Arc::new(AtomicI64::new(i64::MIN)),
+        }
+    }
+
+    /// Clamp `raw` to be non-decreasing relative to the highest value ever
+    /// installed in `slot`. Returns `raw` when it advances the slot, otherwise
+    /// logs a regression at `error` level and returns the previously installed
+    /// value. The memory ordering (Acquire load, AcqRel/Acquire CAS) is the
+    /// audited pattern shared by every non-decreasing clock sequence.
+    fn clamp_non_decreasing(slot: &AtomicI64, raw: i64, what: &str) -> i64 {
+        // Compare-and-swap loop: install `raw` if it's newer than the slot,
+        // otherwise report a regression and keep the old value.
+        loop {
+            let prev = slot.load(Ordering::Acquire);
+            if raw >= prev {
+                match slot.compare_exchange(prev, raw, Ordering::AcqRel, Ordering::Acquire) {
+                    Ok(_) => return raw,
+                    Err(_) => continue, // another thread stored a newer value; retry
+                }
+            } else {
+                tracing::error!("user clock regressed ({}): prev={} new={}", what, prev, raw);
+                return prev;
+            }
         }
     }
 
@@ -211,24 +240,7 @@ impl MonotonicClock {
     /// any value previously returned by this [`MonotonicClock`] (or any clone
     /// of it). A regression is logged at `error` level.
     pub(crate) fn now_us(&self) -> i64 {
-        let raw = self.inner.now_us();
-        // Compare-and-swap loop: install `raw` if it's newer than `last`,
-        // otherwise report a regression and keep the old value.
-        loop {
-            let prev = self.last.load(Ordering::Acquire);
-            if raw >= prev {
-                match self
-                    .last
-                    .compare_exchange(prev, raw, Ordering::AcqRel, Ordering::Acquire)
-                {
-                    Ok(_) => return raw,
-                    Err(_) => continue, // another thread stored a newer value; retry
-                }
-            } else {
-                tracing::error!("user clock regressed: prev={} new={}", prev, raw);
-                return prev;
-            }
-        }
+        Self::clamp_non_decreasing(&self.last, self.inner.now_us(), "us")
     }
 }
 
@@ -238,7 +250,7 @@ impl Clock for MonotonicClock {
     }
 
     fn now_wall_ns(&self) -> i64 {
-        self.inner.now_wall_ns()
+        Self::clamp_non_decreasing(&self.last_wall_ns, self.inner.now_wall_ns(), "wall_ns")
     }
 
     fn now_mono_ns(&self) -> i64 {
@@ -252,8 +264,46 @@ impl Clock for MonotonicClock {
 
 #[cfg(test)]
 mod tests {
-    use super::{Clock, FnClock};
+    use super::{Clock, FnClock, MonotonicClock};
+    use std::sync::atomic::{AtomicI64, Ordering};
     use std::sync::Arc;
+
+    /// A mutable test clock whose `now_us` and `now_wall_ns` are independently
+    /// programmable, so we can inject backward jumps into either sequence.
+    struct AdjustableClock {
+        us: AtomicI64,
+        wall_ns: AtomicI64,
+    }
+
+    impl AdjustableClock {
+        fn new(us: i64, wall_ns: i64) -> Arc<Self> {
+            Arc::new(Self {
+                us: AtomicI64::new(us),
+                wall_ns: AtomicI64::new(wall_ns),
+            })
+        }
+        fn set_us(&self, v: i64) {
+            self.us.store(v, Ordering::SeqCst);
+        }
+        fn set_wall_ns(&self, v: i64) {
+            self.wall_ns.store(v, Ordering::SeqCst);
+        }
+    }
+
+    impl Clock for AdjustableClock {
+        fn now_us(&self) -> i64 {
+            self.us.load(Ordering::SeqCst)
+        }
+        fn now_wall_ns(&self) -> i64 {
+            self.wall_ns.load(Ordering::SeqCst)
+        }
+        fn now_mono_ns(&self) -> i64 {
+            0
+        }
+        fn process_boot_ns(&self) -> u64 {
+            0
+        }
+    }
 
     #[test]
     fn fn_clock_preserves_negative_wall_values_but_not_monotonic_time() {
@@ -272,6 +322,70 @@ mod tests {
         assert!(
             clock.now_mono_ns() >= 0,
             "PROPERTY: process-local monotonic evidence must not echo a negative caller wall clock"
+        );
+    }
+
+    #[test]
+    fn now_wall_ns_clamps_on_regression() {
+        let inner = AdjustableClock::new(1_000, 5_000_000_000);
+        let mono = MonotonicClock::wrap(Arc::clone(&inner) as Arc<dyn Clock>);
+
+        assert_eq!(
+            mono.now_wall_ns(),
+            5_000_000_000,
+            "PROPERTY: forward wall clock passes through unchanged"
+        );
+        // Inner wall clock jumps backward (NTP step-back / manual reset).
+        inner.set_wall_ns(1_000_000_000);
+        assert_eq!(
+            mono.now_wall_ns(),
+            5_000_000_000,
+            "PROPERTY: a regressing wall clock stalls at the highest value seen, never moving backward"
+        );
+        // A subsequent forward move past the high-water mark advances again.
+        inner.set_wall_ns(6_000_000_000);
+        assert_eq!(
+            mono.now_wall_ns(),
+            6_000_000_000,
+            "PROPERTY: forward progress past the high-water mark resumes"
+        );
+    }
+
+    #[test]
+    fn now_us_and_now_wall_ns_clamp_states_are_independent() {
+        let inner = AdjustableClock::new(1_000, 5_000_000_000);
+        let mono = MonotonicClock::wrap(Arc::clone(&inner) as Arc<dyn Clock>);
+
+        // Prime both sequences.
+        assert_eq!(mono.now_us(), 1_000);
+        assert_eq!(mono.now_wall_ns(), 5_000_000_000);
+
+        // Regress only the microsecond clock; wall_ns must still advance freely.
+        inner.set_us(500);
+        inner.set_wall_ns(9_000_000_000);
+        assert_eq!(
+            mono.now_us(),
+            1_000,
+            "PROPERTY: regressed us sequence stalls at its own high-water mark"
+        );
+        assert_eq!(
+            mono.now_wall_ns(),
+            9_000_000_000,
+            "PROPERTY: wall_ns is not contaminated by the us regression (separate atomic)"
+        );
+
+        // Regress only the wall clock; us must still advance freely.
+        inner.set_us(2_000);
+        inner.set_wall_ns(1_000_000_000);
+        assert_eq!(
+            mono.now_us(),
+            2_000,
+            "PROPERTY: us is not contaminated by the wall_ns regression (separate atomic)"
+        );
+        assert_eq!(
+            mono.now_wall_ns(),
+            9_000_000_000,
+            "PROPERTY: regressed wall_ns sequence stalls at its own high-water mark"
         );
     }
 }
