@@ -568,6 +568,10 @@ impl WriterState<'_> {
         {
             return Ok(false);
         }
+        #[cfg(feature = "dangerous-test-hooks")]
+        let old_segment = *self.segment_id;
+        #[cfg(feature = "dangerous-test-hooks")]
+        let new_segment = *self.segment_id + 1;
         // Write SIDX footer before sealing. append_frames_from_segment now
         // strips SIDX data via detect_sidx_boundary, so this is safe.
         if let Err(e) = self.active_segment.write_sidx_footer(&self.sidx_collector) {
@@ -585,6 +589,17 @@ impl WriterState<'_> {
             )?,
         );
         let _sealed = old.seal();
+        // Seal/pre-publish boundary: old segment sealed, new empty active file
+        // exists on disk, reader not yet advanced. The single recovery-meaningful
+        // point at which to inject a crash during rotation.
+        #[cfg(feature = "dangerous-test-hooks")]
+        crate::store::fault::maybe_inject(
+            crate::store::fault::InjectionPoint::SegmentRotation {
+                old_segment,
+                new_segment,
+            },
+            &self.config.fault_injector,
+        )?;
         *self.segment_id += 1;
         // Notify the reader of the new active segment so mmap dispatch is correct.
         self.reader.set_active_segment(*self.segment_id);

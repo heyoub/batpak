@@ -7,9 +7,11 @@ mod by_hash;
 
 /// Bounded ancestor collection with cycle detection; on cycle it
 /// truncates the walk at the cycle point and logs at `error` level,
-/// then returns the prefix collected up to that point. This matches
-/// the public `Store::walk_ancestors` signature, which returns `Vec<_>`
-/// unconditionally.
+/// then returns the prefix collected up to that point. The walk also
+/// truncates-and-logs at `error` level when a read of an index-proven
+/// event fails (CRC/IO corruption on a known-present event), rather than
+/// only on cycle. This matches the public `Store::walk_ancestors`
+/// signature, which returns `Vec<_>` unconditionally.
 pub(super) fn collect_ancestors<State, Cursor, Step>(
     store: &Store<State>,
     mut cursor: Option<Cursor>,
@@ -50,7 +52,17 @@ pub(super) fn read_entry_and_event<State>(
     event_id: u128,
 ) -> Option<(IndexEntry, StoredEvent<serde_json::Value>)> {
     let entry = store.index.get_by_id(event_id)?;
-    let stored = store.reader.read_entry(&entry.disk_pos).ok()?;
+    let stored = match store.reader.read_entry(&entry.disk_pos) {
+        Ok(stored) => stored,
+        Err(error) => {
+            tracing::error!(
+                event_id = %format!("{event_id:#034x}"),
+                %error,
+                "ancestry walk failed to read an index-proven event — store corruption; returning truncated prefix"
+            );
+            return None;
+        }
+    };
     Some((entry, stored))
 }
 

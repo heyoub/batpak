@@ -1002,6 +1002,94 @@ fn batch_cross_segment_fault_recovery() {
     );
 }
 
+/// Test: single-append crash during segment rotation recovers cleanly.
+///
+/// Exercises the `InjectionPoint::SegmentRotation` seal/pre-publish boundary
+/// (old segment sealed, new empty active file on disk, reader not yet
+/// advanced). A fault here must abort the rotating append with `FaultInjected`,
+/// and reopen must surface only the pre-rotation event while leaving the store
+/// fully usable.
+/// PROVES: INV-BATCH-CRASH-RECOVERY.
+#[cfg(feature = "dangerous-test-hooks")]
+#[test]
+fn single_append_fault_at_segment_rotation_recovers() {
+    use batpak::store::fault::{CountdownAction, CountdownInjector, InjectionPoint};
+
+    let tmp = tempfile::tempdir().expect("create temp dir for segment-rotation recovery test");
+    let coord = Coordinate::new("rot", "seg").expect("valid segment-rotation coordinate");
+
+    // Phase 1: fill segment 0 past the 1024B rotation threshold with a single
+    // committed event so the NEXT append must rotate before it can be written.
+    let config = StoreConfig::new(tmp.path()).with_segment_max_bytes(1024);
+    let store = Store::open(config).expect("open baseline store for segment-rotation recovery");
+    let pre_payload = serde_json::json!({"phase": 1, "data": "x".repeat(900) });
+    let pre_receipt = store
+        .append(&coord, EventKind::DATA, &pre_payload)
+        .expect("append pre-rotation event before segment-rotation fault");
+    drop(store);
+
+    // Phase 2: reopen with a fault injector filtered on SegmentRotation. The
+    // next append must rotate segment 0 -> 1 and fault at the seal/pre-publish
+    // boundary.
+    let config = StoreConfig::new(tmp.path())
+        .with_segment_max_bytes(1024)
+        .with_fault_injector(Some(std::sync::Arc::new(
+            CountdownInjector::new(1, CountdownAction::Fail("crash during segment rotation"))
+                .with_filter(|p| matches!(p, InjectionPoint::SegmentRotation { .. })),
+        )));
+    let store =
+        Store::open(config).expect("open fault-injected store for segment-rotation recovery");
+
+    let result = store.append(
+        &coord,
+        EventKind::DATA,
+        &serde_json::json!({"phase": 2, "pad": "y".repeat(300)}),
+    );
+    match result {
+        Err(batpak::store::StoreError::FaultInjected(_)) => {}
+        Err(other) => panic!("expected FaultInjected during rotation, got {other:?}"),
+        Ok(receipt) => panic!(
+            "second append must rotate-and-fault, but it succeeded (seq {}); \
+             increase the Phase-1 payload size or lower segment_max_bytes",
+            receipt.sequence
+        ),
+    }
+    drop(store);
+
+    // Phase 3: reopen clean. Only the pre-rotation event must survive.
+    let config = StoreConfig::new(tmp.path());
+    let store = Store::open(config).expect("reopen store after segment-rotation fault recovery");
+    let mut cursor = store.cursor_guaranteed(&Region::all());
+    let entries = strip_open_completed(cursor.poll_batch(10));
+    assert_eq!(
+        entries.len(),
+        1,
+        "only the pre-rotation event should survive a crash during segment rotation"
+    );
+    assert_eq!(
+        store
+            .get(batpak::id::EventId::from(entries[0].event_id()))
+            .expect("load recovered pre-rotation event")
+            .event
+            .payload["phase"],
+        serde_json::json!(1),
+        "the surviving entry must be the pre-rotation Phase-1 event"
+    );
+
+    // Store remains usable: a subsequent append succeeds and is monotonic.
+    let after_receipt = store
+        .append(
+            &coord,
+            EventKind::DATA,
+            &serde_json::json!({"phase": 3, "after": "recovery"}),
+        )
+        .expect("append after segment-rotation recovery");
+    assert!(
+        after_receipt.sequence > pre_receipt.sequence,
+        "appends after segment-rotation recovery must be monotonic"
+    );
+}
+
 /// Test: concurrent readers NEVER observe a partial batch.
 ///
 /// Uses a fault injector at `BatchPrePublish` to create a deterministic
