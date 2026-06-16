@@ -1,6 +1,6 @@
 {
   "name": "batpak-ts-workspace",
-  "version": "0.0.0",
+  "version": "0.8.2",
   "private": true,
   "type": "module",
   "description": "BatPAK TypeScript SDK workspace. 0.8.2 release.",

@@ -2,7 +2,7 @@
 
 Reference NETBAT/1 host for the batpak family (`publish = false`).
 
-`hbat` registers all ten manifest operations against a real `Store`: six core
+`hbat` registers all ten manifest operations against a real `Store`: five core
 substrate terminals plus `system.heartbeat` and the four domain-neutral
 `evidence.*` ops. Runtime dispatch stays in `syncbat`; wire framing stays in
 `netbat`; durable records, receipts, and evidence stay in `batpak`.

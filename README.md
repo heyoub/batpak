@@ -155,7 +155,7 @@ When batpak is the wrong tool:
 
 Judge the evidence, not the version number:
 
-- ~40k lines of tests against ~43k lines of source, including crash-recovery
+- Roughly one line of tests per line of source, including crash-recovery
   and cold-start suites.
 - Deterministic concurrency proofs with `loom`, not just stress tests.
 - Property-based tests over hash-chain integrity and canonical encoding.

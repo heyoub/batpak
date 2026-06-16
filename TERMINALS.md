@@ -23,7 +23,7 @@ Current terminal-shaped surfaces include:
 - projection and replay entry points
 - netbat routes and operation handling surfaces
 
-The reference NETBAT profile exposes ten operations: six core substrate
+The reference NETBAT profile exposes ten operations: five core substrate
 terminals plus one liveness terminal and four domain-neutral `evidence.*`
 terminals.
 

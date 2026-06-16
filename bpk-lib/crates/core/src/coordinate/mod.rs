@@ -114,8 +114,8 @@ impl Coordinate {
     /// separators reserved by `Region::checkpoint_identity`.
     ///
     /// # Errors
-    /// Returns `CoordinateError::EmptyEntity` if the entity string is empty.
-    /// Returns `CoordinateError::EmptyScope` if the scope string is empty.
+    /// Returns any `CoordinateError` produced by the validation rules described
+    /// above.
     pub fn new(entity: impl AsRef<str>, scope: impl AsRef<str>) -> Result<Self, CoordinateError> {
         let entity = entity.as_ref();
         let scope = scope.as_ref();
