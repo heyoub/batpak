@@ -32,6 +32,49 @@ impl Reader {
         })
     }
 
+    /// Read and CRC-verify a sealed/active frame through the FD/pread path,
+    /// returning the decoded raw MessagePack frame bytes via `decode`. This is
+    /// the byte-identical fallback for the mmap fast path: both terminate in
+    /// `segment::frame_decode` + `Self::decode_frame_payload_*`, so a corrupt
+    /// frame surfaces the SAME `StoreError` variant on either path.
+    fn read_frame_payload_fd<P>(
+        &self,
+        pos: &DiskPos,
+        decode: impl Fn(&[u8]) -> Result<crate::store::segment::FramePayload<P>, StoreError>,
+    ) -> Result<crate::store::segment::FramePayload<P>, StoreError> {
+        let frame_len = Self::checked_frame_len(pos.segment_id, pos.length)?;
+        let mut buf = self.acquire_buffer(frame_len);
+        if let Err(e) = self.read_active_frame_into(pos, &mut buf) {
+            self.release_buffer(buf);
+            return Err(e);
+        }
+
+        let decoded = (|| {
+            let (msgpack, _) = segment::frame_decode(&buf)
+                .map_err(|error| Self::frame_decode_error_for_pos(pos, error))?;
+            decode(msgpack)
+        })();
+        self.release_buffer(buf);
+        decoded
+    }
+
+    /// Read and CRC-verify a sealed frame through the mmap fast path, returning
+    /// the decoded raw MessagePack frame bytes via `decode`.
+    fn read_frame_payload_mmap<P>(
+        &self,
+        mmap_ref: &dashmap::mapref::one::Ref<'_, u64, memmap2::Mmap>,
+        pos: &DiskPos,
+        decode: impl Fn(&[u8]) -> Result<crate::store::segment::FramePayload<P>, StoreError>,
+    ) -> Result<crate::store::segment::FramePayload<P>, StoreError> {
+        let mmap: &memmap2::Mmap = mmap_ref.value();
+        let frame_range =
+            Self::checked_frame_range(pos.segment_id, pos.offset, pos.length, mmap.len())?;
+        let frame_buf = &mmap[frame_range];
+        let (msgpack, _) = segment::frame_decode(frame_buf)
+            .map_err(|error| Self::frame_decode_error_for_pos(pos, error))?;
+        decode(msgpack)
+    }
+
     /// Read a single event by disk position. CRC32 verified.
     /// Sealed segments: zero-copy read via mmap.
     /// Active segment: pread (Unix) or seek+read (Windows) via FD cache.
@@ -44,26 +87,13 @@ impl Reader {
         if self.is_sealed(pos.segment_id) {
             return self.read_entry_mmap(pos);
         }
+        self.read_entry_fd(pos)
+    }
 
-        // Slow path: active segment via FD cache + buffer pool.
-        let frame_len = Self::checked_frame_len(pos.segment_id, pos.length)?;
-        let mut buf = self.acquire_buffer(frame_len);
-        self.read_active_frame_into(pos, &mut buf)?;
-
-        let result = segment::frame_decode(&buf)
-            .map_err(|error| Self::frame_decode_error_for_pos(pos, error));
-        let (msgpack, _) = match result {
-            Ok(v) => v,
-            Err(e) => {
-                self.release_buffer(buf);
-                return Err(e);
-            }
-        };
-        let payload = Self::decode_frame_payload_value(msgpack)?;
-
-        // Release buffer back to pool after deserialization
-        self.release_buffer(buf);
-
+    /// FD/pread read of an entry. Used for the active segment and as the sealed
+    /// fallback when mmap is not admitted.
+    fn read_entry_fd(&self, pos: &DiskPos) -> Result<StoredEvent<serde_json::Value>, StoreError> {
+        let payload = self.read_frame_payload_fd(pos, Self::decode_frame_payload_value)?;
         let coord =
             Coordinate::new(&payload.entity, &payload.scope).map_err(StoreError::Coordinate)?;
         Ok(StoredEvent {
@@ -74,14 +104,11 @@ impl Reader {
 
     /// Zero-copy read from a sealed segment's memory map.
     fn read_entry_mmap(&self, pos: &DiskPos) -> Result<StoredEvent<serde_json::Value>, StoreError> {
-        let mmap_ref = self.get_or_map_sealed(pos.segment_id)?;
-        let mmap: &memmap2::Mmap = mmap_ref.value();
-        let frame_range =
-            Self::checked_frame_range(pos.segment_id, pos.offset, pos.length, mmap.len())?;
-        let frame_buf = &mmap[frame_range];
-        let (msgpack, _) = segment::frame_decode(frame_buf)
-            .map_err(|error| Self::frame_decode_error_for_pos(pos, error))?;
-        let payload = Self::decode_frame_payload_value(msgpack)?;
+        let Some(mmap_ref) = self.get_or_map_sealed(pos.segment_id)? else {
+            return self.read_entry_fd(pos);
+        };
+        let payload =
+            self.read_frame_payload_mmap(&mmap_ref, pos, Self::decode_frame_payload_value)?;
         let coord =
             Coordinate::new(&payload.entity, &payload.scope).map_err(StoreError::Coordinate)?;
         Ok(StoredEvent {
@@ -97,23 +124,13 @@ impl Reader {
         if self.is_sealed(pos.segment_id) {
             return self.read_entry_raw_mmap(pos);
         }
+        self.read_entry_raw_fd(pos)
+    }
 
-        let frame_len = Self::checked_frame_len(pos.segment_id, pos.length)?;
-        let mut buf = self.acquire_buffer(frame_len);
-        self.read_active_frame_into(pos, &mut buf)?;
-
-        let result = segment::frame_decode(&buf)
-            .map_err(|error| Self::frame_decode_error_for_pos(pos, error));
-        let (msgpack, _) = match result {
-            Ok(v) => v,
-            Err(e) => {
-                self.release_buffer(buf);
-                return Err(e);
-            }
-        };
-        let payload = Self::decode_frame_payload_raw(msgpack)?;
-        self.release_buffer(buf);
-
+    /// FD/pread read of a raw entry. Used for the active segment and as the
+    /// sealed fallback when mmap is not admitted.
+    fn read_entry_raw_fd(&self, pos: &DiskPos) -> Result<StoredEvent<Vec<u8>>, StoreError> {
+        let payload = self.read_frame_payload_fd(pos, Self::decode_frame_payload_raw)?;
         let coord =
             Coordinate::new(&payload.entity, &payload.scope).map_err(StoreError::Coordinate)?;
         Ok(StoredEvent {
@@ -123,14 +140,11 @@ impl Reader {
     }
 
     fn read_entry_raw_mmap(&self, pos: &DiskPos) -> Result<StoredEvent<Vec<u8>>, StoreError> {
-        let mmap_ref = self.get_or_map_sealed(pos.segment_id)?;
-        let mmap: &memmap2::Mmap = mmap_ref.value();
-        let frame_range =
-            Self::checked_frame_range(pos.segment_id, pos.offset, pos.length, mmap.len())?;
-        let frame_buf = &mmap[frame_range];
-        let (msgpack, _) = segment::frame_decode(frame_buf)
-            .map_err(|error| Self::frame_decode_error_for_pos(pos, error))?;
-        let payload = Self::decode_frame_payload_raw(msgpack)?;
+        let Some(mmap_ref) = self.get_or_map_sealed(pos.segment_id)? else {
+            return self.read_entry_raw_fd(pos);
+        };
+        let payload =
+            self.read_frame_payload_mmap(&mmap_ref, pos, Self::decode_frame_payload_raw)?;
         let coord =
             Coordinate::new(&payload.entity, &payload.scope).map_err(StoreError::Coordinate)?;
         Ok(StoredEvent {
@@ -150,40 +164,24 @@ impl Reader {
         if self.is_sealed(pos.segment_id) {
             return self.read_event_only_mmap(pos);
         }
+        self.read_event_only_fd(pos)
+    }
 
-        // Slow path: active segment via FD cache + buffer pool.
-        let frame_len = Self::checked_frame_len(pos.segment_id, pos.length)?;
-        let mut buf = self.acquire_buffer(frame_len);
-        self.read_active_frame_into(pos, &mut buf)?;
-
-        let result = segment::frame_decode(&buf)
-            .map_err(|error| Self::frame_decode_error_for_pos(pos, error));
-        let (msgpack, _) = match result {
-            Ok(v) => v,
-            Err(e) => {
-                self.release_buffer(buf);
-                return Err(e);
-            }
-        };
-        let payload = Self::decode_frame_payload_value(msgpack)?;
-
-        // Release buffer back to pool after deserialization
-        self.release_buffer(buf);
-
+    /// FD/pread read of an event. Used for the active segment and as the sealed
+    /// fallback when mmap is not admitted.
+    fn read_event_only_fd(&self, pos: &DiskPos) -> Result<Event<serde_json::Value>, StoreError> {
+        let payload = self.read_frame_payload_fd(pos, Self::decode_frame_payload_value)?;
         Ok(payload.event)
     }
 
     /// Zero-copy read from a sealed segment's memory map, returning only the
     /// event and skipping Coordinate construction.
     fn read_event_only_mmap(&self, pos: &DiskPos) -> Result<Event<serde_json::Value>, StoreError> {
-        let mmap_ref = self.get_or_map_sealed(pos.segment_id)?;
-        let mmap: &memmap2::Mmap = mmap_ref.value();
-        let frame_range =
-            Self::checked_frame_range(pos.segment_id, pos.offset, pos.length, mmap.len())?;
-        let frame_buf = &mmap[frame_range];
-        let (msgpack, _) = segment::frame_decode(frame_buf)
-            .map_err(|error| Self::frame_decode_error_for_pos(pos, error))?;
-        let payload = Self::decode_frame_payload_value(msgpack)?;
+        let Some(mmap_ref) = self.get_or_map_sealed(pos.segment_id)? else {
+            return self.read_event_only_fd(pos);
+        };
+        let payload =
+            self.read_frame_payload_mmap(&mmap_ref, pos, Self::decode_frame_payload_value)?;
         Ok(payload.event)
     }
 
@@ -204,22 +202,13 @@ impl Reader {
         if self.is_sealed(pos.segment_id) {
             return self.read_event_raw_only_mmap(pos);
         }
+        self.read_event_raw_only_fd(pos)
+    }
 
-        let frame_len = Self::checked_frame_len(pos.segment_id, pos.length)?;
-        let mut buf = self.acquire_buffer(frame_len);
-        self.read_active_frame_into(pos, &mut buf)?;
-
-        let result = segment::frame_decode(&buf)
-            .map_err(|error| Self::frame_decode_error_for_pos(pos, error));
-        let (msgpack, _) = match result {
-            Ok(v) => v,
-            Err(e) => {
-                self.release_buffer(buf);
-                return Err(e);
-            }
-        };
-        let payload = Self::decode_frame_payload_raw(msgpack)?;
-        self.release_buffer(buf);
+    /// FD/pread read of a raw event. Used for the active segment and as the
+    /// sealed fallback when mmap is not admitted.
+    fn read_event_raw_only_fd(&self, pos: &DiskPos) -> Result<Event<Vec<u8>>, StoreError> {
+        let payload = self.read_frame_payload_fd(pos, Self::decode_frame_payload_raw)?;
         Ok(payload.event)
     }
 
@@ -231,22 +220,16 @@ impl Reader {
         if self.is_sealed(pos.segment_id) {
             return self.read_receipt_extensions_mmap(pos);
         }
+        self.read_receipt_extensions_fd(pos)
+    }
 
-        let frame_len = Self::checked_frame_len(pos.segment_id, pos.length)?;
-        let mut buf = self.acquire_buffer(frame_len);
-        self.read_active_frame_into(pos, &mut buf)?;
-
-        let result = segment::frame_decode(&buf)
-            .map_err(|error| Self::frame_decode_error_for_pos(pos, error));
-        let (msgpack, _) = match result {
-            Ok(v) => v,
-            Err(e) => {
-                self.release_buffer(buf);
-                return Err(e);
-            }
-        };
-        let payload = Self::decode_frame_payload_raw(msgpack)?;
-        self.release_buffer(buf);
+    /// FD/pread read of a frame's receipt extensions. Used for the active
+    /// segment and as the sealed fallback when mmap is not admitted.
+    fn read_receipt_extensions_fd(
+        &self,
+        pos: &DiskPos,
+    ) -> Result<BTreeMap<ExtensionKey, EncodedBytes>, StoreError> {
+        let payload = self.read_frame_payload_fd(pos, Self::decode_frame_payload_raw)?;
         Ok(payload.receipt_extensions)
     }
 
@@ -254,26 +237,20 @@ impl Reader {
         &self,
         pos: &DiskPos,
     ) -> Result<BTreeMap<ExtensionKey, EncodedBytes>, StoreError> {
-        let mmap_ref = self.get_or_map_sealed(pos.segment_id)?;
-        let mmap: &memmap2::Mmap = mmap_ref.value();
-        let frame_range =
-            Self::checked_frame_range(pos.segment_id, pos.offset, pos.length, mmap.len())?;
-        let frame_buf = &mmap[frame_range];
-        let (msgpack, _) = segment::frame_decode(frame_buf)
-            .map_err(|error| Self::frame_decode_error_for_pos(pos, error))?;
-        let payload = Self::decode_frame_payload_raw(msgpack)?;
+        let Some(mmap_ref) = self.get_or_map_sealed(pos.segment_id)? else {
+            return self.read_receipt_extensions_fd(pos);
+        };
+        let payload =
+            self.read_frame_payload_mmap(&mmap_ref, pos, Self::decode_frame_payload_raw)?;
         Ok(payload.receipt_extensions)
     }
 
     fn read_event_raw_only_mmap(&self, pos: &DiskPos) -> Result<Event<Vec<u8>>, StoreError> {
-        let mmap_ref = self.get_or_map_sealed(pos.segment_id)?;
-        let mmap: &memmap2::Mmap = mmap_ref.value();
-        let frame_range =
-            Self::checked_frame_range(pos.segment_id, pos.offset, pos.length, mmap.len())?;
-        let frame_buf = &mmap[frame_range];
-        let (msgpack, _) = segment::frame_decode(frame_buf)
-            .map_err(|error| Self::frame_decode_error_for_pos(pos, error))?;
-        let payload = Self::decode_frame_payload_raw(msgpack)?;
+        let Some(mmap_ref) = self.get_or_map_sealed(pos.segment_id)? else {
+            return self.read_event_raw_only_fd(pos);
+        };
+        let payload =
+            self.read_frame_payload_mmap(&mmap_ref, pos, Self::decode_frame_payload_raw)?;
         Ok(payload.event)
     }
 

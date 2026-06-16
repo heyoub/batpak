@@ -109,7 +109,8 @@ fn parallel_sidx_footer_read_matches_sequential_footer_read() {
     let reader = Reader::new(
         dir.path().to_path_buf(),
         16,
-        std::sync::Arc::new(crate::store::SystemClock::new()),
+        &(std::sync::Arc::new(crate::store::SystemClock::new())
+            as std::sync::Arc<dyn crate::store::Clock>),
     );
     let (parallel, _) = read_sealed_sidx_entries_parallel(&reader, &sealed_segments)
         .expect("parallel SIDX footer read should succeed");
@@ -129,7 +130,8 @@ fn build_snapshot_plan_keeps_chunk_count_when_tail_is_empty() {
     let reader = Reader::new(
         dir.path().to_path_buf(),
         4,
-        std::sync::Arc::new(crate::store::SystemClock::new()),
+        &(std::sync::Arc::new(crate::store::SystemClock::new())
+            as std::sync::Arc<dyn crate::store::Clock>),
     );
     let clock = crate::store::SystemClock::new();
     let planner = RestorePlanner {
@@ -179,7 +181,8 @@ fn build_snapshot_plan_rejects_snapshot_entries_without_backing_frames() {
     let reader = Reader::new(
         dir.path().to_path_buf(),
         4,
-        std::sync::Arc::new(crate::store::SystemClock::new()),
+        &(std::sync::Arc::new(crate::store::SystemClock::new())
+            as std::sync::Arc<dyn crate::store::Clock>),
     );
     let clock = crate::store::SystemClock::new();
     let planner = RestorePlanner {
@@ -240,7 +243,8 @@ fn build_snapshot_plan_adds_chunk_when_tail_is_present() {
     let reader = Reader::new(
         dir.path().to_path_buf(),
         4,
-        std::sync::Arc::new(crate::store::SystemClock::new()),
+        &(std::sync::Arc::new(crate::store::SystemClock::new())
+            as std::sync::Arc<dyn crate::store::Clock>),
     );
     reader.set_active_segment(active_after_tail);
     let clock = crate::store::SystemClock::new();
@@ -457,7 +461,8 @@ fn open_index_skips_fast_paths_when_pending_compaction_marker_exists() {
     let reader = Reader::new(
         dir.path().to_path_buf(),
         4,
-        std::sync::Arc::new(crate::store::SystemClock::new()),
+        &(std::sync::Arc::new(crate::store::SystemClock::new())
+            as std::sync::Arc<dyn crate::store::Clock>),
     );
     let index = StoreIndex::new();
     let report = open_index(
@@ -508,7 +513,8 @@ fn collect_tail_entries_keeps_events_from_the_watermark_segment() {
     let reader = Reader::new(
         dir.path().to_path_buf(),
         4,
-        std::sync::Arc::new(crate::store::SystemClock::new()),
+        &(std::sync::Arc::new(crate::store::SystemClock::new())
+            as std::sync::Arc<dyn crate::store::Clock>),
     );
     reader.set_active_segment(highest_segment_id + 1);
     let tail_entries = collect_tail_entries(

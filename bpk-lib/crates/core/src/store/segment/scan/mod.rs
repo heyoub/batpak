@@ -72,7 +72,6 @@ fn read_frame_header_or_clean_eof(
 #[doc(hidden)]
 pub struct Reader {
     data_dir: PathBuf,
-    clock: Arc<dyn Clock>,
     /// FD cache for the active segment only. Sealed segments use mmap.
     /// [DEP:parking_lot::Mutex] — lock() returns guard directly, no poisoning
     fd_cache: Mutex<FdCache>,
@@ -83,6 +82,16 @@ pub struct Reader {
     /// ID of the current active (writable) segment. Set by the writer on rotation.
     /// Segments with ID < this are sealed and safe for mmap.
     active_segment_id: AtomicU64,
+    /// Cached sealed-segment mmap admission, probed exactly ONCE at construction.
+    ///
+    /// Mmap support is an immutable host fact, so there is no reason to re-probe
+    /// it per segment. Crucially, the probe writes a temp file into `data_dir`
+    /// (see `platform::evidence`), so re-probing on every first map would require
+    /// write access to the data dir on the *read* path — breaking reads of a
+    /// perfectly intact sealed segment on a read-only mount or full disk.
+    /// `None` means mmap is not admitted; sealed reads then fall back to the
+    /// FD/pread path, which produces byte-identical results.
+    sealed_mmap_admission: Option<crate::store::platform::mmap::SealedSegmentMmapAdmission>,
 }
 
 struct FdCache {
@@ -188,10 +197,20 @@ impl Reader {
         Self::frame_decode_error(pos.segment_id, pos.offset, error)
     }
 
-    pub(crate) fn new(data_dir: PathBuf, fd_budget: usize, clock: Arc<dyn Clock>) -> Self {
+    pub(crate) fn new(data_dir: PathBuf, fd_budget: usize, clock: &Arc<dyn Clock>) -> Self {
+        // Probe mmap admission ONCE here. This is the only temp-file probe over
+        // the Reader's lifetime; sealed reads never re-probe. A probe failure
+        // (e.g. a read-only data dir, where the probe's temp file cannot be
+        // written) leaves `sealed_mmap_admission == None`, which routes sealed
+        // reads to the FD/pread fallback instead of hard-failing.
+        let sealed_mmap_admission = crate::store::platform::mmap::admit_sealed_segment_mmap(
+            crate::store::platform::evidence::collect_for_store_path(&data_dir, &**clock)
+                .store_path
+                .sealed_segment_mmap,
+        )
+        .ok();
         Self {
             data_dir,
-            clock,
             fd_cache: Mutex::new(FdCache {
                 fds: HashMap::new(),
                 order: Vec::new(),
@@ -200,6 +219,7 @@ impl Reader {
             buffer_pool: Mutex::new(Vec::new()),
             sealed_maps: DashMap::new(),
             active_segment_id: AtomicU64::new(0),
+            sealed_mmap_admission,
         }
     }
 
@@ -220,35 +240,42 @@ impl Reader {
     }
 
     /// Get or create a memory mapping for a sealed segment.
+    ///
+    /// Returns `Ok(None)` when mmap was not admitted at construction (e.g. the
+    /// data dir is read-only and the one-time probe could not run); callers must
+    /// then fall back to the FD/pread read path, which is byte-identical.
     fn get_or_map_sealed(
         &self,
         segment_id: u64,
-    ) -> Result<dashmap::mapref::one::Ref<'_, u64, memmap2::Mmap>, StoreError> {
+    ) -> Result<Option<dashmap::mapref::one::Ref<'_, u64, memmap2::Mmap>>, StoreError> {
         if let Some(entry) = self.sealed_maps.get(&segment_id) {
-            return Ok(entry);
+            return Ok(Some(entry));
         }
+        // Mmap not admitted on this host/mount: signal the FD/pread fallback.
+        let Some(admission) = self.sealed_mmap_admission else {
+            return Ok(None);
+        };
         // Map the segment file
         let path = self.data_dir.join(segment::segment_filename(segment_id));
         let file = crate::store::platform::fs::open_file(&path).map_err(StoreError::Io)?;
         // SAFETY: memmap2::Mmap::map is unsafe because the file could be modified externally.
         // Sealed segments are immutable by design — only compaction deletes them, and
-        // evict_segment drops the mapping before deletion.
-        let evidence =
-            crate::store::platform::evidence::collect_for_store_path(&self.data_dir, &*self.clock);
-        let admission = crate::store::platform::mmap::admit_sealed_segment_mmap(
-            evidence.store_path.sealed_segment_mmap,
-        )?;
+        // evict_segment drops the mapping before deletion. The admission token only
+        // attests the mmap mechanism; the immutability proof above is unchanged.
         let mmap =
             unsafe { crate::store::platform::mmap::map_sealed_segment_file(&file, admission) }
                 .map_err(StoreError::Io)?;
         self.sealed_maps.insert(segment_id, mmap);
         // Return the just-inserted entry
-        self.sealed_maps.get(&segment_id).ok_or_else(|| {
-            StoreError::Io(std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                "mmap entry missing after insert",
-            ))
-        })
+        self.sealed_maps
+            .get(&segment_id)
+            .ok_or_else(|| {
+                StoreError::Io(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "mmap entry missing after insert",
+                ))
+            })
+            .map(Some)
     }
 
     /// Acquire a buffer from the pool, or allocate a new one if pool is empty.
@@ -280,6 +307,20 @@ impl Reader {
             pool.push(buf);
         }
         // else: drop it — pool is full
+    }
+
+    /// Test-only: force the sealed-segment mmap admission to absent, simulating
+    /// a host/mount where the one-time probe could not run (e.g. read-only data
+    /// dir). Sealed reads then exercise the FD/pread fallback path.
+    #[cfg(test)]
+    pub(super) fn disable_sealed_mmap_for_test(&mut self) {
+        self.sealed_mmap_admission = None;
+    }
+
+    /// Test-only: report whether sealed-segment mmap was admitted at construction.
+    #[cfg(test)]
+    pub(super) fn sealed_mmap_admitted_for_test(&self) -> bool {
+        self.sealed_mmap_admission.is_some()
     }
 
     /// Evict a segment from FD cache and mmap cache.

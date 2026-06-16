@@ -58,7 +58,7 @@ fn open_components(
     let reader = Arc::new(Reader::new(
         config.data_dir.clone(),
         config.fd_budget,
-        runtime.clock_arc(),
+        &runtime.clock_arc(),
     ));
 
     // Cold start: checkpoint/mmap fast paths or full segment scan.
