@@ -44,6 +44,22 @@ impl Reader {
         payload_len > segment::MAX_FRAME_PAYLOAD
     }
 
+    pub(super) fn checked_header_len(
+        segment_id: u64,
+        header_len: usize,
+    ) -> Result<usize, StoreError> {
+        if header_len > segment::MAX_SEGMENT_HEADER {
+            return Err(StoreError::corrupt_segment_with_detail(
+                segment_id,
+                format!(
+                    "segment header length {header_len} exceeds MAX_SEGMENT_HEADER {}",
+                    segment::MAX_SEGMENT_HEADER
+                ),
+            ));
+        }
+        Ok(header_len)
+    }
+
     pub(super) fn checked_batch_count(
         segment_id: u64,
         offset: u64,

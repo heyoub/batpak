@@ -314,6 +314,27 @@ fn payload_len_exceeds_max_respects_the_exact_boundary() {
 }
 
 #[test]
+fn checked_header_len_respects_the_exact_boundary() {
+    assert_eq!(
+        Reader::checked_header_len(7, segment::MAX_SEGMENT_HEADER)
+            .expect("a header exactly at MAX_SEGMENT_HEADER remains valid"),
+        segment::MAX_SEGMENT_HEADER,
+        "PROPERTY: a header exactly at MAX_SEGMENT_HEADER is accepted unchanged"
+    );
+
+    let err = Reader::checked_header_len(7, segment::MAX_SEGMENT_HEADER + 1)
+        .expect_err("a header one byte past MAX_SEGMENT_HEADER must stop scan before allocation");
+    assert!(
+        matches!(
+            err,
+            StoreError::CorruptSegment { segment_id: 7, ref detail }
+            if detail.contains("exceeds MAX_SEGMENT_HEADER")
+        ),
+        "PROPERTY: an oversize header_len must be rejected as CorruptSegment before any vec![0u8; header_len] allocation, got {err:?}"
+    );
+}
+
+#[test]
 fn checked_batch_count_rejects_vacuous_or_implausible_counts() {
     assert!(Reader::checked_batch_count(1, 0, 0).is_err());
     assert!(Reader::checked_batch_count(1, 0, MAX_BATCH_RECOVERY_ITEMS + 1).is_err());

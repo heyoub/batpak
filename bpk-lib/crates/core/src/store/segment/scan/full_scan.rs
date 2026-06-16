@@ -46,7 +46,8 @@ impl Reader {
         let mut header_len_buf = [0u8; 4];
         file.read_exact(&mut header_len_buf)
             .map_err(StoreError::Io)?;
-        let header_len = u32::from_be_bytes(header_len_buf) as usize;
+        let header_len =
+            Self::checked_header_len(segment_id, u32::from_be_bytes(header_len_buf) as usize)?;
         let mut header_buf = vec![0u8; header_len];
         file.read_exact(&mut header_buf).map_err(StoreError::Io)?;
         let header: segment::SegmentHeader = crate::encoding::from_bytes(&header_buf)

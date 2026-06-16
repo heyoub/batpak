@@ -188,3 +188,61 @@ fn truncated_segment_mid_frame_does_not_crash_reopen() {
     );
     store.close().expect("close after recovery");
 }
+
+/// C4: segment create/rotation fsyncs the parent directory entry. An
+/// in-process test cannot cut power, but the observable consequence of the
+/// directory fsync is that every rotated segment's directory entry is present
+/// after a forced rotation and an unclean (drop, not close) shutdown — so a
+/// re-open recovers the full event count from on-disk segments alone.
+#[test]
+fn forced_rotation_then_unclean_reopen_sees_all_segment_entries() {
+    let dir = TempDir::new().expect("temp dir");
+
+    // Tiny segment_max_bytes forces many rotations; disable checkpoint/mmap so
+    // the reopen path must rebuild purely from the on-disk *.fbat segments,
+    // making segment directory-entry visibility load-bearing for recovery.
+    let config = StoreConfig::new(dir.path())
+        .with_segment_max_bytes(256)
+        .with_sync_every_n_events(1);
+
+    let count = 64u32;
+    {
+        let store = Store::open(config.clone()).expect("open store");
+        let coord = Coordinate::new("entity:rot", "scope:test").expect("valid coord");
+        for i in 0..count {
+            store
+                .append(&coord, KIND, &serde_json::json!({"i": i}))
+                .expect("append");
+        }
+        // Drop without close(): no clean-shutdown checkpoint/index artifacts.
+    }
+
+    // At least one rotation must have happened, and every rotated segment's
+    // directory entry must be visible via read_dir (the dir-fsync consequence).
+    let segments: Vec<std::path::PathBuf> = std::fs::read_dir(dir.path())
+        .expect("read data dir")
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| {
+            p.extension()
+                .and_then(|x| x.to_str())
+                .map(|s| s == "fbat")
+                .unwrap_or(false)
+        })
+        .collect();
+    assert!(
+        segments.len() >= 2,
+        "PROPERTY: tiny segment_max_bytes must force >=1 rotation; found {} segments: {:?}",
+        segments.len(),
+        segments
+    );
+
+    // Cold-start recovery from the visible segments must yield the full count.
+    let store = Store::<ReadOnly>::open_read_only(config).expect("reopen after unclean shutdown");
+    let recovered = user_visible_entries(&store).len();
+    assert_eq!(
+        recovered, count as usize,
+        "PROPERTY: every rotated segment's directory entry must survive an unclean shutdown so \
+         cold-start recovers all {count} events; got {recovered}"
+    );
+}

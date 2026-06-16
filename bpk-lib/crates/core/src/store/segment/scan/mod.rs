@@ -17,6 +17,21 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
+// OOM posture (scan + recovery allocations).
+//
+// batpak relies on *input bounds*, not allocation-failure recovery, to keep
+// corrupt or adversarial segment input from driving unbounded allocation:
+// every input-sized buffer is capped before it is allocated — frame payloads by
+// `MAX_FRAME_PAYLOAD`, header buffers by `MAX_SEGMENT_HEADER`, and recovery
+// batch counts by `MAX_BATCH_RECOVERY_ITEMS`. It does NOT implement
+// allocation-failure recovery: under true allocator exhaustion these
+// allocations abort the process (Rust's default global-allocator behavior).
+// Operators must therefore bound process memory externally (cgroup / ulimit)
+// and treat OOM as a crash-restart, which cold-start recovery is designed to
+// survive. `try_reserve`-based graceful degradation is intentionally out of
+// scope for 0.8.3 and tracked post-release: a partial retrofit would give false
+// OOM-safety, since the dominant allocations (serde/msgpack decode, HashMap
+// staging pools, Arc clones) would still abort via the global allocator.
 const FRAME_HEADER_BYTES: usize = 8;
 const MAX_BATCH_RECOVERY_ITEMS: u32 = 1_000_000;
 

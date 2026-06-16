@@ -23,6 +23,13 @@ pub const SEGMENT_EXTENSION: &str = "fbat";
 /// a malicious or corrupt segment file from causing unbounded memory use.
 pub(crate) const MAX_FRAME_PAYLOAD: usize = 256 * 1024 * 1024;
 
+/// Maximum allowed segment header size in bytes. The real header is a fixed
+/// four-field msgpack struct (~30 bytes), so a 64 KiB cap rejects only
+/// impossible inputs. A segment claiming a larger `header_len` is rejected as
+/// corrupt before allocation, preventing a malicious or corrupt segment file
+/// from driving an unbounded header buffer allocation. Mirrors MAX_FRAME_PAYLOAD.
+pub(crate) const MAX_SEGMENT_HEADER: usize = 64 * 1024;
+
 /// Segment file header, serialized as MessagePack after the magic bytes.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SegmentHeader {
@@ -257,6 +264,16 @@ impl Segment<Active> {
         file.write_all(&header_len).map_err(StoreError::Io)?;
         file.write_all(&header_bytes).map_err(StoreError::Io)?;
 
+        // Durability boundary for segment creation/rotation: fsync the file
+        // content, THEN the parent directory entry. File-then-dir ordering
+        // ensures the header bytes are durable before the directory entry that
+        // points at the inode is durable, so a power loss immediately after a
+        // rotation cannot lose the freshly-created segment's directory entry.
+        // Mirrors the write_file_atomically file-then-dir precedent in
+        // platform/fs.rs.
+        crate::store::platform::sync::sync_file_all_io(&file).map_err(StoreError::Io)?;
+        crate::store::platform::sync::sync_parent_dir(&path)?;
+
         Ok(Self {
             header,
             path,
@@ -447,6 +464,51 @@ mod tests {
         assert!(
             !segment.needs_rotation(1024),
             "PROPERTY: needs_rotation must stay false below the threshold"
+        );
+    }
+
+    #[test]
+    fn create_with_created_ns_fsyncs_content_and_directory_entry() {
+        let dir = TempDir::new().expect("tmpdir");
+        let segment_id = 42u64;
+        let created_ns = 1_234_567i64;
+        {
+            // Drop the segment immediately after create so only fsynced bytes
+            // remain; nothing else writes to or flushes the file.
+            let _segment: Segment<Active> =
+                Segment::create_with_created_ns(dir.path(), segment_id, created_ns)
+                    .expect("create segment");
+        }
+
+        // The directory entry must be present (dir fsync) and the header bytes
+        // durable (file fsync): reopen and round-trip magic + header. The reopen
+        // succeeding is itself the directory-entry-visibility proof — open_file
+        // fails if the freshly-created entry is not visible — so no separate
+        // read_dir scan is needed (and store-layer code must not touch the
+        // filesystem directly outside src/store/platform).
+        let path = dir.path().join(segment_filename(segment_id));
+        let mut file = crate::store::platform::fs::open_file(&path).expect("reopen segment");
+        let mut magic = [0u8; 4];
+        file.read_exact(&mut magic).expect("read magic");
+        assert_eq!(&magic, SEGMENT_MAGIC, "PROPERTY: magic must be durable");
+
+        let mut header_len_buf = [0u8; 4];
+        file.read_exact(&mut header_len_buf)
+            .expect("read header_len");
+        let header_len = u32::from_be_bytes(header_len_buf) as usize;
+        let mut header_buf = vec![0u8; header_len];
+        file.read_exact(&mut header_buf).expect("read header");
+        let header: SegmentHeader =
+            crate::encoding::from_bytes(&header_buf).expect("decode header");
+
+        assert_eq!(
+            header.segment_id, segment_id,
+            "PROPERTY: segment_id must round-trip after create + reopen, proving content is fsynced"
+        );
+        assert_eq!(header.version, 1, "PROPERTY: version must round-trip");
+        assert_eq!(
+            header.created_ns, created_ns,
+            "PROPERTY: created_ns must round-trip"
         );
     }
 
