@@ -322,3 +322,17 @@ pub trait ReceiptSink {
         envelope: &ReceiptEnvelope,
     ) -> Result<RecordedReceipt, ReceiptSinkError>;
 }
+
+#[cfg(test)]
+mod receipt_sink_error_tests {
+    use super::ReceiptSinkError;
+
+    #[test]
+    fn message_returns_the_constructed_text() {
+        // Pins the accessor: returning a constant ("xyzzy") would mask the real
+        // sink failure reason from callers and receipts.
+        let err = ReceiptSinkError::new("sink offline");
+        assert_eq!(err.message(), "sink offline");
+        assert_eq!(err.to_string(), "sink offline");
+    }
+}

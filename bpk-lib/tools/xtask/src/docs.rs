@@ -121,17 +121,11 @@ pub(crate) fn docs(args: DocsArgs) -> Result<()> {
         "RUSTDOCFLAGS",
         "--cfg docsrs --cfg batpak_stable_docs -D warnings",
     );
-    cargo_doc.args([
-        "doc",
-        "-p",
-        "batpak",
-        "-p",
-        "syncbat",
-        "-p",
-        "netbat",
-        "--all-features",
-        "--no-deps",
-    ]);
+    // Document every workspace member dynamically rather than a hardcoded crate
+    // list. `--workspace` ignores `default-members` (which narrows bare
+    // `cargo doc` to crates/core) so new crates are picked up automatically with
+    // no list to maintain. `--no-deps` keeps the build to first-party crates.
+    cargo_doc.args(["doc", "--workspace", "--all-features", "--no-deps"]);
     crate::util::run(cargo_doc)?;
     copy_dir(&target_dir.join("doc"), &site_dir.join("api"))?;
 

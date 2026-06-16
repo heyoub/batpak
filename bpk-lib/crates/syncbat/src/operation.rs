@@ -392,3 +392,34 @@ fn validate_stable_ref_token(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod effect_class_tests {
+    use super::EffectClass;
+
+    #[test]
+    fn every_variant_round_trips_through_catalog_str() {
+        // Pins each `from_catalog_str` arm against its `as_str` spelling so a
+        // deleted arm (e.g. "persist") is caught as a broken round-trip rather
+        // than silently parsing to None.
+        for class in [
+            EffectClass::Inspect,
+            EffectClass::Compute,
+            EffectClass::Persist,
+            EffectClass::Emit,
+            EffectClass::Control,
+        ] {
+            assert_eq!(
+                EffectClass::from_catalog_str(class.as_str()),
+                Some(class),
+                "round-trip failed for {}",
+                class.as_str()
+            );
+        }
+        assert_eq!(
+            EffectClass::from_catalog_str("persist"),
+            Some(EffectClass::Persist)
+        );
+        assert_eq!(EffectClass::from_catalog_str("nonsense"), None);
+    }
+}

@@ -5,7 +5,7 @@
 //! retrieve a previously-committed event by its `event_id`, or page through
 //! index summaries for a region.
 //!
-//! All three verbs are exposed via [`OperationDescriptor`] constants here, with
+//! All three verbs are exposed via [`syncbat::OperationDescriptor`] constants here, with
 //! request/response payload types deriving [`batpak::EventPayload`] so the
 //! TypeScript SDK manifest carries their full shape. The actual handlers
 //! capture a runtime `Arc<batpak::store::Store>` and live in

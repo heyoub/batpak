@@ -1,8 +1,8 @@
 //! `receipt.verify` operation surface.
 //!
 //! Ack-shaped append receipt fields can be checked against the current store
-//! index and signing registry without reconstructing a full [`AppendReceipt`]
-//! on the wire.
+//! index and signing registry without reconstructing a full
+//! [`batpak::store::AppendReceipt`] on the wire.
 
 use std::collections::BTreeMap;
 

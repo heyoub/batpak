@@ -3,10 +3,10 @@
 //!
 //! **Payload descriptors** — each `EventPayload`-deriving module submits
 //! via [`crate::hbat_event_descriptor!`], which expands to
-//! [`EventDescriptorRegistration`] + `inventory::submit!`.
+//! [`crate::manifest::EventDescriptorRegistration`] + `inventory::submit!`.
 //!
 //! **Operation descriptors** — each operation module submits
-//! [`OperationDescriptorRegistration`] next to its `*_DESCRIPTOR` const
+//! [`crate::manifest::OperationDescriptorRegistration`] next to its `*_DESCRIPTOR` const
 //! (Cut 4 inventory pattern).
 //!
 //! [`descriptors`] iterates both registries at runtime and materializes

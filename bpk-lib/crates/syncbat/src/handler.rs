@@ -81,3 +81,19 @@ where
         self(input, cx)
     }
 }
+
+#[cfg(test)]
+mod handler_error_tests {
+    use super::HandlerError;
+
+    #[test]
+    fn display_renders_class_and_message() {
+        // Pins the Display impl: stubbing it to `Ok(Default::default())` would
+        // emit an empty string and lose the diagnostic entirely.
+        assert_eq!(HandlerError::failed("boom").to_string(), "failed: boom");
+        assert_eq!(
+            HandlerError::invalid_input("bad bytes").to_string(),
+            "invalid_input: bad bytes"
+        );
+    }
+}

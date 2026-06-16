@@ -955,6 +955,9 @@ mod tests {
         let entries = parse_ledger(&repo).expect("ledger parses");
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].title, "INV-PARSE");
+        // `### Invariant:` sits on the second line of the ledger body; the entry
+        // must record that 1-based line so diagnostics point at the real source.
+        assert_eq!(entries[0].line, 2);
         assert_eq!(entries[0].locations, vec!["tests/synthetic.rs"]);
         assert_eq!(entries[0].commands, vec!["cargo test --test synthetic"]);
 
@@ -1067,6 +1070,13 @@ mod tests {
         );
         assert_eq!(
             cargo_test_target_and_filter("cargo test --test synthetic --package batpak proof"),
+            Some(("synthetic", "proof"))
+        );
+        // A leading env assignment shifts `--test` off index 2 so the cursor must
+        // be `target_pos + 2` (not `* 2`); at target_pos=3 those differ (5 vs 6)
+        // and the wrong arithmetic would walk past the filter and return None.
+        assert_eq!(
+            cargo_test_target_and_filter("CARGO_INCREMENTAL=0 cargo test --test synthetic proof"),
             Some(("synthetic", "proof"))
         );
         assert!(flag_takes_value("--features"));
@@ -1259,5 +1269,101 @@ mod tests {
         );
 
         fs::remove_dir_all(repo).expect("remove temp repo");
+    }
+
+    #[test]
+    fn check_propagates_ledger_validation_failure() {
+        // Pins the top-level `check` orchestrator: a malformed ledger must make
+        // `check` itself return Err, not just the inner helpers. Guards against
+        // the whole body being short-circuited to Ok(()).
+        let parent = temp_repo("check-e2e");
+        write_ledger(
+            &parent,
+            r"## Not A Real Pattern
+### Invariant: INV-BAD
+",
+        );
+        let repo = parent.join("core");
+        fs::create_dir_all(&repo).expect("create core repo");
+        let mut source_cache = SourceCache::new(&repo);
+
+        let err = check(&repo, &[], &mut source_cache)
+            .expect_err("check must propagate ledger validation failure");
+        assert!(
+            err.to_string().contains("unknown harness section"),
+            "{err:?}"
+        );
+
+        fs::remove_dir_all(parent).expect("remove temp parent");
+    }
+
+    #[test]
+    fn check_module_headers_rejects_header_missing_only_seeded() {
+        // PROVES + CATCHES present but SEEDED absent must still be rejected.
+        // Pins the second `&&` in the completeness conjunction: turning it into
+        // `||` would wrongly treat this header as complete.
+        let repo = temp_repo("missing-seeded");
+        let path = "tests/synthetic.rs";
+        fs::create_dir_all(repo.join("tests")).expect("create tests dir");
+        fs::write(
+            repo.join(path),
+            "//! PROVES: synthetic proof.\n//! CATCHES: synthetic regression.\n",
+        )
+        .expect("write header missing SEEDED");
+        let files = BTreeSet::from([path.to_owned()]);
+        let mut source_cache = SourceCache::new(&repo);
+
+        let err = check_module_headers(&repo, &files, &mut source_cache)
+            .expect_err("header missing SEEDED rejected");
+        assert!(err.to_string().contains("PROVES/CATCHES/SEEDED"), "{err:?}");
+
+        fs::remove_dir_all(repo).expect("remove temp repo");
+    }
+
+    #[test]
+    fn check_no_silent_repo_fixture_skips_allows_plain_return() {
+        // A core test that uses `return;` but never references the packaged
+        // fixture marker is fine. Pins the `&&`: an `||` would falsely flag
+        // every test containing a bare `return;`.
+        let repo = temp_repo("plain-return");
+        let path = repo.join("crates/core/tests/plain.rs");
+        fs::create_dir_all(path.parent().unwrap()).expect("create tests dir");
+        fs::write(&path, "fn helper() {\n    return;\n}\n").expect("write plain return test");
+        let tracked = vec![path];
+        let mut source_cache = SourceCache::new(&repo);
+
+        check_no_silent_repo_fixture_skips(&repo, &tracked, &mut source_cache)
+            .expect("plain return without fixture marker is allowed");
+
+        fs::remove_dir_all(repo).expect("remove temp repo");
+    }
+
+    #[test]
+    fn header_allowlist_validates_and_exposes_every_entry() {
+        // Pins `header_allowlist`: collapsing its body to an empty map would
+        // silently disarm the allowlist (stale entries undetected, debt-bearing
+        // harnesses forced to fail). Every static entry must round-trip.
+        let allowlist = header_allowlist().expect("header allowlist validates");
+        assert_eq!(allowlist.len(), HEADER_DEBT_ALLOWLIST.len());
+        assert!(!allowlist.is_empty());
+        for debt in HEADER_DEBT_ALLOWLIST {
+            assert!(allowlist.contains_key(debt.path), "missing {}", debt.path);
+        }
+    }
+
+    #[test]
+    fn oversize_debt_entry_reports_its_own_reason_and_target() {
+        // Pins the DebtEntry accessors for OversizeDebt: a stubbed accessor
+        // returning a constant would defeat the empty-reason/empty-target
+        // validation in `validate_debt_allowlist`.
+        let debt = OversizeDebt {
+            path: "tests/example.rs",
+            max_lines: 600,
+            reason: "documented split debt",
+            target: "split during next pass",
+        };
+        assert_eq!(DebtEntry::reason(&debt), "documented split debt");
+        assert_eq!(DebtEntry::target(&debt), "split during next pass");
+        assert_eq!(DebtEntry::path(&debt), "tests/example.rs");
     }
 }

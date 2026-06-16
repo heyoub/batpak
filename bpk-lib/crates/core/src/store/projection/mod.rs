@@ -495,6 +495,24 @@ mod tests {
     }
 
     #[test]
+    fn cache_meta_decode_accepts_exact_legacy_trailer_with_empty_value() {
+        // Boundary: a buffer of exactly CACHE_META_LEGACY_SIZE (no magic, empty
+        // value) is the smallest valid legacy entry. Pins the `<` length guard:
+        // an off-by-one `<=` would reject this exact-size buffer as "too short".
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&7u64.to_le_bytes());
+        buf.extend_from_slice(&123i64.to_le_bytes());
+        assert_eq!(buf.len(), CACHE_META_LEGACY_SIZE);
+
+        let (value, meta) = CacheMeta::decode_from_bytes(&buf)
+            .expect("exact-size legacy trailer must decode, not be rejected as too short");
+        assert!(value.is_empty());
+        assert_eq!(meta.watermark, 7);
+        assert_eq!(meta.cached_at_us, 123);
+        assert!(meta.cached_at_mono_ns.is_none());
+    }
+
+    #[test]
     fn native_cache_delete_prefix_reports_removed_entries() {
         fn meta() -> CacheMeta {
             CacheMeta {
