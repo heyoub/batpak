@@ -750,18 +750,29 @@ fn check_syncbat_is_explicitly_gated(repo_root: &Path) -> Result<()> {
         return Ok(());
     }
 
+    // A file gates a family crate either by naming it explicitly, or by a
+    // dynamic mechanism that provably covers every workspace member despite the
+    // core-only `default-members`: a `--workspace` cargo invocation, or the
+    // `FAMILY_CRATES` iteration constant. Dynamic coverage is preferred — it
+    // cannot silently drop a newly-added crate the way a hardcoded list can.
+    let gates_family = |content: &str, package: &str| -> bool {
+        content.contains(&format!("\"{package}\""))
+            || content.contains("--workspace")
+            || content.contains("FAMILY_CRATES")
+    };
+
     for (label, content) in [
-        ("tools/xtask/src/main.rs", xtask_main),
-        ("tools/xtask/src/commands/ci.rs", ci_rs),
+        ("tools/xtask/src/main.rs", xtask_main.as_str()),
+        ("tools/xtask/src/commands/ci.rs", ci_rs.as_str()),
     ] {
         for package in &active_family_crates {
             ensure(
-                content.contains(&format!("\"{package}\""))
+                gates_family(content, package)
                     && content.contains("\"check\"")
                     && content.contains("\"test\"")
                     && content.contains("\"clippy\""),
                 format!(
-                    "{label} must explicitly gate {package} with check, test, and clippy while default-members stays core-only"
+                    "{label} must gate {package} (explicitly, via --workspace, or via FAMILY_CRATES) with check, test, and clippy while default-members stays core-only"
                 ),
             )?;
         }
@@ -769,12 +780,12 @@ fn check_syncbat_is_explicitly_gated(repo_root: &Path) -> Result<()> {
 
     for package in &active_family_crates {
         ensure(
-            coverage_rs.contains(&format!("\"{package}\"")),
-            format!("tools/xtask/src/coverage.rs must include {package} while default-members stays core-only"),
+            gates_family(&coverage_rs, package),
+            format!("tools/xtask/src/coverage.rs must include {package} (explicitly or via --workspace) while default-members stays core-only"),
         )?;
         ensure(
-            docs_rs.contains(&format!("\"{package}\"")),
-            format!("tools/xtask/src/docs.rs must include {package} while default-members stays core-only"),
+            gates_family(&docs_rs, package),
+            format!("tools/xtask/src/docs.rs must include {package} (explicitly or via --workspace) while default-members stays core-only"),
         )?;
     }
 

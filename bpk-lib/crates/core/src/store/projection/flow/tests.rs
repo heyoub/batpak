@@ -428,3 +428,75 @@ fn group_local_projection_freshness_is_typed() {
         GroupLocalProjectionFreshness::Stale
     );
 }
+
+#[test]
+fn group_local_freshness_is_fresh_only_for_fresh_variant() {
+    // Pins `is_fresh`: hardcoding it to `false` would force a re-project on
+    // every genuinely-fresh cache slot, silently defeating the cache.
+    assert!(GroupLocalProjectionFreshness::Fresh.is_fresh());
+    assert!(!GroupLocalProjectionFreshness::Stale.is_fresh());
+    assert!(!GroupLocalProjectionFreshness::Missing.is_fresh());
+}
+
+#[test]
+fn incremental_projection_applies_events_after_cached_watermark() -> TestResult {
+    use crate::coordinate::Coordinate;
+    use crate::store::{Freshness, Store};
+
+    // A projection that supports incremental apply: `from_events` and
+    // `apply_event` agree (count == number of events folded).
+    #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq)]
+    struct IncCounter {
+        count: u32,
+    }
+    impl EventSourced for IncCounter {
+        type Input = crate::event::JsonValueInput;
+        fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
+            Some(IncCounter {
+                count: u32::try_from(events.len()).expect("test uses < 2^32 events"),
+            })
+        }
+        fn apply_event(&mut self, _event: &Event<serde_json::Value>) {
+            self.count += 1;
+        }
+        fn relevant_event_kinds() -> &'static [EventKind] {
+            &[]
+        }
+        fn supports_incremental_apply() -> bool {
+            true
+        }
+    }
+
+    let dir = TempDir::new()?;
+    let config = StoreConfig::new(dir.path().join("data"))
+        .with_sync_every_n_events(1)
+        .with_incremental_projection(true);
+    let store = Store::open_with_native_cache(config, dir.path().join("cache"))?;
+
+    let coord = Coordinate::new("entity:inc", "scope:test").expect("coordinate");
+    let kind = EventKind::custom(0xF, 1);
+    store.append(&coord, kind, &serde_json::json!({ "x": 1 }))?;
+    store.append(&coord, kind, &serde_json::json!({ "x": 2 }))?;
+
+    // First project: cache miss → full replay → external cache populated at the
+    // current watermark (count == 2).
+    let first: Option<IncCounter> = store.project("entity:inc", &Freshness::Consistent)?;
+    assert_eq!(first, Some(IncCounter { count: 2 }));
+
+    // Commit one more event past the cached watermark.
+    store.append(&coord, kind, &serde_json::json!({ "x": 3 }))?;
+
+    // Second project: cache hit at the stale watermark + incremental enabled, so
+    // `apply_incremental_events` must fold the single post-watermark event. A
+    // no-op apply (or skipping the incremental branch) would return the stale
+    // cached count (2) instead of 3.
+    let second: Option<IncCounter> = store.project("entity:inc", &Freshness::Consistent)?;
+    assert_eq!(
+        second,
+        Some(IncCounter { count: 3 }),
+        "incremental apply must fold events committed after the cached watermark"
+    );
+
+    store.close()?;
+    Ok(())
+}

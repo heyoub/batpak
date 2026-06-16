@@ -191,3 +191,26 @@ impl FilteredSubscriberList {
         );
     }
 }
+
+#[cfg(test)]
+mod fanout_subscriber_tests {
+    use super::{CommittedEventEnvelope, FanoutList};
+    use crate::coordinate::Region;
+
+    #[test]
+    fn has_subscribers_tracks_subscription_state() {
+        // Pins `has_subscribers`: hardcoding it to `true` would make the writer
+        // broadcast into an empty subscriber list on every commit.
+        let fanout: FanoutList<CommittedEventEnvelope> = FanoutList::new();
+        assert!(
+            !fanout.has_subscribers(),
+            "a freshly constructed fanout has no subscribers"
+        );
+
+        let _rx = fanout.subscribe_with_region(1, Region::all());
+        assert!(
+            fanout.has_subscribers(),
+            "after a subscribe the fanout must report subscribers"
+        );
+    }
+}

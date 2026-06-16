@@ -206,3 +206,21 @@ fn duration_micros_preserves_zero_and_one_microsecond_boundaries() {
         "PROPERTY: one microsecond must round-trip exactly"
     );
 }
+
+#[test]
+fn has_custom_clock_reflects_clock_presence() {
+    // Pins `has_custom_clock`: hardcoding it to `true` would claim a fresh
+    // config carries an injected clock, breaking callers that branch on it.
+    let mut config = StoreConfig::new("target/test-has-custom-clock");
+    assert!(
+        !config.has_custom_clock(),
+        "a fresh config must report no custom clock"
+    );
+
+    let raw = Arc::new(|| 1_000i64) as Arc<dyn Fn() -> i64 + Send + Sync>;
+    config.clock = Some(clock_from_fn(raw));
+    assert!(
+        config.has_custom_clock(),
+        "a config with an injected clock must report a custom clock"
+    );
+}
