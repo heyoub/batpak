@@ -367,10 +367,14 @@ fn untrusted_footer_torn_last_frame_recovers_prefix() {
     let store = Store::open(config(&dir))
         .expect("reopen must succeed: a torn last frame with no valid frame after is torn-tail");
     let entries = user_entries(&store);
-    assert!(
-        !entries.is_empty(),
+    // N=6: seed_store appends 6 user events; the torn LAST frame is the trailing
+    // SYSTEM_CLOSE_COMPLETED lifecycle frame, so every committed user event written
+    // before it must survive prefix recovery (user_entries filters out OPEN/CLOSE).
+    assert_eq!(
+        entries.len(),
+        6,
         "PROPERTY: a torn LAST frame under an untrusted footer must recover the clean prefix \
-         (the committed events before the tear), not FailClosed; got {} entries",
+         (all committed user events before the tear), not FailClosed; got {} entries",
         entries.len()
     );
     store.close().expect("close");

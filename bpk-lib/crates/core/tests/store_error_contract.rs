@@ -16,11 +16,16 @@ use store_error_support::*;
 
 #[test]
 fn store_error_contract_domain_family_stays_stable() {
-    for case in contract_table()
+    let cases: Vec<_> = contract_table()
         .into_iter()
         .filter(|case| case.class == HandlingClass::Domain)
-    {
-        assert_case_contract(&case);
+        .collect();
+    assert!(
+        !cases.is_empty(),
+        "STORE_ERROR CONTRACT DRIFT: expected Domain cases in contract_table()"
+    );
+    for case in &cases {
+        assert_case_contract(case);
     }
 }
 

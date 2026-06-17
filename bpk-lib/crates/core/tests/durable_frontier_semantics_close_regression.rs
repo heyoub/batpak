@@ -51,6 +51,7 @@ struct CloseLifecyclePayload {
 fn forge_close_hlc_regression(
     segment_dir: &Path,
     victim_close_hlc: HlcPoint,
+    victim_close_clock: u32,
     forged_close_hlc: HlcPoint,
 ) -> std::io::Result<()> {
     remove_fast_start_artifacts(segment_dir)?;
@@ -58,7 +59,12 @@ fn forge_close_hlc_regression(
     segment_paths.sort();
 
     for path in segment_paths {
-        if rewrite_close_frame_if_present(&path, victim_close_hlc, forged_close_hlc)? {
+        if rewrite_close_frame_if_present(
+            &path,
+            victim_close_hlc,
+            victim_close_clock,
+            forged_close_hlc,
+        )? {
             return Ok(());
         }
     }
@@ -94,6 +100,7 @@ fn segment_paths(segment_dir: &Path) -> std::io::Result<Vec<PathBuf>> {
 fn rewrite_close_frame_if_present(
     path: &Path,
     victim_close_hlc: HlcPoint,
+    victim_close_clock: u32,
     forged_close_hlc: HlcPoint,
 ) -> std::io::Result<bool> {
     let bytes = fs::read(path)?;
@@ -108,8 +115,15 @@ fn rewrite_close_frame_if_present(
         let (msgpack, frame_len) = decode_frame(&bytes[cursor..frames_end])?;
         let mut payload: TestFramePayload =
             rmp_serde::from_slice(msgpack).map_err(std::io::Error::other)?;
+        // Match the victim by full HLC: wall_ms alone cannot disambiguate two close
+        // frames committed in the same millisecond. The DagPosition carries the HLC
+        // clock as `sequence()` (constructed from the writer's `timing.clock`), which
+        // is exactly the `IndexEntry::clock()` the caller threads through as
+        // `victim_close_clock`. Requiring both wall_ms and the clock component to match
+        // pins the exact victim frame even when two closes share a millisecond.
         if payload.event.header.event_kind == EventKind::SYSTEM_CLOSE_COMPLETED
             && payload.event.header.position.wall_ms() == victim_close_hlc.wall_ms
+            && payload.event.header.position.sequence() == victim_close_clock
         {
             forge_close_payload(&mut payload, forged_close_hlc)?;
             rewritten.extend_from_slice(&encode_frame(&payload)?);
@@ -260,6 +274,7 @@ fn close_hlc_monotonicity_violation_surfaces_invariant_violation() {
     assert_eq!(close_entries.len(), 2);
     let close_hlc_1 = point(&close_entries[0]);
     let close_hlc_2 = point(&close_entries[1]);
+    let victim_close_clock = close_entries[1].clock();
     assert!(
         close_hlc_2 > close_hlc_1,
         "PROPERTY: normal close lifecycle must be monotonic before forging"
@@ -274,7 +289,7 @@ fn close_hlc_monotonicity_violation_surfaces_invariant_violation() {
         forged < close_hlc_1,
         "PROPERTY: forged later close HLC must regress below first close"
     );
-    forge_close_hlc_regression(dir.path(), close_hlc_2, forged)
+    forge_close_hlc_regression(dir.path(), close_hlc_2, victim_close_clock, forged)
         .expect("forge close_hlc regression");
 
     let err = match Store::open(StoreConfig::new(dir.path())) {

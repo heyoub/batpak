@@ -66,7 +66,7 @@ fn pipeline_commit_bypass_persists() {
         "PROPERTY: commit_bypass must persist the event through the store.\n\
          Investigate: src/pipeline/mod.rs commit_bypass.\n\
          Common causes: commit_fn not called, payload not forwarded.\n\
-         Run: cargo test --test store_reactive_behaviorpipeline_commit_bypass_persists"
+         Run: cargo test --test store_reactive_behavior pipeline_commit_bypass_persists"
     );
     assert_eq!(
         committed_audit.reason,
@@ -143,7 +143,7 @@ fn react_loop_spawns_and_processes() {
         EventKind::custom(0xA, 2),
         "PROPERTY: reaction event must have the kind returned by the reactor.\n\
          Investigate: src/store/mod.rs react_loop.\n\
-         Run: cargo test --test store_reactive_behaviorreact_loop_spawns_and_processes"
+         Run: cargo test --test store_reactive_behavior react_loop_spawns_and_processes"
     );
 
     store.sync().expect("sync");
@@ -227,7 +227,7 @@ fn reactive_subscribe_react_append_pattern() {
          Investigate: src/event/sourcing.rs Reactive trait react() method.\n\
          Common causes: react() returning an empty vec because event_kind comparison \
          fails, or EventKind::custom encoding mismatch between writer and reactor.\n\
-         Run: cargo test --test store_reactive_behaviorreactive_subscribe_react_append_pattern"
+         Run: cargo test --test store_reactive_behavior reactive_subscribe_react_append_pattern"
     );
 
     // Append reactions via append_reaction (the causal link)
@@ -251,7 +251,7 @@ fn reactive_subscribe_react_append_pattern() {
          Investigate: src/store/mod.rs Store::append_reaction() src/event/sourcing.rs.\n\
          Common causes: append_reaction() not writing to the store, or stats.event_count \
          not counting reaction events that go to a different coordinate.\n\
-         Run: cargo test --test store_reactive_behaviorreactive_subscribe_react_append_pattern"
+         Run: cargo test --test store_reactive_behavior reactive_subscribe_react_append_pattern"
     );
 
     store.sync().expect("sync");

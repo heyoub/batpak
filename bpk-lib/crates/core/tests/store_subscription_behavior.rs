@@ -54,7 +54,7 @@ fn subscription_receives_matching_events() {
         "PROPERTY: subscription must deliver exactly 3 notifications for 3 matching appends.\n\
          Investigate: src/store/delivery/subscription.rs, src/store/mod.rs writer broadcast.\n\
          Common causes: broadcast channel dropped before all events sent, region filter too narrow.\n\
-         Run: cargo test --test store_subscription_behaviorsubscription_receives_matching_events"
+         Run: cargo test --test store_subscription_behavior subscription_receives_matching_events"
     );
 
     store.sync().expect("sync");
@@ -102,7 +102,7 @@ fn subscription_filters_by_region() {
         "PROPERTY: subscription filtered to entity:a must match exactly 2 of 3 appended events.\n\
          Investigate: src/store/delivery/subscription.rs region filter, src/store/mod.rs broadcast.\n\
          Common causes: region predicate not applied, entity prefix match too broad or too narrow.\n\
-         Run: cargo test --test store_subscription_behaviorsubscription_filters_by_region"
+         Run: cargo test --test store_subscription_behavior subscription_filters_by_region"
     );
 
     store.sync().expect("sync");
@@ -153,7 +153,7 @@ fn subscription_ops_map_transforms_notifications() {
         "PROPERTY: SubscriptionOps::map must pass through transformed notifications.\n\
          Investigate: src/store/delivery/subscription.rs SubscriptionOps::map and recv.\n\
          Common causes: map_fn not applied in recv loop, map returns None.\n\
-         Run: cargo test --test store_subscription_behaviorsubscription_ops_map_transforms_notifications"
+         Run: cargo test --test store_subscription_behavior subscription_ops_map_transforms_notifications"
     );
     let notif = rx_result.expect("mapped notification should be Some per preceding assert");
     assert_eq!(
@@ -161,7 +161,7 @@ fn subscription_ops_map_transforms_notifications() {
         "PROPERTY: SubscriptionOps::map must apply the transformation function to notifications.\n\
          Investigate: src/store/delivery/subscription.rs recv map_fn application.\n\
          Common causes: map_fn ignored, original notification returned instead.\n\
-         Run: cargo test --test store_subscription_behaviorsubscription_ops_map_transforms_notifications"
+         Run: cargo test --test store_subscription_behavior subscription_ops_map_transforms_notifications"
     );
 
     store.sync().expect("sync");
@@ -217,7 +217,7 @@ fn subscription_ops_filter_chains_correctly() {
         "PROPERTY: chained filter with AND semantics must pass only kind1 events (2 of 3).\n\
          Investigate: src/store/delivery/subscription.rs SubscriptionOps::filter, recv.\n\
          Common causes: filters not chained, last filter replaces previous.\n\
-         Run: cargo test --test store_subscription_behaviorsubscription_ops_filter_chains_correctly"
+         Run: cargo test --test store_subscription_behavior subscription_ops_filter_chains_correctly"
     );
 
     let (tx, rx) = std::sync::mpsc::channel();
@@ -278,7 +278,7 @@ fn subscription_ops_take_limits_count() {
         "PROPERTY: SubscriptionOps::take(3) must return at most 3 notifications from 5 events.\n\
          Investigate: src/store/delivery/subscription.rs SubscriptionOps::take, recv count check.\n\
          Common causes: count not incremented in recv, limit check after return.\n\
-         Run: cargo test --test store_subscription_behaviorsubscription_ops_take_limits_count"
+         Run: cargo test --test store_subscription_behavior subscription_ops_take_limits_count"
     );
 
     let (tx, rx) = std::sync::mpsc::channel();
