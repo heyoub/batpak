@@ -463,12 +463,16 @@ fn sidx_footer_magic_mismatch_falls_back_to_frame_scan() {
 }
 
 #[test]
-fn sidx_footer_offset_forged_to_truncate_frames_is_rejected_not_silently_dropped() {
-    // A forged SIDX string_table_offset that lands on an EARLIER real frame
-    // boundary would make the frame-scan fallback stop short and silently drop
-    // the later CRC-valid frames. The offset is not covered by the SDX3 footer
-    // CRC, so corrupting it forces the frame-scan fallback; cold start must then
-    // refuse to trust the truncating boundary rather than lose committed data.
+fn sidx_footer_offset_forged_too_low_into_an_interior_frame_recovers_all_frames() {
+    // ROUND-4 P1: a forged SIDX string_table_offset that lands on an EARLIER real
+    // frame boundary (too LOW). Overwriting the offset breaks the SDX3 footer CRC,
+    // so the boundary is UNTRUSTED — the offset is GARBAGE and must NEVER bound
+    // recovery. Earlier rounds rejected this with CorruptSegment (treating the
+    // hint as a truncation proof). The DEFINITIVE behavior: discard the hint and
+    // walk the CRC-valid frames bounded only by file_len, so cold start recovers
+    // EVERY committed frame instead of either dropping the later ones or failing
+    // closed. (Trusting an unauthenticated offset to FAIL is itself a denial-of-
+    // availability vector; the CRC-valid frames are the durability oracle.)
     let dir = TempDir::new().expect("temp dir");
     seed_store(&dir, 6);
 
@@ -505,24 +509,78 @@ fn sidx_footer_offset_forged_to_truncate_frames_is_rejected_not_silently_dropped
     forged[off_pos..off_pos + 8].copy_from_slice(&(forged_offset as u64).to_le_bytes());
     std::fs::write(&seg, &forged).expect("write forged-offset segment");
 
-    // Cold start must NOT succeed with truncated data; it must surface the
-    // corruption (CorruptSegment) rather than silently dropping the frames after
-    // the forged boundary.
-    let result = Store::open(config(&dir));
-    match result {
-        Err(StoreError::CorruptSegment { .. }) => {}
-        Ok(store) => {
-            let entries = user_entries(&store);
-            panic!(
-                "PROPERTY: a forged truncating SIDX offset must not silently drop frames; \
-                 cold start returned Ok with {} of 6 entries",
-                entries.len()
-            );
-        }
-        Err(other) => panic!(
-            "PROPERTY: expected CorruptSegment for a forged truncating SIDX offset, got {other:?}"
-        ),
-    }
+    // Cold start must recover ALL committed frames: the untrusted offset is
+    // discarded and the CRC-valid frame walk finds every event.
+    let store = Store::open(config(&dir))
+        .expect("reopen must succeed: a forged too-low untrusted offset must not brick cold start");
+    let entries = user_entries(&store);
+    assert_eq!(
+        entries.len(),
+        6,
+        "PROPERTY: a forged too-LOW unauthenticated SIDX offset must recover ALL CRC-valid \
+         frames (hint discarded), not drop frames or FailClosed; got {} (expected 6)",
+        entries.len()
+    );
+    store.close().expect("close");
+}
+
+#[test]
+fn sidx_footer_offset_forged_mid_frame_recovers_all_frames() {
+    // ROUND-4 P1 (the gap that kept slipping): a forged SIDX string_table_offset
+    // landing INSIDE a later CRC-valid frame's header/payload — NOT at a frame
+    // boundary. No frame begins at the offset, so the old truncation guard never
+    // fired; and the old walker (hint as upper bound) hit `frame_tail > hint` for
+    // the frame CONTAINING the offset and returned that frame's START — silently
+    // dropping that CRC-valid frame and all later ones. With the hint discarded
+    // and file_len the only bound, the walk decodes that frame cleanly and
+    // recovers EVERY committed event.
+    let dir = TempDir::new().expect("temp dir");
+    seed_store(&dir, 6);
+
+    let seg = segment_path(&dir);
+    let bytes = std::fs::read(&seg).expect("read segment");
+    assert_eq!(
+        &bytes[bytes.len() - 4..],
+        b"SDX3",
+        "seeded segment must carry the SDX3 SIDX magic"
+    );
+
+    let frames_start = frame_scan_header_end(&bytes);
+    let true_frames_end = usize::try_from(u64::from_le_bytes(
+        bytes[bytes.len() - 16..bytes.len() - 8]
+            .try_into()
+            .expect("8-byte SIDX trailer offset"),
+    ))
+    .expect("SIDX string table offset fits usize");
+    // Skip the first two frames to land at the start of the THIRD frame, then
+    // point the offset a few bytes INTO it (mid-header / mid-payload).
+    let mut cursor = frames_start;
+    let first_len = u32::from_be_bytes(bytes[cursor..cursor + 4].try_into().unwrap()) as usize;
+    cursor += 8 + first_len;
+    let second_len = u32::from_be_bytes(bytes[cursor..cursor + 4].try_into().unwrap()) as usize;
+    cursor += 8 + second_len;
+    let mid_frame_offset = cursor + 3; // strictly inside the third frame
+    assert!(
+        mid_frame_offset > cursor && mid_frame_offset < true_frames_end,
+        "forged offset must land strictly inside a later CRC-valid frame, not at a boundary"
+    );
+
+    let mut forged = bytes.clone();
+    let off_pos = forged.len() - 16;
+    forged[off_pos..off_pos + 8].copy_from_slice(&(mid_frame_offset as u64).to_le_bytes());
+    std::fs::write(&seg, &forged).expect("write mid-frame-offset segment");
+
+    let store = Store::open(config(&dir))
+        .expect("reopen must succeed: a mid-frame untrusted offset must not brick cold start");
+    let entries = user_entries(&store);
+    assert_eq!(
+        entries.len(),
+        6,
+        "PROPERTY: a forged MID-FRAME unauthenticated SIDX offset must recover ALL CRC-valid \
+         frames (hint discarded), not drop the containing frame; got {} (expected 6)",
+        entries.len()
+    );
+    store.close().expect("close");
 }
 
 #[test]

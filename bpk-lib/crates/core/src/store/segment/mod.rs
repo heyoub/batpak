@@ -335,16 +335,20 @@ impl Segment<Active> {
         // strict path applies (validate is a no-op when frames_end == file_len).
         let untrusted_boundary = boundary.is_some_and(|b| !b.trusted);
 
-        // Lower-bound check (mirrors scan/recovery.rs + full_scan.rs): the SIDX
-        // string_table_offset must not fall below the start of the frame region.
-        // detect_sidx_boundary only validates the upper bound; the lower bound is
-        // the call site's responsibility. A corrupt offset < frames_start would
-        // make `frames_end.saturating_sub(frames_start)` copy zero bytes (or only
-        // a prefix), and after compaction publishes the merged segment and cleans
-        // up the old sealed files, those CRC-valid frames would be silently lost.
+        // Lower-bound check (TRUSTED boundaries only; mirrors scan/recovery.rs +
+        // full_scan.rs): an authenticated SDX3 string_table_offset must not fall
+        // below the start of the frame region. detect_sidx_boundary only validates
+        // the upper bound; the lower bound is the call site's responsibility. A
+        // corrupt-but-authenticated offset < frames_start would make
+        // `frames_end.saturating_sub(frames_start)` copy zero bytes (or only a
+        // prefix), and after compaction publishes the merged segment and cleans up
+        // the old sealed files, those CRC-valid frames would be silently lost.
         // Reject with CorruptSegment instead. frames_end == frames_start (empty
-        // frame region) stays valid.
-        if frames_end < frames_start {
+        // frame region) stays valid. For an UNTRUSTED boundary the offset is
+        // garbage and discarded below (the copy walks from `frames_start` bounded
+        // by `file_len`), so a too-low untrusted hint must NOT error — it recovers
+        // all CRC-valid frames instead.
+        if !untrusted_boundary && frames_end < frames_start {
             return Err(StoreError::corrupt_segment_with_detail(
                 0,
                 format!(
@@ -356,22 +360,21 @@ impl Segment<Active> {
 
         // Determine the true copy boundary based on the offset's provenance.
         //
-        // Both paths first reject a TRUNCATING boundary — an offset too LOW, where
-        // a CRC-valid frame begins exactly at the claimed boundary — which would
-        // lose later frames once the old sealed file is recycled.
-        //
         // TRUSTED (CRC-valid SDX3 footer): the offset is authoritative; copy up to
-        // it.
+        // it. A truncating offset cannot occur here — the offset is byte-for-byte
+        // authenticated by the footer CRC.
         //
         // UNTRUSTED (CRC-failed SDX3, legacy SDX2, or forged trailer): the offset
-        // is an unauthenticated hint that may point too HIGH — copying up to it
-        // would splice corrupt footer bytes into the merged segment. After the
-        // truncation guard, walk the CRC-valid frames and copy exactly the span
-        // that decodes cleanly (recover-what-was-found), so a corrupt-footer offset
-        // never bricks compaction.
-        validate_sidx_boundary_not_truncating(&mut source, frames_end, file_len, 0)?;
+        // is GARBAGE. It might point too LOW (truncating real frames), MID-FRAME
+        // (inside a later CRC-valid frame), or too HIGH (into the corrupt footer);
+        // any of those, if trusted as the copy boundary, would either drop
+        // CRC-valid frames or splice corrupt footer bytes into the merged segment.
+        // So the hint is discarded entirely: walk the CRC-valid frames bounded only
+        // by `file_len` and copy exactly the span that decodes cleanly. This
+        // recovers ALL CRC-valid frames (the walk is truncation-proof), so no
+        // separate truncation guard is needed for the untrusted path.
         let copy_end = if untrusted_boundary {
-            crc_valid_frames_end(&mut source, frames_start, frames_end)?
+            crc_valid_frames_end(&mut source, frames_start, file_len)?
         } else {
             frames_end
         };
@@ -542,98 +545,27 @@ pub(crate) fn detect_sidx_boundary<R: Read + Seek>(
     }))
 }
 
-/// Verify that a SIDX frame-region boundary does not truncate real frames.
-///
-/// `detect_sidx_boundary` trusts the trailer's `string_table_offset` as the end
-/// of the frame region, but that offset is NOT covered by the SDX3 footer CRC
-/// (and SDX2 footers carry no CRC at all), so a corrupt/forged offset is
-/// unauthenticated. If the offset is forged to land on an *earlier* frame
-/// boundary, the frame scan stops there and silently drops the later CRC-valid
-/// frames — they never get indexed and are lost once compaction recycles the
-/// segment.
-///
-/// The structural tell is simple and format-agnostic: in a correctly-sealed
-/// segment, `frames_end` points at the SIDX string table (msgpack), which is not
-/// a frame. If a CRC-VALID frame begins exactly at `frames_end`, the boundary is
-/// truncating real data and must be rejected. A genuine footer's string-table
-/// bytes will not decode as a CRC-valid frame, so this never false-positives on a
-/// merely-stale-but-honest offset (e.g. a footer whose `entry_count` was
-/// corrupted but whose `string_table_offset` is correct — that path must still
-/// recover gracefully).
-///
-/// `frames_end == file_len` means there was no SIDX footer (frames run to EOF),
-/// so there is nothing to validate.
-///
-/// # Errors
-/// Returns [`StoreError::Io`] on seek/read failure and
-/// [`StoreError::CorruptSegment`] when a CRC-valid frame begins at the claimed
-/// boundary (proof the offset truncated real frames).
-pub(crate) fn validate_sidx_boundary_not_truncating<R: Read + Seek>(
-    source: &mut R,
-    frames_end: u64,
-    file_len: u64,
-    segment_id: u64,
-) -> Result<(), StoreError> {
-    // No SIDX footer → no untrusted boundary to check.
-    if frames_end >= file_len {
-        return Ok(());
-    }
-
-    let available = file_len.saturating_sub(frames_end);
-    if available < 8 {
-        // Not even a frame header can start here → cannot be a truncated frame.
-        return Ok(());
-    }
-
-    // Read the 8-byte frame header first to learn the claimed payload length,
-    // then read exactly that payload (bounded by MAX_FRAME_PAYLOAD and by the
-    // bytes actually available) so a forged length cannot drive an unbounded
-    // allocation. frame_decode then either confirms a CRC-valid frame begins
-    // here (boundary truncates real data → reject) or rejects it (an honest
-    // footer's string-table bytes, which do not decode as a frame).
-    source
-        .seek(SeekFrom::Start(frames_end))
-        .map_err(StoreError::Io)?;
-    let mut header = [0u8; 8];
-    source.read_exact(&mut header).map_err(StoreError::Io)?;
-    let claimed_len = u32::from_be_bytes([header[0], header[1], header[2], header[3]]) as u64;
-    if claimed_len > MAX_FRAME_PAYLOAD as u64 || claimed_len > available.saturating_sub(8) {
-        // A real frame here would not fit / would exceed the payload cap, so it
-        // cannot be a CRC-valid frame the boundary is truncating.
-        return Ok(());
-    }
-    let payload_len = usize::try_from(claimed_len).unwrap_or(usize::MAX);
-    let mut probe = vec![0u8; 8 + payload_len];
-    probe[..8].copy_from_slice(&header);
-    source.read_exact(&mut probe[8..]).map_err(StoreError::Io)?;
-
-    if frame_decode(&probe).is_ok() {
-        return Err(StoreError::corrupt_segment_with_detail(
-            segment_id,
-            format!(
-                "SIDX string_table_offset {frames_end} truncates the frame region: a CRC-valid \
-                 frame begins at the claimed boundary, so trusting it would silently drop later \
-                 frames (forged/corrupt unauthenticated offset)"
-            ),
-        ));
-    }
-
-    Ok(())
-}
-
 /// Find the true end of CRC-valid frames when the SIDX boundary is UNTRUSTED.
 ///
 /// An untrusted boundary (CRC-failed SDX3 footer, legacy SDX2 footer, or a
-/// forged trailer) gives an unauthenticated `frames_end` hint. If that hint is
-/// too HIGH — pointing past the real frames, into the corrupt footer region —
-/// trusting it makes the scan parse footer bytes (string table / entries / CRC)
-/// as frame headers and FailClosed, even though every real frame is CRC-valid
-/// and recoverable. This walks the frame region from `frames_start` toward the
-/// `claimed_end` hint and returns the offset where CRC-valid frames actually
-/// stop: the first frame that fails to decode, claims an over-large payload, or
-/// would extend past the hint is treated as the clean end of real frames
-/// (recover-what-was-found), because over-reading into a corrupt footer is the
-/// expected failure mode here.
+/// forged trailer) gives an unauthenticated `string_table_offset`. That offset
+/// is GARBAGE and must NEVER bound recovery — whether it is too LOW (truncating
+/// real frames), MID-FRAME (landing inside a later CRC-valid frame's
+/// header/payload), or too HIGH (pointing into the corrupt footer region).
+/// Trusting it as an upper bound silently drops every CRC-valid frame at or
+/// after the bogus offset; trusting it as a lower bound makes the scan parse
+/// footer bytes as frame headers and FailClosed. Either way the hint corrupts
+/// recovery.
+///
+/// So the hint is discarded entirely. This walks the frame region from
+/// `frames_start` to the NATURAL end of CRC-valid frames: it keeps decoding
+/// frames until one fails — truncated, an over-large `claimed_len`, a
+/// `frame_decode` error, or one that would read past `file_len` — and returns
+/// the cursor at that first failure. The ONLY bound is `file_len` (the real
+/// source/file length). Footer bytes after the real frames never decode as a
+/// CRC-valid frame, so the scan stops naturally at the true frame-region end no
+/// matter where the garbage hint pointed. This recovers ALL CRC-valid frames
+/// (availability) without admitting any non-CRC-valid data (integrity).
 ///
 /// This must ONLY be used for an untrusted boundary. For a CRC-authenticated
 /// SDX3 footer the offset is authoritative and a bad frame before it is genuine
@@ -644,7 +576,7 @@ pub(crate) fn validate_sidx_boundary_not_truncating<R: Read + Seek>(
 pub(crate) fn crc_valid_frames_end<R: Read + Seek>(
     source: &mut R,
     frames_start: u64,
-    claimed_end: u64,
+    file_len: u64,
 ) -> Result<u64, StoreError> {
     let mut cursor = frames_start;
     source
@@ -652,13 +584,13 @@ pub(crate) fn crc_valid_frames_end<R: Read + Seek>(
         .map_err(StoreError::Io)?;
 
     loop {
-        if cursor >= claimed_end {
-            // Reached the hint without hitting a decode failure: the hint and the
-            // real frames agree, so the real frames end exactly at the hint.
-            return Ok(claimed_end);
+        if cursor >= file_len {
+            // Walked every byte of the source as CRC-valid frames (no footer, or
+            // the frames run to EOF): the real frames end at the source end.
+            return Ok(file_len);
         }
-        // Need at least an 8-byte frame header before the hint.
-        if claimed_end.saturating_sub(cursor) < 8 {
+        // Need at least an 8-byte frame header before the source end.
+        if file_len.saturating_sub(cursor) < 8 {
             return Ok(cursor);
         }
         let mut header = [0u8; 8];
@@ -677,8 +609,8 @@ pub(crate) fn crc_valid_frames_end<R: Read + Seek>(
             Some(tail) => tail,
             None => return Ok(cursor),
         };
-        if frame_tail > claimed_end {
-            // A real frame cannot extend past the hint into the footer region.
+        if frame_tail > file_len {
+            // A real frame cannot extend past the end of the source.
             return Ok(cursor);
         }
         let payload_len = usize::try_from(claimed_len).unwrap_or(usize::MAX);
@@ -695,7 +627,8 @@ pub(crate) fn crc_valid_frames_end<R: Read + Seek>(
                 };
             }
             Err(_) => {
-                // First non-CRC-valid frame is the clean end of real frames.
+                // First non-CRC-valid frame (footer bytes or genuine corruption)
+                // is the clean end of real frames.
                 return Ok(cursor);
             }
         }

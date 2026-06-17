@@ -71,12 +71,15 @@ impl Reader {
             StoreError::corrupt_segment_with_detail(segment_id, "segment header offset overflow")
         })?; // past magic + header_len + header
 
-        // Lower-bound check: frames_end (the SIDX string_table_offset) must not
-        // fall below the start of the frame region. A corrupt offset < cursor
-        // would make the scan loop break immediately and return zero events —
-        // silent data loss. Error with CorruptSegment instead. frames_end ==
-        // cursor (empty frame region) stays valid.
-        if frames_end < cursor {
+        // Lower-bound check (TRUSTED boundaries only): an authenticated SDX3
+        // `string_table_offset` must not fall below the start of the frame region.
+        // A corrupt-but-authenticated offset < cursor would make the scan loop
+        // break immediately and return zero events — silent data loss. Error with
+        // CorruptSegment instead. frames_end == cursor (empty frame region) stays
+        // valid. For an UNTRUSTED boundary the offset is garbage and discarded
+        // below (recovery walks from `cursor` bounded by `file_len`), so a too-low
+        // untrusted hint must NOT error — it recovers all CRC-valid frames instead.
+        if !untrusted_boundary && frames_end < cursor {
             return Err(StoreError::corrupt_segment_with_detail(
                 segment_id,
                 format!(
@@ -88,27 +91,23 @@ impl Reader {
 
         // Resolve the frame-region end based on the offset's provenance.
         //
-        // Both paths first reject a TRUNCATING boundary — an offset too LOW, where
-        // a CRC-valid frame begins exactly at the claimed boundary, which would
-        // silently drop later committed frames. That guard is provenance-agnostic.
-        //
-        // TRUSTED (CRC-valid SDX3 footer): the offset is authoritative. A
-        // frame-decode failure BEFORE this boundary is genuine mid-stream
-        // corruption and the scan loop below FailCloses on it.
+        // TRUSTED (CRC-valid SDX3 footer): the offset is authoritative and
+        // byte-for-byte authenticated by the footer CRC, so it cannot be
+        // truncating. A frame-decode failure BEFORE this boundary is genuine
+        // mid-stream corruption and the scan loop below FailCloses on it.
         //
         // UNTRUSTED (CRC-failed SDX3, legacy SDX2, or forged trailer): the offset
-        // is an unauthenticated hint that may also point too HIGH, into the corrupt
-        // footer region. After the truncation guard, walk the CRC-valid frames and
-        // clamp `frames_end` down to where they actually stop, so the scan
-        // terminates at the last real frame instead of parsing footer bytes as
-        // frame headers and FailClosing. Recover-what-was-found: over-reading into
-        // a corrupt footer is expected, so a decode failure on the way to the hint
-        // is the clean end of real frames, not a hard error.
-        segment::validate_sidx_boundary_not_truncating(
-            &mut file, frames_end, file_len, segment_id,
-        )?;
+        // is GARBAGE — it may point too LOW (truncating real frames), MID-FRAME
+        // (inside a later CRC-valid frame), or too HIGH (into the corrupt footer).
+        // Trusting it as a bound either silently drops CRC-valid frames or makes
+        // the scan parse footer bytes as frame headers and FailClose. So discard
+        // the hint entirely and walk the CRC-valid frames bounded only by
+        // `file_len`, clamping `frames_end` down to where they actually stop. The
+        // walk is truncation-proof (it never drops a CRC-valid frame and never
+        // admits non-CRC-valid bytes), so no separate truncation guard is needed
+        // for the untrusted path.
         let frames_end = if untrusted_boundary {
-            segment::crc_valid_frames_end(&mut file, cursor, frames_end)?
+            segment::crc_valid_frames_end(&mut file, cursor, file_len)?
         } else {
             frames_end
         };
