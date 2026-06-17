@@ -26,6 +26,46 @@ A coordinate names where an event belongs. Keep the engineering name `Coordinate
 
 Payload bytes are part of the event contract. When structured payloads are hashed or linked, canonical encoding matters.
 
+## Schema Evolution
+
+Payloads change shape over time. batpak versions that shape and decodes old bytes on read; it never rewrites stored bytes (that would break the hash chain and signatures).
+
+Each `#[derive(EventPayload)]` type carries `PAYLOAD_VERSION` (default `1`, set via `#[batpak(version = N)]`). A typed append (`append_typed` and the typed `submit`/`reaction` family) stamps that version into `EventHeader.payload_version`. Untyped / batch / denial / lifecycle appends stamp `0`; `0` means "legacy or app-managed" and is decoded tolerantly as the current shape. The version field rides inside the frame but outside the hashed region: the content hash covers payload bytes only and the signature cover is `event_id + sequence + coord + kind + prev_hash + content_hash + extensions`, so adding or stamping it moves no existing hash or signature.
+
+Decode happens at one seam (`event::decode`). For a stored version `v` and current version `c`:
+
+- `v == c` or `v == 0` — decode as today.
+- `v < c` — run the registered `Upcast` chain (`v -> v+1 -> ... -> c`) over the value, then decode.
+- `v > c` — hard `FutureVersion` error, everywhere including replay and cold-start scan. There is no downcaster; upgrade the reader.
+
+### Safe vs unsafe changes
+
+| Change | Safe without a version bump? |
+|---|---|
+| Add a field with `#[serde(default)]` or `Option` | yes — serde fills it |
+| Reorder fields | yes — named MessagePack |
+| Remove a field | yes — unknown keys are ignored |
+| Add a non-defaulted field | no — bump version + add an upcaster |
+| Rename a field | no — bump version + add an upcaster (a defaulted rename silently loses data) |
+| Change a field's type | no — bump version + add an upcaster (compatible reprs coerce silently to a wrong value) |
+
+Do not add `deny_unknown_fields`: it breaks the safe forward direction. The structural frozen-fixture lint guards the unsafe directions instead.
+
+### Adding an upcaster
+
+When a change needs a version bump:
+
+1. Bump the struct's `#[batpak(version = N)]`.
+2. Write an `Upcast` for each new hop: `impl Upcast for MyV{N-1}ToV{N} { const KIND = ...; const FROM_VERSION = N-1; fn upcast(value: rmpv::Value) -> Result<rmpv::Value, UpcastError> { ... } }`, transforming a value of `FROM_VERSION` into one of `FROM_VERSION + 1`.
+3. Register it: `register_upcast!(MyV{N-1}ToV{N});`.
+4. Freeze a fixture for the new shape (next section).
+
+### Freezing a fixture
+
+Frozen fixtures are the payload MessagePack bytes (journal form) under `crates/core/tests/golden/payloads/<category>_<type_id>__v<N>.hex`, decoded by `assert_frozen_decode::<T>` with the current decoder to prove old bytes still decode. Regeneration is append-only: `GOLDEN_UPDATE=I_KNOW_WHAT_IM_DOING cargo test --test schema_evolution` writes a missing fixture but never overwrites an existing one — proof-of-compat bytes must not mutate. A new version writes `__v<N+1>` alongside the old file. Every `#[derive(EventPayload)]` type should have a fixture; the warn-first structural lint tracks the backlog in `FROZEN_FIXTURE_DEBT`.
+
+A wire version tag only helps frames written after it lands; pre-versioning frames are `0` forever, so a future upcaster cannot repair a breaking change to legacy data. Additive changes stay safe regardless.
+
 ## Envelope Boundary
 
 The substrate event kind is not the same as a domain receipt taxonomy. batpak may

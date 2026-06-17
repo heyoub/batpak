@@ -24,6 +24,38 @@ pub struct EventPayloadRegistration {
 
 inventory::collect!(EventPayloadRegistration);
 
+/// Registration item emitted once per `(KIND, from_version)` upcast step.
+///
+/// Mirrors [`EventPayloadRegistration`]: collected link-time via `inventory`
+/// so the decode seam can look up the registered vN→vN+1 migration for a given
+/// stored kind/version without a runtime registry. The `step` operates on a
+/// type-erased `rmpv::Value` so a single chain runner is lane-neutral (it works
+/// for both the JSON and raw-msgpack replay lanes). The concrete error type is
+/// owned by `batpak` core, so `step` returns a boxed `dyn Error` here to keep
+/// this support crate dependency-light.
+pub struct UpcastRegistration {
+    /// Packed `(category << 12) | type_id`; equals `EventKind::as_raw_u16`.
+    pub kind_bits: u16,
+    /// The stored version this step upgrades *from* (it produces `from + 1`).
+    pub from_version: u16,
+    /// The migration applied to a decoded `rmpv::Value` of version
+    /// `from_version`, producing a value of version `from_version + 1`.
+    pub step: fn(rmpv::Value) -> Result<rmpv::Value, Box<dyn std::error::Error + Send + Sync>>,
+}
+
+inventory::collect!(UpcastRegistration);
+
+/// Return all registered upcast steps for `kind_bits`, indexed by `from_version`.
+///
+/// A duplicate `(kind_bits, from_version)` registration is a programming error
+/// (two migrations claiming the same hop); the caller in `batpak` core surfaces
+/// it as a decode-time failure rather than silently picking one.
+pub fn upcast_steps_for(kind_bits: u16) -> Vec<&'static UpcastRegistration> {
+    inventory::iter::<UpcastRegistration>()
+        .filter(|reg| reg.kind_bits == kind_bits)
+        .collect()
+}
+
 /// One duplicate `EventKind` registration discovered in the current binary.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct EventKindCollision {

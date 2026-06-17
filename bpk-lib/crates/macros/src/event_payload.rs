@@ -65,15 +65,19 @@ pub(super) fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStrea
         }
     };
 
-    // ─── Parse keys: category + type_id, exactly once each, no unknowns ──────
+    // ─── Parse keys: category + type_id (required), version (optional) ──────
+    // `version` is the wire payload schema version. It defaults to 1 when
+    // absent, matching `EventPayload::PAYLOAD_VERSION`'s associated-const
+    // default, so existing derives keep emitting version 1 with no edit.
     let mut category_lit: Option<LitInt> = None;
     let mut type_id_lit: Option<LitInt> = None;
+    let mut version_lit: Option<LitInt> = None;
 
     attr.parse_nested_meta(|meta| {
         let ident = meta
             .path
             .get_ident()
-            .ok_or_else(|| meta.error("expected `category` or `type_id`"))?;
+            .ok_or_else(|| meta.error("expected `category`, `type_id`, or `version`"))?;
         match ident.to_string().as_str() {
             "category" => {
                 if category_lit.is_some() {
@@ -87,9 +91,15 @@ pub(super) fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStrea
                 }
                 type_id_lit = Some(meta.value()?.parse::<LitInt>()?);
             }
+            "version" => {
+                if version_lit.is_some() {
+                    return Err(meta.error("duplicate `version` key"));
+                }
+                version_lit = Some(meta.value()?.parse::<LitInt>()?);
+            }
             other => {
                 return Err(meta.error(format!(
-                    "unknown key `{other}`, expected `category` or `type_id`"
+                    "unknown key `{other}`, expected `category`, `type_id`, or `version`"
                 )));
             }
         }
@@ -141,6 +151,34 @@ pub(super) fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStrea
         return Err(syn::Error::new(type_id_lit.span(), msg));
     }
 
+    // `version` defaults to 1. A `version = 0` literal is rejected: 0 is the
+    // legacy/untyped sentinel on the wire (`EventHeader.payload_version`), so a
+    // declared payload may never claim it.
+    let payload_version: u16 = match &version_lit {
+        None => 1,
+        Some(lit) => {
+            let version_u64: u64 = lit.base10_parse()?;
+            if version_u64 == 0 {
+                return Err(syn::Error::new(
+                    lit.span(),
+                    "version 0 is reserved for legacy/untyped frames; declared payloads start at version 1",
+                ));
+            }
+            if version_u64 > u64::from(u16::MAX) {
+                return Err(syn::Error::new(
+                    lit.span(),
+                    format!(
+                        "version {version_u64} exceeds u16 range; payload version must fit in u16"
+                    ),
+                ));
+            }
+            // justifies: INV-MACRO-BOUNDED-CAST; narrowing u64 to u16 is bounds-checked by the u16::MAX comparison on the preceding lines in crates/macros/src/event_payload.rs so truncation cannot occur here.
+            #[allow(clippy::cast_possible_truncation)]
+            let v = version_u64 as u16;
+            v
+        }
+    };
+
     // ─── Codegen ─────────────────────────────────────────────────────────────
     let ident = &input.ident;
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
@@ -159,6 +197,7 @@ pub(super) fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStrea
         impl #impl_generics ::batpak::event::EventPayload for #ident #ty_generics #where_clause {
             const KIND: ::batpak::event::EventKind =
                 ::batpak::event::EventKind::custom(#category, #type_id);
+            const PAYLOAD_VERSION: u16 = #payload_version;
         }
 
         const _: () = {

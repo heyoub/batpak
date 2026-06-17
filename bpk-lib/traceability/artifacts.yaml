@@ -637,6 +637,21 @@
     - CONTRIBUTING.md
     - AGENTS.md
     - templates/minimal-app/Cargo.toml
+- id: ART-EVENT-PAYLOAD-DECODE-SEAM
+  kind: source
+  paths:
+    - crates/core/src/event/decode.rs
+    - crates/core/src/event/upcast.rs
+    - crates/core/src/event/header.rs
+    - crates/core/src/event/payload.rs
+- id: ART-EVENT-PAYLOAD-FROZEN-GOLDENS
+  kind: tests
+  paths:
+    - crates/core/tests/schema_evolution.rs
+- id: ART-SCHEMA-EVOLUTION-DOC
+  kind: docs
+  paths:
+    - EVENTS.md
 - id: ART-EXAMPLES
   kind: examples
   paths:
