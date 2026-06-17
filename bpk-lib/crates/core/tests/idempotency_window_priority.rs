@@ -187,14 +187,15 @@ fn fail_closed_overflow_refuses_new_key_but_keeps_existing_noops() {
 
     // A new key over the cap is refused.
     let new_key = 0x6000_0000_0000_0000_0000_0000_0000_0001u128;
-    let err = store
-        .append_with_options(
-            &coord(),
-            KIND,
-            &serde_json::json!({"over": true}),
-            AppendOptions::new().with_idempotency(IdempotencyKey::from(new_key)),
-        )
-        .expect_err("new key over cap must be refused under FailClosed");
+    let err = match store.append_with_options(
+        &coord(),
+        KIND,
+        &serde_json::json!({"over": true}),
+        AppendOptions::new().with_idempotency(IdempotencyKey::from(new_key)),
+    ) {
+        Ok(_) => panic!("new key over cap must be refused under FailClosed"),
+        Err(e) => e,
+    };
     assert!(
         matches!(err, StoreError::IdempotencyOverflowFailClosed { .. }),
         "FailClosed refuses the new keyed append: {err:?}"

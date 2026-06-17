@@ -345,14 +345,19 @@ impl WriterState<'_> {
             return Ok(cached);
         }
 
-        // Genuinely-new keyed items: enforce the soft-cap overflow policy before
-        // committing. All-or-nothing batch semantics: if any new key is refused
-        // the whole batch fails closed. justifies: INV-IDEMPOTENCY-DURABLE-WINDOW
-        for item in &items {
-            if let Some(key) = item.options().idempotency_key {
-                use crate::id::EntityIdType;
-                self.index.idemp.admit_new_key(key.as_u128())?;
-            }
+        // Genuinely-new keyed items: validate + admit the whole candidate key
+        // set as a UNIT. This rejects duplicate new keys within the batch
+        // (which would otherwise derive duplicate event ids) AND enforces the
+        // soft cap against the unique-new count atomically, so a set of unique
+        // new keys can never collectively slip past a fail-closed cap.
+        // All-or-nothing. justifies: INV-IDEMPOTENCY-DURABLE-WINDOW
+        {
+            use crate::id::EntityIdType;
+            let frontier = self.index.global_sequence();
+            let keys = items
+                .iter()
+                .filter_map(|item| item.options().idempotency_key.map(|key| key.as_u128()));
+            self.index.idemp.admit_new_keys(keys, frontier)?;
         }
 
         let prepared = PreparedBatch::from_items(items)?;

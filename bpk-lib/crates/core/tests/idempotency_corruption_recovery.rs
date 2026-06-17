@@ -124,6 +124,22 @@ fn truncated_file_degrades_and_does_not_crash() {
 }
 
 #[test]
+fn unsupported_lower_version_degrades_and_does_not_crash() {
+    // A corrupted `version = 0` with a CRC-VALID body must NOT load as the
+    // current version (the CRC excludes the header, so the body alone cannot
+    // catch a flipped version). It degrades as absent, like a bad CRC.
+    assert_graceful_degradation(|path| {
+        let mut bytes = std::fs::read(path).expect("read idemp file");
+        assert!(bytes.len() >= 12, "idemp file should have a header + body");
+        // Overwrite the version field (bytes 6..8, little-endian) with 0,
+        // leaving magic, CRC, and body untouched so only the version trips.
+        let bad_version: u16 = 0;
+        bytes[6..8].copy_from_slice(&bad_version.to_le_bytes());
+        std::fs::write(path, &bytes).expect("write version-0 idemp file");
+    });
+}
+
+#[test]
 fn future_version_is_a_hard_error_at_cold_start() {
     // A future on-disk version must FAIL CLOSED (mirroring schema-evo
     // FutureVersion): a reader can never reconstruct a format it predates.

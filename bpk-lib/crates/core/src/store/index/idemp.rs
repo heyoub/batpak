@@ -55,14 +55,6 @@ pub(crate) const IDEMP_FILENAME: &str = "index.idemp";
 /// Header length: magic(6) + version(2) + crc(4).
 const HEADER_LEN: usize = 6 + 2 + 4;
 
-/// Sentinel `disk_pos` segment id marking an entry whose underlying event has
-/// been evicted (by retention compaction). The reconstructed receipt still
-/// carries the *original* recorded `disk_pos` — this constant documents the
-/// posture; we never overwrite a recorded `disk_pos` because a downstream
-/// reader of a no-op receipt for an evicted event must not be told the frame
-/// still lives somewhere it does not.
-pub(crate) const EVICTED_DISK_POS_SENTINEL: u64 = u64::MAX;
-
 /// Default window guarantee: keep idempotency keys for the most recent
 /// `DEFAULT_KEEP_SEQUENCES` committed global sequences. Generous on purpose —
 /// it must comfortably outlive a realistic event-retention window so a retry
@@ -169,7 +161,10 @@ pub(crate) struct IdempEntry {
     /// Global sequence assigned at the original commit.
     pub(crate) global_sequence: u64,
     /// Original frame location. Preserved verbatim even after the event is
-    /// evicted (see [`EVICTED_DISK_POS_SENTINEL`] for the eviction posture).
+    /// evicted — the reconstructed no-op receipt must always carry the ORIGINAL
+    /// position so a within-window retry returns the original receipt unchanged.
+    /// Eviction is tracked by the separate [`IdempEntry::event_evicted`] flag,
+    /// never by mutating this field.
     pub(crate) disk_pos_segment: u64,
     /// Byte offset of the original frame.
     pub(crate) disk_pos_offset: u64,
@@ -190,6 +185,12 @@ pub(crate) struct IdempEntry {
     /// store. This is the value the window-priority rule ages against — it is
     /// the entry's position on the frontier timeline.
     pub(crate) recorded_global_sequence: u64,
+    /// Whether this entry's underlying event frame has been evicted by
+    /// retention compaction. Set by [`IdempotencyStore::mark_evicted`]; the
+    /// `disk_pos_*` fields are NEVER mutated, so the reconstructed receipt keeps
+    /// the original frame position.
+    #[serde(default)]
+    pub(crate) event_evicted: bool,
     /// Opaque receipt extensions committed with the original event.
     pub(crate) receipt_extensions: BTreeMap<ExtensionKey, EncodedBytes>,
 }
@@ -211,6 +212,7 @@ impl IdempEntry {
             scope: entry.coord.scope().to_owned(),
             kind: entry.kind,
             recorded_global_sequence,
+            event_evicted: false,
             receipt_extensions: entry.receipt_extensions.clone(),
         }
     }
@@ -225,12 +227,14 @@ impl IdempEntry {
     }
 
     /// Whether this entry's underlying event frame has been evicted (retention
-    /// compaction). Detected by the [`EVICTED_DISK_POS_SENTINEL`] segment id.
-    /// A no-op receipt for an evicted event still carries the original
-    /// reconstruction tuple; this flag lets callers distinguish "frame still
-    /// live" from "deduplicated against an evicted event" without a disk probe.
+    /// compaction). A no-op receipt for an evicted event still carries the
+    /// original reconstruction tuple (including the original `disk_pos`); this
+    /// flag lets callers distinguish "frame still live" from "deduplicated
+    /// against an evicted event" without a disk probe. Non-test code reads the
+    /// `event_evicted` field directly; this accessor is the test-facing reader.
+    #[cfg(test)]
     pub(crate) fn is_event_evicted(&self) -> bool {
-        self.disk_pos_segment == EVICTED_DISK_POS_SENTINEL
+        self.event_evicted
     }
 }
 
@@ -283,23 +287,67 @@ impl IdempotencyStore {
         self.map.get(&key).map(|r| r.value().clone())
     }
 
-    /// Whether a NEW keyed append should be admitted under the current
-    /// overflow policy. Only relevant when the soft cap is configured and the
-    /// store is at/over the cap with the candidate being a genuinely new key.
-    ///
-    /// Returns `Ok(())` to admit, or an error to fail the append closed.
-    /// `Warn`/`Backpressure`-treated-as-fail behavior is decided by the caller
-    /// via the returned variant; here we only fail-close when configured.
-    pub(crate) fn admit_new_key(&self, key: u128) -> Result<(), StoreError> {
-        let Some(max_keys) = self.retention.max_keys() else {
-            return Ok(());
-        };
-        // Re-recording an already-known key is always admitted (no growth).
+    /// Whether a single NEW keyed append should be admitted under the soft cap.
+    /// `frontier` lets us age out-of-window keys out before fail-closing, so a
+    /// stale entry is trimmed rather than a fresh key refused. Re-recording a
+    /// known key is always admitted (no growth).
+    pub(crate) fn admit_new_key(&self, key: u128, frontier: u64) -> Result<(), StoreError> {
         if self.map.contains_key(&key) {
             return Ok(());
         }
-        let len = self.map.len() as u64;
-        if len < max_keys {
+        self.admit_unique_new_count(1, frontier)
+    }
+
+    /// Validate and admit a whole batch of candidate keys as a UNIT. Counts only
+    /// keys NOT already present, rejects duplicate new keys WITHIN the batch
+    /// (they would otherwise both pass a per-item check and derive duplicate
+    /// event ids), and enforces `current + unique_new <= max_keys` atomically so
+    /// a set of unique new keys can never collectively slip past a fail-closed
+    /// cap. All-or-nothing. `frontier` drives the same age-out as
+    /// [`IdempotencyStore::admit_new_key`].
+    pub(crate) fn admit_new_keys(
+        &self,
+        keys: impl Iterator<Item = u128>,
+        frontier: u64,
+    ) -> Result<(), StoreError> {
+        let mut seen_new: std::collections::HashSet<u128> = std::collections::HashSet::new();
+        let mut unique_new: u64 = 0;
+        for key in keys {
+            // Already durable: re-recording is a no-op on growth.
+            if self.map.contains_key(&key) {
+                continue;
+            }
+            if !seen_new.insert(key) {
+                return Err(StoreError::IdempotencyPartialBatch {
+                    reason: "duplicate idempotency key in batch".into(),
+                });
+            }
+            unique_new = unique_new.saturating_add(1);
+        }
+        self.admit_unique_new_count(unique_new, frontier)
+    }
+
+    /// Shared admission core: can `unique_new` genuinely-new keys be admitted
+    /// without exceeding the soft cap? Ages out-of-window keys out first, then
+    /// escalates per [`OverflowPolicy`]. `Unbounded`/`Window` (no cap) always
+    /// admit.
+    fn admit_unique_new_count(&self, unique_new: u64, frontier: u64) -> Result<(), StoreError> {
+        let Some(max_keys) = self.retention.max_keys() else {
+            return Ok(());
+        };
+        if unique_new == 0 {
+            return Ok(());
+        }
+        let mut len = self.map.len() as u64;
+        if len.saturating_add(unique_new) <= max_keys {
+            return Ok(());
+        }
+        // Pressure: age out out-of-window keys before fail-closing so a stale
+        // key is trimmed rather than a fresh one refused. justifies:
+        // INV-IDEMPOTENCY-DURABLE-WINDOW
+        self.evict(frontier);
+        len = self.map.len() as u64;
+        if len.saturating_add(unique_new) <= max_keys {
             return Ok(());
         }
         match self.overflow {
@@ -310,8 +358,9 @@ impl IdempotencyStore {
                     target: "batpak::idemp",
                     len,
                     max_keys,
+                    unique_new,
                     backpressure_note,
-                    "durable idempotency store at soft cap; refusing new keyed append (fail-closed)"
+                    "durable idempotency store at soft cap; refusing new keyed append(s) (fail-closed)"
                 );
                 Err(StoreError::IdempotencyOverflowFailClosed { len, max_keys })
             }
@@ -324,16 +373,16 @@ impl IdempotencyStore {
     }
 
     /// Mark durable entries whose underlying event frame is no longer live as
-    /// EVICTED (stamps [`EVICTED_DISK_POS_SENTINEL`] into the recorded
-    /// segment id). `is_live(event_id)` reports whether the frame still exists
-    /// in the live index. Run at the compaction tail so a subsequent no-op for
-    /// a deduplicated-against-evicted key is honestly flagged. The
-    /// reconstruction tuple (hash, sequence, extensions) is preserved — only
-    /// the segment id is overwritten with the sentinel.
+    /// EVICTED by setting the [`IdempEntry::event_evicted`] flag.
+    /// `is_live(event_id)` reports whether the frame still exists in the live
+    /// index. Run at the compaction tail so a subsequent no-op for a
+    /// deduplicated-against-evicted key is honestly flagged. The whole
+    /// reconstruction tuple — including `disk_pos_*` — is left immutable so the
+    /// reconstructed receipt always carries the ORIGINAL frame position.
     pub(crate) fn mark_evicted(&self, is_live: impl Fn(u128) -> bool) {
         for mut entry in self.map.iter_mut() {
-            if !entry.is_event_evicted() && !is_live(entry.event_id) {
-                entry.disk_pos_segment = EVICTED_DISK_POS_SENTINEL;
+            if !entry.event_evicted && !is_live(entry.event_id) {
+                entry.event_evicted = true;
             }
         }
     }
@@ -548,6 +597,21 @@ pub(crate) fn read_idemp_file(data_dir: &Path) -> Result<IdempLoad, StoreError> 
             current: IDEMP_VERSION,
         });
     }
+    if version != IDEMP_VERSION {
+        // The header is unauthenticated (the CRC covers the body only), so a
+        // corrupted lower version with a CRC-valid body would otherwise load as
+        // the current version. Degrade as absent (same posture as a bad CRC).
+        tracing::warn!(
+            target: "batpak::idemp",
+            path = %path.display(),
+            version,
+            current = IDEMP_VERSION,
+            "idempotency store file declares an unsupported version — ignoring"
+        );
+        return Ok(IdempLoad::Invalid {
+            reason: format!("unsupported version: {version}"),
+        });
+    }
 
     let stored_crc = u32::from_le_bytes([raw[8], raw[9], raw[10], raw[11]]);
     let body = &raw[HEADER_LEN..];
@@ -590,6 +654,8 @@ mod tests {
     #![allow(clippy::unwrap_used)]
     // justifies: INV-IDEMPOTENCY-DURABLE-WINDOW; synthetic loop indices are tiny u128 keys cast to u64 sequences, truncation impossible at these magnitudes
     #![allow(clippy::cast_possible_truncation)]
+    // justifies: INV-TEST-PANIC-AS-ASSERTION; admission unit tests assert via panic on the must-not-happen Ok branch
+    #![allow(clippy::panic)]
 
     use super::*;
 
@@ -607,6 +673,7 @@ mod tests {
             scope: "s".to_owned(),
             kind: EventKind::custom(0xB, 1),
             recorded_global_sequence,
+            event_evicted: false,
             receipt_extensions: BTreeMap::new(),
         }
     }
@@ -627,22 +694,11 @@ mod tests {
             store.record(entry(i, 90 + i as u64));
         }
         let report = store.evict(100);
-        assert!(
-            report.within_window_exceeds_cap,
-            "within-window keys alone exceed the cap — residual pigeonhole detected"
-        );
-        assert_eq!(report.aged_out, 0, "nothing is outside the window");
-        assert_eq!(
-            report.cap_trimmed_out_of_window, 0,
-            "cap must not trim within-window keys"
-        );
+        assert!(report.within_window_exceeds_cap, "residual pigeonhole");
+        assert_eq!(report.aged_out, 0);
+        assert_eq!(report.cap_trimmed_out_of_window, 0);
         assert_eq!(report.remaining, 10, "all within-window keys survive");
-        for i in 0..10u128 {
-            assert!(
-                store.get(i).is_some(),
-                "within-window key {i} survives the cap"
-            );
-        }
+        assert!((0..10u128).all(|i| store.get(i).is_some()));
     }
 
     #[test]
@@ -665,9 +721,7 @@ mod tests {
         for i in 0..5u128 {
             assert!(store.get(i).is_none(), "aged-out key {i} is gone");
         }
-        for i in 95..100u128 {
-            assert!(store.get(i).is_some(), "within-window key {i} remains");
-        }
+        assert!((95..100u128).all(|i| store.get(i).is_some()), "kept");
     }
 
     #[test]
@@ -682,24 +736,73 @@ mod tests {
         assert_eq!(report.remaining, 50);
     }
 
-    #[test]
-    fn admit_new_key_fail_closed_refuses_only_new_keys_over_cap() {
-        let store = IdempotencyStore::new(
+    fn fail_closed(keep_sequences: u64, max_keys: u64) -> IdempotencyStore {
+        IdempotencyStore::new(
             IdempotencyRetention::Hybrid {
-                keep_sequences: 1000,
-                max_keys: 2,
+                keep_sequences,
+                max_keys,
             },
             OverflowPolicy::FailClosed,
-        );
+        )
+    }
+
+    #[test]
+    fn admit_new_key_fail_closed_refuses_only_new_keys_over_cap() {
+        let store = fail_closed(1000, 2);
         store.record(entry(1, 1));
         store.record(entry(2, 2));
-        // Re-recording an existing key is always admitted (no growth).
-        assert!(store.admit_new_key(1).is_ok());
-        // A new key over the cap is refused.
+        // Re-recording an existing key is admitted; a new key over the cap is not
+        // (both held keys are within window at frontier 2).
+        assert!(store.admit_new_key(1, 2).is_ok());
         assert!(matches!(
-            store.admit_new_key(99),
+            store.admit_new_key(99, 2),
             Err(StoreError::IdempotencyOverflowFailClosed { .. })
         ));
+    }
+
+    #[test]
+    fn admit_new_key_ages_out_of_window_before_fail_closing() {
+        // Both held keys are OUT of window at frontier 1000 (floor 990). A new
+        // key must age them out first and be admitted, not refused.
+        let store = fail_closed(10, 2);
+        store.record(entry(1, 1));
+        store.record(entry(2, 2));
+        assert!(
+            store.admit_new_key(99, 1000).is_ok(),
+            "PROPERTY: out-of-window keys must age out before a fresh key is refused"
+        );
+        assert_eq!(store.len(), 0, "stale keys were aged out by admission");
+    }
+
+    #[test]
+    fn admit_new_keys_validates_the_batch_as_a_unit() {
+        // (1) Duplicate new keys within one batch are rejected (they would
+        // otherwise derive duplicate event ids).
+        let dup_store = fail_closed(1000, 1000);
+        let dup_err = match dup_store.admit_new_keys([7u128, 7u128].into_iter(), 0) {
+            Ok(()) => panic!("PROPERTY: two identical new keys in a batch must be rejected"),
+            Err(e) => e,
+        };
+        assert!(
+            matches!(dup_err, StoreError::IdempotencyPartialBatch { .. }),
+            "duplicate new key must surface IdempotencyPartialBatch, got {dup_err:?}"
+        );
+
+        // (2) Cap 3 with 2 within-window keys held: a batch of 2 unique NEW keys
+        // reaches 4 > 3 and is rejected as a unit even though each alone passes a
+        // per-item len check; a batch that fits (1 new => 3 == cap) is admitted.
+        let store = fail_closed(1000, 3);
+        store.record(entry(1, 1));
+        store.record(entry(2, 2));
+        let err = match store.admit_new_keys([10u128, 11u128].into_iter(), 2) {
+            Ok(()) => panic!("PROPERTY: a unique-new batch exceeding the cap must be rejected"),
+            Err(e) => e,
+        };
+        assert!(
+            matches!(err, StoreError::IdempotencyOverflowFailClosed { .. }),
+            "over-cap unique batch must surface IdempotencyOverflowFailClosed, got {err:?}"
+        );
+        assert!(store.admit_new_keys([10u128].into_iter(), 2).is_ok());
     }
 
     #[test]
@@ -719,19 +822,16 @@ mod tests {
         store.mark_evicted(|event_id| event_id == 1);
 
         let one = store.get(1).unwrap();
-        assert!(!one.is_event_evicted(), "live event keeps its segment id");
+        assert!(!one.is_event_evicted() && !one.event_evicted);
         assert_eq!(one.disk_pos_segment, 7);
 
         let two = store.get(2).unwrap();
-        assert!(two.is_event_evicted(), "dropped event is flagged evicted");
-        assert_eq!(
-            two.global_sequence, 2,
-            "reconstruction tuple (sequence) preserved across eviction flag"
-        );
-        assert_eq!(
-            two.content_hash, [0xAB; 32],
-            "reconstruction tuple (content hash) preserved across eviction flag"
-        );
+        assert!(two.is_event_evicted() && two.event_evicted);
+        // disk_pos is UNCHANGED after eviction: the reconstructed receipt must
+        // carry the ORIGINAL frame position. The rest of the tuple is preserved.
+        assert_eq!(two.disk_pos_segment, 9, "disk_pos unchanged after eviction");
+        assert_eq!(two.global_sequence, 2, "sequence preserved");
+        assert_eq!(two.content_hash, [0xAB; 32], "content hash preserved");
     }
 
     #[test]
@@ -742,10 +842,7 @@ mod tests {
         store.record(entry(8, 8));
         store.flush(dir.path()).unwrap();
         let loaded = read_idemp_file(dir.path()).unwrap();
-        assert!(
-            matches!(&loaded, IdempLoad::Loaded(entries) if entries.len() == 2),
-            "expected Loaded with 2 entries after a flush/read roundtrip"
-        );
+        assert!(matches!(&loaded, IdempLoad::Loaded(e) if e.len() == 2));
     }
 
     #[test]

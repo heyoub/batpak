@@ -95,7 +95,7 @@ fn keyed_retry_is_noop_after_retention_evicts_the_event() {
     for i in 0..8 {
         store
             .append(&coord(), KIND, &serde_json::json!({ "filler": i }))
-            .ok();
+            .expect("append filler event");
     }
 
     // Run retention compaction that drops the keyed event frame.
@@ -181,7 +181,7 @@ fn idemp_authority_survives_eviction_then_cold_start() {
         for i in 0..8 {
             store
                 .append(&coord(), KIND, &serde_json::json!({ "filler": i }))
-                .ok();
+                .expect("append filler event");
         }
         store.compact(&evict_all_user_events()).expect("compact");
         store.close().expect("close");

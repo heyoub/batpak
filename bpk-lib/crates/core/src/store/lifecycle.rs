@@ -96,6 +96,7 @@ pub(crate) fn snapshot(
     let mut copied_segment_ids_sorted = Vec::new();
     let mut copied_visibility_ranges_present = false;
     let mut copied_pending_compaction_marker_present = false;
+    let mut copied_idempotency_store_present = false;
     let mut findings = Vec::new();
     if cleared_artifact_count > 0 {
         findings.push(SnapshotFinding::DestinationCleared {
@@ -123,8 +124,10 @@ pub(crate) fn snapshot(
                     copied_pending_compaction_marker_present = true;
                 }
                 SnapshotFileKind::IdempotencyStore => {
-                    // Carried forward as a correctness authority; no dedicated
-                    // structural counter in snapshot evidence v1.
+                    // The dedup authority. Recorded in evidence identity (v2) so
+                    // a snapshot that lost it cannot masquerade as one that
+                    // carried it. justifies: INV-IDEMPOTENCY-DURABLE-WINDOW
+                    copied_idempotency_store_present = true;
                 }
             }
         }
@@ -144,6 +147,7 @@ pub(crate) fn snapshot(
         copied_segment_ids_sorted,
         copied_visibility_ranges_present,
         copied_pending_compaction_marker_present,
+        copied_idempotency_store_present,
         destination_path_digest: destination_path_digest(dest),
         findings,
     })?;
@@ -566,9 +570,16 @@ pub(crate) fn compact(
         "applied window-priority idempotency eviction after compaction"
     );
 
+    // Persist the durable idempotency store FIRST and MANDATORILY: compaction
+    // has already deleted the source frames, so losing the (now-evicted) sidecar
+    // on a crash/reopen would lose within-window dedup memory. Its error is
+    // PROPAGATED, never downgraded — it is a correctness primitive, not a
+    // fast-open cache. justifies: INV-IDEMPOTENCY-DURABLE-WINDOW
+    store.index.idemp.flush(&store.config.data_dir)?;
+
     // Refresh cold-start artifacts after post-compact rebuild so the next open
-    // can take the fast path. This also flushes the (now-evicted) durable
-    // idempotency store so compaction NEVER loses a within-window key.
+    // can take the fast path. This is best-effort: a failed mmap/checkpoint only
+    // costs a slower next open, so its error stays a warning.
     if let Err(e) = write_cold_start_artifacts_on_close(store) {
         tracing::warn!("post-compaction cold-start artifact write failed: {e}");
     }
@@ -613,6 +624,12 @@ pub(crate) fn close(mut store: Store<Open>) -> Result<Closed, StoreError> {
         writer.join()?;
     }
 
+    // Persist the durable idempotency store FIRST and MANDATORILY, ahead of the
+    // best-effort cold-start artifacts. It is a correctness primitive that must
+    // survive even when checkpoint/mmap artifacts are disabled or fail.
+    // justifies: INV-IDEMPOTENCY-DURABLE-WINDOW
+    store.index.idemp.flush(&store.config.data_dir)?;
+
     // Write cold-start artifacts after writer shutdown (all data fsynced).
     // Explicit close() is the honest durable path, so artifact write failures
     // must surface to the caller instead of being downgraded to a warning.
@@ -649,11 +666,11 @@ fn write_cold_start_artifacts_on_close(store: &Store<Open>) -> Result<(), StoreE
         }
         None => {}
     }
-    // Always flush the durable idempotency store, independent of the cold-start
-    // artifact target. It is a correctness primitive, not a fast-open cache, so
-    // it must persist even when checkpoint/mmap artifacts are disabled.
+    // NOTE: the durable idempotency store is flushed by the CALLERS (close +
+    // compaction tail) BEFORE this best-effort artifact refresh, so its error
+    // is always propagated and never lost behind a warn-swallowed artifact
+    // write. It is a correctness primitive, not a fast-open cache.
     // justifies: INV-IDEMPOTENCY-DURABLE-WINDOW
-    store.index.idemp.flush(&store.config.data_dir)?;
     Ok(())
 }
 

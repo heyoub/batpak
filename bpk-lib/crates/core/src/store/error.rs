@@ -164,6 +164,17 @@ pub enum StoreError {
         /// Configured soft cap.
         max_keys: u64,
     },
+    /// A typed append carried `EventPayload::PAYLOAD_VERSION == 0`. Version `0`
+    /// is the reserved legacy/untyped sentinel and is never a valid declared
+    /// version. The `#[derive(EventPayload)]` macro rejects this at compile
+    /// time, but a hand-written `EventPayload` impl can still set it, so the
+    /// typed-append seam rejects it at runtime before stamping the header
+    /// (a non-zero declared version is what lets the decode seam tell a real
+    /// typed frame apart from a legacy untyped one).
+    InvalidPayloadVersion {
+        /// The rejected event kind, as its raw 16-bit encoding.
+        kind: u16,
+    },
     /// A segment frame is corrupt (length field beyond buffer, bad CRC region, etc.).
     CorruptFrame {
         /// Segment file where the frame lives.
@@ -432,6 +443,11 @@ impl std::fmt::Display for StoreError {
                 "durable idempotency store at soft cap ({len}/{max_keys}); new keyed append \
                  refused (overflow policy fail-closed)"
             ),
+            Self::InvalidPayloadVersion { kind } => write!(
+                f,
+                "typed append for kind 0x{kind:04X} declared PAYLOAD_VERSION 0; version 0 is the \
+                 reserved legacy/untyped sentinel and is never a valid declared payload version"
+            ),
             Self::CorruptFrame {
                 segment_id,
                 offset,
@@ -568,6 +584,7 @@ impl std::error::Error for StoreError {
             | Self::IdempotencyPartialBatch { .. }
             | Self::IdempotencyFutureVersion { .. }
             | Self::IdempotencyOverflowFailClosed { .. }
+            | Self::InvalidPayloadVersion { .. }
             | Self::CorruptFrame { .. }
             | Self::SegmentTooManyEntries { .. }
             | Self::DataDirMalformed { .. }

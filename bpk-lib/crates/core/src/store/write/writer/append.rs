@@ -95,8 +95,12 @@ impl WriterState<'_> {
                 return Ok(receipt);
             }
             // Genuinely new key: enforce the soft-cap overflow policy BEFORE we
-            // commit. FailClosed/Backpressure refuse here; Warn proceeds.
-            self.index.idemp.admit_new_key(key)?;
+            // commit. FailClosed/Backpressure refuse here; Warn proceeds. Pass
+            // the current frontier so out-of-window keys age out before we
+            // fail-close on a fresh key.
+            self.index
+                .idemp
+                .admit_new_key(key, self.index.global_sequence())?;
         }
 
         let prev_hash = latest

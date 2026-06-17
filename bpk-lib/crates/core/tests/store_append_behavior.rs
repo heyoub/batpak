@@ -323,3 +323,34 @@ fn with_correlation_and_causation_combined() {
         "VARIANCE: default append should have None causation_id."
     );
 }
+
+#[test]
+fn typed_append_rejects_manual_payload_version_zero() {
+    // A hand-written EventPayload impl forging the reserved legacy sentinel.
+    // The derive macro forbids this at compile time, but a manual impl can do
+    // it; the typed-append seam must reject it at runtime so a real typed frame
+    // can never be stamped indistinguishable from a legacy untyped frame.
+    // justifies: INV-PAYLOAD-VERSION-NONZERO
+    #[derive(Serialize, Deserialize)]
+    struct ForgedLegacy {
+        n: u64,
+    }
+    impl EventPayload for ForgedLegacy {
+        const KIND: EventKind = EventKind::custom(0x3, 0x111);
+        const PAYLOAD_VERSION: u16 = 0;
+    }
+
+    let dir = TempDir::new().expect("temp dir");
+    let store = Store::open(StoreConfig::new(dir.path())).expect("open store");
+    let coord = Coordinate::new("entity:forged-version", "scope:test").expect("coord");
+    let err = match store.append_typed(&coord, &ForgedLegacy { n: 7 }) {
+        Ok(_) => panic!("PROPERTY: typed append with PAYLOAD_VERSION 0 must be rejected"),
+        Err(e) => e,
+    };
+    assert!(
+        matches!(err, StoreError::InvalidPayloadVersion { kind }
+            if kind == ForgedLegacy::KIND.as_raw_u16()),
+        "PROPERTY: manual PAYLOAD_VERSION 0 must surface InvalidPayloadVersion, got {err:?}"
+    );
+    store.close().expect("close store");
+}

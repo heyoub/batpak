@@ -510,10 +510,11 @@ fn sample_store_reports() -> TestResult<(
         copied_segment_ids_sorted: vec![1, 2, 3],
         copied_visibility_ranges_present: true,
         copied_pending_compaction_marker_present: false,
+        copied_idempotency_store_present: true,
         destination_path_digest: digest(0x97),
         findings: vec![
             SnapshotFinding::CopyByteHashUnavailable {
-                reason: "snapshot v1 structural fixture".into(),
+                reason: "snapshot structural fixture".into(),
                 file_kind: SnapshotFileKind::Segment,
             },
             SnapshotFinding::FenceTokenCancelled,

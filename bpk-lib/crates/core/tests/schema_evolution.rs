@@ -1,6 +1,6 @@
 // justifies: INV-TEST-PANIC-AS-ASSERTION; schema-evolution frozen-decode tests in tests/schema_evolution.rs assert via panic and emit a stderr warning when GOLDEN_UPDATE appends a new frozen fixture.
 #![allow(clippy::panic, clippy::print_stderr)]
-//! Event payload schema-evolution proofs (Workstream A, Phase 1).
+//! Event payload schema-evolution proofs.
 //!
 //! PROVES: INV-EVENT-PAYLOAD-DECODE-BACKCOMPAT — the single decode seam keeps
 //! decoding frozen payload bytes as schemas evolve: additive-with-default is

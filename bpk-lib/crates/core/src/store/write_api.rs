@@ -480,6 +480,21 @@ impl Store<Open> {
     // lifecycle path leaves the `0` sentinel, which the decode seam reads as
     // "tolerant decode as current".
 
+    /// Reject the reserved legacy/untyped sentinel (version 0) before stamping a
+    /// header. The derive macro forbids `version = 0` at compile time, but a
+    /// hand-written `EventPayload` impl can set it; version 0 is what the decode
+    /// seam uses to tell a real typed frame from an untyped one, so this one hot-
+    /// path comparison stops a manual impl from forging legacy-indistinguishable
+    /// bytes. justifies: INV-PAYLOAD-VERSION-NONZERO; see src/event/payload.rs
+    fn guard_typed_payload_version(kind: EventKind, version: u16) -> Result<(), StoreError> {
+        if version == 0 {
+            return Err(StoreError::InvalidPayloadVersion {
+                kind: kind.as_raw_u16(),
+            });
+        }
+        Ok(())
+    }
+
     /// Versioned root submit. Mirrors [`Store::submit`] but stamps `version`.
     fn submit_versioned(
         &self,
@@ -488,6 +503,7 @@ impl Store<Open> {
         payload: &impl Serialize,
         version: u16,
     ) -> Result<AppendTicket, StoreError> {
+        Self::guard_typed_payload_version(kind, version)?;
         self.submit_prepared(
             coord,
             kind,
@@ -505,6 +521,7 @@ impl Store<Open> {
         opts: AppendOptions,
         version: u16,
     ) -> Result<AppendReceipt, StoreError> {
+        Self::guard_typed_payload_version(kind, version)?;
         let gate = opts.gate;
         let receipt = self
             .submit_prepared(
@@ -532,6 +549,7 @@ impl Store<Open> {
         version: u16,
     ) -> Result<AppendTicket, StoreError> {
         use crate::id::EntityIdType;
+        Self::guard_typed_payload_version(kind, version)?;
         self.submit_prepared(
             coord,
             kind,

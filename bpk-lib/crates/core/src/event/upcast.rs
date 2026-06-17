@@ -1,4 +1,4 @@
-//! On-read payload schema upcasting (Workstream A, ADR-0010 consumer).
+//! On-read payload schema upcasting (ADR-0010 consumer).
 //!
 //! When a stored event's `payload_version` is *older* than the current
 //! [`EventPayload::PAYLOAD_VERSION`], the decode seam runs the registered
@@ -218,10 +218,20 @@ fn decode_value<T: DeserializeOwned>(value: &rmpv::Value) -> Result<T, UpcastErr
 }
 
 /// Decode raw msgpack payload bytes into an [`rmpv::Value`] for upcasting.
+///
+/// Rejects trailing bytes after the value: a valid msgpack value followed by
+/// junk indicates a truncated/corrupt payload, not a clean single value.
 pub(crate) fn value_from_msgpack(bytes: &[u8]) -> Result<rmpv::Value, UpcastError> {
     let mut cursor = bytes;
-    rmpv::decode::read_value(&mut cursor)
-        .map_err(|e| UpcastError::ValueCodec(format!("read stored msgpack as value: {e}")))
+    let value = rmpv::decode::read_value(&mut cursor)
+        .map_err(|e| UpcastError::ValueCodec(format!("read stored msgpack as value: {e}")))?;
+    if !cursor.is_empty() {
+        return Err(UpcastError::ValueCodec(format!(
+            "{} trailing byte(s) after stored msgpack value",
+            cursor.len()
+        )));
+    }
+    Ok(value)
 }
 
 /// Convert a `serde_json::Value` (JSON replay lane) into an [`rmpv::Value`].
@@ -232,4 +242,41 @@ pub(crate) fn value_from_json(value: &serde_json::Value) -> Result<rmpv::Value, 
     let bytes = crate::encoding::to_bytes(value)
         .map_err(|e| UpcastError::ValueCodec(format!("encode json payload to msgpack: {e}")))?;
     value_from_msgpack(&bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    // justifies: INV-EVENT-PAYLOAD-DECODE-BACKCOMPAT; unit tests assert via panic on impossible-by-construction branches in src/event/upcast.rs
+    #![allow(clippy::panic)]
+    use super::*;
+
+    #[test]
+    fn value_from_msgpack_rejects_trailing_bytes() {
+        // A valid msgpack value (the integer 42) followed by junk must be
+        // rejected — trailing bytes indicate a corrupt/truncated payload, not a
+        // clean single value.
+        let mut bytes = Vec::new();
+        rmpv::encode::write_value(&mut bytes, &rmpv::Value::from(42u8)).expect("encode test value");
+        bytes.extend_from_slice(&[0xDE, 0xAD, 0xBE, 0xEF]);
+
+        let err = match value_from_msgpack(&bytes) {
+            Ok(_) => panic!("PROPERTY: trailing bytes after a msgpack value must be rejected"),
+            Err(e) => e,
+        };
+        let UpcastError::ValueCodec(msg) = err else {
+            panic!("expected ValueCodec error, got {err:?}");
+        };
+        assert!(
+            msg.contains("4 trailing byte(s)"),
+            "error must report the trailing byte count, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn value_from_msgpack_accepts_a_clean_single_value() {
+        let mut bytes = Vec::new();
+        rmpv::encode::write_value(&mut bytes, &rmpv::Value::from(7u8)).expect("encode test value");
+        let value = value_from_msgpack(&bytes).expect("clean single value decodes");
+        assert_eq!(value.as_u64(), Some(7));
+    }
 }
