@@ -128,7 +128,7 @@ fn crc_valid_frames_end_recovers_all_frames_for_a_too_high_hint() {
     let (bytes, real_frames_end) = frames_then_sdx3_footer(&["x", "y", "z"]);
     let file_len = bytes.len() as u64;
     let mut cursor = Cursor::new(bytes);
-    let recovered = crc_valid_frames_end(&mut cursor, 0, file_len).expect("must not error");
+    let recovered = crc_valid_frames_end(&mut cursor, 0, file_len, 7).expect("must not error");
     assert_eq!(
         recovered, real_frames_end,
         "PROPERTY: the walker, bounded by file_len, stops at the true CRC-valid frame end and \
@@ -151,7 +151,7 @@ fn crc_valid_frames_end_recovers_all_frames_for_a_too_low_hint() {
         "too-low hint must land on an interior frame boundary"
     );
     let mut cursor = Cursor::new(bytes);
-    let recovered = crc_valid_frames_end(&mut cursor, 0, file_len).expect("must not error");
+    let recovered = crc_valid_frames_end(&mut cursor, 0, file_len, 7).expect("must not error");
     assert_eq!(
         recovered, real_frames_end,
         "PROPERTY: a too-low untrusted hint must NOT bound recovery; all CRC-valid frames recover"
@@ -179,7 +179,7 @@ fn crc_valid_frames_end_recovers_all_frames_for_a_mid_frame_hint() {
         "hint must land strictly inside a later CRC-valid frame, not at a boundary"
     );
     let mut cursor = Cursor::new(bytes);
-    let recovered = crc_valid_frames_end(&mut cursor, 0, file_len).expect("must not error");
+    let recovered = crc_valid_frames_end(&mut cursor, 0, file_len, 7).expect("must not error");
     assert_eq!(
         recovered, real_frames_end,
         "PROPERTY: a mid-frame untrusted hint must NOT drop the containing CRC-valid frame; all \
@@ -195,10 +195,67 @@ fn crc_valid_frames_end_stops_at_first_non_frame_byte() {
     let (bytes, real_frames_end) = frames_then_sdx3_footer(&["p", "q"]);
     let file_len = bytes.len() as u64;
     let mut cursor = Cursor::new(bytes);
-    let recovered = crc_valid_frames_end(&mut cursor, 0, file_len).expect("must not error");
+    let recovered = crc_valid_frames_end(&mut cursor, 0, file_len, 7).expect("must not error");
     assert_eq!(
         recovered, real_frames_end,
         "PROPERTY: the walk stops at the true frame end (footer bytes never decode as a frame)"
+    );
+}
+
+#[test]
+fn crc_valid_frames_end_fails_closed_on_mid_stream_corruption() {
+    // ROUND-5 P1 (unit-level): `[valid][valid][CORRUPT][valid][valid][footer]`. The
+    // walk reaches the corrupt frame at P (CRC fails -> non-decodable), then the
+    // look-ahead resync from P+1 finds the CRC-valid frames that FOLLOW. A
+    // non-decodable position with valid frames after it is MID-STREAM corruption,
+    // not the true frame end, so recovery must FailClosed (CorruptSegment) — NOT
+    // silently truncate to the `[valid][valid]` prefix as the round-4 code did.
+    let (mut bytes, frames_end) = frames_then_sdx3_footer(&["a", "b", "c", "d", "e"]);
+    // Corrupt the THIRD frame's payload (interior), leaving frames 4/5 CRC-valid.
+    let f2_start = frame_total_len_at(&bytes, 0);
+    let f3_start = f2_start + frame_total_len_at(&bytes, f2_start);
+    let third_payload_byte = usize::try_from(f3_start + 8).expect("offset fits usize");
+    assert!(
+        (third_payload_byte as u64) < frames_end,
+        "corruption target must be inside the frame region"
+    );
+    bytes[third_payload_byte] ^= 0x01; // break only the third frame's CRC
+    let file_len = bytes.len() as u64;
+    let mut cursor = Cursor::new(bytes);
+    let result = crc_valid_frames_end(&mut cursor, 0, file_len, 7);
+    assert!(
+        matches!(
+            result,
+            Err(StoreError::CorruptSegment { segment_id: 7, .. })
+        ),
+        "PROPERTY: mid-stream corruption (CRC-valid frames after the first bad frame) must \
+         FailClosed with CorruptSegment, not silently recover the prefix; got {result:?}"
+    );
+}
+
+#[test]
+fn crc_valid_frames_end_recovers_prefix_for_torn_last_frame() {
+    // ROUND-5 composition (unit-level): a genuinely torn LAST frame with NOTHING
+    // CRC-valid after it. The walk recovers `[valid][valid]`, reaches the torn
+    // frame at P, the resync look-ahead finds no valid frame between P and EOF, so
+    // P is the true frame-region end (torn tail) — recover the prefix, do NOT
+    // FailClosed. This proves the fix composes with torn-tail handling.
+    let (bytes, _frames_end) = frames_then_sdx3_footer(&["a", "b", "c"]);
+    // Find the start of the THIRD (last real) frame, then keep only its header + a
+    // single payload byte so it can never decode (truncated) and append NO footer —
+    // nothing CRC-valid follows the tear.
+    let f2_start = frame_total_len_at(&bytes, 0);
+    let f3_start = f2_start + frame_total_len_at(&bytes, f2_start);
+    let prefix_end = usize::try_from(f3_start + 8 + 1).expect("offset fits usize");
+    let torn = bytes[..prefix_end].to_vec();
+    let file_len = torn.len() as u64;
+    let mut cursor = Cursor::new(torn);
+    let recovered =
+        crc_valid_frames_end(&mut cursor, 0, file_len, 7).expect("torn tail must not error");
+    assert_eq!(
+        recovered, f3_start,
+        "PROPERTY: a torn last frame with nothing valid after it recovers the clean prefix \
+         (ends at the start of the torn frame), not FailClosed"
     );
 }
 

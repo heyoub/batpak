@@ -107,7 +107,7 @@ impl Reader {
         // admits non-CRC-valid bytes), so no separate truncation guard is needed
         // for the untrusted path.
         let frames_end = if untrusted_boundary {
-            segment::crc_valid_frames_end(&mut file, cursor, file_len)?
+            segment::crc_valid_frames_end(&mut file, cursor, file_len, segment_id)?
         } else {
             frames_end
         };

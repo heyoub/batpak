@@ -374,7 +374,7 @@ impl Segment<Active> {
         // recovers ALL CRC-valid frames (the walk is truncation-proof), so no
         // separate truncation guard is needed for the untrusted path.
         let copy_end = if untrusted_boundary {
-            crc_valid_frames_end(&mut source, frames_start, file_len)?
+            crc_valid_frames_end(&mut source, frames_start, file_len, 0)?
         } else {
             frames_end
         };
@@ -545,6 +545,99 @@ pub(crate) fn detect_sidx_boundary<R: Read + Seek>(
     }))
 }
 
+/// Attempt to decode a single CRC-valid frame starting at byte `at` in `source`,
+/// reading no farther than `file_len`. Returns the consumed frame size on a clean
+/// decode, or `None` if no real frame begins exactly at `at` (truncated header, a
+/// zero or over-large `claimed_len`, a tail past `file_len`, a short read, or a
+/// CRC/decode failure). A returned `Some` means the bytes at `at` are a genuine
+/// frame: the `claimed_len` is in `1..=MAX_FRAME_PAYLOAD` AND the CRC32 over the
+/// payload matches, which makes a false positive astronomically unlikely.
+///
+/// A zero `claimed_len` is rejected on purpose: `frame_encode` always serializes a
+/// non-empty `FramePayload` (it carries at least `event`/`entity`/`scope`), so a
+/// real frame's payload is never empty. Admitting a zero-length frame would also
+/// let any run of 8 zero bytes (common inside the SIDX footer's entry table —
+/// e.g. `prev_hash: [0; 32]`) read as a CRC-valid empty frame (the CRC32 of an
+/// empty payload is 0), which is the one systematic false-positive the resync
+/// look-ahead must not trip on.
+///
+/// # Errors
+/// Returns [`StoreError::Io`] only on a seek failure; a short/EOF read is treated
+/// as "no frame here" (`Ok(None)`), not an error.
+fn try_decode_frame_at<R: Read + Seek>(
+    source: &mut R,
+    at: u64,
+    file_len: u64,
+) -> Result<Option<u64>, StoreError> {
+    // Need at least an 8-byte frame header before the source end.
+    if file_len.saturating_sub(at) < 8 {
+        return Ok(None);
+    }
+    source.seek(SeekFrom::Start(at)).map_err(StoreError::Io)?;
+    let mut header = [0u8; 8];
+    if source.read_exact(&mut header).is_err() {
+        return Ok(None);
+    }
+    let claimed_len = u32::from_be_bytes([header[0], header[1], header[2], header[3]]) as u64;
+    if claimed_len == 0 || claimed_len > MAX_FRAME_PAYLOAD as u64 {
+        return Ok(None);
+    }
+    let frame_tail = match at.checked_add(8).and_then(|b| b.checked_add(claimed_len)) {
+        Some(tail) => tail,
+        None => return Ok(None),
+    };
+    if frame_tail > file_len {
+        // A real frame cannot extend past the end of the source.
+        return Ok(None);
+    }
+    let payload_len = usize::try_from(claimed_len).unwrap_or(usize::MAX);
+    let mut frame = vec![0u8; 8 + payload_len];
+    frame[..8].copy_from_slice(&header);
+    if source.read_exact(&mut frame[8..]).is_err() {
+        return Ok(None);
+    }
+    match frame_decode(&frame) {
+        Ok((_, frame_size)) => Ok(Some(frame_size as u64)),
+        Err(_) => Ok(None),
+    }
+}
+
+/// Look-ahead resync: starting at byte `from`, scan toward `file_len` for ANY
+/// CRC-valid frame. Returns `true` if one is found.
+///
+/// This is the integrity check that distinguishes "the bytes at the first
+/// non-decodable position are footer/torn-tail" (nothing valid follows → `false`)
+/// from "the bytes at that position are MID-STREAM corruption" (a CRC-valid frame
+/// still follows → `true`). A CRC-valid frame after the corruption proves the
+/// corruption is interior, not the true end of the frame region, so recovery must
+/// fail closed instead of silently truncating to the prefix.
+///
+/// Cost: the scan only covers the tail region after the last CRC-valid frame.
+/// In the common (benign) case that tail is just the footer — a handful of bytes
+/// — so the byte-by-byte resync is cheap and bounded by `file_len`. Alignment is
+/// NOT assumed: a CRC-valid frame may begin at any byte, so every offset from
+/// `from` to `file_len - 8` is probed. Correctness (never miss a real later
+/// frame) is worth more than skipping offsets here. The 256 MiB
+/// `MAX_FRAME_PAYLOAD` claim-cap plus the CRC make a false-positive resync onto
+/// random bytes astronomically unlikely, so a `true` result is a real frame.
+///
+/// # Errors
+/// Returns [`StoreError::Io`] on a seek failure inside the probe.
+fn crc_valid_frame_exists_after<R: Read + Seek>(
+    source: &mut R,
+    from: u64,
+    file_len: u64,
+) -> Result<bool, StoreError> {
+    let mut probe = from;
+    while file_len.saturating_sub(probe) >= 8 {
+        if try_decode_frame_at(source, probe, file_len)?.is_some() {
+            return Ok(true);
+        }
+        probe += 1;
+    }
+    Ok(false)
+}
+
 /// Find the true end of CRC-valid frames when the SIDX boundary is UNTRUSTED.
 ///
 /// An untrusted boundary (CRC-failed SDX3 footer, legacy SDX2 footer, or a
@@ -555,33 +648,49 @@ pub(crate) fn detect_sidx_boundary<R: Read + Seek>(
 /// Trusting it as an upper bound silently drops every CRC-valid frame at or
 /// after the bogus offset; trusting it as a lower bound makes the scan parse
 /// footer bytes as frame headers and FailClosed. Either way the hint corrupts
-/// recovery.
+/// recovery. So the hint is discarded entirely and the ONLY bound is `file_len`.
 ///
-/// So the hint is discarded entirely. This walks the frame region from
-/// `frames_start` to the NATURAL end of CRC-valid frames: it keeps decoding
-/// frames until one fails — truncated, an over-large `claimed_len`, a
-/// `frame_decode` error, or one that would read past `file_len` — and returns
-/// the cursor at that first failure. The ONLY bound is `file_len` (the real
-/// source/file length). Footer bytes after the real frames never decode as a
-/// CRC-valid frame, so the scan stops naturally at the true frame-region end no
-/// matter where the garbage hint pointed. This recovers ALL CRC-valid frames
-/// (availability) without admitting any non-CRC-valid data (integrity).
+/// This walks the frame region from `frames_start`, decoding frames until one
+/// fails at some position P (truncated, an over-large `claimed_len`, a
+/// `frame_decode`/CRC error, or a tail past `file_len`). P is the FIRST
+/// non-decodable position. The remaining question is whether P is the true end
+/// of the frame region (footer/torn-tail bytes follow) or MID-STREAM corruption
+/// (a corrupt frame with valid frames still after it):
+///
+/// - **P is the true end** iff NOTHING decodable as a CRC-valid frame exists
+///   between P and `file_len`. Footer bytes, the string table, the trailer, and a
+///   genuinely torn last frame never resync to a CRC-valid frame, so the prefix
+///   `[frames_start..P]` is exactly the durable frame region → return `Ok(P)`.
+///
+/// - **P is mid-stream corruption** iff a CRC-valid frame still EXISTS after P
+///   (before `file_len`). Silently returning `P` here would drop the corrupt
+///   frame AND every later CRC-valid event — converting interior corruption into
+///   a clean EOF, which a trusted/no-footer scan would FailClosed on. So this
+///   FailCloses too: return `Err(CorruptSegment)`. The look-ahead resync
+///   (`crc_valid_frame_exists_after`) is what decides this; CRC makes a
+///   false-positive resync astronomically unlikely.
+///
+/// This recovers ALL CRC-valid frames in the benign cases (availability) without
+/// ever converting interior corruption into silent truncation (integrity), and
+/// composes with torn-tail handling: a genuinely incomplete LAST frame has
+/// nothing valid after it, so it falls in the "true end" branch and the prefix
+/// recovers.
 ///
 /// This must ONLY be used for an untrusted boundary. For a CRC-authenticated
 /// SDX3 footer the offset is authoritative and a bad frame before it is genuine
 /// mid-stream corruption that must still FailClosed (see the scan loops).
 ///
 /// # Errors
-/// Returns [`StoreError::Io`] on seek/read failure.
+/// Returns [`StoreError::Io`] on seek/read failure, or
+/// [`StoreError::CorruptSegment`] when a CRC-valid frame is found after the first
+/// non-decodable position (mid-stream corruption).
 pub(crate) fn crc_valid_frames_end<R: Read + Seek>(
     source: &mut R,
     frames_start: u64,
     file_len: u64,
+    segment_id: u64,
 ) -> Result<u64, StoreError> {
     let mut cursor = frames_start;
-    source
-        .seek(SeekFrom::Start(frames_start))
-        .map_err(StoreError::Io)?;
 
     loop {
         if cursor >= file_len {
@@ -589,46 +698,37 @@ pub(crate) fn crc_valid_frames_end<R: Read + Seek>(
             // the frames run to EOF): the real frames end at the source end.
             return Ok(file_len);
         }
-        // Need at least an 8-byte frame header before the source end.
-        if file_len.saturating_sub(cursor) < 8 {
-            return Ok(cursor);
-        }
-        let mut header = [0u8; 8];
-        if source.read_exact(&mut header).is_err() {
-            return Ok(cursor);
-        }
-        let claimed_len = u32::from_be_bytes([header[0], header[1], header[2], header[3]]) as u64;
-        if claimed_len > MAX_FRAME_PAYLOAD as u64 {
-            // Over-large payload claim: not a real frame, clean end here.
-            return Ok(cursor);
-        }
-        let frame_tail = match cursor
-            .checked_add(8)
-            .and_then(|b| b.checked_add(claimed_len))
-        {
-            Some(tail) => tail,
-            None => return Ok(cursor),
-        };
-        if frame_tail > file_len {
-            // A real frame cannot extend past the end of the source.
-            return Ok(cursor);
-        }
-        let payload_len = usize::try_from(claimed_len).unwrap_or(usize::MAX);
-        let mut frame = vec![0u8; 8 + payload_len];
-        frame[..8].copy_from_slice(&header);
-        if source.read_exact(&mut frame[8..]).is_err() {
-            return Ok(cursor);
-        }
-        match frame_decode(&frame) {
-            Ok((_, frame_size)) => {
-                cursor = match cursor.checked_add(frame_size as u64) {
+        match try_decode_frame_at(source, cursor, file_len)? {
+            Some(frame_size) => {
+                cursor = match cursor.checked_add(frame_size) {
                     Some(next) => next,
                     None => return Ok(cursor),
                 };
             }
-            Err(_) => {
-                // First non-CRC-valid frame (footer bytes or genuine corruption)
-                // is the clean end of real frames.
+            None => {
+                // `cursor` (= P) is the FIRST position that does not decode as a
+                // CRC-valid frame. It is the true end of the frame region ONLY if
+                // nothing valid follows it. Resync-scan from P+1 toward EOF: if a
+                // CRC-valid frame still exists after P, P is mid-stream corruption
+                // and recovery must FailClosed rather than silently truncate to the
+                // prefix. (Probe from P+1 because P itself just failed to decode as
+                // a frame start.)
+                let resync_from = match cursor.checked_add(1) {
+                    Some(next) => next,
+                    None => return Ok(cursor),
+                };
+                if crc_valid_frame_exists_after(source, resync_from, file_len)? {
+                    return Err(StoreError::corrupt_segment_with_detail(
+                        segment_id,
+                        format!(
+                            "mid-stream corruption: frame at offset {cursor} is non-decodable but a \
+                             CRC-valid frame follows before EOF (file_len {file_len}); refusing to \
+                             silently truncate to the prefix during untrusted-footer recovery"
+                        ),
+                    ));
+                }
+                // Nothing valid after P: P is the genuine end of the frame region
+                // (footer / torn-tail bytes follow). Recover the prefix.
                 return Ok(cursor);
             }
         }

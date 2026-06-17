@@ -217,8 +217,8 @@ const OVERSIZE_HARNESS_ALLOWLIST: &[OversizeDebt] = &[
     },
     OversizeDebt {
         path: "tests/segment_scan_hardening.rs",
-        max_lines: 986,
-        reason: "segment corruption shapes share frame-building helpers; bumped 713 -> 805 after the legacy-SDX2 backward-compat frame-scan regression tests landed (audit P1 fallback fix); 805 -> 868 for the forged truncating SIDX-offset rejection regression test (audit P1, rustfmt-final count); 868 -> 928 for the corrupt-SDX3-footer too-high-offset recover-all-CRC-valid-frames regression test (round-3 audit P1); 928 -> 986 for the round-4 untrusted-offset recover-all-frames regression tests (forged too-low + mid-frame; the round-2 reject test became a recover-all test since an unauthenticated offset must never bound recovery)",
+        max_lines: 1161,
+        reason: "segment corruption shapes share frame-building helpers; grew across audit rounds (legacy-SDX2 fallback, forged-truncate reject, corrupt-SDX3 too-high recover, round-4 untrusted-offset recover-all, round-5 mid-stream-corruption FailClosed via look-ahead + torn-last-frame recover); 1161 is the rustfmt-final count after the round-5 tests",
         target: "split helper module from case table during harness cleanup",
     },
     OversizeDebt {
