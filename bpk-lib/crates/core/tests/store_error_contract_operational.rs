@@ -13,20 +13,30 @@ use store_error_support::*;
 
 #[test]
 fn store_error_contract_retryable_operational_family_stays_stable() {
-    for case in contract_table()
+    let cases: Vec<_> = contract_table()
         .into_iter()
         .filter(|case| case.class == HandlingClass::RetryableOperational)
-    {
-        assert_case_contract(&case);
+        .collect();
+    assert!(
+        !cases.is_empty(),
+        "STORE_ERROR CONTRACT DRIFT: expected RetryableOperational cases in contract_table()"
+    );
+    for case in &cases {
+        assert_case_contract(case);
     }
 }
 
 #[test]
 fn store_error_contract_fail_closed_operational_family_stays_stable() {
-    for case in contract_table()
+    let cases: Vec<_> = contract_table()
         .into_iter()
         .filter(|case| case.class == HandlingClass::FailClosedOperational)
-    {
-        assert_case_contract(&case);
+        .collect();
+    assert!(
+        !cases.is_empty(),
+        "STORE_ERROR CONTRACT DRIFT: expected FailClosedOperational cases in contract_table()"
+    );
+    for case in &cases {
+        assert_case_contract(case);
     }
 }

@@ -57,7 +57,7 @@ struct ColdStartContext {
 }
 
 #[test]
-#[ignore = "hardware-dependent perf gate — run via `cargo xtask perf-gates` or `cargo nextest run --test perf_gates -- --ignored`. Uses Instant::now() and asserts on wall-clock; flakes on shared CI runners."]
+#[ignore = "hardware-dependent perf gate — run via `cargo xtask perf-gates` or `cargo nextest run --test perf_gates_cold_start -- --ignored`. Uses Instant::now() and asserts on wall-clock; flakes on shared CI runners."]
 fn cold_start_1k_events_under_threshold() {
     let dir = TempDir::new().expect("create temp dir");
     let kind = EventKind::custom(0xF, 1);
