@@ -794,3 +794,86 @@ fn external_cache_hit_observed_freshness_distinguishes_fresh_from_stale_allowed(
     store.close()?;
     Ok(())
 }
+
+#[test]
+fn ahead_of_disk_external_cache_row_is_not_served_on_freshness_path() -> TestResult {
+    // R16 (cache-hit path): a MaybeStale (age-fresh) external cache row whose
+    // watermark is AHEAD of disk — e.g. a row that survived a rollback/rebuild —
+    // must NOT be returned. Serving it would report state for events no longer
+    // present in the current segment log. The guard
+    //   `is_fresh && meta.watermark <= execution.replay.watermark`
+    // forces a full replay so disk stays authoritative. Without the
+    // `meta.watermark <= replay.watermark` term, the age-only `is_fresh` would
+    // return the forged ahead-of-disk value.
+    use crate::coordinate::Coordinate;
+    use crate::store::projection::CacheMeta;
+    use crate::store::{Freshness, Store};
+
+    // Non-incremental projection (defaults route through the external-cache
+    // path). value == on-disk event count, so the forged ahead-of-disk row and
+    // the honest full-replay value are distinguishable.
+    #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq)]
+    struct AheadCounter {
+        count: u32,
+    }
+    impl EventSourced for AheadCounter {
+        type Input = crate::event::JsonValueInput;
+        fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
+            Some(AheadCounter {
+                count: u32::try_from(events.len()).expect("test uses < 2^32 events"),
+            })
+        }
+        fn apply_event(&mut self, _event: &Event<serde_json::Value>) {}
+        fn relevant_event_kinds() -> &'static [EventKind] {
+            static KINDS: [EventKind; 1] = [EventKind::custom(0xF, 1)];
+            &KINDS
+        }
+        // supports_incremental_apply() defaults to false -> external-cache path.
+    }
+
+    let dir = TempDir::new()?;
+    let config = StoreConfig::new(dir.path().join("data")).with_sync_every_n_events(1);
+    let store = Store::open_with_native_cache(config, dir.path().join("cache"))?;
+
+    let coord = Coordinate::new("entity:ahead", "scope:test").expect("coordinate");
+    let kind = AheadCounter::relevant_event_kinds()[0];
+    // Disk holds two events -> the honest projection is count 2.
+    store.append(&coord, kind, &serde_json::json!({ "n": 1 }))?;
+    store.append(&coord, kind, &serde_json::json!({ "n": 2 }))?;
+
+    // Forge an external cache row that is AHEAD of disk: it claims a future
+    // watermark (u64::MAX, guaranteed > the current disk watermark) and a bogus
+    // value (count 99). It is freshly stamped so the MaybeStale age check alone
+    // would treat it as fresh.
+    let key = projection_cache_key::<AheadCounter>("entity:ahead");
+    let forged = serde_json::to_vec(&AheadCounter { count: 99 })?;
+    store.cache.put(
+        &key,
+        &forged,
+        CacheMeta {
+            watermark: u64::MAX,
+            cached_at_us: store.runtime.cache_now_us(),
+            cached_at_mono_ns: Some(store.runtime.now_mono_ns()),
+            process_boot_ns: Some(store.runtime.process_boot_ns()),
+        },
+    )?;
+
+    // MaybeStale with a wide age window: age-only freshness would serve the
+    // forged 99. The ahead-of-disk guard must instead force a full replay -> 2.
+    let observed: Option<AheadCounter> = store.project(
+        "entity:ahead",
+        &Freshness::MaybeStale {
+            max_stale_ms: 60_000,
+        },
+    )?;
+    assert_eq!(
+        observed,
+        Some(AheadCounter { count: 2 }),
+        "ahead-of-disk cache row (watermark u64::MAX > disk) must NOT be served; \
+         disk is authoritative (full replay 2). Dropping the \
+         `meta.watermark <= replay.watermark` guard serves the forged 99."
+    );
+
+    store.close()?;
+    Ok(())
+}

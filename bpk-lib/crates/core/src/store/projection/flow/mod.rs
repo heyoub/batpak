@@ -575,7 +575,14 @@ where
                 }
             }
 
-            if is_fresh {
+            // R16 (cache-hit path): never serve a cache row that is AHEAD of
+            // disk. The `Consistent` freshness check already requires
+            // `meta.watermark == replay.watermark`, but `MaybeStale` derives
+            // `is_fresh` purely from age and would otherwise return bytes from a
+            // future watermark after a rollback/rebuild — reporting state for
+            // events no longer present in the current segment log. Force full
+            // replay (disk authoritative) for ahead-of-disk rows.
+            if is_fresh && meta.watermark <= execution.replay.watermark {
                 if let Some(value) = decode_cached_state::<T>(
                     execution.entity,
                     &bytes,

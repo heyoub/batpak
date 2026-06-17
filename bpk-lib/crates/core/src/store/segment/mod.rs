@@ -2,6 +2,9 @@ pub(crate) mod id;
 pub(crate) mod scan;
 pub(crate) mod sidx;
 
+#[cfg(test)]
+mod boundary_tests;
+
 pub(crate) use id::SegmentId;
 
 use crate::event::Event;
@@ -327,6 +330,30 @@ impl Segment<Active> {
         // offset; this copy path mirrors corrupt_magic(0) above and has no parsed id.
         let frames_end = detect_sidx_boundary(&mut source, file_len, 0)?.unwrap_or(file_len);
 
+        // Lower-bound check (mirrors scan/recovery.rs + full_scan.rs): the SIDX
+        // string_table_offset must not fall below the start of the frame region.
+        // detect_sidx_boundary only validates the upper bound; the lower bound is
+        // the call site's responsibility. A corrupt offset < frames_start would
+        // make `frames_end.saturating_sub(frames_start)` copy zero bytes (or only
+        // a prefix), and after compaction publishes the merged segment and cleans
+        // up the old sealed files, those CRC-valid frames would be silently lost.
+        // Reject with CorruptSegment instead. frames_end == frames_start (empty
+        // frame region) stays valid.
+        if frames_end < frames_start {
+            return Err(StoreError::corrupt_segment_with_detail(
+                0,
+                format!(
+                    "SIDX string_table_offset {frames_end} is below the frame region start \
+                     {frames_start} (8 + header_len {header_len}) during compaction copy"
+                ),
+            ));
+        }
+
+        // Reject an unauthenticated SIDX boundary that truncates real frames: if
+        // a CRC-valid frame begins at the claimed boundary, copying only up to it
+        // would lose the later frames once the old sealed file is recycled.
+        validate_sidx_boundary_not_truncating(&mut source, frames_end, file_len, 0)?;
+
         source
             .seek(SeekFrom::Start(frames_start))
             .map_err(StoreError::Io)?;
@@ -447,6 +474,85 @@ pub(crate) fn detect_sidx_boundary<R: Read + Seek>(
     }
 
     Ok(Some(string_table_offset))
+}
+
+/// Verify that a SIDX frame-region boundary does not truncate real frames.
+///
+/// `detect_sidx_boundary` trusts the trailer's `string_table_offset` as the end
+/// of the frame region, but that offset is NOT covered by the SDX3 footer CRC
+/// (and SDX2 footers carry no CRC at all), so a corrupt/forged offset is
+/// unauthenticated. If the offset is forged to land on an *earlier* frame
+/// boundary, the frame scan stops there and silently drops the later CRC-valid
+/// frames — they never get indexed and are lost once compaction recycles the
+/// segment.
+///
+/// The structural tell is simple and format-agnostic: in a correctly-sealed
+/// segment, `frames_end` points at the SIDX string table (msgpack), which is not
+/// a frame. If a CRC-VALID frame begins exactly at `frames_end`, the boundary is
+/// truncating real data and must be rejected. A genuine footer's string-table
+/// bytes will not decode as a CRC-valid frame, so this never false-positives on a
+/// merely-stale-but-honest offset (e.g. a footer whose `entry_count` was
+/// corrupted but whose `string_table_offset` is correct — that path must still
+/// recover gracefully).
+///
+/// `frames_end == file_len` means there was no SIDX footer (frames run to EOF),
+/// so there is nothing to validate.
+///
+/// # Errors
+/// Returns [`StoreError::Io`] on seek/read failure and
+/// [`StoreError::CorruptSegment`] when a CRC-valid frame begins at the claimed
+/// boundary (proof the offset truncated real frames).
+pub(crate) fn validate_sidx_boundary_not_truncating<R: Read + Seek>(
+    source: &mut R,
+    frames_end: u64,
+    file_len: u64,
+    segment_id: u64,
+) -> Result<(), StoreError> {
+    // No SIDX footer → no untrusted boundary to check.
+    if frames_end >= file_len {
+        return Ok(());
+    }
+
+    let available = file_len.saturating_sub(frames_end);
+    if available < 8 {
+        // Not even a frame header can start here → cannot be a truncated frame.
+        return Ok(());
+    }
+
+    // Read the 8-byte frame header first to learn the claimed payload length,
+    // then read exactly that payload (bounded by MAX_FRAME_PAYLOAD and by the
+    // bytes actually available) so a forged length cannot drive an unbounded
+    // allocation. frame_decode then either confirms a CRC-valid frame begins
+    // here (boundary truncates real data → reject) or rejects it (an honest
+    // footer's string-table bytes, which do not decode as a frame).
+    source
+        .seek(SeekFrom::Start(frames_end))
+        .map_err(StoreError::Io)?;
+    let mut header = [0u8; 8];
+    source.read_exact(&mut header).map_err(StoreError::Io)?;
+    let claimed_len = u32::from_be_bytes([header[0], header[1], header[2], header[3]]) as u64;
+    if claimed_len > MAX_FRAME_PAYLOAD as u64 || claimed_len > available.saturating_sub(8) {
+        // A real frame here would not fit / would exceed the payload cap, so it
+        // cannot be a CRC-valid frame the boundary is truncating.
+        return Ok(());
+    }
+    let payload_len = usize::try_from(claimed_len).unwrap_or(usize::MAX);
+    let mut probe = vec![0u8; 8 + payload_len];
+    probe[..8].copy_from_slice(&header);
+    source.read_exact(&mut probe[8..]).map_err(StoreError::Io)?;
+
+    if frame_decode(&probe).is_ok() {
+        return Err(StoreError::corrupt_segment_with_detail(
+            segment_id,
+            format!(
+                "SIDX string_table_offset {frames_end} truncates the frame region: a CRC-valid \
+                 frame begins at the claimed boundary, so trusting it would silently drop later \
+                 frames (forged/corrupt unauthenticated offset)"
+            ),
+        ));
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]

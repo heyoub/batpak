@@ -463,6 +463,69 @@ fn sidx_footer_magic_mismatch_falls_back_to_frame_scan() {
 }
 
 #[test]
+fn sidx_footer_offset_forged_to_truncate_frames_is_rejected_not_silently_dropped() {
+    // A forged SIDX string_table_offset that lands on an EARLIER real frame
+    // boundary would make the frame-scan fallback stop short and silently drop
+    // the later CRC-valid frames. The offset is not covered by the SDX3 footer
+    // CRC, so corrupting it forces the frame-scan fallback; cold start must then
+    // refuse to trust the truncating boundary rather than lose committed data.
+    let dir = TempDir::new().expect("temp dir");
+    seed_store(&dir, 6);
+
+    let seg = segment_path(&dir);
+    let bytes = std::fs::read(&seg).expect("read segment");
+    assert_eq!(
+        &bytes[bytes.len() - 4..],
+        b"SDX3",
+        "seeded segment must carry the SDX3 SIDX magic"
+    );
+
+    // Walk frames from the header end to find the offset of the SECOND frame —
+    // a real frame boundary that sits strictly inside the frame region.
+    let frames_start = frame_scan_header_end(&bytes);
+    let true_frames_end = usize::try_from(u64::from_le_bytes(
+        bytes[bytes.len() - 16..bytes.len() - 8]
+            .try_into()
+            .expect("8-byte SIDX trailer offset"),
+    ))
+    .expect("SIDX string table offset fits usize");
+    let mut cursor = frames_start;
+    // skip the first frame
+    let first_len = u32::from_be_bytes(bytes[cursor..cursor + 4].try_into().unwrap()) as usize;
+    cursor += 8 + first_len;
+    let forged_offset = cursor;
+    assert!(
+        forged_offset > frames_start && forged_offset < true_frames_end,
+        "forged boundary must land on an interior real frame boundary"
+    );
+
+    // Overwrite the SIDX trailer's string_table_offset with the forged boundary.
+    let mut forged = bytes.clone();
+    let off_pos = forged.len() - 16;
+    forged[off_pos..off_pos + 8].copy_from_slice(&(forged_offset as u64).to_le_bytes());
+    std::fs::write(&seg, &forged).expect("write forged-offset segment");
+
+    // Cold start must NOT succeed with truncated data; it must surface the
+    // corruption (CorruptSegment) rather than silently dropping the frames after
+    // the forged boundary.
+    let result = Store::open(config(&dir));
+    match result {
+        Err(StoreError::CorruptSegment { .. }) => {}
+        Ok(store) => {
+            let entries = user_entries(&store);
+            panic!(
+                "PROPERTY: a forged truncating SIDX offset must not silently drop frames; \
+                 cold start returned Ok with {} of 6 entries",
+                entries.len()
+            );
+        }
+        Err(other) => panic!(
+            "PROPERTY: expected CorruptSegment for a forged truncating SIDX offset, got {other:?}"
+        ),
+    }
+}
+
+#[test]
 fn sidx_footer_entry_count_disagreement_falls_back_to_frame_scan() {
     // Corrupting the SIDX entry_count makes the footer structurally
     // inconsistent with the actual footer block. Cold start must not trust

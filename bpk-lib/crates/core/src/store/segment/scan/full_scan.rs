@@ -80,6 +80,15 @@ impl Reader {
             ));
         }
 
+        // The SIDX boundary offset is unauthenticated (not covered by the SDX3
+        // CRC; SDX2 has no CRC). Reject it if it truncates real frames — i.e. a
+        // CRC-valid frame begins exactly at the claimed boundary — so a forged
+        // offset cannot silently drop later CRC-valid frames during the scan.
+        segment::validate_sidx_boundary_not_truncating(
+            &mut file, frames_end, file_len, segment_id,
+        )?;
+        file.seek(SeekFrom::Start(cursor)).map_err(StoreError::Io)?;
+
         // Read frames until EOF. Each frame: [len:u32 BE][crc32:u32 BE][msgpack]
         let mut entries = Vec::new();
         loop {

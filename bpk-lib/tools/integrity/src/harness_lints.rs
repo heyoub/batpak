@@ -187,8 +187,8 @@ const OVERSIZE_HARNESS_ALLOWLIST: &[OversizeDebt] = &[
     },
     OversizeDebt {
         path: "tests/durable_frontier_waits.rs",
-        max_lines: 597,
-        reason: "wait and gate API phases share controlled projection fixtures",
+        max_lines: 620,
+        reason: "wait and gate API phases share controlled projection fixtures; R3 writer-crash case carries its own terminal-restart-policy store helper",
         target: "split wait surfaces from append-gate surfaces during harness cleanup",
     },
     OversizeDebt {
@@ -217,8 +217,8 @@ const OVERSIZE_HARNESS_ALLOWLIST: &[OversizeDebt] = &[
     },
     OversizeDebt {
         path: "tests/segment_scan_hardening.rs",
-        max_lines: 805,
-        reason: "segment corruption shapes share frame-building helpers; bumped 713 -> 805 after the legacy-SDX2 backward-compat frame-scan regression tests landed (audit P1 fallback fix)",
+        max_lines: 868,
+        reason: "segment corruption shapes share frame-building helpers; bumped 713 -> 805 after the legacy-SDX2 backward-compat frame-scan regression tests landed (audit P1 fallback fix); 805 -> 868 for the forged truncating SIDX-offset rejection regression test (audit P1, rustfmt-final count)",
         target: "split helper module from case table during harness cleanup",
     },
     OversizeDebt {

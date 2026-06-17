@@ -12,8 +12,8 @@
 
 use batpak::prelude::{Coordinate, EventKind, Region};
 use batpak::store::{
-    AppendOptions, BatchAppendItem, CausationRef, DurabilityGate, HlcPoint, Store, StoreConfig,
-    StoreError, WatermarkKind,
+    AppendOptions, BatchAppendItem, CausationRef, DurabilityGate, HlcPoint, RestartPolicy, Store,
+    StoreConfig, StoreError, WatermarkKind,
 };
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -42,6 +42,26 @@ fn open_store(sync_every_n_events: u32) -> (TempDir, Store) {
     let store =
         Store::open(StoreConfig::new(dir.path()).with_sync_every_n_events(sync_every_n_events))
             .expect("open store");
+    (dir, store)
+}
+
+/// Open a store whose writer treats any panic as terminal (zero restart
+/// budget). Under the default `RestartPolicy::Once`, a single panic is a
+/// *within-budget transient* — the writer restarts and durable waiters are NOT
+/// poisoned (that is the R3 fix). To prove that a genuine writer CRASH surfaces
+/// to durable waiters as `WriterCrashed`, the panic must be terminal, which a
+/// zero-budget `Bounded` policy guarantees on the first panic.
+fn open_store_terminal_on_panic(sync_every_n_events: u32) -> (TempDir, Store) {
+    let dir = TempDir::new().expect("temp dir");
+    let store = Store::open(
+        StoreConfig::new(dir.path())
+            .with_sync_every_n_events(sync_every_n_events)
+            .with_restart_policy(RestartPolicy::Bounded {
+                max_restarts: 0,
+                within_ms: 0,
+            }),
+    )
+    .expect("open store");
     (dir, store)
 }
 
@@ -166,7 +186,10 @@ fn wait_for_durable_returns_timeout_when_target_unreachable() {
 
 #[test]
 fn wait_for_durable_surfaces_writer_crash() {
-    let (_dir, store) = open_store(1000);
+    // Terminal-on-panic policy: the single panic below must poison waiters.
+    // Under the default Once policy this panic is a within-budget transient
+    // (writer restarts, no poison), so the waiter would time out instead.
+    let (_dir, store) = open_store_terminal_on_panic(1000);
     let store = Arc::new(store);
     let target = HlcPoint {
         wall_ms: u64::MAX,
