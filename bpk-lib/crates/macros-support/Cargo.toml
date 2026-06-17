@@ -17,3 +17,7 @@ workspace = true
 
 [dependencies]
 inventory = "0.3"
+# Lane-neutral value type for registered schema upcast steps. The chain runner
+# in batpak core operates on rmpv::Value so one migration serves both the JSON
+# and raw-msgpack replay lanes. Pinned exactly to the rmp line rmp-serde =1.3.1 uses.
+rmpv = "=1.3.1"

@@ -63,7 +63,13 @@ impl std::fmt::Display for ManifestBuildError {
 impl std::error::Error for ManifestBuildError {}
 
 /// Wire/manifest version emitted in the JSON envelope.
-pub const MANIFEST_VERSION: u32 = 1;
+///
+/// Bumped to `2` in the schema-evolution Phase 2 cut: each
+/// [`EventDescriptor`] now carries `payload_version` (the
+/// `EventPayload::PAYLOAD_VERSION` of its source struct), making the
+/// per-event wire schema version manifest-visible so the TS codegen and
+/// parity harness can advertise and forward-compat-decode against it.
+pub const MANIFEST_VERSION: u32 = 2;
 
 /// Deterministic nonce used in the manifest fixture for both heartbeat
 /// request and ack.
@@ -101,6 +107,12 @@ pub struct EventDescriptor {
     pub category: u8,
     /// `EventKind` type id (lower 12 bits).
     pub type_id: u16,
+    /// Wire schema version of this payload's serialized shape, mirrored
+    /// from `EventPayload::PAYLOAD_VERSION`. The server stamps this into
+    /// `EventHeader::payload_version` at the typed-append seam and upcasts
+    /// on read; a TS client treats a stored version newer than this as
+    /// forward-compatible (reads the current shape) rather than rejecting.
+    pub payload_version: u16,
     /// Field metadata in serde declaration order.
     pub fields: Vec<FieldDescriptor>,
     /// JSON form of the Phase 0 deterministic fixture value.
@@ -202,6 +214,8 @@ pub struct EventDescriptorRegistration {
     pub schema_ref: &'static str,
     /// Packed `(category << 12) | type_id` — equals `EventKind::as_raw_u16()`.
     pub kind_bits: u16,
+    /// Wire schema version mirrored from `EventPayload::PAYLOAD_VERSION`.
+    pub payload_version: u16,
     /// Field rows in declaration order.
     pub fields: &'static [FieldRow],
     /// Returns the canonically-encoded fixture payload bytes. Returns
@@ -262,6 +276,7 @@ impl EventDescriptorRegistration {
             ts_name: self.ts_name.to_owned(),
             category,
             type_id,
+            payload_version: self.payload_version,
             fields: self
                 .fields
                 .iter()

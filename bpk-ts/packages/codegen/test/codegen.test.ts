@@ -38,6 +38,7 @@ const MINIMAL_MANIFEST = {
       tsName: "TestEvent",
       category: 15,
       typeId: 1,
+      payloadVersion: 1,
       fields: [{ wireName: "field", tsName: "field", typeToken: "string", order: 0 }],
       fixtureValue: { field: "x" },
       goldenPayloadHex: "81a566696572746178",
@@ -227,6 +228,38 @@ describe("readManifest validates the envelope", () => {
     expect(() => readManifest(path)).not.toThrow();
   });
 
+  it("rejects an event missing a declared payloadVersion (manifest v2 field)", () => {
+    const path = writeManifest({
+      ...MINIMAL_MANIFEST,
+      events: [{ ...MINIMAL_MANIFEST.events[0], payloadVersion: undefined }],
+    });
+    try {
+      readManifest(path);
+      throw new Error("expected throw");
+    } catch (error) {
+      expect(error).toBeInstanceOf(CodegenError);
+      if (error instanceof CodegenError) {
+        expect(error.code).toBe("invalid_payload_version");
+      }
+    }
+  });
+
+  it("rejects payloadVersion 0 (the reserved legacy/untyped sentinel)", () => {
+    const path = writeManifest({
+      ...MINIMAL_MANIFEST,
+      events: [{ ...MINIMAL_MANIFEST.events[0], payloadVersion: 0 }],
+    });
+    try {
+      readManifest(path);
+      throw new Error("expected throw");
+    } catch (error) {
+      expect(error).toBeInstanceOf(CodegenError);
+      if (error instanceof CodegenError) {
+        expect(error.code).toBe("invalid_payload_version");
+      }
+    }
+  });
+
   it("rejects unknown typeToken values", () => {
     const path = writeManifest({
       ...MINIMAL_MANIFEST,
@@ -304,6 +337,7 @@ describe("generate writes the expected files", () => {
           tsName: "XE",
           category: 15,
           typeId: 2,
+          payloadVersion: 1,
           fields: [
             { wireName: "zebra", tsName: "zebra", typeToken: "string", order: 0 },
             { wireName: "apple", tsName: "apple", typeToken: "string", order: 1 },

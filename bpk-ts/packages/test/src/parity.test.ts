@@ -30,6 +30,8 @@ import {
   parseRequestFrame,
   parseResponseFrame,
   NETBAT_ERROR_CODES,
+  isCompatiblePayloadVersion,
+  classifyPayloadVersion,
 } from "@batpak/client";
 import { readManifest, type BatpakTsManifest } from "@batpak/codegen";
 import { decodeBytes, encodeBytes } from "@batpak/schema";
@@ -41,11 +43,21 @@ const manifest: BatpakTsManifest = readManifest(MANIFEST_PATH);
 
 describe("manifest envelope", () => {
   it("declares the 0.8.2 protocol versions", () => {
-    expect(manifest.manifestVersion).toBe(1);
+    // manifestVersion 2: schema-evolution Phase 2 made each event's
+    // payload_version manifest-visible (see payloadVersion below).
+    expect(manifest.manifestVersion).toBe(2);
     expect(manifest.netbatVersion).toBe("NETBAT/1");
     expect(manifest.canonicalEncoding.kind).toBe("named-field-msgpack");
     expect(manifest.canonicalEncoding.rmpSerdeVersion).toBe("1.3.1");
     expect(manifest.batpakVersion).toBe("0.8.2");
+  });
+
+  it("carries a declared payloadVersion (>= 1) on every event", () => {
+    for (const event of manifest.events) {
+      expect(Number.isInteger(event.payloadVersion)).toBe(true);
+      // 0 is the legacy/untyped sentinel and is never a DECLARED version.
+      expect(event.payloadVersion).toBeGreaterThanOrEqual(1);
+    }
   });
 
   it("carries all reference hbat events", () => {
@@ -175,7 +187,7 @@ describe("denial-vocabulary guard", () => {
 });
 
 describe("manifest-version guard", () => {
-  it("readManifest accepts manifestVersion: 1", () => {
+  it("readManifest accepts manifestVersion: 2", () => {
     expect(() => readManifest(MANIFEST_PATH)).not.toThrow();
   });
 
@@ -184,12 +196,62 @@ describe("manifest-version guard", () => {
     try {
       const path = join(tmp, "batpak.manifest.json");
       const raw = readFileSync(MANIFEST_PATH, "utf-8");
-      const tampered = raw.replace(`"manifestVersion": 1`, `"manifestVersion": 99`);
+      const tampered = raw.replace(`"manifestVersion": 2`, `"manifestVersion": 99`);
       writeFileSync(path, tampered, "utf-8");
       expect(() => readManifest(path)).toThrow(/manifestVersion 99 is not supported/);
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
+  });
+
+  it("readManifest refuses the now-obsolete manifestVersion 1", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "batpak-ts-manifest-"));
+    try {
+      const path = join(tmp, "batpak.manifest.json");
+      const raw = readFileSync(MANIFEST_PATH, "utf-8");
+      const tampered = raw.replace(`"manifestVersion": 2`, `"manifestVersion": 1`);
+      writeFileSync(path, tampered, "utf-8");
+      expect(() => readManifest(path)).toThrow(/manifestVersion 1 is not supported/);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("forward-compat payload_version decode", () => {
+  it("tolerates a stored payload_version newer than the generated SDK", () => {
+    // The server upcasts older shapes on read and additive evolution is
+    // ignored by the generated Schema, so a NEWER stored version still
+    // decodes against the current shape — never hard-reject.
+    const generated = Generated.SYSTEM_HEARTBEAT_REQUEST_PAYLOAD_VERSION;
+    expect(isCompatiblePayloadVersion(generated + 1, generated)).toBe(true);
+    expect(classifyPayloadVersion(generated + 1, generated)).toBe("newer");
+  });
+
+  it("tolerates the legacy/untyped sentinel (0) and exact/older versions", () => {
+    const generated = Generated.SYSTEM_HEARTBEAT_REQUEST_PAYLOAD_VERSION;
+    expect(isCompatiblePayloadVersion(0, generated)).toBe(true);
+    expect(classifyPayloadVersion(0, generated)).toBe("legacy");
+    expect(isCompatiblePayloadVersion(generated, generated)).toBe(true);
+    expect(classifyPayloadVersion(generated, generated)).toBe("exact");
+  });
+
+  it("decodes the heartbeat fixture regardless of the wire payload_version", () => {
+    // Forward-compat contract: the payload BYTES decode the same; the
+    // version tag rides in the header, not the payload struct, so a newer
+    // tag does not perturb payload decode.
+    const bytes = decodeHex(Generated.SYSTEM_HEARTBEAT_REQUEST_GOLDEN_HEX);
+    const value = decodeBytes(Generated.SystemHeartbeatRequest, bytes);
+    expect(value).toEqual(Generated.SYSTEM_HEARTBEAT_REQUEST_FIXTURE);
+    expect(
+      isCompatiblePayloadVersion(99, Generated.SYSTEM_HEARTBEAT_REQUEST_PAYLOAD_VERSION),
+    ).toBe(true);
+  });
+
+  it("rejects only a malformed (non-integer / negative) stored version", () => {
+    const generated = Generated.SYSTEM_HEARTBEAT_REQUEST_PAYLOAD_VERSION;
+    expect(isCompatiblePayloadVersion(-1, generated)).toBe(false);
+    expect(isCompatiblePayloadVersion(1.5, generated)).toBe(false);
   });
 });
 
@@ -262,6 +324,7 @@ describe("Effect 4 schema round-trip via @batpak/schema", () => {
         kind_category: 999,
         kind_type_id: 0,
         payload_hex: "",
+        idempotency_key_hex: null,
       }),
     ).toThrow();
   });
@@ -314,7 +377,7 @@ describe("operation handles in generated/operations", () => {
     expect(Generated.EVIDENCE_READ_WALK.name).toBe("evidence.read_walk");
     expect(Generated.EVIDENCE_PROJECTION_RUN.name).toBe("evidence.projection_run");
     expect(Generated.BANK_COMMIT.goldenInputHex).toBe(
-      "85a6656e74697479ac666978747572653a62616e6ba573636f7065ad666978747572652d73636f7065ad6b696e645f63617465676f72790fac6b696e645f747970655f6964cd0a01ab7061796c6f61645f686578d93c383161353665366636653633363562363638363536313732373436323635363137343264363636393738373437353732363532643330333033303331",
+      "86a6656e74697479ac666978747572653a62616e6ba573636f7065ad666978747572652d73636f7065ad6b696e645f63617465676f72790fac6b696e645f747970655f6964cd0a01ab7061796c6f61645f686578d93c383161353665366636653633363562363638363536313732373436323635363137343264363636393738373437353732363532643330333033303331b36964656d706f74656e63795f6b65795f686578c0",
     );
     expect(Generated.EVIDENCE_CHAIN_WALK.goldenInputHex).toBe(
       "84b273746172745f6576656e745f69645f686578d9203031323334353637383961626364656630313233343536373839616263646566b773746172745f65787065637465645f686173685f686578c0b0656e645f6576656e745f69645f686578c0a56c696d697410",

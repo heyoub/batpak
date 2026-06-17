@@ -16,6 +16,7 @@ pub(crate) enum StoreFileKind {
     VisibilityRanges,
     Checkpoint,
     MmapIndex,
+    IdempotencyStore,
     PendingCompactionMarker,
     CompactSource,
     CursorDirectory,
@@ -42,6 +43,7 @@ impl StoreFileKind {
             Some(crate::store::hidden_ranges::VISIBILITY_RANGES_FILENAME) => Self::VisibilityRanges,
             Some(crate::store::cold_start::checkpoint::CHECKPOINT_FILENAME) => Self::Checkpoint,
             Some(crate::store::cold_start::mmap::MMAP_INDEX_FILENAME) => Self::MmapIndex,
+            Some(crate::store::index::idemp::IDEMP_FILENAME) => Self::IdempotencyStore,
             Some(crate::store::cold_start::rebuild::COMPACTION_MARKER_FILENAME) => {
                 Self::PendingCompactionMarker
             }
@@ -57,6 +59,7 @@ impl StoreFileKind {
             | Self::VisibilityRanges
             | Self::Checkpoint
             | Self::MmapIndex
+            | Self::IdempotencyStore
             | Self::PendingCompactionMarker
             | Self::CompactSource
             | Self::CursorDirectory
@@ -65,9 +68,16 @@ impl StoreFileKind {
     }
 
     pub(crate) fn should_copy_into_snapshot(&self) -> bool {
+        // The durable idempotency store is a correctness authority, so a
+        // snapshot must carry it forward — otherwise restoring from the
+        // snapshot would silently lose cross-compaction dedup memory.
+        // justifies: INV-IDEMPOTENCY-DURABLE-WINDOW
         matches!(
             self,
-            Self::Segment(_) | Self::VisibilityRanges | Self::PendingCompactionMarker
+            Self::Segment(_)
+                | Self::VisibilityRanges
+                | Self::IdempotencyStore
+                | Self::PendingCompactionMarker
         )
     }
 
@@ -79,6 +89,7 @@ impl StoreFileKind {
                 | Self::VisibilityRanges
                 | Self::Checkpoint
                 | Self::MmapIndex
+                | Self::IdempotencyStore
                 | Self::PendingCompactionMarker
                 | Self::CompactSource
         )

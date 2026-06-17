@@ -12,6 +12,7 @@ use crate::{
     store_pub_fn_coverage,
 };
 use anyhow::{anyhow, bail, Result};
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use syn::spanned::Spanned;
 
@@ -31,6 +32,7 @@ pub(crate) fn run() -> Result<()> {
     check_allow_justifications(&repo_root, &mut source_cache)?;
     check_rust_file_size_pressure(&repo_root, &mut source_cache)?;
     check_inline_test_island_pressure(&repo_root, &mut source_cache)?;
+    check_event_payload_frozen_fixtures(&repo_root, &mut source_cache)?;
     public_surface::check(&repo_root, &mut source_cache)?;
     ci_parity::check(&repo_root)?;
     store_pub_fn_coverage::check(&repo_root, &mut source_cache)?;
@@ -95,6 +97,313 @@ fn check_inline_test_island_pressure(
         }
     }
     Ok(())
+}
+
+/// One `#[derive(EventPayload)]` type that does not yet have a frozen-decode
+/// fixture. Mirrors `harness_lints::HeaderDebt` / `OversizeDebt`: a pre-seeded
+/// allowlist so the warn-first lint lands green while the fixture backlog
+/// (Phase 2, `ART-EVENT-PAYLOAD-FROZEN-GOLDENS`) is burned down.
+struct FrozenFixtureDebt {
+    /// The payload struct's identifier (matched against the AST-discovered name).
+    type_name: &'static str,
+    /// Why this payload has no frozen fixture yet.
+    reason: &'static str,
+    /// What closes the debt.
+    target: &'static str,
+}
+
+/// Pre-seeded so Phase 1 lands green (warn-first). Every hbat manifest payload
+/// is here; they gain frozen fixtures in Phase 2. batpak core's own typed kinds
+/// already have fixtures under `tests/golden/payloads/`, so they are NOT debted.
+const FROZEN_FIXTURE_DEBT: &[FrozenFixtureDebt] = &[
+    FrozenFixtureDebt {
+        type_name: "SystemHeartbeatRequest",
+        reason: "hbat manifest payload predates the frozen-decode fixture regime",
+        target: "freeze a v1 fixture + frozen_decode test in Phase 2",
+    },
+    FrozenFixtureDebt {
+        type_name: "SystemHeartbeatAck",
+        reason: "hbat manifest payload predates the frozen-decode fixture regime",
+        target: "freeze a v1 fixture + frozen_decode test in Phase 2",
+    },
+    FrozenFixtureDebt {
+        type_name: "BankCommitRequest",
+        reason: "hbat manifest payload predates the frozen-decode fixture regime",
+        target: "freeze a v1 fixture + frozen_decode test in Phase 2",
+    },
+    FrozenFixtureDebt {
+        type_name: "BankCommitAck",
+        reason: "hbat manifest payload predates the frozen-decode fixture regime",
+        target: "freeze a v1 fixture + frozen_decode test in Phase 2",
+    },
+    FrozenFixtureDebt {
+        type_name: "EventGetRequest",
+        reason: "hbat manifest payload predates the frozen-decode fixture regime",
+        target: "freeze a v1 fixture + frozen_decode test in Phase 2",
+    },
+    FrozenFixtureDebt {
+        type_name: "EventGetAck",
+        reason: "hbat manifest payload predates the frozen-decode fixture regime",
+        target: "freeze a v1 fixture + frozen_decode test in Phase 2",
+    },
+    FrozenFixtureDebt {
+        type_name: "EventQueryRequest",
+        reason: "hbat manifest payload predates the frozen-decode fixture regime",
+        target: "freeze a v1 fixture + frozen_decode test in Phase 2",
+    },
+    FrozenFixtureDebt {
+        type_name: "EventSummary",
+        reason: "hbat manifest payload predates the frozen-decode fixture regime",
+        target: "freeze a v1 fixture + frozen_decode test in Phase 2",
+    },
+    FrozenFixtureDebt {
+        type_name: "EventQueryAck",
+        reason: "hbat manifest payload predates the frozen-decode fixture regime",
+        target: "freeze a v1 fixture + frozen_decode test in Phase 2",
+    },
+    FrozenFixtureDebt {
+        type_name: "EventWalkRequest",
+        reason: "hbat manifest payload predates the frozen-decode fixture regime",
+        target: "freeze a v1 fixture + frozen_decode test in Phase 2",
+    },
+    FrozenFixtureDebt {
+        type_name: "EventWalkAck",
+        reason: "hbat manifest payload predates the frozen-decode fixture regime",
+        target: "freeze a v1 fixture + frozen_decode test in Phase 2",
+    },
+    FrozenFixtureDebt {
+        type_name: "ReceiptVerifyRequest",
+        reason: "hbat manifest payload predates the frozen-decode fixture regime",
+        target: "freeze a v1 fixture + frozen_decode test in Phase 2",
+    },
+    FrozenFixtureDebt {
+        type_name: "ReceiptVerifyAck",
+        reason: "hbat manifest payload predates the frozen-decode fixture regime",
+        target: "freeze a v1 fixture + frozen_decode test in Phase 2",
+    },
+    FrozenFixtureDebt {
+        type_name: "ChainWalkEvidenceRequest",
+        reason: "hbat manifest payload predates the frozen-decode fixture regime",
+        target: "freeze a v1 fixture + frozen_decode test in Phase 2",
+    },
+    FrozenFixtureDebt {
+        type_name: "ChainWalkEvidenceAck",
+        reason: "hbat manifest payload predates the frozen-decode fixture regime",
+        target: "freeze a v1 fixture + frozen_decode test in Phase 2",
+    },
+    FrozenFixtureDebt {
+        type_name: "StoreResourceEvidenceRequest",
+        reason: "hbat manifest payload predates the frozen-decode fixture regime",
+        target: "freeze a v1 fixture + frozen_decode test in Phase 2",
+    },
+    FrozenFixtureDebt {
+        type_name: "StoreResourceEvidenceAck",
+        reason: "hbat manifest payload predates the frozen-decode fixture regime",
+        target: "freeze a v1 fixture + frozen_decode test in Phase 2",
+    },
+    FrozenFixtureDebt {
+        type_name: "ReadWalkEvidenceRequest",
+        reason: "hbat manifest payload predates the frozen-decode fixture regime",
+        target: "freeze a v1 fixture + frozen_decode test in Phase 2",
+    },
+    FrozenFixtureDebt {
+        type_name: "ReadWalkEvidenceAck",
+        reason: "hbat manifest payload predates the frozen-decode fixture regime",
+        target: "freeze a v1 fixture + frozen_decode test in Phase 2",
+    },
+    FrozenFixtureDebt {
+        type_name: "ProjectionRunEvidenceRequest",
+        reason: "hbat manifest payload predates the frozen-decode fixture regime",
+        target: "freeze a v1 fixture + frozen_decode test in Phase 2",
+    },
+    FrozenFixtureDebt {
+        type_name: "ProjectionRunEvidenceAck",
+        reason: "hbat manifest payload predates the frozen-decode fixture regime",
+        target: "freeze a v1 fixture + frozen_decode test in Phase 2",
+    },
+];
+
+/// Warn-first frozen-fixture lint (`ART-EVENT-PAYLOAD-FROZEN-GOLDENS`).
+///
+/// Every `#[derive(EventPayload)]` type in production source must have a frozen
+/// payload fixture (`tests/golden/payloads/<cat>_<type_id>__v*.hex`) so the
+/// decode seam's back-compat is proven against historical bytes
+/// (`INV-EVENT-PAYLOAD-DECODE-BACKCOMPAT`). Types still in `FROZEN_FIXTURE_DEBT`
+/// are skipped. Phase 1 is **warn-first** (prints, does not fail) — it flips to
+/// hard-fail next minor once the debt is burned down. A debt entry whose fixture
+/// now exists, or that names a type no longer present, is reported so the
+/// allowlist cannot rot.
+fn check_event_payload_frozen_fixtures(
+    repo_root: &Path,
+    source_cache: &mut SourceCache,
+) -> Result<()> {
+    let payloads_dir = core_tests_root(repo_root).join("golden").join("payloads");
+
+    let mut discovered: Vec<(String, Option<(u8, u16)>)> = Vec::new();
+    for path in production_rust_files(repo_root) {
+        let rel = relative(repo_root, &path);
+        let file = source_cache
+            .parse_rust(&path)
+            .map_err(|err| anyhow!("parse EventPayload derives in {rel}: {err}"))?;
+        collect_event_payload_structs(&file.items, &mut discovered);
+    }
+
+    let debt: std::collections::HashMap<&str, &FrozenFixtureDebt> = FROZEN_FIXTURE_DEBT
+        .iter()
+        .map(|d| (d.type_name, d))
+        .collect();
+
+    let mut warnings: Vec<String> = Vec::new();
+    let mut satisfied_debt: BTreeSet<&str> = BTreeSet::new();
+    let discovered_names: BTreeSet<&str> = discovered.iter().map(|(n, _)| n.as_str()).collect();
+
+    for (name, kind) in &discovered {
+        let has_fixture = kind
+            .map(|(cat, type_id)| frozen_fixture_exists(&payloads_dir, cat, type_id))
+            .unwrap_or(false);
+        let is_debted = debt.contains_key(name.as_str());
+        if has_fixture {
+            if is_debted {
+                satisfied_debt.insert(name.as_str());
+            }
+            continue;
+        }
+        if is_debted {
+            continue;
+        }
+        warnings.push(format!(
+            "structural-check (warn): EventPayload type `{name}` has no frozen payload fixture under \
+             {} and is not in FROZEN_FIXTURE_DEBT. Freeze a v1 fixture + a frozen_decode test \
+             (see EVENTS.md -> Schema Evolution), or add a debt entry. \
+             [ART-EVENT-PAYLOAD-FROZEN-GOLDENS; warn-first this minor]",
+            relative(repo_root, &payloads_dir)
+        ));
+    }
+
+    // Anti-rot: a debt entry whose fixture now exists must be removed; a debt
+    // entry naming a vanished type is stale.
+    for d in FROZEN_FIXTURE_DEBT {
+        if satisfied_debt.contains(d.type_name) {
+            warnings.push(format!(
+                "structural-check (warn): FROZEN_FIXTURE_DEBT entry `{}` now has a fixture; remove \
+                 the debt entry (reason was: {}; target: {}).",
+                d.type_name, d.reason, d.target
+            ));
+        } else if !discovered_names.contains(d.type_name) {
+            warnings.push(format!(
+                "structural-check (warn): FROZEN_FIXTURE_DEBT entry `{}` names no live \
+                 EventPayload type; remove the stale debt entry.",
+                d.type_name
+            ));
+        }
+    }
+
+    for warning in &warnings {
+        println!("{warning}");
+    }
+    Ok(())
+}
+
+/// Walk items recursively, collecting `(struct_name, Option<(category, type_id)>)`
+/// for every struct carrying `#[derive(..EventPayload..)]`. The kind tuple is
+/// `None` when the `#[batpak(category, type_id)]` attribute cannot be parsed
+/// (the derive itself would reject that, so it only happens on malformed input).
+fn collect_event_payload_structs(items: &[syn::Item], out: &mut Vec<(String, Option<(u8, u16)>)>) {
+    for item in items {
+        if let syn::Item::Struct(s) = item {
+            if has_event_payload_derive(&s.attrs) {
+                out.push((s.ident.to_string(), parse_batpak_kind(&s.attrs)));
+            }
+        } else if let syn::Item::Mod(m) = item {
+            // Skip `#[cfg(test)]` modules: payload types defined there are test
+            // fixtures, not shippable wire kinds, so they need no frozen-decode
+            // proof of historical compatibility.
+            if is_cfg_test(&m.attrs) {
+                continue;
+            }
+            if let Some((_, nested)) = &m.content {
+                collect_event_payload_structs(nested, out);
+            }
+        }
+    }
+}
+
+/// True when `attrs` carries `#[cfg(test)]` (the literal test-gate form).
+fn is_cfg_test(attrs: &[syn::Attribute]) -> bool {
+    attrs.iter().any(|attr| {
+        if !attr.path().is_ident("cfg") {
+            return false;
+        }
+        let mut found = false;
+        let _ = attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("test") {
+                found = true;
+            }
+            Ok(())
+        });
+        found
+    })
+}
+
+fn has_event_payload_derive(attrs: &[syn::Attribute]) -> bool {
+    attrs.iter().any(|attr| {
+        if !attr.path().is_ident("derive") {
+            return false;
+        }
+        let mut found = false;
+        let _ = attr.parse_nested_meta(|meta| {
+            if meta
+                .path
+                .segments
+                .last()
+                .is_some_and(|seg| seg.ident == "EventPayload")
+            {
+                found = true;
+            }
+            Ok(())
+        });
+        found
+    })
+}
+
+fn parse_batpak_kind(attrs: &[syn::Attribute]) -> Option<(u8, u16)> {
+    let attr = attrs.iter().find(|a| a.path().is_ident("batpak"))?;
+    let mut category: Option<u64> = None;
+    let mut type_id: Option<u64> = None;
+    attr.parse_nested_meta(|meta| {
+        if meta.path.is_ident("category") {
+            let lit: syn::LitInt = meta.value()?.parse()?;
+            category = lit.base10_parse::<u64>().ok();
+        } else if meta.path.is_ident("type_id") {
+            let lit: syn::LitInt = meta.value()?.parse()?;
+            type_id = lit.base10_parse::<u64>().ok();
+        } else if meta.path.is_ident("version") {
+            let _: syn::LitInt = meta.value()?.parse()?;
+        }
+        Ok(())
+    })
+    .ok()?;
+    // justifies: crates/macros/src/event_payload.rs already validates category fits 4 bits and type_id fits 12 bits, so these casts mirror that bounded narrowing.
+    #[allow(clippy::cast_possible_truncation)]
+    Some((category? as u8, type_id? as u16))
+}
+
+/// A fixture for `(category, type_id)` exists when any `<cat>_<type_id>__v*.hex`
+/// is present. Fixture base name matches the test helper's
+/// `<kind>__v<N>.hex` convention: kind == `{cat:x}_{type_id:03x}`.
+fn frozen_fixture_exists(payloads_dir: &Path, category: u8, type_id: u16) -> bool {
+    let prefix = format!("{category:x}_{type_id:03x}__v");
+    let Ok(entries) = std::fs::read_dir(payloads_dir) else {
+        return false;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with(&prefix) && name.ends_with(".hex") {
+            return true;
+        }
+    }
+    false
 }
 
 fn check_no_placeholder_runtime_macros(

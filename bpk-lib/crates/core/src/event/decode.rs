@@ -26,8 +26,8 @@
 //! `P::KIND` is the sole identity check. The seam does not consult any
 //! runtime registry.
 
+use crate::event::upcast::{self, UpcastError};
 use crate::event::{Event, EventKind, EventPayload};
-use serde::de::DeserializeOwned;
 
 /// Source of a payload decode failure, retaining the lane-specific error chain.
 #[derive(Debug)]
@@ -82,6 +82,28 @@ pub enum TypedDecodeError {
         /// The underlying lane-specific decode error.
         source: DecodeSource,
     },
+    /// The stored `payload_version` is *newer* than the decoder's current
+    /// [`EventPayload::PAYLOAD_VERSION`]. There is no downcaster — a reader can
+    /// never reconstruct a struct shape it predates — so this is a hard error
+    /// everywhere, including replay and cold-start scan.
+    FutureVersion {
+        /// The matched kind.
+        kind: EventKind,
+        /// The version stamped on the stored frame.
+        stored: u16,
+        /// The maximum version this binary's decoder understands.
+        current: u16,
+    },
+    /// The stored version is older than current and the registered [`Upcast`]
+    /// chain failed to lift the payload to the current shape.
+    ///
+    /// [`Upcast`]: crate::event::Upcast
+    Upcast {
+        /// The matched kind.
+        kind: EventKind,
+        /// The underlying upcast-chain error.
+        source: UpcastError,
+    },
 }
 
 impl std::fmt::Display for TypedDecodeError {
@@ -93,6 +115,18 @@ impl std::fmt::Display for TypedDecodeError {
             Self::DecodeFailure { kind, source } => {
                 write!(f, "decode failed for kind {kind:?}: {source}")
             }
+            Self::FutureVersion {
+                kind,
+                stored,
+                current,
+            } => write!(
+                f,
+                "future payload version for kind {kind:?}: stored frame is version {stored} but \
+                 this decoder understands at most version {current}; upgrade the reader"
+            ),
+            Self::Upcast { kind, source } => {
+                write!(f, "upcast failed for kind {kind:?}: {source}")
+            }
         }
     }
 }
@@ -100,8 +134,9 @@ impl std::fmt::Display for TypedDecodeError {
 impl std::error::Error for TypedDecodeError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::KindMismatch { .. } => None,
+            Self::KindMismatch { .. } | Self::FutureVersion { .. } => None,
             Self::DecodeFailure { source, .. } => Some(source),
+            Self::Upcast { source, .. } => Some(source),
         }
     }
 }
@@ -152,7 +187,12 @@ impl DecodeTyped for Event<serde_json::Value> {
         if self.header.event_kind != T::KIND {
             return Ok(None);
         }
-        decode_json::<T>(self.header.event_kind, &self.payload).map(Some)
+        decode_json::<T>(
+            self.header.event_kind,
+            self.header.payload_version,
+            &self.payload,
+        )
+        .map(Some)
     }
 
     fn decode_typed<T: EventPayload>(&self) -> Result<T, TypedDecodeError> {
@@ -162,7 +202,11 @@ impl DecodeTyped for Event<serde_json::Value> {
                 got: self.header.event_kind,
             });
         }
-        decode_json::<T>(self.header.event_kind, &self.payload)
+        decode_json::<T>(
+            self.header.event_kind,
+            self.header.payload_version,
+            &self.payload,
+        )
     }
 }
 
@@ -171,7 +215,12 @@ impl DecodeTyped for Event<Vec<u8>> {
         if self.header.event_kind != T::KIND {
             return Ok(None);
         }
-        decode_msgpack::<T>(self.header.event_kind, &self.payload).map(Some)
+        decode_msgpack::<T>(
+            self.header.event_kind,
+            self.header.payload_version,
+            &self.payload,
+        )
+        .map(Some)
     }
 
     fn decode_typed<T: EventPayload>(&self) -> Result<T, TypedDecodeError> {
@@ -181,33 +230,93 @@ impl DecodeTyped for Event<Vec<u8>> {
                 got: self.header.event_kind,
             });
         }
-        decode_msgpack::<T>(self.header.event_kind, &self.payload)
+        decode_msgpack::<T>(
+            self.header.event_kind,
+            self.header.payload_version,
+            &self.payload,
+        )
     }
 }
 
-fn decode_json<T: DeserializeOwned>(
+/// The single version-dispatch decision shared by both lanes.
+///
+/// * `stored == current` or `stored == 0` (legacy/untyped) → tolerant decode as
+///   today (serde absorbs additive-with-default for free).
+/// * `stored < current` → run the registered [`Upcast`] chain, then decode.
+/// * `stored > current` → hard [`TypedDecodeError::FutureVersion`].
+///
+/// `decode_current` is the lane's normal tolerant decode (no upcast); it is only
+/// invoked on the equal / legacy branch. The upcast branch always goes through
+/// the lane-neutral rmpv chain via the `value` thunk.
+///
+/// [`Upcast`]: crate::event::Upcast
+fn decode_versioned<T, FCurrent, FValue>(
     kind: EventKind,
-    value: &serde_json::Value,
-) -> Result<T, TypedDecodeError> {
-    // Borrow-based decode: `&Value` implements `Deserializer`, so
-    // `T::deserialize(value)` goes straight through without allocating.
-    // The older `serde_json::from_value(value.clone())` form allocated a
-    // full `Value` copy on every decode — real cost on hot reactor /
-    // projection paths.
-    T::deserialize(value).map_err(|e| TypedDecodeError::DecodeFailure {
-        kind,
-        source: DecodeSource::Json(e),
-    })
+    stored: u16,
+    decode_current: FCurrent,
+    value: FValue,
+) -> Result<T, TypedDecodeError>
+where
+    T: EventPayload,
+    FCurrent: FnOnce() -> Result<T, TypedDecodeError>,
+    FValue: FnOnce() -> Result<rmpv::Value, UpcastError>,
+{
+    let current = T::PAYLOAD_VERSION;
+    if stored == current || stored == 0 {
+        return decode_current();
+    }
+    if stored > current {
+        return Err(TypedDecodeError::FutureVersion {
+            kind,
+            stored,
+            current,
+        });
+    }
+    // stored < current: lift through the registered chain, then decode.
+    let value = value().map_err(|source| TypedDecodeError::Upcast { kind, source })?;
+    upcast::upcast_and_decode::<T>(value, stored, current)
+        .map_err(|source| TypedDecodeError::Upcast { kind, source })
 }
 
-fn decode_msgpack<T: DeserializeOwned>(
+fn decode_json<T: EventPayload>(
     kind: EventKind,
+    stored: u16,
+    value: &serde_json::Value,
+) -> Result<T, TypedDecodeError> {
+    decode_versioned::<T, _, _>(
+        kind,
+        stored,
+        || {
+            // Borrow-based decode: `&Value` implements `Deserializer`, so
+            // `T::deserialize(value)` goes straight through without allocating.
+            // The older `serde_json::from_value(value.clone())` form allocated a
+            // full `Value` copy on every decode — real cost on hot reactor /
+            // projection paths.
+            T::deserialize(value).map_err(|e| TypedDecodeError::DecodeFailure {
+                kind,
+                source: DecodeSource::Json(e),
+            })
+        },
+        || upcast::value_from_json(value),
+    )
+}
+
+fn decode_msgpack<T: EventPayload>(
+    kind: EventKind,
+    stored: u16,
     bytes: &[u8],
 ) -> Result<T, TypedDecodeError> {
-    crate::encoding::from_bytes::<T>(bytes).map_err(|e| TypedDecodeError::DecodeFailure {
+    decode_versioned::<T, _, _>(
         kind,
-        source: DecodeSource::Msgpack(e),
-    })
+        stored,
+        || {
+            crate::encoding::from_bytes::<T>(bytes).map_err(|e| TypedDecodeError::DecodeFailure {
+                kind,
+                source: DecodeSource::Msgpack(e),
+            })
+        },
+        || upcast::value_from_msgpack(bytes),
+    )
 }
 
 #[cfg(test)]

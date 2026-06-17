@@ -143,6 +143,7 @@ fn commit_heartbeat(core: &mut syncbat::Core, entity: &str) -> Result<BankCommit
         kind_category: SystemHeartbeatRequest::KIND.category(),
         kind_type_id: SystemHeartbeatRequest::KIND.type_id(),
         payload_hex: encode_hex_str(&heartbeat_bytes),
+        idempotency_key_hex: None,
     };
     let request_bytes = batpak::encoding::to_bytes(&request)?;
     let result = core.invoke("bank.commit", request_bytes)?;
@@ -170,6 +171,7 @@ fn bank_commit_appends_a_heartbeat_request_event() -> Result<()> {
         kind_category: SystemHeartbeatRequest::KIND.category(),
         kind_type_id: SystemHeartbeatRequest::KIND.type_id(),
         payload_hex: encode_hex_str(&heartbeat_bytes),
+        idempotency_key_hex: None,
     };
     let request_bytes = batpak::encoding::to_bytes(&request)?;
 
@@ -196,6 +198,7 @@ fn event_get_returns_what_bank_commit_wrote() -> Result<()> {
         kind_category: SystemHeartbeatRequest::KIND.category(),
         kind_type_id: SystemHeartbeatRequest::KIND.type_id(),
         payload_hex: encode_hex_str(&heartbeat_bytes),
+        idempotency_key_hex: None,
     };
     let request_bytes = batpak::encoding::to_bytes(&request)?;
     let commit_result = core.invoke("bank.commit", request_bytes)?;
@@ -230,6 +233,7 @@ fn bank_commit_rejects_reserved_kind_category() -> Result<()> {
         kind_category: 0x0,
         kind_type_id: 0xA01,
         payload_hex: "81a0".to_owned(),
+        idempotency_key_hex: None,
     };
     let request_bytes = batpak::encoding::to_bytes(&request)?;
     let msg = invoke_expect_err(&mut core, "bank.commit", request_bytes)?;
@@ -250,6 +254,7 @@ fn bank_commit_rejects_invalid_coordinate() -> Result<()> {
         kind_category: 0xF,
         kind_type_id: 0xA01,
         payload_hex: "81a0".to_owned(),
+        idempotency_key_hex: None,
     };
     let request_bytes = batpak::encoding::to_bytes(&request)?;
     let msg = invoke_expect_err(&mut core, "bank.commit", request_bytes)?;

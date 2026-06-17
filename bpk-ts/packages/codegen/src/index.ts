@@ -20,7 +20,7 @@
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, basename, join, resolve } from "node:path";
 
-export const SUPPORTED_MANIFEST_VERSION = 1;
+export const SUPPORTED_MANIFEST_VERSION = 2;
 
 /**
  * Phase 0 wire-token vocabulary. Adding a new entry here requires:
@@ -81,6 +81,16 @@ export interface ManifestEvent {
   tsName: string;
   category: number;
   typeId: number;
+  /**
+   * Wire schema version of this event's serialized shape, mirrored from
+   * the Rust `EventPayload::PAYLOAD_VERSION`. The codegen emits this as
+   * `<TsName>_PAYLOAD_VERSION` so a client can compare it against the
+   * `payload_version` an event carries on the wire and forward-compat
+   * decode (see `isCompatiblePayloadVersion` in `@batpak/client`): a
+   * stored version NEWER than this is tolerated, not rejected. Manifest
+   * v2+ field; older manifests are rejected by the version guard.
+   */
+  payloadVersion: number;
   fields: ManifestField[];
   fixtureValue: unknown;
   goldenPayloadHex: string;
@@ -180,6 +190,16 @@ function validateManifest(value: unknown, source: string): BatpakTsManifest {
     );
   }
   for (const event of manifest.events) {
+    if (
+      typeof event.payloadVersion !== "number" ||
+      !Number.isInteger(event.payloadVersion) ||
+      event.payloadVersion < 1
+    ) {
+      throw new CodegenError(
+        "invalid_payload_version",
+        `${source}: ${event.name}.payloadVersion must be an integer >= 1 (got ${JSON.stringify(event.payloadVersion)}); 0 is the reserved legacy/untyped sentinel and is never a declared version`,
+      );
+    }
     for (const field of event.fields) {
       if (field.wireName !== field.tsName) {
         throw new CodegenError(
@@ -277,6 +297,14 @@ function renderEventsModule(manifest: BatpakTsManifest): string {
     lines.push("");
 
     const constSafeName = constCase(event.tsName);
+    // Wire schema version this generated shape was built against. A
+    // client compares it to the `payload_version` an event carries on
+    // the wire: equal/older => decode as-is; newer => forward-compat
+    // (the server upcasts, TS reads the current shape). See
+    // `isCompatiblePayloadVersion` in `@batpak/client`.
+    lines.push(
+      `export const ${constSafeName}_PAYLOAD_VERSION = ${event.payloadVersion} as const;`,
+    );
     // CRITICAL: Rust's rmp-serde::to_vec_named emits struct fields in
     // DECLARATION order; serde_json::to_value uses BTreeMap (alphabetical).
     // The TS canonical encoder iterates object insertion order. So the

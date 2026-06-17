@@ -470,6 +470,141 @@ impl Store<Open> {
         Ok(receipt)
     }
 
+    // ─── Typed version-stamping lowerings ───────────────────────────────────
+    //
+    // `append_typed::<T>` and friends previously erased `T` straight to
+    // `append(coord, T::KIND, payload)`, so `EventPayload::PAYLOAD_VERSION` never
+    // reached the header. These crate-private funnels thread the version as a
+    // scalar into the submission so the typed seam (and only the typed seam)
+    // stamps a non-zero `payload_version`. Every untyped / batch / denial /
+    // lifecycle path leaves the `0` sentinel, which the decode seam reads as
+    // "tolerant decode as current".
+
+    /// Reject the reserved legacy/untyped sentinel (version 0) before stamping a
+    /// header. The derive macro forbids `version = 0` at compile time, but a
+    /// hand-written `EventPayload` impl can set it; version 0 is what the decode
+    /// seam uses to tell a real typed frame from an untyped one, so this one hot-
+    /// path comparison stops a manual impl from forging legacy-indistinguishable
+    /// bytes. justifies: INV-PAYLOAD-VERSION-NONZERO; see src/event/payload.rs
+    fn guard_typed_payload_version(kind: EventKind, version: u16) -> Result<(), StoreError> {
+        if version == 0 {
+            return Err(StoreError::InvalidPayloadVersion {
+                kind: kind.as_raw_u16(),
+            });
+        }
+        Ok(())
+    }
+
+    /// Versioned root submit. Mirrors [`Store::submit`] but stamps `version`.
+    fn submit_versioned(
+        &self,
+        coord: &Coordinate,
+        kind: EventKind,
+        payload: &impl Serialize,
+        version: u16,
+    ) -> Result<AppendTicket, StoreError> {
+        Self::guard_typed_payload_version(kind, version)?;
+        self.submit_prepared(
+            coord,
+            kind,
+            payload,
+            AppendSubmission::root(self.runtime.clock()).with_payload_version(version),
+        )
+    }
+
+    /// Versioned options submit. Mirrors [`Store::append_with_options`]'s funnel.
+    fn submit_with_options_versioned(
+        &self,
+        coord: &Coordinate,
+        kind: EventKind,
+        payload: &impl Serialize,
+        opts: AppendOptions,
+        version: u16,
+    ) -> Result<AppendReceipt, StoreError> {
+        Self::guard_typed_payload_version(kind, version)?;
+        let gate = opts.gate;
+        let receipt = self
+            .submit_prepared(
+                coord,
+                kind,
+                payload,
+                AppendSubmission::with_options(opts, self.runtime.clock())
+                    .with_payload_version(version),
+            )?
+            .wait()?;
+        if let Some(gate) = gate {
+            self.wait_for_gate(&receipt, gate)?;
+        }
+        Ok(receipt)
+    }
+
+    /// Versioned reaction submit. Mirrors [`Store::submit_reaction`].
+    fn submit_reaction_versioned(
+        &self,
+        coord: &Coordinate,
+        kind: EventKind,
+        payload: &impl Serialize,
+        correlation_id: crate::id::CorrelationId,
+        causation_id: crate::id::CausationId,
+        version: u16,
+    ) -> Result<AppendTicket, StoreError> {
+        use crate::id::EntityIdType;
+        Self::guard_typed_payload_version(kind, version)?;
+        self.submit_prepared(
+            coord,
+            kind,
+            payload,
+            AppendSubmission::reaction(
+                self.runtime.clock(),
+                correlation_id.as_u128(),
+                causation_id.as_u128(),
+            )
+            .with_payload_version(version),
+        )
+    }
+
+    /// Versioned non-blocking root submit. Mirrors [`Store::try_submit`].
+    fn try_submit_versioned(
+        &self,
+        coord: &Coordinate,
+        kind: EventKind,
+        payload: &impl Serialize,
+        version: u16,
+    ) -> Result<crate::outcome::Outcome<AppendTicket>, StoreError> {
+        if self.index.active_visibility_fence().is_some() {
+            return Ok(crate::outcome::Outcome::cancelled(
+                "visibility fence is active; submit through the fence",
+            ));
+        }
+        if let Some(outcome) = self.submit_pressure_gate() {
+            return Ok(outcome);
+        }
+        self.submit_versioned(coord, kind, payload, version)
+            .map(crate::outcome::Outcome::ok)
+    }
+
+    /// Versioned non-blocking reaction submit. Mirrors [`Store::try_submit_reaction`].
+    fn try_submit_reaction_versioned(
+        &self,
+        coord: &Coordinate,
+        kind: EventKind,
+        payload: &impl Serialize,
+        correlation_id: crate::id::CorrelationId,
+        causation_id: crate::id::CausationId,
+        version: u16,
+    ) -> Result<crate::outcome::Outcome<AppendTicket>, StoreError> {
+        if self.index.active_visibility_fence().is_some() {
+            return Ok(crate::outcome::Outcome::cancelled(
+                "visibility fence is active; submit through the fence",
+            ));
+        }
+        if let Some(outcome) = self.submit_pressure_gate() {
+            return Ok(outcome);
+        }
+        self.submit_reaction_versioned(coord, kind, payload, correlation_id, causation_id, version)
+            .map(crate::outcome::Outcome::ok)
+    }
+
     /// WRITE: apply a typestate transition — kind is read from `P::KIND`.
     ///
     /// Per FREEZE-7 the transition's event kind is structurally derived from
@@ -489,7 +624,8 @@ impl Store<Open> {
         transition: crate::typestate::transition::Transition<From, To, P>,
     ) -> Result<AppendReceipt, StoreError> {
         let payload = transition.into_payload();
-        self.append(coord, P::KIND, &payload)
+        self.submit_versioned(coord, P::KIND, &payload, P::PAYLOAD_VERSION)?
+            .wait()
     }
 
     /// WRITE (typed): append a root-cause event — kind derived from `T::KIND`.
@@ -502,7 +638,8 @@ impl Store<Open> {
         coord: &Coordinate,
         payload: &T,
     ) -> Result<AppendReceipt, StoreError> {
-        self.append(coord, T::KIND, payload)
+        self.submit_versioned(coord, T::KIND, payload, T::PAYLOAD_VERSION)?
+            .wait()
     }
 
     /// WRITE (typed): append with options — kind derived from `T::KIND`.
@@ -516,7 +653,7 @@ impl Store<Open> {
         payload: &T,
         opts: AppendOptions,
     ) -> Result<AppendReceipt, StoreError> {
-        self.append_with_options(coord, T::KIND, payload, opts)
+        self.submit_with_options_versioned(coord, T::KIND, payload, opts, T::PAYLOAD_VERSION)
     }
 
     /// Advanced typed producer API: nonblocking submit — kind derived from
@@ -529,7 +666,7 @@ impl Store<Open> {
         coord: &Coordinate,
         payload: &T,
     ) -> Result<AppendTicket, StoreError> {
-        self.submit(coord, T::KIND, payload)
+        self.submit_versioned(coord, T::KIND, payload, T::PAYLOAD_VERSION)
     }
 
     /// Advanced typed producer API: attempt submit without blocking under
@@ -542,7 +679,7 @@ impl Store<Open> {
         coord: &Coordinate,
         payload: &T,
     ) -> Result<crate::outcome::Outcome<AppendTicket>, StoreError> {
-        self.try_submit(coord, T::KIND, payload)
+        self.try_submit_versioned(coord, T::KIND, payload, T::PAYLOAD_VERSION)
     }
 
     /// WRITE (typed): append a reaction — kind derived from `T::KIND`.
@@ -560,7 +697,15 @@ impl Store<Open> {
         correlation_id: crate::id::CorrelationId,
         causation_id: crate::id::CausationId,
     ) -> Result<AppendReceipt, StoreError> {
-        self.append_reaction(coord, T::KIND, payload, correlation_id, causation_id)
+        self.submit_reaction_versioned(
+            coord,
+            T::KIND,
+            payload,
+            correlation_id,
+            causation_id,
+            T::PAYLOAD_VERSION,
+        )?
+        .wait()
     }
 
     /// Advanced typed producer API: nonblocking reaction submit — kind derived
@@ -575,7 +720,14 @@ impl Store<Open> {
         correlation_id: crate::id::CorrelationId,
         causation_id: crate::id::CausationId,
     ) -> Result<AppendTicket, StoreError> {
-        self.submit_reaction(coord, T::KIND, payload, correlation_id, causation_id)
+        self.submit_reaction_versioned(
+            coord,
+            T::KIND,
+            payload,
+            correlation_id,
+            causation_id,
+            T::PAYLOAD_VERSION,
+        )
     }
 
     /// Advanced typed producer API: attempt reaction submit without blocking
@@ -590,7 +742,14 @@ impl Store<Open> {
         correlation_id: crate::id::CorrelationId,
         causation_id: crate::id::CausationId,
     ) -> Result<crate::outcome::Outcome<AppendTicket>, StoreError> {
-        self.try_submit_reaction(coord, T::KIND, payload, correlation_id, causation_id)
+        self.try_submit_reaction_versioned(
+            coord,
+            T::KIND,
+            payload,
+            correlation_id,
+            causation_id,
+            T::PAYLOAD_VERSION,
+        )
     }
 }
 

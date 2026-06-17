@@ -37,6 +37,22 @@ pub trait EventPayload: Serialize + DeserializeOwned {
     /// Must be unique within a binary. The `#[derive(EventPayload)]` macro (when
     /// available) enforces this with a per-binary collision test.
     const KIND: EventKind;
+
+    /// The wire schema version of this payload's serialized shape.
+    ///
+    /// Stamped into [`EventHeader::payload_version`](crate::event::EventHeader)
+    /// at the typed-append seam so a future decoder can tell which struct shape
+    /// produced the stored bytes and run the registered [`Upcast`] chain when
+    /// they differ. Defaults to `1`; bump it (and freeze a new fixture + add an
+    /// `Upcast`) whenever a non-additive change lands. See `EVENTS.md` →
+    /// "Schema Evolution".
+    ///
+    /// `0` is reserved as the legacy/untyped sentinel and is never a valid
+    /// declared version. The `#[derive(EventPayload)]` macro accepts an optional
+    /// `#[batpak(version = N)]` key (default `1`, `0` rejected).
+    ///
+    /// [`Upcast`]: crate::event::Upcast
+    const PAYLOAD_VERSION: u16 = 1;
 }
 
 /// How `Store::open` handles linked `EventPayload` kind collisions.

@@ -42,6 +42,10 @@ crc32fast = "1"
 # Canonical report and receipt bytes are fixture-locked against this exact
 # encoder version. Bump deliberately with golden refreshes and ADR-0019 review.
 rmp-serde = "=1.3.1"
+# Schema-evolution upcast chain: registered vN->vN+1 migrations operate on a
+# lane-neutral rmpv::Value (read-time, in-memory only; stored bytes are never
+# rewritten). Pinned exactly to the rmp line rmp-serde =1.3.1 uses.
+rmpv = "=1.3.1"
 dashmap = "6"
 parking_lot = "0.12"
 tracing = "0.1"

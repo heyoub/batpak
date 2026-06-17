@@ -82,6 +82,11 @@ pub(crate) fn snapshot(
     let snapshot_fence = store.begin_visibility_fence()?;
     let fence_token = snapshot_fence.token();
     sync(store)?;
+    // Flush the durable idempotency store to disk so the snapshot copies a
+    // current `index.idemp`. It is a correctness authority, so a snapshot that
+    // dropped it would silently lose cross-compaction dedup memory.
+    // justifies: INV-IDEMPOTENCY-DURABLE-WINDOW
+    store.index.idemp.flush(&store.config.data_dir)?;
     let (source_watermark_segment_id, source_watermark_offset) =
         latest_segment_watermark(&store.config.data_dir)?;
     platform_fs::reject_symlink_leaf(dest, "snapshot destination")?;
@@ -91,6 +96,7 @@ pub(crate) fn snapshot(
     let mut copied_segment_ids_sorted = Vec::new();
     let mut copied_visibility_ranges_present = false;
     let mut copied_pending_compaction_marker_present = false;
+    let mut copied_idempotency_store_present = false;
     let mut findings = Vec::new();
     if cleared_artifact_count > 0 {
         findings.push(SnapshotFinding::DestinationCleared {
@@ -117,6 +123,12 @@ pub(crate) fn snapshot(
                 SnapshotFileKind::PendingCompactionMarker => {
                     copied_pending_compaction_marker_present = true;
                 }
+                SnapshotFileKind::IdempotencyStore => {
+                    // The dedup authority. Recorded in evidence identity (v2) so
+                    // a snapshot that lost it cannot masquerade as one that
+                    // carried it. justifies: INV-IDEMPOTENCY-DURABLE-WINDOW
+                    copied_idempotency_store_present = true;
+                }
             }
         }
     }
@@ -135,6 +147,7 @@ pub(crate) fn snapshot(
         copied_segment_ids_sorted,
         copied_visibility_ranges_present,
         copied_pending_compaction_marker_present,
+        copied_idempotency_store_present,
         destination_path_digest: destination_path_digest(dest),
         findings,
     })?;
@@ -148,6 +161,7 @@ fn snapshot_source_file_kind(file_kind: &StoreFileKind) -> Option<SnapshotFileKi
     match file_kind {
         StoreFileKind::Segment(_) => Some(SnapshotFileKind::Segment),
         StoreFileKind::VisibilityRanges => Some(SnapshotFileKind::VisibilityRanges),
+        StoreFileKind::IdempotencyStore => Some(SnapshotFileKind::IdempotencyStore),
         StoreFileKind::PendingCompactionMarker => Some(SnapshotFileKind::PendingCompactionMarker),
         StoreFileKind::MalformedSegment(_)
         | StoreFileKind::Checkpoint
@@ -428,6 +442,7 @@ pub(crate) fn compact(
             StoreFileKind::VisibilityRanges
             | StoreFileKind::Checkpoint
             | StoreFileKind::MmapIndex
+            | StoreFileKind::IdempotencyStore
             | StoreFileKind::PendingCompactionMarker
             | StoreFileKind::CompactSource
             | StoreFileKind::CursorDirectory
@@ -531,8 +546,40 @@ pub(crate) fn compact(
     }
     crate::store::cold_start::rebuild::clear_pending_compaction(&store.config.data_dir)?;
 
+    // Apply the window-priority idempotency eviction at the current frontier,
+    // THEN flush. The idemp store is a separate authority from `by_id`, so the
+    // index swap above did not touch it: every keyed entry survives compaction
+    // even as the underlying event frames are evicted. Eviction here only trims
+    // keys that aged out of the window (and out-of-window surplus under the soft
+    // cap); within-window keys are structurally guaranteed to remain.
+    // justifies: INV-IDEMPOTENCY-DURABLE-WINDOW
+    let frontier = store.index.global_sequence();
+    // Flag entries whose event frames the retention merge just dropped, before
+    // trimming aged-out keys. The reconstruction tuple stays intact; only the
+    // disk_pos segment id is stamped with the evicted sentinel.
+    store.index.mark_idemp_evicted_against_live();
+    let eviction = store.index.idemp.evict(frontier);
+    tracing::debug!(
+        target: "batpak::idemp",
+        flow = "compact",
+        frontier,
+        aged_out = eviction.aged_out,
+        cap_trimmed = eviction.cap_trimmed_out_of_window,
+        within_window_exceeds_cap = eviction.within_window_exceeds_cap,
+        remaining = eviction.remaining,
+        "applied window-priority idempotency eviction after compaction"
+    );
+
+    // Persist the durable idempotency store FIRST and MANDATORILY: compaction
+    // has already deleted the source frames, so losing the (now-evicted) sidecar
+    // on a crash/reopen would lose within-window dedup memory. Its error is
+    // PROPAGATED, never downgraded — it is a correctness primitive, not a
+    // fast-open cache. justifies: INV-IDEMPOTENCY-DURABLE-WINDOW
+    store.index.idemp.flush(&store.config.data_dir)?;
+
     // Refresh cold-start artifacts after post-compact rebuild so the next open
-    // can take the fast path.
+    // can take the fast path. This is best-effort: a failed mmap/checkpoint only
+    // costs a slower next open, so its error stays a warning.
     if let Err(e) = write_cold_start_artifacts_on_close(store) {
         tracing::warn!("post-compaction cold-start artifact write failed: {e}");
     }
@@ -577,6 +624,12 @@ pub(crate) fn close(mut store: Store<Open>) -> Result<Closed, StoreError> {
         writer.join()?;
     }
 
+    // Persist the durable idempotency store FIRST and MANDATORILY, ahead of the
+    // best-effort cold-start artifacts. It is a correctness primitive that must
+    // survive even when checkpoint/mmap artifacts are disabled or fail.
+    // justifies: INV-IDEMPOTENCY-DURABLE-WINDOW
+    store.index.idemp.flush(&store.config.data_dir)?;
+
     // Write cold-start artifacts after writer shutdown (all data fsynced).
     // Explicit close() is the honest durable path, so artifact write failures
     // must surface to the caller instead of being downgraded to a warning.
@@ -613,6 +666,11 @@ fn write_cold_start_artifacts_on_close(store: &Store<Open>) -> Result<(), StoreE
         }
         None => {}
     }
+    // NOTE: the durable idempotency store is flushed by the CALLERS (close +
+    // compaction tail) BEFORE this best-effort artifact refresh, so its error
+    // is always propagated and never lost behind a warn-swallowed artifact
+    // write. It is a correctness primitive, not a fast-open cache.
+    // justifies: INV-IDEMPOTENCY-DURABLE-WINDOW
     Ok(())
 }
 

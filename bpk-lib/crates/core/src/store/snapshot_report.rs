@@ -5,7 +5,11 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 /// Report body schema version for snapshot evidence.
-pub const SNAPSHOT_EVIDENCE_REPORT_SCHEMA_VERSION: u16 = 1;
+///
+/// v2: added `copied_idempotency_store_present` so a snapshot that LOST the
+/// `index.idemp` dedup authority no longer shares an evidence identity with one
+/// that carried it.
+pub const SNAPSHOT_EVIDENCE_REPORT_SCHEMA_VERSION: u16 = 2;
 
 /// Hash alias for snapshot evidence report bodies.
 pub type SnapshotEvidenceHash = [u8; 32];
@@ -33,6 +37,8 @@ pub enum SnapshotFileKind {
     Segment,
     /// `visibility_ranges.fbv`.
     VisibilityRanges,
+    /// Durable idempotency store (`index.idemp`).
+    IdempotencyStore,
     /// Pending compaction marker.
     PendingCompactionMarker,
 }
@@ -64,6 +70,7 @@ struct SnapshotStructuralFingerprint {
     copied_segment_ids_sorted: Vec<u64>,
     copied_visibility_ranges_present: bool,
     copied_pending_compaction_marker_present: bool,
+    copied_idempotency_store_present: bool,
     destination_path_digest: SnapshotEvidenceHash,
 }
 
@@ -91,6 +98,10 @@ pub struct SnapshotReportBody {
     pub copied_visibility_ranges_present: bool,
     /// Whether the pending-compaction marker was copied.
     pub copied_pending_compaction_marker_present: bool,
+    /// Whether the durable idempotency store (`index.idemp`) was copied. Part
+    /// of evidence identity so a snapshot that lost the dedup authority does not
+    /// share a fingerprint with one that carried it.
+    pub copied_idempotency_store_present: bool,
     /// Digest of the destination path bytes.
     pub destination_path_digest: SnapshotEvidenceHash,
     /// Structural findings sorted before `body_hash`.
@@ -146,6 +157,7 @@ pub(crate) struct SnapshotReportInput {
     pub(crate) copied_segment_ids_sorted: Vec<u64>,
     pub(crate) copied_visibility_ranges_present: bool,
     pub(crate) copied_pending_compaction_marker_present: bool,
+    pub(crate) copied_idempotency_store_present: bool,
     pub(crate) destination_path_digest: SnapshotEvidenceHash,
     pub(crate) findings: Vec<SnapshotFinding>,
 }
@@ -172,6 +184,7 @@ pub(crate) fn snapshot_evidence_report(
         copied_segment_ids_sorted: copied_segment_ids_sorted.clone(),
         copied_visibility_ranges_present: input.copied_visibility_ranges_present,
         copied_pending_compaction_marker_present: input.copied_pending_compaction_marker_present,
+        copied_idempotency_store_present: input.copied_idempotency_store_present,
         destination_path_digest: input.destination_path_digest,
     };
     let snapshot_id = snapshot_id_digest(&fp)?;
@@ -183,6 +196,7 @@ pub(crate) fn snapshot_evidence_report(
         copied_segment_ids_sorted,
         copied_visibility_ranges_present: input.copied_visibility_ranges_present,
         copied_pending_compaction_marker_present: input.copied_pending_compaction_marker_present,
+        copied_idempotency_store_present: input.copied_idempotency_store_present,
         destination_path_digest: input.destination_path_digest,
         findings,
     };

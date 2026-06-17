@@ -237,6 +237,7 @@ fn commit_heartbeat_event(host: &HbatProcess, entity: &str, nonce: &str) -> Resu
         kind_category: SystemHeartbeatRequest::KIND.category(),
         kind_type_id: SystemHeartbeatRequest::KIND.type_id(),
         payload_hex: lowercase_hex(&original_payload_bytes),
+        idempotency_key_hex: None,
     };
     let commit_input = batpak::encoding::to_bytes(&commit_request)?;
     let commit_response = call_one(host, "bank.commit", &commit_input)?;
@@ -290,6 +291,7 @@ fn bank_commit_then_event_get_recovers_canonical_bytes() -> Result<()> {
         kind_category: SystemHeartbeatRequest::KIND.category(),
         kind_type_id: SystemHeartbeatRequest::KIND.type_id(),
         payload_hex: lowercase_hex(&original_payload_bytes),
+        idempotency_key_hex: None,
     };
     let commit_input = batpak::encoding::to_bytes(&commit_request)?;
     let commit_response = call_one(&host, "bank.commit", &commit_input)?;
@@ -351,6 +353,7 @@ fn bank_commit_then_event_query_pages_global_sequence_and_event_get_fetches() ->
             kind_category: SystemHeartbeatRequest::KIND.category(),
             kind_type_id: SystemHeartbeatRequest::KIND.type_id(),
             payload_hex: lowercase_hex(&original_payload_bytes),
+            idempotency_key_hex: None,
         };
         let commit_input = batpak::encoding::to_bytes(&commit_request)?;
         let commit_response = call_one(&host, "bank.commit", &commit_input)?;
@@ -602,6 +605,7 @@ fn bank_commit_rejects_reserved_kind_category_over_tcp() -> Result<()> {
         kind_category: 0, // reserved
         kind_type_id: 1,
         payload_hex: "00".to_owned(),
+        idempotency_key_hex: None,
     };
     let input = batpak::encoding::to_bytes(&bad_request)?;
     let response = call_one(&host, "bank.commit", &input)?;
@@ -665,6 +669,7 @@ fn evidence_chain_walk_round_trips_over_tcp() -> Result<()> {
             kind_category: SystemHeartbeatRequest::KIND.category(),
             kind_type_id: SystemHeartbeatRequest::KIND.type_id(),
             payload_hex: lowercase_hex(&payload_bytes),
+            idempotency_key_hex: None,
         };
         let response = call_one(&host, "bank.commit", &batpak::encoding::to_bytes(&commit)?)?;
         let ack: BankCommitAck = batpak::encoding::from_bytes(&parse_ok(&response)?)?;
@@ -730,6 +735,7 @@ fn evidence_read_walk_round_trips_over_tcp() -> Result<()> {
             kind_category: SystemHeartbeatRequest::KIND.category(),
             kind_type_id: SystemHeartbeatRequest::KIND.type_id(),
             payload_hex: lowercase_hex(&payload_bytes),
+            idempotency_key_hex: None,
         };
         let _ = call_one(&host, "bank.commit", &batpak::encoding::to_bytes(&commit)?)?;
     }
@@ -770,6 +776,7 @@ fn evidence_read_walk_truncated_over_tcp() -> Result<()> {
             kind_category: SystemHeartbeatRequest::KIND.category(),
             kind_type_id: SystemHeartbeatRequest::KIND.type_id(),
             payload_hex: lowercase_hex(&payload_bytes),
+            idempotency_key_hex: None,
         };
         let _ = call_one(&host, "bank.commit", &batpak::encoding::to_bytes(&commit)?)?;
     }

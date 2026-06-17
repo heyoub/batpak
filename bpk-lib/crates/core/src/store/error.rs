@@ -143,6 +143,38 @@ pub enum StoreError {
         /// Human-readable description of the offending batch layout.
         reason: String,
     },
+    /// The on-disk `index.idemp` durable idempotency store declares a format
+    /// version newer than this binary understands. Like the schema-evolution
+    /// `FutureVersion`, this is a hard error: a reader can never reconstruct a
+    /// format it predates. Upgrade the reader.
+    IdempotencyFutureVersion {
+        /// Version stamped on the on-disk file.
+        stored: u16,
+        /// The maximum version this binary understands.
+        current: u16,
+    },
+    /// A new keyed append was refused because the durable idempotency store is
+    /// at its soft cap and the configured `OverflowPolicy` is `FailClosed`
+    /// (or `Backpressure`, which is treated as fail-closed). Existing
+    /// within-window keys are never evicted, so prior retries remain no-ops;
+    /// only genuinely new keys are rejected.
+    IdempotencyOverflowFailClosed {
+        /// Current number of durable keys.
+        len: u64,
+        /// Configured soft cap.
+        max_keys: u64,
+    },
+    /// A typed append carried `EventPayload::PAYLOAD_VERSION == 0`. Version `0`
+    /// is the reserved legacy/untyped sentinel and is never a valid declared
+    /// version. The `#[derive(EventPayload)]` macro rejects this at compile
+    /// time, but a hand-written `EventPayload` impl can still set it, so the
+    /// typed-append seam rejects it at runtime before stamping the header
+    /// (a non-zero declared version is what lets the decode seam tell a real
+    /// typed frame apart from a legacy untyped one).
+    InvalidPayloadVersion {
+        /// The rejected event kind, as its raw 16-bit encoding.
+        kind: u16,
+    },
     /// A segment frame is corrupt (length field beyond buffer, bad CRC region, etc.).
     CorruptFrame {
         /// Segment file where the frame lives.
@@ -401,6 +433,21 @@ impl std::fmt::Display for StoreError {
             Self::IdempotencyPartialBatch { reason } => {
                 write!(f, "batch rejected: {reason}")
             }
+            Self::IdempotencyFutureVersion { stored, current } => write!(
+                f,
+                "durable idempotency store on disk is version {stored} but this binary understands \
+                 at most version {current}; upgrade the reader"
+            ),
+            Self::IdempotencyOverflowFailClosed { len, max_keys } => write!(
+                f,
+                "durable idempotency store at soft cap ({len}/{max_keys}); new keyed append \
+                 refused (overflow policy fail-closed)"
+            ),
+            Self::InvalidPayloadVersion { kind } => write!(
+                f,
+                "typed append for kind 0x{kind:04X} declared PAYLOAD_VERSION 0; version 0 is the \
+                 reserved legacy/untyped sentinel and is never a valid declared payload version"
+            ),
             Self::CorruptFrame {
                 segment_id,
                 offset,
@@ -535,6 +582,9 @@ impl std::error::Error for StoreError {
             | Self::VisibilityFenceNotActive
             | Self::VisibilityFenceCancelled
             | Self::IdempotencyPartialBatch { .. }
+            | Self::IdempotencyFutureVersion { .. }
+            | Self::IdempotencyOverflowFailClosed { .. }
+            | Self::InvalidPayloadVersion { .. }
             | Self::CorruptFrame { .. }
             | Self::SegmentTooManyEntries { .. }
             | Self::DataDirMalformed { .. }

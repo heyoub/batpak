@@ -367,6 +367,7 @@ pub(crate) fn find_latest_segment_id(dir: &std::path::Path) -> Result<Option<u64
             StoreFileKind::VisibilityRanges
             | StoreFileKind::Checkpoint
             | StoreFileKind::MmapIndex
+            | StoreFileKind::IdempotencyStore
             | StoreFileKind::PendingCompactionMarker
             | StoreFileKind::CompactSource
             | StoreFileKind::CursorDirectory

@@ -53,6 +53,8 @@ export async function commitAppEvent(
     kind_category: DEMO_KIND_CATEGORY,
     kind_type_id: kindTypeId,
     payload_hex: encodeHex(payload) as typeof BankCommitRequest.Type.payload_hex,
+    // Optional durable-idempotency operation key (manifest v2, additive); unset here.
+    idempotency_key_hex: null,
   };
 
   return withSocket(host, port, async (socket) => {

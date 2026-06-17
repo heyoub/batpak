@@ -354,6 +354,68 @@ export function isKnownNetbatErrorCode(value: string): value is KnownNetbatError
   return false;
 }
 
+/**
+ * Forward-compatible payload-version check.
+ *
+ * Every generated event carries a `<TsName>_PAYLOAD_VERSION` constant
+ * (from `@batpak/generated`) recording the wire schema version this SDK
+ * was built against. Events ride the wire with a `payload_version`
+ * stamped into their `EventHeader` by the server's typed-append seam.
+ *
+ * Semantics (mirrors the tolerant `NetbatErrorCode` `(string & {})`
+ * carve-out — never hard-reject the unknown-but-newer direction):
+ *
+ *   - `stored === generated` — exact match; decode as-is.
+ *   - `stored === 0`         — legacy/untyped sentinel: the producer
+ *                              pre-dates versioning (or used the untyped
+ *                              `append`). Tolerated; decoded with the
+ *                              current shape (serde fills additive
+ *                              defaults). Returns `true`.
+ *   - `stored < generated`   — older shape; the SERVER upcasts on read
+ *                              before it ever reaches the wire, so a TS
+ *                              client only ever sees the current shape.
+ *                              Tolerated. Returns `true`.
+ *   - `stored > generated`   — NEWER shape than this SDK knows. The
+ *                              server has already upcast to its current
+ *                              shape on read; for purely additive
+ *                              evolution Effect's `Schema.Struct` ignores
+ *                              the unknown keys, so the known fields still
+ *                              decode. We therefore TOLERATE it (returns
+ *                              `true`) rather than rejecting, matching the
+ *                              "read the current shape" forward-compat
+ *                              contract. Callers that want to surface a
+ *                              "decoded against an older SDK" signal can
+ *                              compare the two numbers directly.
+ *
+ * In short: this function never returns `false` for a real wire value —
+ * it exists to DOCUMENT and CENTRALIZE the tolerant policy and to give
+ * callers a single seam to hook telemetry/warnings on the
+ * `stored > generated` case. A `stored` value that is not a finite
+ * non-negative integer is the only rejected input.
+ */
+export function isCompatiblePayloadVersion(stored: number, generated: number): boolean {
+  if (!Number.isInteger(stored) || stored < 0) return false;
+  if (!Number.isInteger(generated) || generated < 1) return false;
+  // 0 = legacy/untyped sentinel; any declared version (incl. newer than
+  // this SDK) is forward-compat decodable because the server upcasts on
+  // read and additive fields are ignored by the generated schema.
+  return true;
+}
+
+/**
+ * Classify a stored `payload_version` against the version this SDK was
+ * generated for, without rejecting. Returns a discriminant a caller can
+ * branch on for logging while still proceeding to decode.
+ */
+export function classifyPayloadVersion(
+  stored: number,
+  generated: number,
+): "exact" | "legacy" | "older" | "newer" {
+  if (stored === 0) return "legacy";
+  if (stored === generated) return "exact";
+  return stored < generated ? "older" : "newer";
+}
+
 function trimNewline(text: string): string {
   if (text.endsWith("\r\n")) return text.slice(0, -2);
   if (text.endsWith("\n")) return text.slice(0, -1);

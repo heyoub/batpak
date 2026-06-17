@@ -122,6 +122,16 @@
   witness:
     - path: crates/core/tests/event_payload_surface.rs
       lines: [20, 77]
+- name: UpcastRegistration
+  justification: __private registration struct consumed by register_upcast! generated code; not a user-facing API (mirrors EventPayloadRegistration)
+  witness:
+    - path: crates/core/tests/schema_evolution.rs
+      lines: [325]
+- name: upcast_steps_for
+  justification: __private inventory lookup used by the decode-seam upcast chain runner; exercised directly to witness the linked registration surface
+  witness:
+    - path: crates/core/tests/schema_evolution.rs
+      lines: [326]
 - name: inventory
   justification: __private re-export used by derive-generated code; not a user-facing API
   witness:

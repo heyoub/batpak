@@ -33,6 +33,18 @@ pub struct EventHeader {
     /// writer step 5 (reuses the blake3 computation).
     #[serde(default)]
     pub content_hash: [u8; 32],
+    /// Wire schema version of the payload bytes (`EventPayload::PAYLOAD_VERSION`).
+    ///
+    /// Stamped at the typed-append seam; untyped / legacy paths leave it `0`,
+    /// which the decode seam treats as "tolerant decode as current". This field
+    /// rides INSIDE the frame msgpack but OUTSIDE the hashed/signed region: the
+    /// content hash covers payload bytes only and the signature cover is
+    /// `event_id + sequence + coord + kind + prev_hash + content_hash +
+    /// extensions` (see `store/signing.rs::cover_bytes`), so adding it moves
+    /// neither any event content hash nor any signature. `#[serde(default)]`
+    /// lets pre-versioning frames decode as `0`.
+    #[serde(default)]
+    pub payload_version: u16,
 }
 
 /// Flag bit constants for EventHeader.flags
@@ -71,6 +83,7 @@ impl EventHeader {
             event_kind,
             flags: 0,
             content_hash: [0u8; 32],
+            payload_version: 0,
         }
     }
 
@@ -99,12 +112,23 @@ impl EventHeader {
             event_kind,
             flags: 0,
             content_hash: [0u8; 32],
+            payload_version: 0,
         }
     }
 
     /// Sets the flags byte on this header.
     pub fn with_flags(mut self, flags: u8) -> Self {
         self.flags = flags;
+        self
+    }
+
+    /// Stamps the payload schema version (`EventPayload::PAYLOAD_VERSION`).
+    ///
+    /// Only the typed-append lowerings call this; untyped/legacy paths leave the
+    /// default `0`. The value lives outside the hashed/signed region, so
+    /// stamping it does not move any content hash or signature.
+    pub fn with_payload_version(mut self, payload_version: u16) -> Self {
+        self.payload_version = payload_version;
         self
     }
 

@@ -90,6 +90,7 @@ pub(crate) fn latest_segment_watermark(data_dir: &Path) -> Result<(u64, u64), St
             StoreFileKind::VisibilityRanges
             | StoreFileKind::Checkpoint
             | StoreFileKind::MmapIndex
+            | StoreFileKind::IdempotencyStore
             | StoreFileKind::PendingCompactionMarker
             | StoreFileKind::CompactSource
             | StoreFileKind::CursorDirectory

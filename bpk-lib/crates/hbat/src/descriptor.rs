@@ -20,6 +20,8 @@ macro_rules! hbat_event_descriptor {
                 ts_name: $ts_name,
                 schema_ref: $schema_ref,
                 kind_bits: <$ty>::KIND.as_raw_u16(),
+                payload_version:
+                    <$ty as batpak::event::EventPayload>::PAYLOAD_VERSION,
                 fields: $crate::hbat_event_descriptor!(
                     @fields_inner
                     0usize,

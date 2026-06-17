@@ -709,6 +709,27 @@
     restore-artifact mismatches outside this pure query surface, which still
     belong to cold-start parity suites rather than the overlay oracle itself.
 
+- title: Frozen payload bytes keep decoding as event schemas evolve
+  section: Property Harness
+  pattern: Property Harness
+  status: green
+  invariants:
+    - INV-EVENT-PAYLOAD-DECODE-BACKCOMPAT
+  locations:
+    - bpk-lib/crates/core/tests/schema_evolution.rs
+  commands:
+    - cargo test --test schema_evolution
+  coverage_delta: >
+    new suite exercises crates/core/src/event/decode.rs version-dispatch,
+    crates/core/src/event/upcast.rs chain runner, and the typed-append version
+    stamping in crates/core/src/store/write_api.rs; exact JSON delta not recorded.
+  mutation_delta: unmeasured
+  blind_spots: >
+    Phase 1 freezes fixtures for batpak core's own versioned test kinds and a
+    plain v1 kind; the hbat manifest payloads carry FROZEN_FIXTURE_DEBT and gain
+    fixtures in Phase 2. The structural frozen-fixture lint is warn-first this
+    minor and flips to hard-fail once the debt is burned down.
+
 - title: Public topology diagnostics match configured overlay posture
   section: Oracle Harness
   pattern: Oracle Harness

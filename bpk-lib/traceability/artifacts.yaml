@@ -637,6 +637,21 @@
     - CONTRIBUTING.md
     - AGENTS.md
     - templates/minimal-app/Cargo.toml
+- id: ART-EVENT-PAYLOAD-DECODE-SEAM
+  kind: source
+  paths:
+    - crates/core/src/event/decode.rs
+    - crates/core/src/event/upcast.rs
+    - crates/core/src/event/header.rs
+    - crates/core/src/event/payload.rs
+- id: ART-EVENT-PAYLOAD-FROZEN-GOLDENS
+  kind: tests
+  paths:
+    - crates/core/tests/schema_evolution.rs
+- id: ART-SCHEMA-EVOLUTION-DOC
+  kind: docs
+  paths:
+    - EVENTS.md
 - id: ART-EXAMPLES
   kind: examples
   paths:
@@ -662,11 +677,24 @@
     - crates/core/examples/typed_reactor_multi.rs
     - crates/core/examples/visibility_fence.rs
     - crates/core/examples/wait_for_durable.rs
+    - crates/core/examples/idempotent_pass.rs
 - id: ART-MACROS
   kind: source
   paths:
     - crates/macros/src/lib.rs
     - crates/macros-support/src/lib.rs
+- id: ART-IDEMPOTENCY-DURABLE-SOURCE
+  kind: source
+  paths:
+    - crates/core/src/store/index/idemp.rs
+    - crates/core/src/id/mod.rs
+- id: ART-IDEMPOTENCY-DURABLE-TESTS
+  kind: tests
+  paths:
+    - crates/core/tests/idempotency_durable_store.rs
+    - crates/core/tests/idempotency_window_priority.rs
+    - crates/core/tests/idempotency_for_operation.rs
+    - crates/core/tests/idempotency_corruption_recovery.rs
 - id: ART-TESTS
   kind: tests
   paths:
