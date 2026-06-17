@@ -217,8 +217,8 @@ const OVERSIZE_HARNESS_ALLOWLIST: &[OversizeDebt] = &[
     },
     OversizeDebt {
         path: "tests/segment_scan_hardening.rs",
-        max_lines: 868,
-        reason: "segment corruption shapes share frame-building helpers; bumped 713 -> 805 after the legacy-SDX2 backward-compat frame-scan regression tests landed (audit P1 fallback fix); 805 -> 868 for the forged truncating SIDX-offset rejection regression test (audit P1, rustfmt-final count)",
+        max_lines: 928,
+        reason: "segment corruption shapes share frame-building helpers; bumped 713 -> 805 after the legacy-SDX2 backward-compat frame-scan regression tests landed (audit P1 fallback fix); 805 -> 868 for the forged truncating SIDX-offset rejection regression test (audit P1, rustfmt-final count); 868 -> 928 for the corrupt-SDX3-footer too-high-offset recover-all-CRC-valid-frames regression test (round-3 audit P1)",
         target: "split helper module from case table during harness cleanup",
     },
     OversizeDebt {

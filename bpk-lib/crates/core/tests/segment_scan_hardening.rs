@@ -526,6 +526,66 @@ fn sidx_footer_offset_forged_to_truncate_frames_is_rejected_not_silently_dropped
 }
 
 #[test]
+fn corrupt_sdx3_footer_offset_too_high_into_footer_recovers_all_crc_valid_frames() {
+    // ROUND-3 P1: a CORRUPT (CRC-failing) SDX3 footer whose `string_table_offset`
+    // points too HIGH — past the real frames, INTO the footer region (string
+    // table / entries / CRC). The round-2 truncation guard only rejects an offset
+    // too LOW (a CRC-valid frame begins at the claimed boundary). A too-HIGH
+    // offset lands on footer bytes, where NO CRC-valid frame begins, so the guard
+    // passed it through. Before this fix, cold start trusted that unauthenticated
+    // offset as `frames_end`, scanned the real frames fine, then parsed FOOTER
+    // bytes as frame headers and FailClosed — bricking recovery even though every
+    // real frame is CRC-valid. With provenance-aware recovery, the untrusted
+    // offset is clamped down to the true end of CRC-valid frames, so all events
+    // are recovered.
+    let dir = TempDir::new().expect("temp dir");
+    seed_store(&dir, 6);
+
+    let seg = segment_path(&dir);
+    let mut bytes = std::fs::read(&seg).expect("read segment");
+    assert_eq!(
+        &bytes[bytes.len() - 4..],
+        b"SDX3",
+        "seeded segment must carry the SDX3 SIDX magic"
+    );
+
+    let n = bytes.len();
+    let off_pos = n - 16;
+    let true_frames_end = u64::from_le_bytes(
+        bytes[off_pos..off_pos + 8]
+            .try_into()
+            .expect("8-byte SIDX trailer offset"),
+    );
+    // The footer region spans [true_frames_end .. n). Point the offset INTO it,
+    // strictly past the real frames but still <= file_len - 16 (the trailer can't
+    // begin inside itself). Landing it a few bytes into the string table is the
+    // adversarial too-high case. This also breaks the footer CRC (read_layout
+    // recomputes the covered region from the offset and the geometry no longer
+    // matches the stored CRC / errors), so the footer is UNTRUSTED and recovery
+    // must rebuild from the CRC-valid frames it actually finds.
+    let max_offset = (n as u64) - 16;
+    let forged_high = (true_frames_end + 4).min(max_offset);
+    assert!(
+        forged_high > true_frames_end,
+        "forged offset must point strictly into the footer region (too high)"
+    );
+    bytes[off_pos..off_pos + 8].copy_from_slice(&forged_high.to_le_bytes());
+    std::fs::write(&seg, &bytes).expect("write too-high-offset segment");
+
+    let store = Store::open(config(&dir))
+        .expect("reopen must succeed: a too-high corrupt-footer offset must not brick cold start");
+    let entries = user_entries(&store);
+    assert_eq!(
+        entries.len(),
+        6,
+        "PROPERTY: a too-HIGH unauthenticated SIDX offset (into the footer) must recover ALL \
+         CRC-valid frames, not FailClosed; got {} (expected 6)",
+        entries.len()
+    );
+    store.close().expect("close");
+}
+
+#[test]
 fn sidx_footer_entry_count_disagreement_falls_back_to_frame_scan() {
     // Corrupting the SIDX entry_count makes the footer structurally
     // inconsistent with the actual footer block. Cold start must not trust

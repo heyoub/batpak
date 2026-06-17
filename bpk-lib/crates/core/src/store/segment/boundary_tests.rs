@@ -6,7 +6,133 @@
 //! lower-bound check on `append_frames_from_segment` (audit P1s).
 
 use super::*;
+use std::io::Cursor;
 use tempfile::TempDir;
+
+/// Build an in-memory buffer of `[real CRC-valid frames][CRC-valid SDX3 footer]`.
+/// Returns `(bytes, frames_end)` where `frames_end` is the SIDX
+/// `string_table_offset` the footer records (= the true end of the frames).
+fn frames_then_sdx3_footer(payloads: &[&str]) -> (Vec<u8>, u64) {
+    use crate::store::segment::sidx::{kind_to_raw, SidxEntry, SidxEntryCollector};
+
+    let mut bytes = Vec::new();
+    let mut collector = SidxEntryCollector::new();
+    for (idx, p) in payloads.iter().enumerate() {
+        let frame_offset = bytes.len() as u64;
+        let frame = frame_encode(&serde_json::json!({ "payload": p })).expect("encode frame");
+        let frame_length = u32::try_from(frame.len()).expect("frame length fits u32");
+        bytes.extend_from_slice(&frame);
+        let entry = SidxEntry {
+            event_id: idx as u128 + 1,
+            entity_idx: 0,
+            scope_idx: 0,
+            kind: kind_to_raw(crate::event::EventKind::custom(0x1, 1)),
+            wall_ms: 1,
+            clock: 1,
+            dag_lane: 0,
+            dag_depth: 0,
+            prev_hash: [0; 32],
+            event_hash: [1; 32],
+            frame_offset,
+            frame_length,
+            global_sequence: idx as u64 + 1,
+            correlation_id: 1,
+            causation_id: 0,
+        };
+        collector.record(entry, "entity:test", "scope:test");
+    }
+    let frames_end = bytes.len() as u64;
+    let mut cursor = Cursor::new(&mut bytes);
+    cursor.seek(SeekFrom::End(0)).expect("seek to footer start");
+    collector
+        .write_footer(&mut cursor, 7)
+        .expect("write footer");
+    (bytes, frames_end)
+}
+
+#[test]
+fn detect_sidx_boundary_trusts_a_crc_valid_sdx3_footer() {
+    // A real, CRC-valid SDX3 footer authenticates its string_table_offset: the
+    // boundary is reported `trusted`, so the scan loops keep the strict
+    // (FailClosed-on-bad-frame) policy.
+    let (bytes, frames_end) = frames_then_sdx3_footer(&["a", "b", "c"]);
+    let file_len = bytes.len() as u64;
+    let mut cursor = Cursor::new(bytes);
+    let boundary = detect_sidx_boundary(&mut cursor, file_len, 7)
+        .expect("must not error")
+        .expect("a CRC-valid SDX3 footer is a boundary");
+    assert_eq!(
+        boundary,
+        SidxBoundary {
+            frames_end,
+            trusted: true,
+        },
+        "PROPERTY: a CRC-valid SDX3 footer must mark the boundary trusted with the true frames_end"
+    );
+}
+
+#[test]
+fn detect_sidx_boundary_distrusts_a_crc_failed_sdx3_footer() {
+    // Flip a byte inside the footer's string-table/entries region so the SDX3
+    // CRC fails. The trailer (magic + offset) is untouched, so the boundary is
+    // still recognized — but it must be flagged UNTRUSTED, because the offset is
+    // no longer authenticated and a too-high garbage offset must trigger
+    // recover-what-was-found, not a blind FailClosed.
+    let (mut bytes, frames_end) = frames_then_sdx3_footer(&["a", "b", "c"]);
+    // Corrupt a byte just inside the string table (right after the real frames),
+    // which is covered by the footer CRC but is not the trailer geometry.
+    let corrupt_at = usize::try_from(frames_end).expect("frames_end fits usize");
+    bytes[corrupt_at] ^= 0xFF;
+    let file_len = bytes.len() as u64;
+    let mut cursor = Cursor::new(bytes);
+    let boundary = detect_sidx_boundary(&mut cursor, file_len, 7)
+        .expect("must not error")
+        .expect("a CRC-failed footer is still recognized as a boundary");
+    assert_eq!(
+        boundary,
+        SidxBoundary {
+            frames_end,
+            trusted: false,
+        },
+        "PROPERTY: a CRC-failed SDX3 footer must be recognized as a boundary but flagged untrusted"
+    );
+}
+
+#[test]
+fn crc_valid_frames_end_clamps_a_too_high_hint_down_to_the_real_frame_end() {
+    // The too-HIGH corrupt-offset case: a claimed_end pointing INTO the footer
+    // region (past the real frames). crc_valid_frames_end walks the CRC-valid
+    // frames and returns where they actually stop, NOT the bogus hint — so the
+    // scan recovers every real frame instead of parsing footer bytes as frames.
+    let (bytes, real_frames_end) = frames_then_sdx3_footer(&["x", "y", "z"]);
+    let file_len = bytes.len() as u64;
+    // A hint that points past the real frames but inside the file (into footer).
+    let too_high = real_frames_end + 4;
+    assert!(
+        too_high < file_len,
+        "hint must land inside the footer region"
+    );
+    let mut cursor = Cursor::new(bytes);
+    let recovered = crc_valid_frames_end(&mut cursor, 0, too_high).expect("must not error");
+    assert_eq!(
+        recovered, real_frames_end,
+        "PROPERTY: a too-high untrusted hint must clamp down to the true CRC-valid frame end"
+    );
+}
+
+#[test]
+fn crc_valid_frames_end_returns_an_honest_hint_unchanged() {
+    // When the hint equals the real frame end (honest footer), the walk reaches
+    // the hint with every frame decoding cleanly and returns it unchanged — no
+    // frames dropped, no over-read.
+    let (bytes, real_frames_end) = frames_then_sdx3_footer(&["p", "q"]);
+    let mut cursor = Cursor::new(bytes);
+    let recovered = crc_valid_frames_end(&mut cursor, 0, real_frames_end).expect("must not error");
+    assert_eq!(
+        recovered, real_frames_end,
+        "PROPERTY: an honest hint at the true frame end is returned unchanged"
+    );
+}
 
 #[test]
 fn validate_sidx_boundary_rejects_offset_landing_on_a_crc_valid_frame() {

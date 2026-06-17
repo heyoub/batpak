@@ -6,7 +6,7 @@ use crate::util::{git_output, repo_root};
 
 use super::lanes::MutationLane;
 use super::plan::mutants_command;
-use super::policy::assert_mutation_policy;
+use super::policy::{assert_mutation_policy, DiffScope};
 use super::score::mutation_score;
 
 /// Environment variable carrying the path to the PR base..head patch that
@@ -24,8 +24,15 @@ const MUTANTS_DIFF_ENV: &str = "BATPAK_MUTANTS_DIFF";
 ///    current branch against `origin/main` (then `main`) to a scratch file under
 ///    the cargo target dir and return that path.
 ///
-/// Returns `Ok(None)` only when no diff can be resolved at all (e.g. a local run
-/// with no upstream); callers treat that as "no in-diff scope available".
+/// Returns `Ok(None)` when no NON-EMPTY diff can be resolved — either no upstream
+/// exists, or the resolved diff is empty (e.g. a manual `workflow_dispatch`/local
+/// run on the default branch, where `origin/main..HEAD` is empty). An EMPTY diff
+/// must be reported as `None`, not as a path to an empty patch: scoping a lane
+/// with an empty `--in-diff` makes cargo-mutants find zero mutants, which would
+/// let the diff-scoped zero-mutant early return mark the lane PASSED and skip the
+/// critical-seam threshold gate. With `None`, the caller omits `--in-diff` and
+/// the lane mutates the whole seam glob so the gate still runs, and it records
+/// `DiffScope::None` so the zero-mutant pass cannot fire on a non-PR run.
 fn resolve_smoke_diff() -> Result<Option<PathBuf>> {
     if let Some(path) = std::env::var_os(MUTANTS_DIFF_ENV) {
         let path = PathBuf::from(path);
@@ -36,13 +43,21 @@ fn resolve_smoke_diff() -> Result<Option<PathBuf>> {
                 path.display()
             );
         }
+        // A CI-plumbed patch can still be empty (a PR touching no lib code).
+        // Treat an empty patch as "no PR scope" so the gate does not silently pass
+        // on zero mutants.
+        let contents = std::fs::read_to_string(&path)
+            .with_context(|| format!("read {MUTANTS_DIFF_ENV} patch at {}", path.display()))?;
+        if contents.trim().is_empty() {
+            return Ok(None);
+        }
         return Ok(Some(path));
     }
 
     // Local best-effort: derive a merge-base against a sensible upstream and
     // materialize the patch so cargo-mutants can read it. Never hard-fails the
-    // lane on its own — if we cannot resolve an upstream, the lane simply runs
-    // with no in-diff scope and the policy early-return handles an empty result.
+    // lane on its own — if we cannot resolve an upstream OR the diff is empty, the
+    // lane runs with no in-diff scope (whole seam) and the policy gate still runs.
     let root = repo_root()?;
     let base = ["origin/main", "main"]
         .into_iter()
@@ -56,6 +71,11 @@ fn resolve_smoke_diff() -> Result<Option<PathBuf>> {
     // repo-root-relative `bpk-lib/...` paths that cargo-mutants' --in-diff
     // matcher silently drops, selecting zero mutants.
     let diff = git_output(&root, ["diff", "--relative", &base, "HEAD"])?;
+    // An empty merge-base diff (default branch, no PR) must NOT scope the lane —
+    // otherwise every diff-scoped seam sees zero mutants and silently passes.
+    if diff.trim().is_empty() {
+        return Ok(None);
+    }
     let diff_path = super::lanes::mutants_output_root().join("smoke-diff.patch");
     if let Some(parent) = diff_path.parent() {
         std::fs::create_dir_all(parent).with_context(|| {
@@ -94,6 +114,15 @@ pub(super) fn run_mutation_lane(lane: &MutationLane) -> Result<()> {
     } else {
         None
     };
+    // A diff-scoped lane only earns the zero-mutant pass when a REAL, non-empty PR
+    // diff actually scoped it. `resolve_smoke_diff` returns `None` for an empty or
+    // absent diff (manual dispatch / default branch), so `diff_path.is_some()` is
+    // the exact "a PR diff was applied" signal.
+    let diff_scope = if lane.diff_scoped && diff_path.is_some() {
+        DiffScope::PrDiff
+    } else {
+        DiffScope::None
+    };
     command.args(mutants_command(lane, &output_dir, diff_path.as_deref()));
     let status = command
         .status()
@@ -107,7 +136,7 @@ pub(super) fn run_mutation_lane(lane: &MutationLane) -> Result<()> {
         )
     })?;
 
-    let policy_result = assert_mutation_policy(lane, &output_dir, score);
+    let policy_result = assert_mutation_policy(lane, &output_dir, score, diff_scope);
     if status.success() || lane.allows_nonzero_exit(score) {
         return policy_result;
     }

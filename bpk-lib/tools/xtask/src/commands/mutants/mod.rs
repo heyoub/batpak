@@ -40,7 +40,8 @@ mod tests {
     };
     use super::plan::{build_mutant_execution_plan, mutants_command, MutantExecutionPlan};
     use super::policy::{
-        assert_mutation_policy, next_ratchet_floor, RepoMutationPhase, REPO_MUTATION_PHASE,
+        assert_mutation_policy, next_ratchet_floor, DiffScope, RepoMutationPhase,
+        REPO_MUTATION_PHASE,
     };
     use super::score::{
         cargo_mutants_receipt_path, cargo_mutants_results_dir, mutation_score, MutationScore,
@@ -456,8 +457,42 @@ mod tests {
         };
 
         assert!(
-            assert_mutation_policy(&lane, &fake_output_dir(), score).is_ok(),
-            "diff-scoped lane with no mutable lines in the PR diff is a legitimate PASS"
+            assert_mutation_policy(&lane, &fake_output_dir(), score, DiffScope::PrDiff).is_ok(),
+            "diff-scoped lane scoped by a REAL PR diff with no mutable lines is a legitimate PASS"
+        );
+    }
+
+    #[test]
+    fn diff_scoped_lane_with_empty_diff_and_zero_mutants_does_not_silently_pass() {
+        // ROUND-3 P2: on a manual `workflow_dispatch`/local run with no PR,
+        // `resolve_smoke_diff` falls back to `origin/main..HEAD`, which is EMPTY on
+        // the default branch. That empty diff is reported as `DiffScope::None`, so a
+        // diff-scoped critical seam producing zero mutants must NOT take the
+        // zero-mutant pass — it must hard-fail as no-evidence, so a manual mutation
+        // proof cannot skip the critical-seam threshold gate.
+        let lane = critical_mutation_smoke_lanes()
+            .into_iter()
+            .find(|lane| lane.slug == "writer-commit")
+            .expect("writer-commit smoke lane");
+        assert!(
+            lane.diff_scoped,
+            "the smoke lane under test must be diff-scoped"
+        );
+        let score = MutationScore {
+            caught: 0,
+            missed: 0,
+            timed_out: 0,
+            unviable: 0,
+            executed: 0,
+            scored: 0,
+            score_pct: None,
+        };
+
+        let err = assert_mutation_policy(&lane, &fake_output_dir(), score, DiffScope::None)
+            .expect_err("an empty-diff manual run must not silently pass with zero mutants");
+        assert!(
+            err.to_string().contains("no executed mutants"),
+            "a diff-scoped lane with no real PR diff must fail as no-evidence, got: {err:#}"
         );
     }
 
@@ -477,7 +512,7 @@ mod tests {
             score_pct: None,
         };
 
-        let err = assert_mutation_policy(&lane, &fake_output_dir(), score)
+        let err = assert_mutation_policy(&lane, &fake_output_dir(), score, DiffScope::None)
             .expect_err("non-diff lanes must bail on zero mutants");
         assert!(
             err.to_string().contains("no executed mutants"),
@@ -525,7 +560,8 @@ mod tests {
             score_pct: None,
         };
 
-        let err = assert_mutation_policy(&lane, &fake_output_dir(), score).expect_err("must fail");
+        let err = assert_mutation_policy(&lane, &fake_output_dir(), score, DiffScope::None)
+            .expect_err("must fail");
         assert!(
             err.to_string()
                 .contains("no scoreable caught/missed mutants"),
@@ -546,7 +582,8 @@ mod tests {
             score_pct: None,
         };
 
-        let err = assert_mutation_policy(&lane, &fake_output_dir(), score).expect_err("must fail");
+        let err = assert_mutation_policy(&lane, &fake_output_dir(), score, DiffScope::None)
+            .expect_err("must fail");
         assert!(
             err.to_string().contains("no executed mutants"),
             "empty mutation lanes must fail as no-evidence lanes, got: {err:#}"
@@ -600,7 +637,8 @@ mod tests {
         let timeout_path = cargo_mutants_receipt_path(&output_dir, "timeout.txt")
             .display()
             .to_string();
-        let err = assert_mutation_policy(&lane, &output_dir, score).expect_err("must fail");
+        let err = assert_mutation_policy(&lane, &output_dir, score, DiffScope::None)
+            .expect_err("must fail");
         assert!(
             err.to_string().contains(&timeout_path),
             "timeout guidance must point at nested cargo-mutants receipts, got: {err:#}"
@@ -624,7 +662,8 @@ mod tests {
         let missed_path = cargo_mutants_receipt_path(&output_dir, "missed.txt")
             .display()
             .to_string();
-        let err = assert_mutation_policy(&lane, &output_dir, score).expect_err("must fail");
+        let err = assert_mutation_policy(&lane, &output_dir, score, DiffScope::None)
+            .expect_err("must fail");
         assert!(
             err.to_string().contains(&missed_path),
             "threshold guidance must point at nested cargo-mutants receipts, got: {err:#}"
