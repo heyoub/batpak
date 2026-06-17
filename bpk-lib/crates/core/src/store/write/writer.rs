@@ -589,9 +589,18 @@ impl WriterState<'_> {
             )?,
         );
         let _sealed = old.seal();
-        // Seal/pre-publish boundary: old segment sealed, new empty active file
-        // exists on disk, reader not yet advanced. The single recovery-meaningful
-        // point at which to inject a crash during rotation.
+        *self.segment_id += 1;
+        // Notify the reader of the new active segment so mmap dispatch is correct.
+        self.reader.set_active_segment(*self.segment_id);
+        // Inject a crash during rotation AFTER in-memory state is fully rolled
+        // forward (active segment swapped, id incremented, reader advanced), so a
+        // returned injected error leaves writer state CONSISTENT — a real crash
+        // discards in-memory state, it does not leave active_segment pointing at
+        // the new file while segment_id still names the old one (which would make
+        // the next append publish DiskPos values that read the wrong segment).
+        // The on-disk recovery scenario is unchanged: old segment sealed (with
+        // footer), new empty active file present, triggering append not yet
+        // written — exactly what cold-start recovery must handle.
         #[cfg(feature = "dangerous-test-hooks")]
         crate::store::fault::maybe_inject(
             crate::store::fault::InjectionPoint::SegmentRotation {
@@ -600,9 +609,6 @@ impl WriterState<'_> {
             },
             &self.config.fault_injector,
         )?;
-        *self.segment_id += 1;
-        // Notify the reader of the new active segment so mmap dispatch is correct.
-        self.reader.set_active_segment(*self.segment_id);
         Ok(true)
     }
 }
