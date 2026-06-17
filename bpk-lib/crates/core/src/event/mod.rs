@@ -10,6 +10,8 @@ pub mod kind;
 pub mod payload;
 /// Traits for event-sourced and reactive state reconstruction.
 pub mod sourcing;
+/// On-read payload schema upcasting (vN -> vN+1 migration chain).
+pub mod upcast;
 
 pub use decode::{DecodeSource, DecodeTyped, TypedDecodeError};
 pub use hash::HashChain;
@@ -23,6 +25,7 @@ pub use sourcing::{
     EventSourced, JsonValueInput, MultiDispatchError, MultiReactive, ProjectionEvent,
     ProjectionInput, ProjectionPayload, RawMsgpackInput, Reactive, ReplayLane, TypedReactive,
 };
+pub use upcast::{Upcast, UpcastError};
 
 use crate::coordinate::Coordinate;
 use serde::{Deserialize, Serialize};

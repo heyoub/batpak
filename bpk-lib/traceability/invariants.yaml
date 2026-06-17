@@ -3,6 +3,12 @@
   artifacts:
     - ART-CARGO
     - ART-BUILD-RS
+- id: INV-EVENT-PAYLOAD-DECODE-BACKCOMPAT
+  statement: The single typed-decode seam keeps decoding historical payload bytes as schemas evolve - additive-with-default is absorbed by serde, an older stored payload_version is lifted to the current shape by the registered Upcast chain (in-memory only, stored bytes never rewritten), and a stored version newer than the decoder is a hard FutureVersion error; adding the payload_version header field moves no event content hash or signature.
+  artifacts:
+    - ART-EVENT-PAYLOAD-DECODE-SEAM
+    - ART-EVENT-PAYLOAD-FROZEN-GOLDENS
+    - ART-SCHEMA-EVOLUTION-DOC
 - id: INV-SYNCBAT-DISPATCH-RECEIPTS
   statement: syncbat checkout dispatch emits at most one completed or failed runtime receipt for resolved operations, emits no receipt for unknown operations, and fails closed when the configured receipt sink fails.
   artifacts:

@@ -12,6 +12,15 @@ pub(crate) struct AppendSubmission {
     correlation_id: u128,
     pub(super) options: AppendOptions,
     fence_token: Option<u64>,
+    /// `EventPayload::PAYLOAD_VERSION` threaded from the typed-append seam.
+    ///
+    /// `0` is the default for every untyped / legacy / batch / denial /
+    /// lifecycle path; only the typed lowerings (`append_typed*`,
+    /// `submit_typed*`, `*_reaction_typed`, `apply_transition`) raise it to
+    /// `T::PAYLOAD_VERSION` via [`AppendSubmission::with_payload_version`]. It is
+    /// stamped into the header by [`AppendSubmission::build_event`] and rides
+    /// outside the hashed/signed region.
+    payload_version: u16,
 }
 
 impl AppendSubmission {
@@ -22,7 +31,18 @@ impl AppendSubmission {
             correlation_id: event_id,
             options: AppendOptions::default(),
             fence_token: None,
+            payload_version: 0,
         }
+    }
+
+    /// Stamp the typed payload schema version onto this submission.
+    ///
+    /// Threaded as a scalar (not a generic bound) because `build_event` and the
+    /// public funnels are bounded `impl Serialize`, not `EventPayload`. Only the
+    /// typed lowerings call this; everything else keeps the `0` sentinel.
+    pub(crate) fn with_payload_version(mut self, payload_version: u16) -> Self {
+        self.payload_version = payload_version;
+        self
     }
 
     pub(crate) fn root_under_fence(token: u64, clock: &dyn Clock) -> Self {
@@ -43,6 +63,7 @@ impl AppendSubmission {
                 ..AppendOptions::default()
             },
             fence_token: None,
+            payload_version: 0,
         }
     }
 
@@ -72,6 +93,7 @@ impl AppendSubmission {
                 .unwrap_or(event_id),
             options,
             fence_token: None,
+            payload_version: 0,
         }
     }
 
@@ -114,6 +136,9 @@ impl AppendSubmission {
         );
         if self.options.flags != 0 {
             header = header.with_flags(self.options.flags);
+        }
+        if self.payload_version != 0 {
+            header = header.with_payload_version(self.payload_version);
         }
         Ok(Event::new(header, payload_bytes))
     }

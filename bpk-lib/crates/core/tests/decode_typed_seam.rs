@@ -1,5 +1,5 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; DecodeTyped lane tests in tests/decode_typed_seam.rs treat decode failures as test failures; unwrap and panic are the assertion style throughout.
-#![allow(clippy::unwrap_used, clippy::panic)]
+// justifies: INV-TEST-PANIC-AS-ASSERTION; DecodeTyped lane tests in tests/decode_typed_seam.rs treat decode failures as test failures; unwrap and panic are the assertion style throughout, and the catch-all match arms panic on any unexpected TypedDecodeError variant (including future ones such as FutureVersion) which is the intended assertion.
+#![allow(clippy::unwrap_used, clippy::panic, clippy::wildcard_enum_match_arm)]
 //! Per-lane behavioural tests for the `DecodeTyped` seam (Dispatch Chapter T1).
 //!
 //! Both replay lanes (`Event<serde_json::Value>` and `Event<Vec<u8>>`) must
