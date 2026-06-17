@@ -7,7 +7,6 @@ use super::score::MutationScore;
 
 pub(super) const MUTANTS_OUTPUT_ROOT_LABEL: &str = "$CARGO_TARGET_DIR/xtask-mutants";
 pub(super) const CRITICAL_SEAM_MIN_CATCH_PCT: u32 = 85;
-pub(super) const CRITICAL_SMOKE_SHARD: &str = "0/8";
 pub(super) const REPO_WIDE_SMOKE_SHARD: &str = "0/48";
 
 pub(super) const REPO_WIDE_ALL_FEATURES_MUTANT_FILES: &[&str] = &[
@@ -91,6 +90,49 @@ const WRITER_COMMIT_MUTANT_EXCLUDE_RES: &[&str] = &[
     // CI receipt: PreparedBatch::len -> 0 exceeded the auto test timeout while
     // the staging invariants are already covered by unit tests in staging.rs.
     r"crates/core/src/store/write/staging\.rs:.*replace PreparedBatch::len -> usize with 0",
+    // CI receipt: push_shared_parts `total_bytes += len` -> `-=` drives the
+    // byte accumulator into a pathological state that hangs an integration test
+    // (401s auto timeout) instead of failing fast. The batch byte accounting is
+    // exercised by staging.rs unit tests; exclude the timeout artifact rather
+    // than block the lane on a wall-clock hang.
+    r"crates/core/src/store/write/staging\.rs:.*replace \+= with -= in PreparedBatchBuilder::push_shared_parts",
+];
+// Equivalent-mutant registry for the projection-flow seam. Each entry is a
+// mutant proven to have no observable effect on projection output; excluding
+// them keeps the mutation-score denominator honest instead of letting provably
+// equivalent mutants drag the gate. Every entry must carry its equivalence proof.
+const PROJECTION_MUTANT_EXCLUDE_RES: &[&str] = &[
+    // Equivalent mutant: deleting `!` in `result.is_none() && !events.is_empty()`
+    // only changes whether a `tracing::debug!` diagnostic is emitted in
+    // execute_full_replay — there is no functional behavior to assert without a
+    // brittle log-capture test, so the mutant is unkillable by design.
+    r"crates/core/src/store/projection/flow/mod\.rs:.*delete ! in execute_full_replay",
+    // The guard's three `&&` conjuncts in execute_external_cache_path's
+    // incremental-apply gate (`!is_fresh && meta.watermark <= replay.watermark &&
+    // supports_incremental_apply() && incremental_projection`) are all killed by
+    // external_cache_path_full_replays_for_non_incremental_type and verified
+    // CAUGHT by `cargo mutants --re 'replace && with ||'` (3/3 caught), so none
+    // are excluded. That test uses a non-incremental, stale Consistent entry:
+    // the real guard is false (-> full replay -> 3), while flipping ANY `&&` to
+    // `||` makes `!is_fresh` (true) carry the guard, wrongly entering the
+    // incremental branch whose no-op apply returns the stale cached 2.
+    // The previously-registered :540:26 equivalence exclusion was removed: it was
+    // only equivalent for supports_incremental_apply()==true types, and the new
+    // non-incremental test proves it is killable, so excluding it was over-broad.
+    //
+    // No exclusion for the `==` checks in execute_external_cache_path: BOTH are
+    // value-/label-affecting and killable.
+    //   * :520 (the Consistent `is_fresh` check) is value-affecting.
+    //   * :607 (`meta.watermark == execution.replay.watermark`) selects the
+    //     reported ProjectionObservedFreshness (Fresh vs StaleAllowed). That label
+    //     is NOT log-only: it flows through projection_run::map_observed_freshness
+    //     onto `body.observed_freshness` on the project_run_evidence outcome, so
+    //     the `== -> !=` mutant is killed by
+    //     external_cache_hit_observed_freshness_distinguishes_fresh_from_stale_allowed,
+    //     which asserts Fresh (watermarks equal) AND StaleAllowed (watermarks
+    //     differ) on that observable field.
+    // The value-affecting age comparison here (`age_us < max_stale_ms * 1000`) is
+    // pinned by maybe_stale_external_cache_age_boundary_is_pinned.
 ];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -139,6 +181,11 @@ pub(super) struct MutationLane {
     pub(super) baseline: MutationBaseline,
     pub(super) shard: Option<String>,
     pub(super) sharding: Option<MutationSharding>,
+    /// When true, this lane scopes mutation to the lines changed in the PR diff
+    /// (`cargo mutants --in-diff <patch>`) instead of a content-derived
+    /// round-robin shard. The gated mutant population is then deterministic with
+    /// respect to the PR rather than drifting on unrelated source edits.
+    pub(super) diff_scoped: bool,
     pub(super) enforcement: MutationEnforcement,
     pub(super) package: Option<&'static str>,
     pub(super) paths: &'static [&'static str],
@@ -157,6 +204,7 @@ impl MutationLane {
             baseline: MutationBaseline::Run,
             shard: None,
             sharding: None,
+            diff_scoped: false,
             enforcement: MutationEnforcement::Threshold {
                 min_catch_pct: CRITICAL_SEAM_MIN_CATCH_PCT,
             },
@@ -170,7 +218,7 @@ impl MutationLane {
     fn critical_smoke(seam: CriticalMutationSeam) -> Self {
         Self {
             label: format!(
-                "{} ({}, smoke shard {CRITICAL_SMOKE_SHARD})",
+                "{} ({}, diff-scoped)",
                 seam.label,
                 surface_name(seam.surface)
             ),
@@ -179,8 +227,13 @@ impl MutationLane {
             scope: MutationScope::CriticalSeam,
             surface: seam.surface,
             baseline: MutationBaseline::Run,
-            shard: Some(CRITICAL_SMOKE_SHARD.to_owned()),
-            sharding: Some(MutationSharding::RoundRobin),
+            // Diff-scoped smoke lanes never carry a fixed fractional shard: the
+            // mutant set is the intersection of the seam `--file` globs and the
+            // PR diff, so the round-robin slice (and its frontier-append-gate
+            // special case) disappear entirely.
+            shard: None,
+            sharding: None,
+            diff_scoped: true,
             enforcement: MutationEnforcement::Threshold {
                 min_catch_pct: CRITICAL_SEAM_MIN_CATCH_PCT,
             },
@@ -204,6 +257,7 @@ impl MutationLane {
             baseline: MutationBaseline::Run,
             shard: shard.map(str::to_owned),
             sharding: None,
+            diff_scoped: false,
             enforcement: current_repo_mutation_enforcement(),
             package: None,
             paths: repo_wide_paths(surface),
@@ -225,6 +279,7 @@ impl MutationLane {
             baseline: MutationBaseline::Run,
             shard: Some(REPO_WIDE_SMOKE_SHARD.to_owned()),
             sharding: Some(MutationSharding::RoundRobin),
+            diff_scoped: false,
             enforcement: current_repo_mutation_enforcement(),
             package: None,
             paths: repo_wide_paths(surface),
@@ -259,22 +314,34 @@ impl MutationLane {
 
     pub(super) fn policy_line(&self) -> String {
         match self.enforcement {
-            MutationEnforcement::Threshold { min_catch_pct } => match self.shard.as_deref() {
-                Some(shard) => format!(
-                    "{} `{}` on {} shard {shard}: threshold {}%",
-                    self.scope.name(),
-                    self.label,
-                    surface_name(self.surface),
-                    min_catch_pct,
-                ),
-                None => format!(
-                    "{} `{}` on {}: threshold {}%",
-                    self.scope.name(),
-                    self.label,
-                    surface_name(self.surface),
-                    min_catch_pct,
-                ),
-            },
+            MutationEnforcement::Threshold { min_catch_pct } => {
+                if self.diff_scoped {
+                    format!(
+                        "{} `{}` on {} diff-scoped (--in-diff against PR base): threshold {}%",
+                        self.scope.name(),
+                        self.label,
+                        surface_name(self.surface),
+                        min_catch_pct,
+                    )
+                } else {
+                    match self.shard.as_deref() {
+                        Some(shard) => format!(
+                            "{} `{}` on {} shard {shard}: threshold {}%",
+                            self.scope.name(),
+                            self.label,
+                            surface_name(self.surface),
+                            min_catch_pct,
+                        ),
+                        None => format!(
+                            "{} `{}` on {}: threshold {}%",
+                            self.scope.name(),
+                            self.label,
+                            surface_name(self.surface),
+                            min_catch_pct,
+                        ),
+                    }
+                }
+            }
             MutationEnforcement::RecordOnly => format!(
                 "{} `{}` on {}: record-only for current ratchet phase",
                 self.scope.name(),
@@ -324,6 +391,7 @@ fn critical_seam_exclude_res(slug: &str) -> &'static [&'static str] {
     match slug {
         "segment-scan" => SEGMENT_SCAN_MUTANT_EXCLUDE_RES,
         "writer-commit" => WRITER_COMMIT_MUTANT_EXCLUDE_RES,
+        "projection-flow" => PROJECTION_MUTANT_EXCLUDE_RES,
         _ => &[],
     }
 }

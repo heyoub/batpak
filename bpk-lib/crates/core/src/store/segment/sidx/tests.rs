@@ -357,7 +357,13 @@ fn read_footer_returns_none_for_empty_file() {
 
 #[test]
 fn read_footer_allows_empty_string_table_range_to_reach_decoder() {
+    // 32 bytes of pre-footer "frames", then an SDX3 footer with
+    // string_table_offset == entries_start (empty string table, zero entries).
+    // The CRC32 covers the empty [string_table_offset .. entries_start) region,
+    // so it is the CRC of an empty byte slice. With a matching CRC the layout
+    // validates and the empty string-table range reaches the msgpack decoder.
     let mut bytes = vec![0xA5; 32];
+    bytes.extend_from_slice(&crc32fast::hash(&[]).to_le_bytes());
     bytes.extend_from_slice(&32u64.to_le_bytes());
     bytes.extend_from_slice(&0u32.to_le_bytes());
     bytes.extend_from_slice(SIDX_MAGIC);
@@ -444,5 +450,72 @@ fn footer_round_trip_zero_entries() {
     assert!(
         strings.is_empty(),
         "zero strings expected for empty collector"
+    );
+}
+
+// ── CRC integrity: a flipped covered byte must read as None (frame-scan) ───
+
+#[test]
+fn read_footer_returns_none_on_crc_mismatch() {
+    // Build a real footer via write_footer, then flip a single byte inside the
+    // entries block (the CRC-covered region) while leaving the 4-byte CRC, the
+    // 16-byte trailer, and the SDX3 magic intact. read_footer must detect the
+    // mismatch and return Ok(None) so the consumer degrades to the CRC-verified
+    // frame-scan rebuild rather than trusting corrupted bytes.
+    let mut buf: Vec<u8> = Vec::new();
+    buf.extend_from_slice(b"FBAT");
+    buf.extend_from_slice(&[0u8; 60]); // pretend frames
+
+    let mut cursor = Cursor::new(&mut buf);
+    cursor.seek(SeekFrom::End(0)).expect("seek to end");
+
+    let mut collector = SidxEntryCollector::new();
+    collector.record(sample_entry(1), "user:1", "profile");
+    collector.record(sample_entry(2), "user:2", "profile");
+    collector
+        .write_footer(&mut cursor, /* segment_id = */ 0)
+        .expect("write_footer must succeed");
+
+    // Footer tail layout: [...entries][crc:4][string_table_offset:8][entry_count:4][magic:4].
+    // Flip a byte well inside the entries block: one ENTRY_SIZE before the CRC.
+    let crc_start = buf.len() - 16 - 4;
+    let flip_at = crc_start - ENTRY_SIZE; // first byte of the last entry
+    buf[flip_at] ^= 0xFF;
+
+    // Sanity: trailer + magic + CRC bytes are untouched.
+    assert_eq!(
+        &buf[buf.len() - 4..],
+        SIDX_MAGIC,
+        "magic must remain intact after the entry-byte flip"
+    );
+
+    let mut tmp = NamedTempFile::new().expect("create temp file");
+    tmp.write_all(&buf).expect("write");
+    tmp.flush().expect("flush");
+
+    let result = read_footer(tmp.path()).expect("read_footer must not IO-error");
+    assert!(
+        result.is_none(),
+        "PROPERTY: a CRC mismatch over the covered region must read as None (frame-scan fallback), never trusting the bytes"
+    );
+}
+
+// ── pre-0.8.3 SDX2 footers fall back cleanly ──────────────────────────────
+
+#[test]
+fn read_footer_returns_none_for_sdx2_magic() {
+    // A pre-0.8.3 footer carries the old SDX2 magic and no CRC. It must read as
+    // None on first reopen so the consumer rebuilds via CRC-verified frame scan,
+    // mirroring the SIDX->SDX2 old-magic precedent. The magic gate alone rejects
+    // it before any CRC math runs.
+    let mut tmp = NamedTempFile::new().expect("create temp file");
+    tmp.write_all(&[0u8; 12]).expect("write trailer prefix");
+    tmp.write_all(b"SDX2").expect("write old SDX2 magic");
+    tmp.flush().expect("flush");
+
+    let result = read_footer(tmp.path()).expect("read_footer must not IO-error");
+    assert!(
+        result.is_none(),
+        "PROPERTY: an old SDX2 footer must fall back cleanly to None, not be trusted as an SDX3 footer"
     );
 }

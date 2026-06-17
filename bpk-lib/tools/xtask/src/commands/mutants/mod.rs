@@ -40,7 +40,8 @@ mod tests {
     };
     use super::plan::{build_mutant_execution_plan, mutants_command, MutantExecutionPlan};
     use super::policy::{
-        assert_mutation_policy, next_ratchet_floor, RepoMutationPhase, REPO_MUTATION_PHASE,
+        assert_mutation_policy, next_ratchet_floor, DiffScope, RepoMutationPhase,
+        REPO_MUTATION_PHASE,
     };
     use super::score::{
         cargo_mutants_receipt_path, cargo_mutants_results_dir, mutation_score, MutationScore,
@@ -113,7 +114,8 @@ mod tests {
         assert_eq!(
             mutants_command(
                 &lane,
-                Path::new("/repo/bpk-lib/target/xtask-mutants/writer-commit-all-features")
+                Path::new("/repo/bpk-lib/target/xtask-mutants/writer-commit-all-features"),
+                None,
             ),
             vec![
                 "mutants",
@@ -128,6 +130,8 @@ mod tests {
                 "crates/core/src/store/write/control/**/*.rs",
                 "--exclude-re",
                 lane.exclude_res[0],
+                "--exclude-re",
+                lane.exclude_res[1],
                 "--all-features",
                 "--cargo-arg",
                 "--locked",
@@ -146,7 +150,8 @@ mod tests {
         assert_eq!(
             mutants_command(
                 &lane,
-                Path::new("/repo/bpk-lib/target/xtask-mutants/repo-wide-no-default-features")
+                Path::new("/repo/bpk-lib/target/xtask-mutants/repo-wide-no-default-features"),
+                None,
             ),
             vec![
                 "mutants",
@@ -182,15 +187,21 @@ mod tests {
     }
 
     #[test]
-    fn mutants_smoke_lane_uses_round_robin_shard_and_skip_baseline_after_first_lane(
-    ) -> anyhow::Result<()> {
+    fn mutants_smoke_lane_is_diff_scoped_and_skip_baseline_after_first_lane() -> anyhow::Result<()>
+    {
         let lanes = critical_mutation_smoke_lanes();
-        assert_eq!(lanes[0].shard.as_deref(), Some("0/8"));
-        assert_eq!(lanes[0].sharding, Some(MutationSharding::RoundRobin));
+        // Critical smoke seams scope to the PR diff (--in-diff), not a
+        // content-derived round-robin shard, so the gated mutant set is
+        // deterministic w.r.t. the PR and cannot drift on unrelated edits.
+        assert!(lanes.iter().all(|lane| lane.diff_scoped));
+        assert!(lanes.iter().all(|lane| lane.shard.is_none()));
+        assert!(lanes.iter().all(|lane| lane.sharding.is_none()));
+        // Repo-wide smoke stays on the round-robin ratchet sample.
         assert_eq!(
             MutationLane::repo_wide_smoke(MutantSurface::AllFeatures).sharding,
             Some(MutationSharding::RoundRobin)
         );
+        assert!(!MutationLane::repo_wide_smoke(MutantSurface::AllFeatures).diff_scoped);
 
         let plan = build_mutant_execution_plan(&smoke_args())?;
 
@@ -366,12 +377,147 @@ mod tests {
             Path::new(
                 "/repo/bpk-lib/target/xtask-mutants/testing-ledger-structural-lint-all-features",
             ),
+            None,
         );
         let package_index = command
             .iter()
             .position(|arg| arg == "--package")
             .expect("package arg");
         assert_eq!(command[package_index + 1], "batpak-integrity");
+    }
+
+    #[test]
+    fn diff_scoped_lane_emits_in_diff_and_not_shard() {
+        let lane = critical_mutation_smoke_lanes()
+            .into_iter()
+            .find(|lane| lane.slug == "writer-commit")
+            .expect("writer-commit smoke lane");
+        assert!(lane.diff_scoped, "smoke seam lanes must be diff-scoped");
+
+        let command = mutants_command(
+            &lane,
+            Path::new("/repo/bpk-lib/target/xtask-mutants/writer-commit-all-features"),
+            Some(Path::new(
+                "/workspace/batpak/bpk-lib/target/smoke-diff.patch",
+            )),
+        );
+
+        let in_diff_index = command
+            .iter()
+            .position(|arg| arg == "--in-diff")
+            .expect("diff-scoped lane must emit --in-diff");
+        assert_eq!(
+            command[in_diff_index + 1],
+            "/workspace/batpak/bpk-lib/target/smoke-diff.patch"
+        );
+        assert!(
+            !command.iter().any(|arg| arg == "--shard"),
+            "diff-scoped lanes must not emit --shard, got: {command:?}"
+        );
+        assert!(
+            !command.iter().any(|arg| arg == "--sharding"),
+            "diff-scoped lanes must not emit --sharding, got: {command:?}"
+        );
+        // The seam --file globs survive so --in-diff is intersected with the
+        // seam boundary rather than mutating the whole PR.
+        assert!(command.iter().any(|arg| arg == "--file"));
+    }
+
+    #[test]
+    fn diff_scoped_lane_with_empty_diff_omits_in_diff() {
+        let lane = critical_mutation_smoke_lanes()
+            .into_iter()
+            .find(|lane| lane.slug == "writer-commit")
+            .expect("writer-commit smoke lane");
+        // With no resolvable diff the lane simply omits --in-diff; cargo-mutants
+        // then finds nothing in the seam globs and the policy early-return passes.
+        let command = mutants_command(
+            &lane,
+            Path::new("/repo/bpk-lib/target/xtask-mutants/writer-commit-all-features"),
+            None,
+        );
+        assert!(!command.iter().any(|arg| arg == "--in-diff"));
+        assert!(!command.iter().any(|arg| arg == "--shard"));
+    }
+
+    #[test]
+    fn diff_scoped_lane_with_zero_executed_mutants_passes() {
+        let lane = critical_mutation_smoke_lanes()
+            .into_iter()
+            .find(|lane| lane.slug == "writer-commit")
+            .expect("writer-commit smoke lane");
+        let score = MutationScore {
+            caught: 0,
+            missed: 0,
+            timed_out: 0,
+            unviable: 0,
+            executed: 0,
+            scored: 0,
+            score_pct: None,
+        };
+
+        assert!(
+            assert_mutation_policy(&lane, &fake_output_dir(), score, DiffScope::PrDiff).is_ok(),
+            "diff-scoped lane scoped by a REAL PR diff with no mutable lines is a legitimate PASS"
+        );
+    }
+
+    #[test]
+    fn diff_scoped_lane_with_empty_diff_and_zero_mutants_does_not_silently_pass() {
+        // ROUND-3 P2: on a manual `workflow_dispatch`/local run with no PR,
+        // `resolve_smoke_diff` falls back to `origin/main..HEAD`, which is EMPTY on
+        // the default branch. That empty diff is reported as `DiffScope::None`, so a
+        // diff-scoped critical seam producing zero mutants must NOT take the
+        // zero-mutant pass — it must hard-fail as no-evidence, so a manual mutation
+        // proof cannot skip the critical-seam threshold gate.
+        let lane = critical_mutation_smoke_lanes()
+            .into_iter()
+            .find(|lane| lane.slug == "writer-commit")
+            .expect("writer-commit smoke lane");
+        assert!(
+            lane.diff_scoped,
+            "the smoke lane under test must be diff-scoped"
+        );
+        let score = MutationScore {
+            caught: 0,
+            missed: 0,
+            timed_out: 0,
+            unviable: 0,
+            executed: 0,
+            scored: 0,
+            score_pct: None,
+        };
+
+        let err = assert_mutation_policy(&lane, &fake_output_dir(), score, DiffScope::None)
+            .expect_err("an empty-diff manual run must not silently pass with zero mutants");
+        assert!(
+            err.to_string().contains("no executed mutants"),
+            "a diff-scoped lane with no real PR diff must fail as no-evidence, got: {err:#}"
+        );
+    }
+
+    #[test]
+    fn non_diff_lane_with_zero_executed_mutants_still_bails() {
+        // The empty-diff PASS must be gated strictly on diff_scoped: a non-diff
+        // lane producing zero mutants must still hard-fail as no-evidence.
+        let lane = fake_lane();
+        assert!(!lane.diff_scoped);
+        let score = MutationScore {
+            caught: 0,
+            missed: 0,
+            timed_out: 0,
+            unviable: 0,
+            executed: 0,
+            scored: 0,
+            score_pct: None,
+        };
+
+        let err = assert_mutation_policy(&lane, &fake_output_dir(), score, DiffScope::None)
+            .expect_err("non-diff lanes must bail on zero mutants");
+        assert!(
+            err.to_string().contains("no executed mutants"),
+            "non-diff zero-mutant lanes must fail as no-evidence, got: {err:#}"
+        );
     }
 
     fn fake_lane() -> MutationLane {
@@ -414,7 +560,8 @@ mod tests {
             score_pct: None,
         };
 
-        let err = assert_mutation_policy(&lane, &fake_output_dir(), score).expect_err("must fail");
+        let err = assert_mutation_policy(&lane, &fake_output_dir(), score, DiffScope::None)
+            .expect_err("must fail");
         assert!(
             err.to_string()
                 .contains("no scoreable caught/missed mutants"),
@@ -435,7 +582,8 @@ mod tests {
             score_pct: None,
         };
 
-        let err = assert_mutation_policy(&lane, &fake_output_dir(), score).expect_err("must fail");
+        let err = assert_mutation_policy(&lane, &fake_output_dir(), score, DiffScope::None)
+            .expect_err("must fail");
         assert!(
             err.to_string().contains("no executed mutants"),
             "empty mutation lanes must fail as no-evidence lanes, got: {err:#}"
@@ -489,7 +637,8 @@ mod tests {
         let timeout_path = cargo_mutants_receipt_path(&output_dir, "timeout.txt")
             .display()
             .to_string();
-        let err = assert_mutation_policy(&lane, &output_dir, score).expect_err("must fail");
+        let err = assert_mutation_policy(&lane, &output_dir, score, DiffScope::None)
+            .expect_err("must fail");
         assert!(
             err.to_string().contains(&timeout_path),
             "timeout guidance must point at nested cargo-mutants receipts, got: {err:#}"
@@ -513,7 +662,8 @@ mod tests {
         let missed_path = cargo_mutants_receipt_path(&output_dir, "missed.txt")
             .display()
             .to_string();
-        let err = assert_mutation_policy(&lane, &output_dir, score).expect_err("must fail");
+        let err = assert_mutation_policy(&lane, &output_dir, score, DiffScope::None)
+            .expect_err("must fail");
         assert!(
             err.to_string().contains(&missed_path),
             "threshold guidance must point at nested cargo-mutants receipts, got: {err:#}"

@@ -47,7 +47,11 @@ fn smoke_selection_flags(args: &MutantsArgs) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn mutants_command(lane: &MutationLane, output_dir: &std::path::Path) -> Vec<String> {
+pub(super) fn mutants_command(
+    lane: &MutationLane,
+    output_dir: &std::path::Path,
+    diff_path: Option<&std::path::Path>,
+) -> Vec<String> {
     let mut args = vec![
         "mutants".to_owned(),
         "--output".to_owned(),
@@ -90,16 +94,27 @@ pub(super) fn mutants_command(lane: &MutationLane, output_dir: &std::path::Path)
     args.push("--test-tool".to_owned());
     args.push("cargo".to_owned());
 
-    if let Some(shard) = lane.shard.as_deref() {
-        args.push("--shard".to_owned());
-        args.push(shard.to_owned());
-    }
+    if lane.diff_scoped {
+        // Diff-scoped lanes mutate only the lines the PR touched, intersected
+        // with the seam `--file` globs already pushed above. This makes the
+        // gated mutant population deterministic w.r.t. the PR instead of
+        // drifting with the content-derived round-robin shard index.
+        if let Some(diff_path) = diff_path {
+            args.push("--in-diff".to_owned());
+            args.push(diff_path.display().to_string());
+        }
+    } else {
+        if let Some(shard) = lane.shard.as_deref() {
+            args.push("--shard".to_owned());
+            args.push(shard.to_owned());
+        }
 
-    if let Some(sharding) = lane.sharding {
-        args.push("--sharding".to_owned());
-        args.push(match sharding {
-            MutationSharding::RoundRobin => "round-robin".to_owned(),
-        });
+        if let Some(sharding) = lane.sharding {
+            args.push("--sharding".to_owned());
+            args.push(match sharding {
+                MutationSharding::RoundRobin => "round-robin".to_owned(),
+            });
+        }
     }
 
     args

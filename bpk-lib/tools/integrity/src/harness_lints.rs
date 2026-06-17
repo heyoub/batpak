@@ -1,8 +1,8 @@
-use crate::repo_surface::{resolve_repo_or_core_path, rust_files};
+use crate::repo_surface::{load_yaml, resolve_repo_or_core_path, rust_files};
 use crate::source_cache::SourceCache;
 use anyhow::{bail, Context, Result};
+use serde::Deserialize;
 use std::collections::{BTreeSet, HashMap};
-use std::fs;
 use std::path::{Path, PathBuf};
 
 const VALID_PATTERNS: &[&str] = &[
@@ -187,8 +187,8 @@ const OVERSIZE_HARNESS_ALLOWLIST: &[OversizeDebt] = &[
     },
     OversizeDebt {
         path: "tests/durable_frontier_waits.rs",
-        max_lines: 597,
-        reason: "wait and gate API phases share controlled projection fixtures",
+        max_lines: 620,
+        reason: "wait and gate API phases share controlled projection fixtures; R3 writer-crash case carries its own terminal-restart-policy store helper",
         target: "split wait surfaces from append-gate surfaces during harness cleanup",
     },
     OversizeDebt {
@@ -217,8 +217,8 @@ const OVERSIZE_HARNESS_ALLOWLIST: &[OversizeDebt] = &[
     },
     OversizeDebt {
         path: "tests/segment_scan_hardening.rs",
-        max_lines: 713,
-        reason: "segment corruption shapes share frame-building helpers; bumped 709 -> 713 after SegmentId::from_filename integration test landed",
+        max_lines: 1406,
+        reason: "segment corruption shapes share frame-building helpers; grew across audit rounds (legacy-SDX2 fallback, forged-truncate reject, corrupt-SDX3 too-high recover, round-4 untrusted-offset recover-all, round-5 mid-stream-corruption FailClosed via look-ahead + torn-last-frame recover, round-6 out-of-bounds untrusted offset recover + torn-trailer recover + coincidental-magic recover + adversarial-offset property battery); 1406 is the rustfmt-final count after the round-6 tests. Split is already tracked as separate cleanup; bumping for now per round-6 directive",
         target: "split helper module from case table during harness cleanup",
     },
     OversizeDebt {
@@ -226,6 +226,12 @@ const OVERSIZE_HARNESS_ALLOWLIST: &[OversizeDebt] = &[
         max_lines: 1675,
         reason: "legacy omnibus store suite is being burned down over time",
         target: "move cursor/lifecycle remnants to focused suites during harness cleanup",
+    },
+    OversizeDebt {
+        path: "tests/store_error_contract.rs",
+        max_lines: 521,
+        reason: "structured StoreError contract cases share the classification fixture; bumped 500 -> 521 after the ReservedKind contract cases landed (audit R5)",
+        target: "split the classification table from per-variant contract cases during harness cleanup",
     },
 ];
 
@@ -239,6 +245,27 @@ struct LedgerEntry {
     fields: BTreeSet<String>,
     locations: Vec<String>,
     commands: Vec<String>,
+}
+
+/// Raw record shape for `traceability/testing_ledger.yaml`. Each entry is one
+/// doctrine-bearing harness suite. Optional scalars stay `Option` so the schema
+/// lints below can name a specific missing field instead of failing at parse.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct LedgerRecord {
+    title: String,
+    section: String,
+    pattern: Option<String>,
+    status: Option<String>,
+    #[serde(default)]
+    invariants: Vec<String>,
+    #[serde(default)]
+    locations: Vec<String>,
+    #[serde(default)]
+    commands: Vec<String>,
+    coverage_delta: Option<String>,
+    mutation_delta: Option<String>,
+    blind_spots: Option<String>,
 }
 
 pub fn check(
@@ -257,99 +284,95 @@ pub fn check(
     Ok(())
 }
 
+pub(crate) fn ledger_path(repo_root: &Path) -> PathBuf {
+    repo_root.join("traceability/testing_ledger.yaml")
+}
+
+/// One ledger entry's citation surface, shared with the invariant bridge and the
+/// architecture-ir projection so the ledger has a single deserialization home.
+pub(crate) struct LedgerCitations {
+    pub title: String,
+    /// 1-based record position, used to anchor diagnostics and waiver names.
+    pub line: usize,
+    pub invariants: Vec<String>,
+}
+
+/// Read the testing ledger and project each entry's title and cited catalog
+/// invariants. Other integrity gates use this instead of re-parsing the file.
+pub(crate) fn load_ledger_citations(repo_root: &Path) -> Result<Vec<LedgerCitations>> {
+    let path = ledger_path(repo_root);
+    let records: Vec<LedgerRecord> = load_yaml(&path).context("read testing_ledger.yaml")?;
+    Ok(records
+        .into_iter()
+        .enumerate()
+        .map(|(index, record)| LedgerCitations {
+            title: record.title,
+            line: index + 1,
+            invariants: record.invariants,
+        })
+        .collect())
+}
+
 fn parse_ledger(repo_root: &Path) -> Result<Vec<LedgerEntry>> {
-    let path = repo_root
-        .parent()
-        .unwrap_or(repo_root)
-        .join("archive/legacy-docs/041_TESTING_LEDGER.md");
-    let content = fs::read_to_string(&path).context("read 041_TESTING_LEDGER.md")?;
-    let mut current_section = String::new();
-    let mut entries = Vec::new();
-    let mut current: Option<LedgerEntry> = None;
-    let mut active_block: Option<&'static str> = None;
-
-    for (index, line) in content.lines().enumerate() {
-        let line_no = index + 1;
-        if let Some(section) = line.strip_prefix("## ") {
-            if let Some(entry) = current.take() {
-                entries.push(entry);
-            }
-            current_section = section.trim().to_owned();
-            if current_section != "Harness Ledger" {
-                ensure(
-                    VALID_PATTERNS.contains(&current_section.as_str()),
-                    format!(
-                        "041_TESTING_LEDGER.md:{line_no}: unknown harness section `{current_section}`"
-                    ),
-                )?;
-            }
-            active_block = None;
-            continue;
-        }
-
-        if let Some(title) = line.strip_prefix("### Invariant: ") {
-            if let Some(entry) = current.take() {
-                entries.push(entry);
-            }
-            current = Some(LedgerEntry {
-                title: title.trim().to_owned(),
-                section: current_section.clone(),
-                line: line_no,
-                ..LedgerEntry::default()
-            });
-            active_block = None;
-            continue;
-        }
-
-        let Some(entry) = current.as_mut() else {
-            continue;
-        };
-
-        if let Some(field) = field_name(line) {
-            entry.fields.insert(field.to_owned());
-            active_block = match field {
-                "Location" => Some("location"),
-                "Command used" => Some("command"),
-                _ => None,
-            };
-            if field == "Harness pattern" {
-                entry.pattern = backtick_value(line).map(str::to_owned);
-            }
-            if field == "Status" {
-                entry.status = line
-                    .split_once(':')
-                    .map(|(_, value)| value.trim().to_owned())
-                    .filter(|value| !value.is_empty());
-            }
-            continue;
-        }
-
-        if line.starts_with("- ") {
-            active_block = None;
-        }
-
-        match active_block {
-            Some("location") => {
-                if let Some(path) = backtick_value(line) {
-                    entry.locations.push(path.to_owned());
-                }
-            }
-            Some("command") => {
-                if let Some(command) = list_item(line) {
-                    entry.commands.push(command.to_owned());
-                }
-            }
-            _ => {}
-        }
-    }
-    if let Some(entry) = current {
-        entries.push(entry);
+    let path = ledger_path(repo_root);
+    let records: Vec<LedgerRecord> = load_yaml(&path).context("read testing_ledger.yaml")?;
+    let mut entries = Vec::with_capacity(records.len());
+    for (index, record) in records.into_iter().enumerate() {
+        // 1-based record position so diagnostics point at a real ledger entry
+        // even though the source is now a flat YAML sequence.
+        let line = index + 1;
+        ensure(
+            VALID_PATTERNS.contains(&record.section.as_str()),
+            format!(
+                "testing_ledger.yaml:{line}: unknown harness section `{}`",
+                record.section
+            ),
+        )?;
+        entries.push(into_entry(record, line));
     }
     ensure(
         !entries.is_empty(),
-        "041_TESTING_LEDGER.md has no invariant entries",
+        "testing_ledger.yaml has no invariant entries",
     )?;
     Ok(entries)
+}
+
+/// Translate a deserialized ledger record into the `LedgerEntry` the schema
+/// lints consume. `fields` records which required fields were actually present
+/// so `check_entries` can name a specific missing field.
+fn into_entry(record: LedgerRecord, line: usize) -> LedgerEntry {
+    let mut fields = BTreeSet::new();
+    if record.pattern.is_some() {
+        fields.insert("Harness pattern".to_owned());
+    }
+    if record.status.is_some() {
+        fields.insert("Status".to_owned());
+    }
+    if !record.locations.is_empty() {
+        fields.insert("Location".to_owned());
+    }
+    if !record.commands.is_empty() {
+        fields.insert("Command used".to_owned());
+    }
+    if record.coverage_delta.is_some() {
+        fields.insert("Line/function coverage delta".to_owned());
+    }
+    if record.mutation_delta.is_some() {
+        fields.insert("Mutation delta".to_owned());
+    }
+    if record.blind_spots.is_some() {
+        fields.insert("Remaining known blind spots".to_owned());
+    }
+    LedgerEntry {
+        title: record.title,
+        section: record.section,
+        line,
+        pattern: record.pattern,
+        status: record.status,
+        fields,
+        locations: record.locations,
+        commands: record.commands,
+    }
 }
 
 fn check_entries(
@@ -362,7 +385,7 @@ fn check_entries(
         ensure(
             VALID_PATTERNS.contains(&entry.section.as_str()),
             format!(
-                "041_TESTING_LEDGER.md:{}: invariant `{}` appears outside a valid harness section",
+                "testing_ledger.yaml:{}: invariant `{}` appears outside a valid harness section",
                 entry.line, entry.title
             ),
         )?;
@@ -370,21 +393,21 @@ fn check_entries(
             ensure(
                 entry.fields.contains(*required),
                 format!(
-                    "041_TESTING_LEDGER.md:{}: invariant `{}` missing `{required}`",
+                    "testing_ledger.yaml:{}: invariant `{}` missing `{required}`",
                     entry.line, entry.title
                 ),
             )?;
         }
         let Some(pattern) = entry.pattern.as_deref() else {
             bail!(
-                "041_TESTING_LEDGER.md:{}: invariant `{}` missing backticked harness pattern",
+                "testing_ledger.yaml:{}: invariant `{}` missing `Harness pattern`",
                 entry.line,
                 entry.title
             );
         };
         let Some(status) = entry.status.as_deref() else {
             bail!(
-                "041_TESTING_LEDGER.md:{}: invariant `{}` missing `Status`",
+                "testing_ledger.yaml:{}: invariant `{}` missing `Status`",
                 entry.line,
                 entry.title
             );
@@ -392,28 +415,28 @@ fn check_entries(
         ensure(
             VALID_STATUS.contains(&status),
             format!(
-                "041_TESTING_LEDGER.md:{}: invariant `{}` Status `{status}` not in {{green,amber,red,unmeasured}}",
+                "testing_ledger.yaml:{}: invariant `{}` Status `{status}` not in {{green,amber,red,unmeasured}}",
                 entry.line, entry.title
             ),
         )?;
         ensure(
             pattern == entry.section,
             format!(
-                "041_TESTING_LEDGER.md:{}: invariant `{}` pattern `{pattern}` must match section `{}`",
+                "testing_ledger.yaml:{}: invariant `{}` pattern `{pattern}` must match section `{}`",
                 entry.line, entry.title, entry.section
             ),
         )?;
         ensure(
             !entry.locations.is_empty(),
             format!(
-                "041_TESTING_LEDGER.md:{}: invariant `{}` has no locations",
+                "testing_ledger.yaml:{}: invariant `{}` has no locations",
                 entry.line, entry.title
             ),
         )?;
         ensure(
             !entry.commands.is_empty(),
             format!(
-                "041_TESTING_LEDGER.md:{}: invariant `{}` has no commands",
+                "testing_ledger.yaml:{}: invariant `{}` has no commands",
                 entry.line, entry.title
             ),
         )?;
@@ -422,7 +445,7 @@ fn check_entries(
             ensure(
                 resolve_repo_or_core_path(repo_root, path).exists(),
                 format!(
-                    "041_TESTING_LEDGER.md:{}: location `{path}` does not exist",
+                    "testing_ledger.yaml:{}: location `{path}` does not exist",
                     entry.line
                 ),
             )?;
@@ -430,7 +453,7 @@ fn check_entries(
                 tracked.contains(workspace_path.as_str())
                     || tracked.contains(&format!("crates/core/{workspace_path}")),
                 format!(
-                    "041_TESTING_LEDGER.md:{}: location `{path}` is not git-tracked",
+                    "testing_ledger.yaml:{}: location `{path}` is not git-tracked",
                     entry.line
                 ),
             )?;
@@ -441,7 +464,7 @@ fn check_entries(
                     .iter()
                     .any(|prefix| command.starts_with(prefix)),
                 format!(
-                    "041_TESTING_LEDGER.md:{}: command `{command}` must start with an approved repo command",
+                    "testing_ledger.yaml:{}: command `{command}` must start with an approved repo command",
                     entry.line
                 ),
             )?;
@@ -464,7 +487,7 @@ fn check_cargo_test_filter_targets_existing_test(
     ensure(
         target_path.exists(),
         format!(
-            "041_TESTING_LEDGER.md:{}: command `{command}` names missing integration test target `{target}`",
+            "testing_ledger.yaml:{}: command `{command}` names missing integration test target `{target}`",
             entry.line
         ),
     )?;
@@ -472,7 +495,7 @@ fn check_cargo_test_filter_targets_existing_test(
     ensure(
         tests.iter().any(|name| name.contains(filter)),
         format!(
-            "041_TESTING_LEDGER.md:{}: command `{command}` filter `{filter}` matches zero #[test] functions in tests/{target}.rs or tests/{target}/",
+            "testing_ledger.yaml:{}: command `{command}` filter `{filter}` matches zero #[test] functions in tests/{target}.rs or tests/{target}/",
             entry.line
         ),
     )
@@ -730,27 +753,6 @@ fn oversize_allowlist() -> Result<HashMap<&'static str, &'static OversizeDebt>> 
     validate_debt_allowlist(OVERSIZE_HARNESS_ALLOWLIST, "oversize debt")
 }
 
-fn field_name(line: &str) -> Option<&str> {
-    REQUIRED_FIELDS
-        .iter()
-        .copied()
-        .find(|field| line.starts_with(&format!("- {field}:")))
-}
-
-fn backtick_value(line: &str) -> Option<&str> {
-    let start = line.find('`')?;
-    let rest = &line[start + 1..];
-    let end = rest.find('`')?;
-    Some(&rest[..end])
-}
-
-fn list_item(line: &str) -> Option<&str> {
-    line.trim_start()
-        .strip_prefix("- ")
-        .map(str::trim)
-        .map(|item| item.trim_matches('`'))
-}
-
 fn tracked_set(repo_root: &Path, tracked_files: &[PathBuf]) -> BTreeSet<String> {
     tracked_files
         .iter()
@@ -823,6 +825,7 @@ fn ensure(condition: bool, message: impl Into<String>) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_repo(name: &str) -> PathBuf {
@@ -900,23 +903,21 @@ mod tests {
         fs::remove_dir_all(repo).expect("remove temp repo");
     }
 
-    fn write_ledger(parent: &Path, body: &str) {
-        let ledger_dir = parent.join("archive/legacy-docs");
-        fs::create_dir_all(&ledger_dir).expect("create ledger dir");
-        fs::write(ledger_dir.join("041_TESTING_LEDGER.md"), body).expect("write ledger");
+    fn write_ledger(repo: &Path, body: &str) {
+        let ledger = ledger_path(repo);
+        fs::create_dir_all(ledger.parent().expect("ledger parent")).expect("create ledger dir");
+        fs::write(ledger, body).expect("write ledger");
     }
 
     #[test]
     fn parse_ledger_rejects_unknown_harness_section() {
-        let parent = temp_repo("ledger-parent");
+        let repo = temp_repo("ledger-parent");
         write_ledger(
-            &parent,
-            r"## Not A Real Pattern
-### Invariant: INV-BAD
+            &repo,
+            r"- title: INV-BAD
+  section: Not A Real Pattern
 ",
         );
-        let repo = parent.join("core");
-        fs::create_dir_all(&repo).expect("create core repo");
 
         let result = parse_ledger(&repo);
         let err = match result {
@@ -928,37 +929,40 @@ mod tests {
             "unexpected error: {err:?}"
         );
 
-        fs::remove_dir_all(parent).expect("remove temp parent");
+        fs::remove_dir_all(repo).expect("remove temp repo");
     }
 
     #[test]
     fn parse_ledger_collects_locations_and_commands() {
-        let parent = temp_repo("ledger-parse");
+        let repo = temp_repo("ledger-parse");
         write_ledger(
-            &parent,
-            r"## Property Harness
-### Invariant: INV-PARSE
-- Harness pattern: `Property Harness`
-- Status: green
-- Location:
-  - `tests/synthetic.rs`
-- Command used:
-  - cargo test --test synthetic
-- Line/function coverage delta: n/a
-- Mutation delta: n/a
-- Remaining known blind spots: n/a
+            &repo,
+            r"- title: INV-PARSE
+  section: Property Harness
+  pattern: Property Harness
+  status: green
+  invariants:
+    - INV-PARSE
+  locations:
+    - tests/synthetic.rs
+  commands:
+    - cargo test --test synthetic
+  coverage_delta: n/a
+  mutation_delta: n/a
+  blind_spots: n/a
 ",
         );
-        let repo = parent.join("core");
-        fs::create_dir_all(&repo).expect("create core repo");
 
         let entries = parse_ledger(&repo).expect("ledger parses");
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].title, "INV-PARSE");
+        // The lone record sits at 1-based position 1 so diagnostics point at the
+        // real ledger entry.
+        assert_eq!(entries[0].line, 1);
         assert_eq!(entries[0].locations, vec!["tests/synthetic.rs"]);
         assert_eq!(entries[0].commands, vec!["cargo test --test synthetic"]);
 
-        fs::remove_dir_all(parent).expect("remove temp parent");
+        fs::remove_dir_all(repo).expect("remove temp repo");
     }
 
     #[test]
@@ -1069,24 +1073,19 @@ mod tests {
             cargo_test_target_and_filter("cargo test --test synthetic --package batpak proof"),
             Some(("synthetic", "proof"))
         );
+        // A leading env assignment shifts `--test` off index 2 so the cursor must
+        // be `target_pos + 2` (not `* 2`); at target_pos=3 those differ (5 vs 6)
+        // and the wrong arithmetic would walk past the filter and return None.
+        assert_eq!(
+            cargo_test_target_and_filter("CARGO_INCREMENTAL=0 cargo test --test synthetic proof"),
+            Some(("synthetic", "proof"))
+        );
         assert!(flag_takes_value("--features"));
         assert!(!flag_takes_value("--locked"));
     }
 
     #[test]
-    fn helper_parsers_extract_field_names_and_list_items() {
-        assert_eq!(
-            field_name("- Harness pattern: `Property Harness`"),
-            Some("Harness pattern")
-        );
-        assert_eq!(
-            backtick_value("- Location: `tests/synthetic.rs`"),
-            Some("tests/synthetic.rs")
-        );
-        assert_eq!(
-            list_item("- cargo test --test synthetic"),
-            Some("cargo test --test synthetic")
-        );
+    fn location_path_normalizers_strip_workspace_and_core_prefixes() {
         assert_eq!(
             workspace_relative_location("bpk-lib/crates/core/tests/x.rs"),
             "crates/core/tests/x.rs"
@@ -1209,8 +1208,7 @@ mod tests {
         let err = check_entries(&repo, &tracked, &[entry], &mut source_cache)
             .expect_err("missing pattern rejected");
         assert!(
-            err.to_string()
-                .contains("missing backticked harness pattern"),
+            err.to_string().contains("missing `Harness pattern`"),
             "{err:?}"
         );
 
@@ -1259,5 +1257,99 @@ mod tests {
         );
 
         fs::remove_dir_all(repo).expect("remove temp repo");
+    }
+
+    #[test]
+    fn check_propagates_ledger_validation_failure() {
+        // Pins the top-level `check` orchestrator: a malformed ledger must make
+        // `check` itself return Err, not just the inner helpers. Guards against
+        // the whole body being short-circuited to Ok(()).
+        let repo = temp_repo("check-e2e");
+        write_ledger(
+            &repo,
+            r"- title: INV-BAD
+  section: Not A Real Pattern
+",
+        );
+        let mut source_cache = SourceCache::new(&repo);
+
+        let err = check(&repo, &[], &mut source_cache)
+            .expect_err("check must propagate ledger validation failure");
+        assert!(
+            err.to_string().contains("unknown harness section"),
+            "{err:?}"
+        );
+
+        fs::remove_dir_all(repo).expect("remove temp repo");
+    }
+
+    #[test]
+    fn check_module_headers_rejects_header_missing_only_seeded() {
+        // PROVES + CATCHES present but SEEDED absent must still be rejected.
+        // Pins the second `&&` in the completeness conjunction: turning it into
+        // `||` would wrongly treat this header as complete.
+        let repo = temp_repo("missing-seeded");
+        let path = "tests/synthetic.rs";
+        fs::create_dir_all(repo.join("tests")).expect("create tests dir");
+        fs::write(
+            repo.join(path),
+            "//! PROVES: synthetic proof.\n//! CATCHES: synthetic regression.\n",
+        )
+        .expect("write header missing SEEDED");
+        let files = BTreeSet::from([path.to_owned()]);
+        let mut source_cache = SourceCache::new(&repo);
+
+        let err = check_module_headers(&repo, &files, &mut source_cache)
+            .expect_err("header missing SEEDED rejected");
+        assert!(err.to_string().contains("PROVES/CATCHES/SEEDED"), "{err:?}");
+
+        fs::remove_dir_all(repo).expect("remove temp repo");
+    }
+
+    #[test]
+    fn check_no_silent_repo_fixture_skips_allows_plain_return() {
+        // A core test that uses `return;` but never references the packaged
+        // fixture marker is fine. Pins the `&&`: an `||` would falsely flag
+        // every test containing a bare `return;`.
+        let repo = temp_repo("plain-return");
+        let path = repo.join("crates/core/tests/plain.rs");
+        fs::create_dir_all(path.parent().unwrap()).expect("create tests dir");
+        fs::write(&path, "fn helper() {\n    return;\n}\n").expect("write plain return test");
+        let tracked = vec![path];
+        let mut source_cache = SourceCache::new(&repo);
+
+        check_no_silent_repo_fixture_skips(&repo, &tracked, &mut source_cache)
+            .expect("plain return without fixture marker is allowed");
+
+        fs::remove_dir_all(repo).expect("remove temp repo");
+    }
+
+    #[test]
+    fn header_allowlist_validates_and_exposes_every_entry() {
+        // Pins `header_allowlist`: collapsing its body to an empty map would
+        // silently disarm the allowlist (stale entries undetected, debt-bearing
+        // harnesses forced to fail). Every static entry must round-trip.
+        let allowlist = header_allowlist().expect("header allowlist validates");
+        assert_eq!(allowlist.len(), HEADER_DEBT_ALLOWLIST.len());
+        assert!(!allowlist.is_empty());
+        for debt in HEADER_DEBT_ALLOWLIST {
+            assert!(allowlist.contains_key(debt.path), "missing {}", debt.path);
+        }
+    }
+
+    #[test]
+    fn oversize_debt_entry_reports_its_own_reason_and_target() {
+        // Pins the DebtEntry accessors for OversizeDebt: a stubbed accessor
+        // returning a constant would defeat the empty-reason/empty-target
+        // validation in `validate_debt_allowlist`.
+        let debt = OversizeDebt {
+            path: "tests/example.rs",
+            max_lines: 600,
+            reason: "documented split debt",
+            target: "split during next pass",
+        };
+        assert_eq!(DebtEntry::reason(&debt), "documented split debt");
+        assert_eq!(DebtEntry::target(&debt), "split during next pass");
+        assert_eq!(DebtEntry::path(&debt), "tests/example.rs");
     }
 }

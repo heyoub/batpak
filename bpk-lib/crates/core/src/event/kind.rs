@@ -128,6 +128,17 @@ impl EventKind {
         self.category() == 0xD
     }
 
+    /// Returns `true` if this kind is reserved for internal substrate use and
+    /// must not be appended through the public raw-`kind` write surface.
+    ///
+    /// Reserved kinds are the system category (0x0) and the effect category
+    /// (0xD). Note that `TOMBSTONE` (0x0FFE) and `SYSTEM_DENIAL` (0x000F) live
+    /// in category 0x0, so `is_system()` already covers them — no extra
+    /// disjunct is required here.
+    pub const fn is_reserved(self) -> bool {
+        self.is_system() || self.is_effect()
+    }
+
     /// Library constants. Products NEVER define these — they use custom().
     /// User-defined data event. Uses product category 0x1, not system category 0x0.
     pub const DATA: Self = Self(0x1000);

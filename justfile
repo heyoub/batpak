@@ -135,6 +135,9 @@ ship-real:
 pre-commit:
     cd bpk-lib; cargo xtask pre-commit
 
+# Report-only coverage. The same `cargo xtask cover` now also runs per-PR in CI
+# as the non-blocking `coverage-baseline` job (advisory observation). The hard
+# coverage floor (80) is `cover-check` below, which runs in preflight/verify-linux.
 cover:
     cd bpk-lib; cargo xtask cover
 

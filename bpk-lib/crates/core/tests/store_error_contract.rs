@@ -47,6 +47,7 @@ fn classify(error: &StoreError) -> HandlingClass {
         | StoreError::IdempotencyPartialBatch { .. }
         | StoreError::RangeMalformed { .. }
         | StoreError::InvalidCoordinate { .. }
+        | StoreError::ReservedKind { .. }
         | StoreError::InvalidCausation { .. }
         | StoreError::InvalidCommitMetadata { .. }
         | StoreError::CoordinateNulByte
@@ -264,6 +265,26 @@ fn store_error_contract_table_stays_stable() {
                 "entity cannot be empty",
                 "invalid coordinate",
             ],
+        },
+        Case {
+            name: "reserved_kind_single",
+            error: StoreError::ReservedKind {
+                index: None,
+                kind: 0x0006,
+            },
+            class: HandlingClass::Domain,
+            source_needle: None,
+            display_needles: &["reserved kind 0x0006", "public surface"],
+        },
+        Case {
+            name: "reserved_kind_batch_item",
+            error: StoreError::ReservedKind {
+                index: Some(3),
+                kind: 0xD001,
+            },
+            class: HandlingClass::Domain,
+            source_needle: None,
+            display_needles: &["reserved kind 0xD001", "batch item 3"],
         },
         Case {
             name: "batch_item_too_large",

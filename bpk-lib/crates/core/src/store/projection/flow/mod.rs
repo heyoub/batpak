@@ -537,7 +537,11 @@ where
                 }
             };
 
-            if !is_fresh && T::supports_incremental_apply() && store.runtime.incremental_projection
+            // R16: never incrementally apply onto a cache row that is AHEAD of disk (post-rebuild/rollback); fall through to full replay so disk is authoritative.
+            if !is_fresh
+                && meta.watermark <= execution.replay.watermark
+                && T::supports_incremental_apply()
+                && store.runtime.incremental_projection
             {
                 if let Some(mut cached_state) = decode_cached_state::<T>(
                     execution.entity,
@@ -571,7 +575,14 @@ where
                 }
             }
 
-            if is_fresh {
+            // R16 (cache-hit path): never serve a cache row that is AHEAD of
+            // disk. The `Consistent` freshness check already requires
+            // `meta.watermark == replay.watermark`, but `MaybeStale` derives
+            // `is_fresh` purely from age and would otherwise return bytes from a
+            // future watermark after a rollback/rebuild — reporting state for
+            // events no longer present in the current segment log. Force full
+            // replay (disk authoritative) for ahead-of-disk rows.
+            if is_fresh && meta.watermark <= execution.replay.watermark {
                 if let Some(value) = decode_cached_state::<T>(
                     execution.entity,
                     &bytes,
@@ -713,6 +724,14 @@ where
     ))
 }
 
+/// Fold post-watermark events onto a decoded cached state.
+///
+/// Correctness rests on the [`EventSourced::supports_incremental_apply`]
+/// contract: `from_events` must equal a fold over `apply_event`. That contract
+/// is documented but NOT machine-enforced here — a projection that violates it
+/// silently diverges from a full replay. A debug-only cross-check is deferred
+/// (0.8.3 audit R9); only call this for types whose `supports_incremental_apply`
+/// returns `true`.
 fn apply_incremental_events<T, I, State>(
     store: &Store<State>,
     execution: &ReplayExecution<'_>,

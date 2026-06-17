@@ -141,6 +141,11 @@ impl CacheMeta {
     /// Decode value + metadata from a cache-stored byte buffer. Handles both
     /// current (40-byte trailer + magic) and legacy (16-byte trailer) formats.
     /// Legacy entries return `None` for the monotonic fields.
+    ///
+    /// Current-vs-legacy is disambiguated by a trailing-8-byte magic heuristic
+    /// (there is no leading magic/version/length header). This is safe because
+    /// the cache is fully rebuildable — a misread is a miss, not corruption — so
+    /// a leading versioned header is deferred (0.8.3 audit R18).
     pub(crate) fn decode_from_bytes(bytes: &[u8]) -> Result<(Vec<u8>, Self), StoreError> {
         // Try current format first: last 8 bytes == magic.
         if bytes.len() >= CACHE_META_CURRENT_SIZE {
@@ -492,6 +497,24 @@ mod tests {
         assert_eq!(meta.cached_at_us, 1_234_567);
         assert!(meta.cached_at_mono_ns.is_none());
         assert!(meta.process_boot_ns.is_none());
+    }
+
+    #[test]
+    fn cache_meta_decode_accepts_exact_legacy_trailer_with_empty_value() {
+        // Boundary: a buffer of exactly CACHE_META_LEGACY_SIZE (no magic, empty
+        // value) is the smallest valid legacy entry. Pins the `<` length guard:
+        // an off-by-one `<=` would reject this exact-size buffer as "too short".
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&7u64.to_le_bytes());
+        buf.extend_from_slice(&123i64.to_le_bytes());
+        assert_eq!(buf.len(), CACHE_META_LEGACY_SIZE);
+
+        let (value, meta) = CacheMeta::decode_from_bytes(&buf)
+            .expect("exact-size legacy trailer must decode, not be rejected as too short");
+        assert!(value.is_empty());
+        assert_eq!(meta.watermark, 7);
+        assert_eq!(meta.cached_at_us, 123);
+        assert!(meta.cached_at_mono_ns.is_none());
     }
 
     #[test]

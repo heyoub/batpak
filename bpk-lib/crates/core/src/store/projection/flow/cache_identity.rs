@@ -19,6 +19,11 @@ where
     T: EventSourced + 'static,
 {
     let schema_v = T::schema_version();
+    // NOTE: `TypeId` + `DefaultHasher` are NOT stable across toolchain versions,
+    // so a compiler upgrade changes this discriminant and orphans existing cache
+    // files. That is benign — orphaned entries simply miss and are recomputed on
+    // next access — so a stable author-declared discriminant is deferred (0.8.3
+    // audit R17). Do not rely on this key being portable across rustc versions.
     let type_disc = {
         let mut h = std::collections::hash_map::DefaultHasher::new();
         TypeId::of::<T>().hash(&mut h);
@@ -60,4 +65,57 @@ where
     // hash-finish value on an empty feed.
     kinds.len().hash(&mut h);
     h.finish()
+}
+
+#[cfg(test)]
+mod relevant_kinds_hash_tests {
+    use super::*;
+    use crate::event::{Event, EventKind};
+
+    struct OneKind;
+    impl EventSourced for OneKind {
+        type Input = crate::event::JsonValueInput;
+        fn apply_event(&mut self, _event: &Event<serde_json::Value>) {}
+        fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
+            (!events.is_empty()).then_some(Self)
+        }
+        fn relevant_event_kinds() -> &'static [EventKind] {
+            static KINDS: [EventKind; 1] = [EventKind::DATA];
+            &KINDS
+        }
+    }
+
+    struct TwoKinds;
+    impl EventSourced for TwoKinds {
+        type Input = crate::event::JsonValueInput;
+        fn apply_event(&mut self, _event: &Event<serde_json::Value>) {}
+        fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
+            (!events.is_empty()).then_some(Self)
+        }
+        fn relevant_event_kinds() -> &'static [EventKind] {
+            static KINDS: [EventKind; 2] = [EventKind::DATA, EventKind::EFFECT_ERROR];
+            &KINDS
+        }
+    }
+
+    #[test]
+    fn distinct_kind_sets_produce_distinct_hashes() {
+        // Pins `relevant_kinds_hash`: collapsing it to a constant (e.g. 0) would
+        // make projections with different relevant_event_kinds collide on the
+        // same cache key, serving stale state across kind-set changes.
+        assert_ne!(
+            relevant_kinds_hash::<OneKind>(),
+            relevant_kinds_hash::<TwoKinds>(),
+            "different relevant_event_kinds must hash differently"
+        );
+    }
+
+    #[test]
+    fn cache_key_kinds_component_tracks_relevant_kinds() {
+        // The trailing 8 bytes of the cache key are the kinds hash; two
+        // projections with different kind sets must differ there.
+        let one = projection_cache_key::<OneKind>("entity");
+        let two = projection_cache_key::<TwoKinds>("entity");
+        assert_ne!(one[one.len() - 8..], two[two.len() - 8..]);
+    }
 }

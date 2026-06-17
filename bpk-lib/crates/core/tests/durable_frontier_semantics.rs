@@ -203,7 +203,7 @@ fn segment_frames_start(bytes: &[u8]) -> std::io::Result<usize> {
 
 fn sidx_frames_end(bytes: &[u8]) -> Option<usize> {
     const TRAILER_LEN: usize = 16;
-    if bytes.len() < TRAILER_LEN || &bytes[bytes.len() - 4..] != b"SDX2" {
+    if bytes.len() < TRAILER_LEN || &bytes[bytes.len() - 4..] != b"SDX3" {
         return None;
     }
     let trailer = &bytes[bytes.len() - TRAILER_LEN..];

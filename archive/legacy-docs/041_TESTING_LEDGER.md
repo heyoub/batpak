@@ -1,5 +1,10 @@
 # Testing Ledger
 
+> ARCHIVED — superseded by the live machine-law ledger
+> `bpk-lib/traceability/testing_ledger.yaml`, which the integrity tool now owns
+> and reads. No live tooling reads this file; it is retained as a historical
+> snapshot of the markdown-era ledger.
+
 This ledger records the current doctrine-bearing suites and their primary
 harness pattern.
 

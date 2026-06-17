@@ -223,6 +223,14 @@ where
 /// `netbat` does not spawn worker threads and does not require syncbat handlers
 /// to be `Send`.
 ///
+/// # Concurrency
+/// The accept loop is single-threaded and sequential: each connection is fully
+/// served (up to `max_requests_per_connection`, bounded by `timeouts`) before
+/// the next is accepted. A slow client therefore head-of-line-blocks others for
+/// its timeout window, and `max_connections` is a lifetime accept budget, not a
+/// concurrency limit. Concurrent acceptance is deferred (0.8.3 audit C2): it
+/// needs a `Core`-factory API because `Core` is `&mut`/non-`Send`.
+///
 /// # Errors
 /// Returns [`NetbatError`] when listener configuration, accept, timeout
 /// configuration, or response writes fail. Per-request decode/runtime errors

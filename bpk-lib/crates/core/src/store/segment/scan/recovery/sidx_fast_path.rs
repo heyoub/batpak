@@ -55,11 +55,23 @@ impl Reader {
         };
         let sidx_start = u64::from_le_bytes(offset_bytes);
 
-        let max_tail = sidx_entries
-            .iter()
-            .map(|e| e.frame_offset.saturating_add(u64::from(e.frame_length)))
-            .max()
-            .unwrap_or(0);
+        // R15: compute the max frame tail with checked arithmetic. A garbage or
+        // overflowing frame_offset/frame_length pair is corruption, not a value to
+        // silently clamp to u64::MAX, so any overflow degrades to Incomplete
+        // (frame-scan fallback with CRC verification) rather than saturating.
+        let mut max_tail = 0u64;
+        for entry in sidx_entries {
+            let tail = match entry
+                .frame_offset
+                .checked_add(u64::from(entry.frame_length))
+            {
+                Some(tail) => tail,
+                None => return SidxTailCoverage::Incomplete,
+            };
+            if tail > max_tail {
+                max_tail = tail;
+            }
+        }
 
         if max_tail == sidx_start {
             SidxTailCoverage::Complete

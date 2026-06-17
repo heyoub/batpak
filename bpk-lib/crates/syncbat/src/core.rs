@@ -306,3 +306,25 @@ impl CheckoutResult {
         self.output
     }
 }
+
+#[cfg(test)]
+mod checkout_tests {
+    use super::Checkout;
+    use crate::operation::{EffectClass, OperationDescriptor};
+
+    #[test]
+    fn input_exposes_the_checkout_bytes() {
+        // Pins `Checkout::input`: a stubbed body (e.g. `Vec::leak(vec![1])`)
+        // would hand handlers fabricated bytes instead of the real payload.
+        let descriptor = OperationDescriptor::new(
+            "echo",
+            EffectClass::Compute,
+            "schema.echo.input.v1",
+            "schema.echo.output.v1",
+            "receipt.echo.v1",
+        );
+        let payload = b"real-payload".to_vec();
+        let checkout = Checkout::new(descriptor, payload.clone());
+        assert_eq!(checkout.input(), payload.as_slice());
+    }
+}

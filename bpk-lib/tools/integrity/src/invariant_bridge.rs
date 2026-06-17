@@ -239,37 +239,17 @@ fn collect_ledger_citations(
     known_invariants: &BTreeSet<String>,
     waivers: &CitationWaivers,
 ) -> Result<BTreeSet<String>> {
-    let path = repo_root
-        .parent()
-        .unwrap_or(repo_root)
-        .join("archive/legacy-docs/041_TESTING_LEDGER.md");
-    let content = fs::read_to_string(&path).context("read 041_TESTING_LEDGER.md")?;
-    let mut current_title: Option<(String, usize)> = None;
-    let mut current_citations = BTreeSet::new();
     let mut all_citations = BTreeSet::new();
-
-    for (index, line) in content.lines().enumerate() {
-        if let Some(title) = line.strip_prefix("### Invariant: ") {
-            check_ledger_entry_citations(
-                current_title.take(),
-                &current_citations,
-                known_invariants,
-                waivers,
-            )?;
-            current_title = Some((title.trim().to_owned(), index + 1));
-            current_citations.clear();
-            continue;
-        }
-        if current_title.is_some() {
-            for anchor in extract_anchors(line) {
-                if let JustifiesAnchor::Invariant(id) = anchor {
-                    all_citations.insert(id.clone());
-                    current_citations.insert(id);
-                }
-            }
-        }
+    for entry in crate::harness_lints::load_ledger_citations(repo_root)? {
+        let citations = entry.invariants.iter().cloned().collect::<BTreeSet<_>>();
+        all_citations.extend(citations.iter().cloned());
+        check_ledger_entry_citations(
+            Some((entry.title, entry.line)),
+            &citations,
+            known_invariants,
+            waivers,
+        )?;
     }
-    check_ledger_entry_citations(current_title, &current_citations, known_invariants, waivers)?;
     Ok(all_citations)
 }
 
@@ -282,20 +262,18 @@ fn check_ledger_entry_citations(
     let Some((title, line)) = current_title else {
         return Ok(());
     };
-    let waiver_name = format!("041_TESTING_LEDGER.md:{line}:{title}");
+    let waiver_name = format!("testing_ledger.yaml:{line}:{title}");
     if waivers.contains(&waiver_name)? {
         return Ok(());
     }
     ensure(
         !citations.is_empty(),
-        format!("041_TESTING_LEDGER.md:{line}: `{title}` must cite at least one catalog INV-* id"),
+        format!("testing_ledger.yaml:{line}: `{title}` must cite at least one catalog INV-* id"),
     )?;
     for citation in citations {
         ensure(
             known_invariants.contains(citation),
-            format!(
-                "041_TESTING_LEDGER.md:{line}: `{title}` cites non-catalog invariant {citation}"
-            ),
+            format!("testing_ledger.yaml:{line}: `{title}` cites non-catalog invariant {citation}"),
         )?;
     }
     Ok(())

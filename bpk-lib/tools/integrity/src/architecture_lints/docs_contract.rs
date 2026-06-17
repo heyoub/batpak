@@ -23,7 +23,6 @@ fn check_portable_context_links(repo_root: &Path) -> Result<()> {
     let model = doc_root.join("MODEL.md");
     let invariants = doc_root.join("INVARIANTS.md");
     let conformance = doc_root.join("CONFORMANCE.md");
-    let cookbook = doc_root.join("COOKBOOK.md");
 
     let readme_links = markdown_links(doc_root, &readme)?;
     for target in [
@@ -39,7 +38,6 @@ fn check_portable_context_links(repo_root: &Path) -> Result<()> {
         "PROJECTIONS.md",
         "INTEGRATION.md",
         "CONFORMANCE.md",
-        "COOKBOOK.md",
     ] {
         ensure(
             readme_links.contains(target),
@@ -52,7 +50,6 @@ fn check_portable_context_links(repo_root: &Path) -> Result<()> {
         ("MODEL.md", model),
         ("INVARIANTS.md", invariants),
         ("CONFORMANCE.md", conformance),
-        ("COOKBOOK.md", cookbook),
     ] {
         let links = markdown_links(doc_root, &path)?;
         ensure(
@@ -81,7 +78,6 @@ fn check_live_docs_do_not_link_archives(repo_root: &Path) -> Result<()> {
         doc_root.join("PROJECTIONS.md"),
         doc_root.join("INTEGRATION.md"),
         doc_root.join("CONFORMANCE.md"),
-        doc_root.join("COOKBOOK.md"),
         doc_root.join("CONTRIBUTING.md"),
     ];
     for path in files {
@@ -115,7 +111,6 @@ fn check_factory_docs_use_just_commands(repo_root: &Path) -> Result<()> {
         "PROJECTIONS.md",
         "INTEGRATION.md",
         "CONFORMANCE.md",
-        "COOKBOOK.md",
     ] {
         let content =
             fs::read_to_string(doc_root.join(doc)).with_context(|| format!("read {doc}"))?;
@@ -140,7 +135,6 @@ fn check_root_doc_site_contract(repo_root: &Path) -> Result<()> {
         ("MODEL.md", "MODEL.html"),
         ("INVARIANTS.md", "INVARIANTS.html"),
         ("CONFORMANCE.md", "CONFORMANCE.html"),
-        ("COOKBOOK.md", "COOKBOOK.html"),
     ] {
         ensure(
             content.contains(source),

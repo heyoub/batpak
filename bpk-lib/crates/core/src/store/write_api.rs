@@ -58,6 +58,9 @@ impl Store<Open> {
     /// # Errors
     /// Returns any serialization, enqueue, or writer error surfaced while
     /// staging the append for background execution.
+    /// Returns [`StoreError::ReservedKind`] if `kind` is a reserved
+    /// system/effect/tombstone kind (see [`EventKind::is_reserved`]); reserved
+    /// kinds are emitted only by the substrate.
     pub fn submit(
         &self,
         coord: &Coordinate,
@@ -81,6 +84,9 @@ impl Store<Open> {
     /// # Errors
     /// Returns any serialization, enqueue, or writer error surfaced while
     /// staging the reaction append for background execution.
+    /// Returns [`StoreError::ReservedKind`] if `kind` is a reserved
+    /// system/effect/tombstone kind (see [`EventKind::is_reserved`]); reserved
+    /// kinds are emitted only by the substrate.
     pub fn submit_reaction(
         &self,
         coord: &Coordinate,
@@ -120,6 +126,8 @@ impl Store<Open> {
     /// serialized payload plus encoded receipt-extension bytes exceeds
     /// `single_append_max_bytes`, or any enqueue or writer error surfaced
     /// while staging the batch for background execution.
+    /// Returns [`StoreError::ReservedKind`] `{ index: Some(i), .. }` directly
+    /// (NOT wrapped in `BatchFailed`) if item `i` carries a reserved kind.
     pub fn submit_batch(
         &self,
         items: Vec<crate::store::append::BatchAppendItem>,
@@ -155,6 +163,9 @@ impl Store<Open> {
     /// # Errors
     /// Returns any serialization, enqueue, or writer error surfaced when the
     /// operation proceeds past the soft-pressure gate.
+    /// Returns [`StoreError::ReservedKind`] if `kind` is a reserved
+    /// system/effect/tombstone kind (see [`EventKind::is_reserved`]); reserved
+    /// kinds are emitted only by the substrate.
     pub fn try_submit(
         &self,
         coord: &Coordinate,
@@ -179,6 +190,9 @@ impl Store<Open> {
     /// # Errors
     /// Returns any serialization, enqueue, or writer error surfaced when the
     /// operation proceeds past the soft-pressure gate.
+    /// Returns [`StoreError::ReservedKind`] if `kind` is a reserved
+    /// system/effect/tombstone kind (see [`EventKind::is_reserved`]); reserved
+    /// kinds are emitted only by the substrate.
     pub fn try_submit_reaction(
         &self,
         coord: &Coordinate,
@@ -205,6 +219,8 @@ impl Store<Open> {
     /// # Errors
     /// Returns any enqueue or writer error surfaced when the operation
     /// proceeds past the soft-pressure gate.
+    /// Returns [`StoreError::ReservedKind`] `{ index: Some(i), .. }` directly
+    /// (NOT wrapped in `BatchFailed`) if item `i` carries a reserved kind.
     pub fn try_submit_batch(
         &self,
         items: Vec<crate::store::append::BatchAppendItem>,
@@ -226,6 +242,9 @@ impl Store<Open> {
     /// # Errors
     /// Returns `StoreError::Serialization` if the payload cannot be serialized.
     /// Returns `StoreError::WriterCrashed` if the writer thread has exited unexpectedly.
+    /// Returns [`StoreError::ReservedKind`] if `kind` is a reserved
+    /// system/effect/tombstone kind (see [`EventKind::is_reserved`]); reserved
+    /// kinds are emitted only by the substrate.
     pub fn append(
         &self,
         coord: &Coordinate,
@@ -261,8 +280,22 @@ impl Store<Open> {
     ) -> Result<DenialReceipt, StoreError> {
         let payload =
             gate_set.trace_denial(failing, proposed_kind, proposed_content_hash, pipeline_id);
-        let receipt =
-            self.append_with_options(coord, EventKind::SYSTEM_DENIAL, &payload, options)?;
+        // SYSTEM_DENIAL is a reserved kind, so the public funnel would reject
+        // it. Route directly through the internal funnel so the substrate audit
+        // receipt still emits. The batch-level gate semantics from
+        // `append_with_options` are not part of the denial contract.
+        let gate = options.gate;
+        let receipt = self
+            .submit_prepared_internal(
+                coord,
+                EventKind::SYSTEM_DENIAL,
+                &payload,
+                AppendSubmission::with_options(options, self.runtime.clock()),
+            )?
+            .wait()?;
+        if let Some(gate) = gate {
+            self.wait_for_gate(&receipt, gate)?;
+        }
         Ok(DenialReceipt {
             event_id: receipt.event_id,
             sequence: receipt.sequence,
@@ -279,6 +312,9 @@ impl Store<Open> {
     /// # Errors
     /// Returns `StoreError::Serialization` if the payload cannot be serialized.
     /// Returns `StoreError::WriterCrashed` if the writer thread has exited unexpectedly.
+    /// Returns [`StoreError::ReservedKind`] if `kind` is a reserved
+    /// system/effect/tombstone kind (see [`EventKind::is_reserved`]); reserved
+    /// kinds are emitted only by the substrate.
     pub fn append_reaction(
         &self,
         coord: &Coordinate,
@@ -308,6 +344,8 @@ impl Store<Open> {
     /// encoding, marker writing, or publish preparation. Returns
     /// `StoreError::BatchSyncFailed` if the batch reaches the final durability
     /// boundary and segment sync fails before publish.
+    /// Returns [`StoreError::ReservedKind`] `{ index: Some(i), .. }` directly
+    /// (NOT wrapped in `BatchFailed`) if item `i` carries a reserved kind.
     pub fn append_batch(
         &self,
         items: Vec<crate::store::append::BatchAppendItem>,
@@ -325,6 +363,8 @@ impl Store<Open> {
     /// Returns any batch append error surfaced by [`Store::append_batch`].
     /// Returns [`StoreError::WaitTimeout`] or [`StoreError::WriterCrashed`] if
     /// the optional batch-level gate is not satisfied after the batch commits.
+    /// Returns [`StoreError::ReservedKind`] `{ index: Some(i), .. }` directly
+    /// (NOT wrapped in `BatchFailed`) if item `i` carries a reserved kind.
     pub fn append_batch_with_options(
         &self,
         items: Vec<crate::store::append::BatchAppendItem>,
@@ -351,6 +391,8 @@ impl Store<Open> {
     /// encoding, marker writing, or publish preparation. Returns
     /// `StoreError::BatchSyncFailed` if the batch reaches the final durability
     /// boundary and segment sync fails before publish.
+    /// Returns [`StoreError::ReservedKind`] `{ index: Some(i), .. }` directly
+    /// (NOT wrapped in `BatchFailed`) if item `i` carries a reserved kind.
     pub fn append_reaction_batch(
         &self,
         correlation_id: crate::id::CorrelationId,
@@ -395,6 +437,9 @@ impl Store<Open> {
     /// Returns `StoreError::Serialization` if the payload cannot be serialized.
     /// Returns `StoreError::SequenceMismatch` if the expected sequence does not match.
     /// Returns `StoreError::WriterCrashed` if the writer thread has exited unexpectedly.
+    /// Returns [`StoreError::ReservedKind`] if `kind` is a reserved
+    /// system/effect/tombstone kind (see [`EventKind::is_reserved`]); reserved
+    /// kinds are emitted only by the substrate.
     pub fn append_with_options(
         &self,
         coord: &Coordinate,
@@ -591,5 +636,91 @@ mod tests {
             .expect("append completes after lifecycle gate opens")
             .expect("append succeeds");
         worker.join().expect("append worker joins");
+    }
+
+    #[test]
+    fn append_rejects_reserved_kinds_and_admits_data() {
+        let dir = TempDir::new().expect("temp dir");
+        let store = Store::open(StoreConfig::new(dir.path())).expect("open store");
+        let coord = Coordinate::new("entity:reserved", "scope:test").expect("coord");
+        let payload = serde_json::json!({"forged": true});
+
+        // append() with a reserved system marker is rejected with index: None.
+        let err = store
+            .append(&coord, EventKind::SYSTEM_BATCH_BEGIN, &payload)
+            .expect_err("PROPERTY: append must reject reserved system kinds");
+        assert!(
+            matches!(
+                err,
+                StoreError::ReservedKind {
+                    index: None,
+                    kind
+                } if kind == EventKind::SYSTEM_BATCH_BEGIN.as_raw_u16()
+            ),
+            "PROPERTY: reserved single-event append must surface ReservedKind {{ index: None }}, got {err:?}"
+        );
+
+        // append_with_options() with TOMBSTONE and EFFECT_ERROR are rejected too.
+        for reserved in [EventKind::TOMBSTONE, EventKind::EFFECT_ERROR] {
+            let err = store
+                .append_with_options(&coord, reserved, &payload, AppendOptions::default())
+                .expect_err("PROPERTY: append_with_options must reject reserved kinds");
+            assert!(
+                matches!(
+                    err,
+                    StoreError::ReservedKind { index: None, kind } if kind == reserved.as_raw_u16()
+                ),
+                "PROPERTY: reserved append_with_options must surface ReservedKind, got {err:?}"
+            );
+        }
+
+        // DATA still appends successfully through the same funnel.
+        store
+            .append(&coord, EventKind::DATA, &payload)
+            .expect("PROPERTY: DATA append must still succeed after the reserved-kind guard");
+
+        store.close().expect("close store");
+    }
+
+    #[test]
+    fn append_batch_rejects_reserved_item_and_admits_clean_batch() {
+        use crate::store::append::{BatchAppendItem, CausationRef};
+
+        let dir = TempDir::new().expect("temp dir");
+        let store = Store::open(StoreConfig::new(dir.path())).expect("open store");
+        let coord = Coordinate::new("entity:reserved-batch", "scope:test").expect("coord");
+        let payload = serde_json::json!({"n": 1});
+
+        let forged = BatchAppendItem::new(
+            coord.clone(),
+            EventKind::SYSTEM_BATCH_COMMIT,
+            &payload,
+            AppendOptions::default(),
+            CausationRef::None,
+        )
+        .expect("build forged batch item");
+        let result = store.append_batch(vec![forged]);
+        assert!(
+            matches!(
+                result,
+                Err(StoreError::ReservedKind { index: Some(0), kind })
+                    if kind == EventKind::SYSTEM_BATCH_COMMIT.as_raw_u16()
+            ),
+            "PROPERTY: reserved batch item must surface ReservedKind {{ index: Some(0) }}"
+        );
+
+        let clean = BatchAppendItem::new(
+            coord.clone(),
+            EventKind::DATA,
+            &payload,
+            AppendOptions::default(),
+            CausationRef::None,
+        )
+        .expect("build clean batch item");
+        store
+            .append_batch(vec![clean])
+            .expect("PROPERTY: a clean batch must still commit after the reserved-kind guard");
+
+        store.close().expect("close store");
     }
 }

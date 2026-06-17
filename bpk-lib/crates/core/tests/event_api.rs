@@ -484,6 +484,38 @@ fn event_kind_effect_constants_are_effect() {
 }
 
 #[test]
+fn event_kind_is_reserved_covers_system_and_effect() {
+    // System category (0x0) — TOMBSTONE/SYSTEM_DENIAL live in 0x0 and are thus
+    // already covered by is_system(), so is_reserved() reports them too.
+    let reserved = [
+        EventKind::SYSTEM_BATCH_BEGIN,
+        EventKind::SYSTEM_BATCH_COMMIT,
+        EventKind::SYSTEM_DENIAL,
+        EventKind::TOMBSTONE,
+        EventKind::EFFECT_ERROR,
+    ];
+    for kind in reserved {
+        assert!(
+            kind.is_reserved(),
+            "PROPERTY: reserved EventKind {:?} must return true for is_reserved().\n\
+             Investigate: src/event/kind.rs EventKind::is_reserved() (is_system || is_effect).\n\
+             Run: cargo test --test event_api event_kind_is_reserved_covers_system_and_effect",
+            kind
+        );
+    }
+
+    // Product/data kinds are NOT reserved and must remain appendable.
+    for kind in [EventKind::DATA, EventKind::custom(0xF, 1)] {
+        assert!(
+            !kind.is_reserved(),
+            "PROPERTY: product EventKind {:?} must NOT be reserved (must stay appendable).\n\
+             Run: cargo test --test event_api event_kind_is_reserved_covers_system_and_effect",
+            kind
+        );
+    }
+}
+
+#[test]
 fn event_kind_custom_is_neither_system_nor_effect() {
     let custom = EventKind::custom(0x5, 42);
     let is_system = custom.is_system();

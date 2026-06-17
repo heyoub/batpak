@@ -1,5 +1,4 @@
 use crate::repo_surface::{ensure, load_yaml, relative, resolve_repo_or_core_path};
-use crate::shared_checks::{extract_anchors, JustifiesAnchor};
 use crate::source_cache::SourceCache;
 use crate::store_pub_fn_coverage;
 use anyhow::{bail, Context, Result};
@@ -363,18 +362,9 @@ fn load_invariant_gate_links(
 }
 
 fn ledger_invariant_citations(repo_root: &Path) -> Result<BTreeSet<String>> {
-    let path = repo_root
-        .parent()
-        .unwrap_or(repo_root)
-        .join("archive/legacy-docs/041_TESTING_LEDGER.md");
-    let content = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
     let mut citations = BTreeSet::new();
-    for line in content.lines() {
-        for anchor in extract_anchors(line) {
-            if let JustifiesAnchor::Invariant(id) = anchor {
-                citations.insert(id);
-            }
-        }
+    for entry in crate::harness_lints::load_ledger_citations(repo_root)? {
+        citations.extend(entry.invariants);
     }
     Ok(citations)
 }

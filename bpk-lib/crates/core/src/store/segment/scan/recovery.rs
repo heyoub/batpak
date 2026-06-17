@@ -70,7 +70,14 @@ impl Reader {
 
         let mut file = crate::store::platform::fs::open_file(path).map_err(StoreError::Io)?;
         let file_len = file.seek(SeekFrom::End(0)).map_err(StoreError::Io)?;
-        let frames_end = segment::detect_sidx_boundary(&mut file, file_len)?.unwrap_or(file_len);
+        let boundary = segment::detect_sidx_boundary(&mut file, file_len, segment_id)?;
+        let frames_end = boundary.map_or(file_len, |b| b.frames_end);
+        // An untrusted footer boundary (CRC-failed SDX3, legacy SDX2, or forged
+        // trailer) yields an unauthenticated `frames_end` hint that may over-read
+        // into the corrupt footer. Only then do we recover-what-was-found. With NO
+        // footer, frames legitimately run to EOF and mid-stream corruption must
+        // still FailClosed — so this is gated on the footer actually being present.
+        let untrusted_boundary = boundary.is_some_and(|b| !b.trusted);
         file.seek(SeekFrom::Start(0)).map_err(StoreError::Io)?;
 
         let mut magic = [0u8; 4];
@@ -82,7 +89,8 @@ impl Reader {
         let mut header_len_buf = [0u8; 4];
         file.read_exact(&mut header_len_buf)
             .map_err(StoreError::Io)?;
-        let header_len = u32::from_be_bytes(header_len_buf) as usize;
+        let header_len =
+            Self::checked_header_len(segment_id, u32::from_be_bytes(header_len_buf) as usize)?;
         let mut header_buf = vec![0u8; header_len];
         file.read_exact(&mut header_buf).map_err(StoreError::Io)?;
         let header: SegmentHeader = crate::encoding::from_bytes(&header_buf)
@@ -92,6 +100,62 @@ impl Reader {
         }
 
         let mut cursor = (8 + header_len) as u64;
+
+        // Lower-bound check (TRUSTED boundaries only): an authenticated SDX3
+        // `string_table_offset` must not fall below the start of the frame region.
+        // A corrupt-but-authenticated offset < cursor would make the scan loop
+        // break on the first iteration and return an empty Ok(()) with zero events
+        // — silent data loss. Erroring with CorruptSegment is the correct DO-178B
+        // behavior. frames_end == cursor (empty frame region) stays valid. For an
+        // UNTRUSTED boundary the offset is garbage and discarded below (recovery
+        // walks from `cursor` bounded by `file_len`), so a too-low untrusted hint
+        // must NOT error — it recovers all CRC-valid frames instead.
+        if !untrusted_boundary && frames_end < cursor {
+            return Err(StoreError::corrupt_segment_with_detail(
+                segment_id,
+                format!(
+                    "SIDX string_table_offset {frames_end} is below the frame region start \
+                     {cursor} (8 + header_len {header_len})"
+                ),
+            ));
+        }
+
+        // Resolve the frame-region end based on the offset's provenance.
+        //
+        // TRUSTED (CRC-valid SDX3 footer): the offset is authoritative and
+        // byte-for-byte authenticated by the footer CRC, so it cannot be
+        // truncating. A frame-decode failure BEFORE this boundary is genuine
+        // mid-stream corruption and the scan loop below FailCloses on it.
+        //
+        // UNTRUSTED (CRC-failed SDX3, legacy SDX2, or forged trailer): the offset
+        // is GARBAGE — it may point too LOW (truncating real frames), MID-FRAME
+        // (inside a later CRC-valid frame), or too HIGH (into the corrupt footer).
+        // Trusting it as a bound either silently drops CRC-valid frames or makes
+        // the scan parse footer bytes as frame headers and FailClose. So discard
+        // the hint entirely and recover via the SIDX-manifest path
+        // (`resolve_untrusted_frames_end`): it walks the CRC-valid frames bounded
+        // only by `file_len` (truncation-proof, still FailClosed on mid-stream
+        // corruption), AND consults the CRC-independent SIDX entry table as a
+        // self-authenticating manifest. If a CORROBORATED entry (matching offset +
+        // length + content event_hash of a recovered frame) attests to a committed
+        // frame at/after the recovered prefix end that the stream is missing — the
+        // torn-last-frame-under-corrupt-footer case (round-7) — it FailCloses
+        // regardless of tail policy. With no corroborated manifest it degrades to
+        // the existing recover-the-prefix behavior, honoring `tail_policy` for that
+        // fall-back.
+        let frames_end = if untrusted_boundary {
+            segment::resolve_untrusted_frames_end(
+                &mut file,
+                cursor,
+                file_len,
+                segment_id,
+                !tail_policy.can_recover_torn_tail(),
+            )?
+        } else {
+            frames_end
+        };
+        file.seek(SeekFrom::Start(cursor)).map_err(StoreError::Io)?;
+
         let mut local_state = BatchRecoveryState::default();
         let state_ref: &mut BatchRecoveryState = match batch_state {
             Some(ref mut s) => s,

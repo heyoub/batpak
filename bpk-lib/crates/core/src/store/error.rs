@@ -184,6 +184,16 @@ pub enum StoreError {
         /// Human-readable description of the rejection reason.
         reason: String,
     },
+    /// A reserved system/effect/tombstone `EventKind` was submitted through the
+    /// public raw-`kind` append surface. Reserved kinds are emitted only by the
+    /// internal substrate (batch markers, lifecycle receipts, tombstones,
+    /// gate-denial audit receipts) and cannot be forged by callers.
+    ReservedKind {
+        /// Optional position of the offending item within a batch.
+        index: Option<usize>,
+        /// The rejected reserved kind, as its raw 16-bit encoding.
+        kind: u16,
+    },
     /// A batch `CausationRef::PriorItem` pointed at a non-earlier item.
     InvalidCausation {
         /// Index the caller referenced.
@@ -423,6 +433,16 @@ impl std::fmt::Display for StoreError {
                 Some(i) => write!(f, "invalid coordinate at batch item {i}: {reason}"),
                 None => write!(f, "invalid coordinate: {reason}"),
             },
+            Self::ReservedKind { index, kind } => match index {
+                Some(i) => write!(
+                    f,
+                    "reserved kind 0x{kind:04X} at batch item {i} cannot be appended through the public surface"
+                ),
+                None => write!(
+                    f,
+                    "reserved kind 0x{kind:04X} cannot be appended through the public surface"
+                ),
+            },
             Self::InvalidCausation {
                 prior_idx,
                 item_index,
@@ -521,6 +541,7 @@ impl std::error::Error for StoreError {
             | Self::AncestryCorrupt { .. }
             | Self::RangeMalformed { .. }
             | Self::InvalidCoordinate { .. }
+            | Self::ReservedKind { .. }
             | Self::InvalidCausation { .. }
             | Self::InvalidCommitMetadata { .. }
             | Self::CoordinateNulByte

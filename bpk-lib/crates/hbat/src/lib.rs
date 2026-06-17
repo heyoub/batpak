@@ -47,7 +47,7 @@ mod descriptor;
 /// descriptors; the runtime handlers live in [`handlers`].
 pub mod evidence;
 /// Runtime handlers for [`bank`] operations. Capture `Arc<Store>`; pulled
-/// into the binary via [`crate::main`] and not part of the library's
+/// into the binary via the `hbat` binary's `main` and not part of the library's
 /// pure-data surface that `xtask` depends on.
 pub mod handlers;
 /// Heartbeat payload types and the registered operation descriptor.

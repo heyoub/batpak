@@ -36,6 +36,17 @@ impl WatermarkAdvanceHandle {
     }
 
     pub(crate) fn mark_writer_crashed(&self) {
+        // Hold the state lock across the poison store + notify. A waiter that has
+        // observed `poison == false` but not yet parked on the condvar would
+        // otherwise miss this wake-up (lost-wakeup), and only learn the writer
+        // died when its full timeout elapses. Taking the lock serializes against
+        // the wait-loop's check-then-park, matching the discipline the normal
+        // watermark-advance/notify path already uses (audit R7).
+        //
+        // Safe from deadlock: the writer thread unwinds (dropping any held
+        // guard, which parking_lot releases without poisoning) before the panic
+        // handler calls this, so the lock is free here.
+        let _guard = self.state.lock();
         self.poison.store(true, Ordering::Release);
         self.cv.notify_all();
     }

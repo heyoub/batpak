@@ -2,7 +2,7 @@
 //!
 //! A SIDX footer is appended to a **sealed** segment file immediately after all event
 //! frames have been written. On the next cold start, the store can seek to the last 16
-//! bytes of each segment, detect the `b"SDX2"` magic, and reconstruct the in-memory
+//! bytes of each segment, detect the `b"SDX3"` magic, and reconstruct the in-memory
 //! index without re-deserialising every MessagePack frame.
 //!
 //! # On-disk layout (end of segment file)
@@ -10,13 +10,17 @@
 //! ```text
 //! [...frames...]
 //! [string_table_bytes]           — msgpack-encoded Vec<String> (entity + scope names)
-//! [entries: N × ENTRY_SIZE]      — raw little-endian binary, no framing, no CRC
+//! [entries: N × ENTRY_SIZE]      — raw little-endian binary, no framing
+//! [crc32: u32 LE]                — CRC32 over [string_table_bytes ++ entries], integrity
 //! [string_table_offset: u64 LE]  — byte offset from segment start where the table begins
 //! [entry_count: u32 LE]          — number of SidxEntry records
-//! [magic: b"SDX2"]               — 4 bytes; last bytes of the file
+//! [magic: b"SDX3"]               — 4 bytes; last bytes of the file
 //! ```
 //!
-//! To read: seek to `EOF - 16`, read `magic(4) + entry_count(4) + string_table_offset(8)`.
+//! To read: seek to `EOF - 16`, read the fixed trailer in on-disk order
+//! `string_table_offset(8) + entry_count(4) + magic(4)`; the trailing `magic` must equal
+//! `SDX3` before the other fields are trusted (matching `footer::read_layout`). The 4-byte
+//! `crc32` sits immediately before the trailer, covering `[string_table_bytes ++ entries]`.
 //! Then seek to `string_table_offset` and read the string table, then the entry block.
 //!
 //! # Entry binary layout (162 bytes per entry, little-endian)
@@ -60,7 +64,25 @@ use std::path::Path;
 // ── constants ─────────────────────────────────────────────────────────────────
 
 /// Four-byte magic that identifies a SIDX footer at the tail of a segment file.
-pub(crate) const SIDX_MAGIC: &[u8; 4] = b"SDX2";
+///
+/// `SDX3` (the `SDX2`→`SDX3` bump) gates the CRC32-bearing footer: pre-0.8.3 `SDX2`
+/// footers carried no integrity check, so they read as `Ok(None)` and fall back to the
+/// CRC-verified frame-scan rebuild rather than trusting un-CRC'd bytes.
+pub(crate) const SIDX_MAGIC: &[u8; 4] = b"SDX3";
+
+/// Legacy pre-0.8.3 SIDX magic. A footer tagged `SDX2` carries no CRC32, so its
+/// *content* must never be trusted on read — `read_footer`/`read_layout` keep
+/// rejecting it by matching only [`SIDX_MAGIC`], which degrades to the
+/// CRC-verified frame-scan rebuild.
+///
+/// Its *boundary*, however, must still be honored: the 16-byte trailer geometry
+/// (`string_table_offset(8) + entry_count(4) + magic(4)`) is identical across
+/// `SDX2`/`SDX3`, so `string_table_offset` reliably marks where the frame region
+/// ends. [`crate::store::segment::detect_sidx_boundary`] recognizes BOTH magics so
+/// the frame-scan fallback stops at the true end of frames instead of over-running
+/// into the old un-CRC'd footer bytes (which a frame scan would mis-read as a
+/// corrupt/oversized frame, hard-failing cold start for any non-tail segment).
+pub(crate) const SIDX_MAGIC_LEGACY_SDX2: &[u8; 4] = b"SDX2";
 
 /// Fixed byte size of one serialised [`SidxEntry`] on disk.
 ///
@@ -347,9 +369,10 @@ impl SidxEntryCollector {
     /// ```text
     /// [string_table_bytes]          — msgpack-encoded Vec<String>
     /// [entries: N × ENTRY_SIZE]     — raw little-endian binary
+    /// [crc32: u32 LE]               — CRC32 over [string_table_bytes ++ entries]
     /// [string_table_offset: u64 LE] — byte offset where string_table_bytes starts
     /// [entry_count: u32 LE]
-    /// [magic: b"SDX2"]
+    /// [magic: b"SDX3"]
     /// ```
     ///
     /// The body is assembled in a single `Vec<u8>` and written in one
@@ -393,6 +416,7 @@ impl SidxEntryCollector {
         let mut footer = Vec::with_capacity(
             string_table_bytes.len()
                 + self.entries.len() * ENTRY_SIZE
+                + footer::sidx_crc_len_usize()
                 + footer::trailer_size_usize(),
         );
 
@@ -403,6 +427,14 @@ impl SidxEntryCollector {
             entry.encode_into(&mut buf);
             footer.extend_from_slice(&buf);
         }
+
+        // 4b. Append a CRC32 over the contiguous [string_table_bytes ++ entries]
+        // region that has accumulated in `footer` so far. This is the integrity
+        // check `footer::read_layout` recomputes and verifies on read; placing it
+        // immediately before the fixed 16-byte trailer keeps the trailer geometry
+        // (offset/count/magic) unchanged for the fixed-offset trailer readers.
+        let crc = crc32fast::hash(&footer);
+        footer.extend_from_slice(&crc.to_le_bytes());
 
         footer.extend_from_slice(&string_table_offset.to_le_bytes());
         footer.extend_from_slice(&entry_count.to_le_bytes());
@@ -451,6 +483,58 @@ impl SidxEntryCollector {
 /// out-of-range offsets or string-table indices).
 /// Parsed SIDX footer: entries + string table.
 pub(crate) type SidxFooterData = (Vec<SidxEntry>, Vec<String>);
+
+/// Return the `string_table_offset` from a footer **only if its CRC
+/// authenticates** the SDX3 footer.
+///
+/// This is the trust oracle for the frame-region boundary: it runs the exact
+/// same CRC verification as [`read_footer`] (via `footer::read_layout`) over an
+/// already-open reader, but discards the parsed entries — the caller only needs
+/// to know whether the trailer's `string_table_offset` came from an
+/// authenticated footer.
+///
+/// Returns `Ok(Some(offset))` when the footer is a CRC-valid SDX3 footer (the
+/// offset is authoritative). Returns `Ok(None)` when there is no footer, the
+/// CRC mismatches, or the footer is a legacy un-CRC'd SDX2 footer (the offset
+/// is, at best, an unauthenticated hint). Only an actual IO failure surfaces as
+/// [`StoreError::Io`].
+pub(crate) fn authenticated_string_table_offset<R: Read + Seek>(
+    reader: &mut R,
+    segment_id: u64,
+) -> Result<Option<u64>, StoreError> {
+    match footer::read_layout(reader, segment_id) {
+        Ok(Some(layout)) => Ok(Some(layout.string_table_offset)),
+        // No SDX3 magic / CRC mismatch → no authenticated footer.
+        Ok(None) => Ok(None),
+        // A structurally-inconsistent footer (e.g. a forged trailer whose
+        // entry_count/offset geometry is impossible) is NOT trusted — it cannot
+        // authenticate the offset. This is a trust oracle, not the rebuild path,
+        // so we degrade to "untrusted" rather than surfacing the structural error;
+        // the frame-scan recovery is the authority. Only a real IO failure must
+        // still propagate so it is not silently swallowed as untrust.
+        Err(StoreError::Io(e)) => Err(StoreError::Io(e)),
+        Err(_) => Ok(None),
+    }
+}
+
+/// Parse the SIDX entry table WITHOUT requiring the footer CRC to authenticate.
+///
+/// This is the untrusted manifest-recovery read used by the segment frame-scan
+/// fallback (the "cake-and-eat-it" resolution): when the footer boundary is
+/// UNTRUSTED (CRC-failed SDX3, legacy SDX2, or a forged trailer), the entries are
+/// still parseable because [`SidxEntry::decode_from`] is CRC-independent. Every
+/// returned entry is an UNTRUSTED HYPOTHESIS the caller MUST corroborate against
+/// the independently CRC-verified recovered frames before trusting it.
+///
+/// Returns ZERO entries (`Ok(Vec::new())`) on any geometry/parse failure so the
+/// caller falls back to the existing tail-policy behavior. Only a real IO failure
+/// surfaces as [`StoreError::Io`]. See [`footer::read_entries_unauthenticated`].
+pub(crate) fn read_entries_unauthenticated<R: Read + Seek>(
+    reader: &mut R,
+    segment_id: u64,
+) -> Result<Vec<SidxEntry>, StoreError> {
+    footer::read_entries_unauthenticated(reader, segment_id)
+}
 
 pub(crate) fn read_footer(path: &Path) -> Result<Option<SidxFooterData>, StoreError> {
     // Derive a segment_id for error messages from the filename ("000042.fbat" → 42).

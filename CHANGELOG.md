@@ -4,11 +4,46 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Security
+- Hardened the public append surface (0.8.3): raw-`kind` append entry points
+  (`append`, `append_with_options`, `submit`/`submit_reaction` and their
+  fenced/`try_*` variants, and both the unfenced and fenced batch paths) now
+  reject reserved system/effect/tombstone `EventKind`s with the new
+  `StoreError::ReservedKind`. This closes a forgery hole where a caller could
+  smuggle a `SYSTEM_BATCH_BEGIN`/`SYSTEM_BATCH_COMMIT` (or other reserved)
+  marker and corrupt crash recovery and SIDX fast-path rebuild. Behavior-
+  changing for callers that previously relied on appending reserved kinds; the
+  only legitimate reserved-kind emitter on the public surface, `append_denial`
+  (`SYSTEM_DENIAL`), is unaffected and still emits its audit receipt.
+
 ### Fixed
 - Corrected `cargo-mutants` shard indices to the 0-based `k/n` convention
   (`0/12`…`11/12` for full CI matrix; smoke lanes use `0/8` and `0/48`).
+- Read-only media (0.8.3): sealed-segment reads fall back to FD/pread when mmap
+  can't be admitted, so stores on read-only mounts/immutable infra are now
+  readable.
+- Monotonic durable timestamps (0.8.3): `now_wall_ns` is sticky non-decreasing;
+  a backward wall-clock/NTP step can stall durable `created_ns` but never moves
+  it backward.
+- Reliability (0.8.3): the writer durability gate is no longer permanently
+  poisoned by a recoverable (within-budget) panic; the push fanout now prunes
+  dropped out-of-region subscribers (no slow leak).
 
 ### Changed
+- SIDX SDX3 + CRC32 (0.8.3): footers bumped SDX2→SDX3 with a CRC32 over
+  `[string_table ++ entries]`, verified on cold start. Pre-0.8.3 SDX2 footers
+  are no longer trusted; they fall back to the CRC-verified frame-scan rebuild,
+  so the FIRST reopen of an older store is slower (one-time, per sealed
+  segment). No data is lost; this follows the ADR-0009 artifact-upgrade posture.
+- overflow-checks (0.8.3): the release profile now builds
+  `overflow-checks = true` (a silent integer wrap now panics rather than
+  admitting corrupt durable state); the bench profile keeps checks off so
+  throughput reflects prior release behavior; the cold-start `wall_ms` multiply
+  now saturates.
+- Internal/CI (0.8.3): segment `header_len` is capped before allocation and the
+  directory entry is fsynced on segment create/rotation; the mutation smoke gate
+  is now diff-scoped (`--in-diff`) and a non-blocking `coverage-baseline` CI job
+  was added.
 - Synced factory docs with the full-system README: INTEGRATION/MODEL/BATTERIES/
   CIRCUITS composition language, `hbat` crate README, bpk-ts test counts, and
   README artifact tally (119).

@@ -1002,6 +1002,249 @@ fn batch_cross_segment_fault_recovery() {
     );
 }
 
+/// Test: single-append crash during segment rotation recovers cleanly.
+///
+/// Exercises the `InjectionPoint::SegmentRotation` seal/pre-publish boundary
+/// (old segment sealed, new empty active file on disk, reader not yet
+/// advanced). A fault here must abort the rotating append with `FaultInjected`,
+/// and reopen must surface only the pre-rotation event while leaving the store
+/// fully usable.
+/// PROVES: INV-BATCH-CRASH-RECOVERY.
+#[cfg(feature = "dangerous-test-hooks")]
+#[test]
+fn single_append_fault_at_segment_rotation_recovers() {
+    use batpak::store::fault::{CountdownAction, CountdownInjector, InjectionPoint};
+
+    let tmp = tempfile::tempdir().expect("create temp dir for segment-rotation recovery test");
+    let coord = Coordinate::new("rot", "seg").expect("valid segment-rotation coordinate");
+
+    // Phase 1: fill segment 0 past the 1024B rotation threshold with a single
+    // committed event so the NEXT append must rotate before it can be written.
+    let config = StoreConfig::new(tmp.path()).with_segment_max_bytes(1024);
+    let store = Store::open(config).expect("open baseline store for segment-rotation recovery");
+    let pre_payload = serde_json::json!({"phase": 1, "data": "x".repeat(900) });
+    let pre_receipt = store
+        .append(&coord, EventKind::DATA, &pre_payload)
+        .expect("append pre-rotation event before segment-rotation fault");
+    drop(store);
+
+    // Phase 2: reopen with a fault injector filtered on SegmentRotation. The
+    // next append must rotate segment 0 -> 1 and fault at the seal/pre-publish
+    // boundary.
+    let config = StoreConfig::new(tmp.path())
+        .with_segment_max_bytes(1024)
+        .with_fault_injector(Some(std::sync::Arc::new(
+            CountdownInjector::new(1, CountdownAction::Fail("crash during segment rotation"))
+                .with_filter(|p| matches!(p, InjectionPoint::SegmentRotation { .. })),
+        )));
+    let store =
+        Store::open(config).expect("open fault-injected store for segment-rotation recovery");
+
+    let result = store.append(
+        &coord,
+        EventKind::DATA,
+        &serde_json::json!({"phase": 2, "pad": "y".repeat(300)}),
+    );
+    match result {
+        Err(batpak::store::StoreError::FaultInjected(_)) => {}
+        Err(other) => panic!("expected FaultInjected during rotation, got {other:?}"),
+        Ok(receipt) => panic!(
+            "second append must rotate-and-fault, but it succeeded (seq {}); \
+             increase the Phase-1 payload size or lower segment_max_bytes",
+            receipt.sequence
+        ),
+    }
+    drop(store);
+
+    // Phase 3: reopen clean. Only the pre-rotation event must survive.
+    let config = StoreConfig::new(tmp.path());
+    let store = Store::open(config).expect("reopen store after segment-rotation fault recovery");
+    let mut cursor = store.cursor_guaranteed(&Region::all());
+    let entries = strip_open_completed(cursor.poll_batch(10));
+    assert_eq!(
+        entries.len(),
+        1,
+        "only the pre-rotation event should survive a crash during segment rotation"
+    );
+    assert_eq!(
+        store
+            .get(batpak::id::EventId::from(entries[0].event_id()))
+            .expect("load recovered pre-rotation event")
+            .event
+            .payload["phase"],
+        serde_json::json!(1),
+        "the surviving entry must be the pre-rotation Phase-1 event"
+    );
+
+    // Store remains usable: a subsequent append succeeds and is monotonic.
+    let after_receipt = store
+        .append(
+            &coord,
+            EventKind::DATA,
+            &serde_json::json!({"phase": 3, "after": "recovery"}),
+        )
+        .expect("append after segment-rotation recovery");
+    assert!(
+        after_receipt.sequence > pre_receipt.sequence,
+        "appends after segment-rotation recovery must be monotonic"
+    );
+}
+
+/// Test: a fault during the NEW-segment create/fsync at the start of rotation
+/// leaves the writer state CONSISTENT (rotation cleanly did not happen).
+///
+/// This is the regression guard for the rotation-path P1: previously the SIDX
+/// footer write, collector reset, and old-segment sync ran BEFORE the fallible
+/// new-segment `create_with_created_ns`. If that create/fsync failed, the old
+/// active segment already had a footer written and the collector was wiped, yet
+/// `mem::replace` never ran — so the writer kept appending frame bytes AFTER the
+/// footer bytes in the old segment with a collector that no longer held the old
+/// entries. Cold-start recovery / compaction could then mis-read footer bytes as
+/// frames or lose SIDX coverage: a silent-corruption path.
+///
+/// The fix reorders rotation so the new segment is created+fsync'd FIRST. A
+/// failure there now returns `?` with the old segment + collector fully intact.
+/// `InjectionPoint::SegmentRotationCreate` models exactly that create failure.
+///
+/// Asserts:
+/// 1. The rotating append fails cleanly with `FaultInjected`.
+/// 2. The store stays usable IN-PROCESS: with the one-shot injector spent, a
+///    subsequent append succeeds, rotates, and is monotonic — proving the writer
+///    was NOT left half-rotated (no footer-then-frames, no wiped collector).
+/// 3. Reopening clean shows every committed event recovers, in order, with the
+///    correct payloads — no footer-bytes-as-frames corruption and no lost
+///    coverage.
+///
+/// PROVES: INV-BATCH-CRASH-RECOVERY (rotation create/fsync seam).
+#[cfg(feature = "dangerous-test-hooks")]
+#[test]
+fn segment_rotation_new_segment_create_fault_leaves_writer_consistent() {
+    use batpak::store::fault::{FaultInjector, InjectionPoint};
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    // A genuinely ONE-SHOT injector: fails on the FIRST matching point only,
+    // then lets every later point through. The built-in CountdownInjector fails
+    // at the Nth point AND beyond, which would also trip the in-process retry
+    // below; we specifically need the writer's NEXT rotation to succeed so we
+    // can prove the writer was left consistent (not poisoned, not half-rotated).
+    struct OneShotCreateFault {
+        spent: AtomicBool,
+    }
+    impl FaultInjector for OneShotCreateFault {
+        fn check(&self, point: InjectionPoint) -> Option<batpak::store::StoreError> {
+            if matches!(point, InjectionPoint::SegmentRotationCreate { .. })
+                && !self.spent.swap(true, Ordering::SeqCst)
+            {
+                return Some(batpak::store::StoreError::FaultInjected(
+                    "crash creating new segment during rotation".to_string(),
+                ));
+            }
+            None
+        }
+    }
+
+    let tmp = tempfile::tempdir()
+        .expect("create temp dir for rotation new-segment-create consistency test");
+    let coord = Coordinate::new("rot", "create").expect("valid rotation-create coordinate");
+
+    // Phase 1: fill segment 0 past the 1024B rotation threshold so the NEXT
+    // append must rotate before it can be written.
+    let config = StoreConfig::new(tmp.path()).with_segment_max_bytes(1024);
+    let store = Store::open(config).expect("open baseline store for rotation-create consistency");
+    let pre_payload = serde_json::json!({"phase": 1, "data": "x".repeat(900) });
+    let pre_receipt = store
+        .append(&coord, EventKind::DATA, &pre_payload)
+        .expect("append pre-rotation event before rotation-create fault");
+    drop(store);
+
+    // Phase 2: reopen with the one-shot injector that fails at
+    // SegmentRotationCreate — i.e. the new-segment create/fsync fails while the
+    // old segment + collector are still pristine. The next append must rotate
+    // and fault at that seam.
+    let config = StoreConfig::new(tmp.path())
+        .with_segment_max_bytes(1024)
+        .with_fault_injector(Some(std::sync::Arc::new(OneShotCreateFault {
+            spent: AtomicBool::new(false),
+        })));
+    let store = Store::open(config).expect("open fault-injected store for rotation-create");
+
+    let result = store.append(
+        &coord,
+        EventKind::DATA,
+        &serde_json::json!({"phase": 2, "pad": "y".repeat(300)}),
+    );
+    match result {
+        Err(batpak::store::StoreError::FaultInjected(_)) => {}
+        Err(other) => panic!("expected FaultInjected at new-segment create, got {other:?}"),
+        Ok(receipt) => panic!(
+            "second append must rotate-and-fault at new-segment create, but it \
+             succeeded (seq {}); lower segment_max_bytes or grow the Phase-1 payload",
+            receipt.sequence
+        ),
+    }
+
+    // The one-shot injector is now spent. PROPERTY: the writer was left
+    // CONSISTENT, not half-rotated. A subsequent in-process append must succeed
+    // (it rotates the still-intact old segment), be monotonic, and — critically
+    // — not be written after a stray footer with a wiped collector.
+    let post_fault = store
+        .append(
+            &coord,
+            EventKind::DATA,
+            &serde_json::json!({"phase": 3, "data": "z".repeat(300)}),
+        )
+        .expect("append after rotation-create fault must succeed on a consistent writer");
+    assert!(
+        post_fault.sequence > pre_receipt.sequence,
+        "appends after a rotation-create fault must be monotonic — proves the \
+         writer was not left half-rotated"
+    );
+    drop(store);
+
+    // Phase 3: reopen clean. Both committed events (phase 1 and phase 3) must
+    // recover, in order, with correct payloads. No footer-bytes-as-frames
+    // corruption and no lost SIDX coverage.
+    let config = StoreConfig::new(tmp.path());
+    let store = Store::open(config).expect("reopen store after rotation-create fault recovery");
+    let mut cursor = store.cursor_guaranteed(&Region::all());
+    let entries = strip_open_completed(cursor.poll_batch(10));
+    assert_eq!(
+        entries.len(),
+        2,
+        "exactly the two committed events (pre-rotation + post-fault) must survive; \
+         a higher/lower count means footer bytes were mis-read as frames or frames were lost"
+    );
+    let phases: Vec<serde_json::Value> = entries
+        .iter()
+        .map(|e| {
+            store
+                .get(batpak::id::EventId::from(e.event_id()))
+                .expect("load recovered event after rotation-create fault")
+                .event
+                .payload["phase"]
+                .clone()
+        })
+        .collect();
+    assert_eq!(
+        phases,
+        vec![serde_json::json!(1), serde_json::json!(3)],
+        "recovered events must be the pre-rotation and post-fault events, in order"
+    );
+
+    // Store still usable after reopen.
+    let after = store
+        .append(
+            &coord,
+            EventKind::DATA,
+            &serde_json::json!({"phase": 4, "after": "recovery"}),
+        )
+        .expect("append after rotation-create reopen");
+    assert!(
+        after.sequence > post_fault.sequence,
+        "appends after rotation-create reopen must be monotonic"
+    );
+}
+
 /// Test: concurrent readers NEVER observe a partial batch.
 ///
 /// Uses a fault injector at `BatchPrePublish` to create a deterministic
@@ -1399,7 +1642,7 @@ fn batch_survives_unclean_shutdown_without_sidx_footer() {
 
     // Phase 2b: locate the segment file and strip its SIDX footer in place.
     // The SIDX trailer is the last 16 bytes: [string_table_offset:u64 LE]
-    // [entry_count:u32 LE][magic:4 b"SDX2"]. Truncating to string_table_offset
+    // [entry_count:u32 LE][magic:4 b"SDX3"]. Truncating to string_table_offset
     // restores the file to its pre-SIDX state — exactly what an unclean
     // shutdown between batch sync and segment rotation/close would produce.
     let entries: Vec<_> = std::fs::read_dir(&data_dir)
@@ -1421,7 +1664,7 @@ fn batch_survives_unclean_shutdown_without_sidx_footer() {
     let trailer = &bytes[bytes.len() - 16..];
     assert_eq!(
         &trailer[12..16],
-        b"SDX2",
+        b"SDX3",
         "clean close must have written the SIDX footer (sanity check before truncation)"
     );
     let string_table_offset = u64::from_le_bytes(

@@ -1,5 +1,10 @@
 # Testing Doctrine
 
+> ARCHIVED — the live testing doctrine now lives in `CONFORMANCE.md`
+> ("Machine Law" → "Testing doctrine"). The machine-law ledger this file
+> referenced is `bpk-lib/traceability/testing_ledger.yaml`. No live tooling
+> reads this file; it is retained as a historical record.
+
 This file defines the operational testing doctrine for `batpak`.
 
 This doctrine is enforced for doctrine-bearing harnesses listed in

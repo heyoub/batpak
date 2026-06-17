@@ -121,7 +121,10 @@ impl<T: Clone + RegionFanoutItem> FanoutList<T> {
         let subscribers_before = guard.len();
         guard.retain(|sub| {
             if !value.matches_region(&sub.region) {
-                return true;
+                // Out of region: no push, but still prune a dropped receiver so
+                // subscribers to quiet regions don't leak senders forever and
+                // impose O(dead) work on every commit (audit R4).
+                return !sub.tx.is_disconnected();
             }
             match sub.tx.try_send(value.clone()) {
                 Ok(()) => true,
@@ -174,7 +177,9 @@ impl FilteredSubscriberList {
         let subscribers_before = guard.len();
         guard.retain(|sub| {
             match notification_matches_region(&sub.region, value) {
-                false => true, // out of region; subscriber remains but gets no push
+                // Out of region: no push, but prune a dropped receiver so quiet-
+                // region subscribers don't leak senders forever (audit R4).
+                false => !sub.tx.is_disconnected(),
                 true => match sub.tx.try_send(value.clone()) {
                     Ok(()) => true,
                     Err(TrySendError::Full(_)) => false,
@@ -188,6 +193,78 @@ impl FilteredSubscriberList {
             subscribers_after = guard.len(),
             pruned = subscribers_before.saturating_sub(guard.len()),
             "subscription fanout try_send pass",
+        );
+    }
+}
+
+#[cfg(test)]
+mod fanout_subscriber_tests {
+    use super::{CommittedEventEnvelope, FanoutList, FilteredSubscriberList, Notification};
+    use crate::coordinate::{Coordinate, DagPosition, Region};
+    use crate::event::EventKind;
+
+    #[test]
+    fn has_subscribers_tracks_subscription_state() {
+        // Pins `has_subscribers`: hardcoding it to `true` would make the writer
+        // broadcast into an empty subscriber list on every commit.
+        let fanout: FanoutList<CommittedEventEnvelope> = FanoutList::new();
+        assert!(
+            !fanout.has_subscribers(),
+            "a freshly constructed fanout has no subscribers"
+        );
+
+        let _rx = fanout.subscribe_with_region(1, Region::all());
+        assert!(
+            fanout.has_subscribers(),
+            "after a subscribe the fanout must report subscribers"
+        );
+    }
+
+    fn notification(scope: &str) -> Notification {
+        Notification {
+            event_id: 1,
+            correlation_id: 1,
+            causation_id: None,
+            coord: Coordinate::new("entity", scope).expect("coordinate"),
+            kind: EventKind::DATA,
+            sequence: 1,
+            position: DagPosition::root(),
+        }
+    }
+
+    #[test]
+    fn dropped_out_of_region_subscriber_is_pruned_not_leaked() {
+        // R4: a subscriber whose region never matches incoming events used to be
+        // retained forever, even after its receiver was dropped — an unbounded
+        // sender leak plus O(dead) work on every commit. Now an out-of-region
+        // broadcast still prunes a disconnected sender.
+        let list = FilteredSubscriberList::new();
+        let rx = list.subscribe_with_region(4, Region::scope("alpha"));
+        assert_eq!(list.senders.lock().len(), 1);
+
+        drop(rx); // receiver gone -> channel disconnected
+
+        // Broadcast targets scope "beta": out of the subscriber's region.
+        list.broadcast(&notification("beta"));
+        assert_eq!(
+            list.senders.lock().len(),
+            0,
+            "a dropped out-of-region subscriber must be pruned (audit R4)"
+        );
+    }
+
+    #[test]
+    fn live_out_of_region_subscriber_is_retained() {
+        // Dual direction: a still-connected subscriber must NOT be pruned just
+        // because a broadcast was out of its region.
+        let list = FilteredSubscriberList::new();
+        let _rx = list.subscribe_with_region(4, Region::scope("alpha"));
+
+        list.broadcast(&notification("beta")); // out of region, receiver alive
+        assert_eq!(
+            list.senders.lock().len(),
+            1,
+            "a live out-of-region subscriber must be retained"
         );
     }
 }

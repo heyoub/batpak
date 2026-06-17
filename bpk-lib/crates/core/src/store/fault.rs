@@ -106,7 +106,25 @@ pub enum InjectionPoint {
         entity: String,
     },
 
-    /// During segment rotation.
+    /// During segment rotation, BEFORE the new active segment is created.
+    ///
+    /// Models a failure of `Segment::create_with_created_ns` (the new-segment
+    /// file create + file/dir fsync) at the very start of rotation, while the
+    /// old segment and SIDX collector are still pristine. A fault here must
+    /// abort the rotation with the old segment + collector fully intact (no
+    /// SIDX footer written, collector unchanged), so the writer state stays
+    /// consistent and the next append cleanly retries against the unchanged
+    /// old segment.
+    SegmentRotationCreate {
+        /// Segment being sealed.
+        old_segment: u64,
+        /// Segment being opened.
+        new_segment: u64,
+    },
+
+    /// During segment rotation, AFTER in-memory state is fully rolled forward
+    /// (old segment sealed with footer, new active file present, segment_id
+    /// advanced, reader notified).
     SegmentRotation {
         /// Segment being sealed.
         old_segment: u64,

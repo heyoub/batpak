@@ -25,6 +25,24 @@ pub(super) enum MutationEnforcement {
     RecordOnly,
 }
 
+/// Whether a diff-scoped lane was actually scoped by a real, non-empty PR diff.
+///
+/// The zero-mutant early return ("the PR touched no mutable lines in this seam")
+/// is only a legitimate PASS when an actual PR diff was applied. On a manual
+/// `workflow_dispatch`/local run there is no PR, so `resolve_smoke_diff` falls
+/// back to `origin/main..HEAD`, which is EMPTY on the default branch — every
+/// diff-scoped seam then sees zero mutants. Treating that as a PASS would let a
+/// manual mutation proof skip all critical-seam threshold gates, so an
+/// empty/absent diff must NOT qualify for the zero-mutant pass.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum DiffScope {
+    /// A real, non-empty PR diff scoped this lane (`--in-diff <patch>` applied).
+    PrDiff,
+    /// No diff scope was applied — either the lane is not diff-scoped, or the
+    /// resolved diff was empty/absent (manual dispatch / default branch).
+    None,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum RepoMutationPhase {
     Phase0,
@@ -57,7 +75,27 @@ pub(super) fn assert_mutation_policy(
     lane: &MutationLane,
     output_dir: &Path,
     score: MutationScore,
+    diff_scope: DiffScope,
 ) -> Result<()> {
+    if lane.diff_scoped && diff_scope == DiffScope::PrDiff && score.executed == 0 {
+        // A diff-scoped lane scoped by a REAL PR diff that produced zero mutants
+        // means the PR touched no mutable lines inside this seam's --file globs.
+        // That is a legitimate PASS: there is nothing for the gate to prove.
+        //
+        // This is gated on BOTH `diff_scoped` AND `DiffScope::PrDiff`: a manual
+        // `workflow_dispatch`/local run has no PR, so `resolve_smoke_diff` falls
+        // back to `origin/main..HEAD`, which is EMPTY on the default branch. That
+        // empty diff is reported as `DiffScope::None`, so it falls THROUGH to the
+        // hard-fail below instead of silently passing every critical seam with
+        // zero mutants — which would let a manual mutation proof skip all
+        // critical-seam threshold gates.
+        println!(
+            "mutants: `{}` => no mutable lines in PR diff for this seam; nothing to prove.",
+            lane.label
+        );
+        return Ok(());
+    }
+
     if score.executed == 0 {
         bail!(
             "mutants: `{}` produced no executed mutants in {}. Treating this as a failure because \
@@ -173,7 +211,7 @@ pub(super) fn next_ratchet_floor(score_pct: usize, current_floor: Option<u32>) -
 pub(super) fn print_mutation_policy() {
     println!("Mutation policy:");
     println!(
-        "- `cargo xtask mutants smoke`: run representative round-robin shards of every critical seam at {}%, then repo-wide {} lanes using the current ratchet phase. Only the first lane runs a fresh baseline; later lanes reuse it with `--baseline skip`.",
+        "- `cargo xtask mutants smoke`: run diff-scoped (--in-diff against PR base) mutation of every critical seam at {}%, then repo-wide {} lanes using the current ratchet phase. Only the first lane runs a fresh baseline; later lanes reuse it with `--baseline skip`.",
         CRITICAL_SEAM_MIN_CATCH_PCT,
         REPO_WIDE_SMOKE_SHARD,
     );

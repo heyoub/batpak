@@ -19,6 +19,7 @@ impl Store<Open> {
         items: Vec<BatchAppendItem>,
         token: Option<u64>,
     ) -> Result<BatchAppendTicket, StoreError> {
+        Self::reject_reserved_item_kinds(&items)?;
         let _lifecycle = self.lifecycle_gate.lock();
         let (tx, rx) = flume::bounded(1);
         let command = match token {
@@ -36,7 +37,55 @@ impl Store<Open> {
         Ok(BatchAppendTicket::new(rx))
     }
 
+    /// Reject any batch item carrying a reserved system/effect/tombstone kind.
+    ///
+    /// Called from every batch funnel (`submit_batch` and
+    /// `submit_batch_with_fence_impl`) so neither the unfenced nor the fenced
+    /// batch path can smuggle a forged substrate marker.
+    fn reject_reserved_item_kinds(items: &[BatchAppendItem]) -> Result<(), StoreError> {
+        for (i, item) in items.iter().enumerate() {
+            let kind = item.kind();
+            if kind.is_reserved() {
+                return Err(StoreError::ReservedKind {
+                    index: Some(i),
+                    kind: kind.as_raw_u16(),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    /// Public single-event append funnel. Rejects reserved kinds before
+    /// delegating to [`Self::submit_prepared_internal`]; every public
+    /// raw-`kind` single-event path (submit, submit_reaction, append,
+    /// append_with_options, the fenced variants, and the `try_submit*` family)
+    /// converges here, so this is the single guard point for that surface.
     pub(crate) fn submit_prepared(
+        &self,
+        coord: &Coordinate,
+        kind: EventKind,
+        payload: &impl Serialize,
+        submission: AppendSubmission,
+    ) -> Result<AppendTicket, StoreError> {
+        if kind.is_reserved() {
+            return Err(StoreError::ReservedKind {
+                index: None,
+                kind: kind.as_raw_u16(),
+            });
+        }
+        self.submit_prepared_internal(coord, kind, payload, submission)
+    }
+
+    /// Internal-only append funnel that bypasses the reserved-kind guard.
+    ///
+    /// This is the substrate marker constructor the hardening contract requires:
+    /// it is not `pub` and is unreachable from outside the crate. The only
+    /// legitimate caller emitting a reserved kind through it is
+    /// `Store::append_denial` (SYSTEM_DENIAL), which must still emit its audit
+    /// receipt. All other reserved-kind emitters (lifecycle/open receipts,
+    /// tombstones, batch markers) build their writer commands directly and
+    /// never reach this method.
+    pub(crate) fn submit_prepared_internal(
         &self,
         coord: &Coordinate,
         kind: EventKind,
@@ -180,6 +229,42 @@ mod tests {
             "PROPERTY: queued commands exactly at the retry threshold must produce retry advice; \
              a <= comparison waits one command too long"
         );
+        store.close().expect("close store");
+    }
+
+    #[test]
+    fn fenced_batch_rejects_reserved_item_kind() {
+        use crate::coordinate::Coordinate;
+        use crate::store::append::{BatchAppendItem, CausationRef};
+        use crate::store::AppendOptions;
+
+        let dir = TempDir::new().expect("tempdir");
+        let store = Store::open(StoreConfig::new(dir.path())).expect("open store");
+        let coord = Coordinate::new("entity:fenced-reserved", "scope:test").expect("coord");
+        let payload = serde_json::json!({"forged": true});
+
+        let fence = store
+            .begin_visibility_fence()
+            .expect("begin visibility fence");
+        let forged = BatchAppendItem::new(
+            coord,
+            EventKind::SYSTEM_BATCH_BEGIN,
+            &payload,
+            AppendOptions::default(),
+            CausationRef::None,
+        )
+        .expect("build forged batch item");
+        let result = fence.submit_batch(vec![forged]);
+        assert!(
+            matches!(
+                result,
+                Err(StoreError::ReservedKind { index: Some(0), kind })
+                    if kind == EventKind::SYSTEM_BATCH_BEGIN.as_raw_u16()
+            ),
+            "PROPERTY: submit_batch_with_fence_impl must reject reserved-kind items with \
+             ReservedKind {{ index: Some(0) }}"
+        );
+        fence.cancel().expect("cancel fence");
         store.close().expect("close store");
     }
 }

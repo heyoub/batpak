@@ -1,7 +1,5 @@
 # Security
 
-> ARCHIVED: the live security policy now lives at [`.github/SECURITY.md`](../../.github/SECURITY.md).
-
 Please report suspected vulnerabilities privately through the repository
 security advisory flow before opening a public issue:
 <https://github.com/heyoub/batpak/security/advisories/new>.

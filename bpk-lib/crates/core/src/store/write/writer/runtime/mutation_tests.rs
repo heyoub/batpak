@@ -71,7 +71,7 @@ fn shutdown_in_group_commit_drain_exits_before_shutdown_queue_drain() {
     let reader = Arc::new(Reader::new(
         config.data_dir.clone(),
         config.fd_budget,
-        validated_cfg.clock_arc(),
+        &validated_cfg.clock_arc(),
     ));
     let subscribers = SubscriberList::new();
     let reactor_subscribers = ReactorSubscriberList::new();

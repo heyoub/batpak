@@ -1,5 +1,9 @@
 # Technical Reference
 
+> ARCHIVED — superseded by the root docs; see `CHANGELOG.md` and `README.md`
+> for current behavior. The "Truth Hierarchy" rank-2 claim below is historical
+> and no longer authoritative.
+
 This is the compact technical reference for `batpak`. Use it for architecture,
 topology, replay lanes, tuning, invariants, and authoritative paths. Use
 [`README.md`](README.md) for orientation and [`010_USER_GUIDE.md`](010_USER_GUIDE.md) for
@@ -327,7 +331,7 @@ Operator profile workflows live under `cargo xtask platform ...`:
 
 Current artifact versions:
 
-- SIDX footer magic: `SDX2`
+- SIDX footer magic: `SDX3`
 - checkpoint format: v6
 - mmap index snapshot: v5
 

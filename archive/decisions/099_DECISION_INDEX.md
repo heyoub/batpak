@@ -53,3 +53,5 @@ Root layer docs:
 | ADR-0029 | Netbat Boundary Contract | Accepted; 0.7.6 correction cut |
 | ADR-0030 | Netbat Streaming Contract | Draft contract; keyed to batpak stream item vocabulary |
 | ADR-0031 | 0.7.6 Release Proof Posture | Accepted; 0.7.6 correction cut |
+| ADR-0032 | SIDX SDX3 Integrity Footer | Accepted; 0.8.3 audit-remediation cut |
+| ADR-0033 | 0.8.3 Hardening Posture | Accepted; 0.8.3 audit-remediation cut |

@@ -75,7 +75,7 @@ Full documentation lives in the
 [repository](https://github.com/heyoub/batpak): the
 [README](https://github.com/heyoub/batpak/blob/main/README.md) for the
 evaluator path, the
-[COOKBOOK](https://github.com/heyoub/batpak/blob/main/COOKBOOK.md) for
+[cookbook](https://github.com/heyoub/batpak/blob/main/cookbook/README.md) for
 task-shaped recipes, and
 [MODEL](https://github.com/heyoub/batpak/blob/main/MODEL.md) /
 [INVARIANTS](https://github.com/heyoub/batpak/blob/main/INVARIANTS.md) /

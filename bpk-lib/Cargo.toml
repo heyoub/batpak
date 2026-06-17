@@ -52,6 +52,11 @@ opt-level = 3
 lto = "thin"
 codegen-units = 16
 strip = "symbols"
+# Storage-engine posture: a silent integer wrap is a correctness bug we want to
+# surface as a loud panic, not let corrupt durable state in production. The
+# overhead is negligible against an opt-level=3, LTO build. (Behavior changes
+# only on code that would otherwise have wrapped — i.e. on a bug.)
+overflow-checks = true
 
 [profile.test]
 opt-level = 1
@@ -61,3 +66,6 @@ incremental = true
 [profile.bench]
 inherits = "release"
 debug = true
+# Benches measure throughput; keep overflow checks out of the hot path so the
+# numbers reflect release behavior, not the safety posture above.
+overflow-checks = false

@@ -1,8 +1,22 @@
 pub(crate) mod id;
+pub(crate) mod recovery_manifest;
 pub(crate) mod scan;
 pub(crate) mod sidx;
 
+#[cfg(test)]
+mod boundary_tests;
+
+#[cfg(test)]
+mod manifest_recovery_tests;
+
 pub(crate) use id::SegmentId;
+pub(crate) use recovery_manifest::resolve_untrusted_frames_end;
+// Corroboration internals are surfaced to the inline manifest-recovery test
+// island only; production code reaches them through `resolve_untrusted_frames_end`.
+#[cfg(test)]
+pub(crate) use recovery_manifest::{
+    corroborate_untrusted_entries, RecoveredFrame, RecoveredFrameMap, UntrustedRecovery,
+};
 
 use crate::event::Event;
 use crate::store::{EncodedBytes, ExtensionKey, StoreError};
@@ -22,6 +36,13 @@ pub const SEGMENT_EXTENSION: &str = "fbat";
 /// larger than this are rejected as corrupt before allocation, preventing
 /// a malicious or corrupt segment file from causing unbounded memory use.
 pub(crate) const MAX_FRAME_PAYLOAD: usize = 256 * 1024 * 1024;
+
+/// Maximum allowed segment header size in bytes. The real header is a fixed
+/// four-field msgpack struct (~30 bytes), so a 64 KiB cap rejects only
+/// impossible inputs. A segment claiming a larger `header_len` is rejected as
+/// corrupt before allocation, preventing a malicious or corrupt segment file
+/// from driving an unbounded header buffer allocation. Mirrors MAX_FRAME_PAYLOAD.
+pub(crate) const MAX_SEGMENT_HEADER: usize = 64 * 1024;
 
 /// Segment file header, serialized as MessagePack after the magic bytes.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -257,6 +278,16 @@ impl Segment<Active> {
         file.write_all(&header_len).map_err(StoreError::Io)?;
         file.write_all(&header_bytes).map_err(StoreError::Io)?;
 
+        // Durability boundary for segment creation/rotation: fsync the file
+        // content, THEN the parent directory entry. File-then-dir ordering
+        // ensures the header bytes are durable before the directory entry that
+        // points at the inode is durable, so a power loss immediately after a
+        // rotation cannot lose the freshly-created segment's directory entry.
+        // Mirrors the write_file_atomically file-then-dir precedent in
+        // platform/fs.rs.
+        crate::store::platform::sync::sync_file_all_io(&file).map_err(StoreError::Io)?;
+        crate::store::platform::sync::sync_parent_dir(&path)?;
+
         Ok(Self {
             header,
             path,
@@ -306,7 +337,65 @@ impl Segment<Active> {
         // the frames stop at string_table_offset. Otherwise, frames extend
         // to the end of the file.
         let file_len = source.seek(SeekFrom::End(0)).map_err(StoreError::Io)?;
-        let frames_end = detect_sidx_boundary(&mut source, file_len)?.unwrap_or(file_len);
+        // segment_id is only used to stamp a CorruptSegment error on a bad SIDX
+        // offset; this copy path mirrors corrupt_magic(0) above and has no parsed id.
+        let boundary = detect_sidx_boundary(&mut source, file_len, 0)?;
+        let frames_end = boundary.map_or(file_len, |b| b.frames_end);
+        // Only an actual footer whose offset is unauthenticated triggers the
+        // recover-what-was-found copy. With no footer, frames run to EOF and the
+        // strict path applies (validate is a no-op when frames_end == file_len).
+        let untrusted_boundary = boundary.is_some_and(|b| !b.trusted);
+
+        // Lower-bound check (TRUSTED boundaries only; mirrors scan/recovery.rs +
+        // full_scan.rs): an authenticated SDX3 string_table_offset must not fall
+        // below the start of the frame region. detect_sidx_boundary only validates
+        // the upper bound; the lower bound is the call site's responsibility. A
+        // corrupt-but-authenticated offset < frames_start would make
+        // `frames_end.saturating_sub(frames_start)` copy zero bytes (or only a
+        // prefix), and after compaction publishes the merged segment and cleans up
+        // the old sealed files, those CRC-valid frames would be silently lost.
+        // Reject with CorruptSegment instead. frames_end == frames_start (empty
+        // frame region) stays valid. For an UNTRUSTED boundary the offset is
+        // garbage and discarded below (the copy walks from `frames_start` bounded
+        // by `file_len`), so a too-low untrusted hint must NOT error — it recovers
+        // all CRC-valid frames instead.
+        if !untrusted_boundary && frames_end < frames_start {
+            return Err(StoreError::corrupt_segment_with_detail(
+                0,
+                format!(
+                    "SIDX string_table_offset {frames_end} is below the frame region start \
+                     {frames_start} (8 + header_len {header_len}) during compaction copy"
+                ),
+            ));
+        }
+
+        // Determine the true copy boundary based on the offset's provenance.
+        //
+        // TRUSTED (CRC-valid SDX3 footer): the offset is authoritative; copy up to
+        // it. A truncating offset cannot occur here — the offset is byte-for-byte
+        // authenticated by the footer CRC.
+        //
+        // UNTRUSTED (CRC-failed SDX3, legacy SDX2, or forged trailer): the offset
+        // is GARBAGE. It might point too LOW (truncating real frames), MID-FRAME
+        // (inside a later CRC-valid frame), or too HIGH (into the corrupt footer);
+        // any of those, if trusted as the copy boundary, would either drop
+        // CRC-valid frames or splice corrupt footer bytes into the merged segment.
+        // So the hint is discarded entirely and recovery routes through the
+        // SIDX-manifest path (`resolve_untrusted_frames_end`): it walks the
+        // CRC-valid frames bounded only by `file_len` (truncation-proof, still
+        // FailClosed on mid-stream corruption), AND corroborates the
+        // CRC-independent SIDX entry table against the recovered frames. If a
+        // corroborated entry attests to a committed frame at/after the recovered
+        // prefix end that the source is missing (torn last committed frame under a
+        // corrupt footer — round-7), the copy FailCloses instead of silently
+        // merging a segment that dropped a committed event. Compaction copy of a
+        // sealed source is strict, so its fall-back posture is FailClosed; with no
+        // corroborated manifest it still recovers the CRC-valid prefix.
+        let copy_end = if untrusted_boundary {
+            resolve_untrusted_frames_end(&mut source, frames_start, file_len, 0, true)?
+        } else {
+            frames_end
+        };
 
         source
             .seek(SeekFrom::Start(frames_start))
@@ -314,7 +403,7 @@ impl Segment<Active> {
 
         let offset = self.written_bytes;
         if let Some(ref mut destination) = self.file {
-            let bytes_to_copy = frames_end.saturating_sub(frames_start);
+            let bytes_to_copy = copy_end.saturating_sub(frames_start);
             let copied = std::io::copy(&mut source.take(bytes_to_copy), destination)
                 .map_err(StoreError::Io)?;
             self.written_bytes += copied;
@@ -368,13 +457,43 @@ impl Segment<Active> {
     }
 }
 
+/// A SIDX frame-region boundary together with its trust provenance.
+///
+/// `frames_end` is the trailer's `string_table_offset` — where the frame region
+/// is claimed to end. `trusted` records whether that offset came from a
+/// CRC-authenticated SDX3 footer:
+///
+/// - `trusted == true`: the offset is byte-for-byte covered by the SDX3 footer
+///   CRC, so it is authoritative. A frame-decode failure *before* this boundary
+///   is genuine mid-stream corruption and must FailClosed.
+/// - `trusted == false`: the offset is an UNAUTHENTICATED hint — a corrupt SDX3
+///   footer (CRC failed), a legacy un-CRC'd SDX2 footer, or a forged trailer.
+///   The recovery scan must rebuild from the CRC-valid frames it actually finds
+///   and treat over-reading into the (corrupt) footer as the clean end of real
+///   frames, NOT a hard error.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct SidxBoundary {
+    pub(crate) frames_end: u64,
+    pub(crate) trusted: bool,
+}
+
 /// Check whether a segment file ends with a SIDX footer.
-/// If so, return the byte offset where the string table starts (= end of frames).
-/// If not, return `None` (frames extend to EOF).
+///
+/// If so, return the [`SidxBoundary`]: the byte offset where the string table
+/// starts (= end of frames) plus whether that offset is authenticated by the
+/// SDX3 footer CRC. If not, return `None` (frames extend to EOF).
+///
+/// The trailer geometry (offset/count/magic) is read identically for SDX2 and
+/// SDX3, so the *boundary* is detected for both — but only a CRC-valid SDX3
+/// footer marks the boundary `trusted`. SDX2 footers and CRC-failed SDX3
+/// footers are recognized as boundaries (so the scan knows where the footer
+/// region begins) yet flagged untrusted, so the caller does not treat the
+/// unauthenticated offset as an authoritative `frames_end`.
 pub(crate) fn detect_sidx_boundary<R: Read + Seek>(
     source: &mut R,
     file_len: u64,
-) -> Result<Option<u64>, StoreError> {
+    segment_id: u64,
+) -> Result<Option<SidxBoundary>, StoreError> {
     // SIDX trailer is the last 16 bytes: [string_table_offset:u64 LE][entry_count:u32 LE][magic:4]
     const TRAILER_LEN: u64 = 16;
     if file_len < TRAILER_LEN {
@@ -386,8 +505,20 @@ pub(crate) fn detect_sidx_boundary<R: Read + Seek>(
     let mut trailer = [0u8; 16];
     source.read_exact(&mut trailer).map_err(StoreError::Io)?;
 
-    // Check magic at bytes 12..16
-    if &trailer[12..16] != crate::store::segment::sidx::SIDX_MAGIC {
+    // Check magic at bytes 12..16. Recognize BOTH the current `SDX3` magic and
+    // the legacy pre-0.8.3 `SDX2` magic as a footer boundary marker. This is a
+    // boundary-only check: it tells the frame scan where the frame region ends so
+    // it stops at `string_table_offset` instead of over-running into the footer's
+    // string table + entries + trailer bytes. It does NOT make the footer's
+    // content trusted — `sidx::read_footer` / `footer::read_layout` still match
+    // only `SIDX_MAGIC` (SDX3) and reject an un-CRC'd SDX2 footer as `Ok(None)`,
+    // forcing the CRC-verified frame-scan rebuild. The trailer geometry
+    // (offset/count/magic) is byte-identical across SDX2/SDX3, so the
+    // `string_table_offset` field is read the same way for both.
+    let magic = &trailer[12..16];
+    if magic != crate::store::segment::sidx::SIDX_MAGIC
+        && magic != crate::store::segment::sidx::SIDX_MAGIC_LEGACY_SDX2
+    {
         return Ok(None);
     }
     // string_table_offset at bytes 0..8
@@ -395,7 +526,219 @@ pub(crate) fn detect_sidx_boundary<R: Read + Seek>(
         trailer[0], trailer[1], trailer[2], trailer[3], trailer[4], trailer[5], trailer[6],
         trailer[7],
     ]);
-    Ok(Some(string_table_offset))
+
+    // Trust is determined FIRST, before any validation of the offset value.
+    //
+    // GOVERNING PRINCIPLE: an unauthenticated SIDX trailer offset must NEVER cause
+    // a hard failure OR data loss — it always degrades to CRC-valid-frame recovery.
+    // So the offset's *value* may be validated (and turned into a hard error) only
+    // once it is known TRUSTED. An UNTRUSTED offset is FULLY INERT: never validated
+    // as an error, never used as a boundary; callers discard `frames_end` for an
+    // untrusted boundary and recover via `crc_valid_frames_end` (bounded only by
+    // `file_len`).
+    //
+    // Only a CRC-valid SDX3 footer authenticates the offset. A CRC-fail SDX3
+    // footer, a legacy SDX2 footer (no CRC), a torn/truncated footer, or a
+    // no-footer segment whose last bytes coincidentally equal the magic all yield
+    // `Ok(None)` -> UNTRUSTED. The CRC check is bounded (chunked hashing in
+    // `read_layout`). An authenticated offset must equal the trailer offset read
+    // above, else it is not trusted.
+    let trusted =
+        crate::store::segment::sidx::authenticated_string_table_offset(source, segment_id)?
+            == Some(string_table_offset);
+
+    // Upper-bound check — TRUSTED offsets ONLY. The string table cannot start
+    // inside/past the 16-byte trailer. `file_len - 16` cannot underflow (checked
+    // `file_len >= TRAILER_LEN` above); `offset == file_len - 16` (empty table)
+    // stays valid. The lower bound is validated per call site. Gated on `trusted`
+    // so it can NEVER hard-error an untrusted footer: a CRC-authenticated offset
+    // is consistent by construction (read_layout already proved it <= entries_start
+    // <= file_len - 16), so this never fires for a trusted offset, while a garbage
+    // untrusted offset of ANY shape (0, mid-frame, file_len, > file_len-16, huge,
+    // torn) downgrades to CRC-valid-frame recovery, not CorruptSegment (round-6 P1).
+    if trusted {
+        let max_offset = file_len - TRAILER_LEN;
+        if string_table_offset > max_offset {
+            return Err(StoreError::corrupt_segment_with_detail(
+                segment_id,
+                format!(
+                    "SIDX string_table_offset {string_table_offset} is past the frame region \
+                     (max {max_offset} = file_len {file_len} - 16-byte trailer)"
+                ),
+            ));
+        }
+    }
+
+    Ok(Some(SidxBoundary {
+        frames_end: string_table_offset,
+        trusted,
+    }))
+}
+
+/// Attempt to decode a single CRC-valid frame starting at byte `at` in `source`,
+/// reading no farther than `file_len`. Returns the consumed frame size on a clean
+/// decode, or `None` if no real frame begins exactly at `at` (truncated header, a
+/// zero or over-large `claimed_len`, a tail past `file_len`, a short read, or a
+/// CRC/decode failure). A returned `Some` means the bytes at `at` are a genuine
+/// frame: the `claimed_len` is in `1..=MAX_FRAME_PAYLOAD` AND the CRC32 over the
+/// payload matches, which makes a false positive astronomically unlikely.
+///
+/// A zero `claimed_len` is rejected on purpose: `frame_encode` always serializes a
+/// non-empty `FramePayload` (it carries at least `event`/`entity`/`scope`), so a
+/// real frame's payload is never empty. Admitting a zero-length frame would also
+/// let any run of 8 zero bytes (common inside the SIDX footer's entry table —
+/// e.g. `prev_hash: [0; 32]`) read as a CRC-valid empty frame (the CRC32 of an
+/// empty payload is 0), which is the one systematic false-positive the resync
+/// look-ahead must not trip on.
+///
+/// # Errors
+/// Returns [`StoreError::Io`] only on a seek failure; a short/EOF read is treated
+/// as "no frame here" (`Ok(None)`), not an error.
+pub(super) fn try_decode_frame_at<R: Read + Seek>(
+    source: &mut R,
+    at: u64,
+    file_len: u64,
+) -> Result<Option<u64>, StoreError> {
+    // Need at least an 8-byte frame header before the source end.
+    if file_len.saturating_sub(at) < 8 {
+        return Ok(None);
+    }
+    source.seek(SeekFrom::Start(at)).map_err(StoreError::Io)?;
+    let mut header = [0u8; 8];
+    if source.read_exact(&mut header).is_err() {
+        return Ok(None);
+    }
+    let claimed_len = u32::from_be_bytes([header[0], header[1], header[2], header[3]]) as u64;
+    if claimed_len == 0 || claimed_len > MAX_FRAME_PAYLOAD as u64 {
+        return Ok(None);
+    }
+    let frame_tail = match at.checked_add(8).and_then(|b| b.checked_add(claimed_len)) {
+        Some(tail) => tail,
+        None => return Ok(None),
+    };
+    if frame_tail > file_len {
+        // A real frame cannot extend past the end of the source.
+        return Ok(None);
+    }
+    let payload_len = usize::try_from(claimed_len).unwrap_or(usize::MAX);
+    let mut frame = vec![0u8; 8 + payload_len];
+    frame[..8].copy_from_slice(&header);
+    if source.read_exact(&mut frame[8..]).is_err() {
+        return Ok(None);
+    }
+    match frame_decode(&frame) {
+        Ok((_, frame_size)) => Ok(Some(frame_size as u64)),
+        Err(_) => Ok(None),
+    }
+}
+
+/// Look-ahead resync: starting at byte `from`, scan toward `file_len` for ANY
+/// CRC-valid frame. Returns `true` if one is found.
+///
+/// This is the integrity check that distinguishes "the bytes at the first
+/// non-decodable position are footer/torn-tail" (nothing valid follows → `false`)
+/// from "the bytes at that position are MID-STREAM corruption" (a CRC-valid frame
+/// still follows → `true`). A CRC-valid frame after the corruption proves the
+/// corruption is interior, not the true end of the frame region, so recovery must
+/// fail closed instead of silently truncating to the prefix.
+///
+/// Cost: the scan only covers the tail region after the last CRC-valid frame.
+/// In the common (benign) case that tail is just the footer — a handful of bytes
+/// — so the byte-by-byte resync is cheap and bounded by `file_len`. Alignment is
+/// NOT assumed: a CRC-valid frame may begin at any byte, so every offset from
+/// `from` to `file_len - 8` is probed. Correctness (never miss a real later
+/// frame) is worth more than skipping offsets here. The 256 MiB
+/// `MAX_FRAME_PAYLOAD` claim-cap plus the CRC make a false-positive resync onto
+/// random bytes astronomically unlikely, so a `true` result is a real frame.
+///
+/// # Errors
+/// Returns [`StoreError::Io`] on a seek failure inside the probe.
+pub(super) fn crc_valid_frame_exists_after<R: Read + Seek>(
+    source: &mut R,
+    from: u64,
+    file_len: u64,
+) -> Result<bool, StoreError> {
+    let mut probe = from;
+    while file_len.saturating_sub(probe) >= 8 {
+        if try_decode_frame_at(source, probe, file_len)?.is_some() {
+            return Ok(true);
+        }
+        probe += 1;
+    }
+    Ok(false)
+}
+
+/// Find the true end of CRC-valid frames when the SIDX boundary is UNTRUSTED.
+///
+/// An untrusted boundary (CRC-failed SDX3 footer, legacy SDX2 footer, or a
+/// forged trailer) gives an unauthenticated `string_table_offset`. That offset
+/// is GARBAGE and must NEVER bound recovery — whether it is too LOW (truncating
+/// real frames), MID-FRAME (landing inside a later CRC-valid frame's
+/// header/payload), or too HIGH (pointing into the corrupt footer region).
+/// Trusting it as an upper bound silently drops every CRC-valid frame at or
+/// after the bogus offset; trusting it as a lower bound makes the scan parse
+/// footer bytes as frame headers and FailClosed. Either way the hint corrupts
+/// recovery. So the hint is discarded entirely and the ONLY bound is `file_len`.
+///
+/// This walks the frame region from `frames_start`, decoding frames until one
+/// fails at some position P (truncated, an over-large `claimed_len`, a
+/// `frame_decode`/CRC error, or a tail past `file_len`). P is the FIRST
+/// non-decodable position. The remaining question is whether P is the true end
+/// of the frame region (footer/torn-tail bytes follow) or MID-STREAM corruption
+/// (a corrupt frame with valid frames still after it):
+///
+/// - **P is the true end** iff NOTHING decodable as a CRC-valid frame exists
+///   between P and `file_len`. Footer bytes, the string table, the trailer, and a
+///   genuinely torn last frame never resync to a CRC-valid frame, so the prefix
+///   `[frames_start..P]` is exactly the durable frame region → return `Ok(P)`.
+///
+/// - **P is mid-stream corruption** iff a CRC-valid frame still EXISTS after P
+///   (before `file_len`). Silently returning `P` here would drop the corrupt
+///   frame AND every later CRC-valid event — converting interior corruption into
+///   a clean EOF, which a trusted/no-footer scan would FailClosed on. So this
+///   FailCloses too: return `Err(CorruptSegment)`. The look-ahead resync
+///   (`crc_valid_frame_exists_after`) is what decides this; CRC makes a
+///   false-positive resync astronomically unlikely.
+///
+/// This recovers ALL CRC-valid frames in the benign cases (availability) without
+/// ever converting interior corruption into silent truncation (integrity), and
+/// composes with torn-tail handling: a genuinely incomplete LAST frame has
+/// nothing valid after it, so it falls in the "true end" branch and the prefix
+/// recovers.
+///
+/// This must ONLY be used for an untrusted boundary. For a CRC-authenticated
+/// SDX3 footer the offset is authoritative and a bad frame before it is genuine
+/// mid-stream corruption that must still FailClosed (see the scan loops).
+///
+/// # Errors
+/// Returns [`StoreError::Io`] on seek/read failure, or
+/// [`StoreError::CorruptSegment`] when a CRC-valid frame is found after the first
+/// non-decodable position (mid-stream corruption).
+///
+/// This is the prefix-only primitive: it returns just the recovery stop offset P.
+/// The production untrusted path uses [`crc_valid_frames_end_with_map`] (which
+/// additionally builds the recovered-frame map `R` for SIDX-manifest
+/// corroboration); this thin wrapper preserves the original signature for the
+/// round-5/6 unit tests that pin the mid-stream-corruption / torn-tail behavior
+/// directly, and is the single source of truth for that walk.
+//
+// Production code reaches the walk via `crc_valid_frames_end_with_map`; this
+// prefix-only wrapper is exercised only by the boundary unit tests, so it is
+// gated `#[cfg(test)]` (no dead code in the production lib).
+#[cfg(test)]
+pub(crate) fn crc_valid_frames_end<R: Read + Seek>(
+    source: &mut R,
+    frames_start: u64,
+    file_len: u64,
+    segment_id: u64,
+) -> Result<u64, StoreError> {
+    let (stop, _recovered) = recovery_manifest::crc_valid_frames_end_with_map(
+        source,
+        frames_start,
+        file_len,
+        segment_id,
+    )?;
+    Ok(stop)
 }
 
 #[cfg(test)]
@@ -425,6 +768,137 @@ mod tests {
         assert!(
             !segment.needs_rotation(1024),
             "PROPERTY: needs_rotation must stay false below the threshold"
+        );
+    }
+
+    #[test]
+    fn create_with_created_ns_fsyncs_content_and_directory_entry() {
+        let dir = TempDir::new().expect("tmpdir");
+        let segment_id = 42u64;
+        let created_ns = 1_234_567i64;
+        {
+            // Drop the segment immediately after create so only fsynced bytes
+            // remain; nothing else writes to or flushes the file.
+            let _segment: Segment<Active> =
+                Segment::create_with_created_ns(dir.path(), segment_id, created_ns)
+                    .expect("create segment");
+        }
+
+        // The directory entry must be present (dir fsync) and the header bytes
+        // durable (file fsync): reopen and round-trip magic + header. The reopen
+        // succeeding is itself the directory-entry-visibility proof — open_file
+        // fails if the freshly-created entry is not visible — so no separate
+        // read_dir scan is needed (and store-layer code must not touch the
+        // filesystem directly outside src/store/platform).
+        let path = dir.path().join(segment_filename(segment_id));
+        let mut file = crate::store::platform::fs::open_file(&path).expect("reopen segment");
+        let mut magic = [0u8; 4];
+        file.read_exact(&mut magic).expect("read magic");
+        assert_eq!(&magic, SEGMENT_MAGIC, "PROPERTY: magic must be durable");
+
+        let mut header_len_buf = [0u8; 4];
+        file.read_exact(&mut header_len_buf)
+            .expect("read header_len");
+        let header_len = u32::from_be_bytes(header_len_buf) as usize;
+        let mut header_buf = vec![0u8; header_len];
+        file.read_exact(&mut header_buf).expect("read header");
+        let header: SegmentHeader =
+            crate::encoding::from_bytes(&header_buf).expect("decode header");
+
+        assert_eq!(
+            header.segment_id, segment_id,
+            "PROPERTY: segment_id must round-trip after create + reopen, proving content is fsynced"
+        );
+        assert_eq!(header.version, 1, "PROPERTY: version must round-trip");
+        assert_eq!(
+            header.created_ns, created_ns,
+            "PROPERTY: created_ns must round-trip"
+        );
+    }
+
+    /// Build a minimal in-memory buffer whose last 16 bytes are a SIDX trailer
+    /// with the given `string_table_offset`, valid magic, and zero entry_count.
+    fn sidx_trailer_buf(total_len: usize, string_table_offset: u64) -> Vec<u8> {
+        assert!(total_len >= 16, "buffer must hold the 16-byte trailer");
+        let mut bytes = vec![0u8; total_len];
+        let trailer_start = total_len - 16;
+        bytes[trailer_start..trailer_start + 8].copy_from_slice(&string_table_offset.to_le_bytes());
+        bytes[trailer_start + 8..trailer_start + 12].copy_from_slice(&0u32.to_le_bytes());
+        bytes[trailer_start + 12..trailer_start + 16]
+            .copy_from_slice(crate::store::segment::sidx::SIDX_MAGIC);
+        bytes
+    }
+
+    #[test]
+    fn detect_sidx_boundary_accepts_offset_at_max() {
+        let file_len = 64u64;
+        let max_offset = file_len - 16; // empty string table boundary, valid
+        let bytes = sidx_trailer_buf(
+            usize::try_from(file_len).expect("file_len fits usize"),
+            max_offset,
+        );
+        let mut cursor = std::io::Cursor::new(bytes);
+        let result = detect_sidx_boundary(&mut cursor, file_len, 7);
+        assert_eq!(
+            result
+                .expect("must not error at the max boundary")
+                .map(|b| b.frames_end),
+            Some(max_offset),
+            "PROPERTY: offset == file_len - 16 is the empty-string-table boundary and must be accepted"
+        );
+    }
+
+    #[test]
+    fn detect_sidx_boundary_recognizes_legacy_sdx2_magic() {
+        // A pre-0.8.3 segment ends in the legacy `SDX2` magic with the same
+        // 16-byte trailer geometry. detect_sidx_boundary must recognize it as a
+        // footer BOUNDARY (so the frame scan stops at string_table_offset)
+        // even though read_footer refuses to TRUST its un-CRC'd content.
+        let file_len = 64u64;
+        let max_offset = file_len - 16;
+        let mut bytes = vec![0u8; usize::try_from(file_len).expect("file_len fits usize")];
+        let trailer_start = bytes.len() - 16;
+        bytes[trailer_start..trailer_start + 8].copy_from_slice(&max_offset.to_le_bytes());
+        bytes[trailer_start + 8..trailer_start + 12].copy_from_slice(&0u32.to_le_bytes());
+        bytes[trailer_start + 12..trailer_start + 16]
+            .copy_from_slice(crate::store::segment::sidx::SIDX_MAGIC_LEGACY_SDX2);
+        let mut cursor = std::io::Cursor::new(bytes);
+        let result = detect_sidx_boundary(&mut cursor, file_len, 7).expect("must not error");
+        assert_eq!(
+            result,
+            Some(SidxBoundary {
+                frames_end: max_offset,
+                // A legacy SDX2 footer carries no CRC, so its offset is recognized
+                // as a boundary but is NEVER trusted.
+                trusted: false,
+            }),
+            "PROPERTY: a legacy SDX2 trailer must be recognized as a frame-region boundary"
+        );
+        assert!(
+            !result.expect("boundary present").trusted,
+            "PROPERTY: an un-CRC'd SDX2 boundary must be flagged untrusted"
+        );
+    }
+
+    #[test]
+    fn detect_sidx_boundary_no_magic_returns_none() {
+        // A tail without the SIDX magic must read as "no footer", not error.
+        let bytes = vec![0u8; 64];
+        let file_len = bytes.len() as u64;
+        let mut cursor = std::io::Cursor::new(bytes);
+        let result = detect_sidx_boundary(&mut cursor, file_len, 7).expect("must not error");
+        assert_eq!(result, None, "PROPERTY: absent SIDX magic must return None");
+    }
+
+    #[test]
+    fn detect_sidx_boundary_tiny_file_returns_none() {
+        let bytes = vec![0xAA; 8]; // < 16-byte trailer
+        let file_len = bytes.len() as u64;
+        let mut cursor = std::io::Cursor::new(bytes);
+        let result = detect_sidx_boundary(&mut cursor, file_len, 7).expect("must not error");
+        assert_eq!(
+            result, None,
+            "PROPERTY: a file smaller than the trailer must return None"
         );
     }
 }

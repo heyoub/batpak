@@ -81,7 +81,11 @@ pub(super) fn writer_thread_main(
         match result {
             Ok(()) => return,
             Err(panic_info) => {
-                runtime.watermark_handle.mark_writer_crashed();
+                // Do NOT poison the durability gate here: a panic within the
+                // restart budget is recoverable. Poisoning is deferred to the
+                // terminal exits below, so a transient panic + clean restart does
+                // not leave wait_for_durable/applied/visible failing forever
+                // (audit R3).
                 let panic_msg = if let Some(s) = panic_info.downcast_ref::<&str>() {
                     (*s).to_string()
                 } else if let Some(s) = panic_info.downcast_ref::<String>() {
@@ -98,6 +102,9 @@ pub(super) fn writer_thread_main(
                 );
 
                 if !budget_ok {
+                    // Terminal exit: budget exhausted, the writer is giving up —
+                    // now poison the durability gate so waiters fail fast.
+                    runtime.watermark_handle.mark_writer_crashed();
                     tracing::error!(
                         "writer restart budget exhausted — thread exiting. \
                          Last panic: {panic_msg}. Policy: {:?}",
@@ -146,6 +153,8 @@ pub(super) fn writer_thread_main(
                 seg_id = match find_latest_segment_id(&runtime.config.data_dir) {
                     Ok(latest) => next_restart_segment_id(latest, seg_id),
                     Err(error) => {
+                        // Terminal exit: cannot resume the writer — poison the gate.
+                        runtime.watermark_handle.mark_writer_crashed();
                         tracing::error!(
                             "writer restart failed — cannot enumerate segments: {error}. Thread exiting."
                         );
@@ -159,6 +168,8 @@ pub(super) fn writer_thread_main(
                 ) {
                     Ok(s) => s,
                     Err(e) => {
+                        // Terminal exit: cannot resume the writer — poison the gate.
+                        runtime.watermark_handle.mark_writer_crashed();
                         tracing::error!(
                             "writer restart failed — cannot create segment: {e}. Thread exiting."
                         );

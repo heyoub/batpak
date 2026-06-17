@@ -122,7 +122,6 @@ fn check_no_legacy_topology_or_replay_names(
             || rel == "PROJECTIONS.md"
             || rel == "INTEGRATION.md"
             || rel == "CONFORMANCE.md"
-            || rel == "COOKBOOK.md"
             || rel.starts_with("crates/core/src/")
             || rel.starts_with("src/")
             || rel.starts_with("crates/core/examples/")

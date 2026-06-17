@@ -14,13 +14,13 @@ impl std::io::Read for FailingRead {
     }
 }
 
+fn test_clock() -> std::sync::Arc<dyn crate::store::Clock> {
+    std::sync::Arc::new(crate::store::SystemClock::new())
+}
+
 fn test_reader() -> (Reader, TempDir) {
     let dir = TempDir::new().expect("create temp dir for reader test");
-    let reader = Reader::new(
-        dir.path().to_path_buf(),
-        4,
-        std::sync::Arc::new(crate::store::SystemClock::new()),
-    );
+    let reader = Reader::new(dir.path().to_path_buf(), 4, &test_clock());
     (reader, dir)
 }
 
@@ -314,6 +314,27 @@ fn payload_len_exceeds_max_respects_the_exact_boundary() {
 }
 
 #[test]
+fn checked_header_len_respects_the_exact_boundary() {
+    assert_eq!(
+        Reader::checked_header_len(7, segment::MAX_SEGMENT_HEADER)
+            .expect("a header exactly at MAX_SEGMENT_HEADER remains valid"),
+        segment::MAX_SEGMENT_HEADER,
+        "PROPERTY: a header exactly at MAX_SEGMENT_HEADER is accepted unchanged"
+    );
+
+    let err = Reader::checked_header_len(7, segment::MAX_SEGMENT_HEADER + 1)
+        .expect_err("a header one byte past MAX_SEGMENT_HEADER must stop scan before allocation");
+    assert!(
+        matches!(
+            err,
+            StoreError::CorruptSegment { segment_id: 7, ref detail }
+            if detail.contains("exceeds MAX_SEGMENT_HEADER")
+        ),
+        "PROPERTY: an oversize header_len must be rejected as CorruptSegment before any vec![0u8; header_len] allocation, got {err:?}"
+    );
+}
+
+#[test]
 fn checked_batch_count_rejects_vacuous_or_implausible_counts() {
     assert!(Reader::checked_batch_count(1, 0, 0).is_err());
     assert!(Reader::checked_batch_count(1, 0, MAX_BATCH_RECOVERY_ITEMS + 1).is_err());
@@ -326,6 +347,211 @@ fn checked_batch_count_rejects_vacuous_or_implausible_counts() {
     assert_eq!(
         Reader::checked_batch_count(1, 0, 3).expect("valid batch count"),
         3
+    );
+}
+
+/// Build a valid single-frame sealed segment on disk via the real `Segment`
+/// writer (which routes all file contact through `crate::store::platform`),
+/// returning the `DiskPos` of the written frame and its expected event payload.
+/// The segment is sealed by closing its file handle; callers then point the
+/// reader's active-segment cutoff past `segment_id` to treat it as sealed.
+fn write_valid_sealed_segment(
+    dir: &TempDir,
+    segment_id: u64,
+    entity: &str,
+    scope: &str,
+    payload: &serde_json::Value,
+) -> DiskPos {
+    // Mirror the writer: the frame stores the event payload as pre-encoded
+    // MessagePack bytes (Event<Vec<u8>>), not an inline serde_json::Value.
+    let payload_bytes = crate::encoding::to_bytes(payload).expect("encode payload bytes");
+    let event = Event {
+        header: EventHeader::new(1, 1, None, 1, DagPosition::root(), 0, EventKind::DATA),
+        payload: payload_bytes,
+        hash_chain: Some(HashChain::default()),
+    };
+    let frame = segment::FramePayloadRef {
+        event: &event,
+        entity,
+        scope,
+        receipt_extensions: &BTreeMap::new(),
+    };
+    let frame_bytes = segment::frame_encode(&frame).expect("encode frame");
+
+    let mut active =
+        segment::Segment::<segment::Active>::create_with_created_ns(dir.path(), segment_id, 0)
+            .expect("create segment");
+    let offset = active.write_frame(&frame_bytes).expect("write frame");
+    active
+        .sync_with_mode(&crate::store::SyncMode::SyncAll)
+        .expect("sync segment");
+    let _sealed = active.seal();
+
+    DiskPos::new(
+        segment_id,
+        offset,
+        u32::try_from(frame_bytes.len()).expect("frame length fits u32"),
+    )
+}
+
+#[test]
+fn sealed_read_falls_back_to_fd_when_mmap_admission_is_absent() {
+    let (mut reader, dir) = test_reader();
+    // Force the no-mmap-admission state (as would happen on a host where the
+    // one-time probe could not run, e.g. a read-only data dir).
+    reader.disable_sealed_mmap_for_test();
+    assert!(
+        !reader.sealed_mmap_admitted_for_test(),
+        "PRECONDITION: the test must exercise the FD fallback, so mmap admission must be absent"
+    );
+
+    let payload = serde_json::json!({"v": "sealed-fd-fallback", "n": 7});
+    let pos = write_valid_sealed_segment(&dir, 0, "entity:fd", "scope:fallback", &payload);
+    // Mark segment 0 as sealed by advancing the active cutoff past it.
+    reader.set_active_segment(1);
+    assert!(
+        reader.is_sealed(pos.segment_id),
+        "PRECONDITION: segment 0 must be sealed once the active cutoff is 1"
+    );
+
+    let stored = reader
+        .read_entry(&pos)
+        .expect("FD fallback must read a valid sealed frame when mmap is not admitted");
+    assert_eq!(
+        stored.event.payload, payload,
+        "PROPERTY: the FD/pread fallback must decode the sealed frame byte-identically to the mmap path"
+    );
+
+    let event_only = reader
+        .read_event_only(&pos)
+        .expect("read_event_only must also fall back to FD on a sealed segment");
+    assert_eq!(
+        event_only.payload, payload,
+        "PROPERTY: read_event_only's FD fallback must return the same event payload"
+    );
+
+    // No mmap mapping should have been created on the no-admission path.
+    assert!(
+        reader.sealed_maps.get(&pos.segment_id).is_none(),
+        "PROPERTY: with mmap admission absent, sealed reads must not create any memory mapping"
+    );
+}
+
+#[test]
+fn sealed_mmap_and_fd_paths_return_identical_bytes() {
+    // Reader A keeps mmap admission (default); reader B is forced to FD fallback.
+    let (reader_mmap, dir) = test_reader();
+    let payload = serde_json::json!({"v": "parity", "items": [1, 2, 3], "nested": {"k": "x"}});
+    let pos = write_valid_sealed_segment(&dir, 0, "entity:parity", "scope:p", &payload);
+    reader_mmap.set_active_segment(1);
+
+    // Build a second reader over the SAME data dir and disable mmap on it.
+    let mut reader_fd = Reader::new(dir.path().to_path_buf(), 4, &test_clock());
+    reader_fd.disable_sealed_mmap_for_test();
+    reader_fd.set_active_segment(1);
+
+    let via_mmap = reader_mmap.read_event_raw_only(&pos).expect("mmap read");
+    let via_fd = reader_fd.read_event_raw_only(&pos).expect("fd read");
+    assert_eq!(
+        via_mmap.payload, via_fd.payload,
+        "PROPERTY: mmap and FD reads of the same valid sealed frame must yield identical raw bytes \
+         (no silent data divergence between the two read paths)"
+    );
+
+    let coord_mmap = reader_mmap.read_entry(&pos).expect("mmap entry");
+    let coord_fd = reader_fd.read_entry(&pos).expect("fd entry");
+    assert_eq!(
+        coord_mmap.event.payload, coord_fd.event.payload,
+        "PROPERTY: decoded event payloads must match across mmap and FD paths"
+    );
+}
+
+#[test]
+fn corrupt_sealed_frame_surfaces_same_error_class_on_both_paths() {
+    let dir = TempDir::new().expect("tmpdir");
+    // Build a valid frame, then flip a payload byte so the CRC fails on decode.
+    let payload = serde_json::json!({"v": "corruptible"});
+    let pos = write_valid_sealed_segment(&dir, 0, "entity:corrupt", "scope:c", &payload);
+
+    // Corrupt one msgpack byte in the frame. The frame layout is
+    // [len:u32 BE][crc:u32 BE][msgpack...]; flipping a payload byte leaves the
+    // stored CRC stale, so frame_decode must report CrcMismatch on BOTH paths.
+    // All file contact routes through the platform layer (read + atomic write).
+    let frame_path = dir.path().join(segment::segment_filename(0));
+    let mut segment_bytes =
+        crate::store::platform::fs::read(&frame_path).expect("read full segment");
+    let payload_byte =
+        usize::try_from(pos.offset).expect("offset fits usize") + 8 /* frame header */;
+    segment_bytes[payload_byte] ^= 0xFF;
+    crate::store::platform::fs::write_derivative_file_atomically(
+        dir.path(),
+        &frame_path,
+        "corrupt-sealed-frame-test",
+        &segment_bytes,
+    )
+    .expect("rewrite corrupted segment");
+
+    // mmap path
+    let reader_mmap = Reader::new(dir.path().to_path_buf(), 4, &test_clock());
+    reader_mmap.set_active_segment(1);
+    let err_mmap = reader_mmap
+        .read_entry(&pos)
+        .expect_err("a corrupt sealed frame must fail to decode on the mmap path");
+
+    // FD path
+    let mut reader_fd = Reader::new(dir.path().to_path_buf(), 4, &test_clock());
+    reader_fd.disable_sealed_mmap_for_test();
+    reader_fd.set_active_segment(1);
+    let err_fd = reader_fd
+        .read_entry(&pos)
+        .expect_err("a corrupt sealed frame must fail to decode on the FD fallback path");
+
+    assert!(
+        matches!(err_mmap, StoreError::CrcMismatch { .. }),
+        "PROPERTY: the mmap path must surface CrcMismatch on a corrupt frame, got {err_mmap:?}"
+    );
+    assert!(
+        matches!(err_fd, StoreError::CrcMismatch { .. }),
+        "PROPERTY: the FD fallback must surface the SAME error class (CrcMismatch), \
+         not swallow or remap corruption differently, got {err_fd:?}"
+    );
+    assert_eq!(
+        std::mem::discriminant(&err_mmap),
+        std::mem::discriminant(&err_fd),
+        "PROPERTY: corrupt-frame error class must be identical across mmap and FD read paths"
+    );
+}
+
+#[test]
+fn sealed_mmap_probe_runs_at_construction_not_per_read() {
+    // A reader constructed on a normal (writable) dir admits mmap exactly once
+    // at construction; subsequent sealed reads must not re-probe or re-temp-file.
+    let (reader, dir) = test_reader();
+    assert!(
+        reader.sealed_mmap_admitted_for_test(),
+        "PROPERTY: on a writable data dir the one-time construction probe must admit mmap"
+    );
+
+    // Perform several sealed reads of distinct segment ids; none of these may
+    // re-run the probe (which would write a temp file into the data dir).
+    let active_cutoff = 4u64;
+    for sid in 0..active_cutoff {
+        let pos = write_valid_sealed_segment(
+            &dir,
+            sid,
+            "entity:probe",
+            "scope:once",
+            &serde_json::json!({"sid": sid}),
+        );
+        reader.set_active_segment(active_cutoff);
+        let stored = reader.read_entry(&pos).expect("read sealed frame via mmap");
+        assert_eq!(stored.event.payload, serde_json::json!({"sid": sid}));
+    }
+
+    // The cached admission token is the sole probe artifact; it stays stable.
+    assert!(
+        reader.sealed_mmap_admitted_for_test(),
+        "PROPERTY: the cached admission token persists for the reader's lifetime"
     );
 }
 

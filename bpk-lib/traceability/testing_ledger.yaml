@@ -1,0 +1,768 @@
+# Testing ledger — machine-law data for the doctrine-bearing harness suites.
+#
+# This is the live home of the testing ledger the integrity tool owns. It
+# records the current doctrine-bearing suites and their primary harness pattern.
+# Coverage is treated as a consequence of harness density, not as the target
+# itself; where a delta is unmeasured the entry says so explicitly instead of
+# pretending.
+#
+# Loaders:
+#   - tools/integrity/src/harness_lints.rs   (schema + location/command lints)
+#   - tools/integrity/src/invariant_bridge.rs (ledger-as-coverage-witness)
+#   - tools/integrity/src/architecture_ir.rs  (invariant_gate_links projection)
+#
+# Required per entry: pattern, status, locations, commands, coverage_delta,
+# mutation_delta, blind_spots. `pattern` must be one of the five+ repo-owned
+# harness patterns and must equal `section`. `invariants` lists the catalog
+# INV-* ids this entry witnesses (citation source for the invariant bridge).
+# `status` is one of {green, amber, red, unmeasured}. Commands must start with
+# an approved prefix: `cargo test`, `BATPAK_RUN_CHAOS=1 cargo test`,
+# `CARGO_INCREMENTAL=0 cargo mutants`, or `cargo xtask`. The full testing
+# doctrine prose now lives in CONFORMANCE.md ("Testing doctrine").
+
+- title: syncbat checkout emits honest runtime receipts
+  section: Runtime And Boundary Harness
+  pattern: Runtime And Boundary Harness
+  status: unmeasured
+  invariants:
+    - INV-SYNCBAT-DISPATCH-RECEIPTS
+  locations:
+    - bpk-lib/crates/syncbat/tests/runtime.rs
+    - bpk-lib/crates/syncbat/tests/store_sink.rs
+    - bpk-lib/crates/syncbat/tests/receipt_namespace.rs
+    - bpk-lib/crates/syncbat/tests/wire_stability.rs
+  commands:
+    - cargo test -p syncbat --test runtime
+    - cargo test -p syncbat --test store_sink
+    - cargo test -p syncbat --test receipt_namespace
+    - cargo test -p syncbat --test wire_stability
+  coverage_delta: unmeasured
+  mutation_delta: >
+    syncbat-runtime-dispatch lane is defined in
+    tools/xtask/src/commands/mutants/lanes.rs; no run receipt is recorded.
+  blind_spots: >
+    receipt hashing policy has deterministic unit coverage; arbitrary-byte
+    proptest coverage has no recorded run.
+
+- title: syncbat durable catalog rebuild is deterministic
+  section: Runtime And Boundary Harness
+  pattern: Runtime And Boundary Harness
+  status: unmeasured
+  invariants:
+    - INV-SYNCBAT-REGISTER-CATALOG-DETERMINISTIC
+  locations:
+    - bpk-lib/crates/syncbat/tests/register_store_catalog.rs
+    - bpk-lib/crates/syncbat/tests/register_properties.rs
+    - bpk-lib/crates/syncbat/tests/descriptor_validation.rs
+    - bpk-lib/crates/syncbat/tests/operation_macro.rs
+    - bpk-lib/crates/syncbat/tests/operation_macro_errors.rs
+    - bpk-lib/crates/syncbat/tests/wire_stability.rs
+  commands:
+    - cargo test -p syncbat --test register_store_catalog
+    - cargo test -p syncbat --test register_properties
+    - cargo test -p syncbat --test descriptor_validation
+    - cargo test -p syncbat --test operation_macro
+    - cargo test -p syncbat --test operation_macro_errors
+    - cargo test -p syncbat --test wire_stability
+  coverage_delta: unmeasured
+  mutation_delta: >
+    syncbat-register-catalog lane is defined in
+    tools/xtask/src/commands/mutants/lanes.rs; no run receipt is recorded.
+  blind_spots: >
+    catalog row order is covered through store sequence order, but no separate
+    mutation score is recorded for lifecycle conflict branches.
+
+- title: netbat line protocol stays stable and thin
+  section: Runtime And Boundary Harness
+  pattern: Runtime And Boundary Harness
+  status: unmeasured
+  invariants:
+    - INV-NETBAT-LINE-PROTOCOL-STABLE
+    - INV-NETBAT-BOUNDARY-THIN
+  locations:
+    - bpk-lib/crates/netbat/tests/boundary.rs
+    - bpk-lib/crates/netbat/tests/route_validation.rs
+    - bpk-lib/crates/netbat/tests/tcp_transport.rs
+    - bpk-lib/crates/netbat/tests/golden/request_call_v1.hex
+  commands:
+    - cargo test -p netbat --test boundary
+    - cargo test -p netbat --test route_validation
+    - cargo test -p netbat --test tcp_transport
+  coverage_delta: unmeasured
+  mutation_delta: >
+    netbat-boundary-protocol lane is defined in
+    tools/xtask/src/commands/mutants/lanes.rs; no run receipt is recorded.
+  blind_spots: >
+    NETBAT/1 is request/response only; streaming over Canal requires a separate
+    protocol contract rather than an implicit extension.
+
+- title: Invalid derive input fails structurally
+  section: Fault-Injection Harness
+  pattern: Fault-Injection Harness
+  status: unmeasured
+  invariants:
+    - INV-BUILD-FAIL-FAST
+    - INV-GENERATED-WITNESS-PIN
+  locations:
+    - bpk-lib/crates/core/tests/derive_eventpayload_errors.rs
+    - bpk-lib/crates/core/tests/derive_event_sourced_errors.rs
+    - bpk-lib/crates/core/tests/derive_multi_event_reactor_errors.rs
+  commands:
+    - cargo test --test derive_eventpayload_errors
+    - cargo test --test derive_event_sourced_errors
+    - cargo test --test derive_multi_event_reactor_errors
+  coverage_delta: unmeasured
+  mutation_delta: unmeasured
+  blind_spots: >
+    compile-fail suites prove invalid macro shapes and error quality, but they
+    do not prove successful derived runtime behaviour by themselves.
+
+- title: Corruption and stress fail closed
+  section: Fault-Injection Harness
+  pattern: Fault-Injection Harness
+  status: unmeasured
+  invariants:
+    - INV-FAULT-INJECT-GATED
+    - INV-BATCH-CRASH-RECOVERY
+  locations:
+    - bpk-lib/crates/core/tests/chaos_testing.rs
+    - bpk-lib/crates/core/tests/cold_start_recovery.rs
+  commands:
+    - cargo test --test chaos_testing --all-features
+    - cargo test --test cold_start_recovery
+  coverage_delta: unmeasured
+  mutation_delta: unmeasured
+  blind_spots: >
+    broad chaos coverage exists, but not every low-level segment-scan defensive
+    branch is table-driven yet.
+
+- title: Slow-path segment recovery fails closed on corrupt batch metadata
+  section: Fault-Injection Harness
+  pattern: Fault-Injection Harness
+  status: unmeasured
+  invariants:
+    - INV-BATCH-CRASH-RECOVERY
+  locations:
+    - bpk-lib/crates/core/tests/segment_scan_hardening.rs
+  commands:
+    - cargo test --test segment_scan_hardening
+    - cargo test --test segment_scan_hardening corruption_inside_committed_batch_fails_closed
+    - cargo test --test segment_scan_hardening sidx_footer_entry_count_disagreement_falls_back_to_frame_scan
+    - cargo test --test segment_scan_hardening valid_crc_unreadable_frame_metadata_fails_closed
+    - cargo test --test segment_scan_hardening orphan_commit_marker_is_ignored_without_stopping_scan
+  coverage_delta: >
+    targeted rise in crates/core/src/store/segment/scan.rs; exact JSON delta not
+    recorded.
+  mutation_delta: unmeasured
+  blind_spots: >
+    low-level unit coverage still owns some byte-range helper boundaries, but
+    the black-box slow-path corruption shapes currently called out in this
+    ledger are covered.
+
+- title: Durable frontier observations stay honest under writer faults
+  section: Fault-Injection Harness
+  pattern: Fault-Injection Harness
+  status: unmeasured
+  invariants:
+    - INV-FRONTIER-DURABLE-COVERS-RECOVERED
+  locations:
+    - bpk-lib/crates/core/tests/durable_frontier_semantics.rs
+    - bpk-lib/crates/core/tests/durable_frontier_chaos.rs
+  commands:
+    - cargo test --test durable_frontier_semantics --features dangerous-test-hooks
+    - cargo test --test durable_frontier_chaos --features dangerous-test-hooks
+  coverage_delta: >
+    added in the Phase 0 durable-frontier wave; exact JSON delta not recorded in
+    this ledger.
+  mutation_delta: >
+    writer commit protocol and projection replay/freshness are policy-owned
+    critical seams; current thresholds are printed by cargo xtask mutants policy.
+  blind_spots: >
+    writer_panic_at_single_append_written_is_not_durable_on_reopen is
+    intentionally ignored because an in-process writer panic leaves the complete
+    unsynced frame recoverable from host page cache; it is superseded by the
+    dm-flakey block-layer proof in
+    bpk-lib/crates/core/tests/chaos/scenarios/single_append_written.rs. The
+    public frontier exposes observation truth; durability-gated read and wait
+    semantics are represented by the explicit wait APIs and durability gates.
+
+- title: Explicit close lifecycle frontiers survive restart
+  section: Fault-Injection Harness
+  pattern: Fault-Injection Harness
+  status: unmeasured
+  invariants:
+    - INV-STORE-LIFECYCLE-HONESTY
+    - INV-FRONTIER-OPEN-MONOTONIC
+  locations:
+    - bpk-lib/crates/core/tests/durable_frontier_semantics.rs
+  commands:
+    - cargo test --test durable_frontier_semantics --features dangerous-test-hooks
+  coverage_delta: >
+    Phase 1A adds explicit-close bootstrap coverage; exact JSON delta not
+    recorded in this ledger.
+  mutation_delta: >
+    no dedicated lifecycle seam; regressions route through the writer commit
+    protocol and projection replay/freshness critical seams.
+  blind_spots: >
+    none for the explicit-close lifecycle frontier shape currently in scope.
+
+- title: Platform profile mismatch fails open before lifecycle success
+  section: State-Machine Harness
+  pattern: State-Machine Harness
+  status: unmeasured
+  invariants:
+    - INV-PLATFORM-EVIDENCE-NOT-MEANING
+  locations:
+    - bpk-lib/crates/core/tests/platform_backend.rs
+  commands:
+    - cargo test --test platform_backend platform_profile_match_allows_open_and_mismatch_fails_before_lifecycle
+    - cargo test platform_profile_mismatch_fails_closed
+  coverage_delta: unmeasured
+  mutation_delta: >
+    platform-backend critical seam is registered at the 85% smoke threshold.
+  blind_spots: >
+    profile command and crates/core/build.rs env-var validation are covered by
+    structural and compile checks; mutation-specific fixtures have no recorded
+    run.
+
+- title: Durable frontier wait API surfaces honest blocking semantics
+  section: State-Machine Harness
+  pattern: State-Machine Harness
+  status: unmeasured
+  invariants:
+    - INV-FRONTIER-WAIT-MONOTONIC
+    - INV-FRONTIER-APPEND-GATE-HONORED
+  locations:
+    - bpk-lib/crates/core/tests/durable_frontier_waits.rs
+  commands:
+    - cargo test --test durable_frontier_waits --features dangerous-test-hooks
+  coverage_delta: >
+    not measured; the suite covers durable wait API semantics, applied/visible
+    wait surfaces, and append-time gate behavior.
+  mutation_delta: >
+    frontier-wait-durable and frontier-append-gate critical seams are registered
+    at the 85% smoke threshold for gate kind matching, timeout propagation,
+    receipt HLC conversion, and batch per-item gate ignore.
+  blind_spots: >
+    Precise waiter lists are not implemented; wake-all remains the current wait
+    strategy. OBS-CADENCE-GT-1-VISIBLE-EXCEEDS-DURABLE is narrowed, not retired:
+    cadence>1 without a DurabilityGate still exhibits the skew, and the gate is
+    the opt-in escape hatch.
+
+- title: Linux block-layer chaos harness fails writes after device flip
+  section: Fault-Injection Harness
+  pattern: Fault-Injection Harness
+  status: unmeasured
+  invariants:
+    - INV-CHAOS-LINUX-ONLY
+  locations:
+    - bpk-lib/crates/core/tests/chaos.rs
+    - bpk-lib/crates/core/tests/chaos/dm_flakey.rs
+    - bpk-lib/crates/core/tests/chaos/scenarios/smoke.rs
+  commands:
+    - BATPAK_RUN_CHAOS=1 cargo test --features dangerous-test-hooks --test chaos smoke -- --test-threads=1
+  coverage_delta: >
+    not measured; this scaffold proves harness viability rather than batpak
+    runtime code coverage.
+  mutation_delta: >
+    not applicable yet; batpak-specific torn-tail scenarios land in later Phase
+    1B stops.
+  blind_spots: >
+    this scaffold entry proves wrapper viability only; batpak-specific
+    durability claims are recorded in the torn-tail scenario entry below.
+
+- title: Durable frontier covers recovered state after device failure
+  section: Fault-Injection Harness
+  pattern: Fault-Injection Harness
+  status: unmeasured
+  invariants:
+    - INV-FRONTIER-DURABLE-COVERS-RECOVERED
+    - INV-CHAOS-LINUX-ONLY
+  locations:
+    - bpk-lib/crates/core/tests/chaos.rs
+    - bpk-lib/crates/core/tests/chaos/dm_flakey.rs
+    - bpk-lib/crates/core/tests/chaos/scenarios/single_append_written.rs
+    - bpk-lib/crates/core/tests/chaos/scenarios/batch_commit_written.rs
+  commands:
+    - BATPAK_RUN_CHAOS=1 cargo test --features dangerous-test-hooks --test chaos -- --test-threads=1
+  coverage_delta: >
+    not measured; this is a privileged block-layer proof rather than a
+    coverage-density suite. Activation gate: BATPAK_RUN_CHAOS=1.
+  mutation_delta: >
+    not applicable; the scenario exercises real device-mapper failure semantics
+    outside cargo-mutants' in-process model.
+  blind_spots: >
+    the legacy in-process FaultInjector test remains ignored as a documented
+    contrast with host page-cache behavior; the privileged dm-flakey scenario
+    now pins the recovered-state accounting contract. Batpak deliberately does
+    not expose or persist a fsync-history marker that distinguishes "batpak
+    deliberately fsynced" from "the OS preserved this data"; this is recorded as
+    OBS-DURABLE-HLC-INCLUDES-OS-PRESERVED-DATA.
+
+- title: Derived projections stay equivalent to the hand-written target
+  section: Equivalence Harness
+  pattern: Equivalence Harness
+  status: unmeasured
+  invariants:
+    - INV-REPLAY-LANE-SELECTION
+  locations:
+    - bpk-lib/crates/core/tests/derive_event_sourced_parity.rs
+    - bpk-lib/crates/core/tests/derive_event_sourced_generic.rs
+  commands:
+    - cargo test --test derive_event_sourced_parity
+    - cargo test --test derive_event_sourced_generic
+  coverage_delta: unmeasured
+  mutation_delta: unmeasured
+  blind_spots: >
+    these suites pin behavioural equivalence, not compile-fail diagnostics.
+
+- title: Live, reopen, and replay paths converge on the same visible truth
+  section: Equivalence Harness
+  pattern: Equivalence Harness
+  status: unmeasured
+  invariants:
+    - INV-REPLAY-LANE-SELECTION
+    - INV-MMAP-SEALED-READS
+  locations:
+    - bpk-lib/crates/core/tests/replay_consistency.rs
+    - bpk-lib/crates/core/tests/mmap_cold_start.rs
+  commands:
+    - cargo test --test replay_consistency
+    - cargo test --test mmap_cold_start
+  coverage_delta: unmeasured
+  mutation_delta: unmeasured
+  blind_spots: >
+    parity across all artifact paths is strong, but some corruption-only
+    branches still live in separate fault-injection suites.
+
+- title: Projection flow surfaces stay observationally equivalent
+  section: Equivalence Harness
+  pattern: Equivalence Harness
+  status: unmeasured
+  invariants:
+    - INV-CACHE-CAPABILITIES-EXPLICIT
+    - INV-REPLAY-LANE-SELECTION
+  locations:
+    - bpk-lib/crates/core/tests/raw_projection_mode.rs
+  commands:
+    - cargo test --test raw_projection_mode
+    - cargo test --test raw_projection_mode projection_flow_maybe_stale_keeps_replay_lanes_equivalent
+    - cargo test --test raw_projection_mode projection_flow_incremental_group_local_keeps_lanes_equivalent
+    - cargo test --test raw_projection_mode projection_flow_incremental_external_cache_keeps_lanes_equivalent
+  coverage_delta: >
+    targeted rise in crates/core/src/store/projection/flow.rs and
+    watcher-adjacent paths; exact JSON delta not recorded.
+  mutation_delta: unmeasured
+  blind_spots: >
+    current matrix now covers relevant and irrelevant appends across the two
+    replay lanes, the cache-enabled Freshness::MaybeStale stale-hit vs
+    forced-replay branch, and both incremental branches (group-local and
+    external-cache replay); remaining blind spots are cache-get-error handling,
+    exact age-boundary behavior, and the empty/no-replay-plan public surface.
+
+- title: MaybeStale never serves corrupt cache bytes as a fresh enough success
+  section: Fault-Injection Harness
+  pattern: Fault-Injection Harness
+  status: unmeasured
+  invariants:
+    - INV-CACHE-CAPABILITIES-EXPLICIT
+    - INV-CLOCK-NOW-US-LIVE
+  locations:
+    - bpk-lib/crates/core/tests/projection_cache.rs
+  commands:
+    - cargo test --test projection_cache freshness_maybe_stale_replays_when_stale_cache_bytes_are_corrupt
+    - cargo test --test projection_cache freshness_maybe_stale_replays_when_fresh_cache_bytes_are_corrupt
+    - cargo test --test projection_cache projection_replays_when_cache_get_errors
+    - cargo test --test projection_cache freshness_maybe_stale_replays_at_exact_age_boundary
+    - cargo test --test projection_cache empty_projection_surface_skips_cache_for_no_replay_plan
+    - cargo test --test projection_cache consistent_replays_when_reopened_native_cache_row_is_stale
+    - cargo test --test projection_cache maybe_stale_replays_when_cache_row_has_valid_metadata_but_empty_payload
+    - cargo test --test projection_cache consistent_replays_when_cache_row_has_valid_metadata_but_truncated_payload
+  coverage_delta: >
+    targeted rise in crates/core/src/store/projection/flow.rs; exact JSON delta
+    not recorded.
+  mutation_delta: unmeasured
+  blind_spots: >
+    this seam now proves that stale-but-young corrupt rows, fresh-but-corrupt
+    rows, cache-get failures, and exact age-boundary rows all fall back to honest
+    replay under Freshness::MaybeStale; remaining cache-edge blind spots are now
+    limited to backend-specific OS error shapes that are difficult to force
+    portably without changing production behavior.
+
+- title: Fuzz and chaos probe outputs stay within explicit policy gates
+  section: Property Harness
+  pattern: Property Harness
+  status: unmeasured
+  invariants:
+    - INV-CANONICAL-PATCH-STABILITY
+    - INV-GROUP-COMMIT-IDEMPOTENCY
+    - INV-FAULT-INJECT-GATED
+  locations:
+    - bpk-lib/crates/core/tests/fuzz_chaos_feedback.rs
+  commands:
+    - cargo test --test fuzz_chaos_feedback --all-features --release -- --ignored
+  coverage_delta: unmeasured
+  mutation_delta: unmeasured
+  blind_spots: >
+    feedback policy is explicit, but it does not replace direct seam-level
+    fault-injection or state-machine proofs.
+
+- title: Representative store errors keep stable handling, display, and source contracts
+  section: Property Harness
+  pattern: Property Harness
+  status: unmeasured
+  invariants:
+    - INV-CANONICAL-PATCH-STABILITY
+    - INV-STORE-ERROR-TAXONOMY
+  locations:
+    - bpk-lib/crates/core/tests/store_error_contract.rs
+    - bpk-lib/crates/core/src/store/error.rs
+  commands:
+    - cargo test --test store_error_contract
+    - cargo test store::error::tests
+  coverage_delta: >
+    targeted rise in crates/core/src/store/error.rs; exact JSON delta not
+    recorded.
+  mutation_delta: unmeasured
+  blind_spots: >
+    none for the representative StoreError handling, Display, source(),
+    conversion routing, and internal helper-constructor surface currently in
+    scope.
+
+- title: Catastrophic performance regressions trip explicit thresholds
+  section: Property Harness
+  pattern: Property Harness
+  status: unmeasured
+  invariants:
+    - INV-CANONICAL-PATCH-STABILITY
+    - INV-PERFORMANCE-GATES-ENFORCED
+  locations:
+    - bpk-lib/crates/core/tests/perf_gates.rs
+  commands:
+    - cargo xtask perf-gates
+  coverage_delta: not applicable
+  mutation_delta: not applicable
+  blind_spots: >
+    these are intentionally loose catastrophic guards, not precise benchmark
+    baselines; stable trend authority belongs to cargo xtask bench.
+
+- title: Typed payload kind allocation is binary-wide and collision-checked
+  section: Property Harness
+  pattern: Property Harness
+  status: unmeasured
+  invariants:
+    - INV-CANONICAL-PATCH-STABILITY
+    - INV-GENERATED-WITNESS-PIN
+    - INV-MACRO-BOUNDED-CAST
+  locations:
+    - bpk-lib/crates/core/fixtures/downstream/src/lib.rs
+    - bpk-lib/crates/core/tests/event_payload_registry_policy.rs
+    - bpk-lib/crates/core/tests/event_payload_registry_downstream.rs
+  commands:
+    - cargo test --manifest-path bpk-lib/crates/core/fixtures/downstream/Cargo.toml
+    - cargo test --test event_payload_registry_policy
+    - cargo test --test event_payload_registry_downstream
+  coverage_delta: >
+    targeted rise in crates/core/src/event/payload.rs,
+    crates/core/src/store/config.rs, and crates/core/src/store/mod.rs; exact JSON
+    delta not recorded.
+  mutation_delta: >
+    event-payload-registry-validator critical seam is registered at the 85% smoke
+    threshold for collision detection, open-time warn/fail-fast policy, and cache
+    refresh.
+  blind_spots: >
+    the validator reports linked registrations, not whether a particular store
+    will ever append every linked payload kind. Store open warns by default and
+    can be made fail-fast, but explicit per-application allocation discipline
+    remains the caller's responsibility.
+
+- title: Harness doctrine stays structurally enforceable
+  section: Property Harness
+  pattern: Property Harness
+  status: unmeasured
+  invariants:
+    - INV-CANONICAL-PATCH-STABILITY
+    - INV-ALLOW-IS-DESIGN
+    - INV-NO-DEAD-CODE-SILENCERS
+  locations:
+    - bpk-lib/tools/integrity/src/harness_lints.rs
+  commands:
+    - cargo test -p batpak-integrity harness_lints
+    - cargo xtask structural
+  coverage_delta: >
+    targeted rise in tools/integrity/src/harness_lints.rs; exact JSON delta not
+    recorded.
+  mutation_delta: >
+    testing-ledger-structural-lint critical seam is registered at the 85% smoke
+    threshold for ledger schema, command-prefix, location, module-header, and
+    capped line-count enforcement.
+  blind_spots: >
+    allowlist entries are explicit debt with reason and shrinkage target; new
+    entries should be treated as review-visible debt, not routine bypasses.
+
+- title: Evidence report bodies keep deterministic structural identity
+  section: Property Harness
+  pattern: Property Harness
+  status: unmeasured
+  invariants:
+    - INV-CANONICAL-PATCH-STABILITY
+  locations:
+    - bpk-lib/crates/core/tests/evidence_report_family.rs
+    - bpk-lib/crates/core/tests/lane_store_resource_evidence.rs
+    - bpk-lib/crates/core/tests/schema_snapshot_report.rs
+    - bpk-lib/crates/core/tests/chain_walk_evidence_report.rs
+    - bpk-lib/crates/core/tests/subscriber_frontier_observations.rs
+    - bpk-lib/crates/core/tests/projection_run_evidence_report.rs
+    - bpk-lib/crates/core/tests/read_walk_evidence_report.rs
+  commands:
+    - cargo test --test evidence_report_family
+    - cargo test --test lane_store_resource_evidence
+    - cargo xtask evidence-audit
+    - cargo test --test schema_snapshot_report
+    - cargo test --test chain_walk_evidence_report
+    - cargo test --test subscriber_frontier_observations
+    - cargo test --test projection_run_evidence_report
+    - cargo test --test read_walk_evidence_report
+  coverage_delta: unmeasured
+  mutation_delta: unmeasured
+  blind_spots: >
+    the v1 report family is covered as structural evidence; any new report body
+    needs its own schema-version, canonical-body, findings-order, and
+    append-boundary pins before promotion.
+
+- title: Lane A generic substrate — artifact envelope framing, compaction evidence, idempotency, and explicit read bounds
+  section: Property Harness
+  pattern: Property Harness
+  status: unmeasured
+  invariants:
+    - INV-CANONICAL-PATCH-STABILITY
+    - INV-GROUP-COMMIT-IDEMPOTENCY
+  locations:
+    - bpk-lib/crates/core/tests/lane_a_artifact_substrate.rs
+    - bpk-lib/crates/core/tests/lane_a_store_substrate.rs
+    - bpk-lib/crates/core/tests/idempotent_batch_crash_recovery.rs
+    - bpk-lib/crates/core/src/artifact.rs
+    - bpk-lib/crates/core/src/store/compaction_report.rs
+  commands:
+    - cargo test --test lane_a_artifact_substrate
+    - cargo test --test lane_a_store_substrate
+  coverage_delta: >
+    targeted rise in crates/core/src/artifact.rs and
+    crates/core/src/store/compaction_report.rs; exact JSON delta not recorded.
+  mutation_delta: unmeasured
+  blind_spots: >
+    deep cryptographic signature verification is represented by signing and
+    verifier harnesses; these tests use structural echo verifiers only.
+
+- title: Lane B1 attested registry — canonical row body, envelope composition, drift, verification, supersession
+  section: Property Harness
+  pattern: Property Harness
+  status: unmeasured
+  invariants:
+    - INV-CANONICAL-PATCH-STABILITY
+  locations:
+    - bpk-lib/crates/core/tests/lane_b1_registry_substrate.rs
+    - bpk-lib/crates/core/src/registry.rs
+  commands:
+    - cargo test --test lane_b1_registry_substrate
+  coverage_delta: unmeasured
+  mutation_delta: unmeasured
+  blind_spots: >
+    full graph-theoretic SCC classification for supersession is not exposed; only
+    deterministic structural findings used by callers today.
+
+- title: Lane B2 backup envelope — manifest body hash, segment sort, restore proof, attested envelope
+  section: Property Harness
+  pattern: Property Harness
+  status: unmeasured
+  invariants:
+    - INV-CANONICAL-PATCH-STABILITY
+  locations:
+    - bpk-lib/crates/core/tests/lane_b2_backup_envelope_substrate.rs
+    - bpk-lib/crates/core/src/store/backup_envelope.rs
+  commands:
+    - cargo test --test lane_b2_backup_envelope_substrate
+  coverage_delta: unmeasured
+  mutation_delta: unmeasured
+  blind_spots: >
+    restore proof does not execute a real store open; it compares digest maps
+    only.
+
+- title: Lane B3 transition substrate — canonical event digest, allowed-edge report, finding order
+  section: Property Harness
+  pattern: Property Harness
+  status: unmeasured
+  invariants:
+    - INV-CANONICAL-PATCH-STABILITY
+  locations:
+    - bpk-lib/crates/core/tests/lane_b3_transition_substrate.rs
+    - bpk-lib/crates/core/src/transition.rs
+  commands:
+    - cargo test --test lane_b3_transition_substrate
+  coverage_delta: unmeasured
+  mutation_delta: unmeasured
+  blind_spots: >
+    allowed-edge membership is a flat sorted list only (no labeled edge families
+    or weights).
+
+- title: Lane B4 reservation ledger — structural lanes, invalid transitions, reconciliation buckets, body hashes
+  section: Property Harness
+  pattern: Property Harness
+  status: unmeasured
+  invariants:
+    - INV-CANONICAL-PATCH-STABILITY
+  locations:
+    - bpk-lib/crates/core/tests/lane_b4_reservation_substrate.rs
+    - bpk-lib/crates/core/src/reservation.rs
+  commands:
+    - cargo test --test lane_b4_reservation_substrate
+  coverage_delta: unmeasured
+  mutation_delta: unmeasured
+  blind_spots: >
+    simulation is pure transition replay over an in-memory map; no store append
+    or cross-session recovery.
+
+- title: Bounded schedules preserve concurrency protocol truth
+  section: State-Machine Harness
+  pattern: State-Machine Harness
+  status: unmeasured
+  invariants:
+    - INV-CONCURRENCY-SCHEDULE-PROOF
+    - INV-BATCH-ATOMIC-VISIBILITY
+  locations:
+    - bpk-lib/crates/core/tests/deterministic_concurrency.rs
+  commands:
+    - cargo xtask loom
+  coverage_delta: unmeasured
+  mutation_delta: unmeasured
+  blind_spots: >
+    loom proofs cover bounded interleavings, not unbounded stress or real I/O.
+
+- title: Durable cursor checkpoints only commit honest progress
+  section: State-Machine Harness
+  pattern: State-Machine Harness
+  status: unmeasured
+  invariants:
+    - INV-DELIVERY-AT-LEAST-ONCE-WITNESS
+  locations:
+    - bpk-lib/crates/core/tests/cursor_durability.rs
+  commands:
+    - cargo test --test cursor_durability
+  coverage_delta: >
+    targeted rise in crates/core/src/store/delivery/cursor.rs; exact JSON delta
+    not recorded.
+  mutation_delta: unmeasured
+  blind_spots: >
+    committed progress vs rollback/restart semantics are covered, but this does
+    not replace the broader cursor lifecycle tests in
+    bpk-lib/crates/core/tests/store_advanced.rs.
+
+- title: Ready writer tickets surface observable completion through try_check
+  section: State-Machine Harness
+  pattern: State-Machine Harness
+  status: unmeasured
+  invariants:
+    - INV-JOURNAL-WRITER-SERIALIZES-COMMITS
+    - INV-FENCE-CANCELLED-STAYS-HIDDEN
+  locations:
+    - bpk-lib/crates/core/tests/control_plane_surface.rs
+  commands:
+    - cargo test --test control_plane_surface try_check_surfaces_ready_append_and_batch_tickets
+    - cargo test --test control_plane_surface fenced_root_submit_stays_hidden_until_commit_and_cancel_discards_it
+    - cargo test --test control_plane_surface fenced_batch_submit_stays_hidden_until_commit_and_cancel_discards_it
+    - cargo test --test control_plane_surface fenced_reaction_submit_stays_hidden_until_commit_and_cancel_discards_it
+    - cargo test --test control_plane_surface fenced_reaction_commit_preserves_reaction_metadata
+    - cargo test --test control_plane_surface try_submit_batch_returns_retry_under_pressure
+  coverage_delta: >
+    targeted rise in crates/core/src/store/write/control.rs; exact JSON delta not
+    recorded.
+  mutation_delta: >
+    exact ticket try_check and fence/reaction field-deletion mutants in
+    crates/core/src/store/write/control.rs are now caught or characterized as
+    unviable by the ready-path proof lane.
+  blind_spots: >
+    this closes the positive-ready edge for append and batch tickets and adds
+    direct root-under-fence, batch-under-fence, reaction-under-fence
+    visibility/cancel, and reaction metadata-preservation proofs; the wider
+    writer commit protocol still needs broader mutation pressure across
+    writer.rs, staging.rs, and fanout.rs.
+
+- title: Public query and cursor surfaces match a linear reference scan across topologies
+  section: Oracle Harness
+  pattern: Oracle Harness
+  status: unmeasured
+  invariants:
+    - INV-INDEX-FILTER-COMPOSES
+    - INV-MULTI-VIEW-PUBLISH-AFTER-VIEW-SYNC
+  locations:
+    - bpk-lib/crates/core/tests/index_filter_composition.rs
+  commands:
+    - cargo test --test index_filter_composition
+    - cargo test --test index_filter_composition reopen_matches_live_oracle_across_topologies
+  coverage_delta: >
+    targeted rise in crates/core/src/store/index/columnar.rs and
+    crates/core/src/store/index/mod.rs; exact JSON delta not recorded.
+  mutation_delta: unmeasured
+  blind_spots: >
+    the oracle now owns filter composition, cursor batch ordering, and
+    live-vs-reopen parity across topologies; remaining blind spots are deeper
+    restore-artifact mismatches outside this pure query surface, which still
+    belong to cold-start parity suites rather than the overlay oracle itself.
+
+- title: Public topology diagnostics match configured overlay posture
+  section: Oracle Harness
+  pattern: Oracle Harness
+  status: unmeasured
+  invariants:
+    - INV-COLUMNAR-REPLACES-DASHMAP
+  locations:
+    - bpk-lib/crates/core/tests/index_topology.rs
+  commands:
+    - cargo test --test index_topology
+  coverage_delta: unmeasured
+  mutation_delta: unmeasured
+  blind_spots: >
+    this suite proves diagnostic truth for topology posture; query/cursor
+    semantic equivalence remains owned by the linear-reference oracle above.
+
+- title: Structural gates own non-runtime policy and bridge coverage
+  section: Structural Harness
+  pattern: Structural Harness
+  status: unmeasured
+  invariants:
+    - INV-NO-TOKIO-PROD
+    - INV-STORE-SYNC-ONLY
+    - INV-PAYLOAD-LENGTH-EXACT
+    - INV-TRACEABILITY-COMPLETE
+    - INV-CANONICAL-CONTAINER-CI
+    - INV-CHECKPOINT-V2-INTERNED
+    - INV-SIDX-TIMESTAMP-US-APPROXIMATION
+    - INV-EXAMPLES-OBSERVABLE-OUTPUT
+    - INV-LITERAL-REGEX-UNWRAP-SAFE
+    - INV-TYPESTATE-OPEN-HAS-WRITER
+    - INV-COORDINATE-IS-LOGICAL-STREAM
+    - INV-CROSS-DIRECTORY-CONSISTENCY-PRODUCT-OWNED
+    - INV-CONTEXT-VIEWS-DERIVED-FROM-HISTORY
+  locations:
+    - bpk-lib/tools/integrity/src/invariant_bridge.rs
+    - bpk-lib/tools/integrity/src/structural.rs
+    - bpk-lib/tools/integrity/src/ci_parity.rs
+    - bpk-lib/tools/integrity/src/architecture_lints/syncbat_boundary.rs
+    - bpk-lib/tools/xtask/src/main.rs
+    - bpk-lib/crates/core/tests/typestate_safety.rs
+    - bpk-lib/crates/core/tests/mmap_cold_start.rs
+    - bpk-lib/crates/core/tests/wire_format.rs
+  commands:
+    - cargo xtask structural
+    - cargo xtask boundary
+    - cargo xtask stale-paths
+    - cargo xtask evidence-audit
+    - cargo test --test typestate_safety
+    - cargo test --test mmap_cold_start
+    - cargo test --test wire_format
+  coverage_delta: unmeasured
+  mutation_delta: unmeasured
+  blind_spots: >
+    this entry covers structural and doctrine-shaped invariants; runtime behavior
+    still belongs in direct test artifacts whenever a catalog invariant can be
+    exercised as code.

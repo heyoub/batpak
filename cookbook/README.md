@@ -18,3 +18,19 @@ recipe below should stay backed by a compiling example, template, or test.
 - [`200_RESERVATION_LEDGER.md`](200_RESERVATION_LEDGER.md) - abstract reservation ledgers.
 - [`200_PLATFORM_EVIDENCE.md`](200_PLATFORM_EVIDENCE.md) - platform profile probes.
 - [`200_ANTI_PATTERNS.md`](200_ANTI_PATTERNS.md) - wrong moves and replacements.
+
+## Factory Checks
+
+Use the root command surface:
+
+```sh
+just inspect
+just verify
+just perf-gates
+just loom
+just seal
+```
+
+`perf-gates` and `loom` are manual proof tiers; they are not part of `just verify`.
+
+If a repeated workflow needs raw `cargo`, `npm`, or `pnpm`, promote it to a named `just` recipe.

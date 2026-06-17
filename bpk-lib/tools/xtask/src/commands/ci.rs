@@ -104,20 +104,14 @@ fn run_kind_collision_composer_fixture() -> Result<()> {
     ])
 }
 
-/// Build rustdoc for the three publish crates with `-D warnings`.
+/// Build rustdoc for every workspace member with `-D warnings`.
+///
+/// Uses `--workspace` (not a hardcoded crate list) so any new crate is doc-lint
+/// gated automatically. `--no-deps` keeps the gate to first-party crates.
 fn doc_deny_warnings() -> Result<()> {
     let mut cmd = std::process::Command::new("cargo");
-    cmd.args([
-        "doc",
-        "--no-deps",
-        "-p",
-        "batpak",
-        "-p",
-        "syncbat",
-        "-p",
-        "netbat",
-    ])
-    .env("RUSTDOCFLAGS", "-D warnings");
+    cmd.args(["doc", "--workspace", "--no-deps"])
+        .env("RUSTDOCFLAGS", "-D warnings");
     crate::util::run(cmd)
 }
 

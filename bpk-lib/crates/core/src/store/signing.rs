@@ -64,6 +64,14 @@ pub(crate) struct ReceiptSigningRegistry {
 }
 
 impl ReceiptSigningRegistry {
+    /// Build a signing registry from a key list.
+    ///
+    /// Every key with a public half is registered as a *verifying* key. The
+    /// **active signer** is the LAST key in `keys` that carries a public half —
+    /// i.e. ordering is significant: re-ordering the `with_signing_key` calls
+    /// that produce this slice silently changes which key signs new receipts.
+    /// This is the intended key-rotation mechanism (append the new active key
+    /// last); callers must not treat the order as cosmetic.
     pub(crate) fn from_keys(keys: &[SigningKey]) -> Self {
         let mut verifying_keys = BTreeMap::new();
         let mut current = None;

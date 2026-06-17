@@ -4,7 +4,8 @@
 //! Restart policy tests split out of store_advanced.rs.
 
 mod support;
-use batpak::store::{RestartPolicy, Store, StoreConfig, StoreError};
+use batpak::store::{HlcPoint, RestartPolicy, Store, StoreConfig, StoreError};
+use std::time::Duration;
 use support::prelude::*;
 use tempfile::TempDir;
 
@@ -30,6 +31,40 @@ fn writer_restart_once_recovers_from_panic() {
 
     let entries = store.by_entity("restart:test");
     assert_eq!(entries.len(), 2);
+}
+
+#[test]
+#[serial_test::serial(writer_restart)]
+fn writer_restart_recovers_durability_gate_after_panic() {
+    // R3 regression: a within-budget panic used to poison the durability gate
+    // permanently — `mark_writer_crashed` fired before the budget check and the
+    // poison flag was never cleared, so every wait_for_durable/applied/visible
+    // returned WriterCrashed forever after the first transient panic. After a
+    // recoverable panic + restart the gate must work again. ORIGIN is always
+    // at/below the frontier, and wait_for_watermark checks poison FIRST, so the
+    // only way this errors is the stale poison flag.
+    let dir = TempDir::new().expect("create temp dir");
+    let config = StoreConfig::new(dir.path())
+        .with_segment_max_bytes(64 * 1024)
+        .with_restart_policy(RestartPolicy::Once);
+    let store = Store::open(config).expect("open store");
+    let coord = Coordinate::new("restart:durable", "restart:scope").expect("valid coord");
+    let kind = EventKind::custom(0xF, 1);
+
+    store
+        .append(&coord, kind, &"before_panic")
+        .expect("append before panic");
+    store.panic_writer_for_test().expect("send panic command");
+    store
+        .append(&coord, kind, &"after_panic")
+        .expect("append after restart");
+
+    store
+        .wait_for_durable(HlcPoint::ORIGIN, Duration::from_secs(5))
+        .expect(
+            "DURABILITY GATE POISONED: after a within-budget panic + restart, \
+             wait_for_durable must recover, not stay WriterCrashed (audit R3).",
+        );
 }
 
 #[test]

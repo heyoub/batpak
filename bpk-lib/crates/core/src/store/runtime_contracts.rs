@@ -15,7 +15,7 @@ fn test_store_with_writer(tx: flume::Sender<writer::WriterCommand>) -> (Store, T
         reader: Arc::new(reader::Reader::new(
             dir.path().to_path_buf(),
             4,
-            std::sync::Arc::new(crate::store::SystemClock::new()),
+            &runtime.clock_arc(),
         )),
         cache: Box::new(NoCache),
         writer: Some(writer::WriterHandle::from_parts_for_test(tx, subscribers)),
