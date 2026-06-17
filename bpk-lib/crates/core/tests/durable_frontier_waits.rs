@@ -1,48 +1,37 @@
 // justifies: INV-TEST-PANIC-AS-ASSERTION; wait API tests use panic! through assert macros and explicit error extraction to pin blocking invariants.
 #![allow(clippy::panic)]
 #![cfg(feature = "dangerous-test-hooks")]
-//! PROVES:
-//!   - INV-FRONTIER-WAIT-MONOTONIC and INV-FRONTIER-APPEND-GATE-HONORED.
-//!   - `Store::wait_for_durable`, `Store::wait_for_applied`, and
-//!     `Store::wait_for_visible` return only after observing their
-//!     corresponding watermark `>= target`.
-//!   - Timeouts are mandatory and surfaced as `StoreError::WaitTimeout`.
-//!   - Spurious wakeups do not satisfy the wait, and writer panics poison
-//!     waiters with `StoreError::WriterCrashed`.
+//! PROVES: INV-FRONTIER-WAIT-MONOTONIC. `Store::wait_for_durable`,
+//! `Store::wait_for_applied`, and `Store::wait_for_visible` return only after
+//! observing their corresponding watermark `>= target`. Timeouts are mandatory
+//! and surfaced as `StoreError::WaitTimeout`.
+//! CATCHES: a wait returning before its watermark reaches target, a spurious
+//! wakeup satisfying a wait, a missing-timeout regression, or a genuine writer
+//! crash failing to poison durable waiters with `WriterCrashed`.
+//! SEEDED: deterministic single-event/projection watermark advances driven from
+//! background threads; the R3 writer-crash case seeds a terminal restart policy
+//! so the panic is non-transient.
 
-use batpak::prelude::{Coordinate, EventKind, Region};
-use batpak::store::{
-    AppendOptions, BatchAppendItem, CausationRef, DurabilityGate, HlcPoint, RestartPolicy, Store,
-    StoreConfig, StoreError, WatermarkKind,
-};
+#[path = "support/durable_frontier_waits.rs"]
+mod dfw_support;
+
+use batpak::prelude::Region;
+use batpak::store::{HlcPoint, RestartPolicy, Store, StoreConfig, StoreError, WatermarkKind};
+use dfw_support::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tempfile::TempDir;
 
-const WAIT_SCOPE: &str = "scope:frontier-waits";
-
-fn coord(entity: &str) -> Coordinate {
-    Coordinate::new(entity, WAIT_SCOPE).expect("valid wait coordinate")
-}
-
-fn kind() -> EventKind {
-    EventKind::custom(0xF, 0x94)
-}
-
-fn point(entry: &batpak::store::index::IndexEntry) -> HlcPoint {
-    HlcPoint {
-        wall_ms: entry.wall_ms(),
-        global_sequence: entry.global_sequence(),
-    }
-}
-
-fn open_store(sync_every_n_events: u32) -> (TempDir, Store) {
-    let dir = TempDir::new().expect("temp dir");
-    let store =
-        Store::open(StoreConfig::new(dir.path()).with_sync_every_n_events(sync_every_n_events))
-            .expect("open store");
-    (dir, store)
+/// Wait-family helper: append one event and return its HLC point. Lives inline
+/// in this binary because only the wait surfaces exercise it (the append-gate
+/// family appends through the gated `append_with_options`/batch paths).
+fn append_number(store: &Store, entity: &str, n: u32) -> HlcPoint {
+    store
+        .append(&coord(entity), kind(), &serde_json::json!({ "n": n }))
+        .expect("append wait event");
+    let entries = store.query(&Region::entity(entity));
+    point(entries.last().expect("appended event visible in query"))
 }
 
 /// Open a store whose writer treats any panic as terminal (zero restart
@@ -51,6 +40,9 @@ fn open_store(sync_every_n_events: u32) -> (TempDir, Store) {
 /// poisoned (that is the R3 fix). To prove that a genuine writer CRASH surfaces
 /// to durable waiters as `WriterCrashed`, the panic must be terminal, which a
 /// zero-budget `Bounded` policy guarantees on the first panic.
+///
+/// Kept inline here (not in shared support) because only the writer-crash case
+/// in this binary uses the terminal restart policy.
 fn open_store_terminal_on_panic(sync_every_n_events: u32) -> (TempDir, Store) {
     let dir = TempDir::new().expect("temp dir");
     let store = Store::open(
@@ -65,46 +57,7 @@ fn open_store_terminal_on_panic(sync_every_n_events: u32) -> (TempDir, Store) {
     (dir, store)
 }
 
-fn append_number(store: &Store, entity: &str, n: u32) -> HlcPoint {
-    store
-        .append(&coord(entity), kind(), &serde_json::json!({ "n": n }))
-        .expect("append wait event");
-    let entries = store.query(&Region::entity(entity));
-    point(entries.last().expect("appended event visible in query"))
-}
-
-fn batch_item(entity: &str, n: u32, options: AppendOptions) -> BatchAppendItem {
-    BatchAppendItem::new(
-        coord(entity),
-        kind(),
-        &serde_json::json!({ "n": n }),
-        options,
-        CausationRef::None,
-    )
-    .expect("batch item")
-}
-
-fn durable_gate(timeout: Duration) -> DurabilityGate {
-    DurabilityGate {
-        kind: WatermarkKind::Durable,
-        timeout,
-    }
-}
-
-fn applied_gate(timeout: Duration) -> DurabilityGate {
-    DurabilityGate {
-        kind: WatermarkKind::Applied,
-        timeout,
-    }
-}
-
-fn visible_gate(timeout: Duration) -> DurabilityGate {
-    DurabilityGate {
-        kind: WatermarkKind::Visible,
-        timeout,
-    }
-}
-
+/// Wait-family helper: assert a wait result is the expected `WaitTimeout`.
 fn assert_wait_timeout(result: Result<(), StoreError>, watermark: WatermarkKind, target: HlcPoint) {
     let err = match result {
         Ok(()) => panic!("PROPERTY: wait must not succeed before target reaches {watermark:?}"),
@@ -404,217 +357,4 @@ fn mixed_wait_for_durable_applied_visible_converge_in_order() {
         .join()
         .expect("applied waiter joins")
         .expect("applied waiter succeeds");
-}
-
-#[test]
-fn append_without_gate_returns_immediately() {
-    let (_dir, store) = open_store(1000);
-
-    let started = Instant::now();
-    store
-        .append_with_options(
-            &coord("entity:gate:none"),
-            kind(),
-            &serde_json::json!({ "n": 1 }),
-            AppendOptions::default(),
-        )
-        .expect("append without gate");
-    assert!(
-        started.elapsed() < Duration::from_millis(50),
-        "PROPERTY: append without DurabilityGate must not wait for cadence sync"
-    );
-}
-
-#[test]
-fn append_with_durable_gate_blocks_until_synced() {
-    let (_dir, store) = open_store(1000);
-    let store = Arc::new(store);
-
-    let second_store = Arc::clone(&store);
-    let second = std::thread::Builder::new()
-        .name("durable-gate-second-append".into())
-        .spawn(move || {
-            std::thread::sleep(Duration::from_millis(50));
-            second_store
-                .append(
-                    &coord("entity:gate:durable-second"),
-                    kind(),
-                    &serde_json::json!({ "n": 2 }),
-                )
-                .expect("second append before explicit sync");
-            second_store.sync().expect("explicit sync advances durable");
-        })
-        .expect("spawn second append");
-    let started = Instant::now();
-    store
-        .append_with_options(
-            &coord("entity:gate:durable-first"),
-            kind(),
-            &serde_json::json!({ "n": 1 }),
-            AppendOptions::default().with_gate(durable_gate(Duration::from_secs(2))),
-        )
-        .expect("durable gate satisfied after explicit sync");
-    let elapsed = started.elapsed();
-    second.join().expect("second append joins");
-    assert!(
-        elapsed >= Duration::from_millis(20),
-        "PROPERTY: durable gate should block until an explicit sync advances durable_hlc"
-    );
-    assert!(
-        elapsed < Duration::from_millis(500),
-        "PROPERTY: durable gate should wake promptly once cadence sync fires"
-    );
-}
-
-#[test]
-fn append_with_applied_gate_blocks_until_min_projection_advances() {
-    let (_dir, store) = open_store(1000);
-    let store = Arc::new(store);
-    store.dangerous_register_projection("frontier:gate:applied:a");
-    store.dangerous_register_projection("frontier:gate:applied:b");
-
-    let notifier_store = Arc::clone(&store);
-    let notifier = std::thread::Builder::new()
-        .name("applied-gate-projection-advance".into())
-        .spawn(move || {
-            let target = loop {
-                let entries = notifier_store.query(&Region::entity("entity:gate:applied"));
-                if let Some(entry) = entries.last() {
-                    break point(entry);
-                }
-                std::thread::sleep(Duration::from_millis(5));
-            };
-            notifier_store.dangerous_notify_projection_applied("frontier:gate:applied:a", target);
-            std::thread::sleep(Duration::from_millis(50));
-            notifier_store.dangerous_notify_projection_applied("frontier:gate:applied:b", target);
-        })
-        .expect("spawn projection notifier");
-
-    let started = Instant::now();
-    store
-        .append_with_options(
-            &coord("entity:gate:applied"),
-            kind(),
-            &serde_json::json!({ "n": 1 }),
-            AppendOptions::default().with_gate(applied_gate(Duration::from_secs(2))),
-        )
-        .expect("applied gate satisfied after lagging projection advances");
-    let elapsed = started.elapsed();
-    notifier.join().expect("projection notifier joins");
-    assert!(
-        elapsed >= Duration::from_millis(20),
-        "PROPERTY: applied gate must honor the min across registered projections"
-    );
-    assert!(
-        elapsed < Duration::from_millis(500),
-        "PROPERTY: applied gate should wake promptly after the lagging projection advances"
-    );
-}
-
-#[test]
-fn append_with_visible_gate_returns_after_publish() {
-    let (_dir, store) = open_store(1000);
-
-    let started = Instant::now();
-    store
-        .append_with_options(
-            &coord("entity:gate:visible"),
-            kind(),
-            &serde_json::json!({ "n": 1 }),
-            AppendOptions::default().with_gate(visible_gate(Duration::from_secs(1))),
-        )
-        .expect("visible gate satisfied by publish");
-    assert!(
-        started.elapsed() < Duration::from_millis(50),
-        "PROPERTY: visible gate should return after publish even when durable cadence is not reached"
-    );
-}
-
-#[test]
-fn append_with_gate_surfaces_wait_timeout_when_unreachable() {
-    let (_dir, store) = open_store(1000);
-    let entity = "entity:gate:timeout";
-
-    let result = store.append_with_options(
-        &coord(entity),
-        kind(),
-        &serde_json::json!({ "n": 1 }),
-        AppendOptions::default().with_gate(durable_gate(Duration::from_millis(100))),
-    );
-    let err = match result {
-        Ok(_) => panic!("PROPERTY: unreachable durable gate must not return a receipt"),
-        Err(err) => err,
-    };
-    assert!(
-        matches!(
-            err,
-            StoreError::WaitTimeout {
-                watermark: WatermarkKind::Durable,
-                ..
-            }
-        ),
-        "PROPERTY: durable gate timeout must surface WaitTimeout, got {err:?}"
-    );
-    assert_eq!(
-        store.query(&Region::entity(entity)).len(),
-        1,
-        "PROPERTY: gate timeout reflects the guarantee, not the commit; the event remains queryable"
-    );
-}
-
-#[test]
-fn batch_append_with_durable_gate_covers_entire_batch() {
-    let (_dir, store) = open_store(10000);
-    let entity = "entity:gate:batch-durable";
-    let items: Vec<_> = (0..5)
-        .map(|n| batch_item(entity, n, AppendOptions::default()))
-        .collect();
-
-    let receipts = store
-        .append_batch_with_options(
-            items,
-            AppendOptions::default().with_gate(durable_gate(Duration::from_secs(2))),
-        )
-        .expect("batch durable gate");
-    assert_eq!(receipts.len(), 5);
-    let durable_hlc = store.dangerous_watermark_snapshot().durable_hlc;
-    for entry in store.query(&Region::entity(entity)) {
-        assert!(
-            durable_hlc >= point(&entry),
-            "PROPERTY: durable gate on the last batch item must cover every prior batch item"
-        );
-    }
-}
-
-#[test]
-fn batch_per_item_gate_ignored() {
-    let (_dir, store) = open_store(1000);
-    let item = batch_item(
-        "entity:gate:batch-item-ignored",
-        1,
-        AppendOptions::default().with_gate(durable_gate(Duration::from_millis(100))),
-    );
-
-    #[cfg(debug_assertions)]
-    {
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            store.append_batch(vec![item])
-        }));
-        assert!(
-            result.is_err(),
-            "PROPERTY: debug builds should catch ignored per-item batch gates with debug_assert"
-        );
-    }
-
-    #[cfg(not(debug_assertions))]
-    {
-        let started = Instant::now();
-        store
-            .append_batch(vec![item])
-            .expect("per-item gate ignored");
-        assert!(
-            started.elapsed() < Duration::from_millis(50),
-            "PROPERTY: release builds silently ignore per-item batch gates"
-        );
-    }
 }

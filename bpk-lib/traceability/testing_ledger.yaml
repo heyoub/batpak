@@ -126,9 +126,13 @@
     - INV-BATCH-CRASH-RECOVERY
   locations:
     - bpk-lib/crates/core/tests/chaos_testing.rs
+    - bpk-lib/crates/core/tests/chaos_testing_byte_corruption.rs
+    - bpk-lib/crates/core/tests/chaos_testing_batch_rotation.rs
     - bpk-lib/crates/core/tests/cold_start_recovery.rs
   commands:
     - cargo test --test chaos_testing --all-features
+    - cargo test --test chaos_testing_byte_corruption --all-features
+    - cargo test --test chaos_testing_batch_rotation --all-features
     - cargo test --test cold_start_recovery
   coverage_delta: unmeasured
   mutation_delta: unmeasured
@@ -346,9 +350,9 @@
     - bpk-lib/crates/core/tests/raw_projection_mode.rs
   commands:
     - cargo test --test raw_projection_mode
-    - cargo test --test raw_projection_mode projection_flow_maybe_stale_keeps_replay_lanes_equivalent
-    - cargo test --test raw_projection_mode projection_flow_incremental_group_local_keeps_lanes_equivalent
-    - cargo test --test raw_projection_mode projection_flow_incremental_external_cache_keeps_lanes_equivalent
+    - cargo test --test raw_projection_mode_flow_matrix projection_flow_maybe_stale_keeps_replay_lanes_equivalent
+    - cargo test --test raw_projection_mode_incremental projection_flow_incremental_group_local_keeps_lanes_equivalent
+    - cargo test --test raw_projection_mode_incremental projection_flow_incremental_external_cache_keeps_lanes_equivalent
   coverage_delta: >
     targeted rise in crates/core/src/store/projection/flow.rs and
     watcher-adjacent paths; exact JSON delta not recorded.
@@ -370,14 +374,14 @@
   locations:
     - bpk-lib/crates/core/tests/projection_cache.rs
   commands:
-    - cargo test --test projection_cache freshness_maybe_stale_replays_when_stale_cache_bytes_are_corrupt
-    - cargo test --test projection_cache freshness_maybe_stale_replays_when_fresh_cache_bytes_are_corrupt
-    - cargo test --test projection_cache projection_replays_when_cache_get_errors
-    - cargo test --test projection_cache freshness_maybe_stale_replays_at_exact_age_boundary
-    - cargo test --test projection_cache empty_projection_surface_skips_cache_for_no_replay_plan
-    - cargo test --test projection_cache consistent_replays_when_reopened_native_cache_row_is_stale
-    - cargo test --test projection_cache maybe_stale_replays_when_cache_row_has_valid_metadata_but_empty_payload
-    - cargo test --test projection_cache consistent_replays_when_cache_row_has_valid_metadata_but_truncated_payload
+    - cargo test --test projection_cache_corruption freshness_maybe_stale_replays_when_stale_cache_bytes_are_corrupt
+    - cargo test --test projection_cache_corruption freshness_maybe_stale_replays_when_fresh_cache_bytes_are_corrupt
+    - cargo test --test projection_cache_corruption projection_replays_when_cache_get_errors
+    - cargo test --test projection_cache_freshness freshness_maybe_stale_replays_at_exact_age_boundary
+    - cargo test --test projection_cache_freshness empty_projection_surface_skips_cache_for_no_replay_plan
+    - cargo test --test projection_cache_freshness consistent_replays_when_reopened_native_cache_row_is_stale
+    - cargo test --test projection_cache_corruption maybe_stale_replays_when_cache_row_has_valid_metadata_but_empty_payload
+    - cargo test --test projection_cache_corruption consistent_replays_when_cache_row_has_valid_metadata_but_truncated_payload
   coverage_delta: >
     targeted rise in crates/core/src/store/projection/flow.rs; exact JSON delta
     not recorded.
@@ -416,9 +420,11 @@
     - INV-STORE-ERROR-TAXONOMY
   locations:
     - bpk-lib/crates/core/tests/store_error_contract.rs
+    - bpk-lib/crates/core/tests/store_error_contract_operational.rs
     - bpk-lib/crates/core/src/store/error.rs
   commands:
     - cargo test --test store_error_contract
+    - cargo test --test store_error_contract_operational
     - cargo test store::error::tests
   coverage_delta: >
     targeted rise in crates/core/src/store/error.rs; exact JSON delta not
@@ -667,12 +673,12 @@
   locations:
     - bpk-lib/crates/core/tests/control_plane_surface.rs
   commands:
-    - cargo test --test control_plane_surface try_check_surfaces_ready_append_and_batch_tickets
-    - cargo test --test control_plane_surface fenced_root_submit_stays_hidden_until_commit_and_cancel_discards_it
-    - cargo test --test control_plane_surface fenced_batch_submit_stays_hidden_until_commit_and_cancel_discards_it
-    - cargo test --test control_plane_surface fenced_reaction_submit_stays_hidden_until_commit_and_cancel_discards_it
-    - cargo test --test control_plane_surface fenced_reaction_commit_preserves_reaction_metadata
-    - cargo test --test control_plane_surface try_submit_batch_returns_retry_under_pressure
+    - cargo test --test control_plane_surface_ticket try_check_surfaces_ready_append_and_batch_tickets
+    - cargo test --test control_plane_surface_fence fenced_root_submit_stays_hidden_until_commit_and_cancel_discards_it
+    - cargo test --test control_plane_surface_fence fenced_batch_submit_stays_hidden_until_commit_and_cancel_discards_it
+    - cargo test --test control_plane_surface_fence fenced_reaction_submit_stays_hidden_until_commit_and_cancel_discards_it
+    - cargo test --test control_plane_surface_fence fenced_reaction_commit_preserves_reaction_metadata
+    - cargo test --test control_plane_surface_pressure try_submit_batch_returns_retry_under_pressure
   coverage_delta: >
     targeted rise in crates/core/src/store/write/control.rs; exact JSON delta not
     recorded.

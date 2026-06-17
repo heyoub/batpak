@@ -403,8 +403,12 @@
   kind: tests
   paths:
     - crates/core/tests/projection_cache.rs
+    - crates/core/tests/projection_cache_freshness.rs
+    - crates/core/tests/projection_cache_corruption.rs
     - crates/core/tests/store_projection_wiring.rs
     - crates/core/tests/raw_projection_mode.rs
+    - crates/core/tests/raw_projection_mode_flow_matrix.rs
+    - crates/core/tests/raw_projection_mode_incremental.rs
 - id: ART-STORE-ADVANCED
   kind: tests
   paths:
@@ -438,10 +442,13 @@
   kind: tests
   paths:
     - crates/core/tests/durable_frontier_semantics.rs
+    - crates/core/tests/durable_frontier_semantics_frontier.rs
+    - crates/core/tests/durable_frontier_semantics_close_regression.rs
 - id: ART-FRONTIER-WAIT-TESTS
   kind: tests
   paths:
     - crates/core/tests/durable_frontier_waits.rs
+    - crates/core/tests/durable_frontier_waits_append_gate.rs
 - id: ART-CHAOS-DM-FLAKEY
   kind: tests
   paths:
@@ -459,6 +466,8 @@
   paths:
     - crates/core/tests/replay_consistency.rs
     - crates/core/tests/raw_projection_mode.rs
+    - crates/core/tests/raw_projection_mode_flow_matrix.rs
+    - crates/core/tests/raw_projection_mode_incremental.rs
 - id: ART-DETERMINISTIC-CONCURRENCY-TESTS
   kind: tests
   paths:
@@ -563,6 +572,9 @@
   kind: tests
   paths:
     - crates/core/tests/control_plane_surface.rs
+    - crates/core/tests/control_plane_surface_ticket.rs
+    - crates/core/tests/control_plane_surface_fence.rs
+    - crates/core/tests/control_plane_surface_pressure.rs
     - crates/core/tests/mmap_cold_start.rs
     - crates/core/tests/writer_command_flow.rs
 - id: ART-GROUP-COMMIT-TESTS
@@ -601,6 +613,9 @@
   kind: tests
   paths:
     - crates/core/tests/perf_gates.rs
+    - crates/core/tests/perf_gates_throughput_latency.rs
+    - crates/core/tests/perf_gates_cold_start.rs
+    - crates/core/tests/perf_gates_correctness.rs
 - id: ART-COMBINATOR-LAW-TESTS
   kind: tests
   paths:

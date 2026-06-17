@@ -125,6 +125,12 @@ pub(crate) fn perf_gates() -> Result<()> {
     run_nextest_ci([
         "--test",
         "perf_gates",
+        "--test",
+        "perf_gates_throughput_latency",
+        "--test",
+        "perf_gates_cold_start",
+        "--test",
+        "perf_gates_correctness",
         "--all-features",
         "--run-ignored",
         "only",

@@ -74,19 +74,9 @@ const HEADER_DEBT_ALLOWLIST: &[HeaderDebt] = &[
         target: "add header when smoke scenario changes",
     },
     HeaderDebt {
-        path: "tests/chaos_testing.rs",
-        reason: "legacy chaos suite has partial header only",
-        target: "split or normalize during harness cleanup",
-    },
-    HeaderDebt {
         path: "tests/cold_start_recovery.rs",
         reason: "legacy cold-start recovery suite predates module-header doctrine",
         target: "add header when recovery matrix changes",
-    },
-    HeaderDebt {
-        path: "tests/control_plane_surface.rs",
-        reason: "large control-plane suite predates module-header doctrine",
-        target: "split by writer-control seam during harness cleanup",
     },
     HeaderDebt {
         path: "tests/derive_event_sourced_errors.rs",
@@ -119,39 +109,14 @@ const HEADER_DEBT_ALLOWLIST: &[HeaderDebt] = &[
         target: "add header when schedule matrix changes",
     },
     HeaderDebt {
-        path: "tests/durable_frontier_waits.rs",
-        reason: "durable wait suite has partial header only",
-        target: "add missing CATCHES/SEEDED during harness cleanup",
-    },
-    HeaderDebt {
-        path: "tests/fuzz_chaos_feedback.rs",
-        reason: "fuzz-chaos suite has partial header only",
-        target: "add missing CATCHES/SEEDED during harness cleanup",
-    },
-    HeaderDebt {
         path: "tests/index_filter_composition.rs",
         reason: "oracle suite predates module-header doctrine",
         target: "add header when query oracle changes",
     },
     HeaderDebt {
-        path: "tests/perf_gates.rs",
-        reason: "perf gate suite has partial header only",
-        target: "add missing CATCHES/SEEDED during harness cleanup",
-    },
-    HeaderDebt {
-        path: "tests/projection_cache.rs",
-        reason: "cache suite has partial header only",
-        target: "split and normalize during harness cleanup",
-    },
-    HeaderDebt {
         path: "tests/replay_consistency.rs",
         reason: "replay parity suite predates module-header doctrine",
         target: "add header when replay matrix changes",
-    },
-    HeaderDebt {
-        path: "tests/segment_scan_hardening.rs",
-        reason: "segment hardening suite predates module-header doctrine",
-        target: "add header when corruption matrix changes",
     },
     HeaderDebt {
         path: "tests/store_advanced.rs",
@@ -160,80 +125,7 @@ const HEADER_DEBT_ALLOWLIST: &[HeaderDebt] = &[
     },
 ];
 
-const OVERSIZE_HARNESS_ALLOWLIST: &[OversizeDebt] = &[
-    OversizeDebt {
-        path: "tests/chaos_testing.rs",
-        max_lines: 1017,
-        reason: "legacy chaos matrix remains intact until split",
-        target: "split low-level byte corruption cases during harness cleanup",
-    },
-    OversizeDebt {
-        path: "tests/control_plane_surface.rs",
-        max_lines: 1055,
-        reason: "control-plane proofs share fixtures today",
-        target: "split ticket/fence/pressure seams during harness cleanup",
-    },
-    OversizeDebt {
-        path: "tests/cursor_durability.rs",
-        max_lines: 578,
-        reason: "cursor checkpoint lifecycle matrix remains coupled",
-        target: "split checkpoint corruption vs delivery progress during harness cleanup",
-    },
-    OversizeDebt {
-        path: "tests/durable_frontier_semantics.rs",
-        max_lines: 1044,
-        reason: "durable frontier semantic phases still share setup",
-        target: "split lifecycle/frontier cases during harness cleanup",
-    },
-    OversizeDebt {
-        path: "tests/durable_frontier_waits.rs",
-        max_lines: 620,
-        reason: "wait and gate API phases share controlled projection fixtures; R3 writer-crash case carries its own terminal-restart-policy store helper",
-        target: "split wait surfaces from append-gate surfaces during harness cleanup",
-    },
-    OversizeDebt {
-        path: "tests/fuzz_chaos_feedback.rs",
-        max_lines: 757,
-        reason: "fuzz-chaos policy matrix remains single-file",
-        target: "split generators from policy assertions during harness cleanup",
-    },
-    OversizeDebt {
-        path: "tests/perf_gates.rs",
-        max_lines: 1350,
-        reason: "hardware-dependent gates share calibration constants",
-        target: "split gate families during harness cleanup",
-    },
-    OversizeDebt {
-        path: "tests/projection_cache.rs",
-        max_lines: 1213,
-        reason: "cache corruption and freshness matrix share cache fixtures",
-        target: "split freshness modes from corruption shapes during harness cleanup",
-    },
-    OversizeDebt {
-        path: "tests/raw_projection_mode.rs",
-        max_lines: 923,
-        reason: "raw/derived projection equivalence matrix shares event fixtures",
-        target: "split replay lane families during harness cleanup",
-    },
-    OversizeDebt {
-        path: "tests/segment_scan_hardening.rs",
-        max_lines: 1406,
-        reason: "segment corruption shapes share frame-building helpers; grew across audit rounds (legacy-SDX2 fallback, forged-truncate reject, corrupt-SDX3 too-high recover, round-4 untrusted-offset recover-all, round-5 mid-stream-corruption FailClosed via look-ahead + torn-last-frame recover, round-6 out-of-bounds untrusted offset recover + torn-trailer recover + coincidental-magic recover + adversarial-offset property battery); 1406 is the rustfmt-final count after the round-6 tests. Split is already tracked as separate cleanup; bumping for now per round-6 directive",
-        target: "split helper module from case table during harness cleanup",
-    },
-    OversizeDebt {
-        path: "tests/store_advanced.rs",
-        max_lines: 1675,
-        reason: "legacy omnibus store suite is being burned down over time",
-        target: "move cursor/lifecycle remnants to focused suites during harness cleanup",
-    },
-    OversizeDebt {
-        path: "tests/store_error_contract.rs",
-        max_lines: 521,
-        reason: "structured StoreError contract cases share the classification fixture; bumped 500 -> 521 after the ReservedKind contract cases landed (audit R5)",
-        target: "split the classification table from per-variant contract cases during harness cleanup",
-    },
-];
+const OVERSIZE_HARNESS_ALLOWLIST: &[OversizeDebt] = &[];
 
 #[derive(Clone, Default)]
 struct LedgerEntry {

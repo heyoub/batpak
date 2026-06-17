@@ -64,7 +64,7 @@ fn append_reaction_links_causation() {
         "PROPERTY: append_reaction must produce a new unique event_id distinct from its cause.\n\
          Investigate: src/store/mod.rs append_reaction.\n\
          Common causes: event_id generation reuses the cause ID, hash collision in tiny test set.\n\
-         Run: cargo test --test store_advanced append_reaction_links_causation"
+         Run: cargo test --test store_append_behavior append_reaction_links_causation"
     );
 
     // Verify: can retrieve both
@@ -76,7 +76,7 @@ fn append_reaction_links_causation() {
         "PROPERTY: root event must retain its original EventKind after being stored.\n\
          Investigate: src/store/mod.rs append, src/store/segment/mod.rs write_frame.\n\
          Common causes: event_kind field not serialised, wrong frame read back.\n\
-         Run: cargo test --test store_advanced append_reaction_links_causation"
+         Run: cargo test --test store_append_behavior append_reaction_links_causation"
     );
     assert_eq!(
         react_stored.event.event_kind(),
@@ -84,7 +84,7 @@ fn append_reaction_links_causation() {
         "PROPERTY: reaction event must retain its EventKind (kind_evt) after storage.\n\
          Investigate: src/store/mod.rs append_reaction, src/store/segment/mod.rs write_frame.\n\
          Common causes: reaction inherits cause kind instead of its own, serialisation bug.\n\
-         Run: cargo test --test store_advanced append_reaction_links_causation"
+         Run: cargo test --test store_append_behavior append_reaction_links_causation"
     );
 
     store.close().expect("close");
@@ -155,7 +155,7 @@ fn idempotency_returns_same_receipt() {
         "PROPERTY: append_with_options with the same idempotency_key must return the same event_id.\n\
          Investigate: src/store/mod.rs append_with_options idempotency check.\n\
          Common causes: idempotency key not stored after first write, key lookup hash collision.\n\
-         Run: cargo test --test store_advanced idempotency_returns_same_receipt"
+         Run: cargo test --test store_append_behavior idempotency_returns_same_receipt"
     );
 
     // Only 1 event should exist
@@ -165,7 +165,7 @@ fn idempotency_returns_same_receipt() {
         "PROPERTY: idempotent appends must not increase event_count beyond the lifecycle event plus one stored user event.\n\
          Investigate: src/store/mod.rs append_with_options idempotency check.\n\
          Common causes: idempotency key lookup misses in-memory cache, duplicate written to segment.\n\
-         Run: cargo test --test store_advanced idempotency_returns_same_receipt"
+         Run: cargo test --test store_append_behavior idempotency_returns_same_receipt"
     );
 
     store.close().expect("close");
@@ -205,14 +205,14 @@ fn apply_transition_persists_event() {
         "PROPERTY: apply_transition must persist the EventKind carried by the Transition.\n\
          Investigate: src/store/mod.rs apply_transition, src/typestate/mod.rs Transition.\n\
          Common causes: transition payload serialised without kind, wrong kind written to frame.\n\
-         Run: cargo test --test store_advanced apply_transition_persists_event"
+         Run: cargo test --test store_append_behavior apply_transition_persists_event"
     );
     assert_eq!(
         stored.coordinate, coord,
         "PROPERTY: apply_transition must persist the event under the supplied Coordinate.\n\
          Investigate: src/store/mod.rs apply_transition.\n\
          Common causes: coordinate not forwarded to inner append call, coordinate field swapped.\n\
-         Run: cargo test --test store_advanced apply_transition_persists_event"
+         Run: cargo test --test store_append_behavior apply_transition_persists_event"
     );
 
     store.close().expect("close");

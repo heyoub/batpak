@@ -34,14 +34,14 @@ fn store_config_new_uses_sensible_defaults() {
         "PROPERTY: StoreConfig::new() must set segment_max_bytes to 256 MiB.\n\
          Investigate: src/store/mod.rs StoreConfig::new.\n\
          Common causes: default constant changed, field wired to wrong config value.\n\
-         Run: cargo test --test store_advanced store_config_new_uses_sensible_defaults"
+         Run: cargo test --test store_query_behavior store_config_new_uses_sensible_defaults"
     );
     assert_eq!(
         diag.fd_budget, 64,
         "PROPERTY: StoreConfig::new() must set fd_budget to 64.\n\
          Investigate: src/store/mod.rs StoreConfig::new.\n\
          Common causes: default constant changed, fd_budget not propagated into diagnostics.\n\
-         Run: cargo test --test store_advanced store_config_new_uses_sensible_defaults"
+         Run: cargo test --test store_query_behavior store_config_new_uses_sensible_defaults"
     );
     store.close().expect("close");
 }
@@ -90,7 +90,7 @@ fn query_with_clock_range_filters_events() {
         "PROPERTY: clock_range [3,7] query must return exactly 5 events (clocks 3,4,5,6,7).\n\
          Investigate: src/store/index/mod.rs query clock_range filter.\n\
          Common causes: range bounds exclusive instead of inclusive, clock field misread from frame.\n\
-         Run: cargo test --test store_advanced query_with_clock_range_filters_events"
+         Run: cargo test --test store_query_behavior query_with_clock_range_filters_events"
     );
 
     // Verify all results have clock in [3, 7]
@@ -100,7 +100,7 @@ fn query_with_clock_range_filters_events() {
             "PROPERTY: every result from a clock_range [3,7] query must have clock in [3,7], got {}.\n\
              Investigate: src/store/index/mod.rs query clock_range filter.\n\
              Common causes: range bounds off-by-one, filter applied before or after wrong index.\n\
-             Run: cargo test --test store_advanced query_with_clock_range_filters_events",
+             Run: cargo test --test store_query_behavior query_with_clock_range_filters_events",
             entry.clock()
         );
     }
@@ -135,7 +135,7 @@ fn query_clock_range_with_scope_filter() {
         "PROPERTY: entity:a with clock_range [1,3] must return exactly 3 events.\n\
          Investigate: src/store/index/mod.rs query clock_range + entity filter.\n\
          Common causes: entity filter applied after range filter loses scope, range inclusive bounds wrong.\n\
-         Run: cargo test --test store_advanced query_clock_range_with_scope_filter"
+         Run: cargo test --test store_query_behavior query_clock_range_with_scope_filter"
     );
 
     store.close().expect("close");
@@ -173,7 +173,7 @@ fn query_by_fact_category() {
         "PROPERTY: fact_category filter 0xA must match exactly 2 events (kind_a1 and kind_a2).\n\
          Investigate: src/store/index/mod.rs KindFilter::Category path.\n\
          Common causes: category nibble extracted from wrong byte, filter matches all kinds.\n\
-         Run: cargo test --test store_advanced query_by_fact_category"
+         Run: cargo test --test store_query_behavior query_by_fact_category"
     );
 
     store.close().expect("close");
