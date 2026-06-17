@@ -71,6 +71,12 @@ pub struct BankCommitRequest {
     pub kind_type_id: u16,
     /// Lowercase hex of the canonically-encoded payload bytes.
     pub payload_hex: String,
+    /// Optional idempotency key as 32-char lowercase hex (`u128` big-endian).
+    /// When present, the commit is deduplicated: a re-submit with the same key
+    /// returns the original receipt as a no-op (durable across compaction and
+    /// cold-start). Additive within manifest v2.
+    #[serde(default)]
+    pub idempotency_key_hex: Option<String>,
 }
 
 /// Wire output for [`BANK_COMMIT_DESCRIPTOR`]. Mirrors
@@ -107,6 +113,7 @@ impl EventPayloadFixture for BankCommitRequest {
             kind_type_id: 0xA01,
             // Matches the SystemHeartbeatRequest fixture payload exactly.
             payload_hex: "81a56e6f6e6365b66865617274626561742d666978747572652d30303031".to_owned(),
+            idempotency_key_hex: None,
         }
     }
 }
@@ -399,6 +406,7 @@ crate::hbat_event_descriptor! {
         ("kind_category", "u8"),
         ("kind_type_id", "u16"),
         ("payload_hex", "hex-blob"),
+        ("idempotency_key_hex", "option<u128-hex>"),
     ],
 }
 

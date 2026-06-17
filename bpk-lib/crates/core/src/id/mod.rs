@@ -169,6 +169,56 @@ impl From<IdempotencyKey> for u128 {
     }
 }
 
+impl IdempotencyKey {
+    /// Derive a deterministic idempotency key from an OPERATION IDENTITY: a
+    /// `domain` plus an ordered list of `components`.
+    ///
+    /// The key is blake3 over a **length-delimited** encoding — each of the
+    /// domain and every component is length-prefixed before hashing — so that
+    /// `["ab", "c"]` and `["a", "bc"]` produce DIFFERENT keys (no boundary
+    /// ambiguity / canonicalization collisions). The first 16 bytes of the
+    /// digest are taken as the `u128`.
+    ///
+    /// # This is operation identity, NOT a content hash
+    ///
+    /// `for_operation` answers "is this the SAME operation I already performed?"
+    /// — e.g. `("transfer", &[from, to, request_id])`. It deliberately does
+    /// NOT hash the event payload bytes. Do not misuse it as a
+    /// content-addressing scheme: two semantically-identical operations
+    /// submitted with the same components must collide to the same key (that is
+    /// the whole point of idempotency), whereas a content hash must change
+    /// whenever any payload byte changes. Conflating the two re-introduces the
+    /// exact failure mode the schema-evolution plan warns against — treating an
+    /// operation key as if it certified payload contents.
+    ///
+    /// # Example
+    /// ```
+    /// use batpak::id::IdempotencyKey;
+    /// let a = IdempotencyKey::for_operation("transfer", &["acct:1", "acct:2", "req:42"]);
+    /// let b = IdempotencyKey::for_operation("transfer", &["acct:1", "acct:2", "req:42"]);
+    /// assert_eq!(a, b, "same operation identity -> same key (idempotent)");
+    /// let c = IdempotencyKey::for_operation("transfer", &["acct:12", "acct:2", "req:42"]);
+    /// assert_ne!(a, c, "length-delimited encoding keeps boundaries distinct");
+    /// ```
+    #[must_use]
+    pub fn for_operation(domain: &str, components: &[&str]) -> Self {
+        let mut hasher = blake3::Hasher::new();
+        // Length-delimit the domain.
+        hasher.update(&(domain.len() as u64).to_le_bytes());
+        hasher.update(domain.as_bytes());
+        // Length-delimit the component count, then each component.
+        hasher.update(&(components.len() as u64).to_le_bytes());
+        for component in components {
+            hasher.update(&(component.len() as u64).to_le_bytes());
+            hasher.update(component.as_bytes());
+        }
+        let digest = hasher.finalize();
+        let mut bytes = [0u8; 16];
+        bytes.copy_from_slice(&digest.as_bytes()[..16]);
+        <Self as EntityIdType>::new(u128::from_be_bytes(bytes))
+    }
+}
+
 // Serde impls for the typed ids. Wire format is unchanged from the raw u128
 // path: each newtype serializes as 16 big-endian bytes via the existing
 // crate::wire::u128_bytes helpers. EventHeader's #[serde(with = ...)] field

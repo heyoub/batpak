@@ -39,18 +39,20 @@ export const BankCommitRequest = Schema.Struct({
   kind_category: Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 255 }))),
   kind_type_id: Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 65535 }))),
   payload_hex: Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]*$/u)), Schema.brand("HexBlob")),
+  idempotency_key_hex: Schema.NullOr(Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{32}$/u)), Schema.brand("EventIdHex"))),
 });
 // eslint-disable-next-line @typescript-eslint/no-redeclare
 export type BankCommitRequest = typeof BankCommitRequest.Type;
 
 export const BANK_COMMIT_REQUEST_PAYLOAD_VERSION = 1 as const;
-export const BANK_COMMIT_REQUEST_GOLDEN_HEX = "85a6656e74697479ac666978747572653a62616e6ba573636f7065ad666978747572652d73636f7065ad6b696e645f63617465676f72790fac6b696e645f747970655f6964cd0a01ab7061796c6f61645f686578d93c383161353665366636653633363562363638363536313732373436323635363137343264363636393738373437353732363532643330333033303331" as const;
+export const BANK_COMMIT_REQUEST_GOLDEN_HEX = "86a6656e74697479ac666978747572653a62616e6ba573636f7065ad666978747572652d73636f7065ad6b696e645f63617465676f72790fac6b696e645f747970655f6964cd0a01ab7061796c6f61645f686578d93c383161353665366636653633363562363638363536313732373436323635363137343264363636393738373437353732363532643330333033303331b36964656d706f74656e63795f6b65795f686578c0" as const;
 export const BANK_COMMIT_REQUEST_FIXTURE: BankCommitRequest = {
   "entity": "fixture:bank",
   "scope": "fixture-scope",
   "kind_category": 15,
   "kind_type_id": 2561,
-  "payload_hex": "81a56e6f6e6365b66865617274626561742d666978747572652d30303031"
+  "payload_hex": "81a56e6f6e6365b66865617274626561742d666978747572652d30303031",
+  "idempotency_key_hex": null
 } as unknown as BankCommitRequest;
 
 /** Source: hbat::bank::BankCommitAck; category=15, typeId=2577 */

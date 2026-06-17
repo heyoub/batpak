@@ -34,6 +34,7 @@ fn bank_commit_frame() -> CheckoutFrame {
         kind_category: SystemHeartbeatRequest::KIND.category(),
         kind_type_id: SystemHeartbeatRequest::KIND.type_id(),
         payload_hex: encode_hex_str(&payload),
+        idempotency_key_hex: None,
     };
     CheckoutFrame::new(
         BANK_COMMIT_DESCRIPTOR.name(),

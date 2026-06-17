@@ -1,4 +1,5 @@
 use crate::store::cold_start::rebuild::OpenIndexReport;
+use crate::store::index::idemp::{IdempotencyRetention, OverflowPolicy};
 use crate::store::RestartPolicy;
 use std::sync::Arc;
 
@@ -228,6 +229,14 @@ pub struct IndexConfig {
     pub enable_checkpoint: bool,
     /// Prefer the mmap index artifact on open before checkpoint / segment replay.
     pub enable_mmap_index: bool,
+    /// Growth-bound policy for the durable idempotency store. Default is the
+    /// window-priority [`IdempotencyRetention::Hybrid`]: a within-window keyed
+    /// retry is always a no-op, with a generous soft cap + alarm.
+    pub idempotency_retention: IdempotencyRetention,
+    /// Escalation policy when within-window keys alone exceed the soft cap.
+    /// Default [`OverflowPolicy::Warn`]: log loudly and proceed (the window
+    /// always wins on correctness).
+    pub idempotency_overflow: OverflowPolicy,
 }
 
 impl Default for IndexConfig {
@@ -237,6 +246,8 @@ impl Default for IndexConfig {
             incremental_projection: false,
             enable_checkpoint: true,
             enable_mmap_index: true,
+            idempotency_retention: IdempotencyRetention::default(),
+            idempotency_overflow: OverflowPolicy::default(),
         }
     }
 }

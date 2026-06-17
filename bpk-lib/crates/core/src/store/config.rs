@@ -13,6 +13,7 @@ use crate::store::fault::FaultInjector;
 mod types;
 mod validation;
 
+pub use crate::store::index::idemp::{IdempotencyRetention, OverflowPolicy};
 pub use types::{
     BatchConfig, IndexConfig, IndexTopology, OpenReportObserver, SyncConfig, SyncMode, WriterConfig,
 };
@@ -250,6 +251,23 @@ impl StoreConfig {
     /// Enable or disable the mmap-first index artifact on close/open.
     pub fn with_enable_mmap_index(mut self, enable_mmap_index: bool) -> Self {
         self.index.enable_mmap_index = enable_mmap_index;
+        self
+    }
+
+    /// Set the growth-bound policy for the durable idempotency store.
+    ///
+    /// Default is the window-priority [`IdempotencyRetention::Hybrid`]: a keyed
+    /// retry whose original commit is within the window is ALWAYS a no-op,
+    /// regardless of compaction or load. See [`IdempotencyRetention`].
+    pub fn with_idempotency_retention(mut self, retention: IdempotencyRetention) -> Self {
+        self.index.idempotency_retention = retention;
+        self
+    }
+
+    /// Set the escalation policy when within-window keys alone exceed the soft
+    /// cap (residual pigeonhole). Default [`OverflowPolicy::Warn`].
+    pub fn with_idempotency_overflow(mut self, overflow: OverflowPolicy) -> Self {
+        self.index.idempotency_overflow = overflow;
         self
     }
 

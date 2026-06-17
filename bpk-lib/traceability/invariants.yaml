@@ -9,6 +9,11 @@
     - ART-EVENT-PAYLOAD-DECODE-SEAM
     - ART-EVENT-PAYLOAD-FROZEN-GOLDENS
     - ART-SCHEMA-EVOLUTION-DOC
+- id: INV-IDEMPOTENCY-DURABLE-WINDOW
+  statement: A keyed append is deduplicated as a true no-op via a durable sidecar (index.idemp - magic FBATID, versioned, crc32fast CRC, atomic write) that survives retention compaction, cold-start, and snapshot independent of event eviction and is restored unconditionally (never rebuilt from segment scan); growth is bounded by a window-priority hybrid where the window is inviolable (a key whose recorded global sequence is within keep_sequences of the frontier is never evicted by the soft max_keys cap, which may only trim out-of-window keys), so a retry of a within-window key is always a no-op regardless of load while a corrupt or missing sidecar degrades to empty (logged, never crashing) and a future on-disk version is a hard error; IdempotencyKey::for_operation derives operation identity from a length-delimited blake3 over domain plus components and is not a payload content hash.
+  artifacts:
+    - ART-IDEMPOTENCY-DURABLE-SOURCE
+    - ART-IDEMPOTENCY-DURABLE-TESTS
 - id: INV-SYNCBAT-DISPATCH-RECEIPTS
   statement: syncbat checkout dispatch emits at most one completed or failed runtime receipt for resolved operations, emits no receipt for unknown operations, and fails closed when the configured receipt sink fails.
   artifacts:
