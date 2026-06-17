@@ -324,6 +324,7 @@ describe("Effect 4 schema round-trip via @batpak/schema", () => {
         kind_category: 999,
         kind_type_id: 0,
         payload_hex: "",
+        idempotency_key_hex: null,
       }),
     ).toThrow();
   });

@@ -123,6 +123,9 @@ async function runBankCommit(host: string, port: number): Promise<typeof BankCom
     kind_category: 15,
     kind_type_id: 2561,
     payload_hex: encodeHex(heartbeatPayload) as typeof BankCommitRequest.Type.payload_hex,
+    // Optional durable-idempotency operation key (manifest v2, additive). This
+    // spike does not dedupe, so it is left unset (null).
+    idempotency_key_hex: null,
   };
   const socket = await openSocket(host, port);
   try {
