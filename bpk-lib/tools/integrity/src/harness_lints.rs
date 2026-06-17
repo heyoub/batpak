@@ -217,8 +217,8 @@ const OVERSIZE_HARNESS_ALLOWLIST: &[OversizeDebt] = &[
     },
     OversizeDebt {
         path: "tests/segment_scan_hardening.rs",
-        max_lines: 713,
-        reason: "segment corruption shapes share frame-building helpers; bumped 709 -> 713 after SegmentId::from_filename integration test landed",
+        max_lines: 805,
+        reason: "segment corruption shapes share frame-building helpers; bumped 713 -> 805 after the legacy-SDX2 backward-compat frame-scan regression tests landed (audit P1 fallback fix)",
         target: "split helper module from case table during harness cleanup",
     },
     OversizeDebt {

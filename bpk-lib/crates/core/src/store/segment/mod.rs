@@ -406,8 +406,20 @@ pub(crate) fn detect_sidx_boundary<R: Read + Seek>(
     let mut trailer = [0u8; 16];
     source.read_exact(&mut trailer).map_err(StoreError::Io)?;
 
-    // Check magic at bytes 12..16
-    if &trailer[12..16] != crate::store::segment::sidx::SIDX_MAGIC {
+    // Check magic at bytes 12..16. Recognize BOTH the current `SDX3` magic and
+    // the legacy pre-0.8.3 `SDX2` magic as a footer boundary marker. This is a
+    // boundary-only check: it tells the frame scan where the frame region ends so
+    // it stops at `string_table_offset` instead of over-running into the footer's
+    // string table + entries + trailer bytes. It does NOT make the footer's
+    // content trusted — `sidx::read_footer` / `footer::read_layout` still match
+    // only `SIDX_MAGIC` (SDX3) and reject an un-CRC'd SDX2 footer as `Ok(None)`,
+    // forcing the CRC-verified frame-scan rebuild. The trailer geometry
+    // (offset/count/magic) is byte-identical across SDX2/SDX3, so the
+    // `string_table_offset` field is read the same way for both.
+    let magic = &trailer[12..16];
+    if magic != crate::store::segment::sidx::SIDX_MAGIC
+        && magic != crate::store::segment::sidx::SIDX_MAGIC_LEGACY_SDX2
+    {
         return Ok(None);
     }
     // string_table_offset at bytes 0..8
@@ -551,6 +563,29 @@ mod tests {
             result.expect("must not error at the max boundary"),
             Some(max_offset),
             "PROPERTY: offset == file_len - 16 is the empty-string-table boundary and must be accepted"
+        );
+    }
+
+    #[test]
+    fn detect_sidx_boundary_recognizes_legacy_sdx2_magic() {
+        // A pre-0.8.3 segment ends in the legacy `SDX2` magic with the same
+        // 16-byte trailer geometry. detect_sidx_boundary must recognize it as a
+        // footer BOUNDARY (so the frame scan stops at string_table_offset)
+        // even though read_footer refuses to TRUST its un-CRC'd content.
+        let file_len = 64u64;
+        let max_offset = file_len - 16;
+        let mut bytes = vec![0u8; usize::try_from(file_len).expect("file_len fits usize")];
+        let trailer_start = bytes.len() - 16;
+        bytes[trailer_start..trailer_start + 8].copy_from_slice(&max_offset.to_le_bytes());
+        bytes[trailer_start + 8..trailer_start + 12].copy_from_slice(&0u32.to_le_bytes());
+        bytes[trailer_start + 12..trailer_start + 16]
+            .copy_from_slice(crate::store::segment::sidx::SIDX_MAGIC_LEGACY_SDX2);
+        let mut cursor = std::io::Cursor::new(bytes);
+        let result = detect_sidx_boundary(&mut cursor, file_len, 7).expect("must not error");
+        assert_eq!(
+            result,
+            Some(max_offset),
+            "PROPERTY: a legacy SDX2 trailer must be recognized as a frame-region boundary"
         );
     }
 

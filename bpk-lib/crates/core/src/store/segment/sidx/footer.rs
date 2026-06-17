@@ -97,22 +97,40 @@ pub(super) fn read_layout<R: Read + Seek>(
             segment_id,
             detail: "SIDX covered region end overflows u64".into(),
         })?;
-    let covered_len = usize::try_from(string_table_len.checked_add(entries_block_len).ok_or_else(
-        || StoreError::CorruptSegment {
+    // `covered_len` is derived from on-disk geometry. The bounds checks above
+    // prove `covered_end <= file_len`, so `covered_len` cannot exceed the file
+    // size — but a corrupt/adversarial trailer with `string_table_offset` near 0
+    // on a large or sparse segment can still drive it to nearly the whole file.
+    // Hash the covered region in fixed-size chunks so memory stays O(chunk)
+    // instead of O(covered_len), keeping cold-start reopen from OOM-ing on a
+    // forged footer before the CRC can reject it and trigger the frame-scan
+    // fallback. The result is byte-identical to hashing the whole span at once.
+    let covered_len = string_table_len
+        .checked_add(entries_block_len)
+        .ok_or_else(|| StoreError::CorruptSegment {
             segment_id,
             detail: "SIDX covered region length overflows u64".into(),
-        },
-    )?)
-    .map_err(|_| StoreError::CorruptSegment {
-        segment_id,
-        detail: "SIDX covered region length exceeds usize::MAX".into(),
-    })?;
+        })?;
 
     reader
         .seek(SeekFrom::Start(string_table_offset))
         .map_err(StoreError::Io)?;
-    let mut covered = vec![0u8; covered_len];
-    reader.read_exact(&mut covered).map_err(StoreError::Io)?;
+    let mut hasher = crc32fast::Hasher::new();
+    let mut remaining = covered_len;
+    let mut chunk = [0u8; 8192];
+    while remaining > 0 {
+        // `remaining` is clamped to `chunk.len()` (a usize), so the result
+        // always fits in usize regardless of how large the corrupt span claims
+        // to be — the `min` is computed on the usize side to make that explicit.
+        let take = usize::try_from(remaining)
+            .unwrap_or(chunk.len())
+            .min(chunk.len());
+        reader
+            .read_exact(&mut chunk[..take])
+            .map_err(StoreError::Io)?;
+        hasher.update(&chunk[..take]);
+        remaining -= take as u64;
+    }
 
     reader
         .seek(SeekFrom::Start(covered_end))
@@ -120,7 +138,7 @@ pub(super) fn read_layout<R: Read + Seek>(
     let mut stored_crc = [0u8; 4];
     reader.read_exact(&mut stored_crc).map_err(StoreError::Io)?;
 
-    if crc32fast::hash(&covered) != u32::from_le_bytes(stored_crc) {
+    if hasher.finalize() != u32::from_le_bytes(stored_crc) {
         return Ok(None);
     }
 

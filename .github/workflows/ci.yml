@@ -357,6 +357,12 @@ jobs:
           workspaces: bpk-lib
       - uses: ./.github/actions/setup-devcontainer
       - name: Resolve PR diff for diff-scoped mutation
+        # Only pull requests carry a base sha; on workflow_dispatch (manual
+        # mutants/heavy runs) `github.event.pull_request.base.sha` is empty and
+        # `git diff "" HEAD` exits 128 before xtask can run. Skip this step for
+        # manual runs and leave BATPAK_MUTANTS_DIFF unset so resolve_smoke_diff's
+        # local merge-base fallback derives the scope instead.
+        if: github.event_name == 'pull_request'
         shell: bash
         run: |
           base="${{ github.event.pull_request.base.sha }}"
@@ -367,12 +373,15 @@ jobs:
           # cargo-mutants' --in-diff matcher silently drops.
           mkdir -p bpk-lib/target
           git -C bpk-lib diff --relative "$base" HEAD > bpk-lib/target/smoke-diff.patch
+          # Plumb the patch path only when we actually wrote one. The smoke step
+          # hard-fails if BATPAK_MUTANTS_DIFF points at a missing file, so manual
+          # runs must leave it unset to take the local fallback path.
+          echo "BATPAK_MUTANTS_DIFF=/workspace/batpak/bpk-lib/target/smoke-diff.patch" >> "$GITHUB_ENV"
           echo "wrote $(wc -l < bpk-lib/target/smoke-diff.patch) lines of diff for base $base"
       - name: Mutation smoke (critical seam, diff-scoped)
         env:
           BATPAK_DEVCONTAINER_IMAGE: batpak-devcontainer:ci
           BATPAK_DEVCONTAINER_SKIP_BUILD: "1"
-          BATPAK_MUTANTS_DIFF: /workspace/batpak/bpk-lib/target/smoke-diff.patch
         run: bash ./scripts/run-in-devcontainer.sh 'cargo xtask mutants smoke --seam ${{ matrix.seam }}'
 
   mutants-smoke-repo-wide:

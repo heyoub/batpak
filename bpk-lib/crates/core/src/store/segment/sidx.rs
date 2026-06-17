@@ -70,6 +70,20 @@ use std::path::Path;
 /// CRC-verified frame-scan rebuild rather than trusting un-CRC'd bytes.
 pub(crate) const SIDX_MAGIC: &[u8; 4] = b"SDX3";
 
+/// Legacy pre-0.8.3 SIDX magic. A footer tagged `SDX2` carries no CRC32, so its
+/// *content* must never be trusted on read — `read_footer`/`read_layout` keep
+/// rejecting it by matching only [`SIDX_MAGIC`], which degrades to the
+/// CRC-verified frame-scan rebuild.
+///
+/// Its *boundary*, however, must still be honored: the 16-byte trailer geometry
+/// (`string_table_offset(8) + entry_count(4) + magic(4)`) is identical across
+/// `SDX2`/`SDX3`, so `string_table_offset` reliably marks where the frame region
+/// ends. [`crate::store::segment::detect_sidx_boundary`] recognizes BOTH magics so
+/// the frame-scan fallback stops at the true end of frames instead of over-running
+/// into the old un-CRC'd footer bytes (which a frame scan would mis-read as a
+/// corrupt/oversized frame, hard-failing cold start for any non-tail segment).
+pub(crate) const SIDX_MAGIC_LEGACY_SDX2: &[u8; 4] = b"SDX2";
+
 /// Fixed byte size of one serialised [`SidxEntry`] on disk.
 ///
 /// Breakdown:

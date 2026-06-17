@@ -492,6 +492,98 @@ fn sidx_footer_entry_count_disagreement_falls_back_to_frame_scan() {
     store.close().expect("close");
 }
 
+/// Rewrite only the trailing 4-byte SIDX magic from the current `SDX3` to the
+/// legacy pre-0.8.3 `SDX2`, leaving the whole footer (string table + entries +
+/// 16-byte trailer geometry) byte-for-byte intact. This reproduces a real
+/// pre-0.8.3 sealed segment on disk: a structurally-valid SIDX footer whose
+/// magic the post-bump reader no longer trusts (no CRC32 in the SDX2 format),
+/// so `read_footer` returns `Ok(None)` and cold start must fall back to the
+/// CRC-verified frame scan.
+fn downgrade_sidx_magic_to_sdx2(seg: &std::path::Path) {
+    let mut bytes = std::fs::read(seg).expect("read segment");
+    let n = bytes.len();
+    assert!(n >= 16, "segment must hold the 16-byte SIDX trailer");
+    assert_eq!(
+        &bytes[n - 4..],
+        b"SDX3",
+        "seeded segment must carry the current SDX3 SIDX magic before downgrade"
+    );
+    bytes[n - 4..].copy_from_slice(b"SDX2");
+    std::fs::write(seg, bytes).expect("write SDX2-downgraded segment");
+}
+
+#[test]
+fn legacy_sdx2_tail_segment_recovers_all_events_via_frame_scan() {
+    // BACKWARD-COMPAT (P1): a pre-0.8.3 sealed segment carries an SDX2 footer
+    // with no CRC32. After the SDX2->SDX3 magic bump, `read_footer` refuses to
+    // trust SDX2 content (Ok(None)) and cold start frame-scans. The scan must
+    // still honor the SDX2 footer's BOUNDARY (string_table_offset) so it stops
+    // at the true end of frames instead of over-running into the footer bytes.
+    let dir = TempDir::new().expect("temp dir");
+    seed_store(&dir, 8);
+
+    let seg = segment_path(&dir);
+    downgrade_sidx_magic_to_sdx2(&seg);
+
+    let store = Store::open(config(&dir)).expect("reopen pre-0.8.3 SDX2 tail segment");
+    let entries = user_entries(&store);
+    assert_eq!(
+        entries.len(),
+        8,
+        "PROPERTY: a pre-0.8.3 SDX2 sealed segment must recover ALL events via the \
+         frame-scan fallback; got {} (expected 8)",
+        entries.len()
+    );
+    store.close().expect("close");
+}
+
+#[test]
+fn legacy_sdx2_non_tail_segment_recovers_all_events_via_frame_scan() {
+    // The dangerous case the P1 actually bricked: a NON-TAIL (historical) SDX2
+    // segment frame-scans under the fail-closed tail policy. Before the boundary
+    // fix, `detect_sidx_boundary` matched only SDX3, returned None for SDX2, set
+    // frames_end = file_len, and the scan over-ran into the SDX2 string-table
+    // bytes — whose first msgpack byte reads as an oversized frame length,
+    // surfacing CorruptFrame and FAILING the entire store reopen. Recognizing
+    // the SDX2 magic as a boundary marker makes frames_end land exactly at the
+    // end of the frame region, so every committed event is recovered.
+    let dir = TempDir::new().expect("temp dir");
+    let store =
+        Store::open(config(&dir).with_segment_max_bytes(512)).expect("open store for rotation");
+    let coord = Coordinate::new("entity:scan-legacy", "scope:test").expect("valid coord");
+    for i in 0..40 {
+        store
+            .append(
+                &coord,
+                KIND,
+                &serde_json::json!({"i": i, "pad": "x".repeat(96)}),
+            )
+            .expect("append");
+    }
+    store.close().expect("close");
+
+    let segments = segment_paths_sorted(&dir);
+    assert!(
+        segments.len() >= 2,
+        "test must create at least one historical (non-tail) segment plus a tail; got {}",
+        segments.len()
+    );
+    // Downgrade the FIRST (oldest, non-tail) sealed segment to the SDX2 format.
+    downgrade_sidx_magic_to_sdx2(&segments[0]);
+
+    let store = Store::open(config(&dir).with_segment_max_bytes(512))
+        .expect("reopen must succeed: a non-tail SDX2 segment must not brick cold start");
+    let entries = user_entries(&store);
+    assert_eq!(
+        entries.len(),
+        40,
+        "PROPERTY: every event across all segments must survive when an older \
+         segment is in the legacy SDX2 format; got {} (expected 40)",
+        entries.len()
+    );
+    store.close().expect("close");
+}
+
 #[test]
 fn truncating_segment_mid_frame_never_panics() {
     // Truncate a segment inside a frame body. The scanner sees an

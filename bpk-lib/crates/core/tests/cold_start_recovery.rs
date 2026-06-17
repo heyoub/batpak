@@ -203,7 +203,9 @@ fn forced_rotation_then_unclean_reopen_sees_all_segment_entries() {
     // making segment directory-entry visibility load-bearing for recovery.
     let config = StoreConfig::new(dir.path())
         .with_segment_max_bytes(256)
-        .with_sync_every_n_events(1);
+        .with_sync_every_n_events(1)
+        .with_enable_checkpoint(false)
+        .with_enable_mmap_index(false);
 
     let count = 64u32;
     {
