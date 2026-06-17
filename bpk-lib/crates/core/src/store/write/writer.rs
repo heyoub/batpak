@@ -572,22 +572,65 @@ impl WriterState<'_> {
         let old_segment = *self.segment_id;
         #[cfg(feature = "dangerous-test-hooks")]
         let new_segment = *self.segment_id + 1;
-        // Write SIDX footer before sealing. append_frames_from_segment now
-        // strips SIDX data via detect_sidx_boundary, so this is safe.
-        if let Err(e) = self.active_segment.write_sidx_footer(&self.sidx_collector) {
-            tracing::warn!("SIDX footer write failed (non-fatal): {e}");
-        }
-        self.sidx_collector = crate::store::segment::sidx::SidxEntryCollector::new();
+        // Create + fsync the NEW segment FIRST, before touching the old segment
+        // or the collector. `create_with_created_ns` performs the file create
+        // plus the file/dir fsync (Batch F/C4), and is the only step here that
+        // both can fail AND has rollback-requiring side effects. If it fails we
+        // return `?` with the old segment and collector FULLY INTACT: rotation
+        // simply did not happen. The triggering append errors cleanly and the
+        // next append retries against the unchanged old segment — no SIDX footer
+        // has been written to the old segment, the collector still holds every
+        // old entry, so there is no "frame bytes after footer bytes" corruption
+        // and no lost SIDX coverage. (Previously the footer write + collector
+        // reset + old-segment sync happened BEFORE this fallible create, so a
+        // create/fsync failure left the writer running on a half-sealed old
+        // segment with a wiped collector — the silent-corruption P1.)
+        //
+        // Fault injection point models the create/fsync FAILING here, while the
+        // old segment + collector are still pristine. Firing it before the real
+        // create (rather than making the create itself fallible-by-injection)
+        // exercises the exact same rollback path: `?` returns with nothing
+        // mutated, so rotation cleanly did not happen.
+        #[cfg(feature = "dangerous-test-hooks")]
+        crate::store::fault::maybe_inject(
+            crate::store::fault::InjectionPoint::SegmentRotationCreate {
+                old_segment,
+                new_segment,
+            },
+            &self.config.fault_injector,
+        )?;
+        let new_active = Segment::<Active>::create_with_created_ns(
+            &self.config.data_dir,
+            *self.segment_id + 1,
+            self.runtime.now_wall_ns(),
+        )?;
+        // New segment is durably present. Now flush the OLD segment's committed
+        // frames while it is still pristine — before writing the footer or
+        // resetting the collector. This is the second (and last) fallible step
+        // that touches the old segment, so doing it here keeps the same
+        // invariant: if it fails we return `?` with the old segment and
+        // collector still fully intact (no footer written, collector unchanged),
+        // so rotation cleanly did not happen and the next append retries against
+        // the unchanged old segment.
         self.active_segment.sync_with_mode(&self.config.sync.mode)?;
         self.watermark_handle.lock().advance_durable_to_accepted();
-        let old = std::mem::replace(
-            self.active_segment,
-            Segment::<Active>::create_with_created_ns(
-                &self.config.data_dir,
-                *self.segment_id + 1,
-                self.runtime.now_wall_ns(),
-            )?,
-        );
+        // From here on every step is infallible or non-fatal, so the rotation
+        // completes atomically with respect to its fallible side effects.
+        //
+        // Write SIDX footer before sealing. append_frames_from_segment now
+        // strips SIDX data via detect_sidx_boundary, so this is safe. The footer
+        // is a cold-start fast-rebuild optimization: if writing OR its best-effort
+        // durability flush fails, recovery falls back to a full frame scan, so
+        // both are treated as non-fatal and never abort the rotation (aborting
+        // here would reintroduce the half-rotated state this reorder fixes — the
+        // footer would be partially written and the collector about to be reset).
+        if let Err(e) = self.active_segment.write_sidx_footer(&self.sidx_collector) {
+            tracing::warn!("SIDX footer write failed (non-fatal): {e}");
+        } else if let Err(e) = self.active_segment.sync_with_mode(&self.config.sync.mode) {
+            tracing::warn!("SIDX footer durability flush failed (non-fatal): {e}");
+        }
+        self.sidx_collector = crate::store::segment::sidx::SidxEntryCollector::new();
+        let old = std::mem::replace(self.active_segment, new_active);
         let _sealed = old.seal();
         *self.segment_id += 1;
         // Notify the reader of the new active segment so mmap dispatch is correct.
