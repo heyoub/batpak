@@ -33,8 +33,14 @@ impl Reader {
 
         let mut file = crate::store::platform::fs::open_file(path).map_err(StoreError::Io)?;
         let file_len = file.seek(SeekFrom::End(0)).map_err(StoreError::Io)?;
-        let frames_end =
-            segment::detect_sidx_boundary(&mut file, file_len, segment_id)?.unwrap_or(file_len);
+        let boundary = segment::detect_sidx_boundary(&mut file, file_len, segment_id)?;
+        let frames_end = boundary.map_or(file_len, |b| b.frames_end);
+        // An untrusted footer boundary (CRC-failed SDX3, legacy SDX2, or forged
+        // trailer) yields an unauthenticated `frames_end` hint that may over-read
+        // into the corrupt footer. Only then do we recover-what-was-found. With NO
+        // footer, frames legitimately run to EOF and mid-stream corruption must
+        // still FailClosed — so this is gated on the footer actually being present.
+        let untrusted_boundary = boundary.is_some_and(|b| !b.trusted);
         file.seek(SeekFrom::Start(0)).map_err(StoreError::Io)?;
 
         let mut magic = [0u8; 4];
@@ -80,13 +86,32 @@ impl Reader {
             ));
         }
 
-        // The SIDX boundary offset is unauthenticated (not covered by the SDX3
-        // CRC; SDX2 has no CRC). Reject it if it truncates real frames — i.e. a
-        // CRC-valid frame begins exactly at the claimed boundary — so a forged
-        // offset cannot silently drop later CRC-valid frames during the scan.
+        // Resolve the frame-region end based on the offset's provenance.
+        //
+        // Both paths first reject a TRUNCATING boundary — an offset too LOW, where
+        // a CRC-valid frame begins exactly at the claimed boundary, which would
+        // silently drop later committed frames. That guard is provenance-agnostic.
+        //
+        // TRUSTED (CRC-valid SDX3 footer): the offset is authoritative. A
+        // frame-decode failure BEFORE this boundary is genuine mid-stream
+        // corruption and the scan loop below FailCloses on it.
+        //
+        // UNTRUSTED (CRC-failed SDX3, legacy SDX2, or forged trailer): the offset
+        // is an unauthenticated hint that may also point too HIGH, into the corrupt
+        // footer region. After the truncation guard, walk the CRC-valid frames and
+        // clamp `frames_end` down to where they actually stop, so the scan
+        // terminates at the last real frame instead of parsing footer bytes as
+        // frame headers and FailClosing. Recover-what-was-found: over-reading into
+        // a corrupt footer is expected, so a decode failure on the way to the hint
+        // is the clean end of real frames, not a hard error.
         segment::validate_sidx_boundary_not_truncating(
             &mut file, frames_end, file_len, segment_id,
         )?;
+        let frames_end = if untrusted_boundary {
+            segment::crc_valid_frames_end(&mut file, cursor, frames_end)?
+        } else {
+            frames_end
+        };
         file.seek(SeekFrom::Start(cursor)).map_err(StoreError::Io)?;
 
         // Read frames until EOF. Each frame: [len:u32 BE][crc32:u32 BE][msgpack]

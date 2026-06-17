@@ -484,6 +484,39 @@ impl SidxEntryCollector {
 /// Parsed SIDX footer: entries + string table.
 pub(crate) type SidxFooterData = (Vec<SidxEntry>, Vec<String>);
 
+/// Return the `string_table_offset` from a footer **only if its CRC
+/// authenticates** the SDX3 footer.
+///
+/// This is the trust oracle for the frame-region boundary: it runs the exact
+/// same CRC verification as [`read_footer`] (via `footer::read_layout`) over an
+/// already-open reader, but discards the parsed entries — the caller only needs
+/// to know whether the trailer's `string_table_offset` came from an
+/// authenticated footer.
+///
+/// Returns `Ok(Some(offset))` when the footer is a CRC-valid SDX3 footer (the
+/// offset is authoritative). Returns `Ok(None)` when there is no footer, the
+/// CRC mismatches, or the footer is a legacy un-CRC'd SDX2 footer (the offset
+/// is, at best, an unauthenticated hint). Only an actual IO failure surfaces as
+/// [`StoreError::Io`].
+pub(crate) fn authenticated_string_table_offset<R: Read + Seek>(
+    reader: &mut R,
+    segment_id: u64,
+) -> Result<Option<u64>, StoreError> {
+    match footer::read_layout(reader, segment_id) {
+        Ok(Some(layout)) => Ok(Some(layout.string_table_offset)),
+        // No SDX3 magic / CRC mismatch → no authenticated footer.
+        Ok(None) => Ok(None),
+        // A structurally-inconsistent footer (e.g. a forged trailer whose
+        // entry_count/offset geometry is impossible) is NOT trusted — it cannot
+        // authenticate the offset. This is a trust oracle, not the rebuild path,
+        // so we degrade to "untrusted" rather than surfacing the structural error;
+        // the frame-scan recovery is the authority. Only a real IO failure must
+        // still propagate so it is not silently swallowed as untrust.
+        Err(StoreError::Io(e)) => Err(StoreError::Io(e)),
+        Err(_) => Ok(None),
+    }
+}
+
 pub(crate) fn read_footer(path: &Path) -> Result<Option<SidxFooterData>, StoreError> {
     // Derive a segment_id for error messages from the filename ("000042.fbat" → 42).
     // Falls back to 0 if the filename is malformed, but surfaces the parse failure
