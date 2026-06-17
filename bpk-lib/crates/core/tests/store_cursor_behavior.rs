@@ -65,7 +65,7 @@ fn cursor_polls_events_in_order() {
         "PROPERTY: cursor must yield all 5 appended events when polled to exhaustion.\n\
          Investigate: src/store/delivery/cursor.rs poll.\n\
          Common causes: cursor stops at segment boundary, region filter drops valid events.\n\
-         Run: cargo test --test store_advanced cursor_polls_events_in_order"
+         Run: cargo test --test store_cursor_behaviorcursor_polls_events_in_order"
     );
 
     // Verify global_sequence is monotonically increasing
@@ -75,7 +75,7 @@ fn cursor_polls_events_in_order() {
             "PROPERTY: cursor must yield events in strictly ascending global_sequence order.\n\
              Investigate: src/store/delivery/cursor.rs poll.\n\
              Common causes: cursor index not sorted on open, iterator yields unordered segments.\n\
-             Run: cargo test --test store_advanced cursor_polls_events_in_order"
+             Run: cargo test --test store_cursor_behaviorcursor_polls_events_in_order"
         );
     }
 
@@ -109,7 +109,7 @@ fn cursor_poll_batch_respects_boundaries_without_duplicates() {
              Expected counts: {expected_counts:?}\n\
              Investigate: src/store/delivery/cursor.rs poll_batch.\n\
              Common causes: max parameter ignored, exhaustion not sticky, or cursor position drifts between batch calls.\n\
-             Run: cargo test --test store_advanced cursor_poll_batch_respects_boundaries_without_duplicates"
+             Run: cargo test --test store_cursor_behaviorcursor_poll_batch_respects_boundaries_without_duplicates"
         );
 
         let flattened: Vec<u64> = batch_sequences.into_iter().flatten().collect();
@@ -121,7 +121,7 @@ fn cursor_poll_batch_respects_boundaries_without_duplicates() {
              Requests: {requests:?}\n\
              Drained sequences: {flattened:?}\n\
              Investigate: src/store/delivery/cursor.rs poll_batch advancement.\n\
-             Run: cargo test --test store_advanced cursor_poll_batch_respects_boundaries_without_duplicates"
+             Run: cargo test --test store_cursor_behaviorcursor_poll_batch_respects_boundaries_without_duplicates"
         );
 
         let unique: std::collections::HashSet<u64> = flattened.iter().copied().collect();
@@ -133,7 +133,7 @@ fn cursor_poll_batch_respects_boundaries_without_duplicates() {
              Requests: {requests:?}\n\
              Drained sequences: {flattened:?}\n\
              Investigate: src/store/delivery/cursor.rs position tracking.\n\
-             Run: cargo test --test store_advanced cursor_poll_batch_respects_boundaries_without_duplicates"
+             Run: cargo test --test store_cursor_behaviorcursor_poll_batch_respects_boundaries_without_duplicates"
         );
 
         for pair in flattened.windows(2) {
@@ -144,7 +144,7 @@ fn cursor_poll_batch_respects_boundaries_without_duplicates() {
                  Requests: {requests:?}\n\
                  Drained sequences: {flattened:?}\n\
                  Investigate: src/store/delivery/cursor.rs and src/store/index/mod.rs ordering.\n\
-                 Run: cargo test --test store_advanced cursor_poll_batch_respects_boundaries_without_duplicates"
+                 Run: cargo test --test store_cursor_behaviorcursor_poll_batch_respects_boundaries_without_duplicates"
             );
         }
     }
@@ -164,7 +164,7 @@ fn cursor_empty_stream_stays_empty_across_poll_and_batch_calls() {
         "PROPERTY: cursor.poll() on an empty store must return None.\n\
          Investigate: src/store/delivery/cursor.rs poll.\n\
          Common causes: cursor starts with a non-zero position, index returns phantom entries.\n\
-         Run: cargo test --test store_advanced cursor_empty_stream_stays_empty_across_poll_and_batch_calls"
+         Run: cargo test --test store_cursor_behaviorcursor_empty_stream_stays_empty_across_poll_and_batch_calls"
     );
 
     let batch = cursor.poll_batch(10);
@@ -173,7 +173,7 @@ fn cursor_empty_stream_stays_empty_across_poll_and_batch_calls() {
         "PROPERTY: cursor.poll_batch() on an empty stream must return an empty Vec even after a prior empty poll().\n\
          Investigate: src/store/delivery/cursor.rs poll_batch.\n\
          Common causes: empty poll mutates cursor state, or poll_batch fabricates a stale entry.\n\
-         Run: cargo test --test store_advanced cursor_empty_stream_stays_empty_across_poll_and_batch_calls"
+         Run: cargo test --test store_cursor_behaviorcursor_empty_stream_stays_empty_across_poll_and_batch_calls"
     );
 
     assert!(
@@ -181,7 +181,7 @@ fn cursor_empty_stream_stays_empty_across_poll_and_batch_calls() {
         "PROPERTY: an empty cursor must stay empty across repeated poll() calls.\n\
          Investigate: src/store/delivery/cursor.rs poll.\n\
          Common causes: empty-path state machine mutates `started`/position and fabricates later entries.\n\
-         Run: cargo test --test store_advanced cursor_empty_stream_stays_empty_across_poll_and_batch_calls"
+         Run: cargo test --test store_cursor_behaviorcursor_empty_stream_stays_empty_across_poll_and_batch_calls"
     );
 
     assert!(
@@ -189,7 +189,7 @@ fn cursor_empty_stream_stays_empty_across_poll_and_batch_calls() {
         "PROPERTY: an empty cursor must stay empty across repeated poll_batch() calls after prior empty reads.\n\
          Investigate: src/store/delivery/cursor.rs poll_batch.\n\
          Common causes: exhaustion is not sticky, or repeated empty reads reset internal state.\n\
-         Run: cargo test --test store_advanced cursor_empty_stream_stays_empty_across_poll_and_batch_calls"
+         Run: cargo test --test store_cursor_behaviorcursor_empty_stream_stays_empty_across_poll_and_batch_calls"
     );
 
     store.close().expect("close");
@@ -235,7 +235,7 @@ fn cursor_sees_events_appended_after_creation() {
         "PROPERTY: cursor must see events appended after cursor creation.\n\
          Investigate: src/store/delivery/cursor.rs poll_batch, position tracking.\n\
          Common causes: cursor snapshots index at creation time and never refreshes.\n\
-         Run: cargo test --test store_advanced cursor_sees_events_appended_after_creation"
+         Run: cargo test --test store_cursor_behaviorcursor_sees_events_appended_after_creation"
     );
 
     store.close().expect("close");
@@ -288,7 +288,7 @@ fn cursor_ordered_delivery_under_load() {
         "PROPERTY: cursor must deliver exactly {event_count} indexed events under concurrent load.\n\
          Investigate: src/store/delivery/cursor.rs poll_batch, src/store/index/mod.rs.\n\
          Common causes: index race conditions, cursor skips entries during concurrent writes.\n\
-         Run: cargo test --test store_advanced cursor_ordered_delivery_under_load"
+         Run: cargo test --test store_cursor_behaviorcursor_ordered_delivery_under_load"
     );
 
     store.sync().expect("sync");
@@ -324,7 +324,7 @@ fn cursor_repoll_after_eof_sees_new_events() {
         "PROPERTY: Cursor must see new events appended after reaching EOF.\n\
          Investigate: src/store/delivery/cursor.rs poll() position tracking.\n\
          Common causes: position set to max, preventing future polls.\n\
-         Run: cargo test --test store_advanced cursor_repoll_after_eof_sees_new_events"
+         Run: cargo test --test store_cursor_behaviorcursor_repoll_after_eof_sees_new_events"
     );
 }
 

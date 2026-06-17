@@ -1,17 +1,26 @@
-//! Direct tests of ProjectionCache trait methods on the built-in backends.
-//! Plus: integration tests with real Store operations around cache population,
-//! stale reads, and refresh behavior.
+// justifies: pins NativeCache backend mechanics, anchors INV-CACHE-CAPABILITIES-EXPLICIT in src/store/projection/mod.rs
+#![allow(clippy::too_many_lines)]
+//! Direct ProjectionCache backend MECHANICS: the NoCache no-op contract and the
+//! built-in file-backed NativeCache (get/put round-trips, prefix deletes,
+//! reopen persistence, and the Store + NativeCache projection round-trip).
 //!
 //! Integration tests: `cargo test --test projection_cache`
+//! Freshness-window semantics live in `projection_cache_freshness`; corruption
+//! fall-backs live in `projection_cache_corruption`.
 //!
-//! PROVES: LAW-001 (No Fake Success — cached projections must be correct)
-//! DEFENDS: FM-009 (Polite Downgrade — MaybeStale stale-window semantics stay honest)
-//! INVARIANTS: INV-CACHE-CAPABILITIES-EXPLICIT (cache round-trip fidelity), INV-CLOCK-NOW-US-LIVE (freshness semantics), INV-NATIVE-DELETE-IDEMPOTENT (native cache deletion), INV-REPLAY-LANE-SELECTION (replay path selection)
+//! PROVES: LAW-001 (No Fake Success — cached projections must be correct).
+//! CATCHES: drift where NativeCache loses round-trip/persistence fidelity,
+//!   where delete_prefix stops being scoped/idempotent, or where NoCache stops
+//!   being a faithful no-op.
+//! SEEDED: deterministic NativeCache put/get/delete round-trips over a temp dir.
+//! INVARIANTS: INV-CACHE-CAPABILITIES-EXPLICIT (cache round-trip fidelity),
+//!   INV-NATIVE-DELETE-IDEMPOTENT (native cache deletion).
+
+#[path = "support/projection_cache.rs"]
+mod pc_support;
 
 use batpak::store::projection::{CacheMeta, NoCache, ProjectionCache};
-use batpak::store::StoreError;
-use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
-use std::sync::Arc;
+use pc_support::*;
 
 fn test_meta() -> CacheMeta {
     CacheMeta {
@@ -20,82 +29,6 @@ fn test_meta() -> CacheMeta {
         cached_at_mono_ns: None,
         process_boot_ns: None,
     }
-}
-
-struct GetErrorCache;
-
-impl ProjectionCache for GetErrorCache {
-    fn capabilities(&self) -> batpak::store::projection::CacheCapabilities {
-        batpak::store::projection::CacheCapabilities::none()
-    }
-
-    fn get(&self, _key: &[u8]) -> Result<Option<(Vec<u8>, CacheMeta)>, StoreError> {
-        Err(StoreError::CacheFailed(
-            "simulated cache get failure".into(),
-        ))
-    }
-
-    fn put(&self, _key: &[u8], _value: &[u8], _meta: CacheMeta) -> Result<(), StoreError> {
-        Ok(())
-    }
-
-    fn delete_prefix(&self, _prefix: &[u8]) -> Result<u64, StoreError> {
-        Ok(0)
-    }
-
-    fn sync(&self) -> Result<(), StoreError> {
-        Ok(())
-    }
-}
-
-#[derive(Default)]
-struct CacheProbeCounters {
-    gets: AtomicUsize,
-    puts: AtomicUsize,
-    prefetches: AtomicUsize,
-}
-
-struct CountingCache {
-    counters: Arc<CacheProbeCounters>,
-}
-
-impl ProjectionCache for CountingCache {
-    fn capabilities(&self) -> batpak::store::projection::CacheCapabilities {
-        batpak::store::projection::CacheCapabilities {
-            is_noop: false,
-            supports_prefetch: true,
-        }
-    }
-
-    fn get(&self, _key: &[u8]) -> Result<Option<(Vec<u8>, CacheMeta)>, StoreError> {
-        self.counters.gets.fetch_add(1, Ordering::SeqCst);
-        Ok(None)
-    }
-
-    fn put(&self, _key: &[u8], _value: &[u8], _meta: CacheMeta) -> Result<(), StoreError> {
-        self.counters.puts.fetch_add(1, Ordering::SeqCst);
-        Ok(())
-    }
-
-    fn delete_prefix(&self, _prefix: &[u8]) -> Result<u64, StoreError> {
-        Ok(0)
-    }
-
-    fn sync(&self) -> Result<(), StoreError> {
-        Ok(())
-    }
-
-    fn prefetch(&self, _key: &[u8], _predicted_meta: CacheMeta) -> Result<(), StoreError> {
-        self.counters.prefetches.fetch_add(1, Ordering::SeqCst);
-        Ok(())
-    }
-}
-
-fn legacy_cache_bytes(value: &[u8], watermark: u64, cached_at_us: i64) -> Vec<u8> {
-    let mut bytes = value.to_vec();
-    bytes.extend_from_slice(&watermark.to_le_bytes());
-    bytes.extend_from_slice(&cached_at_us.to_le_bytes());
-    bytes
 }
 
 // ================================================================
@@ -134,6 +67,35 @@ fn nocache_delete_prefix_returns_zero() {
 fn nocache_sync_is_noop() {
     let cache = NoCache;
     cache.sync().expect("NoCache::sync should not error.");
+}
+
+#[test]
+fn nocache_ignores_put_and_always_returns_none() {
+    let cache = NoCache;
+    cache.put(b"short", b"x", test_meta()).expect("put");
+    let result = cache.get(b"short").expect("get");
+    assert!(
+        result.is_none(),
+        "CACHE METADATA: NoCache should return None regardless of what was put."
+    );
+}
+
+#[test]
+fn nocache_prefetch_is_noop() {
+    let cache = NoCache;
+    let meta = test_meta();
+    let caps = cache.capabilities();
+    assert!(
+        !caps.supports_prefetch,
+        "NoCache must explicitly report that it does not support prefetch hints."
+    );
+    assert!(
+        caps.is_noop,
+        "NoCache must report itself as a no-op cache backend."
+    );
+    cache
+        .prefetch(b"any_key", meta)
+        .expect("NoCache::prefetch should not error — it's a no-op by default.");
 }
 
 // ================================================================
@@ -271,36 +233,6 @@ mod native_tests {
     }
 
     #[test]
-    fn native_corruption_falls_back_to_cache_miss() {
-        let dir = TempDir::new().expect("temp dir");
-        let cache_path = dir.path().join("cache");
-        let meta = test_meta();
-
-        let cache = NativeCache::open(&cache_path).expect("open");
-        cache.put(b"corrupt_me", b"valid_data", meta).expect("put");
-
-        // Corrupt the file by writing garbage
-        let hex_key: String = b"corrupt_me".iter().map(|b| format!("{b:02x}")).collect();
-        let shard = &hex_key[..2];
-        let corrupt_path = cache_path.join(shard).join(format!("{hex_key}.bin"));
-        std::fs::write(&corrupt_path, b"garbage").expect("write garbage");
-
-        // Get should return None (cache miss), not error
-        let result = cache.get(b"corrupt_me").expect("get should not error");
-        assert!(
-            result.is_none(),
-            "NATIVE CORRUPTION: corrupt cache file should degrade to cache miss, not error.\n\
-             Investigate: src/store/projection/mod.rs NativeCache::get decode error path."
-        );
-
-        // Corrupt file should be deleted (self-healing)
-        assert!(
-            !corrupt_path.exists(),
-            "NATIVE SELF-HEAL: corrupt cache file should be deleted after failed decode."
-        );
-    }
-
-    #[test]
     fn native_delete_prefix_with_0xff_keys() {
         let (cache, _dir) = native_cache();
         let meta = test_meta();
@@ -347,28 +279,12 @@ mod native_tests {
     }
 
     // -- Integration: Store + NativeCache --
+    //
+    // These fold the shared `MaybeStaleCounter` projection (a plain event
+    // counter) so the projection type stays a single source of truth across all
+    // three split binaries.
 
     use batpak::prelude::*;
-
-    #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq)]
-    struct Counter {
-        count: u32,
-    }
-    impl EventSourced for Counter {
-        type Input = batpak::prelude::JsonValueInput;
-
-        fn from_events(events: &[batpak::prelude::Event<serde_json::Value>]) -> Option<Self> {
-            Some(Counter {
-                count: u32::try_from(events.len()).expect("test uses < 2^32 events"),
-            })
-        }
-        fn apply_event(&mut self, _event: &batpak::prelude::Event<serde_json::Value>) {
-            self.count += 1;
-        }
-        fn relevant_event_kinds() -> &'static [EventKind] {
-            &[]
-        }
-    }
 
     #[test]
     fn native_projection_round_trip() {
@@ -391,31 +307,31 @@ mod native_tests {
             .expect("append 2");
 
         // First project: cache miss, replays from segments
-        let result: Option<Counter> = store
+        let result: Option<MaybeStaleCounter> = store
             .project("entity:native1", &Freshness::Consistent)
             .expect("project");
         assert_eq!(
             result,
-            Some(Counter { count: 2 }),
+            Some(MaybeStaleCounter { count: 2 }),
             "NATIVE PROJECTION ROUND-TRIP: first project should replay 2 events."
         );
 
         // Second project: should hit cache (same watermark)
-        let result2: Option<Counter> = store
+        let result2: Option<MaybeStaleCounter> = store
             .project("entity:native1", &Freshness::Consistent)
             .expect("project 2");
-        assert_eq!(result2, Some(Counter { count: 2 }));
+        assert_eq!(result2, Some(MaybeStaleCounter { count: 2 }));
 
         // Append more → cache should be stale → re-replay
         store
             .append(&coord, kind, &serde_json::json!({"x": 3}))
             .expect("append 3");
-        let result3: Option<Counter> = store
+        let result3: Option<MaybeStaleCounter> = store
             .project("entity:native1", &Freshness::Consistent)
             .expect("project 3");
         assert_eq!(
             result3,
-            Some(Counter { count: 3 }),
+            Some(MaybeStaleCounter { count: 3 }),
             "NATIVE CACHE INVALIDATION: after appending more events, project should re-replay."
         );
 
@@ -441,7 +357,7 @@ mod native_tests {
             store
                 .append(&coord, kind, &serde_json::json!({"x": 2}))
                 .expect("append 2");
-            let _: Option<Counter> = store
+            let _: Option<MaybeStaleCounter> = store
                 .project("entity:native-miss", &Freshness::Consistent)
                 .expect("warm cache");
             store.close().expect("close");
@@ -460,10 +376,10 @@ mod native_tests {
 
         {
             let store = Store::open_with_native_cache(config, &cache_path).expect("reopen store");
-            let result: Option<Counter> = store
+            let result: Option<MaybeStaleCounter> = store
                 .project("entity:native-miss", &Freshness::Consistent)
                 .expect("project after delete");
-            assert_eq!(result, Some(Counter { count: 2 }));
+            assert_eq!(result, Some(MaybeStaleCounter { count: 2 }));
             store.close().expect("close");
         }
 
@@ -476,661 +392,4 @@ mod native_tests {
             "NATIVE CACHE MISS PROOF: projecting after delete_prefix must repopulate the cache key."
         );
     }
-}
-
-// ================================================================
-// Freshness::MaybeStale + cache metadata edge cases
-// PROVES: LAW-001 (No Fake Success — stale cache must not serve wrong data)
-// DEFENDS: FM-009 (Polite Downgrade — MaybeStale stale-window semantics stay honest)
-// ================================================================
-
-#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq)]
-struct MaybeStaleCounter {
-    count: u32,
-}
-impl batpak::prelude::EventSourced for MaybeStaleCounter {
-    type Input = batpak::prelude::JsonValueInput;
-
-    fn from_events(events: &[batpak::prelude::Event<serde_json::Value>]) -> Option<Self> {
-        Some(MaybeStaleCounter {
-            count: u32::try_from(events.len()).expect("test uses < 2^32 events"),
-        })
-    }
-    fn apply_event(&mut self, _event: &batpak::prelude::Event<serde_json::Value>) {
-        self.count += 1;
-    }
-    fn relevant_event_kinds() -> &'static [batpak::prelude::EventKind] {
-        &[]
-    }
-}
-
-const MAYBE_STALE_GENERATION_KIND: batpak::prelude::EventKind =
-    batpak::prelude::EventKind::custom(0xF, 0x51);
-
-#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq)]
-struct MaybeStaleGenerationCounter {
-    count: u32,
-}
-
-impl batpak::prelude::EventSourced for MaybeStaleGenerationCounter {
-    type Input = batpak::prelude::JsonValueInput;
-
-    fn from_events(events: &[batpak::prelude::Event<serde_json::Value>]) -> Option<Self> {
-        Some(Self {
-            count: u32::try_from(events.len()).expect("test uses < 2^32 events"),
-        })
-    }
-
-    fn apply_event(&mut self, _event: &batpak::prelude::Event<serde_json::Value>) {
-        self.count += 1;
-    }
-
-    fn relevant_event_kinds() -> &'static [batpak::prelude::EventKind] {
-        &[MAYBE_STALE_GENERATION_KIND]
-    }
-}
-
-fn find_only_native_cache_entry(cache_path: &std::path::Path) -> std::path::PathBuf {
-    let mut stack = vec![cache_path.to_path_buf()];
-    let mut entries = Vec::new();
-
-    while let Some(dir) = stack.pop() {
-        for entry in std::fs::read_dir(&dir).expect("read_dir") {
-            let entry = entry.expect("dir entry");
-            let path = entry.path();
-            if path.is_dir() {
-                stack.push(path);
-            } else if path.extension().and_then(std::ffi::OsStr::to_str) == Some("bin") {
-                entries.push(path);
-            }
-        }
-    }
-
-    assert_eq!(
-        entries.len(),
-        1,
-        "PROJECTION CACHE TEST SETUP: expected exactly one native cache entry, found {}",
-        entries.len()
-    );
-    entries.pop().expect("single cache entry")
-}
-
-#[test]
-fn freshness_maybe_stale_serves_stale_cache_within_window() {
-    use batpak::prelude::*;
-    use batpak::store::{Freshness, NativeCache, Store, StoreConfig};
-    use tempfile::TempDir;
-
-    let dir = TempDir::new().expect("temp dir");
-    let cache_path = dir.path().join("cache");
-    let cache = NativeCache::open(&cache_path).expect("open native cache");
-
-    let config = StoreConfig::new(dir.path().join("data"))
-        .with_segment_max_bytes(4096)
-        .with_sync_every_n_events(1);
-    let store = Store::open_with_cache(config, Box::new(cache)).expect("open store");
-
-    let coord = Coordinate::new("entity:besteff1", "scope:test").expect("coord");
-    let kind = EventKind::custom(0xF, 1);
-    store
-        .append(&coord, kind, &serde_json::json!({"x": 1}))
-        .expect("append 1");
-    store
-        .append(&coord, kind, &serde_json::json!({"x": 2}))
-        .expect("append 2");
-
-    // Project with Consistent to populate cache
-    let result: Option<MaybeStaleCounter> = store
-        .project("entity:besteff1", &Freshness::Consistent)
-        .expect("project consistent");
-    assert_eq!(result, Some(MaybeStaleCounter { count: 2 }));
-
-    // Append a third event — cache is now stale
-    store
-        .append(&coord, kind, &serde_json::json!({"x": 3}))
-        .expect("append 3");
-
-    // MaybeStale with large window should serve the stale cached value
-    let result_best: Option<MaybeStaleCounter> = store
-        .project(
-            "entity:besteff1",
-            &Freshness::MaybeStale {
-                max_stale_ms: 60_000,
-            },
-        )
-        .expect("project maybe stale");
-    assert_eq!(
-        result_best,
-        Some(MaybeStaleCounter { count: 2 }),
-        "FRESHNESS BEST EFFORT: with large stale window, should serve cached value (count=2) \
-         even though a 3rd event was appended.\n\
-         Investigate: src/store/mod.rs project() MaybeStale branch."
-    );
-
-    // MaybeStale with zero window should force re-replay
-    let result_strict: Option<MaybeStaleCounter> = store
-        .project(
-            "entity:besteff1",
-            &Freshness::MaybeStale { max_stale_ms: 0 },
-        )
-        .expect("project maybe stale strict");
-    assert_eq!(
-        result_strict,
-        Some(MaybeStaleCounter { count: 3 }),
-        "FRESHNESS BEST EFFORT ZERO: with max_stale_ms=0, cache should always be considered \
-         stale, forcing a full replay (count=3)."
-    );
-
-    store.close().expect("close");
-}
-
-#[test]
-fn freshness_maybe_stale_replays_when_stale_cache_bytes_are_corrupt() {
-    use batpak::prelude::*;
-    use batpak::store::{Freshness, Store, StoreConfig};
-    use tempfile::TempDir;
-
-    let dir = TempDir::new().expect("temp dir");
-    let cache_path = dir.path().join("cache");
-
-    let config = StoreConfig::new(dir.path().join("data"))
-        .with_segment_max_bytes(4096)
-        .with_sync_every_n_events(1);
-    let coord = Coordinate::new("entity:maybe-stale-corrupt", "scope:test").expect("coord");
-    let kind = EventKind::custom(0xF, 1);
-
-    {
-        let store = Store::open_with_native_cache(config.clone(), &cache_path).expect("open store");
-        store
-            .append(&coord, kind, &serde_json::json!({"x": 1}))
-            .expect("append 1");
-        store
-            .append(&coord, kind, &serde_json::json!({"x": 2}))
-            .expect("append 2");
-
-        let seeded: Option<MaybeStaleCounter> = store
-            .project("entity:maybe-stale-corrupt", &Freshness::Consistent)
-            .expect("seed cache");
-        assert_eq!(seeded, Some(MaybeStaleCounter { count: 2 }));
-
-        // Advance the entity so the warmed cache row is stale by watermark,
-        // but keep the row young enough that MaybeStale would otherwise try
-        // to serve it from the external cache.
-        store
-            .append(&coord, kind, &serde_json::json!({"x": 3}))
-            .expect("append 3");
-        store.close().expect("close seeded store");
-    }
-
-    let cache_entry = find_only_native_cache_entry(&cache_path);
-    let mut corrupted = std::fs::read(&cache_entry).expect("read cache entry");
-    let last = corrupted
-        .len()
-        .checked_sub(1)
-        .expect("non-empty cache entry");
-    corrupted[last] ^= 0x5A;
-    std::fs::write(&cache_entry, corrupted).expect("corrupt cache entry");
-
-    let store = Store::open_with_native_cache(config, &cache_path).expect("reopen store");
-    let result: Option<MaybeStaleCounter> = store
-        .project(
-            "entity:maybe-stale-corrupt",
-            &Freshness::MaybeStale {
-                max_stale_ms: 60_000,
-            },
-        )
-        .expect("project maybe stale after corruption");
-    assert_eq!(
-        result,
-        Some(MaybeStaleCounter { count: 3 }),
-        "MAYBE STALE CORRUPTION HONESTY: a stale-but-young corrupt cache row must fall back to replay and return the current folded state.\n\
-         It must not serve garbage and must not preserve the stale count=2 row just because the age window still says 'fresh enough'."
-    );
-    store.close().expect("close");
-}
-
-#[test]
-fn freshness_maybe_stale_replays_when_fresh_cache_bytes_are_corrupt() {
-    use batpak::prelude::*;
-    use batpak::store::{Freshness, Store, StoreConfig};
-    use tempfile::TempDir;
-
-    let dir = TempDir::new().expect("temp dir");
-    let cache_path = dir.path().join("cache");
-
-    let config = StoreConfig::new(dir.path().join("data"))
-        .with_segment_max_bytes(4096)
-        .with_sync_every_n_events(1);
-    let coord = Coordinate::new("entity:maybe-stale-fresh-corrupt", "scope:test").expect("coord");
-    let kind = EventKind::custom(0xF, 1);
-
-    {
-        let store = Store::open_with_native_cache(config.clone(), &cache_path).expect("open store");
-        store
-            .append(&coord, kind, &serde_json::json!({"x": 1}))
-            .expect("append 1");
-        store
-            .append(&coord, kind, &serde_json::json!({"x": 2}))
-            .expect("append 2");
-
-        let seeded: Option<MaybeStaleCounter> = store
-            .project("entity:maybe-stale-fresh-corrupt", &Freshness::Consistent)
-            .expect("seed cache");
-        assert_eq!(seeded, Some(MaybeStaleCounter { count: 2 }));
-        store.close().expect("close seeded store");
-    }
-
-    let cache_entry = find_only_native_cache_entry(&cache_path);
-    let mut corrupted = std::fs::read(&cache_entry).expect("read cache entry");
-    let first = corrupted.first_mut().expect("non-empty cache entry");
-    *first ^= 0xA5;
-    std::fs::write(&cache_entry, corrupted).expect("corrupt cache entry");
-
-    let store = Store::open_with_native_cache(config, &cache_path).expect("reopen store");
-    let result: Option<MaybeStaleCounter> = store
-        .project(
-            "entity:maybe-stale-fresh-corrupt",
-            &Freshness::MaybeStale {
-                max_stale_ms: 60_000,
-            },
-        )
-        .expect("project maybe stale after fresh corruption");
-    assert_eq!(
-        result,
-        Some(MaybeStaleCounter { count: 2 }),
-        "MAYBE STALE FRESH CORRUPTION HONESTY: a fresh-but-corrupt cache row must fall back to replay and return the current folded state.\n\
-         It must not fail open just because the age window still says 'fresh enough'."
-    );
-    store.close().expect("close");
-}
-
-#[test]
-fn project_if_changed_never_pairs_maybe_stale_cache_with_new_generation() {
-    use batpak::prelude::*;
-    use batpak::store::{Freshness, NativeCache, Store, StoreConfig};
-    use tempfile::TempDir;
-
-    let dir = TempDir::new().expect("temp dir");
-    let cache_path = dir.path().join("cache");
-    let cache = NativeCache::open(&cache_path).expect("open native cache");
-
-    let config = StoreConfig::new(dir.path().join("data"))
-        .with_segment_max_bytes(4096)
-        .with_sync_every_n_events(1);
-    let store = Store::open_with_cache(config, Box::new(cache)).expect("open store");
-
-    let coord = Coordinate::new("entity:generation-honesty", "scope:test").expect("coord");
-    store
-        .append(
-            &coord,
-            MAYBE_STALE_GENERATION_KIND,
-            &serde_json::json!({"x": 1}),
-        )
-        .expect("append 1");
-    store
-        .append(
-            &coord,
-            MAYBE_STALE_GENERATION_KIND,
-            &serde_json::json!({"x": 2}),
-        )
-        .expect("append 2");
-
-    let seeded: Option<MaybeStaleGenerationCounter> = store
-        .project("entity:generation-honesty", &Freshness::Consistent)
-        .expect("seed cache");
-    assert_eq!(seeded, Some(MaybeStaleGenerationCounter { count: 2 }));
-
-    let baseline_generation = store
-        .entity_generation("entity:generation-honesty")
-        .expect("baseline generation");
-
-    store
-        .append(
-            &coord,
-            MAYBE_STALE_GENERATION_KIND,
-            &serde_json::json!({"x": 3}),
-        )
-        .expect("append 3");
-
-    let changed = store
-        .project_if_changed::<MaybeStaleGenerationCounter>(
-            "entity:generation-honesty",
-            baseline_generation,
-            &Freshness::MaybeStale {
-                max_stale_ms: 60_000,
-            },
-        )
-        .expect("project_if_changed")
-        .expect("changed projection");
-
-    assert!(
-        changed.0 > baseline_generation,
-        "generation should advance after the third relevant append"
-    );
-    assert_eq!(
-        changed.1,
-        Some(MaybeStaleGenerationCounter { count: 3 }),
-        "PROPERTY: project_if_changed must not return stale cache bytes together with a newer generation token.\n\
-         Investigate: src/store/projection/flow.rs project_if_changed() MaybeStale path."
-    );
-
-    store.close().expect("close");
-}
-
-#[test]
-fn empty_projection_surface_skips_cache_for_no_replay_plan() {
-    use batpak::store::{Freshness, Store, StoreConfig};
-    use tempfile::TempDir;
-
-    let dir = TempDir::new().expect("temp dir");
-    let counters = Arc::new(CacheProbeCounters::default());
-    let cache = CountingCache {
-        counters: Arc::clone(&counters),
-    };
-    let config = StoreConfig::new(dir.path().join("data"))
-        .with_segment_max_bytes(4096)
-        .with_sync_every_n_events(1);
-    let store = Store::open_with_cache(config, Box::new(cache)).expect("open store");
-
-    let consistent: Option<MaybeStaleCounter> = store
-        .project("entity:no-events", &Freshness::Consistent)
-        .expect("project empty consistent");
-    let maybe_stale: Option<MaybeStaleCounter> = store
-        .project(
-            "entity:no-events",
-            &Freshness::MaybeStale {
-                max_stale_ms: 60_000,
-            },
-        )
-        .expect("project empty maybe stale");
-    let unchanged = store
-        .project_if_changed::<MaybeStaleCounter>("entity:no-events", 0, &Freshness::Consistent)
-        .expect("project_if_changed empty");
-
-    assert_eq!(
-        consistent, None,
-        "EMPTY PROJECTION SURFACE: project() on an entity with no replay plan should return None."
-    );
-    assert_eq!(
-        maybe_stale, None,
-        "EMPTY PROJECTION SURFACE: MaybeStale must not invent a cache-backed value for an empty entity."
-    );
-    assert_eq!(
-        unchanged, None,
-        "EMPTY PROJECTION SURFACE: project_if_changed() should report no change for a never-seen entity."
-    );
-    assert_eq!(
-        counters.gets.load(Ordering::SeqCst),
-        0,
-        "EMPTY PROJECTION SURFACE: no replay plan should skip external cache get entirely."
-    );
-    assert_eq!(
-        counters.prefetches.load(Ordering::SeqCst),
-        0,
-        "EMPTY PROJECTION SURFACE: no replay plan should skip cache prefetch entirely."
-    );
-    assert_eq!(
-        counters.puts.load(Ordering::SeqCst),
-        0,
-        "EMPTY PROJECTION SURFACE: no replay plan should not populate cache."
-    );
-
-    store.close().expect("close");
-}
-
-#[test]
-fn consistent_replays_when_reopened_native_cache_row_is_stale() {
-    use batpak::prelude::*;
-    use batpak::store::{Freshness, Store, StoreConfig};
-    use tempfile::TempDir;
-
-    let dir = TempDir::new().expect("temp dir");
-    let cache_path = dir.path().join("cache");
-    let config = StoreConfig::new(dir.path().join("data"))
-        .with_segment_max_bytes(4096)
-        .with_sync_every_n_events(1);
-    let coord = Coordinate::new("entity:consistent-stale-cache", "scope:test").expect("coord");
-    let kind = EventKind::custom(0xF, 1);
-
-    {
-        let store = Store::open_with_native_cache(config.clone(), &cache_path).expect("open store");
-        store
-            .append(&coord, kind, &serde_json::json!({"x": 1}))
-            .expect("append 1");
-        store
-            .append(&coord, kind, &serde_json::json!({"x": 2}))
-            .expect("append 2");
-        let seeded: Option<MaybeStaleCounter> = store
-            .project("entity:consistent-stale-cache", &Freshness::Consistent)
-            .expect("seed cache");
-        assert_eq!(seeded, Some(MaybeStaleCounter { count: 2 }));
-        store.close().expect("close seeded store");
-    }
-
-    {
-        let store = Store::open_with_native_cache(config, &cache_path).expect("reopen store");
-        store
-            .append(&coord, kind, &serde_json::json!({"x": 3}))
-            .expect("append 3");
-        let result: Option<MaybeStaleCounter> = store
-            .project("entity:consistent-stale-cache", &Freshness::Consistent)
-            .expect("project after stale cache");
-        assert_eq!(
-            result,
-            Some(MaybeStaleCounter { count: 3 }),
-            "CONSISTENT STALE CACHE HONESTY: after reopen, a populated external cache row with an older watermark must be bypassed and replayed."
-        );
-        store.close().expect("close");
-    }
-}
-
-#[test]
-fn maybe_stale_replays_when_cache_row_has_valid_metadata_but_empty_payload() {
-    use batpak::prelude::*;
-    use batpak::store::{Freshness, Store, StoreConfig};
-    use tempfile::TempDir;
-
-    let dir = TempDir::new().expect("temp dir");
-    let cache_path = dir.path().join("cache");
-    let config = StoreConfig::new(dir.path().join("data"))
-        .with_segment_max_bytes(4096)
-        .with_sync_every_n_events(1);
-    let coord = Coordinate::new("entity:metadata-only-stale", "scope:test").expect("coord");
-    let kind = EventKind::custom(0xF, 1);
-
-    {
-        let store = Store::open_with_native_cache(config.clone(), &cache_path).expect("open store");
-        store
-            .append(&coord, kind, &serde_json::json!({"x": 1}))
-            .expect("append 1");
-        store
-            .append(&coord, kind, &serde_json::json!({"x": 2}))
-            .expect("append 2");
-        let seeded: Option<MaybeStaleCounter> = store
-            .project("entity:metadata-only-stale", &Freshness::Consistent)
-            .expect("seed cache");
-        assert_eq!(seeded, Some(MaybeStaleCounter { count: 2 }));
-        store
-            .append(&coord, kind, &serde_json::json!({"x": 3}))
-            .expect("append 3");
-        store.close().expect("close seeded store");
-    }
-
-    let cache_entry = find_only_native_cache_entry(&cache_path);
-    std::fs::write(&cache_entry, legacy_cache_bytes(&[], 2, 1_000_000))
-        .expect("write metadata-only legacy cache entry");
-
-    let store = Store::open_with_native_cache(config, &cache_path).expect("reopen store");
-    let result: Option<MaybeStaleCounter> = store
-        .project(
-            "entity:metadata-only-stale",
-            &Freshness::MaybeStale {
-                max_stale_ms: 60_000,
-            },
-        )
-        .expect("project maybe stale after metadata-only cache row");
-    assert_eq!(
-        result,
-        Some(MaybeStaleCounter { count: 3 }),
-        "METADATA-ONLY CACHE HONESTY: a cache file with valid metadata but undecodable payload must replay rather than serve a stale MaybeStale success."
-    );
-    store.close().expect("close");
-}
-
-#[test]
-fn consistent_replays_when_cache_row_has_valid_metadata_but_truncated_payload() {
-    use batpak::prelude::*;
-    use batpak::store::{Freshness, Store, StoreConfig};
-    use tempfile::TempDir;
-
-    let dir = TempDir::new().expect("temp dir");
-    let cache_path = dir.path().join("cache");
-    let config = StoreConfig::new(dir.path().join("data"))
-        .with_segment_max_bytes(4096)
-        .with_sync_every_n_events(1);
-    let coord = Coordinate::new("entity:metadata-valid-truncated", "scope:test").expect("coord");
-    let kind = EventKind::custom(0xF, 1);
-
-    {
-        let store = Store::open_with_native_cache(config.clone(), &cache_path).expect("open store");
-        store
-            .append(&coord, kind, &serde_json::json!({"x": 1}))
-            .expect("append 1");
-        store
-            .append(&coord, kind, &serde_json::json!({"x": 2}))
-            .expect("append 2");
-        let seeded: Option<MaybeStaleCounter> = store
-            .project("entity:metadata-valid-truncated", &Freshness::Consistent)
-            .expect("seed cache");
-        assert_eq!(seeded, Some(MaybeStaleCounter { count: 2 }));
-        store.close().expect("close seeded store");
-    }
-
-    let cache_entry = find_only_native_cache_entry(&cache_path);
-    std::fs::write(&cache_entry, legacy_cache_bytes(b"\x92", 2, 1_000_000))
-        .expect("write truncated-payload legacy cache entry");
-
-    let store = Store::open_with_native_cache(config, &cache_path).expect("reopen store");
-    let result: Option<MaybeStaleCounter> = store
-        .project("entity:metadata-valid-truncated", &Freshness::Consistent)
-        .expect("project after truncated cache payload");
-    assert_eq!(
-        result,
-        Some(MaybeStaleCounter { count: 2 }),
-        "TRUNCATED PAYLOAD CACHE HONESTY: valid cache metadata with an undecodable payload must fall back to replay under Consistent freshness."
-    );
-    store.close().expect("close");
-}
-
-#[test]
-fn projection_replays_when_cache_get_errors() {
-    use batpak::prelude::*;
-    use batpak::store::{Freshness, Store, StoreConfig};
-    use tempfile::TempDir;
-
-    let dir = TempDir::new().expect("temp dir");
-    let config = StoreConfig::new(dir.path().join("data"))
-        .with_segment_max_bytes(4096)
-        .with_sync_every_n_events(1);
-    let store = Store::open_with_cache(config, Box::new(GetErrorCache)).expect("open store");
-    let coord = Coordinate::new("entity:cache-get-error", "scope:test").expect("coord");
-    let kind = EventKind::custom(0xF, 1);
-    store
-        .append(&coord, kind, &serde_json::json!({"x": 1}))
-        .expect("append 1");
-    store
-        .append(&coord, kind, &serde_json::json!({"x": 2}))
-        .expect("append 2");
-
-    let result: Option<MaybeStaleCounter> = store
-        .project("entity:cache-get-error", &Freshness::Consistent)
-        .expect("project after cache get error");
-    assert_eq!(
-        result,
-        Some(MaybeStaleCounter { count: 2 }),
-        "CACHE GET ERROR HONESTY: a cache backend get failure must fall back to replay and return the honest folded state."
-    );
-
-    store.close().expect("close");
-}
-
-#[test]
-fn freshness_maybe_stale_replays_at_exact_age_boundary() {
-    use batpak::prelude::*;
-    use batpak::store::{Freshness, NativeCache, Store, StoreConfig};
-    use tempfile::TempDir;
-
-    let dir = TempDir::new().expect("temp dir");
-    let cache_path = dir.path().join("cache");
-    let cache = NativeCache::open(&cache_path).expect("open native cache");
-    let now_us = Arc::new(AtomicI64::new(1_000_000));
-    let clock = Arc::clone(&now_us);
-
-    let config = StoreConfig::new(dir.path().join("data"))
-        .with_segment_max_bytes(4096)
-        .with_sync_every_n_events(1)
-        .with_clock_fn(move || clock.load(Ordering::SeqCst));
-    let store = Store::open_with_cache(config, Box::new(cache)).expect("open store");
-
-    let coord = Coordinate::new("entity:maybe-stale-boundary", "scope:test").expect("coord");
-    let kind = EventKind::custom(0xF, 1);
-    store
-        .append(&coord, kind, &serde_json::json!({"x": 1}))
-        .expect("append 1");
-    store
-        .append(&coord, kind, &serde_json::json!({"x": 2}))
-        .expect("append 2");
-
-    let seeded: Option<MaybeStaleCounter> = store
-        .project("entity:maybe-stale-boundary", &Freshness::Consistent)
-        .expect("seed cache");
-    assert_eq!(seeded, Some(MaybeStaleCounter { count: 2 }));
-
-    store
-        .append(&coord, kind, &serde_json::json!({"x": 3}))
-        .expect("append 3");
-
-    now_us.store(1_005_000, Ordering::SeqCst);
-    let result: Option<MaybeStaleCounter> = store
-        .project(
-            "entity:maybe-stale-boundary",
-            &Freshness::MaybeStale { max_stale_ms: 5 },
-        )
-        .expect("project maybe stale at boundary");
-    assert_eq!(
-        result,
-        Some(MaybeStaleCounter { count: 3 }),
-        "MAYBE STALE BOUNDARY HONESTY: when cache age equals max_stale_ms exactly, the strict '<' boundary must force replay rather than serve the stale row."
-    );
-
-    store.close().expect("close");
-}
-
-#[test]
-fn nocache_ignores_put_and_always_returns_none() {
-    let cache = NoCache;
-    cache.put(b"short", b"x", test_meta()).expect("put");
-    let result = cache.get(b"short").expect("get");
-    assert!(
-        result.is_none(),
-        "CACHE METADATA: NoCache should return None regardless of what was put."
-    );
-}
-
-#[test]
-fn nocache_prefetch_is_noop() {
-    let cache = NoCache;
-    let meta = test_meta();
-    let caps = cache.capabilities();
-    assert!(
-        !caps.supports_prefetch,
-        "NoCache must explicitly report that it does not support prefetch hints."
-    );
-    assert!(
-        caps.is_noop,
-        "NoCache must report itself as a no-op cache backend."
-    );
-    cache
-        .prefetch(b"any_key", meta)
-        .expect("NoCache::prefetch should not error — it's a no-op by default.");
 }

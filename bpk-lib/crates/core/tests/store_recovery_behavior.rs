@@ -54,7 +54,7 @@ fn fd_budget_evicts_oldest_segments() {
         "PROPERTY: writing 100 events with segment_max_bytes=512 must create more than 2 segment files.\n\
          Investigate: src/store/write/writer.rs segment rotation logic.\n\
          Common causes: rotation threshold not honoured, all events written to one segment.\n\
-         Run: cargo test --test store_advanced fd_budget_evicts_oldest_segments"
+         Run: cargo test --test store_recovery_behaviorfd_budget_evicts_oldest_segments"
     );
 
     // Read events from different segments — this exercises LRU eviction
@@ -66,7 +66,7 @@ fn fd_budget_evicts_oldest_segments() {
         "PROPERTY: stream must return all 100 appended events even when fd_budget forces LRU eviction.\n\
          Investigate: src/store/segment/scan.rs get_fd LRU cache, src/store/mod.rs stream.\n\
          Common causes: evicted segment FD not re-opened on next access, stream skips closed segments.\n\
-         Run: cargo test --test store_advanced fd_budget_evicts_oldest_segments"
+         Run: cargo test --test store_recovery_behaviorfd_budget_evicts_oldest_segments"
     );
 
     // Read first event (oldest segment), last event (newest), then first again
@@ -88,7 +88,7 @@ fn fd_budget_evicts_oldest_segments() {
         "PROPERTY: re-reading the same event after LRU fd eviction must return the identical event_id.\n\
          Investigate: src/store/segment/scan.rs get_fd LRU cache.\n\
          Common causes: evicted segment FD reopened to wrong offset, cache key collision after eviction.\n\
-         Run: cargo test --test store_advanced fd_budget_evicts_oldest_segments"
+         Run: cargo test --test store_recovery_behaviorfd_budget_evicts_oldest_segments"
     );
 
     // Verify event identity integrity through eviction cycles
@@ -99,7 +99,7 @@ fn fd_budget_evicts_oldest_segments() {
          even when read from different segments after LRU eviction.\n\
          Investigate: src/store/segment/scan.rs get_fd LRU cache, src/store/segment/mod.rs read_frame.\n\
          Common causes: frame data corrupted during eviction cycle, wrong frame decoded after re-open.\n\
-         Run: cargo test --test store_advanced fd_budget_evicts_oldest_segments"
+         Run: cargo test --test store_recovery_behaviorfd_budget_evicts_oldest_segments"
     );
 
     store.close().expect("close");
@@ -197,7 +197,7 @@ fn corrupt_frame_in_segment_is_detected() {
         "PROPERTY: after appending events and syncing, at least one .fbat segment file must exist.\n\
          Investigate: src/store/write/writer.rs sync, src/store/segment/mod.rs write path.\n\
          Common causes: sync no-op, segment file never flushed to disk, wrong extension used.\n\
-         Run: cargo test --test store_advanced corrupt_frame_in_segment_is_detected"
+         Run: cargo test --test store_recovery_behaviorcorrupt_frame_in_segment_is_detected"
     );
 
     let seg_path = segments[0].path();
