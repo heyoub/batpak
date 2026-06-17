@@ -11,6 +11,17 @@ impl<State> Store<State> {
         lifecycle::diagnostics(self)
     }
 
+    /// Number of keys currently held in the durable idempotency store.
+    ///
+    /// This is the persistent dedup authority that survives retention
+    /// compaction, cold-start, and snapshot independent of event eviction. It
+    /// can temporarily exceed the configured soft cap under a within-window
+    /// key-rate spike (the window always wins on correctness). Exposed for
+    /// diagnostics and durability tests.
+    pub fn durable_idempotency_key_count(&self) -> usize {
+        self.index.idemp.len()
+    }
+
     /// Deterministic store resource evidence over stable [`StoreDiagnostics`] facts.
     ///
     /// Canonical identity excludes raw paths (uses [`store_data_dir_identity_hash`]),

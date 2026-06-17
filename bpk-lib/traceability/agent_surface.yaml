@@ -377,3 +377,24 @@ tasks:
       - "CONFORMANCE.md"
       - "EVENTS.md"
       - "REPLAY.md"
+
+  idempotent_pass:
+    problem: "Make a keyed append a durable, re-runnable no-op that survives retention compaction and cold-start."
+    use:
+      - "IdempotencyKey::for_operation"
+      - "AppendOptions::with_idempotency"
+      - "StoreConfig::with_idempotency_retention"
+    avoid:
+      - "treating for_operation as a payload content hash"
+      - "assuming dedup only survives the event retention window"
+    examples:
+      - "crates/core/examples/idempotent_pass.rs"
+    tests:
+      - "crates/core/tests/idempotency_durable_store.rs"
+      - "crates/core/tests/idempotency_window_priority.rs"
+    invariants:
+      - "a within-window keyed retry is always a no-op regardless of load"
+      - "the durable idempotency sidecar survives compaction, cold-start, and snapshot"
+    docs:
+      - "cookbook/200_IDEMPOTENT_PASS.md"
+      - "EVENTS.md"

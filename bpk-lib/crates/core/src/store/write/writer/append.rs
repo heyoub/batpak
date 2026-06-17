@@ -52,6 +52,30 @@ impl WriterState<'_> {
         }
 
         if let Some(key) = guards.idempotency_key {
+            // Durable map FIRST: a hit here is a true no-op even if the
+            // underlying event has been evicted by retention compaction.
+            // justifies: INV-IDEMPOTENCY-DURABLE-WINDOW
+            if let Some(durable) = self.index.idemp.get(key) {
+                let mut receipt = AppendReceipt {
+                    event_id: crate::id::EventId::from(durable.event_id),
+                    sequence: durable.global_sequence,
+                    disk_pos: durable.disk_pos(),
+                    content_hash: durable.content_hash,
+                    key_id: [0; 32],
+                    signature: None,
+                    extensions: durable.receipt_extensions.clone(),
+                };
+                let coord = crate::coordinate::Coordinate::new(&durable.entity, &durable.scope)?;
+                self.runtime.signing_registry.sign_append_receipt(
+                    &mut receipt,
+                    &coord,
+                    durable.kind,
+                    durable.prev_hash,
+                );
+                return Ok(receipt);
+            }
+            // Fall through to the live `by_id` path (covers entries recorded
+            // before the durable store existed and preserves prior behavior).
             if let Some(entry) = self.index.get_by_id(key) {
                 let mut receipt = AppendReceipt {
                     event_id: crate::id::EventId::from(entry.event_id),
@@ -70,6 +94,9 @@ impl WriterState<'_> {
                 );
                 return Ok(receipt);
             }
+            // Genuinely new key: enforce the soft-cap overflow policy BEFORE we
+            // commit. FailClosed/Backpressure refuse here; Warn proceeds.
+            self.index.idemp.admit_new_key(key)?;
         }
 
         let prev_hash = latest
@@ -211,6 +238,18 @@ impl WriterState<'_> {
             committed.index_entry.coord.entity(),
             committed.index_entry.coord.scope(),
         );
+        // Record the durable idempotency entry on every successful KEYED
+        // append, capturing exactly the no-op reconstruction tuple. This
+        // survives retention compaction and cold-start independent of the
+        // event frame. justifies: INV-IDEMPOTENCY-DURABLE-WINDOW
+        if guards.idempotency_key.is_some() {
+            self.index
+                .idemp
+                .record(crate::store::index::idemp::IdempEntry::from_index_entry(
+                    &committed.index_entry,
+                    global_seq,
+                ));
+        }
         self.index.insert(committed.index_entry);
 
         debug!(event_id = %event.header.event_id, clock = clock, "append committed");

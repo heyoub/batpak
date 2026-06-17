@@ -218,6 +218,8 @@ fn scan_index_maps_variant_insert_and_query() {
         incremental_projection: false,
         enable_checkpoint: true,
         enable_mmap_index: true,
+        idempotency_retention: crate::store::IdempotencyRetention::default(),
+        idempotency_overflow: crate::store::OverflowPolicy::default(),
     });
     for i in 0u64..7 {
         si.insert(&make_entry(KIND_A, i, "e1", "s1"));
@@ -232,6 +234,8 @@ fn scan_index_soa_variant_insert_and_query() {
         incremental_projection: false,
         enable_checkpoint: true,
         enable_mmap_index: true,
+        idempotency_retention: crate::store::IdempotencyRetention::default(),
+        idempotency_overflow: crate::store::OverflowPolicy::default(),
     });
     for i in 0u64..12 {
         si.insert(&make_entry(KIND_A, i, "e1", "s2"));
@@ -340,6 +344,8 @@ fn scan_capabilities_follow_topology_truth() {
             incremental_projection: false,
             enable_checkpoint: true,
             enable_mmap_index: true,
+            idempotency_retention: crate::store::IdempotencyRetention::default(),
+            idempotency_overflow: crate::store::OverflowPolicy::default(),
         });
         assert_eq!(
             si.capabilities(),
@@ -357,6 +363,8 @@ fn scan_index_aosoa8_variant() {
         incremental_projection: false,
         enable_checkpoint: true,
         enable_mmap_index: true,
+        idempotency_retention: crate::store::IdempotencyRetention::default(),
+        idempotency_overflow: crate::store::OverflowPolicy::default(),
     });
     for i in 0u64..20 {
         si.insert(&make_entry(KIND_A, i, "e1", "s1"));
@@ -371,6 +379,8 @@ fn scan_index_maps_scope_entity_set() {
         incremental_projection: false,
         enable_checkpoint: true,
         enable_mmap_index: true,
+        idempotency_retention: crate::store::IdempotencyRetention::default(),
+        idempotency_overflow: crate::store::OverflowPolicy::default(),
     });
     si.insert(&make_entry(KIND_A, 0, "ent-1", "my-scope"));
     si.insert(&make_entry(KIND_A, 1, "ent-2", "my-scope"));
@@ -388,6 +398,8 @@ fn scan_index_columnar_scope_entity_set_uses_base_aos_view() {
         incremental_projection: false,
         enable_checkpoint: true,
         enable_mmap_index: true,
+        idempotency_retention: crate::store::IdempotencyRetention::default(),
+        idempotency_overflow: crate::store::OverflowPolicy::default(),
     });
     si.insert(&make_entry(KIND_A, 0, "ent-1", "my-scope"));
     let set = si
@@ -403,6 +415,8 @@ fn scan_index_clear() {
         incremental_projection: false,
         enable_checkpoint: true,
         enable_mmap_index: true,
+        idempotency_retention: crate::store::IdempotencyRetention::default(),
+        idempotency_overflow: crate::store::OverflowPolicy::default(),
     });
     for i in 0u64..5 {
         si.insert(&make_entry(KIND_A, i, "e1", "s1"));
@@ -418,6 +432,8 @@ fn scan_index_soaos_variant() {
         incremental_projection: false,
         enable_checkpoint: true,
         enable_mmap_index: true,
+        idempotency_retention: crate::store::IdempotencyRetention::default(),
+        idempotency_overflow: crate::store::OverflowPolicy::default(),
     });
     for i in 0u64..10 {
         si.insert(&make_entry(KIND_A, i, "e1", "s1"));
@@ -435,6 +451,8 @@ fn entity_local_projection_fast_paths_round_trip() {
         incremental_projection: false,
         enable_checkpoint: true,
         enable_mmap_index: true,
+        idempotency_retention: crate::store::IdempotencyRetention::default(),
+        idempotency_overflow: crate::store::OverflowPolicy::default(),
     });
     si.insert(&make_entry(KIND_A, 0, "entity:projection", "scope:test"));
     si.insert(&make_entry(KIND_A, 1, "entity:projection", "scope:test"));
@@ -466,6 +484,8 @@ fn scan_capabilities_track_tile_count_for_tiled_views() {
         incremental_projection: false,
         enable_checkpoint: true,
         enable_mmap_index: true,
+        idempotency_retention: crate::store::IdempotencyRetention::default(),
+        idempotency_overflow: crate::store::OverflowPolicy::default(),
     });
     for i in 0u64..130 {
         si.insert(&make_entry(KIND_A, i, "e1", "s1"));

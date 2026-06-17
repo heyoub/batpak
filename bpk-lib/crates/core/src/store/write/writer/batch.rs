@@ -88,7 +88,29 @@ impl WriterState<'_> {
             if let Some(key) = item.options().idempotency_key {
                 use crate::id::EntityIdType;
                 keyed_count += 1;
-                if let Some(entry) = self.index.get_by_id(key.as_u128()) {
+                // Durable map FIRST (survives compaction/cold-start), then the
+                // live `by_id` path. justifies: INV-IDEMPOTENCY-DURABLE-WINDOW
+                if let Some(durable) = self.index.idemp.get(key.as_u128()) {
+                    let mut receipt = AppendReceipt {
+                        event_id: crate::id::EventId::from(durable.event_id),
+                        sequence: durable.global_sequence,
+                        disk_pos: durable.disk_pos(),
+                        content_hash: durable.content_hash,
+                        key_id: [0; 32],
+                        signature: None,
+                        extensions: durable.receipt_extensions.clone(),
+                    };
+                    let coord =
+                        crate::coordinate::Coordinate::new(&durable.entity, &durable.scope)?;
+                    self.runtime.signing_registry.sign_append_receipt(
+                        &mut receipt,
+                        &coord,
+                        durable.kind,
+                        durable.prev_hash,
+                    );
+                    cached_receipts[idx] = Some(receipt);
+                    cached_count += 1;
+                } else if let Some(entry) = self.index.get_by_id(key.as_u128()) {
                     let mut receipt = AppendReceipt {
                         event_id: crate::id::EventId::from(entry.event_id),
                         sequence: entry.global_sequence,
@@ -323,6 +345,16 @@ impl WriterState<'_> {
             return Ok(cached);
         }
 
+        // Genuinely-new keyed items: enforce the soft-cap overflow policy before
+        // committing. All-or-nothing batch semantics: if any new key is refused
+        // the whole batch fails closed. justifies: INV-IDEMPOTENCY-DURABLE-WINDOW
+        for item in &items {
+            if let Some(key) = item.options().idempotency_key {
+                use crate::id::EntityIdType;
+                self.index.idemp.admit_new_key(key.as_u128())?;
+            }
+        }
+
         let prepared = PreparedBatch::from_items(items)?;
         self.handle_prepared_batch(&prepared, fence)
     }
@@ -444,6 +476,20 @@ impl WriterState<'_> {
             &self.config.fault_injector,
         )?;
 
+        // Record durable idempotency entries for keyed batch items. Batches are
+        // homogeneous (all keyed or all unkeyed, enforced in handle_append_batch)
+        // and a keyed item's event_id IS its idempotency key, so an entry maps
+        // 1:1 to its key. justifies: INV-IDEMPOTENCY-DURABLE-WINDOW
+        for (item, index_entry) in prepared.items().iter().zip(artifacts.entries.iter()) {
+            if item.options().idempotency_key.is_some() {
+                self.index
+                    .idemp
+                    .record(crate::store::index::idemp::IdempEntry::from_index_entry(
+                        index_entry,
+                        index_entry.global_sequence,
+                    ));
+            }
+        }
         self.index.insert_batch(artifacts.entries);
         let publish_span = u32::try_from(prepared.len())
             .map_err(|_| StoreError::ser_msg("prepared batch item count exceeds u32::MAX"))?;

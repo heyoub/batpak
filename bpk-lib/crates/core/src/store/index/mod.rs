@@ -1,5 +1,6 @@
 pub(crate) mod columnar;
 mod entry;
+pub(crate) mod idemp;
 pub(crate) mod interner;
 mod projection_bridge;
 mod query;
@@ -80,6 +81,12 @@ pub(crate) struct StoreIndex {
     /// The lock's inner unit value is intentionally trivial — it exists
     /// purely as a rendezvous barrier around the swap.
     swap_gate: RwLock<()>,
+    /// Durable idempotency key → receipt-reconstruction store. A separate
+    /// authority from `by_id`: it is NOT cleared by
+    /// `replace_contents_from_fresh`, so a keyed retry survives retention
+    /// compaction, cold-start, and snapshot independent of event eviction.
+    /// justifies: INV-IDEMPOTENCY-DURABLE-WINDOW
+    pub(crate) idemp: idemp::IdempotencyStore,
 }
 
 impl StoreIndex {
@@ -99,6 +106,10 @@ impl StoreIndex {
             len: AtomicUsize::new(0),
             interner: Arc::new(StringInterner::new()),
             swap_gate: RwLock::new(()),
+            idemp: idemp::IdempotencyStore::new(
+                config.idempotency_retention,
+                config.idempotency_overflow,
+            ),
         }
     }
 
@@ -385,6 +396,16 @@ impl StoreIndex {
 
     pub(crate) fn len(&self) -> usize {
         self.len.load(Ordering::Relaxed)
+    }
+
+    /// Mark durable idempotency entries whose event frame is no longer present
+    /// in the live `by_id` index as evicted. Called at the compaction tail so a
+    /// later no-op deduplicated against an evicted event is honestly flagged.
+    /// justifies: INV-IDEMPOTENCY-DURABLE-WINDOW
+    pub(crate) fn mark_idemp_evicted_against_live(&self) {
+        let _read = self.swap_gate.read();
+        self.idemp
+            .mark_evicted(|event_id| self.by_id.contains_key(&event_id));
     }
 
     /// F6 / FREEZE-4 compact swap-point.

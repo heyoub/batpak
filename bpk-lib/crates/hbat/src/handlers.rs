@@ -65,11 +65,19 @@ fn handle_bank_commit(store: &Store, input: &[u8]) -> HandlerResult {
     let payload_bytes = decode_hex_str(&request.payload_hex)
         .map_err(|error| HandlerError::invalid_input(format!("payload_hex: {error}")))?;
 
+    let mut options = AppendOptions::new();
+    if let Some(idempotency_key_hex) = request.idempotency_key_hex.as_deref() {
+        let raw = decode_event_id_hex(idempotency_key_hex).map_err(|error| {
+            HandlerError::invalid_input(format!("idempotency_key_hex: {error}"))
+        })?;
+        options = options.with_idempotency(batpak::id::IdempotencyKey::from(raw));
+    }
+
     let item = BatchAppendItem::from_msgpack_bytes(
         coord,
         kind,
         payload_bytes,
-        AppendOptions::new(),
+        options,
         CausationRef::None,
     );
 

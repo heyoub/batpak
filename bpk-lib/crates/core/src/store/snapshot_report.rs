@@ -33,6 +33,8 @@ pub enum SnapshotFileKind {
     Segment,
     /// `visibility_ranges.fbv`.
     VisibilityRanges,
+    /// Durable idempotency store (`index.idemp`).
+    IdempotencyStore,
     /// Pending compaction marker.
     PendingCompactionMarker,
 }

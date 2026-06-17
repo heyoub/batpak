@@ -86,6 +86,7 @@ pub(super) fn segment_paths(data_dir: &Path) -> Result<Vec<(u64, PathBuf)>, Stor
             StoreFileKind::VisibilityRanges
             | StoreFileKind::Checkpoint
             | StoreFileKind::MmapIndex
+            | StoreFileKind::IdempotencyStore
             | StoreFileKind::PendingCompactionMarker
             | StoreFileKind::CompactSource
             | StoreFileKind::CursorDirectory
