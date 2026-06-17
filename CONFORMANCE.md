@@ -77,6 +77,43 @@ Docs explain the current contract. Gates decide whether the contract still holds
 `traceability/product_doctrine_audit.yaml` is doctrine law for naming and
 boundary review; it is not a runtime feature and not a CI gate by itself.
 
+### Testing doctrine
+
+The goal is proof density, not test count or a vanity coverage number: more
+decisions covered per harness, clearer receipts for what each harness proves,
+fewer story tests that walk one happy path. Coverage is a consequence of harness
+density; where a delta is unmeasured, say so instead of pretending.
+
+`bpk-lib/traceability/testing_ledger.yaml` is the machine-law ledger of
+doctrine-bearing suites, validated by `just inspect`. Each entry names its
+harness pattern, status, locations, commands, and the catalog `INV-*` ids it
+witnesses. Every catalog invariant must have a direct test artifact, a ledger
+entry, or a recorded waiver — the invariant bridge hard-fails otherwise. A suite
+belongs in the ledger when it proves a named invariant or boundary contract,
+would leave a real proof hole if deleted, is stable enough to run intentionally,
+and points back to a concrete runtime seam.
+
+Every doctrine-bearing harness must be deterministic; use no network, Docker, or
+external services; fail closed rather than skip when it cannot decide; run under
+`just verify`; add no new test-framework dependency; require no production
+rewrite for testability without explicit approval; and split by seam or evidence
+shape past roughly 500 lines. Its module header must declare `PROVES:`,
+`CATCHES:`, and `SEEDED:` so a later reader knows why the file exists. Each
+ledger entry's recorded commands are restricted to a narrow approved prefix set
+(`cargo test`, gated chaos test, `cargo mutants`, or the repo xtask surface);
+widening that set is a structural-lint policy change, not a per-entry escape
+hatch.
+
+Classify each suite by evidence shape, not subsystem, into one of the repo-owned
+harness patterns: Oracle (obvious-correct reference vs optimized path), Property
+(seeded/enumerated input families against invariants), State-Machine (protocol,
+lifecycle, or bounded schedule where transitions matter), Equivalence (multiple
+paths claiming the same semantics stay aligned), Fault-Injection (corruption,
+bad input, or illegal shapes must fail structurally with no phantom success),
+plus the Runtime-And-Boundary and Structural patterns the ledger also tracks.
+One file gets one primary pattern. Do not invent a new pattern because a suite
+feels special; tighten the existing ones instead.
+
 ## Terminal Manifest
 
 The hbat manifest must expose the ten reference NETBAT operations — the six

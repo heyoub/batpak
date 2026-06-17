@@ -32,7 +32,7 @@
 ## Root Altitudes
 
 - Canonical source lives under `bpk-lib/crates/core/` and companion `bpk-lib/crates/*` members.
-- Proof and validation live under `bpk-lib/crates/core/tests/`, `bpk-lib/crates/core/benches/`, `bpk-lib/crates/core/fixtures/`, `bpk-lib/traceability/`, and root `040_*/041_*` harness docs.
+- Proof and validation live under `bpk-lib/crates/core/tests/`, `bpk-lib/crates/core/benches/`, `bpk-lib/crates/core/fixtures/`, and `bpk-lib/traceability/` (including the machine-law testing ledger `bpk-lib/traceability/testing_ledger.yaml`). The testing doctrine itself lives in `CONFORMANCE.md`.
 - Package-owned Cargo examples live under the owning crate. Today that means `bpk-lib/crates/core/examples/` for `batpak`; do not add root `examples/`.
 - Runtime/network crates (`syncbat`, `netbat`) must have integration `tests/`. Proc-macro/support crates may be tested through their owning consumer crates instead of carrying empty `tests/` folders.
 - Repo-owned Rust tools live under `bpk-lib/tools/`, with root `scripts/` reserved for CI/devcontainer boundary wrappers only.

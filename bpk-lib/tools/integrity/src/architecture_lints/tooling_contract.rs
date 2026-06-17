@@ -47,7 +47,7 @@ fn check_project_layout_contract(repo_root: &Path) -> Result<()> {
         "CONFORMANCE.md",
         "CONTRIBUTING.md",
         "archive/decisions/099_DECISION_INDEX.md",
-        "archive/legacy-docs/041_TESTING_LEDGER.md",
+        "bpk-lib/traceability/testing_ledger.yaml",
         "cookbook",
         "bpk-lib/Cargo.toml",
         "bpk-lib/.cargo/config.toml",
@@ -104,8 +104,9 @@ fn check_testing_doc_renames_stay_current(repo_root: &Path) -> Result<()> {
     let harness_lints = fs::read_to_string(repo_root.join("tools/integrity/src/harness_lints.rs"))
         .context("read harness_lints.rs")?;
     ensure(
-        !harness_lints.contains("HARNESS_LEDGER.md"),
-        "harness lint diagnostics must name 041_TESTING_LEDGER.md, not retired HARNESS_LEDGER.md",
+        !harness_lints.contains("HARNESS_LEDGER.md")
+            && !harness_lints.contains("041_TESTING_LEDGER.md"),
+        "harness lint diagnostics must name the live traceability/testing_ledger.yaml, not the retired HARNESS_LEDGER.md or archived 041_TESTING_LEDGER.md",
     )?;
 
     let docs_rs =
