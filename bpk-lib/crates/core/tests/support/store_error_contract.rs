@@ -10,9 +10,11 @@
 //! per-family builder is consumed in every binary — no `dead_code` surface and
 //! no escape hatch required (see ADR-0012).
 
+use batpak::coordinate::CoordinateError;
+use batpak::event::{EventPayloadKindCollision, EventPayloadRegistryError};
 use batpak::store::{
-    HiddenRangesCorruption, HlcPoint, ProfileInvalidKind, StoreError, StoreInvariant,
-    StoreLockMode, WatermarkKind,
+    CheckpointIdError, HiddenRangesCorruption, HlcPoint, ProfileInvalidKind, StoreError,
+    StoreInvariant, StoreLockMode, WatermarkKind,
 };
 use std::error::Error as _;
 use std::io;
@@ -36,17 +38,29 @@ pub struct Case {
     pub display_needles: &'static [&'static str],
 }
 
-/// Map a `StoreError` to its required downstream handling class. The wildcard
-/// arm panics so any new public variant fails this harness until it is given an
-/// explicit, reviewed classification.
+/// Map a `StoreError` to its required downstream handling class.
+///
+/// Every public variant is matched by an EXPLICIT arm (no catch-all that swallows
+/// a real variant), so adding a new `StoreError` variant makes this `match` fail
+/// to compile until it is given a reviewed classification. `StoreError` is
+/// `#[non_exhaustive]`, so the Rust compiler still requires a trailing wildcard:
+/// it is genuinely unreachable for any variant defined today and exists only to
+/// satisfy the `#[non_exhaustive]` obligation. The wildcard panics so that a
+/// future variant added in the defining crate (which would compile here without
+/// touching this file) still fails loudly the first time it is classified rather
+/// than silently borrowing a neighbour's class.
 pub fn classify(error: &StoreError) -> HandlingClass {
     match error {
         StoreError::Io(_)
         | StoreError::CacheFailed(_)
         | StoreError::CheckpointWriteFailed { .. }
+        | StoreError::IdempotencyOverflowFailClosed { .. }
         | StoreError::WaitTimeout { .. } => HandlingClass::RetryableOperational,
         StoreError::StoreLocked { .. }
         | StoreError::Coordinate(_)
+        | StoreError::CheckpointId(_)
+        | StoreError::EventPayloadRegistry(_)
+        | StoreError::InvalidPayloadVersion { .. }
         | StoreError::NotFound(_)
         | StoreError::SequenceMismatch { .. }
         | StoreError::Configuration(_)
@@ -81,12 +95,17 @@ pub fn classify(error: &StoreError) -> HandlingClass {
         | StoreError::SegmentTooManyEntries { .. }
         | StoreError::DataDirMalformed { .. }
         | StoreError::AncestryCorrupt { .. }
+        | StoreError::IdempotencyFutureVersion { .. }
         | StoreError::HiddenRangesCorrupt { .. }
         | StoreError::CursorCheckpointCorrupt { .. }
         | StoreError::CursorCheckpointRegionMismatch { .. }
         | StoreError::InvariantViolation { .. } => HandlingClass::FailClosedOperational,
         #[cfg(feature = "dangerous-test-hooks")]
         StoreError::FaultInjected(_) => HandlingClass::FailClosedOperational,
+        // `StoreError` is `#[non_exhaustive]`; this wildcard is unreachable for
+        // every variant that exists today (all are matched explicitly above) and
+        // is required only to satisfy the compiler. Any variant later added in
+        // the defining crate trips this panic the first time it is classified.
         _ => panic!(
             "STORE_ERROR CONTRACT TABLE OUT OF DATE: add an explicit handling class for {error:?}"
         ),
@@ -251,6 +270,155 @@ pub fn domain_cases() -> Vec<Case> {
             source_needle: None,
             display_needles: &["-17", "invalid", "timestamp_us"],
         },
+        Case {
+            name: "coordinate",
+            error: StoreError::Coordinate(CoordinateError::EmptyEntity),
+            class: HandlingClass::Domain,
+            source_needle: Some("entity cannot be empty"),
+            display_needles: &["coordinate error", "entity cannot be empty"],
+        },
+        Case {
+            name: "checkpoint_id",
+            error: StoreError::CheckpointId(CheckpointIdError::ForbiddenSeparator),
+            class: HandlingClass::Domain,
+            source_needle: Some("forbidden identity-separator"),
+            display_needles: &["checkpoint id error", "identity-separator"],
+        },
+        Case {
+            name: "event_payload_registry",
+            error: StoreError::EventPayloadRegistry(EventPayloadRegistryError::new(vec![
+                EventPayloadKindCollision {
+                    category: 0xF,
+                    type_id: 0x0FE,
+                    first_type_name: "crate_a::Widget",
+                    second_type_name: "crate_b::Gadget",
+                },
+            ])),
+            class: HandlingClass::Domain,
+            source_needle: Some("duplicate kind assignment"),
+            display_needles: &[
+                "EventPayload registry",
+                "duplicate kind assignment",
+                "category=0xF",
+                "crate_a::Widget",
+            ],
+        },
+        Case {
+            name: "invalid_payload_version",
+            error: StoreError::InvalidPayloadVersion { kind: 0x1234 },
+            class: HandlingClass::Domain,
+            source_needle: None,
+            display_needles: &[
+                "0x1234",
+                "PAYLOAD_VERSION 0",
+                "reserved legacy/untyped sentinel",
+            ],
+        },
+        Case {
+            name: "idempotency_required",
+            error: StoreError::IdempotencyRequired,
+            class: HandlingClass::Domain,
+            source_needle: None,
+            display_needles: &["group commit", "requires an idempotency key"],
+        },
+        Case {
+            name: "idempotency_partial_batch",
+            error: StoreError::IdempotencyPartialBatch {
+                reason: "items 0,2 carry idempotency keys but item 1 does not".into(),
+            },
+            class: HandlingClass::Domain,
+            source_needle: None,
+            display_needles: &[
+                "batch rejected",
+                "items 0,2 carry idempotency keys but item 1 does not",
+            ],
+        },
+        Case {
+            name: "visibility_fence_active",
+            error: StoreError::VisibilityFenceActive,
+            class: HandlingClass::Domain,
+            source_needle: None,
+            display_needles: &["visibility fence is already active"],
+        },
+        Case {
+            name: "visibility_fence_not_active",
+            error: StoreError::VisibilityFenceNotActive,
+            class: HandlingClass::Domain,
+            source_needle: None,
+            display_needles: &["no matching visibility fence is currently active"],
+        },
+        Case {
+            name: "visibility_fence_cancelled",
+            error: StoreError::VisibilityFenceCancelled,
+            class: HandlingClass::Domain,
+            source_needle: None,
+            display_needles: &["visibility fence was cancelled before publish"],
+        },
+        Case {
+            name: "range_malformed",
+            error: StoreError::RangeMalformed { start: 9, end: 4 },
+            class: HandlingClass::Domain,
+            source_needle: None,
+            display_needles: &["malformed range", "start=9", "end=4", "start must be < end"],
+        },
+        Case {
+            name: "invalid_causation",
+            error: StoreError::InvalidCausation {
+                prior_idx: 5,
+                item_index: 3,
+                reason: "PriorItem must reference an earlier item".into(),
+            },
+            class: HandlingClass::Domain,
+            source_needle: None,
+            display_needles: &[
+                "invalid causation",
+                "item 3",
+                "prior 5",
+                "PriorItem must reference an earlier item",
+            ],
+        },
+        Case {
+            name: "invalid_commit_metadata",
+            error: StoreError::InvalidCommitMetadata {
+                reason: "commit metadata key must not be empty".into(),
+            },
+            class: HandlingClass::Domain,
+            source_needle: None,
+            display_needles: &[
+                "invalid commit metadata",
+                "commit metadata key must not be empty",
+            ],
+        },
+        Case {
+            name: "entity_clock_overflow",
+            error: StoreError::EntityClockOverflow {
+                entity: "user:42".into(),
+            },
+            class: HandlingClass::Domain,
+            source_needle: None,
+            display_needles: &["entity user:42", "u32::MAX", "further appends rejected"],
+        },
+        Case {
+            name: "coordinate_nul_byte",
+            error: StoreError::CoordinateNulByte,
+            class: HandlingClass::Domain,
+            source_needle: None,
+            display_needles: &["coordinate component contains forbidden NUL byte"],
+        },
+        Case {
+            name: "coordinate_path_traversal",
+            error: StoreError::CoordinatePathTraversal,
+            class: HandlingClass::Domain,
+            source_needle: None,
+            display_needles: &["forbidden path-traversal substring"],
+        },
+        Case {
+            name: "coordinate_control_char",
+            error: StoreError::CoordinateControlChar,
+            class: HandlingClass::Domain,
+            source_needle: None,
+            display_needles: &["forbidden ASCII control character"],
+        },
     ]
 }
 
@@ -329,6 +497,23 @@ pub fn retryable_operational_cases() -> Vec<Case> {
             class: HandlingClass::RetryableOperational,
             source_needle: Some("checkpoint fsync timed out"),
             display_needles: &["reactor-a", "write failed", "checkpoint fsync timed out"],
+        },
+        Case {
+            // Soft-cap backpressure: not corruption. A later retry can succeed
+            // once out-of-window keys age out and free durable capacity, so this
+            // is operationally retryable rather than a fail-closed halt.
+            name: "idempotency_overflow_fail_closed",
+            error: StoreError::IdempotencyOverflowFailClosed {
+                len: 1024,
+                max_keys: 1024,
+            },
+            class: HandlingClass::RetryableOperational,
+            source_needle: None,
+            display_needles: &[
+                "durable idempotency store at soft cap",
+                "1024/1024",
+                "overflow policy fail-closed",
+            ],
         },
     ]
 }
@@ -492,6 +677,67 @@ pub fn fail_closed_operational_cases() -> Vec<Case> {
                 "entity_prefix=user:",
                 "entity_prefix=order:",
                 "belongs to region",
+            ],
+        },
+        Case {
+            name: "writer_crashed",
+            error: StoreError::WriterCrashed,
+            class: HandlingClass::FailClosedOperational,
+            source_needle: None,
+            display_needles: &["writer thread crashed"],
+        },
+        Case {
+            name: "segment_too_many_entries",
+            error: StoreError::SegmentTooManyEntries {
+                segment_id: 12,
+                count: 5_000_000_000,
+            },
+            class: HandlingClass::FailClosedOperational,
+            source_needle: None,
+            display_needles: &["segment 12", "5000000000 entries", "u32 footer capacity"],
+        },
+        Case {
+            name: "data_dir_malformed",
+            error: StoreError::DataDirMalformed {
+                path: PathBuf::from("fixtures/data/not-a-segment.txt"),
+            },
+            class: HandlingClass::FailClosedOperational,
+            source_needle: None,
+            display_needles: &[
+                "data directory contains unexpected file",
+                "fixtures/data/not-a-segment.txt",
+            ],
+        },
+        Case {
+            name: "ancestry_corrupt",
+            error: StoreError::AncestryCorrupt { cycle_at: 0xBEEF },
+            class: HandlingClass::FailClosedOperational,
+            source_needle: None,
+            display_needles: &["ancestry walk detected a cycle", "beef"],
+        },
+        Case {
+            name: "idempotency_future_version",
+            error: StoreError::IdempotencyFutureVersion {
+                stored: 9,
+                current: 2,
+            },
+            class: HandlingClass::FailClosedOperational,
+            source_needle: None,
+            display_needles: &[
+                "durable idempotency store on disk is version 9",
+                "understands at most version 2",
+                "upgrade the reader",
+            ],
+        },
+        #[cfg(feature = "dangerous-test-hooks")]
+        Case {
+            name: "fault_injected",
+            error: StoreError::FaultInjected("simulated fsync failure at segment boundary".into()),
+            class: HandlingClass::FailClosedOperational,
+            source_needle: None,
+            display_needles: &[
+                "fault injected",
+                "simulated fsync failure at segment boundary",
             ],
         },
     ]
