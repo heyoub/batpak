@@ -94,7 +94,7 @@ packages/
   codegen/    Reads batpak.manifest.json, emits @batpak/generated.
               Refuses unsupported manifestVersion, netbatVersion,
               canonicalEncoding, field-name drift, unknown typeToken.
-              24 direct tests.
+              28 direct tests.
   generated/  AUTO-GENERATED Effect 4 schemas + TS types + golden hex.
               Fully overwritten by each codegen run.
   schema/     Effect 4 Schema bridge — decodeBytes/encodeBytes wrap
@@ -104,7 +104,7 @@ packages/
   sdk/        One-install npm entry; re-exports canonical, client,
               schema, and generated for downstream apps.
   test/       End-to-end parity harness across every event and every
-              operation in the manifest. 120 parity assertions.
+              operation in the manifest. 127 parity assertions.
 examples/
   heartbeat-spike/  Calibration pulse against hbat:
                     - sends system.heartbeat
@@ -160,7 +160,7 @@ cargo run -p xtask -- export-ts-manifest --out ../bpk-ts/batpak.manifest.json
 cd ../bpk-ts
 pnpm install
 pnpm -w build
-pnpm -w test          # 211 tests across all packages
+pnpm -w test          # 220 tests across all packages
 
 # Live integration:
 cd ../bpk-lib
