@@ -16,6 +16,14 @@ All host interaction crosses named terminals. Hidden wires are bugs.
 
 An accepted event is immutable. Corrections are represented by later events, not mutation of old events.
 
+## Payload Shape Evolves On Read
+
+Stored payload bytes are never rewritten. A payload's `PAYLOAD_VERSION` rides in the event header, outside the hashed region; on read an older version is upcast in memory, an equal or legacy-`0` version decodes tolerantly, and a version newer than the reader understands is a hard error everywhere — including replay and cold-start.
+
+## Idempotency Is Durable
+
+A keyed append (`with_idempotency`) is a durable no-op: within its retention window a retry returns the original receipt regardless of compaction, cold-start, or load. The window is the inviolable guarantee; the size cap may only ever evict keys already outside it.
+
 ## Receipts Describe Outcomes
 
 A receipt records what the system accepted, denied, replayed, verified, projected, imported, exported, or inspected. A receipt is structured evidence, not a debug log.

@@ -67,7 +67,7 @@ Judge the evidence, not the 0.x version number: roughly one line of tests
 per line of source, deterministic concurrency proofs with `loom`,
 property-based tests over hash-chain integrity and canonical encoding,
 crash-recovery and fault-injection suites, mutation testing on critical
-seams, and 71 named invariants enforced by an executable integrity gate.
+seams, and 73 named invariants enforced by an executable integrity gate.
 
 ## Docs
 

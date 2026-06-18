@@ -4,6 +4,38 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- Event schema evolution (0.8.3): `#[derive(EventPayload)]` types carry a
+  `PAYLOAD_VERSION` (set via `#[batpak(version = N)]`) stamped into a new
+  `EventHeader.payload_version` field — inside the frame but outside the hashed
+  region, so no content hash or signature moves. On read, a stored version equal
+  to current (or the legacy/untyped sentinel `0`) decodes tolerantly; an older
+  version runs a registered `Upcast` chain (in-memory over `rmpv::Value`, never
+  rewriting stored bytes); a newer version is a hard `FutureVersion` error.
+  Append-only frozen-bytes decode fixtures plus a structural lint back the
+  back-compat guarantee. The hbat manifest is now `manifestVersion` 2 with a
+  per-event `payloadVersion`, and the TypeScript client decodes newer payload
+  versions tolerantly. See EVENTS.md ("Schema Evolution").
+- Durable idempotency (0.8.3): `AppendOptions::with_idempotency(key)` is now a
+  durable correctness primitive. A dedicated `index.idemp` sidecar (magic
+  `FBATID`, crc32fast CRC, atomic write) records the minimal tuple to
+  reconstruct the original receipt and survives `Retention` compaction,
+  cold-start, and snapshot independent of event eviction — restored
+  unconditionally on open, never rebuilt from a segment scan. Growth is bounded
+  by `IdempotencyRetention` (`StoreConfig::with_idempotency_retention`, default
+  window-priority `Hybrid { keep_sequences, max_keys }`) with `OverflowPolicy`
+  (`with_idempotency_overflow`, default `Warn`): the retention window is the
+  inviolable guarantee — a within-window keyed retry is always a no-op
+  regardless of load; the soft cap may only ever trim out-of-window keys. Adds
+  `IdempotencyKey::for_operation(domain, components)` (length-delimited blake3
+  operation identity) and an additive `bank.commit` `idempotency_key_hex` wire
+  field. See EVENTS.md ("Durable idempotency") and cookbook recipe
+  `200_IDEMPOTENT_PASS`.
+- TypeScript codegen (0.8.3): a Rust `#[serde(default)] Option<T>` field now
+  generates an omittable TS input property (callers may omit it entirely) while
+  still encoding as present-nil on the wire, preserving byte-parity with the
+  Rust `None` encoding.
+
 ### Security
 - Hardened the public append surface (0.8.3): raw-`kind` append entry points
   (`append`, `append_with_options`, `submit`/`submit_reaction` and their
