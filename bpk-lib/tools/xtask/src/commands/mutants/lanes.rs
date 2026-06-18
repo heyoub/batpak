@@ -129,6 +129,36 @@ pub(super) const IMPORT_EQUIVALENT_MUTANTS: &[&str] = &[
     r"crates/core/src/store/import\.rs:.*replace ImportSelector::all -> Self with Default::default",
 ];
 pub(super) const MUTANT_EXCLUDE_RES: &[&str] = &[INDEX_TOPOLOGY_DEFAULT_EQUIVALENT_MUTANT];
+// Platform-backend seam: cfg-gated reflink_impl variants. The Linux FICLONE
+// reflink_impl (fs.rs:215) IS compiled and IS killed on the Linux CI runner, so
+// it is NOT excluded. These entries are the macOS (clonefile) and unsupported
+// (Err Unsupported) variants of `reflink_impl`, which are NOT compiled on the
+// Linux CI runner, so cargo-mutants can neither apply nor test them there. Their
+// cargo-mutants descriptions are identical to the Linux variant, so they are
+// distinguished by LINE number (verified against fs.rs):
+//   * fs.rs:233 — `#[cfg(target_os = "macos")] reflink_impl -> Ok(())`
+//   * fs.rs:252 — the macOS `result == 0` flipped to `!=`
+//   * fs.rs:260 — `#[cfg(not(any(linux, macos)))] reflink_impl -> Ok(())`
+const PLATFORM_BACKEND_MUTANT_EXCLUDE_RES: &[&str] = &[
+    r"fs\.rs:233:.*reflink_impl",
+    r"fs\.rs:252:.*replace == with != in reflink_impl",
+    r"fs\.rs:260:.*reflink_impl",
+];
+// Fork-isolation seam equivalent-mutant registry. Each entry is proven to have
+// no observable effect on fork classification; excluding them keeps the
+// mutation-score denominator honest. Every entry carries its equivalence proof.
+//
+// (a) `file_classification.rs:111` match guard
+//     `segment_id.as_u64() == active_segment_id -> true` in fork_strategy:
+//     `active_segment_id` is always the MAX live segment id (the latest-segment
+//     watermark), so NO segment has `id > active`. The first arm takes
+//     `id < active`, the second `id == active`, and `id > active` is impossible.
+//     Replacing the guard with `true` (i.e. `>= active`) therefore selects the
+//     SAME arm for every reachable segment — `== active` and `true` are
+//     observationally identical, so the mutant is equivalent.
+const FORK_ISOLATION_MUTANT_EXCLUDE_RES: &[&str] = &[
+    r"file_classification\.rs:.*replace match guard segment_id.as_u64\(\) == active_segment_id with true in StoreFileKind::fork_strategy",
+];
 const SEGMENT_SCAN_MUTANT_EXCLUDE_RES: &[&str] = &[];
 const WRITER_COMMIT_MUTANT_EXCLUDE_RES: &[&str] = &[
     // CI receipt: PreparedBatch::len -> 0 exceeded the auto test timeout while
@@ -437,6 +467,8 @@ fn critical_seam_exclude_res(slug: &str) -> &'static [&'static str] {
         "writer-commit" => WRITER_COMMIT_MUTANT_EXCLUDE_RES,
         "projection-flow" => PROJECTION_MUTANT_EXCLUDE_RES,
         "import-reapply" => IMPORT_EQUIVALENT_MUTANTS,
+        "platform-backend" => PLATFORM_BACKEND_MUTANT_EXCLUDE_RES,
+        "fork-isolation" => FORK_ISOLATION_MUTANT_EXCLUDE_RES,
         _ => &[],
     }
 }

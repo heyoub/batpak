@@ -316,7 +316,7 @@ pub(crate) fn read_exact_at(
 
 #[cfg(test)]
 mod tests {
-    use super::remove_dir_all;
+    use super::{reject_copy_source, remove_dir_all};
     use std::error::Error;
 
     #[test]
@@ -332,6 +332,39 @@ mod tests {
         assert!(
             !root.exists(),
             "PROPERTY: platform remove_dir_all must remove directories, not only files or leaves"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn reject_copy_source_rejects_non_file_source() -> Result<(), Box<dyn Error>> {
+        // A directory is a non-file source: the cow_copy_file ladder must refuse
+        // it rather than silently succeed. Kills `reject_copy_source -> Ok(())`.
+        let dir = tempfile::tempdir()?;
+        let result = reject_copy_source(dir.path());
+        assert!(
+            result.is_err(),
+            "PROPERTY: reject_copy_source must reject a non-file (directory) source"
+        );
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reject_copy_source_rejects_symlink_source() -> Result<(), Box<dyn Error>> {
+        // A symlink source must be refused even when it targets a real file:
+        // copying through it would dereference an attacker-controlled link.
+        // Kills `reject_copy_source -> Ok(())` on the symlink branch.
+        let dir = tempfile::tempdir()?;
+        let target = dir.path().join("target.bin");
+        std::fs::write(&target, b"payload")?;
+        let link = dir.path().join("link.bin");
+        std::os::unix::fs::symlink(&target, &link)?;
+
+        let result = reject_copy_source(&link);
+        assert!(
+            result.is_err(),
+            "PROPERTY: reject_copy_source must reject a symlink source (no link dereference)"
         );
         Ok(())
     }

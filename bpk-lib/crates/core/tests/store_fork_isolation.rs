@@ -11,7 +11,7 @@
 //! coordinates and idempotency keys.
 
 mod support;
-use batpak::store::{ReadOnly, Store, StoreConfig};
+use batpak::store::{ForkOptions, ReadOnly, Store, StoreConfig};
 use support::prelude::*;
 use tempfile::TempDir;
 
@@ -210,6 +210,86 @@ fn fork_idempotency_store_is_copied_not_shared() -> TestResult {
     );
 
     fork.close()?;
+    store.close()?;
+    Ok(())
+}
+
+#[test]
+fn fork_report_records_concrete_strategy_counts_and_nonzero_digests() -> TestResult {
+    // EVIDENCE proof for the fork report. A controlled hardlink-only fork over a
+    // multi-segment fixture must populate the strategy counters with CONCRETE
+    // values and produce non-zero structural digests. This kills:
+    //   * ForkStrategyCounts::record_copy `+= -> -=`/`*=` (the hardlink/deep_copy
+    //     counters would no longer reflect the real copies),
+    //   * record_excluded `with ()` / `+= -> *=` (the excluded counter), and
+    //   * the digest fns (fork_id_digest / fork_report_body_hash /
+    //     destination_path_digest) collapsing to Default::default() ([0u8; 32]).
+    let source_dir = TempDir::new()?;
+    let store = store_with_small_segments(&source_dir)?;
+    // Enough blobs to seal multiple segments: sealed -> hardlink, active ->
+    // deep_copy, and the store-shaped non-forkable artifacts -> excluded.
+    append_blob_events(&store, "entity:fork:evidence", 12)?;
+
+    let fork_dir = TempDir::new()?;
+    let report = store.fork_with_evidence(
+        fork_dir.path(),
+        ForkOptions {
+            use_reflink: false,
+            use_hardlink: true,
+            exclude_caches: true,
+        },
+    )?;
+    let counts = report.body.strategy_counts;
+
+    // Concrete strategy counters (kills the arithmetic-operator mutants on
+    // record_copy / record_excluded, which the determinism test could not see).
+    assert_eq!(
+        counts.reflink, 0,
+        "reflink disabled: the reflink counter must be exactly zero"
+    );
+    assert!(
+        counts.hardlink >= 1,
+        "hardlink-only fork over sealed segments must record at least one hardlink, got {}",
+        counts.hardlink
+    );
+    assert!(
+        counts.deep_copy >= 1,
+        "the active segment must be deep-copied, recording at least one deep_copy, got {}",
+        counts.deep_copy
+    );
+    assert!(
+        counts.excluded >= 1,
+        "store-shaped non-forkable artifacts must record at least one exclusion, got {}",
+        counts.excluded
+    );
+    // Cross-check the counters against the segment-id evidence: every shared
+    // segment was hardlinked here, and every deep-copied segment was deep-copied,
+    // so the counters cannot be smaller than those id sets.
+    assert!(
+        counts.hardlink >= report.body.shared_segment_ids_sorted.len(),
+        "hardlink count must cover every shared segment id"
+    );
+    assert!(
+        counts.deep_copy >= report.body.deep_copied_segment_ids_sorted.len(),
+        "deep_copy count must cover every deep-copied segment id"
+    );
+
+    // Non-zero structural digests (kills the `-> Default::default()` digest
+    // mutants, which the mutated-vs-mutated determinism test could not detect).
+    let zero = [0u8; 32];
+    assert_ne!(
+        report.body_hash, zero,
+        "fork report body_hash must be a real content hash, not the zero digest"
+    );
+    assert_ne!(
+        report.body.fork_id, zero,
+        "fork_id digest must be a real content hash, not the zero digest"
+    );
+    assert_ne!(
+        report.body.destination_path_digest, zero,
+        "destination_path_digest must be a real content hash, not the zero digest"
+    );
+
     store.close()?;
     Ok(())
 }
