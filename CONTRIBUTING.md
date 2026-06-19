@@ -1,5 +1,44 @@
 # Contributing
 
+## Project Direction
+
+batpak is a substrate — an event-store library a notch below SQLite. It is
+**maintainer-led**. Contributions are welcome; direction is not crowdsourced.
+
+Welcome without prior discussion: bug fixes, tests, doc corrections, small
+compatibility patches.
+
+RFC-first (open an issue *before* a PR): new features, public-API changes,
+architecture or runtime-model changes, new dependencies, and naming changes.
+Anything touching the public surface or the invariant lattice
+(`INVARIANTS.md`, `MODEL.md`, the traceability ledger) is RFC-first, no
+exceptions.
+
+A technically correct patch may still be declined if it doesn't fit the
+project's direction, doctrine, maintenance budget, or conceptual shape. That's
+not a knock on the work — it may live well as a fork or downstream adapter.
+
+### Doctrine (the bar every change is held to)
+
+- **Substrate, not policy.** batpak is mechanism. No domain nouns in any public
+  API (no agent/session/task/etc.). If it encodes what something *means* rather
+  than *how it's stored*, it belongs in the layer built on batpak, not here.
+- **Composition over inheritance.** Free functions and thin `Store` methods. No
+  manager objects, no new traits/`dyn` hierarchies to do what a function does.
+- **Every behavior change ships its falsifying test** — the test that fails if
+  the behavior regresses, not just a happy-path smoke.
+- **Make illegal states unrepresentable.** The type system and borrow checker
+  are features, not obstacles.
+- **Robustness bar is SQLite/DO-178B.** "It passed last time" is not a status.
+  No `#[allow(...)]` to silence a lint — fix the cause.
+- **Caps: split, don't bump.** Oversized files get split, not added to an
+  allowlist.
+
+### AI-assisted contributions
+
+Allowed, but you must understand and stand behind what you submit. A PR you
+can't explain or defend in review will be closed. No vibe-dump-and-flee.
+
 ## Canonical Environment
 
 The checked-in devcontainer is the canonical environment. Native Windows and Linux are supported too, but they should use the same root-first commands:
