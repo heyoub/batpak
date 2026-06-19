@@ -160,6 +160,7 @@ pub(crate) fn check(repo_root: &Path) -> Result<()> {
             "writer-commit",
             "cursor-delivery",
             "projection-flow",
+            "projection-fusion",
             "segment-scan",
             "hash-chain-replay",
             "frontier-wait-durable",
@@ -172,6 +173,8 @@ pub(crate) fn check(repo_root: &Path) -> Result<()> {
             "netbat-boundary-protocol",
             "fork-isolation",
             "import-reapply",
+            "lane-branch",
+            "lane-frontier",
         ],
     )?;
     assert_workflow_list_values(

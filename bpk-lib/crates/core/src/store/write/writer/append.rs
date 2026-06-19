@@ -20,6 +20,7 @@ pub(crate) struct AppendGuards {
     pub idempotency_key: Option<u128>,
     pub dag_lane: u32,
     pub dag_depth: u32,
+    pub dag_branch_root: bool,
     pub extensions: BTreeMap<ExtensionKey, EncodedBytes>,
 }
 
@@ -38,7 +39,7 @@ impl WriterState<'_> {
         let entity = coord.entity();
         let scope = coord.scope();
 
-        let latest = self.index.get_latest(entity);
+        let latest = self.index.get_latest_committed(entity, guards.dag_lane);
 
         if let Some(expected) = guards.expected_sequence {
             let actual = latest.as_ref().map(|entry| entry.clock).unwrap_or(0);
@@ -129,8 +130,13 @@ impl WriterState<'_> {
 
         self.watermark_handle
             .lock()
-            .advance_accepted(frontier_point);
-        let position = DagPosition::with_hlc(now_ms, 0, guards.dag_depth, guards.dag_lane, clock);
+            .advance_accepted_on_lane(guards.dag_lane, frontier_point);
+        let dag_depth = if guards.dag_branch_root {
+            DagPosition::fork(guards.dag_depth, guards.dag_lane).depth()
+        } else {
+            guards.dag_depth
+        };
+        let position = DagPosition::with_hlc(now_ms, 0, dag_depth, guards.dag_lane, clock);
         event.header.position = position;
         event.header.event_kind = kind;
         event.header.correlation_id = crate::id::CorrelationId::from(correlation_id);
@@ -176,7 +182,9 @@ impl WriterState<'_> {
         }
 
         let offset = self.active_segment.write_frame(&frame)?;
-        self.watermark_handle.lock().advance_written(frontier_point);
+        self.watermark_handle
+            .lock()
+            .advance_written_on_lane(guards.dag_lane, frontier_point);
         trace!(offset = offset, len = frame.len(), "frame written");
 
         #[cfg(feature = "dangerous-test-hooks")]
@@ -209,7 +217,7 @@ impl WriterState<'_> {
             now_ms,
             clock,
             guards.dag_lane,
-            guards.dag_depth,
+            dag_depth,
         );
         let staged = StagedCommittedEvent::new(
             coord.clone(),

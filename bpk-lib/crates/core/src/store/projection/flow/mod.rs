@@ -1,15 +1,20 @@
 mod cache_identity;
+mod fusion;
 mod outcome;
 mod replay_input;
 mod strategy;
 
 use crate::event::{EventSourced, ProjectionInput};
 use crate::store::index::columnar::CachedProjectionSlot;
-use crate::store::index::ProjectionCacheStoreStatus;
+use crate::store::index::{ProjectionCacheStoreStatus, ProjectionReplayItem};
 use crate::store::{Freshness, HlcPoint, Store, StoreError};
 use std::any::TypeId;
+use std::collections::BTreeMap;
 
 pub(crate) use cache_identity::projection_cache_key;
+#[cfg(test)]
+pub(crate) use fusion::{fused_replay_batch_reads, reset_fused_replay_batch_reads};
+pub(crate) use fusion::{project_fused2, project_fused3};
 use outcome::{
     elapsed_us, finish_empty_projection, finish_projection, record_external_cache_probe_time,
     ProjectionFinishObservation,
@@ -332,6 +337,7 @@ where
         entity,
         strategy = ?dispatch.strategy(),
     );
+    let replay_items = replay_items_for_dispatch(&dispatch);
 
     // ── Phase 3: Dispatch ─────────────────────────────────────────────
     //
@@ -457,23 +463,44 @@ where
         returned_generation = outcome.returned_generation(),
     );
 
-    notify_projection_applied::<T, State>(store, entity, &outcome);
+    notify_projection_applied::<T, State>(store, entity, &outcome, &replay_items);
     Ok(outcome)
+}
+
+fn replay_items_for_dispatch(dispatch: &ProjectionDispatch) -> Vec<ProjectionReplayItem> {
+    match dispatch {
+        ProjectionDispatch::Empty => Vec::new(),
+        ProjectionDispatch::GroupLocalHit { replay, .. }
+        | ProjectionDispatch::GroupLocalIncremental { replay, .. }
+        | ProjectionDispatch::ExternalCacheThenReplay { replay }
+        | ProjectionDispatch::DirectReplay { replay } => replay.plan.items.clone(),
+    }
 }
 
 fn notify_projection_applied<T, State>(
     store: &Store<State>,
     entity: &str,
     outcome: &ProjectionOutcome<T>,
+    replay_items: &[ProjectionReplayItem],
 ) where
     T: 'static,
 {
     if let Some(sequence) = outcome.applied_sequence() {
-        if let Some(point) = store.index.hlc_for_global_sequence(sequence) {
-            store.projection_registry.notify_applied(
-                super::registry::ProjectionRegistry::id_for_type::<T>(entity),
-                point,
-            );
+        let projection_id = super::registry::ProjectionRegistry::id_for_type::<T>(entity);
+        let mut lanes = BTreeMap::<u32, HlcPoint>::new();
+        for item in replay_items
+            .iter()
+            .filter(|item| item.global_sequence <= sequence)
+        {
+            lanes
+                .entry(item.lane)
+                .and_modify(|current| *current = (*current).max_by_sequence(item.point))
+                .or_insert(item.point);
+        }
+        for (lane, point) in lanes {
+            store
+                .projection_registry
+                .notify_applied_on_lane(projection_id.clone(), lane, point);
         }
     }
 }
@@ -843,5 +870,7 @@ fn store_index_cached_projection<State>(
     }
 }
 
+#[cfg(test)]
+mod fusion_tests;
 #[cfg(test)]
 mod tests;

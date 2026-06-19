@@ -90,6 +90,27 @@ reports, schema snapshots, artifact envelopes, pipelines, outbox writes, and
 visibility fences remain public where they are real. They are not the default
 prelude story.
 
+## Lane Frontier Model
+
+The store has one physical commit order (`global_sequence`) and one segment-file
+durability axis. DAG lanes are logical branch labels inside that order, not
+separate logs. Therefore frontier tracking is split:
+
+- the physical durable point is global, because one fsync covers interleaved
+  bytes across lanes;
+- accepted, written, durable, visible, applied, and emitted are also exposed per
+  lane as logical watermarks;
+- a lane's logical durable watermark is capped by the global physical durable
+  point on the shared `global_sequence` axis, not by wall-clock HLC ordering;
+- lane visibility is a lane-scoped publish cursor over the same global sequence
+  axis, not a stream session or branch manager.
+- cancelled visibility ranges are persisted as global ranges plus per-lane
+  ranges over that same global sequence axis, so bootstrap can keep hidden
+  durable entries out of visible/applied lane progress.
+
+The legacy global frontier remains a max view for compatibility. Lane-aware
+callers use lane-scoped reads and waits when they need branch-local progress.
+
 ## Engineering Names
 
 The Rust API keeps engineering names where precision matters:

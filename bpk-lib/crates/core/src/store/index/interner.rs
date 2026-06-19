@@ -225,6 +225,11 @@ impl StringInterner {
         id
     }
 
+    /// Return the existing [`InternId`] for `s` without installing a new entry.
+    pub(crate) fn get(&self, s: &str) -> Option<InternId> {
+        self.forward.read().get(s).copied()
+    }
+
     /// Resolve an [`InternId`] back to the original string.
     ///
     /// Returns `None` if `id` is out of range (i.e. was never issued by this

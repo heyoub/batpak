@@ -43,6 +43,11 @@ pub(super) const PROJECTION_MUTANT_FILES: &[&str] = &[
     "crates/core/src/store/projection/mod.rs",
     "crates/core/src/store/projection/watch.rs",
 ];
+pub(super) const PROJECTION_FUSION_MUTANT_FILES: &[&str] = &[
+    "crates/core/src/store/projection/flow/fusion.rs",
+    "crates/core/src/store/projection/flow/mod.rs",
+    "crates/core/src/store/read_api.rs",
+];
 pub(super) const SEGMENT_SCAN_MUTANT_FILES: &[&str] =
     &["crates/core/src/store/segment/scan/**/*.rs"];
 pub(super) const HASH_CHAIN_REPLAY_MUTANT_FILES: &[&str] = &[
@@ -93,6 +98,33 @@ pub(super) const FORK_MUTANT_FILES: &[&str] = &[
 // import seam: import.rs is fully owned by Store::import_events (key derivation,
 // chunking, dedup classification, reserved-kind skip, provenance).
 pub(super) const IMPORT_MUTANT_FILES: &[&str] = &["crates/core/src/store/import.rs"];
+pub(super) const LANE_BRANCH_MUTANT_FILES: &[&str] = &[
+    "crates/core/src/coordinate/mod.rs",
+    "crates/core/src/store/append.rs",
+    "crates/core/src/store/read_api.rs",
+    "crates/core/src/store/index/entry.rs",
+    "crates/core/src/store/index/mod.rs",
+    "crates/core/src/store/index/query.rs",
+    "crates/core/src/store/write/control/submission.rs",
+    "crates/core/src/store/write/fanout.rs",
+    "crates/core/src/store/write/writer/append.rs",
+    "crates/core/src/store/write/writer/batch.rs",
+];
+pub(super) const LANE_FRONTIER_MUTANT_FILES: &[&str] = &[
+    "crates/core/src/store/hidden_ranges.rs",
+    "crates/core/src/store/index/mod.rs",
+    "crates/core/src/store/index/projection_bridge.rs",
+    "crates/core/src/store/index/query.rs",
+    "crates/core/src/store/index/visibility.rs",
+    "crates/core/src/store/lifecycle_api.rs",
+    "crates/core/src/store/open.rs",
+    "crates/core/src/store/projection/flow/fusion.rs",
+    "crates/core/src/store/projection/flow/mod.rs",
+    "crates/core/src/store/projection/registry.rs",
+    "crates/core/src/store/stats.rs",
+    "crates/core/src/store/write/writer/publish.rs",
+    "crates/core/src/store/write/writer/watermark.rs",
+];
 pub(super) const INDEX_TOPOLOGY_DEFAULT_EQUIVALENT_MUTANT: &str = r"crates/core/src/store/config\.rs:.*replace IndexTopology::aos -> Self with Default::default\(\)";
 // Equivalent-mutant registry for the import re-application seam. Each entry is a
 // mutant proven to have no observable effect on import behavior; excluding them
@@ -500,6 +532,14 @@ pub(super) fn critical_mutation_seams() -> &'static [CriticalMutationSeam] {
             paths: PROJECTION_MUTANT_FILES,
         },
         CriticalMutationSeam {
+            slug: "projection-fusion",
+            label: "projection fusion equivalence",
+            description: "fused tuple replay, per-projection filtering, and single-pass read behavior",
+            surface: MutantSurface::AllFeatures,
+            package: None,
+            paths: PROJECTION_FUSION_MUTANT_FILES,
+        },
+        CriticalMutationSeam {
             slug: "segment-scan",
             label: "segment scan corruption handling",
             description: "segment scan and corruption handling",
@@ -594,6 +634,22 @@ pub(super) fn critical_mutation_seams() -> &'static [CriticalMutationSeam] {
             surface: MutantSurface::AllFeatures,
             package: None,
             paths: IMPORT_MUTANT_FILES,
+        },
+        CriticalMutationSeam {
+            slug: "lane-branch",
+            label: "lane branch isolation",
+            description: "per-(entity,lane) heads, writer branch-root positions, lane-scoped reads, and lane-filtered fanout",
+            surface: MutantSurface::AllFeatures,
+            package: None,
+            paths: LANE_BRANCH_MUTANT_FILES,
+        },
+        CriticalMutationSeam {
+            slug: "lane-frontier",
+            label: "per-lane frontier visibility",
+            description: "per-lane watermark lattice, sequence-gate lane cursors, lane waits, projection applied progress, and cold-start lane bootstrap",
+            surface: MutantSurface::AllFeatures,
+            package: None,
+            paths: LANE_FRONTIER_MUTANT_FILES,
         },
     ]
 }

@@ -113,6 +113,8 @@ pub use projection::watch::{CursorWatcherError, ProjectionWatcher, WatcherError}
 pub use projection::{
     CacheCapabilities, CacheMeta, Freshness, NativeCache, NoCache, ProjectionCache,
 };
+/// Three projection states returned by [`Store::project_fused3`].
+pub type ProjectionFusion3<First, Second, Third> = (Option<First>, Option<Second>, Option<Third>);
 pub use projection_run::{
     ProjectionEvidenceRegistry, ProjectionRunCacheStatus, ProjectionRunCheckpointRef,
     ProjectionRunEvidenceReport, ProjectionRunFinding, ProjectionRunFreshnessStatus,
@@ -138,10 +140,10 @@ pub use snapshot_report::{
 };
 pub use stats::{
     ActiveSegmentReadEvidence, ClockEvidence, FrontierView, HlcPoint, HostEvidenceSummary,
-    LockLeafSymlinkProtection, MmapAdmissionSummary, MmapEvidence, ParentDirSyncAdmissionSummary,
-    ParentDirSyncEvidence, PlatformAdmissionSummary, PlatformEvidenceSummary, StoreDiagnostics,
-    StoreLockAdmissionSummary, StorePathEvidenceSummary, StorePathStatusEvidence, StoreStats,
-    WatermarkKind, WriterPressure,
+    LaneFrontierView, LockLeafSymlinkProtection, MmapAdmissionSummary, MmapEvidence,
+    ParentDirSyncAdmissionSummary, ParentDirSyncEvidence, PlatformAdmissionSummary,
+    PlatformEvidenceSummary, StoreDiagnostics, StoreLockAdmissionSummary, StorePathEvidenceSummary,
+    StorePathStatusEvidence, StoreStats, WatermarkKind, WriterPressure,
 };
 pub use store_resource_report::{
     store_data_dir_identity_hash, store_resource_evidence_report_from_diagnostics,

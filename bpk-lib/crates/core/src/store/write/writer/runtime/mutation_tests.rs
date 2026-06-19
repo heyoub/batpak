@@ -104,6 +104,7 @@ fn shutdown_in_group_commit_drain_exits_before_shutdown_queue_drain() {
         idempotency_key: Some(0xA11CE),
         dag_lane: 0,
         dag_depth: 0,
+        dag_branch_root: false,
         extensions: BTreeMap::new(),
     };
 

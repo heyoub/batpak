@@ -40,7 +40,7 @@ mod soa;
 mod soaos;
 
 use crate::event::EventKind;
-use crate::store::index::{ClockKey, DiskPos, IndexEntry, QueryHit, RoutingSummary};
+use crate::store::index::{ClockKey, IndexEntry, QueryHit, RoutingSummary};
 use dashmap::DashMap;
 use parking_lot::RwLock;
 use std::collections::{BTreeMap, HashSet};
@@ -56,7 +56,7 @@ use soa::SoAInner;
 pub(crate) use soaos::CachedProjectionSlot;
 use soaos::SoAoSInner;
 
-type ProjectionCandidates = (u64, u64, Vec<(u64, DiskPos)>);
+type ProjectionCandidates = (u64, u64, Vec<QueryHit>);
 
 /// Reconstruct the raw `u16` wire value from an `EventKind`.
 ///

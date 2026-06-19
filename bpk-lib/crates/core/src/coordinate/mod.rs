@@ -91,6 +91,8 @@ pub struct Region {
     pub(crate) fact: Option<KindFilter>,
     /// Optional inclusive per-entity clock range; does not apply to live filtering.
     pub(crate) clock_range: Option<(u32, u32)>, // per-entity clock, not global_sequence
+    /// Optional exact DAG lane filter.
+    pub(crate) lane: Option<u32>,
 }
 
 /// Filter on [`EventKind`] used within a [`Region`] query.
@@ -290,6 +292,12 @@ impl Region {
         self
     }
 
+    /// Filters events to an exact DAG lane.
+    pub fn with_lane(mut self, lane: u32) -> Self {
+        self.lane = Some(lane);
+        self
+    }
+
     /// Returns the configured entity prefix, if any.
     pub fn entity_prefix(&self) -> Option<&str> {
         self.entity_prefix.as_deref()
@@ -310,6 +318,11 @@ impl Region {
         self.clock_range
     }
 
+    /// Returns the configured exact DAG lane, if any.
+    pub fn lane(&self) -> Option<u32> {
+        self.lane
+    }
+
     /// Returns `true` when `entity` falls within this region's configured
     /// namespace prefix.
     #[must_use]
@@ -323,8 +336,24 @@ impl Region {
     /// Match against individual fields — avoids circular dep on store::Notification.
     /// Called by Subscription::recv() to filter events. [FILE:src/store/delivery/subscription.rs]
     pub fn matches_event(&self, entity: &str, scope: &str, kind: EventKind) -> bool {
+        self.matches_event_on_lane(entity, scope, kind, None)
+    }
+
+    /// Match against individual fields with an optional DAG lane.
+    pub(crate) fn matches_event_on_lane(
+        &self,
+        entity: &str,
+        scope: &str,
+        kind: EventKind,
+        lane: Option<u32>,
+    ) -> bool {
         if !self.matches_entity(entity) {
             return false;
+        }
+        if let Some(expected) = self.lane {
+            if lane != Some(expected) {
+                return false;
+            }
         }
         if let Some(ref s) = self.scope {
             if scope != s.as_ref() {
@@ -368,7 +397,11 @@ impl Region {
             Some((start, end)) => format!("{start}-{end}"),
             None => "*".to_owned(),
         };
-        format!("entity={entity}|scope={scope}|fact={fact}|clock={clock}")
+        let base = format!("entity={entity}|scope={scope}|fact={fact}|clock={clock}");
+        match self.lane {
+            Some(lane) => format!("{base}|lane={lane}"),
+            None => base,
+        }
     }
 }
 

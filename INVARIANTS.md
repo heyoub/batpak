@@ -36,6 +36,22 @@ Import re-applies source events. Payload bytes and content hashes survive
 unchanged, but event ids, global sequences, predecessors, and causation are
 destination-local.
 
+## Lane Frontiers Are Logical
+
+Lane ids are opaque `u32` substrate data. Each lane has its own logical frontier
+for accepted, written, durable, visible, applied, and emitted HLC points, while
+the segment log remains one physically interleaved file sequence. A successful
+fsync advances one global physical durability point; a lane's logical durable
+point may advance only to events on that lane that are at or below the physical
+durable point on the `global_sequence` axis, not by wall-clock HLC ordering.
+Visibility is a separate per-lane publish cursor over the single global sequence
+space; hidden/cancelled fence ranges are interpreted on that same axis and then
+scoped by lane.
+
+For every lane: accepted >= written >= durable, accepted >= visible >= applied,
+and emitted >= visible. The global frontier remains the max view used by
+legacy APIs; lane-scoped APIs must read from the lane view.
+
 ## Receipts Describe Outcomes
 
 A receipt records what the system accepted, denied, replayed, verified, projected, imported, exported, or inspected. A receipt is structured evidence, not a debug log.

@@ -16,6 +16,41 @@ fn broadcast_all<T>(values: impl IntoIterator<Item = T>, mut broadcast: impl FnM
     count
 }
 
+#[derive(Clone, Copy)]
+struct LanePublishPoint {
+    publish_up_to: u64,
+    frontier_point: HlcPoint,
+}
+
+fn lane_publish_points_from_notifications(
+    notifications: &[Notification],
+) -> BTreeMap<u32, LanePublishPoint> {
+    let mut points = BTreeMap::new();
+    for notification in notifications {
+        let lane = notification.position.lane();
+        let publish_up_to = notification.sequence.saturating_add(1);
+        let frontier_point = HlcPoint {
+            wall_ms: notification.position.wall_ms(),
+            global_sequence: notification.sequence,
+        };
+        points
+            .entry(lane)
+            .and_modify(|current: &mut LanePublishPoint| {
+                if publish_up_to > current.publish_up_to {
+                    *current = LanePublishPoint {
+                        publish_up_to,
+                        frontier_point,
+                    };
+                }
+            })
+            .or_insert(LanePublishPoint {
+                publish_up_to,
+                frontier_point,
+            });
+    }
+    points
+}
+
 pub(super) struct CommitArtifacts {
     pub(super) index_entry: IndexEntry,
     pub(super) sidx_entry: SidxEntry,
@@ -215,12 +250,21 @@ impl WriterState<'_> {
         notifications: impl IntoIterator<Item = Notification>,
         envelopes: impl IntoIterator<Item = CommittedEventEnvelope>,
     ) -> Result<(), crate::store::StoreError> {
-        self.index
-            .publish(publish_up_to, "publish_then_broadcast_unfenced")?;
+        let notifications: Vec<Notification> = notifications.into_iter().collect();
+        let lane_points = lane_publish_points_from_notifications(&notifications);
+        self.index.publish_on_lanes(
+            publish_up_to,
+            lane_points
+                .iter()
+                .map(|(lane, point)| (*lane, point.publish_up_to)),
+            "publish_then_broadcast_unfenced",
+        )?;
         self.broadcast_commit_artifacts(notifications, envelopes);
-        self.watermark_handle
-            .lock()
-            .advance_visible_and_emitted(frontier_point);
+        let mut watermark = self.watermark_handle.lock();
+        watermark.advance_visible_and_emitted(frontier_point);
+        for (lane, point) in lane_points {
+            watermark.advance_visible_and_emitted_on_lane(lane, point.frontier_point);
+        }
         Ok(())
     }
 
@@ -243,12 +287,22 @@ impl WriterState<'_> {
         notifications: impl IntoIterator<Item = Notification>,
         envelopes: impl IntoIterator<Item = CommittedEventEnvelope>,
     ) -> Result<(), crate::store::StoreError> {
-        self.index.finish_visibility_fence(token, publish_up_to)?;
+        let notifications: Vec<Notification> = notifications.into_iter().collect();
+        let lane_points = lane_publish_points_from_notifications(&notifications);
+        self.index.finish_visibility_fence_on_lanes(
+            token,
+            publish_up_to,
+            lane_points
+                .iter()
+                .map(|(lane, point)| (*lane, point.publish_up_to)),
+        )?;
         self.broadcast_commit_artifacts(notifications, envelopes);
+        let mut watermark = self.watermark_handle.lock();
         if let Some(point) = frontier_point {
-            self.watermark_handle
-                .lock()
-                .advance_visible_and_emitted(point);
+            watermark.advance_visible_and_emitted(point);
+        }
+        for (lane, point) in lane_points {
+            watermark.advance_visible_and_emitted_on_lane(lane, point.frontier_point);
         }
         Ok(())
     }
