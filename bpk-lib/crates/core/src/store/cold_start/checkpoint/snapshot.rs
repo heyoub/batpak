@@ -46,11 +46,13 @@ pub(crate) struct LoadedCheckpointSnapshot {
 pub(crate) fn try_load_checkpoint(data_dir: &Path) -> Option<LoadedCheckpointData> {
     let loaded = match format::read_checkpoint_file(data_dir) {
         FileLoad::Loaded(loaded) => loaded,
-        FileLoad::Missing | FileLoad::Invalid { .. } => return None,
+        FileLoad::Missing | FileLoad::Invalid { .. } | FileLoad::FutureVersion { .. } => {
+            return None
+        }
     };
     match decode_checkpoint_data(data_dir, &loaded.path, loaded.version, &loaded.body) {
         FileLoad::Loaded(loaded) => Some(loaded),
-        FileLoad::Missing | FileLoad::Invalid { .. } => None,
+        FileLoad::Missing | FileLoad::Invalid { .. } | FileLoad::FutureVersion { .. } => None,
     }
 }
 
@@ -58,7 +60,7 @@ pub(crate) fn try_load_checkpoint(data_dir: &Path) -> Option<LoadedCheckpointDat
 pub(crate) fn try_load_checkpoint_snapshot(data_dir: &Path) -> Option<LoadedCheckpointSnapshot> {
     match load_checkpoint_snapshot(data_dir) {
         FileLoad::Loaded(snapshot) => Some(snapshot),
-        FileLoad::Missing | FileLoad::Invalid { .. } => None,
+        FileLoad::Missing | FileLoad::Invalid { .. } | FileLoad::FutureVersion { .. } => None,
     }
 }
 
@@ -74,6 +76,9 @@ pub(crate) fn load_checkpoint_snapshot(data_dir: &Path) -> FileLoad<LoadedCheckp
             );
             return FileLoad::Invalid { reason };
         }
+        FileLoad::FutureVersion { found, supported } => {
+            return FileLoad::FutureVersion { found, supported }
+        }
     };
     if raw.version == format::CHECKPOINT_VERSION {
         return decode_checkpoint_snapshot_v6(data_dir, &raw.path, &raw.body);
@@ -83,6 +88,9 @@ pub(crate) fn load_checkpoint_snapshot(data_dir: &Path) -> FileLoad<LoadedCheckp
         FileLoad::Loaded(loaded) => loaded,
         FileLoad::Missing => return FileLoad::Missing,
         FileLoad::Invalid { reason } => return FileLoad::Invalid { reason },
+        FileLoad::FutureVersion { found, supported } => {
+            return FileLoad::FutureVersion { found, supported }
+        }
     };
     let chunk_ranges = restore_chunk_ranges(loaded.entries.len(), &loaded.routing);
 
@@ -156,6 +164,9 @@ fn decode_checkpoint_data(
         FileLoad::Loaded(watermark) => watermark,
         FileLoad::Missing => return FileLoad::Missing,
         FileLoad::Invalid { reason } => return FileLoad::Invalid { reason },
+        FileLoad::FutureVersion { found, supported } => {
+            return FileLoad::FutureVersion { found, supported }
+        }
     };
 
     tracing::debug!(
@@ -200,6 +211,9 @@ fn decode_checkpoint_snapshot_v6(
         FileLoad::Loaded(watermark) => watermark,
         FileLoad::Missing => return FileLoad::Missing,
         FileLoad::Invalid { reason } => return FileLoad::Invalid { reason },
+        FileLoad::FutureVersion { found, supported } => {
+            return FileLoad::FutureVersion { found, supported }
+        }
     };
 
     tracing::debug!(

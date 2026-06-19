@@ -79,6 +79,12 @@ pub(crate) fn setup(args: SetupArgs) -> Result<()> {
             "cargo-mutants@27.0.0",
             InstallStrategy::SourceOnly,
         ),
+        RequiredTool::cargo_subcommand(
+            "cargo-fuzz",
+            "fuzz",
+            "cargo-fuzz@0.13.2",
+            InstallStrategy::PreferBinstall,
+        ),
     ];
 
     let mut missing = Vec::new();

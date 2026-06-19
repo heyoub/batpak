@@ -24,7 +24,21 @@ pub(crate) enum ColdStartArtifactKind {
 pub(crate) enum FileLoad<T> {
     Missing,
     Loaded(T),
-    Invalid { reason: String },
+    Invalid {
+        reason: String,
+    },
+    /// The on-disk artifact declares a format version strictly newer than this
+    /// binary supports. This is a CANONICAL TYPED REFUSAL, distinct from
+    /// `Invalid` (corrupt/older → safe to rebuild from scan): a future-version
+    /// artifact must NOT be silently rebuilt, because a future writer may have
+    /// written data this reader cannot interpret. The cold-start flow propagates
+    /// this as a hard error rather than swallowing it into a rebuild.
+    FutureVersion {
+        /// Version stamped on the on-disk file.
+        found: u16,
+        /// The maximum version this binary understands.
+        supported: u16,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

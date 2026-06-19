@@ -89,6 +89,26 @@ pub(super) fn load_mmap_index(
         Some(version) => version,
         None => return invalid_load("mmap index version is unreadable"),
     };
+    // A version STRICTLY NEWER than this binary supports is a canonical typed
+    // refusal — NOT a silent rebuild-from-scan. A future writer may have written
+    // segments or summaries this reader cannot interpret, so degrading to a scan
+    // would risk a silent downgrade instead of a legally reachable state. Older
+    // or otherwise-unknown (but not future) versions stay `Invalid`, which the
+    // cold-start flow safely rebuilds from the durable segments.
+    // justifies: INV-MMAP-SEALED-READS
+    if version > format::MMAP_INDEX_VERSION {
+        tracing::warn!(
+            target: "batpak::mmap_index",
+            path = %path.display(),
+            version,
+            supported = format::MMAP_INDEX_VERSION,
+            "mmap index declares a future format version; refusing canonically"
+        );
+        return FileLoad::FutureVersion {
+            found: version,
+            supported: format::MMAP_INDEX_VERSION,
+        };
+    }
     if !matches!(version, 1..=4) && version != format::MMAP_INDEX_VERSION {
         tracing::warn!(
             target: "batpak::mmap_index",

@@ -1,0 +1,44 @@
+# Gauntlet Phase 0B — SENTINEL S1: cargo-fuzz smoke harness.
+#
+# This is a standalone (workspace-excluded) cargo-fuzz crate. It depends on the
+# real `batpak` core crate by PATH, so every target fuzzes production code, not a
+# copy. cargo-fuzz builds it with the nightly toolchain, libFuzzer sanitizer
+# coverage, and `-C panic=abort` so a panic is caught as a crash.
+[package]
+name = "batpak-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+# `batpak` exposes `store::segment::{frame_decode, frame_encode}` publicly, so
+# the path dep reaches the real decode entry point with no test-hook shim.
+batpak = { path = "../crates/core" }
+
+[features]
+# Mirror of the core crate's gauntlet RED fixture switch. When enabled, the
+# frame_decode target plants a deliberate panic on a known input so the harness
+# can PROVE it catches a crash (tool qualification / non-vacuity). OFF on every
+# normal/CI fuzz run.
+gauntlet-red-fixture = []
+
+# cargo-fuzz crates must NOT be in the parent workspace (nightly-only build-std +
+# panic=abort). Declaring an empty `[workspace]` here makes this dir its own root.
+[workspace]
+
+[profile.release]
+debug = 1
+
+# One bin target per fuzz entry point. `test = false`/`doc = false`/`bench =
+# false` are the cargo-fuzz convention: these are libFuzzer harness binaries,
+# not test/doc/bench targets.
+[[bin]]
+name = "frame_decode"
+path = "fuzz_targets/frame_decode.rs"
+test = false
+doc = false
+bench = false

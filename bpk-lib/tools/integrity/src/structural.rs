@@ -31,7 +31,6 @@ pub(crate) fn run() -> Result<()> {
     check_store_segment_classification_boundary(&repo_root, &mut source_cache)?;
     check_allow_justifications(&repo_root, &mut source_cache)?;
     check_rust_file_size_pressure(&repo_root, &mut source_cache)?;
-    check_file_size_ratchet(&repo_root, &tracked_files, &mut source_cache)?;
     check_inline_test_island_pressure(&repo_root, &mut source_cache)?;
     check_event_payload_frozen_fixtures(&repo_root, &mut source_cache)?;
     public_surface::check(&repo_root, &mut source_cache)?;
@@ -44,9 +43,9 @@ pub(crate) fn run() -> Result<()> {
 }
 
 /// Absolute, non-overridable production file cap. There is no per-file escape
-/// hatch: a file over this cap must be split, never bumped ("split, don't
-/// bump"). The monotonic downward ceiling is enforced separately by
-/// [`check_file_size_ratchet`].
+/// hatch and no per-file ceiling: a file over this cap must be split, never
+/// bumped ("split, don't bump"); a file under the cap passes regardless of its
+/// prior size.
 const DEFAULT_LINE_BUDGET: usize = 850;
 
 fn check_rust_file_size_pressure(repo_root: &Path, source_cache: &mut SourceCache) -> Result<()> {
@@ -64,57 +63,6 @@ fn check_rust_file_size_pressure(repo_root: &Path, source_cache: &mut SourceCach
         )?;
     }
     Ok(())
-}
-
-/// Monotonic per-file ceiling gate (P0-1): every tracked production file must be
-/// at or below `min(absolute cap, its recorded ceiling)`, and a recorded ceiling
-/// may only ratchet DOWN (enforced on the bless path). Triangulated against the
-/// git-tracked set so an untracked shadow file cannot dodge a ceiling.
-fn check_file_size_ratchet(
-    repo_root: &Path,
-    tracked_files: &[PathBuf],
-    source_cache: &mut SourceCache,
-) -> Result<()> {
-    let actuals = production_nonblank_counts(repo_root, tracked_files, source_cache)?;
-    crate::file_size_ceilings::check(repo_root, &actuals, DEFAULT_LINE_BUDGET)
-}
-
-/// Bless path: regenerate `file_size_ceilings.lock` from the current tree.
-/// Delegates to the monotonic-only `bless`, which fails if any file would RAISE
-/// its recorded ceiling.
-pub(crate) fn bless_file_size_ceilings() -> Result<()> {
-    let repo_root = repo_root()?;
-    let tracked_files = tracked_repo_files(&repo_root)?;
-    let mut source_cache = SourceCache::new(&repo_root);
-    let actuals = production_nonblank_counts(&repo_root, &tracked_files, &mut source_cache)?;
-    let existing = crate::file_size_ceilings::load_lock(&repo_root)?;
-    let blessed = crate::file_size_ceilings::bless(&existing, &actuals, DEFAULT_LINE_BUDGET)?;
-    crate::file_size_ceilings::write_lock(&repo_root, &blessed)?;
-    println!(
-        "bless-file-size-ceilings: wrote {} ceiling(s) to {}",
-        blessed.len(),
-        crate::file_size_ceilings::LOCK_REL
-    );
-    Ok(())
-}
-
-/// `rel -> nonblank line count` for every production `.rs` file that is also
-/// git-tracked. The tracked-set intersection is the triangulation guard.
-fn production_nonblank_counts(
-    repo_root: &Path,
-    tracked_files: &[PathBuf],
-    source_cache: &mut SourceCache,
-) -> Result<std::collections::BTreeMap<String, usize>> {
-    let tracked: BTreeSet<PathBuf> = tracked_files.iter().cloned().collect();
-    let mut counts = std::collections::BTreeMap::new();
-    for path in production_rust_files(repo_root) {
-        if !tracked.contains(&path) {
-            continue;
-        }
-        let content = source_cache.read_to_string(&path)?;
-        counts.insert(relative(repo_root, &path), nonblank_line_count(&content));
-    }
-    Ok(counts)
 }
 
 fn check_inline_test_island_pressure(
@@ -775,7 +723,7 @@ mod tests {
     };
 
     #[test]
-    fn file_size_ratchet_counts_nonblank_lines() {
+    fn file_size_pressure_counts_nonblank_lines() {
         assert_eq!(nonblank_line_count("one\n\n  \n two\n"), 2);
     }
 

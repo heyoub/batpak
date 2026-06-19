@@ -75,6 +75,15 @@ impl<'a> RestorePlanner<'a> {
         if !has_pending_compaction && self.policy.try_mmap_index() {
             let mmap_load = super::mmap::load_mmap_snapshot(self.data_dir, self.clock);
             snapshot_loads.record_mmap(&mmap_load);
+            // A future-version mmap artifact is a CANONICAL TYPED REFUSAL, NOT a
+            // silent rebuild-from-scan: a future writer may have written data
+            // this reader cannot interpret, so degrading to a scan would risk a
+            // silent downgrade instead of a legally reachable state. Corrupt or
+            // older artifacts (`Invalid`) still fall through to the safe rebuild
+            // below. justifies: INV-MMAP-SEALED-READS
+            if let super::FileLoad::FutureVersion { found, supported } = mmap_load {
+                return Err(StoreError::MmapFutureVersion { found, supported });
+            }
             if let super::FileLoad::Loaded(snapshot) = mmap_load {
                 return self.build_snapshot_plan(
                     RestoreSource::Mmap,

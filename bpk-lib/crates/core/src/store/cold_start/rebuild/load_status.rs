@@ -41,5 +41,15 @@ fn status_and_reason<T>(load: &FileLoad<T>) -> (OpenIndexLoadStatus, Option<Stri
         FileLoad::Missing => (OpenIndexLoadStatus::Missing, None),
         FileLoad::Loaded(_) => (OpenIndexLoadStatus::Loaded, None),
         FileLoad::Invalid { reason } => (OpenIndexLoadStatus::Invalid, Some(reason.clone())),
+        // A future-version artifact is rejected (not loaded). It is never
+        // swallowed into a rebuild — the cold-start flow propagates it as a hard
+        // error — but if a load attempt is ever recorded for diagnostics it
+        // reads as an invalid (rejected) load with a descriptive reason.
+        FileLoad::FutureVersion { found, supported } => (
+            OpenIndexLoadStatus::Invalid,
+            Some(format!(
+                "future format version {found} (this binary supports at most {supported})"
+            )),
+        ),
     }
 }

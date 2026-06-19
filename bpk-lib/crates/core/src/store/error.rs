@@ -153,6 +153,20 @@ pub enum StoreError {
         /// The maximum version this binary understands.
         current: u16,
     },
+    /// The on-disk mmap index (`index.fbati`) declares a format version strictly
+    /// newer than this binary understands. Unlike a corrupt or older artifact —
+    /// which the cold-start flow safely rebuilds from the durable segments — a
+    /// future-version artifact is a hard, canonical refusal: a future writer may
+    /// have written segments or summaries this reader cannot interpret, so
+    /// silently rebuilding from scan would risk a silent downgrade rather than a
+    /// legally reachable state. Mirrors [`IdempotencyFutureVersion`]. Upgrade the
+    /// reader. justifies: INV-MMAP-SEALED-READS
+    MmapFutureVersion {
+        /// Version stamped on the on-disk file.
+        found: u16,
+        /// The maximum version this binary understands.
+        supported: u16,
+    },
     /// A new keyed append was refused because the durable idempotency store is
     /// at its soft cap and the configured `OverflowPolicy` is `FailClosed`
     /// (or `Backpressure`, which is treated as fail-closed). Existing
@@ -438,6 +452,12 @@ impl std::fmt::Display for StoreError {
                 "durable idempotency store on disk is version {stored} but this binary understands \
                  at most version {current}; upgrade the reader"
             ),
+            Self::MmapFutureVersion { found, supported } => write!(
+                f,
+                "mmap index on disk is version {found} but this binary understands at most version \
+                 {supported}; refusing to rebuild from scan (a future writer may have written data \
+                 this reader cannot interpret); upgrade the reader"
+            ),
             Self::IdempotencyOverflowFailClosed { len, max_keys } => write!(
                 f,
                 "durable idempotency store at soft cap ({len}/{max_keys}); new keyed append \
@@ -583,6 +603,7 @@ impl std::error::Error for StoreError {
             | Self::VisibilityFenceCancelled
             | Self::IdempotencyPartialBatch { .. }
             | Self::IdempotencyFutureVersion { .. }
+            | Self::MmapFutureVersion { .. }
             | Self::IdempotencyOverflowFailClosed { .. }
             | Self::InvalidPayloadVersion { .. }
             | Self::CorruptFrame { .. }

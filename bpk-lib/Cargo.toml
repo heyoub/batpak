@@ -11,6 +11,13 @@ members = [
     "crates/netbat",
     "crates/hbat",
 ]
+# The cargo-fuzz crate (`fuzz/`) is its own workspace: it pulls in nightly-only
+# libfuzzer-sys / -Z build-std machinery and a `-C panic=abort` profile that
+# must NOT leak into the main workspace's build graph or feature unification.
+# It depends on `crates/core` by path, so it always fuzzes the real code.
+exclude = [
+    "fuzz",
+]
 default-members = ["crates/core"]
 resolver = "2"
 

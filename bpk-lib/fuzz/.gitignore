@@ -1,0 +1,5 @@
+# cargo-fuzz build + run outputs. `target/` is already covered by the root
+# .gitignore (`**/target/`); these are the fuzz-specific transient dirs.
+/target
+/artifacts
+/coverage

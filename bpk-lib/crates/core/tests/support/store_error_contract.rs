@@ -96,6 +96,7 @@ pub fn classify(error: &StoreError) -> HandlingClass {
         | StoreError::DataDirMalformed { .. }
         | StoreError::AncestryCorrupt { .. }
         | StoreError::IdempotencyFutureVersion { .. }
+        | StoreError::MmapFutureVersion { .. }
         | StoreError::HiddenRangesCorrupt { .. }
         | StoreError::CursorCheckpointCorrupt { .. }
         | StoreError::CursorCheckpointRegionMismatch { .. }
@@ -726,6 +727,21 @@ pub fn fail_closed_operational_cases() -> Vec<Case> {
             display_needles: &[
                 "durable idempotency store on disk is version 9",
                 "understands at most version 2",
+                "upgrade the reader",
+            ],
+        },
+        Case {
+            name: "mmap_future_version",
+            error: StoreError::MmapFutureVersion {
+                found: 9,
+                supported: 5,
+            },
+            class: HandlingClass::FailClosedOperational,
+            source_needle: None,
+            display_needles: &[
+                "mmap index on disk is version 9",
+                "understands at most version 5",
+                "refusing to rebuild from scan",
                 "upgrade the reader",
             ],
         },

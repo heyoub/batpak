@@ -269,6 +269,14 @@ fn check_single_target_dir_contract(repo_root: &Path) -> Result<()> {
         "perf artifact paths must use bpk-lib/target/, not repo-root target/",
     )?;
 
+    // Workspace-`exclude`d crates (e.g. the cargo-fuzz crate at `fuzz/`) are
+    // their own build graphs and legitimately own a `<crate>/target/`. Exempt
+    // those target dirs from the single-target-dir contract; only the main
+    // workspace must funnel artifacts into bpk-lib/target/.
+    let workspace_toml = fs::read_to_string(repo_root.join("Cargo.toml"))
+        .context("read Cargo.toml for workspace exclude list")?;
+    let exempt_target_dirs = excluded_crate_target_dirs(&workspace_toml);
+
     for entry in walkdir::WalkDir::new(repo_root)
         .into_iter()
         .filter_map(|entry| entry.ok())
@@ -277,6 +285,9 @@ fn check_single_target_dir_contract(repo_root: &Path) -> Result<()> {
         if entry.file_name() == "target" {
             let rel = relative(repo_root, entry.path());
             if rel == "target" {
+                continue;
+            }
+            if exempt_target_dirs.contains(rel.as_str()) {
                 continue;
             }
             let mut children = fs::read_dir(entry.path())
@@ -291,6 +302,38 @@ fn check_single_target_dir_contract(repo_root: &Path) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Repo-relative `target` directories owned by workspace-`exclude`d crates.
+/// Parses the `exclude = [ ... ]` array from the workspace `Cargo.toml` and maps
+/// each excluded crate path `<dir>` to `<dir>/target`, so a freshly-built
+/// excluded crate (e.g. cargo-fuzz) does not trip the single-target-dir gate.
+fn excluded_crate_target_dirs(workspace_toml: &str) -> BTreeSet<String> {
+    let mut targets = BTreeSet::new();
+    let Some(after) = workspace_toml.split_once("exclude").and_then(|(_, rest)| {
+        let rest = rest.trim_start();
+        rest.strip_prefix('=')
+    }) else {
+        return targets;
+    };
+    let after = after.trim_start();
+    let Some(start) = after.strip_prefix('[') else {
+        return targets;
+    };
+    let Some((body, _)) = start.split_once(']') else {
+        return targets;
+    };
+    for raw in body.split(',') {
+        // Strip line comments and surrounding whitespace/quotes from each entry.
+        let entry = raw.split('#').next().unwrap_or("").trim();
+        let entry = entry.trim_matches(|c| c == '"' || c == '\'').trim();
+        if entry.is_empty() {
+            continue;
+        }
+        let normalized = entry.trim_end_matches('/');
+        targets.insert(format!("{normalized}/target"));
+    }
+    targets
 }
 
 fn check_crate_layout_contract(repo_root: &Path) -> Result<()> {
@@ -945,4 +988,41 @@ fn files_with_extension(root: &Path, extension: &str) -> Vec<PathBuf> {
         .filter(|entry| entry.path().extension().and_then(|ext| ext.to_str()) == Some(extension))
         .map(|entry| entry.into_path())
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::excluded_crate_target_dirs;
+
+    #[test]
+    fn excluded_crate_target_dirs_exempts_workspace_excludes() {
+        let manifest = r#"
+[workspace]
+members = ["crates/core"]
+exclude = [
+    "fuzz",
+    "scratch/", # trailing slash + comment
+]
+resolver = "2"
+"#;
+        let dirs = excluded_crate_target_dirs(manifest);
+        assert!(
+            dirs.contains("fuzz/target"),
+            "the cargo-fuzz crate's target dir must be exempt, got {dirs:?}"
+        );
+        assert!(
+            dirs.contains("scratch/target"),
+            "trailing-slash + commented entries must normalize, got {dirs:?}"
+        );
+        assert!(
+            !dirs.contains("target"),
+            "the main workspace target dir must never be exempt"
+        );
+    }
+
+    #[test]
+    fn excluded_crate_target_dirs_empty_when_no_exclude_list() {
+        let manifest = "[workspace]\nmembers = [\"crates/core\"]\nresolver = \"2\"\n";
+        assert!(excluded_crate_target_dirs(manifest).is_empty());
+    }
 }

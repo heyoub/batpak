@@ -235,7 +235,7 @@ pub(crate) fn try_load_mmap_snapshot(
 ) -> Option<LoadedMmapSnapshot> {
     match load_mmap_snapshot(data_dir, clock) {
         FileLoad::Loaded(snapshot) => Some(snapshot),
-        FileLoad::Missing | FileLoad::Invalid { .. } => None,
+        FileLoad::Missing | FileLoad::Invalid { .. } | FileLoad::FutureVersion { .. } => None,
     }
 }
 
@@ -247,6 +247,9 @@ pub(crate) fn load_mmap_snapshot(
         FileLoad::Loaded(loaded) => loaded,
         FileLoad::Missing => return FileLoad::Missing,
         FileLoad::Invalid { reason } => return FileLoad::Invalid { reason },
+        FileLoad::FutureVersion { found, supported } => {
+            return FileLoad::FutureVersion { found, supported }
+        }
     };
 
     let entry_count = match usize::try_from(loaded.entry_count) {

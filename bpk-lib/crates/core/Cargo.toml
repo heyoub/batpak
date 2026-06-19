@@ -29,6 +29,12 @@ rustdoc-args = ["--cfg", "docsrs"]
 default = ["blake3"]
 blake3 = []
 dangerous-test-hooks = ["dep:fastrand"]
+# Gauntlet Phase 0B sentinel RED fixtures. OFF by default: every PR runs the
+# sentinels GREEN-on-clean. Turning this feature on flips each sentinel's
+# assertion to the deliberately-wrong (illegal) expectation so the red fixture
+# FAILS — proving the sentinel actually detects the illegal state rather than
+# passing vacuously. Never enabled in a normal build.
+gauntlet-red-fixture = []
 
 [dependencies]
 uuid = { version = ">=1.20, <1.24", default-features = false, features = ["std", "v7"] }
