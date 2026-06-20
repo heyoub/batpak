@@ -70,6 +70,14 @@ pub(crate) const GATES: &[Gate] = &[
         ),
         has_blocking_authority: true,
     },
+    // --- Agent-safety meta-gate ("raccoon with commit access", P1-4). ---
+    Gate {
+        slug: "meta-gate",
+        red_fixture_test: Some(
+            "tools/integrity/src/meta_gate_tests.rs::lowering_critical_seam_threshold_without_approval_errs",
+        ),
+        has_blocking_authority: true,
+    },
     // --- Harness structural lints (blocking, qualified). ---
     Gate {
         slug: "harness-line-caps",

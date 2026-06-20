@@ -110,6 +110,39 @@ jobs:
           BATPAK_DEVCONTAINER_SKIP_BUILD: "1"
         run: bash ./scripts/run-in-devcontainer.sh 'cargo xtask ci-fast'
 
+  meta-gate:
+    # Agent-safety meta-gate (P1-4, "raccoon with commit access"): blocks a diff
+    # that WEAKENS the assurance machinery (lowers a threshold, raises a cap, adds
+    # a waiver entry, re-buries a gate, deletes a red fixture, downgrades an
+    # assurance level) unless a human applied the `gauntlet-weaken-approved` label
+    # AND a `GAUNTLET-WEAKEN-OK:` commit trailer is present (plus a second-author
+    # trailer for L4 blast radius). Needs full history (`fetch-depth: 0`) to
+    # resolve the merge-base and read commit trailers. The classifier is pure and
+    # unit/mutation-tested in tools/integrity/src/meta_gate.rs.
+    name: Agent-safety meta-gate
+    runs-on: ubuntu-latest
+    needs: [rust-changed]
+    if: needs.rust-changed.outputs.rust == 'true'
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          shared-key: meta-gate
+          workspaces: bpk-lib
+      - uses: ./.github/actions/setup-devcontainer
+      - name: Classify diff for unapproved weakenings
+        env:
+          BATPAK_DEVCONTAINER_IMAGE: batpak-devcontainer:ci
+          BATPAK_DEVCONTAINER_SKIP_BUILD: "1"
+          # The meta-gate READS these; CI cannot self-apply the approval label.
+          GAUNTLET_PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          GAUNTLET_PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          GAUNTLET_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: bash ./scripts/run-in-devcontainer.sh 'cargo xtask meta-gate --base "${GAUNTLET_PR_BASE_SHA:-origin/main}"'
+
   coverage-baseline:
     # Always-on, NON-BLOCKING coverage observation for every Rust-touching PR.
     #

@@ -76,6 +76,7 @@ pub(super) const INTEGRITY_GRADERS_MUTANT_FILES: &[&str] = &[
     "tools/integrity/src/structural.rs",
     "tools/integrity/src/typed_waivers.rs",
     "tools/integrity/src/assurance.rs",
+    "tools/integrity/src/meta_gate.rs",
 ];
 pub(super) const SYNCBAT_RUNTIME_MUTANT_FILES: &[&str] = &[
     "crates/syncbat/src/builder.rs",
