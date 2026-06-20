@@ -119,6 +119,11 @@ enum XtaskCommand {
     /// stable hardware when you need real interpretation.
     PerfGates,
     DevcontainerExec(DevcontainerExecArgs),
+    /// Agent-safety meta-gate (P1-4, "raccoon with commit access"): resolve the
+    /// `base..HEAD` diff, gather PR labels + commit trailers, and FAIL if the
+    /// diff WEAKENS the assurance machinery without the required human approval.
+    /// Thin shell around `batpak-integrity meta-gate-check`.
+    MetaGate(MetaGateArgs),
     /// Early PR signal: format, clippy, checks, tests, dependency gates, machine law.
     CiFast,
     /// Native Windows surface compatibility lane.
@@ -547,6 +552,22 @@ pub(crate) struct ArchitectureIrArgs {
 }
 
 #[derive(Args, Clone, Debug)]
+pub(crate) struct MetaGateArgs {
+    /// Base ref/sha to diff against. Defaults to the merge-base with
+    /// `origin/main` (falling back to `main`).
+    #[arg(long)]
+    pub(crate) base: Option<String>,
+    /// A PR label (repeatable). When omitted, labels are read from the
+    /// `GAUNTLET_PR_LABELS` env var (comma- or newline-separated), so CI can pass
+    /// `github.event.pull_request.labels.*.name` through one variable.
+    #[arg(long = "label")]
+    pub(crate) labels: Vec<String>,
+    /// The PR author login. Defaults to the `GAUNTLET_PR_AUTHOR` env var.
+    #[arg(long)]
+    pub(crate) pr_author: Option<String>,
+}
+
+#[derive(Args, Clone, Debug)]
 pub(crate) struct DevcontainerExecArgs {
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     command: Vec<String>,
@@ -635,6 +656,7 @@ fn main() -> Result<()> {
         }
         XtaskCommand::PerfGates => commands::perf_gates(),
         XtaskCommand::DevcontainerExec(args) => devcontainer::devcontainer_exec(&args),
+        XtaskCommand::MetaGate(args) => commands::meta_gate(&args),
         XtaskCommand::CiFast => commands::ci_fast(),
         XtaskCommand::CiWindowsSurface => commands::ci_windows_surface(),
         XtaskCommand::Ci => commands::ci(),

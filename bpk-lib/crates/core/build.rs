@@ -11,6 +11,15 @@ mod shared_checks {
         env!("CARGO_MANIFEST_DIR"),
         "/build_support/shared_checks.rs"
     ));
+    // Build-script-ONLY receipt + per-file-rerun helpers. Kept in a separate
+    // file so the `batpak-integrity` binary (which includes shared_checks.rs via
+    // tools/shared/shared_checks.rs) never compiles them as dead code under
+    // `-D warnings`. Included here so they share shared_checks.rs's imports
+    // (BTreeSet, Path/PathBuf, fs) inside this same module.
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/build_support/build_receipts.rs"
+    ));
 }
 
 /// Single documented failure path for build.rs. Every invariant violation
@@ -43,45 +52,36 @@ struct TypedWaiverEntry {
 fn main() {
     let repo_invariants_available = repo_invariant_surface_available();
 
-    println!("cargo:rerun-if-env-changed=BATPAK_PLATFORM_PROFILE");
-    println!("cargo:rerun-if-changed=Cargo.toml");
-    println!("cargo:rerun-if-changed=src/");
-    println!("cargo:rerun-if-changed=examples/");
-    println!("cargo:rerun-if-changed=build_support/shared_checks.rs");
-    if repo_invariants_available {
-        println!("cargo:rerun-if-changed=../../Cargo.toml");
-        println!("cargo:rerun-if-changed=tests/");
-        println!("cargo:rerun-if-changed=benches/");
-        println!("cargo:rerun-if-changed=../macros/src/");
-        println!("cargo:rerun-if-changed=../macros-support/src/");
-        println!("cargo:rerun-if-changed=../../tools/xtask/src/");
-        println!("cargo:rerun-if-changed=../../tools/integrity/src/");
-        println!("cargo:rerun-if-changed=../../traceability/dead_code_silencer_allowlist.yaml");
-        println!("cargo:rerun-if-changed=../../traceability/typed_waivers.yaml");
-        println!("cargo:rerun-if-changed=../../traceability/invariants.yaml");
-        println!("cargo:rerun-if-changed=../../../README.md");
-        println!("cargo:rerun-if-changed=../../../MODEL.md");
-        println!("cargo:rerun-if-changed=../../../INVARIANTS.md");
-        println!("cargo:rerun-if-changed=../../../CONFORMANCE.md");
-        println!(
-            "cargo:rerun-if-changed=../../../archive/decisions/100_ADR_0001_SYNC_ONLY_STORE.md"
-        );
-    }
+    emit_rerun_lines(repo_invariants_available);
 
     check_no_tokio_in_deps();
     check_no_banned_patterns();
     check_store_config_field_usage();
-    if repo_invariants_available {
-        check_no_dead_code_silencers();
-        check_allow_justifications();
-    }
+    // The three surface-dependent lints are the vacuous-pass risk: in a packaged
+    // crate the repo invariant surface is absent. Rather than skip them
+    // silently, `run_surface_lint` emits a `cargo:warning=` AND writes an
+    // auditable SKIPPED_PACKAGED receipt; on a real workspace run each writes a
+    // PASS receipt with its real counts. See P1-3b.
+    let avail = repo_invariants_available;
+    shared_checks::run_surface_lint(
+        avail,
+        "no-dead-code-silencers",
+        check_no_dead_code_silencers,
+    );
+    shared_checks::run_surface_lint(avail, "allow-justifications", check_allow_justifications);
     check_no_stubs_in_src();
     check_store_surface_honesty();
     check_no_fixed_temp_patterns();
-    if repo_invariants_available {
-        check_pub_items_have_tests();
-    }
+    shared_checks::run_surface_lint(avail, "pub-items-have-tests", check_pub_items_have_tests);
     check_platform_profile_env();
+}
+
+/// Emit ONE `cargo:rerun-if-changed` per `.rs` file the lints actually read
+/// (per-file is the only form Cargo honors for nested edits), plus the explicit
+/// non-`.rs` inputs (Cargo.toml, traceability YAML, doc/ADR markdown). The
+/// surface-dependent roots are only emitted when present.
+fn emit_rerun_lines(repo_invariants_available: bool) {
+    shared_checks::emit_build_rerun_lines(&core_root(), &repo_root(), repo_invariants_available);
 }
 
 fn repo_root() -> PathBuf {
@@ -396,11 +396,20 @@ fn check_no_stubs_in_src() {
     });
 }
 
-fn check_no_dead_code_silencers() {
+fn check_no_dead_code_silencers() -> shared_checks::LintCounts {
     let repo_root = repo_root();
     let allowlisted = shared_checks::load_dead_code_silencer_allowlist(&repo_root)
         .unwrap_or_else(|err| fail(&err));
+    let mut counts = shared_checks::LintCounts {
+        files_examined: 0,
+        assertions_run: 0,
+        inputs: BTreeSet::new(),
+    };
     walk_dead_code_checked_rs_files(&mut |path, contents| {
+        counts.files_examined += 1;
+        // One "no un-allowlisted dead_code silencer" assertion per file scanned.
+        counts.assertions_run += 1;
+        counts.inputs.insert(path.to_path_buf());
         let rel = path
             .strip_prefix(&repo_root)
             .unwrap_or(path)
@@ -414,6 +423,8 @@ fn check_no_dead_code_silencers() {
                 ))
             });
         for site in sites {
+            // Each candidate silencer site is an additional assertion.
+            counts.assertions_run += 1;
             let allowlist_site = format!("{rel}:{}", site.line);
             if allowlisted.contains(&allowlist_site) {
                 continue;
@@ -430,21 +441,31 @@ fn check_no_dead_code_silencers() {
                 ));
         }
     });
+    counts
 }
 
 /// INV-ALLOW-IS-DESIGN enforcement: every #[allow(...)] in runtime or
 /// toolchain Rust code must carry a structured `// justifies:` comment with
 /// >= 5 words AND >= 1 resolvable anchor (INV-id, ADR-NNNN, or repo path).
-fn check_allow_justifications() {
+fn check_allow_justifications() -> shared_checks::LintCounts {
     let repo_root = repo_root();
     let known_invariants =
         shared_checks::load_known_invariants(&repo_root).unwrap_or_else(|err| fail(&err));
+    let mut counts = shared_checks::LintCounts {
+        files_examined: 0,
+        assertions_run: 0,
+        inputs: BTreeSet::new(),
+    };
     walk_allow_checked_rs_files(&mut |path, contents| {
+        counts.files_examined += 1;
+        counts.inputs.insert(path.to_path_buf());
         let path_str = repo_relative_display(path);
         let lines: Vec<&str> = contents.lines().collect();
         for (line_no, line) in lines.iter().enumerate() {
             let trimmed = line.trim();
             if trimmed.starts_with("#![allow(") || trimmed.starts_with("#[allow(") {
+                // Each `#[allow]`/`#![allow]` site is one justification assertion.
+                counts.assertions_run += 1;
                 let has_justification =
                     shared_checks::line_carries_justification(line, &repo_root, &known_invariants)
                         || (line_no > 0
@@ -472,6 +493,7 @@ fn check_allow_justifications() {
             }
         }
     });
+    counts
 }
 
 fn check_no_tokio_in_deps() {
@@ -787,7 +809,7 @@ impl Visit<'_> for StoreConfigFieldAccessCollector<'_> {
 /// (expiry, owner, adr, L4 sign-off) lives in
 /// `tools/integrity/src/typed_waivers.rs`. LAW-003 (No Orphan Infrastructure),
 /// FM-007 (Island Syndrome).
-fn check_pub_items_have_tests() {
+fn check_pub_items_have_tests() -> shared_checks::LintCounts {
     // After the P0-2 triage this set is empty: every public item is named
     // directly in a test file, so the walk below proves coverage with zero
     // waivers. A typed `pub-item` waiver target is skipped here.
@@ -796,6 +818,15 @@ fn check_pub_items_have_tests() {
     // Parse every test file once.
     let test_files: Vec<(std::path::PathBuf, syn::File)> = collect_rs_file_asts(Path::new("tests"));
 
+    let mut counts = shared_checks::LintCounts {
+        files_examined: 0,
+        assertions_run: 0,
+        inputs: BTreeSet::new(),
+    };
+    for (test_path, _) in &test_files {
+        counts.inputs.insert(test_path.clone());
+    }
+
     // Walk src/ and collect public item names from the parsed AST, then
     // confirm each name has at least one real path-position reference in the
     // parsed tests.
@@ -803,6 +834,8 @@ fn check_pub_items_have_tests() {
         if path.ends_with("prelude.rs") {
             return;
         }
+        counts.files_examined += 1;
+        counts.inputs.insert(path.to_path_buf());
         let path_str = repo_relative_display(path);
         let file = syn::parse_file(contents).unwrap_or_else(|err| {
             fail(&format!(
@@ -814,6 +847,8 @@ fn check_pub_items_have_tests() {
             if allowed_names.contains(&name) {
                 continue;
             }
+            // Each public item checked for a test witness is one assertion.
+            counts.assertions_run += 1;
             let witnessed = test_files
                 .iter()
                 .any(|(_, ast)| shared_checks::ast_references_name(ast, &name));
@@ -826,6 +861,7 @@ fn check_pub_items_have_tests() {
             }
         }
     });
+    counts
 }
 
 fn collect_rs_file_asts(dir: &Path) -> Vec<(std::path::PathBuf, syn::File)> {

@@ -9,6 +9,7 @@ mod host_dev;
 mod host_loop;
 mod loom;
 mod manifest;
+mod meta_gate;
 mod msrv_check;
 mod mutants;
 mod package_scan;
@@ -191,6 +192,10 @@ pub(crate) fn ci() -> Result<()> {
 
 pub(crate) fn ci_fast() -> Result<()> {
     ci::ci_fast()
+}
+
+pub(crate) fn meta_gate(args: &crate::MetaGateArgs) -> Result<()> {
+    meta_gate::meta_gate(args)
 }
 
 pub(crate) fn ci_windows_surface() -> Result<()> {

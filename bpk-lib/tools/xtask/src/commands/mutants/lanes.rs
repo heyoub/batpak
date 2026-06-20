@@ -65,6 +65,19 @@ pub(super) const PLATFORM_BACKEND_MUTANT_FILES: &[&str] = &[
 ];
 pub(super) const TESTING_LEDGER_LINT_MUTANT_FILES: &[&str] =
     &["tools/integrity/src/harness_lints.rs"];
+// The integrity graders are the machine that grades everything else, so the
+// machine itself is mutation-graded (metacircular). A surviving mutant in any
+// of these grader bodies means a verification rule is untested and could be
+// silently disabled. Threshold-enforced, never record-only.
+pub(super) const INTEGRITY_GRADERS_MUTANT_FILES: &[&str] = &[
+    "tools/integrity/src/ci_parity.rs",
+    "tools/integrity/src/invariant_bridge.rs",
+    "tools/integrity/src/public_surface.rs",
+    "tools/integrity/src/structural.rs",
+    "tools/integrity/src/typed_waivers.rs",
+    "tools/integrity/src/assurance.rs",
+    "tools/integrity/src/meta_gate.rs",
+];
 pub(super) const SYNCBAT_RUNTIME_MUTANT_FILES: &[&str] = &[
     "crates/syncbat/src/builder.rs",
     "crates/syncbat/src/core.rs",
@@ -477,6 +490,14 @@ pub(super) fn critical_mutation_seams() -> &'static [CriticalMutationSeam] {
             surface: MutantSurface::AllFeatures,
             package: Some("batpak-integrity"),
             paths: TESTING_LEDGER_LINT_MUTANT_FILES,
+        },
+        CriticalMutationSeam {
+            slug: "integrity-graders",
+            label: "integrity graders (grade the graders)",
+            description: "ci-parity, invariant-bridge, public-surface, structural, typed-waiver, and assurance grader logic — the verification machine is itself mutation-graded",
+            surface: MutantSurface::AllFeatures,
+            package: Some("batpak-integrity"),
+            paths: INTEGRITY_GRADERS_MUTANT_FILES,
         },
         CriticalMutationSeam {
             slug: "syncbat-runtime-dispatch",

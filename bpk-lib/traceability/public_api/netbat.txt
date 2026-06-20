@@ -6,7 +6,7 @@ pub netbat::NetbatError::EmptyStream
 pub netbat::NetbatError::InputTooLarge
 pub netbat::NetbatError::InputTooLarge::max: usize
 pub netbat::NetbatError::Io
-pub netbat::NetbatError::Io::kind: std::io::error::ErrorKind
+pub netbat::NetbatError::Io::kind: std::io::ErrorKind
 pub netbat::NetbatError::LineTooLong
 pub netbat::NetbatError::LineTooLong::max: usize
 pub netbat::NetbatError::MalformedRequest
@@ -20,8 +20,8 @@ pub netbat::NetbatError::UnsupportedProtocolVersion
 pub netbat::NetbatError::UnsupportedProtocolVersion::version: alloc::string::String
 impl netbat::NetbatError
 pub fn netbat::NetbatError::code(&self) -> &'static str
-impl core::convert::From<std::io::error::Error> for netbat::NetbatError
-pub fn netbat::NetbatError::from(error: std::io::error::Error) -> Self
+impl core::convert::From<std::io::Error> for netbat::NetbatError
+pub fn netbat::NetbatError::from(error: std::io::Error) -> Self
 impl core::convert::From<syncbat::error::RuntimeError> for netbat::NetbatError
 pub fn netbat::NetbatError::from(error: syncbat::error::RuntimeError) -> Self
 impl core::error::Error for netbat::NetbatError
@@ -105,7 +105,7 @@ pub fn netbat::Server::introspect(&self) -> netbat::Introspection
 pub fn netbat::Server::modules(&self) -> &[netbat::ServerModule]
 pub fn netbat::Server::mount(&mut self, module: netbat::ServerModule) -> core::result::Result<&mut Self, netbat::RouteValidationError>
 pub fn netbat::Server::new() -> Self
-pub fn netbat::Server::routes(&self) -> impl core::iter::traits::iterator::Iterator<Item = &netbat::Route>
+pub fn netbat::Server::routes(&self) -> impl core::iter::Iterator<Item = &netbat::Route>
 pub struct netbat::ServerModule
 impl netbat::ServerModule
 pub fn netbat::ServerModule::expose(module: syncbat::module::Module, base_path: impl core::convert::AsRef<str>) -> core::result::Result<Self, netbat::RouteValidationError>
@@ -163,7 +163,7 @@ pub fn netbat::encode_hex_into(bytes: &[u8], output: &mut alloc::vec::Vec<u8>)
 pub fn netbat::encode_hex_str(bytes: &[u8]) -> alloc::string::String
 pub fn netbat::encode_request(operation: &str, input: &[u8]) -> alloc::vec::Vec<u8>
 pub fn netbat::encode_response(result: core::result::Result<&[u8], &netbat::NetbatError>) -> alloc::vec::Vec<u8>
-pub fn netbat::inspect_core_operations<I, S>(core: &syncbat::core::Core, operation_names: I) -> netbat::CoreHealth where I: core::iter::traits::collect::IntoIterator<Item = S>, S: core::convert::AsRef<str>
+pub fn netbat::inspect_core_operations<I, S>(core: &syncbat::core::Core, operation_names: I) -> netbat::CoreHealth where I: core::iter::IntoIterator<Item = S>, S: core::convert::AsRef<str>
 pub fn netbat::introspect_modules(modules: &[netbat::ServerModule]) -> netbat::Introspection
 pub fn netbat::serve_stream<S>(stream: &mut S, core: &mut syncbat::core::Core, limits: &netbat::Limits) -> core::result::Result<netbat::ResponseFrame, netbat::NetbatError> where S: std::io::Read + std::io::Write
 pub fn netbat::serve_tcp_listener(listener: std::net::TcpListener, core: &mut syncbat::core::Core, config: &netbat::TcpServerConfig, shutdown: &netbat::ShutdownHandle) -> core::result::Result<netbat::TcpServeStats, netbat::NetbatError>

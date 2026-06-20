@@ -16,6 +16,10 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use syn::spanned::Spanned;
 
+#[cfg(test)]
+#[path = "structural_tests.rs"]
+mod structural_tests;
+
 pub(crate) fn run() -> Result<()> {
     let repo_root = repo_root()?;
     let tracked_files = tracked_repo_files(&repo_root)?;
@@ -23,7 +27,21 @@ pub(crate) fn run() -> Result<()> {
     architecture_lints::check(&repo_root, &tracked_files, &mut source_cache)?;
     agent_surface::check(&repo_root)?;
     harness_lints::check(&repo_root, &tracked_files, &mut source_cache)?;
-    invariant_bridge::check(&repo_root, &tracked_files)?;
+
+    // invariant-bridge: receipt over the tracked-file surface it scans.
+    crate::receipts::run_gate("invariant-bridge", || {
+        invariant_bridge::check(&repo_root, &tracked_files)?;
+        Ok(crate::receipts::GateWork::new(
+            tracked_files.len(),
+            tracked_files.len(),
+            tracked_files.iter().cloned().collect(),
+        ))
+    })?;
+
+    // The structural source lints share one receipt: they all walk the
+    // production-Rust surface and each file is the unit of work + the assertion.
+    let started = crate::receipts::iso8601_now();
+    let source_files = production_rust_files(&repo_root);
     check_no_dead_code_silencers(&repo_root, &mut source_cache)?;
     check_no_placeholder_runtime_macros(&repo_root, &mut source_cache)?;
     check_canonical_encoding_boundary(&repo_root, &mut source_cache)?;
@@ -34,12 +52,68 @@ pub(crate) fn run() -> Result<()> {
     check_inline_test_island_pressure(&repo_root, &mut source_cache)?;
     check_event_payload_frozen_fixtures(&repo_root, &mut source_cache)?;
     public_surface::check(&repo_root, &mut source_cache)?;
-    ci_parity::check(&repo_root)?;
     store_pub_fn_coverage::check(&repo_root, &mut source_cache)?;
-    crate::assurance::check(&repo_root)?;
-    crate::typed_waivers::check(&repo_root)?;
+    // Eight blocking source lints ran over every production file; record the
+    // real files-examined count and assertions (one structural lint per file).
+    crate::receipts::record_pass(
+        "structural-source-lints",
+        source_files.iter().cloned().collect(),
+        source_files.len(),
+        source_files.len().saturating_mul(8),
+        started,
+    )?;
+
+    // ci-parity: receipt over the ci.yml + xtask source surface it cross-checks.
+    crate::receipts::run_gate("ci-parity", || {
+        ci_parity::check(&repo_root)?;
+        let inputs: BTreeSet<PathBuf> = ci_parity_inputs(&repo_root);
+        let files = inputs.len();
+        Ok(crate::receipts::GateWork::new(files, files.max(1), inputs))
+    })?;
+
+    // assurance-level-check: receipt over the manifest + the production files it
+    // resolves to assurance levels.
+    crate::receipts::run_gate("assurance-level-check", || {
+        crate::assurance::check(&repo_root)?;
+        let manifest = crate::assurance::manifest_path(&repo_root);
+        let mut inputs: BTreeSet<PathBuf> = production_rust_files(&repo_root).into_iter().collect();
+        inputs.insert(manifest);
+        let files = inputs.len();
+        Ok(crate::receipts::GateWork::new(files, files, inputs))
+    })?;
+
+    // typed-waivers: receipt over the waiver file (always examined, even when
+    // empty — the gate parses + validates it on every run).
+    crate::receipts::run_gate("typed-waivers", || {
+        crate::typed_waivers::check(&repo_root)?;
+        let mut inputs = BTreeSet::new();
+        inputs.insert(crate::typed_waivers::waivers_path(&repo_root));
+        Ok(crate::receipts::GateWork::new(1, 1, inputs))
+    })?;
+
     println!("structural-check: ok");
     Ok(())
+}
+
+/// The files `ci_parity::check` cross-checks: the CI workflow, the Dockerfile,
+/// the justfile, and the xtask command surface. Used only to give the ci-parity
+/// receipt a real (non-zero) `files_examined` count + `inputs_hash`; missing
+/// optional files are simply omitted.
+fn ci_parity_inputs(repo_root: &Path) -> BTreeSet<PathBuf> {
+    let mut inputs = BTreeSet::new();
+    for rel in [
+        ".github/workflows/ci.yml",
+        "Dockerfile",
+        ".devcontainer/Dockerfile",
+        "justfile",
+        "tools/xtask/src/main.rs",
+    ] {
+        let path = repo_root.join(rel);
+        if path.exists() {
+            inputs.insert(path);
+        }
+    }
+    inputs
 }
 
 /// Absolute, non-overridable production file cap. There is no per-file escape
@@ -49,9 +123,21 @@ pub(crate) fn run() -> Result<()> {
 const DEFAULT_LINE_BUDGET: usize = 850;
 
 fn check_rust_file_size_pressure(repo_root: &Path, source_cache: &mut SourceCache) -> Result<()> {
-    for path in production_rust_files(repo_root) {
-        let rel = relative(repo_root, &path);
-        let content = source_cache.read_to_string(&path)?;
+    check_rust_file_size_pressure_over(repo_root, &production_rust_files(repo_root), source_cache)
+}
+
+/// Testable core of [`check_rust_file_size_pressure`]: assert every file in
+/// `paths` is within the absolute production line budget. Split out so a RED
+/// fixture can run the gate over a planted temp tree without depending on the
+/// live production-Rust surface.
+fn check_rust_file_size_pressure_over(
+    repo_root: &Path,
+    paths: &[PathBuf],
+    source_cache: &mut SourceCache,
+) -> Result<()> {
+    for path in paths {
+        let rel = relative(repo_root, path);
+        let content = source_cache.read_to_string(path)?;
         let line_count = nonblank_line_count(&content);
         ensure(
             line_count <= DEFAULT_LINE_BUDGET,
@@ -65,17 +151,34 @@ fn check_rust_file_size_pressure(repo_root: &Path, source_cache: &mut SourceCach
     Ok(())
 }
 
+/// Absolute, non-overridable cap on the nonblank line count of a single inline
+/// `#[cfg(test)] mod tests` island in a production source file.
+const DEFAULT_TEST_ISLAND_BUDGET: usize = 200;
+
 fn check_inline_test_island_pressure(
     repo_root: &Path,
     source_cache: &mut SourceCache,
 ) -> Result<()> {
-    const DEFAULT_TEST_ISLAND_BUDGET: usize = 200;
+    check_inline_test_island_pressure_over(
+        repo_root,
+        &production_rust_files(repo_root),
+        source_cache,
+    )
+}
 
-    for path in production_rust_files(repo_root) {
-        let rel = relative(repo_root, &path);
-        let content = source_cache.read_to_string(&path)?;
+/// Testable core of [`check_inline_test_island_pressure`]: assert every inline
+/// `mod tests` island in `paths` is within the absolute island budget. Split out
+/// so a RED fixture can run the gate over a planted temp tree.
+fn check_inline_test_island_pressure_over(
+    repo_root: &Path,
+    paths: &[PathBuf],
+    source_cache: &mut SourceCache,
+) -> Result<()> {
+    for path in paths {
+        let rel = relative(repo_root, path);
+        let content = source_cache.read_to_string(path)?;
         let file = source_cache
-            .parse_rust(&path)
+            .parse_rust(path)
             .map_err(|err| anyhow!("parse inline test islands in {rel}: {err}"))?;
         let lines = content.lines().collect::<Vec<_>>();
         for island in inline_test_islands(&file, &lines) {
@@ -441,7 +544,6 @@ fn check_no_placeholder_runtime_macros(
 }
 
 fn check_no_dead_code_silencers(repo_root: &Path, source_cache: &mut SourceCache) -> Result<()> {
-    let allowlisted = load_dead_code_silencer_allowlist(repo_root).map_err(|err| anyhow!(err))?;
     let mut paths = production_rust_files(repo_root);
     paths.extend(rust_files(&repo_root.join("tools/xtask/src")));
     paths.extend(rust_files(&repo_root.join("tools/integrity/src")));
@@ -449,12 +551,24 @@ fn check_no_dead_code_silencers(repo_root: &Path, source_cache: &mut SourceCache
     paths.extend(rust_files(&core_examples_root(repo_root)));
     paths.extend(rust_files(&core_benches_root(repo_root)));
     paths.push(repo_root.join("crates/core/build.rs"));
+    check_no_dead_code_silencers_over(repo_root, &paths, source_cache)
+}
+
+/// Testable core of [`check_no_dead_code_silencers`]: scan `paths` for
+/// `dead_code`/`unused` silencer attributes not present in the repo's allowlist.
+/// Split out so a RED fixture can run the gate over a planted temp tree.
+fn check_no_dead_code_silencers_over(
+    repo_root: &Path,
+    paths: &[PathBuf],
+    source_cache: &mut SourceCache,
+) -> Result<()> {
+    let allowlisted = load_dead_code_silencer_allowlist(repo_root).map_err(|err| anyhow!(err))?;
     for path in paths {
-        let content = source_cache.read_to_string(&path)?;
+        let content = source_cache.read_to_string(path)?;
         let sites = collect_dead_code_silencer_sites(&content)
-            .map_err(|err| anyhow!("parse {}: {}", relative(repo_root, &path), err))?;
+            .map_err(|err| anyhow!("parse {}: {}", relative(repo_root, path), err))?;
         for site in sites {
-            let allowlist_site = format!("{}:{}", relative(repo_root, &path), site.line);
+            let allowlist_site = format!("{}:{}", relative(repo_root, path), site.line);
             if allowlisted.contains(&allowlist_site) {
                 continue;
             }
@@ -464,7 +578,7 @@ fn check_no_dead_code_silencers(repo_root: &Path, source_cache: &mut SourceCache
                  If code is test-only, use #[cfg(test)]. If it is unused, delete it.\n\
                  If it is shared infrastructure, restructure it so the compiler sees the real ownership surface.\n\
                  If this is the rare legitimate exception, add `{}` to traceability/dead_code_silencer_allowlist.yaml with `reason` and `adr`.",
-                relative(repo_root, &path),
+                relative(repo_root, path),
                 site.line,
                 site.column,
                 site.rendered,
@@ -476,7 +590,6 @@ fn check_no_dead_code_silencers(repo_root: &Path, source_cache: &mut SourceCache
 }
 
 fn check_allow_justifications(repo_root: &Path, source_cache: &mut SourceCache) -> Result<()> {
-    let known_invariants = load_known_invariants(repo_root).map_err(|err| anyhow!(err))?;
     let mut paths = production_rust_files(repo_root);
     paths.extend(rust_files(&repo_root.join("tools/xtask/src")));
     paths.extend(rust_files(&repo_root.join("tools/integrity/src")));
@@ -484,8 +597,20 @@ fn check_allow_justifications(repo_root: &Path, source_cache: &mut SourceCache) 
     paths.extend(rust_files(&core_examples_root(repo_root)));
     paths.extend(rust_files(&core_benches_root(repo_root)));
     paths.push(repo_root.join("crates/core/build.rs"));
+    check_allow_justifications_over(repo_root, &paths, source_cache)
+}
+
+/// Testable core of [`check_allow_justifications`]: assert every lint-suppression
+/// attribute in `paths` carries a resolvable `// justifies:` anchor. Split out so
+/// a RED fixture can run the gate over a planted temp tree.
+fn check_allow_justifications_over(
+    repo_root: &Path,
+    paths: &[PathBuf],
+    source_cache: &mut SourceCache,
+) -> Result<()> {
+    let known_invariants = load_known_invariants(repo_root).map_err(|err| anyhow!(err))?;
     for path in paths {
-        let content = source_cache.read_to_string(&path)?;
+        let content = source_cache.read_to_string(path)?;
         let lines: Vec<&str> = content.lines().collect();
         let mut index = 0;
         while index < lines.len() {
@@ -525,7 +650,7 @@ fn check_allow_justifications(repo_root: &Path, source_cache: &mut SourceCache) 
                          An anchor is an INV-id from traceability/invariants.yaml, an ADR-NNNN whose file exists as a root ADR file, \
                          or a concrete repo path (src/..., tests/..., examples/..., crates/macros/..., crates/macros-support/..., benches/..., tools/..., build.rs). \
                         See INV-ALLOW-IS-DESIGN.",
-                        relative(repo_root, &path),
+                        relative(repo_root, path),
                         start_index + 1
                     ),
                 )?;

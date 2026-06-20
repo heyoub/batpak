@@ -24,10 +24,14 @@ pub(crate) fn preflight() -> Result<()> {
 fn preflight_inner() -> Result<()> {
     assert_rustc_matches_toolchain_pin()?;
     crate::commands::ci()?;
+    // The coverage floor is enforced on the default PR path inside `ci_fast`
+    // (see commands/ci.rs). `ci()` already runs `ci_fast()`, so the floor has
+    // already been checked by the time we get here; this call re-runs coverage
+    // for the full preflight artifact bundle and shares the single-source floor.
     coverage::cover(CoverArgs {
         ci: true,
         json: false,
-        threshold: Some(80),
+        threshold: Some(coverage::COVERAGE_FLOOR_PCT),
     })?;
     crate::docs::docs(DocsArgs { open: false })
 }

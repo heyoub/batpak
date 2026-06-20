@@ -9,6 +9,16 @@ use syn::spanned::Spanned;
 use syn::visit::Visit;
 use syn::Token;
 
+// NOTE: The gauntlet execution-receipt + per-file rerun helpers (LintCounts,
+// run_surface_lint, GauntletReceipt, gauntlet_receipts_dir, iso8601_now,
+// civil_from_days, write_gauntlet_receipt, emit_build_rerun_lines,
+// emit_rerun_for_*, crc32_inputs_hash) are BUILD-SCRIPT-ONLY and live in the
+// sibling `build_receipts.rs`, which is `include!`d only from build.rs. They are
+// deliberately NOT here because this file is also included by the
+// `batpak-integrity` binary (via tools/shared/shared_checks.rs), where those
+// receipt helpers would be unused dead code under the `-D warnings` gate.
+// Everything below is genuinely shared by both build.rs and that binary.
+
 /// An anchor extracted from a structured `// justifies:` comment body.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum JustifiesAnchor {

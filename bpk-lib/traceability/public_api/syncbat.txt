@@ -123,14 +123,14 @@ pub type syncbat::handler::HandlerResult = core::result::Result<alloc::vec::Vec<
 pub mod syncbat::module
 pub struct syncbat::module::Module
 impl syncbat::module::Module
-pub fn syncbat::module::Module::from_operations<I>(name: impl core::convert::Into<alloc::string::String>, operations: I) -> core::result::Result<Self, syncbat::register::RegisterValidationError> where I: core::iter::traits::collect::IntoIterator<Item = syncbat::operation::OperationDescriptor>
+pub fn syncbat::module::Module::from_operations<I>(name: impl core::convert::Into<alloc::string::String>, operations: I) -> core::result::Result<Self, syncbat::register::RegisterValidationError> where I: core::iter::IntoIterator<Item = syncbat::operation::OperationDescriptor>
 pub fn syncbat::module::Module::insert_operation(&mut self, descriptor: syncbat::operation::OperationDescriptor) -> core::result::Result<(), syncbat::register::RegisterValidationError>
 pub fn syncbat::module::Module::into_register(self) -> core::result::Result<syncbat::register::Register, syncbat::register::RegisterValidationError>
 pub fn syncbat::module::Module::name(&self) -> &str
 pub fn syncbat::module::Module::new(name: impl core::convert::Into<alloc::string::String>) -> Self
 pub fn syncbat::module::Module::operation(&self, name: &str) -> core::option::Option<&syncbat::operation::OperationDescriptor>
 pub fn syncbat::module::Module::operation_count(&self) -> usize
-pub fn syncbat::module::Module::operations(&self) -> impl core::iter::traits::iterator::Iterator<Item = (&str, &syncbat::operation::OperationDescriptor)> + '_
+pub fn syncbat::module::Module::operations(&self) -> impl core::iter::Iterator<Item = (&str, &syncbat::operation::OperationDescriptor)> + '_
 pub fn syncbat::module::Module::validate(&self) -> core::result::Result<(), syncbat::register::RegisterValidationError>
 pub mod syncbat::operation
 #[non_exhaustive] pub enum syncbat::operation::EffectClass
@@ -283,13 +283,13 @@ pub struct syncbat::register::CacheRegister<'a>
 impl<'a> syncbat::register::CacheRegister<'a>
 pub fn syncbat::register::CacheRegister<'a>::contains_operation(&self, name: &str) -> bool
 pub fn syncbat::register::CacheRegister<'a>::descriptor(&self, name: &str) -> core::option::Option<&'a syncbat::operation::OperationDescriptor>
-pub fn syncbat::register::CacheRegister<'a>::descriptors(&self) -> impl core::iter::traits::iterator::Iterator<Item = (&'a str, &'a syncbat::operation::OperationDescriptor)> + '_
+pub fn syncbat::register::CacheRegister<'a>::descriptors(&self) -> impl core::iter::Iterator<Item = (&'a str, &'a syncbat::operation::OperationDescriptor)> + '_
 pub fn syncbat::register::CacheRegister<'a>::from_register(register: &'a syncbat::register::Register) -> Self
 pub fn syncbat::register::CacheRegister<'a>::is_empty(&self) -> bool
 pub fn syncbat::register::CacheRegister<'a>::len(&self) -> usize
-pub fn syncbat::register::CacheRegister<'a>::names(&self) -> impl core::iter::traits::iterator::Iterator<Item = &'a str> + '_
+pub fn syncbat::register::CacheRegister<'a>::names(&self) -> impl core::iter::Iterator<Item = &'a str> + '_
 pub fn syncbat::register::CacheRegister<'a>::operation(&self, name: &str) -> core::option::Option<&'a syncbat::operation::OperationDescriptor>
-pub fn syncbat::register::CacheRegister<'a>::operations(&self) -> impl core::iter::traits::iterator::Iterator<Item = (&'a str, &'a syncbat::operation::OperationDescriptor)> + '_
+pub fn syncbat::register::CacheRegister<'a>::operations(&self) -> impl core::iter::Iterator<Item = (&'a str, &'a syncbat::operation::OperationDescriptor)> + '_
 pub struct syncbat::register::Register
 impl syncbat::register::Register
 pub fn syncbat::register::Register::as_map(&self) -> &alloc::collections::btree::map::BTreeMap<alloc::string::String, syncbat::operation::OperationDescriptor>
@@ -297,16 +297,16 @@ pub fn syncbat::register::Register::checkout(&self, name: impl core::convert::As
 pub fn syncbat::register::Register::checkout_frame(name: impl core::convert::Into<alloc::string::String>, input: syncbat::operation::OperationInput) -> syncbat::core::CheckoutFrame
 pub fn syncbat::register::Register::contains_operation(&self, name: &str) -> bool
 pub fn syncbat::register::Register::descriptor(&self, name: &str) -> core::option::Option<&syncbat::operation::OperationDescriptor>
-pub fn syncbat::register::Register::descriptors(&self) -> impl core::iter::traits::iterator::Iterator<Item = (&str, &syncbat::operation::OperationDescriptor)> + '_
-pub fn syncbat::register::Register::from_operations<I>(operations: I) -> core::result::Result<Self, syncbat::register::RegisterValidationError> where I: core::iter::traits::collect::IntoIterator<Item = syncbat::operation::OperationDescriptor>
+pub fn syncbat::register::Register::descriptors(&self) -> impl core::iter::Iterator<Item = (&str, &syncbat::operation::OperationDescriptor)> + '_
+pub fn syncbat::register::Register::from_operations<I>(operations: I) -> core::result::Result<Self, syncbat::register::RegisterValidationError> where I: core::iter::IntoIterator<Item = syncbat::operation::OperationDescriptor>
 pub fn syncbat::register::Register::insert_operation(&mut self, descriptor: syncbat::operation::OperationDescriptor) -> core::result::Result<(), syncbat::register::RegisterValidationError>
 pub fn syncbat::register::Register::into_map(self) -> alloc::collections::btree::map::BTreeMap<alloc::string::String, syncbat::operation::OperationDescriptor>
 pub fn syncbat::register::Register::is_empty(&self) -> bool
 pub fn syncbat::register::Register::len(&self) -> usize
-pub fn syncbat::register::Register::names(&self) -> impl core::iter::traits::iterator::Iterator<Item = &str> + '_
+pub fn syncbat::register::Register::names(&self) -> impl core::iter::Iterator<Item = &str> + '_
 pub fn syncbat::register::Register::new() -> Self
 pub fn syncbat::register::Register::operation(&self, name: &str) -> core::option::Option<&syncbat::operation::OperationDescriptor>
-pub fn syncbat::register::Register::operations(&self) -> impl core::iter::traits::iterator::Iterator<Item = (&str, &syncbat::operation::OperationDescriptor)> + '_
+pub fn syncbat::register::Register::operations(&self) -> impl core::iter::Iterator<Item = (&str, &syncbat::operation::OperationDescriptor)> + '_
 pub mod syncbat::register_store
 #[non_exhaustive] pub enum syncbat::register_store::RegisterOperationActionV1
 pub syncbat::register_store::RegisterOperationActionV1::Delete
@@ -567,13 +567,13 @@ pub struct syncbat::CacheRegister<'a>
 impl<'a> syncbat::register::CacheRegister<'a>
 pub fn syncbat::register::CacheRegister<'a>::contains_operation(&self, name: &str) -> bool
 pub fn syncbat::register::CacheRegister<'a>::descriptor(&self, name: &str) -> core::option::Option<&'a syncbat::operation::OperationDescriptor>
-pub fn syncbat::register::CacheRegister<'a>::descriptors(&self) -> impl core::iter::traits::iterator::Iterator<Item = (&'a str, &'a syncbat::operation::OperationDescriptor)> + '_
+pub fn syncbat::register::CacheRegister<'a>::descriptors(&self) -> impl core::iter::Iterator<Item = (&'a str, &'a syncbat::operation::OperationDescriptor)> + '_
 pub fn syncbat::register::CacheRegister<'a>::from_register(register: &'a syncbat::register::Register) -> Self
 pub fn syncbat::register::CacheRegister<'a>::is_empty(&self) -> bool
 pub fn syncbat::register::CacheRegister<'a>::len(&self) -> usize
-pub fn syncbat::register::CacheRegister<'a>::names(&self) -> impl core::iter::traits::iterator::Iterator<Item = &'a str> + '_
+pub fn syncbat::register::CacheRegister<'a>::names(&self) -> impl core::iter::Iterator<Item = &'a str> + '_
 pub fn syncbat::register::CacheRegister<'a>::operation(&self, name: &str) -> core::option::Option<&'a syncbat::operation::OperationDescriptor>
-pub fn syncbat::register::CacheRegister<'a>::operations(&self) -> impl core::iter::traits::iterator::Iterator<Item = (&'a str, &'a syncbat::operation::OperationDescriptor)> + '_
+pub fn syncbat::register::CacheRegister<'a>::operations(&self) -> impl core::iter::Iterator<Item = (&'a str, &'a syncbat::operation::OperationDescriptor)> + '_
 pub struct syncbat::Checkout
 impl syncbat::core::Checkout
 pub fn syncbat::core::Checkout::descriptor(&self) -> &syncbat::operation::OperationDescriptor
@@ -624,14 +624,14 @@ impl core::fmt::Display for syncbat::operation::DescriptorValidationError
 pub fn syncbat::operation::DescriptorValidationError::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct syncbat::Module
 impl syncbat::module::Module
-pub fn syncbat::module::Module::from_operations<I>(name: impl core::convert::Into<alloc::string::String>, operations: I) -> core::result::Result<Self, syncbat::register::RegisterValidationError> where I: core::iter::traits::collect::IntoIterator<Item = syncbat::operation::OperationDescriptor>
+pub fn syncbat::module::Module::from_operations<I>(name: impl core::convert::Into<alloc::string::String>, operations: I) -> core::result::Result<Self, syncbat::register::RegisterValidationError> where I: core::iter::IntoIterator<Item = syncbat::operation::OperationDescriptor>
 pub fn syncbat::module::Module::insert_operation(&mut self, descriptor: syncbat::operation::OperationDescriptor) -> core::result::Result<(), syncbat::register::RegisterValidationError>
 pub fn syncbat::module::Module::into_register(self) -> core::result::Result<syncbat::register::Register, syncbat::register::RegisterValidationError>
 pub fn syncbat::module::Module::name(&self) -> &str
 pub fn syncbat::module::Module::new(name: impl core::convert::Into<alloc::string::String>) -> Self
 pub fn syncbat::module::Module::operation(&self, name: &str) -> core::option::Option<&syncbat::operation::OperationDescriptor>
 pub fn syncbat::module::Module::operation_count(&self) -> usize
-pub fn syncbat::module::Module::operations(&self) -> impl core::iter::traits::iterator::Iterator<Item = (&str, &syncbat::operation::OperationDescriptor)> + '_
+pub fn syncbat::module::Module::operations(&self) -> impl core::iter::Iterator<Item = (&str, &syncbat::operation::OperationDescriptor)> + '_
 pub fn syncbat::module::Module::validate(&self) -> core::result::Result<(), syncbat::register::RegisterValidationError>
 pub struct syncbat::OperationDescriptor
 pub syncbat::OperationDescriptor::effect: syncbat::operation::EffectClass
@@ -708,16 +708,16 @@ pub fn syncbat::register::Register::checkout(&self, name: impl core::convert::As
 pub fn syncbat::register::Register::checkout_frame(name: impl core::convert::Into<alloc::string::String>, input: syncbat::operation::OperationInput) -> syncbat::core::CheckoutFrame
 pub fn syncbat::register::Register::contains_operation(&self, name: &str) -> bool
 pub fn syncbat::register::Register::descriptor(&self, name: &str) -> core::option::Option<&syncbat::operation::OperationDescriptor>
-pub fn syncbat::register::Register::descriptors(&self) -> impl core::iter::traits::iterator::Iterator<Item = (&str, &syncbat::operation::OperationDescriptor)> + '_
-pub fn syncbat::register::Register::from_operations<I>(operations: I) -> core::result::Result<Self, syncbat::register::RegisterValidationError> where I: core::iter::traits::collect::IntoIterator<Item = syncbat::operation::OperationDescriptor>
+pub fn syncbat::register::Register::descriptors(&self) -> impl core::iter::Iterator<Item = (&str, &syncbat::operation::OperationDescriptor)> + '_
+pub fn syncbat::register::Register::from_operations<I>(operations: I) -> core::result::Result<Self, syncbat::register::RegisterValidationError> where I: core::iter::IntoIterator<Item = syncbat::operation::OperationDescriptor>
 pub fn syncbat::register::Register::insert_operation(&mut self, descriptor: syncbat::operation::OperationDescriptor) -> core::result::Result<(), syncbat::register::RegisterValidationError>
 pub fn syncbat::register::Register::into_map(self) -> alloc::collections::btree::map::BTreeMap<alloc::string::String, syncbat::operation::OperationDescriptor>
 pub fn syncbat::register::Register::is_empty(&self) -> bool
 pub fn syncbat::register::Register::len(&self) -> usize
-pub fn syncbat::register::Register::names(&self) -> impl core::iter::traits::iterator::Iterator<Item = &str> + '_
+pub fn syncbat::register::Register::names(&self) -> impl core::iter::Iterator<Item = &str> + '_
 pub fn syncbat::register::Register::new() -> Self
 pub fn syncbat::register::Register::operation(&self, name: &str) -> core::option::Option<&syncbat::operation::OperationDescriptor>
-pub fn syncbat::register::Register::operations(&self) -> impl core::iter::traits::iterator::Iterator<Item = (&str, &syncbat::operation::OperationDescriptor)> + '_
+pub fn syncbat::register::Register::operations(&self) -> impl core::iter::Iterator<Item = (&str, &syncbat::operation::OperationDescriptor)> + '_
 pub struct syncbat::RegisterOperationRowV1
 pub syncbat::RegisterOperationRowV1::action: alloc::string::String
 pub syncbat::RegisterOperationRowV1::effect: alloc::string::String

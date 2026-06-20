@@ -438,3 +438,180 @@ fn render_anchor(anchor: &JustifiesAnchor) -> String {
         JustifiesAnchor::Path(path) => path.to_string_lossy().into_owned(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    // justifies: INV-TEST-PANIC-AS-ASSERTION; setup panics signal fixture breakage, see tools/integrity/src/main.rs
+    fn temp_repo(name: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock after epoch")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "batpak-invariant-bridge-{name}-{}-{nanos}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&path).expect("create temp repo");
+        path
+    }
+
+    fn cleanup(repo: &Path) {
+        let _ = fs::remove_dir_all(repo);
+    }
+
+    #[test]
+    fn invariant_bridge_rejects_uncited_invariant() {
+        // A test artifact that DOES cite the invariant in its header passes;
+        // the same artifact stripped of the citation must make the
+        // header-citation rule bail.
+        let repo = temp_repo("uncited");
+        let rel = "crates/core/tests/synthetic_bridge.rs";
+        fs::create_dir_all(repo.join("crates/core/tests")).expect("tests dir");
+
+        fs::write(
+            repo.join(rel),
+            "//! PROVES INV-SYNTHETIC-BRIDGE holds under replay.\nfn t() {}\n",
+        )
+        .expect("write cited test");
+        invariant_test_artifacts_cite_header(&repo, "INV-SYNTHETIC-BRIDGE", &[rel.to_owned()])
+            .expect("cited header passes");
+
+        fs::write(
+            repo.join(rel),
+            "//! This header mentions no invariant id at all.\nfn t() {}\n",
+        )
+        .expect("write uncited test");
+        let err =
+            invariant_test_artifacts_cite_header(&repo, "INV-SYNTHETIC-BRIDGE", &[rel.to_owned()])
+                .expect_err("uncited header must fail");
+        assert!(
+            err.to_string().contains("INV-SYNTHETIC-BRIDGE")
+                && err.to_string().contains("none cite it"),
+            "unexpected error: {err:#}"
+        );
+        cleanup(&repo);
+    }
+
+    #[test]
+    fn invariant_bridge_rejects_noncatalog_ledger_citation() {
+        // A ledger entry citing a known catalog INV passes; citing an INV that
+        // is not in the catalog must make the ledger-citation rule bail.
+        let known: BTreeSet<String> = BTreeSet::from(["INV-REAL".to_owned()]);
+        let waivers = CitationWaivers::default();
+
+        let good = BTreeSet::from(["INV-REAL".to_owned()]);
+        check_ledger_entry_citations(Some(("good entry".to_owned(), 10)), &good, &known, &waivers)
+            .expect("catalog citation passes");
+
+        let bad = BTreeSet::from(["INV-DOES-NOT-EXIST".to_owned()]);
+        let err = check_ledger_entry_citations(
+            Some(("bad entry".to_owned(), 11)),
+            &bad,
+            &known,
+            &waivers,
+        )
+        .expect_err("non-catalog citation must fail");
+        assert!(
+            err.to_string()
+                .contains("non-catalog invariant INV-DOES-NOT-EXIST"),
+            "unexpected error: {err:#}"
+        );
+    }
+
+    #[test]
+    fn invariant_bridge_rejects_empty_ledger_citation() {
+        // An entry that cites at least one INV passes; an entry citing nothing
+        // must bail ("must cite at least one catalog INV-* id").
+        let known: BTreeSet<String> = BTreeSet::from(["INV-REAL".to_owned()]);
+        let waivers = CitationWaivers::default();
+        let empty = BTreeSet::new();
+        let err =
+            check_ledger_entry_citations(Some(("empty".to_owned(), 7)), &empty, &known, &waivers)
+                .expect_err("empty citation set must fail");
+        assert!(
+            err.to_string().contains("must cite at least one"),
+            "unexpected error: {err:#}"
+        );
+    }
+
+    #[test]
+    fn invariant_bridge_rejects_unresolvable_waiver_anchor() {
+        // A waiver whose `adr` resolves to a real ADR loads cleanly; a waiver
+        // whose `adr` carries no resolvable anchor must make load_waivers bail.
+        let repo = temp_repo("waiver-anchor");
+        // Provide an ADR so the green waiver's anchor resolves. resolve_anchor
+        // searches the PROJECT root (repo_root.parent()), so place it there.
+        let project = repo.join("project");
+        let repo_root = project.join("bpk-lib");
+        fs::create_dir_all(&repo_root).expect("repo root");
+        fs::write(project.join("ADR-0001-some-decision.md"), "# ADR-0001\n").expect("adr file");
+
+        let good = repo_root.join("good_waivers.yaml");
+        fs::write(
+            &good,
+            "- name: INV-X:crates/core/tests/x.rs\n  justification: proven via fuzz harness\n  adr: ADR-0001\n  witness: tests/x.rs\n",
+        )
+        .expect("write good waiver");
+        load_waivers(&good, &repo_root).expect("resolvable anchor passes");
+
+        let bad = repo_root.join("bad_waivers.yaml");
+        fs::write(
+            &bad,
+            "- name: INV-X:crates/core/tests/x.rs\n  justification: proven via fuzz harness\n  adr: no anchor here at all\n  witness: tests/x.rs\n",
+        )
+        .expect("write bad waiver");
+        // `CitationWaivers` deliberately carries no `Debug`, so match the
+        // result rather than `expect_err` (which would require `Debug`).
+        let err = match load_waivers(&bad, &repo_root) {
+            Ok(_) => panic!("unresolvable anchor must fail"),
+            Err(err) => err,
+        };
+        assert!(
+            err.to_string().contains("does not resolve to a real ADR"),
+            "unexpected error: {err:#}"
+        );
+        cleanup(&repo);
+    }
+
+    #[test]
+    fn invariant_bridge_rejects_witnessless_waiver() {
+        // A waiver carrying a witness is honored by `contains`; an otherwise
+        // valid waiver WITHOUT a witness must bail when consulted ("must carry
+        // a witness while the bridge is active").
+        let with_witness = WaiverRecord {
+            name: "INV-X:crates/core/tests/x.rs".to_owned(),
+            justification: "proven via fuzz harness".to_owned(),
+            adr: "ADR-0001".to_owned(),
+            witness: Some("tests/x.rs".to_owned()),
+        };
+        let mut entries = BTreeMap::new();
+        entries.insert(with_witness.name.clone(), with_witness);
+        let waivers = CitationWaivers { entries };
+        assert!(
+            waivers
+                .contains("INV-X:crates/core/tests/x.rs")
+                .expect("witnessed waiver consulted"),
+            "witnessed waiver must be honored"
+        );
+
+        let no_witness = WaiverRecord {
+            name: "INV-Y:crates/core/tests/y.rs".to_owned(),
+            justification: "proven via fuzz harness".to_owned(),
+            adr: "ADR-0001".to_owned(),
+            witness: None,
+        };
+        let mut entries = BTreeMap::new();
+        entries.insert(no_witness.name.clone(), no_witness);
+        let waivers = CitationWaivers { entries };
+        let err = waivers
+            .contains("INV-Y:crates/core/tests/y.rs")
+            .expect_err("witness-less waiver must fail");
+        assert!(
+            err.to_string().contains("must carry a witness"),
+            "unexpected error: {err:#}"
+        );
+    }
+}

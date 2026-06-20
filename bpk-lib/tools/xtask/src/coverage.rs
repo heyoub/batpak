@@ -6,6 +6,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+/// Single source of truth for the repo-wide coverage floor enforced on the
+/// default PR path (`ci-fast`) and in the heavier `preflight` bundle. Both
+/// callers MUST reference this constant rather than duplicating the literal so
+/// the floor cannot silently diverge between lanes.
+pub(crate) const COVERAGE_FLOOR_PCT: u32 = 80;
+
 pub(crate) fn cover(args: CoverArgs) -> Result<()> {
     ensure_llvm_cov_available()?;
 

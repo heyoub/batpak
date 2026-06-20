@@ -209,7 +209,69 @@ fn has_doc_hidden(attrs: &[syn::Attribute]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::doc_hidden_public_names;
+    use super::{check, doc_hidden_public_names};
+    use crate::source_cache::SourceCache;
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_repo(name: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock after epoch")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "batpak-public-surface-{name}-{}-{nanos}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&path).expect("create temp repo");
+        path
+    }
+
+    fn write_file(repo: &Path, rel: &str, body: &str) {
+        let path = repo.join(rel);
+        fs::create_dir_all(path.parent().expect("parent dir")).expect("create dirs");
+        fs::write(&path, body).expect("write fixture file");
+    }
+
+    /// END-TO-END RED FIXTURE: a `pub` item with NO witnessing test reference must
+    /// make `check(..)` fail; a real AST-visible test use must make it pass. Both
+    /// halves run so the test cannot pass vacuously — adding the witness (which
+    /// neutralizes the violation) turns it red.
+    #[test]
+    fn pub_items_have_tests_rejects_unwitnessed_pub_item() {
+        let repo = temp_repo("unwitnessed");
+        write_file(
+            &repo,
+            "crates/core/src/widgets.rs",
+            "pub struct WidgetProbe {\n    pub value: u8,\n}\n",
+        );
+
+        // GREEN: a test that constructs the type is an AST-visible witness.
+        write_file(
+            &repo,
+            "crates/core/tests/widget.rs",
+            "#[test]\nfn exercises() {\n    let _ = WidgetProbe { value: 1 };\n}\n",
+        );
+        let mut cache = SourceCache::new(&repo);
+        check(&repo, &mut cache).expect("a witnessed pub item is accepted");
+
+        // RED: remove the witness — the unreferenced pub item must be flagged.
+        write_file(
+            &repo,
+            "crates/core/tests/widget.rs",
+            "#[test]\nfn unrelated() {\n    assert_eq!(1, 1);\n}\n",
+        );
+        let mut cache = SourceCache::new(&repo);
+        let err = check(&repo, &mut cache).expect_err("unwitnessed pub item is rejected");
+        assert!(
+            err.to_string().contains("WidgetProbe")
+                && err.to_string().contains("has no test reference"),
+            "{err:?}"
+        );
+
+        fs::remove_dir_all(repo).expect("remove temp repo");
+    }
 
     #[test]
     fn doc_hidden_public_detector_finds_items_uses_and_impl_methods() {

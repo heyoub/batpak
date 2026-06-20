@@ -34,9 +34,12 @@ mod assurance;
 mod ci_parity;
 mod doctor;
 mod evidence_audit;
+mod gate_registry;
 mod harness_lints;
 mod invariant_bridge;
+mod meta_gate;
 mod public_surface;
+mod receipts;
 mod repo_surface;
 mod rust_ast;
 mod source_cache;
@@ -66,6 +69,36 @@ enum CommandKind {
     },
     TraceabilityCheck,
     StructuralCheck,
+    /// Verify every registered gate emitted a non-vacuous execution receipt
+    /// (`target/gauntlet-receipts/*.json`). Fails on a missing or zero-count
+    /// (vacuous-pass) receipt; `SKIPPED_PACKAGED` receipts may carry zero counts.
+    GauntletReceiptsPresent,
+    /// Enforce the DO-178B tool-qualification law: no gate may have blocking
+    /// authority without naming an existing red-fixture test. Reports any
+    /// blocking gate that lacks a red fixture (a finding, not a failure path).
+    GateRegistryCheck,
+    /// Agent-safety meta-gate (P1-4): classify a `base..HEAD` diff and FAIL if it
+    /// WEAKENS the assurance machinery without the required human approval. The
+    /// pure classifier lives in `meta_gate.rs`; this subcommand is the
+    /// integrity-side entry that the `cargo xtask meta-gate` shell calls.
+    MetaGateCheck {
+        /// Path to a file containing the unified diff (`git diff base..HEAD`).
+        /// When omitted, the diff is read from stdin.
+        #[arg(long)]
+        diff_file: Option<std::path::PathBuf>,
+        /// A PR label (repeatable). The human-applied `gauntlet-weaken-approved`
+        /// label authorizes a weakening; CI cannot self-apply it.
+        #[arg(long = "label")]
+        labels: Vec<String>,
+        /// The PR author login (for the L4 two-person rule).
+        #[arg(long)]
+        pr_author: Option<String>,
+        /// Path to a file containing the PR's commit messages (e.g.
+        /// `git log base..HEAD`). `GAUNTLET-WEAKEN-OK:` trailers and their commit
+        /// authors are parsed from it. Optional; absent => no trailers.
+        #[arg(long)]
+        commits_file: Option<std::path::PathBuf>,
+    },
     /// Static checks for evidence report bodies and public export vocabulary.
     EvidenceAudit,
     /// Validate the machine-readable agent intent/API/test surface map.
@@ -87,6 +120,26 @@ fn main() -> Result<()> {
         CommandKind::Doctor { strict } => doctor::run(strict),
         CommandKind::TraceabilityCheck => traceability::run(),
         CommandKind::StructuralCheck => structural::run(),
+        CommandKind::GauntletReceiptsPresent => {
+            let validated = receipts::check_present(gate_registry::RECEIPT_REQUIRED_GATES)?;
+            println!(
+                "gauntlet-receipts-present: ok ({} non-vacuous receipt(s) validated)",
+                validated.len()
+            );
+            Ok(())
+        }
+        CommandKind::GateRegistryCheck => {
+            let repo_root = repo_surface::repo_root()?;
+            gate_registry::check(&repo_root)?;
+            gate_registry::report(&repo_root);
+            Ok(())
+        }
+        CommandKind::MetaGateCheck {
+            diff_file,
+            labels,
+            pr_author,
+            commits_file,
+        } => run_meta_gate(diff_file, labels, pr_author, commits_file),
         CommandKind::EvidenceAudit => evidence_audit::run(&repo_surface::repo_root()?),
         CommandKind::AgentSurfaceCheck => agent_surface::run(&repo_surface::repo_root()?),
         CommandKind::AgentDoctor => agent_doctor::run(&repo_surface::repo_root()?),
@@ -94,6 +147,48 @@ fn main() -> Result<()> {
             architecture_ir::run(&repo_surface::repo_root()?, out, check)
         }
     }
+}
+
+/// Read the unified diff (from `--diff-file` or stdin), assemble the approval
+/// context from the labels / PR author / commit messages, and evaluate the
+/// meta-gate. The classification and approval logic live in `meta_gate`; this is
+/// the thin I/O shell.
+fn run_meta_gate(
+    diff_file: Option<std::path::PathBuf>,
+    labels: Vec<String>,
+    pr_author: Option<String>,
+    commits_file: Option<std::path::PathBuf>,
+) -> Result<()> {
+    use std::io::Read;
+    let diff = match diff_file {
+        Some(path) => std::fs::read_to_string(&path)
+            .map_err(|e| anyhow::anyhow!("read diff file {}: {e}", path.display()))?,
+        None => {
+            let mut buf = String::new();
+            std::io::stdin()
+                .read_to_string(&mut buf)
+                .map_err(|e| anyhow::anyhow!("read diff from stdin: {e}"))?;
+            buf
+        }
+    };
+    let weaken_ok_trailers = match commits_file {
+        Some(path) => {
+            let text = std::fs::read_to_string(&path)
+                .map_err(|e| anyhow::anyhow!("read commits file {}: {e}", path.display()))?;
+            meta_gate::parse_weaken_trailers(&text)
+        }
+        None => Vec::new(),
+    };
+    let ctx = meta_gate::ApprovalContext {
+        labels,
+        pr_author,
+        weaken_ok_trailers,
+    };
+    let repo_root = repo_surface::repo_root()?;
+    let l4_entries = meta_gate::load_l4_entries(&repo_root);
+    meta_gate::evaluate(&diff, &l4_entries, &ctx)?;
+    println!("meta-gate: ok (no unapproved weakening detected)");
+    Ok(())
 }
 
 #[cfg(test)]

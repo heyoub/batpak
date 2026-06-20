@@ -110,15 +110,50 @@ jobs:
           BATPAK_DEVCONTAINER_SKIP_BUILD: "1"
         run: bash ./scripts/run-in-devcontainer.sh 'cargo xtask ci-fast'
 
+  meta-gate:
+    # Agent-safety meta-gate (P1-4, "raccoon with commit access"): blocks a diff
+    # that WEAKENS the assurance machinery (lowers a threshold, raises a cap, adds
+    # a waiver entry, re-buries a gate, deletes a red fixture, downgrades an
+    # assurance level) unless a human applied the `gauntlet-weaken-approved` label
+    # AND a `GAUNTLET-WEAKEN-OK:` commit trailer is present (plus a second-author
+    # trailer for L4 blast radius). Needs full history (`fetch-depth: 0`) to
+    # resolve the merge-base and read commit trailers. The classifier is pure and
+    # unit/mutation-tested in tools/integrity/src/meta_gate.rs.
+    name: Agent-safety meta-gate
+    runs-on: ubuntu-latest
+    needs: [rust-changed]
+    if: needs.rust-changed.outputs.rust == 'true'
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          shared-key: meta-gate
+          workspaces: bpk-lib
+      - uses: ./.github/actions/setup-devcontainer
+      - name: Classify diff for unapproved weakenings
+        env:
+          BATPAK_DEVCONTAINER_IMAGE: batpak-devcontainer:ci
+          BATPAK_DEVCONTAINER_SKIP_BUILD: "1"
+          # The meta-gate READS these; CI cannot self-apply the approval label.
+          GAUNTLET_PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          GAUNTLET_PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          GAUNTLET_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: bash ./scripts/run-in-devcontainer.sh 'cargo xtask meta-gate --base "${GAUNTLET_PR_BASE_SHA:-origin/main}"'
+
   coverage-baseline:
     # Always-on, NON-BLOCKING coverage observation for every Rust-touching PR.
     #
-    # The hard threshold-80 coverage gate lives in `cargo xtask preflight`
-    # (verify-linux, heavy lane). This job is intentionally advisory: it runs
-    # `cargo xtask cover` WITHOUT `--ci`, so it only reports — it never gates a
-    # merge. `continue-on-error: true` guarantees a cover-internal hiccup at the
-    # baseline stage cannot block a PR. Ratcheting a default-PR floor upward is
-    # a deferred follow-up; data must precede the ratchet.
+    # The hard threshold-80 coverage gate now lives on the DEFAULT PR path
+    # inside `cargo xtask ci-fast` (ci-fast-linux job) — see commands/ci.rs,
+    # which calls `coverage::cover` with the shared COVERAGE_FLOOR_PCT. This
+    # job is intentionally advisory: it runs `cargo xtask cover` WITHOUT `--ci`,
+    # so it only reports + uploads artifacts — it never gates a merge.
+    # `continue-on-error: true` guarantees a cover-internal hiccup at the
+    # baseline stage cannot block a PR. Ratcheting the default-PR floor upward
+    # is a deferred follow-up; data must precede the ratchet.
     name: Coverage baseline (advisory)
     runs-on: ubuntu-latest
     needs: [ci-fast-linux, rust-changed]
@@ -265,6 +300,37 @@ jobs:
             cargo xtask templates
           '
 
+      # P1-3b anti-vacuous gate: the packaged-consumer build runs batpak's
+      # build.rs with the repo invariant surface ABSENT. The three surface-
+      # dependent build-time lints must then record SKIPPED_PACKAGED receipts,
+      # NOT a (vacuous) PASS. This distinguishes "ran and passed" from "did not
+      # run". consumer-smoke builds into bpk-lib/target/consumer-smoke-build, so
+      # build.rs writes receipts to
+      # bpk-lib/target/consumer-smoke-build/debug/gauntlet-receipts/<slug>.json.
+      - name: Assert packaged build-time lints SKIPPED (not vacuously PASSED)
+        run: |
+          set -euo pipefail
+          dir="bpk-lib/target/consumer-smoke-build/debug/gauntlet-receipts"
+          fail=0
+          for slug in no-dead-code-silencers allow-justifications pub-items-have-tests; do
+            f="$dir/$slug.json"
+            if [ ! -f "$f" ]; then
+              echo "::error::missing packaged receipt $f — the packaged build-time lint did not record its skip (silent vacuous pass)"
+              fail=1
+              continue
+            fi
+            verdict=$(jq -r '.verdict' "$f")
+            echo "$slug -> $verdict"
+            if [ "$verdict" != "SKIPPED_PACKAGED" ]; then
+              echo "::error::packaged receipt $f has verdict '$verdict'; expected SKIPPED_PACKAGED. A PASS here would be vacuous (the lint cannot truly run without the repo invariant surface)."
+              fail=1
+            fi
+          done
+          if [ "$fail" -ne 0 ]; then
+            exit 1
+          fi
+          echo "All three build-time lints recorded explicit SKIPPED_PACKAGED receipts."
+
   ts-parity:
     # BatPAK TypeScript SDK Phase 0 wire-parity gate.
     #
@@ -341,6 +407,7 @@ jobs:
           - event-payload-registry-validator
           - platform-backend
           - testing-ledger-structural-lint
+          - integrity-graders
           - syncbat-runtime-dispatch
           - syncbat-register-catalog
           - netbat-boundary-protocol
@@ -387,14 +454,17 @@ jobs:
   mutants-smoke-repo-wide:
     name: Mutation smoke (repo-wide ratchet)
     runs-on: ubuntu-latest
+    # Default-on, EVERY Rust-touching PR (gated only by the rust-changed
+    # detector — no label required), mirroring the always-on fuzz-smoke lane.
+    # This is bounded because it runs only the single repo-wide shard 0/48
+    # (REPO_WIDE_SMOKE_SHARD, lanes.rs). The heavy full 0/12..11/12 matrix
+    # (mutants-full) stays manual/label-only.
     if: >-
+      needs.rust-changed.outputs.rust == 'true' &&
       ((github.event_name == 'workflow_dispatch' &&
         (github.event.inputs.proof == 'mutants' ||
          github.event.inputs.proof == 'heavy')) ||
-       (github.event_name == 'pull_request' &&
-        (contains(github.event.pull_request.labels.*.name, 'run-heavy-ci') ||
-         contains(github.event.pull_request.labels.*.name, 'run-mutants')))) &&
-      needs.rust-changed.outputs.rust == 'true'
+       github.event_name == 'pull_request')
     needs: [ci-fast-linux, rust-changed]
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
