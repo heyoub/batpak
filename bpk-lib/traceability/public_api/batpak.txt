@@ -159,9 +159,16 @@ pub enum batpak::event::decode::TypedDecodeError
 pub batpak::event::decode::TypedDecodeError::DecodeFailure
 pub batpak::event::decode::TypedDecodeError::DecodeFailure::kind: batpak::event::kind::EventKind
 pub batpak::event::decode::TypedDecodeError::DecodeFailure::source: batpak::event::decode::DecodeSource
+pub batpak::event::decode::TypedDecodeError::FutureVersion
+pub batpak::event::decode::TypedDecodeError::FutureVersion::current: u16
+pub batpak::event::decode::TypedDecodeError::FutureVersion::kind: batpak::event::kind::EventKind
+pub batpak::event::decode::TypedDecodeError::FutureVersion::stored: u16
 pub batpak::event::decode::TypedDecodeError::KindMismatch
 pub batpak::event::decode::TypedDecodeError::KindMismatch::expected: batpak::event::kind::EventKind
 pub batpak::event::decode::TypedDecodeError::KindMismatch::got: batpak::event::kind::EventKind
+pub batpak::event::decode::TypedDecodeError::Upcast
+pub batpak::event::decode::TypedDecodeError::Upcast::kind: batpak::event::kind::EventKind
+pub batpak::event::decode::TypedDecodeError::Upcast::source: batpak::event::upcast::UpcastError
 impl core::error::Error for batpak::event::decode::TypedDecodeError
 pub fn batpak::event::decode::TypedDecodeError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
 impl core::fmt::Display for batpak::event::decode::TypedDecodeError
@@ -190,6 +197,7 @@ pub batpak::event::header::EventHeader::event_id: batpak::id::EventId
 pub batpak::event::header::EventHeader::event_kind: batpak::event::kind::EventKind
 pub batpak::event::header::EventHeader::flags: u8
 pub batpak::event::header::EventHeader::payload_size: u32
+pub batpak::event::header::EventHeader::payload_version: u16
 pub batpak::event::header::EventHeader::position: batpak::coordinate::position::DagPosition
 pub batpak::event::header::EventHeader::timestamp_us: i64
 impl batpak::event::header::EventHeader
@@ -200,6 +208,7 @@ pub fn batpak::event::header::EventHeader::new(event_id: u128, correlation_id: u
 pub fn batpak::event::header::EventHeader::new_typed(event_id: batpak::id::EventId, correlation_id: batpak::id::CorrelationId, causation_id: core::option::Option<batpak::id::CausationId>, timestamp_us: i64, position: batpak::coordinate::position::DagPosition, payload_size: u32, event_kind: batpak::event::kind::EventKind) -> Self
 pub fn batpak::event::header::EventHeader::requires_ack(&self) -> bool
 pub fn batpak::event::header::EventHeader::with_flags(self, flags: u8) -> Self
+pub fn batpak::event::header::EventHeader::with_payload_version(self, payload_version: u16) -> Self
 pub const batpak::event::header::FLAG_REPLAY: u8
 pub const batpak::event::header::FLAG_REQUIRES_ACK: u8
 pub const batpak::event::header::FLAG_TRANSACTIONAL: u8
@@ -240,6 +249,7 @@ pub const fn batpak::event::kind::EventKind::as_raw_u16(self) -> u16
 pub const fn batpak::event::kind::EventKind::category(self) -> u8
 pub const fn batpak::event::kind::EventKind::custom(category: u8, type_id: u16) -> Self
 pub const fn batpak::event::kind::EventKind::is_effect(self) -> bool
+pub const fn batpak::event::kind::EventKind::is_reserved(self) -> bool
 pub const fn batpak::event::kind::EventKind::is_system(self) -> bool
 pub fn batpak::event::kind::EventKind::try_custom(category: u8, type_id: u16) -> core::result::Result<Self, batpak::event::kind::EventKindError>
 pub const fn batpak::event::kind::EventKind::type_id(self) -> u16
@@ -264,6 +274,7 @@ impl core::fmt::Display for batpak::event::payload::EventPayloadRegistryError
 pub fn batpak::event::payload::EventPayloadRegistryError::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub trait batpak::event::payload::EventPayload: serde_core::ser::Serialize + serde_core::de::DeserializeOwned
 pub const batpak::event::payload::EventPayload::KIND: batpak::event::kind::EventKind
+pub const batpak::event::payload::EventPayload::PAYLOAD_VERSION: u16
 pub fn batpak::event::payload::revalidate_event_payload_registry() -> core::result::Result<(), batpak::event::payload::EventPayloadRegistryError>
 pub fn batpak::event::payload::validate_event_payload_registry() -> core::result::Result<(), batpak::event::payload::EventPayloadRegistryError>
 pub mod batpak::event::sourcing
@@ -312,6 +323,28 @@ pub type batpak::event::sourcing::TypedReactive::Error: core::error::Error + cor
 pub fn batpak::event::sourcing::TypedReactive::react(&mut self, event: &batpak::event::StoredEvent<T>, out: &mut batpak::store::reaction::ReactionBatch, at_least_once: core::option::Option<&batpak::store::delivery::observation::AtLeastOnce>) -> core::result::Result<(), Self::Error>
 pub type batpak::event::sourcing::ProjectionEvent<T> = batpak::event::Event<batpak::event::sourcing::ProjectionPayload<T>>
 pub type batpak::event::sourcing::ProjectionPayload<T> = <<T as batpak::event::sourcing::EventSourced>::Input as batpak::event::sourcing::ProjectionInput>::Payload
+pub mod batpak::event::upcast
+pub enum batpak::event::upcast::UpcastError
+pub batpak::event::upcast::UpcastError::DuplicateStep
+pub batpak::event::upcast::UpcastError::DuplicateStep::from_version: u16
+pub batpak::event::upcast::UpcastError::DuplicateStep::kind: batpak::event::kind::EventKind
+pub batpak::event::upcast::UpcastError::MissingStep
+pub batpak::event::upcast::UpcastError::MissingStep::from_version: u16
+pub batpak::event::upcast::UpcastError::MissingStep::kind: batpak::event::kind::EventKind
+pub batpak::event::upcast::UpcastError::MissingStep::to_version: u16
+pub batpak::event::upcast::UpcastError::Step
+pub batpak::event::upcast::UpcastError::Step::from_version: u16
+pub batpak::event::upcast::UpcastError::Step::kind: batpak::event::kind::EventKind
+pub batpak::event::upcast::UpcastError::Step::source: alloc::boxed::Box<(dyn core::error::Error + core::marker::Send + core::marker::Sync)>
+pub batpak::event::upcast::UpcastError::ValueCodec(alloc::string::String)
+impl core::error::Error for batpak::event::upcast::UpcastError
+pub fn batpak::event::upcast::UpcastError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Display for batpak::event::upcast::UpcastError
+pub fn batpak::event::upcast::UpcastError::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub trait batpak::event::upcast::Upcast
+pub const batpak::event::upcast::Upcast::FROM_VERSION: u16
+pub const batpak::event::upcast::Upcast::KIND: batpak::event::kind::EventKind
+pub fn batpak::event::upcast::Upcast::upcast(value: rmpv::Value) -> core::result::Result<rmpv::Value, batpak::event::upcast::UpcastError>
 pub enum batpak::event::DecodeSource
 pub batpak::event::DecodeSource::Json(serde_json::error::Error)
 pub batpak::event::DecodeSource::Msgpack(rmp_serde::decode::Error)
@@ -347,13 +380,37 @@ pub enum batpak::event::TypedDecodeError
 pub batpak::event::TypedDecodeError::DecodeFailure
 pub batpak::event::TypedDecodeError::DecodeFailure::kind: batpak::event::kind::EventKind
 pub batpak::event::TypedDecodeError::DecodeFailure::source: batpak::event::decode::DecodeSource
+pub batpak::event::TypedDecodeError::FutureVersion
+pub batpak::event::TypedDecodeError::FutureVersion::current: u16
+pub batpak::event::TypedDecodeError::FutureVersion::kind: batpak::event::kind::EventKind
+pub batpak::event::TypedDecodeError::FutureVersion::stored: u16
 pub batpak::event::TypedDecodeError::KindMismatch
 pub batpak::event::TypedDecodeError::KindMismatch::expected: batpak::event::kind::EventKind
 pub batpak::event::TypedDecodeError::KindMismatch::got: batpak::event::kind::EventKind
+pub batpak::event::TypedDecodeError::Upcast
+pub batpak::event::TypedDecodeError::Upcast::kind: batpak::event::kind::EventKind
+pub batpak::event::TypedDecodeError::Upcast::source: batpak::event::upcast::UpcastError
 impl core::error::Error for batpak::event::decode::TypedDecodeError
 pub fn batpak::event::decode::TypedDecodeError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
 impl core::fmt::Display for batpak::event::decode::TypedDecodeError
 pub fn batpak::event::decode::TypedDecodeError::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub enum batpak::event::UpcastError
+pub batpak::event::UpcastError::DuplicateStep
+pub batpak::event::UpcastError::DuplicateStep::from_version: u16
+pub batpak::event::UpcastError::DuplicateStep::kind: batpak::event::kind::EventKind
+pub batpak::event::UpcastError::MissingStep
+pub batpak::event::UpcastError::MissingStep::from_version: u16
+pub batpak::event::UpcastError::MissingStep::kind: batpak::event::kind::EventKind
+pub batpak::event::UpcastError::MissingStep::to_version: u16
+pub batpak::event::UpcastError::Step
+pub batpak::event::UpcastError::Step::from_version: u16
+pub batpak::event::UpcastError::Step::kind: batpak::event::kind::EventKind
+pub batpak::event::UpcastError::Step::source: alloc::boxed::Box<(dyn core::error::Error + core::marker::Send + core::marker::Sync)>
+pub batpak::event::UpcastError::ValueCodec(alloc::string::String)
+impl core::error::Error for batpak::event::upcast::UpcastError
+pub fn batpak::event::upcast::UpcastError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Display for batpak::event::upcast::UpcastError
+pub fn batpak::event::upcast::UpcastError::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct batpak::event::Event<P>
 pub batpak::event::Event::hash_chain: core::option::Option<batpak::event::hash::HashChain>
 pub batpak::event::Event::header: batpak::event::header::EventHeader
@@ -380,6 +437,7 @@ pub batpak::event::EventHeader::event_id: batpak::id::EventId
 pub batpak::event::EventHeader::event_kind: batpak::event::kind::EventKind
 pub batpak::event::EventHeader::flags: u8
 pub batpak::event::EventHeader::payload_size: u32
+pub batpak::event::EventHeader::payload_version: u16
 pub batpak::event::EventHeader::position: batpak::coordinate::position::DagPosition
 pub batpak::event::EventHeader::timestamp_us: i64
 impl batpak::event::header::EventHeader
@@ -390,6 +448,7 @@ pub fn batpak::event::header::EventHeader::new(event_id: u128, correlation_id: u
 pub fn batpak::event::header::EventHeader::new_typed(event_id: batpak::id::EventId, correlation_id: batpak::id::CorrelationId, causation_id: core::option::Option<batpak::id::CausationId>, timestamp_us: i64, position: batpak::coordinate::position::DagPosition, payload_size: u32, event_kind: batpak::event::kind::EventKind) -> Self
 pub fn batpak::event::header::EventHeader::requires_ack(&self) -> bool
 pub fn batpak::event::header::EventHeader::with_flags(self, flags: u8) -> Self
+pub fn batpak::event::header::EventHeader::with_payload_version(self, payload_version: u16) -> Self
 pub struct batpak::event::EventKind(_)
 impl batpak::event::kind::EventKind
 pub const batpak::event::kind::EventKind::DATA: Self
@@ -416,6 +475,7 @@ pub const fn batpak::event::kind::EventKind::as_raw_u16(self) -> u16
 pub const fn batpak::event::kind::EventKind::category(self) -> u8
 pub const fn batpak::event::kind::EventKind::custom(category: u8, type_id: u16) -> Self
 pub const fn batpak::event::kind::EventKind::is_effect(self) -> bool
+pub const fn batpak::event::kind::EventKind::is_reserved(self) -> bool
 pub const fn batpak::event::kind::EventKind::is_system(self) -> bool
 pub fn batpak::event::kind::EventKind::try_custom(category: u8, type_id: u16) -> core::result::Result<Self, batpak::event::kind::EventKindError>
 pub const fn batpak::event::kind::EventKind::type_id(self) -> u16
@@ -458,6 +518,7 @@ pub fn batpak::event::Event<serde_json::value::Value>::decode_typed<T: batpak::e
 pub fn batpak::event::Event<serde_json::value::Value>::route_typed<T: batpak::event::payload::EventPayload>(&self) -> core::result::Result<core::option::Option<T>, batpak::event::decode::TypedDecodeError>
 pub trait batpak::event::EventPayload: serde_core::ser::Serialize + serde_core::de::DeserializeOwned
 pub const batpak::event::EventPayload::KIND: batpak::event::kind::EventKind
+pub const batpak::event::EventPayload::PAYLOAD_VERSION: u16
 pub trait batpak::event::EventSourced: core::marker::Sized
 pub type batpak::event::EventSourced::Input: batpak::event::sourcing::ProjectionInput
 pub fn batpak::event::EventSourced::apply_event(&mut self, event: &batpak::event::sourcing::ProjectionEvent<Self>)
@@ -483,6 +544,10 @@ pub fn batpak::event::Reactive::react(&self, event: &batpak::event::Event<P>) ->
 pub trait batpak::event::TypedReactive<T: batpak::event::payload::EventPayload>: core::marker::Send + 'static
 pub type batpak::event::TypedReactive::Error: core::error::Error + core::marker::Send + core::marker::Sync + 'static
 pub fn batpak::event::TypedReactive::react(&mut self, event: &batpak::event::StoredEvent<T>, out: &mut batpak::store::reaction::ReactionBatch, at_least_once: core::option::Option<&batpak::store::delivery::observation::AtLeastOnce>) -> core::result::Result<(), Self::Error>
+pub trait batpak::event::Upcast
+pub const batpak::event::Upcast::FROM_VERSION: u16
+pub const batpak::event::Upcast::KIND: batpak::event::kind::EventKind
+pub fn batpak::event::Upcast::upcast(value: rmpv::Value) -> core::result::Result<rmpv::Value, batpak::event::upcast::UpcastError>
 pub fn batpak::event::revalidate_event_payload_registry() -> core::result::Result<(), batpak::event::payload::EventPayloadRegistryError>
 pub fn batpak::event::validate_event_payload_registry() -> core::result::Result<(), batpak::event::payload::EventPayloadRegistryError>
 pub type batpak::event::ProjectionEvent<T> = batpak::event::Event<batpak::event::sourcing::ProjectionPayload<T>>
@@ -663,6 +728,8 @@ pub fn batpak::id::EventId::serialize<S: serde_core::ser::Serializer>(&self, ser
 impl<'de> serde_core::de::Deserialize<'de> for batpak::id::EventId
 pub fn batpak::id::EventId::deserialize<D: serde_core::de::Deserializer<'de>>(de: D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
 pub struct batpak::id::IdempotencyKey(_)
+impl batpak::id::IdempotencyKey
+pub fn batpak::id::IdempotencyKey::for_operation(domain: &str, components: &[&str]) -> Self
 impl batpak::id::EntityIdType for batpak::id::IdempotencyKey
 pub const batpak::id::IdempotencyKey::ENTITY_NAME: &'static str
 pub fn batpak::id::IdempotencyKey::as_u128(&self) -> u128
@@ -1052,6 +1119,12 @@ pub batpak::prelude::StoreError::EventPayloadRegistry(batpak::event::payload::Ev
 pub batpak::prelude::StoreError::HiddenRangesCorrupt
 pub batpak::prelude::StoreError::HiddenRangesCorrupt::kind: batpak::store::HiddenRangesCorruption
 pub batpak::prelude::StoreError::HiddenRangesCorrupt::path: std::path::PathBuf
+pub batpak::prelude::StoreError::IdempotencyFutureVersion
+pub batpak::prelude::StoreError::IdempotencyFutureVersion::current: u16
+pub batpak::prelude::StoreError::IdempotencyFutureVersion::stored: u16
+pub batpak::prelude::StoreError::IdempotencyOverflowFailClosed
+pub batpak::prelude::StoreError::IdempotencyOverflowFailClosed::len: u64
+pub batpak::prelude::StoreError::IdempotencyOverflowFailClosed::max_keys: u64
 pub batpak::prelude::StoreError::IdempotencyPartialBatch
 pub batpak::prelude::StoreError::IdempotencyPartialBatch::reason: alloc::string::String
 pub batpak::prelude::StoreError::IdempotencyRequired
@@ -1067,9 +1140,14 @@ pub batpak::prelude::StoreError::InvalidCommitMetadata::reason: alloc::string::S
 pub batpak::prelude::StoreError::InvalidCoordinate
 pub batpak::prelude::StoreError::InvalidCoordinate::index: core::option::Option<usize>
 pub batpak::prelude::StoreError::InvalidCoordinate::reason: alloc::string::String
+pub batpak::prelude::StoreError::InvalidPayloadVersion
+pub batpak::prelude::StoreError::InvalidPayloadVersion::kind: u16
 pub batpak::prelude::StoreError::InvariantViolation
 pub batpak::prelude::StoreError::InvariantViolation::kind: batpak::store::StoreInvariant
 pub batpak::prelude::StoreError::Io(std::io::Error)
+pub batpak::prelude::StoreError::MmapFutureVersion
+pub batpak::prelude::StoreError::MmapFutureVersion::found: u16
+pub batpak::prelude::StoreError::MmapFutureVersion::supported: u16
 pub batpak::prelude::StoreError::NotFound(u128)
 pub batpak::prelude::StoreError::PlatformAdmissionFailed
 pub batpak::prelude::StoreError::PlatformAdmissionFailed::capability: &'static str
@@ -1083,6 +1161,9 @@ pub batpak::prelude::StoreError::PlatformProfileMismatch::reason: alloc::string:
 pub batpak::prelude::StoreError::RangeMalformed
 pub batpak::prelude::StoreError::RangeMalformed::end: u64
 pub batpak::prelude::StoreError::RangeMalformed::start: u64
+pub batpak::prelude::StoreError::ReservedKind
+pub batpak::prelude::StoreError::ReservedKind::index: core::option::Option<usize>
+pub batpak::prelude::StoreError::ReservedKind::kind: u16
 pub batpak::prelude::StoreError::SegmentTooManyEntries
 pub batpak::prelude::StoreError::SegmentTooManyEntries::count: u64
 pub batpak::prelude::StoreError::SegmentTooManyEntries::segment_id: u64
@@ -1128,9 +1209,16 @@ pub enum batpak::prelude::TypedDecodeError
 pub batpak::prelude::TypedDecodeError::DecodeFailure
 pub batpak::prelude::TypedDecodeError::DecodeFailure::kind: batpak::event::kind::EventKind
 pub batpak::prelude::TypedDecodeError::DecodeFailure::source: batpak::event::decode::DecodeSource
+pub batpak::prelude::TypedDecodeError::FutureVersion
+pub batpak::prelude::TypedDecodeError::FutureVersion::current: u16
+pub batpak::prelude::TypedDecodeError::FutureVersion::kind: batpak::event::kind::EventKind
+pub batpak::prelude::TypedDecodeError::FutureVersion::stored: u16
 pub batpak::prelude::TypedDecodeError::KindMismatch
 pub batpak::prelude::TypedDecodeError::KindMismatch::expected: batpak::event::kind::EventKind
 pub batpak::prelude::TypedDecodeError::KindMismatch::got: batpak::event::kind::EventKind
+pub batpak::prelude::TypedDecodeError::Upcast
+pub batpak::prelude::TypedDecodeError::Upcast::kind: batpak::event::kind::EventKind
+pub batpak::prelude::TypedDecodeError::Upcast::source: batpak::event::upcast::UpcastError
 impl core::error::Error for batpak::event::decode::TypedDecodeError
 pub fn batpak::event::decode::TypedDecodeError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
 impl core::fmt::Display for batpak::event::decode::TypedDecodeError
@@ -1205,6 +1293,7 @@ pub batpak::prelude::EventHeader::event_id: batpak::id::EventId
 pub batpak::prelude::EventHeader::event_kind: batpak::event::kind::EventKind
 pub batpak::prelude::EventHeader::flags: u8
 pub batpak::prelude::EventHeader::payload_size: u32
+pub batpak::prelude::EventHeader::payload_version: u16
 pub batpak::prelude::EventHeader::position: batpak::coordinate::position::DagPosition
 pub batpak::prelude::EventHeader::timestamp_us: i64
 impl batpak::event::header::EventHeader
@@ -1215,6 +1304,7 @@ pub fn batpak::event::header::EventHeader::new(event_id: u128, correlation_id: u
 pub fn batpak::event::header::EventHeader::new_typed(event_id: batpak::id::EventId, correlation_id: batpak::id::CorrelationId, causation_id: core::option::Option<batpak::id::CausationId>, timestamp_us: i64, position: batpak::coordinate::position::DagPosition, payload_size: u32, event_kind: batpak::event::kind::EventKind) -> Self
 pub fn batpak::event::header::EventHeader::requires_ack(&self) -> bool
 pub fn batpak::event::header::EventHeader::with_flags(self, flags: u8) -> Self
+pub fn batpak::event::header::EventHeader::with_payload_version(self, payload_version: u16) -> Self
 pub struct batpak::prelude::EventId(_)
 impl batpak::id::EntityIdType for batpak::id::EventId
 pub const batpak::id::EventId::ENTITY_NAME: &'static str
@@ -1262,6 +1352,7 @@ pub const fn batpak::event::kind::EventKind::as_raw_u16(self) -> u16
 pub const fn batpak::event::kind::EventKind::category(self) -> u8
 pub const fn batpak::event::kind::EventKind::custom(category: u8, type_id: u16) -> Self
 pub const fn batpak::event::kind::EventKind::is_effect(self) -> bool
+pub const fn batpak::event::kind::EventKind::is_reserved(self) -> bool
 pub const fn batpak::event::kind::EventKind::is_system(self) -> bool
 pub fn batpak::event::kind::EventKind::try_custom(category: u8, type_id: u16) -> core::result::Result<Self, batpak::event::kind::EventKindError>
 pub const fn batpak::event::kind::EventKind::type_id(self) -> u16
@@ -1384,6 +1475,7 @@ impl<State> batpak::store::Store<State>
 pub fn batpak::store::Store<State>::chain_walk_evidence(&self, request: &batpak::store::ChainWalkRequest) -> core::result::Result<batpak::store::ChainWalkEvidenceReport, batpak::store::ChainWalkReportError>
 impl<State> batpak::store::Store<State>
 pub fn batpak::store::Store<State>::diagnostics(&self) -> batpak::store::stats::StoreDiagnostics
+pub fn batpak::store::Store<State>::durable_idempotency_key_count(&self) -> usize
 pub fn batpak::store::Store<State>::stats(&self) -> batpak::store::stats::StoreStats
 pub fn batpak::store::Store<State>::store_resource_evidence_report(&self) -> core::result::Result<batpak::store::StoreResourceEvidenceReport, batpak::store::StoreResourceReportError>
 impl<State> batpak::store::Store<State>
@@ -1420,6 +1512,8 @@ pub fn batpak::prelude::StoreConfig::with_enable_mmap_index(self, enable_mmap_in
 pub fn batpak::prelude::StoreConfig::with_event_payload_validation(self, validation: batpak::event::payload::EventPayloadValidation) -> Self
 pub fn batpak::prelude::StoreConfig::with_fd_budget(self, fd_budget: usize) -> Self
 pub fn batpak::prelude::StoreConfig::with_group_commit_max_batch(self, group_commit_max_batch: u32) -> Self
+pub fn batpak::prelude::StoreConfig::with_idempotency_overflow(self, overflow: batpak::store::OverflowPolicy) -> Self
+pub fn batpak::prelude::StoreConfig::with_idempotency_retention(self, retention: batpak::store::IdempotencyRetention) -> Self
 pub fn batpak::prelude::StoreConfig::with_incremental_projection(self, incremental_projection: bool) -> Self
 pub fn batpak::prelude::StoreConfig::with_index_topology(self, index_topology: batpak::store::IndexTopology) -> Self
 pub fn batpak::prelude::StoreConfig::with_open_report_observer(self, observer: core::option::Option<batpak::store::OpenReportObserver>) -> Self
@@ -1454,6 +1548,7 @@ pub fn batpak::event::Event<serde_json::value::Value>::decode_typed<T: batpak::e
 pub fn batpak::event::Event<serde_json::value::Value>::route_typed<T: batpak::event::payload::EventPayload>(&self) -> core::result::Result<core::option::Option<T>, batpak::event::decode::TypedDecodeError>
 pub trait batpak::prelude::EventPayload: serde_core::ser::Serialize + serde_core::de::DeserializeOwned
 pub const batpak::prelude::EventPayload::KIND: batpak::event::kind::EventKind
+pub const batpak::prelude::EventPayload::PAYLOAD_VERSION: u16
 pub trait batpak::prelude::EventSourced: core::marker::Sized
 pub type batpak::prelude::EventSourced::Input: batpak::event::sourcing::ProjectionInput
 pub fn batpak::prelude::EventSourced::apply_event(&mut self, event: &batpak::event::sourcing::ProjectionEvent<Self>)
@@ -2362,6 +2457,15 @@ pub batpak::store::HiddenRangesCorruption::UnsupportedVersion::expected: u16
 pub batpak::store::HiddenRangesCorruption::UnsupportedVersion::observed: u16
 impl core::fmt::Display for batpak::store::HiddenRangesCorruption
 pub fn batpak::store::HiddenRangesCorruption::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub enum batpak::store::IdempotencyRetention
+pub batpak::store::IdempotencyRetention::Hybrid
+pub batpak::store::IdempotencyRetention::Hybrid::keep_sequences: u64
+pub batpak::store::IdempotencyRetention::Hybrid::max_keys: u64
+pub batpak::store::IdempotencyRetention::Unbounded
+pub batpak::store::IdempotencyRetention::Window
+pub batpak::store::IdempotencyRetention::Window::keep_sequences: u64
+impl core::default::Default for batpak::store::IdempotencyRetention
+pub fn batpak::store::IdempotencyRetention::default() -> Self
 #[non_exhaustive] pub enum batpak::store::LockLeafSymlinkProtection
 pub batpak::store::LockLeafSymlinkProtection::AtomicNoFollow
 pub batpak::store::LockLeafSymlinkProtection::BestEffortCheckThenOpen
@@ -2381,6 +2485,10 @@ pub batpak::store::MmapEvidence::FileBacked
 pub batpak::store::MmapEvidence::ObservedUnsupported
 pub batpak::store::MmapEvidence::ProbeFailed
 pub batpak::store::MmapEvidence::Unknown
+#[non_exhaustive] pub enum batpak::store::OverflowPolicy
+pub batpak::store::OverflowPolicy::Backpressure
+pub batpak::store::OverflowPolicy::FailClosed
+pub batpak::store::OverflowPolicy::Warn
 #[non_exhaustive] pub enum batpak::store::ParentDirSyncAdmissionSummary
 pub batpak::store::ParentDirSyncAdmissionSummary::Rejected
 pub batpak::store::ParentDirSyncAdmissionSummary::RenameOnly
@@ -2550,6 +2658,7 @@ pub batpak::store::RestartPolicy::Once
 pub batpak::store::SigningDowngradeReason::CoverBuildFailed
 pub batpak::store::SigningDowngradeReason::CoverBuildFailed::encoding_error: alloc::string::String
 pub enum batpak::store::SnapshotFileKind
+pub batpak::store::SnapshotFileKind::IdempotencyStore
 pub batpak::store::SnapshotFileKind::PendingCompactionMarker
 pub batpak::store::SnapshotFileKind::Segment
 pub batpak::store::SnapshotFileKind::VisibilityRanges
@@ -2608,6 +2717,12 @@ pub batpak::store::StoreError::EventPayloadRegistry(batpak::event::payload::Even
 pub batpak::store::StoreError::HiddenRangesCorrupt
 pub batpak::store::StoreError::HiddenRangesCorrupt::kind: batpak::store::HiddenRangesCorruption
 pub batpak::store::StoreError::HiddenRangesCorrupt::path: std::path::PathBuf
+pub batpak::store::StoreError::IdempotencyFutureVersion
+pub batpak::store::StoreError::IdempotencyFutureVersion::current: u16
+pub batpak::store::StoreError::IdempotencyFutureVersion::stored: u16
+pub batpak::store::StoreError::IdempotencyOverflowFailClosed
+pub batpak::store::StoreError::IdempotencyOverflowFailClosed::len: u64
+pub batpak::store::StoreError::IdempotencyOverflowFailClosed::max_keys: u64
 pub batpak::store::StoreError::IdempotencyPartialBatch
 pub batpak::store::StoreError::IdempotencyPartialBatch::reason: alloc::string::String
 pub batpak::store::StoreError::IdempotencyRequired
@@ -2623,9 +2738,14 @@ pub batpak::store::StoreError::InvalidCommitMetadata::reason: alloc::string::Str
 pub batpak::store::StoreError::InvalidCoordinate
 pub batpak::store::StoreError::InvalidCoordinate::index: core::option::Option<usize>
 pub batpak::store::StoreError::InvalidCoordinate::reason: alloc::string::String
+pub batpak::store::StoreError::InvalidPayloadVersion
+pub batpak::store::StoreError::InvalidPayloadVersion::kind: u16
 pub batpak::store::StoreError::InvariantViolation
 pub batpak::store::StoreError::InvariantViolation::kind: batpak::store::StoreInvariant
 pub batpak::store::StoreError::Io(std::io::Error)
+pub batpak::store::StoreError::MmapFutureVersion
+pub batpak::store::StoreError::MmapFutureVersion::found: u16
+pub batpak::store::StoreError::MmapFutureVersion::supported: u16
 pub batpak::store::StoreError::NotFound(u128)
 pub batpak::store::StoreError::PlatformAdmissionFailed
 pub batpak::store::StoreError::PlatformAdmissionFailed::capability: &'static str
@@ -2639,6 +2759,9 @@ pub batpak::store::StoreError::PlatformProfileMismatch::reason: alloc::string::S
 pub batpak::store::StoreError::RangeMalformed
 pub batpak::store::StoreError::RangeMalformed::end: u64
 pub batpak::store::StoreError::RangeMalformed::start: u64
+pub batpak::store::StoreError::ReservedKind
+pub batpak::store::StoreError::ReservedKind::index: core::option::Option<usize>
+pub batpak::store::StoreError::ReservedKind::kind: u16
 pub batpak::store::StoreError::SegmentTooManyEntries
 pub batpak::store::StoreError::SegmentTooManyEntries::count: u64
 pub batpak::store::StoreError::SegmentTooManyEntries::segment_id: u64
@@ -2994,6 +3117,8 @@ pub const fn batpak::store::delivery::observation::IdempotencyKey::from_bytes(by
 pub struct batpak::store::IndexConfig
 pub batpak::store::IndexConfig::enable_checkpoint: bool
 pub batpak::store::IndexConfig::enable_mmap_index: bool
+pub batpak::store::IndexConfig::idempotency_overflow: batpak::store::OverflowPolicy
+pub batpak::store::IndexConfig::idempotency_retention: batpak::store::IdempotencyRetention
 pub batpak::store::IndexConfig::incremental_projection: bool
 pub batpak::store::IndexConfig::topology: batpak::store::IndexTopology
 impl core::default::Default for batpak::store::IndexConfig
@@ -3186,6 +3311,7 @@ pub batpak::store::SnapshotEvidenceReport::generated_at_unix_ms: core::option::O
 pub struct batpak::store::SnapshotFenceTokenRef
 pub batpak::store::SnapshotFenceTokenRef::token: u64
 pub struct batpak::store::SnapshotReportBody
+pub batpak::store::SnapshotReportBody::copied_idempotency_store_present: bool
 pub batpak::store::SnapshotReportBody::copied_pending_compaction_marker_present: bool
 pub batpak::store::SnapshotReportBody::copied_segment_ids_sorted: alloc::vec::Vec<u64>
 pub batpak::store::SnapshotReportBody::copied_visibility_ranges_present: bool
@@ -3278,6 +3404,7 @@ impl<State> batpak::store::Store<State>
 pub fn batpak::store::Store<State>::chain_walk_evidence(&self, request: &batpak::store::ChainWalkRequest) -> core::result::Result<batpak::store::ChainWalkEvidenceReport, batpak::store::ChainWalkReportError>
 impl<State> batpak::store::Store<State>
 pub fn batpak::store::Store<State>::diagnostics(&self) -> batpak::store::stats::StoreDiagnostics
+pub fn batpak::store::Store<State>::durable_idempotency_key_count(&self) -> usize
 pub fn batpak::store::Store<State>::stats(&self) -> batpak::store::stats::StoreStats
 pub fn batpak::store::Store<State>::store_resource_evidence_report(&self) -> core::result::Result<batpak::store::StoreResourceEvidenceReport, batpak::store::StoreResourceReportError>
 impl<State> batpak::store::Store<State>
@@ -3314,6 +3441,8 @@ pub fn batpak::prelude::StoreConfig::with_enable_mmap_index(self, enable_mmap_in
 pub fn batpak::prelude::StoreConfig::with_event_payload_validation(self, validation: batpak::event::payload::EventPayloadValidation) -> Self
 pub fn batpak::prelude::StoreConfig::with_fd_budget(self, fd_budget: usize) -> Self
 pub fn batpak::prelude::StoreConfig::with_group_commit_max_batch(self, group_commit_max_batch: u32) -> Self
+pub fn batpak::prelude::StoreConfig::with_idempotency_overflow(self, overflow: batpak::store::OverflowPolicy) -> Self
+pub fn batpak::prelude::StoreConfig::with_idempotency_retention(self, retention: batpak::store::IdempotencyRetention) -> Self
 pub fn batpak::prelude::StoreConfig::with_incremental_projection(self, incremental_projection: bool) -> Self
 pub fn batpak::prelude::StoreConfig::with_index_topology(self, index_topology: batpak::store::IndexTopology) -> Self
 pub fn batpak::prelude::StoreConfig::with_open_report_observer(self, observer: core::option::Option<batpak::store::OpenReportObserver>) -> Self
@@ -3645,8 +3774,10 @@ pub fn batpak::wire::vec_u128_bytes::serialize<S: serde_core::ser::Serializer>(v
 pub macro batpak::define_entity_id!
 pub macro batpak::define_state_machine!
 pub macro batpak::define_typestate!
+pub macro batpak::register_upcast!
 pub trait batpak::EventPayload: serde_core::ser::Serialize + serde_core::de::DeserializeOwned
 pub const batpak::EventPayload::KIND: batpak::event::kind::EventKind
+pub const batpak::EventPayload::PAYLOAD_VERSION: u16
 pub trait batpak::EventSourced: core::marker::Sized
 pub type batpak::EventSourced::Input: batpak::event::sourcing::ProjectionInput
 pub fn batpak::EventSourced::apply_event(&mut self, event: &batpak::event::sourcing::ProjectionEvent<Self>)
