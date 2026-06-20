@@ -7,6 +7,36 @@ use crate::store::StoreError;
 use rayon::prelude::*;
 use std::path::Path;
 
+/// Reference to the optional fault injector threaded through the cold-start
+/// recovery path.
+///
+/// With `dangerous-test-hooks` ON this is `&Option<Arc<dyn FaultInjector>>`
+/// (always `None` unless a test installs one via `with_fault_injector`, so
+/// threading it is behavior-preserving). With the feature OFF the `fault`
+/// module does not exist, so the alias collapses to `&()` and every recovery
+/// fn carries an inert reference the compiler elides — keeping the default
+/// build byte-for-byte behavior-identical.
+#[cfg(feature = "dangerous-test-hooks")]
+type FaultInjectorRef<'a> = &'a Option<std::sync::Arc<dyn crate::store::fault::FaultInjector>>;
+#[cfg(not(feature = "dangerous-test-hooks"))]
+type FaultInjectorRef<'a> = &'a ();
+
+/// The inert "no fault injector" value matching [`FaultInjectorRef`] for the
+/// active feature configuration. Used by the post-compaction rebuild path
+/// (which is never fault-injected), the sequential SIDX helper, and internal
+/// unit tests so they thread a no-op injector regardless of whether
+/// `dangerous-test-hooks` is enabled.
+const NO_FAULT_INJECTOR: FaultInjectorRef<'static> = {
+    #[cfg(feature = "dangerous-test-hooks")]
+    {
+        &None
+    }
+    #[cfg(not(feature = "dangerous-test-hooks"))]
+    {
+        &()
+    }
+};
+
 mod load_status;
 mod report;
 mod topology;
@@ -63,6 +93,7 @@ struct RestorePlanner<'a> {
     data_dir: &'a Path,
     policy: ColdStartPolicy,
     clock: &'a dyn crate::store::Clock,
+    fault_injector: FaultInjectorRef<'a>,
 }
 
 impl<'a> RestorePlanner<'a> {
@@ -73,6 +104,11 @@ impl<'a> RestorePlanner<'a> {
         let mut snapshot_loads = SnapshotLoadDiagnostics::default();
 
         if !has_pending_compaction && self.policy.try_mmap_index() {
+            #[cfg(feature = "dangerous-test-hooks")]
+            crate::store::fault::maybe_inject(
+                crate::store::fault::InjectionPoint::MmapIndexLoad,
+                self.fault_injector,
+            )?;
             let mmap_load = super::mmap::load_mmap_snapshot(self.data_dir, self.clock);
             snapshot_loads.record_mmap(&mmap_load);
             // A future-version mmap artifact is a CANONICAL TYPED REFUSAL, NOT a
@@ -104,6 +140,11 @@ impl<'a> RestorePlanner<'a> {
         }
 
         if !has_pending_compaction && self.policy.try_checkpoint() {
+            #[cfg(feature = "dangerous-test-hooks")]
+            crate::store::fault::maybe_inject(
+                crate::store::fault::InjectionPoint::CheckpointDecode,
+                self.fault_injector,
+            )?;
             let checkpoint_load = super::checkpoint::load_checkpoint_snapshot(self.data_dir);
             snapshot_loads.record_checkpoint(&checkpoint_load);
             if let super::FileLoad::Loaded(snapshot) = checkpoint_load {
@@ -132,7 +173,7 @@ impl<'a> RestorePlanner<'a> {
             allocator_hint,
             chunk_count,
             reopen_reserved_kind_fallbacks,
-        ) = collect_rebuild_entries(self.reader, self.data_dir)?;
+        ) = collect_rebuild_entries(self.reader, self.data_dir, self.fault_injector)?;
         let routing = RoutingSummary::from_sorted_entries(&entries, chunk_count.max(1));
         Ok(RestorePlan {
             source,
@@ -166,6 +207,7 @@ impl<'a> RestorePlanner<'a> {
             self.data_dir,
             &snapshot.watermark,
             snapshot.stored_allocator,
+            self.fault_injector,
         )?;
         let restored_entries = snapshot.entries.len();
         let tail_count = tail_entries.len();
@@ -209,6 +251,7 @@ pub(crate) fn open_index(
     data_dir: &Path,
     policy: ColdStartPolicy,
     clock: &dyn crate::store::Clock,
+    fault_injector: FaultInjectorRef<'_>,
 ) -> Result<OpenIndexOutcome, StoreError> {
     let t0 = clock.now_mono_ns();
     let planner = RestorePlanner {
@@ -216,6 +259,7 @@ pub(crate) fn open_index(
         data_dir,
         policy,
         clock,
+        fault_injector,
     };
     let t_plan = clock.now_mono_ns();
     let plan = planner.build()?;
@@ -255,6 +299,11 @@ pub(crate) fn open_index(
     // A missing file is OK (first open); any other read/parse failure is
     // surfaced so callers cannot silently resurrect cancelled events.
     let t_hidden = clock.now_mono_ns();
+    #[cfg(feature = "dangerous-test-hooks")]
+    crate::store::fault::maybe_inject(
+        crate::store::fault::InjectionPoint::HiddenRangesLoad,
+        fault_injector,
+    )?;
     if let Some(ranges) = crate::store::hidden_ranges::load_cancelled_ranges(data_dir)? {
         index.restore_cancelled_visibility_ranges(ranges);
     }
@@ -316,10 +365,13 @@ fn elapsed_us(clock: &dyn crate::store::Clock, start_ns: i64) -> u64 {
 fn read_sealed_sidx_entries_parallel(
     reader: &Reader,
     sealed_segments: &[(u64, std::path::PathBuf)],
+    fault_injector: FaultInjectorRef<'_>,
 ) -> Option<(Vec<ScannedIndexEntry>, ReservedKindFallbackStats)> {
     let per_segment: Result<Vec<_>, StoreError> = sealed_segments
         .par_iter()
-        .map(|(segment_id, path)| scanned_entries_from_sidx_footer(reader, *segment_id, path))
+        .map(|(segment_id, path)| {
+            scanned_entries_from_sidx_footer(reader, *segment_id, path, fault_injector)
+        })
         .collect();
 
     match per_segment {
@@ -348,7 +400,15 @@ fn scanned_entries_from_sidx_footer(
     reader: &Reader,
     segment_id: u64,
     path: &Path,
+    fault_injector: FaultInjectorRef<'_>,
 ) -> Result<(Vec<ScannedIndexEntry>, ReservedKindFallbackStats), StoreError> {
+    #[cfg(feature = "dangerous-test-hooks")]
+    crate::store::fault::maybe_inject(
+        crate::store::fault::InjectionPoint::IndexFooterDecode { segment_id },
+        fault_injector,
+    )?;
+    #[cfg(not(feature = "dangerous-test-hooks"))]
+    let _ = fault_injector;
     match crate::store::segment::sidx::read_footer(path) {
         Ok(Some((entries, strings))) => {
             let mut scanned = Vec::with_capacity(entries.len());
@@ -387,7 +447,9 @@ fn read_sealed_sidx_entries_sequential(
 ) -> Result<Vec<ScannedIndexEntry>, StoreError> {
     let mut flat = Vec::new();
     for (segment_id, path) in sealed_segments {
-        flat.extend(scanned_entries_from_sidx_footer(reader, *segment_id, path)?.0);
+        flat.extend(
+            scanned_entries_from_sidx_footer(reader, *segment_id, path, NO_FAULT_INJECTOR)?.0,
+        );
     }
     flat.sort_by_key(|entry| entry.global_sequence.unwrap_or(0));
     Ok(flat)
@@ -465,6 +527,7 @@ fn collect_tail_entries(
     data_dir: &Path,
     watermark: &WatermarkInfo,
     allocator_floor: u64,
+    fault_injector: FaultInjectorRef<'_>,
 ) -> Result<Vec<IndexEntry>, StoreError> {
     let entries = segment_paths(data_dir)?;
     let recoverable_tail_segment_id = entries.last().map(|(segment_id, _)| *segment_id);
@@ -474,6 +537,7 @@ fn collect_tail_entries(
         inserted_any: allocator_floor > 0,
     };
     let mut rebuilt_entries = Vec::new();
+    let mut frame_index: usize = 0;
 
     for (seg_id, path) in &entries {
         if *seg_id < watermark.watermark_segment_id {
@@ -491,6 +555,7 @@ fn collect_tail_entries(
             Some(&mut batch_state),
             tail_policy,
             |se| {
+                inject_scan_frame(fault_injector, *seg_id, se.offset, &mut frame_index)?;
                 if *seg_id == watermark.watermark_segment_id
                     && se.offset < watermark.watermark_offset
                 {
@@ -510,6 +575,42 @@ fn collect_tail_entries(
     Ok(rebuilt_entries)
 }
 
+/// Per-frame cold-start scan injection helper.
+///
+/// Fires `ColdStartScanFrame` (and a paired `ReadAt`) for the frame currently
+/// being scanned, then advances `frame_index`. Compiles to a no-op (only the
+/// counter bump) when `dangerous-test-hooks` is off, keeping the default build
+/// behavior-identical.
+#[inline]
+fn inject_scan_frame(
+    fault_injector: FaultInjectorRef<'_>,
+    segment_id: u64,
+    offset: u64,
+    frame_index: &mut usize,
+) -> Result<(), StoreError> {
+    let this_frame = *frame_index;
+    *frame_index = frame_index.saturating_add(1);
+    #[cfg(feature = "dangerous-test-hooks")]
+    {
+        crate::store::fault::maybe_inject(
+            crate::store::fault::InjectionPoint::ReadAt { offset, len: 0 },
+            fault_injector,
+        )?;
+        crate::store::fault::maybe_inject(
+            crate::store::fault::InjectionPoint::ColdStartScanFrame {
+                segment_id,
+                frame_index: this_frame,
+            },
+            fault_injector,
+        )?;
+    }
+    #[cfg(not(feature = "dangerous-test-hooks"))]
+    {
+        let _ = (fault_injector, segment_id, offset, this_frame);
+    }
+    Ok(())
+}
+
 type RebuildResult = (
     RestoreSource,
     Vec<IndexEntry>,
@@ -519,7 +620,11 @@ type RebuildResult = (
     ReservedKindFallbackStats,
 );
 
-fn collect_rebuild_entries(reader: &Reader, data_dir: &Path) -> Result<RebuildResult, StoreError> {
+fn collect_rebuild_entries(
+    reader: &Reader,
+    data_dir: &Path,
+    fault_injector: FaultInjectorRef<'_>,
+) -> Result<RebuildResult, StoreError> {
     let entries = segment_paths(data_dir)?;
     let recoverable_tail_segment_id = entries.last().map(|(segment_id, _)| *segment_id);
     let configured_active_segment = reader.active_segment_id();
@@ -527,6 +632,7 @@ fn collect_rebuild_entries(reader: &Reader, data_dir: &Path) -> Result<RebuildRe
     let interner = StringInterner::new();
     let mut rebuilt_entries = Vec::new();
     let mut tracker = SequenceTracker::default();
+    let mut frame_index: usize = 0;
 
     let sealed_segments: Vec<_> = entries
         .iter()
@@ -540,7 +646,8 @@ fn collect_rebuild_entries(reader: &Reader, data_dir: &Path) -> Result<RebuildRe
     let mut reserved_kind_fallbacks = ReservedKindFallbackStats::default();
 
     if !sealed_segments.is_empty() {
-        if let Some((scanned, counts)) = read_sealed_sidx_entries_parallel(reader, &sealed_segments)
+        if let Some((scanned, counts)) =
+            read_sealed_sidx_entries_parallel(reader, &sealed_segments, fault_injector)
         {
             reserved_kind_fallbacks = reserved_kind_fallbacks.add(&counts);
             for se in scanned {
@@ -566,6 +673,12 @@ fn collect_rebuild_entries(reader: &Reader, data_dir: &Path) -> Result<RebuildRe
                     Some(&mut batch_state),
                     tail_policy,
                     |se| {
+                        inject_scan_frame(
+                            fault_injector,
+                            *segment_id,
+                            se.offset,
+                            &mut frame_index,
+                        )?;
                         let global_sequence = se
                             .global_sequence
                             .unwrap_or_else(|| tracker.synthesize_next());
@@ -591,6 +704,7 @@ fn collect_rebuild_entries(reader: &Reader, data_dir: &Path) -> Result<RebuildRe
             Some(&mut batch_state),
             FrameScanTailPolicy::RecoverTornTail,
             |se| {
+                inject_scan_frame(fault_injector, *segment_id, se.offset, &mut frame_index)?;
                 let global_sequence = se
                     .global_sequence
                     .unwrap_or_else(|| tracker.synthesize_next());
@@ -628,7 +742,7 @@ pub(crate) fn rebuild_from_segments(
     data_dir: &Path,
 ) -> Result<(), StoreError> {
     let (_, entries, interner_strings, allocator_hint, chunk_count, _) =
-        collect_rebuild_entries(reader, data_dir)?;
+        collect_rebuild_entries(reader, data_dir, NO_FAULT_INJECTOR)?;
     index.interner.replace_from_full_snapshot(&interner_strings);
     let routing = RoutingSummary::from_sorted_entries(&entries, chunk_count.max(1));
     index.restore_sorted_entries_with_routing(entries, allocator_hint, &routing)?;

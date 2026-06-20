@@ -29,6 +29,15 @@ rustdoc-args = ["--cfg", "docsrs"]
 default = ["blake3"]
 blake3 = []
 dangerous-test-hooks = ["dep:fastrand"]
+# Test-only global-allocator shims (off by default; never in a normal build).
+# A `#[global_allocator]` is process-wide, so each shim must be installed by a
+# DEDICATED single-test binary. `alloc-count` enables `CountingAlloc` (atomic
+# alloc/realloc/dealloc counters + a `scope()` snapshot-delta guard) used to
+# gate hot paths against an allocation budget. `fault-alloc` enables
+# `FailingAlloc`, which returns null starting at the Kth allocation to exercise
+# OOM-handling paths deterministically. Neither alters production behavior.
+alloc-count = []
+fault-alloc = []
 # Gauntlet Phase 0B sentinel RED fixtures are gated behind the
 # `--cfg gauntlet_red_fixture` compile flag, NOT a Cargo feature. A red fixture
 # is designed to FAIL (it asserts the illegal/old behavior), so it must never be
