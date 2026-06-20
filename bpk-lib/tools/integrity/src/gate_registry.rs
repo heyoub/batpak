@@ -115,6 +115,31 @@ pub(crate) const GATES: &[Gate] = &[
         ),
         has_blocking_authority: true,
     },
+    // --- Phase-2 perf/fault sentinels (blocking, qualified). Each names a
+    //     dedicated single-test binary whose `#[test]` is the anti-vacuous RED
+    //     fixture: it arms a real allocation/IO fault (or budget) and asserts the
+    //     hot path stays consistent / typed-errors / within budget. ---
+    Gate {
+        slug: "perf-alloc-count",
+        red_fixture_test: Some(
+            "crates/core/tests/gauntlet_perf_alloc_count.rs::single_append_stays_under_allocation_budget",
+        ),
+        has_blocking_authority: true,
+    },
+    Gate {
+        slug: "fault-kth-io",
+        red_fixture_test: Some(
+            "crates/core/tests/gauntlet_fault_kth_recovery_io.rs::kth_io_fault_on_scan_path_is_consistent_or_typed_error",
+        ),
+        has_blocking_authority: true,
+    },
+    Gate {
+        slug: "fault-alloc-oom",
+        red_fixture_test: Some(
+            "crates/core/tests/gauntlet_fault_alloc_oom.rs::failing_alloc_arms_and_disarms_deterministically",
+        ),
+        has_blocking_authority: true,
+    },
     // --- Fuzz-replay gate (GAUNT-FUZZ-1, blocking, self-proving). The replay
     //     `#[test]` re-runs every committed corpus + regression input through the
     //     real `__fuzz::*` decode entry points and asserts none panics. Its

@@ -89,12 +89,12 @@ pub(super) const SYNCBAT_RUNTIME_MUTANT_FILES: &[&str] = &[
 ];
 pub(super) const SYNCBAT_CATALOG_MUTANT_FILES: &[&str] = &[
     "crates/syncbat/src/register.rs",
-    "crates/syncbat/src/register_store.rs",
+    "crates/syncbat/src/register_store/**/*.rs",
 ];
 pub(super) const NETBAT_BOUNDARY_MUTANT_FILES: &[&str] = &[
     "crates/netbat/src/lib.rs",
     "crates/netbat/src/route.rs",
-    "crates/netbat/src/transport.rs",
+    "crates/netbat/src/transport/**/*.rs",
 ];
 pub(super) const INDEX_TOPOLOGY_DEFAULT_EQUIVALENT_MUTANT: &str = r"crates/core/src/store/config\.rs:.*replace IndexTopology::aos -> Self with Default::default\(\)";
 pub(super) const MUTANT_EXCLUDE_RES: &[&str] = &[INDEX_TOPOLOGY_DEFAULT_EQUIVALENT_MUTANT];

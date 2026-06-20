@@ -29,13 +29,12 @@ pub(crate) const LANES_RS_REL: &str = "tools/xtask/src/commands/mutants/lanes.rs
 /// shrinks as `lanes.rs` is fixed — a waived glob that now matches a file is
 /// reported (anti-rot), and a NEW dead glob not on this list still fails hard.
 ///
-/// `crates/syncbat/src/register_store.rs` and `crates/netbat/src/transport.rs`
-/// became directory modules (`register_store/`, `transport/`); the single-file
-/// seam globs no longer match. Fix is to repoint them at `…/**/*.rs` in lanes.rs.
-pub(crate) const KNOWN_DEAD_GLOBS: &[&str] = &[
-    "crates/syncbat/src/register_store.rs",
-    "crates/netbat/src/transport.rs",
-];
+/// This list is now EMPTY: the two stale seam globs
+/// (`crates/syncbat/src/register_store.rs`, `crates/netbat/src/transport.rs`)
+/// were repointed at their directory-module forms (`register_store/**/*.rs`,
+/// `transport/**/*.rs`) in lanes.rs, so they match tracked files again and no
+/// longer need a waiver. Any NEW dead glob still fails the gate hard.
+pub(crate) const KNOWN_DEAD_GLOBS: &[&str] = &[];
 
 /// Production entry: validate every `*_MUTANT_FILES` glob in the live `lanes.rs`
 /// against the live tracked-file set.
