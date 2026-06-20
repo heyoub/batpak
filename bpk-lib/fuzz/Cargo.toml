@@ -19,12 +19,14 @@ libfuzzer-sys = "0.4"
 # the path dep reaches the real decode entry point with no test-hook shim.
 batpak = { path = "../crates/core" }
 
-[features]
-# Mirror of the core crate's gauntlet RED fixture switch. When enabled, the
+[lints.rust]
+# Mirror of the core crate's gauntlet RED fixture switch, gated behind the
+# `--cfg gauntlet_red_fixture` compile flag (NOT a Cargo feature). When set, the
 # frame_decode target plants a deliberate panic on a known input so the harness
 # can PROVE it catches a crash (tool qualification / non-vacuity). OFF on every
-# normal/CI fuzz run.
-gauntlet-red-fixture = []
+# normal/CI fuzz run. Registered here so the default build does not warn on the
+# unexpected cfg.
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(gauntlet_red_fixture)'] }
 
 # cargo-fuzz crates must NOT be in the parent workspace (nightly-only build-std +
 # panic=abort). Declaring an empty `[workspace]` here makes this dir its own root.

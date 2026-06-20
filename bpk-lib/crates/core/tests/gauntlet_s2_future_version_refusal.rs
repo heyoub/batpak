@@ -24,7 +24,7 @@
 
 use batpak::coordinate::Coordinate;
 use batpak::event::EventKind;
-#[cfg(not(feature = "gauntlet-red-fixture"))]
+#[cfg(not(gauntlet_red_fixture))]
 use batpak::store::StoreError;
 use batpak::store::{Store, StoreConfig};
 use std::path::Path;
@@ -97,12 +97,12 @@ fn future_version_mmap_index_is_canonical_refusal_not_silent_rebuild() {
 
     let result = Store::open(mmap_config(&dir));
 
-    // RED fixture: when `gauntlet-red-fixture` is enabled, assert the OLD
+    // RED fixture: under `--cfg gauntlet_red_fixture`, assert the OLD
     // silent-degrade behavior (open succeeds via rebuild-from-scan). That
     // assertion is FALSE against the cured code, so the red fixture FAILS —
     // proving the sentinel detects the illegal silent-rebuild outcome rather
     // than passing vacuously.
-    #[cfg(feature = "gauntlet-red-fixture")]
+    #[cfg(gauntlet_red_fixture)]
     {
         let store = result.expect(
             "RED FIXTURE: this asserts the (illegal) silent rebuild-from-scan \
@@ -121,7 +121,7 @@ fn future_version_mmap_index_is_canonical_refusal_not_silent_rebuild() {
     }
 
     // GREEN: the cured behavior — a canonical typed refusal, propagated.
-    #[cfg(not(feature = "gauntlet-red-fixture"))]
+    #[cfg(not(gauntlet_red_fixture))]
     {
         let err = match result {
             Ok(_) => panic!(

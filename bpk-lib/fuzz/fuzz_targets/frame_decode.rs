@@ -31,16 +31,17 @@ use batpak::store::segment::{frame_decode, frame_encode, FrameDecodeError};
 /// crash). `frame_decode` is already hardened (bounds-checked, zero-copy, no
 /// live panic on arbitrary bytes), so the green harness can never crash on its
 /// own. To prove S1 is NON-VACUOUS — that this target really would catch a
-/// decode panic — we gate a planted panic behind the `gauntlet-red-fixture`
-/// feature, mirroring how S2/S3 plant their red fixtures behind the same flag.
+/// decode panic — we gate a planted panic behind the `--cfg gauntlet_red_fixture`
+/// compile flag (NOT a Cargo feature, so `--all-features` never enables it),
+/// mirroring how S2/S3 plant their red fixtures behind the same flag.
 ///
 /// Reproduce the catch:
-///   cargo +nightly fuzz run frame_decode \
-///     --features gauntlet-red-fixture fuzz/regressions/frame_decode/RED-planted-panic
-/// libFuzzer reports a crash on the planted panic. Without the feature, the same
+///   RUSTFLAGS="--cfg gauntlet_red_fixture" cargo +nightly fuzz run frame_decode \
+///     fuzz/regressions/frame_decode/RED-planted-panic
+/// libFuzzer reports a crash on the planted panic. Without the cfg, the same
 /// input decodes cleanly (it is a valid empty-payload frame) — proving the red
 /// proof is a deliberate plant, not a real decode defect.
-#[cfg(feature = "gauntlet-red-fixture")]
+#[cfg(gauntlet_red_fixture)]
 fn red_fixture_plant(buf: &[u8]) {
     // The committed RED corpus input is a valid 8-byte frame whose payload is
     // empty: [len=0][crc32 of empty]. On the cured code this decodes to an empty
@@ -53,14 +54,14 @@ fn red_fixture_plant(buf: &[u8]) {
     if buf == EMPTY_FRAME {
         panic!(
             "RED FIXTURE: planted frame_decode panic to prove the S1 fuzz harness \
-             catches a crash. Disable the `gauntlet-red-fixture` feature for the \
+             catches a crash. Drop the `--cfg gauntlet_red_fixture` flag for the \
              green contract."
         );
     }
 }
 
 fuzz_target!(|data: &[u8]| {
-    #[cfg(feature = "gauntlet-red-fixture")]
+    #[cfg(gauntlet_red_fixture)]
     red_fixture_plant(data);
 
     // (a)+(d): NEVER panic on arbitrary bytes; invalid bytes return a typed Err.

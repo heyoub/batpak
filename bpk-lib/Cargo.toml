@@ -44,6 +44,11 @@ missing_errors_doc = "warn"
 
 [workspace.lints.rust]
 deprecated = "deny"
+# Gauntlet Phase 0B sentinel RED fixtures compile only under this cfg (set via
+# RUSTFLAGS="--cfg gauntlet_red_fixture"); it is intentionally NOT a Cargo
+# feature so `--all-features` never enables a fixture designed to fail. Register
+# it here so the every-PR build does not warn/deny on the unexpected cfg.
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(gauntlet_red_fixture)'] }
 
 # Profile settings (NOT in .cargo/config.toml — they're ignored there)
 [profile.dev]

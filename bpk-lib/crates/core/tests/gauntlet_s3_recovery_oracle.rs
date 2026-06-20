@@ -199,12 +199,12 @@ fn post_fsync_committed_batch_recovers_committed_or_canonical_refusal() {
         "the plainly-committed pre-fault event must never be lost on recovery"
     );
 
-    // RED fixture: when `gauntlet-red-fixture` is enabled, assert the ILLEGAL
+    // RED fixture: under `--cfg gauntlet_red_fixture`, assert the ILLEGAL
     // outcome (the fsync-confirmed batch rolled back). That assertion is FALSE
     // against the real recovery path (which recovers Committed), so the red
     // fixture FAILS — proving the oracle actually detects a lost-after-fsync
     // commit rather than passing vacuously.
-    #[cfg(feature = "gauntlet-red-fixture")]
+    #[cfg(gauntlet_red_fixture)]
     assert_eq!(
         state,
         RecoveredState::RolledBack,
@@ -214,7 +214,7 @@ fn post_fsync_committed_batch_recovers_committed_or_canonical_refusal() {
 
     // GREEN: the sacred rule. A fsync-confirmed batch comes back Committed (or,
     // legally, a canonical refusal). Never RolledBack, never a half-ghost.
-    #[cfg(not(feature = "gauntlet-red-fixture"))]
+    #[cfg(not(gauntlet_red_fixture))]
     assert!(
         matches!(
             state,
