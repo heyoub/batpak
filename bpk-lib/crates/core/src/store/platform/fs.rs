@@ -178,9 +178,63 @@ pub(crate) fn read_exact_at(
     }
 }
 
+/// Filesystem seam for production and (future) deterministic simulation.
+///
+/// Boundary: this is the narrow trait through which store code reaches the
+/// target filesystem. Production routes through [`RealFs`], whose every method
+/// is a byte-for-byte delegate to the existing `platform::fs::*` /
+/// `platform::sync::*` free functions — the only observable difference from a
+/// direct free-fn call is the indirection through a trait object. A later
+/// gauntlet item installs a `SimFs` that fakes the filesystem on an in-memory
+/// model for deterministic crash/fault tests; it is NOT built here. This trait
+/// only introduces the seam so call sites that hold a `StoreConfig` stop
+/// reaching `std::fs` (via the free fns) directly.
+///
+/// `Send + Sync` so it can live behind `Arc<dyn StoreFs>` on `StoreConfig` and
+/// be shared across threads, mirroring the [`super::spawn::Spawn`] seam.
+///
+/// Scope note: this is the routed subset of the platform fs/sync surface — the
+/// two ops that had a `StoreConfig`-bearing, non-ratcheted call site to route
+/// through in this pass: `create_dir_all` (`open_components`,
+/// `WriterHandle::spawn`) and `read_dir` (`clear_snapshot_store_artifacts`).
+/// The remaining ops (`metadata`, `remove_file`, `rename`, `copy`,
+/// `reject_symlink_leaf`, and the durability cluster `read`, `named_temp_in`,
+/// `read_exact_at`, `sync_file_all_io`, `sync_parent_dir`,
+/// `persist_temp_with_parent_sync`) live behind deep `data_dir`-only free fns,
+/// the config-less `Reader`, or complexity-ratcheted `lifecycle` fns with no
+/// line headroom; they join this trait in the follow-up that threads
+/// `&dyn StoreFs` through those signatures (and splits the ratcheted fns).
+/// Until then their `RealFs` free fns remain the live path. See
+/// GAUNTLET_ISSUES.md for the deferred set.
+pub(crate) trait StoreFs: Send + Sync {
+    /// Iterate a directory's entries. Mirrors [`std::fs::read_dir`].
+    fn read_dir(&self, path: &Path) -> io::Result<ReadDir>;
+
+    /// Create a directory and all missing parents. Mirrors
+    /// [`std::fs::create_dir_all`].
+    fn create_dir_all(&self, path: &Path) -> io::Result<()>;
+}
+
+/// Production [`StoreFs`]: every method delegates to the existing
+/// `platform::fs::*` free functions, so the default build behaves byte-for-byte
+/// as it did before the seam was introduced.
+#[derive(Debug, Default, Clone, Copy)]
+pub(crate) struct RealFs;
+
+impl StoreFs for RealFs {
+    fn read_dir(&self, path: &Path) -> io::Result<ReadDir> {
+        read_dir(path)
+    }
+
+    fn create_dir_all(&self, path: &Path) -> io::Result<()> {
+        create_dir_all(path)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::remove_dir_all;
+    use super::{RealFs, StoreFs};
     use std::error::Error;
 
     #[test]
@@ -196,6 +250,35 @@ mod tests {
         assert!(
             !root.exists(),
             "PROPERTY: platform remove_dir_all must remove directories, not only files or leaves"
+        );
+        Ok(())
+    }
+
+    // Exercises every routed StoreFs method through a trait object so the
+    // production RealFs delegation is proven byte-for-byte against the platform
+    // free fns, and every method on the seam is a live vtable entry.
+    #[test]
+    fn real_fs_delegates_routed_ops_like_the_platform_free_fns() -> Result<(), Box<dyn Error>> {
+        let dir = tempfile::tempdir()?;
+        let fs: std::sync::Arc<dyn StoreFs> = std::sync::Arc::new(RealFs);
+
+        // create_dir_all builds the whole tree.
+        let sub = dir.path().join("a").join("b");
+        fs.create_dir_all(&sub)?;
+        assert!(
+            sub.is_dir(),
+            "PROPERTY: RealFs::create_dir_all must create the full nested tree"
+        );
+
+        // read_dir lists what create_dir_all produced (entry errors propagated).
+        std::fs::write(dir.path().join("leaf.bin"), b"leaf")?;
+        let mut names = Vec::new();
+        for entry in fs.read_dir(dir.path())? {
+            names.push(entry?.file_name());
+        }
+        assert!(
+            names.iter().any(|n| n == "leaf.bin") && names.iter().any(|n| n == "a"),
+            "PROPERTY: RealFs::read_dir must list directory entries like the platform free fn"
         );
         Ok(())
     }

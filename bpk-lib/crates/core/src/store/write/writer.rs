@@ -17,7 +17,6 @@ use crate::event::{Event, EventHeader, EventKind, HashChain};
 use crate::store::append::BatchAppendItem;
 use crate::store::config::ValidatedStoreConfig;
 use crate::store::index::{DiskPos, StoreIndex};
-use crate::store::platform;
 use crate::store::segment::sidx::kind_to_raw;
 use crate::store::segment::{self, Active, FramePayloadRef, Segment};
 #[cfg(test)]
@@ -146,7 +145,10 @@ impl WriterHandle {
         reader: &Arc<crate::store::segment::scan::Reader>,
     ) -> Result<Self, StoreError> {
         // Fallible init — propagate errors to Store::open() caller
-        platform::fs::create_dir_all(&config.data_dir).map_err(StoreError::Io)?;
+        config
+            .fs()
+            .create_dir_all(&config.data_dir)
+            .map_err(StoreError::Io)?;
         let initial_segment_id = find_latest_segment_id(&config.data_dir)?.unwrap_or(0) + 1;
         let initial_segment = Segment::<Active>::create_with_created_ns(
             &config.data_dir,

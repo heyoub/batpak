@@ -278,3 +278,51 @@ fn with_spawner_installs_custom_spawner_and_runs_body() {
         "PROPERTY: the body handed to the custom spawner must run to completion"
     );
 }
+
+#[test]
+fn with_fs_installs_custom_filesystem_backend() {
+    use crate::store::platform::fs::{RealFs, StoreFs};
+    use std::path::Path;
+    use std::sync::atomic::AtomicBool;
+
+    // A recording StoreFs proving that `with_fs` rewires the seam: it flags
+    // when asked to create_dir_all, then delegates to RealFs so the production
+    // op still happens (behavior-preserving delegation through the trait).
+    struct RecordingFs {
+        created: Arc<AtomicBool>,
+        inner: RealFs,
+    }
+    impl StoreFs for RecordingFs {
+        fn read_dir(&self, path: &Path) -> std::io::Result<std::fs::ReadDir> {
+            self.inner.read_dir(path)
+        }
+        fn create_dir_all(&self, path: &Path) -> std::io::Result<()> {
+            self.created.store(true, Ordering::Release);
+            self.inner.create_dir_all(path)
+        }
+    }
+
+    let created = Arc::new(AtomicBool::new(false));
+    let fs: Arc<dyn StoreFs> = Arc::new(RecordingFs {
+        created: Arc::clone(&created),
+        inner: RealFs,
+    });
+
+    let config = StoreConfig::new("target/test-with-fs").with_fs(fs);
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let nested = dir.path().join("seam").join("leaf");
+    config
+        .fs()
+        .create_dir_all(&nested)
+        .expect("custom fs must create the tree");
+
+    assert!(
+        created.load(Ordering::Acquire),
+        "PROPERTY: with_fs must route config.fs() through the installed StoreFs"
+    );
+    assert!(
+        nested.is_dir(),
+        "PROPERTY: the installed StoreFs must still perform the real create_dir_all"
+    );
+}

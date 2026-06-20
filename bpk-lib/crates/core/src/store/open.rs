@@ -36,7 +36,7 @@ fn open_components(
     lock_mode: StoreLockMode,
 ) -> Result<OpenComponents, StoreError> {
     validate_payload_registry_for_open(&config)?;
-    platform::fs::create_dir_all(&config.data_dir)?;
+    config.fs().create_dir_all(&config.data_dir)?;
     config.data_dir = platform::fs::canonicalize(&config.data_dir).map_err(StoreError::Io)?;
     let configured_signing_keys = config.signing_keys.len();
     tracing::debug!(

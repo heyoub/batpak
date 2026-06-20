@@ -91,7 +91,7 @@ pub(crate) fn snapshot(
         latest_segment_watermark(&store.config.data_dir)?;
     platform_fs::reject_symlink_leaf(dest, "snapshot destination")?;
     platform_fs::create_dir_all(dest).map_err(StoreError::Io)?;
-    let cleared_artifact_count = clear_snapshot_store_artifacts(dest)?;
+    let cleared_artifact_count = clear_snapshot_store_artifacts(store.config.fs().as_ref(), dest)?;
     let entries = platform_fs::read_dir(&store.config.data_dir).map_err(StoreError::Io)?;
     let mut copied_segment_ids_sorted = Vec::new();
     let mut copied_visibility_ranges_present = false;
@@ -184,8 +184,11 @@ fn remove_dir_all_if_present(path: &std::path::Path) -> Result<bool, StoreError>
     platform_fs::remove_dir_all_if_present(path).map_err(StoreError::Io)
 }
 
-fn clear_snapshot_store_artifacts(dest: &std::path::Path) -> Result<usize, StoreError> {
-    let entries = platform_fs::read_dir(dest).map_err(StoreError::Io)?;
+fn clear_snapshot_store_artifacts(
+    fs: &dyn crate::store::platform::fs::StoreFs,
+    dest: &std::path::Path,
+) -> Result<usize, StoreError> {
+    let entries = fs.read_dir(dest).map_err(StoreError::Io)?;
     let mut removed = 0;
     for entry in entries {
         let entry = entry.map_err(StoreError::Io)?;
