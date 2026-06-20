@@ -186,6 +186,38 @@ pub(crate) const GATES: &[Gate] = &[
         red_fixture_kind: Some(RedFixtureKind::ProductionFlip),
         has_blocking_authority: true,
     },
+    // --- Phase-B2 deterministic-simulation crash-recovery (blocking, qualified
+    //     ProductionFlip). A real Store is composed over the fault-injecting SimFs
+    //     backend, driven through the real append/sync API, crashed at the
+    //     durability boundary, and reopened; the oracle fails closed on any
+    //     illegal recovered state (lost-after-sync commit, undead event, broken
+    //     hash chain, non-canonical reopen) or nondeterminism. Under
+    //     `gauntlet_red_fixture` the test asserts the (illegal) lost-after-sync
+    //     outcome, so its red half fails — proving the oracle bites. ---
+    Gate {
+        slug: "dst-recovery",
+        red_fixture_test: Some(
+            "crates/core/tests/dst_recovery.rs::dst_recovery_is_legal_and_deterministic",
+        ),
+        red_fixture_kind: Some(RedFixtureKind::ProductionFlip),
+        has_blocking_authority: true,
+    },
+    // --- Phase-B4 linearizability gate (blocking, qualified GateNegativePath).
+    //     A seeded op stream against a REAL Store under a fixed clock must, after
+    //     settling on the visibility watermark, expose a dense strictly-increasing
+    //     global_sequence prefix (== single-writer linearization order), with
+    //     monotonic reads, reader convergence, and no real-time/seq inversion. The
+    //     pure `check_linearizable` checker makes the property testable in isolation;
+    //     the red fixture feeds it inverted/gapped/duplicate histories and asserts
+    //     each is rejected, proving the checker is not vacuous. ---
+    Gate {
+        slug: "linearizability",
+        red_fixture_test: Some(
+            "crates/core/tests/linearizability.rs::checker_rejects_inverted_gapped_and_duplicate_histories",
+        ),
+        red_fixture_kind: Some(RedFixtureKind::GateNegativePath),
+        has_blocking_authority: true,
+    },
     // --- Phase-2 fault sentinels: run on every PR via `--all-features` nextest,
     //     but NOT yet qualified — their tests assert "consistent OR typed error"
     //     without a proven failing path, and the OOM test only exercises the
@@ -295,6 +327,21 @@ pub(crate) const GATES: &[Gate] = &[
         slug: "no-wallclock-asserts",
         red_fixture_test: Some(
             "tools/integrity/src/structural_tests.rs::no_wallclock_asserts_rejects_elapsed_assertion",
+        ),
+        red_fixture_kind: Some(RedFixtureKind::GateNegativePath),
+        has_blocking_authority: true,
+    },
+    // --- Phase-B5 complexity-EXPONENT + WCET gate (GAUNT-CPLX-EXP, blocking,
+    //     qualified GateNegativePath). The live measurement fits a log-log slope
+    //     of a real `Store::query(Region::all())`'s ALLOCATION COUNT (not
+    //     wall-clock) across geometric input sizes and asserts the asymptotic
+    //     class stays ~linear, plus a count-based WCET/p100 budget. Its
+    //     anti-vacuous red fixture plants a QUADRATIC dataset and asserts the
+    //     pure `check_complexity` gate returns `Err`. ---
+    Gate {
+        slug: "complexity-exponent",
+        red_fixture_test: Some(
+            "crates/core/tests/complexity_exponent.rs::super_linear_dataset_is_rejected",
         ),
         red_fixture_kind: Some(RedFixtureKind::GateNegativePath),
         has_blocking_authority: true,

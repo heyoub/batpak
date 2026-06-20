@@ -128,6 +128,28 @@ pub(crate) fn load_cancelled_ranges(
     }
 
     let version = u16::from_le_bytes([raw[6], raw[7]]);
+    // A future (newer-than-supported) artifact is a DISTINCT canonical refusal,
+    // not remediable corruption: a future writer may have recorded cancelled
+    // ranges in a layout this reader cannot interpret, so treating it as
+    // generic corruption (or silently empty) would risk resurrecting cancelled
+    // events. The version field is outside the CRC region (CRC at 8..12 covers
+    // body 12..) and is checked before the CRC, so a forged version alone trips
+    // it. Older/unknown versions keep the remediable corruption path below.
+    // justifies: INV-ONDISK-FORWARD-COMPAT-CANONICAL
+    if version > VISIBILITY_RANGES_VERSION {
+        tracing::warn!(
+            target: "batpak::visibility",
+            path = %path.display(),
+            version,
+            supported = VISIBILITY_RANGES_VERSION,
+            "visibility-ranges metadata declares a future format version — refusing canonically"
+        );
+        return Err(StoreError::HiddenRangesFutureVersion {
+            path: path.clone(),
+            found: version,
+            supported: VISIBILITY_RANGES_VERSION,
+        });
+    }
     if version != VISIBILITY_RANGES_VERSION {
         return Err(corrupt_ranges(
             &path,

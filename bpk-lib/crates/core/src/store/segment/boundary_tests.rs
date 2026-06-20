@@ -16,6 +16,13 @@ use super::*;
 use std::io::Cursor;
 use tempfile::TempDir;
 
+/// Production [`RealFs`] behind the [`StoreFs`] seam, for the segment-create
+/// calls in these boundary tests (the durability seam is exercised by the sim
+/// tests; here we only need a real backing filesystem).
+fn realfs() -> std::sync::Arc<dyn crate::store::platform::fs::StoreFs> {
+    std::sync::Arc::new(crate::store::platform::fs::RealFs)
+}
+
 /// Build an in-memory buffer of `[real CRC-valid frames][CRC-valid SDX3 footer]`.
 /// Returns `(bytes, frames_end)` where `frames_end` is the SIDX
 /// `string_table_offset` the footer records (= the true end of the frames).
@@ -388,7 +395,7 @@ fn append_frames_from_segment_recovers_all_frames_for_untrusted_too_low_offset()
 
     // Source segment with one real frame.
     let mut source: Segment<Active> =
-        Segment::create_with_created_ns(dir.path(), 1, 0).expect("create source");
+        Segment::create_with_created_ns_on(dir.path(), 1, 0, &realfs()).expect("create source");
     let frame =
         frame_encode(&serde_json::json!({"payload": "compaction-recover"})).expect("encode frame");
     source.write_frame(&frame).expect("write frame");
@@ -414,7 +421,7 @@ fn append_frames_from_segment_recovers_all_frames_for_untrusted_too_low_offset()
 
     // Destination segment for the compaction copy.
     let mut dest: Segment<Active> =
-        Segment::create_with_created_ns(dir.path(), 2, 0).expect("create dest");
+        Segment::create_with_created_ns_on(dir.path(), 2, 0, &realfs()).expect("create dest");
     let dest_header_bytes = dest.written_bytes;
     dest.append_frames_from_segment(&source_path)
         .expect("PROPERTY: an untrusted too-low offset must recover the real frame, not error");
@@ -451,7 +458,7 @@ fn append_frames_from_segment_recovers_all_frames_for_untrusted_out_of_bounds_of
     let dir = TempDir::new().expect("tmpdir");
 
     let mut source: Segment<Active> =
-        Segment::create_with_created_ns(dir.path(), 1, 0).expect("create source");
+        Segment::create_with_created_ns_on(dir.path(), 1, 0, &realfs()).expect("create source");
     let frame = frame_encode(&serde_json::json!({"payload": "compaction-oob-recover"}))
         .expect("encode frame");
     source.write_frame(&frame).expect("write frame");
@@ -493,7 +500,7 @@ fn append_frames_from_segment_recovers_all_frames_for_untrusted_out_of_bounds_of
     }
 
     let mut dest: Segment<Active> =
-        Segment::create_with_created_ns(dir.path(), 2, 0).expect("create dest");
+        Segment::create_with_created_ns_on(dir.path(), 2, 0, &realfs()).expect("create dest");
     let dest_header_bytes = dest.written_bytes;
     dest.append_frames_from_segment(&source_path).expect(
         "PROPERTY: an out-of-bounds untrusted offset must recover the real frame during \

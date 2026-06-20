@@ -112,6 +112,19 @@ fn one_of_every_variant() -> Vec<StoreError> {
             stored: 2,
             current: 1,
         },
+        StoreError::MmapFutureVersion {
+            found: 6,
+            supported: 5,
+        },
+        StoreError::CheckpointFutureVersion {
+            found: 7,
+            supported: 6,
+        },
+        StoreError::HiddenRangesFutureVersion {
+            path: PathBuf::from("p"),
+            found: 2,
+            supported: 1,
+        },
         StoreError::IdempotencyOverflowFailClosed {
             len: 1,
             max_keys: 1,
@@ -225,6 +238,9 @@ fn one_of_every_variant() -> Vec<StoreError> {
             | StoreError::BatchSyncFailed { .. }
             | StoreError::IdempotencyPartialBatch { .. }
             | StoreError::IdempotencyFutureVersion { .. }
+            | StoreError::MmapFutureVersion { .. }
+            | StoreError::CheckpointFutureVersion { .. }
+            | StoreError::HiddenRangesFutureVersion { .. }
             | StoreError::IdempotencyOverflowFailClosed { .. }
             | StoreError::InvalidPayloadVersion { .. }
             | StoreError::CorruptFrame { .. }

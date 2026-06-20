@@ -356,7 +356,7 @@ fn missing_watermark_segment_returns_none() {
 }
 
 #[test]
-fn wrong_version_returns_none() {
+fn future_version_is_a_canonical_refusal_not_a_silent_rebuild() {
     let tmp = TempDir::new().expect("tempdir");
     let dir = tmp.path();
     touch_segment(dir, 0);
@@ -364,24 +364,59 @@ fn wrong_version_returns_none() {
     let idx = StoreIndex::new();
     write_checkpoint(&idx, dir, 0, 0).expect("write");
 
-    // Overwrite the two version bytes with an unsupported future version
+    // Overwrite the two version bytes (6..8, LE) with a FUTURE version. The
+    // version field is OUTSIDE the CRC region (CRC at 8..12 covers body 12..),
+    // and the future-version check fires before the CRC check, so no CRC fix is
+    // needed — a forged version alone trips the refusal.
     let path = dir.join(format::CHECKPOINT_FILENAME);
-    let mut raw = std::fs::read(&path).expect("read");
-    // bytes [6..8] are the version — set to 99
-    raw[6] = 99;
-    raw[7] = 0;
-    // Also fix the CRC so it doesn't fail there first
-    let body_crc = crc32fast::hash(&raw[12..]);
-    let crc_bytes = body_crc.to_le_bytes();
-    raw[8] = crc_bytes[0];
-    raw[9] = crc_bytes[1];
-    raw[10] = crc_bytes[2];
-    raw[11] = crc_bytes[3];
+    let mut raw = crate::store::platform::fs::read(&path).expect("read");
+    let future = format::CHECKPOINT_VERSION + 1;
+    raw[6..8].copy_from_slice(&future.to_le_bytes());
     std::fs::write(&path, &raw).expect("rewrite");
+
+    // The format reader classifies it as a typed future-version refusal — NOT
+    // a silent degrade to a rebuild-from-scan. (`try_load_checkpoint` collapses
+    // every non-Loaded outcome to None, so we assert directly on the reader.)
+    assert!(
+        matches!(
+            format::read_checkpoint_file(dir),
+            crate::store::cold_start::FileLoad::FutureVersion { found, supported }
+                if found == future && supported == format::CHECKPOINT_VERSION
+        ),
+        "PROPERTY: a future-version checkpoint must be FileLoad::FutureVersion, not a silent rebuild"
+    );
+}
+
+#[test]
+fn older_unsupported_version_still_degrades_gracefully() {
+    let tmp = TempDir::new().expect("tempdir");
+    let dir = tmp.path();
+    touch_segment(dir, 0);
+
+    let idx = StoreIndex::new();
+    write_checkpoint(&idx, dir, 0, 0).expect("write");
+
+    // Forge an OLDER, no-longer-decodable version (1: rejected by
+    // decode_checkpoint_data). Fix the CRC so the version branch — not a CRC
+    // mismatch — is what classifies it. An older artifact must keep its
+    // graceful-rebuild path (decode returns None → silent rebuild), distinct
+    // from the future-version hard refusal above.
+    let path = dir.join(format::CHECKPOINT_FILENAME);
+    let mut raw = crate::store::platform::fs::read(&path).expect("read");
+    raw[6] = 1;
+    raw[7] = 0;
+    let body_crc = crc32fast::hash(&raw[12..]);
+    raw[8..12].copy_from_slice(&body_crc.to_le_bytes());
+    // Route the forge rewrite through the platform boundary (the same atomic
+    // write the store itself uses) rather than a raw `std::fs::write`.
+    crate::store::platform::fs::write_file_atomically(dir, &path, "checkpoint-forge", |file| {
+        std::io::Write::write_all(file, &raw).map_err(crate::store::StoreError::Io)
+    })
+    .expect("rewrite forged older-version checkpoint");
 
     assert!(
         try_load_checkpoint(dir).is_none(),
-        "wrong version should return None"
+        "older unsupported version must degrade to None (rebuild), not refuse"
     );
 }
 

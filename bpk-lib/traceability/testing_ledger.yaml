@@ -838,16 +838,19 @@
     - cargo test --test compat_matrix
     - cargo test --test compat_matrix compat_matrix_self_row_tracks_live_version
   coverage_delta: >
-    exercises the mmap-index version branch in
-    crates/core/src/store/cold_start/mmap/load.rs through the public Store::open
-    lifecycle; exact JSON delta not recorded.
+    exercises four on-disk version branches through the public Store::open
+    lifecycle: mmap-index (cold_start/mmap/load.rs), checkpoint
+    (cold_start/checkpoint/format.rs + rebuild.rs planner), idempotency-index
+    (store/index/idemp.rs), and visibility-ranges (store/hidden_ranges.rs). Each
+    has an OpensOK self-row and a forged future-version CanonicalRefusal row;
+    exact JSON delta not recorded.
   mutation_delta: unmeasured
   blind_spots: >
-    the matrix currently seeds only the mmap-index format (OpensOK self-row plus
-    a forged future-version canonical refusal). Idempotency, visibility-ranges,
-    checkpoint, and segment rows are DEFERRED (logged in GAUNTLET_ISSUES.md):
-    checkpoint and segment still need a per-format *FutureVersion typed error
-    before a CanonicalRefusal row can be asserted.
+    the segment/.fbat format is intentionally NOT covered: its version field is
+    msgpack-encoded inside the header (no fixed-offset forge applies) and a
+    future-version segment already fails closed via CorruptSegment with no
+    silent-degrade path (segments are the durable bottom layer, never rebuilt
+    from elsewhere), so no new typed refusal was warranted.
 
 - title: Docs-currency gate keeps INVARIANTS.md a current view of the catalog
   section: Structural Harness

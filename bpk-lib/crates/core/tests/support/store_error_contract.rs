@@ -97,6 +97,8 @@ pub fn classify(error: &StoreError) -> HandlingClass {
         | StoreError::AncestryCorrupt { .. }
         | StoreError::IdempotencyFutureVersion { .. }
         | StoreError::MmapFutureVersion { .. }
+        | StoreError::CheckpointFutureVersion { .. }
+        | StoreError::HiddenRangesFutureVersion { .. }
         | StoreError::HiddenRangesCorrupt { .. }
         | StoreError::CursorCheckpointCorrupt { .. }
         | StoreError::CursorCheckpointRegionMismatch { .. }
@@ -742,6 +744,37 @@ pub fn fail_closed_operational_cases() -> Vec<Case> {
                 "mmap index on disk is version 9",
                 "understands at most version 5",
                 "refusing to rebuild from scan",
+                "upgrade the reader",
+            ],
+        },
+        Case {
+            name: "checkpoint_future_version",
+            error: StoreError::CheckpointFutureVersion {
+                found: 9,
+                supported: 6,
+            },
+            class: HandlingClass::FailClosedOperational,
+            source_needle: None,
+            display_needles: &[
+                "checkpoint on disk is version 9",
+                "understands at most version 6",
+                "refusing to rebuild from scan",
+                "upgrade the reader",
+            ],
+        },
+        Case {
+            name: "hidden_ranges_future_version",
+            error: StoreError::HiddenRangesFutureVersion {
+                path: PathBuf::from("fixtures/data/visibility_ranges.fbv"),
+                found: 9,
+                supported: 1,
+            },
+            class: HandlingClass::FailClosedOperational,
+            source_needle: None,
+            display_needles: &[
+                "hidden-ranges metadata at",
+                "is version 9",
+                "understands at most version 1",
                 "upgrade the reader",
             ],
         },

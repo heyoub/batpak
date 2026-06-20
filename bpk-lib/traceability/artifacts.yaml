@@ -26,6 +26,14 @@
   kind: tests
   paths:
     - crates/core/tests/semantic_diff.rs
+- id: ART-LINEARIZABILITY-TESTS
+  kind: tests
+  paths:
+    - crates/core/tests/linearizability.rs
+- id: ART-COMPLEXITY-EXPONENT-TESTS
+  kind: tests
+  paths:
+    - crates/core/tests/complexity_exponent.rs
 - id: ART-DOCS-CATALOG-GATE
   kind: tool
   paths:
@@ -757,3 +765,14 @@
   kind: tests
   paths:
     - crates/core/tests
+- id: ART-DST-RECOVERY-SOURCE
+  kind: source
+  paths:
+    - crates/core/src/store/sim/fs.rs
+    - crates/core/src/store/sim/recovery.rs
+    - crates/core/src/store/platform/fs.rs
+    - crates/core/src/store/segment/mod.rs
+- id: ART-DST-RECOVERY-TEST
+  kind: tests
+  paths:
+    - crates/core/tests/dst_recovery.rs

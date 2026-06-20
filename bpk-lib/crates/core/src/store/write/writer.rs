@@ -150,10 +150,11 @@ impl WriterHandle {
             .create_dir_all(&config.data_dir)
             .map_err(StoreError::Io)?;
         let initial_segment_id = find_latest_segment_id(&config.data_dir)?.unwrap_or(0) + 1;
-        let initial_segment = Segment::<Active>::create_with_created_ns(
+        let initial_segment = Segment::<Active>::create_with_created_ns_on(
             &config.data_dir,
             initial_segment_id,
             runtime.now_wall_ns(),
+            config.fs(),
         )?;
 
         let (tx, rx) = flume::bounded::<WriterCommand>(config.writer.channel_capacity);
@@ -237,6 +238,21 @@ impl WriterHandle {
             })?;
         }
         Ok(())
+    }
+
+    /// Test-only: abandon the writer the way a power loss would — close its
+    /// command channel (so the loop ends WITHOUT a `Shutdown`-triggered drain,
+    /// footer, or final sync) and join the thread to quiescence. Consumes the
+    /// handle, dropping `tx` (the sole sender) so the writer's `rx.iter()`
+    /// terminates naturally. Used by [`super::super::Store::abandon_without_shutdown`].
+    #[cfg(feature = "dangerous-test-hooks")]
+    pub(crate) fn close_channel_and_join(self) {
+        let Self { tx, thread, .. } = self;
+        // Drop the only sender first so the writer loop's `rx.iter()` ends.
+        drop(tx);
+        if let Some(thread) = thread {
+            let _join_result = thread.join();
+        }
     }
 
     // NOTE: No send_append() method here. Store::append() and Store::append_reaction()
@@ -605,10 +621,11 @@ impl WriterState<'_> {
             },
             &self.config.fault_injector,
         )?;
-        let new_active = Segment::<Active>::create_with_created_ns(
+        let new_active = Segment::<Active>::create_with_created_ns_on(
             &self.config.data_dir,
             *self.segment_id + 1,
             self.runtime.now_wall_ns(),
+            self.config.fs(),
         )?;
         // New segment is durably present. Now flush the OLD segment's committed
         // frames while it is still pristine — before writing the footer or

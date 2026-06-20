@@ -260,3 +260,32 @@ fn wait_for_drop_shutdown_ack(rx: &flume::Receiver<Result<(), StoreError>>) {
 fn join_drop_shutdown_writer(writer: &mut WriterHandle) {
     let _join_result = writer.join();
 }
+
+#[cfg(feature = "dangerous-test-hooks")]
+impl Store<Open> {
+    /// Test-only: abandon this store the way a power loss would, WITHOUT the
+    /// clean-shutdown drain.
+    ///
+    /// A normal `drop`/`close` sends `Shutdown` to the writer, which drains the
+    /// queue, writes a SIDX footer, and fsyncs — defeating any pre-fsync crash
+    /// scenario. This hook instead disables the drop-time shutdown and quiesces
+    /// the writer by closing its command channel (NOT by sending `Shutdown`), so
+    /// the writer loop simply ends with no final sync/footer. The
+    /// write-but-unsynced tail therefore stays exactly where the durability seam
+    /// left it; the caller then drives [`crate::store::platform::fs::StoreFs::crash`]
+    /// (via the installed sim filesystem) to truncate it, modelling power loss.
+    ///
+    /// Consumes the store; reopen over the same data directory to recover.
+    pub(crate) fn abandon_without_shutdown(mut self) {
+        self.should_shutdown_on_drop = false;
+        // Take the writer handle and close its command channel WITHOUT sending
+        // Shutdown: the writer loop ends naturally (no drain, no footer, no final
+        // sync), then we join to quiescence so no thread is mid-fsync when the
+        // caller crashes the filesystem.
+        if let Some(writer) = self.writer.take() {
+            writer.close_channel_and_join();
+        }
+        // `self` (writer already taken, should_shutdown_on_drop=false) drops here
+        // as an inert handle: Drop returns immediately.
+    }
+}

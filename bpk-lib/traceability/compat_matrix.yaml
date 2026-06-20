@@ -12,10 +12,13 @@
 # gauntlet_s2_future_version_refusal) and asserts the outcome.
 #
 # Fields:
-#   format          — on-disk format the row covers. Currently: mmap-index
-#                     (index.fbati, version const MMAP_INDEX_VERSION). The driver
-#                     panics on an unknown format so a new format needs a row +
-#                     a forge arm, not a silent skip.
+#   format          — on-disk format the row covers. Today:
+#                       mmap-index        (index.fbati,            MMAP_INDEX_VERSION)
+#                       checkpoint        (index.ckpt,             CHECKPOINT_VERSION)
+#                       idempotency-index (index.idemp,            IDEMP_VERSION)
+#                       visibility-ranges (visibility_ranges.fbv,  VISIBILITY_RANGES_VERSION)
+#                     The driver panics on an unknown format so a new format needs
+#                     a row + a forge arm, not a silent skip.
 #   writer_version  — the format version stamped into the forged artifact.
 #   reader_version  — the format version the live binary supports. MUST equal the
 #                     live const for the self-row; the gate cross-checks this so a
@@ -24,15 +27,20 @@
 #   expected_outcome — one of:
 #                       OpensOK
 #                       CanonicalRefusal:MmapFutureVersion
+#                       CanonicalRefusal:CheckpointFutureVersion
+#                       CanonicalRefusal:IdempotencyFutureVersion
+#                       CanonicalRefusal:HiddenRangesFutureVersion
 #   fixture_path    — relative-to-crate descriptor of the forged artifact. Forged
-#                     on the fly from a seeded store (kept tiny: 4 events), so the
-#                     path is the in-temp artifact name, not a checked-in blob.
+#                     on the fly from a seeded store (kept tiny: 4 events / a
+#                     cancelled fence), so the path is the in-temp artifact name,
+#                     not a checked-in blob.
 #
-# DEFERRED ROWS (logged, not yet seeded — see GAUNTLET_ISSUES.md):
-#   - idempotency-index (index.idemp / IdempotencyFutureVersion)
-#   - visibility-ranges (visibility_ranges.fbv / HiddenRangesCorrupt)
-#   - checkpoint (index.ckpt) — needs a *FutureVersion typed error first (Item 4.1)
-#   - segment (.fbat / CorruptSegment future-version branch)
+# DEFERRED FORMATS (honest skip — see GAUNTLET_ISSUES.md):
+#   - segment (.fbat): its version field is msgpack-encoded inside the header
+#     (not a fixed byte offset), so the shared version-field forge does not
+#     apply, AND a future-version segment already fails closed via
+#     `CorruptSegment` with no silent-degrade path (segments are the durable
+#     bottom layer, never rebuilt from elsewhere). No new refusal was needed.
 
 rows:
   # Self-row: a reader opens an artifact written at its own live version. This
@@ -54,3 +62,59 @@ rows:
     feature_bits: 0
     expected_outcome: CanonicalRefusal:MmapFutureVersion
     fixture_path: index.fbati
+
+  # ── checkpoint (index.ckpt) ──────────────────────────────────────────────
+  # Backward (new reader / own-version artifact): opens through the checkpoint
+  # cold-start fast path.
+  - format: checkpoint
+    writer_version: 6
+    reader_version: 6
+    feature_bits: 0
+    expected_outcome: OpensOK
+    fixture_path: index.ckpt
+  # Forward (old reader / future artifact): a future-version checkpoint is a
+  # canonical refusal propagated out of cold-start, NOT a silent rebuild. Before
+  # the cure the planner fell through to rebuild-from-scan (silent degrade);
+  # this row reds if that regresses.
+  - format: checkpoint
+    writer_version: 7
+    reader_version: 6
+    feature_bits: 0
+    expected_outcome: CanonicalRefusal:CheckpointFutureVersion
+    fixture_path: index.ckpt
+
+  # ── idempotency-index (index.idemp) ──────────────────────────────────────
+  # Backward: own-version durable idempotency sidecar restores on open.
+  - format: idempotency-index
+    writer_version: 1
+    reader_version: 1
+    feature_bits: 0
+    expected_outcome: OpensOK
+    fixture_path: index.idemp
+  # Forward: a future-version sidecar is a hard typed refusal — a reader can
+  # never reconstruct a durable-dedup format it predates (silently degrading to
+  # empty would lose cross-compaction dedup correctness).
+  - format: idempotency-index
+    writer_version: 2
+    reader_version: 1
+    feature_bits: 0
+    expected_outcome: CanonicalRefusal:IdempotencyFutureVersion
+    fixture_path: index.idemp
+
+  # ── visibility-ranges (visibility_ranges.fbv) ────────────────────────────
+  # Backward: own-version cancelled-ranges metadata restores on open.
+  - format: visibility-ranges
+    writer_version: 1
+    reader_version: 1
+    feature_bits: 0
+    expected_outcome: OpensOK
+    fixture_path: visibility_ranges.fbv
+  # Forward: a future-version artifact is a DISTINCT canonical refusal (not the
+  # remediable HiddenRangesCorrupt path) — treating it as generic corruption or
+  # silently empty would risk resurrecting cancelled events.
+  - format: visibility-ranges
+    writer_version: 2
+    reader_version: 1
+    feature_bits: 0
+    expected_outcome: CanonicalRefusal:HiddenRangesFutureVersion
+    fixture_path: visibility_ranges.fbv

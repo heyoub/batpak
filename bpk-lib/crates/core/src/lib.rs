@@ -132,6 +132,9 @@ pub mod __fuzz;
 #[cfg(feature = "dangerous-test-hooks")]
 #[doc(hidden)]
 pub mod __sim {
+    pub use crate::store::sim::recovery::{
+        recovery_replay_seed, run_seeded_recovery, RecoveryOutcomePublic,
+    };
     pub use crate::store::sim::{replay_seed, run_seeded_workload};
 }
 

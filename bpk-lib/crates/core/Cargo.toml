@@ -90,6 +90,9 @@ serial_test = { version = "3.5.0", features = ["file_locks"] }
 loom = "0.7"
 tracing-subscriber = { version = "0.3", features = ["fmt", "std"] }
 yaml_serde = "0.10.4"
+# Pinned to the exact line the crate uses so a forged on-disk artifact in the
+# compat-matrix gate is byte-identical to what the store would write.
+rmp-serde = "=1.3.1"
 
 [build-dependencies]
 serde = { version = "1", features = ["derive"] }

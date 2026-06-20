@@ -109,9 +109,13 @@ fn shutdown_drain_limit_is_exclusive_upper_bound() {
     let subscribers = SubscriberList::new();
     let reactor_subscribers = ReactorSubscriberList::new();
     let watermark_handle = WatermarkState::handle(Arc::new(SystemClock::new()));
-    let segment =
-        Segment::<Active>::create_with_created_ns(&config.data_dir, 1, validated_cfg.now_wall_ns())
-            .expect("create active segment");
+    let segment = Segment::<Active>::create_with_created_ns_on(
+        &config.data_dir,
+        1,
+        validated_cfg.now_wall_ns(),
+        config.fs(),
+    )
+    .expect("create active segment");
     let (tx, rx) = flume::bounded(3);
     let (shutdown_tx, shutdown_rx) = flume::bounded(1);
     let (first_sync_tx, first_sync_rx) = flume::bounded(1);
@@ -183,9 +187,13 @@ fn shutdown_drain_limit_zero_drains_no_commands_behind_shutdown() {
     let subscribers = SubscriberList::new();
     let reactor_subscribers = ReactorSubscriberList::new();
     let watermark_handle = WatermarkState::handle(Arc::new(SystemClock::new()));
-    let segment =
-        Segment::<Active>::create_with_created_ns(&config.data_dir, 1, validated_cfg.now_wall_ns())
-            .expect("create active segment");
+    let segment = Segment::<Active>::create_with_created_ns_on(
+        &config.data_dir,
+        1,
+        validated_cfg.now_wall_ns(),
+        config.fs(),
+    )
+    .expect("create active segment");
     let (tx, rx) = flume::bounded(2);
     let (shutdown_tx, shutdown_rx) = flume::bounded(1);
     let (sync_tx, sync_rx) = flume::bounded(1);

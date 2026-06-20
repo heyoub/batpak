@@ -32,15 +32,17 @@
 //! are routed — see GAUNTLET_ISSUES.md.
 
 pub(crate) mod clock;
+pub(crate) mod fault_model;
 pub(crate) mod fs;
 pub(crate) mod invariants;
+pub(crate) mod recovery;
 pub(crate) mod scheduler;
 pub(crate) mod workload;
 
 use std::sync::Arc;
 
 pub(crate) use clock::SimClock;
-pub(crate) use fs::SimFs;
+pub(crate) use fault_model::InMemFaultFs;
 pub(crate) use scheduler::SimScheduler;
 
 /// Read the replay seed from the `BATPAK_SEED` environment variable.
@@ -70,8 +72,9 @@ pub(crate) struct Sim {
     pub(crate) clock: Arc<SimClock>,
     /// Cooperative scheduler that runs spawned bodies on the calling thread.
     pub(crate) scheduler: Arc<SimScheduler>,
-    /// In-memory, fault-injecting filesystem keyed off the same seed.
-    pub(crate) fs: Arc<SimFs>,
+    /// In-memory, fault-injecting model keyed off the same seed (model-only
+    /// determinism witness; the real-`Store` composition uses [`fs::SimFs`]).
+    pub(crate) fs: Arc<InMemFaultFs>,
 }
 
 impl Sim {
@@ -86,7 +89,7 @@ impl Sim {
             // The fs PRNG is keyed off a stable, seed-derived sub-stream so
             // that changing the workload PRNG draw count never perturbs which
             // faults fire — each backend owns an independent sub-seed.
-            fs: Arc::new(SimFs::new(seed ^ 0x5F5F_5F5F_5F5F_5F5F)),
+            fs: Arc::new(InMemFaultFs::new(seed ^ 0x5F5F_5F5F_5F5F_5F5F)),
         }
     }
 

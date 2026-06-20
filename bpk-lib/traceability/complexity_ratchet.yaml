@@ -75,10 +75,6 @@
   lines: 84
   nesting: 5
   cyclomatic: 21
-- key: "crates/core/src/store/lifecycle.rs::materialize_compacted_segment"
-  lines: 47
-  nesting: 4
-  cyclomatic: 22
 - key: "crates/core/src/store/lifecycle.rs::compact"
   lines: 167
   nesting: 3

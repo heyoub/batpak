@@ -295,6 +295,31 @@ fn write_scanned_entry(
     Ok(())
 }
 
+/// If a sealed source shares the merged segment's id, move it aside to a
+/// `.compact-src` temp path so the new merged segment can claim the canonical
+/// name without clobbering its own input. Records the temp path so the caller
+/// can clean it up after the swap. Extracted from
+/// [`materialize_compacted_segment`] to keep that fn within its complexity budget
+/// once the segment-create call carries the `StoreFs` seam argument.
+fn relocate_merged_source_if_present(
+    store: &Store<Open>,
+    sealed: &mut [(u64, std::path::PathBuf)],
+    merged_id: u64,
+    compact_source_path: &mut Option<std::path::PathBuf>,
+) -> Result<(), StoreError> {
+    if let Some((_, source_path)) = sealed.iter_mut().find(|(seg_id, _)| *seg_id == merged_id) {
+        let temp_source_path = store.config.data_dir.join(format!(
+            "{merged_id:06}.{}.compact-src",
+            segment::SEGMENT_EXTENSION
+        ));
+        remove_file_if_present(&temp_source_path)?;
+        platform_fs::rename(&*source_path, &temp_source_path).map_err(StoreError::Io)?;
+        *source_path = temp_source_path.clone();
+        *compact_source_path = Some(temp_source_path);
+    }
+    Ok(())
+}
+
 fn materialize_compacted_segment(
     store: &Store<Open>,
     strategy: &CompactionStrategy,
@@ -307,22 +332,14 @@ fn materialize_compacted_segment(
         store.reader.evict_segment(*seg_id);
     }
 
-    if let Some((_, source_path)) = sealed.iter_mut().find(|(seg_id, _)| *seg_id == merged_id) {
-        let temp_source_path = store.config.data_dir.join(format!(
-            "{merged_id:06}.{}.compact-src",
-            segment::SEGMENT_EXTENSION
-        ));
-        remove_file_if_present(&temp_source_path)?;
-        platform_fs::rename(&*source_path, &temp_source_path).map_err(StoreError::Io)?;
-        *source_path = temp_source_path.clone();
-        *compact_source_path = Some(temp_source_path);
-    }
+    relocate_merged_source_if_present(store, sealed, merged_id, compact_source_path)?;
 
     remove_file_if_present(merged_path)?;
-    let mut merged_segment = segment::Segment::<Active>::create_with_created_ns(
+    let mut merged_segment = segment::Segment::<Active>::create_with_created_ns_on(
         &store.config.data_dir,
         merged_id,
         store.runtime.now_wall_ns(),
+        store.config.fs(),
     )?;
     match strategy {
         CompactionStrategy::Merge => {

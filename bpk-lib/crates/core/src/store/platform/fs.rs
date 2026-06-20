@@ -128,6 +128,19 @@ pub(crate) fn copy(from: &Path, to: &Path) -> io::Result<u64> {
     std::fs::copy(from, to)
 }
 
+/// Truncate (or extend) the file at `path` to exactly `len` bytes.
+///
+/// Used by the deterministic-simulation filesystem ([`super::super::sim::fs::SimFs`])
+/// to model a crash: each tracked file is truncated to its last durable length,
+/// discarding the write-but-unsynced tail. Lives here, under the platform
+/// boundary, so the raw file-open + `set_len` target contact stays out of the
+/// store-runtime code the structural gate guards.
+#[cfg(feature = "dangerous-test-hooks")]
+pub(crate) fn truncate_file_to(path: &Path, len: u64) -> io::Result<()> {
+    let file = std::fs::OpenOptions::new().write(true).open(path)?;
+    file.set_len(len)
+}
+
 #[derive(Debug)]
 pub(crate) enum PositionedReadError {
     Io(std::io::Error),
@@ -213,6 +226,37 @@ pub(crate) trait StoreFs: Send + Sync {
     /// Create a directory and all missing parents. Mirrors
     /// [`std::fs::create_dir_all`].
     fn create_dir_all(&self, path: &Path) -> io::Result<()>;
+
+    /// Create-new the segment/data file at `path`, returning the open handle.
+    ///
+    /// `path` is the LOGICAL file path the caller will hold (e.g. a segment
+    /// `.fbat`); a fault-injecting backend keys its durable-length model off it
+    /// so a later [`StoreFs::crash`] can truncate the file to its last fsynced
+    /// length. Mirrors [`create_new_file`].
+    fn create_new_file(&self, path: &Path) -> Result<File, StoreError>;
+
+    /// Fsync the contents of `file` (backing `path`) with `mode`.
+    ///
+    /// This is the per-event / per-rotation durability boundary. A backend may
+    /// honor it (advancing the durable length recorded for `path`) or, under its
+    /// seeded fault schedule, drop it (leaving the most recent bytes lost on the
+    /// next [`StoreFs::crash`]). `path` lets the backend key its durable model.
+    /// Mirrors [`super::sync::sync_file_with_mode`].
+    fn sync_file_with_mode(
+        &self,
+        file: &File,
+        path: &Path,
+        mode: &crate::store::SyncMode,
+    ) -> Result<(), StoreError>;
+
+    /// Fsync the contents of `file` (backing `path`) unconditionally (`sync_all`
+    /// semantics). Used on segment create where the header bytes must be durable
+    /// before the directory entry. Mirrors [`super::sync::sync_file_all_io`].
+    fn sync_file_all(&self, file: &File, path: &Path) -> io::Result<()>;
+
+    /// Fsync the directory entry for `path`'s parent so a freshly-created file's
+    /// name is durable. Mirrors [`super::sync::sync_parent_dir`].
+    fn sync_parent_dir(&self, path: &Path) -> Result<(), StoreError>;
 }
 
 /// Production [`StoreFs`]: every method delegates to the existing
@@ -228,6 +272,28 @@ impl StoreFs for RealFs {
 
     fn create_dir_all(&self, path: &Path) -> io::Result<()> {
         create_dir_all(path)
+    }
+
+    fn create_new_file(&self, path: &Path) -> Result<File, StoreError> {
+        create_new_file(path)
+    }
+
+    fn sync_file_with_mode(
+        &self,
+        file: &File,
+        _path: &Path,
+        mode: &crate::store::SyncMode,
+    ) -> Result<(), StoreError> {
+        // RealFs ignores `path`: the real OS keys durability off the file handle.
+        crate::store::platform::sync::sync_file_with_mode(file, mode)
+    }
+
+    fn sync_file_all(&self, file: &File, _path: &Path) -> io::Result<()> {
+        crate::store::platform::sync::sync_file_all_io(file)
+    }
+
+    fn sync_parent_dir(&self, path: &Path) -> Result<(), StoreError> {
+        crate::store::platform::sync::sync_parent_dir(path)
     }
 }
 
@@ -279,6 +345,24 @@ mod tests {
         assert!(
             names.iter().any(|n| n == "leaf.bin") && names.iter().any(|n| n == "a"),
             "PROPERTY: RealFs::read_dir must list directory entries like the platform free fn"
+        );
+
+        // create_new_file + the sync seam: create a real file, write to it,
+        // fsync via every routed mode, and fsync the parent dir — proving the
+        // RealFs durability methods delegate to the platform free fns and leave
+        // the real bytes durably on disk.
+        use std::io::Write;
+        let seg = dir.path().join("seg.bin");
+        let mut file = fs.create_new_file(&seg)?;
+        file.write_all(b"durable-bytes")?;
+        fs.sync_file_all(&file, &seg)?;
+        fs.sync_file_with_mode(&file, &seg, &crate::store::SyncMode::SyncAll)?;
+        fs.sync_file_with_mode(&file, &seg, &crate::store::SyncMode::SyncData)?;
+        fs.sync_parent_dir(&seg)?;
+        assert_eq!(
+            std::fs::metadata(&seg)?.len(),
+            b"durable-bytes".len() as u64,
+            "PROPERTY: RealFs durability methods persist the real bytes like the platform free fns"
         );
         Ok(())
     }

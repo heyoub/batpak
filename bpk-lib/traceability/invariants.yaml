@@ -15,7 +15,8 @@
     - ART-IDEMPOTENCY-DURABLE-SOURCE
     - ART-IDEMPOTENCY-DURABLE-TESTS
 - id: INV-ONDISK-FORWARD-COMPAT-CANONICAL
-  statement: Every on-disk format declared in the compat matrix opens or fails with exactly one canonical typed error per (writer_version, reader_version) pair - never silent corruption and never a silent rebuild-from-scan downgrade. A reader opening an artifact written at its own live version succeeds (the OpensOK self-row), and an artifact written at a strictly-newer version is a canonical typed refusal such as StoreError MmapFutureVersion. The matrix is the live contract, so a bump to an on-disk version const with no matching matrix row is caught because the self-row reader_version is cross-checked against the live supported version.
+  statement: Every on-disk format declared in the compat matrix opens or fails with exactly one canonical typed error per (writer_version, reader_version) pair - never silent corruption and never a silent rebuild-from-scan downgrade. A reader opening an artifact written at its own live version succeeds (the OpensOK self-row), and an artifact written at a strictly-newer version is a canonical typed refusal. The governed formats and their future-version refusals are - mmap-index (index.fbati, StoreError MmapFutureVersion), checkpoint (index.ckpt, StoreError CheckpointFutureVersion), idempotency-index (index.idemp, StoreError IdempotencyFutureVersion), and visibility-ranges (visibility_ranges.fbv, StoreError HiddenRangesFutureVersion); each refusal is propagated out of cold-start rather than degrading to a scan, while corrupt or older artifacts keep their graceful-rebuild path. The matrix is the live contract, so a bump to an on-disk version const with no matching matrix row is caught because the self-row reader_version is cross-checked against the live supported version. The segment/.fbat format is intentionally excluded - its version is msgpack-encoded (no fixed-offset forge) and a future-version segment already fails closed via CorruptSegment with no silent-degrade path.
+  witness_test: crates/core/tests/compat_matrix.rs::compat_matrix_rows_match_declared_outcomes
   artifacts:
     - ART-COMPAT-MATRIX
 - id: INV-SYNCBAT-DISPATCH-RECEIPTS
@@ -501,6 +502,20 @@
   witness_test: crates/core/tests/semantic_diff.rs::equivalence_claiming_configs_agree_on_visible_truth
   artifacts:
     - ART-SEMANTIC-DIFF-TESTS
+- id: INV-LINEARIZABILITY-SINGLE-WRITER
+  statement: >-
+    Because batpak commits through a single writer behind a gated visibility watermark,
+    the ordered visible history a reader returns is the single-writer linearization order:
+    a dense, strictly increasing global_sequence prefix (no gap below the visible
+    high-water and no premature visibility), reads are monotonic (a re-query never drops
+    or reorders a previously-visible event), two independent readers of the same store
+    converge on identical history, and there is no real-time/sequence inversion (if an
+    append returns before another is issued, its global_sequence is the smaller one); a
+    seeded operation stream against a real Store under a fixed clock witnesses this, and a
+    pure checker rejects inverted/gapped/duplicate histories so the property is not vacuous.
+  witness_test: crates/core/tests/linearizability.rs::live_store_history_is_linearizable
+  artifacts:
+    - ART-LINEARIZABILITY-TESTS
 - id: INV-DOCS-CATALOG-VIEW-CURRENT
   statement: >-
     INVARIANTS.md is a generated VIEW of traceability/invariants.yaml: the auto-generated catalog
@@ -531,3 +546,30 @@
   artifacts:
     - ART-REPO-IR-SOURCE
   witness_test: tools/integrity/src/repo_ir_tests.rs::run_fused_equals_run_separate
+- id: INV-DST-RECOVERY-LEGAL
+  statement: >-
+    A real Store opened over the fault-injecting SimFs filesystem backend, driven through the real
+    public append/append_batch/sync API, crashed at the durability boundary (writer abandoned without
+    a clean shutdown, then the unsynced tail truncated via SimFs::crash), and reopened over the
+    persisted (truncated) tree must recover a LEGAL state: a prefix of the appended op-log (no
+    invented or undead events), containing every acknowledged-durable commit (nothing lost that an
+    honored sync confirmed durable), with an intact hash chain across the recovered visible events;
+    and the same BATPAK_SEED must recover the identical state and op-trace digest (determinism). A
+    typed corruption refusal on reopen is a legal recovery outcome; an untyped failure is not.
+  artifacts:
+    - ART-DST-RECOVERY-SOURCE
+    - ART-DST-RECOVERY-TEST
+  witness_test: crates/core/tests/dst_recovery.rs::dst_recovery_is_legal_and_deterministic
+- id: INV-COMPLEXITY-EXPONENT-BOUNDED
+  statement: >-
+    A real Store read operation's cost does not silently regress into a worse asymptotic class: the
+    ALLOCATION COUNT (measured by the process-wide CountingAlloc, never wall-clock nanoseconds) of
+    Store::query(Region::all()) is sampled at geometrically increasing input sizes, a least-squares
+    slope of log(cost) vs log(n) is fit, and that fitted complexity exponent must stay under a
+    linear-ish budget; additionally the worst observed per-op allocation COUNT over the declared input
+    distribution stays under a fixed count-based WCET budget. The slope is a ratio of logs and so is
+    hardware-independent and deterministic, and the gate is anti-vacuous because a planted quadratic
+    dataset is rejected by the same pure check_complexity logic.
+  artifacts:
+    - ART-COMPLEXITY-EXPONENT-TESTS
+  witness_test: crates/core/tests/complexity_exponent.rs::query_complexity_exponent_and_wcet_are_bounded

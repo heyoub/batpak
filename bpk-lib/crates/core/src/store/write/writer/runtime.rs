@@ -161,22 +161,38 @@ pub(super) fn writer_thread_main(
                         return;
                     }
                 };
-                segment = match Segment::<Active>::create_with_created_ns(
-                    &runtime.config.data_dir,
-                    seg_id,
-                    runtime.validated_cfg.now_wall_ns(),
-                ) {
-                    Ok(s) => s,
-                    Err(e) => {
-                        // Terminal exit: cannot resume the writer — poison the gate.
-                        runtime.watermark_handle.mark_writer_crashed();
-                        tracing::error!(
-                            "writer restart failed — cannot create segment: {e}. Thread exiting."
-                        );
-                        return;
-                    }
+                segment = match recreate_restart_segment(&runtime, seg_id) {
+                    Some(s) => s,
+                    None => return,
                 };
             }
+        }
+    }
+}
+
+/// Recreate the active segment after a writer restart, routing the create+fsync
+/// through the configured [`StoreFs`] backend. On failure it poisons the
+/// durability gate and logs the terminal exit, returning `None` so the caller
+/// (the restart loop in [`writer_thread_main`]) returns and the thread exits.
+/// Extracted to keep `writer_thread_main` within its complexity-ratchet budget
+/// once the create call carries the fs-seam argument.
+///
+/// [`StoreFs`]: crate::store::platform::fs::StoreFs
+fn recreate_restart_segment(runtime: &WriterRuntime<'_>, seg_id: u64) -> Option<Segment<Active>> {
+    match Segment::<Active>::create_with_created_ns_on(
+        &runtime.config.data_dir,
+        seg_id,
+        runtime.validated_cfg.now_wall_ns(),
+        runtime.config.fs(),
+    ) {
+        Ok(segment) => Some(segment),
+        Err(error) => {
+            // Terminal exit: cannot resume the writer — poison the gate.
+            runtime.watermark_handle.mark_writer_crashed();
+            tracing::error!(
+                "writer restart failed — cannot create segment: {error}. Thread exiting."
+            );
+            None
         }
     }
 }

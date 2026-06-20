@@ -147,6 +147,13 @@ impl<'a> RestorePlanner<'a> {
             )?;
             let checkpoint_load = super::checkpoint::load_checkpoint_snapshot(self.data_dir);
             snapshot_loads.record_checkpoint(&checkpoint_load);
+            // A future-version checkpoint is a CANONICAL TYPED REFUSAL, NOT a
+            // silent rebuild-from-scan — same stance as the mmap path above. A
+            // corrupt or older checkpoint (`Invalid`) still falls through to the
+            // safe rebuild below. justifies: INV-ONDISK-FORWARD-COMPAT-CANONICAL
+            if let super::FileLoad::FutureVersion { found, supported } = checkpoint_load {
+                return Err(StoreError::CheckpointFutureVersion { found, supported });
+            }
             if let super::FileLoad::Loaded(snapshot) = checkpoint_load {
                 return self.build_snapshot_plan(
                     RestoreSource::Checkpoint,

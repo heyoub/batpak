@@ -167,6 +167,35 @@ pub enum StoreError {
         /// The maximum version this binary understands.
         supported: u16,
     },
+    /// The on-disk checkpoint (`index.ckpt`) declares a format version strictly
+    /// newer than this binary understands. Unlike a corrupt or older checkpoint —
+    /// which the cold-start flow safely rebuilds from the durable segments — a
+    /// future-version checkpoint is a hard, canonical refusal: a future writer
+    /// may have written a snapshot this reader cannot interpret, so silently
+    /// rebuilding from scan would risk a silent downgrade rather than a legally
+    /// reachable state. Mirrors [`MmapFutureVersion`]. Upgrade the reader.
+    CheckpointFutureVersion {
+        /// Version stamped on the on-disk file.
+        found: u16,
+        /// The maximum version this binary understands.
+        supported: u16,
+    },
+    /// The on-disk hidden-ranges metadata (`visibility_ranges.fbv`) declares a
+    /// format version strictly newer than this binary understands. Unlike a
+    /// corrupt or older artifact — surfaced as [`HiddenRangesCorrupt`] for the
+    /// caller to remediate — a future-version artifact is a distinct canonical
+    /// refusal: a future writer may have recorded cancelled ranges in a layout
+    /// this reader cannot interpret, so treating it as remediable corruption (or
+    /// silently empty) would risk resurrecting cancelled events. Mirrors
+    /// [`MmapFutureVersion`]. Upgrade the reader.
+    HiddenRangesFutureVersion {
+        /// Path of the future-version metadata file.
+        path: PathBuf,
+        /// Version stamped on the on-disk file.
+        found: u16,
+        /// The maximum version this binary understands.
+        supported: u16,
+    },
     /// A new keyed append was refused because the durable idempotency store is
     /// at its soft cap and the configured `OverflowPolicy` is `FailClosed`
     /// (or `Backpressure`, which is treated as fail-closed). Existing
@@ -353,6 +382,100 @@ pub enum StoreError {
     },
 }
 
+impl StoreError {
+    /// Shared `Display` body for the on-disk future-version refusals. Each format
+    /// renders the same "on disk is version N but this binary understands at most
+    /// version M; upgrade the reader" shape with a format-specific subject. Kept
+    /// out of the main `Display::fmt` match so adding a per-format refusal does
+    /// not grow that function past its complexity ratchet.
+    fn fmt_future_version(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::IdempotencyFutureVersion { stored, current } => write!(
+                f,
+                "durable idempotency store on disk is version {stored} but this binary understands \
+                 at most version {current}; upgrade the reader"
+            ),
+            Self::MmapFutureVersion { found, supported } => write!(
+                f,
+                "mmap index on disk is version {found} but this binary understands at most version \
+                 {supported}; refusing to rebuild from scan (a future writer may have written data \
+                 this reader cannot interpret); upgrade the reader"
+            ),
+            Self::CheckpointFutureVersion { found, supported } => write!(
+                f,
+                "checkpoint on disk is version {found} but this binary understands at most version \
+                 {supported}; refusing to rebuild from scan (a future writer may have written a \
+                 snapshot this reader cannot interpret); upgrade the reader"
+            ),
+            Self::HiddenRangesFutureVersion {
+                path,
+                found,
+                supported,
+            } => write!(
+                f,
+                "hidden-ranges metadata at {} is version {found} but this binary understands at \
+                 most version {supported}; refusing to open (a future writer may have recorded \
+                 cancelled ranges this reader cannot interpret); upgrade the reader",
+                path.display()
+            ),
+            // Reached only from the four future-version arms of `Display::fmt`.
+            // The remaining variants are listed explicitly (not wildcarded) so a
+            // newly-added variant trips a compile error here, and return the
+            // empty render they can never actually produce on this path.
+            // justifies: INV-ONDISK-FORWARD-COMPAT-CANONICAL
+            Self::Io(_)
+            | Self::StoreLocked { .. }
+            | Self::Coordinate(_)
+            | Self::CheckpointId(_)
+            | Self::Serialization(_)
+            | Self::CrcMismatch { .. }
+            | Self::CorruptSegment { .. }
+            | Self::NotFound(_)
+            | Self::SequenceMismatch { .. }
+            | Self::WriterCrashed
+            | Self::WaitTimeout { .. }
+            | Self::CacheFailed(_)
+            | Self::SequenceGateViolation { .. }
+            | Self::Configuration(_)
+            | Self::PlatformProfileInvalid { .. }
+            | Self::PlatformProfileMismatch { .. }
+            | Self::PlatformAdmissionFailed { .. }
+            | Self::EventPayloadRegistry(_)
+            | Self::IdempotencyRequired
+            | Self::VisibilityFenceActive
+            | Self::VisibilityFenceNotActive
+            | Self::VisibilityFenceCancelled
+            | Self::BatchFailed { .. }
+            | Self::BatchSyncFailed { .. }
+            | Self::IdempotencyPartialBatch { .. }
+            | Self::IdempotencyOverflowFailClosed { .. }
+            | Self::InvalidPayloadVersion { .. }
+            | Self::CorruptFrame { .. }
+            | Self::SegmentTooManyEntries { .. }
+            | Self::DataDirMalformed { .. }
+            | Self::AncestryCorrupt { .. }
+            | Self::RangeMalformed { .. }
+            | Self::InvalidCoordinate { .. }
+            | Self::ReservedKind { .. }
+            | Self::InvalidCausation { .. }
+            | Self::InvalidCommitMetadata { .. }
+            | Self::CoordinateNulByte
+            | Self::CoordinatePathTraversal
+            | Self::CoordinateControlChar
+            | Self::HiddenRangesCorrupt { .. }
+            | Self::BatchItemTooLarge { .. }
+            | Self::EntityClockOverflow { .. }
+            | Self::InvalidClock { .. }
+            | Self::CheckpointWriteFailed { .. }
+            | Self::CursorCheckpointCorrupt { .. }
+            | Self::CursorCheckpointRegionMismatch { .. }
+            | Self::InvariantViolation { .. } => Ok(()),
+            #[cfg(feature = "dangerous-test-hooks")]
+            Self::FaultInjected(_) => Ok(()),
+        }
+    }
+}
+
 impl std::fmt::Display for StoreError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -447,17 +570,13 @@ impl std::fmt::Display for StoreError {
             Self::IdempotencyPartialBatch { reason } => {
                 write!(f, "batch rejected: {reason}")
             }
-            Self::IdempotencyFutureVersion { stored, current } => write!(
-                f,
-                "durable idempotency store on disk is version {stored} but this binary understands \
-                 at most version {current}; upgrade the reader"
-            ),
-            Self::MmapFutureVersion { found, supported } => write!(
-                f,
-                "mmap index on disk is version {found} but this binary understands at most version \
-                 {supported}; refusing to rebuild from scan (a future writer may have written data \
-                 this reader cannot interpret); upgrade the reader"
-            ),
+            // All four on-disk future-version refusals share one Display shape;
+            // delegate to a helper so this match stays within its complexity
+            // ratchet rather than growing an arm per format.
+            Self::IdempotencyFutureVersion { .. }
+            | Self::MmapFutureVersion { .. }
+            | Self::CheckpointFutureVersion { .. }
+            | Self::HiddenRangesFutureVersion { .. } => self.fmt_future_version(f),
             Self::IdempotencyOverflowFailClosed { len, max_keys } => write!(
                 f,
                 "durable idempotency store at soft cap ({len}/{max_keys}); new keyed append \
@@ -604,6 +723,8 @@ impl std::error::Error for StoreError {
             | Self::IdempotencyPartialBatch { .. }
             | Self::IdempotencyFutureVersion { .. }
             | Self::MmapFutureVersion { .. }
+            | Self::CheckpointFutureVersion { .. }
+            | Self::HiddenRangesFutureVersion { .. }
             | Self::IdempotencyOverflowFailClosed { .. }
             | Self::InvalidPayloadVersion { .. }
             | Self::CorruptFrame { .. }

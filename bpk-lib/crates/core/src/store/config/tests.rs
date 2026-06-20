@@ -300,6 +300,23 @@ fn with_fs_installs_custom_filesystem_backend() {
             self.created.store(true, Ordering::Release);
             self.inner.create_dir_all(path)
         }
+        fn create_new_file(&self, path: &Path) -> Result<std::fs::File, crate::store::StoreError> {
+            self.inner.create_new_file(path)
+        }
+        fn sync_file_with_mode(
+            &self,
+            file: &std::fs::File,
+            path: &Path,
+            mode: &crate::store::SyncMode,
+        ) -> Result<(), crate::store::StoreError> {
+            self.inner.sync_file_with_mode(file, path, mode)
+        }
+        fn sync_file_all(&self, file: &std::fs::File, path: &Path) -> std::io::Result<()> {
+            self.inner.sync_file_all(file, path)
+        }
+        fn sync_parent_dir(&self, path: &Path) -> Result<(), crate::store::StoreError> {
+            self.inner.sync_parent_dir(path)
+        }
     }
 
     let created = Arc::new(AtomicBool::new(false));
