@@ -468,3 +468,11 @@
     - ART-STORE-PROJECTION
     - ART-STORE-MOD
     - ART-DX-DOCS
+- id: INV-WORKSPACE-DAG-ACYCLIC
+  statement: >-
+    The intra-workspace crate dependency graph is a directed acyclic graph; the triangulation gate
+    cross-checks two independent edge derivations (cargo-metadata path dependencies and a direct
+    manifest scan) and fails on either an inter-oracle disagreement or an agreed dependency cycle,
+    so layering and incremental builds are never broken by a reverse or circular crate edge.
+  artifacts:
+    - ART-TRIANGULATION-SOURCE

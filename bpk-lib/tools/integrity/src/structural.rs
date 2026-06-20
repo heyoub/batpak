@@ -74,6 +74,17 @@ pub(crate) fn run() -> Result<()> {
         Ok(crate::receipts::GateWork::new(files, files.max(1), inputs))
     })?;
 
+    // triangulation: cross-oracle check of non-type facts (GAUNTLET-TRIANGULATION).
+    // The wired fact is workspace crate-graph acyclicity, cross-checked by two
+    // independent graph derivations; a disagreement OR an agreed cycle fails.
+    crate::receipts::run_gate("triangulation", || {
+        crate::triangulation::check(&repo_root)?;
+        let mut inputs: BTreeSet<PathBuf> = workspace_manifest_inputs(&repo_root);
+        let files = inputs.len().max(1);
+        inputs.insert(repo_root.join("Cargo.toml"));
+        Ok(crate::receipts::GateWork::new(files, files, inputs))
+    })?;
+
     // assurance-level-check: receipt over the manifest + the production files it
     // resolves to assurance levels.
     crate::receipts::run_gate("assurance-level-check", || {
@@ -114,6 +125,31 @@ fn ci_parity_inputs(repo_root: &Path) -> BTreeSet<PathBuf> {
         let path = repo_root.join(rel);
         if path.exists() {
             inputs.insert(path);
+        }
+    }
+    inputs
+}
+
+/// The member `Cargo.toml` manifests the triangulation crate-graph oracles read
+/// (every workspace member's manifest, plus the root). Used to give the
+/// triangulation receipt a real `files_examined` count + `inputs_hash`.
+fn workspace_manifest_inputs(repo_root: &Path) -> BTreeSet<PathBuf> {
+    let mut inputs = BTreeSet::new();
+    for rel in [
+        "crates/core",
+        "crates/syncbat",
+        "crates/netbat",
+        "crates/hbat",
+        "crates/macros",
+        "crates/macros-support",
+        "crates/syncbat-macros",
+        "crates/bench-support",
+        "tools/integrity",
+        "tools/xtask",
+    ] {
+        let manifest = repo_root.join(rel).join("Cargo.toml");
+        if manifest.exists() {
+            inputs.insert(manifest);
         }
     }
     inputs

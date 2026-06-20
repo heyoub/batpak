@@ -16,6 +16,12 @@
   paths:
     - tools/integrity/src/main.rs
     - tools/integrity/src/architecture_lints.rs
+- id: ART-TRIANGULATION-SOURCE
+  kind: tool
+  paths:
+    - tools/integrity/src/triangulation.rs
+    - tools/integrity/src/triangulation_tests.rs
+    - tools/integrity/src/structural.rs
 - id: ART-TRACEABILITY
   kind: registry
   paths:

@@ -798,9 +798,11 @@
     - INV-COORDINATE-IS-LOGICAL-STREAM
     - INV-CROSS-DIRECTORY-CONSISTENCY-PRODUCT-OWNED
     - INV-CONTEXT-VIEWS-DERIVED-FROM-HISTORY
+    - INV-WORKSPACE-DAG-ACYCLIC
   locations:
     - bpk-lib/tools/integrity/src/invariant_bridge.rs
     - bpk-lib/tools/integrity/src/structural.rs
+    - bpk-lib/tools/integrity/src/triangulation.rs
     - bpk-lib/tools/integrity/src/ci_parity.rs
     - bpk-lib/tools/integrity/src/architecture_lints/syncbat_boundary.rs
     - bpk-lib/tools/xtask/src/main.rs
@@ -809,6 +811,7 @@
     - bpk-lib/crates/core/tests/wire_format.rs
   commands:
     - cargo xtask structural
+    - cargo xtask triangulation
     - cargo xtask boundary
     - cargo xtask stale-paths
     - cargo xtask evidence-audit

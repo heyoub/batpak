@@ -48,6 +48,7 @@ mod source_cache;
 mod store_pub_fn_coverage;
 mod structural;
 mod traceability;
+mod triangulation;
 mod typed_waivers;
 mod wallclock;
 
@@ -102,6 +103,11 @@ enum CommandKind {
         #[arg(long)]
         commits_file: Option<std::path::PathBuf>,
     },
+    /// Triangulation harness (GAUNTLET-TRIANGULATION): cross-check independent
+    /// oracles over non-type repo facts; a disagreement is a hard finding. The
+    /// wired fact is workspace crate-graph acyclicity (cargo-metadata + Tarjan
+    /// vs. manifest-scan). Also folded into `structural-check`.
+    TriangulationCheck,
     /// Static checks for evidence report bodies and public export vocabulary.
     EvidenceAudit,
     /// Validate the machine-readable agent intent/API/test surface map.
@@ -143,6 +149,7 @@ fn main() -> Result<()> {
             pr_author,
             commits_file,
         } => run_meta_gate(diff_file, labels, pr_author, commits_file),
+        CommandKind::TriangulationCheck => triangulation::check(&repo_surface::repo_root()?),
         CommandKind::EvidenceAudit => evidence_audit::run(&repo_surface::repo_root()?),
         CommandKind::AgentSurfaceCheck => agent_surface::run(&repo_surface::repo_root()?),
         CommandKind::AgentDoctor => agent_doctor::run(&repo_surface::repo_root()?),
