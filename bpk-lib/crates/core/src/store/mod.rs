@@ -100,6 +100,11 @@ pub use fault::{
     CountdownAction, CountdownInjector, FaultInjector, InjectionPoint, ProbabilisticInjector,
 };
 pub use gate::DurabilityGate;
+/// Test-only global-allocator shims. Re-exported so dedicated single-test
+/// binaries can install one as `#[global_allocator]`. Compiled out unless the
+/// `alloc-count` or `fault-alloc` feature is enabled.
+#[cfg(any(feature = "alloc-count", feature = "fault-alloc"))]
+pub use platform::alloc;
 pub use platform::clock::{Clock, SystemClock};
 pub use projection::watch::{CursorWatcherError, ProjectionWatcher, WatcherError};
 pub use projection::{
