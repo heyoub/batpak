@@ -14,6 +14,10 @@
   artifacts:
     - ART-IDEMPOTENCY-DURABLE-SOURCE
     - ART-IDEMPOTENCY-DURABLE-TESTS
+- id: INV-ONDISK-FORWARD-COMPAT-CANONICAL
+  statement: Every on-disk format declared in the compat matrix opens or fails with exactly one canonical typed error per (writer_version, reader_version) pair - never silent corruption and never a silent rebuild-from-scan downgrade. A reader opening an artifact written at its own live version succeeds (the OpensOK self-row), and an artifact written at a strictly-newer version is a canonical typed refusal such as StoreError MmapFutureVersion. The matrix is the live contract, so a bump to an on-disk version const with no matching matrix row is caught because the self-row reader_version is cross-checked against the live supported version.
+  artifacts:
+    - ART-COMPAT-MATRIX
 - id: INV-SYNCBAT-DISPATCH-RECEIPTS
   statement: syncbat checkout dispatch emits at most one completed or failed runtime receipt for resolved operations, emits no receipt for unknown operations, and fails closed when the configured receipt sink fails.
   artifacts:

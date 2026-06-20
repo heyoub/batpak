@@ -89,6 +89,7 @@ fastrand = "2"
 serial_test = { version = "3.5.0", features = ["file_locks"] }
 loom = "0.7"
 tracing-subscriber = { version = "0.3", features = ["fmt", "std"] }
+yaml_serde = "0.10.4"
 
 [build-dependencies]
 serde = { version = "1", features = ["derive"] }

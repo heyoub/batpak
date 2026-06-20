@@ -729,6 +729,11 @@
     - crates/core/tests/idempotency_window_priority.rs
     - crates/core/tests/idempotency_for_operation.rs
     - crates/core/tests/idempotency_corruption_recovery.rs
+- id: ART-COMPAT-MATRIX
+  kind: tests
+  paths:
+    - traceability/compat_matrix.yaml
+    - crates/core/tests/compat_matrix.rs
 - id: ART-TESTS
   kind: tests
   paths:

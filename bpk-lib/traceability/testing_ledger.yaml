@@ -824,3 +824,27 @@
     this entry covers structural and doctrine-shaped invariants; runtime behavior
     still belongs in direct test artifacts whenever a catalog invariant can be
     exercised as code.
+
+- title: On-disk forward-compat downgrade discipline driven by the compat matrix
+  section: Oracle Harness
+  pattern: Oracle Harness
+  status: green
+  invariants:
+    - INV-ONDISK-FORWARD-COMPAT-CANONICAL
+  locations:
+    - bpk-lib/traceability/compat_matrix.yaml
+    - bpk-lib/crates/core/tests/compat_matrix.rs
+  commands:
+    - cargo test --test compat_matrix
+    - cargo test --test compat_matrix compat_matrix_self_row_tracks_live_version
+  coverage_delta: >
+    exercises the mmap-index version branch in
+    crates/core/src/store/cold_start/mmap/load.rs through the public Store::open
+    lifecycle; exact JSON delta not recorded.
+  mutation_delta: unmeasured
+  blind_spots: >
+    the matrix currently seeds only the mmap-index format (OpensOK self-row plus
+    a forged future-version canonical refusal). Idempotency, visibility-ranges,
+    checkpoint, and segment rows are DEFERRED (logged in GAUNTLET_ISSUES.md):
+    checkpoint and segment still need a per-format *FutureVersion typed error
+    before a CanonicalRefusal row can be asserted.

@@ -1,0 +1,56 @@
+# Compat matrix — on-disk forward-compatibility downgrade discipline.
+#
+# Each row is a (writer_version, reader_version, feature_bits) tuple and the
+# single LEGAL outcome when a reader at `reader_version` opens an on-disk
+# artifact written at `writer_version`. The owner's rule: old/foreign data
+# either OPENS, or fails with ONE canonical typed error — never silent
+# corruption and never a silent downgrade-from-scan.
+#
+# Loaded by: bpk-lib/crates/core/tests/compat_matrix.rs (table-driven gate).
+# The gate forges an on-disk artifact at `writer_version` (reusing the public
+# store seed + the byte-level version-field forge used by
+# gauntlet_s2_future_version_refusal) and asserts the outcome.
+#
+# Fields:
+#   format          — on-disk format the row covers. Currently: mmap-index
+#                     (index.fbati, version const MMAP_INDEX_VERSION). The driver
+#                     panics on an unknown format so a new format needs a row +
+#                     a forge arm, not a silent skip.
+#   writer_version  — the format version stamped into the forged artifact.
+#   reader_version  — the format version the live binary supports. MUST equal the
+#                     live const for the self-row; the gate cross-checks this so a
+#                     bump to the on-disk version with no matching row is caught.
+#   feature_bits    — reserved capability bitset (0 today; future feature gating).
+#   expected_outcome — one of:
+#                       OpensOK
+#                       CanonicalRefusal:MmapFutureVersion
+#   fixture_path    — relative-to-crate descriptor of the forged artifact. Forged
+#                     on the fly from a seeded store (kept tiny: 4 events), so the
+#                     path is the in-temp artifact name, not a checked-in blob.
+#
+# DEFERRED ROWS (logged, not yet seeded — see GAUNTLET_ISSUES.md):
+#   - idempotency-index (index.idemp / IdempotencyFutureVersion)
+#   - visibility-ranges (visibility_ranges.fbv / HiddenRangesCorrupt)
+#   - checkpoint (index.ckpt) — needs a *FutureVersion typed error first (Item 4.1)
+#   - segment (.fbat / CorruptSegment future-version branch)
+
+rows:
+  # Self-row: a reader opens an artifact written at its own live version. This
+  # is the OpensOK baseline AND the staleness tripwire — `writer_version` and
+  # `reader_version` here MUST equal the live MMAP_INDEX_VERSION, so a bump to
+  # the on-disk version without updating this row makes the gate fail.
+  - format: mmap-index
+    writer_version: 5
+    reader_version: 5
+    feature_bits: 0
+    expected_outcome: OpensOK
+    fixture_path: index.fbati
+
+  # Forged future-version row: a future writer's artifact (live + 1) must be a
+  # canonical typed refusal, never a silent rebuild-from-scan.
+  - format: mmap-index
+    writer_version: 6
+    reader_version: 5
+    feature_bits: 0
+    expected_outcome: CanonicalRefusal:MmapFutureVersion
+    fixture_path: index.fbati
