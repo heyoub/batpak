@@ -202,6 +202,25 @@ pub(crate) const GATES: &[Gate] = &[
         red_fixture_kind: Some(RedFixtureKind::ProductionFlip),
         has_blocking_authority: true,
     },
+    // --- Phase-B3 recovery-oracle matrix (blocking, qualified ProductionFlip).
+    //     B2's dst-recovery ran the legality oracle under ONE fault profile
+    //     (honest disk). B3 generalizes it across the FULL hostile-fs matrix SimFs
+    //     can model over the real Store: honest-disk crash, lying-disk fsync-drop,
+    //     and crash-before-fsync at each durability boundary (single-append frame,
+    //     batch-commit marker, post-fsync-before-publish, segment-rotation create).
+    //     Every cell must recover EXACTLY one of {CommittedPrefix | RolledBack |
+    //     CanonicalRefusal} and LEGAL (prefix, no undead, intact hash chain;
+    //     honest-disk no-loss rule; lying-disk relaxation). Under
+    //     `gauntlet_red_fixture` the honest-disk cell is asserted to have lost an
+    //     acked-durable commit, so its red half fails — proving the oracle bites.
+    Gate {
+        slug: "recovery-oracle",
+        red_fixture_test: Some(
+            "crates/core/tests/recovery_oracle.rs::recovery_oracle_matrix_is_legal_and_deterministic",
+        ),
+        red_fixture_kind: Some(RedFixtureKind::ProductionFlip),
+        has_blocking_authority: true,
+    },
     // --- Phase-B4 linearizability gate (blocking, qualified GateNegativePath).
     //     A seeded op stream against a REAL Store under a fixed clock must, after
     //     settling on the visibility watermark, expose a dense strictly-increasing

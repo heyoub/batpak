@@ -135,6 +135,9 @@ pub mod __sim {
     pub use crate::store::sim::recovery::{
         recovery_replay_seed, run_seeded_recovery, RecoveryOutcomePublic,
     };
+    pub use crate::store::sim::recovery_matrix::{
+        matrix_replay_seed, run_recovery_matrix, MatrixCell, RecoveredClass,
+    };
     pub use crate::store::sim::{replay_seed, run_seeded_workload};
 }
 

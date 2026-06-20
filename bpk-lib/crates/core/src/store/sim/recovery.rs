@@ -37,15 +37,15 @@ use crate::store::{AppendOptions, BatchAppendItem, CausationRef, Store, StoreCon
 use std::sync::Arc;
 
 /// FNV-1a 64-bit offset basis / prime, matching the model workload digest.
-const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+pub(crate) const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
 
 /// The user-visible event kind the workload appends (category 0xC is a free
 /// custom range; 0xD is reserved for effect kinds).
-const KIND: EventKind = EventKind::custom(0xC, 2);
+pub(crate) const KIND: EventKind = EventKind::custom(0xC, 2);
 
 /// Fold one `u64` token into a running FNV-1a digest.
-fn fold(digest: u64, token: u64) -> u64 {
+pub(crate) fn fold(digest: u64, token: u64) -> u64 {
     let mut d = digest;
     for byte in token.to_le_bytes() {
         d ^= u64::from(byte);
@@ -218,17 +218,17 @@ fn drive(seed: u64, steps: usize) -> Result<RecoveryOutcome, Violation> {
 }
 
 /// A compact view of one recovered visible event for the legality oracle.
-struct RecoveredEvent {
-    global_sequence: u64,
-    prev_hash: [u8; 32],
-    event_hash: [u8; 32],
+pub(crate) struct RecoveredEvent {
+    pub(crate) global_sequence: u64,
+    pub(crate) prev_hash: [u8; 32],
+    pub(crate) event_hash: [u8; 32],
     /// First 8 bytes of the event hash, folded into the determinism digest.
-    event_hash_token: u64,
+    pub(crate) event_hash_token: u64,
 }
 
 /// One seeded op in the plan.
 #[derive(Clone, Copy)]
-enum Op {
+pub(crate) enum Op {
     /// Append a single event.
     Append,
     /// Append a batch of `n` events atomically.
@@ -238,13 +238,13 @@ enum Op {
 }
 
 /// A deterministic op plan derived purely from the seed.
-struct OpPlan {
-    ops: Vec<Op>,
+pub(crate) struct OpPlan {
+    pub(crate) ops: Vec<Op>,
 }
 
 impl OpPlan {
     /// Build a `steps`-long plan from `seed`. Pure function of the seed.
-    fn seeded(seed: u64, steps: usize) -> Self {
+    pub(crate) fn seeded(seed: u64, steps: usize) -> Self {
         let mut rng = fastrand::Rng::with_seed(seed);
         let mut ops = Vec::with_capacity(steps);
         for _ in 0..steps {
@@ -260,7 +260,7 @@ impl OpPlan {
 
 /// Execute the op plan against the real store, returning
 /// `(appended, durable_acked, digest)`.
-fn run_op_plan(
+pub(crate) fn run_op_plan(
     store: &Store,
     coord: &Coordinate,
     plan: &OpPlan,
@@ -301,7 +301,7 @@ fn run_op_plan(
 }
 
 /// Build `n` batch items tagged with a monotone base sequence.
-fn batch_items(coord: &Coordinate, base: usize, n: u32) -> Vec<BatchAppendItem> {
+pub(crate) fn batch_items(coord: &Coordinate, base: usize, n: u32) -> Vec<BatchAppendItem> {
     (0..n)
         .filter_map(|i| {
             BatchAppendItem::new(
@@ -318,7 +318,7 @@ fn batch_items(coord: &Coordinate, base: usize, n: u32) -> Vec<BatchAppendItem> 
 
 /// Collect the recovered user-visible events (excluding system lifecycle events),
 /// ordered by global sequence.
-fn recovered_user_events(store: &Store) -> Vec<RecoveredEvent> {
+pub(crate) fn recovered_user_events(store: &Store) -> Vec<RecoveredEvent> {
     let mut events: Vec<RecoveredEvent> = store
         .query(&Region::all())
         .into_iter()
@@ -353,7 +353,7 @@ fn recovered_user_events(store: &Store) -> Vec<RecoveredEvent> {
 
 /// Verify the recovered visible events form an unbroken hash chain: each event's
 /// `prev_hash` must equal the previous recovered event's `event_hash`.
-fn verify_hash_chain(events: &[RecoveredEvent]) -> Result<(), Violation> {
+pub(crate) fn verify_hash_chain(events: &[RecoveredEvent]) -> Result<(), Violation> {
     let mut prev: Option<[u8; 32]> = None;
     for ev in events {
         if let Some(prev_hash) = prev {
@@ -370,7 +370,7 @@ fn verify_hash_chain(events: &[RecoveredEvent]) -> Result<(), Violation> {
 
 /// A typed corruption refusal is a legal recovery outcome; an untyped error is
 /// not. Mirrors the canonical-refusal set the recovery sentinels accept.
-fn is_canonical_refusal(error: &crate::store::StoreError) -> bool {
+pub(crate) fn is_canonical_refusal(error: &crate::store::StoreError) -> bool {
     use crate::store::StoreError;
     matches!(
         error,

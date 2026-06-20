@@ -560,6 +560,28 @@
     - ART-DST-RECOVERY-SOURCE
     - ART-DST-RECOVERY-TEST
   witness_test: crates/core/tests/dst_recovery.rs::dst_recovery_is_legal_and_deterministic
+- id: INV-RECOVERY-ORACLE-LEGAL
+  statement: >-
+    A real Store opened over the fault-injecting SimFs backend (plus the
+    durability-boundary fault injector), driven through the real
+    append/append_batch/sync API, crashed under EACH hostile-fs fault mode SimFs
+    can model — honest-disk crash, lying-disk fsync-drop, and crash-before-fsync at
+    each durability boundary (single-append frame write, batch-commit marker,
+    post-fsync-before-publish, segment-rotation create) — and reopened over the
+    persisted (truncated) tree must recover a state that is EXACTLY one of
+    {CommittedPrefix | RolledBack | CanonicalRefusal} and LEGAL: a prefix of the
+    appended op-log (no invented or undead events) with an intact hash chain across
+    the recovered visible events; HONEST-disk modes never lose an
+    acknowledged-durable commit (the sacred rule); LYING-disk modes may legally lose
+    a dropped-fsync commit but the result must STILL be a prefix, undead-free, and
+    chain-intact (losing the dropped commit is the FS's fault, exposing an
+    undead/corrupt one is not); a typed corruption refusal on reopen is a legal
+    outcome, an untyped failure/panic is not. The same (BATPAK_SEED, fault mode)
+    recovers the identical classification and op-trace digest (determinism).
+  artifacts:
+    - ART-RECOVERY-ORACLE-SOURCE
+    - ART-RECOVERY-ORACLE-TEST
+  witness_test: crates/core/tests/recovery_oracle.rs::recovery_oracle_matrix_is_legal_and_deterministic
 - id: INV-COMPLEXITY-EXPONENT-BOUNDED
   statement: >-
     A real Store read operation's cost does not silently regress into a worse asymptotic class: the

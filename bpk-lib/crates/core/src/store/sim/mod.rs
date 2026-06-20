@@ -36,6 +36,7 @@ pub(crate) mod fault_model;
 pub(crate) mod fs;
 pub(crate) mod invariants;
 pub(crate) mod recovery;
+pub(crate) mod recovery_matrix;
 pub(crate) mod scheduler;
 pub(crate) mod workload;
 
