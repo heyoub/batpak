@@ -43,6 +43,7 @@ mod invariant_bridge;
 mod meta_gate;
 mod public_surface;
 mod receipts;
+mod repo_ir;
 mod repo_surface;
 mod rust_ast;
 mod source_cache;
@@ -130,6 +131,15 @@ enum CommandKind {
         #[arg(long)]
         check: bool,
     },
+    /// GAUNTLET-REPO-IR (Phase 3, item 6): emit the minimal queryable repo-IR as
+    /// JSON. ONE column-store binding AL assignments + gate ownership + waiver
+    /// ownership + public-surface map + mutation-seam map + docs traceability,
+    /// over which fitness functions fold (banana-split-fused: one traversal, N
+    /// checks). `--out` writes to a file; default prints to stdout.
+    RepoIr {
+        #[arg(long)]
+        out: Option<std::path::PathBuf>,
+    },
 }
 
 fn main() -> Result<()> {
@@ -166,6 +176,7 @@ fn main() -> Result<()> {
             architecture_ir::run(&repo_surface::repo_root()?, out, check)
         }
         CommandKind::DocsCatalog { check } => docs_catalog::run(&repo_surface::repo_root()?, check),
+        CommandKind::RepoIr { out } => repo_ir::run(&repo_surface::repo_root()?, out),
     }
 }
 
