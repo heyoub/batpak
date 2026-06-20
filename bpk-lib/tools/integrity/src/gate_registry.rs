@@ -173,6 +173,19 @@ pub(crate) const GATES: &[Gate] = &[
         red_fixture_kind: Some(RedFixtureKind::ProductionFlip),
         has_blocking_authority: true,
     },
+    // --- Phase-2 semantic_diff family (blocking, qualified ProductionFlip). The
+    //     same seeded op stream is driven through every equivalence-claiming config
+    //     pair (mmap<->scan, checkpoint<->rebuilt, fused<->unfused, cached<->uncached,
+    //     reopened<->fresh); divergence is a hard finding. Under the cfg one side is
+    //     fed an extra op so the diff assertion fails. ---
+    Gate {
+        slug: "semantic-diff",
+        red_fixture_test: Some(
+            "crates/core/tests/semantic_diff.rs::semantic_diff_detects_planted_divergence",
+        ),
+        red_fixture_kind: Some(RedFixtureKind::ProductionFlip),
+        has_blocking_authority: true,
+    },
     // --- Phase-2 fault sentinels: run on every PR via `--all-features` nextest,
     //     but NOT yet qualified — their tests assert "consistent OR typed error"
     //     without a proven failing path, and the OOM test only exercises the

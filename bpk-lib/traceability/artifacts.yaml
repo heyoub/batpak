@@ -22,6 +22,10 @@
     - tools/integrity/src/triangulation.rs
     - tools/integrity/src/triangulation_tests.rs
     - tools/integrity/src/structural.rs
+- id: ART-SEMANTIC-DIFF-TESTS
+  kind: tests
+  paths:
+    - crates/core/tests/semantic_diff.rs
 - id: ART-DOCS-CATALOG-GATE
   kind: tool
   paths:

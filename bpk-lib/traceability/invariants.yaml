@@ -490,6 +490,17 @@
     so layering and incremental builds are never broken by a reverse or circular crate edge.
   artifacts:
     - ART-TRIANGULATION-SOURCE
+- id: INV-SEMANTIC-DIFF-EQUIVALENCE
+  statement: >-
+    Every pair of store configurations that claim to expose identical visible truth
+    (mmap<->scan, checkpoint<->rebuilt, fused<->unfused projection, cached<->uncached,
+    and reopened cold-start across those representations) produces byte-identical
+    observables — query results across every region shape, the visible HLC frontier,
+    and the global sequence — when fed the same seeded operation stream under a fixed
+    clock; any divergence between an equivalence-claiming pair is a hard finding.
+  witness_test: crates/core/tests/semantic_diff.rs::equivalence_claiming_configs_agree_on_visible_truth
+  artifacts:
+    - ART-SEMANTIC-DIFF-TESTS
 - id: INV-DOCS-CATALOG-VIEW-CURRENT
   statement: >-
     INVARIANTS.md is a generated VIEW of traceability/invariants.yaml: the auto-generated catalog
