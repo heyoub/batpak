@@ -211,6 +211,11 @@ fn compat_matrix_rows_match_declared_outcomes() {
     }
 }
 
+/// On-disk formats the compat matrix governs. Grows as typed `*FutureVersion`
+/// refusal errors land for the deferred formats (checkpoint, segment,
+/// idempotency-index, visibility-ranges — see GAUNTLET_ISSUES.md).
+const COMPAT_FORMATS: &[&str] = &["mmap-index"];
+
 /// Staleness tripwire: a NEW on-disk version with no matrix row must be
 /// catchable. Each format MUST have a self-row whose `writer_version ==
 /// reader_version == live supported version`. If the on-disk version const is
@@ -219,7 +224,7 @@ fn compat_matrix_rows_match_declared_outcomes() {
 fn compat_matrix_self_row_tracks_live_version() {
     let matrix = load_matrix();
 
-    for format in ["mmap-index"] {
+    for &format in COMPAT_FORMATS {
         let live = live_supported_version(format);
         let self_row = matrix
             .rows

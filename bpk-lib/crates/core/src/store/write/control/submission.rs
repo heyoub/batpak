@@ -342,15 +342,17 @@ mod submission_tests {
             .build_event(&serde_json::json!({}), kind, 1)
             .expect("build_event");
         let (tx, _rx) = flume::bounded::<AppendReply>(1);
-        match s.into_command(coord, kind, event, tx) {
-            WriterCommand::FenceAppend { token, guards, .. } => {
-                assert_eq!(token, 42, "fence token must route to FenceAppend");
-                assert_eq!(guards.expected_sequence, Some(3), "CAS guard threaded");
-                assert_eq!(guards.dag_lane, 2, "position-hint lane threaded");
-                assert_eq!(guards.dag_depth, 4, "position-hint depth threaded");
-            }
-            _ => panic!("expected FenceAppend, got a different command variant"),
-        }
+        assert!(
+            matches!(
+                s.into_command(coord, kind, event, tx),
+                WriterCommand::FenceAppend { token, guards, .. }
+                    if token == 42
+                        && guards.expected_sequence == Some(3)
+                        && guards.dag_lane == 2
+                        && guards.dag_depth == 4
+            ),
+            "fence token must route to FenceAppend with CAS + position-hint guards threaded"
+        );
     }
 
     #[test]
