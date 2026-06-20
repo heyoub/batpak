@@ -31,10 +31,6 @@
   lines: 115
   nesting: 4
   cyclomatic: 29
-- key: "crates/core/src/store/delivery/cursor/worker.rs::Store::cursor_worker"
-  lines: 238
-  nesting: 7
-  cyclomatic: 27
 - key: "crates/core/src/store/index/restore.rs::RoutingSummary::validate_detailed"
   lines: 111
   nesting: 3

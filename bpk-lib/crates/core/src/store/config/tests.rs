@@ -224,3 +224,57 @@ fn has_custom_clock_reflects_clock_presence() {
         "a config with an injected clock must report a custom clock"
     );
 }
+
+#[test]
+fn with_spawner_installs_custom_spawner_and_runs_body() {
+    use crate::store::platform::spawn::{SimJoin, Spawn};
+    use std::sync::atomic::AtomicBool;
+
+    // A recording spawner proving that `with_spawner` rewires the seam: it
+    // sets a flag when asked to spawn, then delegates the body to a real
+    // ThreadSpawn so the join contract still holds end-to-end.
+    struct RecordingSpawn {
+        spawned: Arc<AtomicBool>,
+        inner: crate::store::platform::spawn::ThreadSpawn,
+    }
+    impl Spawn for RecordingSpawn {
+        fn spawn(
+            &self,
+            name: String,
+            stack_size: Option<usize>,
+            body: Box<dyn FnOnce() + Send + 'static>,
+        ) -> std::io::Result<Box<dyn SimJoin>> {
+            self.spawned.store(true, Ordering::Release);
+            self.inner.spawn(name, stack_size, body)
+        }
+    }
+
+    let spawned = Arc::new(AtomicBool::new(false));
+    let spawner: Arc<dyn Spawn> = Arc::new(RecordingSpawn {
+        spawned: Arc::clone(&spawned),
+        inner: crate::store::platform::spawn::ThreadSpawn,
+    });
+
+    let config = StoreConfig::new("target/test-with-spawner").with_spawner(spawner);
+
+    let ran = Arc::new(AtomicBool::new(false));
+    let ran_for_body = Arc::clone(&ran);
+    let handle = config
+        .spawner()
+        .spawn(
+            "with-spawner-config-proof".to_string(),
+            None,
+            Box::new(move || ran_for_body.store(true, Ordering::Release)),
+        )
+        .expect("custom spawner must spawn");
+    handle.join().expect("body must join Ok");
+
+    assert!(
+        spawned.load(Ordering::Acquire),
+        "PROPERTY: with_spawner must route config.spawner() through the installed Spawn"
+    );
+    assert!(
+        ran.load(Ordering::Acquire),
+        "PROPERTY: the body handed to the custom spawner must run to completion"
+    );
+}

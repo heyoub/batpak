@@ -115,7 +115,7 @@ pub(crate) struct WriterHandle {
     pub subscribers: Arc<SubscriberList>,
     pub reactor_subscribers: Arc<ReactorSubscriberList>,
     watermark_handle: WatermarkAdvanceHandle,
-    thread: Option<std::thread::JoinHandle<()>>,
+    thread: Option<Box<dyn crate::store::platform::spawn::SimJoin>>,
 }
 
 /// RestartPolicy: how the writer recovers from panics.
@@ -164,27 +164,28 @@ impl WriterHandle {
         let rdr = Arc::clone(reader);
         let watermark_for_thread = watermark_handle.clone();
 
-        let mut builder = std::thread::Builder::new().name(writer_thread_name(&config.data_dir));
-        if let Some(stack_size) = config.writer.stack_size {
-            builder = builder.stack_size(stack_size);
-        }
-        let thread = builder
-            .spawn(move || {
-                writer_thread_main(
-                    WriterRuntime {
-                        rx: &rx,
-                        config: &cfg,
-                        validated_cfg: &validated,
-                        index: &idx,
-                        subscribers: &subs,
-                        reactor_subscribers: &reactor_subs,
-                        reader: &rdr,
-                        watermark_handle: &watermark_for_thread,
-                    },
-                    initial_segment,
-                    initial_segment_id,
-                );
-            })
+        let thread = config
+            .spawner()
+            .spawn(
+                writer_thread_name(&config.data_dir),
+                config.writer.stack_size,
+                Box::new(move || {
+                    writer_thread_main(
+                        WriterRuntime {
+                            rx: &rx,
+                            config: &cfg,
+                            validated_cfg: &validated,
+                            index: &idx,
+                            subscribers: &subs,
+                            reactor_subscribers: &reactor_subs,
+                            reader: &rdr,
+                            watermark_handle: &watermark_for_thread,
+                        },
+                        initial_segment,
+                        initial_segment_id,
+                    );
+                }),
+            )
             .map_err(StoreError::Io)?;
 
         Ok(Self {
@@ -218,7 +219,7 @@ impl WriterHandle {
         if self
             .thread
             .as_ref()
-            .is_some_and(std::thread::JoinHandle::is_finished)
+            .is_some_and(|thread| thread.is_finished())
         {
             self.watermark_handle.mark_writer_crashed();
             return Err(StoreError::WriterCrashed);
@@ -339,12 +340,15 @@ mod tests {
     fn writer_handle_join_surfaces_thread_panic_and_poisons_watermarks() {
         let (tx, _rx) = flume::bounded::<WriterCommand>(1);
         let watermark_handle = WatermarkState::handle(Arc::new(SystemClock::new()));
-        let thread = std::thread::Builder::new()
-            .name("writer-join-panic-proof".to_owned())
-            .spawn(|| {
+        let thread = crate::store::platform::spawn::Spawn::spawn(
+            &crate::store::platform::spawn::ThreadSpawn,
+            "writer-join-panic-proof".to_owned(),
+            None,
+            Box::new(|| {
                 panic!("intentional writer join panic proof");
-            })
-            .expect("spawn panic proof thread");
+            }),
+        )
+        .expect("spawn panic proof thread");
 
         let mut handle = WriterHandle {
             tx,

@@ -572,45 +572,52 @@ where
     let stop_for_thread = Arc::clone(&stop);
     let sub = store.subscribe_lossy(region);
 
-    let join = std::thread::Builder::new()
-        .name("batpak-reactor-lossy".into())
-        .spawn(move || {
-            while !stop_for_thread.load(Ordering::Acquire) {
-                let notif = match sub.filtered_receiver().recv_timeout(idle_sleep) {
-                    Ok(notif) => notif,
-                    Err(RecvTimeoutError::Timeout) => continue,
-                    Err(RecvTimeoutError::Disconnected) => break,
-                };
-                let stored =
-                    match fetch(&store_for_handler, crate::id::EventId::from(notif.event_id)) {
-                        Ok(stored) => stored,
-                        Err(error) => {
-                            *slot_for_handler.lock() = Some(ReactorError::Store(error));
-                            break;
-                        }
+    let join = store
+        .config
+        .spawner()
+        .spawn(
+            "batpak-reactor-lossy".to_string(),
+            None,
+            Box::new(move || {
+                while !stop_for_thread.load(Ordering::Acquire) {
+                    let notif = match sub.filtered_receiver().recv_timeout(idle_sleep) {
+                        Ok(notif) => notif,
+                        Err(RecvTimeoutError::Timeout) => continue,
+                        Err(RecvTimeoutError::Disconnected) => break,
                     };
-                let mut batch = ReactionBatch::new();
-                match dispatcher.dispatch(&stored, &mut batch, None) {
-                    Ok(()) if !batch.is_empty() => {
-                        if let Err(error) =
-                            batch.flush(&store_for_handler, notif.correlation_id, notif.event_id)
-                        {
-                            *slot_for_handler.lock() = Some(ReactorError::Store(error));
+                    let stored =
+                        match fetch(&store_for_handler, crate::id::EventId::from(notif.event_id)) {
+                            Ok(stored) => stored,
+                            Err(error) => {
+                                *slot_for_handler.lock() = Some(ReactorError::Store(error));
+                                break;
+                            }
+                        };
+                    let mut batch = ReactionBatch::new();
+                    match dispatcher.dispatch(&stored, &mut batch, None) {
+                        Ok(()) if !batch.is_empty() => {
+                            if let Err(error) = batch.flush(
+                                &store_for_handler,
+                                notif.correlation_id,
+                                notif.event_id,
+                            ) {
+                                *slot_for_handler.lock() = Some(ReactorError::Store(error));
+                                break;
+                            }
+                        }
+                        Ok(()) => {}
+                        Err(ReactorStepError::User(error)) => {
+                            *slot_for_handler.lock() = Some(ReactorError::User(error));
                             break;
                         }
-                    }
-                    Ok(()) => {}
-                    Err(ReactorStepError::User(error)) => {
-                        *slot_for_handler.lock() = Some(ReactorError::User(error));
-                        break;
-                    }
-                    Err(ReactorStepError::Decode(error)) => {
-                        *slot_for_handler.lock() = Some(ReactorError::Decode(error));
-                        break;
+                        Err(ReactorStepError::Decode(error)) => {
+                            *slot_for_handler.lock() = Some(ReactorError::Decode(error));
+                            break;
+                        }
                     }
                 }
-            }
-        })
+            }),
+        )
         .map_err(StoreError::Io)?;
 
     Ok(SubscriptionWorkerHandle::new(stop, join, slot_for_store))

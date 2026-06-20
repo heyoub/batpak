@@ -18,4 +18,5 @@ pub(crate) mod lock;
 pub(crate) mod mmap;
 pub(crate) mod path_identity;
 pub(crate) mod profile;
+pub(crate) mod spawn;
 pub(crate) mod sync;

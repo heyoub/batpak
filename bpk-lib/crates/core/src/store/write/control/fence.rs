@@ -202,11 +202,17 @@ impl<'a> VisibilityFence<'a> {
             Err(TrySendError::Disconnected(_)) => {
                 Err("writer channel disconnected during fence drop".to_string())
             }
-            Err(TrySendError::Full(command)) => std::thread::Builder::new()
-                .name("batpak-fence-drop-cancel".to_string())
-                .spawn(move || {
-                    drop(writer_tx.send(command));
-                })
+            Err(TrySendError::Full(command)) => self
+                .store
+                .config
+                .spawner()
+                .spawn(
+                    "batpak-fence-drop-cancel".to_string(),
+                    None,
+                    Box::new(move || {
+                        drop(writer_tx.send(command));
+                    }),
+                )
                 .map(|_| ())
                 .map_err(|error| format!("failed to spawn drop-cancel helper: {error}")),
         }

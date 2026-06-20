@@ -1,10 +1,10 @@
 use crate::store::index::IndexEntry;
+use crate::store::platform::spawn::SimJoin;
 use crate::store::write::fanout::Notification;
 use crate::store::StoreError;
 use parking_lot::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::thread::JoinHandle;
 use std::time::Duration;
 
 /// One pulled canal batch without forcing one allocation for one-item canals.
@@ -103,14 +103,14 @@ pub trait CanalHandle: Send {
 /// Handle for lossy subscription-backed workers.
 pub(crate) struct SubscriptionWorkerHandle {
     stop: Arc<AtomicBool>,
-    join: Option<JoinHandle<()>>,
+    join: Option<Box<dyn SimJoin>>,
     error_slot: Arc<Mutex<Option<StoreError>>>,
 }
 
 impl SubscriptionWorkerHandle {
     pub(crate) fn new(
         stop: Arc<AtomicBool>,
-        join: JoinHandle<()>,
+        join: Box<dyn SimJoin>,
         error_slot: Arc<Mutex<Option<StoreError>>>,
     ) -> Self {
         Self {
