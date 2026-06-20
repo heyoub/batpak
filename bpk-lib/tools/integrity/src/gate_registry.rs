@@ -115,6 +115,18 @@ pub(crate) const GATES: &[Gate] = &[
         ),
         has_blocking_authority: true,
     },
+    // --- Fuzz-replay gate (GAUNT-FUZZ-1, blocking, self-proving). The replay
+    //     `#[test]` re-runs every committed corpus + regression input through the
+    //     real `__fuzz::*` decode entry points and asserts none panics. Its
+    //     anti-vacuous fixture is the meta-test that reds when any declared fuzz
+    //     `[[bin]]` loses its regression dir or its dispatcher wiring. ---
+    Gate {
+        slug: "fuzz-replay",
+        red_fixture_test: Some(
+            "crates/core/tests/fuzz_replay.rs::fuzz_replay_covers_every_target",
+        ),
+        has_blocking_authority: true,
+    },
     // --- Structural source lints (blocking, qualified). Each now carries a
     //     dedicated end-to-end RED fixture: a green baseline temp tree plus a
     //     planted violation asserting the full `check(..)` returns `Err`. ---

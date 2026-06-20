@@ -572,6 +572,43 @@ jobs:
           BATPAK_RUN_CHAOS: "1"
         run: cargo test --features dangerous-test-hooks --test chaos -- --test-threads=1
 
+  fuzz-replay:
+    # GAUNT-FUZZ-1 — the PR-BLOCKING fuzz-replay gate (the gateable, deterministic
+    # half). NOT cargo-fuzz: a normal `#[test]` on the standard devcontainer
+    # toolchain that re-runs every committed corpus + regression input through the
+    # real `batpak::__fuzz::*` decode entry points and asserts none panics. Fast
+    # (<1s/file), hardware-independent, no nightly/sanitizer needed — so it rides
+    # the always-on PR lane (gated only by the rust-changed detector), unlike the
+    # nightly cargo-fuzz `fuzz-smoke` below. The `fuzz_replay_covers_every_target`
+    # meta-test inside the same binary reds if any declared fuzz `[[bin]]` loses its
+    # regression fixture or dispatcher wiring, so the gate can't be hollowed out.
+    name: Fuzz replay (committed corpus)
+    runs-on: ubuntu-latest
+    needs: [ci-fast-linux, rust-changed]
+    if: >-
+      needs.rust-changed.outputs.rust == 'true' &&
+      (github.event_name == 'pull_request' ||
+       (github.event_name == 'workflow_dispatch' &&
+        (github.event.inputs.proof == 'verify' ||
+         github.event.inputs.proof == 'chaos' ||
+         github.event.inputs.proof == 'heavy')))
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          shared-key: fuzz-replay
+          workspaces: bpk-lib
+      - uses: ./.github/actions/setup-devcontainer
+      - name: Replay committed fuzz corpus + regressions (no panic)
+        env:
+          BATPAK_DEVCONTAINER_IMAGE: batpak-devcontainer:ci
+          BATPAK_DEVCONTAINER_SKIP_BUILD: "1"
+        run: >-
+          bash ./scripts/run-in-devcontainer.sh
+          'cargo test -p batpak --test fuzz_replay --features dangerous-test-hooks'
+
   fuzz-smoke:
     # Gauntlet Phase 0B — SENTINEL S1: cargo-fuzz smoke on `frame_decode`.
     #
@@ -619,10 +656,17 @@ jobs:
       # compiled for (via the `current_platform` crate), which the taiki-e
       # install-action resolves to the statically-linked musl triple — fatal for
       # ASan. Pin the gnu target on BOTH build and run so the sanitizer links.
-      - name: Build frame_decode fuzz target
+      # GAUNT-FUZZ-1: build EVERY declared fuzz target so a target that stops
+      # compiling under the nightly + sanitizer toolchain fails the lane (the
+      # devcontainer fuzz-replay lane only proves they build on the stable
+      # toolchain). `cargo fuzz build` with no target name builds all `[[bin]]`s.
+      - name: Build all fuzz targets
         working-directory: bpk-lib/fuzz
-        run: cargo +nightly fuzz build frame_decode --target x86_64-unknown-linux-gnu
-      - name: Fuzz smoke (60s, RSS-bounded)
+        run: cargo +nightly fuzz build --target x86_64-unknown-linux-gnu
+      # Always-on PR smoke: a short frame_decode run for fast signal on the
+      # store's hottest decode surface. The full per-target sweep below is the
+      # deep (heavy/chaos dispatch) lane.
+      - name: Fuzz smoke (frame_decode, 60s, RSS-bounded)
         working-directory: bpk-lib/fuzz
         # `corpus/frame_decode` seeds the run; libFuzzer also replays the RED
         # regression dir. -max_total_time caps the budget; -rss_limit_mb makes an
@@ -631,11 +675,32 @@ jobs:
           cargo +nightly fuzz run frame_decode --target x86_64-unknown-linux-gnu --
           -max_total_time=60
           -rss_limit_mb=2048
+      # Deep sweep (scheduled/heavy): loop EVERY target for a longer budget,
+      # seeded by its committed corpus and replaying its RED regressions. Only on
+      # the heavy/chaos workflow_dispatch profiles so PR cost stays bounded.
+      - name: Fuzz sweep (all targets, RSS-bounded)
+        if: >-
+          github.event_name == 'workflow_dispatch' &&
+          (github.event.inputs.proof == 'chaos' || github.event.inputs.proof == 'heavy')
+        working-directory: bpk-lib/fuzz
+        # -max_total_time is per target; keep the gnu-target pin for the
+        # sanitizer link on every invocation.
+        run: |
+          for target in \
+            frame_decode segment_header sidx_entry checkpoint_data \
+            checkpoint_snapshot_v6 mmap_entry cache_meta projection_state \
+            hidden_ranges mmap_index_load sidx_footer; do
+            echo "::group::fuzz $target"
+            cargo +nightly fuzz run "$target" --target x86_64-unknown-linux-gnu -- \
+              -max_total_time=900 \
+              -rss_limit_mb=2048
+            echo "::endgroup::"
+          done
       - name: Upload fuzz crash artifacts on failure
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: fuzz-frame-decode-crashes
+          name: fuzz-crashes
           path: bpk-lib/fuzz/artifacts/
           if-no-files-found: ignore
           retention-days: 14

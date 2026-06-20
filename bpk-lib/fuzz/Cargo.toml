@@ -16,8 +16,11 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 # `batpak` exposes `store::segment::{frame_decode, frame_encode}` publicly, so
-# the path dep reaches the real decode entry point with no test-hook shim.
-batpak = { path = "../crates/core" }
+# the path dep reaches the real frame_decode entry point with no test-hook shim.
+# The GAUNT-FUZZ-1 targets (every other on-disk/untrusted decode surface) call
+# the doc-hidden `batpak::__fuzz::*` contract, which lives behind the
+# `dangerous-test-hooks` feature — enable it here so the whole target set builds.
+batpak = { path = "../crates/core", features = ["dangerous-test-hooks"] }
 
 [lints.rust]
 # Mirror of the core crate's gauntlet RED fixture switch, gated behind the
@@ -41,6 +44,78 @@ debug = 1
 [[bin]]
 name = "frame_decode"
 path = "fuzz_targets/frame_decode.rs"
+test = false
+doc = false
+bench = false
+
+# GAUNT-FUZZ-1 — one bin per `batpak::__fuzz::*` contract fn. Same cargo-fuzz
+# convention as frame_decode (test/doc/bench = false: libFuzzer harness bins).
+[[bin]]
+name = "segment_header"
+path = "fuzz_targets/segment_header.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sidx_entry"
+path = "fuzz_targets/sidx_entry.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "checkpoint_data"
+path = "fuzz_targets/checkpoint_data.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "checkpoint_snapshot_v6"
+path = "fuzz_targets/checkpoint_snapshot_v6.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "mmap_entry"
+path = "fuzz_targets/mmap_entry.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "cache_meta"
+path = "fuzz_targets/cache_meta.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "projection_state"
+path = "fuzz_targets/projection_state.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "hidden_ranges"
+path = "fuzz_targets/hidden_ranges.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "mmap_index_load"
+path = "fuzz_targets/mmap_index_load.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sidx_footer"
+path = "fuzz_targets/sidx_footer.rs"
 test = false
 doc = false
 bench = false

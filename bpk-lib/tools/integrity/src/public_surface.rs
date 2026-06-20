@@ -59,6 +59,23 @@ fn check_doc_hidden_public_surface(repo_root: &Path, source_cache: &mut SourceCa
     let allowed: BTreeSet<&str> = [
         "crates/core/src/lib.rs::__private",
         "crates/core/src/lib.rs::batpak",
+        // GAUNT-FUZZ-1: the `#[cfg(feature = "dangerous-test-hooks")]`
+        // `#[doc(hidden)] pub mod __fuzz` exposes thin wrappers over real decode
+        // entry points for the workspace-excluded `batpak-fuzz` cargo-fuzz crate.
+        // It is feature-gated (absent from any default/published build) and
+        // doc-hidden by design; these entries are the reviewed escape-hatch.
+        "crates/core/src/lib.rs::__fuzz",
+        "crates/core/src/__fuzz.rs::FuzzProjectionState",
+        "crates/core/src/__fuzz.rs::__fuzz_segment_header",
+        "crates/core/src/__fuzz.rs::__fuzz_sidx_entry",
+        "crates/core/src/__fuzz.rs::__fuzz_checkpoint_data",
+        "crates/core/src/__fuzz.rs::__fuzz_checkpoint_snapshot_v6",
+        "crates/core/src/__fuzz.rs::__fuzz_mmap_entry",
+        "crates/core/src/__fuzz.rs::__fuzz_cache_meta",
+        "crates/core/src/__fuzz.rs::__fuzz_projection_state",
+        "crates/core/src/__fuzz.rs::__fuzz_hidden_ranges",
+        "crates/core/src/__fuzz.rs::__fuzz_mmap_index_load",
+        "crates/core/src/__fuzz.rs::__fuzz_sidx_footer",
         "crates/core/src/store/delivery/subscription.rs::receiver",
         "crates/core/src/store/projection/flow/mod.rs::ReplayInput",
         "crates/core/src/store/projection/flow/replay_input.rs::ReplayInput",

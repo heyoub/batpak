@@ -22,7 +22,10 @@ pub mod fault;
 mod file_classification;
 mod frontier_api;
 mod gate;
-mod hidden_ranges;
+// `pub(crate)` (was `mod`) so the feature-gated `crate::__fuzz` module can name
+// `hidden_ranges::{load_cancelled_ranges, VISIBILITY_RANGES_FILENAME}`. Crate-
+// internal only; no public API-surface change.
+pub(crate) mod hidden_ranges;
 /// In-memory 2D event index, rebuilt from segments on startup.
 pub mod index;
 mod lifecycle;

@@ -36,6 +36,7 @@ dependencies = [
  "crc32fast",
  "dashmap",
  "ed25519-compact",
+ "fastrand",
  "flume",
  "libc",
  "memmap2",

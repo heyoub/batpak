@@ -116,6 +116,14 @@ pub mod __private {
     };
 }
 
+/// Fuzz-only decode entry points for the workspace-excluded `batpak-fuzz`
+/// cargo-fuzz crate (GAUNT-FUZZ-1). Gated behind `dangerous-test-hooks` and
+/// `#[doc(hidden)]`: a default build never compiles it, so there is no
+/// production API-surface change. See the module docs for the wrapper contract.
+#[cfg(feature = "dangerous-test-hooks")]
+#[doc(hidden)]
+pub mod __fuzz;
+
 // Self-alias for path hygiene in derive-generated code.
 // `batpak-macros` emits absolute `::batpak::...` paths (see ADR-0010 and
 // `crates/macros/src/lib.rs:151-166`). `pub extern crate self as batpak;`
