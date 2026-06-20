@@ -1,0 +1,14 @@
+# batpak is maintainer-led. The maintainer owns all paths; the lines below
+# call out the crown-jewel surfaces explicitly. Combined with required PRs,
+# this auto-requests review when those areas change.
+
+*                          @heyoub
+
+# Invariant lattice + ontology — change only via RFC (see CONTRIBUTING.md).
+/INVARIANTS.md             @heyoub
+/MODEL.md                  @heyoub
+/bpk-lib/traceability/     @heyoub
+
+# Core substrate + CI/release machinery.
+/bpk-lib/                  @heyoub
+/.github/                  @heyoub
