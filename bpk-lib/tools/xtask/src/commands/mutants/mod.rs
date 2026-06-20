@@ -40,8 +40,8 @@ mod tests {
     };
     use super::plan::{build_mutant_execution_plan, mutants_command, MutantExecutionPlan};
     use super::policy::{
-        assert_mutation_policy, next_ratchet_floor, DiffScope, RepoMutationPhase,
-        REPO_MUTATION_PHASE,
+        assert_mutation_policy, current_repo_mutation_enforcement, next_ratchet_floor, DiffScope,
+        MutationEnforcement, RepoMutationPhase, REPO_MUTATION_PHASE,
     };
     use super::score::{
         cargo_mutants_receipt_path, cargo_mutants_results_dir, mutation_score, MutationScore,
@@ -284,8 +284,22 @@ mod tests {
     }
 
     #[test]
-    fn current_phase_starts_repo_wide_in_record_only_mode() {
-        assert_eq!(REPO_MUTATION_PHASE, RepoMutationPhase::Phase0);
+    fn current_phase_enforces_repo_wide_blocking_floor() {
+        // GAUNT-MUT-4: the repo-wide lane is no longer RecordOnly; it enforces a real,
+        // monotonic floor. Phase4 == 75% (provisional pending first cloud confirmation).
+        // The floor only ever climbs, so this asserts >= the current committed floor.
+        assert_eq!(REPO_MUTATION_PHASE, RepoMutationPhase::Phase4);
+        match current_repo_mutation_enforcement() {
+            MutationEnforcement::Threshold { min_catch_pct } => {
+                assert!(
+                    min_catch_pct >= 75,
+                    "repo-wide mutation floor must not regress below the committed 75% (got {min_catch_pct}%)"
+                );
+            }
+            MutationEnforcement::RecordOnly => {
+                panic!("repo-wide mutation lane must be blocking, not RecordOnly")
+            }
+        }
     }
 
     #[test]

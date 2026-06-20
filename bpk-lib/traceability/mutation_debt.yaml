@@ -1,0 +1,24 @@
+# mutation_debt.yaml — typed debt ledger for surviving (missed) mutants.
+#
+# GAUNT-MUT-4. This file is the canonical record of mutants that the repo-wide
+# mutation lane currently fails to catch. Each surviving mutant must be tracked
+# here as explicit, typed debt rather than silently tolerated. A structural check
+# (owned elsewhere — NOT defined here) consumes this file and reds the build when a
+# NEW missed mutant appears that is not recorded below. Mirrors the existing
+# allowlist patterns (e.g. FROZEN_FIXTURE_DEBT, dead_code_silencer_allowlist).
+#
+# Schema — a list of entries, each with the following fields:
+#   mutant:     str  - the cargo-mutants mutant description (the exact line printed
+#                       in missed.txt, e.g. "replace == with != in unregister").
+#   file:       str  - repo-relative path to the source file the mutant lives in.
+#   line:       int  - 1-based line number of the mutated expression.
+#   seam:       str  - the mutation seam/lane slug that covers this file
+#                       (e.g. "projection-fusion", "lane-frontier", "repo-wide").
+#   first_seen: str  - ISO-8601 date (YYYY-MM-DD) the mutant first survived, so debt
+#                       age is auditable.
+#   reason:     str  - why it is currently tolerated and the plan to kill it
+#                       (e.g. "no falsifying test yet — tracked in #NNN").
+#
+# Empty list = no tolerated surviving mutants. Keep this list at zero whenever
+# possible; every entry is a falsifying test that has not been written yet.
+[]
