@@ -873,3 +873,28 @@
     catalog ids still ride the weak header-citation / ledger escalation path. The
     MODEL.md symbol-binding gate (5.2) and the prose-only burndown ratchet (5.4)
     are DEFERRED and logged in GAUNTLET_ISSUES.md.
+
+- title: Repo-IR fold-fusion runner is metacircular fold-fusion equivalent
+  section: Structural Harness
+  pattern: Structural Harness
+  status: green
+  invariants:
+    - INV-GAUNTLET-FOLD-FUSION
+  locations:
+    - bpk-lib/tools/integrity/src/repo_ir.rs
+    - bpk-lib/tools/integrity/src/repo_ir_tests.rs
+  commands:
+    - cargo xtask structural
+  coverage_delta: >
+    the minimal repo-IR binds six fact families (AL assignments, gate ownership,
+    waiver ownership, public-surface map, mutation-seam map, docs traceability)
+    into one column-store; the metacircular test asserts the fused single-pass
+    fitness runner equals the separate-pass runner for two fact families; exact
+    JSON delta not recorded.
+  mutation_delta: unmeasured
+  blind_spots: >
+    only two skeleton fitness functions are wired and the fitness pass is advisory
+    (not blocking) in this skeleton. Re-hosting the existing serial structural
+    checks onto the IR (item 6.3), the YAML-authored fitness registry (item 3.4),
+    and the syn symbol/call/type columns are DEFERRED and logged in
+    GAUNTLET_ISSUES.md.

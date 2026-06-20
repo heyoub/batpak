@@ -510,3 +510,13 @@
   artifacts:
     - ART-DOCS-CATALOG-GATE
   witness_test: tools/integrity/src/docs_catalog_tests.rs::witness_gate_rejects_non_test_fn
+- id: INV-GAUNTLET-FOLD-FUSION
+  statement: >-
+    The gauntlet's own fitness functions fold over ONE shared repo-IR column-store (binding AL
+    assignments, gate ownership, waiver ownership, the public-surface map, the mutation-seam map, and
+    docs traceability), and the fused single-traversal runner produces the identical finding set as
+    running each fitness in its own separate pass, so the integrity engine obeys the same
+    banana-split fold-fusion equivalence law it tests for event projections.
+  artifacts:
+    - ART-REPO-IR-SOURCE
+  witness_test: tools/integrity/src/repo_ir_tests.rs::run_fused_equals_run_separate

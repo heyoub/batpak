@@ -28,6 +28,11 @@
     - tools/integrity/src/docs_catalog.rs
     - tools/integrity/src/docs_catalog_tests.rs
     - tools/integrity/src/structural.rs
+- id: ART-REPO-IR-SOURCE
+  kind: tool
+  paths:
+    - tools/integrity/src/repo_ir.rs
+    - tools/integrity/src/repo_ir_tests.rs
 - id: ART-TRACEABILITY
   kind: registry
   paths:
