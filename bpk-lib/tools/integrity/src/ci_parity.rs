@@ -81,6 +81,10 @@ pub(crate) fn check(repo_root: &Path) -> Result<()> {
     let xtask_main = fs::read_to_string(repo_root.join("tools/xtask/src/main.rs"))
         .context("read tools/xtask/src/main.rs")?;
     let xtask_sources = xtask_source_text(repo_root)?;
+    // Anti-rebury (P1-1): the L2+ contract gates must stay on the default PR
+    // path inside `ci_fast()`. This blocks silently moving them back into the
+    // label-gated `ci()`/`preflight()` lanes.
+    assert_ci_fast_keeps_default_path_gates(&xtask_sources)?;
     let dockerfile = fs::read_to_string(project_root.join(".devcontainer/Dockerfile"))
         .context("read .devcontainer/Dockerfile")?;
     let workflows = [
@@ -482,6 +486,93 @@ fn assert_workflow_just_recipes_map_to_xtask(
     Ok(())
 }
 
+/// The exact xtask call substrings that MUST appear inside the body of
+/// `ci_fast()` so the L2+ contract gates stay on the default PR path. Each is a
+/// distinctive marker of the corresponding gate invocation (P1-1). If a future
+/// edit re-buries a gate (moves it back into the label-gated `ci()`/`preflight`
+/// lanes, or drops it entirely), the marker disappears from the `ci_fast` body
+/// and this gate fails — preventing silent re-burial.
+const CI_FAST_REQUIRED_GATE_MARKERS: &[(&str, &str)] = &[
+    ("coverage floor", "coverage::cover(CoverArgs"),
+    (
+        "public-api baseline",
+        "crate::public_api::public_api(PublicApiArgs",
+    ),
+    (
+        "package-leak-scan",
+        "super::package_leak_scan(PackageLeakScanArgs",
+    ),
+    ("doctor --strict", "integrity(\"doctor\", [\"--strict\"])"),
+];
+
+/// Extract the body of EVERY `fn ci_fast() -> Result<()>` in the concatenated
+/// xtask source surface. There are legitimately two: the real implementation in
+/// `commands/ci.rs` and a one-line delegator (`ci::ci_fast()`) in `commands.rs`
+/// that `main.rs` dispatches through. Each body is the text between the
+/// function's opening `{` and the next top-level `}` (a line that is exactly
+/// `}`), which is how rustfmt closes a free function in this tree. Returning all
+/// bodies lets the anti-rebury assertion accept the gates living in the real
+/// impl while ignoring the delegator — and still catch true re-burial, because a
+/// gate moved out of the real `ci_fast` into `ci()`/`preflight` appears in NO
+/// `ci_fast` body.
+fn extract_ci_fast_bodies(xtask_sources: &str) -> Result<Vec<String>> {
+    let signature = "fn ci_fast() -> Result<()> {";
+    let mut bodies = Vec::new();
+    let mut search_from = 0usize;
+    while let Some(rel) = xtask_sources[search_from..].find(signature) {
+        let start = search_from + rel;
+        let after_sig = &xtask_sources[start + signature.len()..];
+        let mut body = String::new();
+        let mut closed = false;
+        for line in after_sig.lines() {
+            if line == "}" {
+                closed = true;
+                break;
+            }
+            body.push_str(line);
+            body.push('\n');
+        }
+        if !closed {
+            bail!(
+                "ci-parity: found `fn ci_fast()` but could not locate its closing `}}` at \
+                 column 0 in the xtask source surface; the anti-rebury check cannot scope to \
+                 its body."
+            );
+        }
+        bodies.push(body);
+        search_from = start + signature.len();
+    }
+    if bodies.is_empty() {
+        bail!(
+            "ci-parity: could not find `fn ci_fast() -> Result<()> {{` in the xtask source \
+             surface (tools/xtask/src/). The default-path fast lane must exist so its L2+ \
+             gates can be verified."
+        );
+    }
+    Ok(bodies)
+}
+
+/// Assert that `ci_fast()` still invokes every L2+ contract gate on the default
+/// PR path. Each marker must appear in at least one `ci_fast` body (the real
+/// impl); a gate re-buried into `ci()`/`preflight` appears in none and fails.
+/// See [`CI_FAST_REQUIRED_GATE_MARKERS`].
+fn assert_ci_fast_keeps_default_path_gates(xtask_sources: &str) -> Result<()> {
+    let bodies = extract_ci_fast_bodies(xtask_sources)?;
+    for (gate, marker) in CI_FAST_REQUIRED_GATE_MARKERS {
+        if !bodies.iter().any(|body| body.contains(marker)) {
+            bail!(
+                "ci-parity: `ci_fast()` no longer invokes the {gate} gate (expected to find \
+                 `{marker}` in its body). The L2+ contract gates must run on the DEFAULT PR \
+                 path (P1-1); do not re-bury them in the label-gated `ci()`/`preflight` lanes. \
+                 If you are intentionally relocating the gate, update \
+                 CI_FAST_REQUIRED_GATE_MARKERS in tools/integrity/src/ci_parity.rs and the \
+                 meta-gate/gate_registry accordingly."
+            );
+        }
+    }
+    Ok(())
+}
+
 fn xtask_source_text(repo_root: &Path) -> Result<String> {
     let mut combined = String::new();
     for path in files_with_extension(&repo_root.join("tools/xtask/src"), "rs") {
@@ -525,6 +616,14 @@ enum XtaskCommand {
     Mutants,
     Setup,
     Release(ReleaseArgs),
+}
+
+pub(crate) fn ci_fast() -> Result<()> {
+    coverage::cover(CoverArgs { ci: true, json: false, threshold: Some(80) })?;
+    crate::public_api::public_api(PublicApiArgs { strict: true, check_baseline: true, bless_baseline: false })?;
+    super::package_leak_scan(PackageLeakScanArgs { allow_dirty: false, strict_language: true })?;
+    integrity("doctor", ["--strict"])?;
+    integrity("gauntlet-receipts-present", [])
 }
 
 fn install_tools() {
@@ -722,6 +821,77 @@ fn install_tools() {
             assert_workflow_list_values("perf.yml", planted, "surface", &["neutral", "native"])
                 .expect_err("missing value must fail");
         assert!(err.to_string().contains("surface"), "unexpected: {err:#}");
+    }
+
+    /// A synthetic `ci_fast()` body that invokes every required L2+ gate, used
+    /// as the green floor for the anti-rebury self-test below.
+    const GREEN_CI_FAST_SOURCE: &str = r#"
+pub(crate) fn ci_fast() -> Result<()> {
+    cargo(["fmt", "--check"])?;
+    coverage::cover(CoverArgs { ci: true, json: false, threshold: Some(80) })?;
+    crate::public_api::public_api(PublicApiArgs { strict: true, check_baseline: true, bless_baseline: false })?;
+    super::package_leak_scan(PackageLeakScanArgs { allow_dirty: false, strict_language: true })?;
+    integrity("doctor", ["--strict"])?;
+    integrity("gauntlet-receipts-present", [])
+}
+"#;
+
+    #[test]
+    fn ci_parity_rejects_ci_fast_missing_coverage_gate() {
+        // Anti-rebury (P1-1): the green ci_fast body containing every gate
+        // passes; removing the coverage call (re-burying the coverage floor)
+        // must make the anti-rebury assertion bail. Anti-vacuous: both the
+        // green AND the planted-violation case are asserted.
+        assert_ci_fast_keeps_default_path_gates(GREEN_CI_FAST_SOURCE)
+            .expect("green ci_fast with all gates must pass anti-rebury");
+
+        let reburied = GREEN_CI_FAST_SOURCE.replace(
+            "    coverage::cover(CoverArgs { ci: true, json: false, threshold: Some(80) })?;\n",
+            "",
+        );
+        let err = assert_ci_fast_keeps_default_path_gates(&reburied)
+            .expect_err("ci_fast missing the coverage gate must fail anti-rebury");
+        assert!(
+            err.to_string().contains("coverage floor"),
+            "unexpected error: {err:#}"
+        );
+    }
+
+    #[test]
+    fn ci_parity_rejects_ci_fast_missing_public_api_gate() {
+        // Companion to the coverage case: dropping the public-api baseline call
+        // from ci_fast must also trip the anti-rebury assertion.
+        let reburied = GREEN_CI_FAST_SOURCE.replace(
+            "    crate::public_api::public_api(PublicApiArgs { strict: true, check_baseline: true, bless_baseline: false })?;\n",
+            "",
+        );
+        let err = assert_ci_fast_keeps_default_path_gates(&reburied)
+            .expect_err("ci_fast missing the public-api gate must fail anti-rebury");
+        assert!(
+            err.to_string().contains("public-api baseline"),
+            "unexpected error: {err:#}"
+        );
+    }
+
+    #[test]
+    fn ci_parity_anti_rebury_reads_only_the_ci_fast_body() {
+        // A gate present elsewhere (e.g. still called inside `ci()`) must NOT
+        // satisfy the assertion: the scope is the ci_fast body only. Strip the
+        // coverage call from ci_fast but leave a decoy call after the closing
+        // brace; the assertion must still bail.
+        let reburied = GREEN_CI_FAST_SOURCE.replace(
+            "    coverage::cover(CoverArgs { ci: true, json: false, threshold: Some(80) })?;\n",
+            "",
+        );
+        let with_decoy = format!(
+            "{reburied}\npub(crate) fn ci() -> Result<()> {{\n    coverage::cover(CoverArgs {{ ci: true, json: false, threshold: Some(80) }})?;\n    Ok(())\n}}\n"
+        );
+        let err = assert_ci_fast_keeps_default_path_gates(&with_decoy)
+            .expect_err("coverage call outside ci_fast must not satisfy anti-rebury");
+        assert!(
+            err.to_string().contains("coverage floor"),
+            "unexpected error: {err:#}"
+        );
     }
 
     #[test]

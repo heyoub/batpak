@@ -113,12 +113,14 @@ jobs:
   coverage-baseline:
     # Always-on, NON-BLOCKING coverage observation for every Rust-touching PR.
     #
-    # The hard threshold-80 coverage gate lives in `cargo xtask preflight`
-    # (verify-linux, heavy lane). This job is intentionally advisory: it runs
-    # `cargo xtask cover` WITHOUT `--ci`, so it only reports — it never gates a
-    # merge. `continue-on-error: true` guarantees a cover-internal hiccup at the
-    # baseline stage cannot block a PR. Ratcheting a default-PR floor upward is
-    # a deferred follow-up; data must precede the ratchet.
+    # The hard threshold-80 coverage gate now lives on the DEFAULT PR path
+    # inside `cargo xtask ci-fast` (ci-fast-linux job) — see commands/ci.rs,
+    # which calls `coverage::cover` with the shared COVERAGE_FLOOR_PCT. This
+    # job is intentionally advisory: it runs `cargo xtask cover` WITHOUT `--ci`,
+    # so it only reports + uploads artifacts — it never gates a merge.
+    # `continue-on-error: true` guarantees a cover-internal hiccup at the
+    # baseline stage cannot block a PR. Ratcheting the default-PR floor upward
+    # is a deferred follow-up; data must precede the ratchet.
     name: Coverage baseline (advisory)
     runs-on: ubuntu-latest
     needs: [ci-fast-linux, rust-changed]
@@ -419,14 +421,17 @@ jobs:
   mutants-smoke-repo-wide:
     name: Mutation smoke (repo-wide ratchet)
     runs-on: ubuntu-latest
+    # Default-on, EVERY Rust-touching PR (gated only by the rust-changed
+    # detector — no label required), mirroring the always-on fuzz-smoke lane.
+    # This is bounded because it runs only the single repo-wide shard 0/48
+    # (REPO_WIDE_SMOKE_SHARD, lanes.rs). The heavy full 0/12..11/12 matrix
+    # (mutants-full) stays manual/label-only.
     if: >-
+      needs.rust-changed.outputs.rust == 'true' &&
       ((github.event_name == 'workflow_dispatch' &&
         (github.event.inputs.proof == 'mutants' ||
          github.event.inputs.proof == 'heavy')) ||
-       (github.event_name == 'pull_request' &&
-        (contains(github.event.pull_request.labels.*.name, 'run-heavy-ci') ||
-         contains(github.event.pull_request.labels.*.name, 'run-mutants')))) &&
-      needs.rust-changed.outputs.rust == 'true'
+       github.event_name == 'pull_request')
     needs: [ci-fast-linux, rust-changed]
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6

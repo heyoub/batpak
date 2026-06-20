@@ -1,8 +1,9 @@
 use super::{deny_split, integrity, templates};
 use crate::bench;
+use crate::coverage;
 use crate::publish::FAMILY_CRATES;
 use crate::util::{cargo, cargo_target_dir_arg};
-use crate::{BenchSurface, PackageLeakScanArgs, PublicApiArgs};
+use crate::{BenchSurface, CoverArgs, PackageLeakScanArgs, PublicApiArgs};
 use anyhow::Result;
 
 /// Early PR signal: format, clippy, checks, tests, dependency gates, machine law.
@@ -18,18 +19,20 @@ pub(crate) fn ci_fast() -> Result<()> {
     run_family_tests()?;
     integrity("traceability-check", [])?;
     integrity("structural-check", [])?;
-    // Tool-qualification anti-vacuity gate (P1-3): every registered gate must
-    // have left a non-vacuous execution receipt. Runs AFTER structural-check so
-    // the receipts it validates were just (re)generated in this same invocation.
-    integrity("gauntlet-receipts-present", [])
-}
-
-/// Full merge bundle: fast lane plus release-oriented and compile-heavy gates.
-pub(crate) fn ci() -> Result<()> {
-    ci_fast()?;
-    integrity("doctor", ["--strict"])?;
-    templates()?;
-    doc_deny_warnings()?;
+    // L2+ contract gates on the DEFAULT PR path (P1-1). These used to live only
+    // in `ci()`/`preflight()` behind the label-gated verify-linux job, which
+    // meant a public-api drift or sub-floor coverage shipped without any label.
+    // They now run in `ci-fast` (the always-on default lane) so EVERY
+    // Rust-touching PR enforces them. The devcontainer ships the required tools,
+    // so each gate is invoked STRICT here (cargo-public-api availability is
+    // still handled gracefully inside `public_api`, mirroring its existing
+    // strict/advisory split). Re-burying any of these is blocked by the
+    // anti-rebury assertion in tools/integrity/src/ci_parity.rs.
+    coverage::cover(CoverArgs {
+        ci: true,
+        json: false,
+        threshold: Some(coverage::COVERAGE_FLOOR_PCT),
+    })?;
     crate::public_api::public_api(PublicApiArgs {
         strict: true,
         check_baseline: true,
@@ -39,6 +42,23 @@ pub(crate) fn ci() -> Result<()> {
         allow_dirty: false,
         strict_language: true,
     })?;
+    integrity("doctor", ["--strict"])?;
+    // Tool-qualification anti-vacuity gate (P1-3): every registered gate must
+    // have left a non-vacuous execution receipt. Runs AFTER structural-check so
+    // the receipts it validates were just (re)generated in this same invocation.
+    integrity("gauntlet-receipts-present", [])
+}
+
+/// Full merge bundle: fast lane plus release-oriented and compile-heavy gates.
+///
+/// The L2+ contract gates (coverage floor, public-api baseline,
+/// package-leak-scan, doctor --strict) now live in `ci_fast()` so they run on
+/// the default PR path; this bundle keeps only the genuinely compile-heavy /
+/// release-oriented extras on top of the fast lane.
+pub(crate) fn ci() -> Result<()> {
+    ci_fast()?;
+    templates()?;
+    doc_deny_warnings()?;
     bench::bench_compile(BenchSurface::Neutral)?;
     bench::bench_compile(BenchSurface::Native)?;
     unused_deps_advisory();

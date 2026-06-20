@@ -174,7 +174,69 @@ fn ast_references_store_method(ast: &syn::File, name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::ast_references_store_method;
+    use super::{ast_references_store_method, check};
+    use crate::source_cache::SourceCache;
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_repo(name: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock after epoch")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "batpak-store-pub-fn-{name}-{}-{nanos}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&path).expect("create temp repo");
+        path
+    }
+
+    fn write_file(repo: &Path, rel: &str, body: &str) {
+        let path = repo.join(rel);
+        fs::create_dir_all(path.parent().expect("parent dir")).expect("create dirs");
+        fs::write(&path, body).expect("write fixture file");
+    }
+
+    /// END-TO-END RED FIXTURE: a `pub fn` on `impl Store` with ZERO test/source
+    /// references must make the gate's `check(..)` fail; a single witnessing
+    /// reference must make it pass. Both halves run so the test cannot pass
+    /// vacuously — neutralizing the violation (adding the witness) turns it red.
+    #[test]
+    fn store_pub_fn_coverage_rejects_uncovered_store_method() {
+        let repo = temp_repo("uncovered");
+        write_file(
+            &repo,
+            "crates/core/src/store/mod.rs",
+            "pub struct Store;\nimpl Store {\n    pub fn orphaned_probe(&self) -> u8 { 0 }\n}\n",
+        );
+
+        // GREEN: a test file that actually calls the method satisfies coverage.
+        write_file(
+            &repo,
+            "crates/core/tests/probe.rs",
+            "#[test]\nfn exercises() {\n    let store = batpak::store::Store;\n    let _ = store.orphaned_probe();\n}\n",
+        );
+        let mut cache = SourceCache::new(&repo);
+        check(&repo, &mut cache).expect("a witnessed Store pub fn is accepted");
+
+        // RED: remove the witness — the orphaned pub fn must be flagged.
+        write_file(
+            &repo,
+            "crates/core/tests/probe.rs",
+            "#[test]\nfn unrelated() {\n    assert_eq!(1, 1);\n}\n",
+        );
+        let mut cache = SourceCache::new(&repo);
+        let err = check(&repo, &mut cache).expect_err("orphaned Store pub fn is rejected");
+        assert!(
+            err.to_string().contains("Store pub fn coverage failure")
+                && err.to_string().contains("orphaned_probe"),
+            "{err:?}"
+        );
+
+        fs::remove_dir_all(repo).expect("remove temp repo");
+    }
 
     #[test]
     fn ast_reference_detection_ignores_comments_and_strings() {

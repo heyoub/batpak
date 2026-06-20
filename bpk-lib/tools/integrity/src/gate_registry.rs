@@ -107,40 +107,50 @@ pub(crate) const GATES: &[Gate] = &[
         ),
         has_blocking_authority: true,
     },
-    // --- Structural source lints that BLOCK in `structural::run` but have only
-    //     green-mechanics unit tests (helper-level), NOT a dedicated end-to-end
-    //     RED fixture asserting the full `check(..)` errors on a planted bad tree.
-    //     Recorded honestly as NOT-YET-QUALIFIED: blocking authority withheld
-    //     until a red fixture lands. See UNQUALIFIED_BLOCKING_GATES. ---
+    // --- Structural source lints (blocking, qualified). Each now carries a
+    //     dedicated end-to-end RED fixture: a green baseline temp tree plus a
+    //     planted violation asserting the full `check(..)` returns `Err`. ---
     Gate {
         slug: "file-size-pressure",
-        red_fixture_test: None,
-        has_blocking_authority: false,
+        red_fixture_test: Some(
+            "tools/integrity/src/structural_tests.rs::file_size_pressure_rejects_oversized_production_file",
+        ),
+        has_blocking_authority: true,
     },
     Gate {
         slug: "inline-test-island-pressure",
-        red_fixture_test: None,
-        has_blocking_authority: false,
+        red_fixture_test: Some(
+            "tools/integrity/src/structural_tests.rs::inline_test_island_pressure_rejects_oversized_island",
+        ),
+        has_blocking_authority: true,
     },
     Gate {
         slug: "dead-code-silencers",
-        red_fixture_test: None,
-        has_blocking_authority: false,
+        red_fixture_test: Some(
+            "tools/integrity/src/structural_tests.rs::dead_code_silencers_reject_dead_code_allow",
+        ),
+        has_blocking_authority: true,
     },
     Gate {
         slug: "allow-justifications",
-        red_fixture_test: None,
-        has_blocking_authority: false,
+        red_fixture_test: Some(
+            "tools/integrity/src/structural_tests.rs::allow_justifications_rejects_unanchored_allow",
+        ),
+        has_blocking_authority: true,
     },
     Gate {
         slug: "pub-items-have-tests",
-        red_fixture_test: None,
-        has_blocking_authority: false,
+        red_fixture_test: Some(
+            "tools/integrity/src/public_surface.rs::pub_items_have_tests_rejects_unwitnessed_pub_item",
+        ),
+        has_blocking_authority: true,
     },
     Gate {
         slug: "store-pub-fn-coverage",
-        red_fixture_test: None,
-        has_blocking_authority: false,
+        red_fixture_test: Some(
+            "tools/integrity/src/store_pub_fn_coverage.rs::store_pub_fn_coverage_rejects_uncovered_store_method",
+        ),
+        has_blocking_authority: true,
     },
 ];
 
@@ -149,14 +159,13 @@ pub(crate) const GATES: &[Gate] = &[
 /// surfaced finding, NOT a fabricated qualification: each needs an end-to-end red
 /// fixture (plant a violating tree, assert the gate's `check(..)` returns `Err`)
 /// before it may flip to blocking in the registry.
-pub(crate) const UNQUALIFIED_BLOCKING_GATES: &[&str] = &[
-    "file-size-pressure",
-    "inline-test-island-pressure",
-    "dead-code-silencers",
-    "allow-justifications",
-    "pub-items-have-tests",
-    "store-pub-fn-coverage",
-];
+///
+/// This list is now EMPTY: every previously-unqualified structural source lint
+/// earned its blocking authority by landing a dedicated end-to-end RED fixture
+/// (see the `structural-source-lints` family in [`GATES`]). The list stays so the
+/// honesty-ledger test below keeps it permanently empty — a regression that
+/// withholds authority again must re-list the gate here.
+pub(crate) const UNQUALIFIED_BLOCKING_GATES: &[&str] = &[];
 
 /// Slugs of gates that emit an execution receipt the `gauntlet-receipts-present`
 /// check requires. Kept narrow to the gates whose receipts the integrity binary
@@ -309,12 +318,17 @@ mod tests {
         .expect("a real test fn must resolve"));
     }
 
-    /// The honesty ledger: every slug listed as an unqualified blocking gate
-    /// exists in the registry with `has_blocking_authority == false` (so we never
-    /// quietly flip one to blocking without giving it a red fixture and removing
-    /// it from this list).
+    /// The honesty ledger: the unqualified-blocking list is now EMPTY — every
+    /// structural source lint earned a red fixture and flipped to blocking. Any
+    /// gate re-added to the list must still be recorded `has_blocking_authority:
+    /// false` with no red fixture (so we never quietly flip one to blocking
+    /// without giving it a red fixture and removing it from this list).
     #[test]
     fn unqualified_blocking_gates_are_recorded_nonblocking() {
+        assert!(
+            UNQUALIFIED_BLOCKING_GATES.is_empty(),
+            "every structural source lint now has a red fixture; the unqualified list must be empty"
+        );
         for slug in UNQUALIFIED_BLOCKING_GATES {
             let gate = GATES
                 .iter()
