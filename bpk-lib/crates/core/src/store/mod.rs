@@ -20,9 +20,12 @@ mod error;
 )]
 pub mod fault;
 mod file_classification;
+mod fork_report;
 mod frontier_api;
 mod gate;
 mod hidden_ranges;
+mod import;
+mod import_api;
 /// In-memory 2D event index, rebuilt from segments on startup.
 pub mod index;
 mod lifecycle;
@@ -96,12 +99,22 @@ pub use error::{
 pub use fault::{
     CountdownAction, CountdownInjector, FaultInjector, InjectionPoint, ProbabilisticInjector,
 };
+pub use fork_report::{
+    fork_report_body_hash, ForkCopyStrategy, ForkEvidenceHash, ForkFinding, ForkOptions,
+    ForkReport, ForkReportBody, ForkStrategyCounts, FORK_EVIDENCE_REPORT_SCHEMA_VERSION,
+};
 pub use gate::DurabilityGate;
+pub use import::{
+    provenance, provenance_from_extensions, ImportFilter, ImportOptions, ImportProvenance,
+    ImportReport, ImportSelector, IMPORT_PROVENANCE_SCHEMA_VERSION,
+};
 pub use platform::clock::{Clock, SystemClock};
 pub use projection::watch::{CursorWatcherError, ProjectionWatcher, WatcherError};
 pub use projection::{
     CacheCapabilities, CacheMeta, Freshness, NativeCache, NoCache, ProjectionCache,
 };
+/// Three projection states returned by [`Store::project_fused3`].
+pub type ProjectionFusion3<First, Second, Third> = (Option<First>, Option<Second>, Option<Third>);
 pub use projection_run::{
     ProjectionEvidenceRegistry, ProjectionRunCacheStatus, ProjectionRunCheckpointRef,
     ProjectionRunEvidenceReport, ProjectionRunFinding, ProjectionRunFreshnessStatus,
@@ -127,10 +140,10 @@ pub use snapshot_report::{
 };
 pub use stats::{
     ActiveSegmentReadEvidence, ClockEvidence, FrontierView, HlcPoint, HostEvidenceSummary,
-    LockLeafSymlinkProtection, MmapAdmissionSummary, MmapEvidence, ParentDirSyncAdmissionSummary,
-    ParentDirSyncEvidence, PlatformAdmissionSummary, PlatformEvidenceSummary, StoreDiagnostics,
-    StoreLockAdmissionSummary, StorePathEvidenceSummary, StorePathStatusEvidence, StoreStats,
-    WatermarkKind, WriterPressure,
+    LaneFrontierView, LockLeafSymlinkProtection, MmapAdmissionSummary, MmapEvidence,
+    ParentDirSyncAdmissionSummary, ParentDirSyncEvidence, PlatformAdmissionSummary,
+    PlatformEvidenceSummary, StoreDiagnostics, StoreLockAdmissionSummary, StorePathEvidenceSummary,
+    StorePathStatusEvidence, StoreStats, WatermarkKind, WriterPressure,
 };
 pub use store_resource_report::{
     store_data_dir_identity_hash, store_resource_evidence_report_from_diagnostics,

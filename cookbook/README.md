@@ -7,6 +7,9 @@ recipe below should stay backed by a compiling example, template, or test.
 - [`200_BUILD_WITH_BATPAK.md`](200_BUILD_WITH_BATPAK.md) - shortest end-to-end path.
 - [`200_TYPED_EVENT_STORE.md`](200_TYPED_EVENT_STORE.md) - typed event append.
 - [`200_IDEMPOTENT_PASS.md`](200_IDEMPOTENT_PASS.md) - durable re-runnable idempotent append.
+- [`200_FORK_CLONE.md`](200_FORK_CLONE.md) - copy-on-write store clone.
+- [`200_IMPORT_FORK.md`](200_IMPORT_FORK.md) - re-apply events from another store.
+- [`200_LANE_BRANCH.md`](200_LANE_BRANCH.md) - lane-scoped branch writes and reads.
 - [`200_REGION_READ.md`](200_REGION_READ.md) - bounded reads.
 - [`200_READ_WALK_EVIDENCE.md`](200_READ_WALK_EVIDENCE.md) - read evidence reports.
 - [`200_PROJECTION.md`](200_PROJECTION.md) - projection and projection-run evidence.

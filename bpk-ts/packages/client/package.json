@@ -1,6 +1,6 @@
 {
   "name": "@batpak/client",
-  "version": "0.8.2",
+  "version": "0.8.3",
   "description": "NETBAT/1 frame client. Phase 0: TCP only.",
   "license": "MIT OR Apache-2.0",
   "repository": {

@@ -153,6 +153,7 @@ impl AppendSubmission {
             idempotency_key: self.options.idempotency_key.map(|id| id.as_u128()),
             dag_lane: position_hint.lane,
             dag_depth: position_hint.depth,
+            dag_branch_root: position_hint.branch_root,
             extensions: self.options.extensions,
         }
     }

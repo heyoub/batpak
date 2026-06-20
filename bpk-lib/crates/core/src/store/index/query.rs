@@ -1,5 +1,5 @@
 use super::visibility::{extend_visible_entries, VisibilitySnapshot};
-use super::{IndexEntry, QueryHit, StoreIndex};
+use super::{IndexEntry, LaneHeadKey, QueryHit, StoreIndex};
 use crate::coordinate::{KindFilter, Region};
 
 impl StoreIndex {
@@ -40,6 +40,15 @@ impl StoreIndex {
             );
         }
         upgraded.filter(|entry| visibility.is_visible(entry.global_sequence))
+    }
+
+    pub(crate) fn upgrade_hit_visible_on_lane(
+        &self,
+        hit: QueryHit,
+        visibility: &VisibilitySnapshot,
+    ) -> Option<IndexEntry> {
+        self.upgrade_hit_with_visibility(hit, visibility)
+            .filter(|entry| visibility.is_visible_on_lane(entry.global_sequence, entry.dag_lane))
     }
 
     /// Return all entries matching `region` as lightweight `QueryHit` values.
@@ -171,9 +180,14 @@ impl StoreIndex {
         let requested_scope = region.scope.as_deref();
         let fact_filter = region.fact.as_ref();
         let clock_range = region.clock_range;
+        let lane = region.lane;
 
         hits.retain(|h| {
-            if !visibility.is_visible(h.global_sequence) {
+            if let Some(lane) = lane {
+                if h.dag_lane != lane || !visibility.is_visible_on_lane(h.global_sequence, lane) {
+                    return false;
+                }
+            } else if !visibility.is_visible(h.global_sequence) {
                 return false;
             }
             if let Some(scope) = requested_scope {
@@ -247,6 +261,7 @@ impl StoreIndex {
         F: FnMut(u64) -> bool,
     {
         let clock_range = region.clock_range;
+        let lane = region.lane;
         let trim_threshold = limit
             .saturating_mul(2)
             .max(limit.saturating_add(1))
@@ -262,7 +277,13 @@ impl StoreIndex {
                 if !seq_ok(entry.global_sequence) {
                     continue;
                 }
-                if !visibility.is_visible(entry.global_sequence) {
+                if let Some(lane) = lane {
+                    if entry.dag_lane != lane
+                        || !visibility.is_visible_on_lane(entry.global_sequence, lane)
+                    {
+                        continue;
+                    }
+                } else if !visibility.is_visible(entry.global_sequence) {
                     continue;
                 }
                 if let Some((min, max)) = clock_range {
@@ -281,13 +302,27 @@ impl StoreIndex {
     }
 
     /// Returns the latest entry for `entity`, filtered by visibility.
-    pub(crate) fn get_latest(&self, entity: &str) -> Option<IndexEntry> {
+    pub(crate) fn get_latest(&self, entity: &str, lane: u32) -> Option<IndexEntry> {
         let _read_guard = self.swap_gate.read();
         let visibility = self.sequence.snapshot();
+        let entity_id = self.interner.get(entity)?;
         self.latest
-            .get(entity)
+            .get(&LaneHeadKey::new(entity_id, lane))
             .map(|r| r.value().as_ref().clone())
-            .filter(|e| visibility.is_visible(e.global_sequence))
+            .filter(|e| visibility.is_visible_on_lane(e.global_sequence, lane))
+    }
+
+    /// Returns the latest committed entry for writer chain construction.
+    ///
+    /// Unlike [`StoreIndex::get_latest`], this intentionally ignores reader
+    /// visibility so multiple writes staged under the same visibility fence
+    /// still form a single per-lane hash/clock chain before publication.
+    pub(crate) fn get_latest_committed(&self, entity: &str, lane: u32) -> Option<IndexEntry> {
+        let _read_guard = self.swap_gate.read();
+        let entity_id = self.interner.get(entity)?;
+        self.latest
+            .get(&LaneHeadKey::new(entity_id, lane))
+            .map(|r| r.value().as_ref().clone())
     }
 
     pub(crate) fn stream(&self, entity: &str) -> Vec<IndexEntry> {
@@ -299,6 +334,24 @@ impl StoreIndex {
                 let mut entries = Vec::with_capacity(r.value().len());
                 extend_visible_entries(&mut entries, r.value().values(), &visibility);
                 entries
+            })
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn stream_lane(&self, entity: &str, lane: u32) -> Vec<IndexEntry> {
+        let _read_guard = self.swap_gate.read();
+        let visibility = self.sequence.snapshot();
+        self.streams
+            .get(entity)
+            .map(|r| {
+                r.value()
+                    .values()
+                    .filter(|entry| {
+                        entry.dag_lane == lane
+                            && visibility.is_visible_on_lane(entry.global_sequence, lane)
+                    })
+                    .map(|entry| entry.as_ref().clone())
+                    .collect()
             })
             .unwrap_or_default()
     }

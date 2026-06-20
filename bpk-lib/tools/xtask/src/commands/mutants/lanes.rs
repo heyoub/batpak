@@ -43,6 +43,11 @@ pub(super) const PROJECTION_MUTANT_FILES: &[&str] = &[
     "crates/core/src/store/projection/mod.rs",
     "crates/core/src/store/projection/watch.rs",
 ];
+pub(super) const PROJECTION_FUSION_MUTANT_FILES: &[&str] = &[
+    "crates/core/src/store/projection/flow/fusion.rs",
+    "crates/core/src/store/projection/flow/mod.rs",
+    "crates/core/src/store/read_api.rs",
+];
 pub(super) const SEGMENT_SCAN_MUTANT_FILES: &[&str] =
     &["crates/core/src/store/segment/scan/**/*.rs"];
 pub(super) const HASH_CHAIN_REPLAY_MUTANT_FILES: &[&str] = &[
@@ -96,8 +101,109 @@ pub(super) const NETBAT_BOUNDARY_MUTANT_FILES: &[&str] = &[
     "crates/netbat/src/route.rs",
     "crates/netbat/src/transport.rs",
 ];
+// fork seam: the CoW fork decision (active-vs-sealed split) + evidence report.
+// fs.rs holds the cow_copy_file ladder but also unrelated helpers, so it is
+// proven via targeted `mutants --re` rather than a whole-file seam glob.
+pub(super) const FORK_MUTANT_FILES: &[&str] = &[
+    "crates/core/src/store/file_classification.rs",
+    "crates/core/src/store/fork_report.rs",
+];
+// import seam: import.rs is fully owned by Store::import_events (key derivation,
+// chunking, dedup classification, reserved-kind skip, provenance).
+pub(super) const IMPORT_MUTANT_FILES: &[&str] = &["crates/core/src/store/import.rs"];
+pub(super) const LANE_BRANCH_MUTANT_FILES: &[&str] = &[
+    "crates/core/src/coordinate/mod.rs",
+    "crates/core/src/store/append.rs",
+    "crates/core/src/store/read_api.rs",
+    "crates/core/src/store/index/entry.rs",
+    "crates/core/src/store/index/mod.rs",
+    "crates/core/src/store/index/query.rs",
+    "crates/core/src/store/write/control/submission.rs",
+    "crates/core/src/store/write/fanout.rs",
+    "crates/core/src/store/write/writer/append.rs",
+    "crates/core/src/store/write/writer/batch.rs",
+];
+pub(super) const LANE_FRONTIER_MUTANT_FILES: &[&str] = &[
+    "crates/core/src/store/hidden_ranges.rs",
+    "crates/core/src/store/index/mod.rs",
+    "crates/core/src/store/index/projection_bridge.rs",
+    "crates/core/src/store/index/query.rs",
+    "crates/core/src/store/index/visibility.rs",
+    "crates/core/src/store/lifecycle_api.rs",
+    "crates/core/src/store/open.rs",
+    "crates/core/src/store/projection/flow/fusion.rs",
+    "crates/core/src/store/projection/flow/mod.rs",
+    "crates/core/src/store/projection/registry.rs",
+    "crates/core/src/store/stats.rs",
+    "crates/core/src/store/write/writer/publish.rs",
+    "crates/core/src/store/write/writer/watermark.rs",
+];
 pub(super) const INDEX_TOPOLOGY_DEFAULT_EQUIVALENT_MUTANT: &str = r"crates/core/src/store/config\.rs:.*replace IndexTopology::aos -> Self with Default::default\(\)";
+// Equivalent-mutant registry for the import re-application seam. Each entry is a
+// mutant proven to have no observable effect on import behavior; excluding them
+// keeps the mutation-score denominator honest instead of letting provably
+// equivalent mutants drag the gate. Every entry carries its equivalence proof.
+//
+// (a) `import.rs:282` post-append dedup classification
+//     (`if receipt.sequence < pre_import_frontier`): a fresh (non-deduplicated)
+//     append always lands at a sequence STRICTLY GREATER than the pre-import
+//     frontier captured before the loop, and a deduplicated source event never
+//     reaches `append_batch` (it is pre-filtered at :246). So the comparison is
+//     only ever evaluated for sequences strictly above the frontier — there is
+//     no sequence equal to the frontier in this branch. `<`, `==`, and `<=` all
+//     classify these sequences identically (none take the dedup arm), so the
+//     `< -> ==` and `< -> <=` mutants are observationally equivalent.
+// (b) `import.rs:309` dedup probe
+//     (`idemp.get(...).is_some() || get_by_id(...).is_some()`): dedup is
+//     double-defended. The pre-filter here is an efficiency short-circuit only;
+//     correctness is backstopped by `append_batch`'s durable idempotency (a
+//     re-applied key collapses to the existing event) AND the post-append
+//     sequence<frontier reclassification at :282. Whether the probe is `||` or
+//     `&&`, an already-present event is still deduplicated by the durable path
+//     and the observable imported/deduplicated counts are unchanged, so the
+//     `|| -> &&` mutant is equivalent.
+// (c) `ImportSelector::all -> Self with Default::default()`: `Default for
+//     ImportSelector` IS `Self::all()` (see import.rs Default impl), so the
+//     mutant rewrites `all()` to call its own Default, which calls `all()` —
+//     unbounded recursion. This is a timeout/abort, not a behavior change, so
+//     it cannot be killed by an assertion and is registered as equivalent.
+pub(super) const IMPORT_EQUIVALENT_MUTANTS: &[&str] = &[
+    r"crates/core/src/store/import\.rs:.*replace < with == in import_events",
+    r"crates/core/src/store/import\.rs:.*replace < with <= in import_events",
+    r"crates/core/src/store/import\.rs:.*replace \|\| with && in import_key_already_present",
+    r"crates/core/src/store/import\.rs:.*replace ImportSelector::all -> Self with Default::default",
+];
 pub(super) const MUTANT_EXCLUDE_RES: &[&str] = &[INDEX_TOPOLOGY_DEFAULT_EQUIVALENT_MUTANT];
+// Platform-backend seam: cfg-gated reflink_impl variants. The Linux FICLONE
+// reflink_impl (fs.rs:215) IS compiled and IS killed on the Linux CI runner, so
+// it is NOT excluded. These entries are the macOS (clonefile) and unsupported
+// (Err Unsupported) variants of `reflink_impl`, which are NOT compiled on the
+// Linux CI runner, so cargo-mutants can neither apply nor test them there. Their
+// cargo-mutants descriptions are identical to the Linux variant, so they are
+// distinguished by LINE number (verified against fs.rs):
+//   * fs.rs:233 — `#[cfg(target_os = "macos")] reflink_impl -> Ok(())`
+//   * fs.rs:252 — the macOS `result == 0` flipped to `!=`
+//   * fs.rs:260 — `#[cfg(not(any(linux, macos)))] reflink_impl -> Ok(())`
+// The macOS and non-Linux `reflink_impl` cfg variants (fs.rs ~lines 232-265,
+// below the Linux FICLONE variant at ~215) are not compiled on the Linux CI
+// runner, so cargo-mutants cannot exercise them there. Match the 230-269 line
+// band — robust to small line shifts, and never the Linux variant at line 21x.
+const PLATFORM_BACKEND_MUTANT_EXCLUDE_RES: &[&str] = &[r"fs\.rs:2[3-6][0-9]:.*reflink_impl"];
+// Fork-isolation seam equivalent-mutant registry. Each entry is proven to have
+// no observable effect on fork classification; excluding them keeps the
+// mutation-score denominator honest. Every entry carries its equivalence proof.
+//
+// (a) `file_classification.rs:111` match guard
+//     `segment_id.as_u64() == active_segment_id -> true` in fork_strategy:
+//     `active_segment_id` is always the MAX live segment id (the latest-segment
+//     watermark), so NO segment has `id > active`. The first arm takes
+//     `id < active`, the second `id == active`, and `id > active` is impossible.
+//     Replacing the guard with `true` (i.e. `>= active`) therefore selects the
+//     SAME arm for every reachable segment — `== active` and `true` are
+//     observationally identical, so the mutant is equivalent.
+const FORK_ISOLATION_MUTANT_EXCLUDE_RES: &[&str] = &[
+    r"file_classification\.rs:.*replace match guard segment_id.as_u64\(\) == active_segment_id with true in StoreFileKind::fork_strategy",
+];
 const SEGMENT_SCAN_MUTANT_EXCLUDE_RES: &[&str] = &[];
 const WRITER_COMMIT_MUTANT_EXCLUDE_RES: &[&str] = &[
     // CI receipt: PreparedBatch::len -> 0 exceeded the auto test timeout while
@@ -405,6 +511,9 @@ fn critical_seam_exclude_res(slug: &str) -> &'static [&'static str] {
         "segment-scan" => SEGMENT_SCAN_MUTANT_EXCLUDE_RES,
         "writer-commit" => WRITER_COMMIT_MUTANT_EXCLUDE_RES,
         "projection-flow" => PROJECTION_MUTANT_EXCLUDE_RES,
+        "import-reapply" => IMPORT_EQUIVALENT_MUTANTS,
+        "platform-backend" => PLATFORM_BACKEND_MUTANT_EXCLUDE_RES,
+        "fork-isolation" => FORK_ISOLATION_MUTANT_EXCLUDE_RES,
         _ => &[],
     }
 }
@@ -434,6 +543,14 @@ pub(super) fn critical_mutation_seams() -> &'static [CriticalMutationSeam] {
             surface: MutantSurface::AllFeatures,
             package: None,
             paths: PROJECTION_MUTANT_FILES,
+        },
+        CriticalMutationSeam {
+            slug: "projection-fusion",
+            label: "projection fusion equivalence",
+            description: "fused tuple replay, per-projection filtering, and single-pass read behavior",
+            surface: MutantSurface::AllFeatures,
+            package: None,
+            paths: PROJECTION_FUSION_MUTANT_FILES,
         },
         CriticalMutationSeam {
             slug: "segment-scan",
@@ -523,6 +640,38 @@ pub(super) fn critical_mutation_seams() -> &'static [CriticalMutationSeam] {
             package: Some("netbat"),
             paths: NETBAT_BOUNDARY_MUTANT_FILES,
         },
+        CriticalMutationSeam {
+            slug: "fork-isolation",
+            label: "fork CoW isolation classification",
+            description: "fork strategy active-vs-sealed split, share-vs-deep-copy classification, and fork evidence report",
+            surface: MutantSurface::AllFeatures,
+            package: None,
+            paths: FORK_MUTANT_FILES,
+        },
+        CriticalMutationSeam {
+            slug: "import-reapply",
+            label: "import re-application idempotency",
+            description: "import key derivation, all-or-nothing chunking, dedup-vs-import classification, reserved-kind skip, and provenance",
+            surface: MutantSurface::AllFeatures,
+            package: None,
+            paths: IMPORT_MUTANT_FILES,
+        },
+        CriticalMutationSeam {
+            slug: "lane-branch",
+            label: "lane branch isolation",
+            description: "per-(entity,lane) heads, writer branch-root positions, lane-scoped reads, and lane-filtered fanout",
+            surface: MutantSurface::AllFeatures,
+            package: None,
+            paths: LANE_BRANCH_MUTANT_FILES,
+        },
+        CriticalMutationSeam {
+            slug: "lane-frontier",
+            label: "per-lane frontier visibility",
+            description: "per-lane watermark lattice, sequence-gate lane cursors, lane waits, projection applied progress, and cold-start lane bootstrap",
+            surface: MutantSurface::AllFeatures,
+            package: None,
+            paths: LANE_FRONTIER_MUTANT_FILES,
+        },
     ]
 }
 
@@ -565,4 +714,61 @@ pub(super) fn repo_wide_mutation_lanes(
         .into_iter()
         .map(|surface| MutationLane::repo_wide(surface, shard))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::critical_seam_slugs;
+    use std::collections::BTreeSet;
+
+    /// Anti-fragility guard: the hard-coded `seam:` matrix in the CI workflow must
+    /// stay in lockstep with `critical_mutation_seams()`. Without this coupling a
+    /// seam added in one place but not the other silently goes ungated — exactly
+    /// how the 0.9.0 fork/import seams were initially missing from the CI matrix.
+    #[test]
+    fn ci_mutation_seam_matrix_matches_registry() {
+        let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(3)
+            .expect("xtask lives at <repo>/bpk-lib/tools/xtask; three parents reach the repo root");
+        let ci_yml = repo_root.join(".github/workflows/ci.yml");
+        let text = std::fs::read_to_string(&ci_yml)
+            .expect("read .github/workflows/ci.yml for the seam-matrix drift guard");
+
+        // Collect the `- <slug>` entries directly under the single `seam:` matrix key.
+        let mut ci_seams: BTreeSet<String> = BTreeSet::new();
+        let mut in_seam_list = false;
+        for line in text.lines() {
+            let trimmed = line.trim();
+            if trimmed == "seam:" {
+                in_seam_list = true;
+                continue;
+            }
+            if in_seam_list {
+                if let Some(slug) = trimmed.strip_prefix("- ") {
+                    ci_seams.insert(slug.trim().to_owned());
+                } else if !trimmed.is_empty() {
+                    break;
+                }
+            }
+        }
+        assert!(
+            !ci_seams.is_empty(),
+            "no `seam:` matrix entries found in {} — the drift guard needs the matrix",
+            ci_yml.display()
+        );
+
+        let registry: BTreeSet<String> = critical_seam_slugs()
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+        let missing_in_ci: Vec<&String> = registry.difference(&ci_seams).collect();
+        let missing_in_registry: Vec<&String> = ci_seams.difference(&registry).collect();
+        assert!(
+            missing_in_ci.is_empty() && missing_in_registry.is_empty(),
+            "CI mutation `seam:` matrix drifted from critical_mutation_seams().\n  \
+             in registry but missing from ci.yml: {missing_in_ci:?}\n  \
+             in ci.yml but missing from registry: {missing_in_registry:?}"
+        );
+    }
 }

@@ -172,7 +172,7 @@ impl WriterState<'_> {
         }
 
         let mut computed: Vec<StagedCommittedEvent> = Vec::with_capacity(prepared.len());
-        let mut entity_states: std::collections::HashMap<Arc<str>, BatchEntityState> =
+        let mut entity_states: std::collections::HashMap<(Arc<str>, u32), BatchEntityState> =
             std::collections::HashMap::new();
 
         let now_us = self.runtime.now_us();
@@ -181,10 +181,12 @@ impl WriterState<'_> {
 
         for (idx, item) in prepared.items().iter().enumerate() {
             let entity = Arc::clone(item.entity_arc());
-            let state = match entity_states.entry(Arc::clone(&entity)) {
+            let position_hint = item.options().position_hint.unwrap_or_default();
+            let state_key = (Arc::clone(&entity), position_hint.lane);
+            let state = match entity_states.entry(state_key) {
                 std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
                 std::collections::hash_map::Entry::Vacant(entry) => {
-                    let latest = self.index.get_latest(&entity);
+                    let latest = self.index.get_latest_committed(&entity, position_hint.lane);
                     entry.insert(BatchEntityState {
                         entity_arc: Arc::clone(&entity),
                         prev_hash: latest
@@ -239,10 +241,13 @@ impl WriterState<'_> {
             state.last_wall_ms = wall_ms;
 
             let global_seq = first_seq + idx as u64;
-            self.watermark_handle.lock().advance_accepted(HlcPoint {
-                wall_ms,
-                global_sequence: global_seq,
-            });
+            self.watermark_handle.lock().advance_accepted_on_lane(
+                position_hint.lane,
+                HlcPoint {
+                    wall_ms,
+                    global_sequence: global_seq,
+                },
+            );
             let meta = StagedCommitMeta::new(
                 event_id,
                 item.options()
@@ -253,14 +258,13 @@ impl WriterState<'_> {
                 item.kind(),
                 global_seq,
             );
-            let position_hint = item.options().position_hint.unwrap_or_default();
-            let timing = StagedCommitTiming::new(
-                now_us,
-                wall_ms,
-                clock,
-                position_hint.lane,
-                position_hint.depth,
-            );
+            let dag_depth = if position_hint.branch_root {
+                DagPosition::fork(position_hint.depth, position_hint.lane).depth()
+            } else {
+                position_hint.depth
+            };
+            let timing =
+                StagedCommitTiming::new(now_us, wall_ms, clock, position_hint.lane, dag_depth);
             computed.push(StagedCommittedEvent::new(
                 item.coord().clone(),
                 meta,
@@ -566,10 +570,13 @@ impl WriterState<'_> {
                 .active_segment
                 .write_frame(&frame)
                 .map_err(|e| batch_failed(idx, BatchFailureStage::Writing, e))?;
-            self.watermark_handle.lock().advance_written(HlcPoint {
-                wall_ms: staged.timing.wall_ms,
-                global_sequence: staged.global_sequence(),
-            });
+            self.watermark_handle.lock().advance_written_on_lane(
+                staged.timing.dag_lane,
+                HlcPoint {
+                    wall_ms: staged.timing.wall_ms,
+                    global_sequence: staged.global_sequence(),
+                },
+            );
 
             receipt.disk_pos = DiskPos {
                 segment_id: *self.segment_id,

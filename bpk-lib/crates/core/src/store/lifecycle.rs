@@ -1,7 +1,11 @@
 use crate::coordinate::Coordinate;
 use crate::event::{EventKind, StoredEvent};
 use crate::store::cold_start::{latest_segment_watermark, ColdStartArtifactKind};
-use crate::store::file_classification::StoreFileKind;
+use crate::store::file_classification::{ForkStrategy, StoreFileKind};
+use crate::store::fork_report::{
+    destination_path_digest as fork_destination_path_digest, fork_evidence_report,
+    ForkCopyStrategy, ForkFinding, ForkOptions, ForkReport, ForkReportInput, ForkStrategyCounts,
+};
 use crate::store::platform::fs as platform_fs;
 use crate::store::segment::scan as reader;
 use crate::store::segment::{self, Active, FramePayload};
@@ -154,6 +158,171 @@ pub(crate) fn snapshot(
     Ok(report)
 }
 
+pub(crate) fn fork(
+    store: &Store<Open>,
+    dest: &std::path::Path,
+    options: ForkOptions,
+) -> Result<ForkReport, StoreError> {
+    tracing::debug!(
+        target: "batpak::flow",
+        flow = "fork",
+        destination = %dest.display()
+    );
+    let _lifecycle = store.lifecycle_gate.lock();
+    let fork_fence = store.begin_visibility_fence()?;
+    let fence_token = fork_fence.token();
+    sync(store)?;
+    store.index.idemp.flush(&store.config.data_dir)?;
+    let (source_watermark_segment_id, source_watermark_offset) =
+        latest_segment_watermark(&store.config.data_dir)?;
+    let active_segment_id = source_watermark_segment_id;
+
+    platform_fs::reject_symlink_leaf(dest, "fork destination")?;
+    platform_fs::create_dir_all(dest).map_err(StoreError::Io)?;
+    // Refuse forking a store onto its own data dir: the clear pass below would
+    // delete the live store's files before copying (data loss).
+    let dest_canon = platform_fs::canonicalize(dest).map_err(StoreError::Io)?;
+    let src_canon = platform_fs::canonicalize(&store.config.data_dir).map_err(StoreError::Io)?;
+    if dest_canon == src_canon {
+        return Err(StoreError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!(
+                "fork destination {} resolves to the source data directory",
+                dest.display()
+            ),
+        )));
+    }
+    let cleared_artifact_count = clear_fork_store_artifacts(dest)?;
+    let entries = platform_fs::read_dir(&store.config.data_dir).map_err(StoreError::Io)?;
+
+    let mut shared_segment_ids_sorted = Vec::new();
+    let mut deep_copied_segment_ids_sorted = Vec::new();
+    let mut copied_visibility_ranges_present = false;
+    let mut copied_pending_compaction_marker_present = false;
+    let mut copied_idempotency_store_present = false;
+    let mut strategy_counts = ForkStrategyCounts::default();
+    let mut findings = Vec::new();
+    if cleared_artifact_count > 0 {
+        findings.push(ForkFinding::DestinationCleared {
+            artifact_count: cleared_artifact_count,
+        });
+    }
+
+    for entry in entries {
+        let entry = entry.map_err(StoreError::Io)?;
+        let path = entry.path();
+        let source_kind = StoreFileKind::from_path(&path);
+        let file_name = entry.file_name();
+        let file_name_display = file_name.to_string_lossy().into_owned();
+        let dest_path = dest.join(&file_name);
+        platform_fs::reject_symlink_leaf(&dest_path, "fork entry")?;
+
+        match source_kind.fork_strategy(active_segment_id) {
+            ForkStrategy::ShareIfPossible => {
+                let used = platform_fs::cow_copy_file(
+                    &path,
+                    &dest_path,
+                    options.use_reflink,
+                    options.use_hardlink,
+                )
+                .map_err(StoreError::Io)?;
+                let strategy = fork_copy_strategy(used);
+                strategy_counts.record_copy(strategy);
+                if let Some(segment_id) = source_kind.segment_id() {
+                    match strategy {
+                        ForkCopyStrategy::Reflink | ForkCopyStrategy::Hardlink => {
+                            shared_segment_ids_sorted.push(segment_id.as_u64());
+                        }
+                        ForkCopyStrategy::DeepCopy => {
+                            deep_copied_segment_ids_sorted.push(segment_id.as_u64());
+                        }
+                    }
+                }
+                findings.push(ForkFinding::FileCopied {
+                    file_name: file_name_display,
+                    strategy,
+                });
+            }
+            ForkStrategy::DeepCopyAlways => {
+                let used = platform_fs::cow_copy_file(&path, &dest_path, false, false)
+                    .map_err(StoreError::Io)?;
+                let strategy = fork_copy_strategy(used);
+                strategy_counts.record_copy(strategy);
+                if let Some(segment_id) = source_kind.segment_id() {
+                    deep_copied_segment_ids_sorted.push(segment_id.as_u64());
+                }
+                match source_kind {
+                    StoreFileKind::VisibilityRanges => copied_visibility_ranges_present = true,
+                    StoreFileKind::PendingCompactionMarker => {
+                        copied_pending_compaction_marker_present = true;
+                    }
+                    StoreFileKind::IdempotencyStore => copied_idempotency_store_present = true,
+                    StoreFileKind::Segment(_)
+                    | StoreFileKind::MalformedSegment(_)
+                    | StoreFileKind::Checkpoint
+                    | StoreFileKind::MmapIndex
+                    | StoreFileKind::CompactSource
+                    | StoreFileKind::CursorDirectory
+                    | StoreFileKind::Other => {}
+                }
+                findings.push(ForkFinding::FileCopied {
+                    file_name: file_name_display,
+                    strategy,
+                });
+            }
+            ForkStrategy::CacheRegenerable if !options.exclude_caches => {
+                let used = platform_fs::cow_copy_file(&path, &dest_path, false, false)
+                    .map_err(StoreError::Io)?;
+                let strategy = fork_copy_strategy(used);
+                strategy_counts.record_copy(strategy);
+                findings.push(ForkFinding::FileCopied {
+                    file_name: file_name_display,
+                    strategy,
+                });
+            }
+            ForkStrategy::CacheRegenerable => {
+                strategy_counts.record_cache_regenerable();
+                findings.push(ForkFinding::CacheRegenerableExcluded {
+                    file_name: file_name_display,
+                });
+            }
+            ForkStrategy::Exclude => {
+                strategy_counts.record_excluded();
+                findings.push(ForkFinding::FileExcluded {
+                    file_name: file_name_display,
+                    reason: "not part of the share-safe fork substrate".to_string(),
+                });
+            }
+        }
+    }
+
+    fork_fence.cancel()?;
+    findings.push(ForkFinding::FenceTokenCancelled);
+    fork_evidence_report(ForkReportInput {
+        fence_token,
+        source_watermark_segment_id,
+        source_watermark_offset,
+        active_segment_id,
+        shared_segment_ids_sorted,
+        deep_copied_segment_ids_sorted,
+        strategy_counts,
+        copied_visibility_ranges_present,
+        copied_pending_compaction_marker_present,
+        copied_idempotency_store_present,
+        destination_path_digest: fork_destination_path_digest(dest),
+        findings,
+    })
+    .map_err(StoreError::from)
+}
+
+fn fork_copy_strategy(used: platform_fs::CowStrategyUsed) -> ForkCopyStrategy {
+    match used {
+        platform_fs::CowStrategyUsed::Reflink => ForkCopyStrategy::Reflink,
+        platform_fs::CowStrategyUsed::Hardlink => ForkCopyStrategy::Hardlink,
+        platform_fs::CowStrategyUsed::DeepCopy => ForkCopyStrategy::DeepCopy,
+    }
+}
+
 fn snapshot_source_file_kind(file_kind: &StoreFileKind) -> Option<SnapshotFileKind> {
     if !file_kind.should_copy_into_snapshot() {
         return None;
@@ -197,6 +366,27 @@ fn clear_snapshot_store_artifacts(dest: &std::path::Path) -> Result<usize, Store
 
         if path.is_dir() && StoreFileKind::from_path(&path) == StoreFileKind::CursorDirectory {
             removed += usize::from(remove_dir_all_if_present(&path)?);
+        }
+    }
+    Ok(removed)
+}
+
+fn clear_fork_store_artifacts(dest: &std::path::Path) -> Result<usize, StoreError> {
+    let entries = platform_fs::read_dir(dest).map_err(StoreError::Io)?;
+    let mut removed = 0;
+    for entry in entries {
+        let entry = entry.map_err(StoreError::Io)?;
+        let path = entry.path();
+        if !StoreFileKind::from_path(&path).should_clear_from_fork_destination() {
+            continue;
+        }
+        let is_dir = platform_fs::symlink_metadata(&path)
+            .map(|meta| meta.file_type().is_dir())
+            .unwrap_or(false);
+        if is_dir {
+            removed += usize::from(remove_dir_all_if_present(&path)?);
+        } else {
+            removed += usize::from(remove_file_if_present(&path)?);
         }
     }
     Ok(removed)

@@ -844,10 +844,7 @@ fn check_hbat_manifest_wiring_contract(
         return Ok(());
     }
 
-    let main = source_cache
-        .rust_file("crates/hbat/src/main.rs")?
-        .text
-        .clone();
+    let main = std::sync::Arc::clone(&source_cache.rust_file("crates/hbat/src/main.rs")?.text);
 
     for relative in source_cache.rust_files_under("crates/hbat/src")? {
         let source = source_cache.rust_file(&relative)?;
@@ -871,7 +868,7 @@ fn check_hbat_manifest_wiring_contract(
             };
             let helper_name = format!("{}_descriptor", prefix.to_lowercase());
             ensure(
-                count_occurrences(&content, &format!("descriptor: {helper_name}")) == 1,
+                count_occurrences(content, &format!("descriptor: {helper_name}")) == 1,
                 format!(
                     "hbat operation descriptor `{descriptor}` in {rel} must have exactly one OperationDescriptorRegistration inventory::submit! referencing it"
                 ),
@@ -893,14 +890,12 @@ fn check_hbat_manifest_wiring_contract(
         for payload in hbat_event_payload_structs(content) {
             let rust_type = format!("hbat::{module}::{payload}");
             let manual_rust_type =
-                count_occurrences(&content, &format!("rust_type: \"{rust_type}\""));
-            let manual_ts_name = count_occurrences(&content, &format!("ts_name: \"{payload}\""));
-            let manual_kind_bits = count_occurrences(
-                &content,
-                &format!("kind_bits: {payload}::KIND.as_raw_u16()"),
-            );
-            let macro_type = count_occurrences(&content, &format!("type = {payload},"));
-            let macro_ts_name = count_occurrences(&content, &format!("ts_name = \"{payload}\""));
+                count_occurrences(content, &format!("rust_type: \"{rust_type}\""));
+            let manual_ts_name = count_occurrences(content, &format!("ts_name: \"{payload}\""));
+            let manual_kind_bits =
+                count_occurrences(content, &format!("kind_bits: {payload}::KIND.as_raw_u16()"));
+            let macro_type = count_occurrences(content, &format!("type = {payload},"));
+            let macro_ts_name = count_occurrences(content, &format!("ts_name = \"{payload}\""));
 
             let manual = manual_rust_type == 1 && manual_ts_name == 1 && manual_kind_bits == 1;
             let via_macro = macro_type == 1 && macro_ts_name == 1;

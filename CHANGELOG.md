@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Added PR1 surfaces for the 0.9.0 line: `Store::fork_with_evidence` /
+  `Store::fork` materialize a self-contained store directory without opening
+  it, with deterministic fork evidence and CoW strategy reporting; immutable
+  sealed segments may be reflinked or hardlinked while the active segment and
+  mutable authorities (`index.idemp`, `visibility_ranges.fbv`) are deep-copied.
+- Added `Store::import_events` for store-to-store re-application using a
+  caller-supplied source namespace. Import preserves raw MessagePack payload
+  bytes and content hashes, regenerates destination identity and hash-chain
+  predecessors, clears causation, preserves correlation, and records import
+  provenance in receipt extensions.
+- Added property-law coverage for `DagPosition`, SIDX rows, lane-neutral
+  payload upcast, and raw import payload hashing, plus the `fork_cost`
+  Criterion bench with CoW and deep-copy baseline arms.
+
+## [0.8.3] - 2026-06-17
+
+### Added
 - Event schema evolution (0.8.3): `#[derive(EventPayload)]` types carry a
   `PAYLOAD_VERSION` (set via `#[batpak(version = N)]`) stamped into a new
   `EventHeader.payload_version` field — inside the frame but outside the hashed

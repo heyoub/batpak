@@ -272,6 +272,12 @@ RUN cargo install --locked cargo-mutants@27.0.0
             .expect("crate lives under tools/integrity - two parents is the repo root")
             .to_path_buf();
 
+        // References a real harness function: the 0.8.3 harness split moved
+        // append_with_visible_gate_returns_after_publish into
+        // crates/core/tests/durable_frontier_waits_append_gate.rs. Keeping this
+        // fixture pinned to the live path means a future move that breaks the
+        // observation-evidence link is caught by the (now workspace-gated)
+        // integrity tests rather than silently rotting.
         assert!(validate_observation_evidence(
             &repo_root,
             "OBS-TEST",

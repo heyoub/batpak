@@ -290,6 +290,80 @@
   kind: source
   paths:
     - crates/core/src/store/lifecycle.rs
+- id: ART-STORE-FORK-IMPORT-SOURCE
+  kind: source
+  paths:
+    - crates/core/src/store/file_classification.rs
+    - crates/core/src/store/fork_report.rs
+    - crates/core/src/store/import.rs
+    - crates/core/src/store/import_api.rs
+    - crates/core/src/store/lifecycle.rs
+    - crates/core/src/store/lifecycle_api.rs
+    - crates/core/src/store/platform/fs.rs
+    - crates/core/src/store/write_api.rs
+- id: ART-STORE-FORK-IMPORT-TESTS
+  kind: tests
+  paths:
+    - crates/core/tests/store_fork.rs
+    - crates/core/tests/import_events.rs
+    - crates/core/tests/isomorphism_laws.rs
+    - crates/core/src/event/upcast.rs
+    - crates/core/src/store/segment/sidx/tests.rs
+- id: ART-STORE-FORK-BENCH
+  kind: benchmark
+  paths:
+    - crates/core/benches/fork_cost.rs
+- id: ART-STORE-LANE-BRANCH-SOURCE
+  kind: source
+  paths:
+    - crates/core/src/coordinate/mod.rs
+    - crates/core/src/store/append.rs
+    - crates/core/src/store/read_api.rs
+    - crates/core/src/store/index/entry.rs
+    - crates/core/src/store/index/mod.rs
+    - crates/core/src/store/index/query.rs
+    - crates/core/src/store/write/control/submission.rs
+    - crates/core/src/store/write/fanout.rs
+    - crates/core/src/store/write/writer/append.rs
+    - crates/core/src/store/write/writer/batch.rs
+- id: ART-STORE-LANE-BRANCH-TESTS
+  kind: tests
+  paths:
+    - crates/core/tests/lane_branches.rs
+    - tools/xtask/src/commands/mutants/lanes.rs
+- id: ART-STORE-PROJECTION-FUSION-SOURCE
+  kind: source
+  paths:
+    - crates/core/src/store/projection/flow/fusion.rs
+    - crates/core/src/store/projection/flow/mod.rs
+    - crates/core/src/store/read_api.rs
+- id: ART-STORE-PROJECTION-FUSION-TESTS
+  kind: tests
+  paths:
+    - crates/core/tests/projection_fusion.rs
+    - crates/core/src/store/projection/flow/fusion_tests.rs
+    - tools/xtask/src/commands/mutants/lanes.rs
+- id: ART-STORE-LANE-FRONTIER-SOURCE
+  kind: source
+  paths:
+    - crates/core/src/store/hidden_ranges.rs
+    - crates/core/src/store/index/mod.rs
+    - crates/core/src/store/index/projection_bridge.rs
+    - crates/core/src/store/index/query.rs
+    - crates/core/src/store/index/visibility.rs
+    - crates/core/src/store/lifecycle_api.rs
+    - crates/core/src/store/open.rs
+    - crates/core/src/store/projection/flow/fusion.rs
+    - crates/core/src/store/projection/flow/mod.rs
+    - crates/core/src/store/projection/registry.rs
+    - crates/core/src/store/stats.rs
+    - crates/core/src/store/write/writer/publish.rs
+    - crates/core/src/store/write/writer/watermark.rs
+- id: ART-STORE-LANE-FRONTIER-TESTS
+  kind: tests
+  paths:
+    - crates/core/tests/per_lane_frontier.rs
+    - tools/xtask/src/commands/mutants/lanes.rs
 - id: ART-STORE-DANGEROUS-TEST-HOOKS
   kind: source
   paths:

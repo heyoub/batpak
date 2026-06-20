@@ -24,6 +24,34 @@ Stored payload bytes are never rewritten. A payload's `PAYLOAD_VERSION` rides in
 
 A keyed append (`with_idempotency`) is a durable no-op: within its retention window a retry returns the original receipt regardless of compaction, cold-start, or load. The window is the inviolable guarantee; the size cap may only ever evict keys already outside it.
 
+## Forks Do Not Alias Mutable Authorities
+
+A fork may share immutable sealed segments, but it must own its active segment,
+visibility ranges, idempotency sidecar, and pending compaction state. Parent
+writes or cancellations after the fork do not affect the fork.
+
+## Import Preserves Content, Not Identity
+
+Import re-applies source events. Payload bytes and content hashes survive
+unchanged, but event ids, global sequences, predecessors, and causation are
+destination-local.
+
+## Lane Frontiers Are Logical
+
+Lane ids are opaque `u32` substrate data. Each lane has its own logical frontier
+for accepted, written, durable, visible, applied, and emitted HLC points, while
+the segment log remains one physically interleaved file sequence. A successful
+fsync advances one global physical durability point; a lane's logical durable
+point may advance only to events on that lane that are at or below the physical
+durable point on the `global_sequence` axis, not by wall-clock HLC ordering.
+Visibility is a separate per-lane publish cursor over the single global sequence
+space; hidden/cancelled fence ranges are interpreted on that same axis and then
+scoped by lane.
+
+For every lane: accepted >= written >= durable, accepted >= visible >= applied,
+and emitted >= visible. The global frontier remains the max view used by
+legacy APIs; lane-scoped APIs must read from the lane view.
+
 ## Receipts Describe Outcomes
 
 A receipt records what the system accepted, denied, replayed, verified, projected, imported, exported, or inspected. A receipt is structured evidence, not a debug log.

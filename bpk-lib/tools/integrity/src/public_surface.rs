@@ -5,7 +5,7 @@ use crate::typed_waivers::{self, WaiverKind};
 use anyhow::{Context, Result};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::rc::Rc;
 
 pub(crate) fn check(repo_root: &Path, source_cache: &mut SourceCache) -> Result<()> {
     check_doc_hidden_public_surface(repo_root, source_cache)?;
@@ -19,7 +19,7 @@ pub(crate) fn check(repo_root: &Path, source_cache: &mut SourceCache) -> Result<
     let waived: BTreeSet<String> = typed_waivers::targets_for(&waivers, WaiverKind::PubItem);
 
     let test_files: Vec<PathBuf> = rust_files(&core_tests_root(repo_root));
-    let mut parsed_tests: Vec<(PathBuf, Arc<syn::File>)> = Vec::with_capacity(test_files.len());
+    let mut parsed_tests: Vec<(PathBuf, Rc<syn::File>)> = Vec::with_capacity(test_files.len());
     for path in test_files {
         let file = source_cache
             .parse_rust(&path)
