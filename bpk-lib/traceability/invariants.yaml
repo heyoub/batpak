@@ -89,6 +89,16 @@
   artifacts:
     - ART-STORE-ERROR
     - ART-STORE-PROPERTIES
+- id: INV-PAYLOAD-VERSION-NONZERO
+  statement: >-
+    A typed event payload always carries a non-zero PAYLOAD_VERSION in the event header; the reserved
+    legacy sentinel 0 marks an untyped/legacy frame, so the typed-append seam rejects any payload that
+    forges PAYLOAD_VERSION = 0 (the derive macro forbids it at compile time and the runtime seam
+    forbids a hand-written impl), keeping typed frames distinguishable from legacy frames on read.
+  artifacts:
+    - ART-PAYLOAD-VERSION-NONZERO-TEST
+    - ART-EVENT-PAYLOAD-DECODE-SEAM
+  witness_test: crates/core/tests/store_append_behavior.rs::typed_append_rejects_manual_payload_version_zero
 - id: INV-PAYLOAD-LENGTH-EXACT
   statement: Serialized payload lengths must be computed exactly and rejected when they exceed the wire contract.
   artifacts:
@@ -480,3 +490,23 @@
     so layering and incremental builds are never broken by a reverse or circular crate edge.
   artifacts:
     - ART-TRIANGULATION-SOURCE
+- id: INV-DOCS-CATALOG-VIEW-CURRENT
+  statement: >-
+    INVARIANTS.md is a generated VIEW of traceability/invariants.yaml: the auto-generated catalog
+    block between the BEGIN/END INV-CATALOG markers lists every catalog id and its one-line
+    statement, the authored human prose stays above the block, and the docs-catalog gate folded into
+    structural-check fails on any drift so the published docs can never silently rot away from
+    machine law while the generator regenerates the block deterministically.
+  artifacts:
+    - ART-DOCS-CATALOG-GATE
+  witness_test: tools/integrity/src/docs_catalog_tests.rs::live_catalog_block_matches_committed_invariants_md
+- id: INV-INVARIANT-WITNESS-TEST
+  statement: >-
+    Every catalog invariant that declares a witness_test names a path::fn that resolves to a real
+    declared test (a #[test] function or a proptest!-defined test) in the tree; the docs-catalog gate
+    fails when a declared witness names a missing file, a missing function, or a plain non-test
+    function, upgrading the weak header-string citation to a strong named-test citation for the
+    invariants that carry it.
+  artifacts:
+    - ART-DOCS-CATALOG-GATE
+  witness_test: tools/integrity/src/docs_catalog_tests.rs::witness_gate_rejects_non_test_fn

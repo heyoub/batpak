@@ -7,6 +7,10 @@
     clippy::panic
 )]
 //! Advanced Store append and append-option integration tests.
+//!
+//! Catalog citation: INV-PAYLOAD-VERSION-NONZERO is witnessed here by
+//! `typed_append_rejects_manual_payload_version_zero` (a typed-append seam that
+//! refuses a hand-forged PAYLOAD_VERSION = 0 legacy sentinel).
 
 mod support;
 use batpak::store::{Store, StoreConfig, StoreError, StoreStats};

@@ -103,6 +103,12 @@ const REQUIRED_DOC_NAV: &[(&str, &str)] = &[
 ];
 
 pub(crate) fn docs(args: DocsArgs) -> Result<()> {
+    // GAUNTLET-DOCS-CURRENCY: regenerate the INV catalog VIEW in INVARIANTS.md
+    // from traceability/invariants.yaml BEFORE rendering the site, so the HTML
+    // and the committed Markdown both reflect the current machine catalog. The
+    // matching `--check` mode runs inside `structural-check` (drift => fail).
+    crate::commands::integrity("docs-catalog", [])?;
+
     let target_dir = cargo_target_dir()?;
     let site_dir = target_dir.join("site");
     if site_dir.exists() {

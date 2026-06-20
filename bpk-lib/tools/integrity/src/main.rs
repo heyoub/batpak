@@ -33,6 +33,7 @@ mod architecture_lints;
 mod assurance;
 mod ci_parity;
 mod complexity;
+mod docs_catalog;
 mod doctor;
 mod evidence_audit;
 mod gate_registry;
@@ -121,6 +122,14 @@ enum CommandKind {
         #[arg(long)]
         check: bool,
     },
+    /// GAUNTLET-DOCS-CURRENCY: regenerate (or `--check`) the auto-generated INV
+    /// catalog block in `INVARIANTS.md` from `traceability/invariants.yaml`, and
+    /// enforce the per-INV `witness_test` strong-tier citation gate. `--check`
+    /// fails on drift instead of rewriting; it is folded into `structural-check`.
+    DocsCatalog {
+        #[arg(long)]
+        check: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -156,6 +165,7 @@ fn main() -> Result<()> {
         CommandKind::ArchitectureIr { out, check } => {
             architecture_ir::run(&repo_surface::repo_root()?, out, check)
         }
+        CommandKind::DocsCatalog { check } => docs_catalog::run(&repo_surface::repo_root()?, check),
     }
 }
 

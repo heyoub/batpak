@@ -22,6 +22,12 @@
     - tools/integrity/src/triangulation.rs
     - tools/integrity/src/triangulation_tests.rs
     - tools/integrity/src/structural.rs
+- id: ART-DOCS-CATALOG-GATE
+  kind: tool
+  paths:
+    - tools/integrity/src/docs_catalog.rs
+    - tools/integrity/src/docs_catalog_tests.rs
+    - tools/integrity/src/structural.rs
 - id: ART-TRACEABILITY
   kind: registry
   paths:
@@ -682,6 +688,10 @@
   kind: tests
   paths:
     - crates/core/tests/schema_evolution.rs
+- id: ART-PAYLOAD-VERSION-NONZERO-TEST
+  kind: tests
+  paths:
+    - crates/core/tests/store_append_behavior.rs
 - id: ART-SCHEMA-EVOLUTION-DOC
   kind: docs
   paths:

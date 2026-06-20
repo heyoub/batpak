@@ -8,8 +8,8 @@ use crate::shared_checks::{
 };
 use crate::source_cache::SourceCache;
 use crate::{
-    agent_surface, architecture_lints, ci_parity, complexity, glob_coverage, harness_lints,
-    invariant_bridge, public_surface, store_pub_fn_coverage, wallclock,
+    agent_surface, architecture_lints, ci_parity, complexity, docs_catalog, glob_coverage,
+    harness_lints, invariant_bridge, public_surface, store_pub_fn_coverage, wallclock,
 };
 use anyhow::{anyhow, bail, Result};
 use std::collections::BTreeSet;
@@ -37,6 +37,11 @@ pub(crate) fn run() -> Result<()> {
             tracked_files.iter().cloned().collect(),
         ))
     })?;
+
+    // GAUNTLET-DOCS-CURRENCY: the INVARIANTS.md catalog block must be a current
+    // view of traceability/invariants.yaml (drift => fail), and every declared
+    // witness_test must resolve to a real test. `check=true` => never rewrite.
+    docs_catalog::run(&repo_root, true)?;
 
     // The structural source lints share one receipt: they all walk the
     // production-Rust surface and each file is the unit of work + the assertion.
