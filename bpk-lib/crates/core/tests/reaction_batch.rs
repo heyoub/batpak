@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; test body in tests/reaction_batch.rs exercises precondition-holds invariants; .unwrap is acceptable in test code where a panic is a test failure.
-#![allow(clippy::unwrap_used, clippy::panic)]
 //! Integration tests for [`ReactionBatch`]'s public push surface
 //! (Dispatch Chapter T2).
 //!
@@ -30,11 +28,11 @@ struct FollowUp {
 }
 
 fn source_coord() -> Coordinate {
-    Coordinate::new("entity:reaction-source", "scope:test").unwrap()
+    Coordinate::new("entity:reaction-source", "scope:test").expect("source coord")
 }
 
 fn reaction_coord() -> Coordinate {
-    Coordinate::new("entity:reaction-target", "scope:test").unwrap()
+    Coordinate::new("entity:reaction-target", "scope:test").expect("reaction target coord")
 }
 
 #[test]
@@ -50,7 +48,7 @@ fn push_typed_stamps_kind_and_advances_len() {
             },
             CausationRef::None,
         )
-        .unwrap();
+        .expect("push first reaction");
     batch
         .push_typed(
             reaction_coord(),
@@ -59,7 +57,7 @@ fn push_typed_stamps_kind_and_advances_len() {
             },
             CausationRef::PriorItem(0),
         )
-        .unwrap();
+        .expect("push follow-up reaction");
 
     assert_eq!(
         batch.len(),
@@ -82,13 +80,13 @@ fn push_typed_with_options_accepts_append_options() {
             opts,
             CausationRef::None,
         )
-        .unwrap();
+        .expect("push reaction with options");
     assert_eq!(batch.len(), 1);
 }
 
 #[test]
 fn drop_without_flush_leaves_store_unchanged() {
-    let (_dir, store) = small_segment_store().unwrap();
+    let (_dir, store) = small_segment_store().expect("small segment store");
 
     // Write a root event so the store has non-zero sequence state.
     let root = store
@@ -98,7 +96,7 @@ fn drop_without_flush_leaves_store_unchanged() {
                 note: "root".into(),
             },
         )
-        .unwrap();
+        .expect("append root event");
 
     let seq_before_drop = store.stats().global_sequence;
 
@@ -113,7 +111,7 @@ fn drop_without_flush_leaves_store_unchanged() {
                 },
                 CausationRef::Absolute(u128::from(root.event_id)),
             )
-            .unwrap();
+            .expect("push never-flushed reaction");
         batch
             .push_typed(
                 reaction_coord(),
@@ -122,7 +120,7 @@ fn drop_without_flush_leaves_store_unchanged() {
                 },
                 CausationRef::PriorItem(0),
             )
-            .unwrap();
+            .expect("push never-flushed follow-up");
         assert_eq!(batch.len(), 2);
         // `batch` drops here — `flush` was never called.
     }

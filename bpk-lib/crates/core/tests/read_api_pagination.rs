@@ -1,6 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; this integration harness uses panic!/expect to surface contract regressions with explicit messages.
-#![allow(clippy::panic, clippy::unwrap_used)]
-
 //! PROVES: INV-BIDIRECTIONAL-SUBSTRATE-LANE, INV-EXTERNAL-REPLAY-NO-SIDECAR-TRUTH.
 
 use batpak::coordinate::{Coordinate, Region};

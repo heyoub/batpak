@@ -1,7 +1,5 @@
 //! Replay and checkpoint consistency proofs.
 //! Harness pattern: Equivalence Harness (live vs reopen lane).
-// justifies: INV-TEST-PANIC-AS-ASSERTION; test bodies in tests/replay_consistency.rs treat invariant violations as test failures; panic! is the assertion style throughout this file.
-#![allow(clippy::panic)]
 
 mod support;
 use batpak::store::{ReadOnly, Store, StoreConfig};
@@ -167,10 +165,9 @@ fn add_cancelled_fence_event(store: &Store, tag: &str) {
         )
         .expect("submit hidden event");
     drop(fence);
-    let err = match writer_reply(ticket.receiver(), "writer ticket") {
-        Ok(_) => panic!("PROPERTY: cancelled fence work must not resolve as visible success"),
-        Err(err) => err,
-    };
+    let err = writer_reply(ticket.receiver(), "writer ticket")
+        .map(|_| ())
+        .expect_err("PROPERTY: cancelled fence work must not resolve as visible success");
     assert!(
         matches!(err, batpak::store::StoreError::VisibilityFenceCancelled),
         "cancelled fence work must surface VisibilityFenceCancelled, got {err:?}"

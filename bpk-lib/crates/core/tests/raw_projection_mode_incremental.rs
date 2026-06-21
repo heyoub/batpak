@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; raw projection incremental tests in tests/raw_projection_mode_incremental.rs use panic! as the assertion style when the raw-dispatch contract breaks.
-#![allow(clippy::panic)]
 //! Raw projection mode: incremental-apply replay lanes.
 //! Harness pattern: Equivalence Harness.
 //!
@@ -196,12 +194,9 @@ fn projection_flow_incremental_group_local_keeps_lanes_equivalent() {
         "PROPERTY: group-local incremental replay must stay equivalent across raw and value lanes."
     );
 
-    let store = match Arc::try_unwrap(store) {
-        Ok(store) => store,
-        Err(_) => panic!(
-            "PROPERTY: incremental group-local test should release all Arc clones before close"
-        ),
-    };
+    let store = Arc::try_unwrap(store).map_err(|_| ()).expect(
+        "PROPERTY: incremental group-local test should release all Arc clones before close",
+    );
     store.close().expect("close");
 }
 
@@ -226,12 +221,9 @@ fn projection_flow_incremental_external_cache_keeps_lanes_equivalent() {
         .expect("baseline raw state");
     assert_eq!(baseline_value.summary(), baseline_raw.summary());
 
-    let store = match Arc::try_unwrap(store) {
-        Ok(store) => store,
-        Err(_) => panic!(
-            "PROPERTY: incremental external-cache seed test should release all Arc clones before close"
-        ),
-    };
+    let store = Arc::try_unwrap(store).map_err(|_| ()).expect(
+        "PROPERTY: incremental external-cache seed test should release all Arc clones before close",
+    );
     store.close().expect("close seeded store");
 
     let config = StoreConfig::new(data_path)
@@ -279,11 +271,8 @@ fn projection_flow_incremental_external_cache_keeps_lanes_equivalent() {
         "PROPERTY: external-cache incremental replay must stay equivalent across raw and value lanes."
     );
 
-    let reopened = match Arc::try_unwrap(reopened) {
-        Ok(store) => store,
-        Err(_) => panic!(
-            "PROPERTY: incremental external-cache test should release all Arc clones before close"
-        ),
-    };
+    let reopened = Arc::try_unwrap(reopened).map_err(|_| ()).expect(
+        "PROPERTY: incremental external-cache test should release all Arc clones before close",
+    );
     reopened.close().expect("close reopened");
 }

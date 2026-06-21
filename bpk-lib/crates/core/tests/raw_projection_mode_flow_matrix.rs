@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; raw projection flow-matrix tests in tests/raw_projection_mode_flow_matrix.rs use panic! as the assertion style when the raw-dispatch contract breaks.
-#![allow(clippy::panic)]
 //! Raw projection mode: flow-matrix and maybe-stale cache replay lanes.
 //! Harness pattern: Equivalence Harness.
 //!
@@ -195,7 +193,9 @@ macro_rules! observe_projection_flow_matrix_case {
             )
             .expect("append matrix event");
 
-        let (watched_generation, watched_state) = blocking("raw-projection-watch-recv", move || watcher.recv()).expect("watch projection recv");
+        let (watched_generation, watched_state) =
+            blocking("raw-projection-watch-recv", move || watcher.recv())
+                .expect("watch projection recv");
         let watched_state = watched_state.expect("watch projection state");
         let changed = store
             .project_if_changed::<$ty>(
@@ -254,13 +254,9 @@ macro_rules! observe_projection_flow_matrix_case {
              state changes from generation-only changes.",
             case.label
         );
-        let store = match Arc::try_unwrap(store) {
-            Ok(store) => store,
-            Err(_) => panic!(
-                "PROPERTY: projection flow matrix cell '{}' should release all Arc clones before close",
-                case.label
-            ),
-        };
+        let store = Arc::try_unwrap(store).map_err(|_| ()).expect(
+            "PROPERTY: projection flow matrix cell should release all Arc clones before close",
+        );
         store.close().expect("close matrix store");
 
         ProjectionFlowObservation {
@@ -413,9 +409,8 @@ fn projection_flow_maybe_stale_keeps_replay_lanes_equivalent() {
         "PROPERTY: raw and value replay lanes must agree on the strict replay branch."
     );
 
-    let store = match Arc::try_unwrap(store) {
-        Ok(store) => store,
-        Err(_) => panic!("PROPERTY: maybe-stale matrix must release all Arc clones before close"),
-    };
+    let store = Arc::try_unwrap(store)
+        .map_err(|_| ())
+        .expect("PROPERTY: maybe-stale matrix must release all Arc clones before close");
     store.close().expect("close maybe stale matrix store");
 }

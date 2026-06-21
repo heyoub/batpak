@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; test body in tests/react_loop_typed.rs exercises precondition-holds invariants; .unwrap is acceptable in test code where a panic is a test failure.
-#![allow(clippy::unwrap_used, clippy::panic)]
 //! Integration tests for `react_loop_typed<T, R>` and the shared canal
 //! runner (Dispatch Chapter T4b).
 //!
@@ -75,7 +73,8 @@ impl TypedReactive<PayloadA> for CountingReactor {
         _witness: Option<&batpak::store::AtLeastOnce>,
     ) -> Result<(), Self::Error> {
         self.seen.fetch_add(1, Ordering::SeqCst);
-        let reaction_coord = Coordinate::new("entity:reaction", "scope:test").unwrap();
+        let reaction_coord =
+            Coordinate::new("entity:reaction", "scope:test").expect("reaction coord");
         out.push_typed(
             reaction_coord,
             &PayloadAReaction {
@@ -83,7 +82,7 @@ impl TypedReactive<PayloadA> for CountingReactor {
             },
             CausationRef::None,
         )
-        .unwrap();
+        .expect("push reaction");
         Ok(())
     }
 }
@@ -145,7 +144,7 @@ impl TypedReactive<PayloadA> for WitnessRecordingReactor {
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
 fn source_coord() -> Coordinate {
-    Coordinate::new("entity:typed-reactor-source", "scope:test").unwrap()
+    Coordinate::new("entity:typed-reactor-source", "scope:test").expect("source coord")
 }
 
 fn wait_for<F: Fn() -> bool>(cond: F, timeout: Duration) -> bool {
@@ -160,7 +159,7 @@ fn wait_for<F: Fn() -> bool>(cond: F, timeout: Duration) -> bool {
 }
 
 fn test_store() -> (tempfile::TempDir, Arc<Store>) {
-    let (d, s) = small_segment_store().unwrap();
+    let (d, s) = small_segment_store().expect("small segment store");
     (d, Arc::new(s))
 }
 
@@ -189,7 +188,7 @@ fn happy_path_reactor_filters_wrong_kind_and_reacts_to_matched() {
     // Interleave two kinds: only PayloadA should reach the reactor.
     store
         .append_typed(&source_coord(), &PayloadA { n: 1 })
-        .unwrap();
+        .expect("append PayloadA n=1");
     store
         .append_typed(
             &source_coord(),
@@ -197,10 +196,10 @@ fn happy_path_reactor_filters_wrong_kind_and_reacts_to_matched() {
                 note: "skip me".into(),
             },
         )
-        .unwrap();
+        .expect("append PayloadB skip me");
     store
         .append_typed(&source_coord(), &PayloadA { n: 2 })
-        .unwrap();
+        .expect("append PayloadA n=2");
     store
         .append_typed(
             &source_coord(),
@@ -208,10 +207,10 @@ fn happy_path_reactor_filters_wrong_kind_and_reacts_to_matched() {
                 note: "skip me again".into(),
             },
         )
-        .unwrap();
+        .expect("append PayloadB skip me again");
     store
         .append_typed(&source_coord(), &PayloadA { n: 3 })
-        .unwrap();
+        .expect("append PayloadA n=3");
 
     assert!(
         wait_for(|| seen.load(Ordering::SeqCst) == 3, Duration::from_secs(3)),
@@ -254,7 +253,7 @@ fn user_error_stops_loop_and_surfaces_through_join() {
     for n in 1..=5 {
         store
             .append_typed(&source_coord(), &PayloadA { n })
-            .unwrap();
+            .expect("append PayloadA in fail-on-third stream");
     }
 
     // Wait for at least the 3rd event to have been attempted.
@@ -262,15 +261,15 @@ fn user_error_stops_loop_and_surfaces_through_join() {
 
     // Worker will exhaust its restart budget and stop.
     let join_result = handle.join();
-    match join_result {
-        Err(err @ ReactorError::User(_)) => {
-            assert!(
-                err.source().is_some(),
-                "ReactorError::User must expose the handler error as source()"
-            );
-        }
-        other => panic!("expected ReactorError::User, got {other:?}"),
-    }
+    assert!(
+        matches!(&join_result, Err(ReactorError::User(_))),
+        "expected ReactorError::User, got {join_result:?}"
+    );
+    let err = join_result.expect_err("user error must surface through join");
+    assert!(
+        err.source().is_some(),
+        "ReactorError::User must expose the handler error as source()"
+    );
 }
 
 #[test]
@@ -297,7 +296,7 @@ fn lossy_subscription_canal_is_explicit_and_never_mints_at_least_once() {
 
     store
         .append_typed(&source_coord(), &PayloadA { n: 77 })
-        .unwrap();
+        .expect("append PayloadA n=77");
 
     assert!(
         wait_for(|| seen.load(Ordering::SeqCst) == 1, Duration::from_secs(3)),
@@ -309,7 +308,7 @@ fn lossy_subscription_canal_is_explicit_and_never_mints_at_least_once() {
         "lossy subscription canal must not fabricate an AtLeastOnce witness"
     );
 
-    handle.stop_and_join().unwrap();
+    handle.stop_and_join().expect("clean stop and join");
 }
 
 // ─── Matched-kind decode failure path ─────────────────────────────────────────
@@ -371,8 +370,11 @@ fn matched_kind_decode_failure_surfaces_reactor_error_decode() {
     // own after the matched-kind decode fails. `join` is the passive wait
     // for that natural exit — no explicit stop needed.
     let join_result = handle.join();
-    match join_result {
-        Err(batpak::store::reactor_typed::ReactorError::Decode(_)) => {}
-        other => panic!("expected ReactorError::Decode, got {other:?}"),
-    }
+    assert!(
+        matches!(
+            join_result,
+            Err(batpak::store::reactor_typed::ReactorError::Decode(_))
+        ),
+        "expected ReactorError::Decode, got {join_result:?}"
+    );
 }

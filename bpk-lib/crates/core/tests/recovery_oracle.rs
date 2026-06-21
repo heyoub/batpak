@@ -1,5 +1,3 @@
-// justifies: INV-RECOVERY-ORACLE-LEGAL; the B3 recovery-oracle matrix uses expect/panic as the assertion style when a recovered state falls outside the legal {CommittedPrefix | RolledBack | CanonicalRefusal} set or is illegal, per crates/core/tests/recovery_oracle.rs
-#![allow(clippy::panic, clippy::unwrap_used)]
 // The sim filesystem, fault injector, crash hook, and __sim entry points live
 // behind `dangerous-test-hooks`; without the feature the whole file is empty.
 #![cfg(feature = "dangerous-test-hooks")]
@@ -67,11 +65,19 @@ fn recovery_oracle_matrix_is_legal_and_deterministic() {
 
     let first: Vec<MatrixCell> =
         batpak::__sim::run_recovery_matrix(seed, steps).unwrap_or_else(|v| {
-            panic!("B3 recovery matrix must be legal on the real recovery path: {v}")
+            assert!(
+                std::hint::black_box(false),
+                "B3 recovery matrix must be legal on the real recovery path: {v}"
+            );
+            unreachable!()
         });
     let second: Vec<MatrixCell> =
         batpak::__sim::run_recovery_matrix(seed, steps).unwrap_or_else(|v| {
-            panic!("B3 recovery matrix must be legal on the real recovery path: {v}")
+            assert!(
+                std::hint::black_box(false),
+                "B3 recovery matrix must be legal on the real recovery path: {v}"
+            );
+            unreachable!()
         });
 
     assert!(

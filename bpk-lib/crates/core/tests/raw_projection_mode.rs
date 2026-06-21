@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; raw projection mode parity/watch tests in tests/raw_projection_mode.rs use panic! as the assertion style when the raw-dispatch contract breaks.
-#![allow(clippy::panic)]
 //! Raw projection mode: raw-vs-value parity and watch replay lanes.
 //! Harness pattern: Equivalence Harness.
 //!
@@ -146,12 +144,9 @@ fn raw_projection_matches_value_projection_live_and_reopen() {
         "raw-mode and value-mode projections must converge on the same state live"
     );
 
-    let store = match Arc::try_unwrap(store) {
-        Ok(store) => store,
-        Err(_) => {
-            panic!("PROPERTY: raw projection test should release all Arc clones before close")
-        }
-    };
+    let store = Arc::try_unwrap(store)
+        .map_err(|_| ())
+        .expect("PROPERTY: raw projection test should release all Arc clones before close");
     store.close().expect("close");
 
     let reopened = Store::open(StoreConfig::new(dir.path())).expect("reopen");
@@ -205,10 +200,9 @@ fn raw_watch_projection_emits_updated_state() {
         gen > baseline_generation,
         "watch projection generation should advance after a relevant append"
     );
-    let store = match Arc::try_unwrap(store) {
-        Ok(store) => store,
-        Err(_) => panic!("PROPERTY: raw watch test should release all Arc clones before close"),
-    };
+    let store = Arc::try_unwrap(store)
+        .map_err(|_| ())
+        .expect("PROPERTY: raw watch test should release all Arc clones before close");
     store.close().expect("close");
 }
 
@@ -257,12 +251,9 @@ fn raw_watch_projection_matches_project_if_changed_after_relevant_append() {
         "PROPERTY: watch_projection and project_if_changed must report the same honest generation \
          after a relevant append."
     );
-    let store = match Arc::try_unwrap(store) {
-        Ok(store) => store,
-        Err(_) => {
-            panic!("PROPERTY: raw parity watch test should release all Arc clones before close")
-        }
-    };
+    let store = Arc::try_unwrap(store)
+        .map_err(|_| ())
+        .expect("PROPERTY: raw parity watch test should release all Arc clones before close");
     store.close().expect("close");
 }
 
@@ -325,13 +316,8 @@ fn raw_watch_projection_matches_project_if_changed_after_irrelevant_append() {
         changed.0 > baseline_generation,
         "entity generation should still advance on the irrelevant append"
     );
-    let store = match Arc::try_unwrap(store) {
-        Ok(store) => store,
-        Err(_) => {
-            panic!(
-                "PROPERTY: raw irrelevant parity test should release all Arc clones before close"
-            )
-        }
-    };
+    let store = Arc::try_unwrap(store)
+        .map_err(|_| ())
+        .expect("PROPERTY: raw irrelevant parity test should release all Arc clones before close");
     store.close().expect("close");
 }

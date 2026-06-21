@@ -24,7 +24,6 @@
 //! against a single-pass reference fuser defined here; wiring the law to the
 //! public `Store::project_fused*` surface is logged as deferred in
 //! GAUNTLET_ISSUES.md.
-#![allow(clippy::wildcard_enum_match_arm)] // justifies: INV-TEST-PANIC-AS-ASSERTION; proptest assertions report counterexamples without enumerating every variant.
 
 use batpak::event::EventKind;
 use proptest::prelude::*;
@@ -140,12 +139,13 @@ impl FoldAcc {
             }
             FoldShape::LastIndexOfKind(k) => {
                 if raw == k {
-                    self.acc = idx as i64 + 1;
+                    self.acc = i64::try_from(idx).expect("bounded test stream index") + 1;
                 }
             }
             FoldShape::XorOfKind(k) => {
                 if raw == k {
-                    self.xor ^= u64::from(raw) ^ (idx as u64);
+                    self.xor ^=
+                        u64::from(raw) ^ u64::try_from(idx).expect("bounded test stream index");
                 }
             }
         }
@@ -153,8 +153,11 @@ impl FoldAcc {
 
     fn finish(self) -> i64 {
         match self.shape {
-            FoldShape::XorOfKind(_) => self.xor as i64,
-            _ => self.acc,
+            FoldShape::XorOfKind(_) => i64::from_ne_bytes(self.xor.to_ne_bytes()),
+            FoldShape::CountAll
+            | FoldShape::CountKind(_)
+            | FoldShape::SumNOfKind(_)
+            | FoldShape::LastIndexOfKind(_) => self.acc,
         }
     }
 }

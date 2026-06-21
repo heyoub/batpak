@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; test body in tests/react_loop_multi_raw.rs exercises precondition-holds invariants; .unwrap is acceptable in test code where a panic is a test failure.
-#![allow(clippy::unwrap_used, clippy::panic)]
 //! Raw-msgpack lane parity test for `#[derive(MultiEventReactor)]` (T6).
 //! Proves invariant 5 at the reactor surface: a reactor derived with
 //! `input = RawMsgpackInput` behaves identically to the `JsonValueInput`
@@ -61,7 +59,7 @@ impl RawReactor {
         _witness: Option<&batpak::store::AtLeastOnce>,
     ) -> Result<(), NeverFails> {
         self.alphas.fetch_add(1, Ordering::SeqCst);
-        let coord = Coordinate::new("entity:raw-out", "scope:test").unwrap();
+        let coord = Coordinate::new("entity:raw-out", "scope:test").expect("alpha reaction coord");
         out.push_typed(
             coord,
             &ReactionRaw {
@@ -69,7 +67,7 @@ impl RawReactor {
             },
             CausationRef::None,
         )
-        .unwrap();
+        .expect("push alpha reaction");
         Ok(())
     }
     fn on_beta(
@@ -79,13 +77,13 @@ impl RawReactor {
         _witness: Option<&batpak::store::AtLeastOnce>,
     ) -> Result<(), NeverFails> {
         self.betas.fetch_add(1, Ordering::SeqCst);
-        let coord = Coordinate::new("entity:raw-out", "scope:test").unwrap();
+        let coord = Coordinate::new("entity:raw-out", "scope:test").expect("beta reaction coord");
         out.push_typed(
             coord,
             &ReactionRaw { via: "beta".into() },
             CausationRef::None,
         )
-        .unwrap();
+        .expect("push beta reaction");
         Ok(())
     }
 }
@@ -103,7 +101,7 @@ fn wait_for<F: Fn() -> bool>(cond: F, timeout: Duration) -> bool {
 
 #[test]
 fn raw_msgpack_multi_reactor_dispatches_same_as_json_lane() {
-    let (_dir, store) = small_segment_store().unwrap();
+    let (_dir, store) = small_segment_store().expect("small segment store");
     let store = Arc::new(store);
     let alphas = Arc::new(AtomicUsize::new(0));
     let betas = Arc::new(AtomicUsize::new(0));
@@ -116,8 +114,10 @@ fn raw_msgpack_multi_reactor_dispatches_same_as_json_lane() {
         .react_loop_multi_raw(&Region::all(), ReactorConfig::default(), reactor)
         .expect("spawn raw reactor");
 
-    let source = Coordinate::new("entity:raw-src", "scope:test").unwrap();
-    store.append_typed(&source, &AlphaRaw { n: 1 }).unwrap();
+    let source = Coordinate::new("entity:raw-src", "scope:test").expect("source coord");
+    store
+        .append_typed(&source, &AlphaRaw { n: 1 })
+        .expect("append AlphaRaw n=1");
     store
         .append_typed(
             &source,
@@ -125,8 +125,10 @@ fn raw_msgpack_multi_reactor_dispatches_same_as_json_lane() {
                 label: "one".into(),
             },
         )
-        .unwrap();
-    store.append_typed(&source, &AlphaRaw { n: 2 }).unwrap();
+        .expect("append BetaRaw one");
+    store
+        .append_typed(&source, &AlphaRaw { n: 2 })
+        .expect("append AlphaRaw n=2");
     store
         .append_typed(
             &source,
@@ -134,8 +136,10 @@ fn raw_msgpack_multi_reactor_dispatches_same_as_json_lane() {
                 label: "two".into(),
             },
         )
-        .unwrap();
-    store.append_typed(&source, &AlphaRaw { n: 3 }).unwrap();
+        .expect("append BetaRaw two");
+    store
+        .append_typed(&source, &AlphaRaw { n: 3 })
+        .expect("append AlphaRaw n=3");
 
     assert!(
         wait_for(
@@ -160,8 +164,8 @@ fn raw_msgpack_multi_reactor_dispatches_same_as_json_lane() {
 fn store_read_raw_round_trip_witness() {
     // Witness test for `Store::read_raw` — proves the new public surface
     // added in T6 is exercised directly (independent of reactor plumbing).
-    let (_dir, store) = small_segment_store().unwrap();
-    let coord = Coordinate::new("entity:read-raw-witness", "scope:test").unwrap();
+    let (_dir, store) = small_segment_store().expect("small segment store");
+    let coord = Coordinate::new("entity:read-raw-witness", "scope:test").expect("witness coord");
     let receipt = store
         .append_typed(&coord, &AlphaRaw { n: 42 })
         .expect("append");

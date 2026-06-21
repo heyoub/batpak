@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; this public-input cleanup harness uses panic! as a deliberate assertion style for exact variant checking.
-#![allow(clippy::panic)]
 //! PROVES: public runtime input that used to rely on `expect()` now surfaces
 //! structured errors: `EventKind::try_custom` rejects invalid kind namespaces
 //! without panicking, and negative custom-clock input returns `StoreError`
@@ -47,14 +45,14 @@ fn negative_custom_clock_surfaces_store_error_in_append_and_batch_paths() {
         Store::open(StoreConfig::new(append_dir.path()).with_clock_fn(move || append_clock()))
             .expect("open append store");
 
-    let append_err = match append_store.append(
-        &coord,
-        EventKind::DATA,
-        &serde_json::json!({"append": true}),
-    ) {
-        Ok(_) => panic!("append should reject a negative custom clock"),
-        Err(err) => err,
-    };
+    let append_err = append_store
+        .append(
+            &coord,
+            EventKind::DATA,
+            &serde_json::json!({"append": true}),
+        )
+        .map(|_| ())
+        .expect_err("append should reject a negative custom clock");
     assert!(
         matches!(
             append_err,
@@ -79,39 +77,33 @@ fn negative_custom_clock_surfaces_store_error_in_append_and_batch_paths() {
         Store::open(StoreConfig::new(batch_dir.path()).with_clock_fn(move || batch_clock()))
             .expect("open batch store");
 
-    let batch_err = match batch_store.append_batch(vec![BatchAppendItem::new(
-        coord.clone(),
-        EventKind::DATA,
-        &serde_json::json!({"batch": true}),
-        AppendOptions::default(),
-        CausationRef::None,
-    )
-    .expect("batch item")])
-    {
-        Ok(_) => panic!("batch append should reject a negative custom clock"),
-        Err(err) => err,
-    };
+    let batch_err = batch_store
+        .append_batch(vec![BatchAppendItem::new(
+            coord.clone(),
+            EventKind::DATA,
+            &serde_json::json!({"batch": true}),
+            AppendOptions::default(),
+            CausationRef::None,
+        )
+        .expect("batch item")])
+        .map(|_| ())
+        .expect_err("batch append should reject a negative custom clock");
 
-    // justifies: INV-ALLOW-IS-DESIGN, src/store/error.rs; StoreError is #[non_exhaustive] and this negative-input harness intentionally cares about exactly one accepted variant while routing every other current or future variant through the failure message.
-    #[allow(clippy::wildcard_enum_match_arm)]
-    match batch_err {
-        StoreError::BatchFailed { item_index, source } => {
-            assert_eq!(item_index, 0, "negative clock should fail the first batch item envelope");
-            assert!(
-                matches!(
-                    *source,
-                    StoreError::InvalidClock {
-                        timestamp_us: -1,
-                        ..
-                    }
-                ),
-                "negative custom clock must surface InvalidClock inside BatchFailed, got {source:?}"
-            );
-        }
-        other => panic!(
-            "negative custom clock must surface BatchFailed{{source=InvalidClock}} on batch append, got {other:?}"
+    assert!(
+        matches!(
+            &batch_err,
+            StoreError::BatchFailed { item_index, source }
+                if *item_index == 0
+                    && matches!(
+                        **source,
+                        StoreError::InvalidClock {
+                            timestamp_us: -1,
+                            ..
+                        }
+                    )
         ),
-    }
+        "negative custom clock must surface BatchFailed{{item_index=0, source=InvalidClock}} on batch append, got {batch_err:?}"
+    );
 
     assert!(
         batch_store
