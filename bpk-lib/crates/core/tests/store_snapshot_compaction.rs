@@ -1,11 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION, INV-MACRO-BOUNDED-CAST; snapshot/compaction tests rely on unwrap/panic as assertion style and intentionally bounded fixture data.
-#![allow(
-    clippy::unwrap_used,
-    clippy::disallowed_methods,
-    clippy::cast_possible_truncation,
-    clippy::needless_borrows_for_generic_args,
-    clippy::panic
-)]
 //! Snapshot and compaction contract tests extracted from `store_advanced.rs`.
 //!
 //! PROVES: snapshot preserves honest on-disk state; compaction preserves or
@@ -56,12 +48,7 @@ fn snapshot_copies_segments() {
     let fbat_count = std::fs::read_dir(snap_dir.path())
         .expect("read snap dir")
         .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.path()
-                .extension()
-                .map(|ext| ext == "fbat")
-                .unwrap_or(false)
-        })
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "fbat"))
         .count();
 
     assert!(
@@ -141,12 +128,13 @@ fn snapshot_with_evidence_reports_fence_watermark_and_copied_segments() {
 }
 
 #[test]
-// justifies: ADR-0027 and tests/store_snapshot_compaction.rs exercise the one-cut deprecated snapshot wrapper.
-#[allow(deprecated)]
-fn snapshot_alias_preserves_copy_behavior_for_one_cut() {
+fn snapshot_preserves_copy_behavior_for_one_cut() {
     let (_dir, store) = test_store();
     let snap_dir = TempDir::new().expect("snap dir");
-    store.snapshot(snap_dir.path()).expect("snapshot alias");
+    store
+        .snapshot_with_evidence(snap_dir.path())
+        .map(|_| ())
+        .expect("snapshot");
     store.close().expect("close");
 }
 
@@ -171,10 +159,10 @@ fn snapshot_rejects_when_visibility_fence_is_active() {
         .expect("begin visibility fence");
     let snap_dir = TempDir::new().expect("snap dir");
 
-    let err = match store.snapshot_with_evidence(snap_dir.path()) {
-        Ok(_) => panic!("PROPERTY: snapshot must not proceed while a visibility fence is active"),
-        Err(err) => err,
-    };
+    let err = store
+        .snapshot_with_evidence(snap_dir.path())
+        .map(|_| ())
+        .expect_err("PROPERTY: snapshot must not proceed while a visibility fence is active");
     assert!(
         matches!(err, StoreError::VisibilityFenceActive),
         "PROPERTY: snapshot with an active visibility fence must surface VisibilityFenceActive, got {err:?}"
@@ -354,10 +342,9 @@ fn snapshot_waits_for_in_flight_compaction() {
         snap_stats.global_sequence, live_stats.global_sequence,
         "PROPERTY: snapshot that starts during compaction must preserve the live store watermark after compaction finishes"
     );
-    let store = match Arc::try_unwrap(store) {
-        Ok(store) => store,
-        Err(_) => panic!("snapshot/compaction threads must release the store Arc"),
-    };
+    let store = Arc::try_unwrap(store)
+        .map_err(|_| ())
+        .expect("snapshot/compaction threads must release the store Arc");
     store.close().expect("close");
 }
 
@@ -478,13 +465,7 @@ fn compact_merge_rebuild_does_not_duplicate_superseded_sealed_segments() {
     let segment_count = std::fs::read_dir(dir.path())
         .expect("read data dir")
         .filter_map(Result::ok)
-        .filter(|entry| {
-            entry
-                .path()
-                .extension()
-                .map(|ext| ext == "fbat")
-                .unwrap_or(false)
-        })
+        .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "fbat"))
         .count();
     assert_eq!(
         segment_count,
@@ -519,8 +500,12 @@ fn compact_fails_closed_on_corrupt_hidden_ranges_metadata() {
             ..CompactionConfig::default()
         })
         .expect("compact result");
-    let CompactionOutcome::Failed { reason } = result.outcome else {
-        panic!("expected compaction failure on corrupt hidden ranges");
+    let reason = match result.outcome {
+        CompactionOutcome::Failed { reason } => reason,
+        CompactionOutcome::Performed | CompactionOutcome::Skipped => unreachable!(
+            "expected compaction failure on corrupt hidden ranges, got a non-failure outcome"
+        ),
+        _ => unreachable!("unexpected non_exhaustive CompactionOutcome variant"),
     };
     assert!(
         reason.contains("visibility-ranges"),
@@ -557,7 +542,7 @@ fn compact_rolls_back_marker_on_pre_swap_rename_failure() {
         .filter_map(Result::ok)
         .filter_map(|entry| {
             let path = entry.path();
-            let is_segment = path.extension().map(|ext| ext == "fbat").unwrap_or(false);
+            let is_segment = path.extension().is_some_and(|ext| ext == "fbat");
             if !is_segment {
                 return None;
             }
@@ -577,8 +562,12 @@ fn compact_rolls_back_marker_on_pre_swap_rename_failure() {
             ..CompactionConfig::default()
         })
         .expect("compact result");
-    let CompactionOutcome::Failed { reason } = result.outcome else {
-        panic!("expected compaction failure on pre-swap rename blocker");
+    let reason = match result.outcome {
+        CompactionOutcome::Failed { reason } => reason,
+        CompactionOutcome::Performed | CompactionOutcome::Skipped => unreachable!(
+            "expected compaction failure on pre-swap rename blocker, got a non-failure outcome"
+        ),
+        _ => unreachable!("unexpected non_exhaustive CompactionOutcome variant"),
     };
     assert!(
         reason.contains("pre-swap phase failed"),
@@ -638,14 +627,10 @@ fn compact_retention_removes_dropped_events_from_index() {
     let (_result, _report) = store.compact(&retention_config).expect("compact");
 
     for dropped_id in &drop_ids {
-        let get_result = store.get(*dropped_id);
-        let err = match get_result {
-            Ok(_) => panic!(
-                "COMPACT RETENTION INDEX LEAK: get() should return NotFound after retention compaction dropped the event.\
-                 Investigate: src/store/mod.rs compact(), src/store/index/mod.rs clear()."
-            ),
-            Err(err) => err,
-        };
+        let err = store.get(*dropped_id).map(|_| ()).expect_err(
+            "COMPACT RETENTION INDEX LEAK: get() should return NotFound after retention compaction dropped the event.\
+             Investigate: src/store/mod.rs compact(), src/store/index/mod.rs clear().",
+        );
         assert!(
             matches!(err, StoreError::NotFound(_)),
             "PROPERTY: get() on a compaction-dropped event must surface as StoreError::NotFound, got {err:?}"

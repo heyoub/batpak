@@ -1,11 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION, INV-MACRO-BOUNDED-CAST; advanced store tests rely on unwrap/panic as assertion style, spawn threads for concurrency probes, and narrow bounded test data into target types that the fixture guarantees fit.
-#![allow(
-    clippy::unwrap_used,
-    clippy::disallowed_methods,
-    clippy::cast_possible_truncation,
-    clippy::needless_borrows_for_generic_args,
-    clippy::panic
-)]
 //! Advanced Store segment, fd-budget, and cold-start recovery integration tests.
 
 mod support;
@@ -42,12 +34,7 @@ fn fd_budget_evicts_oldest_segments() {
     let segment_count = std::fs::read_dir(dir.path())
         .expect("read dir")
         .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.path()
-                .extension()
-                .map(|ext| ext == "fbat")
-                .unwrap_or(false)
-        })
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "fbat"))
         .count();
     assert!(
         segment_count > 2,
@@ -136,17 +123,14 @@ fn cold_start_skips_corrupt_segment_gracefully() {
     // The store should either skip it or error on it.
     // scan_segment checks magic bytes and returns CorruptSegment error.
     let config = StoreConfig::new(dir.path()).with_segment_max_bytes(512);
-    // Note: `Store` doesn't implement Debug (it owns Arc'd internal state),
-    // so `Result::expect_err` doesn't compile here. Match instead.
-    let err = match Store::open(config) {
-        Ok(_) => panic!(
-            "PROPERTY: Store::open must return Err when a segment file has an \
-             invalid magic header. Investigate: src/store/segment/scan.rs scan_segment \
-             magic check. Common causes: magic bytes check skipped or returns \
-             Ok(empty), corrupt file silently ignored."
-        ),
-        Err(e) => e,
-    };
+    // `Store` doesn't implement Debug (it owns Arc'd internal state), so map the
+    // Ok payload to `()` before `expect_err` to satisfy the Debug bound.
+    let err = Store::open(config).map(|_| ()).expect_err(
+        "PROPERTY: Store::open must return Err when a segment file has an \
+         invalid magic header. Investigate: src/store/segment/scan.rs scan_segment \
+         magic check. Common causes: magic bytes check skipped or returns \
+         Ok(empty), corrupt file silently ignored.",
+    );
     assert!(
         matches!(err, StoreError::CorruptSegment { .. }),
         "PROPERTY: invalid magic header must surface as StoreError::CorruptSegment, got {err:?}"
@@ -184,12 +168,7 @@ fn corrupt_frame_in_segment_is_detected() {
     let mut segments: Vec<_> = std::fs::read_dir(dir.path())
         .expect("read dir")
         .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.path()
-                .extension()
-                .map(|ext| ext == "fbat")
-                .unwrap_or(false)
-        })
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "fbat"))
         .collect();
     segments.sort_by_key(|e| e.file_name());
     assert!(
@@ -202,19 +181,24 @@ fn corrupt_frame_in_segment_is_detected() {
 
     let seg_path = segments[0].path();
     let mut data = std::fs::read(&seg_path).expect("read segment");
-    let sidx_start = u64::from_le_bytes(
+    let sidx_start = usize::try_from(u64::from_le_bytes(
         data[data.len() - 16..data.len() - 8]
             .try_into()
             .expect("SIDX trailer offset"),
-    ) as usize;
+    ))
+    .expect("bounded SIDX trailer offset");
     data.truncate(sidx_start);
-    let header_len = u32::from_be_bytes(data[4..8].try_into().expect("header len")) as usize;
+    let header_len = usize::try_from(u32::from_be_bytes(
+        data[4..8].try_into().expect("header len"),
+    ))
+    .expect("bounded header len");
     let frame_offset = 8 + header_len;
-    let payload_len = u32::from_be_bytes(
+    let payload_len = usize::try_from(u32::from_be_bytes(
         data[frame_offset..frame_offset + 4]
             .try_into()
             .expect("frame payload len"),
-    ) as usize;
+    ))
+    .expect("bounded frame payload len");
     let frame_end = frame_offset + 8 + payload_len;
     assert!(
         frame_end + 8 < data.len(),
@@ -227,22 +211,24 @@ fn corrupt_frame_in_segment_is_detected() {
     // Phase 3: cold start must fail closed. The old behavior logged the bad
     // frame and returned a partial index, which made committed data loss look
     // like successful recovery.
-    let err = match Store::open(
+    let opened = Store::open(
         StoreConfig::new(dir.path())
             .with_enable_checkpoint(false)
             .with_enable_mmap_index(false),
-    ) {
-        Ok(store) => {
-            let stats = store.stats();
+    );
+    // If the store opened, capture how many events it surfaced so the failure
+    // diagnostic is honest, then map the Ok payload to that count for `expect_err`.
+    let err = opened
+        .map(|store| {
+            let event_count = store.stats().event_count;
             let _ = store.close();
-            panic!(
-                "PROPERTY: committed middle-frame corruption must fail closed instead of opening with {} events.\n\
-                 Investigate: src/store/segment/scan/full_scan.rs and recovery.rs corrupt-frame handling.",
-                stats.event_count
-            );
-        }
-        Err(err) => err,
-    };
+            event_count
+        })
+        .expect_err(
+            "PROPERTY: committed middle-frame corruption must fail closed instead of \
+             opening successfully. Investigate: src/store/segment/scan/full_scan.rs and \
+             recovery.rs corrupt-frame handling.",
+        );
     assert!(
         matches!(
             err,

@@ -1,6 +1,6 @@
-// justifies: INV-SUBSCRIPTION-STATE-MACHINE; tests intentionally exercise blocking subscription APIs under bounded producer/timeout probes.
-#![allow(clippy::disallowed_methods)]
 //! Advanced Store subscription delivery and SubscriptionOps integration tests.
+//!
+//! PROVES: INV-SUBSCRIPTION-STATE-MACHINE
 
 mod support;
 use batpak::store::Store;

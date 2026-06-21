@@ -1,5 +1,3 @@
-// justifies: INV-CONCURRENCY-SCHEDULE-PROOF, INV-TEST-PANIC-AS-ASSERTION; algebraic property tests in tests/store_properties.rs spawn threads via std::thread::spawn to exercise concurrency invariants and use explicit panic branches as assertion failures.
-#![allow(clippy::disallowed_methods, clippy::panic)]
 //! Store algebraic property tests: replay determinism, idempotency, commutativity,
 //! round-trip fidelity, law enforcement, flow connectivity, error propagation.
 //!
@@ -416,14 +414,13 @@ fn errors_propagate_not_launder_to_defaults() {
     let store = test_store(&dir);
 
     // get() on nonexistent event must return NotFound, not a default
-    let result = store.get(batpak::id::EventId::from(999999u128));
-    let err = match result {
-        Ok(_) => panic!(
+    let err = store
+        .get(batpak::id::EventId::from(999999u128))
+        .map(|_| ())
+        .expect_err(
             "PROPERTY: get() for nonexistent event must return Err(NotFound), not a default. \
-             Investigate: src/store/mod.rs get(), src/store/segment/scan.rs read_entry."
-        ),
-        Err(err) => err,
-    };
+             Investigate: src/store/mod.rs get(), src/store/segment/scan.rs read_entry.",
+        );
     assert!(
         matches!(err, StoreError::NotFound(_)),
         "PROPERTY: violation must surface as StoreError::NotFound, got {err:?}"
@@ -438,14 +435,13 @@ fn errors_propagate_not_launder_to_defaults() {
         expected_sequence: Some(999), // wrong sequence
         ..AppendOptions::default()
     };
-    let result = store.append_with_options(&coord, kind, &"should_fail", opts);
-    let err = match result {
-        Ok(_) => panic!(
+    let err = store
+        .append_with_options(&coord, kind, &"should_fail", opts)
+        .map(|_| ())
+        .expect_err(
             "PROPERTY: CAS with wrong expected_sequence must return Err(SequenceMismatch). \
-             Investigate: src/store/write/writer.rs CAS check (Step 1a)."
-        ),
-        Err(err) => err,
-    };
+             Investigate: src/store/write/writer.rs CAS check (Step 1a).",
+        );
     assert!(
         matches!(err, StoreError::SequenceMismatch { .. }),
         "PROPERTY: violation must surface as StoreError::SequenceMismatch, got {err:?}"
