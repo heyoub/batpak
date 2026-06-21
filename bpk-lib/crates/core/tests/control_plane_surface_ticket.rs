@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION, ADR-0007; this ticket-surface harness treats invariant violations as test failures; panic! is the assertion style throughout this file.
-#![allow(clippy::panic)]
 //! PROVES: the ready-ticket polling surface -- `AppendTicket`/`BatchAppendTicket`
 //! `try_check` exposes committed receipts (identity + visible sequence order)
 //! once the writer reply lands -- and that a lossy scan fold converges with the
@@ -77,15 +75,12 @@ fn try_check_surfaces_ready_append_and_batch_tickets() {
         .submit(&coord, kind, &serde_json::json!({"n": "append"}))
         .expect("submit append ticket");
     wait_until_ticket_receiver_has_value(append_ticket.receiver(), "append ticket receiver");
-    let append_receipt = match append_ticket.try_check() {
-        Some(Ok(receipt)) => receipt,
-        Some(Err(err)) => panic!(
-            "PROPERTY: ready append ticket must surface its receipt through try_check, got error {err:?}"
-        ),
-        None => panic!(
-            "PROPERTY: once the append ticket receiver is non-empty, try_check must return Some(Ok(_))"
-        ),
-    };
+    let append_receipt = append_ticket
+        .try_check()
+        .expect(
+            "PROPERTY: once the append ticket receiver is non-empty, try_check must return Some(_)",
+        )
+        .expect("PROPERTY: ready append ticket must surface its receipt through try_check");
     assert_eq!(append_receipt.sequence, 1);
     assert_ne!(
         append_receipt.event_id,
@@ -114,15 +109,12 @@ fn try_check_surfaces_ready_append_and_batch_tickets() {
         ])
         .expect("submit batch ticket");
     wait_until_ticket_receiver_has_value(batch_ticket.receiver(), "batch ticket receiver");
-    let batch_receipts = match batch_ticket.try_check() {
-        Some(Ok(receipts)) => receipts,
-        Some(Err(err)) => panic!(
-            "PROPERTY: ready batch ticket must surface its receipts through try_check, got error {err:?}"
-        ),
-        None => panic!(
-            "PROPERTY: once the batch ticket receiver is non-empty, try_check must return Some(Ok(_))"
-        ),
-    };
+    let batch_receipts = batch_ticket
+        .try_check()
+        .expect(
+            "PROPERTY: once the batch ticket receiver is non-empty, try_check must return Some(_)",
+        )
+        .expect("PROPERTY: ready batch ticket must surface its receipts through try_check");
     assert_eq!(batch_receipts.len(), 2);
     assert!(
         batch_receipts

@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION, ADR-0007; this writer-pressure harness treats invariant violations as test failures; panic! is the assertion style throughout this file.
-#![allow(clippy::panic)]
 //! PROVES: the writer-pressure backpressure gate -- `try_submit` and
 //! `try_submit_batch` return `Outcome::Retry` once the writer channel exceeds the
 //! configured pressure threshold (50% of capacity 8 = 4 queued commands) under a
@@ -78,10 +76,9 @@ fn try_submit_returns_retry_under_pressure() {
          exceeds the pressure threshold (50% of capacity 8 = 4 queued commands)."
     );
 
-    let store = match Arc::try_unwrap(store) {
-        Ok(store) => store,
-        Err(_) => panic!("PROPERTY: producer threads should release the last Arc"),
-    };
+    let store = Arc::try_unwrap(store)
+        .map_err(|_| "PROPERTY: producer threads should release the last Arc")
+        .expect("producer threads should release the last Arc after stop + join");
     store.close().expect("close store");
 }
 
@@ -115,7 +112,7 @@ fn try_submit_batch_returns_retry_under_pressure() {
                             &serde_json::json!({"t": i, "n": n}),
                             AppendOptions::new().with_idempotency(
                                 batpak::id::IdempotencyKey::from(u128::from(
-                                    ((i as u64) << 32) | u64::from(n) | 0xB000_0000,
+                                    (u64::from(i) << 32) | u64::from(n) | 0xB000_0000,
                                 )),
                             ),
                             batpak::store::CausationRef::None,
@@ -159,9 +156,8 @@ fn try_submit_batch_returns_retry_under_pressure() {
          exceeds the pressure threshold (50% of capacity 8 = 4 queued commands)."
     );
 
-    let store = match Arc::try_unwrap(store) {
-        Ok(store) => store,
-        Err(_) => panic!("PROPERTY: producer threads should release the last Arc"),
-    };
+    let store = Arc::try_unwrap(store)
+        .map_err(|_| "PROPERTY: producer threads should release the last Arc")
+        .expect("producer threads should release the last Arc after stop + join");
     store.close().expect("close store");
 }

@@ -2,16 +2,6 @@
 // CATCHES: FM-011 (Error Path Hollowing — partial batch published), FM-019 (Non-Replayable Truth — events lost across rotation)
 // SEEDED: tiny segment limits (256/512 bytes) forcing mid-batch rotation, concurrent batch storms (4 threads × 10 batches × 10 items)
 // INVARIANTS: INV-BATCH-CRASH-RECOVERY (all-or-nothing publish), INV-CONCURRENCY-SCHEDULE-PROOF (clock continuity)
-// justifies: INV-TEST-PANIC-AS-ASSERTION, INV-FAULT-INJECT-GATED; chaos batch/rotation fixtures spawn threads for stress probes, emit stderr diagnostics during fault injection, and use unwrap/panic as assertion style when invariants are violated.
-#![allow(
-    clippy::panic,
-    clippy::print_stderr,
-    clippy::unwrap_used,
-    clippy::inconsistent_digit_grouping,
-    clippy::disallowed_methods,
-    clippy::needless_borrows_for_generic_args,
-    clippy::unused_enumerate_index
-)]
 //! Chaos testing — batch atomicity and rapid segment rotation lane.
 //! Harness pattern: Fault-Injection Harness (direct chaos lane).
 //! Splits the rotation-stress and batch-atomicity cases out of `chaos_testing`:
@@ -69,7 +59,6 @@ fn chaos_rapid_segment_rotation() {
         })
         .count();
 
-    eprintln!("  CHAOS ROTATION: {iterations} events across {segment_count} segments");
     assert!(
         segment_count > 1,
         "CHAOS PROPERTY: with a 256-byte segment limit, {iterations} events must span more than one segment file (got {segment_count}).\n\
@@ -167,13 +156,8 @@ fn chaos_batch_atomicity_concurrent() {
                             })
                             .collect();
 
-                        match store.append_batch(items) {
-                            Ok(_) => {
-                                batch_counter.fetch_add(1, Ordering::SeqCst);
-                            }
-                            Err(e) => {
-                                eprintln!("Thread {t} batch {b} failed: {e}");
-                            }
+                        if store.append_batch(items).is_ok() {
+                            batch_counter.fetch_add(1, Ordering::SeqCst);
                         }
                     }
                 })
@@ -211,7 +195,8 @@ fn chaos_batch_atomicity_concurrent() {
         if !entries.is_empty() {
             for (i, entry) in entries.iter().enumerate() {
                 assert_eq!(
-                    entry.clock() as usize,
+                    usize::try_from(entry.clock())
+                        .expect("entity clock fits in usize for a bounded test batch"),
                     i,
                     "CHAOS PROPERTY: entity clocks must be contiguous after concurrent batches.\n\
                      Entry {} has clock {} (expected {}).",
@@ -230,7 +215,6 @@ fn chaos_batch_atomicity_concurrent() {
          A zero-commit run is vacuous and does not prove anything about atomic publish.\n\
          Investigate: test harness stress level, writer availability, or batch fault paths."
     );
-    eprintln!("  CHAOS BATCH: {total_committed} batches committed across {n_threads} threads");
 
     drop(store);
 }
@@ -298,6 +282,5 @@ fn chaos_batch_cross_segment_rotation() {
         segment_count
     );
 
-    eprintln!("  CHAOS BATCH ROTATION: 20 items across {segment_count} segments");
     store.close().expect("close");
 }

@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; the complexity-exponent gate uses explicit panic/expect branches as assertion failures in tests/complexity_exponent.rs.
-#![allow(clippy::panic)]
 #![cfg(feature = "alloc-count")]
 //! GAUNT-CPLX-EXP: perf-as-contract complexity-EXPONENT + WCET gate.
 //!
@@ -228,9 +226,8 @@ fn query_complexity_exponent_and_wcet_are_bounded() {
         .collect();
 
     // EXPONENT half: the fitted log-log slope must stay under the linear budget.
-    let slope = check_complexity(&samples, SLOPE_BUDGET).unwrap_or_else(|why| {
-        panic!("PROPERTY: query complexity exponent must be bounded — {why}")
-    });
+    let slope = check_complexity(&samples, SLOPE_BUDGET)
+        .expect("PROPERTY: query complexity exponent must be bounded");
     assert!(
         slope <= SLOPE_BUDGET,
         "PROPERTY: query log-log slope {slope:.4} must be <= budget {SLOPE_BUDGET:.4} \

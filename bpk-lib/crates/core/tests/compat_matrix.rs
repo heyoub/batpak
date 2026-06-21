@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; a data-driven downgrade gate uses expect/panic as the assertion style when a matrix row's contract is violated
-#![allow(clippy::panic, clippy::unwrap_used, clippy::expect_used)]
 //! Gauntlet Phase 3 — COMPAT MATRIX: on-disk forward-compat downgrade discipline.
 //!
 //! Harness pattern: Oracle / Fault harness (table-driven, every-PR).
@@ -103,15 +101,19 @@ enum Outcome {
 
 fn parse_outcome(raw: &str) -> Outcome {
     if raw == "OpensOK" {
-        Outcome::OpensOk
-    } else if let Some(tag) = raw.strip_prefix("CanonicalRefusal:") {
-        Outcome::CanonicalRefusal(tag.to_string())
-    } else {
-        panic!(
-            "compat_matrix.yaml: unknown expected_outcome {raw:?}; \
-             expected `OpensOK` or `CanonicalRefusal:<TypedError>`"
-        );
+        return Outcome::OpensOk;
     }
+    let tag = raw
+        .strip_prefix("CanonicalRefusal:")
+        .map(str::to_string)
+        .ok_or_else(|| {
+            format!(
+                "compat_matrix.yaml: unknown expected_outcome {raw:?}; \
+                 expected `OpensOK` or `CanonicalRefusal:<TypedError>`"
+            )
+        })
+        .expect("compat_matrix.yaml expected_outcome must be OpensOK or CanonicalRefusal:<tag>");
+    Outcome::CanonicalRefusal(tag)
 }
 
 /// The store config a given `format` row opens through. Each format enables
@@ -120,25 +122,31 @@ fn parse_outcome(raw: &str) -> Outcome {
 /// mmap row enables the mmap index).
 fn config_for(dir: &Path, format: &str) -> StoreConfig {
     let base = StoreConfig::new(dir).with_sync_every_n_events(1);
-    match format {
+    let config = match format {
         // The mmap path must be the only fast path so a forged mmap artifact is
         // what cold-start sees first.
-        "mmap-index" => base
-            .with_enable_checkpoint(false)
-            .with_enable_mmap_index(true),
+        "mmap-index" => Some(
+            base.with_enable_checkpoint(false)
+                .with_enable_mmap_index(true),
+        ),
         // Disable mmap so the checkpoint is the fast path (mmap would otherwise
         // shadow it). Checkpoints are enabled by default; make it explicit.
-        "checkpoint" => base
-            .with_enable_mmap_index(false)
-            .with_enable_checkpoint(true),
+        "checkpoint" => Some(
+            base.with_enable_mmap_index(false)
+                .with_enable_checkpoint(true),
+        ),
         // The durable idempotency sidecar + hidden-ranges metadata are loaded
         // UNCONDITIONALLY on open, independent of mmap/checkpoint; keep the
         // config minimal and deterministic.
-        "idempotency-index" | "visibility-ranges" => base
-            .with_enable_mmap_index(false)
-            .with_enable_checkpoint(false),
-        other => panic!("compat_matrix.yaml: no store config for format {other:?}"),
-    }
+        "idempotency-index" | "visibility-ranges" => Some(
+            base.with_enable_mmap_index(false)
+                .with_enable_checkpoint(false),
+        ),
+        _ => None,
+    };
+    config
+        .ok_or_else(|| format!("compat_matrix.yaml: no store config for format {format:?}"))
+        .expect("compat_matrix.yaml row must reference a format with a config arm")
 }
 
 /// Append `count` plain events through `config`, returning after a clean close
@@ -230,29 +238,34 @@ fn forge_version_field(artifact: &Path, live: u16, writer_version: u16) {
 /// artifact path. A self-version forge (writer == live) is a no-op rewrite that
 /// still asserts the artifact is on the expected live format.
 fn forge_artifact_version(dir: &Path, format: &str, writer_version: u16) -> PathBuf {
-    let (artifact_name, live) = match format {
+    let seeded: Option<(&str, u16)> = match format {
         "mmap-index" => {
             seed_events(dir, format, 4);
-            (MMAP_ARTIFACT, SUPPORTED_MMAP_VERSION)
+            Some((MMAP_ARTIFACT, SUPPORTED_MMAP_VERSION))
         }
         "checkpoint" => {
             seed_events(dir, format, 4);
-            (CHECKPOINT_ARTIFACT, SUPPORTED_CHECKPOINT_VERSION)
+            Some((CHECKPOINT_ARTIFACT, SUPPORTED_CHECKPOINT_VERSION))
         }
         "idempotency-index" => {
             seed_events(dir, format, 4);
-            (IDEMP_ARTIFACT, SUPPORTED_IDEMP_VERSION)
+            Some((IDEMP_ARTIFACT, SUPPORTED_IDEMP_VERSION))
         }
         "visibility-ranges" => {
             seed_visibility_ranges(dir);
-            (VISIBILITY_ARTIFACT, SUPPORTED_VISIBILITY_VERSION)
+            Some((VISIBILITY_ARTIFACT, SUPPORTED_VISIBILITY_VERSION))
         }
-        other => panic!(
-            "compat_matrix.yaml row references format {other:?} with no forge arm; \
-             add a `forge_artifact_version` arm (and an `open_outcome` arm) before \
-             adding the row, or it is a silent-skip gap"
-        ),
+        _ => None,
     };
+    let (artifact_name, live) = seeded
+        .ok_or_else(|| {
+            format!(
+                "compat_matrix.yaml row references format {format:?} with no forge arm; \
+                 add a `forge_artifact_version` arm (and an `open_outcome` arm) before \
+                 adding the row, or it is a silent-skip gap"
+            )
+        })
+        .expect("compat_matrix.yaml row must reference a format with a forge arm");
     let artifact = dir.join(artifact_name);
     assert!(
         artifact.exists(),
@@ -267,41 +280,47 @@ fn forge_artifact_version(dir: &Path, format: &str, writer_version: u16) -> Path
 /// uses. Unknown formats — or unrelated errors — panic (no silent skip).
 fn open_outcome(dir: &Path, format: &str) -> Outcome {
     let result = Store::open(config_for(dir, format));
-    match (format, result) {
-        (_, Ok(_store)) => Outcome::OpensOk,
+    let classified: Result<Outcome, String> = match (format, result) {
+        (_, Ok(_store)) => Ok(Outcome::OpensOk),
         ("mmap-index", Err(StoreError::MmapFutureVersion { .. })) => {
-            Outcome::CanonicalRefusal("MmapFutureVersion".to_string())
+            Ok(Outcome::CanonicalRefusal("MmapFutureVersion".to_string()))
         }
-        ("checkpoint", Err(StoreError::CheckpointFutureVersion { .. })) => {
-            Outcome::CanonicalRefusal("CheckpointFutureVersion".to_string())
-        }
-        ("idempotency-index", Err(StoreError::IdempotencyFutureVersion { .. })) => {
-            Outcome::CanonicalRefusal("IdempotencyFutureVersion".to_string())
-        }
-        ("visibility-ranges", Err(StoreError::HiddenRangesFutureVersion { .. })) => {
-            Outcome::CanonicalRefusal("HiddenRangesFutureVersion".to_string())
-        }
-        (format, Err(other)) => panic!(
+        ("checkpoint", Err(StoreError::CheckpointFutureVersion { .. })) => Ok(
+            Outcome::CanonicalRefusal("CheckpointFutureVersion".to_string()),
+        ),
+        ("idempotency-index", Err(StoreError::IdempotencyFutureVersion { .. })) => Ok(
+            Outcome::CanonicalRefusal("IdempotencyFutureVersion".to_string()),
+        ),
+        ("visibility-ranges", Err(StoreError::HiddenRangesFutureVersion { .. })) => Ok(
+            Outcome::CanonicalRefusal("HiddenRangesFutureVersion".to_string()),
+        ),
+        (format, Err(other)) => Err(format!(
             "PROPERTY: forward-compat for {format:?} must yield OpensOK or its canonical \
              future-version refusal; got an unrelated error {other:?}"
-        ),
-    }
+        )),
+    };
+    classified
+        .expect("forward-compat open must yield OpensOK or a canonical future-version refusal")
 }
 
 fn live_supported_version(format: &str) -> u16 {
-    match format {
-        "mmap-index" => SUPPORTED_MMAP_VERSION,
-        "checkpoint" => SUPPORTED_CHECKPOINT_VERSION,
-        "idempotency-index" => SUPPORTED_IDEMP_VERSION,
-        "visibility-ranges" => SUPPORTED_VISIBILITY_VERSION,
-        other => panic!("compat_matrix.yaml: no live version mirror for format {other:?}"),
-    }
+    let version = match format {
+        "mmap-index" => Some(SUPPORTED_MMAP_VERSION),
+        "checkpoint" => Some(SUPPORTED_CHECKPOINT_VERSION),
+        "idempotency-index" => Some(SUPPORTED_IDEMP_VERSION),
+        "visibility-ranges" => Some(SUPPORTED_VISIBILITY_VERSION),
+        _ => None,
+    };
+    version
+        .ok_or_else(|| format!("compat_matrix.yaml: no live version mirror for format {format:?}"))
+        .expect("every COMPAT_FORMATS entry must have a live version mirror")
 }
 
 fn load_matrix() -> CompatMatrix {
     let path = matrix_path();
     let text = std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("read compat matrix {}: {e}", path.display()));
+        .map_err(|e| format!("read compat matrix {}: {e}", path.display()))
+        .expect("compat_matrix.yaml fixture must be readable");
     yaml_serde::from_str(&text).expect("parse compat_matrix.yaml")
 }
 
@@ -363,15 +382,17 @@ fn compat_matrix_self_row_tracks_live_version() {
             .rows
             .iter()
             .find(|r| r.format == format && r.writer_version == live && r.reader_version == live);
-        let self_row = self_row.unwrap_or_else(|| {
-            panic!(
-                "compat_matrix.yaml has NO self-row for format {format:?} at the live \
-                 supported version {live}. A new on-disk version without a row is a \
-                 forward-compat gap: add a row \
-                 {{ writer_version: {live}, reader_version: {live}, \
-                 expected_outcome: OpensOK }}"
-            )
-        });
+        let self_row = self_row
+            .ok_or_else(|| {
+                format!(
+                    "compat_matrix.yaml has NO self-row for format {format:?} at the live \
+                     supported version {live}. A new on-disk version without a row is a \
+                     forward-compat gap: add a row \
+                     {{ writer_version: {live}, reader_version: {live}, \
+                     expected_outcome: OpensOK }}"
+                )
+            })
+            .expect("compat_matrix.yaml must declare a self-row at the live version");
         assert_eq!(
             parse_outcome(&self_row.expected_outcome),
             Outcome::OpensOk,
@@ -385,13 +406,15 @@ fn compat_matrix_self_row_tracks_live_version() {
             .rows
             .iter()
             .find(|r| r.format == format && r.writer_version == live + 1);
-        let future = future.unwrap_or_else(|| {
-            panic!(
-                "compat_matrix.yaml has no forged future-version row for {format:?} \
-                 at version {}; the downgrade-refusal branch would be untested",
-                live + 1
-            )
-        });
+        let future = future
+            .ok_or_else(|| {
+                format!(
+                    "compat_matrix.yaml has no forged future-version row for {format:?} \
+                     at version {}; the downgrade-refusal branch would be untested",
+                    live + 1
+                )
+            })
+            .expect("compat_matrix.yaml must declare a forged future-version row");
         assert!(
             matches!(
                 parse_outcome(&future.expected_outcome),

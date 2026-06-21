@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION, ADR-0007; this visibility-fence harness treats invariant violations as test failures; panic! is the assertion style throughout this file.
-#![allow(clippy::panic)]
 //! PROVES: the `VisibilityFence` lifecycle -- root/batch/reaction submissions stay
 //! hidden until commit, commit preserves reaction correlation/causation metadata,
 //! and cancel (explicit, on drop, or on shutdown) discards pending work and keeps

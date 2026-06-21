@@ -332,11 +332,11 @@ fn store_config_all_fields_overridable() {
     // Avoids wall-clock dependency so the test never flakes on clock skew.
     let clock_start = std::time::Instant::now();
     let clock_fn: Arc<dyn Fn() -> i64 + Send + Sync> = Arc::new(move || {
-        // justifies: INV-CLOCK-NOW-US-LIVE, INV-MACRO-BOUNDED-CAST; u128 microseconds-since-start narrowed to i64 in tests/config_propagation.rs cannot overflow during any plausible test run (requires >292,000 years of elapsed time).
-        #[allow(clippy::cast_possible_truncation)]
-        {
-            clock_start.elapsed().as_micros() as i64
-        }
+        // u128 microseconds-since-start narrowed to i64: this cannot overflow
+        // during any plausible test run (it would require >292,000 years of
+        // elapsed time), so the try_from is infallible in practice.
+        i64::try_from(clock_start.elapsed().as_micros())
+            .expect("microseconds since test start fit in i64 within any test run")
     });
 
     let config = StoreConfig::new(dir.path())
