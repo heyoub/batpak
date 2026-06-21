@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION, ADR-0010; this test shells out to a downstream fixture and panics only on fixture execution failure.
-#![allow(clippy::panic)]
 //! PROVES: cross-crate EventPayload registry collisions are visible to a composing downstream binary.
 //! CATCHES: dependency-crate `inventory::submit!` registrations lost behind `cfg(test)` boundaries.
 //! SEEDED: deterministic / no randomness.
@@ -20,14 +18,13 @@ fn downstream_fixture_detects_dependency_event_kind_collision_in_release() {
 fn run_downstream_fixture(args: &[&str]) {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let manifest = manifest_dir.join("fixtures/kind-collision-composer/Cargo.toml");
-    if !manifest.exists() {
-        panic!(
-            "downstream fixture manifest is missing from repo checkout: {}",
-            manifest.display()
-        );
-    }
+    assert!(
+        manifest.exists(),
+        "downstream fixture manifest is missing from repo checkout: {}",
+        manifest.display()
+    );
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_owned());
-    let output = match Command::new(cargo)
+    let output = Command::new(cargo)
         .args(args)
         .arg("--manifest-path")
         .arg(&manifest)
@@ -36,18 +33,14 @@ fn run_downstream_fixture(args: &[&str]) {
             downstream_fixture_target_dir(&manifest_dir),
         )
         .output()
-    {
-        Ok(output) => output,
-        Err(error) => panic!("failed to run downstream fixture: {error}"),
-    };
-    if !output.status.success() {
-        panic!(
-            "downstream fixture failed\nstatus: {}\nstdout:\n{}\nstderr:\n{}",
-            output.status,
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
+        .expect("failed to run downstream fixture");
+    assert!(
+        output.status.success(),
+        "downstream fixture failed\nstatus: {}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 fn downstream_fixture_target_dir(manifest_dir: &std::path::Path) -> PathBuf {

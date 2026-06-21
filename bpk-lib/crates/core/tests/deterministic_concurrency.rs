@@ -1,7 +1,8 @@
-// justifies: INV-CONCURRENCY-SCHEDULE-PROOF, INV-TEST-PANIC-AS-ASSERTION; loom proofs in tests/deterministic_concurrency.rs treat any unwrap failure as a falsified invariant; unwrap is the idiomatic assertion style for loom tests.
-#![allow(clippy::unwrap_used)]
 //! Deterministic concurrency proofs using loom.
 //! Harness pattern: State-Machine Harness (bounded schedule lane).
+//! PROVES: INV-CONCURRENCY-SCHEDULE-PROOF — bounded loom exploration of the
+//! idempotency, CAS, restart-budget, single-compactor, and batch-visibility
+//! schedules; any falsified invariant fails the model.
 
 use loom::sync::{Arc, Mutex};
 use loom::thread;
@@ -29,23 +30,23 @@ where
 }
 
 fn model_idempotent_append(committed: &Mutex<bool>, commit_count: &Mutex<u64>) {
-    let mut committed_guard = committed.lock().unwrap();
+    let mut committed_guard = committed.lock().expect("lock committed flag");
     if !*committed_guard {
         *committed_guard = true;
         drop(committed_guard);
 
-        let mut count_guard = commit_count.lock().unwrap();
+        let mut count_guard = commit_count.lock().expect("lock commit count");
         *count_guard += 1;
     }
 }
 
 fn model_compare_and_append(sequence: &Mutex<u32>, success_count: &Mutex<u32>, expected: u32) {
-    let mut sequence_guard = sequence.lock().unwrap();
+    let mut sequence_guard = sequence.lock().expect("lock sequence");
     if *sequence_guard == expected {
         *sequence_guard += 1;
         drop(sequence_guard);
 
-        let mut success_guard = success_count.lock().unwrap();
+        let mut success_guard = success_count.lock().expect("lock success count");
         *success_guard += 1;
     }
 }
@@ -55,23 +56,25 @@ fn model_bounded_restart(
     successful_restarts: &Mutex<u32>,
     max_restarts: u32,
 ) {
-    let mut restart_guard = restart_count.lock().unwrap();
+    let mut restart_guard = restart_count.lock().expect("lock restart count");
     if *restart_guard < max_restarts {
         *restart_guard += 1;
         drop(restart_guard);
 
-        let mut success_guard = successful_restarts.lock().unwrap();
+        let mut success_guard = successful_restarts
+            .lock()
+            .expect("lock successful restarts");
         *success_guard += 1;
     }
 }
 
 fn model_single_compactor(compacting: &Mutex<bool>, winners: &Mutex<u32>) {
-    let mut compacting_guard = compacting.lock().unwrap();
+    let mut compacting_guard = compacting.lock().expect("lock compacting flag");
     if !*compacting_guard {
         *compacting_guard = true;
         drop(compacting_guard);
 
-        let mut winners_guard = winners.lock().unwrap();
+        let mut winners_guard = winners.lock().expect("lock winners");
         *winners_guard += 1;
     }
 }
@@ -92,15 +95,15 @@ fn loom_idempotency_single_winner_under_race() {
         }
 
         for handle in handles {
-            handle.join().unwrap();
+            handle.join().expect("join worker thread");
         }
 
         assert!(
-            *committed.lock().unwrap(),
+            *committed.lock().expect("lock committed flag"),
             "PROPERTY: one racing append must commit the idempotent key."
         );
         assert_eq!(
-            *commit_count.lock().unwrap(),
+            *commit_count.lock().expect("lock commit count"),
             1,
             "PROPERTY: racing idempotent appends must linearize to a single committed write."
         );
@@ -123,16 +126,16 @@ fn loom_cas_only_one_writer_can_claim_sequence() {
         }
 
         for handle in handles {
-            handle.join().unwrap();
+            handle.join().expect("join worker thread");
         }
 
         assert_eq!(
-            *success_count.lock().unwrap(),
+            *success_count.lock().expect("lock success count"),
             1,
             "PROPERTY: two racing CAS appends with expected_sequence=0 must have exactly one winner."
         );
         assert_eq!(
-            *sequence.lock().unwrap(),
+            *sequence.lock().expect("lock sequence"),
             1,
             "PROPERTY: the claimed sequence must advance exactly once after the race."
         );
@@ -155,16 +158,16 @@ fn loom_bounded_restart_allows_only_configured_number_of_recoveries() {
         }
 
         for handle in handles {
-            handle.join().unwrap();
+            handle.join().expect("join worker thread");
         }
 
         assert_eq!(
-            *successful_restarts.lock().unwrap(),
+            *successful_restarts.lock().expect("lock successful restarts"),
             1,
             "PROPERTY: a bounded restart policy with max_restarts=1 must admit exactly one recovery under race."
         );
         assert_eq!(
-            *restart_count.lock().unwrap(),
+            *restart_count.lock().expect("lock restart count"),
             1,
             "PROPERTY: restart bookkeeping must stop once the configured limit is exhausted."
         );
@@ -187,11 +190,11 @@ fn loom_compaction_has_single_exclusive_owner() {
         }
 
         for handle in handles {
-            handle.join().unwrap();
+            handle.join().expect("join worker thread");
         }
 
         assert_eq!(
-            *winners.lock().unwrap(),
+            *winners.lock().expect("lock winners"),
             1,
             "PROPERTY: only one compaction claimant may own the exclusive window at a time."
         );
@@ -291,7 +294,7 @@ fn loom_batch_visibility_no_prefix_exposure() {
             );
         });
 
-        writer.join().unwrap();
-        reader.join().unwrap();
+        writer.join().expect("join writer thread");
+        reader.join().expect("join reader thread");
     });
 }

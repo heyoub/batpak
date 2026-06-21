@@ -1,5 +1,3 @@
-// justifies: INV-DST-RECOVERY-LEGAL; the DST recovery composition uses expect/panic as the assertion style when a recovered state is illegal or nondeterministic, per crates/core/tests/dst_recovery.rs
-#![allow(clippy::panic, clippy::unwrap_used)]
 // The sim filesystem, crash hook, and __sim entry points live behind
 // `dangerous-test-hooks`; without the feature the whole file is empty.
 #![cfg(feature = "dangerous-test-hooks")]
@@ -41,13 +39,11 @@ fn dst_recovery_is_legal_and_deterministic() {
     // Two runs from the same seed must recover byte-identically. The outcome type
     // is named explicitly so its public surface is test-anchored.
     let first: batpak::__sim::RecoveryOutcomePublic =
-        batpak::__sim::run_seeded_recovery(seed, steps).unwrap_or_else(|v| {
-            panic!("DST recovery must be legal on the real recovery path: {v}")
-        });
+        batpak::__sim::run_seeded_recovery(seed, steps)
+            .expect("DST recovery must be legal on the real recovery path");
     let second: batpak::__sim::RecoveryOutcomePublic =
-        batpak::__sim::run_seeded_recovery(seed, steps).unwrap_or_else(|v| {
-            panic!("DST recovery must be legal on the real recovery path: {v}")
-        });
+        batpak::__sim::run_seeded_recovery(seed, steps)
+            .expect("DST recovery must be legal on the real recovery path");
 
     assert_eq!(
         first, second,

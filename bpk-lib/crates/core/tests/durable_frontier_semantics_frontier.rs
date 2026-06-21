@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; this frontier-semantics harness uses panic! through assert macros for crisp invariant failures.
-#![allow(clippy::panic)]
 #![cfg(feature = "dangerous-test-hooks")]
 //! PROVES: INV-FRONTIER-MONOTONIC, INV-FRONTIER-ORDERING, INV-FRONTIER-TORN-FREE,
 //! INV-FRONTIER-OPEN-MONOTONIC, INV-FRONTIER-APPLIED-MIN, and
@@ -70,13 +68,13 @@ fn config_with_fault(
 }
 
 fn assert_fault_injected(result: Result<batpak::store::AppendReceipt, StoreError>) {
-    match result {
-        Ok(_) => panic!("PROPERTY: append must surface the injected error, not a receipt"),
-        Err(err) => assert!(
-            matches!(err, StoreError::FaultInjected(ref message) if message.contains("single append fault")),
-            "PROPERTY: expected injected fault, got {err:?}"
-        ),
-    }
+    let err = result
+        .map(|_| ())
+        .expect_err("PROPERTY: append must surface the injected error, not a receipt");
+    assert!(
+        matches!(err, StoreError::FaultInjected(ref message) if message.contains("single append fault")),
+        "PROPERTY: expected injected fault, got {err:?}"
+    );
 }
 
 #[test]

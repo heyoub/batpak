@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION, ADR-0010; this file uses panic-on-error test assertions for registry contract failures.
-#![allow(clippy::panic)]
 //! PROVES: EventPayload registry validation exposes clean, warn, fail-fast, and explicit revalidation policy.
 //! CATCHES: registry validator cache, error, and StoreConfig policy regressions.
 //! SEEDED: deterministic / no randomness.

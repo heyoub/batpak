@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; append-gate tests use panic! through assert macros and explicit error extraction to pin the append-gate contract.
-#![allow(clippy::panic)]
 #![cfg(feature = "dangerous-test-hooks")]
 //! PROVES: INV-FRONTIER-APPEND-GATE-HONORED. `append_with_options` returns only
 //! after the requested `DurabilityGate` watermark covers the appended event, and
@@ -192,10 +190,9 @@ fn append_with_gate_surfaces_wait_timeout_when_unreachable() {
         &serde_json::json!({ "n": 1 }),
         AppendOptions::default().with_gate(durable_gate(Duration::from_millis(100))),
     );
-    let err = match result {
-        Ok(_) => panic!("PROPERTY: unreachable durable gate must not return a receipt"),
-        Err(err) => err,
-    };
+    let err = result
+        .map(|_| ())
+        .expect_err("PROPERTY: unreachable durable gate must not return a receipt");
     assert!(
         matches!(
             err,

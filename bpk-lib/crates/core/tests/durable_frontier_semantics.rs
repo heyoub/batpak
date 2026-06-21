@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; this frontier lifecycle harness uses panic! through assert macros for crisp invariant failures.
-#![allow(clippy::panic)]
 #![cfg(feature = "dangerous-test-hooks")]
 //! PROVES: INV-FRONTIER-OPEN-MONOTONIC and INV-FRONTIER-MONOTONIC for the store
 //! open/close/reopen lifecycle. Immediately after mutable `Store::open`, the

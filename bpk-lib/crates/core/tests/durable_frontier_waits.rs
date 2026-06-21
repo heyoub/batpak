@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; wait API tests use panic! through assert macros and explicit error extraction to pin blocking invariants.
-#![allow(clippy::panic)]
 #![cfg(feature = "dangerous-test-hooks")]
 //! PROVES: INV-FRONTIER-WAIT-MONOTONIC. `Store::wait_for_durable`,
 //! `Store::wait_for_applied`, and `Store::wait_for_visible` return only after
@@ -59,10 +57,8 @@ fn open_store_terminal_on_panic(sync_every_n_events: u32) -> (TempDir, Store) {
 
 /// Wait-family helper: assert a wait result is the expected `WaitTimeout`.
 fn assert_wait_timeout(result: Result<(), StoreError>, watermark: WatermarkKind, target: HlcPoint) {
-    let err = match result {
-        Ok(()) => panic!("PROPERTY: wait must not succeed before target reaches {watermark:?}"),
-        Err(err) => err,
-    };
+    let err =
+        result.expect_err("PROPERTY: wait must not succeed before target reaches the watermark");
     assert!(
         matches!(
             err,

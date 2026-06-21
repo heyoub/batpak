@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; this close-regression harness uses panic! through assert macros for crisp invariant failures.
-#![allow(clippy::panic)]
 #![cfg(feature = "dangerous-test-hooks")]
 //! PROVES: INV-FRONTIER-MONOTONIC for the persisted `SYSTEM_CLOSE_COMPLETED`
 //! close frontier: a later close frame whose HLC regresses below an earlier
@@ -152,7 +150,8 @@ fn segment_frames_start(bytes: &[u8]) -> std::io::Result<usize> {
             "segment file missing FBAT magic",
         ));
     }
-    let header_len = u32::from_be_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]) as usize;
+    let header_len = usize::try_from(u32::from_be_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]))
+        .expect("u32 segment header length fits usize");
     8usize
         .checked_add(header_len)
         .filter(|start| *start <= bytes.len())
@@ -181,7 +180,8 @@ fn decode_frame(buf: &[u8]) -> std::io::Result<(&[u8], usize)> {
             "frame too short for header",
         ));
     }
-    let len = u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]) as usize;
+    let len = usize::try_from(u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]))
+        .expect("u32 frame length fits usize");
     let expected_crc = u32::from_be_bytes([buf[4], buf[5], buf[6], buf[7]]);
     let frame_len = 8usize.checked_add(len).ok_or_else(|| {
         std::io::Error::new(std::io::ErrorKind::InvalidData, "frame length overflow")
@@ -292,12 +292,9 @@ fn close_hlc_monotonicity_violation_surfaces_invariant_violation() {
     forge_close_hlc_regression(dir.path(), close_hlc_2, victim_close_clock, forged)
         .expect("forge close_hlc regression");
 
-    let err = match Store::open(StoreConfig::new(dir.path())) {
-        Ok(_) => {
-            panic!("PROPERTY: opening with regressed close_hlc must fail with InvariantViolation")
-        }
-        Err(error) => error,
-    };
+    let err = Store::open(StoreConfig::new(dir.path()))
+        .map(|_| ())
+        .expect_err("PROPERTY: opening with regressed close_hlc must fail with InvariantViolation");
     assert!(
         matches!(err, StoreError::InvariantViolation { .. }),
         "wrong error variant: {err:?}"

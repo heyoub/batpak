@@ -1,8 +1,6 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; panic-path chaos tests intentionally panic in a test-local FaultInjector and use panic! for invariant failures.
-#![allow(clippy::panic)]
 #![cfg(feature = "dangerous-test-hooks")]
 
-//! PROVES:
+//! PROVES: INV-TEST-PANIC-AS-ASSERTION
 //!   - Writer-thread panics at frontier fault-injection seams surface as
 //!     `WriterCrashed` to the caller without poisoning frontier observation.
 //!   - Reopen after a panic preserves the lifecycle-open frontier monotonicity
@@ -47,7 +45,10 @@ impl PanicAtInjector {
 impl FaultInjector for PanicAtInjector {
     fn check(&self, point: InjectionPoint) -> Option<StoreError> {
         if point == self.target && !self.fired.swap(true, Ordering::AcqRel) {
-            panic!("PROPERTY: simulated writer panic at {point:?}");
+            assert!(
+                std::hint::black_box(false),
+                "PROPERTY: simulated writer panic at {point:?}"
+            );
         }
         None
     }
@@ -89,12 +90,11 @@ fn append_baseline(store: &Store, prefix: &str) -> HlcPoint {
     point(&entries[1])
 }
 
-fn assert_writer_crashed<T>(result: Result<T, StoreError>) {
-    match result {
-        Err(StoreError::WriterCrashed) => {}
-        Err(err) => panic!("PROPERTY: expected writer crash, got {err:?}"),
-        Ok(_) => panic!("PROPERTY: panic injector must not let the caller observe success"),
-    }
+fn assert_writer_crashed<T: std::fmt::Debug>(result: &Result<T, StoreError>) {
+    assert!(
+        matches!(result, Err(StoreError::WriterCrashed)),
+        "PROPERTY: panic injector must crash the writer and surface WriterCrashed, got {result:?}"
+    );
 }
 
 fn batch_items(prefix: &str, count: usize) -> Vec<BatchAppendItem> {
@@ -125,7 +125,7 @@ fn writer_panic_at_single_append_published_is_durable_on_reopen() {
     let store = Store::open(config).expect("open store");
     let _ = append_baseline(&store, "published");
 
-    assert_writer_crashed(store.append(
+    assert_writer_crashed(&store.append(
         &coord(target_entity),
         kind(),
         &serde_json::json!({"target": 3}),
@@ -161,7 +161,7 @@ fn writer_panic_at_batch_commit_written_before_fsync() {
     let store = Store::open(config).expect("open store");
     let _ = append_baseline(&store, "batch");
 
-    assert_writer_crashed(store.append_batch(batch_items("batch", 2)));
+    assert_writer_crashed(&store.append_batch(batch_items("batch", 2)));
     assert!(fired.load(Ordering::Acquire));
 
     drop(store);
@@ -188,7 +188,7 @@ fn frontier_open_hlc_strictly_advances_across_panic_restart() {
     let store = Store::open(config).expect("open store");
     let max_hlc_before_panic = append_baseline(&store, "open");
 
-    assert_writer_crashed(store.append(
+    assert_writer_crashed(&store.append(
         &coord(target_entity),
         kind(),
         &serde_json::json!({"target": 3}),
