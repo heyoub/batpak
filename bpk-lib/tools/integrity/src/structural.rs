@@ -366,21 +366,9 @@ const FROZEN_FIXTURE_DEBT: &[FrozenFixtureDebt] = &[
         reason: "refbat manifest payload predates the frozen-decode fixture regime",
         target: "freeze a v1 fixture + frozen_decode test in Phase 2",
     },
-    FrozenFixtureDebt {
-        type_name: "BoundaryPlanEvent",
-        reason: "bvisor C0 0xE payload; fixtures land with the host-wiring phase",
-        target: "freeze a v1 fixture + frozen_decode test when bvisor gains host wiring",
-    },
-    FrozenFixtureDebt {
-        type_name: "BoundaryReportEvent",
-        reason: "bvisor C0 0xE payload; fixtures land with the host-wiring phase",
-        target: "freeze a v1 fixture + frozen_decode test when bvisor gains host wiring",
-    },
-    FrozenFixtureDebt {
-        type_name: "BoundaryRecoveryEvent",
-        reason: "bvisor C0 0xE payload; fixtures land with the reconciliation phase",
-        target: "freeze a v1 fixture + frozen_decode test when bvisor gains reconciliation",
-    },
+    // bvisor's three 0xE payloads (BoundaryPlanEvent/ReportEvent/RecoveryEvent)
+    // now have real v1 goldens under tests/golden/payloads/ + frozen-decode tests
+    // in crates/bvisor/tests/frozen_goldens.rs, so they are no longer debted.
 ];
 
 /// Warn-first frozen-fixture lint (`ART-EVENT-PAYLOAD-FROZEN-GOLDENS`).
