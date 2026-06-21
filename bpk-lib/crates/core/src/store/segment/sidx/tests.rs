@@ -1,6 +1,45 @@
 use super::*;
+use proptest::prelude::*;
 use std::io::Cursor;
 use tempfile::NamedTempFile;
+
+prop_compose! {
+    fn arb_sidx_entry()(
+        event_id in any::<u128>(),
+        entity_idx in any::<u32>(),
+        scope_idx in any::<u32>(),
+        kind in any::<u16>(),
+        wall_ms in any::<u64>(),
+        clock in any::<u32>(),
+        dag_lane in any::<u32>(),
+        dag_depth in any::<u32>(),
+        prev_hash in any::<[u8; 32]>(),
+        event_hash in any::<[u8; 32]>(),
+        frame_offset in any::<u64>(),
+        frame_length in any::<u32>(),
+        global_sequence in any::<u64>(),
+        correlation_id in any::<u128>(),
+        causation_id in any::<u128>(),
+    ) -> SidxEntry {
+        SidxEntry {
+            event_id,
+            entity_idx,
+            scope_idx,
+            kind,
+            wall_ms,
+            clock,
+            dag_lane,
+            dag_depth,
+            prev_hash,
+            event_hash,
+            frame_offset,
+            frame_length,
+            global_sequence,
+            correlation_id,
+            causation_id,
+        }
+    }
+}
 
 /// Construct a minimal [`SidxEntry`] with deterministic field values.
 /// `entity_idx` and `scope_idx` are left at 0; `record()` will overwrite them.
@@ -57,6 +96,16 @@ fn encode_decode_round_trip() {
     original.encode_into(&mut buf);
     let decoded = SidxEntry::decode_from(&buf, 1).expect("decode must succeed");
     assert_eq!(original, decoded, "round-trip must be lossless");
+}
+
+proptest! {
+    #[test]
+    fn encode_decode_round_trip_property(original in arb_sidx_entry()) {
+        let mut buf = [0u8; ENTRY_SIZE];
+        original.encode_into(&mut buf);
+        let decoded = SidxEntry::decode_from(&buf, 1).expect("decode generated SIDX entry");
+        prop_assert_eq!(decoded, original);
+    }
 }
 
 #[test]

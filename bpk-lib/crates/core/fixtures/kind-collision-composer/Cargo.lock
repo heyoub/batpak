@@ -28,7 +28,7 @@ checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
 name = "batpak"
-version = "0.8.2"
+version = "0.8.3"
 dependencies = [
  "batpak-macros",
  "batpak-macros-support",
@@ -91,7 +91,7 @@ dependencies = [
 
 [[package]]
 name = "batpak-macros"
-version = "0.8.2"
+version = "0.8.3"
 dependencies = [
  "batpak-macros-support",
  "proc-macro2",
@@ -101,7 +101,7 @@ dependencies = [
 
 [[package]]
 name = "batpak-macros-support"
-version = "0.8.2"
+version = "0.8.3"
 dependencies = [
  "inventory",
  "rmpv",

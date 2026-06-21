@@ -68,7 +68,7 @@ fn package(root: &Path, package_name: &str, allow_dirty: bool) -> Result<()> {
     if allow_dirty {
         command.arg("--allow-dirty");
     }
-    // Internal path-deps are at version 0.8.2 in this workspace but only
+    // Internal path-deps are at version 0.8.3 in this workspace but only
     // 0.7.0 is published on crates.io. Pass only the patches needed for this
     // package graph so Cargo does not emit unused-patch warnings.
     for (name, relative_path) in local_patch_overrides(package_name) {

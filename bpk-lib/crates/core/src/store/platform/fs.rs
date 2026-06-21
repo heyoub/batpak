@@ -4,6 +4,13 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CowStrategyUsed {
+    Reflink,
+    Hardlink,
+    DeepCopy,
+}
+
 pub(crate) fn reject_symlink_leaf(path: &Path, purpose: &str) -> Result<(), StoreError> {
     match std::fs::symlink_metadata(path) {
         Ok(meta) if meta.file_type().is_symlink() => Err(StoreError::Io(std::io::Error::new(
@@ -92,6 +99,10 @@ pub(crate) fn metadata(path: &Path) -> io::Result<Metadata> {
     std::fs::metadata(path)
 }
 
+pub(crate) fn symlink_metadata(path: &Path) -> io::Result<Metadata> {
+    std::fs::symlink_metadata(path)
+}
+
 pub(crate) fn remove_file(path: &Path) -> io::Result<()> {
     std::fs::remove_file(path)
 }
@@ -139,6 +150,131 @@ pub(crate) fn copy(from: &Path, to: &Path) -> io::Result<u64> {
 pub(crate) fn truncate_file_to(path: &Path, len: u64) -> io::Result<()> {
     let file = std::fs::OpenOptions::new().write(true).open(path)?;
     file.set_len(len)
+}
+
+pub(crate) fn hard_link(from: &Path, to: &Path) -> io::Result<()> {
+    std::fs::hard_link(from, to)
+}
+
+pub(crate) fn reflink(from: &Path, to: &Path) -> io::Result<()> {
+    reject_copy_source(from)?;
+    remove_file_if_present(to)?;
+    reflink_impl(from, to).inspect_err(|_| {
+        drop(remove_file_if_present(to));
+    })
+}
+
+pub(crate) fn cow_copy_file(
+    from: &Path,
+    to: &Path,
+    use_reflink: bool,
+    use_hardlink: bool,
+) -> io::Result<CowStrategyUsed> {
+    reject_copy_source(from)?;
+    remove_file_if_present(to)?;
+
+    if use_reflink {
+        match reflink(from, to) {
+            Ok(()) => return Ok(CowStrategyUsed::Reflink),
+            Err(error) => {
+                tracing::debug!(
+                    source = %from.display(),
+                    destination = %to.display(),
+                    error = %error,
+                    "reflink failed; falling back to next fork copy rung"
+                );
+                remove_file_if_present(to)?;
+            }
+        }
+    }
+
+    if use_hardlink {
+        match hard_link(from, to) {
+            Ok(()) => return Ok(CowStrategyUsed::Hardlink),
+            Err(error) => {
+                tracing::debug!(
+                    source = %from.display(),
+                    destination = %to.display(),
+                    error = %error,
+                    "hardlink failed; falling back to deep copy"
+                );
+                remove_file_if_present(to)?;
+            }
+        }
+    }
+
+    copy(from, to)?;
+    Ok(CowStrategyUsed::DeepCopy)
+}
+
+fn reject_copy_source(path: &Path) -> io::Result<()> {
+    let meta = std::fs::symlink_metadata(path)?;
+    if meta.file_type().is_symlink() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("refusing to copy symlink source {}", path.display()),
+        ));
+    }
+    if !meta.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("refusing to copy non-file source {}", path.display()),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn reflink_impl(from: &Path, to: &Path) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+
+    const FICLONE: libc::c_ulong = 0x4004_9409;
+    let source = File::open(from)?;
+    let destination = File::create_new(to)?;
+    // SAFETY: `source` and `destination` are live file descriptors opened by
+    // this function. `FICLONE` does not retain pointers into Rust memory; it
+    // asks the kernel to clone file data from `source` into `destination`.
+    let result = unsafe { libc::ioctl(destination.as_raw_fd(), FICLONE, source.as_raw_fd()) };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn reflink_impl(from: &Path, to: &Path) -> io::Result<()> {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+
+    let from = CString::new(from.as_os_str().as_bytes()).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "source path contains interior NUL",
+        )
+    })?;
+    let to = CString::new(to.as_os_str().as_bytes()).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "destination path contains interior NUL",
+        )
+    })?;
+    // SAFETY: the C strings are NUL-terminated and live for the duration of
+    // the call. `clonefile` does not retain the pointers after returning.
+    let result = unsafe { libc::clonefile(from.as_ptr(), to.as_ptr(), 0) };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn reflink_impl(_from: &Path, _to: &Path) -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "reflink is not supported on this platform",
+    ))
 }
 
 #[derive(Debug)]
@@ -299,7 +435,7 @@ impl StoreFs for RealFs {
 
 #[cfg(test)]
 mod tests {
-    use super::remove_dir_all;
+    use super::{reject_copy_source, remove_dir_all};
     use super::{RealFs, StoreFs};
     use std::error::Error;
 
@@ -363,6 +499,39 @@ mod tests {
             std::fs::metadata(&seg)?.len(),
             b"durable-bytes".len() as u64,
             "PROPERTY: RealFs durability methods persist the real bytes like the platform free fns"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn reject_copy_source_rejects_non_file_source() -> Result<(), Box<dyn Error>> {
+        // A directory is a non-file source: the cow_copy_file ladder must refuse
+        // it rather than silently succeed. Kills `reject_copy_source -> Ok(())`.
+        let dir = tempfile::tempdir()?;
+        let result = reject_copy_source(dir.path());
+        assert!(
+            result.is_err(),
+            "PROPERTY: reject_copy_source must reject a non-file (directory) source"
+        );
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reject_copy_source_rejects_symlink_source() -> Result<(), Box<dyn Error>> {
+        // A symlink source must be refused even when it targets a real file:
+        // copying through it would dereference an attacker-controlled link.
+        // Kills `reject_copy_source -> Ok(())` on the symlink branch.
+        let dir = tempfile::tempdir()?;
+        let target = dir.path().join("target.bin");
+        std::fs::write(&target, b"payload")?;
+        let link = dir.path().join("link.bin");
+        std::os::unix::fs::symlink(&target, &link)?;
+
+        let result = reject_copy_source(&link);
+        assert!(
+            result.is_err(),
+            "PROPERTY: reject_copy_source must reject a symlink source (no link dereference)"
         );
         Ok(())
     }

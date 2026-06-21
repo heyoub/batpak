@@ -14,6 +14,46 @@ pub(crate) fn callee_path_segments(expr: &Expr) -> Option<Vec<String>> {
     match expr {
         Expr::Path(ExprPath { path, .. }) => Some(path_segments(path)),
         Expr::Call(ExprCall { func, .. }) => callee_path_segments(func),
+        Expr::Array(_)
+        | Expr::Assign(_)
+        | Expr::Async(_)
+        | Expr::Await(_)
+        | Expr::Binary(_)
+        | Expr::Block(_)
+        | Expr::Break(_)
+        | Expr::Cast(_)
+        | Expr::Closure(_)
+        | Expr::Const(_)
+        | Expr::Continue(_)
+        | Expr::Field(_)
+        | Expr::ForLoop(_)
+        | Expr::Group(_)
+        | Expr::If(_)
+        | Expr::Index(_)
+        | Expr::Infer(_)
+        | Expr::Let(_)
+        | Expr::Lit(_)
+        | Expr::Loop(_)
+        | Expr::Macro(_)
+        | Expr::Match(_)
+        | Expr::MethodCall(_)
+        | Expr::Paren(_)
+        | Expr::Range(_)
+        | Expr::RawAddr(_)
+        | Expr::Reference(_)
+        | Expr::Repeat(_)
+        | Expr::Return(_)
+        | Expr::Struct(_)
+        | Expr::Try(_)
+        | Expr::TryBlock(_)
+        | Expr::Tuple(_)
+        | Expr::Unary(_)
+        | Expr::Unsafe(_)
+        | Expr::Verbatim(_)
+        | Expr::While(_)
+        | Expr::Yield(_) => None,
+        // `syn::Expr` is `#[non_exhaustive]`; future variants are non-call,
+        // non-path expressions with no callee path to extract.
         _ => None,
     }
 }

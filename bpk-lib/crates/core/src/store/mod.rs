@@ -20,16 +20,21 @@ mod error;
 )]
 pub mod fault;
 mod file_classification;
+mod fork_report;
 mod frontier_api;
 mod gate;
 // `pub(crate)` (was `mod`) so the feature-gated `crate::__fuzz` module can name
 // `hidden_ranges::{load_cancelled_ranges, VISIBILITY_RANGES_FILENAME}`. Crate-
 // internal only; no public API-surface change.
 pub(crate) mod hidden_ranges;
+mod import;
+mod import_api;
 /// In-memory 2D event index, rebuilt from segments on startup.
 pub mod index;
 mod lifecycle;
 mod lifecycle_api;
+mod lifecycle_close;
+mod lifecycle_fork;
 mod open;
 mod platform;
 /// Projection cache traits and built-in backends (NoCache, NativeCache).
@@ -102,7 +107,15 @@ pub use error::{
 pub use fault::{
     CountdownAction, CountdownInjector, FaultInjector, InjectionPoint, ProbabilisticInjector,
 };
+pub use fork_report::{
+    fork_report_body_hash, ForkCopyStrategy, ForkEvidenceHash, ForkFinding, ForkOptions,
+    ForkReport, ForkReportBody, ForkStrategyCounts, FORK_EVIDENCE_REPORT_SCHEMA_VERSION,
+};
 pub use gate::DurabilityGate;
+pub use import::{
+    provenance, provenance_from_extensions, ImportFilter, ImportOptions, ImportProvenance,
+    ImportReport, ImportSelector, IMPORT_PROVENANCE_SCHEMA_VERSION,
+};
 /// Test-only global-allocator shims. Re-exported so dedicated single-test
 /// binaries can install one as `#[global_allocator]`. Compiled out unless the
 /// `alloc-count` or `fault-alloc` feature is enabled.
@@ -113,6 +126,8 @@ pub use projection::watch::{CursorWatcherError, ProjectionWatcher, WatcherError}
 pub use projection::{
     CacheCapabilities, CacheMeta, Freshness, NativeCache, NoCache, ProjectionCache,
 };
+/// Three projection states returned by [`Store::project_fused3`].
+pub type ProjectionFusion3<First, Second, Third> = (Option<First>, Option<Second>, Option<Third>);
 pub use projection_run::{
     ProjectionEvidenceRegistry, ProjectionRunCacheStatus, ProjectionRunCheckpointRef,
     ProjectionRunEvidenceReport, ProjectionRunFinding, ProjectionRunFreshnessStatus,
@@ -138,10 +153,10 @@ pub use snapshot_report::{
 };
 pub use stats::{
     ActiveSegmentReadEvidence, ClockEvidence, FrontierView, HlcPoint, HostEvidenceSummary,
-    LockLeafSymlinkProtection, MmapAdmissionSummary, MmapEvidence, ParentDirSyncAdmissionSummary,
-    ParentDirSyncEvidence, PlatformAdmissionSummary, PlatformEvidenceSummary, StoreDiagnostics,
-    StoreLockAdmissionSummary, StorePathEvidenceSummary, StorePathStatusEvidence, StoreStats,
-    WatermarkKind, WriterPressure,
+    LaneFrontierView, LockLeafSymlinkProtection, MmapAdmissionSummary, MmapEvidence,
+    ParentDirSyncAdmissionSummary, ParentDirSyncEvidence, PlatformAdmissionSummary,
+    PlatformEvidenceSummary, StoreDiagnostics, StoreLockAdmissionSummary, StorePathEvidenceSummary,
+    StorePathStatusEvidence, StoreStats, WatermarkKind, WriterPressure,
 };
 pub use store_resource_report::{
     store_data_dir_identity_hash, store_resource_evidence_report_from_diagnostics,

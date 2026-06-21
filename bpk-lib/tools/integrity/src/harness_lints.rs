@@ -779,11 +779,9 @@ mod tests {
 ",
         );
 
-        let result = parse_ledger(&repo);
-        let err = match result {
-            Ok(_) => panic!("expected unknown section rejection"),
-            Err(error) => error,
-        };
+        let err = parse_ledger(&repo)
+            .err()
+            .expect("expected unknown section rejection");
         assert!(
             err.to_string().contains("unknown harness section"),
             "unexpected error: {err:?}"
@@ -1003,7 +1001,8 @@ mod tests {
         let repo = temp_repo("fixture-tombstone");
         let fixture_path = repo.join("crates/core/tests/fixture.rs");
         let tombstone_path = repo.join("crates/core/tests/tombstone.rs");
-        fs::create_dir_all(fixture_path.parent().unwrap()).expect("create tests dir");
+        fs::create_dir_all(fixture_path.parent().expect("fixture path has parent"))
+            .expect("create tests dir");
         fs::write(
             &fixture_path,
             "fn packaged_fixture() {\n    if std::path::Path::new(\".cargo_vcs_info.json\").exists() {\n        return;\n    }\n}\n",
@@ -1079,7 +1078,8 @@ mod tests {
     fn test_names_for_target_collects_nested_module_tests() {
         let repo = temp_repo("nested-tests");
         let target = repo.join("tests/nested.rs");
-        fs::create_dir_all(target.parent().unwrap()).expect("create tests dir");
+        fs::create_dir_all(target.parent().expect("target path has parent"))
+            .expect("create tests dir");
         fs::write(
             target,
             "#[cfg(test)]\nmod cases {\n    #[test]\n    fn nested_proof() {}\n}\n",
@@ -1173,7 +1173,7 @@ mod tests {
         // every test containing a bare `return;`.
         let repo = temp_repo("plain-return");
         let path = repo.join("crates/core/tests/plain.rs");
-        fs::create_dir_all(path.parent().unwrap()).expect("create tests dir");
+        fs::create_dir_all(path.parent().expect("path has parent")).expect("create tests dir");
         fs::write(&path, "fn helper() {\n    return;\n}\n").expect("write plain return test");
         let tracked = vec![path];
         let mut source_cache = SourceCache::new(&repo);

@@ -497,14 +497,30 @@ impl ExtensionKey {
 pub struct AppendPositionHint {
     /// Parallel branch index within the DAG.
     pub lane: u32,
-    /// Branch depth within the DAG.
+    /// Branch depth within the DAG, or the parent depth when
+    /// [`branch_root`](Self::branch_root) is `true`.
     pub depth: u32,
+    /// Whether this append starts a new branch at `depth + 1`.
+    pub branch_root: bool,
 }
 
 impl AppendPositionHint {
     /// Create a new DAG lane/depth hint for append operations.
     pub const fn new(lane: u32, depth: u32) -> Self {
-        Self { lane, depth }
+        Self {
+            lane,
+            depth,
+            branch_root: false,
+        }
+    }
+
+    /// Create a hint for the first event on a forked lane.
+    pub const fn branch_root(lane: u32, parent_depth: u32) -> Self {
+        Self {
+            lane,
+            depth: parent_depth,
+            branch_root: true,
+        }
     }
 }
 

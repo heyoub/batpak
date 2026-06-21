@@ -2,10 +2,11 @@ use anyhow::{anyhow, Context, Result};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
+use std::rc::Rc;
 use std::sync::Arc;
 
 enum ParsedRust {
-    Ok(Arc<syn::File>),
+    Ok(Rc<syn::File>),
     Err(String),
 }
 
@@ -96,12 +97,12 @@ impl SourceCache {
         Ok(Arc::clone(&self.rust_file(&relative)?.text))
     }
 
-    pub(crate) fn parse_rust(&mut self, path: &Path) -> Result<Arc<syn::File>> {
+    pub(crate) fn parse_rust(&mut self, path: &Path) -> Result<Rc<syn::File>> {
         let relative = self.relative_key(path)?;
         self.parse_rust_relative(&relative)
     }
 
-    pub(crate) fn parse_rust_if_valid(&mut self, path: &Path) -> Result<Option<Arc<syn::File>>> {
+    pub(crate) fn parse_rust_if_valid(&mut self, path: &Path) -> Result<Option<Rc<syn::File>>> {
         let relative = self.relative_key(path)?;
         Ok(match self.parse_rust_relative_result(&relative)? {
             ParsedRust::Ok(file) => Some(file),
@@ -109,7 +110,7 @@ impl SourceCache {
         })
     }
 
-    fn parse_rust_relative(&mut self, relative: &Path) -> Result<Arc<syn::File>> {
+    fn parse_rust_relative(&mut self, relative: &Path) -> Result<Rc<syn::File>> {
         match self.parse_rust_relative_result(relative)? {
             ParsedRust::Ok(file) => Ok(file),
             ParsedRust::Err(error) => Err(anyhow!(
@@ -128,12 +129,12 @@ impl SourceCache {
             .ok_or_else(|| anyhow!("source cache failed to retain {}", display_relative(&key)))?;
         if cached.parsed_rust.is_none() {
             cached.parsed_rust = Some(match syn::parse_file(&cached.text) {
-                Ok(file) => ParsedRust::Ok(Arc::new(file)),
+                Ok(file) => ParsedRust::Ok(Rc::new(file)),
                 Err(error) => ParsedRust::Err(error.to_string()),
             });
         }
         match cached.parsed_rust.as_ref() {
-            Some(ParsedRust::Ok(file)) => Ok(ParsedRust::Ok(Arc::clone(file))),
+            Some(ParsedRust::Ok(file)) => Ok(ParsedRust::Ok(Rc::clone(file))),
             Some(ParsedRust::Err(error)) => Ok(ParsedRust::Err(error.clone())),
             None => Err(anyhow!(
                 "source cache failed to retain parse result {}",
@@ -186,6 +187,7 @@ fn display_relative(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::rc::Rc;
     use std::sync::Arc;
 
     fn write_temp_rust(dir: &Path, relative: &str, contents: &str) {
@@ -213,7 +215,7 @@ mod tests {
 
         let parsed_a = cache.parse_rust(&root.join("a.rs")).expect("parse a");
         let parsed_b = cache.parse_rust(&root.join("a.rs")).expect("parse b");
-        assert!(Arc::ptr_eq(&parsed_a, &parsed_b));
+        assert!(Rc::ptr_eq(&parsed_a, &parsed_b));
 
         let _ = fs::remove_dir_all(&root);
     }

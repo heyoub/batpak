@@ -20,6 +20,7 @@ pub(crate) struct AppendGuards {
     pub idempotency_key: Option<u128>,
     pub dag_lane: u32,
     pub dag_depth: u32,
+    pub dag_branch_root: bool,
     pub extensions: BTreeMap<ExtensionKey, EncodedBytes>,
 }
 
@@ -38,7 +39,7 @@ impl WriterState<'_> {
         let entity = coord.entity();
         let scope = coord.scope();
 
-        let latest = self.index.get_latest(entity);
+        let latest = self.index.get_latest_committed(entity, guards.dag_lane);
 
         if let Some(expected) = guards.expected_sequence {
             let actual = latest.as_ref().map(|entry| entry.clock).unwrap_or(0);
@@ -52,55 +53,9 @@ impl WriterState<'_> {
         }
 
         if let Some(key) = guards.idempotency_key {
-            // Durable map FIRST: a hit here is a true no-op even if the
-            // underlying event has been evicted by retention compaction.
-            // justifies: INV-IDEMPOTENCY-DURABLE-WINDOW
-            if let Some(durable) = self.index.idemp.get(key) {
-                let mut receipt = AppendReceipt {
-                    event_id: crate::id::EventId::from(durable.event_id),
-                    sequence: durable.global_sequence,
-                    disk_pos: durable.disk_pos(),
-                    content_hash: durable.content_hash,
-                    key_id: [0; 32],
-                    signature: None,
-                    extensions: durable.receipt_extensions.clone(),
-                };
-                let coord = crate::coordinate::Coordinate::new(&durable.entity, &durable.scope)?;
-                self.runtime.signing_registry.sign_append_receipt(
-                    &mut receipt,
-                    &coord,
-                    durable.kind,
-                    durable.prev_hash,
-                );
+            if let Some(receipt) = self.try_idempotency_replay(key)? {
                 return Ok(receipt);
             }
-            // Fall through to the live `by_id` path (covers entries recorded
-            // before the durable store existed and preserves prior behavior).
-            if let Some(entry) = self.index.get_by_id(key) {
-                let mut receipt = AppendReceipt {
-                    event_id: crate::id::EventId::from(entry.event_id),
-                    sequence: entry.global_sequence,
-                    disk_pos: entry.disk_pos,
-                    content_hash: entry.hash_chain.event_hash,
-                    key_id: [0; 32],
-                    signature: None,
-                    extensions: entry.receipt_extensions.clone(),
-                };
-                self.runtime.signing_registry.sign_append_receipt(
-                    &mut receipt,
-                    &entry.coord,
-                    entry.kind,
-                    entry.hash_chain.prev_hash,
-                );
-                return Ok(receipt);
-            }
-            // Genuinely new key: enforce the soft-cap overflow policy BEFORE we
-            // commit. FailClosed/Backpressure refuse here; Warn proceeds. Pass
-            // the current frontier so out-of-window keys age out before we
-            // fail-close on a fresh key.
-            self.index
-                .idemp
-                .admit_new_key(key, self.index.global_sequence())?;
         }
 
         let prev_hash = latest
@@ -129,8 +84,13 @@ impl WriterState<'_> {
 
         self.watermark_handle
             .lock()
-            .advance_accepted(frontier_point);
-        let position = DagPosition::with_hlc(now_ms, 0, guards.dag_depth, guards.dag_lane, clock);
+            .advance_accepted_on_lane(guards.dag_lane, frontier_point);
+        let dag_depth = if guards.dag_branch_root {
+            DagPosition::fork(guards.dag_depth, guards.dag_lane).depth()
+        } else {
+            guards.dag_depth
+        };
+        let position = DagPosition::with_hlc(now_ms, 0, dag_depth, guards.dag_lane, clock);
         event.header.position = position;
         event.header.event_kind = kind;
         event.header.correlation_id = crate::id::CorrelationId::from(correlation_id);
@@ -176,7 +136,9 @@ impl WriterState<'_> {
         }
 
         let offset = self.active_segment.write_frame(&frame)?;
-        self.watermark_handle.lock().advance_written(frontier_point);
+        self.watermark_handle
+            .lock()
+            .advance_written_on_lane(guards.dag_lane, frontier_point);
         trace!(offset = offset, len = frame.len(), "frame written");
 
         #[cfg(feature = "dangerous-test-hooks")]
@@ -209,7 +171,7 @@ impl WriterState<'_> {
             now_ms,
             clock,
             guards.dag_lane,
-            guards.dag_depth,
+            dag_depth,
         );
         let staged = StagedCommittedEvent::new(
             coord.clone(),
@@ -284,5 +246,63 @@ impl WriterState<'_> {
         }
 
         Ok(receipt)
+    }
+
+    /// Idempotency short-circuit phase of [`Self::handle_append`]: for a keyed
+    /// append, return the reconstructed no-op receipt if `key` was already
+    /// committed, otherwise admit the genuinely-new key (enforcing the soft-cap
+    /// overflow policy) and return `None` so the caller proceeds to commit.
+    /// Behavior-preserving extraction of `handle_append`'s former inline block.
+    fn try_idempotency_replay(&mut self, key: u128) -> Result<Option<AppendReceipt>, StoreError> {
+        // Durable map FIRST: a hit here is a true no-op even if the
+        // underlying event has been evicted by retention compaction.
+        // justifies: INV-IDEMPOTENCY-DURABLE-WINDOW
+        if let Some(durable) = self.index.idemp.get(key) {
+            let mut receipt = AppendReceipt {
+                event_id: crate::id::EventId::from(durable.event_id),
+                sequence: durable.global_sequence,
+                disk_pos: durable.disk_pos(),
+                content_hash: durable.content_hash,
+                key_id: [0; 32],
+                signature: None,
+                extensions: durable.receipt_extensions.clone(),
+            };
+            let coord = crate::coordinate::Coordinate::new(&durable.entity, &durable.scope)?;
+            self.runtime.signing_registry.sign_append_receipt(
+                &mut receipt,
+                &coord,
+                durable.kind,
+                durable.prev_hash,
+            );
+            return Ok(Some(receipt));
+        }
+        // Fall through to the live `by_id` path (covers entries recorded
+        // before the durable store existed and preserves prior behavior).
+        if let Some(entry) = self.index.get_by_id(key) {
+            let mut receipt = AppendReceipt {
+                event_id: crate::id::EventId::from(entry.event_id),
+                sequence: entry.global_sequence,
+                disk_pos: entry.disk_pos,
+                content_hash: entry.hash_chain.event_hash,
+                key_id: [0; 32],
+                signature: None,
+                extensions: entry.receipt_extensions.clone(),
+            };
+            self.runtime.signing_registry.sign_append_receipt(
+                &mut receipt,
+                &entry.coord,
+                entry.kind,
+                entry.hash_chain.prev_hash,
+            );
+            return Ok(Some(receipt));
+        }
+        // Genuinely new key: enforce the soft-cap overflow policy BEFORE we
+        // commit. FailClosed/Backpressure refuse here; Warn proceeds. Pass
+        // the current frontier so out-of-window keys age out before we
+        // fail-close on a fresh key.
+        self.index
+            .idemp
+            .admit_new_key(key, self.index.global_sequence())?;
+        Ok(None)
     }
 }

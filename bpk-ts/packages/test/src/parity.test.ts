@@ -1,5 +1,5 @@
 /**
- * BatPAK TS SDK 0.8.2 parity harness.
+ * BatPAK TS SDK 0.8.3 parity harness.
  *
  * Asserts byte-for-byte parity between the Rust-generated manifest
  * (`bpk-ts/batpak.manifest.json`) and the TypeScript canonical codec +
@@ -42,14 +42,14 @@ const MANIFEST_PATH = resolve(here, "../../../batpak.manifest.json");
 const manifest: BatpakTsManifest = readManifest(MANIFEST_PATH);
 
 describe("manifest envelope", () => {
-  it("declares the 0.8.2 protocol versions", () => {
+  it("declares the 0.8.3 protocol versions", () => {
     // manifestVersion 2: schema-evolution Phase 2 made each event's
     // payload_version manifest-visible (see payloadVersion below).
     expect(manifest.manifestVersion).toBe(2);
     expect(manifest.netbatVersion).toBe("NETBAT/1");
     expect(manifest.canonicalEncoding.kind).toBe("named-field-msgpack");
     expect(manifest.canonicalEncoding.rmpSerdeVersion).toBe("1.3.1");
-    expect(manifest.batpakVersion).toBe("0.8.2");
+    expect(manifest.batpakVersion).toBe("0.8.3");
   });
 
   it("carries a declared payloadVersion (>= 1) on every event", () => {

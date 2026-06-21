@@ -164,7 +164,7 @@ pub(super) fn check(repo_root: &Path, source_cache: &mut SourceCache) -> Result<
 fn parse_public_api_rust(
     source_cache: &mut SourceCache,
     path: &Path,
-) -> Result<std::sync::Arc<syn::File>> {
+) -> Result<std::rc::Rc<syn::File>> {
     source_cache
         .parse_rust(path)
         .with_context(|| format!("parse {}", path.display()))

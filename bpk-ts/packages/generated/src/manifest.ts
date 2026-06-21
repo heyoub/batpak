@@ -4,12 +4,12 @@
 
 // Source manifest: batpak.manifest.json
 export const MANIFEST_VERSION = 2 as const;
-export const BATPAK_VERSION = "0.8.2" as const;
+export const BATPAK_VERSION = "0.8.3" as const;
 export const CANONICAL_ENCODING = {"kind":"named-field-msgpack","rmpSerdeVersion":"1.3.1"} as const;
 export const BATPAK_TS_MANIFEST = {
   "manifestVersion": 2,
   "netbatVersion": "NETBAT/1",
-  "batpakVersion": "0.8.2",
+  "batpakVersion": "0.8.3",
   "canonicalEncoding": {
     "kind": "named-field-msgpack",
     "rmpSerdeVersion": "1.3.1"

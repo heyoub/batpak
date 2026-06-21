@@ -1,6 +1,6 @@
 {
   "name": "@batpak/sdk",
-  "version": "0.8.2",
+  "version": "0.8.3",
   "description": "One-install BatPAK TypeScript SDK: NETBAT/1 client, canonical codec, Effect schema bridge, and manifest-generated types.",
   "license": "MIT OR Apache-2.0",
   "repository": {

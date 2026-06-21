@@ -743,6 +743,149 @@
     restore-artifact mismatches outside this pure query surface, which still
     belong to cold-start parity suites rather than the overlay oracle itself.
 
+- title: Store fork preserves filesystem aliasing isolation
+  section: State-Machine Harness
+  pattern: State-Machine Harness
+  status: green
+  invariants:
+    - INV-FORK-ISOLATION
+  locations:
+    - bpk-lib/crates/core/tests/store_fork.rs
+    - bpk-lib/crates/core/src/store/lifecycle.rs
+    - bpk-lib/crates/core/src/store/file_classification.rs
+    - bpk-lib/crates/core/src/store/platform/fs.rs
+  commands:
+    - cargo test --test store_fork
+  coverage_delta: >
+    adds fork reopen parity, parent/fork write isolation, hardlink-only sealed
+    sharing, active/idempotency/visibility deep-copy checks, cache exclusion,
+    symlink rejection, compaction, reused destination, and fork-of-fork coverage.
+  mutation_delta: unmeasured
+  blind_spots: >
+    reflink behavior is platform/filesystem dependent and is represented by the
+    strategy report plus hardlink-only deterministic lane; concurrent compaction
+    serialization is covered by the lifecycle gate shape shared with snapshot.
+
+- title: Store import re-applies source logs without changing content bytes
+  section: Property Harness
+  pattern: Property Harness
+  status: green
+  invariants:
+    - INV-IMPORT-CONTENT-ISOMORPHISM
+    - INV-STORE-ISOMORPHISM-LAWS
+  locations:
+    - bpk-lib/crates/core/tests/import_events.rs
+    - bpk-lib/crates/core/tests/isomorphism_laws.rs
+    - bpk-lib/crates/core/src/event/upcast.rs
+    - bpk-lib/crates/core/src/store/segment/sidx/tests.rs
+  commands:
+    - cargo test --test import_events
+    - cargo test --test isomorphism_laws
+    - cargo test event::upcast::tests::value_from_json_and_msgpack_agree
+    - cargo test store::segment::sidx::tests::encode_decode_round_trip_property
+  coverage_delta: >
+    adds import replay, partial-overlap, compaction noop, deterministic key,
+    chunk-size equivalence, provenance, reserved skip, oversized-item, raw
+    payload hash, DagPosition, SIDX, and upcast isomorphism properties.
+  mutation_delta: unmeasured
+  blind_spots: >
+    import_events returns an aggregate report, not the replayed receipts; tests
+    verify provenance through stored receipt extensions and idempotent replay
+    counts rather than a per-dedup receipt stream.
+
+- title: Lane branches isolate per-entity heads and reads
+  section: State-Machine Harness
+  pattern: State-Machine Harness
+  status: green
+  invariants:
+    - INV-LANE-BRANCH-ISOLATION
+  locations:
+    - bpk-lib/crates/core/tests/lane_branches.rs
+    - bpk-lib/crates/core/src/store/index/mod.rs
+    - bpk-lib/crates/core/src/store/write/writer/append.rs
+    - bpk-lib/crates/core/src/store/write/writer/batch.rs
+  commands:
+    - cargo test --test lane_branches
+  coverage_delta: >
+    adds mixed-lane single and batch append coverage for independent prev_hash
+    and clock heads, explicit branch-root DagPosition forking, Region lane
+    filters, lane-scoped public reads, paged query, cursor delivery,
+    subscription fanout, lane-scoped CAS, default lane-0 compatibility, hidden
+    fenced same-lane head chaining, and rebuild/checkpoint/mmap latest-head
+    recovery.
+  mutation_delta: >
+    lane-branch critical seam is registered in
+    tools/xtask/src/commands/mutants/lanes.rs and mirrored in the CI seam
+    matrix; no run receipt is recorded yet.
+  blind_spots: >
+    lane-0 compatibility is covered by the default no-hint append path, existing
+    default append/read suites, and a byte-for-byte DagPosition wire golden in
+    lane_branches.rs; remaining coverage depends on the lane-branch mutation seam
+    run receipt.
+
+- title: Projection fusion equals separate consistent folds
+  section: State-Machine Harness
+  pattern: State-Machine Harness
+  status: green
+  invariants:
+    - INV-PROJECTION-FUSION-EQUIVALENT
+  locations:
+    - bpk-lib/crates/core/tests/projection_fusion.rs
+    - bpk-lib/crates/core/src/store/projection/flow/fusion.rs
+    - bpk-lib/crates/core/src/store/projection/flow/mod.rs
+    - bpk-lib/crates/core/src/store/projection/flow/fusion_tests.rs
+  commands:
+    - cargo test --test projection_fusion
+    - cargo test -p batpak store::projection::flow::fusion_tests
+  coverage_delta: >
+    adds fused two-projection replay over one entity, verifies fused output
+    equals the tuple of separate consistent projections, proves per-projection
+    kind filtering with an unrelated noise kind, covers the missing-entity
+    empty tuple, verifies consumed inputs still advance applied frontiers when a
+    projection returns None, and asserts the fused path performs one shared
+    batch read.
+  mutation_delta: >
+    projection-fusion critical seam is registered in
+    tools/xtask/src/commands/mutants/lanes.rs and mirrored in the CI seam
+    matrix; no run receipt is recorded yet.
+  blind_spots: >
+    fused projection is currently a direct consistent replay and intentionally
+    bypasses cache store-back to keep cache watermarks projection-specific; N-way
+    fusion beyond arity two is not exposed yet.
+
+- title: Per-lane frontier waits and bootstrap are lane-scoped
+  section: State-Machine Harness
+  pattern: State-Machine Harness
+  status: green
+  invariants:
+    - INV-PER-LANE-FRONTIER
+  locations:
+    - bpk-lib/crates/core/tests/per_lane_frontier.rs
+    - bpk-lib/crates/core/src/store/hidden_ranges.rs
+    - bpk-lib/crates/core/src/store/index/projection_bridge.rs
+    - bpk-lib/crates/core/src/store/write/writer/watermark.rs
+    - bpk-lib/crates/core/src/store/index/visibility.rs
+    - bpk-lib/crates/core/src/store/open.rs
+  commands:
+    - cargo test --test per_lane_frontier
+  coverage_delta: >
+    adds lane-scoped accepted/written/durable/visible/applied/emitted waits,
+    proves lane-0 waits are not satisfied by lane-1 progress, exercises all
+    public LaneFrontierView tracks, verifies lane cursor gap observations explain
+    globally hidden cancelled ranges, and verifies cold-start bootstrap
+    reconstructs non-zero lane frontiers from persisted dag_lane metadata while
+    cancelled fenced entries stay hidden from projection replay and do not
+    bootstrap as visible/applied progress.
+  mutation_delta: >
+    lane-frontier critical seam is registered in
+    tools/xtask/src/commands/mutants/lanes.rs and mirrored in the CI seam
+    matrix; no run receipt is recorded yet.
+  blind_spots: >
+    cancellation metadata now persists global and per-lane ranges over the
+    shared global_sequence axis; corruption handling still inherits the existing
+    visibility-range metadata tests rather than carrying a lane-specific
+    corruption fixture.
+
 - title: Frozen payload bytes keep decoding as event schemas evolve
   section: Property Harness
   pattern: Property Harness

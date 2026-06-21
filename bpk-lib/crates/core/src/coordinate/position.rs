@@ -136,7 +136,7 @@ impl DagPosition {
         Self {
             wall_ms: 0,
             counter: 0,
-            depth: parent_depth + 1,
+            depth: parent_depth.saturating_add(1),
             lane: new_lane,
             sequence: 0,
         }

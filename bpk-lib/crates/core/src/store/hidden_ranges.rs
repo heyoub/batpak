@@ -1,21 +1,36 @@
 use crate::store::{platform, HiddenRangesCorruption, StoreError};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::io::{BufWriter, Write};
 use std::path::Path;
 
 pub(crate) const VISIBILITY_RANGES_MAGIC: &[u8; 6] = b"FBATVR";
-pub(crate) const VISIBILITY_RANGES_VERSION: u16 = 1;
+pub(crate) const VISIBILITY_RANGES_VERSION: u16 = 2;
 pub(crate) const VISIBILITY_RANGES_FILENAME: &str = "visibility_ranges.fbv";
 
 #[derive(Serialize, Deserialize)]
 struct VisibilityRangesData {
     ranges: Vec<VisibilityRangeEntry>,
+    #[serde(default)]
+    lane_ranges: Vec<LaneVisibilityRangeEntry>,
 }
 
 #[derive(Serialize, Deserialize)]
 struct VisibilityRangeEntry {
     start: u64,
     end: u64,
+}
+
+#[derive(Serialize, Deserialize)]
+struct LaneVisibilityRangeEntry {
+    lane: u32,
+    ranges: Vec<VisibilityRangeEntry>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct CancelledVisibilityRanges {
+    pub(crate) global: Vec<(u64, u64)>,
+    pub(crate) lanes: BTreeMap<u32, Vec<(u64, u64)>>,
 }
 
 fn normalize_ranges(ranges: &[(u64, u64)]) -> Result<Vec<(u64, u64)>, StoreError> {
@@ -41,15 +56,29 @@ fn normalize_ranges(ranges: &[(u64, u64)]) -> Result<Vec<(u64, u64)>, StoreError
     Ok(merged)
 }
 
+fn normalize_lane_ranges(
+    lane_ranges: &BTreeMap<u32, Vec<(u64, u64)>>,
+) -> Result<BTreeMap<u32, Vec<(u64, u64)>>, StoreError> {
+    let mut normalized = BTreeMap::new();
+    for (lane, ranges) in lane_ranges {
+        let ranges = normalize_ranges(ranges)?;
+        if !ranges.is_empty() {
+            normalized.insert(*lane, ranges);
+        }
+    }
+    Ok(normalized)
+}
+
 pub(crate) fn write_cancelled_ranges(
     data_dir: &Path,
-    ranges: &[(u64, u64)],
+    ranges: &CancelledVisibilityRanges,
 ) -> Result<(), StoreError> {
     let final_path = data_dir.join(VISIBILITY_RANGES_FILENAME);
     crate::store::platform::fs::reject_symlink_leaf(&final_path, "visibility-ranges metadata")?;
 
-    let normalized = normalize_ranges(ranges)?;
-    if normalized.is_empty() {
+    let normalized_global = normalize_ranges(&ranges.global)?;
+    let normalized_lanes = normalize_lane_ranges(&ranges.lanes)?;
+    if normalized_global.is_empty() && normalized_lanes.is_empty() {
         if platform::fs::remove_file_if_present(&final_path).map_err(StoreError::Io)? {
             crate::store::platform::sync::sync_parent_dir(&final_path)?;
         }
@@ -57,9 +86,19 @@ pub(crate) fn write_cancelled_ranges(
     }
 
     let body = crate::encoding::to_bytes(&VisibilityRangesData {
-        ranges: normalized
+        ranges: normalized_global
             .into_iter()
             .map(|(start, end)| VisibilityRangeEntry { start, end })
+            .collect(),
+        lane_ranges: normalized_lanes
+            .into_iter()
+            .map(|(lane, ranges)| LaneVisibilityRangeEntry {
+                lane,
+                ranges: ranges
+                    .into_iter()
+                    .map(|(start, end)| VisibilityRangeEntry { start, end })
+                    .collect(),
+            })
             .collect(),
     })
     .map_err(|error| StoreError::Serialization(Box::new(error)))?;
@@ -99,7 +138,7 @@ pub(crate) fn write_cancelled_ranges(
 /// re-opening.
 pub(crate) fn load_cancelled_ranges(
     data_dir: &Path,
-) -> Result<Option<Vec<(u64, u64)>>, StoreError> {
+) -> Result<Option<CancelledVisibilityRanges>, StoreError> {
     let path = data_dir.join(VISIBILITY_RANGES_FILENAME);
     let raw = match platform::fs::read(&path) {
         Ok(raw) => raw,
@@ -150,7 +189,9 @@ pub(crate) fn load_cancelled_ranges(
             supported: VISIBILITY_RANGES_VERSION,
         });
     }
-    if version != VISIBILITY_RANGES_VERSION {
+    // Below the future-version refusal: accept the supported range (1..=current),
+    // anything else (a zero/garbled version) is remediable corruption.
+    if !(1..=VISIBILITY_RANGES_VERSION).contains(&version) {
         return Err(corrupt_ranges(
             &path,
             HiddenRangesCorruption::UnsupportedVersion {
@@ -188,9 +229,27 @@ pub(crate) fn load_cancelled_ranges(
         .into_iter()
         .map(|entry| (entry.start, entry.end))
         .collect();
-    match normalize_ranges(&raw_ranges) {
-        Ok(normalized) => Ok(Some(normalized)),
-        Err(err) => Err(corrupt_ranges(
+    let mut raw_lane_ranges = BTreeMap::new();
+    for lane_entry in data.lane_ranges {
+        let ranges = lane_entry
+            .ranges
+            .into_iter()
+            .map(|entry| (entry.start, entry.end))
+            .collect::<Vec<_>>();
+        raw_lane_ranges.insert(lane_entry.lane, ranges);
+    }
+    match (
+        normalize_ranges(&raw_ranges),
+        normalize_lane_ranges(&raw_lane_ranges),
+    ) {
+        (Ok(global), Ok(lanes)) => Ok(Some(CancelledVisibilityRanges { global, lanes })),
+        (Err(err), _) => Err(corrupt_ranges(
+            &path,
+            HiddenRangesCorruption::MalformedEntries {
+                source: Box::new(err),
+            },
+        )),
+        (_, Err(err)) => Err(corrupt_ranges(
             &path,
             HiddenRangesCorruption::MalformedEntries {
                 source: Box::new(err),

@@ -168,7 +168,7 @@ impl SoAoSInner {
             }
             let sequence = entry.global_sequence;
             watermark = Some(sequence);
-            candidates.push((sequence, entry.disk_pos));
+            candidates.push(QueryHit::from_entry(entry));
         }
 
         Some((watermark?, group.generation, candidates))

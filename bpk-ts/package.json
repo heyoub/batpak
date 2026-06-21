@@ -1,9 +1,9 @@
 {
   "name": "batpak-ts-workspace",
-  "version": "0.8.2",
+  "version": "0.8.3",
   "private": true,
   "type": "module",
-  "description": "BatPAK TypeScript SDK workspace. 0.8.2 release.",
+  "description": "BatPAK TypeScript SDK workspace. 0.8.3 release.",
   "scripts": {
     "build": "pnpm -r run build",
     "test": "pnpm -r run test",
