@@ -243,9 +243,9 @@ describe("forward-compat payload_version decode", () => {
     const bytes = decodeHex(Generated.SYSTEM_HEARTBEAT_REQUEST_GOLDEN_HEX);
     const value = decodeBytes(Generated.SystemHeartbeatRequest, bytes);
     expect(value).toEqual(Generated.SYSTEM_HEARTBEAT_REQUEST_FIXTURE);
-    expect(
-      isCompatiblePayloadVersion(99, Generated.SYSTEM_HEARTBEAT_REQUEST_PAYLOAD_VERSION),
-    ).toBe(true);
+    expect(isCompatiblePayloadVersion(99, Generated.SYSTEM_HEARTBEAT_REQUEST_PAYLOAD_VERSION)).toBe(
+      true,
+    );
   });
 
   it("rejects only a malformed (non-integer / negative) stored version", () => {
