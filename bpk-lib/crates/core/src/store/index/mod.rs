@@ -266,8 +266,6 @@ impl StoreIndex {
     /// `entries` must be sorted ascending by `global_sequence`. The allocator is
     /// restored to `max(last_sequence + 1, allocator_hint)` and published only
     /// after every base map and overlay view has been rebuilt.
-    // justifies: src/store/index/restore.rs builds restore runs from u32-backed artifact coordinates, so these width checks are supported-target invariants.
-    #[allow(clippy::expect_used)]
     fn restore_sorted_entries_impl(
         &self,
         entries: Vec<IndexEntry>,
@@ -288,14 +286,13 @@ impl StoreIndex {
         let mut latest = HashMap::<LaneHeadKey, Arc<IndexEntry>>::new();
 
         for run in &restored.routing.entity_runs {
-            let start = usize::try_from(run.start)
-                .expect("invariant: entity run index fits usize on any supported target");
-            let len = usize::try_from(run.len)
-                .expect("invariant: entity run length fits usize on any supported target");
-            let end = start
-                .checked_add(len)
-                .expect("invariant: entity run start+len fits usize on supported targets");
-            let slice = &restored.entries_by_entity[start..end];
+            let range = run.usize_range()?;
+            let slice = restored.entries_by_entity.get(range).ok_or_else(|| {
+                crate::store::StoreError::corrupt_segment_with_detail(
+                    0,
+                    "routing entity-run range out of bounds for restored entries",
+                )
+            })?;
             if slice.is_empty() {
                 continue;
             }
@@ -326,7 +323,7 @@ impl StoreIndex {
             &restored.entries_by_sequence,
             &restored.entries_by_entity,
             &restored.routing,
-        );
+        )?;
         for entry in &restored.entries_by_sequence {
             by_id.insert(entry.event_id, Arc::clone(entry));
         }

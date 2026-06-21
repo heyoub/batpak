@@ -127,9 +127,10 @@ pub(super) fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStrea
             ),
         ));
     }
-    // justifies: INV-MACRO-BOUNDED-CAST; narrowing u64 to u8 is bounds-checked by the u8::MAX comparison on the preceding lines in crates/macros/src/event_payload.rs so truncation cannot occur here.
-    #[allow(clippy::cast_possible_truncation)]
-    let category: u8 = category_u64 as u8;
+    // The preceding `> u64::from(u8::MAX)` guard makes this conversion total;
+    // `try_from` keeps it lint-clean instead of an unchecked `as` narrowing.
+    let category: u8 =
+        u8::try_from(category_u64).expect("category bounded to u8 range by guard above");
     if let Err(msg) = batpak_macros_support::validate_category(category) {
         return Err(syn::Error::new(category_lit.span(), msg));
     }
@@ -144,9 +145,9 @@ pub(super) fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStrea
             ),
         ));
     }
-    // justifies: INV-MACRO-BOUNDED-CAST; narrowing u64 to u16 is bounds-checked by the u16::MAX comparison on the preceding lines in crates/macros/src/event_payload.rs so truncation cannot occur here.
-    #[allow(clippy::cast_possible_truncation)]
-    let type_id: u16 = type_id_u64 as u16;
+    // The preceding `> u64::from(u16::MAX)` guard makes this conversion total.
+    let type_id: u16 =
+        u16::try_from(type_id_u64).expect("type_id bounded to u16 range by guard above");
     if let Err(msg) = batpak_macros_support::validate_type_id(type_id) {
         return Err(syn::Error::new(type_id_lit.span(), msg));
     }
@@ -172,10 +173,8 @@ pub(super) fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStrea
                     ),
                 ));
             }
-            // justifies: INV-MACRO-BOUNDED-CAST; narrowing u64 to u16 is bounds-checked by the u16::MAX comparison on the preceding lines in crates/macros/src/event_payload.rs so truncation cannot occur here.
-            #[allow(clippy::cast_possible_truncation)]
-            let v = version_u64 as u16;
-            v
+            // The preceding `> u64::from(u16::MAX)` guard makes this total.
+            u16::try_from(version_u64).expect("version bounded to u16 range by guard above")
         }
     };
 
@@ -186,13 +185,15 @@ pub(super) fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStrea
     // at expansion time before EventKind is available in this expression, so
     // the packed formula is intentionally inlined here.
     let kind_bits: u16 = (u16::from(category) << 12) | type_id;
-    let test_fn_name = format_ident!("__batpak_kind_collision_check_{}", ident);
+    // Embed the user's ident in snake_case so the generated test fn is itself a
+    // valid snake_case identifier and does not trip `non_snake_case` — no lint
+    // suppression on generated code. The conversion is deterministic and unique
+    // per source ident (idents are already unique within a module).
+    let snake_ident = to_snake_case(&ident.to_string());
+    let test_fn_name = format_ident!("__batpak_kind_collision_check_{}", snake_ident);
 
-    // The emitted test fn is named `__batpak_kind_collision_check_<Ident>`
-    // (CamelCase ident embedded), so `non_snake_case` has to be suppressed on
-    // that specific item. The registration block is unconditional so payloads
-    // in dependency crates remain visible to a downstream binary's explicit
-    // registry validator.
+    // The registration block is unconditional so payloads in dependency crates
+    // remain visible to a downstream binary's explicit registry validator.
     Ok(quote! {
         impl #impl_generics ::batpak::event::EventPayload for #ident #ty_generics #where_clause {
             const KIND: ::batpak::event::EventKind =
@@ -211,10 +212,30 @@ pub(super) fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStrea
 
         #[cfg(test)]
         #[test]
-        // justifies: INV-GENERATED-WITNESS-PIN; generated test fn in crates/macros/src/event_payload.rs embeds the user's CamelCase ident so non_snake_case must be suppressed on this specific item.
-        #[allow(non_snake_case)]
         fn #test_fn_name() {
             ::batpak::__private::assert_no_kind_collisions();
         }
     })
+}
+
+/// Convert a (typically CamelCase) Rust identifier into `snake_case`.
+///
+/// Used only to build a valid snake_case generated test-fn name from the user's
+/// payload type ident, so the emitted item needs no `non_snake_case` allow.
+fn to_snake_case(ident: &str) -> String {
+    let mut out = String::with_capacity(ident.len() + 4);
+    let mut prev_lower_or_digit = false;
+    for ch in ident.chars() {
+        if ch.is_ascii_uppercase() {
+            if prev_lower_or_digit {
+                out.push('_');
+            }
+            out.push(ch.to_ascii_lowercase());
+            prev_lower_or_digit = false;
+        } else {
+            out.push(ch);
+            prev_lower_or_digit = ch.is_ascii_lowercase() || ch.is_ascii_digit();
+        }
+    }
+    out
 }

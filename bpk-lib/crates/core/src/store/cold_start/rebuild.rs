@@ -196,54 +196,64 @@ impl<'a> RestorePlanner<'a> {
         })
     }
 
-    // justifies: ADR-0008; planner in src/store/cold_start/rebuild.rs takes ownership of snapshot data — clippy's suggestion would force a re-clone on the caller side.
-    #[allow(clippy::needless_pass_by_value)]
     fn build_snapshot_plan(
         &self,
         source: RestoreSource,
-        mut snapshot: SnapshotPlanInput,
+        snapshot: SnapshotPlanInput,
     ) -> Result<RestorePlan, StoreError> {
-        if !snapshot.receipt_extensions_hydrated {
-            hydrate_receipt_extensions(self.reader, &mut snapshot.entries)?;
+        // Destructure up front so the move-out of each owned field is explicit;
+        // the planner consumes the snapshot rather than borrowing it.
+        let SnapshotPlanInput {
+            mut entries,
+            interner_strings,
+            watermark,
+            stored_allocator,
+            routing: input_routing,
+            reopen_reserved_kind_fallbacks,
+            persisted_cumulative_reserved_kind_fallbacks,
+            receipt_extensions_hydrated,
+            snapshot_loads,
+        } = snapshot;
+
+        if !receipt_extensions_hydrated {
+            hydrate_receipt_extensions(self.reader, &mut entries)?;
         }
         let interner = StringInterner::new();
-        interner.replace_from_full_snapshot(&snapshot.interner_strings)?;
+        interner.replace_from_full_snapshot(&interner_strings)?;
         let tail_entries = collect_tail_entries(
             &interner,
             self.reader,
             self.data_dir,
-            &snapshot.watermark,
-            snapshot.stored_allocator,
+            &watermark,
+            stored_allocator,
             self.fault_injector,
         )?;
-        let restored_entries = snapshot.entries.len();
+        let restored_entries = entries.len();
         let tail_count = tail_entries.len();
-        snapshot.entries.extend(tail_entries);
-        snapshot.entries.sort_by_key(|entry| entry.global_sequence);
-        let chunk_count = usize::try_from(snapshot.routing.chunk_count)
+        entries.extend(tail_entries);
+        entries.sort_by_key(|entry| entry.global_sequence);
+        let chunk_count = usize::try_from(input_routing.chunk_count)
             .unwrap_or(1)
             .max(1)
             + usize::from(tail_count > 0);
-        let routing = RoutingSummary::from_sorted_entries(&snapshot.entries, chunk_count);
+        let routing = RoutingSummary::from_sorted_entries(&entries, chunk_count);
 
         Ok(RestorePlan {
             source,
-            allocator_hint: snapshot.stored_allocator.max(
-                snapshot
-                    .entries
+            allocator_hint: stored_allocator.max(
+                entries
                     .last()
                     .map(|entry| entry.global_sequence.saturating_add(1))
                     .unwrap_or(0),
             ),
             interner_strings: full_interner_snapshot(&interner),
             routing,
-            entries: snapshot.entries,
+            entries,
             restored_entries,
             tail_entries: tail_count,
-            reopen_reserved_kind_fallbacks: snapshot.reopen_reserved_kind_fallbacks,
-            persisted_cumulative_reserved_kind_fallbacks: snapshot
-                .persisted_cumulative_reserved_kind_fallbacks,
-            snapshot_loads: snapshot.snapshot_loads,
+            reopen_reserved_kind_fallbacks,
+            persisted_cumulative_reserved_kind_fallbacks,
+            snapshot_loads,
         })
     }
 }

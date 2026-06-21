@@ -94,6 +94,18 @@ impl EventKind {
         Self(((category as u16) << 12) | type_id)
     }
 
+    /// Reconstruct a kind from its raw `u16` encoding.
+    ///
+    /// This is the inverse of [`as_raw_u16`](Self::as_raw_u16) and performs no
+    /// validation: it is for round-tripping an already-encoded `u16` (e.g. the
+    /// packed `kind_bits` carried by a registry collision record) back into a
+    /// kind so its [`category`](Self::category)/[`type_id`](Self::type_id)
+    /// accessors can narrow the nibbles without an unchecked cast.
+    #[inline]
+    pub(crate) const fn from_raw_u16(raw: u16) -> Self {
+        Self(raw)
+    }
+
     /// Returns the canonical on-disk and over-the-wire `u16` encoding.
     ///
     /// This value must stay byte-for-byte equal to `(category << 12) | type_id`.

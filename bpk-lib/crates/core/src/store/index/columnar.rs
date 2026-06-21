@@ -41,6 +41,7 @@ mod soaos;
 
 use crate::event::EventKind;
 use crate::store::index::{ClockKey, IndexEntry, QueryHit, RoutingSummary};
+use crate::store::StoreError;
 use dashmap::DashMap;
 use parking_lot::RwLock;
 use std::collections::{BTreeMap, HashSet};
@@ -213,7 +214,7 @@ impl ColumnarIndex {
         entries_by_sequence: &[Arc<IndexEntry>],
         entries_by_entity: &[Arc<IndexEntry>],
         routing: &RoutingSummary,
-    ) {
+    ) -> Result<(), StoreError> {
         match &self.inner {
             ColumnarVariant::SoA(lock) => {
                 *lock.write() = SoAInner::from_entries(entries_by_sequence)
@@ -233,9 +234,10 @@ impl ColumnarIndex {
                 *lock.write() = AoSoA64SimdInner::from_entries(entries_by_sequence)
             }
             ColumnarVariant::SoAoS(lock) => {
-                *lock.write() = SoAoSInner::from_restore_base(entries_by_entity, routing)
+                *lock.write() = SoAoSInner::from_restore_base(entries_by_entity, routing)?
             }
         }
+        Ok(())
     }
 
     fn query_hits_sorted(&self, query: EntryQuery<'_>) -> Vec<QueryHit> {
@@ -510,7 +512,7 @@ impl ScanIndex {
         entries_by_sequence: &[Arc<IndexEntry>],
         entries_by_entity: &[Arc<IndexEntry>],
         routing: &RoutingSummary,
-    ) {
+    ) -> Result<(), StoreError> {
         self.by_fact.clear();
         self.scope_entities.clear();
 
@@ -542,17 +544,18 @@ impl ScanIndex {
         }
 
         if let Some(idx) = &self.soa {
-            idx.rebuild_from_restore_base(entries_by_sequence, entries_by_entity, routing);
+            idx.rebuild_from_restore_base(entries_by_sequence, entries_by_entity, routing)?;
         }
         if let Some(idx) = &self.entity_groups {
-            idx.rebuild_from_restore_base(entries_by_sequence, entries_by_entity, routing);
+            idx.rebuild_from_restore_base(entries_by_sequence, entries_by_entity, routing)?;
         }
         if let Some(idx) = &self.tiles64 {
-            idx.rebuild_from_restore_base(entries_by_sequence, entries_by_entity, routing);
+            idx.rebuild_from_restore_base(entries_by_sequence, entries_by_entity, routing)?;
         }
         if let Some(idx) = &self.tiles64_simd {
-            idx.rebuild_from_restore_base(entries_by_sequence, entries_by_entity, routing);
+            idx.rebuild_from_restore_base(entries_by_sequence, entries_by_entity, routing)?;
         }
+        Ok(())
     }
 
     /// Return the set of entity strings registered under `scope` (Maps variant only).
