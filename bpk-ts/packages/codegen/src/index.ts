@@ -360,9 +360,7 @@ function renderEventsModule(manifest: BatpakTsManifest): string {
     // the wire: equal/older => decode as-is; newer => forward-compat
     // (the server upcasts, TS reads the current shape). See
     // `isCompatiblePayloadVersion` in `@batpak/client`.
-    lines.push(
-      `export const ${constSafeName}_PAYLOAD_VERSION = ${event.payloadVersion} as const;`,
-    );
+    lines.push(`export const ${constSafeName}_PAYLOAD_VERSION = ${event.payloadVersion} as const;`);
     // CRITICAL: Rust's rmp-serde::to_vec_named emits struct fields in
     // DECLARATION order; serde_json::to_value uses BTreeMap (alphabetical).
     // The TS canonical encoder iterates object insertion order. So the
@@ -566,7 +564,7 @@ const OPTIONAL_NULLABLE_HELPER_LINES: readonly string[] = [
   "    Schema.decodeTo(Schema.optionalKey(Schema.NullOr(inner)), {",
   "      decode: SchemaGetter.passthrough({ strict: false }),",
   "      encode: SchemaGetter.transformOptional(",
-  "        (ot: Option.Option<S[\"Type\"] | null>): Option.Option<S[\"Type\"] | null> =>",
+  '        (ot: Option.Option<S["Type"] | null>): Option.Option<S["Type"] | null> =>',
   "          Option.isNone(ot) ? Option.some(null) : ot,",
   "      ),",
   "    }),",

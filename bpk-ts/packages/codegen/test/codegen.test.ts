@@ -174,9 +174,7 @@ describe("readManifest validates the envelope", () => {
       events: [
         {
           ...MINIMAL_MANIFEST.events[0],
-          fields: [
-            { wireName: "f", tsName: "f", typeToken: "string", order: 0, optional: true },
-          ],
+          fields: [{ wireName: "f", tsName: "f", typeToken: "string", order: 0, optional: true }],
         },
       ],
     });
