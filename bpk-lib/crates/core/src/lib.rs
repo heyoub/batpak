@@ -64,6 +64,14 @@
 //!    [`schema`]: Advanced substrate batteries for envelopes, ledgers,
 //!    transition evidence, reservation mechanics, and drift reports.
 
+// Width invariant: batpak stores ids/offsets/lengths compactly as `u32`/`u64` and
+// converts to `usize` only transiently for slicing. `u32 -> usize` is lossless only
+// when `usize` is at least 32 bits, so a <32-bit target is rejected here at compile
+// time. This makes the `usize::try_from(u32).unwrap_or(..)` conversions throughout
+// the store provably-total (their `Err` arm is unreachable) without any `#[allow]`.
+#[cfg(target_pointer_width = "16")]
+compile_error!("batpak requires a >=32-bit target: u32 ids/offsets must fit usize losslessly");
+
 /// Crate-level substrate: canonical artifact body digest vs envelope digest.
 pub mod artifact;
 /// Entity and scope addressing for events.

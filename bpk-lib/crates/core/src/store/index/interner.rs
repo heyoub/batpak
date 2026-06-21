@@ -61,10 +61,13 @@ impl InternId {
     /// The inner `u32` is a 1-based index; this cast is always lossless because
     /// `u32::MAX` (≈4 B) is well within `usize` range on all supported targets.
     #[inline]
-    // justifies: src/store/index/interner.rs supports only targets where the u32 interner domain fits usize; this is a supported-target invariant.
-    #[allow(clippy::expect_used)]
     pub(crate) fn to_usize(self) -> usize {
-        usize::try_from(self.0).expect("u32 intern IDs fit in usize on supported targets")
+        // `u32 -> usize` is lossless on every supported target: a <32-bit target is
+        // rejected at compile time (see the `target_pointer_width` guard in lib.rs),
+        // so the `Err` arm is unreachable. `unwrap_or` keeps this total and lint-clean
+        // (no expect/unwrap/panic/cast); on the impossible narrow target it degrades to
+        // a guaranteed out-of-bounds index rather than a panic.
+        usize::try_from(self.0).unwrap_or(usize::MAX)
     }
 
     /// Returns the sentinel ID (slot 0, empty string). Used as a placeholder
