@@ -20,7 +20,9 @@
 //! `UndeadBoundary` — that a crash with a committed artifact but no sealed report
 //! reconciles to `Completed`. The real reconciler returns `CanonicalRefusal`
 //! (the sacred window forbids a silent Completed), so the assertion is false and
-//! the red half FAILS. (NOT registered in `gate_registry.rs` yet.)
+//! the red half FAILS. Registered as the blocking ProductionFlip gate
+//! `bvisor-reconciliation` in `gate_registry.rs`; its red half is proven by the
+//! `gauntlet-red-fixtures-bite` lane (`cargo xtask prove-gates-bite`).
 //!
 //! Replay a seed with `BVISOR_SEED=N cargo test -p bvisor
 //! --features dangerous-test-hooks --test reconciliation_oracle`.
@@ -109,7 +111,8 @@ fn reconciliation_matrix_diverges_across_seeds() -> Result<(), String> {
 /// `--cfg gauntlet_red_fixture` it asserts the illegal `UndeadBoundary` outcome —
 /// that the sacred-window cell reconciles to `Completed`. The real reconciler
 /// returns `CanonicalRefusal`, so the assertion is false and the red half FAILS,
-/// proving the oracle detects an undead boundary. (NOT registered yet.)
+/// proving the oracle detects an undead boundary. Registered as the blocking
+/// ProductionFlip gate `bvisor-reconciliation` in `gate_registry.rs`.
 #[cfg(gauntlet_red_fixture)]
 #[test]
 fn reconciliation_red_fixture_undead_boundary_must_fail() -> Result<(), String> {

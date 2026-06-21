@@ -16,8 +16,10 @@
 //!
 //! RED fixture (`--cfg gauntlet_red_fixture`): flips the expectation to "lie
 //! uncaught", which is FALSE for a biting oracle, so the red half FAILS —
-//! mirroring `recovery_oracle.rs:98-109`. These fixtures are NOT yet registered
-//! in `gate_registry.rs` (a separate human follow-up).
+//! mirroring `recovery_oracle.rs:98-109`. Registered as the blocking
+//! ProductionFlip gate `bvisor-grid` in `gate_registry.rs`; its red half is
+//! proven by the `gauntlet-red-fixtures-bite` lane (`cargo xtask
+//! prove-gates-bite`), which builds it under the cfg and asserts it FAILS.
 //!
 //! Replay a seed with `BVISOR_SEED=N cargo test -p bvisor
 //! --features dangerous-test-hooks --test grid`.
@@ -64,7 +66,8 @@ fn grid_is_deterministic() -> Result<(), String> {
 /// `--cfg gauntlet_red_fixture` it asserts the (illegal) "lie uncaught" outcome —
 /// that the oracle does NOT catch the spawn-despite-deny lie. A biting oracle
 /// ALWAYS catches it, so this assertion is false and the red half FAILS, proving
-/// the grid is anti-vacuous. (NOT registered in `gate_registry.rs` yet.)
+/// the grid is anti-vacuous. Registered as the blocking ProductionFlip gate
+/// `bvisor-grid` in `gate_registry.rs`.
 #[cfg(gauntlet_red_fixture)]
 #[test]
 fn grid_red_fixture_lie_must_escape() -> Result<(), String> {

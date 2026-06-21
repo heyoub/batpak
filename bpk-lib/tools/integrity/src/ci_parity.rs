@@ -180,6 +180,8 @@ pub(crate) fn check(repo_root: &Path) -> Result<()> {
             "import-reapply",
             "lane-branch",
             "lane-frontier",
+            "bvisor-admission",
+            "bvisor-report-seal",
         ],
     )?;
     assert_workflow_list_values(
@@ -674,10 +676,15 @@ fn install_tools() {
         yml
     }
 
+    // Must stay in EXACT lockstep with the canonical seam list `check` asserts
+    // above (the `seam` entry in the ci.yml `assert_workflow_list_values` call):
+    // the green fixture runs the full `check`, so any seam present there but
+    // absent here makes the green sanity-floor fixture fail.
     const GREEN_SEAMS: &[&str] = &[
         "writer-commit",
         "cursor-delivery",
         "projection-flow",
+        "projection-fusion",
         "segment-scan",
         "hash-chain-replay",
         "frontier-wait-durable",
@@ -689,6 +696,12 @@ fn install_tools() {
         "syncbat-runtime-dispatch",
         "syncbat-register-catalog",
         "netbat-boundary-protocol",
+        "fork-isolation",
+        "import-reapply",
+        "lane-branch",
+        "lane-frontier",
+        "bvisor-admission",
+        "bvisor-report-seal",
     ];
 
     const GREEN_PERF_YML: &str = "name: perf\njobs:\n  bench:\n    strategy:\n      matrix:\n        surface: [neutral, native]\n";
