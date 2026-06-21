@@ -12,6 +12,11 @@ path = "src/lib.rs"
 
 [features]
 default = []
+# The SimBackend monster + the harness-owned GroundTruth shadow + the
+# reconciliation matrix live behind this feature, mirroring batpak's
+# `store/sim` convention (`crates/core/Cargo.toml`). Without it the whole
+# `sim/` module is compiled out and the crate stays the pure contract + Inert.
+dangerous-test-hooks = []
 
 [dependencies]
 # batpak by path for the EventPayload derive + inventory registration and the

@@ -22,6 +22,9 @@
 mod backend;
 mod contract;
 
+#[cfg(feature = "dangerous-test-hooks")]
+mod sim;
+
 pub use backend::inert::InertBackend;
 
 pub use contract::backend::Backend;
@@ -45,3 +48,25 @@ pub use contract::report::{
     DeniedAttempt, ExitStatus, ObservedFact, Outcome, BOUNDARY_REPORT_SCHEMA_VERSION,
 };
 pub use contract::support::{BackendProfile, BackendProfileSnapshot, SupportMatrix};
+
+/// Doc-hidden, test-only surface for the SimBackend monster, the harness-owned
+/// [`sim::ground_truth::GroundTruth`] shadow oracle, the G1–G13 proof grid, and
+/// the startup-reconciliation matrix. Compiled out unless the
+/// `dangerous-test-hooks` feature is on, exactly like batpak's `__sim`.
+///
+/// THE MONSTER NEVER GRADES ITSELF: the grid + reconciliation oracles diff a
+/// harness-owned [`sim::ground_truth::GroundTruth`] (what ACTUALLY happened)
+/// against the backend's self-reported [`BoundaryReport`].
+#[cfg(feature = "dangerous-test-hooks")]
+#[doc(hidden)]
+pub mod __sim {
+    pub use crate::sim::backend::{LieInjector, LieMode, OneShotLiar, SeededLiar, SimBackend};
+    pub use crate::sim::grid::{
+        run_gate, GateKind, GateOutcome, GateScenario, GateViolation, GATE_SCENARIOS,
+    };
+    pub use crate::sim::ground_truth::{GroundTruth, GroundTruthDiff, Lie};
+    pub use crate::sim::reconciliation_matrix::{
+        all_crash_boundaries, reconciliation_replay_seed, run_reconciliation_matrix, CrashBoundary,
+        ReconCell, ReconClass, ReconViolation,
+    };
+}
