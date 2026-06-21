@@ -118,6 +118,17 @@ ci:
 verify:
     cd bpk-lib; cargo xtask preflight
 
+# Whole-repo validation in one command: the Rust gates (preflight) AND the
+# bpk-ts package set. This is the polyglot porch — no more "run `just verify`
+# then remember the pnpm combo by hand" to clear both halves of the monorepo.
+verify-all: verify verify-ts
+
+# The bpk-ts gate surface. The real pnpm logic lives in the xtask engine
+# (`cargo xtask verify-ts`) per the justfile-stays-thin contract; this recipe
+# only forwards to it.
+verify-ts:
+    cd bpk-lib; cargo xtask verify-ts
+
 seal:
     cd bpk-lib; cargo xtask check-version-pins
     cd bpk-lib; cargo xtask evidence-audit

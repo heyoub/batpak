@@ -60,6 +60,10 @@ enum XtaskCommand {
     AgentDoctor,
     /// Emit the machine-readable architecture IR into target/ by default.
     ArchitectureIr(ArchitectureIrArgs),
+    /// Run the bpk-ts (TypeScript) gate surface: frozen-lockfile install,
+    /// build (tsc), lint, format check, and tests. The polyglot half of the
+    /// monorepo; `just verify-all` runs this alongside the Rust `preflight`.
+    VerifyTs,
     Check(CheckArgs),
     Test(TestArgs),
     Clippy(ClippyArgs),
@@ -603,6 +607,7 @@ fn main() -> Result<()> {
         XtaskCommand::EvidenceAudit => commands::integrity("evidence-audit", []),
         XtaskCommand::AgentDoctor => commands::integrity("agent-doctor", []),
         XtaskCommand::ArchitectureIr(args) => commands::architecture_ir(&args),
+        XtaskCommand::VerifyTs => commands::verify_ts(),
         XtaskCommand::Check(args) => run_check(&args),
         XtaskCommand::Test(args) => run_test(&args),
         XtaskCommand::Clippy(args) => run_clippy(&args),

@@ -24,6 +24,7 @@ mod staged;
 mod stress;
 mod templates;
 mod unused_deps;
+mod verify_ts;
 mod version_pins;
 
 use crate::util::{cargo, cargo_target_dir};
@@ -74,6 +75,12 @@ pub(crate) fn scaffold(args: ScaffoldArgs) -> Result<()> {
 
 pub(crate) fn templates() -> Result<()> {
     templates::templates()
+}
+
+/// Drive the bpk-ts (TypeScript) gate surface — the polyglot half of the
+/// monorepo — so `just verify-all` clears both halves in one command.
+pub(crate) fn verify_ts() -> Result<()> {
+    verify_ts::verify_ts()
 }
 
 /// Drive `cargo cyclonedx` over every publishable crate and emit a
