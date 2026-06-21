@@ -1,11 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION, INV-MACRO-BOUNDED-CAST; advanced store tests rely on unwrap/panic as assertion style, spawn threads for concurrency probes, and narrow bounded test data into target types that the fixture guarantees fit.
-#![allow(
-    clippy::unwrap_used,
-    clippy::disallowed_methods,
-    clippy::cast_possible_truncation,
-    clippy::needless_borrows_for_generic_args,
-    clippy::panic
-)]
 //! Advanced Store append and append-option integration tests.
 //!
 //! Catalog citation: INV-PAYLOAD-VERSION-NONZERO is witnessed here by
@@ -115,14 +107,11 @@ fn cas_fails_on_wrong_sequence() {
         ..Default::default()
     };
     let result = store.append_with_options(&coord, kind, &serde_json::json!({"x": 3}), opts);
-    let err = match result {
-        Ok(_) => panic!(
-            "PROPERTY: append_with_options must return Err when expected_sequence is stale (CAS failure).\
-             Investigate: src/store/mod.rs append_with_options CAS check.\
-             Common causes: sequence comparison uses wrong field, CAS check skipped under lock."
-        ),
-        Err(err) => err,
-    };
+    let err = result.map(|_| ()).expect_err(
+        "PROPERTY: append_with_options must return Err when expected_sequence is stale (CAS failure).\
+         Investigate: src/store/mod.rs append_with_options CAS check.\
+         Common causes: sequence comparison uses wrong field, CAS check skipped under lock.",
+    );
     assert!(
         matches!(err, StoreError::SequenceMismatch { .. }),
         "PROPERTY: CAS failure must surface as StoreError::SequenceMismatch, got {err:?}"
@@ -333,8 +322,8 @@ fn typed_append_rejects_manual_payload_version_zero() {
     // A hand-written EventPayload impl forging the reserved legacy sentinel.
     // The derive macro forbids this at compile time, but a manual impl can do
     // it; the typed-append seam must reject it at runtime so a real typed frame
-    // can never be stamped indistinguishable from a legacy untyped frame.
-    // justifies: INV-PAYLOAD-VERSION-NONZERO
+    // can never be stamped indistinguishable from a legacy untyped frame
+    // (PROVES INV-PAYLOAD-VERSION-NONZERO).
     #[derive(Serialize, Deserialize)]
     struct ForgedLegacy {
         n: u64,
@@ -347,10 +336,10 @@ fn typed_append_rejects_manual_payload_version_zero() {
     let dir = TempDir::new().expect("temp dir");
     let store = Store::open(StoreConfig::new(dir.path())).expect("open store");
     let coord = Coordinate::new("entity:forged-version", "scope:test").expect("coord");
-    let err = match store.append_typed(&coord, &ForgedLegacy { n: 7 }) {
-        Ok(_) => panic!("PROPERTY: typed append with PAYLOAD_VERSION 0 must be rejected"),
-        Err(e) => e,
-    };
+    let err = store
+        .append_typed(&coord, &ForgedLegacy { n: 7 })
+        .map(|_| ())
+        .expect_err("PROPERTY: typed append with PAYLOAD_VERSION 0 must be rejected");
     assert!(
         matches!(err, StoreError::InvalidPayloadVersion { kind }
             if kind == ForgedLegacy::KIND.as_raw_u16()),

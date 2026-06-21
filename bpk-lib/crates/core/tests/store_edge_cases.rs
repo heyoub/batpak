@@ -1,10 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; edge-case tests in tests/store_edge_cases.rs spawn threads for concurrent stress probes, rely on panic as the assertion style, and intentionally build config via field-by-field mutation; these allows are the file-wide idioms.
-#![allow(
-    clippy::disallowed_methods,
-    clippy::panic,
-    clippy::clone_on_ref_ptr,
-    clippy::field_reassign_with_default
-)]
 //! Store edge case tests: frame_decode error paths, subscription lifecycle,
 //! concurrent append correctness, config edge cases, Store drop behavior.
 //!
@@ -28,10 +21,11 @@ use medium_store_support::{medium_segment_store as test_store, test_coord};
 fn frame_decode_too_short() {
     use batpak::store::segment::{frame_decode, FrameDecodeError};
     let buf = [0u8; 7]; // less than 8 bytes
-    match frame_decode(&buf) {
-        Err(FrameDecodeError::TooShort) => {}
-        other => panic!("expected TooShort, got {other:?}"),
-    }
+    let result = frame_decode(&buf);
+    assert!(
+        matches!(result, Err(FrameDecodeError::TooShort)),
+        "expected TooShort, got {result:?}"
+    );
 }
 
 #[test]
@@ -41,34 +35,34 @@ fn frame_decode_truncated() {
     let mut buf = vec![0u8; 12];
     buf[0..4].copy_from_slice(&100u32.to_be_bytes()); // len = 100
     buf[4..8].copy_from_slice(&0u32.to_be_bytes()); // crc = 0
-    match frame_decode(&buf) {
-        Err(FrameDecodeError::Truncated {
-            expected_len,
-            available,
-        }) => {
-            assert_eq!(expected_len, 108);
-            assert_eq!(available, 12);
-        }
-        other => panic!("expected Truncated, got {other:?}"),
-    }
+    let result = frame_decode(&buf);
+    assert!(
+        matches!(
+            result,
+            Err(FrameDecodeError::Truncated {
+                expected_len: 108,
+                available: 12,
+            })
+        ),
+        "expected Truncated {{ expected_len: 108, available: 12 }}, got {result:?}"
+    );
 }
 
 #[test]
 fn frame_decode_crc_mismatch() {
     use batpak::store::segment::{frame_decode, FrameDecodeError};
     let payload = b"hello";
-    // justifies: INV-MACRO-BOUNDED-CAST; b"hello" has len 5 in tests/store_edge_cases.rs, far below u32::MAX, so usize-to-u32 narrowing cannot truncate in this fixed-size test payload.
-    #[allow(clippy::cast_possible_truncation)]
-    let len = payload.len() as u32;
+    let len = u32::try_from(payload.len()).expect("bounded test payload length fits u32");
     let bad_crc = 0xDEADBEEFu32;
     let mut buf = Vec::new();
     buf.extend_from_slice(&len.to_be_bytes());
     buf.extend_from_slice(&bad_crc.to_be_bytes());
     buf.extend_from_slice(payload);
-    match frame_decode(&buf) {
-        Err(FrameDecodeError::CrcMismatch { .. }) => {}
-        other => panic!("expected CrcMismatch, got {other:?}"),
-    }
+    let result = frame_decode(&buf);
+    assert!(
+        matches!(result, Err(FrameDecodeError::CrcMismatch { .. })),
+        "expected CrcMismatch, got {result:?}"
+    );
 }
 
 #[test]
@@ -255,10 +249,10 @@ fn single_append_payload_over_limit_is_rejected_cleanly() {
     let kind = EventKind::custom(1, 1);
     let payload = "this payload is larger than eight bytes";
 
-    let err = match store.append(&coord, kind, &payload) {
-        Ok(_) => panic!("PROPERTY: oversized payload should not append successfully"),
-        Err(err) => err,
-    };
+    let err = store
+        .append(&coord, kind, &payload)
+        .map(|_| ())
+        .expect_err("PROPERTY: oversized payload should not append successfully");
 
     assert!(
         matches!(err, StoreError::Configuration(ref msg) if msg.contains("single append bytes")),
@@ -288,9 +282,10 @@ fn single_append_payload_at_exact_limit_succeeds() {
         if bytes.len() == limit as usize {
             break;
         }
-        if bytes.len() > limit as usize {
-            panic!("overshot: could not construct a payload of exactly {limit} msgpack bytes");
-        }
+        assert!(
+            bytes.len() <= limit as usize,
+            "overshot: could not construct a payload of exactly {limit} msgpack bytes"
+        );
         s.push('A');
     }
 
@@ -312,19 +307,17 @@ fn single_append_payload_at_exact_limit_succeeds() {
 fn coordinate_component_length_limit_is_enforced() {
     let long = "x".repeat(batpak::coordinate::MAX_COORDINATE_COMPONENT_LEN + 1);
 
-    let entity_err = match Coordinate::new(&long, "scope:test") {
-        Ok(_) => panic!("PROPERTY: overlong entity should be rejected"),
-        Err(err) => err,
-    };
+    let entity_err = Coordinate::new(&long, "scope:test")
+        .map(|_| ())
+        .expect_err("PROPERTY: overlong entity should be rejected");
     assert!(
         matches!(entity_err, CoordinateError::EntityTooLong { .. }),
         "expected EntityTooLong, got {entity_err:?}"
     );
 
-    let scope_err = match Coordinate::new("entity:test", &long) {
-        Ok(_) => panic!("PROPERTY: overlong scope should be rejected"),
-        Err(err) => err,
-    };
+    let scope_err = Coordinate::new("entity:test", &long)
+        .map(|_| ())
+        .expect_err("PROPERTY: overlong scope should be rejected");
     assert!(
         matches!(scope_err, CoordinateError::ScopeTooLong { .. }),
         "expected ScopeTooLong, got {scope_err:?}"
@@ -353,10 +346,10 @@ fn close_rejects_checkpoint_symlink_leaf() {
     let checkpoint_path = dir.path().join("index.ckpt");
     symlink(&target, &checkpoint_path).expect("create checkpoint symlink");
 
-    let err = match store.close() {
-        Ok(_) => panic!("PROPERTY: close should reject checkpoint symlink leaf"),
-        Err(err) => err,
-    };
+    let err = store
+        .close()
+        .map(|_| ())
+        .expect_err("PROPERTY: close should reject checkpoint symlink leaf");
     assert!(
         matches!(err, StoreError::Io(ref io) if io.kind() == std::io::ErrorKind::InvalidInput),
         "expected Io(InvalidInput), got {err:?}"
@@ -380,10 +373,9 @@ fn open_with_native_cache_rejects_symlink_leaf() {
     let cache_link = dir.path().join("cache-link");
     symlink(&cache_real, &cache_link).expect("create cache symlink");
 
-    let err = match Store::open_with_native_cache(StoreConfig::new(dir.path()), &cache_link) {
-        Ok(_) => panic!("PROPERTY: native cache root symlink should be rejected"),
-        Err(err) => err,
-    };
+    let err = Store::open_with_native_cache(StoreConfig::new(dir.path()), &cache_link)
+        .map(|_| ())
+        .expect_err("PROPERTY: native cache root symlink should be rejected");
 
     assert!(
         matches!(err, StoreError::CacheFailed(_)),
@@ -454,8 +446,11 @@ fn compact_skips_when_below_min_segments() {
     store.append(&coord, kind, &"e1").expect("append");
     store.sync().expect("sync");
 
-    let mut compact_config = CompactionConfig::default();
-    compact_config.min_segments = 10; // High threshold — won't trigger
+    // High min_segments threshold — won't trigger compaction.
+    let compact_config = CompactionConfig {
+        min_segments: 10,
+        ..CompactionConfig::default()
+    };
     let (result, _report) = store.compact(&compact_config).expect("compact");
     assert_eq!(
         result.segments_removed, 0,

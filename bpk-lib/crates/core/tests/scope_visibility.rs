@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; tests in tests/scope_visibility.rs rely on expect/panic on unreachable failures; clippy::unwrap_used and clippy::panic are the standard harness allowances for integration tests.
-#![allow(clippy::unwrap_used, clippy::panic)]
 //! Scope query visibility + filter composition across index overlays.
 //!
 //! [INV-COORDINATE-IS-LOGICAL-STREAM] `Region::scope(...)` returns only events whose
@@ -202,10 +200,9 @@ fn bounded_scope_cursor_skips_hidden_gap_and_reaches_later_visible_event() {
         .collect();
     fence.cancel().expect("cancel visibility fence");
     for ticket in hidden_tickets {
-        let err = match writer_reply(ticket.receiver(), "writer ticket") {
-            Ok(_) => panic!("PROPERTY: cancelled fence ticket must not resolve as visible success"),
-            Err(err) => err,
-        };
+        let err = writer_reply(ticket.receiver(), "writer ticket")
+            .map(|_| ())
+            .expect_err("PROPERTY: cancelled fence ticket must not resolve as visible success");
         assert!(
             matches!(err, StoreError::VisibilityFenceCancelled),
             "PROPERTY: cancelled fence work must surface VisibilityFenceCancelled, got {err:?}"

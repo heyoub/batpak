@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; tests in tests/segment_scan_hardening.rs rely on expect/panic on unreachable failures; clippy::unwrap_used and clippy::panic are the standard harness allowances for integration tests.
-#![allow(clippy::unwrap_used, clippy::panic)]
 //! PROVES: a cold-start frame scan over a FULLY-READ committed segment fails
 //! closed on metadata/CRC corruption inside committed frames — bad-CRC staged
 //! batch items, CRC-valid-but-undecodable MessagePack, a zero batch-begin
@@ -262,10 +260,9 @@ fn valid_crc_unreadable_frame_metadata_fails_closed() {
         |_payload| raw_msgpack_frame(&[0xC1]),
     );
 
-    let err = match Store::open(config(&dir)) {
-        Ok(_) => panic!("PROPERTY: CRC-valid unreadable committed metadata must fail closed"),
-        Err(err) => err,
-    };
+    let err = Store::open(config(&dir))
+        .map(|_| ())
+        .expect_err("PROPERTY: CRC-valid unreadable committed metadata must fail closed");
     assert!(
         matches!(err, StoreError::CorruptSegment { .. }),
         "PROPERTY: CRC-valid unreadable committed metadata must surface as corrupt segment; got {err:?}"
@@ -326,12 +323,9 @@ fn invalid_batch_begin_count_fails_closed_on_reopen() {
         },
     );
 
-    let err = match Store::open(config(&dir)) {
-        Ok(_) => {
-            panic!("PROPERTY: a SYSTEM_BATCH_BEGIN with count 0 must fail closed during reopen")
-        }
-        Err(err) => err,
-    };
+    let err = Store::open(config(&dir))
+        .map(|_| ())
+        .expect_err("PROPERTY: a SYSTEM_BATCH_BEGIN with count 0 must fail closed during reopen");
     assert!(
         matches!(
             err,
@@ -363,12 +357,9 @@ fn missing_hash_chain_for_data_frame_fails_closed_on_reopen() {
         },
     );
 
-    let err = match Store::open(config(&dir)) {
-        Ok(_) => panic!(
-            "PROPERTY: a persisted data frame without hash_chain must fail closed during reopen"
-        ),
-        Err(err) => err,
-    };
+    let err = Store::open(config(&dir)).map(|_| ()).expect_err(
+        "PROPERTY: a persisted data frame without hash_chain must fail closed during reopen",
+    );
     assert!(
         matches!(
             err,
@@ -420,10 +411,9 @@ fn corruption_inside_committed_batch_fails_closed() {
     let seg = segment_path(&dir);
     corrupt_second_staged_batch_item_crc(&seg);
 
-    let err = match Store::open(config(&dir)) {
-        Ok(_) => panic!("PROPERTY: corrupted committed batch payload must fail closed"),
-        Err(err) => err,
-    };
+    let err = Store::open(config(&dir))
+        .map(|_| ())
+        .expect_err("PROPERTY: corrupted committed batch payload must fail closed");
     assert!(
         matches!(err, StoreError::CrcMismatch { .. }),
         "PROPERTY: corrupted committed batch payload must surface as CRC mismatch; got {err:?}"

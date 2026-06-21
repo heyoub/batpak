@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; tests in tests/segment_scan_hardening_frame_bounds.rs rely on expect/panic on unreachable failures; clippy::unwrap_used and clippy::panic are the standard harness allowances for integration tests.
-#![allow(clippy::unwrap_used, clippy::panic)]
 //! PROVES: the cold-start frame scan stays bounded and panic-free against
 //! frame-length and footer-boundary pathologies — a u32::MAX frame header on
 //! the tail stops the scan while preserving earlier frames, the same length in
@@ -208,12 +206,9 @@ fn non_tail_pathological_frame_length_fails_closed_on_reopen() {
     );
     poison_first_frame_length_past_max(&segments[0]);
 
-    let err = match Store::open(config(&dir).with_segment_max_bytes(512)) {
-        Ok(_) => {
-            panic!("PROPERTY: non-tail impossible frame length must fail closed during reopen")
-        }
-        Err(err) => err,
-    };
+    let err = Store::open(config(&dir).with_segment_max_bytes(512))
+        .map(|_| ())
+        .expect_err("PROPERTY: non-tail impossible frame length must fail closed during reopen");
 
     assert!(
         matches!(

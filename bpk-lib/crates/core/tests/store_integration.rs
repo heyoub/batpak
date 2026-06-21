@@ -1,5 +1,3 @@
-// justifies: INV-CONCURRENCY-SCHEDULE-PROOF; integration tests in tests/store_integration.rs spawn concurrent writer threads via std::thread::spawn and pass borrows shaped by the fixture's generic helpers.
-#![allow(clippy::disallowed_methods, clippy::needless_borrows_for_generic_args)]
 //! Integration tests for Store lifecycle.
 //! Append/get/query, segment rotation, cold start index rebuild, concurrent r/w.
 //!

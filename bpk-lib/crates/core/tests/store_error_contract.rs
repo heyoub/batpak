@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; this contract-table harness uses panic! to make variant/source drift fail loudly and locally.
-#![allow(clippy::panic)]
 //! PROVES: domain-class `StoreError` variants and the coordinate/IO conversion
 //! routes preserve handling class, source forwarding, and `Display` fields.
 //! CATCHES: drift where a domain-fault `StoreError` arm or a `From` conversion
@@ -334,10 +332,12 @@ fn coordinate_and_io_conversion_preserve_store_error_routing() {
 
     let empty_entity = Coordinate::new("", "scope").expect_err("empty entity should be rejected");
     let routed = StoreError::from(empty_entity.clone());
+    assert!(
+        matches!(routed, StoreError::Coordinate(_)),
+        "COORDINATE ROUTING DRIFT: EmptyEntity should stay wrapped in StoreError::Coordinate"
+    );
     let StoreError::Coordinate(inner) = routed else {
-        panic!(
-            "COORDINATE ROUTING DRIFT: EmptyEntity should stay wrapped in StoreError::Coordinate"
-        );
+        unreachable!("matched StoreError::Coordinate above")
     };
     assert_eq!(
         inner, empty_entity,
@@ -351,8 +351,12 @@ fn coordinate_and_io_conversion_preserve_store_error_routing() {
 
     let io_error = io::Error::new(io::ErrorKind::TimedOut, "fsync timed out");
     let routed = StoreError::from(io_error);
+    assert!(
+        matches!(routed, StoreError::Io(_)),
+        "IO ROUTING DRIFT: std::io::Error should stay wrapped in StoreError::Io"
+    );
     let StoreError::Io(source) = routed else {
-        panic!("IO ROUTING DRIFT: std::io::Error should stay wrapped in StoreError::Io");
+        unreachable!("matched StoreError::Io above")
     };
     assert_eq!(source.kind(), io::ErrorKind::TimedOut);
 }

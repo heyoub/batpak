@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; this contract-table harness uses panic! to make variant/source drift fail loudly and locally.
-#![allow(clippy::panic)]
 //! PROVES: operational `StoreError` variants preserve their downstream handling
 //! class (retryable vs fail-closed), source forwarding, and `Display` fields.
 //! CATCHES: drift where a retryable or fail-closed `StoreError` arm drops

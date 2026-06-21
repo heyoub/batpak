@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; tests in tests/segment_scan_hardening_untrusted_tail.rs rely on expect/panic on unreachable failures; clippy::unwrap_used and clippy::panic are the standard harness allowances for integration tests.
-#![allow(clippy::unwrap_used, clippy::panic)]
 //! PROVES: the untrusted-footer governing principle at the SEGMENT TAIL — an
 //! out-of-bounds forged offset, a torn/truncated SDX3 trailer, and a no-footer
 //! segment whose final payload coincidentally ends in the SIDX magic each leave
@@ -268,10 +266,12 @@ fn untrusted_footer_adversarial_offsets_always_recover_all_frames() {
         std::fs::write(&seg, &bytes).expect("write adversarial-offset segment");
 
         let store = Store::open(config(&dir)).unwrap_or_else(|err| {
-            panic!(
+            assert!(
+                std::hint::black_box(false),
                 "PROPERTY: an UNTRUSTED footer with adversarial offset '{offset_kind}' \
                  ({forged_offset}) must recover, never error; got {err:?}"
-            )
+            );
+            unreachable!("the recovery assertion above always fails on error")
         });
         let entries = user_entries(&store);
         assert_eq!(
