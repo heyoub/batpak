@@ -113,7 +113,7 @@ fn admit_one(
     let enforcement = backend.classify(&requirement, profile);
     match enforcement {
         Enforcement::Enforced | Enforcement::Mediated => Ok(AdmittedRequirement {
-            mechanism: mechanism_for(backend.id(), &requirement, enforcement),
+            mechanism: mechanism_for(&backend.id(), &requirement, enforcement),
             requirement,
             enforcement,
         }),
@@ -130,7 +130,7 @@ fn admit_one(
 /// the mechanism reflects exactly what it does (host launch + stdio wiring with
 /// no confinement). Real backends record their concrete primitive here.
 fn mechanism_for(
-    backend: BackendId,
+    backend: &BackendId,
     requirement: &BoundaryRequirement,
     enforcement: Enforcement,
 ) -> String {
@@ -147,9 +147,9 @@ fn mechanism_for(
     format!("{backend}:{primitive}:{enforcement:?}")
 }
 
-/// Canonical plan identity: hash of the plan core (backend + snapshot + admitted
-/// + workload + budgets + evidence). Sorts the admitted set by requirement so
-/// the digest is stable regardless of admission order.
+/// Canonical plan identity: hash of the plan core (backend, snapshot, admitted,
+/// workload, budgets, evidence). Sorts the admitted set by requirement so the
+/// digest is stable regardless of admission order.
 fn compute_plan_id(
     backend: BackendId,
     snapshot: &BackendProfileSnapshot,

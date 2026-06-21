@@ -1,6 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; the frozen-decode goldens assert via
-// panic and emit a stderr warning when GOLDEN_UPDATE appends a new fixture.
-#![allow(clippy::panic, clippy::print_stderr)]
 //! Frozen v1 goldens for bvisor's three 0xE event payloads.
 //!
 //! PROVES: INV-EVENT-PAYLOAD-DECODE-BACKCOMPAT for `BoundaryPlanEvent`
@@ -66,7 +63,7 @@ fn hex_decode(s: &str) -> Vec<u8> {
 /// `expected` (only under the `GOLDEN_UPDATE` sentinel); if it is PRESENT it is
 /// read, decoded with the current decoder, and asserted equal to `expected` —
 /// the real proof that the v1-on-disk bytes still decode into the current type.
-fn assert_frozen_decode<T>(fixture: &str, expected: &T)
+fn assert_frozen_decode<T>(fixture: &str, expected: &T) -> Result<(), String>
 where
     T: EventPayload + DeserializeOwned + PartialEq + std::fmt::Debug,
 {
@@ -74,32 +71,35 @@ where
     let updating = std::env::var("GOLDEN_UPDATE").as_deref() == Ok("I_KNOW_WHAT_IM_DOING");
 
     if !path.exists() {
-        assert!(
-            updating,
-            "frozen payload fixture {} not found. To create it (append-only), run \
-             GOLDEN_UPDATE=I_KNOW_WHAT_IM_DOING cargo test -p bvisor --test frozen_goldens",
-            path.display()
-        );
-        let bytes = canonical::to_bytes(expected).expect("encode fixture payload");
-        std::fs::create_dir_all(payloads_dir()).expect("create payloads dir");
-        std::fs::write(&path, hex_encode(&bytes)).expect("write frozen fixture");
-        eprintln!(
-            "⚠ GOLDEN_UPDATE: wrote NEW frozen payload fixture {} (append-only; existing \
-             fixtures are never overwritten). Inspect the diff before committing.",
-            path.display()
-        );
-        return;
+        if !updating {
+            return Err(format!(
+                "frozen payload fixture {} not found. To create it (append-only), run \
+                 GOLDEN_UPDATE=I_KNOW_WHAT_IM_DOING cargo test -p bvisor --test frozen_goldens",
+                path.display()
+            ));
+        }
+        let bytes =
+            canonical::to_bytes(expected).map_err(|e| format!("encode fixture payload: {e}"))?;
+        std::fs::create_dir_all(payloads_dir()).map_err(|e| format!("create payloads dir: {e}"))?;
+        std::fs::write(&path, hex_encode(&bytes))
+            .map_err(|e| format!("write frozen fixture: {e}"))?;
+        // GOLDEN_UPDATE append path: the new fixture file is the artifact; inspect
+        // the diff before committing. (No stderr print — print_stderr is denied.)
+        return Ok(());
     }
 
-    let bytes = hex_decode(&std::fs::read_to_string(&path).expect("read frozen fixture"));
+    let raw = std::fs::read_to_string(&path).map_err(|e| format!("read frozen fixture: {e}"))?;
+    let bytes = hex_decode(&raw);
     let decoded: T = canonical::from_bytes(&bytes)
-        .unwrap_or_else(|e| panic!("frozen fixture {fixture} failed current decode: {e}"));
-    assert_eq!(
-        &decoded, expected,
-        "SCHEMA DRIFT: frozen fixture {fixture} decoded to a different value than expected. \
-         If the change is intentional and non-additive, bump the payload version, add an Upcast, \
-         and freeze a __vN+1 fixture — do not edit this one."
-    );
+        .map_err(|e| format!("frozen fixture {fixture} failed current decode: {e}"))?;
+    if &decoded != expected {
+        return Err(format!(
+            "SCHEMA DRIFT: frozen fixture {fixture} decoded to a different value than expected. \
+             If the change is intentional and non-additive, bump the payload version, add an \
+             Upcast, and freeze a __vN+1 fixture — do not edit this one."
+        ));
+    }
+    Ok(())
 }
 
 // ─── Deterministic, host-independent representative instances ────────────────
@@ -185,27 +185,27 @@ fn sample_report() -> BoundaryReport {
 // ─── Frozen-decode proofs ───────────────────────────────────────────────────
 
 #[test]
-fn boundary_plan_event_v1_still_decodes() {
+fn boundary_plan_event_v1_still_decodes() -> Result<(), String> {
     assert_frozen_decode::<BoundaryPlanEvent>(
         "e_001__v1.hex",
         &BoundaryPlanEvent {
             plan: sample_plan(),
         },
-    );
+    )
 }
 
 #[test]
-fn boundary_report_event_v1_still_decodes() {
+fn boundary_report_event_v1_still_decodes() -> Result<(), String> {
     assert_frozen_decode::<BoundaryReportEvent>(
         "e_002__v1.hex",
         &BoundaryReportEvent {
             report: sample_report(),
         },
-    );
+    )
 }
 
 #[test]
-fn boundary_recovery_event_v1_still_decodes() {
+fn boundary_recovery_event_v1_still_decodes() -> Result<(), String> {
     assert_frozen_decode::<BoundaryRecoveryEvent>(
         "e_003__v1.hex",
         &BoundaryRecoveryEvent {
@@ -222,7 +222,7 @@ fn boundary_recovery_event_v1_still_decodes() {
                 },
             ],
         },
-    );
+    )
 }
 
 #[test]

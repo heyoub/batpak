@@ -1,7 +1,6 @@
 //! C0 contract suite: fail-closed planning, sealed reports, deterministic
 //! profile derivation, and 0xE event round-trips — all against the honest
 //! [`InertBackend`].
-#![allow(clippy::panic)]
 
 use bvisor::{
     Backend, BackendRegistry, BoundaryPlanEvent, BoundaryPlanner, BoundaryRecoveryEvent,
@@ -51,16 +50,10 @@ fn plan_fails_closed_on_required_confinement() {
     let err = planner
         .plan(&spec, &inert_id())
         .expect_err("inert must refuse real filesystem confinement");
-    match err {
-        PlanError::Unsupported { backend, .. } => {
-            assert_eq!(
-                backend,
-                inert_id(),
-                "the refusal must name the inert backend"
-            );
-        }
-        other => panic!("expected Unsupported, got {other:?}"),
-    }
+    assert!(
+        matches!(&err, PlanError::Unsupported { backend, .. } if *backend == inert_id()),
+        "expected Unsupported naming the inert backend, got {err:?}"
+    );
 }
 
 // (b) a zero-confinement spec (just LaunchWorkload + CaptureStreams) on Inert
