@@ -1,14 +1,14 @@
-//! Wire payload and `to_core()` mapping tests for `hbat::evidence`.
+//! Wire payload and `to_core()` mapping tests for `refbat::evidence`.
 
 use anyhow::Result;
 use batpak::store::{ChainWalkStartRef, Freshness};
-use hbat::evidence::{
+use refbat::evidence::{
     ChainWalkEvidenceAck, ChainWalkEvidenceRequest, EvidenceRequestError, ProjectionRunEvidenceAck,
     ProjectionRunEvidenceRequest, ReadWalkEvidenceAck, ReadWalkEvidenceRequest,
     StoreResourceEvidenceAck, StoreResourceEvidenceRequest, EVIDENCE_MAX_LIMIT,
     EVIDENCE_READ_WALK_PROOF_MAX_LIMIT,
 };
-use hbat::EventPayloadFixture;
+use refbat::EventPayloadFixture;
 
 #[test]
 fn chain_walk_request_fixture_roundtrips() -> Result<()> {

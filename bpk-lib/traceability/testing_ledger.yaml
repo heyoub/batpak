@@ -903,7 +903,7 @@
   mutation_delta: unmeasured
   blind_spots: >
     Phase 1 freezes fixtures for batpak core's own versioned test kinds and a
-    plain v1 kind; the hbat manifest payloads carry FROZEN_FIXTURE_DEBT and gain
+    plain v1 kind; the refbat manifest payloads carry FROZEN_FIXTURE_DEBT and gain
     fixtures in Phase 2. The structural frozen-fixture lint is warn-first this
     minor and flips to hard-fail once the debt is burned down.
 

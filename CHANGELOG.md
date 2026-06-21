@@ -30,7 +30,7 @@ All notable changes to this project will be documented in this file.
   version runs a registered `Upcast` chain (in-memory over `rmpv::Value`, never
   rewriting stored bytes); a newer version is a hard `FutureVersion` error.
   Append-only frozen-bytes decode fixtures plus a structural lint back the
-  back-compat guarantee. The hbat manifest is now `manifestVersion` 2 with a
+  back-compat guarantee. The refbat manifest is now `manifestVersion` 2 with a
   per-event `payloadVersion`, and the TypeScript client decodes newer payload
   versions tolerantly. See EVENTS.md ("Schema Evolution").
 - Durable idempotency (0.8.3): `AppendOptions::with_idempotency(key)` is now a
@@ -94,10 +94,10 @@ All notable changes to this project will be documented in this file.
   is now diff-scoped (`--in-diff`) and a non-blocking `coverage-baseline` CI job
   was added.
 - Synced factory docs with the full-system README: INTEGRATION/MODEL/BATTERIES/
-  CIRCUITS composition language, `hbat` crate README, bpk-ts test counts, and
+  CIRCUITS composition language, `refbat` crate README, bpk-ts test counts, and
   README artifact tally (119).
 - Rewrote the root README as a full-system front door: battery family table
-  (`batpak`, `syncbat`, `netbat`, `hbat`, `@batpak/sdk`), Rust and TypeScript
+  (`batpak`, `syncbat`, `netbat`, `refbat`, `@batpak/sdk`), Rust and TypeScript
   entry paths, multi-journal composition, and per-journal HLC frontier language.
 - Expanded `evidence.read_walk` wire request to full `Region` selector parity
   (`kind_category`/`kind_type_id`, `start_clock`/`end_clock`, `max_stale_ms`);
@@ -136,7 +136,7 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 - Surfaced the substrate evidence-report family on the `NETBAT/1` wire as four
-  domain-neutral `evidence.*` operations in `hbat`, each a thin adapter over an
+  domain-neutral `evidence.*` operations in `refbat`, each a thin adapter over an
   existing `Store` evidence method (no new analysis):
   `evidence.chain_walk` (`Store::chain_walk_evidence`),
   `evidence.store_resource` (`Store::store_resource_evidence_report`),
@@ -147,7 +147,7 @@ All notable changes to this project will be documented in this file.
 - Added `batpak::store::ProjectionEvidenceRegistry`, a domain-neutral, embedder-
   populated dispatch from a projection id to a type-erased
   `Store::project_run_evidence` runner. It backs `evidence.projection_run` while
-  keeping the wire surface free of domain types; the reference `hbat` host
+  keeping the wire surface free of domain types; the reference `refbat` host
   registers no projections and answers every projection id with an
   unknown-projection error.
 - Extended the TypeScript codegen with the `option<blake3-32-hex>` field token.

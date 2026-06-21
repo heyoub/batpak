@@ -1,4 +1,4 @@
-// justifies: INV-ALLOW-IS-DESIGN; hbat reference host intentionally emits machine-readable rendezvous lines and local status messages.
+// justifies: INV-ALLOW-IS-DESIGN; refbat reference host intentionally emits machine-readable rendezvous lines and local status messages.
 #![allow(clippy::print_stdout, clippy::print_stderr)]
 
 use std::io::Write as _;
@@ -14,17 +14,17 @@ use netbat::{serve_tcp_listener, IoTimeouts, ShutdownHandle, TcpServerConfig};
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "hbat",
+    name = "refbat",
     about = "Reference NETBAT/1 host for the batpak family. Not a product daemon.",
     long_about = None,
 )]
 struct Cli {
     #[command(subcommand)]
-    command: HbatCommand,
+    command: RefbatCommand,
 }
 
 #[derive(Subcommand, Debug)]
-enum HbatCommand {
+enum RefbatCommand {
     /// Start a NETBAT/1 TCP listener with the bundled reference operations.
     Serve(ServeArgs),
 }
@@ -58,18 +58,18 @@ fn main() -> Result<()> {
     install_tracing_subscriber();
     let cli = Cli::parse();
     match cli.command {
-        HbatCommand::Serve(args) => serve(&args),
+        RefbatCommand::Serve(args) => serve(&args),
     }
 }
 
 /// Install a fmt subscriber that respects `RUST_LOG`. Defaults to
-/// `info` for syncbat/netbat/hbat when `RUST_LOG` is unset so live
+/// `info` for syncbat/netbat/refbat when `RUST_LOG` is unset so live
 /// operations always emit at least the dispatch + accept-loop spans.
 fn install_tracing_subscriber() {
     use tracing_subscriber::filter::EnvFilter;
     use tracing_subscriber::fmt;
     let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info,hbat=info,netbat=info,syncbat=info"));
+        .unwrap_or_else(|_| EnvFilter::new("info,refbat=info,netbat=info,syncbat=info"));
     let _ = fmt()
         .with_env_filter(filter)
         .with_target(true)
@@ -77,7 +77,7 @@ fn install_tracing_subscriber() {
         .try_init();
 }
 
-#[tracing::instrument(name = "hbat.serve", skip_all, fields(store = %args.store.display(), tcp = %args.tcp))]
+#[tracing::instrument(name = "refbat.serve", skip_all, fields(store = %args.store.display(), tcp = %args.tcp))]
 fn serve(args: &ServeArgs) -> Result<()> {
     let addr: SocketAddr = args
         .tcp
@@ -86,12 +86,12 @@ fn serve(args: &ServeArgs) -> Result<()> {
 
     if !args.allow_non_loopback && !is_loopback(addr.ip()) {
         return Err(anyhow!(
-            "hbat refuses to bind to non-loopback address {addr}. Pass --allow-non-loopback to override (reference host only; not for production exposure)."
+            "refbat refuses to bind to non-loopback address {addr}. Pass --allow-non-loopback to override (reference host only; not for production exposure)."
         ));
     }
     if args.allow_non_loopback && !is_loopback(addr.ip()) {
         eprintln!(
-            "hbat: warning: binding non-loopback address {addr}; reference host only, not a product daemon"
+            "refbat: warning: binding non-loopback address {addr}; reference host only, not a product daemon"
         );
     }
 
@@ -136,7 +136,7 @@ fn serve(args: &ServeArgs) -> Result<()> {
         .context("netbat::serve_tcp_listener")?;
 
     eprintln!(
-        "hbat: shutdown — accepted={}, served={}, failed={}, shutdown_requested={}",
+        "refbat: shutdown — accepted={}, served={}, failed={}, shutdown_requested={}",
         stats.accepted_connections,
         stats.served_requests,
         stats.failed_requests,
@@ -152,68 +152,71 @@ fn is_loopback(ip: IpAddr) -> bool {
 fn build_core(store: &Arc<batpak::store::Store>) -> Result<syncbat::Core> {
     let mut builder = syncbat::Core::builder();
     builder
-        .register(hbat::HEARTBEAT_DESCRIPTOR.clone(), hbat::HeartbeatHandler)
+        .register(
+            refbat::HEARTBEAT_DESCRIPTOR.clone(),
+            refbat::HeartbeatHandler,
+        )
         .map_err(|error| anyhow!("register system.heartbeat: {error}"))?;
     builder
         .register(
-            hbat::BANK_COMMIT_DESCRIPTOR.clone(),
-            hbat::BankCommitHandler {
+            refbat::BANK_COMMIT_DESCRIPTOR.clone(),
+            refbat::BankCommitHandler {
                 store: Arc::clone(store),
             },
         )
         .map_err(|error| anyhow!("register bank.commit: {error}"))?;
     builder
         .register(
-            hbat::EVENT_GET_DESCRIPTOR.clone(),
-            hbat::EventGetHandler {
+            refbat::EVENT_GET_DESCRIPTOR.clone(),
+            refbat::EventGetHandler {
                 store: Arc::clone(store),
             },
         )
         .map_err(|error| anyhow!("register event.get: {error}"))?;
     builder
         .register(
-            hbat::EVENT_QUERY_DESCRIPTOR.clone(),
-            hbat::EventQueryHandler {
+            refbat::EVENT_QUERY_DESCRIPTOR.clone(),
+            refbat::EventQueryHandler {
                 store: Arc::clone(store),
             },
         )
         .map_err(|error| anyhow!("register event.query: {error}"))?;
     builder
         .register(
-            hbat::RECEIPT_VERIFY_DESCRIPTOR.clone(),
-            hbat::ReceiptVerifyHandler {
+            refbat::RECEIPT_VERIFY_DESCRIPTOR.clone(),
+            refbat::ReceiptVerifyHandler {
                 store: Arc::clone(store),
             },
         )
         .map_err(|error| anyhow!("register receipt.verify: {error}"))?;
     builder
         .register(
-            hbat::EVENT_WALK_DESCRIPTOR.clone(),
-            hbat::EventWalkHandler {
+            refbat::EVENT_WALK_DESCRIPTOR.clone(),
+            refbat::EventWalkHandler {
                 store: Arc::clone(store),
             },
         )
         .map_err(|error| anyhow!("register event.walk: {error}"))?;
     builder
         .register(
-            hbat::EVIDENCE_CHAIN_WALK_DESCRIPTOR.clone(),
-            hbat::ChainWalkEvidenceHandler {
+            refbat::EVIDENCE_CHAIN_WALK_DESCRIPTOR.clone(),
+            refbat::ChainWalkEvidenceHandler {
                 store: Arc::clone(store),
             },
         )
         .map_err(|error| anyhow!("register evidence.chain_walk: {error}"))?;
     builder
         .register(
-            hbat::EVIDENCE_STORE_RESOURCE_DESCRIPTOR.clone(),
-            hbat::StoreResourceEvidenceHandler {
+            refbat::EVIDENCE_STORE_RESOURCE_DESCRIPTOR.clone(),
+            refbat::StoreResourceEvidenceHandler {
                 store: Arc::clone(store),
             },
         )
         .map_err(|error| anyhow!("register evidence.store_resource: {error}"))?;
     builder
         .register(
-            hbat::EVIDENCE_READ_WALK_DESCRIPTOR.clone(),
-            hbat::ReadWalkEvidenceHandler {
+            refbat::EVIDENCE_READ_WALK_DESCRIPTOR.clone(),
+            refbat::ReadWalkEvidenceHandler {
                 store: Arc::clone(store),
             },
         )
@@ -225,8 +228,8 @@ fn build_core(store: &Arc<batpak::store::Store>) -> Result<syncbat::Core> {
     let projection_registry = Arc::new(batpak::store::ProjectionEvidenceRegistry::new());
     builder
         .register(
-            hbat::EVIDENCE_PROJECTION_RUN_DESCRIPTOR.clone(),
-            hbat::ProjectionRunEvidenceHandler {
+            refbat::EVIDENCE_PROJECTION_RUN_DESCRIPTOR.clone(),
+            refbat::ProjectionRunEvidenceHandler {
                 store: Arc::clone(store),
                 registry: Arc::clone(&projection_registry),
             },

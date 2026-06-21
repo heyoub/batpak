@@ -760,25 +760,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "841d1cc9bed7f9236f321df977030373f4a4163ae1a7dbfe1a51a2c1a51d9100"
 
 [[package]]
-name = "hbat"
-version = "0.8.3"
-dependencies = [
- "anyhow",
- "batpak",
- "clap",
- "criterion",
- "ctrlc",
- "inventory",
- "netbat",
- "serde",
- "serde_json",
- "syncbat",
- "tempfile",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "heck"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1231,6 +1212,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed2bf2547551a7053d6fdfafda3f938979645c44812fbfcda098faae3f1a362d"
 dependencies = [
  "bitflags",
+]
+
+[[package]]
+name = "refbat"
+version = "0.8.3"
+dependencies = [
+ "anyhow",
+ "batpak",
+ "clap",
+ "criterion",
+ "ctrlc",
+ "inventory",
+ "netbat",
+ "serde",
+ "serde_json",
+ "syncbat",
+ "tempfile",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -2049,9 +2049,9 @@ dependencies = [
  "batpak",
  "clap",
  "crc32fast",
- "hbat",
  "memmap2",
  "pulldown-cmark",
+ "refbat",
  "serde",
  "serde_json",
  "sha2",

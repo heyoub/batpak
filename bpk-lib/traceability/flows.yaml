@@ -27,21 +27,21 @@
     - ART-NETBAT-TESTS
     - ART-NETBAT-WIRE-GOLDENS
     - ART-ADR-NETBAT-CONTRACT
-- id: FLOW-HBAT-EVENT-QUERY
+- id: FLOW-REFBAT-EVENT-QUERY
   summary: event.query accepts bounded domain-neutral filters, validates kind and coordinate axes, pages visible Store index entries in global_sequence order through Store::query_entries_after, and returns metadata-only summaries; callers fetch full payloads with event.get and decode domain envelopes above batpak.
   artifacts:
-    - ART-HBAT-SOURCE
-    - ART-HBAT-TESTS
-    - ART-HBAT-MANIFEST-EXPORT
+    - ART-REFBAT-SOURCE
+    - ART-REFBAT-TESTS
+    - ART-REFBAT-MANIFEST-EXPORT
     - ART-STORE-QUERY-TRAVERSAL
     - ART-STORE-QUERY-TRAVERSAL-TESTS
     - ART-DX-DOCS
-- id: FLOW-HBAT-EVIDENCE-OPS
+- id: FLOW-REFBAT-EVIDENCE-OPS
   summary: evidence.* ops adapt Store evidence reports to NETBAT/1 with canonical report_hex + body_hash identity and bounded Region selectors.
   artifacts:
-    - ART-HBAT-SOURCE
-    - ART-HBAT-TESTS
-    - ART-HBAT-MANIFEST-EXPORT
+    - ART-REFBAT-SOURCE
+    - ART-REFBAT-TESTS
+    - ART-REFBAT-MANIFEST-EXPORT
     - ART-STORE-EVIDENCE-REPORTS
     - ART-BPK-TS-MANIFEST
     - ART-BPK-TS-CODEGEN
@@ -235,5 +235,5 @@
   artifacts:
     - ART-DX-PRODUCT-DOCTRINE-AUDIT
     - ART-DX-DOCS
-    - ART-HBAT-SOURCE
+    - ART-REFBAT-SOURCE
     - ART-STORE-QUERY-TRAVERSAL

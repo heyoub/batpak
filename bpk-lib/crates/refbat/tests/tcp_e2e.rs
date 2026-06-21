@@ -1,13 +1,13 @@
-//! End-to-end TCP integration tests for the `hbat` binary.
+//! End-to-end TCP integration tests for the `refbat` binary.
 //!
-//! These tests spawn the actual `hbat` binary as a subprocess, parse
+//! These tests spawn the actual `refbat` binary as a subprocess, parse
 //! the `HBAT_READY {…}` rendezvous line from its stdout, connect over
 //! TCP, and drive the ten-op NETBAT/1 manifest the reference host
 //! advertises. They close the cross-language parity loop on the Rust
 //! side the same way `bpk-ts/examples/heartbeat-spike` does on the TS
 //! side.
 //!
-//! Audit reference: maturity-gap audit flagged that hbat had NO
+//! Audit reference: maturity-gap audit flagged that refbat had NO
 //! integration tests (only inline #[test] fns) — this file fills that
 //! hole.
 //!
@@ -38,7 +38,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
 use batpak::EventPayload;
-use hbat::{
+use refbat::{
     bank::{
         BankCommitAck, BankCommitRequest, EventGetAck, EventGetRequest, EventQueryAck,
         EventQueryRequest,
@@ -54,21 +54,21 @@ use hbat::{
     EventPayloadFixture,
 };
 
-const HBAT_BIN: &str = env!("CARGO_BIN_EXE_hbat");
+const REFBAT_BIN: &str = env!("CARGO_BIN_EXE_refbat");
 const READY_PREFIX: &str = "HBAT_READY ";
 
-/// Spawned hbat process holding the temp dir alive for the duration
+/// Spawned refbat process holding the temp dir alive for the duration
 /// of the test.
-struct HbatProcess {
+struct RefbatProcess {
     child: Child,
     port: u16,
     _tempdir: tempfile::TempDir,
 }
 
-impl HbatProcess {
+impl RefbatProcess {
     fn spawn() -> Result<Self> {
         let tempdir = tempfile::TempDir::new().context("temp dir")?;
-        let mut child = Command::new(HBAT_BIN)
+        let mut child = Command::new(REFBAT_BIN)
             .arg("serve")
             .arg("--store")
             .arg(tempdir.path())
@@ -78,7 +78,7 @@ impl HbatProcess {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .context("spawn hbat")?;
+            .context("spawn refbat")?;
 
         let stdout = child.stdout.take().context("stdout piped")?;
         let mut reader = BufReader::new(stdout);
@@ -94,7 +94,7 @@ impl HbatProcess {
             match reader.read_line(&mut ready_line) {
                 Ok(0) => {
                     let _ = child.kill();
-                    bail!("hbat closed stdout before printing HBAT_READY");
+                    bail!("refbat closed stdout before printing HBAT_READY");
                 }
                 Ok(_) => {
                     if ready_line.starts_with(READY_PREFIX) {
@@ -149,13 +149,13 @@ impl HbatProcess {
             }
         }
         bail!(
-            "failed to connect to hbat on 127.0.0.1:{}: {last_error:?}",
+            "failed to connect to refbat on 127.0.0.1:{}: {last_error:?}",
             self.port
         );
     }
 }
 
-impl Drop for HbatProcess {
+impl Drop for RefbatProcess {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
@@ -179,7 +179,7 @@ fn decode_response(stream: &mut TcpStream) -> Result<Vec<u8>> {
 }
 
 /// Send a NETBAT/1 CALL frame and return the raw response line including \n.
-fn call_one(host: &HbatProcess, op: &str, input: &[u8]) -> Result<Vec<u8>> {
+fn call_one(host: &RefbatProcess, op: &str, input: &[u8]) -> Result<Vec<u8>> {
     let mut stream = host.connect()?;
     let frame = netbat::encode_request(op, input);
     stream.write_all(&frame).context("write request")?;
@@ -226,7 +226,11 @@ fn parse_err(response: &[u8]) -> Result<(String, String)> {
     Ok((code, message))
 }
 
-fn commit_heartbeat_event(host: &HbatProcess, entity: &str, nonce: &str) -> Result<BankCommitAck> {
+fn commit_heartbeat_event(
+    host: &RefbatProcess,
+    entity: &str,
+    nonce: &str,
+) -> Result<BankCommitAck> {
     let original_payload = SystemHeartbeatRequest {
         nonce: nonce.to_owned(),
     };
@@ -249,7 +253,7 @@ fn commit_heartbeat_event(host: &HbatProcess, entity: &str, nonce: &str) -> Resu
 
 #[test]
 fn system_heartbeat_round_trips() -> Result<()> {
-    let host = HbatProcess::spawn()?;
+    let host = RefbatProcess::spawn()?;
     let request = SystemHeartbeatRequest {
         nonce: "tcp-e2e-heartbeat-001".to_owned(),
     };
@@ -264,7 +268,7 @@ fn system_heartbeat_round_trips() -> Result<()> {
 
 #[test]
 fn unknown_operation_returns_typed_err_with_utf8_message() -> Result<()> {
-    let host = HbatProcess::spawn()?;
+    let host = RefbatProcess::spawn()?;
     let response = call_one(&host, "system.heartbeat.nope", &[])?;
     let (code, message) = parse_err(&response)?;
     assert_eq!(code, "unknown_operation");
@@ -277,7 +281,7 @@ fn unknown_operation_returns_typed_err_with_utf8_message() -> Result<()> {
 
 #[test]
 fn bank_commit_then_event_get_recovers_canonical_bytes() -> Result<()> {
-    let host = HbatProcess::spawn()?;
+    let host = RefbatProcess::spawn()?;
 
     // Commit a heartbeat-request typed event.
     let original_payload = SystemHeartbeatRequest {
@@ -338,7 +342,7 @@ fn bank_commit_then_event_get_recovers_canonical_bytes() -> Result<()> {
 
 #[test]
 fn bank_commit_then_event_query_pages_global_sequence_and_event_get_fetches() -> Result<()> {
-    let host = HbatProcess::spawn()?;
+    let host = RefbatProcess::spawn()?;
 
     let original_payload = SystemHeartbeatRequest {
         nonce: "tcp-e2e-event-query-001".to_owned(),
@@ -449,7 +453,7 @@ fn bank_commit_then_event_query_pages_global_sequence_and_event_get_fetches() ->
 
 #[test]
 fn event_query_rejects_zero_limit_over_tcp() -> Result<()> {
-    let host = HbatProcess::spawn()?;
+    let host = RefbatProcess::spawn()?;
 
     let request = EventQueryRequest {
         entity: None,
@@ -471,7 +475,7 @@ fn event_query_rejects_zero_limit_over_tcp() -> Result<()> {
 
 #[test]
 fn bank_commit_then_receipt_verify_accepts_ack_over_tcp() -> Result<()> {
-    let host = HbatProcess::spawn()?;
+    let host = RefbatProcess::spawn()?;
     let ack = commit_heartbeat_event(&host, "tcp:verify", "tcp-e2e-receipt-verify-001")?;
 
     let request = ReceiptVerifyRequest {
@@ -497,7 +501,7 @@ fn bank_commit_then_receipt_verify_accepts_ack_over_tcp() -> Result<()> {
 
 #[test]
 fn receipt_verify_rejects_tampered_fields_over_tcp() -> Result<()> {
-    let host = HbatProcess::spawn()?;
+    let host = RefbatProcess::spawn()?;
     let ack = commit_heartbeat_event(&host, "tcp:verify-tamper", "tcp-e2e-receipt-verify-002")?;
 
     let request = ReceiptVerifyRequest {
@@ -523,7 +527,7 @@ fn receipt_verify_rejects_tampered_fields_over_tcp() -> Result<()> {
 
 #[test]
 fn event_walk_rejects_zero_limit_over_tcp() -> Result<()> {
-    let host = HbatProcess::spawn()?;
+    let host = RefbatProcess::spawn()?;
     let request = EventWalkRequest {
         event_id_hex: "0123456789abcdef0123456789abcdef".to_owned(),
         limit: 0,
@@ -540,7 +544,7 @@ fn event_walk_rejects_zero_limit_over_tcp() -> Result<()> {
 
 #[test]
 fn bank_commit_then_event_walk_then_event_get_works_over_tcp() -> Result<()> {
-    let host = HbatProcess::spawn()?;
+    let host = RefbatProcess::spawn()?;
     let first = commit_heartbeat_event(&host, "tcp:walk", "tcp-e2e-walk-001")?;
     let second = commit_heartbeat_event(&host, "tcp:walk", "tcp-e2e-walk-002")?;
     let third = commit_heartbeat_event(&host, "tcp:walk", "tcp-e2e-walk-003")?;
@@ -582,7 +586,7 @@ fn fixture_payloads_round_trip_over_tcp() -> Result<()> {
     // Sanity for the manifest fixtures themselves — proves the bytes
     // we publish in batpak.manifest.json (which the TS SDK consumes
     // for its parity tests) work end-to-end through the live wire.
-    let host = HbatProcess::spawn()?;
+    let host = RefbatProcess::spawn()?;
 
     let heartbeat_fixture = SystemHeartbeatRequest::fixture_value();
     let heartbeat_bytes = batpak::encoding::to_bytes(&heartbeat_fixture)?;
@@ -595,7 +599,7 @@ fn fixture_payloads_round_trip_over_tcp() -> Result<()> {
 
 #[test]
 fn bank_commit_rejects_reserved_kind_category_over_tcp() -> Result<()> {
-    let host = HbatProcess::spawn()?;
+    let host = RefbatProcess::spawn()?;
     // Build a malformed BankCommitRequest that the substrate must
     // reject. kind_category=0 is the reserved system category and
     // EventKind::try_custom refuses it.
@@ -623,7 +627,7 @@ fn bank_commit_rejects_reserved_kind_category_over_tcp() -> Result<()> {
 
 #[test]
 fn malformed_frame_returns_typed_err() -> Result<()> {
-    let host = HbatProcess::spawn()?;
+    let host = RefbatProcess::spawn()?;
     let mut stream = host.connect()?;
     // Garbage line with no protocol prefix.
     stream
@@ -647,14 +651,14 @@ fn malformed_frame_returns_typed_err() -> Result<()> {
 #[test]
 fn ready_payload_carries_addr_port_and_protocol() -> Result<()> {
     // Spawn-and-introspect smoke test: just ensure HBAT_READY parses.
-    let host = HbatProcess::spawn()?;
+    let host = RefbatProcess::spawn()?;
     assert!(host.port() > 0);
     Ok(())
 }
 
 #[test]
 fn evidence_chain_walk_round_trips_over_tcp() -> Result<()> {
-    let host = HbatProcess::spawn()?;
+    let host = RefbatProcess::spawn()?;
 
     // Commit two events to the same entity so a chain exists to walk.
     let payload = SystemHeartbeatRequest {
@@ -708,7 +712,7 @@ fn assert_evidence_report_identity(ack_report_hex: &str, ack_body_hash_hex: &str
 
 #[test]
 fn evidence_store_resource_round_trips_over_tcp() -> Result<()> {
-    let host = HbatProcess::spawn()?;
+    let host = RefbatProcess::spawn()?;
     let request = StoreResourceEvidenceRequest::fixture_value();
     let response = call_one(
         &host,
@@ -722,7 +726,7 @@ fn evidence_store_resource_round_trips_over_tcp() -> Result<()> {
 
 #[test]
 fn evidence_read_walk_round_trips_over_tcp() -> Result<()> {
-    let host = HbatProcess::spawn()?;
+    let host = RefbatProcess::spawn()?;
 
     let payload = SystemHeartbeatRequest {
         nonce: "tcp-e2e-evidence-read-walk".to_owned(),
@@ -763,7 +767,7 @@ fn evidence_read_walk_round_trips_over_tcp() -> Result<()> {
 
 #[test]
 fn evidence_read_walk_truncated_over_tcp() -> Result<()> {
-    let host = HbatProcess::spawn()?;
+    let host = RefbatProcess::spawn()?;
 
     let payload = SystemHeartbeatRequest {
         nonce: "tcp-e2e-evidence-read-walk-trunc".to_owned(),
@@ -810,7 +814,7 @@ fn evidence_read_walk_truncated_over_tcp() -> Result<()> {
 fn evidence_projection_run_unknown_projection_over_tcp() -> Result<()> {
     // The reference host is domain-neutral: it advertises evidence.projection_run
     // but registers no projections, so every projection id is unknown.
-    let host = HbatProcess::spawn()?;
+    let host = RefbatProcess::spawn()?;
     let request = ProjectionRunEvidenceRequest {
         projection: "any.projection".to_owned(),
         entity: "tcp:e2e-evidence".to_owned(),

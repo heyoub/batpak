@@ -46,7 +46,7 @@ The factory uses tiered verification so humans, agents, and CI all speak the sam
 | Tier | Human face | Policy face (xtask) | Blocks merge? | Meaning |
 | --- | --- | --- | --- | --- |
 | Inspect | `just inspect` | structural, boundary, architecture IR, ast-grep | Optional/path-based | Fast shape checks before expensive proof. |
-| Host profile | `just host-dev` | `host-dev` | No | Local end-to-end host proof: manifest → codegen → TS build/test → hbat boot → heartbeat-spike → deterministic regeneration. |
+| Host profile | `just host-dev` | `host-dev` | No | Local end-to-end host proof: manifest → codegen → TS build/test → refbat boot → heartbeat-spike → deterministic regeneration. |
 | Factory ledger | `just ledger-list`, `just ledger-run -- …`, `just ledger-run-gate …` | `factory-ledger` | No | Opt-in local proof trail: command events plus optional named gate completions under `target/factory-ledger/store/`. Gates are proof markers, not CI enforcement. |
 | Context packet | `just context` | `context` | No | Opt-in portable-context handoff artifact under `target/context/latest.{json,md}`; captures git state, stack hints, ledger tail, boundary reminders. |
 | Doctrine audit | traceability/docs artifact | traceability metadata | No | Records the substrate/product semantic firewall; not a CI or release gate unless promoted to an explicit command later. |
@@ -116,7 +116,7 @@ feels special; tighten the existing ones instead.
 
 ## Terminal Manifest
 
-The hbat manifest must expose the ten reference NETBAT operations — the six
+The refbat manifest must expose the ten reference NETBAT operations — the six
 core ops plus the four domain-neutral `evidence.*` ops:
 
 - `system.heartbeat`

@@ -145,7 +145,7 @@ fn workspace_manifest_inputs(repo_root: &Path) -> BTreeSet<PathBuf> {
         "crates/core",
         "crates/syncbat",
         "crates/netbat",
-        "crates/hbat",
+        "crates/refbat",
         "crates/macros",
         "crates/macros-support",
         "crates/syncbat-macros",
@@ -256,113 +256,113 @@ struct FrozenFixtureDebt {
     target: &'static str,
 }
 
-/// Pre-seeded so Phase 1 lands green (warn-first). Every hbat manifest payload
+/// Pre-seeded so Phase 1 lands green (warn-first). Every refbat manifest payload
 /// is here; they gain frozen fixtures in Phase 2. batpak core's own typed kinds
 /// already have fixtures under `tests/golden/payloads/`, so they are NOT debted.
 const FROZEN_FIXTURE_DEBT: &[FrozenFixtureDebt] = &[
     FrozenFixtureDebt {
         type_name: "SystemHeartbeatRequest",
-        reason: "hbat manifest payload predates the frozen-decode fixture regime",
+        reason: "refbat manifest payload predates the frozen-decode fixture regime",
         target: "freeze a v1 fixture + frozen_decode test in Phase 2",
     },
     FrozenFixtureDebt {
         type_name: "SystemHeartbeatAck",
-        reason: "hbat manifest payload predates the frozen-decode fixture regime",
+        reason: "refbat manifest payload predates the frozen-decode fixture regime",
         target: "freeze a v1 fixture + frozen_decode test in Phase 2",
     },
     FrozenFixtureDebt {
         type_name: "BankCommitRequest",
-        reason: "hbat manifest payload predates the frozen-decode fixture regime",
+        reason: "refbat manifest payload predates the frozen-decode fixture regime",
         target: "freeze a v1 fixture + frozen_decode test in Phase 2",
     },
     FrozenFixtureDebt {
         type_name: "BankCommitAck",
-        reason: "hbat manifest payload predates the frozen-decode fixture regime",
+        reason: "refbat manifest payload predates the frozen-decode fixture regime",
         target: "freeze a v1 fixture + frozen_decode test in Phase 2",
     },
     FrozenFixtureDebt {
         type_name: "EventGetRequest",
-        reason: "hbat manifest payload predates the frozen-decode fixture regime",
+        reason: "refbat manifest payload predates the frozen-decode fixture regime",
         target: "freeze a v1 fixture + frozen_decode test in Phase 2",
     },
     FrozenFixtureDebt {
         type_name: "EventGetAck",
-        reason: "hbat manifest payload predates the frozen-decode fixture regime",
+        reason: "refbat manifest payload predates the frozen-decode fixture regime",
         target: "freeze a v1 fixture + frozen_decode test in Phase 2",
     },
     FrozenFixtureDebt {
         type_name: "EventQueryRequest",
-        reason: "hbat manifest payload predates the frozen-decode fixture regime",
+        reason: "refbat manifest payload predates the frozen-decode fixture regime",
         target: "freeze a v1 fixture + frozen_decode test in Phase 2",
     },
     FrozenFixtureDebt {
         type_name: "EventSummary",
-        reason: "hbat manifest payload predates the frozen-decode fixture regime",
+        reason: "refbat manifest payload predates the frozen-decode fixture regime",
         target: "freeze a v1 fixture + frozen_decode test in Phase 2",
     },
     FrozenFixtureDebt {
         type_name: "EventQueryAck",
-        reason: "hbat manifest payload predates the frozen-decode fixture regime",
+        reason: "refbat manifest payload predates the frozen-decode fixture regime",
         target: "freeze a v1 fixture + frozen_decode test in Phase 2",
     },
     FrozenFixtureDebt {
         type_name: "EventWalkRequest",
-        reason: "hbat manifest payload predates the frozen-decode fixture regime",
+        reason: "refbat manifest payload predates the frozen-decode fixture regime",
         target: "freeze a v1 fixture + frozen_decode test in Phase 2",
     },
     FrozenFixtureDebt {
         type_name: "EventWalkAck",
-        reason: "hbat manifest payload predates the frozen-decode fixture regime",
+        reason: "refbat manifest payload predates the frozen-decode fixture regime",
         target: "freeze a v1 fixture + frozen_decode test in Phase 2",
     },
     FrozenFixtureDebt {
         type_name: "ReceiptVerifyRequest",
-        reason: "hbat manifest payload predates the frozen-decode fixture regime",
+        reason: "refbat manifest payload predates the frozen-decode fixture regime",
         target: "freeze a v1 fixture + frozen_decode test in Phase 2",
     },
     FrozenFixtureDebt {
         type_name: "ReceiptVerifyAck",
-        reason: "hbat manifest payload predates the frozen-decode fixture regime",
+        reason: "refbat manifest payload predates the frozen-decode fixture regime",
         target: "freeze a v1 fixture + frozen_decode test in Phase 2",
     },
     FrozenFixtureDebt {
         type_name: "ChainWalkEvidenceRequest",
-        reason: "hbat manifest payload predates the frozen-decode fixture regime",
+        reason: "refbat manifest payload predates the frozen-decode fixture regime",
         target: "freeze a v1 fixture + frozen_decode test in Phase 2",
     },
     FrozenFixtureDebt {
         type_name: "ChainWalkEvidenceAck",
-        reason: "hbat manifest payload predates the frozen-decode fixture regime",
+        reason: "refbat manifest payload predates the frozen-decode fixture regime",
         target: "freeze a v1 fixture + frozen_decode test in Phase 2",
     },
     FrozenFixtureDebt {
         type_name: "StoreResourceEvidenceRequest",
-        reason: "hbat manifest payload predates the frozen-decode fixture regime",
+        reason: "refbat manifest payload predates the frozen-decode fixture regime",
         target: "freeze a v1 fixture + frozen_decode test in Phase 2",
     },
     FrozenFixtureDebt {
         type_name: "StoreResourceEvidenceAck",
-        reason: "hbat manifest payload predates the frozen-decode fixture regime",
+        reason: "refbat manifest payload predates the frozen-decode fixture regime",
         target: "freeze a v1 fixture + frozen_decode test in Phase 2",
     },
     FrozenFixtureDebt {
         type_name: "ReadWalkEvidenceRequest",
-        reason: "hbat manifest payload predates the frozen-decode fixture regime",
+        reason: "refbat manifest payload predates the frozen-decode fixture regime",
         target: "freeze a v1 fixture + frozen_decode test in Phase 2",
     },
     FrozenFixtureDebt {
         type_name: "ReadWalkEvidenceAck",
-        reason: "hbat manifest payload predates the frozen-decode fixture regime",
+        reason: "refbat manifest payload predates the frozen-decode fixture regime",
         target: "freeze a v1 fixture + frozen_decode test in Phase 2",
     },
     FrozenFixtureDebt {
         type_name: "ProjectionRunEvidenceRequest",
-        reason: "hbat manifest payload predates the frozen-decode fixture regime",
+        reason: "refbat manifest payload predates the frozen-decode fixture regime",
         target: "freeze a v1 fixture + frozen_decode test in Phase 2",
     },
     FrozenFixtureDebt {
         type_name: "ProjectionRunEvidenceAck",
-        reason: "hbat manifest payload predates the frozen-decode fixture regime",
+        reason: "refbat manifest payload predates the frozen-decode fixture regime",
         target: "freeze a v1 fixture + frozen_decode test in Phase 2",
     },
 ];

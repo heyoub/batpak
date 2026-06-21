@@ -14,7 +14,7 @@
 /// the wire → `None`); a plain `Option<T>` stays required-but-nullable.
 /// See [`crate::manifest::FieldDescriptor::optional`].
 #[macro_export]
-macro_rules! hbat_event_descriptor {
+macro_rules! refbat_event_descriptor {
     (
         type = $ty:ty,
         schema_ref = $schema_ref:expr,
@@ -29,7 +29,7 @@ macro_rules! hbat_event_descriptor {
                 kind_bits: <$ty>::KIND.as_raw_u16(),
                 payload_version:
                     <$ty as batpak::event::EventPayload>::PAYLOAD_VERSION,
-                fields: $crate::hbat_event_descriptor!(
+                fields: $crate::refbat_event_descriptor!(
                     @fields_inner
                     0usize,
                     [ $( ( $($field_spec)+ ) ),* ],
@@ -62,7 +62,7 @@ macro_rules! hbat_event_descriptor {
         [ ($wire:literal, $token:literal, $optional:literal) $(, ( $($rest:tt)+ ) )* $(,)? ],
         ACC: [ $( $acc:expr ),* $(,)? ]
     ) => {
-        $crate::hbat_event_descriptor!(
+        $crate::refbat_event_descriptor!(
             @fields_inner
             ($idx + 1usize),
             [ $( ( $($rest)+ ) ),* ],
@@ -85,7 +85,7 @@ macro_rules! hbat_event_descriptor {
         [ ($wire:literal, $token:literal) $(, ( $($rest:tt)+ ) )* $(,)? ],
         ACC: [ $( $acc:expr ),* $(,)? ]
     ) => {
-        $crate::hbat_event_descriptor!(
+        $crate::refbat_event_descriptor!(
             @fields_inner
             ($idx + 1usize),
             [ $( ( $($rest)+ ) ),* ],

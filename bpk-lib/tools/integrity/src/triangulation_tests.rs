@@ -60,8 +60,8 @@ fn engine_ignores_single_oracle_groups() {
 #[test]
 fn tarjan_clean_dag_has_no_cycles() {
     let mut g = CrateGraph::default();
-    g.add_edge("hbat", "syncbat");
-    g.add_edge("hbat", "core");
+    g.add_edge("refbat", "syncbat");
+    g.add_edge("refbat", "core");
     g.add_edge("syncbat", "core");
     g.add_edge("netbat", "syncbat");
     assert!(g.cycles().is_empty(), "a DAG must report zero cycles");
@@ -108,10 +108,10 @@ fn graph_oracles_disagree_when_edge_sets_differ() {
     // on the edge-signature predicate — the whole-graph cross-check, not just
     // the boolean verdict.
     let mut a = CrateGraph::default();
-    a.add_edge("hbat", "syncbat");
+    a.add_edge("refbat", "syncbat");
     let mut b = CrateGraph::default();
-    b.add_edge("hbat", "syncbat");
-    b.add_edge("hbat", "core");
+    b.add_edge("refbat", "syncbat");
+    b.add_edge("refbat", "core");
     let pool = vec![
         claim(
             "cargo-metadata",

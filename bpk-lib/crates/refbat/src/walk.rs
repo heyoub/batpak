@@ -77,7 +77,7 @@ impl EventPayloadFixture for EventWalkAck {
     }
 }
 
-crate::hbat_event_descriptor! {
+crate::refbat_event_descriptor! {
     type = EventWalkRequest,
     schema_ref = EVENT_WALK_INPUT_SCHEMA_REF,
     ts_name = "EventWalkRequest",
@@ -87,7 +87,7 @@ crate::hbat_event_descriptor! {
     ],
 }
 
-crate::hbat_event_descriptor! {
+crate::refbat_event_descriptor! {
     type = EventWalkAck,
     schema_ref = EVENT_WALK_OUTPUT_SCHEMA_REF,
     ts_name = "EventWalkAck",

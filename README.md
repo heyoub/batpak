@@ -13,7 +13,7 @@ The Free Battery Factory makes batteries for software boundaries.
 typed payloads, Blake3 hash-chained ancestry, verifiable receipts, deterministic
 replay, and derived projections. The **family** around it wires that journal into
 larger hosts — `syncbat` for runtime dispatch, `netbat` for NETBAT/1 network
-terminals, `hbat` as the reference host, and `@batpak/sdk` for TypeScript clients
+terminals, `refbat` as the reference host, and `@batpak/sdk` for TypeScript clients
 on the other side of the wire. Circuits connect batteries without one owning
 another's state.
 
@@ -32,7 +32,7 @@ placement, runtime integration, network boundaries, and application authority.
 | Core journal | `batpak` | Append-only store, HLC frontier, receipts, replay, projections |
 | Runtime dispatch | `syncbat` | Operation descriptors, handler registration, runtime receipts |
 | Network terminal | `netbat` | NETBAT/1 frames, bounded request/response |
-| Reference host | `hbat` | Live operation handling (manifest-owned) |
+| Reference host | `refbat` | Live operation handling (manifest-owned) |
 | TypeScript clients | `@batpak/sdk` | Wire client, canonical codec, generated types |
 
 See [BATTERIES.md](BATTERIES.md) for the full battery map and
@@ -49,14 +49,14 @@ cargo add batpak
 ```
 
 **Door B — Networked host.** Install the TypeScript SDK and prove the live
-host loop against `hbat`:
+host loop against `refbat`:
 
 ```sh
 npm install @batpak/sdk
 just host-dev
 ```
 
-`just host-dev` exports the manifest, builds the workspace, boots `hbat` on an
+`just host-dev` exports the manifest, builds the workspace, boots `refbat` on an
 ephemeral store, and runs the heartbeat-spike through commit, query, and get.
 The ten reference NETBAT terminals — `bank.commit`, `event.query`, `event.get`,
 `receipt.verify`, `event.walk`, and the four `evidence.*` ops — are documented

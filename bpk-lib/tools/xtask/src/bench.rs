@@ -111,7 +111,7 @@ pub(crate) fn bench_targets(surface: BenchSurface) -> &'static [&'static str] {
 const FAMILY_BENCH_TARGETS: &[(&str, &[&str])] = &[
     ("syncbat", &["dispatch"]),
     ("netbat", &["boundary"]),
-    ("hbat", &["live_operations"]),
+    ("refbat", &["live_operations"]),
 ];
 
 fn family_bench_compile_args(
@@ -460,7 +460,7 @@ mod tests {
     #[test]
     fn family_bench_run_args_include_package_and_criterion_args() {
         let args = family_bench_run_args(
-            "hbat",
+            "refbat",
             &["live_operations"],
             &["--save-baseline".to_owned(), "windows-native-v3".to_owned()],
         );
@@ -469,7 +469,7 @@ mod tests {
             vec![
                 "bench",
                 "-p",
-                "hbat",
+                "refbat",
                 "--bench",
                 "live_operations",
                 "--",
@@ -502,12 +502,12 @@ mod tests {
                 include_str!("../../../crates/netbat/Cargo.toml"),
             ),
             (
-                "hbat",
+                "refbat",
                 FAMILY_BENCH_TARGETS
                     .iter()
-                    .find_map(|(name, benches)| (*name == "hbat").then_some(*benches))
-                    .expect("hbat family benches are wired"),
-                include_str!("../../../crates/hbat/Cargo.toml"),
+                    .find_map(|(name, benches)| (*name == "refbat").then_some(*benches))
+                    .expect("refbat family benches are wired"),
+                include_str!("../../../crates/refbat/Cargo.toml"),
             ),
         ] {
             let manifest: toml::Value = toml::from_str(manifest).expect("parse package manifest");

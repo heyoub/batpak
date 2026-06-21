@@ -37,7 +37,7 @@ terminals.
 - `evidence.store_resource` is the store-resource snapshot evidence terminal.
 - `evidence.read_walk` is the read-walk evidence report terminal.
 - `evidence.projection_run` is the projection-run evidence terminal. The
-  reference `hbat` host registers no projections, so this op is advertised on
+  reference `refbat` host registers no projections, so this op is advertised on
   the wire but answers with an unknown-projection handler error unless an
   embedder registers projections.
 
@@ -45,7 +45,7 @@ Push subscription is lossy awareness, not replay. Durable replay uses
 commit-order query pages, durable cursor pull surfaces, or projection-owned
 pull surfaces.
 
-Run `just host-dev` to prove the ten reference NETBAT operations through hbat
+Run `just host-dev` to prove the ten reference NETBAT operations through refbat
 and the TypeScript heartbeat-spike in one local motion.
 
 ## Terminal Versus Function

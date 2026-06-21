@@ -33,7 +33,7 @@ import {
 } from "@batpak/sdk";
 ```
 
-The reference host (`hbat`, in the main repository) exposes six core
+The reference host (`refbat`, in the main repository) exposes six core
 operations — `system.heartbeat`, `bank.commit`, `event.get`, `event.query`,
 `receipt.verify`, `event.walk` — plus four `evidence.*` report operations.
 Every payload round-trips through the same canonical bytes the Rust store

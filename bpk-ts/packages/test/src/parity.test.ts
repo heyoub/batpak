@@ -60,7 +60,7 @@ describe("manifest envelope", () => {
     }
   });
 
-  it("carries all reference hbat events", () => {
+  it("carries all reference refbat events", () => {
     const names = manifest.events.map((e) => e.name).sort();
     expect(names).toEqual(
       [
@@ -89,7 +89,7 @@ describe("manifest envelope", () => {
     );
   });
 
-  it("carries all reference hbat operations", () => {
+  it("carries all reference refbat operations", () => {
     const names = manifest.operations.map((o) => o.name).sort();
     expect(names).toEqual([
       "bank.commit",

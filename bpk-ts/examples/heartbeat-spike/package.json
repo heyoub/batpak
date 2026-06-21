@@ -2,7 +2,7 @@
   "name": "@batpak/example-heartbeat-spike",
   "version": "0.0.0",
   "private": true,
-  "description": "Phase 0 spike: boot hbat, send a system.heartbeat, decode the ack.",
+  "description": "Phase 0 spike: boot refbat, send a system.heartbeat, decode the ack.",
   "type": "module",
   "scripts": {
     "build": "tsc -b",

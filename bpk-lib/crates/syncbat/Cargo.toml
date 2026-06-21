@@ -20,7 +20,7 @@ batpak = { path = "../core", version = "0.8.3", default-features = false }
 serde = { version = "1", features = ["derive"] }
 syncbat-macros = { path = "../syncbat-macros", version = "0.8.3" }
 # `tracing` provides structured spans + events around dispatch.
-# Subscribers come from the binary (hbat or downstream); syncbat just
+# Subscribers come from the binary (refbat or downstream); syncbat just
 # emits. No runtime cost when no subscriber is installed.
 tracing = "0.1"
 

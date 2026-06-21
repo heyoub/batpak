@@ -1,11 +1,11 @@
 //! `cargo xtask export-ts-manifest` — render the BatPAK TypeScript SDK
-//! manifest by calling [`hbat::manifest::descriptors`] and wrapping the
+//! manifest by calling [`refbat::manifest::descriptors`] and wrapping the
 //! result with protocol-level metadata.
 //!
 //! The shape of the emitted JSON is the source-of-truth for the
 //! TypeScript codegen package. See the plan in
 //! `/root/.claude/plans/yes-this-is-the-warm-finch.md` and the contract
-//! documented at the top of `crates/hbat/src/manifest.rs`.
+//! documented at the top of `crates/refbat/src/manifest.rs`.
 
 use crate::ExportTsManifestArgs;
 use anyhow::{bail, Context, Result};
@@ -15,7 +15,7 @@ use std::fs;
 /// Manifest version emitted in the JSON envelope. Bumping this is a
 /// protocol-level change; the TypeScript codegen will refuse to consume
 /// an unsupported version.
-const MANIFEST_VERSION: u32 = hbat::manifest::MANIFEST_VERSION;
+const MANIFEST_VERSION: u32 = refbat::manifest::MANIFEST_VERSION;
 
 /// `rmp-serde` version that the substrate canonical encoder is locked to.
 /// Mirrors the `=` pin in `bpk-lib/crates/core/Cargo.toml`. Bumping this
@@ -42,7 +42,7 @@ struct BatpakTsManifest {
     batpak_version: &'static str,
     canonical_encoding: CanonicalEncoding,
     #[serde(flatten)]
-    snapshot: hbat::manifest::ManifestSnapshot,
+    snapshot: refbat::manifest::ManifestSnapshot,
 }
 
 #[derive(Serialize)]
@@ -61,7 +61,7 @@ pub(crate) fn export_ts_manifest(args: &ExportTsManifestArgs) -> Result<()> {
             kind: "named-field-msgpack",
             rmp_serde_version: RMP_SERDE_VERSION,
         },
-        snapshot: hbat::manifest::descriptors().context("build hbat manifest snapshot")?,
+        snapshot: refbat::manifest::descriptors().context("build refbat manifest snapshot")?,
     };
 
     let json =
@@ -114,7 +114,7 @@ mod tests {
                 kind: "named-field-msgpack",
                 rmp_serde_version: RMP_SERDE_VERSION,
             },
-            snapshot: hbat::manifest::descriptors().expect("build hbat manifest snapshot"),
+            snapshot: refbat::manifest::descriptors().expect("build refbat manifest snapshot"),
         };
         let json = serde_json::to_value(&manifest).expect("serialize manifest");
 
@@ -126,7 +126,7 @@ mod tests {
             json["canonicalEncoding"]["rmpSerdeVersion"],
             RMP_SERDE_VERSION
         );
-        // Current hbat ships 21 events (the six core ops' req/ack/summary
+        // Current refbat ships 21 events (the six core ops' req/ack/summary
         // events plus the four evidence.* req/ack pairs) and 10 operations.
         assert_eq!(
             json["events"].as_array().expect("events is an array").len(),

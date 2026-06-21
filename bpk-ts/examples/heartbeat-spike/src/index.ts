@@ -1,11 +1,11 @@
 /**
  * 0.8.3 live integration spike.
  *
- * Boots against a running `hbat` on `--port N` and exercises the live
+ * Boots against a running `refbat` on `--port N` and exercises the live
  * calibration path: heartbeat + commit/query/get + typed ERR. The full
  * ten-operation NETBAT/1 host profile also includes `receipt.verify`,
  * `event.walk`, and the four `evidence.*` ops, which are covered by
- * manifest/parity and hbat tests.
+ * manifest/parity and refbat tests.
  *
  *   1. `system.heartbeat`  — proves the wire is open.
  *   2. `bank.commit`        — appends a typed event, returns AppendReceipt.
@@ -15,9 +15,9 @@
  *                              original Rust-typed struct via Effect 4.
  *   5. Error path           — unknown_operation returns typed NetbatError.
  *
- * Boot `hbat` separately:
+ * Boot `refbat` separately:
  *
- *   cargo run -p hbat -- serve --store $(mktemp -d) --tcp 127.0.0.1:0 --print-port
+ *   cargo run -p refbat -- serve --store $(mktemp -d) --tcp 127.0.0.1:0 --print-port
  *
  * Parse the `HBAT_READY {"port": N, ...}` line on stdout, then invoke:
  *
@@ -72,7 +72,7 @@ function parseArgs(argv: readonly string[]): CliArgs {
     }
   }
   if (port === null) {
-    throw new Error("--port is required (read it from the hbat HBAT_READY line)");
+    throw new Error("--port is required (read it from the refbat HBAT_READY line)");
   }
   return { port, host };
 }

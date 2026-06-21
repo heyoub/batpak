@@ -23,7 +23,7 @@ function optionalNullable<S extends Schema.Top>(inner: S) {
   );
 }
 
-/** Source: hbat::heartbeat::SystemHeartbeatRequest; category=15, typeId=2561 */
+/** Source: refbat::heartbeat::SystemHeartbeatRequest; category=15, typeId=2561 */
 export const SystemHeartbeatRequest = Schema.Struct({
   nonce: Schema.String,
 });
@@ -36,7 +36,7 @@ export const SYSTEM_HEARTBEAT_REQUEST_FIXTURE: SystemHeartbeatRequest = {
   "nonce": "heartbeat-fixture-0001"
 } as unknown as SystemHeartbeatRequest;
 
-/** Source: hbat::heartbeat::SystemHeartbeatAck; category=15, typeId=2562 */
+/** Source: refbat::heartbeat::SystemHeartbeatAck; category=15, typeId=2562 */
 export const SystemHeartbeatAck = Schema.Struct({
   nonce: Schema.String,
   server_ts_ms: Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 9007199254740991 }))),
@@ -51,7 +51,7 @@ export const SYSTEM_HEARTBEAT_ACK_FIXTURE: SystemHeartbeatAck = {
   "server_ts_ms": 1700000000000
 } as unknown as SystemHeartbeatAck;
 
-/** Source: hbat::bank::BankCommitRequest; category=15, typeId=2576 */
+/** Source: refbat::bank::BankCommitRequest; category=15, typeId=2576 */
 export const BankCommitRequest = Schema.Struct({
   entity: Schema.String,
   scope: Schema.String,
@@ -74,7 +74,7 @@ export const BANK_COMMIT_REQUEST_FIXTURE: BankCommitRequest = {
   "idempotency_key_hex": null
 } as unknown as BankCommitRequest;
 
-/** Source: hbat::bank::BankCommitAck; category=15, typeId=2577 */
+/** Source: refbat::bank::BankCommitAck; category=15, typeId=2577 */
 export const BankCommitAck = Schema.Struct({
   event_id_hex: Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{32}$/u)), Schema.brand("EventIdHex")),
   sequence: Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 9007199254740991 }))),
@@ -99,7 +99,7 @@ export const BANK_COMMIT_ACK_FIXTURE: BankCommitAck = {
   }
 } as unknown as BankCommitAck;
 
-/** Source: hbat::bank::EventGetRequest; category=15, typeId=2592 */
+/** Source: refbat::bank::EventGetRequest; category=15, typeId=2592 */
 export const EventGetRequest = Schema.Struct({
   event_id_hex: Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{32}$/u)), Schema.brand("EventIdHex")),
 });
@@ -112,7 +112,7 @@ export const EVENT_GET_REQUEST_FIXTURE: EventGetRequest = {
   "event_id_hex": "0123456789abcdef0123456789abcdef"
 } as unknown as EventGetRequest;
 
-/** Source: hbat::bank::EventGetAck; category=15, typeId=2593 */
+/** Source: refbat::bank::EventGetAck; category=15, typeId=2593 */
 export const EventGetAck = Schema.Struct({
   event_id_hex: Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{32}$/u)), Schema.brand("EventIdHex")),
   sequence: Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 9007199254740991 }))),
@@ -145,7 +145,7 @@ export const EVENT_GET_ACK_FIXTURE: EventGetAck = {
   "content_hash_hex": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 } as unknown as EventGetAck;
 
-/** Source: hbat::bank::EventQueryRequest; category=15, typeId=2594 */
+/** Source: refbat::bank::EventQueryRequest; category=15, typeId=2594 */
 export const EventQueryRequest = Schema.Struct({
   entity: Schema.NullOr(Schema.String),
   scope: Schema.NullOr(Schema.String),
@@ -168,7 +168,7 @@ export const EVENT_QUERY_REQUEST_FIXTURE: EventQueryRequest = {
   "limit": 2
 } as unknown as EventQueryRequest;
 
-/** Source: hbat::bank::EventSummary; category=15, typeId=2595 */
+/** Source: refbat::bank::EventSummary; category=15, typeId=2595 */
 export const EventSummary = Schema.Struct({
   event_id_hex: Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{32}$/u)), Schema.brand("EventIdHex")),
   global_sequence: Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 9007199254740991 }))),
@@ -201,7 +201,7 @@ export const EVENT_SUMMARY_FIXTURE: EventSummary = {
   "content_hash_hex": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 } as unknown as EventSummary;
 
-/** Source: hbat::bank::EventQueryAck; category=15, typeId=2596 */
+/** Source: refbat::bank::EventQueryAck; category=15, typeId=2596 */
 export const EventQueryAck = Schema.Struct({
   entries: Schema.Array(EventSummary),
   next_after_global_sequence: Schema.NullOr(Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 9007199254740991 })))),
@@ -232,7 +232,7 @@ export const EVENT_QUERY_ACK_FIXTURE: EventQueryAck = {
   "truncated": false
 } as unknown as EventQueryAck;
 
-/** Source: hbat::receipt::ReceiptVerifyRequest; category=15, typeId=2608 */
+/** Source: refbat::receipt::ReceiptVerifyRequest; category=15, typeId=2608 */
 export const ReceiptVerifyRequest = Schema.Struct({
   event_id_hex: Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{32}$/u)), Schema.brand("EventIdHex")),
   sequence: Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 9007199254740991 }))),
@@ -255,7 +255,7 @@ export const RECEIPT_VERIFY_REQUEST_FIXTURE: ReceiptVerifyRequest = {
   "extensions": {}
 } as unknown as ReceiptVerifyRequest;
 
-/** Source: hbat::receipt::ReceiptVerifyAck; category=15, typeId=2609 */
+/** Source: refbat::receipt::ReceiptVerifyAck; category=15, typeId=2609 */
 export const ReceiptVerifyAck = Schema.Struct({
   valid: Schema.Boolean,
   outcome: Schema.String,
@@ -272,7 +272,7 @@ export const RECEIPT_VERIFY_ACK_FIXTURE: ReceiptVerifyAck = {
   "reason_code": null
 } as unknown as ReceiptVerifyAck;
 
-/** Source: hbat::walk::EventWalkRequest; category=15, typeId=2624 */
+/** Source: refbat::walk::EventWalkRequest; category=15, typeId=2624 */
 export const EventWalkRequest = Schema.Struct({
   event_id_hex: Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{32}$/u)), Schema.brand("EventIdHex")),
   limit: Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 1, maximum: 9007199254740991 }))),
@@ -287,7 +287,7 @@ export const EVENT_WALK_REQUEST_FIXTURE: EventWalkRequest = {
   "limit": 3
 } as unknown as EventWalkRequest;
 
-/** Source: hbat::walk::EventWalkAck; category=15, typeId=2625 */
+/** Source: refbat::walk::EventWalkAck; category=15, typeId=2625 */
 export const EventWalkAck = Schema.Struct({
   entries: Schema.Array(EventSummary),
 });
@@ -314,7 +314,7 @@ export const EVENT_WALK_ACK_FIXTURE: EventWalkAck = {
   ]
 } as unknown as EventWalkAck;
 
-/** Source: hbat::evidence::ChainWalkEvidenceRequest; category=15, typeId=2640 */
+/** Source: refbat::evidence::ChainWalkEvidenceRequest; category=15, typeId=2640 */
 export const ChainWalkEvidenceRequest = Schema.Struct({
   start_event_id_hex: Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{32}$/u)), Schema.brand("EventIdHex")),
   start_expected_hash_hex: Schema.NullOr(Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{64}$/u)), Schema.brand("ContentHashHex"))),
@@ -333,7 +333,7 @@ export const CHAIN_WALK_EVIDENCE_REQUEST_FIXTURE: ChainWalkEvidenceRequest = {
   "limit": 16
 } as unknown as ChainWalkEvidenceRequest;
 
-/** Source: hbat::evidence::ChainWalkEvidenceAck; category=15, typeId=2641 */
+/** Source: refbat::evidence::ChainWalkEvidenceAck; category=15, typeId=2641 */
 export const ChainWalkEvidenceAck = Schema.Struct({
   report_hex: Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]*$/u)), Schema.brand("HexBlob")),
   body_hash_hex: Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{64}$/u)), Schema.brand("ContentHashHex")),
@@ -350,7 +350,7 @@ export const CHAIN_WALK_EVIDENCE_ACK_FIXTURE: ChainWalkEvidenceAck = {
   "truncated": false
 } as unknown as ChainWalkEvidenceAck;
 
-/** Source: hbat::evidence::StoreResourceEvidenceRequest; category=15, typeId=2656 */
+/** Source: refbat::evidence::StoreResourceEvidenceRequest; category=15, typeId=2656 */
 export const StoreResourceEvidenceRequest = Schema.Struct({
 });
 // eslint-disable-next-line @typescript-eslint/no-redeclare
@@ -360,7 +360,7 @@ export const STORE_RESOURCE_EVIDENCE_REQUEST_PAYLOAD_VERSION = 1 as const;
 export const STORE_RESOURCE_EVIDENCE_REQUEST_GOLDEN_HEX = "80" as const;
 export const STORE_RESOURCE_EVIDENCE_REQUEST_FIXTURE: StoreResourceEvidenceRequest = {} as unknown as StoreResourceEvidenceRequest;
 
-/** Source: hbat::evidence::StoreResourceEvidenceAck; category=15, typeId=2657 */
+/** Source: refbat::evidence::StoreResourceEvidenceAck; category=15, typeId=2657 */
 export const StoreResourceEvidenceAck = Schema.Struct({
   report_hex: Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]*$/u)), Schema.brand("HexBlob")),
   body_hash_hex: Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{64}$/u)), Schema.brand("ContentHashHex")),
@@ -377,7 +377,7 @@ export const STORE_RESOURCE_EVIDENCE_ACK_FIXTURE: StoreResourceEvidenceAck = {
   "truncated": false
 } as unknown as StoreResourceEvidenceAck;
 
-/** Source: hbat::evidence::ReadWalkEvidenceRequest; category=15, typeId=2672 */
+/** Source: refbat::evidence::ReadWalkEvidenceRequest; category=15, typeId=2672 */
 export const ReadWalkEvidenceRequest = Schema.Struct({
   entity: Schema.NullOr(Schema.String),
   scope: Schema.NullOr(Schema.String),
@@ -406,7 +406,7 @@ export const READ_WALK_EVIDENCE_REQUEST_FIXTURE: ReadWalkEvidenceRequest = {
   "max_stale_ms": null
 } as unknown as ReadWalkEvidenceRequest;
 
-/** Source: hbat::evidence::ReadWalkEvidenceAck; category=15, typeId=2673 */
+/** Source: refbat::evidence::ReadWalkEvidenceAck; category=15, typeId=2673 */
 export const ReadWalkEvidenceAck = Schema.Struct({
   report_hex: Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]*$/u)), Schema.brand("HexBlob")),
   body_hash_hex: Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{64}$/u)), Schema.brand("ContentHashHex")),
@@ -423,7 +423,7 @@ export const READ_WALK_EVIDENCE_ACK_FIXTURE: ReadWalkEvidenceAck = {
   "truncated": false
 } as unknown as ReadWalkEvidenceAck;
 
-/** Source: hbat::evidence::ProjectionRunEvidenceRequest; category=15, typeId=2688 */
+/** Source: refbat::evidence::ProjectionRunEvidenceRequest; category=15, typeId=2688 */
 export const ProjectionRunEvidenceRequest = Schema.Struct({
   projection: Schema.String,
   entity: Schema.String,
@@ -440,7 +440,7 @@ export const PROJECTION_RUN_EVIDENCE_REQUEST_FIXTURE: ProjectionRunEvidenceReque
   "max_stale_ms": null
 } as unknown as ProjectionRunEvidenceRequest;
 
-/** Source: hbat::evidence::ProjectionRunEvidenceAck; category=15, typeId=2689 */
+/** Source: refbat::evidence::ProjectionRunEvidenceAck; category=15, typeId=2689 */
 export const ProjectionRunEvidenceAck = Schema.Struct({
   report_hex: Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]*$/u)), Schema.brand("HexBlob")),
   body_hash_hex: Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{64}$/u)), Schema.brand("ContentHashHex")),

@@ -51,7 +51,7 @@ pub(crate) fn wire_axes_to_region(
     end_clock: Option<u32>,
 ) -> Result<Region, WireRegionError> {
     if let Some(entity) = entity {
-        Coordinate::new(entity, "hbat-wire-region").map_err(|error| {
+        Coordinate::new(entity, "refbat-wire-region").map_err(|error| {
             WireRegionError::Coordinate {
                 field: "entity",
                 message: error.to_string(),
@@ -59,7 +59,7 @@ pub(crate) fn wire_axes_to_region(
         })?;
     }
     if let Some(scope) = scope {
-        Coordinate::new("hbat:wire-region", scope).map_err(|error| {
+        Coordinate::new("refbat:wire-region", scope).map_err(|error| {
             WireRegionError::Coordinate {
                 field: "scope",
                 message: error.to_string(),

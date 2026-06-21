@@ -34,7 +34,7 @@ event.walk         — bounded hash-chain ancestry from a starting event_id;
 evidence.chain_walk — chain-walk evidence report over bounded hash-chain ancestry.
 evidence.store_resource — point-in-time store resource evidence snapshot.
 evidence.read_walk — read-walk evidence report with full Region selector axes.
-evidence.projection_run — projection-run evidence; reference hbat registers
+evidence.projection_run — projection-run evidence; reference refbat registers
                      no projections, so unknown projection ids return a
                      handler error unless an embedder registers projections.
 ```
@@ -44,7 +44,7 @@ Authority direction:
 ```
 Rust #[derive(EventPayload)]
   +
-hbat::manifest::descriptors()   (substrate-owned registry)
+refbat::manifest::descriptors()   (substrate-owned registry)
   ↓
 cargo xtask export-ts-manifest
   ↓
@@ -59,7 +59,7 @@ bpk-ts/batpak.manifest.json
 
 ## npm
 
-For apps talking to a NETBAT/1 host (for example `hbat`), install one package:
+For apps talking to a NETBAT/1 host (for example `refbat`), install one package:
 
 ```sh
 npm install @batpak/sdk
@@ -106,7 +106,7 @@ packages/
   test/       End-to-end parity harness across every event and every
               operation in the manifest. 127 parity assertions.
 examples/
-  heartbeat-spike/  Calibration pulse against hbat:
+  heartbeat-spike/  Calibration pulse against refbat:
                     - sends system.heartbeat
                     - sends bank.commit (appends a typed event)
                     - sends event.query (pages metadata by coordinate and
@@ -117,25 +117,25 @@ examples/
                       ERR-frame path.
                     - note: receipt.verify, event.walk, and the four
                       evidence.* ops round out the ten-op host profile and
-                      are covered by manifest/parity tests and hbat tests.
-  audit-loop/       Living loop against hbat:
+                      are covered by manifest/parity tests and refbat tests.
+  audit-loop/       Living loop against refbat:
                     - commits app-owned events (kind_category=0x01)
                     - rebuilds an ordered audit view from event.query +
                       event.get (not commit acks)
-                    - supports --replay-only after hbat restart on the
+                    - supports --replay-only after refbat restart on the
                       same store directory
 ```
 
-## hbat — the reference host
+## refbat — the reference host
 
-`hbat` (in `bpk-lib/crates/hbat/`) registers all ten reference operations against
+`refbat` (in `bpk-lib/crates/refbat/`) registers all ten reference operations against
 a real BatPAK store. `publish = false`. Loopback-only by default; bind
 to a non-loopback interface only with `--allow-non-loopback`.
 
 Boot:
 
 ```sh
-cargo run -p hbat -- serve \
+cargo run -p refbat -- serve \
   --store $(mktemp -d) \
   --tcp 127.0.0.1:0 \
   --print-port
@@ -164,10 +164,10 @@ pnpm -w test          # 220 tests across all packages
 
 # Live integration:
 cd ../bpk-lib
-cargo run -p hbat -- serve --store "$(mktemp -d)" --tcp 127.0.0.1:0 --print-port \
-  > /tmp/hbat-ready.txt 2>&1 &
+cargo run -p refbat -- serve --store "$(mktemp -d)" --tcp 127.0.0.1:0 --print-port \
+  > /tmp/refbat-ready.txt 2>&1 &
 sleep 0.5
-PORT=$(node -e 'const j=require("fs").readFileSync("/tmp/hbat-ready.txt","utf-8").trim();process.stdout.write(String(JSON.parse(j.replace(/^HBAT_READY /,"")).port))')
+PORT=$(node -e 'const j=require("fs").readFileSync("/tmp/refbat-ready.txt","utf-8").trim();process.stdout.write(String(JSON.parse(j.replace(/^HBAT_READY /,"")).port))')
 
 cd ../bpk-ts
 node examples/heartbeat-spike/dist/index.js --port "$PORT"

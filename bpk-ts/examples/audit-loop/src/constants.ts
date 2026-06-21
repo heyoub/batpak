@@ -1,4 +1,4 @@
-/** App/demo-owned kind namespace — not hbat profile category 0x0F. */
+/** App/demo-owned kind namespace — not refbat profile category 0x0F. */
 export const DEMO_KIND_CATEGORY = 0x01;
 
 export const DEMO_ENTITY = "demo:audit";

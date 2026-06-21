@@ -390,13 +390,13 @@ impl EventPayloadFixture for EventQueryAck {
 
 // ─── Manifest registry submissions ──────────────────────────────────────────
 //
-// Payload descriptors submit via `hbat_event_descriptor!`. Field rows mirror
+// Payload descriptors submit via `refbat_event_descriptor!`. Field rows mirror
 // serde declaration order on the structs above.
 
 // payload_hex is a free-form hex blob (variable length, lowercase).
 // Branded as HexBlob on the TS side so callers cannot accidentally pass
 // an event_id or content hash here.
-crate::hbat_event_descriptor! {
+crate::refbat_event_descriptor! {
     type = BankCommitRequest,
     schema_ref = BANK_COMMIT_INPUT_SCHEMA_REF,
     ts_name = "BankCommitRequest",
@@ -415,7 +415,7 @@ crate::hbat_event_descriptor! {
 
 // Branded hex tokens prevent passing the wrong hex shape (e.g. a content
 // hash where an event id was expected).
-crate::hbat_event_descriptor! {
+crate::refbat_event_descriptor! {
     type = BankCommitAck,
     schema_ref = BANK_COMMIT_OUTPUT_SCHEMA_REF,
     ts_name = "BankCommitAck",
@@ -429,7 +429,7 @@ crate::hbat_event_descriptor! {
     ],
 }
 
-crate::hbat_event_descriptor! {
+crate::refbat_event_descriptor! {
     type = EventGetRequest,
     schema_ref = EVENT_GET_INPUT_SCHEMA_REF,
     ts_name = "EventGetRequest",
@@ -438,7 +438,7 @@ crate::hbat_event_descriptor! {
     ],
 }
 
-crate::hbat_event_descriptor! {
+crate::refbat_event_descriptor! {
     type = EventGetAck,
     schema_ref = EVENT_GET_OUTPUT_SCHEMA_REF,
     ts_name = "EventGetAck",
@@ -457,7 +457,7 @@ crate::hbat_event_descriptor! {
     ],
 }
 
-crate::hbat_event_descriptor! {
+crate::refbat_event_descriptor! {
     type = EventQueryRequest,
     schema_ref = EVENT_QUERY_INPUT_SCHEMA_REF,
     ts_name = "EventQueryRequest",
@@ -471,7 +471,7 @@ crate::hbat_event_descriptor! {
     ],
 }
 
-crate::hbat_event_descriptor! {
+crate::refbat_event_descriptor! {
     type = EventSummary,
     schema_ref = EVENT_QUERY_SUMMARY_SCHEMA_REF,
     ts_name = "EventSummary",
@@ -490,7 +490,7 @@ crate::hbat_event_descriptor! {
     ],
 }
 
-crate::hbat_event_descriptor! {
+crate::refbat_event_descriptor! {
     type = EventQueryAck,
     schema_ref = EVENT_QUERY_OUTPUT_SCHEMA_REF,
     ts_name = "EventQueryAck",

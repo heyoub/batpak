@@ -5,7 +5,7 @@ the core battery: an embedded, sync-first append-only journal with typed
 payloads, Blake3 hash-chained ancestry, verifiable receipts, deterministic
 replay, and derived projections.
 
-The family around it — `syncbat`, `netbat`, `hbat`, and `@batpak/sdk` — wires
+The family around it — `syncbat`, `netbat`, `refbat`, and `@batpak/sdk` — wires
 that journal into networked hosts and TypeScript clients through explicit
 terminals and circuits. See the
 [repository README](https://github.com/heyoub/batpak/blob/main/README.md) for

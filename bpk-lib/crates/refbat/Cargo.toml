@@ -1,5 +1,5 @@
 [package]
-name = "hbat"
+name = "refbat"
 version = "0.8.3"
 edition = "2021"
 rust-version = "1.92"
@@ -11,7 +11,7 @@ publish = false
 path = "src/lib.rs"
 
 [[bin]]
-name = "hbat"
+name = "refbat"
 path = "src/main.rs"
 
 [features]
@@ -31,7 +31,7 @@ serde_json = { version = "1", features = ["preserve_order"] }
 clap = { version = "4.6", features = ["derive"] }
 anyhow = "1"
 ctrlc = { version = "3", features = ["termination"] }
-# Tracing: hbat installs a fmt subscriber so operators see structured
+# Tracing: refbat installs a fmt subscriber so operators see structured
 # spans (operation, byte counts, errors) by default. RUST_LOG drives
 # verbosity; the env filter feature is optional.
 tracing = "0.1"

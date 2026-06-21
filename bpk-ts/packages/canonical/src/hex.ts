@@ -11,7 +11,7 @@ import { CanonicalDecodeError } from "./reader.js";
  * Lowercase-hex encode a byte string.
  *
  * Matches the Rust side's `netbat::transport::encode_hex_into` (and the
- * hbat manifest `encode_hex` helper) byte-for-byte.
+ * refbat manifest `encode_hex` helper) byte-for-byte.
  *
  * @example
  * ```ts

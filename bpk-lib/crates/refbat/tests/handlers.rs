@@ -10,27 +10,27 @@ use batpak::store::{
     Store, StoreConfig, StoreResourceReportBody,
 };
 use batpak::{EventPayload, EventSourced};
-use hbat::bank::{
+use netbat::{decode_hex_str, encode_hex_str};
+use refbat::bank::{
     BankCommitAck, BankCommitRequest, EventGetAck, EventGetRequest, BANK_COMMIT_DESCRIPTOR,
     EVENT_GET_DESCRIPTOR, EVENT_QUERY_DESCRIPTOR,
 };
-use hbat::evidence::{
+use refbat::evidence::{
     ChainWalkEvidenceAck, ChainWalkEvidenceRequest, ProjectionRunEvidenceAck,
     ProjectionRunEvidenceRequest, ReadWalkEvidenceAck, ReadWalkEvidenceRequest,
     StoreResourceEvidenceAck, StoreResourceEvidenceRequest, EVIDENCE_CHAIN_WALK_DESCRIPTOR,
     EVIDENCE_PROJECTION_RUN_DESCRIPTOR, EVIDENCE_READ_WALK_DESCRIPTOR,
     EVIDENCE_STORE_RESOURCE_DESCRIPTOR,
 };
-use hbat::handlers::{
+use refbat::handlers::{
     BankCommitHandler, ChainWalkEvidenceHandler, EventGetHandler, EventQueryHandler,
     EventWalkHandler, ProjectionRunEvidenceHandler, ReadWalkEvidenceHandler, ReceiptVerifyHandler,
     StoreResourceEvidenceHandler,
 };
-use hbat::heartbeat::SystemHeartbeatRequest;
-use hbat::receipt::{ReceiptVerifyAck, ReceiptVerifyRequest, RECEIPT_VERIFY_DESCRIPTOR};
-use hbat::walk::{EventWalkAck, EventWalkRequest, EVENT_WALK_DESCRIPTOR};
-use hbat::EventPayloadFixture;
-use netbat::{decode_hex_str, encode_hex_str};
+use refbat::heartbeat::SystemHeartbeatRequest;
+use refbat::receipt::{ReceiptVerifyAck, ReceiptVerifyRequest, RECEIPT_VERIFY_DESCRIPTOR};
+use refbat::walk::{EventWalkAck, EventWalkRequest, EVENT_WALK_DESCRIPTOR};
+use refbat::EventPayloadFixture;
 
 /// Minimal fixture projection used to exercise the `evidence.projection_run`
 /// registry dispatch path end to end.

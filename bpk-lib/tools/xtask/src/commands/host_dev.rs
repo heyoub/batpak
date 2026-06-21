@@ -1,5 +1,5 @@
 //! `cargo xtask host-dev` — prove the host profile in one motion:
-//! manifest → TS tool build → codegen → TS build/test → hbat boot → heartbeat-spike → determinism.
+//! manifest → TS tool build → codegen → TS build/test → refbat boot → heartbeat-spike → determinism.
 
 use super::export_ts_manifest;
 use crate::util::{cargo, cargo_target_dir, project_root, run, run_output};
@@ -22,8 +22,8 @@ pub(crate) fn host_dev(args: &HostDevArgs) -> Result<()> {
     let bpk_ts = project.join("bpk-ts");
     let manifest_out = bpk_ts.join("batpak.manifest.json");
 
-    println!("host-dev: build hbat + xtask");
-    cargo(["build", "-p", "hbat", "-p", "xtask"])?;
+    println!("host-dev: build refbat + xtask");
+    cargo(["build", "-p", "refbat", "-p", "xtask"])?;
 
     println!("host-dev: pnpm install --frozen-lockfile");
     run_pnpm(&bpk_ts, &["install", "--frozen-lockfile"])?;
@@ -138,32 +138,36 @@ fn command_succeeds(program: &str, args: &[&str]) -> bool {
         .unwrap_or(false)
 }
 
-fn hbat_binary() -> Result<PathBuf> {
-    let name = if cfg!(windows) { "hbat.exe" } else { "hbat" };
+fn refbat_binary() -> Result<PathBuf> {
+    let name = if cfg!(windows) {
+        "refbat.exe"
+    } else {
+        "refbat"
+    };
     let path = cargo_target_dir()?.join("debug").join(name);
     if !path.exists() {
         bail!(
-            "hbat binary missing at {}; run `cargo build -p hbat` first",
+            "refbat binary missing at {}; run `cargo build -p refbat` first",
             path.display()
         );
     }
     Ok(path)
 }
 
-struct HbatProcess {
+struct RefbatProcess {
     child: Child,
     port: u16,
     _store: TempDir,
 }
 
-impl HbatProcess {
+impl RefbatProcess {
     fn spawn() -> Result<Self> {
         let host_dev_root = cargo_target_dir()?.join("host-dev");
         fs::create_dir_all(&host_dev_root).context("create host-dev target dir")?;
         let store = TempDir::new_in(&host_dev_root).context("create ephemeral store dir")?;
-        let hbat = hbat_binary()?;
+        let refbat = refbat_binary()?;
 
-        let mut child = Command::new(&hbat)
+        let mut child = Command::new(&refbat)
             .arg("serve")
             .arg("--store")
             .arg(store.path())
@@ -173,9 +177,9 @@ impl HbatProcess {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .with_context(|| format!("spawn {}", hbat.display()))?;
+            .with_context(|| format!("spawn {}", refbat.display()))?;
 
-        let ready_line = read_hbat_ready_line(&mut child)?;
+        let ready_line = read_refbat_ready_line(&mut child)?;
 
         let payload = ready_line.trim_start_matches(READY_PREFIX).trim();
         let parsed: serde_json::Value =
@@ -200,14 +204,14 @@ enum ReadyReadResult {
     Error(std::io::Error),
 }
 
-fn read_hbat_ready_line(child: &mut Child) -> Result<String> {
-    let stdout = child.stdout.take().context("pipe hbat stdout")?;
+fn read_refbat_ready_line(child: &mut Child) -> Result<String> {
+    let stdout = child.stdout.take().context("pipe refbat stdout")?;
     let last_line = Arc::new(Mutex::new(String::new()));
     let thread_last_line = Arc::clone(&last_line);
     let (tx, rx) = mpsc::channel();
 
     thread::Builder::new()
-        .name("host-dev-hbat-ready-reader".to_owned())
+        .name("host-dev-refbat-ready-reader".to_owned())
         .spawn(move || {
             let mut reader = BufReader::new(stdout);
             let mut line = String::new();
@@ -235,14 +239,14 @@ fn read_hbat_ready_line(child: &mut Child) -> Result<String> {
                 }
             }
         })
-        .context("spawn hbat ready reader thread")?;
+        .context("spawn refbat ready reader thread")?;
 
     match rx.recv_timeout(HBAT_READY_TIMEOUT) {
         Ok(ReadyReadResult::Ready(line)) => Ok(line),
         Ok(ReadyReadResult::Eof) => {
             let _ = child.kill();
             let stderr = read_child_stderr(child);
-            bail!("hbat closed stdout before HBAT_READY\nstderr:\n{stderr}");
+            bail!("refbat closed stdout before HBAT_READY\nstderr:\n{stderr}");
         }
         Ok(ReadyReadResult::Error(error)) => {
             let _ = child.kill();
@@ -262,12 +266,12 @@ fn read_hbat_ready_line(child: &mut Child) -> Result<String> {
         Err(mpsc::RecvTimeoutError::Disconnected) => {
             let _ = child.kill();
             let stderr = read_child_stderr(child);
-            bail!("hbat readiness reader exited before HBAT_READY\nstderr:\n{stderr}");
+            bail!("refbat readiness reader exited before HBAT_READY\nstderr:\n{stderr}");
         }
     }
 }
 
-impl Drop for HbatProcess {
+impl Drop for RefbatProcess {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
@@ -287,7 +291,7 @@ fn read_child_stderr(child: &mut Child) -> String {
 }
 
 fn run_live_spike(bpk_ts: &Path) -> Result<()> {
-    let process = HbatProcess::spawn()?;
+    let process = RefbatProcess::spawn()?;
     let port = process.port;
     let spike = bpk_ts.join("examples/heartbeat-spike/dist/index.js");
     if !spike.exists() {

@@ -67,9 +67,9 @@
 - id: REQ-BIDIRECTIONAL-SUBSTRATE-LANE
   summary: Non-Rust terminals that can commit substrate events must also expose bounded, domain-neutral traversal so external replay can be reconstructed from substrate truth without sidecar authority.
   artifacts:
-    - ART-HBAT-SOURCE
-    - ART-HBAT-TESTS
-    - ART-HBAT-MANIFEST-EXPORT
+    - ART-REFBAT-SOURCE
+    - ART-REFBAT-TESTS
+    - ART-REFBAT-MANIFEST-EXPORT
     - ART-STORE-QUERY-TRAVERSAL
     - ART-STORE-QUERY-TRAVERSAL-TESTS
     - ART-DX-DOCS
@@ -100,5 +100,5 @@
   artifacts:
     - ART-DX-PRODUCT-DOCTRINE-AUDIT
     - ART-DX-DOCS
-    - ART-HBAT-SOURCE
+    - ART-REFBAT-SOURCE
     - ART-STORE-QUERY-TRAVERSAL

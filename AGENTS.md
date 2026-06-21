@@ -46,7 +46,7 @@ At repo root, agents use `just`. Raw `cargo`, `npm`, and `pnpm` are implementati
 
 - `just list` — show the command surface
 - `just inspect` — structural doctrine, boundary checks, architecture IR, and ast-grep calipers
-- `just host-dev` — host profile end-to-end proof after hbat, manifest, or TS changes
+- `just host-dev` — host profile end-to-end proof after refbat, manifest, or TS changes
 - `just host-loop` — living audit-loop proof after audit-loop example changes
 - `just ledger-list` — list recent factory command proof events from the opt-in ledger store
 - `just ledger-run -- <command>` — run a command through the opt-in factory ledger wrapper
@@ -118,7 +118,7 @@ Implementation commands still live under `bpk-lib/` and remain valid when a task
   - run `just verify` when the change affects store behavior, xtask itself, or CI config
   - run the relevant perf surface
   - inspect `bpk-lib/crates/core/tests/perf_gates.rs` and the relevant factory root doc
-- hbat, manifest, or TypeScript SDK change:
+- refbat, manifest, or TypeScript SDK change:
   - run `just host-dev`
 - audit-loop / living-loop example change:
   - run `just host-loop`
@@ -148,7 +148,7 @@ Implementation commands still live under `bpk-lib/` and remain valid when a task
   commit order. `after_global_sequence` is an exclusive resume point, not a
   stream cursor or server-held session; do not introduce ambiguous cursor names.
 - **Domain graph boundary** — do not add Downstream, workflow, mission, or
-  receipt-body verbs as batpak/hbat/netbat operations. Domain layers decode
+  receipt-body verbs as batpak/refbat/netbat operations. Domain layers decode
   envelope payloads above batpak after `event.query` + `event.get`; substrate
   traversal returns metadata only.
 - **ExtProfile boundary** — batpak may align with the sibling `EXTERNAL_SPEC`, but this crate

@@ -17,7 +17,7 @@ pub(super) fn check(repo_root: &Path, source_cache: &mut SourceCache) -> Result<
     check_core_feature_cfg_contract(repo_root)?;
     check_xtask_surface_contract(repo_root)?;
     check_syncbat_is_explicitly_gated(repo_root)?;
-    check_hbat_manifest_wiring_contract(repo_root, source_cache)?;
+    check_refbat_manifest_wiring_contract(repo_root, source_cache)?;
     Ok(())
 }
 
@@ -349,9 +349,9 @@ fn check_crate_layout_contract(repo_root: &Path) -> Result<()> {
         "crates/netbat/src",
         "crates/netbat/tests",
         "crates/netbat/benches",
-        "crates/hbat/src",
-        "crates/hbat/tests",
-        "crates/hbat/benches",
+        "crates/refbat/src",
+        "crates/refbat/tests",
+        "crates/refbat/benches",
         "crates/macros/src",
         "crates/macros-support/src",
         "crates/syncbat-macros/src",
@@ -835,33 +835,33 @@ fn check_syncbat_is_explicitly_gated(repo_root: &Path) -> Result<()> {
     Ok(())
 }
 
-fn check_hbat_manifest_wiring_contract(
+fn check_refbat_manifest_wiring_contract(
     repo_root: &Path,
     source_cache: &mut SourceCache,
 ) -> Result<()> {
-    let hbat_src = repo_root.join("crates/hbat/src");
-    if !hbat_src.is_dir() {
+    let refbat_src = repo_root.join("crates/refbat/src");
+    if !refbat_src.is_dir() {
         return Ok(());
     }
 
-    let main = std::sync::Arc::clone(&source_cache.rust_file("crates/hbat/src/main.rs")?.text);
+    let main = std::sync::Arc::clone(&source_cache.rust_file("crates/refbat/src/main.rs")?.text);
 
-    for relative in source_cache.rust_files_under("crates/hbat/src")? {
+    for relative in source_cache.rust_files_under("crates/refbat/src")? {
         let source = source_cache.rust_file(&relative)?;
         let rel = display_path(&source.relative_path);
         let module = source
             .relative_path
             .file_stem()
             .and_then(|stem| stem.to_str())
-            .context("hbat source file has UTF-8 stem")?;
+            .context("refbat source file has UTF-8 stem")?;
         let content = source.text.as_ref();
 
-        for descriptor in hbat_operation_descriptors(content) {
+        for descriptor in refbat_operation_descriptors(content) {
             let Some(prefix) = descriptor.strip_suffix("_DESCRIPTOR") else {
                 ensure(
                     false,
                     format!(
-                        "hbat operation descriptor `{descriptor}` in {rel} must use *_DESCRIPTOR naming"
+                        "refbat operation descriptor `{descriptor}` in {rel} must use *_DESCRIPTOR naming"
                     ),
                 )?;
                 continue;
@@ -870,25 +870,25 @@ fn check_hbat_manifest_wiring_contract(
             ensure(
                 count_occurrences(content, &format!("descriptor: {helper_name}")) == 1,
                 format!(
-                    "hbat operation descriptor `{descriptor}` in {rel} must have exactly one OperationDescriptorRegistration inventory::submit! referencing it"
+                    "refbat operation descriptor `{descriptor}` in {rel} must have exactly one OperationDescriptorRegistration inventory::submit! referencing it"
                 ),
             )?;
             ensure(
                 content.contains(&format!("&{descriptor}_STORAGE")),
                 format!(
-                    "hbat operation descriptor `{descriptor}` in {rel} must be referenced by its manifest inventory helper"
+                    "refbat operation descriptor `{descriptor}` in {rel} must be referenced by its manifest inventory helper"
                 ),
             )?;
             ensure(
-                main.contains(&format!("hbat::{descriptor}.clone()")),
+                main.contains(&format!("refbat::{descriptor}.clone()")),
                 format!(
-                    "hbat operation descriptor `{descriptor}` in {rel} is not registered by hbat main::build_core"
+                    "refbat operation descriptor `{descriptor}` in {rel} is not registered by refbat main::build_core"
                 ),
             )?;
         }
 
-        for payload in hbat_event_payload_structs(content) {
-            let rust_type = format!("hbat::{module}::{payload}");
+        for payload in refbat_event_payload_structs(content) {
+            let rust_type = format!("refbat::{module}::{payload}");
             let manual_rust_type =
                 count_occurrences(content, &format!("rust_type: \"{rust_type}\""));
             let manual_ts_name = count_occurrences(content, &format!("ts_name: \"{payload}\""));
@@ -903,16 +903,16 @@ fn check_hbat_manifest_wiring_contract(
             ensure(
                 manual || via_macro,
                 format!(
-                    "hbat EventPayload `{rust_type}` in {rel} must register exactly once via \
-                     `hbat_event_descriptor!` (type/ts_name) or EventDescriptorRegistration \
+                    "refbat EventPayload `{rust_type}` in {rel} must register exactly once via \
+                     `refbat_event_descriptor!` (type/ts_name) or EventDescriptorRegistration \
                      (rust_type/ts_name/kind_bits)"
                 ),
             )?;
             ensure(
                 !(manual && via_macro),
                 format!(
-                    "hbat EventPayload `{rust_type}` in {rel} must not register via both \
-                     `hbat_event_descriptor!` and manual EventDescriptorRegistration"
+                    "refbat EventPayload `{rust_type}` in {rel} must not register via both \
+                     `refbat_event_descriptor!` and manual EventDescriptorRegistration"
                 ),
             )?;
         }
@@ -921,7 +921,7 @@ fn check_hbat_manifest_wiring_contract(
     Ok(())
 }
 
-fn hbat_operation_descriptors(content: &str) -> Vec<String> {
+fn refbat_operation_descriptors(content: &str) -> Vec<String> {
     content
         .lines()
         .filter_map(|line| {
@@ -934,7 +934,7 @@ fn hbat_operation_descriptors(content: &str) -> Vec<String> {
         .collect()
 }
 
-fn hbat_event_payload_structs(content: &str) -> Vec<String> {
+fn refbat_event_payload_structs(content: &str) -> Vec<String> {
     let mut structs = Vec::new();
     let mut pending_event_payload_derive = false;
     for line in content.lines() {

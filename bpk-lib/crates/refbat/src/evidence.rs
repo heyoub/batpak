@@ -12,7 +12,7 @@
 //! ## Why a report blob instead of a typed mirror
 //!
 //! `body_hash` is computed over the canonical bytes of the report body. A
-//! field-by-field hbat mirror would re-encode and produce *different* bytes,
+//! field-by-field refbat mirror would re-encode and produce *different* bytes,
 //! so the hash on the wire would not match the body on the wire. Shipping the
 //! exact canonical body bytes preserves byte-exact evidence identity: a
 //! consumer re-hashes `report_hex` and checks it equals `body_hash_hex`.
@@ -257,7 +257,7 @@ impl EventPayloadFixture for ChainWalkEvidenceAck {
     }
 }
 
-crate::hbat_event_descriptor! {
+crate::refbat_event_descriptor! {
     type = ChainWalkEvidenceRequest,
     schema_ref = EVIDENCE_CHAIN_WALK_INPUT_SCHEMA_REF,
     ts_name = "ChainWalkEvidenceRequest",
@@ -269,7 +269,7 @@ crate::hbat_event_descriptor! {
     ],
 }
 
-crate::hbat_event_descriptor! {
+crate::refbat_event_descriptor! {
     type = ChainWalkEvidenceAck,
     schema_ref = EVIDENCE_CHAIN_WALK_OUTPUT_SCHEMA_REF,
     ts_name = "ChainWalkEvidenceAck",
@@ -351,14 +351,14 @@ impl EventPayloadFixture for StoreResourceEvidenceAck {
     }
 }
 
-crate::hbat_event_descriptor! {
+crate::refbat_event_descriptor! {
     type = StoreResourceEvidenceRequest,
     schema_ref = EVIDENCE_STORE_RESOURCE_INPUT_SCHEMA_REF,
     ts_name = "StoreResourceEvidenceRequest",
     fields = [],
 }
 
-crate::hbat_event_descriptor! {
+crate::refbat_event_descriptor! {
     type = StoreResourceEvidenceAck,
     schema_ref = EVIDENCE_STORE_RESOURCE_OUTPUT_SCHEMA_REF,
     ts_name = "StoreResourceEvidenceAck",
@@ -520,7 +520,7 @@ impl EventPayloadFixture for ReadWalkEvidenceAck {
     }
 }
 
-crate::hbat_event_descriptor! {
+crate::refbat_event_descriptor! {
     type = ReadWalkEvidenceRequest,
     schema_ref = EVIDENCE_READ_WALK_INPUT_SCHEMA_REF,
     ts_name = "ReadWalkEvidenceRequest",
@@ -537,7 +537,7 @@ crate::hbat_event_descriptor! {
     ],
 }
 
-crate::hbat_event_descriptor! {
+crate::refbat_event_descriptor! {
     type = ReadWalkEvidenceAck,
     schema_ref = EVIDENCE_READ_WALK_OUTPUT_SCHEMA_REF,
     ts_name = "ReadWalkEvidenceAck",
@@ -642,7 +642,7 @@ impl EventPayloadFixture for ProjectionRunEvidenceAck {
     }
 }
 
-crate::hbat_event_descriptor! {
+crate::refbat_event_descriptor! {
     type = ProjectionRunEvidenceRequest,
     schema_ref = EVIDENCE_PROJECTION_RUN_INPUT_SCHEMA_REF,
     ts_name = "ProjectionRunEvidenceRequest",
@@ -653,7 +653,7 @@ crate::hbat_event_descriptor! {
     ],
 }
 
-crate::hbat_event_descriptor! {
+crate::refbat_event_descriptor! {
     type = ProjectionRunEvidenceAck,
     schema_ref = EVIDENCE_PROJECTION_RUN_OUTPUT_SCHEMA_REF,
     ts_name = "ProjectionRunEvidenceAck",

@@ -9,7 +9,7 @@ Free Battery Factory is the workshop. Each battery is a bounded component that s
 | `batpak` | Core battery pack format and embedded event substrate. |
 | `syncbat` | Sync-first runtime contracts and dispatch surfaces. |
 | `netbat` | Server and network boundary surfaces for explicit IO. |
-| `hbat` | Live operation handling surface in the current workspace. |
+| `refbat` | Live operation handling surface in the current workspace. |
 | `@batpak/sdk` / [bpk-ts/](bpk-ts/README.md) | NETBAT/1 wire client, canonical codec, manifest-generated types. |
 | `batpak-macros` | Derive macro support for the core substrate. |
 | `syncbat-macros` | Derive macro support for syncbat. |
@@ -39,7 +39,7 @@ Need sync-first runtime behavior? Use `syncbat`.
 
 Need explicit network wiring? Use `netbat`.
 
-Need a live reference host? Use `hbat` and prove it with `just host-dev`.
+Need a live reference host? Use `refbat` and prove it with `just host-dev`.
 
 Need TypeScript against that host? Use `@batpak/sdk` — see [bpk-ts/README.md](bpk-ts/README.md).
 

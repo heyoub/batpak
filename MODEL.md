@@ -63,7 +63,7 @@ One paragraph version:
 | Journal | `batpak::Store` | Source truth, HLC frontier, receipts |
 | Runtime | `syncbat` | Handler dispatch, runtime receipts |
 | Network | `netbat` | NETBAT/1 framing |
-| Reference host | `hbat` | Ten-op manifest |
+| Reference host | `refbat` | Ten-op manifest |
 | TS clients | `@batpak/sdk` | Wire client, canonical codec, generated types |
 
 The in-process path opens `Store` directly. The networked path crosses

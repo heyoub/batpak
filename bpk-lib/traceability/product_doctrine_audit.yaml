@@ -62,7 +62,7 @@ entries:
       - evidence reports
     proof_commands:
       - just host-dev
-      - cargo test -p hbat
+      - cargo test -p refbat
     owning_layer: BatPAK substrate proof / downstream trust policy
     explicit_non_goals:
       - granted authority
@@ -126,7 +126,7 @@ entries:
     proof_commands:
       - just host-dev
       - just host-loop
-    owning_layer: hbat NETBAT/1 reference host
+    owning_layer: refbat NETBAT/1 reference host
     explicit_non_goals:
       - event.cursor
       - event.stream

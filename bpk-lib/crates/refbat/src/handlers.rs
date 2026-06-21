@@ -1,9 +1,9 @@
 //! Runtime handlers for [`crate::bank`] operations.
 //!
 //! These handlers capture an `Arc<batpak::store::Store>` so they can be
-//! registered with [`syncbat::CoreBuilder::register`] from the `hbat`
+//! registered with [`syncbat::CoreBuilder::register`] from the `refbat`
 //! binary. They live in their own module (not in `bank.rs`) because the
-//! library half of `hbat` deliberately does NOT depend on a runtime
+//! library half of `refbat` deliberately does NOT depend on a runtime
 //! store handle — the descriptors and payload types are pure data and
 //! must be linkable from `xtask` without dragging the runtime in.
 
@@ -20,7 +20,7 @@ use batpak::store::{
     ExtensionKey, ProjectionEvidenceRegistry, ProjectionRunReportError, ReadWalkDroppedCount,
     ReceiptVerification, ReceiptVerificationError, Store,
 };
-// Hex codec is the canonical netbat implementation; hbat does not
+// Hex codec is the canonical netbat implementation; refbat does not
 // re-roll its own. See netbat::transport::hex.
 use netbat::{decode_hex_str, encode_hex_str};
 use syncbat::{Ctx, Handler, HandlerError, HandlerResult};
@@ -603,7 +603,7 @@ fn handle_evidence_read_walk(store: &Store, input: &[u8]) -> HandlerResult {
 /// Handler binding for [`crate::evidence::EVIDENCE_PROJECTION_RUN_DESCRIPTOR`].
 ///
 /// Dispatches the request's domain-neutral `projection` id through an
-/// embedder-populated [`ProjectionEvidenceRegistry`]. The reference `hbat`
+/// embedder-populated [`ProjectionEvidenceRegistry`]. The reference `refbat`
 /// binary registers an empty registry, so every projection id resolves to an
 /// `unknown projection` error; an embedder that registers its projections makes
 /// them reachable without changing the wire contract.
@@ -631,7 +631,7 @@ fn handle_evidence_projection_run(
     // Validate the entity as a substrate coordinate at the boundary, matching
     // bank.commit/event.query, so a malformed entity is a deterministic
     // invalid_input rather than reaching the projection/report path.
-    Coordinate::new(&request.entity, "hbat:evidence-projection-run")
+    Coordinate::new(&request.entity, "refbat:evidence-projection-run")
         .map_err(|error| HandlerError::invalid_input(format!("entity: {error}")))?;
 
     let freshness = request.freshness();

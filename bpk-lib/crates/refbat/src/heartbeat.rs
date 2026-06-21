@@ -134,10 +134,10 @@ fn current_unix_ms() -> u64 {
 
 // ─── Manifest registry submissions ──────────────────────────────────────────
 //
-// Payload descriptors submit via `hbat_event_descriptor!`. Operation
+// Payload descriptors submit via `refbat_event_descriptor!`. Operation
 // descriptors use `OperationDescriptorRegistration` + inventory (Cut 4).
 
-crate::hbat_event_descriptor! {
+crate::refbat_event_descriptor! {
     type = SystemHeartbeatRequest,
     schema_ref = HEARTBEAT_INPUT_SCHEMA_REF,
     ts_name = "SystemHeartbeatRequest",
@@ -146,7 +146,7 @@ crate::hbat_event_descriptor! {
     ],
 }
 
-crate::hbat_event_descriptor! {
+crate::refbat_event_descriptor! {
     type = SystemHeartbeatAck,
     schema_ref = HEARTBEAT_OUTPUT_SCHEMA_REF,
     ts_name = "SystemHeartbeatAck",
@@ -233,7 +233,7 @@ mod tests {
         // The derive macro produces KIND from #[batpak(category=N, type_id=M)].
         // The substrate exposes named constants that must stay byte-equal so
         // downstream consumers can reference the canonical name without having
-        // to import the hbat struct.
+        // to import the refbat struct.
         assert_eq!(
             SystemHeartbeatRequest::KIND.as_raw_u16(),
             batpak::event::EventKind::SYSTEM_HEARTBEAT_REQUEST.as_raw_u16(),

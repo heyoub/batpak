@@ -4,7 +4,7 @@ batpak owns a **local truth boundary** per journal: one `Store`, one `data_dir`,
 one exclusive writer. That scopes source truth to a single append-only journal;
 it does not mean distributed systems are out of scope. Larger hosts compose
 **multiple journals** through explicit circuits — `netbat` routes, `syncbat`
-dispatch, reference `hbat`, and cross-store observations — without one battery
+dispatch, reference `refbat`, and cross-store observations — without one battery
 mutating another's state through a hidden path. See [CIRCUITS.md](CIRCUITS.md)
 for journal composition rules and [README.md](README.md) for the scale-out
 model. batpak does not own the whole application.
@@ -83,15 +83,15 @@ Use circuits and terminals to connect batteries. Do not hide ownership by lettin
 ## Local Host Loop
 
 **Calibration pulse:** `just host-dev` mirrors the CI ts-parity lane: export
-manifest, codegen, build and test the workspace, boot hbat on an ephemeral
+manifest, codegen, build and test the workspace, boot refbat on an ephemeral
 store, run heartbeat-spike (heartbeat, commit, query, get), and verify committed
 generated sources stay deterministic. heartbeat-spike proves the live heartbeat
 + commit/query/get + ERR calibration path; `receipt.verify`, `event.walk`, and
 the four `evidence.*` ops round out the ten-op host profile and are covered by
-manifest/parity and hbat tests.
+manifest/parity and refbat tests.
 
 **Living loop:** `just host-loop` runs the audit-loop example against a
 persistent store under `target/host-loop/store/`. It seeds app-owned events
 (`kind_category = 0x01`), rebuilds the rendered audit view from `event.query` +
-`event.get` (not commit acks), kills hbat, restarts on the same store, and
+`event.get` (not commit acks), kills refbat, restarts on the same store, and
 runs `--replay-only` to prove substrate replay.

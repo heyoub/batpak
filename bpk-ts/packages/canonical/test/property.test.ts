@@ -29,7 +29,7 @@ const jsonValue: fc.Arbitrary<unknown> = fc.letrec((tie) => ({
     fc.boolean(),
     // Use Number.MAX_SAFE_INTEGER for the int domain; the encoder
     // emits canonical msgpack int family (positive fixint, uint8,
-    // uint16, uint32, uint64-safe). Bounds match what hbat exposes
+    // uint16, uint32, uint64-safe). Bounds match what refbat exposes
     // on the wire today.
     fc.integer({ min: 0, max: Number.MAX_SAFE_INTEGER }),
     fc.string({ maxLength: 32 }),

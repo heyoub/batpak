@@ -17,7 +17,7 @@ export const BATPAK_TS_MANIFEST = {
   "events": [
     {
       "name": "system.heartbeat.request",
-      "rustType": "hbat::heartbeat::SystemHeartbeatRequest",
+      "rustType": "refbat::heartbeat::SystemHeartbeatRequest",
       "tsName": "SystemHeartbeatRequest",
       "category": 15,
       "typeId": 2561,
@@ -38,7 +38,7 @@ export const BATPAK_TS_MANIFEST = {
     },
     {
       "name": "system.heartbeat.ack",
-      "rustType": "hbat::heartbeat::SystemHeartbeatAck",
+      "rustType": "refbat::heartbeat::SystemHeartbeatAck",
       "tsName": "SystemHeartbeatAck",
       "category": 15,
       "typeId": 2562,
@@ -67,7 +67,7 @@ export const BATPAK_TS_MANIFEST = {
     },
     {
       "name": "bank.commit.request",
-      "rustType": "hbat::bank::BankCommitRequest",
+      "rustType": "refbat::bank::BankCommitRequest",
       "tsName": "BankCommitRequest",
       "category": 15,
       "typeId": 2576,
@@ -128,7 +128,7 @@ export const BATPAK_TS_MANIFEST = {
     },
     {
       "name": "bank.commit.ack",
-      "rustType": "hbat::bank::BankCommitAck",
+      "rustType": "refbat::bank::BankCommitAck",
       "tsName": "BankCommitAck",
       "category": 15,
       "typeId": 2577,
@@ -191,7 +191,7 @@ export const BATPAK_TS_MANIFEST = {
     },
     {
       "name": "event.get.request",
-      "rustType": "hbat::bank::EventGetRequest",
+      "rustType": "refbat::bank::EventGetRequest",
       "tsName": "EventGetRequest",
       "category": 15,
       "typeId": 2592,
@@ -212,7 +212,7 @@ export const BATPAK_TS_MANIFEST = {
     },
     {
       "name": "event.get.ack",
-      "rustType": "hbat::bank::EventGetAck",
+      "rustType": "refbat::bank::EventGetAck",
       "tsName": "EventGetAck",
       "category": 15,
       "typeId": 2593,
@@ -313,7 +313,7 @@ export const BATPAK_TS_MANIFEST = {
     },
     {
       "name": "event.query.request",
-      "rustType": "hbat::bank::EventQueryRequest",
+      "rustType": "refbat::bank::EventQueryRequest",
       "tsName": "EventQueryRequest",
       "category": 15,
       "typeId": 2594,
@@ -374,7 +374,7 @@ export const BATPAK_TS_MANIFEST = {
     },
     {
       "name": "event.query.summary",
-      "rustType": "hbat::bank::EventSummary",
+      "rustType": "refbat::bank::EventSummary",
       "tsName": "EventSummary",
       "category": 15,
       "typeId": 2595,
@@ -475,7 +475,7 @@ export const BATPAK_TS_MANIFEST = {
     },
     {
       "name": "event.query.ack",
-      "rustType": "hbat::bank::EventQueryAck",
+      "rustType": "refbat::bank::EventQueryAck",
       "tsName": "EventQueryAck",
       "category": 15,
       "typeId": 2596,
@@ -526,7 +526,7 @@ export const BATPAK_TS_MANIFEST = {
     },
     {
       "name": "receipt.verify.request",
-      "rustType": "hbat::receipt::ReceiptVerifyRequest",
+      "rustType": "refbat::receipt::ReceiptVerifyRequest",
       "tsName": "ReceiptVerifyRequest",
       "category": 15,
       "typeId": 2608,
@@ -587,7 +587,7 @@ export const BATPAK_TS_MANIFEST = {
     },
     {
       "name": "receipt.verify.ack",
-      "rustType": "hbat::receipt::ReceiptVerifyAck",
+      "rustType": "refbat::receipt::ReceiptVerifyAck",
       "tsName": "ReceiptVerifyAck",
       "category": 15,
       "typeId": 2609,
@@ -624,7 +624,7 @@ export const BATPAK_TS_MANIFEST = {
     },
     {
       "name": "event.walk.request",
-      "rustType": "hbat::walk::EventWalkRequest",
+      "rustType": "refbat::walk::EventWalkRequest",
       "tsName": "EventWalkRequest",
       "category": 15,
       "typeId": 2624,
@@ -653,7 +653,7 @@ export const BATPAK_TS_MANIFEST = {
     },
     {
       "name": "event.walk.ack",
-      "rustType": "hbat::walk::EventWalkAck",
+      "rustType": "refbat::walk::EventWalkAck",
       "tsName": "EventWalkAck",
       "category": 15,
       "typeId": 2625,
@@ -688,7 +688,7 @@ export const BATPAK_TS_MANIFEST = {
     },
     {
       "name": "evidence.chain_walk.request",
-      "rustType": "hbat::evidence::ChainWalkEvidenceRequest",
+      "rustType": "refbat::evidence::ChainWalkEvidenceRequest",
       "tsName": "ChainWalkEvidenceRequest",
       "category": 15,
       "typeId": 2640,
@@ -733,7 +733,7 @@ export const BATPAK_TS_MANIFEST = {
     },
     {
       "name": "evidence.chain_walk.ack",
-      "rustType": "hbat::evidence::ChainWalkEvidenceAck",
+      "rustType": "refbat::evidence::ChainWalkEvidenceAck",
       "tsName": "ChainWalkEvidenceAck",
       "category": 15,
       "typeId": 2641,
@@ -770,7 +770,7 @@ export const BATPAK_TS_MANIFEST = {
     },
     {
       "name": "evidence.store_resource.request",
-      "rustType": "hbat::evidence::StoreResourceEvidenceRequest",
+      "rustType": "refbat::evidence::StoreResourceEvidenceRequest",
       "tsName": "StoreResourceEvidenceRequest",
       "category": 15,
       "typeId": 2656,
@@ -781,7 +781,7 @@ export const BATPAK_TS_MANIFEST = {
     },
     {
       "name": "evidence.store_resource.ack",
-      "rustType": "hbat::evidence::StoreResourceEvidenceAck",
+      "rustType": "refbat::evidence::StoreResourceEvidenceAck",
       "tsName": "StoreResourceEvidenceAck",
       "category": 15,
       "typeId": 2657,
@@ -818,7 +818,7 @@ export const BATPAK_TS_MANIFEST = {
     },
     {
       "name": "evidence.read_walk.request",
-      "rustType": "hbat::evidence::ReadWalkEvidenceRequest",
+      "rustType": "refbat::evidence::ReadWalkEvidenceRequest",
       "tsName": "ReadWalkEvidenceRequest",
       "category": 15,
       "typeId": 2672,
@@ -903,7 +903,7 @@ export const BATPAK_TS_MANIFEST = {
     },
     {
       "name": "evidence.read_walk.ack",
-      "rustType": "hbat::evidence::ReadWalkEvidenceAck",
+      "rustType": "refbat::evidence::ReadWalkEvidenceAck",
       "tsName": "ReadWalkEvidenceAck",
       "category": 15,
       "typeId": 2673,
@@ -940,7 +940,7 @@ export const BATPAK_TS_MANIFEST = {
     },
     {
       "name": "evidence.projection_run.request",
-      "rustType": "hbat::evidence::ProjectionRunEvidenceRequest",
+      "rustType": "refbat::evidence::ProjectionRunEvidenceRequest",
       "tsName": "ProjectionRunEvidenceRequest",
       "category": 15,
       "typeId": 2688,
@@ -977,7 +977,7 @@ export const BATPAK_TS_MANIFEST = {
     },
     {
       "name": "evidence.projection_run.ack",
-      "rustType": "hbat::evidence::ProjectionRunEvidenceAck",
+      "rustType": "refbat::evidence::ProjectionRunEvidenceAck",
       "tsName": "ProjectionRunEvidenceAck",
       "category": 15,
       "typeId": 2689,

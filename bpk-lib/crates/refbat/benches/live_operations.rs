@@ -3,12 +3,12 @@ use std::sync::Arc;
 use batpak::store::{Store, StoreConfig};
 use batpak::EventPayload;
 use criterion::{criterion_group, criterion_main, Criterion};
-use hbat::{
+use netbat::encode_hex_str;
+use refbat::{
     BankCommitHandler, EventQueryHandler, EventQueryRequest, HeartbeatHandler,
     SystemHeartbeatRequest, BANK_COMMIT_DESCRIPTOR, EVENT_GET_DESCRIPTOR, EVENT_QUERY_DESCRIPTOR,
     HEARTBEAT_DESCRIPTOR,
 };
-use netbat::encode_hex_str;
 use std::hint::black_box;
 use syncbat::{CheckoutFrame, Core};
 use tempfile::TempDir;
@@ -28,8 +28,8 @@ fn bank_commit_frame() -> CheckoutFrame {
         nonce: "bench-bank".to_owned(),
     })
     .expect("encode nested heartbeat");
-    let request = hbat::BankCommitRequest {
-        entity: "bench:hbat".to_owned(),
+    let request = refbat::BankCommitRequest {
+        entity: "bench:refbat".to_owned(),
         scope: "bench-scope".to_owned(),
         kind_category: SystemHeartbeatRequest::KIND.category(),
         kind_type_id: SystemHeartbeatRequest::KIND.type_id(),
@@ -44,7 +44,7 @@ fn bank_commit_frame() -> CheckoutFrame {
 
 fn event_query_frame() -> CheckoutFrame {
     let request = EventQueryRequest {
-        entity: Some("bench:hbat".to_owned()),
+        entity: Some("bench:refbat".to_owned()),
         scope: Some("bench-scope".to_owned()),
         kind_category: Some(SystemHeartbeatRequest::KIND.category()),
         kind_type_id: Some(SystemHeartbeatRequest::KIND.type_id()),
@@ -75,7 +75,7 @@ fn core() -> (Core, TempDir) {
     builder
         .register(
             EVENT_GET_DESCRIPTOR.clone(),
-            hbat::EventGetHandler {
+            refbat::EventGetHandler {
                 store: Arc::clone(&store),
             },
         )
@@ -88,13 +88,13 @@ fn core() -> (Core, TempDir) {
             },
         )
         .expect("register event.query");
-    (builder.build().expect("build hbat core"), dir)
+    (builder.build().expect("build refbat core"), dir)
 }
 
 fn bench_live_operations(c: &mut Criterion) {
     let (mut core, _dir) = core();
 
-    c.bench_function("hbat_system_heartbeat", |b| {
+    c.bench_function("refbat_system_heartbeat", |b| {
         b.iter(|| {
             let result = core
                 .checkout_frame(heartbeat_frame())
@@ -103,7 +103,7 @@ fn bench_live_operations(c: &mut Criterion) {
         });
     });
 
-    c.bench_function("hbat_bank_commit", |b| {
+    c.bench_function("refbat_bank_commit", |b| {
         b.iter(|| {
             let result = core
                 .checkout_frame(bank_commit_frame())
@@ -112,7 +112,7 @@ fn bench_live_operations(c: &mut Criterion) {
         });
     });
 
-    c.bench_function("hbat_event_query", |b| {
+    c.bench_function("refbat_event_query", |b| {
         b.iter(|| {
             let result = core
                 .checkout_frame(event_query_frame())

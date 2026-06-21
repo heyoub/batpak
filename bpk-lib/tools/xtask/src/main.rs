@@ -106,9 +106,9 @@ enum XtaskCommand {
     /// Export the BatPAK TypeScript SDK manifest from the reference host
     /// descriptors. Consumed by `bpk-ts/packages/codegen`.
     ExportTsManifest(ExportTsManifestArgs),
-    /// Prove the host profile end-to-end: manifest, codegen, TS, hbat, spike.
+    /// Prove the host profile end-to-end: manifest, codegen, TS, refbat, spike.
     HostDev(HostDevArgs),
-    /// Prove the living TS audit-loop: seed, restart hbat, replay-only.
+    /// Prove the living TS audit-loop: seed, restart refbat, replay-only.
     HostLoop,
     /// Opt-in factory command proof ledger backed by a local BatPAK store.
     FactoryLedger(FactoryLedgerArgs),

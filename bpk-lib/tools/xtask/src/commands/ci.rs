@@ -16,7 +16,7 @@ pub(crate) fn ci_fast() -> Result<()> {
     deny_split()?;
     // `--workspace` is mandatory here for the same reason as the clippy gate:
     // without it nextest runs only `default-members` (crates/core), leaving
-    // tools/integrity, hbat, and the macro crates outside the test net. That
+    // tools/integrity, refbat, and the macro crates outside the test net. That
     // hole let a stale integrity self-test fixture rot undetected until a
     // workspace-wide run surfaced it.
     run_nextest_ci(["--workspace", "--all-features"])?;

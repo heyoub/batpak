@@ -1,8 +1,8 @@
 //! Inventory-driven descriptor registry consumed by both
-//! `xtask export-ts-manifest` and the `hbat` binary.
+//! `xtask export-ts-manifest` and the `refbat` binary.
 //!
 //! **Payload descriptors** — each `EventPayload`-deriving module submits
-//! via [`crate::hbat_event_descriptor!`], which expands to
+//! via [`crate::refbat_event_descriptor!`], which expands to
 //! [`crate::manifest::EventDescriptorRegistration`] + `inventory::submit!`.
 //!
 //! **Operation descriptors** — each operation module submits
@@ -223,7 +223,7 @@ pub struct FieldRow {
 /// export time so callers that only consume the schema-ref constants do
 /// not pay it.
 pub struct EventDescriptorRegistration {
-    /// Fully-qualified Rust type path (e.g. `hbat::heartbeat::SystemHeartbeatRequest`).
+    /// Fully-qualified Rust type path (e.g. `refbat::heartbeat::SystemHeartbeatRequest`).
     pub rust_type: &'static str,
     /// PascalCase TypeScript symbol for the type.
     pub ts_name: &'static str,
@@ -311,7 +311,7 @@ impl EventDescriptorRegistration {
     }
 }
 
-/// Build the descriptor snapshot for hbat's operation surface.
+/// Build the descriptor snapshot for refbat's operation surface.
 ///
 /// Walks the `inventory` registry, materializes one [`EventDescriptor`]
 /// per submitted [`EventDescriptorRegistration`], sorts by

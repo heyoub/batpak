@@ -1,5 +1,5 @@
 //! `cargo xtask host-loop` — prove the living TS loop: seed audit-loop, restart
-//! hbat on the same store, replay-only rebuild from substrate truth.
+//! refbat on the same store, replay-only rebuild from substrate truth.
 
 use crate::util::{cargo, cargo_target_dir, project_root, run};
 use anyhow::{bail, Context, Result};
@@ -22,8 +22,8 @@ pub(crate) fn host_loop() -> Result<()> {
     }
     fs::create_dir_all(&store_dir).context("create host-loop store dir")?;
 
-    println!("host-loop: build hbat");
-    cargo(["build", "-p", "hbat"])?;
+    println!("host-loop: build refbat");
+    cargo(["build", "-p", "refbat"])?;
 
     println!("host-loop: pnpm -w build");
     run_pnpm(&bpk_ts, &["-w", "build"])?;
@@ -40,7 +40,7 @@ pub(crate) fn host_loop() -> Result<()> {
     let seed_output = run_audit_loop(&bpk_ts, &store_dir, &[])?;
     let seed_stream = extract_stream_lines(&seed_output)?;
 
-    println!("host-loop: restart hbat and replay-only");
+    println!("host-loop: restart refbat and replay-only");
     let replay_output = run_audit_loop(&bpk_ts, &store_dir, &["--replay-only"])?;
     let replay_stream = extract_stream_lines(&replay_output)?;
 
@@ -57,7 +57,7 @@ pub(crate) fn host_loop() -> Result<()> {
 }
 
 fn run_audit_loop(bpk_ts: &Path, store_dir: &Path, extra_args: &[&str]) -> Result<String> {
-    let process = HbatProcess::spawn(store_dir)?;
+    let process = RefbatProcess::spawn(store_dir)?;
     let port = process.port;
     let port_string = port.to_string();
 
@@ -84,15 +84,15 @@ fn run_audit_loop(bpk_ts: &Path, store_dir: &Path, extra_args: &[&str]) -> Resul
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
-struct HbatProcess {
+struct RefbatProcess {
     child: Child,
     port: u16,
 }
 
-impl HbatProcess {
+impl RefbatProcess {
     fn spawn(store_dir: &Path) -> Result<Self> {
-        let hbat = hbat_binary()?;
-        let mut child = Command::new(&hbat)
+        let refbat = refbat_binary()?;
+        let mut child = Command::new(&refbat)
             .arg("serve")
             .arg("--store")
             .arg(store_dir)
@@ -102,9 +102,9 @@ impl HbatProcess {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .with_context(|| format!("spawn {}", hbat.display()))?;
+            .with_context(|| format!("spawn {}", refbat.display()))?;
 
-        let stdout = child.stdout.take().context("pipe hbat stdout")?;
+        let stdout = child.stdout.take().context("pipe refbat stdout")?;
         let mut reader = BufReader::new(stdout);
         let mut ready_line = String::new();
         let deadline = Instant::now() + Duration::from_secs(10);
@@ -122,7 +122,7 @@ impl HbatProcess {
                 Ok(0) => {
                     let stderr = read_child_stderr(&mut child);
                     let _ = child.kill();
-                    bail!("hbat closed stdout before HBAT_READY\nstderr:\n{stderr}");
+                    bail!("refbat closed stdout before HBAT_READY\nstderr:\n{stderr}");
                 }
                 Ok(_) => {
                     if ready_line.starts_with(READY_PREFIX) {
@@ -149,7 +149,7 @@ impl HbatProcess {
     }
 }
 
-impl Drop for HbatProcess {
+impl Drop for RefbatProcess {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
@@ -189,12 +189,16 @@ fn extract_stream_lines(output: &str) -> Result<Vec<String>> {
     Ok(lines)
 }
 
-fn hbat_binary() -> Result<PathBuf> {
-    let name = if cfg!(windows) { "hbat.exe" } else { "hbat" };
+fn refbat_binary() -> Result<PathBuf> {
+    let name = if cfg!(windows) {
+        "refbat.exe"
+    } else {
+        "refbat"
+    };
     let path = cargo_target_dir()?.join("debug").join(name);
     if !path.exists() {
         bail!(
-            "hbat binary missing at {}; run `cargo build -p hbat` first",
+            "refbat binary missing at {}; run `cargo build -p refbat` first",
             path.display()
         );
     }

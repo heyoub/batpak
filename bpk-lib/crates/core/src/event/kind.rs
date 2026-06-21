@@ -179,19 +179,19 @@ impl EventKind {
     pub const TOMBSTONE: Self = Self(0x0FFE);
 
     /// Fixture-only: NETBAT/1 wire-parity heartbeat request payload used by
-    /// the `hbat` reference host. Category `0xF`, type_id `0xA01`.
+    /// the `refbat` reference host. Category `0xF`, type_id `0xA01`.
     ///
     /// This constant lives in `batpak::event::kind` so the substrate owns
     /// the numeric registry naming, but the payload struct itself
-    /// (`hbat::heartbeat::SystemHeartbeatRequest`) lives in `hbat` — it is
+    /// (`refbat::heartbeat::SystemHeartbeatRequest`) lives in `refbat` — it is
     /// a fixture, not a substrate-promoted public event. The constant
     /// remains in sync with the `#[batpak(category = 0xF, type_id =
     /// 0xA01)]` attribute on the struct via a compile-time alignment test
-    /// in `crates/hbat/src/heartbeat.rs`.
+    /// in `crates/refbat/src/heartbeat.rs`.
     pub const SYSTEM_HEARTBEAT_REQUEST: Self = Self::custom(0xF, 0xA01);
 
     /// Fixture-only: NETBAT/1 wire-parity heartbeat ack payload used by
-    /// the `hbat` reference host. Category `0xF`, type_id `0xA02`. See
+    /// the `refbat` reference host. Category `0xF`, type_id `0xA02`. See
     /// [`SYSTEM_HEARTBEAT_REQUEST`](Self::SYSTEM_HEARTBEAT_REQUEST) for
     /// the substrate-vs-fixture placement rationale.
     pub const SYSTEM_HEARTBEAT_ACK: Self = Self::custom(0xF, 0xA02);

@@ -1,7 +1,7 @@
 #![warn(missing_docs)]
 //! Reference host library for the batpak family.
 //!
-//! This crate is the library half of the `hbat` reference host. It is not a
+//! This crate is the library half of the `refbat` reference host. It is not a
 //! product daemon and not part of the BatPAK publish family. It exists so
 //! TypeScript and other non-Rust clients have a concrete process to talk to
 //! over `NETBAT/1`, and so the workspace can prove cross-language wire parity
@@ -31,7 +31,7 @@
 //!   returns projection-run evidence via an embedder-populated registry.
 //! - [`manifest::descriptors`] consumes inventory registrations for both
 //!   event payloads and operations. Payload descriptors submit via
-//!   [`hbat_event_descriptor!`]; operation descriptors use
+//!   [`refbat_event_descriptor!`]; operation descriptors use
 //!   [`manifest::OperationDescriptorRegistration`] + `inventory::submit!`.
 //!   Fixtures remain hand-authored on [`EventPayloadFixture`]; the macro
 //!   wires field rows and fixture closures only.
@@ -47,13 +47,13 @@ mod descriptor;
 /// descriptors; the runtime handlers live in [`handlers`].
 pub mod evidence;
 /// Runtime handlers for [`bank`] operations. Capture `Arc<Store>`; pulled
-/// into the binary via the `hbat` binary's `main` and not part of the library's
+/// into the binary via the `refbat` binary's `main` and not part of the library's
 /// pure-data surface that `xtask` depends on.
 pub mod handlers;
 /// Heartbeat payload types and the registered operation descriptor.
 pub mod heartbeat;
 /// Manifest snapshot consumed by `xtask export-ts-manifest` and by the
-/// `hbat` binary.
+/// `refbat` binary.
 pub mod manifest;
 /// `receipt.verify` payload types + descriptor.
 pub mod receipt;

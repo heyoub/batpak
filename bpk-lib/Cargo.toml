@@ -9,7 +9,7 @@ members = [
     "crates/syncbat-macros",
     "crates/syncbat",
     "crates/netbat",
-    "crates/hbat",
+    "crates/refbat",
 ]
 # The cargo-fuzz crate (`fuzz/`) is its own workspace: it pulls in nightly-only
 # libfuzzer-sys / -Z build-std machinery and a `-C panic=abort` profile that

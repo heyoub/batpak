@@ -466,7 +466,7 @@ type ProjectionEvidenceRunner<State> = Box<
 ///
 /// `Store::project_run_evidence::<T>` is generic over a domain projection type
 /// because running a projection *is* executing that type's fold. A
-/// domain-neutral wire host (for example `hbat`) therefore cannot reconstruct
+/// domain-neutral wire host (for example `refbat`) therefore cannot reconstruct
 /// `T` from a request string on its own. The embedder registers each projection
 /// once (`registry.register::<MyProjection>("my.projection")`); the registry
 /// stores a monomorphized closure that discards the folded `T` state and yields

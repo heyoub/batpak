@@ -102,7 +102,7 @@ impl EventPayloadFixture for ReceiptVerifyAck {
     }
 }
 
-crate::hbat_event_descriptor! {
+crate::refbat_event_descriptor! {
     type = ReceiptVerifyRequest,
     schema_ref = RECEIPT_VERIFY_INPUT_SCHEMA_REF,
     ts_name = "ReceiptVerifyRequest",
@@ -116,7 +116,7 @@ crate::hbat_event_descriptor! {
     ],
 }
 
-crate::hbat_event_descriptor! {
+crate::refbat_event_descriptor! {
     type = ReceiptVerifyAck,
     schema_ref = RECEIPT_VERIFY_OUTPUT_SCHEMA_REF,
     ts_name = "ReceiptVerifyAck",

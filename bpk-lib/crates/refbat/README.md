@@ -1,8 +1,8 @@
-# hbat
+# refbat
 
 Reference NETBAT/1 host for the batpak family (`publish = false`).
 
-`hbat` registers all ten manifest operations against a real `Store`: five core
+`refbat` registers all ten manifest operations against a real `Store`: five core
 substrate terminals plus `system.heartbeat` and the four domain-neutral
 `evidence.*` ops. Runtime dispatch stays in `syncbat`; wire framing stays in
 `netbat`; durable records, receipts, and evidence stay in `batpak`.
@@ -18,13 +18,13 @@ just host-dev
 ```
 
 From the repository root — exports the manifest, builds the workspace, boots
-`hbat` on an ephemeral store, and runs the TypeScript heartbeat-spike through
+`refbat` on an ephemeral store, and runs the TypeScript heartbeat-spike through
 commit, query, and get.
 
 ## Boot (manual)
 
 ```sh
-cargo run -p hbat -- serve \
+cargo run -p refbat -- serve \
   --store "$(mktemp -d)" \
   --tcp 127.0.0.1:0 \
   --print-port
