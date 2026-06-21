@@ -1,4 +1,5 @@
 use crate::chaos::dm_flakey::FlakeyDevice;
+use std::io::Write as _;
 
 fn chaos_enabled() -> bool {
     std::env::var_os("BATPAK_RUN_CHAOS").is_some()
@@ -7,7 +8,10 @@ fn chaos_enabled() -> bool {
 #[test]
 fn dm_flakey_wrapper_create_flip_teardown_round_trip() {
     if !chaos_enabled() {
-        eprintln!("skipping privileged dm-flakey smoke; set BATPAK_RUN_CHAOS=1 to run it");
+        let _ = writeln!(
+            std::io::stderr(),
+            "skipping privileged dm-flakey smoke; set BATPAK_RUN_CHAOS=1 to run it"
+        );
         return;
     }
 

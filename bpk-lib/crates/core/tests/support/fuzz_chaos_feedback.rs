@@ -14,16 +14,6 @@
 //! [`FuzzChaosContext`], and pushes every gate type defined here, so every item
 //! in this module is consumed by its one consumer — no `dead_code` surface and
 //! no escape hatch required (see ADR-0012).
-// justifies: INV-MACRO-BOUNDED-CAST; this probe/gate support module narrows proptest-bounded counters and uses bounded casts while generating fuzz+chaos metrics for the feedback gate lane.
-#![allow(
-    clippy::inconsistent_digit_grouping,
-    clippy::cast_sign_loss,
-    clippy::cast_possible_truncation,
-    clippy::unnecessary_cast,
-    clippy::needless_borrows_for_generic_args,
-    clippy::disallowed_methods,
-    clippy::print_stderr
-)]
 
 use batpak::coordinate::{Coordinate, Region};
 use batpak::event::EventKind;
@@ -31,6 +21,7 @@ use batpak::guard::{Denial, Gate, GateSet};
 use batpak::outcome::Outcome;
 use batpak::store::segment::{frame_decode, frame_encode};
 use batpak::store::{AppendOptions, Store, StoreConfig};
+use std::io::Write as _;
 use std::sync::Arc;
 use std::time::Instant;
 use tempfile::TempDir;
@@ -231,7 +222,7 @@ pub fn run_fuzz_probes() -> (f64, f64, f64, u64) {
     let mut panics = 0u64;
 
     // Probe: frame_decode throughput
-    let n = 10_000;
+    let n: u32 = 10_000;
     let payloads: Vec<Vec<u8>> = (0..n)
         .map(|i| {
             let s = format!("payload-{i}");
@@ -254,7 +245,7 @@ pub fn run_fuzz_probes() -> (f64, f64, f64, u64) {
         v: u128,
     }
     let start = Instant::now();
-    for i in 0..n as u128 {
+    for i in 0..u128::from(n) {
         let w = WireProbe { v: i };
         let bytes = rmp_serde::to_vec_named(&w).expect("ser");
         let _: WireProbe = rmp_serde::from_slice(&bytes).expect("de");
@@ -263,7 +254,7 @@ pub fn run_fuzz_probes() -> (f64, f64, f64, u64) {
 
     // Probe: outcome combinator throughput
     let start = Instant::now();
-    for i in 0..n as i32 {
+    for i in 0..n {
         let o = Outcome::Ok(i);
         let _ = o
             .and_then(|x| Outcome::Ok(x.wrapping_mul(2)))
@@ -295,7 +286,7 @@ pub fn run_chaos_probes() -> (f64, u64, bool, bool, u64, f64, bool) {
                 .name(format!("fuzz-chaos-probe-write-{t}"))
                 .spawn(move || {
                     let coord =
-                        Coordinate::new(&format!("probe:t{t}"), "probe:scope").expect("valid");
+                        Coordinate::new(format!("probe:t{t}"), "probe:scope").expect("valid");
                     let mut errors = 0u64;
                     for i in 0..writes_per_thread {
                         if store
@@ -362,14 +353,15 @@ pub fn run_chaos_probes() -> (f64, u64, bool, bool, u64, f64, bool) {
 
     // --- Segment rotation data loss ---
     let rot_coord = Coordinate::new("probe:rotation", "probe:scope").expect("valid");
-    let rot_n = 50;
+    let rot_n: u64 = 50;
     for i in 0..rot_n {
         store
             .append(&rot_coord, kind, &serde_json::json!({"i": i}))
             .expect("append");
     }
     let rot_entries = store.by_entity("probe:rotation");
-    let rotation_loss = rot_n as u64 - rot_entries.len() as u64;
+    let recovered = u64::try_from(rot_entries.len()).expect("rotation entry count fits u64");
+    let rotation_loss = rot_n - recovered;
 
     // --- Subscription delivery ---
     let sub_coord = Coordinate::new("probe:sub", "probe:scope").expect("valid");
@@ -404,10 +396,11 @@ pub fn run_chaos_probes() -> (f64, u64, bool, bool, u64, f64, bool) {
     }
     let cursor_ok = cursor_count == cur_n;
 
-    match Arc::try_unwrap(store) {
-        Ok(s) => s.close().expect("close"),
-        Err(_) => panic!("Arc still has multiple owners"),
-    };
+    Arc::try_unwrap(store)
+        .ok()
+        .expect("Arc must be sole owner at close")
+        .close()
+        .expect("close");
 
     (
         write_throughput,
@@ -425,13 +418,17 @@ pub fn run_chaos_probes() -> (f64, u64, bool, bool, u64, f64, bool) {
 // ============================================================
 
 pub fn run_extended_fuzz_chaos() {
-    eprintln!("  EXTENDED: High-volume frame_decode fuzz...");
-    let n = 50_000;
+    let mut diag = std::io::stderr();
+    let _ = writeln!(diag, "  EXTENDED: High-volume frame_decode fuzz...");
+    let n: u32 = 50_000;
     let seed: u64 = std::env::var("FUZZ_CHAOS_SEED")
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(0);
-    eprintln!("fuzz_chaos seed: {seed} (override with FUZZ_CHAOS_SEED=<n>)");
+    let _ = writeln!(
+        diag,
+        "fuzz_chaos seed: {seed} (override with FUZZ_CHAOS_SEED=<n>)"
+    );
     let mut rng = fastrand::Rng::with_seed(seed);
     let start = Instant::now();
     for _ in 0..n {
@@ -442,11 +439,14 @@ pub fn run_extended_fuzz_chaos() {
         let _ = frame_decode(&data);
     }
     let frame_extended_ops = n as f64 / start.elapsed().as_secs_f64();
-    eprintln!("    {frame_extended_ops:.0} ops/sec over {n} iterations");
+    let _ = writeln!(
+        diag,
+        "    {frame_extended_ops:.0} ops/sec over {n} iterations"
+    );
 
-    eprintln!("  EXTENDED: High-volume outcome combinator fuzz...");
+    let _ = writeln!(diag, "  EXTENDED: High-volume outcome combinator fuzz...");
     let start = Instant::now();
-    for i in 0..n as i32 {
+    for i in 0..n {
         let batch = Outcome::Batch(vec![
             Outcome::Ok(i),
             Outcome::Ok(i.wrapping_add(1)),
@@ -457,17 +457,20 @@ pub fn run_extended_fuzz_chaos() {
             .map(|x| x.wrapping_mul(3));
     }
     let combinator_extended_ops = n as f64 / start.elapsed().as_secs_f64();
-    eprintln!("    {combinator_extended_ops:.0} ops/sec over {n} iterations");
+    let _ = writeln!(
+        diag,
+        "    {combinator_extended_ops:.0} ops/sec over {n} iterations"
+    );
 
-    eprintln!("  EXTENDED: Concurrent chaos storm...");
+    let _ = writeln!(diag, "  EXTENDED: Concurrent chaos storm...");
     let dir = TempDir::new().expect("temp dir");
     let config = StoreConfig::new(dir.path())
         .with_segment_max_bytes(1024)
         .with_fd_budget(4);
     let store = Arc::new(Store::open(config).expect("open"));
     let kind = EventKind::custom(0xF, 1);
-    let n_threads = 8;
-    let writes_per = 200;
+    let n_threads: u64 = 8;
+    let writes_per: u64 = 200;
 
     let start = Instant::now();
     let handles: Vec<_> = (0..n_threads)
@@ -476,7 +479,7 @@ pub fn run_extended_fuzz_chaos() {
             std::thread::Builder::new()
                 .name(format!("fuzz-chaos-ext-write-{t}"))
                 .spawn(move || {
-                    let coord = Coordinate::new(&format!("ext:t{t}"), "ext:scope").expect("valid");
+                    let coord = Coordinate::new(format!("ext:t{t}"), "ext:scope").expect("valid");
                     let mut ok = 0u64;
                     for i in 0..writes_per {
                         if store
@@ -495,26 +498,31 @@ pub fn run_extended_fuzz_chaos() {
     let total_ok: u64 = handles.into_iter().map(|h| h.join().expect("join")).sum();
     let elapsed = start.elapsed().as_secs_f64();
     let ext_throughput = total_ok as f64 / elapsed;
-    eprintln!("    {total_ok} events in {elapsed:.2}s = {ext_throughput:.0} events/sec");
+    let _ = writeln!(
+        diag,
+        "    {total_ok} events in {elapsed:.2}s = {ext_throughput:.0} events/sec"
+    );
 
     // Verify all events readable
     let store_ref = &*store;
+    let total_ok_count = usize::try_from(total_ok).expect("extended write count fits usize");
     let mut total_entries = 0;
     for t in 0..n_threads {
         total_entries += store_ref.by_entity(&format!("ext:t{t}")).len();
     }
     assert_eq!(
-        total_entries, total_ok as usize,
+        total_entries, total_ok_count,
         "EXTENDED CHAOS: index has {total_entries} entries but {total_ok} events written. \
          Data loss detected. Investigate: src/store/write/writer.rs + src/store/index/mod.rs."
     );
 
     // Close and reopen to verify durability (cold-start verification).
     // Without this, we only verified in-memory state — events could be lost on disk.
-    match Arc::try_unwrap(store) {
-        Ok(s) => s.close().expect("close"),
-        Err(_) => panic!("Arc still has multiple owners"),
-    };
+    Arc::try_unwrap(store)
+        .ok()
+        .expect("Arc must be sole owner at close")
+        .close()
+        .expect("close");
     let config2 = StoreConfig::new(dir.path());
     let store2 = Store::open(config2).expect("cold start reopen");
     let mut cold_entries = 0;
@@ -522,7 +530,7 @@ pub fn run_extended_fuzz_chaos() {
         cold_entries += store2.by_entity(&format!("ext:t{t}")).len();
     }
     assert_eq!(
-        cold_entries, total_ok as usize,
+        cold_entries, total_ok_count,
         "COLD START DATA LOSS: wrote {total_ok} events, but only {cold_entries} survived cold start.\n\
          This means events were in-memory but not durable on disk.\n\
          Investigate: src/store/write/writer.rs sync paths, segment rotation durability.\n\
@@ -622,7 +630,7 @@ pub fn run_extended_fuzz_chaos() {
         frame_ops: frame_extended_ops,
         combinator_ops: combinator_extended_ops,
         store_throughput: ext_throughput,
-        data_loss: (n_threads as u64 * writes_per as u64) - total_ok,
+        data_loss: (n_threads * writes_per) - total_ok,
     };
 
     let mut ext_gates = GateSet::new();
@@ -633,23 +641,34 @@ pub fn run_extended_fuzz_chaos() {
 
     let ext_denials = ext_gates.evaluate_all(&ext_ctx);
 
-    eprintln!("\n  ========================================");
-    eprintln!("  EXTENDED FUZZ+CHAOS GATE REPORT");
-    eprintln!("  ========================================");
-    eprintln!("    Frame fuzz:       {frame_extended_ops:.0} ops/sec");
-    eprintln!("    Combinator fuzz:  {combinator_extended_ops:.0} ops/sec");
-    eprintln!("    Store throughput: {ext_throughput:.0} events/sec");
-    eprintln!("    Data loss:        {}", ext_ctx.data_loss);
+    let _ = writeln!(diag, "\n  ========================================");
+    let _ = writeln!(diag, "  EXTENDED FUZZ+CHAOS GATE REPORT");
+    let _ = writeln!(diag, "  ========================================");
+    let _ = writeln!(
+        diag,
+        "    Frame fuzz:       {frame_extended_ops:.0} ops/sec"
+    );
+    let _ = writeln!(
+        diag,
+        "    Combinator fuzz:  {combinator_extended_ops:.0} ops/sec"
+    );
+    let _ = writeln!(diag, "    Store throughput: {ext_throughput:.0} events/sec");
+    let _ = writeln!(diag, "    Data loss:        {}", ext_ctx.data_loss);
 
     if ext_denials.is_empty() {
-        eprintln!("    Result: ALL EXTENDED GATES PASSED");
-        eprintln!("    The full fuzz+chaos feedback loop is GREEN.");
+        let _ = writeln!(diag, "    Result: ALL EXTENDED GATES PASSED");
+        let _ = writeln!(diag, "    The full fuzz+chaos feedback loop is GREEN.");
     } else {
-        eprintln!("    Result: {} EXTENDED GATES FAILED:", ext_denials.len());
+        let _ = writeln!(
+            diag,
+            "    Result: {} EXTENDED GATES FAILED:",
+            ext_denials.len()
+        );
         for d in &ext_denials {
-            eprintln!("      [{gate}] {msg}", gate = d.gate, msg = d.message);
+            let _ = writeln!(diag, "      [{gate}] {msg}", gate = d.gate, msg = d.message);
         }
-        panic!(
+        assert!(
+            ext_denials.is_empty(),
             "EXTENDED FUZZ+CHAOS FAILED: {} gate(s) denied.\n\
              Phase 1 passed but extended load testing revealed regressions.",
             ext_denials.len()

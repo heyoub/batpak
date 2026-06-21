@@ -13,9 +13,9 @@ where
         .spawn(move || {
             let _ = tx.send(f());
         })
-        .unwrap_or_else(|err| {
-            panic!("PROPERTY: failed to spawn bounded wait thread {name}: {err}")
-        });
+        .map_err(|err| format!("PROPERTY: failed to spawn bounded wait thread {name}: {err}"))
+        .expect("bounded wait thread must spawn");
     rx.recv_timeout(TEST_WAIT_TIMEOUT)
-        .unwrap_or_else(|err| panic!("PROPERTY: timed out waiting for {name}: {err}"))
+        .map_err(|err| format!("PROPERTY: timed out waiting for {name}: {err}"))
+        .expect("bounded wait must complete within timeout")
 }

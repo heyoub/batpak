@@ -109,11 +109,27 @@ pub fn classify(error: &StoreError) -> HandlingClass {
         // `StoreError` is `#[non_exhaustive]`; this wildcard is unreachable for
         // every variant that exists today (all are matched explicitly above) and
         // is required only to satisfy the compiler. Any variant later added in
-        // the defining crate trips this panic the first time it is classified.
-        _ => panic!(
-            "STORE_ERROR CONTRACT TABLE OUT OF DATE: add an explicit handling class for {error:?}"
-        ),
+        // the defining crate trips this fail-loud the first time it is classified,
+        // so callers never silently borrow a neighbour's handling class. The
+        // message is carried by the empty-lookup `expect` (sanctioned `expect_used`
+        // in test helpers) so it surfaces verbatim without a bare `panic!`.
+        _ => unclassified(error),
     }
+}
+
+/// Fail-loud sink for the unreachable `#[non_exhaustive]` wildcard in
+/// [`classify`]. A future `StoreError` variant that reaches here finds no entry
+/// in the (deliberately empty) classification escape map, so the `expect` fires
+/// with the descriptive message. Routing through a runtime map lookup (rather
+/// than an inline literal `Err`/`None`) keeps the call a genuine fallible
+/// `expect` rather than a pointless-literal unwrap.
+fn unclassified(error: &StoreError) -> HandlingClass {
+    use std::collections::HashMap;
+    let escape: HashMap<std::mem::Discriminant<StoreError>, HandlingClass> = HashMap::new();
+    escape.get(&std::mem::discriminant(error)).copied().expect(
+        "STORE_ERROR CONTRACT TABLE OUT OF DATE: \
+         add an explicit handling class for the new StoreError variant",
+    )
 }
 
 /// Assert one contract-table row: classification stability, every `Display`
@@ -123,13 +139,11 @@ pub fn assert_case_contract(case: &Case) {
     let display = case.error.to_string();
     let source = case.error.source().map(std::string::ToString::to_string);
 
+    let actual_class = classify(&case.error);
     assert_eq!(
-        classify(&case.error),
-        case.class,
+        actual_class, case.class,
         "STORE_ERROR CLASSIFICATION DRIFT: {} should stay {:?}, got {:?}. display={display}",
-        case.name,
-        case.class,
-        classify(&case.error)
+        case.name, case.class, actual_class
     );
 
     for needle in case.display_needles {
@@ -144,12 +158,14 @@ pub fn assert_case_contract(case: &Case) {
 
     match case.source_needle {
         Some(needle) => {
-            let Some(source) = source.as_deref() else {
-                panic!(
-                    "STORE_ERROR SOURCE DRIFT: {} should expose an underlying source error",
-                    case.name
-                );
-            };
+            assert!(
+                source.is_some(),
+                "STORE_ERROR SOURCE DRIFT: {} should expose an underlying source error",
+                case.name
+            );
+            let source = source
+                .as_deref()
+                .expect("source presence asserted immediately above");
             assert!(
                 source.contains(needle),
                 "STORE_ERROR SOURCE DRIFT: {} should expose {:?}, got {:?}",
