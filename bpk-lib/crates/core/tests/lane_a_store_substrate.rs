@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; lane A substrate doctrine tests use panic for PROPERTY mismatches only.
-#![allow(clippy::panic)]
 //! PROVES: compaction structural evidence is deterministic (`CompactionReportBody`); append idempotency via event id +
 //! keyed batch replay; public reads expose explicit predicate bounds (`Region`/entity/cursor surfaces).
 //! CATCHES: nondeterministic compaction report fields; partial batch idempotency faking success; implicit unbounded scans.
@@ -279,10 +277,10 @@ fn idempotency_batch_partial_cache_rejected_instead_of_silent_success() {
         )
         .expect("new item"),
     ];
-    let err = match store.append_batch(items) {
-        Ok(_) => panic!("PROPERTY: partial idempotency replay must not return Ok"),
-        Err(e) => e,
-    };
+    let err = store
+        .append_batch(items)
+        .map(|_| ())
+        .expect_err("PROPERTY: partial idempotency replay must not return Ok");
     assert!(
         matches!(err, StoreError::IdempotencyPartialBatch { .. }),
         "wrong error: {err:?}"
@@ -368,7 +366,7 @@ fn public_canal_trait_pulls_cursor_and_subscription_items() {
             assert_eq!(CanalItem::event_id(&entry), u128::from(first.event_id));
         }
         other @ (CanalBatch::Empty | CanalBatch::Many(_)) => {
-            panic!("PROPERTY: cursor canal should yield one entry, got {other:?}")
+            unreachable!("PROPERTY: cursor canal should yield one entry, got {other:?}")
         }
     }
 
@@ -387,7 +385,9 @@ fn public_canal_trait_pulls_cursor_and_subscription_items() {
             );
         }
         other @ (CanalBatch::Empty | CanalBatch::Many(_)) => {
-            panic!("PROPERTY: subscription canal should yield one notification, got {other:?}")
+            unreachable!(
+                "PROPERTY: subscription canal should yield one notification, got {other:?}"
+            )
         }
     }
 

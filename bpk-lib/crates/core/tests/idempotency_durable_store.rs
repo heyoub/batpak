@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION, INV-IDEMPOTENCY-DURABLE-WINDOW; integration tests rely on expect/panic on unreachable failures; clippy::unwrap_used and clippy::panic are the standard harness allowances for integration tests.
-#![allow(clippy::unwrap_used, clippy::panic)]
 //! Durable idempotency key -> receipt store (Phase 3, 0.8.3).
 //!
 //! PROVES: INV-IDEMPOTENCY-DURABLE-WINDOW. A keyed append is deduplicated as a

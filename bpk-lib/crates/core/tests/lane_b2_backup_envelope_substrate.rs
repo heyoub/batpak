@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; Lane B2 backup envelope doctrine uses panic for PROPERTY mismatches only.
-#![allow(clippy::panic)]
 //! PROVES: backup manifest `manifest_hash` ignores segment permutation; restore proof reports are
 //! deterministic; envelope-only metadata does not change manifest body identity.
 //! CATCHES: unsorted segment normalization gaps; missing/extra segment at restore; digest mismatches.

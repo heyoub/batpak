@@ -17,7 +17,6 @@
 //! `wall_ms` the order falls through to `global_sequence`, so the generator MUST
 //! produce equal-`wall_ms`/distinct-`global_sequence` pairs (and vice versa) to
 //! kill a mutant that picks `self` unconditionally on the equal branch.
-#![allow(clippy::wildcard_enum_match_arm)] // justifies: INV-TEST-PANIC-AS-ASSERTION; proptest assertions report counterexamples without enumerating every variant.
 
 use proptest::prelude::*;
 use support::prelude::*;

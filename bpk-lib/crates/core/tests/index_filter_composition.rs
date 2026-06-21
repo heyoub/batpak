@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; tests in tests/index_filter_composition.rs rely on expect/panic on unreachable failures; clippy::unwrap_used and clippy::panic are the standard harness allowances for integration tests.
-#![allow(clippy::unwrap_used, clippy::panic)]
 //! Index filter composition across overlays.
 //!
 //! [INV-INDEX-FILTER-COMPOSES] For every supported overlay topology and every
@@ -137,7 +135,7 @@ fn ground_truth(corpus: &[GroundTruthEvent], region: &Region) -> HashSet<(String
                 KindFilter::Exact(k) => ev.kind == *k,
                 KindFilter::Category(c) => ev.kind.category() == *c,
                 KindFilter::Any => true,
-                _ => panic!("reference model must be updated for new KindFilter variants"),
+                _ => unreachable!("reference model must be updated for new KindFilter variants"),
             };
             if !matches {
                 continue;
@@ -195,7 +193,9 @@ fn ground_truth_ordered(
                     KindFilter::Exact(k) => ev.kind == *k,
                     KindFilter::Category(c) => ev.kind.category() == *c,
                     KindFilter::Any => true,
-                    _ => panic!("reference model must be updated for new KindFilter variants"),
+                    _ => {
+                        unreachable!("reference model must be updated for new KindFilter variants")
+                    }
                 };
                 if !matches {
                     return None;
@@ -304,7 +304,7 @@ fn assert_cursor_matches(
         }
         actual_entries.extend(actual_ordered(&batch));
     }
-    panic!(
+    unreachable!(
         "topology `{label}` cursor query `{query_name}` did not terminate within {max_batches} batches. \
          expected_len={}, actual_len={}, batch_size={batch_size}, region={region:?}",
         expected.len(),

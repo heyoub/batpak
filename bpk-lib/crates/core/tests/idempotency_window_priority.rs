@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION, INV-IDEMPOTENCY-DURABLE-WINDOW; integration tests rely on expect/panic and cast tiny synthetic counters/keys to u64 where truncation is impossible; these are standard harness allowances.
-#![allow(clippy::unwrap_used, clippy::panic, clippy::cast_possible_truncation)]
 //! Window-priority hybrid growth bound (Phase 3, 0.8.3).
 //!
 //! PROVES: INV-IDEMPOTENCY-DURABLE-WINDOW. The window is the inviolable
@@ -28,11 +26,12 @@ fn coord() -> Coordinate {
 }
 
 fn append_keyed(store: &Store, key: u128) -> batpak::store::AppendReceipt {
+    let payload_tag = u64::try_from(key & u128::from(u64::MAX)).expect("low 64 bits fit u64");
     store
         .append_with_options(
             &coord(),
             KIND,
-            &serde_json::json!({"k": key as u64}),
+            &serde_json::json!({ "k": payload_tag }),
             AppendOptions::new().with_idempotency(IdempotencyKey::from(key)),
         )
         .expect("keyed append")
@@ -63,13 +62,14 @@ fn within_window_retry_is_always_noop_even_when_cap_is_exceeded() {
     let burst = 40usize;
     let mut originals = Vec::with_capacity(burst);
     for i in 0..burst {
-        let key = 0xA000_0000_0000_0000_0000_0000_0000_0000u128 + i as u128;
+        let offset = u128::try_from(i).expect("burst index fits u128");
+        let key = 0xA000_0000_0000_0000_0000_0000_0000_0000u128 + offset;
         originals.push((key, append_keyed(&store, key)));
     }
 
     // The store should have exceeded the soft cap (window wins on correctness).
     assert!(
-        store.durable_idempotency_key_count() as u64 > max_keys,
+        u64::try_from(store.durable_idempotency_key_count()).expect("key count fits u64") > max_keys,
         "within-window key-rate spike makes the store exceed max_keys (window wins): count={}, max_keys={}",
         store.durable_idempotency_key_count(),
         max_keys
@@ -174,12 +174,17 @@ fn fail_closed_overflow_refuses_new_key_but_keeps_existing_noops() {
     // lifecycle events already recorded at open).
     let mut originals = Vec::new();
     let mut next = 0x5000_0000_0000_0000_0000_0000_0000_0000u128;
-    while (store.durable_idempotency_key_count() as u64) < max_keys {
+    while u64::try_from(store.durable_idempotency_key_count()).expect("key count fits u64")
+        < max_keys
+    {
         let key = next;
         next += 1;
         originals.push((key, append_keyed(&store, key)));
     }
-    assert_eq!(store.durable_idempotency_key_count() as u64, max_keys);
+    assert_eq!(
+        u64::try_from(store.durable_idempotency_key_count()).expect("key count fits u64"),
+        max_keys
+    );
     assert!(
         !originals.is_empty(),
         "recorded at least one of our own keys"
@@ -187,15 +192,15 @@ fn fail_closed_overflow_refuses_new_key_but_keeps_existing_noops() {
 
     // A new key over the cap is refused.
     let new_key = 0x6000_0000_0000_0000_0000_0000_0000_0001u128;
-    let err = match store.append_with_options(
-        &coord(),
-        KIND,
-        &serde_json::json!({"over": true}),
-        AppendOptions::new().with_idempotency(IdempotencyKey::from(new_key)),
-    ) {
-        Ok(_) => panic!("new key over cap must be refused under FailClosed"),
-        Err(e) => e,
-    };
+    let err = store
+        .append_with_options(
+            &coord(),
+            KIND,
+            &serde_json::json!({"over": true}),
+            AppendOptions::new().with_idempotency(IdempotencyKey::from(new_key)),
+        )
+        .map(|_| ())
+        .expect_err("new key over cap must be refused under FailClosed");
     assert!(
         matches!(err, StoreError::IdempotencyOverflowFailClosed { .. }),
         "FailClosed refuses the new keyed append: {err:?}"

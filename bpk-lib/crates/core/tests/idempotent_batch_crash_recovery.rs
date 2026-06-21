@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION, INV-BATCH-CRASH-RECOVERY; tests in tests/idempotent_batch_crash_recovery.rs rely on expect/panic on unreachable failures; clippy::unwrap_used and clippy::panic are the standard harness allowances for integration tests.
-#![allow(clippy::unwrap_used, clippy::panic)]
 //! Idempotent batch shape + replay recovery.
 //!
 //! PROVES: fully keyed batch is replayable after close+reopen without duplicate events;
@@ -103,13 +101,9 @@ fn partial_keys_rejected_synchronously() {
         .expect("unkeyed item"),
     ];
 
-    let result = store.append_batch(items);
-    let err = match result {
-        Ok(_) => panic!(
-            "PROPERTY: a batch that mixes keyed and unkeyed items must be rejected synchronously"
-        ),
-        Err(err) => err,
-    };
+    let err = store.append_batch(items).map(|_| ()).expect_err(
+        "PROPERTY: a batch that mixes keyed and unkeyed items must be rejected synchronously",
+    );
     assert!(
         matches!(err, StoreError::IdempotencyPartialBatch { .. }),
         "PROPERTY: partial-key batch must route to StoreError::IdempotencyPartialBatch, got {err:?}"
@@ -148,17 +142,17 @@ fn batch_max_bytes_accepts_exact_limit_and_rejects_one_byte_over() {
     let over_dir = TempDir::new().expect("temp dir");
     let over_store =
         Store::open(config(&over_dir).with_batch_max_bytes(exact_limit - 1)).expect("open over");
-    let err = match over_store.append_batch(items) {
-        Ok(_) => panic!("PROPERTY: batch one byte over max_bytes must be rejected"),
-        Err(err) => err,
-    };
-    // let-else is the canonical "destructure or panic" idiom used
+    let err = over_store
+        .append_batch(items)
+        .map(|_| ())
+        .expect_err("PROPERTY: batch one byte over max_bytes must be rejected");
+    // let-else is the canonical "destructure or fail" idiom used
     // throughout core tests (see cursor_durability.rs::*_corrupt). It
     // does NOT trigger clippy::wildcard_enum_match_arm over the
     // #[non_exhaustive] StoreError, so we don't need to silence the
     // lint or list every variant.
     let StoreError::BatchFailed { item_index, source } = err else {
-        panic!("PROPERTY: expected StoreError::BatchFailed, got {err:?}");
+        unreachable!("PROPERTY: expected StoreError::BatchFailed, got {err:?}");
     };
     assert_eq!(
         item_index, 0,

@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION, INV-IDEMPOTENCY-DURABLE-WINDOW; integration tests rely on expect/panic and cast a tiny synthetic key to u64 where truncation is impossible; clippy allowances are standard for harness tests.
-#![allow(clippy::unwrap_used, clippy::panic, clippy::cast_possible_truncation)]
 //! Crash / corruption posture for the durable idempotency sidecar (Phase 3).
 //!
 //! PROVES: INV-IDEMPOTENCY-DURABLE-WINDOW (graceful-degradation posture). A
@@ -34,11 +32,12 @@ fn config(dir: &TempDir) -> StoreConfig {
 }
 
 fn append_keyed(store: &Store, key: u128) -> batpak::store::AppendReceipt {
+    let payload_tag = u64::try_from(key & u128::from(u64::MAX)).expect("low 64 bits fit u64");
     store
         .append_with_options(
             &coord(),
             KIND,
-            &serde_json::json!({"k": key as u64}),
+            &serde_json::json!({ "k": payload_tag }),
             AppendOptions::new().with_idempotency(IdempotencyKey::from(key)),
         )
         .expect("keyed append")

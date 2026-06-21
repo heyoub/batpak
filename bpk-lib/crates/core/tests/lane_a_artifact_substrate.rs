@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; lane A substrate doctrine tests use panic for PROPERTY mismatches only.
-#![allow(clippy::panic)]
 //! PROVES: `batpak::artifact` separates body digest from envelope digest; signature/attachment vector order is
 //! canonically sorted before hashing so permutations do not change `envelope_hash`.
 //! CATCHES: body/envelope identity coupling; permutation-sensitive envelope hashing.
@@ -228,10 +226,9 @@ fn artifact_invalid_signature_finding_deterministic() {
             assert_eq!(*key_id, key);
             assert!(!reason.is_empty());
         }
-        _ => panic!(
-            "PROPERTY: expected exactly one InvalidSignature finding, got {:?}",
-            report.findings
-        ),
+        other => {
+            unreachable!("PROPERTY: expected exactly one InvalidSignature finding, got {other:?}")
+        }
     }
 
     let hrep = artifact_verification_report_body_hash(&report).expect("report digest");
