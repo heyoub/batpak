@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
-const READY_PREFIX: &str = "HBAT_READY ";
+const READY_PREFIX: &str = "REFBAT_READY ";
 const STREAM_BEGIN: &str = "audit-loop: stream begin";
 const STREAM_END: &str = "audit-loop: stream end";
 
@@ -114,7 +114,7 @@ impl RefbatProcess {
                 let stderr = read_child_stderr(&mut child);
                 let _ = child.kill();
                 bail!(
-                    "timed out waiting for HBAT_READY (read so far: {ready_line:?})\nstderr:\n{stderr}"
+                    "timed out waiting for REFBAT_READY (read so far: {ready_line:?})\nstderr:\n{stderr}"
                 );
             }
             ready_line.clear();
@@ -122,7 +122,7 @@ impl RefbatProcess {
                 Ok(0) => {
                     let stderr = read_child_stderr(&mut child);
                     let _ = child.kill();
-                    bail!("refbat closed stdout before HBAT_READY\nstderr:\n{stderr}");
+                    bail!("refbat closed stdout before REFBAT_READY\nstderr:\n{stderr}");
                 }
                 Ok(_) => {
                     if ready_line.starts_with(READY_PREFIX) {
@@ -131,19 +131,19 @@ impl RefbatProcess {
                 }
                 Err(error) => {
                     let _ = child.kill();
-                    return Err(error).context("read HBAT_READY");
+                    return Err(error).context("read REFBAT_READY");
                 }
             }
         }
 
         let payload = ready_line.trim_start_matches(READY_PREFIX).trim();
         let parsed: serde_json::Value =
-            serde_json::from_str(payload).context("HBAT_READY payload is JSON")?;
+            serde_json::from_str(payload).context("REFBAT_READY payload is JSON")?;
         let port_u64 = parsed
             .get("port")
             .and_then(serde_json::Value::as_u64)
-            .context("HBAT_READY carries a numeric port")?;
-        let port = u16::try_from(port_u64).context("HBAT_READY port fits in u16")?;
+            .context("REFBAT_READY carries a numeric port")?;
+        let port = u16::try_from(port_u64).context("REFBAT_READY port fits in u16")?;
 
         Ok(Self { child, port })
     }

@@ -1,7 +1,7 @@
 //! End-to-end TCP integration tests for the `refbat` binary.
 //!
 //! These tests spawn the actual `refbat` binary as a subprocess, parse
-//! the `HBAT_READY {…}` rendezvous line from its stdout, connect over
+//! the `REFBAT_READY {…}` rendezvous line from its stdout, connect over
 //! TCP, and drive the ten-op NETBAT/1 manifest the reference host
 //! advertises. They close the cross-language parity loop on the Rust
 //! side the same way `bpk-ts/examples/heartbeat-spike` does on the TS
@@ -12,7 +12,7 @@
 //! hole.
 //!
 //! PROVES:
-//!   - HBAT_READY rendezvous is a parseable JSON line on stdout.
+//!   - REFBAT_READY rendezvous is a parseable JSON line on stdout.
 //!   - NETBAT/1 reachability for the ten-op manifest over TCP.
 //!   - Success-path evidence identity for `evidence.chain_walk`,
 //!     `evidence.store_resource`, and `evidence.read_walk`.
@@ -55,7 +55,7 @@ use refbat::{
 };
 
 const REFBAT_BIN: &str = env!("CARGO_BIN_EXE_refbat");
-const READY_PREFIX: &str = "HBAT_READY ";
+const READY_PREFIX: &str = "REFBAT_READY ";
 
 /// Spawned refbat process holding the temp dir alive for the duration
 /// of the test.
@@ -88,13 +88,13 @@ impl RefbatProcess {
         loop {
             if Instant::now() > deadline {
                 let _ = child.kill();
-                bail!("timed out waiting for HBAT_READY (read so far: {ready_line:?})");
+                bail!("timed out waiting for REFBAT_READY (read so far: {ready_line:?})");
             }
             ready_line.clear();
             match reader.read_line(&mut ready_line) {
                 Ok(0) => {
                     let _ = child.kill();
-                    bail!("refbat closed stdout before printing HBAT_READY");
+                    bail!("refbat closed stdout before printing REFBAT_READY");
                 }
                 Ok(_) => {
                     if ready_line.starts_with(READY_PREFIX) {
@@ -103,19 +103,19 @@ impl RefbatProcess {
                 }
                 Err(error) => {
                     let _ = child.kill();
-                    return Err(error).context("read HBAT_READY");
+                    return Err(error).context("read REFBAT_READY");
                 }
             }
         }
 
         let payload = ready_line.trim_start_matches(READY_PREFIX).trim();
         let parsed: serde_json::Value =
-            serde_json::from_str(payload).context("HBAT_READY payload is JSON")?;
+            serde_json::from_str(payload).context("REFBAT_READY payload is JSON")?;
         let port_u64 = parsed
             .get("port")
             .and_then(|v| v.as_u64())
-            .context("HBAT_READY carries a numeric port")?;
-        let port = u16::try_from(port_u64).context("HBAT_READY port fits in u16")?;
+            .context("REFBAT_READY carries a numeric port")?;
+        let port = u16::try_from(port_u64).context("REFBAT_READY port fits in u16")?;
 
         Ok(Self {
             child,
@@ -650,7 +650,7 @@ fn malformed_frame_returns_typed_err() -> Result<()> {
 
 #[test]
 fn ready_payload_carries_addr_port_and_protocol() -> Result<()> {
-    // Spawn-and-introspect smoke test: just ensure HBAT_READY parses.
+    // Spawn-and-introspect smoke test: just ensure REFBAT_READY parses.
     let host = RefbatProcess::spawn()?;
     assert!(host.port() > 0);
     Ok(())

@@ -42,7 +42,7 @@ struct ServeArgs {
     tcp: String,
 
     /// After binding, emit exactly one machine-readable ready line to
-    /// stdout (prefix `HBAT_READY ` followed by JSON), then enter the
+    /// stdout (prefix `REFBAT_READY ` followed by JSON), then enter the
     /// serve loop. Intended for CI rendezvous.
     #[arg(long)]
     print_port: bool,
@@ -107,15 +107,15 @@ fn serve(args: &ServeArgs) -> Result<()> {
 
     if args.print_port {
         let ready = format!(
-            "HBAT_READY {{\"addr\":\"{}\",\"port\":{},\"protocol\":\"NETBAT/1\"}}\n",
+            "REFBAT_READY {{\"addr\":\"{}\",\"port\":{},\"protocol\":\"NETBAT/1\"}}\n",
             local_addr,
             local_addr.port()
         );
         let mut stdout = std::io::stdout().lock();
         stdout
             .write_all(ready.as_bytes())
-            .context("write HBAT_READY line")?;
-        stdout.flush().context("flush stdout after HBAT_READY")?;
+            .context("write REFBAT_READY line")?;
+        stdout.flush().context("flush stdout after REFBAT_READY")?;
     }
 
     let shutdown = ShutdownHandle::new();

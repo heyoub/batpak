@@ -19,7 +19,7 @@
  *
  *   cargo run -p refbat -- serve --store $(mktemp -d) --tcp 127.0.0.1:0 --print-port
  *
- * Parse the `HBAT_READY {"port": N, ...}` line on stdout, then invoke:
+ * Parse the `REFBAT_READY {"port": N, ...}` line on stdout, then invoke:
  *
  *   pnpm --filter @batpak/example-heartbeat-spike start -- --port N
  */
@@ -72,7 +72,7 @@ function parseArgs(argv: readonly string[]): CliArgs {
     }
   }
   if (port === null) {
-    throw new Error("--port is required (read it from the refbat HBAT_READY line)");
+    throw new Error("--port is required (read it from the refbat REFBAT_READY line)");
   }
   return { port, host };
 }

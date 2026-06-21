@@ -30,7 +30,7 @@ cargo run -p refbat -- serve \
   --print-port
 ```
 
-The first stdout line is machine-readable rendezvous JSON (`HBAT_READY …`).
+The first stdout line is machine-readable rendezvous JSON (`REFBAT_READY …`).
 
 ## Docs
 

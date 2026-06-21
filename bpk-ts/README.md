@@ -144,7 +144,7 @@ cargo run -p refbat -- serve \
 The first stdout line is a machine-readable rendezvous:
 
 ```
-HBAT_READY {"addr":"127.0.0.1:54321","port":54321,"protocol":"NETBAT/1"}
+REFBAT_READY {"addr":"127.0.0.1:54321","port":54321,"protocol":"NETBAT/1"}
 ```
 
 Parse the JSON, take `port`, connect.
@@ -167,7 +167,7 @@ cd ../bpk-lib
 cargo run -p refbat -- serve --store "$(mktemp -d)" --tcp 127.0.0.1:0 --print-port \
   > /tmp/refbat-ready.txt 2>&1 &
 sleep 0.5
-PORT=$(node -e 'const j=require("fs").readFileSync("/tmp/refbat-ready.txt","utf-8").trim();process.stdout.write(String(JSON.parse(j.replace(/^HBAT_READY /,"")).port))')
+PORT=$(node -e 'const j=require("fs").readFileSync("/tmp/refbat-ready.txt","utf-8").trim();process.stdout.write(String(JSON.parse(j.replace(/^REFBAT_READY /,"")).port))')
 
 cd ../bpk-ts
 node examples/heartbeat-spike/dist/index.js --port "$PORT"

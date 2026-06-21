@@ -14,8 +14,8 @@ use std::thread;
 use std::time::Duration;
 use tempfile::TempDir;
 
-const READY_PREFIX: &str = "HBAT_READY ";
-const HBAT_READY_TIMEOUT: Duration = Duration::from_secs(10);
+const READY_PREFIX: &str = "REFBAT_READY ";
+const REFBAT_READY_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub(crate) fn host_dev(args: &HostDevArgs) -> Result<()> {
     let project = project_root()?;
@@ -183,12 +183,12 @@ impl RefbatProcess {
 
         let payload = ready_line.trim_start_matches(READY_PREFIX).trim();
         let parsed: serde_json::Value =
-            serde_json::from_str(payload).context("HBAT_READY payload is JSON")?;
+            serde_json::from_str(payload).context("REFBAT_READY payload is JSON")?;
         let port_u64 = parsed
             .get("port")
             .and_then(serde_json::Value::as_u64)
-            .context("HBAT_READY carries a numeric port")?;
-        let port = u16::try_from(port_u64).context("HBAT_READY port fits in u16")?;
+            .context("REFBAT_READY carries a numeric port")?;
+        let port = u16::try_from(port_u64).context("REFBAT_READY port fits in u16")?;
 
         Ok(Self {
             child,
@@ -241,16 +241,16 @@ fn read_refbat_ready_line(child: &mut Child) -> Result<String> {
         })
         .context("spawn refbat ready reader thread")?;
 
-    match rx.recv_timeout(HBAT_READY_TIMEOUT) {
+    match rx.recv_timeout(REFBAT_READY_TIMEOUT) {
         Ok(ReadyReadResult::Ready(line)) => Ok(line),
         Ok(ReadyReadResult::Eof) => {
             let _ = child.kill();
             let stderr = read_child_stderr(child);
-            bail!("refbat closed stdout before HBAT_READY\nstderr:\n{stderr}");
+            bail!("refbat closed stdout before REFBAT_READY\nstderr:\n{stderr}");
         }
         Ok(ReadyReadResult::Error(error)) => {
             let _ = child.kill();
-            Err(error).context("read HBAT_READY")
+            Err(error).context("read REFBAT_READY")
         }
         Err(mpsc::RecvTimeoutError::Timeout) => {
             let _ = child.kill();
@@ -260,13 +260,13 @@ fn read_refbat_ready_line(child: &mut Child) -> Result<String> {
                 .unwrap_or_default();
             let stderr = read_child_stderr(child);
             bail!(
-                "timed out waiting for HBAT_READY (read so far: {ready_line:?})\nstderr:\n{stderr}"
+                "timed out waiting for REFBAT_READY (read so far: {ready_line:?})\nstderr:\n{stderr}"
             );
         }
         Err(mpsc::RecvTimeoutError::Disconnected) => {
             let _ = child.kill();
             let stderr = read_child_stderr(child);
-            bail!("refbat readiness reader exited before HBAT_READY\nstderr:\n{stderr}");
+            bail!("refbat readiness reader exited before REFBAT_READY\nstderr:\n{stderr}");
         }
     }
 }
