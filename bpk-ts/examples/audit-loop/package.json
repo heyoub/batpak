@@ -14,6 +14,6 @@
     "@batpak/sdk": "workspace:*"
   },
   "devDependencies": {
-    "vitest": "2.1.9"
+    "vitest": "3.2.6"
   }
 }
