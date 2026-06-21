@@ -1,6 +1,7 @@
 use super::columnar::CachedProjectionSlot;
-use super::{DiskPos, StoreIndex};
+use super::{DiskPos, IndexEntry, StoreIndex};
 use crate::event::EventKind;
+use crate::store::stats::HlcPoint;
 use std::any::TypeId;
 
 #[inline]
@@ -16,6 +17,8 @@ pub(crate) fn projection_kind_matches(relevant_kinds: &[EventKind], kind: EventK
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ProjectionReplayItem {
     pub(crate) global_sequence: u64,
+    pub(crate) lane: u32,
+    pub(crate) point: HlcPoint,
     pub(crate) disk_pos: DiskPos,
 }
 
@@ -24,6 +27,20 @@ pub(crate) struct ProjectionReplayPlan {
     pub(crate) watermark: u64,
     pub(crate) generation: u64,
     pub(crate) items: Vec<ProjectionReplayItem>,
+}
+
+impl ProjectionReplayItem {
+    fn from_entry(entry: &IndexEntry) -> Self {
+        Self {
+            global_sequence: entry.global_sequence,
+            lane: entry.dag_lane,
+            point: HlcPoint {
+                wall_ms: entry.wall_ms,
+                global_sequence: entry.global_sequence,
+            },
+            disk_pos: entry.disk_pos,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -76,19 +93,19 @@ impl StoreIndex {
         relevant_kinds: &[EventKind],
     ) -> Option<ProjectionReplayPlan> {
         let _read = self.swap_gate.read();
+        let visibility = self.sequence.snapshot();
         if let Some((watermark, generation, items)) =
             self.scan.projection_candidates(entity, relevant_kinds)
         {
+            let items: Vec<ProjectionReplayItem> = items
+                .into_iter()
+                .filter_map(|hit| self.upgrade_hit_visible_on_lane(hit, &visibility))
+                .map(|entry| ProjectionReplayItem::from_entry(&entry))
+                .collect();
             return Some(ProjectionReplayPlan {
                 watermark,
                 generation,
-                items: items
-                    .into_iter()
-                    .map(|(global_sequence, disk_pos)| ProjectionReplayItem {
-                        global_sequence,
-                        disk_pos,
-                    })
-                    .collect(),
+                items,
             });
         }
 
@@ -100,10 +117,10 @@ impl StoreIndex {
                 continue;
             }
             watermark = Some(entry.global_sequence);
-            items.push(ProjectionReplayItem {
-                global_sequence: entry.global_sequence,
-                disk_pos: entry.disk_pos,
-            });
+            if !visibility.is_visible_on_lane(entry.global_sequence, entry.dag_lane) {
+                continue;
+            }
+            items.push(ProjectionReplayItem::from_entry(entry));
         }
 
         Some(ProjectionReplayPlan {

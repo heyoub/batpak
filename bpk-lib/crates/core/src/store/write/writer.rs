@@ -324,7 +324,7 @@ mod tests {
         };
         let mut state = WatermarkState::default();
 
-        state.advance_accepted(point);
+        state.advance_accepted_on_lane(0, point);
         state.advance_durable(point);
         assert_eq!(
             state.snapshot().oldest_pending_write_age_ms,
@@ -332,7 +332,7 @@ mod tests {
             "PROPERTY: durability to accepted clears pending write age"
         );
 
-        state.advance_accepted(point);
+        state.advance_accepted_on_lane(0, point);
         assert_eq!(
             state.snapshot().oldest_pending_write_age_ms,
             None,

@@ -262,7 +262,7 @@ pub(crate) fn validate_observation_evidence(
     observation_id: &str,
     evidence: &str,
 ) -> Result<()> {
-    let mut source_cache = SourceCache::new(&repo_root);
+    let mut source_cache = SourceCache::new(repo_root);
     validate_observation_evidence_with_cache(repo_root, observation_id, evidence, &mut source_cache)
 }
 

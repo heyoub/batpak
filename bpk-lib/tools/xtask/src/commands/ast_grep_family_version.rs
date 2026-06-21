@@ -37,8 +37,8 @@ rule:
     kind: string
     regex: '^({stale_json_alt})$'"#
     )
-    .unwrap();
-    writeln!(inline_rules, "---").unwrap();
+    .expect("writing to an in-memory String is infallible");
+    writeln!(inline_rules, "---").expect("writing to an in-memory String is infallible");
     writeln!(
         inline_rules,
         r#"id: stale-family-version-manifest-json
@@ -52,8 +52,8 @@ rule:
     kind: string
     regex: '^({stale_json_alt})$'"#
     )
-    .unwrap();
-    writeln!(inline_rules, "---").unwrap();
+    .expect("writing to an in-memory String is infallible");
+    writeln!(inline_rules, "---").expect("writing to an in-memory String is infallible");
     writeln!(
         inline_rules,
         r#"id: stale-family-version-traceability
@@ -64,8 +64,8 @@ rule:
   kind: plain_scalar
   regex: '^current_version: ({stale_yaml_alt})$'"#
     )
-    .unwrap();
-    writeln!(inline_rules, "---").unwrap();
+    .expect("writing to an in-memory String is infallible");
+    writeln!(inline_rules, "---").expect("writing to an in-memory String is infallible");
     let mut ts_any = String::new();
     for (index, version) in stale.iter().enumerate() {
         if index > 0 {
@@ -87,8 +87,8 @@ rule:
   any:
 {ts_any}"#
     )
-    .unwrap();
-    writeln!(inline_rules, "---").unwrap();
+    .expect("writing to an in-memory String is infallible");
+    writeln!(inline_rules, "---").expect("writing to an in-memory String is infallible");
     let rust_any = stale
         .iter()
         .map(|version| format!("    - pattern: 'const BATPAK_VERSION: &str = \"{version}\";'"))
@@ -104,7 +104,7 @@ rule:
   any:
 {rust_any}"#
     )
-    .unwrap();
+    .expect("writing to an in-memory String is infallible");
 
     let mut command = Command::new("sg");
     command.current_dir(&root).args([

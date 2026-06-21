@@ -74,6 +74,27 @@ Growth is bounded by `IdempotencyRetention` (config `with_idempotency_retention`
 
 Derive operation keys with `IdempotencyKey::for_operation(domain, components)` — a length-delimited blake3 over `(domain, components)` (so `["ab","c"] != ["a","bc"]`). This is OPERATION IDENTITY, not a payload content hash: it answers "is this the same operation?", not "are these the same bytes?". Do not use it as a content-addressing scheme.
 
+## Fork And Import
+
+`Store::fork_with_evidence(dest, options)` materializes a self-contained store
+directory and returns deterministic evidence. It does not open the fork. Opening
+is caller-owned so the clone stays pristine until the caller decides to mutate
+it.
+
+Fork is filesystem-level sharing with Rust-like aliasing discipline: sealed
+segments are immutable and may be reflinked or hardlinked; the active segment,
+durable idempotency sidecar, visibility ranges, and pending compaction marker
+are copied. Regenerable cold-start caches are excluded by default. Symlink leaf
+destinations are rejected.
+
+`Store::import_events(source, selector, options)` re-applies visible source
+events into a destination store. It is not a merge. Destination event ids,
+global sequences, and per-entity predecessors are local to the destination.
+Payload bytes and content hashes are preserved; correlation is preserved as
+opaque metadata; causation is cleared so no source event id is forged as a
+destination-local edge. Each imported event carries provenance keyed by the
+caller-supplied source namespace and source event id.
+
 ## Envelope Boundary
 
 The substrate event kind is not the same as a domain receipt taxonomy. batpak may

@@ -4,7 +4,7 @@ use crate::source_cache::SourceCache;
 use anyhow::{bail, Context, Result};
 use std::collections::BTreeSet;
 use std::path::Path;
-use std::sync::Arc;
+use std::rc::Rc;
 use syn::visit::{self, Visit};
 use syn::Item;
 
@@ -117,7 +117,7 @@ pub(crate) fn inventory(
     // 2. Build the reference corpus: parseable .rs files under tests/ and src/.
     // Compile-fail UI fixtures are intentionally invalid Rust and are skipped;
     // comments and string literals never count because reference detection is AST-based.
-    let mut search_asts: Vec<Arc<syn::File>> = Vec::new();
+    let mut search_asts: Vec<Rc<syn::File>> = Vec::new();
     for path in rust_files(&core_tests_root(repo_root))
         .into_iter()
         .chain(rust_files(&core_src_root(repo_root)))

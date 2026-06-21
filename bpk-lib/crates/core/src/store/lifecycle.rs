@@ -1,7 +1,13 @@
 use crate::coordinate::Coordinate;
 use crate::event::{EventKind, StoredEvent};
-use crate::store::cold_start::{latest_segment_watermark, ColdStartArtifactKind};
+use crate::store::cold_start::latest_segment_watermark;
 use crate::store::file_classification::StoreFileKind;
+use crate::store::fork_report::{
+    destination_path_digest as fork_destination_path_digest, fork_evidence_report, ForkFinding,
+    ForkOptions, ForkReport, ForkReportInput,
+};
+use crate::store::lifecycle_close::write_cold_start_artifacts_on_close;
+use crate::store::lifecycle_fork::{fork_entry, ForkAccumulator};
 use crate::store::platform::fs as platform_fs;
 use crate::store::segment::scan as reader;
 use crate::store::segment::{self, Active, FramePayload};
@@ -154,6 +160,89 @@ pub(crate) fn snapshot(
     Ok(report)
 }
 
+pub(crate) fn fork(
+    store: &Store<Open>,
+    dest: &std::path::Path,
+    options: ForkOptions,
+) -> Result<ForkReport, StoreError> {
+    tracing::debug!(
+        target: "batpak::flow",
+        flow = "fork",
+        destination = %dest.display()
+    );
+    let _lifecycle = store.lifecycle_gate.lock();
+    let fork_fence = store.begin_visibility_fence()?;
+    let fence_token = fork_fence.token();
+    sync(store)?;
+    store.index.idemp.flush(&store.config.data_dir)?;
+    let (source_watermark_segment_id, source_watermark_offset) =
+        latest_segment_watermark(&store.config.data_dir)?;
+    let active_segment_id = source_watermark_segment_id;
+
+    platform_fs::reject_symlink_leaf(dest, "fork destination")?;
+    platform_fs::create_dir_all(dest).map_err(StoreError::Io)?;
+    // Refuse forking a store onto its own data dir: the clear pass below would
+    // delete the live store's files before copying (data loss).
+    let dest_canon = platform_fs::canonicalize(dest).map_err(StoreError::Io)?;
+    let src_canon = platform_fs::canonicalize(&store.config.data_dir).map_err(StoreError::Io)?;
+    if dest_canon == src_canon {
+        return Err(StoreError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!(
+                "fork destination {} resolves to the source data directory",
+                dest.display()
+            ),
+        )));
+    }
+    let cleared_artifact_count = clear_fork_store_artifacts(dest)?;
+    let entries = platform_fs::read_dir(&store.config.data_dir).map_err(StoreError::Io)?;
+
+    let mut acc = ForkAccumulator::default();
+    if cleared_artifact_count > 0 {
+        acc.findings.push(ForkFinding::DestinationCleared {
+            artifact_count: cleared_artifact_count,
+        });
+    }
+
+    for entry in entries {
+        let entry = entry.map_err(StoreError::Io)?;
+        let path = entry.path();
+        let source_kind = StoreFileKind::from_path(&path);
+        let file_name = entry.file_name();
+        let file_name_display = file_name.to_string_lossy().into_owned();
+        let dest_path = dest.join(&file_name);
+        platform_fs::reject_symlink_leaf(&dest_path, "fork entry")?;
+
+        fork_entry(
+            &mut acc,
+            &path,
+            &source_kind,
+            file_name_display,
+            &dest_path,
+            active_segment_id,
+            &options,
+        )?;
+    }
+
+    fork_fence.cancel()?;
+    acc.findings.push(ForkFinding::FenceTokenCancelled);
+    fork_evidence_report(ForkReportInput {
+        fence_token,
+        source_watermark_segment_id,
+        source_watermark_offset,
+        active_segment_id,
+        shared_segment_ids_sorted: acc.shared_segment_ids_sorted,
+        deep_copied_segment_ids_sorted: acc.deep_copied_segment_ids_sorted,
+        strategy_counts: acc.strategy_counts,
+        copied_visibility_ranges_present: acc.copied_visibility_ranges_present,
+        copied_pending_compaction_marker_present: acc.copied_pending_compaction_marker_present,
+        copied_idempotency_store_present: acc.copied_idempotency_store_present,
+        destination_path_digest: fork_destination_path_digest(dest),
+        findings: acc.findings,
+    })
+    .map_err(StoreError::from)
+}
+
 fn snapshot_source_file_kind(file_kind: &StoreFileKind) -> Option<SnapshotFileKind> {
     if !file_kind.should_copy_into_snapshot() {
         return None;
@@ -200,6 +289,27 @@ fn clear_snapshot_store_artifacts(
 
         if path.is_dir() && StoreFileKind::from_path(&path) == StoreFileKind::CursorDirectory {
             removed += usize::from(remove_dir_all_if_present(&path)?);
+        }
+    }
+    Ok(removed)
+}
+
+fn clear_fork_store_artifacts(dest: &std::path::Path) -> Result<usize, StoreError> {
+    let entries = platform_fs::read_dir(dest).map_err(StoreError::Io)?;
+    let mut removed = 0;
+    for entry in entries {
+        let entry = entry.map_err(StoreError::Io)?;
+        let path = entry.path();
+        if !StoreFileKind::from_path(&path).should_clear_from_fork_destination() {
+            continue;
+        }
+        let is_dir = platform_fs::symlink_metadata(&path)
+            .map(|meta| meta.file_type().is_dir())
+            .unwrap_or(false);
+        if is_dir {
+            removed += usize::from(remove_dir_all_if_present(&path)?);
+        } else {
+            removed += usize::from(remove_file_if_present(&path)?);
         }
     }
     Ok(removed)
@@ -657,41 +767,6 @@ pub(crate) fn close(mut store: Store<Open>) -> Result<Closed, StoreError> {
 
     store.should_shutdown_on_drop = false;
     Ok(Closed)
-}
-
-/// Determine watermark from the latest segment file and write the fastest
-/// available cold-start artifact. When mmap is enabled it is strictly
-/// preferred over checkpoint — writing both is redundant work that doubles
-/// close() cost at high event counts.
-fn write_cold_start_artifacts_on_close(store: &Store<Open>) -> Result<(), StoreError> {
-    let (seg_id, offset) = latest_segment_watermark(&store.config.data_dir)?;
-    match store.runtime.cold_start.write_target() {
-        Some(ColdStartArtifactKind::MmapIndex) => {
-            crate::store::cold_start::mmap::write_mmap_index_with_reserved_kind_fallbacks(
-                &store.index,
-                &store.config.data_dir,
-                seg_id,
-                offset,
-                &store.cumulative_reserved_kind_fallbacks,
-            )?;
-        }
-        Some(ColdStartArtifactKind::Checkpoint) => {
-            crate::store::cold_start::checkpoint::write_checkpoint_with_reserved_kind_fallbacks(
-                &store.index,
-                &store.config.data_dir,
-                seg_id,
-                offset,
-                &store.cumulative_reserved_kind_fallbacks,
-            )?;
-        }
-        None => {}
-    }
-    // NOTE: the durable idempotency store is flushed by the CALLERS (close +
-    // compaction tail) BEFORE this best-effort artifact refresh, so its error
-    // is always propagated and never lost behind a warn-swallowed artifact
-    // write. It is a correctness primitive, not a fast-open cache.
-    // justifies: INV-IDEMPOTENCY-DURABLE-WINDOW
-    Ok(())
 }
 
 pub(crate) fn stats<State>(store: &Store<State>) -> StoreStats {

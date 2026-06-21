@@ -78,7 +78,12 @@ pub struct Notification {
 }
 
 pub(crate) fn notification_matches_region(region: &Region, value: &Notification) -> bool {
-    region.matches_event(value.coord.entity(), value.coord.scope(), value.kind)
+    region.matches_event_on_lane(
+        value.coord.entity(),
+        value.coord.scope(),
+        value.kind,
+        Some(value.position.lane()),
+    )
 }
 
 impl RegionFanoutItem for CommittedEventEnvelope {

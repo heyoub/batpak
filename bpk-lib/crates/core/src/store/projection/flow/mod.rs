@@ -1,15 +1,20 @@
 mod cache_identity;
+mod fusion;
 mod outcome;
 mod replay_input;
 mod strategy;
 
 use crate::event::{EventSourced, ProjectionInput};
 use crate::store::index::columnar::CachedProjectionSlot;
-use crate::store::index::ProjectionCacheStoreStatus;
+use crate::store::index::{ProjectionCacheStoreStatus, ProjectionReplayItem};
 use crate::store::{Freshness, HlcPoint, Store, StoreError};
 use std::any::TypeId;
+use std::collections::BTreeMap;
 
 pub(crate) use cache_identity::projection_cache_key;
+#[cfg(test)]
+pub(crate) use fusion::{fused_replay_batch_reads, reset_fused_replay_batch_reads};
+pub(crate) use fusion::{project_fused2, project_fused3};
 use outcome::{
     elapsed_us, finish_empty_projection, finish_projection, record_external_cache_probe_time,
     ProjectionFinishObservation,
@@ -260,61 +265,8 @@ where
 
     // ── Phase 1: Gather metadata ──────────────────────────────────────
 
-    // 1a: Build replay plan
-    let relevant_kinds = T::relevant_event_kinds();
-    let preparation = match store.index.projection_replay_plan(entity, relevant_kinds) {
-        None => ProjectionPreparation::Empty,
-        Some(plan) => {
-            let t_cache_key = store.runtime.now_mono_ns();
-            let replay = ReplayContext {
-                watermark: plan.watermark,
-                cached_at_us: store.runtime.cache_now_us(),
-                cached_at_mono_ns: store.runtime.now_mono_ns(),
-                process_boot_ns: store.runtime.process_boot_ns(),
-                type_id: TypeId::of::<T>(),
-                cache_key: projection_cache_key::<T>(entity),
-                plan,
-            };
-            if let Some(t) = timings.as_deref_mut() {
-                t.cache_key_build_us = elapsed_us(store.runtime.clock(), t_cache_key);
-            }
-
-            // Fire prefetch early so I/O overlaps with group-local CPU work.
-            let t_prefetch = store.runtime.now_mono_ns();
-            if store.cache.capabilities().supports_prefetch {
-                let predicted_meta = super::CacheMeta {
-                    watermark: replay.watermark,
-                    cached_at_us: replay.cached_at_us,
-                    cached_at_mono_ns: Some(replay.cached_at_mono_ns),
-                    process_boot_ns: Some(replay.process_boot_ns),
-                };
-                if let Err(error) = store.cache.prefetch(&replay.cache_key, predicted_meta) {
-                    tracing::warn!("cache prefetch failed (non-fatal): {error}");
-                }
-            }
-            if let Some(t) = timings.as_deref_mut() {
-                t.prefetch_us = elapsed_us(store.runtime.clock(), t_prefetch);
-            }
-
-            let t_group = store.runtime.now_mono_ns();
-            let group_local_slot = store.index.cached_projection(entity, replay.type_id);
-            let group_local_fresh =
-                group_local_projection_freshness(group_local_slot.as_ref(), &replay, freshness)
-                    .is_fresh();
-            if let Some(t) = timings.as_deref_mut() {
-                t.group_local_lookup_us = elapsed_us(store.runtime.clock(), t_group);
-            }
-
-            ProjectionPreparation::Planned(PreparedProjection {
-                replay,
-                group_local_slot,
-                group_local_fresh,
-            })
-        }
-    };
-    if let Some(t) = timings.as_deref_mut() {
-        t.plan_build_us = elapsed_us(store.runtime.clock(), t_start);
-    }
+    let preparation =
+        prepare_projection::<T, State>(store, entity, freshness, t_start, timings.as_deref_mut());
 
     // ── Phase 2: Compute strategy ─────────────────────────────────────
 
@@ -332,6 +284,7 @@ where
         entity,
         strategy = ?dispatch.strategy(),
     );
+    let replay_items = replay_items_for_dispatch(&dispatch);
 
     // ── Phase 3: Dispatch ─────────────────────────────────────────────
     //
@@ -457,23 +410,115 @@ where
         returned_generation = outcome.returned_generation(),
     );
 
-    notify_projection_applied::<T, State>(store, entity, &outcome);
+    notify_projection_applied::<T, State>(store, entity, &outcome, &replay_items);
     Ok(outcome)
+}
+
+/// Phase 1 of [`project_inner`]: build the replay plan, fire the early cache
+/// prefetch, and probe the group-local slot, recording the per-phase timings.
+/// Extracted verbatim from `project_inner` to keep that function within budget.
+fn prepare_projection<T, State>(
+    store: &Store<State>,
+    entity: &str,
+    freshness: &Freshness,
+    t_start: i64,
+    mut timings: Option<&mut ProjectionTimings>,
+) -> ProjectionPreparation
+where
+    T: EventSourced + serde::Serialize + serde::de::DeserializeOwned + 'static,
+{
+    // 1a: Build replay plan
+    let relevant_kinds = T::relevant_event_kinds();
+    let preparation = match store.index.projection_replay_plan(entity, relevant_kinds) {
+        None => ProjectionPreparation::Empty,
+        Some(plan) => {
+            let t_cache_key = store.runtime.now_mono_ns();
+            let replay = ReplayContext {
+                watermark: plan.watermark,
+                cached_at_us: store.runtime.cache_now_us(),
+                cached_at_mono_ns: store.runtime.now_mono_ns(),
+                process_boot_ns: store.runtime.process_boot_ns(),
+                type_id: TypeId::of::<T>(),
+                cache_key: projection_cache_key::<T>(entity),
+                plan,
+            };
+            if let Some(t) = timings.as_deref_mut() {
+                t.cache_key_build_us = elapsed_us(store.runtime.clock(), t_cache_key);
+            }
+
+            // Fire prefetch early so I/O overlaps with group-local CPU work.
+            let t_prefetch = store.runtime.now_mono_ns();
+            if store.cache.capabilities().supports_prefetch {
+                let predicted_meta = super::CacheMeta {
+                    watermark: replay.watermark,
+                    cached_at_us: replay.cached_at_us,
+                    cached_at_mono_ns: Some(replay.cached_at_mono_ns),
+                    process_boot_ns: Some(replay.process_boot_ns),
+                };
+                if let Err(error) = store.cache.prefetch(&replay.cache_key, predicted_meta) {
+                    tracing::warn!("cache prefetch failed (non-fatal): {error}");
+                }
+            }
+            if let Some(t) = timings.as_deref_mut() {
+                t.prefetch_us = elapsed_us(store.runtime.clock(), t_prefetch);
+            }
+
+            let t_group = store.runtime.now_mono_ns();
+            let group_local_slot = store.index.cached_projection(entity, replay.type_id);
+            let group_local_fresh =
+                group_local_projection_freshness(group_local_slot.as_ref(), &replay, freshness)
+                    .is_fresh();
+            if let Some(t) = timings.as_deref_mut() {
+                t.group_local_lookup_us = elapsed_us(store.runtime.clock(), t_group);
+            }
+
+            ProjectionPreparation::Planned(PreparedProjection {
+                replay,
+                group_local_slot,
+                group_local_fresh,
+            })
+        }
+    };
+    if let Some(t) = timings {
+        t.plan_build_us = elapsed_us(store.runtime.clock(), t_start);
+    }
+    preparation
+}
+
+fn replay_items_for_dispatch(dispatch: &ProjectionDispatch) -> Vec<ProjectionReplayItem> {
+    match dispatch {
+        ProjectionDispatch::Empty => Vec::new(),
+        ProjectionDispatch::GroupLocalHit { replay, .. }
+        | ProjectionDispatch::GroupLocalIncremental { replay, .. }
+        | ProjectionDispatch::ExternalCacheThenReplay { replay }
+        | ProjectionDispatch::DirectReplay { replay } => replay.plan.items.clone(),
+    }
 }
 
 fn notify_projection_applied<T, State>(
     store: &Store<State>,
     entity: &str,
     outcome: &ProjectionOutcome<T>,
+    replay_items: &[ProjectionReplayItem],
 ) where
     T: 'static,
 {
     if let Some(sequence) = outcome.applied_sequence() {
-        if let Some(point) = store.index.hlc_for_global_sequence(sequence) {
-            store.projection_registry.notify_applied(
-                super::registry::ProjectionRegistry::id_for_type::<T>(entity),
-                point,
-            );
+        let projection_id = super::registry::ProjectionRegistry::id_for_type::<T>(entity);
+        let mut lanes = BTreeMap::<u32, HlcPoint>::new();
+        for item in replay_items
+            .iter()
+            .filter(|item| item.global_sequence <= sequence)
+        {
+            lanes
+                .entry(item.lane)
+                .and_modify(|current| *current = (*current).max_by_sequence(item.point))
+                .or_insert(item.point);
+        }
+        for (lane, point) in lanes {
+            store
+                .projection_registry
+                .notify_applied_on_lane(projection_id.clone(), lane, point);
         }
     }
 }
@@ -843,5 +888,7 @@ fn store_index_cached_projection<State>(
     }
 }
 
+#[cfg(test)]
+mod fusion_tests;
 #[cfg(test)]
 mod tests;

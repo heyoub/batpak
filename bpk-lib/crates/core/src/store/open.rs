@@ -1,5 +1,6 @@
 use super::*;
 use crate::store::cold_start::rebuild::OpenIndexReport;
+use std::collections::BTreeMap;
 
 struct OpenComponents {
     runtime: Arc<config::ValidatedStoreConfig>,
@@ -144,8 +145,45 @@ fn highest_index_hlc(index: &StoreIndex) -> HlcPoint {
             wall_ms: entry.wall_ms,
             global_sequence: entry.global_sequence,
         })
-        .max()
+        .reduce(HlcPoint::max_by_sequence)
         .unwrap_or(HlcPoint::ORIGIN)
+}
+
+fn highest_visible_index_hlc(index: &StoreIndex) -> HlcPoint {
+    index
+        .visible_entries()
+        .into_iter()
+        .map(|entry| HlcPoint {
+            wall_ms: entry.wall_ms,
+            global_sequence: entry.global_sequence,
+        })
+        .reduce(HlcPoint::max_by_sequence)
+        .unwrap_or(HlcPoint::ORIGIN)
+}
+
+fn highest_index_hlc_by_lane(
+    entries: impl IntoIterator<Item = crate::store::index::IndexEntry>,
+) -> BTreeMap<u32, HlcPoint> {
+    let mut lanes = BTreeMap::new();
+    for entry in entries {
+        let point = HlcPoint {
+            wall_ms: entry.wall_ms,
+            global_sequence: entry.global_sequence,
+        };
+        lanes
+            .entry(entry.dag_lane)
+            .and_modify(|current: &mut HlcPoint| *current = (*current).max_by_sequence(point))
+            .or_insert(point);
+    }
+    lanes
+}
+
+fn highest_durable_index_hlc_by_lane(index: &StoreIndex) -> BTreeMap<u32, HlcPoint> {
+    highest_index_hlc_by_lane(index.all_entries())
+}
+
+fn highest_visible_index_hlc_by_lane(index: &StoreIndex) -> BTreeMap<u32, HlcPoint> {
+    highest_index_hlc_by_lane(index.visible_entries())
 }
 
 fn last_close_hlc(index: &StoreIndex) -> Result<HlcPoint, StoreError> {
@@ -218,6 +256,12 @@ fn bootstrap_open_hlc(
     let open_hlc = lifecycle_open_candidate(runtime, max_recovered_hlc, last_close_hlc)?;
     validate_bootstrap_hlc(open_hlc, max_recovered_hlc, last_close_hlc)?;
     Ok(open_hlc)
+}
+
+fn bootstrap_read_only_hlc(index: &StoreIndex) -> Result<HlcPoint, StoreError> {
+    let max_recovered_hlc = highest_index_hlc(index);
+    let _last_close_hlc = last_close_hlc(index)?;
+    Ok(max_recovered_hlc)
 }
 
 pub(super) fn timestamp_us_for_hlc(point: HlcPoint) -> Result<i64, StoreError> {
@@ -364,7 +408,12 @@ impl Store<Open> {
         emit_open_report_observability(&store.config, &open_report);
         let open_hlc = append_open_completed_event(&store, &open_report, open_candidate)?;
         lifecycle::sync(&store)?;
-        store.watermark_handle.lock().reset_to_bootstrap(open_hlc);
+        store.watermark_handle.lock().reset_to_bootstrap_lanes(
+            open_hlc,
+            open_hlc,
+            highest_durable_index_hlc_by_lane(&store.index),
+            highest_visible_index_hlc_by_lane(&store.index),
+        );
 
         Ok(store)
     }
@@ -414,8 +463,14 @@ impl Store<ReadOnly> {
             store_lock,
         } = open_components(config, StoreLockMode::ReadOnly)?;
 
-        let open_hlc = bootstrap_open_hlc(&runtime, &index)?;
-        let watermark_handle = WatermarkState::bootstrap_handle(open_hlc, runtime.clock_arc());
+        let recovered_hlc = bootstrap_read_only_hlc(&index)?;
+        let watermark_handle = WatermarkState::bootstrap_handle(recovered_hlc, runtime.clock_arc());
+        watermark_handle.lock().reset_to_bootstrap_lanes(
+            recovered_hlc,
+            highest_visible_index_hlc(&index),
+            highest_durable_index_hlc_by_lane(&index),
+            highest_visible_index_hlc_by_lane(&index),
+        );
         let projection_registry = ProjectionRegistry::new(watermark_handle.clone());
         let store = Self {
             index,

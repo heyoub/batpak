@@ -226,6 +226,73 @@
     - ART-STORE-REBUILD
     - ART-CONTROL-PLANE-TESTS
     - ART-ADR-CONTROL-PLANE
+- id: INV-FORK-ISOLATION
+  statement: >-
+    Store fork materializes a self-contained directory at a drained visibility
+    boundary: immutable sealed segments may be shared by reflink or hardlink,
+    but the active segment and mutable correctness authorities such as
+    index.idemp and visibility_ranges.fbv are deep-copied, regenerable caches
+    are excluded by default, symlink leaves are rejected, and writes or
+    visibility cancellations after the fork cannot mutate the fork view.
+  artifacts:
+    - ART-STORE-FORK-IMPORT-SOURCE
+    - ART-STORE-FORK-IMPORT-TESTS
+    - ART-STORE-FORK-BENCH
+- id: INV-IMPORT-CONTENT-ISOMORPHISM
+  statement: >-
+    Store import is re-application rather than merge: source event identity,
+    sequence, and causation are regenerated or cleared, while raw MessagePack
+    payload bytes, content hashes, correlation metadata, deterministic
+    source-namespace idempotency keys, and provenance receipt extensions are
+    preserved across chunking, replay, and compaction.
+  artifacts:
+    - ART-STORE-FORK-IMPORT-SOURCE
+    - ART-STORE-FORK-IMPORT-TESTS
+- id: INV-STORE-ISOMORPHISM-LAWS
+  statement: >-
+    Serialization seams that define durable store identity round-trip generated
+    values without loss: DagPosition MessagePack encoding, SIDX entry encoding,
+    lane-neutral JSON-to-MessagePack upcast, and raw imported payload hashing all
+    preserve their intended value or byte identity.
+  artifacts:
+    - ART-STORE-FORK-IMPORT-TESTS
+- id: INV-LANE-BRANCH-ISOLATION
+  statement: >-
+    DAG lanes are independent branch heads for the same entity: writer
+    prev_hash, per-lane clock/CAS state, batch staging, cold-start latest-head
+    reconstruction, query pagination, cursor delivery, and push fanout all route
+    by `(entity,lane)`, while a Region with no lane filter observes the
+    historical all-lane timeline and the lane-0 default path remains the
+    compatibility path.
+  artifacts:
+    - ART-STORE-LANE-BRANCH-SOURCE
+    - ART-STORE-LANE-BRANCH-TESTS
+- id: INV-PROJECTION-FUSION-EQUIVALENT
+  statement: >-
+    Fused projection replay over an entity is equivalent to the tuple of
+    separate consistent projections: one shared direct replay stream is read
+    once, each projection folds only events matching its declared
+    relevant_event_kinds, projection-applied notifications use each
+    projection's own per-lane relevant input maxima even when the projection
+    returns None, and cache watermarks remain
+    projection-specific because the fused path does not write cache rows.
+  artifacts:
+    - ART-STORE-PROJECTION-FUSION-SOURCE
+    - ART-STORE-PROJECTION-FUSION-TESTS
+- id: INV-PER-LANE-FRONTIER
+  statement: >-
+    Frontier state is a lattice with one global physical durability axis and
+    per-lane logical accepted, written, durable, visible, applied, and emitted
+    HLC tracks. The lattice ordering for lane durability and visibility is the
+    shared global_sequence axis, not wall-clock HLC ordering. For every lane,
+    accepted >= written >= durable, accepted >= visible >= applied, emitted >=
+    visible, and logical durable never exceeds the global physical durable point.
+    Lane-scoped reads and waits use the lane cursor; cancelled visibility ranges
+    are persisted with per-lane ranges over the shared global_sequence axis;
+    legacy global reads and frontier fields remain the max compatibility view.
+  artifacts:
+    - ART-STORE-LANE-FRONTIER-SOURCE
+    - ART-STORE-LANE-FRONTIER-TESTS
 - id: INV-SCHEMA-VERSION-ISOLATION
   statement: Cached projections are keyed by entity + schema_version. Different versions get separate cache slots, preventing stale cached values from being served to new code.
   artifacts:

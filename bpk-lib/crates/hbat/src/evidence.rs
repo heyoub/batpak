@@ -88,13 +88,13 @@ impl std::fmt::Display for EvidenceRequestError {
 impl EvidenceRequestError {
     fn from_wire_region(error: crate::region_wire::WireRegionError) -> Self {
         match error {
-            crate::region_wire::WireRegionError::InvalidCoordinate { field, message } => {
+            crate::region_wire::WireRegionError::Coordinate { field, message } => {
                 Self::InvalidCoordinate { field, message }
             }
-            crate::region_wire::WireRegionError::InvalidKind { field, message } => {
+            crate::region_wire::WireRegionError::Kind { field, message } => {
                 Self::InvalidKind { field, message }
             }
-            crate::region_wire::WireRegionError::InvalidClockRange { message } => {
+            crate::region_wire::WireRegionError::ClockRange { message } => {
                 Self::InvalidClockRange { message }
             }
         }

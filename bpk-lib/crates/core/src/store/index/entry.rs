@@ -114,6 +114,8 @@ pub(crate) struct QueryHit {
     pub(crate) kind: EventKind,
     /// Per-entity HLC clock. Needed for `Region::clock_range` filtering.
     pub(crate) clock: u32,
+    /// DAG lane. Needed for `Region` lane filtering.
+    pub(crate) dag_lane: u32,
 }
 
 impl QueryHit {
@@ -124,6 +126,7 @@ impl QueryHit {
             disk_pos: entry.disk_pos,
             kind: entry.kind,
             clock: entry.clock,
+            dag_lane: entry.dag_lane,
         }
     }
 }

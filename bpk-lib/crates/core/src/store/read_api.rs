@@ -131,6 +131,20 @@ impl<State> Store<State> {
         self.index.query(region)
     }
 
+    /// READ: return every currently visible index entry matching a Region on
+    /// one exact DAG lane.
+    ///
+    /// The explicit `lane` argument is authoritative. Passing a `Region` that
+    /// already carries a lane is only valid when it matches this argument.
+    #[must_use]
+    pub fn query_lane(&self, region: &Region, lane: u32) -> Vec<IndexEntry> {
+        debug_assert!(
+            region.lane.is_none() || region.lane == Some(lane),
+            "query_lane lane argument must match any pre-set Region lane"
+        );
+        self.index.query(&region.clone().with_lane(lane))
+    }
+
     /// READ: query a bounded page of visible events by Region in ascending
     /// `global_sequence` order.
     ///
@@ -180,6 +194,59 @@ impl<State> Store<State> {
         projection::flow::project(self, entity, freshness)
     }
 
+    /// PROJECT: reconstruct two typed states from one consistent direct replay.
+    ///
+    /// Both projections must use the same replay input lane, and each is folded
+    /// over only its declared [`EventSourced::relevant_event_kinds`]. This
+    /// fused path intentionally bypasses projection caches so cache watermarks
+    /// remain projection-specific.
+    ///
+    /// # Errors
+    /// Returns any disk-read or replay decode error surfaced while loading the
+    /// shared event stream.
+    pub fn project_fused2<Left, Right>(
+        &self,
+        entity: &str,
+    ) -> Result<(Option<Left>, Option<Right>), StoreError>
+    where
+        Left: EventSourced + serde::Serialize + serde::de::DeserializeOwned + 'static,
+        Right: EventSourced<Input = Left::Input>
+            + serde::Serialize
+            + serde::de::DeserializeOwned
+            + 'static,
+        Left::Input: projection::flow::ReplayInput,
+    {
+        projection::flow::project_fused2(self, entity)
+    }
+
+    /// PROJECT: reconstruct three typed states from one consistent direct replay.
+    ///
+    /// The projections must use the same replay input lane. A projection whose
+    /// [`EventSourced::relevant_event_kinds`] slice is empty receives the full
+    /// shared stream; other projections receive only their declared kinds.
+    ///
+    /// # Errors
+    /// Returns any disk-read or replay decode error surfaced while loading the
+    /// shared event stream.
+    pub fn project_fused3<First, Second, Third>(
+        &self,
+        entity: &str,
+    ) -> Result<super::ProjectionFusion3<First, Second, Third>, StoreError>
+    where
+        First: EventSourced + serde::Serialize + serde::de::DeserializeOwned + 'static,
+        Second: EventSourced<Input = First::Input>
+            + serde::Serialize
+            + serde::de::DeserializeOwned
+            + 'static,
+        Third: EventSourced<Input = First::Input>
+            + serde::Serialize
+            + serde::de::DeserializeOwned
+            + 'static,
+        First::Input: projection::flow::ReplayInput,
+    {
+        projection::flow::project_fused3(self, entity)
+    }
+
     /// Return the current per-entity generation if the entity exists.
     ///
     /// Generations advance monotonically on every insert for that entity.
@@ -221,6 +288,24 @@ impl<State> Store<State> {
     #[must_use]
     pub fn by_entity(&self, entity: &str) -> Vec<IndexEntry> {
         self.index.stream(entity)
+    }
+
+    /// READ: query all events for an exact entity id on one DAG lane.
+    #[must_use]
+    pub fn by_entity_lane(&self, entity: &str, lane: u32) -> Vec<IndexEntry> {
+        self.index.stream_lane(entity, lane)
+    }
+
+    /// READ: query all events for an exact entity id on one DAG lane.
+    #[must_use]
+    pub fn stream_lane(&self, entity: &str, lane: u32) -> Vec<IndexEntry> {
+        self.by_entity_lane(entity, lane)
+    }
+
+    /// READ: return the latest visible event for an entity on one DAG lane.
+    #[must_use]
+    pub fn latest_lane(&self, entity: &str, lane: u32) -> Option<IndexEntry> {
+        self.index.get_latest(entity, lane)
     }
 
     /// READ: query all events in the given scope.

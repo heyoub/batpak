@@ -16,6 +16,41 @@ fn broadcast_all<T>(values: impl IntoIterator<Item = T>, mut broadcast: impl FnM
     count
 }
 
+#[derive(Clone, Copy)]
+struct LanePublishPoint {
+    publish_up_to: u64,
+    frontier_point: HlcPoint,
+}
+
+fn lane_publish_points_from_notifications(
+    notifications: &[Notification],
+) -> BTreeMap<u32, LanePublishPoint> {
+    let mut points = BTreeMap::new();
+    for notification in notifications {
+        let lane = notification.position.lane();
+        let publish_up_to = notification.sequence.saturating_add(1);
+        let frontier_point = HlcPoint {
+            wall_ms: notification.position.wall_ms(),
+            global_sequence: notification.sequence,
+        };
+        points
+            .entry(lane)
+            .and_modify(|current: &mut LanePublishPoint| {
+                if publish_up_to > current.publish_up_to {
+                    *current = LanePublishPoint {
+                        publish_up_to,
+                        frontier_point,
+                    };
+                }
+            })
+            .or_insert(LanePublishPoint {
+                publish_up_to,
+                frontier_point,
+            });
+    }
+    points
+}
+
 pub(super) struct CommitArtifacts {
     pub(super) index_entry: IndexEntry,
     pub(super) sidx_entry: SidxEntry,
@@ -215,12 +250,21 @@ impl WriterState<'_> {
         notifications: impl IntoIterator<Item = Notification>,
         envelopes: impl IntoIterator<Item = CommittedEventEnvelope>,
     ) -> Result<(), crate::store::StoreError> {
-        self.index
-            .publish(publish_up_to, "publish_then_broadcast_unfenced")?;
+        let notifications: Vec<Notification> = notifications.into_iter().collect();
+        let lane_points = lane_publish_points_from_notifications(&notifications);
+        self.index.publish_on_lanes(
+            publish_up_to,
+            lane_points
+                .iter()
+                .map(|(lane, point)| (*lane, point.publish_up_to)),
+            "publish_then_broadcast_unfenced",
+        )?;
         self.broadcast_commit_artifacts(notifications, envelopes);
-        self.watermark_handle
-            .lock()
-            .advance_visible_and_emitted(frontier_point);
+        let mut watermark = self.watermark_handle.lock();
+        watermark.advance_visible_and_emitted(frontier_point);
+        for (lane, point) in lane_points {
+            watermark.advance_visible_and_emitted_on_lane(lane, point.frontier_point);
+        }
         Ok(())
     }
 
@@ -243,12 +287,22 @@ impl WriterState<'_> {
         notifications: impl IntoIterator<Item = Notification>,
         envelopes: impl IntoIterator<Item = CommittedEventEnvelope>,
     ) -> Result<(), crate::store::StoreError> {
-        self.index.finish_visibility_fence(token, publish_up_to)?;
+        let notifications: Vec<Notification> = notifications.into_iter().collect();
+        let lane_points = lane_publish_points_from_notifications(&notifications);
+        self.index.finish_visibility_fence_on_lanes(
+            token,
+            publish_up_to,
+            lane_points
+                .iter()
+                .map(|(lane, point)| (*lane, point.publish_up_to)),
+        )?;
         self.broadcast_commit_artifacts(notifications, envelopes);
+        let mut watermark = self.watermark_handle.lock();
         if let Some(point) = frontier_point {
-            self.watermark_handle
-                .lock()
-                .advance_visible_and_emitted(point);
+            watermark.advance_visible_and_emitted(point);
+        }
+        for (lane, point) in lane_points {
+            watermark.advance_visible_and_emitted_on_lane(lane, point.frontier_point);
         }
         Ok(())
     }
@@ -256,7 +310,62 @@ impl WriterState<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::broadcast_all;
+    use super::{broadcast_all, lane_publish_points_from_notifications, Notification};
+    use crate::coordinate::{Coordinate, DagPosition};
+    use crate::event::EventKind;
+
+    fn notification_for(lane: u32, sequence: u64, wall_ms: u64) -> Notification {
+        Notification {
+            event_id: 0,
+            correlation_id: 0,
+            causation_id: None,
+            coord: Coordinate::new("entity", "scope").expect("valid coordinate"),
+            kind: EventKind::DATA,
+            sequence,
+            position: DagPosition::with_hlc(
+                wall_ms,
+                0,
+                0,
+                lane,
+                u32::try_from(sequence).unwrap_or(u32::MAX),
+            ),
+        }
+    }
+
+    #[test]
+    fn lane_publish_points_keep_first_on_equal_publish_up_to() {
+        // Two notifications on the SAME lane with the SAME sequence (hence the
+        // same `publish_up_to = sequence + 1`) but DIFFERENT wall_ms. The
+        // `and_modify` only overwrites when the new `publish_up_to` is strictly
+        // greater, so equal values must keep the FIRST point. The `> -> >=`
+        // mutant would overwrite with the second (wall_ms = 222) instead.
+        let notifications = vec![notification_for(7, 5, 111), notification_for(7, 5, 222)];
+
+        let points = lane_publish_points_from_notifications(&notifications);
+        let point = points.get(&7).expect("lane 7 must be present");
+
+        assert_eq!(
+            point.publish_up_to, 6,
+            "PROPERTY: publish_up_to is sequence + 1"
+        );
+        assert_eq!(
+            point.frontier_point.wall_ms, 111,
+            "PROPERTY: equal publish_up_to must NOT overwrite the first lane point"
+        );
+    }
+
+    #[test]
+    fn lane_publish_points_advance_on_strictly_greater() {
+        // Sanity companion: a strictly greater publish_up_to DOES overwrite, so
+        // the test above is pinning the equality boundary, not blanket no-update.
+        let notifications = vec![notification_for(3, 5, 111), notification_for(3, 9, 222)];
+
+        let points = lane_publish_points_from_notifications(&notifications);
+        let point = points.get(&3).expect("lane 3 must be present");
+
+        assert_eq!(point.publish_up_to, 10);
+        assert_eq!(point.frontier_point.wall_ms, 222);
+    }
 
     #[test]
     fn broadcast_all_counts_every_pushed_item() {

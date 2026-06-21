@@ -63,9 +63,12 @@ impl Store<Open> {
         let measurement = measure_gate_wait(
             || self.receipt_point(receipt),
             |target| match gate.kind {
+                WatermarkKind::Accepted => self.wait_for_accepted(target, gate.timeout),
+                WatermarkKind::Written => self.wait_for_written(target, gate.timeout),
                 WatermarkKind::Durable => self.wait_for_durable(target, gate.timeout),
                 WatermarkKind::Applied => self.wait_for_applied(target, gate.timeout),
                 WatermarkKind::Visible => self.wait_for_visible(target, gate.timeout),
+                WatermarkKind::Emitted => self.wait_for_emitted(target, gate.timeout),
             },
         )?;
         tracing::trace!(

@@ -218,10 +218,16 @@ impl Cursor {
         if delivered_sequence <= expected_sequence {
             return;
         }
-        let cancelled_ranges = self
-            .index
-            .cancelled_visibility_ranges()
-            .into_iter()
+        let cancelled_visibility = self.index.cancelled_visibility_ranges();
+        let lane_ranges = self
+            .region
+            .lane
+            .and_then(|lane| cancelled_visibility.lanes.get(&lane));
+        let cancelled_ranges = cancelled_visibility
+            .global
+            .iter()
+            .chain(lane_ranges.into_iter().flatten())
+            .copied()
             .filter_map(|(start, end)| {
                 let overlap_start = start.max(expected_sequence);
                 let overlap_end = end.min(delivered_sequence);
