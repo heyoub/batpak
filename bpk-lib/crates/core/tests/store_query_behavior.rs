@@ -1,11 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION, INV-MACRO-BOUNDED-CAST; advanced store tests rely on unwrap/panic as assertion style, spawn threads for concurrency probes, and narrow bounded test data into target types that the fixture guarantees fit.
-#![allow(
-    clippy::unwrap_used,
-    clippy::disallowed_methods,
-    clippy::cast_possible_truncation,
-    clippy::needless_borrows_for_generic_args,
-    clippy::panic
-)]
 //! Advanced Store config, lookup, and query integration tests.
 
 mod support;
@@ -51,14 +43,13 @@ fn store_config_new_uses_sensible_defaults() {
 #[test]
 fn get_nonexistent_returns_not_found() {
     let (_dir, store) = test_store();
-    let result = store.get(batpak::id::EventId::from(0xDEADu128));
-    let err = match result {
-        Ok(_) => panic!(
-            "PROPERTY: get() of a nonexistent event_id must return Err(StoreError::NotFound).\
-             Investigate: src/store/mod.rs get, src/store/segment/scan.rs lookup."
-        ),
-        Err(err) => err,
-    };
+    let err = store
+        .get(batpak::id::EventId::from(0xDEADu128))
+        .map(|_| ())
+        .expect_err(
+            "PROPERTY: get() of a nonexistent event_id must return Err(StoreError::NotFound). \
+             Investigate: src/store/mod.rs get, src/store/segment/scan.rs lookup.",
+        );
     assert!(
         matches!(err, StoreError::NotFound(_)),
         "PROPERTY: get() on a nonexistent event_id must surface as StoreError::NotFound, got {err:?}"

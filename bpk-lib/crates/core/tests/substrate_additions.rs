@@ -1,6 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; this integration harness uses panic! to surface structural regressions with explicit messages.
-#![allow(clippy::panic, clippy::unwrap_used)]
-
 use batpak::coordinate::{Coordinate, Region};
 use batpak::event::EventKind;
 use batpak::guard::{
@@ -251,13 +248,13 @@ fn receipt_extensions_count_against_single_append_limit() {
         AppendOptions::new().with_extension(key, vec![0xAB; 128]),
     );
 
-    match result {
-        Ok(_) => panic!("PROPERTY: extension bytes must count against single append limit"),
-        Err(err) => assert!(
-            matches!(err, batpak::store::StoreError::Configuration(ref message) if message.contains("single append bytes")),
-            "wrong error: {err:?}"
-        ),
-    }
+    let err = result
+        .map(|_| ())
+        .expect_err("PROPERTY: extension bytes must count against single append limit");
+    assert!(
+        matches!(err, batpak::store::StoreError::Configuration(ref message) if message.contains("single append bytes")),
+        "wrong error: {err:?}"
+    );
 }
 
 #[test]
@@ -283,13 +280,14 @@ fn receipt_extensions_count_against_batch_limits() {
     )
     .expect("batch item");
 
-    match store.append_batch(vec![per_item]) {
-        Ok(_) => panic!("PROPERTY: extension bytes must count against batch per-item limit"),
-        Err(err) => assert!(
-            matches!(err, batpak::store::StoreError::BatchItemTooLarge { .. }),
-            "wrong error: {err:?}"
-        ),
-    }
+    let err = store
+        .append_batch(vec![per_item])
+        .map(|_| ())
+        .expect_err("PROPERTY: extension bytes must count against batch per-item limit");
+    assert!(
+        matches!(err, batpak::store::StoreError::BatchItemTooLarge { .. }),
+        "wrong error: {err:?}"
+    );
 
     let dir = TempDir::new().expect("temp dir");
     let store = Store::open(
@@ -311,13 +309,14 @@ fn receipt_extensions_count_against_batch_limits() {
         .expect("batch item")
     };
 
-    match store.append_batch(vec![make_item(1), make_item(2)]) {
-        Ok(_) => panic!("PROPERTY: extension bytes must count against batch total limit"),
-        Err(err) => assert!(
-            matches!(err, batpak::store::StoreError::BatchFailed { .. }),
-            "wrong error: {err:?}"
-        ),
-    }
+    let err = store
+        .append_batch(vec![make_item(1), make_item(2)])
+        .map(|_| ())
+        .expect_err("PROPERTY: extension bytes must count against batch total limit");
+    assert!(
+        matches!(err, batpak::store::StoreError::BatchFailed { .. }),
+        "wrong error: {err:?}"
+    );
 }
 
 fn receipt_extension_restore_config(
@@ -560,13 +559,13 @@ fn namespace_prefix_query_excludes_adjacent_namespaces() {
 
     store
         .append(&alice, kind, &serde_json::json!({"n": 1}))
-        .unwrap();
+        .expect("append alice");
     store
         .append(&alice_child, kind, &serde_json::json!({"n": 2}))
-        .unwrap();
+        .expect("append alice child");
     store
         .append(&alice2, kind, &serde_json::json!({"n": 3}))
-        .unwrap();
+        .expect("append alice2");
 
     let hits = store.query(&Region::entity("alice"));
     let entities = hits
@@ -719,8 +718,10 @@ fn cursor_gap_accessor_uses_bounded_ring_buffer() {
 #[test]
 fn guarded_prefix_sites_no_longer_use_raw_starts_with() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let coordinate = std::fs::read_to_string(root.join("src/coordinate/mod.rs")).unwrap();
-    let query = std::fs::read_to_string(root.join("src/store/index/query.rs")).unwrap();
+    let coordinate = std::fs::read_to_string(root.join("src/coordinate/mod.rs"))
+        .expect("read coordinate/mod.rs");
+    let query =
+        std::fs::read_to_string(root.join("src/store/index/query.rs")).expect("read query.rs");
 
     assert!(
         !coordinate.contains("entity.starts_with(prefix.as_ref())"),

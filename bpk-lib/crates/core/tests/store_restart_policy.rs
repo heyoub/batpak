@@ -1,6 +1,4 @@
 #![cfg(feature = "dangerous-test-hooks")]
-// justifies: INV-TEST-PANIC-AS-ASSERTION, ADR-0006; retry-poll loops in tests/store_restart_policy.rs use panic! as the escape hatch when the expected transition never arrives within the bound.
-#![allow(clippy::panic)]
 //! Restart policy tests split out of store_advanced.rs.
 
 mod support;
@@ -86,21 +84,19 @@ fn writer_restart_once_gives_up_after_second_panic() {
     // process the panic command and exit; sleeping a fixed amount makes
     // the test flaky on slow CI runners. Retry append with a deadline.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    let final_err = loop {
+    let final_err: Option<StoreError> = loop {
         match store.append(&coord, kind, &"should_fail") {
-            Err(e) => break e,
-            Ok(_) if std::time::Instant::now() >= deadline => {
-                panic!(
-                    "PROPERTY: after exhausting RestartPolicy::Once, append \
-                     must fail. Writer thread did not die within 5s of \
-                     receiving the second PanicForTest command. \
-                     Investigate: src/store/write/writer.rs writer_thread_main \
-                     restart counter."
-                )
-            }
+            Err(e) => break Some(e),
+            Ok(_) if std::time::Instant::now() >= deadline => break None,
             Ok(_) => std::thread::yield_now(),
         }
     };
+    let final_err = final_err.expect(
+        "PROPERTY: after exhausting RestartPolicy::Once, append must fail. \
+         Writer thread did not die within 5s of receiving the second \
+         PanicForTest command. Investigate: src/store/write/writer.rs \
+         writer_thread_main restart counter.",
+    );
     assert!(
         matches!(final_err, StoreError::WriterCrashed),
         "PROPERTY: append after exhausted restart budget must surface as \
@@ -136,19 +132,18 @@ fn writer_restart_bounded_respects_limit() {
     // Poll for the writer to die instead of sleeping a fixed duration —
     // see writer_restart_once_gives_up_after_second_panic for rationale.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    let final_err = loop {
+    let final_err: Option<StoreError> = loop {
         match store.append(&coord, kind, &"should_fail") {
-            Err(e) => break e,
-            Ok(_) if std::time::Instant::now() >= deadline => {
-                panic!(
-                    "PROPERTY: after exhausting RestartPolicy::Bounded, \
-                     append must fail. Writer thread did not die within 5s. \
-                     Investigate: src/store/write/writer.rs restart counter."
-                )
-            }
+            Err(e) => break Some(e),
+            Ok(_) if std::time::Instant::now() >= deadline => break None,
             Ok(_) => std::thread::yield_now(),
         }
     };
+    let final_err = final_err.expect(
+        "PROPERTY: after exhausting RestartPolicy::Bounded, append must fail. \
+         Writer thread did not die within 5s. \
+         Investigate: src/store/write/writer.rs restart counter.",
+    );
     assert!(
         matches!(final_err, StoreError::WriterCrashed),
         "PROPERTY: append after exhausted bounded restart budget must \
