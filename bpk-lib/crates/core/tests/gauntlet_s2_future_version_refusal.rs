@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; Phase 0B sentinel uses expect/panic as the assertion style when the future-version refusal contract is violated
-#![allow(clippy::panic, clippy::unwrap_used)]
 //! Gauntlet Phase 0B — SENTINEL S2: future-version canonical refusal.
 //!
 //! Harness pattern: Offensive sentinel (always-on, every-PR; ships a RED fixture).
@@ -123,13 +121,10 @@ fn future_version_mmap_index_is_canonical_refusal_not_silent_rebuild() {
     // GREEN: the cured behavior — a canonical typed refusal, propagated.
     #[cfg(not(gauntlet_red_fixture))]
     {
-        let err = match result {
-            Ok(_) => panic!(
-                "PROPERTY: a future-version mmap index must be a CANONICAL TYPED REFUSAL, \
-                 never silently rebuilt from scan (silent downgrade)."
-            ),
-            Err(err) => err,
-        };
+        let err = result.map(|_| ()).expect_err(
+            "PROPERTY: a future-version mmap index must be a CANONICAL TYPED REFUSAL, \
+             never silently rebuilt from scan (silent downgrade).",
+        );
         assert!(
             matches!(
                 err,

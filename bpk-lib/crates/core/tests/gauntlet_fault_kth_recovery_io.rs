@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; recovery test uses explicit panic branches as assertion failures for Store open result paths in tests/gauntlet_fault_kth_recovery_io.rs.
-#![allow(clippy::panic)]
 #![cfg(feature = "dangerous-test-hooks")]
 //! GAUNT-FAULT-3: Kth-I/O cold-start recovery contract.
 //!

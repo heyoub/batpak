@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; OOM-injection test uses explicit panic/expect branches as assertion failures in tests/gauntlet_fault_alloc_oom.rs.
-#![allow(clippy::panic)]
 #![cfg(feature = "fault-alloc")]
 //! GAUNT-FAULT-ALLOC: deterministic allocation-failure (OOM) injection.
 //!

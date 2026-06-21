@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; allocation-budget test uses explicit panic/expect branches as assertion failures in tests/gauntlet_perf_alloc_count.rs.
-#![allow(clippy::panic)]
 #![cfg(feature = "alloc-count")]
 //! GAUNT-PERF-5a: hot-path allocation-COUNT contract.
 //!

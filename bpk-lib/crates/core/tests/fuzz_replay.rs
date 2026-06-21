@@ -17,8 +17,6 @@
 //! These wrappers all live behind `dangerous-test-hooks`; this whole test file only
 //! compiles under that feature (the dispatch calls `batpak::__fuzz::*`).
 #![cfg(feature = "dangerous-test-hooks")]
-// justifies: INV-TEST-PANIC-AS-ASSERTION; the fuzz-replay gate reports a corpus crash by panicking with the offending file path in crates/core/tests/fuzz_replay.rs
-#![allow(clippy::panic, clippy::unwrap_used)]
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
@@ -151,8 +149,9 @@ fn load_inputs(dir: &Path) -> Vec<(PathBuf, Vec<u8>)> {
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_file() {
-            let bytes = std::fs::read(&path)
-                .unwrap_or_else(|e| panic!("read fuzz input {}: {e}", path.display()));
+            let Ok(bytes) = std::fs::read(&path) else {
+                unreachable!("read committed fuzz input {}", path.display());
+            };
             out.push((path, bytes));
         }
     }
@@ -253,8 +252,9 @@ fn fuzz_replay_covers_every_target() {
 /// it walks lines, tracks whether the current section header is `[[bin]]`, and
 /// captures the first `name = "..."` within each such section.
 fn declared_bin_targets(manifest: &Path) -> Vec<String> {
-    let text = std::fs::read_to_string(manifest)
-        .unwrap_or_else(|e| panic!("read {}: {e}", manifest.display()));
+    let Ok(text) = std::fs::read_to_string(manifest) else {
+        unreachable!("read fuzz manifest {}", manifest.display());
+    };
     let mut targets = Vec::new();
     let mut in_bin = false;
     for raw in text.lines() {

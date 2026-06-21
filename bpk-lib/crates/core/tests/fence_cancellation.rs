@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION, INV-FENCE-CANCELLED-STAYS-HIDDEN; tests in tests/fence_cancellation.rs rely on expect/panic on unreachable failures; clippy::unwrap_used and clippy::panic are the standard harness allowances for integration tests.
-#![allow(clippy::unwrap_used, clippy::panic)]
 //! Visibility-fence cancellation is durable across close+reopen.
 //!
 //! [INV-FENCE-CANCELLED-STAYS-HIDDEN] When a batch submitted under a visibility fence
