@@ -628,8 +628,71 @@ impl CursorWorkerLoop {
 
 #[cfg(test)]
 mod tests {
-    use super::stringify_panic_payload;
+    use super::{build_worker_cursor, stringify_panic_payload};
+    use crate::coordinate::Region;
+    use crate::store::delivery::cursor::{Cursor, CursorCheckpoint};
+    use crate::store::delivery::observation::CheckpointId;
+    use crate::store::index::StoreIndex;
     use std::any::Any;
+    use std::sync::Arc;
+
+    #[test]
+    fn build_worker_cursor_honors_the_load_saved_checkpoint_flag() {
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let region = Region::entity("entity:cursor-load-flag");
+        let index = Arc::new(StoreIndex::new());
+        let id = CheckpointId::new("batpak-build-worker-cursor-flag").expect("valid id");
+
+        // Persist a non-zero checkpoint whose region identity matches `region`,
+        // so a *loading* construction would resume at (7, true).
+        let persisted = CursorCheckpoint {
+            position: 7,
+            started: true,
+            process_boot_ns: None,
+            region_identity: Some(region.checkpoint_identity()),
+        };
+        Cursor::save_checkpoint(dir.path(), &id, &persisted).expect("save checkpoint");
+
+        // load_saved_checkpoint = true -> new_with_checkpoint -> resumes at (7, true).
+        let loaded = build_worker_cursor(&region, &index, dir.path(), Some(&id), true)
+            .expect("build loading cursor");
+        assert_eq!(
+            loaded.checkpoint(),
+            (7, true),
+            "PROPERTY: Some(id) + load=true must load the persisted position"
+        );
+
+        // load_saved_checkpoint = false -> new_bound_checkpoint -> ignores the
+        // persisted position, starting fresh at (0, false). The `if true` mutant
+        // would load here and report (7, true), failing this assertion.
+        let bound = build_worker_cursor(&region, &index, dir.path(), Some(&id), false)
+            .expect("build bound cursor");
+        assert_eq!(
+            bound.checkpoint(),
+            (0, false),
+            "PROPERTY: Some(id) + load=false must BIND without loading — the match \
+             guard `if load_saved_checkpoint` is load-bearing, not `if true`"
+        );
+    }
+
+    #[test]
+    fn build_worker_cursor_with_no_id_is_in_memory_and_fresh() {
+        let region = Region::entity("entity:cursor-no-id");
+        let index = Arc::new(StoreIndex::new());
+        let cursor = build_worker_cursor(
+            &region,
+            &index,
+            std::path::Path::new("/nonexistent"),
+            None,
+            true,
+        )
+        .expect("build in-memory cursor");
+        assert_eq!(
+            cursor.checkpoint(),
+            (0, false),
+            "PROPERTY: a None checkpoint id yields a fresh in-memory cursor regardless of the flag"
+        );
+    }
 
     #[test]
     fn stringify_panic_payload_preserves_static_str_payload() {

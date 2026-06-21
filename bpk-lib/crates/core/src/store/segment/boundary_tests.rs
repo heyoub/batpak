@@ -515,3 +515,74 @@ fn append_frames_from_segment_recovers_all_frames_for_untrusted_out_of_bounds_of
         frame.len()
     );
 }
+
+#[test]
+fn append_frames_from_segment_accepts_trusted_empty_frame_region() {
+    // Compaction copy of a sealed source with a CRC-valid SDX3 footer over an
+    // EMPTY frame region: the authenticated `string_table_offset` lands exactly
+    // at `frames_start` (8 + header_len) because no frames precede it. The
+    // lower-bound guard is `frames_end < frames_start`, so frames_end ==
+    // frames_start must stay VALID (no error). A `<` -> `==` mutant would treat
+    // this legitimate empty segment as corrupt and reject it, so this asserts the
+    // boundary is inclusive of the empty case.
+    use std::io::{Seek as _, Write as _};
+
+    let dir = TempDir::new().expect("tmpdir");
+
+    // Empty source segment: header only, zero frames. written_bytes == frames_start.
+    let source: Segment<Active> =
+        Segment::create_with_created_ns_on(dir.path(), 1, 0, &realfs()).expect("create source");
+    let source_path = source.path.clone();
+    let frames_start = source.written_bytes;
+    drop(source);
+
+    // Append a CRC-valid SDX3 footer for an EMPTY collector. write_footer records
+    // string_table_offset = current stream position = frames_start (no frames),
+    // and the CRC authenticates that offset -> the boundary is TRUSTED with
+    // frames_end == frames_start.
+    {
+        let mut f = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&source_path)
+            .expect("open empty source to append footer");
+        f.seek(SeekFrom::End(0)).expect("seek to footer start");
+        let position = f.stream_position().expect("footer position");
+        assert_eq!(
+            position, frames_start,
+            "fixture sanity: an empty segment's footer must begin exactly at frames_start"
+        );
+        crate::store::segment::sidx::SidxEntryCollector::new()
+            .write_footer(&mut f, 1)
+            .expect("write empty CRC-valid footer");
+        f.flush().expect("flush footer");
+    }
+
+    // Sanity: the boundary detector must report a TRUSTED footer whose frames_end
+    // equals frames_start, which is exactly the input the guard must NOT reject.
+    {
+        let mut probe = std::fs::OpenOptions::new()
+            .read(true)
+            .open(&source_path)
+            .expect("open source for boundary probe");
+        let file_len = probe.seek(SeekFrom::End(0)).expect("file_len");
+        let boundary = detect_sidx_boundary(&mut probe, file_len, 1)
+            .expect("boundary detect must not error")
+            .expect("CRC-valid SDX3 footer is a boundary");
+        assert_eq!(
+            boundary,
+            SidxBoundary {
+                frames_end: frames_start,
+                trusted: true,
+            },
+            "fixture sanity: empty trusted footer reports frames_end == frames_start"
+        );
+    }
+
+    let mut dest: Segment<Active> =
+        Segment::create_with_created_ns_on(dir.path(), 2, 0, &realfs()).expect("create dest");
+    dest.append_frames_from_segment(&source_path).expect(
+        "PROPERTY: a trusted EMPTY frame region (frames_end == frames_start) must copy cleanly — \
+         the lower-bound guard `frames_end < frames_start` must NOT reject the inclusive boundary",
+    );
+}

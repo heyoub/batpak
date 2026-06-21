@@ -179,6 +179,28 @@ pub(crate) fn run(sim: &Sim, steps: usize) -> Result<u64, String> {
 #[cfg(test)]
 mod tests {
     use super::super::Sim;
+    use super::usize_token;
+
+    #[test]
+    fn usize_token_widens_value_losslessly() {
+        // A body-stubbing mutant collapses every input to `0`; a non-zero input
+        // pins the lossless widening so that mutant cannot survive.
+        assert_eq!(
+            usize_token(5),
+            5,
+            "PROPERTY: usize_token widens the length value, it does not zero it"
+        );
+        assert_eq!(
+            usize_token(0),
+            0,
+            "PROPERTY: zero widens to zero (boundary)"
+        );
+        assert_eq!(
+            usize_token(usize::MAX),
+            u64::try_from(usize::MAX).unwrap_or(u64::MAX),
+            "PROPERTY: a 64-bit-or-narrower platform widens usize::MAX without truncation"
+        );
+    }
 
     #[test]
     fn workload_digest_is_stable_across_runs() {

@@ -226,6 +226,41 @@ fn snapshot_reused_destination_replaces_stale_store_artifacts() {
 }
 
 #[test]
+fn snapshot_into_fresh_destination_reports_no_destination_cleared() {
+    // A pristine, empty destination clears zero artifacts. The report must NOT
+    // claim a DestinationCleared finding: `if cleared_artifact_count > 0` is the
+    // guard that suppresses it. A `>= 0` mutant (always true for usize) would
+    // emit a spurious DestinationCleared { artifact_count: 0 }, which this test
+    // catches.
+    let (_dir, store) = test_store();
+    let coord = Coordinate::new("entity:snap:fresh", "scope:test").expect("valid coord");
+    let kind = EventKind::custom(0xF, 9);
+    for i in 0..4 {
+        store
+            .append(&coord, kind, &serde_json::json!({"i": i}))
+            .expect("append");
+    }
+
+    // Fresh TempDir: empty directory, nothing to clear.
+    let snap_dir = TempDir::new().expect("snap dir");
+    let report = store
+        .snapshot_with_evidence(snap_dir.path())
+        .expect("snapshot into fresh dir");
+
+    assert!(
+        !report
+            .body
+            .findings
+            .iter()
+            .any(|finding| matches!(finding, SnapshotFinding::DestinationCleared { .. })),
+        "PROPERTY: a fresh empty destination clears nothing, so the report must omit \
+         DestinationCleared — findings were {:?}",
+        report.body.findings
+    );
+    store.close().expect("close source");
+}
+
+#[test]
 fn snapshot_waits_for_in_flight_compaction() {
     let dir = TempDir::new().expect("temp dir");
     let config = StoreConfig::new(dir.path())
