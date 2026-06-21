@@ -33,6 +33,13 @@ enum XtaskCommand {
     Doctor,
     Traceability,
     Structural,
+    /// Cross-oracle triangulation gate (GAUNTLET-TRIANGULATION): workspace
+    /// crate-graph acyclicity cross-checked by two independent derivations.
+    Triangulation,
+    /// Prove the gates bite (GAUNTLET-TQL): rebuild every `ProductionFlip` red
+    /// fixture under `--cfg gauntlet_red_fixture` and assert each test FAILS. A
+    /// fixture that cannot red has laundered blocking authority.
+    ProveGatesBite,
     /// Check the repo layout contract: root docs/cookbook plus bpk-lib workspace.
     Layout,
     /// Check stack dependency direction and runtime boundary discipline.
@@ -584,6 +591,8 @@ fn main() -> Result<()> {
         XtaskCommand::Doctor => commands::doctor(),
         XtaskCommand::Traceability => commands::integrity("traceability-check", []),
         XtaskCommand::Structural => commands::integrity("structural-check", []),
+        XtaskCommand::Triangulation => commands::integrity("triangulation-check", []),
+        XtaskCommand::ProveGatesBite => commands::prove_gates_bite(),
         XtaskCommand::Layout => commands::integrity("structural-check", []),
         XtaskCommand::Boundary => commands::integrity("structural-check", []),
         XtaskCommand::StalePaths => commands::integrity("structural-check", []),

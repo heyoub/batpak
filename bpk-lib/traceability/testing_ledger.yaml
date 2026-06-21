@@ -393,6 +393,34 @@
     limited to backend-specific OS error shapes that are difficult to force
     portably without changing production behavior.
 
+- title: Algebraic laws hold as generated properties, not single examples
+  section: Property Harness
+  pattern: Property Harness
+  status: green
+  invariants:
+    - INV-PROJECTION-FUSION-EQUIVALENCE
+    - INV-HLC-JOIN-SEMILATTICE
+    - INV-OUTCOME-FUNCTOR-COMPOSITION
+    - INV-EVENTKIND-PARSE-ROUNDTRIP
+  locations:
+    - bpk-lib/crates/core/tests/projection_fusion_laws.rs
+    - bpk-lib/crates/core/tests/hlc_semilattice_laws.rs
+    - bpk-lib/crates/core/tests/outcome_eventkind_laws.rs
+  commands:
+    - cargo test --test projection_fusion_laws
+    - cargo test --test hlc_semilattice_laws
+    - cargo test --test outcome_eventkind_laws
+  coverage_delta: >
+    bounded proptest (64 cases/property) over the fold-fusion, HLC semilattice,
+    and Outcome/EventKind algebras; exact line delta not measured.
+  mutation_delta: >
+    targets the fold/merge/map seams a single fixed example cannot kill (dropped
+    fold kinds, equal-coordinate HLC tiebreak, Batch-arm map distribution).
+  blind_spots: >
+    the banana-split law runs against an in-test single-pass fuser because the
+    public Store::project_fused* surface is not yet on this branch; wiring the
+    same property to that surface is deferred to the 0.9 fork-import work.
+
 - title: Fuzz and chaos probe outputs stay within explicit policy gates
   section: Property Harness
   pattern: Property Harness
@@ -770,9 +798,11 @@
     - INV-COORDINATE-IS-LOGICAL-STREAM
     - INV-CROSS-DIRECTORY-CONSISTENCY-PRODUCT-OWNED
     - INV-CONTEXT-VIEWS-DERIVED-FROM-HISTORY
+    - INV-WORKSPACE-DAG-ACYCLIC
   locations:
     - bpk-lib/tools/integrity/src/invariant_bridge.rs
     - bpk-lib/tools/integrity/src/structural.rs
+    - bpk-lib/tools/integrity/src/triangulation.rs
     - bpk-lib/tools/integrity/src/ci_parity.rs
     - bpk-lib/tools/integrity/src/architecture_lints/syncbat_boundary.rs
     - bpk-lib/tools/xtask/src/main.rs
@@ -781,6 +811,7 @@
     - bpk-lib/crates/core/tests/wire_format.rs
   commands:
     - cargo xtask structural
+    - cargo xtask triangulation
     - cargo xtask boundary
     - cargo xtask stale-paths
     - cargo xtask evidence-audit
@@ -793,3 +824,80 @@
     this entry covers structural and doctrine-shaped invariants; runtime behavior
     still belongs in direct test artifacts whenever a catalog invariant can be
     exercised as code.
+
+- title: On-disk forward-compat downgrade discipline driven by the compat matrix
+  section: Oracle Harness
+  pattern: Oracle Harness
+  status: green
+  invariants:
+    - INV-ONDISK-FORWARD-COMPAT-CANONICAL
+  locations:
+    - bpk-lib/traceability/compat_matrix.yaml
+    - bpk-lib/crates/core/tests/compat_matrix.rs
+  commands:
+    - cargo test --test compat_matrix
+    - cargo test --test compat_matrix compat_matrix_self_row_tracks_live_version
+  coverage_delta: >
+    exercises four on-disk version branches through the public Store::open
+    lifecycle: mmap-index (cold_start/mmap/load.rs), checkpoint
+    (cold_start/checkpoint/format.rs + rebuild.rs planner), idempotency-index
+    (store/index/idemp.rs), and visibility-ranges (store/hidden_ranges.rs). Each
+    has an OpensOK self-row and a forged future-version CanonicalRefusal row;
+    exact JSON delta not recorded.
+  mutation_delta: unmeasured
+  blind_spots: >
+    the segment/.fbat format is intentionally NOT covered: its version field is
+    msgpack-encoded inside the header (no fixed-offset forge applies) and a
+    future-version segment already fails closed via CorruptSegment with no
+    silent-degrade path (segments are the durable bottom layer, never rebuilt
+    from elsewhere), so no new typed refusal was warranted.
+
+- title: Docs-currency gate keeps INVARIANTS.md a current view of the catalog
+  section: Structural Harness
+  pattern: Structural Harness
+  status: green
+  invariants:
+    - INV-DOCS-CATALOG-VIEW-CURRENT
+    - INV-INVARIANT-WITNESS-TEST
+  locations:
+    - bpk-lib/tools/integrity/src/docs_catalog.rs
+    - bpk-lib/tools/integrity/src/docs_catalog_tests.rs
+    - bpk-lib/tools/integrity/src/structural.rs
+  commands:
+    - cargo xtask structural
+  coverage_delta: >
+    the docs-catalog gate folded into structural-check asserts the generated
+    INV-CATALOG block in INVARIANTS.md matches traceability/invariants.yaml and
+    that every declared witness_test resolves to a real test; exact JSON delta
+    not recorded.
+  mutation_delta: unmeasured
+  blind_spots: >
+    only the INVs that declare a witness_test ride the strong tier; the remaining
+    catalog ids still ride the weak header-citation / ledger escalation path. The
+    MODEL.md symbol-binding gate (5.2) and the prose-only burndown ratchet (5.4)
+    are DEFERRED and logged in GAUNTLET_ISSUES.md.
+
+- title: Repo-IR fold-fusion runner is metacircular fold-fusion equivalent
+  section: Structural Harness
+  pattern: Structural Harness
+  status: green
+  invariants:
+    - INV-GAUNTLET-FOLD-FUSION
+  locations:
+    - bpk-lib/tools/integrity/src/repo_ir.rs
+    - bpk-lib/tools/integrity/src/repo_ir_tests.rs
+  commands:
+    - cargo xtask structural
+  coverage_delta: >
+    the minimal repo-IR binds six fact families (AL assignments, gate ownership,
+    waiver ownership, public-surface map, mutation-seam map, docs traceability)
+    into one column-store; the metacircular test asserts the fused single-pass
+    fitness runner equals the separate-pass runner for two fact families; exact
+    JSON delta not recorded.
+  mutation_delta: unmeasured
+  blind_spots: >
+    only two skeleton fitness functions are wired and the fitness pass is advisory
+    (not blocking) in this skeleton. Re-hosting the existing serial structural
+    checks onto the IR (item 6.3), the YAML-authored fitness registry (item 3.4),
+    and the syn symbol/call/type columns are DEFERRED and logged in
+    GAUNTLET_ISSUES.md.

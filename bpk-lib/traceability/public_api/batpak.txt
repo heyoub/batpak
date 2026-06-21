@@ -1085,6 +1085,9 @@ pub batpak::prelude::StoreError::BatchSyncFailed
 pub batpak::prelude::StoreError::BatchSyncFailed::item_count: usize
 pub batpak::prelude::StoreError::BatchSyncFailed::source: alloc::boxed::Box<batpak::prelude::StoreError>
 pub batpak::prelude::StoreError::CacheFailed(alloc::boxed::Box<(dyn core::error::Error + core::marker::Send + core::marker::Sync)>)
+pub batpak::prelude::StoreError::CheckpointFutureVersion
+pub batpak::prelude::StoreError::CheckpointFutureVersion::found: u16
+pub batpak::prelude::StoreError::CheckpointFutureVersion::supported: u16
 pub batpak::prelude::StoreError::CheckpointId(batpak::store::delivery::observation::CheckpointIdError)
 pub batpak::prelude::StoreError::CheckpointWriteFailed
 pub batpak::prelude::StoreError::CheckpointWriteFailed::id: alloc::string::String
@@ -1119,6 +1122,10 @@ pub batpak::prelude::StoreError::EventPayloadRegistry(batpak::event::payload::Ev
 pub batpak::prelude::StoreError::HiddenRangesCorrupt
 pub batpak::prelude::StoreError::HiddenRangesCorrupt::kind: batpak::store::HiddenRangesCorruption
 pub batpak::prelude::StoreError::HiddenRangesCorrupt::path: std::path::PathBuf
+pub batpak::prelude::StoreError::HiddenRangesFutureVersion
+pub batpak::prelude::StoreError::HiddenRangesFutureVersion::found: u16
+pub batpak::prelude::StoreError::HiddenRangesFutureVersion::path: std::path::PathBuf
+pub batpak::prelude::StoreError::HiddenRangesFutureVersion::supported: u16
 pub batpak::prelude::StoreError::IdempotencyFutureVersion
 pub batpak::prelude::StoreError::IdempotencyFutureVersion::current: u16
 pub batpak::prelude::StoreError::IdempotencyFutureVersion::stored: u16
@@ -2683,6 +2690,9 @@ pub batpak::store::StoreError::BatchSyncFailed
 pub batpak::store::StoreError::BatchSyncFailed::item_count: usize
 pub batpak::store::StoreError::BatchSyncFailed::source: alloc::boxed::Box<batpak::prelude::StoreError>
 pub batpak::store::StoreError::CacheFailed(alloc::boxed::Box<(dyn core::error::Error + core::marker::Send + core::marker::Sync)>)
+pub batpak::store::StoreError::CheckpointFutureVersion
+pub batpak::store::StoreError::CheckpointFutureVersion::found: u16
+pub batpak::store::StoreError::CheckpointFutureVersion::supported: u16
 pub batpak::store::StoreError::CheckpointId(batpak::store::delivery::observation::CheckpointIdError)
 pub batpak::store::StoreError::CheckpointWriteFailed
 pub batpak::store::StoreError::CheckpointWriteFailed::id: alloc::string::String
@@ -2717,6 +2727,10 @@ pub batpak::store::StoreError::EventPayloadRegistry(batpak::event::payload::Even
 pub batpak::store::StoreError::HiddenRangesCorrupt
 pub batpak::store::StoreError::HiddenRangesCorrupt::kind: batpak::store::HiddenRangesCorruption
 pub batpak::store::StoreError::HiddenRangesCorrupt::path: std::path::PathBuf
+pub batpak::store::StoreError::HiddenRangesFutureVersion
+pub batpak::store::StoreError::HiddenRangesFutureVersion::found: u16
+pub batpak::store::StoreError::HiddenRangesFutureVersion::path: std::path::PathBuf
+pub batpak::store::StoreError::HiddenRangesFutureVersion::supported: u16
 pub batpak::store::StoreError::IdempotencyFutureVersion
 pub batpak::store::StoreError::IdempotencyFutureVersion::current: u16
 pub batpak::store::StoreError::IdempotencyFutureVersion::stored: u16

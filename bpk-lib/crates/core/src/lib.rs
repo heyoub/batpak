@@ -116,6 +116,31 @@ pub mod __private {
     };
 }
 
+/// Fuzz-only decode entry points for the workspace-excluded `batpak-fuzz`
+/// cargo-fuzz crate (GAUNT-FUZZ-1). Gated behind `dangerous-test-hooks` and
+/// `#[doc(hidden)]`: a default build never compiles it, so there is no
+/// production API-surface change. See the module docs for the wrapper contract.
+#[cfg(feature = "dangerous-test-hooks")]
+#[doc(hidden)]
+pub mod __fuzz;
+
+/// Deterministic-simulation entry points for the `sim_is_deterministic`
+/// integration test (GAUNT-SIM-2c). Gated behind `dangerous-test-hooks` and
+/// `#[doc(hidden)]`: a default build never compiles it, so there is no
+/// production API-surface change. Exposes only the seeded-workload driver and
+/// `BATPAK_SEED` replay helper over the `pub(crate)` simulation backends.
+#[cfg(feature = "dangerous-test-hooks")]
+#[doc(hidden)]
+pub mod __sim {
+    pub use crate::store::sim::recovery::{
+        recovery_replay_seed, run_seeded_recovery, RecoveryOutcomePublic,
+    };
+    pub use crate::store::sim::recovery_matrix::{
+        matrix_replay_seed, run_recovery_matrix, MatrixCell, RecoveredClass,
+    };
+    pub use crate::store::sim::{replay_seed, run_seeded_workload};
+}
+
 // Self-alias for path hygiene in derive-generated code.
 // `batpak-macros` emits absolute `::batpak::...` paths (see ADR-0010 and
 // `crates/macros/src/lib.rs:151-166`). `pub extern crate self as batpak;`

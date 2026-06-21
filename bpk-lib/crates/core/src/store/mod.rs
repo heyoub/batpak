@@ -22,7 +22,10 @@ pub mod fault;
 mod file_classification;
 mod frontier_api;
 mod gate;
-mod hidden_ranges;
+// `pub(crate)` (was `mod`) so the feature-gated `crate::__fuzz` module can name
+// `hidden_ranges::{load_cancelled_ranges, VISIBILITY_RANGES_FILENAME}`. Crate-
+// internal only; no public API-surface change.
+pub(crate) mod hidden_ranges;
 /// In-memory 2D event index, rebuilt from segments on startup.
 pub mod index;
 mod lifecycle;
@@ -44,6 +47,9 @@ mod runtime_contracts;
 /// On-disk segment format, frame encoding/decoding, and compaction helpers.
 pub mod segment;
 mod signing;
+/// Cooperative single-thread seeded simulation runtime (test hooks only).
+#[cfg(feature = "dangerous-test-hooks")]
+pub(crate) mod sim;
 mod snapshot_report;
 /// Runtime statistics and diagnostic snapshots.
 pub mod stats;
@@ -97,6 +103,11 @@ pub use fault::{
     CountdownAction, CountdownInjector, FaultInjector, InjectionPoint, ProbabilisticInjector,
 };
 pub use gate::DurabilityGate;
+/// Test-only global-allocator shims. Re-exported so dedicated single-test
+/// binaries can install one as `#[global_allocator]`. Compiled out unless the
+/// `alloc-count` or `fault-alloc` feature is enabled.
+#[cfg(any(feature = "alloc-count", feature = "fault-alloc"))]
+pub use platform::alloc;
 pub use platform::clock::{Clock, SystemClock};
 pub use projection::watch::{CursorWatcherError, ProjectionWatcher, WatcherError};
 pub use projection::{
@@ -248,4 +259,33 @@ fn wait_for_drop_shutdown_ack(rx: &flume::Receiver<Result<(), StoreError>>) {
 
 fn join_drop_shutdown_writer(writer: &mut WriterHandle) {
     let _join_result = writer.join();
+}
+
+#[cfg(feature = "dangerous-test-hooks")]
+impl Store<Open> {
+    /// Test-only: abandon this store the way a power loss would, WITHOUT the
+    /// clean-shutdown drain.
+    ///
+    /// A normal `drop`/`close` sends `Shutdown` to the writer, which drains the
+    /// queue, writes a SIDX footer, and fsyncs — defeating any pre-fsync crash
+    /// scenario. This hook instead disables the drop-time shutdown and quiesces
+    /// the writer by closing its command channel (NOT by sending `Shutdown`), so
+    /// the writer loop simply ends with no final sync/footer. The
+    /// write-but-unsynced tail therefore stays exactly where the durability seam
+    /// left it; the caller then drives [`crate::store::platform::fs::StoreFs::crash`]
+    /// (via the installed sim filesystem) to truncate it, modelling power loss.
+    ///
+    /// Consumes the store; reopen over the same data directory to recover.
+    pub(crate) fn abandon_without_shutdown(mut self) {
+        self.should_shutdown_on_drop = false;
+        // Take the writer handle and close its command channel WITHOUT sending
+        // Shutdown: the writer loop ends naturally (no drain, no footer, no final
+        // sync), then we join to quiescence so no thread is mid-fsync when the
+        // caller crashes the filesystem.
+        if let Some(writer) = self.writer.take() {
+            writer.close_channel_and_join();
+        }
+        // `self` (writer already taken, should_shutdown_on_drop=false) drops here
+        // as an inert handle: Drop returns immediately.
+    }
 }

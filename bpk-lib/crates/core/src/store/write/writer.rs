@@ -17,7 +17,6 @@ use crate::event::{Event, EventHeader, EventKind, HashChain};
 use crate::store::append::BatchAppendItem;
 use crate::store::config::ValidatedStoreConfig;
 use crate::store::index::{DiskPos, StoreIndex};
-use crate::store::platform;
 use crate::store::segment::sidx::kind_to_raw;
 use crate::store::segment::{self, Active, FramePayloadRef, Segment};
 #[cfg(test)]
@@ -115,7 +114,7 @@ pub(crate) struct WriterHandle {
     pub subscribers: Arc<SubscriberList>,
     pub reactor_subscribers: Arc<ReactorSubscriberList>,
     watermark_handle: WatermarkAdvanceHandle,
-    thread: Option<std::thread::JoinHandle<()>>,
+    thread: Option<Box<dyn crate::store::platform::spawn::SimJoin>>,
 }
 
 /// RestartPolicy: how the writer recovers from panics.
@@ -146,12 +145,16 @@ impl WriterHandle {
         reader: &Arc<crate::store::segment::scan::Reader>,
     ) -> Result<Self, StoreError> {
         // Fallible init — propagate errors to Store::open() caller
-        platform::fs::create_dir_all(&config.data_dir).map_err(StoreError::Io)?;
+        config
+            .fs()
+            .create_dir_all(&config.data_dir)
+            .map_err(StoreError::Io)?;
         let initial_segment_id = find_latest_segment_id(&config.data_dir)?.unwrap_or(0) + 1;
-        let initial_segment = Segment::<Active>::create_with_created_ns(
+        let initial_segment = Segment::<Active>::create_with_created_ns_on(
             &config.data_dir,
             initial_segment_id,
             runtime.now_wall_ns(),
+            config.fs(),
         )?;
 
         let (tx, rx) = flume::bounded::<WriterCommand>(config.writer.channel_capacity);
@@ -164,27 +167,28 @@ impl WriterHandle {
         let rdr = Arc::clone(reader);
         let watermark_for_thread = watermark_handle.clone();
 
-        let mut builder = std::thread::Builder::new().name(writer_thread_name(&config.data_dir));
-        if let Some(stack_size) = config.writer.stack_size {
-            builder = builder.stack_size(stack_size);
-        }
-        let thread = builder
-            .spawn(move || {
-                writer_thread_main(
-                    WriterRuntime {
-                        rx: &rx,
-                        config: &cfg,
-                        validated_cfg: &validated,
-                        index: &idx,
-                        subscribers: &subs,
-                        reactor_subscribers: &reactor_subs,
-                        reader: &rdr,
-                        watermark_handle: &watermark_for_thread,
-                    },
-                    initial_segment,
-                    initial_segment_id,
-                );
-            })
+        let thread = config
+            .spawner()
+            .spawn(
+                writer_thread_name(&config.data_dir),
+                config.writer.stack_size,
+                Box::new(move || {
+                    writer_thread_main(
+                        WriterRuntime {
+                            rx: &rx,
+                            config: &cfg,
+                            validated_cfg: &validated,
+                            index: &idx,
+                            subscribers: &subs,
+                            reactor_subscribers: &reactor_subs,
+                            reader: &rdr,
+                            watermark_handle: &watermark_for_thread,
+                        },
+                        initial_segment,
+                        initial_segment_id,
+                    );
+                }),
+            )
             .map_err(StoreError::Io)?;
 
         Ok(Self {
@@ -218,7 +222,7 @@ impl WriterHandle {
         if self
             .thread
             .as_ref()
-            .is_some_and(std::thread::JoinHandle::is_finished)
+            .is_some_and(|thread| thread.is_finished())
         {
             self.watermark_handle.mark_writer_crashed();
             return Err(StoreError::WriterCrashed);
@@ -234,6 +238,21 @@ impl WriterHandle {
             })?;
         }
         Ok(())
+    }
+
+    /// Test-only: abandon the writer the way a power loss would — close its
+    /// command channel (so the loop ends WITHOUT a `Shutdown`-triggered drain,
+    /// footer, or final sync) and join the thread to quiescence. Consumes the
+    /// handle, dropping `tx` (the sole sender) so the writer's `rx.iter()`
+    /// terminates naturally. Used by [`super::super::Store::abandon_without_shutdown`].
+    #[cfg(feature = "dangerous-test-hooks")]
+    pub(crate) fn close_channel_and_join(self) {
+        let Self { tx, thread, .. } = self;
+        // Drop the only sender first so the writer loop's `rx.iter()` ends.
+        drop(tx);
+        if let Some(thread) = thread {
+            let _join_result = thread.join();
+        }
     }
 
     // NOTE: No send_append() method here. Store::append() and Store::append_reaction()
@@ -339,12 +358,15 @@ mod tests {
     fn writer_handle_join_surfaces_thread_panic_and_poisons_watermarks() {
         let (tx, _rx) = flume::bounded::<WriterCommand>(1);
         let watermark_handle = WatermarkState::handle(Arc::new(SystemClock::new()));
-        let thread = std::thread::Builder::new()
-            .name("writer-join-panic-proof".to_owned())
-            .spawn(|| {
+        let thread = crate::store::platform::spawn::Spawn::spawn(
+            &crate::store::platform::spawn::ThreadSpawn,
+            "writer-join-panic-proof".to_owned(),
+            None,
+            Box::new(|| {
                 panic!("intentional writer join panic proof");
-            })
-            .expect("spawn panic proof thread");
+            }),
+        )
+        .expect("spawn panic proof thread");
 
         let mut handle = WriterHandle {
             tx,
@@ -599,10 +621,11 @@ impl WriterState<'_> {
             },
             &self.config.fault_injector,
         )?;
-        let new_active = Segment::<Active>::create_with_created_ns(
+        let new_active = Segment::<Active>::create_with_created_ns_on(
             &self.config.data_dir,
             *self.segment_id + 1,
             self.runtime.now_wall_ns(),
+            self.config.fs(),
         )?;
         // New segment is durably present. Now flush the OLD segment's committed
         // frames while it is still pristine — before writing the footer or

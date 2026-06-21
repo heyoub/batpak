@@ -14,6 +14,11 @@
   artifacts:
     - ART-IDEMPOTENCY-DURABLE-SOURCE
     - ART-IDEMPOTENCY-DURABLE-TESTS
+- id: INV-ONDISK-FORWARD-COMPAT-CANONICAL
+  statement: Every on-disk format declared in the compat matrix opens or fails with exactly one canonical typed error per (writer_version, reader_version) pair - never silent corruption and never a silent rebuild-from-scan downgrade. A reader opening an artifact written at its own live version succeeds (the OpensOK self-row), and an artifact written at a strictly-newer version is a canonical typed refusal. The governed formats and their future-version refusals are - mmap-index (index.fbati, StoreError MmapFutureVersion), checkpoint (index.ckpt, StoreError CheckpointFutureVersion), idempotency-index (index.idemp, StoreError IdempotencyFutureVersion), and visibility-ranges (visibility_ranges.fbv, StoreError HiddenRangesFutureVersion); each refusal is propagated out of cold-start rather than degrading to a scan, while corrupt or older artifacts keep their graceful-rebuild path. The matrix is the live contract, so a bump to an on-disk version const with no matching matrix row is caught because the self-row reader_version is cross-checked against the live supported version. The segment/.fbat format is intentionally excluded - its version is msgpack-encoded (no fixed-offset forge) and a future-version segment already fails closed via CorruptSegment with no silent-degrade path.
+  witness_test: crates/core/tests/compat_matrix.rs::compat_matrix_rows_match_declared_outcomes
+  artifacts:
+    - ART-COMPAT-MATRIX
 - id: INV-SYNCBAT-DISPATCH-RECEIPTS
   statement: syncbat checkout dispatch emits at most one completed or failed runtime receipt for resolved operations, emits no receipt for unknown operations, and fails closed when the configured receipt sink fails.
   artifacts:
@@ -85,6 +90,16 @@
   artifacts:
     - ART-STORE-ERROR
     - ART-STORE-PROPERTIES
+- id: INV-PAYLOAD-VERSION-NONZERO
+  statement: >-
+    A typed event payload always carries a non-zero PAYLOAD_VERSION in the event header; the reserved
+    legacy sentinel 0 marks an untyped/legacy frame, so the typed-append seam rejects any payload that
+    forges PAYLOAD_VERSION = 0 (the derive macro forbids it at compile time and the runtime seam
+    forbids a hand-written impl), keeping typed frames distinguishable from legacy frames on read.
+  artifacts:
+    - ART-PAYLOAD-VERSION-NONZERO-TEST
+    - ART-EVENT-PAYLOAD-DECODE-SEAM
+  witness_test: crates/core/tests/store_append_behavior.rs::typed_append_rejects_manual_payload_version_zero
 - id: INV-PAYLOAD-LENGTH-EXACT
   statement: Serialized payload lengths must be computed exactly and rejected when they exceed the wire contract.
   artifacts:
@@ -391,6 +406,22 @@
   statement: Public outcome and monadic combinators preserve their type-level success, retry, cancelled, and error law shapes under property tests.
   artifacts:
     - ART-COMBINATOR-LAW-TESTS
+- id: INV-PROJECTION-FUSION-EQUIVALENCE
+  statement: Folding multiple catamorphisms in one fused banana-split traversal equals folding each fold separately, for any generated event stream and any fold pair or triple, while reading the stream exactly once.
+  artifacts:
+    - ART-PROJECTION-FUSION-LAW-TESTS
+- id: INV-HLC-JOIN-SEMILATTICE
+  statement: The hybrid logical clock merge forms a bounded join-semilattice that is commutative, associative, idempotent, and bottomed at ORIGIN, with the dual meet behaving symmetrically and the lexicographic tiebreak preserved.
+  artifacts:
+    - ART-HLC-SEMILATTICE-LAW-TESTS
+- id: INV-OUTCOME-FUNCTOR-COMPOSITION
+  statement: Outcome map distributes over function composition through every variant including the Batch arm, Batch concatenation is an associative monoid with the empty batch as unit, and zip selects the maximum-priority variant of its two inputs.
+  artifacts:
+    - ART-OUTCOME-EVENTKIND-LAW-TESTS
+- id: INV-EVENTKIND-PARSE-ROUNDTRIP
+  statement: Every value built by the fallible EventKind try_custom parser decomposes back to its originating category and type id, and try_custom accepts exactly the inputs the strict const constructor would accept without panicking.
+  artifacts:
+    - ART-OUTCOME-EVENTKIND-LAW-TESTS
 - id: INV-HASH-CHAIN-INTEGRITY
   statement: Hash-chain tests preserve append-order integrity by detecting reordered, missing, or mutated event payload links.
   artifacts:
@@ -452,3 +483,115 @@
     - ART-STORE-PROJECTION
     - ART-STORE-MOD
     - ART-DX-DOCS
+- id: INV-WORKSPACE-DAG-ACYCLIC
+  statement: >-
+    The intra-workspace crate dependency graph is a directed acyclic graph; the triangulation gate
+    cross-checks two independent edge derivations (cargo-metadata path dependencies and a direct
+    manifest scan) and fails on either an inter-oracle disagreement or an agreed dependency cycle,
+    so layering and incremental builds are never broken by a reverse or circular crate edge.
+  artifacts:
+    - ART-TRIANGULATION-SOURCE
+- id: INV-SEMANTIC-DIFF-EQUIVALENCE
+  statement: >-
+    Every pair of store configurations that claim to expose identical visible truth
+    (mmap<->scan, checkpoint<->rebuilt, fused<->unfused projection, cached<->uncached,
+    and reopened cold-start across those representations) produces byte-identical
+    observables — query results across every region shape, the visible HLC frontier,
+    and the global sequence — when fed the same seeded operation stream under a fixed
+    clock; any divergence between an equivalence-claiming pair is a hard finding.
+  witness_test: crates/core/tests/semantic_diff.rs::equivalence_claiming_configs_agree_on_visible_truth
+  artifacts:
+    - ART-SEMANTIC-DIFF-TESTS
+- id: INV-LINEARIZABILITY-SINGLE-WRITER
+  statement: >-
+    Because batpak commits through a single writer behind a gated visibility watermark,
+    the ordered visible history a reader returns is the single-writer linearization order:
+    a dense, strictly increasing global_sequence prefix (no gap below the visible
+    high-water and no premature visibility), reads are monotonic (a re-query never drops
+    or reorders a previously-visible event), two independent readers of the same store
+    converge on identical history, and there is no real-time/sequence inversion (if an
+    append returns before another is issued, its global_sequence is the smaller one); a
+    seeded operation stream against a real Store under a fixed clock witnesses this, and a
+    pure checker rejects inverted/gapped/duplicate histories so the property is not vacuous.
+  witness_test: crates/core/tests/linearizability.rs::live_store_history_is_linearizable
+  artifacts:
+    - ART-LINEARIZABILITY-TESTS
+- id: INV-DOCS-CATALOG-VIEW-CURRENT
+  statement: >-
+    INVARIANTS.md is a generated VIEW of traceability/invariants.yaml: the auto-generated catalog
+    block between the BEGIN/END INV-CATALOG markers lists every catalog id and its one-line
+    statement, the authored human prose stays above the block, and the docs-catalog gate folded into
+    structural-check fails on any drift so the published docs can never silently rot away from
+    machine law while the generator regenerates the block deterministically.
+  artifacts:
+    - ART-DOCS-CATALOG-GATE
+  witness_test: tools/integrity/src/docs_catalog_tests.rs::live_catalog_block_matches_committed_invariants_md
+- id: INV-INVARIANT-WITNESS-TEST
+  statement: >-
+    Every catalog invariant that declares a witness_test names a path::fn that resolves to a real
+    declared test (a #[test] function or a proptest!-defined test) in the tree; the docs-catalog gate
+    fails when a declared witness names a missing file, a missing function, or a plain non-test
+    function, upgrading the weak header-string citation to a strong named-test citation for the
+    invariants that carry it.
+  artifacts:
+    - ART-DOCS-CATALOG-GATE
+  witness_test: tools/integrity/src/docs_catalog_tests.rs::witness_gate_rejects_non_test_fn
+- id: INV-GAUNTLET-FOLD-FUSION
+  statement: >-
+    The gauntlet's own fitness functions fold over ONE shared repo-IR column-store (binding AL
+    assignments, gate ownership, waiver ownership, the public-surface map, the mutation-seam map, and
+    docs traceability), and the fused single-traversal runner produces the identical finding set as
+    running each fitness in its own separate pass, so the integrity engine obeys the same
+    banana-split fold-fusion equivalence law it tests for event projections.
+  artifacts:
+    - ART-REPO-IR-SOURCE
+  witness_test: tools/integrity/src/repo_ir_tests.rs::run_fused_equals_run_separate
+- id: INV-DST-RECOVERY-LEGAL
+  statement: >-
+    A real Store opened over the fault-injecting SimFs filesystem backend, driven through the real
+    public append/append_batch/sync API, crashed at the durability boundary (writer abandoned without
+    a clean shutdown, then the unsynced tail truncated via SimFs::crash), and reopened over the
+    persisted (truncated) tree must recover a LEGAL state: a prefix of the appended op-log (no
+    invented or undead events), containing every acknowledged-durable commit (nothing lost that an
+    honored sync confirmed durable), with an intact hash chain across the recovered visible events;
+    and the same BATPAK_SEED must recover the identical state and op-trace digest (determinism). A
+    typed corruption refusal on reopen is a legal recovery outcome; an untyped failure is not.
+  artifacts:
+    - ART-DST-RECOVERY-SOURCE
+    - ART-DST-RECOVERY-TEST
+  witness_test: crates/core/tests/dst_recovery.rs::dst_recovery_is_legal_and_deterministic
+- id: INV-RECOVERY-ORACLE-LEGAL
+  statement: >-
+    A real Store opened over the fault-injecting SimFs backend (plus the
+    durability-boundary fault injector), driven through the real
+    append/append_batch/sync API, crashed under EACH hostile-fs fault mode SimFs
+    can model — honest-disk crash, lying-disk fsync-drop, and crash-before-fsync at
+    each durability boundary (single-append frame write, batch-commit marker,
+    post-fsync-before-publish, segment-rotation create) — and reopened over the
+    persisted (truncated) tree must recover a state that is EXACTLY one of
+    {CommittedPrefix | RolledBack | CanonicalRefusal} and LEGAL: a prefix of the
+    appended op-log (no invented or undead events) with an intact hash chain across
+    the recovered visible events; HONEST-disk modes never lose an
+    acknowledged-durable commit (the sacred rule); LYING-disk modes may legally lose
+    a dropped-fsync commit but the result must STILL be a prefix, undead-free, and
+    chain-intact (losing the dropped commit is the FS's fault, exposing an
+    undead/corrupt one is not); a typed corruption refusal on reopen is a legal
+    outcome, an untyped failure/panic is not. The same (BATPAK_SEED, fault mode)
+    recovers the identical classification and op-trace digest (determinism).
+  artifacts:
+    - ART-RECOVERY-ORACLE-SOURCE
+    - ART-RECOVERY-ORACLE-TEST
+  witness_test: crates/core/tests/recovery_oracle.rs::recovery_oracle_matrix_is_legal_and_deterministic
+- id: INV-COMPLEXITY-EXPONENT-BOUNDED
+  statement: >-
+    A real Store read operation's cost does not silently regress into a worse asymptotic class: the
+    ALLOCATION COUNT (measured by the process-wide CountingAlloc, never wall-clock nanoseconds) of
+    Store::query(Region::all()) is sampled at geometrically increasing input sizes, a least-squares
+    slope of log(cost) vs log(n) is fit, and that fitted complexity exponent must stay under a
+    linear-ish budget; additionally the worst observed per-op allocation COUNT over the declared input
+    distribution stays under a fixed count-based WCET budget. The slope is a ratio of logs and so is
+    hardware-independent and deterministic, and the gate is anti-vacuous because a planted quadratic
+    dataset is rejected by the same pure check_complexity logic.
+  artifacts:
+    - ART-COMPLEXITY-EXPONENT-TESTS
+  witness_test: crates/core/tests/complexity_exponent.rs::query_complexity_exponent_and_wcet_are_bounded

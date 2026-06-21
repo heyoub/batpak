@@ -378,9 +378,15 @@ fn write_valid_sealed_segment(
     };
     let frame_bytes = segment::frame_encode(&frame).expect("encode frame");
 
-    let mut active =
-        segment::Segment::<segment::Active>::create_with_created_ns(dir.path(), segment_id, 0)
-            .expect("create segment");
+    let fs: std::sync::Arc<dyn crate::store::platform::fs::StoreFs> =
+        std::sync::Arc::new(crate::store::platform::fs::RealFs);
+    let mut active = segment::Segment::<segment::Active>::create_with_created_ns_on(
+        dir.path(),
+        segment_id,
+        0,
+        &fs,
+    )
+    .expect("create segment");
     let offset = active.write_frame(&frame_bytes).expect("write frame");
     active
         .sync_with_mode(&crate::store::SyncMode::SyncAll)

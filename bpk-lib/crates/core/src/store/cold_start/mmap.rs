@@ -16,6 +16,38 @@ use crate::store::index::{
 };
 use crate::store::{EncodedBytes, ExtensionKey, StoreError};
 use load::{invalid_load, load_mmap_index};
+
+/// Fuzz-only crate-visible shim over the `pub(super)` mmap entry decoder.
+///
+/// `format::MmapIndexEntry::decode_from` is `pub(super)` and returns a private
+/// type, so it cannot be re-exported through the crate-root `__fuzz` module.
+/// This shim lives inside the `mmap` module (where the decoder is visible),
+/// drives a real fixed-width entry decode on untrusted bytes, and collapses the
+/// private `Result<MmapIndexEntry, StoreError>` to a `bool` (`Ok`/`Err`).
+#[cfg(feature = "dangerous-test-hooks")]
+pub(crate) fn __fuzz_decode_mmap_entry(buf: &[u8], version: u16) -> bool {
+    format::MmapIndexEntry::decode_from(buf, version).is_ok()
+}
+
+/// Fuzz-only crate-visible shim over the `pub(super)` mmap index file loader.
+///
+/// `load::load_mmap_index` is `pub(super)` and returns a private
+/// `FileLoad<LoadedMmapIndex>` (the `LoadedMmapIndex` holds an `Mmap`), so it
+/// cannot cross the crate-root `__fuzz` boundary. This shim opens the real
+/// loader against `data_dir` (the fuzz wrapper has already written the untrusted
+/// bytes to `<data_dir>/index.fbati`), passes a real `SystemClock`, and collapses
+/// the private `FileLoad` to a stable `&'static str` discriminant so the fuzz
+/// crate only observes "did it panic / which arm".
+#[cfg(feature = "dangerous-test-hooks")]
+pub(crate) fn __fuzz_load_mmap_index(data_dir: &Path) -> &'static str {
+    let clock = crate::store::SystemClock::new();
+    match load_mmap_index(data_dir, &clock) {
+        FileLoad::Missing => "missing",
+        FileLoad::Loaded(_) => "loaded",
+        FileLoad::Invalid { .. } => "invalid",
+        FileLoad::FutureVersion { .. } => "future_version",
+    }
+}
 use rayon::prelude::*;
 use std::collections::BTreeMap;
 use std::io::{BufWriter, Seek, SeekFrom, Write};

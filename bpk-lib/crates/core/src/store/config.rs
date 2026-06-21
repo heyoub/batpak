@@ -2,6 +2,8 @@ use crate::event::EventPayloadValidation;
 pub(crate) use crate::store::platform::clock::{
     clock_from_fn, wall_ms_from_timestamp_us, Clock, MonotonicClock, SystemClock,
 };
+pub(crate) use crate::store::platform::fs::{RealFs, StoreFs};
+pub(crate) use crate::store::platform::spawn::{Spawn, ThreadSpawn};
 use crate::store::signing::SigningKey;
 use crate::store::RestartPolicy;
 use std::path::{Path, PathBuf};
@@ -44,6 +46,16 @@ pub struct StoreConfig {
     pub(crate) index: IndexConfig,
     /// Injectable clock for deterministic testing. None = SystemClock.
     pub(crate) clock: Option<Arc<dyn Clock>>,
+    /// Spawner for store background threads. Defaults to [`ThreadSpawn`]
+    /// (one OS thread per spawn, identical to direct `std::thread` usage).
+    /// A deterministic simulation backend can be installed via
+    /// [`StoreConfig::with_spawner`].
+    pub(crate) spawner: Arc<dyn Spawn>,
+    /// Filesystem backend for store data-path operations. Defaults to
+    /// [`RealFs`] (every op delegates to `std::fs` via the platform free fns,
+    /// identical to direct usage). A deterministic simulation backend can be
+    /// installed via [`StoreConfig::with_fs`].
+    pub(crate) fs: Arc<dyn StoreFs>,
     /// Optional callback fired once after a successful open completes.
     pub(crate) open_report_observer: Option<OpenReportObserver>,
     /// Optional platform profile record that must match current platform evidence at open.
@@ -79,6 +91,8 @@ impl StoreConfig {
             sync: SyncConfig::default(),
             index: IndexConfig::default(),
             clock: None,
+            spawner: Arc::new(ThreadSpawn),
+            fs: Arc::new(RealFs),
             open_report_observer: None,
             platform_profile_path: None,
             signing_keys: Vec::new(),
@@ -86,6 +100,14 @@ impl StoreConfig {
             #[cfg(feature = "dangerous-test-hooks")]
             fault_injector: None,
         }
+        // Funnel the default spawner through the builder so the install seam is
+        // exercised on every construction; a deterministic-sim backend swaps it
+        // in via the same builder without touching any spawn site.
+        .with_spawner(Arc::new(ThreadSpawn))
+        // Funnel the default filesystem backend through the builder too, so the
+        // install seam is exercised on every construction; a deterministic-sim
+        // backend swaps it in via the same builder without touching call sites.
+        .with_fs(Arc::new(RealFs))
     }
 
     /// Set the maximum segment file size in bytes before rotation.
@@ -334,6 +356,36 @@ impl StoreConfig {
         self.clock.is_some()
     }
 
+    /// Install a custom spawner for store background threads.
+    ///
+    /// Production uses the default [`ThreadSpawn`] (one OS thread per spawn).
+    /// A deterministic simulation backend installs an alternate [`Spawn`] here
+    /// without touching any spawn site.
+    pub(crate) fn with_spawner(mut self, spawner: Arc<dyn Spawn>) -> Self {
+        self.spawner = spawner;
+        self
+    }
+
+    /// The configured spawner for store background threads.
+    pub(crate) fn spawner(&self) -> &Arc<dyn Spawn> {
+        &self.spawner
+    }
+
+    /// Install a custom filesystem backend for store data-path operations.
+    ///
+    /// Production uses the default [`RealFs`] (every op delegates to `std::fs`).
+    /// A deterministic simulation backend installs an alternate [`StoreFs`] here
+    /// without touching routed call sites.
+    pub(crate) fn with_fs(mut self, fs: Arc<dyn StoreFs>) -> Self {
+        self.fs = fs;
+        self
+    }
+
+    /// The configured filesystem backend for store data-path operations.
+    pub(crate) fn fs(&self) -> &Arc<dyn StoreFs> {
+        &self.fs
+    }
+
     /// Optional platform profile path.
     pub fn platform_profile_path(&self) -> Option<&Path> {
         self.platform_profile_path.as_deref()
@@ -369,6 +421,8 @@ impl Clone for StoreConfig {
             sync: self.sync.clone(),
             index: self.index.clone(),
             clock: self.clock.clone(),
+            spawner: Arc::clone(&self.spawner),
+            fs: Arc::clone(&self.fs),
             open_report_observer: self.open_report_observer.clone(),
             platform_profile_path: self.platform_profile_path.clone(),
             signing_keys: self.signing_keys.clone(),
@@ -392,6 +446,8 @@ impl std::fmt::Debug for StoreConfig {
             .field("sync", &self.sync)
             .field("index", &self.index)
             .field("clock", &self.clock.as_ref().map(|_| "<clock>"))
+            .field("spawner", &"<spawner>")
+            .field("fs", &"<fs>")
             .field(
                 "open_report_observer",
                 &self.open_report_observer.as_ref().map(|_| "<observer>"),

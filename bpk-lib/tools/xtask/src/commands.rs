@@ -14,6 +14,7 @@ mod msrv_check;
 mod mutants;
 mod package_scan;
 mod platform;
+mod prove_gates_bite;
 mod release;
 mod release_manifest;
 mod sbom;
@@ -83,6 +84,12 @@ pub(crate) fn templates() -> Result<()> {
 /// the binary is missing rather than auto-installing or no-opping.
 pub(crate) fn sbom() -> Result<()> {
     sbom::sbom()
+}
+
+/// Prove every `ProductionFlip` gate's red fixture actually reds under
+/// `--cfg gauntlet_red_fixture` (the anti-laundering "prove the gates bite" lane).
+pub(crate) fn prove_gates_bite() -> Result<()> {
+    prove_gates_bite::run()
 }
 
 /// Detect dependencies declared in `Cargo.toml` that are never referenced

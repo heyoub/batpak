@@ -224,3 +224,122 @@ fn has_custom_clock_reflects_clock_presence() {
         "a config with an injected clock must report a custom clock"
     );
 }
+
+#[test]
+fn with_spawner_installs_custom_spawner_and_runs_body() {
+    use crate::store::platform::spawn::{SimJoin, Spawn};
+    use std::sync::atomic::AtomicBool;
+
+    // A recording spawner proving that `with_spawner` rewires the seam: it
+    // sets a flag when asked to spawn, then delegates the body to a real
+    // ThreadSpawn so the join contract still holds end-to-end.
+    struct RecordingSpawn {
+        spawned: Arc<AtomicBool>,
+        inner: crate::store::platform::spawn::ThreadSpawn,
+    }
+    impl Spawn for RecordingSpawn {
+        fn spawn(
+            &self,
+            name: String,
+            stack_size: Option<usize>,
+            body: Box<dyn FnOnce() + Send + 'static>,
+        ) -> std::io::Result<Box<dyn SimJoin>> {
+            self.spawned.store(true, Ordering::Release);
+            self.inner.spawn(name, stack_size, body)
+        }
+    }
+
+    let spawned = Arc::new(AtomicBool::new(false));
+    let spawner: Arc<dyn Spawn> = Arc::new(RecordingSpawn {
+        spawned: Arc::clone(&spawned),
+        inner: crate::store::platform::spawn::ThreadSpawn,
+    });
+
+    let config = StoreConfig::new("target/test-with-spawner").with_spawner(spawner);
+
+    let ran = Arc::new(AtomicBool::new(false));
+    let ran_for_body = Arc::clone(&ran);
+    let handle = config
+        .spawner()
+        .spawn(
+            "with-spawner-config-proof".to_string(),
+            None,
+            Box::new(move || ran_for_body.store(true, Ordering::Release)),
+        )
+        .expect("custom spawner must spawn");
+    handle.join().expect("body must join Ok");
+
+    assert!(
+        spawned.load(Ordering::Acquire),
+        "PROPERTY: with_spawner must route config.spawner() through the installed Spawn"
+    );
+    assert!(
+        ran.load(Ordering::Acquire),
+        "PROPERTY: the body handed to the custom spawner must run to completion"
+    );
+}
+
+#[test]
+fn with_fs_installs_custom_filesystem_backend() {
+    use crate::store::platform::fs::{RealFs, StoreFs};
+    use std::path::Path;
+    use std::sync::atomic::AtomicBool;
+
+    // A recording StoreFs proving that `with_fs` rewires the seam: it flags
+    // when asked to create_dir_all, then delegates to RealFs so the production
+    // op still happens (behavior-preserving delegation through the trait).
+    struct RecordingFs {
+        created: Arc<AtomicBool>,
+        inner: RealFs,
+    }
+    impl StoreFs for RecordingFs {
+        fn read_dir(&self, path: &Path) -> std::io::Result<std::fs::ReadDir> {
+            self.inner.read_dir(path)
+        }
+        fn create_dir_all(&self, path: &Path) -> std::io::Result<()> {
+            self.created.store(true, Ordering::Release);
+            self.inner.create_dir_all(path)
+        }
+        fn create_new_file(&self, path: &Path) -> Result<std::fs::File, crate::store::StoreError> {
+            self.inner.create_new_file(path)
+        }
+        fn sync_file_with_mode(
+            &self,
+            file: &std::fs::File,
+            path: &Path,
+            mode: &crate::store::SyncMode,
+        ) -> Result<(), crate::store::StoreError> {
+            self.inner.sync_file_with_mode(file, path, mode)
+        }
+        fn sync_file_all(&self, file: &std::fs::File, path: &Path) -> std::io::Result<()> {
+            self.inner.sync_file_all(file, path)
+        }
+        fn sync_parent_dir(&self, path: &Path) -> Result<(), crate::store::StoreError> {
+            self.inner.sync_parent_dir(path)
+        }
+    }
+
+    let created = Arc::new(AtomicBool::new(false));
+    let fs: Arc<dyn StoreFs> = Arc::new(RecordingFs {
+        created: Arc::clone(&created),
+        inner: RealFs,
+    });
+
+    let config = StoreConfig::new("target/test-with-fs").with_fs(fs);
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let nested = dir.path().join("seam").join("leaf");
+    config
+        .fs()
+        .create_dir_all(&nested)
+        .expect("custom fs must create the tree");
+
+    assert!(
+        created.load(Ordering::Acquire),
+        "PROPERTY: with_fs must route config.fs() through the installed StoreFs"
+    );
+    assert!(
+        nested.is_dir(),
+        "PROPERTY: the installed StoreFs must still perform the real create_dir_all"
+    );
+}

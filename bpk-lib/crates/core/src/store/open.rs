@@ -36,7 +36,7 @@ fn open_components(
     lock_mode: StoreLockMode,
 ) -> Result<OpenComponents, StoreError> {
     validate_payload_registry_for_open(&config)?;
-    platform::fs::create_dir_all(&config.data_dir)?;
+    config.fs().create_dir_all(&config.data_dir)?;
     config.data_dir = platform::fs::canonicalize(&config.data_dir).map_err(StoreError::Io)?;
     let configured_signing_keys = config.signing_keys.len();
     tracing::debug!(
@@ -63,12 +63,19 @@ fn open_components(
 
     // Cold start: checkpoint/mmap fast paths or full segment scan.
     // Segment files are named so lexicographic order matches replay order.
+    // The fault injector only exists when `dangerous-test-hooks` is enabled;
+    // otherwise the cold-start path takes an inert `&()` (see FaultInjectorRef).
+    #[cfg(feature = "dangerous-test-hooks")]
+    let cold_start_fault_injector = &config.fault_injector;
+    #[cfg(not(feature = "dangerous-test-hooks"))]
+    let cold_start_fault_injector = &();
     let open_outcome = cold_start::rebuild::open_index(
         &index,
         &reader,
         &config.data_dir,
         runtime.cold_start,
         runtime.clock(),
+        cold_start_fault_injector,
     )?;
 
     // Tell the reader which segment is active (for mmap dispatch).

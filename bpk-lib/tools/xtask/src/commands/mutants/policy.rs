@@ -10,7 +10,13 @@ use super::lanes::{MutationLane, MutationScope};
 use super::score::{cargo_mutants_receipt_path, MutationScore};
 use crate::MutantSurface;
 
-pub(super) const REPO_MUTATION_PHASE: RepoMutationPhase = RepoMutationPhase::Phase0;
+// GAUNT-MUT-4: flipped off Phase0 (RecordOnly = never fails) to make the repo-wide
+// mutation lane BLOCKING at a real floor. The audit estimates ~75% live mutants, so
+// we set Phase4 (floor 75%). This floor is PROVISIONAL pending the first cloud
+// repo-wide smoke confirmation — if the cloud shows the measured score is below 75,
+// it is a one-line drop to the highest phase <= measured. The ratchet is monotonic:
+// the floor only ever climbs from here (`next_ratchet_floor` advertises the next raise).
+pub(super) const REPO_MUTATION_PHASE: RepoMutationPhase = RepoMutationPhase::Phase4;
 pub(super) const REPO_MUTATION_THRESHOLDS: &[(RepoMutationPhase, u32)] = &[
     (RepoMutationPhase::Phase1, 35),
     (RepoMutationPhase::Phase2, 50),
@@ -45,7 +51,12 @@ pub(super) enum DiffScope {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum RepoMutationPhase {
-    Phase0,
+    // RecordOnly sentinel (floor-less, never-fails). The repo-wide lane is BLOCKING as
+    // of GAUNT-MUT-4, so this is not the currently-selected phase, but it is retained so
+    // a deliberate fallback to record-only stays expressible. It is intentionally absent
+    // from `REPO_MUTATION_THRESHOLDS` (it has no floor); `current_repo_mutation_floor`
+    // maps any phase not present in that table to `None` (record-only).
+    RecordOnly,
     Phase1,
     Phase2,
     Phase3,
@@ -54,14 +65,10 @@ pub(super) enum RepoMutationPhase {
 }
 
 fn current_repo_mutation_floor() -> Option<u32> {
-    match REPO_MUTATION_PHASE {
-        RepoMutationPhase::Phase0 => None,
-        RepoMutationPhase::Phase1 => Some(35),
-        RepoMutationPhase::Phase2 => Some(50),
-        RepoMutationPhase::Phase3 => Some(65),
-        RepoMutationPhase::Phase4 => Some(75),
-        RepoMutationPhase::Phase5 => Some(85),
-    }
+    REPO_MUTATION_THRESHOLDS
+        .iter()
+        .find(|(phase, _)| *phase == REPO_MUTATION_PHASE)
+        .map(|(_, floor)| *floor)
 }
 
 pub(super) fn current_repo_mutation_enforcement() -> MutationEnforcement {

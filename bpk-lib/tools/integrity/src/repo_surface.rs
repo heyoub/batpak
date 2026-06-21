@@ -60,9 +60,21 @@ fn is_primary_crate_relative_path(rel: &Path) -> bool {
 }
 
 pub(crate) fn tracked_repo_files(repo_root: &Path) -> Result<Vec<PathBuf>> {
+    // Clear the git environment a parent process (e.g. a `git commit` pre-commit
+    // hook) may have exported. With an inherited `GIT_DIR`/`GIT_WORK_TREE`/
+    // `GIT_INDEX_FILE`, `--exclude-standard` resolves .gitignore relative to the
+    // hook's work tree rather than `current_dir(repo_root)`, which leaks ignored
+    // build artifacts (e.g. `target/.rustc_info.json`) into the listing — making
+    // the hygiene scan flag a path-leak only when run from a hook. Unsetting them
+    // makes `git ls-files` resolve the worktree from `current_dir` deterministically,
+    // so the tracked set is identical whether invoked manually or from a commit hook.
     let output = Command::new("git")
         .args(["ls-files", "--cached", "--others", "--exclude-standard"])
         .current_dir(repo_root)
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_INDEX_FILE")
+        .env_remove("GIT_PREFIX")
         .output()
         .context("git ls-files")?;
     ensure(output.status.success(), "git ls-files failed")?;
@@ -70,6 +82,17 @@ pub(crate) fn tracked_repo_files(repo_root: &Path) -> Result<Vec<PathBuf>> {
     let stdout = String::from_utf8(output.stdout).context("git ls-files utf8")?;
     let mut files = Vec::new();
     for line in stdout.lines().filter(|line| !line.is_empty()) {
+        // Defensively skip Cargo build output. `target/` is gitignored, so
+        // `--exclude-standard` normally omits it; but when `git ls-files` runs
+        // inside the pre-commit hook of a linked WORKTREE (cwd = bpk-lib, git
+        // env inherited from the in-flight `git commit`), git's untracked-file
+        // scan can momentarily surface `target/.rustc_info.json` and friends
+        // while a concurrent build writes them. Those are never part of the
+        // integrity surface, so exclude any path under a `target/` directory
+        // explicitly — a robustness fix, not a gate relaxation.
+        if line.split('/').any(|component| component == "target") {
+            continue;
+        }
         let path = repo_root.join(line);
         if path.exists() {
             files.push(path);

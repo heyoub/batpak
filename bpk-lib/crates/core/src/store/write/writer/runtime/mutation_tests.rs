@@ -76,9 +76,13 @@ fn shutdown_in_group_commit_drain_exits_before_shutdown_queue_drain() {
     let subscribers = SubscriberList::new();
     let reactor_subscribers = ReactorSubscriberList::new();
     let watermark_handle = WatermarkState::handle(Arc::new(SystemClock::new()));
-    let segment =
-        Segment::<Active>::create_with_created_ns(&config.data_dir, 1, validated_cfg.now_wall_ns())
-            .expect("create active segment");
+    let segment = Segment::<Active>::create_with_created_ns_on(
+        &config.data_dir,
+        1,
+        validated_cfg.now_wall_ns(),
+        config.fs(),
+    )
+    .expect("create active segment");
     let (tx, rx) = flume::bounded(3);
     let (append_tx, append_rx) = flume::bounded(1);
     let (shutdown_tx, shutdown_rx) = flume::bounded(1);

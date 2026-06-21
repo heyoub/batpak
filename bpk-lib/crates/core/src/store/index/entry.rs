@@ -238,3 +238,131 @@ impl IndexEntry {
         self.causation_id.is_none()
     }
 }
+
+#[cfg(test)]
+mod entry_behavior_tests {
+    use super::super::interner::InternId;
+    use super::*;
+
+    fn make_entry(event_id: u128, correlation_id: u128, causation_id: Option<u128>) -> IndexEntry {
+        IndexEntry {
+            event_id,
+            correlation_id,
+            causation_id,
+            coord: Coordinate::new("entity:e", "scope:s").expect("coord"),
+            entity_id: InternId::sentinel(),
+            scope_id: InternId::sentinel(),
+            kind: EventKind::custom(0xA, 7),
+            wall_ms: 42,
+            clock: 3,
+            dag_lane: 1,
+            dag_depth: 2,
+            hash_chain: HashChain {
+                prev_hash: [1u8; 32],
+                event_hash: [2u8; 32],
+            },
+            disk_pos: DiskPos::new(11, 64, 128),
+            global_sequence: 9,
+            receipt_extensions: BTreeMap::new(),
+        }
+    }
+
+    #[test]
+    fn disk_pos_accessors_return_the_constructed_fields() {
+        // Pins each accessor to its own field; swapping segment_id<->offset or
+        // returning a constant would flip exactly one of these.
+        let pos = DiskPos::new(7, 4096, 256);
+        assert_eq!(pos.segment_id(), 7, "segment_id accessor");
+        assert_eq!(pos.offset(), 4096, "offset accessor");
+        assert_eq!(pos.length(), 256, "length accessor");
+    }
+
+    #[test]
+    fn query_hit_from_entry_copies_the_correct_five_fields() {
+        let entry = make_entry(0xDEAD, 0xBEEF, Some(0xCAFE));
+        let hit = QueryHit::from_entry(&entry);
+        assert_eq!(hit.event_id, 0xDEAD, "event_id must come from entry");
+        assert_eq!(
+            hit.global_sequence, 9,
+            "global_sequence must come from entry"
+        );
+        assert_eq!(
+            hit.disk_pos,
+            DiskPos::new(11, 64, 128),
+            "disk_pos preserved"
+        );
+        assert_eq!(hit.kind, EventKind::custom(0xA, 7), "kind preserved");
+        assert_eq!(hit.clock, 3, "clock must come from entry, not wall_ms");
+        // clock and wall_ms differ in the fixture, so a clock<->wall_ms swap fails.
+        assert_ne!(u64::from(hit.clock), entry.wall_ms);
+    }
+
+    #[test]
+    fn is_correlated_is_true_only_when_correlation_differs_from_event_id() {
+        // Self-correlated root: event_id == correlation_id.
+        let root = make_entry(100, 100, None);
+        assert!(
+            !root.is_correlated(),
+            "a self-correlated root must NOT be reported as correlated"
+        );
+        // Reaction: correlation_id != event_id.
+        let reaction = make_entry(101, 100, Some(100));
+        assert!(
+            reaction.is_correlated(),
+            "an event whose correlation differs from its id IS correlated"
+        );
+    }
+
+    #[test]
+    fn is_root_cause_polarity_matches_causation_presence() {
+        assert!(
+            make_entry(1, 1, None).is_root_cause(),
+            "no causation -> root cause"
+        );
+        assert!(
+            !make_entry(2, 1, Some(1)).is_root_cause(),
+            "present causation -> NOT root cause"
+        );
+    }
+
+    #[test]
+    fn is_caused_by_is_an_exact_match_not_a_has_any_cause_predicate() {
+        let entry = make_entry(2, 1, Some(0x1111));
+        assert!(
+            entry.is_caused_by(crate::id::EventId::from(0x1111u128)),
+            "exact causation id must match"
+        );
+        assert!(
+            !entry.is_caused_by(crate::id::EventId::from(0x2222u128)),
+            "a different id must NOT match (exactness)"
+        );
+        // A root-cause event is caused by nothing.
+        assert!(!make_entry(1, 1, None).is_caused_by(crate::id::EventId::from(0u128)));
+    }
+
+    #[test]
+    fn clock_key_tiebreaks_by_uuid_when_wall_and_clock_match() {
+        // Equal wall_ms and clock: the uuid tiebreak decides ordering.
+        let lo = ClockKey {
+            wall_ms: 5,
+            clock: 5,
+            uuid: 1,
+        };
+        let hi = ClockKey {
+            wall_ms: 5,
+            clock: 5,
+            uuid: 2,
+        };
+        assert!(lo < hi, "uuid tiebreak must order lower uuid first");
+        // clock dominates uuid.
+        let earlier_clock = ClockKey {
+            wall_ms: 5,
+            clock: 4,
+            uuid: 9999,
+        };
+        assert!(
+            earlier_clock < lo,
+            "a smaller clock must sort before a larger clock regardless of uuid"
+        );
+    }
+}

@@ -16,6 +16,35 @@
   paths:
     - tools/integrity/src/main.rs
     - tools/integrity/src/architecture_lints.rs
+- id: ART-TRIANGULATION-SOURCE
+  kind: tool
+  paths:
+    - tools/integrity/src/triangulation.rs
+    - tools/integrity/src/triangulation_tests.rs
+    - tools/integrity/src/structural.rs
+- id: ART-SEMANTIC-DIFF-TESTS
+  kind: tests
+  paths:
+    - crates/core/tests/semantic_diff.rs
+- id: ART-LINEARIZABILITY-TESTS
+  kind: tests
+  paths:
+    - crates/core/tests/linearizability.rs
+- id: ART-COMPLEXITY-EXPONENT-TESTS
+  kind: tests
+  paths:
+    - crates/core/tests/complexity_exponent.rs
+- id: ART-DOCS-CATALOG-GATE
+  kind: tool
+  paths:
+    - tools/integrity/src/docs_catalog.rs
+    - tools/integrity/src/docs_catalog_tests.rs
+    - tools/integrity/src/structural.rs
+- id: ART-REPO-IR-SOURCE
+  kind: tool
+  paths:
+    - tools/integrity/src/repo_ir.rs
+    - tools/integrity/src/repo_ir_tests.rs
 - id: ART-TRACEABILITY
   kind: registry
   paths:
@@ -622,6 +651,18 @@
   paths:
     - crates/core/tests/monad_laws.rs
     - crates/core/tests/outcome_combinators.rs
+- id: ART-PROJECTION-FUSION-LAW-TESTS
+  kind: tests
+  paths:
+    - crates/core/tests/projection_fusion_laws.rs
+- id: ART-HLC-SEMILATTICE-LAW-TESTS
+  kind: tests
+  paths:
+    - crates/core/tests/hlc_semilattice_laws.rs
+- id: ART-OUTCOME-EVENTKIND-LAW-TESTS
+  kind: tests
+  paths:
+    - crates/core/tests/outcome_eventkind_laws.rs
 - id: ART-HASH-CHAIN-TESTS
   kind: tests
   paths:
@@ -664,6 +705,10 @@
   kind: tests
   paths:
     - crates/core/tests/schema_evolution.rs
+- id: ART-PAYLOAD-VERSION-NONZERO-TEST
+  kind: tests
+  paths:
+    - crates/core/tests/store_append_behavior.rs
 - id: ART-SCHEMA-EVOLUTION-DOC
   kind: docs
   paths:
@@ -711,7 +756,34 @@
     - crates/core/tests/idempotency_window_priority.rs
     - crates/core/tests/idempotency_for_operation.rs
     - crates/core/tests/idempotency_corruption_recovery.rs
+- id: ART-COMPAT-MATRIX
+  kind: tests
+  paths:
+    - traceability/compat_matrix.yaml
+    - crates/core/tests/compat_matrix.rs
 - id: ART-TESTS
   kind: tests
   paths:
     - crates/core/tests
+- id: ART-DST-RECOVERY-SOURCE
+  kind: source
+  paths:
+    - crates/core/src/store/sim/fs.rs
+    - crates/core/src/store/sim/recovery.rs
+    - crates/core/src/store/platform/fs.rs
+    - crates/core/src/store/segment/mod.rs
+- id: ART-DST-RECOVERY-TEST
+  kind: tests
+  paths:
+    - crates/core/tests/dst_recovery.rs
+- id: ART-RECOVERY-ORACLE-SOURCE
+  kind: source
+  paths:
+    - crates/core/src/store/sim/recovery_matrix.rs
+    - crates/core/src/store/sim/recovery.rs
+    - crates/core/src/store/sim/fs.rs
+    - crates/core/src/store/fault.rs
+- id: ART-RECOVERY-ORACLE-TEST
+  kind: tests
+  paths:
+    - crates/core/tests/recovery_oracle.rs

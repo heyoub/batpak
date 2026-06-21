@@ -32,21 +32,28 @@ mod architecture_ir;
 mod architecture_lints;
 mod assurance;
 mod ci_parity;
+mod complexity;
+mod docs_catalog;
 mod doctor;
 mod evidence_audit;
 mod gate_registry;
+mod glob_coverage;
 mod harness_lints;
 mod invariant_bridge;
 mod meta_gate;
+mod mutation_debt;
 mod public_surface;
 mod receipts;
+mod repo_ir;
 mod repo_surface;
 mod rust_ast;
 mod source_cache;
 mod store_pub_fn_coverage;
 mod structural;
 mod traceability;
+mod triangulation;
 mod typed_waivers;
+mod wallclock;
 
 #[path = "../../shared/shared_checks.rs"]
 mod shared_checks;
@@ -74,9 +81,15 @@ enum CommandKind {
     /// (vacuous-pass) receipt; `SKIPPED_PACKAGED` receipts may carry zero counts.
     GauntletReceiptsPresent,
     /// Enforce the DO-178B tool-qualification law: no gate may have blocking
-    /// authority without naming an existing red-fixture test. Reports any
-    /// blocking gate that lacks a red fixture (a finding, not a failure path).
+    /// authority without naming an existing, anti-vacuous red-fixture test.
+    /// Reports any blocking gate that lacks a qualified red fixture.
     GateRegistryCheck,
+    /// Print the registry's `ProductionFlip` red-fixture test references (one per
+    /// line, `<file>::<test_fn>`). The `gauntlet-red-fixtures-bite` CI lane
+    /// consumes this list, rebuilds with `--cfg gauntlet_red_fixture`, and asserts
+    /// each test FAILS — proving the gates actually red in automation, not just in
+    /// source. This is the registry as the single source of truth for the lane.
+    ProductionFlipFixtures,
     /// Agent-safety meta-gate (P1-4): classify a `base..HEAD` diff and FAIL if it
     /// WEAKENS the assurance machinery without the required human approval. The
     /// pure classifier lives in `meta_gate.rs`; this subcommand is the
@@ -99,6 +112,11 @@ enum CommandKind {
         #[arg(long)]
         commits_file: Option<std::path::PathBuf>,
     },
+    /// Triangulation harness (GAUNTLET-TRIANGULATION): cross-check independent
+    /// oracles over non-type repo facts; a disagreement is a hard finding. The
+    /// wired fact is workspace crate-graph acyclicity (cargo-metadata + Tarjan
+    /// vs. manifest-scan). Also folded into `structural-check`.
+    TriangulationCheck,
     /// Static checks for evidence report bodies and public export vocabulary.
     EvidenceAudit,
     /// Validate the machine-readable agent intent/API/test surface map.
@@ -111,6 +129,23 @@ enum CommandKind {
         out: Option<std::path::PathBuf>,
         #[arg(long)]
         check: bool,
+    },
+    /// GAUNTLET-DOCS-CURRENCY: regenerate (or `--check`) the auto-generated INV
+    /// catalog block in `INVARIANTS.md` from `traceability/invariants.yaml`, and
+    /// enforce the per-INV `witness_test` strong-tier citation gate. `--check`
+    /// fails on drift instead of rewriting; it is folded into `structural-check`.
+    DocsCatalog {
+        #[arg(long)]
+        check: bool,
+    },
+    /// GAUNTLET-REPO-IR (Phase 3, item 6): emit the minimal queryable repo-IR as
+    /// JSON. ONE column-store binding AL assignments + gate ownership + waiver
+    /// ownership + public-surface map + mutation-seam map + docs traceability,
+    /// over which fitness functions fold (banana-split-fused: one traversal, N
+    /// checks). `--out` writes to a file; default prints to stdout.
+    RepoIr {
+        #[arg(long)]
+        out: Option<std::path::PathBuf>,
     },
 }
 
@@ -134,18 +169,27 @@ fn main() -> Result<()> {
             gate_registry::report(&repo_root);
             Ok(())
         }
+        CommandKind::ProductionFlipFixtures => {
+            for reference in gate_registry::production_flip_fixtures() {
+                println!("{reference}");
+            }
+            Ok(())
+        }
         CommandKind::MetaGateCheck {
             diff_file,
             labels,
             pr_author,
             commits_file,
         } => run_meta_gate(diff_file, labels, pr_author, commits_file),
+        CommandKind::TriangulationCheck => triangulation::check(&repo_surface::repo_root()?),
         CommandKind::EvidenceAudit => evidence_audit::run(&repo_surface::repo_root()?),
         CommandKind::AgentSurfaceCheck => agent_surface::run(&repo_surface::repo_root()?),
         CommandKind::AgentDoctor => agent_doctor::run(&repo_surface::repo_root()?),
         CommandKind::ArchitectureIr { out, check } => {
             architecture_ir::run(&repo_surface::repo_root()?, out, check)
         }
+        CommandKind::DocsCatalog { check } => docs_catalog::run(&repo_surface::repo_root()?, check),
+        CommandKind::RepoIr { out } => repo_ir::run(&repo_surface::repo_root()?, out),
     }
 }
 

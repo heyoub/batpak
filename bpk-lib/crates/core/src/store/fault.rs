@@ -131,6 +131,54 @@ pub enum InjectionPoint {
         /// Segment being opened.
         new_segment: u64,
     },
+
+    // ---------------------------------------------------------------------
+    // READ / SCAN / COLD-START injection points (GAUNT-FAULT-3).
+    //
+    // These mirror the write-path call-site pattern but cover the recovery
+    // surface exercised during `Store::open` / `Store::open_read_only`: mmap
+    // fast-path load, checkpoint decode, sealed-segment SIDX footer decode,
+    // per-frame segment scan, and hidden-ranges (cancelled visibility) load.
+    // A fault at any of these must leave the store either consistently opened
+    // or aborted with a typed `StoreError` (never a panic / partial state).
+    // ---------------------------------------------------------------------
+    /// Before attempting to load the mmap index fast-path snapshot
+    /// (`index.fbati`) during cold start.
+    MmapIndexLoad,
+
+    /// While decoding the mmap index footer/header (after the file is mapped,
+    /// before its contents are trusted).
+    IndexFooterDecode {
+        /// Segment whose SIDX footer is being decoded, if known.
+        segment_id: u64,
+    },
+
+    /// Before attempting to decode the checkpoint snapshot (`index.ckpt`)
+    /// during cold start.
+    CheckpointDecode,
+
+    /// Before loading the persisted hidden (cancelled visibility) ranges
+    /// during cold start. A fault here must fail closed rather than silently
+    /// resurrect cancelled events.
+    HiddenRangesLoad,
+
+    /// Per-frame during a cold-start segment scan (frame-scan fallback or
+    /// tail recovery). Triggered once per scanned frame.
+    ColdStartScanFrame {
+        /// Segment being scanned.
+        segment_id: u64,
+        /// Zero-based index of the frame within this scan pass.
+        frame_index: usize,
+    },
+
+    /// A low-level positional read during recovery. Generic catch-all for
+    /// `read_at`-style I/O on the cold-start path.
+    ReadAt {
+        /// Byte offset of the read.
+        offset: u64,
+        /// Number of bytes requested.
+        len: usize,
+    },
 }
 
 /// Trait for implementing fault injection scenarios.
@@ -222,6 +270,30 @@ impl CountdownInjector {
             CountdownAction::Fail("simulated fault after COMMIT before fsync"),
         )
         .with_filter(|p| matches!(p, InjectionPoint::BatchCommitWritten { .. }))
+    }
+
+    /// Convenience: fail on the Kth read/scan/cold-start I/O point.
+    ///
+    /// Counts only recovery-path injection points (mmap load, checkpoint
+    /// decode, SIDX footer decode, per-frame scan, hidden-ranges load, and
+    /// positional reads), so the same injector can be reused across the whole
+    /// cold-start surface to model "crash on the Kth recovery I/O".
+    pub fn on_kth_recovery_io(k: usize) -> Self {
+        Self::new(
+            k,
+            CountdownAction::Fail("simulated fault on Kth recovery I/O"),
+        )
+        .with_filter(|p| {
+            matches!(
+                p,
+                InjectionPoint::MmapIndexLoad
+                    | InjectionPoint::IndexFooterDecode { .. }
+                    | InjectionPoint::CheckpointDecode
+                    | InjectionPoint::HiddenRangesLoad
+                    | InjectionPoint::ColdStartScanFrame { .. }
+                    | InjectionPoint::ReadAt { .. }
+            )
+        })
     }
 }
 

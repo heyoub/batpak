@@ -8,8 +8,8 @@ use crate::shared_checks::{
 };
 use crate::source_cache::SourceCache;
 use crate::{
-    agent_surface, architecture_lints, ci_parity, harness_lints, invariant_bridge, public_surface,
-    store_pub_fn_coverage,
+    agent_surface, architecture_lints, ci_parity, complexity, docs_catalog, glob_coverage,
+    harness_lints, invariant_bridge, public_surface, store_pub_fn_coverage, wallclock,
 };
 use anyhow::{anyhow, bail, Result};
 use std::collections::BTreeSet;
@@ -38,6 +38,11 @@ pub(crate) fn run() -> Result<()> {
         ))
     })?;
 
+    // GAUNTLET-DOCS-CURRENCY: the INVARIANTS.md catalog block must be a current
+    // view of traceability/invariants.yaml (drift => fail), and every declared
+    // witness_test must resolve to a real test. `check=true` => never rewrite.
+    docs_catalog::run(&repo_root, true)?;
+
     // The structural source lints share one receipt: they all walk the
     // production-Rust surface and each file is the unit of work + the assertion.
     let started = crate::receipts::iso8601_now();
@@ -51,15 +56,19 @@ pub(crate) fn run() -> Result<()> {
     check_rust_file_size_pressure(&repo_root, &mut source_cache)?;
     check_inline_test_island_pressure(&repo_root, &mut source_cache)?;
     check_event_payload_frozen_fixtures(&repo_root, &mut source_cache)?;
+    complexity::check(&repo_root, &mut source_cache)?;
+    wallclock::check(&repo_root, &mut source_cache)?;
+    glob_coverage::check(&repo_root)?;
+    crate::mutation_debt::check(&repo_root)?;
     public_surface::check(&repo_root, &mut source_cache)?;
     store_pub_fn_coverage::check(&repo_root, &mut source_cache)?;
-    // Eight blocking source lints ran over every production file; record the
+    // Eleven blocking source lints ran over every production file; record the
     // real files-examined count and assertions (one structural lint per file).
     crate::receipts::record_pass(
         "structural-source-lints",
         source_files.iter().cloned().collect(),
         source_files.len(),
-        source_files.len().saturating_mul(8),
+        source_files.len().saturating_mul(11),
         started,
     )?;
 
@@ -69,6 +78,17 @@ pub(crate) fn run() -> Result<()> {
         let inputs: BTreeSet<PathBuf> = ci_parity_inputs(&repo_root);
         let files = inputs.len();
         Ok(crate::receipts::GateWork::new(files, files.max(1), inputs))
+    })?;
+
+    // triangulation: cross-oracle check of non-type facts (GAUNTLET-TRIANGULATION).
+    // The wired fact is workspace crate-graph acyclicity, cross-checked by two
+    // independent graph derivations; a disagreement OR an agreed cycle fails.
+    crate::receipts::run_gate("triangulation", || {
+        crate::triangulation::check(&repo_root)?;
+        let mut inputs: BTreeSet<PathBuf> = workspace_manifest_inputs(&repo_root);
+        let files = inputs.len().max(1);
+        inputs.insert(repo_root.join("Cargo.toml"));
+        Ok(crate::receipts::GateWork::new(files, files, inputs))
     })?;
 
     // assurance-level-check: receipt over the manifest + the production files it
@@ -111,6 +131,31 @@ fn ci_parity_inputs(repo_root: &Path) -> BTreeSet<PathBuf> {
         let path = repo_root.join(rel);
         if path.exists() {
             inputs.insert(path);
+        }
+    }
+    inputs
+}
+
+/// The member `Cargo.toml` manifests the triangulation crate-graph oracles read
+/// (every workspace member's manifest, plus the root). Used to give the
+/// triangulation receipt a real `files_examined` count + `inputs_hash`.
+fn workspace_manifest_inputs(repo_root: &Path) -> BTreeSet<PathBuf> {
+    let mut inputs = BTreeSet::new();
+    for rel in [
+        "crates/core",
+        "crates/syncbat",
+        "crates/netbat",
+        "crates/hbat",
+        "crates/macros",
+        "crates/macros-support",
+        "crates/syncbat-macros",
+        "crates/bench-support",
+        "tools/integrity",
+        "tools/xtask",
+    ] {
+        let manifest = repo_root.join(rel).join("Cargo.toml");
+        if manifest.exists() {
+            inputs.insert(manifest);
         }
     }
     inputs
@@ -832,12 +877,18 @@ fn nonblank_line_count_in_range(lines: &[&str], start_line: usize, end_line: usi
         .count()
 }
 
-fn production_rust_files(repo_root: &Path) -> Vec<PathBuf> {
+pub(crate) fn production_rust_files(repo_root: &Path) -> Vec<PathBuf> {
     let mut paths = rust_files(&core_src_root(repo_root));
     for root in production_rust_roots(repo_root) {
         paths.extend(rust_files(&root));
     }
     paths
+}
+
+/// True when `attrs` carries `#[cfg(test)]`. Shared with the complexity gate so
+/// both detectors skip the same test-only module surface.
+pub(crate) fn module_is_cfg_test(attrs: &[syn::Attribute]) -> bool {
+    is_cfg_test(attrs)
 }
 
 #[cfg(test)]
