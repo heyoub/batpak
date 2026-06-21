@@ -123,6 +123,21 @@ pub(super) const LANE_BRANCH_MUTANT_FILES: &[&str] = &[
     "crates/core/src/store/write/writer/append.rs",
     "crates/core/src/store/write/writer/batch.rs",
 ];
+// bvisor-admission seam: the fail-closed boundary planner. `plan` probes the
+// chosen backend, classifies every requirement, and `admit_one` admits
+// (Enforced/Mediated) or fails closed (Unsupported -> PlanError), plus the plan
+// canonicalization/identity hash. registry.rs is fully owned by the planner +
+// runner; the runner half is covered by the report-seal seam below.
+pub(super) const BVISOR_ADMISSION_MUTANT_FILES: &[&str] =
+    &["crates/bvisor/src/contract/registry.rs"];
+// bvisor-report-seal seam: report sealing. `BoundaryReportBody::body_hash`
+// (report.rs) sorts findings, canonical-encodes, and blake3-hashes the body;
+// `BoundaryRunner::run` (registry.rs) executes via the bound backend and SEALS
+// the observed body, failing closed if sealing cannot canonical-encode.
+pub(super) const BVISOR_REPORT_SEAL_MUTANT_FILES: &[&str] = &[
+    "crates/bvisor/src/contract/report.rs",
+    "crates/bvisor/src/contract/registry.rs",
+];
 pub(super) const LANE_FRONTIER_MUTANT_FILES: &[&str] = &[
     "crates/core/src/store/hidden_ranges.rs",
     "crates/core/src/store/index/mod.rs",
@@ -671,6 +686,27 @@ pub(super) fn critical_mutation_seams() -> &'static [CriticalMutationSeam] {
             surface: MutantSurface::AllFeatures,
             package: None,
             paths: LANE_FRONTIER_MUTANT_FILES,
+        },
+        // bvisor C1 seams. `--all-features` enables `dangerous-test-hooks`, which
+        // compiles the SimBackend monster + GroundTruth oracle that catch the
+        // mutants. `bvisor-policy-lowering` is intentionally DEFERRED to C2: the
+        // real backend policy lowering does not exist yet, so a seam glob for it
+        // would match no code and vacuously pass — it is added when C2 lands.
+        CriticalMutationSeam {
+            slug: "bvisor-admission",
+            label: "bvisor fail-closed boundary admission",
+            description: "boundary planner probe/classify, fail-closed admit_one (Unsupported -> PlanError), and canonical plan identity hashing",
+            surface: MutantSurface::AllFeatures,
+            package: Some("bvisor"),
+            paths: BVISOR_ADMISSION_MUTANT_FILES,
+        },
+        CriticalMutationSeam {
+            slug: "bvisor-report-seal",
+            label: "bvisor report sealing",
+            description: "report body_hash canonicalization (sort findings, canonical encode, blake3) and the runner's seal-or-fail-closed execution path",
+            surface: MutantSurface::AllFeatures,
+            package: Some("bvisor"),
+            paths: BVISOR_REPORT_SEAL_MUTANT_FILES,
         },
     ]
 }

@@ -369,6 +369,42 @@ pub(crate) const GATES: &[Gate] = &[
         red_fixture_kind: Some(RedFixtureKind::GateNegativePath),
         has_blocking_authority: true,
     },
+    // --- bvisor C1 boundary-supervisor gates (blocking, qualified ProductionFlip).
+    //     bvisor's SimBackend "monster" drives `admit → plan → run` against a lying
+    //     backend while the HARNESS-OWNED GroundTruth oracle classifies what ACTUALLY
+    //     happened — the monster never grades itself, mirroring batpak's recovery
+    //     matrix (reopen-and-classify-independently). These fixtures live in the
+    //     `bvisor` package behind `--features dangerous-test-hooks`, so the bite lane
+    //     (and `prove-gates-bite`) build them per-package from the path prefix.
+    //
+    //     `bvisor-grid`: the G1..G13 proof grid. Under `gauntlet_red_fixture` the red
+    //     branch asserts the (illegal) "lie uncaught" outcome on G4 (no-spawn-when-
+    //     denied); a biting oracle always catches the spawn-despite-deny lie, so the
+    //     red half FAILS — proving the grid is anti-vacuous.
+    Gate {
+        slug: "bvisor-grid",
+        red_fixture_test: Some(
+            "crates/bvisor/tests/grid.rs::grid_red_fixture_lie_must_escape",
+        ),
+        red_fixture_kind: Some(RedFixtureKind::ProductionFlip),
+        has_blocking_authority: true,
+    },
+    //     `bvisor-reconciliation`: the startup-reconciliation oracle (G13). It sweeps
+    //     `(crash_boundary × seed)` and classifies each in-flight boundary as EXACTLY
+    //     one of {Completed | RolledBack | CanonicalRefusal}, reading ONLY the
+    //     persisted 0xE crash state (never a backend self-report). Under
+    //     `gauntlet_red_fixture` the red branch asserts the illegal UndeadBoundary
+    //     (a committed artifact with no sealed report reconciling to Completed); the
+    //     real reconciler returns CanonicalRefusal (the sacred window forbids a silent
+    //     Completed), so the red half FAILS — proving the oracle bites.
+    Gate {
+        slug: "bvisor-reconciliation",
+        red_fixture_test: Some(
+            "crates/bvisor/tests/reconciliation_oracle.rs::reconciliation_red_fixture_undead_boundary_must_fail",
+        ),
+        red_fixture_kind: Some(RedFixtureKind::ProductionFlip),
+        has_blocking_authority: true,
+    },
 ];
 
 /// Gates that block a real run today but are recorded as `has_blocking_authority:

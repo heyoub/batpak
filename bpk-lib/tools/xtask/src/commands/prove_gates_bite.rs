@@ -21,9 +21,23 @@ use std::process::Command;
 /// The cfg that flips ProductionFlip fixtures to their illegal-behavior assertion.
 const RED_CFG: &str = "--cfg gauntlet_red_fixture";
 
-/// Minimum number of ProductionFlip fixtures we expect (S2, S3, perf-alloc). If the
-/// registry ever returns fewer, the lane fails closed rather than vacuously pass.
-const MIN_FIXTURES: usize = 3;
+/// Minimum number of ProductionFlip fixtures we expect (the core S2/S3/perf-alloc
+/// sentinels plus the bvisor C1 grid + reconciliation oracles). If the registry
+/// ever returns fewer, the lane fails closed rather than vacuously pass.
+const MIN_FIXTURES: usize = 5;
+
+/// Resolve the cargo `--package` that owns a registry fixture reference from its
+/// `<repo-rel-file>::<test_fn>` path. ProductionFlip fixtures live under either
+/// `crates/core/tests/...` (the `batpak` crate) or `crates/<pkg>/tests/...` (a
+/// sibling crate, e.g. `bvisor`). Defaulting to `batpak` keeps the historical
+/// core fixtures working without per-entry annotation.
+fn package_for(reference: &str) -> &'static str {
+    if reference.starts_with("crates/bvisor/") {
+        "bvisor"
+    } else {
+        "batpak"
+    }
+}
 
 pub(crate) fn run() -> Result<()> {
     let fixtures = production_flip_fixtures()?;
@@ -46,18 +60,31 @@ pub(crate) fn run() -> Result<()> {
     // Separate target dir: the red-cfg build must not pollute the normal cache.
     let bite_target = cargo_target_dir()?.join("gauntlet-bite");
 
-    println!("prove-gates-bite: building all test targets under {RED_CFG} ...");
-    let mut build = Command::new("cargo");
-    build
-        .env("CARGO_TARGET_DIR", &bite_target)
-        .env("RUSTFLAGS", RED_CFG)
-        .args(["test", "--package", "batpak", "--all-features", "--no-run"]);
-    util::run(build).context("test build under --cfg gauntlet_red_fixture failed to compile")?;
+    // Each ProductionFlip fixture is owned by a cargo package, derived from its
+    // path prefix. Build the test targets for every distinct package under the cfg
+    // (core S2/S3/perf-alloc live in `batpak`; bvisor C1's grid + reconciliation
+    // live in `bvisor` behind `--all-features`). Building per-package keeps the
+    // bite lane honest for sibling crates instead of silently skipping them.
+    let mut packages: Vec<&'static str> = fixtures.iter().map(|r| package_for(r)).collect();
+    packages.sort_unstable();
+    packages.dedup();
+    for package in &packages {
+        println!("prove-gates-bite: building {package} test targets under {RED_CFG} ...");
+        let mut build = Command::new("cargo");
+        build
+            .env("CARGO_TARGET_DIR", &bite_target)
+            .env("RUSTFLAGS", RED_CFG)
+            .args(["test", "--package", package, "--all-features", "--no-run"]);
+        util::run(build).with_context(|| {
+            format!("test build for {package} under --cfg gauntlet_red_fixture failed to compile")
+        })?;
+    }
 
     let mut laundered = Vec::new();
     for reference in &fixtures {
         let test_fn = reference.rsplit("::").next().unwrap_or(reference.as_str());
-        println!("prove-gates-bite: biting {reference}");
+        let package = package_for(reference);
+        println!("prove-gates-bite: biting {reference} (package {package})");
         // Raw output() (NOT util::run_output, which bails on nonzero): we EXPECT a
         // nonzero exit here — a failing test is the success condition.
         let output = Command::new("cargo")
@@ -66,7 +93,7 @@ pub(crate) fn run() -> Result<()> {
             .args([
                 "test",
                 "--package",
-                "batpak",
+                package,
                 "--all-features",
                 test_fn,
                 "--",
