@@ -1,0 +1,29 @@
+[package]
+name = "bvisor"
+version = "0.8.3"
+edition = "2021"
+rust-version = "1.92"
+license = "MIT OR Apache-2.0"
+description = "Publish-false boundary supervisor: platform-agnostic boundary contract (types + fail-closed planner + honest InertBackend). ZERO OS code, ZERO BatPak writes in the trait."
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[features]
+default = []
+
+[dependencies]
+# batpak by path for the EventPayload derive + inventory registration and the
+# canonical encoding / blake3 hash helpers reused for report sealing. The `blake3`
+# default feature backs `event::hash::compute_hash`, which seals report bodies.
+# The contract itself stays OS-free and writes no BatPak.
+batpak = { path = "../core", version = "0.8.3" }
+serde = { version = "1", features = ["derive"] }
+# Named in report/plan seal signatures: batpak's canonical encoder returns
+# `rmp_serde::encode::Error`, mirrored here exactly as core's *ReportBody does.
+# Pinned to the same line core pins so the canonical bytes stay byte-identical.
+rmp-serde = "=1.3.1"
+
+[lints]
+workspace = true

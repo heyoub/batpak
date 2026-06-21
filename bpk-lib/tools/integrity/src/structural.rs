@@ -146,6 +146,7 @@ fn workspace_manifest_inputs(repo_root: &Path) -> BTreeSet<PathBuf> {
         "crates/syncbat",
         "crates/netbat",
         "crates/refbat",
+        "crates/bvisor",
         "crates/macros",
         "crates/macros-support",
         "crates/syncbat-macros",
@@ -364,6 +365,21 @@ const FROZEN_FIXTURE_DEBT: &[FrozenFixtureDebt] = &[
         type_name: "ProjectionRunEvidenceAck",
         reason: "refbat manifest payload predates the frozen-decode fixture regime",
         target: "freeze a v1 fixture + frozen_decode test in Phase 2",
+    },
+    FrozenFixtureDebt {
+        type_name: "BoundaryPlanEvent",
+        reason: "bvisor C0 0xE payload; fixtures land with the host-wiring phase",
+        target: "freeze a v1 fixture + frozen_decode test when bvisor gains host wiring",
+    },
+    FrozenFixtureDebt {
+        type_name: "BoundaryReportEvent",
+        reason: "bvisor C0 0xE payload; fixtures land with the host-wiring phase",
+        target: "freeze a v1 fixture + frozen_decode test when bvisor gains host wiring",
+    },
+    FrozenFixtureDebt {
+        type_name: "BoundaryRecoveryEvent",
+        reason: "bvisor C0 0xE payload; fixtures land with the reconciliation phase",
+        target: "freeze a v1 fixture + frozen_decode test when bvisor gains reconciliation",
     },
 ];
 
