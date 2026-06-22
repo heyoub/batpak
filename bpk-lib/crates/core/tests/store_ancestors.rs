@@ -80,7 +80,7 @@ fn walk_ancestors_respects_limit() {
 
     for i in 0..10 {
         let payload = serde_json::json!({"i": i});
-        store.append(&coord, kind, &payload).expect("append");
+        let _ = store.append(&coord, kind, &payload).expect("append");
     }
 
     let entries = store.by_entity("entity:limit");

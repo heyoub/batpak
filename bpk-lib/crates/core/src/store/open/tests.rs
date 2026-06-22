@@ -88,12 +88,13 @@ fn cooperative_open_spawns_zero_writer_threads_but_threaded_spawns_one() {
         Store::open_cooperative(StoreConfig::new(coop_dir.path()).with_spawner(coop_spawner))
             .expect("open cooperative");
     let coord = Coordinate::new("entity:coop-seam", "scope:test").expect("coord");
-    coop.append(
-        &coord,
-        EventKind::custom(0xC, 0x0B),
-        &serde_json::json!({ "x": 1 }),
-    )
-    .expect("cooperative append drives inline");
+    let _ = coop
+        .append(
+            &coord,
+            EventKind::custom(0xC, 0x0B),
+            &serde_json::json!({ "x": 1 }),
+        )
+        .expect("cooperative append drives inline");
     coop.close().expect("close cooperative");
     assert_eq!(
         coop_count.load(Ordering::Acquire),
@@ -118,7 +119,7 @@ fn highest_index_hlc_reports_non_origin_point_for_appended_entry() {
     let point = highest_index_hlc(&store.index);
 
     assert_eq!(
-        point.global_sequence, receipt.sequence,
+        point.global_sequence, receipt.global_sequence,
         "PROPERTY: highest_index_hlc must observe the committed entry's global sequence"
     );
     assert!(

@@ -29,7 +29,7 @@ fn build_fixture(depth: u64) -> (Store, TempDir) {
     let coord = Coordinate::new("bench:fork:entity", "bench:fork").expect("valid coordinate");
     let blob = "x".repeat(300);
     for i in 0..depth {
-        store
+        let _ = store
             .append(&coord, KIND, &serde_json::json!({"i": i, "blob": blob}))
             .expect("append fixture event");
     }

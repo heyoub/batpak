@@ -184,10 +184,10 @@ fn happy_path_reactor_filters_wrong_kind_and_reacts_to_matched() {
         .expect("spawn reactor");
 
     // Interleave two kinds: only PayloadA should reach the reactor.
-    store
+    let _ = store
         .append_typed(&source_coord(), &PayloadA { n: 1 })
         .expect("append PayloadA n=1");
-    store
+    let _ = store
         .append_typed(
             &source_coord(),
             &PayloadB {
@@ -195,10 +195,10 @@ fn happy_path_reactor_filters_wrong_kind_and_reacts_to_matched() {
             },
         )
         .expect("append PayloadB skip me");
-    store
+    let _ = store
         .append_typed(&source_coord(), &PayloadA { n: 2 })
         .expect("append PayloadA n=2");
-    store
+    let _ = store
         .append_typed(
             &source_coord(),
             &PayloadB {
@@ -206,7 +206,7 @@ fn happy_path_reactor_filters_wrong_kind_and_reacts_to_matched() {
             },
         )
         .expect("append PayloadB skip me again");
-    store
+    let _ = store
         .append_typed(&source_coord(), &PayloadA { n: 3 })
         .expect("append PayloadA n=3");
 
@@ -249,7 +249,7 @@ fn user_error_stops_loop_and_surfaces_through_join() {
         .expect("spawn reactor");
 
     for n in 1..=5 {
-        store
+        let _ = store
             .append_typed(&source_coord(), &PayloadA { n })
             .expect("append PayloadA in fail-on-third stream");
     }
@@ -292,7 +292,7 @@ fn lossy_subscription_canal_is_explicit_and_never_mints_at_least_once() {
         )
         .expect("spawn lossy reactor");
 
-    store
+    let _ = store
         .append_typed(&source_coord(), &PayloadA { n: 77 })
         .expect("append PayloadA n=77");
 
@@ -356,7 +356,7 @@ fn matched_kind_decode_failure_surfaces_reactor_error_decode() {
 
     // Raw append with a payload that is NOT a valid `ShapeX` — kind matches,
     // decode will fail. This is the "matched kind + decode fail" path.
-    store
+    let _ = store
         .append(
             &source_coord(),
             ShapeX::KIND,

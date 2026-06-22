@@ -136,7 +136,7 @@ fn populate_specs(store: &Store, specs: &[AppendSpec]) {
     for spec in specs {
         let coord = Coordinate::new(entity_name(spec.entity_idx), scope_name(spec.scope_idx))
             .expect("generated coordinates must be valid");
-        store
+        let _ = store
             .append(
                 &coord,
                 event_kind(spec),
@@ -187,7 +187,7 @@ fn seeded_store() -> (TempDir, Store) {
     let coord = Coordinate::new("entity:replay", "scope:test").expect("coord");
     let kind = EventKind::custom(0xF, 1);
     for n in 0..6 {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"n": n}))
             .expect("append");
     }

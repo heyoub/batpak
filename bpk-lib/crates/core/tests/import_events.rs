@@ -52,7 +52,7 @@ fn append_numbered_events(
 ) -> TestResult<Coordinate> {
     let coord = Coordinate::new(entity, "scope:import")?;
     for n in start..start + count {
-        store.append(&coord, kind, &serde_json::json!({"n": n}))?;
+        let _ = store.append(&coord, kind, &serde_json::json!({"n": n}))?;
     }
     Ok(coord)
 }
@@ -73,8 +73,8 @@ fn import_events_reimport_is_noop_and_preserves_raw_payload_bytes() -> TestResul
     let dest = test_store(&dest_dir)?;
     let coord = Coordinate::new("entity:import:raw", "scope:import")?;
     let kind = EventKind::custom(0xF, 0x81);
-    source.append(&coord, kind, &serde_json::json!({"n": 1, "label": "one"}))?;
-    source.append(&coord, kind, &serde_json::json!({"n": 2, "label": "two"}))?;
+    let _ = source.append(&coord, kind, &serde_json::json!({"n": 1, "label": "one"}))?;
+    let _ = source.append(&coord, kind, &serde_json::json!({"n": 2, "label": "two"}))?;
 
     let filter: ImportFilter = Box::new(|entry| entry.event_kind().category() == 0xF);
     let options = ImportOptions::new("source-alpha")?
@@ -129,7 +129,7 @@ fn import_events_preserves_correlation_clears_causation_and_records_provenance()
     let coord = Coordinate::new("entity:import:lineage", "scope:import")?;
     let kind = EventKind::custom(0xF, 0x82);
     let root = source.append(&coord, kind, &serde_json::json!({"step": "root"}))?;
-    source.append_reaction(
+    let _ = source.append_reaction(
         &coord,
         kind,
         &serde_json::json!({"step": "reaction"}),
@@ -230,9 +230,9 @@ fn import_selector_after_resumes_exclusively() -> TestResult {
     let dest = test_store(&dest_dir)?;
     let coord = Coordinate::new("entity:import:after", "scope:import")?;
     let kind = EventKind::custom(0xF, 0x83);
-    source.append(&coord, kind, &serde_json::json!({"n": 1}))?;
+    let _ = source.append(&coord, kind, &serde_json::json!({"n": 1}))?;
     let first_user_seq = source.by_entity("entity:import:after")[0].global_sequence();
-    source.append(&coord, kind, &serde_json::json!({"n": 2}))?;
+    let _ = source.append(&coord, kind, &serde_json::json!({"n": 2}))?;
     source.close()?;
     let source = Store::<ReadOnly>::open_read_only(StoreConfig::new(source_dir.path()))?;
 
@@ -385,7 +385,7 @@ fn import_recomputes_valid_prev_hash_chain_in_target() -> TestResult {
     // must recompute the imported chain over THIS head — not copy the source
     // prev_hash (which links to the source's genesis).
     let local_coord = Coordinate::new(entity, "scope:import")?;
-    dest.append(
+    let _ = dest.append(
         &local_coord,
         kind,
         &serde_json::json!({"local": "pre-existing"}),
@@ -448,7 +448,7 @@ fn import_events_oversized_destination_item_is_rejected_cleanly() -> TestResult 
     )?;
     let coord = Coordinate::new("entity:import:oversized", "scope:import")?;
     let kind = EventKind::custom(0xF, 0x88);
-    source.append(&coord, kind, &serde_json::json!({"blob": "x".repeat(80)}))?;
+    let _ = source.append(&coord, kind, &serde_json::json!({"blob": "x".repeat(80)}))?;
 
     let options = ImportOptions::new("source-oversized")?;
     let err = dest
@@ -475,7 +475,7 @@ fn import_events_from_same_store_is_bounded_not_self_amplifying() -> TestResult 
     let coord = Coordinate::new("entity:import:self", "scope:import")?;
     let kind = EventKind::custom(0xF, 0x75);
     for i in 0..4 {
-        store.append(&coord, kind, &serde_json::json!({ "i": i }))?;
+        let _ = store.append(&coord, kind, &serde_json::json!({ "i": i }))?;
     }
 
     let options = ImportOptions::new("self-source")?;

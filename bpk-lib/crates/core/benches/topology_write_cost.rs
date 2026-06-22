@@ -55,7 +55,7 @@ fn bench_topology_write_cost(c: &mut Criterion) {
                 |(store, _dir)| {
                     for event_ix in 0..EVENT_COUNT {
                         let coord = coord_for(event_ix);
-                        store
+                        let _ = store
                             .append(
                                 &coord,
                                 kind,

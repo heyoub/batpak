@@ -145,16 +145,16 @@ impl DerivedRaw {
 
 fn write_canonical_stream(store: &Store) -> Coordinate {
     let coord = Coordinate::new("entity:parity", "scope:test").expect("valid coord");
-    store
+    let _ = store
         .append_typed(&coord, &Incremented { amount: 1 })
         .expect("append +1");
-    store
+    let _ = store
         .append_typed(&coord, &Incremented { amount: 5 })
         .expect("append +5");
-    store
+    let _ = store
         .append_typed(&coord, &Decremented { amount: -2 })
         .expect("append -2");
-    store
+    let _ = store
         .append_typed(&coord, &Incremented { amount: 10 })
         .expect("append +10");
     coord
@@ -288,7 +288,7 @@ fn project_if_changed_parity_between_hand_and_derived() {
     // Append one more event and assert both surfaces re-project with matching
     // results.
     let coord = Coordinate::new("entity:parity", "scope:test").expect("valid coord");
-    store
+    let _ = store
         .append_typed(&coord, &Incremented { amount: 3 })
         .expect("append +3");
     let gen_after_append = store.entity_generation("entity:parity").unwrap_or(0);
@@ -328,7 +328,7 @@ fn watch_projection_parity_between_hand_and_derived() {
     let coord = Coordinate::new("entity:parity-watch", "scope:test").expect("valid coord");
 
     // Seed with one event so both watchers see initial state.
-    store
+    let _ = store
         .append_typed(&coord, &Incremented { amount: 1 })
         .expect("seed append +1");
 
@@ -343,11 +343,11 @@ fn watch_projection_parity_between_hand_and_derived() {
     // re-project to the same snapshot.
     for amount in [5i64, -3, 7, -1] {
         if amount >= 0 {
-            store
+            let _ = store
                 .append_typed(&coord, &Incremented { amount })
                 .expect("append increment");
         } else {
-            store
+            let _ = store
                 .append_typed(&coord, &Decremented { amount })
                 .expect("append decrement");
         }

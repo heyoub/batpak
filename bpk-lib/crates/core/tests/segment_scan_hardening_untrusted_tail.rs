@@ -156,11 +156,11 @@ fn no_footer_segment_ending_in_coincidental_magic_recovers_all_frames() {
     // Append several frames; the LAST user frame's payload deliberately ends with
     // the SIDX magic so the segment tail coincidentally matches.
     for i in 0..5u32 {
-        store
+        let _ = store
             .append(&coord, KIND, &serde_json::json!({"i": i}))
             .expect("append");
     }
-    store
+    let _ = store
         .append(
             &coord,
             KIND,

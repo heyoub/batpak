@@ -10,7 +10,7 @@ use tempfile::TempDir;
 fn populate_small_segments(store: &Store, coord: &Coordinate, segments: u64, kind: EventKind) {
     for seg in 0..segments {
         for i in 0..100u64 {
-            store
+            let _ = store
                 .append(coord, kind, &serde_json::json!({"seg": seg, "i": i}))
                 .expect("append");
         }

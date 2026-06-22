@@ -21,7 +21,7 @@ fn group_commit_batches_under_load() {
     for i in 0u32..32 {
         let opts = AppendOptions::new()
             .with_idempotency(batpak::id::IdempotencyKey::from(u128::from(i) + 1));
-        store
+        let _ = store
             .append_with_options(&coord, kind_a(), &payload(i), opts)
             .expect("append");
     }
@@ -40,7 +40,7 @@ fn group_commit_batch_1_is_backward_compat() {
     let config = StoreConfig::new(dir.path()).with_group_commit_max_batch(1);
     let store = Store::open(config).expect("open");
     let coord = test_coord();
-    store.append(&coord, kind_a(), &payload(0)).expect("append");
+    let _ = store.append(&coord, kind_a(), &payload(0)).expect("append");
     assert_eq!(store.by_entity("entity:test").len(), 1);
     store.close().expect("close");
 }
@@ -72,7 +72,7 @@ fn group_commit_mid_batch_shutdown_safe() {
     for i in 0u32..10 {
         let opts = AppendOptions::new()
             .with_idempotency(batpak::id::IdempotencyKey::from(u128::from(i) + 1));
-        store
+        let _ = store
             .append_with_options(&coord, kind_a(), &payload(i), opts)
             .expect("append");
     }

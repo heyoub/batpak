@@ -29,7 +29,7 @@ fn seed_store(dir: &TempDir, mmap: bool, checkpoint: bool) {
     let store = Store::open(config).expect("open store for seeding");
     let coord = Coordinate::new("entity:kth", "scope:recovery").expect("valid coordinate");
     for n in 0..200u32 {
-        store
+        let _ = store
             .append(
                 &coord,
                 KIND,

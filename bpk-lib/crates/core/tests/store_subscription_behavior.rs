@@ -30,7 +30,7 @@ fn subscription_receives_matching_events() {
         .name("store-advanced-sub-recv-writer".into())
         .spawn(move || {
             for i in 0..3 {
-                store_w
+                let _ = store_w
                     .append(&coord_w, kind, &serde_json::json!({"i": i}))
                     .expect("append");
             }
@@ -74,13 +74,13 @@ fn subscription_filters_by_region() {
         .spawn(move || {
             let coord_a = Coordinate::new("entity:a", "scope:test").expect("valid coord");
             let coord_b = Coordinate::new("entity:b", "scope:test").expect("valid coord");
-            store_w
+            let _ = store_w
                 .append(&coord_a, kind, &serde_json::json!({"target": "a"}))
                 .expect("append a");
-            store_w
+            let _ = store_w
                 .append(&coord_b, kind, &serde_json::json!({"target": "b"}))
                 .expect("append b");
-            store_w
+            let _ = store_w
                 .append(&coord_a, kind, &serde_json::json!({"target": "a2"}))
                 .expect("append a2");
         })
@@ -122,7 +122,7 @@ fn subscription_ops_map_transforms_notifications() {
     std::thread::Builder::new()
         .name("store-advanced-sub-ops-map-writer".into())
         .spawn(move || {
-            store_w
+            let _ = store_w
                 .append(&coord_w, kind, &serde_json::json!({"v": 1}))
                 .expect("append");
         })
@@ -193,13 +193,13 @@ fn subscription_ops_filter_chains_correctly() {
     let writer = std::thread::Builder::new()
         .name("store-advanced-sub-ops-filter-writer".into())
         .spawn(move || {
-            store_w
+            let _ = store_w
                 .append(&coord_w, kind1, &serde_json::json!({"k": 1}))
                 .expect("append");
-            store_w
+            let _ = store_w
                 .append(&coord_w, kind2, &serde_json::json!({"k": 2}))
                 .expect("append");
-            store_w
+            let _ = store_w
                 .append(&coord_w, kind1, &serde_json::json!({"k": 3}))
                 .expect("append");
         })
@@ -257,7 +257,7 @@ fn subscription_ops_take_limits_count() {
         .name("store-advanced-sub-ops-take-writer".into())
         .spawn(move || {
             for i in 0..5 {
-                store_w
+                let _ = store_w
                     .append(&coord_w, kind, &serde_json::json!({"i": i}))
                     .expect("append");
             }

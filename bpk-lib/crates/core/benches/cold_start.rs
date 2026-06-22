@@ -51,7 +51,7 @@ fn populate_store(config: StoreConfig, count: u64) {
     let kind = EventKind::custom(0xF, 1);
     let payload = serde_json::json!({"x": 1});
     for _ in 0..count {
-        store.append(&coord, kind, &payload).expect("append");
+        let _ = store.append(&coord, kind, &payload).expect("append");
     }
     store.sync().expect("sync");
     store.close().expect("close");
@@ -87,7 +87,7 @@ fn append_tail_without_refreshing_snapshot(fixture_dir: &TempDir, tail_count: u6
     let coord = Coordinate::new("bench:entity", "bench:scope").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
     for i in 0..tail_count {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"tail": i}))
             .expect("append tail");
     }

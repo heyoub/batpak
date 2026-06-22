@@ -169,7 +169,7 @@ impl CommitMetadata {
         use crate::id::EntityIdType;
         Self::new(
             receipt.event_id.as_u128(),
-            receipt.sequence,
+            receipt.global_sequence,
             receipt.content_hash,
         )
     }

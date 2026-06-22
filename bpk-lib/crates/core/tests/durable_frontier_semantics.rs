@@ -75,7 +75,7 @@ fn open_after_close_advances_open_hlc_past_max_pre_close() {
 
     let max_hlc_before_close = {
         let store = Store::open(StoreConfig::new(dir.path())).expect("open store");
-        store
+        let _ = store
             .append(&coord, kind(), &serde_json::json!({"n": 1}))
             .expect("append");
         let entries = store.query(&Region::entity("entity:frontier-reopen"));
@@ -107,7 +107,7 @@ fn read_only_reopen_does_not_emit_lifecycle_event() {
 
     let (max_hlc_before_read_only, lifecycle_count_before_read_only) = {
         let store = Store::open(StoreConfig::new(dir.path())).expect("open store");
-        store
+        let _ = store
             .append(&coord, kind(), &serde_json::json!({"n": 1}))
             .expect("append");
         let entries = store.query(&Region::entity("entity:frontier-readonly-lifecycle"));
@@ -144,7 +144,7 @@ fn explicit_close_emits_system_close_completed_event() {
 
     let max_hlc_before_close = {
         let store = Store::open(StoreConfig::new(dir.path())).expect("open store");
-        store
+        let _ = store
             .append(&coord, kind(), &serde_json::json!({"n": 1}))
             .expect("append");
         let entries = store.query(&Region::entity("entity:frontier-close-event"));
@@ -177,7 +177,7 @@ fn drop_without_explicit_close_emits_no_close_event() {
 
     {
         let store = Store::open(StoreConfig::new(dir.path())).expect("open store");
-        store
+        let _ = store
             .append(&coord, kind(), &serde_json::json!({"n": 1}))
             .expect("append");
     }
@@ -205,7 +205,7 @@ fn bootstrap_open_hlc_consumes_recorded_close_hlc() {
 
     let close_hlc_1 = {
         let store = Store::open(StoreConfig::new(dir.path())).expect("open store");
-        store
+        let _ = store
             .append(&coord, kind(), &serde_json::json!({"n": 1}))
             .expect("append");
         store.close().expect("close");
@@ -223,7 +223,7 @@ fn bootstrap_open_hlc_consumes_recorded_close_hlc() {
             store.frontier().accepted_hlc >= close_hlc_1,
             "PROPERTY: reopen must consume the recorded close frontier"
         );
-        store
+        let _ = store
             .append(&coord, kind(), &serde_json::json!({"n": 2}))
             .expect("append");
         store.close().expect("close");
@@ -254,7 +254,7 @@ fn bootstrap_with_clock_skew_preserves_monotonicity() {
 
     let max_hlc_before_close = {
         let store = Store::open(fixed_clock_config(&dir, 9_000_000_000)).expect("open store");
-        store
+        let _ = store
             .append(&coord, kind(), &serde_json::json!({"n": 1}))
             .expect("append");
         let entries = store.query(&Region::entity("entity:frontier-clock-skew"));
@@ -282,7 +282,7 @@ fn empty_store_open_starts_with_lifecycle_frontier_then_append_advances() {
     assert_eq!(open_hlc.global_sequence, 0);
 
     let coord = coord("entity:frontier-empty-advance");
-    store
+    let _ = store
         .append(&coord, kind(), &serde_json::json!({"n": 1}))
         .expect("append");
     let snapshot = store.dangerous_watermark_snapshot();
@@ -296,7 +296,7 @@ fn read_only_open_bootstraps_frontier_from_rebuilt_index() {
 
     let max_hlc_before_close = {
         let store = Store::open(StoreConfig::new(dir.path())).expect("open store");
-        store
+        let _ = store
             .append(&coord, kind(), &serde_json::json!({"n": 1}))
             .expect("append");
         let entries = store.query(&Region::entity("entity:frontier-readonly"));

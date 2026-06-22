@@ -39,7 +39,7 @@ fn chaos_rapid_segment_rotation() {
     let iterations = chaos_iterations().min(200);
 
     for i in 0..iterations {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"i": i}))
             .expect("append");
     }

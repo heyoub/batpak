@@ -98,7 +98,7 @@ fn assert_historical_fixture_opens(
         ]),
         "older artifact restore must hydrate receipt extensions from the backing .fbat frame"
     );
-    assert!(store.verify_append_receipt(&replay));
+    assert!(store.verify_append_receipt(&replay).is_valid());
 }
 
 #[test]

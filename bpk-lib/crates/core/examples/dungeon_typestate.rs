@@ -119,22 +119,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Close it — this returns a new Door<Closed> and a Transition event
     let (door, transition) = door.close();
-    store.apply_transition(&coord, transition)?;
+    let _ = store.apply_transition(&coord, transition)?;
     let _ = writeln!(out, "  → Closed (event persisted)");
 
     // Lock it
     let (door, transition) = door.lock("skeleton-key");
-    store.apply_transition(&coord, transition)?;
+    let _ = store.apply_transition(&coord, transition)?;
     let _ = writeln!(out, "  → Locked with skeleton-key (event persisted)");
 
     // Unlock it
     let (door, transition) = door.unlock("skeleton-key");
-    store.apply_transition(&coord, transition)?;
+    let _ = store.apply_transition(&coord, transition)?;
     let _ = writeln!(out, "  → Unlocked (event persisted)");
 
     // Open it
     let (_door, transition) = door.open();
-    store.apply_transition(&coord, transition)?;
+    let _ = store.apply_transition(&coord, transition)?;
     let _ = writeln!(out, "  → Open again (event persisted)");
 
     // -- Show the event log --

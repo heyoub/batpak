@@ -380,7 +380,7 @@ fn corruption_inside_committed_batch_fails_closed() {
     let batch_coord =
         Coordinate::new("entity:scan-corrupt-batch", "scope:test").expect("batch coord");
 
-    store
+    let _ = store
         .append(&pre_coord, KIND, &serde_json::json!({"pre": true}))
         .expect("append pre-batch event");
     store

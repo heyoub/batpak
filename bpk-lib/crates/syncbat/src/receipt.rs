@@ -149,7 +149,7 @@ impl From<batpak::store::AppendReceipt> for BatpakReceiptFields {
     fn from(receipt: batpak::store::AppendReceipt) -> Self {
         Self {
             event_id: receipt.event_id,
-            sequence: receipt.sequence,
+            sequence: receipt.global_sequence,
             content_hash: receipt.content_hash,
             key_id: receipt.key_id,
             signature: receipt.signature,

@@ -82,7 +82,7 @@ fn run_cooperative_once() -> (Vec<ReceiptFingerprint>, usize) {
         );
 
         fingerprints.push(ReceiptFingerprint {
-            sequence: receipt.sequence,
+            sequence: receipt.global_sequence,
             content_hash: receipt.content_hash,
             payload,
         });

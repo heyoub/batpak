@@ -31,7 +31,7 @@ fn bench_topology_matrix(c: &mut Criterion) {
         )
         .expect("open");
         for i in 0u32..1_000 {
-            store
+            let _ = store
                 .append(&coord, kind, &serde_json::json!({"i": i}))
                 .expect("append");
         }

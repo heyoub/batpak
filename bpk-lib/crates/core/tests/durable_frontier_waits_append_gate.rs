@@ -50,7 +50,7 @@ fn append_without_gate_returns_immediately() {
     let (_dir, store) = open_store(1000);
 
     let started = Instant::now();
-    store
+    let _ = store
         .append_with_options(
             &coord("entity:gate:none"),
             kind(),
@@ -74,7 +74,7 @@ fn append_with_durable_gate_blocks_until_synced() {
         .name("durable-gate-second-append".into())
         .spawn(move || {
             std::thread::sleep(Duration::from_millis(50));
-            second_store
+            let _ = second_store
                 .append(
                     &coord("entity:gate:durable-second"),
                     kind(),
@@ -85,7 +85,7 @@ fn append_with_durable_gate_blocks_until_synced() {
         })
         .expect("spawn second append");
     let started = Instant::now();
-    store
+    let _ = store
         .append_with_options(
             &coord("entity:gate:durable-first"),
             kind(),
@@ -130,7 +130,7 @@ fn append_with_applied_gate_blocks_until_min_projection_advances() {
         .expect("spawn projection notifier");
 
     let started = Instant::now();
-    store
+    let _ = store
         .append_with_options(
             &coord("entity:gate:applied"),
             kind(),
@@ -155,7 +155,7 @@ fn append_with_visible_gate_returns_after_publish() {
     let (_dir, store) = open_store(1000);
 
     let started = Instant::now();
-    store
+    let _ = store
         .append_with_options(
             &coord("entity:gate:visible"),
             kind(),

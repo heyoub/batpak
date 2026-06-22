@@ -28,23 +28,19 @@ fn append_receipt_verification_rejects_disk_position_tampering() {
         .expect("append");
 
     assert_eq!(
-        store.verify_append_receipt_detailed(&receipt),
+        store.verify_append_receipt(&receipt),
         ReceiptVerification::UnsignedAccepted
     );
-    assert!(store.verify_append_receipt(&receipt));
     receipt.disk_pos = DiskPos::new(
         receipt.disk_pos.segment_id(),
         receipt.disk_pos.offset() + 1,
         receipt.disk_pos.length(),
     );
 
-    assert!(
-        !store.verify_append_receipt(&receipt),
-        "disk position must match the committed index entry"
-    );
     assert_eq!(
-        store.verify_append_receipt_detailed(&receipt),
-        ReceiptVerification::Invalid(ReceiptVerificationError::DiskPositionMismatch)
+        store.verify_append_receipt(&receipt),
+        ReceiptVerification::Invalid(ReceiptVerificationError::DiskPositionMismatch),
+        "disk position must match the committed index entry"
     );
 }
 
@@ -68,7 +64,7 @@ fn wire_append_receipt_verification_hydrates_disk_pos_from_index() {
 
     let verification = store.verify_append_receipt_wire_detailed(
         receipt.event_id,
-        receipt.sequence,
+        receipt.global_sequence,
         receipt.content_hash,
         receipt.key_id,
         receipt.signature,
@@ -117,7 +113,7 @@ mod mismatch_polarity {
     fn matching_append() -> AppendReceipt {
         AppendReceipt {
             event_id: EventId::from(EID),
-            sequence: SEQ,
+            global_sequence: SEQ,
             disk_pos: DiskPos::new(2, 32, 16),
             content_hash: HASH,
             key_id: [0; 32],
@@ -129,7 +125,7 @@ mod mismatch_polarity {
     fn matching_denial() -> DenialReceipt {
         DenialReceipt {
             event_id: EventId::from(EID),
-            sequence: SEQ,
+            global_sequence: SEQ,
             disk_pos: DiskPos::new(2, 32, 16),
             content_hash: HASH,
             key_id: [0; 32],
@@ -159,7 +155,7 @@ mod mismatch_polarity {
         );
 
         let mut r = matching_append();
-        r.sequence = SEQ + 1;
+        r.global_sequence = SEQ + 1;
         assert_eq!(
             append_receipt_index_mismatch(&r, &e),
             Some(Err::SequenceMismatch)
@@ -218,7 +214,7 @@ mod mismatch_polarity {
         );
 
         let mut r = matching_denial();
-        r.sequence = SEQ + 9;
+        r.global_sequence = SEQ + 9;
         assert_eq!(
             denial_receipt_index_mismatch(&r, &e),
             Some(Err::SequenceMismatch)

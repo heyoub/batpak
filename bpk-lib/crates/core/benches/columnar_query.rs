@@ -58,7 +58,7 @@ fn build_sorted_store(topology: IndexTopology) -> (Store, TempDir) {
     for (i, &kind) in KINDS.iter().enumerate() {
         let coord = Coordinate::new(format!("bench:entity:{i}"), "bench:scope").expect("coord");
         for seq in 0..EVENTS_PER_KIND {
-            store
+            let _ = store
                 .append(&coord, kind, &serde_json::json!({"seq": seq}))
                 .expect("append");
         }
@@ -82,7 +82,7 @@ fn build_interleaved_store(topology: IndexTopology) -> (Store, TempDir) {
         .collect();
     for seq in 0..EVENTS_PER_KIND {
         for (i, &kind) in KINDS.iter().enumerate() {
-            store
+            let _ = store
                 .append(&coords[i], kind, &serde_json::json!({"seq": seq}))
                 .expect("append");
         }

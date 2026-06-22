@@ -80,7 +80,7 @@ fn try_check_surfaces_ready_append_and_batch_tickets() {
             "PROPERTY: once the append ticket receiver is non-empty, try_check must return Some(_)",
         )
         .expect("PROPERTY: ready append ticket must surface its receipt through try_check");
-    assert_eq!(append_receipt.sequence, 1);
+    assert_eq!(append_receipt.global_sequence, 1);
     assert_ne!(
         append_receipt.event_id,
         batpak::id::EventId::from(0u128),
@@ -128,7 +128,7 @@ fn try_check_surfaces_ready_append_and_batch_tickets() {
     assert_eq!(
         batch_receipts
             .iter()
-            .map(|receipt| receipt.sequence)
+            .map(|receipt| receipt.global_sequence)
             .collect::<Vec<_>>(),
         vec![2, 3],
         "PROPERTY: batch try_check must expose the committed receipts in visible sequence order."
@@ -144,7 +144,7 @@ fn scan_fold_converges_to_project_count() {
 
     // Phase 1: seed 10 events before subscribing.
     for i in 0..10u32 {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"phase": 1, "i": i}))
             .expect("append seed event");
     }
@@ -187,7 +187,7 @@ fn scan_fold_converges_to_project_count() {
 
     // Append 10 more events from the main thread.
     for i in 0..10u32 {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"phase": 2, "i": i}))
             .expect("append phase 2 event");
     }

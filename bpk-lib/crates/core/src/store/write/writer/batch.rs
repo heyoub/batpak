@@ -93,7 +93,7 @@ impl WriterCore {
                 if let Some(durable) = self.index.idemp.get(key.as_u128()) {
                     let mut receipt = AppendReceipt {
                         event_id: crate::id::EventId::from(durable.event_id),
-                        sequence: durable.global_sequence,
+                        global_sequence: durable.global_sequence,
                         disk_pos: durable.disk_pos(),
                         content_hash: durable.content_hash,
                         key_id: [0; 32],
@@ -113,7 +113,7 @@ impl WriterCore {
                 } else if let Some(entry) = self.index.get_by_id(key.as_u128()) {
                     let mut receipt = AppendReceipt {
                         event_id: crate::id::EventId::from(entry.event_id),
-                        sequence: entry.global_sequence,
+                        global_sequence: entry.global_sequence,
                         disk_pos: entry.disk_pos,
                         content_hash: entry.hash_chain.event_hash,
                         key_id: [0; 32],
@@ -547,7 +547,7 @@ impl WriterCore {
 
             let mut receipt = AppendReceipt {
                 event_id: crate::id::EventId::from(staged.event_id()),
-                sequence: staged.global_sequence(),
+                global_sequence: staged.global_sequence(),
                 disk_pos: DiskPos {
                     segment_id: self.segment_id,
                     offset: 0,

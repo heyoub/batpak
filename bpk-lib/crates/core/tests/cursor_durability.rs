@@ -61,7 +61,7 @@ fn cursor_worker_fails_closed_on_corrupt_checkpoint() {
     let store = Arc::new(Store::open(config(&dir)).expect("open store"));
     let coord = Coordinate::new("entity:cursor-corrupt", "scope:test").expect("valid coord");
     // Seed a matching event so silent checkpoint-load skips cannot idle forever.
-    store
+    let _ = store
         .append(&coord, KIND, &serde_json::json!({"i": 0}))
         .expect("append seed event");
     let mut worker_config = CursorWorkerConfig::default();
@@ -107,10 +107,10 @@ fn cursor_worker_rejects_checkpoint_id_reused_for_different_region() {
     let coord_b = Coordinate::new("entity:cursor-b", "scope:test").expect("coord b");
     let store = Arc::new(Store::open(config(&dir)).expect("open store"));
 
-    store
+    let _ = store
         .append(&coord_a, KIND, &serde_json::json!({"i": 0}))
         .expect("append a");
-    store
+    let _ = store
         .append(&coord_b, KIND, &serde_json::json!({"i": 1}))
         .expect("append b");
 
@@ -196,7 +196,7 @@ fn cursor_worker_surfaces_checkpoint_write_failure_through_join() {
             .expect("spawn cursor worker")
     };
 
-    store
+    let _ = store
         .append(&coord, KIND, &serde_json::json!({"i": 0}))
         .expect("append");
 

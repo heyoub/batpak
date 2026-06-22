@@ -18,7 +18,7 @@ fn bench_writer_coordinate_churn(c: &mut Criterion) {
         let kind = EventKind::custom(0xF, 1);
         let mut i = 0u64;
         b.iter(|| {
-            store
+            let _ = store
                 .append(&coord, kind, &serde_json::json!({"i": i}))
                 .expect("append");
             i += 1;
@@ -33,7 +33,7 @@ fn bench_writer_coordinate_churn(c: &mut Criterion) {
         let mut i = 0u64;
         b.iter(|| {
             let coord = Coordinate::new(format!("bench:fresh:{i}"), "bench:scope").expect("coord");
-            store
+            let _ = store
                 .append(&coord, kind, &serde_json::json!({"i": i}))
                 .expect("append");
             i += 1;

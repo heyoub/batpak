@@ -40,7 +40,7 @@ const KIND_B: EventKind = EventKind::custom(0xC, 2);
 fn seed(store: &Store, entity: &str, scope: &str, kind: EventKind, count: u32) {
     let coord = Coordinate::new(entity, scope).expect("valid coord");
     for i in 0..count {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"i": i}))
             .expect("append");
     }
@@ -185,7 +185,7 @@ fn bounded_scope_cursor_skips_hidden_gap_and_reaches_later_visible_event() {
     let store = open_store(&dir, IndexTopology::all());
     let coord = Coordinate::new("entity:scope-gap", "scope:gap").expect("valid coord");
 
-    store
+    let _ = store
         .append(&coord, KIND_A, &serde_json::json!({"baseline": true}))
         .expect("append baseline");
 

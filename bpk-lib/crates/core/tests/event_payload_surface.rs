@@ -208,7 +208,7 @@ fn try_submit_typed_ok_path() {
         .try_submit_typed(&coord(), &payload)
         .expect("try_submit_typed");
     let ticket = outcome.into_result().expect("outcome is Ok");
-    writer_reply(ticket.receiver(), "typed writer ticket").expect("ticket.wait");
+    let _ = writer_reply(ticket.receiver(), "typed writer ticket").expect("ticket.wait");
     store
         .close()
         .expect("EventPayload surface test precondition holds");
@@ -273,7 +273,7 @@ fn submit_reaction_typed_ticket_resolves() {
             batpak::id::CausationId::from(u128::from(root.event_id)),
         )
         .expect("submit_reaction_typed");
-    writer_reply(ticket.receiver(), "typed writer ticket").expect("ticket.wait");
+    let _ = writer_reply(ticket.receiver(), "typed writer ticket").expect("ticket.wait");
     store
         .close()
         .expect("EventPayload surface test precondition holds");
@@ -301,7 +301,7 @@ fn try_submit_reaction_typed_ok_path() {
         )
         .expect("try_submit_reaction_typed");
     let ticket = outcome.into_result().expect("outcome is Ok");
-    writer_reply(ticket.receiver(), "typed writer ticket").expect("ticket.wait");
+    let _ = writer_reply(ticket.receiver(), "typed writer ticket").expect("ticket.wait");
     store
         .close()
         .expect("EventPayload surface test precondition holds");
@@ -312,16 +312,16 @@ fn try_submit_reaction_typed_ok_path() {
 #[test]
 fn by_fact_typed_filters_by_kind() {
     let (_dir, store) = test_store();
-    store
+    let _ = store
         .append_typed(&coord(), &ThingHappened { value: 1 })
         .expect("EventPayload surface test precondition holds");
-    store
+    let _ = store
         .append_typed(&coord(), &ThingHappened { value: 2 })
         .expect("EventPayload surface test precondition holds");
 
     let other_coord = Coordinate::new("entity:other", "scope:test")
         .expect("EventPayload surface test precondition holds");
-    store
+    let _ = store
         .append_typed(
             &other_coord,
             &OtherThingHappened {

@@ -110,7 +110,7 @@ fn build_corpus() -> Vec<GroundTruthEvent> {
 fn seed_store_with_corpus(store: &Store, corpus: &[GroundTruthEvent]) {
     for (i, ev) in corpus.iter().enumerate() {
         let coord = Coordinate::new(ev.entity, ev.scope).expect("valid coord");
-        store
+        let _ = store
             .append(&coord, ev.kind, &serde_json::json!({"i": i}))
             .expect("seed append");
     }

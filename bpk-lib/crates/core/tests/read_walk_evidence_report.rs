@@ -22,7 +22,7 @@ fn append_events(store: &Store<Open>, entity: &str, scope: &str, count: u64) -> 
     let coord = Coordinate::new(entity, scope)?;
     let kind = EventKind::custom(0xE, 0x41);
     for n in 0..count {
-        store.append(&coord, kind, &serde_json::json!({ "n": n }))?;
+        let _ = store.append(&coord, kind, &serde_json::json!({ "n": n }))?;
     }
     Ok(())
 }

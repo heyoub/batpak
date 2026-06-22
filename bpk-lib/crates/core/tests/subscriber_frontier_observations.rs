@@ -27,7 +27,7 @@ fn current_subscriber_reports_deterministic_frontier_state() -> TestResult {
     let receipt = store.append(&coord, kind, &serde_json::json!({"step": 0}))?;
 
     let request = SubscriberFrontierRequest::lossy_push(
-        Some(receipt.sequence),
+        Some(receipt.global_sequence),
         SubscriberDeliveryState::Active,
         LossPrecision::Unknown,
     );

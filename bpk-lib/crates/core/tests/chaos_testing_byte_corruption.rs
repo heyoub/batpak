@@ -37,7 +37,7 @@ fn chaos_corrupted_segment_bytes() {
 
     // Write some events
     for i in 0..20 {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"i": i}))
             .expect("append");
     }
@@ -177,7 +177,7 @@ fn chaos_truncated_segment_recovers() {
     let n_events = 20usize;
 
     for i in 0..n_events {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"i": i}))
             .expect("append");
     }

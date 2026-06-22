@@ -60,7 +60,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _ = writeln!(
         out,
         "first pass committed credit at sequence {} (event {})",
-        first.sequence, first.event_id
+        first.global_sequence, first.event_id
     );
 
     // Re-run the SAME pass (e.g. a retry after a crash). It is a no-op: the
@@ -69,11 +69,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _ = writeln!(
         out,
         "re-run was a no-op: sequence {} (same as first: {})",
-        replay.sequence,
-        replay.sequence == first.sequence
+        replay.global_sequence,
+        replay.global_sequence == first.global_sequence
     );
     assert_eq!(
-        first.sequence, replay.sequence,
+        first.global_sequence, replay.global_sequence,
         "idempotent re-run must return the original receipt"
     );
 

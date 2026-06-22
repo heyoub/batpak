@@ -27,7 +27,7 @@ fn config_with_artifacts(dir: &TempDir) -> StoreConfig {
 fn append_seed(store: &Store, entity: &str, scope: &str, count: u32) -> u32 {
     let coord = Coordinate::new(entity, scope).expect("valid coord");
     for i in 0..count {
-        store
+        let _ = store
             .append(&coord, KIND, &serde_json::json!({"i": i}))
             .expect("append");
     }
@@ -212,7 +212,7 @@ fn forced_rotation_then_unclean_reopen_sees_all_segment_entries() {
         let store = Store::open(config.clone()).expect("open store");
         let coord = Coordinate::new("entity:rot", "scope:test").expect("valid coord");
         for i in 0..count {
-            store
+            let _ = store
                 .append(&coord, KIND, &serde_json::json!({"i": i}))
                 .expect("append");
         }

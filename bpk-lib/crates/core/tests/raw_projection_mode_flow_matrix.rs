@@ -125,7 +125,7 @@ fn seeded_store() -> (TempDir, Arc<Store>) {
     let store = Arc::new(Store::open(StoreConfig::new(dir.path())).expect("open"));
     let coord = Coordinate::new("entity:raw-proj", "scope:test").expect("coord");
     for (amount, label) in [(3, "a"), (-1, "b"), (7, "c"), (2, "d")] {
-        store
+        let _ = store
             .append(
                 &coord,
                 KIND,
@@ -150,7 +150,7 @@ fn cached_seeded_store() -> (TempDir, Arc<Store>) {
     );
     let coord = Coordinate::new("entity:raw-proj", "scope:test").expect("coord");
     for (amount, label) in [(3, "a"), (-1, "b"), (7, "c"), (2, "d")] {
-        store
+        let _ = store
             .append(
                 &coord,
                 KIND,
@@ -179,7 +179,7 @@ macro_rules! observe_projection_flow_matrix_case {
             Arc::clone(&store).watch_projection::<$ty>("entity:raw-proj", Freshness::Consistent);
         let coord = Coordinate::new("entity:raw-proj", "scope:test").expect("coord");
 
-        store
+        let _ = store
             .append(
                 &coord,
                 case.append_kind,
@@ -322,7 +322,7 @@ fn projection_flow_maybe_stale_keeps_replay_lanes_equivalent() {
     );
 
     let coord = Coordinate::new("entity:raw-proj", "scope:test").expect("coord");
-    store
+    let _ = store
         .append(
             &coord,
             KIND,

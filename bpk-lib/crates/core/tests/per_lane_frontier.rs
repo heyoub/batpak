@@ -44,7 +44,7 @@ fn coord() -> TestResult<Coordinate> {
 }
 
 fn append_lane_one(store: &Store) -> TestResult<HlcPoint> {
-    store.append_with_options(
+    let _ = store.append_with_options(
         &coord()?,
         EventKind::DATA,
         &serde_json::json!({ "lane": 1 }),
@@ -170,7 +170,7 @@ fn lane_cursor_gap_observations_include_global_cancellations() -> TestResult {
             .iter()
             .map(|entry| entry.global_sequence())
             .collect::<Vec<_>>(),
-        vec![first.sequence, second.sequence],
+        vec![first.global_sequence, second.global_sequence],
         "PROPERTY: lane-0 cursor should deliver the visible lane-0 writes across a lane-1 cancelled range"
     );
     assert_eq!(
@@ -180,7 +180,7 @@ fn lane_cursor_gap_observations_include_global_cancellations() -> TestResult {
     );
     assert_eq!(
         gaps[0].cancelled_ranges,
-        vec![(first.sequence + 1, second.sequence)],
+        vec![(first.global_sequence + 1, second.global_sequence)],
         "PROPERTY: lane cursor gap observations must use global cancelled ranges as well as lane-specific ranges"
     );
     store.close()?;

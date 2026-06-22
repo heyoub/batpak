@@ -113,10 +113,10 @@ fn raw_msgpack_multi_reactor_dispatches_same_as_json_lane() {
         .expect("spawn raw reactor");
 
     let source = Coordinate::new("entity:raw-src", "scope:test").expect("source coord");
-    store
+    let _ = store
         .append_typed(&source, &AlphaRaw { n: 1 })
         .expect("append AlphaRaw n=1");
-    store
+    let _ = store
         .append_typed(
             &source,
             &BetaRaw {
@@ -124,10 +124,10 @@ fn raw_msgpack_multi_reactor_dispatches_same_as_json_lane() {
             },
         )
         .expect("append BetaRaw one");
-    store
+    let _ = store
         .append_typed(&source, &AlphaRaw { n: 2 })
         .expect("append AlphaRaw n=2");
-    store
+    let _ = store
         .append_typed(
             &source,
             &BetaRaw {
@@ -135,7 +135,7 @@ fn raw_msgpack_multi_reactor_dispatches_same_as_json_lane() {
             },
         )
         .expect("append BetaRaw two");
-    store
+    let _ = store
         .append_typed(&source, &AlphaRaw { n: 3 })
         .expect("append AlphaRaw n=3");
 

@@ -106,7 +106,7 @@ fn diagnostics_reports_tile_count_only_for_tiled_topologies() {
 
         let coord = Coordinate::new("entity:tile-proof", "scope:tile-proof").expect("coord");
         for i in 0..130 {
-            store
+            let _ = store
                 .append(
                     &coord,
                     EventKind::custom(0x1, 1),

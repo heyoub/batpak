@@ -255,7 +255,7 @@ fn close_hlc_monotonicity_violation_surfaces_invariant_violation() {
 
     {
         let store = Store::open(StoreConfig::new(dir.path())).expect("open store");
-        store
+        let _ = store
             .append(&coord, kind(), &serde_json::json!({"n": 1}))
             .expect("append first lifecycle event");
         store.close().expect("close first lifecycle");
@@ -263,7 +263,7 @@ fn close_hlc_monotonicity_violation_surfaces_invariant_violation() {
 
     {
         let store = Store::open(StoreConfig::new(dir.path())).expect("reopen store");
-        store
+        let _ = store
             .append(&coord, kind(), &serde_json::json!({"n": 2}))
             .expect("append second lifecycle event");
         store.close().expect("close second lifecycle");

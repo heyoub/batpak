@@ -64,7 +64,7 @@ fn query_with_clock_range_filters_events() {
 
     // Append 10 events (clock 0..9)
     for i in 0..10 {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"i": i}))
             .expect("append");
     }
@@ -108,10 +108,10 @@ fn query_clock_range_with_scope_filter() {
     let coord_b = Coordinate::new("entity:b", "scope:shared").expect("valid coord");
 
     for i in 0..5 {
-        store
+        let _ = store
             .append(&coord_a, kind, &serde_json::json!({"i": i}))
             .expect("append a");
-        store
+        let _ = store
             .append(&coord_b, kind, &serde_json::json!({"i": i}))
             .expect("append b");
     }
@@ -145,13 +145,13 @@ fn query_by_fact_category() {
     // Category 0xB: type 1
     let kind_b1 = EventKind::custom(0xB, 1);
 
-    store
+    let _ = store
         .append(&coord, kind_a1, &serde_json::json!({"cat": "a"}))
         .expect("append");
-    store
+    let _ = store
         .append(&coord, kind_a2, &serde_json::json!({"cat": "a"}))
         .expect("append");
-    store
+    let _ = store
         .append(&coord, kind_b1, &serde_json::json!({"cat": "b"}))
         .expect("append");
 

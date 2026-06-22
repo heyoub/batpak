@@ -34,7 +34,7 @@ fn append_on_lane(store: &Store, lane: u32, branch_root: bool, value: u32) -> Te
     } else {
         AppendPositionHint::new(lane, u32::from(lane != 0))
     };
-    store.append_with_options(
+    let _ = store.append_with_options(
         &coord()?,
         EventKind::DATA,
         &serde_json::json!({ "value": value, "lane": lane }),
@@ -68,11 +68,11 @@ fn default_lane_zero_path_and_lane_scoped_cas() -> TestResult {
     let store = Store::open(store_config(&dir))?;
     let coord = coord()?;
 
-    store.append(&coord, EventKind::DATA, &serde_json::json!({ "value": 0 }))?;
-    store.append(&coord, EventKind::DATA, &serde_json::json!({ "value": 1 }))?;
+    let _ = store.append(&coord, EventKind::DATA, &serde_json::json!({ "value": 0 }))?;
+    let _ = store.append(&coord, EventKind::DATA, &serde_json::json!({ "value": 1 }))?;
     append_on_lane(&store, 1, true, 10)?;
 
-    store.append_with_options(
+    let _ = store.append_with_options(
         &coord,
         EventKind::DATA,
         &serde_json::json!({ "value": 11, "lane": 1 }),
@@ -102,7 +102,7 @@ fn default_lane_zero_position_matches_golden_wire_bytes() -> TestResult {
     let store = Store::open(StoreConfig::new(dir.path()).with_clock_fn(|| 1_234_000))?;
     let coord = coord()?;
 
-    store.append(&coord, EventKind::DATA, &serde_json::json!({ "value": 0 }))?;
+    let _ = store.append(&coord, EventKind::DATA, &serde_json::json!({ "value": 0 }))?;
     let entry = store
         .latest_lane("entity:lane", 0)
         .ok_or_else(|| io_err("missing lane-0 latest"))?;

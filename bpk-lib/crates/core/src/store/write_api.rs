@@ -305,7 +305,7 @@ impl Store<Open> {
         }
         Ok(DenialReceipt {
             event_id: receipt.event_id,
-            sequence: receipt.sequence,
+            global_sequence: receipt.global_sequence,
             disk_pos: receipt.disk_pos,
             content_hash: receipt.content_hash,
             key_id: receipt.key_id,
@@ -792,7 +792,7 @@ mod tests {
         );
 
         drop(lifecycle);
-        done_rx
+        let _ = done_rx
             .recv_timeout(std::time::Duration::from_secs(1))
             .expect("append completes after lifecycle gate opens")
             .expect("append succeeds");
@@ -836,7 +836,7 @@ mod tests {
         }
 
         // DATA still appends successfully through the same funnel.
-        store
+        let _ = store
             .append(&coord, EventKind::DATA, &payload)
             .expect("PROPERTY: DATA append must still succeed after the reserved-kind guard");
 

@@ -100,7 +100,7 @@ impl ReceiptSigningRegistry {
                 use crate::id::EntityIdType;
                 receipt.event_id.as_u128()
             },
-            receipt.sequence,
+            receipt.global_sequence,
             coord,
             kind,
             prev_hash,
@@ -146,7 +146,7 @@ impl ReceiptSigningRegistry {
                 use crate::id::EntityIdType;
                 receipt.event_id.as_u128()
             },
-            receipt.sequence,
+            receipt.global_sequence,
             coord,
             kind,
             prev_hash,
@@ -183,7 +183,7 @@ impl ReceiptSigningRegistry {
                 use crate::id::EntityIdType;
                 receipt.event_id.as_u128()
             },
-            receipt.sequence,
+            receipt.global_sequence,
             coord,
             kind,
             prev_hash,
@@ -364,7 +364,7 @@ mod tests {
     fn cover_build_failure_adds_signing_downgrade_extension() {
         let mut receipt = AppendReceipt {
             event_id: crate::id::EventId::from(7u128),
-            sequence: 9,
+            global_sequence: 9,
             disk_pos: crate::store::index::DiskPos {
                 segment_id: 1,
                 offset: 2,

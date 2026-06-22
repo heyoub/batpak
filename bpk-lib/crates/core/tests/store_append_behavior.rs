@@ -92,10 +92,10 @@ fn cas_fails_on_wrong_sequence() {
     let coord = Coordinate::new("entity:cas-fail", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
 
-    store
+    let _ = store
         .append(&coord, kind, &serde_json::json!({"x": 1}))
         .expect("first");
-    store
+    let _ = store
         .append(&coord, kind, &serde_json::json!({"x": 2}))
         .expect("second");
 

@@ -203,10 +203,10 @@ fn named_store_flows_emit_traceable_events() {
         let coord = Coordinate::new("entity:obs", "scope:test").expect("coord");
         let kind = EventKind::custom(0xF, 1);
 
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"n": 1}))
             .expect("append");
-        store
+        let _ = store
             .append_with_options(
                 &coord,
                 kind,
@@ -265,7 +265,7 @@ fn stable_batpak_targets_field_shape_at_info_and_trace() {
 
     let coord = Coordinate::new("entity:obs:trace", "scope:test").expect("coord");
     let kind = EventKind::custom(0xF, 1);
-    store
+    let _ = store
         .append(&coord, kind, &serde_json::json!({"n": 1}))
         .expect("append");
 
@@ -274,7 +274,7 @@ fn stable_batpak_targets_field_shape_at_info_and_trace() {
         .wait_for_visible(point, std::time::Duration::from_secs(2))
         .expect("wait_for_visible");
 
-    store
+    let _ = store
         .append_with_options(
             &coord,
             kind,
@@ -401,7 +401,7 @@ fn external_cache_projection_probe_event_is_required_on_external_cache_path() {
     let store = Store::open_with_cache(config, Box::new(FailingPrefetchCache)).expect("open store");
     let coord = Coordinate::new("entity:obs:external-cache", "scope:test").expect("coord");
     let kind = EventKind::custom(0xF, 1);
-    store
+    let _ = store
         .append(&coord, kind, &serde_json::json!({"n": 1}))
         .expect("append");
 
@@ -458,7 +458,7 @@ fn project_failure_paths_emit_cache_warnings_without_hiding_flow() {
             .expect("open store with failing cache");
         let coord = Coordinate::new("entity:obs:cache", "scope:test").expect("coord");
         let kind = EventKind::custom(0xF, 1);
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"n": 1}))
             .expect("append");
 
@@ -502,7 +502,7 @@ fn append_reaction_emits_distinct_flow_telemetry() {
         let receipt = store
             .append(&coord, kind, &serde_json::json!({"n": 1}))
             .expect("append");
-        store
+        let _ = store
             .append_reaction(
                 &Coordinate::new("entity:obs:reaction", "scope:test").expect("coord"),
                 EventKind::custom(0xF, 2),

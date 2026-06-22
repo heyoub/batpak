@@ -54,7 +54,7 @@ pub fn seed_store(dir: &TempDir, count: u32) {
     let store = Store::open(config(dir)).expect("open store");
     let coord = Coordinate::new("entity:scan", "scope:test").expect("valid coord");
     for i in 0..count {
-        store
+        let _ = store
             .append(&coord, KIND, &serde_json::json!({"i": i}))
             .expect("append");
     }

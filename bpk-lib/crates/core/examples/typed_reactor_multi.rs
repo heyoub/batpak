@@ -142,15 +142,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
     )?;
 
-    store.append_typed(&source, &PayloadA { n: 1 })?;
-    store.append_typed(
+    let _ = store.append_typed(&source, &PayloadA { n: 1 })?;
+    let _ = store.append_typed(
         &source,
         &PayloadB {
             label: "mid".into(),
         },
     )?;
-    store.append_typed(&source, &PayloadC { amount: 5 })?;
-    store.append_typed(&source, &PayloadA { n: 2 })?;
+    let _ = store.append_typed(&source, &PayloadC { amount: 5 })?;
+    let _ = store.append_typed(&source, &PayloadA { n: 2 })?;
 
     wait_for(
         || store.by_fact_typed::<Reaction>().len() >= 4,

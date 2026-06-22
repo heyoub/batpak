@@ -119,9 +119,9 @@ fn rebuilt_register_survives_store_reopen() {
     .expect("open store");
     let store = Arc::new(store);
     let catalog = StoreRegisterCatalog::new(Arc::clone(&store), register_coord());
-    catalog.persist_operation(&ALPHA).expect("persist alpha");
-    catalog.persist_operation(&BRAVO).expect("persist bravo");
-    catalog.delete_operation("alpha").expect("delete alpha");
+    let _ = catalog.persist_operation(&ALPHA).expect("persist alpha");
+    let _ = catalog.persist_operation(&BRAVO).expect("persist bravo");
+    let _ = catalog.delete_operation("alpha").expect("delete alpha");
     drop(catalog);
     close_store(store);
 
@@ -143,14 +143,14 @@ fn rebuild_filters_exact_coordinate_and_ignores_identical_duplicates() {
     let (store, _dir) = test_store();
     let catalog = StoreRegisterCatalog::new(Arc::clone(&store), register_coord());
     let other = StoreRegisterCatalog::new(Arc::clone(&store), other_coord());
-    catalog.persist_operation(&ALPHA).expect("persist alpha");
-    catalog
+    let _ = catalog.persist_operation(&ALPHA).expect("persist alpha");
+    let _ = catalog
         .persist_operation(&ALPHA)
         .expect("persist duplicate alpha");
-    other
+    let _ = other
         .persist_operation(&BRAVO)
         .expect("persist other bravo");
-    other.delete_operation("bravo").expect("delete other bravo");
+    let _ = other.delete_operation("bravo").expect("delete other bravo");
 
     let rebuilt = rebuild_register_from_store(store.as_ref(), &register_coord()).expect("rebuild");
 
@@ -167,8 +167,8 @@ fn rebuild_filters_exact_coordinate_and_ignores_identical_duplicates() {
 fn rebuild_applies_explicit_update_for_active_operation() {
     let (store, _dir) = test_store();
     let catalog = StoreRegisterCatalog::new(Arc::clone(&store), register_coord());
-    catalog.persist_operation(&ALPHA).expect("persist alpha");
-    catalog.update_operation(&ALPHA_V2).expect("update alpha");
+    let _ = catalog.persist_operation(&ALPHA).expect("persist alpha");
+    let _ = catalog.update_operation(&ALPHA_V2).expect("update alpha");
 
     let rebuilt = rebuild_register_from_store(store.as_ref(), &register_coord()).expect("rebuild");
 
@@ -183,7 +183,7 @@ fn rebuild_applies_explicit_update_for_active_operation() {
 fn persist_operation_rejects_implicit_replacement_put() {
     let (store, _dir) = test_store();
     let catalog = StoreRegisterCatalog::new(Arc::clone(&store), register_coord());
-    catalog.persist_operation(&ALPHA).expect("persist alpha");
+    let _ = catalog.persist_operation(&ALPHA).expect("persist alpha");
 
     let err = catalog
         .persist_operation(&ALPHA_V2)
@@ -230,9 +230,9 @@ fn update_operation_rejects_missing_operation() {
 fn rebuild_applies_delete_tombstone_and_idempotent_duplicate() {
     let (store, _dir) = test_store();
     let catalog = StoreRegisterCatalog::new(Arc::clone(&store), register_coord());
-    catalog.persist_operation(&ALPHA).expect("persist alpha");
-    catalog.delete_operation("alpha").expect("delete alpha");
-    store
+    let _ = catalog.persist_operation(&ALPHA).expect("persist alpha");
+    let _ = catalog.delete_operation("alpha").expect("delete alpha");
+    let _ = store
         .append_typed(&register_coord(), &RegisterOperationRowV1::delete("alpha"))
         .expect("append duplicate delete row");
 
@@ -249,9 +249,9 @@ fn rebuild_applies_delete_tombstone_and_idempotent_duplicate() {
 fn rebuild_rejects_put_after_tombstone() {
     let (store, _dir) = test_store();
     let catalog = StoreRegisterCatalog::new(Arc::clone(&store), register_coord());
-    catalog.persist_operation(&ALPHA).expect("persist alpha");
-    catalog.delete_operation("alpha").expect("delete alpha");
-    store
+    let _ = catalog.persist_operation(&ALPHA).expect("persist alpha");
+    let _ = catalog.delete_operation("alpha").expect("delete alpha");
+    let _ = store
         .append_typed(
             &register_coord(),
             &RegisterOperationRowV1::from_descriptor(&ALPHA),
@@ -280,7 +280,7 @@ fn rebuild_rejects_put_row_with_supersedes_field() {
     let (store, _dir) = test_store();
     let mut row = RegisterOperationRowV1::from_descriptor(&ALPHA);
     row.supersedes = Some("old.alpha".to_owned());
-    store
+    let _ = store
         .append_typed(&register_coord(), &row)
         .expect("append malformed put");
 
@@ -302,7 +302,7 @@ fn rebuild_rejects_put_row_with_supersedes_field() {
 #[test]
 fn rebuild_rejects_delete_before_put() {
     let (store, _dir) = test_store();
-    store
+    let _ = store
         .append_typed(&register_coord(), &RegisterOperationRowV1::delete("alpha"))
         .expect("append delete before put");
 
@@ -326,11 +326,11 @@ fn rebuild_rejects_delete_before_put() {
 fn rebuild_applies_supersession_and_idempotent_duplicate() {
     let (store, _dir) = test_store();
     let catalog = StoreRegisterCatalog::new(Arc::clone(&store), register_coord());
-    catalog.persist_operation(&ALPHA).expect("persist alpha");
-    catalog
+    let _ = catalog.persist_operation(&ALPHA).expect("persist alpha");
+    let _ = catalog
         .supersede_operation("alpha", &CHARLIE)
         .expect("supersede alpha");
-    store
+    let _ = store
         .append_typed(
             &register_coord(),
             &RegisterOperationRowV1::supersede("alpha", &CHARLIE),
@@ -351,8 +351,8 @@ fn rebuild_applies_supersession_and_idempotent_duplicate() {
 fn delete_operation_rejects_after_supersession() {
     let (store, _dir) = test_store();
     let catalog = StoreRegisterCatalog::new(Arc::clone(&store), register_coord());
-    catalog.persist_operation(&ALPHA).expect("persist alpha");
-    catalog
+    let _ = catalog.persist_operation(&ALPHA).expect("persist alpha");
+    let _ = catalog
         .supersede_operation("alpha", &CHARLIE)
         .expect("supersede alpha");
     let err = catalog
@@ -400,8 +400,8 @@ fn rebuild_rejects_supersession_from_missing_source() {
 fn rebuild_rejects_supersession_after_delete_without_matching_replacement() {
     let (store, _dir) = test_store();
     let catalog = StoreRegisterCatalog::new(Arc::clone(&store), register_coord());
-    catalog.persist_operation(&ALPHA).expect("persist alpha");
-    catalog.delete_operation("alpha").expect("delete alpha");
+    let _ = catalog.persist_operation(&ALPHA).expect("persist alpha");
+    let _ = catalog.delete_operation("alpha").expect("delete alpha");
 
     let err = catalog
         .supersede_operation("alpha", &CHARLIE)
@@ -426,7 +426,7 @@ fn rebuild_rejects_supersede_row_missing_supersedes_name() {
     let (store, _dir) = test_store();
     let mut row = RegisterOperationRowV1::from_descriptor(&CHARLIE);
     row.action = RegisterOperationActionV1::Supersede.as_str().to_owned();
-    store
+    let _ = store
         .append_typed(&register_coord(), &row)
         .expect("append malformed supersede");
 
@@ -449,7 +449,7 @@ fn rebuild_rejects_supersede_row_missing_supersedes_name() {
 fn rebuild_rejects_same_name_supersede_row() {
     let (store, _dir) = test_store();
     let row = RegisterOperationRowV1::supersede("alpha", &ALPHA);
-    store
+    let _ = store
         .append_typed(&register_coord(), &row)
         .expect("append malformed same-name supersede");
 
@@ -472,11 +472,11 @@ fn rebuild_rejects_same_name_supersede_row() {
 fn supersede_operation_rejects_tombstoned_replacement_name() {
     let (store, _dir) = test_store();
     let catalog = StoreRegisterCatalog::new(Arc::clone(&store), register_coord());
-    catalog
+    let _ = catalog
         .persist_operation(&CHARLIE)
         .expect("persist charlie");
-    catalog.delete_operation("charlie").expect("delete charlie");
-    catalog.persist_operation(&ALPHA).expect("persist alpha");
+    let _ = catalog.delete_operation("charlie").expect("delete charlie");
+    let _ = catalog.persist_operation(&ALPHA).expect("persist alpha");
 
     let err = catalog
         .supersede_operation("alpha", &CHARLIE)
@@ -500,8 +500,8 @@ fn supersede_operation_rejects_tombstoned_replacement_name() {
 fn supersede_operation_rejects_active_replacement_with_different_fields() {
     let (store, _dir) = test_store();
     let catalog = StoreRegisterCatalog::new(Arc::clone(&store), register_coord());
-    catalog.persist_operation(&ALPHA).expect("persist alpha");
-    catalog
+    let _ = catalog.persist_operation(&ALPHA).expect("persist alpha");
+    let _ = catalog
         .persist_operation(&CHARLIE)
         .expect("persist charlie");
 
@@ -526,7 +526,7 @@ fn supersede_operation_rejects_active_replacement_with_different_fields() {
 #[test]
 fn rebuild_rejects_malformed_catalog_payload() {
     let (store, _dir) = test_store();
-    store
+    let _ = store
         .append_typed(
             &register_coord(),
             &OtherRow {
@@ -548,7 +548,7 @@ fn rebuild_rejects_malformed_lifecycle_row_shape() {
     let (store, _dir) = test_store();
     let mut malformed_delete = RegisterOperationRowV1::from_descriptor(&ALPHA);
     malformed_delete.action = RegisterOperationActionV1::Delete.as_str().to_owned();
-    store
+    let _ = store
         .append_typed(&register_coord(), &malformed_delete)
         .expect("append malformed delete");
 
@@ -609,8 +609,8 @@ fn register_row_round_trips_descriptor_fields() {
 fn persist_operation_is_idempotent_for_same_descriptor() {
     let (store, _dir) = test_store();
     let catalog = StoreRegisterCatalog::new(Arc::clone(&store), register_coord());
-    catalog.persist_operation(&ALPHA).expect("persist alpha");
-    catalog
+    let _ = catalog.persist_operation(&ALPHA).expect("persist alpha");
+    let _ = catalog
         .persist_operation(&ALPHA)
         .expect("idempotent persist succeeds");
 
@@ -625,8 +625,8 @@ fn persist_operation_is_idempotent_for_same_descriptor() {
 fn update_operation_rejects_tombstoned_operation() {
     let (store, _dir) = test_store();
     let catalog = StoreRegisterCatalog::new(Arc::clone(&store), register_coord());
-    catalog.persist_operation(&ALPHA).expect("persist alpha");
-    catalog.delete_operation("alpha").expect("delete alpha");
+    let _ = catalog.persist_operation(&ALPHA).expect("persist alpha");
+    let _ = catalog.delete_operation("alpha").expect("delete alpha");
 
     let err = catalog
         .update_operation(&ALPHA_V2)
@@ -650,8 +650,8 @@ fn update_operation_rejects_tombstoned_operation() {
 fn delete_operation_rejects_already_deleted_operation() {
     let (store, _dir) = test_store();
     let catalog = StoreRegisterCatalog::new(Arc::clone(&store), register_coord());
-    catalog.persist_operation(&ALPHA).expect("persist alpha");
-    catalog.delete_operation("alpha").expect("delete alpha");
+    let _ = catalog.persist_operation(&ALPHA).expect("persist alpha");
+    let _ = catalog.delete_operation("alpha").expect("delete alpha");
 
     let err = catalog
         .delete_operation("alpha")
@@ -675,8 +675,8 @@ fn delete_operation_rejects_already_deleted_operation() {
 fn supersede_operation_rejects_idempotent_duplicate() {
     let (store, _dir) = test_store();
     let catalog = StoreRegisterCatalog::new(Arc::clone(&store), register_coord());
-    catalog.persist_operation(&ALPHA).expect("persist alpha");
-    catalog
+    let _ = catalog.persist_operation(&ALPHA).expect("persist alpha");
+    let _ = catalog
         .supersede_operation("alpha", &CHARLIE)
         .expect("supersede alpha");
 

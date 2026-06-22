@@ -312,7 +312,7 @@ pub fn run_chaos_probes() -> (f64, u64, bool, bool, u64, f64, bool) {
 
     // --- CAS contention ---
     let cas_coord = Coordinate::new("probe:cas", "probe:scope").expect("valid");
-    store
+    let _ = store
         .append(&cas_coord, kind, &serde_json::json!({"seed": true}))
         .expect("seed");
 
@@ -355,7 +355,7 @@ pub fn run_chaos_probes() -> (f64, u64, bool, bool, u64, f64, bool) {
     let rot_coord = Coordinate::new("probe:rotation", "probe:scope").expect("valid");
     let rot_n: u64 = 50;
     for i in 0..rot_n {
-        store
+        let _ = store
             .append(&rot_coord, kind, &serde_json::json!({"i": i}))
             .expect("append");
     }
@@ -369,7 +369,7 @@ pub fn run_chaos_probes() -> (f64, u64, bool, bool, u64, f64, bool) {
     let sub = store.subscribe_lossy(&region);
     let sub_n = 50;
     for i in 0..sub_n {
-        store
+        let _ = store
             .append(&sub_coord, kind, &serde_json::json!({"i": i}))
             .expect("append");
     }
@@ -384,7 +384,7 @@ pub fn run_chaos_probes() -> (f64, u64, bool, bool, u64, f64, bool) {
     let cur_coord = Coordinate::new("probe:cursor", "probe:scope").expect("valid");
     let cur_n = 30;
     for i in 0..cur_n {
-        store
+        let _ = store
             .append(&cur_coord, kind, &serde_json::json!({"i": i}))
             .expect("append");
     }

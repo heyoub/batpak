@@ -114,11 +114,11 @@ fn fused_projection_matches_separate_consistent_projection() -> TestResult {
     let dir = TempDir::new()?;
     let store = Store::open(StoreConfig::new(dir.path()))?;
     let coord = Coordinate::new("entity:fusion", "scope:fusion")?;
-    store.append(&coord, LEFT_KIND, &serde_json::json!({ "n": 1 }))?;
-    store.append(&coord, RIGHT_KIND, &serde_json::json!({ "n": 2 }))?;
-    store.append(&coord, NOISE_KIND, &serde_json::json!({ "n": 100 }))?;
-    store.append(&coord, LEFT_KIND, &serde_json::json!({ "n": 3 }))?;
-    store.append(&coord, RIGHT_KIND, &serde_json::json!({ "n": 4 }))?;
+    let _ = store.append(&coord, LEFT_KIND, &serde_json::json!({ "n": 1 }))?;
+    let _ = store.append(&coord, RIGHT_KIND, &serde_json::json!({ "n": 2 }))?;
+    let _ = store.append(&coord, NOISE_KIND, &serde_json::json!({ "n": 100 }))?;
+    let _ = store.append(&coord, LEFT_KIND, &serde_json::json!({ "n": 3 }))?;
+    let _ = store.append(&coord, RIGHT_KIND, &serde_json::json!({ "n": 4 }))?;
 
     let separate_left: Option<LeftCount> =
         store.project("entity:fusion", &Freshness::Consistent)?;
@@ -142,10 +142,10 @@ fn fused_three_projection_matches_separate_consistent_projection() -> TestResult
     let dir = TempDir::new()?;
     let store = Store::open(StoreConfig::new(dir.path()))?;
     let coord = Coordinate::new("entity:fusion-three", "scope:fusion")?;
-    store.append(&coord, LEFT_KIND, &serde_json::json!({ "n": 1 }))?;
-    store.append(&coord, RIGHT_KIND, &serde_json::json!({ "n": 2 }))?;
-    store.append(&coord, NOISE_KIND, &serde_json::json!({ "n": 3 }))?;
-    store.append(&coord, LEFT_KIND, &serde_json::json!({ "n": 4 }))?;
+    let _ = store.append(&coord, LEFT_KIND, &serde_json::json!({ "n": 1 }))?;
+    let _ = store.append(&coord, RIGHT_KIND, &serde_json::json!({ "n": 2 }))?;
+    let _ = store.append(&coord, NOISE_KIND, &serde_json::json!({ "n": 3 }))?;
+    let _ = store.append(&coord, LEFT_KIND, &serde_json::json!({ "n": 4 }))?;
 
     let separate_left: Option<LeftCount> =
         store.project("entity:fusion-three", &Freshness::Consistent)?;
@@ -185,7 +185,7 @@ fn fused_projection_marks_consumed_none_projection_inputs_applied() -> TestResul
     let dir = TempDir::new()?;
     let store = Store::open(StoreConfig::new(dir.path()))?;
     let coord = Coordinate::new("entity:fusion-none", "scope:fusion")?;
-    store.append_with_options(
+    let _ = store.append_with_options(
         &coord,
         LEFT_KIND,
         &serde_json::json!({ "n": 1 }),

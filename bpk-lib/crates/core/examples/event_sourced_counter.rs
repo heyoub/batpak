@@ -92,21 +92,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // -- Write some events --
     let _ = writeln!(out, "Writing events...\n");
 
-    store.append_typed(
+    let _ = store.append_typed(
         &coord,
         &Incremented {
             amount: 1,
             reason: "page view".into(),
         },
     )?;
-    store.append_typed(
+    let _ = store.append_typed(
         &coord,
         &Incremented {
             amount: 5,
             reason: "bulk import".into(),
         },
     )?;
-    store.append_typed(
+    let _ = store.append_typed(
         &coord,
         &Decremented {
             amount: -2,

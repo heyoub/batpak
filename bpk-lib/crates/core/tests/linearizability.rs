@@ -187,7 +187,7 @@ fn populate(store: &Store, specs: &[AppendSpec]) -> Result<Vec<u64>, StoreError>
         )?;
         // Real-time order: this append RETURNED (committed) before the next is
         // issued, so its sequence must be below every later one.
-        issued_sequences.push(receipt.sequence);
+        issued_sequences.push(receipt.global_sequence);
     }
     store.sync()?;
     let written = store.frontier().written_hlc;

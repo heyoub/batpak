@@ -68,7 +68,7 @@ fn append_multiple_events_same_entity() {
 
     for i in 0..10 {
         let payload = serde_json::json!({"i": i});
-        store.append(&coord, kind, &payload).expect("append");
+        let _ = store.append(&coord, kind, &payload).expect("append");
     }
 
     let stats = store.stats();
@@ -119,11 +119,11 @@ fn query_by_entity_prefix() {
     for i in 0..5 {
         let coord =
             Coordinate::new(format!("user:{i}").as_str(), "scope:test").expect("valid coord");
-        store.append(&coord, kind, &payload).expect("append");
+        let _ = store.append(&coord, kind, &payload).expect("append");
     }
     // And some non-matching entities
     let coord = Coordinate::new("order:1", "scope:test").expect("valid coord");
-    store.append(&coord, kind, &payload).expect("append");
+    let _ = store.append(&coord, kind, &payload).expect("append");
 
     let region = Region::entity("user");
     let results = store.query(&region);
@@ -186,9 +186,9 @@ fn query_by_scope() {
     let coord_a = Coordinate::new("entity:1", "scope:a").expect("valid coord");
     let coord_b = Coordinate::new("entity:2", "scope:b").expect("valid coord");
 
-    store.append(&coord_a, kind, &payload).expect("append");
-    store.append(&coord_a, kind, &payload).expect("append");
-    store.append(&coord_b, kind, &payload).expect("append");
+    let _ = store.append(&coord_a, kind, &payload).expect("append");
+    let _ = store.append(&coord_a, kind, &payload).expect("append");
+    let _ = store.append(&coord_b, kind, &payload).expect("append");
 
     let region = Region::scope("scope:a");
     let results = store.query(&region);
@@ -261,9 +261,9 @@ fn by_scope_wrapper_matches_exact_scope_results() {
     let coord_a2 = Coordinate::new("entity:scope:2", "scope:wrapper").expect("valid coord");
     let coord_b = Coordinate::new("entity:scope:other", "scope:other").expect("valid coord");
 
-    store.append(&coord_a1, kind, &payload).expect("append a1");
-    store.append(&coord_a2, kind, &payload).expect("append a2");
-    store.append(&coord_b, kind, &payload).expect("append b");
+    let _ = store.append(&coord_a1, kind, &payload).expect("append a1");
+    let _ = store.append(&coord_a2, kind, &payload).expect("append a2");
+    let _ = store.append(&coord_b, kind, &payload).expect("append b");
 
     let wrapped = store.by_scope("scope:wrapper");
     let queried = store.query(&Region::scope("scope:wrapper"));
@@ -307,9 +307,9 @@ fn query_by_fact() {
     let kind_b = EventKind::custom(0xF, 2);
     let payload = serde_json::json!({"x": 1});
 
-    store.append(&coord, kind_a, &payload).expect("append");
-    store.append(&coord, kind_a, &payload).expect("append");
-    store.append(&coord, kind_b, &payload).expect("append");
+    let _ = store.append(&coord, kind_a, &payload).expect("append");
+    let _ = store.append(&coord, kind_a, &payload).expect("append");
+    let _ = store.append(&coord, kind_b, &payload).expect("append");
 
     let results = store.by_fact(kind_a);
     assert_eq!(
@@ -370,7 +370,7 @@ fn cold_start_rebuilds_index() {
         let store = Store::open(config).expect("open store");
         let coord = Coordinate::new("entity:1", "scope:test").expect("valid coord");
         for _ in 0..20 {
-            store.append(&coord, kind, &payload).expect("append");
+            let _ = store.append(&coord, kind, &payload).expect("append");
         }
         store.sync().expect("sync");
         store.close().expect("close");
@@ -455,7 +455,7 @@ fn segment_rotation_on_size() {
     let payload = serde_json::json!({"data": "some payload to fill segments quickly"});
 
     for _ in 0..50 {
-        store.append(&coord, kind, &payload).expect("append");
+        let _ = store.append(&coord, kind, &payload).expect("append");
     }
     store.sync().expect("sync");
 
@@ -501,7 +501,7 @@ fn concurrent_append_and_query() {
         .spawn(move || {
             for i in 0..100 {
                 let payload = serde_json::json!({"i": i});
-                store_w.append(&coord_w, kind, &payload).expect("append");
+                let _ = store_w.append(&coord_w, kind, &payload).expect("append");
             }
         })
         .expect("spawn thread");
@@ -562,7 +562,7 @@ fn append_with_cas_success() {
     let payload = serde_json::json!({"x": 1});
 
     // First append — no CAS needed (sequence starts at 0)
-    store.append(&coord, kind, &payload).expect("first append");
+    let _ = store.append(&coord, kind, &payload).expect("first append");
 
     // CAS with correct expected sequence (clock starts at 0, first event gets clock=0)
     let opts = batpak::store::AppendOptions {
@@ -637,7 +637,7 @@ fn projection_replays_events() {
 
     for i in 0..5 {
         let payload = serde_json::json!({"i": i});
-        store.append(&coord, kind, &payload).expect("append");
+        let _ = store.append(&coord, kind, &payload).expect("append");
     }
 
     let counter: Option<Counter> = store

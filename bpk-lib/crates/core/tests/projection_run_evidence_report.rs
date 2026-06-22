@@ -78,7 +78,7 @@ fn projection_run_report_is_deterministic_for_same_inputs() -> TestResult {
     assert!(data_dir_guard.path().exists());
     let coord = Coordinate::new("entity:projection-run-deterministic", "scope:test")?;
     let kind = EventKind::custom(0xF, 0x61);
-    store.append(&coord, kind, &serde_json::json!({"n": 1}))?;
+    let _ = store.append(&coord, kind, &serde_json::json!({"n": 1}))?;
 
     let first = store.project_run_evidence::<CounterProjection>(
         "entity:projection-run-deterministic",
@@ -109,7 +109,7 @@ fn projection_run_success_records_known_output_hash_when_available() -> TestResu
     assert!(data_dir_guard.path().exists());
     let coord = Coordinate::new("entity:projection-run-output-hash", "scope:test")?;
     let kind = EventKind::custom(0xF, 0x61);
-    store.append(&coord, kind, &serde_json::json!({"n": 1}))?;
+    let _ = store.append(&coord, kind, &serde_json::json!({"n": 1}))?;
 
     let (state, report) = store.project_run_evidence::<CounterProjection>(
         "entity:projection-run-output-hash",
@@ -146,14 +146,14 @@ fn projection_run_input_frontier_is_bound_to_replay_watermark() -> TestResult {
     )?;
 
     assert_eq!(state, Some(CounterProjection { count: 2 }));
-    assert_ne!(first.sequence, second.sequence);
+    assert_ne!(first.global_sequence, second.global_sequence);
     assert!(matches!(
         report.body.input_frontier,
         Some(ProjectionRunInputFrontier {
             kind: ProjectionRunFrontierKind::Visible,
             global_sequence,
             ..
-        }) if global_sequence == second.sequence
+        }) if global_sequence == second.global_sequence
     ), "PROPERTY: projection run evidence input_frontier must be the replay watermark used by the outcome");
     Ok(())
 }
@@ -165,7 +165,7 @@ fn cache_status_unavailable_emits_explicit_finding() -> TestResult {
     let store = Store::open_with_cache(config, Box::new(CacheGetError))?;
     let coord = Coordinate::new("entity:projection-run-cache-unknown", "scope:test")?;
     let kind = EventKind::custom(0xF, 0x61);
-    store.append(&coord, kind, &serde_json::json!({"n": 1}))?;
+    let _ = store.append(&coord, kind, &serde_json::json!({"n": 1}))?;
 
     let (state, report) = store.project_run_evidence::<CounterProjection>(
         "entity:projection-run-cache-unknown",
@@ -287,7 +287,7 @@ fn projection_evidence_registry_dispatches_registered_projection() -> TestResult
     assert!(data_dir_guard.path().exists());
     let coord = Coordinate::new("entity:registry-dispatch", "scope:test")?;
     let kind = EventKind::custom(0xF, 0x61);
-    store.append(&coord, kind, &serde_json::json!({"n": 1}))?;
+    let _ = store.append(&coord, kind, &serde_json::json!({"n": 1}))?;
 
     let mut registry = ProjectionEvidenceRegistry::new();
     registry.register::<CounterProjection>("counter.projection");

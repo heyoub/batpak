@@ -124,7 +124,7 @@ fn populate(store: &Store, specs: &[AppendSpec]) -> Result<(), StoreError> {
     for spec in specs {
         let coord = Coordinate::new(entity_name(spec.entity_idx), scope_name(spec.scope_idx))
             .expect("generated coordinates must be valid");
-        store.append(
+        let _ = store.append(
             &coord,
             event_kind(spec),
             &serde_json::json!({

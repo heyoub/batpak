@@ -187,7 +187,7 @@ fn index_entry_causation_helpers() {
     assert_eq!(root_entry.dag_depth(), 0);
     assert_ne!(root_entry.hash_chain().event_hash, [0; 32]);
     assert!(root_entry.disk_pos().length() > 0);
-    assert_eq!(root_entry.global_sequence(), root.sequence);
+    assert_eq!(root_entry.global_sequence(), root.global_sequence);
     assert!(root_entry.receipt_extensions().is_empty());
 
     let root_is_root_cause = root_entry.is_root_cause();

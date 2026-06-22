@@ -48,13 +48,13 @@ where
 fn generic_projection_compiles_and_projects() {
     let (_dir, store) = small_segment_store().expect("open small segment store");
     let coord = Coordinate::new("entity:generic", "scope:test").expect("valid coord");
-    store
+    let _ = store
         .append_typed(&coord, &Bumped { amount: 2 })
         .expect("append amount 2");
-    store
+    let _ = store
         .append_typed(&coord, &Bumped { amount: 5 })
         .expect("append amount 5");
-    store
+    let _ = store
         .append_typed(&coord, &Bumped { amount: 11 })
         .expect("append amount 11");
 

@@ -70,7 +70,7 @@ fn populate_projection_fixture(store: &Store, entity: &str, events: u64) {
     let kind = EventKind::custom(0xF, 1);
     let payload = serde_json::json!({"x": 1});
     for _ in 0..events {
-        store.append(&coord, kind, &payload).expect("append");
+        let _ = store.append(&coord, kind, &payload).expect("append");
     }
 }
 
