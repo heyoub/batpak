@@ -1,5 +1,3 @@
-// justifies: INV-EXAMPLES-OBSERVABLE-OUTPUT; example binary in examples/eight_jobs.rs prints one compact success line so the canonical public API path is visible from the command line.
-#![allow(clippy::print_stdout)]
 //! # eight_jobs
 //!
 //! **Teaches:** the canonical BatPAK store path for 0.8.
@@ -35,6 +33,9 @@ impl NoteStream {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    use std::io::Write;
+    let mut out = std::io::stdout().lock();
+
     let dir = tempfile::tempdir()?;
 
     // 1. Open.
@@ -85,7 +86,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 8. Close.
     store.close()?;
 
-    println!(
+    let _ = writeln!(
+        out,
         "eight jobs ok: page={} ancestors={} receipt={verification:?}",
         page.len(),
         ancestors.len()

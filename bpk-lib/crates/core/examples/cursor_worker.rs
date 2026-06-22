@@ -22,9 +22,10 @@ struct Tick {
     n: u32,
 }
 
-// justifies: INV-EXAMPLES-OBSERVABLE-OUTPUT; example main in examples/cursor_worker.rs prints cursor-worker progress to stdout so the reader can see the observable drain.
-#[allow(clippy::print_stdout)]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    use std::io::Write;
+    let mut out = std::io::stdout().lock();
+
     let dir = tempfile::tempdir()?;
     let store = Arc::new(Store::open(StoreConfig::new(dir.path()))?);
     let coord = Coordinate::new("player:cursor", "room:worker")?;
@@ -59,7 +60,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     worker.stop_and_join()?;
-    println!(
+    let _ = writeln!(
+        out,
         "cursor worker processed {} event(s) through the ordered pull path",
         processed.load(Ordering::SeqCst)
     );

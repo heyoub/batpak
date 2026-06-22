@@ -1,5 +1,3 @@
-// justifies: INV-EXAMPLES-OBSERVABLE-OUTPUT; example binary in examples/raw_projection_counter.rs demonstrates hand-written raw projection via println output and matches only the demo variants with a wildcard fallback.
-#![allow(clippy::print_stdout, clippy::wildcard_enum_match_arm)]
 //! # raw_projection_counter
 //!
 //! **Teaches:** hand-written raw projection replay for performance-sensitive folds.
@@ -68,6 +66,9 @@ impl EventSourced for RawCounterState {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    use std::io::Write;
+    let mut out = std::io::stdout().lock();
+
     let dir = tempfile::tempdir()?;
     let store = Store::open(StoreConfig::new(dir.path()))?;
     let coord = Coordinate::new("counter:raw", "example")?;
@@ -100,10 +101,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let state: Option<RawCounterState> = store.project("counter:raw", &Freshness::Consistent)?;
 
     if let Some(state) = state {
-        println!("Raw replay projection state:");
-        println!("  value:        {}", state.value);
-        println!("  total_events: {}", state.total_events);
-        println!("  replay lane:  RawMsgpackInput (performance lane)");
+        let _ = writeln!(out, "Raw replay projection state:");
+        let _ = writeln!(out, "  value:        {}", state.value);
+        let _ = writeln!(out, "  total_events: {}", state.total_events);
+        let _ = writeln!(out, "  replay lane:  RawMsgpackInput (performance lane)");
     }
 
     store.close()?;

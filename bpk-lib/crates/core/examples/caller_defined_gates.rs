@@ -1,9 +1,3 @@
-// justifies: INV-EXAMPLES-OBSERVABLE-OUTPUT; caller-defined-gates example in examples/caller_defined_gates.rs shows the propose-evaluate-commit flow via println, and passes gate-shaped arguments by value/borrow as the gate API expects from a teaching fixture.
-#![allow(
-    clippy::print_stdout,
-    clippy::needless_pass_by_value,
-    clippy::needless_borrows_for_generic_args
-)]
 //! # caller_defined_gates
 //!
 //! **Teaches:** gate-based propose -> evaluate -> commit pipeline with
@@ -71,19 +65,22 @@ impl Gate<WriteRequest> for TagDenyGate {
     }
 }
 
-fn try_write(store: &Store, pipeline: &Pipeline<WriteRequest>, request: WriteRequest) {
+fn try_write(store: &Store, pipeline: &Pipeline<WriteRequest>, request: &WriteRequest) {
+    use std::io::Write;
+    let mut out = std::io::stdout().lock();
+
     let label = format!(
         "{} bytes={} tag={}",
         request.stream, request.bytes, request.tag
     );
     let proposal = Proposal::new(request.clone());
 
-    match pipeline.evaluate(&request, proposal) {
+    match pipeline.evaluate(request, proposal) {
         Ok(receipt) => {
-            println!("  ACCEPTED: {label}");
-            println!("    Gates passed: {:?}", receipt.gates_passed());
+            let _ = writeln!(out, "  ACCEPTED: {label}");
+            let _ = writeln!(out, "    Gates passed: {:?}", receipt.gates_passed());
 
-            let coord = Coordinate::new(&format!("stream:{}", request.stream), "writes:accepted")
+            let coord = Coordinate::new(format!("stream:{}", request.stream), "writes:accepted")
                 .expect("valid coordinate");
 
             let result: Result<_, StoreError> = pipeline.commit(receipt, |payload| {
@@ -92,24 +89,31 @@ fn try_write(store: &Store, pipeline: &Pipeline<WriteRequest>, request: WriteReq
             });
 
             match result {
-                Ok(committed) => println!("    Committed: event_id={:032x}", committed.event_id()),
-                Err(error) => println!("    Commit failed: {error}"),
+                Ok(committed) => {
+                    let _ = writeln!(out, "    Committed: event_id={:032x}", committed.event_id());
+                }
+                Err(error) => {
+                    let _ = writeln!(out, "    Commit failed: {error}");
+                }
             }
         }
         Err(denial) => {
-            println!("  DENIED: {label}");
-            println!("    Gate: {}", denial.gate);
-            println!("    Code: {}", denial.code);
-            println!("    Reason: {}", denial.message);
+            let _ = writeln!(out, "  DENIED: {label}");
+            let _ = writeln!(out, "    Gate: {}", denial.gate);
+            let _ = writeln!(out, "    Code: {}", denial.code);
+            let _ = writeln!(out, "    Reason: {}", denial.message);
             for (key, value) in &denial.context {
-                println!("    {key}: {value}");
+                let _ = writeln!(out, "    {key}: {value}");
             }
         }
     }
-    println!();
+    let _ = writeln!(out);
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    use std::io::Write;
+    let mut out = std::io::stdout().lock();
+
     let dir = tempfile::tempdir()?;
     let store = Store::open(StoreConfig::new(dir.path()))?;
 
@@ -121,12 +125,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let pipeline = Pipeline::new(gates);
 
-    println!("=== Caller-Defined Gates ===\n");
+    let _ = writeln!(out, "=== Caller-Defined Gates ===\n");
+    drop(out);
 
     try_write(
         &store,
         &pipeline,
-        WriteRequest {
+        &WriteRequest {
             stream: "alpha".into(),
             bytes: 1024,
             tag: "normal".into(),
@@ -136,7 +141,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     try_write(
         &store,
         &pipeline,
-        WriteRequest {
+        &WriteRequest {
             stream: "beta".into(),
             bytes: 512,
             tag: "blocked".into(),
@@ -146,7 +151,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     try_write(
         &store,
         &pipeline,
-        WriteRequest {
+        &WriteRequest {
             stream: "gamma".into(),
             bytes: 8192,
             tag: "normal".into(),

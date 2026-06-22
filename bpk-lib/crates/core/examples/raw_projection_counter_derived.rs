@@ -1,5 +1,3 @@
-// justifies: INV-EXAMPLES-OBSERVABLE-OUTPUT; example binary in examples/raw_projection_counter_derived.rs demonstrates derived-raw projection output via println and matches only the demo variants with a wildcard fallback.
-#![allow(clippy::print_stdout, clippy::wildcard_enum_match_arm)]
 //! # raw_projection_counter_derived
 //!
 //! **Teaches:** derive with `input = RawMsgpackInput` (raw msgpack replay lane).
@@ -60,6 +58,9 @@ impl CounterState {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    use std::io::Write;
+    let mut out = std::io::stdout().lock();
+
     let dir = tempfile::tempdir()?;
     let store = Store::open(StoreConfig::new(dir.path()))?;
     let coord = Coordinate::new("counter:raw-derived", "example")?;
@@ -91,15 +92,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     match state {
         Some(s) => {
-            println!("Counter state (reconstructed via RawMsgpackInput lane):");
-            println!("  value:            {}", s.value);
-            println!("  total_increments: {}", s.total_increments);
-            println!("  total_decrements: {}", s.total_decrements);
+            let _ = writeln!(
+                out,
+                "Counter state (reconstructed via RawMsgpackInput lane):"
+            );
+            let _ = writeln!(out, "  value:            {}", s.value);
+            let _ = writeln!(out, "  total_increments: {}", s.total_increments);
+            let _ = writeln!(out, "  total_decrements: {}", s.total_decrements);
         }
-        None => println!("No events found!"),
+        None => {
+            let _ = writeln!(out, "No events found!");
+        }
     }
 
     store.close()?;
-    println!("\nDone. Same derive, different lane — same result.");
+    let _ = writeln!(out, "\nDone. Same derive, different lane — same result.");
     Ok(())
 }

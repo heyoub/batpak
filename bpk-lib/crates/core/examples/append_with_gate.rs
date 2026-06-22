@@ -14,9 +14,10 @@ struct AccountAdjusted {
     amount: i64,
 }
 
-// justifies: INV-EXAMPLES-OBSERVABLE-OUTPUT; example in examples/append_with_gate.rs prints observable gate outcomes for durable, visible, and timeout paths.
-#[allow(clippy::print_stdout)]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    use std::io::Write;
+    let mut out = std::io::stdout().lock();
+
     let dir = tempfile::tempdir()?;
     let store = Store::open(
         StoreConfig::new(dir.path())
@@ -33,7 +34,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             timeout: Duration::from_secs(1),
         }),
     )?;
-    println!("durable-gated append: {}", durable_receipt.event_id);
+    let _ = writeln!(out, "durable-gated append: {}", durable_receipt.event_id);
 
     let batch = vec![
         BatchAppendItem::typed(
@@ -56,7 +57,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             timeout: Duration::from_secs(1),
         }),
     )?;
-    println!("visible-gated batch: {} events", batch_receipts.len());
+    let _ = writeln!(out, "visible-gated batch: {} events", batch_receipts.len());
 
     let timeout_dir = tempfile::tempdir()?;
     let timeout_store = Store::open(
@@ -76,7 +77,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     match timeout {
         Err(StoreError::WaitTimeout { .. }) => {
             let committed = timeout_store.query(&Region::entity("account:gate-timeout"));
-            println!(
+            let _ = writeln!(
+                out,
                 "durable gate timed out; committed events: {}",
                 committed.len()
             );

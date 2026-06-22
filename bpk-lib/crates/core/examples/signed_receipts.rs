@@ -1,5 +1,3 @@
-// justifies: INV-EXAMPLES-OBSERVABLE-OUTPUT; signed_receipts example prints receipt verification state so users can see append and denial signatures validate end to end.
-#![allow(clippy::print_stdout)]
 //! # signed_receipts
 //!
 //! **Teaches:** opt-in receipt signing, append receipt verification, and
@@ -40,6 +38,9 @@ impl Gate<SettingChanged> for WriteWindowGate {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    use std::io::Write;
+    let mut out = std::io::stdout().lock();
+
     let dir = tempfile::tempdir()?;
     let signing_key = SigningKey::from_bytes([7; 32]);
     let store = Store::open(StoreConfig::new(dir.path()).with_signing_key(signing_key))?;
@@ -51,7 +52,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let append_receipt = store.append_typed(&coord, &changed)?;
     assert!(store.verify_append_receipt(&append_receipt));
-    println!("append receipt verified: {}", append_receipt.event_id);
+    let _ = writeln!(out, "append receipt verified: {}", append_receipt.event_id);
 
     let mut gates = GateSet::new();
     gates.push(WriteWindowGate { open: false });
@@ -85,7 +86,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         denial_event.event.header.event_kind,
         EventKind::SYSTEM_DENIAL
     );
-    println!("denial receipt verified: {}", denial_receipt.event_id);
+    let _ = writeln!(out, "denial receipt verified: {}", denial_receipt.event_id);
 
     store.close()?;
     Ok(())

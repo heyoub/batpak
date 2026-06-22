@@ -24,9 +24,10 @@ struct AuditLogged {
     participants: u32,
 }
 
-// justifies: INV-EXAMPLES-OBSERVABLE-OUTPUT; example in examples/batch_append.rs demonstrates batch append; println output is the observable success path shown to readers of this example.
-#[allow(clippy::print_stdout)]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    use std::io::Write;
+    let mut out = std::io::stdout().lock();
+
     let dir = tempfile::tempdir()?;
     let config = StoreConfig::new(dir.path())
         .with_sync_every_n_events(25)
@@ -68,10 +69,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let receipts = store.append_batch(items)?;
 
-    println!("batch committed: {} events", receipts.len());
+    let _ = writeln!(out, "batch committed: {} events", receipts.len());
     for (i, receipt) in receipts.iter().enumerate() {
         let fetched = store.get(receipt.event_id)?;
-        println!(
+        let _ = writeln!(
+            out,
             "  [{}] event_id={} seq={} entity={}",
             i,
             receipt.event_id,
@@ -82,7 +84,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Verify all events are queryable.
     let alice_events = store.query(&Region::entity("user:alice"));
-    println!("\nalice has {} event(s)", alice_events.len());
+    let _ = writeln!(out, "\nalice has {} event(s)", alice_events.len());
 
     Ok(())
 }

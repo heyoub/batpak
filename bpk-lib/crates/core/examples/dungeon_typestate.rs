@@ -1,5 +1,3 @@
-// justifies: INV-EXAMPLES-OBSERVABLE-OUTPUT; example binary in examples/dungeon_typestate.rs demonstrates typestate transitions by printing the state trace to stdout; println is the user-observable success path.
-#![allow(clippy::print_stdout)]
 //! # dungeon_typestate
 //!
 //! **Teaches:** compile-time state machine enforcement via typestate transitions.
@@ -106,41 +104,45 @@ impl Door<Locked> {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    use std::io::Write;
+    let mut out = std::io::stdout().lock();
+
     let dir = tempfile::tempdir()?;
     let store = Store::open(StoreConfig::new(dir.path()))?;
     let coord = Coordinate::new("door:vault", "dungeon:level-3")?;
 
-    println!("=== Dungeon Door State Machine ===\n");
+    let _ = writeln!(out, "=== Dungeon Door State Machine ===\n");
 
     // Start with an open door
     let door = Door::<Open>::new("Vault Door".into());
-    println!("Door '{}' starts Open", door.name());
+    let _ = writeln!(out, "Door '{}' starts Open", door.name());
 
     // Close it — this returns a new Door<Closed> and a Transition event
     let (door, transition) = door.close();
     store.apply_transition(&coord, transition)?;
-    println!("  → Closed (event persisted)");
+    let _ = writeln!(out, "  → Closed (event persisted)");
 
     // Lock it
     let (door, transition) = door.lock("skeleton-key");
     store.apply_transition(&coord, transition)?;
-    println!("  → Locked with skeleton-key (event persisted)");
+    let _ = writeln!(out, "  → Locked with skeleton-key (event persisted)");
 
     // Unlock it
     let (door, transition) = door.unlock("skeleton-key");
     store.apply_transition(&coord, transition)?;
-    println!("  → Unlocked (event persisted)");
+    let _ = writeln!(out, "  → Unlocked (event persisted)");
 
     // Open it
     let (_door, transition) = door.open();
     store.apply_transition(&coord, transition)?;
-    println!("  → Open again (event persisted)");
+    let _ = writeln!(out, "  → Open again (event persisted)");
 
     // -- Show the event log --
-    println!("\nEvent log for vault door:");
+    let _ = writeln!(out, "\nEvent log for vault door:");
     for entry in store.by_entity("door:vault") {
         let stored = store.get(batpak::id::EventId::from(entry.event_id()))?;
-        println!(
+        let _ = writeln!(
+            out,
             "  kind={} payload={}",
             entry.event_kind(),
             stored.event.payload
@@ -159,8 +161,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // locked_door.open();  // ERROR: no method named `open` found for `Door<Locked>`
 
     store.close()?;
-    println!("\nThe compiler guarantees every door transition is legal.");
-    println!("Try uncommenting the illegal transitions to see it fail!");
+    let _ = writeln!(
+        out,
+        "\nThe compiler guarantees every door transition is legal."
+    );
+    let _ = writeln!(
+        out,
+        "Try uncommenting the illegal transitions to see it fail!"
+    );
 
     Ok(())
 }

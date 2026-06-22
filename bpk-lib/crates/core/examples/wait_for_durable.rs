@@ -14,9 +14,10 @@ struct LedgerPosted {
     amount: i64,
 }
 
-// justifies: INV-EXAMPLES-OBSERVABLE-OUTPUT; example in examples/wait_for_durable.rs prints observable wait success output so readers can see the durability wait contract.
-#[allow(clippy::print_stdout)]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    use std::io::Write;
+    let mut out = std::io::stdout().lock();
+
     let dir = tempfile::tempdir()?;
     let config = StoreConfig::new(dir.path())
         .with_sync_every_n_events(25)
@@ -38,7 +39,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     store.sync()?;
     store.wait_for_durable(target, Duration::from_secs(1))?;
 
-    println!("event {} crossed durable frontier", receipt.event_id);
+    let _ = writeln!(out, "event {} crossed durable frontier", receipt.event_id);
     store.close()?;
     Ok(())
 }

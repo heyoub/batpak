@@ -12,9 +12,10 @@ struct Archived {
     n: u32,
 }
 
-// justifies: INV-EXAMPLES-OBSERVABLE-OUTPUT; example main in examples/read_only.rs prints read-only reopening observable output via stdout; println is the success signal for this demo.
-#[allow(clippy::print_stdout)]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    use std::io::Write;
+    let mut out = std::io::stdout().lock();
+
     let dir = tempfile::tempdir()?;
     let config = StoreConfig::new(dir.path())
         .with_enable_checkpoint(true)
@@ -27,7 +28,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let read_only = Store::<batpak::store::ReadOnly>::open_read_only(config)?;
     let stream = read_only.by_entity("player:readonly");
-    println!("read-only reopen recovered {} event(s)", stream.len());
+    let _ = writeln!(out, "read-only reopen recovered {} event(s)", stream.len());
 
     Ok(())
 }

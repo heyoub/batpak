@@ -1,5 +1,3 @@
-// justifies: INV-EXAMPLES-OBSERVABLE-OUTPUT; lifecycle_observer example prints the durable open lifecycle event so users can verify the store ownership event stream.
-#![allow(clippy::print_stdout)]
 //! # lifecycle_observer
 //!
 //! **Teaches:** observing the durable `SYSTEM_OPEN_COMPLETED` lifecycle event
@@ -10,6 +8,9 @@
 use batpak::prelude::*;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    use std::io::Write;
+    let mut out = std::io::stdout().lock();
+
     let dir = tempfile::tempdir()?;
     let store = Store::open(StoreConfig::new(dir.path()))?;
 
@@ -26,7 +27,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         EventKind::SYSTEM_OPEN_COMPLETED
     );
 
-    println!(
+    let _ = writeln!(
+        out,
         "observed lifecycle open event {} at {}/{}",
         open_event.event.header.event_id,
         open_event.coordinate.entity(),

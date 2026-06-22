@@ -1,5 +1,3 @@
-// justifies: INV-EXAMPLES-OBSERVABLE-OUTPUT; example binary in examples/typed_reactor.rs demonstrates typed-reactor observable output via println and spawns worker threads via std::thread::spawn as part of the demo.
-#![allow(clippy::print_stdout, clippy::disallowed_methods)]
 //! # typed_reactor
 //!
 //! **Teaches:** `react_loop_typed<T, R>` with matched-kind decode failure
@@ -122,14 +120,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Inspect the derived events.
+    use std::io::Write;
+    let mut out = std::io::stdout().lock();
     let reactions = store.by_fact_typed::<PayloadB>();
-    println!(
+    let _ = writeln!(
+        out,
         "Typed reactor emitted {} reactions for 4 source events:",
         reactions.len()
     );
     for entry in &reactions {
         let stored = store.get(batpak::id::EventId::from(entry.event_id()))?;
-        println!(
+        let _ = writeln!(
+            out,
             "  reaction event_id={} payload={}",
             entry.event_id(),
             stored.event.payload

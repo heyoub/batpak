@@ -1,5 +1,3 @@
-// justifies: INV-EXAMPLES-OBSERVABLE-OUTPUT; example binary in examples/typed_reactor_multi.rs demonstrates observable output via println and spawns worker threads via std::thread::spawn as part of the teaching scenario.
-#![allow(clippy::print_stdout, clippy::disallowed_methods)]
 //! # typed_reactor_multi
 //!
 //! **Teaches:** `react_loop_multi` with multi-event dispatch via
@@ -163,8 +161,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err(format!("reactor join failed: {e}").into());
     }
 
+    use std::io::Write;
+    let mut out = std::io::stdout().lock();
     let reactions = store.by_fact_typed::<Reaction>();
-    println!(
+    let _ = writeln!(
+        out,
         "Multi-event reactor emitted {} reactions across 3 payload kinds",
         reactions.len()
     );

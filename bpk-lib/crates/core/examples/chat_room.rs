@@ -1,5 +1,3 @@
-// justifies: INV-EXAMPLES-OBSERVABLE-OUTPUT; example binary in examples/chat_room.rs demonstrates the chat-room scenario with println and std::thread::spawn as the user-observable output and concurrency shape.
-#![allow(clippy::print_stdout, clippy::disallowed_methods)]
 //! # chat_room
 //!
 //! **Teaches:** push subscriptions (lossy) vs pull cursors (ordered replay).
@@ -42,10 +40,17 @@ struct MessageDeleted {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    use std::io::Write;
+    // A concurrent listener thread also writes to stdout, so this example
+    // locks the handle per write (released immediately) rather than holding a
+    // single `StdoutLock` across `listener.join()` — holding it would deadlock
+    // against the listener's own `stdout().lock()`.
+    let out = std::io::stdout();
+
     let dir = tempfile::tempdir()?;
     let store = Arc::new(Store::open(StoreConfig::new(dir.path()))?);
 
-    println!("=== Chat Room: Subscriptions & Cursors ===\n");
+    let _ = writeln!(out.lock(), "=== Chat Room: Subscriptions & Cursors ===\n");
 
     // -- Set up a subscriber BEFORE any messages are sent --
     // Subscriptions are push-based: you only see events that happen AFTER subscribing.
@@ -57,6 +62,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let listener = std::thread::Builder::new()
         .name("chat-room-listener".into())
         .spawn(move || {
+            let mut listener_out = std::io::stdout().lock();
             let mut received = vec![];
             // Use SubscriptionOps for composable filtering: only MessageSent, take 3
             let mut ops = sub.ops().filter(|n| n.kind == MessageSent::KIND).take(3);
@@ -69,16 +75,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ));
             }
             // Also demonstrate reading full events from notifications
-            println!(
+            let _ = writeln!(
+                listener_out,
                 "  Subscriber received {} messages (via push)",
                 received.len()
             );
             for r in &received {
-                println!("    {}", r);
+                let _ = writeln!(listener_out, "    {}", r);
             }
             // Try to read one of the events
             if let Some(first_notif_desc) = received.first() {
-                println!("    (first: {})", first_notif_desc);
+                let _ = writeln!(listener_out, "    (first: {})", first_notif_desc);
             }
             drop(store_clone);
         })
@@ -97,7 +104,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             text: "Hey everyone!".into(),
         },
     )?;
-    println!("Alice: Hey everyone!");
+    let _ = writeln!(out.lock(), "Alice: Hey everyone!");
 
     store.append_typed(
         &bob,
@@ -106,7 +113,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             text: "What's up?".into(),
         },
     )?;
-    println!("Bob: What's up?");
+    let _ = writeln!(out.lock(), "Bob: What's up?");
 
     // Bob edits his message (different event kind — subscriber filter will skip this)
     store.append_typed(
@@ -116,7 +123,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             text: "What's up? (edited)".into(),
         },
     )?;
-    println!("Bob: [edited his message]");
+    let _ = writeln!(out.lock(), "Bob: [edited his message]");
 
     store.append_typed(
         &charlie,
@@ -125,24 +132,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             text: "Hey! Just joined.".into(),
         },
     )?;
-    println!("Charlie: Hey! Just joined.");
+    let _ = writeln!(out.lock(), "Charlie: Hey! Just joined.");
 
     // Wait for listener to finish (it takes 3 MSG_SENT events then stops)
-    println!("\n--- Subscription Results ---");
+    let _ = writeln!(out.lock(), "\n--- Subscription Results ---");
     listener
         .join()
         .map_err(|_| std::io::Error::other("chat room listener thread panicked"))?;
 
+    // The listener thread has now joined, so this thread is the only writer.
+    let mut out = out.lock();
+
     // -- Now demonstrate cursors: ordered replay, pull-based --
-    println!("\n--- Cursor: Pull-based replay ---");
-    println!("  (Cursors see ALL events, even ones before the cursor was created)\n");
+    let _ = writeln!(out, "\n--- Cursor: Pull-based replay ---");
+    let _ = writeln!(
+        out,
+        "  (Cursors see ALL events, even ones before the cursor was created)\n"
+    );
 
     let mut cursor = store.cursor_guaranteed(&general_region);
     let mut cursor_events = vec![];
     while let Some(entry) = cursor.poll() {
         cursor_events.push(entry);
     }
-    println!("  Cursor found {} events total:", cursor_events.len());
+    let _ = writeln!(out, "  Cursor found {} events total:", cursor_events.len());
     for entry in &cursor_events {
         let kind_label = match entry.event_kind() {
             k if k == MessageSent::KIND => "SENT",
@@ -150,7 +163,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             k if k == MessageDeleted::KIND => "DELETED",
             _ => "OTHER",
         };
-        println!(
+        let _ = writeln!(
+            out,
             "    [{:7}] {} (seq={})",
             kind_label,
             entry.coord(),
@@ -159,20 +173,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // -- Query: filter by entity --
-    println!("\n--- Query: Bob's messages only ---");
+    let _ = writeln!(out, "\n--- Query: Bob's messages only ---");
     let bob_events = store.by_entity("user:bob");
-    println!("  Bob has {} events:", bob_events.len());
+    let _ = writeln!(out, "  Bob has {} events:", bob_events.len());
     for entry in &bob_events {
-        println!("    kind={} seq={}", entry.event_kind(), entry.clock());
+        let _ = writeln!(out, "    kind={} seq={}", entry.event_kind(), entry.clock());
     }
 
     // -- Query: filter by event kind --
-    println!("\n--- Query: All edits across all users ---");
+    let _ = writeln!(out, "\n--- Query: All edits across all users ---");
     let edits = store.by_fact_typed::<MessageEdited>();
-    println!("  {} edit event(s) found", edits.len());
+    let _ = writeln!(out, "  {} edit event(s) found", edits.len());
 
     // -- Batch append: efficient bulk messaging --
-    println!("\n--- Batch: Bulk message import ---");
+    let _ = writeln!(out, "\n--- Batch: Bulk message import ---");
     use batpak::store::{BatchAppendItem, CausationRef};
 
     // Simulate importing a batch of historical messages
@@ -207,9 +221,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ];
 
     let batch_receipts = store.append_batch(historical)?;
-    println!("  Imported {} messages atomically", batch_receipts.len());
+    let _ = writeln!(
+        out,
+        "  Imported {} messages atomically",
+        batch_receipts.len()
+    );
     for (i, receipt) in batch_receipts.iter().enumerate() {
-        println!(
+        let _ = writeln!(
+            out,
             "    Message {}: seq={}, event_id={}",
             i, receipt.sequence, receipt.event_id
         );
@@ -220,14 +239,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .cursor_guaranteed(&general_region)
         .poll_batch(100)
         .len();
-    println!("  Total messages in #general: {}", all_general);
+    let _ = writeln!(out, "  Total messages in #general: {}", all_general);
 
     drop(store);
-    println!("\nSubscriptions are push (lossy, filtered, composable).");
-    println!(
+    let _ = writeln!(
+        out,
+        "\nSubscriptions are push (lossy, filtered, composable)."
+    );
+    let _ = writeln!(
+        out,
         "Cursors are pull (ordered, at-least-once; restart durability uses checkpointed workers)."
     );
-    println!("Queries are instant (in-memory index).");
+    let _ = writeln!(out, "Queries are instant (in-memory index).");
 
     Ok(())
 }

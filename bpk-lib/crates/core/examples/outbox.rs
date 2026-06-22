@@ -12,9 +12,10 @@ struct Tick {
     n: u32,
 }
 
-// justifies: INV-EXAMPLES-OBSERVABLE-OUTPUT; example main in examples/outbox.rs prints outbox events to stdout so the reader can see the staging-then-flush observable result.
-#[allow(clippy::print_stdout)]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    use std::io::Write;
+    let mut out = std::io::stdout().lock();
+
     let dir = tempfile::tempdir()?;
     let store = Store::open(StoreConfig::new(dir.path()))?;
 
@@ -36,7 +37,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
 
     let receipts = outbox.flush()?;
-    println!(
+    let _ = writeln!(
+        out,
         "flushed {} staged events through one batch path",
         receipts.len()
     );

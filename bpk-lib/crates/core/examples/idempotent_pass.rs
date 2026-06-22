@@ -47,16 +47,18 @@ fn credit_once(
     Ok(receipt)
 }
 
-// justifies: INV-EXAMPLES-OBSERVABLE-OUTPUT; idempotent_pass example in examples/idempotent_pass.rs prints observable output so users can see the re-run is a no-op returning the same sequence.
-#[allow(clippy::print_stdout)]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    use std::io::Write;
+    let mut out = std::io::stdout().lock();
+
     let dir = tempfile::tempdir()?;
     let store = Store::open(StoreConfig::new(dir.path()))?;
     let coord = Coordinate::new("account:alice", "ledger:main")?;
 
     // First pass: the credit is committed.
     let first = credit_once(&store, &coord, "req-2026-0001", "account:alice", 5_000)?;
-    println!(
+    let _ = writeln!(
+        out,
         "first pass committed credit at sequence {} (event {})",
         first.sequence, first.event_id
     );
@@ -64,7 +66,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Re-run the SAME pass (e.g. a retry after a crash). It is a no-op: the
     // same key resolves to the original receipt — no duplicate is written.
     let replay = credit_once(&store, &coord, "req-2026-0001", "account:alice", 5_000)?;
-    println!(
+    let _ = writeln!(
+        out,
         "re-run was a no-op: sequence {} (same as first: {})",
         replay.sequence,
         replay.sequence == first.sequence
@@ -74,7 +77,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "idempotent re-run must return the original receipt"
     );
 
-    println!(
+    let _ = writeln!(
+        out,
         "durable idempotency keys held: {}",
         store.durable_idempotency_key_count()
     );

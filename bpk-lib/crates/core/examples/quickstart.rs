@@ -15,9 +15,10 @@ struct PlayerMoved {
     y: i32,
 }
 
-// justifies: INV-EXAMPLES-OBSERVABLE-OUTPUT; quickstart example in examples/quickstart.rs prints observable success output so new users can see the end-to-end append and query flow.
-#[allow(clippy::print_stdout)]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    use std::io::Write;
+    let mut out = std::io::stdout().lock();
+
     let dir = tempfile::tempdir()?;
     let store = Store::open(StoreConfig::new(dir.path()))?;
 
@@ -25,7 +26,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let receipt = store.append_typed(&coord, &PlayerMoved { x: 10, y: 20 })?;
 
     let fetched = store.get(receipt.event_id)?;
-    println!(
+    let _ = writeln!(
+        out,
         "stored {} at sequence {} in scope {}",
         fetched.event.header.event_id,
         receipt.sequence,

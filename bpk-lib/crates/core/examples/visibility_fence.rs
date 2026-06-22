@@ -12,9 +12,10 @@ struct Hidden {
     hidden: bool,
 }
 
-// justifies: INV-EXAMPLES-OBSERVABLE-OUTPUT; example binary in examples/visibility_fence.rs demonstrates the visibility-fence observable via println, which is the user-visible success signal here.
-#[allow(clippy::print_stdout)]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    use std::io::Write;
+    let mut out = std::io::stdout().lock();
+
     let dir = tempfile::tempdir()?;
     let store = Store::open(StoreConfig::new(dir.path()))?;
 
@@ -25,7 +26,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let fence = store.begin_visibility_fence()?;
     let ticket = fence.submit(&coord, Hidden::KIND, &Hidden { hidden: true })?;
 
-    println!(
+    let _ = writeln!(
+        out,
         "durable before commit: visible_count={}",
         store.by_fact_typed::<Hidden>().len()
     );
@@ -34,7 +36,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     fence.commit()?;
     let receipt = ticket.wait()?;
 
-    println!(
+    let _ = writeln!(
+        out,
         "after commit event {} is visible and query count is {}",
         receipt.event_id,
         store.by_fact_typed::<Hidden>().len()

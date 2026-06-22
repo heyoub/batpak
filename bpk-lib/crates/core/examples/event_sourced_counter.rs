@@ -1,5 +1,3 @@
-// justifies: INV-EXAMPLES-OBSERVABLE-OUTPUT; example binary in examples/event_sourced_counter.rs demonstrates counter output via println and matches only the variants used in the demo with a wildcard fallback.
-#![allow(clippy::print_stdout, clippy::wildcard_enum_match_arm)]
 //! # event_sourced_counter
 //!
 //! **Teaches:** `#[derive(EventSourced)]` with `JsonValueInput` replay lane.
@@ -81,6 +79,9 @@ impl CounterState {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    use std::io::Write;
+    let mut out = std::io::stdout().lock();
+
     // Create a temporary store (disappears when the program exits)
     let dir = tempfile::tempdir()?;
     let store = Store::open(StoreConfig::new(dir.path()))?;
@@ -89,7 +90,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let coord = Coordinate::new("counter:hits", "example")?;
 
     // -- Write some events --
-    println!("Writing events...\n");
+    let _ = writeln!(out, "Writing events...\n");
 
     store.append_typed(
         &coord,
@@ -119,21 +120,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     match state {
         Some(s) => {
-            println!("Counter state (reconstructed from {} events):", 3);
-            println!("  value:            {}", s.value);
-            println!("  total_increments: {}", s.total_increments);
-            println!("  total_decrements: {}", s.total_decrements);
-            println!("  replay lane:      JsonValueInput (ergonomic default)");
+            let _ = writeln!(out, "Counter state (reconstructed from {} events):", 3);
+            let _ = writeln!(out, "  value:            {}", s.value);
+            let _ = writeln!(out, "  total_increments: {}", s.total_increments);
+            let _ = writeln!(out, "  total_decrements: {}", s.total_decrements);
+            let _ = writeln!(
+                out,
+                "  replay lane:      JsonValueInput (ergonomic default)"
+            );
         }
-        None => println!("No events found!"),
+        None => {
+            let _ = writeln!(out, "No events found!");
+        }
     }
 
     // -- Query: browse the raw event log --
-    println!("\nRaw event log:");
+    let _ = writeln!(out, "\nRaw event log:");
     let entries = store.by_entity("counter:hits");
     for entry in &entries {
         let stored = store.get(batpak::id::EventId::from(entry.event_id()))?;
-        println!(
+        let _ = writeln!(
+            out,
             "  seq={} kind={} payload={}",
             entry.clock(),
             entry.event_kind(),
@@ -143,10 +150,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // -- Walk ancestors: trace causation backwards --
     if let Some(last) = entries.last() {
-        println!("\nAncestor walk from last event:");
+        let _ = writeln!(out, "\nAncestor walk from last event:");
         let ancestors = store.walk_ancestors(batpak::id::EventId::from(last.event_id()), 10);
         for (i, a) in ancestors.iter().enumerate() {
-            println!(
+            let _ = writeln!(
+                out,
                 "  {}: kind={} payload={}",
                 i, a.event.header.event_kind, a.event.payload
             );
@@ -154,7 +162,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     store.close()?;
-    println!("\nDone. The event log told us the count is 4, and we know exactly why.");
+    let _ = writeln!(
+        out,
+        "\nDone. The event log told us the count is 4, and we know exactly why."
+    );
 
     Ok(())
 }
