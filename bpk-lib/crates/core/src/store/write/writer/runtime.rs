@@ -230,7 +230,10 @@ fn group_commit_drain_budget_remaining(drained: u32, extra_budget: u32) -> bool 
 ///
 /// Returned by [`WriterCore::drive_command`] in place of the bare `return`s the
 /// per-command body used to perform directly in `writer_loop`.
-enum DriveStep {
+///
+/// `pub(super)` so the cooperative pump in the parent `writer` module can match
+/// on the step exactly as `writer_loop` does on the threaded path.
+pub(super) enum DriveStep {
     Continue,
     Exit,
 }
@@ -243,7 +246,10 @@ impl WriterCore {
     ///
     /// `events_since_sync` is threaded by `&mut` so its count persists across
     /// commands exactly as it did when this body lived inline in `writer_loop`.
-    fn drive_command(
+    ///
+    /// `pub(super)` so the cooperative pump in the parent `writer` module can
+    /// run the identical per-command pipeline inline on the calling thread.
+    pub(super) fn drive_command(
         &mut self,
         rx: &Receiver<WriterCommand>,
         validated_cfg: &ValidatedStoreConfig,

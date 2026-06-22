@@ -1,15 +1,33 @@
+#[cfg(feature = "dangerous-test-hooks")]
+use super::CooperativePump;
 use super::{AppendReceipt, AppendReply, BatchAppendReply, StoreError};
 
 struct Ticket<T> {
     rx: flume::Receiver<Result<T, StoreError>>,
+    /// Cooperative-mode pump, or `None` on the threaded path. When present,
+    /// `wait` drains the writer queue inline before blocking on the receive, so
+    /// the awaited reply is already produced (there is no writer thread). Only
+    /// exists under `dangerous-test-hooks`, where cooperative mode is available.
+    #[cfg(feature = "dangerous-test-hooks")]
+    pump: Option<CooperativePump>,
 }
 
 impl<T> Ticket<T> {
+    #[cfg(feature = "dangerous-test-hooks")]
+    fn new(rx: flume::Receiver<Result<T, StoreError>>, pump: Option<CooperativePump>) -> Self {
+        Self { rx, pump }
+    }
+
+    #[cfg(not(feature = "dangerous-test-hooks"))]
     fn new(rx: flume::Receiver<Result<T, StoreError>>) -> Self {
         Self { rx }
     }
 
     fn wait(self) -> Result<T, StoreError> {
+        #[cfg(feature = "dangerous-test-hooks")]
+        if let Some(pump) = &self.pump {
+            pump.pump();
+        }
         crate::store::recv_writer_reply(&self.rx)
     }
 
@@ -33,6 +51,14 @@ pub struct AppendTicket {
 }
 
 impl AppendTicket {
+    #[cfg(feature = "dangerous-test-hooks")]
+    pub(crate) fn new(rx: flume::Receiver<AppendReply>, pump: Option<CooperativePump>) -> Self {
+        Self {
+            inner: Ticket::new(rx, pump),
+        }
+    }
+
+    #[cfg(not(feature = "dangerous-test-hooks"))]
     pub(crate) fn new(rx: flume::Receiver<AppendReply>) -> Self {
         Self {
             inner: Ticket::new(rx),
@@ -66,6 +92,17 @@ pub struct BatchAppendTicket {
 }
 
 impl BatchAppendTicket {
+    #[cfg(feature = "dangerous-test-hooks")]
+    pub(crate) fn new(
+        rx: flume::Receiver<BatchAppendReply>,
+        pump: Option<CooperativePump>,
+    ) -> Self {
+        Self {
+            inner: Ticket::new(rx, pump),
+        }
+    }
+
+    #[cfg(not(feature = "dangerous-test-hooks"))]
     pub(crate) fn new(rx: flume::Receiver<BatchAppendReply>) -> Self {
         Self {
             inner: Ticket::new(rx),

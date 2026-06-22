@@ -1,3 +1,5 @@
+#[cfg(feature = "dangerous-test-hooks")]
+use super::writer::CooperativePump;
 use super::writer::{AppendGuards, WriterCommand, WriterHandle};
 use crate::store::{AppendReceipt, StoreError};
 

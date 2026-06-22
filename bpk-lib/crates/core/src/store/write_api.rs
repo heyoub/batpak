@@ -36,6 +36,9 @@ impl Store<Open> {
             }
             return Err(StoreError::WriterCrashed);
         }
+        // Cooperative mode: drive the queued command inline before awaiting its
+        // reply (no-op under the threaded path).
+        self.writer_handle()?.pump();
         recv_writer_reply(&rx)?;
         Ok(VisibilityFence::new(self, token))
     }

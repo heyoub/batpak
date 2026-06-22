@@ -57,6 +57,9 @@ fn append_close_completed_event(store: &Store<Open>) -> Result<(), StoreError> {
         .tx
         .send(command)
         .map_err(|_| StoreError::WriterCrashed)?;
+    // Cooperative mode: drive the queued command inline before awaiting its
+    // reply (no-op under the threaded path).
+    store.writer_handle()?.pump();
     crate::store::recv_writer_reply(&rx)?;
     Ok(())
 }
@@ -69,6 +72,9 @@ pub(crate) fn sync(store: &Store<Open>) -> Result<(), StoreError> {
         .tx
         .send(crate::store::write::writer::WriterCommand::Sync { respond: tx })
         .map_err(|_| StoreError::WriterCrashed)?;
+    // Cooperative mode: drive the queued command inline before awaiting its
+    // reply (no-op under the threaded path).
+    store.writer_handle()?.pump();
     crate::store::recv_writer_reply(&rx)
 }
 
@@ -747,6 +753,9 @@ pub(crate) fn close(mut store: Store<Open>) -> Result<Closed, StoreError> {
         .tx
         .send(crate::store::write::writer::WriterCommand::Shutdown { respond: tx })
         .map_err(|_| StoreError::WriterCrashed)?;
+    // Cooperative mode: drive the Shutdown command (and its drain) inline before
+    // awaiting the reply (no-op under the threaded path).
+    store.writer_handle()?.pump();
     let result = crate::store::recv_writer_reply(&rx);
 
     result?;

@@ -138,6 +138,9 @@ impl<'a> VisibilityFence<'a> {
             })
             .map_err(|_| StoreError::WriterCrashed)?;
         self.closed = true;
+        // Cooperative mode: drive the queued command inline before awaiting its
+        // reply (no-op under the threaded path).
+        self.store.writer_handle()?.pump();
         crate::store::recv_writer_reply(&rx)
     }
 
@@ -159,6 +162,9 @@ impl<'a> VisibilityFence<'a> {
             })
             .map_err(|_| StoreError::WriterCrashed)?;
         self.closed = true;
+        // Cooperative mode: drive the queued command inline before awaiting its
+        // reply (no-op under the threaded path).
+        self.store.writer_handle()?.pump();
         crate::store::recv_writer_reply(&rx)
     }
 }

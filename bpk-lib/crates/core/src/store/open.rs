@@ -308,6 +308,9 @@ fn append_open_completed_event(
         .tx
         .send(command)
         .map_err(|_| StoreError::WriterCrashed)?;
+    // Cooperative mode: drive the queued command inline before awaiting its
+    // reply (no-op under the threaded path, so production is unaffected).
+    store.writer_handle()?.pump();
     let receipt = recv_writer_reply(&rx)?;
     let receipt_event_id_raw = {
         use crate::id::EntityIdType;
@@ -339,6 +342,29 @@ impl Store<Open> {
     /// Returns `StoreError::Io` if the data directory cannot be created or segments cannot be read.
     pub fn open(config: StoreConfig) -> Result<Self, StoreError> {
         Self::open_with_cache(config, Box::new(NoCache))
+    }
+
+    /// Test-only: open a store in cooperative (single-threaded) writer mode.
+    ///
+    /// There is NO writer thread — the writer pipeline runs inline on the
+    /// calling thread, driven by pumping the command queue at every reply-await
+    /// funnel. Exposed under `dangerous-test-hooks` because [`WriterMode`] and
+    /// its builder are crate-internal; this is not a public API surface.
+    ///
+    /// # Errors
+    /// Same as [`Store::open`].
+    ///
+    /// [`WriterMode`]: crate::store::config::WriterMode
+    #[cfg(feature = "dangerous-test-hooks")]
+    #[cfg_attr(
+        all(docsrs, not(batpak_stable_docs)),
+        doc(cfg(feature = "dangerous-test-hooks"))
+    )]
+    pub fn open_cooperative(config: StoreConfig) -> Result<Self, StoreError> {
+        Self::open_with_cache(
+            config.with_writer_mode(crate::store::config::WriterMode::Cooperative),
+            Box::new(NoCache),
+        )
     }
 
     /// Open a store with the built-in file-backed projection cache.
@@ -377,14 +403,25 @@ impl Store<Open> {
         let open_candidate = bootstrap_open_hlc(&runtime, &index)?;
         let subscribers = Arc::new(SubscriberList::new());
         let reactor_subscribers = Arc::new(ReactorSubscriberList::new());
-        let writer = WriterHandle::spawn(
-            &config,
-            &runtime,
-            &index,
-            &subscribers,
-            &reactor_subscribers,
-            &reader,
-        )?;
+        let writer = match config.writer_mode() {
+            crate::store::config::WriterMode::Threaded => WriterHandle::spawn(
+                &config,
+                &runtime,
+                &index,
+                &subscribers,
+                &reactor_subscribers,
+                &reader,
+            )?,
+            #[cfg(feature = "dangerous-test-hooks")]
+            crate::store::config::WriterMode::Cooperative => WriterHandle::cooperative(
+                &config,
+                &runtime,
+                &index,
+                &subscribers,
+                &reactor_subscribers,
+                &reader,
+            )?,
+        };
         let watermark_handle = writer.watermark_handle();
         let projection_registry = ProjectionRegistry::new(watermark_handle.clone());
 

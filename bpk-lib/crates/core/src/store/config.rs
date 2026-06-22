@@ -16,6 +16,7 @@ mod types;
 mod validation;
 
 pub use crate::store::index::idemp::{IdempotencyRetention, OverflowPolicy};
+pub(crate) use types::WriterMode;
 pub use types::{
     BatchConfig, IndexConfig, IndexTopology, OpenReportObserver, SyncConfig, SyncMode, WriterConfig,
 };
@@ -40,6 +41,8 @@ pub struct StoreConfig {
     pub(crate) batch: BatchConfig,
     /// Writer thread channel, stack, restart, and shutdown-drain configuration.
     pub(crate) writer: WriterConfig,
+    /// How the writer pipeline is driven (threaded vs. cooperative inline).
+    pub(crate) writer_mode: WriterMode,
     /// fsync strategy and cadence.
     pub(crate) sync: SyncConfig,
     /// Secondary query index topology, projection, and checkpoint configuration.
@@ -88,6 +91,7 @@ impl StoreConfig {
             single_append_max_bytes: 16 * 1024 * 1024,
             batch: BatchConfig::default(),
             writer: WriterConfig::default(),
+            writer_mode: WriterMode::default(),
             sync: SyncConfig::default(),
             index: IndexConfig::default(),
             clock: None,
@@ -371,6 +375,23 @@ impl StoreConfig {
         &self.spawner
     }
 
+    /// Select how the writer pipeline is driven.
+    ///
+    /// Production uses the default [`WriterMode::Threaded`] (a dedicated writer
+    /// thread). The cooperative mode runs the writer inline on the calling
+    /// thread with NO writer thread, for deterministic simulation, and is only
+    /// available under `dangerous-test-hooks`.
+    #[cfg(feature = "dangerous-test-hooks")]
+    pub(crate) fn with_writer_mode(mut self, writer_mode: WriterMode) -> Self {
+        self.writer_mode = writer_mode;
+        self
+    }
+
+    /// How the writer pipeline is driven.
+    pub(crate) fn writer_mode(&self) -> WriterMode {
+        self.writer_mode
+    }
+
     /// Install a custom filesystem backend for store data-path operations.
     ///
     /// Production uses the default [`RealFs`] (every op delegates to `std::fs`).
@@ -418,6 +439,7 @@ impl Clone for StoreConfig {
             single_append_max_bytes: self.single_append_max_bytes,
             batch: self.batch.clone(),
             writer: self.writer.clone(),
+            writer_mode: self.writer_mode,
             sync: self.sync.clone(),
             index: self.index.clone(),
             clock: self.clock.clone(),
@@ -443,6 +465,7 @@ impl std::fmt::Debug for StoreConfig {
             .field("single_append_max_bytes", &self.single_append_max_bytes)
             .field("batch", &self.batch)
             .field("writer", &self.writer)
+            .field("writer_mode", &self.writer_mode)
             .field("sync", &self.sync)
             .field("index", &self.index)
             .field("clock", &self.clock.as_ref().map(|_| "<clock>"))

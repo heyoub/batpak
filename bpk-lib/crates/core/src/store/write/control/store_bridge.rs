@@ -30,11 +30,18 @@ impl Store<Open> {
             },
             None => WriterCommand::AppendBatch { items, respond: tx },
         };
-        self.writer_handle()?
+        let handle = self.writer_handle()?;
+        #[cfg(feature = "dangerous-test-hooks")]
+        let pump = handle.cooperative_pump();
+        handle
             .tx
             .send(command)
             .map_err(|_| StoreError::WriterCrashed)?;
-        Ok(BatchAppendTicket::new(rx))
+        #[cfg(feature = "dangerous-test-hooks")]
+        let ticket = BatchAppendTicket::new(rx, pump);
+        #[cfg(not(feature = "dangerous-test-hooks"))]
+        let ticket = BatchAppendTicket::new(rx);
+        Ok(ticket)
     }
 
     /// Reject any batch item carrying a reserved system/effect/tombstone kind.
@@ -107,12 +114,19 @@ impl Store<Open> {
 
         let (tx, rx) = flume::bounded(1);
         let command = submission.into_command(coord.clone(), kind, event, tx);
-        self.writer_handle()?
+        let handle = self.writer_handle()?;
+        #[cfg(feature = "dangerous-test-hooks")]
+        let pump = handle.cooperative_pump();
+        handle
             .tx
             .send(command)
             .map_err(|_| StoreError::WriterCrashed)?;
 
-        Ok(AppendTicket::new(rx))
+        #[cfg(feature = "dangerous-test-hooks")]
+        let ticket = AppendTicket::new(rx, pump);
+        #[cfg(not(feature = "dangerous-test-hooks"))]
+        let ticket = AppendTicket::new(rx);
+        Ok(ticket)
     }
 
     pub(crate) fn writer_handle(&self) -> Result<&WriterHandle, StoreError> {

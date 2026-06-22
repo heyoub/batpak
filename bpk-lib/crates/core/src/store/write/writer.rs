@@ -35,6 +35,8 @@ mod watermark;
 pub(crate) use self::append::AppendGuards;
 use self::fence_runtime::{CommandResult, DeferredReply, FenceLedger};
 pub(crate) use self::runtime::find_latest_segment_id;
+#[cfg(feature = "dangerous-test-hooks")]
+use self::runtime::DriveStep;
 use self::runtime::{writer_thread_main, writer_thread_name, WriterRuntime};
 pub(crate) use self::watermark::{WatermarkAdvanceHandle, WatermarkState};
 
@@ -118,9 +120,69 @@ pub(crate) struct WriterHandle {
     drive: WriterDrive,
 }
 
-/// How the writer is driven. Single-variant today; a cooperative variant lands
-/// in a later step. Wrapping the thread handle in an enum now keeps that change
-/// localized.
+/// Writer state owned by the cooperative pump: the same [`WriterCore`] the
+/// spawned writer thread owns, plus the `events_since_sync` counter the threaded
+/// path keeps as a `writer_loop` local. Bundled so the [`Mutex`] guards a single
+/// unit and the pump can split-borrow both halves through one lock.
+#[cfg(feature = "dangerous-test-hooks")]
+struct CoopState {
+    core: WriterCore,
+    events_since_sync: u32,
+}
+
+/// Cheap-clone handle that drives the writer inline by draining the command
+/// queue on the calling thread. There is NO writer thread in cooperative mode.
+///
+/// Single-threaded by construction: the only caller is the reply-await funnel,
+/// which pumps before it blocks on a receive. The `Mutex` exists purely for the
+/// `Send + Sync` soundness the handle needs (it is stored in the `WriterHandle`
+/// and reached from `Store` methods), mirroring `SimScheduler`; it is never
+/// actually contended.
+#[cfg(feature = "dangerous-test-hooks")]
+#[derive(Clone)]
+pub(crate) struct CooperativePump {
+    state: std::sync::Arc<std::sync::Mutex<CoopState>>,
+    // flume `Receiver` is `Clone` (a shared consumer), so cloning the pump shares
+    // the one command queue rather than forking it.
+    rx: Receiver<WriterCommand>,
+    validated_cfg: Arc<ValidatedStoreConfig>,
+    config: Arc<StoreConfig>,
+}
+
+#[cfg(feature = "dangerous-test-hooks")]
+impl CooperativePump {
+    /// Drain every currently-queued command through the shared drive, inline on
+    /// the calling thread. Single-threaded by construction; the lock recovery
+    /// (`PoisonError::into_inner`) is the established lint-clean pattern from
+    /// `sim/scheduler.rs` and is never reached because the lock is uncontended.
+    pub(crate) fn pump(&self) {
+        let mut guard = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        // Split borrow: hand `drive_command` a `&mut WriterCore` and a
+        // `&mut u32` from the same guard without re-borrowing the whole struct.
+        let CoopState {
+            core,
+            events_since_sync,
+        } = &mut *guard;
+        while let Ok(cmd) = self.rx.try_recv() {
+            if let DriveStep::Exit = core.drive_command(
+                &self.rx,
+                &self.validated_cfg,
+                &self.config,
+                events_since_sync,
+                cmd,
+            ) {
+                break;
+            }
+        }
+    }
+}
+
+/// How the writer is driven. The production threaded path is byte-identical to
+/// before; the cooperative path (only present under `dangerous-test-hooks`)
+/// drives the writer inline with no thread.
 pub(crate) enum WriterDrive {
     /// Production: the writer runs on a spawned thread (OS thread, or a
     /// SimScheduler task). `None` only for the test-only `from_parts_for_test`
@@ -128,6 +190,20 @@ pub(crate) enum WriterDrive {
     Threaded {
         thread: Option<Box<dyn crate::store::platform::spawn::SimJoin>>,
     },
+    /// Single-threaded: no writer thread; the queue is pumped inline.
+    #[cfg(feature = "dangerous-test-hooks")]
+    Cooperative { pump: CooperativePump },
+}
+
+impl WriterDrive {
+    /// Pump the cooperative queue if cooperative; a no-op on the threaded path.
+    fn pump(&self) {
+        match self {
+            WriterDrive::Threaded { .. } => {}
+            #[cfg(feature = "dangerous-test-hooks")]
+            WriterDrive::Cooperative { pump } => pump.pump(),
+        }
+    }
 }
 
 /// RestartPolicy: how the writer recovers from panics.
@@ -216,6 +292,78 @@ impl WriterHandle {
         })
     }
 
+    /// Build a cooperative (single-threaded) writer handle. Mirrors [`spawn`]'s
+    /// fallible init and field wiring exactly, but builds the [`WriterCore`]
+    /// directly into a shared [`CooperativePump`] instead of spawning a thread.
+    /// NO thread is spawned and `config.spawner()` is never consulted.
+    ///
+    /// A panic inside a pumped command propagates to the pumping caller (there is
+    /// no `catch_unwind` restart loop in cooperative mode); that is acceptable
+    /// for the deterministic simulation this mode serves.
+    ///
+    /// [`spawn`]: Self::spawn
+    #[cfg(feature = "dangerous-test-hooks")]
+    pub(crate) fn cooperative(
+        config: &Arc<StoreConfig>,
+        runtime: &Arc<ValidatedStoreConfig>,
+        index: &Arc<StoreIndex>,
+        subscribers: &Arc<SubscriberList>,
+        reactor_subscribers: &Arc<ReactorSubscriberList>,
+        reader: &Arc<crate::store::segment::scan::Reader>,
+    ) -> Result<Self, StoreError> {
+        // Fallible init — identical to `spawn`, propagate errors to the caller.
+        config
+            .fs()
+            .create_dir_all(&config.data_dir)
+            .map_err(StoreError::Io)?;
+        let initial_segment_id = find_latest_segment_id(&config.data_dir)?.unwrap_or(0) + 1;
+        let initial_segment = Segment::<Active>::create_with_created_ns_on(
+            &config.data_dir,
+            initial_segment_id,
+            runtime.now_wall_ns(),
+            config.fs(),
+        )?;
+
+        let (tx, rx) = flume::bounded::<WriterCommand>(config.writer.channel_capacity);
+        let watermark_handle = WatermarkState::handle(runtime.clock_arc());
+
+        // Build the core directly — the same field wiring the `spawn` closure
+        // performs inside `writer_loop`, just constructed here and owned by the
+        // pump rather than a thread.
+        let core = WriterCore {
+            index: Arc::clone(index),
+            active_segment: initial_segment,
+            segment_id: initial_segment_id,
+            config: Arc::clone(config),
+            runtime: Arc::clone(runtime),
+            subscribers: Arc::clone(subscribers),
+            reactor_subscribers: Arc::clone(reactor_subscribers),
+            reader: Arc::clone(reader),
+            watermark_handle: watermark_handle.clone(),
+            sidx_collector: crate::store::segment::sidx::SidxEntryCollector::new(),
+            fence_ledger: None,
+        };
+        let state = std::sync::Arc::new(std::sync::Mutex::new(CoopState {
+            core,
+            events_since_sync: 0,
+        }));
+
+        Ok(Self {
+            tx,
+            subscribers: Arc::clone(subscribers),
+            reactor_subscribers: Arc::clone(reactor_subscribers),
+            watermark_handle,
+            drive: WriterDrive::Cooperative {
+                pump: CooperativePump {
+                    state,
+                    rx,
+                    validated_cfg: Arc::clone(runtime),
+                    config: Arc::clone(config),
+                },
+            },
+        })
+    }
+
     #[cfg(test)]
     pub(crate) fn from_parts_for_test(
         tx: Sender<WriterCommand>,
@@ -235,23 +383,59 @@ impl WriterHandle {
     }
 
     pub(crate) fn fail_if_exited(&self) -> Result<(), StoreError> {
-        let WriterDrive::Threaded { thread } = &self.drive;
-        if thread.as_ref().is_some_and(|thread| thread.is_finished()) {
-            self.watermark_handle.mark_writer_crashed();
-            return Err(StoreError::WriterCrashed);
+        match &self.drive {
+            WriterDrive::Threaded { thread } => {
+                if thread.as_ref().is_some_and(|thread| thread.is_finished()) {
+                    self.watermark_handle.mark_writer_crashed();
+                    return Err(StoreError::WriterCrashed);
+                }
+                Ok(())
+            }
+            // No thread to exit: the writer runs inline on the calling thread, so
+            // it cannot become a zombie. A command panic would unwind the pumping
+            // caller rather than silently leaving a dead writer behind.
+            #[cfg(feature = "dangerous-test-hooks")]
+            WriterDrive::Cooperative { .. } => Ok(()),
         }
-        Ok(())
     }
 
     pub(crate) fn join(&mut self) -> Result<(), StoreError> {
-        let WriterDrive::Threaded { thread } = &mut self.drive;
-        if let Some(thread) = thread.take() {
-            thread.join().map_err(|_| {
-                self.watermark_handle.mark_writer_crashed();
-                StoreError::WriterCrashed
-            })?;
+        match &mut self.drive {
+            WriterDrive::Threaded { thread } => {
+                if let Some(thread) = thread.take() {
+                    thread.join().map_err(|_| {
+                        self.watermark_handle.mark_writer_crashed();
+                        StoreError::WriterCrashed
+                    })?;
+                }
+                Ok(())
+            }
+            // No thread to join; pump once to drain any commands queued behind the
+            // Shutdown so the inline writer reaches quiescence, then return.
+            #[cfg(feature = "dangerous-test-hooks")]
+            WriterDrive::Cooperative { pump } => {
+                pump.pump();
+                Ok(())
+            }
         }
-        Ok(())
+    }
+
+    /// Pump the writer's command queue. No-op on the threaded path (the writer
+    /// thread is already draining the queue); on the cooperative path it drives
+    /// every currently-queued command inline before the caller awaits a reply.
+    pub(crate) fn pump(&self) {
+        self.drive.pump();
+    }
+
+    /// The cooperative pump handle, cloned, when running cooperatively; `None`
+    /// on the threaded path. Used to thread the pump into [`super::control`]
+    /// tickets so `Ticket::wait` can drain the queue before blocking.
+    #[cfg(feature = "dangerous-test-hooks")]
+    pub(crate) fn cooperative_pump(&self) -> Option<CooperativePump> {
+        match &self.drive {
+            WriterDrive::Threaded { .. } => None,
+            WriterDrive::Cooperative { pump } => Some(pump.clone()),
+        }
     }
 
     /// Test-only: abandon the writer the way a power loss would — close its
@@ -270,9 +454,15 @@ impl WriterHandle {
         let (dead_tx, _dead_rx) = flume::bounded(0);
         let live_tx = std::mem::replace(&mut self.tx, dead_tx);
         drop(live_tx);
-        let WriterDrive::Threaded { thread } = &mut self.drive;
-        if let Some(thread) = thread.take() {
-            let _join_result = thread.join();
+        match &mut self.drive {
+            WriterDrive::Threaded { thread } => {
+                if let Some(thread) = thread.take() {
+                    let _join_result = thread.join();
+                }
+            }
+            // No thread to join; pump to drive any already-queued commands to
+            // quiescence. The dropped `tx` means no new commands can arrive.
+            WriterDrive::Cooperative { pump } => pump.pump(),
         }
     }
 

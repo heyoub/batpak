@@ -6,6 +6,27 @@ use std::sync::Arc;
 /// User-supplied hook fired after a successful store open completes.
 pub type OpenReportObserver = Arc<dyn Fn(&OpenIndexReport) + Send + Sync>;
 
+/// How the writer pipeline is driven.
+///
+/// `Threaded` is the production default: a dedicated OS (or sim) thread owns the
+/// writer state and pulls commands off the channel. `Cooperative` runs the
+/// writer inline on the calling thread — there is NO writer thread; the command
+/// queue is pumped whenever a reply is awaited. Cooperative drive is a
+/// deterministic-simulation primitive, kept `pub(crate)` (not public API).
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) enum WriterMode {
+    /// Production: the writer runs on a spawned thread.
+    #[default]
+    Threaded,
+    /// Single-threaded: the writer is driven inline by pumping the queue.
+    ///
+    /// Only constructible under `dangerous-test-hooks` (via
+    /// `StoreConfig::with_writer_mode` / `Store::open_cooperative`): cooperative
+    /// drive is a deterministic-simulation primitive, not a production path.
+    #[cfg(feature = "dangerous-test-hooks")]
+    Cooperative,
+}
+
 /// Sync strategy for segment fsync.
 #[derive(Clone, Debug, Default)]
 pub enum SyncMode {
