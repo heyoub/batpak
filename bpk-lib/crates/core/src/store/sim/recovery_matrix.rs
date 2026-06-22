@@ -538,7 +538,7 @@ pub(crate) fn all_modes() -> Vec<FaultMode> {
 
 // ── Test-only public surface, re-exported (doc-hidden) at `batpak::__sim`. ──
 
-/// Doc-hidden public mirror of [`Classification`] for the integration test.
+/// Doc-hidden public mirror of `Classification` for the integration test.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecoveredClass {
     /// Reopened cleanly with a legal non-empty recovered prefix.
@@ -588,7 +588,7 @@ fn mode_label(mode: FaultMode) -> String {
 
 /// Test-only entry point re-exported (doc-hidden) at `batpak::__sim`: sweep the
 /// FULL hostile-fs fault matrix for `seed` and return one [`MatrixCell`] per
-/// cell. Each cell's legality oracle fail-closes inside [`run`].
+/// cell. Each cell's legality oracle fail-closes inside `run`.
 ///
 /// # Errors
 /// Returns a seed/mode-tagged violation string on the first illegal cell.

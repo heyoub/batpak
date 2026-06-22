@@ -259,16 +259,13 @@ pub fn segment_filename(segment_id: u64) -> String {
 }
 
 impl Segment<Active> {
-    /// Create new active segment over the production [`RealFs`] filesystem.
+    /// Create new active segment over the production `RealFs` filesystem.
     ///
-    /// Public convenience over [`Segment::create_with_created_ns_on`]: it pins the
-    /// production [`RealFs`] backend so the public signature does not expose the
-    /// crate-private [`StoreFs`] seam. The store's writer/lifecycle paths call the
+    /// Public convenience over `Segment::create_with_created_ns_on`: it pins the
+    /// production `RealFs` backend so the public signature does not expose the
+    /// crate-private `StoreFs` seam. The store's writer/lifecycle paths call the
     /// fs-bearing variant directly so a deterministic-simulation backend can
     /// interpose on the create + fsync durability boundary.
-    ///
-    /// [`RealFs`]: crate::store::platform::fs::RealFs
-    /// [`StoreFs`]: crate::store::platform::fs::StoreFs
     ///
     /// # Errors
     /// Returns `StoreError::Io` if the segment file cannot be created or the header cannot be written.

@@ -406,7 +406,7 @@ pub fn recovery_replay_seed(default: u64) -> u64 {
     seed_from_env(default)
 }
 
-/// Doc-hidden public mirror of [`RecoveryOutcome`] for the integration test.
+/// Doc-hidden public mirror of `RecoveryOutcome` for the integration test.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecoveryOutcomePublic {
     /// FNV-1a digest folding the op-trace and recovered visible state.

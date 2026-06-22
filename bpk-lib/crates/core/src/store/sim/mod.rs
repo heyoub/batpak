@@ -108,7 +108,7 @@ impl Sim {
     }
 }
 
-/// Test-only entry point: build a [`Sim`] from `seed` and run a `steps`-long
+/// Test-only entry point: build a `Sim` from `seed` and run a `steps`-long
 /// seeded workload, returning the op-trace digest (or a seed-tagged invariant
 /// violation string). Re-exported (doc-hidden) at the crate root as
 /// `batpak::__sim::run_seeded_workload` so the `sim_is_deterministic`
@@ -124,7 +124,7 @@ pub fn run_seeded_workload(seed: u64, steps: usize) -> Result<u64, String> {
     Sim::new(seed).run_workload(steps)
 }
 
-/// Test-only re-export of [`seed_from_env`] for `BATPAK_SEED` replay from
+/// Test-only re-export of `seed_from_env` for `BATPAK_SEED` replay from
 /// integration tests.
 pub fn replay_seed(default: u64) -> u64 {
     seed_from_env(default)

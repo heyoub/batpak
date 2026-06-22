@@ -4,10 +4,10 @@
 //! Two independent modes live here, each behind its own off-by-default Cargo
 //! feature so a normal build never compiles either one:
 //!
-//! - [`CountingAlloc`] (`alloc-count`): wraps [`System`] and records the number
+//! - `CountingAlloc` (`alloc-count`): wraps `System` and records the number
 //!   of `alloc`/`realloc`/`dealloc` calls in process-wide atomics. Used to gate
 //!   a hot path against an allocation budget (GAUNT-PERF-5a).
-//! - [`FailingAlloc`] (`fault-alloc`): wraps [`System`] and returns null (an
+//! - `FailingAlloc` (`fault-alloc`): wraps `System` and returns null (an
 //!   allocation failure) starting at the Kth allocation. Used to exercise OOM
 //!   handling paths deterministically.
 //!
@@ -18,7 +18,7 @@
 //! itself. Therefore each must be used from a DEDICATED single-test binary
 //! (its own `tests/<name>.rs`), never alongside unrelated tests in the same
 //! binary, or the counters/fault state will be polluted by foreign
-//! allocations. The provided [`CountingAlloc::scope`] guard narrows a count to
+//! allocations. The provided `CountingAlloc::scope` guard narrows a count to
 //! the closure body, but the binary must still be dedicated to keep
 //! cross-thread noise out.
 
