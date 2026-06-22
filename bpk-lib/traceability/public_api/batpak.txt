@@ -1137,6 +1137,8 @@ pub batpak::prelude::StoreError::IdempotencyOverflowFailClosed::max_keys: u64
 pub batpak::prelude::StoreError::IdempotencyPartialBatch
 pub batpak::prelude::StoreError::IdempotencyPartialBatch::reason: alloc::string::String
 pub batpak::prelude::StoreError::IdempotencyRequired
+pub batpak::prelude::StoreError::InternerExhausted
+pub batpak::prelude::StoreError::InternerExhausted::count: u64
 pub batpak::prelude::StoreError::InvalidCausation
 pub batpak::prelude::StoreError::InvalidCausation::item_index: usize
 pub batpak::prelude::StoreError::InvalidCausation::prior_idx: usize
@@ -1266,6 +1268,9 @@ impl batpak::prelude::AppendReceipt
 pub const fn batpak::prelude::AppendReceipt::disk_pos(&self) -> batpak::store::index::DiskPos
 pub fn batpak::prelude::AppendReceipt::signing_downgrade(&self) -> core::option::Option<batpak::store::SigningDowngradeBody>
 pub struct batpak::prelude::Closed
+impl batpak::store::StoreState for batpak::store::Closed
+pub fn batpak::store::Closed::shutdown_writer(&mut self, _should_shutdown: bool)
+pub fn batpak::store::Closed::writer_queue_len(&self) -> core::option::Option<usize>
 pub struct batpak::prelude::Coordinate
 impl batpak::coordinate::Coordinate
 pub fn batpak::coordinate::Coordinate::entity(&self) -> &str
@@ -1386,12 +1391,18 @@ pub struct batpak::prelude::JsonValueInput
 impl batpak::event::sourcing::ProjectionInput for batpak::event::sourcing::JsonValueInput
 pub type batpak::event::sourcing::JsonValueInput::Payload = serde_json::value::Value
 pub const batpak::event::sourcing::JsonValueInput::MODE: batpak::event::sourcing::ReplayLane
-pub struct batpak::prelude::Open
+pub struct batpak::prelude::Open(_)
+impl batpak::store::StoreState for batpak::store::Open
+pub fn batpak::store::Open::shutdown_writer(&mut self, should_shutdown: bool)
+pub fn batpak::store::Open::writer_queue_len(&self) -> core::option::Option<usize>
 pub struct batpak::prelude::RawMsgpackInput
 impl batpak::event::sourcing::ProjectionInput for batpak::event::sourcing::RawMsgpackInput
 pub type batpak::event::sourcing::RawMsgpackInput::Payload = alloc::vec::Vec<u8>
 pub const batpak::event::sourcing::RawMsgpackInput::MODE: batpak::event::sourcing::ReplayLane
 pub struct batpak::prelude::ReadOnly
+impl batpak::store::StoreState for batpak::store::ReadOnly
+pub fn batpak::store::ReadOnly::shutdown_writer(&mut self, _should_shutdown: bool)
+pub fn batpak::store::ReadOnly::writer_queue_len(&self) -> core::option::Option<usize>
 pub struct batpak::prelude::Region
 impl batpak::coordinate::Region
 pub fn batpak::coordinate::Region::all() -> Self
@@ -1408,12 +1419,12 @@ pub fn batpak::coordinate::Region::with_fact(self, filter: batpak::coordinate::K
 pub fn batpak::coordinate::Region::with_fact_category(self, cat: u8) -> Self
 pub fn batpak::coordinate::Region::with_lane(self, lane: u32) -> Self
 pub fn batpak::coordinate::Region::with_scope(self, scope: impl core::convert::AsRef<str>) -> Self
-pub struct batpak::prelude::Store<State>
+pub struct batpak::prelude::Store<State: batpak::store::StoreState>
 impl batpak::store::Store<batpak::store::Open>
 pub fn batpak::store::Store<batpak::store::Open>::append(&self, coord: &batpak::coordinate::Coordinate, kind: batpak::event::kind::EventKind, payload: &impl serde_core::ser::Serialize) -> core::result::Result<batpak::prelude::AppendReceipt, batpak::prelude::StoreError>
 pub fn batpak::store::Store<batpak::store::Open>::append_batch(&self, items: alloc::vec::Vec<batpak::store::BatchAppendItem>) -> core::result::Result<alloc::vec::Vec<batpak::prelude::AppendReceipt>, batpak::prelude::StoreError>
 pub fn batpak::store::Store<batpak::store::Open>::append_batch_with_options(&self, items: alloc::vec::Vec<batpak::store::BatchAppendItem>, opts: batpak::prelude::AppendOptions) -> core::result::Result<alloc::vec::Vec<batpak::prelude::AppendReceipt>, batpak::prelude::StoreError>
-pub fn batpak::store::Store<batpak::store::Open>::append_denial<Ctx>(&self, coord: &batpak::coordinate::Coordinate, proposed_kind: batpak::event::kind::EventKind, gate_set: &batpak::guard::GateSet<Ctx>, failing: &batpak::guard::denial::Denial, proposed_content_hash: core::option::Option<[u8; 32]>, pipeline_id: core::option::Option<alloc::string::String>, options: batpak::prelude::AppendOptions) -> core::result::Result<batpak::store::DenialReceipt, batpak::prelude::StoreError>
+pub fn batpak::store::Store<batpak::store::Open>::append_denial<Ctx>(&self, request: batpak::store::DenialRequest<'_, Ctx>) -> core::result::Result<batpak::store::DenialReceipt, batpak::prelude::StoreError>
 pub fn batpak::store::Store<batpak::store::Open>::append_reaction(&self, coord: &batpak::coordinate::Coordinate, kind: batpak::event::kind::EventKind, payload: &impl serde_core::ser::Serialize, correlation_id: batpak::id::CorrelationId, causation_id: batpak::id::CausationId) -> core::result::Result<batpak::prelude::AppendReceipt, batpak::prelude::StoreError>
 pub fn batpak::store::Store<batpak::store::Open>::append_reaction_batch(&self, correlation_id: batpak::id::CorrelationId, causation_id: batpak::id::CausationId, items: alloc::vec::Vec<batpak::store::BatchAppendItem>) -> core::result::Result<alloc::vec::Vec<batpak::prelude::AppendReceipt>, batpak::prelude::StoreError>
 pub fn batpak::store::Store<batpak::store::Open>::append_reaction_typed<T: batpak::event::payload::EventPayload>(&self, coord: &batpak::coordinate::Coordinate, payload: &T, correlation_id: batpak::id::CorrelationId, causation_id: batpak::id::CausationId) -> core::result::Result<batpak::prelude::AppendReceipt, batpak::prelude::StoreError>
@@ -1457,7 +1468,7 @@ pub fn batpak::store::Store<batpak::store::Open>::wait_for_written_lane(&self, l
 impl batpak::store::Store<batpak::store::Open>
 pub fn batpak::store::Store<batpak::store::Open>::cursor_worker<F>(self: &alloc::sync::Arc<Self>, region: &batpak::coordinate::Region, config: batpak::store::CursorWorkerConfig, handler: F) -> core::result::Result<batpak::store::CursorWorkerHandle, batpak::prelude::StoreError> where F: core::ops::function::FnMut(&[batpak::store::index::IndexEntry], &batpak::store::Store<batpak::store::Open>, core::option::Option<&batpak::store::delivery::observation::AtLeastOnce>) -> batpak::store::CursorWorkerAction + core::marker::Send + 'static
 impl batpak::store::Store<batpak::store::Open>
-pub fn batpak::store::Store<batpak::store::Open>::import_events<S>(&self, source: &batpak::store::Store<S>, selector: &batpak::store::ImportSelector, options: &batpak::store::ImportOptions) -> core::result::Result<batpak::store::ImportReport, batpak::prelude::StoreError>
+pub fn batpak::store::Store<batpak::store::Open>::import_events<S: batpak::store::StoreState>(&self, source: &batpak::store::Store<S>, selector: &batpak::store::ImportSelector, options: &batpak::store::ImportOptions) -> core::result::Result<batpak::store::ImportReport, batpak::prelude::StoreError>
 impl batpak::store::Store<batpak::store::Open>
 pub fn batpak::store::Store<batpak::store::Open>::open(config: batpak::prelude::StoreConfig) -> core::result::Result<Self, batpak::prelude::StoreError>
 pub fn batpak::store::Store<batpak::store::Open>::open_with_cache(config: batpak::prelude::StoreConfig, cache: alloc::boxed::Box<dyn batpak::store::projection::ProjectionCache>) -> core::result::Result<Self, batpak::prelude::StoreError>
@@ -1476,7 +1487,7 @@ impl batpak::store::Store<batpak::store::ReadOnly>
 pub fn batpak::store::Store<batpak::store::ReadOnly>::open_read_only(config: batpak::prelude::StoreConfig) -> core::result::Result<Self, batpak::prelude::StoreError>
 pub fn batpak::store::Store<batpak::store::ReadOnly>::open_read_only_with_cache(config: batpak::prelude::StoreConfig, cache: alloc::boxed::Box<dyn batpak::store::projection::ProjectionCache>) -> core::result::Result<Self, batpak::prelude::StoreError>
 pub fn batpak::store::Store<batpak::store::ReadOnly>::open_read_only_with_native_cache(config: batpak::prelude::StoreConfig, cache_path: impl core::convert::AsRef<std::path::Path>) -> core::result::Result<Self, batpak::prelude::StoreError>
-impl<State> batpak::store::Store<State>
+impl<State: batpak::store::StoreState> batpak::store::Store<State>
 pub fn batpak::store::Store<State>::by_entity(&self, entity: &str) -> alloc::vec::Vec<batpak::store::index::IndexEntry>
 pub fn batpak::store::Store<State>::by_entity_lane(&self, entity: &str, lane: u32) -> alloc::vec::Vec<batpak::store::index::IndexEntry>
 pub fn batpak::store::Store<State>::by_fact(&self, kind: batpak::event::kind::EventKind) -> alloc::vec::Vec<batpak::store::index::IndexEntry>
@@ -1501,22 +1512,22 @@ pub fn batpak::store::Store<State>::verify_append_receipt_wire_detailed(&self, e
 pub fn batpak::store::Store<State>::verify_denial_receipt(&self, receipt: &batpak::store::DenialReceipt) -> bool
 pub fn batpak::store::Store<State>::verify_denial_receipt_detailed(&self, receipt: &batpak::store::DenialReceipt) -> batpak::prelude::ReceiptVerification
 pub fn batpak::store::Store<State>::walk_ancestors(&self, event_id: batpak::id::EventId, limit: usize) -> alloc::vec::Vec<batpak::event::StoredEvent<serde_json::value::Value>>
-impl<State> batpak::store::Store<State>
+impl<State: batpak::store::StoreState> batpak::store::Store<State>
 pub fn batpak::store::Store<State>::chain_walk_evidence(&self, request: &batpak::store::ChainWalkRequest) -> core::result::Result<batpak::store::ChainWalkEvidenceReport, batpak::store::ChainWalkReportError>
-impl<State> batpak::store::Store<State>
+impl<State: batpak::store::StoreState> batpak::store::Store<State>
 pub fn batpak::store::Store<State>::diagnostics(&self) -> batpak::store::stats::StoreDiagnostics
 pub fn batpak::store::Store<State>::durable_idempotency_key_count(&self) -> usize
 pub fn batpak::store::Store<State>::stats(&self) -> batpak::store::stats::StoreStats
 pub fn batpak::store::Store<State>::store_resource_evidence_report(&self) -> core::result::Result<batpak::store::StoreResourceEvidenceReport, batpak::store::StoreResourceReportError>
-impl<State> batpak::store::Store<State>
+impl<State: batpak::store::StoreState> batpak::store::Store<State>
 pub fn batpak::store::Store<State>::frontier(&self) -> batpak::store::stats::FrontierView
-impl<State> batpak::store::Store<State>
+impl<State: batpak::store::StoreState> batpak::store::Store<State>
 pub fn batpak::store::Store<State>::project_run_evidence<T>(&self, entity: &str, freshness: &batpak::store::projection::Freshness) -> core::result::Result<(core::option::Option<T>, batpak::store::ProjectionRunEvidenceReport), batpak::store::ProjectionRunReportError> where T: batpak::event::sourcing::EventSourced + serde_core::ser::Serialize + serde_core::de::DeserializeOwned + 'static, <T as batpak::event::sourcing::EventSourced>::Input: crate::store::projection::flow::ReplayInput
-impl<State> batpak::store::Store<State>
+impl<State: batpak::store::StoreState> batpak::store::Store<State>
 pub fn batpak::store::Store<State>::query_with_read_walk_evidence(&self, request: &batpak::store::ReadWalkRequest) -> core::result::Result<(alloc::vec::Vec<batpak::store::index::IndexEntry>, batpak::store::ReadWalkEvidenceReport), batpak::store::ReadWalkReportError>
-impl<State> batpak::store::Store<State>
+impl<State: batpak::store::StoreState> batpak::store::Store<State>
 pub fn batpak::store::Store<State>::subscriber_frontier_observation(&self, request: &batpak::store::SubscriberFrontierRequest) -> core::result::Result<batpak::store::SubscriberFrontierEvidenceReport, batpak::store::SubscriberFrontierReportError>
-impl<State> core::ops::drop::Drop for batpak::store::Store<State>
+impl<State: batpak::store::StoreState> core::ops::drop::Drop for batpak::store::Store<State>
 pub fn batpak::store::Store<State>::drop(&mut self)
 pub struct batpak::prelude::StoreConfig
 impl batpak::prelude::StoreConfig
@@ -2710,7 +2721,7 @@ pub batpak::store::ReceiptVerificationError::SequenceMismatch
 pub batpak::store::ReceiptVerificationError::UnknownSigningKey
 pub batpak::store::ReceiptVerificationError::UnsignedReceiptRejected
 pub batpak::store::ReceiptVerificationError::ZeroKeyWithSignature
-#[non_exhaustive] pub enum batpak::store::RestartPolicy
+pub enum batpak::store::RestartPolicy
 pub batpak::store::RestartPolicy::Bounded
 pub batpak::store::RestartPolicy::Bounded::max_restarts: u32
 pub batpak::store::RestartPolicy::Bounded::within_ms: u64
@@ -2794,6 +2805,8 @@ pub batpak::store::StoreError::IdempotencyOverflowFailClosed::max_keys: u64
 pub batpak::store::StoreError::IdempotencyPartialBatch
 pub batpak::store::StoreError::IdempotencyPartialBatch::reason: alloc::string::String
 pub batpak::store::StoreError::IdempotencyRequired
+pub batpak::store::StoreError::InternerExhausted
+pub batpak::store::StoreError::InternerExhausted::count: u64
 pub batpak::store::StoreError::InvalidCausation
 pub batpak::store::StoreError::InvalidCausation::item_index: usize
 pub batpak::store::StoreError::InvalidCausation::prior_idx: usize
@@ -3076,6 +3089,9 @@ impl batpak::store::delivery::observation::CheckpointId
 pub fn batpak::store::delivery::observation::CheckpointId::as_str(&self) -> &str
 pub fn batpak::store::delivery::observation::CheckpointId::new(value: impl core::convert::Into<alloc::string::String>) -> core::result::Result<Self, batpak::store::delivery::observation::CheckpointIdError>
 pub struct batpak::store::Closed
+impl batpak::store::StoreState for batpak::store::Closed
+pub fn batpak::store::Closed::shutdown_writer(&mut self, _should_shutdown: bool)
+pub fn batpak::store::Closed::writer_queue_len(&self) -> core::option::Option<usize>
 pub struct batpak::store::CompactionConfig
 pub batpak::store::CompactionConfig::min_segments: usize
 pub batpak::store::CompactionConfig::strategy: batpak::store::CompactionStrategy
@@ -3149,6 +3165,14 @@ pub batpak::store::DenialReceipt::sequence: u64
 pub batpak::store::DenialReceipt::signature: core::option::Option<[u8; 64]>
 impl batpak::store::DenialReceipt
 pub const fn batpak::store::DenialReceipt::disk_pos(&self) -> batpak::store::index::DiskPos
+pub struct batpak::store::DenialRequest<'a, Ctx>
+pub batpak::store::DenialRequest::coord: &'a batpak::coordinate::Coordinate
+pub batpak::store::DenialRequest::failing: &'a batpak::guard::denial::Denial
+pub batpak::store::DenialRequest::gate_set: &'a batpak::guard::GateSet<Ctx>
+pub batpak::store::DenialRequest::options: batpak::prelude::AppendOptions
+pub batpak::store::DenialRequest::pipeline_id: core::option::Option<alloc::string::String>
+pub batpak::store::DenialRequest::proposed_content_hash: core::option::Option<[u8; 32]>
+pub batpak::store::DenialRequest::proposed_kind: batpak::event::kind::EventKind
 pub struct batpak::store::DurabilityGate
 pub batpak::store::DurabilityGate::kind: batpak::store::stats::WatermarkKind
 pub batpak::store::DurabilityGate::timeout: core::time::Duration
@@ -3271,11 +3295,9 @@ pub fn batpak::store::IndexTopology::aos() -> Self
 pub fn batpak::store::IndexTopology::entity_local() -> Self
 pub fn batpak::store::IndexTopology::scan() -> Self
 pub fn batpak::store::IndexTopology::tiled() -> Self
-pub fn batpak::store::IndexTopology::tiled_simd() -> Self
 pub fn batpak::store::IndexTopology::with_entity_groups(self, enabled: bool) -> Self
 pub fn batpak::store::IndexTopology::with_soa(self, enabled: bool) -> Self
 pub fn batpak::store::IndexTopology::with_tiles64(self, enabled: bool) -> Self
-pub fn batpak::store::IndexTopology::with_tiles64_simd(self, enabled: bool) -> Self
 impl core::default::Default for batpak::store::IndexTopology
 pub fn batpak::store::IndexTopology::default() -> Self
 pub struct batpak::store::LaneFrontierView
@@ -3319,7 +3341,10 @@ pub struct batpak::store::ObservedOnce
 impl batpak::store::delivery::observation::ObservedOnce
 pub fn batpak::store::delivery::observation::ObservedOnce::into_parts(self) -> (batpak::store::delivery::observation::AtLeastOnce, batpak::store::delivery::observation::IdempotencyKey)
 pub fn batpak::store::delivery::observation::ObservedOnce::new(at_least_once: batpak::store::delivery::observation::AtLeastOnce, idempotency_key: batpak::store::delivery::observation::IdempotencyKey) -> Self
-pub struct batpak::store::Open
+pub struct batpak::store::Open(_)
+impl batpak::store::StoreState for batpak::store::Open
+pub fn batpak::store::Open::shutdown_writer(&mut self, should_shutdown: bool)
+pub fn batpak::store::Open::writer_queue_len(&self) -> core::option::Option<usize>
 pub struct batpak::store::Outbox<'a>
 impl<'a> batpak::store::Outbox<'a>
 pub fn batpak::store::Outbox<'a>::flush(&mut self) -> core::result::Result<alloc::vec::Vec<batpak::prelude::AppendReceipt>, batpak::prelude::StoreError>
@@ -3344,14 +3369,14 @@ pub batpak::store::PlatformAdmissionSummary::store_lock: batpak::store::stats::S
 pub batpak::store::PlatformEvidenceSummary::admission: batpak::store::stats::PlatformAdmissionSummary
 pub batpak::store::PlatformEvidenceSummary::host: batpak::store::stats::HostEvidenceSummary
 pub batpak::store::PlatformEvidenceSummary::store_path: batpak::store::stats::StorePathEvidenceSummary
-pub struct batpak::store::ProjectionEvidenceRegistry<State>
-impl<State> batpak::store::ProjectionEvidenceRegistry<State>
+pub struct batpak::store::ProjectionEvidenceRegistry<State: batpak::store::StoreState>
+impl<State: batpak::store::StoreState> batpak::store::ProjectionEvidenceRegistry<State>
 pub fn batpak::store::ProjectionEvidenceRegistry<State>::contains(&self, projection: &str) -> bool
 pub fn batpak::store::ProjectionEvidenceRegistry<State>::new() -> Self
 pub fn batpak::store::ProjectionEvidenceRegistry<State>::projection_ids(&self) -> impl core::iter::Iterator<Item = &str>
 pub fn batpak::store::ProjectionEvidenceRegistry<State>::register<T>(&mut self, projection: impl core::convert::Into<alloc::string::String>) where T: batpak::event::sourcing::EventSourced + serde_core::ser::Serialize + serde_core::de::DeserializeOwned + 'static, <T as batpak::event::sourcing::EventSourced>::Input: ReplayInput
 pub fn batpak::store::ProjectionEvidenceRegistry<State>::run(&self, projection: &str, store: &batpak::store::Store<State>, entity: &str, freshness: &batpak::store::projection::Freshness) -> core::option::Option<core::result::Result<batpak::store::ProjectionRunEvidenceReport, batpak::store::ProjectionRunReportError>>
-impl<State> core::default::Default for batpak::store::ProjectionEvidenceRegistry<State>
+impl<State: batpak::store::StoreState> core::default::Default for batpak::store::ProjectionEvidenceRegistry<State>
 pub fn batpak::store::ProjectionEvidenceRegistry<State>::default() -> Self
 pub struct batpak::store::ProjectionRunEvidenceReport
 pub batpak::store::ProjectionRunEvidenceReport::batpak_version: core::option::Option<alloc::string::String>
@@ -3397,6 +3422,9 @@ pub batpak::store::ReactorConfig::restart_policy: batpak::store::RestartPolicy
 impl core::default::Default for batpak::store::reactor_typed::ReactorConfig
 pub fn batpak::store::reactor_typed::ReactorConfig::default() -> Self
 pub struct batpak::store::ReadOnly
+impl batpak::store::StoreState for batpak::store::ReadOnly
+pub fn batpak::store::ReadOnly::shutdown_writer(&mut self, _should_shutdown: bool)
+pub fn batpak::store::ReadOnly::writer_queue_len(&self) -> core::option::Option<usize>
 pub struct batpak::store::ReadWalkEvidenceReport
 pub batpak::store::ReadWalkEvidenceReport::batpak_version: core::option::Option<alloc::string::String>
 pub batpak::store::ReadWalkEvidenceReport::body: batpak::store::ReadWalkReportBody
@@ -3476,12 +3504,12 @@ pub fn batpak::store::SnapshotReportBody::body_hash(&self) -> core::result::Resu
 pub struct batpak::store::SnapshotWatermarkRef
 pub batpak::store::SnapshotWatermarkRef::offset: u64
 pub batpak::store::SnapshotWatermarkRef::segment_id: u64
-pub struct batpak::store::Store<State>
+pub struct batpak::store::Store<State: batpak::store::StoreState>
 impl batpak::store::Store<batpak::store::Open>
 pub fn batpak::store::Store<batpak::store::Open>::append(&self, coord: &batpak::coordinate::Coordinate, kind: batpak::event::kind::EventKind, payload: &impl serde_core::ser::Serialize) -> core::result::Result<batpak::prelude::AppendReceipt, batpak::prelude::StoreError>
 pub fn batpak::store::Store<batpak::store::Open>::append_batch(&self, items: alloc::vec::Vec<batpak::store::BatchAppendItem>) -> core::result::Result<alloc::vec::Vec<batpak::prelude::AppendReceipt>, batpak::prelude::StoreError>
 pub fn batpak::store::Store<batpak::store::Open>::append_batch_with_options(&self, items: alloc::vec::Vec<batpak::store::BatchAppendItem>, opts: batpak::prelude::AppendOptions) -> core::result::Result<alloc::vec::Vec<batpak::prelude::AppendReceipt>, batpak::prelude::StoreError>
-pub fn batpak::store::Store<batpak::store::Open>::append_denial<Ctx>(&self, coord: &batpak::coordinate::Coordinate, proposed_kind: batpak::event::kind::EventKind, gate_set: &batpak::guard::GateSet<Ctx>, failing: &batpak::guard::denial::Denial, proposed_content_hash: core::option::Option<[u8; 32]>, pipeline_id: core::option::Option<alloc::string::String>, options: batpak::prelude::AppendOptions) -> core::result::Result<batpak::store::DenialReceipt, batpak::prelude::StoreError>
+pub fn batpak::store::Store<batpak::store::Open>::append_denial<Ctx>(&self, request: batpak::store::DenialRequest<'_, Ctx>) -> core::result::Result<batpak::store::DenialReceipt, batpak::prelude::StoreError>
 pub fn batpak::store::Store<batpak::store::Open>::append_reaction(&self, coord: &batpak::coordinate::Coordinate, kind: batpak::event::kind::EventKind, payload: &impl serde_core::ser::Serialize, correlation_id: batpak::id::CorrelationId, causation_id: batpak::id::CausationId) -> core::result::Result<batpak::prelude::AppendReceipt, batpak::prelude::StoreError>
 pub fn batpak::store::Store<batpak::store::Open>::append_reaction_batch(&self, correlation_id: batpak::id::CorrelationId, causation_id: batpak::id::CausationId, items: alloc::vec::Vec<batpak::store::BatchAppendItem>) -> core::result::Result<alloc::vec::Vec<batpak::prelude::AppendReceipt>, batpak::prelude::StoreError>
 pub fn batpak::store::Store<batpak::store::Open>::append_reaction_typed<T: batpak::event::payload::EventPayload>(&self, coord: &batpak::coordinate::Coordinate, payload: &T, correlation_id: batpak::id::CorrelationId, causation_id: batpak::id::CausationId) -> core::result::Result<batpak::prelude::AppendReceipt, batpak::prelude::StoreError>
@@ -3525,7 +3553,7 @@ pub fn batpak::store::Store<batpak::store::Open>::wait_for_written_lane(&self, l
 impl batpak::store::Store<batpak::store::Open>
 pub fn batpak::store::Store<batpak::store::Open>::cursor_worker<F>(self: &alloc::sync::Arc<Self>, region: &batpak::coordinate::Region, config: batpak::store::CursorWorkerConfig, handler: F) -> core::result::Result<batpak::store::CursorWorkerHandle, batpak::prelude::StoreError> where F: core::ops::function::FnMut(&[batpak::store::index::IndexEntry], &batpak::store::Store<batpak::store::Open>, core::option::Option<&batpak::store::delivery::observation::AtLeastOnce>) -> batpak::store::CursorWorkerAction + core::marker::Send + 'static
 impl batpak::store::Store<batpak::store::Open>
-pub fn batpak::store::Store<batpak::store::Open>::import_events<S>(&self, source: &batpak::store::Store<S>, selector: &batpak::store::ImportSelector, options: &batpak::store::ImportOptions) -> core::result::Result<batpak::store::ImportReport, batpak::prelude::StoreError>
+pub fn batpak::store::Store<batpak::store::Open>::import_events<S: batpak::store::StoreState>(&self, source: &batpak::store::Store<S>, selector: &batpak::store::ImportSelector, options: &batpak::store::ImportOptions) -> core::result::Result<batpak::store::ImportReport, batpak::prelude::StoreError>
 impl batpak::store::Store<batpak::store::Open>
 pub fn batpak::store::Store<batpak::store::Open>::open(config: batpak::prelude::StoreConfig) -> core::result::Result<Self, batpak::prelude::StoreError>
 pub fn batpak::store::Store<batpak::store::Open>::open_with_cache(config: batpak::prelude::StoreConfig, cache: alloc::boxed::Box<dyn batpak::store::projection::ProjectionCache>) -> core::result::Result<Self, batpak::prelude::StoreError>
@@ -3544,7 +3572,7 @@ impl batpak::store::Store<batpak::store::ReadOnly>
 pub fn batpak::store::Store<batpak::store::ReadOnly>::open_read_only(config: batpak::prelude::StoreConfig) -> core::result::Result<Self, batpak::prelude::StoreError>
 pub fn batpak::store::Store<batpak::store::ReadOnly>::open_read_only_with_cache(config: batpak::prelude::StoreConfig, cache: alloc::boxed::Box<dyn batpak::store::projection::ProjectionCache>) -> core::result::Result<Self, batpak::prelude::StoreError>
 pub fn batpak::store::Store<batpak::store::ReadOnly>::open_read_only_with_native_cache(config: batpak::prelude::StoreConfig, cache_path: impl core::convert::AsRef<std::path::Path>) -> core::result::Result<Self, batpak::prelude::StoreError>
-impl<State> batpak::store::Store<State>
+impl<State: batpak::store::StoreState> batpak::store::Store<State>
 pub fn batpak::store::Store<State>::by_entity(&self, entity: &str) -> alloc::vec::Vec<batpak::store::index::IndexEntry>
 pub fn batpak::store::Store<State>::by_entity_lane(&self, entity: &str, lane: u32) -> alloc::vec::Vec<batpak::store::index::IndexEntry>
 pub fn batpak::store::Store<State>::by_fact(&self, kind: batpak::event::kind::EventKind) -> alloc::vec::Vec<batpak::store::index::IndexEntry>
@@ -3569,22 +3597,22 @@ pub fn batpak::store::Store<State>::verify_append_receipt_wire_detailed(&self, e
 pub fn batpak::store::Store<State>::verify_denial_receipt(&self, receipt: &batpak::store::DenialReceipt) -> bool
 pub fn batpak::store::Store<State>::verify_denial_receipt_detailed(&self, receipt: &batpak::store::DenialReceipt) -> batpak::prelude::ReceiptVerification
 pub fn batpak::store::Store<State>::walk_ancestors(&self, event_id: batpak::id::EventId, limit: usize) -> alloc::vec::Vec<batpak::event::StoredEvent<serde_json::value::Value>>
-impl<State> batpak::store::Store<State>
+impl<State: batpak::store::StoreState> batpak::store::Store<State>
 pub fn batpak::store::Store<State>::chain_walk_evidence(&self, request: &batpak::store::ChainWalkRequest) -> core::result::Result<batpak::store::ChainWalkEvidenceReport, batpak::store::ChainWalkReportError>
-impl<State> batpak::store::Store<State>
+impl<State: batpak::store::StoreState> batpak::store::Store<State>
 pub fn batpak::store::Store<State>::diagnostics(&self) -> batpak::store::stats::StoreDiagnostics
 pub fn batpak::store::Store<State>::durable_idempotency_key_count(&self) -> usize
 pub fn batpak::store::Store<State>::stats(&self) -> batpak::store::stats::StoreStats
 pub fn batpak::store::Store<State>::store_resource_evidence_report(&self) -> core::result::Result<batpak::store::StoreResourceEvidenceReport, batpak::store::StoreResourceReportError>
-impl<State> batpak::store::Store<State>
+impl<State: batpak::store::StoreState> batpak::store::Store<State>
 pub fn batpak::store::Store<State>::frontier(&self) -> batpak::store::stats::FrontierView
-impl<State> batpak::store::Store<State>
+impl<State: batpak::store::StoreState> batpak::store::Store<State>
 pub fn batpak::store::Store<State>::project_run_evidence<T>(&self, entity: &str, freshness: &batpak::store::projection::Freshness) -> core::result::Result<(core::option::Option<T>, batpak::store::ProjectionRunEvidenceReport), batpak::store::ProjectionRunReportError> where T: batpak::event::sourcing::EventSourced + serde_core::ser::Serialize + serde_core::de::DeserializeOwned + 'static, <T as batpak::event::sourcing::EventSourced>::Input: crate::store::projection::flow::ReplayInput
-impl<State> batpak::store::Store<State>
+impl<State: batpak::store::StoreState> batpak::store::Store<State>
 pub fn batpak::store::Store<State>::query_with_read_walk_evidence(&self, request: &batpak::store::ReadWalkRequest) -> core::result::Result<(alloc::vec::Vec<batpak::store::index::IndexEntry>, batpak::store::ReadWalkEvidenceReport), batpak::store::ReadWalkReportError>
-impl<State> batpak::store::Store<State>
+impl<State: batpak::store::StoreState> batpak::store::Store<State>
 pub fn batpak::store::Store<State>::subscriber_frontier_observation(&self, request: &batpak::store::SubscriberFrontierRequest) -> core::result::Result<batpak::store::SubscriberFrontierEvidenceReport, batpak::store::SubscriberFrontierReportError>
-impl<State> core::ops::drop::Drop for batpak::store::Store<State>
+impl<State: batpak::store::StoreState> core::ops::drop::Drop for batpak::store::Store<State>
 pub fn batpak::store::Store<State>::drop(&mut self)
 pub struct batpak::store::StoreConfig
 impl batpak::prelude::StoreConfig
@@ -3846,6 +3874,18 @@ pub trait batpak::store::ReceiptExtensionNamespace
 pub const batpak::store::ReceiptExtensionNamespace::PREFIX: &'static str
 impl batpak::store::ReceiptExtensionNamespace for batpak::store::SigningExtensionNamespace
 pub const batpak::store::SigningExtensionNamespace::PREFIX: &'static str
+pub trait batpak::store::StoreState: sealed::Sealed
+pub fn batpak::store::StoreState::shutdown_writer(&mut self, should_shutdown: bool)
+pub fn batpak::store::StoreState::writer_queue_len(&self) -> core::option::Option<usize>
+impl batpak::store::StoreState for batpak::store::Closed
+pub fn batpak::store::Closed::shutdown_writer(&mut self, _should_shutdown: bool)
+pub fn batpak::store::Closed::writer_queue_len(&self) -> core::option::Option<usize>
+impl batpak::store::StoreState for batpak::store::Open
+pub fn batpak::store::Open::shutdown_writer(&mut self, should_shutdown: bool)
+pub fn batpak::store::Open::writer_queue_len(&self) -> core::option::Option<usize>
+impl batpak::store::StoreState for batpak::store::ReadOnly
+pub fn batpak::store::ReadOnly::shutdown_writer(&mut self, _should_shutdown: bool)
+pub fn batpak::store::ReadOnly::writer_queue_len(&self) -> core::option::Option<usize>
 pub fn batpak::store::compaction_strategy_shape(strategy: &batpak::store::CompactionStrategy) -> batpak::store::CompactionStrategyShape
 pub fn batpak::store::fork_report_body_hash(body: &batpak::store::ForkReportBody) -> core::result::Result<batpak::store::ForkEvidenceHash, rmp_serde::encode::Error>
 pub fn batpak::store::provenance(receipt: &batpak::prelude::AppendReceipt) -> core::option::Option<batpak::store::ImportProvenance>

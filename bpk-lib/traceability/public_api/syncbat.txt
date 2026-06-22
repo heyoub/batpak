@@ -369,7 +369,7 @@ pub fn syncbat::StoreRegisterCatalog::supersede_operation(&self, superseded_name
 pub fn syncbat::StoreRegisterCatalog::update_operation(&self, descriptor: &syncbat::operation::OperationDescriptor) -> core::result::Result<batpak::store::append::AppendReceipt, syncbat::StoreRegisterCatalogError>
 pub fn syncbat::StoreRegisterCatalog::with_options(self, options: batpak::store::append::AppendOptions) -> Self
 pub const syncbat::register_store::SYNCBAT_REGISTER_EVENT_KIND: batpak::event::kind::EventKind
-pub fn syncbat::register_store::rebuild_register_from_store<State>(store: &batpak::store::Store<State>, coordinate: &batpak::coordinate::Coordinate) -> core::result::Result<syncbat::register::Register, syncbat::StoreRegisterCatalogError>
+pub fn syncbat::register_store::rebuild_register_from_store<State: batpak::store::StoreState>(store: &batpak::store::Store<State>, coordinate: &batpak::coordinate::Coordinate) -> core::result::Result<syncbat::register::Register, syncbat::StoreRegisterCatalogError>
 pub mod syncbat::store_sink
 #[non_exhaustive] pub enum syncbat::store_sink::StoreReceiptSinkError
 pub syncbat::store_sink::StoreReceiptSinkError::ExtensionKey(batpak::store::append::ExtensionKeyError)
@@ -768,7 +768,7 @@ pub trait syncbat::ReceiptSink
 pub fn syncbat::ReceiptSink::record_receipt(&self, envelope: &syncbat::receipt::ReceiptEnvelope) -> core::result::Result<syncbat::receipt::RecordedReceipt, syncbat::receipt::ReceiptSinkError>
 impl syncbat::receipt::ReceiptSink for syncbat::store_sink::StoreReceiptSink
 pub fn syncbat::store_sink::StoreReceiptSink::record_receipt(&self, envelope: &syncbat::receipt::ReceiptEnvelope) -> core::result::Result<syncbat::receipt::RecordedReceipt, syncbat::receipt::ReceiptSinkError>
-pub fn syncbat::rebuild_register_from_store<State>(store: &batpak::store::Store<State>, coordinate: &batpak::coordinate::Coordinate) -> core::result::Result<syncbat::register::Register, syncbat::StoreRegisterCatalogError>
+pub fn syncbat::rebuild_register_from_store<State: batpak::store::StoreState>(store: &batpak::store::Store<State>, coordinate: &batpak::coordinate::Coordinate) -> core::result::Result<syncbat::register::Register, syncbat::StoreRegisterCatalogError>
 pub fn syncbat::receipt_extension_key(field: impl core::convert::AsRef<str>) -> core::result::Result<syncbat::SyncbatReceiptExtensionKey, batpak::store::append::ExtensionKeyError>
 pub fn syncbat::receipt_extension_value(bytes: impl core::convert::Into<batpak::store::append::EncodedBytes>) -> syncbat::SyncbatReceiptExtensionValue
 pub type syncbat::HandlerResult = core::result::Result<alloc::vec::Vec<u8>, syncbat::handler::HandlerError>

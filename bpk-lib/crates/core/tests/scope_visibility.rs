@@ -21,7 +21,6 @@ fn topologies() -> Vec<(&'static str, IndexTopology)> {
         ("scan", IndexTopology::scan()),
         ("entity-local", IndexTopology::entity_local()),
         ("tiled", IndexTopology::tiled()),
-        ("tiled_simd", IndexTopology::tiled_simd()),
         ("all", IndexTopology::all()),
     ]
 }

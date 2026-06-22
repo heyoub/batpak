@@ -472,13 +472,12 @@ fn stable_id_fixture() -> &'static str {
     "batpak.family.schema_snapshot_fixture.v1"
 }
 
-fn topology_cases() -> [(&'static str, IndexTopology); 6] {
+fn topology_cases() -> [(&'static str, IndexTopology); 5] {
     [
         ("aos", IndexTopology::aos()),
         ("scan", IndexTopology::scan()),
         ("entity-local", IndexTopology::entity_local()),
         ("tiled", IndexTopology::tiled()),
-        ("tiled-simd", IndexTopology::tiled_simd()),
         ("all", IndexTopology::all()),
     ]
 }

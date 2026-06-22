@@ -94,7 +94,6 @@ fn bench_by_kind(c: &mut Criterion) {
     let cases = [
         ("soa", IndexTopology::scan()),
         ("aosoa64", IndexTopology::tiled()),
-        ("aosoa64simd", IndexTopology::tiled_simd()),
     ];
 
     let mut group = c.benchmark_group("by_kind/sorted");
@@ -128,7 +127,6 @@ fn bench_by_category(c: &mut Criterion) {
     let cases = [
         ("soa", IndexTopology::scan()),
         ("aosoa64", IndexTopology::tiled()),
-        ("aosoa64simd", IndexTopology::tiled_simd()),
     ];
 
     let mut group = c.benchmark_group("by_category/sorted");

@@ -53,26 +53,6 @@ fn cache_now_us_preserves_zero_custom_clock_value() {
 }
 
 #[test]
-fn index_topology_tiles64_simd_builder_sets_only_simd_overlay() {
-    let topology = IndexTopology::default().with_tiles64_simd(true);
-
-    assert!(
-        topology.tiles64_simd_enabled(),
-        "PROPERTY: with_tiles64_simd(true) must enable the SIMD overlay"
-    );
-    assert!(
-        !IndexTopology::default().tiles64_simd_enabled(),
-        "PROPERTY: default topology keeps the experimental SIMD overlay disabled"
-    );
-    assert!(
-        topology.soa_enabled() == IndexTopology::default().soa_enabled()
-            && topology.entity_groups_enabled() == IndexTopology::default().entity_groups_enabled()
-            && topology.tiles64_enabled() == IndexTopology::default().tiles64_enabled(),
-        "PROPERTY: with_tiles64_simd must not silently reset the rest of the topology"
-    );
-}
-
-#[test]
 fn validated_accepts_documented_inclusive_upper_bounds() {
     let mut config = StoreConfig::new("target/test-config-upper-bounds");
     config.writer.pressure_retry_threshold_pct = 100;

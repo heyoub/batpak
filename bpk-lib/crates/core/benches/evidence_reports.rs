@@ -78,7 +78,7 @@ fn build_store_with_topology(
     (store, dir, coord, kind, last)
 }
 
-fn topology_cases() -> [TopologyCase; 6] {
+fn topology_cases() -> [TopologyCase; 5] {
     [
         TopologyCase {
             label: "aos",
@@ -95,10 +95,6 @@ fn topology_cases() -> [TopologyCase; 6] {
         TopologyCase {
             label: "tiled",
             topology: IndexTopology::tiled(),
-        },
-        TopologyCase {
-            label: "tiled-simd",
-            topology: IndexTopology::tiled_simd(),
         },
         TopologyCase {
             label: "all",

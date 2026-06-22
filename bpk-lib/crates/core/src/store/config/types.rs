@@ -49,13 +49,6 @@ pub struct IndexTopology {
     entity_groups: bool,
     /// Enable the AoSoA64 tiled overlay for replay/scanning hot loops.
     tiles64: bool,
-    /// Enable the experimental AoSoA64Simd mixed-kind tiled overlay.
-    ///
-    /// Unlike `tiles64` (kind-homogeneous tiles + tile-skip), `tiles64_simd`
-    /// uses mixed-kind tiles with an inline `[u16; 64]` kinds array designed
-    /// for auto-vectorizable comparison. These two overlays are mutually
-    /// exclusive in practice — enable one or the other, not both.
-    tiles64_simd: bool,
 }
 
 impl IndexTopology {
@@ -65,7 +58,6 @@ impl IndexTopology {
             soa: false,
             entity_groups: false,
             tiles64: false,
-            tiles64_simd: false,
         }
     }
 
@@ -75,7 +67,6 @@ impl IndexTopology {
             soa: true,
             entity_groups: false,
             tiles64: false,
-            tiles64_simd: false,
         }
     }
 
@@ -85,7 +76,6 @@ impl IndexTopology {
             soa: false,
             entity_groups: true,
             tiles64: false,
-            tiles64_simd: false,
         }
     }
 
@@ -95,18 +85,6 @@ impl IndexTopology {
             soa: false,
             entity_groups: false,
             tiles64: true,
-            tiles64_simd: false,
-        }
-    }
-
-    /// Base AoS maps plus the experimental AoSoA64Simd overlay (mixed-kind, inline
-    /// kinds array, auto-vectorizable scan). Benchmarked head-to-head against `tiled`.
-    pub fn tiled_simd() -> Self {
-        Self {
-            soa: false,
-            entity_groups: false,
-            tiles64: false,
-            tiles64_simd: true,
         }
     }
 
@@ -116,7 +94,6 @@ impl IndexTopology {
             soa: true,
             entity_groups: true,
             tiles64: true,
-            tiles64_simd: false,
         }
     }
 
@@ -138,12 +115,6 @@ impl IndexTopology {
         self
     }
 
-    /// Enable or disable the experimental AoSoA64Simd overlay.
-    pub fn with_tiles64_simd(mut self, enabled: bool) -> Self {
-        self.tiles64_simd = enabled;
-        self
-    }
-
     pub(crate) fn soa_enabled(&self) -> bool {
         self.soa
     }
@@ -154,10 +125,6 @@ impl IndexTopology {
 
     pub(crate) fn tiles64_enabled(&self) -> bool {
         self.tiles64
-    }
-
-    pub(crate) fn tiles64_simd_enabled(&self) -> bool {
-        self.tiles64_simd
     }
 }
 
