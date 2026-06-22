@@ -115,7 +115,19 @@ pub(crate) struct WriterHandle {
     pub subscribers: Arc<SubscriberList>,
     pub reactor_subscribers: Arc<ReactorSubscriberList>,
     watermark_handle: WatermarkAdvanceHandle,
-    thread: Option<Box<dyn crate::store::platform::spawn::SimJoin>>,
+    drive: WriterDrive,
+}
+
+/// How the writer is driven. Single-variant today; a cooperative variant lands
+/// in a later step. Wrapping the thread handle in an enum now keeps that change
+/// localized.
+pub(crate) enum WriterDrive {
+    /// Production: the writer runs on a spawned thread (OS thread, or a
+    /// SimScheduler task). `None` only for the test-only `from_parts_for_test`
+    /// handle that has no live writer.
+    Threaded {
+        thread: Option<Box<dyn crate::store::platform::spawn::SimJoin>>,
+    },
 }
 
 /// RestartPolicy: how the writer recovers from panics.
@@ -198,7 +210,9 @@ impl WriterHandle {
             subscribers: Arc::clone(subscribers),
             reactor_subscribers: Arc::clone(reactor_subscribers),
             watermark_handle,
-            thread: Some(thread),
+            drive: WriterDrive::Threaded {
+                thread: Some(thread),
+            },
         })
     }
 
@@ -212,7 +226,7 @@ impl WriterHandle {
             subscribers,
             reactor_subscribers: Arc::new(ReactorSubscriberList::new()),
             watermark_handle: WatermarkState::handle(Arc::new(SystemClock::new())),
-            thread: None,
+            drive: WriterDrive::Threaded { thread: None },
         }
     }
 
@@ -221,11 +235,8 @@ impl WriterHandle {
     }
 
     pub(crate) fn fail_if_exited(&self) -> Result<(), StoreError> {
-        if self
-            .thread
-            .as_ref()
-            .is_some_and(|thread| thread.is_finished())
-        {
+        let WriterDrive::Threaded { thread } = &self.drive;
+        if thread.as_ref().is_some_and(|thread| thread.is_finished()) {
             self.watermark_handle.mark_writer_crashed();
             return Err(StoreError::WriterCrashed);
         }
@@ -233,7 +244,8 @@ impl WriterHandle {
     }
 
     pub(crate) fn join(&mut self) -> Result<(), StoreError> {
-        if let Some(thread) = self.thread.take() {
+        let WriterDrive::Threaded { thread } = &mut self.drive;
+        if let Some(thread) = thread.take() {
             thread.join().map_err(|_| {
                 self.watermark_handle.mark_writer_crashed();
                 StoreError::WriterCrashed
@@ -258,7 +270,8 @@ impl WriterHandle {
         let (dead_tx, _dead_rx) = flume::bounded(0);
         let live_tx = std::mem::replace(&mut self.tx, dead_tx);
         drop(live_tx);
-        if let Some(thread) = self.thread.take() {
+        let WriterDrive::Threaded { thread } = &mut self.drive;
+        if let Some(thread) = thread.take() {
             let _join_result = thread.join();
         }
     }
@@ -294,7 +307,7 @@ mod tests {
     use super::watermark::elapsed_ms_since;
     use super::{
         checked_next_clock, ReactorSubscriberList, SubscriberList, WatermarkState, WriterCommand,
-        WriterHandle,
+        WriterDrive, WriterHandle,
     };
     use crate::store::stats::HlcPoint;
     use crate::store::{StoreError, SystemClock};
@@ -383,7 +396,9 @@ mod tests {
             subscribers: Arc::new(SubscriberList::new()),
             reactor_subscribers: Arc::new(ReactorSubscriberList::new()),
             watermark_handle: watermark_handle.clone(),
-            thread: Some(thread),
+            drive: WriterDrive::Threaded {
+                thread: Some(thread),
+            },
         };
 
         let err = handle
