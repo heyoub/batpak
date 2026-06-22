@@ -159,7 +159,7 @@ pub enum StoreError {
     /// future-version artifact is a hard, canonical refusal: a future writer may
     /// have written segments or summaries this reader cannot interpret, so
     /// silently rebuilding from scan would risk a silent downgrade rather than a
-    /// legally reachable state. Mirrors [`IdempotencyFutureVersion`]. Upgrade the
+    /// legally reachable state. Mirrors [`Self::IdempotencyFutureVersion`]. Upgrade the
     /// reader. justifies: INV-MMAP-SEALED-READS
     MmapFutureVersion {
         /// Version stamped on the on-disk file.
@@ -173,7 +173,7 @@ pub enum StoreError {
     /// future-version checkpoint is a hard, canonical refusal: a future writer
     /// may have written a snapshot this reader cannot interpret, so silently
     /// rebuilding from scan would risk a silent downgrade rather than a legally
-    /// reachable state. Mirrors [`MmapFutureVersion`]. Upgrade the reader.
+    /// reachable state. Mirrors [`Self::MmapFutureVersion`]. Upgrade the reader.
     CheckpointFutureVersion {
         /// Version stamped on the on-disk file.
         found: u16,
@@ -182,12 +182,12 @@ pub enum StoreError {
     },
     /// The on-disk hidden-ranges metadata (`visibility_ranges.fbv`) declares a
     /// format version strictly newer than this binary understands. Unlike a
-    /// corrupt or older artifact — surfaced as [`HiddenRangesCorrupt`] for the
+    /// corrupt or older artifact — surfaced as [`Self::HiddenRangesCorrupt`] for the
     /// caller to remediate — a future-version artifact is a distinct canonical
     /// refusal: a future writer may have recorded cancelled ranges in a layout
     /// this reader cannot interpret, so treating it as remediable corruption (or
     /// silently empty) would risk resurrecting cancelled events. Mirrors
-    /// [`MmapFutureVersion`]. Upgrade the reader.
+    /// [`Self::MmapFutureVersion`]. Upgrade the reader.
     HiddenRangesFutureVersion {
         /// Path of the future-version metadata file.
         path: PathBuf,
@@ -235,7 +235,7 @@ pub enum StoreError {
         count: u64,
     },
     /// The `u32` interner id domain is exhausted: every one of the ~4 billion
-    /// available [`InternId`](crate::store::index::interner::InternId) slots has
+    /// available `InternId` slots has
     /// been allocated, so no further entity/scope string can be interned.
     InternerExhausted {
         /// The interned-string count at the point of exhaustion (the last id

@@ -348,13 +348,11 @@ impl Store<Open> {
     ///
     /// There is NO writer thread — the writer pipeline runs inline on the
     /// calling thread, driven by pumping the command queue at every reply-await
-    /// funnel. Exposed under `dangerous-test-hooks` because [`WriterMode`] and
+    /// funnel. Exposed under `dangerous-test-hooks` because `WriterMode` and
     /// its builder are crate-internal; this is not a public API surface.
     ///
     /// # Errors
     /// Same as [`Store::open`].
-    ///
-    /// [`WriterMode`]: crate::store::config::WriterMode
     #[cfg(feature = "dangerous-test-hooks")]
     #[cfg_attr(
         all(docsrs, not(batpak_stable_docs)),
