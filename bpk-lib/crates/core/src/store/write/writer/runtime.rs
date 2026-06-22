@@ -226,6 +226,75 @@ fn group_commit_drain_budget_remaining(drained: u32, extra_budget: u32) -> bool 
     drained < extra_budget
 }
 
+/// Whether the writer loop should keep pulling commands or exit the thread.
+///
+/// Returned by [`WriterCore::drive_command`] in place of the bare `return`s the
+/// per-command body used to perform directly in `writer_loop`.
+enum DriveStep {
+    Continue,
+    Exit,
+}
+
+impl WriterCore {
+    /// Drive a single command pulled from `rx` through the full per-command
+    /// pipeline: execute, settle, optional shutdown drain, optional group-commit
+    /// drain, and periodic sync. Returns [`DriveStep::Exit`] wherever the writer
+    /// loop previously returned, so the caller can exit the thread.
+    ///
+    /// `events_since_sync` is threaded by `&mut` so its count persists across
+    /// commands exactly as it did when this body lived inline in `writer_loop`.
+    fn drive_command(
+        &mut self,
+        rx: &Receiver<WriterCommand>,
+        validated_cfg: &ValidatedStoreConfig,
+        config: &StoreConfig,
+        events_since_sync: &mut u32,
+        cmd: WriterCommand,
+    ) -> DriveStep {
+        let result = self.execute_command(WriterLoopPhase::Main, cmd);
+        if let Some(respond) = result.shutdown_drain_respond {
+            let shutdown_result =
+                drain_shutdown_queue(self, rx, validated_cfg.shutdown_drain_limit);
+            ignore_closed_response_channel(respond.send(shutdown_result));
+            return DriveStep::Exit;
+        }
+
+        let outcome = settle_command_result(self, events_since_sync, result);
+        if outcome.exit_writer {
+            return DriveStep::Exit;
+        }
+
+        if outcome.enter_group_commit_drain {
+            let extra_budget = validated_cfg.group_commit_drain_budget;
+            let mut drained = 0u32;
+            while group_commit_drain_budget_remaining(drained, extra_budget) {
+                let Ok(next_cmd) = rx.try_recv() else {
+                    break;
+                };
+                let drain_result =
+                    self.execute_command(WriterLoopPhase::GroupCommitDrain, next_cmd);
+                let drain_outcome = settle_command_result(self, events_since_sync, drain_result);
+                drained = drained.saturating_add(drain_outcome.sync_event_delta);
+                if drain_outcome.exit_writer {
+                    return DriveStep::Exit;
+                }
+                if drain_outcome.break_loop {
+                    break;
+                }
+            }
+        }
+
+        if *events_since_sync >= config.sync.every_n_events {
+            if let Err(error) = self.sync_active_segment() {
+                tracing::error!("periodic sync failed: {error}");
+            }
+            *events_since_sync = 0;
+        }
+
+        DriveStep::Continue
+    }
+}
+
 /// The writer's main loop. Runs on the background thread.
 /// The spawn closure owns the Arcs; this function borrows them.
 fn writer_loop(runtime: WriterRuntime<'_>, active_segment: Segment<Active>, segment_id: u64) {
@@ -250,45 +319,9 @@ fn writer_loop(runtime: WriterRuntime<'_>, active_segment: Segment<Active>, segm
     };
 
     for cmd in rx.iter() {
-        let result = state.execute_command(WriterLoopPhase::Main, cmd);
-        if let Some(respond) = result.shutdown_drain_respond {
-            let shutdown_result =
-                drain_shutdown_queue(&mut state, rx, validated_cfg.shutdown_drain_limit);
-            ignore_closed_response_channel(respond.send(shutdown_result));
-            return;
-        }
-
-        let outcome = settle_command_result(&mut state, &mut events_since_sync, result);
-        if outcome.exit_writer {
-            return;
-        }
-
-        if outcome.enter_group_commit_drain {
-            let extra_budget = validated_cfg.group_commit_drain_budget;
-            let mut drained = 0u32;
-            while group_commit_drain_budget_remaining(drained, extra_budget) {
-                let Ok(next_cmd) = rx.try_recv() else {
-                    break;
-                };
-                let drain_result =
-                    state.execute_command(WriterLoopPhase::GroupCommitDrain, next_cmd);
-                let drain_outcome =
-                    settle_command_result(&mut state, &mut events_since_sync, drain_result);
-                drained = drained.saturating_add(drain_outcome.sync_event_delta);
-                if drain_outcome.exit_writer {
-                    return;
-                }
-                if drain_outcome.break_loop {
-                    break;
-                }
-            }
-        }
-
-        if events_since_sync >= config.sync.every_n_events {
-            if let Err(error) = state.sync_active_segment() {
-                tracing::error!("periodic sync failed: {error}");
-            }
-            events_since_sync = 0;
+        match state.drive_command(rx, &validated_cfg, &config, &mut events_since_sync, cmd) {
+            DriveStep::Exit => return,
+            DriveStep::Continue => {}
         }
     }
 }
