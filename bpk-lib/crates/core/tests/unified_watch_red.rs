@@ -1,7 +1,5 @@
 //! Red-path tests keep the `unified_*_red` names for cross-surface edge cases
 //! that should fail fast or prove defensive behavior across the unified store.
-// justifies: INV-TEST-PANIC-AS-ASSERTION, INV-MACRO-BOUNDED-CAST; unified red-path watch tests in tests/unified_watch_red.rs use unwrap/panic as assertion style and narrow bounded test counters that fit within u32.
-#![allow(clippy::unwrap_used, clippy::cast_possible_truncation, clippy::panic)]
 
 #[path = "support/bounded_blocking.rs"]
 mod bounded_blocking;
@@ -157,14 +155,9 @@ fn watch_projection_returns_subscription_pruned_when_slow_watcher_is_pruned() {
          Investigate: src/store/projection/watch.rs recv + src/store/projection/flow.rs."
     );
 
-    let err: batpak::store::WatcherError = match second {
-        Ok(_) => {
-            panic!(
-                "PROPERTY: pruned watcher should terminate with WatcherError::SubscriptionPruned"
-            )
-        }
-        Err(err) => err,
-    };
+    let err: batpak::store::WatcherError = second.map(|_| ()).expect_err(
+        "PROPERTY: pruned watcher should terminate with WatcherError::SubscriptionPruned",
+    );
     assert!(
         matches!(err, batpak::store::WatcherError::SubscriptionPruned),
         "PROPERTY: a pruned watcher must surface WatcherError::SubscriptionPruned, got {err:?}"

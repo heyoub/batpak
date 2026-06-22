@@ -1,7 +1,5 @@
 //! Red-path tests keep the `unified_*_red` names for cross-surface edge cases
 //! that should fail fast or prove defensive behavior across the unified store.
-// justifies: INV-TEST-PANIC-AS-ASSERTION, INV-MACRO-BOUNDED-CAST; unified red-path test in tests/unified_topology_red.rs uses unwrap/panic as the assertion style and narrows bounded test counters; these are file-wide idioms for this suite.
-#![allow(clippy::unwrap_used, clippy::cast_possible_truncation, clippy::panic)]
 
 #[path = "support/red_kind_b.rs"]
 mod red_kind_b;

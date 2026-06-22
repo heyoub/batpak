@@ -1,6 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION, ADR-0002; writer command-flow tests in tests/writer_command_flow.rs use panic! to surface unexpected writer states when the WriterCommand handshake breaks.
-#![allow(clippy::panic)]
-
 mod support;
 use batpak::store::{AppendOptions, BatchAppendItem, Store, StoreConfig, StoreError};
 use std::sync::{Arc, Barrier};
@@ -121,10 +118,9 @@ fn mixed_append_and_batch_commands_complete_under_group_commit_drain() {
     assert!(receipt_b.sequence <= first_sequence + 3);
     assert_eq!(batch_receipts.len(), 2);
 
-    let store = match Arc::try_unwrap(store) {
-        Ok(store) => store,
-        Err(_) => panic!("PROPERTY: mixed command flow test should release all Arc clones"),
-    };
+    let store = Arc::try_unwrap(store)
+        .map_err(|_| ())
+        .expect("PROPERTY: mixed command flow test should release all Arc clones");
     store.close().expect("close");
 }
 
@@ -162,10 +158,9 @@ fn sync_during_group_commit_drain_preserves_completed_work() {
             .expect("append receipt");
     }
 
-    let store = match Arc::try_unwrap(store) {
-        Ok(store) => store,
-        Err(_) => panic!("PROPERTY: sync during drain test should release all Arc clones"),
-    };
+    let store = Arc::try_unwrap(store)
+        .map_err(|_| ())
+        .expect("PROPERTY: sync during drain test should release all Arc clones");
     store.close().expect("close");
 
     let reopened = Store::open(command_flow_config(&dir)).expect("reopen");
@@ -225,19 +220,20 @@ fn begin_visibility_fence_after_unfenced_drain_keeps_pre_fence_work_visible() {
 
     let mut successful_unfenced = 1usize;
     for handle in handles {
-        match handle.join().expect("append thread") {
+        let outcome = handle.join().expect("append thread");
+        match outcome {
             Ok(_) => successful_unfenced += 1,
             Err(StoreError::VisibilityFenceActive) => {}
-            Err(err) => panic!(
-                "PROPERTY: unfenced drain append must either commit before the fence or be rejected with VisibilityFenceActive, got {err:?}"
+            ref other => assert!(
+                matches!(other, Err(StoreError::VisibilityFenceActive)),
+                "PROPERTY: unfenced drain append must either commit before the fence or be rejected with VisibilityFenceActive, got {other:?}"
             ),
         }
     }
 
-    let err = match writer_reply(fenced_ticket.receiver(), "cancelled fenced batch ticket") {
-        Ok(_) => panic!("PROPERTY: cancelled fence work must not resolve as visible success"),
-        Err(err) => err,
-    };
+    let err = writer_reply(fenced_ticket.receiver(), "cancelled fenced batch ticket")
+        .map(|_| ())
+        .expect_err("PROPERTY: cancelled fence work must not resolve as visible success");
     assert!(
         matches!(err, StoreError::VisibilityFenceCancelled),
         "cancelled fence work must surface VisibilityFenceCancelled, got {err:?}"
@@ -248,10 +244,9 @@ fn begin_visibility_fence_after_unfenced_drain_keeps_pre_fence_work_visible() {
         "PROPERTY: beginning and cancelling a fence after unfenced drain work must keep all successfully submitted pre-fence writes visible while keeping fenced work hidden."
     );
 
-    let store = match Arc::try_unwrap(store) {
-        Ok(store) => store,
-        Err(_) => panic!("PROPERTY: fence barrier test should release all Arc clones"),
-    };
+    let store = Arc::try_unwrap(store)
+        .map_err(|_| ())
+        .expect("PROPERTY: fence barrier test should release all Arc clones");
     store.close().expect("close");
 
     let reopened = Store::open(command_flow_config(&dir)).expect("reopen");

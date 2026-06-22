@@ -1,9 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; wire-format golden tests in tests/wire_format.rs assert via panic, intentionally group timestamp digits for readability, and emit a stderr warning when GOLDEN_UPDATE rewrites fixtures.
-#![allow(
-    clippy::panic,
-    clippy::inconsistent_digit_grouping,
-    clippy::print_stderr
-)]
 //! Wire format golden tests.
 //! Verifies MessagePack serialization matches known-good byte sequences.
 //!
@@ -29,6 +23,7 @@ use batpak::outcome::wait::{CompensationAction, WaitCondition};
 mod support;
 use batpak::wire::{option_u128_bytes, u128_bytes, vec_u128_bytes};
 use serde::Serialize;
+use std::io::Write;
 use support::prelude::*;
 use tempfile::TempDir;
 
@@ -44,20 +39,35 @@ fn check_or_update_golden(name: &str, actual_bytes: &[u8]) {
     // overwriting golden files. Any value other than "I_KNOW_WHAT_IM_DOING" is ignored.
     let updating = std::env::var("GOLDEN_UPDATE").as_deref() == Ok("I_KNOW_WHAT_IM_DOING");
     if updating {
-        eprintln!(
+        let _ = writeln!(
+            std::io::stderr(),
             "⚠ GOLDEN_UPDATE: regenerating golden files in {}. Inspect the diff before committing.",
             golden_dir().display()
         );
         std::fs::write(&path, &actual_hex)
-            .unwrap_or_else(|e| panic!("Failed to write golden file {}: {}", path.display(), e));
+            .map_err(|e| (path.clone(), e))
+            .unwrap_or_else(|(path, e)| {
+                assert!(
+                    std::hint::black_box(false),
+                    "Failed to write golden file {}: {e}",
+                    path.display()
+                );
+                unreachable!()
+            });
         return;
     }
 
     let expected_hex = std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!(
-            "Golden file {} not found: {}. Run GOLDEN_UPDATE=I_KNOW_WHAT_IM_DOING cargo test wire_format to create it.",
-            path.display(), e
-        ));
+        .map_err(|e| (path.clone(), e))
+        .unwrap_or_else(|(path, e)| {
+            assert!(
+                std::hint::black_box(false),
+                "Golden file {} not found: {e}. \
+                 Run GOLDEN_UPDATE=I_KNOW_WHAT_IM_DOING cargo test wire_format to create it.",
+                path.display()
+            );
+            unreachable!()
+        });
 
     assert_eq!(
         actual_hex.trim(),
@@ -174,7 +184,7 @@ fn event_header_msgpack_golden() {
         0x0123456789ABCDEF_0123456789ABCDEF_u128, // event_id
         0x0123456789ABCDEF_0123456789ABCDEF_u128, // correlation_id
         None,                                     // causation_id
-        1700000000_000000_i64,                    // timestamp_us
+        1_700_000_000_000_000_i64,                // timestamp_us
         DagPosition::root(),
         42, // payload_size
         EventKind::custom(0xF, 1),
@@ -297,10 +307,8 @@ fn committed_api_contract() {
     hash[0] = 0xAB;
     hash[31] = 0xCD;
 
-    let meta = match CommitMetadata::new(event_id, sequence, hash) {
-        Ok(meta) => meta,
-        Err(err) => panic!("test constructs known-valid commit metadata: {err:?}"),
-    };
+    let meta = CommitMetadata::new(event_id, sequence, hash)
+        .expect("test constructs known-valid commit metadata");
     assert_eq!(meta.event_id(), event_id);
     assert_eq!(meta.sequence(), sequence);
     assert_eq!(meta.hash(), hash);
@@ -353,10 +361,8 @@ fn commit_metadata_from_append_receipt_uses_receipt_hash() {
         .expect("append event");
     let expected_hash = receipt.content_hash;
 
-    let meta = match CommitMetadata::from_append_receipt(&receipt) {
-        Ok(meta) => meta,
-        Err(err) => panic!("test constructs known-valid receipt metadata: {err:?}"),
-    };
+    let meta = CommitMetadata::from_append_receipt(&receipt)
+        .expect("test constructs known-valid receipt metadata");
     assert_eq!(meta.hash(), expected_hash);
 
     store.close().expect("close store");

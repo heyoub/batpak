@@ -1,7 +1,5 @@
 //! Red-path tests keep the `unified_*_red` names for cross-surface edge cases
 //! that should fail fast or prove defensive behavior across the unified store.
-// justifies: INV-TEST-PANIC-AS-ASSERTION, INV-MACRO-BOUNDED-CAST; unified red-path group-commit tests in tests/unified_group_commit_red.rs use unwrap/panic as assertion style and narrow bounded test counters that fit within u32.
-#![allow(clippy::unwrap_used, clippy::cast_possible_truncation, clippy::panic)]
 
 #[path = "support/red_kinds.rs"]
 mod red_kinds;
@@ -24,8 +22,8 @@ fn group_commit_batches_under_load() {
     let store = Store::open(config).expect("open");
     let coord = test_coord();
     for i in 0u32..32 {
-        let opts =
-            AppendOptions::new().with_idempotency(batpak::id::IdempotencyKey::from(i as u128 + 1));
+        let opts = AppendOptions::new()
+            .with_idempotency(batpak::id::IdempotencyKey::from(u128::from(i) + 1));
         store
             .append_with_options(&coord, kind_a(), &payload(i), opts)
             .expect("append");
@@ -75,8 +73,8 @@ fn group_commit_mid_batch_shutdown_safe() {
     let store = Store::open(config).expect("open");
     let coord = test_coord();
     for i in 0u32..10 {
-        let opts =
-            AppendOptions::new().with_idempotency(batpak::id::IdempotencyKey::from(i as u128 + 1));
+        let opts = AppendOptions::new()
+            .with_idempotency(batpak::id::IdempotencyKey::from(u128::from(i) + 1));
         store
             .append_with_options(&coord, kind_a(), &payload(i), opts)
             .expect("append");

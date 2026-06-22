@@ -1,8 +1,6 @@
 //! Red-path tests keep the `unified_*_red` names for cross-surface edge cases
 //! that should fail fast or prove defensive behavior across the unified store.
 //! PROVES: INV-SCHEMA-VERSION-ISOLATION.
-// justifies: INV-TEST-PANIC-AS-ASSERTION, INV-MACRO-BOUNDED-CAST; unified red-path projection tests in tests/unified_projection_red.rs use unwrap/panic as the assertion style and narrow bounded test counters that fit in u32.
-#![allow(clippy::unwrap_used, clippy::cast_possible_truncation, clippy::panic)]
 
 #[path = "support/red_counters.rs"]
 mod red_counters;
@@ -59,7 +57,14 @@ fn empty_kinds_replays_all() {
     let coord = Coordinate::new("rek:entity", "rek:scope").expect("coord");
     for i in 0u32..3 {
         store
-            .append(&coord, EventKind::custom(0xF, i as u16 + 1), &payload(i))
+            .append(
+                &coord,
+                EventKind::custom(
+                    0xF,
+                    u16::try_from(i).expect("bounded loop counter fits u16") + 1,
+                ),
+                &payload(i),
+            )
             .expect("append");
     }
     let result: Option<AllCounter> = store
