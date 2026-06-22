@@ -116,7 +116,7 @@ fn explicit_sync_advances_durable_and_clears_pending_write_age() {
     let store = Store::open(config).expect("open store");
     let coord = coord("entity:frontier-sync");
 
-    store
+    let _ = store
         .append(&coord, kind(), &serde_json::json!({"n": 1}))
         .expect("append");
 
@@ -144,7 +144,7 @@ fn frontier_api_is_public_and_returns_consistent_view() {
     let coord = coord("entity:frontier-api");
 
     for n in 0..5 {
-        store
+        let _ = store
             .append(&coord, kind(), &serde_json::json!({"n": n}))
             .expect("append");
     }
@@ -170,7 +170,7 @@ fn frontier_visible_minus_durable_seq_is_positive_under_cadence_gt_1() {
     let coord = coord("entity:frontier-api-gap");
 
     for n in 0..10 {
-        store
+        let _ = store
             .append(&coord, kind(), &serde_json::json!({"n": n}))
             .expect("append");
     }
@@ -225,7 +225,7 @@ fn concurrent_snapshot_never_observes_torn_emitted_below_visible() {
 
     start.wait();
     for n in 0..300 {
-        store
+        let _ = store
             .append(&coord, kind(), &serde_json::json!({"n": n}))
             .expect("append");
         if n % 8 == 0 {
@@ -259,7 +259,7 @@ fn applied_starts_at_open_hlc_when_no_projections_registered() {
     let coord = coord("entity:frontier-applied-none");
 
     for n in 0..3 {
-        store
+        let _ = store
             .append(&coord, kind(), &serde_json::json!({"n": n}))
             .expect("append");
     }
@@ -280,7 +280,7 @@ fn applied_advances_with_single_projection() {
     store.dangerous_register_projection_for::<FrontierProjection>("entity:frontier-applied-one");
 
     for n in 0..3 {
-        store
+        let _ = store
             .append(&coord, kind(), &serde_json::json!({"n": n}))
             .expect("append");
     }
@@ -304,7 +304,7 @@ fn applied_is_min_across_two_projections() {
     let coord = coord("entity:frontier-applied-two");
 
     for n in 0..5 {
-        store
+        let _ = store
             .append(&coord, kind(), &serde_json::json!({"n": n}))
             .expect("append");
     }
@@ -342,7 +342,7 @@ fn applied_unregister_recomputes_from_remaining_projection_progress() {
         });
 
         for n in 0..5 {
-            store
+            let _ = store
                 .append(&coord, kind(), &serde_json::json!({"n": n}))
                 .expect("append");
         }

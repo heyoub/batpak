@@ -160,7 +160,7 @@ pub(super) const INDEX_TOPOLOGY_DEFAULT_EQUIVALENT_MUTANT: &str = r"crates/core/
 // equivalent mutants drag the gate. Every entry carries its equivalence proof.
 //
 // (a) `import.rs:282` post-append dedup classification
-//     (`if receipt.sequence < pre_import_frontier`): a fresh (non-deduplicated)
+//     (`if receipt.global_sequence < pre_import_frontier`): a fresh (non-deduplicated)
 //     append always lands at a sequence STRICTLY GREATER than the pre-import
 //     frontier captured before the loop, and a deduplicated source event never
 //     reaches `append_batch` (it is pre-filtered at :246). So the comparison is

@@ -322,7 +322,7 @@ pub(crate) fn import_events<S: crate::store::StoreState>(
         if !new_items.is_empty() {
             let receipts = destination.append_batch(new_items)?;
             for receipt in receipts {
-                if receipt.sequence < pre_import_frontier {
+                if receipt.global_sequence < pre_import_frontier {
                     report.deduplicated = report.deduplicated.saturating_add(1);
                 } else {
                     report.imported = report.imported.saturating_add(1);
@@ -391,7 +391,7 @@ mod tests {
 
         let coord = Coordinate::new("entity:prov:wrapper", "scope:import").expect("coord");
         let kind = EventKind::custom(0xF, 0x8A);
-        source
+        let _ = source
             .append(&coord, kind, &serde_json::json!({"n": 1}))
             .expect("source append");
 

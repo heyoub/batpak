@@ -103,7 +103,7 @@ fn append_receipt_to_ack(receipt: &AppendReceipt) -> BankCommitAck {
         .collect();
     BankCommitAck {
         event_id_hex: format!("{:032x}", u128::from(receipt.event_id)),
-        sequence: receipt.sequence,
+        sequence: receipt.global_sequence,
         content_hash_hex: encode_hex_str(&receipt.content_hash),
         key_id_hex: encode_hex_str(&receipt.key_id),
         signature_hex: receipt.signature.map(|s| encode_hex_str(&s)),

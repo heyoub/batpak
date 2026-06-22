@@ -120,7 +120,7 @@ fn cached_seeded_store_for(entity: &str) -> (TempDir, Arc<Store>) {
     );
     let coord = Coordinate::new(entity, "scope:test").expect("coord");
     for (amount, label) in [(3, "a"), (-1, "b"), (7, "c"), (2, "d")] {
-        store
+        let _ = store
             .append(
                 &coord,
                 KIND,
@@ -155,7 +155,7 @@ fn projection_flow_incremental_group_local_keeps_lanes_equivalent() {
 
     let coord =
         Coordinate::new("entity:raw-proj-incremental-group-local", "scope:test").expect("coord");
-    store
+    let _ = store
         .append(
             &coord,
             KIND,
@@ -232,7 +232,7 @@ fn projection_flow_incremental_external_cache_keeps_lanes_equivalent() {
     );
     let coord =
         Coordinate::new("entity:raw-proj-incremental-external", "scope:test").expect("coord");
-    reopened
+    let _ = reopened
         .append(
             &coord,
             KIND,

@@ -172,7 +172,7 @@ fn pathological_frame_length_is_bounded_not_panicking() {
 
     // The store remains usable.
     let coord = Coordinate::new("entity:scan", "scope:test").expect("valid coord");
-    store
+    let _ = store
         .append(&coord, KIND, &serde_json::json!({"post_poison": true}))
         .expect("append after corrupt reopen");
     store.close().expect("close");
@@ -187,7 +187,7 @@ fn non_tail_pathological_frame_length_fails_closed_on_reopen() {
     let store = Store::open(config(&dir).with_segment_max_bytes(512)).expect("open store");
     let coord = Coordinate::new("entity:scan-historical", "scope:test").expect("valid coord");
     for i in 0..40 {
-        store
+        let _ = store
             .append(
                 &coord,
                 KIND,
@@ -332,7 +332,7 @@ fn legacy_sdx2_non_tail_segment_recovers_all_events_via_frame_scan() {
         Store::open(config(&dir).with_segment_max_bytes(512)).expect("open store for rotation");
     let coord = Coordinate::new("entity:scan-legacy", "scope:test").expect("valid coord");
     for i in 0..40 {
-        store
+        let _ = store
             .append(
                 &coord,
                 KIND,

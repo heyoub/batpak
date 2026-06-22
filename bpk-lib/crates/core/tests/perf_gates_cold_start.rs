@@ -66,7 +66,7 @@ fn cold_start_1k_events_under_threshold() {
         let store = Store::open(config).expect("open store");
         let coord = Coordinate::new("bench:entity", "bench:scope").expect("valid coord");
         for _ in 0..1_000 {
-            store.append(&coord, kind, &payload).expect("append");
+            let _ = store.append(&coord, kind, &payload).expect("append");
         }
         store.sync().expect("sync");
         store.close().expect("close");

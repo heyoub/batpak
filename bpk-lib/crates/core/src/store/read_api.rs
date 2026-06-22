@@ -37,27 +37,17 @@ impl<State: crate::store::StoreState> Store<State> {
         self.reader.read_entry_raw(&entry.disk_pos)
     }
 
-    /// Verify an append receipt against the store's signing-key registry and
-    /// current index state, returning only a boolean.
-    ///
-    /// Prefer [`Self::verify_append_receipt_detailed`] in new code when the
-    /// caller needs proof language or a stable rejection reason.
-    #[must_use]
-    pub fn verify_append_receipt(&self, receipt: &AppendReceipt) -> bool {
-        self.verify_append_receipt_detailed(receipt).is_valid()
-    }
-
     /// Verify ack-shaped append receipt fields against the store's signing-key
     /// registry and current index state.
     ///
     /// Wire transports omit [`AppendReceipt::disk_pos`]; this helper hydrates
     /// it from the committed index entry before delegating to
-    /// [`Self::verify_append_receipt_detailed`].
+    /// [`Self::verify_append_receipt`].
     #[must_use]
     pub fn verify_append_receipt_wire_detailed(
         &self,
         event_id: EventId,
-        sequence: u64,
+        global_sequence: u64,
         content_hash: [u8; 32],
         key_id: [u8; 32],
         signature: Option<[u8; 64]>,
@@ -68,14 +58,14 @@ impl<State: crate::store::StoreState> Store<State> {
         };
         let receipt = AppendReceipt {
             event_id,
-            sequence,
+            global_sequence,
             disk_pos: entry.disk_pos,
             content_hash,
             key_id,
             signature,
             extensions,
         };
-        self.verify_append_receipt_detailed(&receipt)
+        self.verify_append_receipt(&receipt)
     }
 
     /// Verify a full persisted append receipt and return the exact acceptance
@@ -86,7 +76,7 @@ impl<State: crate::store::StoreState> Store<State> {
     /// use [`Self::verify_append_receipt_wire_detailed`] so the store can
     /// hydrate the disk position from the committed index entry.
     #[must_use]
-    pub fn verify_append_receipt_detailed(&self, receipt: &AppendReceipt) -> ReceiptVerification {
+    pub fn verify_append_receipt(&self, receipt: &AppendReceipt) -> ReceiptVerification {
         let Some(entry) = self.index.get_by_id(receipt.event_id.as_u128()) else {
             return ReceiptVerification::Invalid(ReceiptVerificationError::MissingCommittedEvent);
         };
@@ -101,17 +91,10 @@ impl<State: crate::store::StoreState> Store<State> {
         )
     }
 
-    /// Verify a persisted denial receipt against the store's signing-key
-    /// registry and current index state.
-    #[must_use]
-    pub fn verify_denial_receipt(&self, receipt: &DenialReceipt) -> bool {
-        self.verify_denial_receipt_detailed(receipt).is_valid()
-    }
-
     /// Verify a persisted denial receipt and return the exact acceptance or
     /// rejection reason.
     #[must_use]
-    pub fn verify_denial_receipt_detailed(&self, receipt: &DenialReceipt) -> ReceiptVerification {
+    pub fn verify_denial_receipt(&self, receipt: &DenialReceipt) -> ReceiptVerification {
         let Some(entry) = self.index.get_by_id(receipt.event_id.as_u128()) else {
             return ReceiptVerification::Invalid(ReceiptVerificationError::MissingCommittedEvent);
         };
@@ -353,7 +336,7 @@ fn append_receipt_index_mismatch(
     if receipt.event_id.as_u128() != entry.event_id {
         return Some(ReceiptVerificationError::EventIdMismatch);
     }
-    if receipt.sequence != entry.global_sequence {
+    if receipt.global_sequence != entry.global_sequence {
         return Some(ReceiptVerificationError::SequenceMismatch);
     }
     if receipt.disk_pos != entry.disk_pos {
@@ -378,7 +361,7 @@ fn denial_receipt_index_mismatch(
     if receipt.event_id.as_u128() != entry.event_id {
         return Some(ReceiptVerificationError::EventIdMismatch);
     }
-    if receipt.sequence != entry.global_sequence {
+    if receipt.global_sequence != entry.global_sequence {
         return Some(ReceiptVerificationError::SequenceMismatch);
     }
     if receipt.disk_pos != entry.disk_pos {

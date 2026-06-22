@@ -401,7 +401,7 @@ mod tests {
         let coord = Coordinate::new("watch:startup-race", "watch:scope").expect("coord");
         let sub = store.subscribe_lossy(&crate::coordinate::Region::entity("watch:startup-race"));
 
-        store
+        let _ = store
             .append(
                 &coord,
                 EventKind::custom(0xF, 1),

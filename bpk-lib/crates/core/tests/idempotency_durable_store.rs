@@ -92,7 +92,7 @@ fn keyed_retry_is_noop_after_retention_evicts_the_event() {
     // Append filler events to force segment rotation so compaction has sealed
     // inputs (tiny segment_max_bytes makes each append rotate).
     for i in 0..8 {
-        store
+        let _ = store
             .append(&coord(), KIND, &serde_json::json!({ "filler": i }))
             .expect("append filler event");
     }
@@ -112,7 +112,7 @@ fn keyed_retry_is_noop_after_retention_evicts_the_event() {
     // ...yet a re-run of the same key is a NO-OP returning the original receipt.
     let replay = append_keyed(&store, key, &serde_json::json!({"v": 1}));
     assert_eq!(
-        replay.sequence, first.sequence,
+        replay.global_sequence, first.global_sequence,
         "INV-IDEMPOTENCY-DURABLE-WINDOW: keyed retry after eviction returns original sequence"
     );
     assert_eq!(
@@ -162,7 +162,7 @@ fn keyed_retry_is_noop_after_close_and_reopen() {
     );
     let replay = append_keyed(&store, key, &serde_json::json!({"hello": "world"}));
     assert_eq!(
-        replay.sequence, original.sequence,
+        replay.global_sequence, original.global_sequence,
         "INV-IDEMPOTENCY-DURABLE-WINDOW: keyed retry after reopen is a no-op"
     );
     store.close().expect("close");
@@ -178,7 +178,7 @@ fn idemp_authority_survives_eviction_then_cold_start() {
         let store = Store::open(config(&dir)).expect("open");
         let r = append_keyed(&store, key, &serde_json::json!({"x": 9}));
         for i in 0..8 {
-            store
+            let _ = store
                 .append(&coord(), KIND, &serde_json::json!({ "filler": i }))
                 .expect("append filler event");
         }
@@ -190,7 +190,7 @@ fn idemp_authority_survives_eviction_then_cold_start() {
     let store = Store::open(config(&dir)).expect("reopen");
     let replay = append_keyed(&store, key, &serde_json::json!({"x": 9}));
     assert_eq!(
-        replay.sequence, original.sequence,
+        replay.global_sequence, original.global_sequence,
         "INV-IDEMPOTENCY-DURABLE-WINDOW: key survives eviction + cold-start"
     );
     store.close().expect("close");
@@ -220,7 +220,7 @@ fn snapshot_carries_the_durable_idempotency_store() {
     );
     let replay = append_keyed(&store, key, &serde_json::json!({"snap": true}));
     assert_eq!(
-        replay.sequence, original.sequence,
+        replay.global_sequence, original.global_sequence,
         "INV-IDEMPOTENCY-DURABLE-WINDOW: snapshot preserves keyed-retry no-op"
     );
     store.close().expect("close");
@@ -253,7 +253,7 @@ fn for_operation_drives_a_durable_idempotent_pass() {
         )
         .expect("replay op append");
     assert_eq!(
-        first.sequence, replay.sequence,
+        first.global_sequence, replay.global_sequence,
         "for_operation drives idempotent no-op"
     );
     store.close().expect("close");
@@ -275,7 +275,7 @@ fn unbounded_and_window_policies_are_configurable() {
     let key = 0x7777_7777_7777_7777_7777_7777_7777_7777u128;
     let first = append_keyed(&store, key, &serde_json::json!({"w": 1}));
     let replay = append_keyed(&store, key, &serde_json::json!({"w": 1}));
-    assert_eq!(first.sequence, replay.sequence);
+    assert_eq!(first.global_sequence, replay.global_sequence);
 
     let _unbounded = IdempotencyRetention::Unbounded;
     let _fail_closed = OverflowPolicy::FailClosed;

@@ -77,7 +77,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "  [{}] event_id={} seq={} entity={}",
             i,
             receipt.event_id,
-            receipt.sequence,
+            receipt.global_sequence,
             fetched.coordinate.entity(),
         );
     }

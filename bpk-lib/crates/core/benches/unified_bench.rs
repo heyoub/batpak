@@ -76,11 +76,11 @@ fn append_ordinary_events(
             let opts = AppendOptions::new().with_idempotency(batpak::id::IdempotencyKey::from(
                 idempotency_base + u128::from(i),
             ));
-            store
+            let _ = store
                 .append_with_options(coord, kind, &payload, opts)
                 .expect("append with idempotency");
         } else {
-            store.append(coord, kind, &payload).expect("append");
+            let _ = store.append(coord, kind, &payload).expect("append");
         }
     }
 }
@@ -275,7 +275,7 @@ fn bench_topology_by_fact(c: &mut Criterion) {
     for (name, topology) in &topologies {
         let (store, _dir) = open_store_with_topology(topology.clone());
         for i in 0u32..1_000 {
-            store
+            let _ = store
                 .append(&coord, kind, &serde_json::json!({"i": i}))
                 .expect("append");
         }
@@ -325,7 +325,7 @@ fn bench_incremental_projection(c: &mut Criterion) {
         .with_sync_every_n_events(10_000);
     let store = Store::open(config).expect("open");
     for i in 0u32..1_000 {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"i": i}))
             .expect("append");
     }
@@ -335,7 +335,7 @@ fn bench_incremental_projection(c: &mut Criterion) {
 
     // Add 5 more events — incremental path should apply only these
     for i in 1_000u32..1_005 {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"i": i}))
             .expect("append delta");
     }
@@ -355,7 +355,7 @@ fn bench_incremental_projection(c: &mut Criterion) {
         .with_sync_every_n_events(10_000);
     let store2 = Store::open(config2).expect("open baseline");
     for i in 0u32..1_005 {
-        store2
+        let _ = store2
             .append(&coord, kind, &serde_json::json!({"i": i}))
             .expect("append");
     }

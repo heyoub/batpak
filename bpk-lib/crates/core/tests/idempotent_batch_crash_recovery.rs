@@ -238,7 +238,7 @@ fn idempotent_batch_replayable_without_duplicates() {
                 u128::from(replay.event_id),
             );
             assert_eq!(
-                orig.sequence, replay.sequence,
+                orig.global_sequence, replay.global_sequence,
                 "PROPERTY: idempotent replay must return the original sequence"
             );
         }

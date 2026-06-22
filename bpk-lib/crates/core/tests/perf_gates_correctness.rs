@@ -168,7 +168,7 @@ fn correctness_gates_self_validate() {
 
     // Populate with enough events to trigger segment rotation + fd eviction
     for i in 0..n {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"i": i}))
             .expect("append");
     }
@@ -200,7 +200,7 @@ fn correctness_gates_self_validate() {
         && entries.len() == usize::try_from(n).expect("bounded test event count fits usize");
 
     // --- Probe 3: CAS rejection ---
-    store
+    let _ = store
         .append(&coord, kind, &serde_json::json!({"extra": true}))
         .expect("one more");
     let cas_result = store.append_with_options(
@@ -236,7 +236,7 @@ fn correctness_gates_self_validate() {
     // --- Probe 5: Cursor completeness ---
     let coord2 = Coordinate::new("cursor:test", "correctness:scope").expect("valid");
     for i in 0..5 {
-        store
+        let _ = store
             .append(&coord2, kind, &serde_json::json!({"c": i}))
             .expect("append");
     }

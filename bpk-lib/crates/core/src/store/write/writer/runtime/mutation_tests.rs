@@ -143,7 +143,7 @@ fn shutdown_in_group_commit_drain_exits_before_shutdown_queue_drain() {
         1,
     );
 
-    append_rx
+    let _ = append_rx
         .recv_timeout(Duration::from_secs(1))
         .expect("append reply")
         .expect("append succeeds");

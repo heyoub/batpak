@@ -96,7 +96,7 @@ fn seed_store(dir: &TempDir, count: u32) {
     let kind = EventKind::custom(0xF, 1);
 
     for i in 0..count {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({ "i": i }))
             .expect("append");
     }
@@ -246,7 +246,7 @@ fn default_config_reopen_uses_mmap_path() {
     let coord = Coordinate::new("entity:default", "scope:test").expect("coord");
     let kind = EventKind::custom(0xF, 1);
     for i in 0..100u32 {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"i": i}))
             .expect("append");
     }

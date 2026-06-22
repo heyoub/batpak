@@ -93,7 +93,7 @@ fn seeded_store() -> (TempDir, Arc<Store>) {
     let store = Arc::new(Store::open(StoreConfig::new(dir.path())).expect("open"));
     let coord = Coordinate::new("entity:raw-proj", "scope:test").expect("coord");
     for (amount, label) in [(3, "a"), (-1, "b"), (7, "c"), (2, "d")] {
-        store
+        let _ = store
             .append(
                 &coord,
                 KIND,
@@ -177,7 +177,7 @@ fn raw_watch_projection_emits_updated_state() {
     );
     let coord = Coordinate::new("entity:raw-proj", "scope:test").expect("coord");
 
-    store
+    let _ = store
         .append(
             &coord,
             KIND,
@@ -213,7 +213,7 @@ fn raw_watch_projection_matches_project_if_changed_after_relevant_append() {
         Arc::clone(&store).watch_projection::<RawCounter>("entity:raw-proj", Freshness::Consistent);
     let coord = Coordinate::new("entity:raw-proj", "scope:test").expect("coord");
 
-    store
+    let _ = store
         .append(
             &coord,
             KIND,
@@ -268,7 +268,7 @@ fn raw_watch_projection_matches_project_if_changed_after_irrelevant_append() {
         Arc::clone(&store).watch_projection::<RawCounter>("entity:raw-proj", Freshness::Consistent);
     let coord = Coordinate::new("entity:raw-proj", "scope:test").expect("coord");
 
-    store
+    let _ = store
         .append(
             &coord,
             NOISE_KIND,

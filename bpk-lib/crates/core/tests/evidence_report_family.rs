@@ -137,7 +137,7 @@ fn snapshot_evidence_family_invariants_and_no_append_side_effect() -> TestResult
     let (_data_dir_guard, store) = small_store_support::small_segment_store()?;
     let coord = Coordinate::new("entity:family-snapshot", "scope:fam_snapshot")?;
     let kind = EventKind::custom(0xF, 0x22);
-    store.append(&coord, kind, &serde_json::json!({"s": 0}))?;
+    let _ = store.append(&coord, kind, &serde_json::json!({"s": 0}))?;
     let before = store.stats().event_count;
 
     let snapshot_dir = TempDir::new()?;
@@ -296,11 +296,11 @@ fn projection_run_body_hash_changes_after_relevant_append() -> TestResult {
     let coord = Coordinate::new("entity:family-projection-reopen", "scope:fam")?;
     let kind = EventKind::custom(0xE, 0x71);
 
-    store.append(&coord, kind, &serde_json::json!({"n": 0}))?;
+    let _ = store.append(&coord, kind, &serde_json::json!({"n": 0}))?;
     let r1 =
         store.project_run_evidence::<FamilyProjection>(coord.entity(), &Freshness::Consistent)?;
 
-    store.append(&coord, kind, &serde_json::json!({"n": 1}))?;
+    let _ = store.append(&coord, kind, &serde_json::json!({"n": 1}))?;
     let r2 =
         store.project_run_evidence::<FamilyProjection>(coord.entity(), &Freshness::Consistent)?;
 
@@ -346,7 +346,7 @@ fn read_walk_evidence_matches_across_close_reopen() -> TestResult {
     let path = dir.path().to_path_buf();
     let coord = Coordinate::new("entity:family-readwalk", "scope:fam_rw")?;
     let kind = EventKind::custom(0xE, 0x81);
-    store.append(&coord, kind, &serde_json::json!({"i": 0}))?;
+    let _ = store.append(&coord, kind, &serde_json::json!({"i": 0}))?;
 
     let mut req = ReadWalkRequest::full(
         Region::scope(coord.scope()).with_fact(batpak::coordinate::KindFilter::Exact(kind)),
@@ -400,7 +400,7 @@ fn read_walk_evidence_body_is_topology_independent() -> TestResult {
         let coord = Coordinate::new("entity:family-topology-read", "scope:topology-read")?;
         let kind = EventKind::custom(0xE, 0x81);
         for i in 0..5 {
-            store.append(&coord, kind, &serde_json::json!({ "i": i }))?;
+            let _ = store.append(&coord, kind, &serde_json::json!({ "i": i }))?;
         }
 
         let request = ReadWalkRequest::full(
@@ -441,9 +441,9 @@ fn projection_run_evidence_output_is_topology_independent() -> TestResult {
         let relevant = EventKind::custom(0xE, 0x71);
         let irrelevant = EventKind::custom(0xE, 0x72);
         for i in 0..4 {
-            store.append(&coord, relevant, &serde_json::json!({ "i": i }))?;
+            let _ = store.append(&coord, relevant, &serde_json::json!({ "i": i }))?;
         }
-        store.append(&coord, irrelevant, &serde_json::json!({ "ignored": true }))?;
+        let _ = store.append(&coord, irrelevant, &serde_json::json!({ "ignored": true }))?;
 
         let (state, report) = store
             .project_run_evidence::<FamilyProjection>(coord.entity(), &Freshness::Consistent)?;

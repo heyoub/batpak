@@ -19,7 +19,7 @@ fn fd_budget_evicts_oldest_segments() {
 
     // Write enough events to create many segments (>2, exceeding fd_budget)
     for i in 0..100 {
-        store
+        let _ = store
             .append(
                 &coord,
                 kind,
@@ -102,7 +102,7 @@ fn cold_start_skips_corrupt_segment_gracefully() {
         let store = Store::open(config).expect("open");
         let coord = Coordinate::new("entity:corrupt", "scope:test").expect("valid coord");
         for i in 0..20 {
-            store
+            let _ = store
                 .append(&coord, kind, &serde_json::json!({"i": i}))
                 .expect("append");
         }
@@ -149,7 +149,7 @@ fn corrupt_frame_in_segment_is_detected() {
         let store = Store::open(config).expect("open");
         let coord = Coordinate::new("entity:crc", "scope:test").expect("valid");
         for i in 0..3 {
-            store
+            let _ = store
                 .append(&coord, kind, &serde_json::json!({"i": i}))
                 .expect("append");
         }

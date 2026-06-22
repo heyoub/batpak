@@ -39,7 +39,7 @@ fn ops_recv_without_filters() {
         .name("ops-recv-no-filters-producer".into())
         .spawn(move || {
             let payload = serde_json::json!({"hello": "world"});
-            store_w.append(&coord_w, kind, &payload).expect("append");
+            let _ = store_w.append(&coord_w, kind, &payload).expect("append");
         })
         .expect("spawn producer thread");
 
@@ -79,7 +79,7 @@ fn subscription_notifications_preserve_committed_position() {
     let producer = thread::Builder::new()
         .name("subscription-position-producer".into())
         .spawn(move || {
-            store_w
+            let _ = store_w
                 .append_with_options(
                     &coord_w,
                     kind,
@@ -119,7 +119,7 @@ fn ops_filter_passes_matching() {
         .spawn(move || {
             let payload = serde_json::json!({"x": 1});
             // Append an event with the matching kind.
-            store_w
+            let _ = store_w
                 .append(&coord_w, target_kind, &payload)
                 .expect("append matching");
         })
@@ -163,11 +163,11 @@ fn ops_filter_rejects_non_matching() {
         .spawn(move || {
             let payload = serde_json::json!({"x": 1});
             // First: append non-matching event — should be rejected by filter.
-            store_w
+            let _ = store_w
                 .append(&coord_w, unwanted_kind, &payload)
                 .expect("append unwanted");
             // Second: append matching event — should pass through.
-            store_w
+            let _ = store_w
                 .append(&coord_w, wanted_kind, &payload)
                 .expect("append wanted");
         })
@@ -207,7 +207,7 @@ fn ops_take_limits_count() {
         .spawn(move || {
             let payload = serde_json::json!({"x": 1});
             for _ in 0..5 {
-                store_w.append(&coord_w, kind, &payload).expect("append");
+                let _ = store_w.append(&coord_w, kind, &payload).expect("append");
             }
         })
         .expect("spawn producer thread");
@@ -247,7 +247,7 @@ fn ops_take_limit_returns_none_immediately_while_store_is_open() {
 
     let sub = store.subscribe_lossy(&Region::entity("entity:take-open"));
     let mut ops = sub.ops().take(1);
-    store
+    let _ = store
         .append(&coord, kind, &serde_json::json!({"x": 1}))
         .expect("append");
     assert!(
@@ -294,19 +294,19 @@ fn ops_filter_and_take_combined() {
         .spawn(move || {
             let payload = serde_json::json!({"x": 1});
             // Interleave matching and non-matching events.
-            store_w
+            let _ = store_w
                 .append(&coord_w, other_kind, &payload)
                 .expect("append other");
-            store_w
+            let _ = store_w
                 .append(&coord_w, wanted_kind, &payload)
                 .expect("append wanted 1");
-            store_w
+            let _ = store_w
                 .append(&coord_w, other_kind, &payload)
                 .expect("append other");
-            store_w
+            let _ = store_w
                 .append(&coord_w, wanted_kind, &payload)
                 .expect("append wanted 2");
-            store_w
+            let _ = store_w
                 .append(&coord_w, wanted_kind, &payload)
                 .expect("append wanted 3");
         })
@@ -389,7 +389,7 @@ fn ops_map_transforms_notification() {
     let producer = thread::Builder::new()
         .name("ops-map-transforms-producer".into())
         .spawn(move || {
-            store_w
+            let _ = store_w
                 .append(&coord_w, kind, &serde_json::json!({"x": 1}))
                 .expect("append");
         })
@@ -441,11 +441,11 @@ fn ops_map_returning_none_skips_event() {
         .name("ops-map-none-skips-producer".into())
         .spawn(move || {
             // First event: skip_kind — map returns None, should be skipped
-            store_w
+            let _ = store_w
                 .append(&coord_w, skip_kind, &serde_json::json!({"skip": true}))
                 .expect("append skip");
             // Second event: pass_kind — map returns Some, should pass through
-            store_w
+            let _ = store_w
                 .append(&coord_w, pass_kind, &serde_json::json!({"pass": true}))
                 .expect("append pass");
         })
@@ -494,11 +494,11 @@ fn ops_multiple_filters_all_must_pass() {
         .name("ops-multi-filter-producer".into())
         .spawn(move || {
             // Event 1: kind_c — fails first filter
-            store_w
+            let _ = store_w
                 .append(&coord_w, kind_c, &serde_json::json!({"x": 1}))
                 .expect("append kind_c");
             // Event 2: kind_a, sequence=1 — passes both filters
-            store_w
+            let _ = store_w
                 .append(&coord_w, kind_a, &serde_json::json!({"x": 2}))
                 .expect("append kind_a");
         })

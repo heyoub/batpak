@@ -48,7 +48,11 @@ fn query_entries_after_returns_ascending_global_sequence_order() {
 
     assert_eq!(
         sequences(&entries),
-        vec![first.sequence, second.sequence, third.sequence],
+        vec![
+            first.global_sequence,
+            second.global_sequence,
+            third.global_sequence
+        ],
         "query_entries_after must expose pages in commit-order global_sequence order"
     );
 }
@@ -72,7 +76,7 @@ fn query_entries_after_resumes_strictly_after_global_sequence() {
     let first_page = store.query_entries_after(&Region::entity("page:resume"), None, 2);
     assert_eq!(
         sequences(&first_page),
-        vec![first.sequence, second.sequence]
+        vec![first.global_sequence, second.global_sequence]
     );
 
     let second_page = store.query_entries_after(
@@ -80,7 +84,7 @@ fn query_entries_after_resumes_strictly_after_global_sequence() {
         Some(first_page[1].global_sequence()),
         2,
     );
-    assert_eq!(sequences(&second_page), vec![third.sequence]);
+    assert_eq!(sequences(&second_page), vec![third.global_sequence]);
 }
 
 #[test]
@@ -95,13 +99,13 @@ fn query_entries_after_applies_region_filtering() {
     let first = store
         .append(&target_a, kind, &serde_json::json!({"n": 1}))
         .expect("append target");
-    store
+    let _ = store
         .append(&wrong_scope, kind, &serde_json::json!({"n": 2}))
         .expect("append wrong scope");
     let second = store
         .append(&target_child, kind, &serde_json::json!({"n": 3}))
         .expect("append target child");
-    store
+    let _ = store
         .append(&wrong_entity, kind, &serde_json::json!({"n": 4}))
         .expect("append wrong entity");
 
@@ -111,7 +115,10 @@ fn query_entries_after_applies_region_filtering() {
         8,
     );
 
-    assert_eq!(sequences(&entries), vec![first.sequence, second.sequence]);
+    assert_eq!(
+        sequences(&entries),
+        vec![first.global_sequence, second.global_sequence]
+    );
     assert!(
         entries
             .iter()
@@ -143,7 +150,10 @@ fn query_entries_after_keeps_cancelled_fence_writes_invisible() {
 
     assert_eq!(
         sequences(&entries),
-        vec![visible_before.sequence, visible_after.sequence],
+        vec![
+            visible_before.global_sequence,
+            visible_after.global_sequence
+        ],
         "query_entries_after must share the index visibility rules used by regular queries"
     );
 }

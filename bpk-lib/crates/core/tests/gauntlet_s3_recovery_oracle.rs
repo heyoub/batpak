@@ -98,7 +98,7 @@ fn run_post_fsync_crash_oracle(batch_n: u32) -> (RecoveredState, bool) {
     // Op 1: a normal, plainly-committed pre-event to establish durable history.
     {
         let store = Store::open(config(&dir)).expect("open baseline store");
-        store
+        let _ = store
             .append(&coord, KIND, &serde_json::json!({ "pre": 1 }))
             .expect("append committed pre-event");
         store.close().expect("close baseline store");

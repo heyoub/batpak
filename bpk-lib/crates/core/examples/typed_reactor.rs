@@ -103,7 +103,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Write a few source events.
     for n in [1, 2, 3, 7] {
-        store.append_typed(&source, &PayloadA { n })?;
+        let _ = store.append_typed(&source, &PayloadA { n })?;
     }
 
     // Wait until the reactor has produced one PayloadB per source event.

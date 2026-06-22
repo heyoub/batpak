@@ -40,7 +40,7 @@ fn bench_write_throughput(c: &mut Criterion) {
                 || open_bench_store(saturating_u32(count).saturating_add(1), SyncMode::default()),
                 |(store, _dir, coord, kind)| {
                     for i in 0..count {
-                        store
+                        let _ = store
                             .append(&coord, kind, &serde_json::json!({"i": i}))
                             .expect("append");
                     }
@@ -67,7 +67,7 @@ fn bench_write_throughput(c: &mut Criterion) {
                 || open_bench_store(1, SyncMode::default()),
                 |(store, _dir, coord, kind)| {
                     for i in 0..count {
-                        store
+                        let _ = store
                             .append(&coord, kind, &serde_json::json!({"i": i}))
                             .expect("append");
                     }
@@ -116,7 +116,7 @@ fn bench_concurrent_write_throughput(c: &mut Criterion) {
                                 .name(format!("bench-writer-{t}"))
                                 .spawn(move || {
                                     for i in 0..events_per_thread {
-                                        store
+                                        let _ = store
                                             .append(&coord, kind, &serde_json::json!({"i": i}))
                                             .expect("append");
                                     }
@@ -161,7 +161,7 @@ fn bench_sync_mode_comparison(c: &mut Criterion) {
                 || open_bench_store(1, sync_mode.clone()),
                 |(store, _dir, coord, kind)| {
                     for i in 0..count {
-                        store
+                        let _ = store
                             .append(&coord, kind, &serde_json::json!({"i": i}))
                             .expect("append");
                     }

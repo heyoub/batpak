@@ -178,10 +178,10 @@ fn project_if_changed_replays_when_watermark_matches_but_generation_advances() {
     let store = Store::open(config).expect("open store");
 
     let coord = Coordinate::new("entity:generation-watermark", "scope:test").expect("coord");
-    store
+    let _ = store
         .append(&coord, GENERATION_KIND, &serde_json::json!({"x": 1}))
         .expect("append relevant 1");
-    store
+    let _ = store
         .append(&coord, GENERATION_KIND, &serde_json::json!({"x": 2}))
         .expect("append relevant 2");
 
@@ -193,7 +193,7 @@ fn project_if_changed_replays_when_watermark_matches_but_generation_advances() {
         .entity_generation("entity:generation-watermark")
         .expect("baseline generation");
 
-    store
+    let _ = store
         .append(
             &coord,
             EventKind::custom(0xF, 9),

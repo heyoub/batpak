@@ -48,7 +48,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     })?;
 
     for n in 0..3u32 {
-        store.append_typed(&coord, &Tick { n })?;
+        let _ = store.append_typed(&coord, &Tick { n })?;
     }
 
     let deadline = Instant::now() + Duration::from_secs(5);

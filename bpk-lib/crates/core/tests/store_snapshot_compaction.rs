@@ -33,7 +33,7 @@ fn snapshot_copies_segments() {
     let kind = EventKind::custom(0xF, 1);
 
     for i in 0..10 {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"i": i}))
             .expect("append");
     }
@@ -78,7 +78,7 @@ fn snapshot_with_evidence_reports_fence_watermark_and_copied_segments() {
     let kind = EventKind::custom(0xF, 0x11);
 
     for i in 0..12 {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"i": i}))
             .expect("append");
     }
@@ -177,7 +177,7 @@ fn snapshot_reused_destination_replaces_stale_store_artifacts() {
     let coord = Coordinate::new("entity:snap:source", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 7);
     for i in 0..6 {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"i": i}))
             .expect("append source");
     }
@@ -188,7 +188,7 @@ fn snapshot_reused_destination_replaces_stale_store_artifacts() {
         let stale_store =
             Store::open(StoreConfig::new(snapshot_dir.path())).expect("open stale store");
         let stale_coord = Coordinate::new("entity:snap:stale", "scope:test").expect("stale coord");
-        stale_store
+        let _ = stale_store
             .append(&stale_coord, kind, &serde_json::json!({"stale": true}))
             .expect("append stale");
         stale_store.close().expect("close stale");
@@ -223,7 +223,7 @@ fn snapshot_into_fresh_destination_reports_no_destination_cleared() {
     let coord = Coordinate::new("entity:snap:fresh", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 9);
     for i in 0..4 {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"i": i}))
             .expect("append");
     }
@@ -258,7 +258,7 @@ fn snapshot_waits_for_in_flight_compaction() {
     let kind = EventKind::custom(0xF, 0x44);
     let payload = "x".repeat(300);
     for i in 0..12 {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"i": i, "blob": payload}))
             .expect("append");
     }
@@ -352,7 +352,7 @@ fn snapshot_preserves_pending_compaction_marker() {
     let (dir, store) = test_store();
     let coord = Coordinate::new("entity:snapshot:marker", "scope:test").expect("coord");
     let kind = EventKind::custom(0xF, 0x66);
-    store
+    let _ = store
         .append(&coord, kind, &serde_json::json!({"i": 0}))
         .expect("append");
     std::fs::write(
@@ -381,7 +381,7 @@ fn compact_does_not_lose_data() {
     let kind = EventKind::custom(0xF, 1);
 
     for i in 0..5 {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"i": i}))
             .expect("append");
     }
@@ -424,7 +424,7 @@ fn compact_merge_rebuild_does_not_duplicate_superseded_sealed_segments() {
     let kind = EventKind::custom(0xF, 3);
 
     for i in 0..12 {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"i": i}))
             .expect("append");
     }
@@ -486,7 +486,7 @@ fn compact_fails_closed_on_corrupt_hidden_ranges_metadata() {
     let kind = EventKind::custom(0xF, 0x55);
 
     for i in 0..12 {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"i": i}))
             .expect("append");
     }
@@ -531,7 +531,7 @@ fn compact_rolls_back_marker_on_pre_swap_rename_failure() {
     let kind = EventKind::custom(0xF, 0x56);
     let payload = "x".repeat(300);
     for i in 0..12 {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"i": i, "blob": payload}))
             .expect("append");
     }
@@ -662,7 +662,7 @@ fn compact_tombstone_updates_event_kind_in_index() {
 
         for i in 0..10 {
             let kind = if i % 2 == 0 { live_kind } else { doomed_kind };
-            store
+            let _ = store
                 .append(&coord, kind, &serde_json::json!({"i": i}))
                 .expect("append");
         }

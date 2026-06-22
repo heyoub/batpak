@@ -97,7 +97,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let charlie = Coordinate::new("user:charlie", "chat:general")?;
 
     // A few small delays so the subscriber thread can keep up
-    store.append_typed(
+    let _ = store.append_typed(
         &alice,
         &MessageSent {
             from: "alice".into(),
@@ -106,7 +106,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
     let _ = writeln!(out.lock(), "Alice: Hey everyone!");
 
-    store.append_typed(
+    let _ = store.append_typed(
         &bob,
         &MessageSent {
             from: "bob".into(),
@@ -116,7 +116,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _ = writeln!(out.lock(), "Bob: What's up?");
 
     // Bob edits his message (different event kind — subscriber filter will skip this)
-    store.append_typed(
+    let _ = store.append_typed(
         &bob,
         &MessageEdited {
             from: "bob".into(),
@@ -125,7 +125,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
     let _ = writeln!(out.lock(), "Bob: [edited his message]");
 
-    store.append_typed(
+    let _ = store.append_typed(
         &charlie,
         &MessageSent {
             from: "charlie".into(),
@@ -230,7 +230,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let _ = writeln!(
             out,
             "    Message {}: seq={}, event_id={}",
-            i, receipt.sequence, receipt.event_id
+            i, receipt.global_sequence, receipt.event_id
         );
     }
 

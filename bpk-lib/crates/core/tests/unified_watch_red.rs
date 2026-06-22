@@ -22,7 +22,7 @@ fn watch_projection_emits_on_new_events() {
     let coord = Coordinate::new("watch:entity", "watch:scope").expect("coord");
 
     for i in 0u32..5 {
-        store.append(&coord, kind_a(), &payload(i)).expect("append");
+        let _ = store.append(&coord, kind_a(), &payload(i)).expect("append");
     }
 
     let mut watcher = store.watch_projection::<AllCounter>("watch:entity", Freshness::Consistent);
@@ -33,7 +33,7 @@ fn watch_projection_emits_on_new_events() {
         .spawn(move || {
             let coord = Coordinate::new("watch:entity", "watch:scope").expect("coord");
             for i in 5u32..8 {
-                store2
+                let _ = store2
                     .append(&coord, kind_a(), &payload(i))
                     .expect("append");
             }
@@ -61,7 +61,7 @@ fn watch_projection_catches_up_after_lossy_notifications() {
     let coord = Coordinate::new("watch:lossy", "watch:scope").expect("coord");
 
     for i in 0u32..3 {
-        store
+        let _ = store
             .append(&coord, kind_a(), &payload(i))
             .expect("seed append");
     }
@@ -69,7 +69,7 @@ fn watch_projection_catches_up_after_lossy_notifications() {
     let mut watcher = store.watch_projection::<AllCounter>("watch:lossy", Freshness::Consistent);
 
     for i in 3u32..10 {
-        store
+        let _ = store
             .append(&coord, kind_a(), &payload(i))
             .expect("append burst");
     }
@@ -90,7 +90,7 @@ fn subscription_returns_none_on_store_close() {
     let dir = TempDir::new().expect("temp dir");
     let store = Arc::new(Store::open(StoreConfig::new(dir.path())).expect("open"));
     let coord = Coordinate::new("drop:entity", "drop:scope").expect("coord");
-    store.append(&coord, kind_a(), &payload(0)).expect("append");
+    let _ = store.append(&coord, kind_a(), &payload(0)).expect("append");
 
     let sub = store.subscribe_lossy(&Region::entity("drop:entity"));
 
@@ -122,14 +122,14 @@ fn watch_projection_returns_subscription_pruned_when_slow_watcher_is_pruned() {
     let store = Arc::new(Store::open(config).expect("open"));
     let coord = Coordinate::new("watch:pruned", "watch:scope").expect("coord");
 
-    store
+    let _ = store
         .append(&coord, kind_a(), &payload(0))
         .expect("seed append");
 
     let mut watcher = store.watch_projection::<AllCounter>("watch:pruned", Freshness::Consistent);
 
     for i in 1u32..6 {
-        store
+        let _ = store
             .append(&coord, kind_a(), &payload(i))
             .expect("burst append");
     }
@@ -166,7 +166,7 @@ fn cursor_watch_projection_replays_without_subscription_prune_error_type() {
     let coord = Coordinate::new("watch:cursor", "watch:scope").expect("coord");
 
     for i in 0u32..3 {
-        store
+        let _ = store
             .append(&coord, kind_a(), &payload(i))
             .expect("seed append");
     }
@@ -192,7 +192,7 @@ fn project_if_changed_reports_honest_generation_for_empty_filtered_state() {
     let store = Arc::new(Store::open(StoreConfig::new(dir.path())).expect("open"));
     let coord = Coordinate::new("watch:filtered-empty", "watch:scope").expect("coord");
 
-    store
+    let _ = store
         .append(&coord, kind_b(), &payload(99))
         .expect("append irrelevant event");
 

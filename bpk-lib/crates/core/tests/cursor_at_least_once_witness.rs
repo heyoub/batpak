@@ -87,7 +87,7 @@ fn reactor_config(checkpoint_id: Option<CheckpointId>) -> ReactorConfig {
 fn cursor_worker_with_checkpoint_id_passes_witness() {
     let (_dir, store) = test_store();
     let checkpoint_id = CheckpointId::new("witness-cursor").expect("valid checkpoint id");
-    store
+    let _ = store
         .append(
             &source_coord(),
             EventKind::custom(0xE, 1),
@@ -118,7 +118,7 @@ fn cursor_worker_with_checkpoint_id_passes_witness() {
 #[test]
 fn cursor_worker_without_checkpoint_id_passes_none() {
     let (_dir, store) = test_store();
-    store
+    let _ = store
         .append(
             &source_coord(),
             EventKind::custom(0xE, 1),
@@ -187,7 +187,7 @@ fn typed_reactor_handler_receives_witness() {
         )
         .expect("spawn typed reactor");
 
-    store
+    let _ = store
         .append_typed(&source_coord(), &WitnessPayload { n: 3 })
         .expect("append typed source");
 
@@ -250,7 +250,7 @@ fn multi_reactor_handler_receives_witness() {
         )
         .expect("spawn multi reactor");
 
-    store
+    let _ = store
         .append_typed(&source_coord(), &WitnessPayload { n: 4 })
         .expect("append multi source");
 
@@ -266,7 +266,7 @@ fn multi_reactor_handler_receives_witness() {
 fn observed_once_composes_from_handler_witness() {
     let (_dir, store) = test_store();
     let checkpoint_id = CheckpointId::new("witness-observed-once").expect("valid checkpoint id");
-    store
+    let _ = store
         .append(
             &source_coord(),
             EventKind::custom(0xE, 1),

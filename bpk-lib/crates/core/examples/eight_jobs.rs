@@ -72,7 +72,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     assert!(ancestors.len() >= 2);
 
     // 6. Verify a native append receipt with detailed proof language.
-    let verification = store.verify_append_receipt_detailed(&second);
+    let verification = store.verify_append_receipt(&second);
     assert!(verification.is_valid());
 
     // 7. Project derived state from committed history.

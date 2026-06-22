@@ -109,7 +109,7 @@ fn flushing_empty_outbox_is_a_noop_and_stays_empty() {
         "PROPERTY: flushing an empty Outbox must not publish any user event"
     );
 
-    store
+    let _ = store
         .append(&coord, kind, &serde_json::json!({"post_empty_flush": true}))
         .expect("append after empty outbox flush");
 }

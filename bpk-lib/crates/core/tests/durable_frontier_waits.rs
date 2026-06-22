@@ -24,7 +24,7 @@ use tempfile::TempDir;
 /// in this binary because only the wait surfaces exercise it (the append-gate
 /// family appends through the gated `append_with_options`/batch paths).
 fn append_number(store: &Store, entity: &str, n: u32) -> HlcPoint {
-    store
+    let _ = store
         .append(&coord(entity), kind(), &serde_json::json!({ "n": n }))
         .expect("append wait event");
     let entries = store.query(&Region::entity(entity));

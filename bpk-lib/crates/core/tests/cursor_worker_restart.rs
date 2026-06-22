@@ -26,7 +26,7 @@ fn cursor_worker_restarts_from_last_committed_checkpoint_after_panic() {
     let kind = EventKind::custom(0xF, 7);
 
     for n in 0..3u32 {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"n": n}))
             .expect("append seed event");
     }
@@ -132,7 +132,7 @@ fn cursor_worker_exits_cleanly_when_restart_budget_exhausted() {
 
     // Seed 3 events so the worker has something to process.
     for n in 0..3u32 {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"n": n}))
             .expect("append seed event");
     }
@@ -175,10 +175,10 @@ fn cursor_worker_exits_cleanly_when_restart_budget_exhausted() {
         .append(&coord, kind, &serde_json::json!({"after": true}))
         .expect("append after worker exit");
     assert!(
-        receipt.sequence >= 3,
+        receipt.global_sequence >= 3,
         "PROPERTY: store must remain usable after cursor worker exhausts its restart budget. \
          Expected sequence >= 3, got {}.",
-        receipt.sequence
+        receipt.global_sequence
     );
 
     let store = Arc::try_unwrap(store)
@@ -193,7 +193,7 @@ fn bounded_restart_window_resets_after_elapsed_window() {
     let store = Arc::new(Store::open(test_config(&dir)).expect("open store"));
     let coord = Coordinate::new("entity:restart-window", "scope:test").expect("coord");
     let kind = EventKind::custom(0xF, 7);
-    store
+    let _ = store
         .append(&coord, kind, &serde_json::json!({"n": 1}))
         .expect("append seed event");
 

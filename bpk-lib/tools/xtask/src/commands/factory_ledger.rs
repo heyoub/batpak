@@ -340,7 +340,7 @@ fn append_started(store: &mut Store, args: FactoryLedgerRecordStartedArgs) -> Re
         head: args.head.unwrap_or_else(default_head),
         started_ms: args.started_ms.unwrap_or_else(now_ms),
     };
-    store
+    let _ = store
         .append_typed(&coord, &payload)
         .context("append factory.command.started")?;
     Ok(())
@@ -355,7 +355,7 @@ fn append_completed(store: &mut Store, args: FactoryLedgerRecordCompletedArgs) -
         duration_ms: args.duration_ms,
         completed_ms: args.completed_ms.unwrap_or_else(now_ms),
     };
-    store
+    let _ = store
         .append_typed(&coord, &payload)
         .context("append factory.command.completed")?;
     Ok(())
@@ -371,7 +371,7 @@ fn append_failed(store: &mut Store, args: FactoryLedgerRecordFailedArgs) -> Resu
         stderr_tail: cap_stderr_tail(args.stderr_tail),
         completed_ms: args.completed_ms.unwrap_or_else(now_ms),
     };
-    store
+    let _ = store
         .append_typed(&coord, &payload)
         .context("append factory.command.failed")?;
     Ok(())
@@ -393,7 +393,7 @@ fn append_gate_completed(
         head: args.head.unwrap_or_else(default_head),
         summary: args.summary,
     };
-    store
+    let _ = store
         .append_typed(&coord, &payload)
         .context("append factory.gate.completed")?;
     Ok(())

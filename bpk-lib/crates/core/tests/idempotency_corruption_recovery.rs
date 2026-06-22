@@ -64,7 +64,7 @@ fn assert_graceful_degradation(mutate: impl FnOnce(&std::path::Path)) {
 
     {
         let store = Store::open(config(&dir)).expect("open");
-        append_keyed(&store, key);
+        let _ = append_keyed(&store, key);
         assert_eq!(key_event_count(&store, key), 1, "one keyed event committed");
         store.close().expect("close");
     }
@@ -80,7 +80,7 @@ fn assert_graceful_degradation(mutate: impl FnOnce(&std::path::Path)) {
     let fresh = append_keyed(&store, new_key);
     let replay = append_keyed(&store, new_key);
     assert_eq!(
-        fresh.sequence, replay.sequence,
+        fresh.global_sequence, replay.global_sequence,
         "store remains correct after corruption: new keyed append + retry no-ops"
     );
     assert_eq!(
@@ -146,7 +146,7 @@ fn future_version_is_a_hard_error_at_cold_start() {
     let key = 0x4242_4242_4242_4242_4242_4242_4242_4242u128;
     {
         let store = Store::open(config(&dir)).expect("open");
-        append_keyed(&store, key);
+        let _ = append_keyed(&store, key);
         store.close().expect("close");
     }
 

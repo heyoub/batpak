@@ -23,7 +23,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let store = Store::open(config.clone())?;
     let coord = Coordinate::new("player:readonly", "room:archive")?;
-    store.append_typed(&coord, &Archived { n: 1 })?;
+    let _ = store.append_typed(&coord, &Archived { n: 1 })?;
     store.close()?;
 
     let read_only = Store::<batpak::store::ReadOnly>::open_read_only(config)?;

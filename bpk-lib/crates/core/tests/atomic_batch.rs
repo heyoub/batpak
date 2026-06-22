@@ -225,13 +225,13 @@ fn batch_oversized_item_no_partial_visibility() {
         )
         .expect("store usable after failed batch");
     assert_eq!(
-        post_failure.sequence, 1,
+        post_failure.global_sequence, 1,
         "PROPERTY: the first event after a failed batch must occupy \
          sequence 0 — the failed batch must not have burned any sequence \
          slots that would shift the next append's sequence. Got sequence \
          {}. Investigate: src/store/write/writer.rs validate_batch ordering \
          relative to reserve_sequences.",
-        post_failure.sequence
+        post_failure.global_sequence
     );
 }
 
@@ -699,7 +699,7 @@ fn batch_recovery_system_remains_coherent() {
         1,
         "entity_a should have only committed event"
     );
-    assert_eq!(entries_a[0].global_sequence(), receipt_a1.sequence);
+    assert_eq!(entries_a[0].global_sequence(), receipt_a1.global_sequence);
 
     let mut cursor_b = store.cursor_guaranteed(&Region::entity(coord_b.entity()));
     let entries_b = cursor_b.poll_batch(10);
@@ -714,7 +714,7 @@ fn batch_recovery_system_remains_coherent() {
         .append(&coord_a, EventKind::DATA, &serde_json::json!({"seq": 3}))
         .expect("append post-recovery entity_a event");
     assert!(
-        receipt_new.sequence > receipt_a1.sequence,
+        receipt_new.global_sequence > receipt_a1.global_sequence,
         "sequence should continue monotonically after recovery"
     );
 
@@ -802,7 +802,7 @@ fn batch_subscription_atomicity_no_partial_visibility() {
     let store =
         Store::open(config.clone()).expect("open baseline store for subscription atomicity");
     let sub = store.subscribe_lossy(&Region::all());
-    store
+    let _ = store
         .append(&coord, EventKind::DATA, &serde_json::json!({"pre": 1}))
         .expect("append pre-crash subscription event");
     let pre_crash_count = drain(&sub);
@@ -984,7 +984,7 @@ fn batch_cross_segment_fault_recovery() {
         )
         .expect("append event after cross-segment recovery");
     assert!(
-        new_receipt.sequence > 0,
+        new_receipt.global_sequence > 0,
         "new appends should work after cross-segment recovery"
     );
 }
@@ -1068,7 +1068,7 @@ fn single_append_fault_at_segment_rotation_recovers() {
         )
         .expect("append after segment-rotation recovery");
     assert!(
-        after_receipt.sequence > pre_receipt.sequence,
+        after_receipt.global_sequence > pre_receipt.global_sequence,
         "appends after segment-rotation recovery must be monotonic"
     );
 }
@@ -1175,7 +1175,7 @@ fn segment_rotation_new_segment_create_fault_leaves_writer_consistent() {
         )
         .expect("append after rotation-create fault must succeed on a consistent writer");
     assert!(
-        post_fault.sequence > pre_receipt.sequence,
+        post_fault.global_sequence > pre_receipt.global_sequence,
         "appends after a rotation-create fault must be monotonic — proves the \
          writer was not left half-rotated"
     );
@@ -1220,7 +1220,7 @@ fn segment_rotation_new_segment_create_fault_leaves_writer_consistent() {
         )
         .expect("append after rotation-create reopen");
     assert!(
-        after.sequence > post_fault.sequence,
+        after.global_sequence > post_fault.global_sequence,
         "appends after rotation-create reopen must be monotonic"
     );
 }
@@ -1348,7 +1348,7 @@ fn batch_publish_atomicity_concurrent_reader_sees_zero_or_all() {
     // pre_count + k * batch_size.
     let pre_count: usize = 3;
     for i in 0..pre_count {
-        store
+        let _ = store
             .append(&coord, EventKind::DATA, &serde_json::json!({"pre": i}))
             .expect("append baseline event");
     }
@@ -1696,7 +1696,7 @@ fn oversized_batch_reopens_with_sidx_entries_pointing_to_correct_segment() {
     {
         let config = StoreConfig::new(&data_dir).with_segment_max_bytes(512);
         let store = Store::open(config).expect("open store");
-        store
+        let _ = store
             .append(
                 &coord,
                 EventKind::DATA,

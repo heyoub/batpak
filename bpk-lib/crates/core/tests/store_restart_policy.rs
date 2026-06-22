@@ -17,11 +17,11 @@ fn writer_restart_once_recovers_from_panic() {
     let coord = Coordinate::new("restart:test", "restart:scope").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
 
-    store
+    let _ = store
         .append(&coord, kind, &"before_panic")
         .expect("append before panic");
     store.panic_writer_for_test().expect("send panic command");
-    store.append(&coord, kind, &"after_panic").expect(
+    let _ = store.append(&coord, kind, &"after_panic").expect(
         "RESTART FAILED: append after writer panic should succeed with RestartPolicy::Once.\n\
          Investigate: src/store/write/writer.rs writer_thread_main() catch_unwind logic.",
     );
@@ -48,11 +48,11 @@ fn writer_restart_recovers_durability_gate_after_panic() {
     let coord = Coordinate::new("restart:durable", "restart:scope").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
 
-    store
+    let _ = store
         .append(&coord, kind, &"before_panic")
         .expect("append before panic");
     store.panic_writer_for_test().expect("send panic command");
-    store
+    let _ = store
         .append(&coord, kind, &"after_panic")
         .expect("append after restart");
 
@@ -119,11 +119,11 @@ fn writer_restart_bounded_respects_limit() {
     let kind = EventKind::custom(0xF, 1);
 
     store.panic_writer_for_test().expect("first panic");
-    store
+    let _ = store
         .append(&coord, kind, &"after_panic_1")
         .expect("append after first restart");
     store.panic_writer_for_test().expect("second panic");
-    store
+    let _ = store
         .append(&coord, kind, &"after_panic_2")
         .expect("append after second restart");
     let _ = store.panic_writer_for_test();

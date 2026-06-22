@@ -51,7 +51,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         value: "30".into(),
     };
     let append_receipt = store.append_typed(&coord, &changed)?;
-    assert!(store.verify_append_receipt(&append_receipt));
+    assert!(store.verify_append_receipt(&append_receipt).is_valid());
     let _ = writeln!(out, "append receipt verified: {}", append_receipt.event_id);
 
     let mut gates = GateSet::new();
@@ -79,7 +79,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         pipeline_id: Some("example:signed_receipts".to_owned()),
         options: AppendOptions::new(),
     })?;
-    assert!(store.verify_denial_receipt(&denial_receipt));
+    assert!(store.verify_denial_receipt(&denial_receipt).is_valid());
 
     let denial_event = store.read_raw(denial_receipt.event_id)?;
     assert_eq!(

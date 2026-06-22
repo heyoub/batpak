@@ -47,7 +47,7 @@ fn cancelled_fence_hides_batch_before_and_after_reopen() {
     // several writes under it. Cancel the fence before committing.
     {
         let store = Store::open(config(&dir)).expect("open store");
-        store
+        let _ = store
             .append(&coord, FENCE_KIND, &serde_json::json!({"baseline": true}))
             .expect("append baseline");
 

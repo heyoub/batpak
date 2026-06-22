@@ -80,7 +80,7 @@ fn within_window_retry_is_always_noop_even_when_cap_is_exceeded() {
     for (key, original) in &originals {
         let replay = append_keyed(&store, *key);
         assert_eq!(
-            replay.sequence, original.sequence,
+            replay.global_sequence, original.global_sequence,
             "INV-IDEMPOTENCY-DURABLE-WINDOW: within-window key {key:#x} must always no-op regardless of load"
         );
         assert_eq!(
@@ -112,12 +112,12 @@ fn out_of_window_keys_are_trimmed_across_compaction() {
 
     // Old key recorded near the start of the sequence timeline.
     let old_key = 0xDEAD_0000_0000_0000_0000_0000_0000_0001u128;
-    append_keyed(&store, old_key);
+    let _ = append_keyed(&store, old_key);
 
     // Drive the frontier far past the window with many fresh keys.
     for i in 0..40u128 {
         let key = 0xBEEF_0000_0000_0000_0000_0000_0000_0000u128 + i;
-        append_keyed(&store, key);
+        let _ = append_keyed(&store, key);
     }
 
     let recent_key = 0xCAFE_0000_0000_0000_0000_0000_0000_0001u128;
@@ -142,7 +142,7 @@ fn out_of_window_keys_are_trimmed_across_compaction() {
     // The recent within-window key still no-ops.
     let replay = append_keyed(&store, recent_key);
     assert_eq!(
-        replay.sequence, recent.sequence,
+        replay.global_sequence, recent.global_sequence,
         "INV-IDEMPOTENCY-DURABLE-WINDOW: recent within-window key remains a no-op after aging"
     );
 
@@ -210,7 +210,7 @@ fn fail_closed_overflow_refuses_new_key_but_keeps_existing_noops() {
     for (key, original) in &originals {
         let replay = append_keyed(&store, *key);
         assert_eq!(
-            replay.sequence, original.sequence,
+            replay.global_sequence, original.global_sequence,
             "existing within-window key stays a no-op even under FailClosed cap"
         );
     }

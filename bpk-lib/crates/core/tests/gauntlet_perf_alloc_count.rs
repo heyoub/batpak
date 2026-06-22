@@ -48,7 +48,7 @@ fn single_append_stays_under_allocation_budget() {
     // Warm up: first appends touch lazily-initialized caches/segments whose
     // one-time allocations are not part of the steady-state hot path.
     for n in 0..16u32 {
-        store
+        let _ = store
             .append(&coord, KIND, &serde_json::json!({ "warm": n }))
             .expect("warmup append");
     }

@@ -112,8 +112,8 @@ fn mixed_append_and_batch_commands_complete_under_group_commit_drain() {
         (first_sequence..first_sequence + 4).collect::<Vec<_>>(),
         "PROPERTY: mixed append and batch commands must preserve contiguous visible sequencing."
     );
-    assert!(receipt_a.sequence <= first_sequence + 3);
-    assert!(receipt_b.sequence <= first_sequence + 3);
+    assert!(receipt_a.global_sequence <= first_sequence + 3);
+    assert!(receipt_b.global_sequence <= first_sequence + 3);
     assert_eq!(batch_receipts.len(), 2);
 
     let store = Arc::try_unwrap(store)
@@ -150,7 +150,7 @@ fn sync_during_group_commit_drain_preserves_completed_work() {
     barrier.wait();
     store.sync().expect("sync during drain");
     for handle in handles {
-        handle
+        let _ = handle
             .join()
             .expect("append thread")
             .expect("append receipt");
@@ -175,7 +175,7 @@ fn begin_visibility_fence_after_unfenced_drain_keeps_pre_fence_work_visible() {
     let dir = TempDir::new().expect("temp dir");
     let store = Arc::new(Store::open(command_flow_config(&dir)).expect("open store"));
     let coord = flow_coord();
-    sync_append_with_idempotency(
+    let _ = sync_append_with_idempotency(
         &store,
         &coord,
         0x1FF,
@@ -264,7 +264,7 @@ fn shutdown_auto_cancels_pending_fenced_responses_after_drain_mix() {
 
     let visible = sync_append_with_idempotency(&store, &coord, 0x300, &serde_json::json!({"n": 1}))
         .expect("visible append");
-    assert_eq!(visible.sequence, 1);
+    assert_eq!(visible.global_sequence, 1);
 
     let ticket = {
         let fence = store.begin_visibility_fence().expect("begin fence");

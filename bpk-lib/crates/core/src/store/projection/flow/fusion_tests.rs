@@ -175,9 +175,9 @@ fn fused_direct_replay_reads_shared_stream_once() -> TestResult {
     let dir = TempDir::new()?;
     let store = Store::open(StoreConfig::new(dir.path()))?;
     let coord = Coordinate::new("entity:fused-once", "scope:fused")?;
-    store.append(&coord, LEFT_KIND, &serde_json::json!({ "n": 1 }))?;
-    store.append(&coord, RIGHT_KIND, &serde_json::json!({ "n": 2 }))?;
-    store.append(&coord, RIGHT_KIND, &serde_json::json!({ "n": 3 }))?;
+    let _ = store.append(&coord, LEFT_KIND, &serde_json::json!({ "n": 1 }))?;
+    let _ = store.append(&coord, RIGHT_KIND, &serde_json::json!({ "n": 2 }))?;
+    let _ = store.append(&coord, RIGHT_KIND, &serde_json::json!({ "n": 3 }))?;
 
     reset_fused_replay_batch_reads();
     let fused: (Option<LeftCount>, Option<RightTotal>) =
@@ -203,9 +203,9 @@ fn fused_result_matches_separate_consistent_projections() -> TestResult {
     let dir = TempDir::new()?;
     let store = Store::open(StoreConfig::new(dir.path()))?;
     let coord = Coordinate::new("entity:fused-equiv", "scope:fused")?;
-    store.append(&coord, LEFT_KIND, &serde_json::json!({ "n": 1 }))?;
-    store.append(&coord, RIGHT_KIND, &serde_json::json!({ "n": 2 }))?;
-    store.append(&coord, LEFT_KIND, &serde_json::json!({ "n": 3 }))?;
+    let _ = store.append(&coord, LEFT_KIND, &serde_json::json!({ "n": 1 }))?;
+    let _ = store.append(&coord, RIGHT_KIND, &serde_json::json!({ "n": 2 }))?;
+    let _ = store.append(&coord, LEFT_KIND, &serde_json::json!({ "n": 3 }))?;
 
     let separate_left: Option<LeftCount> =
         store.project("entity:fused-equiv", &Freshness::Consistent)?;
@@ -228,9 +228,9 @@ fn fused_overlapping_kinds_match_separate_projections_and_batch_read_once() -> T
     let dir = TempDir::new()?;
     let store = Store::open(StoreConfig::new(dir.path()))?;
     let coord = Coordinate::new("entity:fused-overlap", "scope:fused")?;
-    store.append(&coord, OVERLAP_KIND, &serde_json::json!({ "n": 2 }))?;
-    store.append(&coord, NOISE_KIND, &serde_json::json!({ "n": 100 }))?;
-    store.append(&coord, OVERLAP_KIND, &serde_json::json!({ "n": 5 }))?;
+    let _ = store.append(&coord, OVERLAP_KIND, &serde_json::json!({ "n": 2 }))?;
+    let _ = store.append(&coord, NOISE_KIND, &serde_json::json!({ "n": 100 }))?;
+    let _ = store.append(&coord, OVERLAP_KIND, &serde_json::json!({ "n": 5 }))?;
 
     let separate_count: Option<OverlapCount> =
         store.project("entity:fused-overlap", &Freshness::Consistent)?;
@@ -263,9 +263,9 @@ fn fused_empty_relevant_kind_projection_matches_all_events() -> TestResult {
     let dir = TempDir::new()?;
     let store = Store::open(StoreConfig::new(dir.path()))?;
     let coord = Coordinate::new("entity:fused-match-all", "scope:fused")?;
-    store.append(&coord, LEFT_KIND, &serde_json::json!({ "n": 1 }))?;
-    store.append(&coord, RIGHT_KIND, &serde_json::json!({ "n": 2 }))?;
-    store.append(&coord, NOISE_KIND, &serde_json::json!({ "n": 3 }))?;
+    let _ = store.append(&coord, LEFT_KIND, &serde_json::json!({ "n": 1 }))?;
+    let _ = store.append(&coord, RIGHT_KIND, &serde_json::json!({ "n": 2 }))?;
+    let _ = store.append(&coord, NOISE_KIND, &serde_json::json!({ "n": 3 }))?;
 
     reset_fused_replay_batch_reads();
     let fused: (Option<MatchAllCount>, Option<RightTotal>) =
@@ -297,9 +297,9 @@ fn fused_three_projection_tuple_batch_reads_once() -> TestResult {
     let dir = TempDir::new()?;
     let store = Store::open(StoreConfig::new(dir.path()))?;
     let coord = Coordinate::new("entity:fused-three", "scope:fused")?;
-    store.append(&coord, LEFT_KIND, &serde_json::json!({ "n": 1 }))?;
-    store.append(&coord, RIGHT_KIND, &serde_json::json!({ "n": 2 }))?;
-    store.append(&coord, NOISE_KIND, &serde_json::json!({ "n": 3 }))?;
+    let _ = store.append(&coord, LEFT_KIND, &serde_json::json!({ "n": 1 }))?;
+    let _ = store.append(&coord, RIGHT_KIND, &serde_json::json!({ "n": 2 }))?;
+    let _ = store.append(&coord, NOISE_KIND, &serde_json::json!({ "n": 3 }))?;
 
     let separate_left: Option<LeftCount> =
         store.project("entity:fused-three", &Freshness::Consistent)?;

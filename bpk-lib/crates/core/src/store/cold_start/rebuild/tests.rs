@@ -84,7 +84,7 @@ fn parallel_sidx_footer_read_matches_sequential_footer_read() {
     });
 
     for n in 0..64u32 {
-        store
+        let _ = store
             .append(
                 &coord,
                 kind,
@@ -227,7 +227,7 @@ fn build_snapshot_plan_adds_chunk_when_tail_is_present() {
     let coord = Coordinate::new("entity:tail-plan", "scope:rebuild").expect("coord");
     let kind = EventKind::custom(0xE, 8);
     for n in 0..16u32 {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({ "n": n }))
             .expect("append tail event");
     }
@@ -454,7 +454,7 @@ fn open_index_skips_fast_paths_when_pending_compaction_marker_exists() {
         .expect("coord");
     let kind = crate::event::EventKind::custom(0xE, 1);
     for i in 0..20u32 {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({ "i": i }))
             .expect("append");
     }
@@ -496,7 +496,7 @@ fn collect_tail_entries_keeps_events_from_the_watermark_segment() {
     let kind = EventKind::custom(0xE, 7);
 
     for n in 0..64u32 {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({ "n": n }))
             .expect("append");
     }

@@ -180,8 +180,8 @@ fn subscription_filters_by_region_in_recv_loop() {
     let sub = store.subscribe_lossy(&region);
 
     // Append to entity:b first (should be filtered), then entity:a
-    store.append(&coord_b, kind, &"ignored").expect("append b");
-    store.append(&coord_a, kind, &"wanted").expect("append a");
+    let _ = store.append(&coord_b, kind, &"ignored").expect("append b");
+    let _ = store.append(&coord_a, kind, &"wanted").expect("append a");
 
     let notif = sub
         .filtered_receiver()
@@ -201,7 +201,7 @@ fn store_drop_without_close_persists_data() {
     // Write and drop without calling close()
     {
         let store = test_store(&dir);
-        store.append(&coord, kind, &"event1").expect("append");
+        let _ = store.append(&coord, kind, &"event1").expect("append");
         store.sync().expect("sync");
         // No close() — just drop
     }
@@ -223,7 +223,7 @@ fn segment_max_bytes_very_small_forces_frequent_rotation() {
     let kind = EventKind::custom(1, 1);
 
     for i in 0..5 {
-        store
+        let _ = store
             .append(&coord, kind, &format!("event_{i}"))
             .expect("append");
     }
@@ -288,7 +288,7 @@ fn single_append_payload_at_exact_limit_succeeds() {
     }
 
     // This append MUST succeed: payload is exactly max, check is `> max` not `>= max`.
-    store
+    let _ = store
         .append(&coord, kind, &s)
         .expect("PROPERTY: payload of exactly single_append_max_bytes must be accepted");
 
@@ -337,7 +337,7 @@ fn close_rejects_checkpoint_symlink_leaf() {
     let store = Store::open(config).expect("open");
     let coord = test_coord();
     let kind = EventKind::custom(1, 1);
-    store.append(&coord, kind, &"event").expect("append");
+    let _ = store.append(&coord, kind, &"event").expect("append");
 
     let target = dir.path().join("attacker-target.ckpt");
     std::fs::write(&target, b"sentinel").expect("write target");
@@ -401,7 +401,7 @@ fn concurrent_appends_same_entity_all_persisted() {
                 .name(format!("store-edge-concurrent-append-{t}"))
                 .spawn(move || {
                     for i in 0..n_per_thread {
-                        s.append(&c, kind, &format!("t{t}_e{i}")).expect("append");
+                        let _ = s.append(&c, kind, &format!("t{t}_e{i}")).expect("append");
                     }
                 })
                 .expect("spawn concurrent append thread")
@@ -441,7 +441,7 @@ fn compact_skips_when_below_min_segments() {
     let kind = EventKind::custom(1, 1);
 
     // Append just a few events (won't fill a segment)
-    store.append(&coord, kind, &"e1").expect("append");
+    let _ = store.append(&coord, kind, &"e1").expect("append");
     store.sync().expect("sync");
 
     // High min_segments threshold — won't trigger compaction.
@@ -468,7 +468,7 @@ fn scan_recovers_events_before_corruption() {
     {
         let store = test_store(&dir);
         for i in 0..5 {
-            store
+            let _ = store
                 .append(&coord, kind, &format!("event_{i}"))
                 .expect("append");
         }

@@ -173,19 +173,19 @@ fn multi_kind_dispatch_routes_each_kind_to_right_handler() {
         .expect("spawn");
 
     // Interleaved stream across all three kinds.
-    store
+    let _ = store
         .append_typed(&source_coord(), &PayloadA { n: 1 })
         .expect("append PayloadA n=1");
-    store
+    let _ = store
         .append_typed(&source_coord(), &PayloadB { label: "x".into() })
         .expect("append PayloadB x");
-    store
+    let _ = store
         .append_typed(&source_coord(), &PayloadA { n: 2 })
         .expect("append PayloadA n=2");
-    store
+    let _ = store
         .append_typed(&source_coord(), &PayloadC { amount: 7 })
         .expect("append PayloadC");
-    store
+    let _ = store
         .append_typed(&source_coord(), &PayloadB { label: "y".into() })
         .expect("append PayloadB y");
 
@@ -263,7 +263,7 @@ fn matched_kind_decode_failure_surfaces_reactor_error_decode() {
         .expect("spawn");
 
     // Write an event at ShapeY::KIND with a payload that will not decode.
-    store
+    let _ = store
         .append(
             &source_coord(),
             ShapeY::KIND,

@@ -70,7 +70,7 @@ fn bench_replay_lanes(c: &mut Criterion) {
     let coord = Coordinate::new("bench:replay", "bench:scope").expect("coord");
     let kind = EventKind::custom(0xF, 1);
     for i in 0u64..1_000 {
-        store
+        let _ = store
             .append(
                 &coord,
                 kind,

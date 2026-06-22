@@ -131,7 +131,7 @@ fn chaos_cas_contention() {
     let kind = EventKind::custom(0xF, 1);
 
     // First, seed with one event so sequence > 0
-    store
+    let _ = store
         .append(&coord, kind, &serde_json::json!({"seed": true}))
         .expect("seed");
 
@@ -311,7 +311,7 @@ fn chaos_subscription_write_storm() {
         .name("chaos-sub-writer".to_string())
         .spawn(move || {
             for i in 0..iterations {
-                store2
+                let _ = store2
                     .append(&coord, kind, &serde_json::json!({"i": i}))
                     .expect("append");
             }
@@ -358,7 +358,7 @@ fn chaos_cursor_completeness_concurrent() {
 
     // Write events
     for i in 0..n {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"i": i}))
             .expect("append");
     }

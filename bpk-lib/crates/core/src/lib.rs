@@ -27,7 +27,7 @@
 //! hash-chain ancestry with
 //! [`Store::walk_ancestors`](crate::store::Store::walk_ancestors), verify
 //! receipts with
-//! [`Store::verify_append_receipt_detailed`](crate::store::Store::verify_append_receipt_detailed),
+//! [`Store::verify_append_receipt`](crate::store::Store::verify_append_receipt),
 //! project derived state with [`Store::project`](crate::store::Store::project),
 //! then close the store. Gates and [`Pipeline`](crate::pipeline::Pipeline) are
 //! advanced batteries for caller-owned evaluation before commit.

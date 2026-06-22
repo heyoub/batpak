@@ -179,7 +179,7 @@ fn replay_read_alloc_cost(n: u64) -> u64 {
     let store = Store::open(StoreConfig::new(dir.path())).expect("open store");
     let coord = Coordinate::new("entity:cplx", "scope:exp").expect("valid coordinate");
     for i in 0..n {
-        store
+        let _ = store
             .append(&coord, KIND, &serde_json::json!({ "i": i }))
             .expect("append");
     }

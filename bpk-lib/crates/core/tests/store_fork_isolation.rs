@@ -31,7 +31,7 @@ fn append_blob_events(store: &Store, entity: &str, count: usize) -> TestResult {
     let kind = EventKind::custom(0xF, 0x71);
     let blob = "x".repeat(300);
     for i in 0..count {
-        store.append(&coord, kind, &serde_json::json!({"i": i, "blob": blob}))?;
+        let _ = store.append(&coord, kind, &serde_json::json!({"i": i, "blob": blob}))?;
     }
     Ok(())
 }
@@ -140,7 +140,7 @@ fn fork_idempotency_store_is_copied_not_shared() -> TestResult {
     let key_y = IdempotencyKey::for_operation("fork-idemp", &["y"]);
 
     // Seed key X into the parent BEFORE the fork.
-    store.append_with_options(
+    let _ = store.append_with_options(
         &coord,
         kind,
         &serde_json::json!({"k": "x"}),
@@ -151,7 +151,7 @@ fn fork_idempotency_store_is_copied_not_shared() -> TestResult {
     store.fork(fork_dir.path())?;
 
     // Mutate the PARENT's idempotency authority AFTER the fork by recording key Y.
-    store.append_with_options(
+    let _ = store.append_with_options(
         &coord,
         kind,
         &serde_json::json!({"k": "y"}),

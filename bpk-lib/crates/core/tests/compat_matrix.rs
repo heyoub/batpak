@@ -157,7 +157,7 @@ fn seed_events(dir: &Path, format: &str, count: u32) {
         Coordinate::new("entity:compat", "scope:compat-matrix").expect("valid compat coordinate");
     let kind = EventKind::custom(0xF, 7);
     for i in 0..count {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({ "i": i }))
             .expect("append compat seed event");
     }

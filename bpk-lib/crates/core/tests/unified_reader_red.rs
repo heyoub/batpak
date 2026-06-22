@@ -18,7 +18,7 @@ fn sealed_segment_reads_via_mmap() {
     let store = Store::open(config).expect("open");
     let coord = test_coord();
     for i in 0u32..50 {
-        store.append(&coord, kind_a(), &payload(i)).expect("append");
+        let _ = store.append(&coord, kind_a(), &payload(i)).expect("append");
     }
     store.sync().expect("sync");
     let entries = store.by_entity("entity:test");
@@ -72,7 +72,7 @@ fn evict_mmap_before_compaction_delete() {
     let store = Store::open(config).expect("open");
     let coord = test_coord();
     for i in 0u32..50 {
-        store.append(&coord, kind_a(), &payload(i)).expect("append");
+        let _ = store.append(&coord, kind_a(), &payload(i)).expect("append");
     }
     store.sync().expect("sync");
     let result = store

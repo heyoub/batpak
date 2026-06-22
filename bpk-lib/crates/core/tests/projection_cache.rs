@@ -296,10 +296,10 @@ mod native_tests {
 
         let coord = Coordinate::new("entity:native1", "scope:test").expect("coord");
         let kind = EventKind::custom(0xF, 1);
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"x": 1}))
             .expect("append 1");
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"x": 2}))
             .expect("append 2");
 
@@ -320,7 +320,7 @@ mod native_tests {
         assert_eq!(result2, Some(MaybeStaleCounter { count: 2 }));
 
         // Append more → cache should be stale → re-replay
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"x": 3}))
             .expect("append 3");
         let result3: Option<MaybeStaleCounter> = store
@@ -348,10 +348,10 @@ mod native_tests {
         {
             let store =
                 Store::open_with_native_cache(config.clone(), &cache_path).expect("open store");
-            store
+            let _ = store
                 .append(&coord, kind, &serde_json::json!({"x": 1}))
                 .expect("append 1");
-            store
+            let _ = store
                 .append(&coord, kind, &serde_json::json!({"x": 2}))
                 .expect("append 2");
             let _: Option<MaybeStaleCounter> = store

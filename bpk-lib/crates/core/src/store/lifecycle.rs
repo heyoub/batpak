@@ -60,7 +60,7 @@ fn append_close_completed_event(store: &Store<Open>) -> Result<(), StoreError> {
     // Cooperative mode: drive the queued command inline before awaiting its
     // reply (no-op under the threaded path).
     store.writer_handle()?.pump();
-    crate::store::recv_writer_reply(&rx)?;
+    let _ = crate::store::recv_writer_reply(&rx)?;
     Ok(())
 }
 

@@ -73,7 +73,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let store = Store::open(StoreConfig::new(dir.path()))?;
     let coord = Coordinate::new("counter:raw", "example")?;
 
-    store.append(
+    let _ = store.append(
         &coord,
         INCREMENTED,
         &Delta {
@@ -81,7 +81,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             reason: "signup".into(),
         },
     )?;
-    store.append(
+    let _ = store.append(
         &coord,
         DECREMENTED,
         &Delta {
@@ -89,7 +89,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             reason: "cleanup".into(),
         },
     )?;
-    store.append(
+    let _ = store.append(
         &coord,
         INCREMENTED,
         &Delta {

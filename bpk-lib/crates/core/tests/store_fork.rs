@@ -36,7 +36,7 @@ fn append_blob_events(store: &Store, entity: &str, count: usize) -> TestResult {
     let kind = EventKind::custom(0xF, 0x71);
     let blob = "x".repeat(300);
     for i in 0..count {
-        store.append(&coord, kind, &serde_json::json!({"i": i, "blob": blob}))?;
+        let _ = store.append(&coord, kind, &serde_json::json!({"i": i, "blob": blob}))?;
     }
     Ok(())
 }
@@ -355,7 +355,7 @@ fn fork_deep_copies_idempotency_and_visibility_authorities() -> TestResult {
     let store = store_with_small_segments(&source_dir)?;
     let coord = Coordinate::new("entity:fork:authorities", "scope:fork")?;
     let kind = EventKind::custom(0xF, 0x73);
-    store.append_with_options(
+    let _ = store.append_with_options(
         &coord,
         kind,
         &serde_json::json!({"keyed": true}),

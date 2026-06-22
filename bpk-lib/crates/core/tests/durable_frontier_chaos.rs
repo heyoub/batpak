@@ -80,7 +80,7 @@ fn config_with_panic(dir: &TempDir, target: InjectionPoint) -> (StoreConfig, Arc
 fn append_baseline(store: &Store, prefix: &str) -> HlcPoint {
     for n in 0..2 {
         let coord = coord(&format!("entity:{prefix}:baseline-{n}"));
-        store
+        let _ = store
             .append(&coord, kind(), &serde_json::json!({"baseline": n}))
             .expect("append baseline event");
     }

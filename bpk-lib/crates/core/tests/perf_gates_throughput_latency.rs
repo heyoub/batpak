@@ -160,7 +160,7 @@ fn multi_gate_performance_feedback() {
     // Measure write throughput
     let write_start = Instant::now();
     for i in 0..n {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"i": i}))
             .expect("append");
     }
@@ -329,7 +329,7 @@ fn append_throughput_gate() {
 
     let start = Instant::now();
     for i in 0..n {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"i": i}))
             .expect("append");
     }
@@ -382,7 +382,7 @@ fn projection_latency_gate() {
     let n = 1_000u64;
 
     for i in 0..n {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"i": i}))
             .expect("append");
     }
@@ -438,7 +438,7 @@ fn projection_cold_path_gate() {
     let n = 1_000u64;
 
     for i in 0..n {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"i": i}))
             .expect("append");
     }

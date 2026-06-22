@@ -98,7 +98,7 @@ fn control_plane_surface_smoke() {
         .submit(&coord, kind, &serde_json::json!({"n": 1}))
         .expect("submit");
     let receipt = wait_append_ticket(&ticket, "control-plane submit").expect("wait");
-    assert_eq!(receipt.sequence, 1);
+    assert_eq!(receipt.global_sequence, 1);
 
     let reaction_ticket = store
         .submit_reaction(
@@ -111,14 +111,14 @@ fn control_plane_surface_smoke() {
         .expect("submit reaction");
     let reaction = wait_append_ticket(&reaction_ticket, "control-plane submit reaction")
         .expect("wait reaction");
-    assert_eq!(reaction.sequence, 2);
+    assert_eq!(reaction.global_sequence, 2);
 
     let outcome = store
         .try_submit(&coord, kind, &serde_json::json!({"n": 3}))
         .expect("try_submit");
     let ticket: AppendTicket = outcome.into_result().expect("ok outcome");
     let receipt = wait_append_ticket(&ticket, "control-plane try_submit").expect("wait try_submit");
-    assert_eq!(receipt.sequence, 3);
+    assert_eq!(receipt.global_sequence, 3);
 
     let try_reaction = store
         .try_submit_reaction(
@@ -243,7 +243,7 @@ fn control_plane_surface_smoke() {
         *count += 1;
         Some(*count)
     });
-    store
+    let _ = store
         .append(&coord, kind, &serde_json::json!({"n": 11}))
         .expect("append for scan");
     let folded_count =
@@ -270,7 +270,7 @@ fn control_plane_surface_smoke() {
         "generation gate should skip unchanged entities"
     );
 
-    store
+    let _ = store
         .append(&coord, kind, &serde_json::json!({"n": 12}))
         .expect("append after projection");
     let changed = store
@@ -344,7 +344,7 @@ fn control_plane_surface_smoke() {
     );
     let visible_after_cancel = store.by_fact(kind).len();
     let stream_after_cancel = store.by_entity("entity:control").len();
-    store
+    let _ = store
         .append(&coord, kind, &serde_json::json!({"n": 15.5}))
         .expect("append after cancelled fence");
     assert_eq!(
@@ -369,7 +369,7 @@ fn control_plane_surface_smoke() {
             |_batch, _store, _witness| CursorWorkerAction::Stop,
         )
         .expect("spawn cursor worker");
-    store
+    let _ = store
         .append(&coord, kind, &serde_json::json!({"n": 13}))
         .expect("append for cursor worker");
     worker.stop_and_join().expect("stop and join cursor worker");

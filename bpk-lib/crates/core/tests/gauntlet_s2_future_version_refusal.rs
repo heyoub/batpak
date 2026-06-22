@@ -46,7 +46,7 @@ fn seed_store(dir: &TempDir, count: u32) {
     let coord = Coordinate::new("entity:s2", "scope:future-version").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
     for i in 0..count {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({ "i": i }))
             .expect("append seed event");
     }

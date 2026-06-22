@@ -71,7 +71,7 @@ fn cursor_resumes_from_checkpoint_across_reopen() {
         let first_pass_seen = Arc::new(Mutex::new(Vec::<u64>::new()));
         let store = Arc::new(Store::open(config(&dir)).expect("open store"));
         for i in 0..100u32 {
-            store
+            let _ = store
                 .append(&coord, KIND, &serde_json::json!({"i": i}))
                 .expect("seed append");
         }
@@ -136,7 +136,7 @@ fn cursor_resumes_from_checkpoint_across_reopen() {
     {
         let store = Arc::new(Store::open(config(&dir)).expect("reopen store"));
         for i in 100..150u32 {
-            store
+            let _ = store
                 .append(&coord, KIND, &serde_json::json!({"i": i}))
                 .expect("post-reopen append");
         }
@@ -229,7 +229,7 @@ fn durable_cursor_worker_state_machine_preserves_last_committed_checkpoint() {
     let store = Arc::new(Store::open(config(&dir)).expect("open store"));
 
     for i in 0..5u32 {
-        store
+        let _ = store
             .append(&coord, KIND, &serde_json::json!({"i": i}))
             .expect("seed append");
     }

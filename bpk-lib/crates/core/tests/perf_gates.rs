@@ -66,7 +66,7 @@ fn populate_single_entity_corpus(config: StoreConfig, count: u64) {
     let coord = Coordinate::new("perf:single", "perf:scope").expect("coord");
     let kind = EventKind::custom(0xF, 1);
     for i in 0..count {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"i": i}))
             .expect("append");
     }
@@ -83,7 +83,7 @@ fn populate_mixed_entity_corpus(config: StoreConfig, entity_count: u64, per_enti
         )
         .expect("coord");
         for seq in 0..per_entity {
-            store
+            let _ = store
                 .append(
                     &coord,
                     kind,

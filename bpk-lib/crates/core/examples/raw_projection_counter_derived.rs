@@ -65,21 +65,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let store = Store::open(StoreConfig::new(dir.path()))?;
     let coord = Coordinate::new("counter:raw-derived", "example")?;
 
-    store.append_typed(
+    let _ = store.append_typed(
         &coord,
         &Incremented {
             amount: 1,
             reason: "page view".into(),
         },
     )?;
-    store.append_typed(
+    let _ = store.append_typed(
         &coord,
         &Incremented {
             amount: 5,
             reason: "bulk import".into(),
         },
     )?;
-    store.append_typed(
+    let _ = store.append_typed(
         &coord,
         &Decremented {
             amount: -2,

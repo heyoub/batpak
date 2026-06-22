@@ -103,7 +103,7 @@ fn react_loop_spawns_and_processes() {
 
     // Append a trigger event
     let coord = Coordinate::new("entity:trigger", "scope:test").expect("valid coord");
-    store
+    let _ = store
         .append(
             &coord,
             EventKind::custom(0xA, 1),
@@ -220,7 +220,7 @@ fn reactive_subscribe_react_append_pattern() {
 
     // Append reactions via append_reaction (the causal link)
     for (react_coord, react_kind, react_payload) in reactions {
-        store
+        let _ = store
             .append_reaction(
                 &react_coord,
                 react_kind,

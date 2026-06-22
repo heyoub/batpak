@@ -59,7 +59,7 @@ fn compaction_report_skipped_is_deterministic() {
     let (_dir, store) = lane_store();
     let coord = Coordinate::new("e", "s").expect("coord");
     let kind = EventKind::custom(0xF, 1);
-    store
+    let _ = store
         .append(&coord, kind, &serde_json::json!({ "x": 1 }))
         .expect("append");
     store.sync().expect("sync");
@@ -89,7 +89,7 @@ fn compact_merge_evidence_has_sorted_sources_stable_body_hash_and_output_digest(
     let kind = EventKind::custom(0xF, 0x41);
 
     for i in 0..12 {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"i": i}))
             .expect("append");
     }
@@ -237,7 +237,7 @@ fn idempotency_keyed_batch_double_submit_returns_cached_receipts_without_reopen(
     );
     for (a, b) in r1.iter().zip(r2.iter()) {
         assert_eq!(a.event_id, b.event_id);
-        assert_eq!(a.sequence, b.sequence);
+        assert_eq!(a.global_sequence, b.global_sequence);
     }
     store.close().expect("close");
 }
@@ -248,7 +248,7 @@ fn idempotency_batch_partial_cache_rejected_instead_of_silent_success() {
     let coord = Coordinate::new("e-partial", "s").expect("coord");
     let kind = EventKind::custom(0xF, 0x43);
     let existing_key = 0xE0_E1_E2_E3_E4_E5_E6_E7_u128;
-    store
+    let _ = store
         .append_with_options(
             &coord,
             kind,
@@ -317,7 +317,7 @@ fn idempotency_key_is_event_id_scoped_global_lookup() {
         .expect("replay");
 
     assert_eq!(r1.event_id, r2.event_id);
-    assert_eq!(r1.sequence, r2.sequence);
+    assert_eq!(r1.global_sequence, r2.global_sequence);
     store.close().expect("close");
 }
 

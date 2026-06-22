@@ -166,7 +166,7 @@ fn idempotent_replay_preserves_original_position_hint() {
         .expect("idempotent replay");
 
     assert_eq!(replay.event_id, first.event_id);
-    assert_eq!(replay.sequence, first.sequence);
+    assert_eq!(replay.global_sequence, first.global_sequence);
 
     let stored = store
         .get(first.event_id)

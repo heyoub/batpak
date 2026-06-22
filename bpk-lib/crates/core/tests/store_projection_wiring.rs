@@ -60,7 +60,7 @@ fn project_calls_prefetch_only_when_supported() {
     let store = Store::open_with_cache(config, Box::new(cache)).expect("open store with cache");
     let coord = Coordinate::new("entity:pf", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
-    store
+    let _ = store
         .append(&coord, kind, &serde_json::json!({"data": 1}))
         .expect("append");
 
@@ -110,7 +110,7 @@ fn first_projection_report_can_lower_overstated_applied_frontier() {
     let kind = EventKind::custom(0xF, 2);
 
     for n in 1..=5 {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({ "n": n }))
             .expect("append projection progress event");
     }

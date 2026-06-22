@@ -70,10 +70,10 @@ fn fence_drop_without_commit_auto_cancels() {
         .append(&coord, kind, &serde_json::json!({"after_drop": true}))
         .expect("append after fence drop");
     assert!(
-        receipt.sequence >= 1,
+        receipt.global_sequence >= 1,
         "PROPERTY: store must be usable after an auto-cancelled fence drop. \
          Got sequence {}, expected >= 1.",
-        receipt.sequence
+        receipt.global_sequence
     );
 
     store.close().expect("close store");

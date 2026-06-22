@@ -425,7 +425,7 @@ fn errors_propagate_not_launder_to_defaults() {
     // CAS failure must return SequenceMismatch, not silently succeed
     let coord = test_coord();
     let kind = EventKind::custom(1, 1);
-    store.append(&coord, kind, &"seed").expect("seed");
+    let _ = store.append(&coord, kind, &"seed").expect("seed");
 
     let opts = AppendOptions {
         expected_sequence: Some(999), // wrong sequence
@@ -495,15 +495,15 @@ fn commutativity_independent_entity_appends() {
     // Order 1: A then B
     {
         let store = Store::open(StoreConfig::new(dir1.path())).expect("open");
-        store.append(&coord_a, kind, &"a1").expect("a1");
-        store.append(&coord_b, kind, &"b1").expect("b1");
+        let _ = store.append(&coord_a, kind, &"a1").expect("a1");
+        let _ = store.append(&coord_b, kind, &"b1").expect("b1");
         store.close().expect("close");
     }
     // Order 2: B then A
     {
         let store = Store::open(StoreConfig::new(dir2.path())).expect("open");
-        store.append(&coord_b, kind, &"b1").expect("b1");
-        store.append(&coord_a, kind, &"a1").expect("a1");
+        let _ = store.append(&coord_b, kind, &"b1").expect("b1");
+        let _ = store.append(&coord_a, kind, &"a1").expect("a1");
         store.close().expect("close");
     }
 
@@ -608,11 +608,11 @@ fn totality_projection_handles_unknown_event_kinds() {
     let known_kind = EventKind::custom(1, 1);
     let unknown_kind = EventKind::custom(2, 99); // not in relevant_event_kinds
 
-    store.append(&coord, known_kind, &"known").expect("known");
-    store
+    let _ = store.append(&coord, known_kind, &"known").expect("known");
+    let _ = store
         .append(&coord, unknown_kind, &"unknown")
         .expect("unknown");
-    store.append(&coord, known_kind, &"known2").expect("known2");
+    let _ = store.append(&coord, known_kind, &"known2").expect("known2");
 
     // This must not panic even though unknown_kind isn't in relevant_event_kinds
     let result: Option<StrictCounter> = store
@@ -718,7 +718,7 @@ fn store_drop_drains_pending_events() {
     {
         let store = Store::open(StoreConfig::new(dir.path())).expect("open");
         for i in 0..10 {
-            store
+            let _ = store
                 .append(&coord, kind, &serde_json::json!({"i": i}))
                 .expect("append");
         }

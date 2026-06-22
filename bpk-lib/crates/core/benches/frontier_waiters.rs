@@ -75,7 +75,7 @@ fn point_after(store: &Store, sequence_offset: usize) -> HlcPoint {
 }
 
 fn append_one(store: &Store, coord: &Coordinate, kind: EventKind, i: usize) {
-    store
+    let _ = store
         .append(coord, kind, &serde_json::json!({ "i": i }))
         .expect("append benchmark event");
 }
