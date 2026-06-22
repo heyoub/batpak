@@ -421,13 +421,13 @@
     - ART-CHAOS-DM-FLAKEY
     - ART-ADR-CHAOS-HARNESS
 - id: INV-ALLOW-IS-DESIGN
-  statement: "Every `#[allow(...)]` in the repo is a deliberate design decision, not a silencer. The allow carries a `// justifies <prose>` comment on the same or preceding line that cites at least one resolvable anchor — an INV-id from this catalog, an `ADR-NNNN` root ADR file, or a concrete repo path (`crates/core/src/...`, `crates/core/tests/...`, `crates/core/examples/...`, `crates/macros/...`, `crates/macros-support/...`) — so the rationale is traceable, not narrative-only."
+  statement: "The repo contains ZERO `#[allow(...)]`/`#![allow(...)]`/`#[expect(...)]` attributes. Clippy and rustc findings are FIXED, never silenced; structural-check fails on any allow/expect attribute in tracked source. The ONLY permitted occurrences are the raw-string test fixtures inside the allow-silencer detector itself (crates/core/build_support/shared_checks.rs), which are string data, not attributes."
   artifacts:
     - ART-DOCTOR
     - ART-STRUCTURAL-CHECK
     - ART-BUILD-RS
 - id: INV-EXAMPLES-OBSERVABLE-OUTPUT
-  statement: "Examples in crates/core/examples/*.rs prove shipped behaviour by producing observable stdout/stderr output that a reader can see; print_stdout, print_stderr, wildcard match arms over enums, and bounded integer narrowing in teaching fixtures are expected for that role. The Teaches-header convention keeps each example focused on a single pattern."
+  statement: "Examples emit output via `writeln!(std::io::stdout().lock(), ..)` (the explicit Write API), not the println!/print! macros; no print allow is used."
   artifacts:
     - ART-EXAMPLES
 - id: INV-MACRO-BOUNDED-CAST
@@ -443,12 +443,12 @@
   artifacts:
     - ART-DOCTOR
 - id: INV-TEST-PANIC-AS-ASSERTION
-  statement: "Test bodies under crates/core/tests/ use panic!, unwrap, and expect as the assertion style — when a test precondition, fixture setup, or invariant check fails, the panic is the test failure signal. File-level #![allow(clippy::unwrap_used, clippy::panic)] is the acceptable scope for this idiom. Tests using panic! for invariant failures and test-local FaultInjector impls that panic in writer threads must opt out of clippy::panic at module scope and document the exception in a leading \"justifies:\" comment."
+  statement: "Test bodies signal failure via assert!/assert!(matches!(..))/expect/expect_err/`#[test] -> Result`. panic! is not used as an assertion (use assert!), unwrap is not used (use expect). No file-level or item-level allow is permitted in tests."
   artifacts:
     - ART-TESTS
     - ART-FRONTIER-CHAOS-TESTS
 - id: INV-BUILD-FAIL-FAST
-  statement: "crates/core/build.rs halts the build on invariant violations with a cargo-parseable explanation. Panic sites are consolidated through the crate-private fail helper so the policy is expressed in one place; the file-level #![allow(clippy::panic)] attribute covers that single documented exit path."
+  statement: "crates/core/build.rs halts the build on invariant violations by returning Err from `fn main() -> Result<(), String>` with a cargo-parseable explanation (the crate-private `fail` helper builds the message). No allow attribute is used."
   artifacts:
     - ART-BUILD-RS
 - id: INV-TYPESTATE-OPEN-HAS-WRITER

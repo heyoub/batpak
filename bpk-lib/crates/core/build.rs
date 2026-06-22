@@ -473,14 +473,14 @@ fn check_no_dead_code_silencers_inner() -> Result<shared_checks::LintCounts, Str
                 continue;
             }
             return Err(fail(&format!(
-                    "dead_code silencers are not tolerated in this repo: {rel}:{}:{}\n\
-                     Found `{}`.\n\
+                    "zero-allow policy (INV-ALLOW-IS-DESIGN): remove the #[allow]; fix the lint instead — see the INV.\n\
+                     Found `{}` in {rel}:{}:{}.\n\
+                     The repo permits NO #[allow(...)]/#![allow(...)]/#[expect(...)] attributes.\n\
                      If code is test-only, use #[cfg(test)]. If it is unused, delete it.\n\
-                     If it is shared infrastructure, restructure it so the compiler sees the real ownership surface.\n\
-                     If this is the rare legitimate exception, add `{allowlist_site}` to traceability/dead_code_silencer_allowlist.yaml with `reason` and `adr`.",
+                     If it is shared infrastructure, restructure it so the compiler sees the real ownership surface.",
+                    site.rendered,
                     site.line,
                     site.column,
-                    site.rendered,
                 )));
         }
         Ok(())
@@ -488,9 +488,11 @@ fn check_no_dead_code_silencers_inner() -> Result<shared_checks::LintCounts, Str
     Ok(counts)
 }
 
-/// INV-ALLOW-IS-DESIGN enforcement: every #[allow(...)] in runtime or
-/// toolchain Rust code must carry a structured `// justifies:` comment with
-/// >= 5 words AND >= 1 resolvable anchor (INV-id, ADR-NNNN, or repo path).
+/// INV-ALLOW-IS-DESIGN enforcement (zero-allow doctrine): the repo permits NO
+/// `#[allow(...)]`/`#![allow(...)]`/`#[expect(...)]` attribute. This is a HARD
+/// BAN — clippy/rustc findings are FIXED, never silenced. Routes through the same
+/// AST-based detector as the dead-code gate, so raw-string fixtures are excluded
+/// and multi-line/cfg_attr-wrapped attributes are caught.
 fn check_allow_justifications() -> shared_checks::LintCounts {
     // `run_surface_lint` fixes the `fn() -> LintCounts` signature; the fallible
     // body lives in the inner fn and a violation aborts at this single boundary.
@@ -498,9 +500,6 @@ fn check_allow_justifications() -> shared_checks::LintCounts {
 }
 
 fn check_allow_justifications_inner() -> Result<shared_checks::LintCounts, String> {
-    let repo_root = repo_root();
-    let known_invariants =
-        shared_checks::load_known_invariants(&repo_root).map_err(|err| fail(&err))?;
     let mut counts = shared_checks::LintCounts {
         files_examined: 0,
         assertions_run: 0,
@@ -509,38 +508,25 @@ fn check_allow_justifications_inner() -> Result<shared_checks::LintCounts, Strin
     walk_allow_checked_rs_files(&mut |path, contents| {
         counts.files_examined += 1;
         counts.inputs.insert(path.to_path_buf());
+        // One "no allow/expect attribute" assertion per file scanned.
+        counts.assertions_run += 1;
         let path_str = repo_relative_display(path);
-        let lines: Vec<&str> = contents.lines().collect();
-        for (line_no, line) in lines.iter().enumerate() {
-            let trimmed = line.trim();
-            if trimmed.starts_with("#![allow(") || trimmed.starts_with("#[allow(") {
-                // Each `#[allow]`/`#![allow]` site is one justification assertion.
-                counts.assertions_run += 1;
-                let has_justification =
-                    shared_checks::line_carries_justification(line, &repo_root, &known_invariants)
-                        || (line_no > 0
-                            && lines
-                                .get(line_no - 1)
-                                .map(|prev| {
-                                    shared_checks::line_carries_justification(
-                                        prev,
-                                        &repo_root,
-                                        &known_invariants,
-                                    )
-                                })
-                                .unwrap_or(false));
-                if !has_justification {
-                    return Err(fail(&format!(
-                        "ROGUE SILENCE in {path_str}:{}: `{trimmed}`\n\
-                         Every #[allow(...)] must carry a `// justifies: <>=5 words + >=1 resolvable anchor>`\n\
-                         comment on the same or preceding line. Anchors: INV-<NAME> from\n\
-                         traceability/invariants.yaml, ADR-NNNN from root ADR files, or a concrete repo path\n\
-                         (src/..., tests/..., examples/..., crates/macros/..., crates/macros-support/...,\n\
-                         benches/..., tools/..., build.rs). See INV-ALLOW-IS-DESIGN.",
-                        line_no + 1
-                    )));
-                }
-            }
+        let sites = shared_checks::collect_dead_code_silencer_sites(contents).map_err(|err| {
+            fail(&format!(
+                "cannot parse {path_str} while checking the zero-allow policy: {err}"
+            ))
+        })?;
+        if let Some(site) = sites.into_iter().next() {
+            // Each found allow/expect site is an additional assertion.
+            counts.assertions_run += 1;
+            return Err(fail(&format!(
+                "zero-allow policy (INV-ALLOW-IS-DESIGN): remove the #[allow]; fix the lint instead — see the INV.\n\
+                 Found `{}` in {path_str}:{}:{}.\n\
+                 The repo permits NO #[allow(...)]/#![allow(...)]/#[expect(...)] attributes.",
+                site.rendered,
+                site.line,
+                site.column,
+            )));
         }
         Ok(())
     })?;

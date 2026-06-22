@@ -11,9 +11,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use super::shared_checks::{
-    extract_anchors, load_known_invariants, resolve_anchor, JustifiesAnchor,
-};
+use super::anchors::{extract_anchors, load_known_invariants, resolve_anchor, JustifiesAnchor};
 
 #[derive(Debug, Deserialize)]
 struct InvariantRecord {

@@ -2,10 +2,7 @@ use crate::repo_surface::{
     core_benches_root, core_examples_root, core_src_root, core_tests_root, ensure,
     production_rust_roots, relative, repo_root, rust_files, tracked_repo_files,
 };
-use crate::shared_checks::{
-    collect_dead_code_silencer_sites, line_carries_justification,
-    load_dead_code_silencer_allowlist, load_known_invariants,
-};
+use crate::shared_checks::{collect_dead_code_silencer_sites, load_dead_code_silencer_allowlist};
 use crate::source_cache::SourceCache;
 use crate::{
     agent_surface, architecture_lints, ci_parity, complexity, docs_catalog, glob_coverage,
@@ -628,16 +625,15 @@ fn check_no_dead_code_silencers_over(
                 continue;
             }
             bail!(
-                "dead_code silencers are not tolerated in {}:{}:{}.\n\
-                 Found `{}`.\n\
+                "zero-allow policy (INV-ALLOW-IS-DESIGN): remove the #[allow]; fix the lint instead — see the INV.\n\
+                 Found `{}` in {}:{}:{}.\n\
+                 The repo permits NO #[allow(...)]/#![allow(...)]/#[expect(...)] attributes.\n\
                  If code is test-only, use #[cfg(test)]. If it is unused, delete it.\n\
-                 If it is shared infrastructure, restructure it so the compiler sees the real ownership surface.\n\
-                 If this is the rare legitimate exception, add `{}` to traceability/dead_code_silencer_allowlist.yaml with `reason` and `adr`.",
+                 If it is shared infrastructure, restructure it so the compiler sees the real ownership surface.",
+                site.rendered,
                 relative(repo_root, path),
                 site.line,
                 site.column,
-                site.rendered,
-                allowlist_site,
             );
         }
     }
@@ -655,62 +651,35 @@ fn check_allow_justifications(repo_root: &Path, source_cache: &mut SourceCache) 
     check_allow_justifications_over(repo_root, &paths, source_cache)
 }
 
-/// Testable core of [`check_allow_justifications`]: assert every lint-suppression
-/// attribute in `paths` carries a resolvable `// justifies:` anchor. Split out so
-/// a RED fixture can run the gate over a planted temp tree.
+/// Testable core of [`check_allow_justifications`]: under the zero-allow
+/// doctrine (INV-ALLOW-IS-DESIGN) there are no allows to justify. This is now a
+/// HARD BAN — any `#[allow(...)]`/`#![allow(...)]`/`#[expect(...)]` attribute in
+/// `paths` (including cfg_attr-wrapped) fails. It routes through the same
+/// AST-based detector as the dead-code gate, so raw-string fixtures are
+/// correctly excluded and multi-line attributes are caught. The gate name and
+/// signature are kept stable for build.rs `run_surface_lint` and the RED
+/// fixtures. Split out so a RED fixture can run the gate over a planted temp tree.
 fn check_allow_justifications_over(
     repo_root: &Path,
     paths: &[PathBuf],
     source_cache: &mut SourceCache,
 ) -> Result<()> {
-    let known_invariants = load_known_invariants(repo_root).map_err(|err| anyhow!(err))?;
     for path in paths {
         let content = source_cache.read_to_string(path)?;
-        let lines: Vec<&str> = content.lines().collect();
-        let mut index = 0;
-        while index < lines.len() {
-            let start_index = index;
-            let line = lines[index];
-            let trimmed = line.trim();
-            let mut attr_text = trimmed.to_owned();
-            let starts_suppression_attr = trimmed.starts_with("#![allow(")
-                || trimmed.starts_with("#[allow(")
-                || trimmed.starts_with("#![expect(")
-                || trimmed.starts_with("#[expect(")
-                || trimmed.starts_with("#![cfg_attr(")
-                || trimmed.starts_with("#[cfg_attr(");
-            if starts_suppression_attr {
-                while attr_text.contains("cfg_attr(")
-                    && !attr_text.contains(']')
-                    && index + 1 < lines.len()
-                {
-                    index += 1;
-                    attr_text.push('\n');
-                    attr_text.push_str(lines[index].trim());
-                }
-            }
-            if starts_suppression_attr
-                && (attr_text.contains("allow(") || attr_text.contains("expect("))
-            {
-                let justified = line_carries_justification(line, repo_root, &known_invariants)
-                    || start_index
-                        .checked_sub(1)
-                        .and_then(|prev| lines.get(prev))
-                        .map(|prev| line_carries_justification(prev, repo_root, &known_invariants))
-                        .unwrap_or(false);
-                ensure(
-                    justified,
-                    format!(
-                        "unjustified lint suppression in {}:{} — every #[allow(...)], #[expect(...)], or cfg_attr-wrapped allow/expect must carry a `// justifies: <>=5 words + >=1 resolvable anchor>` comment. \
-                         An anchor is an INV-id from traceability/invariants.yaml, an ADR-NNNN whose file exists as a root ADR file, \
-                         or a concrete repo path (src/..., tests/..., examples/..., crates/macros/..., crates/macros-support/..., benches/..., tools/..., build.rs). \
-                        See INV-ALLOW-IS-DESIGN.",
-                        relative(repo_root, path),
-                        start_index + 1
-                    ),
-                )?;
-            }
-            index += 1;
+        let sites = collect_dead_code_silencer_sites(&content)
+            .map_err(|err| anyhow!("parse {}: {}", relative(repo_root, path), err))?;
+        if let Some(site) = sites.into_iter().next() {
+            ensure(
+                false,
+                format!(
+                    "zero-allow policy (INV-ALLOW-IS-DESIGN): remove the #[allow]; fix the lint instead — see the INV. \
+                     Found `{}` in {}:{}:{}. The repo permits NO #[allow(...)]/#![allow(...)]/#[expect(...)] attributes.",
+                    site.rendered,
+                    relative(repo_root, path),
+                    site.line,
+                    site.column,
+                ),
+            )?;
         }
     }
     Ok(())
