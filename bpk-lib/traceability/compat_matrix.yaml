@@ -102,19 +102,32 @@ rows:
     fixture_path: index.idemp
 
   # ── visibility-ranges (visibility_ranges.fbv) ────────────────────────────
-  # Backward: own-version cancelled-ranges metadata restores on open.
+  # Self-row: own-version (live VISIBILITY_RANGES_VERSION = 2) cancelled-ranges
+  # metadata restores on open. The v1→v2 bump added an optional `lane_ranges`
+  # field with `#[serde(default)]`, so the body is version-number-only
+  # compatible (a v1-shaped body decodes at v2 with empty lane ranges).
   - format: visibility-ranges
-    writer_version: 1
-    reader_version: 1
+    writer_version: 2
+    reader_version: 2
     feature_bits: 0
     expected_outcome: OpensOK
     fixture_path: visibility_ranges.fbv
-  # Forward: a future-version artifact is a DISTINCT canonical refusal (not the
-  # remediable HiddenRangesCorrupt path) — treating it as generic corruption or
-  # silently empty would risk resurrecting cancelled events.
+  # Bonus backward-compat: a v1 artifact still opens on the v2 reader — the
+  # loader accepts the supported range 1..=VISIBILITY_RANGES_VERSION (see
+  # hidden_ranges.rs version-handling), so prior on-disk metadata is honored.
   - format: visibility-ranges
-    writer_version: 2
-    reader_version: 1
+    writer_version: 1
+    reader_version: 2
+    feature_bits: 0
+    expected_outcome: OpensOK
+    fixture_path: visibility_ranges.fbv
+  # Forward: a future-version artifact (live + 1 = 3) is a DISTINCT canonical
+  # refusal (not the remediable HiddenRangesCorrupt path) — treating it as
+  # generic corruption or silently empty would risk resurrecting cancelled
+  # events.
+  - format: visibility-ranges
+    writer_version: 3
+    reader_version: 2
     feature_bits: 0
     expected_outcome: CanonicalRefusal:HiddenRangesFutureVersion
     fixture_path: visibility_ranges.fbv

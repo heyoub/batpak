@@ -52,7 +52,7 @@ use tempfile::TempDir;
 const SUPPORTED_MMAP_VERSION: u16 = 5;
 const SUPPORTED_CHECKPOINT_VERSION: u16 = 6;
 const SUPPORTED_IDEMP_VERSION: u16 = 1;
-const SUPPORTED_VISIBILITY_VERSION: u16 = 1;
+const SUPPORTED_VISIBILITY_VERSION: u16 = 2;
 
 const MMAP_ARTIFACT: &str = "index.fbati";
 const CHECKPOINT_ARTIFACT: &str = "index.ckpt";
@@ -182,9 +182,12 @@ struct VisibilityRange {
     end: u64,
 }
 
-/// Write a valid v1 `visibility_ranges.fbv` directly:
+/// Write a valid live-version `visibility_ranges.fbv` directly:
 /// `magic(6) | version(2 le) | crc32(4 le over body) | body(to_vec_named)`.
-/// Identical layout to `hidden_ranges::write_cancelled_ranges`.
+/// Identical layout to `hidden_ranges::write_cancelled_ranges`. The body carries
+/// only `ranges`; the v1→v2 bump added an optional `lane_ranges` field with
+/// `#[serde(default)]`, so this body decodes cleanly at the live v2 (the bump is
+/// version-number-only as far as a global-ranges-only body is concerned).
 fn seed_visibility_ranges(dir: &Path) {
     // Seed a real (segment-bearing) store first so the data dir is a valid store
     // the reopen can cold-start, then drop the cancelled-ranges sidecar beside it.
@@ -421,6 +424,52 @@ fn compat_matrix_self_row_tracks_live_version() {
                 Outcome::CanonicalRefusal(_)
             ),
             "compat_matrix.yaml future-version row for {format:?} must be a CanonicalRefusal"
+        );
+    }
+}
+
+/// Staleness tripwire (the future-version sibling of
+/// `compat_matrix_self_row_tracks_live_version`): every governed format MUST
+/// have a forged future-version row at EXACTLY `live + 1` whose
+/// `reader_version == live` and whose outcome is a canonical refusal. The
+/// self-row tripwire catches a missing/stale SELF-row when the on-disk version
+/// is bumped, but nothing pinned the FUTURE-row to the live const — a bump that
+/// left a stale future-row (writer no longer == live + 1) silently regressed
+/// the downgrade-refusal coverage (the forged "future" artifact was actually a
+/// supported version that OpensOK, not the refusal branch). This gate ties the
+/// future-row to the live const so a bump without updating it now reds CI.
+#[test]
+fn compat_matrix_future_row_tracks_live_plus_one() {
+    let matrix = load_matrix();
+
+    for &format in COMPAT_FORMATS {
+        let live = live_supported_version(format);
+        let future_version = live + 1;
+        let future_row = matrix.rows.iter().find(|r| {
+            r.format == format && r.writer_version == future_version && r.reader_version == live
+        });
+        let future_row = future_row
+            .ok_or_else(|| {
+                format!(
+                    "compat_matrix.yaml has NO future-version row for format {format:?} at \
+                     writer_version {future_version} (live + 1) with reader_version {live}. A \
+                     bump to the on-disk version without re-pinning the future-row leaves the \
+                     downgrade-refusal branch untested (the old future-row may now name a \
+                     supported version that OpensOK): add a row \
+                     {{ writer_version: {future_version}, reader_version: {live}, \
+                     expected_outcome: CanonicalRefusal:<TypedError> }}"
+                )
+            })
+            .expect("compat_matrix.yaml must declare a future-version row at the live + 1 version");
+        assert!(
+            matches!(
+                parse_outcome(&future_row.expected_outcome),
+                Outcome::CanonicalRefusal(_)
+            ),
+            "compat_matrix.yaml future-version row for {format:?} at writer_version \
+             {future_version} (feature_bits={}) must be a CanonicalRefusal, not {:?}",
+            future_row.feature_bits,
+            future_row.expected_outcome,
         );
     }
 }
