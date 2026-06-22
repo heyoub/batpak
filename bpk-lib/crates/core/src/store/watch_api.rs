@@ -43,6 +43,7 @@ impl Store<Open> {
         std::thread::Builder::new()
             .name("batpak-reactor".into())
             .spawn(move || {
+                use crate::id::EntityIdType;
                 while let Ok(envelope) = sub.recv() {
                     let notif = envelope.notification;
                     for (coord, kind, payload) in reactor.react(&envelope.stored.event) {
@@ -51,7 +52,7 @@ impl Store<Open> {
                             kind,
                             &payload,
                             crate::id::CorrelationId::from(notif.correlation_id),
-                            crate::id::CausationId::from(notif.event_id),
+                            crate::id::CausationId::from(notif.event_id.as_u128()),
                         ) {
                             tracing::warn!("react_loop: failed to append reaction: {e}");
                         }

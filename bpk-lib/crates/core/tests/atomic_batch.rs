@@ -1,6 +1,7 @@
 //! Atomic batch append tests.
 //! PROVES: INV-BATCH-ATOMIC-VISIBILITY, INV-BATCH-CRASH-RECOVERY.
 
+use batpak::id::EntityIdType;
 use batpak_testkit::default_store;
 use batpak_testkit::prelude::*;
 use default_store::default_temp_store;
@@ -267,9 +268,9 @@ fn batch_atomicity_full_visibility_on_success() {
 
     for receipt in &receipts {
         assert!(
-            found.contains(&u128::from(receipt.event_id)),
+            found.contains(&receipt.event_id),
             "event {} should be visible",
-            u128::from(receipt.event_id)
+            receipt.event_id
         );
     }
 }
@@ -339,7 +340,7 @@ fn batch_intra_batch_causation() {
 
     let first_id = entries[0].event_id();
     let second_causation = entries[1].causation_id();
-    assert_eq!(second_causation, Some(first_id));
+    assert_eq!(second_causation, Some(first_id.as_u128()));
 }
 
 /// Test: batch respects size limits.
@@ -630,7 +631,7 @@ fn batch_fsync_ambiguity_discards_uncommitted() {
     );
     assert_eq!(
         store
-            .get(batpak::id::EventId::from(entries[0].event_id()))
+            .get(entries[0].event_id())
             .expect("load recovered pre-established event after fsync ambiguity")
             .event
             .payload["pre"],
@@ -874,7 +875,7 @@ fn batch_subscription_atomicity_no_partial_visibility() {
     assert_eq!(entries.len(), 1, "only pre-established event visible");
     assert_eq!(
         store
-            .get(batpak::id::EventId::from(entries[0].event_id()))
+            .get(entries[0].event_id())
             .expect("load recovered pre-established subscription event")
             .event
             .payload["pre"],
@@ -1050,7 +1051,7 @@ fn single_append_fault_at_segment_rotation_recovers() {
     );
     assert_eq!(
         store
-            .get(batpak::id::EventId::from(entries[0].event_id()))
+            .get(entries[0].event_id())
             .expect("load recovered pre-rotation event")
             .event
             .payload["phase"],
@@ -1197,7 +1198,7 @@ fn segment_rotation_new_segment_create_fault_leaves_writer_consistent() {
         .iter()
         .map(|e| {
             store
-                .get(batpak::id::EventId::from(e.event_id()))
+                .get(e.event_id())
                 .expect("load recovered event after rotation-create fault")
                 .event
                 .payload["phase"]
@@ -1308,7 +1309,7 @@ fn batch_publish_atomicity_no_partial_read_during_insert() {
     );
     assert_eq!(
         entries[0].event_id(),
-        u128::from(pre.event_id),
+        pre.event_id,
         "the single visible entry must be the pre-batch baseline event"
     );
 }
@@ -1672,7 +1673,7 @@ fn batch_survives_unclean_shutdown_without_sidx_footer() {
         .iter()
         .filter_map(|e| {
             store
-                .get(batpak::id::EventId::from(e.event_id()))
+                .get(e.event_id())
                 .ok()
                 .and_then(|stored| stored.event.payload["step"].as_i64())
         })
@@ -1734,11 +1735,11 @@ fn oversized_batch_reopens_with_sidx_entries_pointing_to_correct_segment() {
 
     for (entry, expected_item) in entries.iter().skip(1).zip(expected) {
         let stored = reopened
-            .get(batpak::id::EventId::from(entry.event_id()))
+            .get(entry.event_id())
             .expect("SIDX disk position reads committed batch frame");
         assert_eq!(
             stored.event.header.event_id,
-            batpak::id::EventId::from(entry.event_id()),
+            entry.event_id(),
             "PROPERTY: SIDX row must point to the segment containing this event frame, not a later batch segment"
         );
         assert_eq!(

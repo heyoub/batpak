@@ -147,7 +147,7 @@ fn handle_event_get(store: &Store, input: &[u8]) -> HandlerResult {
     let sequence = store
         .query(&region)
         .into_iter()
-        .find(|entry| entry.event_id() == event_id)
+        .find(|entry| entry.event_id() == typed_event_id)
         .map(|entry| entry.global_sequence())
         .ok_or_else(|| {
             HandlerError::failed(format!(
@@ -250,7 +250,7 @@ fn query_event_summaries(
 
 fn index_entry_to_query_summary(entry: &IndexEntry) -> EventSummary {
     EventSummary {
-        event_id_hex: format!("{:032x}", entry.event_id()),
+        event_id_hex: format!("{:032x}", entry.event_id().as_u128()),
         global_sequence: entry.global_sequence(),
         wall_ms: entry.wall_ms(),
         clock: entry.clock(),
@@ -317,7 +317,7 @@ fn summary_for_event_id(store: &Store, event_id: EventId) -> Result<EventSummary
     let entry = store
         .query(&region)
         .into_iter()
-        .find(|entry| entry.event_id() == event_id.as_u128())
+        .find(|entry| entry.event_id() == event_id)
         .ok_or_else(|| {
             HandlerError::failed(format!(
                 "event_id {:032x} was read_raw-able but missing from the index query",

@@ -5,6 +5,7 @@
 //! DEFENDS: FM-022 (Receipt Hollowing — Receipt is sealed, single-use)
 //! INVARIANTS: INV-FRONTIER-APPEND-GATE-HONORED (gate evaluation state machine), INV-RECEIPT-SEALED (Receipt seal)
 
+use batpak::id::EntityIdType;
 use batpak::pipeline::BypassReceipt;
 use batpak_testkit::prelude::*;
 
@@ -232,7 +233,7 @@ fn pipeline_commit_with_receipt() {
          Run: cargo test --test gate_pipeline pipeline_commit_with_receipt"
     );
     assert_eq!(
-        committed.event_id(),
+        committed.event_id().as_u128(),
         12345,
         "PIPELINE COMMIT EVENT_ID: committed event_id should match what the closure returns.\n\
          Investigate: src/pipeline/mod.rs Pipeline::commit.\n\
@@ -518,7 +519,7 @@ fn committed_accessors_expose_only_read_only_metadata() {
     )
     .expect("commit");
     let payload = committed.payload();
-    let event_id = committed.event_id();
+    let event_id = committed.event_id().as_u128();
     let sequence = committed.sequence();
     let hash = committed.hash();
     let audit: &batpak::pipeline::BypassAudit = committed

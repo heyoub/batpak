@@ -12,7 +12,10 @@ impl<State: crate::store::StoreState> Store<State> {
     /// Returns `StoreError::Io` or `StoreError::Serialization` if reading from disk fails.
     pub fn get(&self, event_id: EventId) -> Result<StoredEvent<serde_json::Value>, StoreError> {
         let raw = event_id.as_u128();
-        let entry = self.index.get_by_id(raw).ok_or(StoreError::NotFound(raw))?;
+        let entry = self
+            .index
+            .get_by_id(raw)
+            .ok_or(StoreError::NotFound(event_id))?;
         self.reader.read_entry(&entry.disk_pos)
     }
 
@@ -27,7 +30,10 @@ impl<State: crate::store::StoreState> Store<State> {
     /// from disk fails.
     pub fn read_raw(&self, event_id: EventId) -> Result<StoredEvent<Vec<u8>>, StoreError> {
         let raw = event_id.as_u128();
-        let entry = self.index.get_by_id(raw).ok_or(StoreError::NotFound(raw))?;
+        let entry = self
+            .index
+            .get_by_id(raw)
+            .ok_or(StoreError::NotFound(event_id))?;
         self.reader.read_entry_raw(&entry.disk_pos)
     }
 

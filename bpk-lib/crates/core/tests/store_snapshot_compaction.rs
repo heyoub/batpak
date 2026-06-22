@@ -8,6 +8,7 @@
 //! rollback drift.
 //! SEEDED: small-segment fixtures via `support/small_store.rs` and bounded append counts.
 
+use batpak::id::EntityIdType;
 use batpak::store::{
     segment::{CompactionOutcome, CompactionResult},
     snapshot_report_body_hash, ReadOnly, SnapshotEvidenceHash, SnapshotEvidenceReport,
@@ -445,7 +446,7 @@ fn compact_merge_rebuild_does_not_duplicate_superseded_sealed_segments() {
     );
 
     let all = user_visible_entries(&store);
-    let mut ids: Vec<_> = all.iter().map(|entry| entry.event_id()).collect();
+    let mut ids: Vec<_> = all.iter().map(|entry| entry.event_id().as_u128()).collect();
     ids.sort_unstable();
     ids.dedup();
 

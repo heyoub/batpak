@@ -78,16 +78,12 @@ fn chaos_rapid_segment_rotation() {
     );
 
     // Spot-check first and last events
-    let first = store
-        .get(batpak::id::EventId::from(entries[0].event_id()))
-        .expect("first event");
+    let first = store.get(entries[0].event_id()).expect("first event");
     let last = store
-        .get(batpak::id::EventId::from(
-            entries[entries.len() - 1].event_id(),
-        ))
+        .get(entries[entries.len() - 1].event_id())
         .expect("last event");
     assert_eq!(
-        u128::from(first.event.event_id()),
+        first.event.event_id(),
         entries[0].event_id(),
         "CHAOS PROPERTY: store.get() for the first indexed event_id must return the matching event.\n\
          Investigate: src/store/segment/scan.rs get(), src/store/index/mod.rs lookup offset.\n\
@@ -95,7 +91,7 @@ fn chaos_rapid_segment_rotation() {
          Run: cargo test --test chaos_testing_batch_rotation chaos_rapid_segment_rotation"
     );
     assert_eq!(
-        u128::from(last.event.event_id()),
+        last.event.event_id(),
         entries[entries.len() - 1].event_id(),
         "CHAOS PROPERTY: store.get() for the last indexed event_id must return the matching event.\n\
          Investigate: src/store/segment/scan.rs get(), src/store/segment/mod.rs seek by offset.\n\

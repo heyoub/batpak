@@ -6,6 +6,7 @@
 //! Run: `cargo run --example caller_defined_gates`
 
 use batpak::guard::{Denial, Gate, GateSet};
+use batpak::id::EntityIdType;
 use batpak::pipeline::{CommitMetadata, Pipeline, Proposal};
 use batpak::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -90,7 +91,11 @@ fn try_write(store: &Store, pipeline: &Pipeline<WriteRequest>, request: &WriteRe
 
             match result {
                 Ok(committed) => {
-                    let _ = writeln!(out, "    Committed: event_id={:032x}", committed.event_id());
+                    let _ = writeln!(
+                        out,
+                        "    Committed: event_id={:032x}",
+                        committed.event_id().as_u128()
+                    );
                 }
                 Err(error) => {
                     let _ = writeln!(out, "    Commit failed: {error}");

@@ -19,6 +19,7 @@
 //!
 //! Inspect `git diff tests/golden/` carefully before committing regenerated goldens.
 
+use batpak::id::EntityIdType;
 use batpak::outcome::wait::{CompensationAction, WaitCondition};
 use batpak::wire::{option_u128_bytes, u128_bytes, vec_u128_bytes};
 use batpak_testkit::prelude::*;
@@ -308,7 +309,7 @@ fn committed_api_contract() {
 
     let meta = CommitMetadata::new(event_id, sequence, hash)
         .expect("test constructs known-valid commit metadata");
-    assert_eq!(meta.event_id(), event_id);
+    assert_eq!(meta.event_id().as_u128(), event_id);
     assert_eq!(meta.sequence(), sequence);
     assert_eq!(meta.hash(), hash);
 
@@ -318,7 +319,7 @@ fn committed_api_contract() {
     )
     .expect("public commit path should construct Committed");
     let payload = committed.payload();
-    let committed_event_id = committed.event_id();
+    let committed_event_id = committed.event_id().as_u128();
     let committed_sequence = committed.sequence();
     let committed_hash = committed.hash();
     assert_eq!(payload, &"payload");
@@ -329,7 +330,7 @@ fn committed_api_contract() {
     let (payload, meta2, audit2) = committed.into_parts();
     assert_eq!(payload, "payload");
     assert!(audit2.is_some(), "bypass audit must survive into_parts()");
-    let meta2_event_id = meta2.event_id();
+    let meta2_event_id = meta2.event_id().as_u128();
     let meta2_sequence = meta2.sequence();
     let meta2_hash = meta2.hash();
     assert_eq!(meta2_event_id, event_id);
@@ -371,7 +372,7 @@ fn commit_metadata_from_append_receipt_uses_receipt_hash() {
 fn commit_metadata_genesis_reserves_zero_sequence_legally() {
     let hash = [0x11; 32];
     let meta = CommitMetadata::genesis(0xBEEF, hash);
-    let event_id = meta.event_id();
+    let event_id = meta.event_id().as_u128();
     let sequence = meta.sequence();
     let returned_hash = meta.hash();
     let is_genesis = meta.is_genesis();

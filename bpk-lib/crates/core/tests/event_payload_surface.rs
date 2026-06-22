@@ -147,7 +147,7 @@ fn append_typed_round_trip() {
     );
     assert_eq!(
         hits[0].event_id(),
-        u128::from(receipt.event_id),
+        receipt.event_id,
         "PROPERTY: by_fact_typed must return the correct event_id"
     );
     store
@@ -376,7 +376,7 @@ fn batch_append_item_typed_constructor() {
     );
     assert_eq!(
         hits[0].event_id(),
-        u128::from(receipts[0].event_id),
+        receipts[0].event_id,
         "PROPERTY: batch receipt event_id must match by_fact_typed result"
     );
     store
@@ -415,7 +415,7 @@ fn transition_from_payload_store_round_trip() {
 
     let hits = store.by_fact_typed::<ThingHappened>();
     assert_eq!(hits.len(), 1);
-    assert_eq!(hits[0].event_id(), u128::from(receipt.event_id));
+    assert_eq!(hits[0].event_id(), receipt.event_id);
     store
         .close()
         .expect("EventPayload surface test precondition holds");
@@ -438,7 +438,7 @@ fn outbox_stage_typed_smoke() {
     );
     let hits = store.by_fact_typed::<ThingHappened>();
     assert_eq!(hits.len(), 1);
-    assert_eq!(hits[0].event_id(), u128::from(receipts[0].event_id));
+    assert_eq!(hits[0].event_id(), receipts[0].event_id);
     store
         .close()
         .expect("EventPayload surface test precondition holds");
@@ -521,7 +521,7 @@ fn fence_submit_typed_smoke() {
     assert_ne!(receipt.event_id, batpak::id::EventId::from(0u128));
     let hits = store.by_fact_typed::<ThingHappened>();
     assert_eq!(hits.len(), 1);
-    assert_eq!(hits[0].event_id(), u128::from(receipt.event_id));
+    assert_eq!(hits[0].event_id(), receipt.event_id);
     store
         .close()
         .expect("EventPayload surface test precondition holds");

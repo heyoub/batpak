@@ -59,6 +59,14 @@ macro_rules! define_entity_id {
         #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
         pub struct $name(u128);
 
+        impl $name {
+            #[doc = concat!("Construct a `", stringify!($name), "` from a raw `u128` in a const context.")]
+            #[must_use]
+            pub const fn from_u128(id: u128) -> Self {
+                Self(id)
+            }
+        }
+
         impl $crate::id::EntityIdType for $name {
             const ENTITY_NAME: &'static str = $entity;
 

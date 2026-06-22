@@ -17,7 +17,10 @@ fn test_store() -> (tempfile::TempDir, Store) {
 fn store_error_display_variants() {
     use batpak::store::StoreError;
 
-    let not_found = format!("{}", StoreError::NotFound(0xDEAD));
+    let not_found = format!(
+        "{}",
+        StoreError::NotFound(batpak::id::EventId::from(0xDEADu128))
+    );
     assert!(
         not_found.contains("dead"),
         "PROPERTY: StoreError::NotFound Display must include the event ID in hex (e.g. 'dead').\n\
@@ -170,10 +173,10 @@ fn index_entry_causation_helpers() {
 
     let root_entry = entries
         .iter()
-        .find(|e| e.event_id() == u128::from(root.event_id))
+        .find(|e| e.event_id() == root.event_id)
         .expect("find root");
     let root_entry: &batpak::store::index::IndexEntry = root_entry;
-    assert_eq!(root_entry.event_id(), u128::from(root.event_id));
+    assert_eq!(root_entry.event_id(), root.event_id);
     assert_eq!(root_entry.correlation_id(), u128::from(root.event_id));
     assert_eq!(root_entry.causation_id(), None);
     assert_eq!(root_entry.coord(), &coord);
@@ -206,7 +209,7 @@ fn index_entry_causation_helpers() {
 
     let react_entry = entries
         .iter()
-        .find(|e| e.event_id() == u128::from(reaction.event_id))
+        .find(|e| e.event_id() == reaction.event_id)
         .expect("find reaction");
     let reaction_is_root_cause = react_entry.is_root_cause();
     let reaction_is_correlated = react_entry.is_correlated();

@@ -110,7 +110,7 @@ fn summarize_entries<State: batpak::store::StoreState>(
         .filter(|entry| entry.event_kind() != EventKind::SYSTEM_CLOSE_COMPLETED)
         .map(|entry| {
             let mut payload = store
-                .get(batpak::id::EventId::from(entry.event_id()))
+                .get(entry.event_id())
                 .expect("query result must be readable from disk")
                 .event
                 .payload;

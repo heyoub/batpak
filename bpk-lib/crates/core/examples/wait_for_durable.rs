@@ -29,7 +29,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let entry = store
         .query(&Region::entity("ledger:acct-1"))
         .into_iter()
-        .find(|entry| entry.event_id() == u128::from(receipt.event_id))
+        .find(|entry| entry.event_id() == receipt.event_id)
         .ok_or("appended event missing from query")?;
     let target = HlcPoint {
         wall_ms: entry.wall_ms(),

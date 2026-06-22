@@ -35,6 +35,7 @@
 //! `wait_for_visible` before snapshotting, so captures are taken at a SETTLED
 //! state rather than racing the watermark.
 
+use batpak::id::EntityIdType;
 use batpak::store::index::IndexEntry;
 use batpak::store::{Store, StoreConfig};
 use batpak_testkit::prelude::*;
@@ -165,7 +166,7 @@ fn observe(store: &Store) -> Vec<ObservedEvent> {
         .into_iter()
         .map(|entry| ObservedEvent {
             global_sequence: entry.global_sequence(),
-            event_id: entry.event_id(),
+            event_id: entry.event_id().as_u128(),
         })
         .collect()
 }

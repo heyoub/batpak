@@ -106,7 +106,7 @@ fn capture_snapshot<State: StoreState>(store: &Store<State>) -> StoreSnapshot {
         })
         .map(|entry| {
             let payload = store
-                .get(batpak::id::EventId::from(entry.event_id()))
+                .get(entry.event_id())
                 .expect("visible query result must be readable from disk")
                 .event
                 .payload;

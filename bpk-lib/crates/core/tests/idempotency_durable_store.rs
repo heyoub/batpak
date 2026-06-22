@@ -11,6 +11,7 @@
 
 use batpak::coordinate::{Coordinate, Region};
 use batpak::event::EventKind;
+use batpak::id::EntityIdType;
 use batpak::id::IdempotencyKey;
 use batpak::store::{
     AppendOptions, CompactionConfig, CompactionStrategy, IdempotencyRetention, OverflowPolicy,
@@ -104,7 +105,7 @@ fn keyed_retry_is_noop_after_retention_evicts_the_event() {
     // The keyed event frame should now be gone from the live index...
     let live_after = user_visible_events(&store);
     assert!(
-        live_after.iter().all(|e| e.event_id() != key),
+        live_after.iter().all(|e| e.event_id().as_u128() != key),
         "PRECONDITION: retention compaction evicted the keyed event frame"
     );
 
@@ -128,7 +129,7 @@ fn keyed_retry_is_noop_after_retention_evicts_the_event() {
     assert_eq!(
         user_visible_events(&store)
             .iter()
-            .filter(|e| e.event_id() == key)
+            .filter(|e| e.event_id().as_u128() == key)
             .count(),
         0,
         "no duplicate keyed event re-appended after eviction"

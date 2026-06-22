@@ -106,7 +106,7 @@ fn default_lane_zero_position_matches_golden_wire_bytes() -> TestResult {
     let entry = store
         .latest_lane("entity:lane", 0)
         .ok_or_else(|| io_err("missing lane-0 latest"))?;
-    let stored = store.get(EventId::from(entry.event_id()))?;
+    let stored = store.get(entry.event_id())?;
     let encoded_position = batpak::encoding::to_bytes(&stored.event.header.position)?;
 
     let golden = [
@@ -221,16 +221,8 @@ fn branch_root_hint_uses_dag_position_fork() -> TestResult {
     let fork = store
         .latest_lane("entity:lane", 1)
         .ok_or_else(|| io_err("missing lane 1 latest"))?;
-    let root_pos = store
-        .get(EventId::from(root.event_id()))?
-        .event
-        .header
-        .position;
-    let fork_pos = store
-        .get(EventId::from(fork.event_id()))?
-        .event
-        .header
-        .position;
+    let root_pos = store.get(root.event_id())?.event.header.position;
+    let fork_pos = store.get(fork.event_id())?.event.header.position;
 
     assert_eq!(fork_pos.lane(), 1);
     assert_eq!(

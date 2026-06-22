@@ -73,7 +73,7 @@ fn assert_historical_fixture_opens(
     assert_eq!(entries[0].dag_depth(), depth);
 
     let stored = store
-        .get(batpak::id::EventId::from(entries[0].event_id()))
+        .get(entries[0].event_id())
         .expect("fetch fixture event");
     assert_eq!(stored.event.header.position.lane(), lane);
     assert_eq!(stored.event.header.position.depth(), depth);

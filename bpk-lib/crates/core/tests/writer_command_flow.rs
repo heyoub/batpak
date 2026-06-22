@@ -342,8 +342,7 @@ fn notification_is_not_observable_before_published_visibility() {
         "PROPERTY: the notification test batch must commit exactly one item."
     );
     assert_eq!(
-        u128::from(receipts[0].event_id),
-        notification.event_id,
+        receipts[0].event_id, notification.event_id,
         "PROPERTY: notification, receipt, and visible entry must agree on event identity."
     );
     store.close().expect("close");

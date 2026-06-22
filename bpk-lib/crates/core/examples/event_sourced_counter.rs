@@ -138,7 +138,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _ = writeln!(out, "\nRaw event log:");
     let entries = store.by_entity("counter:hits");
     for entry in &entries {
-        let stored = store.get(batpak::id::EventId::from(entry.event_id()))?;
+        let stored = store.get(entry.event_id())?;
         let _ = writeln!(
             out,
             "  seq={} kind={} payload={}",
@@ -151,7 +151,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // -- Walk ancestors: trace causation backwards --
     if let Some(last) = entries.last() {
         let _ = writeln!(out, "\nAncestor walk from last event:");
-        let ancestors = store.walk_ancestors(batpak::id::EventId::from(last.event_id()), 10);
+        let ancestors = store.walk_ancestors(last.event_id(), 10);
         for (i, a) in ancestors.iter().enumerate() {
             let _ = writeln!(
                 out,

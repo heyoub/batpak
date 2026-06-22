@@ -1,6 +1,7 @@
 //! Advanced Store pipeline and reactive-flow integration tests.
 
 use batpak::event::Reactive;
+use batpak::id::EntityIdType;
 use batpak::store::{Store, StoreConfig, StoreError};
 use batpak_testkit::prelude::*;
 use std::sync::Arc;
@@ -47,9 +48,7 @@ fn pipeline_commit_bypass_persists() {
         .expect("commit_bypass should retain bypass audit");
 
     // Verify persisted
-    let stored = store
-        .get(batpak::id::EventId::from(committed_event_id))
-        .expect("get");
+    let stored = store.get(committed_event_id).expect("get");
     assert_eq!(
         stored.event.event_kind(),
         kind,
@@ -198,7 +197,7 @@ fn reactive_subscribe_react_append_pattern() {
     let reactor = OrderReactor;
     // Build a minimal event for the reactor (it only needs kind + event_id)
     let header = EventHeader::new(
-        notif.event_id,
+        notif.event_id.as_u128(),
         notif.correlation_id,
         notif.causation_id,
         0,

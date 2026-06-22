@@ -19,6 +19,7 @@
 //! as durable going forward.
 
 use crate::chaos::dm_flakey::FlakeyDevice;
+use batpak::id::EntityIdType;
 use batpak::prelude::{Coordinate, EventKind, Region};
 use batpak::store::{AppendReceipt, HlcPoint, Store, StoreConfig, StoreError};
 use std::io::Write as _;
@@ -72,7 +73,10 @@ fn recovered_entries(store: &Store) -> Vec<batpak::store::index::IndexEntry> {
 }
 
 fn event_ids(entries: &[batpak::store::index::IndexEntry]) -> Vec<u128> {
-    entries.iter().map(|entry| entry.event_id()).collect()
+    entries
+        .iter()
+        .map(|entry| entry.event_id().as_u128())
+        .collect()
 }
 
 fn entry_point_for(
@@ -81,7 +85,7 @@ fn entry_point_for(
 ) -> HlcPoint {
     entries
         .iter()
-        .find(|entry| entry.event_id() == u128::from(receipt.event_id))
+        .find(|entry| entry.event_id() == receipt.event_id)
         .map(point)
         .expect("receipt event must be query-visible before failure")
 }

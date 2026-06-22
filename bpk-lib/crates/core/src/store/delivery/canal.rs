@@ -29,17 +29,17 @@ impl<I> CanalBatch<I> {
 /// Minimal event reference yielded by a [`Canal`].
 pub trait CanalItem {
     /// Event id to fetch from the store replay lane.
-    fn event_id(&self) -> u128;
+    fn event_id(&self) -> crate::id::EventId;
 }
 
 impl CanalItem for IndexEntry {
-    fn event_id(&self) -> u128 {
+    fn event_id(&self) -> crate::id::EventId {
         self.event_id()
     }
 }
 
 impl CanalItem for Notification {
-    fn event_id(&self) -> u128 {
+    fn event_id(&self) -> crate::id::EventId {
         self.event_id
     }
 }

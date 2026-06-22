@@ -62,7 +62,7 @@ pub(crate) trait RegionFanoutItem {
 #[derive(Clone, Debug)]
 pub struct Notification {
     /// Unique ID of the event that was appended.
-    pub event_id: u128,
+    pub event_id: crate::id::EventId,
     /// Correlation ID linking this event to a causal chain.
     pub correlation_id: u128,
     /// ID of the event that caused this one; `None` for root-cause events.
@@ -227,7 +227,7 @@ mod fanout_subscriber_tests {
 
     fn notification(scope: &str) -> Notification {
         Notification {
-            event_id: 1,
+            event_id: crate::id::EventId::from_u128(1),
             correlation_id: 1,
             causation_id: None,
             coord: Coordinate::new("entity", scope).expect("coordinate"),

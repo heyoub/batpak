@@ -11,7 +11,7 @@
 
 use batpak::coordinate::{Coordinate, Region};
 use batpak::event::EventKind;
-use batpak::id::IdempotencyKey;
+use batpak::id::{EntityIdType, IdempotencyKey};
 use batpak::store::{AppendOptions, Store, StoreConfig, StoreError};
 use std::io::Write;
 use tempfile::TempDir;
@@ -49,7 +49,7 @@ fn key_event_count(store: &Store, key: u128) -> usize {
     store
         .query(&Region::all())
         .into_iter()
-        .filter(|e| e.event_kind() == KIND && e.event_id() == key)
+        .filter(|e| e.event_kind() == KIND && e.event_id().as_u128() == key)
         .count()
 }
 

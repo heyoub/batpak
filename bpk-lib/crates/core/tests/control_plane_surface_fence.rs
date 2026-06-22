@@ -295,7 +295,7 @@ fn fenced_reaction_commit_preserves_reaction_metadata() {
     let reaction_entry = &entries[0];
     assert_eq!(
         reaction_entry.event_id(),
-        u128::from(reaction.event_id),
+        reaction.event_id,
         "PROPERTY: the committed reaction receipt must identify the stored reaction event."
     );
     assert_eq!(

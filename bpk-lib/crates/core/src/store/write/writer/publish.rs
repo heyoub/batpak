@@ -125,7 +125,7 @@ impl WriterCore {
         let coord = staged.coord.clone();
         let position = staged.position();
         let notification = Notification {
-            event_id: staged.meta.event_id,
+            event_id: crate::id::EventId::from_u128(staged.meta.event_id),
             correlation_id: staged.meta.correlation_id,
             causation_id: staged.meta.causation_id,
             coord: coord.clone(),
@@ -332,7 +332,7 @@ mod tests {
 
     fn notification_for(lane: u32, sequence: u64, wall_ms: u64) -> Notification {
         Notification {
-            event_id: 0,
+            event_id: crate::id::EventId::from_u128(0),
             correlation_id: 0,
             causation_id: None,
             coord: Coordinate::new("entity", "scope").expect("valid coordinate"),

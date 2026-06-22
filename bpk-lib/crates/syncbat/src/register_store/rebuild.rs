@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use batpak::coordinate::Coordinate;
 use batpak::coordinate::{KindFilter, Region};
 use batpak::event::DecodeTyped;
+use batpak::id::EntityIdType;
 use batpak::store::Store;
 
 use crate::register::Register;
@@ -43,12 +44,12 @@ pub(super) fn fold_catalog_entries<State: batpak::store::StoreState>(
     hits.sort_by(|left, right| {
         left.global_sequence()
             .cmp(&right.global_sequence())
-            .then_with(|| left.event_id().cmp(&right.event_id()))
+            .then_with(|| left.event_id().as_u128().cmp(&right.event_id().as_u128()))
     });
 
     let mut entries = BTreeMap::<String, CatalogEntryState>::new();
     for hit in hits {
-        let stored = store.get(batpak::id::EventId::from(hit.event_id()))?;
+        let stored = store.get(hit.event_id())?;
         let row = stored.event.decode_typed::<RegisterOperationRowV1>()?;
         let action = row.action_kind()?;
         match action {

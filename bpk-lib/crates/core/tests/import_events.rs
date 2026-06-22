@@ -91,8 +91,8 @@ fn import_events_reimport_is_noop_and_preserves_raw_payload_bytes() -> TestResul
     let dest_entries = dest.by_entity("entity:import:raw");
     assert_eq!(source_entries.len(), 2);
     assert_eq!(dest_entries.len(), 2);
-    let source_raw = source.read_raw(EventId::from(source_entries[0].event_id()))?;
-    let dest_raw = dest.read_raw(EventId::from(dest_entries[0].event_id()))?;
+    let source_raw = source.read_raw(source_entries[0].event_id())?;
+    let dest_raw = dest.read_raw(dest_entries[0].event_id())?;
     assert_eq!(
         dest_raw.event.payload, source_raw.event.payload,
         "import must preserve raw MessagePack payload bytes"
@@ -176,13 +176,13 @@ fn import_events_preserves_correlation_clears_causation_and_records_provenance()
     assert_eq!(provenance_body.source_namespace.as_str(), "source-lineage");
     assert_eq!(
         provenance_body.source_event_id,
-        source_entries[0].event_id()
+        source_entries[0].event_id().as_u128()
     );
     assert_eq!(
         provenance_body.source_global_sequence,
         source_entries[0].global_sequence()
     );
-    let source_raw = source.read_raw(EventId::from(source_entries[0].event_id()))?;
+    let source_raw = source.read_raw(source_entries[0].event_id())?;
     assert_eq!(
         provenance_body.source_content_hash, source_raw.event.header.content_hash,
         "provenance must record the source CONTENT hash, not the chain event hash"
@@ -320,8 +320,8 @@ fn import_events_uses_deterministic_key_and_regenerates_destination_identity() -
     let source_entry = source.by_entity("entity:import:key")[0].clone();
     let dest_entry = dest.by_entity("entity:import:key")[0].clone();
     assert_eq!(
-        dest_entry.event_id(),
-        deterministic_import_key("source-key", source_entry.event_id()),
+        dest_entry.event_id().as_u128(),
+        deterministic_import_key("source-key", source_entry.event_id().as_u128()),
         "destination event id must be the deterministic import idempotency key"
     );
     assert_ne!(

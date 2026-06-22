@@ -374,7 +374,7 @@ where
 
     for entry in entries {
         // Fetch the full event using the lane's specific reader.
-        let stored = match fetch(inner_store, crate::id::EventId::from(entry.event_id)) {
+        let stored = match fetch(inner_store, entry.event_id()) {
             Ok(s) => s,
             Err(e) => {
                 *slot_for_handler.lock() = Some(ReactorError::Store(e));
@@ -586,21 +586,21 @@ where
                         Err(RecvTimeoutError::Timeout) => continue,
                         Err(RecvTimeoutError::Disconnected) => break,
                     };
-                    let stored =
-                        match fetch(&store_for_handler, crate::id::EventId::from(notif.event_id)) {
-                            Ok(stored) => stored,
-                            Err(error) => {
-                                *slot_for_handler.lock() = Some(ReactorError::Store(error));
-                                break;
-                            }
-                        };
+                    let stored = match fetch(&store_for_handler, notif.event_id) {
+                        Ok(stored) => stored,
+                        Err(error) => {
+                            *slot_for_handler.lock() = Some(ReactorError::Store(error));
+                            break;
+                        }
+                    };
                     let mut batch = ReactionBatch::new();
                     match dispatcher.dispatch(&stored, &mut batch, None) {
                         Ok(()) if !batch.is_empty() => {
+                            use crate::id::EntityIdType;
                             if let Err(error) = batch.flush(
                                 &store_for_handler,
                                 notif.correlation_id,
-                                notif.event_id,
+                                notif.event_id.as_u128(),
                             ) {
                                 *slot_for_handler.lock() = Some(ReactorError::Store(error));
                                 break;

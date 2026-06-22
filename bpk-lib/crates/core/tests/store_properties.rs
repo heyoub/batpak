@@ -86,7 +86,7 @@ fn replay_determinism_cold_start_rebuilds_identical_index() {
     for (i, entry) in events.iter().enumerate() {
         assert_eq!(
             entry.event_id(),
-            u128::from(event_ids[i]),
+            event_ids[i],
             "PROPERTY: Replayed event_id must match original at index {i}.\n\
              Investigate: src/store/segment/scan.rs scan_segment event ordering.\n\
              Common causes: events reordered during cold start, BTreeMap key collision."
@@ -322,12 +322,10 @@ fn flow_connectivity_full_production_path() {
     let store = test_store(&dir);
 
     // Step 4: Read back via get — verify event exists and has correct metadata
-    let stored = store
-        .get(batpak::id::EventId::from(event_id))
-        .expect("get after cold start");
+    let stored = store.get(event_id).expect("get after cold start");
     assert_eq!(
         stored.event.header.event_id,
-        batpak::id::EventId::from(event_id),
+        event_id,
         "PROPERTY: Full pipeline flow must preserve event_id through write→sync→close→reopen→read.\n\
          Investigate: pipeline commit → store.append → segment write → cold start → index rebuild → get.\n\
          Common causes: Island Syndrome (FM-007) — pipeline not wired to store, or store not persisting."
@@ -657,7 +655,10 @@ fn error_variant_coverage_all_store_errors_display() {
                 detail: "bad".into(),
             },
         ),
-        ("NotFound", StoreError::NotFound(123)),
+        (
+            "NotFound",
+            StoreError::NotFound(batpak::id::EventId::from(123u128)),
+        ),
         (
             "SequenceMismatch",
             StoreError::SequenceMismatch {

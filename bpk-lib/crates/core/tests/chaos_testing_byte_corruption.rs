@@ -275,11 +275,9 @@ fn chaos_truncated_segment_recovers() {
 
     // All recovered events must be readable via get()
     for entry in &recovered_entries {
-        let fetched = store2
-            .get(batpak::id::EventId::from(entry.event_id()))
-            .expect("get recovered event");
+        let fetched = store2.get(entry.event_id()).expect("get recovered event");
         assert_eq!(
-            u128::from(fetched.event.event_id()),
+            fetched.event.event_id(),
             entry.event_id(),
             "CHAOS PROPERTY: store.get() for a recovered event_id must return the matching event.\n\
              Investigate: src/store/segment/scan.rs get(), src/store/index/mod.rs offset lookup.\n\

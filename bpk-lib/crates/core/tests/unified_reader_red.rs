@@ -24,7 +24,7 @@ fn sealed_segment_reads_via_mmap() {
     let entries = store.by_entity("entity:test");
     let first = &entries[0];
     let event = store
-        .get(batpak::id::EventId::from(first.event_id()))
+        .get(first.event_id())
         .expect("get from sealed segment");
     assert_eq!(
         event.coordinate.entity(),

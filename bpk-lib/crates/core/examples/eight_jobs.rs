@@ -60,10 +60,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let region = Region::scope("scope:eight-jobs");
     let page = store.query_entries_after(&region, None, 16);
     assert_eq!(page.len(), 2);
-    assert_eq!(EventId::from(page[0].event_id()), first.event_id);
+    assert_eq!(page[0].event_id(), first.event_id);
 
     // 4. Get a point-read payload and decode it through the typed registry.
-    let stored = store.get(EventId::from(page[0].event_id()))?;
+    let stored = store.get(page[0].event_id())?;
     let decoded: NoteAdded = stored.event.decode_typed()?;
     assert_eq!(decoded.body, "first note");
 

@@ -10,6 +10,7 @@
 //! `OBS-DURABLE-HLC-INCLUDES-OS-PRESERVED-DATA`.
 
 use crate::chaos::dm_flakey::FlakeyDevice;
+use batpak::id::EntityIdType;
 use batpak::prelude::{Coordinate, EventKind, Region};
 use batpak::store::{
     AppendOptions, AppendReceipt, BatchAppendItem, CausationRef, HlcPoint, Store, StoreConfig,
@@ -101,7 +102,10 @@ fn recovered_entries(store: &Store) -> Vec<batpak::store::index::IndexEntry> {
 }
 
 fn event_ids(entries: &[batpak::store::index::IndexEntry]) -> HashSet<u128> {
-    entries.iter().map(|entry| entry.event_id()).collect()
+    entries
+        .iter()
+        .map(|entry| entry.event_id().as_u128())
+        .collect()
 }
 
 fn assert_durable_covers_recovered(store: &Store) {

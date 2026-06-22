@@ -46,7 +46,7 @@ fn one_of_every_variant() -> Vec<StoreError> {
             segment_id: 1,
             detail: "d".into(),
         },
-        StoreError::NotFound(1),
+        StoreError::NotFound(batpak::id::EventId::from(1u128)),
         StoreError::SequenceMismatch {
             entity: "e".into(),
             expected: 1,
@@ -140,7 +140,9 @@ fn one_of_every_variant() -> Vec<StoreError> {
         StoreError::DataDirMalformed {
             path: PathBuf::from("p"),
         },
-        StoreError::AncestryCorrupt { cycle_at: 1 },
+        StoreError::AncestryCorrupt {
+            cycle_at: batpak::id::EventId::from(1u128),
+        },
         StoreError::RangeMalformed { start: 2, end: 1 },
         StoreError::InvalidCoordinate {
             index: None,

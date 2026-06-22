@@ -13,6 +13,7 @@
 //! Default depth: 500 iterations (override with `CHAOS_ITERATIONS=<n>`)
 //! Extended: CHAOS_ITERATIONS=5000 cargo test --test chaos_testing --all-features --release
 
+use batpak::id::EntityIdType;
 use batpak::store::{AppendOptions, Store, StoreConfig};
 use batpak_testkit::prelude::*;
 use std::sync::Arc;
@@ -367,7 +368,7 @@ fn chaos_cursor_completeness_concurrent() {
     let mut cursor = store.cursor_guaranteed(&region);
     let mut seen = Vec::new();
     while let Some(entry) = cursor.poll() {
-        seen.push(entry.event_id());
+        seen.push(entry.event_id().as_u128());
     }
 
     assert_eq!(

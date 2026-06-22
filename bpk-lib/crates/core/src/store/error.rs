@@ -1,5 +1,6 @@
 use crate::coordinate::CoordinateError;
 use crate::event::EventPayloadRegistryError;
+use crate::id::EntityIdType;
 use crate::store::delivery::observation::CheckpointIdError;
 use crate::store::stats::{HlcPoint, WatermarkKind};
 use std::path::PathBuf;
@@ -46,7 +47,7 @@ pub enum StoreError {
         detail: String,
     },
     /// No event with the given ID exists in the index.
-    NotFound(u128),
+    NotFound(crate::id::EventId),
     /// CAS check failed: the entity's current sequence did not match the expected value.
     SequenceMismatch {
         /// Entity whose sequence was checked.
@@ -251,7 +252,7 @@ pub enum StoreError {
     /// The ancestry walk detected a cycle in the hash chain.
     AncestryCorrupt {
         /// Event id at which the cycle was closed.
-        cycle_at: u128,
+        cycle_at: crate::id::EventId,
     },
     /// A caller-supplied visibility range is malformed (`start >= end`).
     RangeMalformed {
@@ -510,7 +511,7 @@ impl std::fmt::Display for StoreError {
             Self::CorruptSegment { segment_id, detail } => {
                 write!(f, "corrupt segment {segment_id}: {detail}")
             }
-            Self::NotFound(id) => write!(f, "event {id:032x} not found"),
+            Self::NotFound(id) => write!(f, "event {:032x} not found", id.as_u128()),
             Self::SequenceMismatch {
                 entity,
                 expected,
@@ -620,7 +621,7 @@ impl std::fmt::Display for StoreError {
                 )
             }
             Self::AncestryCorrupt { cycle_at } => {
-                write!(f, "ancestry walk detected a cycle at event {cycle_at:032x}")
+                write!(f, "ancestry walk detected a cycle at event {:032x}", cycle_at.as_u128())
             }
             Self::RangeMalformed { start, end } => {
                 write!(

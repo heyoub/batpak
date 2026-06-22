@@ -18,7 +18,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let open_entry = lifecycle_entries
         .first()
         .ok_or("mutable open should emit SYSTEM_OPEN_COMPLETED")?;
-    let open_event = store.read_raw(batpak::id::EventId::from(open_entry.event_id()))?;
+    let open_event = store.read_raw(open_entry.event_id())?;
 
     assert_eq!(open_event.coordinate.entity(), "batpak:store");
     assert_eq!(open_event.coordinate.scope(), "batpak:lifecycle");

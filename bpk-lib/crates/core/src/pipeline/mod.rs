@@ -96,8 +96,8 @@ impl<T> Committed<T> {
     }
 
     /// Returns the committed event identifier.
-    pub fn event_id(&self) -> u128 {
-        self.metadata.event_id
+    pub fn event_id(&self) -> crate::id::EventId {
+        crate::id::EventId::from_u128(self.metadata.event_id)
     }
 
     /// Returns the committed sequence number.
@@ -189,8 +189,8 @@ impl CommitMetadata {
     }
 
     /// Returns the committed event identifier.
-    pub const fn event_id(self) -> u128 {
-        self.event_id
+    pub const fn event_id(self) -> crate::id::EventId {
+        crate::id::EventId::from_u128(self.event_id)
     }
 
     /// Returns the committed sequence number.

@@ -152,7 +152,7 @@ fn run_post_fsync_crash_oracle(batch_n: u32) -> (RecoveredState, bool) {
     let pre_present = store.query(&Region::all()).into_iter().any(|entry| {
         entry.event_kind() == KIND && {
             store
-                .get(batpak::id::EventId::from(entry.event_id()))
+                .get(entry.event_id())
                 .map(|loaded| loaded.event.payload.get("pre") == Some(&serde_json::json!(1)))
                 .unwrap_or(false)
         }

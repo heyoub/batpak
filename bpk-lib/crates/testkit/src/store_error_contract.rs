@@ -212,7 +212,7 @@ pub fn domain_cases() -> Vec<Case> {
         },
         Case {
             name: "not_found",
-            error: StoreError::NotFound(0xDEAD),
+            error: StoreError::NotFound(batpak::id::EventId::from(0xDEADu128)),
             class: HandlingClass::Domain,
             source_needle: None,
             display_needles: &["dead", "not found"],
@@ -739,7 +739,9 @@ pub fn fail_closed_operational_cases() -> Vec<Case> {
         },
         Case {
             name: "ancestry_corrupt",
-            error: StoreError::AncestryCorrupt { cycle_at: 0xBEEF },
+            error: StoreError::AncestryCorrupt {
+                cycle_at: batpak::id::EventId::from(0xBEEFu128),
+            },
             class: HandlingClass::FailClosedOperational,
             source_needle: None,
             display_needles: &["ancestry walk detected a cycle", "beef"],

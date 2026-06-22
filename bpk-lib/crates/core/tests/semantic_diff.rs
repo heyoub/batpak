@@ -156,7 +156,7 @@ fn summarize_entries<State: batpak::store::StoreState>(
         })
         .map(|entry| {
             let payload = store
-                .get(batpak::id::EventId::from(entry.event_id()))
+                .get(entry.event_id())
                 .expect("query result must be readable from disk")
                 .event
                 .payload;

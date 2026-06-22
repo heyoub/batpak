@@ -288,17 +288,17 @@ pub(crate) fn import_events<S: crate::store::StoreState>(
                 }
             }
 
-            let key = import_key(&options.source_namespace, entry.event_id());
+            let key = import_key(&options.source_namespace, entry.event_id().as_u128());
             if import_key_already_present(destination, key) {
                 report.deduplicated = report.deduplicated.saturating_add(1);
                 continue;
             }
 
-            let raw = source.read_raw(crate::id::EventId::from(entry.event_id()))?;
+            let raw = source.read_raw(entry.event_id())?;
             let provenance = ImportProvenance {
                 schema_version: IMPORT_PROVENANCE_SCHEMA_VERSION,
                 source_namespace: options.source_namespace.clone(),
-                source_event_id: entry.event_id(),
+                source_event_id: entry.event_id().as_u128(),
                 source_global_sequence: entry.global_sequence(),
                 source_kind: entry.event_kind().as_raw_u16(),
                 source_content_hash: raw.event.header.content_hash,
@@ -366,7 +366,6 @@ mod tests {
     use super::*;
     use crate::coordinate::Coordinate;
     use crate::event::EventKind;
-    use crate::id::EventId;
     use crate::store::{AppendOptions, StoreConfig};
 
     #[test]
@@ -408,13 +407,16 @@ mod tests {
         // extension — the exact envelope shape an imported event receipt holds.
         let source_entry = source.by_entity("entity:prov:wrapper")[0].clone();
         let raw = source
-            .read_raw(EventId::from(source_entry.event_id()))
+            .read_raw(source_entry.event_id())
             .expect("read source raw");
-        let key = import_key(options.source_namespace(), source_entry.event_id());
+        let key = import_key(
+            options.source_namespace(),
+            source_entry.event_id().as_u128(),
+        );
         let provenance_body = ImportProvenance {
             schema_version: IMPORT_PROVENANCE_SCHEMA_VERSION,
             source_namespace: options.source_namespace().clone(),
-            source_event_id: source_entry.event_id(),
+            source_event_id: source_entry.event_id().as_u128(),
             source_global_sequence: source_entry.global_sequence(),
             source_kind: source_entry.event_kind().as_raw_u16(),
             source_content_hash: raw.event.header.content_hash,
@@ -437,7 +439,7 @@ mod tests {
         let decoded = provenance(&receipt).expect("wrapper must decode import provenance");
         assert_eq!(
             decoded.source_event_id,
-            source_entry.event_id(),
+            source_entry.event_id().as_u128(),
             "wrapper-decoded source_event_id must match the source event"
         );
         assert_eq!(

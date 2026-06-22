@@ -140,7 +140,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // -- Show the event log --
     let _ = writeln!(out, "\nEvent log for vault door:");
     for entry in store.by_entity("door:vault") {
-        let stored = store.get(batpak::id::EventId::from(entry.event_id()))?;
+        let stored = store.get(entry.event_id())?;
         let _ = writeln!(
             out,
             "  kind={} payload={}",

@@ -10,7 +10,7 @@ use std::thread;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{bail, Context, Result};
-use batpak::id::EventId;
+use batpak::id::EntityIdType;
 use batpak::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -434,8 +434,8 @@ fn collect_gate_rows_from_store(store: &Store, limit: usize) -> Result<Vec<Ledge
     for entry in entries {
         let event_id = entry.event_id();
         let stored = store
-            .read_raw(EventId::from(event_id))
-            .with_context(|| format!("read ledger event {event_id:032x}"))?;
+            .read_raw(event_id)
+            .with_context(|| format!("read ledger event {:032x}", event_id.as_u128()))?;
         if let Some(gate) = stored
             .event
             .route_typed::<FactoryGateCompleted>()
@@ -466,8 +466,8 @@ pub(crate) fn collect_list_lines(store: &Store, limit: usize) -> Result<Vec<Stri
     for entry in entries {
         let event_id = entry.event_id();
         let stored = store
-            .read_raw(EventId::from(event_id))
-            .with_context(|| format!("read ledger event {event_id:032x}"))?;
+            .read_raw(event_id)
+            .with_context(|| format!("read ledger event {:032x}", event_id.as_u128()))?;
         let seq = entry.global_sequence();
         if let Some(started) = stored
             .event
@@ -663,9 +663,7 @@ mod tests {
             .into_iter()
             .next()
             .expect("one entry");
-        let stored = store
-            .read_raw(EventId::from(entry.event_id()))
-            .expect("read");
+        let stored = store.read_raw(entry.event_id()).expect("read");
         let failed = stored
             .event
             .route_typed::<FactoryCommandFailed>()

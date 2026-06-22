@@ -189,7 +189,7 @@ fn replay_read_alloc_cost(n: u64) -> u64 {
         let mut decoded = 0u64;
         for entry in &entries {
             let stored = store
-                .get(batpak::id::EventId::from(entry.event_id()))
+                .get(entry.event_id())
                 .expect("read back appended event");
             // Touch the decoded payload so the decode cannot be optimized away.
             if stored.event.payload.is_object() {

@@ -149,8 +149,8 @@ impl PartialOrd for ClockKey {
 impl IndexEntry {
     /// Unique ID of the event.
     #[must_use]
-    pub const fn event_id(&self) -> u128 {
-        self.event_id
+    pub const fn event_id(&self) -> crate::id::EventId {
+        crate::id::EventId::from_u128(self.event_id)
     }
 
     /// Correlation ID linking related events in a causal chain.

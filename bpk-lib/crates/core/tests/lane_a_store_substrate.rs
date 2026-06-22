@@ -362,7 +362,7 @@ fn public_canal_trait_pulls_cursor_and_subscription_items() {
         Canal::pull_batch(&mut cursor, 1, Duration::from_millis(0)).expect("cursor canal");
     match cursor_batch {
         CanalBatch::One(entry) => {
-            assert_eq!(CanalItem::event_id(&entry), u128::from(first.event_id));
+            assert_eq!(CanalItem::event_id(&entry), first.event_id);
         }
         other @ (CanalBatch::Empty | CanalBatch::Many(_)) => {
             unreachable!("PROPERTY: cursor canal should yield one entry, got {other:?}")
@@ -378,10 +378,7 @@ fn public_canal_trait_pulls_cursor_and_subscription_items() {
             .expect("subscription canal");
     match subscription_batch {
         CanalBatch::One(notification) => {
-            assert_eq!(
-                CanalItem::event_id(&notification),
-                u128::from(second.event_id)
-            );
+            assert_eq!(CanalItem::event_id(&notification), second.event_id);
         }
         other @ (CanalBatch::Empty | CanalBatch::Many(_)) => {
             unreachable!(
