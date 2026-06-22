@@ -244,15 +244,21 @@ impl WriterHandle {
 
     /// Test-only: abandon the writer the way a power loss would — close its
     /// command channel (so the loop ends WITHOUT a `Shutdown`-triggered drain,
-    /// footer, or final sync) and join the thread to quiescence. Consumes the
-    /// handle, dropping `tx` (the sole sender) so the writer's `rx.iter()`
-    /// terminates naturally. Used by [`super::super::Store::abandon_without_shutdown`].
+    /// footer, or final sync) and join the thread to quiescence. Takes the
+    /// handle by `&mut` (the `Open` typestate owns it in `Store::state.0` and
+    /// cannot be moved out past the `Drop` impl); it replaces `tx` with a
+    /// freshly-disconnected sender, dropping the original sole sender so the
+    /// writer's `rx.iter()` terminates naturally, then joins the thread. Used
+    /// by [`super::super::Store::abandon_without_shutdown`].
     #[cfg(feature = "dangerous-test-hooks")]
-    pub(crate) fn close_channel_and_join(self) {
-        let Self { tx, thread, .. } = self;
-        // Drop the only sender first so the writer loop's `rx.iter()` ends.
-        drop(tx);
-        if let Some(thread) = thread {
+    pub(crate) fn close_channel_and_join(&mut self) {
+        // Replace `tx` with a dead sender whose receiver is already dropped, so
+        // the original `tx` (the sole live sender) drops here and the writer
+        // loop's `rx.iter()` ends.
+        let (dead_tx, _dead_rx) = flume::bounded(0);
+        let live_tx = std::mem::replace(&mut self.tx, dead_tx);
+        drop(live_tx);
+        if let Some(thread) = self.thread.take() {
             let _join_result = thread.join();
         }
     }

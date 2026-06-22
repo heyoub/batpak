@@ -125,7 +125,7 @@ fn group_local_projection_freshness(
     }
 }
 
-fn fallback_to_full_replay<T, I, State>(
+fn fallback_to_full_replay<T, I, State: crate::store::StoreState>(
     store: &Store<State>,
     entity: &str,
     freshness: &Freshness,
@@ -146,11 +146,14 @@ where
     )
 }
 
-fn input_frontier_for_sequence<State>(store: &Store<State>, sequence: u64) -> Option<HlcPoint> {
+fn input_frontier_for_sequence<State: crate::store::StoreState>(
+    store: &Store<State>,
+    sequence: u64,
+) -> Option<HlcPoint> {
     store.index.hlc_for_global_sequence(sequence)
 }
 
-fn finish_observation<State>(
+fn finish_observation<State: crate::store::StoreState>(
     store: &Store<State>,
     applied_sequence: u64,
     cache_status: ProjectionCacheObservation,
@@ -164,7 +167,7 @@ fn finish_observation<State>(
     }
 }
 
-pub(crate) fn project<T, State>(
+pub(crate) fn project<T, State: crate::store::StoreState>(
     store: &Store<State>,
     entity: &str,
     freshness: &Freshness,
@@ -176,7 +179,7 @@ where
     Ok(project_inner::<T, T::Input, State>(store, entity, freshness, None)?.into_state())
 }
 
-pub(crate) fn project_outcome<T, State>(
+pub(crate) fn project_outcome<T, State: crate::store::StoreState>(
     store: &Store<State>,
     entity: &str,
     freshness: &Freshness,
@@ -188,7 +191,7 @@ where
     project_inner::<T, T::Input, State>(store, entity, freshness, None)
 }
 
-pub(crate) fn project_if_changed<T, State>(
+pub(crate) fn project_if_changed<T, State: crate::store::StoreState>(
     store: &Store<State>,
     entity: &str,
     last_seen_generation: u64,
@@ -226,7 +229,7 @@ where
 /// Same as `project()` but captures per-phase timings into `out`.
 /// The measured path IS the real path — same code, same branches.
 #[cfg(test)]
-pub(crate) fn project_timed<T, State>(
+pub(crate) fn project_timed<T, State: crate::store::StoreState>(
     store: &Store<State>,
     entity: &str,
     freshness: &Freshness,
@@ -240,7 +243,7 @@ where
 }
 
 /// Shared projection executor. Optional timing sink gated behind `timings.is_some()`.
-fn project_inner<T, I, State>(
+fn project_inner<T, I, State: crate::store::StoreState>(
     store: &Store<State>,
     entity: &str,
     freshness: &Freshness,
@@ -417,7 +420,7 @@ where
 /// Phase 1 of [`project_inner`]: build the replay plan, fire the early cache
 /// prefetch, and probe the group-local slot, recording the per-phase timings.
 /// Extracted verbatim from `project_inner` to keep that function within budget.
-fn prepare_projection<T, State>(
+fn prepare_projection<T, State: crate::store::StoreState>(
     store: &Store<State>,
     entity: &str,
     freshness: &Freshness,
@@ -495,7 +498,7 @@ fn replay_items_for_dispatch(dispatch: &ProjectionDispatch) -> Vec<ProjectionRep
     }
 }
 
-fn notify_projection_applied<T, State>(
+fn notify_projection_applied<T, State: crate::store::StoreState>(
     store: &Store<State>,
     entity: &str,
     outcome: &ProjectionOutcome<T>,
@@ -526,7 +529,7 @@ fn notify_projection_applied<T, State>(
 /// External cache probe with incremental apply and fresh-hit paths, then fallback to full replay.
 // cold path -- keep out of the hot dispatch to reduce instruction cache pressure
 #[inline(never)]
-fn execute_external_cache_path<T, I, State>(
+fn execute_external_cache_path<T, I, State: crate::store::StoreState>(
     store: &Store<State>,
     execution: ReplayExecution<'_>,
     mut fallback_cache_status: ProjectionCacheObservation,
@@ -692,7 +695,7 @@ where
 /// Full replay from disk: batch-read events, fold, and store back to cache.
 // cold path -- keep out of the hot dispatch to reduce instruction cache pressure
 #[inline(never)]
-fn execute_full_replay<T, I, State>(
+fn execute_full_replay<T, I, State: crate::store::StoreState>(
     store: &Store<State>,
     execution: ReplayExecution<'_>,
     cache_status: ProjectionCacheObservation,
@@ -777,7 +780,7 @@ where
 /// silently diverges from a full replay. A debug-only cross-check is deferred
 /// (0.8.3 audit R9); only call this for types whose `supports_incremental_apply`
 /// returns `true`.
-fn apply_incremental_events<T, I, State>(
+fn apply_incremental_events<T, I, State: crate::store::StoreState>(
     store: &Store<State>,
     execution: &ReplayExecution<'_>,
     cached_state: &mut T,
@@ -800,7 +803,7 @@ where
     Ok(())
 }
 
-fn store_projection_value<T, State>(
+fn store_projection_value<T, State: crate::store::StoreState>(
     store: &Store<State>,
     execution: &ReplayExecution<'_>,
     value: &T,
@@ -867,7 +870,7 @@ fn observe_projection_cache_store_outcome(
     );
 }
 
-fn store_index_cached_projection<State>(
+fn store_index_cached_projection<State: crate::store::StoreState>(
     store: &Store<State>,
     entity: &str,
     type_id: TypeId,

@@ -2,7 +2,7 @@
 //! Harness pattern: Equivalence Harness (live vs reopen lane).
 
 mod support;
-use batpak::store::{ReadOnly, Store, StoreConfig};
+use batpak::store::{ReadOnly, Store, StoreConfig, StoreState};
 use proptest::prelude::*;
 use support::prelude::*;
 use tempfile::TempDir;
@@ -96,7 +96,7 @@ fn event_kind(spec: &AppendSpec) -> EventKind {
     EventKind::custom(spec.category, spec.type_id)
 }
 
-fn capture_snapshot<State>(store: &Store<State>) -> StoreSnapshot {
+fn capture_snapshot<State: StoreState>(store: &Store<State>) -> StoreSnapshot {
     let visible: Vec<_> = store
         .query(&Region::all())
         .into_iter()

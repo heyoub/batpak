@@ -102,7 +102,10 @@ fn populate(store: &Store, specs: &[AppendSpec]) -> Result<(), StoreError> {
     Ok(())
 }
 
-fn summarize_entries<State>(store: &Store<State>, entries: Vec<IndexEntry>) -> Vec<EventSummary> {
+fn summarize_entries<State: batpak::store::StoreState>(
+    store: &Store<State>,
+    entries: Vec<IndexEntry>,
+) -> Vec<EventSummary> {
     entries
         .into_iter()
         .filter(|entry| entry.event_kind() != EventKind::SYSTEM_CLOSE_COMPLETED)
@@ -139,7 +142,10 @@ fn summarize_entries<State>(store: &Store<State>, entries: Vec<IndexEntry>) -> V
         .collect()
 }
 
-fn capture_snapshot<State>(store: &Store<State>, specs: &[AppendSpec]) -> QuerySnapshot {
+fn capture_snapshot<State: batpak::store::StoreState>(
+    store: &Store<State>,
+    specs: &[AppendSpec],
+) -> QuerySnapshot {
     let mut entities = BTreeSet::new();
     let mut scope_names = BTreeSet::new();
     let mut exact_kind_keys = BTreeSet::new();

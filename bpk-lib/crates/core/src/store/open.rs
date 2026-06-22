@@ -392,7 +392,6 @@ impl Store<Open> {
             index,
             reader,
             cache,
-            writer: Some(writer),
             watermark_handle,
             projection_registry,
             lifecycle_gate: Mutex::new(()),
@@ -401,7 +400,7 @@ impl Store<Open> {
             should_shutdown_on_drop: true,
             open_report: Some(open_report.clone()),
             cumulative_reserved_kind_fallbacks,
-            _state: std::marker::PhantomData,
+            state: Open(writer),
             _store_lock: store_lock,
         };
 
@@ -476,7 +475,6 @@ impl Store<ReadOnly> {
             index,
             reader,
             cache,
-            writer: None,
             watermark_handle,
             projection_registry,
             lifecycle_gate: Mutex::new(()),
@@ -485,7 +483,7 @@ impl Store<ReadOnly> {
             should_shutdown_on_drop: false,
             open_report: Some(open_report.clone()),
             cumulative_reserved_kind_fallbacks,
-            _state: std::marker::PhantomData,
+            state: ReadOnly,
             _store_lock: store_lock,
         };
 

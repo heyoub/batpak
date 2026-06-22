@@ -14,7 +14,7 @@ impl Store<Open> {
     /// # Errors
     /// Returns any source read, destination append, serialization, or
     /// configuration error surfaced while importing.
-    pub fn import_events<S>(
+    pub fn import_events<S: crate::store::StoreState>(
         &self,
         source: &Store<S>,
         selector: &ImportSelector,

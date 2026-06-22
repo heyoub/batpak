@@ -91,6 +91,11 @@ fn check_doc_hidden_public_surface(repo_root: &Path, source_cache: &mut SourceCa
         "crates/core/src/store/projection/watch.rs::subscription",
         "crates/core/src/store/segment/scan/mod.rs::Reader",
         "crates/core/src/store/test_support.rs::panic_writer_for_test",
+        // Sealing module for the public `StoreState` typestate-bound trait
+        // (mirrors `typestate/transition.rs::sealed`): a `#[doc(hidden)] pub mod
+        // sealed { pub trait Sealed {} }` Rust-visibility escape hatch so
+        // downstream crates cannot implement `StoreState` for new markers.
+        "crates/core/src/store/mod.rs::sealed",
         "crates/core/src/typestate/transition.rs::sealed",
     ]
     .into_iter()

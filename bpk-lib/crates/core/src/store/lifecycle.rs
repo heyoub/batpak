@@ -750,9 +750,7 @@ pub(crate) fn close(mut store: Store<Open>) -> Result<Closed, StoreError> {
     let result = crate::store::recv_writer_reply(&rx);
 
     result?;
-    if let Some(writer) = store.writer.as_mut() {
-        writer.join()?;
-    }
+    store.state.0.join()?;
 
     // Persist the durable idempotency store FIRST and MANDATORILY, ahead of the
     // best-effort cold-start artifacts. It is a correctness primitive that must
@@ -769,14 +767,16 @@ pub(crate) fn close(mut store: Store<Open>) -> Result<Closed, StoreError> {
     Ok(Closed)
 }
 
-pub(crate) fn stats<State>(store: &Store<State>) -> StoreStats {
+pub(crate) fn stats<State: crate::store::StoreState>(store: &Store<State>) -> StoreStats {
     StoreStats {
         event_count: store.index.len(),
         global_sequence: store.index.global_sequence(),
     }
 }
 
-pub(crate) fn diagnostics<State>(store: &Store<State>) -> StoreDiagnostics {
+pub(crate) fn diagnostics<State: crate::store::StoreState>(
+    store: &Store<State>,
+) -> StoreDiagnostics {
     let frontier = store.watermark_handle.lock().snapshot_view();
     StoreDiagnostics {
         event_count: store.index.len(),
@@ -787,10 +787,10 @@ pub(crate) fn diagnostics<State>(store: &Store<State>) -> StoreDiagnostics {
         fd_budget: store.config.fd_budget,
         restart_policy: store.config.writer.restart_policy.clone(),
         writer_pressure: store
-            .writer
-            .as_ref()
-            .map(|writer| WriterPressure {
-                queue_len: writer.tx.len(),
+            .state
+            .writer_queue_len()
+            .map(|queue_len| WriterPressure {
+                queue_len,
                 capacity: store.config.writer.channel_capacity,
             })
             .unwrap_or(WriterPressure {

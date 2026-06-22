@@ -86,7 +86,7 @@ fn append_counter_event(store: &Store<Open>, entity: &str) -> TestResult {
     Ok(())
 }
 
-fn replay_context_for<State>(
+fn replay_context_for<State: crate::store::StoreState>(
     store: &Store<State>,
     entity: &str,
     type_id: std::any::TypeId,

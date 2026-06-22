@@ -1,6 +1,6 @@
 use super::*;
 
-impl<State> Store<State> {
+impl<State: crate::store::StoreState> Store<State> {
     /// Return the current operator-facing frontier view.
     pub fn frontier(&self) -> FrontierView {
         self.watermark_handle.lock().snapshot_view()

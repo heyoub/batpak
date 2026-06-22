@@ -1,6 +1,6 @@
 use super::*;
 
-impl<State> Store<State> {
+impl<State: crate::store::StoreState> Store<State> {
     /// DIAGNOSTICS
     pub fn stats(&self) -> StoreStats {
         lifecycle::stats(self)

@@ -18,7 +18,6 @@ fn test_store_with_writer(tx: flume::Sender<writer::WriterCommand>) -> (Store, T
             &runtime.clock_arc(),
         )),
         cache: Box::new(NoCache),
-        writer: Some(writer::WriterHandle::from_parts_for_test(tx, subscribers)),
         projection_registry: projection::registry::ProjectionRegistry::new(
             watermark_handle.clone(),
         ),
@@ -30,7 +29,7 @@ fn test_store_with_writer(tx: flume::Sender<writer::WriterCommand>) -> (Store, T
         open_report: None,
         cumulative_reserved_kind_fallbacks:
             crate::store::segment::sidx::ReservedKindFallbackStats::default(),
-        _state: std::marker::PhantomData,
+        state: Open(writer::WriterHandle::from_parts_for_test(tx, subscribers)),
         _store_lock: dir_lock::StoreDirLock::acquire(dir.path(), StoreLockMode::Mutable)
             .expect("test store lock"),
     };

@@ -4,7 +4,7 @@ use crate::id::EventId;
 use crate::store::index::IndexEntry;
 use std::collections::BTreeMap;
 
-impl<State> Store<State> {
+impl<State: crate::store::StoreState> Store<State> {
     /// READ: get a single event by ID.
     ///
     /// # Errors

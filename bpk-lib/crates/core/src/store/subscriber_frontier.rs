@@ -197,7 +197,7 @@ impl std::fmt::Display for SubscriberFrontierReportError {
 
 impl std::error::Error for SubscriberFrontierReportError {}
 
-impl<State> Store<State> {
+impl<State: crate::store::StoreState> Store<State> {
     /// Build a deterministic subscriber frontier evidence report.
     ///
     /// # Errors

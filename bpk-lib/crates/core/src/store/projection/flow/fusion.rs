@@ -27,7 +27,7 @@ fn observe_fused_replay_batch_read() {
 #[cfg(not(test))]
 fn observe_fused_replay_batch_read() {}
 
-pub(crate) fn project_fused2<Left, Right, State>(
+pub(crate) fn project_fused2<Left, Right, State: crate::store::StoreState>(
     store: &Store<State>,
     entity: &str,
 ) -> Result<(Option<Left>, Option<Right>), StoreError>
@@ -62,7 +62,7 @@ where
     Ok((left, right))
 }
 
-pub(crate) fn project_fused3<First, Second, Third, State>(
+pub(crate) fn project_fused3<First, Second, Third, State: crate::store::StoreState>(
     store: &Store<State>,
     entity: &str,
 ) -> Result<ProjectionFusion3<First, Second, Third>, StoreError>
@@ -169,7 +169,7 @@ where
     (filtered, lanes)
 }
 
-fn notify_projection_applied_lanes<T, State>(
+fn notify_projection_applied_lanes<T, State: crate::store::StoreState>(
     store: &Store<State>,
     entity: &str,
     lanes: &BTreeMap<u32, HlcPoint>,

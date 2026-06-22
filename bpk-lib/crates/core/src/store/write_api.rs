@@ -422,15 +422,10 @@ impl Store<Open> {
     /// Crate-private accessor that encodes the `Store<Open>` typestate
     /// invariant: an `Open` store always holds a writer handle.
     ///
-    /// Panics if the invariant is violated — which only happens when a
-    /// `Store<Open>` has been partially moved out of during drop, a context
-    /// in which every public method is already unreachable.
-    // justifies: INV-TYPESTATE-OPEN-HAS-WRITER and src/store/lifecycle.rs make this a typestate construction guarantee, not contingent runtime input.
-    #[allow(clippy::expect_used)]
+    /// The invariant is enforced by the type: `Open(WriterHandle)` owns the
+    /// handle, so the borrow is total — no `Option`, no `expect`, no panic.
     pub(crate) fn writer_ref(&self) -> &WriterHandle {
-        self.writer
-            .as_ref()
-            .expect("invariant: Store<Open> is constructed with a writer handle")
+        &self.state.0
     }
 
     /// WRITE: append with CAS, idempotency, custom correlation/causation.

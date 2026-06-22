@@ -18,7 +18,7 @@ use super::{validate_catalog_name, CatalogEntryState, TombstoneState};
 /// # Errors
 /// Returns [`StoreRegisterCatalogError`] when a matching row cannot be read,
 /// decoded, validated, or folded into a conflict-free register.
-pub fn rebuild_register_from_store<State>(
+pub fn rebuild_register_from_store<State: batpak::store::StoreState>(
     store: &Store<State>,
     coordinate: &Coordinate,
 ) -> Result<Register, StoreRegisterCatalogError> {
@@ -31,7 +31,7 @@ pub fn rebuild_register_from_store<State>(
     .map_err(StoreRegisterCatalogError::Register)
 }
 
-pub(super) fn fold_catalog_entries<State>(
+pub(super) fn fold_catalog_entries<State: batpak::store::StoreState>(
     store: &Store<State>,
     coordinate: &Coordinate,
 ) -> Result<BTreeMap<String, CatalogEntryState>, StoreRegisterCatalogError> {

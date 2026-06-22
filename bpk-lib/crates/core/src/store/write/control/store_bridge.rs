@@ -116,7 +116,7 @@ impl Store<Open> {
     }
 
     pub(crate) fn writer_handle(&self) -> Result<&WriterHandle, StoreError> {
-        let writer = self.writer.as_ref().ok_or(StoreError::WriterCrashed)?;
+        let writer = &self.state.0;
         writer.fail_if_exited()?;
         Ok(writer)
     }
@@ -166,15 +166,13 @@ impl Store<Open> {
     }
 
     pub(crate) fn submit_pressure_gate(&self) -> Option<crate::outcome::Outcome<AppendTicket>> {
-        let writer = self.writer.as_ref()?;
-        self.pressure_retry_outcome(writer.tx.len())
+        self.pressure_retry_outcome(self.state.0.tx.len())
     }
 
     pub(crate) fn submit_pressure_gate_batch(
         &self,
     ) -> Option<crate::outcome::Outcome<BatchAppendTicket>> {
-        let writer = self.writer.as_ref()?;
-        self.pressure_retry_outcome(writer.tx.len())
+        self.pressure_retry_outcome(self.state.0.tx.len())
     }
 
     pub(crate) fn pressure_retry_threshold(&self) -> usize {

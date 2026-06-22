@@ -201,7 +201,7 @@ pub(crate) fn import_provenance_extension_key() -> ExtensionKey {
     ExtensionKey::reserved("batpak.import.provenance")
 }
 
-pub(crate) fn import_events<S>(
+pub(crate) fn import_events<S: crate::store::StoreState>(
     destination: &Store<Open>,
     source: &Store<S>,
     selector: &ImportSelector,

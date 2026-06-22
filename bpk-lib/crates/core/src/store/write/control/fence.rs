@@ -171,8 +171,7 @@ impl<'a> VisibilityFence<'a> {
     /// Returns:
     /// * `Ok(())` when the cancel command was enqueued directly, offloaded
     ///   to a helper thread, or when there is no action to take
-    ///   (`self.closed` is true, or the store is no longer holding a
-    ///   writer handle).
+    ///   (`self.closed` is true).
     /// * `Err(String)` when the writer channel is disconnected or the helper
     ///   thread could not be spawned. We never panic in `Drop` under any
     ///   circumstance.
@@ -180,10 +179,8 @@ impl<'a> VisibilityFence<'a> {
         if self.closed {
             return Ok(());
         }
-        let Some(writer) = self.store.writer.as_ref() else {
-            return Ok(());
-        };
-        let writer_tx = writer.tx.clone();
+        // `self.store` is a `&Store<Open>`, which always owns a writer handle.
+        let writer_tx = self.store.state.0.tx.clone();
         let (tx, _rx) = flume::bounded(1);
         // D4: best-effort cancel on drop. We do not wait for the writer's
         // ack here — doing so would turn every fence drop into a

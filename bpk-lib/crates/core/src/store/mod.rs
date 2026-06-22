@@ -214,8 +214,48 @@ pub(crate) fn recv_writer_reply<T>(
 #[cfg(feature = "async-store")]
 compile_error!("INVARIANT 2: Store API is sync. Use spawn_blocking or flume recv_async.");
 
+/// Sealing module for [`StoreState`] (mirrors `typestate::transition::sealed`).
+///
+/// `Sealed` is a marker that only this crate's typestate markers implement, so
+/// downstream code cannot add new [`StoreState`] implementors.
+#[doc(hidden)]
+pub mod sealed {
+    /// Sealed marker implemented by every [`super::StoreState`] type.
+    pub trait Sealed {}
+}
+
+/// Sealed per-state teardown contract for the [`Store`] typestate.
+///
+/// This is what lets the single generic `Drop for Store<State>` reach the
+/// writer (when there is one) by `&mut` without moving any field out of the
+/// store. Only [`Open`] carries a writer handle; the other markers are ZSTs
+/// whose teardown is a no-op.
+///
+/// The trait is `pub` so it can bound the `State` parameter on the public
+/// [`Store`]/[`ProjectionEvidenceRegistry`] types, but it is **sealed** via the
+/// private `sealed::Sealed` supertrait: downstream code can neither implement
+/// it for new markers nor obtain a `StoreState` value to call its methods on
+/// (the marker constructors — e.g. `Open`'s field — are crate-private). No
+/// method signature names `WriterHandle`, so the crate-private writer type is
+/// never exposed in the public API either.
+pub trait StoreState: sealed::Sealed {
+    /// Drain + join the owned writer when `should_shutdown` is set.
+    fn shutdown_writer(&mut self, should_shutdown: bool);
+
+    /// Queue length of the owned writer's command channel, if any.
+    ///
+    /// Returns the channel length only for [`Open`]; the other states carry no
+    /// writer. Domain-neutral `usize` so the crate-private `WriterHandle` is
+    /// never named in the (sealed) trait signature.
+    fn writer_queue_len(&self) -> Option<usize>;
+}
+
 /// Typestate marker for an open store.
-pub struct Open;
+///
+/// `Open` is the only state that owns the writer handle: encoding the
+/// invariant "an open store always has a writer" directly in the type, so
+/// `writer_ref` can return `&WriterHandle` with no `Option`, no `expect`.
+pub struct Open(pub(crate) WriterHandle);
 
 /// Typestate marker for a cleanly closed store.
 pub struct Closed;
@@ -223,36 +263,16 @@ pub struct Closed;
 /// Typestate marker for a read-only store handle.
 pub struct ReadOnly;
 
-/// The main event store handle. Sync API; all methods are blocking. Send + Sync.
-pub struct Store<State = Open> {
-    pub(crate) index: Arc<StoreIndex>,
-    pub(crate) reader: Arc<Reader>,
-    pub(crate) cache: Box<dyn ProjectionCache>,
-    pub(crate) writer: Option<WriterHandle>,
-    pub(crate) watermark_handle: WatermarkAdvanceHandle,
-    pub(crate) projection_registry: ProjectionRegistry,
-    pub(crate) lifecycle_gate: Mutex<()>,
-    pub(crate) config: Arc<StoreConfig>,
-    pub(crate) runtime: Arc<config::ValidatedStoreConfig>,
-    pub(crate) should_shutdown_on_drop: bool,
-    pub(crate) open_report: Option<cold_start::rebuild::OpenIndexReport>,
-    pub(crate) cumulative_reserved_kind_fallbacks: segment::sidx::ReservedKindFallbackStats,
-    pub(crate) _state: std::marker::PhantomData<State>,
-    pub(crate) _store_lock: dir_lock::StoreDirLock,
-}
+impl sealed::Sealed for Open {}
+impl sealed::Sealed for Closed {}
+impl sealed::Sealed for ReadOnly {}
 
-/// Safety net: if Store is dropped without calling close(), send Shutdown to the
-/// writer thread and wait for it to drain pending events before releasing the
-/// directory lock.
-/// close(self) is still the preferred explicit path for guaranteed clean shutdown.
-impl<State> Drop for Store<State> {
-    fn drop(&mut self) {
-        if !self.should_shutdown_on_drop {
+impl StoreState for Open {
+    fn shutdown_writer(&mut self, should_shutdown: bool) {
+        if !should_shutdown {
             return;
         }
-        let Some(mut writer) = self.writer.take() else {
-            return;
-        };
+        let writer = &mut self.0;
         tracing::warn!(
             "Store dropped without explicit close(); draining writer before releasing store lock"
         );
@@ -264,7 +284,54 @@ impl<State> Drop for Store<State> {
         {
             wait_for_drop_shutdown_ack(&rx);
         }
-        join_drop_shutdown_writer(&mut writer);
+        join_drop_shutdown_writer(writer);
+    }
+
+    fn writer_queue_len(&self) -> Option<usize> {
+        Some(self.0.tx.len())
+    }
+}
+
+impl StoreState for Closed {
+    fn shutdown_writer(&mut self, _should_shutdown: bool) {}
+    fn writer_queue_len(&self) -> Option<usize> {
+        None
+    }
+}
+
+impl StoreState for ReadOnly {
+    fn shutdown_writer(&mut self, _should_shutdown: bool) {}
+    fn writer_queue_len(&self) -> Option<usize> {
+        None
+    }
+}
+
+/// The main event store handle. Sync API; all methods are blocking. Send + Sync.
+pub struct Store<State: StoreState = Open> {
+    pub(crate) index: Arc<StoreIndex>,
+    pub(crate) reader: Arc<Reader>,
+    pub(crate) cache: Box<dyn ProjectionCache>,
+    pub(crate) watermark_handle: WatermarkAdvanceHandle,
+    pub(crate) projection_registry: ProjectionRegistry,
+    pub(crate) lifecycle_gate: Mutex<()>,
+    pub(crate) config: Arc<StoreConfig>,
+    pub(crate) runtime: Arc<config::ValidatedStoreConfig>,
+    pub(crate) should_shutdown_on_drop: bool,
+    pub(crate) open_report: Option<cold_start::rebuild::OpenIndexReport>,
+    pub(crate) cumulative_reserved_kind_fallbacks: segment::sidx::ReservedKindFallbackStats,
+    /// Typestate payload: carries the writer handle when (and only when) the
+    /// store is [`Open`]; a ZST for the other states.
+    pub(crate) state: State,
+    pub(crate) _store_lock: dir_lock::StoreDirLock,
+}
+
+/// Safety net: if Store is dropped without calling close(), send Shutdown to the
+/// writer thread and wait for it to drain pending events before releasing the
+/// directory lock.
+/// close(self) is still the preferred explicit path for guaranteed clean shutdown.
+impl<State: StoreState> Drop for Store<State> {
+    fn drop(&mut self) {
+        self.state.shutdown_writer(self.should_shutdown_on_drop);
     }
 }
 
@@ -293,14 +360,13 @@ impl Store<Open> {
     /// Consumes the store; reopen over the same data directory to recover.
     pub(crate) fn abandon_without_shutdown(mut self) {
         self.should_shutdown_on_drop = false;
-        // Take the writer handle and close its command channel WITHOUT sending
-        // Shutdown: the writer loop ends naturally (no drain, no footer, no final
-        // sync), then we join to quiescence so no thread is mid-fsync when the
-        // caller crashes the filesystem.
-        if let Some(writer) = self.writer.take() {
-            writer.close_channel_and_join();
-        }
-        // `self` (writer already taken, should_shutdown_on_drop=false) drops here
-        // as an inert handle: Drop returns immediately.
+        // Close the writer's command channel WITHOUT sending Shutdown: the writer
+        // loop ends naturally (no drain, no footer, no final sync), then we join
+        // to quiescence so no thread is mid-fsync when the caller crashes the
+        // filesystem.
+        self.state.0.close_channel_and_join();
+        // `self` (should_shutdown_on_drop=false) drops here as an inert handle:
+        // `Open::shutdown_writer(false)` no-ops and the quiesced writer in
+        // `state.0` then drops inertly.
     }
 }

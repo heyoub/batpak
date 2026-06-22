@@ -224,7 +224,7 @@ impl std::fmt::Display for ReadWalkReportError {
 
 impl std::error::Error for ReadWalkReportError {}
 
-impl<State> Store<State> {
+impl<State: crate::store::StoreState> Store<State> {
     /// Perform a region query and return deterministic, opt-in read evidence.
     ///
     /// This method does not append evidence automatically.

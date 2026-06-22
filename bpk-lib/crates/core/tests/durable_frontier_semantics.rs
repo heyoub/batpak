@@ -26,7 +26,7 @@ fn fixed_clock_config(dir: &TempDir, now_us: i64) -> StoreConfig {
     StoreConfig::new(dir.path()).with_clock_fn(move || now_us)
 }
 
-fn lifecycle_open_count<State>(store: &Store<State>) -> usize {
+fn lifecycle_open_count<State: batpak::store::StoreState>(store: &Store<State>) -> usize {
     store
         .query(&Region::entity("batpak:store"))
         .into_iter()
@@ -34,7 +34,9 @@ fn lifecycle_open_count<State>(store: &Store<State>) -> usize {
         .count()
 }
 
-fn lifecycle_close_entries<State>(store: &Store<State>) -> Vec<batpak::store::index::IndexEntry> {
+fn lifecycle_close_entries<State: batpak::store::StoreState>(
+    store: &Store<State>,
+) -> Vec<batpak::store::index::IndexEntry> {
     store
         .query(&Region::entity("batpak:store"))
         .into_iter()

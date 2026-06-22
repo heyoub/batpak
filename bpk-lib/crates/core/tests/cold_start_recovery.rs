@@ -57,7 +57,9 @@ fn find_single_segment(dir: &TempDir) -> std::path::PathBuf {
     entries.into_iter().next().expect("exactly one segment")
 }
 
-fn user_visible_entries<State>(store: &Store<State>) -> Vec<batpak::store::index::IndexEntry> {
+fn user_visible_entries<State: batpak::store::StoreState>(
+    store: &Store<State>,
+) -> Vec<batpak::store::index::IndexEntry> {
     store
         .query(&Region::all())
         .into_iter()

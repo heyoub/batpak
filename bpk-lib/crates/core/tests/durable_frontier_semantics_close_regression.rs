@@ -25,7 +25,9 @@ use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
-fn lifecycle_close_entries<State>(store: &Store<State>) -> Vec<batpak::store::index::IndexEntry> {
+fn lifecycle_close_entries<State: batpak::store::StoreState>(
+    store: &Store<State>,
+) -> Vec<batpak::store::index::IndexEntry> {
     store
         .query(&Region::entity("batpak:store"))
         .into_iter()

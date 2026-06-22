@@ -225,7 +225,7 @@ impl std::error::Error for ProjectionRunReportError {
     }
 }
 
-impl<State> Store<State> {
+impl<State: crate::store::StoreState> Store<State> {
     /// Run a projection and return both materialized state and deterministic
     /// projection run evidence.
     ///
@@ -473,11 +473,11 @@ type ProjectionEvidenceRunner<State> = Box<
 /// only the report. The public surface stays domain-neutral: keys are opaque
 /// strings, values are [`ProjectionRunEvidenceReport`], and the domain type
 /// appears solely as a generic parameter at registration time.
-pub struct ProjectionEvidenceRegistry<State = Open> {
+pub struct ProjectionEvidenceRegistry<State: crate::store::StoreState = Open> {
     runners: BTreeMap<String, ProjectionEvidenceRunner<State>>,
 }
 
-impl<State> ProjectionEvidenceRegistry<State> {
+impl<State: crate::store::StoreState> ProjectionEvidenceRegistry<State> {
     /// Create an empty registry. A host with no registered projections answers
     /// every projection id with [`ProjectionEvidenceRegistry::run`] returning
     /// `None`.
@@ -539,7 +539,7 @@ impl<State> ProjectionEvidenceRegistry<State> {
     }
 }
 
-impl<State> Default for ProjectionEvidenceRegistry<State> {
+impl<State: crate::store::StoreState> Default for ProjectionEvidenceRegistry<State> {
     fn default() -> Self {
         Self::new()
     }
