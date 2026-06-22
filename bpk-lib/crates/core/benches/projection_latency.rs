@@ -1,6 +1,3 @@
-// justifies: benches/projection_latency.rs uses panic only in benchmark-only reopen helpers to fail fast on violated lock-release assumptions proved in tests/store_locking.rs.
-#![allow(clippy::panic)]
-
 //! Projection replay and cache benchmarks with explicit cold/hot lanes.
 
 use batpak::prelude::*;
@@ -83,16 +80,18 @@ where
 {
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
-        match open() {
-            Ok(value) => return value,
-            Err(err @ StoreError::StoreLocked { .. }) => {
-                if Instant::now() >= deadline {
-                    panic!("{label}: lock did not clear before deadline: {err:?}");
-                }
-                std::thread::sleep(Duration::from_millis(25));
-            }
-            Err(err) => panic!("{label}: unexpected reopen failure: {err:?}"),
+        let result = open();
+        if matches!(result, Err(StoreError::StoreLocked { .. })) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(25));
+            continue;
         }
+        let context = match &result {
+            Err(StoreError::StoreLocked { .. }) => {
+                format!("{label}: lock did not clear before deadline")
+            }
+            _ => format!("{label}: unexpected reopen failure"),
+        };
+        return result.expect(&context);
     }
 }
 
