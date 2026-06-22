@@ -64,7 +64,7 @@ pub(crate) fn run() -> Result<()> {
     // real files-examined count and assertions (one structural lint per file).
     crate::receipts::record_pass(
         "structural-source-lints",
-        source_files.iter().cloned().collect(),
+        &source_files.iter().cloned().collect(),
         source_files.len(),
         source_files.len().saturating_mul(11),
         started,

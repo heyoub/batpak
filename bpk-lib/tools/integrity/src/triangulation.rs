@@ -13,6 +13,7 @@
 //!      reading each member's declared path dependencies) + Tarjan SCC.
 //!   2. `ManifestScanGraphOracle` — edges re-derived by directly scanning each
 //!      member `Cargo.toml` for `path = "../<dir>"` entries + Tarjan SCC.
+//!
 //! If the two graphs disagree on the acyclicity verdict (or on the edge set),
 //! that is itself a finding; if they AGREE that a cycle exists, the gate fails
 //! naming the cycle. Both clean + agreeing on the live tree ⟹ green.

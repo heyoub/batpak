@@ -28,7 +28,6 @@ pub(super) const REPO_MUTATION_THRESHOLDS: &[(RepoMutationPhase, u32)] = &[
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum MutationEnforcement {
     Threshold { min_catch_pct: u32 },
-    RecordOnly,
 }
 
 /// Whether a diff-scoped lane was actually scoped by a real, non-empty PR diff.
@@ -51,12 +50,6 @@ pub(super) enum DiffScope {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum RepoMutationPhase {
-    // RecordOnly sentinel (floor-less, never-fails). The repo-wide lane is BLOCKING as
-    // of GAUNT-MUT-4, so this is not the currently-selected phase, but it is retained so
-    // a deliberate fallback to record-only stays expressible. It is intentionally absent
-    // from `REPO_MUTATION_THRESHOLDS` (it has no floor); `current_repo_mutation_floor`
-    // maps any phase not present in that table to `None` (record-only).
-    RecordOnly,
     Phase1,
     Phase2,
     Phase3,
@@ -64,17 +57,24 @@ pub(super) enum RepoMutationPhase {
     Phase5,
 }
 
-fn current_repo_mutation_floor() -> Option<u32> {
-    REPO_MUTATION_THRESHOLDS
-        .iter()
-        .find(|(phase, _)| *phase == REPO_MUTATION_PHASE)
-        .map(|(_, floor)| *floor)
+/// The blocking floor for a repo-wide ratchet phase. Every phase carries a real,
+/// non-zero floor — the floor-less record-only sentinel was removed when the
+/// repo-wide lane became unconditionally BLOCKING (GAUNT-MUT-4) — so this is an
+/// exhaustive, infallible lookup. `REPO_MUTATION_THRESHOLDS` mirrors the same
+/// pairs for policy printing and ratchet display; the two must stay in sync.
+fn current_repo_mutation_floor() -> u32 {
+    match REPO_MUTATION_PHASE {
+        RepoMutationPhase::Phase1 => 35,
+        RepoMutationPhase::Phase2 => 50,
+        RepoMutationPhase::Phase3 => 65,
+        RepoMutationPhase::Phase4 => 75,
+        RepoMutationPhase::Phase5 => 85,
+    }
 }
 
 pub(super) fn current_repo_mutation_enforcement() -> MutationEnforcement {
-    match current_repo_mutation_floor() {
-        Some(min_catch_pct) => MutationEnforcement::Threshold { min_catch_pct },
-        None => MutationEnforcement::RecordOnly,
+    MutationEnforcement::Threshold {
+        min_catch_pct: current_repo_mutation_floor(),
     }
 }
 
@@ -187,21 +187,6 @@ pub(super) fn assert_mutation_policy(
                 }
             }
         }
-        MutationEnforcement::RecordOnly => {
-            let Some(score_pct) = score.score_pct else {
-                outln!(
-                    "mutants: `{}` produced execution evidence but no scoreable caught/missed mutants, so ratchet math is not applied for this record-only lane.",
-                    lane.label
-                );
-                return Ok(());
-            };
-            if let Some(next_floor) = next_ratchet_floor(score_pct, None) {
-                outln!(
-                    "mutants: `{}` is in repo-wide record-only mode for this phase. Current score {}% supports a future ratchet to {}%.",
-                    lane.label, score_pct, next_floor
-                );
-            }
-        }
     }
 
     Ok(())
@@ -225,16 +210,11 @@ pub(super) fn print_mutation_policy() {
     outln!(
         "- `cargo xtask mutants full`: with no overrides, run the full policy; with `--surface` and/or `--shard`, run only the requested repo-wide ratchet lane."
     );
-    match current_repo_mutation_floor() {
-        Some(floor) => outln!(
-            "- Repo-wide ratchet phase: {:?} (current floor: {floor}%).",
-            REPO_MUTATION_PHASE
-        ),
-        None => outln!(
-            "- Repo-wide ratchet phase: {:?} (record-only; no floor enforced yet).",
-            REPO_MUTATION_PHASE
-        ),
-    }
+    outln!(
+        "- Repo-wide ratchet phase: {:?} (current floor: {}%).",
+        REPO_MUTATION_PHASE,
+        current_repo_mutation_floor()
+    );
     outln!("- Repo-wide ratchet phases staged in code:");
     for (phase, floor) in REPO_MUTATION_THRESHOLDS {
         outln!("  {:?} => {floor}%", phase);

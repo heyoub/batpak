@@ -750,10 +750,12 @@ mod tests {
     #[test]
     fn unqualified_blocking_gates_are_recorded_nonblocking() {
         for slug in UNQUALIFIED_BLOCKING_GATES {
-            let gate = GATES
-                .iter()
-                .find(|g| g.slug == *slug)
-                .unwrap_or_else(|| panic!("unqualified gate `{slug}` missing from GATES"));
+            let found = GATES.iter().find(|g| g.slug == *slug);
+            assert!(
+                found.is_some(),
+                "unqualified gate `{slug}` missing from GATES"
+            );
+            let gate = found.expect("checked is_some directly above");
             assert!(
                 !gate.has_blocking_authority,
                 "gate `{slug}` is listed as unqualified but claims blocking authority"

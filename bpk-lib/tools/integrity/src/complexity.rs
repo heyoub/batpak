@@ -267,9 +267,10 @@ fn impl_label(node: &syn::ItemImpl) -> String {
 }
 
 fn type_label(ty: &syn::Type) -> String {
-    match ty {
-        syn::Type::Path(p) => path_label(&p.path),
-        other => quote_to_compact(other),
+    if let syn::Type::Path(p) = ty {
+        path_label(&p.path)
+    } else {
+        quote_to_compact(ty)
     }
 }
 

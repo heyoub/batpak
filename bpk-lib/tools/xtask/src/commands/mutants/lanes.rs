@@ -440,48 +440,36 @@ impl MutationLane {
     }
 
     pub(super) fn allows_nonzero_exit(&self, score: MutationScore) -> bool {
-        matches!(
-            self.enforcement,
-            MutationEnforcement::Threshold { .. } | MutationEnforcement::RecordOnly
-        ) && score.executed > 0
+        matches!(self.enforcement, MutationEnforcement::Threshold { .. }) && score.executed > 0
     }
 
     pub(super) fn policy_line(&self) -> String {
-        match self.enforcement {
-            MutationEnforcement::Threshold { min_catch_pct } => {
-                if self.diff_scoped {
-                    format!(
-                        "{} `{}` on {} diff-scoped (--in-diff against PR base): threshold {}%",
-                        self.scope.name(),
-                        self.label,
-                        surface_name(self.surface),
-                        min_catch_pct,
-                    )
-                } else {
-                    match self.shard.as_deref() {
-                        Some(shard) => format!(
-                            "{} `{}` on {} shard {shard}: threshold {}%",
-                            self.scope.name(),
-                            self.label,
-                            surface_name(self.surface),
-                            min_catch_pct,
-                        ),
-                        None => format!(
-                            "{} `{}` on {}: threshold {}%",
-                            self.scope.name(),
-                            self.label,
-                            surface_name(self.surface),
-                            min_catch_pct,
-                        ),
-                    }
-                }
-            }
-            MutationEnforcement::RecordOnly => format!(
-                "{} `{}` on {}: record-only for current ratchet phase",
+        let MutationEnforcement::Threshold { min_catch_pct } = self.enforcement;
+        if self.diff_scoped {
+            format!(
+                "{} `{}` on {} diff-scoped (--in-diff against PR base): threshold {}%",
                 self.scope.name(),
                 self.label,
-                surface_name(self.surface)
-            ),
+                surface_name(self.surface),
+                min_catch_pct,
+            )
+        } else {
+            match self.shard.as_deref() {
+                Some(shard) => format!(
+                    "{} `{}` on {} shard {shard}: threshold {}%",
+                    self.scope.name(),
+                    self.label,
+                    surface_name(self.surface),
+                    min_catch_pct,
+                ),
+                None => format!(
+                    "{} `{}` on {}: threshold {}%",
+                    self.scope.name(),
+                    self.label,
+                    surface_name(self.surface),
+                    min_catch_pct,
+                ),
+            }
         }
     }
 }

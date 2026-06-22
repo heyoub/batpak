@@ -65,20 +65,17 @@ pub(crate) fn run(repo_root: &Path, check: bool) -> Result<()> {
             "docs-catalog: ok ({} invariants, catalog block current)",
             invariants.len()
         );
+    } else if current != next {
+        std::fs::write(&md_path, &next).with_context(|| format!("write {}", md_path.display()))?;
+        outln!(
+            "docs-catalog: regenerated INVARIANTS.md catalog block ({} invariants)",
+            invariants.len()
+        );
     } else {
-        if current != next {
-            std::fs::write(&md_path, &next)
-                .with_context(|| format!("write {}", md_path.display()))?;
-            outln!(
-                "docs-catalog: regenerated INVARIANTS.md catalog block ({} invariants)",
-                invariants.len()
-            );
-        } else {
-            outln!(
-                "docs-catalog: INVARIANTS.md already current ({} invariants)",
-                invariants.len()
-            );
-        }
+        outln!(
+            "docs-catalog: INVARIANTS.md already current ({} invariants)",
+            invariants.len()
+        );
     }
     Ok(())
 }
@@ -199,25 +196,22 @@ fn file_declares_test_fn(cache: &mut SourceCache, path: &Path, fn_name: &str) ->
 
 fn item_test_fns_match(items: &[syn::Item], fn_name: &str) -> bool {
     for item in items {
-        match item {
-            syn::Item::Fn(item_fn) if item_fn.sig.ident == fn_name => {
-                if fn_has_test_attr(&item_fn.attrs) {
+        if let syn::Item::Fn(item_fn) = item {
+            if item_fn.sig.ident == fn_name && fn_has_test_attr(&item_fn.attrs) {
+                return true;
+            }
+        } else if let syn::Item::Macro(item_macro) = item {
+            if macro_is_proptest(&item_macro.mac)
+                && proptest_body_declares_fn(&item_macro.mac.tokens, fn_name)
+            {
+                return true;
+            }
+        } else if let syn::Item::Mod(item_mod) = item {
+            if let Some((_, nested)) = &item_mod.content {
+                if item_test_fns_match(nested, fn_name) {
                     return true;
                 }
             }
-            syn::Item::Macro(item_macro) if macro_is_proptest(&item_macro.mac) => {
-                if proptest_body_declares_fn(&item_macro.mac.tokens, fn_name) {
-                    return true;
-                }
-            }
-            syn::Item::Mod(item_mod) => {
-                if let Some((_, nested)) = &item_mod.content {
-                    if item_test_fns_match(nested, fn_name) {
-                        return true;
-                    }
-                }
-            }
-            _ => {}
         }
     }
     false
@@ -245,20 +239,18 @@ fn macro_is_proptest(mac: &syn::Macro) -> bool {
 fn proptest_body_declares_fn(tokens: &proc_macro2::TokenStream, fn_name: &str) -> bool {
     let mut prev_was_fn = false;
     for tree in tokens.clone() {
-        match tree {
-            proc_macro2::TokenTree::Ident(ident) => {
-                if prev_was_fn && ident == fn_name {
-                    return true;
-                }
-                prev_was_fn = ident == "fn";
+        if let proc_macro2::TokenTree::Ident(ident) = tree {
+            if prev_was_fn && ident == fn_name {
+                return true;
             }
-            proc_macro2::TokenTree::Group(group) => {
-                if proptest_body_declares_fn(&group.stream(), fn_name) {
-                    return true;
-                }
-                prev_was_fn = false;
+            prev_was_fn = ident == "fn";
+        } else if let proc_macro2::TokenTree::Group(group) = tree {
+            if proptest_body_declares_fn(&group.stream(), fn_name) {
+                return true;
             }
-            _ => prev_was_fn = false,
+            prev_was_fn = false;
+        } else {
+            prev_was_fn = false;
         }
     }
     false

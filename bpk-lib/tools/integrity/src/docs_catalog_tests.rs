@@ -62,14 +62,15 @@ fn splice_replaces_only_between_markers() {
 
 #[test]
 fn splice_fails_without_markers() {
-    let err = splice_catalog_block("no markers here", "X").unwrap_err();
+    let err = splice_catalog_block("no markers here", "X").expect_err("missing markers must Err");
     assert!(err.to_string().contains("missing"), "got: {err}");
 }
 
 fn write_file(dir: &Path, rel: &str, body: &str) {
     let full = dir.join(rel);
-    std::fs::create_dir_all(full.parent().unwrap()).unwrap();
-    std::fs::write(&full, body).unwrap();
+    std::fs::create_dir_all(full.parent().expect("rel path has a parent"))
+        .expect("create parent dirs");
+    std::fs::write(&full, body).expect("write test fixture file");
 }
 
 #[test]
@@ -108,7 +109,8 @@ fn witness_gate_rejects_non_test_fn() {
         Some("tests/bad.rs::not_a_test"),
     )];
     let mut cache = SourceCache::new(root);
-    let err = check_witness_tests(root, &invs, &mut cache).unwrap_err();
+    let err =
+        check_witness_tests(root, &invs, &mut cache).expect_err("non-test fn must be rejected");
     assert!(err.to_string().contains("names no"), "got: {err}");
 }
 
@@ -122,7 +124,8 @@ fn witness_gate_rejects_missing_file() {
         Some("tests/nope.rs::ghost"),
     )];
     let mut cache = SourceCache::new(root);
-    let err = check_witness_tests(root, &invs, &mut cache).unwrap_err();
+    let err =
+        check_witness_tests(root, &invs, &mut cache).expect_err("missing file must be rejected");
     assert!(err.to_string().contains("missing file"), "got: {err}");
 }
 

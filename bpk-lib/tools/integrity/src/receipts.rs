@@ -132,14 +132,14 @@ fn write(receipt: &GateReceipt) -> Result<()> {
 /// and passed by the time this is called.
 pub(crate) fn record_pass(
     slug: &str,
-    inputs: BTreeSet<PathBuf>,
+    inputs: &BTreeSet<PathBuf>,
     files_examined: usize,
     assertions_run: usize,
     started: String,
 ) -> Result<()> {
     write(&GateReceipt {
         gate: slug.to_string(),
-        inputs_hash: fnv1a_inputs_hash(&inputs),
+        inputs_hash: fnv1a_inputs_hash(inputs),
         files_examined,
         assertions_run,
         started,
@@ -161,7 +161,7 @@ where
     let work = gate()?;
     record_pass(
         slug,
-        work.inputs,
+        &work.inputs,
         work.files_examined,
         work.assertions_run,
         started,

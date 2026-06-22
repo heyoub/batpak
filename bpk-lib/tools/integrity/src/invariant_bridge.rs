@@ -563,9 +563,10 @@ mod tests {
         .expect("write bad waiver");
         // `CitationWaivers` deliberately carries no `Debug`, so match the
         // result rather than `expect_err` (which would require `Debug`).
-        let err = match load_waivers(&bad, &repo_root) {
-            Ok(_) => panic!("unresolvable anchor must fail"),
-            Err(err) => err,
+        let result = load_waivers(&bad, &repo_root);
+        assert!(result.is_err(), "unresolvable anchor must fail");
+        let Err(err) = result else {
+            unreachable!("asserted is_err directly above")
         };
         assert!(
             err.to_string().contains("does not resolve to a real ADR"),

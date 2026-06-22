@@ -150,7 +150,7 @@ pub(crate) fn function_body_has_wallclock_assert(text: &str) -> bool {
     if !starts_clock {
         return false;
     }
-    let asserts_elapsed = (text.contains("assert") || text.contains("debug_assert"))
+    (text.contains("assert") || text.contains("debug_assert"))
         && (text.contains(". elapsed")
             || text.contains(".elapsed")
             || text.contains("Duration :: from")
@@ -158,6 +158,5 @@ pub(crate) fn function_body_has_wallclock_assert(text: &str) -> bool {
             || text.contains("as_millis")
             || text.contains("as_micros")
             || text.contains("as_secs")
-            || text.contains("as_nanos"));
-    asserts_elapsed
+            || text.contains("as_nanos"))
 }

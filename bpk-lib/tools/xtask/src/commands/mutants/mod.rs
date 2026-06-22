@@ -289,17 +289,11 @@ mod tests {
         // monotonic floor. Phase4 == 75% (provisional pending first cloud confirmation).
         // The floor only ever climbs, so this asserts >= the current committed floor.
         assert_eq!(REPO_MUTATION_PHASE, RepoMutationPhase::Phase4);
-        match current_repo_mutation_enforcement() {
-            MutationEnforcement::Threshold { min_catch_pct } => {
-                assert!(
-                    min_catch_pct >= 75,
-                    "repo-wide mutation floor must not regress below the committed 75% (got {min_catch_pct}%)"
-                );
-            }
-            MutationEnforcement::RecordOnly => {
-                panic!("repo-wide mutation lane must be blocking, not RecordOnly")
-            }
-        }
+        let MutationEnforcement::Threshold { min_catch_pct } = current_repo_mutation_enforcement();
+        assert!(
+            min_catch_pct >= 75,
+            "repo-wide mutation floor must not regress below the committed 75% (got {min_catch_pct}%)"
+        );
     }
 
     #[test]
