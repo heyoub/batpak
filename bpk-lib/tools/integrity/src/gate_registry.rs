@@ -293,7 +293,7 @@ pub(crate) const GATES: &[Gate] = &[
     Gate {
         slug: "dead-code-silencers",
         red_fixture_test: Some(
-            "tools/integrity/src/structural_tests.rs::dead_code_silencers_reject_dead_code_allow",
+            "tools/integrity/src/structural_tests.rs::zero_allow_ban_rejects_every_allow",
         ),
         red_fixture_kind: Some(RedFixtureKind::GateNegativePath),
         has_blocking_authority: true,
@@ -301,7 +301,7 @@ pub(crate) const GATES: &[Gate] = &[
     Gate {
         slug: "allow-justifications",
         red_fixture_test: Some(
-            "tools/integrity/src/structural_tests.rs::allow_justifications_rejects_unanchored_allow",
+            "tools/integrity/src/structural_tests.rs::allow_ban_rejects_even_a_justified_allow",
         ),
         red_fixture_kind: Some(RedFixtureKind::GateNegativePath),
         has_blocking_authority: true,

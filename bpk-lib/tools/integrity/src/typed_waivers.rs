@@ -19,9 +19,9 @@
 //! `today` is injected ([`check_with_today`]) so fixtures stay deterministic and
 //! never rot as the wall clock advances.
 
+use crate::anchors::{extract_anchors, resolve_anchor};
 use crate::assurance::AssuranceLevel;
 use crate::repo_surface::{ensure, load_yaml};
-use crate::shared_checks::{extract_anchors, resolve_anchor};
 use anyhow::Result;
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};

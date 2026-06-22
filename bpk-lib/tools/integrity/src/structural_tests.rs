@@ -139,13 +139,20 @@ fn inline_test_island_pressure_rejects_oversized_island() {
 // --- Gate 3: dead-code-silencers -------------------------------------------
 
 #[test]
-fn dead_code_silencers_reject_dead_code_allow() {
-    let repo = temp_repo("dead-code");
+fn zero_allow_ban_rejects_every_allow() {
+    let repo = temp_repo("zero-allow");
     write_empty_dead_code_allowlist(&repo);
     let rel = "crates/macros/src/synthetic.rs";
 
-    // GREEN: a sibling `unused_imports` allow is not a dead_code silencer.
-    let path = write_file(
+    // GREEN: a file with NO allow/expect attribute passes (the repo is zero-allow).
+    let path = write_file(&repo, rel, "use std::fmt;\npub fn production() {}\n");
+    let mut cache = SourceCache::new(&repo);
+    check_no_dead_code_silencers_over(&repo, std::slice::from_ref(&path), &mut cache)
+        .expect("allow-free file is accepted");
+
+    // RED: under the zero-allow doctrine ANY allow is banned, even a plain
+    // `unused_imports` allow that the old dead_code-only gate used to permit.
+    write_file(
         &repo,
         rel,
         &format!(
@@ -154,21 +161,11 @@ fn dead_code_silencers_reject_dead_code_allow() {
         ),
     );
     let mut cache = SourceCache::new(&repo);
-    check_no_dead_code_silencers_over(&repo, std::slice::from_ref(&path), &mut cache)
-        .expect("sibling unused_imports allow is accepted");
-
-    // RED: a `dead_code` silencer is forbidden and not allowlisted.
-    write_file(
-        &repo,
-        rel,
-        &format!("{}\npub fn production() {{}}\n", allow_attr("dead_code")),
-    );
-    let mut cache = SourceCache::new(&repo);
     let err = check_no_dead_code_silencers_over(&repo, &[path], &mut cache)
-        .expect_err("dead_code silencer is rejected");
+        .expect_err("any allow attribute is rejected under the zero-allow ban");
     assert!(
         err.to_string()
-            .contains("dead_code silencers are not tolerated"),
+            .contains("zero-allow policy (INV-ALLOW-IS-DESIGN)"),
         "{err:?}"
     );
 
@@ -178,38 +175,32 @@ fn dead_code_silencers_reject_dead_code_allow() {
 // --- Gate 4: allow-justifications ------------------------------------------
 
 #[test]
-fn allow_justifications_rejects_unanchored_allow() {
-    let repo = temp_repo("allow-justifications");
+fn allow_ban_rejects_even_a_justified_allow() {
+    let repo = temp_repo("allow-ban");
     write_invariants_catalog(&repo);
     let rel = "crates/macros/src/synthetic.rs";
 
-    // GREEN: an allow attribute with a >=5-word justifies line carrying a
-    // resolvable INV anchor is accepted.
+    // GREEN: a file with no allow attribute passes the ban.
+    let path = write_file(&repo, rel, "pub fn production() -> u8 { 0 }\n");
+    let mut cache = SourceCache::new(&repo);
+    check_allow_justifications_over(&repo, std::slice::from_ref(&path), &mut cache)
+        .expect("allow-free file passes the zero-allow ban");
+
+    // RED: under the zero-allow doctrine even a fully-justified, anchored allow
+    // is now a hard violation — there are no allows to justify anymore.
     let justified = format!(
         "// justifies: narrowing cast is bounded by INV-TEST-FIXTURE invariant catalog entry\n\
          {}\n\
-         pub fn production() -> u8 {{ 0 }}\n",
+         pub fn narrows() -> u8 {{ 0 }}\n",
         allow_attr("clippy::cast_possible_truncation")
     );
-    let path = write_file(&repo, rel, &justified);
-    let mut cache = SourceCache::new(&repo);
-    check_allow_justifications_over(&repo, std::slice::from_ref(&path), &mut cache)
-        .expect("anchored, prose-bearing justifies is accepted");
-
-    // RED: the same allow with NO `// justifies:` line fails.
-    write_file(
-        &repo,
-        rel,
-        &format!(
-            "{}\npub fn production() -> u8 {{ 0 }}\n",
-            allow_attr("clippy::cast_possible_truncation")
-        ),
-    );
+    write_file(&repo, rel, &justified);
     let mut cache = SourceCache::new(&repo);
     let err = check_allow_justifications_over(&repo, &[path], &mut cache)
-        .expect_err("unjustified lint suppression is rejected");
+        .expect_err("any allow attribute is rejected under the zero-allow ban");
     assert!(
-        err.to_string().contains("unjustified lint suppression"),
+        err.to_string()
+            .contains("zero-allow policy (INV-ALLOW-IS-DESIGN)"),
         "{err:?}"
     );
 

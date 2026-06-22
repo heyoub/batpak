@@ -1,34 +1,27 @@
 //! Integrity tool - executable invariants for the batpak repo.
 //!
-//! # `// justifies:` comment convention
+//! # Zero-allow doctrine (INV-ALLOW-IS-DESIGN)
 //!
-//! Every `#[allow(...)]` in the repo's runtime, tool, and build-script
-//! surfaces must carry a `// justifies: ...` comment either on the same line
-//! or on the line immediately preceding the attribute. The comment body must:
+//! The repo contains ZERO `#[allow(...)]`/`#![allow(...)]`/`#[expect(...)]`
+//! attributes. Clippy and rustc findings are FIXED, never silenced. The
+//! `structural-check` gate fails on any allow/expect attribute found in tracked
+//! source (an AST-based detector, so raw-string fixtures are not attributes and
+//! are correctly excluded). This tool lints itself; the gate has blocking
+//! authority and is RED-fixture-proven.
 //!
-//! 1. Start with the literal prefix `justifies:` (after an optional `//` and
-//!    whitespace).
-//! 2. Contain at least five whitespace-separated words after the prefix,
-//!    naming the design decision that makes the silencer safe.
-//! 3. Cite at least one resolvable anchor - an `INV-<NAME>` from
-//!    `traceability/invariants.yaml`, an `ADR-NNNN` whose file exists as a
-//!    root ADR file, or a concrete in-repo path (`src/...`, `tests/...`,
-//!    `examples/...`, `crates/macros/...`, `crates/macros-support/...`,
-//!    `build.rs`) whose file exists. Multiple anchors are fine; at least one
-//!    must resolve.
-//!
-//! Narrative prose without that structure counts as silence, not design.
-//! INV-ALLOW-IS-DESIGN is the meta-invariant. This tool lints itself; every
-//! justification below is load-bearing and is checked by
-//! `structural::check_allow_justifications` on every run.
 //! dead_code silencers are not tolerated in this repo; test-only code uses
 //! `cfg(test)`, unused code is deleted, and shared helpers get restructured.
+//!
+//! The `crate::anchors` module resolves `INV-<NAME>`/`ADR-NNNN`/repo-path
+//! anchors for traceability checks (invariant_bridge, typed_waivers) — a
+//! separate concern from lint suppression.
 
 #[macro_use]
 mod cli_out;
 
 mod agent_doctor;
 mod agent_surface;
+mod anchors;
 mod architecture_ir;
 mod architecture_lints;
 mod assurance;
@@ -238,11 +231,9 @@ fn run_meta_gate(
 
 #[cfg(test)]
 mod tests {
+    use crate::anchors::{extract_anchors, JustifiesAnchor};
     use crate::ci_parity::{dockerfile_tool_pins, workflow_list_values};
-    use crate::shared_checks::{
-        extract_anchors, justification_body, line_carries_justification, load_known_invariants,
-        public_item_names, JustifiesAnchor,
-    };
+    use crate::shared_checks::public_item_names;
     use crate::traceability::validate_observation_evidence;
     use std::path::Path;
 
@@ -260,7 +251,7 @@ mod tests {
             }
         "#;
 
-        // justifies: INV-TEST-PANIC-AS-ASSERTION; setup panics signal fixture breakage, see tools/integrity/src/main.rs
+        // expect: a parse failure on this static fixture is fixture breakage, not a real input error.
         let file = syn::parse_file(source).expect("parse source");
         let names = public_item_names(&file);
 
@@ -281,7 +272,7 @@ matrix:
     - "--all-features"
 "#;
 
-        // justifies: INV-TEST-PANIC-AS-ASSERTION; setup panics signal fixture breakage in tools/integrity/src/main.rs
+        // expect: a parse failure on this static fixture is fixture breakage, not a real input error.
         let values = workflow_list_values(workflow, "features").expect("parse values");
         assert_eq!(
             values,
@@ -343,23 +334,6 @@ RUN cargo install --locked cargo-mutants@27.0.0
     }
 
     #[test]
-    fn justification_body_returns_prose_after_prefix() {
-        assert_eq!(
-            justification_body("// justifies: INV-FOO; narrow cast bounds checked above here"),
-            Some("INV-FOO; narrow cast bounds checked above here".to_string()),
-        );
-        assert_eq!(
-            justification_body("    let _ = 1; // justifies: INV-BAR; inline anchored rationale"),
-            Some("INV-BAR; inline anchored rationale".to_string()),
-        );
-        assert_eq!(
-            justification_body("// this is not a justifies comment"),
-            None
-        );
-        assert_eq!(justification_body("let x = 1;"), None);
-    }
-
-    #[test]
     fn extract_anchors_finds_inv_adr_and_path_tokens() {
         let body =
             "INV-MACRO-BOUNDED-CAST and ADR-0010 plus tests/coordinate_hardening.rs:42 cover this";
@@ -380,44 +354,5 @@ RUN cargo install --locked cargo-mutants@27.0.0
             "bare words must not produce anchors; got {:?}",
             anchors
         );
-    }
-
-    #[test]
-    fn line_carries_justification_requires_body_plus_anchor() {
-        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .ancestors()
-            .nth(2)
-            .expect("crate lives under tools/integrity - two parents is the repo root")
-            .to_path_buf();
-        // justifies: INV-TEST-PANIC-AS-ASSERTION; test-only setup failure is the assertion signal in tools/integrity/src/main.rs
-        let known = load_known_invariants(&repo_root).expect("load catalog");
-
-        // good - real invariant anchor, prose is long enough
-        assert!(line_carries_justification(
-            "// justifies: INV-MACRO-BOUNDED-CAST; narrowing cast bounds checked in crates/macros/src/lib.rs",
-            &repo_root,
-            &known,
-        ));
-
-        // bad - prose but no resolvable anchor
-        assert!(!line_carries_justification(
-            "// justifies: this is a narrative justification with no catalog anchor or path",
-            &repo_root,
-            &known,
-        ));
-
-        // bad - INV-id that is not in the catalog
-        assert!(!line_carries_justification(
-            "// justifies: INV-NOT-A-REAL-INVARIANT-IDENTIFIER-HERE covers this site",
-            &repo_root,
-            &known,
-        ));
-
-        // bad - too short (< 5 words) even with an anchor
-        assert!(!line_carries_justification(
-            "// justifies: INV-MACRO-BOUNDED-CAST ok",
-            &repo_root,
-            &known,
-        ));
     }
 }
