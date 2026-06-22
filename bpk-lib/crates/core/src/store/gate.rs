@@ -30,14 +30,33 @@ where
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DurabilityGate {
     /// Watermark that must cross the appended event's HLC.
-    pub kind: WatermarkKind,
+    kind: WatermarkKind,
     /// Maximum time to wait for the watermark.
     ///
     /// `WaitTimeout` means the append committed but did not cross the
     /// requested watermark within `timeout`. The event is still in the log;
     /// query reflects it. Re-call `wait_for_<kind>` with a longer timeout if
     /// you need to re-acquire the guarantee.
-    pub timeout: Duration,
+    timeout: Duration,
+}
+
+impl DurabilityGate {
+    /// Construct a gate waiting up to `timeout` for `kind` to cross the append.
+    #[must_use]
+    pub const fn new(kind: WatermarkKind, timeout: Duration) -> Self {
+        Self { kind, timeout }
+    }
+
+    /// Watermark that must cross the appended event's HLC.
+    pub fn kind(&self) -> WatermarkKind {
+        self.kind
+    }
+
+    /// Maximum time to wait for the watermark.
+    #[must_use]
+    pub fn timeout(&self) -> Duration {
+        self.timeout
+    }
 }
 
 impl Store<Open> {

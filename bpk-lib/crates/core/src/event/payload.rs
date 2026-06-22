@@ -57,6 +57,7 @@ pub trait EventPayload: Serialize + DeserializeOwned {
 
 /// How `Store::open` handles linked `EventPayload` kind collisions.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum EventPayloadValidation {
     /// Log a single process-wide warning if duplicate payload kinds are linked.
     #[default]

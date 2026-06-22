@@ -18,6 +18,7 @@ use serde::Serialize;
 /// helper thread so the caller thread does not stall. For deterministic
 /// cleanup — especially when the writer may have crashed — call
 /// [`VisibilityFence::cancel`] explicitly instead of relying on drop.
+#[must_use = "dropping a VisibilityFence only best-effort cancels it; call commit() or cancel() to control the publish boundary deterministically"]
 pub struct VisibilityFence<'a> {
     store: &'a Store<Open>,
     token: u64,

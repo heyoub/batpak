@@ -29,6 +29,7 @@ pub(crate) enum WriterMode {
 
 /// Sync strategy for segment fsync.
 #[derive(Clone, Debug, Default)]
+#[non_exhaustive]
 pub enum SyncMode {
     /// sync_all: syncs data + metadata (safest, slower)
     #[default]

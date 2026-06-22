@@ -279,10 +279,10 @@ fn stable_batpak_targets_field_shape_at_info_and_trace() {
             &coord,
             kind,
             &serde_json::json!({"n": 2}),
-            AppendOptions::new().with_gate(DurabilityGate {
-                kind: WatermarkKind::Visible,
-                timeout: std::time::Duration::from_secs(2),
-            }),
+            AppendOptions::new().with_gate(DurabilityGate::new(
+                WatermarkKind::Visible,
+                std::time::Duration::from_secs(2),
+            )),
         )
         .expect("append_with_gate");
 

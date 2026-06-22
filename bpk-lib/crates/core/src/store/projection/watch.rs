@@ -103,6 +103,7 @@ impl From<StoreError> for CursorWatcherError {
 /// Pull-based: the caller drives the loop by calling [`recv()`](Self::recv).
 /// Each `recv()` blocks until a new event arrives for the entity, re-projects,
 /// and returns the state materialized at the next honest generation.
+#[must_use = "dropping a ProjectionWatcher stops watching; hold it and call recv() to observe updated projections"]
 pub struct ProjectionWatcher<T, C: Canal = Subscription> {
     canal: C,
     store: Arc<Store<Open>>,

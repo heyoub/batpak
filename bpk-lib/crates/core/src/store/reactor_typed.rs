@@ -223,6 +223,7 @@ impl<E: std::error::Error + Send + Sync + 'static> std::error::Error for Reactor
 }
 
 /// Handle for a running typed reactor loop.
+#[must_use = "dropping a TypedReactorHandle leaks the background reactor loop; call stop()/join() to wind it down"]
 pub struct TypedReactorHandle<E: std::error::Error + Send + Sync + 'static> {
     inner: Box<dyn CanalHandle>,
     error_slot: Arc<Mutex<Option<ReactorError<E>>>>,

@@ -408,6 +408,7 @@ pub enum MmapAdmissionSummary {
 /// Detailed diagnostic snapshot of the store's internal configuration and state.
 #[derive(Clone, Debug)]
 #[must_use]
+#[non_exhaustive]
 pub struct StoreDiagnostics {
     /// Total number of events currently held in the in-memory index.
     pub event_count: usize,

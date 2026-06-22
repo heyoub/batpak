@@ -34,24 +34,15 @@ fn batch_item(entity: &str, n: u32, options: AppendOptions) -> BatchAppendItem {
 }
 
 fn durable_gate(timeout: Duration) -> DurabilityGate {
-    DurabilityGate {
-        kind: WatermarkKind::Durable,
-        timeout,
-    }
+    DurabilityGate::new(WatermarkKind::Durable, timeout)
 }
 
 fn applied_gate(timeout: Duration) -> DurabilityGate {
-    DurabilityGate {
-        kind: WatermarkKind::Applied,
-        timeout,
-    }
+    DurabilityGate::new(WatermarkKind::Applied, timeout)
 }
 
 fn visible_gate(timeout: Duration) -> DurabilityGate {
-    DurabilityGate {
-        kind: WatermarkKind::Visible,
-        timeout,
-    }
+    DurabilityGate::new(WatermarkKind::Visible, timeout)
 }
 
 #[test]

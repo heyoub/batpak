@@ -29,10 +29,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let durable_receipt = store.append_typed_with_options(
         &coord,
         &AccountAdjusted { amount: 10 },
-        AppendOptions::new().with_gate(DurabilityGate {
-            kind: WatermarkKind::Durable,
-            timeout: Duration::from_secs(1),
-        }),
+        AppendOptions::new().with_gate(DurabilityGate::new(
+            WatermarkKind::Durable,
+            Duration::from_secs(1),
+        )),
     )?;
     let _ = writeln!(out, "durable-gated append: {}", durable_receipt.event_id);
 
@@ -52,10 +52,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ];
     let batch_receipts = store.append_batch_with_options(
         batch,
-        AppendOptions::new().with_gate(DurabilityGate {
-            kind: WatermarkKind::Visible,
-            timeout: Duration::from_secs(1),
-        }),
+        AppendOptions::new().with_gate(DurabilityGate::new(
+            WatermarkKind::Visible,
+            Duration::from_secs(1),
+        )),
     )?;
     let _ = writeln!(out, "visible-gated batch: {} events", batch_receipts.len());
 
@@ -69,10 +69,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let timeout = timeout_store.append_typed_with_options(
         &timeout_coord,
         &AccountAdjusted { amount: 99 },
-        AppendOptions::new().with_gate(DurabilityGate {
-            kind: WatermarkKind::Durable,
-            timeout: Duration::from_millis(50),
-        }),
+        AppendOptions::new().with_gate(DurabilityGate::new(
+            WatermarkKind::Durable,
+            Duration::from_millis(50),
+        )),
     );
     match timeout {
         Err(StoreError::WaitTimeout { .. }) => {

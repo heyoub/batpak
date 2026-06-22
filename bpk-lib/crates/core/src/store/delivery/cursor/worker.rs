@@ -12,6 +12,7 @@ use std::time::Duration;
 
 /// Outcome returned by a cursor worker batch handler.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum CursorWorkerAction {
     /// Continue polling future batches. The worker commits the current
     /// cursor position as the new checkpoint.
@@ -187,6 +188,7 @@ impl Default for CursorWorkerConfig {
 }
 
 /// Handle for a background cursor worker.
+#[must_use = "dropping a CursorWorkerHandle leaks the background worker thread; call stop()/join() to wind it down"]
 pub struct CursorWorkerHandle {
     stop: Arc<AtomicBool>,
     join: Option<Box<dyn crate::store::platform::spawn::SimJoin>>,
