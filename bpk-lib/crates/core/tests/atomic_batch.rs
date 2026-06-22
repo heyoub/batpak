@@ -1,12 +1,10 @@
 //! Atomic batch append tests.
 //! PROVES: INV-BATCH-ATOMIC-VISIBILITY, INV-BATCH-CRASH-RECOVERY.
 
-#[path = "support/default_store.rs"]
-mod default_store;
-mod support;
+use batpak_testkit::default_store;
+use batpak_testkit::prelude::*;
 use default_store::default_temp_store;
 use std::collections::HashSet;
-use support::prelude::*;
 
 fn strip_open_completed(
     entries: Vec<batpak::store::index::IndexEntry>,

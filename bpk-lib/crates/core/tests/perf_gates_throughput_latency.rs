@@ -14,12 +14,10 @@
 //! `PerfContext` fields, so they MUST share a binary to keep every field live.
 //! Harness pattern: Property Harness (catastrophic threshold lane).
 
-#[path = "support/mod.rs"]
-mod support;
 use batpak::store::{Store, StoreConfig};
+use batpak_testkit::prelude::*;
 use std::io::Write;
 use std::time::Instant;
-use support::prelude::*;
 use tempfile::TempDir;
 
 // ---- Multi-dimension performance gates ----

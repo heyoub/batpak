@@ -18,12 +18,11 @@
 //! produce equal-`wall_ms`/distinct-`global_sequence` pairs (and vice versa) to
 //! kill a mutant that picks `self` unconditionally on the equal branch.
 
+use batpak_testkit::prelude::*;
 use proptest::prelude::*;
-use support::prelude::*;
 
 #[path = "common/proptest.rs"]
 mod proptest_support;
-mod support;
 
 /// Generates an `HlcPoint`, deliberately oversampling values that share one
 /// coordinate so the tiebreak path is exercised: `ORIGIN` (the bottom), fully

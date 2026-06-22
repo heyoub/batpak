@@ -5,14 +5,12 @@
 //! DEFENDS: FM-011 (Error Path Hollowing), FM-013 (Coverage Mirage)
 //! INVARIANTS: INV-WIRE-ROUNDTRIP-TOTALITY (frame decode totality), INV-CONCURRENCY-SCHEDULE-PROOF (concurrent appends)
 
-mod support;
+use batpak_testkit::prelude::*;
 use std::io::Write;
 use std::time::Duration;
-use support::prelude::*;
 use tempfile::TempDir;
 
-#[path = "support/medium_store.rs"]
-mod medium_store_support;
+use batpak_testkit::medium_store as medium_store_support;
 use medium_store_support::{medium_segment_store as test_store, test_coord};
 
 // ===== frame_decode edge cases =====

@@ -1,14 +1,12 @@
 //! Replay and checkpoint consistency proofs.
 //! Harness pattern: Equivalence Harness (live vs reopen lane).
 
-mod support;
 use batpak::store::{ReadOnly, Store, StoreConfig, StoreState};
+use batpak_testkit::prelude::*;
 use proptest::prelude::*;
-use support::prelude::*;
 use tempfile::TempDir;
 
-#[path = "support/bounded_writer_reply.rs"]
-mod bounded_writer_reply;
+use batpak_testkit::bounded_writer_reply;
 #[path = "common/proptest.rs"]
 mod proptest_support;
 use bounded_writer_reply::writer_reply;

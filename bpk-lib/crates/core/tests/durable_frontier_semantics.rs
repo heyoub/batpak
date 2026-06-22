@@ -14,8 +14,7 @@
 //!
 //! SEEDED: deterministic tempdir-based open (with fixed-clock skew variants).
 
-#[path = "support/durable_frontier_semantics.rs"]
-mod dfs_support;
+use batpak_testkit::durable_frontier_semantics as dfs_support;
 
 use batpak::prelude::{EventKind, Region};
 use batpak::store::{FrontierView, HlcPoint, ReadOnly, Store, StoreConfig};

@@ -659,11 +659,11 @@
 - id: ART-UNIFIED-TESTS
   kind: tests
   paths:
-    - crates/core/tests/support/red_kinds.rs
-    - crates/core/tests/support/red_kind_b.rs
-    - crates/core/tests/support/red_test_coord.rs
-    - crates/core/tests/support/red_counters.rs
-    - crates/core/tests/support/red_versioned_counters.rs
+    - crates/testkit/src/red_kinds.rs
+    - crates/testkit/src/red_kind_b.rs
+    - crates/testkit/src/red_test_coord.rs
+    - crates/testkit/src/red_counters.rs
+    - crates/testkit/src/red_versioned_counters.rs
     - crates/core/tests/unified_cold_start_red.rs
     - crates/core/tests/unified_config_red.rs
     - crates/core/tests/unified_group_commit_red.rs

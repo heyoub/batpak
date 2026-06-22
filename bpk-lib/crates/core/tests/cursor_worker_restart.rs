@@ -1,11 +1,10 @@
-mod support;
 use batpak::store::delivery::cursor::{CursorWorkerAction, CursorWorkerConfig};
 use batpak::store::{RestartPolicy, Store, StoreConfig};
+use batpak_testkit::prelude::*;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use support::prelude::*;
 use tempfile::TempDir;
 
 fn test_config(dir: &TempDir) -> StoreConfig {

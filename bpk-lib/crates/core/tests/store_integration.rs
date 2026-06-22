@@ -12,13 +12,11 @@
 //! (regression coverage for the missing `serde 'rc'` feature flag that broke
 //! `Coordinate` deserialization) through round-trip persistence.
 
-mod support;
 use batpak::store::{Freshness, Store, StoreConfig};
-use support::prelude::*;
+use batpak_testkit::prelude::*;
 use tempfile::TempDir;
 
-#[path = "support/small_store.rs"]
-mod small_store_support;
+use batpak_testkit::small_store as small_store_support;
 
 fn test_store() -> (TempDir, Store) {
     small_store_support::small_segment_store().expect("small segment store")

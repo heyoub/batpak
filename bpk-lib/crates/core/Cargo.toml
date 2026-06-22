@@ -28,7 +28,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 # request `features = ["blake3"]` still resolve to the mandatory implementation.
 default = ["blake3"]
 blake3 = []
-dangerous-test-hooks = ["dep:fastrand"]
+dangerous-test-hooks = ["dep:fastrand", "batpak-testkit/dangerous-test-hooks"]
 # Test-only global-allocator shims (off by default; never in a normal build).
 # A `#[global_allocator]` is process-wide, so each shim must be installed by a
 # DEDICATED single-test binary. `alloc-count` enables `CountingAlloc` (atomic
@@ -80,6 +80,7 @@ zeroize = "1"
 
 [dev-dependencies]
 batpak-bench-support = { path = "../bench-support", version = "0.8.3" }
+batpak-testkit = { path = "../testkit" }
 proptest = "1"
 arbitrary = { version = "1", features = ["derive"] }
 criterion = { version = "0.8", features = ["html_reports"] }

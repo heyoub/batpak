@@ -3,8 +3,7 @@
 //!
 //! PROVES: INV-TEST-PANIC-AS-ASSERTION, INV-MACRO-BOUNDED-CAST
 
-mod support;
-use support::prelude::*;
+use batpak_testkit::prelude::*;
 use tempfile::TempDir;
 
 #[test]

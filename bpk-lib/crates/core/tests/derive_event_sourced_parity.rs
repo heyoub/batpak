@@ -21,15 +21,12 @@
 //! that property is not needed — removing a binding removes both arms and
 //! kind entries simultaneously.
 
-mod support;
 use batpak::prelude::{EventPayload, EventSourced};
+use batpak_testkit::prelude::*;
 use serde::{Deserialize, Serialize};
-use support::prelude::*;
 
-#[path = "support/bounded_blocking.rs"]
-mod bounded_blocking;
-#[path = "support/small_store.rs"]
-mod small_store_support;
+use batpak_testkit::bounded_blocking;
+use batpak_testkit::small_store as small_store_support;
 use bounded_blocking::blocking;
 use small_store_support::small_segment_store;
 

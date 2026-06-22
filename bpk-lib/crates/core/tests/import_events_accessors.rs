@@ -7,9 +7,8 @@
 //! configured value (region_ref -> leaked default Region; chunk_size -> 1).
 //! SEEDED: pure in-memory ImportSelector/ImportOptions values; no store.
 
-mod support;
 use batpak::store::{ImportOptions, ImportSelector};
-use support::prelude::*;
+use batpak_testkit::prelude::*;
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 

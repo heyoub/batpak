@@ -14,8 +14,7 @@
 //! INVARIANTS: INV-CACHE-CAPABILITIES-EXPLICIT (cache round-trip fidelity),
 //!   INV-NATIVE-DELETE-IDEMPOTENT (native cache deletion).
 
-#[path = "support/projection_cache.rs"]
-mod pc_support;
+use batpak_testkit::projection_cache as pc_support;
 
 use batpak::store::projection::{CacheMeta, NoCache, ProjectionCache};
 use pc_support::*;

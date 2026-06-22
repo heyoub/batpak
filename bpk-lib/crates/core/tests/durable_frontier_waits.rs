@@ -10,8 +10,7 @@
 //! background threads; the R3 writer-crash case seeds a terminal restart policy
 //! so the panic is non-transient.
 
-#[path = "support/durable_frontier_waits.rs"]
-mod dfw_support;
+use batpak_testkit::durable_frontier_waits as dfw_support;
 
 use batpak::prelude::Region;
 use batpak::store::{HlcPoint, RestartPolicy, Store, StoreConfig, StoreError, WatermarkKind};

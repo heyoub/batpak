@@ -16,8 +16,7 @@
 //! SEEDED: deterministic tempdir-based open with fixed sync cadence and
 //! countdown fault injection.
 
-#[path = "support/durable_frontier_semantics.rs"]
-mod dfs_support;
+use batpak_testkit::durable_frontier_semantics as dfs_support;
 
 use batpak::prelude::{Event, EventKind, EventSourced, Freshness, JsonValueInput, Region};
 use batpak::store::{

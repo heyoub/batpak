@@ -4,10 +4,9 @@
 //! CATCHES: Cache I/O downgrades and project_if_changed stale-generation shortcuts
 //! SEEDED: mutation-smoke gaps in NativeCache::get and project_inner generation checks
 
-mod support;
 use batpak::store::projection::{CacheMeta, NativeCache, ProjectionCache};
 use batpak::store::{Freshness, IndexTopology, Store, StoreConfig, StoreError};
-use support::prelude::*;
+use batpak_testkit::prelude::*;
 use tempfile::TempDir;
 
 const GENERATION_KIND: EventKind = EventKind::custom(0xF, 0x51);

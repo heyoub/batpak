@@ -17,8 +17,7 @@
 //! manipulate the on-disk segment bytes and observe what `Store::open` +
 //! `query` produce.
 
-#[path = "support/segment_scan_hardening.rs"]
-mod ssh_support;
+use batpak_testkit::segment_scan_hardening as ssh_support;
 
 use batpak::coordinate::Coordinate;
 use batpak::event::{Event, EventKind};

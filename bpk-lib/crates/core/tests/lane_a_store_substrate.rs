@@ -6,7 +6,6 @@
 //! **Compaction vs snapshot interplay:** `tests/store_snapshot_compaction.rs`.
 
 use batpak::event::EventKind;
-mod support;
 use batpak::store::index::IndexEntry;
 use batpak::store::segment::CompactionOutcome;
 use batpak::store::{
@@ -15,9 +14,9 @@ use batpak::store::{
     CompactionEvidenceReport, CompactionReportBody, CompactionReportFinding,
     CompactionStrategyShape, StoreError, COMPACTION_REPORT_SCHEMA_VERSION,
 };
+use batpak_testkit::prelude::*;
 use std::path::PathBuf;
 use std::time::Duration;
-use support::prelude::*;
 use tempfile::TempDir;
 
 fn lane_store() -> (TempDir, Store<Open>) {

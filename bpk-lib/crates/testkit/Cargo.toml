@@ -1,0 +1,37 @@
+[package]
+name = "batpak-testkit"
+version = "0.8.3"
+edition = "2021"
+rust-version = "1.92"
+license = "MIT OR Apache-2.0"
+description = "Integration-test support helpers for batpak (dev-dependency only)."
+repository = "https://github.com/heyoub/batpak"
+homepage = "https://github.com/heyoub/batpak"
+documentation = "https://docs.rs/batpak-testkit"
+keywords = ["event-sourcing", "testing"]
+categories = ["development-tools::testing"]
+publish = false
+
+[lib]
+
+[features]
+# Forwards to batpak's crash/fault-injection hooks. The store-error-contract
+# helper classifies the `StoreError::FaultInjected` variant, which only exists
+# when batpak is built with `dangerous-test-hooks`; gating both ends on the same
+# feature keeps the match arm and the variant in lockstep.
+dangerous-test-hooks = ["batpak/dangerous-test-hooks"]
+
+[lints]
+workspace = true
+
+[dependencies]
+batpak = { path = "../core" }
+batpak-macros = { path = "../macros", version = "0.8.3" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+flume = "0.12"
+fastrand = "2"
+tempfile = ">=3.24, <3.25"
+# Pinned to the exact line batpak uses so forged/round-tripped bytes in the
+# fuzz+chaos feedback harness match what the store would write.
+rmp-serde = "=1.3.1"

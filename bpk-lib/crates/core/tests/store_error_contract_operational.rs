@@ -4,8 +4,7 @@
 //! identity, source, or handling-class stability without an explicit table update.
 //! SEEDED: deterministic contract table (retryable + fail-closed families).
 
-#[path = "support/store_error_contract.rs"]
-mod store_error_support;
+use batpak_testkit::store_error_contract as store_error_support;
 
 use store_error_support::*;
 

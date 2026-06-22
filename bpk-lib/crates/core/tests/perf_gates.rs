@@ -13,12 +13,10 @@
 //! correctness families live in sibling `perf_gates_*` binaries.
 //! Harness pattern: Property Harness (catastrophic threshold lane).
 
-#[path = "support/mod.rs"]
-mod support;
 use batpak::store::cold_start::rebuild::OpenIndexPath;
 use batpak::store::{Store, StoreConfig};
+use batpak_testkit::prelude::*;
 use std::time::Instant;
-use support::prelude::*;
 use tempfile::TempDir;
 
 struct LifecycleContext {

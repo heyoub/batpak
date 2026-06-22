@@ -9,9 +9,8 @@
 //! bound on join_all (Phase 1.4) — proptest generates Batch(vec![Ok(x)]) cases
 //! that exercise the .map() path requiring Clone.
 
-mod support;
+use batpak_testkit::prelude::*;
 use proptest::prelude::*;
-use support::prelude::*;
 #[path = "common/proptest.rs"]
 mod proptest_support;
 

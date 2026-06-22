@@ -20,17 +20,15 @@
 //!
 //! Run with: cargo test --test fuzz_chaos_feedback --all-features --release -- --ignored
 
-#[path = "support/fuzz_chaos_feedback.rs"]
-mod fcf_support;
-mod support;
+use batpak_testkit::fuzz_chaos_feedback as fcf_support;
 
 use std::io::Write;
 
+use batpak_testkit::prelude::*;
 use fcf_support::{
     ChaosIntegrityGate, ChaosSubscriptionGate, ChaosWriteGate, FuzzChaosContext, FuzzPanicGate,
     FuzzThroughputGate,
 };
-use support::prelude::*;
 
 // ============================================================
 // PHASE 4: The feedback loop test

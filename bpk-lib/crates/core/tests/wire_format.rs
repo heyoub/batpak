@@ -20,11 +20,10 @@
 //! Inspect `git diff tests/golden/` carefully before committing regenerated goldens.
 
 use batpak::outcome::wait::{CompensationAction, WaitCondition};
-mod support;
 use batpak::wire::{option_u128_bytes, u128_bytes, vec_u128_bytes};
+use batpak_testkit::prelude::*;
 use serde::Serialize;
 use std::io::Write;
-use support::prelude::*;
 use tempfile::TempDir;
 
 fn golden_dir() -> std::path::PathBuf {

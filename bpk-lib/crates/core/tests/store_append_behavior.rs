@@ -4,11 +4,10 @@
 //! `typed_append_rejects_manual_payload_version_zero` (a typed-append seam that
 //! refuses a hand-forged PAYLOAD_VERSION = 0 legacy sentinel).
 
-mod support;
 use batpak::store::{Store, StoreConfig, StoreError, StoreStats};
 use batpak::typestate::Transition;
+use batpak_testkit::prelude::*;
 use serde::{Deserialize, Serialize};
-use support::prelude::*;
 use tempfile::TempDir;
 
 // Test-local EventPayload used by the apply_transition test. FREEZE-7 removed
@@ -22,8 +21,7 @@ struct PublishedDoc {
     to: String,
 }
 
-#[path = "support/small_store.rs"]
-mod small_store_support;
+use batpak_testkit::small_store as small_store_support;
 
 fn test_store() -> (TempDir, Store) {
     small_store_support::small_segment_store().expect("small segment store")

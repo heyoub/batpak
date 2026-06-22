@@ -9,7 +9,6 @@ use batpak::artifact::{
     verify_canonical_artifact_envelope, AttestationRef, CanonicalArtifactEnvelope,
     SignatureEnvelope, SignatureRef,
 };
-mod support;
 use batpak::registry::{
     registry_drift_findings_sorted, registry_drift_report_body_hash, registry_row_body_hash,
     registry_verification_report_body_hash, NamedDigest, RegistryDriftReportBody, RegistryRowBody,
@@ -44,17 +43,16 @@ use batpak::transition::{
     StateTransitionReportBody, TransitionCauseRef, TransitionId, TransitionMachineId,
     TransitionSubjectId, STATE_TRANSITION_EVENT_SCHEMA_VERSION,
 };
+use batpak_testkit::prelude::*;
 use proptest::prelude::*;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::error::Error;
-use support::prelude::*;
 
 #[path = "common/proptest.rs"]
 mod proptest_support;
 
-#[path = "support/small_store.rs"]
-mod small_store_support;
+use batpak_testkit::small_store as small_store_support;
 
 type TestResult<T = ()> = Result<T, Box<dyn Error>>;
 

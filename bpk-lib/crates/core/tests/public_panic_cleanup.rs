@@ -6,9 +6,8 @@
 //! clock execution paths that would otherwise crash the writer on public input.
 //! SEEDED: deterministic / no randomness.
 
-mod support;
+use batpak_testkit::prelude::*;
 use std::sync::Arc;
-use support::prelude::*;
 
 #[test]
 fn event_kind_try_custom_rejects_invalid_public_input() {

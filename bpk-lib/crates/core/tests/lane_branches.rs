@@ -9,10 +9,9 @@
 //! SEEDED: tempfile stores, explicit branch-root hints, interleaved lane
 //! appends, reopen through rebuild/checkpoint/mmap paths.
 
-mod support;
 use batpak::store::index::IndexEntry;
+use batpak_testkit::prelude::*;
 use std::time::Duration;
-use support::prelude::*;
 use tempfile::TempDir;
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;

@@ -8,7 +8,6 @@
 //! vocabulary leaks.
 //! SEEDED: deterministic / no randomness.
 
-mod support;
 use batpak::schema::{
     compare_schema_snapshot, SchemaSnapshot, SCHEMA_SNAPSHOT_REPORT_SCHEMA_VERSION,
 };
@@ -18,13 +17,12 @@ use batpak::store::{
     CHAIN_WALK_REPORT_SCHEMA_VERSION, READ_WALK_REPORT_SCHEMA_VERSION,
     SUBSCRIBER_FRONTIER_REPORT_SCHEMA_VERSION,
 };
+use batpak_testkit::prelude::*;
 use serde::Serialize;
 use std::error::Error;
-use support::prelude::*;
 use tempfile::TempDir;
 
-#[path = "support/small_store.rs"]
-mod small_store_support;
+use batpak_testkit::small_store as small_store_support;
 
 type TestResult = Result<(), Box<dyn Error>>;
 

@@ -2,14 +2,12 @@
 //!
 //! PROVES: INV-SUBSCRIPTION-STATE-MACHINE
 
-mod support;
 use batpak::store::Store;
+use batpak_testkit::prelude::*;
 use std::sync::Arc;
-use support::prelude::*;
 use tempfile::TempDir;
 
-#[path = "support/small_store.rs"]
-mod small_store_support;
+use batpak_testkit::small_store as small_store_support;
 
 fn test_store() -> (TempDir, Store) {
     small_store_support::small_segment_store().expect("small segment store")

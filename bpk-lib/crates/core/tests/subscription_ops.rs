@@ -7,17 +7,15 @@
 //! after deterministic producer appends; exhaustion probes are bounded by an
 //! outer `recv_timeout` channel.
 
-mod support;
 use batpak::store::Notification;
+use batpak_testkit::prelude::*;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
-use support::prelude::*;
 
 const PROMPT_EXHAUSTION_TIMEOUT: Duration = Duration::from_secs(2);
 
-#[path = "support/small_store.rs"]
-mod small_store_support;
+use batpak_testkit::small_store as small_store_support;
 
 fn test_store() -> (tempfile::TempDir, Store) {
     small_store_support::small_segment_store().expect("small segment store")

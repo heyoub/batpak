@@ -28,4 +28,3 @@
 - key: "crates/core/tests/store_restart_policy.rs::writer_restart_bounded_respects_limit"
 - key: "crates/core/tests/store_restart_policy.rs::writer_restart_once_gives_up_after_second_panic"
 - key: "crates/core/tests/store_snapshot_compaction.rs::snapshot_waits_for_in_flight_compaction"
-- key: "crates/core/tests/support/fuzz_chaos_feedback.rs::run_extended_fuzz_chaos"

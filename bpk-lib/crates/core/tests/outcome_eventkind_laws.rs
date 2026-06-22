@@ -17,12 +17,11 @@
 //! functor identity) with the missing functor-composition half plus the monoid
 //! and parse laws that example tests never generalized.
 
+use batpak_testkit::prelude::*;
 use proptest::prelude::*;
-use support::prelude::*;
 
 #[path = "common/proptest.rs"]
 mod proptest_support;
-mod support;
 
 /// Generates a valid custom [`EventKind`] via the fallible parser (never the
 /// panicking const constructor).

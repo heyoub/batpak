@@ -11,8 +11,7 @@
 //! SEEDED: deterministic single-segment stores (6/8 user frames) whose SDX3
 //! trailer offset is forged or whose interior frame is corrupted before reopen.
 
-#[path = "support/segment_scan_hardening.rs"]
-mod ssh_support;
+use batpak_testkit::segment_scan_hardening as ssh_support;
 
 use batpak::store::{Store, StoreError};
 use ssh_support::*;

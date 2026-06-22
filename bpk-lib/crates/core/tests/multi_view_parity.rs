@@ -1,12 +1,11 @@
 //! Property tests proving that all view topologies agree on query results.
 
 use batpak::coordinate::KindFilter;
-mod support;
 use batpak::store::index::IndexEntry;
 use batpak::store::{IndexTopology, Store, StoreConfig};
+use batpak_testkit::prelude::*;
 use proptest::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
-use support::prelude::*;
 use tempfile::TempDir;
 
 #[path = "common/proptest.rs"]

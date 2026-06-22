@@ -8,14 +8,13 @@
 //! SEEDED: proptest-generated HLC/lane/depth fields, bounded JSON payloads,
 //! tempfile-backed stores, fixed coordinates and EventKinds.
 
-mod support;
 use batpak::coordinate::DagPosition;
 use batpak::event::hash::compute_hash;
 use batpak::store::{AppendOptions, BatchAppendItem, CausationRef, Store, StoreConfig};
+use batpak_testkit::prelude::*;
 use proptest::prelude::*;
 use proptest::test_runner::TestCaseError;
 use serde_json::{Map, Value};
-use support::prelude::*;
 use tempfile::TempDir;
 
 #[path = "common/proptest.rs"]

@@ -10,9 +10,8 @@
 //! SEEDED: tempfile-backed stores, tiny segment rotation, deterministic
 //! coordinates and idempotency keys.
 
-mod support;
 use batpak::store::{ForkOptions, ReadOnly, Store, StoreConfig};
-use support::prelude::*;
+use batpak_testkit::prelude::*;
 use tempfile::TempDir;
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;

@@ -10,15 +10,12 @@
 //! CATCHES: typed payload public surface drift and clean-registry validator regressions.
 //! SEEDED: deterministic / no randomness.
 
-mod support;
 use batpak::store::{AppendOptions, BatchAppendItem, CausationRef, Store};
 use batpak::typestate::transition::{StateMarker, Transition};
-use support::prelude::*;
+use batpak_testkit::prelude::*;
 
-#[path = "support/bounded_writer_reply.rs"]
-mod bounded_writer_reply;
-#[path = "support/small_store.rs"]
-mod small_store_support;
+use batpak_testkit::bounded_writer_reply;
+use batpak_testkit::small_store as small_store_support;
 use bounded_writer_reply::writer_reply;
 use small_store_support::small_segment_store;
 

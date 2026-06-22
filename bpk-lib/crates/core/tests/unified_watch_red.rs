@@ -1,23 +1,18 @@
 //! Red-path tests keep the `unified_*_red` names for cross-surface edge cases
 //! that should fail fast or prove defensive behavior across the unified store.
 
-#[path = "support/bounded_blocking.rs"]
-mod bounded_blocking;
-#[path = "support/red_counters.rs"]
-mod red_counters;
-#[path = "support/red_kind_b.rs"]
-mod red_kind_b;
-#[path = "support/red_kinds.rs"]
-mod red_kinds;
+use batpak_testkit::bounded_blocking;
+use batpak_testkit::red_counters;
+use batpak_testkit::red_kind_b;
+use batpak_testkit::red_kinds;
 use bounded_blocking::blocking;
 
 use red_counters::*;
 use red_kind_b::*;
 use red_kinds::*;
 
-mod support;
+use batpak_testkit::prelude::*;
 use std::sync::Arc;
-use support::prelude::*;
 use tempfile::TempDir;
 
 #[test]

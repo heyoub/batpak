@@ -26,12 +26,11 @@
 //! profiles, so it cannot run inside one process; it is a CI build-matrix concern,
 //! not a single-test property. Tracked for the perf/CI matrix, not faked here.
 
-mod support;
 use batpak::store::index::IndexEntry;
 use batpak::store::{HlcPoint, Store, StoreConfig};
+use batpak_testkit::prelude::*;
 use proptest::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
-use support::prelude::*;
 use tempfile::TempDir;
 
 #[path = "common/proptest.rs"]

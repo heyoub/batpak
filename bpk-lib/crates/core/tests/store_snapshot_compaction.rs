@@ -8,20 +8,18 @@
 //! rollback drift.
 //! SEEDED: small-segment fixtures via `support/small_store.rs` and bounded append counts.
 
-mod support;
 use batpak::store::{
     segment::{CompactionOutcome, CompactionResult},
     snapshot_report_body_hash, ReadOnly, SnapshotEvidenceHash, SnapshotEvidenceReport,
     SnapshotFenceTokenRef, SnapshotFileKind, SnapshotFinding, SnapshotReportBody,
     SnapshotWatermarkRef, Store, StoreConfig, StoreError, SNAPSHOT_EVIDENCE_REPORT_SCHEMA_VERSION,
 };
+use batpak_testkit::prelude::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use support::prelude::*;
 use tempfile::TempDir;
 
-#[path = "support/small_store.rs"]
-mod small_store_support;
+use batpak_testkit::small_store as small_store_support;
 
 fn test_store() -> (TempDir, Store) {
     small_store_support::small_segment_store().expect("small segment store")

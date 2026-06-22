@@ -123,6 +123,7 @@ dependencies = [
  "batpak-bench-support",
  "batpak-macros",
  "batpak-macros-support",
+ "batpak-testkit",
  "blake3",
  "crc32fast",
  "criterion",
@@ -193,6 +194,20 @@ version = "0.8.3"
 dependencies = [
  "inventory",
  "rmpv",
+]
+
+[[package]]
+name = "batpak-testkit"
+version = "0.8.3"
+dependencies = [
+ "batpak",
+ "batpak-macros",
+ "fastrand",
+ "flume",
+ "rmp-serde",
+ "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

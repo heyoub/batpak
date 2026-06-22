@@ -11,11 +11,9 @@
 //! code-level tripwires, not an independent production certification system.
 //! Harness pattern: Property Harness (catastrophic threshold lane).
 
-#[path = "support/mod.rs"]
-mod support;
 use batpak::store::{Store, StoreConfig};
+use batpak_testkit::prelude::*;
 use std::io::Write;
-use support::prelude::*;
 use tempfile::TempDir;
 
 // ================================================================

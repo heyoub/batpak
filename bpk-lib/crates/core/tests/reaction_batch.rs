@@ -8,11 +8,9 @@
 //! exercise the public push-side contract and the drop-on-error-is-structural
 //! guarantee from a downstream consumer's point of view.
 
-mod support;
-use support::prelude::*;
+use batpak_testkit::prelude::*;
 
-#[path = "support/small_store.rs"]
-mod small_store_support;
+use batpak_testkit::small_store as small_store_support;
 use small_store_support::small_segment_store;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, EventPayload)]

@@ -12,8 +12,7 @@ use batpak::prelude::Coordinate;
 use batpak::store::{Cursor, IndexTopology, Store, StoreConfig, StoreError};
 use tempfile::TempDir;
 
-#[path = "support/bounded_writer_reply.rs"]
-mod bounded_writer_reply;
+use batpak_testkit::bounded_writer_reply;
 use bounded_writer_reply::writer_reply;
 
 fn topologies() -> Vec<(&'static str, IndexTopology)> {

@@ -35,11 +35,10 @@
 //! `wait_for_visible` before snapshotting, so captures are taken at a SETTLED
 //! state rather than racing the watermark.
 
-mod support;
 use batpak::store::index::IndexEntry;
 use batpak::store::{Store, StoreConfig};
+use batpak_testkit::prelude::*;
 use proptest::prelude::*;
-use support::prelude::*;
 use tempfile::TempDir;
 
 #[path = "common/proptest.rs"]

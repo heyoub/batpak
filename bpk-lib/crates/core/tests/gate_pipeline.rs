@@ -6,8 +6,7 @@
 //! INVARIANTS: INV-FRONTIER-APPEND-GATE-HONORED (gate evaluation state machine), INV-RECEIPT-SEALED (Receipt seal)
 
 use batpak::pipeline::BypassReceipt;
-mod support;
-use support::prelude::*;
+use batpak_testkit::prelude::*;
 
 // --- Test gate implementations ---
 

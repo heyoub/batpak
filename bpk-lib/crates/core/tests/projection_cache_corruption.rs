@@ -17,8 +17,7 @@
 //!   INV-CLOCK-NOW-US-LIVE (freshness window cannot rescue corruption),
 //!   INV-REPLAY-LANE-SELECTION (replay path selection).
 
-#[path = "support/projection_cache.rs"]
-mod pc_support;
+use batpak_testkit::projection_cache as pc_support;
 
 use batpak::store::projection::{CacheMeta, ProjectionCache};
 use batpak::store::StoreError;

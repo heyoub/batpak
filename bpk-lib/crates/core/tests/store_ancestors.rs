@@ -5,11 +5,9 @@
 //! DEFENDS: ancestor traversal truncation drift, descendant leakage, and
 //! strict-ordering regressions in `DagPosition::is_ancestor_of`.
 
-mod support;
-use support::prelude::*;
+use batpak_testkit::prelude::*;
 
-#[path = "support/small_store.rs"]
-mod small_store_support;
+use batpak_testkit::small_store as small_store_support;
 
 fn test_store() -> (tempfile::TempDir, Store) {
     small_store_support::small_segment_store().expect("small segment store")

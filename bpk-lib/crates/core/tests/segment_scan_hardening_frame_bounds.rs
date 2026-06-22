@@ -11,8 +11,7 @@
 //! SEEDED: deterministic stores (single tail segment plus rotated multi-segment
 //! histories) whose frame-length fields and SIDX magic are surgically mutated.
 
-#[path = "support/segment_scan_hardening.rs"]
-mod ssh_support;
+use batpak_testkit::segment_scan_hardening as ssh_support;
 
 use batpak::coordinate::{Coordinate, Region};
 use batpak::event::EventKind;

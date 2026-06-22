@@ -10,14 +10,13 @@
 //! SEEDED: two tempfile-backed real stores, fixed source namespaces, fixed
 //! EventKinds, explicit chunk sizes, stable coordinates.
 
-mod support;
 use batpak::id::{EntityIdType, IdempotencyKey};
 use batpak::store::{
     provenance, provenance_from_extensions, ImportFilter, ImportOptions, ImportProvenance,
     ImportReport, ImportSelector, ReadOnly, Store, StoreConfig, StoreError,
     IMPORT_PROVENANCE_SCHEMA_VERSION,
 };
-use support::prelude::*;
+use batpak_testkit::prelude::*;
 use tempfile::TempDir;
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;

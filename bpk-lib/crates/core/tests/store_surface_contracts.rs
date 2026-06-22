@@ -5,11 +5,9 @@
 //! DEFENDS: user-visible message drift, coordinate formatting regressions,
 //! causation helper regressions, and append flag propagation loss.
 
-mod support;
-use support::prelude::*;
+use batpak_testkit::prelude::*;
 
-#[path = "support/small_store.rs"]
-mod small_store_support;
+use batpak_testkit::small_store as small_store_support;
 
 fn test_store() -> (tempfile::TempDir, Store) {
     small_store_support::small_segment_store().expect("small segment store")

@@ -7,12 +7,11 @@
 //! ranges, and public frontier views omitting lane entries.
 //! SEEDED: explicit lane-1 append, sync, lane waits, and reopen bootstrap.
 
-mod support;
 use batpak::store::delivery::cursor::CursorGapConfig;
 use batpak::store::LaneFrontierView;
+use batpak_testkit::prelude::*;
 use std::num::NonZeroUsize;
 use std::time::Duration;
-use support::prelude::*;
 use tempfile::TempDir;
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;

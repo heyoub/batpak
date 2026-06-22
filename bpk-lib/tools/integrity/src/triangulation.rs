@@ -317,6 +317,16 @@ impl CargoMetadataGraphOracle {
                 if dep.path.is_none() {
                     continue; // external (registry) dep — not a workspace edge.
                 }
+                // Only normal (build-graph) edges constrain the workspace DAG.
+                // `dev-`/`build-dependencies` do not participate in the library
+                // build graph, and Cargo intentionally permits cycles through
+                // them (e.g. a `*-testkit` crate that path-depends on the crate
+                // it supports, which in turn dev-depends on the testkit). Such a
+                // cycle cannot break layering or incremental library builds, so
+                // it must not trip INV-WORKSPACE-DAG-ACYCLIC.
+                if dep.kind != cargo_metadata::DependencyKind::Normal {
+                    continue;
+                }
                 if member_names.contains(dep.name.as_str()) {
                     graph.add_edge(&package.name, &dep.name);
                 }
@@ -400,16 +410,26 @@ impl Oracle for ManifestScanGraphOracle {
 }
 
 /// Scan a `Cargo.toml` text body for `path = "..."` values that appear inside a
-/// `[dependencies]` / `[dev-dependencies]` / `[build-dependencies]` section.
-/// Deliberately a line scanner independent of cargo's own parser so the two
-/// oracles derive edges by genuinely different means.
+/// normal `[dependencies]` (or `[target.'...'.dependencies]`) section.
+/// `[dev-dependencies]` and `[build-dependencies]` are deliberately excluded:
+/// they are not part of the library build graph, and Cargo permits cycles
+/// through them (e.g. a `*-testkit` crate that path-depends on the crate it
+/// supports, which dev-depends on the testkit back). Counting them would trip
+/// INV-WORKSPACE-DAG-ACYCLIC on a legal, non-build-graph cycle. Deliberately a
+/// line scanner independent of cargo's own parser so the two oracles derive
+/// edges by genuinely different means.
 fn scan_path_dependencies(manifest: &str) -> Vec<String> {
     let mut in_deps = false;
     let mut paths = Vec::new();
     for raw in manifest.lines() {
         let line = raw.trim();
         if line.starts_with('[') {
-            in_deps = line.contains("dependencies]");
+            // Match only normal dependency tables: `[dependencies]` and
+            // target-scoped `[target.'cfg(...)'.dependencies]`. Exclude
+            // `[dev-dependencies]` / `[build-dependencies]` and their
+            // target-scoped variants.
+            let header = line.trim_start_matches('[').trim_end_matches(']');
+            in_deps = header == "dependencies" || header.ends_with(".dependencies");
             continue;
         }
         if !in_deps || line.starts_with('#') {

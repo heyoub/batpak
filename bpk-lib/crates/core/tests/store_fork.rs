@@ -10,14 +10,13 @@
 //! SEEDED: tempfile-backed stores, tiny segment rotation, hardlink-only fork
 //! options, deterministic coordinates, cancelled visibility fences.
 
-mod support;
 use batpak::store::{
     fork_report_body_hash, ForkCopyStrategy, ForkEvidenceHash, ForkOptions, ForkReport,
     ForkReportBody, ForkStrategyCounts, ReadOnly, Store, StoreConfig,
     FORK_EVIDENCE_REPORT_SCHEMA_VERSION,
 };
+use batpak_testkit::prelude::*;
 use std::path::{Path, PathBuf};
-use support::prelude::*;
 use tempfile::TempDir;
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;

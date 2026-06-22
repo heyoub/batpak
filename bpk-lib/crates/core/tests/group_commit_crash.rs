@@ -4,9 +4,8 @@
 //!         group commit drain loop is race-free under loom.
 //! INVARIANTS: INV-GROUP-COMMIT-IDEMPOTENCY, INV-BATCH-ATOMIC-VISIBILITY.
 
-mod support;
 use batpak::store::{Store, StoreConfig};
-use support::prelude::*;
+use batpak_testkit::prelude::*;
 use tempfile::TempDir;
 
 /// Run a loom model with a bounded preemption budget. See

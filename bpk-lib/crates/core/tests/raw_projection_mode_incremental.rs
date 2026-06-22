@@ -11,14 +11,12 @@
 
 use std::sync::Arc;
 
-mod support;
 use batpak::store::{Freshness, Store, StoreConfig};
+use batpak_testkit::prelude::*;
 use serde::{Deserialize, Serialize};
-use support::prelude::*;
 use tempfile::TempDir;
 
-#[path = "support/raw_projection_mode.rs"]
-mod rpm_support;
+use batpak_testkit::raw_projection_mode as rpm_support;
 use rpm_support::{CounterDelta, KIND};
 
 trait MatrixCounterState {

@@ -13,8 +13,7 @@ use batpak::store::{Store, StoreConfig, StoreError};
 use std::time::Duration;
 use tempfile::TempDir;
 
-#[path = "support/bounded_writer_reply.rs"]
-mod bounded_writer_reply;
+use batpak_testkit::bounded_writer_reply;
 use bounded_writer_reply::writer_reply;
 
 const FENCE_KIND: EventKind = EventKind::custom(0xC, 1);

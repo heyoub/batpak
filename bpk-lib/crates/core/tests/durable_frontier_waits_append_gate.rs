@@ -10,8 +10,7 @@
 //! SEEDED: deterministic single/batch appends with explicit durable/applied and
 //! visible gates, advanced from background threads.
 
-#[path = "support/durable_frontier_waits.rs"]
-mod dfw_support;
+use batpak_testkit::durable_frontier_waits as dfw_support;
 
 use batpak::prelude::Region;
 use batpak::store::{

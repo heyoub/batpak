@@ -8,9 +8,8 @@
 //! projections.
 //! SEEDED: interleaved event kinds on one entity plus an unrelated noise kind.
 
-mod support;
+use batpak_testkit::prelude::*;
 use std::time::Duration;
-use support::prelude::*;
 use tempfile::TempDir;
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;

@@ -4,19 +4,17 @@
 //! incorrect limit/drop counts, unsorted findings, and body-hash drift.
 //! SEEDED: deterministic / no randomness.
 
-mod support;
 use batpak::store::{
     ReadWalkDroppedCount, ReadWalkEvidenceReport, ReadWalkFinding, ReadWalkFreshnessIntent,
     ReadWalkFrontierKind, ReadWalkHash, ReadWalkInputFrontier, ReadWalkProofRef, ReadWalkProofRefs,
     ReadWalkReplayMode, ReadWalkReportBody, ReadWalkReportError, ReadWalkRequest,
     ReadWalkSourceRef, READ_WALK_REPORT_SCHEMA_VERSION,
 };
+use batpak_testkit::prelude::*;
 use std::error::Error;
 use std::time::Duration;
-use support::prelude::*;
 
-#[path = "support/small_store.rs"]
-mod small_store_support;
+use batpak_testkit::small_store as small_store_support;
 
 type TestResult = Result<(), Box<dyn Error>>;
 

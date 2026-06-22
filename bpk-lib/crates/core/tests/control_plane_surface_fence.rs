@@ -13,12 +13,10 @@ use batpak::store::{
 use std::time::Duration;
 use tempfile::TempDir;
 
-#[path = "support/control_plane_surface.rs"]
-mod cps_support;
+use batpak_testkit::control_plane_surface as cps_support;
 use cps_support::{test_config, KIND_COUNTER};
 
-#[path = "support/bounded_writer_reply.rs"]
-mod bounded_writer_reply;
+use batpak_testkit::bounded_writer_reply;
 use bounded_writer_reply::writer_reply;
 
 fn wait_append_ticket(ticket: &AppendTicket, label: &str) -> Result<AppendReceipt, StoreError> {

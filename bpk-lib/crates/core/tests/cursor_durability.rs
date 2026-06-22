@@ -12,8 +12,7 @@
 //! swallowing of checkpoint write failures.
 //! SEEDED: deterministic / no randomness.
 
-#[path = "support/cursor_durability.rs"]
-mod cd_support;
+use batpak_testkit::cursor_durability as cd_support;
 
 use batpak::coordinate::{Coordinate, Region};
 use batpak::store::delivery::cursor::{CursorCheckpoint, CursorWorkerAction, CursorWorkerConfig};

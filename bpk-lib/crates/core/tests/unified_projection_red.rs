@@ -2,24 +2,19 @@
 //! that should fail fast or prove defensive behavior across the unified store.
 //! PROVES: INV-SCHEMA-VERSION-ISOLATION.
 
-#[path = "support/red_counters.rs"]
-mod red_counters;
-#[path = "support/red_kind_b.rs"]
-mod red_kind_b;
-#[path = "support/red_kinds.rs"]
-mod red_kinds;
-#[path = "support/red_versioned_counters.rs"]
-mod red_versioned_counters;
+use batpak_testkit::red_counters;
+use batpak_testkit::red_kind_b;
+use batpak_testkit::red_kinds;
+use batpak_testkit::red_versioned_counters;
 
 use red_counters::*;
 use red_kind_b::*;
 use red_kinds::*;
 use red_versioned_counters::*;
 
-mod support;
+use batpak_testkit::prelude::*;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
-use support::prelude::*;
 use tempfile::TempDir;
 
 #[test]

@@ -6,13 +6,11 @@
 //! INVARIANTS: INV-REPLAY-LANE-SELECTION (replay determinism), INV-GROUP-COMMIT-IDEMPOTENCY (idempotency), INV-WIRE-ROUNDTRIP-TOTALITY (round-trip),
 //!             INV-MACRO-BOUNDED-CAST (EventKind category enforcement), INV-STORE-ERROR-TAXONOMY (error shape stability)
 
-mod support;
+use batpak_testkit::prelude::*;
 use proptest::prelude::*;
-use support::prelude::*;
 use tempfile::TempDir;
 
-#[path = "support/medium_store.rs"]
-mod medium_store_support;
+use batpak_testkit::medium_store as medium_store_support;
 #[path = "common/proptest.rs"]
 mod proptest_support;
 use medium_store_support::{medium_segment_store as test_store, test_coord};

@@ -1,16 +1,13 @@
 //! Red-path tests keep the `unified_*_red` names for cross-surface edge cases
 //! that should fail fast or prove defensive behavior across the unified store.
 
-#[path = "support/red_kinds.rs"]
-mod red_kinds;
-#[path = "support/red_test_coord.rs"]
-mod red_test_coord;
+use batpak_testkit::red_kinds;
+use batpak_testkit::red_test_coord;
 
 use red_kinds::*;
 use red_test_coord::*;
 
-mod support;
-use support::prelude::*;
+use batpak_testkit::prelude::*;
 use tempfile::TempDir;
 
 #[test]

@@ -1,12 +1,10 @@
 //! Advanced Store config, lookup, and query integration tests.
 
-mod support;
 use batpak::store::{Store, StoreConfig, StoreDiagnostics, StoreError};
-use support::prelude::*;
+use batpak_testkit::prelude::*;
 use tempfile::TempDir;
 
-#[path = "support/small_store.rs"]
-mod small_store_support;
+use batpak_testkit::small_store as small_store_support;
 
 fn test_store() -> (TempDir, Store) {
     small_store_support::small_segment_store().expect("small segment store")

@@ -3,8 +3,10 @@
 //! Public `batpak::prelude` is intentionally beginner-oriented for 0.8. The
 //! integration suite still exercises advanced batteries directly; keeping that
 //! broad surface here prevents test import churn from shaping user-facing API.
-// justifies: INV-ALLOW-IS-DESIGN; tests/support/prelude.rs intentionally re-exports a broad integration-test surface so public prelude narrowing does not turn every behavioral test into import noise.
-#![allow(unused_imports)]
+//!
+//! Every entry below is a genuine `pub use` re-export (this is a real lib
+//! crate, not a `#[path]`-included module), so `unused_imports` does not fire
+//! and no allow attribute is required.
 
 pub use batpak::artifact::{
     ArtifactEnvelopeFinding, ArtifactEnvelopeIdentity, ArtifactHash, ArtifactVerificationReport,

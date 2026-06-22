@@ -4,8 +4,7 @@
 //! drops identity, source, or handling-class stability without a table update.
 //! SEEDED: deterministic contract table (domain family + conversion routes).
 
-#[path = "support/store_error_contract.rs"]
-mod store_error_support;
+use batpak_testkit::store_error_contract as store_error_support;
 
 use batpak::coordinate::{Coordinate, CoordinateError};
 use batpak::event::{EventPayloadKindCollision, EventPayloadRegistryError};

@@ -3,16 +3,13 @@
 //!
 //! PROVES: INV-TEST-PANIC-AS-ASSERTION, INV-MACRO-BOUNDED-CAST
 
-#[path = "support/red_kinds.rs"]
-mod red_kinds;
-#[path = "support/red_test_coord.rs"]
-mod red_test_coord;
+use batpak_testkit::red_kinds;
+use batpak_testkit::red_test_coord;
 
 use red_kinds::*;
 use red_test_coord::*;
 
-mod support;
-use support::prelude::*;
+use batpak_testkit::prelude::*;
 use tempfile::TempDir;
 
 #[test]

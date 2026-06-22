@@ -132,7 +132,13 @@ fn graph_oracles_disagree_when_edge_sets_differ() {
 }
 
 #[test]
-fn manifest_scanner_picks_up_path_deps_only_in_dependency_sections() {
+fn manifest_scanner_picks_up_path_deps_only_in_normal_dependency_sections() {
+    // Only normal `[dependencies]` (and target-scoped `*.dependencies`) edges
+    // count toward the workspace build-graph DAG. `[dev-dependencies]` and
+    // `[build-dependencies]` are excluded: Cargo permits cycles through them
+    // (e.g. a `*-testkit` crate that path-depends on the crate it supports,
+    // which dev-depends on the testkit), and such a cycle cannot break the
+    // library build graph or INV-WORKSPACE-DAG-ACYCLIC.
     let manifest = r#"
 [package]
 name = "syncbat"
@@ -143,9 +149,15 @@ batpak = { path = "../core", version = "0.8.2" }
 serde = "1"
 syncbat-macros = { path = "../syncbat-macros" }
 
+[target.'cfg(unix)'.dependencies]
+unix-only = { path = "../unix-only" }
+
 [dev-dependencies]
 proptest = "1"
 test-helper = { path = "../test-helper" }
+
+[build-dependencies]
+build-only = { path = "../build-only" }
 "#;
     let mut paths = scan_path_dependencies(manifest);
     paths.sort();
@@ -154,7 +166,7 @@ test-helper = { path = "../test-helper" }
         vec![
             "../core".to_owned(),
             "../syncbat-macros".to_owned(),
-            "../test-helper".to_owned(),
+            "../unix-only".to_owned(),
         ]
     );
 }

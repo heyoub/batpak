@@ -13,8 +13,7 @@
 //! `SYSTEM_CLOSE_COMPLETED` segment frame (FBAT codec + CRC re-stamping) that
 //! drives the close HLC backwards.
 
-#[path = "support/durable_frontier_semantics.rs"]
-mod dfs_support;
+use batpak_testkit::durable_frontier_semantics as dfs_support;
 
 use batpak::coordinate::DagPosition;
 use batpak::prelude::{Event, EventKind, Region};

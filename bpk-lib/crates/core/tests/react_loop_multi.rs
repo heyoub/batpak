@@ -16,11 +16,9 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use batpak::event::StoredEvent;
-mod support;
-use support::prelude::*;
+use batpak_testkit::prelude::*;
 
-#[path = "support/small_store.rs"]
-mod small_store_support;
+use batpak_testkit::small_store as small_store_support;
 use small_store_support::small_segment_store;
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, EventPayload)]

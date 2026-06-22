@@ -1,9 +1,8 @@
 //! PROVES: INV-POSITION-HINT-PERSISTENCE.
 
-mod support;
 use batpak::store::cold_start::rebuild::OpenIndexPath;
+use batpak_testkit::prelude::*;
 use serde_json::json;
-use support::prelude::*;
 use tempfile::TempDir;
 
 fn test_coord() -> Coordinate {

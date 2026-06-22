@@ -1,13 +1,11 @@
-mod support;
 use batpak::store::{AppendOptions, BatchAppendItem, Store, StoreConfig, StoreError};
+use batpak_testkit::prelude::*;
 use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::Duration;
-use support::prelude::*;
 use tempfile::TempDir;
 
-#[path = "support/bounded_writer_reply.rs"]
-mod bounded_writer_reply;
+use batpak_testkit::bounded_writer_reply;
 use bounded_writer_reply::writer_reply;
 
 const KIND: EventKind = EventKind::custom(0xF, 0x55);

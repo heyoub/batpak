@@ -14,8 +14,7 @@ use batpak::store::{AppendOptions, BatchAppendItem, Store, StoreError};
 use std::time::{Duration, Instant};
 use tempfile::TempDir;
 
-#[path = "support/control_plane_surface.rs"]
-mod cps_support;
+use batpak_testkit::control_plane_surface as cps_support;
 use cps_support::{test_config, KIND_COUNTER};
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]

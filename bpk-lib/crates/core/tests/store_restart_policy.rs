@@ -1,10 +1,9 @@
 #![cfg(feature = "dangerous-test-hooks")]
 //! Restart policy tests split out of store_advanced.rs.
 
-mod support;
 use batpak::store::{HlcPoint, RestartPolicy, Store, StoreConfig, StoreError};
+use batpak_testkit::prelude::*;
 use std::time::Duration;
-use support::prelude::*;
 use tempfile::TempDir;
 
 #[test]

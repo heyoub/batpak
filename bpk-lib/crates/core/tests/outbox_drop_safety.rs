@@ -5,12 +5,10 @@
 //! notification fires. Flushing an outbox after staging is atomic — all items
 //! land together.
 
-mod support;
 use batpak::store::Outbox;
-use support::prelude::*;
+use batpak_testkit::prelude::*;
 
-#[path = "support/small_store.rs"]
-mod small_store_support;
+use batpak_testkit::small_store as small_store_support;
 use small_store_support::small_segment_store;
 
 fn test_coord() -> Coordinate {

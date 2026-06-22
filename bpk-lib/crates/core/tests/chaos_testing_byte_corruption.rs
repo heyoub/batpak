@@ -13,14 +13,12 @@
 //! Default depth: 500 iterations (override with `CHAOS_ITERATIONS=<n>`)
 //! Extended: CHAOS_ITERATIONS=5000 cargo test --test chaos_testing_byte_corruption --all-features --release
 
-mod support;
 use batpak::store::segment::frame_decode;
 use batpak::store::{Store, StoreConfig, StoreError};
-use support::prelude::*;
+use batpak_testkit::prelude::*;
 use tempfile::TempDir;
 
-#[path = "support/chaos_testing.rs"]
-mod chaos_support;
+use batpak_testkit::chaos_testing as chaos_support;
 use chaos_support::chaos_iterations;
 
 // ============================================================

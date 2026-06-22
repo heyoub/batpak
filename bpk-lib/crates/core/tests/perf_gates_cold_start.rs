@@ -11,12 +11,10 @@
 //! ColdStartGate/ColdStartContext family and the BatchThroughputGate family.
 //! Harness pattern: Property Harness (catastrophic threshold lane).
 
-#[path = "support/mod.rs"]
-mod support;
 use batpak::store::{Store, StoreConfig, SyncMode};
+use batpak_testkit::prelude::*;
 use std::io::Write;
 use std::time::Instant;
-use support::prelude::*;
 use tempfile::TempDir;
 
 /// A Gate that checks cold-start performance.

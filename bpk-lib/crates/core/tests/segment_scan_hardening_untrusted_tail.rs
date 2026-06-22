@@ -12,8 +12,7 @@
 //! magic-tail payload) whose SDX3 trailer is forged, torn, or stripped to a
 //! coincidental magic before reopen.
 
-#[path = "support/segment_scan_hardening.rs"]
-mod ssh_support;
+use batpak_testkit::segment_scan_hardening as ssh_support;
 
 use batpak::coordinate::Coordinate;
 use batpak::store::Store;

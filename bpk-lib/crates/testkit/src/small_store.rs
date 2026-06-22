@@ -21,6 +21,11 @@ pub fn small_segment_store_config(data_dir: &Path) -> StoreConfig {
 /// the `TempDir`: `Store::drop` syncs the active segment during shutdown, so the
 /// backing directory must outlive the store. Reuse the `TempDir` to reopen the
 /// same data directory across `Store::open` calls.
+///
+/// # Errors
+///
+/// Returns an error if the temp directory cannot be created or [`Store::open`]
+/// fails for the generated configuration.
 pub fn small_segment_store() -> Result<(TempDir, Store), Box<dyn std::error::Error>> {
     let dir = TempDir::new()?;
     let config = small_segment_store_config(dir.path());
