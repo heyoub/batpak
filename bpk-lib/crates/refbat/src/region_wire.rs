@@ -1,6 +1,6 @@
 //! Shared wire-to-[`Region`] mapping for NETBAT/1 query-shaped requests.
 
-use batpak::coordinate::{Coordinate, KindFilter, Region};
+use batpak::coordinate::{ClockRange, Coordinate, EventCategory, KindFilter, Region};
 use batpak::event::EventKind;
 
 /// Reason wire region axes could not be mapped onto a substrate [`Region`].
@@ -82,12 +82,12 @@ pub(crate) fn wire_axes_to_region(
             })?;
             region.with_fact(KindFilter::Exact(kind))
         }
-        (Some(category), None) if category <= 0xF => region.with_fact_category(category),
         (Some(category), None) => {
-            return Err(WireRegionError::Kind {
+            let category = EventCategory::new(category).map_err(|error| WireRegionError::Kind {
                 field: "kind_category",
-                message: format!("kind_category must fit in 4 bits, got {category}"),
-            });
+                message: error.to_string(),
+            })?;
+            region.with_fact_category(category)
         }
         (None, Some(_)) => {
             return Err(WireRegionError::Kind {
@@ -100,12 +100,11 @@ pub(crate) fn wire_axes_to_region(
 
     match (start_clock, end_clock) {
         (Some(start), Some(end)) => {
-            if start > end {
-                return Err(WireRegionError::ClockRange {
-                    message: format!("start_clock must be <= end_clock, got {start} > {end}"),
-                });
-            }
-            Ok(region.with_clock_range((start, end)))
+            let range =
+                ClockRange::new(start, end).map_err(|error| WireRegionError::ClockRange {
+                    message: error.to_string(),
+                })?;
+            Ok(region.with_clock_range(range))
         }
         (None, None) => Ok(region),
         _ => Err(WireRegionError::ClockRange {

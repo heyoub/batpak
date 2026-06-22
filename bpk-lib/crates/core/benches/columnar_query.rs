@@ -137,7 +137,11 @@ fn bench_by_category(c: &mut Criterion) {
     for (name, topology) in &cases {
         let (store, _dir) = build_sorted_store(topology.clone());
         group.bench_function(BenchmarkId::new(*name, EVENTS_PER_KIND), |b| {
-            b.iter(|| black_box(store.query(&Region::all().with_fact_category(QUERY_CATEGORY))));
+            b.iter(|| {
+                black_box(store.query(&Region::all().with_fact_category(
+                    EventCategory::new(QUERY_CATEGORY).expect("valid category"),
+                )))
+            });
         });
         store.close().expect("close");
     }
@@ -150,7 +154,11 @@ fn bench_by_category(c: &mut Criterion) {
     for (name, topology) in &cases {
         let (store, _dir) = build_interleaved_store(topology.clone());
         group.bench_function(BenchmarkId::new(*name, EVENTS_PER_KIND), |b| {
-            b.iter(|| black_box(store.query(&Region::all().with_fact_category(QUERY_CATEGORY))));
+            b.iter(|| {
+                black_box(store.query(&Region::all().with_fact_category(
+                    EventCategory::new(QUERY_CATEGORY).expect("valid category"),
+                )))
+            });
         });
         store.close().expect("close");
     }

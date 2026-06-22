@@ -179,7 +179,7 @@ impl StoreIndex {
     ) {
         let requested_scope = region.scope.as_deref();
         let fact_filter = region.fact.as_ref();
-        let clock_range = region.clock_range;
+        let clock_range = region.clock_range.map(|range| range.as_tuple());
         let lane = region.lane;
 
         hits.retain(|h| {
@@ -260,7 +260,7 @@ impl StoreIndex {
     where
         F: FnMut(u64) -> bool,
     {
-        let clock_range = region.clock_range;
+        let clock_range = region.clock_range.map(|range| range.as_tuple());
         let lane = region.lane;
         let trim_threshold = limit
             .saturating_mul(2)

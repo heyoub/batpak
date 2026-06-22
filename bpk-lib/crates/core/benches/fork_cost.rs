@@ -6,7 +6,7 @@
 //! does not open the fork.
 
 use batpak::prelude::*;
-use batpak::store::{ForkOptions, Store, StoreConfig, SyncMode};
+use batpak::store::{CopyPreference, ForkOptions, Store, StoreConfig, SyncMode};
 use batpak_bench_support::{apply_profile, throughput_elements, BenchProfile};
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use std::hint::black_box;
@@ -50,8 +50,7 @@ fn bench_fork_cost(c: &mut Criterion) {
             (
                 "deep_copy_baseline",
                 ForkOptions {
-                    use_reflink: false,
-                    use_hardlink: false,
+                    copy_preference: CopyPreference::DeepCopyOnly,
                     exclude_caches: true,
                 },
             ),

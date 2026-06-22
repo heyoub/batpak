@@ -13,7 +13,10 @@ pub use batpak::artifact::{
     AttestationRef, CanonicalArtifactEnvelope, SignatureEnvelope, SignatureRef,
     ARTIFACT_ENVELOPE_FRAMING_VERSION,
 };
-pub use batpak::coordinate::{Coordinate, CoordinateError, DagPosition, KindFilter, Region};
+pub use batpak::coordinate::{
+    ClockRange, Coordinate, CoordinateError, DagPosition, EventCategory, KindFilter, Region,
+    RegionFilterError,
+};
 pub use batpak::event::sourcing::{MultiDispatchError, MultiReactive, Reactive, TypedReactive};
 pub use batpak::event::{
     revalidate_event_payload_registry, validate_event_payload_registry, DecodeSource, DecodeTyped,

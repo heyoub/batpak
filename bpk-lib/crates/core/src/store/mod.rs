@@ -108,13 +108,14 @@ pub use fault::{
     CountdownAction, CountdownInjector, FaultInjector, InjectionPoint, ProbabilisticInjector,
 };
 pub use fork_report::{
-    fork_report_body_hash, ForkCopyStrategy, ForkEvidenceHash, ForkFinding, ForkOptions,
-    ForkReport, ForkReportBody, ForkStrategyCounts, FORK_EVIDENCE_REPORT_SCHEMA_VERSION,
+    fork_report_body_hash, CopyPreference, ForkCopyStrategy, ForkEvidenceHash, ForkFinding,
+    ForkOptions, ForkReport, ForkReportBody, ForkStrategyCounts,
+    FORK_EVIDENCE_REPORT_SCHEMA_VERSION,
 };
 pub use gate::DurabilityGate;
 pub use import::{
     provenance, provenance_from_extensions, ImportFilter, ImportOptions, ImportProvenance,
-    ImportReport, ImportSelector, IMPORT_PROVENANCE_SCHEMA_VERSION,
+    ImportReport, ImportSelector, SourceNamespace, IMPORT_PROVENANCE_SCHEMA_VERSION,
 };
 /// Test-only global-allocator shims. Re-exported so dedicated single-test
 /// binaries can install one as `#[global_allocator]`. Compiled out unless the

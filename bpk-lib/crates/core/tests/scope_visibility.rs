@@ -6,7 +6,7 @@
 //! post-filter). Exercised across every public overlay topology so any
 //! overlay that forgets the scope gate surfaces as a fan-out delta.
 
-use batpak::coordinate::{KindFilter, Region};
+use batpak::coordinate::{ClockRange, KindFilter, Region};
 use batpak::event::EventKind;
 use batpak::prelude::Coordinate;
 use batpak::store::{Cursor, IndexTopology, Store, StoreConfig, StoreError};
@@ -137,7 +137,10 @@ fn run_matrix(label: &str, store: &Store) {
 
     // Scope + clock_range: (0..=2) is 3 clocks per entity-scope stream.
     // scope:A contains two streams (alpha, beta), so expect 6 entries.
-    let scope_a_clocked = store.query(&Region::scope("scope:A").with_clock_range((0, 2)));
+    let scope_a_clocked = store.query(
+        &Region::scope("scope:A")
+            .with_clock_range(ClockRange::new(0, 2).expect("valid clock range")),
+    );
     assert_eq!(
         scope_a_clocked.len(),
         6,

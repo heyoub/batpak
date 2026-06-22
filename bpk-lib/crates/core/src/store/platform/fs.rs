@@ -167,9 +167,15 @@ pub(crate) fn reflink(from: &Path, to: &Path) -> io::Result<()> {
 pub(crate) fn cow_copy_file(
     from: &Path,
     to: &Path,
-    use_reflink: bool,
-    use_hardlink: bool,
+    preference: crate::store::CopyPreference,
 ) -> io::Result<CowStrategyUsed> {
+    use crate::store::CopyPreference;
+    let use_reflink = matches!(preference, CopyPreference::ReflinkThenHardlink);
+    let use_hardlink = matches!(
+        preference,
+        CopyPreference::ReflinkThenHardlink | CopyPreference::HardlinkOnly
+    );
+
     reject_copy_source(from)?;
     remove_file_if_present(to)?;
 

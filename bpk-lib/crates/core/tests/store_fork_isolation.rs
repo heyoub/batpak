@@ -10,7 +10,7 @@
 //! SEEDED: tempfile-backed stores, tiny segment rotation, deterministic
 //! coordinates and idempotency keys.
 
-use batpak::store::{ForkOptions, ReadOnly, Store, StoreConfig};
+use batpak::store::{CopyPreference, ForkOptions, ReadOnly, Store, StoreConfig};
 use batpak_testkit::prelude::*;
 use tempfile::TempDir;
 
@@ -233,8 +233,7 @@ fn fork_report_records_concrete_strategy_counts_and_nonzero_digests() -> TestRes
     let report = store.fork_with_evidence(
         fork_dir.path(),
         ForkOptions {
-            use_reflink: false,
-            use_hardlink: true,
+            copy_preference: CopyPreference::HardlinkOnly,
             exclude_caches: true,
         },
     )?;

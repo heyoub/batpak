@@ -219,6 +219,10 @@ fn lane_frontier_waits_are_scoped_to_lane() -> TestResult {
         "PROPERTY: lane-1 emitted frontier must cover the lane-1 append"
     );
 
+    // Canonical wait entry points (the per-kind methods above are thin
+    // forwarders onto these).
+    store.wait_for(WatermarkKind::Accepted, lane_one_point, Duration::ZERO)?;
+    store.wait_for_on_lane(WatermarkKind::Accepted, 1, lane_one_point, Duration::ZERO)?;
     store.wait_for_accepted(lane_one_point, Duration::ZERO)?;
     store.wait_for_accepted_lane(1, lane_one_point, Duration::ZERO)?;
     store.wait_for_written(lane_one_point, Duration::ZERO)?;

@@ -70,7 +70,8 @@ fn query_with_clock_range_filters_events() {
     }
 
     // Query with clock_range [3, 7] — should get events with clock 3,4,5,6,7
-    let region = Region::entity("entity:clock").with_clock_range((3, 7));
+    let region = Region::entity("entity:clock")
+        .with_clock_range(ClockRange::new(3, 7).expect("valid clock range"));
     let results = store.query(&region);
 
     assert_eq!(
@@ -116,7 +117,8 @@ fn query_clock_range_with_scope_filter() {
     }
 
     // entity:a with clock range [1,3]
-    let region = Region::entity("entity:a").with_clock_range((1, 3));
+    let region = Region::entity("entity:a")
+        .with_clock_range(ClockRange::new(1, 3).expect("valid clock range"));
     let results = store.query(&region);
     assert_eq!(
         results.len(),
@@ -154,7 +156,7 @@ fn query_by_fact_category() {
         .expect("append");
 
     // Query by category 0xA — should get both kind_a1 and kind_a2
-    let region = Region::all().with_fact_category(0xA);
+    let region = Region::all().with_fact_category(EventCategory::new(0xA).expect("valid category"));
     let results = store.query(&region);
     assert_eq!(
         results.len(),
@@ -166,4 +168,32 @@ fn query_by_fact_category() {
     );
 
     store.close().expect("close");
+}
+
+/// PROVES: `ClockRange::new`/`EventCategory::new` validate their inputs and
+/// surface the typed `RegionFilterError` variants; valid values expose their
+/// accessors. CATCHES: a constructor that accepts an inverted range or an
+/// out-of-range category, or accessors that drop/swap the stored values.
+#[test]
+fn region_filter_constructors_validate_and_surface_typed_errors() {
+    let range = ClockRange::new(3, 7).expect("valid range");
+    assert_eq!((range.start(), range.end()), (3, 7));
+    assert_eq!(
+        ClockRange::new(7, 3),
+        Err(RegionFilterError::InvertedClockRange { start: 7, end: 3 }),
+        "inverted clock range must be rejected with the typed error"
+    );
+
+    let category = EventCategory::new(0xA).expect("valid category");
+    assert_eq!(category.get(), 0xA);
+    assert_eq!(
+        EventCategory::new(16),
+        Err(RegionFilterError::CategoryOutOfRange { category: 16 }),
+        "out-of-range category must be rejected with the typed error"
+    );
+    assert_eq!(
+        EventCategory::of_kind(EventKind::custom(0xC, 1)).get(),
+        0xC,
+        "of_kind must read the 4-bit category from the event kind"
+    );
 }

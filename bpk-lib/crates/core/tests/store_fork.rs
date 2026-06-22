@@ -11,8 +11,8 @@
 //! options, deterministic coordinates, cancelled visibility fences.
 
 use batpak::store::{
-    fork_report_body_hash, ForkCopyStrategy, ForkEvidenceHash, ForkOptions, ForkReport,
-    ForkReportBody, ForkStrategyCounts, ReadOnly, Store, StoreConfig,
+    fork_report_body_hash, CopyPreference, ForkCopyStrategy, ForkEvidenceHash, ForkOptions,
+    ForkReport, ForkReportBody, ForkStrategyCounts, ReadOnly, Store, StoreConfig,
     FORK_EVIDENCE_REPORT_SCHEMA_VERSION,
 };
 use batpak_testkit::prelude::*;
@@ -85,8 +85,7 @@ fn fork_with_evidence_reopens_to_same_count_and_isolates_parent_writes() -> Test
     let report = store.fork_with_evidence(
         fork_dir.path(),
         ForkOptions {
-            use_reflink: false,
-            use_hardlink: false,
+            copy_preference: CopyPreference::DeepCopyOnly,
             exclude_caches: true,
         },
     )?;
@@ -151,8 +150,7 @@ fn fork_hardlinks_sealed_segments_and_deep_copies_active_segment() -> TestResult
     let report = store.fork_with_evidence(
         fork_dir.path(),
         ForkOptions {
-            use_reflink: false,
-            use_hardlink: true,
+            copy_preference: CopyPreference::HardlinkOnly,
             exclude_caches: true,
         },
     )?;
@@ -226,8 +224,7 @@ fn fork_hardlink_only_shares_sealed_segments_but_copies_active_segment() -> Test
     let report = store.fork_with_evidence(
         fork_dir.path(),
         ForkOptions {
-            use_reflink: false,
-            use_hardlink: true,
+            copy_preference: CopyPreference::HardlinkOnly,
             exclude_caches: true,
         },
     )?;
@@ -371,8 +368,7 @@ fn fork_deep_copies_idempotency_and_visibility_authorities() -> TestResult {
     let report = store.fork_with_evidence(
         fork_dir.path(),
         ForkOptions {
-            use_reflink: false,
-            use_hardlink: true,
+            copy_preference: CopyPreference::HardlinkOnly,
             exclude_caches: true,
         },
     )?;

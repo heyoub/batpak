@@ -8,7 +8,7 @@
 //! collection). Deterministic PRNG: one fixed seed, one shuffled corpus,
 //! many queries.
 
-use batpak::coordinate::{Coordinate, KindFilter, Region};
+use batpak::coordinate::{ClockRange, Coordinate, KindFilter, Region};
 use batpak::event::EventKind;
 use batpak::store::index::IndexEntry;
 use batpak::store::{IndexTopology, Store, StoreConfig};
@@ -140,8 +140,8 @@ fn ground_truth(corpus: &[GroundTruthEvent], region: &Region) -> HashSet<(String
                 continue;
             }
         }
-        if let Some((lo, hi)) = region.clock_range() {
-            if ev.clock_slot < lo || ev.clock_slot > hi {
+        if let Some(range) = region.clock_range() {
+            if ev.clock_slot < range.start() || ev.clock_slot > range.end() {
                 continue;
             }
         }
@@ -200,8 +200,8 @@ fn ground_truth_ordered(
                     return None;
                 }
             }
-            if let Some((lo, hi)) = region.clock_range() {
-                if ev.clock_slot < lo || ev.clock_slot > hi {
+            if let Some(range) = region.clock_range() {
+                if ev.clock_slot < range.start() || ev.clock_slot > range.end() {
                     return None;
                 }
             }
@@ -324,7 +324,7 @@ fn standard_queries() -> Vec<(&'static str, Region)> {
             "scope(Z) + kind(6,1) + clock(0..=3)",
             Region::scope("scope:Z")
                 .with_fact(KindFilter::Exact(EventKind::custom(0x6, 1)))
-                .with_clock_range((0, 3)),
+                .with_clock_range(ClockRange::new(0, 3).expect("valid clock range")),
         ),
         (
             "kind(5,2)",
@@ -335,12 +335,15 @@ fn standard_queries() -> Vec<(&'static str, Region)> {
             Region::all().with_fact(KindFilter::Category(0x5)),
         ),
         ("kind(Any)", Region::all().with_fact(KindFilter::Any)),
-        ("clock(2..=5)", Region::all().with_clock_range((2, 5))),
+        (
+            "clock(2..=5)",
+            Region::all().with_clock_range(ClockRange::new(2, 5).expect("valid clock range")),
+        ),
         (
             "entity(bravo) + scope(Y) + category(5) + clock(0..=2)",
             entity_scoped_region("entity:bravo", "scope:Y")
                 .with_fact(KindFilter::Category(0x5))
-                .with_clock_range((0, 2)),
+                .with_clock_range(ClockRange::new(0, 2).expect("valid clock range")),
         ),
     ]
 }
@@ -354,7 +357,8 @@ fn cursor_queries() -> Vec<(&'static str, Region)> {
         ),
         (
             "entity(bravo) + clock(1..=6)",
-            Region::entity("entity:bravo").with_clock_range((1, 6)),
+            Region::entity("entity:bravo")
+                .with_clock_range(ClockRange::new(1, 6).expect("valid clock range")),
         ),
         (
             "entity(alpha) + scope(Z) + category(5)",

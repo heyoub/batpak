@@ -159,7 +159,8 @@ fn read_walk_request_maps_clock_range() -> Result<()> {
         ..ReadWalkEvidenceRequest::fixture_value()
     };
     let core = request.to_core()?;
-    assert_eq!(core.region.clock_range(), Some((1, 5)));
+    let range = core.region.clock_range().expect("clock range present");
+    assert_eq!((range.start(), range.end()), (1, 5));
     Ok(())
 }
 

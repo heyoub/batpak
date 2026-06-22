@@ -61,13 +61,8 @@ pub(super) fn fork_entry(
 ) -> Result<(), StoreError> {
     match source_kind.fork_strategy(active_segment_id) {
         ForkStrategy::ShareIfPossible => {
-            let used = platform_fs::cow_copy_file(
-                path,
-                dest_path,
-                options.use_reflink,
-                options.use_hardlink,
-            )
-            .map_err(StoreError::Io)?;
+            let used = platform_fs::cow_copy_file(path, dest_path, options.copy_preference)
+                .map_err(StoreError::Io)?;
             let strategy = fork_copy_strategy(used);
             acc.strategy_counts.record_copy(strategy);
             if let Some(segment_id) = source_kind.segment_id() {
@@ -86,8 +81,12 @@ pub(super) fn fork_entry(
             });
         }
         ForkStrategy::DeepCopyAlways => {
-            let used = platform_fs::cow_copy_file(path, dest_path, false, false)
-                .map_err(StoreError::Io)?;
+            let used = platform_fs::cow_copy_file(
+                path,
+                dest_path,
+                crate::store::CopyPreference::DeepCopyOnly,
+            )
+            .map_err(StoreError::Io)?;
             let strategy = fork_copy_strategy(used);
             acc.strategy_counts.record_copy(strategy);
             if let Some(segment_id) = source_kind.segment_id() {
@@ -100,8 +99,12 @@ pub(super) fn fork_entry(
             });
         }
         ForkStrategy::CacheRegenerable if !options.exclude_caches => {
-            let used = platform_fs::cow_copy_file(path, dest_path, false, false)
-                .map_err(StoreError::Io)?;
+            let used = platform_fs::cow_copy_file(
+                path,
+                dest_path,
+                crate::store::CopyPreference::DeepCopyOnly,
+            )
+            .map_err(StoreError::Io)?;
             let strategy = fork_copy_strategy(used);
             acc.strategy_counts.record_copy(strategy);
             acc.findings.push(ForkFinding::FileCopied {

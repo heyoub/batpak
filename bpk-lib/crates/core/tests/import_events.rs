@@ -80,7 +80,7 @@ fn import_events_reimport_is_noop_and_preserves_raw_payload_bytes() -> TestResul
     let options = ImportOptions::new("source-alpha")?
         .with_chunk_size(1)
         .with_filter(filter);
-    assert_eq!(options.source_namespace(), "source-alpha");
+    assert_eq!(options.source_namespace().as_str(), "source-alpha");
     assert_eq!(options.chunk_size(), 1);
     let report: ImportReport = dest.import_events(&source, &ImportSelector::all(), &options)?;
     assert_eq!(report.imported, 2);
@@ -113,7 +113,7 @@ fn import_events_reimport_is_noop_and_preserves_raw_payload_bytes() -> TestResul
     let provenance_body: ImportProvenance =
         provenance_from_extensions(dest.by_entity("entity:import:raw")[0].receipt_extensions())
             .ok_or_else(|| test_failure("deduplicated import retained provenance"))?;
-    assert_eq!(provenance_body.source_namespace, "source-alpha");
+    assert_eq!(provenance_body.source_namespace.as_str(), "source-alpha");
 
     source.close()?;
     dest.close()?;
@@ -173,7 +173,7 @@ fn import_events_preserves_correlation_clears_causation_and_records_provenance()
         provenance_body.schema_version,
         IMPORT_PROVENANCE_SCHEMA_VERSION
     );
-    assert_eq!(provenance_body.source_namespace, "source-lineage");
+    assert_eq!(provenance_body.source_namespace.as_str(), "source-lineage");
     assert_eq!(
         provenance_body.source_event_id,
         source_entries[0].event_id()
@@ -216,7 +216,7 @@ fn import_options_reject_empty_namespace() -> TestResult {
     let dir = TempDir::new()?;
     let derived = ImportOptions::with_source_namespace_from_data_dir(dir.path())?;
     assert!(
-        derived.source_namespace().starts_with("data-dir:"),
+        derived.source_namespace().as_str().starts_with("data-dir:"),
         "path-derived source namespace must be explicit and prefixed"
     );
     Ok(())

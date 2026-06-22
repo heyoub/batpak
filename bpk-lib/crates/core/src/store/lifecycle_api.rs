@@ -9,6 +9,70 @@ impl Store<Open> {
         lifecycle::sync(self)
     }
 
+    /// Block until the named watermark reaches `point` or `timeout` elapses.
+    ///
+    /// This is the canonical wait entry point; the per-kind `wait_for_<kind>`
+    /// methods forward here. The single `match` over [`WatermarkKind`] is the
+    /// one source of truth mirroring the durability-gate dispatch.
+    ///
+    /// # Errors
+    /// Returns [`StoreError::WaitTimeout`] if the watermark does not reach
+    /// `point` before `timeout`. Returns [`StoreError::WriterCrashed`] if the
+    /// writer panicked while the caller was waiting.
+    pub fn wait_for(
+        &self,
+        kind: WatermarkKind,
+        point: HlcPoint,
+        timeout: std::time::Duration,
+    ) -> Result<(), StoreError> {
+        match kind {
+            WatermarkKind::Accepted => self.watermark_handle.wait_for_accepted(point, timeout),
+            WatermarkKind::Written => self.watermark_handle.wait_for_written(point, timeout),
+            WatermarkKind::Durable => self.watermark_handle.wait_for_durable(point, timeout),
+            WatermarkKind::Applied => self.watermark_handle.wait_for_applied(point, timeout),
+            WatermarkKind::Visible => self.watermark_handle.wait_for_visible(point, timeout),
+            WatermarkKind::Emitted => self.watermark_handle.wait_for_emitted(point, timeout),
+        }
+    }
+
+    /// Block until one lane's logical watermark reaches `point` or `timeout`.
+    ///
+    /// Canonical lane wait entry point; the per-kind `wait_for_<kind>_lane`
+    /// methods forward here.
+    ///
+    /// # Errors
+    /// Returns [`StoreError::WaitTimeout`] if that lane's watermark does not
+    /// reach `point` before `timeout`. Returns [`StoreError::WriterCrashed`] if
+    /// the writer panicked while the caller was waiting.
+    pub fn wait_for_on_lane(
+        &self,
+        kind: WatermarkKind,
+        lane: u32,
+        point: HlcPoint,
+        timeout: std::time::Duration,
+    ) -> Result<(), StoreError> {
+        match kind {
+            WatermarkKind::Accepted => self
+                .watermark_handle
+                .wait_for_accepted_on_lane(lane, point, timeout),
+            WatermarkKind::Written => self
+                .watermark_handle
+                .wait_for_written_on_lane(lane, point, timeout),
+            WatermarkKind::Durable => self
+                .watermark_handle
+                .wait_for_durable_on_lane(lane, point, timeout),
+            WatermarkKind::Applied => self
+                .watermark_handle
+                .wait_for_applied_on_lane(lane, point, timeout),
+            WatermarkKind::Visible => self
+                .watermark_handle
+                .wait_for_visible_on_lane(lane, point, timeout),
+            WatermarkKind::Emitted => self
+                .watermark_handle
+                .wait_for_emitted_on_lane(lane, point, timeout),
+        }
+    }
+
     /// Block until the durable frontier reaches `point` or `timeout` elapses.
     ///
     /// # Errors
@@ -20,7 +84,7 @@ impl Store<Open> {
         point: HlcPoint,
         timeout: std::time::Duration,
     ) -> Result<(), StoreError> {
-        self.watermark_handle.wait_for_durable(point, timeout)
+        self.wait_for(WatermarkKind::Durable, point, timeout)
     }
 
     /// Block until the accepted frontier reaches `point` or `timeout` elapses.
@@ -34,7 +98,7 @@ impl Store<Open> {
         point: HlcPoint,
         timeout: std::time::Duration,
     ) -> Result<(), StoreError> {
-        self.watermark_handle.wait_for_accepted(point, timeout)
+        self.wait_for(WatermarkKind::Accepted, point, timeout)
     }
 
     /// Block until one lane's logical accepted frontier reaches `point`.
@@ -49,8 +113,7 @@ impl Store<Open> {
         point: HlcPoint,
         timeout: std::time::Duration,
     ) -> Result<(), StoreError> {
-        self.watermark_handle
-            .wait_for_accepted_on_lane(lane, point, timeout)
+        self.wait_for_on_lane(WatermarkKind::Accepted, lane, point, timeout)
     }
 
     /// Block until the written frontier reaches `point` or `timeout` elapses.
@@ -64,7 +127,7 @@ impl Store<Open> {
         point: HlcPoint,
         timeout: std::time::Duration,
     ) -> Result<(), StoreError> {
-        self.watermark_handle.wait_for_written(point, timeout)
+        self.wait_for(WatermarkKind::Written, point, timeout)
     }
 
     /// Block until one lane's logical written frontier reaches `point`.
@@ -79,8 +142,7 @@ impl Store<Open> {
         point: HlcPoint,
         timeout: std::time::Duration,
     ) -> Result<(), StoreError> {
-        self.watermark_handle
-            .wait_for_written_on_lane(lane, point, timeout)
+        self.wait_for_on_lane(WatermarkKind::Written, lane, point, timeout)
     }
 
     /// Block until one lane's logical durable frontier reaches `point`.
@@ -95,8 +157,7 @@ impl Store<Open> {
         point: HlcPoint,
         timeout: std::time::Duration,
     ) -> Result<(), StoreError> {
-        self.watermark_handle
-            .wait_for_durable_on_lane(lane, point, timeout)
+        self.wait_for_on_lane(WatermarkKind::Durable, lane, point, timeout)
     }
 
     /// Block until the applied frontier reaches `point` or `timeout` elapses.
@@ -113,7 +174,7 @@ impl Store<Open> {
         point: HlcPoint,
         timeout: std::time::Duration,
     ) -> Result<(), StoreError> {
-        self.watermark_handle.wait_for_applied(point, timeout)
+        self.wait_for(WatermarkKind::Applied, point, timeout)
     }
 
     /// Block until one lane's logical applied frontier reaches `point`.
@@ -128,8 +189,7 @@ impl Store<Open> {
         point: HlcPoint,
         timeout: std::time::Duration,
     ) -> Result<(), StoreError> {
-        self.watermark_handle
-            .wait_for_applied_on_lane(lane, point, timeout)
+        self.wait_for_on_lane(WatermarkKind::Applied, lane, point, timeout)
     }
 
     /// Block until the visible frontier reaches `point` or `timeout` elapses.
@@ -143,7 +203,7 @@ impl Store<Open> {
         point: HlcPoint,
         timeout: std::time::Duration,
     ) -> Result<(), StoreError> {
-        self.watermark_handle.wait_for_visible(point, timeout)
+        self.wait_for(WatermarkKind::Visible, point, timeout)
     }
 
     /// Block until one lane's logical visible frontier reaches `point`.
@@ -158,8 +218,7 @@ impl Store<Open> {
         point: HlcPoint,
         timeout: std::time::Duration,
     ) -> Result<(), StoreError> {
-        self.watermark_handle
-            .wait_for_visible_on_lane(lane, point, timeout)
+        self.wait_for_on_lane(WatermarkKind::Visible, lane, point, timeout)
     }
 
     /// Block until the emitted frontier reaches `point` or `timeout` elapses.
@@ -173,7 +232,7 @@ impl Store<Open> {
         point: HlcPoint,
         timeout: std::time::Duration,
     ) -> Result<(), StoreError> {
-        self.watermark_handle.wait_for_emitted(point, timeout)
+        self.wait_for(WatermarkKind::Emitted, point, timeout)
     }
 
     /// Block until one lane's logical emitted frontier reaches `point`.
@@ -188,8 +247,7 @@ impl Store<Open> {
         point: HlcPoint,
         timeout: std::time::Duration,
     ) -> Result<(), StoreError> {
-        self.watermark_handle
-            .wait_for_emitted_on_lane(lane, point, timeout)
+        self.wait_for_on_lane(WatermarkKind::Emitted, lane, point, timeout)
     }
 
     /// Snapshot the current index to a destination directory and return

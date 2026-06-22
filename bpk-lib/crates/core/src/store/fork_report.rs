@@ -21,14 +21,28 @@ pub enum ForkCopyStrategy {
     DeepCopy,
 }
 
+/// Copy ladder preference for forked artifacts.
+///
+/// Selects how aggressively a fork shares storage with its source. Each rung
+/// falls back to an ordinary deep copy when the preferred mechanism is not
+/// available on the underlying filesystem.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CopyPreference {
+    /// Try a filesystem reflink, then a hardlink, then a deep copy.
+    #[default]
+    ReflinkThenHardlink,
+    /// Skip reflinks; try a hardlink, then a deep copy.
+    HardlinkOnly,
+    /// Always perform an ordinary byte-for-byte deep copy.
+    DeepCopyOnly,
+}
+
 /// Caller options for [`crate::store::Store::fork_with_evidence`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[must_use]
 pub struct ForkOptions {
-    /// Try filesystem reflinks for immutable sealed segments before hardlink/copy fallback.
-    pub use_reflink: bool,
-    /// Try hardlinks for immutable sealed segments before deep-copy fallback.
-    pub use_hardlink: bool,
+    /// Copy ladder preference for immutable sealed segments.
+    pub copy_preference: CopyPreference,
     /// Exclude regenerable cold-start caches (`index.ckpt`, `index.fbati`).
     pub exclude_caches: bool,
 }
@@ -36,8 +50,7 @@ pub struct ForkOptions {
 impl Default for ForkOptions {
     fn default() -> Self {
         Self {
-            use_reflink: true,
-            use_hardlink: true,
+            copy_preference: CopyPreference::default(),
             exclude_caches: true,
         }
     }

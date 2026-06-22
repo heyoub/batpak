@@ -14,6 +14,43 @@ use std::path::Path;
 /// Predicate used to skip source events during import.
 pub type ImportFilter = Box<dyn Fn(&IndexEntry) -> bool + Send + Sync>;
 
+/// Caller-owned identity for an import source log.
+///
+/// A non-empty opaque label that, together with the source event id, forms the
+/// deterministic import idempotency key. The serde form is transparent: the
+/// wire representation is identical to the inner string.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct SourceNamespace(String);
+
+impl SourceNamespace {
+    /// Construct a source namespace, validating that it is non-empty.
+    ///
+    /// # Errors
+    /// Returns [`StoreError::Configuration`] if the namespace is empty.
+    pub fn new(value: impl Into<String>) -> Result<Self, StoreError> {
+        let value = value.into();
+        if value.is_empty() {
+            return Err(StoreError::Configuration(
+                "import source_namespace must be non-empty".to_string(),
+            ));
+        }
+        Ok(Self(value))
+    }
+
+    /// Borrow the namespace as a string slice.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for SourceNamespace {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
 /// Source event selector for [`Store::import_events`].
 #[derive(Clone, Debug)]
 #[must_use]
@@ -73,7 +110,7 @@ impl Default for ImportSelector {
 /// Options controlling [`Store::import_events`].
 #[must_use]
 pub struct ImportOptions {
-    source_namespace: String,
+    source_namespace: SourceNamespace,
     chunk_size: usize,
     filter: Option<ImportFilter>,
 }
@@ -84,10 +121,8 @@ impl ImportOptions {
     /// # Errors
     /// Returns [`StoreError::Configuration`] if the namespace is empty.
     pub fn new(source_namespace: impl Into<String>) -> Result<Self, StoreError> {
-        let source_namespace = source_namespace.into();
-        validate_source_namespace(&source_namespace)?;
         Ok(Self {
-            source_namespace,
+            source_namespace: SourceNamespace::new(source_namespace)?,
             chunk_size: 256,
             filter: None,
         })
@@ -128,7 +163,7 @@ impl ImportOptions {
     }
 
     /// Borrow the source namespace.
-    pub fn source_namespace(&self) -> &str {
+    pub fn source_namespace(&self) -> &SourceNamespace {
         &self.source_namespace
     }
 
@@ -164,7 +199,7 @@ pub struct ImportProvenance {
     /// Extension schema version.
     pub schema_version: u16,
     /// Caller-supplied namespace for the source log.
-    pub source_namespace: String,
+    pub source_namespace: SourceNamespace,
     /// Source event id, as a raw `u128`.
     pub source_event_id: u128,
     /// Source global sequence.
@@ -207,7 +242,6 @@ pub(crate) fn import_events<S: crate::store::StoreState>(
     selector: &ImportSelector,
     options: &ImportOptions,
 ) -> Result<ImportReport, StoreError> {
-    validate_source_namespace(&options.source_namespace)?;
     let destination_batch_max = usize::try_from(destination.config.batch.max_size)
         .unwrap_or(usize::MAX)
         .max(1);
@@ -304,18 +338,12 @@ pub(crate) fn import_events<S: crate::store::StoreState>(
     Ok(report)
 }
 
-fn validate_source_namespace(source_namespace: &str) -> Result<(), StoreError> {
-    if source_namespace.is_empty() {
-        return Err(StoreError::Configuration(
-            "import source_namespace must be non-empty".to_string(),
-        ));
-    }
-    Ok(())
-}
-
-fn import_key(source_namespace: &str, source_event_id: u128) -> IdempotencyKey {
+fn import_key(source_namespace: &SourceNamespace, source_event_id: u128) -> IdempotencyKey {
     let source_event_id = format!("{source_event_id:032x}");
-    IdempotencyKey::for_operation("batpak.import", &[source_namespace, &source_event_id])
+    IdempotencyKey::for_operation(
+        "batpak.import",
+        &[source_namespace.as_str(), &source_event_id],
+    )
 }
 
 fn import_key_already_present(destination: &Store<Open>, key: IdempotencyKey) -> bool {
@@ -385,7 +413,7 @@ mod tests {
         let key = import_key(options.source_namespace(), source_entry.event_id());
         let provenance_body = ImportProvenance {
             schema_version: IMPORT_PROVENANCE_SCHEMA_VERSION,
-            source_namespace: options.source_namespace().to_string(),
+            source_namespace: options.source_namespace().clone(),
             source_event_id: source_entry.event_id(),
             source_global_sequence: source_entry.global_sequence(),
             source_kind: source_entry.event_kind().as_raw_u16(),
@@ -413,7 +441,8 @@ mod tests {
             "wrapper-decoded source_event_id must match the source event"
         );
         assert_eq!(
-            decoded.source_namespace, "source-prov-wrapper",
+            decoded.source_namespace.as_str(),
+            "source-prov-wrapper",
             "wrapper-decoded source_namespace must match the configured source namespace"
         );
 

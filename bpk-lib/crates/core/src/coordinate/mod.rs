@@ -80,6 +80,109 @@ pub enum CoordinateError {
     ForbiddenSeparator,
 }
 
+/// Errors returned when constructing a region filter component.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum RegionFilterError {
+    /// A clock range whose start exceeds its end.
+    InvertedClockRange {
+        /// Inclusive lower bound supplied by the caller.
+        start: u32,
+        /// Inclusive upper bound supplied by the caller.
+        end: u32,
+    },
+    /// An event category outside the valid 4-bit range (`0..16`).
+    CategoryOutOfRange {
+        /// Out-of-range category supplied by the caller.
+        category: u8,
+    },
+}
+
+impl fmt::Display for RegionFilterError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvertedClockRange { start, end } => {
+                write!(f, "clock range start {start} exceeds end {end}")
+            }
+            Self::CategoryOutOfRange { category } => {
+                write!(
+                    f,
+                    "event category {category} is out of range (must be < 16)"
+                )
+            }
+        }
+    }
+}
+impl std::error::Error for RegionFilterError {}
+
+/// Inclusive per-entity clock range used as a region filter.
+///
+/// Bounds are per-entity logical clocks, not global sequences, and do not apply
+/// to live filtering.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ClockRange {
+    start: u32,
+    end: u32,
+}
+
+impl ClockRange {
+    /// Construct an inclusive clock range.
+    ///
+    /// # Errors
+    /// Returns [`RegionFilterError::InvertedClockRange`] when `start > end`.
+    pub fn new(start: u32, end: u32) -> Result<Self, RegionFilterError> {
+        if start > end {
+            return Err(RegionFilterError::InvertedClockRange { start, end });
+        }
+        Ok(Self { start, end })
+    }
+
+    /// Inclusive lower bound.
+    #[must_use]
+    pub fn start(&self) -> u32 {
+        self.start
+    }
+
+    /// Inclusive upper bound.
+    #[must_use]
+    pub fn end(&self) -> u32 {
+        self.end
+    }
+
+    pub(crate) fn as_tuple(&self) -> (u32, u32) {
+        (self.start, self.end)
+    }
+}
+
+/// A 4-bit event category used as a region filter.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EventCategory(u8);
+
+impl EventCategory {
+    /// Construct a category, validating that it fits in 4 bits (`0..16`).
+    ///
+    /// # Errors
+    /// Returns [`RegionFilterError::CategoryOutOfRange`] when `category >= 16`.
+    pub fn new(category: u8) -> Result<Self, RegionFilterError> {
+        if category >= 16 {
+            return Err(RegionFilterError::CategoryOutOfRange { category });
+        }
+        Ok(Self(category))
+    }
+
+    /// The category of a concrete [`EventKind`].
+    #[must_use]
+    pub fn of_kind(kind: EventKind) -> Self {
+        Self(kind.category())
+    }
+
+    /// The raw 4-bit category value.
+    #[must_use]
+    pub fn get(&self) -> u8 {
+        self.0
+    }
+}
+
 /// Region: the ONE predicate type for query, subscription, cursor, traversal.
 #[derive(Clone, Debug, Default)]
 pub struct Region {
@@ -90,7 +193,7 @@ pub struct Region {
     /// Optional event-kind filter applied to matched events.
     pub(crate) fact: Option<KindFilter>,
     /// Optional inclusive per-entity clock range; does not apply to live filtering.
-    pub(crate) clock_range: Option<(u32, u32)>, // per-entity clock, not global_sequence
+    pub(crate) clock_range: Option<ClockRange>, // per-entity clock, not global_sequence
     /// Optional exact DAG lane filter.
     pub(crate) lane: Option<u32>,
 }
@@ -281,13 +384,13 @@ impl Region {
     }
 
     /// Filters events to those whose kind matches the given category.
-    pub fn with_fact_category(mut self, cat: u8) -> Self {
-        self.fact = Some(KindFilter::Category(cat));
+    pub fn with_fact_category(mut self, category: EventCategory) -> Self {
+        self.fact = Some(KindFilter::Category(category.get()));
         self
     }
 
     /// Filters events to those within the given per-entity clock range.
-    pub fn with_clock_range(mut self, range: (u32, u32)) -> Self {
+    pub fn with_clock_range(mut self, range: ClockRange) -> Self {
         self.clock_range = Some(range);
         self
     }
@@ -314,7 +417,7 @@ impl Region {
     }
 
     /// Returns the configured inclusive per-entity clock range, if any.
-    pub fn clock_range(&self) -> Option<(u32, u32)> {
+    pub fn clock_range(&self) -> Option<ClockRange> {
         self.clock_range
     }
 
@@ -394,7 +497,10 @@ impl Region {
             None => "none".to_owned(),
         };
         let clock = match self.clock_range {
-            Some((start, end)) => format!("{start}-{end}"),
+            Some(range) => {
+                let (start, end) = range.as_tuple();
+                format!("{start}-{end}")
+            }
             None => "*".to_owned(),
         };
         let base = format!("entity={entity}|scope={scope}|fact={fact}|clock={clock}");

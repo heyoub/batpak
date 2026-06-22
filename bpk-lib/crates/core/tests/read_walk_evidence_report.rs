@@ -239,7 +239,7 @@ fn read_walk_report_round_trips_through_canonical_encoding() -> TestResult {
             .with_fact(batpak::coordinate::KindFilter::Exact(EventKind::custom(
                 0xE, 0x41,
             )))
-            .with_clock_range((0, 9)),
+            .with_clock_range(ClockRange::new(0, 9).expect("valid clock range")),
         limit: Some(3),
         include_proof_refs: true,
         freshness_intent: Freshness::MaybeStale { max_stale_ms: 25 },

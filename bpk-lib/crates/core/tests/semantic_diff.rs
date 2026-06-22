@@ -200,7 +200,13 @@ fn capture_snapshot<State: batpak::store::StoreState>(
         .map(|c| {
             (
                 *c,
-                summarize_entries(store, store.query(&Region::all().with_fact_category(*c))),
+                summarize_entries(
+                    store,
+                    store.query(
+                        &Region::all()
+                            .with_fact_category(EventCategory::new(*c).expect("valid category")),
+                    ),
+                ),
             )
         })
         .collect();
