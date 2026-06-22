@@ -1,6 +1,3 @@
-// justifies: INV-ALLOW-IS-DESIGN; refbat reference host intentionally emits machine-readable rendezvous lines and local status messages.
-#![allow(clippy::print_stdout, clippy::print_stderr)]
-
 use std::io::Write as _;
 use std::net::{IpAddr, SocketAddr, TcpListener};
 use std::path::PathBuf;
@@ -90,7 +87,9 @@ fn serve(args: &ServeArgs) -> Result<()> {
         ));
     }
     if args.allow_non_loopback && !is_loopback(addr.ip()) {
-        eprintln!(
+        let mut stderr = std::io::stderr().lock();
+        let _ = writeln!(
+            stderr,
             "refbat: warning: binding non-loopback address {addr}; reference host only, not a product daemon"
         );
     }
@@ -135,7 +134,9 @@ fn serve(args: &ServeArgs) -> Result<()> {
     let stats = serve_tcp_listener(listener, &mut core, &config, &shutdown)
         .context("netbat::serve_tcp_listener")?;
 
-    eprintln!(
+    let mut stderr = std::io::stderr().lock();
+    let _ = writeln!(
+        stderr,
         "refbat: shutdown — accepted={}, served={}, failed={}, shutdown_requested={}",
         stats.accepted_connections,
         stats.served_requests,

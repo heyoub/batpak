@@ -78,7 +78,7 @@ fn file_size_pressure_rejects_oversized_production_file() {
         .collect::<String>();
     let path = write_file(&repo, rel, &at_cap);
     let mut cache = SourceCache::new(&repo);
-    check_rust_file_size_pressure_over(&repo, &[path.clone()], &mut cache)
+    check_rust_file_size_pressure_over(&repo, std::slice::from_ref(&path), &mut cache)
         .expect("at-cap production file is accepted");
 
     // RED: one nonblank line over the cap fails.
@@ -115,7 +115,7 @@ fn inline_test_island_pressure_rejects_oversized_island() {
     // GREEN: a small inline `mod tests` island is well within the budget.
     let path = write_file(&repo, rel, &file_with_test_island(10));
     let mut cache = SourceCache::new(&repo);
-    check_inline_test_island_pressure_over(&repo, &[path.clone()], &mut cache)
+    check_inline_test_island_pressure_over(&repo, std::slice::from_ref(&path), &mut cache)
         .expect("small inline test island is accepted");
 
     // RED: an island whose body exceeds the absolute budget fails.
@@ -154,7 +154,7 @@ fn dead_code_silencers_reject_dead_code_allow() {
         ),
     );
     let mut cache = SourceCache::new(&repo);
-    check_no_dead_code_silencers_over(&repo, &[path.clone()], &mut cache)
+    check_no_dead_code_silencers_over(&repo, std::slice::from_ref(&path), &mut cache)
         .expect("sibling unused_imports allow is accepted");
 
     // RED: a `dead_code` silencer is forbidden and not allowlisted.
@@ -193,7 +193,7 @@ fn allow_justifications_rejects_unanchored_allow() {
     );
     let path = write_file(&repo, rel, &justified);
     let mut cache = SourceCache::new(&repo);
-    check_allow_justifications_over(&repo, &[path.clone()], &mut cache)
+    check_allow_justifications_over(&repo, std::slice::from_ref(&path), &mut cache)
         .expect("anchored, prose-bearing justifies is accepted");
 
     // RED: the same allow with NO `// justifies:` line fails.
@@ -251,7 +251,8 @@ fn function_complexity_rejects_over_budget_function() {
     let path = write_file(&repo, rel, &complexity_fixture(false));
     let mut cache = SourceCache::new(&repo);
     let measured =
-        crate::complexity::collect_functions(&repo, &[path.clone()], &mut cache).expect("collect");
+        crate::complexity::collect_functions(&repo, std::slice::from_ref(&path), &mut cache)
+            .expect("collect");
     crate::complexity::enforce(&measured, &[]).expect("within-budget fns pass");
 
     // RED: add an over-budget fn; with no allowlist it is reported.
@@ -316,7 +317,8 @@ fn no_wallclock_asserts_rejects_elapsed_assertion() {
     let path = write_file(&repo, rel, &wallclock_fixture(false));
     let mut cache = SourceCache::new(&repo);
     let offenders =
-        crate::wallclock::collect_offenders(&repo, &[path.clone()], &mut cache).expect("collect");
+        crate::wallclock::collect_offenders(&repo, std::slice::from_ref(&path), &mut cache)
+            .expect("collect");
     assert!(
         offenders.is_empty(),
         "logical-assert test is not an offender: {offenders:?}"

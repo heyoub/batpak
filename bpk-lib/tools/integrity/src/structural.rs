@@ -13,6 +13,7 @@ use crate::{
 };
 use anyhow::{anyhow, bail, Result};
 use std::collections::BTreeSet;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use syn::spanned::Spanned;
 
@@ -111,7 +112,8 @@ pub(crate) fn run() -> Result<()> {
         Ok(crate::receipts::GateWork::new(1, 1, inputs))
     })?;
 
-    println!("structural-check: ok");
+    let mut out = std::io::stdout().lock();
+    let _ = writeln!(out, "structural-check: ok");
     Ok(())
 }
 
@@ -446,8 +448,9 @@ fn check_event_payload_frozen_fixtures(
         }
     }
 
+    let mut out = std::io::stdout().lock();
     for warning in &warnings {
-        println!("{warning}");
+        let _ = writeln!(out, "{warning}");
     }
     Ok(())
 }
@@ -531,9 +534,12 @@ fn parse_batpak_kind(attrs: &[syn::Attribute]) -> Option<(u8, u16)> {
         Ok(())
     })
     .ok()?;
-    // justifies: crates/macros/src/event_payload.rs already validates category fits 4 bits and type_id fits 12 bits, so these casts mirror that bounded narrowing.
-    #[allow(clippy::cast_possible_truncation)]
-    Some((category? as u8, type_id? as u16))
+    // crates/macros/src/event_payload.rs already validates category fits 4 bits
+    // and type_id fits 12 bits; try_from mirrors that bounded narrowing and
+    // drops the value (None) if a malformed attribute somehow exceeds it.
+    let category = u8::try_from(category?).ok()?;
+    let type_id = u16::try_from(type_id?).ok()?;
+    Some((category, type_id))
 }
 
 /// A fixture for `(category, type_id)` exists when any `<cat>_<type_id>__v*.hex`

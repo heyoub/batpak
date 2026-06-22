@@ -283,9 +283,10 @@ impl EventDescriptorRegistration {
         let fixture_value = (self.fixture_json)().ok_or(ManifestBuildError::FixtureJson {
             rust_type: self.rust_type,
         })?;
-        // justifies: ADR-0010, src/event/kind.rs; kind_bits upper nibble fits in u8 by construction so narrowing into u8 cannot truncate
-        #[allow(clippy::cast_possible_truncation)]
-        let category = (self.kind_bits >> 12) as u8;
+        // kind_bits upper nibble is at most 0xF (4 bits) by construction, so the
+        // shifted value always fits in u8; try_from documents that bound.
+        let category = u8::try_from(self.kind_bits >> 12)
+            .expect("kind_bits upper nibble fits in u8 by construction");
         let type_id = self.kind_bits & 0x0FFF;
         Ok(EventDescriptor {
             name: self.schema_ref.to_owned(),

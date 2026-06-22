@@ -89,20 +89,18 @@ pub fn find_kind_collisions() -> Vec<EventKindCollision> {
 ///
 /// Panics when more than one registered payload type uses the same
 /// `(category, type_id)` pair in the current binary.
-// justifies: INV-TEST-PANIC-AS-ASSERTION; this proc-macro support assertion is called from generated tests in crates/macros/src/lib.rs and must fail by panicking when duplicate EventKind registrations are present.
-#[allow(clippy::panic)]
 pub fn assert_no_kind_collisions() {
-    if let Some(collision) = find_kind_collisions().into_iter().next() {
-        panic!(
-            "batpak EventKind collision detected.\n\
-             Types `{prior}` and `{ty}` share the same (category, type_id) \
-             pair (kind_bits = 0x{bits:04X}).\n\
-             Each EventPayload type must have a unique kind within a binary.",
-            prior = collision.first_type_name,
-            ty = collision.second_type_name,
-            bits = collision.kind_bits,
-        );
-    }
+    let first = find_kind_collisions().into_iter().next();
+    assert!(
+        first.is_none(),
+        "batpak EventKind collision detected.\n\
+         Types `{prior}` and `{ty}` share the same (category, type_id) \
+         pair (kind_bits = 0x{bits:04X}).\n\
+         Each EventPayload type must have a unique kind within a binary.",
+        prior = first.as_ref().map_or("", |c| c.first_type_name),
+        ty = first.as_ref().map_or("", |c| c.second_type_name),
+        bits = first.as_ref().map_or(0, |c| c.kind_bits),
+    );
 }
 
 /// Scan all `EventPayload` registrations in the current binary for kind collisions.
