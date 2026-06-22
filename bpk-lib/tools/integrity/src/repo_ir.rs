@@ -22,8 +22,8 @@
 //!   6. docs traceability     — `invariants.yaml` catalog (id, witness_test).
 //!
 //! The fused fold-runner ([`run_fitness`]) applies every registered [`Fitness`]
-//! in a SINGLE pass over the IR; [`run_fitness_separately`] runs each fitness in
-//! its own pass. The metacircular law [`tests::run_fused_equals_run_separate`]
+//! in a SINGLE pass over the IR; `run_fitness_separately` runs each fitness in
+//! its own pass. The metacircular law `tests::run_fused_equals_run_separate`
 //! asserts the two produce identical findings (order-independent) for ≥2 facts —
 //! the gauntlet's own fold fusion is itself tested, exactly as item 1a does for
 //! projections.

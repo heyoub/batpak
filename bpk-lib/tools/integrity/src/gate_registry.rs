@@ -3,7 +3,7 @@
 //! Every gauntlet gate is listed here with whether it has BLOCKING AUTHORITY
 //! (its `Err` fails a real CI run on the default PR path) and, if so, the
 //! anti-vacuous RED FIXTURE test that proves the gate actually flags a planted
-//! violation. The law, enforced by [`tests::no_blocking_gate_without_a_red_fixture`]:
+//! violation. The law, enforced by `tests::no_blocking_gate_without_a_red_fixture`:
 //!
 //!   > No gate may carry `has_blocking_authority: true` without naming an
 //!   > EXISTING, ANTI-VACUOUS `red_fixture_test`.
