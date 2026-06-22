@@ -53,7 +53,9 @@ fn frames_then_sdx3_footer(payloads: &[&str]) -> (Vec<u8>, u64) {
             correlation_id: 1,
             causation_id: 0,
         };
-        collector.record(entry, "entity:test", "scope:test");
+        collector
+            .record(entry, "entity:test", "scope:test")
+            .expect("intern test strings");
     }
     let frames_end = bytes.len() as u64;
     let mut cursor = Cursor::new(&mut bytes);

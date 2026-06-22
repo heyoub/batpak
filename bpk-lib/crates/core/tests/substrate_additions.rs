@@ -12,7 +12,7 @@ use batpak::store::{
     ReceiptVerificationError, SigningDowngradeBody, SigningDowngradeReason,
     SigningExtensionNamespace, Store, StoreConfig, SIGNING_DOWNGRADE_SCHEMA_VERSION,
 };
-use batpak::store::{DenialReceipt, SigningKey};
+use batpak::store::{DenialReceipt, DenialRequest, SigningKey};
 use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use tempfile::TempDir;
@@ -174,15 +174,15 @@ fn caller_supplied_receipt_extensions_flow_through_append_paths() {
     gates.push(DenyGate);
     let failing = Denial::new("deny_gate", "blocked");
     let denial_receipt = store
-        .append_denial(
-            &coord,
-            kind,
-            &gates,
-            &failing,
-            Some([0xA5; 32]),
-            Some("pipeline:extension".to_owned()),
-            AppendOptions::new().with_extension(denial_key.clone(), vec![10]),
-        )
+        .append_denial(DenialRequest {
+            coord: &coord,
+            proposed_kind: kind,
+            gate_set: &gates,
+            failing: &failing,
+            proposed_content_hash: Some([0xA5; 32]),
+            pipeline_id: Some("pipeline:extension".to_owned()),
+            options: AppendOptions::new().with_extension(denial_key.clone(), vec![10]),
+        })
         .expect("append denial");
     assert_eq!(denial_receipt.extensions.get(&denial_key), Some(&vec![10]));
     assert!(store.verify_denial_receipt(&denial_receipt));
@@ -374,17 +374,17 @@ fn assert_receipt_extensions_survive_close_reopen_case(
         gates.push(DenyGate);
         let failing = Denial::new("deny_gate", "blocked");
         store
-            .append_denial(
-                &coord,
-                kind,
-                &gates,
-                &failing,
-                Some([0x5A; 32]),
-                Some("pipeline:reopen".to_owned()),
-                AppendOptions::new()
+            .append_denial(DenialRequest {
+                coord: &coord,
+                proposed_kind: kind,
+                gate_set: &gates,
+                failing: &failing,
+                proposed_content_hash: Some([0x5A; 32]),
+                pipeline_id: Some("pipeline:reopen".to_owned()),
+                options: AppendOptions::new()
                     .with_idempotency(batpak::id::IdempotencyKey::from(0xE3))
                     .with_extension(denial_key.clone(), vec![3]),
-            )
+            })
             .expect("append denial");
         store.close().expect("close store");
     }
@@ -435,17 +435,17 @@ fn assert_receipt_extensions_survive_close_reopen_case(
     gates.push(DenyGate);
     let failing = Denial::new("deny_gate", "blocked");
     let denial_replay = reopened
-        .append_denial(
-            &coord,
-            kind,
-            &gates,
-            &failing,
-            Some([0x5A; 32]),
-            Some("pipeline:reopen".to_owned()),
-            AppendOptions::new()
+        .append_denial(DenialRequest {
+            coord: &coord,
+            proposed_kind: kind,
+            gate_set: &gates,
+            failing: &failing,
+            proposed_content_hash: Some([0x5A; 32]),
+            pipeline_id: Some("pipeline:reopen".to_owned()),
+            options: AppendOptions::new()
                 .with_idempotency(batpak::id::IdempotencyKey::from(0xE3))
                 .with_extension(denial_key.clone(), vec![9]),
-        )
+        })
         .expect("replay denial");
     assert_eq!(denial_replay.extensions.get(&denial_key), Some(&vec![3]));
     assert!(reopened.verify_denial_receipt(&denial_replay));
@@ -848,15 +848,15 @@ fn signed_receipts_round_trip() {
     );
 
     let denial_receipt: DenialReceipt = store
-        .append_denial(
-            &coord,
-            kind,
-            &gates,
-            &failing,
-            Some([0xEF; 32]),
-            Some("pipeline:test".to_owned()),
-            batpak::store::AppendOptions::new(),
-        )
+        .append_denial(DenialRequest {
+            coord: &coord,
+            proposed_kind: kind,
+            gate_set: &gates,
+            failing: &failing,
+            proposed_content_hash: Some([0xEF; 32]),
+            pipeline_id: Some("pipeline:test".to_owned()),
+            options: batpak::store::AppendOptions::new(),
+        })
         .expect("append denial");
     assert_eq!(
         store

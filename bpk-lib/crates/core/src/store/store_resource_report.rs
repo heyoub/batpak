@@ -71,9 +71,6 @@ fn restart_policy_shape(policy: &RestartPolicy) -> StoreResourceRestartPolicySha
             max_restarts: *max_restarts,
             within_ms: *within_ms,
         },
-        // justifies: forward compatible default for future RestartPolicy variants on this non exhaustive enum without changing stable resource evidence shape; anchor src/store/write/writer.rs
-        #[allow(unreachable_patterns)]
-        _ => StoreResourceRestartPolicyShape::Once,
     }
 }
 

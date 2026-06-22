@@ -35,7 +35,9 @@ fn footer_bytes(prefix_len: usize, entries: &[SidxEntry]) -> Vec<u8> {
     let mut collector = SidxEntryCollector::new();
     for (idx, entry) in entries.iter().cloned().enumerate() {
         let entity = format!("entity:{idx}");
-        collector.record(entry, &entity, "scope:test");
+        collector
+            .record(entry, &entity, "scope:test")
+            .expect("intern test strings");
     }
     collector
         .write_footer(&mut cursor, 7)

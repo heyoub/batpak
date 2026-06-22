@@ -195,23 +195,12 @@ impl WriterState<'_> {
                 emit_envelope,
             },
         );
-        self.sidx_collector.record(
+        self.record_commit_index_artifacts(
             committed.sidx_entry,
-            committed.index_entry.coord.entity(),
-            committed.index_entry.coord.scope(),
-        );
-        // Record the durable idempotency entry on every successful KEYED
-        // append, capturing exactly the no-op reconstruction tuple. This
-        // survives retention compaction and cold-start independent of the
-        // event frame. justifies: INV-IDEMPOTENCY-DURABLE-WINDOW
-        if guards.idempotency_key.is_some() {
-            self.index
-                .idemp
-                .record(crate::store::index::idemp::IdempEntry::from_index_entry(
-                    &committed.index_entry,
-                    global_seq,
-                ));
-        }
+            &committed.index_entry,
+            guards.idempotency_key.is_some(),
+            global_seq,
+        )?;
         self.index.insert(committed.index_entry);
 
         debug!(event_id = %event.header.event_id, clock = clock, "append committed");
@@ -242,6 +231,41 @@ impl WriterState<'_> {
         }
 
         Ok(receipt)
+    }
+
+    /// Record the SIDX index entry and, for a keyed append, the durable
+    /// idempotency entry. Behavior-preserving extraction of `handle_append`'s
+    /// former inline block; isolating the fallible SIDX intern here keeps
+    /// `handle_append`'s branch count within its complexity ratchet.
+    ///
+    /// # Errors
+    /// Returns [`StoreError::InternerExhausted`] if the SIDX string table cannot
+    /// intern the entity/scope (the `u32` index domain is exhausted).
+    fn record_commit_index_artifacts(
+        &mut self,
+        sidx_entry: crate::store::segment::sidx::SidxEntry,
+        index_entry: &crate::store::index::IndexEntry,
+        has_idempotency_key: bool,
+        global_seq: u64,
+    ) -> Result<(), StoreError> {
+        self.sidx_collector.record(
+            sidx_entry,
+            index_entry.coord.entity(),
+            index_entry.coord.scope(),
+        )?;
+        // Record the durable idempotency entry on every successful KEYED
+        // append, capturing exactly the no-op reconstruction tuple. This
+        // survives retention compaction and cold-start independent of the
+        // event frame. justifies: INV-IDEMPOTENCY-DURABLE-WINDOW
+        if has_idempotency_key {
+            self.index
+                .idemp
+                .record(crate::store::index::idemp::IdempEntry::from_index_entry(
+                    index_entry,
+                    global_seq,
+                ));
+        }
+        Ok(())
     }
 
     /// Idempotency short-circuit phase of [`Self::handle_append`]: for a keyed

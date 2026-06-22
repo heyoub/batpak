@@ -68,7 +68,7 @@ mod write_api;
 
 pub use append::{
     AppendOptions, AppendPositionHint, AppendReceipt, BatchAppendItem, CausationRef,
-    CompactionConfig, CompactionStrategy, DenialReceipt, EncodedBytes, ExtensionKey,
+    CompactionConfig, CompactionStrategy, DenialReceipt, DenialRequest, EncodedBytes, ExtensionKey,
     ExtensionKeyError, ReceiptExtensionKey, ReceiptExtensionNamespace, ReceiptExtensionValue,
     RetentionPredicate, SigningDowngradeBody, SigningDowngradeReason, SigningExtensionNamespace,
     SIGNING_DOWNGRADE_SCHEMA_VERSION,
@@ -178,7 +178,6 @@ use crate::coordinate::{Coordinate, KindFilter, Region};
 use crate::event::{
     self, EventKind, EventPayload, EventPayloadValidation, EventSourced, StoredEvent,
 };
-use crate::guard::{Denial, GateSet};
 use index::StoreIndex;
 use open::timestamp_us_for_hlc;
 use parking_lot::Mutex;
@@ -209,8 +208,9 @@ pub(crate) fn recv_writer_reply<T>(
 
 /// Store: the runtime. Sync API. Send + Sync.
 /// Invariant 2: all methods are sync; async integration lives in channels.
-// justifies: INV-STORE-SYNC-ONLY, ADR-0001; async-store is not a declared feature in src/store/mod.rs; this compile_error guard must survive cargo check by silencing the unexpected cfg name
-#[allow(unexpected_cfgs)]
+// async-store is intentionally undeclared in Cargo.toml; build.rs registers the
+// cfg via `cargo::rustc-check-cfg` so this INV-STORE-SYNC-ONLY guard (ADR-0001)
+// compiles warning-free in src/store/mod.rs.
 #[cfg(feature = "async-store")]
 compile_error!("INVARIANT 2: Store API is sync. Use spawn_blocking or flume recv_async.");
 

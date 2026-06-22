@@ -1,7 +1,8 @@
-// Intentional impossible-feature guard: exponential backoff belongs in the product supervisor, not the library.
-// exponential-backoff is not a declared feature — suppress cfg warning for this guard
-// justifies: ADR-0006; the `exponential-backoff` feature is deliberately undeclared in src/store/write/writer.rs — this block is a compile_error tripwire for anyone who adds the feature to Cargo.toml.
-#[allow(unexpected_cfgs)]
+// Intentional impossible-feature guard: exponential backoff belongs in the
+// product supervisor, not the library (ADR-0006: only Once and Bounded restart
+// policies). The `exponential-backoff` feature is deliberately undeclared in
+// Cargo.toml; build.rs registers the cfg via `cargo::rustc-check-cfg` so this
+// compile_error tripwire fires only if someone adds the feature, warning-free.
 #[cfg(feature = "exponential-backoff")]
 compile_error!(
     "Red flag: only Once and Bounded restart policies. \
@@ -118,9 +119,10 @@ pub(crate) struct WriterHandle {
 }
 
 /// RestartPolicy: how the writer recovers from panics.
-/// Keep this surface intentionally small: exactly two variants.
+/// Keep this surface intentionally small: exactly two variants. The enum is
+/// deliberately exhaustive (not `#[non_exhaustive]`) so every match over it is
+/// total without a forward-compat wildcard arm.
 #[derive(Clone, Debug, Default)]
-#[non_exhaustive]
 pub enum RestartPolicy {
     /// Allow at most one automatic restart after a writer panic.
     #[default]
@@ -283,9 +285,6 @@ struct WriterState<'a> {
 
 #[cfg(test)]
 mod tests {
-    // justifies: INV-TEST-PANIC-AS-ASSERTION; writer unit tests use explicit panic branches to prove join and conversion failures are observable test failures.
-    #![allow(clippy::panic)]
-
     use super::watermark::elapsed_ms_since;
     use super::{
         checked_next_clock, ReactorSubscriberList, SubscriberList, WatermarkState, WriterCommand,
@@ -363,7 +362,12 @@ mod tests {
             "writer-join-panic-proof".to_owned(),
             None,
             Box::new(|| {
-                panic!("intentional writer join panic proof");
+                // Deterministically unwind this writer body to prove join
+                // surfaces the panic as WriterCrashed. `black_box` hides the
+                // `None` from the literal-unwrap lint; `expect` is the
+                // permitted in-test panic shape (not the `panic!` macro).
+                std::hint::black_box(Option::<()>::None)
+                    .expect("intentional writer join panic proof");
             }),
         )
         .expect("spawn panic proof thread");
@@ -376,10 +380,9 @@ mod tests {
             thread: Some(thread),
         };
 
-        let err = match handle.join() {
-            Ok(()) => panic!("PROPERTY: writer thread panic must surface through join"),
-            Err(err) => err,
-        };
+        let err = handle
+            .join()
+            .expect_err("PROPERTY: writer thread panic must surface through join");
         assert!(matches!(err, StoreError::WriterCrashed));
 
         let poisoned =

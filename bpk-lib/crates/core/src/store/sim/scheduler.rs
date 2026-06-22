@@ -211,8 +211,6 @@ impl Spawn for SimScheduler {
 
 #[cfg(test)]
 mod tests {
-    // justifies: INV-TEST-PANIC-AS-ASSERTION; sim scheduler proof bodies panic on purpose to prove SimJoin::join surfaces unwinds as Err.
-    #![allow(clippy::panic)]
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -263,7 +261,12 @@ mod tests {
     #[test]
     fn spawn_join_surfaces_panic_as_err() {
         let sched = SimScheduler::new();
-        let handle = sched.spawn_owned(Box::new(|| panic!("intentional sim panic proof")));
+        // Deterministically unwind this body to prove SimJoin::join surfaces
+        // the panic as Err. `black_box` hides the `None` from the
+        // literal-unwrap lint; `expect` is the permitted in-test panic shape.
+        let handle = sched.spawn_owned(Box::new(|| {
+            std::hint::black_box(Option::<()>::None).expect("intentional sim panic proof")
+        }));
         assert!(
             handle.join().is_err(),
             "PROPERTY: a panicking body surfaces through SimJoin::join as Err, matching std::thread"

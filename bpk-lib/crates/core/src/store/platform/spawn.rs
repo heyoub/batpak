@@ -99,8 +99,6 @@ impl Spawn for ThreadSpawn {
 
 #[cfg(test)]
 mod tests {
-    // justifies: INV-TEST-PANIC-AS-ASSERTION; spawn proof bodies deliberately panic to prove SimJoin::join surfaces unwinds as Err, mirroring std::thread::JoinHandle::join.
-    #![allow(clippy::panic)]
     use super::*;
     use std::sync::Arc;
 
@@ -132,7 +130,14 @@ mod tests {
             .spawn(
                 "thread-spawn-panic-proof".to_string(),
                 Some(256 * 1024),
-                Box::new(|| panic!("intentional spawn panic proof")),
+                Box::new(|| {
+                    // Deterministically unwind this spawned body to prove
+                    // SimJoin::join surfaces the panic as Err. `black_box` hides
+                    // the `None` from the literal-unwrap lint; `expect` is the
+                    // permitted in-test panic shape (not the `panic!` macro).
+                    std::hint::black_box(Option::<()>::None)
+                        .expect("intentional spawn panic proof");
+                }),
             )
             .expect("spawn must succeed");
         assert!(

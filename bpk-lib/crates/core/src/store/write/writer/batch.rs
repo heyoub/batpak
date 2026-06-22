@@ -473,7 +473,7 @@ impl WriterState<'_> {
                 sidx_entry.clone(),
                 index_entry.coord.entity(),
                 index_entry.coord.scope(),
-            );
+            )?;
         }
 
         #[cfg(feature = "dangerous-test-hooks")]

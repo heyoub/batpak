@@ -10,7 +10,7 @@
 use batpak::guard::{Denial, Gate, GateSet};
 use batpak::pipeline::Proposal;
 use batpak::prelude::*;
-use batpak::store::SigningKey;
+use batpak::store::{DenialRequest, SigningKey};
 
 #[derive(Clone, serde::Serialize, serde::Deserialize, EventPayload)]
 #[batpak(category = 6, type_id = 1)]
@@ -69,15 +69,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(denial) => denial,
     };
 
-    let denial_receipt = store.append_denial(
-        &coord,
-        SettingChanged::KIND,
-        &gates,
-        &denial,
-        Some(append_receipt.content_hash),
-        Some("example:signed_receipts".to_owned()),
-        AppendOptions::new(),
-    )?;
+    let denial_receipt = store.append_denial(DenialRequest {
+        coord: &coord,
+        proposed_kind: SettingChanged::KIND,
+        gate_set: &gates,
+        failing: &denial,
+        proposed_content_hash: Some(append_receipt.content_hash),
+        pipeline_id: Some("example:signed_receipts".to_owned()),
+        options: AppendOptions::new(),
+    })?;
     assert!(store.verify_denial_receipt(&denial_receipt));
 
     let denial_event = store.read_raw(denial_receipt.event_id)?;

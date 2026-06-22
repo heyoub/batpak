@@ -497,8 +497,6 @@ impl StoreIndex {
     ///   (no disk I/O), which is significantly faster than the previous
     ///   protocol of clearing the live index and replaying segments under
     ///   reader visibility.
-    // justifies: src/store/index/restore.rs builds the fresh index from u32-backed routing runs, so these width checks are supported-target invariants.
-    #[allow(clippy::expect_used)]
     pub(crate) fn replace_contents_from_fresh(
         &self,
         fresh: StoreIndex,

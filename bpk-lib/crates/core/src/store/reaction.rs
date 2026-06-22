@@ -124,11 +124,9 @@ impl Default for ReactionBatch {
 }
 
 #[cfg(test)]
-// Unit tests exercise `pub(crate) flush`; .unwrap() + panic! are standard
-// test idioms here and are gated by #[cfg(test)] so they never reach
-// non-test builds.
-// justifies: INV-TEST-PANIC-AS-ASSERTION; test-only module in src/store/reaction.rs where `.unwrap()` and `panic!` are the idiomatic assertion shape and never reach production builds.
-#[allow(clippy::unwrap_used, clippy::panic)]
+// Unit tests exercise `pub(crate) flush`; setup uses `.expect(..)` so each
+// failure carries a message, and they are gated by #[cfg(test)] so they never
+// reach non-test builds.
 mod tests {
     //! Internal unit tests for `ReactionBatch::flush`. `flush` is `pub(crate)`
     //! because users never call it directly — the typed-reactor loop (T4b)
@@ -175,14 +173,16 @@ mod tests {
         let (store, _dir) = open_store();
         let source = store
             .append_typed(
-                &Coordinate::new("entity:reaction-internal-src", "scope:test").unwrap(),
+                &Coordinate::new("entity:reaction-internal-src", "scope:test")
+                    .expect("valid coordinate"),
                 &InternalA { n: 1 },
             )
             .expect("source append");
 
         let before = store.stats().global_sequence;
 
-        let target_coord = Coordinate::new("entity:reaction-internal-tgt", "scope:test").unwrap();
+        let target_coord = Coordinate::new("entity:reaction-internal-tgt", "scope:test")
+            .expect("valid coordinate");
         let mut batch = ReactionBatch::new();
         batch
             .push_typed(
@@ -190,7 +190,7 @@ mod tests {
                 &InternalA { n: 2 },
                 CausationRef::None,
             )
-            .unwrap();
+            .expect("push reaction item into batch");
         batch
             .push_typed(
                 target_coord.clone(),
@@ -199,7 +199,7 @@ mod tests {
                 },
                 CausationRef::PriorItem(0),
             )
-            .unwrap();
+            .expect("push reaction item into batch");
         assert_eq!(batch.len(), 2);
 
         let receipts = batch
@@ -239,15 +239,17 @@ mod tests {
         let (store, _dir) = open_store();
         let source = store
             .append_typed(
-                &Coordinate::new("entity:reaction-chain-src", "scope:test").unwrap(),
+                &Coordinate::new("entity:reaction-chain-src", "scope:test")
+                    .expect("valid coordinate"),
                 &InternalA { n: 10 },
             )
             .expect("source");
-        let target = Coordinate::new("entity:reaction-chain-tgt", "scope:test").unwrap();
+        let target =
+            Coordinate::new("entity:reaction-chain-tgt", "scope:test").expect("valid coordinate");
         let mut batch = ReactionBatch::new();
         batch
             .push_typed(target.clone(), &InternalA { n: 11 }, CausationRef::None)
-            .unwrap();
+            .expect("push reaction item into batch");
         batch
             .push_typed(
                 target.clone(),
@@ -256,7 +258,7 @@ mod tests {
                 },
                 CausationRef::PriorItem(0),
             )
-            .unwrap();
+            .expect("push reaction item into batch");
         let receipts = batch
             .flush(
                 &store,

@@ -242,6 +242,31 @@ pub struct DenialReceipt {
     pub extensions: BTreeMap<ExtensionKey, EncodedBytes>,
 }
 
+/// Inputs for [`Store::append_denial`](crate::store::Store::append_denial): the
+/// gate denial to persist as a normal per-entity chain event (a `SYSTEM_DENIAL`
+/// audit receipt).
+///
+/// Bundling the inputs into one request keeps the public denial-append surface a
+/// single self-describing argument instead of a positional argument list.
+/// Borrowed fields keep the call zero-copy; owned fields (`pipeline_id`,
+/// `options`) are moved into the request.
+pub struct DenialRequest<'a, Ctx> {
+    /// Per-entity coordinate the denial event is appended to.
+    pub coord: &'a Coordinate,
+    /// The kind the rejected write proposed (recorded in the denial payload).
+    pub proposed_kind: EventKind,
+    /// The gate set that produced the denial; used to build the denial trace.
+    pub gate_set: &'a crate::guard::GateSet<Ctx>,
+    /// The specific gate denial being recorded.
+    pub failing: &'a crate::guard::Denial,
+    /// Optional content hash of the rejected payload, if it was computed.
+    pub proposed_content_hash: Option<[u8; 32]>,
+    /// Optional pipeline identifier the rejected write flowed through.
+    pub pipeline_id: Option<String>,
+    /// Append options (e.g. extensions, durability gate) for the denial event.
+    pub options: AppendOptions,
+}
+
 /// Encoded extension payload bytes.
 pub type EncodedBytes = Vec<u8>;
 

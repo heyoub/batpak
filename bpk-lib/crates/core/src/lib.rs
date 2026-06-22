@@ -1,6 +1,7 @@
 #![deny(missing_docs)]
-// justifies: INV-STORE-SYNC-ONLY, ADR-0001; impossible-feature guards in src/lib.rs (async-store, sha256) use cfg attributes for features intentionally not declared in Cargo.toml; item-level allow is unreliable for cfg checks on some toolchain versions so we silence at crate root.
-#![allow(unexpected_cfgs)]
+// The impossible-feature guards below (async-store, sha256) reference features
+// intentionally not declared in Cargo.toml; build.rs registers them via
+// `cargo::rustc-check-cfg` so rustc recognizes them without any cfg-lint allow.
 // justifies: docs.rs builds with --cfg docsrs from Cargo.toml so feature-gated public API can show doc(cfg) badges; local stable docs add batpak_stable_docs to avoid nightly-only attributes.
 #![cfg_attr(all(docsrs, not(batpak_stable_docs)), feature(doc_cfg))]
 // justifies: src/lib.rs makes production expect() sites deliberate invariant escape hatches instead of ambient convenience panics.
@@ -171,8 +172,9 @@ pub use crate::event::{EventPayload, EventSourced, MultiReactive};
 pub use batpak_macros::{EventPayload, EventSourced, MultiEventReactor};
 
 /// compile_error guards for impossible configurations:
-// justifies: INV-STORE-SYNC-ONLY, ADR-0001; async-store is not a declared feature in src/lib.rs; this guard must survive cargo check without the crate-level lint silencing the cfg reference
-#[allow(unexpected_cfgs)]
+// async-store is intentionally undeclared in Cargo.toml; build.rs registers the
+// cfg via `cargo::rustc-check-cfg` so this INV-STORE-SYNC-ONLY guard (ADR-0001)
+// compiles warning-free in src/lib.rs.
 #[cfg(feature = "async-store")]
 compile_error!(
     "INVARIANT 2: batpak does not have an async Store API. \
@@ -180,8 +182,9 @@ compile_error!(
      See: src/store/delivery/subscription.rs for the async pattern."
 );
 
-// justifies: INV-STORE-SYNC-ONLY; sha256 is not a declared feature in src/lib.rs; this compile_error guard requires the cfg reference to reach codegen
-#[allow(unexpected_cfgs)]
+// sha256 is intentionally undeclared in Cargo.toml; build.rs registers the cfg
+// via `cargo::rustc-check-cfg` so this blake3-only guard (INV-STORE-SYNC-ONLY)
+// compiles warning-free in src/lib.rs.
 #[cfg(feature = "sha256")]
 compile_error!(
     "INVARIANT 5: blake3 is the only hash. No HashAlgorithm enum. \

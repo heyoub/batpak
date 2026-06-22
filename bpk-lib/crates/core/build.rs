@@ -50,6 +50,26 @@ struct TypedWaiverEntry {
 // errors instead of cryptic compiler failures. See README.md, MODEL.md,
 // INVARIANTS.md, and CONFORMANCE.md for the current truth hierarchy.
 fn main() {
+    // Register the intentionally-undeclared impossible-feature guard cfgs so
+    // rustc's `unexpected_cfgs` lint recognizes them as known-but-disabled
+    // features instead of warning on the `#[cfg(feature = "...")]` tripwires in
+    // src/lib.rs, src/store/mod.rs, and src/store/write/writer.rs. These three
+    // feature names are deliberately absent from Cargo.toml: each guards a
+    // `compile_error!` that fires only if someone adds the feature, enforcing
+    // INV-STORE-SYNC-ONLY (async-store), blake3-only hashing (sha256), and the
+    // Once/Bounded-only restart policy (exponential-backoff, ADR-0006).
+    // Registering them here lets every guard compile warning-free without any
+    // `#[allow(unexpected_cfgs)]`.
+    for feature in ["async-store", "sha256", "exponential-backoff"] {
+        println!("cargo::rustc-check-cfg=cfg(feature, values(\"{feature}\"))");
+    }
+    // `batpak_stable_docs` is a plain `--cfg` flag (NOT a Cargo feature) set when
+    // building local stable-toolchain docs to avoid the nightly-only `doc_cfg`
+    // attribute (see the `#![cfg_attr(all(docsrs, not(batpak_stable_docs)), ...)]`
+    // in src/lib.rs and the `#[cfg_attr(..., doc(cfg(...)))]` doc badges). Register
+    // it so the cfg-name references compile warning-free without an allow.
+    println!("cargo::rustc-check-cfg=cfg(batpak_stable_docs)");
+
     let repo_invariants_available = repo_invariant_surface_available();
 
     emit_rerun_lines(repo_invariants_available);

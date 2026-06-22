@@ -246,8 +246,6 @@ pub(crate) fn value_from_json(value: &serde_json::Value) -> Result<rmpv::Value, 
 
 #[cfg(test)]
 mod tests {
-    // justifies: INV-EVENT-PAYLOAD-DECODE-BACKCOMPAT; unit tests assert via panic on impossible-by-construction branches in src/event/upcast.rs
-    #![allow(clippy::panic)]
     use super::*;
     use proptest::prelude::*;
     use proptest::test_runner::TestCaseError;
@@ -293,12 +291,14 @@ mod tests {
         rmpv::encode::write_value(&mut bytes, &rmpv::Value::from(42u8)).expect("encode test value");
         bytes.extend_from_slice(&[0xDE, 0xAD, 0xBE, 0xEF]);
 
-        let err = match value_from_msgpack(&bytes) {
-            Ok(_) => panic!("PROPERTY: trailing bytes after a msgpack value must be rejected"),
-            Err(e) => e,
-        };
+        let err = value_from_msgpack(&bytes)
+            .expect_err("PROPERTY: trailing bytes after a msgpack value must be rejected");
+        assert!(
+            matches!(&err, UpcastError::ValueCodec(_)),
+            "expected ValueCodec error, got {err:?}"
+        );
         let UpcastError::ValueCodec(msg) = err else {
-            panic!("expected ValueCodec error, got {err:?}");
+            unreachable!("matches! above already asserted the ValueCodec variant")
         };
         assert!(
             msg.contains("4 trailing byte(s)"),

@@ -263,21 +263,25 @@ impl Store<Open> {
 
     /// WRITE: persist a gate denial as a normal per-entity chain event.
     ///
+    /// Takes a [`DenialRequest`] so the denial-append inputs travel as one
+    /// self-describing argument.
+    ///
     /// # Errors
     /// Returns any serialization or writer error surfaced by the underlying
     /// append path.
-    // justifies: Store::append_denial matches the substrate contract locked in this turn and mirrors the user-requested denial append surface; splitting it would add an extra request object without simplifying src/store/mod.rs.
-    #[allow(clippy::too_many_arguments)]
     pub fn append_denial<Ctx>(
         &self,
-        coord: &Coordinate,
-        proposed_kind: EventKind,
-        gate_set: &GateSet<Ctx>,
-        failing: &Denial,
-        proposed_content_hash: Option<[u8; 32]>,
-        pipeline_id: Option<String>,
-        options: AppendOptions,
+        request: DenialRequest<'_, Ctx>,
     ) -> Result<DenialReceipt, StoreError> {
+        let DenialRequest {
+            coord,
+            proposed_kind,
+            gate_set,
+            failing,
+            proposed_content_hash,
+            pipeline_id,
+            options,
+        } = request;
         let payload =
             gate_set.trace_denial(failing, proposed_kind, proposed_content_hash, pipeline_id);
         // SYSTEM_DENIAL is a reserved kind, so the public funnel would reject
