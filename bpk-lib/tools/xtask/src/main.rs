@@ -1,5 +1,5 @@
-// justifies: INV-ALLOW-IS-DESIGN; xtask is the repository-owned command-line tool and its subcommands intentionally write human and CI status messages to stdout/stderr from tools/xtask/src/main.rs.
-#![allow(clippy::print_stdout, clippy::print_stderr)]
+#[macro_use]
+mod cli_out;
 
 mod bench;
 mod commands;

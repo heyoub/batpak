@@ -61,7 +61,7 @@ pub(crate) fn run(repo_root: &Path, check: bool) -> Result<()> {
              traceability/invariants.yaml. Run `cargo xtask docs` (or \
              `cargo run -p batpak-integrity -- docs-catalog`) to regenerate it.",
         )?;
-        println!(
+        outln!(
             "docs-catalog: ok ({} invariants, catalog block current)",
             invariants.len()
         );
@@ -69,12 +69,12 @@ pub(crate) fn run(repo_root: &Path, check: bool) -> Result<()> {
         if current != next {
             std::fs::write(&md_path, &next)
                 .with_context(|| format!("write {}", md_path.display()))?;
-            println!(
+            outln!(
                 "docs-catalog: regenerated INVARIANTS.md catalog block ({} invariants)",
                 invariants.len()
             );
         } else {
-            println!(
+            outln!(
                 "docs-catalog: INVARIANTS.md already current ({} invariants)",
                 invariants.len()
             );
@@ -179,7 +179,7 @@ pub(crate) fn check_witness_tests(
         )?;
     }
     if !seen_witnessed.is_empty() {
-        println!(
+        outln!(
             "docs-catalog: {} invariant(s) carry a resolved witness_test",
             seen_witnessed.len()
         );

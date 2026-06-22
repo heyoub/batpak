@@ -90,12 +90,12 @@ pub(crate) fn export_ts_manifest(args: &ExportTsManifestArgs) -> Result<()> {
                 args.out.display()
             );
         }
-        println!("export-ts-manifest: {} is current", args.out.display());
+        outln!("export-ts-manifest: {} is current", args.out.display());
         return Ok(());
     }
 
     fs::write(&args.out, content).with_context(|| format!("write {}", args.out.display()))?;
-    println!("export-ts-manifest: wrote {}", args.out.display());
+    outln!("export-ts-manifest: wrote {}", args.out.display());
 
     Ok(())
 }

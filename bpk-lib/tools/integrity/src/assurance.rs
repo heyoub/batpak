@@ -322,15 +322,15 @@ pub(crate) fn check(repo_root: &Path) -> Result<()> {
 
     let unleveled = unleveled_files(repo_root, &entries);
     if unleveled.is_empty() {
-        println!("assurance-level-check: ok (every production file resolves to a declared AL)");
+        outln!("assurance-level-check: ok (every production file resolves to a declared AL)");
     } else {
-        println!(
+        outln!(
             "assurance-level-check: ok ({} unleveled production file(s) default to {} — advisory):",
             unleveled.len(),
             DEFAULT_LEVEL.as_str()
         );
         for rel in &unleveled {
-            println!("  - {rel} [{}]", resolve_level(&entries, rel).as_str());
+            outln!("  - {rel} [{}]", resolve_level(&entries, rel).as_str());
         }
     }
     Ok(())

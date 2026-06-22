@@ -116,7 +116,7 @@ fn record_command(args: FactoryLedgerRecordArgs) -> Result<()> {
 fn list_command(args: &FactoryLedgerListArgs) -> Result<()> {
     let store = open_ledger_store()?;
     for line in collect_list_lines(&store, args.limit)? {
-        println!("{line}");
+        outln!("{line}");
     }
     store.close().context("close factory ledger store")?;
     Ok(())

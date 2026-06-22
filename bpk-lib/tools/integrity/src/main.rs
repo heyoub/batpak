@@ -23,8 +23,9 @@
 //! `structural::check_allow_justifications` on every run.
 //! dead_code silencers are not tolerated in this repo; test-only code uses
 //! `cfg(test)`, unused code is deleted, and shared helpers get restructured.
-// justifies: INV-ALLOW-IS-DESIGN; batpak-integrity is a repository command-line tool and its check subcommands intentionally report human and CI status messages from tools/integrity/src/main.rs.
-#![allow(clippy::print_stdout, clippy::print_stderr)]
+
+#[macro_use]
+mod cli_out;
 
 mod agent_doctor;
 mod agent_surface;
@@ -157,7 +158,7 @@ fn main() -> Result<()> {
         CommandKind::StructuralCheck => structural::run(),
         CommandKind::GauntletReceiptsPresent => {
             let validated = receipts::check_present(gate_registry::RECEIPT_REQUIRED_GATES)?;
-            println!(
+            outln!(
                 "gauntlet-receipts-present: ok ({} non-vacuous receipt(s) validated)",
                 validated.len()
             );
@@ -171,7 +172,7 @@ fn main() -> Result<()> {
         }
         CommandKind::ProductionFlipFixtures => {
             for reference in gate_registry::production_flip_fixtures() {
-                println!("{reference}");
+                outln!("{reference}");
             }
             Ok(())
         }
@@ -231,7 +232,7 @@ fn run_meta_gate(
     let repo_root = repo_surface::repo_root()?;
     let l4_entries = meta_gate::load_l4_entries(&repo_root);
     meta_gate::evaluate(&diff, &l4_entries, &ctx)?;
-    println!("meta-gate: ok (no unapproved weakening detected)");
+    outln!("meta-gate: ok (no unapproved weakening detected)");
     Ok(())
 }
 

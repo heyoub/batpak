@@ -22,41 +22,41 @@ pub(crate) fn host_dev(args: &HostDevArgs) -> Result<()> {
     let bpk_ts = project.join("bpk-ts");
     let manifest_out = bpk_ts.join("batpak.manifest.json");
 
-    println!("host-dev: build refbat + xtask");
+    outln!("host-dev: build refbat + xtask");
     cargo(["build", "-p", "refbat", "-p", "xtask"])?;
 
-    println!("host-dev: pnpm install --frozen-lockfile");
+    outln!("host-dev: pnpm install --frozen-lockfile");
     run_pnpm(&bpk_ts, &["install", "--frozen-lockfile"])?;
 
-    println!("host-dev: export-ts-manifest");
+    outln!("host-dev: export-ts-manifest");
     export_ts_manifest::export_ts_manifest(&ExportTsManifestArgs {
         out: manifest_out.clone(),
         check: false,
     })?;
 
-    println!("host-dev: pnpm -w build (tool bootstrap)");
+    outln!("host-dev: pnpm -w build (tool bootstrap)");
     run_pnpm(&bpk_ts, &["-w", "build"])?;
 
-    println!("host-dev: codegen generate");
+    outln!("host-dev: codegen generate");
     run_pnpm(&bpk_ts, &["--filter", "@batpak/codegen", "run", "generate"])?;
 
-    println!("host-dev: pnpm -w build");
+    outln!("host-dev: pnpm -w build");
     run_pnpm(&bpk_ts, &["-w", "build"])?;
 
     if !args.skip_tests {
-        println!("host-dev: pnpm -w test");
+        outln!("host-dev: pnpm -w test");
         run_pnpm(&bpk_ts, &["-w", "test"])?;
     }
 
-    println!("host-dev: live heartbeat-spike");
+    outln!("host-dev: live heartbeat-spike");
     run_live_spike(&bpk_ts)?;
 
     if !args.skip_determinism {
-        println!("host-dev: determinism check");
+        outln!("host-dev: determinism check");
         check_determinism(&project, &bpk_ts, &manifest_out)?;
     }
 
-    println!("host-dev: ok");
+    outln!("host-dev: ok");
     Ok(())
 }
 

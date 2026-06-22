@@ -33,20 +33,20 @@ pub(crate) fn run(repo_root: &Path) -> Result<()> {
     }
 
     if findings.is_empty() {
-        println!("agent-doctor: ok");
+        outln!("agent-doctor: ok");
         return Ok(());
     }
 
     for finding in &findings {
-        println!("{}", finding.id);
-        println!("violates: {}", finding.violates);
-        println!("why: {}", finding.why);
-        println!("fix: {}", finding.fix);
-        println!("example: {}", finding.example);
+        outln!("{}", finding.id);
+        outln!("violates: {}", finding.violates);
+        outln!("why: {}", finding.why);
+        outln!("fix: {}", finding.fix);
+        outln!("example: {}", finding.example);
         if finding.warning_only {
-            println!("severity: warning");
+            outln!("severity: warning");
         }
-        println!();
+        outln!();
     }
 
     let hard_count = findings
@@ -57,7 +57,7 @@ pub(crate) fn run(repo_root: &Path) -> Result<()> {
         hard_count == 0,
         format!("agent-doctor found {hard_count} blocking issue(s)"),
     )?;
-    println!("agent-doctor: ok with warnings");
+    outln!("agent-doctor: ok with warnings");
     Ok(())
 }
 

@@ -34,10 +34,10 @@ pub(crate) fn scaffold(args: ScaffoldArgs) -> Result<()> {
     copy_dir(&template, &dest)?;
     rewrite_template_references(&dest, args.pattern.template_dir(), &package_name)?;
     rewrite_manifest(&repo_root, &dest.join("Cargo.toml"), &package_name)?;
-    println!("scaffolded {} at {}", args.pattern.as_str(), dest.display());
-    println!("next:");
-    println!("  cd {}", dest.display());
-    println!("  cargo test");
+    outln!("scaffolded {} at {}", args.pattern.as_str(), dest.display());
+    outln!("next:");
+    outln!("  cd {}", dest.display());
+    outln!("  cargo test");
     Ok(())
 }
 

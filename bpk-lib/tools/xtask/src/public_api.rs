@@ -48,7 +48,7 @@ pub(crate) fn public_api(args: PublicApiArgs) -> Result<()> {
         if args.strict {
             bail!("{message}");
         }
-        eprintln!("{message}");
+        errln!("{message}");
         return Ok(());
     }
 
@@ -78,7 +78,7 @@ pub(crate) fn public_api(args: PublicApiArgs) -> Result<()> {
         let output = match run_output(command) {
             Ok(output) => output,
             Err(error) if !args.strict => {
-                eprintln!(
+                errln!(
                     "public-api: advisory run failed for {}: {error:#}",
                     package.package
                 );
@@ -96,7 +96,7 @@ pub(crate) fn public_api(args: PublicApiArgs) -> Result<()> {
             .with_context(|| format!("write {}", current.display()))?;
         fs::write(&stderr_path, stderr.as_bytes())
             .with_context(|| format!("write {}", stderr_path.display()))?;
-        println!("public-api: wrote {}", current.display());
+        outln!("public-api: wrote {}", current.display());
 
         let baseline = root.join("traceability/public_api").join(package.baseline);
         if args.bless_baseline {
@@ -106,7 +106,7 @@ pub(crate) fn public_api(args: PublicApiArgs) -> Result<()> {
             }
             fs::write(&baseline, snapshot.as_ref())
                 .with_context(|| format!("write {}", baseline.display()))?;
-            println!("public-api: blessed {}", baseline.display());
+            outln!("public-api: blessed {}", baseline.display());
         }
         if args.check_baseline {
             let expected_raw = fs::read_to_string(&baseline)
@@ -119,7 +119,7 @@ pub(crate) fn public_api(args: PublicApiArgs) -> Result<()> {
                     current.display()
                 );
             }
-            println!("public-api: baseline matches {}", baseline.display());
+            outln!("public-api: baseline matches {}", baseline.display());
         }
     }
     Ok(())
@@ -135,7 +135,7 @@ pub(crate) fn semver_check(args: SemverCheckArgs) -> Result<()> {
         if args.strict {
             bail!("{message}");
         }
-        eprintln!("{message}");
+        errln!("{message}");
         return Ok(());
     }
 
@@ -174,7 +174,7 @@ pub(crate) fn semver_check(args: SemverCheckArgs) -> Result<()> {
             }
             Err(error) if !args.strict => {
                 combined_stdout.push_str(&format!("## {}\n{error:#}\n", package.package));
-                eprintln!(
+                errln!(
                     "semver-check: advisory run reported incompatibility or failed for {}",
                     package.package
                 );
@@ -193,7 +193,7 @@ pub(crate) fn semver_check(args: SemverCheckArgs) -> Result<()> {
         combined_stderr.as_bytes(),
     )
     .context("write target/semver-public-api/semver-checks.stderr.txt")?;
-    println!(
+    outln!(
         "semver-check: wrote {}",
         target_dir.join("semver-checks.txt").display()
     );

@@ -32,15 +32,17 @@ pub(crate) fn package_leak_scan(args: PackageLeakScanArgs) -> Result<()> {
         .collect();
 
     for finding in &hard {
-        eprintln!(
+        errln!(
             "package-leak-scan: hard leak: {} in {}",
-            finding.needle, finding.entry
+            finding.needle,
+            finding.entry
         );
     }
     for finding in &language {
-        eprintln!(
+        errln!(
             "package-leak-scan: language warning: {} in {}",
-            finding.needle, finding.entry
+            finding.needle,
+            finding.entry
         );
     }
 
@@ -52,7 +54,7 @@ pub(crate) fn package_leak_scan(args: PackageLeakScanArgs) -> Result<()> {
         );
     }
 
-    println!(
+    outln!(
         "package-leak-scan: ok; scanned {} file(s) across {} crate archive(s)",
         total_entries,
         scanned_archives.len()

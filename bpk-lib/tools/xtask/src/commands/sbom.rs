@@ -60,7 +60,7 @@ pub(crate) fn sbom() -> Result<()> {
         let bytes = fs::metadata(&dest)
             .with_context(|| format!("stat {}", dest.display()))?
             .len();
-        println!(
+        outln!(
             "xtask sbom: wrote {} ({} bytes)",
             display_relative(&dest),
             bytes

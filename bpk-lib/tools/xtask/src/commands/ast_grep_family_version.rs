@@ -12,7 +12,7 @@ pub(crate) fn ast_grep_family_version() -> Result<()> {
     let current = read_family_version(&root)?;
     let stale = stale_patch_versions(&current)?;
     if stale.is_empty() {
-        println!("ast-grep-family-version: ok; no stale patch versions below {current}");
+        outln!("ast-grep-family-version: ok; no stale patch versions below {current}");
         return Ok(());
     }
 
@@ -145,7 +145,7 @@ rule:
 
     scan_family_cargo_versions(&root, &stale, &current)?;
 
-    println!("ast-grep-family-version: ok; no stale patch versions below {current}");
+    outln!("ast-grep-family-version: ok; no stale patch versions below {current}");
     Ok(())
 }
 

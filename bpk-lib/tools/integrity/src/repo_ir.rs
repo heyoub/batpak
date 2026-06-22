@@ -393,14 +393,14 @@ pub(crate) fn run(repo_root: &Path, out: Option<PathBuf>) -> Result<()> {
     let fitnesses: Vec<&dyn Fitness> = owned.iter().map(AsRef::as_ref).collect();
     let findings = run_fitness(&ir, &fitnesses);
     if findings.is_empty() {
-        eprintln!(
+        errln!(
             "repo-ir: {} fitness function(s) clean over {} fact families",
             fitnesses.len(),
             ALL_KINDS.len()
         );
     } else {
         for finding in &findings {
-            eprintln!("repo-ir finding [{}]: {}", finding.fitness, finding.message);
+            errln!("repo-ir finding [{}]: {}", finding.fitness, finding.message);
         }
     }
 
@@ -412,9 +412,9 @@ pub(crate) fn run(repo_root: &Path, out: Option<PathBuf>) -> Result<()> {
                     .with_context(|| format!("create {}", parent.display()))?;
             }
             std::fs::write(&out, rendered).with_context(|| format!("write {}", out.display()))?;
-            println!("repo-ir: wrote {}", out.display());
+            outln!("repo-ir: wrote {}", out.display());
         }
-        None => print!("{rendered}"),
+        None => out!("{rendered}"),
     }
     Ok(())
 }

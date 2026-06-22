@@ -180,7 +180,7 @@ pub(crate) fn run(repo_root: &Path, out: Option<PathBuf>, check: bool) -> Result
     let rendered = format!("{}\n", serde_json::to_string_pretty(&ir)?);
 
     let Some(out) = out else {
-        print!("{rendered}");
+        out!("{rendered}");
         return Ok(());
     };
 
@@ -195,7 +195,7 @@ pub(crate) fn run(repo_root: &Path, out: Option<PathBuf>, check: bool) -> Result
                 out.display()
             ),
         )?;
-        println!("architecture-ir: {} is current", out.display());
+        outln!("architecture-ir: {} is current", out.display());
         return Ok(());
     }
 
@@ -203,7 +203,7 @@ pub(crate) fn run(repo_root: &Path, out: Option<PathBuf>, check: bool) -> Result
         fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
     }
     fs::write(&out, rendered).with_context(|| format!("write {}", out.display()))?;
-    println!("architecture-ir: wrote {}", out.display());
+    outln!("architecture-ir: wrote {}", out.display());
     Ok(())
 }
 

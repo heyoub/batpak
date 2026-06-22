@@ -49,12 +49,12 @@ pub(crate) fn run() -> Result<()> {
             fixtures
         );
     }
-    println!(
+    outln!(
         "prove-gates-bite: {} ProductionFlip fixture(s) to bite:",
         fixtures.len()
     );
     for reference in &fixtures {
-        println!("  {reference}");
+        outln!("  {reference}");
     }
 
     // Separate target dir: the red-cfg build must not pollute the normal cache.
@@ -69,7 +69,7 @@ pub(crate) fn run() -> Result<()> {
     packages.sort_unstable();
     packages.dedup();
     for package in &packages {
-        println!("prove-gates-bite: building {package} test targets under {RED_CFG} ...");
+        outln!("prove-gates-bite: building {package} test targets under {RED_CFG} ...");
         let mut build = Command::new("cargo");
         build
             .env("CARGO_TARGET_DIR", &bite_target)
@@ -84,7 +84,7 @@ pub(crate) fn run() -> Result<()> {
     for reference in &fixtures {
         let test_fn = reference.rsplit("::").next().unwrap_or(reference.as_str());
         let package = package_for(reference);
-        println!("prove-gates-bite: biting {reference} (package {package})");
+        outln!("prove-gates-bite: biting {reference} (package {package})");
         // Raw output() (NOT util::run_output, which bails on nonzero): we EXPECT a
         // nonzero exit here — a failing test is the success condition.
         let output = Command::new("cargo")
@@ -110,17 +110,15 @@ pub(crate) fn run() -> Result<()> {
         // "matched no test" both print `test result: ok` (or no result line) —
         // both are laundering (the fixture's red half did not red).
         if combined.contains("test result: FAILED") {
-            println!("  OK: {reference} RED under {RED_CFG}");
+            outln!("  OK: {reference} RED under {RED_CFG}");
         } else {
-            println!(
-                "  LAUNDERED: {reference} did NOT red under {RED_CFG} (passed or did not run)"
-            );
+            outln!("  LAUNDERED: {reference} did NOT red under {RED_CFG} (passed or did not run)");
             laundered.push(reference.clone());
         }
     }
 
     if laundered.is_empty() {
-        println!(
+        outln!(
             "prove-gates-bite: ok — all {} ProductionFlip red fixture(s) bite under {RED_CFG}",
             fixtures.len()
         );

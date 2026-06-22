@@ -73,7 +73,7 @@ pub(crate) fn run(strict: bool) -> Result<()> {
         fsync_probe(&repo_root)?;
     }
 
-    println!("doctor: ok");
+    outln!("doctor: ok");
     Ok(())
 }
 
@@ -121,8 +121,8 @@ fn fsync_probe(repo_root: &Path) -> Result<()> {
         1_000_000.0 / median_us as f64
     };
 
-    println!("fsync probe: median {median_ms:.2} ms/fsync ({fsyncs_per_sec:.0} fsyncs/sec)");
-    println!(
+    outln!("fsync probe: median {median_ms:.2} ms/fsync ({fsyncs_per_sec:.0} fsyncs/sec)");
+    outln!(
         "  → expected single-event durable throughput: ~{fsyncs_per_sec:.0} events/sec\n  \
            (configure batch.group_commit_max_batch > 1 or use append_batch for higher throughput)"
     );
@@ -135,7 +135,7 @@ fn fsync_probe(repo_root: &Path) -> Result<()> {
         None
     };
     if let Some(hint) = environment_hint {
-        println!("  hint: {hint}");
+        outln!("  hint: {hint}");
     }
 
     Ok(())

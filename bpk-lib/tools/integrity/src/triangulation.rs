@@ -499,7 +499,7 @@ pub(crate) fn check(repo_root: &Path) -> Result<()> {
         ),
     )?;
 
-    println!(
+    outln!(
         "triangulation: ok ({} oracles agree; workspace crate graph is a DAG)",
         engine.oracles.len()
     );

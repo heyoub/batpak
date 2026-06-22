@@ -22,10 +22,10 @@ pub(crate) fn host_loop() -> Result<()> {
     }
     fs::create_dir_all(&store_dir).context("create host-loop store dir")?;
 
-    println!("host-loop: build refbat");
+    outln!("host-loop: build refbat");
     cargo(["build", "-p", "refbat"])?;
 
-    println!("host-loop: pnpm -w build");
+    outln!("host-loop: pnpm -w build");
     run_pnpm(&bpk_ts, &["-w", "build"])?;
 
     let audit_loop = bpk_ts.join("examples/audit-loop/dist/index.js");
@@ -36,11 +36,11 @@ pub(crate) fn host_loop() -> Result<()> {
         );
     }
 
-    println!("host-loop: seed + replay on {}", store_dir.display());
+    outln!("host-loop: seed + replay on {}", store_dir.display());
     let seed_output = run_audit_loop(&bpk_ts, &store_dir, &[])?;
     let seed_stream = extract_stream_lines(&seed_output)?;
 
-    println!("host-loop: restart refbat and replay-only");
+    outln!("host-loop: restart refbat and replay-only");
     let replay_output = run_audit_loop(&bpk_ts, &store_dir, &["--replay-only"])?;
     let replay_stream = extract_stream_lines(&replay_output)?;
 
@@ -52,7 +52,7 @@ pub(crate) fn host_loop() -> Result<()> {
         );
     }
 
-    println!("host-loop: ok");
+    outln!("host-loop: ok");
     Ok(())
 }
 

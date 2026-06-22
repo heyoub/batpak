@@ -223,7 +223,7 @@ pub(crate) fn run() -> Result<()> {
     }
     check_examples_artifact_complete(&repo_root, &artifacts)?;
 
-    println!("traceability-check: ok");
+    outln!("traceability-check: ok");
     Ok(())
 }
 

@@ -183,22 +183,22 @@ fn criterion_args(
 fn print_bench_plan(surface: BenchSurface, save: Option<&str>, compare: bool, baseline: &str) {
     match (save, compare) {
         (Some(_), false) => {
-            println!(
+            outln!(
                 "Running {} benchmarks and saving baseline {}...",
                 surface_name(surface),
                 baseline
             );
         }
         (None, true) => {
-            println!(
+            outln!(
                 "Comparing {} benchmarks against baseline {}...",
                 surface_name(surface),
                 baseline
             );
         }
         (None, false) => {
-            println!("Running {} benchmarks...", surface_name(surface));
-            println!("Baseline name: {}", baseline);
+            outln!("Running {} benchmarks...", surface_name(surface));
+            outln!("Baseline name: {}", baseline);
         }
         (Some(_), true) => {}
     }

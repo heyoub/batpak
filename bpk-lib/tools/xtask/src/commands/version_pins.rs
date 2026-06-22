@@ -70,7 +70,7 @@ pub(crate) fn check_version_pins() -> Result<()> {
         bail!("version pin drift:\n{}", mismatches.join("\n"));
     }
 
-    println!(
+    outln!(
         "check-version-pins: ok; checked {} workspace member(s)",
         members.len()
     );

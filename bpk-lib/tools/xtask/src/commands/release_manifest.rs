@@ -42,7 +42,7 @@ pub(crate) fn release_manifest(args: ReleaseManifestArgs) -> Result<()> {
     fs::create_dir_all(&target_dir).with_context(|| format!("create {}", target_dir.display()))?;
     fs::write(&output, render_manifest(&manifest))
         .with_context(|| format!("write {}", output.display()))?;
-    println!("release-manifest: wrote {}", output.display());
+    outln!("release-manifest: wrote {}", output.display());
     Ok(())
 }
 

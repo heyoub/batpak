@@ -96,7 +96,7 @@ pub(super) fn assert_mutation_policy(
         // hard-fail below instead of silently passing every critical seam with
         // zero mutants — which would let a manual mutation proof skip all
         // critical-seam threshold gates.
-        println!(
+        outln!(
             "mutants: `{}` => no mutable lines in PR diff for this seam; nothing to prove.",
             lane.label
         );
@@ -113,7 +113,7 @@ pub(super) fn assert_mutation_policy(
     }
 
     match score.score_pct {
-        Some(score_pct) => println!(
+        Some(score_pct) => outln!(
             "mutants: `{}` => {} caught / {} scored = {}% (executed: {}, missed: {}, timed out: {}, unviable: {})",
             lane.label,
             score.caught,
@@ -124,7 +124,7 @@ pub(super) fn assert_mutation_policy(
             score.timed_out,
             score.unviable,
         ),
-        None => println!(
+        None => outln!(
             "mutants: `{}` => no scoreable mutants (executed: {}, timed out: {}, unviable: {})",
             lane.label,
             score.executed,
@@ -143,7 +143,7 @@ pub(super) fn assert_mutation_policy(
     }
 
     if score.unviable > 0 {
-        println!(
+        outln!(
             "mutants: `{}` recorded {} unviable mutants in {}.",
             lane.label,
             score.unviable,
@@ -180,7 +180,7 @@ pub(super) fn assert_mutation_policy(
             }
             if lane.scope == MutationScope::RepoWide {
                 if let Some(next_floor) = next_ratchet_floor(score_pct, Some(min_catch_pct)) {
-                    println!(
+                    outln!(
                         "mutants: `{}` is above the current repo-wide ratchet floor; a future raise to {}% is available.",
                         lane.label, next_floor
                     );
@@ -189,14 +189,14 @@ pub(super) fn assert_mutation_policy(
         }
         MutationEnforcement::RecordOnly => {
             let Some(score_pct) = score.score_pct else {
-                println!(
+                outln!(
                     "mutants: `{}` produced execution evidence but no scoreable caught/missed mutants, so ratchet math is not applied for this record-only lane.",
                     lane.label
                 );
                 return Ok(());
             };
             if let Some(next_floor) = next_ratchet_floor(score_pct, None) {
-                println!(
+                outln!(
                     "mutants: `{}` is in repo-wide record-only mode for this phase. Current score {}% supports a future ratchet to {}%.",
                     lane.label, score_pct, next_floor
                 );
@@ -216,41 +216,41 @@ pub(super) fn next_ratchet_floor(score_pct: usize, current_floor: Option<u32>) -
 }
 
 pub(super) fn print_mutation_policy() {
-    println!("Mutation policy:");
-    println!(
+    outln!("Mutation policy:");
+    outln!(
         "- `cargo xtask mutants smoke`: run diff-scoped (--in-diff against PR base) mutation of every critical seam at {}%, then repo-wide {} lanes using the current ratchet phase. Only the first lane runs a fresh baseline; later lanes reuse it with `--baseline skip`.",
         CRITICAL_SEAM_MIN_CATCH_PCT,
         REPO_WIDE_SMOKE_SHARD,
     );
-    println!(
+    outln!(
         "- `cargo xtask mutants full`: with no overrides, run the full policy; with `--surface` and/or `--shard`, run only the requested repo-wide ratchet lane."
     );
     match current_repo_mutation_floor() {
-        Some(floor) => println!(
+        Some(floor) => outln!(
             "- Repo-wide ratchet phase: {:?} (current floor: {floor}%).",
             REPO_MUTATION_PHASE
         ),
-        None => println!(
+        None => outln!(
             "- Repo-wide ratchet phase: {:?} (record-only; no floor enforced yet).",
             REPO_MUTATION_PHASE
         ),
     }
-    println!("- Repo-wide ratchet phases staged in code:");
+    outln!("- Repo-wide ratchet phases staged in code:");
     for (phase, floor) in REPO_MUTATION_THRESHOLDS {
-        println!("  {:?} => {floor}%", phase);
+        outln!("  {:?} => {floor}%", phase);
     }
     for lane in critical_mutation_smoke_lanes() {
-        println!("- {}", lane.policy_line());
+        outln!("- {}", lane.policy_line());
     }
     for lane in [
         MutationLane::repo_wide_smoke(MutantSurface::AllFeatures),
         MutationLane::repo_wide_smoke(MutantSurface::NoDefaultFeatures),
     ] {
-        println!("- {}", lane.policy_line());
+        outln!("- {}", lane.policy_line());
     }
-    println!("- Critical seam surfaces:");
+    outln!("- Critical seam surfaces:");
     for seam in critical_mutation_seams() {
-        println!(
+        outln!(
             "  {} [{} on {}]: {}",
             seam.label,
             seam.slug,
@@ -258,21 +258,21 @@ pub(super) fn print_mutation_policy() {
             seam.description
         );
         for pattern in seam.paths {
-            println!("    {pattern}");
+            outln!("    {pattern}");
         }
     }
-    println!("- Repo-wide patterns:");
+    outln!("- Repo-wide patterns:");
     for pattern in REPO_WIDE_ALL_FEATURES_MUTANT_FILES {
-        println!("  all-features: {pattern}");
+        outln!("  all-features: {pattern}");
     }
     for pattern in REPO_WIDE_NO_DEFAULT_MUTANT_FILES {
-        println!("  no-default-features: {pattern}");
+        outln!("  no-default-features: {pattern}");
     }
-    println!(
+    outln!(
         "- Mutation regex excludes: {}.",
         MUTANT_EXCLUDE_RES.join(", ")
     );
-    println!(
+    outln!(
         "- Mutation artifacts live under `{MUTANTS_OUTPUT_ROOT_LABEL}` so xtask owns the scratch surface."
     );
 }

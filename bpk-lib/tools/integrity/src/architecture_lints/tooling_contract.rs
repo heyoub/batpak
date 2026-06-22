@@ -674,13 +674,13 @@ fn check_xtask_surface_contract(repo_root: &Path) -> Result<()> {
     ensure(
         coverage_content.contains("if !args.json {")
             && coverage_content
-                .contains("println!(\"Running tests with coverage instrumentation...\");")
+                .contains("outln!(\"Running tests with coverage instrumentation...\");")
             && coverage_content
-                .contains("println!(\"Coverage export written to {}\", coverage_json.display());"),
+                .contains("outln!(\"Coverage export written to {}\", coverage_json.display());"),
         "xtask coverage banners must stay out of JSON mode",
     )?;
     ensure(
-        coverage_content.contains("print!(\"{json_text}\");"),
+        coverage_content.contains("out!(\"{json_text}\");"),
         "xtask coverage JSON mode must print only the exported JSON payload",
     )?;
     ensure(

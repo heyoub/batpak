@@ -22,8 +22,8 @@ pub(crate) fn cover(args: CoverArgs) -> Result<()> {
     let text_report = export_dir.join("text-report.txt");
 
     if !args.json {
-        println!("Running tests with coverage instrumentation...");
-        println!();
+        outln!("Running tests with coverage instrumentation...");
+        outln!();
     }
 
     run_llvm_cov_nextest(&staging_dir, args.json)?;
@@ -41,13 +41,13 @@ pub(crate) fn cover(args: CoverArgs) -> Result<()> {
     ensure_artifact_exists(&coverage_json, &export_dir, "coverage.json")?;
 
     if !args.json {
-        println!("Coverage export written to {}", coverage_json.display());
+        outln!("Coverage export written to {}", coverage_json.display());
     }
 
     let json_text = fs::read_to_string(&coverage_json)
         .with_context(|| format!("read {}", coverage_json.display()))?;
     if args.json {
-        print!("{json_text}");
+        out!("{json_text}");
         return Ok(());
     }
 
@@ -61,56 +61,62 @@ pub(crate) fn cover(args: CoverArgs) -> Result<()> {
     let parsed_json: Value = serde_json::from_str(&json_text).context("parse coverage json")?;
     let summary = coverage_summary(&parsed_json)?;
 
-    println!();
-    println!("================================================================");
-    println!("  COVERAGE FEEDBACK");
-    println!("================================================================");
-    println!();
-    println!(
+    outln!();
+    outln!("================================================================");
+    outln!("  COVERAGE FEEDBACK");
+    outln!("================================================================");
+    outln!();
+    outln!(
         "  Lines:     {} / {} ({}%)",
-        summary.lines_covered, summary.lines_total, summary.line_pct
+        summary.lines_covered,
+        summary.lines_total,
+        summary.line_pct
     );
-    println!(
+    outln!(
         "  Functions: {} / {} ({}%)",
-        summary.funcs_covered, summary.funcs_total, summary.func_pct
+        summary.funcs_covered,
+        summary.funcs_total,
+        summary.func_pct
     );
-    println!();
-    println!("----------------------------------------------------------------");
-    println!("  UNCOVERED (the ping-back)");
-    println!("----------------------------------------------------------------");
-    println!();
+    outln!();
+    outln!("----------------------------------------------------------------");
+    outln!("  UNCOVERED (the ping-back)");
+    outln!("----------------------------------------------------------------");
+    outln!();
 
     for file in uncovered_files(&report_output) {
-        println!(
+        outln!(
             "  {:<50}  regions_miss={:<4}  lines_miss={:<4}",
-            file.file, file.region_miss, file.line_miss
+            file.file,
+            file.region_miss,
+            file.line_miss
         );
     }
 
-    println!();
-    println!("----------------------------------------------------------------");
-    println!("  UNCOVERED FUNCTIONS");
-    println!("----------------------------------------------------------------");
-    println!();
+    outln!();
+    outln!("----------------------------------------------------------------");
+    outln!("  UNCOVERED FUNCTIONS");
+    outln!("----------------------------------------------------------------");
+    outln!();
 
     let uncovered = uncovered_functions(&parsed_json);
     if uncovered.is_empty() {
-        println!("  All functions covered!");
+        outln!("  All functions covered!");
     } else {
         let mut current_file = String::new();
         for item in &uncovered {
             if item.location != current_file {
                 current_file = item.location.clone();
-                println!("  {}:", current_file);
+                outln!("  {}:", current_file);
             }
-            println!("    -> {}::{}()", item.module_path, item.function_name);
+            outln!("    -> {}::{}()", item.module_path, item.function_name);
         }
-        println!();
-        println!("  Total uncovered functions: {}", uncovered.len());
+        outln!();
+        outln!("  Total uncovered functions: {}", uncovered.len());
     }
 
-    println!();
-    println!("================================================================");
+    outln!();
+    outln!("================================================================");
 
     if args.ci {
         let threshold = args.threshold.unwrap_or(70);
@@ -123,10 +129,12 @@ pub(crate) fn cover(args: CoverArgs) -> Result<()> {
                 summary.func_pct
             );
         }
-        println!();
-        println!(
+        outln!();
+        outln!(
             "PASS: coverage meets threshold {}% (lines={}%, functions={}%)",
-            threshold, summary.line_pct, summary.func_pct
+            threshold,
+            summary.line_pct,
+            summary.func_pct
         );
     }
 

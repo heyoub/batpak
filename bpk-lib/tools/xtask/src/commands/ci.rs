@@ -154,7 +154,7 @@ fn doc_deny_warnings() -> Result<()> {
 
 fn unused_deps_advisory() {
     if let Err(error) = super::unused_deps() {
-        eprintln!("xtask ci: unused-deps advisory pass reported: {error}");
+        errln!("xtask ci: unused-deps advisory pass reported: {error}");
     }
 }
 

@@ -608,7 +608,7 @@ pub(crate) fn production_flip_fixtures() -> Vec<&'static str> {
 /// Print the qualification ledger: each gate, whether it blocks, its red fixture
 /// kind, and a resolved/MISSING marker. Diagnostic only — `check` is the gate.
 pub(crate) fn report(repo_root: &Path) {
-    println!(
+    outln!(
         "gate-registry-check: ok ({} gate(s) registered)",
         GATES.len()
     );
@@ -628,22 +628,22 @@ pub(crate) fn report(repo_root: &Path) {
                     None => "?",
                 };
                 let (file, test_fn) = split_reference(reference).unwrap_or((reference, "?"));
-                println!(
+                outln!(
                     "  - {} [{authority}] {kind} red fixture {file}::{test_fn} ({marker})",
                     gate.slug
                 );
             }
-            None => println!("  - {} [{authority}] no red fixture", gate.slug),
+            None => outln!("  - {} [{authority}] no red fixture", gate.slug),
         }
     }
     if !UNQUALIFIED_BLOCKING_GATES.is_empty() {
-        println!(
+        outln!(
             "gate-registry-check: {} gate(s) run today but are NOT yet qualified (no anti-vacuous \
              red fixture); blocking authority withheld until each lands one:",
             UNQUALIFIED_BLOCKING_GATES.len()
         );
         for slug in UNQUALIFIED_BLOCKING_GATES {
-            println!("  - {slug}");
+            outln!("  - {slug}");
         }
     }
 }

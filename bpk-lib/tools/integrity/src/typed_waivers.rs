@@ -252,7 +252,7 @@ pub(crate) fn check_with_today(repo_root: &Path, today: IsoDate) -> Result<()> {
     let waivers = load_waivers(repo_root)?;
     validate(repo_root, &waivers, today)?;
     let aggregate: u32 = waivers.iter().map(|w| u32::from(w.debt_score)).sum();
-    println!(
+    outln!(
         "typed-waivers: ok ({} waiver(s), aggregate debt {})",
         waivers.len(),
         aggregate

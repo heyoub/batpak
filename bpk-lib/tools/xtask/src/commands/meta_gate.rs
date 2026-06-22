@@ -54,7 +54,7 @@ fn resolve_labels(flag_labels: &[String]) -> Vec<String> {
 pub(crate) fn meta_gate(args: &MetaGateArgs) -> Result<()> {
     let root = repo_root()?;
     let base = resolve_base(&root, args.base.as_deref())?;
-    println!("meta-gate: diffing {base}..HEAD");
+    outln!("meta-gate: diffing {base}..HEAD");
 
     // The unified diff for the classifier. `--no-color`/no `--stat` so the text
     // is the raw unified-diff shape `parse_unified_diff` expects.

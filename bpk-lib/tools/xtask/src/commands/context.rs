@@ -156,8 +156,8 @@ pub(crate) fn context(args: ContextArgs) -> Result<()> {
     let markdown = render_context_markdown(&packet);
     fs::write(&json_path, json).with_context(|| format!("write {}", json_path.display()))?;
     fs::write(&md_path, markdown).with_context(|| format!("write {}", md_path.display()))?;
-    println!("context: wrote {}", json_path.display());
-    println!("context: wrote {}", md_path.display());
+    outln!("context: wrote {}", json_path.display());
+    outln!("context: wrote {}", md_path.display());
     Ok(())
 }
 

@@ -95,7 +95,7 @@ pub(crate) fn setup(args: SetupArgs) -> Result<()> {
     }
 
     if missing.is_empty() {
-        println!("All developer tools are installed.");
+        outln!("All developer tools are installed.");
     } else if args.install_tools {
         if required.iter().any(|tool| {
             missing.contains(&tool.name) && tool.strategy == InstallStrategy::PreferBinstall
@@ -108,14 +108,14 @@ pub(crate) fn setup(args: SetupArgs) -> Result<()> {
             }
         }
     } else {
-        println!("Missing tools: {}", missing.join(", "));
-        println!("Run `cargo xtask setup --install-tools` to install the standard toolchain.");
+        outln!("Missing tools: {}", missing.join(", "));
+        outln!("Run `cargo xtask setup --install-tools` to install the standard toolchain.");
     }
 
     if cfg!(windows) {
-        println!("Native Windows detected. `cargo xtask doctor` will validate the host toolchain.");
+        outln!("Native Windows detected. `cargo xtask doctor` will validate the host toolchain.");
     } else {
-        println!("Use the checked-in devcontainer for the canonical environment.");
+        outln!("Use the checked-in devcontainer for the canonical environment.");
     }
     let hook_status = if args.install_tools {
         maybe_install_repo_hooks().map(|status| (status, true))
@@ -124,7 +124,7 @@ pub(crate) fn setup(args: SetupArgs) -> Result<()> {
     };
     match hook_status {
         Ok((status, attempted_install)) => report_hook_install_result(status, attempted_install),
-        Err(err) => eprintln!("setup: warning: could not inspect/install repo hooks: {err:#}"),
+        Err(err) => errln!("setup: warning: could not inspect/install repo hooks: {err:#}"),
     }
     Ok(())
 }
@@ -185,17 +185,17 @@ pub(crate) fn doctor() -> Result<()> {
     match repo_hook_status() {
         Ok(HookStatus::Installed) => {}
         Ok(HookStatus::Default) => {
-            eprintln!(
+            errln!(
                 "doctor: warning: repo-managed hooks are not installed. Run `cargo xtask install-hooks` to wire `.githooks/pre-commit`."
             );
         }
         Ok(HookStatus::Custom(path)) => {
-            eprintln!(
+            errln!(
                 "doctor: warning: custom git hooks path `{path}` is active, so `.githooks/pre-commit` is not managing pre-commit checks. Clear or change `core.hooksPath`, then run `cargo xtask install-hooks` if you want the repo hook surface."
             );
         }
         Err(err) => {
-            eprintln!("doctor: warning: could not inspect git hooks path: {err:#}");
+            errln!("doctor: warning: could not inspect git hooks path: {err:#}");
         }
     }
     Ok(())
@@ -299,18 +299,18 @@ fn normalize_path(path: &Path) -> PathBuf {
 fn report_hook_install_result(status: HookStatus, attempted_install: bool) {
     match status {
         HookStatus::Installed if attempted_install => {
-            println!("Repo hooks are installed at `{REPO_HOOKS_PATH}`.");
+            outln!("Repo hooks are installed at `{REPO_HOOKS_PATH}`.");
         }
         HookStatus::Installed => {
-            println!("Repo hooks are already installed at `{REPO_HOOKS_PATH}`.");
+            outln!("Repo hooks are already installed at `{REPO_HOOKS_PATH}`.");
         }
         HookStatus::Default => {
-            println!(
+            outln!(
                 "Repo hooks are not installed. Run `cargo xtask install-hooks` to wire `.githooks/pre-commit`."
             );
         }
         HookStatus::Custom(path) => {
-            println!(
+            outln!(
                 "Custom git hooks path `{path}` is active; leaving it unchanged. To opt into the repo-managed hook surface, set `git config core.hooksPath {REPO_HOOKS_PATH}` or clear the custom path first, then run `cargo xtask install-hooks`."
             );
         }
@@ -336,7 +336,7 @@ fn install_tool(spec: &str, strategy: InstallStrategy) -> Result<()> {
         if run(binstall).is_ok() {
             return Ok(());
         }
-        eprintln!("binstall fallback: `{spec}` binary install failed; retrying with cargo install");
+        errln!("binstall fallback: `{spec}` binary install failed; retrying with cargo install");
     }
 
     cargo(["install", "--locked", spec])
