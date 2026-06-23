@@ -366,16 +366,39 @@ fn check_crate_layout_contract(repo_root: &Path) -> Result<()> {
         )?;
     }
 
-    for crate_name in ["syncbat", "netbat"] {
-        let crate_root = repo_root.join("crates").join(crate_name);
-        for dir in ["examples", "fixtures"] {
-            ensure(
-                !crate_root.join(dir).exists(),
-                format!(
-                    "`crates/{crate_name}/{dir}` would blur ownership; companion crate demos belong in root docs/cookbook or explicit tests; benchmarks belong in `crates/{crate_name}/benches`"
-                ),
-            )?;
+    // Demos live ONLY in the family-wide `crates/examples` crate — no per-crate
+    // `examples/` folder anywhere else (locks the examples-out-of-core hoist).
+    // Generalized over every crate so a future `crates/<x>/examples/` is caught.
+    if let Ok(entries) = fs::read_dir(repo_root.join("crates")) {
+        for entry in entries.flatten() {
+            if entry.file_name() == "examples" {
+                continue;
+            }
+            if entry.path().join("examples").is_dir() {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                ensure(
+                    false,
+                    format!(
+                        "`crates/{name}/examples` blurs ownership; demos live in the family-wide `crates/examples` crate"
+                    ),
+                )?;
+            }
         }
+    }
+
+    // syncbat/netbat must not grow their own fixtures; a crate's genuinely-owned
+    // cross-crate inputs live under that crate (e.g. `crates/core/fixtures`).
+    for crate_name in ["syncbat", "netbat"] {
+        ensure(
+            !repo_root
+                .join("crates")
+                .join(crate_name)
+                .join("fixtures")
+                .exists(),
+            format!(
+                "`crates/{crate_name}/fixtures` would blur ownership; companion-crate cross-crate inputs belong under their owning crate or as explicit tests"
+            ),
+        )?;
     }
 
     let (macro_crate, owner) = ("crates/macros", "crates/core/tests/ui");
