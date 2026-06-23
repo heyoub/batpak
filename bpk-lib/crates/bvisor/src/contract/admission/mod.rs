@@ -18,11 +18,13 @@
 //! The independent validator (step 3) and the compiler `C` (step 2 proper) land
 //! as further submodules; they consume the artifacts frozen in [`program`].
 
+mod compile;
 mod eval;
 mod limits;
 mod program;
 mod validate;
 
+pub use compile::{compile_budget_membrane, CircuitBuilder};
 pub use eval::{evaluate, Decision, EvalError, Lane};
 pub use limits::{LimitViolation, ProgramLimits, FROZEN_LIMITS};
 pub use program::{
