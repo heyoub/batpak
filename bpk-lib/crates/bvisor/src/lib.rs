@@ -29,8 +29,8 @@ pub use backend::inert::InertBackend;
 
 pub use contract::backend::Backend;
 pub use contract::capability::{
-    Capability, Enforcement, EnvPolicy, FdPolicy, FsAccess, FsConfinement, NetDest, NetPolicy,
-    PathSet, SpawnPolicy,
+    Capability, Enforcement, EnvPolicy, EvidenceClaim, EvidenceSet, FdPolicy, FsAccess,
+    FsConfinement, NetDest, NetPolicy, PathSet, SpawnPolicy, SupportVerdict,
 };
 pub use contract::events::{BoundaryPlanEvent, BoundaryRecoveryEvent, BoundaryReportEvent};
 pub use contract::host_control::{

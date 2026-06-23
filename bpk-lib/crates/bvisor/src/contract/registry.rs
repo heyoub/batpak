@@ -2,7 +2,7 @@
 //! [`BoundaryRunner`]. No `struct Bal`.
 
 use crate::contract::backend::Backend;
-use crate::contract::capability::Enforcement;
+use crate::contract::capability::{Enforcement, EvidenceSet};
 use crate::contract::host_control::HostControl;
 use crate::contract::ids::{BackendId, BoundaryPlanHash};
 use crate::contract::plan::{
@@ -74,13 +74,30 @@ impl<'r> BoundaryPlanner<'r> {
         let profile = backend.profile(&snapshot);
 
         let mut admitted = Vec::new();
+        let mut available = EvidenceSet::new();
         for capability in &spec.capabilities {
             let req = BoundaryRequirement::Capability(capability.clone());
-            admitted.push(admit_one(backend.as_ref(), req, &profile)?);
+            let (admitted_req, evidence) = admit_one(backend.as_ref(), req, &profile)?;
+            available.extend_from(&evidence);
+            admitted.push(admitted_req);
         }
         for control in &spec.controls {
             let req = BoundaryRequirement::HostControl(control.clone());
-            admitted.push(admit_one(backend.as_ref(), req, &profile)?);
+            let (admitted_req, evidence) = admit_one(backend.as_ref(), req, &profile)?;
+            available.extend_from(&evidence);
+            admitted.push(admitted_req);
+        }
+
+        // Evidence gate: the caller's required claims must be a subset of what
+        // the admitted requirements can actually witness, else fail closed.
+        let required = spec.evidence.required_claims();
+        if !required.is_subset(&available) {
+            return Err(PlanError::EvidenceUnsatisfiable {
+                backend: backend.id(),
+                detail: format!(
+                    "required evidence {required:?} is not a subset of admitted evidence {available:?}"
+                ),
+            });
         }
 
         let plan_id =
@@ -105,18 +122,25 @@ impl<'r> BoundaryPlanner<'r> {
 }
 
 /// Classify one requirement; admit it (Enforced/Mediated) or fail closed.
+///
+/// Returns the admitted record AND the evidence the backend can witness for it
+/// (the verdict's evidence axis), which `plan()` unions to check the caller's
+/// required-evidence gate.
 fn admit_one(
     backend: &dyn Backend,
     requirement: BoundaryRequirement,
     profile: &BackendProfile,
-) -> Result<AdmittedRequirement, PlanError> {
-    let enforcement = backend.classify(&requirement, profile);
-    match enforcement {
-        Enforcement::Enforced | Enforcement::Mediated => Ok(AdmittedRequirement {
-            mechanism: mechanism_for(&backend.id(), &requirement, enforcement),
-            requirement,
-            enforcement,
-        }),
+) -> Result<(AdmittedRequirement, EvidenceSet), PlanError> {
+    let verdict = backend.classify(&requirement, profile);
+    match verdict.enforcement {
+        Enforcement::Enforced | Enforcement::Mediated => Ok((
+            AdmittedRequirement {
+                mechanism: mechanism_for(&backend.id(), &requirement, verdict.enforcement),
+                requirement,
+                enforcement: verdict.enforcement,
+            },
+            verdict.evidence,
+        )),
         Enforcement::Unsupported => Err(PlanError::Unsupported {
             requirement,
             backend: backend.id(),

@@ -1,6 +1,6 @@
 //! Spec → Plan: the inert IR and its fail-closed admission types.
 
-use crate::contract::capability::{Capability, Enforcement};
+use crate::contract::capability::{Capability, Enforcement, EvidenceClaim, EvidenceSet};
 use crate::contract::host_control::HostControl;
 use crate::contract::ids::{BackendId, BoundaryPlanHash};
 use crate::contract::support::BackendProfileSnapshot;
@@ -53,6 +53,24 @@ pub struct EvidenceRequirements {
     pub require_captured_streams: bool,
     /// Require the exit status in the report.
     pub require_exit_status: bool,
+}
+
+impl EvidenceRequirements {
+    /// The set of [`EvidenceClaim`]s the caller requires the plan to be able to
+    /// produce. Planning admits only when this is a subset of the union of the
+    /// admitted requirements' verdict evidence (required ⊆ available); otherwise
+    /// it fails closed with [`PlanError::EvidenceUnsatisfiable`].
+    #[must_use]
+    pub fn required_claims(&self) -> EvidenceSet {
+        let mut set = EvidenceSet::new();
+        if self.require_captured_streams {
+            set.insert(EvidenceClaim::CapturedStreams);
+        }
+        if self.require_exit_status {
+            set.insert(EvidenceClaim::TerminalOutcome);
+        }
+        set
+    }
 }
 
 /// The caller's request: authority + controls + workload + budgets + evidence.

@@ -156,3 +156,58 @@ fn event_payloads_round_trip() {
     assert_eq!(report_back, report_event);
     assert_eq!(recovery_back, recovery_event);
 }
+
+// (e) plan() is fail-closed on UNCOVERABLE evidence: requiring captured streams
+//     without admitting CaptureStreams yields EvidenceUnsatisfiable. Inert's
+//     LaunchWorkload witnesses only the terminal outcome, so the required
+//     `CapturedStreams` claim is not a subset of the admitted evidence.
+#[test]
+fn plan_fails_closed_when_required_evidence_uncoverable() {
+    let registry = registry();
+    let planner = BoundaryPlanner::new(&registry);
+    let spec = BoundarySpec {
+        workload: trivial_workload(),
+        capabilities: Vec::new(),
+        controls: vec![HostControl::LaunchWorkload],
+        budgets: Budgets::default(),
+        evidence: EvidenceRequirements {
+            require_captured_streams: true,
+            require_exit_status: false,
+        },
+    };
+
+    let err = planner
+        .plan(&spec, &inert_id())
+        .expect_err("inert cannot witness captured streams without CaptureStreams admitted");
+    assert!(
+        matches!(&err, PlanError::EvidenceUnsatisfiable { backend, .. } if *backend == inert_id()),
+        "expected EvidenceUnsatisfiable naming the inert backend, got {err:?}"
+    );
+}
+
+// (f) the inverse: requiring captured streams AND exit status, WITH both
+//     LaunchWorkload + CaptureStreams admitted, plans OK (required ⊆ available).
+#[test]
+fn plan_admits_when_required_evidence_is_covered() {
+    let registry = registry();
+    let planner = BoundaryPlanner::new(&registry);
+    let spec = BoundarySpec {
+        workload: trivial_workload(),
+        capabilities: Vec::new(),
+        controls: vec![
+            HostControl::LaunchWorkload,
+            HostControl::CaptureStreams {
+                streams: StdStreams::capture_out_err(),
+            },
+        ],
+        budgets: Budgets::default(),
+        evidence: EvidenceRequirements {
+            require_captured_streams: true,
+            require_exit_status: true,
+        },
+    };
+
+    planner
+        .plan(&spec, &inert_id())
+        .expect("covered evidence (CapturedStreams + TerminalOutcome) must admit");
+}

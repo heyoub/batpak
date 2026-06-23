@@ -13,7 +13,7 @@
 //! [`Backend`] trait and all contract types stay OS-free.
 
 use crate::contract::backend::Backend;
-use crate::contract::capability::Enforcement;
+use crate::contract::capability::{Enforcement, EvidenceClaim, SupportVerdict};
 use crate::contract::host_control::HostControl;
 use crate::contract::ids::BackendId;
 use crate::contract::plan::{BoundaryPlan, BoundaryRequirement, Workload};
@@ -43,8 +43,20 @@ impl InertBackend {
     #[must_use]
     pub fn new() -> Self {
         let mut best_case = BTreeMap::new();
-        best_case.insert(RequirementKind::LaunchWorkload, Enforcement::Enforced);
-        best_case.insert(RequirementKind::CaptureStreams, Enforcement::Enforced);
+        best_case.insert(
+            RequirementKind::LaunchWorkload,
+            SupportVerdict::new(
+                Enforcement::Enforced,
+                [EvidenceClaim::TerminalOutcome].into_iter().collect(),
+            ),
+        );
+        best_case.insert(
+            RequirementKind::CaptureStreams,
+            SupportVerdict::new(
+                Enforcement::Enforced,
+                [EvidenceClaim::CapturedStreams].into_iter().collect(),
+            ),
+        );
         Self {
             id: BackendId::new(Self::ID),
             support: SupportMatrix::from_best_case(best_case),
@@ -83,12 +95,24 @@ impl Backend for InertBackend {
         // The machine ceiling matches the family best-case: it can launch a
         // process and wire pipes, and nothing else. Derived deterministically.
         let mut ceiling = BTreeMap::new();
-        ceiling.insert(RequirementKind::LaunchWorkload, Enforcement::Enforced);
-        ceiling.insert(RequirementKind::CaptureStreams, Enforcement::Enforced);
+        ceiling.insert(
+            RequirementKind::LaunchWorkload,
+            SupportVerdict::new(
+                Enforcement::Enforced,
+                [EvidenceClaim::TerminalOutcome].into_iter().collect(),
+            ),
+        );
+        ceiling.insert(
+            RequirementKind::CaptureStreams,
+            SupportVerdict::new(
+                Enforcement::Enforced,
+                [EvidenceClaim::CapturedStreams].into_iter().collect(),
+            ),
+        );
         BackendProfile::from_ceiling(ceiling)
     }
 
-    fn classify(&self, req: &BoundaryRequirement, profile: &BackendProfile) -> Enforcement {
+    fn classify(&self, req: &BoundaryRequirement, profile: &BackendProfile) -> SupportVerdict {
         self.support.classify(req, profile)
     }
 

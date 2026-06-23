@@ -7,7 +7,7 @@
 //! executes an admitted plan into an UNSEALED report body. Sealing belongs to
 //! [`crate::BoundaryRunner`]; persistence belongs to the host.
 
-use crate::contract::capability::Enforcement;
+use crate::contract::capability::SupportVerdict;
 use crate::contract::ids::BackendId;
 use crate::contract::plan::{BoundaryPlan, BoundaryRequirement};
 use crate::contract::report::BoundaryReportBody;
@@ -30,8 +30,9 @@ pub trait Backend: Send + Sync {
     fn profile(&self, snap: &BackendProfileSnapshot) -> BackendProfile;
 
     /// Classify a requirement against the TYPED profile (no string parsing at
-    /// admission).
-    fn classify(&self, req: &BoundaryRequirement, profile: &BackendProfile) -> Enforcement;
+    /// admission). Returns the two-axis [`SupportVerdict`]: enforcement strength
+    /// AND the evidence the backend can produce for the requirement.
+    fn classify(&self, req: &BoundaryRequirement, profile: &BackendProfile) -> SupportVerdict;
 
     /// Lower an admitted plan and EXECUTE it, returning the OBSERVED facts as an
     /// UNSEALED body. The backend does NOT canonicalize, hash, or touch BatPak.

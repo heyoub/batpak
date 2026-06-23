@@ -16,7 +16,7 @@
 //! [`Lie::AutoCommitButReportFalse`]) are illegal in every mode.
 
 use crate::contract::backend::Backend;
-use crate::contract::capability::Enforcement;
+use crate::contract::capability::{Enforcement, EvidenceClaim, SupportVerdict};
 use crate::contract::host_control::HostControl;
 use crate::contract::ids::BackendId;
 use crate::contract::plan::{BoundaryPlan, BoundaryRequirement, Workload};
@@ -220,8 +220,31 @@ impl SimBackend {
     }
 }
 
-/// A deep support matrix: every requirement kind claims `Enforced` so `plan()`
-/// admits any spec against the monster.
+/// The monster's deep verdict: `Enforced` with FULL evidence, so `plan()` admits
+/// any spec (any enforcement + any evidence requirement) and the lie surfaces at
+/// execution time, never at admission.
+fn deep_verdict() -> SupportVerdict {
+    SupportVerdict::new(
+        Enforcement::Enforced,
+        [
+            EvidenceClaim::TerminalOutcome,
+            EvidenceClaim::CapturedStreams,
+            EvidenceClaim::ResourceUsage,
+            EvidenceClaim::AllowedActions,
+            EvidenceClaim::DeniedAttempts,
+            EvidenceClaim::FilesystemDelta,
+            EvidenceClaim::ProcessTree,
+            EvidenceClaim::NetworkActivity,
+            EvidenceClaim::ArtifactLineage,
+            EvidenceClaim::MechanismAttestation,
+        ]
+        .into_iter()
+        .collect(),
+    )
+}
+
+/// A deep support matrix: every requirement kind claims the deep verdict so
+/// `plan()` admits any spec against the monster.
 fn deep_support() -> SupportMatrix {
     let mut best = BTreeMap::new();
     for kind in [
@@ -240,7 +263,7 @@ fn deep_support() -> SupportMatrix {
         RequirementKind::Kill,
         RequirementKind::ListOutputs,
     ] {
-        best.insert(kind, Enforcement::Enforced);
+        best.insert(kind, deep_verdict());
     }
     SupportMatrix::from_best_case(best)
 }
@@ -264,7 +287,7 @@ fn deep_ceiling() -> BackendProfile {
         RequirementKind::Kill,
         RequirementKind::ListOutputs,
     ] {
-        ceiling.insert(kind, Enforcement::Enforced);
+        ceiling.insert(kind, deep_verdict());
     }
     BackendProfile::from_ceiling(ceiling)
 }
@@ -292,7 +315,7 @@ impl Backend for SimBackend {
         deep_ceiling()
     }
 
-    fn classify(&self, req: &BoundaryRequirement, profile: &BackendProfile) -> Enforcement {
+    fn classify(&self, req: &BoundaryRequirement, profile: &BackendProfile) -> SupportVerdict {
         self.support.classify(req, profile)
     }
 
