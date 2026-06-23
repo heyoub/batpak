@@ -18,7 +18,7 @@
 //! glue that derives those inputs from a real `BoundarySpec` + `BackendProfile`
 //! inside `BoundaryPlanner` is the next increment.
 
-use super::compile::{compile_admission, AdmissionShape};
+use super::compile::{compile_admission, compile_budget_detail, AdmissionShape};
 use super::eval::{evaluate, Lane};
 use super::program::Width;
 
@@ -26,6 +26,11 @@ use super::program::Width;
 /// encoding. Enforcement is the 2-bit code the circuit uses internally.
 const FIELD_BITS: u32 = 8;
 const ENFORCEMENT_BITS: u32 = 2;
+
+/// The 1-based index of the budget membrane in the canonical order (drift, support,
+/// evidence, BUDGET, conflict). The budget dimension/reason selectors are meaningful
+/// only when the budget membrane is the first-failing one.
+const BUDGET_MEMBRANE: u64 = 4;
 
 /// One requirement's admission inputs (the per-requirement slice of `V`/`Q`).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -96,6 +101,13 @@ pub enum AdmissionOutcome {
         refusal_code: u64,
         /// Per-membrane pass bits, in canonical order.
         trace: Vec<bool>,
+        /// First-failing budget dimension `1..=7` (`0` unless the refusal is at the
+        /// budget membrane). Wall, cpu, resident, process, handle, storage, network.
+        budget_dimension: u64,
+        /// First-failing budget reason `1..=4` (`0` unless a budget refusal):
+        /// `1` BelowDerivedMinimum, `2` CapacityExceeded, `3` GuaranteeInsufficient,
+        /// `4` EvidenceMissing.
+        budget_reason: u64,
     },
 }
 
@@ -157,34 +169,77 @@ fn reference_trace(inputs: &AdmissionInputs) -> Vec<bool> {
     let evidence = inputs.requirements.iter().all(|r| {
         (mask(r.evidence_required, FIELD_BITS) & !mask(r.evidence_available, FIELD_BITS)) == 0
     });
-    let budget = inputs.budget.iter().all(|d| {
-        let limit = mask(d.limit, FIELD_BITS);
-        let available = mask(d.available, FIELD_BITS);
-        let derived = mask(d.derived_min, FIELD_BITS);
-        let g_req = mask(u64::from(d.guarantee_required), ENFORCEMENT_BITS);
-        let g_avail = mask(u64::from(d.guarantee_available), ENFORCEMENT_BITS);
-        let e_req = mask(d.evidence_required, FIELD_BITS);
-        let e_avail = mask(d.evidence_available, FIELD_BITS);
-        // Two-phase, flattened to one pass bit: intrinsic (D ≤ L) then adjudication
-        // (L ≤ A ∧ G_req ≤ G_avail ∧ Q ⊆ C).
-        derived <= limit && limit <= available && g_req <= g_avail && (e_req & !e_avail) == 0
-    });
+    // The budget membrane passes iff every dimension has no failing reason.
+    let budget = inputs.budget.iter().all(|d| budget_dim_reason(d) == 0);
     let conflict = inputs.requirements.iter().all(|r| {
         (mask(r.conflict_present, FIELD_BITS) & mask(r.conflict_forbidden, FIELD_BITS)) == 0
     });
     vec![drift, support, evidence, budget, conflict]
 }
 
-/// Build the outcome from a membrane trace (first failing membrane = refusal).
-pub(crate) fn outcome_from_trace(trace: Vec<bool>) -> AdmissionOutcome {
+/// One budget dimension's first-failing reason in canonical order (`1`
+/// BelowDerivedMinimum, `2` CapacityExceeded, `3` GuaranteeInsufficient, `4`
+/// EvidenceMissing), or `0` if the dimension passes. Masked to the same lane widths
+/// the circuit sees, so the imperative twin agrees on out-of-range inputs.
+fn budget_dim_reason(d: &BudgetInputs) -> u8 {
+    let limit = mask(d.limit, FIELD_BITS);
+    let available = mask(d.available, FIELD_BITS);
+    let derived = mask(d.derived_min, FIELD_BITS);
+    let g_req = mask(u64::from(d.guarantee_required), ENFORCEMENT_BITS);
+    let g_avail = mask(u64::from(d.guarantee_available), ENFORCEMENT_BITS);
+    let e_req = mask(d.evidence_required, FIELD_BITS);
+    let e_avail = mask(d.evidence_available, FIELD_BITS);
+    if derived > limit {
+        1
+    } else if limit > available {
+        2
+    } else if g_req > g_avail {
+        3
+    } else if (e_req & !e_avail) != 0 {
+        4
+    } else {
+        0
+    }
+}
+
+/// The packed `(first-failing dimension, reason)` budget detail `(dim << 3) | reason`,
+/// `0` if every dimension passes — the imperative twin of [`compile_budget_detail`].
+fn reference_budget_detail(inputs: &AdmissionInputs) -> u64 {
+    for (index, d) in inputs.budget.iter().enumerate() {
+        let reason = budget_dim_reason(d);
+        if reason != 0 {
+            let dimension = u64::try_from(index + 1).unwrap_or(0);
+            return (dimension << 3) | u64::from(reason);
+        }
+    }
+    0
+}
+
+/// Split the budget membrane's first-failing membrane index into the dimension +
+/// reason selectors, but ONLY when the budget membrane is the refusing one (`detail`
+/// is gated so an earlier membrane's refusal carries no budget detail).
+fn budget_selectors(membrane: u64, detail: u64) -> (u64, u64) {
+    if membrane == BUDGET_MEMBRANE {
+        (detail >> 3, detail & 0b111)
+    } else {
+        (0, 0)
+    }
+}
+
+/// Build the outcome from a membrane trace (first failing membrane = refusal),
+/// attaching the budget dimension/reason selectors on a budget refusal.
+pub(crate) fn outcome_from_trace(trace: Vec<bool>, budget_detail: u64) -> AdmissionOutcome {
     match trace.iter().position(|pass| !pass) {
         None => AdmissionOutcome::Admitted { trace },
         Some(i) => {
             let index = u64::try_from(i + 1).unwrap_or(0);
+            let (budget_dimension, budget_reason) = budget_selectors(index, budget_detail);
             AdmissionOutcome::Refused {
                 membrane: index,
                 refusal_code: index,
                 trace,
+                budget_dimension,
+                budget_reason,
             }
         }
     }
@@ -193,7 +248,7 @@ pub(crate) fn outcome_from_trace(trace: Vec<bool>) -> AdmissionOutcome {
 /// The authoritative imperative admission decision over normalized inputs.
 #[must_use]
 pub fn reference_admission(inputs: &AdmissionInputs) -> AdmissionOutcome {
-    outcome_from_trace(reference_trace(inputs))
+    outcome_from_trace(reference_trace(inputs), reference_budget_detail(inputs))
 }
 
 fn field_width() -> Width {
@@ -247,9 +302,30 @@ fn encode(inputs: &AdmissionInputs) -> Vec<Lane> {
             .iter()
             .map(|r| encode_lane(r.evidence_available, field)),
     );
-    // Budget section, canonical lane order (must match `compile_admission`):
-    // limit, available, derived-min, guarantee-required, guarantee-available,
-    // evidence-required, evidence-available — each × dims.
+    lanes.extend(encode_budget(inputs));
+    lanes.extend(
+        inputs
+            .requirements
+            .iter()
+            .map(|r| encode_lane(r.conflict_present, field)),
+    );
+    lanes.extend(
+        inputs
+            .requirements
+            .iter()
+            .map(|r| encode_lane(r.conflict_forbidden, field)),
+    );
+    lanes
+}
+
+/// Encode JUST the budget lanes, in the canonical order both `compile_admission` and
+/// `compile_budget_detail` read: limit, available, derived-min (field width),
+/// guarantee-required, guarantee-available (enforcement width), evidence-required,
+/// evidence-available (field width) — each × dims.
+fn encode_budget(inputs: &AdmissionInputs) -> Vec<Lane> {
+    let field = field_width();
+    let enf = enforcement_lane_width();
+    let mut lanes = Vec::new();
     lanes.extend(inputs.budget.iter().map(|d| encode_lane(d.limit, field)));
     lanes.extend(
         inputs
@@ -287,36 +363,34 @@ fn encode(inputs: &AdmissionInputs) -> Vec<Lane> {
             .iter()
             .map(|d| encode_lane(d.evidence_available, field)),
     );
-    lanes.extend(
-        inputs
-            .requirements
-            .iter()
-            .map(|r| encode_lane(r.conflict_present, field)),
-    );
-    lanes.extend(
-        inputs
-            .requirements
-            .iter()
-            .map(|r| encode_lane(r.conflict_forbidden, field)),
-    );
     lanes
 }
 
-/// The shadow circuit's admission decision over the same normalized inputs.
+/// The shadow circuit's admission decision over the same normalized inputs. On a
+/// refusal, a SECOND NC¹ circuit ([`compile_budget_detail`]) yields the packed budget
+/// dimension/reason selector — so the circuit produces the SAME full outcome the
+/// reference does (the selectors are circuit-computed, not reference-only).
 fn circuit_admission(inputs: &AdmissionInputs) -> Result<AdmissionOutcome, &'static str> {
     let shape = shape_of(inputs);
     let program = compile_admission(&shape).map_err(|_| "circuit compilation failed")?;
     let decision = evaluate(&program, &encode(inputs)).map_err(|_| "circuit evaluation failed")?;
-    Ok(if decision.admit {
-        AdmissionOutcome::Admitted {
+    if decision.admit {
+        return Ok(AdmissionOutcome::Admitted {
             trace: decision.membranes,
-        }
-    } else {
-        AdmissionOutcome::Refused {
-            membrane: decision.refusal_code,
-            refusal_code: decision.refusal_code,
-            trace: decision.membranes,
-        }
+        });
+    }
+    let detail_program = compile_budget_detail(inputs.budget.len(), field_width(), field_width())
+        .map_err(|_| "budget detail compilation failed")?;
+    let detail = evaluate(&detail_program, &encode_budget(inputs))
+        .map_err(|_| "budget detail evaluation failed")?
+        .refusal_code;
+    let (budget_dimension, budget_reason) = budget_selectors(decision.refusal_code, detail);
+    Ok(AdmissionOutcome::Refused {
+        membrane: decision.refusal_code,
+        refusal_code: decision.refusal_code,
+        trace: decision.membranes,
+        budget_dimension,
+        budget_reason,
     })
 }
 
@@ -439,6 +513,8 @@ mod shadow_tests {
             membrane: 2,
             refusal_code: 2,
             trace: vec![true, false, true, true, true],
+            budget_dimension: 0,
+            budget_reason: 0,
         };
         let result = decide(reference.clone(), Ok(wrong_circuit.clone()));
         assert_eq!(
@@ -448,6 +524,64 @@ mod shadow_tests {
                 circuit: wrong_circuit,
             })
         );
+    }
+
+    /// A budget refusal must name BOTH the dimension and the reason, with the
+    /// circuit-computed selectors agreeing with the reference (shadow_check only
+    /// returns Ok when the FULL outcome — including the selectors — matches).
+    fn assert_budget_refusal(inputs: &AdmissionInputs, dimension: u64, reason: u64) {
+        let got = match shadow_check(inputs).expect("no divergence (reference == circuit)") {
+            AdmissionOutcome::Refused {
+                membrane,
+                budget_dimension,
+                budget_reason,
+                ..
+            } => Some((membrane, budget_dimension, budget_reason)),
+            AdmissionOutcome::Admitted { .. } => None,
+        };
+        assert_eq!(
+            got,
+            Some((4, dimension, reason)),
+            "budget refusal must name dimension {dimension}, reason {reason}"
+        );
+    }
+
+    #[test]
+    fn budget_refusal_names_the_dimension_and_reason_with_circuit_parity() {
+        // Two budget dimensions so the dimension-2 selector is reachable.
+        let two_dim = || {
+            let mut inputs = all_pass();
+            let dim0 = inputs.budget[0];
+            inputs.budget.push(dim0); // dimension 2 = a passing copy of dimension 1
+            inputs
+        };
+
+        // Dimension 1, each reason in canonical order.
+        let mut below = two_dim();
+        below.budget[0].limit = 2;
+        below.budget[0].derived_min = 5; // 5 > 2 -> BelowDerivedMinimum
+        assert_budget_refusal(&below, 1, 1);
+
+        let mut capacity = two_dim();
+        capacity.budget[0].limit = 99;
+        capacity.budget[0].available = 1; // 99 > 1 -> CapacityExceeded
+        assert_budget_refusal(&capacity, 1, 2);
+
+        let mut guarantee = two_dim();
+        guarantee.budget[0].guarantee_required = 2; // Enforced
+        guarantee.budget[0].guarantee_available = 1; // Mediated < Enforced
+        assert_budget_refusal(&guarantee, 1, 3);
+
+        let mut evidence = two_dim();
+        evidence.budget[0].evidence_required = 0b1000;
+        evidence.budget[0].evidence_available = 0b0001; // not a subset
+        assert_budget_refusal(&evidence, 1, 4);
+
+        // Dimension 1 passes, dimension 2 fails -> the dimension selector is 2.
+        let mut second = two_dim();
+        second.budget[1].limit = 99;
+        second.budget[1].available = 1;
+        assert_budget_refusal(&second, 2, 2);
     }
 
     #[test]

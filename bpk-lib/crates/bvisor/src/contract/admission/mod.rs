@@ -27,7 +27,7 @@ mod shadow;
 mod validate;
 
 pub use compile::{
-    compile_admission, compile_budget_membrane, compile_conflict_membrane,
+    compile_admission, compile_budget_detail, compile_budget_membrane, compile_conflict_membrane,
     compile_evidence_membrane, compile_profile_drift_membrane, compile_support_membrane,
     compose_membranes, AdmissionShape, CircuitBuilder,
 };

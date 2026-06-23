@@ -52,7 +52,8 @@ pub fn planner_reference(inputs: &PlannerInputs) -> AdmissionOutcome {
     let evidence = (mask(u64::from(inputs.evidence_required), EVIDENCE_BITS)
         & !mask(u64::from(inputs.evidence_available), EVIDENCE_BITS))
         == 0;
-    outcome_from_trace(vec![support, evidence])
+    // The planner has no budget membrane, so there is no budget detail (0).
+    outcome_from_trace(vec![support, evidence], 0)
 }
 
 fn enforcement_width() -> Width {
@@ -117,6 +118,8 @@ fn planner_circuit(inputs: &PlannerInputs) -> Result<AdmissionOutcome, &'static 
             membrane: decision.refusal_code,
             refusal_code: decision.refusal_code,
             trace: decision.membranes,
+            budget_dimension: 0,
+            budget_reason: 0,
         }
     })
 }
@@ -149,6 +152,8 @@ mod planner_shadow_tests {
             membrane,
             refusal_code: membrane,
             trace,
+            budget_dimension: 0,
+            budget_reason: 0,
         }
     }
 
@@ -211,6 +216,8 @@ mod planner_shadow_tests {
             membrane: 2,
             refusal_code: 2,
             trace: vec![true, false],
+            budget_dimension: 0,
+            budget_reason: 0,
         };
         assert_eq!(
             decide(reference.clone(), Ok(wrong.clone())),

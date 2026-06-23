@@ -28,7 +28,7 @@ mod sim;
 pub use backend::inert::InertBackend;
 
 pub use contract::admission::{
-    compile_admission, compile_budget_membrane, compile_conflict_membrane,
+    compile_admission, compile_budget_detail, compile_budget_membrane, compile_conflict_membrane,
     compile_evidence_membrane, compile_profile_drift_membrane, compile_support_membrane,
     compose_membranes, decode_validated, evaluate, planner_reference, planner_shadow_check,
     reference_admission, shadow_check, validate, verify_certificate, AdmissionDivergence,
