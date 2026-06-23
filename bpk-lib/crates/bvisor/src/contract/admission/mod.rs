@@ -24,6 +24,7 @@ mod limits;
 mod planner_shadow;
 mod program;
 mod qf_bv;
+mod schedule;
 mod shadow;
 mod validate;
 
@@ -44,6 +45,10 @@ pub use qf_bv::{
     budget_membrane_equivalence_smt, budget_planted_disagreement_smt, smt_digest, translate,
     verify_receipt, ProofGateError, ProofReceipt, ProofStatus, QfBvError, TranslatedCircuit,
     ADMISSION_CIRCUIT_PROOF,
+};
+pub use schedule::{
+    reference_schedule_admission, schedule_refusal, PrimitiveDeclInputs, ScheduleInputs,
+    ScheduleOutcome, ScheduleRefusal, ScheduleSlotInputs, MAX_PRIMITIVES,
 };
 pub use shadow::{
     reference_admission, shadow_check, AdmissionDivergence, AdmissionInputs, AdmissionOutcome,
