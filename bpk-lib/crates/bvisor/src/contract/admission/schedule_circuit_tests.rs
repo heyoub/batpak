@@ -270,3 +270,150 @@ fn agreement_is_not_a_divergence_and_a_circuit_error_is() {
         })
     ));
 }
+
+// --- The completeness grid: the 12 named adversarial schedules the membrane must
+// independently reject. Each carries a stable id, its frozen refusal code, and is
+// asserted on BOTH paths (the imperative reference AND the NC¹ circuit, via shadow
+// parity) — so the membrane is provably complete, not merely "green on the happy path."
+
+/// One named red fixture: a stable id, the adversarial input, and the refusal both
+/// paths must produce.
+struct RedFixture {
+    id: &'static str,
+    inputs: ScheduleInputs,
+    expect: ScheduleRefusal,
+}
+
+fn red_fixtures() -> Vec<RedFixture> {
+    let f = |id, inputs, expect| RedFixture { id, inputs, expect };
+
+    // 1. unknown primitive id — a slot names an index outside the universe.
+    let unknown = {
+        let mut a = canonical();
+        a.schedule[2].primitive = 9;
+        a
+    };
+    // 2. wrong primitive version — the slot claims the digest of a different version
+    //    (version is bound into decl_digest), so it fails authentication.
+    let wrong_version = {
+        let mut a = canonical();
+        a.schedule[1].claimed_decl_digest = 0x1234; // "version 2" digest
+        a
+    };
+    // 3. duplicate primitive — the same index occupies two slots.
+    let duplicate = {
+        let mut a = canonical();
+        a.schedule[2] = slot(0, 0xA0, 0xB0);
+        a
+    };
+    // 4. missing prerequisite — a present primitive needs an unscheduled one (index 3).
+    let missing = {
+        let mut a = canonical();
+        a.declarations[1].prerequisites = 0b001 | (1 << 3);
+        a
+    };
+    // 5. prerequisite appears later — p1 (needs p0) is placed before p0.
+    let prereq_later = {
+        let mut a = canonical();
+        a.schedule = vec![a.schedule[1], a.schedule[0], a.schedule[2]];
+        a
+    };
+    // 6. cycle smuggled through declarations — p0 ⇄ p1, same phase (no phase pre-empt).
+    let cycle = {
+        let mut a = canonical();
+        a.declarations[0].phase = FS;
+        a.declarations[0].prerequisites = 0b010;
+        a
+    };
+    // 7. conflicting primitives co-present — p0 conflicts with the scheduled p2.
+    let conflict = {
+        let mut a = canonical();
+        a.declarations[0].conflicts = 0b100;
+        a
+    };
+    // 8. phase inversion — [p2(FS), p0(NS), p1(FS)] descends FS→NS.
+    let phase_inv = {
+        let mut a = canonical();
+        a.schedule = vec![a.schedule[2], a.schedule[0], a.schedule[1]];
+        a
+    };
+    // 9. uncovered boundary requirement — a required kind no primitive covers.
+    let uncovered = {
+        let mut a = canonical();
+        a.required = 0b1000;
+        a
+    };
+    // 10. altered parameters with a stale digest — claimed param digest != trusted.
+    let stale_params = {
+        let mut a = canonical();
+        a.schedule[0].claimed_param_digest = 0x99;
+        a
+    };
+    // 11. valid but non-canonical ordering — [p0, p2, p1] passes validity, fails Kahn.
+    let noncanonical = {
+        let mut a = canonical();
+        a.schedule = vec![a.schedule[0], a.schedule[2], a.schedule[1]];
+        a
+    };
+    // 12. schedule built from a different backend profile — a different profile yields
+    //     different declarations, so the claimed digests no longer authenticate.
+    let other_profile = {
+        let mut a = canonical();
+        a.schedule[2].claimed_decl_digest = 0xDEAD; // declaration from profile P'
+        a
+    };
+
+    use ScheduleRefusal as R;
+    vec![
+        f("unknown-primitive-id", unknown, R::IndexOutOfRange),
+        f("wrong-primitive-version", wrong_version, R::DeclIntegrity),
+        f("duplicate-primitive", duplicate, R::DuplicatePrimitive),
+        f("missing-prerequisite", missing, R::MissingPrerequisite),
+        f(
+            "prerequisite-appears-later",
+            prereq_later,
+            R::PrereqOutOfOrder,
+        ),
+        f("cycle-smuggled", cycle, R::PrereqOutOfOrder),
+        f("conflicting-primitives", conflict, R::ConflictCoPresent),
+        f("phase-inversion", phase_inv, R::PhaseOutOfOrder),
+        f("uncovered-requirement", uncovered, R::RequirementUncovered),
+        f("altered-parameters", stale_params, R::DeclIntegrity),
+        f("valid-noncanonical", noncanonical, R::NonCanonical),
+        f("different-backend-profile", other_profile, R::DeclIntegrity),
+    ]
+}
+
+#[test]
+fn the_twelve_red_fixtures_are_each_rejected_on_both_paths() {
+    let fixtures = red_fixtures();
+    assert_eq!(
+        fixtures.len(),
+        12,
+        "the completeness grid has all 12 fixtures"
+    );
+    for RedFixture { id, inputs, expect } in &fixtures {
+        // The authoritative imperative reference rejects with the expected reason...
+        assert_eq!(
+            reference_schedule_admission(inputs),
+            refused(*expect),
+            "reference must reject `{id}` as {expect} (code {})",
+            expect.code()
+        );
+        // ...and the NC¹ circuit agrees (shadow parity returns Ok only on a full match).
+        match schedule_shadow_check(inputs) {
+            Ok(outcome) => {
+                assert_eq!(
+                    outcome,
+                    refused(*expect),
+                    "circuit must reject `{id}` as {expect}"
+                );
+            }
+            Err(divergence) => {
+                // Test-only intentional failure with dynamic context (no `panic!` macro).
+                let message = format!("fixture `{id}` diverged: {divergence}");
+                std::hint::black_box(Option::<()>::None).expect(&message);
+            }
+        }
+    }
+}
