@@ -50,8 +50,8 @@ pub use contract::plan::{
 pub use contract::recovery::{QuarantineRecord, RecoveryClassification};
 pub use contract::registry::{BackendRegistry, BoundaryPlanner, BoundaryRunner};
 pub use contract::report::{
-    ArtifactRecord, BoundaryFinding, BoundaryReport, BoundaryReportBody, CaptureRefs,
-    DeniedAttempt, ExitStatus, ObservedFact, Outcome, BOUNDARY_REPORT_SCHEMA_VERSION,
+    BoundaryFinding, BoundaryReport, BoundaryReportBody, CaptureRefs, DeniedAttempt, ExitStatus,
+    ObservedFact, Outcome, StagedArtifact, BOUNDARY_REPORT_SCHEMA_VERSION,
 };
 pub use contract::support::{BackendProfile, BackendProfileSnapshot, SupportMatrix};
 

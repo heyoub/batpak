@@ -7,7 +7,9 @@
 //! canonical; it is NOT persisted — the host appends it as a 0xE event.
 
 use crate::contract::capability::Enforcement;
-use crate::contract::ids::{BackendId, BoundaryPlanHash, BoundaryReportHash};
+use crate::contract::ids::{
+    ArtifactId, BackendId, BoundaryPlanHash, BoundaryReportHash, ContentHash,
+};
 use crate::contract::plan::{AdmittedRequirement, BoundaryRequirement};
 use crate::contract::support::BackendProfileSnapshot;
 use serde::{Deserialize, Serialize};
@@ -62,13 +64,21 @@ pub struct CaptureRefs {
     pub stderr: Option<String>,
 }
 
-/// A record of an artifact the boundary produced (quarantined until committed).
+/// A record of an artifact the boundary STAGED (produced + quarantined).
+///
+/// The report STAGES artifacts; it NEVER commits them. Committal/discard is the
+/// host's post-report [`crate::BoundaryDispositionEvent`], so a report is never
+/// self-authorizing. Identity is the occurrence [`ArtifactId`] (distinct from
+/// the byte-identity [`ContentHash`]: two attempts producing identical bytes
+/// are distinct occurrences with independent dispositions).
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct ArtifactRecord {
+pub struct StagedArtifact {
+    /// Occurrence identity (derived from attempt + logical slot + content).
+    pub artifact_id: ArtifactId,
+    /// blake3 content hash of the artifact's bytes (byte identity).
+    pub content_hash: ContentHash,
     /// Stable artifact name/path, as a portable string.
     pub name: String,
-    /// Whether the artifact has been committed out of quarantine.
-    pub committed: bool,
 }
 
 /// Process exit status, portably encoded (no OS `ExitStatus` type).
@@ -120,8 +130,8 @@ pub struct BoundaryReportBody {
     pub exit: Option<ExitStatus>,
     /// References to captured streams.
     pub captured: CaptureRefs,
-    /// Artifacts the boundary produced.
-    pub artifacts: Vec<ArtifactRecord>,
+    /// Artifacts the boundary STAGED (quarantined; disposition is post-report).
+    pub artifacts: Vec<StagedArtifact>,
     /// Structural findings, sorted before hashing (canonical).
     pub findings: Vec<BoundaryFinding>,
 }

@@ -46,7 +46,7 @@ pub enum Lie {
     DropOrphanFromReport,
     /// G6 — an inherited host fd leaked into a proxy/child.
     ProxyInheritedFd,
-    /// G7 — auto-committed an artifact while reporting it uncommitted.
+    /// G7 — auto-promoted an artifact out of quarantine but hid it from the report.
     AutoCommitButReportFalse,
     /// G8 — skipped sealing (a terminal outcome with no honest body).
     SkipSealing,
@@ -244,18 +244,13 @@ impl GroundTruth {
         if !self.reachable_inherited_fds.is_empty() && !observed_any(body, "fd_leaked") {
             caught.insert(Lie::ProxyInheritedFd);
         }
-        // G7: committed an artifact but the report marks it uncommitted (or omits
-        // it). The committed set is GroundTruth; the report's `committed` flag is
-        // the self-report.
-        for name in &self.committed_artifacts {
-            let reported_committed = body
-                .artifacts
-                .iter()
-                .find(|a| &a.name == name)
-                .is_some_and(|a| a.committed);
-            if !reported_committed {
-                caught.insert(Lie::AutoCommitButReportFalse);
-            }
+        // G7: the backend auto-promoted bytes OUT of quarantine (committed an
+        // artifact it has no authority to commit — committal is a host
+        // disposition, never a backend act) but the report does not OBSERVE it.
+        // Promoting bytes and hiding it leaves the artifact ungoverned: no
+        // disposition ceremony ever sees it. Same observed-fact shape as G1–G6.
+        if !self.committed_artifacts.is_empty() && !observed_any(body, "artifact_committed") {
+            caught.insert(Lie::AutoCommitButReportFalse);
         }
         // G9: an attempt was actually denied but is absent from `denied`.
         for label in &self.actually_denied {

@@ -18,8 +18,8 @@ use crate::contract::host_control::HostControl;
 use crate::contract::ids::BackendId;
 use crate::contract::plan::{BoundaryPlan, BoundaryRequirement, Workload};
 use crate::contract::report::{
-    ArtifactRecord, BoundaryFinding, BoundaryReportBody, CaptureRefs, DeniedAttempt, ExitStatus,
-    ObservedFact, Outcome, BOUNDARY_REPORT_SCHEMA_VERSION,
+    BoundaryFinding, BoundaryReportBody, CaptureRefs, DeniedAttempt, ExitStatus, ObservedFact,
+    Outcome, StagedArtifact, BOUNDARY_REPORT_SCHEMA_VERSION,
 };
 use crate::contract::support::{
     BackendProfile, BackendProfileSnapshot, RequirementKind, SupportMatrix,
@@ -153,7 +153,7 @@ impl Backend for InertBackend {
             denied: Vec::<DeniedAttempt>::new(),
             exit,
             captured,
-            artifacts: Vec::<ArtifactRecord>::new(),
+            artifacts: Vec::<StagedArtifact>::new(),
             findings,
         }
     }

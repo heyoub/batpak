@@ -21,8 +21,8 @@ use crate::contract::host_control::HostControl;
 use crate::contract::ids::BackendId;
 use crate::contract::plan::{BoundaryPlan, BoundaryRequirement, Workload};
 use crate::contract::report::{
-    ArtifactRecord, BoundaryFinding, BoundaryReportBody, CaptureRefs, DeniedAttempt, ExitStatus,
-    ObservedFact, Outcome, BOUNDARY_REPORT_SCHEMA_VERSION,
+    BoundaryFinding, BoundaryReportBody, CaptureRefs, DeniedAttempt, ExitStatus, ObservedFact,
+    Outcome, BOUNDARY_REPORT_SCHEMA_VERSION,
 };
 use crate::contract::support::{
     BackendProfile, BackendProfileSnapshot, RequirementKind, SupportMatrix,
@@ -385,12 +385,11 @@ impl SimBackend {
                 // Report omits the leak → diff catches G6.
             }
             Lie::AutoCommitButReportFalse => {
+                // The backend auto-promoted bytes OUT of quarantine — an act it
+                // has no authority to do (commit is a host disposition). It then
+                // stays SILENT in the report (no "artifact_committed" observation),
+                // so no disposition ever governs the artifact → diff catches G7.
                 self.record(|t| t.committed_artifact("out.bin"));
-                // Report marks it uncommitted → diff catches G7 (hide-danger).
-                run.artifacts.push(ArtifactRecord {
-                    name: "out.bin".to_string(),
-                    committed: false,
-                });
             }
             Lie::SkipSealing => {
                 // The run REACHES a terminal (GroundTruth recorded it above) but
@@ -427,7 +426,6 @@ struct RunState {
     exit: Option<ExitStatus>,
     observed: Vec<ObservedFact>,
     denied: Vec<DeniedAttempt>,
-    artifacts: Vec<ArtifactRecord>,
     /// G10: override the admitted mechanism strings in the report.
     mechanism_override: Option<String>,
 }
@@ -439,7 +437,6 @@ impl RunState {
             exit: None,
             observed: Vec::new(),
             denied: Vec::new(),
-            artifacts: Vec::new(),
             mechanism_override: None,
         }
     }
@@ -489,7 +486,7 @@ impl RunState {
             denied: self.denied,
             exit: self.exit,
             captured: CaptureRefs::default(),
-            artifacts: self.artifacts,
+            artifacts: Vec::new(),
             findings,
         }
     }
