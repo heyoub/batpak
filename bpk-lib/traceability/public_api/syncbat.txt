@@ -1,9 +1,24 @@
 pub mod syncbat
 pub use syncbat::operation
+pub mod syncbat::admission
+#[non_exhaustive] pub enum syncbat::admission::AdmissionDecision
+pub syncbat::admission::AdmissionDecision::Admit
+pub syncbat::admission::AdmissionDecision::Deny
+pub syncbat::admission::AdmissionDecision::Deny::code: alloc::string::String
+pub syncbat::admission::AdmissionDecision::Deny::message: alloc::string::String
+impl syncbat::admission::AdmissionDecision
+pub fn syncbat::admission::AdmissionDecision::deny(code: impl core::convert::Into<alloc::string::String>, message: impl core::convert::Into<alloc::string::String>) -> Self
+pub const fn syncbat::admission::AdmissionDecision::is_admit(&self) -> bool
+pub trait syncbat::admission::AdmissionGuard
+pub fn syncbat::admission::AdmissionGuard::admit(&self, descriptor: &syncbat::operation::OperationDescriptor, input: &[u8], cx: &mut syncbat::core::Ctx<'_>) -> syncbat::admission::AdmissionDecision
+impl<F> syncbat::admission::AdmissionGuard for F where F: core::ops::function::Fn(&syncbat::operation::OperationDescriptor, &[u8], &mut syncbat::core::Ctx<'_>) -> syncbat::admission::AdmissionDecision
+pub fn F::admit(&self, descriptor: &syncbat::operation::OperationDescriptor, input: &[u8], cx: &mut syncbat::core::Ctx<'_>) -> syncbat::admission::AdmissionDecision
 pub mod syncbat::builder
 pub struct syncbat::builder::CoreBuilder
 impl syncbat::builder::CoreBuilder
+pub fn syncbat::builder::CoreBuilder::admission_guard<G>(&mut self, guard: G) -> &mut Self where G: syncbat::admission::AdmissionGuard + 'static
 pub fn syncbat::builder::CoreBuilder::build(self) -> core::result::Result<syncbat::core::Core, syncbat::error::BuildError>
+pub fn syncbat::builder::CoreBuilder::clear_admission_guard(&mut self) -> &mut Self
 pub fn syncbat::builder::CoreBuilder::clear_receipt_sink(&mut self) -> &mut Self
 pub fn syncbat::builder::CoreBuilder::mount(&mut self, module: syncbat::module::Module) -> core::result::Result<&mut Self, syncbat::error::BuildError>
 pub fn syncbat::builder::CoreBuilder::new() -> Self
@@ -42,6 +57,8 @@ pub fn syncbat::core::Core::descriptor(&self, name: impl core::convert::AsRef<st
 pub fn syncbat::core::Core::invoke(&mut self, name: impl core::convert::AsRef<str>, input: syncbat::operation::OperationInput) -> core::result::Result<syncbat::core::CheckoutResult, syncbat::error::RuntimeError>
 pub struct syncbat::core::Ctx<'a>
 impl<'a> syncbat::core::Ctx<'a>
+pub fn syncbat::core::Ctx<'a>::attach_local_extension(&mut self, key: impl core::convert::Into<alloc::string::String>, value: impl core::convert::Into<alloc::vec::Vec<u8>>)
+pub fn syncbat::core::Ctx<'a>::attach_signed_extension(&mut self, key: impl core::convert::Into<alloc::string::String>, value: impl core::convert::Into<alloc::vec::Vec<u8>>)
 pub fn syncbat::core::Ctx<'a>::descriptor(&self) -> &'a syncbat::operation::OperationDescriptor
 pub mod syncbat::error
 #[non_exhaustive] pub enum syncbat::error::BuildError
@@ -74,6 +91,10 @@ impl core::error::Error for syncbat::error::BuildError
 impl core::fmt::Display for syncbat::error::BuildError
 pub fn syncbat::error::BuildError::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 #[non_exhaustive] pub enum syncbat::error::RuntimeError
+pub syncbat::error::RuntimeError::Denied
+pub syncbat::error::RuntimeError::Denied::code: alloc::string::String
+pub syncbat::error::RuntimeError::Denied::message: alloc::string::String
+pub syncbat::error::RuntimeError::Denied::name: alloc::string::String
 pub syncbat::error::RuntimeError::Handler
 pub syncbat::error::RuntimeError::Handler::code: alloc::string::String
 pub syncbat::error::RuntimeError::Handler::message: alloc::string::String
@@ -87,6 +108,7 @@ pub syncbat::error::RuntimeError::ReceiptSink::name: alloc::string::String
 pub syncbat::error::RuntimeError::UnknownOperation
 pub syncbat::error::RuntimeError::UnknownOperation::name: alloc::string::String
 impl syncbat::error::RuntimeError
+pub fn syncbat::error::RuntimeError::denied(name: impl core::convert::Into<alloc::string::String>, code: impl core::convert::Into<alloc::string::String>, message: impl core::convert::Into<alloc::string::String>) -> Self
 pub fn syncbat::error::RuntimeError::handler(name: impl core::convert::Into<alloc::string::String>, code: impl core::convert::Into<alloc::string::String>, message: impl core::convert::Into<alloc::string::String>) -> Self
 pub fn syncbat::error::RuntimeError::missing_handler(name: impl core::convert::Into<alloc::string::String>) -> Self
 pub fn syncbat::error::RuntimeError::receipt_sink(name: impl core::convert::Into<alloc::string::String>, message: impl core::convert::Into<alloc::string::String>) -> Self
@@ -240,6 +262,11 @@ pub fn syncbat::receipt::ReceiptEnvelope::with_output_hash(self, hash: syncbat::
 pub fn syncbat::receipt::ReceiptEnvelope::with_signed_extension(self, key: impl core::convert::Into<alloc::string::String>, value: impl core::convert::Into<alloc::vec::Vec<u8>>) -> Self
 impl batpak::event::payload::EventPayload for syncbat::receipt::ReceiptEnvelope
 pub const syncbat::receipt::ReceiptEnvelope::KIND: batpak::event::kind::EventKind
+pub struct syncbat::receipt::ReceiptMetadata
+pub syncbat::receipt::ReceiptMetadata::local: syncbat::receipt::ReceiptExtensionDrawer
+pub syncbat::receipt::ReceiptMetadata::signed: syncbat::receipt::ReceiptExtensionDrawer
+impl syncbat::receipt::ReceiptMetadata
+pub fn syncbat::receipt::ReceiptMetadata::is_empty(&self) -> bool
 pub struct syncbat::receipt::ReceiptSinkError
 impl syncbat::receipt::ReceiptSinkError
 pub fn syncbat::receipt::ReceiptSinkError::message(&self) -> &str
@@ -391,6 +418,14 @@ pub fn syncbat::store_sink::StoreReceiptSink::record_typed(&self, envelope: &syn
 pub fn syncbat::store_sink::StoreReceiptSink::with_options(self, options: batpak::store::append::AppendOptions) -> Self
 impl syncbat::receipt::ReceiptSink for syncbat::store_sink::StoreReceiptSink
 pub fn syncbat::store_sink::StoreReceiptSink::record_receipt(&self, envelope: &syncbat::receipt::ReceiptEnvelope) -> core::result::Result<syncbat::receipt::RecordedReceipt, syncbat::receipt::ReceiptSinkError>
+#[non_exhaustive] pub enum syncbat::AdmissionDecision
+pub syncbat::AdmissionDecision::Admit
+pub syncbat::AdmissionDecision::Deny
+pub syncbat::AdmissionDecision::Deny::code: alloc::string::String
+pub syncbat::AdmissionDecision::Deny::message: alloc::string::String
+impl syncbat::admission::AdmissionDecision
+pub fn syncbat::admission::AdmissionDecision::deny(code: impl core::convert::Into<alloc::string::String>, message: impl core::convert::Into<alloc::string::String>) -> Self
+pub const fn syncbat::admission::AdmissionDecision::is_admit(&self) -> bool
 #[non_exhaustive] pub enum syncbat::BuildError
 pub syncbat::BuildError::DuplicateHandler
 pub syncbat::BuildError::DuplicateHandler::name: alloc::string::String
@@ -490,6 +525,10 @@ impl core::error::Error for syncbat::register::RegisterValidationError
 impl core::fmt::Display for syncbat::register::RegisterValidationError
 pub fn syncbat::register::RegisterValidationError::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 #[non_exhaustive] pub enum syncbat::RuntimeError
+pub syncbat::RuntimeError::Denied
+pub syncbat::RuntimeError::Denied::code: alloc::string::String
+pub syncbat::RuntimeError::Denied::message: alloc::string::String
+pub syncbat::RuntimeError::Denied::name: alloc::string::String
 pub syncbat::RuntimeError::Handler
 pub syncbat::RuntimeError::Handler::code: alloc::string::String
 pub syncbat::RuntimeError::Handler::message: alloc::string::String
@@ -503,6 +542,7 @@ pub syncbat::RuntimeError::ReceiptSink::name: alloc::string::String
 pub syncbat::RuntimeError::UnknownOperation
 pub syncbat::RuntimeError::UnknownOperation::name: alloc::string::String
 impl syncbat::error::RuntimeError
+pub fn syncbat::error::RuntimeError::denied(name: impl core::convert::Into<alloc::string::String>, code: impl core::convert::Into<alloc::string::String>, message: impl core::convert::Into<alloc::string::String>) -> Self
 pub fn syncbat::error::RuntimeError::handler(name: impl core::convert::Into<alloc::string::String>, code: impl core::convert::Into<alloc::string::String>, message: impl core::convert::Into<alloc::string::String>) -> Self
 pub fn syncbat::error::RuntimeError::missing_handler(name: impl core::convert::Into<alloc::string::String>) -> Self
 pub fn syncbat::error::RuntimeError::receipt_sink(name: impl core::convert::Into<alloc::string::String>, message: impl core::convert::Into<alloc::string::String>) -> Self
@@ -602,7 +642,9 @@ pub fn syncbat::core::Core::descriptor(&self, name: impl core::convert::AsRef<st
 pub fn syncbat::core::Core::invoke(&mut self, name: impl core::convert::AsRef<str>, input: syncbat::operation::OperationInput) -> core::result::Result<syncbat::core::CheckoutResult, syncbat::error::RuntimeError>
 pub struct syncbat::CoreBuilder
 impl syncbat::builder::CoreBuilder
+pub fn syncbat::builder::CoreBuilder::admission_guard<G>(&mut self, guard: G) -> &mut Self where G: syncbat::admission::AdmissionGuard + 'static
 pub fn syncbat::builder::CoreBuilder::build(self) -> core::result::Result<syncbat::core::Core, syncbat::error::BuildError>
+pub fn syncbat::builder::CoreBuilder::clear_admission_guard(&mut self) -> &mut Self
 pub fn syncbat::builder::CoreBuilder::clear_receipt_sink(&mut self) -> &mut Self
 pub fn syncbat::builder::CoreBuilder::mount(&mut self, module: syncbat::module::Module) -> core::result::Result<&mut Self, syncbat::error::BuildError>
 pub fn syncbat::builder::CoreBuilder::new() -> Self
@@ -614,6 +656,8 @@ pub fn syncbat::builder::CoreBuilder::register_item(&mut self, item: syncbat::op
 pub fn syncbat::builder::CoreBuilder::register_operation(&mut self, descriptor: syncbat::operation::OperationDescriptor) -> core::result::Result<&mut Self, syncbat::error::BuildError>
 pub struct syncbat::Ctx<'a>
 impl<'a> syncbat::core::Ctx<'a>
+pub fn syncbat::core::Ctx<'a>::attach_local_extension(&mut self, key: impl core::convert::Into<alloc::string::String>, value: impl core::convert::Into<alloc::vec::Vec<u8>>)
+pub fn syncbat::core::Ctx<'a>::attach_signed_extension(&mut self, key: impl core::convert::Into<alloc::string::String>, value: impl core::convert::Into<alloc::vec::Vec<u8>>)
 pub fn syncbat::core::Ctx<'a>::descriptor(&self) -> &'a syncbat::operation::OperationDescriptor
 pub struct syncbat::DescriptorValidationError
 pub syncbat::DescriptorValidationError::field: &'static str
@@ -679,6 +723,11 @@ pub fn syncbat::receipt::ReceiptEnvelope::with_output_hash(self, hash: syncbat::
 pub fn syncbat::receipt::ReceiptEnvelope::with_signed_extension(self, key: impl core::convert::Into<alloc::string::String>, value: impl core::convert::Into<alloc::vec::Vec<u8>>) -> Self
 impl batpak::event::payload::EventPayload for syncbat::receipt::ReceiptEnvelope
 pub const syncbat::receipt::ReceiptEnvelope::KIND: batpak::event::kind::EventKind
+pub struct syncbat::ReceiptMetadata
+pub syncbat::ReceiptMetadata::local: syncbat::receipt::ReceiptExtensionDrawer
+pub syncbat::ReceiptMetadata::signed: syncbat::receipt::ReceiptExtensionDrawer
+impl syncbat::receipt::ReceiptMetadata
+pub fn syncbat::receipt::ReceiptMetadata::is_empty(&self) -> bool
 pub struct syncbat::ReceiptSinkError
 impl syncbat::receipt::ReceiptSinkError
 pub fn syncbat::receipt::ReceiptSinkError::message(&self) -> &str
@@ -756,6 +805,10 @@ pub const syncbat::MAX_OPERATION_NAME_BYTES: usize
 pub const syncbat::SYNCBAT_EXTENSION_NAMESPACE: &str
 pub const syncbat::SYNCBAT_RECEIPT_EVENT_KIND: batpak::event::kind::EventKind
 pub const syncbat::SYNCBAT_REGISTER_EVENT_KIND: batpak::event::kind::EventKind
+pub trait syncbat::AdmissionGuard
+pub fn syncbat::AdmissionGuard::admit(&self, descriptor: &syncbat::operation::OperationDescriptor, input: &[u8], cx: &mut syncbat::core::Ctx<'_>) -> syncbat::admission::AdmissionDecision
+impl<F> syncbat::admission::AdmissionGuard for F where F: core::ops::function::Fn(&syncbat::operation::OperationDescriptor, &[u8], &mut syncbat::core::Ctx<'_>) -> syncbat::admission::AdmissionDecision
+pub fn F::admit(&self, descriptor: &syncbat::operation::OperationDescriptor, input: &[u8], cx: &mut syncbat::core::Ctx<'_>) -> syncbat::admission::AdmissionDecision
 pub trait syncbat::Handler
 pub fn syncbat::Handler::handle(&mut self, input: &[u8], cx: &mut syncbat::core::Ctx<'_>) -> syncbat::handler::HandlerResult
 impl<F> syncbat::handler::Handler for F where F: for<'a> core::ops::function::FnMut(&[u8], &mut syncbat::core::Ctx<'a>) -> syncbat::handler::HandlerResult

@@ -61,6 +61,7 @@
 #[doc(hidden)]
 pub extern crate self as syncbat;
 
+pub mod admission;
 pub mod builder;
 pub mod core;
 pub mod error;
@@ -73,6 +74,7 @@ pub mod register;
 pub mod register_store;
 pub mod store_sink;
 
+pub use admission::{AdmissionDecision, AdmissionGuard};
 pub use builder::CoreBuilder;
 pub use core::{Checkout, CheckoutFrame, CheckoutResult, Core, Ctx};
 pub use error::{BuildError, ReceiptSinkHandlerCause, RuntimeError};
@@ -85,7 +87,7 @@ pub use operation::{
 pub use operation_name::{OperationName, OperationNameError};
 pub use receipt::{
     BatpakReceiptFields, ReceiptEnvelope, ReceiptExtensionDrawer, ReceiptHash, ReceiptHashPolicy,
-    ReceiptHasher, ReceiptOutcome, ReceiptSink, ReceiptSinkError, RecordedReceipt,
+    ReceiptHasher, ReceiptMetadata, ReceiptOutcome, ReceiptSink, ReceiptSinkError, RecordedReceipt,
     SYNCBAT_RECEIPT_EVENT_KIND,
 };
 pub use register::{CacheRegister, Register, RegisterValidationError};

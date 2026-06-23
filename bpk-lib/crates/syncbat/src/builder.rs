@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 
+use crate::admission::AdmissionGuard;
 use crate::core::Core;
 use crate::error::BuildError;
 use crate::receipt::ReceiptHashPolicy;
@@ -9,6 +10,7 @@ use crate::{handler, module, operation, receipt, register};
 
 type BoxedHandler = Box<dyn handler::Handler + 'static>;
 type BoxedReceiptSink = Box<dyn receipt::ReceiptSink + 'static>;
+type BoxedAdmissionGuard = Box<dyn AdmissionGuard + 'static>;
 
 /// Builder for [`Core`].
 ///
@@ -20,6 +22,7 @@ type BoxedReceiptSink = Box<dyn receipt::ReceiptSink + 'static>;
 pub struct CoreBuilder {
     descriptors: BTreeMap<String, operation::OperationDescriptor>,
     handlers: BTreeMap<String, BoxedHandler>,
+    admission_guard: Option<BoxedAdmissionGuard>,
     receipt_sink: Option<BoxedReceiptSink>,
     receipt_hash_policy: ReceiptHashPolicy,
 }
@@ -133,6 +136,25 @@ impl CoreBuilder {
         self.register(descriptor, handler)
     }
 
+    /// Configure the optional pre-handler admission guard.
+    ///
+    /// The guard runs before every handler dispatch and may deny the call (the
+    /// handler never runs, and the runtime records a `Denied` receipt). At most
+    /// one guard is held; compose multiple policies inside a single guard.
+    pub fn admission_guard<G>(&mut self, guard: G) -> &mut Self
+    where
+        G: AdmissionGuard + 'static,
+    {
+        self.admission_guard = Some(Box::new(guard));
+        self
+    }
+
+    /// Clear any configured admission guard.
+    pub fn clear_admission_guard(&mut self) -> &mut Self {
+        self.admission_guard = None;
+        self
+    }
+
     /// Configure the optional receipt sink made available to invocation
     /// contexts.
     pub fn receipt_sink<S>(&mut self, sink: S) -> &mut Self
@@ -175,6 +197,7 @@ impl CoreBuilder {
         Ok(Core {
             descriptors: self.descriptors,
             handlers: self.handlers,
+            admission_guard: self.admission_guard,
             receipt_sink: self.receipt_sink,
             receipt_hash_policy: self.receipt_hash_policy,
         })

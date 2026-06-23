@@ -36,7 +36,10 @@ pub use contract::events::{BoundaryPlanEvent, BoundaryRecoveryEvent, BoundaryRep
 pub use contract::host_control::{
     CommitDurability, HostControl, KillGuarantee, KillTarget, PathView, StdStreams,
 };
-pub use contract::ids::{BackendId, BoundaryPlanHash, BoundaryReportHash};
+pub use contract::ids::{
+    ArtifactId, AttemptId, BackendId, BackendProfileHash, BoundaryPlanHash, BoundaryReportHash,
+    ContentHash, Digest32,
+};
 pub use contract::plan::{
     AdmittedRequirement, BoundaryPlan, BoundaryRequirement, BoundarySpec, Budgets,
     EvidenceRequirements, PlanError, Workload, BOUNDARY_PLAN_SCHEMA_VERSION,

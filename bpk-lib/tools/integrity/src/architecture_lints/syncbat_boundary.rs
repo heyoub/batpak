@@ -42,6 +42,14 @@ const CORE_LAYER_LEAKS: &[BoundaryTerm] = &[
         reason: "network layer type names belong outside batpak core",
     },
     BoundaryTerm {
+        token: "bvisor",
+        reason: "boundary-supervisor layer names belong outside batpak core",
+    },
+    BoundaryTerm {
+        token: "Bvisor",
+        reason: "boundary-supervisor layer type names belong outside batpak core",
+    },
+    BoundaryTerm {
         token: "contract.context_v1",
         reason: "PCP profile wire validation belongs outside batpak core",
     },
@@ -77,6 +85,14 @@ const SYNCBAT_LAYER_LEAKS: &[BoundaryTerm] = &[
         reason: "network layer type names belong outside syncbat",
     },
     BoundaryTerm {
+        token: "bvisor",
+        reason: "boundary-supervisor layer names belong outside syncbat",
+    },
+    BoundaryTerm {
+        token: "Bvisor",
+        reason: "boundary-supervisor layer type names belong outside syncbat",
+    },
+    BoundaryTerm {
         token: "contract.context_v1",
         reason: "PCP profile wire validation belongs outside syncbat",
     },
@@ -96,6 +112,14 @@ const SYNCBAT_LAYER_LEAKS: &[BoundaryTerm] = &[
 
 const NETBAT_LAYER_LEAKS: &[BoundaryTerm] = &[
     BoundaryTerm {
+        token: "bvisor",
+        reason: "boundary-supervisor layer names belong outside netbat",
+    },
+    BoundaryTerm {
+        token: "Bvisor",
+        reason: "boundary-supervisor layer type names belong outside netbat",
+    },
+    BoundaryTerm {
         token: "contract.context_v1",
         reason: "PCP profile wire validation belongs outside netbat",
     },
@@ -114,6 +138,49 @@ const NETBAT_LAYER_LEAKS: &[BoundaryTerm] = &[
     BoundaryTerm {
         token: "batpak::",
         reason: "netbat should expose syncbat, not bypass the runtime into batpak",
+    },
+];
+
+// The PURE `bvisor` contract crate (crates/bvisor/src/). It depends on the
+// batpak generic substrate API ONLY: host wiring (syncbat), transport (netbat),
+// and contract-layer names live in `bvisor-host`, never in the pure contract.
+const BVISOR_LAYER_LEAKS: &[BoundaryTerm] = &[
+    BoundaryTerm {
+        token: "syncbat",
+        reason: "runtime host wiring belongs in bvisor-host, not the pure bvisor contract",
+    },
+    BoundaryTerm {
+        token: "Syncbat",
+        reason: "runtime host wiring belongs in bvisor-host, not the pure bvisor contract",
+    },
+    BoundaryTerm {
+        token: "netbat",
+        reason: "transport belongs in bvisor-host, not the pure bvisor contract",
+    },
+    BoundaryTerm {
+        token: "Netbat",
+        reason: "transport belongs in bvisor-host, not the pure bvisor contract",
+    },
+    BoundaryTerm {
+        token: "clawbat",
+        reason: "contract layer names belong outside bvisor",
+    },
+    BoundaryTerm {
+        token: "Clawbat",
+        reason: "contract layer type names belong outside bvisor",
+    },
+    BoundaryTerm {
+        token: "authority_required",
+        reason:
+            "authority claims are caller policy input — bvisor governs mechanisms, not meanings",
+    },
+    BoundaryTerm {
+        token: "PCP-Core",
+        reason: "PCP semantics stay outside bvisor",
+    },
+    BoundaryTerm {
+        token: "PcpProfile",
+        reason: "PCP profile types stay outside bvisor",
     },
 ];
 
@@ -218,6 +285,9 @@ enum SourceLayer {
     Core,
     Syncbat,
     Netbat,
+    /// The PURE `bvisor` contract crate (`crates/bvisor/src/`). NOT `bvisor-host`
+    /// (which may use syncbat/netbat and own threads) — that maps to `None`.
+    Bvisor,
 }
 
 impl SourceLayer {
@@ -226,11 +296,15 @@ impl SourceLayer {
             SourceLayer::Core => "batpak core",
             SourceLayer::Syncbat => "syncbat",
             SourceLayer::Netbat => "netbat",
+            SourceLayer::Bvisor => "bvisor (pure contract)",
         }
     }
 
     fn checks_internal_batpak_paths(self) -> bool {
-        matches!(self, SourceLayer::Syncbat | SourceLayer::Netbat)
+        matches!(
+            self,
+            SourceLayer::Syncbat | SourceLayer::Netbat | SourceLayer::Bvisor
+        )
     }
 }
 
@@ -248,12 +322,20 @@ fn source_layer(repo_root: &Path, path: &Path) -> Option<SourceLayer> {
     if rel.starts_with("crates/netbat/src/") {
         return Some(SourceLayer::Netbat);
     }
+    // The pure contract only. `crates/bvisor-host/src/` does NOT match this
+    // prefix (the next char is `-`, not `/`), so the host is intentionally
+    // exempt — it owns syncbat wiring, transport, and supervision threads.
+    if rel.starts_with("crates/bvisor/src/") {
+        return Some(SourceLayer::Bvisor);
+    }
     None
 }
 
 fn checks_runtime_shape(repo_root: &Path, path: &Path) -> bool {
     let rel = relative(repo_root, path);
-    rel.starts_with("crates/syncbat/src/") || rel.starts_with("crates/netbat/src/")
+    rel.starts_with("crates/syncbat/src/")
+        || rel.starts_with("crates/netbat/src/")
+        || rel.starts_with("crates/bvisor/src/")
 }
 
 fn check_no_async_or_unsafe_runtime_source(
@@ -325,6 +407,7 @@ fn check_family_manifest_boundaries(repo_root: &Path) -> Result<()> {
                 "syncbat-macros",
                 "clawbat",
                 "netbat",
+                "bvisor",
                 "pcp",
                 "liteship",
             ],
@@ -332,17 +415,41 @@ fn check_family_manifest_boundaries(repo_root: &Path) -> Result<()> {
         ManifestRule {
             label: "syncbat",
             rel: "crates/syncbat/Cargo.toml",
-            forbidden_stack_deps: &["clawbat", "netbat", "pcp", "liteship"],
+            forbidden_stack_deps: &["clawbat", "netbat", "bvisor", "pcp", "liteship"],
         },
         ManifestRule {
             label: "syncbat-macros",
             rel: "crates/syncbat-macros/Cargo.toml",
-            forbidden_stack_deps: &["batpak", "syncbat", "clawbat", "netbat", "pcp", "liteship"],
+            forbidden_stack_deps: &[
+                "batpak", "syncbat", "clawbat", "netbat", "bvisor", "pcp", "liteship",
+            ],
         },
         ManifestRule {
             label: "netbat",
             rel: "crates/netbat/Cargo.toml",
-            forbidden_stack_deps: &["batpak", "clawbat", "pcp", "liteship"],
+            forbidden_stack_deps: &["batpak", "clawbat", "bvisor", "pcp", "liteship"],
+        },
+        // The PURE bvisor contract depends on the batpak generic substrate ONLY.
+        // syncbat/netbat host wiring lives in bvisor-host (not gated here, since
+        // bvisor-host legitimately depends on them).
+        ManifestRule {
+            label: "bvisor (pure contract)",
+            rel: "crates/bvisor/Cargo.toml",
+            forbidden_stack_deps: &[
+                "syncbat",
+                "syncbat-macros",
+                "netbat",
+                "clawbat",
+                "pcp",
+                "liteship",
+            ],
+        },
+        // refbat is the reference host + conformance witness — it must never
+        // become a bvisor product host (kosher rule #3).
+        ManifestRule {
+            label: "refbat",
+            rel: "crates/refbat/Cargo.toml",
+            forbidden_stack_deps: &["bvisor"],
         },
     ];
 
@@ -436,6 +543,7 @@ fn forbidden_layer_terms(layer: SourceLayer, content: &str) -> Vec<&'static Boun
         SourceLayer::Core => CORE_LAYER_LEAKS,
         SourceLayer::Syncbat => SYNCBAT_LAYER_LEAKS,
         SourceLayer::Netbat => NETBAT_LAYER_LEAKS,
+        SourceLayer::Bvisor => BVISOR_LAYER_LEAKS,
     };
     matching_terms(terms, content)
 }
@@ -580,6 +688,39 @@ mod tests {
         assert!(forbidden_layer_terms(SourceLayer::Core, content).is_empty());
         assert!(forbidden_layer_terms(SourceLayer::Syncbat, content).is_empty());
         assert!(forbidden_layer_terms(SourceLayer::Netbat, content).is_empty());
+        assert!(forbidden_layer_terms(SourceLayer::Bvisor, content).is_empty());
+    }
+
+    #[test]
+    fn detects_bvisor_referenced_from_lower_layers() {
+        // The boundary-supervisor layer must not leak DOWN into core/syncbat/netbat.
+        let content = "use bvisor::BoundaryPlan;\nlet _ = bvisor::BoundaryRunner::run;\n";
+        for layer in [SourceLayer::Core, SourceLayer::Syncbat, SourceLayer::Netbat] {
+            let tokens = tokens(&forbidden_layer_terms(layer, content));
+            assert!(
+                tokens.contains(&"bvisor"),
+                "{layer:?} should reject `bvisor`"
+            );
+        }
+    }
+
+    #[test]
+    fn detects_runtime_and_transport_leak_in_pure_bvisor() {
+        // The PURE contract must not reach UP into host wiring (syncbat) or
+        // transport (netbat) — those belong in bvisor-host.
+        let content = "use syncbat::Core;\nlet _ = netbat::serve_tcp_listener;\n";
+        let tokens = tokens(&forbidden_layer_terms(SourceLayer::Bvisor, content));
+        assert!(tokens.contains(&"syncbat"));
+        assert!(tokens.contains(&"netbat"));
+    }
+
+    #[test]
+    fn allows_bvisor_public_batpak_paths() {
+        // The pure contract legitimately consumes the batpak generic API.
+        let content =
+            "use batpak::{EventPayload, canonical};\nuse batpak::event::hash::compute_hash;\n";
+        assert!(forbidden_layer_terms(SourceLayer::Bvisor, content).is_empty());
+        assert!(family_internal_batpak_paths(content).is_empty());
     }
 
     #[test]
@@ -642,6 +783,15 @@ mod tests {
         assert_eq!(
             source_layer(root, Path::new("/repo/crates/netbat/src/lib.rs")),
             Some(SourceLayer::Netbat)
+        );
+        assert_eq!(
+            source_layer(root, Path::new("/repo/crates/bvisor/src/contract/plan.rs")),
+            Some(SourceLayer::Bvisor)
+        );
+        // bvisor-host is NOT the pure layer — it owns syncbat wiring + threads.
+        assert_eq!(
+            source_layer(root, Path::new("/repo/crates/bvisor-host/src/lib.rs")),
+            None
         );
         assert_eq!(
             source_layer(

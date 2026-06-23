@@ -179,3 +179,119 @@ impl BackendProfile {
             .unwrap_or(Enforcement::Unsupported)
     }
 }
+
+#[cfg(test)]
+mod meet_semilattice_laws {
+    //! [`floor`] is the MEET of the enforcement lattice in the SECURITY order
+    //! (`Enforced` = top/strongest, `Unsupported` = bottom/fail-closed). The
+    //! derived [`Ord`] on [`Enforcement`] runs the OTHER way (declaration order:
+    //! `Enforced` < `Mediated` < `Unsupported`), so the security-meet equals the
+    //! derived-`Ord` MAX — NOT the `min` an earlier sketch guessed. These
+    //! exhaustive laws (the domain is 3 elements, so we brute-force every
+    //! pairing/triple rather than sample) pin the algebra the admission matrix
+    //! already relies on: a bounded meet-semilattice with `Unsupported` as the
+    //! absorbing bottom (the load-bearing fail-closed property) and `Enforced`
+    //! as the identity. Associativity is what makes composing N machine ceilings
+    //! (layered confinement) deterministic regardless of grouping.
+    use super::{floor, Enforcement};
+
+    const ALL: [Enforcement; 3] = [
+        Enforcement::Enforced,
+        Enforcement::Mediated,
+        Enforcement::Unsupported,
+    ];
+
+    /// Security strength: higher = stronger guarantee (`Enforced` strongest,
+    /// `Unsupported` weakest). This is the REVERSE of the derived `Ord`.
+    fn strength(e: Enforcement) -> u8 {
+        match e {
+            Enforcement::Enforced => 2,
+            Enforcement::Mediated => 1,
+            Enforcement::Unsupported => 0,
+        }
+    }
+
+    #[test]
+    fn floor_is_commutative() {
+        for a in ALL {
+            for b in ALL {
+                assert_eq!(floor(a, b), floor(b, a), "commutativity at ({a:?},{b:?})");
+            }
+        }
+    }
+
+    #[test]
+    fn floor_is_associative() {
+        for a in ALL {
+            for b in ALL {
+                for c in ALL {
+                    assert_eq!(
+                        floor(floor(a, b), c),
+                        floor(a, floor(b, c)),
+                        "associativity at ({a:?},{b:?},{c:?})",
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn floor_is_idempotent() {
+        for a in ALL {
+            assert_eq!(floor(a, a), a, "idempotence at {a:?}");
+        }
+    }
+
+    #[test]
+    fn unsupported_is_the_absorbing_bottom() {
+        // Fail-closed: `Unsupported` on either side forces `Unsupported`. This is
+        // the load-bearing security property of the whole admission lattice.
+        for a in ALL {
+            assert_eq!(floor(Enforcement::Unsupported, a), Enforcement::Unsupported);
+            assert_eq!(floor(a, Enforcement::Unsupported), Enforcement::Unsupported);
+        }
+    }
+
+    #[test]
+    fn enforced_is_the_identity() {
+        // `Enforced` is the lattice top: flooring by it leaves the other operand
+        // unchanged (the machine could back anything; the requirement decides).
+        for a in ALL {
+            assert_eq!(floor(Enforcement::Enforced, a), a);
+            assert_eq!(floor(a, Enforcement::Enforced), a);
+        }
+    }
+
+    #[test]
+    fn floor_is_the_greatest_lower_bound_in_security_order() {
+        // The verdict is never STRONGER than either input, and is the strongest
+        // that satisfies that bound — i.e. the GLB in the security order.
+        for a in ALL {
+            for b in ALL {
+                let r = floor(a, b);
+                assert!(
+                    strength(r) <= strength(a) && strength(r) <= strength(b),
+                    "floor exceeded an input at ({a:?},{b:?}) -> {r:?}",
+                );
+                assert_eq!(
+                    strength(r),
+                    strength(a).min(strength(b)),
+                    "not the GLB at ({a:?},{b:?}) -> {r:?}",
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn floor_equals_derived_ord_max() {
+        // Consistency pin: because the derived `Ord` is reversed from strength,
+        // the security-meet equals the derived-`Ord` MAX. `floor` could thus be
+        // written `best.max(ceiling)`; this guards that identity (and corrects
+        // the plan's "floor == min" misstatement).
+        for a in ALL {
+            for b in ALL {
+                assert_eq!(floor(a, b), a.max(b), "floor != Ord-max at ({a:?},{b:?})");
+            }
+        }
+    }
+}

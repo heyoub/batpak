@@ -70,6 +70,30 @@ impl ReceiptHashPolicy {
 /// layer does not impose a schema on higher-level operation kits.
 pub type ReceiptExtensionDrawer = BTreeMap<String, Vec<u8>>;
 
+/// Opaque receipt metadata a handler or admission guard attaches to the current
+/// invocation via [`crate::Ctx`]. The runtime drains it into the recorded
+/// [`ReceiptEnvelope`]'s drawers — `signed` into [`ReceiptEnvelope::signed_extensions`]
+/// (copied into batpak receipt extensions by the store sink) and `local` into
+/// [`ReceiptEnvelope::local_extensions`] (envelope body only). It exists so a
+/// handler can stamp correlation/attempt metadata onto its receipt WITHOUT
+/// owning the receipt envelope, preserving the runtime's sole ownership of
+/// receipt persistence.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ReceiptMetadata {
+    /// Entries destined for the envelope's signed drawer.
+    pub signed: ReceiptExtensionDrawer,
+    /// Entries kept only in the envelope's local drawer.
+    pub local: ReceiptExtensionDrawer,
+}
+
+impl ReceiptMetadata {
+    /// Return true when no metadata has been attached.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.signed.is_empty() && self.local.is_empty()
+    }
+}
+
 /// Runtime result recorded for a completed operation attempt.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[non_exhaustive]

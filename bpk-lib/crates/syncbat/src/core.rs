@@ -2,21 +2,25 @@
 
 use std::collections::BTreeMap;
 
+use crate::admission::{AdmissionDecision, AdmissionGuard};
 use crate::error::{ReceiptSinkHandlerCause, RuntimeError};
-use crate::receipt::{ReceiptHashPolicy, ReceiptOutcome, RecordedReceipt};
+use crate::receipt::{ReceiptHashPolicy, ReceiptMetadata, ReceiptOutcome, RecordedReceipt};
 use crate::{handler, operation, receipt};
 
 type BoxedHandler = Box<dyn handler::Handler + 'static>;
 type BoxedReceiptSink = Box<dyn receipt::ReceiptSink + 'static>;
+type BoxedAdmissionGuard = Box<dyn AdmissionGuard + 'static>;
 
 /// Composition root for a sync-first operation runtime.
 ///
-/// `Core` owns the operation descriptors, the matching handler table, and the
-/// optional receipt sink shared with each invocation context. It performs only
-/// synchronous dispatch; handlers run on the caller's thread.
+/// `Core` owns the operation descriptors, the matching handler table, an
+/// optional pre-handler admission guard, and the optional receipt sink shared
+/// with each invocation context. It performs only synchronous dispatch;
+/// handlers run on the caller's thread.
 pub struct Core {
     pub(crate) descriptors: BTreeMap<String, operation::OperationDescriptor>,
     pub(crate) handlers: BTreeMap<String, BoxedHandler>,
+    pub(crate) admission_guard: Option<BoxedAdmissionGuard>,
     pub(crate) receipt_sink: Option<BoxedReceiptSink>,
     pub(crate) receipt_hash_policy: ReceiptHashPolicy,
 }
@@ -92,20 +96,48 @@ impl Core {
         ),
     )]
     pub fn checkout(&mut self, checkout: Checkout) -> Result<CheckoutResult, RuntimeError> {
-        let name = checkout.descriptor.name();
-        let descriptor = self.descriptors.get(name).cloned().ok_or_else(|| {
-            tracing::warn!(operation = %name, outcome = "unknown_operation", "checkout rejected");
-            RuntimeError::unknown_operation(name)
-        })?;
+        let descriptor = {
+            let name = checkout.descriptor.name();
+            self.descriptors.get(name).cloned().ok_or_else(|| {
+                tracing::warn!(operation = %name, outcome = "unknown_operation", "checkout rejected");
+                RuntimeError::unknown_operation(name)
+            })?
+        };
+        let name = descriptor.name();
+        let input = checkout.input;
+
+        // One borrowed context spans the optional guard and the handler, so a
+        // guard may stamp receipt metadata (e.g. correlation identity) that
+        // survives into the handler's eventual receipt.
+        let mut ctx = Ctx::new(&descriptor);
+
+        // Pre-handler admission: a guard may DENY before the handler runs. This
+        // is the only place `Core` dispatch emits `ReceiptOutcome::Denied`.
+        if let Some(guard) = self.admission_guard.as_deref() {
+            if let AdmissionDecision::Deny { code, message } =
+                guard.admit(&descriptor, &input, &mut ctx)
+            {
+                let metadata = ctx.into_metadata();
+                tracing::warn!(
+                    operation = %name,
+                    code = %code,
+                    message = %message,
+                    outcome = "denied",
+                    "checkout denied by admission guard",
+                );
+                let outcome = ReceiptOutcome::denied(code.clone(), message.clone());
+                self.record_runtime_receipt(&descriptor, &input, None, outcome, None, metadata)?;
+                tracing::Span::current().record("outcome", "denied");
+                return Err(RuntimeError::denied(name, code, message));
+            }
+        }
+
         let handler = self.handlers.get_mut(name).ok_or_else(|| {
             tracing::error!(operation = %name, outcome = "missing_handler", "checkout rejected");
             RuntimeError::missing_handler(name)
         })?;
-        let input = checkout.input;
-        let handler_result = {
-            let mut ctx = Ctx::new(&descriptor);
-            handler.handle(&input, &mut ctx)
-        };
+        let handler_result = handler.handle(&input, &mut ctx);
+        let metadata = ctx.into_metadata();
 
         let output = match handler_result {
             Ok(output) => output,
@@ -125,6 +157,7 @@ impl Core {
                     None,
                     outcome,
                     Some(cause.clone()),
+                    metadata,
                 )?;
                 return Err(RuntimeError::handler(name, cause.code(), cause.message()));
             }
@@ -135,6 +168,7 @@ impl Core {
             Some(output.as_slice()),
             ReceiptOutcome::Completed,
             None,
+            metadata,
         )?;
         let span = tracing::Span::current();
         span.record("output_bytes", output.len());
@@ -154,6 +188,7 @@ impl Core {
         output: Option<&[u8]>,
         outcome: ReceiptOutcome,
         handler_cause: Option<ReceiptSinkHandlerCause>,
+        metadata: ReceiptMetadata,
     ) -> Result<Option<RecordedReceipt>, RuntimeError> {
         let Some(sink) = self.receipt_sink.as_deref() else {
             return Ok(None);
@@ -168,6 +203,11 @@ impl Core {
                 envelope = envelope.with_output_hash(hash);
             }
         }
+        // Drain handler/guard-attached metadata into the receipt drawers. The
+        // runtime still owns the envelope; the handler only contributed opaque
+        // bytes via its `Ctx`.
+        envelope.signed_extensions.extend(metadata.signed);
+        envelope.local_extensions.extend(metadata.local);
 
         sink.record_receipt(&envelope).map(Some).map_err(|error| {
             let message = error.to_string();
@@ -257,20 +297,47 @@ impl Checkout {
     }
 }
 
-/// Minimal borrowed invocation context passed to handlers.
+/// Minimal borrowed invocation context passed to handlers (and the admission
+/// guard).
+///
+/// Beyond the descriptor, a handler or guard may attach opaque receipt metadata
+/// to the current invocation; the runtime drains it into the recorded receipt.
+/// The handler never owns the receipt envelope — it only contributes bytes.
 pub struct Ctx<'a> {
     descriptor: &'a operation::OperationDescriptor,
+    metadata: ReceiptMetadata,
 }
 
 impl<'a> Ctx<'a> {
     pub(crate) fn new(descriptor: &'a operation::OperationDescriptor) -> Self {
-        Self { descriptor }
+        Self {
+            descriptor,
+            metadata: ReceiptMetadata::default(),
+        }
     }
 
     /// Descriptor for the operation currently being invoked.
     #[must_use]
     pub fn descriptor(&self) -> &'a operation::OperationDescriptor {
         self.descriptor
+    }
+
+    /// Attach one entry to the SIGNED receipt drawer of this invocation. The
+    /// store sink copies signed entries into batpak receipt extensions, so this
+    /// is where correlation/attempt identity belongs.
+    pub fn attach_signed_extension(&mut self, key: impl Into<String>, value: impl Into<Vec<u8>>) {
+        self.metadata.signed.insert(key.into(), value.into());
+    }
+
+    /// Attach one entry to the LOCAL receipt drawer of this invocation. Local
+    /// entries stay in the receipt envelope body and are not promoted to batpak
+    /// receipt extensions.
+    pub fn attach_local_extension(&mut self, key: impl Into<String>, value: impl Into<Vec<u8>>) {
+        self.metadata.local.insert(key.into(), value.into());
+    }
+
+    pub(crate) fn into_metadata(self) -> ReceiptMetadata {
+        self.metadata
     }
 }
 

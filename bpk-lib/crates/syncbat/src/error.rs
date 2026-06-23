@@ -198,6 +198,16 @@ pub enum RuntimeError {
         /// Handler-supplied error message.
         message: String,
     },
+    /// A pre-handler admission guard denied the invocation; the handler never
+    /// ran. The runtime records a `Denied` receipt before returning this.
+    Denied {
+        /// Operation name that was denied.
+        name: String,
+        /// Guard-supplied denial class.
+        code: String,
+        /// Guard-supplied denial message.
+        message: String,
+    },
     /// The configured receipt sink rejected a runtime-emitted receipt.
     ReceiptSink {
         /// Operation name whose receipt could not be recorded.
@@ -230,6 +240,20 @@ impl RuntimeError {
         message: impl Into<String>,
     ) -> Self {
         Self::Handler {
+            name: name.into(),
+            code: code.into(),
+            message: message.into(),
+        }
+    }
+
+    /// Build an admission-denied error with an operation name, class, and message.
+    #[must_use]
+    pub fn denied(
+        name: impl Into<String>,
+        code: impl Into<String>,
+        message: impl Into<String>,
+    ) -> Self {
+        Self::Denied {
             name: name.into(),
             code: code.into(),
             message: message.into(),
@@ -276,6 +300,16 @@ impl fmt::Display for RuntimeError {
                 write!(
                     f,
                     "handler for operation `{name}` failed with {code}: {message}"
+                )
+            }
+            Self::Denied {
+                name,
+                code,
+                message,
+            } => {
+                write!(
+                    f,
+                    "operation `{name}` denied by admission guard with {code}: {message}"
                 )
             }
             Self::ReceiptSink {

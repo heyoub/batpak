@@ -84,6 +84,7 @@ pub(super) const INTEGRITY_GRADERS_MUTANT_FILES: &[&str] = &[
     "tools/integrity/src/meta_gate.rs",
 ];
 pub(super) const SYNCBAT_RUNTIME_MUTANT_FILES: &[&str] = &[
+    "crates/syncbat/src/admission.rs",
     "crates/syncbat/src/builder.rs",
     "crates/syncbat/src/core.rs",
     "crates/syncbat/src/error.rs",
@@ -622,7 +623,7 @@ pub(super) fn critical_mutation_seams() -> &'static [CriticalMutationSeam] {
         CriticalMutationSeam {
             slug: "syncbat-runtime-dispatch",
             label: "syncbat runtime dispatch and receipts",
-            description: "syncbat build, dispatch, handler failure, and receipt sink semantics",
+            description: "syncbat build, dispatch, pre-handler admission guard (deny -> Denied receipt), Ctx receipt-metadata collector, handler failure, and receipt sink semantics",
             surface: MutantSurface::AllFeatures,
             package: Some("syncbat"),
             paths: SYNCBAT_RUNTIME_MUTANT_FILES,
