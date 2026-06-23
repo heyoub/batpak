@@ -21,6 +21,7 @@
 mod compile;
 mod eval;
 mod limits;
+mod planner_shadow;
 mod program;
 mod shadow;
 mod validate;
@@ -32,6 +33,7 @@ pub use compile::{
 };
 pub use eval::{evaluate, Decision, EvalError, Lane};
 pub use limits::{LimitViolation, ProgramLimits, FROZEN_LIMITS};
+pub use planner_shadow::{planner_reference, planner_shadow_check, PlannerInputs};
 pub use program::{
     AdmissionProgram, CertNode, CompareRel, InputDecl, InputSlot, LookupTable, Node, NodeId,
     NodeOp, Outputs, ProgramCertificate, ProgramError, Width, ADMISSION_PROGRAM_SCHEMA_VERSION,
