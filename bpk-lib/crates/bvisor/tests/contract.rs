@@ -3,8 +3,8 @@
 //! [`InertBackend`].
 
 use bvisor::{
-    Backend, BackendRegistry, BoundaryPlanEvent, BoundaryPlanner, BoundaryRecoveryEvent,
-    BoundaryReportEvent, BoundaryRunner, BoundarySpec, Budgets, Capability, EvidenceRequirements,
+    Backend, BackendRegistry, BoundaryPlanner, BoundaryRecoveryEvent, BoundaryReportEvent,
+    BoundaryRunner, BoundarySpec, BoundaryStartedEvent, Budgets, Capability, EvidenceRequirements,
     FsAccess, FsConfinement, HostControl, InertBackend, Outcome, PathSet, PlanError, StdStreams,
     Workload,
 };
@@ -130,7 +130,7 @@ fn event_payloads_round_trip() {
     let plan = planner.plan(&spec, &inert_id()).expect("plan admits");
     let report = runner.run(&plan).expect("run seals");
 
-    let plan_event = BoundaryPlanEvent { plan: plan.clone() };
+    let plan_event = BoundaryStartedEvent { plan: plan.clone() };
     let report_event = BoundaryReportEvent {
         report: report.clone(),
     };
@@ -145,7 +145,7 @@ fn event_payloads_round_trip() {
     let recovery_bytes =
         batpak::canonical::to_bytes(&recovery_event).expect("encode recovery event");
 
-    let plan_back: BoundaryPlanEvent =
+    let plan_back: BoundaryStartedEvent =
         batpak::canonical::from_bytes(&plan_bytes).expect("decode plan event");
     let report_back: BoundaryReportEvent =
         batpak::canonical::from_bytes(&report_bytes).expect("decode report event");
