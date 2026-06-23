@@ -234,20 +234,23 @@ pub struct DerivedMinimums {
     pub network_bytes: u64,
 }
 
-/// Why one budget dimension was refused. The canonical check ORDER is fixed (and
-/// must match the circuit): limit, then guarantee, then evidence, then
-/// structural-minimum — so the first-failing reason is deterministic.
+/// Why one budget dimension was refused. The canonical reason ORDER is fixed (and
+/// must match the circuit + shadow + JSON projection + solver model): the intrinsic
+/// derived-minimum check comes FIRST (the request is internally incoherent,
+/// independent of any backend), THEN backend adjudication — capacity, then
+/// guarantee, then evidence — so the first-failing reason is deterministic.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum BudgetFailure {
-    /// Requested limit exceeds the backend's available limit (`L_d > A_d`).
-    Limit,
+    /// The requested limit is below the derived structural minimum (`L_d < D_d`) —
+    /// the request is internally incoherent, refused BEFORE any backend is asked.
+    BelowDerivedMinimum,
+    /// The requested limit exceeds the backend's available capacity (`L_d > A_d`).
+    CapacityExceeded,
     /// The backend's guarantee is weaker than required (`E_d < G_d`).
-    Guarantee,
+    GuaranteeInsufficient,
     /// Required evidence is not a subset of available evidence (`Q_d ⊄ C_d`).
-    Evidence,
-    /// The requested limit is below the derived structural minimum (`L_d < min`).
-    StructuralMinimum,
+    EvidenceMissing,
 }
 
 /// A budget refusal: the first failing dimension and its reason.
@@ -276,28 +279,28 @@ fn guarantee_strength(guarantee: MinGuarantee) -> u8 {
     }
 }
 
-/// Adjudicate ONE dimension against its profile + derived minimum, FAIL-CLOSED in
-/// the canonical reason order (limit → guarantee → evidence → structural-minimum).
+/// Adjudicate ONE dimension's coherent request against the backend's available
+/// capacity, FAIL-CLOSED in canonical reason order (capacity → guarantee →
+/// evidence). The intrinsic derived-minimum check (`L_d ≥ D_d`) is a SEPARATE,
+/// EARLIER phase in [`budget_admit`]; a dimension reaching here has already passed
+/// it, so this never returns [`BudgetFailure::BelowDerivedMinimum`].
 ///
 /// # Errors
-/// The first [`BudgetFailure`] in canonical order.
-pub fn admit_dimension(
+/// The first of [`BudgetFailure::CapacityExceeded`],
+/// [`BudgetFailure::GuaranteeInsufficient`], [`BudgetFailure::EvidenceMissing`].
+pub fn adjudicate_dimension(
     request: &BudgetRequest,
     availability: &BudgetAvailability,
-    derived_minimum: u64,
     profile_digest: Digest32,
 ) -> Result<AdmittedBudget, BudgetFailure> {
     if request.limit > availability.available {
-        return Err(BudgetFailure::Limit);
+        return Err(BudgetFailure::CapacityExceeded);
     }
     if enforcement_strength(availability.enforcement) < guarantee_strength(request.guarantee) {
-        return Err(BudgetFailure::Guarantee);
+        return Err(BudgetFailure::GuaranteeInsufficient);
     }
     if !request.evidence.is_subset(&availability.evidence) {
-        return Err(BudgetFailure::Evidence);
-    }
-    if request.limit < derived_minimum {
-        return Err(BudgetFailure::StructuralMinimum);
+        return Err(BudgetFailure::EvidenceMissing);
     }
     Ok(AdmittedBudget {
         effective_limit: request.limit,
@@ -310,69 +313,119 @@ pub fn admit_dimension(
     })
 }
 
-/// Adjudicate all seven dimensions in canonical order, returning the admitted
-/// contract or the FIRST failing dimension + reason.
+/// Admit all seven dimensions in two phases, returning the admitted contract or the
+/// FIRST failing dimension + reason in canonical order.
+///
+/// PHASE 1 — intrinsic request validation: every dimension must be internally
+/// coherent (`L_d ≥ D_d`) BEFORE any backend is asked to satisfy it. The request is
+/// REFUSED with the offending dimension, never silently clamped up to the minimum.
+///
+/// PHASE 2 — backend adjudication: a coherent request is matched per dimension
+/// against the profile's capacity, guarantee, and evidence.
+///
+/// Both phases walk the canonical dimension order (wall, cpu, resident memory,
+/// process, handle, storage, network); phase 1 fully precedes phase 2, so a
+/// below-minimum dimension always out-ranks any capacity/guarantee/evidence failure.
 ///
 /// # Errors
-/// The first [`BudgetRefusal`] (earliest dimension in canonical order to fail).
+/// The first [`BudgetRefusal`] — phase 1 (`BelowDerivedMinimum`) before phase 2.
 pub fn budget_admit(
     requirements: &BudgetRequirements,
     profile: &BudgetProfile,
     derived: &DerivedMinimums,
     profile_digest: Digest32,
 ) -> Result<AdmittedBudgets, BudgetRefusal> {
-    let admit = |dimension: BudgetDimension,
-                 request: &BudgetRequest,
-                 availability: &BudgetAvailability,
-                 minimum: u64|
+    // PHASE 1 — intrinsic coherence, canonical dimension order.
+    let intrinsic = [
+        (
+            BudgetDimension::Wall,
+            requirements.wall_micros.limit,
+            derived.wall_micros,
+        ),
+        (
+            BudgetDimension::Cpu,
+            requirements.cpu_micros.limit,
+            derived.cpu_micros,
+        ),
+        (
+            BudgetDimension::ResidentMemory,
+            requirements.resident_bytes.limit,
+            derived.resident_bytes,
+        ),
+        (
+            BudgetDimension::ProcessCount,
+            requirements.process_count.limit,
+            derived.process_count,
+        ),
+        (
+            BudgetDimension::HandleCount,
+            requirements.handle_count.limit,
+            derived.handle_count,
+        ),
+        (
+            BudgetDimension::Storage,
+            requirements.storage_bytes.limit,
+            derived.storage_bytes,
+        ),
+        (
+            BudgetDimension::Network,
+            requirements.network_bytes.limit,
+            derived.network_bytes,
+        ),
+    ];
+    for (dimension, limit, minimum) in intrinsic {
+        if limit < minimum {
+            return Err(BudgetRefusal {
+                dimension,
+                failure: BudgetFailure::BelowDerivedMinimum,
+            });
+        }
+    }
+
+    // PHASE 2 — backend adjudication. Struct fields evaluate in written (canonical)
+    // order, so the first `?` failure is the earliest failing dimension.
+    let adjudicate = |dimension: BudgetDimension,
+                      request: &BudgetRequest,
+                      availability: &BudgetAvailability|
      -> Result<AdmittedBudget, BudgetRefusal> {
-        admit_dimension(request, availability, minimum, profile_digest)
+        adjudicate_dimension(request, availability, profile_digest)
             .map_err(|failure| BudgetRefusal { dimension, failure })
     };
-    // Struct fields evaluate in written (canonical) order, so the first `?` failure
-    // is the earliest failing dimension.
     Ok(AdmittedBudgets {
-        wall_micros: admit(
+        wall_micros: adjudicate(
             BudgetDimension::Wall,
             &requirements.wall_micros,
             &profile.wall_micros,
-            derived.wall_micros,
         )?,
-        cpu_micros: admit(
+        cpu_micros: adjudicate(
             BudgetDimension::Cpu,
             &requirements.cpu_micros,
             &profile.cpu_micros,
-            derived.cpu_micros,
         )?,
-        resident_bytes: admit(
+        resident_bytes: adjudicate(
             BudgetDimension::ResidentMemory,
             &requirements.resident_bytes,
             &profile.resident_bytes,
-            derived.resident_bytes,
         )?,
-        process_count: admit(
+        process_count: adjudicate(
             BudgetDimension::ProcessCount,
             &requirements.process_count,
             &profile.process_count,
-            derived.process_count,
         )?,
-        handle_count: admit(
+        handle_count: adjudicate(
             BudgetDimension::HandleCount,
             &requirements.handle_count,
             &profile.handle_count,
-            derived.handle_count,
         )?,
-        storage_bytes: admit(
+        storage_bytes: adjudicate(
             BudgetDimension::Storage,
             &requirements.storage_bytes,
             &profile.storage_bytes,
-            derived.storage_bytes,
         )?,
-        network_bytes: admit(
+        network_bytes: adjudicate(
             BudgetDimension::Network,
             &requirements.network_bytes,
             &profile.network_bytes,
-            derived.network_bytes,
         )?,
     })
 }
@@ -380,7 +433,7 @@ pub fn budget_admit(
 #[cfg(test)]
 mod budget_tests {
     use super::{
-        admit_dimension, budget_admit, BudgetAvailability, BudgetDimension, BudgetFailure,
+        adjudicate_dimension, budget_admit, BudgetAvailability, BudgetDimension, BudgetFailure,
         BudgetProfile, BudgetRefusal, BudgetRequest, BudgetRequirements, DerivedMinimums,
         MinGuarantee,
     };
@@ -433,7 +486,7 @@ mod budget_tests {
     #[test]
     fn admits_a_dimension_within_capacity_guarantee_and_evidence() {
         let admitted =
-            admit_dimension(&request(10), &availability(20), 1, [0u8; 32]).expect("admit");
+            adjudicate_dimension(&request(10), &availability(20), [0u8; 32]).expect("admit");
         assert_eq!(admitted.effective_limit, 10);
         assert_eq!(admitted.selected_guarantee, Enforcement::Enforced);
         assert_eq!(admitted.required_guarantee, MinGuarantee::Mediated);
@@ -441,16 +494,17 @@ mod budget_tests {
 
     #[test]
     fn zero_is_a_legitimate_deny_all_bound() {
-        // limit 0, available 0, derived min 0 -> admits (0 <= 0, 0 >= 0).
-        assert!(admit_dimension(&request(0), &availability(0), 0, [0u8; 32]).is_ok());
+        // limit 0, available 0 -> adjudicates OK (0 <= 0). The derived-minimum
+        // check is a separate, earlier phase in budget_admit.
+        assert!(adjudicate_dimension(&request(0), &availability(0), [0u8; 32]).is_ok());
     }
 
     #[test]
-    fn failure_reasons_follow_the_canonical_order() {
-        // Over capacity -> Limit (even though derived-min would also fail).
+    fn adjudication_failures_follow_the_canonical_order() {
+        // Over capacity.
         assert_eq!(
-            admit_dimension(&request(100), &availability(20), 200, [0u8; 32]),
-            Err(BudgetFailure::Limit)
+            adjudicate_dimension(&request(100), &availability(20), [0u8; 32]),
+            Err(BudgetFailure::CapacityExceeded)
         );
         // Within capacity, but guarantee too weak.
         let weak = BudgetAvailability {
@@ -462,8 +516,8 @@ mod budget_tests {
             ..request(10)
         };
         assert_eq!(
-            admit_dimension(&strict, &weak, 1, [0u8; 32]),
-            Err(BudgetFailure::Guarantee)
+            adjudicate_dimension(&strict, &weak, [0u8; 32]),
+            Err(BudgetFailure::GuaranteeInsufficient)
         );
         // Capacity + guarantee OK, evidence not a subset.
         let demanding = BudgetRequest {
@@ -471,13 +525,30 @@ mod budget_tests {
             ..request(10)
         };
         assert_eq!(
-            admit_dimension(&demanding, &availability(20), 1, [0u8; 32]),
-            Err(BudgetFailure::Evidence)
+            adjudicate_dimension(&demanding, &availability(20), [0u8; 32]),
+            Err(BudgetFailure::EvidenceMissing)
         );
-        // Everything else OK, but below the derived structural minimum.
+    }
+
+    #[test]
+    fn derived_minimum_is_checked_before_backend_adjudication() {
+        // Wall: requested 2, below derived 5 AND over capacity 1. The intrinsic
+        // BelowDerivedMinimum (phase 1) out-ranks the capacity failure (phase 2),
+        // and the request is refused — never clamped up to the minimum.
+        let derived = DerivedMinimums {
+            wall_micros: 5,
+            ..DerivedMinimums::default()
+        };
+        let profile = BudgetProfile {
+            wall_micros: availability(1),
+            ..uniform_profile(20)
+        };
         assert_eq!(
-            admit_dimension(&request(2), &availability(20), 5, [0u8; 32]),
-            Err(BudgetFailure::StructuralMinimum)
+            budget_admit(&uniform_requirements(2), &profile, &derived, [0u8; 32]),
+            Err(BudgetRefusal {
+                dimension: BudgetDimension::Wall,
+                failure: BudgetFailure::BelowDerivedMinimum,
+            })
         );
     }
 
@@ -533,7 +604,7 @@ mod budget_tests {
             ),
             Err(BudgetRefusal {
                 dimension: BudgetDimension::Cpu,
-                failure: BudgetFailure::Limit,
+                failure: BudgetFailure::CapacityExceeded,
             })
         );
     }

@@ -40,7 +40,7 @@ pub use contract::admission::{
 };
 pub use contract::backend::Backend;
 pub use contract::budget::{
-    admit_dimension, budget_admit, AdmittedBudget, AdmittedBudgets, BudgetAvailability,
+    adjudicate_dimension, budget_admit, AdmittedBudget, AdmittedBudgets, BudgetAvailability,
     BudgetDimension, BudgetFailure, BudgetProfile, BudgetRefusal, BudgetRequest,
     BudgetRequirements, DerivedMinimums, MinGuarantee,
 };
