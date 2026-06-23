@@ -119,19 +119,24 @@ impl SimProbe {
 #[cfg(test)]
 mod supervisor_tests {
     use super::{SimProbe, SimSupervisor};
-    use crate::backend::inert::InertBackend;
-    use crate::contract::backend::Backend;
-    use crate::contract::budget::BudgetRequirements;
+    use crate::contract::budget::{BudgetRequirements, MinGuarantee};
     use crate::contract::host_control::HostControl;
-    use crate::contract::ids::AttemptId;
+    use crate::contract::ids::{AttemptId, BackendId};
     use crate::contract::plan::{BoundaryPlan, BoundarySpec, EvidenceRequirements, Workload};
     use crate::contract::recovery::{reconcile, QuarantineRecord, RecoveryAction, RunView};
     use crate::contract::registry::{BackendRegistry, BoundaryPlanner, BoundaryRunner};
+    use crate::sim::backend::{LieMode, OneShotLiar, SimBackend};
     use std::sync::Arc;
+
+    fn sim_backend() -> SimBackend {
+        // The honest monster: it admits a runnable budget (Inert, the floor, refuses
+        // every budgeted spec). Honest mode produces a faithful report.
+        SimBackend::new(Box::new(OneShotLiar::new(LieMode::Honest)))
+    }
 
     fn plan() -> BoundaryPlan {
         let mut registry = BackendRegistry::new();
-        registry.register(Arc::new(InertBackend::new()));
+        registry.register(Arc::new(sim_backend()));
         let spec = BoundarySpec {
             workload: Workload::Process {
                 exe: "true".to_string(),
@@ -139,17 +144,17 @@ mod supervisor_tests {
             },
             capabilities: Vec::new(),
             controls: vec![HostControl::LaunchWorkload],
-            budgets: BudgetRequirements::deny_all(),
+            budgets: BudgetRequirements::uniform(64, MinGuarantee::Mediated),
             evidence: EvidenceRequirements::default(),
         };
         BoundaryPlanner::new(&registry)
-            .plan(&spec, &InertBackend::new().id())
-            .expect("inert plans a launch-workload spec")
+            .plan(&spec, &BackendId::new(SimBackend::ID))
+            .expect("honest sim plans a runnable budgeted launch spec")
     }
 
     fn run_for(plan: &BoundaryPlan) -> crate::contract::registry::BoundaryRun {
         let mut registry = BackendRegistry::new();
-        registry.register(Arc::new(InertBackend::new()));
+        registry.register(Arc::new(sim_backend()));
         // Leak a registry for the run's lifetime is unnecessary: begin borrows it
         // only for the call. Build, begin, return the owned run.
         BoundaryRunner::new(&registry)
@@ -167,7 +172,7 @@ mod supervisor_tests {
         assert!(sim.crashed_after.is_none());
 
         let mut registry = BackendRegistry::new();
-        registry.register(Arc::new(InertBackend::new()));
+        registry.register(Arc::new(sim_backend()));
         let direct = BoundaryRunner::new(&registry)
             .run(&plan)
             .expect("run seals");

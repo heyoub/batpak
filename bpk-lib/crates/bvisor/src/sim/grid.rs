@@ -21,7 +21,7 @@
 //!   oracle (`reconciliation_matrix`) — marked here, exercised there.
 
 use crate::contract::backend::Backend;
-use crate::contract::budget::BudgetRequirements;
+use crate::contract::budget::{BudgetRequirements, MinGuarantee};
 use crate::contract::plan::{BoundarySpec, EvidenceRequirements, PlanError, Workload};
 use crate::contract::registry::{BackendRegistry, BoundaryPlanner, BoundaryRunner};
 use crate::sim::backend::{run_seals, LieMode, OneShotLiar, SimBackend};
@@ -232,7 +232,7 @@ fn dangerous_spec() -> BoundarySpec {
             },
             HostControl::ListOutputs,
         ],
-        budgets: BudgetRequirements::deny_all(),
+        budgets: BudgetRequirements::uniform(64, MinGuarantee::Mediated),
         evidence: EvidenceRequirements::default(),
     }
 }

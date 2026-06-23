@@ -1,6 +1,6 @@
 //! Spec → Plan: the inert IR and its fail-closed admission types.
 
-use crate::contract::budget::BudgetRequirements;
+use crate::contract::budget::{BudgetDimension, BudgetFailure, BudgetRequirements};
 use crate::contract::capability::{Capability, Enforcement, EvidenceClaim, EvidenceSet};
 use crate::contract::host_control::HostControl;
 use crate::contract::ids::{BackendId, BoundaryPlanHash};
@@ -158,6 +158,19 @@ pub enum PlanError {
         /// Human-readable detail.
         detail: String,
     },
+    /// The seven-dimensional budget membrane refused: either the request is
+    /// internally incoherent (`BelowDerivedMinimum`) or this backend cannot satisfy
+    /// it (capacity / guarantee / evidence). Names the FIRST failing dimension and
+    /// reason in canonical order. The all-`Unsupported` Inert floor refuses every
+    /// budgeted spec here; capable backends admit.
+    BudgetRefused {
+        /// The backend whose profile was adjudicated against.
+        backend: BackendId,
+        /// The first failing budget dimension.
+        dimension: BudgetDimension,
+        /// Why that dimension failed.
+        failure: BudgetFailure,
+    },
     /// The named backend is not registered.
     UnknownBackend {
         /// The unknown backend id.
@@ -196,6 +209,14 @@ impl std::fmt::Display for PlanError {
             Self::EvidenceUnsatisfiable { backend, detail } => write!(
                 f,
                 "backend {backend} cannot satisfy required evidence: {detail}"
+            ),
+            Self::BudgetRefused {
+                backend,
+                dimension,
+                failure,
+            } => write!(
+                f,
+                "backend {backend} budget membrane refused dimension {dimension:?}: {failure:?}"
             ),
             Self::UnknownBackend { backend } => write!(f, "unknown backend {backend}"),
             Self::ShadowDivergence { detail } => {

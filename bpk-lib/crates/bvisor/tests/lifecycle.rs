@@ -6,23 +6,35 @@
 //! cannot). The illegal *orderings* are proven uncompilable by the
 //! `compile_fail` doctests on `contract::lifecycle`.
 
+#[cfg(feature = "dangerous-test-hooks")]
 use bvisor::{
-    Backend, BackendRegistry, Boundary, BoundaryRunner, BoundarySpec, BudgetRequirements,
-    EvidenceRequirements, HostControl, InertBackend, LifecycleError, Workload,
+    BackendRegistry, Boundary, BoundaryRunner, BoundarySpec, BudgetRequirements,
+    EvidenceRequirements, HostControl, LifecycleError, MinGuarantee, Workload,
 };
+#[cfg(feature = "dangerous-test-hooks")]
 use std::sync::Arc;
 
+/// The honest [`SimBackend`] monster registry: Enforced support + full evidence +
+/// a runnable budget profile, so a budgeted launch spec actually plans/runs.
+/// (Inert, the all-Unsupported floor, refuses every budgeted spec at the budget
+/// membrane.) Only available under `dangerous-test-hooks`.
+#[cfg(feature = "dangerous-test-hooks")]
 fn registry() -> BackendRegistry {
     let mut registry = BackendRegistry::new();
-    registry.register(Arc::new(InertBackend::new()));
+    registry.register(Arc::new(bvisor::__sim::SimBackend::new(Box::new(
+        bvisor::__sim::OneShotLiar::new(bvisor::__sim::LieMode::Honest),
+    ))));
     registry
 }
 
-fn inert_id() -> bvisor::BackendId {
-    InertBackend::new().id()
+#[cfg(feature = "dangerous-test-hooks")]
+fn sim_id() -> bvisor::BackendId {
+    bvisor::BackendId::new(bvisor::__sim::SimBackend::ID)
 }
 
-/// A zero-confinement spec running `exe` — plannable on Inert.
+/// A zero-confinement spec running `exe` with a runnable budget — plannable on
+/// the honest Sim.
+#[cfg(feature = "dangerous-test-hooks")]
 fn spec_running(exe: &str) -> BoundarySpec {
     BoundarySpec {
         workload: Workload::Process {
@@ -31,21 +43,22 @@ fn spec_running(exe: &str) -> BoundarySpec {
         },
         capabilities: Vec::new(),
         controls: vec![HostControl::LaunchWorkload],
-        budgets: BudgetRequirements::deny_all(),
+        budgets: BudgetRequirements::uniform(64, MinGuarantee::Mediated),
         evidence: EvidenceRequirements::default(),
     }
 }
 
 // The legal lifecycle path: propose → plan → start → into_reported, with the
 // emitted events bound to the right plan and attempt.
+#[cfg(feature = "dangerous-test-hooks")]
 #[test]
 fn legal_lifecycle_sequence_runs_end_to_end() {
     let registry = registry();
     let runner = BoundaryRunner::new(&registry);
 
-    let planned = Boundary::propose(spec_running("true"), inert_id())
+    let planned = Boundary::propose(spec_running("true"), sim_id())
         .plan(&registry)
-        .expect("zero-confinement spec must plan on inert");
+        .expect("zero-confinement spec must plan on the honest sim");
     let plan_id = planned.plan_id();
 
     let attempt = bvisor::AttemptId([7u8; 32]);
@@ -58,7 +71,7 @@ fn legal_lifecycle_sequence_runs_end_to_end() {
     );
 
     // The runner seals the report the typestate then records.
-    let report = runner.run(started.as_plan()).expect("inert run seals");
+    let report = runner.run(started.as_plan()).expect("honest sim run seals");
     let reported = started
         .into_reported(report)
         .expect("a report answering this plan is accepted");
@@ -80,17 +93,18 @@ fn legal_lifecycle_sequence_runs_end_to_end() {
 
 // The semantic guard: a report sealed for a DIFFERENT plan is refused at
 // into_reported — foreign evidence never staples to an attempt.
+#[cfg(feature = "dangerous-test-hooks")]
 #[test]
 fn into_reported_rejects_a_report_for_a_different_plan() {
     let registry = registry();
     let runner = BoundaryRunner::new(&registry);
 
     // Two distinct plans (different workloads → different plan ids).
-    let started = Boundary::propose(spec_running("true"), inert_id())
+    let started = Boundary::propose(spec_running("true"), sim_id())
         .plan(&registry)
         .expect("plan A")
         .start(bvisor::AttemptId([1u8; 32]));
-    let other_planned = Boundary::propose(spec_running("false"), inert_id())
+    let other_planned = Boundary::propose(spec_running("false"), sim_id())
         .plan(&registry)
         .expect("plan B");
     assert_ne!(
