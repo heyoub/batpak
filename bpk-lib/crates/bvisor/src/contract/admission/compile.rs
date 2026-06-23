@@ -223,7 +223,7 @@ fn evidence_check(
 }
 
 /// `∀i : Mediated ≤ enforcement[i]`.
-fn support_check(
+pub(crate) fn support_check(
     builder: &mut CircuitBuilder,
     enforcements: &[NodeId],
     enf_width: Width,

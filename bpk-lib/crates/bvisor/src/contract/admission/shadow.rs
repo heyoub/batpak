@@ -123,7 +123,7 @@ impl std::error::Error for AdmissionDivergence {}
 
 /// Mask a value to its lane's low `bits`, matching what the circuit's lanes see, so
 /// the reference and the circuit agree even on out-of-range inputs.
-fn mask(value: u64, bits: u32) -> u64 {
+pub(crate) fn mask(value: u64, bits: u32) -> u64 {
     if bits >= 64 {
         value
     } else {
@@ -153,7 +153,7 @@ fn reference_trace(inputs: &AdmissionInputs) -> Vec<bool> {
 }
 
 /// Build the outcome from a membrane trace (first failing membrane = refusal).
-fn outcome_from_trace(trace: Vec<bool>) -> AdmissionOutcome {
+pub(crate) fn outcome_from_trace(trace: Vec<bool>) -> AdmissionOutcome {
     match trace.iter().position(|pass| !pass) {
         None => AdmissionOutcome::Admitted { trace },
         Some(i) => {
@@ -272,7 +272,7 @@ fn circuit_admission(inputs: &AdmissionInputs) -> Result<AdmissionOutcome, &'sta
 /// Compare the authoritative reference against the shadow circuit outcome. The
 /// pure comparison core of [`shadow_check`], factored so the divergence detector
 /// can be proven to fire on a planted mismatch.
-fn decide(
+pub(crate) fn decide(
     reference: AdmissionOutcome,
     circuit: Result<AdmissionOutcome, &'static str>,
 ) -> Result<AdmissionOutcome, AdmissionDivergence> {
