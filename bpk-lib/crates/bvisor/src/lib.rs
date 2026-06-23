@@ -30,10 +30,11 @@ pub use backend::inert::InertBackend;
 pub use contract::admission::{
     compile_admission, compile_budget_membrane, compile_conflict_membrane,
     compile_evidence_membrane, compile_profile_drift_membrane, compile_support_membrane,
-    compose_membranes, decode_validated, evaluate, validate, verify_certificate, AdmissionProgram,
-    AdmissionShape, CertNode, CircuitBuilder, CompareRel, Decision, EvalError, InputDecl,
-    InputSlot, Lane, LimitViolation, LookupTable, Node, NodeId, NodeOp, Outputs,
-    ProgramCertificate, ProgramError, ProgramLimits, ValidationError, Width,
+    compose_membranes, decode_validated, evaluate, reference_admission, shadow_check, validate,
+    verify_certificate, AdmissionDivergence, AdmissionInputs, AdmissionOutcome, AdmissionProgram,
+    AdmissionShape, BudgetDimension, CertNode, CircuitBuilder, CompareRel, Decision, EvalError,
+    InputDecl, InputSlot, Lane, LimitViolation, LookupTable, Node, NodeId, NodeOp, Outputs,
+    ProgramCertificate, ProgramError, ProgramLimits, RequirementInputs, ValidationError, Width,
     ADMISSION_PROGRAM_SCHEMA_VERSION, FROZEN_LIMITS, MAX_LOOKUP_ENTRIES, MAX_WIDTH,
 };
 pub use contract::backend::Backend;

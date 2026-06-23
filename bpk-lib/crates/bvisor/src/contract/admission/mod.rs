@@ -22,6 +22,7 @@ mod compile;
 mod eval;
 mod limits;
 mod program;
+mod shadow;
 mod validate;
 
 pub use compile::{
@@ -35,6 +36,10 @@ pub use program::{
     AdmissionProgram, CertNode, CompareRel, InputDecl, InputSlot, LookupTable, Node, NodeId,
     NodeOp, Outputs, ProgramCertificate, ProgramError, Width, ADMISSION_PROGRAM_SCHEMA_VERSION,
     MAX_WIDTH,
+};
+pub use shadow::{
+    reference_admission, shadow_check, AdmissionDivergence, AdmissionInputs, AdmissionOutcome,
+    BudgetDimension, RequirementInputs,
 };
 pub use validate::{
     decode_validated, validate, verify_certificate, ValidationError, MAX_LOOKUP_ENTRIES,
