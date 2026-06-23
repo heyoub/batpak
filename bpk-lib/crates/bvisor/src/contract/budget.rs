@@ -143,6 +143,39 @@ pub struct BudgetProfile {
     pub network_bytes: BudgetAvailability,
 }
 
+impl BudgetAvailability {
+    /// A dimension the backend does NOT enforce: it imposes no ceiling
+    /// (`available = u64::MAX`), witnesses nothing, and names no mechanism. The
+    /// honest declaration for a no-confinement reference backend.
+    #[must_use]
+    pub fn unenforced() -> Self {
+        Self {
+            available: u64::MAX,
+            enforcement: Enforcement::Unsupported,
+            evidence: EvidenceSet::new(),
+            mechanism: "none/no-budget-enforcement".to_string(),
+        }
+    }
+}
+
+impl BudgetProfile {
+    /// A profile that enforces NO budget dimension — every dimension unenforced.
+    /// A spec requiring any budget guarantee (`≥ Mediated`) is therefore refused
+    /// once the budget membrane lands; the dimensions stay first-class regardless.
+    #[must_use]
+    pub fn all_unenforced() -> Self {
+        Self {
+            wall_micros: BudgetAvailability::unenforced(),
+            cpu_micros: BudgetAvailability::unenforced(),
+            resident_bytes: BudgetAvailability::unenforced(),
+            process_count: BudgetAvailability::unenforced(),
+            handle_count: BudgetAvailability::unenforced(),
+            storage_bytes: BudgetAvailability::unenforced(),
+            network_bytes: BudgetAvailability::unenforced(),
+        }
+    }
+}
+
 /// One dimension's ADMITTED contract.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AdmittedBudget {
@@ -376,6 +409,16 @@ mod budget_tests {
             evidence: evidence(&[EvidenceClaim::ResourceUsage, EvidenceClaim::TerminalOutcome]),
             mechanism: "cgroup".to_string(),
         }
+    }
+
+    #[test]
+    fn unenforced_profile_imposes_no_ceiling_and_no_guarantee() {
+        let avail = BudgetAvailability::unenforced();
+        assert_eq!(avail.available, u64::MAX);
+        assert_eq!(avail.enforcement, Enforcement::Unsupported);
+        let profile = BudgetProfile::all_unenforced();
+        assert_eq!(profile.network_bytes.enforcement, Enforcement::Unsupported);
+        assert!(profile.wall_micros.evidence.is_empty());
     }
 
     #[test]

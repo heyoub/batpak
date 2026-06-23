@@ -13,6 +13,7 @@
 //! [`Backend`] trait and all contract types stay OS-free.
 
 use crate::contract::backend::Backend;
+use crate::contract::budget::BudgetProfile;
 use crate::contract::capability::{Enforcement, EvidenceClaim, SupportVerdict};
 use crate::contract::host_control::HostControl;
 use crate::contract::ids::BackendId;
@@ -88,6 +89,8 @@ impl Backend for InertBackend {
         BackendProfileSnapshot {
             backend: self.id.clone(),
             probed,
+            // Inert enforces NO resource budget — it runs the process unconfined.
+            budget: BudgetProfile::all_unenforced(),
         }
     }
 
