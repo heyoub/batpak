@@ -10,6 +10,7 @@ pub(crate) mod capability;
 pub(crate) mod events;
 pub(crate) mod host_control;
 pub(crate) mod ids;
+pub(crate) mod lifecycle;
 pub(crate) mod plan;
 pub(crate) mod recovery;
 pub(crate) mod registry;

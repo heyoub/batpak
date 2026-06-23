@@ -43,6 +43,9 @@ pub use contract::ids::{
     ArtifactId, AttemptId, BackendId, BackendProfileHash, BoundaryPlanHash, BoundaryReportHash,
     ContentHash, Digest32,
 };
+pub use contract::lifecycle::{
+    Boundary, BoundaryState, LifecycleError, Planned, Reported, Spec, Started,
+};
 pub use contract::plan::{
     AdmittedRequirement, BoundaryPlan, BoundaryRequirement, BoundarySpec, Budgets,
     EvidenceRequirements, PlanError, Workload, BOUNDARY_PLAN_SCHEMA_VERSION,
