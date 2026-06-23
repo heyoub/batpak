@@ -903,9 +903,10 @@
   mutation_delta: unmeasured
   blind_spots: >
     Phase 1 freezes fixtures for batpak core's own versioned test kinds and a
-    plain v1 kind; the refbat manifest payloads carry FROZEN_FIXTURE_DEBT and gain
-    fixtures in Phase 2. The structural frozen-fixture lint is warn-first this
-    minor and flips to hard-fail once the debt is burned down.
+    plain v1 kind; FROZEN_FIXTURE_DEBT is now empty (the reference-host manifest
+    payloads it tracked were removed with that crate). The structural
+    frozen-fixture lint is warn-first this minor and flips to hard-fail once any
+    new debt is burned down.
 
 - title: Public topology diagnostics match configured overlay posture
   section: Oracle Harness

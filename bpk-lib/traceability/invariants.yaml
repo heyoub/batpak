@@ -49,26 +49,18 @@
 - id: INV-BIDIRECTIONAL-SUBSTRATE-LANE
   statement: Any non-Rust terminal that can commit events must expose bounded domain-neutral enumeration by coordinate, region, and global commit order, or docs must explicitly state replay requires caller-supplied event IDs and is not substrate-complete.
   artifacts:
-    - ART-REFBAT-SOURCE
-    - ART-REFBAT-TESTS
-    - ART-REFBAT-MANIFEST-EXPORT
     - ART-STORE-QUERY-TRAVERSAL
     - ART-STORE-QUERY-TRAVERSAL-TESTS
     - ART-DX-DOCS
 - id: INV-SUBSTRATE-TRAVERSAL-DOMAIN-NEUTRAL
   statement: Traversal terminals return substrate metadata only; they must not expose Moonwalker missions, workflow verbs, movement-graph semantics, receipt_kind dispatch, decoded envelope bodies, or domain replay names.
   artifacts:
-    - ART-REFBAT-SOURCE
-    - ART-REFBAT-TESTS
-    - ART-REFBAT-MANIFEST-EXPORT
     - ART-STORE-QUERY-TRAVERSAL
+    - ART-STORE-QUERY-TRAVERSAL-TESTS
     - ART-DX-DOCS
 - id: INV-EXTERNAL-REPLAY-NO-SIDECAR-TRUTH
   statement: External replay may use caches or indexes, but authoritative reconstruction must be possible through event.query plus event.get plus envelope decoding above batpak; sidecar indexes are projections, not source truth.
   artifacts:
-    - ART-REFBAT-SOURCE
-    - ART-REFBAT-TESTS
-    - ART-REFBAT-MANIFEST-EXPORT
     - ART-STORE-QUERY-TRAVERSAL
     - ART-STORE-QUERY-TRAVERSAL-TESTS
     - ART-DX-DOCS

@@ -68,30 +68,6 @@ jobs:
             echo "rust=false" >> "$GITHUB_OUTPUT"
           fi
 
-  ts-host-changed:
-    name: Detect TS/host-profile changes
-    runs-on: ubuntu-latest
-    outputs:
-      touched: ${{ steps.detect.outputs.touched }}
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-        with:
-          persist-credentials: false
-          fetch-depth: 0
-      - id: detect
-        shell: bash
-        run: |
-          if [ "${{ github.event_name }}" != "pull_request" ]; then
-            echo "touched=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          base="${{ github.event.pull_request.base.sha }}"
-          if git diff --name-only "$base" HEAD | grep -qE '^(bpk-ts/|bpk-lib/crates/refbat/|bpk-lib/crates/netbat/|bpk-lib/crates/syncbat/|bpk-lib/tools/xtask/src/commands/(export_ts_manifest|host_dev)\.rs|bpk-lib/tools/xtask/src/(main|commands)\.rs)'; then
-            echo "touched=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "touched=false" >> "$GITHUB_OUTPUT"
-          fi
-
   ci-fast-linux:
     name: CI fast (ubuntu-devcontainer)
     runs-on: ubuntu-latest
@@ -330,56 +306,6 @@ jobs:
             exit 1
           fi
           echo "All three build-time lints recorded explicit SKIPPED_PACKAGED receipts."
-
-  ts-parity:
-    # BatPAK TypeScript SDK Phase 0 wire-parity gate.
-    #
-    # Delegates to the canonical host proof command so bpk-ts, refbat, netbat,
-    # syncbat, and manifest/codegen changes cannot pass default PR CI without
-    # the same manifest -> TS -> refbat live roundtrip proof used locally.
-    name: TS/host profile proof
-    runs-on: ubuntu-latest
-    needs: [ci-fast-linux, ts-host-changed]
-    if: >-
-      (github.event_name == 'workflow_dispatch' &&
-        (github.event.inputs.proof == 'verify' ||
-         github.event.inputs.proof == 'heavy')) ||
-      (github.event_name == 'pull_request' &&
-        (needs.ts-host-changed.outputs.touched == 'true' ||
-         contains(github.event.pull_request.labels.*.name, 'run-heavy-ci')))
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-        with:
-          persist-credentials: false
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          workspaces: bpk-lib
-      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # 1.92.0
-        with:
-          toolchain: 1.92.0
-          components: clippy,rustfmt
-      - name: Install pnpm
-        run: |
-          corepack enable
-          corepack prepare pnpm@10.33.0 --activate
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: "22"
-          cache: pnpm
-          cache-dependency-path: bpk-ts/pnpm-lock.yaml
-      - name: Host profile proof
-        working-directory: bpk-lib
-        run: cargo xtask host-dev
-      - name: Upload generated artifacts on failure
-        if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: ts-parity-generated-debug
-          path: |
-            bpk-ts/packages/generated/
-            bpk-ts/batpak.manifest.json
-          if-no-files-found: warn
-          retention-days: 7
 
   mutants-smoke:
     name: Mutation smoke (${{ matrix.seam }})

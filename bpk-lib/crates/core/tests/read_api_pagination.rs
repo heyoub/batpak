@@ -1,4 +1,6 @@
-//! PROVES: INV-BIDIRECTIONAL-SUBSTRATE-LANE, INV-EXTERNAL-REPLAY-NO-SIDECAR-TRUTH.
+//! PROVES: INV-BIDIRECTIONAL-SUBSTRATE-LANE, INV-EXTERNAL-REPLAY-NO-SIDECAR-TRUTH,
+//! INV-SUBSTRATE-TRAVERSAL-DOMAIN-NEUTRAL (query returns metadata-only summaries —
+//! no decoded envelope bodies, missions, or domain replay names).
 
 use batpak::coordinate::{Coordinate, Region};
 use batpak::event::EventKind;

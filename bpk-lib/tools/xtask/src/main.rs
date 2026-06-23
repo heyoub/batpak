@@ -103,13 +103,6 @@ enum XtaskCommand {
     SemverCheck(SemverCheckArgs),
     /// Write a local release proof manifest under the Cargo workspace target dir.
     ReleaseManifest(ReleaseManifestArgs),
-    /// Export the BatPAK TypeScript SDK manifest from the reference host
-    /// descriptors. Consumed by `bpk-ts/packages/codegen`.
-    ExportTsManifest(ExportTsManifestArgs),
-    /// Prove the host profile end-to-end: manifest, codegen, TS, refbat, spike.
-    HostDev(HostDevArgs),
-    /// Prove the living TS audit-loop: seed, restart refbat, replay-only.
-    HostLoop,
     /// Opt-in factory command proof ledger backed by a local BatPAK store.
     FactoryLedger(FactoryLedgerArgs),
     /// Emit a PCP-aligned handoff packet under `target/context/`.
@@ -532,27 +525,6 @@ pub(crate) struct ReleaseManifestArgs {
 }
 
 #[derive(Args, Clone, Debug)]
-pub(crate) struct HostDevArgs {
-    /// Skip `pnpm -w test` (inner loop only; canonical proof runs tests).
-    #[arg(long)]
-    pub(crate) skip_tests: bool,
-    /// Skip the regeneration git-diff determinism check.
-    #[arg(long)]
-    pub(crate) skip_determinism: bool,
-}
-
-#[derive(Args, Clone, Debug)]
-pub(crate) struct ExportTsManifestArgs {
-    /// Output path for the rendered manifest. The parent directory is
-    /// created on demand.
-    #[arg(long, value_name = "PATH")]
-    pub(crate) out: PathBuf,
-    /// Refuse descriptor drift instead of rewriting the manifest.
-    #[arg(long)]
-    pub(crate) check: bool,
-}
-
-#[derive(Args, Clone, Debug)]
 pub(crate) struct ArchitectureIrArgs {
     /// Output path for the rendered IR. Defaults to target/architecture.ir.json.
     #[arg(long, value_name = "PATH")]
@@ -628,9 +600,6 @@ fn main() -> Result<()> {
         XtaskCommand::PublicApi(args) => public_api::public_api(args),
         XtaskCommand::SemverCheck(args) => public_api::semver_check(args),
         XtaskCommand::ReleaseManifest(args) => commands::release_manifest(args),
-        XtaskCommand::ExportTsManifest(args) => commands::export_ts_manifest(&args),
-        XtaskCommand::HostDev(args) => commands::host_dev(&args),
-        XtaskCommand::HostLoop => commands::host_loop(),
         XtaskCommand::FactoryLedger(args) => commands::factory_ledger(args),
         XtaskCommand::Context(args) => commands::context(args),
         XtaskCommand::Scaffold(args) => commands::scaffold(args),

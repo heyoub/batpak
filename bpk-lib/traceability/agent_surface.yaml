@@ -366,8 +366,6 @@ tasks:
       - "bpk-ts/examples/heartbeat-spike"
       - "bpk-ts/examples/audit-loop"
     tests:
-      - "crates/refbat/tests/tcp_e2e.rs"
-      - "crates/refbat/tests/handlers.rs"
       - "crates/core/tests/read_api_pagination.rs"
     invariants:
       - "downstream layers decode semantic payloads above BatPAK after bounded traversal"

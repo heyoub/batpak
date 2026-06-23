@@ -638,7 +638,7 @@ pub(crate) fn bench_targets(surface: BenchSurface) -> &'static [&'static str] {
 
 const FAMILY_BENCH_TARGETS: &[(&str, &[&str])] = &[
     ("syncbat", &["dispatch"]),
-    ("refbat", &["live_operations"]),
+    ("netbat", &["boundary"]),
 ];
 "#;
 
@@ -655,8 +655,8 @@ const FAMILY_BENCH_TARGETS: &[(&str, &[&str])] = &[
         assert_eq!(family.len(), 2);
         assert_eq!(family[0].package, "syncbat");
         assert_eq!(family[0].targets, vec!["dispatch"]);
-        assert_eq!(family[1].package, "refbat");
-        assert_eq!(family[1].targets, vec!["live_operations"]);
+        assert_eq!(family[1].package, "netbat");
+        assert_eq!(family[1].targets, vec!["boundary"]);
         Ok(())
     }
 }

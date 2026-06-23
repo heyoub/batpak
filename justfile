@@ -88,12 +88,6 @@ mutants-smoke:
 mutants-full:
     cd bpk-lib; cargo xtask mutants full
 
-host-dev:
-    cd bpk-lib; cargo xtask host-dev
-
-host-loop:
-    cd bpk-lib; cargo xtask host-loop
-
 ledger-list:
     cd bpk-lib; cargo xtask factory-ledger list
 
