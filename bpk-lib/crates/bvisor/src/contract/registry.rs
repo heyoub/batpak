@@ -3,7 +3,7 @@
 
 use crate::contract::admission::{planner_shadow_check, AdmissionOutcome, PlannerInputs};
 use crate::contract::backend::Backend;
-use crate::contract::budget::{budget_admit, DerivedMinimums};
+use crate::contract::budget::{budget_admit, AdmittedBudgets, DerivedMinimums};
 use crate::contract::capability::{
     Capability, Enforcement, EvidenceClaim, EvidenceSet, FdPolicy, FsAccess, NetPolicy,
     SpawnPolicy, SupportVerdict,
@@ -133,13 +133,13 @@ impl<'r> BoundaryPlanner<'r> {
                             detail: format!("budget profile canonicalization failed: {error}"),
                         }
                     })?;
-                budget_admit(&spec.budgets, &snapshot.budget, &derived, profile_digest).map_err(
-                    |refusal| PlanError::BudgetRefused {
-                        backend: backend.id(),
-                        dimension: refusal.dimension,
-                        failure: refusal.failure,
-                    },
-                )?;
+                let admitted_budgets =
+                    budget_admit(&spec.budgets, &snapshot.budget, &derived, profile_digest)
+                        .map_err(|refusal| PlanError::BudgetRefused {
+                            backend: backend.id(),
+                            dimension: refusal.dimension,
+                            failure: refusal.failure,
+                        })?;
 
                 let admitted: Vec<AdmittedRequirement> = classified
                     .iter()
@@ -149,12 +149,12 @@ impl<'r> BoundaryPlanner<'r> {
                         enforcement: verdict.enforcement,
                     })
                     .collect();
-                let plan_id = compute_plan_id(backend.id(), &snapshot, &admitted, spec).map_err(
-                    |error| PlanError::ProfileInsufficient {
-                        backend: backend.id(),
-                        detail: format!("plan canonicalization failed: {error}"),
-                    },
-                )?;
+                let plan_id =
+                    compute_plan_id(backend.id(), &snapshot, &admitted, spec, &admitted_budgets)
+                        .map_err(|error| PlanError::ProfileInsufficient {
+                            backend: backend.id(),
+                            detail: format!("plan canonicalization failed: {error}"),
+                        })?;
                 Ok(BoundaryPlan {
                     schema_version: BOUNDARY_PLAN_SCHEMA_VERSION,
                     plan_id,
@@ -162,7 +162,7 @@ impl<'r> BoundaryPlanner<'r> {
                     profile: snapshot,
                     admitted,
                     workload: spec.workload.clone(),
-                    budgets: spec.budgets.clone(),
+                    budgets: admitted_budgets,
                     evidence: spec.evidence,
                 })
             }
@@ -326,13 +326,15 @@ fn mechanism_for(
 }
 
 /// Canonical plan identity: hash of the plan core (backend, snapshot, admitted,
-/// workload, budgets, evidence). Sorts the admitted set by requirement so the
-/// digest is stable regardless of admission order.
+/// workload, budgets, evidence). Sorts the admitted set by requirement so the digest
+/// is stable regardless of admission order. `H_B` binds BOTH the budget REQUEST and
+/// the ADJUDICATED contract — changing either changes plan identity.
 fn compute_plan_id(
     backend: BackendId,
     snapshot: &BackendProfileSnapshot,
     admitted: &[AdmittedRequirement],
     spec: &BoundarySpec,
+    admitted_budgets: &AdmittedBudgets,
 ) -> Result<BoundaryPlanHash, rmp_serde::encode::Error> {
     let mut sorted_admitted = admitted.to_vec();
     sorted_admitted
@@ -344,7 +346,8 @@ fn compute_plan_id(
         snapshot,
         admitted: &sorted_admitted,
         workload: format!("{:?}", spec.workload),
-        budgets: format!("{:?}", spec.budgets),
+        budget_request: format!("{:?}", spec.budgets),
+        admitted_budgets: format!("{admitted_budgets:?}"),
         evidence: format!("{:?}", spec.evidence),
     };
     let bytes = batpak::canonical::to_bytes(&core)?;
@@ -368,7 +371,8 @@ struct PlanFingerprint<'a> {
     snapshot: &'a BackendProfileSnapshot,
     admitted: &'a [AdmittedRequirement],
     workload: String,
-    budgets: String,
+    budget_request: String,
+    admitted_budgets: String,
     evidence: String,
 }
 

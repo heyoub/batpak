@@ -1,6 +1,8 @@
 //! Spec → Plan: the inert IR and its fail-closed admission types.
 
-use crate::contract::budget::{BudgetDimension, BudgetFailure, BudgetRequirements};
+use crate::contract::budget::{
+    AdmittedBudgets, BudgetDimension, BudgetFailure, BudgetRequirements,
+};
 use crate::contract::capability::{Capability, Enforcement, EvidenceClaim, EvidenceSet};
 use crate::contract::host_control::HostControl;
 use crate::contract::ids::{BackendId, BoundaryPlanHash};
@@ -113,9 +115,12 @@ pub struct BoundaryPlan {
     pub admitted: Vec<AdmittedRequirement>,
     /// The workload to run.
     pub workload: Workload,
-    /// The seven-dimensional budget request carried with the plan (the adjudicated
-    /// `AdmittedBudgets` replaces this once the budget membrane lands).
-    pub budgets: BudgetRequirements,
+    /// The ADJUDICATED seven-dimensional budget contract — per dimension: the
+    /// effective limit, required + selected guarantee, required + promised evidence,
+    /// backing mechanism, and source-profile digest. Unforgeable: an
+    /// [`AdmittedBudgets`] is produced ONLY by the budget membrane admitting the
+    /// request against the backend's profile, so its presence is proof of admission.
+    pub budgets: AdmittedBudgets,
     /// Evidence the report must carry.
     pub evidence: EvidenceRequirements,
 }

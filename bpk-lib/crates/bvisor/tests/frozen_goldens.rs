@@ -41,10 +41,10 @@ use bvisor::{
     AdmittedRequirement, ArtifactId, AttemptId, BackendId, BackendProfileSnapshot,
     BoundaryDispositionEvent, BoundaryFinding, BoundaryPlan, BoundaryPlanHash,
     BoundaryRecoveryEvent, BoundaryReport, BoundaryReportBody, BoundaryReportEvent,
-    BoundaryRequirement, BoundaryStartedEvent, BudgetProfile, BudgetRequirements, CaptureRefs,
-    DispositionAction, DispositionPhase, Enforcement, EvidenceRequirements, ExitStatus,
-    HostControl, ObservedFact, Outcome, QuarantineRecord, RecoveryClassification, Workload,
-    BOUNDARY_PLAN_SCHEMA_VERSION, BOUNDARY_REPORT_SCHEMA_VERSION,
+    BoundaryRequirement, BoundaryStartedEvent, BudgetProfile, CaptureRefs, DispositionAction,
+    DispositionPhase, Enforcement, EvidenceRequirements, ExitStatus, HostControl, ObservedFact,
+    Outcome, QuarantineRecord, RecoveryClassification, Workload, BOUNDARY_PLAN_SCHEMA_VERSION,
+    BOUNDARY_REPORT_SCHEMA_VERSION,
 };
 use serde::de::DeserializeOwned;
 use std::collections::BTreeMap;
@@ -214,6 +214,38 @@ fn launch_requirement() -> BoundaryRequirement {
     BoundaryRequirement::HostControl(HostControl::LaunchWorkload)
 }
 
+/// A deterministic adjudicated budget contract for the sample plan. An
+/// `AdmittedBudgets` is unforgeable — it comes ONLY from the budget membrane
+/// admitting a request against a profile — so the golden builds it the real way.
+fn sample_admitted_budgets() -> bvisor::AdmittedBudgets {
+    use bvisor::{
+        budget_admit, BudgetAvailability, BudgetProfile, BudgetRequirements, DerivedMinimums,
+        EvidenceSet, MinGuarantee,
+    };
+    let enforced = BudgetAvailability {
+        available: 1_000_000,
+        enforcement: Enforcement::Enforced,
+        evidence: EvidenceSet::new(),
+        mechanism: "sample".to_string(),
+    };
+    let profile = BudgetProfile {
+        wall_micros: enforced.clone(),
+        cpu_micros: enforced.clone(),
+        resident_bytes: enforced.clone(),
+        process_count: enforced.clone(),
+        handle_count: enforced.clone(),
+        storage_bytes: enforced.clone(),
+        network_bytes: enforced,
+    };
+    budget_admit(
+        &BudgetRequirements::uniform(64, MinGuarantee::Mediated),
+        &profile,
+        &DerivedMinimums::default(),
+        [7u8; 32],
+    )
+    .expect("the sample uniform request admits against an all-enforced profile")
+}
+
 fn sample_plan() -> BoundaryPlan {
     BoundaryPlan {
         schema_version: BOUNDARY_PLAN_SCHEMA_VERSION,
@@ -229,7 +261,7 @@ fn sample_plan() -> BoundaryPlan {
             exe: "true".to_string(),
             args: Vec::new(),
         },
-        budgets: BudgetRequirements::deny_all(),
+        budgets: sample_admitted_budgets(),
         evidence: EvidenceRequirements::default(),
     }
 }
