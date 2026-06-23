@@ -5,6 +5,7 @@
 //! lives in [`crate::backend::inert`] (the no-confinement reference backend),
 //! never in the contract or the [`backend::Backend`] trait.
 
+pub(crate) mod admission;
 pub(crate) mod backend;
 pub(crate) mod capability;
 pub(crate) mod events;

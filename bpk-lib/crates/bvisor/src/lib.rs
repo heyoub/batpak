@@ -27,6 +27,11 @@ mod sim;
 
 pub use backend::inert::InertBackend;
 
+pub use contract::admission::{
+    AdmissionProgram, CertNode, CompareRel, InputDecl, InputSlot, LimitViolation, LookupTable,
+    Node, NodeId, NodeOp, Outputs, ProgramCertificate, ProgramError, ProgramLimits, Width,
+    ADMISSION_PROGRAM_SCHEMA_VERSION, FROZEN_LIMITS, MAX_WIDTH,
+};
 pub use contract::backend::Backend;
 pub use contract::capability::{
     Capability, Enforcement, EnvPolicy, EvidenceClaim, EvidenceSet, FdPolicy, FsAccess,
@@ -40,8 +45,8 @@ pub use contract::host_control::{
     CommitDurability, HostControl, KillGuarantee, KillTarget, PathView, StdStreams,
 };
 pub use contract::ids::{
-    ArtifactId, AttemptId, BackendId, BackendProfileHash, BoundaryPlanHash, BoundaryReportHash,
-    ContentHash, Digest32,
+    AdmissionProgramHash, ArtifactId, AttemptId, BackendId, BackendProfileHash, BoundaryPlanHash,
+    BoundaryReportHash, ContentHash, Digest32,
 };
 pub use contract::lifecycle::{
     Boundary, BoundaryState, LifecycleError, Planned, Reported, Spec, Started,

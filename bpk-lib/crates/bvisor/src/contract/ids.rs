@@ -105,6 +105,17 @@ impl BackendProfileHash {
     }
 }
 
+/// Canonical content hash of an [`crate::contract::admission::AdmissionProgram`]
+/// (`H_A`).
+///
+/// The admission decision is a bounded validated circuit; its digest is bound
+/// into a [`BoundaryPlan`] so the *exact decision program* — not just its inputs —
+/// is part of plan identity. Two plans that admit the same boundary by a different
+/// circuit are different plans. A branded type, never interchangeable with a plan,
+/// report, or profile hash.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct AdmissionProgramHash(pub Digest32);
+
 #[cfg(test)]
 mod id_tests {
     use super::{ArtifactId, AttemptId, BackendProfileHash, ContentHash};
