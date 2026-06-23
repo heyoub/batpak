@@ -34,16 +34,17 @@ pub use contract::admission::{
 };
 pub use contract::admission::{
     compile_admission, compile_budget_detail, compile_budget_membrane, compile_conflict_membrane,
-    compile_evidence_membrane, compile_profile_drift_membrane, compile_support_membrane,
-    compose_membranes, decode_validated, evaluate, planner_reference, planner_shadow_check,
-    reference_admission, reference_schedule_admission, schedule_refusal, shadow_check, validate,
-    verify_certificate, AdmissionDivergence, AdmissionInputs, AdmissionOutcome, AdmissionProgram,
-    AdmissionShape, BudgetInputs, CertNode, CircuitBuilder, CompareRel, Decision, EvalError,
-    InputDecl, InputSlot, Lane, LimitViolation, LookupTable, Node, NodeId, NodeOp, Outputs,
-    PlannerInputs, PrimitiveDeclInputs, ProgramCertificate, ProgramError, ProgramLimits,
-    RequirementInputs, ScheduleInputs, ScheduleOutcome, ScheduleRefusal, ScheduleSlotInputs,
-    ValidationError, Width, ADMISSION_PROGRAM_SCHEMA_VERSION, FROZEN_LIMITS, MAX_LOOKUP_ENTRIES,
-    MAX_PRIMITIVES, MAX_WIDTH,
+    compile_evidence_membrane, compile_profile_drift_membrane, compile_schedule_membrane,
+    compile_support_membrane, compose_membranes, decode_validated, evaluate, planner_reference,
+    planner_shadow_check, reference_admission, reference_schedule_admission, schedule_refusal,
+    schedule_shadow_check, shadow_check, shape_of, validate, verify_certificate,
+    AdmissionDivergence, AdmissionInputs, AdmissionOutcome, AdmissionProgram, AdmissionShape,
+    BudgetInputs, CertNode, CircuitBuilder, CompareRel, Decision, EvalError, InputDecl, InputSlot,
+    Lane, LimitViolation, LookupTable, Node, NodeId, NodeOp, Outputs, PlannerInputs,
+    PrimitiveDeclInputs, ProgramCertificate, ProgramError, ProgramLimits, RequirementInputs,
+    ScheduleDivergence, ScheduleInputs, ScheduleOutcome, ScheduleRefusal, ScheduleShape,
+    ScheduleSlotInputs, ValidationError, Width, ADMISSION_PROGRAM_SCHEMA_VERSION, FROZEN_LIMITS,
+    MAX_LOOKUP_ENTRIES, MAX_PRIMITIVES, MAX_WIDTH,
 };
 pub use contract::backend::Backend;
 pub use contract::budget::{

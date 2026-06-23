@@ -148,6 +148,24 @@ impl ScheduleRefusal {
             Self::NonCanonical => 9,
         }
     }
+
+    /// The refusal for a frozen [`ScheduleRefusal::code`], or `None` for `0` (admitted)
+    /// or an unknown code — the inverse the shadow uses to read the circuit's lane.
+    #[must_use]
+    pub fn from_code(code: u8) -> Option<Self> {
+        match code {
+            1 => Some(Self::IndexOutOfRange),
+            2 => Some(Self::DuplicatePrimitive),
+            3 => Some(Self::DeclIntegrity),
+            4 => Some(Self::MissingPrerequisite),
+            5 => Some(Self::ConflictCoPresent),
+            6 => Some(Self::PrereqOutOfOrder),
+            7 => Some(Self::PhaseOutOfOrder),
+            8 => Some(Self::RequirementUncovered),
+            9 => Some(Self::NonCanonical),
+            _ => None,
+        }
+    }
 }
 
 impl std::fmt::Display for ScheduleRefusal {
@@ -596,6 +614,13 @@ mod schedule_tests {
         assert_eq!(ScheduleRefusal::RequirementUncovered.code(), 8);
         assert_eq!(ScheduleRefusal::NonCanonical.code(), 9);
         assert_eq!(ScheduleOutcome::Admitted.code(), 0);
+        // `from_code` is the exact inverse on 1..=9; 0 and unknown codes are `None`.
+        for code in 1u8..=9 {
+            let reason = ScheduleRefusal::from_code(code).expect("1..=9 round-trips");
+            assert_eq!(reason.code(), code);
+        }
+        assert_eq!(ScheduleRefusal::from_code(0), None);
+        assert_eq!(ScheduleRefusal::from_code(10), None);
     }
 
     #[test]

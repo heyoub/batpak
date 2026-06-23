@@ -25,6 +25,7 @@ mod planner_shadow;
 mod program;
 mod qf_bv;
 mod schedule;
+mod schedule_circuit;
 mod shadow;
 mod validate;
 
@@ -49,6 +50,9 @@ pub use qf_bv::{
 pub use schedule::{
     reference_schedule_admission, schedule_refusal, PrimitiveDeclInputs, ScheduleInputs,
     ScheduleOutcome, ScheduleRefusal, ScheduleSlotInputs, MAX_PRIMITIVES,
+};
+pub use schedule_circuit::{
+    compile_schedule_membrane, schedule_shadow_check, shape_of, ScheduleDivergence, ScheduleShape,
 };
 pub use shadow::{
     reference_admission, shadow_check, AdmissionDivergence, AdmissionInputs, AdmissionOutcome,
