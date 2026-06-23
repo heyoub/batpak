@@ -2,9 +2,9 @@
 //!
 //! [`SimScheduler`] implements [`Spawn`] without ever touching an OS thread.
 //! Each `spawn` enqueues the body (a `FnOnce`) on a shared FIFO and hands back a
-//! [`SimJoin`] handle bound to a slot. Bodies execute on the *calling* thread
+//! [`JobHandle`] handle bound to a slot. Bodies execute on the *calling* thread
 //! when the queue is drained — either explicitly via [`SimScheduler::run_all`]
-//! or implicitly when a handle's [`SimJoin::join`] is called, which drains until
+//! or implicitly when a handle's [`JobHandle::join`] is called, which drains until
 //! its slot is finished.
 //!
 //! Determinism: because there is exactly one execution thread and a single FIFO
@@ -13,7 +13,7 @@
 //!
 //! Panic contract: a panicking body is caught with
 //! [`std::panic::catch_unwind`] and recorded as a failed slot, so
-//! [`SimJoin::join`] returns `Err` exactly like
+//! [`JobHandle::join`] returns `Err` exactly like
 //! [`std::thread::JoinHandle::join`].
 //!
 //! Shared state lives behind an internal `Arc<Shared>`, so the bare-`&self`
@@ -21,7 +21,7 @@
 //! handle clones the `Arc`). That is what lets `SimScheduler` be installed on a
 //! `StoreConfig` via `with_spawner` and produce working joins.
 
-use crate::store::platform::spawn::{SimJoin, SimJoinResult, Spawn};
+use crate::store::platform::spawn::{JobHandle, JoinError, Spawn, SpawnError};
 use std::collections::VecDeque;
 use std::panic::AssertUnwindSafe;
 use std::sync::{Arc, Mutex};
@@ -124,7 +124,7 @@ impl Shared {
     }
 
     /// Drain until slot `id` is finished, then map its state to a join result.
-    fn join_slot(&self, id: usize) -> SimJoinResult {
+    fn join_slot(&self, id: usize) -> Result<(), JoinError> {
         while !self.is_finished(id) {
             match self.next_pending() {
                 Some(next) => self.run_slot(next),
@@ -138,11 +138,9 @@ impl Shared {
             .state;
         match state {
             SlotState::Done | SlotState::Pending => Ok(()),
-            // Opaque payload; callers only inspect Err-ness, matching
-            // std::thread::JoinHandle::join's Box<dyn Any> contract.
-            SlotState::Panicked => {
-                Err(Box::new("sim body panicked") as Box<dyn std::any::Any + Send>)
-            }
+            // Mirrors std::thread::JoinHandle::join's Err arm as the typed
+            // JoinError::Panicked (callers only inspect Err-ness).
+            SlotState::Panicked => Err(JoinError::Panicked),
         }
     }
 }
@@ -172,7 +170,10 @@ impl SimScheduler {
     /// Identical semantics to [`Spawn::spawn`]; provided as an inherent method
     /// so callers that already hold a `&SimScheduler` get the concrete handle
     /// without a name/stack_size ceremony.
-    pub(crate) fn spawn_owned(&self, body: Box<dyn FnOnce() + Send + 'static>) -> Box<dyn SimJoin> {
+    pub(crate) fn spawn_owned(
+        &self,
+        body: Box<dyn FnOnce() + Send + 'static>,
+    ) -> Box<dyn JobHandle> {
         let id = self.shared.enqueue(body);
         Box::new(SimJoinHandle {
             shared: Arc::clone(&self.shared),
@@ -188,8 +189,8 @@ struct SimJoinHandle {
     id: usize,
 }
 
-impl SimJoin for SimJoinHandle {
-    fn join(self: Box<Self>) -> SimJoinResult {
+impl JobHandle for SimJoinHandle {
+    fn join(self: Box<Self>) -> Result<(), JoinError> {
         self.shared.join_slot(self.id)
     }
 
@@ -204,7 +205,8 @@ impl Spawn for SimScheduler {
         _name: String,
         _stack_size: Option<usize>,
         body: Box<dyn FnOnce() + Send + 'static>,
-    ) -> std::io::Result<Box<dyn SimJoin>> {
+    ) -> Result<Box<dyn JobHandle>, SpawnError> {
+        // The cooperative scheduler never fails to enqueue a body.
         Ok(self.spawn_owned(body))
     }
 }
@@ -261,7 +263,7 @@ mod tests {
     #[test]
     fn spawn_join_surfaces_panic_as_err() {
         let sched = SimScheduler::new();
-        // Deterministically unwind this body to prove SimJoin::join surfaces
+        // Deterministically unwind this body to prove JobHandle::join surfaces
         // the panic as Err. `black_box` hides the `None` from the
         // literal-unwrap lint; `expect` is the permitted in-test panic shape.
         let handle = sched.spawn_owned(Box::new(|| {
@@ -269,7 +271,53 @@ mod tests {
         }));
         assert!(
             handle.join().is_err(),
-            "PROPERTY: a panicking body surfaces through SimJoin::join as Err, matching std::thread"
+            "PROPERTY: a panicking body surfaces through JobHandle::join as Err, matching std::thread"
         );
+    }
+
+    // SHARED-DRIVE RULE (kernel plan §12): the production `ThreadSpawn` and the
+    // cooperative `SimScheduler` must satisfy ONE contract — the SAME body produces
+    // the SAME observable join outcome on both. This is the red fixture: any future
+    // divergence (one path swallowing a panic, the other not; one joining Ok where
+    // the other Errs) fails here. A clean body joins Ok on both; a panicking body
+    // joins Err on both.
+    #[test]
+    fn thread_spawn_and_sim_scheduler_agree_on_join_outcome() {
+        use crate::store::platform::spawn::{JobHandle, Spawn, ThreadSpawn};
+
+        fn join_ok(spawner: &dyn Spawn, panic: bool) -> bool {
+            let handle: Box<dyn JobHandle> = spawner
+                .spawn(
+                    "shared-drive-rule".to_string(),
+                    None,
+                    Box::new(move || {
+                        if panic {
+                            std::hint::black_box(Option::<()>::None)
+                                .expect("intentional shared-drive panic proof");
+                        }
+                    }),
+                )
+                .expect("spawn succeeds on both paths");
+            handle.join().is_ok()
+        }
+
+        let thread = ThreadSpawn;
+        let sim = SimScheduler::new();
+
+        // Clean body: both join Ok.
+        assert_eq!(
+            join_ok(&thread, false),
+            join_ok(&sim, false),
+            "shared-drive: a clean body joins identically on thread + cooperative paths"
+        );
+        assert!(join_ok(&ThreadSpawn, false), "clean body joins Ok");
+
+        // Panicking body: both join Err (one contract, no divergence).
+        assert_eq!(
+            join_ok(&thread, true),
+            join_ok(&sim, true),
+            "shared-drive: a panicking body joins identically on thread + cooperative paths"
+        );
+        assert!(!join_ok(&ThreadSpawn, true), "panicking body joins Err");
     }
 }

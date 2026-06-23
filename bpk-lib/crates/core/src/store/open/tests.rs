@@ -37,7 +37,7 @@ fn next_active_segment_id_is_one_past_latest_existing_segment() -> Result<(), St
 #[cfg(feature = "dangerous-test-hooks")]
 #[test]
 fn cooperative_open_spawns_zero_writer_threads_but_threaded_spawns_one() {
-    use crate::store::platform::spawn::{SimJoin, Spawn, ThreadSpawn};
+    use crate::store::platform::spawn::{JobHandle, Spawn, ThreadSpawn};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
 
@@ -53,7 +53,7 @@ fn cooperative_open_spawns_zero_writer_threads_but_threaded_spawns_one() {
             name: String,
             stack_size: Option<usize>,
             body: Box<dyn FnOnce() + Send + 'static>,
-        ) -> std::io::Result<Box<dyn SimJoin>> {
+        ) -> Result<Box<dyn JobHandle>, crate::store::platform::spawn::SpawnError> {
             self.count.fetch_add(1, Ordering::Release);
             self.inner.spawn(name, stack_size, body)
         }

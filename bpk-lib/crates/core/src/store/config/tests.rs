@@ -207,7 +207,7 @@ fn has_custom_clock_reflects_clock_presence() {
 
 #[test]
 fn with_spawner_installs_custom_spawner_and_runs_body() {
-    use crate::store::platform::spawn::{SimJoin, Spawn};
+    use crate::store::platform::spawn::{JobHandle, Spawn};
     use std::sync::atomic::AtomicBool;
 
     // A recording spawner proving that `with_spawner` rewires the seam: it
@@ -223,7 +223,7 @@ fn with_spawner_installs_custom_spawner_and_runs_body() {
             name: String,
             stack_size: Option<usize>,
             body: Box<dyn FnOnce() + Send + 'static>,
-        ) -> std::io::Result<Box<dyn SimJoin>> {
+        ) -> Result<Box<dyn JobHandle>, crate::store::platform::spawn::SpawnError> {
             self.spawned.store(true, Ordering::Release);
             self.inner.spawn(name, stack_size, body)
         }

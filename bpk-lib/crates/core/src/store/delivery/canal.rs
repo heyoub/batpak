@@ -1,5 +1,5 @@
 use crate::store::index::IndexEntry;
-use crate::store::platform::spawn::SimJoin;
+use crate::store::platform::spawn::JobHandle;
 use crate::store::write::fanout::Notification;
 use crate::store::StoreError;
 use parking_lot::Mutex;
@@ -103,14 +103,14 @@ pub trait CanalHandle: Send {
 /// Handle for lossy subscription-backed workers.
 pub(crate) struct SubscriptionWorkerHandle {
     stop: Arc<AtomicBool>,
-    join: Option<Box<dyn SimJoin>>,
+    join: Option<Box<dyn JobHandle>>,
     error_slot: Arc<Mutex<Option<StoreError>>>,
 }
 
 impl SubscriptionWorkerHandle {
     pub(crate) fn new(
         stop: Arc<AtomicBool>,
-        join: Box<dyn SimJoin>,
+        join: Box<dyn JobHandle>,
         error_slot: Arc<Mutex<Option<StoreError>>>,
     ) -> Self {
         Self {

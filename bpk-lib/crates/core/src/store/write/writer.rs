@@ -188,7 +188,7 @@ pub(crate) enum WriterDrive {
     /// SimScheduler task). `None` only for the test-only `from_parts_for_test`
     /// handle that has no live writer.
     Threaded {
-        thread: Option<Box<dyn crate::store::platform::spawn::SimJoin>>,
+        thread: Option<Box<dyn crate::store::platform::spawn::JobHandle>>,
     },
     /// Single-threaded: no writer thread; the queue is pumped inline.
     #[cfg(feature = "dangerous-test-hooks")]
@@ -279,7 +279,7 @@ impl WriterHandle {
                     );
                 }),
             )
-            .map_err(StoreError::Io)?;
+            .map_err(StoreError::from)?;
 
         Ok(Self {
             tx,

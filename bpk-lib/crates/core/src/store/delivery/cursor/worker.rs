@@ -191,7 +191,7 @@ impl Default for CursorWorkerConfig {
 #[must_use = "dropping a CursorWorkerHandle leaks the background worker thread; call stop()/join() to wind it down"]
 pub struct CursorWorkerHandle {
     stop: Arc<AtomicBool>,
-    join: Option<Box<dyn crate::store::platform::spawn::SimJoin>>,
+    join: Option<Box<dyn crate::store::platform::spawn::JobHandle>>,
     error_slot: Arc<Mutex<Option<StoreError>>>,
 }
 
@@ -348,7 +348,7 @@ impl Store<crate::store::Open> {
                 None,
                 Box::new(move || loop_ctx.run(handler)),
             )
-            .map_err(StoreError::Io)?;
+            .map_err(StoreError::from)?;
 
         Ok(CursorWorkerHandle {
             stop,

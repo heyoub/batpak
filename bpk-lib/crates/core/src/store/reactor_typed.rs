@@ -619,7 +619,7 @@ where
                 }
             }),
         )
-        .map_err(StoreError::Io)?;
+        .map_err(StoreError::from)?;
 
     Ok(SubscriptionWorkerHandle::new(stop, join, slot_for_store))
 }

@@ -123,6 +123,7 @@ pub use import::{
 #[cfg(any(feature = "alloc-count", feature = "fault-alloc"))]
 pub use platform::alloc;
 pub use platform::clock::{Clock, SystemClock};
+pub use platform::spawn::{JobHandle, JobStatus, JoinError, Spawn, SpawnError, ThreadSpawn};
 pub use projection::watch::{CursorWatcherError, ProjectionWatcher, WatcherError};
 pub use projection::{
     CacheCapabilities, CacheMeta, Freshness, NativeCache, NoCache, ProjectionCache,
