@@ -170,6 +170,14 @@ pub enum PlanError {
         /// The unknown backend id.
         backend: BackendId,
     },
+    /// The shadow admission circuit disagreed with the authoritative imperative
+    /// reference — a fail-closed gauntlet finding. No plan is produced and no
+    /// backend effect occurs. Should never arise from correct code; if it does,
+    /// the circuit and the reference have drifted and the build must stop.
+    ShadowDivergence {
+        /// The typed divergence rendered for the operator.
+        detail: String,
+    },
 }
 
 impl std::fmt::Display for PlanError {
@@ -197,6 +205,9 @@ impl std::fmt::Display for PlanError {
                 "backend {backend} cannot satisfy required evidence: {detail}"
             ),
             Self::UnknownBackend { backend } => write!(f, "unknown backend {backend}"),
+            Self::ShadowDivergence { detail } => {
+                write!(f, "admission shadow divergence (fail-closed): {detail}")
+            }
         }
     }
 }

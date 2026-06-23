@@ -1,8 +1,9 @@
 //! The "BAL" in code: [`BackendRegistry`] + [`BoundaryPlanner`] +
 //! [`BoundaryRunner`]. No `struct Bal`.
 
+use crate::contract::admission::{planner_shadow_check, AdmissionOutcome, PlannerInputs};
 use crate::contract::backend::Backend;
-use crate::contract::capability::{Enforcement, EvidenceSet};
+use crate::contract::capability::{Enforcement, EvidenceClaim, EvidenceSet, SupportVerdict};
 use crate::contract::host_control::HostControl;
 use crate::contract::ids::{BackendId, BoundaryPlanHash};
 use crate::contract::plan::{
@@ -10,7 +11,7 @@ use crate::contract::plan::{
     BOUNDARY_PLAN_SCHEMA_VERSION,
 };
 use crate::contract::report::{BoundaryReport, BoundaryReportBody, ObservedFact};
-use crate::contract::support::{BackendProfile, BackendProfileSnapshot};
+use crate::contract::support::BackendProfileSnapshot;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -70,82 +71,138 @@ impl<'r> BoundaryPlanner<'r> {
                 backend: backend.clone(),
             })?;
 
+        // ONE probe per planning attempt; one typed profile derived from it.
         let snapshot = backend.probe();
         let profile = backend.profile(&snapshot);
 
-        let mut admitted = Vec::new();
-        let mut available = EvidenceSet::new();
+        // Classify EVERY requirement ONCE, in admission order (capabilities then
+        // controls). This single classification feeds BOTH admission paths.
+        let mut classified: Vec<(BoundaryRequirement, SupportVerdict)> = Vec::new();
         for capability in &spec.capabilities {
             let req = BoundaryRequirement::Capability(capability.clone());
-            let (admitted_req, evidence) = admit_one(backend.as_ref(), req, &profile)?;
-            available.extend_from(&evidence);
-            admitted.push(admitted_req);
+            let verdict = backend.classify(&req, &profile);
+            classified.push((req, verdict));
         }
         for control in &spec.controls {
             let req = BoundaryRequirement::HostControl(control.clone());
-            let (admitted_req, evidence) = admit_one(backend.as_ref(), req, &profile)?;
-            available.extend_from(&evidence);
-            admitted.push(admitted_req);
+            let verdict = backend.classify(&req, &profile);
+            classified.push((req, verdict));
         }
 
-        // Evidence gate: the caller's required claims must be a subset of what
-        // the admitted requirements can actually witness, else fail closed.
+        // Normalize ONE immutable input object. The evidence union is computed
+        // here (not in-circuit) and fed identically to both paths.
         let required = spec.evidence.required_claims();
-        if !required.is_subset(&available) {
-            return Err(PlanError::EvidenceUnsatisfiable {
+        let mut available = EvidenceSet::new();
+        for (_, verdict) in &classified {
+            available.extend_from(&verdict.evidence);
+        }
+        let inputs = PlannerInputs {
+            enforcement: classified
+                .iter()
+                .map(|(_, verdict)| enforcement_code(verdict.enforcement))
+                .collect(),
+            evidence_required: evidence_bits(&required),
+            evidence_available: evidence_bits(&available),
+        };
+
+        // Authoritative imperative reference + non-persistent shadow circuit over
+        // the IDENTICAL inputs. A disagreement fails closed BEFORE any plan is
+        // built — no backend effect, nothing persisted, plan identity untouched.
+        let outcome =
+            planner_shadow_check(&inputs).map_err(|divergence| PlanError::ShadowDivergence {
+                detail: divergence.to_string(),
+            })?;
+
+        // Map the AUTHORITATIVE reference outcome back to the existing surface.
+        match outcome {
+            AdmissionOutcome::Admitted { .. } => {
+                let admitted: Vec<AdmittedRequirement> = classified
+                    .iter()
+                    .map(|(requirement, verdict)| AdmittedRequirement {
+                        mechanism: mechanism_for(&backend.id(), requirement, verdict.enforcement),
+                        requirement: requirement.clone(),
+                        enforcement: verdict.enforcement,
+                    })
+                    .collect();
+                let plan_id = compute_plan_id(backend.id(), &snapshot, &admitted, spec).map_err(
+                    |error| PlanError::ProfileInsufficient {
+                        backend: backend.id(),
+                        detail: format!("plan canonicalization failed: {error}"),
+                    },
+                )?;
+                Ok(BoundaryPlan {
+                    schema_version: BOUNDARY_PLAN_SCHEMA_VERSION,
+                    plan_id,
+                    backend: backend.id(),
+                    profile: snapshot,
+                    admitted,
+                    workload: spec.workload.clone(),
+                    budgets: spec.budgets,
+                    evidence: spec.evidence,
+                })
+            }
+            // Membrane 1 = support, membrane 2 = evidence (the current contract).
+            AdmissionOutcome::Refused { membrane: 1, .. } => {
+                match classified
+                    .iter()
+                    .find(|(_, verdict)| verdict.enforcement == Enforcement::Unsupported)
+                {
+                    Some((requirement, _)) => Err(PlanError::Unsupported {
+                        requirement: requirement.clone(),
+                        backend: backend.id(),
+                    }),
+                    None => Err(PlanError::ShadowDivergence {
+                        detail: "support refusal without an unsupported requirement".to_string(),
+                    }),
+                }
+            }
+            AdmissionOutcome::Refused { membrane: 2, .. } => Err(PlanError::EvidenceUnsatisfiable {
                 backend: backend.id(),
                 detail: format!(
                     "required evidence {required:?} is not a subset of admitted evidence {available:?}"
                 ),
-            });
+            }),
+            AdmissionOutcome::Refused { membrane, .. } => Err(PlanError::ShadowDivergence {
+                detail: format!("unexpected refusal membrane {membrane}"),
+            }),
         }
-
-        let plan_id =
-            compute_plan_id(backend.id(), &snapshot, &admitted, spec).map_err(|error| {
-                PlanError::ProfileInsufficient {
-                    backend: backend.id(),
-                    detail: format!("plan canonicalization failed: {error}"),
-                }
-            })?;
-
-        Ok(BoundaryPlan {
-            schema_version: BOUNDARY_PLAN_SCHEMA_VERSION,
-            plan_id,
-            backend: backend.id(),
-            profile: snapshot,
-            admitted,
-            workload: spec.workload.clone(),
-            budgets: spec.budgets,
-            evidence: spec.evidence,
-        })
     }
 }
 
-/// Classify one requirement; admit it (Enforced/Mediated) or fail closed.
-///
-/// Returns the admitted record AND the evidence the backend can witness for it
-/// (the verdict's evidence axis), which `plan()` unions to check the caller's
-/// required-evidence gate.
-fn admit_one(
-    backend: &dyn Backend,
-    requirement: BoundaryRequirement,
-    profile: &BackendProfile,
-) -> Result<(AdmittedRequirement, EvidenceSet), PlanError> {
-    let verdict = backend.classify(&requirement, profile);
-    match verdict.enforcement {
-        Enforcement::Enforced | Enforcement::Mediated => Ok((
-            AdmittedRequirement {
-                mechanism: mechanism_for(&backend.id(), &requirement, verdict.enforcement),
-                requirement,
-                enforcement: verdict.enforcement,
-            },
-            verdict.evidence,
-        )),
-        Enforcement::Unsupported => Err(PlanError::Unsupported {
-            requirement,
-            backend: backend.id(),
-        }),
+/// The 2-bit enforcement code the admission inputs use
+/// (`0` Unsupported, `1` Mediated, `2` Enforced).
+fn enforcement_code(enforcement: Enforcement) -> u8 {
+    match enforcement {
+        Enforcement::Unsupported => 0,
+        Enforcement::Mediated => 1,
+        Enforcement::Enforced => 2,
     }
+}
+
+/// The fixed bit position of an evidence claim in the admission evidence bitset.
+/// Exhaustive ON PURPOSE: adding an `EvidenceClaim` must assign it a bit here.
+fn evidence_bit(claim: EvidenceClaim) -> u32 {
+    match claim {
+        EvidenceClaim::TerminalOutcome => 0,
+        EvidenceClaim::CapturedStreams => 1,
+        EvidenceClaim::ResourceUsage => 2,
+        EvidenceClaim::AllowedActions => 3,
+        EvidenceClaim::DeniedAttempts => 4,
+        EvidenceClaim::FilesystemDelta => 5,
+        EvidenceClaim::ProcessTree => 6,
+        EvidenceClaim::NetworkActivity => 7,
+        EvidenceClaim::ArtifactLineage => 8,
+        EvidenceClaim::MechanismAttestation => 9,
+    }
+}
+
+/// Pack an evidence set into a bitset lane (one bit per claim).
+fn evidence_bits(set: &EvidenceSet) -> u16 {
+    let mut bits = 0u16;
+    for claim in set.iter() {
+        bits |= 1u16 << evidence_bit(claim);
+    }
+    bits
 }
 
 /// The mechanism evidence string a backend records for an admitted requirement.
@@ -335,5 +392,170 @@ impl<'r> BoundaryRunner<'r> {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod planner_shadow_integration_tests {
+    use super::{BackendRegistry, BoundaryPlanner};
+    use crate::contract::backend::Backend;
+    use crate::contract::capability::{Capability, Enforcement, NetPolicy, SupportVerdict};
+    use crate::contract::host_control::HostControl;
+    use crate::contract::ids::BackendId;
+    use crate::contract::plan::{
+        BoundaryPlan, BoundaryRequirement, BoundarySpec, Budgets, EvidenceRequirements, PlanError,
+        Workload,
+    };
+    use crate::contract::report::BoundaryReportBody;
+    use crate::contract::support::{BackendProfile, BackendProfileSnapshot, SupportMatrix};
+    use crate::InertBackend;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    fn launch_control() -> HostControl {
+        HostControl::LaunchWorkload
+    }
+
+    /// A spec Inert admits: launch only, requiring just the terminal outcome.
+    fn admissible_spec() -> BoundarySpec {
+        BoundarySpec {
+            workload: Workload::Process {
+                exe: "/bin/true".to_string(),
+                args: vec![],
+            },
+            capabilities: vec![],
+            controls: vec![launch_control()],
+            budgets: Budgets::default(),
+            evidence: EvidenceRequirements {
+                require_captured_streams: false,
+                require_exit_status: true,
+            },
+        }
+    }
+
+    fn registry_with(backend: Arc<dyn Backend>) -> BackendRegistry {
+        let mut registry = BackendRegistry::new();
+        registry.register(backend);
+        registry
+    }
+
+    fn inert_id() -> BackendId {
+        BackendId::new(InertBackend::ID)
+    }
+
+    #[test]
+    fn admits_a_no_confinement_spec_and_is_deterministic() {
+        let registry = registry_with(Arc::new(InertBackend::new()));
+        let planner = BoundaryPlanner::new(&registry);
+        let spec = admissible_spec();
+
+        let first = planner.plan(&spec, &inert_id()).expect("admit");
+        let second = planner.plan(&spec, &inert_id()).expect("admit");
+        // Accepted plan bytes are unchanged across attempts (deterministic identity).
+        assert_eq!(first, second);
+        assert_eq!(first.admitted.len(), 1);
+        assert_eq!(
+            first.admitted[0].requirement,
+            BoundaryRequirement::HostControl(HostControl::LaunchWorkload)
+        );
+        assert_eq!(first.admitted[0].enforcement, Enforcement::Enforced);
+        assert_eq!(first.admitted[0].mechanism, "inert:host_spawn:Enforced");
+    }
+
+    #[test]
+    fn refuses_unsupported_requirement_at_support_membrane() {
+        // A network capability Inert cannot enforce -> support refusal, naming the
+        // first unsupported requirement (parity with the pre-shadow planner).
+        let registry = registry_with(Arc::new(InertBackend::new()));
+        let planner = BoundaryPlanner::new(&registry);
+        let mut spec = admissible_spec();
+        spec.capabilities = vec![Capability::Network {
+            policy: NetPolicy::DenyAll,
+        }];
+
+        let error = planner.plan(&spec, &inert_id()).expect_err("refuse");
+        assert_eq!(
+            error,
+            PlanError::Unsupported {
+                requirement: BoundaryRequirement::Capability(Capability::Network {
+                    policy: NetPolicy::DenyAll,
+                }),
+                backend: inert_id(),
+            }
+        );
+    }
+
+    #[test]
+    fn refuses_unsatisfiable_evidence_at_evidence_membrane() {
+        // Launch is admitted (support passes) but the caller demands captured
+        // streams Inert cannot witness from launch alone -> evidence refusal.
+        let registry = registry_with(Arc::new(InertBackend::new()));
+        let planner = BoundaryPlanner::new(&registry);
+        let mut spec = admissible_spec();
+        spec.evidence.require_captured_streams = true;
+
+        let error = planner.plan(&spec, &inert_id()).expect_err("refuse");
+        assert!(
+            matches!(error, PlanError::EvidenceUnsatisfiable { .. }),
+            "expected evidence refusal, got {error:?}"
+        );
+    }
+
+    #[test]
+    fn unknown_backend_is_rejected() {
+        let registry = BackendRegistry::new();
+        let planner = BoundaryPlanner::new(&registry);
+        let error = planner
+            .plan(&admissible_spec(), &BackendId::new("ghost"))
+            .expect_err("unknown");
+        assert!(matches!(error, PlanError::UnknownBackend { .. }));
+    }
+
+    /// Wraps Inert, counting probe() calls — proves planning probes exactly once.
+    struct ProbeCounting {
+        inner: InertBackend,
+        probes: Arc<AtomicUsize>,
+    }
+
+    impl Backend for ProbeCounting {
+        fn id(&self) -> BackendId {
+            self.inner.id()
+        }
+        fn support(&self) -> &SupportMatrix {
+            self.inner.support()
+        }
+        fn probe(&self) -> BackendProfileSnapshot {
+            self.probes.fetch_add(1, Ordering::SeqCst);
+            self.inner.probe()
+        }
+        fn profile(&self, snap: &BackendProfileSnapshot) -> BackendProfile {
+            self.inner.profile(snap)
+        }
+        fn classify(&self, req: &BoundaryRequirement, profile: &BackendProfile) -> SupportVerdict {
+            self.inner.classify(req, profile)
+        }
+        fn execute(&self, plan: &BoundaryPlan) -> BoundaryReportBody {
+            self.inner.execute(plan)
+        }
+    }
+
+    #[test]
+    fn planning_probes_the_backend_exactly_once() {
+        let probes = Arc::new(AtomicUsize::new(0));
+        let backend = Arc::new(ProbeCounting {
+            inner: InertBackend::new(),
+            probes: Arc::clone(&probes),
+        });
+        let registry = registry_with(backend);
+        let planner = BoundaryPlanner::new(&registry);
+
+        planner
+            .plan(&admissible_spec(), &inert_id())
+            .expect("admit");
+        assert_eq!(
+            probes.load(Ordering::SeqCst),
+            1,
+            "both admission paths must share one probe, not re-probe"
+        );
     }
 }
