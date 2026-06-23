@@ -66,7 +66,7 @@ pub(crate) fn extract_anchors(body: &str) -> Vec<JustifiesAnchor> {
             "examples/",
             "crates/core/src/",
             "crates/core/tests/",
-            "crates/core/examples/",
+            "crates/examples/examples/",
             "crates/core/benches/",
             "crates/core/fixtures/",
             "crates/macros/",

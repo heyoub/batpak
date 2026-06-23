@@ -768,29 +768,29 @@
 - id: ART-EXAMPLES
   kind: examples
   paths:
-    - crates/core/examples/batch_append.rs
-    - crates/core/examples/chat_room.rs
-    - crates/core/examples/cross_crate_payloads.rs
-    - crates/core/examples/cursor_worker.rs
-    - crates/core/examples/dungeon_typestate.rs
-    - crates/core/examples/eight_jobs.rs
-    - crates/core/examples/event_sourced_counter.rs
-    - crates/core/examples/append_with_gate.rs
-    - crates/core/examples/lifecycle_observer.rs
-    - crates/core/examples/outbox.rs
-    - crates/core/examples/caller_defined_gates.rs
-    - crates/core/examples/quickstart.rs
-    - crates/core/examples/raw_projection_counter.rs
-    - crates/core/examples/raw_projection_counter_derived.rs
-    - crates/core/examples/read_only.rs
-    - crates/core/examples/signed_receipts.rs
-    - crates/core/examples/store_lock_helper.rs
-    - crates/core/examples/submit_pipeline.rs
-    - crates/core/examples/typed_reactor.rs
-    - crates/core/examples/typed_reactor_multi.rs
-    - crates/core/examples/visibility_fence.rs
-    - crates/core/examples/wait_for_durable.rs
-    - crates/core/examples/idempotent_pass.rs
+    - crates/examples/examples/batch_append.rs
+    - crates/examples/examples/chat_room.rs
+    - crates/examples/examples/cross_crate_payloads.rs
+    - crates/examples/examples/cursor_worker.rs
+    - crates/examples/examples/dungeon_typestate.rs
+    - crates/examples/examples/eight_jobs.rs
+    - crates/examples/examples/event_sourced_counter.rs
+    - crates/examples/examples/append_with_gate.rs
+    - crates/examples/examples/lifecycle_observer.rs
+    - crates/examples/examples/outbox.rs
+    - crates/examples/examples/caller_defined_gates.rs
+    - crates/examples/examples/quickstart.rs
+    - crates/examples/examples/raw_projection_counter.rs
+    - crates/examples/examples/raw_projection_counter_derived.rs
+    - crates/examples/examples/read_only.rs
+    - crates/examples/examples/signed_receipts.rs
+    - crates/examples/examples/store_lock_helper.rs
+    - crates/examples/examples/submit_pipeline.rs
+    - crates/examples/examples/typed_reactor.rs
+    - crates/examples/examples/typed_reactor_multi.rs
+    - crates/examples/examples/visibility_fence.rs
+    - crates/examples/examples/wait_for_durable.rs
+    - crates/examples/examples/idempotent_pass.rs
 - id: ART-MACROS
   kind: source
   paths:

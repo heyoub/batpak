@@ -235,7 +235,7 @@ fn check_examples_artifact_complete(repo_root: &Path, artifacts: &[ArtifactRecor
     let declared = examples_artifact
         .paths
         .iter()
-        .filter(|path| path.starts_with("crates/core/examples/") && path.ends_with(".rs"))
+        .filter(|path| path.starts_with("crates/examples/examples/") && path.ends_with(".rs"))
         .cloned()
         .collect::<BTreeSet<_>>();
     let mut actual = BTreeSet::new();
@@ -251,7 +251,7 @@ fn check_examples_artifact_complete(repo_root: &Path, artifacts: &[ArtifactRecor
     ensure(
         declared == actual,
         format!(
-            "ART-EXAMPLES must list every runnable crates/core/examples/*.rs file exactly once; declared={declared:?}, actual={actual:?}"
+            "ART-EXAMPLES must list every runnable crates/examples/examples/*.rs file exactly once; declared={declared:?}, actual={actual:?}"
         ),
     )
 }

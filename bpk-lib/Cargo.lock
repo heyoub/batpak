@@ -161,6 +161,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "batpak-examples"
+version = "0.8.3"
+dependencies = [
+ "batpak",
+ "flume",
+ "rmp-serde",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "batpak-integrity"
 version = "0.1.0"
 dependencies = [
