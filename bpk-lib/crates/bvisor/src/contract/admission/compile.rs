@@ -77,6 +77,17 @@ impl CircuitBuilder {
         )
     }
 
+    /// Unsigned `a < b` over two equal-width lanes → 1-bit predicate.
+    pub fn compare_ult(&mut self, a: NodeId, b: NodeId) -> NodeId {
+        self.push(
+            NodeOp::Compare {
+                rel: super::program::CompareRel::Ult,
+            },
+            vec![a, b],
+            Width::one(),
+        )
+    }
+
     /// Boolean AND of two 1-bit lanes.
     pub fn and(&mut self, a: NodeId, b: NodeId) -> NodeId {
         self.push(NodeOp::And, vec![a, b], Width::one())
@@ -124,6 +135,22 @@ impl CircuitBuilder {
                 let l = self.and_reduce(left);
                 let r = self.and_reduce(right);
                 self.and(l, r)
+            }
+        }
+    }
+
+    /// OR-reduce 1-bit lanes into a **balanced** tree (depth `⌈log₂ n⌉`). An empty
+    /// slice reduces to the constant `0` (the identity of OR).
+    pub fn or_reduce(&mut self, items: &[NodeId]) -> NodeId {
+        match items {
+            [] => self.constant(vec![0], Width::one()),
+            [only] => *only,
+            _ => {
+                let mid = items.len() / 2;
+                let (left, right) = items.split_at(mid);
+                let l = self.or_reduce(left);
+                let r = self.or_reduce(right);
+                self.or(l, r)
             }
         }
     }
