@@ -24,7 +24,10 @@ mod limits;
 mod program;
 mod validate;
 
-pub use compile::{compile_budget_membrane, CircuitBuilder};
+pub use compile::{
+    compile_budget_membrane, compile_evidence_membrane, compile_support_membrane,
+    compose_membranes, CircuitBuilder,
+};
 pub use eval::{evaluate, Decision, EvalError, Lane};
 pub use limits::{LimitViolation, ProgramLimits, FROZEN_LIMITS};
 pub use program::{
