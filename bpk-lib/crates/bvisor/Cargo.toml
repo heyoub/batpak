@@ -17,6 +17,12 @@ default = []
 # `store/sim` convention (`crates/core/Cargo.toml`). Without it the whole
 # `sim/` module is compiled out and the crate stays the pure contract + Inert.
 dangerous-test-hooks = []
+# The QF_BV solver harness (kernel plan §4): an EXTERNAL, PINNED, CLOUD-ONLY SMT
+# tool that discharges the admission-circuit equivalence proof. Gated so the solver
+# never runs on the local potato — CI runs `cargo test --features qf-bv` with pinned
+# z3/cvc5 (BVISOR_Z3 / BVISOR_CVC5). The pure SMT GENERATOR is always compiled and
+# unit-tested locally; only the solver-invoking harness is behind this feature.
+qf-bv = []
 
 [dependencies]
 # batpak by path for the EventPayload derive + inventory registration and the

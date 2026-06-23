@@ -23,6 +23,7 @@ mod eval;
 mod limits;
 mod planner_shadow;
 mod program;
+mod qf_bv;
 mod shadow;
 mod validate;
 
@@ -39,6 +40,7 @@ pub use program::{
     NodeOp, Outputs, ProgramCertificate, ProgramError, Width, ADMISSION_PROGRAM_SCHEMA_VERSION,
     MAX_WIDTH,
 };
+pub use qf_bv::{budget_membrane_equivalence_smt, translate, QfBvError, TranslatedCircuit};
 pub use shadow::{
     reference_admission, shadow_check, AdmissionDivergence, AdmissionInputs, AdmissionOutcome,
     BudgetInputs, RequirementInputs,
