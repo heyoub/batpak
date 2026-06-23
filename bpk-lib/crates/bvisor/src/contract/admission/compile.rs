@@ -185,16 +185,88 @@ fn priority_encode(builder: &mut CircuitBuilder, membranes: &[NodeId]) -> NodeId
     code
 }
 
-/// Compile the budget membrane: admit iff `∀d : req[d] ≤ avail[d]`.
-///
-/// The circuit reads `2·dims` input lanes of `width` — the `dims` requested values
-/// followed by the `dims` available values — compares each pair with unsigned `≤`,
-/// and balances the per-dimension passes into a single admit bit. The refusal code
-/// is `0` when admitted, else `1` (this membrane's index).
+/// The 2-bit enforcement-code width.
+fn enforcement_width() -> Width {
+    Width::new(2).expect("2 is within 1..=MAX_WIDTH")
+}
+
+// --- membrane CHECKS: the decision logic, building into an existing builder and
+// returning the membrane's 1-bit pass node. The `compile_*_membrane` wrappers add
+// inputs around a check; `compile_admission` shares inputs across all of them.
+
+/// `∀d : req[d] ≤ avail[d]`.
+fn budget_check(
+    builder: &mut CircuitBuilder,
+    requested: &[NodeId],
+    available: &[NodeId],
+) -> NodeId {
+    let checks: Vec<NodeId> = requested
+        .iter()
+        .zip(available)
+        .map(|(req, avail)| builder.compare_ule(*req, *avail))
+        .collect();
+    builder.and_reduce(&checks)
+}
+
+/// `∀i : required[i] ⊆ available[i]`.
+fn evidence_check(
+    builder: &mut CircuitBuilder,
+    required: &[NodeId],
+    available: &[NodeId],
+) -> NodeId {
+    let checks: Vec<NodeId> = required
+        .iter()
+        .zip(available)
+        .map(|(req, avail)| builder.bitset_subset(*req, *avail))
+        .collect();
+    builder.and_reduce(&checks)
+}
+
+/// `∀i : Mediated ≤ enforcement[i]`.
+fn support_check(
+    builder: &mut CircuitBuilder,
+    enforcements: &[NodeId],
+    enf_width: Width,
+) -> NodeId {
+    let checks: Vec<NodeId> = enforcements
+        .iter()
+        .map(|enf| {
+            let threshold = builder.constant(vec![MEDIATED_CODE], enf_width);
+            builder.compare_ule(threshold, *enf)
+        })
+        .collect();
+    builder.and_reduce(&checks)
+}
+
+/// `∀i : present[i] ∩ forbidden[i] = ∅`.
+fn conflict_check(
+    builder: &mut CircuitBuilder,
+    present: &[NodeId],
+    forbidden: &[NodeId],
+    width: Width,
+) -> NodeId {
+    let zero = builder.constant(vec![0u8; usize::from(width.get()).div_ceil(8)], width);
+    let checks: Vec<NodeId> = present
+        .iter()
+        .zip(forbidden)
+        .map(|(p, f)| {
+            let intersection = builder.bitset_intersection(*p, *f, width);
+            builder.equal(intersection, zero)
+        })
+        .collect();
+    builder.and_reduce(&checks)
+}
+
+/// `planned == live`.
+fn profile_drift_check(builder: &mut CircuitBuilder, planned: NodeId, live: NodeId) -> NodeId {
+    builder.equal(planned, live)
+}
+
+/// Compile the budget membrane: admit iff `∀d : req[d] ≤ avail[d]`. Reads `2·dims`
+/// input lanes of `width` (the `dims` requested values, then the `dims` available).
 ///
 /// # Errors
-/// [`ProgramError`] only if the circuit somehow exceeds `u32` node indexing, which
-/// a budget membrane never does.
+/// [`ProgramError`] only on `u32` node-index overflow, which a membrane never hits.
 pub fn compile_budget_membrane(
     dims: usize,
     width: Width,
@@ -202,20 +274,12 @@ pub fn compile_budget_membrane(
     let mut builder = CircuitBuilder::new();
     let requested: Vec<NodeId> = (0..dims).map(|_| builder.input(width)).collect();
     let available: Vec<NodeId> = (0..dims).map(|_| builder.input(width)).collect();
-    let checks: Vec<NodeId> = requested
-        .iter()
-        .zip(&available)
-        .map(|(req, avail)| builder.compare_ule(*req, *avail))
-        .collect();
-    let admit = builder.and_reduce(&checks);
+    let admit = budget_check(&mut builder, &requested, &available);
     finish_single_membrane(builder, admit)
 }
 
-/// Compile the evidence membrane: admit iff each requirement's required evidence
-/// claims are a subset of those the backend can produce (`required ⊆ available`).
-///
-/// Reads `2·reqs` bitset lanes of `evidence_width` — the `reqs` required sets, then
-/// the `reqs` available sets.
+/// Compile the evidence membrane: admit iff each requirement's required evidence ⊆
+/// the backend's available evidence. Reads `2·reqs` bitset lanes of `evidence_width`.
 ///
 /// # Errors
 /// [`ProgramError`] only on `u32` node-index overflow, which a membrane never hits.
@@ -226,42 +290,25 @@ pub fn compile_evidence_membrane(
     let mut builder = CircuitBuilder::new();
     let required: Vec<NodeId> = (0..reqs).map(|_| builder.input(evidence_width)).collect();
     let available: Vec<NodeId> = (0..reqs).map(|_| builder.input(evidence_width)).collect();
-    let checks: Vec<NodeId> = required
-        .iter()
-        .zip(&available)
-        .map(|(req, avail)| builder.bitset_subset(*req, *avail))
-        .collect();
-    let admit = builder.and_reduce(&checks);
+    let admit = evidence_check(&mut builder, &required, &available);
     finish_single_membrane(builder, admit)
 }
 
 /// Compile the support membrane: admit iff every requirement's enforcement is at
-/// least `Mediated`. Enforcement is a 2-bit code (`0` Unsupported, `1` Mediated,
-/// `2` Enforced); the membrane checks `Mediated ≤ enforcement[i]` per requirement.
+/// least `Mediated` (2-bit codes `0` Unsupported, `1` Mediated, `2` Enforced).
 ///
 /// # Errors
 /// [`ProgramError`] only on `u32` node-index overflow, which a membrane never hits.
 pub fn compile_support_membrane(reqs: usize) -> Result<AdmissionProgram, ProgramError> {
     let mut builder = CircuitBuilder::new();
-    let enf_width = Width::new(2).expect("2 is within 1..=MAX_WIDTH");
+    let enf_width = enforcement_width();
     let enforcements: Vec<NodeId> = (0..reqs).map(|_| builder.input(enf_width)).collect();
-    let checks: Vec<NodeId> = enforcements
-        .iter()
-        .map(|enf| {
-            let threshold = builder.constant(vec![MEDIATED_CODE], enf_width);
-            builder.compare_ule(threshold, *enf)
-        })
-        .collect();
-    let admit = builder.and_reduce(&checks);
+    let admit = support_check(&mut builder, &enforcements, enf_width);
     finish_single_membrane(builder, admit)
 }
 
-/// Compile the conflict-freedom membrane: admit iff no present-primitive set
-/// intersects its forbidden set (`present_i ∩ forbidden_i = ∅`), computed as
-/// `Eq(BitsetIntersection(present, forbidden), 0)` per requirement.
-///
-/// Reads `2·reqs` bitset lanes of `width` — the `reqs` present sets, then the
-/// `reqs` forbidden sets.
+/// Compile the conflict-freedom membrane: admit iff no present set intersects its
+/// forbidden set. Reads `2·reqs` bitset lanes of `width`.
 ///
 /// # Errors
 /// [`ProgramError`] only on `u32` node-index overflow, which a membrane never hits.
@@ -272,22 +319,12 @@ pub fn compile_conflict_membrane(
     let mut builder = CircuitBuilder::new();
     let present: Vec<NodeId> = (0..reqs).map(|_| builder.input(width)).collect();
     let forbidden: Vec<NodeId> = (0..reqs).map(|_| builder.input(width)).collect();
-    let zero = builder.constant(vec![0u8; usize::from(width.get()).div_ceil(8)], width);
-    let checks: Vec<NodeId> = present
-        .iter()
-        .zip(&forbidden)
-        .map(|(p, f)| {
-            let intersection = builder.bitset_intersection(*p, *f, width);
-            builder.equal(intersection, zero)
-        })
-        .collect();
-    let admit = builder.and_reduce(&checks);
+    let admit = conflict_check(&mut builder, &present, &forbidden, width);
     finish_single_membrane(builder, admit)
 }
 
-/// Compile the profile-drift membrane: admit iff the planned backend-profile hash
-/// equals the live (re-probed) one — the run fails closed if the machine changed
-/// between admission and execution.
+/// Compile the profile-drift membrane: admit iff the planned profile hash equals the
+/// live re-probed one — fails closed if the machine changed.
 ///
 /// # Errors
 /// [`ProgramError`] only on `u32` node-index overflow, which a membrane never hits.
@@ -295,8 +332,84 @@ pub fn compile_profile_drift_membrane(hash_width: Width) -> Result<AdmissionProg
     let mut builder = CircuitBuilder::new();
     let planned = builder.input(hash_width);
     let live = builder.input(hash_width);
-    let same = builder.equal(planned, live);
+    let same = profile_drift_check(&mut builder, planned, live);
     finish_single_membrane(builder, same)
+}
+
+/// The shape of a full admission instance — how many requirements / budget
+/// dimensions and the per-aspect lane widths the compiled circuit reads.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AdmissionShape {
+    /// Number of requirements (drives support / evidence / conflict lanes).
+    pub requirements: usize,
+    /// Number of budget dimensions.
+    pub budget_dims: usize,
+    /// Width of each budget value lane.
+    pub budget_width: Width,
+    /// Width of each evidence bitset lane.
+    pub evidence_width: Width,
+    /// Width of each conflict bitset lane.
+    pub conflict_width: Width,
+    /// Width of the profile-hash lanes.
+    pub hash_width: Width,
+}
+
+/// Compile the FULL admission circuit: the five membranes composed in the fixed
+/// canonical order with the ordered priority-encoder refusal (kernel plan §6).
+///
+/// Input lane order (so a caller can encode `x`): `planned_hash, live_hash`, then
+/// `enforcement × requirements`, then `required × requirements`,
+/// `available × requirements`, then `budget_req × dims`, `budget_avail × dims`,
+/// then `present × requirements`, `forbidden × requirements`. Membrane order (the
+/// refusal index): `1` profile-drift, `2` support, `3` evidence, `4` budget,
+/// `5` conflict.
+///
+/// # Errors
+/// [`ProgramError`] only on `u32` node-index overflow, which admission never hits.
+pub fn compile_admission(shape: &AdmissionShape) -> Result<AdmissionProgram, ProgramError> {
+    let mut builder = CircuitBuilder::new();
+    let reqs = shape.requirements;
+    let dims = shape.budget_dims;
+
+    let planned = builder.input(shape.hash_width);
+    let live = builder.input(shape.hash_width);
+    let drift = profile_drift_check(&mut builder, planned, live);
+
+    let enf_width = enforcement_width();
+    let enforcements: Vec<NodeId> = (0..reqs).map(|_| builder.input(enf_width)).collect();
+    let support = support_check(&mut builder, &enforcements, enf_width);
+
+    let required: Vec<NodeId> = (0..reqs)
+        .map(|_| builder.input(shape.evidence_width))
+        .collect();
+    let available: Vec<NodeId> = (0..reqs)
+        .map(|_| builder.input(shape.evidence_width))
+        .collect();
+    let evidence = evidence_check(&mut builder, &required, &available);
+
+    let budget_req: Vec<NodeId> = (0..dims)
+        .map(|_| builder.input(shape.budget_width))
+        .collect();
+    let budget_avail: Vec<NodeId> = (0..dims)
+        .map(|_| builder.input(shape.budget_width))
+        .collect();
+    let budget = budget_check(&mut builder, &budget_req, &budget_avail);
+
+    let present: Vec<NodeId> = (0..reqs)
+        .map(|_| builder.input(shape.conflict_width))
+        .collect();
+    let forbidden: Vec<NodeId> = (0..reqs)
+        .map(|_| builder.input(shape.conflict_width))
+        .collect();
+    let conflict = conflict_check(&mut builder, &present, &forbidden, shape.conflict_width);
+
+    let membranes = [drift, support, evidence, budget, conflict];
+    let (admit, refusal_code) = compose_membranes(&mut builder, &membranes);
+    builder.finish(Outputs {
+        admit,
+        refusal_code,
+        membranes: membranes.to_vec(),
+    })
 }
 
 #[cfg(test)]
@@ -306,9 +419,9 @@ mod compile_tests {
     use super::super::program::{Outputs, Width};
     use super::super::validate::validate;
     use super::{
-        compile_budget_membrane, compile_conflict_membrane, compile_evidence_membrane,
-        compile_profile_drift_membrane, compile_support_membrane, compose_membranes,
-        CircuitBuilder,
+        compile_admission, compile_budget_membrane, compile_conflict_membrane,
+        compile_evidence_membrane, compile_profile_drift_membrane, compile_support_membrane,
+        compose_membranes, AdmissionShape, CircuitBuilder,
     };
 
     fn w(bits: u16) -> Width {
@@ -540,5 +653,107 @@ mod compile_tests {
             assert_eq!(decision.admit, expected_admit, "admit at {bits:03b}");
             assert_eq!(decision.refusal_code, expected_code, "code at {bits:03b}");
         }
+    }
+
+    /// One requirement, one budget dim, all 2-bit lanes — small enough to drive the
+    /// full composed circuit by hand.
+    fn small_shape() -> AdmissionShape {
+        AdmissionShape {
+            requirements: 1,
+            budget_dims: 1,
+            budget_width: w(2),
+            evidence_width: w(2),
+            conflict_width: w(2),
+            hash_width: w(2),
+        }
+    }
+
+    /// The nine per-aspect input values, in `compile_admission`'s lane order.
+    struct Aspects {
+        planned: u64,
+        live: u64,
+        enforcement: u64,
+        required: u64,
+        available: u64,
+        budget_req: u64,
+        budget_avail: u64,
+        present: u64,
+        forbidden: u64,
+    }
+
+    /// An all-membranes-pass baseline for `small_shape`.
+    fn all_pass() -> Aspects {
+        Aspects {
+            planned: 1,
+            live: 1,        // == planned -> drift passes
+            enforcement: 2, // Enforced >= Mediated -> support passes
+            required: 1,
+            available: 3, // 0b01 ⊆ 0b11 -> evidence passes
+            budget_req: 1,
+            budget_avail: 3, // 1 <= 3 -> budget passes
+            present: 1,
+            forbidden: 2, // 0b01 ∩ 0b10 = 0 -> conflict passes
+        }
+    }
+
+    fn admission_inputs(a: &Aspects) -> Vec<Lane> {
+        vec![
+            lane(a.planned, w(2)),
+            lane(a.live, w(2)),
+            lane(a.enforcement, w(2)),
+            lane(a.required, w(2)),
+            lane(a.available, w(2)),
+            lane(a.budget_req, w(2)),
+            lane(a.budget_avail, w(2)),
+            lane(a.present, w(2)),
+            lane(a.forbidden, w(2)),
+        ]
+    }
+
+    #[test]
+    fn full_admission_admits_when_every_membrane_passes() {
+        let program = compile_admission(&small_shape()).expect("compile");
+        validate(&program, &FROZEN_LIMITS).expect("C emits a valid admission circuit");
+        let decision = evaluate(&program, &admission_inputs(&all_pass())).expect("eval");
+        assert!(decision.admit);
+        assert_eq!(decision.refusal_code, 0);
+    }
+
+    #[test]
+    fn full_admission_refuses_at_the_first_failing_membrane() {
+        let program = compile_admission(&small_shape()).expect("compile");
+        // Break only one membrane (earlier ones still pass) and assert the refusal
+        // code names it, in canonical order 1..=5.
+        let assert_refuses = |index: u64, aspects: &Aspects| {
+            let decision = evaluate(&program, &admission_inputs(aspects)).expect("eval");
+            assert!(!decision.admit, "membrane {index} should refuse");
+            assert_eq!(
+                decision.refusal_code, index,
+                "refusal must name the FIRST failing membrane ({index})"
+            );
+        };
+
+        let mut drift = all_pass();
+        drift.live = 2; // != planned
+        assert_refuses(1, &drift);
+
+        let mut support = all_pass();
+        support.enforcement = 0; // Unsupported < Mediated
+        assert_refuses(2, &support);
+
+        let mut evidence = all_pass();
+        evidence.required = 2;
+        evidence.available = 1; // 0b10 ⊄ 0b01
+        assert_refuses(3, &evidence);
+
+        let mut budget = all_pass();
+        budget.budget_req = 3;
+        budget.budget_avail = 1; // 3 > 1
+        assert_refuses(4, &budget);
+
+        let mut conflict = all_pass();
+        conflict.present = 3;
+        conflict.forbidden = 3; // 0b11 ∩ 0b11 != 0
+        assert_refuses(5, &conflict);
     }
 }

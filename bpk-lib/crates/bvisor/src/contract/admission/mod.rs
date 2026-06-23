@@ -25,8 +25,9 @@ mod program;
 mod validate;
 
 pub use compile::{
-    compile_budget_membrane, compile_conflict_membrane, compile_evidence_membrane,
-    compile_profile_drift_membrane, compile_support_membrane, compose_membranes, CircuitBuilder,
+    compile_admission, compile_budget_membrane, compile_conflict_membrane,
+    compile_evidence_membrane, compile_profile_drift_membrane, compile_support_membrane,
+    compose_membranes, AdmissionShape, CircuitBuilder,
 };
 pub use eval::{evaluate, Decision, EvalError, Lane};
 pub use limits::{LimitViolation, ProgramLimits, FROZEN_LIMITS};
