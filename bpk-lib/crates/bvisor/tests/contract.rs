@@ -3,10 +3,14 @@
 //! [`InertBackend`].
 
 use bvisor::{
-    Backend, BackendRegistry, BoundaryPlanner, BoundaryRecoveryEvent, BoundaryReportEvent,
-    BoundaryRunner, BoundarySpec, BoundaryStartedEvent, BudgetRequirements, Capability,
-    EvidenceRequirements, FsAccess, FsConfinement, HostControl, InertBackend, Outcome, PathSet,
-    PlanError, StdStreams, Workload,
+    Backend, BackendRegistry, BoundaryPlanner, BoundarySpec, BudgetRequirements, Capability,
+    EvidenceRequirements, FsAccess, FsConfinement, HostControl, InertBackend, PathSet, PlanError,
+    Workload,
+};
+#[cfg(feature = "dangerous-test-hooks")]
+use bvisor::{
+    BoundaryRecoveryEvent, BoundaryReportEvent, BoundaryRunner, BoundaryStartedEvent, MinGuarantee,
+    Outcome, StdStreams,
 };
 use std::sync::Arc;
 
@@ -18,6 +22,26 @@ fn registry() -> BackendRegistry {
 
 fn inert_id() -> bvisor::BackendId {
     InertBackend::new().id()
+}
+
+/// The honest [`SimBackend`] monster: Enforced support for everything, full
+/// evidence, and a runnable budget profile. Unlike Inert (the all-Unsupported
+/// lattice floor, which refuses every budgeted spec at the budget membrane), the
+/// honest Sim admits any spec whose budget fits its capacities — so it is what
+/// the POSITIVE (admit/run/seal) tests must plan against. Only available under
+/// `dangerous-test-hooks`.
+#[cfg(feature = "dangerous-test-hooks")]
+fn sim_registry() -> BackendRegistry {
+    let mut registry = BackendRegistry::new();
+    registry.register(Arc::new(bvisor::__sim::SimBackend::new(Box::new(
+        bvisor::__sim::OneShotLiar::new(bvisor::__sim::LieMode::Honest),
+    ))));
+    registry
+}
+
+#[cfg(feature = "dangerous-test-hooks")]
+fn sim_id() -> bvisor::BackendId {
+    bvisor::BackendId::new(bvisor::__sim::SimBackend::ID)
 }
 
 /// A workload that exists on every CI host: `true` (exit 0). Avoids shell quirks.
@@ -56,11 +80,13 @@ fn plan_fails_closed_on_required_confinement() {
     );
 }
 
-// (b) a zero-confinement spec (just LaunchWorkload + CaptureStreams) on Inert
-//     returns Ok(plan), and run() yields a sealed report with a stable body_hash.
+// (b) a zero-confinement spec (just LaunchWorkload + CaptureStreams) with a
+//     runnable budget plans on the honest Sim, and run() yields a sealed report
+//     with a stable body_hash. (Inert refuses every budgeted spec at the floor.)
+#[cfg(feature = "dangerous-test-hooks")]
 #[test]
 fn zero_confinement_plans_runs_and_seals_stably() {
-    let registry = registry();
+    let registry = sim_registry();
     let planner = BoundaryPlanner::new(&registry);
     let runner = BoundaryRunner::new(&registry);
 
@@ -73,13 +99,13 @@ fn zero_confinement_plans_runs_and_seals_stably() {
                 streams: StdStreams::capture_out_err(),
             },
         ],
-        budgets: BudgetRequirements::deny_all(),
+        budgets: BudgetRequirements::uniform(64, MinGuarantee::Mediated),
         evidence: EvidenceRequirements::default(),
     };
 
     let plan = planner
-        .plan(&spec, &inert_id())
-        .expect("zero-confinement spec must admit on inert");
+        .plan(&spec, &sim_id())
+        .expect("zero-confinement spec must admit on the honest sim");
     assert_eq!(plan.admitted.len(), 2, "both host controls are admitted");
 
     let report = runner.run(&plan).expect("run must seal a report");
@@ -114,9 +140,10 @@ fn profile_derivation_is_deterministic() {
 }
 
 // (d) the 0xE EventPayload derives compile and round-trip serialize.
+#[cfg(feature = "dangerous-test-hooks")]
 #[test]
 fn event_payloads_round_trip() {
-    let registry = registry();
+    let registry = sim_registry();
     let planner = BoundaryPlanner::new(&registry);
     let runner = BoundaryRunner::new(&registry);
 
@@ -124,10 +151,10 @@ fn event_payloads_round_trip() {
         workload: trivial_workload(),
         capabilities: Vec::new(),
         controls: vec![HostControl::LaunchWorkload],
-        budgets: BudgetRequirements::deny_all(),
+        budgets: BudgetRequirements::uniform(64, MinGuarantee::Mediated),
         evidence: EvidenceRequirements::default(),
     };
-    let plan = planner.plan(&spec, &inert_id()).expect("plan admits");
+    let plan = planner.plan(&spec, &sim_id()).expect("plan admits");
     let report = runner.run(&plan).expect("run seals");
 
     let plan_event = BoundaryStartedEvent { plan: plan.clone() };
@@ -186,10 +213,12 @@ fn plan_fails_closed_when_required_evidence_uncoverable() {
 }
 
 // (f) the inverse: requiring captured streams AND exit status, WITH both
-//     LaunchWorkload + CaptureStreams admitted, plans OK (required ⊆ available).
+//     LaunchWorkload + CaptureStreams admitted and a runnable budget, plans OK
+//     on the honest Sim (required ⊆ available evidence; budget fits capacities).
+#[cfg(feature = "dangerous-test-hooks")]
 #[test]
 fn plan_admits_when_required_evidence_is_covered() {
-    let registry = registry();
+    let registry = sim_registry();
     let planner = BoundaryPlanner::new(&registry);
     let spec = BoundarySpec {
         workload: trivial_workload(),
@@ -200,7 +229,7 @@ fn plan_admits_when_required_evidence_is_covered() {
                 streams: StdStreams::capture_out_err(),
             },
         ],
-        budgets: BudgetRequirements::deny_all(),
+        budgets: BudgetRequirements::uniform(64, MinGuarantee::Mediated),
         evidence: EvidenceRequirements {
             require_captured_streams: true,
             require_exit_status: true,
@@ -208,6 +237,6 @@ fn plan_admits_when_required_evidence_is_covered() {
     };
 
     planner
-        .plan(&spec, &inert_id())
+        .plan(&spec, &sim_id())
         .expect("covered evidence (CapturedStreams + TerminalOutcome) must admit");
 }

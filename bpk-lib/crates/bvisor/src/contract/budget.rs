@@ -90,6 +90,16 @@ impl BudgetRequest {
             evidence: EvidenceSet::new(),
         }
     }
+
+    /// A request for one dimension: `limit`, `guarantee`, and no required evidence.
+    #[must_use]
+    pub fn uniform(limit: u64, guarantee: MinGuarantee) -> Self {
+        Self {
+            limit,
+            guarantee,
+            evidence: EvidenceSet::new(),
+        }
+    }
 }
 
 impl BudgetRequirements {
@@ -106,6 +116,25 @@ impl BudgetRequirements {
             handle_count: BudgetRequest::deny_all(),
             storage_bytes: BudgetRequest::deny_all(),
             network_bytes: BudgetRequest::deny_all(),
+        }
+    }
+
+    /// A uniform request across all seven dimensions — every dimension asks for
+    /// `limit` at `guarantee`, with no required evidence. A capable backend (e.g. the
+    /// honest Sim) admits this for a launching spec when `limit` meets the derived
+    /// minimums and fits the profile capacity; the all-`Unsupported` Inert floor still
+    /// refuses (it guarantees nothing). Useful for tests and as a starting point.
+    #[must_use]
+    pub fn uniform(limit: u64, guarantee: MinGuarantee) -> Self {
+        let dimension = BudgetRequest::uniform(limit, guarantee);
+        Self {
+            wall_micros: dimension.clone(),
+            cpu_micros: dimension.clone(),
+            resident_bytes: dimension.clone(),
+            process_count: dimension.clone(),
+            handle_count: dimension.clone(),
+            storage_bytes: dimension.clone(),
+            network_bytes: dimension,
         }
     }
 }

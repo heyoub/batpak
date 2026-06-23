@@ -62,11 +62,14 @@
 //! }
 //! ```
 //!
-//! The legal sequence does compile:
-//! ```
+//! The legal sequence does compile. `no_run`: the all-`Unsupported` Inert floor
+//! refuses every budgeted spec at runtime (it guarantees nothing) — a capable backend
+//! (the honest `SimBackend`, or a native one) admits the SAME shape. This example's
+//! purpose is to prove the typestate `propose → plan → start` COMPILES:
+//! ```no_run
 //! use bvisor::{
 //!     Backend, BackendRegistry, Boundary, BoundarySpec, BudgetRequirements,
-//!     EvidenceRequirements, HostControl, InertBackend, Workload,
+//!     EvidenceRequirements, HostControl, InertBackend, MinGuarantee, Workload,
 //! };
 //! use std::sync::Arc;
 //!
@@ -78,7 +81,7 @@
 //!     workload: Workload::Process { exe: "true".into(), args: Vec::new() },
 //!     capabilities: Vec::new(),
 //!     controls: vec![HostControl::LaunchWorkload],
-//!     budgets: BudgetRequirements::deny_all(),
+//!     budgets: BudgetRequirements::uniform(64, MinGuarantee::Mediated),
 //!     evidence: EvidenceRequirements::default(),
 //! };
 //!

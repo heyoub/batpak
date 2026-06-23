@@ -3,13 +3,13 @@
 
 use crate::contract::admission::{planner_shadow_check, AdmissionOutcome, PlannerInputs};
 use crate::contract::backend::Backend;
-use crate::contract::budget::DerivedMinimums;
+use crate::contract::budget::{budget_admit, DerivedMinimums};
 use crate::contract::capability::{
     Capability, Enforcement, EvidenceClaim, EvidenceSet, FdPolicy, FsAccess, NetPolicy,
     SpawnPolicy, SupportVerdict,
 };
 use crate::contract::host_control::HostControl;
-use crate::contract::ids::{BackendId, BoundaryPlanHash};
+use crate::contract::ids::{BackendId, BoundaryPlanHash, Digest32};
 use crate::contract::plan::{
     AdmittedRequirement, BoundaryPlan, BoundaryRequirement, BoundarySpec, PlanError,
     BOUNDARY_PLAN_SCHEMA_VERSION,
@@ -120,6 +120,27 @@ impl<'r> BoundaryPlanner<'r> {
         // Map the AUTHORITATIVE reference outcome back to the existing surface.
         match outcome {
             AdmissionOutcome::Admitted { .. } => {
+                // Support + evidence membranes passed; the seven-dimensional budget
+                // membrane is now LOAD-BEARING and fail-closed. The request is
+                // adjudicated against this backend's declared budget profile + the
+                // spec's derived structural minimums. Inert (all-Unsupported) refuses
+                // every budgeted spec here; capable backends (Sim, native) admit.
+                let derived = derive_minimums(spec);
+                let profile_digest =
+                    budget_profile_digest(&snapshot).map_err(|error| {
+                        PlanError::ProfileInsufficient {
+                            backend: backend.id(),
+                            detail: format!("budget profile canonicalization failed: {error}"),
+                        }
+                    })?;
+                budget_admit(&spec.budgets, &snapshot.budget, &derived, profile_digest).map_err(
+                    |refusal| PlanError::BudgetRefused {
+                        backend: backend.id(),
+                        dimension: refusal.dimension,
+                        failure: refusal.failure,
+                    },
+                )?;
+
                 let admitted: Vec<AdmittedRequirement> = classified
                     .iter()
                     .map(|(requirement, verdict)| AdmittedRequirement {
@@ -330,6 +351,16 @@ fn compute_plan_id(
     Ok(BoundaryPlanHash(batpak::event::hash::compute_hash(&bytes)))
 }
 
+/// The digest of the backend's declared budget profile, bound into each adjudicated
+/// dimension as the source-profile provenance. The profile is already hashed into
+/// `plan_id` via the snapshot; this is its standalone identity for budget admission.
+fn budget_profile_digest(
+    snapshot: &BackendProfileSnapshot,
+) -> Result<Digest32, rmp_serde::encode::Error> {
+    let bytes = batpak::canonical::to_bytes(&snapshot.budget)?;
+    Ok(batpak::event::hash::compute_hash(&bytes))
+}
+
 #[derive(serde::Serialize)]
 struct PlanFingerprint<'a> {
     schema_version: u16,
@@ -475,9 +506,11 @@ impl<'r> BoundaryRunner<'r> {
 mod planner_shadow_integration_tests {
     use super::{derive_minimums, BackendRegistry, BoundaryPlanner};
     use crate::contract::backend::Backend;
-    use crate::contract::budget::{BudgetRequirements, DerivedMinimums};
+    use crate::contract::budget::{
+        BudgetDimension, BudgetFailure, BudgetRequirements, DerivedMinimums,
+    };
     use crate::contract::capability::{
-        Capability, Enforcement, FdPolicy, NetPolicy, SpawnPolicy, SupportVerdict,
+        Capability, FdPolicy, NetPolicy, SpawnPolicy, SupportVerdict,
     };
     use crate::contract::host_control::{HostControl, PathView, StdStreams};
     use crate::contract::ids::BackendId;
@@ -522,22 +555,30 @@ mod planner_shadow_integration_tests {
     }
 
     #[test]
-    fn admits_a_no_confinement_spec_and_is_deterministic() {
+    fn inert_deterministically_refuses_a_budgeted_spec_at_the_floor() {
+        // The all-Unsupported Inert floor refuses every budgeted spec — here
+        // deny_all, whose zero wall limit is below the launched workload's derived
+        // minimum — and does so DETERMINISTICALLY: same spec, same typed refusal.
+        // (Positive admit + determinism is proven on the honest Sim; Inert is the
+        // permanent fail-closed reference.)
         let registry = registry_with(Arc::new(InertBackend::new()));
         let planner = BoundaryPlanner::new(&registry);
         let spec = admissible_spec();
 
-        let first = planner.plan(&spec, &inert_id()).expect("admit");
-        let second = planner.plan(&spec, &inert_id()).expect("admit");
-        // Accepted plan bytes are unchanged across attempts (deterministic identity).
-        assert_eq!(first, second);
-        assert_eq!(first.admitted.len(), 1);
-        assert_eq!(
-            first.admitted[0].requirement,
-            BoundaryRequirement::HostControl(HostControl::LaunchWorkload)
+        let first = planner.plan(&spec, &inert_id());
+        let second = planner.plan(&spec, &inert_id());
+        assert_eq!(first, second, "Inert refuses deterministically");
+        assert!(
+            matches!(
+                first,
+                Err(PlanError::BudgetRefused {
+                    dimension: BudgetDimension::Wall,
+                    failure: BudgetFailure::BelowDerivedMinimum,
+                    ..
+                })
+            ),
+            "the floor refuses at the budget membrane: {first:?}"
         );
-        assert_eq!(first.admitted[0].enforcement, Enforcement::Enforced);
-        assert_eq!(first.admitted[0].mechanism, "inert:host_spawn:Enforced");
     }
 
     #[test]
@@ -627,9 +668,9 @@ mod planner_shadow_integration_tests {
         let registry = registry_with(backend);
         let planner = BoundaryPlanner::new(&registry);
 
-        planner
-            .plan(&admissible_spec(), &inert_id())
-            .expect("admit");
+        // Inert refuses at the budget membrane, but the probe still happens EXACTLY
+        // once — probing precedes adjudication, and both admission paths share it.
+        let _ = planner.plan(&admissible_spec(), &inert_id());
         assert_eq!(
             probes.load(Ordering::SeqCst),
             1,
