@@ -32,7 +32,10 @@ pub use contract::capability::{
     Capability, Enforcement, EnvPolicy, EvidenceClaim, EvidenceSet, FdPolicy, FsAccess,
     FsConfinement, NetDest, NetPolicy, PathSet, SpawnPolicy, SupportVerdict,
 };
-pub use contract::events::{BoundaryPlanEvent, BoundaryRecoveryEvent, BoundaryReportEvent};
+pub use contract::events::{
+    BoundaryDispositionEvent, BoundaryRecoveryEvent, BoundaryReportEvent, BoundaryStartedEvent,
+    DispositionAction, DispositionPhase,
+};
 pub use contract::host_control::{
     CommitDurability, HostControl, KillGuarantee, KillTarget, PathView, StdStreams,
 };

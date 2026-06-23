@@ -1,9 +1,10 @@
 //! Frozen v1 goldens for bvisor's three 0xE event payloads.
 //!
-//! PROVES: INV-EVENT-PAYLOAD-DECODE-BACKCOMPAT for `BoundaryPlanEvent`
-//! (0xE/0x001), `BoundaryReportEvent` (0xE/0x002), and `BoundaryRecoveryEvent`
-//! (0xE/0x003) — their v1 on-disk msgpack bytes still decode into the current
-//! structs through batpak's canonical decode seam.
+//! PROVES: INV-EVENT-PAYLOAD-DECODE-BACKCOMPAT for `BoundaryStartedEvent`
+//! (0xE/0x001), `BoundaryReportEvent` (0xE/0x002), `BoundaryRecoveryEvent`
+//! (0xE/0x003), and `BoundaryDispositionEvent` (0xE/0x004) — their v1 on-disk
+//! msgpack bytes still decode into the current structs through batpak's canonical
+//! decode seam.
 //! CATCHES: a contract-struct edit that silently breaks decode of historical
 //! 0xE bytes; a canonical-encoding drift in the bvisor payload surface.
 //! SEEDED: append-only `.hex` fixtures under batpak core's
@@ -27,11 +28,13 @@
 use batpak::canonical;
 use batpak::EventPayload;
 use bvisor::{
-    AdmittedRequirement, BackendId, BackendProfileSnapshot, BoundaryFinding, BoundaryPlan,
-    BoundaryPlanEvent, BoundaryPlanHash, BoundaryRecoveryEvent, BoundaryReport, BoundaryReportBody,
-    BoundaryReportEvent, BoundaryRequirement, Budgets, CaptureRefs, Enforcement,
-    EvidenceRequirements, ExitStatus, HostControl, ObservedFact, Outcome, QuarantineRecord,
-    RecoveryClassification, Workload, BOUNDARY_PLAN_SCHEMA_VERSION, BOUNDARY_REPORT_SCHEMA_VERSION,
+    AdmittedRequirement, ArtifactId, AttemptId, BackendId, BackendProfileSnapshot,
+    BoundaryDispositionEvent, BoundaryFinding, BoundaryPlan, BoundaryPlanHash,
+    BoundaryRecoveryEvent, BoundaryReport, BoundaryReportBody, BoundaryReportEvent,
+    BoundaryRequirement, BoundaryStartedEvent, Budgets, CaptureRefs, DispositionAction,
+    DispositionPhase, Enforcement, EvidenceRequirements, ExitStatus, HostControl, ObservedFact,
+    Outcome, QuarantineRecord, RecoveryClassification, Workload, BOUNDARY_PLAN_SCHEMA_VERSION,
+    BOUNDARY_REPORT_SCHEMA_VERSION,
 };
 use serde::de::DeserializeOwned;
 use std::collections::BTreeMap;
@@ -185,10 +188,10 @@ fn sample_report() -> BoundaryReport {
 // ─── Frozen-decode proofs ───────────────────────────────────────────────────
 
 #[test]
-fn boundary_plan_event_v1_still_decodes() -> Result<(), String> {
-    assert_frozen_decode::<BoundaryPlanEvent>(
+fn boundary_started_event_v1_still_decodes() -> Result<(), String> {
+    assert_frozen_decode::<BoundaryStartedEvent>(
         "e_001__v1.hex",
-        &BoundaryPlanEvent {
+        &BoundaryStartedEvent {
             plan: sample_plan(),
         },
     )
@@ -226,8 +229,24 @@ fn boundary_recovery_event_v1_still_decodes() -> Result<(), String> {
 }
 
 #[test]
+fn boundary_disposition_event_v1_still_decodes() -> Result<(), String> {
+    assert_frozen_decode::<BoundaryDispositionEvent>(
+        "e_004__v1.hex",
+        &BoundaryDispositionEvent {
+            plan_id: BoundaryPlanHash([7u8; 32]),
+            attempt: AttemptId([3u8; 32]),
+            artifact: ArtifactId([4u8; 32]),
+            phase: DispositionPhase::Decided {
+                action: DispositionAction::Promote,
+            },
+        },
+    )
+}
+
+#[test]
 fn frozen_payloads_are_v1() {
-    assert_eq!(BoundaryPlanEvent::PAYLOAD_VERSION, 1);
+    assert_eq!(BoundaryStartedEvent::PAYLOAD_VERSION, 1);
     assert_eq!(BoundaryReportEvent::PAYLOAD_VERSION, 1);
     assert_eq!(BoundaryRecoveryEvent::PAYLOAD_VERSION, 1);
+    assert_eq!(BoundaryDispositionEvent::PAYLOAD_VERSION, 1);
 }
