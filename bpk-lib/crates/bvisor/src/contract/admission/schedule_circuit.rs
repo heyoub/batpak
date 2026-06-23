@@ -487,32 +487,57 @@ fn key_less(
     builder.or(phase_lt, tie)
 }
 
-/// Compile the schedule membrane: admit iff the supplied schedule passes all nine
-/// checks; the refusal code is the first-failing check's [`ScheduleRefusal::code`].
+/// Declare the schedule inputs, build the derived nodes, and return the nine check
+/// pass-bits in canonical priority order — the shared core of [`compile_schedule_membrane`]
+/// (which composes them into a standalone admit + refusal-code circuit) and
+/// [`schedule_membrane_bit`] (which AND-reduces them into one composite-membrane bit).
+fn build_checks(builder: &mut CircuitBuilder, shape: &ScheduleShape) -> [NodeId; 9] {
+    let lanes = declare_inputs(builder, shape);
+    let derived = build_derived(builder, &lanes, shape);
+    [
+        check_in_range(builder, &lanes, shape),
+        check_distinct(builder, &lanes),
+        check_decl_integrity(builder, &lanes, &derived),
+        check_prereq_closure(builder, &lanes, &derived, shape),
+        check_conflict_free(builder, &lanes, &derived, shape),
+        check_prereq_order(builder, &derived, shape),
+        check_phase_order(builder, &derived),
+        check_coverage(builder, &lanes, &derived, shape),
+        check_canonical(builder, &lanes, &derived, shape),
+    ]
+}
+
+/// Compile the standalone schedule membrane: admit iff the supplied schedule passes all
+/// nine checks; the refusal code is the first-failing check's [`ScheduleRefusal::code`].
+/// This is the circuit the shadow evaluates for the per-schedule reason detail.
 ///
 /// # Errors
 /// [`ProgramError`] only on `u32` node-index overflow, which a membrane never hits.
 pub fn compile_schedule_membrane(shape: &ScheduleShape) -> Result<AdmissionProgram, ProgramError> {
     let mut builder = CircuitBuilder::new();
-    let lanes = declare_inputs(&mut builder, shape);
-    let derived = build_derived(&mut builder, &lanes, shape);
-    let checks = [
-        check_in_range(&mut builder, &lanes, shape),
-        check_distinct(&mut builder, &lanes),
-        check_decl_integrity(&mut builder, &lanes, &derived),
-        check_prereq_closure(&mut builder, &lanes, &derived, shape),
-        check_conflict_free(&mut builder, &lanes, &derived, shape),
-        check_prereq_order(&mut builder, &derived, shape),
-        check_phase_order(&mut builder, &derived),
-        check_coverage(&mut builder, &lanes, &derived, shape),
-        check_canonical(&mut builder, &lanes, &derived, shape),
-    ];
+    let checks = build_checks(&mut builder, shape);
     let (admit, refusal_code) = compose_membranes(&mut builder, &checks);
     builder.finish(Outputs {
         admit,
         refusal_code,
         membranes: checks.to_vec(),
     })
+}
+
+/// Build the schedule membrane as a SINGLE composite-membrane pass bit into an existing
+/// builder: it declares the schedule input block (appended in canonical order) and
+/// AND-reduces the nine checks. Used by `compile_admission` to fold the schedule
+/// membrane into the full admission circuit (its per-reason detail is a separate
+/// circuit, exactly like the budget membrane's).
+pub(crate) fn schedule_membrane_bit(builder: &mut CircuitBuilder, shape: &ScheduleShape) -> NodeId {
+    let checks = build_checks(builder, shape);
+    builder.and_reduce(&checks)
+}
+
+/// Encode just the schedule input lanes, in the canonical order [`declare_inputs`]
+/// reads — for the composite `compile_admission` shadow encoding to append.
+pub(crate) fn encode_schedule(inputs: &ScheduleInputs, shape: &ScheduleShape) -> Vec<Lane> {
+    encode(inputs, shape)
 }
 
 /// A typed schedule-membrane shadow disagreement — a hard gauntlet finding.

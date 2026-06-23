@@ -22,7 +22,9 @@
 use super::compile::{compose_membranes, support_check, CircuitBuilder};
 use super::eval::{evaluate, Lane};
 use super::program::{AdmissionProgram, Outputs, ProgramError, Width};
-use super::shadow::{decide, mask, outcome_from_trace, AdmissionDivergence, AdmissionOutcome};
+use super::shadow::{
+    decide, mask, outcome_from_trace, AdmissionDivergence, AdmissionOutcome, MembraneDetails,
+};
 
 const ENFORCEMENT_BITS: u32 = 2;
 const EVIDENCE_BITS: u32 = 16;
@@ -52,8 +54,14 @@ pub fn planner_reference(inputs: &PlannerInputs) -> AdmissionOutcome {
     let evidence = (mask(u64::from(inputs.evidence_required), EVIDENCE_BITS)
         & !mask(u64::from(inputs.evidence_available), EVIDENCE_BITS))
         == 0;
-    // The planner has no budget membrane, so there is no budget detail (0).
-    outcome_from_trace(vec![support, evidence], 0)
+    // The planner has neither a budget nor a schedule membrane (no details).
+    outcome_from_trace(
+        vec![support, evidence],
+        &MembraneDetails {
+            budget: 0,
+            schedule: 0,
+        },
+    )
 }
 
 fn enforcement_width() -> Width {
@@ -120,6 +128,7 @@ fn planner_circuit(inputs: &PlannerInputs) -> Result<AdmissionOutcome, &'static 
             trace: decision.membranes,
             budget_dimension: 0,
             budget_reason: 0,
+            schedule_reason: 0,
         }
     })
 }
@@ -154,6 +163,7 @@ mod planner_shadow_tests {
             trace,
             budget_dimension: 0,
             budget_reason: 0,
+            schedule_reason: 0,
         }
     }
 
@@ -218,12 +228,13 @@ mod planner_shadow_tests {
             trace: vec![true, false],
             budget_dimension: 0,
             budget_reason: 0,
+            schedule_reason: 0,
         };
         assert_eq!(
             decide(reference.clone(), Ok(wrong.clone())),
             Err(AdmissionDivergence::OutcomeMismatch {
-                reference,
-                circuit: wrong,
+                reference: Box::new(reference),
+                circuit: Box::new(wrong),
             })
         );
     }

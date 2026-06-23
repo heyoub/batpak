@@ -4,6 +4,7 @@
 use super::super::eval::{evaluate, Lane};
 use super::super::limits::FROZEN_LIMITS;
 use super::super::program::{Outputs, Width};
+use super::super::schedule_circuit::ScheduleShape;
 use super::super::validate::validate;
 use super::{
     compile_admission, compile_budget_detail, compile_budget_membrane, compile_conflict_membrane,
@@ -337,6 +338,22 @@ fn priority_encoder_reports_the_first_failing_membrane_exhaustively() {
     }
 }
 
+/// An EMPTY schedule membrane (no declarations, no slots): every check passes
+/// vacuously, so the 6th membrane admits and contributes only its single `required`
+/// lane (set to `0` by [`admission_inputs`]). Lets these tests drive the other five
+/// membranes by hand without modeling a full schedule.
+fn empty_schedule_shape() -> ScheduleShape {
+    ScheduleShape {
+        declarations: 0,
+        slots: 0,
+        index_width: w(1),
+        phase_width: w(1),
+        digest_width: w(1),
+        universe_width: w(1),
+        covers_width: w(1),
+    }
+}
+
 /// One requirement, one budget dim, all 2-bit lanes — small enough to drive the
 /// full composed circuit by hand.
 fn small_shape() -> AdmissionShape {
@@ -347,6 +364,7 @@ fn small_shape() -> AdmissionShape {
         evidence_width: w(2),
         conflict_width: w(2),
         hash_width: w(2),
+        schedule: empty_schedule_shape(),
     }
 }
 
@@ -405,6 +423,9 @@ fn admission_inputs(a: &Aspects) -> Vec<Lane> {
         lane(a.budget_e_avail, w(2)),
         lane(a.present, w(2)),
         lane(a.forbidden, w(2)),
+        // The empty schedule membrane's only lane: `required = 0` (covers nothing, so
+        // an empty schedule satisfies it) — see `empty_schedule_shape`.
+        lane(0, w(1)),
     ]
 }
 
