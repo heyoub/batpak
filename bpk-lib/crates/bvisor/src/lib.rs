@@ -50,13 +50,19 @@ pub use contract::plan::{
     AdmittedRequirement, BoundaryPlan, BoundaryRequirement, BoundarySpec, Budgets,
     EvidenceRequirements, PlanError, Workload, BOUNDARY_PLAN_SCHEMA_VERSION,
 };
+pub use contract::primitive::{
+    classify_via_primitives, compile_lowering_plan, ConfinePrimitive, LoweringError, LoweringPhase,
+    LoweringPlan, PrimitiveId, Privilege,
+};
 pub use contract::recovery::{QuarantineRecord, RecoveryClassification};
 pub use contract::registry::{BackendRegistry, BoundaryPlanner, BoundaryRunner};
 pub use contract::report::{
     BoundaryFinding, BoundaryReport, BoundaryReportBody, CaptureRefs, DeniedAttempt, ExitStatus,
     ObservedFact, Outcome, StagedArtifact, BOUNDARY_REPORT_SCHEMA_VERSION,
 };
-pub use contract::support::{BackendProfile, BackendProfileSnapshot, SupportMatrix};
+pub use contract::support::{
+    BackendProfile, BackendProfileSnapshot, RequirementKind, SupportMatrix,
+};
 
 /// Doc-hidden, test-only surface for the SimBackend monster, the harness-owned
 /// [`sim::ground_truth::GroundTruth`] shadow oracle, the G1–G13 proof grid, and

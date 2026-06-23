@@ -12,6 +12,7 @@ pub(crate) mod host_control;
 pub(crate) mod ids;
 pub(crate) mod lifecycle;
 pub(crate) mod plan;
+pub(crate) mod primitive;
 pub(crate) mod recovery;
 pub(crate) mod registry;
 pub(crate) mod report;
