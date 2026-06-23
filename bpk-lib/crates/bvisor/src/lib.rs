@@ -63,8 +63,8 @@ pub use contract::lifecycle::{
     Boundary, BoundaryState, LifecycleError, Planned, Reported, Spec, Started,
 };
 pub use contract::plan::{
-    AdmittedRequirement, BoundaryPlan, BoundaryRequirement, BoundarySpec, Budgets,
-    EvidenceRequirements, PlanError, Workload, BOUNDARY_PLAN_SCHEMA_VERSION,
+    AdmittedRequirement, BoundaryPlan, BoundaryRequirement, BoundarySpec, EvidenceRequirements,
+    PlanError, Workload, BOUNDARY_PLAN_SCHEMA_VERSION,
 };
 pub use contract::primitive::{
     classify_via_primitives, compile_lowering_plan, ConfinePrimitive, LoweringError, LoweringPhase,

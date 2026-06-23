@@ -7,7 +7,7 @@
 //! `compile_fail` doctests on `contract::lifecycle`.
 
 use bvisor::{
-    Backend, BackendRegistry, Boundary, BoundaryRunner, BoundarySpec, Budgets,
+    Backend, BackendRegistry, Boundary, BoundaryRunner, BoundarySpec, BudgetRequirements,
     EvidenceRequirements, HostControl, InertBackend, LifecycleError, Workload,
 };
 use std::sync::Arc;
@@ -31,7 +31,7 @@ fn spec_running(exe: &str) -> BoundarySpec {
         },
         capabilities: Vec::new(),
         controls: vec![HostControl::LaunchWorkload],
-        budgets: Budgets::default(),
+        budgets: BudgetRequirements::deny_all(),
         evidence: EvidenceRequirements::default(),
     }
 }

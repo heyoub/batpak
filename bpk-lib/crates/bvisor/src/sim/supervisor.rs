@@ -121,11 +121,10 @@ mod supervisor_tests {
     use super::{SimProbe, SimSupervisor};
     use crate::backend::inert::InertBackend;
     use crate::contract::backend::Backend;
+    use crate::contract::budget::BudgetRequirements;
     use crate::contract::host_control::HostControl;
     use crate::contract::ids::AttemptId;
-    use crate::contract::plan::{
-        BoundaryPlan, BoundarySpec, Budgets, EvidenceRequirements, Workload,
-    };
+    use crate::contract::plan::{BoundaryPlan, BoundarySpec, EvidenceRequirements, Workload};
     use crate::contract::recovery::{reconcile, QuarantineRecord, RecoveryAction, RunView};
     use crate::contract::registry::{BackendRegistry, BoundaryPlanner, BoundaryRunner};
     use std::sync::Arc;
@@ -140,7 +139,7 @@ mod supervisor_tests {
             },
             capabilities: Vec::new(),
             controls: vec![HostControl::LaunchWorkload],
-            budgets: Budgets::default(),
+            budgets: BudgetRequirements::deny_all(),
             evidence: EvidenceRequirements::default(),
         };
         BoundaryPlanner::new(&registry)

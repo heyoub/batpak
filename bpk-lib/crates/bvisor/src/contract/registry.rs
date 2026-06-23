@@ -137,7 +137,7 @@ impl<'r> BoundaryPlanner<'r> {
                     profile: snapshot,
                     admitted,
                     workload: spec.workload.clone(),
-                    budgets: spec.budgets,
+                    budgets: spec.budgets.clone(),
                     evidence: spec.evidence,
                 })
             }
@@ -399,12 +399,12 @@ impl<'r> BoundaryRunner<'r> {
 mod planner_shadow_integration_tests {
     use super::{BackendRegistry, BoundaryPlanner};
     use crate::contract::backend::Backend;
+    use crate::contract::budget::BudgetRequirements;
     use crate::contract::capability::{Capability, Enforcement, NetPolicy, SupportVerdict};
     use crate::contract::host_control::HostControl;
     use crate::contract::ids::BackendId;
     use crate::contract::plan::{
-        BoundaryPlan, BoundaryRequirement, BoundarySpec, Budgets, EvidenceRequirements, PlanError,
-        Workload,
+        BoundaryPlan, BoundaryRequirement, BoundarySpec, EvidenceRequirements, PlanError, Workload,
     };
     use crate::contract::report::BoundaryReportBody;
     use crate::contract::support::{BackendProfile, BackendProfileSnapshot, SupportMatrix};
@@ -425,7 +425,7 @@ mod planner_shadow_integration_tests {
             },
             capabilities: vec![],
             controls: vec![launch_control()],
-            budgets: Budgets::default(),
+            budgets: BudgetRequirements::deny_all(),
             evidence: EvidenceRequirements {
                 require_captured_streams: false,
                 require_exit_status: true,

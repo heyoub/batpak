@@ -65,8 +65,8 @@
 //! The legal sequence does compile:
 //! ```
 //! use bvisor::{
-//!     Backend, BackendRegistry, Boundary, BoundarySpec, Budgets, EvidenceRequirements,
-//!     HostControl, InertBackend, Workload,
+//!     Backend, BackendRegistry, Boundary, BoundarySpec, BudgetRequirements,
+//!     EvidenceRequirements, HostControl, InertBackend, Workload,
 //! };
 //! use std::sync::Arc;
 //!
@@ -78,7 +78,7 @@
 //!     workload: Workload::Process { exe: "true".into(), args: Vec::new() },
 //!     capabilities: Vec::new(),
 //!     controls: vec![HostControl::LaunchWorkload],
-//!     budgets: Budgets::default(),
+//!     budgets: BudgetRequirements::deny_all(),
 //!     evidence: EvidenceRequirements::default(),
 //! };
 //!

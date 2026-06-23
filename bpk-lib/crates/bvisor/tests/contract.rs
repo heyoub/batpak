@@ -4,9 +4,9 @@
 
 use bvisor::{
     Backend, BackendRegistry, BoundaryPlanner, BoundaryRecoveryEvent, BoundaryReportEvent,
-    BoundaryRunner, BoundarySpec, BoundaryStartedEvent, Budgets, Capability, EvidenceRequirements,
-    FsAccess, FsConfinement, HostControl, InertBackend, Outcome, PathSet, PlanError, StdStreams,
-    Workload,
+    BoundaryRunner, BoundarySpec, BoundaryStartedEvent, BudgetRequirements, Capability,
+    EvidenceRequirements, FsAccess, FsConfinement, HostControl, InertBackend, Outcome, PathSet,
+    PlanError, StdStreams, Workload,
 };
 use std::sync::Arc;
 
@@ -43,7 +43,7 @@ fn plan_fails_closed_on_required_confinement() {
             confinement: FsConfinement::DeclaredRootsOnly,
         }],
         controls: vec![HostControl::LaunchWorkload],
-        budgets: Budgets::default(),
+        budgets: BudgetRequirements::deny_all(),
         evidence: EvidenceRequirements::default(),
     };
 
@@ -73,7 +73,7 @@ fn zero_confinement_plans_runs_and_seals_stably() {
                 streams: StdStreams::capture_out_err(),
             },
         ],
-        budgets: Budgets::default(),
+        budgets: BudgetRequirements::deny_all(),
         evidence: EvidenceRequirements::default(),
     };
 
@@ -124,7 +124,7 @@ fn event_payloads_round_trip() {
         workload: trivial_workload(),
         capabilities: Vec::new(),
         controls: vec![HostControl::LaunchWorkload],
-        budgets: Budgets::default(),
+        budgets: BudgetRequirements::deny_all(),
         evidence: EvidenceRequirements::default(),
     };
     let plan = planner.plan(&spec, &inert_id()).expect("plan admits");
@@ -169,7 +169,7 @@ fn plan_fails_closed_when_required_evidence_uncoverable() {
         workload: trivial_workload(),
         capabilities: Vec::new(),
         controls: vec![HostControl::LaunchWorkload],
-        budgets: Budgets::default(),
+        budgets: BudgetRequirements::deny_all(),
         evidence: EvidenceRequirements {
             require_captured_streams: true,
             require_exit_status: false,
@@ -200,7 +200,7 @@ fn plan_admits_when_required_evidence_is_covered() {
                 streams: StdStreams::capture_out_err(),
             },
         ],
-        budgets: Budgets::default(),
+        budgets: BudgetRequirements::deny_all(),
         evidence: EvidenceRequirements {
             require_captured_streams: true,
             require_exit_status: true,

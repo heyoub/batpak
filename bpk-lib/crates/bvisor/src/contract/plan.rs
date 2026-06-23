@@ -1,5 +1,6 @@
 //! Spec → Plan: the inert IR and its fail-closed admission types.
 
+use crate::contract::budget::BudgetRequirements;
 use crate::contract::capability::{Capability, Enforcement, EvidenceClaim, EvidenceSet};
 use crate::contract::host_control::HostControl;
 use crate::contract::ids::{BackendId, BoundaryPlanHash};
@@ -35,15 +36,6 @@ pub enum Workload {
         /// Reference to the wasm module, as a portable string.
         module_ref: String,
     },
-}
-
-/// Resource budgets for a boundary. Minimal in C0; widened as backends land.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct Budgets {
-    /// Wall-clock timeout in milliseconds; `None` means no timeout.
-    pub wall_clock_ms: Option<u64>,
-    /// Memory ceiling in bytes; `None` means no explicit ceiling.
-    pub memory_bytes: Option<u64>,
 }
 
 /// What evidence the caller requires the report to carry. Minimal in C0.
@@ -82,8 +74,8 @@ pub struct BoundarySpec {
     pub capabilities: Vec<Capability>,
     /// Host lifecycle requested.
     pub controls: Vec<HostControl>,
-    /// Resource budgets.
-    pub budgets: Budgets,
+    /// The seven-dimensional resource budget request.
+    pub budgets: BudgetRequirements,
     /// Evidence the report must carry.
     pub evidence: EvidenceRequirements,
 }
@@ -121,8 +113,9 @@ pub struct BoundaryPlan {
     pub admitted: Vec<AdmittedRequirement>,
     /// The workload to run.
     pub workload: Workload,
-    /// Resource budgets.
-    pub budgets: Budgets,
+    /// The seven-dimensional budget request carried with the plan (the adjudicated
+    /// `AdmittedBudgets` replaces this once the budget membrane lands).
+    pub budgets: BudgetRequirements,
     /// Evidence the report must carry.
     pub evidence: EvidenceRequirements,
 }

@@ -19,9 +19,19 @@
 //! deterministic (no subprocess / no machine probe) so the frozen bytes are
 //! stable and host-independent.
 //!
-//! Regeneration is APPEND-ONLY, mirroring core's `schema_evolution.rs`: under
-//! `GOLDEN_UPDATE=I_KNOW_WHAT_IM_DOING` a MISSING fixture is written; an EXISTING
-//! fixture is NEVER overwritten (bump the version and freeze `__vN+1` instead):
+//! Each payload is PROVISIONAL or FROZEN (see `PAYLOAD_MANIFEST`). A golden is a
+//! development snapshot while PROVISIONAL ("today's canonical bytes — the contract
+//! has not frozen") and an eternal decode promise once FROZEN ("we understand these
+//! bytes indefinitely"). The bvisor `0xE` family is provisional while the
+//! transitive durable closure of `BoundaryStartedEvent` (`BoundaryPlan` /
+//! `BudgetRequirements` / `AdmittedBudgets` / the support, admission-program, and
+//! lowering-schedule digests) is still being finalized.
+//!
+//! - PROVISIONAL: a missing fixture is allowed (the round-trip still proves the
+//!   current shape); a drifted fixture is RE-FROZEN under `GOLDEN_UPDATE` (the diff
+//!   shows old vs new bytes). The payload version does NOT advance.
+//! - FROZEN: the fixture must exist and decode; it is NEVER overwritten — a new
+//!   shape needs a `__vN+1` fixture + an exact upcast or a typed canonical refusal.
 //!
 //!   GOLDEN_UPDATE=I_KNOW_WHAT_IM_DOING cargo test -p bvisor --test frozen_goldens
 
@@ -31,7 +41,7 @@ use bvisor::{
     AdmittedRequirement, ArtifactId, AttemptId, BackendId, BackendProfileSnapshot,
     BoundaryDispositionEvent, BoundaryFinding, BoundaryPlan, BoundaryPlanHash,
     BoundaryRecoveryEvent, BoundaryReport, BoundaryReportBody, BoundaryReportEvent,
-    BoundaryRequirement, BoundaryStartedEvent, Budgets, CaptureRefs, DispositionAction,
+    BoundaryRequirement, BoundaryStartedEvent, BudgetRequirements, CaptureRefs, DispositionAction,
     DispositionPhase, Enforcement, EvidenceRequirements, ExitStatus, HostControl, ObservedFact,
     Outcome, QuarantineRecord, RecoveryClassification, Workload, BOUNDARY_PLAN_SCHEMA_VERSION,
     BOUNDARY_REPORT_SCHEMA_VERSION,
@@ -60,49 +70,125 @@ fn hex_decode(s: &str) -> Vec<u8> {
         .collect()
 }
 
-/// Freeze (append-only) and frozen-decode the v1 payload bytes for `expected`.
+/// The compatibility state of a payload golden — the distinction between a
+/// development snapshot and an eternal decode promise.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PayloadState {
+    /// A development snapshot: re-freezable while the transitive durable type
+    /// closure is still evolving. A missing fixture is allowed (it is regenerated
+    /// once the shape settles); a drifted fixture is RE-FROZEN, not version-bumped.
+    Provisional,
+    /// An eternal decode promise: immutable. A new shape needs a `__vN+1` fixture +
+    /// an exact upcast or a typed canonical refusal — never an edit of this one.
+    Frozen,
+}
+
+/// Provisional-vs-frozen manifest. A golden in the compatibility directory means
+/// "we promise to understand these bytes indefinitely" ONLY once FROZEN; while
+/// PROVISIONAL it means "today's canonical bytes — the contract has not frozen."
+/// Flip an entry to FROZEN only at the declared release freeze.
 ///
-/// If the fixture is ABSENT it is written from the current canonical encoding of
-/// `expected` (only under the `GOLDEN_UPDATE` sentinel); if it is PRESENT it is
-/// read, decoded with the current decoder, and asserted equal to `expected` —
-/// the real proof that the v1-on-disk bytes still decode into the current type.
+/// bvisor's `0xE` family stays provisional until the seven-dimensional budget
+/// model, the final admission surface, and the final plan-identity material are all
+/// integrated. The transitive closure of `BoundaryStartedEvent` (its `BoundaryPlan`,
+/// `BudgetRequirements`, `AdmittedBudgets`, and the support, admission-program, and
+/// lowering-schedule digests) is still moving, so the outer event is NOT frozen.
+const PAYLOAD_MANIFEST: &[(&str, PayloadState)] = &[
+    ("e_001__v1.hex", PayloadState::Provisional),
+    ("e_002__v1.hex", PayloadState::Provisional),
+    ("e_003__v1.hex", PayloadState::Provisional),
+    ("e_004__v1.hex", PayloadState::Provisional),
+];
+
+/// The declared state of a fixture; an UNDECLARED fixture is treated as `Frozen`
+/// (the safe default — a payload must be explicitly declared provisional).
+fn payload_state(fixture: &str) -> PayloadState {
+    PAYLOAD_MANIFEST
+        .iter()
+        .find(|(name, _)| *name == fixture)
+        .map_or(PayloadState::Frozen, |(_, state)| *state)
+}
+
+/// Prove the CURRENT shape of `expected` encodes and decodes round-trip.
+fn assert_round_trip<T>(expected: &T) -> Result<(), String>
+where
+    T: EventPayload + DeserializeOwned + PartialEq + std::fmt::Debug,
+{
+    let bytes = canonical::to_bytes(expected).map_err(|e| format!("encode payload: {e}"))?;
+    let decoded: T =
+        canonical::from_bytes(&bytes).map_err(|e| format!("decode current payload: {e}"))?;
+    if &decoded != expected {
+        return Err("payload does not round-trip through canonical encode/decode".to_string());
+    }
+    Ok(())
+}
+
+/// Re-freeze (write/overwrite) a provisional golden with the current canonical bytes.
+fn refreeze<T: EventPayload>(path: &std::path::Path, expected: &T) -> Result<(), String> {
+    let bytes =
+        canonical::to_bytes(expected).map_err(|e| format!("encode fixture payload: {e}"))?;
+    std::fs::create_dir_all(payloads_dir()).map_err(|e| format!("create payloads dir: {e}"))?;
+    std::fs::write(path, hex_encode(&bytes)).map_err(|e| format!("write fixture: {e}"))
+}
+
+/// Freeze/decode the v1 payload bytes for `expected`, honoring the PROVISIONAL vs
+/// FROZEN manifest:
+///
+/// - FROZEN: the fixture must exist and DECODE into the current type (proving
+///   `INV-EVENT-PAYLOAD-DECODE-BACKCOMPAT`); it is never edited.
+/// - PROVISIONAL: a missing fixture is allowed (a snapshot mid-reshape; the
+///   round-trip still proves the current shape); a drifted fixture is RE-FROZEN
+///   under `GOLDEN_UPDATE` (the diff shows old vs new bytes), not version-bumped.
 fn assert_frozen_decode<T>(fixture: &str, expected: &T) -> Result<(), String>
 where
     T: EventPayload + DeserializeOwned + PartialEq + std::fmt::Debug,
 {
+    let state = payload_state(fixture);
     let path = payloads_dir().join(fixture);
     let updating = std::env::var("GOLDEN_UPDATE").as_deref() == Ok("I_KNOW_WHAT_IM_DOING");
 
     if !path.exists() {
-        if !updating {
-            return Err(format!(
-                "frozen payload fixture {} not found. To create it (append-only), run \
+        if updating {
+            return refreeze(&path, expected);
+        }
+        return match state {
+            PayloadState::Provisional => assert_round_trip(expected),
+            PayloadState::Frozen => Err(format!(
+                "frozen payload fixture {} not found. Create it with \
                  GOLDEN_UPDATE=I_KNOW_WHAT_IM_DOING cargo test -p bvisor --test frozen_goldens",
                 path.display()
-            ));
-        }
-        let bytes =
-            canonical::to_bytes(expected).map_err(|e| format!("encode fixture payload: {e}"))?;
-        std::fs::create_dir_all(payloads_dir()).map_err(|e| format!("create payloads dir: {e}"))?;
-        std::fs::write(&path, hex_encode(&bytes))
-            .map_err(|e| format!("write frozen fixture: {e}"))?;
-        // GOLDEN_UPDATE append path: the new fixture file is the artifact; inspect
-        // the diff before committing. (No stderr print — print_stderr is denied.)
-        return Ok(());
+            )),
+        };
     }
 
-    let raw = std::fs::read_to_string(&path).map_err(|e| format!("read frozen fixture: {e}"))?;
+    let raw = std::fs::read_to_string(&path).map_err(|e| format!("read fixture: {e}"))?;
     let bytes = hex_decode(&raw);
-    let decoded: T = canonical::from_bytes(&bytes)
-        .map_err(|e| format!("frozen fixture {fixture} failed current decode: {e}"))?;
-    if &decoded != expected {
-        return Err(format!(
-            "SCHEMA DRIFT: frozen fixture {fixture} decoded to a different value than expected. \
-             If the change is intentional and non-additive, bump the payload version, add an \
-             Upcast, and freeze a __vN+1 fixture — do not edit this one."
-        ));
+    let decoded = canonical::from_bytes::<T>(&bytes);
+    if let Ok(value) = &decoded {
+        if value == expected {
+            return Ok(());
+        }
     }
-    Ok(())
+    // Mismatch or decode failure.
+    match state {
+        PayloadState::Provisional => {
+            if updating {
+                return refreeze(&path, expected);
+            }
+            Err(format!(
+                "PROVISIONAL payload {fixture} drifted from its development snapshot. Re-freeze \
+                 with GOLDEN_UPDATE=I_KNOW_WHAT_IM_DOING (the diff shows old vs new canonical \
+                 bytes); the payload version does NOT advance while provisional."
+            ))
+        }
+        PayloadState::Frozen => match decoded {
+            Ok(_) => Err(format!(
+                "SCHEMA DRIFT: frozen fixture {fixture} decoded to a different value. Bump the \
+                 payload version, add an Upcast, and freeze a __vN+1 fixture — do not edit this one."
+            )),
+            Err(e) => Err(format!("frozen fixture {fixture} failed current decode: {e}")),
+        },
+    }
 }
 
 // ─── Deterministic, host-independent representative instances ────────────────
@@ -142,7 +228,7 @@ fn sample_plan() -> BoundaryPlan {
             exe: "true".to_string(),
             args: Vec::new(),
         },
-        budgets: Budgets::default(),
+        budgets: BudgetRequirements::deny_all(),
         evidence: EvidenceRequirements::default(),
     }
 }

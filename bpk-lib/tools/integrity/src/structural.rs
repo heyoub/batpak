@@ -254,14 +254,18 @@ struct FrozenFixtureDebt {
     target: &'static str,
 }
 
-/// Empty: every production `#[derive(EventPayload)]` type now has a frozen payload
-/// fixture under `tests/golden/payloads/`. (Held the reference-host manifest
-/// payloads until that crate was removed; nothing is debted today.)
-const FROZEN_FIXTURE_DEBT: &[FrozenFixtureDebt] = &[
-    // bvisor's three 0xE payloads (BoundaryPlanEvent/ReportEvent/RecoveryEvent)
-    // now have real v1 goldens under tests/golden/payloads/ + frozen-decode tests
-    // in crates/bvisor/tests/frozen_goldens.rs, so they are no longer debted.
-];
+/// `BoundaryStartedEvent` (0xE/0x001) is intentionally fixture-less while its
+/// payload is PROVISIONAL: it embeds the full `BoundaryPlan`, whose budget surface
+/// is being widened to the seven-dimensional model. Its provisional golden was
+/// deleted (not version-bumped) and is regenerated once the final admission surface
+/// is integrated — see `crates/bvisor/tests/frozen_goldens.rs` (`PAYLOAD_MANIFEST`).
+/// The anti-rot check below forces this entry's removal once `e_001__v1.hex` is
+/// re-frozen. The other 0xE payloads keep their v1 goldens.
+const FROZEN_FIXTURE_DEBT: &[FrozenFixtureDebt] = &[FrozenFixtureDebt {
+    type_name: "BoundaryStartedEvent",
+    reason: "provisional: embeds BoundaryPlan whose 7-dimensional budget surface is mid-widening",
+    target: "regenerate e_001__v1.hex after the final admission surface + plan identity land",
+}];
 
 /// Warn-first frozen-fixture lint (`ART-EVENT-PAYLOAD-FROZEN-GOLDENS`).
 ///

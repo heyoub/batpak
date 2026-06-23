@@ -79,6 +79,37 @@ pub struct BudgetRequirements {
     pub network_bytes: BudgetRequest,
 }
 
+impl BudgetRequest {
+    /// A deny-all request for one dimension: a zero limit, the minimal guarantee,
+    /// and no required evidence.
+    #[must_use]
+    pub fn deny_all() -> Self {
+        Self {
+            limit: 0,
+            guarantee: MinGuarantee::Mediated,
+            evidence: EvidenceSet::new(),
+        }
+    }
+}
+
+impl BudgetRequirements {
+    /// A deny-all request across all seven dimensions (every limit `0`). The
+    /// honest neutral default: it constrains the workload to nothing until the
+    /// caller asks for resources explicitly.
+    #[must_use]
+    pub fn deny_all() -> Self {
+        Self {
+            wall_micros: BudgetRequest::deny_all(),
+            cpu_micros: BudgetRequest::deny_all(),
+            resident_bytes: BudgetRequest::deny_all(),
+            process_count: BudgetRequest::deny_all(),
+            handle_count: BudgetRequest::deny_all(),
+            storage_bytes: BudgetRequest::deny_all(),
+            network_bytes: BudgetRequest::deny_all(),
+        }
+    }
+}
+
 /// One dimension's PROFILE: `P_d = (available, actual-guarantee, available-evidence,
 /// mechanism)`. Probed and declared by the backend.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -345,6 +376,15 @@ mod budget_tests {
             evidence: evidence(&[EvidenceClaim::ResourceUsage, EvidenceClaim::TerminalOutcome]),
             mechanism: "cgroup".to_string(),
         }
+    }
+
+    #[test]
+    fn deny_all_is_every_limit_zero() {
+        let reqs = BudgetRequirements::deny_all();
+        assert_eq!(BudgetRequest::deny_all().limit, 0);
+        assert_eq!(reqs.wall_micros.limit, 0);
+        assert_eq!(reqs.network_bytes.limit, 0);
+        assert_eq!(reqs.process_count.guarantee, MinGuarantee::Mediated);
     }
 
     #[test]
