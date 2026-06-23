@@ -41,10 +41,10 @@ use bvisor::{
     AdmittedRequirement, ArtifactId, AttemptId, BackendId, BackendProfileSnapshot,
     BoundaryDispositionEvent, BoundaryFinding, BoundaryPlan, BoundaryPlanHash,
     BoundaryRecoveryEvent, BoundaryReport, BoundaryReportBody, BoundaryReportEvent,
-    BoundaryRequirement, BoundaryStartedEvent, BudgetRequirements, CaptureRefs, DispositionAction,
-    DispositionPhase, Enforcement, EvidenceRequirements, ExitStatus, HostControl, ObservedFact,
-    Outcome, QuarantineRecord, RecoveryClassification, Workload, BOUNDARY_PLAN_SCHEMA_VERSION,
-    BOUNDARY_REPORT_SCHEMA_VERSION,
+    BoundaryRequirement, BoundaryStartedEvent, BudgetProfile, BudgetRequirements, CaptureRefs,
+    DispositionAction, DispositionPhase, Enforcement, EvidenceRequirements, ExitStatus,
+    HostControl, ObservedFact, Outcome, QuarantineRecord, RecoveryClassification, Workload,
+    BOUNDARY_PLAN_SCHEMA_VERSION, BOUNDARY_REPORT_SCHEMA_VERSION,
 };
 use serde::de::DeserializeOwned;
 use std::collections::BTreeMap;
@@ -206,6 +206,7 @@ fn sample_profile() -> BackendProfileSnapshot {
     BackendProfileSnapshot {
         backend: sample_backend(),
         probed,
+        budget: BudgetProfile::all_unenforced(),
     }
 }
 

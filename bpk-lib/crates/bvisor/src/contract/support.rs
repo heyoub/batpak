@@ -11,6 +11,7 @@
 //! - [`BackendProfile`] is the TYPED planning view, derived DETERMINISTICALLY
 //!   from the raw snapshot so replay re-derives identical admission decisions.
 
+use crate::contract::budget::BudgetProfile;
 use crate::contract::capability::{Capability, SupportVerdict};
 use crate::contract::host_control::HostControl;
 use crate::contract::ids::BackendId;
@@ -140,6 +141,10 @@ pub struct BackendProfileSnapshot {
     /// Raw probe facts, e.g. `"landlock_abi" -> "4"`, `"cgroup_v2" -> "true"`.
     /// A `BTreeMap` so the persisted bytes are key-sorted and replay-stable.
     pub probed: BTreeMap<String, String>,
+    /// The machine's seven-dimensional budget capability — backend-declared
+    /// availability, guarantee, evidence, and mechanism per dimension. Bound into
+    /// plan identity via `H_P`; never authored by the caller.
+    pub budget: BudgetProfile,
 }
 
 /// TYPED planning view, derived DETERMINISTICALLY from a raw snapshot. The

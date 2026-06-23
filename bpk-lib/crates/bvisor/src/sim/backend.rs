@@ -16,6 +16,7 @@
 //! [`Lie::AutoCommitButReportFalse`]) are illegal in every mode.
 
 use crate::contract::backend::Backend;
+use crate::contract::budget::BudgetProfile;
 use crate::contract::capability::{Enforcement, EvidenceClaim, SupportVerdict};
 use crate::contract::host_control::HostControl;
 use crate::contract::ids::BackendId;
@@ -308,6 +309,7 @@ impl Backend for SimBackend {
         BackendProfileSnapshot {
             backend: self.id.clone(),
             probed,
+            budget: BudgetProfile::all_unenforced(),
         }
     }
 
