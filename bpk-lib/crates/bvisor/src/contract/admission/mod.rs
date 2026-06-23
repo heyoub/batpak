@@ -41,7 +41,7 @@ pub use program::{
 };
 pub use shadow::{
     reference_admission, shadow_check, AdmissionDivergence, AdmissionInputs, AdmissionOutcome,
-    BudgetDimension, RequirementInputs,
+    BudgetPair, RequirementInputs,
 };
 pub use validate::{
     decode_validated, validate, verify_certificate, ValidationError, MAX_LOOKUP_ENTRIES,

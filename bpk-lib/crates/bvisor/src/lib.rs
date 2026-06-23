@@ -32,13 +32,18 @@ pub use contract::admission::{
     compile_evidence_membrane, compile_profile_drift_membrane, compile_support_membrane,
     compose_membranes, decode_validated, evaluate, planner_reference, planner_shadow_check,
     reference_admission, shadow_check, validate, verify_certificate, AdmissionDivergence,
-    AdmissionInputs, AdmissionOutcome, AdmissionProgram, AdmissionShape, BudgetDimension, CertNode,
+    AdmissionInputs, AdmissionOutcome, AdmissionProgram, AdmissionShape, BudgetPair, CertNode,
     CircuitBuilder, CompareRel, Decision, EvalError, InputDecl, InputSlot, Lane, LimitViolation,
     LookupTable, Node, NodeId, NodeOp, Outputs, PlannerInputs, ProgramCertificate, ProgramError,
     ProgramLimits, RequirementInputs, ValidationError, Width, ADMISSION_PROGRAM_SCHEMA_VERSION,
     FROZEN_LIMITS, MAX_LOOKUP_ENTRIES, MAX_WIDTH,
 };
 pub use contract::backend::Backend;
+pub use contract::budget::{
+    admit_dimension, budget_admit, AdmittedBudget, AdmittedBudgets, BudgetAvailability,
+    BudgetDimension, BudgetFailure, BudgetProfile, BudgetRefusal, BudgetRequest,
+    BudgetRequirements, DerivedMinimums, MinGuarantee,
+};
 pub use contract::capability::{
     Capability, Enforcement, EnvPolicy, EvidenceClaim, EvidenceSet, FdPolicy, FsAccess,
     FsConfinement, NetDest, NetPolicy, PathSet, SpawnPolicy, SupportVerdict,

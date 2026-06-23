@@ -7,6 +7,7 @@
 
 pub(crate) mod admission;
 pub(crate) mod backend;
+pub(crate) mod budget;
 pub(crate) mod capability;
 pub(crate) mod events;
 pub(crate) mod host_control;

@@ -44,7 +44,7 @@ pub struct RequirementInputs {
 
 /// One budget dimension's request vs availability (the `B` slice).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct BudgetDimension {
+pub struct BudgetPair {
     /// Requested limit.
     pub requested: u64,
     /// Backend-available limit.
@@ -62,7 +62,7 @@ pub struct AdmissionInputs {
     /// Per-requirement inputs.
     pub requirements: Vec<RequirementInputs>,
     /// Per-dimension budget inputs.
-    pub budget: Vec<BudgetDimension>,
+    pub budget: Vec<BudgetPair>,
 }
 
 /// The canonical admission decision both paths must agree on.
@@ -297,7 +297,7 @@ pub fn shadow_check(inputs: &AdmissionInputs) -> Result<AdmissionOutcome, Admiss
 mod shadow_tests {
     use super::{
         decide, reference_admission, shadow_check, AdmissionDivergence, AdmissionInputs,
-        AdmissionOutcome, BudgetDimension, RequirementInputs,
+        AdmissionOutcome, BudgetPair, RequirementInputs,
     };
 
     /// One requirement, one budget dim, all membranes passing.
@@ -312,7 +312,7 @@ mod shadow_tests {
                 conflict_present: 0b0001,
                 conflict_forbidden: 0b0010, // disjoint
             }],
-            budget: vec![BudgetDimension {
+            budget: vec![BudgetPair {
                 requested: 10,
                 available: 20,
             }],
