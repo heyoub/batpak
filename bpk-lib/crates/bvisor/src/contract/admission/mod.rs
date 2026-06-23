@@ -19,11 +19,17 @@
 //! as further submodules; they consume the artifacts frozen in [`program`].
 
 mod eval;
+mod limits;
 mod program;
+mod validate;
 
 pub use eval::{evaluate, Decision, EvalError, Lane};
+pub use limits::{LimitViolation, ProgramLimits, FROZEN_LIMITS};
 pub use program::{
-    AdmissionProgram, CertNode, CompareRel, InputDecl, InputSlot, LimitViolation, LookupTable,
-    Node, NodeId, NodeOp, Outputs, ProgramCertificate, ProgramError, ProgramLimits, Width,
-    ADMISSION_PROGRAM_SCHEMA_VERSION, FROZEN_LIMITS, MAX_WIDTH,
+    AdmissionProgram, CertNode, CompareRel, InputDecl, InputSlot, LookupTable, Node, NodeId,
+    NodeOp, Outputs, ProgramCertificate, ProgramError, Width, ADMISSION_PROGRAM_SCHEMA_VERSION,
+    MAX_WIDTH,
+};
+pub use validate::{
+    decode_validated, validate, verify_certificate, ValidationError, MAX_LOOKUP_ENTRIES,
 };
