@@ -29,8 +29,10 @@ use crate::contract::report::{
 use crate::contract::support::{
     BackendProfile, BackendProfileSnapshot, RequirementKind, SupportMatrix,
 };
+use crate::sim::clock::SimExecClock;
 use crate::sim::ground_truth::{GroundTruth, Lie};
 use crate::sim::Prng;
+use batpak::store::Clock;
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 
@@ -174,6 +176,14 @@ pub struct SimBackend {
     /// The honest seven-dimensional budget profile the monster declares (it enforces
     /// every dimension via a simulated mechanism).
     budget: BudgetProfile,
+    /// The deterministic clock that witnesses wall time. The honest simulation
+    /// advances it by `simulated_wall_micros` per run, so `execute` reads a real,
+    /// replayable elapsed wall from the public [`batpak::store::Clock`] seam.
+    clock: SimExecClock,
+    /// The simulated workload's modeled wall consumption (µs) the honest run advances
+    /// the clock by. Default `0` (an instant simulation consumes 0 simulated wall);
+    /// tests set it to witness a within-budget run or trip the wall limit.
+    simulated_wall_micros: u64,
     /// The harness-owned independent record. `Mutex` only because `execute`
     /// takes `&self`; the harness reads it back via [`SimBackend::ground_truth`].
     truth: Mutex<GroundTruth>,
@@ -219,8 +229,20 @@ impl SimBackend {
             support: deep_support(),
             injector,
             budget: sim_budget_profile(),
+            clock: SimExecClock::new(),
+            simulated_wall_micros: 0,
             truth: Mutex::new(GroundTruth::new()),
         }
+    }
+
+    /// Set the simulated workload's modeled wall consumption (µs) — the amount the
+    /// honest run advances its deterministic clock by, and thus the witnessed
+    /// `wall_micros` usage. Tests use this to witness a within-budget run or trip the
+    /// wall limit.
+    #[must_use]
+    pub fn with_simulated_wall_micros(mut self, micros: u64) -> Self {
+        self.simulated_wall_micros = micros;
+        self
     }
 
     /// Take a SNAPSHOT of the harness-owned GroundTruth recorded during the most
@@ -357,11 +379,16 @@ impl Backend for SimBackend {
         let mode = self.injector.consult();
         let mut run = RunState::new();
 
+        // Witness WALL TIME from the public Clock seam: the honest run advances the
+        // deterministic clock by the modeled wall, so this delta is real + replayable.
+        let launched_mono_ns = self.clock.now_mono_ns();
         // The monster performs its (simulated) dangerous effects, recording the
         // REAL effect to GroundTruth and applying the lie to the report.
         self.simulate(plan, mode, &mut run);
+        let wall_micros =
+            u64::try_from((self.clock.now_mono_ns() - launched_mono_ns) / 1_000).unwrap_or(0);
 
-        run.into_body(plan, &self.id, &self.probe())
+        run.into_body(plan, &self.id, &self.probe(), wall_micros)
     }
 }
 
@@ -378,6 +405,9 @@ impl SimBackend {
     /// The honest control: every real effect is also observed in the report, and
     /// the run reaches a terminal that is sealed.
     fn simulate_honest(&self, _plan: &BoundaryPlan, run: &mut RunState) {
+        // Model the workload's wall consumption by advancing the deterministic clock;
+        // `execute` reads the resulting elapsed and witnesses the wall budget.
+        self.clock.advance_us(self.simulated_wall_micros);
         self.record(GroundTruth::reached_terminal);
         run.outcome = Outcome::Completed;
         run.exit = Some(ExitStatus::Code(0));
@@ -480,6 +510,7 @@ impl RunState {
         plan: &BoundaryPlan,
         backend: &BackendId,
         profile: &BackendProfileSnapshot,
+        wall_micros: u64,
     ) -> BoundaryReportBody {
         let mut admitted = plan.admitted.clone();
         if let Some(mechanism) = &self.mechanism_override {
@@ -519,10 +550,11 @@ impl RunState {
             denied: self.denied,
             exit: self.exit,
             captured: CaptureRefs::default(),
-            // Budget witnessing at execution is the next vertical slice; until then the
-            // monster echoes the admitted contract with usage unobserved. Lie modes
-            // will misreport these and GroundTruth will catch the mismatch.
-            budget: BudgetWitnesses::unwitnessed(&plan.budgets),
+            // WALL TIME is witnessed from the deterministic Clock seam (the first
+            // execution-slice counter). CPU + the OS-counter dimensions remain
+            // genuinely unwitnessed until their counters land. Lie modes will later
+            // misreport these and GroundTruth will catch the mismatch.
+            budget: BudgetWitnesses::with_wall(&plan.budgets, wall_micros),
             artifacts: Vec::new(),
             findings,
         }
@@ -637,5 +669,68 @@ mod tests {
             ),
             "the Inert floor cannot guarantee any budget: {refused:?}"
         );
+    }
+
+    // The honest monster witnesses WALL TIME from the public Clock seam — a real,
+    // replayable measurement — not the old fabricated ObservationUnavailable.
+    #[test]
+    fn honest_sim_witnesses_wall_time_within_budget_and_trips_when_over() {
+        use crate::contract::budget::{BudgetRequirements, MinGuarantee};
+        use crate::contract::budget_witness::BudgetFinding;
+        use crate::contract::host_control::HostControl;
+        use crate::contract::ids::BackendId;
+        use crate::contract::plan::{BoundarySpec, EvidenceRequirements, Workload};
+        use crate::contract::registry::{BackendRegistry, BoundaryPlanner, BoundaryRunner};
+        use std::sync::Arc;
+
+        let spec = BoundarySpec {
+            workload: Workload::Process {
+                exe: "true".to_string(),
+                args: Vec::new(),
+            },
+            capabilities: Vec::new(),
+            controls: vec![HostControl::LaunchWorkload],
+            // Wall limit 50 us (within Sim capacity); the others uniform.
+            budgets: BudgetRequirements::uniform(50, MinGuarantee::Mediated),
+            evidence: EvidenceRequirements::default(),
+        };
+
+        // A run modeling 40 us of wall -> WITHIN the 50 us budget.
+        let within = run_wall(&spec, 40);
+        assert_eq!(within.budget.wall_micros.observed_usage, 40);
+        assert_eq!(
+            within.budget.wall_micros.finding,
+            BudgetFinding::WithinLimit
+        );
+        // cpu stays genuinely unwitnessed (no CPU counter yet) — earned, not lazy.
+        assert_eq!(
+            within.budget.cpu_micros.finding,
+            BudgetFinding::ObservationUnavailable
+        );
+
+        // A run modeling 90 us -> OVER the 50 us budget: the wall limit tripped.
+        let over = run_wall(&spec, 90);
+        assert_eq!(over.budget.wall_micros.observed_usage, 90);
+        assert_eq!(
+            over.budget.wall_micros.finding,
+            BudgetFinding::LimitReachedEnforced
+        );
+
+        fn run_wall(
+            spec: &BoundarySpec,
+            wall_micros: u64,
+        ) -> crate::contract::report::BoundaryReportBody {
+            let backend = SimBackend::new(Box::new(OneShotLiar::new(LieMode::Honest)))
+                .with_simulated_wall_micros(wall_micros);
+            let mut registry = BackendRegistry::new();
+            registry.register(Arc::new(backend));
+            let plan = BoundaryPlanner::new(&registry)
+                .plan(spec, &BackendId::new(SimBackend::ID))
+                .expect("honest sim admits");
+            BoundaryRunner::new(&registry)
+                .run(&plan)
+                .expect("run seals")
+                .body
+        }
     }
 }

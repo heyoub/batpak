@@ -17,6 +17,7 @@
 //! independently.
 
 pub(crate) mod backend;
+pub(crate) mod clock;
 pub(crate) mod grid;
 pub(crate) mod ground_truth;
 pub(crate) mod reconciliation_matrix;
@@ -56,6 +57,11 @@ pub(crate) fn seed_from_env(default: u64) -> u64 {
 /// A tiny deterministic splitmix64 PRNG. Self-contained (no `fastrand` dep) so
 /// the monster's lie sequence is reproducible from a seed with zero external
 /// state — the same seed advances to the same sequence of lies.
+///
+/// FORCED duplicate, not an oversight: batpak core's sim PRNG is `fastrand`,
+/// `pub(crate)` in `store/sim/workload.rs` and never exported, so bvisor cannot
+/// reuse it. splitmix64 here is the zero-dependency, fully-owned choice. (If core
+/// ever exports a seeded `u64` stream, prefer it.)
 #[derive(Clone, Debug)]
 pub(crate) struct Prng {
     state: u64,

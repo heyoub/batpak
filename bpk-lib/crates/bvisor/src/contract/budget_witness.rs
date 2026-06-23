@@ -90,11 +90,42 @@ pub struct BudgetWitness {
 }
 
 impl BudgetWitness {
+    /// Classify a MEASURED usage against the admitted limit — the simple
+    /// within/at-limit finding. (The richer `ExceededWithinMediatedOvershoot` and
+    /// `EnforcementFault` cases are decided by the enforcing mechanism, not here.)
+    #[must_use]
+    pub fn classify(admitted_limit: u64, observed_usage: u64) -> BudgetFinding {
+        if observed_usage <= admitted_limit {
+            BudgetFinding::WithinLimit
+        } else {
+            BudgetFinding::LimitReachedEnforced
+        }
+    }
+
+    /// A WITNESSED dimension: the contract `(L, G, E, M)` echoed from the plan PLUS a
+    /// real `observed_usage` measured by a counter, with the within/at-limit finding.
+    /// Used for dimensions an execution backend actually measures — e.g. wall time
+    /// from the [`batpak::store::Clock`] seam.
+    #[must_use]
+    pub fn witnessed(admitted: &AdmittedBudget, observed_usage: u64) -> Self {
+        Self {
+            admitted_limit: admitted.effective_limit,
+            required_guarantee: admitted.required_guarantee,
+            supplied_guarantee: GuaranteeProfile::from_enforcement(admitted.selected_guarantee),
+            mechanism: admitted.mechanism.clone(),
+            observed_usage,
+            evidence: admitted.promised_evidence.clone(),
+            finding: Self::classify(admitted.effective_limit, observed_usage),
+        }
+    }
+
     /// An UNWITNESSED echo of an admitted dimension: the contract `(L, G, E, M)` is
-    /// known from the plan, but usage is NOT observed
+    /// known from the plan, but usage is genuinely NOT measured
     /// ([`BudgetFinding::ObservationUnavailable`], `observed_usage = 0` as a
-    /// non-measurement). A backend emits this until the execution slice wires real
-    /// counters for the dimension.
+    /// non-measurement). EARNED, not lazy: a dimension is unwitnessed only when its
+    /// counter is genuinely absent (cpu needs per-tree CPU accounting; resident /
+    /// process / handle / storage / network need OS counters). Time dimensions that
+    /// have a [`batpak::store::Clock`] use [`Self::witnessed`] instead.
     #[must_use]
     pub fn unwitnessed(admitted: &AdmittedBudget) -> Self {
         Self {
@@ -136,6 +167,24 @@ impl BudgetWitnesses {
     pub fn unwitnessed(admitted: &AdmittedBudgets) -> Self {
         Self {
             wall_micros: BudgetWitness::unwitnessed(&admitted.wall_micros),
+            cpu_micros: BudgetWitness::unwitnessed(&admitted.cpu_micros),
+            resident_bytes: BudgetWitness::unwitnessed(&admitted.resident_bytes),
+            process_count: BudgetWitness::unwitnessed(&admitted.process_count),
+            handle_count: BudgetWitness::unwitnessed(&admitted.handle_count),
+            storage_bytes: BudgetWitness::unwitnessed(&admitted.storage_bytes),
+            network_bytes: BudgetWitness::unwitnessed(&admitted.network_bytes),
+        }
+    }
+
+    /// Witnesses with WALL TIME measured (`wall_micros_observed` = the elapsed wall a
+    /// [`batpak::store::Clock`] read from launch to terminal) and the other six
+    /// dimensions genuinely unwitnessed until their counters land. This is the first
+    /// execution-slice step: the one budget dimension a clock gives directly stops
+    /// defaulting to `ObservationUnavailable`.
+    #[must_use]
+    pub fn with_wall(admitted: &AdmittedBudgets, wall_micros_observed: u64) -> Self {
+        Self {
+            wall_micros: BudgetWitness::witnessed(&admitted.wall_micros, wall_micros_observed),
             cpu_micros: BudgetWitness::unwitnessed(&admitted.cpu_micros),
             resident_bytes: BudgetWitness::unwitnessed(&admitted.resident_bytes),
             process_count: BudgetWitness::unwitnessed(&admitted.process_count),
@@ -210,6 +259,34 @@ mod budget_witness_tests {
         assert_eq!(
             witnesses.network_bytes.finding,
             BudgetFinding::ObservationUnavailable
+        );
+    }
+
+    #[test]
+    fn with_wall_witnesses_time_via_a_real_measurement_not_unavailable() {
+        // Wall is MEASURED (40 us against the admitted 64) — clock-sourced, within
+        // limit. The other six are EARNED-unavailable (no counter yet).
+        let witnesses = BudgetWitnesses::with_wall(&admitted(), 40);
+        assert_eq!(witnesses.wall_micros.observed_usage, 40);
+        assert_eq!(witnesses.wall_micros.finding, BudgetFinding::WithinLimit);
+        assert_eq!(
+            witnesses.cpu_micros.finding,
+            BudgetFinding::ObservationUnavailable
+        );
+        assert_eq!(
+            witnesses.network_bytes.finding,
+            BudgetFinding::ObservationUnavailable
+        );
+    }
+
+    #[test]
+    fn a_measured_wall_over_the_limit_is_limit_reached_enforced() {
+        // 100 us against the admitted 64 -> the wall budget tripped.
+        let witnesses = BudgetWitnesses::with_wall(&admitted(), 100);
+        assert_eq!(witnesses.wall_micros.observed_usage, 100);
+        assert_eq!(
+            witnesses.wall_micros.finding,
+            BudgetFinding::LimitReachedEnforced
         );
     }
 }
