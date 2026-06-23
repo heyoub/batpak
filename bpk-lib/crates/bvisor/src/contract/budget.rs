@@ -608,4 +608,108 @@ mod budget_tests {
             })
         );
     }
+
+    // ─── Step 7–8: discrete + boundary hardening ───────────────────────────────
+
+    #[test]
+    fn capacity_boundary_is_inclusive() {
+        let digest = [0u8; 32];
+        // limit == available admits; limit == available + 1 is CapacityExceeded.
+        assert!(adjudicate_dimension(&request(20), &availability(20), digest).is_ok());
+        assert_eq!(
+            adjudicate_dimension(&request(21), &availability(20), digest),
+            Err(BudgetFailure::CapacityExceeded)
+        );
+        // u64 extremes: MAX within MAX admits (no overflow at the boundary).
+        assert!(adjudicate_dimension(&request(u64::MAX), &availability(u64::MAX), digest).is_ok());
+        assert_eq!(
+            adjudicate_dimension(&request(u64::MAX), &availability(u64::MAX - 1), digest),
+            Err(BudgetFailure::CapacityExceeded)
+        );
+    }
+
+    #[test]
+    fn derived_minimum_boundary_is_inclusive() {
+        let digest = [0u8; 32];
+        let derived = DerivedMinimums {
+            wall_micros: 5,
+            ..DerivedMinimums::default()
+        };
+        // limit == derived minimum admits (>= is inclusive).
+        let mut reqs = uniform_requirements(5);
+        assert!(budget_admit(&reqs, &uniform_profile(20), &derived, digest).is_ok());
+        // limit == derived - 1 is BelowDerivedMinimum on that dimension.
+        reqs.wall_micros.limit = 4;
+        assert_eq!(
+            budget_admit(&reqs, &uniform_profile(20), &derived, digest),
+            Err(BudgetRefusal {
+                dimension: BudgetDimension::Wall,
+                failure: BudgetFailure::BelowDerivedMinimum,
+            })
+        );
+    }
+
+    #[test]
+    fn guarantee_boundary_is_inclusive() {
+        let digest = [0u8; 32];
+        let mediated = BudgetAvailability {
+            enforcement: Enforcement::Mediated,
+            ..availability(20)
+        };
+        // Mediated request vs Mediated available admits (>= is inclusive).
+        assert!(adjudicate_dimension(&request(10), &mediated, digest).is_ok());
+        // Enforced request vs Mediated available is GuaranteeInsufficient.
+        let enforced_req = BudgetRequest {
+            guarantee: MinGuarantee::Enforced,
+            ..request(10)
+        };
+        assert_eq!(
+            adjudicate_dimension(&enforced_req, &mediated, digest),
+            Err(BudgetFailure::GuaranteeInsufficient)
+        );
+    }
+
+    /// Assert a one-over-capacity request refuses, naming `dimension`.
+    fn assert_capacity_refusal_at(reqs: &BudgetRequirements, dimension: BudgetDimension) {
+        assert_eq!(
+            budget_admit(
+                reqs,
+                &uniform_profile(20),
+                &DerivedMinimums::default(),
+                [0u8; 32]
+            ),
+            Err(BudgetRefusal {
+                dimension,
+                failure: BudgetFailure::CapacityExceeded,
+            }),
+            "dimension {dimension:?} must own its capacity refusal"
+        );
+    }
+
+    #[test]
+    fn each_of_the_seven_dimensions_is_named_at_its_capacity_boundary() {
+        // Break exactly one dimension (limit one over the available 20) and confirm
+        // the refusal names THAT dimension — the selector covers all seven.
+        let mut reqs = uniform_requirements(10);
+        reqs.wall_micros.limit = 21;
+        assert_capacity_refusal_at(&reqs, BudgetDimension::Wall);
+        let mut reqs = uniform_requirements(10);
+        reqs.cpu_micros.limit = 21;
+        assert_capacity_refusal_at(&reqs, BudgetDimension::Cpu);
+        let mut reqs = uniform_requirements(10);
+        reqs.resident_bytes.limit = 21;
+        assert_capacity_refusal_at(&reqs, BudgetDimension::ResidentMemory);
+        let mut reqs = uniform_requirements(10);
+        reqs.process_count.limit = 21;
+        assert_capacity_refusal_at(&reqs, BudgetDimension::ProcessCount);
+        let mut reqs = uniform_requirements(10);
+        reqs.handle_count.limit = 21;
+        assert_capacity_refusal_at(&reqs, BudgetDimension::HandleCount);
+        let mut reqs = uniform_requirements(10);
+        reqs.storage_bytes.limit = 21;
+        assert_capacity_refusal_at(&reqs, BudgetDimension::Storage);
+        let mut reqs = uniform_requirements(10);
+        reqs.network_bytes.limit = 21;
+        assert_capacity_refusal_at(&reqs, BudgetDimension::Network);
+    }
 }
