@@ -16,8 +16,8 @@
 //! [`Lie::AutoCommitButReportFalse`]) are illegal in every mode.
 
 use crate::contract::backend::Backend;
-use crate::contract::budget::BudgetProfile;
-use crate::contract::capability::{Enforcement, EvidenceClaim, SupportVerdict};
+use crate::contract::budget::{BudgetAvailability, BudgetProfile};
+use crate::contract::capability::{Enforcement, EvidenceClaim, EvidenceSet, SupportVerdict};
 use crate::contract::host_control::HostControl;
 use crate::contract::ids::BackendId;
 use crate::contract::plan::{BoundaryPlan, BoundaryRequirement, Workload};
@@ -170,9 +170,38 @@ pub struct SimBackend {
     id: BackendId,
     support: SupportMatrix,
     injector: Box<dyn LieInjector>,
+    /// The honest seven-dimensional budget profile the monster declares (it enforces
+    /// every dimension via a simulated mechanism).
+    budget: BudgetProfile,
     /// The harness-owned independent record. `Mutex` only because `execute`
     /// takes `&self`; the harness reads it back via [`SimBackend::ground_truth`].
     truth: Mutex<GroundTruth>,
+}
+
+/// The honest budget profile the monster declares: it ENFORCES every dimension via a
+/// simulated mechanism, witnesses resource usage, and offers ample headroom — so a
+/// budgeted spec ADMITS on Sim (the positive reference) where it is refused on the
+/// all-`Unsupported` Inert floor. The lie modes misreport at EXECUTION, not here.
+fn sim_budget_profile() -> BudgetProfile {
+    let enforced = |available: u64, mechanism: &str| {
+        let mut evidence = EvidenceSet::new();
+        evidence.insert(EvidenceClaim::ResourceUsage);
+        BudgetAvailability {
+            available,
+            enforcement: Enforcement::Enforced,
+            evidence,
+            mechanism: mechanism.to_string(),
+        }
+    };
+    BudgetProfile {
+        wall_micros: enforced(60_000_000, "sim_timer"),
+        cpu_micros: enforced(60_000_000, "sim_cpu_accountant"),
+        resident_bytes: enforced(1u64 << 32, "sim_mem_accountant"),
+        process_count: enforced(64, "sim_process_table"),
+        handle_count: enforced(1024, "sim_descriptor_table"),
+        storage_bytes: enforced(1u64 << 32, "sim_storage_quota"),
+        network_bytes: enforced(1u64 << 30, "sim_network_meter"),
+    }
 }
 
 impl SimBackend {
@@ -188,6 +217,7 @@ impl SimBackend {
             id: BackendId::new(Self::ID),
             support: deep_support(),
             injector,
+            budget: sim_budget_profile(),
             truth: Mutex::new(GroundTruth::new()),
         }
     }
@@ -309,7 +339,7 @@ impl Backend for SimBackend {
         BackendProfileSnapshot {
             backend: self.id.clone(),
             probed,
-            budget: BudgetProfile::all_unenforced(),
+            budget: self.budget.clone(),
         }
     }
 
@@ -546,6 +576,61 @@ mod tests {
         assert!(
             run_seals(LieMode::Lie(Lie::CrashMidBoundary)),
             "G11 seals a (lying) terminal report"
+        );
+    }
+
+    // The positive reference: the honest monster ENFORCES every budget dimension, so a
+    // budgeted spec ADMITS on Sim where the all-Unsupported Inert floor must refuse.
+    #[test]
+    fn honest_sim_admits_a_budget_that_the_inert_floor_refuses() {
+        use crate::backend::inert::InertBackend;
+        use crate::contract::budget::{
+            budget_admit, BudgetFailure, BudgetRefusal, BudgetRequest, BudgetRequirements,
+            DerivedMinimums, MinGuarantee,
+        };
+
+        // A modest limit within every dimension's Sim capacity (process_count = 64
+        // is the smallest), so only the GUARANTEE distinguishes Sim from the floor.
+        let dimension = || {
+            let mut evidence = EvidenceSet::new();
+            evidence.insert(EvidenceClaim::ResourceUsage);
+            BudgetRequest {
+                limit: 8,
+                guarantee: MinGuarantee::Mediated,
+                evidence,
+            }
+        };
+        let request = BudgetRequirements {
+            wall_micros: dimension(),
+            cpu_micros: dimension(),
+            resident_bytes: dimension(),
+            process_count: dimension(),
+            handle_count: dimension(),
+            storage_bytes: dimension(),
+            network_bytes: dimension(),
+        };
+        let derived = DerivedMinimums::default();
+
+        // Honest Sim enforces every dimension -> admits (the positive reference).
+        let sim = SimBackend::new(Box::new(OneShotLiar::new(LieMode::Honest)));
+        let admitted = budget_admit(&request, &sim.probe().budget, &derived, [0u8; 32]);
+        assert!(
+            admitted.is_ok(),
+            "honest sim admits a Mediated-guarantee budget: {admitted:?}"
+        );
+
+        // The Inert floor is all-Unsupported -> refuses on the first dimension's guarantee.
+        let inert = InertBackend::new();
+        let refused = budget_admit(&request, &inert.probe().budget, &derived, [0u8; 32]);
+        assert!(
+            matches!(
+                refused,
+                Err(BudgetRefusal {
+                    failure: BudgetFailure::GuaranteeInsufficient,
+                    ..
+                })
+            ),
+            "the Inert floor cannot guarantee any budget: {refused:?}"
         );
     }
 }
