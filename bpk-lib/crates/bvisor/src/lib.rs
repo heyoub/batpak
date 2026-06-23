@@ -54,7 +54,10 @@ pub use contract::primitive::{
     classify_via_primitives, compile_lowering_plan, ConfinePrimitive, LoweringError, LoweringPhase,
     LoweringPlan, PrimitiveId, Privilege,
 };
-pub use contract::recovery::{QuarantineRecord, RecoveryClassification};
+pub use contract::recovery::{
+    reconcile, ArtifactFix, ArtifactReality, DispositionState, QuarantineRecord, RecoveryAction,
+    RecoveryClassification, RecoveryProbe, RunView,
+};
 pub use contract::registry::{BackendRegistry, BoundaryPlanner, BoundaryRunner};
 pub use contract::report::{
     BoundaryFinding, BoundaryReport, BoundaryReportBody, CaptureRefs, DeniedAttempt, ExitStatus,

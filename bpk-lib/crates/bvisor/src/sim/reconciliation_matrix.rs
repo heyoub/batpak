@@ -382,4 +382,58 @@ mod tests {
         );
         Ok(())
     }
+
+    // §13 LAW: the PRODUCTION reconcile (contract::recovery::reconcile over a
+    // RunView + RecoveryProbe) reaches the IDENTICAL classification as this
+    // independent harness oracle, for every crash boundary. This is what makes
+    // reconciliation "real" rather than two prose claims that never meet.
+    #[test]
+    fn production_reconcile_agrees_with_the_oracle() {
+        use crate::contract::ids::{ArtifactId, AttemptId, BoundaryPlanHash};
+        use crate::contract::recovery::{
+            reconcile as production_reconcile, ArtifactReality, RecoveryProbe, RunView,
+        };
+
+        // Map the harness's persisted crash state onto the production inputs.
+        fn production_inputs(state: &CrashState) -> (RunView, RecoveryProbe) {
+            let mut view = RunView::new(AttemptId([0u8; 32]), BoundaryPlanHash([0u8; 32]));
+            view.started = state.plan_sealed; // 0x001 present == started
+            view.reported = state.report_sealed && !state.report_torn;
+
+            let mut probe = RecoveryProbe {
+                orphans: state.orphans.clone(),
+                torn_report: state.report_torn,
+                ..Default::default()
+            };
+            if state.artifact_committed {
+                // A committed artifact with no sealed report = promoted bytes the
+                // production probe would find — the sacred window.
+                probe.artifacts.insert(
+                    ArtifactId([7u8; 32]),
+                    ArtifactReality {
+                        promoted_bytes_present: true,
+                        ..Default::default()
+                    },
+                );
+            }
+            (view, probe)
+        }
+
+        for boundary in all_crash_boundaries() {
+            let mut prng = Prng::new(fold(fold(FNV_OFFSET, 0x5EED_C304), boundary.token()));
+            let state = crash_state(boundary, &mut prng);
+            let oracle: ReconClass = super::reconcile(&state).class.into();
+
+            let (view, probe) = production_inputs(&state);
+            let production: ReconClass = production_reconcile(&view, &probe)
+                .classification()
+                .expect("every sealed-plan boundary records a classification")
+                .into();
+
+            assert_eq!(
+                production, oracle,
+                "PROPERTY (§13 LAW): production reconcile must match the oracle at boundary {boundary:?}"
+            );
+        }
+    }
 }
