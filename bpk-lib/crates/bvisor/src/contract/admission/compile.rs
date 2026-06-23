@@ -20,6 +20,7 @@
 use super::program::{
     AdmissionProgram, InputDecl, InputSlot, Node, NodeId, NodeOp, Outputs, ProgramError, Width,
 };
+use super::schedule_circuit::{schedule_membrane_bit, ScheduleShape};
 
 /// Builds an [`AdmissionProgram`] by appending nodes in canonical order. Every
 /// constructor returns the [`NodeId`] of the node just appended; because nodes are
@@ -503,10 +504,13 @@ pub struct AdmissionShape {
     pub conflict_width: Width,
     /// Width of the profile-hash lanes.
     pub hash_width: Width,
+    /// Shape of the lowering-schedule membrane (the 6th membrane).
+    pub schedule: ScheduleShape,
 }
 
-/// Compile the FULL admission circuit: the five membranes composed in the fixed
-/// canonical order with the ordered priority-encoder refusal (kernel plan §6).
+/// Compile the FULL admission circuit: the six membranes composed in the fixed
+/// canonical order with the ordered priority-encoder refusal (kernel plan §6 + the
+/// lowering-schedule membrane of track A).
 ///
 /// Input lane order (so a caller can encode `x`): `planned_hash, live_hash`, then
 /// `enforcement × requirements`, then `required × requirements`,
@@ -514,8 +518,10 @@ pub struct AdmissionShape {
 /// `budget_limit × dims`, `budget_available × dims`, `budget_derived × dims`,
 /// `budget_guarantee_req × dims`, `budget_guarantee_avail × dims`,
 /// `budget_evidence_req × dims`, `budget_evidence_avail × dims` — then
-/// `present × requirements`, `forbidden × requirements`. Membrane order (the refusal
-/// index): `1` profile-drift, `2` support, `3` evidence, `4` budget, `5` conflict.
+/// `present × requirements`, `forbidden × requirements`, then the entire schedule
+/// membrane input block last (see `schedule_circuit::encode`). Membrane order (the
+/// refusal index): `1` profile-drift, `2` support, `3` evidence, `4` budget,
+/// `5` conflict, `6` lowering-schedule.
 ///
 /// # Errors
 /// [`ProgramError`] only on `u32` node-index overflow, which admission never hits.
@@ -581,7 +587,13 @@ pub fn compile_admission(shape: &AdmissionShape) -> Result<AdmissionProgram, Pro
         .collect();
     let conflict = conflict_check(&mut builder, &present, &forbidden, shape.conflict_width);
 
-    let membranes = [drift, support, evidence, budget, conflict];
+    // The lowering-schedule membrane (track A): its entire input block is declared last,
+    // and the nine schedule checks AND-reduce to this single composite-membrane bit. Its
+    // per-reason detail is the standalone `compile_schedule_membrane` circuit, evaluated
+    // separately in the shadow — exactly as the budget membrane's dimension/reason is.
+    let schedule = schedule_membrane_bit(&mut builder, &shape.schedule);
+
+    let membranes = [drift, support, evidence, budget, conflict, schedule];
     let (admit, refusal_code) = compose_membranes(&mut builder, &membranes);
     builder.finish(Outputs {
         admit,

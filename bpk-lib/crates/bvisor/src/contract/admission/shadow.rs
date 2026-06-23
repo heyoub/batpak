@@ -21,6 +21,10 @@
 use super::compile::{compile_admission, compile_budget_detail, AdmissionShape};
 use super::eval::{evaluate, Lane};
 use super::program::Width;
+use super::schedule::{schedule_refusal, ScheduleInputs};
+use super::schedule_circuit::{
+    compile_schedule_membrane, encode_schedule, shape_of as schedule_shape_of,
+};
 
 /// Lane width (bits) of the evidence / conflict / budget / hash lanes in the shadow
 /// encoding. Enforcement is the 2-bit code the circuit uses internally.
@@ -28,9 +32,13 @@ const FIELD_BITS: u32 = 8;
 const ENFORCEMENT_BITS: u32 = 2;
 
 /// The 1-based index of the budget membrane in the canonical order (drift, support,
-/// evidence, BUDGET, conflict). The budget dimension/reason selectors are meaningful
-/// only when the budget membrane is the first-failing one.
+/// evidence, BUDGET, conflict, schedule). The budget dimension/reason selectors are
+/// meaningful only when the budget membrane is the first-failing one.
 const BUDGET_MEMBRANE: u64 = 4;
+
+/// The 1-based index of the lowering-schedule membrane (the 6th, last). Its reason
+/// selector is meaningful only when it is the first-failing membrane.
+const SCHEDULE_MEMBRANE: u64 = 6;
 
 /// One requirement's admission inputs (the per-requirement slice of `V`/`Q`).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -83,6 +91,8 @@ pub struct AdmissionInputs {
     pub requirements: Vec<RequirementInputs>,
     /// Per-dimension budget inputs.
     pub budget: Vec<BudgetInputs>,
+    /// The lowering-schedule membrane inputs (the supplied schedule + its declarations).
+    pub schedule: ScheduleInputs,
 }
 
 /// The canonical admission decision both paths must agree on.
@@ -108,6 +118,9 @@ pub enum AdmissionOutcome {
         /// `1` BelowDerivedMinimum, `2` CapacityExceeded, `3` GuaranteeInsufficient,
         /// `4` EvidenceMissing.
         budget_reason: u64,
+        /// First-failing schedule reason `1..=9` (`0` unless the refusal is at the
+        /// schedule membrane). See [`super::ScheduleRefusal::code`].
+        schedule_reason: u64,
     },
 }
 
@@ -115,17 +128,19 @@ pub enum AdmissionOutcome {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum AdmissionDivergence {
-    /// The two paths produced different outcomes.
+    /// The two paths produced different outcomes. (Boxed: the outcomes carry the full
+    /// per-membrane trace + detail selectors, so the unboxed error variant would dwarf
+    /// the `Ok` outcome — `clippy::result_large_err`.)
     OutcomeMismatch {
         /// The authoritative imperative outcome.
-        reference: AdmissionOutcome,
+        reference: Box<AdmissionOutcome>,
         /// The shadow circuit outcome.
-        circuit: AdmissionOutcome,
+        circuit: Box<AdmissionOutcome>,
     },
     /// The shadow circuit failed to compile or evaluate where the reference did not.
     CircuitError {
         /// The authoritative imperative outcome.
-        reference: AdmissionOutcome,
+        reference: Box<AdmissionOutcome>,
         /// Why the circuit path failed.
         reason: &'static str,
     },
@@ -158,8 +173,8 @@ pub(crate) fn mask(value: u64, bits: u32) -> u64 {
     }
 }
 
-/// The five membrane pass bits in canonical order: profile-drift, support,
-/// evidence, budget, conflict. The single imperative source of the decision.
+/// The six membrane pass bits in canonical order: profile-drift, support, evidence,
+/// budget, conflict, lowering-schedule. The single imperative source of the decision.
 fn reference_trace(inputs: &AdmissionInputs) -> Vec<bool> {
     let drift = mask(inputs.planned_profile, FIELD_BITS) == mask(inputs.live_profile, FIELD_BITS);
     let support = inputs
@@ -174,7 +189,15 @@ fn reference_trace(inputs: &AdmissionInputs) -> Vec<bool> {
     let conflict = inputs.requirements.iter().all(|r| {
         (mask(r.conflict_present, FIELD_BITS) & mask(r.conflict_forbidden, FIELD_BITS)) == 0
     });
-    vec![drift, support, evidence, budget, conflict]
+    // The schedule membrane passes iff the supplied lowering order is admitted.
+    let schedule = reference_schedule_detail(inputs) == 0;
+    vec![drift, support, evidence, budget, conflict, schedule]
+}
+
+/// The schedule membrane's first-failing reason (`1..=9`, `0` if admitted) — the
+/// imperative twin of the standalone schedule circuit's refusal code.
+fn reference_schedule_detail(inputs: &AdmissionInputs) -> u64 {
+    schedule_refusal(&inputs.schedule).map_or(0, |reason| u64::from(reason.code()))
 }
 
 /// One budget dimension's first-failing reason in canonical order (`1`
@@ -215,9 +238,9 @@ fn reference_budget_detail(inputs: &AdmissionInputs) -> u64 {
     0
 }
 
-/// Split the budget membrane's first-failing membrane index into the dimension +
-/// reason selectors, but ONLY when the budget membrane is the refusing one (`detail`
-/// is gated so an earlier membrane's refusal carries no budget detail).
+/// Split the budget membrane's packed `detail` into the dimension + reason selectors,
+/// but ONLY when the budget membrane is the refusing one (so an earlier membrane's
+/// refusal carries no budget detail).
 fn budget_selectors(membrane: u64, detail: u64) -> (u64, u64) {
     if membrane == BUDGET_MEMBRANE {
         (detail >> 3, detail & 0b111)
@@ -226,20 +249,42 @@ fn budget_selectors(membrane: u64, detail: u64) -> (u64, u64) {
     }
 }
 
+/// The schedule reason selector, meaningful ONLY when the schedule membrane is the
+/// refusing one (else `0`, so an earlier membrane's refusal carries no schedule detail).
+fn schedule_selector(membrane: u64, detail: u64) -> u64 {
+    if membrane == SCHEDULE_MEMBRANE {
+        detail
+    } else {
+        0
+    }
+}
+
+/// The packed per-membrane details both paths compute: the budget `(dim<<3)|reason`
+/// and the schedule reason. Each is gated to its own membrane by the selectors above.
+pub(crate) struct MembraneDetails {
+    /// Budget packed detail `(dimension << 3) | reason`.
+    pub budget: u64,
+    /// Schedule reason `1..=9`.
+    pub schedule: u64,
+}
+
 /// Build the outcome from a membrane trace (first failing membrane = refusal),
-/// attaching the budget dimension/reason selectors on a budget refusal.
-pub(crate) fn outcome_from_trace(trace: Vec<bool>, budget_detail: u64) -> AdmissionOutcome {
+/// attaching the budget dimension/reason selectors on a budget refusal and the
+/// schedule reason on a schedule refusal.
+pub(crate) fn outcome_from_trace(trace: Vec<bool>, details: &MembraneDetails) -> AdmissionOutcome {
     match trace.iter().position(|pass| !pass) {
         None => AdmissionOutcome::Admitted { trace },
         Some(i) => {
             let index = u64::try_from(i + 1).unwrap_or(0);
-            let (budget_dimension, budget_reason) = budget_selectors(index, budget_detail);
+            let (budget_dimension, budget_reason) = budget_selectors(index, details.budget);
+            let schedule_reason = schedule_selector(index, details.schedule);
             AdmissionOutcome::Refused {
                 membrane: index,
                 refusal_code: index,
                 trace,
                 budget_dimension,
                 budget_reason,
+                schedule_reason,
             }
         }
     }
@@ -248,7 +293,11 @@ pub(crate) fn outcome_from_trace(trace: Vec<bool>, budget_detail: u64) -> Admiss
 /// The authoritative imperative admission decision over normalized inputs.
 #[must_use]
 pub fn reference_admission(inputs: &AdmissionInputs) -> AdmissionOutcome {
-    outcome_from_trace(reference_trace(inputs), reference_budget_detail(inputs))
+    let details = MembraneDetails {
+        budget: reference_budget_detail(inputs),
+        schedule: reference_schedule_detail(inputs),
+    };
+    outcome_from_trace(reference_trace(inputs), &details)
 }
 
 fn field_width() -> Width {
@@ -267,6 +316,7 @@ fn shape_of(inputs: &AdmissionInputs) -> AdmissionShape {
         evidence_width: field_width(),
         conflict_width: field_width(),
         hash_width: field_width(),
+        schedule: schedule_shape_of(&inputs.schedule),
     }
 }
 
@@ -276,7 +326,8 @@ fn encode_lane(value: u64, width: Width) -> Lane {
 
 /// Encode the inputs into the lane vector `compile_admission` reads (its documented
 /// order): planned, live, enforcement×reqs, required×reqs, available×reqs,
-/// budget_req×dims, budget_avail×dims, present×reqs, forbidden×reqs.
+/// budget_req×dims, budget_avail×dims, present×reqs, forbidden×reqs, then the whole
+/// schedule membrane input block last.
 fn encode(inputs: &AdmissionInputs) -> Vec<Lane> {
     let field = field_width();
     let enf = enforcement_lane_width();
@@ -315,6 +366,11 @@ fn encode(inputs: &AdmissionInputs) -> Vec<Lane> {
             .iter()
             .map(|r| encode_lane(r.conflict_forbidden, field)),
     );
+    // The schedule membrane input block, last (its own lossless-derived widths).
+    lanes.extend(encode_schedule(
+        &inputs.schedule,
+        &schedule_shape_of(&inputs.schedule),
+    ));
     lanes
 }
 
@@ -367,9 +423,10 @@ fn encode_budget(inputs: &AdmissionInputs) -> Vec<Lane> {
 }
 
 /// The shadow circuit's admission decision over the same normalized inputs. On a
-/// refusal, a SECOND NC¹ circuit ([`compile_budget_detail`]) yields the packed budget
-/// dimension/reason selector — so the circuit produces the SAME full outcome the
-/// reference does (the selectors are circuit-computed, not reference-only).
+/// refusal, SECOND NC¹ circuits ([`compile_budget_detail`] / [`compile_schedule_membrane`])
+/// yield the packed budget dimension/reason and the schedule reason selectors — so the
+/// circuit produces the SAME full outcome the reference does (the selectors are
+/// circuit-computed, not reference-only).
 fn circuit_admission(inputs: &AdmissionInputs) -> Result<AdmissionOutcome, &'static str> {
     let shape = shape_of(inputs);
     let program = compile_admission(&shape).map_err(|_| "circuit compilation failed")?;
@@ -379,19 +436,40 @@ fn circuit_admission(inputs: &AdmissionInputs) -> Result<AdmissionOutcome, &'sta
             trace: decision.membranes,
         });
     }
-    let detail_program = compile_budget_detail(inputs.budget.len(), field_width(), field_width())
-        .map_err(|_| "budget detail compilation failed")?;
-    let detail = evaluate(&detail_program, &encode_budget(inputs))
-        .map_err(|_| "budget detail evaluation failed")?
-        .refusal_code;
-    let (budget_dimension, budget_reason) = budget_selectors(decision.refusal_code, detail);
+    let budget_detail = circuit_budget_detail(inputs)?;
+    let (budget_dimension, budget_reason) = budget_selectors(decision.refusal_code, budget_detail);
+    let schedule_reason =
+        schedule_selector(decision.refusal_code, circuit_schedule_detail(inputs)?);
     Ok(AdmissionOutcome::Refused {
         membrane: decision.refusal_code,
         refusal_code: decision.refusal_code,
         trace: decision.membranes,
         budget_dimension,
         budget_reason,
+        schedule_reason,
     })
+}
+
+/// The circuit-computed packed budget detail `(dimension << 3) | reason`.
+fn circuit_budget_detail(inputs: &AdmissionInputs) -> Result<u64, &'static str> {
+    let program = compile_budget_detail(inputs.budget.len(), field_width(), field_width())
+        .map_err(|_| "budget detail compilation failed")?;
+    Ok(evaluate(&program, &encode_budget(inputs))
+        .map_err(|_| "budget detail evaluation failed")?
+        .refusal_code)
+}
+
+/// The circuit-computed schedule reason (`1..=9`) from the standalone schedule membrane.
+fn circuit_schedule_detail(inputs: &AdmissionInputs) -> Result<u64, &'static str> {
+    let schedule_shape = schedule_shape_of(&inputs.schedule);
+    let program = compile_schedule_membrane(&schedule_shape)
+        .map_err(|_| "schedule detail compilation failed")?;
+    Ok(evaluate(
+        &program,
+        &encode_schedule(&inputs.schedule, &schedule_shape),
+    )
+    .map_err(|_| "schedule detail evaluation failed")?
+    .refusal_code)
 }
 
 /// Compare the authoritative reference against the shadow circuit outcome. The
@@ -403,8 +481,14 @@ pub(crate) fn decide(
 ) -> Result<AdmissionOutcome, AdmissionDivergence> {
     match circuit {
         Ok(circuit) if circuit == reference => Ok(reference),
-        Ok(circuit) => Err(AdmissionDivergence::OutcomeMismatch { reference, circuit }),
-        Err(reason) => Err(AdmissionDivergence::CircuitError { reference, reason }),
+        Ok(circuit) => Err(AdmissionDivergence::OutcomeMismatch {
+            reference: Box::new(reference),
+            circuit: Box::new(circuit),
+        }),
+        Err(reason) => Err(AdmissionDivergence::CircuitError {
+            reference: Box::new(reference),
+            reason,
+        }),
     }
 }
 
@@ -420,12 +504,33 @@ pub fn shadow_check(inputs: &AdmissionInputs) -> Result<AdmissionOutcome, Admiss
 
 #[cfg(test)]
 mod shadow_tests {
+    use super::super::schedule::{PrimitiveDeclInputs, ScheduleInputs, ScheduleSlotInputs};
     use super::{
         decide, reference_admission, shadow_check, AdmissionDivergence, AdmissionInputs,
         AdmissionOutcome, BudgetInputs, RequirementInputs,
     };
 
-    /// One requirement, one budget dim, all membranes passing.
+    /// A schedule that admits: a single covering primitive in canonical order.
+    fn passing_schedule() -> ScheduleInputs {
+        ScheduleInputs {
+            declarations: vec![PrimitiveDeclInputs {
+                phase: 0,
+                covers: 0b1,
+                prerequisites: 0,
+                conflicts: 0,
+                decl_digest: 0xAA,
+                param_digest: 0xBB,
+            }],
+            schedule: vec![ScheduleSlotInputs {
+                primitive: 0,
+                claimed_decl_digest: 0xAA,
+                claimed_param_digest: 0xBB,
+            }],
+            required: 0b1,
+        }
+    }
+
+    /// One requirement, one budget dim, all six membranes passing.
     fn all_pass() -> AdmissionInputs {
         AdmissionInputs {
             planned_profile: 7,
@@ -446,6 +551,7 @@ mod shadow_tests {
                 evidence_required: 0b0001,
                 evidence_available: 0b1111, // superset
             }],
+            schedule: passing_schedule(),
         }
     }
 
@@ -455,7 +561,7 @@ mod shadow_tests {
         assert_eq!(
             outcome,
             AdmissionOutcome::Admitted {
-                trace: vec![true, true, true, true, true],
+                trace: vec![true, true, true, true, true, true],
             }
         );
     }
@@ -463,7 +569,7 @@ mod shadow_tests {
     #[test]
     fn shadow_refuses_at_first_failing_membrane_and_both_paths_agree() {
         // Break each membrane in turn; reference and circuit must agree on the
-        // refusal index (canonical order: 1 drift .. 5 conflict).
+        // refusal index (canonical order: 1 drift .. 5 conflict, 6 schedule).
         let mut drift = all_pass();
         drift.live_profile = 1;
         assert_refused_at(&drift, 1);
@@ -486,6 +592,64 @@ mod shadow_tests {
         conflict.requirements[0].conflict_present = 0b0011;
         conflict.requirements[0].conflict_forbidden = 0b0011;
         assert_refused_at(&conflict, 5);
+
+        let mut schedule = all_pass();
+        schedule.schedule.schedule[0].primitive = 9; // out-of-range index
+        assert_refused_at(&schedule, 6);
+    }
+
+    #[test]
+    fn schedule_membrane_refusal_carries_the_schedule_reason_with_circuit_parity() {
+        // A non-canonical schedule (valid but wrong Kahn order) refuses at membrane 6
+        // with schedule reason 9 (NonCanonical); reference and circuit must agree.
+        let mut inputs = all_pass();
+        inputs.schedule = ScheduleInputs {
+            declarations: vec![
+                PrimitiveDeclInputs {
+                    phase: 0,
+                    covers: 0b01,
+                    prerequisites: 0,
+                    conflicts: 0,
+                    decl_digest: 0xA0,
+                    param_digest: 0xB0,
+                },
+                PrimitiveDeclInputs {
+                    phase: 0,
+                    covers: 0b10,
+                    prerequisites: 0,
+                    conflicts: 0,
+                    decl_digest: 0xA1,
+                    param_digest: 0xB1,
+                },
+            ],
+            // [p1, p0] — both ready at step 0, but p1 (key (0,1)) > p0 (key (0,0)).
+            schedule: vec![
+                ScheduleSlotInputs {
+                    primitive: 1,
+                    claimed_decl_digest: 0xA1,
+                    claimed_param_digest: 0xB1,
+                },
+                ScheduleSlotInputs {
+                    primitive: 0,
+                    claimed_decl_digest: 0xA0,
+                    claimed_param_digest: 0xB0,
+                },
+            ],
+            required: 0b11,
+        };
+        let got = match shadow_check(&inputs).expect("no divergence") {
+            AdmissionOutcome::Refused {
+                membrane,
+                schedule_reason,
+                ..
+            } => Some((membrane, schedule_reason)),
+            AdmissionOutcome::Admitted { .. } => None,
+        };
+        assert_eq!(
+            got,
+            Some((6, 9)),
+            "schedule refusal names reason 9 (NonCanonical)"
+        );
     }
 
     fn assert_refused_at(inputs: &AdmissionInputs, expected: u64) {
@@ -512,16 +676,17 @@ mod shadow_tests {
         let wrong_circuit = AdmissionOutcome::Refused {
             membrane: 2,
             refusal_code: 2,
-            trace: vec![true, false, true, true, true],
+            trace: vec![true, false, true, true, true, true],
             budget_dimension: 0,
             budget_reason: 0,
+            schedule_reason: 0,
         };
         let result = decide(reference.clone(), Ok(wrong_circuit.clone()));
         assert_eq!(
             result,
             Err(AdmissionDivergence::OutcomeMismatch {
-                reference,
-                circuit: wrong_circuit,
+                reference: Box::new(reference),
+                circuit: Box::new(wrong_circuit),
             })
         );
     }
