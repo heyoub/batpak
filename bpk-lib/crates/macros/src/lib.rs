@@ -5,6 +5,7 @@
 //! `use batpak::EventPayload;` or `use batpak::EventSourced;`.
 
 mod event_payload;
+mod operation;
 
 use proc_macro::TokenStream;
 use quote::quote;
@@ -23,6 +24,20 @@ pub fn derive_event_payload(input: TokenStream) -> TokenStream {
     match event_payload::expand(&input) {
         Ok(ts) => ts.into(),
         Err(e) => e.to_compile_error().into(),
+    }
+}
+
+/// `#[operation(...)]` — generate a syncbat operation descriptor + optional
+/// registration fns. Re-exported as `syncbat::operation`; users never name this
+/// crate. (Moved here from the former `syncbat-macros` crate — the family has one
+/// proc-macro crate.)
+#[proc_macro_attribute]
+pub fn operation(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let args = parse_macro_input!(attr as operation::OperationArgs);
+    let function = parse_macro_input!(item as syn::ItemFn);
+    match operation::expand_operation(args, &function) {
+        Ok(tokens) => tokens.into(),
+        Err(error) => error.to_compile_error().into(),
     }
 }
 

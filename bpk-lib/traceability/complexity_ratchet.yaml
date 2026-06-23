@@ -91,7 +91,7 @@
   lines: 203
   nesting: 4
   cyclomatic: 38
-- key: "crates/syncbat-macros/src/lib.rs::parse_args"
+- key: "crates/macros/src/operation.rs::parse_args"
   lines: 46
   nesting: 3
   cyclomatic: 27

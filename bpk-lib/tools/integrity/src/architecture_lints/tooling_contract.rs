@@ -349,7 +349,6 @@ fn check_crate_layout_contract(repo_root: &Path) -> Result<()> {
         "crates/netbat/benches",
         "crates/macros/src",
         "crates/macros-support/src",
-        "crates/syncbat-macros/src",
         "crates/bench-support/src",
     ] {
         ensure(
@@ -379,17 +378,13 @@ fn check_crate_layout_contract(repo_root: &Path) -> Result<()> {
         }
     }
 
-    for (macro_crate, owner) in [
-        ("crates/macros", "crates/core/tests/ui"),
-        ("crates/syncbat-macros", "crates/syncbat/tests/ui"),
-    ] {
-        ensure(
-            repo_root.join(owner).is_dir(),
-            format!(
-                "`{macro_crate}` does not need its own integration-test folder, but `{owner}` must exist as its compile-fail owner"
-            ),
-        )?;
-    }
+    let (macro_crate, owner) = ("crates/macros", "crates/core/tests/ui");
+    ensure(
+        repo_root.join(owner).is_dir(),
+        format!(
+            "`{macro_crate}` does not need its own integration-test folder, but `{owner}` must exist as its compile-fail owner"
+        ),
+    )?;
 
     Ok(())
 }

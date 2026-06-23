@@ -117,7 +117,6 @@
     - crates/macros-support/Cargo.toml
     - crates/macros/Cargo.toml
     - crates/bench-support/Cargo.toml
-    - crates/syncbat-macros/Cargo.toml
     - crates/syncbat/Cargo.toml
     - crates/netbat/Cargo.toml
 - id: ART-PACKAGE-READMES
@@ -127,7 +126,6 @@
     - crates/macros-support/README.md
     - crates/macros/README.md
     - crates/bench-support/README.md
-    - crates/syncbat-macros/README.md
     - crates/syncbat/README.md
     - crates/netbat/README.md
 - id: ART-SYNCBAT-SOURCE

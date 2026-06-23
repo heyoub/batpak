@@ -112,7 +112,6 @@ pub(crate) fn production_rust_roots(repo_root: &Path) -> Vec<PathBuf> {
     [
         "crates/macros/src",
         "crates/macros-support/src",
-        "crates/syncbat-macros/src",
         "crates/syncbat/src",
         "crates/netbat/src",
         "crates/bvisor/src",

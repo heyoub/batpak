@@ -205,7 +205,6 @@ fn scan_family_cargo_versions(
         "bpk-lib/crates/macros-support",
         "bpk-lib/crates/macros",
         "bpk-lib/crates/netbat",
-        "bpk-lib/crates/syncbat-macros",
         "bpk-lib/crates/syncbat",
         "bpk-lib/tools/xtask",
     ];

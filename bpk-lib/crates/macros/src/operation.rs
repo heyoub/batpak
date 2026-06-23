@@ -1,28 +1,18 @@
-//! Procedural macros for syncbat operation kits.
+//! `#[operation]` attribute-macro implementation.
+//!
+//! Generates a syncbat operation descriptor and optional registration fns. The
+//! emitted code references `::syncbat::...` paths, but this module compile-depends
+//! only on syn/quote/proc-macro2 — it carries no syncbat edge. (Lives here, in the
+//! one family proc-macro crate, rather than a separate `syncbat-macros` crate;
+//! the macro layer is one crate.)
 
-use proc_macro::TokenStream;
 use quote::quote;
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
-use syn::{
-    parse_macro_input, Error, Expr, ExprLit, FnArg, Ident, ItemFn, Lit, MetaNameValue, Result,
-    Token,
-};
+use syn::{Error, Expr, ExprLit, FnArg, Ident, ItemFn, Lit, MetaNameValue, Result, Token};
 
-/// Generate a syncbat operation descriptor and optional registration function.
-#[proc_macro_attribute]
-pub fn operation(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let args = parse_macro_input!(attr as OperationArgs);
-    let function = parse_macro_input!(item as ItemFn);
-
-    match expand_operation(args, &function) {
-        Ok(tokens) => tokens.into(),
-        Err(error) => error.to_compile_error().into(),
-    }
-}
-
-struct OperationArgs {
+pub(crate) struct OperationArgs {
     pairs: Punctuated<MetaNameValue, Token![,]>,
 }
 
@@ -46,7 +36,10 @@ struct ParsedOperationArgs {
     title: Option<Lit>,
 }
 
-fn expand_operation(args: OperationArgs, function: &ItemFn) -> Result<proc_macro2::TokenStream> {
+pub(crate) fn expand_operation(
+    args: OperationArgs,
+    function: &ItemFn,
+) -> Result<proc_macro2::TokenStream> {
     validate_function(function)?;
     let parsed = parse_args(args)?;
 

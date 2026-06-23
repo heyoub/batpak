@@ -18,7 +18,9 @@ default = []
 [dependencies]
 batpak = { path = "../core", version = "0.8.3", default-features = false }
 serde = { version = "1", features = ["derive"] }
-syncbat-macros = { path = "../syncbat-macros", version = "0.8.3" }
+# The `#[operation]` attribute macro lives in the one family proc-macro crate
+# (`batpak-macros`); re-exported below as `syncbat::operation`.
+batpak-macros = { path = "../macros", version = "0.8.3" }
 # `tracing` provides structured spans + events around dispatch.
 # Subscribers come from the binary (a downstream host); syncbat just
 # emits. No runtime cost when no subscriber is installed.

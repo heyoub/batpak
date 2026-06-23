@@ -147,7 +147,6 @@ fn workspace_manifest_inputs(repo_root: &Path) -> BTreeSet<PathBuf> {
         "crates/bvisor",
         "crates/macros",
         "crates/macros-support",
-        "crates/syncbat-macros",
         "crates/bench-support",
         "tools/integrity",
         "tools/xtask",

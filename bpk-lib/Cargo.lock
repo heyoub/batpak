@@ -1445,22 +1445,13 @@ name = "syncbat"
 version = "0.8.3"
 dependencies = [
  "batpak",
+ "batpak-macros",
  "criterion",
  "proptest",
  "serde",
- "syncbat-macros",
  "tempfile",
  "tracing",
  "trybuild",
-]
-
-[[package]]
-name = "syncbat-macros"
-version = "0.8.3"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
 ]
 
 [[package]]

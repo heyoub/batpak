@@ -316,7 +316,7 @@ fn source_layer(repo_root: &Path, path: &Path) -> Option<SourceLayer> {
     if rel.starts_with("crates/core/src/") {
         return Some(SourceLayer::Core);
     }
-    if rel.starts_with("crates/syncbat/src/") || rel.starts_with("crates/syncbat-macros/src/") {
+    if rel.starts_with("crates/syncbat/src/") {
         return Some(SourceLayer::Syncbat);
     }
     if rel.starts_with("crates/netbat/src/") {
@@ -402,27 +402,12 @@ fn check_family_manifest_boundaries(repo_root: &Path) -> Result<()> {
         ManifestRule {
             label: "batpak core",
             rel: "crates/core/Cargo.toml",
-            forbidden_stack_deps: &[
-                "syncbat",
-                "syncbat-macros",
-                "downstream-kit",
-                "netbat",
-                "bvisor",
-                "extprofile",
-                "downstream-frontend",
-            ],
+            forbidden_stack_deps: &["syncbat", "downstream-kit", "netbat", "bvisor", "extprofile", "downstream-frontend"],
         },
         ManifestRule {
             label: "syncbat",
             rel: "crates/syncbat/Cargo.toml",
             forbidden_stack_deps: &["downstream-kit", "netbat", "bvisor", "extprofile", "downstream-frontend"],
-        },
-        ManifestRule {
-            label: "syncbat-macros",
-            rel: "crates/syncbat-macros/Cargo.toml",
-            forbidden_stack_deps: &[
-                "batpak", "syncbat", "downstream-kit", "netbat", "bvisor", "extprofile", "downstream-frontend",
-            ],
         },
         ManifestRule {
             label: "netbat",
@@ -435,14 +420,7 @@ fn check_family_manifest_boundaries(repo_root: &Path) -> Result<()> {
         ManifestRule {
             label: "bvisor (pure contract)",
             rel: "crates/bvisor/Cargo.toml",
-            forbidden_stack_deps: &[
-                "syncbat",
-                "syncbat-macros",
-                "netbat",
-                "downstream-kit",
-                "extprofile",
-                "downstream-frontend",
-            ],
+            forbidden_stack_deps: &["syncbat", "netbat", "downstream-kit", "extprofile", "downstream-frontend"],
         },
     ];
 
@@ -767,10 +745,6 @@ mod tests {
         );
         assert_eq!(
             source_layer(root, Path::new("/repo/crates/syncbat/src/lib.rs")),
-            Some(SourceLayer::Syncbat)
-        );
-        assert_eq!(
-            source_layer(root, Path::new("/repo/crates/syncbat-macros/src/lib.rs")),
             Some(SourceLayer::Syncbat)
         );
         assert_eq!(

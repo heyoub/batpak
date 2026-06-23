@@ -75,6 +75,7 @@ pub mod register_store;
 pub mod store_sink;
 
 pub use admission::{AdmissionDecision, AdmissionGuard};
+pub use batpak_macros::operation;
 pub use builder::CoreBuilder;
 pub use core::{Checkout, CheckoutFrame, CheckoutResult, Core, Ctx};
 pub use error::{BuildError, ReceiptSinkHandlerCause, RuntimeError};
@@ -96,7 +97,6 @@ pub use register_store::{
     StoreRegisterCatalog, StoreRegisterCatalogError, SYNCBAT_REGISTER_EVENT_KIND,
 };
 pub use store_sink::{StoreReceiptSink, StoreReceiptSinkError};
-pub use syncbat_macros::operation;
 
 /// Receipt-extension namespace owned by the syncbat runtime layer.
 pub const SYNCBAT_EXTENSION_NAMESPACE: &str = "syncbat";
