@@ -75,7 +75,7 @@ pub use contract::recovery::{
     RecoveryClassification, RecoveryProbe, RunView,
 };
 pub use contract::registry::{
-    BackendRegistry, BoundaryPlanner, BoundaryRun, BoundaryRunner, RunStep,
+    derive_minimums, BackendRegistry, BoundaryPlanner, BoundaryRun, BoundaryRunner, RunStep,
 };
 pub use contract::report::{
     BoundaryFinding, BoundaryReport, BoundaryReportBody, CaptureRefs, DeniedAttempt, ExitStatus,

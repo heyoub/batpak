@@ -3,7 +3,11 @@
 
 use crate::contract::admission::{planner_shadow_check, AdmissionOutcome, PlannerInputs};
 use crate::contract::backend::Backend;
-use crate::contract::capability::{Enforcement, EvidenceClaim, EvidenceSet, SupportVerdict};
+use crate::contract::budget::DerivedMinimums;
+use crate::contract::capability::{
+    Capability, Enforcement, EvidenceClaim, EvidenceSet, FdPolicy, FsAccess, NetPolicy,
+    SpawnPolicy, SupportVerdict,
+};
 use crate::contract::host_control::HostControl;
 use crate::contract::ids::{BackendId, BoundaryPlanHash};
 use crate::contract::plan::{
@@ -205,6 +209,78 @@ fn evidence_bits(set: &EvidenceSet) -> u16 {
     bits
 }
 
+/// Compute the cross-dimensional derived structural minimums `DerivedMinimum_d(S)`
+/// — the floor each budget dimension's requested limit must meet, from what the
+/// spec structurally implies (kernel plan §7). The values are SYMBOLIC structural
+/// floors (a nonzero `1`, the 3 standard descriptors), not precise resource sizing:
+/// they encode coherence, e.g. a launched workload needs ≥1 process and nonzero
+/// time/cpu/memory; requested network access cannot be 0 bytes.
+#[must_use]
+pub fn derive_minimums(spec: &BoundarySpec) -> DerivedMinimums {
+    let mut minimums = DerivedMinimums::default();
+
+    // A launched workload needs at least one process and nonzero time/cpu/memory,
+    // plus the three standard descriptors.
+    let launches = spec
+        .controls
+        .iter()
+        .any(|control| matches!(control, HostControl::LaunchWorkload));
+    if launches {
+        minimums.process_count = 1;
+        minimums.wall_micros = 1;
+        minimums.cpu_micros = 1;
+        minimums.resident_bytes = 1;
+        minimums.handle_count = 3;
+    }
+
+    for control in &spec.controls {
+        if let HostControl::CaptureStreams { streams } = control {
+            minimums.handle_count +=
+                u64::from(streams.stdout) + u64::from(streams.stderr) + u64::from(streams.stdin);
+        }
+        if matches!(
+            control,
+            HostControl::TempRoot { .. } | HostControl::CommitArtifact { .. }
+        ) {
+            minimums.storage_bytes = minimums.storage_bytes.max(1);
+        }
+        if let HostControl::ExposePath { access, .. } = control {
+            if matches!(access, FsAccess::Write | FsAccess::ReadWrite) {
+                minimums.storage_bytes = minimums.storage_bytes.max(1);
+            }
+        }
+    }
+
+    for capability in &spec.capabilities {
+        if matches!(
+            capability,
+            Capability::ChildSpawn {
+                policy: SpawnPolicy::Allow
+            }
+        ) {
+            // Child-spawn authority must fit inside the process-tree bound.
+            minimums.process_count = minimums.process_count.max(2);
+        }
+        if let Capability::InheritedFds {
+            policy: FdPolicy::Only(fds),
+        } = capability
+        {
+            minimums.handle_count += u64::try_from(fds.len()).unwrap_or(u64::MAX);
+        }
+        if matches!(
+            capability,
+            Capability::Network {
+                policy: NetPolicy::AllowList(_)
+            }
+        ) {
+            // Requested network access cannot be coherent with a 0-byte budget.
+            minimums.network_bytes = minimums.network_bytes.max(1);
+        }
+    }
+
+    minimums
+}
+
 /// The mechanism evidence string a backend records for an admitted requirement.
 ///
 /// In C0 only the honest no-confinement reference backend admits anything, so
@@ -397,11 +473,13 @@ impl<'r> BoundaryRunner<'r> {
 
 #[cfg(test)]
 mod planner_shadow_integration_tests {
-    use super::{BackendRegistry, BoundaryPlanner};
+    use super::{derive_minimums, BackendRegistry, BoundaryPlanner};
     use crate::contract::backend::Backend;
-    use crate::contract::budget::BudgetRequirements;
-    use crate::contract::capability::{Capability, Enforcement, NetPolicy, SupportVerdict};
-    use crate::contract::host_control::HostControl;
+    use crate::contract::budget::{BudgetRequirements, DerivedMinimums};
+    use crate::contract::capability::{
+        Capability, Enforcement, FdPolicy, NetPolicy, SpawnPolicy, SupportVerdict,
+    };
+    use crate::contract::host_control::{HostControl, PathView, StdStreams};
     use crate::contract::ids::BackendId;
     use crate::contract::plan::{
         BoundaryPlan, BoundaryRequirement, BoundarySpec, EvidenceRequirements, PlanError, Workload,
@@ -556,6 +634,69 @@ mod planner_shadow_integration_tests {
             probes.load(Ordering::SeqCst),
             1,
             "both admission paths must share one probe, not re-probe"
+        );
+    }
+
+    #[test]
+    fn derived_minimums_are_zero_without_a_launch() {
+        let mut spec = admissible_spec();
+        spec.controls = vec![];
+        assert_eq!(derive_minimums(&spec), DerivedMinimums::default());
+    }
+
+    #[test]
+    fn a_launch_implies_process_resource_and_std_handle_floors() {
+        let minimums = derive_minimums(&admissible_spec());
+        assert_eq!(minimums.process_count, 1);
+        assert_eq!(minimums.wall_micros, 1);
+        assert_eq!(minimums.cpu_micros, 1);
+        assert_eq!(minimums.resident_bytes, 1);
+        assert_eq!(minimums.handle_count, 3, "the three standard descriptors");
+        assert_eq!(minimums.storage_bytes, 0);
+        assert_eq!(minimums.network_bytes, 0);
+    }
+
+    #[test]
+    fn structural_floors_from_streams_fds_spawn_storage_and_network() {
+        let mut spec = admissible_spec();
+        spec.controls = vec![
+            HostControl::LaunchWorkload,
+            HostControl::CaptureStreams {
+                streams: StdStreams {
+                    stdout: true,
+                    stderr: true,
+                    stdin: false,
+                },
+            },
+            HostControl::TempRoot {
+                visibility: PathView::PrivateToBoundary,
+            },
+        ];
+        spec.capabilities = vec![
+            Capability::ChildSpawn {
+                policy: SpawnPolicy::Allow,
+            },
+            Capability::InheritedFds {
+                policy: FdPolicy::Only(vec![5, 6]),
+            },
+            Capability::Network {
+                policy: NetPolicy::AllowList(vec![]),
+            },
+        ];
+        let minimums = derive_minimums(&spec);
+        assert_eq!(
+            minimums.process_count, 2,
+            "child-spawn needs >= 2 processes"
+        );
+        assert_eq!(
+            minimums.handle_count,
+            3 + 2 + 2,
+            "std(3) + captured stdout/stderr(2) + inherited fds(2)"
+        );
+        assert_eq!(minimums.storage_bytes, 1, "a temp root needs > 0 storage");
+        assert_eq!(
+            minimums.network_bytes, 1,
+            "requested network access cannot be a 0-byte budget"
         );
     }
 }
