@@ -3,10 +3,7 @@ mod ast_grep_family_version;
 mod ci;
 mod context;
 mod disk_audit;
-mod export_ts_manifest;
 mod factory_ledger;
-mod host_dev;
-mod host_loop;
 mod loom;
 mod manifest;
 mod meta_gate;
@@ -30,9 +27,8 @@ mod version_pins;
 use crate::util::{cargo, cargo_target_dir};
 use crate::CleanGeneratedArgs;
 use crate::{
-    ArchitectureIrArgs, ChaosArgs, ContextArgs, ExportTsManifestArgs, FactoryLedgerArgs, FuzzArgs,
-    HostDevArgs, MutantsArgs, PackageLeakScanArgs, PlatformArgs, ReleaseArgs, ScaffoldArgs,
-    SetupArgs,
+    ArchitectureIrArgs, ChaosArgs, ContextArgs, FactoryLedgerArgs, FuzzArgs, MutantsArgs,
+    PackageLeakScanArgs, PlatformArgs, ReleaseArgs, ScaffoldArgs, SetupArgs,
 };
 use anyhow::Result;
 
@@ -136,18 +132,6 @@ pub(crate) fn staged_diff() -> Result<()> {
 
 pub(crate) fn release_manifest(args: crate::ReleaseManifestArgs) -> Result<()> {
     release_manifest::release_manifest(args)
-}
-
-pub(crate) fn export_ts_manifest(args: &ExportTsManifestArgs) -> Result<()> {
-    export_ts_manifest::export_ts_manifest(args)
-}
-
-pub(crate) fn host_dev(args: &HostDevArgs) -> Result<()> {
-    host_dev::host_dev(args)
-}
-
-pub(crate) fn host_loop() -> Result<()> {
-    host_loop::host_loop()
 }
 
 pub(crate) fn factory_ledger(args: FactoryLedgerArgs) -> Result<()> {

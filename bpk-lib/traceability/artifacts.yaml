@@ -195,26 +195,6 @@
     - crates/netbat/tests/golden/response_ok.hex
     - crates/netbat/tests/golden/response_ok_hi.hex
     - crates/netbat/tests/golden/response_err_malformed.hex
-- id: ART-REFBAT-SOURCE
-  kind: source
-  paths:
-    - crates/refbat/src/lib.rs
-    - crates/refbat/src/bank.rs
-    - crates/refbat/src/evidence.rs
-    - crates/refbat/src/region_wire.rs
-    - crates/refbat/src/handlers.rs
-    - crates/refbat/src/manifest.rs
-    - crates/refbat/src/main.rs
-- id: ART-REFBAT-TESTS
-  kind: tests
-  paths:
-    - crates/refbat/tests/tcp_e2e.rs
-    - crates/refbat/tests/handlers.rs
-    - crates/refbat/tests/evidence.rs
-- id: ART-REFBAT-MANIFEST-EXPORT
-  kind: tool
-  paths:
-    - tools/xtask/src/commands/export_ts_manifest.rs
 - id: ART-STORE-EVIDENCE-REPORTS
   kind: tests
   paths:

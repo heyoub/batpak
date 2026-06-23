@@ -1,11 +1,10 @@
 use super::{ensure, relative};
-use crate::source_cache::SourceCache;
 use anyhow::{Context, Result};
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub(super) fn check(repo_root: &Path, source_cache: &mut SourceCache) -> Result<()> {
+pub(super) fn check(repo_root: &Path) -> Result<()> {
     check_project_layout_contract(repo_root)?;
     check_no_mdbook_dependency(repo_root)?;
     check_testing_doc_renames_stay_current(repo_root)?;
@@ -17,7 +16,6 @@ pub(super) fn check(repo_root: &Path, source_cache: &mut SourceCache) -> Result<
     check_core_feature_cfg_contract(repo_root)?;
     check_xtask_surface_contract(repo_root)?;
     check_syncbat_is_explicitly_gated(repo_root)?;
-    check_refbat_manifest_wiring_contract(repo_root, source_cache)?;
     Ok(())
 }
 
@@ -349,9 +347,6 @@ fn check_crate_layout_contract(repo_root: &Path) -> Result<()> {
         "crates/netbat/src",
         "crates/netbat/tests",
         "crates/netbat/benches",
-        "crates/refbat/src",
-        "crates/refbat/tests",
-        "crates/refbat/benches",
         "crates/macros/src",
         "crates/macros-support/src",
         "crates/syncbat-macros/src",
@@ -833,143 +828,6 @@ fn check_syncbat_is_explicitly_gated(repo_root: &Path) -> Result<()> {
     }
 
     Ok(())
-}
-
-fn check_refbat_manifest_wiring_contract(
-    repo_root: &Path,
-    source_cache: &mut SourceCache,
-) -> Result<()> {
-    let refbat_src = repo_root.join("crates/refbat/src");
-    if !refbat_src.is_dir() {
-        return Ok(());
-    }
-
-    let main = std::sync::Arc::clone(&source_cache.rust_file("crates/refbat/src/main.rs")?.text);
-
-    for relative in source_cache.rust_files_under("crates/refbat/src")? {
-        let source = source_cache.rust_file(&relative)?;
-        let rel = display_path(&source.relative_path);
-        let module = source
-            .relative_path
-            .file_stem()
-            .and_then(|stem| stem.to_str())
-            .context("refbat source file has UTF-8 stem")?;
-        let content = source.text.as_ref();
-
-        for descriptor in refbat_operation_descriptors(content) {
-            let Some(prefix) = descriptor.strip_suffix("_DESCRIPTOR") else {
-                ensure(
-                    false,
-                    format!(
-                        "refbat operation descriptor `{descriptor}` in {rel} must use *_DESCRIPTOR naming"
-                    ),
-                )?;
-                continue;
-            };
-            let helper_name = format!("{}_descriptor", prefix.to_lowercase());
-            ensure(
-                count_occurrences(content, &format!("descriptor: {helper_name}")) == 1,
-                format!(
-                    "refbat operation descriptor `{descriptor}` in {rel} must have exactly one OperationDescriptorRegistration inventory::submit! referencing it"
-                ),
-            )?;
-            ensure(
-                content.contains(&format!("&{descriptor}_STORAGE")),
-                format!(
-                    "refbat operation descriptor `{descriptor}` in {rel} must be referenced by its manifest inventory helper"
-                ),
-            )?;
-            ensure(
-                main.contains(&format!("refbat::{descriptor}.clone()")),
-                format!(
-                    "refbat operation descriptor `{descriptor}` in {rel} is not registered by refbat main::build_core"
-                ),
-            )?;
-        }
-
-        for payload in refbat_event_payload_structs(content) {
-            let rust_type = format!("refbat::{module}::{payload}");
-            let manual_rust_type =
-                count_occurrences(content, &format!("rust_type: \"{rust_type}\""));
-            let manual_ts_name = count_occurrences(content, &format!("ts_name: \"{payload}\""));
-            let manual_kind_bits =
-                count_occurrences(content, &format!("kind_bits: {payload}::KIND.as_raw_u16()"));
-            let macro_type = count_occurrences(content, &format!("type = {payload},"));
-            let macro_ts_name = count_occurrences(content, &format!("ts_name = \"{payload}\""));
-
-            let manual = manual_rust_type == 1 && manual_ts_name == 1 && manual_kind_bits == 1;
-            let via_macro = macro_type == 1 && macro_ts_name == 1;
-
-            ensure(
-                manual || via_macro,
-                format!(
-                    "refbat EventPayload `{rust_type}` in {rel} must register exactly once via \
-                     `refbat_event_descriptor!` (type/ts_name) or EventDescriptorRegistration \
-                     (rust_type/ts_name/kind_bits)"
-                ),
-            )?;
-            ensure(
-                !(manual && via_macro),
-                format!(
-                    "refbat EventPayload `{rust_type}` in {rel} must not register via both \
-                     `refbat_event_descriptor!` and manual EventDescriptorRegistration"
-                ),
-            )?;
-        }
-    }
-
-    Ok(())
-}
-
-fn refbat_operation_descriptors(content: &str) -> Vec<String> {
-    content
-        .lines()
-        .filter_map(|line| {
-            let trimmed = line.trim();
-            let after_pub_const = trimmed.strip_prefix("pub const ")?;
-            let (name, rest) = after_pub_const.split_once(':')?;
-            rest.contains("OperationDescriptor")
-                .then(|| name.trim().to_owned())
-        })
-        .collect()
-}
-
-fn refbat_event_payload_structs(content: &str) -> Vec<String> {
-    let mut structs = Vec::new();
-    let mut pending_event_payload_derive = false;
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("#[derive(") && trimmed.contains("EventPayload") {
-            pending_event_payload_derive = true;
-            continue;
-        }
-        if !pending_event_payload_derive {
-            continue;
-        }
-        if let Some(after_struct) = trimmed.strip_prefix("pub struct ") {
-            let name = after_struct
-                .split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_'))
-                .next()
-                .unwrap_or_default();
-            if !name.is_empty() {
-                structs.push(name.to_owned());
-            }
-            pending_event_payload_derive = false;
-        } else if trimmed.starts_with("#[") {
-            continue;
-        } else {
-            pending_event_payload_derive = false;
-        }
-    }
-    structs
-}
-
-fn count_occurrences(haystack: &str, needle: &str) -> usize {
-    haystack.match_indices(needle).count()
-}
-
-fn display_path(path: &Path) -> String {
-    path.to_string_lossy().replace('\\', "/")
 }
 
 fn files_with_extension(root: &Path, extension: &str) -> Vec<PathBuf> {

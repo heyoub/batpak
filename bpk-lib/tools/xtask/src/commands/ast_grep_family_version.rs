@@ -131,10 +131,6 @@ rule:
         "bpk-ts/packages/generated/src/manifest.ts",
         "--globs",
         "bpk-lib/traceability/public_api/*_semver_checklist.yaml",
-        "--globs",
-        "bpk-lib/tools/xtask/src/commands/export_ts_manifest.rs",
-        "--globs",
-        "bpk-lib/crates/refbat/src/manifest.rs",
     ]);
     run(command).with_context(|| {
         format!(
@@ -206,7 +202,6 @@ fn scan_family_cargo_versions(
     let family_roots = [
         "bpk-lib/crates/bench-support",
         "bpk-lib/crates/core",
-        "bpk-lib/crates/refbat",
         "bpk-lib/crates/macros-support",
         "bpk-lib/crates/macros",
         "bpk-lib/crates/netbat",

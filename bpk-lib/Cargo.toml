@@ -10,7 +10,6 @@ members = [
     "crates/syncbat-macros",
     "crates/syncbat",
     "crates/netbat",
-    "crates/refbat",
     "crates/bvisor",
 ]
 # The cargo-fuzz crate (`fuzz/`) is its own workspace: it pulls in nightly-only

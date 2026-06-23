@@ -444,13 +444,6 @@ fn check_family_manifest_boundaries(repo_root: &Path) -> Result<()> {
                 "downstream-frontend",
             ],
         },
-        // refbat is the reference host + conformance witness — it must never
-        // become a bvisor product host (kosher rule #3).
-        ManifestRule {
-            label: "refbat",
-            rel: "crates/refbat/Cargo.toml",
-            forbidden_stack_deps: &["bvisor"],
-        },
     ];
 
     for rule in manifests {

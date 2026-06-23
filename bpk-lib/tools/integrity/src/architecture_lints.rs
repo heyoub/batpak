@@ -18,7 +18,7 @@ pub fn check(
     repo_hygiene::check(repo_root, tracked_files)?;
     platform_boundary::check(repo_root, tracked_files, source_cache)?;
     syncbat_boundary::check(repo_root, tracked_files, source_cache)?;
-    tooling_contract::check(repo_root, source_cache)?;
+    tooling_contract::check(repo_root)?;
     docs_contract::check(repo_root)?;
     source_citations::check(repo_root)?;
     public_api_truth::check(repo_root, source_cache)?;

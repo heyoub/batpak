@@ -61,8 +61,7 @@ entries:
       - receipt extension coverage
       - evidence reports
     proof_commands:
-      - just host-dev
-      - cargo test -p refbat
+      - cargo test -p batpak
     owning_layer: BatPAK substrate proof / downstream trust policy
     explicit_non_goals:
       - granted authority
@@ -124,9 +123,8 @@ entries:
       - Store::query_entries_after
       - Store::walk_ancestors
     proof_commands:
-      - just host-dev
-      - just host-loop
-    owning_layer: refbat NETBAT/1 reference host
+      - cargo test -p batpak
+    owning_layer: BatPAK substrate traversal (event.query/get/walk)
     explicit_non_goals:
       - event.cursor
       - event.stream

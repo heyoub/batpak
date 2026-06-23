@@ -360,8 +360,7 @@ fn check_bidirectional_substrate_lane_terms(
             .extension()
             .and_then(|ext| ext.to_str())
             .unwrap_or_default();
-        let is_substrate_wire_surface = rel.starts_with("crates/refbat/")
-            || rel.starts_with("crates/netbat/")
+        let is_substrate_wire_surface = rel.starts_with("crates/netbat/")
             || rel.starts_with("crates/syncbat/")
             || rel.starts_with("bpk-ts/");
         if is_substrate_wire_surface && matches!(ext, "rs" | "ts" | "json" | "md") {
