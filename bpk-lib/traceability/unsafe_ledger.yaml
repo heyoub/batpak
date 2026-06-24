@@ -60,6 +60,74 @@ entries:
       a FAILED spawn, so the workload never runs unconfined (fail closed).
     requirement: Filesystem
 
+  # ── STEP 7a: the HOST-SIDE launcher harness basement (backend→launcher rewire).
+  # The SAFE harness `src/backend/linux/launch.rs` seals a LinuxLaunchPlanV1 into a
+  # read-only memfd, spawns the confinement launcher bin with controlled inherited
+  # fds, and collects its transcript/outcome. EXACTLY these four backend-basement
+  # unsafe surfaces back it; `launch.rs` itself is SAFE. Step 7b wires the harness
+  # into execute(); this step only builds it + re-proves G1/G3 through it.
+  - file: crates/bvisor/src/backend/linux/sys.rs
+    anchor: linux-backend-memfd-seal
+    syscall: memfd_create(name, MFD_CLOEXEC | MFD_ALLOW_SEALING) + OwnedFd::from_raw_fd
+    safety_invariant: >-
+      Host-side (single-threaded, before any spawn). memfd_create is invoked with a
+      valid NUL-terminated name pointer (a `c"..."` literal) and the documented
+      MFD_CLOEXEC | MFD_ALLOW_SEALING flags; it creates a fresh anonymous fd (returned,
+      or -1/errno) and reads no caller memory beyond the name string, dereferencing
+      nothing else. On success the fd is immediately adopted ONCE as an OwnedFd (single
+      owner, closed on drop, no aliasing, no double-close). This produces the tamper-proof
+      plan transport the launcher reads; the bytes are written + sealed by the
+      linux-backend-memfd-add-seals block before the fd is handed out.
+    requirement: InheritedFds
+  - file: crates/bvisor/src/backend/linux/sys.rs
+    anchor: linux-backend-memfd-add-seals
+    syscall: fcntl(memfd, F_ADD_SEALS, F_SEAL_SEAL|F_SEAL_SHRINK|F_SEAL_GROW|F_SEAL_WRITE)
+    safety_invariant: >-
+      Host-side single fcntl on the OWNED memfd from linux-backend-memfd-seal. It only
+      sets seal bits on this one fd and dereferences no pointer; -1/errno on failure is
+      surfaced. F_ADD_SEALS cannot succeed while any writable handle other than this
+      owned one exists — the transient write-handle clone used to write the plan bytes
+      was already dropped, so the seal is total. After it the plan bytes are immutable
+      (write/grow/shrink-proof, no further seals), so the launcher's envelope digest
+      check runs over content that can no longer be tampered with. The fd is passed as a
+      plain owned handle (via as_raw_fd) with no aliasing.
+    requirement: InheritedFds
+  - file: crates/bvisor/src/backend/linux/sys.rs
+    anchor: linux-backend-launcher-relocate
+    syscall: fcntl(fd, F_DUPFD_CLOEXEC, FD_RELOCATE_BASE) + OwnedFd::from_raw_fd
+    safety_invariant: >-
+      Host-side (single-threaded, pre-spawn). F_DUPFD_CLOEXEC duplicates the borrowed
+      source fd to a fresh, exclusively-owned fd >= FD_RELOCATE_BASE (or -1/errno); on
+      success it is adopted ONCE as an OwnedFd (no aliasing, no double-close) and the low
+      original is dropped (closed) so only the high copy survives. Relocating every
+      dup-FROM source ABOVE every fixed dup-TO target guarantees the later pre_exec dup2
+      sequence can never clobber a not-yet-consumed source mid-sequence. No pointer is
+      dereferenced.
+    requirement: InheritedFds
+  - file: crates/bvisor/src/backend/linux/sys.rs
+    anchor: linux-backend-launcher-pre-exec
+    syscall: Command::pre_exec — post-fork child dup2(src,target) + fcntl(target,F_GETFD/F_SETFD) of a PRE-BUILT fd map (via apply_fd_placements)
+    safety_invariant: >-
+      The ONE unsafe block of the spawn flow. It registers the pre_exec closure, which runs
+      in the forked child between fork and exec in a (formerly) multithreaded address space
+      and so must be async-signal-safe, and (lexically inside this unsafe block) the closure
+      calls the unsafe fn apply_fd_placements. EVERY allocation — the relocated source fds,
+      the placement Vec, the env — happens BEFORE the fork in the parent; the closure
+      captures the owned placement Vec by move and the child branch only INDEXES it
+      (copy-on-write read — no allocator). apply_fd_placements issues ONLY async-signal-safe
+      syscalls: dup2 (place each relocated source onto its fixed target fd number) and
+      fcntl(F_GETFD/F_SETFD) (toggle the target's CLOEXEC bit — SET on the error-pipe write
+      end so a successful workload fexecve auto-closes it, CLEARED elsewhere so the launcher
+      inherits the fd). It performs NO heap allocation, takes NO lock, and on a dup2 failure
+      returns the OS errno so Command::spawn fails closed (the launcher never runs with a
+      half-wired fd table). Every source was relocated HIGH first
+      (linux-backend-launcher-relocate), so no fixed target can clobber a not-yet-consumed
+      source. Each dup2 duplicates into the CHILD's own fd table — no cross-process aliasing;
+      the parent-owned source fds stay valid until after spawn returns (dropped by the caller
+      post-spawn). Command::spawn is permitted here (the no-.spawn() single-thread gate scopes
+      to the launcher crate, not this backend basement); the launcher itself still uses clone3.
+    requirement: ChildSpawn
+
   # ── Single-threaded Linux confinement LAUNCHER basement (kernel plan §10.8).
   # The coordinator (main.rs, SAFE) validates + decides; the child (clone3,
   # async-signal-safe window) scrubs ambient authority, applies the parent-built

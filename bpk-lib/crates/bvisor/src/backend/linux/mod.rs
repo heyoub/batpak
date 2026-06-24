@@ -162,6 +162,14 @@ pub use backend_impl::LinuxBackend;
 #[cfg(all(feature = "backend-linux", target_os = "linux"))]
 pub(crate) mod sys;
 
+// The HOST-SIDE launcher harness (kernel plan §10.8, step 7a): a REUSABLE, SAFE
+// orchestration that seals a launcher plan into a memfd, spawns the confinement
+// launcher with controlled inherited fds, and collects its transcript/outcome. Step
+// 7b wires this into `execute()`. SAFE except the two ledgered `sys` basement calls
+// (memfd seal + spawn pre_exec). Compiled only on Linux with the backend feature.
+#[cfg(all(feature = "backend-linux", target_os = "linux"))]
+pub mod launch;
+
 #[cfg(test)]
 mod tests {
     use super::support_matrix;
