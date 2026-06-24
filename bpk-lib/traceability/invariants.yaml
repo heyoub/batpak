@@ -1,5 +1,9 @@
 - id: INV-NO-TOKIO-PROD
   statement: Production dependencies remain runtime-agnostic; Tokio stays out of non-dev dependencies.
+  # weak-tier (GAP): enforced live by crates/core/build.rs::check_no_tokio_in_deps
+  # (string-scans Cargo.toml at build time), but that check is not split into a pure
+  # testable fn and no red fixture plants tokio in [dependencies] and asserts Err.
+  # Not cited rather than fabricate; candidate GateNegativePath.
   artifacts:
     - ART-CARGO
     - ART-BUILD-RS
@@ -12,6 +16,7 @@
     - ART-SCHEMA-EVOLUTION-DOC
 - id: INV-IDEMPOTENCY-DURABLE-WINDOW
   statement: A keyed append is deduplicated as a true no-op via a durable sidecar (index.idemp - magic FBATID, versioned, crc32fast CRC, atomic write) that survives retention compaction, cold-start, and snapshot independent of event eviction and is restored unconditionally (never rebuilt from segment scan); growth is bounded by a window-priority hybrid where the window is inviolable (a key whose recorded global sequence is within keep_sequences of the frontier is never evicted by the soft max_keys cap, which may only trim out-of-window keys), so a retry of a within-window key is always a no-op regardless of load while a corrupt or missing sidecar degrades to empty (logged, never crashing) and a future on-disk version is a hard error; IdempotencyKey::for_operation derives operation identity from a length-delimited blake3 over domain plus components and is not a payload content hash.
+  witness_test: crates/core/tests/idempotency_durable_store.rs::keyed_retry_is_noop_after_close_and_reopen
   artifacts:
     - ART-IDEMPOTENCY-DURABLE-SOURCE
     - ART-IDEMPOTENCY-DURABLE-TESTS
@@ -67,12 +72,18 @@
     - ART-DX-DOCS
 - id: INV-EXTERNAL-REPLAY-NO-SIDECAR-TRUTH
   statement: External replay may use caches or indexes, but authoritative reconstruction must be possible through event.query plus event.get plus envelope decoding above batpak; sidecar indexes are projections, not source truth.
+  witness_test: crates/core/tests/replay_consistency.rs::authoritative_reconstruction_survives_sidecar_deletion
   artifacts:
     - ART-STORE-QUERY-TRAVERSAL
     - ART-STORE-QUERY-TRAVERSAL-TESTS
     - ART-DX-DOCS
 - id: INV-STORE-SYNC-ONLY
   statement: The Store public API remains synchronous.
+  # weak-tier (honest-C): the witness is the compiler. "No Store method returns a
+  # Future" is enforced by the absence of `async fn`/`-> impl Future` in the public
+  # surface; there is no non-tautological runtime/`assert_impl_all!` check (a Send +
+  # Sync impl-bound on Store does not constrain method return types), so promoting
+  # this would fake a witness. Left intentionally witnessless. See ADR-SYNC.
   artifacts:
     - ART-STORE-MOD
     - ART-STORE-CONFIG
@@ -134,6 +145,11 @@
     - ART-TYPESTATE-TESTS
 - id: INV-DANGEROUS-TEST-HOOKS-NONDEFAULT
   statement: Dangerous test hooks are not exposed in default production builds.
+  # weak-tier (honest-C): the witness is the compiler. The hooks live behind
+  # #[cfg(feature = "dangerous-test-hooks")], so their absence in a default build is
+  # a compile-time guarantee, not a runtime property. No existing gate red-fixture
+  # asserts this (the cited ART-STORE-ADVANCED file is a doc stub). Left witnessless
+  # rather than ship a vacuous "feature off => symbol absent" test.
   artifacts:
     - ART-STORE-DANGEROUS-TEST-HOOKS
     - ART-STORE-ADVANCED
@@ -152,6 +168,12 @@
   witness_test: crates/core/tests/projection_cache.rs::native_delete_prefix_is_idempotent
 - id: INV-TRACEABILITY-COMPLETE
   statement: Each important requirement, invariant, and flow links to concrete proving artifacts, and every artifact participates in that graph.
+  # Cited witness covers the first (coverage) clause: a registered example with no
+  # concept_catalog row is a red `expect_err`. PARTIAL: the second clause ("every
+  # artifact participates in the graph") is enforced inline in traceability.rs::run
+  # (the "artifact {} is orphaned" check) but has NO dedicated red fixture that
+  # plants an orphan artifact and asserts rejection — candidate GateNegativePath.
+  witness_test: tools/integrity/src/traceability.rs::rejects_uncovered_registered_example
   artifacts:
     - ART-TRACEABILITY
     - ART-TRACEABILITY-CHECK
@@ -172,6 +194,9 @@
     - ART-STORE-MOD
 - id: INV-CANONICAL-CONTAINER-CI
   statement: The canonical Linux CI path executes inside the checked-in devcontainer image rather than a separately hand-installed host environment.
+  # weak-tier (honest-C): the witness is CI infrastructure (the checked-in
+  # devcontainer + workflow), not runnable code. There is no in-repo test that can
+  # observe "CI ran inside the container". Left witnessless by design.
   artifacts:
     - ART-DEVCONTAINER
     - ART-DEVCONTAINER-RUNNER
@@ -494,43 +519,66 @@
   witness_test: crates/core/tests/durable_frontier_waits_append_gate.rs::append_with_durable_gate_blocks_until_synced
 - id: INV-CHAOS-LINUX-ONLY
   statement: The chaos harness uses Linux device-mapper primitives and is unconditionally cfg'd off on non-Linux targets; durability proofs derived from this harness apply to Linux kernels only.
+  # weak-tier (honest-C): the witness is the compiler. The harness is #[cfg(...)]'d
+  # off on non-Linux, so a runtime test can only ever run on Linux and could never
+  # observe the off-target case — any "witness" would be tautological. Left
+  # witnessless by design.
   artifacts:
     - ART-CHAOS-HARNESS
     - ART-CHAOS-DM-FLAKEY
     - ART-ADR-CHAOS-HARNESS
 - id: INV-ALLOW-IS-DESIGN
   statement: "The repo contains ZERO `#[allow(...)]`/`#![allow(...)]`/`#[expect(...)]` attributes. Clippy and rustc findings are FIXED, never silenced; structural-check fails on any allow/expect attribute in tracked source. The ONLY permitted occurrences are the raw-string test fixtures inside the allow-silencer detector itself (crates/core/build_support/shared_checks.rs), which are string data, not attributes."
+  witness_test: tools/integrity/src/structural_tests.rs::allow_ban_rejects_even_a_justified_allow
   artifacts:
     - ART-DOCTOR
     - ART-STRUCTURAL-CHECK
     - ART-BUILD-RS
 - id: INV-EXAMPLES-OBSERVABLE-OUTPUT
   statement: "Examples emit output via `writeln!(std::io::stdout().lock(), ..)` (the explicit Write API), not the println!/print! macros; no print allow is used."
+  # weak-tier (GAP): no structural gate or red fixture enforces "examples use
+  # writeln!(stdout().lock()) not println!". cli_out.rs only USES the pattern; there
+  # is no falsifying test. Not cited rather than fabricate; candidate GateNegativePath.
   artifacts:
     - ART-EXAMPLES
 - id: INV-MACRO-BOUNDED-CAST
   statement: "Integer narrowing inside batpak-macros (under crates/macros) is preceded by an explicit u8::MAX / u16::MAX comparison that returns a syn error before the conversion, and the conversion itself uses a total u8::try_from / u16::try_from(..).expect(..) (expect is permitted in the proc-macro crate) rather than an `as` cast — so there is no unchecked narrowing cast and no clippy::cast_possible_truncation suppression."
+  witness_test: crates/core/tests/derive_eventpayload_errors.rs::compile_fail_derive_errors
   artifacts:
     - ART-MACROS
 - id: INV-GENERATED-WITNESS-PIN
-  statement: "Derive-generated type-check witnesses (the per-payload __batpak_kind_collision_check_<ident> test fn) exist to make a kind collision fail compilation and have no runtime role. The generated identifier is emitted in snake_case (the user's ident is lowered via to_snake_case before being embedded), so the item is a valid snake_case fn name and carries no non_snake_case / lint suppression on generated code."
+  statement: "Derive-generated kind-collision witnesses (the per-payload __batpak_kind_collision_check_<ident> #[test] fn, plus the unconditional inventory registration) detect when two EventPayload types share a (category, type_id) pair: a same-binary collision is a per-payload generated #[test] panic, and a cross-crate collision surfaces through validate_event_payload_registry. The generated identifier is emitted in snake_case (the user's ident is lowered via to_snake_case before being embedded), so the item is a valid snake_case fn name and carries no non_snake_case / lint suppression on generated code."
+  witness_test: crates/core/fixtures/kind-collision-composer/src/lib.rs::dependency_payload_collision_is_visible_to_composer
   artifacts:
     - ART-MACROS
 - id: INV-LITERAL-REGEX-UNWRAP-SAFE
   statement: "unwrap / expect on regex::Regex::new with a literal string pattern inside tool code is safe because the pattern is a compile-time constant string with known-valid regex syntax; the call cannot fire in any reachable execution of the tool."
+  # weak-tier (honest-C): this is a justification of an un-firing code path, not a
+  # falsifiable property. There is nothing to witness at runtime (the unwrap can
+  # never fire), so any "test" would be vacuous. Left witnessless by design.
   artifacts:
     - ART-DOCTOR
 - id: INV-TEST-PANIC-AS-ASSERTION
   statement: "Test bodies signal failure via assert!/assert!(matches!(..))/expect/expect_err/`#[test] -> Result`. panic! is not used as an assertion (use assert!), unwrap is not used (use expect). No file-level or item-level allow is permitted in tests."
+  # weak-tier (GAP): no structural lint rejects bare panic!/unwrap in test bodies;
+  # the id appears only as // justifies: header comments. No red fixture plants a
+  # panic!/unwrap test and asserts rejection. Not cited rather than fabricate;
+  # candidate GateNegativePath.
   artifacts:
     - ART-TESTS
     - ART-FRONTIER-CHAOS-TESTS
 - id: INV-BUILD-FAIL-FAST
   statement: "crates/core/build.rs halts the build on invariant violations by returning Err from `fn main() -> Result<(), String>` with a cargo-parseable explanation (the crate-private `fail` helper builds the message). No allow attribute is used."
+  # weak-tier (honest-C / GAP): no existing gate red-fixture drives build.rs's
+  # `fn main() -> Result<(), String>` to its Err path, so there is nothing to cite.
+  # The `fail` helper is crate-private to build.rs and untestable from a test crate
+  # without refactoring it into a testable shared_checks fn + a red fixture. Left
+  # witnessless rather than fabricate; flagged as a candidate GateNegativePath.
   artifacts:
     - ART-BUILD-RS
 - id: INV-TYPESTATE-OPEN-HAS-WRITER
   statement: "Store<Open> is only constructible by Store::open after the writer thread is initialized; Store::<Open>::writer_ref() is the single crate-private access point for the writer handle, and its expect is a typestate invariant assertion that cannot fail in reachable code."
+  witness_test: crates/core/tests/typestate_safety.rs::compile_fail_tests
   artifacts:
     - ART-STORE-MOD
     - ART-STORE-LIFECYCLE
@@ -541,6 +589,11 @@
   witness_test: crates/core/tests/wire_format.rs::coordinate_msgpack_round_trip
 - id: INV-PERFORMANCE-GATES-ENFORCED
   statement: Hardware-dependent performance gates remain explicit ignored tests and are runnable only through the repo-owned perf-gates command surface.
+  # weak-tier (GAP): perf_gates_throughput_latency.rs::multi_gate_collects_all_denials
+  # genuinely witnesses that gates DENY on over-budget input, but the INV's stated
+  # property is that gates stay #[ignore]'d and are run only via the repo-owned
+  # command surface — which no test witnesses. Not cited (the available red fixture
+  # witnesses a different, narrower property); candidate GateNegativePath.
   artifacts:
     - ART-PERF-GATES
     - ART-XTASK
@@ -596,6 +649,7 @@
     - ART-INDEX-FILTER-COMPOSITION-TESTS
 - id: INV-NO-DEAD-CODE-SILENCERS
   statement: "dead_code lint suppressions are banned in tracked Rust source. The AST walker in shared_checks::collect_dead_code_silencer_sites rejects #[allow(dead_code)], #[expect(dead_code)], crate-inner forms, lint-list forms containing dead_code, #[allow(unused)] and #[expect(unused)] (the `unused` group subsumes dead_code), and cfg_attr wrappers around any of those, including multi-line wrappers. The only escape hatch is an exact-site entry in traceability/dead_code_silencer_allowlist.yaml with non-empty reason + adr fields that resolve to a real ADR. The honest responses to a dead_code warning are #[cfg(test)] for test-only code, deletion for truly unused code, or restructuring (workspace crate, narrower module, finer-grained #[path] include) so the compilation unit matches actual ownership. See ADR-0012."
+  witness_test: tools/integrity/src/structural_tests.rs::zero_allow_ban_rejects_every_allow
   artifacts:
     - ART-BUILD-RS
     - ART-STRUCTURAL-CHECK
@@ -630,6 +684,9 @@
   statement: >-
     Cross-data_dir consistency is outside Store invariants; multi-journal systems compose by
     product-owned routing, observations, receipts, and local policy.
+  # weak-tier (honest-C / GAP): a scope-EXCLUSION statement ("X is outside Store
+  # invariants") has no falsifiable runtime property to witness — there is nothing
+  # for a test to exercise. Doc-backed only; left witnessless by design.
   artifacts:
     - ART-STORE-MOD
     - ART-DX-DOCS

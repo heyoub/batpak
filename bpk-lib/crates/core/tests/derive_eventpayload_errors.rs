@@ -21,6 +21,7 @@ fn compile_fail_derive_errors() {
     t.compile_fail("tests/ui/ep_duplicate_key.rs");
     t.compile_fail("tests/ui/ep_missing_key.rs");
     t.compile_fail("tests/ui/ep_invalid_category.rs");
+    t.compile_fail("tests/ui/ep_category_overflows_u8.rs");
     t.compile_fail("tests/ui/ep_invalid_type_id.rs");
     t.compile_fail("tests/ui/ep_multiple_attrs.rs");
 }

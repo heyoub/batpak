@@ -214,6 +214,115 @@ fn cold_start_replay_matches_live_projection() {
     );
 }
 
+/// INV-EXTERNAL-REPLAY-NO-SIDECAR-TRUTH: the durable sidecars (mmap index,
+/// checkpoint, idempotency index, visibility ranges) are PROJECTIONS — every
+/// bit of authoritative truth is reconstructible from the segment event log
+/// alone via `query` + `get` + payload decode. We prove this by capturing the
+/// live snapshot (built purely through that authoritative path), physically
+/// DELETING every sidecar artifact on disk, then reopening and reconstructing
+/// the same snapshot. If a sidecar held truth that the event log did not, the
+/// post-deletion reconstruction would diverge and this test would fail.
+#[test]
+fn authoritative_reconstruction_survives_sidecar_deletion() {
+    // Sidecars enabled so they are actually written to disk, then deleted.
+    let dir = TempDir::new().expect("temp dir");
+    let store = Store::open(seeded_config(&dir, true, true)).expect("open seeded store");
+
+    // A spread of coordinates/kinds across multiple entities and scopes, so the
+    // authoritative snapshot has non-trivial visible content for the mmap and
+    // checkpoint sidecars to (redundantly) record. Plain committed events only:
+    // fence-driven visibility hiding is a separate projection concern with its
+    // own dedicated cold-start tests, and conflating it here would muddy what
+    // this witness asserts (committed-event truth lives in the segment log).
+    populate_specs(
+        &store,
+        &[
+            AppendSpec {
+                entity_idx: 0,
+                scope_idx: 0,
+                category: 0x1,
+                type_id: 1,
+                payload: 7,
+            },
+            AppendSpec {
+                entity_idx: 1,
+                scope_idx: 2,
+                category: 0xF,
+                type_id: 3,
+                payload: -11,
+            },
+            AppendSpec {
+                entity_idx: 3,
+                scope_idx: 1,
+                category: 0x2,
+                type_id: 5,
+                payload: 42,
+            },
+        ],
+    );
+    store.sync().expect("sync");
+
+    // Authoritative truth, built purely from event.query + event.get + decode.
+    let live_snapshot = capture_snapshot(&store);
+    assert!(
+        live_snapshot.event_count >= 3,
+        "PROPERTY: the authoritative snapshot must contain the appended visible events; \
+         got {} visible.",
+        live_snapshot.event_count
+    );
+    store.close().expect("close");
+
+    // Physically remove every sidecar projection from the data directory. After
+    // this, ONLY the segment event log (and its directory structure) remains as
+    // a source of truth.
+    let data_dir = dir.path();
+    let sidecars = [
+        "index.fbati",           // mmap index snapshot
+        "index.ckpt",            // checkpoint snapshot
+        "index.idemp",           // durable idempotency index
+        "visibility_ranges.fbv", // hidden-range projection
+    ];
+    let mut deleted = 0usize;
+    for name in sidecars {
+        let path = data_dir.join(name);
+        if path.exists() {
+            std::fs::remove_file(&path).expect("remove sidecar artifact");
+            deleted += 1;
+        }
+    }
+    assert!(
+        deleted >= 2,
+        "PROPERTY: the run must have produced and then deleted real sidecar \
+         artifacts (mmap/checkpoint/visibility); otherwise the no-sidecar-truth \
+         claim is vacuous. deleted={deleted}."
+    );
+    for name in sidecars {
+        assert!(
+            !data_dir.join(name).exists(),
+            "PROPERTY: sidecar {name} must be gone before authoritative replay."
+        );
+    }
+
+    // Reopen with sidecars DISABLED so the store cannot recreate or consult any
+    // sidecar: reconstruction is forced through the segment-scan rebuild, i.e.
+    // the authoritative event.query + event.get + decode path.
+    let reopened = Store::<ReadOnly>::open_read_only(
+        StoreConfig::new(data_dir)
+            .with_enable_checkpoint(false)
+            .with_enable_mmap_index(false),
+    )
+    .expect("reopen read-only with sidecars disabled");
+    let reconstructed = capture_snapshot(&reopened);
+
+    assert_eq!(
+        reconstructed, live_snapshot,
+        "INV-EXTERNAL-REPLAY-NO-SIDECAR-TRUTH: authoritative reconstruction from \
+         the event log alone (after every sidecar was deleted) must equal the \
+         live snapshot exactly. A divergence here means a sidecar carried truth \
+         that event.query + event.get + decode could not reproduce."
+    );
+}
+
 #[test]
 fn snapshot_checkpoint_matches_source_projection() {
     let (_dir, store) = seeded_store();
