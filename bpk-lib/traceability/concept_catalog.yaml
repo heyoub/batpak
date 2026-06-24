@@ -1,0 +1,115 @@
+# concept_catalog.yaml — one CANONICAL runnable example per concept (#68).
+#
+# The example corpus teaches a set of concepts. This catalog is the single
+# authority mapping each concept to its ONE canonical runnable example, so the
+# `concept-canonical` gate (tools/integrity/src/traceability.rs) can enforce:
+#   1. every canonical_example path is a real file AND listed in ART-EXAMPLES,
+#   2. no two rows claim the same concept_id (one canonical per concept),
+#   3. no two rows name the same canonical_example (an example is canonical for
+#      at most one concept),
+#   4. every runnable example in ART-EXAMPLES appears as exactly one row's
+#      canonical_example (completeness — a new example cannot escape the catalog).
+#
+# This makes duplication mechanically visible and BLOCKS new duplication: a
+# second example added for an existing concept fails rule 1/2 until it is either
+# given a distinct concept or folded into the canonical one. Consolidation of the
+# historically-overlapping families (typed-append, durability) is tracked here;
+# each surviving example carries a concept that names its DISTINCT teaching angle.
+#
+# Per row:
+#   concept_id:        stable concept slug
+#   canonical_example: repo-relative path to the one runnable example
+#   summary:           the concept's distinct teaching point (the example's "Teaches:")
+
+concepts:
+  # --- Typed append + the store path. ---
+  - concept_id: typed-append-basic
+    canonical_example: crates/examples/examples/quickstart.rs
+    summary: basic typed append + retrieval (the marketing/release-smoke entry point)
+  - concept_id: store-path-full
+    canonical_example: crates/examples/examples/eight_jobs.rs
+    summary: the canonical full 0.8 BatPAK store path end-to-end
+  - concept_id: typed-payload-kind-allocation
+    canonical_example: crates/examples/examples/cross_crate_payloads.rs
+    summary: validating typed payload kind allocation across an application crate boundary
+  - concept_id: batch-append-atomic
+    canonical_example: crates/examples/examples/batch_append.rs
+    summary: atomic batch commit with causation refs
+  - concept_id: event-sourced-derive
+    canonical_example: crates/examples/examples/event_sourced_counter.rs
+    summary: "#[derive(EventSourced)] with JsonValueInput replay lane"
+
+  # --- Durability / gates / receipts / visibility (the historically-overlapping family). ---
+  - concept_id: durability-gate-append
+    canonical_example: crates/examples/examples/append_with_gate.rs
+    summary: append-time durability gates
+  - concept_id: caller-defined-gate-pipeline
+    canonical_example: crates/examples/examples/caller_defined_gates.rs
+    summary: gate-based propose -> evaluate -> commit pipeline with caller-defined gates
+  - concept_id: frontier-wait-durable
+    canonical_example: crates/examples/examples/wait_for_durable.rs
+    summary: waiting for a specific event to cross the durable frontier
+  - concept_id: visibility-fence
+    canonical_example: crates/examples/examples/visibility_fence.rs
+    summary: durable visibility fence with delayed publish
+  - concept_id: signed-receipts
+    canonical_example: crates/examples/examples/signed_receipts.rs
+    summary: opt-in receipt signing + append receipt verification
+  - concept_id: lifecycle-observability
+    canonical_example: crates/examples/examples/lifecycle_observer.rs
+    summary: observing the durable SYSTEM_OPEN_COMPLETED lifecycle event
+  - concept_id: idempotent-append
+    canonical_example: crates/examples/examples/idempotent_pass.rs
+    summary: a re-runnable, durable idempotent append pass
+
+  # --- Delivery: cursors, subscriptions, reactors. ---
+  - concept_id: subscriptions-vs-cursors
+    canonical_example: crates/examples/examples/chat_room.rs
+    summary: push subscriptions (lossy) vs pull cursors (ordered replay)
+  - concept_id: cursor-worker
+    canonical_example: crates/examples/examples/cursor_worker.rs
+    summary: cursor-based worker with ordered pull replay and observable progress
+  - concept_id: typed-reactor
+    canonical_example: crates/examples/examples/typed_reactor.rs
+    summary: react_loop_typed with matched-kind decode failure handling
+  - concept_id: typed-reactor-multi
+    canonical_example: crates/examples/examples/typed_reactor_multi.rs
+    summary: react_loop_multi with multi-event dispatch
+
+  # --- Projection lanes. ---
+  - concept_id: raw-projection-handwritten
+    canonical_example: crates/examples/examples/raw_projection_counter.rs
+    summary: hand-written raw projection replay for performance-sensitive folds
+  - concept_id: raw-projection-derived
+    canonical_example: crates/examples/examples/raw_projection_counter_derived.rs
+    summary: derive with input = RawMsgpackInput (raw msgpack replay lane)
+
+  # --- Typestate / lifecycle / locking. ---
+  - concept_id: typestate-state-machine
+    canonical_example: crates/examples/examples/dungeon_typestate.rs
+    summary: compile-time state machine enforcement via typestate transitions
+  - concept_id: read-only-reopen
+    canonical_example: crates/examples/examples/read_only.rs
+    summary: read-only store reopening after graceful close
+  - concept_id: store-lock-helper
+    canonical_example: crates/examples/examples/store_lock_helper.rs
+    summary: cooperative store directory lock helper
+
+  # --- Pipelines / outbox / async submit. ---
+  - concept_id: outbox-staging
+    canonical_example: crates/examples/examples/outbox.rs
+    summary: typed outbox staging for pre-commit item collection
+  - concept_id: submit-pipeline
+    canonical_example: crates/examples/examples/submit_pipeline.rs
+    summary: async submit ticket with blocking wait
+
+  # --- 0.9.0 headline features (fork / import / lane). ---
+  - concept_id: fork-clone
+    canonical_example: crates/examples/examples/fork_clone.rs
+    summary: fork a store into an isolated directory and reopen it read-only
+  - concept_id: import-events
+    canonical_example: crates/examples/examples/import_events.rs
+    summary: re-apply events from a source store into a destination with import provenance
+  - concept_id: lane-branch
+    canonical_example: crates/examples/examples/lane_branch.rs
+    summary: append on independent DAG lanes for the same entity
