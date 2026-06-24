@@ -806,4 +806,63 @@ mod tests {
              in ci.yml but missing from registry: {missing_in_registry:?}"
         );
     }
+
+    /// #64-D single-source guard: xtask is now a real CONSUMER of the
+    /// authoritative `traceability/seam_registry.yaml`.
+    ///
+    /// The registry was authoritative on the integrity side only
+    /// (`assurance::check_seam_registry_lockstep`); xtask carried an
+    /// independent in-code array with zero registry references, so a registry
+    /// seam that xtask did not actually grade could drift in silently. This
+    /// test closes that consumer gap: every assurance-leveled seam declared in
+    /// the registry MUST be a real `critical_mutation_seams()` slug — the
+    /// registry cannot name a seam the mutation tooling does not run.
+    ///
+    /// Direction is deliberate (registry ⊆ xtask, not equality): the registry
+    /// tracks the 15 assurance-LEVELED seams (one per `assurance_levels.yaml`
+    /// entry), while `critical_mutation_seams()` additionally carries extra
+    /// smoke-only mutation lanes (e.g. `lane-branch`, `integrity-graders`,
+    /// `bvisor-*`) that have a lane but no formal assurance level. Demanding
+    /// equality would falsely force those lanes into the assurance manifest.
+    /// Glob-granularity reconciliation between the registry and the xtask
+    /// `*_MUTANT_FILES` consts (the registry's globs are coarser by design) is
+    /// a separate concern owned by `assurance::check_seam_registry_lockstep`.
+    #[test]
+    fn seam_registry_seams_are_real_xtask_seams() {
+        let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(2)
+            .expect("xtask lives at <repo>/bpk-lib/tools/xtask; two parents reach the workspace");
+        let registry_yaml = repo_root.join("traceability/seam_registry.yaml");
+        let text = std::fs::read_to_string(&registry_yaml).expect(
+            "read traceability/seam_registry.yaml for the seam-registry single-source guard",
+        );
+
+        // The schema is one flat entry per seam: a top-level `- slug: <name>`
+        // line. Parse those slugs directly — no new YAML dependency, the same
+        // lightweight approach the ci.yml guard uses.
+        let mut registry_seams: BTreeSet<String> = BTreeSet::new();
+        for line in text.lines() {
+            if let Some(rest) = line.strip_prefix("- slug:") {
+                registry_seams.insert(rest.trim().to_owned());
+            }
+        }
+        assert!(
+            !registry_seams.is_empty(),
+            "no `- slug:` entries parsed from {} — the single-source guard needs the registry",
+            registry_yaml.display()
+        );
+
+        let xtask_seams: BTreeSet<String> = critical_seam_slugs()
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+        let registry_only: Vec<&String> = registry_seams.difference(&xtask_seams).collect();
+        assert!(
+            registry_only.is_empty(),
+            "seam_registry.yaml names seam(s) that critical_mutation_seams() does not grade: \
+             {registry_only:?}.\n  The registry is the single source for assurance-leveled \
+             seams; every registry slug must map to a real xtask mutation seam."
+        );
+    }
 }
