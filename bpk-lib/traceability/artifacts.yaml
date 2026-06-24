@@ -788,6 +788,9 @@
     - crates/examples/examples/dungeon_typestate.rs
     - crates/examples/examples/eight_jobs.rs
     - crates/examples/examples/event_sourced_counter.rs
+    - crates/examples/examples/fork_clone.rs
+    - crates/examples/examples/import_events.rs
+    - crates/examples/examples/lane_branch.rs
     - crates/examples/examples/append_with_gate.rs
     - crates/examples/examples/lifecycle_observer.rs
     - crates/examples/examples/outbox.rs

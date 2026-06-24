@@ -345,6 +345,17 @@ pub(crate) fn check_seam_registry_lockstep(entries: &[SeamRegistryEntry]) -> Res
                 entry.slug
             );
         }
+        // A seam that claims DST corpus coverage must carry a real assurance
+        // level (never the bottom `L0`): the flag asserts a graduated-seed proof
+        // exists, so it cannot ride on an unassured seam. Reading the flag here
+        // keeps the schema field load-bearing.
+        if entry.dst_coverage && entry.assurance_level == "L0" {
+            bail!(
+                "seam-registry-check: seam `{}` declares dst_coverage but is assurance_level L0; \
+                 DST corpus coverage requires a real (non-L0) assurance level",
+                entry.slug
+            );
+        }
         for glob in &entry.globs {
             registry_pairs.insert((entry.slug.clone(), glob.clone()));
         }
@@ -364,7 +375,8 @@ pub(crate) fn check_seam_registry_lockstep(entries: &[SeamRegistryEntry]) -> Res
         .map(|(s, g)| (s.as_str(), g.as_str()))
         .collect();
 
-    let missing_from_registry: Vec<(&str, &str)> = mirror_ref.difference(&registry_ref).copied().collect();
+    let missing_from_registry: Vec<(&str, &str)> =
+        mirror_ref.difference(&registry_ref).copied().collect();
     if !missing_from_registry.is_empty() {
         bail!(
             "seam-registry-check: critical-seam pair(s) absent from seam_registry.yaml: {}.",
@@ -376,7 +388,8 @@ pub(crate) fn check_seam_registry_lockstep(entries: &[SeamRegistryEntry]) -> Res
         );
     }
 
-    let extra_in_registry: Vec<(&str, &str)> = registry_ref.difference(&mirror_ref).copied().collect();
+    let extra_in_registry: Vec<(&str, &str)> =
+        registry_ref.difference(&mirror_ref).copied().collect();
     if !extra_in_registry.is_empty() {
         bail!(
             "seam-registry-check: seam_registry.yaml pair(s) not backed by CRITICAL_SEAM_MUTANT_GLOBS: {}.",
@@ -509,9 +522,7 @@ mod tests {
             .into_iter()
             .map(|mut entry| {
                 if entry.slug == "writer-commit" {
-                    entry
-                        .globs
-                        .retain(|glob| !glob.contains("control"));
+                    entry.globs.retain(|glob| !glob.contains("control"));
                 }
                 entry
             })

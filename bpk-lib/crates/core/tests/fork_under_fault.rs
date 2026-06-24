@@ -21,10 +21,7 @@ fn assert_legal_fork_classification(
     #[cfg(gauntlet_red_fixture)]
     {
         let _ = (outcome, seed);
-        return Err(std::io::Error::other(
-            "RED FIXTURE: illegal half-fork accepted",
-        )
-        .into());
+        return Err(std::io::Error::other("RED FIXTURE: illegal half-fork accepted").into());
     }
     #[cfg(not(gauntlet_red_fixture))]
     {
@@ -35,7 +32,7 @@ fn assert_legal_fork_classification(
 
 #[test]
 fn fork_under_fault_is_legal_and_deterministic() -> Result<(), Box<dyn std::error::Error>> {
-    let seed = fork_fault_replay_seed(0xF0_0F_5EED);
+    let seed = fork_fault_replay_seed(0xF00F_5EED);
     let first = run_seeded_fork_fault_public(seed).map_err(std::io::Error::other)?;
     let second = run_seeded_fork_fault_public(seed).map_err(std::io::Error::other)?;
     assert_eq!(
@@ -48,8 +45,8 @@ fn fork_under_fault_is_legal_and_deterministic() -> Result<(), Box<dyn std::erro
 
 #[test]
 fn fork_under_fault_diverges_across_seeds() -> Result<(), Box<dyn std::error::Error>> {
-    let a = run_seeded_fork_fault_public(0xF0_0F_0001).map_err(std::io::Error::other)?;
-    let b = run_seeded_fork_fault_public(0xF0_0F_0002).map_err(std::io::Error::other)?;
+    let a = run_seeded_fork_fault_public(0xF00F_0001).map_err(std::io::Error::other)?;
+    let b = run_seeded_fork_fault_public(0xF00F_0002).map_err(std::io::Error::other)?;
     assert_ne!(
         a.digest, b.digest,
         "PROPERTY: distinct seeds should diverge in fork fault digest"

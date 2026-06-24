@@ -29,19 +29,14 @@ fn same_store_import_terminates_under_segment_rotation() -> TestResult {
     let count = 24usize;
     let blob = "x".repeat(280);
     for i in 0..count {
-        let _ = store.append(
-            &coord,
-            kind,
-            &serde_json::json!({ "i": i, "blob": blob }),
-        )?;
+        let _ = store.append(&coord, kind, &serde_json::json!({ "i": i, "blob": blob }))?;
     }
     let before = store.stats().event_count;
 
     let options = ImportOptions::new("self-rotate")?.with_chunk_size(2);
     let report = store.import_events(&store, &ImportSelector::all(), &options)?;
     assert_eq!(
-        report.imported,
-        count as u64,
+        report.imported, count as u64,
         "same-store import must import exactly the pre-call user events, then stop"
     );
     assert_eq!(

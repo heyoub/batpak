@@ -34,7 +34,9 @@ fn outcome_digest(seed: u64, classification: Classification, dest_event_count: u
 }
 
 /// Classify `dest` after a fault: legal outcomes only.
-pub(crate) fn classify_fork_destination(dest: &Path) -> Result<(Classification, usize), StoreError> {
+pub(crate) fn classify_fork_destination(
+    dest: &Path,
+) -> Result<(Classification, usize), StoreError> {
     if !dest.exists() {
         return Ok((Classification::RolledBack, 0));
     }
@@ -67,16 +69,21 @@ pub(crate) fn run_seeded_fork_fault(seed: u64) -> Result<ForkFaultOutcome, Strin
 
     let store = Store::<Open>::open(config).map_err(|e| format!("seed=0x{seed:X}: open: {e}"))?;
     let steps = 3 + (seed % 5) as usize;
-    let kind = EventKind::custom(0xF0, 0x0A);
+    let kind = EventKind::custom(0xF, 0x0A);
     for i in 0..steps {
         let coord = Coordinate::new(format!("entity-{i}"), "scope:fork")
             .map_err(|e| format!("seed=0x{seed:X}: coord: {e}"))?;
-        store
+        let _receipt = store
             .append(&coord, kind, &serde_json::json!({ "n": i }))
             .map_err(|e| format!("seed=0x{seed:X}: append: {e}"))?;
     }
-    crate::store::lifecycle::sync(&store)
-        .map_err(|e| format!("seed=0x{seed:X}: sync: {e}"))?;
+    crate::store::lifecycle::sync(&store).map_err(|e| format!("seed=0x{seed:X}: sync: {e}"))?;
+
+    // Committed source prefix at fork time. A fork is a CoW copy of the synced
+    // source, so a CommittedPrefix recovery must reproduce this exact count —
+    // not `steps`, which counts only user appends and excludes the store's
+    // SYSTEM_INIT lifecycle event.
+    let source_committed = store.stats().event_count;
 
     store
         .fork_with_evidence(&dest_dir, ForkOptions::default())
@@ -84,12 +91,14 @@ pub(crate) fn run_seeded_fork_fault(seed: u64) -> Result<ForkFaultOutcome, Strin
 
     sim_fs.crash();
 
-    let (classification, dest_event_count) =
-        classify_fork_destination(&dest_dir).map_err(|e| format!("seed=0x{seed:X}: classify: {e}"))?;
+    let (classification, dest_event_count) = classify_fork_destination(&dest_dir)
+        .map_err(|e| format!("seed=0x{seed:X}: classify: {e}"))?;
 
-    if matches!(classification, Classification::CommittedPrefix) && dest_event_count != steps {
+    if matches!(classification, Classification::CommittedPrefix)
+        && dest_event_count != source_committed
+    {
         return Err(format!(
-            "seed=0x{seed:X}: fork dest event count {dest_event_count} != source {steps}"
+            "seed=0x{seed:X}: fork dest event count {dest_event_count} != source {source_committed}"
         ));
     }
 
@@ -112,6 +121,10 @@ pub struct ForkFaultOutcomePublic {
 }
 
 /// Run one seeded fork-under-fault scenario (StoreFs-level).
+///
+/// # Errors
+/// Returns a seed-tagged description string when the scenario cannot run or the
+/// recovered fork destination classifies as an illegal outcome.
 pub fn run_seeded_fork_fault_public(seed: u64) -> Result<ForkFaultOutcomePublic, String> {
     run_seeded_fork_fault(seed).map(|o| ForkFaultOutcomePublic {
         classification: o.classification.into(),

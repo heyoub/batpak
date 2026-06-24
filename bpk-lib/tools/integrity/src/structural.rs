@@ -90,9 +90,7 @@ pub(crate) fn run() -> Result<()> {
         Ok(crate::receipts::GateWork::new(files, files, inputs))
     })?;
 
-    crate::receipts::run_gate("overclaim", || {
-        crate::overclaim::check(&repo_root)
-    })?;
+    crate::receipts::run_gate("overclaim", || crate::overclaim::check(&repo_root))?;
 
     // assurance-level-check: receipt over the manifest + the production files it
     // resolves to assurance levels.

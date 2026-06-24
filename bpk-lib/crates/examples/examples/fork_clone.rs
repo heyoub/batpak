@@ -4,8 +4,8 @@
 //!
 //! Run: `cargo run --example fork_clone`
 
-use batpak::store::{ForkOptions, ReadOnly, Store, StoreConfig};
 use batpak::prelude::*;
+use batpak::store::{ForkOptions, ReadOnly, Store, StoreConfig};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     use std::io::Write;

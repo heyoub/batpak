@@ -154,7 +154,14 @@ fn validate_entries(
                 );
                 l3_unproven += 1;
             }
-            _ => {}
+            // Proven L3/L4 survivors and every L0-L2 seam carry no schema debt.
+            // Listed explicitly (no wildcard) per the workspace
+            // `wildcard_enum_match_arm` lint.
+            AssuranceLevel::L0
+            | AssuranceLevel::L1
+            | AssuranceLevel::L2
+            | AssuranceLevel::L3
+            | AssuranceLevel::L4 => {}
         }
     }
     ensure(

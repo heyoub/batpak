@@ -4,10 +4,10 @@
 //!
 //! Run: `cargo run --example import_events`
 
+use batpak::prelude::*;
 use batpak::store::{
     provenance_from_extensions, ImportOptions, ImportSelector, Store, StoreConfig,
 };
-use batpak::prelude::*;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     use std::io::Write;

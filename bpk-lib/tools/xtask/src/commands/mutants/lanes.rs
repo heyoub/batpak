@@ -441,7 +441,10 @@ impl MutationLane {
     }
 
     pub(super) fn allows_nonzero_exit(&self, score: MutationScore) -> bool {
-        matches!(self.enforcement, MutationEnforcement::Threshold { .. }) && score.executed > 0
+        // Every lane is threshold-enforced today; a nonzero exit is only
+        // meaningful once at least one mutant actually executed.
+        let MutationEnforcement::Threshold { .. } = self.enforcement;
+        score.executed > 0
     }
 
     pub(super) fn policy_line(&self) -> String {
