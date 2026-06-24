@@ -17,7 +17,6 @@
 //! independently.
 
 pub(crate) mod backend;
-pub(crate) mod clock;
 pub(crate) mod grid;
 pub(crate) mod ground_truth;
 pub(crate) mod reconciliation_matrix;

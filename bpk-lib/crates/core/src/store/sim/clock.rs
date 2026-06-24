@@ -19,12 +19,20 @@ use std::sync::atomic::{AtomicI64, Ordering};
 /// derived identity never collides with the zero/uninitialized sentinel.
 const EPOCH_US: i64 = 2_000_000_000_000_000;
 
-/// Deterministic logical clock for the simulator.
+/// Deterministic logical [`Clock`] for the simulator.
 ///
-/// Cloneable shared state lives in atomics so every backend that holds the
-/// clock (writer body, reader, freshness check) observes the same logical
-/// timeline. The scheduler is the sole authority that advances it.
-pub(crate) struct SimClock {
+/// Reports *logical* time: the value the scheduler advances explicitly, never
+/// the host wall clock. Two runs that advance by the same logical deltas
+/// observe identical timestamps — the basis for deterministic UUIDv7 wall bits,
+/// receipts, and freshness comparisons under simulation.
+///
+/// Shared state lives in atomics so every backend that holds the clock (writer
+/// body, reader, freshness check) observes the same logical timeline. Time
+/// starts at a fixed logical epoch and never regresses. This is the canonical
+/// deterministic `Clock`; downstream simulators (e.g. `bvisor`) construct it
+/// rather than re-implementing the trait.
+#[derive(Debug)]
+pub struct SimClock {
     /// Current logical microseconds since Unix epoch (non-decreasing).
     now_us: AtomicI64,
     /// Logical monotonic nanoseconds since simulation start (non-decreasing).
@@ -33,7 +41,8 @@ pub(crate) struct SimClock {
 
 impl SimClock {
     /// Create a clock parked at the fixed logical epoch.
-    pub(crate) fn new() -> Self {
+    #[must_use]
+    pub fn new() -> Self {
         Self {
             now_us: AtomicI64::new(EPOCH_US),
             mono_ns: AtomicI64::new(0),
@@ -41,14 +50,21 @@ impl SimClock {
     }
 
     /// Advance logical time by `delta_us` microseconds (and the monotonic
-    /// stream by the equivalent nanoseconds). Saturating; never regresses.
-    /// Returns the new `now_us` so callers can record it in an op-trace.
-    pub(crate) fn advance_us(&self, delta_us: i64) -> i64 {
+    /// stream by the equivalent nanoseconds). Saturating; never regresses
+    /// (negative deltas are clamped to zero). Returns the new `now_us` so
+    /// callers can record it in an op-trace.
+    pub fn advance_us(&self, delta_us: i64) -> i64 {
         let delta = delta_us.max(0);
         self.mono_ns
             .fetch_add(delta.saturating_mul(1000), Ordering::AcqRel);
         // fetch_add then return the post-increment value.
         self.now_us.fetch_add(delta, Ordering::AcqRel) + delta
+    }
+}
+
+impl Default for SimClock {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

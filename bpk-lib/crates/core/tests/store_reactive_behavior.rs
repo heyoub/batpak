@@ -97,7 +97,9 @@ fn react_loop_spawns_and_processes() {
     let store = Arc::new(Store::open(config).expect("open store"));
 
     let region = Region::entity("entity:trigger");
-    let _handle = store
+    // The opaque handle type is part of the sealed public surface; bind it by
+    // name so this surface is witnessed.
+    let _handle: batpak::store::ReactLoopHandle = store
         .react_loop(&region, TestReactor)
         .expect("spawn reactor");
 
@@ -135,6 +137,43 @@ fn react_loop_spawns_and_processes() {
     );
 
     store.sync().expect("sync");
+}
+
+#[test]
+fn react_loop_handle_is_opaque_and_detaches_on_drop() {
+    use batpak::event::sourcing::Reactive;
+    use batpak::store::ReactLoopHandle;
+
+    struct NoopReactor;
+    impl Reactive<serde_json::Value> for NoopReactor {
+        fn react(
+            &self,
+            _event: &batpak::prelude::Event<serde_json::Value>,
+        ) -> Vec<(Coordinate, EventKind, serde_json::Value)> {
+            vec![]
+        }
+    }
+
+    let dir = TempDir::new().expect("create temp dir");
+    let config = StoreConfig::new(dir.path()).with_sync_every_n_events(1);
+    let store = Arc::new(Store::open(config).expect("open store"));
+
+    let region = Region::entity("entity:trigger");
+    let handle: ReactLoopHandle = store
+        .react_loop(&region, NoopReactor)
+        .expect("spawn reactor");
+
+    // The handle is opaque: its only observable surface is Debug. It does NOT
+    // expose the concrete background-thread type, and it carries no join() —
+    // the legacy reactor is fire-and-detach (the worker holds its own store
+    // Arc, so it cannot be joined to completion). Dropping the handle detaches
+    // the loop without panicking; the store teardown at scope end reaps it.
+    let rendered = format!("{handle:?}");
+    assert!(
+        rendered.starts_with("ReactLoopHandle"),
+        "PROPERTY: ReactLoopHandle Debug must not leak the inner thread handle type; got {rendered}"
+    );
+    drop(handle); // detach — must not panic or block
 }
 // ================================================================
 // Reactive pattern

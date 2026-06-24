@@ -1157,6 +1157,9 @@ pub batpak::prelude::StoreError::DataDirMalformed::path: std::path::PathBuf
 pub batpak::prelude::StoreError::EntityClockOverflow
 pub batpak::prelude::StoreError::EntityClockOverflow::entity: alloc::string::String
 pub batpak::prelude::StoreError::EventPayloadRegistry(batpak::event::payload::EventPayloadRegistryError)
+pub batpak::prelude::StoreError::ForkEvidenceFutureVersion
+pub batpak::prelude::StoreError::ForkEvidenceFutureVersion::found: u16
+pub batpak::prelude::StoreError::ForkEvidenceFutureVersion::supported: u16
 pub batpak::prelude::StoreError::HiddenRangesCorrupt
 pub batpak::prelude::StoreError::HiddenRangesCorrupt::kind: batpak::store::HiddenRangesCorruption
 pub batpak::prelude::StoreError::HiddenRangesCorrupt::path: std::path::PathBuf
@@ -1173,6 +1176,9 @@ pub batpak::prelude::StoreError::IdempotencyOverflowFailClosed::max_keys: u64
 pub batpak::prelude::StoreError::IdempotencyPartialBatch
 pub batpak::prelude::StoreError::IdempotencyPartialBatch::reason: alloc::string::String
 pub batpak::prelude::StoreError::IdempotencyRequired
+pub batpak::prelude::StoreError::ImportProvenanceFutureVersion
+pub batpak::prelude::StoreError::ImportProvenanceFutureVersion::found: u16
+pub batpak::prelude::StoreError::ImportProvenanceFutureVersion::supported: u16
 pub batpak::prelude::StoreError::InternerExhausted
 pub batpak::prelude::StoreError::InternerExhausted::count: u64
 pub batpak::prelude::StoreError::InvalidCausation
@@ -1526,7 +1532,7 @@ pub fn batpak::store::Store<batpak::store::Open>::open(config: batpak::prelude::
 pub fn batpak::store::Store<batpak::store::Open>::open_with_cache(config: batpak::prelude::StoreConfig, cache: alloc::boxed::Box<dyn batpak::store::projection::ProjectionCache>) -> core::result::Result<Self, batpak::prelude::StoreError>
 pub fn batpak::store::Store<batpak::store::Open>::open_with_native_cache(config: batpak::prelude::StoreConfig, cache_path: impl core::convert::AsRef<std::path::Path>) -> core::result::Result<Self, batpak::prelude::StoreError>
 impl batpak::store::Store<batpak::store::Open>
-pub fn batpak::store::Store<batpak::store::Open>::react_loop<R>(self: &alloc::sync::Arc<Self>, region: &batpak::coordinate::Region, reactor: R) -> core::result::Result<std::thread::join_handle::JoinHandle<()>, batpak::prelude::StoreError> where R: batpak::event::sourcing::Reactive<serde_json::value::Value> + core::marker::Send + 'static
+pub fn batpak::store::Store<batpak::store::Open>::react_loop<R>(self: &alloc::sync::Arc<Self>, region: &batpak::coordinate::Region, reactor: R) -> core::result::Result<batpak::store::ReactLoopHandle, batpak::prelude::StoreError> where R: batpak::event::sourcing::Reactive<serde_json::value::Value> + core::marker::Send + 'static
 pub fn batpak::store::Store<batpak::store::Open>::subscribe_lossy(&self, region: &batpak::coordinate::Region) -> batpak::store::delivery::subscription::Subscription
 pub fn batpak::store::Store<batpak::store::Open>::watch_projection<T>(self: &alloc::sync::Arc<Self>, entity: &str, freshness: batpak::store::projection::Freshness) -> batpak::store::ProjectionWatcher<T> where T: batpak::event::sourcing::EventSourced + serde_core::ser::Serialize + serde_core::de::DeserializeOwned + core::marker::Send + 'static
 pub fn batpak::store::Store<batpak::store::Open>::watch_projection_with_cursor<T>(self: &alloc::sync::Arc<Self>, entity: &str, freshness: batpak::store::projection::Freshness, checkpoint_id: core::option::Option<batpak::store::delivery::observation::CheckpointId>) -> core::result::Result<batpak::store::ProjectionWatcher<T, batpak::store::delivery::cursor::Cursor>, batpak::prelude::StoreError> where T: batpak::event::sourcing::EventSourced + serde_core::ser::Serialize + serde_core::de::DeserializeOwned + core::marker::Send + 'static
@@ -2859,6 +2865,9 @@ pub batpak::store::StoreError::DataDirMalformed::path: std::path::PathBuf
 pub batpak::store::StoreError::EntityClockOverflow
 pub batpak::store::StoreError::EntityClockOverflow::entity: alloc::string::String
 pub batpak::store::StoreError::EventPayloadRegistry(batpak::event::payload::EventPayloadRegistryError)
+pub batpak::store::StoreError::ForkEvidenceFutureVersion
+pub batpak::store::StoreError::ForkEvidenceFutureVersion::found: u16
+pub batpak::store::StoreError::ForkEvidenceFutureVersion::supported: u16
 pub batpak::store::StoreError::HiddenRangesCorrupt
 pub batpak::store::StoreError::HiddenRangesCorrupt::kind: batpak::store::HiddenRangesCorruption
 pub batpak::store::StoreError::HiddenRangesCorrupt::path: std::path::PathBuf
@@ -2875,6 +2884,9 @@ pub batpak::store::StoreError::IdempotencyOverflowFailClosed::max_keys: u64
 pub batpak::store::StoreError::IdempotencyPartialBatch
 pub batpak::store::StoreError::IdempotencyPartialBatch::reason: alloc::string::String
 pub batpak::store::StoreError::IdempotencyRequired
+pub batpak::store::StoreError::ImportProvenanceFutureVersion
+pub batpak::store::StoreError::ImportProvenanceFutureVersion::found: u16
+pub batpak::store::StoreError::ImportProvenanceFutureVersion::supported: u16
 pub batpak::store::StoreError::InternerExhausted
 pub batpak::store::StoreError::InternerExhausted::count: u64
 pub batpak::store::StoreError::InvalidCausation
@@ -3340,6 +3352,7 @@ pub batpak::store::ImportProvenance::source_namespace: batpak::store::SourceName
 pub batpak::store::ImportReport::deduplicated: u64
 pub batpak::store::ImportReport::imported: u64
 pub batpak::store::ImportReport::skipped_filtered: u64
+pub batpak::store::ImportReport::skipped_reimported: u64
 pub batpak::store::ImportReport::skipped_reserved: u64
 pub batpak::store::ImportReport::source_high_watermark: core::option::Option<u64>
 pub struct batpak::store::ImportSelector
@@ -3478,6 +3491,9 @@ impl<T> batpak::store::ProjectionWatcher<T, batpak::store::delivery::cursor::Cur
 pub fn batpak::store::ProjectionWatcher<T, batpak::store::delivery::cursor::Cursor>::recv(&mut self) -> core::result::Result<(u64, core::option::Option<T>), batpak::store::CursorWatcherError>
 impl<T> batpak::store::ProjectionWatcher<T, batpak::store::delivery::subscription::Subscription> where T: batpak::event::sourcing::EventSourced + serde_core::ser::Serialize + serde_core::de::DeserializeOwned + 'static, <T as batpak::event::sourcing::EventSourced>::Input: projection_flow::ReplayInput
 pub fn batpak::store::ProjectionWatcher<T, batpak::store::delivery::subscription::Subscription>::recv(&mut self) -> core::result::Result<(u64, core::option::Option<T>), batpak::store::WatcherError>
+pub struct batpak::store::ReactLoopHandle
+impl core::fmt::Debug for batpak::store::ReactLoopHandle
+pub fn batpak::store::ReactLoopHandle::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct batpak::store::ReactionBatch
 impl batpak::store::reaction::ReactionBatch
 pub fn batpak::store::reaction::ReactionBatch::is_empty(&self) -> bool
@@ -3640,7 +3656,7 @@ pub fn batpak::store::Store<batpak::store::Open>::open(config: batpak::prelude::
 pub fn batpak::store::Store<batpak::store::Open>::open_with_cache(config: batpak::prelude::StoreConfig, cache: alloc::boxed::Box<dyn batpak::store::projection::ProjectionCache>) -> core::result::Result<Self, batpak::prelude::StoreError>
 pub fn batpak::store::Store<batpak::store::Open>::open_with_native_cache(config: batpak::prelude::StoreConfig, cache_path: impl core::convert::AsRef<std::path::Path>) -> core::result::Result<Self, batpak::prelude::StoreError>
 impl batpak::store::Store<batpak::store::Open>
-pub fn batpak::store::Store<batpak::store::Open>::react_loop<R>(self: &alloc::sync::Arc<Self>, region: &batpak::coordinate::Region, reactor: R) -> core::result::Result<std::thread::join_handle::JoinHandle<()>, batpak::prelude::StoreError> where R: batpak::event::sourcing::Reactive<serde_json::value::Value> + core::marker::Send + 'static
+pub fn batpak::store::Store<batpak::store::Open>::react_loop<R>(self: &alloc::sync::Arc<Self>, region: &batpak::coordinate::Region, reactor: R) -> core::result::Result<batpak::store::ReactLoopHandle, batpak::prelude::StoreError> where R: batpak::event::sourcing::Reactive<serde_json::value::Value> + core::marker::Send + 'static
 pub fn batpak::store::Store<batpak::store::Open>::subscribe_lossy(&self, region: &batpak::coordinate::Region) -> batpak::store::delivery::subscription::Subscription
 pub fn batpak::store::Store<batpak::store::Open>::watch_projection<T>(self: &alloc::sync::Arc<Self>, entity: &str, freshness: batpak::store::projection::Freshness) -> batpak::store::ProjectionWatcher<T> where T: batpak::event::sourcing::EventSourced + serde_core::ser::Serialize + serde_core::de::DeserializeOwned + core::marker::Send + 'static
 pub fn batpak::store::Store<batpak::store::Open>::watch_projection_with_cursor<T>(self: &alloc::sync::Arc<Self>, entity: &str, freshness: batpak::store::projection::Freshness, checkpoint_id: core::option::Option<batpak::store::delivery::observation::CheckpointId>) -> core::result::Result<batpak::store::ProjectionWatcher<T, batpak::store::delivery::cursor::Cursor>, batpak::prelude::StoreError> where T: batpak::event::sourcing::EventSourced + serde_core::ser::Serialize + serde_core::de::DeserializeOwned + core::marker::Send + 'static
@@ -3977,6 +3993,10 @@ impl batpak::store::StoreState for batpak::store::ReadOnly
 pub fn batpak::store::ReadOnly::shutdown_writer(&mut self, _should_shutdown: bool)
 pub fn batpak::store::ReadOnly::writer_queue_len(&self) -> core::option::Option<usize>
 pub fn batpak::store::compaction_strategy_shape(strategy: &batpak::store::CompactionStrategy) -> batpak::store::CompactionStrategyShape
+pub fn batpak::store::decode_fork_evidence_wire(bytes: &[u8]) -> core::result::Result<batpak::store::ForkReportBody, batpak::prelude::StoreError>
+pub fn batpak::store::decode_import_provenance_wire(bytes: &[u8]) -> core::result::Result<batpak::store::ImportProvenance, batpak::prelude::StoreError>
+pub fn batpak::store::encode_fork_evidence_wire(body: &batpak::store::ForkReportBody) -> core::result::Result<alloc::vec::Vec<u8>, batpak::prelude::StoreError>
+pub fn batpak::store::encode_import_provenance_wire(provenance: &batpak::store::ImportProvenance) -> core::result::Result<alloc::vec::Vec<u8>, batpak::prelude::StoreError>
 pub fn batpak::store::fork_report_body_hash(body: &batpak::store::ForkReportBody) -> core::result::Result<batpak::store::ForkEvidenceHash, rmp_serde::encode::Error>
 pub fn batpak::store::provenance(receipt: &batpak::prelude::AppendReceipt) -> core::option::Option<batpak::store::ImportProvenance>
 pub fn batpak::store::provenance_from_extensions(extensions: &alloc::collections::btree::map::BTreeMap<batpak::store::ExtensionKey, batpak::store::EncodedBytes>) -> core::option::Option<batpak::store::ImportProvenance>

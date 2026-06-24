@@ -16,7 +16,10 @@ default = []
 # reconciliation matrix live behind this feature, mirroring batpak's
 # `store/sim` convention (`crates/core/Cargo.toml`). Without it the whole
 # `sim/` module is compiled out and the crate stays the pure contract + Inert.
-dangerous-test-hooks = []
+# Pulls in batpak's matching gate so the sim path reuses core's canonical
+# deterministic `SimClock` (`batpak::store::SimClock`) instead of carrying a
+# duplicate `Clock` impl.
+dangerous-test-hooks = ["batpak/dangerous-test-hooks"]
 # The QF_BV solver harness (kernel plan §4): an EXTERNAL, PINNED, CLOUD-ONLY SMT
 # tool that discharges the admission-circuit equivalence proof. Gated so the solver
 # never runs on the local potato — CI runs `cargo test --features qf-bv` with pinned

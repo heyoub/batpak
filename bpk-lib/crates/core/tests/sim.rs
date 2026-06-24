@@ -29,3 +29,51 @@ fn sim_is_deterministic() -> Result<(), String> {
     );
     Ok(())
 }
+
+/// The canonical deterministic `Clock` is reachable from the public surface
+/// (`batpak::store::SimClock`) and behaves as a logical, non-regressing clock:
+/// two clocks advanced by the same deltas observe identical timestamps, and
+/// negative deltas are clamped. This is the seam downstream simulators (e.g.
+/// `bvisor`) construct instead of re-implementing the `Clock` trait.
+#[test]
+fn sim_clock_is_public_and_deterministic() {
+    use batpak::store::{Clock, SimClock};
+
+    let a = SimClock::new();
+    let b = SimClock::default();
+
+    // Same construction → same starting timestamp.
+    assert_eq!(
+        a.now_us(),
+        b.now_us(),
+        "PROPERTY: two freshly constructed SimClocks start at the same logical epoch"
+    );
+
+    // Advancing both by identical deltas keeps them in lockstep — the
+    // determinism property that makes UUIDv7 wall bits / freshness replayable.
+    let returned = a.advance_us(250);
+    b.advance_us(250);
+    assert_eq!(
+        a.now_us(),
+        b.now_us(),
+        "PROPERTY: identical advances yield identical logical time"
+    );
+    assert_eq!(
+        returned,
+        a.now_us(),
+        "PROPERTY: advance_us returns the new logical now_us"
+    );
+    assert_eq!(
+        a.now_mono_ns(),
+        250 * 1_000,
+        "PROPERTY: the monotonic stream tracks the advanced microseconds"
+    );
+
+    // Negative deltas are clamped — the clock never regresses.
+    let before = a.now_us();
+    let held = a.advance_us(-1_000);
+    assert_eq!(
+        held, before,
+        "PROPERTY: a negative advance is clamped and the clock never regresses"
+    );
+}

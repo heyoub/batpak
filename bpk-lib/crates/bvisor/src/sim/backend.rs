@@ -29,10 +29,9 @@ use crate::contract::report::{
 use crate::contract::support::{
     BackendProfile, BackendProfileSnapshot, RequirementKind, SupportMatrix,
 };
-use crate::sim::clock::SimExecClock;
 use crate::sim::ground_truth::{GroundTruth, Lie};
 use crate::sim::Prng;
-use batpak::store::Clock;
+use batpak::store::{Clock, SimClock};
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 
@@ -179,7 +178,9 @@ pub struct SimBackend {
     /// The deterministic clock that witnesses wall time. The honest simulation
     /// advances it by `simulated_wall_micros` per run, so `execute` reads a real,
     /// replayable elapsed wall from the public [`batpak::store::Clock`] seam.
-    clock: SimExecClock,
+    /// Core's canonical [`SimClock`] — bvisor no longer carries a duplicate
+    /// `Clock` impl.
+    clock: SimClock,
     /// The simulated workload's modeled wall consumption (µs) the honest run advances
     /// the clock by. Default `0` (an instant simulation consumes 0 simulated wall);
     /// tests set it to witness a within-budget run or trip the wall limit.
@@ -229,7 +230,7 @@ impl SimBackend {
             support: deep_support(),
             injector,
             budget: sim_budget_profile(),
-            clock: SimExecClock::new(),
+            clock: SimClock::new(),
             simulated_wall_micros: 0,
             truth: Mutex::new(GroundTruth::new()),
         }
@@ -407,7 +408,10 @@ impl SimBackend {
     fn simulate_honest(&self, _plan: &BoundaryPlan, run: &mut RunState) {
         // Model the workload's wall consumption by advancing the deterministic clock;
         // `execute` reads the resulting elapsed and witnesses the wall budget.
-        self.clock.advance_us(self.simulated_wall_micros);
+        // Core's SimClock takes a signed delta; the modeled wall is a u64, so
+        // saturate at i64::MAX (the clock clamps anyway and never regresses).
+        self.clock
+            .advance_us(i64::try_from(self.simulated_wall_micros).unwrap_or(i64::MAX));
         self.record(GroundTruth::reached_terminal);
         run.outcome = Outcome::Completed;
         run.exit = Some(ExitStatus::Code(0));

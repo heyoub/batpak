@@ -31,7 +31,7 @@
 //! through `SimFs`) is deferred until the remaining `StoreFs` durability ops
 //! are routed — see GAUNTLET_ISSUES.md.
 
-pub(crate) mod clock;
+pub mod clock;
 pub(crate) mod corpus;
 pub(crate) mod fault_model;
 pub(crate) mod fork_recovery;
@@ -45,7 +45,7 @@ pub(crate) mod workload;
 
 use std::sync::Arc;
 
-pub(crate) use clock::SimClock;
+pub use clock::SimClock;
 pub(crate) use fault_model::InMemFaultFs;
 pub(crate) use scheduler::SimScheduler;
 

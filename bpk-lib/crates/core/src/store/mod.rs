@@ -148,6 +148,13 @@ pub use read_walk::{
 };
 pub use receipt_verification::{ReceiptVerification, ReceiptVerificationError};
 pub use signing::SigningKey;
+/// The canonical deterministic [`Clock`](crate::store::Clock) for simulators.
+///
+/// Exported only under `dangerous-test-hooks` (the same gate the rest of the
+/// simulation runtime lives behind) so downstream deterministic simulators
+/// construct one logical clock instead of re-implementing the trait.
+#[cfg(feature = "dangerous-test-hooks")]
+pub use sim::SimClock;
 pub use snapshot_report::{
     snapshot_report_body_hash, SnapshotEvidenceHash, SnapshotEvidenceReport, SnapshotFenceTokenRef,
     SnapshotFileKind, SnapshotFinding, SnapshotReportBody, SnapshotWatermarkRef,
@@ -173,6 +180,7 @@ pub use subscriber_frontier::{
     SubscriberFrontierReportError, SubscriberFrontierRequest, SubscriberFrontierSource,
     SUBSCRIBER_FRONTIER_REPORT_SCHEMA_VERSION,
 };
+pub use watch_api::ReactLoopHandle;
 pub use write::control::{AppendTicket, BatchAppendTicket, Outbox, VisibilityFence};
 pub use write::writer::{Notification, RestartPolicy};
 
