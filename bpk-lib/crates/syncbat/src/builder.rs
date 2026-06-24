@@ -136,6 +136,37 @@ impl CoreBuilder {
         self.register(descriptor, handler)
     }
 
+    /// Register a descriptor and an already-boxed handler together.
+    ///
+    /// A composition layer above this builder (such as a module host) holds its
+    /// handlers as trait objects; this admits them without re-boxing. Validation
+    /// and duplicate detection match [`Self::register`].
+    ///
+    /// # Errors
+    /// Returns a duplicate descriptor or duplicate handler error if either side
+    /// is already present, or an invalid-operation error if the descriptor fails
+    /// validation.
+    pub fn register_boxed(
+        &mut self,
+        descriptor: operation::OperationDescriptor,
+        handler: BoxedHandler,
+    ) -> Result<&mut Self, BuildError> {
+        let name = descriptor.name().to_owned();
+        descriptor
+            .validate()
+            .map_err(|error| BuildError::invalid_operation(&name, error.to_string()))?;
+        if self.descriptors.contains_key(&name) {
+            return Err(BuildError::duplicate_operation(name));
+        }
+        if self.handlers.contains_key(&name) {
+            return Err(BuildError::duplicate_handler(name));
+        }
+
+        self.descriptors.insert(name.clone(), descriptor);
+        self.handlers.insert(name, handler);
+        Ok(self)
+    }
+
     /// Configure the optional pre-handler admission guard.
     ///
     /// The guard runs before every handler dispatch and may deny the call (the
@@ -162,6 +193,15 @@ impl CoreBuilder {
         S: receipt::ReceiptSink + 'static,
     {
         self.receipt_sink = Some(Box::new(sink));
+        self
+    }
+
+    /// Configure the optional receipt sink from an already-boxed trait object.
+    ///
+    /// Equivalent to [`Self::receipt_sink`] for a composition layer that holds
+    /// its sink as a trait object.
+    pub fn receipt_sink_boxed(&mut self, sink: BoxedReceiptSink) -> &mut Self {
+        self.receipt_sink = Some(sink);
         self
     }
 
