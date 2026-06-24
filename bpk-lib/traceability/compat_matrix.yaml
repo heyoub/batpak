@@ -17,6 +17,8 @@
 #                       checkpoint        (index.ckpt,             CHECKPOINT_VERSION)
 #                       idempotency-index (index.idemp,            IDEMP_VERSION)
 #                       visibility-ranges (visibility_ranges.fbv,  VISIBILITY_RANGES_VERSION)
+#                       fork-evidence       (fork_evidence.fbev,     FORK_EVIDENCE_REPORT_SCHEMA_VERSION)
+#                       import-provenance   (import_provenance.fbip,   IMPORT_PROVENANCE_SCHEMA_VERSION)
 #                     The driver panics on an unknown format so a new format needs
 #                     a row + a forge arm, not a silent skip.
 #   writer_version  — the format version stamped into the forged artifact.
@@ -30,6 +32,8 @@
 #                       CanonicalRefusal:CheckpointFutureVersion
 #                       CanonicalRefusal:IdempotencyFutureVersion
 #                       CanonicalRefusal:HiddenRangesFutureVersion
+#                       CanonicalRefusal:ForkEvidenceFutureVersion
+#                       CanonicalRefusal:ImportProvenanceFutureVersion
 #   fixture_path    — relative-to-crate descriptor of the forged artifact. Forged
 #                     on the fly from a seeded store (kept tiny: 4 events / a
 #                     cancelled fence), so the path is the in-temp artifact name,
@@ -131,3 +135,31 @@ rows:
     feature_bits: 0
     expected_outcome: CanonicalRefusal:HiddenRangesFutureVersion
     fixture_path: visibility_ranges.fbv
+
+  # ── fork-evidence (fork_evidence.fbev) ───────────────────────────────────
+  - format: fork-evidence
+    writer_version: 1
+    reader_version: 1
+    feature_bits: 0
+    expected_outcome: OpensOK
+    fixture_path: fork_evidence.fbev
+  - format: fork-evidence
+    writer_version: 2
+    reader_version: 1
+    feature_bits: 0
+    expected_outcome: CanonicalRefusal:ForkEvidenceFutureVersion
+    fixture_path: fork_evidence.fbev
+
+  # ── import-provenance (import_provenance.fbip) ───────────────────────────
+  - format: import-provenance
+    writer_version: 1
+    reader_version: 1
+    feature_bits: 0
+    expected_outcome: OpensOK
+    fixture_path: import_provenance.fbip
+  - format: import-provenance
+    writer_version: 2
+    reader_version: 1
+    feature_bits: 0
+    expected_outcome: CanonicalRefusal:ImportProvenanceFutureVersion
+    fixture_path: import_provenance.fbip

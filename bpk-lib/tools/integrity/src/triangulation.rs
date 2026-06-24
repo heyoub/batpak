@@ -49,11 +49,17 @@ pub(crate) struct ClaimSet {
 }
 
 impl ClaimSet {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self { claims: Vec::new() }
     }
 
-    fn assert(&mut self, oracle: &str, subject: &str, predicate: &str, value: impl Into<String>) {
+    pub(crate) fn assert(
+        &mut self,
+        oracle: &str,
+        subject: &str,
+        predicate: &str,
+        value: impl Into<String>,
+    ) {
         self.claims.push(Claim {
             subject: subject.to_owned(),
             predicate: predicate.to_owned(),
@@ -87,7 +93,7 @@ pub(crate) struct Disagreement {
 }
 
 impl Disagreement {
-    fn render(&self) -> String {
+    pub(crate) fn render(&self) -> String {
         let votes = self
             .votes
             .iter()

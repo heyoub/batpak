@@ -32,7 +32,10 @@
 //! are routed — see GAUNTLET_ISSUES.md.
 
 pub(crate) mod clock;
+pub(crate) mod corpus;
 pub(crate) mod fault_model;
+pub(crate) mod fork_recovery;
+pub(crate) mod import_recovery;
 pub(crate) mod fs;
 pub(crate) mod invariants;
 pub(crate) mod recovery;

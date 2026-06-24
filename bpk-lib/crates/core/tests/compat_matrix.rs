@@ -21,9 +21,9 @@
 //! `writer_version` (the forge mirrors
 //! `gauntlet_s2_future_version_refusal::forge_future_mmap_version` and
 //! `idempotency_corruption_recovery::future_version_is_a_hard_error_at_cold_start`).
-//! Four formats are governed: mmap-index, checkpoint, idempotency-index, and
-//! visibility-ranges; each has an OpensOK self-row and a forged future-version
-//! `CanonicalRefusal` row.
+//! Four formats are governed: mmap-index, checkpoint, idempotency-index,
+//! visibility-ranges, fork-evidence, and import-provenance; each has an OpensOK
+//! self-row and a forged future-version `CanonicalRefusal` row.
 //!
 //! Adding a covered (format, version) pair is a YAML edit (a new row) plus, for
 //! a genuinely new FORMAT, a new arm in each of `config_for`,
@@ -34,7 +34,12 @@
 
 use batpak::coordinate::Coordinate;
 use batpak::event::EventKind;
-use batpak::store::{Store, StoreConfig, StoreError};
+use batpak::store::{
+    decode_fork_evidence_wire, decode_import_provenance_wire, encode_fork_evidence_wire,
+    encode_import_provenance_wire, fork_report_body_hash, provenance_from_extensions,
+    ForkOptions, ImportOptions, ImportSelector, Store, StoreConfig, StoreError,
+    FORK_EVIDENCE_REPORT_SCHEMA_VERSION, IMPORT_PROVENANCE_SCHEMA_VERSION,
+};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
@@ -49,15 +54,22 @@ use tempfile::TempDir;
 /// * `SUPPORTED_CHECKPOINT_VERSION` ← `cold_start::checkpoint::format::CHECKPOINT_VERSION`
 /// * `SUPPORTED_IDEMP_VERSION` ← `store::index::idemp::IDEMP_VERSION`
 /// * `SUPPORTED_VISIBILITY_VERSION` ← `store::hidden_ranges::VISIBILITY_RANGES_VERSION`
+/// * `SUPPORTED_VISIBILITY_VERSION` ← `store::hidden_ranges::VISIBILITY_RANGES_VERSION`
+/// * `SUPPORTED_FORK_EVIDENCE_VERSION` ← `store::fork_report::FORK_EVIDENCE_REPORT_SCHEMA_VERSION`
+/// * `SUPPORTED_IMPORT_PROVENANCE_VERSION` ← `store::import::IMPORT_PROVENANCE_SCHEMA_VERSION`
 const SUPPORTED_MMAP_VERSION: u16 = 5;
 const SUPPORTED_CHECKPOINT_VERSION: u16 = 6;
 const SUPPORTED_IDEMP_VERSION: u16 = 1;
 const SUPPORTED_VISIBILITY_VERSION: u16 = 2;
+const SUPPORTED_FORK_EVIDENCE_VERSION: u16 = FORK_EVIDENCE_REPORT_SCHEMA_VERSION;
+const SUPPORTED_IMPORT_PROVENANCE_VERSION: u16 = IMPORT_PROVENANCE_SCHEMA_VERSION;
 
 const MMAP_ARTIFACT: &str = "index.fbati";
 const CHECKPOINT_ARTIFACT: &str = "index.ckpt";
 const IDEMP_ARTIFACT: &str = "index.idemp";
 const VISIBILITY_ARTIFACT: &str = "visibility_ranges.fbv";
+const FORK_EVIDENCE_ARTIFACT: &str = "fork_evidence.fbev";
+const IMPORT_PROVENANCE_ARTIFACT: &str = "import_provenance.fbip";
 
 /// Every governed format stamps its version as a little-endian `u16` at bytes
 /// `6..8` (after a 6-byte magic), OUTSIDE the CRC region (CRC at `8..12` covers
@@ -142,6 +154,12 @@ fn config_for(dir: &Path, format: &str) -> StoreConfig {
             base.with_enable_mmap_index(false)
                 .with_enable_checkpoint(false),
         ),
+        // Wire-framed report bodies are decoded outside `Store::open`; keep a
+        // minimal config arm so matrix rows remain structurally valid.
+        "fork-evidence" | "import-provenance" => Some(
+            base.with_enable_mmap_index(false)
+                .with_enable_checkpoint(false),
+        ),
         _ => None,
     };
     config
@@ -213,6 +231,60 @@ fn seed_visibility_ranges(dir: &Path) {
         .expect("write seeded visibility-ranges artifact");
 }
 
+/// Seed a live-version fork evidence wire artifact from a real fork report body.
+fn seed_fork_evidence(dir: &Path) {
+    let source_dir = dir.join("_seed_source");
+    let dest_dir = dir.join("_seed_dest");
+    let store = Store::open(config_for(&source_dir, "fork-evidence")).expect("open fork source");
+    let coord =
+        Coordinate::new("entity:fork-evidence", "scope:compat-matrix").expect("valid coordinate");
+    let kind = EventKind::custom(0xF, 8);
+    for i in 0..3 {
+        let _ = store
+            .append(&coord, kind, &serde_json::json!({ "i": i }))
+            .expect("append fork seed event");
+    }
+    let report = store
+        .fork_with_evidence(&dest_dir, ForkOptions::default())
+        .expect("fork with evidence");
+    store.close().expect("close fork source");
+    let bytes = encode_fork_evidence_wire(&report.body).expect("encode fork evidence wire");
+    std::fs::write(dir.join(FORK_EVIDENCE_ARTIFACT), &bytes)
+        .expect("write seeded fork evidence artifact");
+    let _decoded = decode_fork_evidence_wire(&bytes).expect("round-trip fork evidence wire");
+    let _ = fork_report_body_hash(&report.body).expect("fork body hash");
+}
+
+/// Seed a live-version import provenance wire artifact from a real import.
+fn seed_import_provenance(dir: &Path) {
+    let source_dir = dir.join("_import_source");
+    let dest_dir = dir.join("_import_dest");
+    let source = Store::open(config_for(&source_dir, "import-provenance"))
+        .expect("open import source");
+    let dest = Store::open(config_for(&dest_dir, "import-provenance")).expect("open import dest");
+    let coord =
+        Coordinate::new("entity:import-prov", "scope:compat-matrix").expect("valid coordinate");
+    let kind = EventKind::custom(0xF, 9);
+    let _ = source
+        .append(&coord, kind, &serde_json::json!({ "n": 1 }))
+        .expect("append import provenance seed event");
+    let options = ImportOptions::new("compat-import").expect("import options");
+    let report = dest
+        .import_events(&source, &ImportSelector::all(), &options)
+        .expect("seed import");
+    assert_eq!(report.imported, 1, "seed import must import one event");
+    let dest_entry = dest.by_entity("entity:import-prov")[0].clone();
+    let provenance = provenance_from_extensions(dest_entry.receipt_extensions())
+        .expect("seed import must record provenance on the destination receipt");
+    source.close().expect("close import source");
+    dest.close().expect("close import dest");
+    let bytes =
+        encode_import_provenance_wire(&provenance).expect("encode import provenance wire");
+    std::fs::write(dir.join(IMPORT_PROVENANCE_ARTIFACT), &bytes)
+        .expect("write seeded import provenance artifact");
+    decode_import_provenance_wire(&bytes).expect("round-trip import provenance wire");
+}
+
 /// Read an on-disk artifact, assert it is on the expected live version, and —
 /// when `writer_version` differs — byte-patch the version field. Returns the
 /// patched bytes' path. The version field is the single forge point for every
@@ -258,6 +330,14 @@ fn forge_artifact_version(dir: &Path, format: &str, writer_version: u16) -> Path
             seed_visibility_ranges(dir);
             Some((VISIBILITY_ARTIFACT, SUPPORTED_VISIBILITY_VERSION))
         }
+        "fork-evidence" => {
+            seed_fork_evidence(dir);
+            Some((FORK_EVIDENCE_ARTIFACT, SUPPORTED_FORK_EVIDENCE_VERSION))
+        }
+        "import-provenance" => {
+            seed_import_provenance(dir);
+            Some((IMPORT_PROVENANCE_ARTIFACT, SUPPORTED_IMPORT_PROVENANCE_VERSION))
+        }
         _ => None,
     };
     let (artifact_name, live) = seeded
@@ -282,6 +362,41 @@ fn forge_artifact_version(dir: &Path, format: &str, writer_version: u16) -> Path
 /// the typed `StoreError` into the canonical-refusal tag namespace the matrix
 /// uses. Unknown formats — or unrelated errors — panic (no silent skip).
 fn open_outcome(dir: &Path, format: &str) -> Outcome {
+    if format == "fork-evidence" || format == "import-provenance" {
+        let artifact_name = match format {
+            "fork-evidence" => FORK_EVIDENCE_ARTIFACT,
+            "import-provenance" => IMPORT_PROVENANCE_ARTIFACT,
+            _ => unreachable!("wire decode formats are fork-evidence and import-provenance"),
+        };
+        let bytes = std::fs::read(dir.join(artifact_name)).expect("read wire artifact");
+        let classified: Result<Outcome, String> = match (format, bytes.as_slice()) {
+            ("fork-evidence", bytes) => match decode_fork_evidence_wire(bytes) {
+                Ok(_) => Ok(Outcome::OpensOk),
+                Err(StoreError::ForkEvidenceFutureVersion { .. }) => Ok(Outcome::CanonicalRefusal(
+                    "ForkEvidenceFutureVersion".to_string(),
+                )),
+                Err(other) => Err(format!(
+                    "PROPERTY: forward-compat for {format:?} must yield OpensOK or \
+                     ForkEvidenceFutureVersion; got {other:?}"
+                )),
+            },
+            ("import-provenance", bytes) => match decode_import_provenance_wire(bytes) {
+                Ok(_) => Ok(Outcome::OpensOk),
+                Err(StoreError::ImportProvenanceFutureVersion { .. }) => Ok(
+                    Outcome::CanonicalRefusal("ImportProvenanceFutureVersion".to_string()),
+                ),
+                Err(other) => Err(format!(
+                    "PROPERTY: forward-compat for {format:?} must yield OpensOK or \
+                     ImportProvenanceFutureVersion; got {other:?}"
+                )),
+            },
+            _ => unreachable!(),
+        };
+        return classified.expect(
+            "wire forward-compat decode must yield OpensOK or a canonical future-version refusal",
+        );
+    }
+
     let result = Store::open(config_for(dir, format));
     let classified: Result<Outcome, String> = match (format, result) {
         (_, Ok(_store)) => Ok(Outcome::OpensOk),
@@ -312,6 +427,8 @@ fn live_supported_version(format: &str) -> u16 {
         "checkpoint" => Some(SUPPORTED_CHECKPOINT_VERSION),
         "idempotency-index" => Some(SUPPORTED_IDEMP_VERSION),
         "visibility-ranges" => Some(SUPPORTED_VISIBILITY_VERSION),
+        "fork-evidence" => Some(SUPPORTED_FORK_EVIDENCE_VERSION),
+        "import-provenance" => Some(SUPPORTED_IMPORT_PROVENANCE_VERSION),
         _ => None,
     };
     version
@@ -369,6 +486,8 @@ const COMPAT_FORMATS: &[&str] = &[
     "checkpoint",
     "idempotency-index",
     "visibility-ranges",
+    "fork-evidence",
+    "import-provenance",
 ];
 
 /// Staleness tripwire: a NEW on-disk version with no matrix row must be

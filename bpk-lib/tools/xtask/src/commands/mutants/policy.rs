@@ -28,7 +28,14 @@ pub(super) const REPO_MUTATION_THRESHOLDS: &[(RepoMutationPhase, u32)] = &[
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum MutationEnforcement {
     Threshold { min_catch_pct: u32 },
+    /// AL-graded L1/L2 survivor tier (#64-A, D4): record score evidence without
+    /// blocking the lane on a catch-rate floor.
+    RecordOnly,
 }
+
+/// Natural enforcement for AL-graded L1/L2 survivor recording (#64-A, D4).
+pub(super) const L1_L2_SURVIVOR_ENFORCEMENT: MutationEnforcement =
+    MutationEnforcement::RecordOnly;
 
 /// Whether a diff-scoped lane was actually scoped by a real, non-empty PR diff.
 ///
@@ -186,6 +193,16 @@ pub(super) fn assert_mutation_policy(
                     );
                 }
             }
+        }
+        MutationEnforcement::RecordOnly => {
+            let score_note = match score.score_pct {
+                Some(score_pct) => format!("{score_pct}% recorded"),
+                None => "no scoreable mutants; evidence only".to_owned(),
+            };
+            outln!(
+                "mutants: `{}` => record-only enforcement ({score_note}, not gated).",
+                lane.label,
+            );
         }
     }
 

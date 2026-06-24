@@ -67,6 +67,19 @@
   globs:
     - crates/core/src/store/platform/**/*.rs
 
+- level: L4
+  seam: fork-isolation
+  rationale: "fork CoW isolation classification and evidence report are durability boundaries"
+  globs:
+    - crates/core/src/store/file_classification.rs
+    - crates/core/src/store/fork_report.rs
+
+- level: L4
+  seam: import-reapply
+  rationale: "import key derivation, dedup, and hash-chain regeneration are durability boundaries"
+  globs:
+    - crates/core/src/store/import.rs
+
 # --- L3: deterministic runtime (writer/visibility/projection/frontier/cold-start) ---
 - level: L3
   seam: cursor-delivery

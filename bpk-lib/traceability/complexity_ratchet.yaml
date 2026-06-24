@@ -67,11 +67,11 @@
   lines: 129
   nesting: 3
   cyclomatic: 25
-- key: "crates/core/src/store/lifecycle.rs::snapshot"
+- key: "crates/core/src/store/lifecycle_snapshot.rs::snapshot"
   lines: 84
   nesting: 5
   cyclomatic: 21
-- key: "crates/core/src/store/lifecycle.rs::compact"
+- key: "crates/core/src/store/lifecycle_compact.rs::compact"
   lines: 167
   nesting: 3
   cyclomatic: 22

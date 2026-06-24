@@ -313,6 +313,7 @@
   paths:
     - crates/core/tests/store_fork.rs
     - crates/core/tests/import_events.rs
+    - crates/core/tests/import_same_store_ceiling.rs
     - crates/core/tests/isomorphism_laws.rs
     - crates/core/src/event/upcast.rs
     - crates/core/src/store/segment/sidx/tests.rs
@@ -320,6 +321,18 @@
   kind: benchmark
   paths:
     - crates/core/benches/fork_cost.rs
+- id: ART-IMPORT-FAULT-TESTS
+  kind: tests
+  paths:
+    - crates/core/tests/import_under_fault.rs
+    - crates/core/tests/import_same_store_ceiling.rs
+    - crates/core/src/store/sim/import_recovery.rs
+- id: ART-STORE-FORK-IMPORT-EXAMPLES
+  kind: examples
+  paths:
+    - crates/examples/examples/fork_clone.rs
+    - crates/examples/examples/import_events.rs
+    - crates/examples/examples/lane_branch.rs
 - id: ART-STORE-LANE-BRANCH-SOURCE
   kind: source
   paths:

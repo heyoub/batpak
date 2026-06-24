@@ -197,6 +197,24 @@ pub enum StoreError {
         /// The maximum version this binary understands.
         supported: u16,
     },
+    /// A fork evidence report body declares a schema version strictly newer than
+    /// this binary understands. Mirrors [`Self::MmapFutureVersion`]: silently
+    /// accepting an unknown fork-evidence layout would mis-classify fork outcomes.
+    ForkEvidenceFutureVersion {
+        /// Version stamped on the wire artifact.
+        found: u16,
+        /// The maximum version this binary understands.
+        supported: u16,
+    },
+    /// An import provenance extension body declares a schema version strictly
+    /// newer than this binary understands. Mirrors [`Self::MmapFutureVersion`]:
+    /// silently decoding unknown provenance would break import idempotency audits.
+    ImportProvenanceFutureVersion {
+        /// Version stamped on the wire artifact.
+        found: u16,
+        /// The maximum version this binary understands.
+        supported: u16,
+    },
     /// A new keyed append was refused because the durable idempotency store is
     /// at its soft cap and the configured `OverflowPolicy` is `FailClosed`
     /// (or `Backpressure`, which is treated as fail-closed). Existing
@@ -427,6 +445,16 @@ impl StoreError {
                  cancelled ranges this reader cannot interpret); upgrade the reader",
                 path.display()
             ),
+            Self::ForkEvidenceFutureVersion { found, supported } => write!(
+                f,
+                "fork evidence report is version {found} but this binary understands at most \
+                 version {supported}; upgrade the reader"
+            ),
+            Self::ImportProvenanceFutureVersion { found, supported } => write!(
+                f,
+                "import provenance extension is version {found} but this binary understands at \
+                 most version {supported}; upgrade the reader"
+            ),
             // Reached only from the four future-version arms of `Display::fmt`.
             // The remaining variants are listed explicitly (not wildcarded) so a
             // newly-added variant trips a compile error here, and return the
@@ -586,7 +614,9 @@ impl std::fmt::Display for StoreError {
             Self::IdempotencyFutureVersion { .. }
             | Self::MmapFutureVersion { .. }
             | Self::CheckpointFutureVersion { .. }
-            | Self::HiddenRangesFutureVersion { .. } => self.fmt_future_version(f),
+            | Self::HiddenRangesFutureVersion { .. }
+            | Self::ForkEvidenceFutureVersion { .. }
+            | Self::ImportProvenanceFutureVersion { .. } => self.fmt_future_version(f),
             Self::IdempotencyOverflowFailClosed { len, max_keys } => write!(
                 f,
                 "durable idempotency store at soft cap ({len}/{max_keys}); new keyed append \
@@ -739,6 +769,8 @@ impl std::error::Error for StoreError {
             | Self::MmapFutureVersion { .. }
             | Self::CheckpointFutureVersion { .. }
             | Self::HiddenRangesFutureVersion { .. }
+            | Self::ForkEvidenceFutureVersion { .. }
+            | Self::ImportProvenanceFutureVersion { .. }
             | Self::IdempotencyOverflowFailClosed { .. }
             | Self::InvalidPayloadVersion { .. }
             | Self::CorruptFrame { .. }

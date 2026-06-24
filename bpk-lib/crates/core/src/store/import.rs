@@ -232,6 +232,71 @@ pub fn provenance_from_extensions(
         .and_then(|bytes| crate::encoding::from_bytes(bytes).ok())
 }
 
+/// Wire magic for compat-matrix and forward-compat gates (`import_provenance.fbip`).
+pub(crate) const IMPORT_PROVENANCE_WIRE_MAGIC: &[u8; 6] = b"FBATIP";
+
+/// Encode import provenance using the shared compat wire framing:
+/// `magic(6) | version(2 le) | crc32(4 le over body) | body(to_vec_named)`.
+///
+/// # Errors
+/// MessagePack encoding failure from `rmp-serde`.
+pub fn encode_import_provenance_wire(provenance: &ImportProvenance) -> Result<Vec<u8>, StoreError> {
+    let body_bytes = crate::encoding::to_bytes(provenance)
+        .map_err(|error| StoreError::Serialization(Box::new(error)))?;
+    let crc = crc32fast::hash(&body_bytes);
+    let mut bytes = Vec::with_capacity(12 + body_bytes.len());
+    bytes.extend_from_slice(IMPORT_PROVENANCE_WIRE_MAGIC);
+    bytes.extend_from_slice(&provenance.schema_version.to_le_bytes());
+    bytes.extend_from_slice(&crc.to_le_bytes());
+    bytes.extend_from_slice(&body_bytes);
+    Ok(bytes)
+}
+
+/// Decode import provenance from compat wire framing.
+///
+/// # Errors
+/// Returns [`StoreError::ImportProvenanceFutureVersion`] when the wire or body schema
+/// version exceeds [`IMPORT_PROVENANCE_SCHEMA_VERSION`], or a configuration /
+/// serialization error for corrupt framing.
+pub fn decode_import_provenance_wire(bytes: &[u8]) -> Result<ImportProvenance, StoreError> {
+    if bytes.len() < 12 || bytes.get(..6) != Some(IMPORT_PROVENANCE_WIRE_MAGIC) {
+        return Err(StoreError::Configuration(
+            "import provenance wire framing is invalid".into(),
+        ));
+    }
+    let found = u16::from_le_bytes(
+        bytes[6..8]
+            .try_into()
+            .map_err(|_| StoreError::Configuration("import provenance version slice".into()))?,
+    );
+    if found > IMPORT_PROVENANCE_SCHEMA_VERSION {
+        return Err(StoreError::ImportProvenanceFutureVersion {
+            found,
+            supported: IMPORT_PROVENANCE_SCHEMA_VERSION,
+        });
+    }
+    let expected_crc = u32::from_le_bytes(
+        bytes[8..12]
+            .try_into()
+            .map_err(|_| StoreError::Configuration("import provenance crc slice".into()))?,
+    );
+    let body_bytes = &bytes[12..];
+    if crc32fast::hash(body_bytes) != expected_crc {
+        return Err(StoreError::Configuration(
+            "import provenance wire crc mismatch".into(),
+        ));
+    }
+    let provenance: ImportProvenance = crate::encoding::from_bytes(body_bytes)
+        .map_err(|error| StoreError::Serialization(Box::new(error)))?;
+    if provenance.schema_version > IMPORT_PROVENANCE_SCHEMA_VERSION {
+        return Err(StoreError::ImportProvenanceFutureVersion {
+            found: provenance.schema_version,
+            supported: IMPORT_PROVENANCE_SCHEMA_VERSION,
+        });
+    }
+    Ok(provenance)
+}
+
 pub(crate) fn import_provenance_extension_key() -> ExtensionKey {
     ExtensionKey::reserved("batpak.import.provenance")
 }

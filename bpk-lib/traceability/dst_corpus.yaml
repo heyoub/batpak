@@ -1,0 +1,26 @@
+# dst_corpus.yaml — graduated DST recovery corpus (Thread #64-B).
+#
+# Durable ledger of seeded honest-disk recovery runs over the real Store+SimFs
+# composition. Each entry passed graduation: deterministic digest across two runs,
+# legality oracle pass, and a declared target seam. Replay with
+# `BATPAK_SEED=<seed> cargo nextest run -p batpak --features dangerous-test-hooks
+# -E 'test(dst_corpus_currency)'`.
+#
+# Schema — one entry per graduated seed:
+#   seed:              u64   — SimFs / op-plan seed (decimal)
+#   fault_mode:        str   — HonestDiskCrash (only routed mode today)
+#   boundary:          null  — reserved for recovery_matrix cells (SIM-2b)
+#   seam_touched:      str   — critical mutation seam slug this seed stresses
+#   assurance_level:   str   — AL at graduation (L3/L4)
+#   steps:             u32   — op-plan length for recovery::run
+#   op_trace_digest:   u64   — FNV-1a identity; must replay identically
+#   outcome:           str   — CommittedPrefix | RolledBack | CanonicalRefusal
+
+- seed: 48104590831
+  fault_mode: HonestDiskCrash
+  boundary: null
+  seam_touched: writer-commit
+  assurance_level: L4
+  steps: 96
+  op_trace_digest: 0
+  outcome: CommittedPrefix

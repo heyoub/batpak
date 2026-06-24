@@ -23,6 +23,9 @@
 #                       age is auditable.
 #   reason:     str  - why it is currently tolerated and the plan to kill it
 #                       (e.g. "no falsifying test yet — tracked in #NNN").
+#   proof:      str  - optional proven-equivalence argument; **required** for L4
+#                       seam survivors (#64-A). L3 survivors without proof warn
+#                       against [`L3_MUTATION_DEBT_BUDGET`] in mutation_debt.rs.
 #
 # Empty list = no tolerated surviving mutants. Keep this list at zero whenever
 # possible; every entry is a falsifying test that has not been written yet.

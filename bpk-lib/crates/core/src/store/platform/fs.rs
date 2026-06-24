@@ -399,6 +399,29 @@ pub(crate) trait StoreFs: Send + Sync {
     /// Fsync the directory entry for `path`'s parent so a freshly-created file's
     /// name is durable. Mirrors [`super::sync::sync_parent_dir`].
     fn sync_parent_dir(&self, path: &Path) -> Result<(), StoreError>;
+
+    /// Reject symlink leaf paths before writing. Mirrors [`reject_symlink_leaf`].
+    fn reject_symlink_leaf(&self, path: &Path, purpose: &str) -> Result<(), StoreError>;
+
+    /// Canonicalize a path. Mirrors [`canonicalize`].
+    fn canonicalize(&self, path: &Path) -> io::Result<PathBuf>;
+
+    /// Symlink-aware metadata. Mirrors [`symlink_metadata`].
+    fn symlink_metadata(&self, path: &Path) -> io::Result<Metadata>;
+
+    /// Copy-on-write file copy for fork. Mirrors [`cow_copy_file`].
+    fn cow_copy_file(
+        &self,
+        from: &Path,
+        to: &Path,
+        preference: crate::store::CopyPreference,
+    ) -> io::Result<CowStrategyUsed>;
+
+    /// Deep file copy for snapshot. Mirrors [`copy`].
+    fn copy(&self, from: &Path, to: &Path) -> io::Result<u64>;
+
+    /// File metadata. Mirrors [`metadata`].
+    fn metadata(&self, path: &Path) -> io::Result<Metadata>;
 }
 
 /// Production [`StoreFs`]: every method delegates to the existing
@@ -436,6 +459,35 @@ impl StoreFs for RealFs {
 
     fn sync_parent_dir(&self, path: &Path) -> Result<(), StoreError> {
         crate::store::platform::sync::sync_parent_dir(path)
+    }
+
+    fn reject_symlink_leaf(&self, path: &Path, purpose: &str) -> Result<(), StoreError> {
+        reject_symlink_leaf(path, purpose)
+    }
+
+    fn canonicalize(&self, path: &Path) -> io::Result<PathBuf> {
+        canonicalize(path)
+    }
+
+    fn symlink_metadata(&self, path: &Path) -> io::Result<Metadata> {
+        symlink_metadata(path)
+    }
+
+    fn cow_copy_file(
+        &self,
+        from: &Path,
+        to: &Path,
+        preference: crate::store::CopyPreference,
+    ) -> io::Result<CowStrategyUsed> {
+        cow_copy_file(from, to, preference)
+    }
+
+    fn copy(&self, from: &Path, to: &Path) -> io::Result<u64> {
+        copy(from, to)
+    }
+
+    fn metadata(&self, path: &Path) -> io::Result<Metadata> {
+        metadata(path)
     }
 }
 

@@ -297,6 +297,33 @@ fn with_fs_installs_custom_filesystem_backend() {
         fn sync_parent_dir(&self, path: &Path) -> Result<(), crate::store::StoreError> {
             self.inner.sync_parent_dir(path)
         }
+        fn reject_symlink_leaf(
+            &self,
+            path: &Path,
+            purpose: &str,
+        ) -> Result<(), crate::store::StoreError> {
+            self.inner.reject_symlink_leaf(path, purpose)
+        }
+        fn canonicalize(&self, path: &Path) -> std::io::Result<std::path::PathBuf> {
+            self.inner.canonicalize(path)
+        }
+        fn symlink_metadata(&self, path: &Path) -> std::io::Result<std::fs::Metadata> {
+            self.inner.symlink_metadata(path)
+        }
+        fn cow_copy_file(
+            &self,
+            from: &Path,
+            to: &Path,
+            preference: crate::store::CopyPreference,
+        ) -> std::io::Result<crate::store::platform::fs::CowStrategyUsed> {
+            self.inner.cow_copy_file(from, to, preference)
+        }
+        fn copy(&self, from: &Path, to: &Path) -> std::io::Result<u64> {
+            self.inner.copy(from, to)
+        }
+        fn metadata(&self, path: &Path) -> std::io::Result<std::fs::Metadata> {
+            self.inner.metadata(path)
+        }
     }
 
     let created = Arc::new(AtomicBool::new(false));

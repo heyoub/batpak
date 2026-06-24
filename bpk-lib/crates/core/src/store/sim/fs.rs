@@ -123,10 +123,20 @@ impl SimFs {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         for (path, state) in durable.iter() {
-            // Route the raw open + truncate through the platform boundary so the
-            // store-runtime structural gate stays satisfied.
             let _truncated = crate::store::platform::fs::truncate_file_to(path, state.durable_len);
         }
+    }
+
+    /// Register a file written outside the segment fsync seam (fork copy / snapshot copy).
+    fn track_materialized_file(&self, path: &Path) {
+        let Ok(meta) = crate::store::platform::fs::metadata(path) else {
+            return;
+        };
+        let mut durable = self
+            .durable
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        durable.entry(path.to_path_buf()).or_default().durable_len = meta.len();
     }
 }
 
@@ -181,6 +191,39 @@ impl StoreFs for SimFs {
         // The directory entry is modelled as always durable once the file is
         // created: the crash truncates file CONTENTS, it does not unlink files.
         Ok(())
+    }
+
+    fn reject_symlink_leaf(&self, path: &Path, purpose: &str) -> Result<(), StoreError> {
+        crate::store::platform::fs::reject_symlink_leaf(path, purpose)
+    }
+
+    fn canonicalize(&self, path: &Path) -> io::Result<PathBuf> {
+        crate::store::platform::fs::canonicalize(path)
+    }
+
+    fn symlink_metadata(&self, path: &Path) -> io::Result<std::fs::Metadata> {
+        crate::store::platform::fs::symlink_metadata(path)
+    }
+
+    fn cow_copy_file(
+        &self,
+        from: &Path,
+        to: &Path,
+        preference: crate::store::CopyPreference,
+    ) -> io::Result<crate::store::platform::fs::CowStrategyUsed> {
+        let used = crate::store::platform::fs::cow_copy_file(from, to, preference)?;
+        self.track_materialized_file(to);
+        Ok(used)
+    }
+
+    fn copy(&self, from: &Path, to: &Path) -> io::Result<u64> {
+        let bytes = crate::store::platform::fs::copy(from, to)?;
+        self.track_materialized_file(to);
+        Ok(bytes)
+    }
+
+    fn metadata(&self, path: &Path) -> io::Result<std::fs::Metadata> {
+        crate::store::platform::fs::metadata(path)
     }
 }
 

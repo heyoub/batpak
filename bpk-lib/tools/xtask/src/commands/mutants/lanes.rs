@@ -523,6 +523,13 @@ fn critical_seam_exclude_res(slug: &str) -> &'static [&'static str] {
 }
 
 pub(super) fn critical_mutation_seams() -> &'static [CriticalMutationSeam] {
+    // HYBRID MODE HOOK (#64-C, deferred): for L4 seams (`writer-commit`,
+    // `segment-scan`, `hash-chain-replay`, `frontier-wait-durable`,
+    // `fork-isolation`, `import-reapply`), a future mutation-lane mode should
+    // use `store::sim::corpus::run_corpus_sweep` over `traceability/dst_corpus.yaml`
+    // as the kill-test — a mutant surviving the whole graduated corpus is a true
+    // divergence finding. Wire when SIM-2b broadens DST routing beyond the
+    // honest-disk recovery surface the corpus covers today.
     &[
         CriticalMutationSeam {
             slug: "writer-commit",

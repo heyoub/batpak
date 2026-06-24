@@ -1,6 +1,7 @@
 //! Deterministic evidence report for a store fork operation.
 
 use crate::evidence::{content_hash, sort_findings};
+use crate::store::StoreError;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -284,4 +285,69 @@ pub(crate) fn fork_evidence_report(
         batpak_version: None,
         diagnostics: Vec::new(),
     })
+}
+
+/// Wire magic for compat-matrix and forward-compat gates (`fork_evidence.fbev`).
+pub(crate) const FORK_EVIDENCE_WIRE_MAGIC: &[u8; 6] = b"FBATFE";
+
+/// Encode a fork evidence report body using the shared compat wire framing:
+/// `magic(6) | version(2 le) | crc32(4 le over body) | body(to_vec_named)`.
+///
+/// # Errors
+/// MessagePack encoding failure from `rmp-serde`.
+pub fn encode_fork_evidence_wire(body: &ForkReportBody) -> Result<Vec<u8>, StoreError> {
+    let body_bytes = crate::encoding::to_bytes(body)
+        .map_err(|error| StoreError::Serialization(Box::new(error)))?;
+    let crc = crc32fast::hash(&body_bytes);
+    let mut bytes = Vec::with_capacity(12 + body_bytes.len());
+    bytes.extend_from_slice(FORK_EVIDENCE_WIRE_MAGIC);
+    bytes.extend_from_slice(&body.schema_version.to_le_bytes());
+    bytes.extend_from_slice(&crc.to_le_bytes());
+    bytes.extend_from_slice(&body_bytes);
+    Ok(bytes)
+}
+
+/// Decode a fork evidence report body from compat wire framing.
+///
+/// # Errors
+/// Returns [`StoreError::ForkEvidenceFutureVersion`] when the wire or body schema
+/// version exceeds [`FORK_EVIDENCE_REPORT_SCHEMA_VERSION`], or a configuration /
+/// serialization error for corrupt framing.
+pub fn decode_fork_evidence_wire(bytes: &[u8]) -> Result<ForkReportBody, StoreError> {
+    if bytes.len() < 12 || bytes.get(..6) != Some(FORK_EVIDENCE_WIRE_MAGIC) {
+        return Err(StoreError::Configuration(
+            "fork evidence wire framing is invalid".into(),
+        ));
+    }
+    let found = u16::from_le_bytes(
+        bytes[6..8]
+            .try_into()
+            .map_err(|_| StoreError::Configuration("fork evidence version slice".into()))?,
+    );
+    if found > FORK_EVIDENCE_REPORT_SCHEMA_VERSION {
+        return Err(StoreError::ForkEvidenceFutureVersion {
+            found,
+            supported: FORK_EVIDENCE_REPORT_SCHEMA_VERSION,
+        });
+    }
+    let expected_crc = u32::from_le_bytes(
+        bytes[8..12]
+            .try_into()
+            .map_err(|_| StoreError::Configuration("fork evidence crc slice".into()))?,
+    );
+    let body_bytes = &bytes[12..];
+    if crc32fast::hash(body_bytes) != expected_crc {
+        return Err(StoreError::Configuration(
+            "fork evidence wire crc mismatch".into(),
+        ));
+    }
+    let body: ForkReportBody = crate::encoding::from_bytes(body_bytes)
+        .map_err(|error| StoreError::Serialization(Box::new(error)))?;
+    if body.schema_version > FORK_EVIDENCE_REPORT_SCHEMA_VERSION {
+        return Err(StoreError::ForkEvidenceFutureVersion {
+            found: body.schema_version,
+            supported: FORK_EVIDENCE_REPORT_SCHEMA_VERSION,
+        });
+    }
+    Ok(body)
 }

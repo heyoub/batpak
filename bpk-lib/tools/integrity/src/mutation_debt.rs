@@ -11,11 +11,16 @@
 //!   `file` points at a real tracked source file, `line` is positive). A malformed
 //!   or rotted entry (file deleted/moved) reds the build. Works on the empty list
 //!   too (vacuously passes), so it bites the moment any entry is added.
+//! - LOCAL (AL-graded, #64-A): an **L4** survivor without a non-empty `proof:` is a
+//!   hard fail (blocking). **L3** survivors without proof warn on stderr and count
+//!   against [`L3_MUTATION_DEBT_BUDGET`]; exceeding the budget reds the build.
+//!   **L1/L2** (or unknown seams such as `repo-wide`) are tolerated ledger debt.
 //! - CLOUD (the repo-wide mutation lane): the NEW-missed-mutant comparison — a
 //!   surviving mutant NOT recorded here reds the lane. That needs the cloud
 //!   `missed.txt`, so it cannot be a pure structural check; it lives with the
 //!   mutation runner (decision-1 baseline).
 
+use crate::assurance::{load_manifest, AssuranceEntry, AssuranceLevel, DEFAULT_LEVEL};
 use crate::repo_surface::ensure;
 use anyhow::{Context, Result};
 use serde::Deserialize;
@@ -23,6 +28,10 @@ use std::path::Path;
 
 /// Repo-relative path to the typed mutation-debt ledger.
 pub(crate) const MUTATION_DEBT_REL: &str = "traceability/mutation_debt.yaml";
+
+/// Maximum L3 seam survivors tolerated without a `proof:` field before the
+/// structural check hard-fails. Each unproven L3 entry emits a stderr warning.
+pub(crate) const L3_MUTATION_DEBT_BUDGET: usize = 3;
 
 /// One tolerated surviving mutant. Mirrors the schema documented in the yaml.
 #[derive(Debug, Deserialize)]
@@ -39,6 +48,30 @@ struct DebtEntry {
     first_seen: String,
     /// Why it is currently tolerated + the plan to kill it.
     reason: String,
+    /// Proven-equivalence argument required for L4 survivors (#64-A).
+    #[serde(default)]
+    proof: Option<String>,
+}
+
+/// Resolve a mutation seam slug to its declared assurance level by joining against
+/// `traceability/assurance_levels.yaml` L3/L4 entries (lockstep guarantees this
+/// mapping is total for every critical seam slug). Unknown slugs (e.g. `repo-wide`)
+/// default to [`DEFAULT_LEVEL`] (`L1`).
+pub(crate) fn seam_assurance_level(seam_slug: &str, entries: &[AssuranceEntry]) -> AssuranceLevel {
+    let mut best: Option<AssuranceLevel> = None;
+    for entry in entries {
+        if entry.seam.as_deref() == Some(seam_slug) {
+            best = Some(best.map_or(entry.level, |b| b.max(entry.level)));
+        }
+    }
+    best.unwrap_or(DEFAULT_LEVEL)
+}
+
+fn has_non_empty_proof(entry: &DebtEntry) -> bool {
+    entry
+        .proof
+        .as_ref()
+        .is_some_and(|proof| !proof.trim().is_empty())
 }
 
 /// Production entry: parse + schema-validate the live ledger against the tree.
@@ -48,12 +81,18 @@ pub(crate) fn check(repo_root: &Path) -> Result<()> {
         std::fs::read_to_string(&path).with_context(|| format!("read {MUTATION_DEBT_REL}"))?;
     let entries: Vec<DebtEntry> = yaml_serde::from_str(&content)
         .with_context(|| format!("parse {MUTATION_DEBT_REL} as a list of debt entries"))?;
-    validate_entries(repo_root, &entries)
+    let assurance_entries = load_manifest(repo_root)?;
+    validate_entries(repo_root, &entries, &assurance_entries)
 }
 
 /// Testable core: assert every entry is well-formed and not rotted. A RED fixture
 /// drives synthetic entries (malformed date / missing file) against the real tree.
-fn validate_entries(repo_root: &Path, entries: &[DebtEntry]) -> Result<()> {
+fn validate_entries(
+    repo_root: &Path,
+    entries: &[DebtEntry],
+    assurance_entries: &[AssuranceEntry],
+) -> Result<()> {
+    let mut l3_unproven = 0usize;
     for (i, entry) in entries.iter().enumerate() {
         let tag = format!("mutation_debt.yaml[{i}]");
         ensure(
@@ -93,7 +132,38 @@ fn validate_entries(repo_root: &Path, entries: &[DebtEntry]) -> Result<()> {
                 entry.mutant, entry.file
             ),
         )?;
+
+        match seam_assurance_level(&entry.seam, assurance_entries) {
+            AssuranceLevel::L4 if !has_non_empty_proof(entry) => ensure(
+                false,
+                format!(
+                    "structural-check (mutation-debt-schema): {tag} (`{}`) is an L4 seam `{}` \
+                     survivor without a non-empty `proof:` — L4 divergence must be proven-equivalent \
+                     or cured, not silently tolerated",
+                    entry.mutant, entry.seam
+                ),
+            )?,
+            AssuranceLevel::L3 if !has_non_empty_proof(entry) => {
+                errln!(
+                    "structural-check (mutation-debt-schema): {tag} (`{}`) is an L3 seam `{}` \
+                     survivor without `proof:` — advisory debt ({}/{})",
+                    entry.mutant,
+                    entry.seam,
+                    l3_unproven + 1,
+                    L3_MUTATION_DEBT_BUDGET
+                );
+                l3_unproven += 1;
+            }
+            _ => {}
+        }
     }
+    ensure(
+        l3_unproven <= L3_MUTATION_DEBT_BUDGET,
+        format!(
+            "structural-check (mutation-debt-schema): {l3_unproven} L3 survivor(s) without `proof:` \
+             exceed the budget of {L3_MUTATION_DEBT_BUDGET} — cure the mutants or add equivalence proof"
+        ),
+    )?;
     Ok(())
 }
 

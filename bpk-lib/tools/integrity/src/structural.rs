@@ -58,6 +58,7 @@ pub(crate) fn run() -> Result<()> {
     wallclock::check(&repo_root, &mut source_cache)?;
     glob_coverage::check(&repo_root)?;
     crate::mutation_debt::check(&repo_root)?;
+    crate::dst_corpus::check(&repo_root)?;
     public_surface::check(&repo_root, &mut source_cache)?;
     store_pub_fn_coverage::check(&repo_root, &mut source_cache)?;
     // Eleven blocking source lints ran over every production file; record the
@@ -87,6 +88,10 @@ pub(crate) fn run() -> Result<()> {
         let files = inputs.len().max(1);
         inputs.insert(repo_root.join("Cargo.toml"));
         Ok(crate::receipts::GateWork::new(files, files, inputs))
+    })?;
+
+    crate::receipts::run_gate("overclaim", || {
+        crate::overclaim::check(&repo_root)
     })?;
 
     // assurance-level-check: receipt over the manifest + the production files it

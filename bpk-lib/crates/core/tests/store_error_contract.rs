@@ -122,6 +122,14 @@ fn one_of_every_variant() -> Vec<StoreError> {
             found: 2,
             supported: 1,
         },
+        StoreError::ForkEvidenceFutureVersion {
+            found: 2,
+            supported: 1,
+        },
+        StoreError::ImportProvenanceFutureVersion {
+            found: 2,
+            supported: 1,
+        },
         StoreError::IdempotencyOverflowFailClosed {
             len: 1,
             max_keys: 1,
@@ -241,6 +249,8 @@ fn one_of_every_variant() -> Vec<StoreError> {
             | StoreError::MmapFutureVersion { .. }
             | StoreError::CheckpointFutureVersion { .. }
             | StoreError::HiddenRangesFutureVersion { .. }
+            | StoreError::ForkEvidenceFutureVersion { .. }
+            | StoreError::ImportProvenanceFutureVersion { .. }
             | StoreError::IdempotencyOverflowFailClosed { .. }
             | StoreError::InvalidPayloadVersion { .. }
             | StoreError::CorruptFrame { .. }

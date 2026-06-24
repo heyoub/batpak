@@ -405,6 +405,29 @@ pub(crate) const GATES: &[Gate] = &[
         red_fixture_kind: Some(RedFixtureKind::ProductionFlip),
         has_blocking_authority: true,
     },
+    // --- Phase-B6 DST corpus currency (Thread #64-B, blocking, qualified
+    //     ProductionFlip). The committed `traceability/dst_corpus.yaml` must be
+    //     non-empty and every row's FNV-1a digest must replay through the real
+    //     Store+SimFs recovery oracle. Under `gauntlet_red_fixture` the test
+    //     asserts a zero digest — impossible for a graduated row — so the red
+    //     half FAILS and proves the gate bites. ---
+    Gate {
+        slug: "dst-corpus-currency",
+        red_fixture_test: Some(
+            "crates/core/tests/dst_corpus_currency.rs::dst_corpus_currency_replays_committed_corpus",
+        ),
+        red_fixture_kind: Some(RedFixtureKind::ProductionFlip),
+        has_blocking_authority: true,
+    },
+    // --- Phase-3 over-claim detector (GAUNTLET-OVERCLAIM, Thread #67). ---
+    Gate {
+        slug: "overclaim",
+        red_fixture_test: Some(
+            "tools/integrity/src/overclaim.rs::detector_rejects_planted_overclaim",
+        ),
+        red_fixture_kind: Some(RedFixtureKind::ProductionFlip),
+        has_blocking_authority: true,
+    },
 ];
 
 /// Gates that block a real run today but are recorded as `has_blocking_authority:
@@ -429,6 +452,7 @@ pub(crate) const RECEIPT_REQUIRED_GATES: &[&str] = &[
     "ci-parity",
     "invariant-bridge",
     "structural-source-lints",
+    "overclaim",
 ];
 
 /// Tokens that signal a [`RedFixtureKind::GateNegativePath`] test body asserts a

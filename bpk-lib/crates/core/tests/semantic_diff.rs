@@ -27,7 +27,7 @@
 //! not a single-test property. Tracked for the perf/CI matrix, not faked here.
 
 use batpak::store::index::IndexEntry;
-use batpak::store::{HlcPoint, Store, StoreConfig};
+use batpak::store::{HlcPoint, ImportOptions, ImportSelector, Store, StoreConfig};
 use batpak_testkit::prelude::*;
 use proptest::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
@@ -366,4 +366,63 @@ fn semantic_diff_detects_planted_divergence() {
     store_b.close().expect("close B");
 
     assert_equivalent("planted-divergence-B", &snap_a, &snap_b);
+}
+
+/// Import axis: a destination populated via `import_events` must expose the same
+/// visible truth as one built by direct append of the same logical stream.
+#[test]
+fn import_path_agrees_with_direct_append_on_visible_truth() {
+    let specs = vec![
+        AppendSpec {
+            entity_idx: 0,
+            scope_idx: 0,
+            category: 0x1,
+            type_id: 2,
+            payload: 11,
+        },
+        AppendSpec {
+            entity_idx: 1,
+            scope_idx: 1,
+            category: 0x2,
+            type_id: 3,
+            payload: -3,
+        },
+        AppendSpec {
+            entity_idx: 2,
+            scope_idx: 2,
+            category: 0xF,
+            type_id: 4,
+            payload: 42,
+        },
+    ];
+
+    let source_dir = TempDir::new().expect("source temp dir");
+    let source = Store::open(equiv_config(&source_dir, false, false, false)).expect("open source");
+    populate(&source, &specs).expect("populate source");
+    source.close().expect("close source");
+    let source = Store::open(StoreConfig::new(source_dir.path()).with_clock_fn(|| FIXED_WALL_MS))
+        .expect("reopen source");
+
+    let direct_dir = TempDir::new().expect("direct temp dir");
+    let direct = Store::open(equiv_config(&direct_dir, false, false, false)).expect("open direct");
+    populate(&direct, &specs).expect("populate direct");
+    let direct_snap = capture_snapshot(&direct, &specs);
+    direct.close().expect("close direct");
+
+    let import_dir = TempDir::new().expect("import temp dir");
+    let import_store =
+        Store::open(equiv_config(&import_dir, false, false, false)).expect("open import dest");
+    let options = ImportOptions::new("semantic-diff-source").expect("import options");
+    import_store
+        .import_events(&source, &ImportSelector::all(), &options)
+        .expect("import events");
+    let written = import_store.frontier().written_hlc;
+    import_store
+        .wait_for_visible(written, std::time::Duration::from_secs(10))
+        .expect("wait for import visibility");
+    let import_snap = capture_snapshot(&import_store, &specs);
+    import_store.close().expect("close import dest");
+    source.close().expect("close source");
+
+    assert_equivalent("import-vs-direct-append", &direct_snap, &import_snap);
 }

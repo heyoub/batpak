@@ -230,6 +230,7 @@
     - ART-STORE-FORK-IMPORT-SOURCE
     - ART-STORE-FORK-IMPORT-TESTS
     - ART-STORE-FORK-BENCH
+    - ART-STORE-FORK-IMPORT-EXAMPLES
 - id: INV-IMPORT-CONTENT-ISOMORPHISM
   statement: >-
     Store import is re-application rather than merge: source event identity,
@@ -240,6 +241,28 @@
   artifacts:
     - ART-STORE-FORK-IMPORT-SOURCE
     - ART-STORE-FORK-IMPORT-TESTS
+    - ART-STORE-FORK-IMPORT-EXAMPLES
+- id: INV-IMPORT-CRASH-IDEMPOTENT
+  statement: >-
+    Import over a fault-injecting StoreFs survives crash at the durability boundary:
+    abandoning the destination without shutdown and truncating the unsynced tail must
+    leave a reopenable store whose post-crash re-import deduplicates already-applied
+    events via durable import keys while preserving raw payload bytes, content hashes,
+    and a valid per-entity hash chain.
+  witness_test: crates/core/tests/import_under_fault.rs::import_under_fault_crash_reimport_deduplicates
+  artifacts:
+    - ART-IMPORT-FAULT-TESTS
+    - ART-STORE-FORK-IMPORT-SOURCE
+- id: INV-IMPORT-NO-RUNAWAY
+  statement: >-
+    Same-store import terminates at the call-time source visible frontier: it imports
+    exactly the events present when the call began and never paginates into its own
+    freshly-appended output, even when tiny segment rotation interleaves with chunked
+    pagination.
+  witness_test: crates/core/tests/import_same_store_ceiling.rs::same_store_import_terminates_under_segment_rotation
+  artifacts:
+    - ART-IMPORT-FAULT-TESTS
+    - ART-STORE-FORK-IMPORT-SOURCE
 - id: INV-STORE-ISOMORPHISM-LAWS
   statement: >-
     Serialization seams that define durable store identity round-trip generated
@@ -259,6 +282,7 @@
   artifacts:
     - ART-STORE-LANE-BRANCH-SOURCE
     - ART-STORE-LANE-BRANCH-TESTS
+    - ART-STORE-FORK-IMPORT-EXAMPLES
 - id: INV-PROJECTION-FUSION-EQUIVALENT
   statement: >-
     Fused projection replay over an entity is equivalent to the tuple of

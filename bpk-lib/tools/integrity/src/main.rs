@@ -29,6 +29,7 @@ mod ci_parity;
 mod complexity;
 mod docs_catalog;
 mod doctor;
+mod dst_corpus;
 mod evidence_audit;
 mod gate_registry;
 mod glob_coverage;
@@ -36,6 +37,7 @@ mod harness_lints;
 mod invariant_bridge;
 mod meta_gate;
 mod mutation_debt;
+mod overclaim;
 mod public_surface;
 mod receipts;
 mod repo_ir;
@@ -111,6 +113,10 @@ enum CommandKind {
     /// wired fact is workspace crate-graph acyclicity (cargo-metadata + Tarjan
     /// vs. manifest-scan). Also folded into `structural-check`.
     TriangulationCheck,
+    /// Over-claim detector (GAUNTLET-OVERCLAIM): triangulate gate/doc/name
+    /// claims against delivered witnesses and assertion-bearing tests. Also
+    /// folded into `structural-check`.
+    OverclaimCheck,
     /// Static checks for evidence report bodies and public export vocabulary.
     EvidenceAudit,
     /// Validate the machine-readable agent intent/API/test surface map.
@@ -176,6 +182,10 @@ fn main() -> Result<()> {
             commits_file,
         } => run_meta_gate(diff_file, labels, pr_author, commits_file),
         CommandKind::TriangulationCheck => triangulation::check(&repo_surface::repo_root()?),
+        CommandKind::OverclaimCheck => {
+            let repo_root = repo_surface::repo_root()?;
+            overclaim::check(&repo_root).map(|_| ())
+        }
         CommandKind::EvidenceAudit => evidence_audit::run(&repo_surface::repo_root()?),
         CommandKind::AgentSurfaceCheck => agent_surface::run(&repo_surface::repo_root()?),
         CommandKind::AgentDoctor => agent_doctor::run(&repo_surface::repo_root()?),
