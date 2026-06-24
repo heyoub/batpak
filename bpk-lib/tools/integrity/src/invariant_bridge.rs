@@ -44,6 +44,7 @@ pub(crate) const TESTED_CRATES: &[&str] = &[
     "crates/core/tests/",
     "crates/syncbat/tests/",
     "crates/netbat/tests/",
+    "crates/bvisor/tests/",
 ];
 
 pub(crate) fn check(repo_root: &Path, tracked_files: &[PathBuf]) -> Result<()> {

@@ -145,6 +145,13 @@ fn insert(
     );
 }
 
+// The FROZEN host↔launcher wire protocol (kernel plan §10.8). PURE library types
+// (serde + canonical encode/decode + state-machine checker) — no OS code — so it
+// compiles on ANY host with the feature, ready for a later launcher `[[bin]]` to
+// `use`. Gated OFF by default, so the default public surface is unaffected.
+#[cfg(feature = "backend-linux")]
+pub mod protocol;
+
 // The real backend (probe/profile/execute touch the OS) compiles ONLY on a Linux
 // host with the feature enabled; the honest table above is always present.
 #[cfg(all(feature = "backend-linux", target_os = "linux"))]
