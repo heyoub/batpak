@@ -222,9 +222,116 @@ pub(crate) fn run() -> Result<()> {
         )?;
     }
     check_examples_artifact_complete(&repo_root, &artifacts)?;
+    check_concept_canonical(&repo_root, &artifacts)?;
     crate::model_bindings::check(&repo_root)?;
 
     outln!("traceability-check: ok");
+    Ok(())
+}
+
+#[derive(Debug, Deserialize)]
+struct ConceptRow {
+    concept_id: String,
+    canonical_example: String,
+    summary: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ConceptCatalog {
+    concepts: Vec<ConceptRow>,
+}
+
+/// `concept-canonical` gate (#68): the concept catalog maps each concept to ONE
+/// canonical runnable example. Enforces (1) every `canonical_example` is a real
+/// file listed in ART-EXAMPLES, (2) no duplicate `concept_id`, (3) no two rows
+/// share a `canonical_example`, (4) every runnable example in ART-EXAMPLES is the
+/// canonical example of exactly one concept (completeness — a NEW example cannot
+/// escape the catalog, and a retired one cannot dangle). This makes example
+/// duplication mechanically visible and BLOCKS a second example for an existing
+/// concept. Split out so a RED fixture can drive the pure check.
+fn check_concept_canonical(repo_root: &Path, artifacts: &[ArtifactRecord]) -> Result<()> {
+    let catalog: ConceptCatalog = load_yaml(&repo_root.join("traceability/concept_catalog.yaml"))
+        .context("concept catalog")?;
+    let examples_artifact = artifacts
+        .iter()
+        .find(|artifact| artifact.id == "ART-EXAMPLES")
+        .context("ART-EXAMPLES artifact must exist")?;
+    let registered: BTreeSet<&str> = examples_artifact
+        .paths
+        .iter()
+        .filter(|path| path.starts_with("crates/examples/examples/") && path.ends_with(".rs"))
+        .map(String::as_str)
+        .collect();
+    check_concept_canonical_over(repo_root, &catalog, &registered)
+}
+
+fn check_concept_canonical_over(
+    repo_root: &Path,
+    catalog: &ConceptCatalog,
+    registered: &BTreeSet<&str>,
+) -> Result<()> {
+    ensure(
+        !catalog.concepts.is_empty(),
+        "concept-canonical: concept_catalog.yaml lists no concepts (vacuous catalog)".to_owned(),
+    )?;
+
+    let mut seen_concepts: BTreeSet<&str> = BTreeSet::new();
+    let mut seen_examples: BTreeSet<&str> = BTreeSet::new();
+    for row in &catalog.concepts {
+        ensure(
+            !row.summary.trim().is_empty(),
+            format!(
+                "concept-canonical: concept `{}` has a blank summary",
+                row.concept_id
+            ),
+        )?;
+        ensure(
+            seen_concepts.insert(row.concept_id.as_str()),
+            format!(
+                "concept-canonical: duplicate concept_id `{}` — one canonical per concept",
+                row.concept_id
+            ),
+        )?;
+        ensure(
+            seen_examples.insert(row.canonical_example.as_str()),
+            format!(
+                "concept-canonical: example `{}` is canonical for more than one concept",
+                row.canonical_example
+            ),
+        )?;
+        // The canonical example must be a real file.
+        ensure(
+            resolve_repo_or_core_path(repo_root, &row.canonical_example).is_file(),
+            format!(
+                "concept-canonical: concept `{}` canonical_example `{}` does not exist",
+                row.concept_id, row.canonical_example
+            ),
+        )?;
+        // ...and must be registered in ART-EXAMPLES (so it is lock-gated + compiled).
+        ensure(
+            registered.contains(row.canonical_example.as_str()),
+            format!(
+                "concept-canonical: concept `{}` canonical_example `{}` is not in ART-EXAMPLES",
+                row.concept_id, row.canonical_example
+            ),
+        )?;
+    }
+
+    // Completeness: every registered example is some concept's canonical example.
+    let uncovered: Vec<&str> = registered
+        .iter()
+        .filter(|path| !seen_examples.contains(*path))
+        .copied()
+        .collect();
+    ensure(
+        uncovered.is_empty(),
+        format!(
+            "concept-canonical: runnable example(s) with no concept_catalog row: {}. \
+             Every example must be the canonical example of exactly one concept (add a concept \
+             row, or fold the example into an existing canonical one).",
+            uncovered.join(", ")
+        ),
+    )?;
     Ok(())
 }
 
@@ -330,4 +437,139 @@ fn rust_file_declares_fn(file: &syn::File, name: &str) -> bool {
     let mut finder = FnFinder { name, found: false };
     finder.visit_file(file);
     finder.found
+}
+
+#[cfg(test)]
+mod concept_canonical_tests {
+    use super::{
+        check_concept_canonical, check_concept_canonical_over, ArtifactRecord, ConceptCatalog,
+    };
+    use crate::repo_surface::{load_yaml, repo_root};
+    use std::collections::BTreeSet;
+
+    fn catalog(yaml: &str) -> ConceptCatalog {
+        yaml_serde::from_str(yaml).expect("parse synthetic concept catalog")
+    }
+
+    /// GREEN: the committed concept_catalog.yaml passes on the live tree — every
+    /// canonical example exists, is in ART-EXAMPLES, no concept/example duplicated,
+    /// and every registered example is covered.
+    #[test]
+    fn live_concept_catalog_is_clean() {
+        let repo = repo_root().expect("repo root");
+        let artifacts: Vec<ArtifactRecord> =
+            load_yaml(&repo.join("traceability/artifacts.yaml")).expect("load artifacts");
+        check_concept_canonical(&repo, &artifacts).expect("committed concept catalog must pass");
+    }
+
+    /// RED: two rows claim the same concept_id.
+    #[test]
+    fn rejects_duplicate_concept_id() {
+        let repo = repo_root().expect("repo root");
+        let c = catalog(
+            r#"
+concepts:
+  - concept_id: dup
+    canonical_example: crates/examples/examples/quickstart.rs
+    summary: a
+  - concept_id: dup
+    canonical_example: crates/examples/examples/eight_jobs.rs
+    summary: b
+"#,
+        );
+        let registered: BTreeSet<&str> = [
+            "crates/examples/examples/quickstart.rs",
+            "crates/examples/examples/eight_jobs.rs",
+        ]
+        .into_iter()
+        .collect();
+        let err = check_concept_canonical_over(&repo, &c, &registered)
+            .expect_err("duplicate concept_id must fail");
+        assert!(format!("{err:#}").contains("duplicate concept_id"));
+    }
+
+    /// RED: two concepts name the same canonical example.
+    #[test]
+    fn rejects_example_canonical_for_two_concepts() {
+        let repo = repo_root().expect("repo root");
+        let c = catalog(
+            r#"
+concepts:
+  - concept_id: a
+    canonical_example: crates/examples/examples/quickstart.rs
+    summary: a
+  - concept_id: b
+    canonical_example: crates/examples/examples/quickstart.rs
+    summary: b
+"#,
+        );
+        let registered: BTreeSet<&str> = ["crates/examples/examples/quickstart.rs"]
+            .into_iter()
+            .collect();
+        let err = check_concept_canonical_over(&repo, &c, &registered)
+            .expect_err("example canonical for two concepts must fail");
+        assert!(format!("{err:#}").contains("more than one concept"));
+    }
+
+    /// RED: a canonical example missing from ART-EXAMPLES.
+    #[test]
+    fn rejects_unregistered_canonical_example() {
+        let repo = repo_root().expect("repo root");
+        let c = catalog(
+            r#"
+concepts:
+  - concept_id: a
+    canonical_example: crates/examples/examples/quickstart.rs
+    summary: a
+"#,
+        );
+        // quickstart.rs exists but is NOT in the (empty) registered set.
+        let registered: BTreeSet<&str> = BTreeSet::new();
+        let err = check_concept_canonical_over(&repo, &c, &registered)
+            .expect_err("unregistered canonical example must fail");
+        assert!(format!("{err:#}").contains("not in ART-EXAMPLES"));
+    }
+
+    /// RED: a registered example with no concept row (completeness).
+    #[test]
+    fn rejects_uncovered_registered_example() {
+        let repo = repo_root().expect("repo root");
+        let c = catalog(
+            r#"
+concepts:
+  - concept_id: a
+    canonical_example: crates/examples/examples/quickstart.rs
+    summary: a
+"#,
+        );
+        let registered: BTreeSet<&str> = [
+            "crates/examples/examples/quickstart.rs",
+            "crates/examples/examples/eight_jobs.rs",
+        ]
+        .into_iter()
+        .collect();
+        let err = check_concept_canonical_over(&repo, &c, &registered)
+            .expect_err("uncovered registered example must fail");
+        assert!(format!("{err:#}").contains("no concept_catalog row"));
+    }
+
+    /// RED: a canonical example that does not exist on disk.
+    #[test]
+    fn rejects_missing_canonical_file() {
+        let repo = repo_root().expect("repo root");
+        let c = catalog(
+            r#"
+concepts:
+  - concept_id: a
+    canonical_example: crates/examples/examples/does_not_exist.rs
+    summary: a
+"#,
+        );
+        let registered: BTreeSet<&str> = ["crates/examples/examples/does_not_exist.rs"]
+            .into_iter()
+            .collect();
+        let err = check_concept_canonical_over(&repo, &c, &registered)
+            .expect_err("missing canonical file must fail");
+        assert!(format!("{err:#}").contains("does not exist"));
+    }
 }
