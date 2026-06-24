@@ -59,3 +59,110 @@ entries:
       invocation, and on any error returns an io::Error that pre_exec propagates as
       a FAILED spawn, so the workload never runs unconfined (fail closed).
     requirement: Filesystem
+
+  # ── Single-threaded Linux confinement LAUNCHER basement (kernel plan §10.8).
+  # The no-confinement skeleton: coordinator (main.rs, SAFE) validates + decides;
+  # the child (clone3, async-signal-safe window) scrubs ambient authority + execs.
+  # Every unsafe block lives in launcher/linux/sys.rs and is anchored here.
+  - file: crates/bvisor/launcher/linux/sys.rs
+    anchor: linux-launcher-read-fd
+    syscall: File::from_raw_fd + read_to_end (drain the plan fd), into_raw_fd (release without close)
+    safety_invariant: >-
+      Runs in the COORDINATOR (single-threaded, before clone3 — allocation is
+      fine). The fd is an inherited descriptor the host opened and handed the
+      launcher via a documented env-named slot; it is adopted into a File ONLY to
+      drain it, then released with into_raw_fd WITHOUT closing, so the caller
+      retains exactly the fd it passed (no double-close, no leak; fd accounting
+      stays exact). No raw pointer is dereferenced; only safe File reads run
+      between adopt and release.
+    requirement: InheritedFds
+  - file: crates/bvisor/launcher/linux/sys.rs
+    anchor: linux-launcher-fstat
+    syscall: fstat(fd, &mut stat) + fcntl(fd, F_GETFL)
+    safety_invariant: >-
+      Coordinator-side pure observation. The stat struct is zero-initialised and
+      passed by &mut to fstat, which only WRITES it and reads nothing from user
+      memory beyond that out-pointer; fcntl(F_GETFL) reads only the kernel's
+      file-status flags. The fd is borrowed, not consumed — no fd is created or
+      closed. On error each returns -1 and the OS errno is surfaced. Sound for any
+      valid open fd the host handed the launcher.
+    requirement: InheritedFds
+  - file: crates/bvisor/launcher/linux/sys.rs
+    anchor: linux-launcher-adopt-fd
+    syscall: File::from_raw_fd (take ownership of the control / error-pipe fd)
+    safety_invariant: >-
+      Coordinator-side. The fd is an inherited descriptor the host opened for the
+      launcher (control channel / error-pipe read end), named via a documented env
+      slot. The returned File takes exclusive ownership of exactly this one fd and
+      closes it on drop; the caller passes each such fd here AT MOST ONCE, so there
+      is no aliasing and no double-close. No raw pointer is dereferenced.
+    requirement: ControlChannel
+  - file: crates/bvisor/launcher/linux/sys.rs
+    anchor: linux-launcher-clone3-child
+    syscall: clone3 (raw syscall) + the async-signal-safe child branch (sigprocmask/close/fchdir/fexecve/write/_exit)
+    safety_invariant: >-
+      clone3 is invoked with a correctly sized clone_args (flags=0, exit_signal=
+      SIGCHLD) BUILT IN THE SINGLE-THREADED PARENT. The PARENT branch (rc>0) only
+      returns the child pid. The CHILD branch (rc==0) is the async-signal-safe
+      window: it touches ONLY the pre-built ChildExecPlan (argv/envp NUL-terminated
+      pointer arrays into parent-owned CStrings, the scrub close-list, and the
+      exec/cwd/error fds — ALL allocated by ChildExecPlan::build BEFORE this call)
+      by INDEXING already-mapped copy-on-write memory, and issues ONLY async-signal-
+      safe syscalls: sigprocmask (empty mask), close (each scrub fd), optional
+      fchdir, fexecve (exec rides the fd, no path reopen), write (errno on failure),
+      _exit. It performs NO heap allocation, takes NO lock, and calls NO allocating
+      Rust std; no destructor runs and no unwinding crosses the fork (the child
+      paths either fexecve-replace the image or _exit without returning into Rust).
+      On success fexecve replaces the image and the O_CLOEXEC error fd auto-closes,
+      which the parent reads as EOF; on ANY child failure the child writes the errno
+      to the error fd and _exit(127)s, so the target never runs and the parent
+      observes the fault (fail closed).
+    requirement: ChildSpawn
+  - file: crates/bvisor/launcher/linux/sys.rs
+    anchor: linux-launcher-child-window
+    syscall: run_child dispatch (the rc==0 clone3 child branch — async-signal-safe sigprocmask/close/fchdir/fexecve/write/_exit)
+    safety_invariant: >-
+      The call site of the unsafe `run_child` fn, reached ONLY in the `rc == 0`
+      clone3 CHILD branch — the async-signal-safe window. run_child performs ONLY
+      async-signal-safe syscalls on the PRE-BUILT ChildExecPlan (argv/envp pointer
+      arrays into parent-owned CStrings, the scrub close-list, the exec/cwd/error
+      fds — ALL allocated by ChildExecPlan::build BEFORE clone3), indexing already-
+      mapped copy-on-write memory. It performs NO heap allocation, takes NO lock,
+      and DIVERGES: it either fexecve-replaces the image or _exit(127)s after writing
+      the errno, so no destructor runs and no unwinding crosses the fork. The scrub
+      closes via raw SYS_close (NOT libc::close) to bypass std's owned-fd close guard
+      in the forked child.
+    requirement: ChildSpawn
+  - file: crates/bvisor/launcher/linux/sys.rs
+    anchor: linux-launcher-clone-args-zero
+    syscall: mem::zeroed::<clone_args>() (build the clone3 argument)
+    safety_invariant: >-
+      clone_args is a C-layout struct of plain integer fields (no references, no
+      NonNull, no padding-sensitive invariant), so the all-zero bit pattern is a
+      valid inhabitant. The struct is built in the single-threaded parent and the
+      used fields (exit_signal) are overwritten before it is passed to clone3. No
+      pointer is dereferenced here.
+    requirement: ChildSpawn
+  - file: crates/bvisor/launcher/linux/sys.rs
+    anchor: linux-launcher-close-fd
+    syscall: close (raw SYS_close on the coordinator's error-pipe write-end copy)
+    safety_invariant: >-
+      Coordinator-side single raw close on an inherited descriptor the launcher
+      owns (its copy of the error-pipe WRITE end), so that only the child retains a
+      write end and the read end can reach EOF. The fd is passed as a plain RawFd
+      with no Rust value wrapping it, so there is no aliasing and no double-free of
+      an owned handle; the raw syscall is used instead of a File drop precisely so a
+      best-effort close cannot abort the process if the fd is already gone. No
+      pointer is dereferenced. A failure is ignored.
+    requirement: ControlChannel
+  - file: crates/bvisor/launcher/linux/sys.rs
+    anchor: linux-launcher-waitid
+    syscall: waitid(P_PID, pid, &mut siginfo, WEXITED)
+    safety_invariant: >-
+      Coordinator-side (parent) reaping. siginfo_t is zero-initialised and passed
+      by &mut to waitid, which only WRITES it; WEXITED waits for the child's
+      terminal state. pid is the child this launcher just created via clone3, so the
+      parent is entitled to reap it. No user memory is read through a raw pointer
+      beyond the out-siginfo. Best-effort — a failure is ignored because the error
+      pipe, not the exit code, already decided the launch outcome.
+    requirement: ChildSpawn

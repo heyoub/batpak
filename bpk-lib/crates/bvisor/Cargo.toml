@@ -10,6 +10,16 @@ publish = false
 [lib]
 path = "src/lib.rs"
 
+# The single-threaded Linux confinement LAUNCHER (kernel plan §10.8) — a separate
+# `[[bin]]` in the bvisor package, NOT a crate. Meaningful only on Linux: `main.rs`
+# gates the real impl behind `cfg(target_os = "linux")` and provides a non-Linux
+# stub so the bin compiles cross-platform. Requires `backend-linux` (the protocol
+# types + libc basement live behind that feature).
+[[bin]]
+name = "bvisor-linux-launcher"
+path = "launcher/linux/main.rs"
+required-features = ["backend-linux"]
+
 [features]
 default = []
 # The SimBackend monster + the harness-owned GroundTruth shadow + the
