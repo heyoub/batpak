@@ -4,12 +4,19 @@
 # bvisor backend basement (`crates/bvisor/src/backend/<os>/sys.rs` or `sys/`)
 # against a documented justification. The `integrity unsafe-ledger` gate (folded
 # into `structural-check`) fails CLOSED if:
-#   - a basement `unsafe` block has NO matching ledger entry (unregistered unsafe), OR
-#   - a ledger entry matches NO live basement `unsafe` block (stale entry).
+#   - a basement `unsafe` block carries NO `LEDGER:<id>` anchor (unanchored), OR
+#   - two live `unsafe` blocks share one anchor id (duplicate), OR
+#   - a basement `unsafe` block has NO matching ledger entry (unregistered), OR
+#   - a ledger entry matches NO live anchored `unsafe` block (stale entry).
+#
+# Each `unsafe` block is bound to its entry by a STABLE COMMENT ANCHOR — a
+# `LEDGER:<id>` token (`<id>` is kebab `[a-z0-9-]+`) embedded in the `//` comment
+# block IMMEDIATELY above the `unsafe` keyword (the standard `// SAFETY:` site).
+# Anchoring by id, not `file:line`, lets blocks move freely as the source edits.
 #
 # Each entry MUST cite:
 #   file:               repo-relative path to the basement file
-#   line:               1-based line of the `unsafe` block's opening
+#   anchor:             the `LEDGER:<id>` id in the block's SAFETY comment
 #   syscall:            the syscall / FFI call the block performs (e.g. "clone3")
 #   safety_invariant:   the invariant the caller upholds to make it sound
 #   requirement:        the RequirementKind the unsafe backs (e.g. "ChildSpawn")
@@ -20,7 +27,7 @@
 # further unsafe is registered until those chunks land.
 entries:
   - file: crates/bvisor/src/backend/linux/sys.rs
-    line: 73
+    anchor: linux-landlock-abi-probe
     syscall: landlock_create_ruleset(NULL, 0, LANDLOCK_CREATE_RULESET_VERSION)
     safety_invariant: >-
       Invoked in its documented VERSION-QUERY form (attr=NULL, size=0,
@@ -30,7 +37,7 @@ entries:
       NULL/0 pair is exactly what the version query requires.
     requirement: Filesystem
   - file: crates/bvisor/src/backend/linux/sys.rs
-    line: 169
+    anchor: linux-landlock-pre-exec-apply
     syscall: pre_exec (fork child applies the parent-built landlock ruleset via restrict_self before execve)
     safety_invariant: >-
       The pre_exec closure runs in the forked child between fork and exec and is

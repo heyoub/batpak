@@ -59,7 +59,7 @@ pub(crate) struct ConfinedRoot {
 /// unavailable (old kernel / disabled LSM) — the caller floors `Filesystem` to
 /// `Unsupported` below the required ABI, so `plan()` fails closed.
 ///
-/// SAFETY (ledger entry 1): `landlock_create_ruleset` is invoked in its
+/// SAFETY (LEDGER:linux-landlock-abi-probe): `landlock_create_ruleset` is invoked in its
 /// documented VERSION-QUERY form — `attr = NULL`, `size = 0`, `flags =
 /// LANDLOCK_CREATE_RULESET_VERSION`. In this form the kernel reads NO user
 /// memory (the NULL/0 pair is exactly what the version query requires) and only
@@ -68,8 +68,9 @@ pub(crate) struct ConfinedRoot {
 /// therefore sound for any caller state.
 #[must_use]
 pub(crate) fn probe_landlock_abi() -> i64 {
-    // SAFETY: documented version-query form (NULL attr, 0 size); reads no user
-    // memory, creates no fd, mutates nothing. See the function-level note.
+    // SAFETY (LEDGER:linux-landlock-abi-probe): documented version-query form
+    // (NULL attr, 0 size); reads no user memory, creates no fd, mutates nothing.
+    // See the function-level note.
     let raw = unsafe {
         libc::syscall(
             libc::SYS_landlock_create_ruleset,
@@ -136,7 +137,7 @@ fn to_io(error: impl std::fmt::Display) -> io::Error {
 /// [`CompatLevel::HardRequirement`] makes a kernel that cannot honor the ruleset
 /// fail the spawn (fail closed); the caller passes it once the ABI floor is met.
 ///
-/// SAFETY (ledger entry 2): `pre_exec` runs the closure in the forked child
+/// SAFETY (LEDGER:linux-landlock-pre-exec-apply): `pre_exec` runs the closure in the forked child
 /// between `fork` and `exec`, so it must be async-signal-safe. The ruleset —
 /// including every heap allocation, path-fd open, and `landlock_add_rule` syscall
 /// — is built BEFORE the fork by [`build_ruleset`] in the parent; the created
@@ -163,9 +164,9 @@ pub(crate) fn spawn_confined(
     let mut command = Command::new(exe);
     command.args(args);
 
-    // SAFETY: see the function-level note — the post-fork closure only applies the
-    // parent-built ruleset (no allocation), and fails the spawn rather than
-    // running the workload unconfined.
+    // SAFETY (LEDGER:linux-landlock-pre-exec-apply): see the function-level note —
+    // the post-fork closure only applies the parent-built ruleset (no allocation),
+    // and fails the spawn rather than running the workload unconfined.
     unsafe {
         command.pre_exec(move || {
             pending
