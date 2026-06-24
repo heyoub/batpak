@@ -1,16 +1,14 @@
 //! Sealed-segment compaction with off-side index rebuild and single swap point.
 
+use super::sync;
 use crate::coordinate::Coordinate;
 use crate::event::{EventKind, StoredEvent};
 use crate::store::file_classification::StoreFileKind;
-use super::sync;
 use crate::store::lifecycle_close::write_cold_start_artifacts_on_close;
 use crate::store::platform::fs as platform_fs;
 use crate::store::segment::scan as reader;
 use crate::store::segment::{self, Active, FramePayload};
-use crate::store::{
-    CompactionConfig, CompactionStrategy, Open, Store, StoreError,
-};
+use crate::store::{CompactionConfig, CompactionStrategy, Open, Store, StoreError};
 
 use super::lifecycle_fs::remove_file_if_present;
 
@@ -30,7 +28,10 @@ pub(crate) fn compact(
     sync(store)?;
 
     let mut all_segments: Vec<(u64, std::path::PathBuf)> = Vec::new();
-    for entry in fs.read_dir(&store.config.data_dir).map_err(StoreError::Io)? {
+    for entry in fs
+        .read_dir(&store.config.data_dir)
+        .map_err(StoreError::Io)?
+    {
         let entry = entry.map_err(StoreError::Io)?;
         let path = entry.path();
         let seg_id = match StoreFileKind::from_path(&path) {

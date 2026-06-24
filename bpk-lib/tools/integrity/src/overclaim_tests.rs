@@ -2,7 +2,7 @@
 //! trees, and the live-tree gate (gate registry + triangulation).
 
 use super::{
-    check_overclaim_oracles, overclaim_findings, aspirational_pub_fn_subjects,
+    aspirational_pub_fn_subjects, check_overclaim_oracles, overclaim_findings,
     PREDICATE_ASSERTION_TEST, PREDICATE_WITNESS_DELIVERED,
 };
 use crate::source_cache::SourceCache;
@@ -20,7 +20,12 @@ fn claim(oracle: &str, subject: &str, predicate: &str, value: &str) -> Claim {
 #[test]
 fn overclaim_engine_flags_claim_yes_reality_no() {
     let pool = vec![
-        claim("claim-oracle", "INV-PLANTED", PREDICATE_WITNESS_DELIVERED, "yes"),
+        claim(
+            "claim-oracle",
+            "INV-PLANTED",
+            PREDICATE_WITNESS_DELIVERED,
+            "yes",
+        ),
         claim(
             "reality-oracle",
             "INV-PLANTED",
@@ -28,7 +33,8 @@ fn overclaim_engine_flags_claim_yes_reality_no() {
             "no",
         ),
     ];
-    let findings = overclaim_findings(&TriangulationEngine::disagreements(&pool));
+    let disagreements = TriangulationEngine::disagreements(&pool);
+    let findings = overclaim_findings(&disagreements);
     assert_eq!(findings.len(), 1, "exactly one over-claim");
     assert_eq!(findings[0].subject, "INV-PLANTED");
 }
@@ -37,7 +43,12 @@ fn overclaim_engine_flags_claim_yes_reality_no() {
 fn overclaim_engine_ignores_agreement() {
     let pool = vec![
         claim("claim-oracle", "INV-OK", PREDICATE_WITNESS_DELIVERED, "yes"),
-        claim("reality-oracle", "INV-OK", PREDICATE_WITNESS_DELIVERED, "yes"),
+        claim(
+            "reality-oracle",
+            "INV-OK",
+            PREDICATE_WITNESS_DELIVERED,
+            "yes",
+        ),
     ];
     assert!(overclaim_findings(&TriangulationEngine::disagreements(&pool)).is_empty());
 }
@@ -88,7 +99,8 @@ fn gate_negative_path_flags_non_test_witness_overclaim() -> Result<(), Box<dyn s
 }
 
 #[test]
-fn aspirational_fn_scan_finds_evidence_suffix_on_live_tree() -> Result<(), Box<dyn std::error::Error>> {
+fn aspirational_fn_scan_finds_evidence_suffix_on_live_tree(
+) -> Result<(), Box<dyn std::error::Error>> {
     let root = crate::repo_surface::repo_root()?;
     let mut cache = SourceCache::new(&root);
     let subjects = aspirational_pub_fn_subjects(&root, &mut cache)?;
@@ -100,7 +112,8 @@ fn aspirational_fn_scan_finds_evidence_suffix_on_live_tree() -> Result<(), Box<d
 }
 
 #[test]
-fn name_behavior_overclaim_flags_unwitnessed_aspirational_fn() -> Result<(), Box<dyn std::error::Error>> {
+fn name_behavior_overclaim_flags_unwitnessed_aspirational_fn(
+) -> Result<(), Box<dyn std::error::Error>> {
     let pool = vec![
         claim(
             "claim-oracle",
@@ -115,7 +128,8 @@ fn name_behavior_overclaim_flags_unwitnessed_aspirational_fn() -> Result<(), Box
             "no",
         ),
     ];
-    let findings = overclaim_findings(&TriangulationEngine::disagreements(&pool));
+    let disagreements = TriangulationEngine::disagreements(&pool);
+    let findings = overclaim_findings(&disagreements);
     assert_eq!(findings.len(), 1);
     assert_eq!(findings[0].predicate, PREDICATE_ASSERTION_TEST);
     Ok(())

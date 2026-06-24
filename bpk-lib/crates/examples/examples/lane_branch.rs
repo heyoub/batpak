@@ -15,7 +15,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let store = Store::open(StoreConfig::new(dir.path()).with_sync_every_n_events(1))?;
     let coord = Coordinate::new("entity:lane-demo", "scope:example")?;
 
-    let _ = store.append(&coord, EventKind::DATA, &serde_json::json!({ "lane": 0, "n": 0 }))?;
+    let _ = store.append(
+        &coord,
+        EventKind::DATA,
+        &serde_json::json!({ "lane": 0, "n": 0 }),
+    )?;
     let _ = store.append_with_options(
         &coord,
         EventKind::DATA,

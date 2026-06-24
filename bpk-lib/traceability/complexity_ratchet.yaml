@@ -99,7 +99,7 @@
   lines: 195
   nesting: 4
   cyclomatic: 40
-- key: "crates/core/src/store/error.rs::<StoreError as Display>::fmt"
-  lines: 220
+- key: "crates/core/src/store/error/display.rs::<StoreError as Display>::fmt"
+  lines: 196
   nesting: 2
-  cyclomatic: 56
+  cyclomatic: 46

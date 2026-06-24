@@ -141,13 +141,15 @@ pub mod __fuzz;
 #[cfg(feature = "dangerous-test-hooks")]
 #[doc(hidden)]
 pub mod __sim {
+    pub use crate::store::sim::corpus::{
+        assert_corpus_rows_current, graduate_corpus_seed, verify_corpus_row,
+    };
     pub use crate::store::sim::fork_recovery::{
         fork_fault_replay_seed, run_seeded_fork_fault_public, ForkFaultOutcomePublic,
     };
     pub use crate::store::sim::import_recovery::{
         import_fault_replay_seed, run_seeded_import_fault_public, ImportFaultOutcomePublic,
     };
-    pub use crate::store::sim::corpus::verify_corpus_row;
     pub use crate::store::sim::recovery::{
         recovery_replay_seed, run_seeded_recovery, RecoveryOutcomePublic,
     };

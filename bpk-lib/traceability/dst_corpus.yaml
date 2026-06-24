@@ -22,5 +22,5 @@
   seam_touched: writer-commit
   assurance_level: L4
   steps: 96
-  op_trace_digest: 0
+  op_trace_digest: 101395256710529115
   outcome: CommittedPrefix

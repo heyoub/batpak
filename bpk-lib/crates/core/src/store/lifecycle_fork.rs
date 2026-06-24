@@ -2,11 +2,11 @@
 
 use crate::store::cold_start::latest_segment_watermark;
 use crate::store::file_classification::StoreFileKind;
+use crate::store::fork_report::ForkCopyStrategy;
 use crate::store::fork_report::{
     destination_path_digest as fork_destination_path_digest, fork_evidence_report, ForkFinding,
     ForkOptions, ForkReport, ForkReportInput,
 };
-use crate::store::fork_report::ForkCopyStrategy;
 use crate::store::platform::fs::StoreFs;
 use crate::store::{Open, Store, StoreError};
 
@@ -84,10 +84,12 @@ pub(crate) fn fork(
         fork_entry(
             fs.as_ref(),
             &mut acc,
-            &path,
-            &source_kind,
-            file_name_display,
-            &dest_path,
+            ForkEntry {
+                path: &path,
+                source_kind: &source_kind,
+                file_name_display,
+                dest_path: &dest_path,
+            },
             active_segment_id,
             &options,
         )?;
@@ -154,17 +156,31 @@ fn record_deep_copied_presence(acc: &mut ForkAccumulator, source_kind: &StoreFil
     }
 }
 
+/// One directory entry being forked: its source path/kind, destination path, and
+/// the display name used in findings. Bundled so `fork_entry` stays within the
+/// argument-count budget.
+pub(super) struct ForkEntry<'a> {
+    pub(super) path: &'a std::path::Path,
+    pub(super) source_kind: &'a StoreFileKind,
+    pub(super) file_name_display: String,
+    pub(super) dest_path: &'a std::path::Path,
+}
+
 pub(super) fn fork_entry(
     fs: &dyn StoreFs,
     acc: &mut ForkAccumulator,
-    path: &std::path::Path,
-    source_kind: &StoreFileKind,
-    file_name_display: String,
-    dest_path: &std::path::Path,
+    entry: ForkEntry<'_>,
     active_segment_id: u64,
     options: &ForkOptions,
 ) -> Result<(), StoreError> {
     use crate::store::file_classification::ForkStrategy;
+
+    let ForkEntry {
+        path,
+        source_kind,
+        file_name_display,
+        dest_path,
+    } = entry;
 
     match source_kind.fork_strategy(active_segment_id) {
         ForkStrategy::ShareIfPossible => {
@@ -190,11 +206,7 @@ pub(super) fn fork_entry(
         }
         ForkStrategy::DeepCopyAlways => {
             let used = fs
-                .cow_copy_file(
-                    path,
-                    dest_path,
-                    crate::store::CopyPreference::DeepCopyOnly,
-                )
+                .cow_copy_file(path, dest_path, crate::store::CopyPreference::DeepCopyOnly)
                 .map_err(StoreError::Io)?;
             let strategy = fork_copy_strategy(used);
             acc.strategy_counts.record_copy(strategy);
@@ -209,11 +221,7 @@ pub(super) fn fork_entry(
         }
         ForkStrategy::CacheRegenerable if !options.exclude_caches => {
             let used = fs
-                .cow_copy_file(
-                    path,
-                    dest_path,
-                    crate::store::CopyPreference::DeepCopyOnly,
-                )
+                .cow_copy_file(path, dest_path, crate::store::CopyPreference::DeepCopyOnly)
                 .map_err(StoreError::Io)?;
             let strategy = fork_copy_strategy(used);
             acc.strategy_counts.record_copy(strategy);

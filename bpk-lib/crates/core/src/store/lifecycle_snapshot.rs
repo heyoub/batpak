@@ -1,8 +1,8 @@
 //! Point-in-time store snapshot (deep copy of share-safe substrate files).
 
+use super::sync;
 use crate::store::cold_start::latest_segment_watermark;
 use crate::store::file_classification::StoreFileKind;
-use super::sync;
 use crate::store::snapshot_report::{
     destination_path_digest, snapshot_evidence_report, SnapshotEvidenceReport, SnapshotFileKind,
     SnapshotFinding, SnapshotReportInput,

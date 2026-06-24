@@ -28,14 +28,7 @@ pub(super) const REPO_MUTATION_THRESHOLDS: &[(RepoMutationPhase, u32)] = &[
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum MutationEnforcement {
     Threshold { min_catch_pct: u32 },
-    /// AL-graded L1/L2 survivor tier (#64-A, D4): record score evidence without
-    /// blocking the lane on a catch-rate floor.
-    RecordOnly,
 }
-
-/// Natural enforcement for AL-graded L1/L2 survivor recording (#64-A, D4).
-pub(super) const L1_L2_SURVIVOR_ENFORCEMENT: MutationEnforcement =
-    MutationEnforcement::RecordOnly;
 
 /// Whether a diff-scoped lane was actually scoped by a real, non-empty PR diff.
 ///
@@ -158,50 +151,37 @@ pub(super) fn assert_mutation_policy(
         );
     }
 
-    match lane.enforcement {
-        MutationEnforcement::Threshold { min_catch_pct } => {
-            let Some(score_pct) = score.score_pct else {
-                bail!(
-                    "mutation lane `{}` produced no scoreable caught/missed mutants \
-                     ({} executed total; {} unviable). Threshold gates require at least one \
-                     scoreable mutant so unviable-only output cannot pass as evidence.",
-                    lane.label,
-                    score.executed,
-                    score.unviable,
-                );
-            };
-            if score_pct < min_catch_pct as usize {
-                bail!(
-                    "mutation score for `{}` is {}%, below the required {}% \
-                     ({} caught, {} missed out of {} scored mutants; {} executed total). Add tests that catch the \
-                     mutations listed in {}.",
-                    lane.label,
-                    score_pct,
-                    min_catch_pct,
-                    score.caught,
-                    score.missed,
-                    score.scored,
-                    score.executed,
-                    cargo_mutants_receipt_path(output_dir, "missed.txt").display()
-                );
-            }
-            if lane.scope == MutationScope::RepoWide {
-                if let Some(next_floor) = next_ratchet_floor(score_pct, Some(min_catch_pct)) {
-                    outln!(
-                        "mutants: `{}` is above the current repo-wide ratchet floor; a future raise to {}% is available.",
-                        lane.label, next_floor
-                    );
-                }
-            }
-        }
-        MutationEnforcement::RecordOnly => {
-            let score_note = match score.score_pct {
-                Some(score_pct) => format!("{score_pct}% recorded"),
-                None => "no scoreable mutants; evidence only".to_owned(),
-            };
+    let MutationEnforcement::Threshold { min_catch_pct } = lane.enforcement;
+    let Some(score_pct) = score.score_pct else {
+        bail!(
+            "mutation lane `{}` produced no scoreable caught/missed mutants \
+             ({} executed total; {} unviable). Threshold gates require at least one \
+             scoreable mutant so unviable-only output cannot pass as evidence.",
+            lane.label,
+            score.executed,
+            score.unviable,
+        );
+    };
+    if score_pct < min_catch_pct as usize {
+        bail!(
+            "mutation score for `{}` is {}%, below the required {}% \
+             ({} caught, {} missed out of {} scored mutants; {} executed total). Add tests that catch the \
+             mutations listed in {}.",
+            lane.label,
+            score_pct,
+            min_catch_pct,
+            score.caught,
+            score.missed,
+            score.scored,
+            score.executed,
+            cargo_mutants_receipt_path(output_dir, "missed.txt").display()
+        );
+    }
+    if lane.scope == MutationScope::RepoWide {
+        if let Some(next_floor) = next_ratchet_floor(score_pct, Some(min_catch_pct)) {
             outln!(
-                "mutants: `{}` => record-only enforcement ({score_note}, not gated).",
-                lane.label,
+                "mutants: `{}` is above the current repo-wide ratchet floor; a future raise to {}% is available.",
+                lane.label, next_floor
             );
         }
     }

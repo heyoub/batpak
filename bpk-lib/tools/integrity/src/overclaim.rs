@@ -13,11 +13,11 @@
 use crate::docs_catalog::{load_catalog, CatalogInvariant};
 use crate::gate_registry;
 use crate::invariant_bridge::TESTED_CRATES;
-use crate::repo_surface::{
-    core_src_root, core_tests_root, ensure, production_rust_roots, relative, resolve_repo_or_core_path,
-    rust_files,
-};
 use crate::receipts::GateWork;
+use crate::repo_surface::{
+    core_src_root, core_tests_root, ensure, production_rust_roots, relative,
+    resolve_repo_or_core_path, rust_files,
+};
 use crate::source_cache::SourceCache;
 use crate::triangulation::{Claim, ClaimSet, Disagreement, TriangulationEngine};
 use anyhow::{Context, Result};
@@ -63,15 +63,12 @@ pub(crate) fn check(repo_root: &Path) -> Result<GateWork> {
         "overclaim: ok ({} claim(s) triangulated; gate registry + doc + name-vs-behavior clean)",
         pool.len()
     );
-    Ok(GateWork::new(
-        inputs.len().max(1),
-        assertions,
-        inputs,
-    ))
+    Ok(GateWork::new(inputs.len().max(1), assertions, inputs))
 }
 
 /// Oracle triangulation only (no gate-registry delegate). Used by red fixtures
 /// that plant doc/name violations in a temp tree.
+#[cfg(test)]
 pub(crate) fn check_overclaim_oracles(repo_root: &Path) -> Result<()> {
     let mut cache = SourceCache::new(repo_root);
     let pool = collect_claim_pool(repo_root, &mut cache)?;
@@ -93,7 +90,12 @@ pub(crate) fn check_overclaim_oracles(repo_root: &Path) -> Result<()> {
 fn collect_claim_pool(repo_root: &Path, cache: &mut SourceCache) -> Result<Vec<Claim>> {
     let aspirational = aspirational_pub_fn_subjects(repo_root, cache)?;
     let mut pool = Vec::new();
-    pool.extend(claim_oracle_claims(repo_root, &aspirational)?.claims().iter().cloned());
+    pool.extend(
+        claim_oracle_claims(repo_root, &aspirational)?
+            .claims()
+            .iter()
+            .cloned(),
+    );
     pool.extend(
         reality_oracle_claims(repo_root, cache, &aspirational)?
             .claims()
@@ -127,12 +129,17 @@ fn claim_oracle_claims(repo_root: &Path, aspirational: &[String]) -> Result<Clai
     let mut set = ClaimSet::new();
     let invariants = load_catalog(repo_root).context("load invariants catalog")?;
     for inv in &invariants {
-        set.assert(
-            CLAIM_ORACLE,
-            &inv.id,
-            PREDICATE_WITNESS_DELIVERED,
-            "yes",
-        );
+        // The CLAIM is the declared `witness_test`: an invariant that names a
+        // witness asserts "a witness test delivers this property". A prose-only
+        // invariant (no `witness_test`) makes no such claim — strong-tier
+        // citation is opt-in per-INV during burn-down (INV-INVARIANT-WITNESS-TEST,
+        // docs_catalog::check_witness_tests). Claiming `yes` for every catalog
+        // entry would manufacture a claim nobody made and red the gate on the
+        // entire prose backlog. The detector still bites the real over-claim: a
+        // DECLARED witness that does not resolve to a real `#[test]` (reality=no).
+        if inv.witness_test.is_some() {
+            set.assert(CLAIM_ORACLE, &inv.id, PREDICATE_WITNESS_DELIVERED, "yes");
+        }
     }
     for subject in aspirational {
         set.assert(CLAIM_ORACLE, subject, PREDICATE_ASSERTION_TEST, "yes");
@@ -285,40 +292,36 @@ pub(crate) fn aspirational_pub_fn_subjects(
     Ok(subjects.into_iter().collect())
 }
 
-fn collect_aspirational_pub_fns(
-    items: &[syn::Item],
-    rel: &str,
-    out: &mut BTreeSet<String>,
-) {
+fn collect_aspirational_pub_fns(items: &[syn::Item], rel: &str, out: &mut BTreeSet<String>) {
+    // `syn::Item` is a large `#[non_exhaustive]` foreign enum; use `if let`
+    // dispatch over the three relevant variants rather than a `match` with a
+    // wildcard arm (which the workspace `wildcard_enum_match_arm` lint forbids).
     for item in items {
-        match item {
-            syn::Item::Fn(item_fn) if matches!(item_fn.vis, syn::Visibility::Public(_)) => {
+        if let syn::Item::Fn(item_fn) = item {
+            if matches!(item_fn.vis, syn::Visibility::Public(_)) {
                 let name = item_fn.sig.ident.to_string();
                 if is_aspirational_fn_name(&name) {
                     out.insert(format!("{rel}::{name}"));
                 }
             }
-            syn::Item::Impl(item_impl) => {
-                for impl_item in &item_impl.items {
-                    if let syn::ImplItem::Fn(method) = impl_item {
-                        if matches!(method.vis, syn::Visibility::Public(_)) {
-                            let name = method.sig.ident.to_string();
-                            if is_aspirational_fn_name(&name) {
-                                out.insert(format!("{rel}::{name}"));
-                            }
+        } else if let syn::Item::Impl(item_impl) = item {
+            for impl_item in &item_impl.items {
+                if let syn::ImplItem::Fn(method) = impl_item {
+                    if matches!(method.vis, syn::Visibility::Public(_)) {
+                        let name = method.sig.ident.to_string();
+                        if is_aspirational_fn_name(&name) {
+                            out.insert(format!("{rel}::{name}"));
                         }
                     }
                 }
             }
-            syn::Item::Mod(item_mod) => {
-                if module_is_cfg_test(&item_mod.attrs) {
-                    continue;
-                }
-                if let Some((_, nested)) = &item_mod.content {
-                    collect_aspirational_pub_fns(nested, rel, out);
-                }
+        } else if let syn::Item::Mod(item_mod) = item {
+            if module_is_cfg_test(&item_mod.attrs) {
+                continue;
             }
-            _ => {}
+            if let Some((_, nested)) = &item_mod.content {
+                collect_aspirational_pub_fns(nested, rel, out);
+            }
         }
     }
 }
@@ -436,8 +439,14 @@ fn macro_is_assertion(path: &syn::Path) -> bool {
     path.segments.last().is_some_and(|segment| {
         matches!(
             segment.ident.to_string().as_str(),
-            "assert" | "assert_eq" | "assert_ne" | "assert_matches" | "matches" | "prop_assert"
-                | "prop_assert_eq" | "prop_assert_ne"
+            "assert"
+                | "assert_eq"
+                | "assert_ne"
+                | "assert_matches"
+                | "matches"
+                | "prop_assert"
+                | "prop_assert_eq"
+                | "prop_assert_ne"
         )
     })
 }

@@ -185,6 +185,9 @@ pub struct ImportReport {
     pub skipped_reserved: u64,
     /// Source events skipped by the caller filter.
     pub skipped_filtered: u64,
+    /// Source events skipped because they were our own prior import output for
+    /// this source namespace (chain re-import guard; see INV-IMPORT-NO-RUNAWAY).
+    pub skipped_reimported: u64,
     /// Highest source global sequence observed by the selector.
     pub source_high_watermark: Option<u64>,
 }
@@ -353,6 +356,19 @@ pub(crate) fn import_events<S: crate::store::StoreState>(
                 }
             }
 
+            // Self-chain guard (INV-IMPORT-NO-RUNAWAY): a source event that already
+            // carries import provenance for THIS source_namespace is our own prior
+            // import output for the same logical stream. It aliases an original
+            // source identity that is also part of this selection (and is itself
+            // deduplicated below), so re-importing the copy would amplify the stream
+            // on every clean repeat pass. Skip the copy without counting it: the
+            // original it aliases carries the dedup credit. This is what makes a
+            // completed same-store import idempotent against itself.
+            if source_event_is_self_chained(source, &entry, &options.source_namespace)? {
+                report.skipped_reimported = report.skipped_reimported.saturating_add(1);
+                continue;
+            }
+
             let key = import_key(&options.source_namespace, entry.event_id().as_u128());
             if import_key_already_present(destination, key) {
                 report.deduplicated = report.deduplicated.saturating_add(1);
@@ -414,6 +430,20 @@ fn import_key(source_namespace: &SourceNamespace, source_event_id: u128) -> Idem
 fn import_key_already_present(destination: &Store<Open>, key: IdempotencyKey) -> bool {
     destination.index.idemp.get(key.as_u128()).is_some()
         || destination.index.get_by_id(key.as_u128()).is_some()
+}
+
+/// True when `entry` already carries import provenance recorded under
+/// `source_namespace` — i.e. it is a copy this import chain previously produced
+/// for the same logical source. Such copies alias an original source identity
+/// and must not be re-imported (INV-IMPORT-NO-RUNAWAY).
+fn source_event_is_self_chained<S: crate::store::StoreState>(
+    source: &Store<S>,
+    entry: &IndexEntry,
+    source_namespace: &SourceNamespace,
+) -> Result<bool, StoreError> {
+    let extensions = source.reader.read_receipt_extensions(&entry.disk_pos())?;
+    Ok(provenance_from_extensions(&extensions)
+        .is_some_and(|provenance| provenance.source_namespace == *source_namespace))
 }
 
 fn hex_lower(bytes: &[u8]) -> String {

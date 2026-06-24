@@ -98,17 +98,20 @@ pub(crate) enum GraduationRefusal {
 impl std::fmt::Display for GraduationRefusal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::NonDeterministic { seed, first, second } => write!(
+            Self::NonDeterministic {
+                seed,
+                first,
+                second,
+            } => write!(
                 f,
                 "seed 0x{seed:X} is non-deterministic (digests 0x{first:X} != 0x{second:X})"
             ),
             Self::IllegalRecovery { seed, reason } => {
                 write!(f, "seed 0x{seed:X} failed legality oracle: {reason}")
             }
-            Self::EmptySeam { seed } => write!(
-                f,
-                "seed 0x{seed:X} refused: seam_touched must be non-empty"
-            ),
+            Self::EmptySeam { seed } => {
+                write!(f, "seed 0x{seed:X} refused: seam_touched must be non-empty")
+            }
         }
     }
 }
@@ -122,16 +125,26 @@ fn classify_honest_recovery(outcome: &RecoveryOutcome) -> CorpusOutcome {
     }
 }
 
+/// Live replay of one corpus entry: the deterministic digest plus the recovered
+/// classification, for currency checks against the YAML identity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct CorpusReplay {
+    pub digest: u64,
+    pub outcome: CorpusOutcome,
+}
+
 /// Replay one corpus entry through the honest-disk recovery oracle and return
-/// the live digest (for currency checks against the YAML identity).
+/// the live digest plus recovered outcome (for currency checks against the YAML
+/// identity).
 ///
 /// # Errors
 /// Seed-tagged violation string when recovery is illegal.
-pub(crate) fn replay_corpus_entry(entry: &CorpusEntry) -> Result<u64, String> {
+pub(crate) fn replay_corpus_entry(entry: &CorpusEntry) -> Result<CorpusReplay, String> {
     if entry.fault_mode != FaultModeLabel::HonestDiskCrash {
         return Err(format!(
-            "corpus replay (seed=0x{:X}): only HonestDiskCrash is routed today",
-            entry.seed
+            "corpus replay (seed=0x{:X}): fault_mode {} is not routed; only HonestDiskCrash today",
+            entry.seed,
+            entry.fault_mode.as_str()
         ));
     }
     if entry.boundary.is_some() {
@@ -140,7 +153,10 @@ pub(crate) fn replay_corpus_entry(entry: &CorpusEntry) -> Result<u64, String> {
             entry.seed
         ));
     }
-    run(entry.seed, entry.steps).map(|o| o.digest)
+    run(entry.seed, entry.steps).map(|o| CorpusReplay {
+        digest: o.digest,
+        outcome: classify_honest_recovery(&o),
+    })
 }
 
 /// Graduation criterion (#64-B): (a) deterministic across two runs, (b) names a
@@ -155,14 +171,10 @@ pub(crate) fn check_graduation(
         return Err(GraduationRefusal::EmptySeam { seed });
     }
 
-    let first = run(seed, steps).map_err(|reason| GraduationRefusal::IllegalRecovery {
-        seed,
-        reason,
-    })?;
-    let second = run(seed, steps).map_err(|reason| GraduationRefusal::IllegalRecovery {
-        seed,
-        reason,
-    })?;
+    let first =
+        run(seed, steps).map_err(|reason| GraduationRefusal::IllegalRecovery { seed, reason })?;
+    let second =
+        run(seed, steps).map_err(|reason| GraduationRefusal::IllegalRecovery { seed, reason })?;
 
     if first.digest != second.digest {
         return Err(GraduationRefusal::NonDeterministic {
@@ -212,12 +224,76 @@ pub fn verify_corpus_row(
         outcome: CorpusOutcome::CommittedPrefix,
     };
     let live = replay_corpus_entry(&entry)?;
-    if live != expected_digest {
+    if live.digest != expected_digest {
         return Err(format!(
-            "corpus currency (seed=0x{seed:X}): expected digest 0x{expected_digest:X}, replay 0x{live:X}"
+            "corpus currency (seed=0x{seed:X}): expected digest 0x{expected_digest:X}, replay 0x{:X}",
+            live.digest
         ));
     }
     Ok(())
+}
+
+/// Graduate a single candidate seed through the full sweep engine and return
+/// its deterministic op-trace digest.
+///
+/// This is the public, doc-hidden entry point the `dst_corpus_currency`
+/// integration gate uses to exercise the real graduation path
+/// ([`run_corpus_sweep`] → [`check_graduation`] → [`classify_honest_recovery`])
+/// against a committed corpus seed. A graduated seed's digest must equal the
+/// `op_trace_digest` recorded in `traceability/dst_corpus.yaml`.
+///
+/// # Errors
+/// Returns the [`GraduationRefusal`] rendered as a string when the seed fails
+/// determinism, legality, or names an empty seam.
+pub fn graduate_corpus_seed(
+    seed: u64,
+    steps: usize,
+    seam_touched: &str,
+    assurance_level: &str,
+) -> Result<u64, String> {
+    let (mut graduated, refused) = run_corpus_sweep(&[seed], steps, seam_touched, assurance_level);
+    if let Some(refusal) = refused.into_iter().next() {
+        return Err(refusal.to_string());
+    }
+    let candidate = graduated
+        .pop()
+        .ok_or_else(|| format!("seed 0x{seed:X} produced no graduation candidate"))?;
+    Ok(candidate.entry.op_trace_digest)
+}
+
+/// Replay committed corpus rows through the honest-disk recovery oracle and
+/// assert each stored digest AND outcome label is still current.
+///
+/// Public, doc-hidden entry point for the `dst_corpus_currency` integration
+/// gate. Each tuple mirrors a `traceability/dst_corpus.yaml` row as
+/// `(seed, steps, fault_mode, outcome, op_trace_digest)`. Drives
+/// [`assert_corpus_currency`] over reconstructed [`CorpusEntry`] rows,
+/// exercising both the digest and the outcome-label identity.
+///
+/// # Errors
+/// Returns a descriptive string when the row set is empty, a `fault_mode` or
+/// `outcome` label is unknown, replay is illegal, or a stored digest/outcome no
+/// longer matches.
+pub fn assert_corpus_rows_current(rows: &[(u64, usize, &str, &str, u64)]) -> Result<(), String> {
+    let mut entries = Vec::with_capacity(rows.len());
+    for &(seed, steps, fault_mode, outcome, op_trace_digest) in rows {
+        let fault_mode = FaultModeLabel::parse(fault_mode).ok_or_else(|| {
+            format!("corpus row (seed=0x{seed:X}): unknown fault_mode `{fault_mode}`")
+        })?;
+        let outcome = CorpusOutcome::parse(outcome)
+            .ok_or_else(|| format!("corpus row (seed=0x{seed:X}): unknown outcome `{outcome}`"))?;
+        entries.push(CorpusEntry {
+            seed,
+            fault_mode,
+            boundary: None,
+            seam_touched: String::new(),
+            assurance_level: String::new(),
+            steps,
+            op_trace_digest,
+            outcome,
+        });
+    }
+    assert_corpus_currency(&entries)
 }
 
 /// Sweep `seeds` and emit graduation candidates for those that pass
@@ -240,21 +316,31 @@ pub(crate) fn run_corpus_sweep(
     (graduated, refused)
 }
 
-/// Test-only: replay every committed corpus entry and assert its digest matches
-/// the stored identity. Used by the `dst-corpus-currency` gate.
+/// Test-only: replay every committed corpus entry and assert both its digest and
+/// its recovered outcome label match the stored identity. Used by the
+/// `dst-corpus-currency` gate.
 ///
 /// # Errors
-/// Returns a descriptive string when any entry fails replay or digest mismatch.
+/// Returns a descriptive string when any entry fails replay, digest mismatch, or
+/// outcome-label drift.
 pub(crate) fn assert_corpus_currency(entries: &[CorpusEntry]) -> Result<(), String> {
     if entries.is_empty() {
         return Err("dst corpus must be non-empty".to_owned());
     }
     for entry in entries {
         let live = replay_corpus_entry(entry)?;
-        if live != entry.op_trace_digest {
+        if live.digest != entry.op_trace_digest {
             return Err(format!(
                 "corpus currency (seed=0x{:X}): stored digest 0x{:X} != replay 0x{:X}",
-                entry.seed, entry.op_trace_digest, live
+                entry.seed, entry.op_trace_digest, live.digest
+            ));
+        }
+        if live.outcome != entry.outcome {
+            return Err(format!(
+                "corpus currency (seed=0x{:X}): stored outcome {} != replay {}",
+                entry.seed,
+                entry.outcome.as_str(),
+                live.outcome.as_str()
             ));
         }
     }
@@ -269,10 +355,10 @@ mod tests {
     fn graduation_refuses_nondeterministic_seed() -> Result<(), Box<dyn std::error::Error>> {
         // Two different step counts from the same seed produce different digests;
         // model non-determinism by comparing against a forged second run.
-        let seed = 0xC0_00_0001;
+        let seed = 0xC000_0001;
         let steps = 48;
-        let first = run(seed, steps).map_err(|e| std::io::Error::other(e))?;
-        let mismatched = run(seed, steps + 1).map_err(|e| std::io::Error::other(e))?;
+        let first = run(seed, steps).map_err(std::io::Error::other)?;
+        let mismatched = run(seed, steps + 1).map_err(std::io::Error::other)?;
         if first.digest == mismatched.digest {
             return Err(std::io::Error::other(
                 "PROPERTY: distinct step counts should diverge for this fixture",
@@ -294,14 +380,14 @@ mod tests {
 
     #[test]
     fn graduation_accepts_deterministic_legal_seed() -> Result<(), Box<dyn std::error::Error>> {
-        let candidate = check_graduation(0xC0_00_0002, 64, "writer-commit", "L4").map_err(
-            |r| std::io::Error::other(format!("PROPERTY: legal seed must graduate: {r}")),
-        )?;
+        let candidate = check_graduation(0xC000_0002, 64, "writer-commit", "L4").map_err(|r| {
+            std::io::Error::other(format!("PROPERTY: legal seed must graduate: {r}"))
+        })?;
         assert_eq!(candidate.entry.seam_touched, "writer-commit");
         assert_eq!(candidate.entry.assurance_level, "L4");
-        let again = check_graduation(0xC0_00_0002, 64, "writer-commit", "L4").map_err(
-            |r| std::io::Error::other(format!("PROPERTY: replay must re-graduate: {r}")),
-        )?;
+        let again = check_graduation(0xC000_0002, 64, "writer-commit", "L4").map_err(|r| {
+            std::io::Error::other(format!("PROPERTY: replay must re-graduate: {r}"))
+        })?;
         assert_eq!(
             candidate.entry.op_trace_digest, again.entry.op_trace_digest,
             "PROPERTY: digest must be stable across graduation calls"
@@ -311,19 +397,24 @@ mod tests {
 
     #[test]
     fn committed_corpus_seed_digest_is_stable() -> Result<(), Box<dyn std::error::Error>> {
-        let candidate = check_graduation(48104590831, 96, "writer-commit", "L4").map_err(
-            |r| std::io::Error::other(format!("PROPERTY: committed corpus seed must graduate: {r}")),
-        )?;
-        eprintln!(
-            "committed corpus digest for seed 48104590831 / 96 steps: {}",
-            candidate.entry.op_trace_digest
+        let candidate = check_graduation(48104590831, 96, "writer-commit", "L4").map_err(|r| {
+            std::io::Error::other(format!(
+                "PROPERTY: committed corpus seed must graduate: {r}"
+            ))
+        })?;
+        // Pin the graduated digest to the value committed in
+        // `traceability/dst_corpus.yaml`: a drift here means the recovery oracle
+        // changed and the corpus row must be re-graduated.
+        assert_eq!(
+            candidate.entry.op_trace_digest, 101_395_256_710_529_115,
+            "PROPERTY: committed corpus digest for seed 48104590831 / 96 steps must be stable"
         );
         Ok(())
     }
 
     #[test]
     fn sweep_emits_candidates_for_legal_seeds() -> Result<(), Box<dyn std::error::Error>> {
-        let (ok, bad) = run_corpus_sweep(&[0xC0_00_0003, 0xC0_00_0004], 48, "writer-commit", "L4");
+        let (ok, bad) = run_corpus_sweep(&[0xC000_0003, 0xC000_0004], 48, "writer-commit", "L4");
         if ok.len() != 2 {
             return Err(std::io::Error::other(format!(
                 "PROPERTY: expected two graduates, got {} ok and {} refused",
@@ -337,12 +428,11 @@ mod tests {
 
     #[test]
     fn empty_seam_is_refused() -> Result<(), Box<dyn std::error::Error>> {
-        match check_graduation(0xC0_00_0005, 32, "", "L4") {
+        match check_graduation(0xC000_0005, 32, "", "L4") {
             Ok(_) => {
-                return Err(std::io::Error::other(
-                    "PROPERTY: empty seam_touched must be refused",
+                return Err(
+                    std::io::Error::other("PROPERTY: empty seam_touched must be refused").into(),
                 )
-                .into())
             }
             Err(GraduationRefusal::EmptySeam { .. }) => {}
             Err(other) => {

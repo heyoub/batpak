@@ -27,13 +27,16 @@ fn corpus_path() -> PathBuf {
 struct DstCorpusRow {
     seed: u64,
     fault_mode: String,
+    seam_touched: String,
+    assurance_level: String,
     steps: u32,
     op_trace_digest: u64,
+    outcome: String,
 }
 
 fn load_rows() -> Vec<DstCorpusRow> {
-    let raw = std::fs::read_to_string(corpus_path())
-        .expect("traceability/dst_corpus.yaml must exist");
+    let raw =
+        std::fs::read_to_string(corpus_path()).expect("traceability/dst_corpus.yaml must exist");
     yaml_serde::from_str(&raw).expect("dst_corpus.yaml must parse")
 }
 
@@ -46,18 +49,54 @@ fn load_rows() -> Vec<DstCorpusRow> {
 fn dst_corpus_currency_replays_committed_corpus() -> Result<(), Box<dyn std::error::Error>> {
     let rows = load_rows();
     if rows.is_empty() {
-        return Err(std::io::Error::other(
-            "PROPERTY: dst_corpus.yaml must be non-empty",
-        )
-        .into());
+        return Err(std::io::Error::other("PROPERTY: dst_corpus.yaml must be non-empty").into());
     }
 
+    // Drive the real graduation engine (run_corpus_sweep -> check_graduation ->
+    // classify_honest_recovery) over every committed seed and assert it
+    // re-graduates to the stored digest identity. This is the live exercise of
+    // the corpus engine through the gate, not just a replay helper.
     for row in &rows {
         let steps = usize::try_from(row.steps).map_err(|_| {
-            std::io::Error::other(format!(
-                "PROPERTY: steps {} must fit usize",
-                row.steps
+            std::io::Error::other(format!("PROPERTY: steps {} must fit usize", row.steps))
+        })?;
+        let graduated = batpak::__sim::graduate_corpus_seed(
+            row.seed,
+            steps,
+            &row.seam_touched,
+            &row.assurance_level,
+        )
+        .map_err(std::io::Error::other)?;
+        if graduated != row.op_trace_digest {
+            return Err(std::io::Error::other(format!(
+                "PROPERTY: seed {} re-graduated to digest {graduated}, stored {}",
+                row.seed, row.op_trace_digest
             ))
+            .into());
+        }
+    }
+
+    // Replay every committed row through the corpus currency oracle by identity
+    // (digest + recovered outcome label).
+    let row_tuples: Vec<(u64, usize, &str, &str, u64)> = rows
+        .iter()
+        .map(|row| {
+            let steps = usize::try_from(row.steps).expect("steps must fit usize (checked above)");
+            (
+                row.seed,
+                steps,
+                row.fault_mode.as_str(),
+                row.outcome.as_str(),
+                row.op_trace_digest,
+            )
+        })
+        .collect();
+    batpak::__sim::assert_corpus_rows_current(&row_tuples).map_err(std::io::Error::other)?;
+
+    // Cross-check the single-row replay helper still agrees per row.
+    for row in &rows {
+        let steps = usize::try_from(row.steps).map_err(|_| {
+            std::io::Error::other(format!("PROPERTY: steps {} must fit usize", row.steps))
         })?;
         batpak::__sim::verify_corpus_row(row.seed, steps, &row.fault_mode, row.op_trace_digest)
             .map_err(std::io::Error::other)?;

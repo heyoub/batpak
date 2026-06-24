@@ -135,15 +135,20 @@ pub(crate) fn run_seeded_import_fault(seed: u64) -> Result<ImportFaultOutcome, S
     }
 
     Ok(ImportFaultOutcome {
-        digest: outcome_digest(seed, source_entries.len(), dest_entries.len(), replay.deduplicated),
+        digest: outcome_digest(
+            seed,
+            source_entries.len(),
+            dest_entries.len(),
+            replay.deduplicated,
+        ),
         source_user_events: source_entries.len(),
         dest_user_events: dest_entries.len(),
         reimport_deduplicated: replay.deduplicated,
     })
 }
 
-/// Doc-hidden public mirror for integration tests.
-#[doc(hidden)]
+/// Doc-hidden public mirror for integration tests (hidden via the
+/// `#[doc(hidden)] pub mod __sim` re-export, mirroring `ForkFaultOutcomePublic`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportFaultOutcomePublic {
     /// Determinism digest for this seed + outcome.
@@ -157,6 +162,10 @@ pub struct ImportFaultOutcomePublic {
 }
 
 /// Run one seeded import-under-fault scenario (StoreFs-level).
+///
+/// # Errors
+/// Returns a seed-tagged description string when the scenario cannot run or the
+/// post-crash re-import fails to preserve payload bytes, hash chains, or dedup.
 pub fn run_seeded_import_fault_public(seed: u64) -> Result<ImportFaultOutcomePublic, String> {
     run_seeded_import_fault(seed).map(|o| ImportFaultOutcomePublic {
         digest: o.digest,

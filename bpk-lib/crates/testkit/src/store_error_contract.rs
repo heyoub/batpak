@@ -100,6 +100,8 @@ pub fn classify(error: &StoreError) -> HandlingClass {
         | StoreError::MmapFutureVersion { .. }
         | StoreError::CheckpointFutureVersion { .. }
         | StoreError::HiddenRangesFutureVersion { .. }
+        | StoreError::ForkEvidenceFutureVersion { .. }
+        | StoreError::ImportProvenanceFutureVersion { .. }
         | StoreError::HiddenRangesCorrupt { .. }
         | StoreError::CursorCheckpointCorrupt { .. }
         | StoreError::CursorCheckpointRegionMismatch { .. }
@@ -802,6 +804,34 @@ pub fn fail_closed_operational_cases() -> Vec<Case> {
             display_needles: &[
                 "hidden-ranges metadata at",
                 "is version 9",
+                "understands at most version 1",
+                "upgrade the reader",
+            ],
+        },
+        Case {
+            name: "fork_evidence_future_version",
+            error: StoreError::ForkEvidenceFutureVersion {
+                found: 9,
+                supported: 1,
+            },
+            class: HandlingClass::FailClosedOperational,
+            source_needle: None,
+            display_needles: &[
+                "fork evidence report is version 9",
+                "understands at most version 1",
+                "upgrade the reader",
+            ],
+        },
+        Case {
+            name: "import_provenance_future_version",
+            error: StoreError::ImportProvenanceFutureVersion {
+                found: 9,
+                supported: 1,
+            },
+            class: HandlingClass::FailClosedOperational,
+            source_needle: None,
+            display_needles: &[
+                "import provenance extension is version 9",
                 "understands at most version 1",
                 "upgrade the reader",
             ],

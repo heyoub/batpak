@@ -35,8 +35,10 @@ fn import_under_fault_crash_reimport_deduplicates() -> Result<(), Box<dyn std::e
 
 #[test]
 fn import_under_fault_diverges_across_seeds() -> Result<(), Box<dyn std::error::Error>> {
-    let a = batpak::__sim::run_seeded_import_fault_public(0x1B00_0001).map_err(std::io::Error::other)?;
-    let b = batpak::__sim::run_seeded_import_fault_public(0x1B00_0002).map_err(std::io::Error::other)?;
+    let a = batpak::__sim::run_seeded_import_fault_public(0x1B00_0001)
+        .map_err(std::io::Error::other)?;
+    let b = batpak::__sim::run_seeded_import_fault_public(0x1B00_0002)
+        .map_err(std::io::Error::other)?;
     assert_ne!(
         a.digest, b.digest,
         "PROPERTY: distinct seeds should diverge in import fault digest"

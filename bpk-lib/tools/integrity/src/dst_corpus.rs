@@ -26,35 +26,45 @@ struct DstCorpusRow {
     outcome: String,
 }
 
-pub(crate) fn manifest_path(repo_root: &Path) -> std::path::PathBuf {
+fn manifest_path(repo_root: &Path) -> std::path::PathBuf {
     repo_root.join(DST_CORPUS_REL)
 }
 
-pub(crate) fn load_rows(repo_root: &Path) -> Result<Vec<DstCorpusRow>> {
+fn load_rows(repo_root: &Path) -> Result<Vec<DstCorpusRow>> {
     load_yaml(&manifest_path(repo_root))
 }
 
 fn validate_row(row: &DstCorpusRow, index: usize) -> Result<()> {
+    let seed = row.seed;
     if row.seam_touched.is_empty() {
-        bail!("dst-corpus-currency: entry[{index}] has empty seam_touched");
+        bail!("dst-corpus-currency: entry[{index}] (seed={seed}) has empty seam_touched");
     }
     if row.assurance_level.is_empty() {
-        bail!("dst-corpus-currency: entry[{index}] has empty assurance_level");
+        bail!("dst-corpus-currency: entry[{index}] (seed={seed}) has empty assurance_level");
     }
     if row.steps == 0 {
-        bail!("dst-corpus-currency: entry[{index}] steps must be >= 1");
+        bail!("dst-corpus-currency: entry[{index}] (seed={seed}) steps must be >= 1");
     }
     if row.op_trace_digest == 0 {
         bail!(
-            "dst-corpus-currency: entry[{index}] op_trace_digest must be non-zero (run \
-             graduation to fill the identity digest)"
+            "dst-corpus-currency: entry[{index}] (seed={seed}) op_trace_digest must be non-zero \
+             (run graduation to fill the identity digest)"
         );
     }
     if row.fault_mode != "HonestDiskCrash" {
         bail!(
-            "dst-corpus-currency: entry[{index}] fault_mode `{}` is not routed locally yet \
-             (only HonestDiskCrash today)",
+            "dst-corpus-currency: entry[{index}] (seed={seed}) fault_mode `{}` is not routed \
+             locally yet (only HonestDiskCrash today)",
             row.fault_mode
+        );
+    }
+    // boundary cells require the recovery_matrix replay path (deferred, SIM-2b);
+    // a graduated honest-disk row must leave it null. Reading it here keeps the
+    // schema field load-bearing rather than decorative.
+    if row.boundary.is_some() {
+        bail!(
+            "dst-corpus-currency: entry[{index}] (seed={seed}) declares a durability boundary, \
+             but boundary cells require the recovery_matrix path (deferred); leave boundary null"
         );
     }
     match row.outcome.as_str() {
