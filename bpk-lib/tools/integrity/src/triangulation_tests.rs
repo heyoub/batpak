@@ -5,8 +5,9 @@
 //! justifies: INV-TEST-PANIC-AS-ASSERTION; these are integrity-tool unit tests where setup panics signal fixture breakage, see tools/integrity/src/triangulation.rs
 
 use super::{
-    check_direction_over, load_dependency_direction, scan_crate_imports, scan_path_dependencies,
-    Claim, CrateGraph, DependencyDirection, TriangulationEngine,
+    check_direction_over, check_member_set_over, load_dependency_direction, scan_crate_imports,
+    scan_path_dependencies, textual_member_set, Claim, CrateGraph, DependencyDirection,
+    GitManifestView, TrackedManifest, TriangulationEngine,
 };
 
 fn claim(oracle: &str, subject: &str, predicate: &str, value: &str) -> Claim {
@@ -302,4 +303,105 @@ fn live_dependency_direction_is_clean() {
     let graph = super::CargoMetadataGraphOracle::graph(&repo_root).expect("cargo-metadata graph");
     check_direction_over(&graph, &model)
         .expect("committed dependency_direction.yaml must pass on the live tree");
+}
+
+// --- FACT D7-C: workspace member-set (cargo-metadata vs git+manifest text). ---
+
+fn manifest(dir: &str, name: &str) -> TrackedManifest {
+    TrackedManifest {
+        dir: dir.to_owned(),
+        name: Some(name.to_owned()),
+    }
+}
+
+/// The git+text oracle admits exactly the manifests whose directory the textual
+/// `members` globs admit and `exclude` does not — exercising an explicit member,
+/// a `crates/*` glob, and an excluded directory.
+#[test]
+fn textual_member_set_honors_members_globs_and_exclude() {
+    let view = GitManifestView {
+        manifests: vec![
+            manifest("crates/core", "batpak"),
+            manifest("crates/syncbat", "syncbat"),
+            manifest("tools/integrity", "batpak-integrity"),
+            // present + tracked, but NOT admitted by any members entry:
+            manifest("fuzz", "batpak-fuzz"),
+            // a deeper dir a single-component `crates/*` glob must NOT admit:
+            manifest("crates/core/build_support", "should-not-admit"),
+        ],
+        members: vec!["crates/*".to_owned(), "tools/integrity".to_owned()],
+        exclude: vec!["fuzz".to_owned()],
+    };
+    assert_eq!(
+        textual_member_set(&view),
+        "batpak,batpak-integrity,syncbat",
+        "only members-admitted, non-excluded, single-component manifests count"
+    );
+}
+
+/// GREEN: when cargo's member set and the git+text derivation agree, no
+/// disagreement fires.
+#[test]
+fn member_set_oracles_agree_no_disagreement() {
+    let view = GitManifestView {
+        manifests: vec![
+            manifest("crates/core", "batpak"),
+            manifest("crates/syncbat", "syncbat"),
+        ],
+        members: vec!["crates/core".to_owned(), "crates/syncbat".to_owned()],
+        exclude: Vec::new(),
+    };
+    // cargo resolved the same two members (sorted, comma-joined).
+    let findings = check_member_set_over("batpak,syncbat", &view);
+    assert!(
+        findings.is_empty(),
+        "agreeing member sets must not disagree; got {findings:?}"
+    );
+}
+
+/// RED FIXTURE: a directory the `members` glob admits and that HAS a tracked
+/// `Cargo.toml` (so the git+text oracle counts it) but which cargo's resolution
+/// DROPPED from the workspace (e.g. it is gitignored from cargo's view, or cargo
+/// silently excluded it). The two derivations disagree — a hard finding the engine
+/// surfaces with BOTH oracle names + values, never picking a winner.
+#[test]
+fn member_set_oracles_disagree_when_git_sees_a_member_cargo_missed() {
+    let view = GitManifestView {
+        manifests: vec![
+            manifest("crates/core", "batpak"),
+            // tracked Cargo.toml under the `crates/*` glob, admitted textually:
+            manifest("crates/ghost", "ghost"),
+        ],
+        members: vec!["crates/*".to_owned()],
+        exclude: Vec::new(),
+    };
+    // cargo metadata only resolved `batpak` (it never saw `ghost`).
+    let findings = check_member_set_over("batpak", &view);
+    assert_eq!(findings.len(), 1, "exactly one disagreeing group");
+    let d = &findings[0];
+    assert_eq!(d.subject, "workspace");
+    assert_eq!(d.predicate, "member-set");
+    assert_eq!(
+        d.votes,
+        vec![
+            ("cargo-member-set".to_owned(), "batpak".to_owned()),
+            ("git-member-set".to_owned(), "batpak,ghost".to_owned()),
+        ],
+        "both derivations + values must be surfaced"
+    );
+}
+
+/// The live workspace's two member-set oracles AGREE: cargo's resolution and the
+/// git+text derivation yield the same crate-name set. A drift (a tracked member
+/// manifest cargo dropped, or vice versa) would fail this.
+#[test]
+fn live_member_set_oracles_agree() {
+    let repo_root = crate::repo_surface::repo_root().expect("repo root");
+    let cargo = super::CargoMemberSetOracle::member_set(&repo_root).expect("cargo member set");
+    let view = super::GitMemberSetOracle::view(&repo_root).expect("git manifest view");
+    let findings = check_member_set_over(&cargo, &view);
+    assert!(
+        findings.is_empty(),
+        "live cargo vs git+text member sets must agree; got {findings:?}"
+    );
 }
