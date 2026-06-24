@@ -8,10 +8,11 @@
 //! (monotone-forward, fail-closed terminals, exec gate, outcome mapping).
 
 use bvisor::linux::protocol::{
-    can_exec, frame, is_valid_transition, outcome_class, parse_and_verify, validate_table,
-    DescriptorKind, DescriptorRole, DescriptorShape, DescriptorSlotV1, EnvelopeReject,
-    LauncherState, LinuxLaunchBodyV1, LinuxLaunchPlanV1, LoweringWireV1, TableReject, TargetSpecV1,
-    HEADER_LEN,
+    can_exec, confinement_installed, frame, is_valid_transition, outcome_class, parse_and_verify,
+    phase_resolution_consistent, ready_to_exec, validate_table, DescriptorKind, DescriptorRole,
+    DescriptorShape, DescriptorSlotV1, EnvelopeReject, LauncherState, LinuxLaunchBodyV1,
+    LinuxLaunchPlanV1, LoweringWireEntryV1, LoweringWireV1, PhaseResult, SetupPhase, TableReject,
+    TargetSpecV1, HEADER_LEN,
 };
 use bvisor::{
     compile_schedule, AdmissionProgramHash, AttemptId, BackendProfileHash, BoundaryPlanHash,
@@ -264,7 +265,7 @@ fn skipping_a_step_is_rejected() {
 fn going_backwards_is_rejected() {
     assert!(
         !is_valid_transition(
-            LauncherState::ConfinementInstalled,
+            LauncherState::ConfinementPhaseResolved,
             LauncherState::ChildCreated
         ),
         "no going back"
@@ -275,7 +276,7 @@ fn going_backwards_is_rejected() {
 fn exec_succeeded_only_from_ready_to_exec() {
     assert!(
         !is_valid_transition(
-            LauncherState::ConfinementInstalled,
+            LauncherState::ConfinementPhaseResolved,
             LauncherState::ExecSucceeded
         ),
         "exec only from ReadyToExec"
@@ -318,4 +319,263 @@ fn terminal_outcome_class_mapping_is_correct() {
         Some(Outcome::SupervisorFault)
     );
     assert_eq!(outcome_class(LauncherState::ReadyToExec), None);
+}
+
+// ── Phase-honesty: fixtures ─────────────────────────────────────────────────────
+
+/// One representative scheduled/observed lowering entry.
+fn wire_entry(id: &str, version: u32) -> LoweringWireEntryV1 {
+    LoweringWireEntryV1 {
+        id: id.to_owned(),
+        version,
+        phase_code: 3,
+        param_digest: [0x11; 32],
+        decl_digest: [0x22; 32],
+    }
+}
+
+/// A nonempty scheduled phase (two entries, in order).
+fn nonempty_phase() -> Vec<LoweringWireEntryV1> {
+    vec![wire_entry("linux.a.v1", 1), wire_entry("linux.b.v1", 1)]
+}
+
+/// `resolved_state` maps each phase to its own `*PhaseResolved` checkpoint.
+#[test]
+fn setup_phase_maps_to_its_resolved_state() {
+    assert_eq!(
+        SetupPhase::Identity.resolved_state(),
+        LauncherState::IdentityPhaseResolved
+    );
+    assert_eq!(
+        SetupPhase::Visibility.resolved_state(),
+        LauncherState::VisibilityPhaseResolved
+    );
+    assert_eq!(
+        SetupPhase::AmbientAuthority.resolved_state(),
+        LauncherState::AmbientAuthorityPhaseResolved
+    );
+    assert_eq!(
+        SetupPhase::Confinement.resolved_state(),
+        LauncherState::ConfinementPhaseResolved
+    );
+}
+
+// ── Phase-honesty: phase_resolution_consistent (RED fixtures) ───────────────────
+
+/// NotRequired is honest ONLY when nothing was scheduled and nothing observed.
+#[test]
+fn not_required_on_empty_phase_passes() {
+    assert!(phase_resolution_consistent(
+        &[],
+        &[],
+        PhaseResult::NotRequired
+    ));
+}
+
+/// RED: NotRequired on a NONEMPTY scheduled phase is an under-claim and FAILS.
+#[test]
+fn not_required_on_nonempty_phase_fails() {
+    assert!(
+        !phase_resolution_consistent(&nonempty_phase(), &[], PhaseResult::NotRequired),
+        "a scheduled phase may never resolve NotRequired"
+    );
+}
+
+/// RED: NotRequired while claiming observed actions FAILS.
+#[test]
+fn not_required_with_observed_actions_fails() {
+    assert!(
+        !phase_resolution_consistent(&[], &nonempty_phase(), PhaseResult::NotRequired),
+        "NotRequired may not have observed actions"
+    );
+}
+
+/// Applied is honest when scheduled is nonempty and observed equals it exactly.
+#[test]
+fn applied_with_exact_observed_passes() {
+    let sched = nonempty_phase();
+    let obs = nonempty_phase();
+    assert!(phase_resolution_consistent(
+        &sched,
+        &obs,
+        PhaseResult::Applied
+    ));
+}
+
+/// RED: Applied on an EMPTY phase is an over-claim and FAILS.
+#[test]
+fn applied_on_empty_phase_fails() {
+    assert!(
+        !phase_resolution_consistent(&[], &[], PhaseResult::Applied),
+        "an empty phase may never resolve Applied (over-claim)"
+    );
+}
+
+/// RED: Applied with FEWER observed than scheduled (count mismatch) FAILS.
+#[test]
+fn applied_with_count_mismatch_fails() {
+    let sched = nonempty_phase();
+    let obs = vec![wire_entry("linux.a.v1", 1)]; // dropped one
+    assert!(
+        !phase_resolution_consistent(&sched, &obs, PhaseResult::Applied),
+        "count divergence is an over-claim"
+    );
+}
+
+/// RED: Applied with a differing id FAILS.
+#[test]
+fn applied_with_id_mismatch_fails() {
+    let sched = nonempty_phase();
+    let mut obs = nonempty_phase();
+    obs[1].id = "linux.z.v1".to_owned();
+    assert!(
+        !phase_resolution_consistent(&sched, &obs, PhaseResult::Applied),
+        "id divergence is an over-claim"
+    );
+}
+
+/// RED: Applied with a differing version FAILS.
+#[test]
+fn applied_with_version_mismatch_fails() {
+    let sched = nonempty_phase();
+    let mut obs = nonempty_phase();
+    obs[0].version = 99;
+    assert!(
+        !phase_resolution_consistent(&sched, &obs, PhaseResult::Applied),
+        "version divergence is an over-claim"
+    );
+}
+
+/// RED: Applied with a differing param_digest FAILS.
+#[test]
+fn applied_with_param_digest_mismatch_fails() {
+    let sched = nonempty_phase();
+    let mut obs = nonempty_phase();
+    obs[0].param_digest = [0xff; 32];
+    assert!(
+        !phase_resolution_consistent(&sched, &obs, PhaseResult::Applied),
+        "param divergence is an over-claim"
+    );
+}
+
+/// RED: Applied with the same entries REORDERED FAILS (order is load-bearing).
+#[test]
+fn applied_with_reordered_observed_fails() {
+    let sched = nonempty_phase();
+    let mut obs = nonempty_phase();
+    obs.reverse();
+    assert!(
+        !phase_resolution_consistent(&sched, &obs, PhaseResult::Applied),
+        "reordering is divergence (the schedule order is canonical)"
+    );
+}
+
+/// Refused / Faulted assert no action parity — structurally consistent regardless.
+#[test]
+fn refused_and_faulted_are_structurally_consistent() {
+    assert!(phase_resolution_consistent(
+        &nonempty_phase(),
+        &[],
+        PhaseResult::Refused
+    ));
+    assert!(phase_resolution_consistent(&[], &[], PhaseResult::Faulted));
+}
+
+// ── Phase-honesty: confinement_installed (DERIVED evidence) ─────────────────────
+
+/// Empty confinement schedule can NEVER be an install — for every result, incl.
+/// NotRequired (the exec-only-plan over-claim the rename exists to kill).
+#[test]
+fn confinement_installed_false_on_empty_schedule() {
+    for result in [
+        PhaseResult::Applied,
+        PhaseResult::NotRequired,
+        PhaseResult::Refused,
+        PhaseResult::Faulted,
+    ] {
+        assert!(
+            !confinement_installed(0, result),
+            "empty confinement schedule is never an install ({result:?})"
+        );
+    }
+}
+
+/// Nonempty schedule + Applied ⇒ confinement actually installed.
+#[test]
+fn confinement_installed_true_on_nonempty_applied() {
+    assert!(confinement_installed(2, PhaseResult::Applied));
+}
+
+/// Nonempty schedule but a non-Applied result is NOT an install.
+#[test]
+fn confinement_installed_false_on_nonempty_non_applied() {
+    for result in [
+        PhaseResult::NotRequired,
+        PhaseResult::Refused,
+        PhaseResult::Faulted,
+    ] {
+        assert!(
+            !confinement_installed(2, result),
+            "non-Applied is never an install ({result:?})"
+        );
+    }
+}
+
+// ── Phase-honesty: ready_to_exec gate ───────────────────────────────────────────
+
+const H_L_FIX: [u8; 32] = [0x44; 32];
+
+/// All phases resolved Applied/NotRequired, Ambient Applied, child created, digest
+/// bound. Helper builds the happy four-phase array.
+fn happy_phases() -> [(SetupPhase, PhaseResult); 4] {
+    [
+        (SetupPhase::Identity, PhaseResult::NotRequired),
+        (SetupPhase::Visibility, PhaseResult::NotRequired),
+        (SetupPhase::AmbientAuthority, PhaseResult::Applied),
+        (SetupPhase::Confinement, PhaseResult::NotRequired),
+    ]
+}
+
+#[test]
+fn ready_to_exec_happy_case_passes() {
+    assert!(ready_to_exec(true, happy_phases(), H_L_FIX, H_L_FIX));
+}
+
+/// RED: no child created ⇒ never ready.
+#[test]
+fn ready_to_exec_false_without_child() {
+    assert!(!ready_to_exec(false, happy_phases(), H_L_FIX, H_L_FIX));
+}
+
+/// RED: any phase Refused ⇒ never ready (fail-closed deny short-circuits exec).
+#[test]
+fn ready_to_exec_false_when_a_phase_refused() {
+    let mut phases = happy_phases();
+    phases[1].1 = PhaseResult::Refused;
+    assert!(!ready_to_exec(true, phases, H_L_FIX, H_L_FIX));
+}
+
+/// RED: any phase Faulted ⇒ never ready.
+#[test]
+fn ready_to_exec_false_when_a_phase_faulted() {
+    let mut phases = happy_phases();
+    phases[0].1 = PhaseResult::Faulted;
+    assert!(!ready_to_exec(true, phases, H_L_FIX, H_L_FIX));
+}
+
+/// RED: Ambient resolving NotRequired violates the MANDATORY scrub ⇒ not ready.
+#[test]
+fn ready_to_exec_false_when_ambient_not_required() {
+    let mut phases = happy_phases();
+    phases[2].1 = PhaseResult::NotRequired;
+    assert!(
+        !ready_to_exec(true, phases, H_L_FIX, H_L_FIX),
+        "the ambient-authority scrub is mandatory"
+    );
+}
+
+/// RED: observed schedule digest ≠ bound h_l ⇒ not ready (schedule drift).
+#[test]
+fn ready_to_exec_false_on_digest_drift() {
+    assert!(!ready_to_exec(true, happy_phases(), [0x55; 32], H_L_FIX));
 }

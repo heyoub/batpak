@@ -465,6 +465,71 @@ impl LinuxLaunchPlanV1 {
 // 6. Launcher status state machine
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// How a launcher setup PHASE resolved. A phase is a lifecycle checkpoint, NOT a
+/// claim that a mechanism was installed: a phase with no scheduled actions resolves
+/// [`Self::NotRequired`], and the launcher MUST NOT report an installation it did
+/// not perform. Each value is the explicit, honest result a phase carries.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[non_exhaustive]
+pub enum PhaseResult {
+    /// The phase had scheduled actions and the launcher applied them, observing
+    /// exactly the scheduled set (count, identity, order, digests all matching).
+    Applied,
+    /// The phase had NO scheduled actions, so nothing was applied. NEVER emitted
+    /// for a nonempty phase (that would under-report).
+    NotRequired,
+    /// The launcher declined to proceed (fail-closed deny): a scheduled action it
+    /// does not implement, or a verification mismatch.
+    Refused,
+    /// The launcher itself faulted while resolving the phase.
+    Faulted,
+}
+
+/// One of the four resolvable launcher setup phases. A phase is a checkpoint that
+/// carries a [`PhaseResult`]; it does not assert a meaning, only that the
+/// lifecycle position was reached and resolved.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[non_exhaustive]
+pub enum SetupPhase {
+    /// Identity mapping phase.
+    Identity,
+    /// Visibility construction phase.
+    Visibility,
+    /// Ambient-authority scrub phase.
+    AmbientAuthority,
+    /// Confinement-policy phase.
+    Confinement,
+}
+
+impl SetupPhase {
+    /// The progression state that marks this phase as RESOLVED (its result
+    /// recorded). Resolution is a lifecycle position, not an installation claim.
+    #[must_use]
+    pub fn resolved_state(self) -> LauncherState {
+        match self {
+            Self::Identity => LauncherState::IdentityPhaseResolved,
+            Self::Visibility => LauncherState::VisibilityPhaseResolved,
+            Self::AmbientAuthority => LauncherState::AmbientAuthorityPhaseResolved,
+            Self::Confinement => LauncherState::ConfinementPhaseResolved,
+        }
+    }
+}
+
+/// Why a launcher [`PhaseResult::Refused`] a phase (fail-closed deny). Extensible:
+/// these are the refusals nameable now; more may be added without breaking.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[non_exhaustive]
+pub enum RefusalReason {
+    /// A scheduled action names a primitive the launcher does not implement.
+    MissingPrimitive,
+    /// A bound plan-identity digest did not match the live profile / reconstruction.
+    IdentityMismatch,
+    /// The plan body failed structural validation.
+    PlanInvalid,
+    /// A pre-opened handle did not match its declared descriptor shape.
+    HandleMismatch,
+}
+
 /// The launcher's setup progress. MONOTONE forward only: setup proceeds through
 /// the non-terminal states in order, then resolves to exactly one terminal. The
 /// child execs ONLY from [`Self::ReadyToExec`]; any setup fault means the workload
@@ -482,14 +547,16 @@ pub enum LauncherState {
     HandlesVerified,
     /// The workload child process was created (pre-confinement).
     ChildCreated,
-    /// User/group identity mapping was installed.
-    IdentityMapped,
-    /// The filesystem/namespace visibility was constructed.
-    VisibilityConstructed,
-    /// Ambient authority (extra fds, capabilities, env) was scrubbed.
-    AmbientAuthorityScrubbed,
-    /// The enforcement policy (LSM/seccomp/limits) was installed.
-    ConfinementInstalled,
+    /// The identity phase resolved (its [`PhaseResult`] was recorded — applied,
+    /// not-required, refused, or faulted). NOT a claim that a mapping was installed.
+    IdentityPhaseResolved,
+    /// The visibility phase resolved (its [`PhaseResult`] was recorded).
+    VisibilityPhaseResolved,
+    /// The ambient-authority phase resolved (its [`PhaseResult`] was recorded).
+    AmbientAuthorityPhaseResolved,
+    /// The confinement phase resolved (its [`PhaseResult`] was recorded). NOT a
+    /// claim that an enforcement policy was installed — see [`confinement_installed`].
+    ConfinementPhaseResolved,
     /// Every required setup action completed; the child may exec.
     ReadyToExec,
     /// Terminal: the workload was exec'd successfully.
@@ -519,10 +586,10 @@ impl LauncherState {
         Self::PlanVerified,
         Self::HandlesVerified,
         Self::ChildCreated,
-        Self::IdentityMapped,
-        Self::VisibilityConstructed,
-        Self::AmbientAuthorityScrubbed,
-        Self::ConfinementInstalled,
+        Self::IdentityPhaseResolved,
+        Self::VisibilityPhaseResolved,
+        Self::AmbientAuthorityPhaseResolved,
+        Self::ConfinementPhaseResolved,
         Self::ReadyToExec,
     ];
 
@@ -595,16 +662,97 @@ pub fn outcome_class(terminal: LauncherState) -> Option<Outcome> {
         | LauncherState::PlanVerified
         | LauncherState::HandlesVerified
         | LauncherState::ChildCreated
-        | LauncherState::IdentityMapped
-        | LauncherState::VisibilityConstructed
-        | LauncherState::AmbientAuthorityScrubbed
-        | LauncherState::ConfinementInstalled
+        | LauncherState::IdentityPhaseResolved
+        | LauncherState::VisibilityPhaseResolved
+        | LauncherState::AmbientAuthorityPhaseResolved
+        | LauncherState::ConfinementPhaseResolved
         | LauncherState::ReadyToExec => None,
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 7. Phase-honesty predicates (pure)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Whether a phase's [`PhaseResult`] is consistent with what the launcher
+/// scheduled vs. observed — the anti-over-claim / anti-under-claim oracle. PURE and
+/// total. The launcher (a later step) calls this with its OBSERVED action entries.
+///
+/// Rules:
+/// - [`PhaseResult::NotRequired`] ⟺ `scheduled.is_empty()` AND `observed.is_empty()`.
+///   A launcher may never report a nonempty phase as not-required (under-claim), nor
+///   claim it observed actions while not-required.
+/// - [`PhaseResult::Applied`] ⟺ `!scheduled.is_empty()` AND `observed == scheduled`
+///   EXACTLY — same length and each entry equal field-for-field (id, version,
+///   phase_code, param_digest, decl_digest) IN ORDER. A launcher may never report an
+///   empty phase as applied (over-claim), nor with any divergence in count, identity,
+///   parameters, declaration, or order.
+/// - [`PhaseResult::Refused`] / [`PhaseResult::Faulted`] are failure resolutions that
+///   short-circuit the launch; they do NOT assert action parity, so they are
+///   structurally consistent regardless of counts. Their legality (that they forbid
+///   exec) is enforced by [`ready_to_exec`], not here.
+#[must_use]
+pub fn phase_resolution_consistent(
+    scheduled: &[LoweringWireEntryV1],
+    observed: &[LoweringWireEntryV1],
+    result: PhaseResult,
+) -> bool {
+    match result {
+        PhaseResult::NotRequired => scheduled.is_empty() && observed.is_empty(),
+        PhaseResult::Applied => !scheduled.is_empty() && observed == scheduled,
+        PhaseResult::Refused | PhaseResult::Faulted => true,
+    }
+}
+
+/// Whether confinement was ACTUALLY installed — DERIVED evidence, NOT a state. True
+/// only when the confinement phase had scheduled actions AND they were applied. An
+/// empty confinement schedule (e.g. an exec-only plan) can never yield `true`, so a
+/// [`LauncherState::ConfinementPhaseResolved`] checkpoint never over-claims an
+/// install.
+#[must_use]
+pub fn confinement_installed(
+    scheduled_confinement_action_count: usize,
+    confinement_result: PhaseResult,
+) -> bool {
+    scheduled_confinement_action_count > 0 && confinement_result == PhaseResult::Applied
+}
+
+/// Whether the launch may proceed to exec, given the four resolved phase results and
+/// the schedule binding. PURE and total. True ⟺ the child was created, every phase
+/// resolved to {Applied, NotRequired} (no Refused, no Faulted), the AMBIENT-AUTHORITY
+/// phase resolved [`PhaseResult::Applied`] (the scrub is mandatory — `NotRequired`
+/// is a violation), and the observed schedule digest equals the bound `h_l`. Any
+/// failure resolution, a missing scrub, an unbound schedule, or an uncreated child
+/// ⇒ false (fail-closed).
+#[must_use]
+pub fn ready_to_exec(
+    child_created: bool,
+    phases: [(SetupPhase, PhaseResult); 4],
+    observed_schedule_digest: Digest32,
+    h_l: Digest32,
+) -> bool {
+    if !child_created {
+        return false;
+    }
+    if observed_schedule_digest != h_l {
+        return false;
+    }
+    let mut ambient_applied = false;
+    for (phase, result) in phases {
+        match result {
+            PhaseResult::Applied | PhaseResult::NotRequired => {}
+            PhaseResult::Refused | PhaseResult::Faulted => return false,
+        }
+        if matches!(phase, SetupPhase::AmbientAuthority) && result == PhaseResult::Applied {
+            ambient_applied = true;
+        }
+    }
+    ambient_applied
+}
+
 // The full protocol conformance suite — canonical round-trip, the frozen golden
 // vector, every envelope reject (incl. `parse_and_verify`'s accept + tamper
-// paths), the descriptor table, and the launcher state machine — lives in the
-// integration test `crates/bvisor/tests/launcher_protocol.rs` (a member of the
-// over-claim witness corpus). Kept out-of-source so this module stays types-only.
+// paths), the descriptor table, the launcher state machine, and the phase-honesty
+// predicates — lives in the integration test
+// `crates/bvisor/tests/launcher_protocol.rs` (a member of the over-claim witness
+// corpus). Kept out-of-source so this module stays types-only.
