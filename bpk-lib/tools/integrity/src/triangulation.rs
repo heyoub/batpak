@@ -39,7 +39,7 @@
 //! (traceability/invariants.yaml), architecture_ir.rs (cargo-metadata projection
 //! it complements).
 
-use crate::repo_surface::ensure;
+use crate::repo_surface::{ensure, tracked_repo_files};
 use anyhow::{anyhow, Context, Result};
 use cargo_metadata::MetadataCommand;
 use serde::Deserialize;
@@ -519,6 +519,317 @@ impl Oracle for SourceUsageGraphOracle {
     }
 }
 
+// --- FACT D7-C: workspace MEMBER SET (cargo-metadata vs git+manifest text). ---
+//
+// subject="workspace", predicate="member-set", value = sorted comma-joined crate
+// names. Two GENUINELY INDEPENDENT derivations:
+//
+//   Oracle 1 (`cargo-member-set`): cargo's own workspace resolution
+//     (`metadata.workspace_members` → package names). This reuses the SAME
+//     `cargo metadata` evidence the crate-graph oracles use.
+//
+//   Oracle 2 (`git-member-set`): NO cargo resolution at all. It enumerates
+//     tracked `Cargo.toml` files via `git ls-files`, reads the ROOT manifest's
+//     `members`/`exclude` arrays TEXTUALLY, admits only manifests whose directory
+//     the textual `members` globs admit (and `exclude` does not), and line-scans
+//     each admitted manifest's `[package] name = "..."`. Its evidence artifacts
+//     (git's tracked-file set + raw manifest text + textual glob parsing) share no
+//     code path with cargo's resolver, so a disagreement is a real finding — e.g.
+//     a directory the `members` glob admits that has a `Cargo.toml` but that cargo
+//     dropped from the workspace (or vice versa).
+
+/// One tracked-manifest view row for the git+text oracle: a workspace-root-relative
+/// manifest DIRECTORY (forward-slashed, e.g. `crates/core`) and the `[package]
+/// name` line-scanned out of that `Cargo.toml`. `name` is `None` for a virtual or
+/// nameless manifest (it contributes no member name).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TrackedManifest {
+    pub(crate) dir: String,
+    pub(crate) name: Option<String>,
+}
+
+/// The injected inputs the git+text member-set oracle derives from — kept as a
+/// pure value so a RED fixture can drive [`textual_member_set`] without a live
+/// tree or any `git`/`cargo` invocation.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct GitManifestView {
+    /// Every tracked `Cargo.toml` (except the root) as a `(dir, name)` row.
+    pub(crate) manifests: Vec<TrackedManifest>,
+    /// The root manifest's `members` array, parsed TEXTUALLY (each entry a path
+    /// or a trailing-`*` glob, forward-slashed).
+    pub(crate) members: Vec<String>,
+    /// The root manifest's `exclude` array, parsed TEXTUALLY.
+    pub(crate) exclude: Vec<String>,
+}
+
+/// Match a cargo workspace member/exclude glob `pattern` against a manifest
+/// `dir`, both forward-slashed and root-relative. Cargo member globs support a
+/// trailing `*` matching exactly one path component (`crates/*` admits
+/// `crates/core` but not `crates/a/b`); an exact entry matches that one directory.
+/// Deliberately a tiny dedicated matcher (not cargo's resolver) so this oracle's
+/// admission decision is textual and independent.
+fn member_glob_matches(pattern: &str, dir: &str) -> bool {
+    if let Some(prefix) = pattern.strip_suffix("/*") {
+        // `crates/*` admits a single component directly under `crates/`.
+        match dir.strip_prefix(prefix).and_then(|r| r.strip_prefix('/')) {
+            Some(rest) => !rest.is_empty() && !rest.contains('/'),
+            None => false,
+        }
+    } else {
+        pattern == dir
+    }
+}
+
+/// Derive the workspace member-set value PURELY from the injected git+text view:
+/// keep every tracked manifest whose directory the textual `members` globs admit
+/// and the `exclude` globs do not, take its `[package] name`, sort, and
+/// comma-join. This is the testable core of the `git-member-set` oracle.
+pub(crate) fn textual_member_set(view: &GitManifestView) -> String {
+    let mut names: BTreeSet<String> = BTreeSet::new();
+    for manifest in &view.manifests {
+        let admitted = view
+            .members
+            .iter()
+            .any(|pattern| member_glob_matches(pattern, &manifest.dir));
+        if !admitted {
+            continue;
+        }
+        let excluded = view
+            .exclude
+            .iter()
+            .any(|pattern| member_glob_matches(pattern, &manifest.dir));
+        if excluded {
+            continue;
+        }
+        if let Some(name) = &manifest.name {
+            names.insert(name.clone());
+        }
+    }
+    names.into_iter().collect::<Vec<_>>().join(",")
+}
+
+/// Cross-check the two member-set derivations over INJECTED values (no live tree).
+/// Builds the `workspace`/`member-set` claim pool and returns the disagreement
+/// engine's verdict. Split out so a RED fixture can force a disagreement. The live
+/// gate cross-checks these two oracles through the engine roster directly (both
+/// are registered in `default_oracles`), so this helper is the test-only driver.
+#[cfg(test)]
+pub(crate) fn check_member_set_over(
+    cargo_member_set: &str,
+    view: &GitManifestView,
+) -> Vec<Disagreement> {
+    let textual = textual_member_set(view);
+    let pool = vec![
+        Claim {
+            subject: "workspace".to_owned(),
+            predicate: "member-set".to_owned(),
+            value: cargo_member_set.to_owned(),
+            oracle: "cargo-member-set".to_owned(),
+        },
+        Claim {
+            subject: "workspace".to_owned(),
+            predicate: "member-set".to_owned(),
+            value: textual,
+            oracle: "git-member-set".to_owned(),
+        },
+    ];
+    TriangulationEngine::disagreements(&pool)
+}
+
+/// Oracle 1 for D7-C: workspace member set from cargo's own resolution.
+struct CargoMemberSetOracle;
+
+impl CargoMemberSetOracle {
+    /// Sorted comma-joined member crate names from `metadata.workspace_members`.
+    fn member_set(repo_root: &Path) -> Result<String> {
+        let mut cmd = MetadataCommand::new();
+        cmd.current_dir(repo_root);
+        cmd.no_deps();
+        let metadata = cmd.exec().context("cargo metadata")?;
+        let members: BTreeSet<_> = metadata.workspace_members.iter().collect();
+        let names: BTreeSet<String> = metadata
+            .packages
+            .iter()
+            .filter(|p| members.contains(&p.id))
+            .map(|p| p.name.to_string())
+            .collect();
+        Ok(names.into_iter().collect::<Vec<_>>().join(","))
+    }
+}
+
+impl Oracle for CargoMemberSetOracle {
+    fn name(&self) -> &str {
+        "cargo-member-set"
+    }
+
+    fn claims(&self, repo_root: &Path) -> Result<ClaimSet> {
+        let mut set = ClaimSet::new();
+        set.assert(
+            self.name(),
+            "workspace",
+            "member-set",
+            Self::member_set(repo_root)?,
+        );
+        Ok(set)
+    }
+}
+
+/// Oracle 2 for D7-C: workspace member set from git-tracked manifests + textual
+/// root-manifest glob parsing. Uses NO `cargo metadata` / `MetadataCommand` — its
+/// whole evidence base is `git ls-files` + raw `Cargo.toml` text.
+struct GitMemberSetOracle;
+
+impl GitMemberSetOracle {
+    /// Build the [`GitManifestView`] from the live tree: read the root manifest's
+    /// `members`/`exclude` arrays textually, then enumerate every tracked
+    /// `Cargo.toml` (except the root) and line-scan its `[package] name`.
+    fn view(repo_root: &Path) -> Result<GitManifestView> {
+        let root_manifest = repo_root.join("Cargo.toml");
+        let root_text = std::fs::read_to_string(&root_manifest)
+            .with_context(|| format!("read {}", root_manifest.display()))?;
+        let members = scan_workspace_array(&root_text, "members");
+        let exclude = scan_workspace_array(&root_text, "exclude");
+
+        let mut manifests = Vec::new();
+        for path in tracked_repo_files(repo_root)? {
+            if path.file_name().and_then(|n| n.to_str()) != Some("Cargo.toml") {
+                continue;
+            }
+            if path == root_manifest {
+                continue; // the root virtual manifest is not a member.
+            }
+            let Some(dir) = path.parent() else {
+                continue;
+            };
+            let Ok(rel) = dir.strip_prefix(repo_root) else {
+                continue; // outside the workspace root (e.g. project-root sibling).
+            };
+            let rel = rel.to_string_lossy().replace('\\', "/");
+            let text = std::fs::read_to_string(&path)
+                .with_context(|| format!("read {}", path.display()))?;
+            manifests.push(TrackedManifest {
+                dir: rel,
+                name: scan_package_name(&text),
+            });
+        }
+        manifests.sort_by(|a, b| a.dir.cmp(&b.dir));
+        Ok(GitManifestView {
+            manifests,
+            members,
+            exclude,
+        })
+    }
+}
+
+impl Oracle for GitMemberSetOracle {
+    fn name(&self) -> &str {
+        "git-member-set"
+    }
+
+    fn claims(&self, repo_root: &Path) -> Result<ClaimSet> {
+        let view = Self::view(repo_root)?;
+        let mut set = ClaimSet::new();
+        set.assert(
+            self.name(),
+            "workspace",
+            "member-set",
+            textual_member_set(&view),
+        );
+        Ok(set)
+    }
+}
+
+/// Scan the root `Cargo.toml` text for a `[workspace]`-table array (`members` or
+/// `exclude`) and return its string entries, forward-slashed. Deliberately a line
+/// scanner (NOT a TOML/cargo parser) so the git-member-set oracle derives the
+/// admission globs by genuinely different means than cargo's resolver. Handles the
+/// common multi-line array form (one entry per line, trailing comma) and skips
+/// comment lines.
+fn scan_workspace_array(manifest: &str, key: &str) -> Vec<String> {
+    let mut in_workspace = false;
+    let mut in_array = false;
+    let mut out = Vec::new();
+    for raw in manifest.lines() {
+        let line = raw.trim();
+        if line.starts_with('#') {
+            continue;
+        }
+        if line.starts_with('[') {
+            // Any new table header ends the [workspace] table / the array.
+            in_workspace = line == "[workspace]";
+            in_array = false;
+            continue;
+        }
+        if !in_workspace {
+            continue;
+        }
+        let scan = if in_array {
+            line
+        } else if let Some(rest) = strip_array_key(line, key) {
+            in_array = true;
+            rest
+        } else {
+            continue;
+        };
+        for entry in scan.split(',') {
+            if let Some(value) = quoted_value(entry) {
+                out.push(value.replace('\\', "/"));
+            }
+        }
+        if scan.contains(']') {
+            in_array = false;
+        }
+    }
+    out
+}
+
+/// If `line` opens the array `key = [` (single- or multi-line), return the text
+/// AFTER the opening `[` so any same-line entries are scanned too.
+fn strip_array_key<'a>(line: &'a str, key: &str) -> Option<&'a str> {
+    let rest = line.strip_prefix(key)?;
+    let rest = rest.trim_start();
+    let rest = rest.strip_prefix('=')?.trim_start();
+    rest.strip_prefix('[')
+}
+
+/// The first double-quoted value in `s`, or `None` if there is no complete pair.
+fn quoted_value(s: &str) -> Option<String> {
+    let open = s.find('"')?;
+    let after = &s[open + 1..];
+    let close = after.find('"')?;
+    Some(after[..close].to_owned())
+}
+
+/// Line-scan a member `Cargo.toml` for its `[package] name = "..."`. Returns the
+/// FIRST `name` under the `[package]` table. Deliberately textual (not a TOML
+/// parser) so the git-member-set oracle stays independent of cargo's manifest
+/// parsing.
+fn scan_package_name(manifest: &str) -> Option<String> {
+    let mut in_package = false;
+    for raw in manifest.lines() {
+        let line = raw.trim();
+        if line.starts_with('#') {
+            continue;
+        }
+        if line.starts_with('[') {
+            in_package = line == "[package]";
+            continue;
+        }
+        if !in_package {
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("name") {
+            let rest = rest.trim_start();
+            if let Some(rest) = rest.strip_prefix('=') {
+                if let Some(value) = quoted_value(rest) {
+                    return Some(value);
+                }
+            }
+        }
+    }
+    None
+}
+
 /// Extract the set of crate-import identifiers a Rust source file references via
 /// `use <ident>::`, `use <ident>;`, `extern crate <ident>`, or a leading
 /// `<ident>::` path at a token boundary. Deliberately a hand token scanner (not
@@ -726,6 +1037,8 @@ fn default_oracles() -> Vec<Box<dyn Oracle>> {
         Box::new(CargoMetadataGraphOracle),
         Box::new(ManifestScanGraphOracle),
         Box::new(SourceUsageGraphOracle),
+        Box::new(CargoMemberSetOracle),
+        Box::new(GitMemberSetOracle),
     ]
 }
 

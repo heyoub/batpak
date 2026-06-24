@@ -26,6 +26,12 @@ oracles:
   - name: source-usage
     predicate: workspace-crate-graph/acyclic
     source: "edges re-derived from actual source `use`/`extern crate` usage (acyclic predicate only; the usage edge set is a legal subset of the manifest set)"
+  - name: cargo-member-set
+    predicate: workspace/member-set
+    source: "workspace member crate names from cargo's own resolution (`cargo metadata` workspace_members)"
+  - name: git-member-set
+    predicate: workspace/member-set
+    source: "member crate names re-derived with NO cargo resolution: `git ls-files` tracked Cargo.toml set + textual root-manifest members/exclude glob parsing + textual `[package] name` scan"
 
 invariants:
   - id: INV-WORKSPACE-DAG-ACYCLIC
