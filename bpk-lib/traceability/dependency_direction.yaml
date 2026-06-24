@@ -40,7 +40,6 @@ layers:
   - tier: core-consumers
     crates:
       - syncbat
-      - bvisor
       - batpak-bench-support
 
   # rank 4 — second-order consumers (build on a core-consumer).
@@ -51,7 +50,17 @@ layers:
       # it depends only downward. No edge to/from netbat (independent siblings).
       - hostbat
 
-  # rank 5 — test/example/tooling surface: top of the stack, depended on by
+  # rank 5 — boundary host: bvisor's `host` feature mounts the boundary contract
+  # as a `hostbat` module, so bvisor (maximal-feature) depends DOWNWARD on
+  # hostbat (rank 4), syncbat (rank 3), and batpak (rank 2). The pure `contract/`
+  # only needs batpak, but a crate occupies ONE layer sized to its full feature
+  # set — the `host` feature is what lifts bvisor above hostbat. Nothing in the
+  # workspace depends on bvisor (it is a top-of-stack leaf).
+  - tier: boundary-host
+    crates:
+      - bvisor
+
+  # rank 6 — test/example/tooling surface: top of the stack, depended on by
   # nothing in-workspace (their inbound edges are dev-deps, excluded here).
   - tier: tooling
     crates:

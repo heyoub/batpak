@@ -26,6 +26,11 @@ dangerous-test-hooks = ["batpak/dangerous-test-hooks"]
 # z3/cvc5 (BVISOR_Z3 / BVISOR_CVC5). The pure SMT GENERATOR is always compiled and
 # unit-tested locally; only the solver-invoking harness is behind this feature.
 qf-bv = []
+# Host wiring (kernel plan §11): mount the boundary contract as ONE hostbat
+# `HostModule` over a `syncbat::Core`. Off by default — the pure `contract/` is
+# the crate's identity; `host` adds the syncbat handlers + the hostbat module so
+# bvisor never grows its own host architecture (there is NO `bvisor-host` crate).
+host = ["dep:syncbat", "dep:hostbat"]
 
 [dependencies]
 # batpak by path for the EventPayload derive + inventory registration and the
@@ -38,6 +43,16 @@ serde = { version = "1", features = ["derive"] }
 # `rmp_serde::encode::Error`, mirrored here exactly as core's *ReportBody does.
 # Pinned to the same line core pins so the canonical bytes stay byte-identical.
 rmp-serde = "=1.3.1"
+# Host wiring (the `host` feature). The runtime layer bvisor mounts into and the
+# generic module host that composes it; both optional so the default build stays
+# the pure, OS-free, host-free contract.
+syncbat = { path = "../syncbat", version = "0.8.3", optional = true }
+hostbat = { path = "../hostbat", version = "0.8.3", optional = true }
+
+[dev-dependencies]
+# The `host` end-to-end proof opens a real batpak Store in a tempdir to witness
+# the PERSIST leg (request → admit → execute → seal → persist).
+tempfile = ">=3.24, <3.25"
 
 [lints]
 workspace = true

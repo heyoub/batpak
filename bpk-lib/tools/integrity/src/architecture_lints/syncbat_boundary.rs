@@ -141,25 +141,27 @@ const NETBAT_LAYER_LEAKS: &[BoundaryTerm] = &[
     },
 ];
 
-// The PURE `bvisor` contract crate (crates/bvisor/src/). It depends on the
-// batpak generic substrate API ONLY: host wiring (syncbat), transport (netbat),
-// and contract-layer names live in `bvisor-host`, never in the pure contract.
+// The PURE `bvisor` contract crate (crates/bvisor/src/ EXCEPT src/host/). It
+// depends on the batpak generic substrate API ONLY: host wiring (syncbat),
+// transport (netbat), and contract-layer names live in the feature-gated
+// `bvisor::host` module (kernel plan §11 — there is NO `bvisor-host` crate),
+// never in the pure `contract/` + `backend/`.
 const BVISOR_LAYER_LEAKS: &[BoundaryTerm] = &[
     BoundaryTerm {
         token: "syncbat",
-        reason: "runtime host wiring belongs in bvisor-host, not the pure bvisor contract",
+        reason: "runtime host wiring belongs in the bvisor::host feature module, not the pure bvisor contract",
     },
     BoundaryTerm {
         token: "Syncbat",
-        reason: "runtime host wiring belongs in bvisor-host, not the pure bvisor contract",
+        reason: "runtime host wiring belongs in the bvisor::host feature module, not the pure bvisor contract",
     },
     BoundaryTerm {
         token: "netbat",
-        reason: "transport belongs in bvisor-host, not the pure bvisor contract",
+        reason: "transport belongs in the bvisor::host feature module, not the pure bvisor contract",
     },
     BoundaryTerm {
         token: "Netbat",
-        reason: "transport belongs in bvisor-host, not the pure bvisor contract",
+        reason: "transport belongs in the bvisor::host feature module, not the pure bvisor contract",
     },
     BoundaryTerm {
         token: "downstream-kit",
@@ -285,8 +287,9 @@ enum SourceLayer {
     Core,
     Syncbat,
     Netbat,
-    /// The PURE `bvisor` contract crate (`crates/bvisor/src/`). NOT `bvisor-host`
-    /// (which may use syncbat/netbat and own threads) — that maps to `None`.
+    /// The PURE `bvisor` contract crate (`crates/bvisor/src/` EXCEPT `src/host/`).
+    /// The feature-gated `bvisor::host` module may use syncbat/hostbat and owns
+    /// the host wiring — it maps to `None` (kernel plan §11: no `bvisor-host` crate).
     Bvisor,
 }
 
@@ -322,9 +325,14 @@ fn source_layer(repo_root: &Path, path: &Path) -> Option<SourceLayer> {
     if rel.starts_with("crates/netbat/src/") {
         return Some(SourceLayer::Netbat);
     }
-    // The pure contract only. `crates/bvisor-host/src/` does NOT match this
-    // prefix (the next char is `-`, not `/`), so the host is intentionally
-    // exempt — it owns syncbat wiring, transport, and supervision threads.
+    // The pure contract only. The feature-gated `bvisor::host` module
+    // (`crates/bvisor/src/host/`) is the sanctioned host wiring (kernel plan §11:
+    // NO `bvisor-host` crate; host wiring lives here). It legitimately uses
+    // syncbat + hostbat, so it is exempt from the pure-contract layer exactly as
+    // the old `bvisor-host` crate was — `contract/` and `backend/` stay pure.
+    if rel.starts_with("crates/bvisor/src/host/") {
+        return None;
+    }
     if rel.starts_with("crates/bvisor/src/") {
         return Some(SourceLayer::Bvisor);
     }
@@ -415,12 +423,15 @@ fn check_family_manifest_boundaries(repo_root: &Path) -> Result<()> {
             forbidden_stack_deps: &["batpak", "downstream-kit", "bvisor", "extprofile", "downstream-frontend"],
         },
         // The PURE bvisor contract depends on the batpak generic substrate ONLY.
-        // syncbat/netbat host wiring lives in bvisor-host (not gated here, since
-        // bvisor-host legitimately depends on them).
+        // The `host` feature legitimately adds OPTIONAL syncbat + hostbat deps for
+        // the `bvisor::host` module (kernel plan §11 — no `bvisor-host` crate), so
+        // `syncbat` is NOT forbidden at the manifest level; the source-layer scan
+        // still forbids syncbat USAGE in the pure `contract/` + `backend/` files.
+        // `netbat` stays forbidden until a host transport slice adds it.
         ManifestRule {
             label: "bvisor (pure contract)",
             rel: "crates/bvisor/Cargo.toml",
-            forbidden_stack_deps: &["syncbat", "netbat", "downstream-kit", "extprofile", "downstream-frontend"],
+            forbidden_stack_deps: &["netbat", "downstream-kit", "extprofile", "downstream-frontend"],
         },
     ];
 
@@ -755,9 +766,10 @@ mod tests {
             source_layer(root, Path::new("/repo/crates/bvisor/src/contract/plan.rs")),
             Some(SourceLayer::Bvisor)
         );
-        // bvisor-host is NOT the pure layer — it owns syncbat wiring + threads.
+        // The `bvisor::host` feature module is NOT the pure layer — it owns the
+        // syncbat/hostbat wiring (kernel plan §11), so it maps to None.
         assert_eq!(
-            source_layer(root, Path::new("/repo/crates/bvisor-host/src/lib.rs")),
+            source_layer(root, Path::new("/repo/crates/bvisor/src/host/mod.rs")),
             None
         );
         assert_eq!(
