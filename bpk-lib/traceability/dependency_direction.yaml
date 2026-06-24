@@ -47,6 +47,9 @@ layers:
   - tier: second-order-consumers
     crates:
       - netbat
+      # hostbat composes a syncbat Core (rank 3) + the batpak Spawn seam (rank 2);
+      # it depends only downward. No edge to/from netbat (independent siblings).
+      - hostbat
 
   # rank 5 — test/example/tooling surface: top of the stack, depended on by
   # nothing in-workspace (their inbound edges are dev-deps, excluded here).
