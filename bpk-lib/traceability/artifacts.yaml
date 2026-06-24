@@ -21,6 +21,8 @@
   paths:
     - tools/integrity/src/triangulation.rs
     - tools/integrity/src/triangulation_tests.rs
+    - tools/integrity/src/fitness_functions.rs
+    - tools/integrity/src/fitness_functions_tests.rs
     - tools/integrity/src/structural.rs
 - id: ART-SEMANTIC-DIFF-TESTS
   kind: tests

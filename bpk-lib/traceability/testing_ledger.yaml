@@ -943,6 +943,7 @@
     - INV-CROSS-DIRECTORY-CONSISTENCY-PRODUCT-OWNED
     - INV-CONTEXT-VIEWS-DERIVED-FROM-HISTORY
     - INV-WORKSPACE-DAG-ACYCLIC
+    - INV-DEPENDENCY-DIRECTION
   locations:
     - bpk-lib/tools/integrity/src/invariant_bridge.rs
     - bpk-lib/tools/integrity/src/structural.rs

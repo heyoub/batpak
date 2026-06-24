@@ -84,9 +84,13 @@ pub(crate) fn run() -> Result<()> {
     // independent graph derivations; a disagreement OR an agreed cycle fails.
     crate::receipts::run_gate("triangulation", || {
         crate::triangulation::check(&repo_root)?;
+        // The declarative rule surface must stay in lockstep with the code roster.
+        crate::fitness_functions::check(&repo_root)?;
         let mut inputs: BTreeSet<PathBuf> = workspace_manifest_inputs(&repo_root);
-        let files = inputs.len().max(1);
         inputs.insert(repo_root.join("Cargo.toml"));
+        inputs.insert(crate::triangulation::dependency_direction_path(&repo_root));
+        inputs.insert(crate::fitness_functions::fitness_functions_path(&repo_root));
+        let files = inputs.len().max(1);
         Ok(crate::receipts::GateWork::new(files, files, inputs))
     })?;
 

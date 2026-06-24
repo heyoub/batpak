@@ -31,6 +31,7 @@ mod docs_catalog;
 mod doctor;
 mod dst_corpus;
 mod evidence_audit;
+mod fitness_functions;
 mod gate_registry;
 mod glob_coverage;
 mod harness_lints;

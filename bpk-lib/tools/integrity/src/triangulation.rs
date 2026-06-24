@@ -6,24 +6,43 @@
 //! oracles. rustc is the type source-of-truth and is deliberately NOT re-derived
 //! here (see spec item 3.0); triangulation targets architecture/doctrine facts.
 //!
-//! This is the Phase 3 SKELETON: the `Oracle` trait + disagreement engine + ONE
-//! concrete triangulated fact wired blocking — workspace crate-graph acyclicity,
-//! cross-checked by two independent oracles:
+//! The `Oracle` trait + disagreement engine cross-check workspace crate-graph
+//! acyclicity via THREE independent oracles:
 //!   1. `CargoMetadataGraphOracle` — edges from `cargo metadata` (`no_deps`,
 //!      reading each member's declared path dependencies) + Tarjan SCC.
 //!   2. `ManifestScanGraphOracle` — edges re-derived by directly scanning each
 //!      member `Cargo.toml` for `path = "../<dir>"` entries + Tarjan SCC.
+//!   3. `SourceUsageGraphOracle` — edges re-derived from ACTUAL SOURCE USAGE
+//!      (`use <crate>::` / `extern crate`), a genuinely different evidence source
+//!      than the manifests. It emits ONLY the `acyclic` predicate (not the full
+//!      edge-signature): the usage edge set is a legal SUBSET of the manifest set,
+//!      but acyclicity is monotone under edge removal, so a usage-graph cycle the
+//!      manifests miss is a true finding. (See the oracle's doc for the proof.)
 //!
-//! If the two graphs disagree on the acyclicity verdict (or on the edge set),
-//! that is itself a finding; if they AGREE that a cycle exists, the gate fails
-//! naming the cycle. Both clean + agreeing on the live tree ⟹ green.
+//! If the oracles disagree on the acyclicity verdict (or oracles 1/2 on the edge
+//! set), that is itself a finding; if they AGREE that a cycle exists, the gate
+//! fails naming the cycle.
 //!
-//! Anchors: INV-WORKSPACE-DAG-ACYCLIC (traceability/invariants.yaml),
-//! architecture_ir.rs (cargo-metadata projection it complements).
+//! Beyond acyclicity the gate enforces the STRONGER `INV-DEPENDENCY-DIRECTION`
+//! allowed-edge rule: every NORMAL build-graph edge must go strictly DOWNWARD in
+//! the layer order declared in `traceability/dependency_direction.yaml`. A legal
+//! DAG can still carry an edge in the WRONG direction (a foundational crate
+//! reaching UP into a consumer); the direction gate forbids it, and lockstep
+//! requires every workspace member to be assigned a layer so a NEW crate cannot
+//! escape the rule. Both clean on the live tree ⟹ green.
+//!
+//! The declarative rule surface — which oracles run and which directional
+//! invariant is enforced — is mirrored in `traceability/fitness_functions.yaml`
+//! (the dual-ergonomic registry), kept in lockstep by `fitness_functions.rs`.
+//!
+//! Anchors: INV-WORKSPACE-DAG-ACYCLIC, INV-DEPENDENCY-DIRECTION
+//! (traceability/invariants.yaml), architecture_ir.rs (cargo-metadata projection
+//! it complements).
 
 use crate::repo_surface::ensure;
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use cargo_metadata::MetadataCommand;
+use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
@@ -416,6 +435,231 @@ impl Oracle for ManifestScanGraphOracle {
     }
 }
 
+/// Oracle 3: the crate graph re-derived from ACTUAL SOURCE USAGE, not manifests.
+/// For each workspace member it scans every `.rs` file under the crate's `src/`
+/// for references to a SIBLING workspace crate's import root (`use <crate>::`,
+/// `extern crate <crate>`, or a `<crate>::` path), mapping the Rust import name
+/// (hyphens → underscores) back to the member package name. This is a genuinely
+/// INDEPENDENT derivation: it reads the code's real dependency on a crate's API,
+/// not the manifest's declaration.
+///
+/// CRITICAL honesty note — why this oracle emits ONLY the `acyclic` predicate and
+/// NOT `edge-signature`: a manifest may legitimately declare a dependency the
+/// source never `use`s (re-exports, macro-only deps, feature-gated paths), so the
+/// source-usage edge set is a SUBSET of the manifest edge set, not equal. Asserting
+/// edge-signature would therefore false-fire on a legal subset. But acyclicity is
+/// monotone under edge removal: a subgraph of a DAG is a DAG, so if the manifest
+/// graph is acyclic the usage graph MUST be too. A disagreement on `acyclic`
+/// (manifest=acyclic, usage=cyclic) is then a genuine finding — a real dependency
+/// cycle expressed in code that the manifest's path-dep accounting missed. That is
+/// the only cross-checkable claim, and it is non-tautological.
+struct SourceUsageGraphOracle;
+
+impl SourceUsageGraphOracle {
+    fn graph(repo_root: &Path) -> Result<CrateGraph> {
+        let mut cmd = MetadataCommand::new();
+        cmd.current_dir(repo_root);
+        cmd.no_deps();
+        let metadata = cmd.exec().context("cargo metadata")?;
+        let members: BTreeSet<_> = metadata.workspace_members.iter().collect();
+
+        // Map each member's Rust import name (package name with '-' → '_') to its
+        // package name, and record each member's src/ directory.
+        let mut import_to_name: BTreeMap<String, String> = BTreeMap::new();
+        let mut member_src_dirs: Vec<(String, std::path::PathBuf)> = Vec::new();
+        for package in metadata.packages.iter().filter(|p| members.contains(&p.id)) {
+            let import = package.name.replace('-', "_");
+            import_to_name.insert(import, package.name.to_string());
+            let manifest = package.manifest_path.as_std_path().to_path_buf();
+            let src = manifest
+                .parent()
+                .map(|d| d.join("src"))
+                .unwrap_or_else(|| manifest.clone());
+            member_src_dirs.push((package.name.to_string(), src));
+        }
+
+        let mut graph = CrateGraph::default();
+        for (name, src_dir) in &member_src_dirs {
+            graph.add_node(name);
+            let self_import = name.replace('-', "_");
+            for file in crate::repo_surface::rust_files(src_dir) {
+                let text = std::fs::read_to_string(&file)
+                    .with_context(|| format!("read {}", file.display()))?;
+                for import in scan_crate_imports(&text) {
+                    if import == self_import {
+                        continue; // self-reference, not a dependency edge.
+                    }
+                    if let Some(target) = import_to_name.get(&import) {
+                        graph.add_edge(name, target);
+                    }
+                }
+            }
+        }
+        Ok(graph)
+    }
+}
+
+impl Oracle for SourceUsageGraphOracle {
+    fn name(&self) -> &str {
+        "source-usage"
+    }
+
+    fn claims(&self, repo_root: &Path) -> Result<ClaimSet> {
+        let graph = Self::graph(repo_root)?;
+        // ONLY the acyclic predicate is cross-checkable (see the oracle doc);
+        // emitting edge-signature would false-fire on a legal manifest superset.
+        let mut set = ClaimSet::new();
+        set.assert(
+            self.name(),
+            "workspace-crate-graph",
+            "acyclic",
+            graph.cycles().is_empty().to_string(),
+        );
+        Ok(set)
+    }
+}
+
+/// Extract the set of crate-import identifiers a Rust source file references via
+/// `use <ident>::`, `use <ident>;`, `extern crate <ident>`, or a leading
+/// `<ident>::` path at a token boundary. Deliberately a hand token scanner (not
+/// syn path-resolution) so this oracle derives edges by genuinely different means
+/// than the manifest oracles. Comment lines are skipped. Only the FIRST path
+/// segment is collected; the caller filters to workspace import names.
+fn scan_crate_imports(source: &str) -> BTreeSet<String> {
+    let mut imports = BTreeSet::new();
+    for raw in source.lines() {
+        let line = raw.trim_start();
+        if line.starts_with("//") || line.starts_with("/*") || line.starts_with('*') {
+            continue;
+        }
+        for token in ["use ", "extern crate "] {
+            if let Some(rest) = line.strip_prefix(token) {
+                let rest = rest.trim_start();
+                let head = leading_ident(rest);
+                if !head.is_empty() {
+                    imports.insert(head);
+                }
+            }
+        }
+    }
+    imports
+}
+
+/// The leading Rust identifier of `s` (ASCII alphanumeric + `_`), stopping at the
+/// first non-identifier byte (e.g. `::`, `;`, whitespace, `{`).
+fn leading_ident(s: &str) -> String {
+    s.chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+        .collect()
+}
+
+// --- INV-DEPENDENCY-DIRECTION: the allowed-edge (layer-direction) gate. ---
+
+/// One layer of the dependency-direction model. Crates in the same tier must not
+/// depend on each other; a crate may depend only on crates in a strictly lower
+/// tier (lower rank = more foundational).
+#[derive(Debug, Deserialize)]
+struct DirectionLayer {
+    tier: String,
+    crates: Vec<String>,
+}
+
+/// The parsed `dependency_direction.yaml` model.
+#[derive(Debug, Deserialize)]
+pub(crate) struct DependencyDirection {
+    layers: Vec<DirectionLayer>,
+}
+
+impl DependencyDirection {
+    /// Map each crate name to its layer `(rank, tier)` (rank 0 = most foundational).
+    fn ranks(&self) -> Result<BTreeMap<String, (usize, String)>> {
+        let mut ranks: BTreeMap<String, (usize, String)> = BTreeMap::new();
+        for (rank, layer) in self.layers.iter().enumerate() {
+            for crate_name in &layer.crates {
+                if let Some((_, prior_tier)) =
+                    ranks.insert(crate_name.clone(), (rank, layer.tier.clone()))
+                {
+                    return Err(anyhow!(
+                        "dependency_direction.yaml: crate `{crate_name}` is listed in more than \
+                         one layer (`{prior_tier}` and `{}`) — each crate must appear in exactly \
+                         one tier.",
+                        layer.tier
+                    ));
+                }
+            }
+        }
+        Ok(ranks)
+    }
+}
+
+pub(crate) fn dependency_direction_path(repo_root: &Path) -> std::path::PathBuf {
+    repo_root.join("traceability/dependency_direction.yaml")
+}
+
+fn load_dependency_direction(repo_root: &Path) -> Result<DependencyDirection> {
+    crate::repo_surface::load_yaml(&dependency_direction_path(repo_root))
+}
+
+/// Enforce INV-DEPENDENCY-DIRECTION over a crate graph: every workspace member
+/// must be assigned a layer (lockstep — a NEW crate cannot escape the rule), and
+/// every NORMAL build-graph edge `from -> to` must go strictly DOWNWARD
+/// (`rank(from) > rank(to)`). A same-tier or upward edge is a layering inversion
+/// that a plain acyclicity check would miss. Split from `check` so a RED fixture
+/// can drive it over a synthetic graph + model without the live tree.
+pub(crate) fn check_direction_over(graph: &CrateGraph, model: &DependencyDirection) -> Result<()> {
+    let ranks = model.ranks()?;
+
+    // Lockstep: every node in the graph must be ranked.
+    let unranked: Vec<&String> = graph
+        .edges
+        .keys()
+        .filter(|node| !ranks.contains_key(*node))
+        .collect();
+    ensure(
+        unranked.is_empty(),
+        format!(
+            "INV-DEPENDENCY-DIRECTION: workspace crate(s) absent from \
+             dependency_direction.yaml: {}. Every member must be assigned a layer so a NEW crate \
+             cannot silently escape the direction rule.",
+            unranked
+                .iter()
+                .map(|s| s.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    )?;
+
+    let mut violations: Vec<String> = Vec::new();
+    for (from, tos) in &graph.edges {
+        let Some((from_rank, from_tier)) = ranks.get(from) else {
+            continue; // handled by the lockstep above.
+        };
+        for to in tos {
+            let Some((to_rank, to_tier)) = ranks.get(to) else {
+                continue;
+            };
+            if from_rank <= to_rank {
+                violations.push(format!(
+                    "{from} (tier `{from_tier}`, rank {from_rank}) -> {to} (tier `{to_tier}`, rank {to_rank})"
+                ));
+            }
+        }
+    }
+    violations.sort();
+    ensure(
+        violations.is_empty(),
+        format!(
+            "INV-DEPENDENCY-DIRECTION: dependency edge(s) violate the declared layer order \
+             (a crate may depend only on a STRICTLY LOWER layer; same-layer and upward edges are \
+             forbidden):\n  {}\n\
+             Fix the edge (depend downward) or correct dependency_direction.yaml if the layering \
+             genuinely changed. See INV-DEPENDENCY-DIRECTION.",
+            violations.join("\n  ")
+        ),
+    )?;
+    Ok(())
+}
+
 /// Scan a `Cargo.toml` text body for `path = "..."` values that appear inside a
 /// normal `[dependencies]` (or `[target.'...'.dependencies]`) section.
 /// `[dev-dependencies]` and `[build-dependencies]` are deliberately excluded:
@@ -481,8 +725,24 @@ fn default_oracles() -> Vec<Box<dyn Oracle>> {
     vec![
         Box::new(CargoMetadataGraphOracle),
         Box::new(ManifestScanGraphOracle),
+        Box::new(SourceUsageGraphOracle),
     ]
 }
+
+/// The oracle names the live roster emits — the in-code source of truth the
+/// `fitness_functions.yaml` lockstep cross-checks. Derived from `default_oracles`
+/// so it can never drift from the roster the gate actually runs.
+pub(crate) fn default_oracle_names() -> Vec<String> {
+    default_oracles()
+        .iter()
+        .map(|o| o.name().to_owned())
+        .collect()
+}
+
+/// The catalog invariant ids the triangulation gate enforces — the in-code source
+/// of truth the `fitness_functions.yaml` lockstep cross-checks.
+pub(crate) const ENFORCED_INVARIANTS: &[&str] =
+    &["INV-WORKSPACE-DAG-ACYCLIC", "INV-DEPENDENCY-DIRECTION"];
 
 /// Blocking gate (`GAUNTLET-TRIANGULATION`, fact: `INV-WORKSPACE-DAG-ACYCLIC`).
 /// Fails if (a) the two crate-graph oracles DISAGREE on any shared predicate, or
@@ -526,8 +786,16 @@ pub(crate) fn check(repo_root: &Path) -> Result<()> {
         ),
     )?;
 
+    // Oracles agree the graph is acyclic; now enforce the STRONGER directional
+    // invariant (INV-DEPENDENCY-DIRECTION): every edge must go strictly downward
+    // in the declared layer order. A legal DAG can still carry an upward edge that
+    // acyclicity alone permits; the direction model forbids it.
+    let model = load_dependency_direction(repo_root)?;
+    check_direction_over(&graph, &model)?;
+
     outln!(
-        "triangulation: ok ({} oracles agree; workspace crate graph is a DAG)",
+        "triangulation: ok ({} oracles agree; workspace crate graph is a DAG respecting \
+         dependency_direction.yaml layer order)",
         engine.oracles.len()
     );
     Ok(())

@@ -4,7 +4,10 @@
 //!
 //! justifies: INV-TEST-PANIC-AS-ASSERTION; these are integrity-tool unit tests where setup panics signal fixture breakage, see tools/integrity/src/triangulation.rs
 
-use super::{scan_path_dependencies, Claim, CrateGraph, TriangulationEngine};
+use super::{
+    check_direction_over, load_dependency_direction, scan_crate_imports, scan_path_dependencies,
+    Claim, CrateGraph, DependencyDirection, TriangulationEngine,
+};
 
 fn claim(oracle: &str, subject: &str, predicate: &str, value: &str) -> Claim {
     Claim {
@@ -174,4 +177,129 @@ fn live_workspace_crate_graph_is_acyclic_and_oracles_agree() {
     // GREEN: the real batpak workspace is a DAG and both oracles agree.
     let repo_root = crate::repo_surface::repo_root().expect("repo root");
     super::check(&repo_root).expect("live workspace triangulation gate must pass");
+}
+
+/// The source-usage oracle's import scanner picks up `use`/`extern crate` heads
+/// at a token boundary and ignores comments. Deliberately independent of syn.
+#[test]
+fn source_usage_scanner_collects_use_and_extern_crate_heads() {
+    let src = r#"
+// use commented_out::Thing;  -- a comment, must be ignored
+use batpak::store::Store;
+use batpak_macros::EventPayload;
+extern crate syncbat;
+use std::collections::BTreeMap;
+"#;
+    let imports = scan_crate_imports(src);
+    assert!(imports.contains("batpak"), "got {imports:?}");
+    assert!(imports.contains("batpak_macros"), "got {imports:?}");
+    assert!(imports.contains("syncbat"), "got {imports:?}");
+    assert!(imports.contains("std"), "got {imports:?}");
+    assert!(
+        !imports.contains("commented_out"),
+        "commented import must be ignored; got {imports:?}"
+    );
+}
+
+fn direction_model(yaml: &str) -> DependencyDirection {
+    yaml_serde::from_str(yaml).expect("parse synthetic dependency_direction model")
+}
+
+const SYNTHETIC_MODEL: &str = r#"
+layers:
+  - tier: support
+    crates: [support]
+  - tier: core
+    crates: [core]
+  - tier: consumer
+    crates: [consumer]
+"#;
+
+/// GREEN: a graph whose every edge goes strictly downward passes the direction
+/// gate (consumer -> core -> support).
+#[test]
+fn dependency_direction_accepts_downward_edges() {
+    let model = direction_model(SYNTHETIC_MODEL);
+    let mut g = CrateGraph::default();
+    g.add_edge("consumer", "core");
+    g.add_edge("core", "support");
+    check_direction_over(&g, &model).expect("strictly-downward graph must pass the direction gate");
+}
+
+/// RED FIXTURE: an UPWARD edge (support -> consumer) is a layering inversion the
+/// plain acyclicity check would permit (the graph is still a DAG). The direction
+/// gate must reject it, naming the offending edge.
+#[test]
+fn dependency_direction_rejects_upward_edge() {
+    let model = direction_model(SYNTHETIC_MODEL);
+    let mut g = CrateGraph::default();
+    g.add_edge("support", "consumer"); // foundational crate reaching UP — illegal.
+    let err = check_direction_over(&g, &model)
+        .expect_err("upward edge must fail INV-DEPENDENCY-DIRECTION");
+    let msg = format!("{err:#}");
+    assert!(msg.contains("INV-DEPENDENCY-DIRECTION"), "msg: {msg}");
+    assert!(
+        msg.contains("support"),
+        "msg must name the offending edge: {msg}"
+    );
+}
+
+/// RED FIXTURE: a SAME-TIER edge is also forbidden (a layer must be internally
+/// independent). `rank(from) <= rank(to)` catches the equal case.
+#[test]
+fn dependency_direction_rejects_same_tier_edge() {
+    let model = direction_model(
+        r#"
+layers:
+  - tier: peers
+    crates: [a, b]
+  - tier: lower
+    crates: [c]
+"#,
+    );
+    let mut g = CrateGraph::default();
+    g.add_edge("a", "b"); // same tier — illegal.
+    let err = check_direction_over(&g, &model).expect_err("same-tier edge must fail");
+    assert!(format!("{err:#}").contains("INV-DEPENDENCY-DIRECTION"));
+}
+
+/// RED FIXTURE (lockstep): a workspace crate with no layer assignment fails — a
+/// NEW crate cannot silently escape the direction rule.
+#[test]
+fn dependency_direction_rejects_unranked_crate() {
+    let model = direction_model(SYNTHETIC_MODEL);
+    let mut g = CrateGraph::default();
+    g.add_edge("rogue", "core"); // `rogue` is in no layer.
+    let err = check_direction_over(&g, &model).expect_err("unranked crate must fail the lockstep");
+    let msg = format!("{err:#}");
+    assert!(msg.contains("absent from"), "msg: {msg}");
+    assert!(msg.contains("rogue"), "msg: {msg}");
+}
+
+/// RED FIXTURE: a crate listed in two layers fails `ranks()` (ambiguous rank).
+#[test]
+fn dependency_direction_rejects_double_listed_crate() {
+    let model = direction_model(
+        r#"
+layers:
+  - tier: lower
+    crates: [dup]
+  - tier: upper
+    crates: [dup]
+"#,
+    );
+    let g = CrateGraph::default();
+    let err = check_direction_over(&g, &model).expect_err("a crate in two layers must fail");
+    assert!(format!("{err:#}").contains("more than"), "msg: {err:#}");
+}
+
+/// The committed `dependency_direction.yaml` ranks every live workspace member
+/// (lockstep) and the live crate graph respects the declared direction.
+#[test]
+fn live_dependency_direction_is_clean() {
+    let repo_root = crate::repo_surface::repo_root().expect("repo root");
+    let model = load_dependency_direction(&repo_root).expect("load dependency_direction.yaml");
+    let graph = super::CargoMetadataGraphOracle::graph(&repo_root).expect("cargo-metadata graph");
+    check_direction_over(&graph, &model)
+        .expect("committed dependency_direction.yaml must pass on the live tree");
 }

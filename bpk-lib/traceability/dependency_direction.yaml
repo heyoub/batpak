@@ -1,0 +1,58 @@
+# dependency_direction.yaml — authoritative crate-layer order (INV-DEPENDENCY-DIRECTION).
+#
+# The workspace is a layered architecture: a crate may depend (via NORMAL,
+# build-graph `[dependencies]` path edges) only on crates in a STRICTLY LOWER
+# layer. This is stronger than acyclicity (which Tarjan already proves in
+# triangulation.rs): a legal DAG can still carry an edge in the WRONG direction
+# (e.g. a foundational crate reaching UP into a consumer). The direction gate
+# forbids any such inversion.
+#
+# `layers` is ordered from MOST FOUNDATIONAL (rank 0) to MOST DEPENDENT. An edge
+# `from -> to` is allowed iff `rank(from) > rank(to)` (you may only depend
+# downward). Same-layer edges are forbidden (a layer must be internally
+# independent); an edge to a lower layer is always allowed.
+#
+# Enforced by `tools/integrity/src/triangulation.rs::check_dependency_direction`,
+# wired into the blocking `triangulation` gate. Red fixture:
+# `triangulation_tests.rs::dependency_direction_rejects_upward_edge`.
+#
+# Lockstep: every workspace member (cargo-metadata) must appear in exactly one
+# layer; an unlisted member or a member listed twice fails the gate (so a NEW
+# crate cannot silently escape the direction rule).
+
+layers:
+  # rank 0 — leaf support crates: depend on nothing in-workspace.
+  - tier: support
+    crates:
+      - batpak-macros-support
+
+  # rank 1 — proc-macro crate: only on its support crate.
+  - tier: macros
+    crates:
+      - batpak-macros
+
+  # rank 2 — the core engine.
+  - tier: core
+    crates:
+      - batpak
+
+  # rank 3 — first-order core consumers (runtime libraries + bench support).
+  - tier: core-consumers
+    crates:
+      - syncbat
+      - bvisor
+      - batpak-bench-support
+
+  # rank 4 — second-order consumers (build on a core-consumer).
+  - tier: second-order-consumers
+    crates:
+      - netbat
+
+  # rank 5 — test/example/tooling surface: top of the stack, depended on by
+  # nothing in-workspace (their inbound edges are dev-deps, excluded here).
+  - tier: tooling
+    crates:
+      - batpak-testkit
+      - batpak-examples
+      - batpak-integrity
+      - xtask

@@ -621,6 +621,18 @@
   artifacts:
     - ART-TRIANGULATION-SOURCE
   witness_test: tools/integrity/src/triangulation_tests.rs::live_workspace_crate_graph_is_acyclic_and_oracles_agree
+- id: INV-DEPENDENCY-DIRECTION
+  statement: >-
+    Beyond acyclicity, every normal build-graph crate edge must go strictly DOWNWARD in the layer
+    order declared in traceability/dependency_direction.yaml: a crate may depend only on a strictly
+    more-foundational layer, and same-layer or upward edges are forbidden. A legal DAG can still
+    carry an edge in the wrong direction (a foundational crate reaching up into a consumer), which
+    acyclicity alone permits; the triangulation gate's direction check forbids it, and lockstep
+    requires every workspace member to be assigned a layer so a new crate cannot silently escape the
+    rule.
+  artifacts:
+    - ART-TRIANGULATION-SOURCE
+  witness_test: tools/integrity/src/triangulation_tests.rs::dependency_direction_rejects_upward_edge
 - id: INV-SEMANTIC-DIFF-EQUIVALENCE
   statement: >-
     Every pair of store configurations that claim to expose identical visible truth
