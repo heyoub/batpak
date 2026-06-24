@@ -12,6 +12,21 @@
 //! target. The coordinator holds the `ReadyToExec` gate; the child runs ONLY because
 //! the coordinator already determined the launch ready.
 //!
+//! ## No-fd-escape (G6) is enforced by the CHILD SCRUB, not a coordinator refusal
+//! The launcher is spawned by FORKING a host process, so it inherits whatever fds the
+//! host had open at fork — including a sibling thread's transient non-CLOEXEC fd it
+//! never declared. The coordinator does NOT enumerate its own fd table and ABORT on an
+//! undeclared inherited fd. Instead the CHILD scrub closes every non-allowlisted fd
+//! (raw `SYS_close`) BEFORE `fexecve`, so an unexpected inherited fd is defensively
+//! CLOSED in the child and is never visible to the workload. This is the no-fd-escape
+//! enforcement: an inherited fd that should not reach the workload is SCRUBBED, never a
+//! launch-abort. It is both strictly stronger than a refusal (the scrub PROVES the fd
+//! is gone — `EBADF` in the workload — rather than merely declining to launch) and
+//! more production-honest (a host that leaks an fd does not break the launch; the
+//! workload still cannot see the fd). The coordinator's only handle check is the
+//! deterministic declared-slot `fstat` SHAPE verification (kind/writability mismatch ⇒
+//! `HandleMismatch`).
+//!
 //! ## What this skeleton implements (and what it deliberately does NOT)
 //! EXACTLY two lowering primitives — `linux.ambient.scrub.v1` (the AmbientAuthority
 //! phase, the child's fd scrub) and `linux.exec.v1` (the launch, `fexecve`). It

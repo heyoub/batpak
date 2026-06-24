@@ -20,10 +20,47 @@
 //! `write`, `_exit`). If a step here cannot honestly be made allocation-free it does
 //! NOT belong in the child window.
 
+use landlock::{
+    Access, AccessFs, CompatLevel, Compatible, PathBeneath, Ruleset, RulesetAttr,
+    RulesetCreatedAttr, ABI,
+};
+// Re-export so the SAFE coordinator (`imp.rs`) can name the owned ruleset type it
+// carries from `build_landlock_ruleset` into `clone3_child` without itself depending
+// on the `landlock` crate surface.
+pub(crate) use landlock::RulesetCreated;
 use std::ffi::CString;
 use std::fs::File;
 use std::io::{self, Read};
-use std::os::fd::{FromRawFd, IntoRawFd, RawFd};
+use std::os::fd::{BorrowedFd, FromRawFd, IntoRawFd, RawFd};
+
+/// `LANDLOCK_CREATE_RULESET_VERSION` (uapi `linux/landlock.h`): asks
+/// `landlock_create_ruleset` for the supported ABI version instead of creating a
+/// ruleset. Stable kernel ABI constant.
+const LANDLOCK_CREATE_RULESET_VERSION: libc::c_uint = 1;
+
+/// The landlock ABI floor the launcher confines at. `ABI::V3` is the access set the
+/// parent-side ruleset is built from; the launcher refuses to advertise confinement
+/// when the live kernel ABI is below this floor (see [`build_landlock_ruleset`]).
+const LANDLOCK_ABI_FLOOR: ABI = ABI::V3;
+
+/// The same floor as the raw kernel ABI integer the live probe returns, so the SAFE
+/// coordinator can compare [`probe_landlock_abi`]'s result without depending on the
+/// `landlock` crate's `ABI` enum. Kept in lockstep with [`LANDLOCK_ABI_FLOOR`].
+pub(crate) const LANDLOCK_ABI_FLOOR_RAW: i64 = ABI::V3 as i64;
+
+/// One declared confinement root the launcher restricts FS access TO: a pre-opened,
+/// fstat-validated descriptor (NEVER a path — exec/landlock rides the inherited fd,
+/// avoiding the CVE-2019-5736 reopen race) and whether the workload may write beneath
+/// it. Read+execute is ALWAYS granted under a root; `writable` additionally grants the
+/// write/create access set. Inert plain data the SAFE coordinator fills in.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct LandlockRoot {
+    /// The inherited root directory fd (a `DescriptorRole::ReadRoot`/`WriteRoot`
+    /// slot the coordinator already `fstat`-validated as a writable/readable dir).
+    pub(crate) fd: RawFd,
+    /// Whether the workload may WRITE beneath this root (else read-only).
+    pub(crate) writable: bool,
+}
 
 /// The `fstat`-observed shape of a descriptor: its kind (from `st_mode & S_IFMT`)
 /// and whether it was opened writable (from the file-status `O_ACCMODE` flags).
@@ -133,6 +170,92 @@ impl ChildExecPlan {
     }
 }
 
+/// Probe the LIVE landlock ABI integer straight from the kernel.
+///
+/// Returns the supported ABI version (`>= 1`), or `0` when landlock is unavailable
+/// (old kernel / disabled LSM). The COORDINATOR floors the confinement at
+/// [`LANDLOCK_ABI_FLOOR`]: a probe below that ⇒ the launcher refuses the landlock
+/// action (`SetupRefused{MissingPrimitive}`) rather than advertising a confinement it
+/// cannot deliver. Pure observation, run in the single-threaded parent before clone3.
+#[must_use]
+pub(crate) fn probe_landlock_abi() -> i64 {
+    // SAFETY (LEDGER:linux-launcher-landlock-abi): `landlock_create_ruleset` is
+    // invoked in its documented VERSION-QUERY form (attr=NULL, size=0, flags=
+    // LANDLOCK_CREATE_RULESET_VERSION). In this form the kernel reads NO user memory,
+    // creates NO fd, and mutates nothing — it only returns the supported ABI integer
+    // (>=0) or -1/errno. No pointer is dereferenced. Sound for any caller state; the
+    // NULL/0 pair is exactly what the version query requires.
+    let raw = unsafe {
+        libc::syscall(
+            libc::SYS_landlock_create_ruleset,
+            std::ptr::null::<libc::c_void>(),
+            0usize,
+            LANDLOCK_CREATE_RULESET_VERSION,
+        )
+    };
+    if raw < 0 {
+        0
+    } else {
+        raw
+    }
+}
+
+/// Build the landlock ruleset restricting FS access to exactly `roots`, IN THE PARENT
+/// (before clone3) — async-signal-safety: ALL heap allocation, the
+/// `landlock_create_ruleset`/`landlock_add_rule` syscalls, and the rule construction
+/// happen HERE; the post-clone3 child only calls `restrict_self` (allocation-free).
+///
+/// Each rule is built from a [`BorrowedFd`] of the INHERITED root fd — NOT by
+/// reopening a path (the CVE-2019-5736 / Leaky-Vessels reopen race the protocol
+/// forbids, and strictly better than the backend's `PathFd::new(path)`). Read-only
+/// roots get the read access set; writable roots get read+write. Built at
+/// [`CompatLevel::HardRequirement`] so a kernel that cannot honor the ruleset fails
+/// CLOSED (the caller has already probed the ABI floor, so the requirement is met).
+///
+/// The `roots` slice is the coordinator-resolved, already-`fstat`-validated root
+/// descriptors. Building the ruleset does NOT confine the parent: only `restrict_self`
+/// (in the child) applies it. SAFE: the `landlock` crate is pure safe Rust.
+///
+/// # Errors
+/// An `io::Error` if the ruleset cannot be created (e.g. the ABI floor is not met at
+/// `HardRequirement`, or a root fd cannot be borrowed) — fail closed, never widen.
+pub(crate) fn build_landlock_ruleset(roots: &[LandlockRoot]) -> io::Result<RulesetCreated> {
+    let abi = LANDLOCK_ABI_FLOOR;
+    let mut ruleset = Ruleset::default()
+        .set_compatibility(CompatLevel::HardRequirement)
+        .handle_access(AccessFs::from_all(abi))
+        .map_err(landlock_to_io)?
+        .create()
+        .map_err(landlock_to_io)?;
+
+    for root in roots {
+        // SAFETY (LEDGER:linux-launcher-landlock-root-fd): `root.fd` is an inherited
+        // directory descriptor the host opened and the coordinator already
+        // `fstat`-validated as the declared read/write ROOT (a directory of the
+        // declared writability). We borrow it for exactly the duration of this
+        // `add_rule` call — `BorrowedFd` neither closes nor takes ownership, so the
+        // coordinator's fd accounting is unchanged and there is no double-close. The
+        // borrow does not outlive the loop iteration. No raw memory is touched.
+        let borrowed = unsafe { BorrowedFd::borrow_raw(root.fd) };
+        let access = if root.writable {
+            AccessFs::from_all(abi)
+        } else {
+            AccessFs::from_read(abi)
+        };
+        ruleset = ruleset
+            .add_rule(PathBeneath::new(borrowed, access))
+            .map_err(landlock_to_io)?;
+    }
+
+    Ok(ruleset)
+}
+
+/// Render a landlock error as an `io::Error` (coordinator-side, pre-clone3 — the
+/// allocation in the message is fine here, never in the child window).
+fn landlock_to_io(error: impl std::fmt::Display) -> io::Error {
+    io::Error::other(format!("landlock: {error}"))
+}
+
 /// Read ALL bytes from an inherited raw fd into an owned `Vec` — used by the
 /// COORDINATOR (single-threaded, pre-`clone3`), where heap allocation is fine.
 ///
@@ -211,10 +334,20 @@ pub(crate) fn adopt_fd(fd: RawFd) -> File {
 /// failure the child writes the errno to the error pipe and `_exit(127)`s, and the
 /// parent observes the failure via the error pipe + `waitid`.
 ///
+/// `confinement` is the OPTIONAL parent-built landlock ruleset (`None` ⇒ no landlock
+/// action scheduled). It is built (all allocation + add_rule syscalls) BEFORE this
+/// call by [`build_landlock_ruleset`]; the child applies it via `restrict_self` after
+/// the fd scrub and before `fexecve`. The parent branch never touches it (it drops at
+/// return, closing only the parent's copy of the ruleset fd — the child holds its own
+/// post-clone3 copy, so the parent drop does not affect the child's confinement).
+///
 /// # Errors
 /// An `io::Error` carrying the `clone3` errno if the fork itself fails (the child
 /// never exists, so nothing ran).
-pub(crate) fn clone3_child(plan: &ChildExecPlan) -> io::Result<libc::pid_t> {
+pub(crate) fn clone3_child(
+    plan: &ChildExecPlan,
+    confinement: Option<RulesetCreated>,
+) -> io::Result<libc::pid_t> {
     // Build the clone3 argument IN THE PARENT. flags=0 for the skeleton (the
     // MECHANISM is clone3; pidfd / CLONE_INTO_CGROUP are later steps). exit_signal
     // = SIGCHLD so the parent can `waitid` the child normally.
@@ -253,11 +386,16 @@ pub(crate) fn clone3_child(plan: &ChildExecPlan) -> io::Result<libc::pid_t> {
         // ChildExecPlan::build BEFORE clone3). It indexes already-mapped copy-on-write
         // memory, performs NO heap allocation, takes NO lock, and DIVERGES (it either
         // fexecve-replaces the image or _exit(127)s after writing the errno) — so no
-        // destructor runs and no unwinding crosses the fork. This call site is reached
-        // ONLY in the child branch, satisfying `run_child`'s contract.
-        unsafe { run_child(plan) }
+        // destructor runs and no unwinding crosses the fork. The optional `confinement`
+        // ruleset was fully BUILT in the parent (every allocation + add_rule syscall);
+        // the child only APPLIES it via the async-signal-safe `restrict_self`. This
+        // call site is reached ONLY in the child branch, satisfying `run_child`'s
+        // contract.
+        unsafe { run_child(plan, confinement) }
     }
-    // PARENT — return the child pid. `rc` is the pid (> 0).
+    // PARENT — return the child pid. `rc` is the pid (> 0). `confinement` (if any)
+    // drops here, closing ONLY the parent's copy of the ruleset fd; the child holds
+    // its own inherited copy, so its confinement is unaffected.
     let pid = libc::pid_t::try_from(rc).unwrap_or(-1);
     Ok(pid)
 }
@@ -268,9 +406,11 @@ pub(crate) fn clone3_child(plan: &ChildExecPlan) -> io::Result<libc::pid_t> {
 /// dereferences the pre-built raw pointer arrays and issues raw syscalls.
 ///
 /// SAFETY: callable ONLY from the `rc == 0` child branch of [`clone3_child`], with a
-/// `plan` whose `argv`/`envp`/`close_fds` were fully built in the parent. It indexes
-/// only that already-allocated memory and calls only async-signal-safe syscalls.
-unsafe fn run_child(plan: &ChildExecPlan) -> ! {
+/// `plan` whose `argv`/`envp`/`close_fds` were fully built in the parent and an
+/// OPTIONAL `confinement` ruleset whose every allocation + `add_rule` syscall ran in
+/// the parent. It indexes only that already-allocated memory and calls only
+/// async-signal-safe syscalls (`restrict_self` = `prctl` + `landlock_restrict_self`).
+unsafe fn run_child(plan: &ChildExecPlan, confinement: Option<RulesetCreated>) -> ! {
     // 1. Normalise the signal mask to empty (async-signal-safe). The set is a
     //    stack `sigset_t`; `sigemptyset`/`sigprocmask` allocate nothing.
     let mut empty: libc::sigset_t = std::mem::zeroed();
@@ -298,7 +438,26 @@ unsafe fn run_child(plan: &ChildExecPlan) -> ! {
         }
     }
 
-    // 4. Replace the image. exec rides the fd, never a path (no reopen race). On
+    // 4. CONFINEMENT (the landlock-restrict step, backed by the child-window unsafe
+    //    dispatch — ledger anchor `linux-launcher-child-window`): apply the
+    //    parent-built landlock ruleset, AFTER the fd scrub and BEFORE fexecve, so the
+    //    workload image runs already confined (fail-closed: any restrict_self error
+    //    _exits before the target ever runs). `restrict_self` is itself a SAFE call —
+    //    the async-signal-safe `prctl(PR_SET_NO_NEW_PRIVS)` + `landlock_restrict_self`
+    //    pair on the inherited ruleset fd — with NO allocation and NO rule construction
+    //    (all of that ran in the parent's `build_landlock_ruleset`).
+    if let Some(ruleset) = confinement {
+        if ruleset.restrict_self().is_err() {
+            // The ruleset never installed; the kernel left errno set. Report + _exit so
+            // the target NEVER runs unconfined. (On the Init/No/Dummy compat states
+            // restrict_self returns Ok without enforcing — but we built it at
+            // HardRequirement above the probed ABI floor, so a real enforce is reached
+            // or create() already failed in the parent.)
+            child_fail(plan.error_fd);
+        }
+    }
+
+    // 5. Replace the image. exec rides the fd, never a path (no reopen race). On
     //    return fexecve FAILED — report and _exit.
     libc::fexecve(plan.exe_fd, plan.argv.as_ptr(), plan.envp.as_ptr());
     child_fail(plan.error_fd)
@@ -327,6 +486,28 @@ pub(crate) fn close_fd(fd: RawFd) {
     // double-free of an owned handle. A failure (already-closed fd) is ignored.
     unsafe {
         libc::syscall(libc::SYS_close, fd);
+    }
+}
+
+/// Set `FD_CLOEXEC` on an inherited raw fd in the COORDINATOR (parent, single-threaded,
+/// pre-clone3). Used on the landlock ruleset fd(s) so a successful workload `fexecve`
+/// auto-closes them (no ruleset fd leaks into the workload); the fd stays open across
+/// the child's `restrict_self` because CLOEXEC only acts at exec, not before. A failure
+/// is ignored — the ruleset is still applied; at worst the fd would leak (the scrub
+/// already closes everything else, and the workload cannot misuse a ruleset fd with
+/// `NO_NEW_PRIVS` already set).
+pub(crate) fn set_cloexec(fd: RawFd) {
+    // SAFETY (LEDGER:linux-launcher-set-cloexec): a coordinator-side `fcntl` pair on an
+    // inherited descriptor the launcher owns (a landlock ruleset fd it just created).
+    // `F_GETFD` only READS the fd flags; `F_SETFD` only WRITES the CLOEXEC bit. The fd
+    // is passed as a plain RawFd with no Rust value wrapping it, so there is no aliasing
+    // and no double-close. No pointer is dereferenced and no raw memory is touched. A
+    // failure (returned -1) is ignored — best-effort.
+    unsafe {
+        let flags = libc::fcntl(fd, libc::F_GETFD);
+        if flags >= 0 {
+            let _ = libc::fcntl(fd, libc::F_SETFD, flags | libc::FD_CLOEXEC);
+        }
     }
 }
 

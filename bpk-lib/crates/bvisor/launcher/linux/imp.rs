@@ -2,11 +2,11 @@
 //! the control-fd transcript live here; every `unsafe` syscall is delegated to the
 //! [`crate::sys`] basement. See `main.rs` for the topology + honesty contract.
 
-use crate::sys::{self, ChildExecPlan, ObservedShape};
+use crate::sys::{self, ChildExecPlan, LandlockRoot, ObservedShape};
 use bvisor::linux::protocol::{
     confinement_installed, phase_resolution_consistent, ready_to_exec, validate_table,
-    DescriptorKind, DescriptorSlotV1, LauncherState, LinuxLaunchBodyV1, LinuxLaunchPlanV1,
-    LoweringWireEntryV1, PhaseResult, RefusalReason, SetupPhase,
+    DescriptorKind, DescriptorRole, DescriptorSlotV1, LauncherState, LinuxLaunchBodyV1,
+    LinuxLaunchPlanV1, LoweringWireEntryV1, PhaseResult, RefusalReason, SetupPhase,
 };
 use std::collections::BTreeSet;
 use std::fs::File;
@@ -22,6 +22,12 @@ const ID_AMBIENT_SCRUB: &str = "linux.ambient.scrub.v1";
 /// The launch primitive. Marks the `fexecve` step; it is not itself a SetupPhase.
 const ID_EXEC: &str = "linux.exec.v1";
 
+/// The landlock-apply primitive (Confinement phase). The child applies a parent-built
+/// landlock ruleset confining FS access to exactly the declared read/write ROOTS via
+/// `restrict_self` (after the fd scrub, before `fexecve`). The FIRST real confinement
+/// the launcher serves.
+const ID_LANDLOCK_APPLY: &str = "linux.landlock.apply.v1";
+
 /// Wire `phase_code` for the scrub action's phase, frozen by
 /// `contract::primitive::LoweringPhase::FdHygiene.code()` (== 3): "Sanitize inherited
 /// file descriptors (CLOEXEC sweep, handle list)". The skeleton maps this code to
@@ -31,6 +37,12 @@ const PHASE_CODE_SCRUB: u8 = 3;
 /// Wire `phase_code` for the exec action's phase, frozen by
 /// `contract::primitive::LoweringPhase::Launch.code()` (== 5).
 const PHASE_CODE_EXEC: u8 = 5;
+
+/// Wire `phase_code` for the landlock-apply action's phase, frozen by
+/// `contract::primitive::LoweringPhase::PolicyInstall.code()` (== 4): "Install
+/// enforcement policy (seccomp-BPF, LSM, …)". The launcher maps this code to
+/// [`SetupPhase::Confinement`].
+const PHASE_CODE_CONFINE: u8 = 4;
 
 // ── Env-named inherited fds (the host opens these and passes the NUMBERS) ──────
 
@@ -159,37 +171,59 @@ fn drive(control: &mut Transcript) -> Result<Verdict, BootError> {
     }
     control.emit(LauncherState::IdentityVerified);
 
-    // 4. PlanVerified — table structure + the schedule bucketing (skeleton serves
-    //    ONLY scrub@AmbientAuthority + exec; anything else ⇒ MissingPrimitive).
+    // 4. PlanVerified — table structure + the schedule bucketing (the launcher serves
+    //    scrub@AmbientAuthority + landlock-apply@Confinement + exec; anything else ⇒
+    //    MissingPrimitive).
     if validate_table(&body.descriptor_table).is_err() {
         return Ok(refuse(control, RefusalReason::PlanInvalid));
     }
-    let scrub_entries = match classify_schedule(body) {
-        Ok(scrub) => scrub,
+    let schedule = match classify_schedule(body) {
+        Ok(schedule) => schedule,
         Err(reason) => return Ok(refuse(control, reason)),
     };
     control.emit(LauncherState::PlanVerified);
 
-    // 5. HandlesVerified — fstat each declared slot against its shape, and confirm
-    //    no undeclared fds beyond the known launcher fds.
-    let plan_fd = fd_from_env(ENV_PLAN_FD)?;
-    let known = KnownFds {
-        plan: plan_fd,
-        control_present: true,
-        error: error_fd,
-        error_read: error_read_fd,
-        declared: &body.descriptor_table,
-    };
-    if verify_handles(body, &known)?.is_err() {
+    // 5. HandlesVerified — fstat each declared slot against its declared SHAPE (kind +
+    //    writability). A shape mismatch (e.g. a dir fd where a `Regular` is declared) ⇒
+    //    `HandleMismatch`. The coordinator does NOT enumerate the open-fd table and
+    //    refuse on an undeclared inherited fd: the child-side scrub (step 8) closes
+    //    every non-allowlisted fd before `fexecve`, so G6 (no-fd-escape) is enforced by
+    //    the scrub, not a coordinator refusal. (The landlock roots are validated HERE,
+    //    before the ruleset is built from their inherited fds.)
+    let known = KnownFds { error: error_fd };
+    if verify_handles(body)?.is_err() {
         return Ok(refuse(control, RefusalReason::HandleMismatch));
     }
     control.emit(LauncherState::HandlesVerified);
 
-    // 6. Compute the four phase results for the exec-only plan and hold the
-    //    ReadyToExec gate BEFORE any child is created.
-    let phases = compute_phases(&scrub_entries);
+    // 6. CONFINEMENT: if a landlock-apply action is scheduled, BUILD the ruleset in the
+    //    PARENT now (all allocation + add_rule syscalls, async-signal-safety) from the
+    //    just-validated root fds. `None` ⇒ no landlock action (Confinement stays
+    //    NotRequired). A build failure fails CLOSED to a refusal — the launcher never
+    //    advertises a confinement it cannot install. The ruleset fd(s) are diffed
+    //    against the PRE-build fd snapshot so they can be scrub-exempted + CLOEXEC'd.
+    let open_before = open_fd_set()?;
+    let confinement = if schedule.confine.is_empty() {
+        None
+    } else {
+        match build_confinement(body, &open_before) {
+            Ok(built) => Some(built),
+            Err(ConfineRefusal::AbiBelowFloor) => {
+                return Ok(refuse(control, RefusalReason::MissingPrimitive));
+            }
+            Err(ConfineRefusal::NoUsableRoot) => {
+                return Ok(refuse(control, RefusalReason::HandleMismatch));
+            }
+        }
+    };
+    let confine_built = confinement.is_some();
+
+    // 7. Compute the four phase results and hold the ReadyToExec gate BEFORE any child
+    //    is created. Confinement is `Applied` IFF a landlock action was scheduled AND
+    //    its ruleset was built (the child WILL restrict_self).
+    let phases = compute_phases(&schedule, confine_built);
     // Phase-honesty self-check (anti over/under-claim) before we trust the results.
-    if !phases_are_honest(&scrub_entries, &phases) {
+    if !phases_are_honest(&schedule, &phases) {
         return Ok(Verdict::Faulted);
     }
     let phase_results = [
@@ -198,16 +232,27 @@ fn drive(control: &mut Transcript) -> Result<Verdict, BootError> {
         (SetupPhase::AmbientAuthority, phases.ambient),
         (SetupPhase::Confinement, phases.confinement),
     ];
-    // The skeleton advertises NO confinement: this MUST be false.
-    debug_assert!(!confinement_installed(0, phases.confinement));
+    // confinement_installed is REAL evidence: true IFF a landlock action was scheduled
+    // AND applied. With no landlock action it MUST be false (no over-claim); with one
+    // built+applied it MUST be true.
+    debug_assert_eq!(
+        confinement_installed(schedule.confine.len(), phases.confinement),
+        confine_built
+    );
     if !ready_to_exec(true, phase_results, observed_digest, body.h_l) {
         // The decision is fail-closed: refuse NOW, no child.
         return Ok(refuse(control, RefusalReason::PlanInvalid));
     }
 
-    // 7. Build EVERYTHING the child needs BEFORE clone3 (async-signal-safety).
+    // 8. Build EVERYTHING ELSE the child needs BEFORE clone3 (async-signal-safety).
+    //    The ruleset fd(s) join the allowlist so the scrub leaves them open for
+    //    restrict_self (they CLOEXEC-close on the workload's fexecve — no leak).
     let exe_fd = exe_slot_fd(body)?;
-    let allow = allowlist(&known, exe_fd);
+    let ruleset_fds: &[RawFd] = match &confinement {
+        Some(built) => &built.ruleset_fds,
+        None => &[],
+    };
+    let allow = allowlist(&known, exe_fd, ruleset_fds);
     let close_fds = scrub_close_list(&allow)?;
     let child_plan = match ChildExecPlan::build(
         exe_fd,
@@ -221,12 +266,13 @@ fn drive(control: &mut Transcript) -> Result<Verdict, BootError> {
         Err(_) => return Ok(Verdict::Faulted),
     };
 
-    // 8. Re-check single-thread, then clone3.
+    // 9. Re-check single-thread, then clone3 (carrying the parent-built ruleset, which
+    //    the child applies via restrict_self after scrub, before fexecve).
     let tasks = count_self_tasks()?;
     if tasks != 1 {
         return Err(BootError::NotSingleThreaded { observed: tasks });
     }
-    let child_pid = sys::clone3_child(&child_plan)?;
+    let child_pid = sys::clone3_child(&child_plan, confinement.map(|c| c.ruleset))?;
     control.emit(LauncherState::ChildCreated);
     let _ = control.note(&format!("mechanism=clone3 child_pid={child_pid}"));
 
@@ -240,11 +286,20 @@ fn drive(control: &mut Transcript) -> Result<Verdict, BootError> {
     let child_outcome = wait_for_child(error_read_fd, child_pid)?;
     match child_outcome {
         ChildOutcome::ExecedToEof => {
-            // The deterministic no-branch child sequence ran to exec: resolve the
-            // four phases honestly, then ReadyToExec → ExecSucceeded.
+            // The deterministic no-branch child sequence ran to exec (scrub → maybe
+            // restrict_self → fexecve): resolve the four phases honestly, then
+            // ReadyToExec → ExecSucceeded. The error pipe gave EOF, so restrict_self
+            // (if scheduled) did NOT fail-close — it applied before the workload ran.
             control.emit(LauncherState::IdentityPhaseResolved);
             control.emit(LauncherState::VisibilityPhaseResolved);
             control.emit(LauncherState::AmbientAuthorityPhaseResolved);
+            // Note the HONEST confinement result: Applied (real landlock install) only
+            // when a landlock action was scheduled + its ruleset built+applied.
+            let installed = confinement_installed(schedule.confine.len(), phases.confinement);
+            let _ = control.note(&format!(
+                "confinement={:?} installed={installed}",
+                phases.confinement
+            ));
             control.emit(LauncherState::ConfinementPhaseResolved);
             control.emit(LauncherState::ReadyToExec);
             control.emit(LauncherState::ExecSucceeded);
@@ -268,29 +323,40 @@ fn refuse(control: &mut Transcript, reason: RefusalReason) -> Verdict {
 
 // ── Schedule classification (phase_code → SetupPhase bucketing) ─────────────────
 
+/// The classified schedule the launcher serves: the AmbientAuthority scrub entries
+/// (mandatory) and the Confinement landlock-apply entries (optional). Both are carried
+/// in canonical order so the phase-honesty self-check can confirm observed==scheduled.
+struct ClassifiedSchedule {
+    /// The `linux.ambient.scrub.v1` entries (AmbientAuthority phase).
+    scrub: Vec<LoweringWireEntryV1>,
+    /// The `linux.landlock.apply.v1` entries (Confinement phase). Empty ⇒ no landlock
+    /// action scheduled, so Confinement resolves `NotRequired` (unchanged skeleton).
+    confine: Vec<LoweringWireEntryV1>,
+}
+
 /// Classify the wire lowering: confirm an `linux.exec.v1` entry exists, collect the
-/// scrub (AmbientAuthority) entries, and refuse `MissingPrimitive` on ANY entry the
-/// skeleton does not serve (unknown id, or a known id in the wrong phase, or any
-/// scheduled action in a phase the skeleton can't serve).
-///
-/// Returns the scrub entries (in order) on success.
-fn classify_schedule(body: &LinuxLaunchBodyV1) -> Result<Vec<LoweringWireEntryV1>, RefusalReason> {
+/// scrub (AmbientAuthority) and landlock-apply (Confinement) entries, and refuse
+/// `MissingPrimitive` on ANY entry the launcher does not serve (unknown id, or a
+/// known id in the wrong phase, or any scheduled action in a phase it can't serve).
+fn classify_schedule(body: &LinuxLaunchBodyV1) -> Result<ClassifiedSchedule, RefusalReason> {
     let mut scrub: Vec<LoweringWireEntryV1> = Vec::new();
+    let mut confine: Vec<LoweringWireEntryV1> = Vec::new();
     let mut saw_exec = false;
     for entry in &body.lowering.entries {
         match (entry.id.as_str(), entry.phase_code) {
             (ID_AMBIENT_SCRUB, PHASE_CODE_SCRUB) => scrub.push(entry.clone()),
+            (ID_LANDLOCK_APPLY, PHASE_CODE_CONFINE) => confine.push(entry.clone()),
             (ID_EXEC, PHASE_CODE_EXEC) => saw_exec = true,
             // Any other id, or a serviced id in the wrong phase, or any action in a
-            // phase the skeleton does not serve ⇒ a primitive we do not implement.
+            // phase the launcher does not serve ⇒ a primitive we do not implement.
             _ => return Err(RefusalReason::MissingPrimitive),
         }
     }
     if !saw_exec {
-        // No launch action: the skeleton has nothing to exec.
+        // No launch action: the launcher has nothing to exec.
         return Err(RefusalReason::MissingPrimitive);
     }
-    Ok(scrub)
+    Ok(ClassifiedSchedule { scrub, confine })
 }
 
 /// The schedule-integrity digest the coordinator binds against `h_l`:
@@ -316,65 +382,189 @@ struct Phases {
     confinement: PhaseResult,
 }
 
-/// Compute the four phase results: Identity/Visibility/Confinement have no scheduled
-/// actions ⇒ `NotRequired`; AmbientAuthority has the scrub action the child WILL run
-/// ⇒ `Applied`.
-fn compute_phases(scrub_entries: &[LoweringWireEntryV1]) -> Phases {
-    let ambient = if scrub_entries.is_empty() {
-        // No scrub scheduled — but the skeleton REQUIRES the scrub (the mandatory
+/// Compute the four phase results: Identity/Visibility have no scheduled actions ⇒
+/// `NotRequired`; AmbientAuthority has the scrub action the child WILL run ⇒ `Applied`;
+/// Confinement is `Applied` IFF a landlock-apply action is scheduled AND its ruleset
+/// was built (the child WILL `restrict_self`), else `NotRequired` (no landlock action).
+///
+/// `confine_built` is the coordinator's evidence that the ruleset was actually
+/// constructed in the parent — Confinement is reported `Applied` ONLY when the action
+/// was scheduled and the launcher really built (and will apply) the ruleset, so the
+/// phase result can never over-claim an install that did not happen.
+fn compute_phases(schedule: &ClassifiedSchedule, confine_built: bool) -> Phases {
+    let ambient = if schedule.scrub.is_empty() {
+        // No scrub scheduled — but the launcher REQUIRES the scrub (the mandatory
         // ambient-authority action), so an empty ambient phase is a refusal upstream.
         // `ready_to_exec` enforces ambient==Applied, so NotRequired here fails closed.
         PhaseResult::NotRequired
     } else {
         PhaseResult::Applied
     };
+    let confinement = if schedule.confine.is_empty() {
+        // No landlock action scheduled ⇒ Confinement stays NotRequired (unchanged).
+        PhaseResult::NotRequired
+    } else if confine_built {
+        // A landlock action IS scheduled and the ruleset was built in the parent — the
+        // child will restrict_self before exec ⇒ Applied (REAL confinement evidence).
+        PhaseResult::Applied
+    } else {
+        // Scheduled but un-buildable (ABI below floor / fd not a root): fail closed.
+        PhaseResult::Refused
+    };
     Phases {
         identity: PhaseResult::NotRequired,
         visibility: PhaseResult::NotRequired,
         ambient,
-        confinement: PhaseResult::NotRequired,
+        confinement,
     }
 }
 
 /// Verify, via the protocol's pure oracle, that each phase result is consistent with
 /// what was scheduled vs. what the launcher will observe — the anti over/under-claim
-/// self-check. For the exec-only skeleton: the three empty phases must be
-/// `NotRequired` (scheduled==observed==∅), and AmbientAuthority must be `Applied`
-/// with observed == scheduled (the scrub entries, run deterministically).
-fn phases_are_honest(scrub_entries: &[LoweringWireEntryV1], phases: &Phases) -> bool {
+/// self-check. Identity/Visibility have no actions ⇒ `NotRequired` (∅==∅);
+/// AmbientAuthority is `Applied` with observed==scheduled (the scrub entries, run
+/// deterministically); Confinement is `Applied` with observed==scheduled when a
+/// landlock action is scheduled and its ruleset built, else `NotRequired` (∅==∅).
+///
+/// The child runs the EXACT scheduled set deterministically (it scrubs, then — if a
+/// ruleset was built — `restrict_self`s, then `fexecve`s with no branch that could
+/// drop a scheduled action), so OBSERVED equals SCHEDULED for every phase.
+fn phases_are_honest(schedule: &ClassifiedSchedule, phases: &Phases) -> bool {
     let empty: [LoweringWireEntryV1; 0] = [];
     phase_resolution_consistent(&empty, &empty, phases.identity)
         && phase_resolution_consistent(&empty, &empty, phases.visibility)
-        && phase_resolution_consistent(&empty, &empty, phases.confinement)
-        // The child runs the EXACT scrub set deterministically: observed == scheduled.
-        && phase_resolution_consistent(scrub_entries, scrub_entries, phases.ambient)
+        && phase_resolution_consistent(&schedule.scrub, &schedule.scrub, phases.ambient)
+        && phase_resolution_consistent(&schedule.confine, &schedule.confine, phases.confinement)
+}
+
+// ── Confinement (landlock) root resolution + ruleset build ─────────────────────
+
+/// Why the launcher could not build the landlock ruleset a scheduled
+/// `linux.landlock.apply.v1` action demands. Both fail CLOSED to a refusal — the
+/// launcher NEVER advertises a confinement it cannot deliver.
+enum ConfineRefusal {
+    /// The live landlock ABI is unavailable / below the launcher's floor, so no
+    /// ruleset can be built ⇒ `SetupRefused{MissingPrimitive}` (the launcher does not
+    /// serve a confinement this kernel cannot enforce).
+    AbiBelowFloor,
+    /// A scheduled landlock action references no usable confinement ROOT slot, or the
+    /// ruleset construction itself failed ⇒ `SetupRefused{HandleMismatch}` (the
+    /// declared roots do not back the confinement the action asked for).
+    NoUsableRoot,
+}
+
+/// A built confinement: the parent-side landlock ruleset plus the fd numbers landlock
+/// newly opened to hold it. The launcher ALLOWLISTS those fds (so the child's scrub
+/// does not close the ruleset before `restrict_self` runs) and sets them `O_CLOEXEC`
+/// (so a successful `fexecve` auto-closes them — no ruleset fd leaks into the
+/// workload, preserving the no-fd-escape discipline).
+struct BuiltConfinement {
+    /// The owned ruleset the child applies via `restrict_self`.
+    ruleset: sys::RulesetCreated,
+    /// The fd numbers landlock opened building it (CLOEXEC-set, scrub-exempt).
+    ruleset_fds: Vec<RawFd>,
+}
+
+/// Resolve the declared read/write ROOT slots into [`LandlockRoot`] confinement
+/// targets and BUILD the landlock ruleset in the PARENT (pre-clone3). The roots ride
+/// the inherited, already-`fstat`-validated directory fds — landlock is built from the
+/// root fd via a `BorrowedFd`, NEVER by reopening a path (CVE-2019-5736 avoidance).
+///
+/// `open_before` is the launcher's open-fd snapshot taken BEFORE this build; the fds
+/// open AFTER the build that were not present before are the ruleset's own fds, which
+/// the caller allowlists + CLOEXEC-marks.
+///
+/// Returns the built ruleset on success. Fails CLOSED: an ABI below the floor or a
+/// schedule with no usable root ⇒ the matching [`ConfineRefusal`], so the launcher
+/// refuses rather than running the workload under a confinement it did not install.
+fn build_confinement(
+    body: &LinuxLaunchBodyV1,
+    open_before: &BTreeSet<RawFd>,
+) -> Result<BuiltConfinement, ConfineRefusal> {
+    // Probe the LIVE kernel ABI first: advertise no confinement we cannot deliver.
+    if sys::probe_landlock_abi() < sys::LANDLOCK_ABI_FLOOR_RAW {
+        return Err(ConfineRefusal::AbiBelowFloor);
+    }
+    let roots = landlock_roots(body);
+    if roots.is_empty() {
+        // A landlock action with no read/write root to confine to is a handle fault.
+        return Err(ConfineRefusal::NoUsableRoot);
+    }
+    let ruleset = sys::build_landlock_ruleset(&roots).map_err(|_| ConfineRefusal::NoUsableRoot)?;
+    // Diff the fd table: anything open now that was not before is a landlock fd.
+    let ruleset_fds: Vec<RawFd> = list_open_fds()
+        .map_err(|_| ConfineRefusal::NoUsableRoot)?
+        .into_iter()
+        .filter(|fd| !open_before.contains(fd))
+        .collect();
+    // CLOEXEC them so a successful fexecve auto-closes the ruleset (no leak into the
+    // workload); the scrub leaves them open (allowlisted) until restrict_self runs.
+    for &fd in &ruleset_fds {
+        sys::set_cloexec(fd);
+    }
+    Ok(BuiltConfinement {
+        ruleset,
+        ruleset_fds,
+    })
+}
+
+/// Collect the [`LandlockRoot`] confinement targets from the descriptor table: each
+/// [`DescriptorRole::ReadRoot`] (read-only) and [`DescriptorRole::WriteRoot`]
+/// (read+write) slot, riding its inherited fd (slot index == fd number). The slots
+/// were already `fstat`-validated as directories of the declared writability before
+/// this point, so the fds are sound landlock parents.
+fn landlock_roots(body: &LinuxLaunchBodyV1) -> Vec<LandlockRoot> {
+    body.descriptor_table
+        .iter()
+        .filter_map(|slot| match slot.role {
+            DescriptorRole::ReadRoot => Some(LandlockRoot {
+                fd: raw(slot.slot_index),
+                writable: false,
+            }),
+            DescriptorRole::WriteRoot => Some(LandlockRoot {
+                fd: raw(slot.slot_index),
+                writable: true,
+            }),
+            // Not a confinement root — the exe, cgroup, stdio, and control slots are
+            // never landlock parents. `DescriptorRole` is non_exhaustive, so an unknown
+            // FUTURE role is likewise not a root (fail closed — never widen).
+            DescriptorRole::TargetExe
+            | DescriptorRole::CgroupDir
+            | DescriptorRole::Stdin
+            | DescriptorRole::Stdout
+            | DescriptorRole::Stderr
+            | DescriptorRole::ControlChannel
+            | _ => None,
+        })
+        .collect()
 }
 
 // ── Handle verification ────────────────────────────────────────────────────────
 
-/// The launcher's own well-known fds, for the no-fd-escape baseline.
-struct KnownFds<'a> {
-    plan: RawFd,
-    control_present: bool,
-    /// The child-facing error-pipe WRITE end.
+/// The launcher's own well-known fds the scrub allowlist is built from.
+struct KnownFds {
+    /// The child-facing error-pipe WRITE end (kept across the scrub so the child can
+    /// report a scrub/fexecve failure; CLOEXEC-closed by a successful `fexecve`).
     error: RawFd,
-    /// The coordinator-facing error-pipe READ end.
-    error_read: RawFd,
-    declared: &'a [DescriptorSlotV1],
 }
 
-/// `fstat` each declared slot and check kind + writability against its declaration,
-/// then confirm no UNDECLARED fds are open beyond the known launcher fds (plan,
-/// control, error, stdio, declared slots) — the no-fd-escape baseline.
-fn verify_handles(body: &LinuxLaunchBodyV1, known: &KnownFds) -> Result<Result<(), ()>, BootError> {
+/// `fstat` each declared slot and check its kind + writability against its declaration
+/// — the deterministic declared-slot SHAPE verification (a dir fd where a `Regular` is
+/// declared ⇒ `HandleMismatch`). This is the ONLY handle check the coordinator runs.
+///
+/// It does NOT enumerate the open-fd table and REFUSE on an undeclared inherited fd.
+/// The no-fd-escape guarantee (G6) is enforced child-side by the scrub — the child
+/// closes EVERY non-allowlisted fd (raw `SYS_close`) before `fexecve`, so an unexpected
+/// fd the launcher inherited from its forking host is defensively CLOSED in the child,
+/// never seen by the workload, and never a launch-abort. Refusing here would be both
+/// redundant with that scrub and timing-flaky (a sibling thread's transient
+/// non-CLOEXEC fd, captured at fork, is not an escape — it is scrubbed).
+fn verify_handles(body: &LinuxLaunchBodyV1) -> Result<Result<(), ()>, BootError> {
     for slot in &body.descriptor_table {
         let observed = sys::fstat_shape(raw(slot.slot_index))?;
         if !shape_matches(slot, &observed) {
             return Ok(Err(()));
         }
-    }
-    if !no_undeclared_fds(known)? {
-        return Ok(Err(()));
     }
     Ok(Ok(()))
 }
@@ -408,36 +598,6 @@ fn shape_matches(slot: &DescriptorSlotV1, observed: &ObservedShape) -> bool {
     }
 }
 
-/// Whether every currently-open fd is accounted for: a known launcher fd (plan,
-/// control, error, stdio 0/1/2) or a declared descriptor slot. An extra open fd is a
-/// no-fd-escape violation (fail closed).
-fn no_undeclared_fds(known: &KnownFds) -> Result<bool, BootError> {
-    let mut allowed: BTreeSet<RawFd> = BTreeSet::new();
-    allowed.insert(0);
-    allowed.insert(1);
-    allowed.insert(2);
-    allowed.insert(known.plan);
-    allowed.insert(known.error);
-    allowed.insert(known.error_read);
-    if known.control_present {
-        if let Ok(fd) = fd_from_env(ENV_CONTROL_FD) {
-            allowed.insert(fd);
-        }
-    }
-    for slot in known.declared {
-        allowed.insert(raw(slot.slot_index));
-    }
-    for fd in list_open_fds()? {
-        // The `/proc/self/fd` read itself holds a transient dir fd; ignore any fd not
-        // in `allowed` ONLY if it is the enumeration's own handle. We cannot know its
-        // number portably, so we treat the dirfd specially below in `list_open_fds`.
-        if !allowed.contains(&fd) {
-            return Ok(false);
-        }
-    }
-    Ok(true)
-}
-
 // ── fd plumbing (SAFE: std::fs / std::env only) ────────────────────────────────
 
 /// Parse an inherited fd NUMBER from an env var. The host passes the number; the fd
@@ -461,14 +621,19 @@ fn raw(slot_index: u32) -> RawFd {
 }
 
 /// The allowlist of fds the child KEEPS across the scrub: the target exe, stdio
-/// (0/1/2), and the error-pipe write end. Everything else is closed by the child.
-fn allowlist(known: &KnownFds, exe_fd: RawFd) -> BTreeSet<RawFd> {
+/// (0/1/2), the error-pipe write end, and the landlock ruleset fd(s) (so the child can
+/// `restrict_self` AFTER the scrub; they are CLOEXEC so a successful `fexecve` closes
+/// them — no ruleset fd leaks into the workload). Everything else the child closes.
+fn allowlist(known: &KnownFds, exe_fd: RawFd, ruleset_fds: &[RawFd]) -> BTreeSet<RawFd> {
     let mut allow: BTreeSet<RawFd> = BTreeSet::new();
     allow.insert(0);
     allow.insert(1);
     allow.insert(2);
     allow.insert(exe_fd);
     allow.insert(known.error);
+    for &fd in ruleset_fds {
+        allow.insert(fd);
+    }
     allow
 }
 
@@ -507,6 +672,13 @@ fn list_open_fds() -> Result<Vec<RawFd>, BootError> {
         .into_iter()
         .filter(|&fd| sys::fstat_shape(fd).is_ok())
         .collect())
+}
+
+/// The launcher's currently-open fds as a set — used to diff against the post-build
+/// fd table so the landlock ruleset's own fd(s) can be identified, scrub-exempted,
+/// and CLOEXEC-marked. SAFE (`/proc/self/fd` via [`list_open_fds`]).
+fn open_fd_set() -> Result<BTreeSet<RawFd>, BootError> {
+    Ok(list_open_fds()?.into_iter().collect())
 }
 
 /// Count this process's threads via `/proc/self/task` — SAFE (`std::fs::read_dir`).

@@ -61,9 +61,58 @@ entries:
     requirement: Filesystem
 
   # ── Single-threaded Linux confinement LAUNCHER basement (kernel plan §10.8).
-  # The no-confinement skeleton: coordinator (main.rs, SAFE) validates + decides;
-  # the child (clone3, async-signal-safe window) scrubs ambient authority + execs.
-  # Every unsafe block lives in launcher/linux/sys.rs and is anchored here.
+  # The coordinator (main.rs, SAFE) validates + decides; the child (clone3,
+  # async-signal-safe window) scrubs ambient authority, applies the parent-built
+  # landlock ruleset via restrict_self (when scheduled), then execs. Every unsafe
+  # block lives in launcher/linux/sys.rs and is anchored here.
+  #
+  # NOTE on the landlock-restrict step: RulesetCreated::restrict_self() is itself a
+  # SAFE call (prctl + landlock_restrict_self on an inherited fd). It runs INSIDE the
+  # child-window unsafe dispatch (anchor `linux-launcher-child-window`) and rides the
+  # parent-built ruleset fd — so it has no SEPARATE unsafe block and no separate
+  # ledger entry; its safety is folded into the child-window entry below. The new
+  # landlock unsafe blocks the Confinement chunk DID add are the raw ABI probe
+  # (`linux-launcher-landlock-abi`), the inherited-root-fd borrow that builds each
+  # PathBeneath rule (`linux-launcher-landlock-root-fd`), and the ruleset-fd CLOEXEC
+  # set (`linux-launcher-set-cloexec`).
+  - file: crates/bvisor/launcher/linux/sys.rs
+    anchor: linux-launcher-landlock-abi
+    syscall: landlock_create_ruleset(NULL, 0, LANDLOCK_CREATE_RULESET_VERSION)
+    safety_invariant: >-
+      Coordinator-side (single-threaded, pre-clone3) live-ABI probe. landlock_create_ruleset
+      is invoked in its documented VERSION-QUERY form (attr=NULL, size=0, flags=
+      LANDLOCK_CREATE_RULESET_VERSION): the kernel reads NO user memory, creates NO fd,
+      and mutates nothing — it only returns the supported ABI integer (>=0) or -1/errno.
+      No pointer is dereferenced. The launcher floors confinement at this probe (a result
+      below LANDLOCK_ABI_FLOOR_RAW ⇒ the landlock action is refused), so it never advertises
+      a confinement the live kernel cannot enforce. Sound for any caller state.
+    requirement: Filesystem
+  - file: crates/bvisor/launcher/linux/sys.rs
+    anchor: linux-launcher-landlock-root-fd
+    syscall: BorrowedFd::borrow_raw(root_fd) — borrow an inherited root dir fd to build a PathBeneath rule
+    safety_invariant: >-
+      Coordinator-side (parent, pre-clone3), inside build_landlock_ruleset. Each root.fd
+      is an inherited directory descriptor the host opened and the coordinator ALREADY
+      fstat-validated as the declared read/write ROOT (a directory of the declared
+      writability). We borrow_raw it for EXACTLY the duration of the add_rule call —
+      BorrowedFd neither closes nor takes ownership and does not outlive the loop
+      iteration, so the launcher's fd accounting is unchanged and there is no double-close.
+      Landlock builds the PathBeneath rule from this inherited fd, NEVER by reopening a path
+      (the CVE-2019-5736 / Leaky-Vessels reopen race the protocol forbids). No raw memory
+      is dereferenced. Sound for any valid open root fd.
+    requirement: Filesystem
+  - file: crates/bvisor/launcher/linux/sys.rs
+    anchor: linux-launcher-set-cloexec
+    syscall: fcntl(fd, F_GETFD) + fcntl(fd, F_SETFD, flags | FD_CLOEXEC)
+    safety_invariant: >-
+      Coordinator-side (parent, pre-clone3) fcntl pair on an inherited descriptor the
+      launcher owns — a landlock ruleset fd it JUST created. F_GETFD only READS the fd
+      flags; F_SETFD only WRITES the CLOEXEC bit. The fd is passed as a plain RawFd with
+      no Rust value wrapping it, so there is no aliasing and no double-close. CLOEXEC is
+      set so a successful workload fexecve auto-closes the ruleset fd (no leak into the
+      workload), while the fd stays open across the child's restrict_self (CLOEXEC acts at
+      exec, not before). No pointer is dereferenced. A -1 failure is ignored (best-effort).
+    requirement: Filesystem
   - file: crates/bvisor/launcher/linux/sys.rs
     anchor: linux-launcher-read-fd
     syscall: File::from_raw_fd + read_to_end (drain the plan fd), into_raw_fd (release without close)
@@ -99,39 +148,49 @@ entries:
     requirement: ControlChannel
   - file: crates/bvisor/launcher/linux/sys.rs
     anchor: linux-launcher-clone3-child
-    syscall: clone3 (raw syscall) + the async-signal-safe child branch (sigprocmask/close/fchdir/fexecve/write/_exit)
+    syscall: clone3 (raw syscall) + the async-signal-safe child branch (sigprocmask/close/fchdir/restrict_self/fexecve/write/_exit)
     safety_invariant: >-
       clone3 is invoked with a correctly sized clone_args (flags=0, exit_signal=
       SIGCHLD) BUILT IN THE SINGLE-THREADED PARENT. The PARENT branch (rc>0) only
-      returns the child pid. The CHILD branch (rc==0) is the async-signal-safe
-      window: it touches ONLY the pre-built ChildExecPlan (argv/envp NUL-terminated
-      pointer arrays into parent-owned CStrings, the scrub close-list, and the
-      exec/cwd/error fds — ALL allocated by ChildExecPlan::build BEFORE this call)
-      by INDEXING already-mapped copy-on-write memory, and issues ONLY async-signal-
-      safe syscalls: sigprocmask (empty mask), close (each scrub fd), optional
-      fchdir, fexecve (exec rides the fd, no path reopen), write (errno on failure),
-      _exit. It performs NO heap allocation, takes NO lock, and calls NO allocating
-      Rust std; no destructor runs and no unwinding crosses the fork (the child
-      paths either fexecve-replace the image or _exit without returning into Rust).
-      On success fexecve replaces the image and the O_CLOEXEC error fd auto-closes,
-      which the parent reads as EOF; on ANY child failure the child writes the errno
-      to the error fd and _exit(127)s, so the target never runs and the parent
-      observes the fault (fail closed).
+      returns the child pid (and drops its copy of the optional ruleset fd — the child
+      holds its own inherited copy, so the parent drop does not affect confinement).
+      The CHILD branch (rc==0) is the async-signal-safe window: it touches ONLY the
+      pre-built ChildExecPlan (argv/envp NUL-terminated pointer arrays into parent-owned
+      CStrings, the scrub close-list, and the exec/cwd/error fds — ALL allocated by
+      ChildExecPlan::build BEFORE this call) plus the OPTIONAL parent-built landlock
+      ruleset (whose every allocation + add_rule syscall ran in the parent), by INDEXING
+      already-mapped copy-on-write memory, and issues ONLY async-signal-safe syscalls:
+      sigprocmask (empty mask), close (each scrub fd), optional fchdir, restrict_self
+      (prctl(PR_SET_NO_NEW_PRIVS) + landlock_restrict_self on the inherited ruleset fd —
+      allocation-free, applied AFTER the scrub and BEFORE fexecve), fexecve (exec rides
+      the fd, no path reopen), write (errno on failure), _exit. It performs NO heap
+      allocation, takes NO lock, and calls NO allocating Rust std; no destructor runs and
+      no unwinding crosses the fork (the child paths either fexecve-replace the image or
+      _exit without returning into Rust). On success fexecve replaces the image and the
+      O_CLOEXEC error fd (and the CLOEXEC ruleset fd) auto-close, which the parent reads
+      as EOF; on ANY child failure (including a restrict_self error) the child writes the
+      errno to the error fd and _exit(127)s, so the target NEVER runs unconfined and the
+      parent observes the fault (fail closed).
     requirement: ChildSpawn
   - file: crates/bvisor/launcher/linux/sys.rs
     anchor: linux-launcher-child-window
-    syscall: run_child dispatch (the rc==0 clone3 child branch — async-signal-safe sigprocmask/close/fchdir/fexecve/write/_exit)
+    syscall: run_child dispatch (the rc==0 clone3 child branch — async-signal-safe sigprocmask/close/fchdir/restrict_self/fexecve/write/_exit)
     safety_invariant: >-
       The call site of the unsafe `run_child` fn, reached ONLY in the `rc == 0`
       clone3 CHILD branch — the async-signal-safe window. run_child performs ONLY
       async-signal-safe syscalls on the PRE-BUILT ChildExecPlan (argv/envp pointer
       arrays into parent-owned CStrings, the scrub close-list, the exec/cwd/error
-      fds — ALL allocated by ChildExecPlan::build BEFORE clone3), indexing already-
-      mapped copy-on-write memory. It performs NO heap allocation, takes NO lock,
-      and DIVERGES: it either fexecve-replaces the image or _exit(127)s after writing
-      the errno, so no destructor runs and no unwinding crosses the fork. The scrub
-      closes via raw SYS_close (NOT libc::close) to bypass std's owned-fd close guard
-      in the forked child.
+      fds — ALL allocated by ChildExecPlan::build BEFORE clone3) and the OPTIONAL
+      parent-built landlock ruleset (every allocation + add_rule syscall ran in the
+      parent), indexing already-mapped copy-on-write memory. It performs NO heap
+      allocation, takes NO lock, and DIVERGES: it either fexecve-replaces the image or
+      _exit(127)s after writing the errno, so no destructor runs and no unwinding
+      crosses the fork. The CONFINEMENT step is RulesetCreated::restrict_self() — a SAFE
+      call (prctl(PR_SET_NO_NEW_PRIVS) + landlock_restrict_self on the inherited ruleset
+      fd, allocation-free) run AFTER the scrub and BEFORE fexecve; on its error the child
+      child_fails (errno → pipe → _exit) so the target NEVER runs unconfined. The scrub
+      closes via raw SYS_close (NOT libc::close) to bypass std's owned-fd close guard in
+      the forked child.
     requirement: ChildSpawn
   - file: crates/bvisor/launcher/linux/sys.rs
     anchor: linux-launcher-clone-args-zero
