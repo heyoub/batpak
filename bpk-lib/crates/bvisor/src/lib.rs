@@ -25,6 +25,9 @@ mod contract;
 #[cfg(feature = "dangerous-test-hooks")]
 mod sim;
 
+#[cfg(feature = "host")]
+pub mod host;
+
 pub use backend::inert::InertBackend;
 
 pub use contract::admission::{

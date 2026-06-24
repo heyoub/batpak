@@ -277,8 +277,11 @@ name = "bvisor"
 version = "0.8.3"
 dependencies = [
  "batpak",
+ "hostbat",
  "rmp-serde",
  "serde",
+ "syncbat",
+ "tempfile",
 ]
 
 [[package]]
