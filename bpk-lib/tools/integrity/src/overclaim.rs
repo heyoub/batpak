@@ -536,6 +536,126 @@ mod production_flip {
         root
     }
 
+    /// Plant the canonical D2 bvisor-shadow name-vs-behavior over-claim: a
+    /// production `pub fn` whose name asserts the admission circuit was
+    /// *promoted* out of shadow and *attested* — but the behavior is absent
+    /// (the body still routes through the shadow path) and, critically, NO
+    /// assertion-bearing test references it. This is the "claimed-promoted,
+    /// still-shadow" case #67's name-vs-behavior axis is meant to catch.
+    ///
+    /// `with_witness` controls whether the corpus carries a real
+    /// assertion-bearing test that references the fn: `false` is the
+    /// over-claim (reality oracle says `no`); `true` is the honest positive
+    /// control (reality oracle says `yes`, detector stays silent).
+    fn plant_bvisor_shadow_name_overclaim_tree(with_witness: bool) -> std::path::PathBuf {
+        let root = temp_repo(if with_witness {
+            "bvisor-shadow-witnessed"
+        } else {
+            "bvisor-shadow-overclaim"
+        });
+        // Minimal invariants catalog so load_catalog() succeeds (no doc-class
+        // claims; this fixture isolates the name-vs-behavior axis).
+        write_file(&root, "traceability/invariants.yaml", "[]\n");
+        // The aspirational subject lives under a scanned production root
+        // (crates/bvisor/src — see production_rust_roots). Its `_attested`
+        // suffix makes it an aspirational subject; the body is a placeholder
+        // that does NOT promote anything (still shadow).
+        write_file(
+            &root,
+            "crates/bvisor/src/circuit.rs",
+            r#"/// Claims the admission circuit was promoted out of shadow and attested.
+pub fn circuit_promotion_attested() -> bool {
+    // STILL SHADOW: returns the shadow verdict; nothing was actually promoted.
+    false
+}
+"#,
+        );
+        // The test corpus: either an honest assertion-bearing test that
+        // references the fn (positive control), or an inert test that names
+        // something else (the over-claim — no real witness).
+        let corpus = if with_witness {
+            r#"#[test]
+fn circuit_promotion_is_attested() {
+    assert!(
+        !crate::circuit::circuit_promotion_attested(),
+        "the promotion verdict is observed by a real assertion"
+    );
+}
+"#
+        } else {
+            r#"#[test]
+fn unrelated_smoke() {
+    assert_eq!(2 + 2, 4);
+}
+"#
+        };
+        write_file(&root, "crates/core/tests/circuit_promotion.rs", corpus);
+        root
+    }
+
+    /// Build the name-vs-behavior over-claim findings for a planted tree.
+    fn name_overclaims_for_tree(
+        root: &Path,
+    ) -> Result<Vec<Disagreement>, Box<dyn std::error::Error>> {
+        let mut cache = SourceCache::new(root);
+        let aspirational = aspirational_pub_fn_subjects(root, &mut cache)?;
+        let mut pool = Vec::new();
+        pool.extend(
+            claim_oracle_claims(root, &aspirational)?
+                .claims()
+                .iter()
+                .cloned(),
+        );
+        pool.extend(
+            reality_oracle_claims(root, &mut cache, &aspirational)?
+                .claims()
+                .iter()
+                .cloned(),
+        );
+        let disagreements = TriangulationEngine::disagreements(&pool);
+        Ok(overclaim_findings(&disagreements)
+            .into_iter()
+            .filter(|d| d.predicate == PREDICATE_ASSERTION_TEST)
+            .cloned()
+            .collect())
+    }
+
+    /// The name-vs-behavior detector must BITE the planted bvisor-shadow
+    /// over-claim (an `_attested`-named promotion fn with no assertion-bearing
+    /// test) and stay SILENT on the honest positive control. This is the
+    /// missing D2 fixture: it proves the detector is non-vacuous on the exact
+    /// "claimed-promoted, still-shadow" shape, not merely registered.
+    #[test]
+    fn name_behavior_detector_bites_bvisor_shadow_promotion(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        // Over-claim: no assertion-bearing witness → must be flagged, and the
+        // finding must name the aspirational subject.
+        let overclaim_root = plant_bvisor_shadow_name_overclaim_tree(false);
+        let flagged = name_overclaims_for_tree(&overclaim_root)?;
+        assert_eq!(
+            flagged.len(),
+            1,
+            "PROPERTY: a shadow-promotion `_attested` fn with no assertion-bearing test must be \
+             flagged as a name-vs-behavior over-claim; got {flagged:?}"
+        );
+        assert!(
+            flagged[0].subject.contains("circuit_promotion_attested"),
+            "PROPERTY: the over-claim finding must name the aspirational subject; got {:?}",
+            flagged[0].subject
+        );
+
+        // Positive control: an honest assertion-bearing test that references
+        // the fn must clear the detector (no over-claim).
+        let witnessed_root = plant_bvisor_shadow_name_overclaim_tree(true);
+        let witnessed = name_overclaims_for_tree(&witnessed_root)?;
+        assert!(
+            witnessed.is_empty(),
+            "PROPERTY: an `_attested` fn WITH a real assertion-bearing test must NOT be flagged; \
+             got {witnessed:?}"
+        );
+        Ok(())
+    }
+
     /// ProductionFlip red fixture: under `--cfg gauntlet_red_fixture` the test
     /// asserts the (wrong) outcome that a planted doc over-claim passes, so
     /// the test FAILS when the detector bites. Green on the live tree.
