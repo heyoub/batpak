@@ -51,6 +51,7 @@ mod structural;
 mod traceability;
 mod triangulation;
 mod typed_waivers;
+mod unsafe_ledger;
 mod wallclock;
 
 #[path = "../../shared/shared_checks.rs"]

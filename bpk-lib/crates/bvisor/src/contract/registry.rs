@@ -144,7 +144,7 @@ impl<'r> BoundaryPlanner<'r> {
                 let admitted: Vec<AdmittedRequirement> = classified
                     .iter()
                     .map(|(requirement, verdict)| AdmittedRequirement {
-                        mechanism: mechanism_for(&backend.id(), requirement, verdict.enforcement),
+                        mechanism: backend.mechanism(requirement, verdict.enforcement),
                         requirement: requirement.clone(),
                         enforcement: verdict.enforcement,
                     })
@@ -300,29 +300,6 @@ pub fn derive_minimums(spec: &BoundarySpec) -> DerivedMinimums {
     }
 
     minimums
-}
-
-/// The mechanism evidence string a backend records for an admitted requirement.
-///
-/// In C0 only the honest no-confinement reference backend admits anything, so
-/// the mechanism reflects exactly what it does (host launch + stdio wiring with
-/// no confinement). Real backends record their concrete primitive here.
-fn mechanism_for(
-    backend: &BackendId,
-    requirement: &BoundaryRequirement,
-    enforcement: Enforcement,
-) -> String {
-    let primitive = match requirement {
-        BoundaryRequirement::HostControl(HostControl::LaunchWorkload) => "host_spawn",
-        BoundaryRequirement::HostControl(HostControl::CaptureStreams { .. }) => "host_pipe",
-        // Everything else Inert can admit is a no-confinement restriction (e.g.
-        // Network::DenyAll), so it records no real mechanism. Real backends name
-        // their concrete primitive (landlock / job_object / preopen / …) here.
-        BoundaryRequirement::Capability(_) | BoundaryRequirement::HostControl(_) => {
-            "none/no-confinement"
-        }
-    };
-    format!("{backend}:{primitive}:{enforcement:?}")
 }
 
 /// Canonical plan identity: hash of the plan core (backend, snapshot, admitted,

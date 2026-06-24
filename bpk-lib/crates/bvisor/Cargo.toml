@@ -31,6 +31,16 @@ qf-bv = []
 # the crate's identity; `host` adds the syncbat handlers + the hostbat module so
 # bvisor never grows its own host architecture (there is NO `bvisor-host` crate).
 host = ["dep:syncbat", "dep:hostbat"]
+# Per-platform OS boundary backends (kernel plan §10 / SCOPE backend-ladder).
+# OFF by default — the pure contract + Inert is the crate's identity. Each gates
+# the OS-touching backend STRUCT + unsafe basement; the honest `support_matrix()`
+# data is ALWAYS compiled regardless of feature, so the per-platform honesty
+# tables stay cross-platform testable. Real OS deps land per build-ladder step in
+# the matching `[target.'cfg(target_os="..")'.dependencies]` table below.
+backend-linux = []
+backend-wasm = []
+backend-windows = []
+backend-macos = []
 
 [dependencies]
 # batpak by path for the EventPayload derive + inventory registration and the
@@ -53,6 +63,20 @@ hostbat = { path = "../hostbat", version = "0.8.3", optional = true }
 # The `host` end-to-end proof opens a real batpak Store in a tempdir to witness
 # the PERSIST leg (request → admit → execute → seal → persist).
 tempfile = ">=3.24, <3.25"
+
+# ── Per-platform backend deps (cfg-gated so a Linux build never resolves the
+# Windows/macOS crates). EMPTY in scaffolding (step a) — the real `optional=true`
+# deps land per build-ladder step:
+#   Linux  (step b): libc, landlock, seccompiler  — gated `backend-linux`
+#   Windows (step d): windows-sys                 — gated `backend-windows`
+#   macOS  (step e): libc (Seatbelt extern)       — gated `backend-macos`
+# Wasm (step c) deps (wasmi / wasmtime) are host-OS-independent, so they live in
+# the plain `[dependencies]` behind `backend-wasm`, not in a target table.
+[target.'cfg(target_os = "linux")'.dependencies]
+
+[target.'cfg(target_os = "windows")'.dependencies]
+
+[target.'cfg(target_os = "macos")'.dependencies]
 
 [lints]
 workspace = true

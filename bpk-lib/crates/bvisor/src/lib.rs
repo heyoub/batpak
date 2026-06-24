@@ -30,6 +30,20 @@ pub mod host;
 
 pub use backend::inert::InertBackend;
 
+// The per-platform HONEST support matrices are always available (pure data, so
+// the honesty is cross-platform testable). The OS backend STRUCTS are re-exported
+// only when their feature + target are both active.
+pub use backend::{linux, macos, wasm, windows};
+
+#[cfg(all(feature = "backend-linux", target_os = "linux"))]
+pub use backend::linux::LinuxBackend;
+#[cfg(all(feature = "backend-macos", target_os = "macos"))]
+pub use backend::macos::MacosBackend;
+#[cfg(feature = "backend-wasm")]
+pub use backend::wasm::WasmBackend;
+#[cfg(all(feature = "backend-windows", target_os = "windows"))]
+pub use backend::windows::WindowsBackend;
+
 pub use contract::admission::{
     budget_membrane_equivalence_smt, budget_planted_disagreement_smt, smt_digest, translate,
     verify_receipt, ProofGateError, ProofReceipt, ProofStatus, QfBvError, TranslatedCircuit,

@@ -1,0 +1,20 @@
+# Unsafe basement ledger (kernel plan §10.8 / S-LEDGER plan:506).
+#
+# The SINGLE source of truth reconciling every `unsafe` block in a sanctioned
+# bvisor backend basement (`crates/bvisor/src/backend/<os>/sys.rs` or `sys/`)
+# against a documented justification. The `integrity unsafe-ledger` gate (folded
+# into `structural-check`) fails CLOSED if:
+#   - a basement `unsafe` block has NO matching ledger entry (unregistered unsafe), OR
+#   - a ledger entry matches NO live basement `unsafe` block (stale entry).
+#
+# Each entry MUST cite:
+#   file:               repo-relative path to the basement file
+#   line:               1-based line of the `unsafe` block's opening
+#   syscall:            the syscall / FFI call the block performs (e.g. "clone3")
+#   safety_invariant:   the invariant the caller upholds to make it sound
+#   requirement:        the RequirementKind the unsafe backs (e.g. "ChildSpawn")
+#
+# STEP (a) SCAFFOLDING: the basements are INTENTIONALLY EMPTY (no real syscalls
+# yet), so this ledger is empty. The gate is LIVE and wired so step (b)'s first
+# `unsafe` block is forced to register here before `structural-check` goes green.
+entries: []

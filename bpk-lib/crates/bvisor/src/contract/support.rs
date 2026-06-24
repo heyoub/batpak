@@ -40,6 +40,22 @@ impl SupportMatrix {
         Self { best_case }
     }
 
+    /// The FAMILY best-case verdict for one [`RequirementKind`], independent of
+    /// any machine profile — the fail-closed bottom if the kind is absent.
+    ///
+    /// This is the static honesty surface: it exposes exactly what the family
+    /// CLAIMS it could do, so a per-platform honesty test (and the gauntlet's
+    /// lying-table red fixture) can assert a load-bearing `Unsupported`/`Mediated`
+    /// cell WITHOUT fabricating a machine profile. It is NOT consulted at
+    /// admission — `classify` floors this by the machine ceiling.
+    #[must_use]
+    pub fn best_case_for(&self, kind: RequirementKind) -> SupportVerdict {
+        self.best_case
+            .get(&kind)
+            .cloned()
+            .unwrap_or_else(SupportVerdict::unsupported)
+    }
+
     /// Classify a requirement against the TYPED profile (no string parsing at
     /// admission). The verdict is the family best-case MET with what the machine
     /// profile actually provides — enforcement floored, evidence intersected.

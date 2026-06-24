@@ -7,7 +7,8 @@
 //! executes an admitted plan into an UNSEALED report body. Sealing belongs to
 //! [`crate::BoundaryRunner`]; persistence belongs to the host.
 
-use crate::contract::capability::SupportVerdict;
+use crate::contract::capability::{Enforcement, SupportVerdict};
+use crate::contract::host_control::HostControl;
 use crate::contract::ids::BackendId;
 use crate::contract::plan::{BoundaryPlan, BoundaryRequirement};
 use crate::contract::report::BoundaryReportBody;
@@ -41,4 +42,27 @@ pub trait Backend: Send + Sync {
     /// in [`BoundaryReportBody::outcome`]. A host crash is NOT a controlled
     /// terminal — that path is handled by startup reconciliation.
     fn execute(&self, plan: &BoundaryPlan) -> BoundaryReportBody;
+
+    /// The mechanism-evidence string this backend records for an admitted
+    /// requirement (stored in [`crate::AdmittedRequirement::mechanism`]).
+    ///
+    /// EACH backend AUTHORS its own mechanism vocabulary — Inert records its
+    /// honest `host_spawn` / `host_pipe` / `none/no-confinement`; a real backend
+    /// names its concrete primitive (`landlock_abi4+pivot_root`, `job_object`,
+    /// `preopen`, `cgroup.kill+pidfd`, …). The planner threads this through at
+    /// admission instead of hardcoding one backend's strings.
+    ///
+    /// The DEFAULT is Inert's honest no-confinement vocabulary, so InertBackend
+    /// (and any future no-confinement reference) needs no override. The format is
+    /// stable: `"{backend}:{primitive}:{enforcement:?}"`.
+    fn mechanism(&self, requirement: &BoundaryRequirement, enforcement: Enforcement) -> String {
+        let primitive = match requirement {
+            BoundaryRequirement::HostControl(HostControl::LaunchWorkload) => "host_spawn",
+            BoundaryRequirement::HostControl(HostControl::CaptureStreams { .. }) => "host_pipe",
+            BoundaryRequirement::Capability(_) | BoundaryRequirement::HostControl(_) => {
+                "none/no-confinement"
+            }
+        };
+        format!("{}:{primitive}:{enforcement:?}", self.id())
+    }
 }

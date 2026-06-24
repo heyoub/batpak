@@ -341,9 +341,30 @@ fn source_layer(repo_root: &Path, path: &Path) -> Option<SourceLayer> {
 
 fn checks_runtime_shape(repo_root: &Path, path: &Path) -> bool {
     let rel = relative(repo_root, path);
+    if is_unsafe_basement(&rel) {
+        // The SANCTIONED unsafe basement (kernel plan §10.8 quarantine): the ONLY
+        // place real OS-backend `unsafe` is allowed to live. Every unsafe block
+        // here is reconciled against `traceability/unsafe_ledger.yaml` by
+        // `unsafe_ledger::check` (fail-closed), NOT by the blanket runtime-shape
+        // ban — so this file is exempt from the sync-first/safe-Rust visitor.
+        //
+        // The exemption is DELIBERATELY narrow: only `backend/<os>/sys.rs` (or a
+        // `backend/<os>/sys/` dir). The SAFE `backend/<os>/mod.rs` orchestration
+        // and ALL of `contract/` stay fully runtime-shape-checked.
+        return false;
+    }
     rel.starts_with("crates/syncbat/src/")
         || rel.starts_with("crates/netbat/src/")
         || rel.starts_with("crates/bvisor/src/")
+}
+
+/// Whether `rel` is a sanctioned unsafe-basement file: `backend/<os>/sys.rs` or
+/// any file under a `backend/<os>/sys/` directory. NOTHING else under
+/// `crates/bvisor/src/backend/` is exempt — the safe `mod.rs` orchestration must
+/// stay runtime-shape-checked, and the basement is reconciled by the ledger gate.
+pub(super) fn is_unsafe_basement(rel: &str) -> bool {
+    rel.contains("crates/bvisor/src/backend/")
+        && (rel.ends_with("/sys.rs") || rel.contains("/sys/"))
 }
 
 fn check_no_async_or_unsafe_runtime_source(
@@ -626,8 +647,9 @@ fn compact(content: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        check_signature, dependency_names, family_internal_batpak_paths, forbidden_layer_terms,
-        semantic_content, source_layer, RuntimeShapeVisitor, SourceLayer,
+        check_signature, checks_runtime_shape, dependency_names, family_internal_batpak_paths,
+        forbidden_layer_terms, is_unsafe_basement, semantic_content, source_layer,
+        RuntimeShapeVisitor, SourceLayer,
     };
     use std::path::Path;
     use syn::visit::Visit;
@@ -787,6 +809,47 @@ mod tests {
             source_layer(root, Path::new("/repo/crates/syncbat/src/readme.md")),
             None
         );
+    }
+
+    #[test]
+    fn runtime_shape_covers_safe_orchestration_but_exempts_unsafe_basement() {
+        let root = Path::new("/repo");
+
+        // The SAFE backend orchestration MUST stay runtime-shape-checked: a stray
+        // `unsafe`/`async` in `mod.rs` is a real finding, never silently allowed.
+        let mod_rs = Path::new("/repo/crates/bvisor/src/backend/linux/mod.rs");
+        assert!(
+            checks_runtime_shape(root, mod_rs),
+            "backend/linux/mod.rs must stay runtime-shape-checked"
+        );
+        assert!(!is_unsafe_basement(
+            "crates/bvisor/src/backend/linux/mod.rs"
+        ));
+
+        // The SANCTIONED unsafe basement is the ONLY exempt file.
+        let sys_rs = Path::new("/repo/crates/bvisor/src/backend/linux/sys.rs");
+        assert!(
+            !checks_runtime_shape(root, sys_rs),
+            "backend/linux/sys.rs is the sanctioned unsafe basement (exempt)"
+        );
+        assert!(is_unsafe_basement("crates/bvisor/src/backend/linux/sys.rs"));
+        assert!(is_unsafe_basement(
+            "crates/bvisor/src/backend/windows/sys.rs"
+        ));
+        assert!(is_unsafe_basement(
+            "crates/bvisor/src/backend/linux/sys/raw.rs"
+        ));
+
+        // The exemption is narrow: `contract/` stays fully checked, and a
+        // confusingly-named non-basement file is NOT exempt.
+        assert!(checks_runtime_shape(
+            root,
+            Path::new("/repo/crates/bvisor/src/contract/registry.rs")
+        ));
+        assert!(!is_unsafe_basement("crates/bvisor/src/contract/sys.rs"));
+        assert!(!is_unsafe_basement(
+            "crates/bvisor/src/backend/linux/system.rs"
+        ));
     }
 
     #[test]

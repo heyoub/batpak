@@ -1,0 +1,184 @@
+//! Linux backend — landlock + cgroup-v2 + pidfd confinement (scaffolding).
+//!
+//! STEP (a) scaffolding: the HONEST per-platform [`SupportMatrix`] (pure data,
+//! always-compiled, cross-platform unit-testable) plus a [`LinuxBackend`] struct
+//! whose `execute()` is a stub returning [`Outcome::Unsupported`]. Real syscalls
+//! (probe ABI/cgroup/pidfd, landlock enforcement, cgroup.kill teardown) land in
+//! step (b), in the [`super::linux::sys`] unsafe basement. NO `unsafe` here.
+//!
+//! HONESTY (SCOPE §4 — Linux): ~all Enforced. `NetworkAllowList` is
+//! [`Enforcement::Unsupported`] in v1 (it needs a broker that does not exist yet);
+//! claiming otherwise would be a lie the gauntlet must catch. `Kill` is Enforced
+//! (cgroup-v2 `cgroup.kill` + pidfd), `Filesystem` Enforced (landlock, fails
+//! closed below the ABI floor).
+
+use crate::contract::capability::{Enforcement, EvidenceClaim, SupportVerdict};
+use crate::contract::support::{RequirementKind, SupportMatrix};
+use std::collections::BTreeMap;
+
+/// The HONEST Linux family support matrix (SCOPE §4). Pure data — constructible
+/// and unit-testable on ANY host, so the honesty is provable off-Linux.
+///
+/// Every [`RequirementKind`] NOT listed here defaults to the fail-closed bottom
+/// ([`SupportVerdict::unsupported`]); `NetworkAllowList` is DELIBERATELY listed as
+/// `Unsupported` (v1, no broker) so the absence is a stated answer, not an omission.
+#[must_use]
+pub fn support_matrix() -> SupportMatrix {
+    let mut best = BTreeMap::new();
+
+    // Launch + stdio: structural, always available.
+    insert(
+        &mut best,
+        RequirementKind::LaunchWorkload,
+        Enforcement::Enforced,
+        &[EvidenceClaim::TerminalOutcome, EvidenceClaim::ProcessTree],
+    );
+    insert(
+        &mut best,
+        RequirementKind::CaptureStreams,
+        Enforcement::Enforced,
+        &[EvidenceClaim::CapturedStreams],
+    );
+
+    // Filesystem confinement: landlock (fails closed below ABI floor at probe()).
+    insert(
+        &mut best,
+        RequirementKind::Filesystem,
+        Enforcement::Enforced,
+        &[
+            EvidenceClaim::AllowedActions,
+            EvidenceClaim::DeniedAttempts,
+            EvidenceClaim::FilesystemDelta,
+            EvidenceClaim::MechanismAttestation,
+        ],
+    );
+
+    // Network: deny-all is Enforced (drop CAP_NET / empty net namespace).
+    insert(
+        &mut best,
+        RequirementKind::NetworkDenyAll,
+        Enforcement::Enforced,
+        &[EvidenceClaim::DeniedAttempts],
+    );
+    // NetworkAllowList: UNSUPPORTED in v1 — needs a broker that does not exist yet.
+    // Load-bearing honest fail-closed cell (NEVER fake a broker to fill the table).
+    insert(
+        &mut best,
+        RequirementKind::NetworkAllowList,
+        Enforcement::Unsupported,
+        &[],
+    );
+
+    // Child spawn / env / fds: clone3 + namespaces.
+    insert(
+        &mut best,
+        RequirementKind::ChildSpawn,
+        Enforcement::Enforced,
+        &[EvidenceClaim::ProcessTree],
+    );
+    insert(
+        &mut best,
+        RequirementKind::Environment,
+        Enforcement::Enforced,
+        &[EvidenceClaim::MechanismAttestation],
+    );
+    insert(
+        &mut best,
+        RequirementKind::InheritedFds,
+        Enforcement::Enforced,
+        &[EvidenceClaim::MechanismAttestation],
+    );
+
+    // Host controls: temp root + expose-path (bind mount) + artifact commit/discard.
+    insert(
+        &mut best,
+        RequirementKind::TempRoot,
+        Enforcement::Enforced,
+        &[EvidenceClaim::MechanismAttestation],
+    );
+    insert(
+        &mut best,
+        RequirementKind::ExposePath,
+        Enforcement::Enforced,
+        &[EvidenceClaim::MechanismAttestation],
+    );
+    insert(
+        &mut best,
+        RequirementKind::CommitArtifact,
+        Enforcement::Enforced,
+        &[EvidenceClaim::ArtifactLineage],
+    );
+    insert(
+        &mut best,
+        RequirementKind::DiscardArtifact,
+        Enforcement::Enforced,
+        &[EvidenceClaim::ArtifactLineage],
+    );
+    insert(
+        &mut best,
+        RequirementKind::ListOutputs,
+        Enforcement::Enforced,
+        &[EvidenceClaim::ArtifactLineage],
+    );
+
+    // Kill: cgroup-v2 cgroup.kill + pidfd = atomic subtree teardown.
+    insert(
+        &mut best,
+        RequirementKind::Kill,
+        Enforcement::Enforced,
+        &[EvidenceClaim::ProcessTree, EvidenceClaim::TerminalOutcome],
+    );
+
+    SupportMatrix::from_best_case(best)
+}
+
+/// Insert one best-case verdict into the table.
+fn insert(
+    table: &mut BTreeMap<RequirementKind, SupportVerdict>,
+    kind: RequirementKind,
+    enforcement: Enforcement,
+    evidence: &[EvidenceClaim],
+) {
+    table.insert(
+        kind,
+        SupportVerdict::new(enforcement, evidence.iter().copied().collect()),
+    );
+}
+
+// The real backend (probe/profile/execute touch the OS) compiles ONLY on a Linux
+// host with the feature enabled; the honest table above is always present.
+#[cfg(all(feature = "backend-linux", target_os = "linux"))]
+mod backend_impl;
+#[cfg(all(feature = "backend-linux", target_os = "linux"))]
+pub use backend_impl::LinuxBackend;
+
+#[cfg(all(feature = "backend-linux", target_os = "linux"))]
+pub(crate) mod sys;
+
+#[cfg(test)]
+mod tests {
+    use super::support_matrix;
+    use crate::contract::capability::Enforcement;
+    use crate::contract::support::RequirementKind;
+
+    #[test]
+    fn network_allow_list_is_unsupported_in_v1() {
+        // SCOPE §4 load-bearing honest cell: no broker yet ⇒ Unsupported.
+        let m = super::support_matrix();
+        let v = m.best_case_for(RequirementKind::NetworkAllowList);
+        assert_eq!(v.enforcement, Enforcement::Unsupported);
+    }
+
+    #[test]
+    fn filesystem_and_kill_are_enforced() {
+        let m = support_matrix();
+        assert_eq!(
+            m.best_case_for(RequirementKind::Filesystem).enforcement,
+            Enforcement::Enforced
+        );
+        assert_eq!(
+            m.best_case_for(RequirementKind::Kill).enforcement,
+            Enforcement::Enforced
+        );
+    }
+}

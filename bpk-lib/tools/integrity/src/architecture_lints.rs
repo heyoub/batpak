@@ -18,6 +18,10 @@ pub fn check(
     repo_hygiene::check(repo_root, tracked_files)?;
     platform_boundary::check(repo_root, tracked_files, source_cache)?;
     syncbat_boundary::check(repo_root, tracked_files, source_cache)?;
+    // The compensating control for the basement exemption in `syncbat_boundary`:
+    // every `unsafe` block in an exempted `backend/<os>/sys.rs` MUST be reconciled
+    // against `traceability/unsafe_ledger.yaml`, fail-closed.
+    crate::unsafe_ledger::check(repo_root, source_cache)?;
     tooling_contract::check(repo_root)?;
     docs_contract::check(repo_root)?;
     source_citations::check(repo_root)?;
