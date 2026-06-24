@@ -141,6 +141,54 @@ const NETBAT_LAYER_LEAKS: &[BoundaryTerm] = &[
     },
 ];
 
+// The single-threaded Linux confinement LAUNCHER (`crates/bvisor/launcher/<os>/`,
+// kernel plan §10.8). It is a separate `[[bin]]` in the bvisor PACKAGE — a real-OS
+// trust boundary that legitimately uses std/libc + the backend protocol types +
+// `batpak::canonical` decode. It must NOT reach into the network layer (`netbat`):
+// the launcher has NO network client (it execs and is replaced), so a `netbat`
+// token is a layer leak. The host-wiring layers (syncbat/clawbat) and the
+// contract-layer PCP names also have no business in the launcher. We do NOT forbid
+// `bvisor`/`batpak` here: the launcher consumes the bvisor backend protocol and
+// `batpak::canonical`, which are its sanctioned inputs.
+const BVISOR_LAUNCHER_LAYER_LEAKS: &[BoundaryTerm] = &[
+    BoundaryTerm {
+        token: "netbat",
+        reason: "the launcher has no network client — network access belongs nowhere in the confinement launcher",
+    },
+    BoundaryTerm {
+        token: "Netbat",
+        reason: "the launcher has no network client — network types belong nowhere in the confinement launcher",
+    },
+    BoundaryTerm {
+        token: "syncbat",
+        reason: "host wiring belongs in the bvisor::host feature module, not the confinement launcher",
+    },
+    BoundaryTerm {
+        token: "Syncbat",
+        reason: "host wiring belongs in the bvisor::host feature module, not the confinement launcher",
+    },
+    BoundaryTerm {
+        token: "clawbat",
+        reason: "contract layer names belong outside the launcher",
+    },
+    BoundaryTerm {
+        token: "Clawbat",
+        reason: "contract layer type names belong outside the launcher",
+    },
+    BoundaryTerm {
+        token: "authority_required",
+        reason: "authority claims are caller policy input — the launcher executes mechanisms, not meanings",
+    },
+    BoundaryTerm {
+        token: "PCP-Core",
+        reason: "PCP semantics stay outside the launcher",
+    },
+    BoundaryTerm {
+        token: "PcpProfile",
+        reason: "PCP profile types stay outside the launcher",
+    },
+];
+
 // The PURE `bvisor` contract crate (crates/bvisor/src/ EXCEPT src/host/). It
 // depends on the batpak generic substrate API ONLY: host wiring (syncbat),
 // transport (netbat), and contract-layer names live in the feature-gated
@@ -277,9 +325,26 @@ pub(super) fn check(
         if checks_runtime_shape(repo_root, path) {
             check_no_async_or_unsafe_runtime_source(repo_root, path, source_cache)?;
         }
+
+        if is_launcher_source(&relative(repo_root, path)) {
+            // The launcher is single-threaded BY CONSTRUCTION (kernel plan §10.8):
+            // it must NEVER create a thread. Combined with the no-async ban
+            // (runtime-shape, above) this makes it structurally single-threaded —
+            // it execs and is replaced, so there is no "after the boundary".
+            check_no_thread_spawn_in_launcher(repo_root, path, source_cache)?;
+        }
     }
     check_family_manifest_boundaries(repo_root)?;
     Ok(())
+}
+
+/// Whether `rel` is a tracked launcher Rust source: any `.rs` under
+/// `crates/bvisor/launcher/`. This INCLUDES the launcher basement — the
+/// no-thread-spawn rule has no basement carve-out (an OS basement may use raw
+/// `unsafe` syscalls, but it still may not spawn a thread before the confinement
+/// boundary).
+fn is_launcher_source(rel: &str) -> bool {
+    rel.ends_with(".rs") && rel.starts_with("crates/bvisor/launcher/")
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -291,6 +356,12 @@ enum SourceLayer {
     /// The feature-gated `bvisor::host` module may use syncbat/hostbat and owns
     /// the host wiring — it maps to `None` (kernel plan §11: no `bvisor-host` crate).
     Bvisor,
+    /// The single-threaded Linux confinement LAUNCHER (`crates/bvisor/launcher/<os>/`,
+    /// kernel plan §10.8): a separate `[[bin]]` in the bvisor package that performs
+    /// real-OS `unsafe` (memfd/fstat/exec). It is BORN inside the assurance machine
+    /// — the layer scan, runtime-shape ban (minus its `sys.rs`/`sys/` basement), and
+    /// the single-thread gate all apply to it.
+    BvisorLauncher,
 }
 
 impl SourceLayer {
@@ -300,13 +371,17 @@ impl SourceLayer {
             SourceLayer::Syncbat => "syncbat",
             SourceLayer::Netbat => "netbat",
             SourceLayer::Bvisor => "bvisor (pure contract)",
+            SourceLayer::BvisorLauncher => "bvisor launcher",
         }
     }
 
     fn checks_internal_batpak_paths(self) -> bool {
         matches!(
             self,
-            SourceLayer::Syncbat | SourceLayer::Netbat | SourceLayer::Bvisor
+            SourceLayer::Syncbat
+                | SourceLayer::Netbat
+                | SourceLayer::Bvisor
+                | SourceLayer::BvisorLauncher
         )
     }
 }
@@ -336,6 +411,15 @@ fn source_layer(repo_root: &Path, path: &Path) -> Option<SourceLayer> {
     if rel.starts_with("crates/bvisor/src/") {
         return Some(SourceLayer::Bvisor);
     }
+    // The confinement launcher (`crates/bvisor/launcher/<os>/`, kernel plan §10.8).
+    // It is a separate `[[bin]]` in the bvisor package, NOT under `src/`, so it was
+    // previously INVISIBLE to this check loop (`source_layer == None ⇒ continue`),
+    // which would let launcher unsafe/async escape the gate. Mapping it here brings
+    // it inside the assurance machine: layer scan + runtime-shape ban (minus the
+    // basement) + the single-thread gate all bite.
+    if rel.starts_with("crates/bvisor/launcher/") {
+        return Some(SourceLayer::BvisorLauncher);
+    }
     None
 }
 
@@ -356,15 +440,24 @@ fn checks_runtime_shape(repo_root: &Path, path: &Path) -> bool {
     rel.starts_with("crates/syncbat/src/")
         || rel.starts_with("crates/netbat/src/")
         || rel.starts_with("crates/bvisor/src/")
+        // The confinement launcher (kernel plan §10.8): async + unsafe-outside-basement
+        // are banned there too. Its `sys.rs`/`sys/` basement is exempted by the
+        // `is_unsafe_basement` early-return above, exactly like the backend basement.
+        || rel.starts_with("crates/bvisor/launcher/")
 }
 
-/// Whether `rel` is a sanctioned unsafe-basement file: `backend/<os>/sys.rs` or
-/// any file under a `backend/<os>/sys/` directory. NOTHING else under
-/// `crates/bvisor/src/backend/` is exempt — the safe `mod.rs` orchestration must
-/// stay runtime-shape-checked, and the basement is reconciled by the ledger gate.
-pub(super) fn is_unsafe_basement(rel: &str) -> bool {
-    rel.contains("crates/bvisor/src/backend/")
-        && (rel.ends_with("/sys.rs") || rel.contains("/sys/"))
+/// Whether `rel` is a sanctioned unsafe-basement file. Two sanctioned basement
+/// roots (kernel plan §10.8), same shape (`/sys.rs` or under a `/sys/` dir):
+///   - the backend basement: `crates/bvisor/src/backend/<os>/sys.rs` or `sys/`;
+///   - the launcher basement: `crates/bvisor/launcher/<os>/sys.rs` or `sys/`.
+///
+/// NOTHING else is exempt — the safe `mod.rs`/`main.rs` orchestration stays
+/// runtime-shape-checked, and each basement's `unsafe` is reconciled by the
+/// ledger gate. KEPT IN LOCKSTEP with `unsafe_ledger::is_basement`.
+pub(crate) fn is_unsafe_basement(rel: &str) -> bool {
+    let backend_basement = rel.contains("crates/bvisor/src/backend/");
+    let launcher_basement = rel.contains("crates/bvisor/launcher/");
+    (backend_basement || launcher_basement) && (rel.ends_with("/sys.rs") || rel.contains("/sys/"))
 }
 
 fn check_no_async_or_unsafe_runtime_source(
@@ -388,6 +481,97 @@ fn check_no_async_or_unsafe_runtime_source(
             visitor.findings.join(", ")
         ),
     )
+}
+
+/// The launcher single-thread structural gate (kernel plan §10.8). Scan every
+/// `.rs` under `crates/bvisor/launcher/` with syn and FAIL CLOSED on any thread
+/// creation. AST over raw text is deliberate: thread spawns are CALL expressions
+/// whose meaning lives in the call target's path tail (`thread::spawn`,
+/// `Builder::…spawn`, `thread::scope`, the family `Spawn::spawn`); a syn scan
+/// matches the real call sites while ignoring identically-spelled tokens in
+/// comments, strings, and doc examples — exactly how the runtime-shape and
+/// unsafe-ledger gates already operate. A raw token scan would either miss
+/// method-call forms (`builder.spawn(...)`) or false-positive on prose.
+fn check_no_thread_spawn_in_launcher(
+    repo_root: &Path,
+    path: &Path,
+    source_cache: &mut SourceCache,
+) -> Result<()> {
+    let parsed = source_cache
+        .parse_rust(path)
+        .with_context(|| format!("parse {}", relative(repo_root, path)))?;
+    let mut visitor = ThreadSpawnVisitor::default();
+    visitor.visit_file(&parsed);
+    if visitor.findings.is_empty() {
+        return Ok(());
+    }
+    ensure(
+        false,
+        format!(
+            "the confinement launcher is single-threaded by construction and MUST NOT create a \
+             thread (kernel plan §10.8) in {}: {} [GAUNT-LAUNCHER-SINGLE-THREAD]",
+            relative(repo_root, path),
+            visitor.findings.join(", ")
+        ),
+    )
+}
+
+/// A syn visitor that records every thread-creation call site in a launcher file.
+///
+/// Matches, by the call target's path/method tail:
+///   - `std::thread::spawn` / `thread::spawn`     (free function),
+///   - `std::thread::scope` / `thread::scope`     (scoped threads),
+///   - `Builder::…spawn` / `…spawn_scoped`        (`thread::Builder` methods),
+///   - the family `Spawn` trait's `.spawn(...)`   (method-call form).
+///
+/// The `Builder` and `Spawn` cases are method calls, so they are caught by
+/// `visit_expr_method_call` on the `spawn`/`spawn_scoped` method name; the free
+/// `thread::spawn`/`thread::scope` cases are path calls caught on the path tail.
+#[derive(Default)]
+struct ThreadSpawnVisitor {
+    findings: Vec<String>,
+}
+
+impl<'ast> Visit<'ast> for ThreadSpawnVisitor {
+    fn visit_expr_call(&mut self, node: &'ast syn::ExprCall) {
+        if let syn::Expr::Path(path) = node.func.as_ref() {
+            if let Some(segments) = path_tail_two(&path.path) {
+                let (head, tail) = segments;
+                // `thread::spawn(...)` / `std::thread::spawn(...)` and the scoped
+                // form `thread::scope(...)`. Require the `thread` module qualifier
+                // so a project-local free fn named `spawn` is not swept in.
+                if head == "thread" && (tail == "spawn" || tail == "scope") {
+                    self.findings
+                        .push(format!("thread-creating call `thread::{tail}`"));
+                }
+            }
+        }
+        syn::visit::visit_expr_call(self, node);
+    }
+
+    fn visit_expr_method_call(&mut self, node: &'ast syn::ExprMethodCall) {
+        let method = node.method.to_string();
+        // `Builder::new().spawn(...)` / `.spawn_scoped(...)` and the family
+        // `Spawn` trait's `.spawn(...)`. Any `.spawn`/`.spawn_scoped` method call
+        // in launcher source is a thread creation — fail closed.
+        if method == "spawn" || method == "spawn_scoped" {
+            self.findings
+                .push(format!("thread-creating method call `.{method}()`"));
+        }
+        syn::visit::visit_expr_method_call(self, node);
+    }
+}
+
+/// The last two `::`-segments of a path, as `(head, tail)`. For a single-segment
+/// path returns `None` (no qualifier to anchor on).
+fn path_tail_two(path: &syn::Path) -> Option<(String, String)> {
+    let len = path.segments.len();
+    if len < 2 {
+        return None;
+    }
+    let head = path.segments[len - 2].ident.to_string();
+    let tail = path.segments[len - 1].ident.to_string();
+    Some((head, tail))
 }
 
 #[derive(Default)]
@@ -547,6 +731,7 @@ fn forbidden_layer_terms(layer: SourceLayer, content: &str) -> Vec<&'static Boun
         SourceLayer::Syncbat => SYNCBAT_LAYER_LEAKS,
         SourceLayer::Netbat => NETBAT_LAYER_LEAKS,
         SourceLayer::Bvisor => BVISOR_LAYER_LEAKS,
+        SourceLayer::BvisorLauncher => BVISOR_LAUNCHER_LAYER_LEAKS,
     };
     matching_terms(terms, content)
 }
@@ -648,11 +833,26 @@ fn compact(content: &str) -> String {
 mod tests {
     use super::{
         check_signature, checks_runtime_shape, dependency_names, family_internal_batpak_paths,
-        forbidden_layer_terms, is_unsafe_basement, semantic_content, source_layer,
-        RuntimeShapeVisitor, SourceLayer,
+        forbidden_layer_terms, is_launcher_source, is_unsafe_basement, semantic_content,
+        source_layer, RuntimeShapeVisitor, SourceLayer, ThreadSpawnVisitor,
     };
     use std::path::Path;
     use syn::visit::Visit;
+
+    /// Run the launcher single-thread visitor over a synthetic file and return its
+    /// findings (mirrors how the gate parses + visits a real launcher source).
+    fn thread_spawn_findings(file: &syn::File) -> Vec<String> {
+        let mut visitor = ThreadSpawnVisitor::default();
+        visitor.visit_file(file);
+        visitor.findings
+    }
+
+    /// Run the runtime-shape visitor over a synthetic file and return its findings.
+    fn runtime_shape_findings(file: &syn::File) -> Vec<String> {
+        let mut visitor = RuntimeShapeVisitor::default();
+        visitor.visit_file(file);
+        visitor.findings
+    }
 
     fn tokens(leaks: &[&'static super::BoundaryTerm]) -> Vec<&'static str> {
         leaks.iter().map(|leak| leak.token).collect()
@@ -850,6 +1050,182 @@ mod tests {
         assert!(!is_unsafe_basement(
             "crates/bvisor/src/backend/linux/system.rs"
         ));
+    }
+
+    #[test]
+    fn launcher_is_visible_to_the_check_loop() {
+        // BEFORE this gap was closed the launcher mapped to None and the check loop
+        // `continue`-skipped it — unsafe/async would have escaped. It must now map
+        // to its own layer so the loop processes it.
+        let root = Path::new("/repo");
+        assert_eq!(
+            source_layer(
+                root,
+                Path::new("/repo/crates/bvisor/launcher/linux/main.rs")
+            ),
+            Some(SourceLayer::BvisorLauncher)
+        );
+        assert_eq!(SourceLayer::BvisorLauncher.label(), "bvisor launcher");
+        assert!(is_launcher_source("crates/bvisor/launcher/linux/main.rs"));
+        assert!(is_launcher_source("crates/bvisor/launcher/linux/sys.rs"));
+        assert!(!is_launcher_source(
+            "crates/bvisor/src/backend/linux/mod.rs"
+        ));
+        assert!(!is_launcher_source("crates/bvisor/launcher/linux/notes.md"));
+    }
+
+    #[test]
+    fn launcher_legit_imports_are_not_layer_or_path_leaks() {
+        // The launcher legitimately consumes the bvisor backend protocol types and
+        // `batpak::canonical` decode. Neither may trip a layer-term leak nor a
+        // batpak-internal-path leak.
+        let content = "use bvisor::backend::linux::protocol::LinuxLaunchPlanV1;\n\
+                       use batpak::canonical::decode;\n\
+                       use std::os::unix::io::RawFd;\n\
+                       extern crate libc;\n";
+        assert!(
+            forbidden_layer_terms(SourceLayer::BvisorLauncher, content).is_empty(),
+            "protocol + canonical + std/libc are the launcher's sanctioned inputs"
+        );
+        assert!(family_internal_batpak_paths(content).is_empty());
+    }
+
+    #[test]
+    fn launcher_rejects_netbat_and_host_wiring_leaks() {
+        // No network client (it execs and is replaced) and no host wiring.
+        let content =
+            "use netbat::serve_tcp_listener;\nuse syncbat::Core;\nconst C: &str = \"PCP-Core\";\n";
+        let tokens = tokens(&forbidden_layer_terms(SourceLayer::BvisorLauncher, content));
+        assert!(tokens.contains(&"netbat"), "launcher must reject netbat");
+        assert!(tokens.contains(&"syncbat"), "launcher must reject syncbat");
+        assert!(tokens.contains(&"PCP-Core"));
+    }
+
+    #[test]
+    fn launcher_basement_is_exempt_but_main_is_runtime_shape_checked() {
+        let root = Path::new("/repo");
+
+        // The launcher `main.rs` orchestration IS runtime-shape-checked: a stray
+        // `async`/`unsafe` there is a real finding.
+        let main_rs = Path::new("/repo/crates/bvisor/launcher/linux/main.rs");
+        assert!(
+            checks_runtime_shape(root, main_rs),
+            "launcher/linux/main.rs must stay runtime-shape-checked"
+        );
+        assert!(!is_unsafe_basement("crates/bvisor/launcher/linux/main.rs"));
+
+        // The launcher `sys.rs` (and `sys/` dir) is the sanctioned unsafe basement,
+        // exactly like the backend basement — exempt from the runtime-shape ban.
+        let sys_rs = Path::new("/repo/crates/bvisor/launcher/linux/sys.rs");
+        assert!(
+            !checks_runtime_shape(root, sys_rs),
+            "launcher/linux/sys.rs is the sanctioned unsafe basement (exempt)"
+        );
+        assert!(is_unsafe_basement("crates/bvisor/launcher/linux/sys.rs"));
+        assert!(is_unsafe_basement(
+            "crates/bvisor/launcher/linux/sys/raw.rs"
+        ));
+    }
+
+    #[test]
+    fn launcher_async_fn_in_main_is_caught() {
+        // RED fixture: an `async fn` planted in the launcher main.rs (non-basement)
+        // is caught by the runtime-shape visitor.
+        let parsed: syn::File = syn::parse_quote! {
+            async fn coordinate() {}
+        };
+        let findings = runtime_shape_findings(&parsed);
+        assert!(
+            findings.iter().any(|f| f == "async fn `coordinate`"),
+            "an async fn in the launcher must be caught, got {findings:?}"
+        );
+    }
+
+    #[test]
+    fn launcher_unsafe_block_in_main_is_caught() {
+        // RED fixture: an `unsafe {}` block planted in the launcher main.rs
+        // (NON-basement) is caught by the runtime-shape visitor. Only the launcher
+        // `sys.rs`/`sys/` basement is exempt — main.rs is not.
+        let parsed: syn::File = syn::parse_quote! {
+            fn coordinate() {
+                unsafe { libc::exit(0) };
+            }
+        };
+        let findings = runtime_shape_findings(&parsed);
+        assert!(
+            findings.iter().any(|f| f == "unsafe block"),
+            "an unsafe block in the launcher main.rs must be caught, got {findings:?}"
+        );
+    }
+
+    #[test]
+    fn launcher_thread_spawn_is_caught_by_single_thread_gate() {
+        // RED fixture: `std::thread::spawn(...)` anywhere under the launcher is
+        // caught by the single-thread gate (the SPECIFIC thread::spawn finding).
+        let parsed: syn::File = syn::parse_quote! {
+            fn coordinate() {
+                std::thread::spawn(|| {});
+            }
+        };
+        let findings = thread_spawn_findings(&parsed);
+        assert!(
+            findings
+                .iter()
+                .any(|f| f == "thread-creating call `thread::spawn`"),
+            "std::thread::spawn must be caught, got {findings:?}"
+        );
+    }
+
+    #[test]
+    fn launcher_thread_builder_and_scope_and_spawn_trait_are_caught() {
+        // The single-thread gate also catches the Builder method form, scoped
+        // threads, the `spawn_scoped` method, and the family `Spawn` trait spawn.
+        let builder: syn::File = syn::parse_quote! {
+            fn a() { let _ = std::thread::Builder::new().spawn(|| {}); }
+        };
+        assert!(thread_spawn_findings(&builder)
+            .iter()
+            .any(|f| f == "thread-creating method call `.spawn()`"));
+
+        let scope: syn::File = syn::parse_quote! {
+            fn b() { std::thread::scope(|s| { let _ = s; }); }
+        };
+        assert!(thread_spawn_findings(&scope)
+            .iter()
+            .any(|f| f == "thread-creating call `thread::scope`"));
+
+        let scoped: syn::File = syn::parse_quote! {
+            fn c() { std::thread::scope(|s| { let _ = s.spawn(|| {}); }); }
+        };
+        let scoped_findings = thread_spawn_findings(&scoped);
+        assert!(scoped_findings
+            .iter()
+            .any(|f| f == "thread-creating method call `.spawn()`"));
+
+        let trait_spawn: syn::File = syn::parse_quote! {
+            fn d(spawner: &S) { let _ = spawner.spawn(job); }
+        };
+        assert!(thread_spawn_findings(&trait_spawn)
+            .iter()
+            .any(|f| f == "thread-creating method call `.spawn()`"));
+    }
+
+    #[test]
+    fn launcher_single_thread_gate_ignores_unrelated_calls() {
+        // A plain sync launcher coordinator with no thread creation is clean — the
+        // gate must not false-positive on ordinary calls (incl. a local fn named
+        // `spawn` with no `thread::` qualifier, or `process::exit`).
+        let parsed: syn::File = syn::parse_quote! {
+            fn coordinate() {
+                let plan = decode(bytes);
+                fstat(fd);
+                std::process::exit(0);
+            }
+        };
+        assert!(
+            thread_spawn_findings(&parsed).is_empty(),
+            "ordinary launcher calls must not trip the single-thread gate"
+        );
     }
 
     #[test]

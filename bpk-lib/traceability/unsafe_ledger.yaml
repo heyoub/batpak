@@ -1,8 +1,15 @@
 # Unsafe basement ledger (kernel plan §10.8 / S-LEDGER plan:506).
 #
 # The SINGLE source of truth reconciling every `unsafe` block in a sanctioned
-# bvisor backend basement (`crates/bvisor/src/backend/<os>/sys.rs` or `sys/`)
-# against a documented justification. The `integrity unsafe-ledger` gate (folded
+# bvisor basement against a documented justification. Two sanctioned basement
+# roots, same `/sys.rs`-or-`/sys/` shape:
+#   - the backend basement:  `crates/bvisor/src/backend/<os>/sys.rs` or `sys/`
+#   - the launcher basement: `crates/bvisor/launcher/<os>/sys.rs` or `sys/`
+#     (the single-threaded Linux confinement launcher's real-OS unsafe —
+#     memfd/fstat/exec). The launcher basement is empty for now (no entries
+#     below) ⇒ vacuously green but LIVE: the first launcher unsafe block must
+#     anchor + register here.
+# The `integrity unsafe-ledger` gate (folded
 # into `structural-check`) fails CLOSED if:
 #   - a basement `unsafe` block carries NO `LEDGER:<id>` anchor (unanchored), OR
 #   - two live `unsafe` blocks share one anchor id (duplicate), OR

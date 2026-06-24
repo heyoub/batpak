@@ -1,9 +1,13 @@
 //! GAUNTLET-UNSAFE-LEDGER (kernel plan §10.8 / S-LEDGER plan:506).
 //!
 //! The fail-closed reconciliation between the `unsafe` blocks that live in the
-//! sanctioned bvisor backend BASEMENTS (`crates/bvisor/src/backend/<os>/sys.rs`
-//! or any file under a `backend/<os>/sys/` dir) and their justifications in
-//! `traceability/unsafe_ledger.yaml`.
+//! sanctioned bvisor BASEMENTS and their justifications in
+//! `traceability/unsafe_ledger.yaml`. Two sanctioned basement roots, same
+//! `/sys.rs`-or-`/sys/` shape (kernel plan §10.8):
+//!   - the backend basement: `crates/bvisor/src/backend/<os>/sys.rs` or `sys/`;
+//!   - the launcher basement: `crates/bvisor/launcher/<os>/sys.rs` or `sys/` —
+//!     the single-threaded Linux confinement launcher's real-OS `unsafe`
+//!     (memfd/fstat/exec). Empty for now ⇒ vacuously green but LIVE.
 //!
 //! Each `unsafe` block is matched to its ledger entry by a STABLE COMMENT ANCHOR
 //! — a `LEDGER:<id>` token (`<id>` is kebab-case `[a-z0-9-]+`) embedded in the
@@ -20,9 +24,10 @@
 //!   - a ledger entry matches NO live anchored `unsafe` block (stale), OR
 //!   - a ledger entry's `file` is not a sanctioned basement (outside).
 //!
-//! In step (a) the basements are empty, so the ledger is empty and the gate is
-//! VACUOUSLY green — but LIVE, so step (b)'s first `unsafe` block is forced to
-//! anchor + register before `structural-check` passes.
+//! In step (a) a basement may be empty, so its ledger slice is empty and the gate
+//! is VACUOUSLY green for it — but LIVE, so the first `unsafe` block landing in
+//! that basement (backend OR launcher) is forced to anchor + register before
+//! `structural-check` passes.
 
 use crate::repo_surface::{ensure, load_yaml, relative, rust_files};
 use crate::source_cache::SourceCache;
@@ -39,6 +44,12 @@ pub(crate) const LEDGER_REL: &str = "traceability/unsafe_ledger.yaml";
 
 /// The bvisor backend root under which basements live.
 const BACKEND_ROOT_REL: &str = "crates/bvisor/src/backend";
+
+/// The bvisor confinement-LAUNCHER root under which basements live (kernel plan
+/// §10.8). A SECOND sanctioned basement root, same `/sys.rs`-or-`/sys/` shape as
+/// the backend. Empty for now ⇒ the launcher arm is vacuously green but LIVE: the
+/// first launcher `unsafe` block is forced to anchor + register.
+const LAUNCHER_ROOT_REL: &str = "crates/bvisor/launcher";
 
 /// One ledger entry: a documented basement `unsafe` block, keyed by its anchor.
 #[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd)]
@@ -101,22 +112,33 @@ pub(crate) fn load_ledger(repo_root: &Path) -> Result<Ledger> {
     load_yaml(&path)
 }
 
-/// The basement files: `backend/<os>/sys.rs` or any file under `backend/<os>/sys/`.
+/// The basement files under BOTH sanctioned roots (kernel plan §10.8):
+///   - the backend basement: `backend/<os>/sys.rs` or under `backend/<os>/sys/`;
+///   - the launcher basement: `launcher/<os>/sys.rs` or under `launcher/<os>/sys/`.
+///
+/// The launcher root is empty for now ⇒ it contributes no sites (vacuously green
+/// but LIVE — the first launcher `unsafe` block is collected + reconciled here).
 pub(crate) fn basement_files(repo_root: &Path) -> Vec<PathBuf> {
     let mut files: Vec<PathBuf> = rust_files(&repo_root.join(BACKEND_ROOT_REL))
         .into_iter()
+        .chain(rust_files(&repo_root.join(LAUNCHER_ROOT_REL)))
         .filter(|path| is_basement(&relative(repo_root, path)))
         .collect();
     files.sort();
+    files.dedup();
     files
 }
 
 /// Whether a repo-relative path is a sanctioned basement file. Mirrors the
-/// architecture lint's `is_unsafe_basement` exactly (kept in lockstep on purpose:
-/// the lint EXEMPTS exactly the set this gate RECONCILES).
+/// architecture lint's `is_unsafe_basement` EXACTLY (kept in lockstep on purpose:
+/// the lint EXEMPTS exactly the set this gate RECONCILES). Two sanctioned roots,
+/// same `/sys.rs`-or-`/sys/` shape (kernel plan §10.8):
+///   - the backend basement: `crates/bvisor/src/backend/<os>/sys.rs` or `sys/`;
+///   - the launcher basement: `crates/bvisor/launcher/<os>/sys.rs` or `sys/`.
 fn is_basement(rel: &str) -> bool {
-    rel.contains("crates/bvisor/src/backend/")
-        && (rel.ends_with("/sys.rs") || rel.contains("/sys/"))
+    let backend_basement = rel.contains("crates/bvisor/src/backend/");
+    let launcher_basement = rel.contains("crates/bvisor/launcher/");
+    (backend_basement || launcher_basement) && (rel.ends_with("/sys.rs") || rel.contains("/sys/"))
 }
 
 /// Collect every basement `unsafe` block and resolve it to its comment anchor.
@@ -347,14 +369,40 @@ mod tests {
         assert!(reconcile(&[], &Ledger::default()).is_ok());
     }
 
-    /// The basement matcher mirrors the architecture-lint exemption set.
+    /// The basement matcher mirrors the architecture-lint exemption set EXACTLY,
+    /// across BOTH sanctioned roots (backend + launcher, kernel plan §10.8).
     #[test]
     fn basement_matcher_mirrors_the_lint_exemption() {
+        // Backend basement root.
         assert!(is_basement("crates/bvisor/src/backend/linux/sys.rs"));
         assert!(is_basement("crates/bvisor/src/backend/windows/sys.rs"));
         assert!(is_basement("crates/bvisor/src/backend/linux/sys/raw.rs"));
         assert!(!is_basement("crates/bvisor/src/backend/linux/mod.rs"));
         assert!(!is_basement("crates/bvisor/src/contract/registry.rs"));
+
+        // Launcher basement root (the second sanctioned root).
+        assert!(is_basement("crates/bvisor/launcher/linux/sys.rs"));
+        assert!(is_basement("crates/bvisor/launcher/linux/sys/raw.rs"));
+        assert!(!is_basement("crates/bvisor/launcher/linux/main.rs"));
+
+        // Mirror check: this predicate must agree, path-for-path, with the lint's
+        // `is_unsafe_basement` — they are kept in lockstep on purpose.
+        for rel in [
+            "crates/bvisor/src/backend/linux/sys.rs",
+            "crates/bvisor/src/backend/windows/sys.rs",
+            "crates/bvisor/src/backend/linux/sys/raw.rs",
+            "crates/bvisor/src/backend/linux/mod.rs",
+            "crates/bvisor/src/contract/registry.rs",
+            "crates/bvisor/launcher/linux/sys.rs",
+            "crates/bvisor/launcher/linux/sys/raw.rs",
+            "crates/bvisor/launcher/linux/main.rs",
+        ] {
+            assert_eq!(
+                is_basement(rel),
+                crate::architecture_lints::is_unsafe_basement(rel),
+                "ledger `is_basement` must mirror lint `is_unsafe_basement` for {rel}"
+            );
+        }
     }
 
     /// The association algorithm scans the contiguous comment/attribute run above

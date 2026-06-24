@@ -10,6 +10,14 @@ use crate::source_cache::SourceCache;
 use anyhow::{anyhow, Result};
 use std::path::{Path, PathBuf};
 
+/// Re-exported so the unsafe-ledger gate can assert, in a test, that its basement
+/// predicate (`unsafe_ledger::is_basement`) mirrors this lint's exemption EXACTLY
+/// — the two are kept in lockstep on purpose (kernel plan §10.8). Test-only: the
+/// production ledger gate keeps its own private copy and the mirror is enforced by
+/// the lockstep test, so the re-export has no non-test consumer.
+#[cfg(test)]
+pub(crate) use syncbat_boundary::is_unsafe_basement;
+
 pub fn check(
     repo_root: &Path,
     tracked_files: &[PathBuf],
