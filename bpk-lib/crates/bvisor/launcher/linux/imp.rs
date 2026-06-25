@@ -281,9 +281,19 @@ fn drive(control: &mut Transcript) -> Result<Verdict, BootError> {
     if tasks != 1 {
         return Err(BootError::NotSingleThreaded { observed: tasks });
     }
-    let child_pid = sys::clone3_child(&child_plan, confinement.map(|c| c.ruleset))?;
+    // Resolve the optional cgroup leaf fd: when present, clone3 births the child
+    // INSIDE the prepared leaf (CLONE_INTO_CGROUP), so the workload is resource-confined
+    // the instant it exists — no post-fork migration race. The fd was fstat-validated as
+    // a directory in step 5; the kernel consumes it during the syscall.
+    let cgroup_fd = cgroup_slot_fd(body);
+    let child_pid = sys::clone3_child(&child_plan, confinement.map(|c| c.ruleset), cgroup_fd)?;
     control.emit(LauncherState::ChildCreated);
     let _ = control.note(&format!("mechanism=clone3 child_pid={child_pid}"));
+    if cgroup_fd.is_some() {
+        // The kernel placed the child into the leaf at birth (CLONE_INTO_CGROUP); the
+        // HOST independently confirms membership by reading the leaf's cgroup.procs.
+        let _ = control.note("cgroup_placement=clone_into_cgroup");
+    }
 
     // Close the COORDINATOR's own copy of the error-pipe WRITE end so only the child
     // holds a write end — then the read end gets EOF the instant the child's
@@ -621,6 +631,18 @@ fn fd_from_env(var: &'static str) -> Result<RawFd, BootError> {
 /// The exe descriptor fd from the target spec's `exe_slot`.
 fn exe_slot_fd(body: &LinuxLaunchBodyV1) -> Result<RawFd, BootError> {
     Ok(raw(body.target.exe_slot))
+}
+
+/// The inherited fd of the [`DescriptorRole::CgroupDir`] slot, if the plan declares
+/// one (`None` ⇒ no cgroup placement scheduled). It is a singleton role, so at most
+/// one slot carries it (the table was structurally validated). The slot was already
+/// `fstat`-validated as a directory by [`verify_handles`]; the kernel uses this fd at
+/// `clone3` time (via `CLONE_INTO_CGROUP`) to birth the child inside the prepared leaf.
+fn cgroup_slot_fd(body: &LinuxLaunchBodyV1) -> Option<RawFd> {
+    body.descriptor_table
+        .iter()
+        .find(|slot| slot.role == DescriptorRole::CgroupDir)
+        .map(|slot| raw(slot.slot_index))
 }
 
 /// Convert a (host-assigned, dense) slot index to a `RawFd`. The host opens the

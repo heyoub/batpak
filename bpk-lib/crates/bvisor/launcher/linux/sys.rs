@@ -48,6 +48,14 @@ const LANDLOCK_ABI_FLOOR: ABI = ABI::V3;
 /// `landlock` crate's `ABI` enum. Kept in lockstep with [`LANDLOCK_ABI_FLOOR`].
 pub(crate) const LANDLOCK_ABI_FLOOR_RAW: i64 = ABI::V3 as i64;
 
+/// `CLONE_INTO_CGROUP` (uapi `linux/sched.h`, kernel ≥ 5.7): a `clone3` flag asking
+/// the kernel to place the new child DIRECTLY into the cgroup whose fd is in
+/// `clone_args.cgroup`, at birth — eliminating the post-fork
+/// write-pid-to-`cgroup.procs` migration race. Named here as an explicit `u64`
+/// because the value `0x2_0000_0000` is 2^33 (wider than `i32`), while libc types the
+/// gnu-linux constant as `c_int`; `clone_args.flags`/`.cgroup` are both `c_ulonglong`.
+const CLONE_INTO_CGROUP: u64 = 0x2_0000_0000;
+
 /// One declared confinement root the launcher restricts FS access TO: a pre-opened,
 /// fstat-validated descriptor (NEVER a path — exec/landlock rides the inherited fd,
 /// avoiding the CVE-2019-5736 reopen race) and whether the workload may write beneath
@@ -341,25 +349,47 @@ pub(crate) fn adopt_fd(fd: RawFd) -> File {
 /// return, closing only the parent's copy of the ruleset fd — the child holds its own
 /// post-clone3 copy, so the parent drop does not affect the child's confinement).
 ///
+/// `cgroup_fd` is the OPTIONAL inherited [`DescriptorRole::CgroupDir`] directory fd
+/// (`None` ⇒ no cgroup placement). When `Some`, `clone3` is asked (via
+/// `CLONE_INTO_CGROUP`) to place the child DIRECTLY into that prepared leaf at birth,
+/// so the workload is resource-confined the instant it exists — no post-fork migration
+/// window. The kernel consumes the fd DURING the syscall in the parent; the child never
+/// touches it (so the scrub may close its inherited copy harmlessly).
+///
 /// # Errors
 /// An `io::Error` carrying the `clone3` errno if the fork itself fails (the child
-/// never exists, so nothing ran).
+/// never exists, so nothing ran) — including an invalid/forbidden cgroup fd, which
+/// fails the syscall rather than running the child uncgrouped.
 pub(crate) fn clone3_child(
     plan: &ChildExecPlan,
     confinement: Option<RulesetCreated>,
+    cgroup_fd: Option<RawFd>,
 ) -> io::Result<libc::pid_t> {
-    // Build the clone3 argument IN THE PARENT. flags=0 for the skeleton (the
-    // MECHANISM is clone3; pidfd / CLONE_INTO_CGROUP are later steps). exit_signal
-    // = SIGCHLD so the parent can `waitid` the child normally.
+    // Build the clone3 argument IN THE PARENT. exit_signal = SIGCHLD so the parent can
+    // `waitid` the child normally; the MECHANISM is clone3 (NEVER Command::spawn).
     let mut args: libc::clone_args = ChildArgs::zeroed();
     // exit_signal = SIGCHLD (a small positive constant) so the parent reaps via the
     // normal child-signal path; widen without a lossy `as` cast.
     args.exit_signal = u64::try_from(libc::SIGCHLD).unwrap_or(0);
+    // Optional cgroup placement: if the coordinator resolved a CgroupDir slot, ask the
+    // kernel to birth the child INSIDE that leaf (no migration race). A fd that does not
+    // fit a u64 leaves the flag UNSET (never a truncated cgroup field) — the child then
+    // simply runs in the launcher's cgroup, an honest no-placement, not a wrong one.
+    if let Some(fd) = cgroup_fd {
+        if let Ok(cg) = u64::try_from(fd) {
+            args.flags |= CLONE_INTO_CGROUP;
+            args.cgroup = cg;
+        }
+    }
     let size = u64::try_from(std::mem::size_of::<libc::clone_args>()).unwrap_or(0);
 
     // SAFETY (LEDGER:linux-launcher-clone3-child): `clone3` is invoked with a
-    // properly sized `clone_args` (flags=0, exit_signal=SIGCHLD) built in the
-    // single-threaded parent. The PARENT branch (rc>0) only returns the pid. The
+    // properly sized `clone_args` (exit_signal=SIGCHLD, and flags either 0 or exactly
+    // CLONE_INTO_CGROUP with `cgroup` set to the inherited, fstat-validated CgroupDir
+    // directory fd) built in the single-threaded parent. The kernel consumes the cgroup
+    // fd DURING this syscall in the parent (placing the child into the leaf at birth);
+    // an invalid fd only makes clone3 fail with errno (handled below — no child runs).
+    // The PARENT branch (rc>0) only returns the pid. The
     // CHILD branch (rc==0) is the async-signal-safe window: it touches ONLY the
     // PRE-BUILT `plan` (argv/envp pointer arrays, close-list, fds — all allocated
     // by `ChildExecPlan::build` BEFORE this call) by INDEXING already-mapped

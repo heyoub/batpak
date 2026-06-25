@@ -208,8 +208,17 @@ entries:
     anchor: linux-launcher-clone3-child
     syscall: clone3 (raw syscall) + the async-signal-safe child branch (sigprocmask/close/fchdir/restrict_self/fexecve/write/_exit)
     safety_invariant: >-
-      clone3 is invoked with a correctly sized clone_args (flags=0, exit_signal=
-      SIGCHLD) BUILT IN THE SINGLE-THREADED PARENT. The PARENT branch (rc>0) only
+      clone3 is invoked with a correctly sized clone_args (exit_signal=SIGCHLD, and
+      flags either 0 or exactly CLONE_INTO_CGROUP) BUILT IN THE SINGLE-THREADED PARENT.
+      When the coordinator resolved a DescriptorRole::CgroupDir slot it sets
+      flags|=CLONE_INTO_CGROUP and clone_args.cgroup = that inherited, fstat-validated
+      DIRECTORY fd, so the kernel places the child into the prepared cgroup leaf AT BIRTH
+      (no post-fork migration race); both flags and cgroup are c_ulonglong and the fd is
+      widened with try_from (a non-representable fd leaves the flag unset rather than
+      passing a truncated value). The cgroup fd is consumed by the kernel during the
+      clone3 syscall in the PARENT — the child never needs it — so an invalid fd only
+      makes clone3 fail with errno (returned as an Err; no child exists, nothing ran);
+      no pointer is dereferenced for it. The PARENT branch (rc>0) only
       returns the child pid (and drops its copy of the optional ruleset fd — the child
       holds its own inherited copy, so the parent drop does not affect confinement).
       The CHILD branch (rc==0) is the async-signal-safe window: it touches ONLY the
